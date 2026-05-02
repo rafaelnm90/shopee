@@ -1,0 +1,161 @@
+# 0. CONFIGURAÇÕES INICIAIS
+EXIBIR_LOGS = True
+import os
+from dotenv import load_dotenv
+load_dotenv()
+import logging
+import asyncio
+import random
+from datetime import datetime
+from aiogram import Bot, Dispatcher, types
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
+from aiogram.filters import Command
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+import google.generativeai as genai
+
+# 1. CONSTANTES E TOKENS
+API_TOKEN = os.getenv('TELEGRAM_TOKEN')
+ADMIN_ID = 1226920464
+GRUPO_ID = -1003909405581
+LINK_GRUPO = "https://t.me/shopee_video_afiliado"
+GEMINI_API_KEY = os.getenv('GEMINI_KEY')
+
+genai.configure(api_key=GEMINI_API_KEY)
+
+# 2. CONFIGURAÇÃO DE LOGS 🚀
+if EXIBIR_LOGS:
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+    logger = logging.getLogger(__name__)
+
+# 3. MÁQUINA DE ESTADOS (FSM) PARA O FLUXO DE POSTAGEM
+class PostagemFluxo(StatesGroup):
+    aguardando_nome = State()
+    aguardando_video = State()
+    aguardando_links = State()
+
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(storage=MemoryStorage())
+scheduler = AsyncIOScheduler()
+
+# 4. FUNÇÕES DE GERAÇÃO COM IA E AGENDAMENTO ⏰
+async def gerar_mensagem_gemini(prompt):
+    if EXIBIR_LOGS: logger.info("🧠 Solicitando nova mensagem à IA do Google...")
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        response = await asyncio.to_thread(model.generate_content, prompt)
+        if EXIBIR_LOGS: logger.info("✅ Texto gerado com sucesso pela IA.")
+        return response.text.strip()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao gerar texto com IA: {e}")
+        return "Aproveite as nossas ofertas exclusivas de hoje! 🚀"
+
+async def enviar_incentivo(tipo):
+    if tipo == "manha":
+        prompt = "Crie uma mensagem curta, animada e direta de bom dia para um canal no Telegram focado em ofertas e achadinhos da Shopee. Use emojis. Incentive o pessoal a ficar de olho nas promoções do dia. Não use aspas."
+    else:
+        prompt = "Crie uma mensagem curta e simpática de boa noite para um canal de ofertas da Shopee no Telegram. Lembre o pessoal de conferir os carrinhos de compra e se preparar para as ofertas de amanhã. Use emojis. Não use aspas."
+    
+    mensagem = await gerar_mensagem_gemini(prompt)
+    if EXIBIR_LOGS: logger.info(f"✅ Enviando mensagem agendada ({tipo}): {mensagem[:20]}...")
+    await bot.send_message(GRUPO_ID, mensagem)
+
+async def enviar_link_grupo():
+    prompt = f"Crie uma mensagem curta e persuasiva convidando as pessoas a chamarem amigos para o nosso canal de achadinhos da Shopee. A mensagem deve obrigatoriamente incluir este link no final: {LINK_GRUPO}. Use emojis. Seja criativo para não ser repetitivo."
+    texto = await gerar_mensagem_gemini(prompt)
+    
+    if EXIBIR_LOGS: logger.info("🚀 Enviando link de divulgação gerado pela IA.")
+    await bot.send_message(GRUPO_ID, texto)
+
+def agendar_proximo_link():
+    hora = random.randint(8, 21)
+    minuto = random.randint(0, 59)
+    scheduler.add_job(enviar_link_grupo, 'cron', hour=hora, minute=minuto, id='link_aleatorio', replace_existing=True)
+    if EXIBIR_LOGS: logger.info(f"📅 Link aleatório agendado para as {hora:02d}:{minuto:02d}")
+
+# 5. HANDLERS DE COMANDO E INTERAÇÃO
+@dp.message(Command("postar"))
+async def iniciar_postagem(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    if EXIBIR_LOGS: logger.info("🎬 Iniciando novo fluxo de postagem.")
+    await message.answer("Certo! Qual o nome do produto? (Isso será a base do texto de apresentação)")
+    await state.set_state(PostagemFluxo.aguardando_nome)
+
+@dp.message(PostagemFluxo.aguardando_nome)
+async def receber_nome(message: types.Message, state: FSMContext):
+    await state.update_data(nome_produto=message.text)
+    await message.answer("Perfeito. Agora, anexe o vídeo do produto.")
+    await state.set_state(PostagemFluxo.aguardando_video)
+
+@dp.message(PostagemFluxo.aguardando_video)
+async def receber_video(message: types.Message, state: FSMContext):
+    if not message.video:
+        await message.answer("Por favor, envie um arquivo de vídeo.")
+        return
+    
+    await state.update_data(video_id=message.video.file_id, links=[])
+    await message.answer("Vídeo recebido! Agora envie o link do 1° vídeo/produto.\n\nEnvie /finalizar a qualquer momento para publicar ou /cancelar para abortar.")
+    await state.set_state(PostagemFluxo.aguardando_links)
+
+@dp.message(PostagemFluxo.aguardando_links)
+async def receber_links(message: types.Message, state: FSMContext):
+    if message.text == "/finalizar":
+        await finalizar_postagem(message, state)
+        return
+    if message.text == "/cancelar":
+        await state.clear()
+        await message.answer("Postagem cancelada. ❌")
+        return
+
+    data = await state.get_data()
+    links = data.get('links', [])
+    links.append(message.text)
+    
+    if len(links) >= 8:
+        await state.update_data(links=links)
+        await finalizar_postagem(message, state)
+    else:
+        await state.update_data(links=links)
+        await message.answer(f"Link {len(links)} registrado. Envie o próximo link ou digite /finalizar.")
+
+async def finalizar_postagem(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    nome = data['nome_produto']
+    video = data['video_id']
+    links = data['links']
+    
+    if EXIBIR_LOGS: logger.info("📤 Publicando postagem no grupo.")
+    
+    # Mensagem 1: Apresentação
+    texto_intro = f"✨ Confira este achadinho: {nome}!\n\nVeja os detalhes no vídeo abaixo e aproveite as ofertas."
+    await bot.send_message(GRUPO_ID, texto_intro)
+    
+    # Mensagem 2: Vídeo
+    await bot.send_video(GRUPO_ID, video)
+    
+    # Mensagem 3: Lista de Links
+    texto_links = "🛒 **Links do Produto:**\n\n"
+    for i, link in enumerate(links, 1):
+        texto_links += f"{i}° Vídeo\n{link}\n\n"
+    
+    await bot.send_message(GRUPO_ID, texto_links, parse_mode="Markdown")
+    await message.answer("Postagem enviada com sucesso ao grupo! ✅")
+    await state.clear()
+
+async def main():
+    # Agendamentos fixos
+    scheduler.add_job(enviar_incentivo, 'cron', hour=7, minute=0, args=["manha"])
+    scheduler.add_job(enviar_incentivo, 'cron', hour=20, minute=0, args=["noite"])
+    
+    # Agendamento do link aleatório diário
+    scheduler.add_job(agendar_proximo_link, 'cron', hour=0, minute=1)
+    agendar_proximo_link() # Inicializa o do primeiro dia
+    
+    scheduler.start()
+    await dp.start_polling(bot)
+
+if __name__ == '__main__':
+    asyncio.run(main())
