@@ -7,6 +7,8 @@ import logging
 import asyncio
 import random
 from datetime import datetime
+from zoneinfo import ZoneInfo
+from aiogram import Bot, Dispatcher, types
 from aiogram import Bot, Dispatcher, types
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
@@ -37,7 +39,8 @@ class PostagemFluxo(StatesGroup):
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
-scheduler = AsyncIOScheduler()
+fuso_horario = ZoneInfo("America/Sao_Paulo")
+scheduler = AsyncIOScheduler(timezone=fuso_horario)
 
 # 4. FUNÇÕES DE GERAÇÃO COM IA E AGENDAMENTO ⏰
 async def gerar_mensagem_gemini(prompt):
@@ -51,28 +54,37 @@ async def gerar_mensagem_gemini(prompt):
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao gerar texto com IA: {e}")
         return "Aproveite as nossas ofertas exclusivas de hoje! 🚀"
 
-async def enviar_incentivo(tipo):
-    if tipo == "manha":
-        prompt = "Crie uma mensagem curta, animada e direta de bom dia para um canal no Telegram focado em ofertas e achadinhos da Shopee. Use emojis. Incentive o pessoal a ficar de olho nas promoções do dia. Não use aspas."
-    else:
+async def disparar_mensagem(tipo):
+    if tipo == "bom_dia":
+        prompt = "Crie uma mensagem muito curta, animada e direta de bom dia para um canal no Telegram focado em ofertas da Shopee. Desperte a curiosidade para os achadinhos de hoje. Use emojis. Não use aspas."
+    elif tipo == "boa_noite":
         prompt = "Crie uma mensagem curta e simpática de boa noite para um canal de ofertas da Shopee no Telegram. Lembre o pessoal de conferir os carrinhos de compra e se preparar para as ofertas de amanhã. Use emojis. Não use aspas."
-    
-    mensagem = await gerar_mensagem_gemini(prompt)
-    if EXIBIR_LOGS: logger.info(f"✅ Enviando mensagem agendada ({tipo}): {mensagem[:20]}...")
-    await bot.send_message(GRUPO_ID, mensagem)
+    elif tipo == "incentivo":
+        prompt = "Crie uma mensagem curta e persuasiva de incentivo para um canal de achadinhos da Shopee. Alterne os temas entre foco em economia, senso de urgência ou produtos exclusivos. Use emojis. Não use aspas."
+    elif tipo == "link_grupo":
+        prompt = f"Crie uma mensagem curta e persuasiva convidando as pessoas a chamarem amigos para o nosso canal de achadinhos da Shopee. A mensagem deve obrigatoriamente incluir este link no final: {LINK_GRUPO}. Use emojis. Seja criativo."
 
-async def enviar_link_grupo():
-    prompt = f"Crie uma mensagem curta e persuasiva convidando as pessoas a chamarem amigos para o nosso canal de achadinhos da Shopee. A mensagem deve obrigatoriamente incluir este link no final: {LINK_GRUPO}. Use emojis. Seja criativo para não ser repetitivo."
     texto = await gerar_mensagem_gemini(prompt)
-    
-    if EXIBIR_LOGS: logger.info("🚀 Enviando link de divulgação gerado pela IA.")
+    if EXIBIR_LOGS: logger.info(f"🚀 Enviando mensagem gerada ({tipo}): {texto[:20]}...")
     await bot.send_message(GRUPO_ID, texto)
 
-def agendar_proximo_link():
-    hora = random.randint(8, 21)
-    minuto = random.randint(0, 59)
-    scheduler.add_job(enviar_link_grupo, 'cron', hour=hora, minute=minuto, id='link_aleatorio', replace_existing=True)
-    if EXIBIR_LOGS: logger.info(f"📅 Link aleatório agendado para as {hora:02d}:{minuto:02d}")
+def agendar_tarefas_diarias():
+    if EXIBIR_LOGS: logger.info("🔄 Sorteando horários das postagens de hoje...")
+    
+    minuto_manha = random.randint(0, 59)
+    hora_incentivo = random.randint(8, 21)
+    minuto_incentivo = random.randint(0, 59)
+    minuto_noite = random.randint(0, 59)
+    
+    scheduler.add_job(disparar_mensagem, 'cron', hour=7, minute=minuto_manha, args=["bom_dia"], id='job_manha', replace_existing=True)
+    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_incentivo, minute=minuto_incentivo, args=["incentivo"], id='job_incentivo', replace_existing=True)
+    scheduler.add_job(disparar_mensagem, 'cron', hour=22, minute=minuto_noite, args=["boa_noite"], id='job_noite', replace_existing=True)
+    scheduler.add_job(disparar_mensagem, 'cron', hour=random.randint(8, 21), minute=random.randint(0, 59), args=["link_grupo"], id='job_link', replace_existing=True)
+    
+    if EXIBIR_LOGS:
+        logger.info(f"📅 Bom dia: 07:{minuto_manha:02d}")
+        logger.info(f"📅 Incentivo: {hora_incentivo:02d}:{minuto_incentivo:02d}")
+        logger.info(f"📅 Boa noite: 22:{minuto_noite:02d}")
 
 # 5. HANDLERS DE COMANDO E INTERAÇÃO
 @dp.message(Command("postar"))
@@ -146,13 +158,11 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     await state.clear()
 
 async def main():
-    # Agendamentos fixos
-    scheduler.add_job(enviar_incentivo, 'cron', hour=7, minute=0, args=["manha"])
-    scheduler.add_job(enviar_incentivo, 'cron', hour=20, minute=0, args=["noite"])
+    # Agendador mestre que roda todo dia às 00:01
+    scheduler.add_job(agendar_tarefas_diarias, 'cron', hour=0, minute=1)
     
-    # Agendamento do link aleatório diário
-    scheduler.add_job(agendar_proximo_link, 'cron', hour=0, minute=1)
-    agendar_proximo_link() # Inicializa o do primeiro dia
+    # Roda o agendador imediatamente ao ligar o bot para garantir o dia atual
+    agendar_tarefas_diarias() 
     
     scheduler.start()
     await dp.start_polling(bot)
