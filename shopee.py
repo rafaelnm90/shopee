@@ -226,21 +226,21 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     await message.answer("Postagem enviada com sucesso ao grupo! ✅")
     await state.clear()
 
-@dp.message(F.text == "Enviando mensagem de Bom Dia ☀️")
+@dp.message(F.text == "Enviar mensagem de Bom Dia ☀️")
 async def gatilho_bom_dia(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("☀️ Disparo manual: Bom Dia.")
     await disparar_mensagem("bom_dia")
     await message.answer("Mensagem de Bom Dia enviada! 🚀")
 
-@dp.message(F.text == "Enviando mensagem de Incentivo 🔥")
+@dp.message(F.text == "Enviar mensagem de Incentivo 🔥")
 async def gatilho_incentivo(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🔥 Disparo manual: Incentivo.")
     await disparar_mensagem("incentivo")
     await message.answer("Mensagem de Incentivo enviada! 🚀")
 
-@dp.message(F.text == "Enviando mensagem de Boa Noite 🌙")
+@dp.message(F.text == "Enviar mensagem de Boa Noite 🌙")
 async def gatilho_boa_noite(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🌙 Disparo manual: Boa Noite.")
