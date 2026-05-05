@@ -253,15 +253,16 @@ async def receber_video(message: types.Message, state: FSMContext):
             # ✅ Lê o número atual para informar a IA
             numero_atual = ler_contador()
             
-            # ✅ Prompt aprimorado para identificar kits e formatar com quebra de linha
+            # ✅ Prompt ajustado para remover a repetição do nome no título
             prompt_ia = (
-                f"Assista ao vídeo INTEIRO. "
-                f"Seu objetivo é identificar se o vídeo mostra um único produto ou um KIT/linha de produtos. "
-                f"Se for um único produto, responda: 'Vídeo {numero_atual} - [Nome do Produto]'. "
-                f"Se for um kit ou vários produtos da mesma linha (ex: shampoo, condicionador, sérum), responda: 'Vídeo {numero_atual} - Kit [Nome da Marca/Linha]'. "
-                f"Após isso, adicione uma quebra de linha e insira '📦 Item: [Nome do Produto ou Kit]'. "
-                f"Exemplo de saída esperada:\nVídeo 1 - Kit Dove Reconstrução\n📦 Item: Kit Dove Reconstrução Completo. "
-                f"Não adicione nenhuma outra descrição."
+                f"Assista ao vídeo INTEIRO para identificar o produto ou kit principal. "
+                f"Sua resposta deve conter EXATAMENTE duas linhas. "
+                f"Na primeira linha, escreva estritamente: 'Vídeo {numero_atual}'. "
+                f"Na segunda linha, escreva '📦 Item: ' seguido do nome do produto ou kit identificado. "
+                f"Exemplo de saída esperada:\n"
+                f"Vídeo {numero_atual}\n"
+                f"📦 Item: Kit Dove Reconstrução\n"
+                f"Não adicione nenhuma outra palavra, ponto final extra ou descrição."
             )
             
             # ✅ Mini-cascata para o vídeo: Se o modelo 3-flash esgotar a cota, tenta o 2.5-flash
