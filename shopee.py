@@ -147,11 +147,13 @@ async def disparar_mensagem(tipo):
             "Lembre que um vídeo viral pode gerar comissão por semanas. Use emojis."
         )
     elif tipo == "link_grupo":
-        # ✅ Prompt ajustado para incentivar o compartilhamento e destacar a gratuidade
+        # ✅ Prompt isolado para focar 100% no convite e ignorar a regra de postagem
         prompt = (
-            f"{contexto_afiliado} Peça aos membros que compartilhem o link do grupo com outros parceiros. "
-            f"Destaque que o grupo é totalmente gratuito e que enviamos vídeos prontos para postagem todos os dias. "
-            f"O objetivo é crescer a comunidade. Link: {LINK_GRUPO}. Use emojis."
+            f"{contexto_afiliado} IMPORTANTE: Nesta mensagem específica, não peça para o usuário postar vídeos. "
+            "Foque EXCLUSIVAMENTE em criar um texto persuasivo pedindo aos membros que convidem amigos afiliados. "
+            "Use um tom de parceria do tipo: 'Conhece alguém que é afiliado e está sem tempo de buscar vídeos? "
+            "Mande nosso link para ele! Aqui entregamos tudo pronto e 100% de graça.' "
+            f"Finalize chamando para a ação com o link: {LINK_GRUPO}. Use emojis."
         )
 
     texto = await gerar_mensagem_gemini(prompt)
@@ -208,8 +210,8 @@ async def receber_video(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("🎥 Vídeo recebido. Solicitando análise ao Gemini...")
     msg_status = await message.answer("Analizando vídeo... ⏳")
     
-    # Prompt para a IA identificar o produto
-    prompt_ia = "Assista a este vídeo e me diga apenas o nome do produto principal que aparece. Seja curto e direto."
+    # Prompt otimizado para forçar a análise visual e evitar respostas genéricas
+    prompt_ia = "Analise as imagens deste vídeo e descreva o produto principal. Dê apenas o nome comercial e uma característica principal (Ex: Garrafa Térmica com Canudo). Não peça links."
     nome_sugerido = await gerar_mensagem_gemini(prompt_ia)
     
     await state.update_data(video_id=message.video.file_id, nome_produto=nome_sugerido)
@@ -254,9 +256,12 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     
     if EXIBIR_LOGS: logger.info("📤 Publicando postagem no grupo.")
     
-    # Mensagem 1: Apresentação
-    texto_intro = f"✨ Confira este achadinho: {nome}!\n\nVeja os detalhes no vídeo abaixo e aproveite as ofertas."
-    await bot.send_message(GRUPO_ID, texto_intro)
+    # Mensagem 1: Apresentação para Afiliados
+    texto_intro = f"🎬 **NOVO VÍDEO PRONTO PARA POSTAR!**\n\n" \
+                  f"📦 Produto: {nome}\n" \
+                  f"💡 *Aproveite este material com alto potencial de conversão.*\n\n" \
+                  f"Faça o download do vídeo abaixo e utilize os links a seguir."
+    await bot.send_message(GRUPO_ID, texto_intro, parse_mode="Markdown")
     
     # Mensagem 2: Vídeo
     await bot.send_video(GRUPO_ID, video)
