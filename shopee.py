@@ -274,36 +274,33 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
 async def gatilho_bom_dia(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("☀️ Disparo manual: Bom Dia.")
-# ✅ Texto alterado para 'Enviando...' conforme solicitado
     await message.answer("Enviando mensagem de Bom Dia... ⏳")
     await disparar_mensagem("bom_dia")
+    await message.answer("Mensagem de Bom Dia enviada com sucesso! ✅") # ✅ Confirmação final
 
 @dp.message(F.text == "Enviar mensagem de Incentivo 🔥")
 async def gatilho_incentivo(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🔥 Disparo manual: Incentivo.")
-# ✅ Feedback de ação imediata atualizado
     await message.answer("Enviando mensagem de Incentivo... ⏳")
     await disparar_mensagem("incentivo")
+    await message.answer("Mensagem de Incentivo enviada com sucesso! ✅") # ✅ Confirmação final
 
 @dp.message(F.text == "Enviar mensagem de Boa Noite 🌙")
 async def gatilho_boa_noite(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🌙 Disparo manual: Boa Noite.")
-# ✅ Feedback de ação imediata atualizado
     await message.answer("Enviando mensagem de Boa Noite... ⏳")
     await disparar_mensagem("boa_noite")
+    await message.answer("Mensagem de Boa Noite enviada com sucesso! ✅") # ✅ Confirmação final
 
 @dp.message(F.text == "Divulgar Grupo 📢")
 async def gatilho_divulgar_grupo(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    
-    if EXIBIR_LOGS: 
-        logger.info("📢 Disparo manual solicitado: Convite do Grupo.")
-    
-# ✅ Feedback de ação imediata atualizado
+    if EXIBIR_LOGS: logger.info("📢 Disparo manual solicitado: Convite do Grupo.")
     await message.answer("Enviando convite do grupo... ⏳")
     await disparar_mensagem("link_grupo")
+    await message.answer("Convite do grupo enviado com sucesso! ✅") # ✅ Confirmação final
 
 async def main():
     # Agendador mestre que roda todo dia às 00:01
