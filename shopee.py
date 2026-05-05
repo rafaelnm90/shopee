@@ -35,8 +35,9 @@ if EXIBIR_LOGS:
 
 # 3. MÁQUINA DE ESTADOS (FSM) PARA O FLUXO DE POSTAGEM
 class PostagemFluxo(StatesGroup):
-    aguardando_nome = State()  # ✅ Retornamos a pedir o nome primeiro
-    aguardando_video = State() # ✅ Vídeo vem em seguida
+    aguardando_video = State()             # ✅ O fluxo volta a começar pelo vídeo
+    aguardando_confirmacao_nome = State()  # ✅ Estado para você aprovar o texto da IA
+    aguardando_chamada_manual = State()    # ✅ Estado extra caso você queira digitar
     aguardando_links = State()
 
 bot = Bot(token=API_TOKEN)
@@ -48,6 +49,16 @@ scheduler = AsyncIOScheduler(timezone=fuso_horario)
 # 🛠️ Teclado básico para etapas de entrada de dados
 teclado_cancelar = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Cancelar ❌")]],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+# 🛠️ Teclado de confirmação da análise da inteligência artificial
+teclado_confirmacao = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Tentar Novamente 🔄")],
+        [KeyboardButton(text="Cancelar ❌")]
+    ],
     resize_keyboard=True,
     is_persistent=True
 )
@@ -187,26 +198,76 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 @dp.message(F.text == "Criar Postagem 📝")
 async def iniciar_postagem(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🎬 Iniciando fluxo de postagem: Solicitando nome.")
-    await message.answer("Certo! Qual o nome do produto?", reply_markup=teclado_cancelar)
-    await state.set_state(PostagemFluxo.aguardando_nome)
-
-@dp.message(PostagemFluxo.aguardando_nome)
-async def receber_nome(message: types.Message, state: FSMContext):
-    if EXIBIR_LOGS: logger.info(f"📝 Nome do produto definido: {message.text}")
-    await state.update_data(nome_produto=message.text)
-    await message.answer("Perfeito! Agora, envie o vídeo do produto.", reply_markup=teclado_cancelar)
+    if EXIBIR_LOGS: logger.info("🎬 Iniciando postagem com IA Copywriter.")
+    await message.answer("Excelente! Envie o vídeo do produto e eu criarei a legenda de vendas para você.", reply_markup=teclado_cancelar)
     await state.set_state(PostagemFluxo.aguardando_video)
 
 @dp.message(PostagemFluxo.aguardando_video)
 async def receber_video(message: types.Message, state: FSMContext):
     if not message.video:
-        await message.answer("Por favor, envie um arquivo de vídeo válido.", reply_markup=teclado_cancelar)
+        await message.answer("Por favor, envie um arquivo de vídeo.", reply_markup=teclado_cancelar)
         return
 
-    if EXIBIR_LOGS: logger.info("🎥 Vídeo recebido e armazenado.")
-    await state.update_data(video_id=message.video.file_id, links=[])
-    await message.answer("Vídeo recebido! Agora envie os links um por um.\n\nUse o botão 'Finalizar' quando terminar.", reply_markup=teclado_finalizar)
+    msg_status = await message.answer("📥 Baixando e analisando o vídeo com a IA... Aguarde. ⏳", reply_markup=teclado_cancelar)
+    file_id = message.video.file_id
+    
+    try:
+        # 1. Download do vídeo para o servidor Ubuntu
+        file_info = await bot.get_file(file_id)
+        video_path = f"temp_{file_id}.mp4"
+        await bot.download_file(file_info.file_path, destination=video_path)
+
+        # 2. Upload para a API do Gemini processar a Copy
+        def analisar_video():
+            if EXIBIR_LOGS: logger.info("📤 Processando o vídeo no Gemini 3 Flash...")
+            video_gemini = client.files.upload(file=video_path)
+            
+            prompt_ia = (
+                "Você é um copywriter especialista da Shopee. Assista a este vídeo e crie uma legenda de vendas "
+                "curta, muito persuasiva e atrativa. Identifique o produto, destaque seus benefícios e use emojis. "
+                "NÃO coloque links, NÃO peça links e NÃO use aspas. Entregue apenas o texto limpo."
+            )
+            
+            response = client.models.generate_content(
+                model="gemini-3-flash-preview",
+                contents=[video_gemini, prompt_ia]
+            )
+            return response.text.strip()
+
+        # Executa a IA de forma assíncrona
+        chamada_gerada = await asyncio.to_thread(analisar_video)
+        
+        # 3. Limpeza do servidor
+        if os.path.exists(video_path): os.remove(video_path)
+        
+        await state.update_data(video_id=file_id, nome_produto=chamada_gerada, links=[])
+        await msg_status.delete()
+        
+        # Exibe a arte gerada para sua aprovação
+        await message.answer(f"**Texto Criado:**\n\n{chamada_gerada}\n\nFicou bom?", reply_markup=teclado_confirmacao, parse_mode="Markdown")
+        await state.set_state(PostagemFluxo.aguardando_confirmacao_nome)
+
+    except Exception as e:
+        if os.path.exists(f"temp_{file_id}.mp4"): os.remove(f"temp_{file_id}.mp4")
+        if EXIBIR_LOGS: logger.error(f"❌ Erro na IA: {e}")
+        await msg_status.delete()
+        await message.answer("A IA falhou ao ler o vídeo. Digite manualmente o texto da postagem:", reply_markup=teclado_cancelar)
+        await state.update_data(video_id=file_id, links=[])
+        await state.set_state(PostagemFluxo.aguardando_chamada_manual)
+
+@dp.message(PostagemFluxo.aguardando_confirmacao_nome)
+async def confirmar_nome(message: types.Message, state: FSMContext):
+    if message.text == "Aprovar ✅":
+        await message.answer("Show! Agora mande os links um por um e clique em 'Finalizar'.", reply_markup=teclado_finalizar)
+        await state.set_state(PostagemFluxo.aguardando_links)
+    elif message.text == "Tentar Novamente 🔄":
+        await message.answer("Sem problemas. Digite como você quer que fique a legenda:", reply_markup=teclado_cancelar)
+        await state.set_state(PostagemFluxo.aguardando_chamada_manual)
+
+@dp.message(PostagemFluxo.aguardando_chamada_manual)
+async def receber_chamada_manual(message: types.Message, state: FSMContext):
+    await state.update_data(nome_produto=message.text)
+    await message.answer("Legenda salva! Agora envie os links e clique em 'Finalizar'.", reply_markup=teclado_finalizar)
     await state.set_state(PostagemFluxo.aguardando_links)
 
 @dp.message(PostagemFluxo.aguardando_links)
@@ -235,20 +296,16 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     
     if EXIBIR_LOGS: logger.info("📤 Publicando postagem no grupo.")
     
-    # Mensagem 1: Apresentação para Afiliados
-    texto_intro = f"🎬 **NOVO VÍDEO PRONTO PARA POSTAR!**\n\n" \
-                  f"📦 Produto: {nome}\n" \
-                  f"💡 *Aproveite este material com alto potencial de conversão.*\n\n" \
-                  f"Faça o download do vídeo abaixo e utilize os links a seguir."
-    await bot.send_message(GRUPO_ID, texto_intro, parse_mode="Markdown")
+    # Mensagem 1: O Texto de Vendas Persuasivo (Gerado ou Manual)
+    await bot.send_message(GRUPO_ID, nome)
     
-    # Mensagem 2: Vídeo
+    # Mensagem 2: Vídeo do Produto
     await bot.send_video(GRUPO_ID, video)
     
-    # Mensagem 3: Lista de Links
-    texto_links = "🛒 **Links do Produto:**\n\n"
+    # Mensagem 3: Chamada Direta para os Links
+    texto_links = "🛒 **Pegue seus links aqui:**\n\n"
     for i, link in enumerate(links, 1):
-        texto_links += f"{i}° Vídeo\n{link}\n\n"
+        texto_links += f"👉 {i}° Vídeo\n{link}\n\n"
     
     await bot.send_message(GRUPO_ID, texto_links, parse_mode="Markdown")
     await message.answer("Postagem enviada com sucesso! ✅", reply_markup=obter_teclado_principal())
