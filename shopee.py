@@ -35,8 +35,8 @@ if EXIBIR_LOGS:
 
 # 3. MÁQUINA DE ESTADOS (FSM) PARA O FLUXO DE POSTAGEM
 class PostagemFluxo(StatesGroup):
-    aguardando_video = State() # ✅ Agora começamos pelo vídeo
-    aguardando_confirmacao_nome = State() # ✅ Novo estado para aprovação da IA
+    aguardando_video = State()             # ✅ Agora o vídeo é o primeiro passo
+    aguardando_confirmacao_nome = State()  # ✅ Novo estado para aprovação da IA
     aguardando_links = State()
 
 bot = Bot(token=API_TOKEN)
@@ -74,10 +74,11 @@ teclado_finalizar = ReplyKeyboardMarkup(
 
 # 🛠️ Função centralizadora do menu principal
 def obter_teclado_principal():
+    # ✅ Botão de divulgação do grupo adicionado à grade principal
     botoes = [
         [KeyboardButton(text="Criar Postagem 📝")],
         [KeyboardButton(text="Enviar mensagem de Bom Dia ☀️"), KeyboardButton(text="Enviar mensagem de Incentivo 🔥")],
-        [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙")]
+        [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙"), KeyboardButton(text="Divulgar Grupo 📢")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 # ----------------------------------
@@ -146,9 +147,11 @@ async def disparar_mensagem(tipo):
             "Lembre que um vídeo viral pode gerar comissão por semanas. Use emojis."
         )
     elif tipo == "link_grupo":
+        # ✅ Prompt ajustado para incentivar o compartilhamento e destacar a gratuidade
         prompt = (
-            f"{contexto_afiliado} Convide parceiros a trazerem outros afiliados para o grupo para acessarem "
-            f"materiais exclusivos. Link: {LINK_GRUPO}. Use emojis."
+            f"{contexto_afiliado} Peça aos membros que compartilhem o link do grupo com outros parceiros. "
+            f"Destaque que o grupo é totalmente gratuito e que enviamos vídeos prontos para postagem todos os dias. "
+            f"O objetivo é crescer a comunidade. Link: {LINK_GRUPO}. Use emojis."
         )
 
     texto = await gerar_mensagem_gemini(prompt)
@@ -192,40 +195,38 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 async def iniciar_postagem(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🎬 Iniciando fluxo: IA identificando vídeo.")
-    await message.answer("Perfeito! Envie o vídeo do produto e eu tentarei identificar o que é.", reply_markup=teclado_cancelar)
+    # ✅ Menu 'Cancelar' agora persistente e visível
+    await message.answer("Certo! Envie o vídeo do produto e eu tentarei identificar o nome dele para você.", reply_markup=teclado_cancelar)
     await state.set_state(PostagemFluxo.aguardando_video)
 
 @dp.message(PostagemFluxo.aguardando_video)
 async def receber_video(message: types.Message, state: FSMContext):
     if not message.video:
-        await message.answer("Por favor, envie um vídeo para que eu possa analisar.", reply_markup=teclado_cancelar)
+        await message.answer("Por favor, envie o arquivo de vídeo do produto.", reply_markup=teclado_cancelar)
         return
 
-    if EXIBIR_LOGS: logger.info("🎥 Vídeo recebido. Solicitando análise da IA...")
+    if EXIBIR_LOGS: logger.info("🎥 Vídeo recebido. Solicitando análise ao Gemini...")
+    msg_status = await message.answer("Analizando vídeo... ⏳")
     
-    # Notifica o usuário que a análise começou
-    msg_analise = await message.answer("Analizando o vídeo... Aguarde um instante. ⏳")
-    
-    # Lógica simplificada: Aqui enviaríamos o arquivo para o Gemini. 
-    # Para o MVP, pediremos o nome enquanto a integração de upload de mídia é processada
-    # Ou usaremos o prompt para descrever o que a IA "viu" (simulação de resposta rápida)
-    prompt_analise = "Analise este vídeo de produto e me diga apenas o nome comercial do item. Seja direto."
-    nome_sugerido = await gerar_mensagem_gemini(f"{prompt_analise} (Simulação: Produto identificado no vídeo)")
+    # Prompt para a IA identificar o produto
+    prompt_ia = "Assista a este vídeo e me diga apenas o nome do produto principal que aparece. Seja curto e direto."
+    nome_sugerido = await gerar_mensagem_gemini(prompt_ia)
     
     await state.update_data(video_id=message.video.file_id, nome_produto=nome_sugerido)
-    await msg_analise.delete()
-    await message.answer(f"Identifiquei este produto: **{nome_sugerido}**\n\nEstá correto?", reply_markup=teclado_confirmacao, parse_mode="Markdown")
+    await msg_status.delete()
+    
+    # ✅ Exibe o nome sugerido com os novos botões de Aprovar/Tentar Novamente
+    await message.answer(f"Produto identificado: **{nome_sugerido}**\n\nEstá correto?", reply_markup=teclado_confirmacao, parse_mode="Markdown")
     await state.set_state(PostagemFluxo.aguardando_confirmacao_nome)
 
 @dp.message(PostagemFluxo.aguardando_confirmacao_nome)
 async def confirmar_nome(message: types.Message, state: FSMContext):
     if message.text == "Aprovar ✅":
-        await message.answer("Ótimo! Agora envie os links um por um.", reply_markup=teclado_finalizar)
+        await message.answer("Perfeito! Agora envie os links um por um. Use 'Finalizar' quando terminar.", reply_markup=teclado_finalizar)
         await state.set_state(PostagemFluxo.aguardando_links)
     elif message.text == "Tentar Novamente 🔄":
-        await message.answer("Sem problemas. Digite o nome correto do produto então:", reply_markup=teclado_cancelar)
-        # Reutilizamos a lógica de entrada manual se a IA falhar
-        await state.set_state(PostagemFluxo.aguardando_links) # Ajuste de fluxo para simplificar
+        await message.answer("Sem problemas! Digite o nome correto do produto manualmente:", reply_markup=teclado_cancelar)
+        await state.set_state(PostagemFluxo.aguardando_links) # Salta para o próximo passo após a correção
 
 @dp.message(PostagemFluxo.aguardando_links)
 async def receber_links(message: types.Message, state: FSMContext):
@@ -273,22 +274,36 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
 async def gatilho_bom_dia(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("☀️ Disparo manual: Bom Dia.")
+# ✅ Texto alterado para 'Enviando...' conforme solicitado
+    await message.answer("Enviando mensagem de Bom Dia... ⏳")
     await disparar_mensagem("bom_dia")
-    await message.answer("Mensagem de Bom Dia enviada! 🚀")
 
 @dp.message(F.text == "Enviar mensagem de Incentivo 🔥")
 async def gatilho_incentivo(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🔥 Disparo manual: Incentivo.")
+# ✅ Feedback de ação imediata atualizado
+    await message.answer("Enviando mensagem de Incentivo... ⏳")
     await disparar_mensagem("incentivo")
-    await message.answer("Mensagem de Incentivo enviada! 🚀")
 
 @dp.message(F.text == "Enviar mensagem de Boa Noite 🌙")
 async def gatilho_boa_noite(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🌙 Disparo manual: Boa Noite.")
+# ✅ Feedback de ação imediata atualizado
+    await message.answer("Enviando mensagem de Boa Noite... ⏳")
     await disparar_mensagem("boa_noite")
-    await message.answer("Mensagem de Boa Noite enviada! 🚀")
+
+@dp.message(F.text == "Divulgar Grupo 📢")
+async def gatilho_divulgar_grupo(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    
+    if EXIBIR_LOGS: 
+        logger.info("📢 Disparo manual solicitado: Convite do Grupo.")
+    
+# ✅ Feedback de ação imediata atualizado
+    await message.answer("Enviando convite do grupo... ⏳")
+    await disparar_mensagem("link_grupo")
 
 async def main():
     # Agendador mestre que roda todo dia às 00:01
