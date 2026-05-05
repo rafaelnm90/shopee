@@ -14,6 +14,8 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import Command
+from aiogram import F
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import google.generativeai as genai
 
@@ -87,7 +89,24 @@ def agendar_tarefas_diarias():
         logger.info(f"📅 Boa noite: 22:{minuto_noite:02d}")
 
 # 5. HANDLERS DE COMANDO E INTERAÇÃO
+@dp.message(Command("start"))
+async def comando_start(message: types.Message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    if EXIBIR_LOGS: logger.info("⌨️ Atualizando menu principal com botões de disparo manual.")
+    
+    botoes = [
+        [KeyboardButton(text="Criar Postagem 📝")],
+        [KeyboardButton(text="Enviar mensagem de Bom Dia ☀️"), KeyboardButton(text="Enviar mensagem de Incentivo 🔥")],
+        [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙")]
+    ]
+    teclado = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+    
+    await message.answer("Painel de Controle atualizado. Escolha uma ação abaixo:", reply_markup=teclado)
+
 @dp.message(Command("postar"))
+@dp.message(F.text == "Criar Postagem 📝")
 async def iniciar_postagem(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
@@ -156,6 +175,27 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     await bot.send_message(GRUPO_ID, texto_links, parse_mode="Markdown")
     await message.answer("Postagem enviada com sucesso ao grupo! ✅")
     await state.clear()
+
+@dp.message(F.text == "Enviar mensagem de Bom Dia ☀️")
+async def gatilho_bom_dia(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("☀️ Disparo manual: Bom Dia.")
+    await disparar_mensagem("bom_dia")
+    await message.answer("Mensagem de Bom Dia enviada! 🚀")
+
+@dp.message(F.text == "Enviar mensagem de Incentivo 🔥")
+async def gatilho_incentivo(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🔥 Disparo manual: Incentivo.")
+    await disparar_mensagem("incentivo")
+    await message.answer("Mensagem de Incentivo enviada! 🚀")
+
+@dp.message(F.text == "Enviar mensagem de Boa Noite 🌙")
+async def gatilho_boa_noite(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🌙 Disparo manual: Boa Noite.")
+    await disparar_mensagem("boa_noite")
+    await message.answer("Mensagem de Boa Noite enviada! 🚀")
 
 async def main():
     # Agendador mestre que roda todo dia às 00:01
