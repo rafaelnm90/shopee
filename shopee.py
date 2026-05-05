@@ -17,7 +17,7 @@ from aiogram.filters import Command
 from aiogram import F
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-import google.generativeai as genai
+from google import genai
 
 # 1. CONSTANTES E TOKENS
 API_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -26,7 +26,8 @@ GRUPO_ID = -1003909405581
 LINK_GRUPO = "https://t.me/shopee_video_afiliado"
 GEMINI_API_KEY = os.getenv('GEMINI_KEY')
 
-genai.configure(api_key=GEMINI_API_KEY)
+# Inicializa o cliente moderno da SDK do Google
+client = genai.Client(api_key=GEMINI_API_KEY)
 
 # 2. CONFIGURAÇÃO DE LOGS 🚀
 if EXIBIR_LOGS:
@@ -46,40 +47,44 @@ scheduler = AsyncIOScheduler(timezone=fuso_horario)
 
 # 4. FUNÇÕES DE GERAÇÃO COM IA E AGENDAMENTO ⏰
 async def gerar_mensagem_gemini(prompt):
-    # Ranking de prioridade: Inteligência -> Estabilidade -> Velocidade
+    # Lista técnica em ordem de prioridade para garantir a melhor mensagem
     modelos_disponiveis = [
-        "gemini-3.1-pro-preview",       # 1. Excelência criativa
-        "gemini-2.5-pro",               # 2. Raciocínio estável de alto nível
-        "gemini-3-flash-preview",       # 3. Equilíbrio entre inteligência e rapidez
-        "gemini-2.5-flash",             # 4. O "burro de carga" (mais estável)
-        "gemini-3.1-flash-lite-preview",# 5. Eficiência para mensagens curtas
-        "gemini-2.5-flash-lite"         # 6. Fallback final ultraleve
+        "gemini-3.1-pro-preview",       # 1. Inteligência superior
+        "gemini-2.5-pro",               # 2. Estabilidade e raciocínio
+        "gemini-3-flash-preview",       # 3. Equilíbrio e rapidez
+        "gemini-2.5-flash",             # 4. Versatilidade (Workhorse)
+        "gemini-3.1-flash-lite-preview",# 5. Alta velocidade
+        "gemini-2.5-flash-lite"         # 6. Fallback final leve
     ]
 
-    if EXIBIR_LOGS: logger.info("🧠 Iniciando processamento em cascata inteligente...")
+    if EXIBIR_LOGS: logger.info("🧠 Iniciando processamento em cascata com a nova SDK...")
 
     for modelo_nome in modelos_disponiveis:
         try:
-            if EXIBIR_LOGS: logger.info(f"⏳ Consultando modelo: {modelo_nome}...")
+            if EXIBIR_LOGS: logger.info(f"⏳ Consultando motor: {modelo_nome}...")
             
-            model = genai.GenerativeModel(modelo_nome)
-            response = await asyncio.to_thread(model.generate_content, prompt)
+            # Executa a geração usando a nova sintaxe da biblioteca google-genai
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=modelo_nome,
+                contents=prompt
+            )
             
             if response and response.text:
-                if EXIBIR_LOGS: logger.info(f"✅ Sucesso absoluto com {modelo_nome}!")
+                if EXIBIR_LOGS: logger.info(f"✅ Sucesso total com o modelo {modelo_nome}!")
                 return response.text.strip()
                 
         except Exception as e:
-            erro_msg = str(e)
-            # Tratamento específico para limite de velocidade (Rate Limit)
-            if "429" in erro_msg:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Limite atingido em {modelo_nome}. Pausando 2s para limpeza de buffer...")
-                await asyncio.sleep(2) 
+            erro_str = str(e)
+            # Tratamento para limite de velocidade (Rate Limit)
+            if "429" in erro_str:
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Limite atingido em {modelo_nome}. Pausando 2s para limpeza...")
+                await asyncio.sleep(2)
             else:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Modelo {modelo_nome} indisponível: {erro_msg[:60]}...")
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Modelo {modelo_nome} indisponível: {erro_str[:50]}...")
             continue 
 
-    if EXIBIR_LOGS: logger.error("❌ Falha crítica: Todos os motores da cascata estão inacessíveis.")
+    if EXIBIR_LOGS: logger.error("❌ Falha crítica: Nenhum motor da cascata respondeu.")
     return "Aproveite as nossas ofertas exclusivas de hoje! 🚀"
 
 async def disparar_mensagem(tipo):
