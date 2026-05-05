@@ -33,12 +33,27 @@ if EXIBIR_LOGS:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
     logger = logging.getLogger(__name__)
 
+# 2.5 SISTEMA DE NUMERAÇÃO DE VÍDEOS 🔢
+def ler_contador():
+    try:
+        with open("contador.txt", "r") as f:
+            return int(f.read().strip())
+    except FileNotFoundError:
+        return 1 # Se o arquivo não existir, começa do 1
+
+def salvar_contador(numero):
+    with open("contador.txt", "w") as f:
+        f.write(str(numero))
+
 # 3. MÁQUINA DE ESTADOS (FSM) PARA O FLUXO DE POSTAGEM
 class PostagemFluxo(StatesGroup):
-    aguardando_video = State()             # ✅ O fluxo volta a começar pelo vídeo
-    aguardando_confirmacao_nome = State()  # ✅ Estado para você aprovar o texto da IA
-    aguardando_chamada_manual = State()    # ✅ Estado extra caso você queira digitar
+    aguardando_video = State()             
+    aguardando_confirmacao_nome = State()  
+    aguardando_chamada_manual = State()    
     aguardando_links = State()
+
+class ConfigFluxo(StatesGroup):
+    aguardando_novo_numero = State() # ✅ Novo estado para você editar o número
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -72,15 +87,15 @@ teclado_finalizar = ReplyKeyboardMarkup(
     resize_keyboard=True,
     is_persistent=True
 )
-# ❌ (O teclado_confirmacao foi removido)
 
 # 🛠️ Função centralizadora do menu principal
 def obter_teclado_principal():
-    # ✅ Botão de divulgação do grupo adicionado à grade principal
     botoes = [
         [KeyboardButton(text="Criar Postagem 📝")],
         [KeyboardButton(text="Enviar mensagem de Bom Dia ☀️"), KeyboardButton(text="Enviar mensagem de Incentivo 🔥")],
-        [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙"), KeyboardButton(text="Divulgar Grupo 📢")]
+        [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙"), KeyboardButton(text="Divulgar Grupo 📢")],
+        # ✅ Novos botões para controle da numeração
+        [KeyboardButton(text="Zerar Contador 🔄"), KeyboardButton(text="Editar Número ✏️")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 # ----------------------------------
@@ -223,7 +238,7 @@ async def receber_video(message: types.Message, state: FSMContext):
             if EXIBIR_LOGS: logger.info("📤 Fazendo upload do vídeo para o Google Storage...")
             video_gemini = client.files.upload(file=video_path)
             
-            # ✅ OBRIGATÓRIO: Loop que aguarda a API processar o vídeo
+            # OBRIGATÓRIO: Loop que aguarda a API processar o vídeo
             if EXIBIR_LOGS: logger.info("⏳ Aguardando processamento do vídeo pelo Google...")
             while video_gemini.state.name == "PROCESSING":
                 time.sleep(2)
@@ -233,10 +248,14 @@ async def receber_video(message: types.Message, state: FSMContext):
                 raise Exception("Falha de processamento no servidor do Google.")
 
             if EXIBIR_LOGS: logger.info("✅ Vídeo pronto! Gerando a copy persuasiva...")
+            
+            # ✅ Lê o número atual para informar a IA
+            numero_atual = ler_contador()
+            
             prompt_ia = (
-                "Você é um copywriter especialista da Shopee. Assista a este vídeo e crie uma legenda de vendas "
-                "curta, muito persuasiva e atrativa. Identifique o produto, destaque seus benefícios e use emojis. "
-                "NÃO coloque links, NÃO peça links e NÃO use aspas. Entregue apenas o texto limpo."
+                f"Você é um copywriter da Shopee. Assista ao vídeo e crie uma legenda de vendas. "
+                f"IMPORTANTE: Inicie OBRIGATORIAMENTE o texto com 'Vídeo {numero_atual} - [Nome do Produto]'. "
+                f"Destaque os benefícios e use emojis. Não peça links e não use aspas."
             )
             
             response = client.models.generate_content(
@@ -319,7 +338,13 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
         texto_links += f"👉 {i}° Vídeo\n{link}\n\n"
     
     await bot.send_message(GRUPO_ID, texto_links, parse_mode="Markdown")
-    await message.answer("Postagem enviada com sucesso! ✅", reply_markup=obter_teclado_principal())
+    
+    # ✅ Incrementa o contador para o próximo vídeo
+    numero_antigo = ler_contador()
+    salvar_contador(numero_antigo + 1)
+    if EXIBIR_LOGS: logger.info(f"🔢 Contador atualizado de {numero_antigo} para {numero_antigo + 1}.")
+    
+    await message.answer(f"Postagem enviada com sucesso! ✅\nO próximo vídeo será o número {numero_antigo + 1}.", reply_markup=obter_teclado_principal())
     await state.clear()
 
 @dp.message(F.text == "Enviar mensagem de Bom Dia ☀️")
@@ -352,7 +377,33 @@ async def gatilho_divulgar_grupo(message: types.Message):
     if EXIBIR_LOGS: logger.info("📢 Disparo manual solicitado: Convite do Grupo.")
     await message.answer("Enviando convite do grupo... ⏳")
     await disparar_mensagem("link_grupo")
-    await message.answer("Convite do grupo enviado com sucesso! ✅") # ✅ Confirmação final
+    await message.answer("Convite do grupo enviado com sucesso! ✅")
+
+# ✅ Handlers para Gerenciar a Numeração
+@dp.message(F.text == "Zerar Contador 🔄")
+async def zerar_numero(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    salvar_contador(1)
+    if EXIBIR_LOGS: logger.info("🔢 Contador zerado pelo administrador.")
+    await message.answer("Contador zerado! O próximo post será o 'Vídeo 1'.", reply_markup=obter_teclado_principal())
+
+@dp.message(F.text == "Editar Número ✏️")
+async def pedir_novo_numero(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    numero_atual = ler_contador()
+    await message.answer(f"O próximo vídeo será o {numero_atual}.\n\nDigite o novo número que deseja usar (apenas números):", reply_markup=teclado_cancelar)
+    await state.set_state(ConfigFluxo.aguardando_novo_numero)
+
+@dp.message(ConfigFluxo.aguardando_novo_numero)
+async def salvar_novo_numero(message: types.Message, state: FSMContext):
+    if message.text.isdigit():
+        novo_numero = int(message.text)
+        salvar_contador(novo_numero)
+        if EXIBIR_LOGS: logger.info(f"🔢 Contador editado manualmente para: {novo_numero}.")
+        await message.answer(f"Sucesso! O próximo post será o 'Vídeo {novo_numero}'.", reply_markup=obter_teclado_principal())
+        await state.clear()
+    else:
+        await message.answer("Por favor, digite apenas números. Exemplo: 50", reply_markup=teclado_cancelar)
 
 async def main():
     # Agendador mestre que roda todo dia às 00:01
