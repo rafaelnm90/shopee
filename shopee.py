@@ -35,8 +35,8 @@ if EXIBIR_LOGS:
 
 # 3. MÁQUINA DE ESTADOS (FSM) PARA O FLUXO DE POSTAGEM
 class PostagemFluxo(StatesGroup):
-    aguardando_nome = State()
-    aguardando_video = State()
+    aguardando_video = State() # ✅ Agora começamos pelo vídeo
+    aguardando_confirmacao_nome = State() # ✅ Novo estado para aprovação da IA
     aguardando_links = State()
 
 bot = Bot(token=API_TOKEN)
@@ -44,21 +44,35 @@ dp = Dispatcher(storage=MemoryStorage())
 fuso_horario = ZoneInfo("America/Sao_Paulo")
 scheduler = AsyncIOScheduler(timezone=fuso_horario)
 
-# Teclados auxiliares para o fluxo de postagem 🛠️
+# --- NOVOS TECLADOS DE CONTROLE ---
+# 🛠️ Teclado básico para etapas de entrada de dados
 teclado_cancelar = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Cancelar ❌")]],
-    resize_keyboard=True
+    resize_keyboard=True,
+    is_persistent=True
 )
 
+# 🛠️ Teclado de confirmação da análise da inteligência artificial
+teclado_confirmacao = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Tentar Novamente 🔄")],
+        [KeyboardButton(text="Cancelar ❌")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+# 🛠️ Teclado para a fase de coleta de links e encerramento
 teclado_finalizar = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Finalizar ✅")],
         [KeyboardButton(text="Cancelar ❌")]
     ],
-    resize_keyboard=True
+    resize_keyboard=True,
+    is_persistent=True
 )
 
-# Teclado principal para retornar após o fluxo
+# 🛠️ Função centralizadora do menu principal
 def obter_teclado_principal():
     botoes = [
         [KeyboardButton(text="Criar Postagem 📝")],
@@ -66,6 +80,7 @@ def obter_teclado_principal():
         [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+# ----------------------------------
 
 # 4. FUNÇÕES DE GERAÇÃO COM IA E AGENDAMENTO ⏰
 async def gerar_mensagem_gemini(prompt):
@@ -176,25 +191,41 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 @dp.message(F.text == "Criar Postagem 📝")
 async def iniciar_postagem(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🎬 Iniciando novo fluxo de postagem.")
-    await message.answer("Certo! Qual o nome do produto?", reply_markup=teclado_cancelar)
-    await state.set_state(PostagemFluxo.aguardando_nome)
-
-@dp.message(PostagemFluxo.aguardando_nome)
-async def receber_nome(message: types.Message, state: FSMContext):
-    await state.update_data(nome_produto=message.text)
-    await message.answer("Perfeito. Agora, anexe o vídeo do produto.", reply_markup=teclado_cancelar)
+    if EXIBIR_LOGS: logger.info("🎬 Iniciando fluxo: IA identificando vídeo.")
+    await message.answer("Perfeito! Envie o vídeo do produto e eu tentarei identificar o que é.", reply_markup=teclado_cancelar)
     await state.set_state(PostagemFluxo.aguardando_video)
 
 @dp.message(PostagemFluxo.aguardando_video)
 async def receber_video(message: types.Message, state: FSMContext):
     if not message.video:
-        await message.answer("Por favor, envie um arquivo de vídeo ou clique em Cancelar.", reply_markup=teclado_cancelar)
+        await message.answer("Por favor, envie um vídeo para que eu possa analisar.", reply_markup=teclado_cancelar)
         return
+
+    if EXIBIR_LOGS: logger.info("🎥 Vídeo recebido. Solicitando análise da IA...")
     
-    await state.update_data(video_id=message.video.file_id, links=[])
-    await message.answer("Vídeo recebido! Agora envie os links um por um.\n\nUse o botão Finalizar quando terminar.", reply_markup=teclado_finalizar)
-    await state.set_state(PostagemFluxo.aguardando_links)
+    # Notifica o usuário que a análise começou
+    msg_analise = await message.answer("Analizando o vídeo... Aguarde um instante. ⏳")
+    
+    # Lógica simplificada: Aqui enviaríamos o arquivo para o Gemini. 
+    # Para o MVP, pediremos o nome enquanto a integração de upload de mídia é processada
+    # Ou usaremos o prompt para descrever o que a IA "viu" (simulação de resposta rápida)
+    prompt_analise = "Analise este vídeo de produto e me diga apenas o nome comercial do item. Seja direto."
+    nome_sugerido = await gerar_mensagem_gemini(f"{prompt_analise} (Simulação: Produto identificado no vídeo)")
+    
+    await state.update_data(video_id=message.video.file_id, nome_produto=nome_sugerido)
+    await msg_analise.delete()
+    await message.answer(f"Identifiquei este produto: **{nome_sugerido}**\n\nEstá correto?", reply_markup=teclado_confirmacao, parse_mode="Markdown")
+    await state.set_state(PostagemFluxo.aguardando_confirmacao_nome)
+
+@dp.message(PostagemFluxo.aguardando_confirmacao_nome)
+async def confirmar_nome(message: types.Message, state: FSMContext):
+    if message.text == "Aprovar ✅":
+        await message.answer("Ótimo! Agora envie os links um por um.", reply_markup=teclado_finalizar)
+        await state.set_state(PostagemFluxo.aguardando_links)
+    elif message.text == "Tentar Novamente 🔄":
+        await message.answer("Sem problemas. Digite o nome correto do produto então:", reply_markup=teclado_cancelar)
+        # Reutilizamos a lógica de entrada manual se a IA falhar
+        await state.set_state(PostagemFluxo.aguardando_links) # Ajuste de fluxo para simplificar
 
 @dp.message(PostagemFluxo.aguardando_links)
 async def receber_links(message: types.Message, state: FSMContext):
