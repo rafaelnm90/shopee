@@ -1,4 +1,4 @@
-name: Deploy Automático
+name: Deploy Automatico
 
 on:
   push:
@@ -17,17 +17,15 @@ jobs:
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
           script: |
-            # Acesse a pasta onde o bot está instalado no seu servidor
-            # Verifique se o caminho abaixo está correto ou ajuste conforme necessário
-            cd ~/shopee-telegram-bot
+            # Acessa a pasta exata onde o bot está no servidor
+            cd ~/shopee
             
             # Sincroniza o código com o GitHub
             git pull origin main
             
-            # Atualiza as bibliotecas se houver mudanças no requirements.txt
+            # Atualiza as bibliotecas se houver mudanças
             source venv/bin/activate
             pip install -r requirements.txt
             
-            # Reinicia o serviço automaticamente para aplicar as mudanças
-            # Certifique-se de que o nome do serviço (.service) é este mesmo
-            sudo systemctl restart bot_telegram.service
+            # Reinicia o serviço usando o nome correto
+            sudo systemctl restart shopee_bot.service
