@@ -202,12 +202,13 @@ async def comando_start(message: types.Message):
     if EXIBIR_LOGS: logger.info("⌨️ Atualizando menu principal.")
     await message.answer("Painel de Controle atualizado. Escolha uma ação abaixo:", reply_markup=obter_teclado_principal())
 
-# ❌ NOVO: Handler Global para Cancelar via Botão
-@dp.message(F.text == "Cancelar ❌", StateFilter(PostagemFluxo))
+# ❌ NOVO: Handler Global para Cancelar via Botão (Agora 100% à prova de falhas)
+@dp.message(F.text == "Cancelar ❌")
 async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
-    if EXIBIR_LOGS: logger.info("❌ Fluxo de postagem cancelado via botão.")
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("❌ Ação cancelada ou resetada via botão.")
     await state.clear()
-    await message.answer("Postagem cancelada. Voltando ao menu...", reply_markup=obter_teclado_principal())
+    await message.answer("Ação cancelada e memória limpa. Voltando ao menu...", reply_markup=obter_teclado_principal())
 
 @dp.message(Command("postar"))
 @dp.message(F.text == "Criar Postagem 📝")
@@ -258,10 +259,22 @@ async def receber_video(message: types.Message, state: FSMContext):
                 f"Destaque os benefícios e use emojis. Não peça links e não use aspas."
             )
             
-            response = client.models.generate_content(
-                model="gemini-3-flash-preview",
-                contents=[video_gemini, prompt_ia]
-            )
+            # ✅ Mini-cascata para o vídeo: Se o modelo 3-flash esgotar a cota, tenta o 2.5-flash
+            try:
+                response = client.models.generate_content(
+                    model="gemini-3-flash-preview",
+                    contents=[video_gemini, prompt_ia]
+                )
+            except Exception as erro_modelo:
+                if "429" in str(erro_modelo):
+                    if EXIBIR_LOGS: logger.warning("⚠️ Limite do 3-flash atingido. Usando 2.5-flash como fallback...")
+                    response = client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=[video_gemini, prompt_ia]
+                    )
+                else:
+                    raise erro_modelo
+
             return response.text.strip()
 
         # Executa a IA de forma assíncrona para não travar o bot
