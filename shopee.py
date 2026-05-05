@@ -35,8 +35,8 @@ if EXIBIR_LOGS:
 
 # 3. MÁQUINA DE ESTADOS (FSM) PARA O FLUXO DE POSTAGEM
 class PostagemFluxo(StatesGroup):
-    aguardando_video = State()             # ✅ Agora o vídeo é o primeiro passo
-    aguardando_confirmacao_nome = State()  # ✅ Novo estado para aprovação da IA
+    aguardando_nome = State()  # ✅ Retornamos a pedir o nome primeiro
+    aguardando_video = State() # ✅ Vídeo vem em seguida
     aguardando_links = State()
 
 bot = Bot(token=API_TOKEN)
@@ -52,16 +52,6 @@ teclado_cancelar = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# 🛠️ Teclado de confirmação da análise da inteligência artificial
-teclado_confirmacao = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Tentar Novamente 🔄")],
-        [KeyboardButton(text="Cancelar ❌")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
-
 # 🛠️ Teclado para a fase de coleta de links e encerramento
 teclado_finalizar = ReplyKeyboardMarkup(
     keyboard=[
@@ -71,6 +61,7 @@ teclado_finalizar = ReplyKeyboardMarkup(
     resize_keyboard=True,
     is_persistent=True
 )
+# ❌ (O teclado_confirmacao foi removido)
 
 # 🛠️ Função centralizadora do menu principal
 def obter_teclado_principal():
@@ -196,39 +187,27 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 @dp.message(F.text == "Criar Postagem 📝")
 async def iniciar_postagem(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🎬 Iniciando fluxo: IA identificando vídeo.")
-    # ✅ Menu 'Cancelar' agora persistente e visível
-    await message.answer("Certo! Envie o vídeo do produto e eu tentarei identificar o nome dele para você.", reply_markup=teclado_cancelar)
+    if EXIBIR_LOGS: logger.info("🎬 Iniciando fluxo de postagem: Solicitando nome.")
+    await message.answer("Certo! Qual o nome do produto?", reply_markup=teclado_cancelar)
+    await state.set_state(PostagemFluxo.aguardando_nome)
+
+@dp.message(PostagemFluxo.aguardando_nome)
+async def receber_nome(message: types.Message, state: FSMContext):
+    if EXIBIR_LOGS: logger.info(f"📝 Nome do produto definido: {message.text}")
+    await state.update_data(nome_produto=message.text)
+    await message.answer("Perfeito! Agora, envie o vídeo do produto.", reply_markup=teclado_cancelar)
     await state.set_state(PostagemFluxo.aguardando_video)
 
 @dp.message(PostagemFluxo.aguardando_video)
 async def receber_video(message: types.Message, state: FSMContext):
     if not message.video:
-        await message.answer("Por favor, envie o arquivo de vídeo do produto.", reply_markup=teclado_cancelar)
+        await message.answer("Por favor, envie um arquivo de vídeo válido.", reply_markup=teclado_cancelar)
         return
 
-    if EXIBIR_LOGS: logger.info("🎥 Vídeo recebido. Solicitando análise ao Gemini...")
-    msg_status = await message.answer("Analizando vídeo... ⏳")
-    
-    # Prompt otimizado para forçar a análise visual e evitar respostas genéricas
-    prompt_ia = "Analise as imagens deste vídeo e descreva o produto principal. Dê apenas o nome comercial e uma característica principal (Ex: Garrafa Térmica com Canudo). Não peça links."
-    nome_sugerido = await gerar_mensagem_gemini(prompt_ia)
-    
-    await state.update_data(video_id=message.video.file_id, nome_produto=nome_sugerido)
-    await msg_status.delete()
-    
-    # ✅ Exibe o nome sugerido com os novos botões de Aprovar/Tentar Novamente
-    await message.answer(f"Produto identificado: **{nome_sugerido}**\n\nEstá correto?", reply_markup=teclado_confirmacao, parse_mode="Markdown")
-    await state.set_state(PostagemFluxo.aguardando_confirmacao_nome)
-
-@dp.message(PostagemFluxo.aguardando_confirmacao_nome)
-async def confirmar_nome(message: types.Message, state: FSMContext):
-    if message.text == "Aprovar ✅":
-        await message.answer("Perfeito! Agora envie os links um por um. Use 'Finalizar' quando terminar.", reply_markup=teclado_finalizar)
-        await state.set_state(PostagemFluxo.aguardando_links)
-    elif message.text == "Tentar Novamente 🔄":
-        await message.answer("Sem problemas! Digite o nome correto do produto manualmente:", reply_markup=teclado_cancelar)
-        await state.set_state(PostagemFluxo.aguardando_links) # Salta para o próximo passo após a correção
+    if EXIBIR_LOGS: logger.info("🎥 Vídeo recebido e armazenado.")
+    await state.update_data(video_id=message.video.file_id, links=[])
+    await message.answer("Vídeo recebido! Agora envie os links um por um.\n\nUse o botão 'Finalizar' quando terminar.", reply_markup=teclado_finalizar)
+    await state.set_state(PostagemFluxo.aguardando_links)
 
 @dp.message(PostagemFluxo.aguardando_links)
 async def receber_links(message: types.Message, state: FSMContext):
