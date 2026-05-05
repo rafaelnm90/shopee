@@ -219,9 +219,20 @@ async def receber_video(message: types.Message, state: FSMContext):
 
         # 2. Upload para a API do Gemini processar a Copy
         def analisar_video():
-            if EXIBIR_LOGS: logger.info("📤 Processando o vídeo no Gemini 3 Flash...")
+            import time # ✅ Biblioteca necessária para criar a pausa de verificação
+            if EXIBIR_LOGS: logger.info("📤 Fazendo upload do vídeo para o Google Storage...")
             video_gemini = client.files.upload(file=video_path)
             
+            # ✅ OBRIGATÓRIO: Loop que aguarda a API processar o vídeo
+            if EXIBIR_LOGS: logger.info("⏳ Aguardando processamento do vídeo pelo Google...")
+            while video_gemini.state.name == "PROCESSING":
+                time.sleep(2)
+                video_gemini = client.files.get(name=video_gemini.name)
+                
+            if video_gemini.state.name == "FAILED":
+                raise Exception("Falha de processamento no servidor do Google.")
+
+            if EXIBIR_LOGS: logger.info("✅ Vídeo pronto! Gerando a copy persuasiva...")
             prompt_ia = (
                 "Você é um copywriter especialista da Shopee. Assista a este vídeo e crie uma legenda de vendas "
                 "curta, muito persuasiva e atrativa. Identifique o produto, destaque seus benefícios e use emojis. "
@@ -234,7 +245,7 @@ async def receber_video(message: types.Message, state: FSMContext):
             )
             return response.text.strip()
 
-        # Executa a IA de forma assíncrona
+        # Executa a IA de forma assíncrona para não travar o bot
         chamada_gerada = await asyncio.to_thread(analisar_video)
         
         # 3. Limpeza do servidor
