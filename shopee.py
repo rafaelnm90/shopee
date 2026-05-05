@@ -46,38 +46,40 @@ scheduler = AsyncIOScheduler(timezone=fuso_horario)
 
 # 4. FUNÇÕES DE GERAÇÃO COM IA E AGENDAMENTO ⏰
 async def gerar_mensagem_gemini(prompt):
-    # Lista de modelos em ordem de prioridade (Cascata)
+    # Ranking de prioridade: Inteligência -> Estabilidade -> Velocidade
     modelos_disponiveis = [
-        "gemini-3.1-pro",       # 1º: O mais inteligente
-        "gemini-3-flash",       # 2º: Rápido e eficiente
-        "gemini-2.5-pro",       # 3º: Raciocínio complexo
-        "gemini-2.5-flash",     # 4º: Versátil e estável
-        "gemini-3.1-flash-lite" # 5º: Última instância leve
+        "gemini-3.1-pro-preview",       # 1. Excelência criativa
+        "gemini-2.5-pro",               # 2. Raciocínio estável de alto nível
+        "gemini-3-flash-preview",       # 3. Equilíbrio entre inteligência e rapidez
+        "gemini-2.5-flash",             # 4. O "burro de carga" (mais estável)
+        "gemini-3.1-flash-lite-preview",# 5. Eficiência para mensagens curtas
+        "gemini-2.5-flash-lite"         # 6. Fallback final ultraleve
     ]
 
-    if EXIBIR_LOGS: logger.info("🧠 Iniciando tentativa de geração em cascata...")
+    if EXIBIR_LOGS: logger.info("🧠 Iniciando processamento em cascata inteligente...")
 
     for modelo_nome in modelos_disponiveis:
         try:
-            if EXIBIR_LOGS: logger.info(f"⏳ Tentando com o modelo: {modelo_nome}...")
+            if EXIBIR_LOGS: logger.info(f"⏳ Consultando modelo: {modelo_nome}...")
             
-            # Nota: A biblioteca moderna usa a classe GenerativeModel atualizada
             model = genai.GenerativeModel(modelo_nome)
-            
-            # Executa a chamada de forma assíncrona
             response = await asyncio.to_thread(model.generate_content, prompt)
             
             if response and response.text:
-                if EXIBIR_LOGS: logger.info(f"✅ Sucesso com o modelo {modelo_nome}!")
+                if EXIBIR_LOGS: logger.info(f"✅ Sucesso absoluto com {modelo_nome}!")
                 return response.text.strip()
                 
         except Exception as e:
-            if EXIBIR_LOGS: 
-                logger.warning(f"⚠️ Falha no modelo {modelo_nome}: {str(e)[:100]}")
-            continue # Pula para o próximo modelo da lista
+            erro_msg = str(e)
+            # Tratamento específico para limite de velocidade (Rate Limit)
+            if "429" in erro_msg:
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Limite atingido em {modelo_nome}. Pausando 2s para limpeza de buffer...")
+                await asyncio.sleep(2) 
+            else:
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Modelo {modelo_nome} indisponível: {erro_msg[:60]}...")
+            continue 
 
-    # Se todos os modelos falharem, retorna o fallback de segurança
-    if EXIBIR_LOGS: logger.error("❌ Todos os modelos da cascata falharam.")
+    if EXIBIR_LOGS: logger.error("❌ Falha crítica: Todos os motores da cascata estão inacessíveis.")
     return "Aproveite as nossas ofertas exclusivas de hoje! 🚀"
 
 async def disparar_mensagem(tipo):
