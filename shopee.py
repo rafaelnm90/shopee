@@ -8,11 +8,11 @@ import asyncio
 import random
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, types, F # ✅ 'F' adicionado ao pacote principal
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
-from aiogram.filters import Command, F, StateFilter 
+from aiogram.filters import Command, StateFilter # ✅ 'F' removido daqui para evitar o erro de importação
 from aiogram import F
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
