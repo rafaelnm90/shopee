@@ -253,10 +253,15 @@ async def receber_video(message: types.Message, state: FSMContext):
             # ✅ Lê o número atual para informar a IA
             numero_atual = ler_contador()
             
+            # ✅ Prompt aprimorado para identificar kits e formatar com quebra de linha
             prompt_ia = (
-                f"Assista ao vídeo e identifique o produto. "
-                f"Sua resposta deve ser EXATAMENTE e APENAS no formato: 'Vídeo {numero_atual} - [Nome Curto do Produto]'. "
-                f"Não adicione nenhuma descrição, ponto final ou emoji. Apenas a frase solicitada."
+                f"Assista ao vídeo INTEIRO. "
+                f"Seu objetivo é identificar se o vídeo mostra um único produto ou um KIT/linha de produtos. "
+                f"Se for um único produto, responda: 'Vídeo {numero_atual} - [Nome do Produto]'. "
+                f"Se for um kit ou vários produtos da mesma linha (ex: shampoo, condicionador, sérum), responda: 'Vídeo {numero_atual} - Kit [Nome da Marca/Linha]'. "
+                f"Após isso, adicione uma quebra de linha e insira '📦 Item: [Nome do Produto ou Kit]'. "
+                f"Exemplo de saída esperada:\nVídeo 1 - Kit Dove Reconstrução\n📦 Item: Kit Dove Reconstrução Completo. "
+                f"Não adicione nenhuma outra descrição."
             )
             
             # ✅ Mini-cascata para o vídeo: Se o modelo 3-flash esgotar a cota, tenta o 2.5-flash
@@ -353,8 +358,8 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     
     numero_atual = ler_contador()
     
-    # Mensagem 1: Apresentação Curta do Produto (já formatada pela IA ou digitada manualmente)
-    await bot.send_message(GRUPO_ID, f"📦 {nome}")
+    # Mensagem 1: Apresentação Curta do Produto (já formatada pela IA)
+    await bot.send_message(GRUPO_ID, nome)
     
     # Mensagem 2: Vídeo do Produto
     await bot.send_video(GRUPO_ID, video)
