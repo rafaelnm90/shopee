@@ -288,11 +288,14 @@ async def receber_video(message: types.Message, state: FSMContext):
         # 3. Limpeza do servidor
         if os.path.exists(video_path): os.remove(video_path)
         
+        # ✅ Salva APENAS o texto limpo da IA na memória para a postagem final
         await state.update_data(video_id=file_id, nome_produto=chamada_gerada, links=[])
         await msg_status.delete()
         
-        # Exibe apenas a identificação gerada para aprovação
-        await message.answer(f"{chamada_gerada}", reply_markup=teclado_confirmacao)
+        # ✅ Junta o texto da IA com uma pergunta orientativa apenas para exibição ao administrador
+        mensagem_aprovacao = f"{chamada_gerada}\n\n👉 **Esta identificação está correta?** Escolha uma opção abaixo:"
+        
+        await message.answer(mensagem_aprovacao, reply_markup=teclado_confirmacao, parse_mode="Markdown")
         await state.set_state(PostagemFluxo.aguardando_confirmacao_nome)
 
     except Exception as e:
