@@ -46,15 +46,39 @@ scheduler = AsyncIOScheduler(timezone=fuso_horario)
 
 # 4. FUNÇÕES DE GERAÇÃO COM IA E AGENDAMENTO ⏰
 async def gerar_mensagem_gemini(prompt):
-    if EXIBIR_LOGS: logger.info("🧠 Solicitando nova mensagem à IA do Google...")
-    try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = await asyncio.to_thread(model.generate_content, prompt)
-        if EXIBIR_LOGS: logger.info("✅ Texto gerado com sucesso pela IA.")
-        return response.text.strip()
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao gerar texto com IA: {e}")
-        return "Aproveite as nossas ofertas exclusivas de hoje! 🚀"
+    # Lista de modelos em ordem de prioridade (Cascata)
+    modelos_disponiveis = [
+        "gemini-3.1-pro",       # 1º: O mais inteligente
+        "gemini-3-flash",       # 2º: Rápido e eficiente
+        "gemini-2.5-pro",       # 3º: Raciocínio complexo
+        "gemini-2.5-flash",     # 4º: Versátil e estável
+        "gemini-3.1-flash-lite" # 5º: Última instância leve
+    ]
+
+    if EXIBIR_LOGS: logger.info("🧠 Iniciando tentativa de geração em cascata...")
+
+    for modelo_nome in modelos_disponiveis:
+        try:
+            if EXIBIR_LOGS: logger.info(f"⏳ Tentando com o modelo: {modelo_nome}...")
+            
+            # Nota: A biblioteca moderna usa a classe GenerativeModel atualizada
+            model = genai.GenerativeModel(modelo_nome)
+            
+            # Executa a chamada de forma assíncrona
+            response = await asyncio.to_thread(model.generate_content, prompt)
+            
+            if response and response.text:
+                if EXIBIR_LOGS: logger.info(f"✅ Sucesso com o modelo {modelo_nome}!")
+                return response.text.strip()
+                
+        except Exception as e:
+            if EXIBIR_LOGS: 
+                logger.warning(f"⚠️ Falha no modelo {modelo_nome}: {str(e)[:100]}")
+            continue # Pula para o próximo modelo da lista
+
+    # Se todos os modelos falharem, retorna o fallback de segurança
+    if EXIBIR_LOGS: logger.error("❌ Todos os modelos da cascata falharam.")
+    return "Aproveite as nossas ofertas exclusivas de hoje! 🚀"
 
 async def disparar_mensagem(tipo):
     if tipo == "bom_dia":
