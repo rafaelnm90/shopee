@@ -9,11 +9,10 @@ import random
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, types
-from aiogram import Bot, Dispatcher, types
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
-from aiogram.filters import Command
+from aiogram.filters import Command, F, StateFilter 
 from aiogram import F
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -45,6 +44,29 @@ dp = Dispatcher(storage=MemoryStorage())
 fuso_horario = ZoneInfo("America/Sao_Paulo")
 scheduler = AsyncIOScheduler(timezone=fuso_horario)
 
+# Teclados auxiliares para o fluxo de postagem 🛠️
+teclado_cancelar = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="Cancelar ❌")]],
+    resize_keyboard=True
+)
+
+teclado_finalizar = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Finalizar ✅")],
+        [KeyboardButton(text="Cancelar ❌")]
+    ],
+    resize_keyboard=True
+)
+
+# Teclado principal para retornar após o fluxo
+def obter_teclado_principal():
+    botoes = [
+        [KeyboardButton(text="Criar Postagem 📝")],
+        [KeyboardButton(text="Enviar mensagem de Bom Dia ☀️"), KeyboardButton(text="Enviar mensagem de Incentivo 🔥")],
+        [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+
 # 4. FUNÇÕES DE GERAÇÃO COM IA E AGENDAMENTO ⏰
 async def gerar_mensagem_gemini(prompt):
     # Lista técnica em ordem de prioridade para garantir a melhor mensagem
@@ -63,7 +85,6 @@ async def gerar_mensagem_gemini(prompt):
         try:
             if EXIBIR_LOGS: logger.info(f"⏳ Consultando motor: {modelo_nome}...")
             
-            # Executa a geração usando a nova sintaxe da biblioteca google-genai
             response = await asyncio.to_thread(
                 client.models.generate_content,
                 model=modelo_nome,
@@ -76,48 +97,47 @@ async def gerar_mensagem_gemini(prompt):
                 
         except Exception as e:
             erro_str = str(e)
-            # Tratamento para limite de velocidade (Rate Limit)
             if "429" in erro_str:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Limite atingido em {modelo_nome}. Pausando 2s para limpeza...")
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Limite atingido em {modelo_nome}. Pausando 2s...")
                 await asyncio.sleep(2)
             else:
                 if EXIBIR_LOGS: logger.warning(f"⚠️ Modelo {modelo_nome} indisponível: {erro_str[:50]}...")
             continue 
 
     if EXIBIR_LOGS: logger.error("❌ Falha crítica: Nenhum motor da cascata respondeu.")
-    return "Aproveite as nossas ofertas exclusivas de hoje! 🚀"
+    return "🚀 Novos materiais disponíveis! Bora postar e converter!"
 
 async def disparar_mensagem(tipo):
-    # Contexto base para a IA entender que o grupo é para suporte a afiliados
+    # ✅ Contexto atualizado: Foco em suporte ao Afiliado (Shopee Vídeo)
     contexto_afiliado = (
-        "Você é um assistente que fornece vídeos e links para afiliados da Shopee postarem no Shopee Vídeo. "
-        "O público são parceiros que querem ganhar comissão. Entregue APENAS o texto da mensagem, "
-        "sem introduções, sem oferecer opções e sem aspas."
+        "Você é um assistente especializado em suporte para afiliados da Shopee. "
+        "Seu objetivo é motivar parceiros a postarem vídeos no Shopee Vídeo para ganharem comissão. "
+        "Entregue APENAS o texto da mensagem final, sem introduções, sem aspas e sem oferecer opções."
     )
 
     if tipo == "bom_dia":
         prompt = (
-            f"{contexto_afiliado} Crie uma mensagem curta de bom dia incentivando os afiliados a começarem as postagens. "
-            "Fale sobre a qualidade dos vídeos de hoje e o potencial de vendas. Use emojis."
+            f"{contexto_afiliado} Crie uma mensagem de bom dia motivadora para o grupo de afiliados. "
+            "Diga que os vídeos de hoje estão prontos para download e postagem. Use emojis."
         )
     elif tipo == "boa_noite":
         prompt = (
-            f"{contexto_afiliado} Crie uma mensagem curta de boa noite. "
-            "Sugira que revisem as postagens do dia e se preparem para os novos vídeos que virão amanhã. Use emojis."
+            f"{contexto_afiliado} Crie uma mensagem de boa noite para afiliados. "
+            "Sugira que organizem os links para as postagens de amanhã. Use emojis."
         )
     elif tipo == "incentivo":
         prompt = (
-            f"{contexto_afiliado} Crie um texto curto e motivacional sobre persistência no programa de afiliados. "
-            "Destaque que vídeos bem postados geram comissão no automático. Use emojis."
+            f"{contexto_afiliado} Crie um texto curto e impactante sobre persistência no tráfego orgânico. "
+            "Lembre que um vídeo viral pode gerar comissão por semanas. Use emojis."
         )
     elif tipo == "link_grupo":
         prompt = (
-            f"{contexto_afiliado} Convide os afiliados a chamarem outros parceiros para o grupo para terem acesso "
-            f"a esses materiais gratuitos. Inclua o link: {LINK_GRUPO}. Use emojis."
+            f"{contexto_afiliado} Convide parceiros a trazerem outros afiliados para o grupo para acessarem "
+            f"materiais exclusivos. Link: {LINK_GRUPO}. Use emojis."
         )
 
     texto = await gerar_mensagem_gemini(prompt)
-    if EXIBIR_LOGS: logger.info(f"🚀 Enviando mensagem gerada ({tipo}): {texto[:20]}...")
+    if EXIBIR_LOGS: logger.info(f"🚀 Enviando mensagem ({tipo}): {texto[:20]}...")
     await bot.send_message(GRUPO_ID, texto)
 
 def agendar_tarefas_diarias():
@@ -141,54 +161,46 @@ def agendar_tarefas_diarias():
 # 5. HANDLERS DE COMANDO E INTERAÇÃO
 @dp.message(Command("start"))
 async def comando_start(message: types.Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    
-    if EXIBIR_LOGS: logger.info("⌨️ Atualizando menu principal com botões de disparo manual.")
-    
-    botoes = [
-        [KeyboardButton(text="Criar Postagem 📝")],
-        [KeyboardButton(text="Enviar mensagem de Bom Dia ☀️"), KeyboardButton(text="Enviar mensagem de Incentivo 🔥")],
-        [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙")]
-    ]
-    teclado = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
-    
-    await message.answer("Painel de Controle atualizado. Escolha uma ação abaixo:", reply_markup=teclado)
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("⌨️ Atualizando menu principal.")
+    await message.answer("Painel de Controle atualizado. Escolha uma ação abaixo:", reply_markup=obter_teclado_principal())
+
+# ❌ NOVO: Handler Global para Cancelar via Botão
+@dp.message(F.text == "Cancelar ❌", StateFilter(PostagemFluxo))
+async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
+    if EXIBIR_LOGS: logger.info("❌ Fluxo de postagem cancelado via botão.")
+    await state.clear()
+    await message.answer("Postagem cancelada. Voltando ao menu...", reply_markup=obter_teclado_principal())
 
 @dp.message(Command("postar"))
 @dp.message(F.text == "Criar Postagem 📝")
 async def iniciar_postagem(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
-        return
-    
+    if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🎬 Iniciando novo fluxo de postagem.")
-    await message.answer("Certo! Qual o nome do produto? (Isso será a base do texto de apresentação)")
+    await message.answer("Certo! Qual o nome do produto?", reply_markup=teclado_cancelar)
     await state.set_state(PostagemFluxo.aguardando_nome)
 
 @dp.message(PostagemFluxo.aguardando_nome)
 async def receber_nome(message: types.Message, state: FSMContext):
     await state.update_data(nome_produto=message.text)
-    await message.answer("Perfeito. Agora, anexe o vídeo do produto.")
+    await message.answer("Perfeito. Agora, anexe o vídeo do produto.", reply_markup=teclado_cancelar)
     await state.set_state(PostagemFluxo.aguardando_video)
 
 @dp.message(PostagemFluxo.aguardando_video)
 async def receber_video(message: types.Message, state: FSMContext):
     if not message.video:
-        await message.answer("Por favor, envie um arquivo de vídeo.")
+        await message.answer("Por favor, envie um arquivo de vídeo ou clique em Cancelar.", reply_markup=teclado_cancelar)
         return
     
     await state.update_data(video_id=message.video.file_id, links=[])
-    await message.answer("Vídeo recebido! Agora envie o link do 1° vídeo/produto.\n\nEnvie /finalizar a qualquer momento para publicar ou /cancelar para abortar.")
+    await message.answer("Vídeo recebido! Agora envie os links um por um.\n\nUse o botão Finalizar quando terminar.", reply_markup=teclado_finalizar)
     await state.set_state(PostagemFluxo.aguardando_links)
 
 @dp.message(PostagemFluxo.aguardando_links)
 async def receber_links(message: types.Message, state: FSMContext):
-    if message.text == "/finalizar":
+    # ✅ Captura tanto o botão quanto o comando antigo para redundância
+    if message.text in ["Finalizar ✅", "/finalizar"]:
         await finalizar_postagem(message, state)
-        return
-    if message.text == "/cancelar":
-        await state.clear()
-        await message.answer("Postagem cancelada. ❌")
         return
 
     data = await state.get_data()
@@ -200,7 +212,7 @@ async def receber_links(message: types.Message, state: FSMContext):
         await finalizar_postagem(message, state)
     else:
         await state.update_data(links=links)
-        await message.answer(f"Link {len(links)} registrado. Envie o próximo link ou digite /finalizar.")
+        await message.answer(f"Link {len(links)} registrado. Envie o próximo link ou clique em Finalizar.", reply_markup=teclado_finalizar)
 
 async def finalizar_postagem(message: types.Message, state: FSMContext):
     data = await state.get_data()
@@ -223,7 +235,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
         texto_links += f"{i}° Vídeo\n{link}\n\n"
     
     await bot.send_message(GRUPO_ID, texto_links, parse_mode="Markdown")
-    await message.answer("Postagem enviada com sucesso ao grupo! ✅")
+    await message.answer("Postagem enviada com sucesso! ✅", reply_markup=obter_teclado_principal())
     await state.clear()
 
 @dp.message(F.text == "Enviar mensagem de Bom Dia ☀️")
