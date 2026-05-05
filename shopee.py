@@ -254,9 +254,9 @@ async def receber_video(message: types.Message, state: FSMContext):
             numero_atual = ler_contador()
             
             prompt_ia = (
-                f"Você é um copywriter da Shopee. Assista ao vídeo e crie uma legenda de vendas. "
-                f"IMPORTANTE: Inicie OBRIGATORIAMENTE o texto com 'Vídeo {numero_atual} - [Nome do Produto]'. "
-                f"Destaque os benefícios e use emojis. Não peça links e não use aspas."
+                f"Assista ao vídeo e identifique o produto. "
+                f"Sua resposta deve ser EXATAMENTE e APENAS no formato: 'Vídeo {numero_atual} - [Nome Curto do Produto]'. "
+                f"Não adicione nenhuma descrição, ponto final ou emoji. Apenas a frase solicitada."
             )
             
             # ✅ Mini-cascata para o vídeo: Se o modelo 3-flash esgotar a cota, tenta o 2.5-flash
@@ -286,8 +286,8 @@ async def receber_video(message: types.Message, state: FSMContext):
         await state.update_data(video_id=file_id, nome_produto=chamada_gerada, links=[])
         await msg_status.delete()
         
-        # Exibe a arte gerada para sua aprovação
-        await message.answer(f"**Texto Criado:**\n\n{chamada_gerada}\n\nFicou bom?", reply_markup=teclado_confirmacao, parse_mode="Markdown")
+        # Exibe apenas a identificação gerada para aprovação
+        await message.answer(f"{chamada_gerada}", reply_markup=teclado_confirmacao)
         await state.set_state(PostagemFluxo.aguardando_confirmacao_nome)
 
     except Exception as e:
@@ -353,10 +353,8 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     
     numero_atual = ler_contador()
     
-    # Mensagem 1: Apresentação do Produto
-    texto_intro = f"**Vídeo {numero_atual}**\n" \
-                  f"📦 Item: {nome}"
-    await bot.send_message(GRUPO_ID, texto_intro, parse_mode="Markdown")
+    # Mensagem 1: Apresentação Curta do Produto (já formatada pela IA ou digitada manualmente)
+    await bot.send_message(GRUPO_ID, f"📦 {nome}")
     
     # Mensagem 2: Vídeo do Produto
     await bot.send_video(GRUPO_ID, video)
