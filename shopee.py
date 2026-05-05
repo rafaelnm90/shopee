@@ -278,10 +278,22 @@ async def receber_video(message: types.Message, state: FSMContext):
         await state.set_state(PostagemFluxo.aguardando_confirmacao_nome)
 
     except Exception as e:
+        erro_str = str(e)
         if os.path.exists(f"temp_{file_id}.mp4"): os.remove(f"temp_{file_id}.mp4")
-        if EXIBIR_LOGS: logger.error(f"❌ Erro na IA: {e}")
+        if EXIBIR_LOGS: logger.error(f"❌ Erro na IA ou Download: {erro_str}")
         await msg_status.delete()
-        await message.answer("A IA falhou ao ler o vídeo. Digite manualmente o texto da postagem:", reply_markup=teclado_cancelar)
+        
+        # ✅ Analisa o erro e traduz para o usuário
+        motivo = "Falha no servidor."
+        if "file is too big" in erro_str.lower():
+            motivo = "O vídeo ultrapassa o limite de 20MB do Telegram para Bots."
+        elif "429" in erro_str:
+            motivo = "Limite de velocidade da IA atingido. Aguarde 1 minuto."
+        else:
+            motivo = erro_str[:150] # Exibe o começo do erro técnico
+            
+        await message.answer(f"⚠️ A IA não conseguiu processar este vídeo.\n**Motivo:** {motivo}\n\nDigite manualmente a legenda ou clique em Cancelar:", reply_markup=teclado_cancelar)
+        
         await state.update_data(video_id=file_id, links=[])
         await state.set_state(PostagemFluxo.aguardando_chamada_manual)
 
