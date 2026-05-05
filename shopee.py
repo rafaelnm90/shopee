@@ -88,14 +88,33 @@ async def gerar_mensagem_gemini(prompt):
     return "Aproveite as nossas ofertas exclusivas de hoje! 🚀"
 
 async def disparar_mensagem(tipo):
+    # Contexto base para a IA entender que o grupo é para suporte a afiliados
+    contexto_afiliado = (
+        "Você é um assistente que fornece vídeos e links para afiliados da Shopee postarem no Shopee Vídeo. "
+        "O público são parceiros que querem ganhar comissão. Entregue APENAS o texto da mensagem, "
+        "sem introduções, sem oferecer opções e sem aspas."
+    )
+
     if tipo == "bom_dia":
-        prompt = "Crie uma mensagem muito curta, animada e direta de bom dia para um canal no Telegram focado em ofertas da Shopee. Desperte a curiosidade para os achadinhos de hoje. Use emojis. Não use aspas."
+        prompt = (
+            f"{contexto_afiliado} Crie uma mensagem curta de bom dia incentivando os afiliados a começarem as postagens. "
+            "Fale sobre a qualidade dos vídeos de hoje e o potencial de vendas. Use emojis."
+        )
     elif tipo == "boa_noite":
-        prompt = "Crie uma mensagem curta e simpática de boa noite para um canal de ofertas da Shopee no Telegram. Lembre o pessoal de conferir os carrinhos de compra e se preparar para as ofertas de amanhã. Use emojis. Não use aspas."
+        prompt = (
+            f"{contexto_afiliado} Crie uma mensagem curta de boa noite. "
+            "Sugira que revisem as postagens do dia e se preparem para os novos vídeos que virão amanhã. Use emojis."
+        )
     elif tipo == "incentivo":
-        prompt = "Crie uma mensagem curta e persuasiva de incentivo para um canal de achadinhos da Shopee. Alterne os temas entre foco em economia, senso de urgência ou produtos exclusivos. Use emojis. Não use aspas."
+        prompt = (
+            f"{contexto_afiliado} Crie um texto curto e motivacional sobre persistência no programa de afiliados. "
+            "Destaque que vídeos bem postados geram comissão no automático. Use emojis."
+        )
     elif tipo == "link_grupo":
-        prompt = f"Crie uma mensagem curta e persuasiva convidando as pessoas a chamarem amigos para o nosso canal de achadinhos da Shopee. A mensagem deve obrigatoriamente incluir este link no final: {LINK_GRUPO}. Use emojis. Seja criativo."
+        prompt = (
+            f"{contexto_afiliado} Convide os afiliados a chamarem outros parceiros para o grupo para terem acesso "
+            f"a esses materiais gratuitos. Inclua o link: {LINK_GRUPO}. Use emojis."
+        )
 
     texto = await gerar_mensagem_gemini(prompt)
     if EXIBIR_LOGS: logger.info(f"🚀 Enviando mensagem gerada ({tipo}): {texto[:20]}...")
