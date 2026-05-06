@@ -392,8 +392,12 @@ async def receber_link_video_tiktok(message: types.Message, state: FSMContext):
 @dp.message(PostagemFluxo.aguardando_links_shopee)
 async def receber_links_shopee(message: types.Message, state: FSMContext):
     data = await state.get_data()
+    links = data.get('links_shopee', [])
     
-    if message.text in ["Finalizar ✅", "/finalizar"]:
+    if message.text in ["Finalizar ✅", "/finalizar"] or len(links) >= 6:
+        if len(links) >= 6 and message.text not in ["Finalizar ✅", "/finalizar"]:
+             await message.answer("Limite de 6 links atingido para a Shopee. Avançando para a próxima etapa...", parse_mode="HTML")
+
         plataforma = data['plataforma_escolhida']
         if plataforma == "Ambos 🛒🎵":
             if EXIBIR_LOGS: logger.info("🔀 Transição: Produtos Shopee concluídos, solicitando vídeo do TikTok.")
@@ -404,23 +408,25 @@ async def receber_links_shopee(message: types.Message, state: FSMContext):
             await finalizar_postagem(message, state)
         return
 
-    links = data.get('links_shopee', [])
     links.append(message.text)
     await state.update_data(links_shopee=links)
-    await message.answer(f"Link Shopee {len(links)} registrado. Envie o próximo ou clique em Finalizar.", reply_markup=teclado_finalizar)
+    await message.answer(f"Link Shopee {len(links)}/6 registrado. Envie o próximo ou clique em Finalizar.", reply_markup=teclado_finalizar)
 
 @dp.message(PostagemFluxo.aguardando_links_tiktok)
 async def receber_links_tiktok(message: types.Message, state: FSMContext):
-    if message.text in ["Finalizar ✅", "/finalizar"]:
-        # Terminou o TikTok, então envia a postagem final
-        await finalizar_postagem(message, state)
-        return
-
     data = await state.get_data()
     links = data.get('links_tiktok', [])
+
+    if message.text in ["Finalizar ✅", "/finalizar"] or len(links) >= 6:
+         if len(links) >= 6 and message.text not in ["Finalizar ✅", "/finalizar"]:
+             await message.answer("Limite de 6 links atingido para o TikTok. Finalizando a postagem...", parse_mode="HTML")
+         # Terminou o TikTok, então envia a postagem final
+         await finalizar_postagem(message, state)
+         return
+
     links.append(message.text)
     await state.update_data(links_tiktok=links)
-    await message.answer(f"Link TikTok {len(links)} registrado. Envie o próximo ou clique em Finalizar.", reply_markup=teclado_finalizar)
+    await message.answer(f"Link TikTok {len(links)}/6 registrado. Envie o próximo ou clique em Finalizar.", reply_markup=teclado_finalizar)
 
 async def finalizar_postagem(message: types.Message, state: FSMContext):
     data = await state.get_data()
