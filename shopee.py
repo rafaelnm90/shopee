@@ -50,10 +50,13 @@ class PostagemFluxo(StatesGroup):
     aguardando_video = State()             
     aguardando_confirmacao_nome = State()  
     aguardando_chamada_manual = State()    
-    aguardando_links = State()
+    # ✅ Novos estados para o fluxo aprimorado
+    aguardando_plataforma = State()
+    aguardando_link_video = State()
+    aguardando_links_produtos = State()
 
 class ConfigFluxo(StatesGroup):
-    aguardando_novo_numero = State() # ✅ Novo estado para você editar o número
+    aguardando_novo_numero = State()
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -61,6 +64,17 @@ fuso_horario = ZoneInfo("America/Sao_Paulo")
 scheduler = AsyncIOScheduler(timezone=fuso_horario)
 
 # --- NOVOS TECLADOS DE CONTROLE ---
+# 🛠️ Teclado para seleção da plataforma
+teclado_plataforma = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Ambos 🛒🎵")],
+        [KeyboardButton(text="Apenas Shopee 🛒"), KeyboardButton(text="Apenas TikTok 🎵")],
+        [KeyboardButton(text="Cancelar ❌")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
 # 🛠️ Teclado básico para etapas de entrada de dados
 teclado_cancelar = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Cancelar ❌")]],
@@ -322,21 +336,39 @@ async def receber_video(message: types.Message, state: FSMContext):
 @dp.message(PostagemFluxo.aguardando_confirmacao_nome)
 async def confirmar_nome(message: types.Message, state: FSMContext):
     if message.text == "Aprovar ✅":
-        await message.answer("Show! Agora mande os links um por um e clique em 'Finalizar'.", reply_markup=teclado_finalizar)
-        await state.set_state(PostagemFluxo.aguardando_links)
+        # ✅ Fluxo modificado: em vez de pedir os links de produto, pede a plataforma primeiro
+        await message.answer("Onde você postou/vai postar este vídeo?", reply_markup=teclado_plataforma)
+        await state.set_state(PostagemFluxo.aguardando_plataforma)
     elif message.text == "Tentar Novamente 🔄":
-        await message.answer("Sem problemas. Digite como você quer que fique a legenda:", reply_markup=teclado_cancelar)
+        await message.answer("Sem problemas. Digite a identificação manualmente (ex: Vídeo 1\n📦 Item: Sérum):", reply_markup=teclado_cancelar)
         await state.set_state(PostagemFluxo.aguardando_chamada_manual)
 
 @dp.message(PostagemFluxo.aguardando_chamada_manual)
 async def receber_chamada_manual(message: types.Message, state: FSMContext):
     await state.update_data(nome_produto=message.text)
-    await message.answer("Legenda salva! Agora envie os links e clique em 'Finalizar'.", reply_markup=teclado_finalizar)
-    await state.set_state(PostagemFluxo.aguardando_links)
+    await message.answer("Identificação salva! Onde você postou/vai postar este vídeo?", reply_markup=teclado_plataforma)
+    await state.set_state(PostagemFluxo.aguardando_plataforma)
 
-@dp.message(PostagemFluxo.aguardando_links)
+@dp.message(PostagemFluxo.aguardando_plataforma)
+async def receber_plataforma(message: types.Message, state: FSMContext):
+    plataforma = message.text
+    if plataforma not in ["Ambos 🛒🎵", "Apenas Shopee 🛒", "Apenas TikTok 🎵"]:
+        await message.answer("Por favor, use os botões para escolher a plataforma.")
+        return
+        
+    await state.update_data(plataforma_escolhida=plataforma)
+    await message.answer("Certo! Agora envie o **Link do Vídeo** que você postou. (Se escolheu 'Ambos', envie o da Shopee primeiro e o do TikTok logo em seguida na mesma mensagem, separados por espaço ou linha).", reply_markup=teclado_cancelar)
+    await state.set_state(PostagemFluxo.aguardando_link_video)
+
+@dp.message(PostagemFluxo.aguardando_link_video)
+async def receber_link_video(message: types.Message, state: FSMContext):
+    await state.update_data(link_do_video=message.text, links_produtos=[])
+    await message.answer("Link(s) do vídeo salvo(s)! Por fim, envie os links dos produtos um por um e clique em 'Finalizar'.", reply_markup=teclado_finalizar)
+    await state.set_state(PostagemFluxo.aguardando_links_produtos)
+
+# ✅ Função receber_links atualizada para usar o novo estado
+@dp.message(PostagemFluxo.aguardando_links_produtos)
 async def receber_links(message: types.Message, state: FSMContext):
-    # ✅ Captura tanto o botão quanto o comando antigo para redundância
     if message.text in ["Finalizar ✅", "/finalizar"]:
         await finalizar_postagem(message, state)
         return
@@ -356,24 +388,34 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     data = await state.get_data()
     nome = data['nome_produto']
     video = data['video_id']
-    links = data['links']
+    links_produtos = data['links_produtos']
+    plataforma = data['plataforma_escolhida']
+    link_do_video = data['link_do_video']
     
-    if EXIBIR_LOGS: logger.info("📤 Publicando postagem no grupo.")
-    
+    if EXIBIR_LOGS: logger.info("📤 Publicando postagem aprimorada no grupo.")
     numero_atual = ler_contador()
     
-    # Mensagem 1: Apresentação Curta do Produto (já formatada pela IA)
+    # Mensagem 1: Apresentação (Gerada pela IA ou manual)
     await bot.send_message(GRUPO_ID, nome)
-    
-    # Mensagem 2: Vídeo do Produto
+    # Mensagem 2: O Arquivo de Vídeo
     await bot.send_video(GRUPO_ID, video)
+
+    # Função interna para montar o bloco de interação + produtos
+    async def enviar_bloco_plataforma(nome_plat, icone_plat):
+        texto_bloco = f"**{nome_plat} {icone_plat}**\n\n"
+        texto_bloco += f"👉 Link do Vídeo:\n{link_do_video}\n\n"
+        texto_bloco += "💡 *O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!*\n\n"
+        texto_bloco += "🔗 **Links dos Produtos:**\n"
+        for i, link in enumerate(links_produtos, 1):
+            texto_bloco += f"👉 {i}º Link: {link}\n"
+        await bot.send_message(GRUPO_ID, texto_bloco, parse_mode="Markdown")
+
+    # Dispara os blocos conforme a escolha
+    if plataforma in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
+        await enviar_bloco_plataforma("Shopee Vídeo", "🛒")
     
-    # Mensagem 3: Lista de Links Limpa
-    texto_links = "🔗 **Links da Shopee:**\n\n"
-    for i, link in enumerate(links, 1):
-        texto_links += f"👉 {i}º Link: {link}\n"
-        
-    await bot.send_message(GRUPO_ID, texto_links, parse_mode="Markdown")
+    if plataforma in ["Ambos 🛒🎵", "Apenas TikTok 🎵"]:
+        await enviar_bloco_plataforma("TikTok", "🎵")
     
     # ✅ Incrementa o contador para o próximo vídeo
     salvar_contador(numero_atual + 1)
