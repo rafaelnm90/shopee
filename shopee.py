@@ -553,7 +553,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     # Substitui a quebra de linha por espaço e formata o título
     titulo_limpo = nome.replace('\n', ' | ')
     linha_divisoria = "━━━━━━━━━━━━━━━"
-    cabecalho = f"<b>{titulo_limpo}</b>\n{linha_divisoria}\n\n\n"
+    cabecalho = f"<b>{titulo_limpo}</b>\n\n{linha_divisoria}\n\n"
     
     texto_longo = "(💡 <i>O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!</i>)\n\n"
     texto_curto = "(💡 <i>Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!</i>)\n\n"
