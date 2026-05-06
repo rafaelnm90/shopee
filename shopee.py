@@ -503,43 +503,69 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     links_shopee = data.get('links_shopee', [])
     links_tiktok = data.get('links_tiktok', [])
     
-    if EXIBIR_LOGS: logger.info("📤 Publicando postagem consolidada no grupo.")
+    if EXIBIR_LOGS: logger.info("📤 Iniciando montagem inteligente da legenda (3 níveis).")
     numero_atual = ler_contador()
     
     # Substitui a quebra de linha por espaço e formata o título
     titulo_limpo = nome.replace('\n', ' | ')
-    legenda = f"<b>{titulo_limpo}</b>\n\n"
+    cabecalho = f"<b>{titulo_limpo}</b>\n\n"
     
-    mensagem_apoio = "💡 <i>O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!</i>\n\n"
-    
-    if plataforma in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
-        legenda += f"🔶 <b>SHOPEE VÍDEO</b> 🔶\n"
-        legenda += f"🎬 Link do Vídeo:\n{link_vid_shopee}\n"
-        legenda += mensagem_apoio
-        if links_shopee:
-            legenda += "🔗 Links dos Produtos:\n"
-            for i, link in enumerate(links_shopee, 1):
-                legenda += f"👉 {i}º: {link}\n"
-        if plataforma == "Ambos 🛒🎵":
-            legenda += "\n\n\n"
-        else:
-            legenda += "\n"
-            
-    if plataforma in ["Ambos 🛒🎵", "Apenas TikTok 🎵"]:
-        legenda += f"⬛ <b>TIKTOK</b> ⬛\n"
-        legenda += f"🎬 Link do Vídeo:\n{link_vid_tiktok}\n"
-        legenda += mensagem_apoio
-        if links_tiktok:
-            legenda += "🔗 Links dos Produtos:\n"
-            for i, link in enumerate(links_tiktok, 1):
-                legenda += f"👉 {i}º: {link}\n"
-        legenda += "\n"
+    texto_longo = "\n💡 (<i>O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!</i>)\n\n"
+    texto_curto = "\n💡 (<i>Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!</i>)\n\n"
+    texto_rodape = "\n💡 (<i>Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!</i>)"
 
-    # Envia o vídeo com a legenda consolidada
-    if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo com a nova legenda encapsulada.")
-    await bot.send_video(chat_id=GRUPO_ID, video=video, caption=legenda, parse_mode="HTML")
+    def montar_legenda(mensagem_apoio, is_rodape=False):
+        legenda_temp = cabecalho
+        
+        if plataforma in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
+            legenda_temp += f"🔶 <b>SHOPEE VÍDEO</b> 🔶\n"
+            legenda_temp += f"🎬 Link do Vídeo:\n{link_vid_shopee}\n"
+            if not is_rodape:
+                legenda_temp += mensagem_apoio
+            if links_shopee:
+                legenda_temp += "🔗 Links dos Produtos:\n"
+                for i, link in enumerate(links_shopee, 1):
+                    legenda_temp += f"👉 {i}º: {link}\n"
+            if plataforma == "Ambos 🛒🎵":
+                legenda_temp += "\n\n\n\n"
+            else:
+                legenda_temp += "\n"
+                
+        if plataforma in ["Ambos 🛒🎵", "Apenas TikTok 🎵"]:
+            legenda_temp += f"⬛ <b>TIKTOK</b> ⬛\n"
+            legenda_temp += f"🎬 Link do Vídeo:\n{link_vid_tiktok}\n"
+            if not is_rodape:
+                legenda_temp += mensagem_apoio
+            if links_tiktok:
+                legenda_temp += "🔗 Links dos Produtos:\n"
+                for i, link in enumerate(links_tiktok, 1):
+                    legenda_temp += f"👉 {i}º: {link}\n"
+            legenda_temp += "\n"
+        
+        if is_rodape:
+            legenda_temp += mensagem_apoio
+            
+        return legenda_temp
+
+    # Nível 1: Tenta o texto longo duplo
+    legenda_final = montar_legenda(texto_longo, is_rodape=False)
+    if EXIBIR_LOGS: logger.info(f"📏 Avaliando Nível 1: {len(legenda_final)} caracteres.")
     
-    # ✅ Incrementa o contador para o próximo vídeo
+    if len(legenda_final) > 1024:
+        if EXIBIR_LOGS: logger.warning("⚠️ Limite excedido no Nível 1. Ativando Nível 2 (texto curto duplo).")
+        legenda_final = montar_legenda(texto_curto, is_rodape=False)
+        if EXIBIR_LOGS: logger.info(f"📏 Avaliando Nível 2: {len(legenda_final)} caracteres.")
+        
+        if len(legenda_final) > 1024:
+            if EXIBIR_LOGS: logger.warning("⚠️ Limite excedido no Nível 2. Ativando Nível 3 (rodapé simples).")
+            legenda_final = montar_legenda(texto_rodape, is_rodape=True)
+            if EXIBIR_LOGS: logger.info(f"📏 Avaliando Nível 3: {len(legenda_final)} caracteres.")
+
+    # Envia o vídeo com a legenda consolidada e validada
+    if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo com a legenda encapsulada.")
+    await bot.send_video(chat_id=GRUPO_ID, video=video, caption=legenda_final, parse_mode="HTML")
+    
+    # Incrementa o contador para o próximo vídeo
     salvar_contador(numero_atual + 1)
     if EXIBIR_LOGS: logger.info(f"🔢 Contador atualizado de {numero_atual} para {numero_atual + 1}.")
     
