@@ -442,39 +442,56 @@ async def receber_links_shopee(message: types.Message, state: FSMContext):
     data = await state.get_data()
     links = data.get('links_shopee', [])
     
-    if message.text in ["Finalizar ✅", "/finalizar"] or len(links) >= 6:
-        if len(links) >= 6 and message.text not in ["Finalizar ✅", "/finalizar"]:
-             await message.answer("Limite de 6 links atingido para a Shopee. Avançando para a próxima etapa...", parse_mode="HTML")
-
+    if message.text in ["Finalizar ✅", "/finalizar"]:
         plataforma = data['plataforma_escolhida']
         if plataforma == "Ambos 🛒🎵":
-            if EXIBIR_LOGS: logger.info("🔀 Transição: Produtos Shopee concluídos, solicitando vídeo do TikTok.")
+            if EXIBIR_LOGS: logger.info("🔀 Transição manual: Produtos Shopee concluídos.")
             await message.answer("Links da Shopee salvos! 🛒\n\nAgora, envie o <b>Link do Vídeo</b> que você postou no <b>TIKTOK</b>.", reply_markup=teclado_cancelar, parse_mode="HTML")
             await state.set_state(PostagemFluxo.aguardando_link_video_tiktok)
         else:
-            if EXIBIR_LOGS: logger.info("✅ Fluxo apenas Shopee concluído. Finalizando postagem.")
+            if EXIBIR_LOGS: logger.info("✅ Fluxo Shopee concluído manualmente.")
             await finalizar_postagem(message, state)
         return
 
     links.append(message.text)
     await state.update_data(links_shopee=links)
-    await message.answer(f"Link Shopee {len(links)}/6 registrado. Envie o próximo ou clique em Finalizar.", reply_markup=teclado_finalizar)
+    
+    if len(links) >= 6:
+        if EXIBIR_LOGS: logger.info("✅ 🎯 Limite máximo de links da Shopee alcançado.")
+        await message.answer("Link Shopee 6/6 registrado.\nLimite atingido, avançando para a próxima etapa...", parse_mode="HTML")
+        
+        plataforma = data['plataforma_escolhida']
+        if plataforma == "Ambos 🛒🎵":
+            if EXIBIR_LOGS: logger.info("🔀 Transição automática: solicitando vídeo do TikTok.")
+            await message.answer("Links da Shopee salvos! 🛒\n\nAgora, envie o <b>Link do Vídeo</b> que você postou no <b>TIKTOK</b>.", reply_markup=teclado_cancelar, parse_mode="HTML")
+            await state.set_state(PostagemFluxo.aguardando_link_video_tiktok)
+        else:
+            if EXIBIR_LOGS: logger.info("✅ Fluxo Shopee concluído por limite automático.")
+            await finalizar_postagem(message, state)
+    else:
+        if EXIBIR_LOGS: logger.info(f"🔗 Link Shopee {len(links)}/6 validado.")
+        await message.answer(f"Link Shopee {len(links)}/6 registrado. Envie o próximo ou clique em Finalizar.", reply_markup=teclado_finalizar)
 
 @dp.message(PostagemFluxo.aguardando_links_tiktok)
 async def receber_links_tiktok(message: types.Message, state: FSMContext):
     data = await state.get_data()
     links = data.get('links_tiktok', [])
 
-    if message.text in ["Finalizar ✅", "/finalizar"] or len(links) >= 6:
-         if len(links) >= 6 and message.text not in ["Finalizar ✅", "/finalizar"]:
-             await message.answer("Limite de 6 links atingido para o TikTok. Finalizando a postagem...", parse_mode="HTML")
-         # Terminou o TikTok, então envia a postagem final
+    if message.text in ["Finalizar ✅", "/finalizar"]:
+         if EXIBIR_LOGS: logger.info("✅ Fluxo TikTok concluído manualmente.")
          await finalizar_postagem(message, state)
          return
 
     links.append(message.text)
     await state.update_data(links_tiktok=links)
-    await message.answer(f"Link TikTok {len(links)}/6 registrado. Envie o próximo ou clique em Finalizar.", reply_markup=teclado_finalizar)
+    
+    if len(links) >= 6:
+         if EXIBIR_LOGS: logger.info("✅ 🎯 Limite máximo de links do TikTok alcançado.")
+         await message.answer("Link TikTok 6/6 registrado.\nLimite atingido, finalizando a postagem...", parse_mode="HTML")
+         await finalizar_postagem(message, state)
+    else:
+         if EXIBIR_LOGS: logger.info(f"🔗 Link TikTok {len(links)}/6 validado.")
+         await message.answer(f"Link TikTok {len(links)}/6 registrado. Envie o próximo ou clique em Finalizar.", reply_markup=teclado_finalizar)
 
 async def finalizar_postagem(message: types.Message, state: FSMContext):
     data = await state.get_data()
@@ -493,7 +510,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     titulo_limpo = nome.replace('\n', ' | ')
     legenda = f"<b>{titulo_limpo}</b>\n\n"
     
-    mensagem_apoio = "\n💡 <i>O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!</i>\n\n"
+    mensagem_apoio = "💡 <i>O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!</i>\n\n"
     
     if plataforma in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
         legenda += f"🔶 <b>SHOPEE VÍDEO</b> 🔶\n"
@@ -504,7 +521,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
             for i, link in enumerate(links_shopee, 1):
                 legenda += f"👉 {i}º: {link}\n"
         if plataforma == "Ambos 🛒🎵":
-            legenda += "\n\n\n\n"
+            legenda += "\n\n\n"
         else:
             legenda += "\n"
             
