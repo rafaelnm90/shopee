@@ -331,7 +331,7 @@ async def receber_video(message: types.Message, state: FSMContext):
         else:
             motivo = erro_str[:150] # Exibe o começo do erro técnico
             
-        await message.answer(f"⚠️ A IA não conseguiu processar este vídeo.\n**Motivo:** {motivo}\n\nDigite manualmente a legenda ou clique em Cancelar:", reply_markup=teclado_cancelar)
+        await message.answer(f"⚠️ A IA não conseguiu processar este vídeo.\n**Motivo:** {motivo}\n\nDigite manualmente APENAS O NOME DO PRODUTO ou clique em Cancelar:", reply_markup=teclado_cancelar)
         
         await state.update_data(video_id=file_id, links=[])
         await state.set_state(PostagemFluxo.aguardando_chamada_manual)
@@ -343,13 +343,18 @@ async def confirmar_nome(message: types.Message, state: FSMContext):
         await message.answer("Onde você postou/vai postar este vídeo?", reply_markup=teclado_plataforma)
         await state.set_state(PostagemFluxo.aguardando_plataforma)
     elif message.text == "Tentar Novamente 🔄":
-        await message.answer("Sem problemas. Digite a identificação manualmente (ex: Vídeo 1\n📦 Item: Sérum):", reply_markup=teclado_cancelar)
+        await message.answer("Sem problemas. Digite manualmente APENAS O NOME DO PRODUTO:", reply_markup=teclado_cancelar)
         await state.set_state(PostagemFluxo.aguardando_chamada_manual)
 
 @dp.message(PostagemFluxo.aguardando_chamada_manual)
 async def receber_chamada_manual(message: types.Message, state: FSMContext):
-    await state.update_data(nome_produto=message.text)
-    await message.answer("Identificação salva! Onde você postou/vai postar este vídeo?", reply_markup=teclado_plataforma)
+    numero_atual = ler_contador()
+    nome_formatado = f"Vídeo {numero_atual}\n📦 Item: {message.text.strip()}"
+    
+    if EXIBIR_LOGS: logger.info(f"✍️ Identificação manual formatada automaticamente: Vídeo {numero_atual}.")
+    
+    await state.update_data(nome_produto=nome_formatado)
+    await message.answer(f"Identificação salva como:\n\n{nome_formatado}\n\nOnde você postou/vai postar este vídeo?", reply_markup=teclado_plataforma)
     await state.set_state(PostagemFluxo.aguardando_plataforma)
 
 @dp.message(PostagemFluxo.aguardando_plataforma)
