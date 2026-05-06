@@ -105,13 +105,14 @@ teclado_finalizar = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# 🛠️ Função centralizadora do menu principal 🚀
+# 🛠️ Função centralizadora do menu principal
 def obter_teclado_principal():
     botoes = [
-        [KeyboardButton(text="📝 Criar Postagem 📝")],
-        [KeyboardButton(text="☀️ Enviar Bom Dia ☀️"), KeyboardButton(text="🔥 Enviar Incentivo 🔥")],
-        [KeyboardButton(text="🌙 Enviar Boa Noite 🌙"), KeyboardButton(text="📢 Divulgar Grupo 📢")],
-        [KeyboardButton(text="🔄 Zerar Contador 🔄"), KeyboardButton(text="✏️ Editar Número ✏️")]
+        [KeyboardButton(text="Criar Postagem 📝")],
+        [KeyboardButton(text="Enviar mensagem de Bom Dia ☀️"), KeyboardButton(text="Enviar mensagem de Incentivo 🔥")],
+        [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙"), KeyboardButton(text="Divulgar Grupo 📢")],
+        # ✅ Novos botões para controle da numeração
+        [KeyboardButton(text="Zerar Contador 🔄"), KeyboardButton(text="Editar Número ✏️")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 # ----------------------------------
@@ -237,27 +238,27 @@ async def comando_start(message: types.Message):
     if EXIBIR_LOGS: logger.info("⌨️ Atualizando menu principal.")
     await message.answer("Painel de Controle atualizado. Escolha uma ação abaixo:", reply_markup=obter_teclado_principal())
 
-# ✅ Handlers para Envio Manual de Mensagens via Botões (Nomes atualizados) 🚀
-@dp.message(F.text == "☀️ Enviar Bom Dia ☀️")
+# ✅ Handlers para Envio Manual de Mensagens via Botões
+@dp.message(F.text == "Enviar mensagem de Bom Dia ☀️")
 async def manual_bom_dia(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("Gerando e enviando mensagem de Bom Dia... ⏳")
     await disparar_mensagem("bom_dia")
-    await message.answer("✅ Mensagem de Bom Dia enviada!")
+    await message.answer("Mensagem de Bom Dia enviada ao grupo com sucesso! ✅")
 
-@dp.message(F.text == "🌙 Enviar Boa Noite 🌙")
+@dp.message(F.text == "Enviar mensagem de Boa Noite 🌙")
 async def manual_boa_noite(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("Gerando e enviando mensagem de Boa Noite... ⏳")
     await disparar_mensagem("boa_noite")
-    await message.answer("✅ Mensagem de Boa Noite enviada!")
+    await message.answer("Mensagem de Boa Noite enviada ao grupo com sucesso! ✅")
 
-@dp.message(F.text == "🔥 Enviar Incentivo 🔥")
+@dp.message(F.text == "Enviar mensagem de Incentivo 🔥")
 async def manual_incentivo(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("Gerando e enviando mensagem de Incentivo... ⏳")
     await disparar_mensagem("incentivo")
-    await message.answer("✅ Mensagem de Incentivo enviada!")
+    await message.answer("Mensagem de Incentivo enviada ao grupo com sucesso! ✅")
 
 @dp.message(F.text == "Divulgar Grupo 📢")
 async def manual_link_grupo(message: types.Message):
@@ -488,32 +489,18 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("📤 Publicando postagem consolidada no grupo.")
     numero_atual = ler_contador()
     
-    # Configuração da legenda unificada com espaçamentos 🚀
+    # Substitui a quebra de linha por espaço e formata o título
     titulo_limpo = nome.replace('\n', ' | ')
     legenda = f"<b>{titulo_limpo}</b>\n\n"
     
-    msg_apoio = "💡 <i>O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!</i>"
-
     if plataforma in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
         legenda += f"🔶 <b>SHOPEE VÍDEO</b> 🔶\n"
-        legenda += f"🎬 Link do Vídeo:\n{link_vid_shopee}\n\n"
-        legenda += f"{msg_apoio}\n\n"
+        legenda += f"🎬 Link do Vídeo:\n{link_vid_shopee}\n"
         if links_shopee:
             legenda += "🔗 Links dos Produtos:\n"
             for i, link in enumerate(links_shopee, 1):
                 legenda += f"👉 {i}º: {link}\n"
-    
-    if plataforma == "Ambos 🛒🎵":
-        legenda += "\n\n\n" # ✅ Três espaços em branco entre plataformas
-        
-    if plataforma in ["Ambos 🛒🎵", "Apenas TikTok 🎵"]:
-        legenda += f"⬛ <b>TIKTOK</b> ⬛\n"
-        legenda += f"🎬 Link do Vídeo:\n{link_vid_tiktok}\n\n"
-        legenda += f"{msg_apoio}\n\n"
-        if links_tiktok:
-            legenda += "🔗 Links dos Produtos:\n"
-            for i, link in enumerate(links_tiktok, 1):
-                legenda += f"👉 {i}º: {link}\n"
+        legenda += "\n"
         
     if plataforma in ["Ambos 🛒🎵", "Apenas TikTok 🎵"]:
         legenda += f"⬛ <b>TIKTOK</b> ⬛\n"
