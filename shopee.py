@@ -52,7 +52,8 @@ class PostagemFluxo(StatesGroup):
     aguardando_chamada_manual = State()    
     # ✅ Novos estados para o fluxo aprimorado
     aguardando_plataforma = State()
-    aguardando_link_video = State()
+    aguardando_link_video_shopee = State()
+    aguardando_link_video_tiktok = State()
     # ✅ Estados separados para coletar os links corretos de cada plataforma
     aguardando_links_shopee = State()
     aguardando_links_tiktok = State()
@@ -358,25 +359,30 @@ async def receber_plataforma(message: types.Message, state: FSMContext):
         await message.answer("Por favor, use os botões para escolher a plataforma.")
         return
         
-    await state.update_data(plataforma_escolhida=plataforma)
-    await message.answer("Certo! Agora envie o **Link do Vídeo** que você postou. (Se escolheu 'Ambos', envie o da Shopee primeiro e o do TikTok logo em seguida na mesma mensagem, separados por espaço ou linha).", reply_markup=teclado_cancelar)
-    await state.set_state(PostagemFluxo.aguardando_link_video)
-
-@dp.message(PostagemFluxo.aguardando_link_video)
-async def receber_link_video(message: types.Message, state: FSMContext):
-    # Salva o(s) link(s) do vídeo e cria as duas listas vazias de produtos
-    await state.update_data(link_do_video=message.text, links_shopee=[], links_tiktok=[])
-    data = await state.get_data()
-    plataforma = data['plataforma_escolhida']
+    await state.update_data(plataforma_escolhida=plataforma, links_shopee=[], links_tiktok=[])
     
-    # ✅ Direciona o bot para perguntar os links certos dependendo da plataforma
     if plataforma in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
-        await message.answer("Link(s) do vídeo salvo(s)!\n\nAgora, envie os links dos produtos da **SHOPEE** um por um. Clique em 'Finalizar' quando terminar os da Shopee.", reply_markup=teclado_finalizar)
-        await state.set_state(PostagemFluxo.aguardando_links_shopee)
+        if EXIBIR_LOGS: logger.info("🔀 Direcionando para fluxo de vídeo da Shopee.")
+        await message.answer("Certo! Agora envie o <b>Link do Vídeo</b> que você postou na <b>SHOPEE</b>.", reply_markup=teclado_cancelar, parse_mode="HTML")
+        await state.set_state(PostagemFluxo.aguardando_link_video_shopee)
     else:
-        # Se for apenas TikTok, pula a Shopee
-        await message.answer("Link do vídeo salvo!\n\nAgora, envie os links dos produtos do **TIKTOK** um por um. Clique em 'Finalizar' quando acabar.", reply_markup=teclado_finalizar)
-        await state.set_state(PostagemFluxo.aguardando_links_tiktok)
+        if EXIBIR_LOGS: logger.info("🔀 Direcionando para fluxo de vídeo do TikTok.")
+        await message.answer("Certo! Agora envie o <b>Link do Vídeo</b> que você postou no <b>TIKTOK</b>.", reply_markup=teclado_cancelar, parse_mode="HTML")
+        await state.set_state(PostagemFluxo.aguardando_link_video_tiktok)
+
+@dp.message(PostagemFluxo.aguardando_link_video_shopee)
+async def receber_link_video_shopee(message: types.Message, state: FSMContext):
+    if EXIBIR_LOGS: logger.info("📥 Recebido link do vídeo da Shopee.")
+    await state.update_data(link_video_shopee=message.text)
+    await message.answer("Link do vídeo da Shopee salvo! 🛒\n\nAgora, envie os links dos <b>produtos da SHOPEE</b> um por um. Clique em 'Finalizar' quando terminar.", reply_markup=teclado_finalizar, parse_mode="HTML")
+    await state.set_state(PostagemFluxo.aguardando_links_shopee)
+
+@dp.message(PostagemFluxo.aguardando_link_video_tiktok)
+async def receber_link_video_tiktok(message: types.Message, state: FSMContext):
+    if EXIBIR_LOGS: logger.info("📥 Recebido link do vídeo do TikTok.")
+    await state.update_data(link_video_tiktok=message.text)
+    await message.answer("Link do vídeo do TikTok salvo! 🎵\n\nAgora, envie os links dos <b>produtos do TIKTOK</b> um por um. Clique em 'Finalizar' quando acabar.", reply_markup=teclado_finalizar, parse_mode="HTML")
+    await state.set_state(PostagemFluxo.aguardando_links_tiktok)
 
 @dp.message(PostagemFluxo.aguardando_links_shopee)
 async def receber_links_shopee(message: types.Message, state: FSMContext):
@@ -385,11 +391,11 @@ async def receber_links_shopee(message: types.Message, state: FSMContext):
     if message.text in ["Finalizar ✅", "/finalizar"]:
         plataforma = data['plataforma_escolhida']
         if plataforma == "Ambos 🛒🎵":
-            # ✅ Se for ambos, muda de fase e pede os do TikTok
-            await message.answer("Links da Shopee salvos! 🛒\n\nAgora, envie os links dos produtos do **TIKTOK** um por um. Clique em 'Finalizar' para publicar tudo.", reply_markup=teclado_finalizar)
-            await state.set_state(PostagemFluxo.aguardando_links_tiktok)
+            if EXIBIR_LOGS: logger.info("🔀 Transição: Produtos Shopee concluídos, solicitando vídeo do TikTok.")
+            await message.answer("Links da Shopee salvos! 🛒\n\nAgora, envie o <b>Link do Vídeo</b> que você postou no <b>TIKTOK</b>.", reply_markup=teclado_cancelar, parse_mode="HTML")
+            await state.set_state(PostagemFluxo.aguardando_link_video_tiktok)
         else:
-            # Se for só Shopee, posta direto
+            if EXIBIR_LOGS: logger.info("✅ Fluxo apenas Shopee concluído. Finalizando postagem.")
             await finalizar_postagem(message, state)
         return
 
@@ -416,7 +422,8 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     nome = data['nome_produto']
     video = data['video_id']
     plataforma = data['plataforma_escolhida']
-    link_do_video = data['link_do_video']
+    link_vid_shopee = data.get('link_video_shopee', "")
+    link_vid_tiktok = data.get('link_video_tiktok', "")
     links_shopee = data.get('links_shopee', [])
     links_tiktok = data.get('links_tiktok', [])
     
@@ -427,11 +434,6 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     await bot.send_message(GRUPO_ID, nome)
     # Mensagem 2: Vídeo
     await bot.send_video(GRUPO_ID, video)
-
-    # ✅ Separa os links de vídeo caso você tenha enviado os dois juntos
-    links_video_array = link_do_video.split()
-    link_vid_shopee = links_video_array[0] if len(links_video_array) > 0 else link_do_video
-    link_vid_tiktok = links_video_array[1] if len(links_video_array) > 1 else link_do_video
 
     # Função interna para montar o bloco super destacado
     async def enviar_bloco_plataforma(nome_plat, icone_plat, link_vid, links_prod):
