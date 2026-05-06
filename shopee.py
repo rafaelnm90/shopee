@@ -493,25 +493,30 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     titulo_limpo = nome.replace('\n', ' | ')
     legenda = f"<b>{titulo_limpo}</b>\n\n"
     
+    mensagem_apoio = "\n💡 <i>O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!</i>\n\n"
+    
     if plataforma in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
         legenda += f"🔶 <b>SHOPEE VÍDEO</b> 🔶\n"
         legenda += f"🎬 Link do Vídeo:\n{link_vid_shopee}\n"
+        legenda += mensagem_apoio
         if links_shopee:
             legenda += "🔗 Links dos Produtos:\n"
             for i, link in enumerate(links_shopee, 1):
                 legenda += f"👉 {i}º: {link}\n"
-        legenda += "\n"
-        
+        if plataforma == "Ambos 🛒🎵":
+            legenda += "\n\n\n\n"
+        else:
+            legenda += "\n"
+            
     if plataforma in ["Ambos 🛒🎵", "Apenas TikTok 🎵"]:
         legenda += f"⬛ <b>TIKTOK</b> ⬛\n"
         legenda += f"🎬 Link do Vídeo:\n{link_vid_tiktok}\n"
+        legenda += mensagem_apoio
         if links_tiktok:
             legenda += "🔗 Links dos Produtos:\n"
             for i, link in enumerate(links_tiktok, 1):
                 legenda += f"👉 {i}º: {link}\n"
         legenda += "\n"
-                
-    legenda += "💡 <i>Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!</i>"
 
     # Envia o vídeo com a legenda consolidada
     if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo com a nova legenda encapsulada.")
