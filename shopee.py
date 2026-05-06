@@ -158,36 +158,32 @@ async def gerar_mensagem_gemini(prompt):
     return "🚀 Novos materiais disponíveis! Bora postar e converter!"
 
 async def disparar_mensagem(tipo):
-    # ✅ Contexto atualizado: Foco em suporte ao Afiliado (Shopee Vídeo)
+    # ✅ Contexto atualizado com limitação estrita de caracteres
     contexto_afiliado = (
-        "Você é um assistente especializado em suporte para afiliados da Shopee. "
-        "Seu objetivo é motivar parceiros a postarem vídeos no Shopee Vídeo para ganharem comissão. "
-        "Entregue APENAS o texto da mensagem final, sem introduções, sem aspas e sem oferecer opções."
+        "Você é um assistente de suporte para afiliados da Shopee. "
+        "REGRA ABSOLUTA: Sua resposta deve ser extremamente curta e direta, "
+        "contendo NO MÁXIMO 200 CARACTERES no total. "
+        "Entregue APENAS o texto da mensagem, sem introduções e sem aspas."
     )
 
     if tipo == "bom_dia":
         prompt = (
-            f"{contexto_afiliado} Crie uma mensagem de bom dia motivadora para o grupo de afiliados. "
-            "Diga que os vídeos de hoje estão prontos para download e postagem. Use emojis."
+            f"{contexto_afiliado} Crie uma mensagem de bom dia motivadora. "
+            "Diga que os vídeos de hoje estão prontos para postagem. Use emojis."
         )
     elif tipo == "boa_noite":
         prompt = (
-            f"{contexto_afiliado} Crie uma mensagem de boa noite para afiliados. "
-            "Sugira que organizem os links para as postagens de amanhã. Use emojis."
+            f"{contexto_afiliado} Crie uma mensagem de boa noite. "
+            "Sugira que organizem os links para amanhã. Use emojis."
         )
     elif tipo == "incentivo":
         prompt = (
-            f"{contexto_afiliado} Crie um texto curto e impactante sobre persistência no tráfego orgânico. "
-            "Lembre que um vídeo viral pode gerar comissão por semanas. Use emojis."
+            f"{contexto_afiliado} Crie uma frase de impacto sobre persistência no tráfego orgânico. Use emojis."
         )
     elif tipo == "link_grupo":
-        # ✅ Prompt isolado para focar 100% no convite e ignorar a regra de postagem
         prompt = (
-            f"{contexto_afiliado} IMPORTANTE: Nesta mensagem específica, não peça para o usuário postar vídeos. "
-            "Foque EXCLUSIVAMENTE em criar um texto persuasivo pedindo aos membros que convidem amigos afiliados. "
-            "Use um tom de parceria do tipo: 'Conhece alguém que é afiliado e está sem tempo de buscar vídeos? "
-            "Mande nosso link para ele! Aqui entregamos tudo pronto e 100% de graça.' "
-            f"Finalize chamando para a ação com o link: {LINK_GRUPO}. Use emojis."
+            f"{contexto_afiliado} Não peça para postar vídeos. Crie um convite rápido pedindo aos membros que chamem "
+            f"amigos afiliados para o grupo gratuito. Finalize com: {LINK_GRUPO}"
         )
 
     texto = await gerar_mensagem_gemini(prompt)
@@ -218,6 +214,35 @@ async def comando_start(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("⌨️ Atualizando menu principal.")
     await message.answer("Painel de Controle atualizado. Escolha uma ação abaixo:", reply_markup=obter_teclado_principal())
+
+# ✅ Handlers para Envio Manual de Mensagens via Botões
+@dp.message(F.text == "Enviar mensagem de Bom Dia ☀️")
+async def manual_bom_dia(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    await message.answer("Gerando e enviando mensagem de Bom Dia... ⏳")
+    await disparar_mensagem("bom_dia")
+    await message.answer("Mensagem de Bom Dia enviada ao grupo com sucesso! ✅")
+
+@dp.message(F.text == "Enviar mensagem de Boa Noite 🌙")
+async def manual_boa_noite(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    await message.answer("Gerando e enviando mensagem de Boa Noite... ⏳")
+    await disparar_mensagem("boa_noite")
+    await message.answer("Mensagem de Boa Noite enviada ao grupo com sucesso! ✅")
+
+@dp.message(F.text == "Enviar mensagem de Incentivo 🔥")
+async def manual_incentivo(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    await message.answer("Gerando e enviando mensagem de Incentivo... ⏳")
+    await disparar_mensagem("incentivo")
+    await message.answer("Mensagem de Incentivo enviada ao grupo com sucesso! ✅")
+
+@dp.message(F.text == "Divulgar Grupo 📢")
+async def manual_link_grupo(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    await message.answer("Gerando e enviando divulgação do grupo... ⏳")
+    await disparar_mensagem("link_grupo")
+    await message.answer("Mensagem de divulgação enviada ao grupo com sucesso! ✅")
 
 # ❌ NOVO: Handler Global para Cancelar via Botão (Agora 100% à prova de falhas)
 @dp.message(F.text == "Cancelar ❌")
