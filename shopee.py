@@ -510,9 +510,9 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     titulo_limpo = nome.replace('\n', ' | ')
     cabecalho = f"<b>{titulo_limpo}</b>\n\n"
     
-    texto_longo = "\n💡 (<i>O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!</i>)\n\n"
-    texto_curto = "\n💡 (<i>Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!</i>)\n\n"
-    texto_rodape = "\n💡 (<i>Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!</i>)"
+    texto_longo = "(💡 <i>O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!</i>)\n"
+    texto_curto = "(💡 <i>Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!</i>)\n"
+    texto_rodape = "\n(💡 <i>Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!</i>)"
 
     def montar_legenda(mensagem_apoio, is_rodape=False):
         legenda_temp = cabecalho
@@ -527,7 +527,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
                 for i, link in enumerate(links_shopee, 1):
                     legenda_temp += f"👉 {i}º: {link}\n"
             if plataforma == "Ambos 🛒🎵":
-                legenda_temp += "\n\n\n\n"
+                legenda_temp += "\n\n"
             else:
                 legenda_temp += "\n"
                 
