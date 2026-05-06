@@ -552,17 +552,19 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     
     # Substitui a quebra de linha por espaço e formata o título
     titulo_limpo = nome.replace('\n', ' | ')
-    cabecalho = f"<b>{titulo_limpo}</b>\n\n\n"
+    linha_divisoria = "━━━━━━━━━━━━━━━"
+    cabecalho = f"<b>{titulo_limpo}</b>\n{linha_divisoria}\n\n\n"
     
     texto_longo = "(💡 <i>O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!</i>)\n\n"
     texto_curto = "(💡 <i>Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!</i>)\n\n"
     texto_rodape = "\n(💡 <i>Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!</i>)"
 
-    def montar_legenda(mensagem_apoio, is_rodape=False):
+    def montar_legenda(mensagem_apoio, is_rodape=False, plataforma_alvo=None):
+        plat_atual = plataforma_alvo if plataforma_alvo else plataforma
         legenda_temp = cabecalho
         
-        if plataforma in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
-            legenda_temp += f"🔶 <b>SHOPEE VÍDEO</b> 🔶\n"
+        if plat_atual in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
+            legenda_temp += f"🔶 <b>SHOPEE VÍDEO</b> 🔶\n\n"
             legenda_temp += f"🎬 Link do Vídeo:\n{link_vid_shopee}\n"
             if not is_rodape:
                 legenda_temp += mensagem_apoio
@@ -570,13 +572,13 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
                 legenda_temp += "🔗 Links dos Produtos:\n"
                 for i, link in enumerate(links_shopee, 1):
                     legenda_temp += f"👉 {i}º: {link}\n"
-            if plataforma == "Ambos 🛒🎵":
-                legenda_temp += "\n\n\n"
+            if plat_atual == "Ambos 🛒🎵":
+                legenda_temp += f"\n{linha_divisoria}\n\n"
             else:
                 legenda_temp += "\n"
                 
-        if plataforma in ["Ambos 🛒🎵", "Apenas TikTok 🎵"]:
-            legenda_temp += f"⬛ <b>TIKTOK</b> ⬛\n"
+        if plat_atual in ["Ambos 🛒🎵", "Apenas TikTok 🎵"]:
+            legenda_temp += f"⬛ <b>TIKTOK</b> ⬛\n\n"
             legenda_temp += f"🎬 Link do Vídeo:\n{link_vid_tiktok}\n"
             if not is_rodape:
                 legenda_temp += mensagem_apoio
@@ -595,6 +597,8 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     legenda_final = montar_legenda(texto_longo, is_rodape=False)
     if EXIBIR_LOGS: logger.info(f"📏 Avaliando Nível 1: {len(legenda_final)} caracteres.")
     
+    nivel_4_ativado = False
+
     if len(legenda_final) > 1024:
         if EXIBIR_LOGS: logger.warning("⚠️ Limite excedido no Nível 1. Ativando Nível 2 (texto curto duplo).")
         legenda_final = montar_legenda(texto_curto, is_rodape=False)
@@ -604,10 +608,24 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
             if EXIBIR_LOGS: logger.warning("⚠️ Limite excedido no Nível 2. Ativando Nível 3 (rodapé simples).")
             legenda_final = montar_legenda(texto_rodape, is_rodape=True)
             if EXIBIR_LOGS: logger.info(f"📏 Avaliando Nível 3: {len(legenda_final)} caracteres.")
+            
+            if len(legenda_final) > 1024 and plataforma == "Ambos 🛒🎵":
+                if EXIBIR_LOGS: logger.warning("🚨 Limite crítico excedido no Nível 3. Ativando Nível 4 (Divisão de Postagem).")
+                nivel_4_ativado = True
 
-    # Envia o vídeo com a legenda consolidada e validada
-    if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo com a legenda encapsulada.")
-    await bot.send_video(chat_id=GRUPO_ID, video=video, caption=legenda_final, parse_mode="HTML")
+    if nivel_4_ativado:
+        # Envia a publicação fracionada em duas mensagens
+        legenda_shopee = montar_legenda(texto_longo, is_rodape=False, plataforma_alvo="Apenas Shopee 🛒")
+        if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo 1/2 (Exclusivo Shopee).")
+        await bot.send_video(chat_id=GRUPO_ID, video=video, caption=legenda_shopee, parse_mode="HTML")
+        
+        legenda_tiktok = montar_legenda(texto_longo, is_rodape=False, plataforma_alvo="Apenas TikTok 🎵")
+        if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo 2/2 (Exclusivo TikTok).")
+        await bot.send_video(chat_id=GRUPO_ID, video=video, caption=legenda_tiktok, parse_mode="HTML")
+    else:
+        # Envia o vídeo com a legenda consolidada e validada
+        if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo com a legenda encapsulada.")
+        await bot.send_video(chat_id=GRUPO_ID, video=video, caption=legenda_final, parse_mode="HTML")
     
     # Incrementa o contador para o próximo vídeo
     salvar_contador(numero_atual + 1)
