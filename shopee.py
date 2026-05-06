@@ -204,15 +204,32 @@ def agendar_tarefas_diarias():
     minuto_incentivo = random.randint(0, 59)
     minuto_noite = random.randint(0, 59)
     
+    # ✅ Sorteio dos 3 turnos de divulgação
+    hora_link_manha = random.randint(9, 12)
+    minuto_link_manha = random.randint(0, 59)
+    
+    hora_link_tarde = random.randint(14, 17)
+    minuto_link_tarde = random.randint(0, 59)
+    
+    hora_link_noite = random.randint(18, 21)
+    minuto_link_noite = random.randint(0, 59)
+    
     scheduler.add_job(disparar_mensagem, 'cron', hour=7, minute=minuto_manha, args=["bom_dia"], id='job_manha', replace_existing=True)
     scheduler.add_job(disparar_mensagem, 'cron', hour=hora_incentivo, minute=minuto_incentivo, args=["incentivo"], id='job_incentivo', replace_existing=True)
     scheduler.add_job(disparar_mensagem, 'cron', hour=22, minute=minuto_noite, args=["boa_noite"], id='job_noite', replace_existing=True)
-    scheduler.add_job(disparar_mensagem, 'cron', hour=random.randint(8, 21), minute=random.randint(0, 59), args=["link_grupo"], id='job_link', replace_existing=True)
+    
+    # ✅ Agendamento dos 3 disparos de convite
+    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_manha, minute=minuto_link_manha, args=["link_grupo"], id='job_link_manha', replace_existing=True)
+    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_tarde, minute=minuto_link_tarde, args=["link_grupo"], id='job_link_tarde', replace_existing=True)
+    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_noite, minute=minuto_link_noite, args=["link_grupo"], id='job_link_noite', replace_existing=True)
     
     if EXIBIR_LOGS:
         logger.info(f"📅 Bom dia: 07:{minuto_manha:02d}")
         logger.info(f"📅 Incentivo: {hora_incentivo:02d}:{minuto_incentivo:02d}")
         logger.info(f"📅 Boa noite: 22:{minuto_noite:02d}")
+        logger.info(f"📢 Divulgação Manhã: {hora_link_manha:02d}:{minuto_link_manha:02d}")
+        logger.info(f"📢 Divulgação Tarde: {hora_link_tarde:02d}:{minuto_link_tarde:02d}")
+        logger.info(f"📢 Divulgação Noite: {hora_link_noite:02d}:{minuto_link_noite:02d}")
 
 # 5. HANDLERS DE COMANDO E INTERAÇÃO
 @dp.message(Command("start"))
@@ -495,7 +512,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
         await bot.send_photo(chat_id=GRUPO_ID, photo=url_logo, caption=texto_bloco, parse_mode="HTML")
 
     # Configuração das imagens (você pode substituir o link do TikTok depois por um quadrado)
-    logo_shopee = "https://cdn-1.webcatalog.io/catalog/shopee/shopee-icon-filled-256.png?v=1776040609398"
+    logo_shopee = "https://play-lh.googleusercontent.com/lKszxShut5H_pjaI_Zf8pZjsZVUZr4yUT9-RVhoDPYDF7LCVolo7ioTAujybdC64X1k"
     logo_tiktok = "https://admin.cnnbrasil.com.br/wp-content/uploads/sites/12/2021/06/20738_F2B46AA120D66D07.jpg?w=1024"
 
     # Dispara os blocos com seus respectivos links e logomarcas
