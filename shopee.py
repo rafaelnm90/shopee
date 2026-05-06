@@ -182,13 +182,19 @@ async def disparar_mensagem(tipo):
         )
     elif tipo == "link_grupo":
         prompt = (
-            f"{contexto_afiliado} Não peça para postar vídeos. Crie um convite rápido pedindo aos membros que chamem "
-            f"amigos afiliados para o grupo gratuito. Finalize com: {LINK_GRUPO}"
+            f"{contexto_afiliado} Não peça para postar vídeos. Crie um convite rápido e chamativo pedindo aos membros que convidem "
+            "amigos afiliados para o nosso grupo gratuito. Não adicione nenhum link na sua resposta. Use emojis."
         )
 
     texto = await gerar_mensagem_gemini(prompt)
-    if EXIBIR_LOGS: logger.info(f"🚀 Enviando mensagem ({tipo}): {texto[:20]}...")
+    if EXIBIR_LOGS: logger.info(f"🚀 Enviando mensagem principal ({tipo}): {texto[:20]}...")
     await bot.send_message(GRUPO_ID, texto)
+    
+    # ✅ Disparo condicional: Envia o link separado apenas na divulgação
+    if tipo == "link_grupo":
+        link_separado = f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}"
+        if EXIBIR_LOGS: logger.info("🔗 Enviando link do grupo em mensagem isolada.")
+        await bot.send_message(GRUPO_ID, link_separado, parse_mode="HTML")
 
 def agendar_tarefas_diarias():
     if EXIBIR_LOGS: logger.info("🔄 Sorteando horários das postagens de hoje...")
