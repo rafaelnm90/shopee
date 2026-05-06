@@ -457,9 +457,9 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.info(f"📸 Enviando bloco da plataforma {nome_plat} formatado com imagem.")
         await bot.send_photo(chat_id=GRUPO_ID, photo=url_logo, caption=texto_bloco, parse_mode="HTML")
 
-    # Configuração das imagens (você pode substituir esses links depois, se desejar)
-    logo_shopee = "https://i.pinimg.com/originals/2c/31/6a/2c316a7f0e69123cba733ec6042171c7.png"
-    logo_tiktok = "https://i.pinimg.com/originals/a0/fc/b2/a0fcb24505f013d10006c0989fce3238.png"
+    # Configuração das imagens (você pode substituir o link do TikTok depois por um quadrado)
+    logo_shopee = "https://cdn-1.webcatalog.io/catalog/shopee/shopee-icon-filled-256.png?v=1776040609398"
+    logo_tiktok = "https://admin.cnnbrasil.com.br/wp-content/uploads/sites/12/2021/06/20738_F2B46AA120D66D07.jpg?w=1024"
 
     # Dispara os blocos com seus respectivos links e logomarcas
     if plataforma in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
