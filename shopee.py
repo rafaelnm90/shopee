@@ -310,9 +310,9 @@ async def receber_video(message: types.Message, state: FSMContext):
         await msg_status.delete()
         
         # ✅ Junta o texto da IA com uma pergunta orientativa apenas para exibição ao administrador
-        mensagem_aprovacao = f"{chamada_gerada}\n\n👉 **Esta identificação está correta?** Escolha uma opção abaixo:"
+        mensagem_aprovacao = f"{chamada_gerada}\n\n👉 <b>Esta identificação está correta?</b> Escolha uma opção abaixo:"
         
-        await message.answer(mensagem_aprovacao, reply_markup=teclado_confirmacao, parse_mode="Markdown")
+        await message.answer(mensagem_aprovacao, reply_markup=teclado_confirmacao, parse_mode="HTML")
         await state.set_state(PostagemFluxo.aguardando_confirmacao_nome)
 
     except Exception as e:
@@ -436,10 +436,10 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     # Função interna para montar o bloco super destacado
     async def enviar_bloco_plataforma(nome_plat, icone_plat, link_vid, links_prod):
         # Cabeçalho extremamente chamativo
-        texto_bloco = f"{icone_plat} ━ **{nome_plat.upper()}** ━ {icone_plat}\n\n"
-        texto_bloco += f"👉 **Link do Vídeo:**\n{link_vid}\n\n"
-        texto_bloco += "💡 *O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!*\n\n"
-        texto_bloco += "🔗 **Links dos Produtos:**\n"
+        texto_bloco = f"{icone_plat} ━ <b>{nome_plat.upper()}</b> ━ {icone_plat}\n\n"
+        texto_bloco += f"👉 <b>Link do Vídeo:</b>\n{link_vid}\n\n"
+        texto_bloco += "💡 <i>O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!</i>\n\n"
+        texto_bloco += "🔗 <b>Links dos Produtos:</b>\n"
         
         if not links_prod:
              texto_bloco += "Nenhum link adicionado para esta plataforma.\n"
@@ -447,7 +447,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
         for i, link in enumerate(links_prod, 1):
             texto_bloco += f"👉 {i}º Link: {link}\n"
             
-        await bot.send_message(GRUPO_ID, texto_bloco, parse_mode="Markdown")
+        await bot.send_message(GRUPO_ID, texto_bloco, parse_mode="HTML")
 
     # Dispara os blocos com seus respectivos links
     if plataforma in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
