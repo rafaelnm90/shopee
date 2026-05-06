@@ -186,6 +186,21 @@ async def disparar_mensagem(tipo):
             "amigos afiliados para o nosso grupo gratuito. Não adicione nenhum link na sua resposta. Use emojis."
         )
 
+    elif tipo.startswith("campanha_"):
+        dias_restantes = int(tipo.split("_")[1])
+        if dias_restantes == 0:
+            aviso = "É HOJE o evento de data dupla! Disparem seus links nas redes!"
+        elif dias_restantes == 1:
+            aviso = "É AMANHÃ o evento de data dupla! Preparem todos os materiais!"
+        else:
+            aviso = f"Faltam {dias_restantes} dias para o evento de data dupla. Antecipem a organização!"
+        
+        prompt = (
+            f"Você atua como assistente de afiliados. Crie um alerta baseado no seguinte status: '{aviso}'. "
+            f"REGRA ABSOLUTA: Sua resposta final deve conter NO MÁXIMO 100 CARACTERES. "
+            f"Transmita urgência, use emojis e entregue estritamente o texto pronto, sem aspas."
+        )
+
     texto = await gerar_mensagem_gemini(prompt)
     if EXIBIR_LOGS: logger.info(f"🚀 Enviando mensagem principal ({tipo}): {texto[:20]}...")
     await bot.send_message(GRUPO_ID, texto)
@@ -222,6 +237,35 @@ def agendar_tarefas_diarias():
     scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_manha, minute=minuto_link_manha, args=["link_grupo"], id='job_link_manha', replace_existing=True)
     scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_tarde, minute=minuto_link_tarde, args=["link_grupo"], id='job_link_tarde', replace_existing=True)
     scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_noite, minute=minuto_link_noite, args=["link_grupo"], id='job_link_noite', replace_existing=True)
+
+    from datetime import datetime, timedelta
+    hoje_alvo = datetime.now(fuso_horario)
+    
+    for i in range(4):
+        data_futura = hoje_alvo + timedelta(days=i)
+        if data_futura.day == data_futura.month:
+            if EXIBIR_LOGS: logger.info(f"🎉 Mega Campanha {data_futura.day:02d}.{data_futura.month:02d} rastreada! Faltam {i} dias.")
+            
+            hora_c_manha = random.randint(8, 11)
+            min_c_manha = random.randint(0, 59)
+            
+            hora_c_tarde = random.randint(14, 17)
+            min_c_tarde = random.randint(0, 59)
+            
+            hora_c_noite = random.randint(18, 21)
+            min_c_noite = random.randint(0, 59)
+            
+            tipo_alerta = f"campanha_{i}"
+            
+            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_manha, minute=min_c_manha, args=[tipo_alerta], id='job_campanha_manha', replace_existing=True)
+            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_tarde, minute=min_c_tarde, args=[tipo_alerta], id='job_campanha_tarde', replace_existing=True)
+            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_noite, minute=min_c_noite, args=[tipo_alerta], id='job_campanha_noite', replace_existing=True)
+            
+            if EXIBIR_LOGS:
+                logger.info(f"⏳ Alerta Campanha Manhã: {hora_c_manha:02d}:{min_c_manha:02d}")
+                logger.info(f"⏳ Alerta Campanha Tarde: {hora_c_tarde:02d}:{min_c_tarde:02d}")
+                logger.info(f"⏳ Alerta Campanha Noite: {hora_c_noite:02d}:{min_c_noite:02d}")
+            break
     
     if EXIBIR_LOGS:
         logger.info(f"📅 Bom dia: 07:{minuto_manha:02d}")
@@ -510,9 +554,9 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     titulo_limpo = nome.replace('\n', ' | ')
     cabecalho = f"<b>{titulo_limpo}</b>\n\n"
     
-    texto_longo = "(💡 <i>O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!</i>)\n"
-    texto_curto = "(💡 <i>Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!</i>)\n"
-    texto_rodape = "\n(💡 <i>Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!</i>)"
+    texto_longo = "<i>(💡 O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!)</i>\n"
+    texto_curto = "<i>(💡 Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!)</i>\n"
+    texto_rodape = "\n<i>(💡 Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!)</i>"
 
     def montar_legenda(mensagem_apoio, is_rodape=False):
         legenda_temp = cabecalho
