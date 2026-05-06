@@ -201,15 +201,28 @@ async def disparar_mensagem(tipo):
             f"Transmita urgência, use emojis e entregue estritamente o texto pronto, sem aspas."
         )
 
+    elif tipo == "divulgar_gem":
+        prompt = (
+            "Você atua como assistente de afiliados. Crie uma mensagem curta (MÁXIMO 200 CARACTERES) "
+            "perguntando se a equipe está com dificuldade para criar legendas e hashtags. "
+            "Convide-os a usar nosso prompt automatizado. Insinue de forma sutil que utilizar a "
+            "versão PRO do Gemini resulta em textos muito melhores. Altere as palavras e a abordagem "
+            "toda vez que gerar esse texto, use emojis e entregue apenas a mensagem pronta, sem aspas."
+        )
+
     texto = await gerar_mensagem_gemini(prompt)
     if EXIBIR_LOGS: logger.info(f"🚀 Enviando mensagem principal ({tipo}): {texto[:20]}...")
     await bot.send_message(GRUPO_ID, texto)
     
-    # ✅ Disparo condicional: Envia o link separado apenas na divulgação
+    # ✅ Disparo condicional: Envia o link separado apenas na divulgação e no GEM
     if tipo == "link_grupo":
         link_separado = f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}"
         if EXIBIR_LOGS: logger.info("🔗 Enviando link do grupo em mensagem isolada.")
         await bot.send_message(GRUPO_ID, link_separado, parse_mode="HTML")
+    elif tipo == "divulgar_gem":
+        link_gem = "👇 <b>Acesse o Prompt Automatizado:</b>\nhttps://gemini.google.com/gem/1HtJMuknyMZ76utOu-i6c_xvc3vmQx7bT?usp=sharing"
+        if EXIBIR_LOGS: logger.info("🤖 Enviando link do GEM em mensagem isolada.")
+        await bot.send_message(GRUPO_ID, link_gem, parse_mode="HTML")
 
 def agendar_tarefas_diarias():
     if EXIBIR_LOGS: logger.info("🔄 Sorteando horários das postagens de hoje...")
@@ -237,6 +250,11 @@ def agendar_tarefas_diarias():
     scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_manha, minute=minuto_link_manha, args=["link_grupo"], id='job_link_manha', replace_existing=True)
     scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_tarde, minute=minuto_link_tarde, args=["link_grupo"], id='job_link_tarde', replace_existing=True)
     scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_noite, minute=minuto_link_noite, args=["link_grupo"], id='job_link_noite', replace_existing=True)
+
+    # ✅ Agendamento do disparo diário do GEM (Sorteio restrito entre 08h e 22h)
+    hora_gem = random.randint(8, 22)
+    minuto_gem = random.randint(0, 59)
+    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_gem, minute=minuto_gem, args=["divulgar_gem"], id='job_divulgar_gem', replace_existing=True)
 
     from datetime import datetime, timedelta
     hoje_alvo = datetime.now(fuso_horario)
@@ -274,6 +292,7 @@ def agendar_tarefas_diarias():
         logger.info(f"📢 Divulgação Manhã: {hora_link_manha:02d}:{minuto_link_manha:02d}")
         logger.info(f"📢 Divulgação Tarde: {hora_link_tarde:02d}:{minuto_link_tarde:02d}")
         logger.info(f"📢 Divulgação Noite: {hora_link_noite:02d}:{minuto_link_noite:02d}")
+        logger.info(f"🤖 Divulgação GEM: {hora_gem:02d}:{minuto_gem:02d}")
 
 # 5. HANDLERS DE COMANDO E INTERAÇÃO
 @dp.message(Command("start"))
