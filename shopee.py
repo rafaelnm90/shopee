@@ -486,41 +486,36 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     links_shopee = data.get('links_shopee', [])
     links_tiktok = data.get('links_tiktok', [])
     
-    if EXIBIR_LOGS: logger.info("📤 Publicando postagem aprimorada no grupo.")
+    if EXIBIR_LOGS: logger.info("📤 Publicando postagem consolidada no grupo.")
     numero_atual = ler_contador()
     
-    # Mensagem 1: Apresentação
-    await bot.send_message(GRUPO_ID, nome)
-    # Mensagem 2: Vídeo
-    await bot.send_video(GRUPO_ID, video)
-
-    # Função interna para montar o bloco super destacado com logomarca
-    async def enviar_bloco_plataforma(nome_plat, icone_plat, link_vid, links_prod, url_logo):
-        # Cabeçalho extremamente chamativo
-        texto_bloco = f"{icone_plat} ━ <b>{nome_plat.upper()}</b> ━ {icone_plat}\n\n"
-        texto_bloco += f"🎬 <b>Link do Vídeo:</b>\n{link_vid}\n\n"
-        texto_bloco += "💡 <i>O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!</i>\n\n"
-        texto_bloco += "🔗 <b>Links dos Produtos:</b>\n"
-        
-        if not links_prod:
-             texto_bloco += "Nenhum link adicionado para esta plataforma.\n"
-             
-        for i, link in enumerate(links_prod, 1):
-            texto_bloco += f"👉 {i}º Link: {link}\n"
-        
-        if EXIBIR_LOGS: logger.info(f"📸 Enviando bloco da plataforma {nome_plat} formatado com imagem.")
-        await bot.send_photo(chat_id=GRUPO_ID, photo=url_logo, caption=texto_bloco, parse_mode="HTML")
-
-    # Configuração das imagens (você pode substituir o link do TikTok depois por um quadrado)
-    logo_shopee = "https://play-lh.googleusercontent.com/lKszxShut5H_pjaI_Zf8pZjsZVUZr4yUT9-RVhoDPYDF7LCVolo7ioTAujybdC64X1k"
-    logo_tiktok = "https://admin.cnnbrasil.com.br/wp-content/uploads/sites/12/2021/06/20738_F2B46AA120D66D07.jpg?w=1024"
-
-    # Dispara os blocos com seus respectivos links e logomarcas
-    if plataforma in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
-        await enviar_bloco_plataforma("Shopee Vídeo", "🔶", link_vid_shopee, links_shopee, logo_shopee)
+    # Substitui a quebra de linha por espaço e formata o título
+    titulo_limpo = nome.replace('\n', ' | ')
+    legenda = f"<b>{titulo_limpo}</b>\n\n"
     
+    if plataforma in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
+        legenda += f"🔶 <b>SHOPEE VÍDEO</b> 🔶\n"
+        legenda += f"🎬 Link do Vídeo:\n{link_vid_shopee}\n"
+        if links_shopee:
+            legenda += "🔗 Links dos Produtos:\n"
+            for i, link in enumerate(links_shopee, 1):
+                legenda += f"👉 {i}º: {link}\n"
+        legenda += "\n"
+        
     if plataforma in ["Ambos 🛒🎵", "Apenas TikTok 🎵"]:
-        await enviar_bloco_plataforma("TikTok", "⬛", link_vid_tiktok, links_tiktok, logo_tiktok)
+        legenda += f"⬛ <b>TIKTOK</b> ⬛\n"
+        legenda += f"🎬 Link do Vídeo:\n{link_vid_tiktok}\n"
+        if links_tiktok:
+            legenda += "🔗 Links dos Produtos:\n"
+            for i, link in enumerate(links_tiktok, 1):
+                legenda += f"👉 {i}º: {link}\n"
+        legenda += "\n"
+                
+    legenda += "💡 <i>Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!</i>"
+
+    # Envia o vídeo com a legenda consolidada
+    if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo com a nova legenda encapsulada.")
+    await bot.send_video(chat_id=GRUPO_ID, video=video, caption=legenda, parse_mode="HTML")
     
     # ✅ Incrementa o contador para o próximo vídeo
     salvar_contador(numero_atual + 1)
