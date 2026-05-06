@@ -440,11 +440,11 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     # Mensagem 2: Vídeo
     await bot.send_video(GRUPO_ID, video)
 
-    # Função interna para montar o bloco super destacado
-    async def enviar_bloco_plataforma(nome_plat, icone_plat, link_vid, links_prod):
+    # Função interna para montar o bloco super destacado com logomarca
+    async def enviar_bloco_plataforma(nome_plat, icone_plat, link_vid, links_prod, url_logo):
         # Cabeçalho extremamente chamativo
         texto_bloco = f"{icone_plat} ━ <b>{nome_plat.upper()}</b> ━ {icone_plat}\n\n"
-        texto_bloco += f"👉 <b>Link do Vídeo:</b>\n{link_vid}\n\n"
+        texto_bloco += f"🎬 <b>Link do Vídeo:</b>\n{link_vid}\n\n"
         texto_bloco += "💡 <i>O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!</i>\n\n"
         texto_bloco += "🔗 <b>Links dos Produtos:</b>\n"
         
@@ -453,15 +453,20 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
              
         for i, link in enumerate(links_prod, 1):
             texto_bloco += f"👉 {i}º Link: {link}\n"
-            
-        await bot.send_message(GRUPO_ID, texto_bloco, parse_mode="HTML")
+        
+        if EXIBIR_LOGS: logger.info(f"📸 Enviando bloco da plataforma {nome_plat} formatado com imagem.")
+        await bot.send_photo(chat_id=GRUPO_ID, photo=url_logo, caption=texto_bloco, parse_mode="HTML")
 
-    # Dispara os blocos com seus respectivos links
+    # Configuração das imagens (você pode substituir esses links depois, se desejar)
+    logo_shopee = "https://i.pinimg.com/originals/2c/31/6a/2c316a7f0e69123cba733ec6042171c7.png"
+    logo_tiktok = "https://i.pinimg.com/originals/a0/fc/b2/a0fcb24505f013d10006c0989fce3238.png"
+
+    # Dispara os blocos com seus respectivos links e logomarcas
     if plataforma in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
-        await enviar_bloco_plataforma("Shopee Vídeo", "🔶", link_vid_shopee, links_shopee)
+        await enviar_bloco_plataforma("Shopee Vídeo", "🔶", link_vid_shopee, links_shopee, logo_shopee)
     
     if plataforma in ["Ambos 🛒🎵", "Apenas TikTok 🎵"]:
-        await enviar_bloco_plataforma("TikTok", "⬛", link_vid_tiktok, links_tiktok)
+        await enviar_bloco_plataforma("TikTok", "⬛", link_vid_tiktok, links_tiktok, logo_tiktok)
     
     # ✅ Incrementa o contador para o próximo vídeo
     salvar_contador(numero_atual + 1)
