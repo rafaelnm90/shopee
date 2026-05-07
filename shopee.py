@@ -574,9 +574,9 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     linha_divisoria = "━━━━━━━━━━━━━━━"
     cabecalho = f"<b>{titulo_limpo}</b>\n\n{linha_divisoria}\n\n"
     
-    texto_longo = "(💡 <i>O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!</i>)\n\n"
-    texto_curto = "(💡 <i>Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!</i>)\n\n"
-    texto_rodape = "\n(💡 <i>Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!</i>)"
+    texto_longo = "<i>(💡 O nosso grupo é 100% gratuito. Para nos ajudar a continuar trazendo conteúdos, por favor, clique no link do vídeo acima, assista, curta, comente e siga o perfil! Isso nos ajuda muito!)</i>\n\n"
+    texto_curto = "<i>(💡 Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!)</i>\n\n"
+    texto_rodape = "\n<i>(💡 Grupo 100% gratuito. Curta e comente nos vídeos para ajudar!)</i>"
 
     def montar_legenda(mensagem_apoio, is_rodape=False, plataforma_alvo=None):
         plat_atual = plataforma_alvo if plataforma_alvo else plataforma
