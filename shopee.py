@@ -157,6 +157,13 @@ async def gerar_mensagem_gemini(prompt):
     if EXIBIR_LOGS: logger.error("❌ Falha crítica: Nenhum motor da cascata respondeu.")
     return "🚀 Novos materiais disponíveis! Bora postar e converter!"
 
+async def apagar_mensagem_automatica(msg_id):
+    try:
+        await bot.delete_message(chat_id=GRUPO_ID, message_id=msg_id)
+        if EXIBIR_LOGS: logger.info(f"🧹 Faxina concluída: Mensagem automática {msg_id} apagada após 24h.")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.info(f"⚠️ Faxina: A mensagem {msg_id} já havia sido apagada manualmente ou não foi encontrada.")
+
 async def disparar_mensagem(tipo):
     # ✅ Contexto atualizado com limitação estrita de caracteres
     contexto_afiliado = (
@@ -212,17 +219,23 @@ async def disparar_mensagem(tipo):
 
     texto = await gerar_mensagem_gemini(prompt)
     if EXIBIR_LOGS: logger.info(f"🚀 Enviando mensagem principal ({tipo}): {texto[:20]}...")
-    await bot.send_message(GRUPO_ID, texto)
+    msg_enviada = await bot.send_message(GRUPO_ID, texto)
+    
+    from datetime import timedelta
+    data_exclusao = datetime.now(fuso_horario) + timedelta(hours=24)
+    scheduler.add_job(apagar_mensagem_automatica, 'date', run_date=data_exclusao, args=[msg_enviada.message_id])
     
     # ✅ Disparo condicional: Envia o link separado apenas na divulgação e no GEM
     if tipo == "link_grupo":
         link_separado = f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}"
         if EXIBIR_LOGS: logger.info("🔗 Enviando link do grupo em mensagem isolada.")
-        await bot.send_message(GRUPO_ID, link_separado, parse_mode="HTML")
+        msg_link = await bot.send_message(GRUPO_ID, link_separado, parse_mode="HTML")
+        scheduler.add_job(apagar_mensagem_automatica, 'date', run_date=data_exclusao, args=[msg_link.message_id])
     elif tipo == "divulgar_gem":
         link_gem = "👇 <b>Acesse o Prompt Automatizado:</b>\nhttps://gemini.google.com/gem/1HtJMuknyMZ76utOu-i6c_xvc3vmQx7bT?usp=sharing"
         if EXIBIR_LOGS: logger.info("🤖 Enviando link do GEM em mensagem isolada.")
-        await bot.send_message(GRUPO_ID, link_gem, parse_mode="HTML")
+        msg_gem = await bot.send_message(GRUPO_ID, link_gem, parse_mode="HTML")
+        scheduler.add_job(apagar_mensagem_automatica, 'date', run_date=data_exclusao, args=[msg_gem.message_id])
 
 def agendar_tarefas_diarias():
     if EXIBIR_LOGS: logger.info("🔄 Sorteando horários das postagens de hoje...")
