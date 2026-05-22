@@ -63,8 +63,15 @@ class ConfigFluxo(StatesGroup):
     aguardando_novo_numero = State()
 
 class ConfigDivulgacao(StatesGroup):
+    menu_principal = State()
     aguardando_alvos = State()
     aguardando_frequencia = State()
+    aguardando_exclusao_alvo = State()
+
+class ConfigRotina(StatesGroup):
+    menu_principal = State()
+    aguardando_edicao_tipo = State()
+    aguardando_novo_horario = State()
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -110,15 +117,35 @@ teclado_finalizar = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
+# --- NOVOS TECLADOS DE CONFIGURAÇÃO ---
+teclado_configuracoes_gerais = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Divulgação de Grupos 📢")],
+        [KeyboardButton(text="Mensagens de Rotina ⏰")],
+        [KeyboardButton(text="Pausar/Retomar Automações ⏸️")],
+        [KeyboardButton(text="Voltar ao Início 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+teclado_opcoes_divulgacao = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Adicionar Alvo ➕"), KeyboardButton(text="Editar Frequência ✏️")],
+        [KeyboardButton(text="Excluir Alvo 🗑️"), KeyboardButton(text="Voltar 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
 # 🛠️ Função centralizadora do menu principal
 def obter_teclado_principal():
     botoes = [
         [KeyboardButton(text="Criar Postagem 📝")],
         [KeyboardButton(text="Enviar mensagem de Bom Dia ☀️"), KeyboardButton(text="Enviar mensagem de Incentivo 🔥")],
         [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙"), KeyboardButton(text="Divulgar Grupo 📢")],
-        # ✅ Novos botões para controle da numeração
         [KeyboardButton(text="Zerar Contador 🔄"), KeyboardButton(text="Editar Número ✏️")],
-        [KeyboardButton(text="Configurar Divulgação 🎯")]
+        [KeyboardButton(text="Configurações Gerais ⚙️")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 # ----------------------------------
@@ -698,61 +725,155 @@ async def salvar_novo_numero(message: types.Message, state: FSMContext):
     else:
         await message.answer("Por favor, digite apenas números. Exemplo: 50", reply_markup=teclado_cancelar)
 
-@dp.message(F.text == "Configurar Divulgação 🎯")
-async def iniciar_config_divulgacao(message: types.Message, state: FSMContext):
+@dp.message(F.text == "Configurações Gerais ⚙️")
+async def menu_configuracoes(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("⚙️ Iniciando configuração de alvos de divulgação.")
-    await message.answer(
-        "Vamos configurar os grupos de destino.\n"
-        "Envie os links ou IDs dos grupos separados por vírgula.\n\n"
-        "Exemplo de resposta: <code>https://t.me/grupo1, -1009999999, @grupo3</code>",
-        reply_markup=teclado_cancelar,
-        parse_mode="HTML"
-    )
+    if EXIBIR_LOGS: logger.info("⚙️ Acessando Configurações Gerais.")
+    await message.answer("Menu de Configurações Avançadas.\nEscolha uma opção abaixo:", reply_markup=teclado_configuracoes_gerais)
+
+@dp.message(F.text == "Voltar ao Início 🔙")
+async def voltar_inicio(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
+
+@dp.message(F.text == "Voltar 🔙")
+async def voltar_configs(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    await menu_configuracoes(message)
+
+@dp.message(F.text == "Pausar/Retomar Automações ⏸️")
+async def pausar_retomar(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    from apscheduler.schedulers.base import STATE_PAUSED, STATE_RUNNING
+    
+    if scheduler.state == STATE_RUNNING:
+        scheduler.pause()
+        if EXIBIR_LOGS: logger.info("⏸️ Automações pausadas pelo usuário.")
+        await message.answer("⏸️ Automações PAUSADAS.\nNenhuma mensagem automática será enviada até que você retome.", reply_markup=teclado_configuracoes_gerais)
+    else:
+        scheduler.resume()
+        if EXIBIR_LOGS: logger.info("▶️ Automações retomadas pelo usuário.")
+        await message.answer("▶️ Automações RETOMADAS.\nOs envios automáticos voltaram a operar.", reply_markup=teclado_configuracoes_gerais)
+
+# --- LÓGICA DE GERENCIAMENTO DE DIVULGAÇÃO ---
+def ler_alvos_divulgacao():
+    try:
+        with open("alvos_divulgacao.json", "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"alvos": [], "frequencia_por_hora": 0}
+
+def salvar_alvos_divulgacao(dados):
+    with open("alvos_divulgacao.json", "w") as f:
+        json.dump(dados, f, indent=4)
+
+@dp.message(F.text == "Divulgação de Grupos 📢")
+async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    dados = ler_alvos_divulgacao()
+    alvos = dados.get("alvos", [])
+    freq = dados.get("frequencia_por_hora", 0)
+
+    texto = f"📊 <b>Status da Divulgação</b>\n\nFrequência Global: {freq} msgs/hora\n\n<b>Alvos Ativos:</b>\n"
+    if alvos:
+        for i, alvo in enumerate(alvos, 1):
+            texto += f"{i}. {alvo}\n"
+    else:
+        texto += "Nenhum alvo cadastrado no momento.\n"
+        
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_opcoes_divulgacao)
+    await state.set_state(ConfigDivulgacao.menu_principal)
+
+@dp.message(ConfigDivulgacao.menu_principal, F.text == "Adicionar Alvo ➕")
+async def pedir_alvo(message: types.Message, state: FSMContext):
+    await message.answer("Envie os links ou IDs dos grupos separados por vírgula.\nExemplo: <code>https://t.me/grupo1, -1009999999</code>", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(ConfigDivulgacao.aguardando_alvos)
 
 @dp.message(ConfigDivulgacao.aguardando_alvos)
-async def receber_alvos(message: types.Message, state: FSMContext):
-    alvos = [alvo.strip() for alvo in message.text.split(",") if alvo.strip()]
-    if not alvos:
-        await message.answer("Nenhum alvo detectado. Tente novamente separando por vírgula:", reply_markup=teclado_cancelar)
+async def salvar_alvo(message: types.Message, state: FSMContext):
+    novos_alvos = [alvo.strip() for alvo in message.text.split(",") if alvo.strip()]
+    if not novos_alvos:
+        await message.answer("Nenhum alvo detectado. Tente novamente:", reply_markup=teclado_cancelar)
         return
-    await state.update_data(alvos=alvos)
-    if EXIBIR_LOGS: logger.info(f"✅ Alvos registrados: {alvos}")
-    await message.answer(
-        "Alvos salvos com sucesso!\n"
-        "Agora, digite quantas mensagens por hora devem ser enviadas em cada grupo.\n\n"
-        "Exemplo de resposta: <code>3</code>",
-        reply_markup=teclado_cancelar,
-        parse_mode="HTML"
-    )
+        
+    dados = ler_alvos_divulgacao()
+    dados["alvos"].extend(novos_alvos)
+    
+    # Remove duplicatas mantendo a ordem para evitar envios duplos
+    dados["alvos"] = list(dict.fromkeys(dados["alvos"]))
+    salvar_alvos_divulgacao(dados)
+    
+    if EXIBIR_LOGS: logger.info(f"✅ Novos alvos adicionados: {novos_alvos}")
+    await message.answer("Alvos adicionados com sucesso!", reply_markup=teclado_configuracoes_gerais)
+    await state.clear()
+
+@dp.message(ConfigDivulgacao.menu_principal, F.text == "Excluir Alvo 🗑️")
+async def pedir_exclusao(message: types.Message, state: FSMContext):
+    dados = ler_alvos_divulgacao()
+    alvos = dados.get("alvos", [])
+    if not alvos:
+        await message.answer("Não há alvos cadastrados para excluir.", reply_markup=teclado_opcoes_divulgacao)
+        return
+        
+    texto = "Qual alvo deseja excluir? Digite o <b>NÚMERO</b> correspondente da lista abaixo:\n\n"
+    for i, alvo in enumerate(alvos, 1):
+        texto += f"{i}. {alvo}\n"
+    await message.answer(texto, reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(ConfigDivulgacao.aguardando_exclusao_alvo)
+
+@dp.message(ConfigDivulgacao.aguardando_exclusao_alvo)
+async def processar_exclusao(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas o NÚMERO do alvo.", reply_markup=teclado_cancelar)
+        return
+        
+    indice = int(message.text) - 1
+    dados = ler_alvos_divulgacao()
+    alvos = dados.get("alvos", [])
+    
+    if 0 <= indice < len(alvos):
+        removido = alvos.pop(indice)
+        dados["alvos"] = alvos
+        salvar_alvos_divulgacao(dados)
+        if EXIBIR_LOGS: logger.info(f"🗑️ Alvo removido com sucesso: {removido}")
+        await message.answer(f"Alvo '{removido}' excluído com sucesso da base de dados!", reply_markup=teclado_configuracoes_gerais)
+        await state.clear()
+    else:
+        await message.answer("Número inválido. Tente novamente:", reply_markup=teclado_cancelar)
+
+@dp.message(ConfigDivulgacao.menu_principal, F.text == "Editar Frequência ✏️")
+async def pedir_frequencia(message: types.Message, state: FSMContext):
+    await message.answer("Quantas mensagens por hora devem ser enviadas no total?\nExemplo: <code>3</code>", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(ConfigDivulgacao.aguardando_frequencia)
 
 @dp.message(ConfigDivulgacao.aguardando_frequencia)
-async def receber_frequencia(message: types.Message, state: FSMContext):
+async def salvar_frequencia(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
         await message.answer("Envie apenas números. Exemplo: 3", reply_markup=teclado_cancelar)
         return
-    
-    frequencia = int(message.text)
-    data = await state.get_data()
-    alvos = data.get("alvos", [])
-    
-    config = {
-        "alvos": alvos,
-        "frequencia_por_hora": frequencia
-    }
-    
-    with open("alvos_divulgacao.json", "w") as f:
-        json.dump(config, f, indent=4)
         
-    if EXIBIR_LOGS: logger.info(f"💾 Configuração salva no JSON: {frequencia} msgs/hora para {len(alvos)} alvos.")
+    freq = int(message.text)
+    dados = ler_alvos_divulgacao()
+    dados["frequencia_por_hora"] = freq
+    salvar_alvos_divulgacao(dados)
     
-    await message.answer(
-        f"Tudo pronto! 🚀\nO arquivo foi atualizado. O sistema de divulgação fará {frequencia} envios por hora nos alvos informados.",
-        reply_markup=obter_teclado_principal()
-    )
+    if EXIBIR_LOGS: logger.info(f"✏️ Frequência global atualizada para: {freq} msgs/hora.")
+    await message.answer(f"Frequência atualizada para {freq} envios por hora em cada grupo!", reply_markup=teclado_configuracoes_gerais)
     await state.clear()
+
+# --- LÓGICA DE MENSAGENS DE ROTINA ---
+@dp.message(F.text == "Mensagens de Rotina ⏰")
+async def gerenciar_rotina(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    
+    # Este bloco servirá como gatilho imediato para forçar o re-sorteio de horários
+    # enquanto preparamos a função completa de edição do agendador principal.
+    agendar_tarefas_diarias()
+    
+    if EXIBIR_LOGS: logger.info("⏰ Sorteio das mensagens de rotina forçado pelo usuário.")
+    await message.answer("A função avançada de edição de horários fixos será implementada na próxima atualização estrutural.\n\nPor enquanto, forcei o agendador a <b>re-sortear novos horários automáticos para hoje</b> com base nos padrões já estabelecidos! 🔄", reply_markup=teclado_configuracoes_gerais, parse_mode="HTML")
 
 async def main():
     # Agendador mestre que roda todo dia às 00:01
