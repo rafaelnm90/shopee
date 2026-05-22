@@ -4,6 +4,7 @@ import os
 from dotenv import load_dotenv
 load_dotenv()
 import logging
+import json
 import asyncio
 import random
 from datetime import datetime
@@ -61,6 +62,10 @@ class PostagemFluxo(StatesGroup):
 class ConfigFluxo(StatesGroup):
     aguardando_novo_numero = State()
 
+class ConfigDivulgacao(StatesGroup):
+    aguardando_alvos = State()
+    aguardando_frequencia = State()
+
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 fuso_horario = ZoneInfo("America/Sao_Paulo")
@@ -112,7 +117,8 @@ def obter_teclado_principal():
         [KeyboardButton(text="Enviar mensagem de Bom Dia ☀️"), KeyboardButton(text="Enviar mensagem de Incentivo 🔥")],
         [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙"), KeyboardButton(text="Divulgar Grupo 📢")],
         # ✅ Novos botões para controle da numeração
-        [KeyboardButton(text="Zerar Contador 🔄"), KeyboardButton(text="Editar Número ✏️")]
+        [KeyboardButton(text="Zerar Contador 🔄"), KeyboardButton(text="Editar Número ✏️")],
+        [KeyboardButton(text="Configurar Divulgação 🎯")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 # ----------------------------------
@@ -691,6 +697,62 @@ async def salvar_novo_numero(message: types.Message, state: FSMContext):
         await state.clear()
     else:
         await message.answer("Por favor, digite apenas números. Exemplo: 50", reply_markup=teclado_cancelar)
+
+@dp.message(F.text == "Configurar Divulgação 🎯")
+async def iniciar_config_divulgacao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("⚙️ Iniciando configuração de alvos de divulgação.")
+    await message.answer(
+        "Vamos configurar os grupos de destino.\n"
+        "Envie os links ou IDs dos grupos separados por vírgula.\n\n"
+        "Exemplo de resposta: <code>https://t.me/grupo1, -1009999999, @grupo3</code>",
+        reply_markup=teclado_cancelar,
+        parse_mode="HTML"
+    )
+    await state.set_state(ConfigDivulgacao.aguardando_alvos)
+
+@dp.message(ConfigDivulgacao.aguardando_alvos)
+async def receber_alvos(message: types.Message, state: FSMContext):
+    alvos = [alvo.strip() for alvo in message.text.split(",") if alvo.strip()]
+    if not alvos:
+        await message.answer("Nenhum alvo detectado. Tente novamente separando por vírgula:", reply_markup=teclado_cancelar)
+        return
+    await state.update_data(alvos=alvos)
+    if EXIBIR_LOGS: logger.info(f"✅ Alvos registrados: {alvos}")
+    await message.answer(
+        "Alvos salvos com sucesso!\n"
+        "Agora, digite quantas mensagens por hora devem ser enviadas em cada grupo.\n\n"
+        "Exemplo de resposta: <code>3</code>",
+        reply_markup=teclado_cancelar,
+        parse_mode="HTML"
+    )
+    await state.set_state(ConfigDivulgacao.aguardando_frequencia)
+
+@dp.message(ConfigDivulgacao.aguardando_frequencia)
+async def receber_frequencia(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Envie apenas números. Exemplo: 3", reply_markup=teclado_cancelar)
+        return
+    
+    frequencia = int(message.text)
+    data = await state.get_data()
+    alvos = data.get("alvos", [])
+    
+    config = {
+        "alvos": alvos,
+        "frequencia_por_hora": frequencia
+    }
+    
+    with open("alvos_divulgacao.json", "w") as f:
+        json.dump(config, f, indent=4)
+        
+    if EXIBIR_LOGS: logger.info(f"💾 Configuração salva no JSON: {frequencia} msgs/hora para {len(alvos)} alvos.")
+    
+    await message.answer(
+        f"Tudo pronto! 🚀\nO arquivo foi atualizado. O sistema de divulgação fará {frequencia} envios por hora nos alvos informados.",
+        reply_markup=obter_teclado_principal()
+    )
+    await state.clear()
 
 async def main():
     # Agendador mestre que roda todo dia às 00:01
