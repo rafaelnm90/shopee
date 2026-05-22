@@ -40,14 +40,12 @@ def carregar_configuracoes():
 
 async def gerar_texto_divulgacao():
     prompt = (
-        "Você é um divulgador chamativo de um grupo gratuito do Telegram para afiliados da Shopee. "
-        "Crie um texto de convite agressivo, animado e persuasivo. "
-        "REGRA 1: O texto deve focar na seguinte promessa: Os vídeos do nosso grupo NÃO geram infração de 'Produto Irrelevante' nem 'Contrafeito'. "
-        "REGRA 2: Seja criativo e mude as palavras da chamada central a cada geração para não parecer um robô repetitivo. "
-        "REGRA 3: Você deve OBRIGATORIAMENTE começar a mensagem com exatamente isso: ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️\n"
-        "REGRA 4: Você deve OBRIGATORIAMENTE terminar a mensagem com exatamente isso:\n"
-        "Acervo Afiliados Shopee:👇\nLink de Convite: https://t.me/shopee_video_afiliado\n"
-        "REGRA 5: Entregue apenas a mensagem final pronta, sem aspas, formatações markdown extras ou explicações."
+        "Você atua divulgando um grupo do Telegram para afiliados da Shopee. "
+        "Crie UMA ÚNICA FRASE curta, direta e muito chamativa. "
+        "A frase deve focar na seguinte promessa: Os vídeos do nosso grupo NÃO geram infração de 'Produto Irrelevante' nem 'Contrafeito'. "
+        "Seja criativo e mude as palavras a cada geração. "
+        "Comece a frase com ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️. "
+        "Entregue apenas a frase final, sem aspas ou formatações extras."
     )
     try:
         response = await asyncio.to_thread(
@@ -55,24 +53,36 @@ async def gerar_texto_divulgacao():
             model="gemini-2.5-flash",
             contents=prompt
         )
-        return response.text.strip()
+        frase_ia = response.text.strip()
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao gerar texto com IA: {e}")
-        return (
-            "⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️\n"
-            "Fugindo de ban por Produto Irrelevante ou Contrafeito? 🚀\n"
-            "Vem pro nosso grupo 100% gratuito e pegue vídeos limpos e validados para afiliados Shopee!\n\n"
-            "Acervo Afiliados Shopee:👇\nLink de Convite: https://t.me/shopee_video_afiliado"
-        )
+        frase_ia = "⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️\nFugindo de ban por Produto Irrelevante ou Contrafeito? Pegue vídeos validados aqui!"
+
+    # Monta o bloco curto com o link obrigatório e a quebra de linha em branco
+    bloco_unico = f"{frase_ia}\n\nLINK PARA O GRUPO:👇\nhttps://t.me/shopee_video_afiliado"
+    
+    # Multiplica o bloco 6 vezes na mesma mensagem, separando por quebras de linha duplas
+    texto_multiplicado = "\n\n\n".join([bloco_unico] * 6)
+    
+    return texto_multiplicado
 
 async def enviar_mensagem(alvo):
     texto = await gerar_texto_divulgacao()
     try:
         entidade = await client.get_entity(alvo)
+        
+        # Envia a primeira mensagem com o bloco multiplicado
+        if EXIBIR_LOGS: logger.info(f"📤 Iniciando disparo em rajada para {alvo}...")
         await client.send_message(entidade, texto)
-        if EXIBIR_LOGS: logger.info(f"✅ Divulgação enviada com sucesso para {alvo}!")
+        
+        # Envia as 4 mensagens idênticas adicionais (totalizando 5 envios seguidos)
+        for i in range(4):
+            await asyncio.sleep(1.5) # Pausa de segurança obrigatória contra bloqueio de flood
+            await client.send_message(entidade, texto)
+            
+        if EXIBIR_LOGS: logger.info(f"✅ Rajada de 5 mensagens enviada com sucesso para {alvo}!")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Falha ao enviar para {alvo}: {e}")
+        if EXIBIR_LOGS: logger.error(f"❌ Falha ao enviar rajada para {alvo}: {e}")
 
 def programar_envios_da_hora():
     config = carregar_configuracoes()
