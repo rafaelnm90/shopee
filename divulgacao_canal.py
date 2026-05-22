@@ -88,6 +88,10 @@ def programar_envios_da_hora():
     config = carregar_configuracoes()
     if not config or not config.get("alvos"):
         return
+        
+    if config.get("pausado", False):
+        if EXIBIR_LOGS: logger.info("⏸️ Divulgação pausada pelo painel. Pulando sorteio desta hora.")
+        return
 
     alvos = config["alvos"]
     freq = config["frequencia_por_hora"]
@@ -108,9 +112,28 @@ def programar_envios_da_hora():
             
         if EXIBIR_LOGS: logger.info(f"⏰ Disparo para {alvo} agendado para: {horario_disparo.strftime('%H:%M:%S')}")
 
+async def monitorar_comandos():
+    while True:
+        config = carregar_configuracoes()
+        if config and config.get("forcar_disparo"):
+            if EXIBIR_LOGS: logger.info("🚀 Comando de DISPARO FORÇADO detectado! Iniciando rajada...")
+            
+            # Limpa a flag imediatamente no JSON para o bot não ficar repetindo em loop
+            config["forcar_disparo"] = False
+            with open("alvos_divulgacao.json", "w") as f:
+                json.dump(config, f, indent=4)
+                
+            alvos = config.get("alvos", [])
+            for alvo in alvos:
+                await enviar_mensagem(alvo)
+        await asyncio.sleep(5)
+
 async def main():
     if EXIBIR_LOGS: logger.info("⏳ Iniciando o Userbot de Divulgação...")
     await client.start()
+    
+    # Inicia a tarefa paralela que vigia o arquivo JSON a cada 5 segundos
+    asyncio.create_task(monitorar_comandos())
     
     # Executa imediatamente o agendamento da hora atual ao iniciar o script
     programar_envios_da_hora()
