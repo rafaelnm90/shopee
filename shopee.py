@@ -70,8 +70,10 @@ class ConfigDivulgacao(StatesGroup):
 
 class ConfigRotina(StatesGroup):
     menu_principal = State()
-    aguardando_edicao_tipo = State()
     aguardando_novo_horario = State()
+
+class ConfigPausa(StatesGroup):
+    menu_principal = State()
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -132,7 +134,27 @@ teclado_configuracoes_gerais = ReplyKeyboardMarkup(
 teclado_opcoes_divulgacao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Alvo ➕"), KeyboardButton(text="Editar Frequência ✏️")],
-        [KeyboardButton(text="Excluir Alvo 🗑️"), KeyboardButton(text="Voltar 🔙")]
+        [KeyboardButton(text="Excluir Alvo 🗑️"), KeyboardButton(text="Forçar Disparo Agora 🚀")],
+        [KeyboardButton(text="Voltar 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+teclado_opcoes_rotina = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Boa Noite 🌙")],
+        [KeyboardButton(text="Editar Incentivo 🔥"), KeyboardButton(text="Voltar 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+teclado_opcoes_pausa = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Pausar/Retomar Divulgação 📢")],
+        [KeyboardButton(text="Pausar/Retomar Rotina ⏰")],
+        [KeyboardButton(text="Voltar 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -270,14 +292,46 @@ async def disparar_mensagem(tipo):
         msg_gem = await bot.send_message(GRUPO_ID, link_gem, parse_mode="HTML")
         scheduler.add_job(apagar_mensagem_automatica, 'date', run_date=data_exclusao, args=[msg_gem.message_id])
 
+def ler_config_rotina():
+    try:
+        with open("config_rotina.json", "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        # Configuração padrão de segurança se o arquivo não existir
+        return {
+            "bom_dia": {"inicio": 6, "fim": 9, "frequencia": 1},
+            "incentivo": {"inicio": 10, "fim": 20, "frequencia": 2},
+            "boa_noite": {"inicio": 21, "fim": 23, "frequencia": 1}
+        }
+
+def salvar_config_rotina(dados):
+    with open("config_rotina.json", "w") as f:
+        json.dump(dados, f, indent=4)
+
 def agendar_tarefas_diarias():
-    if EXIBIR_LOGS: logger.info("🔄 Sorteando horários das postagens de hoje...")
+    if EXIBIR_LOGS: logger.info("🔄 Sorteando horários de rotina com base nas janelas configuradas...")
     
-    minuto_manha = random.randint(0, 59)
-    hora_incentivo = random.randint(8, 21)
-    minuto_incentivo = random.randint(0, 59)
-    minuto_noite = random.randint(0, 59)
+    # Limpa exclusivamente os jobs antigos de rotina para evitar duplicatas ao forçar re-sorteio
+    for job in scheduler.get_jobs():
+        if job.id.startswith('job_rotina_'):
+            job.remove()
+
+    dados_rotina = ler_config_rotina()
     
+    # Executa o sorteio dinâmico para Bom Dia, Incentivo e Boa Noite
+    for tipo, config in dados_rotina.items():
+        freq = config.get("frequencia", 1)
+        inicio = config.get("inicio", 6)
+        fim = config.get("fim", 22)
+        
+        for i in range(freq):
+            hora_sorteada = random.randint(inicio, fim)
+            minuto_sorteado = random.randint(0, 59)
+            
+            job_id = f"job_rotina_{tipo}_{i}"
+            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=minuto_sorteado, args=[tipo], id=job_id, replace_existing=True)
+            if EXIBIR_LOGS: logger.info(f"📅 {tipo.upper()} [{i+1}/{freq}]: Sorteado para {hora_sorteada:02d}:{minuto_sorteado:02d}")
+
     # ✅ Sorteio dos 3 turnos de divulgação
     hora_link_manha = random.randint(9, 12)
     minuto_link_manha = random.randint(0, 59)
@@ -744,18 +798,37 @@ async def voltar_configs(message: types.Message, state: FSMContext):
     await menu_configuracoes(message)
 
 @dp.message(F.text == "Pausar/Retomar Automações ⏸️")
-async def pausar_retomar(message: types.Message):
+async def menu_pausa(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    from apscheduler.schedulers.base import STATE_PAUSED, STATE_RUNNING
+    await message.answer("O que você deseja pausar ou retomar?", reply_markup=teclado_opcoes_pausa)
+    await state.set_state(ConfigPausa.menu_principal)
+
+@dp.message(ConfigPausa.menu_principal, F.text == "Pausar/Retomar Divulgação 📢")
+async def alternar_pausa_divulgacao(message: types.Message):
+    dados = ler_alvos_divulgacao()
+    status_atual = dados.get("pausado", False)
+    novo_status = not status_atual
+    dados["pausado"] = novo_status
+    salvar_alvos_divulgacao(dados)
     
+    if novo_status:
+        if EXIBIR_LOGS: logger.info("⏸️ Divulgação de grupos PAUSADA.")
+        await message.answer("⏸️ <b>Divulgação PAUSADA.</b>\nO Userbot não enviará mais convites até você retomar.", parse_mode="HTML")
+    else:
+        if EXIBIR_LOGS: logger.info("▶️ Divulgação de grupos RETOMADA.")
+        await message.answer("▶️ <b>Divulgação RETOMADA.</b>\nO Userbot voltará a operar normalmente.", parse_mode="HTML")
+
+@dp.message(ConfigPausa.menu_principal, F.text == "Pausar/Retomar Rotina ⏰")
+async def alternar_pausa_rotina(message: types.Message):
+    from apscheduler.schedulers.base import STATE_PAUSED, STATE_RUNNING
     if scheduler.state == STATE_RUNNING:
         scheduler.pause()
-        if EXIBIR_LOGS: logger.info("⏸️ Automações pausadas pelo usuário.")
-        await message.answer("⏸️ Automações PAUSADAS.\nNenhuma mensagem automática será enviada até que você retome.", reply_markup=teclado_configuracoes_gerais)
+        if EXIBIR_LOGS: logger.info("⏸️ Rotina (Bom Dia/Boa Noite) PAUSADA.")
+        await message.answer("⏸️ <b>Rotina PAUSADA.</b>\nAs mensagens automáticas do grupo foram suspensas.", parse_mode="HTML")
     else:
         scheduler.resume()
-        if EXIBIR_LOGS: logger.info("▶️ Automações retomadas pelo usuário.")
-        await message.answer("▶️ Automações RETOMADAS.\nOs envios automáticos voltaram a operar.", reply_markup=teclado_configuracoes_gerais)
+        if EXIBIR_LOGS: logger.info("▶️ Rotina (Bom Dia/Boa Noite) RETOMADA.")
+        await message.answer("▶️ <b>Rotina RETOMADA.</b>\nAs mensagens automáticas voltarão a ser enviadas.", parse_mode="HTML")
 
 # --- LÓGICA DE GERENCIAMENTO DE DIVULGAÇÃO ---
 def ler_alvos_divulgacao():
@@ -763,7 +836,7 @@ def ler_alvos_divulgacao():
         with open("alvos_divulgacao.json", "r") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"alvos": [], "frequencia_por_hora": 0}
+        return {"alvos": [], "frequencia_por_hora": 0, "pausado": False, "forcar_disparo": False}
 
 def salvar_alvos_divulgacao(dados):
     with open("alvos_divulgacao.json", "w") as f:
@@ -775,8 +848,9 @@ async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
     dados = ler_alvos_divulgacao()
     alvos = dados.get("alvos", [])
     freq = dados.get("frequencia_por_hora", 0)
+    status_pausa = "⏸️ Pausado" if dados.get("pausado") else "▶️ Rodando"
 
-    texto = f"📊 <b>Status da Divulgação</b>\n\nFrequência Global: {freq} msgs/hora\n\n<b>Alvos Ativos:</b>\n"
+    texto = f"📊 <b>Status da Divulgação</b> [{status_pausa}]\n\nFrequência Global: {freq} msgs/hora\n\n<b>Alvos Ativos:</b>\n"
     if alvos:
         for i, alvo in enumerate(alvos, 1):
             texto += f"{i}. {alvo}\n"
@@ -800,8 +874,6 @@ async def salvar_alvo(message: types.Message, state: FSMContext):
         
     dados = ler_alvos_divulgacao()
     dados["alvos"].extend(novos_alvos)
-    
-    # Remove duplicatas mantendo a ordem para evitar envios duplos
     dados["alvos"] = list(dict.fromkeys(dados["alvos"]))
     salvar_alvos_divulgacao(dados)
     
@@ -838,7 +910,7 @@ async def processar_exclusao(message: types.Message, state: FSMContext):
         dados["alvos"] = alvos
         salvar_alvos_divulgacao(dados)
         if EXIBIR_LOGS: logger.info(f"🗑️ Alvo removido com sucesso: {removido}")
-        await message.answer(f"Alvo '{removido}' excluído com sucesso da base de dados!", reply_markup=teclado_configuracoes_gerais)
+        await message.answer(f"Alvo '{removido}' excluído com sucesso!", reply_markup=teclado_configuracoes_gerais)
         await state.clear()
     else:
         await message.answer("Número inválido. Tente novamente:", reply_markup=teclado_cancelar)
@@ -863,17 +935,78 @@ async def salvar_frequencia(message: types.Message, state: FSMContext):
     await message.answer(f"Frequência atualizada para {freq} envios por hora em cada grupo!", reply_markup=teclado_configuracoes_gerais)
     await state.clear()
 
+@dp.message(ConfigDivulgacao.menu_principal, F.text == "Forçar Disparo Agora 🚀")
+async def acionar_disparo_imediato(message: types.Message):
+    dados = ler_alvos_divulgacao()
+    dados["forcar_disparo"] = True
+    salvar_alvos_divulgacao(dados)
+    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo forçado enviado para o arquivo JSON.")
+    await message.answer("🚀 <b>Disparo Imediato Acionado!</b>\nO Userbot detectará o comando e enviará a rajada de convites em até 5 segundos.", parse_mode="HTML", reply_markup=teclado_opcoes_divulgacao)
+
 # --- LÓGICA DE MENSAGENS DE ROTINA ---
 @dp.message(F.text == "Mensagens de Rotina ⏰")
 async def gerenciar_rotina(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
+    dados = ler_config_rotina()
+    texto = "⏰ <b>Configuração de Janelas e Frequência</b>\n\n"
     
-    # Este bloco servirá como gatilho imediato para forçar o re-sorteio de horários
-    # enquanto preparamos a função completa de edição do agendador principal.
+    for tipo, config in dados.items():
+        nome_exibicao = tipo.replace("_", " ").title()
+        texto += f"🔹 <b>{nome_exibicao}</b>\n"
+        texto += f"   Janela de Sorteio: {config['inicio']}h às {config['fim']}h\n"
+        texto += f"   Disparos por Dia: {config['frequencia']}x\n\n"
+        
+    texto += "Selecione o que deseja editar abaixo:"
+    await message.answer(texto, reply_markup=teclado_opcoes_rotina, parse_mode="HTML")
+    await state.set_state(ConfigRotina.menu_principal)
+
+@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥"]))
+async def pedir_horario_rotina(message: types.Message, state: FSMContext):
+    tipo_map = {
+        "Editar Bom Dia ☀️": "bom_dia",
+        "Editar Boa Noite 🌙": "boa_noite",
+        "Editar Incentivo 🔥": "incentivo"
+    }
+    tipo = tipo_map[message.text]
+    await state.update_data(tipo_edicao=tipo)
+    await message.answer(
+        f"Vamos configurar a janela de sorteio e a quantidade de envios para <b>{message.text}</b>.\n\n"
+        "Envie os dados no seguinte formato: <code>HoraInicio-HoraFim, Quantidade</code>\n\n"
+        "Exemplo para sortear 3 mensagens aleatórias entre 10h e 20h:\n<code>10-20, 3</code>",
+        reply_markup=teclado_cancelar,
+        parse_mode="HTML"
+    )
+    await state.set_state(ConfigRotina.aguardando_novo_horario)
+
+@dp.message(ConfigRotina.aguardando_novo_horario)
+async def salvar_horario_rotina(message: types.Message, state: FSMContext):
+    import re
+    # Expressão regular para validar o formato estrito: Numero-Numero, Numero
+    match = re.match(r"^(\d{1,2})-(\d{1,2}),\s*(\d+)$", message.text.strip())
+    if not match:
+        await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-20, 3", reply_markup=teclado_cancelar)
+        return
+        
+    inicio, fim, freq = map(int, match.groups())
+    
+    if inicio >= fim or inicio < 0 or fim > 23 or freq < 1:
+        await message.answer("Valores inválidos! A hora de início deve ser menor que a do fim (entre 0 e 23) e a quantidade mínima é 1.", reply_markup=teclado_cancelar)
+        return
+        
+    data = await state.get_data()
+    tipo = data['tipo_edicao']
+    
+    dados = ler_config_rotina()
+    dados[tipo] = {"inicio": inicio, "fim": fim, "frequencia": freq}
+    salvar_config_rotina(dados)
+    
+    if EXIBIR_LOGS: logger.info(f"✅ Configuração de {tipo} atualizada: {inicio}h-{fim}h, {freq}x ao dia.")
+    
+    # Força o re-sorteio imediato para aplicar as novas regras hoje mesmo
     agendar_tarefas_diarias()
     
-    if EXIBIR_LOGS: logger.info("⏰ Sorteio das mensagens de rotina forçado pelo usuário.")
-    await message.answer("A função avançada de edição de horários fixos será implementada na próxima atualização estrutural.\n\nPor enquanto, forcei o agendador a <b>re-sortear novos horários automáticos para hoje</b> com base nos padrões já estabelecidos! 🔄", reply_markup=teclado_configuracoes_gerais, parse_mode="HTML")
+    await message.answer("✅ Configuração salva! Os novos horários já foram sorteados e agendados para hoje.", reply_markup=teclado_configuracoes_gerais)
+    await state.clear()
 
 async def main():
     # Agendador mestre que roda todo dia às 00:01
