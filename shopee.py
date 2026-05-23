@@ -342,6 +342,12 @@ def agendar_tarefas_diarias():
     hora_link_noite = random.randint(18, 21)
     minuto_link_noite = random.randint(0, 59)
     
+    # ✅ Variáveis ausentes declaradas e sorteadas para evitar o NameError
+    minuto_manha = random.randint(0, 59)
+    hora_incentivo = random.randint(10, 20)
+    minuto_incentivo = random.randint(0, 59)
+    minuto_noite = random.randint(0, 59)
+    
     scheduler.add_job(disparar_mensagem, 'cron', hour=7, minute=minuto_manha, args=["bom_dia"], id='job_manha', replace_existing=True)
     scheduler.add_job(disparar_mensagem, 'cron', hour=hora_incentivo, minute=minuto_incentivo, args=["incentivo"], id='job_incentivo', replace_existing=True)
     scheduler.add_job(disparar_mensagem, 'cron', hour=22, minute=minuto_noite, args=["boa_noite"], id='job_noite', replace_existing=True)
