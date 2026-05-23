@@ -67,6 +67,8 @@ class ConfigDivulgacao(StatesGroup):
     aguardando_alvos = State()
     aguardando_frequencia = State()
     aguardando_exclusao_alvo = State()
+    aguardando_repeticoes_texto = State()
+    aguardando_replicas_mensagem = State()
 
 class ConfigRotina(StatesGroup):
     menu_principal = State()
@@ -135,6 +137,7 @@ teclado_opcoes_divulgacao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Alvo ➕"), KeyboardButton(text="Editar Frequência ✏️")],
         [KeyboardButton(text="Excluir Alvo 🗑️"), KeyboardButton(text="Forçar Disparo Agora 🚀")],
+        [KeyboardButton(text="Repetições no Texto 📝"), KeyboardButton(text="Réplicas por Disparo 🔄")],
         [KeyboardButton(text="Voltar 🔙")]
     ],
     resize_keyboard=True,
@@ -840,9 +843,13 @@ async def alternar_pausa_rotina(message: types.Message):
 def ler_alvos_divulgacao():
     try:
         with open("alvos_divulgacao.json", "r") as f:
-            return json.load(f)
+            dados = json.load(f)
+            # ✅ Garante que as novas chaves existam mesmo em arquivos antigos
+            if "repeticoes_internas" not in dados: dados["repeticoes_internas"] = 6
+            if "replicas_mensagem" not in dados: dados["replicas_mensagem"] = 5
+            return dados
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"alvos": [], "frequencia_por_hora": 0, "pausado": False, "forcar_disparo": False}
+        return {"alvos": [], "frequencia_por_hora": 0, "pausado": False, "forcar_disparo": False, "repeticoes_internas": 6, "replicas_mensagem": 5}
 
 def salvar_alvos_divulgacao(dados):
     with open("alvos_divulgacao.json", "w") as f:
@@ -854,9 +861,11 @@ async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
     dados = ler_alvos_divulgacao()
     alvos = dados.get("alvos", [])
     freq = dados.get("frequencia_por_hora", 0)
+    rep_internas = dados.get("repeticoes_internas", 6)
+    rep_mensagens = dados.get("replicas_mensagem", 5)
     status_pausa = "⏸️ Pausado" if dados.get("pausado") else "▶️ Rodando"
 
-    texto = f"📊 <b>Status da Divulgação</b> [{status_pausa}]\n\nFrequência Global: {freq} msgs/hora\n\n<b>Alvos Ativos:</b>\n"
+    texto = f"📊 <b>Status da Divulgação</b> [{status_pausa}]\n\nFrequência Global: {freq} msgs/hora\nRepetições no Texto: {rep_internas}x\nRéplicas por Disparo: {rep_mensagens}x\n\n<b>Alvos Ativos:</b>\n"
     if alvos:
         for i, alvo in enumerate(alvos, 1):
             texto += f"{i}. {alvo}\n"
@@ -939,6 +948,46 @@ async def salvar_frequencia(message: types.Message, state: FSMContext):
     
     if EXIBIR_LOGS: logger.info(f"✏️ Frequência global atualizada para: {freq} msgs/hora.")
     await message.answer(f"Frequência atualizada para {freq} envios por hora em cada grupo!", reply_markup=teclado_configuracoes_gerais)
+    await state.clear()
+
+@dp.message(ConfigDivulgacao.menu_principal, F.text == "Repetições no Texto 📝")
+async def pedir_repeticoes_texto(message: types.Message, state: FSMContext):
+    await message.answer("Quantas vezes o bloco de texto deve se repetir dentro da mesma mensagem?\nExemplo: <code>6</code>", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(ConfigDivulgacao.aguardando_repeticoes_texto)
+
+@dp.message(ConfigDivulgacao.aguardando_repeticoes_texto)
+async def salvar_repeticoes_texto(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Envie apenas números. Exemplo: 6", reply_markup=teclado_cancelar)
+        return
+        
+    repeticoes = int(message.text)
+    dados = ler_alvos_divulgacao()
+    dados["repeticoes_internas"] = repeticoes
+    salvar_alvos_divulgacao(dados)
+    
+    if EXIBIR_LOGS: logger.info(f"📝 Repetições internas atualizadas para: {repeticoes}x.")
+    await message.answer(f"Configuração atualizada! O bloco de texto se repetirá {repeticoes} vezes na mesma mensagem.", reply_markup=teclado_configuracoes_gerais)
+    await state.clear()
+
+@dp.message(ConfigDivulgacao.menu_principal, F.text == "Réplicas por Disparo 🔄")
+async def pedir_replicas_mensagem(message: types.Message, state: FSMContext):
+    await message.answer("Quantas mensagens idênticas devem ser enviadas em sequência no grupo a cada disparo?\nExemplo: <code>5</code>", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(ConfigDivulgacao.aguardando_replicas_mensagem)
+
+@dp.message(ConfigDivulgacao.aguardando_replicas_mensagem)
+async def salvar_replicas_mensagem(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Envie apenas números. Exemplo: 5", reply_markup=teclado_cancelar)
+        return
+        
+    replicas = int(message.text)
+    dados = ler_alvos_divulgacao()
+    dados["replicas_mensagem"] = replicas
+    salvar_alvos_divulgacao(dados)
+    
+    if EXIBIR_LOGS: logger.info(f"🔄 Réplicas por disparo atualizadas para: {replicas}x.")
+    await message.answer(f"Configuração atualizada! O bot enviará {replicas} mensagens em sequência a cada disparo.", reply_markup=teclado_configuracoes_gerais)
     await state.clear()
 
 @dp.message(ConfigDivulgacao.menu_principal, F.text == "Forçar Disparo Agora 🚀")
