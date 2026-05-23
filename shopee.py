@@ -440,7 +440,7 @@ async def manual_link_grupo(message: types.Message):
     await message.answer("Mensagem de divulgação enviada ao grupo com sucesso! ✅")
 
 # ❌ NOVO: Handler Global para Cancelar via Botão (Agora 100% à prova de falhas)
-@dp.message(F.text == "Cancelar ❌")
+@dp.message(F.text == "Cancelar ❌", StateFilter("*"))
 async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("❌ Ação cancelada ou resetada via botão.")
