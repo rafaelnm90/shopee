@@ -42,7 +42,8 @@ async def gerar_texto_divulgacao():
     prompt = (
         "Você atua divulgando um grupo do Telegram para afiliados da Shopee. "
         "Crie UMA ÚNICA FRASE curta, direta e muito chamativa. "
-        "A frase deve focar na seguinte promessa: Os vídeos do nosso grupo NÃO geram infração de 'Produto Irrelevante' nem 'Contrafeito'. "
+        "A frase deve INFORMAR OBRIGATORIAMENTE que o grupo é um ACERVO DE VÍDEOS EDITADOS. "
+        "A frase deve focar na seguinte promessa: O grupo possui TÉCNICAS COMPROVADAS para evitar que o afiliado receba punições por 'Produto Irrelevante' e 'Contrafeito' da Shopee. "
         "Seja criativo e mude as palavras a cada geração. "
         "Comece a frase com ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️. "
         "Entregue apenas a frase final, sem aspas ou formatações extras."
@@ -56,13 +57,19 @@ async def gerar_texto_divulgacao():
         frase_ia = response.text.strip()
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao gerar texto com IA: {e}")
-        frase_ia = "⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️\nFugindo de ban por Produto Irrelevante ou Contrafeito? Pegue vídeos validados aqui!"
+        frase_ia = "⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️\nFugindo de ban por Produto Irrelevante ou Contrafeito? Acesse nosso acervo de vídeos editados e validados!"
 
     # Monta o bloco curto com o link obrigatório e a quebra de linha em branco
     bloco_unico = f"{frase_ia}\n\nLINK PARA O GRUPO:👇\nhttps://t.me/shopee_video_afiliado"
     
-    # Multiplica o bloco 6 vezes na mesma mensagem, separando por quebras de linha duplas
-    texto_multiplicado = "\n\n\n".join([bloco_unico] * 6)
+    # ✅ Lê as configurações para multiplicar dinamicamente o bloco
+    config = carregar_configuracoes()
+    repeticoes = config.get("repeticoes_internas", 6) if config else 6
+    
+    if EXIBIR_LOGS: logger.info(f"🔄 Multiplicando bloco de texto {repeticoes} vezes na mesma mensagem.")
+    
+    # Multiplica o bloco na mesma mensagem, separando por quebras de linha duplas
+    texto_multiplicado = "\n\n\n".join([bloco_unico] * repeticoes)
     
     return texto_multiplicado
 
@@ -71,16 +78,19 @@ async def enviar_mensagem(alvo):
     try:
         entidade = await client.get_entity(alvo)
         
-        # Envia a primeira mensagem com o bloco multiplicado
-        if EXIBIR_LOGS: logger.info(f"📤 Iniciando disparo em rajada para {alvo}...")
-        await client.send_message(entidade, texto)
+        # ✅ Lê a quantidade de réplicas configuradas no JSON
+        config = carregar_configuracoes()
+        replicas = config.get("replicas_mensagem", 5) if config else 5
         
-        # Envia as 4 mensagens idênticas adicionais (totalizando 5 envios seguidos)
-        for i in range(4):
-            await asyncio.sleep(1.5) # Pausa de segurança obrigatória contra bloqueio de flood
+        if EXIBIR_LOGS: logger.info(f"📤 Iniciando disparo em rajada de {replicas} mensagens para {alvo}...")
+        
+        for i in range(replicas):
             await client.send_message(entidade, texto)
+            if EXIBIR_LOGS: logger.info(f"📩 Mensagem {i+1}/{replicas} enviada.")
+            if i < replicas - 1: # Pausa apenas se houver uma próxima mensagem
+                await asyncio.sleep(1.5) # Pausa de segurança obrigatória contra bloqueio de flood
             
-        if EXIBIR_LOGS: logger.info(f"✅ Rajada de 5 mensagens enviada com sucesso para {alvo}!")
+        if EXIBIR_LOGS: logger.info(f"✅ Rajada de {replicas} mensagens concluída com sucesso para {alvo}!")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao enviar rajada para {alvo}: {e}")
 
