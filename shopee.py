@@ -1017,6 +1017,8 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥"]))
 async def pedir_horario_rotina(message: types.Message, state: FSMContext):
+    @dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥"]))
+async def pedir_horario_rotina(message: types.Message, state: FSMContext):
     tipo_map = {
         "Editar Bom Dia ☀️": "bom_dia",
         "Editar Boa Noite 🌙": "boa_noite",
@@ -1024,38 +1026,66 @@ async def pedir_horario_rotina(message: types.Message, state: FSMContext):
     }
     tipo = tipo_map[message.text]
     await state.update_data(tipo_edicao=tipo)
-    await message.answer(
-        f"Vamos configurar a janela de sorteio e a quantidade de envios para <b>{message.text}</b>.\n\n"
-        "Envie os dados no seguinte formato: <code>HoraInicio-HoraFim, Quantidade</code>\n\n"
-        "Exemplo para sortear 3 mensagens aleatórias entre 10h e 20h:\n<code>10-20, 3</code>",
-        reply_markup=teclado_cancelar,
-        parse_mode="HTML"
-    )
+    
+    # ✅ Lê as configurações atuais para criar os exemplos dinâmicos
+    dados_atuais = ler_config_rotina()
+    config_atual = dados_atuais.get(tipo, {"inicio": 6, "fim": 9, "frequencia": 1})
+    inicio_ex = config_atual["inicio"]
+    fim_ex = config_atual["fim"]
+    freq_ex = config_atual["frequencia"]
+    
+    if tipo in ["bom_dia", "boa_noite"]:
+        await message.answer(
+            f"Vamos configurar a janela de sorteio para <b>{message.text}</b>.\n"
+            "Atenção: A quantidade de envios para esta rotina é fixada em 1x ao dia.\n\n"
+            "Envie os dados no seguinte formato: <code>HoraInicio-HoraFim</code>\n\n"
+            f"Exemplo atualizado com a sua configuração:\n<code>{inicio_ex}-{fim_ex}</code>",
+            reply_markup=teclado_cancelar,
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer(
+            f"Vamos configurar a janela de sorteio e a quantidade de envios para <b>{message.text}</b>.\n\n"
+            "Envie os dados no seguinte formato: <code>HoraInicio-HoraFim, Quantidade</code>\n\n"
+            f"Exemplo atualizado com a sua configuração:\n<code>{inicio_ex}-{fim_ex}, {freq_ex}</code>",
+            reply_markup=teclado_cancelar,
+            parse_mode="HTML"
+        )
     await state.set_state(ConfigRotina.aguardando_novo_horario)
 
 @dp.message(ConfigRotina.aguardando_novo_horario)
 async def salvar_horario_rotina(message: types.Message, state: FSMContext):
     import re
-    # Expressão regular para validar o formato estrito: Numero-Numero, Numero
-    match = re.match(r"^(\d{1,2})-(\d{1,2}),\s*(\d+)$", message.text.strip())
-    if not match:
-        await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-20, 3", reply_markup=teclado_cancelar)
-        return
+    data = await state.get_data()
+    tipo = data['tipo_edicao']
+    
+    if tipo in ["bom_dia", "boa_noite"]:
+        # ✅ Validação exclusiva para rotinas de disparo único
+        match = re.match(r"^(\d{1,2})-(\d{1,2})$", message.text.strip())
+        if not match:
+            await message.answer("Formato inválido! Use o formato exato como no exemplo: 6-9", reply_markup=teclado_cancelar)
+            return
         
-    inicio, fim, freq = map(int, match.groups())
+        inicio, fim = map(int, match.groups())
+        freq = 1
+    else:
+        # ✅ Validação completa para a rotina de incentivo
+        match = re.match(r"^(\d{1,2})-(\d{1,2}),\s*(\d+)$", message.text.strip())
+        if not match:
+            await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-20, 3", reply_markup=teclado_cancelar)
+            return
+            
+        inicio, fim, freq = map(int, match.groups())
     
     if inicio >= fim or inicio < 0 or fim > 23 or freq < 1:
         await message.answer("Valores inválidos! A hora de início deve ser menor que a do fim (entre 0 e 23) e a quantidade mínima é 1.", reply_markup=teclado_cancelar)
         return
         
-    data = await state.get_data()
-    tipo = data['tipo_edicao']
-    
     dados = ler_config_rotina()
     dados[tipo] = {"inicio": inicio, "fim": fim, "frequencia": freq}
     salvar_config_rotina(dados)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Configuração de {tipo} atualizada: {inicio}h-{fim}h, {freq}x ao dia.")
+    if EXIBIR_LOGS: logger.info(f"✅ Configuração de {tipo} atualizada: {inicio}h até {fim}h, {freq}x ao dia.")
     
     # Força o re-sorteio imediato para aplicar as novas regras hoje mesmo
     agendar_tarefas_diarias()
