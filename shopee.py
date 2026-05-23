@@ -932,7 +932,9 @@ async def processar_exclusao(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigDivulgacao.menu_principal, F.text == "Editar Frequência ✏️")
 async def pedir_frequencia(message: types.Message, state: FSMContext):
-    await message.answer("Quantas mensagens por hora devem ser enviadas no total?\nExemplo: <code>3</code>", reply_markup=teclado_cancelar, parse_mode="HTML")
+    dados = ler_alvos_divulgacao()
+    freq_atual = dados.get("frequencia_por_hora", 0)
+    await message.answer(f"Quantas mensagens por hora devem ser enviadas no total?\nExemplo atualizado com a sua configuração: <code>{freq_atual}</code>", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(ConfigDivulgacao.aguardando_frequencia)
 
 @dp.message(ConfigDivulgacao.aguardando_frequencia)
@@ -952,7 +954,9 @@ async def salvar_frequencia(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigDivulgacao.menu_principal, F.text == "Repetições no Texto 📝")
 async def pedir_repeticoes_texto(message: types.Message, state: FSMContext):
-    await message.answer("Quantas vezes o bloco de texto deve se repetir dentro da mesma mensagem?\nExemplo: <code>6</code>", reply_markup=teclado_cancelar, parse_mode="HTML")
+    dados = ler_alvos_divulgacao()
+    rep_atual = dados.get("repeticoes_internas", 6)
+    await message.answer(f"Quantas vezes o bloco de texto deve se repetir dentro da mesma mensagem?\nExemplo atualizado com a sua configuração: <code>{rep_atual}</code>", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(ConfigDivulgacao.aguardando_repeticoes_texto)
 
 @dp.message(ConfigDivulgacao.aguardando_repeticoes_texto)
@@ -972,7 +976,9 @@ async def salvar_repeticoes_texto(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigDivulgacao.menu_principal, F.text == "Réplicas por Disparo 🔄")
 async def pedir_replicas_mensagem(message: types.Message, state: FSMContext):
-    await message.answer("Quantas mensagens idênticas devem ser enviadas em sequência no grupo a cada disparo?\nExemplo: <code>5</code>", reply_markup=teclado_cancelar, parse_mode="HTML")
+    dados = ler_alvos_divulgacao()
+    replicas_atual = dados.get("replicas_mensagem", 5)
+    await message.answer(f"Quantas mensagens idênticas devem ser enviadas em sequência no grupo a cada disparo?\nExemplo atualizado com a sua configuração: <code>{replicas_atual}</code>", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(ConfigDivulgacao.aguardando_replicas_mensagem)
 
 @dp.message(ConfigDivulgacao.aguardando_replicas_mensagem)
