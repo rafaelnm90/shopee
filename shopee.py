@@ -1017,8 +1017,6 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥"]))
 async def pedir_horario_rotina(message: types.Message, state: FSMContext):
-    @dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥"]))
-async def pedir_horario_rotina(message: types.Message, state: FSMContext):
     tipo_map = {
         "Editar Bom Dia ☀️": "bom_dia",
         "Editar Boa Noite 🌙": "boa_noite",
