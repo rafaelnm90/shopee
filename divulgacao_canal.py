@@ -13,8 +13,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 1. CREDENCIAIS DA CONTA
-API_ID = 12054608
-API_HASH = '9a18338a2cfdd7cfef97fa86c853bb3b'
+API_ID = int(os.getenv('API_ID'))
+API_HASH = os.getenv('API_HASH')
 GEMINI_API_KEY = os.getenv('GEMINI_KEY')
 
 # Inicializa o cliente do Google
