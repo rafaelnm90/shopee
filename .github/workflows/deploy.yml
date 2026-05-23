@@ -29,3 +29,7 @@ jobs:
             
             # Reinicia o serviço usando o nome correto
             sudo systemctl restart shopee_bot.service
+            
+            # Reinicia o Userbot de divulgação em segundo plano
+            pkill -f divulgacao_canal.py || true
+            nohup python3 divulgacao_canal.py > log_divulgacao.txt 2>&1 &
