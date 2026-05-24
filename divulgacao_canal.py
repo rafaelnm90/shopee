@@ -38,7 +38,8 @@ def carregar_configuracoes():
         if EXIBIR_LOGS: logger.warning("⚠️ Arquivo alvos_divulgacao.json não encontrado. Aguardando o bot principal criá-lo.")
         return None
 
-async def gerar_texto_divulgacao():
+async def gerar_texto_divulgacao(repeticoes=6):
+    if EXIBIR_LOGS: print(f"✅ Função iniciada com {repeticoes} repetições.")
     prompt = (
         "Você é um copywriter criativo divulgando um grupo do Telegram para afiliados da Shopee. "
         "Crie UMA ÚNICA FRASE curta, muito chamativa e DIFERENTE de todas que você já criou anteriormente. "
@@ -82,25 +83,23 @@ async def gerar_texto_divulgacao():
     # Monta o bloco curto com o link obrigatório e a quebra de linha em branco
     bloco_unico = f"{frase_ia}\n\nLINK PARA O GRUPO:👇\nhttps://t.me/shopee_video_afiliado"
     
-    # ✅ Lê as configurações para multiplicar dinamicamente o bloco
-    config = carregar_configuracoes()
-    repeticoes = config.get("repeticoes_internas", 6) if config else 6
-    
     if EXIBIR_LOGS: logger.info(f"🔄 Multiplicando bloco de texto {repeticoes} vezes na mesma mensagem.")
     
-    # Multiplica o bloco na mesma mensagem, separando por quebras de linha duplas
     texto_multiplicado = "\n\n\n".join([bloco_unico] * repeticoes)
     
     return texto_multiplicado
 
 async def enviar_mensagem(alvo):
-    texto = await gerar_texto_divulgacao()
+    config = carregar_configuracoes()
+    config_alvos = config.get("config_alvos", {}) if config else {}
+    conf_alvo = config_alvos.get(alvo, {})
+    
+    replicas = conf_alvo.get("replicas", config.get("replicas_mensagem", 5) if config else 5)
+    repeticoes = conf_alvo.get("repeticoes", config.get("repeticoes_internas", 6) if config else 6)
+    
+    texto = await gerar_texto_divulgacao(repeticoes)
     try:
         entidade = await client.get_entity(alvo)
-        
-        # ✅ Lê a quantidade de réplicas configuradas no JSON
-        config = carregar_configuracoes()
-        replicas = config.get("replicas_mensagem", 5) if config else 5
         
         if EXIBIR_LOGS: logger.info(f"📤 Iniciando disparo em rajada de {replicas} mensagens para {alvo}...")
         
@@ -124,23 +123,29 @@ def programar_envios_da_hora():
         return
 
     alvos = config["alvos"]
-    freq = config["frequencia_por_hora"]
+    freq_global = config.get("frequencia_por_hora", 0)
+    config_alvos = config.get("config_alvos", {})
     
     agora = datetime.now()
-    if EXIBIR_LOGS: logger.info(f"🔄 Sorteando {freq} envios para a hora atual ({agora.hour}h)...")
 
-    for _ in range(freq):
-        minuto_sorteado = random.randint(1, 58)
-        horario_disparo = agora.replace(minute=minuto_sorteado, second=random.randint(0, 59))
+    for alvo in alvos:
+        conf_alvo = config_alvos.get(alvo, {})
+        freq_alvo = conf_alvo.get("frequencia", freq_global)
         
-        # Impede que horários no passado travem o agendamento, jogando para os próximos minutos
-        if horario_disparo < agora:
-            horario_disparo = agora + timedelta(minutes=random.randint(1, 5))
+        if freq_alvo <= 0: continue
+        
+        if EXIBIR_LOGS: logger.info(f"🔄 Sorteando {freq_alvo} envios para {alvo} na hora atual ({agora.hour}h)...")
 
-        for alvo in alvos:
+        for _ in range(freq_alvo):
+            minuto_sorteado = random.randint(1, 58)
+            horario_disparo = agora.replace(minute=minuto_sorteado, second=random.randint(0, 59))
+            
+            if horario_disparo < agora:
+                horario_disparo = agora + timedelta(minutes=random.randint(1, 5))
+
             scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo, args=[alvo])
             
-        if EXIBIR_LOGS: logger.info(f"⏰ Disparo para {alvo} agendado para: {horario_disparo.strftime('%H:%M:%S')}")
+        if EXIBIR_LOGS: logger.info(f"⏰ Envios agendados para {alvo} na faixa de {agora.hour}h.")
 
 async def monitorar_comandos():
     while True:
