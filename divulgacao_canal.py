@@ -40,23 +40,43 @@ def carregar_configuracoes():
 
 async def gerar_texto_divulgacao():
     prompt = (
-        "Você atua divulgando um grupo do Telegram para afiliados da Shopee. "
-        "Crie UMA ÚNICA FRASE curta, direta e muito chamativa. "
-        "A frase deve INFORMAR OBRIGATORIAMENTE que o grupo é um ACERVO DE VÍDEOS EDITADOS. "
-        "A frase deve focar na seguinte promessa: O grupo possui TÉCNICAS COMPROVADAS para evitar que o afiliado receba punições por 'Produto Irrelevante' e 'Contrafeito' da Shopee. "
-        "Seja criativo e mude as palavras a cada geração. "
-        "Comece a frase com ⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️. "
-        "Entregue apenas a frase final, sem aspas ou formatações extras."
+        "Você é um copywriter criativo divulgando um grupo do Telegram para afiliados da Shopee. "
+        "Crie UMA ÚNICA FRASE curta, muito chamativa e DIFERENTE de todas que você já criou anteriormente. "
+        "OBRIGATÓRIO: Informe que o grupo é um ACERVO DE VÍDEOS EDITADOS com técnicas anti-punição (contra produtos irrelevantes/contrafeitos). "
+        "Use gírias, emojis variados e tom persuasivo. "
+        "Comece com ⚠️. Entregue APENAS a frase final, sem aspas."
     )
-    try:
-        response = await asyncio.to_thread(
-            client_genai.models.generate_content,
-            model="gemini-2.5-flash",
-            contents=prompt
-        )
-        frase_ia = response.text.strip()
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao gerar texto com IA: {e}")
+    
+    modelos_disponiveis = [
+        "gemini-3.1-flash-lite-preview",
+        "gemini-2.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash-lite"
+    ]
+    
+    frase_ia = None
+    for modelo_nome in modelos_disponiveis:
+        try:
+            if EXIBIR_LOGS: logger.info(f"⏳ A consultar o motor de IA: {modelo_nome}...")
+            response = await asyncio.to_thread(
+                client_genai.models.generate_content,
+                model=modelo_nome,
+                contents=prompt
+            )
+            if response and response.text:
+                if EXIBIR_LOGS: logger.info(f"✅ Sucesso com o modelo {modelo_nome}!")
+                frase_ia = response.text.strip()
+                break
+        except Exception as e:
+            erro_str = str(e)
+            if "429" in erro_str:
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Limite atingido em {modelo_nome}. A tentar a próxima alternativa...")
+            else:
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Modelo {modelo_nome} indisponível: {erro_str[:50]}...")
+            continue
+
+    if not frase_ia:
+        if EXIBIR_LOGS: logger.error("❌ Todos os modelos falharam. A utilizar frase padrão de segurança.")
         frase_ia = "⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️\nFugindo de ban por Produto Irrelevante ou Contrafeito? Acesse nosso acervo de vídeos editados e validados!"
 
     # Monta o bloco curto com o link obrigatório e a quebra de linha em branco
