@@ -125,8 +125,8 @@ teclado_finalizar = ReplyKeyboardMarkup(
 teclado_configuracoes_gerais = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Mensagens de Rotina ⏰")],
-        [KeyboardButton(text="Pausar/Retomar Automações ⏸️")],
         [KeyboardButton(text="SPAM em Grupos 📢")],
+        [KeyboardButton(text="Pausar/Retomar Automações ⏸️")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ],
     resize_keyboard=True,
