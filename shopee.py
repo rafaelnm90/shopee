@@ -124,9 +124,9 @@ teclado_finalizar = ReplyKeyboardMarkup(
 # --- NOVOS TECLADOS DE CONFIGURAÇÃO ---
 teclado_configuracoes_gerais = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="SPAM em Grupos 📢")],
         [KeyboardButton(text="Mensagens de Rotina ⏰")],
         [KeyboardButton(text="Pausar/Retomar Automações ⏸️")],
+        [KeyboardButton(text="SPAM em Grupos 📢")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ],
     resize_keyboard=True,
@@ -147,7 +147,8 @@ teclado_opcoes_divulgacao = ReplyKeyboardMarkup(
 teclado_opcoes_rotina = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Boa Noite 🌙")],
-        [KeyboardButton(text="Editar Incentivo 🔥"), KeyboardButton(text="Voltar 🔙")]
+        [KeyboardButton(text="Editar Incentivo 🔥"), KeyboardButton(text="Editar Convite 🔗")],
+        [KeyboardButton(text="Editar Prompt GEM 🤖"), KeyboardButton(text="Voltar 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -298,13 +299,21 @@ async def disparar_mensagem(tipo):
 def ler_config_rotina():
     try:
         with open("config_rotina.json", "r") as f:
-            return json.load(f)
+            dados = json.load(f)
+            # Adiciona chaves padrão se não existirem (retrocompatibilidade)
+            if "link_grupo" not in dados:
+                dados["link_grupo"] = {"inicio": 9, "fim": 21, "frequencia": 3}
+            if "divulgar_gem" not in dados:
+                dados["divulgar_gem"] = {"inicio": 8, "fim": 22, "frequencia": 1}
+            return dados
     except (FileNotFoundError, json.JSONDecodeError):
         # Configuração padrão de segurança se o arquivo não existir
         return {
             "bom_dia": {"inicio": 6, "fim": 9, "frequencia": 1},
             "incentivo": {"inicio": 10, "fim": 20, "frequencia": 2},
-            "boa_noite": {"inicio": 21, "fim": 23, "frequencia": 1}
+            "boa_noite": {"inicio": 21, "fim": 23, "frequencia": 1},
+            "link_grupo": {"inicio": 9, "fim": 21, "frequencia": 3},
+            "divulgar_gem": {"inicio": 8, "fim": 22, "frequencia": 1}
         }
 
 def salvar_config_rotina(dados):
@@ -335,26 +344,6 @@ def agendar_tarefas_diarias():
             scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=minuto_sorteado, timezone=fuso_horario, args=[tipo], id=job_id, replace_existing=True)
             if EXIBIR_LOGS: logger.info(f"📅 {tipo.upper()} [{i+1}/{freq}]: Sorteado para {hora_sorteada:02d}:{minuto_sorteado:02d}")
 
-    # ✅ Sorteio dos 3 turnos de divulgação
-    hora_link_manha = random.randint(9, 12)
-    minuto_link_manha = random.randint(0, 59)
-    
-    hora_link_tarde = random.randint(14, 17)
-    minuto_link_tarde = random.randint(0, 59)
-    
-    hora_link_noite = random.randint(18, 21)
-    minuto_link_noite = random.randint(0, 59)
-    
-    # ✅ Agendamento dos 3 disparos de convite (Com fuso horário blindado e sem duplicação de rotinas)
-    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_manha, minute=minuto_link_manha, timezone=fuso_horario, args=["link_grupo"], id='job_link_manha', replace_existing=True)
-    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_tarde, minute=minuto_link_tarde, timezone=fuso_horario, args=["link_grupo"], id='job_link_tarde', replace_existing=True)
-    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_noite, minute=minuto_link_noite, timezone=fuso_horario, args=["link_grupo"], id='job_link_noite', replace_existing=True)
-
-    # ✅ Agendamento do disparo diário do GEM (Sorteio restrito entre 08h e 22h)
-    hora_gem = random.randint(8, 22)
-    minuto_gem = random.randint(0, 59)
-    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_gem, minute=minuto_gem, timezone=fuso_horario, args=["divulgar_gem"], id='job_divulgar_gem', replace_existing=True)
-
     from datetime import datetime, timedelta
     hoje_alvo = datetime.now(fuso_horario)
     
@@ -383,12 +372,6 @@ def agendar_tarefas_diarias():
                 logger.info(f"⏳ Alerta Campanha Tarde: {hora_c_tarde:02d}:{min_c_tarde:02d}")
                 logger.info(f"⏳ Alerta Campanha Noite: {hora_c_noite:02d}:{min_c_noite:02d}")
             break
-    
-    if EXIBIR_LOGS:
-        logger.info(f"📢 Divulgação Manhã: {hora_link_manha:02d}:{minuto_link_manha:02d}")
-        logger.info(f"📢 Divulgação Tarde: {hora_link_tarde:02d}:{minuto_link_tarde:02d}")
-        logger.info(f"📢 Divulgação Noite: {hora_link_noite:02d}:{minuto_link_noite:02d}")
-        logger.info(f"🤖 Divulgação GEM: {hora_gem:02d}:{minuto_gem:02d}")
 
 # 5. HANDLERS DE COMANDO E INTERAÇÃO
 @dp.message(Command("start"))
@@ -998,8 +981,16 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
     dados = ler_config_rotina()
     texto = "⏰ <b>Configuração de Janelas e Frequência</b>\n\n"
     
+    nomes_amigaveis = {
+        "bom_dia": "Bom Dia ☀️",
+        "boa_noite": "Boa Noite 🌙",
+        "incentivo": "Incentivo 🔥",
+        "link_grupo": "Convite do Grupo 🔗",
+        "divulgar_gem": "Prompt GEM 🤖"
+    }
+    
     for tipo, config in dados.items():
-        nome_exibicao = tipo.replace("_", " ").title()
+        nome_exibicao = nomes_amigaveis.get(tipo, tipo.replace("_", " ").title())
         texto += f"🔹 <b>{nome_exibicao}</b>\n"
         texto += f"   Janela de Sorteio: {config['inicio']}h às {config['fim']}h\n"
         texto += f"   Disparos por Dia: {config['frequencia']}x\n\n"
@@ -1008,12 +999,14 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=teclado_opcoes_rotina, parse_mode="HTML")
     await state.set_state(ConfigRotina.menu_principal)
 
-@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥"]))
+@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖"]))
 async def pedir_horario_rotina(message: types.Message, state: FSMContext):
     tipo_map = {
         "Editar Bom Dia ☀️": "bom_dia",
         "Editar Boa Noite 🌙": "boa_noite",
-        "Editar Incentivo 🔥": "incentivo"
+        "Editar Incentivo 🔥": "incentivo",
+        "Editar Convite 🔗": "link_grupo",
+        "Editar Prompt GEM 🤖": "divulgar_gem"
     }
     tipo = tipo_map[message.text]
     await state.update_data(tipo_edicao=tipo)
