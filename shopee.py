@@ -61,6 +61,7 @@ class PostagemFluxo(StatesGroup):
 
 class ConfigFluxo(StatesGroup):
     aguardando_novo_numero = State()
+    aguardando_confirmacao_zerar = State()
 
 class ConfigDivulgacao(StatesGroup):
     menu_principal = State()
@@ -116,6 +117,25 @@ teclado_finalizar = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Finalizar ✅")],
         [KeyboardButton(text="Cancelar ❌")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+# 🛠️ Teclado de sub-menu para edição da numeração
+teclado_opcoes_numero = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Editar Número ✏️"), KeyboardButton(text="Zerar Contador 🔄")],
+        [KeyboardButton(text="Voltar ao Início 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+# 🛠️ Teclado de confirmação de segurança para evitar zerar acidentalmente
+teclado_confirmar_zerar = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -190,9 +210,9 @@ def obter_teclado_e_status_pausa():
 def obter_teclado_principal():
     botoes = [
         [KeyboardButton(text="Criar Postagem 📝")],
+        [KeyboardButton(text="Editar Número da Postagem 🔢")],
         [KeyboardButton(text="Enviar mensagem de Bom Dia ☀️"), KeyboardButton(text="Enviar mensagem de Incentivo 🔥")],
         [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙"), KeyboardButton(text="Enviar Convite do Grupo 📢")],
-        [KeyboardButton(text="Zerar Contador 🔄"), KeyboardButton(text="Editar Número ✏️")],
         [KeyboardButton(text="Configurações Gerais ⚙️")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -755,12 +775,34 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     await state.clear()
 
 # ✅ Handlers para Gerenciar a Numeração
-@dp.message(F.text == "Zerar Contador 🔄")
-async def zerar_numero(message: types.Message):
+@dp.message(F.text == "Editar Número da Postagem 🔢")
+async def menu_editar_numero(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    salvar_contador(1)
-    if EXIBIR_LOGS: logger.info("🔢 Contador zerado pelo administrador.")
-    await message.answer("Contador zerado! O próximo post será o 'Vídeo 1'.", reply_markup=obter_teclado_principal())
+    numero_atual = ler_contador()
+    await message.answer(f"O próximo vídeo será o <b>{numero_atual}</b>.\nEscolha uma ação abaixo:", reply_markup=teclado_opcoes_numero, parse_mode="HTML")
+
+@dp.message(F.text == "Zerar Contador 🔄")
+async def confirmar_zerar_numero(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    numero_atual = ler_contador()
+    if EXIBIR_LOGS: logger.info("⚠️ Solicitando confirmação de segurança para zerar contador.")
+    texto_confirmacao = (
+        f"⚠️ <b>Atenção!</b>\n\n"
+        f"O vídeo atual está no número <b>{numero_atual}</b> e iremos zerar para o vídeo número <b>1</b>.\n"
+        f"Você aprova essa ação?"
+    )
+    await message.answer(texto_confirmacao, reply_markup=teclado_confirmar_zerar, parse_mode="HTML")
+    await state.set_state(ConfigFluxo.aguardando_confirmacao_zerar)
+
+@dp.message(ConfigFluxo.aguardando_confirmacao_zerar)
+async def processar_zerar_numero(message: types.Message, state: FSMContext):
+    if message.text == "Aprovar ✅":
+        salvar_contador(1)
+        if EXIBIR_LOGS: logger.info("🔢 Contador zerado pelo administrador após confirmação.")
+        await message.answer("Contador zerado com sucesso! O próximo post será o 'Vídeo 1'.", reply_markup=obter_teclado_principal())
+        await state.clear()
+    else:
+        await message.answer("Por favor, clique em Aprovar ✅ ou Cancelar ❌.", reply_markup=teclado_confirmar_zerar)
 
 @dp.message(F.text == "Editar Número ✏️")
 async def pedir_novo_numero(message: types.Message, state: FSMContext):
