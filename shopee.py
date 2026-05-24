@@ -1021,11 +1021,16 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
         "divulgar_gem": "Prompt GEM 🤖"
     }
     
-    for tipo, config in dados.items():
-        nome_exibicao = nomes_amigaveis.get(tipo, tipo.replace("_", " ").title())
-        texto += f"🔹 <b>{nome_exibicao}</b>\n"
-        texto += f"   Janela de Sorteio: {config['inicio']}h às {config['fim']}h\n"
-        texto += f"   Disparos por Dia: {config['frequencia']}x\n\n"
+    # Ordem de exibição forçada para organizar o painel
+    ordem_exibicao = ["bom_dia", "incentivo", "link_grupo", "divulgar_gem", "boa_noite"]
+    
+    for tipo in ordem_exibicao:
+        if tipo in dados:
+            config = dados[tipo]
+            nome_exibicao = nomes_amigaveis.get(tipo, tipo.replace("_", " ").title())
+            texto += f"🔹 <b>{nome_exibicao}</b>\n"
+            texto += f"   Janela de Sorteio: {config['inicio']}h às {config['fim']}h\n"
+            texto += f"   Disparos por Dia: {config['frequencia']}x\n\n"
         
     texto += "Selecione o que deseja editar abaixo:"
     await message.answer(texto, reply_markup=teclado_opcoes_rotina, parse_mode="HTML")
