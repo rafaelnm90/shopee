@@ -154,15 +154,37 @@ teclado_opcoes_rotina = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-teclado_opcoes_pausa = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Pausar/Retomar Divulgação ⏸️")],
-        [KeyboardButton(text="Pausar/Retomar Rotina ⏰")],
-        [KeyboardButton(text="Voltar 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+# 🛠️ Função dinâmica para o menu de pausa e status
+def obter_teclado_e_status_pausa():
+    dados = ler_alvos_divulgacao()
+    spam_pausado = dados.get("pausado", False)
+    
+    from apscheduler.schedulers.base import STATE_RUNNING
+    rotina_rodando = scheduler.state == STATE_RUNNING
+    
+    texto_spam = "Retomar SPAM em Grupos ▶️" if spam_pausado else "Pausar SPAM em Grupos ⏸️"
+    texto_rotina = "Pausar Mensagens de Rotina ⏸️" if rotina_rodando else "Retomar Mensagens de Rotina ▶️"
+    
+    status_spam = "🔴 PAUSADO" if spam_pausado else "🟢 ATIVO"
+    status_rotina = "🟢 ATIVAS" if rotina_rodando else "🔴 PAUSADAS"
+    
+    painel = (
+        "🛠️ <b>Painel de Controle de Automações:</b>\n\n"
+        f"📢 <b>SPAM em Grupos:</b> {status_spam}\n"
+        f"⏰ <b>Mensagens de Rotina:</b> {status_rotina}\n\n"
+        "Selecione a ação desejada abaixo:"
+    )
+    
+    teclado = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=texto_spam)],
+            [KeyboardButton(text=texto_rotina)],
+            [KeyboardButton(text="Voltar 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    return painel, teclado
 
 # 🛠️ Função centralizadora do menu principal
 def obter_teclado_principal():
@@ -779,10 +801,12 @@ async def voltar_configs(message: types.Message, state: FSMContext):
 @dp.message(F.text == "Pausar/Retomar Automações ⏸️")
 async def menu_pausa(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    await message.answer("O que você deseja pausar ou retomar?", reply_markup=teclado_opcoes_pausa)
+    painel, teclado = obter_teclado_e_status_pausa()
+    if EXIBIR_LOGS: logger.info("⏸️ Acessando painel dinâmico de automações.")
+    await message.answer(painel, reply_markup=teclado, parse_mode="HTML")
     await state.set_state(ConfigPausa.menu_principal)
 
-@dp.message(ConfigPausa.menu_principal, F.text == "Pausar/Retomar Divulgação ⏸️")
+@dp.message(ConfigPausa.menu_principal, F.text.in_(["Pausar SPAM em Grupos ⏸️", "Retomar SPAM em Grupos ▶️"]))
 async def alternar_pausa_divulgacao(message: types.Message):
     dados = ler_alvos_divulgacao()
     status_atual = dados.get("pausado", False)
@@ -790,24 +814,32 @@ async def alternar_pausa_divulgacao(message: types.Message):
     dados["pausado"] = novo_status
     salvar_alvos_divulgacao(dados)
     
+    painel, teclado = obter_teclado_e_status_pausa()
+    
     if novo_status:
-        if EXIBIR_LOGS: logger.info("⏸️ Divulgação de grupos PAUSADA.")
-        await message.answer("⏸️ <b>Divulgação PAUSADA.</b>\nO Userbot não enviará mais convites até você retomar.", parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info("⏸️ SPAM em grupos PAUSADO.")
+        await message.answer("⏸️ <b>SPAM em Grupos PAUSADO.</b>\nO Userbot não enviará mais convites.", parse_mode="HTML")
     else:
-        if EXIBIR_LOGS: logger.info("▶️ Divulgação de grupos RETOMADA.")
-        await message.answer("▶️ <b>Divulgação RETOMADA.</b>\nO Userbot voltará a operar normalmente.", parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info("▶️ SPAM em grupos ATIVADO.")
+        await message.answer("▶️ <b>SPAM em Grupos ATIVO.</b>\nO Userbot voltará a operar normalmente.", parse_mode="HTML")
+        
+    await message.answer(painel, reply_markup=teclado, parse_mode="HTML")
 
-@dp.message(ConfigPausa.menu_principal, F.text == "Pausar/Retomar Rotina ⏰")
+@dp.message(ConfigPausa.menu_principal, F.text.in_(["Pausar Mensagens de Rotina ⏸️", "Retomar Mensagens de Rotina ▶️"]))
 async def alternar_pausa_rotina(message: types.Message):
-    from apscheduler.schedulers.base import STATE_PAUSED, STATE_RUNNING
+    from apscheduler.schedulers.base import STATE_RUNNING
+    
     if scheduler.state == STATE_RUNNING:
         scheduler.pause()
-        if EXIBIR_LOGS: logger.info("⏸️ Rotina (Bom Dia/Boa Noite) PAUSADA.")
-        await message.answer("⏸️ <b>Rotina PAUSADA.</b>\nAs mensagens automáticas do grupo foram suspensas.", parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info("⏸️ Mensagens de Rotina PAUSADAS.")
+        await message.answer("⏸️ <b>Mensagens de Rotina PAUSADAS.</b>\nAs mensagens automáticas do grupo foram suspensas.", parse_mode="HTML")
     else:
         scheduler.resume()
-        if EXIBIR_LOGS: logger.info("▶️ Rotina (Bom Dia/Boa Noite) RETOMADA.")
-        await message.answer("▶️ <b>Rotina RETOMADA.</b>\nAs mensagens automáticas voltarão a ser enviadas.", parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info("▶️ Mensagens de Rotina ATIVADAS.")
+        await message.answer("▶️ <b>Mensagens de Rotina ATIVAS.</b>\nAs mensagens automáticas voltarão a ser enviadas.", parse_mode="HTML")
+        
+    painel, teclado = obter_teclado_e_status_pausa()
+    await message.answer(painel, reply_markup=teclado, parse_mode="HTML")
 
 # --- LÓGICA DE GERENCIAMENTO DE DIVULGAÇÃO ---
 def ler_alvos_divulgacao():
