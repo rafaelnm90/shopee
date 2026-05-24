@@ -32,4 +32,4 @@ jobs:
             
             # Reinicia o Userbot de divulgação em segundo plano
             pkill -f divulgacao_canal.py || true
-            nohup python3 divulgacao_canal.py > log_divulgacao.txt 2>&1 &
+            nohup python3 divulgacao_canal.py > log_divulgacao.txt 2>&1 </dev/null &
