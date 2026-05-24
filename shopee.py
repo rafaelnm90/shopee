@@ -124,7 +124,7 @@ teclado_finalizar = ReplyKeyboardMarkup(
 # --- NOVOS TECLADOS DE CONFIGURAÇÃO ---
 teclado_configuracoes_gerais = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Divulgação de Grupos 📢")],
+        [KeyboardButton(text="SPAM em Grupos 📢")],
         [KeyboardButton(text="Mensagens de Rotina ⏰")],
         [KeyboardButton(text="Pausar/Retomar Automações ⏸️")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
@@ -155,7 +155,7 @@ teclado_opcoes_rotina = ReplyKeyboardMarkup(
 
 teclado_opcoes_pausa = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Pausar/Retomar Divulgação 📢")],
+        [KeyboardButton(text="Pausar/Retomar Divulgação ⏸️")],
         [KeyboardButton(text="Pausar/Retomar Rotina ⏰")],
         [KeyboardButton(text="Voltar 🔙")]
     ],
@@ -168,7 +168,7 @@ def obter_teclado_principal():
     botoes = [
         [KeyboardButton(text="Criar Postagem 📝")],
         [KeyboardButton(text="Enviar mensagem de Bom Dia ☀️"), KeyboardButton(text="Enviar mensagem de Incentivo 🔥")],
-        [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙"), KeyboardButton(text="Divulgar Grupo 📢")],
+        [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙"), KeyboardButton(text="Enviar Convite do Grupo 📢")],
         [KeyboardButton(text="Zerar Contador 🔄"), KeyboardButton(text="Editar Número ✏️")],
         [KeyboardButton(text="Configurações Gerais ⚙️")]
     ]
@@ -419,7 +419,7 @@ async def manual_incentivo(message: types.Message):
     await disparar_mensagem("incentivo")
     await message.answer("Mensagem de Incentivo enviada ao grupo com sucesso! ✅")
 
-@dp.message(F.text == "Divulgar Grupo 📢")
+@dp.message(F.text == "Enviar Convite do Grupo 📢")
 async def manual_link_grupo(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("Gerando e enviando divulgação do grupo... ⏳")
@@ -799,7 +799,7 @@ async def menu_pausa(message: types.Message, state: FSMContext):
     await message.answer("O que você deseja pausar ou retomar?", reply_markup=teclado_opcoes_pausa)
     await state.set_state(ConfigPausa.menu_principal)
 
-@dp.message(ConfigPausa.menu_principal, F.text == "Pausar/Retomar Divulgação 📢")
+@dp.message(ConfigPausa.menu_principal, F.text == "Pausar/Retomar Divulgação ⏸️")
 async def alternar_pausa_divulgacao(message: types.Message):
     dados = ler_alvos_divulgacao()
     status_atual = dados.get("pausado", False)
@@ -842,7 +842,7 @@ def salvar_alvos_divulgacao(dados):
     with open("alvos_divulgacao.json", "w") as f:
         json.dump(dados, f, indent=4)
 
-@dp.message(F.text == "Divulgação de Grupos 📢")
+@dp.message(F.text == "SPAM em Grupos 📢")
 async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     dados = ler_alvos_divulgacao()
