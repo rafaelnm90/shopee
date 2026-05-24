@@ -332,7 +332,7 @@ def agendar_tarefas_diarias():
             minuto_sorteado = random.randint(0, 59)
             
             job_id = f"job_rotina_{tipo}_{i}"
-            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=minuto_sorteado, args=[tipo], id=job_id, replace_existing=True)
+            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=minuto_sorteado, timezone=fuso_horario, args=[tipo], id=job_id, replace_existing=True)
             if EXIBIR_LOGS: logger.info(f"📅 {tipo.upper()} [{i+1}/{freq}]: Sorteado para {hora_sorteada:02d}:{minuto_sorteado:02d}")
 
     # ✅ Sorteio dos 3 turnos de divulgação
@@ -345,25 +345,15 @@ def agendar_tarefas_diarias():
     hora_link_noite = random.randint(18, 21)
     minuto_link_noite = random.randint(0, 59)
     
-    # ✅ Variáveis ausentes declaradas e sorteadas para evitar o NameError
-    minuto_manha = random.randint(0, 59)
-    hora_incentivo = random.randint(10, 20)
-    minuto_incentivo = random.randint(0, 59)
-    minuto_noite = random.randint(0, 59)
-    
-    scheduler.add_job(disparar_mensagem, 'cron', hour=7, minute=minuto_manha, args=["bom_dia"], id='job_manha', replace_existing=True)
-    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_incentivo, minute=minuto_incentivo, args=["incentivo"], id='job_incentivo', replace_existing=True)
-    scheduler.add_job(disparar_mensagem, 'cron', hour=22, minute=minuto_noite, args=["boa_noite"], id='job_noite', replace_existing=True)
-    
-    # ✅ Agendamento dos 3 disparos de convite
-    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_manha, minute=minuto_link_manha, args=["link_grupo"], id='job_link_manha', replace_existing=True)
-    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_tarde, minute=minuto_link_tarde, args=["link_grupo"], id='job_link_tarde', replace_existing=True)
-    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_noite, minute=minuto_link_noite, args=["link_grupo"], id='job_link_noite', replace_existing=True)
+    # ✅ Agendamento dos 3 disparos de convite (Com fuso horário blindado e sem duplicação de rotinas)
+    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_manha, minute=minuto_link_manha, timezone=fuso_horario, args=["link_grupo"], id='job_link_manha', replace_existing=True)
+    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_tarde, minute=minuto_link_tarde, timezone=fuso_horario, args=["link_grupo"], id='job_link_tarde', replace_existing=True)
+    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_link_noite, minute=minuto_link_noite, timezone=fuso_horario, args=["link_grupo"], id='job_link_noite', replace_existing=True)
 
     # ✅ Agendamento do disparo diário do GEM (Sorteio restrito entre 08h e 22h)
     hora_gem = random.randint(8, 22)
     minuto_gem = random.randint(0, 59)
-    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_gem, minute=minuto_gem, args=["divulgar_gem"], id='job_divulgar_gem', replace_existing=True)
+    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_gem, minute=minuto_gem, timezone=fuso_horario, args=["divulgar_gem"], id='job_divulgar_gem', replace_existing=True)
 
     from datetime import datetime, timedelta
     hoje_alvo = datetime.now(fuso_horario)
@@ -384,9 +374,9 @@ def agendar_tarefas_diarias():
             
             tipo_alerta = f"campanha_{i}"
             
-            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_manha, minute=min_c_manha, args=[tipo_alerta], id='job_campanha_manha', replace_existing=True)
-            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_tarde, minute=min_c_tarde, args=[tipo_alerta], id='job_campanha_tarde', replace_existing=True)
-            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_noite, minute=min_c_noite, args=[tipo_alerta], id='job_campanha_noite', replace_existing=True)
+            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_manha, minute=min_c_manha, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_manha', replace_existing=True)
+            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_tarde, minute=min_c_tarde, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_tarde', replace_existing=True)
+            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_noite, minute=min_c_noite, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_noite', replace_existing=True)
             
             if EXIBIR_LOGS:
                 logger.info(f"⏳ Alerta Campanha Manhã: {hora_c_manha:02d}:{min_c_manha:02d}")
@@ -395,9 +385,6 @@ def agendar_tarefas_diarias():
             break
     
     if EXIBIR_LOGS:
-        logger.info(f"📅 Bom dia: 07:{minuto_manha:02d}")
-        logger.info(f"📅 Incentivo: {hora_incentivo:02d}:{minuto_incentivo:02d}")
-        logger.info(f"📅 Boa noite: 22:{minuto_noite:02d}")
         logger.info(f"📢 Divulgação Manhã: {hora_link_manha:02d}:{minuto_link_manha:02d}")
         logger.info(f"📢 Divulgação Tarde: {hora_link_tarde:02d}:{minuto_link_tarde:02d}")
         logger.info(f"📢 Divulgação Noite: {hora_link_noite:02d}:{minuto_link_noite:02d}")
