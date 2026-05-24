@@ -30,6 +30,9 @@ jobs:
             # Reinicia o serviço usando o nome correto
             sudo systemctl restart shopee_bot.service
             
-            # Reinicia o Userbot de divulgação em segundo plano
-            pkill -f divulgacao_canal.py || true
-            nohup python3 divulgacao_canal.py > log_divulgacao.txt 2>&1 </dev/null &
+            EXIBIR_LOGS=true
+            
+            # Reinicia o Userbot de divulgação de forma nativa e registra log visual
+            if [ "$EXIBIR_LOGS" = true ]; then echo "🚀 Iniciando a transição do Userbot..."; fi
+            sudo systemctl restart divulgacao_bot.service
+            if [ "$EXIBIR_LOGS" = true ]; then echo "✅ Sucesso, Userbot em execução nativa."; fi
