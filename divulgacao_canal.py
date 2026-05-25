@@ -113,7 +113,11 @@ async def enviar_mensagem(alvo):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao enviar rajada para {alvo}: {e}")
 
+# Novo dicionário global para rastrear os agendamentos cruzando a virada das horas
+ultimos_agendamentos_por_alvo = {}
+
 def programar_envios_da_hora():
+    global ultimos_agendamentos_por_alvo
     config = carregar_configuracoes()
     if not config or not config.get("alvos"):
         return
@@ -127,7 +131,8 @@ def programar_envios_da_hora():
     config_alvos = config.get("config_alvos", {})
     
     agora = datetime.now()
-
+    INTERVALO_MINIMO = 15 # Distanciamento rigoroso de 15 minutos
+    
     for alvo in alvos:
         conf_alvo = config_alvos.get(alvo, {})
         freq_alvo = conf_alvo.get("frequencia", freq_global)
@@ -136,16 +141,51 @@ def programar_envios_da_hora():
         
         if EXIBIR_LOGS: logger.info(f"🔄 Sorteando {freq_alvo} envios para {alvo} na hora atual ({agora.hour}h)...")
 
-        for _ in range(freq_alvo):
-            minuto_sorteado = random.randint(1, 58)
-            horario_disparo = agora.replace(minute=minuto_sorteado, second=random.randint(0, 59))
-            
-            if horario_disparo < agora:
-                horario_disparo = agora + timedelta(minutes=random.randint(1, 5))
+        # Fatiamento da hora para alocação otimizada
+        espacamento_ideal = 58 // freq_alvo if freq_alvo > 0 else 58
 
-            scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo, args=[alvo])
+        for i in range(freq_alvo):
+            sucesso = False
             
-        if EXIBIR_LOGS: logger.info(f"⏰ Envios agendados para {alvo} na faixa de {agora.hour}h.")
+            min_inicio_busca = (i * espacamento_ideal) + 1
+            min_fim_busca = min(((i + 1) * espacamento_ideal), 59)
+            if min_fim_busca <= min_inicio_busca:
+                min_fim_busca = 59
+                
+            for tentativa in range(100):
+                minuto_sorteado = random.randint(min_inicio_busca, min_fim_busca)
+                horario_disparo = agora.replace(minute=minuto_sorteado, second=random.randint(0, 59))
+                
+                # Checagem de colisão com o histórico
+                ultimo_envio = ultimos_agendamentos_por_alvo.get(alvo)
+                colisao = False
+                
+                if ultimo_envio:
+                    diferenca = (horario_disparo - ultimo_envio).total_seconds() / 60
+                    if abs(diferenca) < INTERVALO_MINIMO:
+                        colisao = True
+                
+                # Impede agendamentos no passado
+                if horario_disparo < agora:
+                    colisao = True
+                    
+                if not colisao:
+                    ultimos_agendamentos_por_alvo[alvo] = horario_disparo
+                    scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo, args=[alvo])
+                    if EXIBIR_LOGS: logger.info(f"✅ Disparo {i+1}/{freq_alvo} para {alvo} agendado às {horario_disparo.strftime('%H:%M:%S')} (Tentativas: {tentativa+1})")
+                    sucesso = True
+                    break
+                    
+            if not sucesso:
+                if EXIBIR_LOGS: logger.warning(f"⚠️ {alvo} [{i+1}/{freq_alvo}]: Janela muito curta. Acionando fallback forçado para empurrar o envio.")
+                
+                ultimo_conhecido = ultimos_agendamentos_por_alvo.get(alvo, agora)
+                # Adiciona 15 minutos de segurança mais um fator aleatório curto
+                horario_disparo_fallback = ultimo_conhecido + timedelta(minutes=INTERVALO_MINIMO + random.randint(1, 3))
+                
+                ultimos_agendamentos_por_alvo[alvo] = horario_disparo_fallback
+                scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo_fallback, args=[alvo])
+                if EXIBIR_LOGS: logger.info(f"🛡️ Fallback ativado: Disparo {i+1} empurrado para as {horario_disparo_fallback.strftime('%H:%M:%S')}")
 
 async def monitorar_comandos():
     while True:
