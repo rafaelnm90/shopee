@@ -70,8 +70,7 @@ class ConfigDivulgacao(StatesGroup):
     # Novos estados para a edição unificada (Global vs Individual)
     aguardando_tipo_edicao = State()
     aguardando_selecao_alvo = State()
-    aguardando_parametro = State()
-    aguardando_valor = State()
+    aguardando_valores_unificados = State()
 
 class ConfigRotina(StatesGroup):
     menu_principal = State()
@@ -158,7 +157,7 @@ teclado_configuracoes_gerais = ReplyKeyboardMarkup(
 teclado_opcoes_divulgacao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Alvo ➕"), KeyboardButton(text="Excluir Alvo 🗑️")],
-        [KeyboardButton(text="Editar Configurações ⚙️"), KeyboardButton(text="Forçar Disparo Agora 🚀")],
+        [KeyboardButton(text="Forçar Disparo Agora 🚀"), KeyboardButton(text="Editar Configurações ⚙️")],
         [KeyboardButton(text="Voltar 🔙")]
     ],
     resize_keyboard=True,
@@ -169,15 +168,6 @@ teclado_tipo_edicao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Global 🌍"), KeyboardButton(text="Por Alvo 🎯")],
         [KeyboardButton(text="Cancelar ❌")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
-
-teclado_parametros_spam = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Frequência ⏱️"), KeyboardButton(text="Repetições 📝")],
-        [KeyboardButton(text="Réplicas 🔄"), KeyboardButton(text="Cancelar ❌")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -1058,11 +1048,24 @@ async def selecionar_tipo_edicao(message: types.Message, state: FSMContext):
     is_global = message.text == "Global 🌍"
     await state.update_data(edicao_global=is_global)
     
+    dados = ler_alvos_divulgacao()
+    
     if is_global:
-        await message.answer("O que deseja alterar no Padrão Global?", reply_markup=teclado_parametros_spam)
-        await state.set_state(ConfigDivulgacao.aguardando_parametro)
+        freq_atual = dados.get("frequencia_por_hora", 0)
+        rep_atual = dados.get("repeticoes_internas", 6)
+        repl_atual = dados.get("replicas_mensagem", 5)
+        
+        texto_explicativo = (
+            "🌍 <b>Edição do Padrão Global</b>\n\n"
+            "Envie os três valores juntos separados por vírgula nesta exata ordem:\n\n"
+            "<b>1️⃣ Frequência:</b> Disparos por hora efetuados pelo bot.\n"
+            "<b>2️⃣ Repetições:</b> Blocos de texto contidos na mensagem longa.\n"
+            "<b>3️⃣ Réplicas:</b> Mensagens disparadas seguidas na mesma rajada.\n\n"
+            f"<i>Exemplo com a sua configuração atual:</i>\n<code>{freq_atual}, {rep_atual}, {repl_atual}</code>"
+        )
+        await message.answer(texto_explicativo, reply_markup=teclado_cancelar, parse_mode="HTML")
+        await state.set_state(ConfigDivulgacao.aguardando_valores_unificados)
     else:
-        dados = ler_alvos_divulgacao()
         alvos = dados.get("alvos", [])
         if not alvos:
             await message.answer("Não há alvos para editar. Adicione um primeiro.", reply_markup=teclado_opcoes_divulgacao)
@@ -1087,54 +1090,61 @@ async def selecionar_alvo_edicao(message: types.Message, state: FSMContext):
     if 0 <= indice < len(alvos):
         alvo_selecionado = alvos[indice]
         await state.update_data(alvo_em_edicao=alvo_selecionado)
-        await message.answer(f"Editando: <b>{alvo_selecionado}</b>\n\nO que deseja alterar neste alvo?", reply_markup=teclado_parametros_spam, parse_mode="HTML")
-        await state.set_state(ConfigDivulgacao.aguardando_parametro)
+        
+        config_alvos = dados.get("config_alvos", {})
+        conf_alvo = config_alvos.get(alvo_selecionado, {})
+        
+        freq_atual = conf_alvo.get("frequencia", dados.get("frequencia_por_hora", 0))
+        rep_atual = conf_alvo.get("repeticoes", dados.get("repeticoes_internas", 6))
+        repl_atual = conf_alvo.get("replicas", dados.get("replicas_mensagem", 5))
+        
+        texto_explicativo = (
+            f"🎯 <b>Edição do Alvo:</b> {alvo_selecionado}\n\n"
+            "Envie os três valores juntos separados por vírgula nesta exata ordem:\n\n"
+            "<b>1️⃣ Frequência:</b> Disparos por hora.\n"
+            "<b>2️⃣ Repetições:</b> Blocos de texto.\n"
+            "<b>3️⃣ Réplicas:</b> Mensagens por rajada.\n\n"
+            f"<i>Exemplo com os valores deste grupo:</i>\n<code>{freq_atual}, {rep_atual}, {repl_atual}</code>"
+        )
+        await message.answer(texto_explicativo, reply_markup=teclado_cancelar, parse_mode="HTML")
+        await state.set_state(ConfigDivulgacao.aguardando_valores_unificados)
     else:
         await message.answer("Número inválido. Tente novamente:", reply_markup=teclado_cancelar)
 
-@dp.message(ConfigDivulgacao.aguardando_parametro, F.text.in_(["Frequência ⏱️", "Repetições 📝", "Réplicas 🔄"]))
-async def perguntar_valor_spam(message: types.Message, state: FSMContext):
-    param = message.text
-    await state.update_data(parametro_edicao=param)
+@dp.message(ConfigDivulgacao.aguardando_valores_unificados)
+async def salvar_valores_unificados(message: types.Message, state: FSMContext):
+    import re
+    match = re.match(r"^(\d+)\s*,\s*(\d+)\s*,\s*(\d+)$", message.text.strip())
     
-    exemplos = {"Frequência ⏱️": "3", "Repetições 📝": "6", "Réplicas 🔄": "5"}
-    await message.answer(f"Digite o novo valor para <b>{param}</b> (apenas números).\nExemplo: <code>{exemplos[param]}</code>", reply_markup=teclado_cancelar, parse_mode="HTML")
-    await state.set_state(ConfigDivulgacao.aguardando_valor)
-
-@dp.message(ConfigDivulgacao.aguardando_valor)
-async def salvar_valor_spam(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
-        await message.answer("Apenas números são aceitos. Tente novamente:", reply_markup=teclado_cancelar)
+    if not match:
+        await message.answer("Formato inválido. Envie os três números isolados por vírgula (Exemplo: 3, 6, 5).", reply_markup=teclado_cancelar)
         return
         
-    valor = int(message.text)
+    freq, rep, repl = map(int, match.groups())
+    
     data = await state.get_data()
     is_global = data.get("edicao_global")
     alvo = data.get("alvo_em_edicao")
-    param = data.get("parametro_edicao")
     
     dados = ler_alvos_divulgacao()
     if "config_alvos" not in dados:
         dados["config_alvos"] = {}
         
-    mapa_chaves = {
-        "Frequência ⏱️": "frequencia" if not is_global else "frequencia_por_hora",
-        "Repetições 📝": "repeticoes" if not is_global else "repeticoes_internas",
-        "Réplicas 🔄": "replicas" if not is_global else "replicas_mensagem"
-    }
-    chave = mapa_chaves[param]
-    
     if is_global:
-        dados[chave] = valor
-        msg_final = f"✅ <b>Padrão Global atualizado!</b>\nO parâmetro {param} agora é {valor}."
+        dados["frequencia_por_hora"] = freq
+        dados["repeticoes_internas"] = rep
+        dados["replicas_mensagem"] = repl
+        msg_final = f"✅ <b>Padrão Global atualizado!</b>\nFrequência: {freq}x/h | Repetições: {rep}x | Réplicas: {repl}x"
     else:
         if alvo not in dados["config_alvos"]:
             dados["config_alvos"][alvo] = {}
-        dados["config_alvos"][alvo][chave] = valor
-        msg_final = f"✅ <b>Alvo personalizado atualizado!</b>\nAlvo: {alvo}\nO parâmetro {param} agora é {valor}."
+        dados["config_alvos"][alvo]["frequencia"] = freq
+        dados["config_alvos"][alvo]["repeticoes"] = rep
+        dados["config_alvos"][alvo]["replicas"] = repl
+        msg_final = f"✅ <b>Alvo personalizado atualizado!</b>\nAlvo: {alvo}\nFrequência: {freq}x/h | Repetições: {rep}x | Réplicas: {repl}x"
         
     salvar_alvos_divulgacao(dados)
-    if EXIBIR_LOGS: logger.info(f"⚙️ Configuração salva. Global: {is_global} | Parâmetro: {param} | Valor: {valor}")
+    if EXIBIR_LOGS: logger.info(f"⚙️ Configuração salva numa única passagem. Global: {is_global} | Freq: {freq}, Rep: {rep}, Repl: {repl}")
     
     await message.answer(msg_final, reply_markup=teclado_configuracoes_gerais, parse_mode="HTML")
     await state.clear()
