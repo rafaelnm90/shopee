@@ -267,6 +267,47 @@ async def gerar_mensagem_gemini(prompt):
     if EXIBIR_LOGS: logger.error("❌ Falha crítica: Nenhum motor da cascata respondeu.")
     return "🚀 Novos materiais disponíveis! Bora postar e converter!"
 
+# --- SISTEMA DE LIXEIRA PERSISTENTE ---
+def ler_lixeira():
+    try:
+        with open("lixeira_mensagens.json", "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"mensagens": []}
+
+def salvar_lixeira(dados):
+    with open("lixeira_mensagens.json", "w") as f:
+        json.dump(dados, f, indent=4)
+
+def registrar_lixeira(msg_id):
+    from datetime import datetime, timedelta
+    dados = ler_lixeira()
+    data_exclusao = (datetime.now(fuso_horario) + timedelta(hours=24)).isoformat()
+    dados["mensagens"].append({"id": msg_id, "excluir_em": data_exclusao})
+    salvar_lixeira(dados)
+    if EXIBIR_LOGS: logger.info(f"💾 ID {msg_id} salvo na lixeira persistente para exclusão em 24h.")
+
+async def varredor_de_lixeira():
+    from datetime import datetime
+    if EXIBIR_LOGS: logger.info("🧹 Iniciando varredura da lixeira persistente...")
+    dados = ler_lixeira()
+    mensagens = dados.get("mensagens", [])
+    mensagens_restantes = []
+    agora = datetime.now(fuso_horario)
+    
+    for msg in mensagens:
+        try:
+            data_exclusao = datetime.fromisoformat(msg["excluir_em"])
+            if agora >= data_exclusao:
+                await apagar_mensagem_automatica(msg["id"])
+            else:
+                mensagens_restantes.append(msg)
+        except Exception as e:
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Falha ao ler data da lixeira: {e}")
+            
+    dados["mensagens"] = mensagens_restantes
+    salvar_lixeira(dados)
+
 async def apagar_mensagem_automatica(msg_id):
     try:
         await bot.delete_message(chat_id=GRUPO_ID, message_id=msg_id)
@@ -331,21 +372,19 @@ async def disparar_mensagem(tipo):
     if EXIBIR_LOGS: logger.info(f"🚀 Enviando mensagem principal ({tipo}): {texto[:20]}...")
     msg_enviada = await bot.send_message(GRUPO_ID, texto)
     
-    from datetime import timedelta
-    data_exclusao = datetime.now(fuso_horario) + timedelta(hours=24)
-    scheduler.add_job(apagar_mensagem_automatica, 'date', run_date=data_exclusao, args=[msg_enviada.message_id])
+    registrar_lixeira(msg_enviada.message_id)
     
     # ✅ Disparo condicional: Envia o link separado apenas na divulgação e no GEM
     if tipo == "link_grupo":
         link_separado = f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}"
         if EXIBIR_LOGS: logger.info("🔗 Enviando link do grupo em mensagem isolada.")
         msg_link = await bot.send_message(GRUPO_ID, link_separado, parse_mode="HTML")
-        scheduler.add_job(apagar_mensagem_automatica, 'date', run_date=data_exclusao, args=[msg_link.message_id])
+        registrar_lixeira(msg_link.message_id)
     elif tipo == "divulgar_gem":
         link_gem = "👇 <b>Acesse o Prompt Automatizado:</b>\nhttps://gemini.google.com/gem/1HtJMuknyMZ76utOu-i6c_xvc3vmQx7bT?usp=sharing"
         if EXIBIR_LOGS: logger.info("🤖 Enviando link do GEM em mensagem isolada.")
         msg_gem = await bot.send_message(GRUPO_ID, link_gem, parse_mode="HTML")
-        scheduler.add_job(apagar_mensagem_automatica, 'date', run_date=data_exclusao, args=[msg_gem.message_id])
+        registrar_lixeira(msg_gem.message_id)
 
 def ler_config_rotina():
     try:
@@ -1269,8 +1308,14 @@ async def main():
     # Agendador mestre que roda todo dia às 00:01
     scheduler.add_job(agendar_tarefas_diarias, 'cron', hour=0, minute=1)
     
+    # ✅ Novo: Agendador da lixeira persistente (roda a cada hora no minuto 0)
+    scheduler.add_job(varredor_de_lixeira, 'cron', minute=0)
+    
     # Roda o agendador imediatamente ao ligar o bot para garantir o dia atual
     agendar_tarefas_diarias() 
+    
+    # Roda a faxina imediatamente ao ligar para limpar pendências de quedas
+    asyncio.create_task(varredor_de_lixeira())
     
     scheduler.start()
     await dp.start_polling(bot)
