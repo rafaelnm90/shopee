@@ -1104,7 +1104,7 @@ async def selecionar_alvo_edicao(message: types.Message, state: FSMContext):
             "<b>1️⃣ Frequência:</b> Disparos por hora efetuados pelo bot.\n"
             "<b>2️⃣ Repetições:</b> Blocos de texto contidos na mensagem longa.\n"
             "<b>3️⃣ Réplicas:</b> Mensagens disparadas seguidas na mesma rajada.\n\n"
-            f"<i>Exemplo com a sua configuração atual deste grupo:</i>\n<code>{freq_atual}, {rep_atual}, {repl_atual}</code>"
+            f"<i>Exemplo com a sua configuração atual:</i>\n<code>{freq_atual}, {rep_atual}, {repl_atual}</code>"
         )
         await message.answer(texto_explicativo, reply_markup=teclado_cancelar, parse_mode="HTML")
         await state.set_state(ConfigDivulgacao.aguardando_valores_unificados)
