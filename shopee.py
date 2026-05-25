@@ -185,9 +185,9 @@ teclado_parametros_spam = ReplyKeyboardMarkup(
 
 teclado_opcoes_rotina = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Boa Noite 🌙")],
-        [KeyboardButton(text="Editar Incentivo 🔥"), KeyboardButton(text="Editar Convite 🔗")],
-        [KeyboardButton(text="Editar Prompt GEM 🤖"), KeyboardButton(text="Voltar 🔙")]
+        [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
+        [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
+        [KeyboardButton(text="Editar Boa Noite 🌙"), KeyboardButton(text="Voltar 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -382,7 +382,7 @@ def salvar_config_rotina(dados):
         json.dump(dados, f, indent=4)
 
 def agendar_tarefas_diarias():
-    if EXIBIR_LOGS: logger.info("🔄 Sorteando horários de rotina com base nas janelas configuradas...")
+    if EXIBIR_LOGS: logger.info("🔄 Sorteando horários de rotina com inteligência anti-spam...")
     
     # Limpa exclusivamente os jobs antigos de rotina para evitar duplicatas ao forçar re-sorteio
     for job in scheduler.get_jobs():
@@ -390,20 +390,63 @@ def agendar_tarefas_diarias():
             job.remove()
 
     dados_rotina = ler_config_rotina()
+    horarios_ocupados = [] 
+    INTERVALO_MINIMO = 30 # Distância mínima em minutos entre qualquer mensagem
     
-    # Executa o sorteio dinâmico para Bom Dia, Incentivo e Boa Noite
+    # Executa o sorteio dinâmico e inteligente
     for tipo, config in dados_rotina.items():
         freq = config.get("frequencia", 1)
         inicio = config.get("inicio", 6)
         fim = config.get("fim", 22)
         
+        limite_superior = fim - 1 if fim > inicio else fim
+        if EXIBIR_LOGS: logger.info(f"🧮 Configurando {tipo}: {freq}x entre {inicio}h e {limite_superior}h59.")
+        
+        # Calcula o espaçamento ideal para distribuir mensagens do mesmo tipo
+        minutos_disponiveis = (limite_superior * 60 + 59) - (inicio * 60)
+        espacamento_ideal = minutos_disponiveis // freq if freq > 1 else 0
+        
         for i in range(freq):
-            hora_sorteada = random.randint(inicio, fim)
-            minuto_sorteado = random.randint(0, 59)
+            sucesso = False
             
-            job_id = f"job_rotina_{tipo}_{i}"
-            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=minuto_sorteado, timezone=fuso_horario, args=[tipo], id=job_id, replace_existing=True)
-            if EXIBIR_LOGS: logger.info(f"📅 {tipo.upper()} [{i+1}/{freq}]: Sorteado para {hora_sorteada:02d}:{minuto_sorteado:02d}")
+            # Subdivide a janela total em sub-blocos para cada disparo
+            min_inicio_busca = (inicio * 60) + (i * espacamento_ideal)
+            if freq > 1:
+                min_fim_busca = min((inicio * 60) + ((i + 1) * espacamento_ideal), (limite_superior * 60 + 59))
+            else:
+                min_fim_busca = (limite_superior * 60 + 59)
+                
+            for tentativa in range(100):
+                minuto_absoluto = random.randint(min_inicio_busca, min_fim_busca)
+                
+                # Validação global rigorosa contra sobreposição (30 minutos)
+                colisao = False
+                for ocupado in horarios_ocupados:
+                    if abs(minuto_absoluto - ocupado) < INTERVALO_MINIMO:
+                        colisao = True
+                        break
+                
+                if not colisao:
+                    horarios_ocupados.append(minuto_absoluto)
+                    hora_sorteada = minuto_absoluto // 60
+                    min_sorteado = minuto_absoluto % 60
+                    
+                    job_id = f"job_rotina_{tipo}_{i}"
+                    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=min_sorteado, timezone=fuso_horario, args=[tipo], id=job_id, replace_existing=True)
+                    if EXIBIR_LOGS: logger.info(f"✅ {tipo.upper()} [{i+1}/{freq}]: Agendado para {hora_sorteada:02d}:{min_sorteado:02d} (Tentativas: {tentativa+1})")
+                    sucesso = True
+                    break
+                    
+            if not sucesso:
+                # O motor aplica o fallback restrito caso a janela esteja muito congestionada
+                if EXIBIR_LOGS: logger.warning(f"⚠️ {tipo.upper()} [{i+1}/{freq}]: Limite de tentativas excedido. Aplicando fallback forçado na lacuna.")
+                minuto_absoluto_fallback = random.randint(min_inicio_busca, min_fim_busca)
+                hora_sorteada = minuto_absoluto_fallback // 60
+                min_sorteado = minuto_absoluto_fallback % 60
+                
+                job_id = f"job_rotina_{tipo}_{i}"
+                scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=min_sorteado, timezone=fuso_horario, args=[tipo], id=job_id, replace_existing=True)
+                if EXIBIR_LOGS: logger.info(f"📅 {tipo.upper()} [{i+1}/{freq}]: Agendamento fallback para {hora_sorteada:02d}:{min_sorteado:02d}")
 
     from datetime import datetime, timedelta
     hoje_alvo = datetime.now(fuso_horario)
