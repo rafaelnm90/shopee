@@ -157,7 +157,7 @@ teclado_configuracoes_gerais = ReplyKeyboardMarkup(
 teclado_opcoes_divulgacao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Alvo ➕"), KeyboardButton(text="Excluir Alvo 🗑️")],
-        [KeyboardButton(text="Forçar Disparo Agora 🚀"), KeyboardButton(text="Editar Configurações ⚙️")],
+        [KeyboardButton(text="Editar Configurações ⚙️"), KeyboardButton(text="Forçar Disparo Agora 🚀")],
         [KeyboardButton(text="Voltar 🔙")]
     ],
     resize_keyboard=True,
