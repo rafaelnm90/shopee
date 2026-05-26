@@ -90,7 +90,12 @@ async def gerar_texto_divulgacao(repeticoes=6):
     return texto_multiplicado
 
 async def enviar_mensagem(alvo):
+    if EXIBIR_LOGS: logger.info(f"🔍 Validando status de pausa antes do disparo para {alvo}...")
     config = carregar_configuracoes()
+    if config and config.get("pausado", False):
+        if EXIBIR_LOGS: logger.warning("🛑 Disparo cancelado: O sistema de SPAM está pausado no momento.")
+        return
+        
     config_alvos = config.get("config_alvos", {}) if config else {}
     conf_alvo = config_alvos.get(alvo, {})
     
@@ -191,16 +196,22 @@ async def monitorar_comandos():
     while True:
         config = carregar_configuracoes()
         if config and config.get("forcar_disparo"):
-            if EXIBIR_LOGS: logger.info("🚀 Comando de DISPARO FORÇADO detectado! Iniciando rajada...")
-            
-            # Limpa a flag imediatamente no JSON para o bot não ficar repetindo em loop
-            config["forcar_disparo"] = False
-            with open("alvos_divulgacao.json", "w") as f:
-                json.dump(config, f, indent=4)
+            if config.get("pausado", False):
+                if EXIBIR_LOGS: logger.warning("🛑 Comando forçado ignorado: O sistema de SPAM está pausado.")
+                config["forcar_disparo"] = False
+                with open("alvos_divulgacao.json", "w") as f:
+                    json.dump(config, f, indent=4)
+            else:
+                if EXIBIR_LOGS: logger.info("🚀 Comando de DISPARO FORÇADO detectado! Iniciando rajada...")
                 
-            alvos = config.get("alvos", [])
-            for alvo in alvos:
-                await enviar_mensagem(alvo)
+                # Limpa a flag imediatamente no JSON para o bot não ficar repetindo em loop
+                config["forcar_disparo"] = False
+                with open("alvos_divulgacao.json", "w") as f:
+                    json.dump(config, f, indent=4)
+                    
+                alvos = config.get("alvos", [])
+                for alvo in alvos:
+                    await enviar_mensagem(alvo)
         await asyncio.sleep(5)
 
 async def main():
