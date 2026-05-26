@@ -1044,6 +1044,15 @@ async def alternar_pausa_rotina(message: types.Message):
     painel, teclado = obter_teclado_e_status_pausa()
     await message.answer(painel, reply_markup=teclado, parse_mode="HTML")
 
+# ✅ NOVO: Handler específico para corrigir o "Voltar" na pausa programada
+@dp.message(PausaProgramadaFluxo.aguardando_selecao_servicos, F.text == "Voltar 🔙")
+@dp.message(PausaProgramadaFluxo.aguardando_data_retorno, F.text == "Voltar 🔙")
+async def voltar_pausa_para_inicio(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🔙 Comando Voltar acionado na Pausa Programada.")
+    await state.clear()
+    await message.answer("Operação cancelada. Voltando ao menu principal.", reply_markup=obter_teclado_principal())
+
 @dp.message(F.text == "Pausar Postagens 🛑")
 async def iniciar_pausa_programada(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
