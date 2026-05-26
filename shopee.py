@@ -1001,7 +1001,7 @@ async def voltar_inicio(message: types.Message, state: FSMContext):
 async def voltar_configs(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    await menu_configuracoes(message)
+    await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
 
 @dp.message(F.text == "Pausar/Retomar Automações ⏸️")
 async def menu_pausa(message: types.Message, state: FSMContext):
