@@ -223,7 +223,7 @@ def obter_teclado_e_status_pausa():
 def obter_teclado_principal():
     botoes = [
         [KeyboardButton(text="Criar Postagem 📝")],
-        [KeyboardButton(text="Pausas de Postagens 🛑")],
+        [KeyboardButton(text="Pausar Postagens 🛑")],
         [KeyboardButton(text="Editar Número da Postagem 🔢")],
         [KeyboardButton(text="Enviar mensagem de Bom Dia ☀️"), KeyboardButton(text="Enviar mensagem de Incentivo 🔥")],
         [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙"), KeyboardButton(text="Enviar Convite do Grupo 📢")],
@@ -1044,7 +1044,7 @@ async def alternar_pausa_rotina(message: types.Message):
     painel, teclado = obter_teclado_e_status_pausa()
     await message.answer(painel, reply_markup=teclado, parse_mode="HTML")
 
-@dp.message(F.text == "Pausas de Postagens 🛑")
+@dp.message(F.text == "Pausar Postagens 🛑")
 async def iniciar_pausa_programada(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     dados_pausa = ler_pausa_programada()
