@@ -1539,6 +1539,11 @@ async def main():
     asyncio.create_task(varredor_de_lixeira())
     
     scheduler.start()
+    if EXIBIR_LOGS: logger.info("🔍 Verificando status de pausa programada na inicialização...")
+    dados_pausa = ler_pausa_programada()
+    if dados_pausa.get("ativa") and "rotina" in dados_pausa.get("servicos_pausados", []):
+        scheduler.pause()
+        if EXIBIR_LOGS: logger.info("⏸️ Rotinas estavam em pausa programada. Agendador pausado com sucesso.")
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
