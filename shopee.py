@@ -258,43 +258,43 @@ async def verificar_pausa_diaria():
     data_retorno = datetime.strptime(data_retorno_str, "%d/%m/%Y").date()
     
     if hoje >= data_retorno:
-                if EXIBIR_LOGS: logger.info("⏰ Data de retorno atingida! Reativando serviços pausados...")
-                servicos = dados_pausa.get("servicos_pausados", [])
-                
-                if "spam" in servicos:
-                    dados_div = ler_alvos_divulgacao()
-                    dados_div["pausado"] = False
-                    salvar_alvos_divulgacao(dados_div)
-                if "rotina" in servicos:
-                    from apscheduler.schedulers.base import STATE_PAUSED
-                    if scheduler.state == STATE_PAUSED:
-                        scheduler.resume()
-                
-                dados_pausa["ativa"] = False
-                dados_pausa["servicos_pausados"] = []
-                # Limpa também o ID do aviso imediato caso a data de retorno seja atingida antes das 09h
-                dados_pausa.pop("id_aviso_imediato", None)
-                salvar_pausa_programada(dados_pausa)
-                if EXIBIR_LOGS: logger.info("✅ Serviços reativados e pausa programada encerrada com sucesso.")
-            else:
-                if EXIBIR_LOGS: logger.info("🛑 Pausa ativa. Enviando aviso diário ao grupo...")
-                
-                # ✅ NOVO: Intercepta e exclui o aviso imediato enviado na ativação da pausa
-                id_aviso_imediato = dados_pausa.pop("id_aviso_imediato", None)
-                if id_aviso_imediato:
-                    if EXIBIR_LOGS: logger.info("🧹 Excluindo aviso de ativação imediata para dar lugar ao aviso diário...")
-                    await apagar_mensagem_automatica(id_aviso_imediato)
-                    salvar_pausa_programada(dados_pausa)
+        if EXIBIR_LOGS: logger.info("⏰ Data de retorno atingida! Reativando serviços pausados...")
+        servicos = dados_pausa.get("servicos_pausados", [])
+        
+        if "spam" in servicos:
+            dados_div = ler_alvos_divulgacao()
+            dados_div["pausado"] = False
+            salvar_alvos_divulgacao(dados_div)
+        if "rotina" in servicos:
+            from apscheduler.schedulers.base import STATE_PAUSED
+            if scheduler.state == STATE_PAUSED:
+                scheduler.resume()
+        
+        dados_pausa["ativa"] = False
+        dados_pausa["servicos_pausados"] = []
+        # Limpa também o ID do aviso imediato caso a data de retorno seja atingida antes das 09h
+        dados_pausa.pop("id_aviso_imediato", None)
+        salvar_pausa_programada(dados_pausa)
+        if EXIBIR_LOGS: logger.info("✅ Serviços reativados e pausa programada encerrada com sucesso.")
+    else:
+        if EXIBIR_LOGS: logger.info("🛑 Pausa ativa. Enviando aviso diário ao grupo...")
+        
+        # ✅ NOVO: Intercepta e exclui o aviso imediato enviado na ativação da pausa
+        id_aviso_imediato = dados_pausa.pop("id_aviso_imediato", None)
+        if id_aviso_imediato:
+            if EXIBIR_LOGS: logger.info("🧹 Excluindo aviso de ativação imediata para dar lugar ao aviso diário...")
+            await apagar_mensagem_automatica(id_aviso_imediato)
+            salvar_pausa_programada(dados_pausa)
 
-                prompt = (
-                    f"Você é assistente de afiliados da Shopee. Crie um aviso curto dizendo que a postagem de "
-                    f"novos materiais está pausada, mas que a equipe voltará a enviar vídeos fresquinhos no dia {data_retorno_str}. "
-                    f"Sugira aproveitarem o tempo para organizar os links e baixar os materiais antigos. "
-                    f"Use emojis. Entregue APENAS a mensagem pronta, sem aspas."
-                )
-                texto = await gerar_mensagem_gemini(prompt)
-                msg_enviada = await bot.send_message(GRUPO_ID, texto)
-                registrar_lixeira(msg_enviada.message_id)
+        prompt = (
+            f"Você é assistente de afiliados da Shopee. Crie um aviso curto dizendo que a postagem de "
+            f"novos materiais está pausada, mas que a equipe voltará a enviar vídeos fresquinhos no dia {data_retorno_str}. "
+            f"Sugira aproveitarem o tempo para organizar os links e baixar os materiais antigos. "
+            f"Use emojis. Entregue APENAS a mensagem pronta, sem aspas."
+        )
+        texto = await gerar_mensagem_gemini(prompt)
+        msg_enviada = await bot.send_message(GRUPO_ID, texto)
+        registrar_lixeira(msg_enviada.message_id)
 # ----------------------------------
 
 # 4. FUNÇÕES DE GERAÇÃO COM IA E AGENDAMENTO ⏰
