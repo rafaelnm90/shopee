@@ -79,6 +79,10 @@ class ConfigRotina(StatesGroup):
 class ConfigPausa(StatesGroup):
     menu_principal = State()
 
+class PausaProgramadaFluxo(StatesGroup):
+    aguardando_data_retorno = State()
+    aguardando_selecao_servicos = State()
+
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 fuso_horario = ZoneInfo("America/Sao_Paulo")
@@ -219,12 +223,68 @@ def obter_teclado_e_status_pausa():
 def obter_teclado_principal():
     botoes = [
         [KeyboardButton(text="Criar Postagem 📝")],
+        [KeyboardButton(text="Pausas de Postagens 🛑")],
         [KeyboardButton(text="Editar Número da Postagem 🔢")],
         [KeyboardButton(text="Enviar mensagem de Bom Dia ☀️"), KeyboardButton(text="Enviar mensagem de Incentivo 🔥")],
         [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙"), KeyboardButton(text="Enviar Convite do Grupo 📢")],
         [KeyboardButton(text="Configurações Gerais ⚙️")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+
+# --- SISTEMA DE PAUSA PROGRAMADA ---
+def ler_pausa_programada():
+    try:
+        with open("pausa_programada.json", "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"ativa": False, "data_retorno": None, "servicos_pausados": []}
+
+def salvar_pausa_programada(dados):
+    with open("pausa_programada.json", "w") as f:
+        json.dump(dados, f, indent=4)
+
+async def verificar_pausa_diaria():
+    dados_pausa = ler_pausa_programada()
+    if not dados_pausa.get("ativa"):
+        return
+        
+    from datetime import datetime
+    hoje = datetime.now(fuso_horario).date()
+    data_retorno_str = dados_pausa.get("data_retorno")
+    
+    if not data_retorno_str:
+        return
+        
+    data_retorno = datetime.strptime(data_retorno_str, "%d/%m/%Y").date()
+    
+    if hoje >= data_retorno:
+        if EXIBIR_LOGS: logger.info("⏰ Data de retorno atingida! Reativando serviços pausados...")
+        servicos = dados_pausa.get("servicos_pausados", [])
+        
+        if "spam" in servicos:
+            dados_div = ler_alvos_divulgacao()
+            dados_div["pausado"] = False
+            salvar_alvos_divulgacao(dados_div)
+        if "rotina" in servicos:
+            from apscheduler.schedulers.base import STATE_PAUSED
+            if scheduler.state == STATE_PAUSED:
+                scheduler.resume()
+        
+        dados_pausa["ativa"] = False
+        dados_pausa["servicos_pausados"] = []
+        salvar_pausa_programada(dados_pausa)
+        if EXIBIR_LOGS: logger.info("✅ Serviços reativados e pausa programada encerrada com sucesso.")
+    else:
+        if EXIBIR_LOGS: logger.info("🛑 Pausa ativa. Enviando aviso diário ao grupo...")
+        prompt = (
+            f"Você é assistente de afiliados da Shopee. Crie um aviso curto dizendo que a postagem de "
+            f"novos materiais está pausada, mas que a equipe voltará a enviar vídeos fresquinhos no dia {data_retorno_str}. "
+            f"Sugira aproveitarem o tempo para organizar os links e baixar os materiais antigos. "
+            f"Use emojis. Entregue APENAS a mensagem pronta, sem aspas."
+        )
+        texto = await gerar_mensagem_gemini(prompt)
+        msg_enviada = await bot.send_message(GRUPO_ID, texto)
+        registrar_lixeira(msg_enviada.message_id)
 # ----------------------------------
 
 # 4. FUNÇÕES DE GERAÇÃO COM IA E AGENDAMENTO ⏰
@@ -974,6 +1034,130 @@ async def alternar_pausa_rotina(message: types.Message):
     painel, teclado = obter_teclado_e_status_pausa()
     await message.answer(painel, reply_markup=teclado, parse_mode="HTML")
 
+@dp.message(F.text == "Pausas de Postagens 🛑")
+async def iniciar_pausa_programada(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    dados_pausa = ler_pausa_programada()
+    
+    if dados_pausa.get("ativa"):
+        data_retorno = dados_pausa.get("data_retorno")
+        texto = f"⚠️ <b>Pausa Programada Ativa!</b>\nO robô está em modo de descanso até o dia <b>{data_retorno}</b>.\n\nDeseja cancelar esta pausa e retomar os serviços agora?"
+        teclado = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Encerrar Pausa Agora ▶️")], [KeyboardButton(text="Voltar 🔙")]], resize_keyboard=True, is_persistent=True)
+        await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
+        await state.set_state(PausaProgramadaFluxo.aguardando_selecao_servicos)
+        return
+        
+    await message.answer("📅 <b>Configurar Pausa Programada</b>\n\nDigite a data exata do seu <b>retorno</b> no formato DD/MM (Exemplo: 28/05).\nO robô voltará a funcionar automaticamente neste dia.", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(PausaProgramadaFluxo.aguardando_data_retorno)
+
+@dp.message(PausaProgramadaFluxo.aguardando_data_retorno)
+async def processar_data_retorno(message: types.Message, state: FSMContext):
+    import re
+    from datetime import datetime
+    
+    match = re.match(r"^(\d{1,2})/(\d{1,2})$", message.text.strip())
+    if not match:
+        await message.answer("Formato inválido. Use DD/MM, como por exemplo: 28/05.", reply_markup=teclado_cancelar)
+        return
+        
+    dia, mes = map(int, match.groups())
+    hoje = datetime.now(fuso_horario).date()
+    ano_atual = hoje.year
+    
+    try:
+        data_retorno = datetime(year=ano_atual, month=mes, day=dia).date()
+        # Corrige automaticamente a transição de ano se configurar dezembro para janeiro
+        if data_retorno <= hoje:
+            if data_retorno.month < hoje.month:
+                data_retorno = datetime(year=ano_atual + 1, month=mes, day=dia).date()
+            else:
+                await message.answer("A data de retorno deve ser no futuro. Tente novamente:", reply_markup=teclado_cancelar)
+                return
+    except ValueError:
+        await message.answer("Data inexistente. Tente novamente:", reply_markup=teclado_cancelar)
+        return
+
+    data_retorno_str = data_retorno.strftime("%d/%m/%Y")
+    await state.update_data(data_retorno_str=data_retorno_str)
+    
+    # Mapeia o funcionamento atual de forma orgânica
+    dados_div = ler_alvos_divulgacao()
+    spam_ativo = not dados_div.get("pausado", False)
+    
+    from apscheduler.schedulers.base import STATE_RUNNING
+    rotina_ativa = scheduler.state == STATE_RUNNING
+    
+    if not spam_ativo and not rotina_ativa:
+        await message.answer(f"Ambos os serviços já estão pausados manualmente.\nApenas a rotina diária de avisos será agendada até {data_retorno_str}.\nConfirma?", reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Confirmar Pausa ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True))
+    else:
+        opcoes = []
+        if spam_ativo and rotina_ativa:
+            opcoes = ["Pausar Ambos", "Apenas SPAM", "Apenas Rotina"]
+        elif spam_ativo:
+            opcoes = ["Pausar SPAM"]
+        elif rotina_ativa:
+            opcoes = ["Pausar Rotina"]
+            
+        botoes = [[KeyboardButton(text=op)] for op in opcoes]
+        botoes.append([KeyboardButton(text="Cancelar ❌")])
+        
+        texto = f"Data de retorno: <b>{data_retorno_str}</b>.\nQuais serviços você deseja pausar automaticamente agora?"
+        await message.answer(texto, parse_mode="HTML", reply_markup=ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True))
+        
+    await state.set_state(PausaProgramadaFluxo.aguardando_selecao_servicos)
+
+@dp.message(PausaProgramadaFluxo.aguardando_selecao_servicos)
+async def confirmar_pausa_programada(message: types.Message, state: FSMContext):
+    if message.text == "Encerrar Pausa Agora ▶️":
+        dados_pausa = ler_pausa_programada()
+        servicos = dados_pausa.get("servicos_pausados", [])
+        
+        if "spam" in servicos:
+            dados_div = ler_alvos_divulgacao()
+            dados_div["pausado"] = False
+            salvar_alvos_divulgacao(dados_div)
+        if "rotina" in servicos:
+            from apscheduler.schedulers.base import STATE_PAUSED
+            if scheduler.state == STATE_PAUSED:
+                scheduler.resume()
+                
+        dados_pausa["ativa"] = False
+        dados_pausa["servicos_pausados"] = []
+        salvar_pausa_programada(dados_pausa)
+        await message.answer("▶️ Pausa programada encerrada e serviços reativados com sucesso!", reply_markup=obter_teclado_principal())
+        await state.clear()
+        return
+
+    opcoes_validas = ["Pausar Ambos", "Apenas SPAM", "Apenas Rotina", "Pausar SPAM", "Pausar Rotina", "Confirmar Pausa ✅"]
+    if message.text not in opcoes_validas:
+        await message.answer("Use um dos botões para escolher.", reply_markup=teclado_cancelar)
+        return
+        
+    data = await state.get_data()
+    data_retorno_str = data["data_retorno_str"]
+    servicos_pausados = []
+    
+    if message.text in ["Pausar Ambos", "Apenas SPAM", "Pausar SPAM"]:
+        dados_div = ler_alvos_divulgacao()
+        dados_div["pausado"] = True
+        salvar_alvos_divulgacao(dados_div)
+        servicos_pausados.append("spam")
+        
+    if message.text in ["Pausar Ambos", "Apenas Rotina", "Pausar Rotina"]:
+        scheduler.pause()
+        servicos_pausados.append("rotina")
+        
+    dados_pausa = {
+        "ativa": True,
+        "data_retorno": data_retorno_str,
+        "servicos_pausados": servicos_pausados
+    }
+    salvar_pausa_programada(dados_pausa)
+    
+    if EXIBIR_LOGS: logger.info(f"🛑 Pausa programada até {data_retorno_str}. Serviços: {servicos_pausados}")
+    await message.answer(f"🛑 <b>Pausa Configurada com Sucesso!</b>\n\nO robô enviará um aviso amigável ao grupo todos os dias às 09h00 informando o retorno para o dia {data_retorno_str}.\nNo dia marcado, ele acordará automaticamente.", parse_mode="HTML", reply_markup=obter_teclado_principal())
+    await state.clear()
+
 # --- LÓGICA DE GERENCIAMENTO DE DIVULGAÇÃO ---
 def ler_alvos_divulgacao():
     try:
@@ -1308,8 +1492,11 @@ async def main():
     # Agendador mestre que roda todo dia às 00:01
     scheduler.add_job(agendar_tarefas_diarias, 'cron', hour=0, minute=1)
     
-    # ✅ Novo: Agendador da lixeira persistente (roda a cada hora no minuto 0)
+    # ✅ Agendador da lixeira persistente (roda a cada hora no minuto 0)
     scheduler.add_job(varredor_de_lixeira, 'cron', minute=0)
+    
+    # ✅ Novo: Despertador e aviso da Pausa Programada (roda às 09:00)
+    scheduler.add_job(verificar_pausa_diaria, 'cron', hour=9, minute=0, timezone=fuso_horario)
     
     # Roda o agendador imediatamente ao ligar o bot para garantir o dia atual
     agendar_tarefas_diarias() 
