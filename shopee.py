@@ -9,12 +9,11 @@ import asyncio
 import random
 from datetime import datetime
 from zoneinfo import ZoneInfo
-from aiogram import Bot, Dispatcher, types, F # ✅ 'F' adicionado ao pacote principal
-from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.fsm.state import StatesGroup, State
+from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
-from aiogram.filters import Command, StateFilter # ✅ 'F' removido daqui para evitar o erro de importação
-from aiogram import F
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.filters import Command, StateFilter
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from google import genai
@@ -86,6 +85,7 @@ class PausaProgramadaFluxo(StatesGroup):
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 fuso_horario = ZoneInfo("America/Sao_Paulo")
+_lock_contador = asyncio.Lock()
 scheduler = AsyncIOScheduler(timezone=fuso_horario)
 
 # --- NOVOS TECLADOS DE CONTROLE ---
@@ -849,7 +849,8 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     links_tiktok = data.get('links_tiktok', [])
     
     if EXIBIR_LOGS: logger.info("📤 Iniciando montagem inteligente da legenda (3 níveis).")
-    numero_atual = ler_contador()
+    async with _lock_contador:
+        numero_atual = ler_contador()
     
     # Substitui a quebra de linha por espaço e formata o título
     titulo_limpo = nome.replace('\n', ' | ')
@@ -929,7 +930,8 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
         await bot.send_video(chat_id=GRUPO_ID, video=video, caption=legenda_final, parse_mode="HTML")
     
     # Incrementa o contador para o próximo vídeo
-    salvar_contador(numero_atual + 1)
+    async with _lock_contador:
+        salvar_contador(numero_atual + 1)
     if EXIBIR_LOGS: logger.info(f"🔢 Contador atualizado de {numero_atual} para {numero_atual + 1}.")
     
     await message.answer(f"Postagem enviada com sucesso! ✅\nO próximo vídeo será o número {numero_atual + 1}.", reply_markup=obter_teclado_principal())
