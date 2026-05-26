@@ -286,11 +286,14 @@ async def verificar_pausa_diaria():
             await apagar_mensagem_automatica(id_aviso_imediato)
             salvar_pausa_programada(dados_pausa)
 
+        motivo_salvo = dados_pausa.get("motivo", "organização interna e curadoria de novos conteúdos")
+
         prompt = (
-            f"Você é assistente de afiliados da Shopee. Crie um aviso curto dizendo que a postagem de "
-            f"novos materiais está pausada, mas que a equipe voltará a enviar vídeos fresquinhos no dia {data_retorno_str}. "
-            f"Sugira aproveitarem o tempo para organizar os links e baixar os materiais antigos. "
-            f"Use emojis. Entregue APENAS a mensagem pronta, sem aspas."
+            f"Você é assistente de afiliados da Shopee. Crie um aviso de desculpas aos usuários informando que a postagem de "
+            f"novos materiais continua temporariamente pausada pelo seguinte motivo: {motivo_salvo}. "
+            f"Diga de forma compreensível que a equipe voltará a enviar vídeos fresquinhos no dia {data_retorno_str}. "
+            f"Sugira que aproveitem o tempo para organizar os links e baixar os materiais antigos. "
+            f"Use emojis variados. Entregue APENAS a mensagem pronta, sem aspas."
         )
         texto = await gerar_mensagem_gemini(prompt)
         msg_enviada = await bot.send_message(GRUPO_ID, texto)
@@ -1168,14 +1171,24 @@ async def confirmar_pausa_programada(message: types.Message, state: FSMContext):
         scheduler.pause()
         servicos_pausados.append("rotina")
         
-    await message.answer("⏳ Configurando pausa e gerando aviso imediato para o grupo...")
-    
+    # Sorteio de um motivo dinâmico para a pausa
+    motivos_pausa = [
+        "manutenção preventiva nos servidores para garantir estabilidade",
+        "curadoria minuciosa e validação de um novo lote gigante de vídeos premium de alta conversão",
+        "atualização rigorosa no nosso sistema de proteção contra punições e bloqueios nas redes",
+        "reestruturação interna e organização do acervo para entregar materiais ainda melhores"
+    ]
+    import random
+    motivo_escolhido = random.choice(motivos_pausa)
+    if EXIBIR_LOGS: logger.info(f"🎲 Motivo de pausa sorteado: {motivo_escolhido}")
+
     # ✅ NOVO: Geração e envio do aviso exato no momento do acionamento
     prompt = (
-        f"Você é assistente de afiliados da Shopee. Crie um aviso curto dizendo que a postagem de "
-        f"novos materiais está pausada a partir de agora, mas que a equipe voltará a enviar vídeos fresquinhos no dia {data_retorno_str}. "
-        f"Sugira aproveitarem o tempo para baixar os materiais antigos. "
-        f"Use emojis. Entregue APENAS a mensagem pronta, sem aspas."
+        f"Você é assistente de afiliados da Shopee. Crie um aviso imediato pedindo desculpas aos usuários e informando que a postagem de "
+        f"novos materiais está pausada a partir de agora pelo seguinte motivo: {motivo_escolhido}. "
+        f"Explique de forma clara que a equipe voltará a enviar vídeos validados no dia {data_retorno_str}. "
+        f"Sugira que aproveitem o tempo para baixar os materiais antigos. "
+        f"Use emojis variados. Entregue APENAS a mensagem pronta, sem aspas."
     )
     texto_aviso = await gerar_mensagem_gemini(prompt)
     msg_imediata = await bot.send_message(GRUPO_ID, texto_aviso)
@@ -1184,7 +1197,8 @@ async def confirmar_pausa_programada(message: types.Message, state: FSMContext):
         "ativa": True,
         "data_retorno": data_retorno_str,
         "servicos_pausados": servicos_pausados,
-        "id_aviso_imediato": msg_imediata.message_id # Salva o ID para exclusão na rotina das 9h
+        "id_aviso_imediato": msg_imediata.message_id, # Salva o ID para exclusão na rotina das 9h
+        "motivo": motivo_escolhido # ✅ NOVO: Salva o motivo para manter a coerência diária
     }
     salvar_pausa_programada(dados_pausa)
     
