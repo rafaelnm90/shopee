@@ -258,33 +258,43 @@ async def verificar_pausa_diaria():
     data_retorno = datetime.strptime(data_retorno_str, "%d/%m/%Y").date()
     
     if hoje >= data_retorno:
-        if EXIBIR_LOGS: logger.info("⏰ Data de retorno atingida! Reativando serviços pausados...")
-        servicos = dados_pausa.get("servicos_pausados", [])
-        
-        if "spam" in servicos:
-            dados_div = ler_alvos_divulgacao()
-            dados_div["pausado"] = False
-            salvar_alvos_divulgacao(dados_div)
-        if "rotina" in servicos:
-            from apscheduler.schedulers.base import STATE_PAUSED
-            if scheduler.state == STATE_PAUSED:
-                scheduler.resume()
-        
-        dados_pausa["ativa"] = False
-        dados_pausa["servicos_pausados"] = []
-        salvar_pausa_programada(dados_pausa)
-        if EXIBIR_LOGS: logger.info("✅ Serviços reativados e pausa programada encerrada com sucesso.")
-    else:
-        if EXIBIR_LOGS: logger.info("🛑 Pausa ativa. Enviando aviso diário ao grupo...")
-        prompt = (
-            f"Você é assistente de afiliados da Shopee. Crie um aviso curto dizendo que a postagem de "
-            f"novos materiais está pausada, mas que a equipe voltará a enviar vídeos fresquinhos no dia {data_retorno_str}. "
-            f"Sugira aproveitarem o tempo para organizar os links e baixar os materiais antigos. "
-            f"Use emojis. Entregue APENAS a mensagem pronta, sem aspas."
-        )
-        texto = await gerar_mensagem_gemini(prompt)
-        msg_enviada = await bot.send_message(GRUPO_ID, texto)
-        registrar_lixeira(msg_enviada.message_id)
+                if EXIBIR_LOGS: logger.info("⏰ Data de retorno atingida! Reativando serviços pausados...")
+                servicos = dados_pausa.get("servicos_pausados", [])
+                
+                if "spam" in servicos:
+                    dados_div = ler_alvos_divulgacao()
+                    dados_div["pausado"] = False
+                    salvar_alvos_divulgacao(dados_div)
+                if "rotina" in servicos:
+                    from apscheduler.schedulers.base import STATE_PAUSED
+                    if scheduler.state == STATE_PAUSED:
+                        scheduler.resume()
+                
+                dados_pausa["ativa"] = False
+                dados_pausa["servicos_pausados"] = []
+                # Limpa também o ID do aviso imediato caso a data de retorno seja atingida antes das 09h
+                dados_pausa.pop("id_aviso_imediato", None)
+                salvar_pausa_programada(dados_pausa)
+                if EXIBIR_LOGS: logger.info("✅ Serviços reativados e pausa programada encerrada com sucesso.")
+            else:
+                if EXIBIR_LOGS: logger.info("🛑 Pausa ativa. Enviando aviso diário ao grupo...")
+                
+                # ✅ NOVO: Intercepta e exclui o aviso imediato enviado na ativação da pausa
+                id_aviso_imediato = dados_pausa.pop("id_aviso_imediato", None)
+                if id_aviso_imediato:
+                    if EXIBIR_LOGS: logger.info("🧹 Excluindo aviso de ativação imediata para dar lugar ao aviso diário...")
+                    await apagar_mensagem_automatica(id_aviso_imediato)
+                    salvar_pausa_programada(dados_pausa)
+
+                prompt = (
+                    f"Você é assistente de afiliados da Shopee. Crie um aviso curto dizendo que a postagem de "
+                    f"novos materiais está pausada, mas que a equipe voltará a enviar vídeos fresquinhos no dia {data_retorno_str}. "
+                    f"Sugira aproveitarem o tempo para organizar os links e baixar os materiais antigos. "
+                    f"Use emojis. Entregue APENAS a mensagem pronta, sem aspas."
+                )
+                texto = await gerar_mensagem_gemini(prompt)
+                msg_enviada = await bot.send_message(GRUPO_ID, texto)
+                registrar_lixeira(msg_enviada.message_id)
 # ----------------------------------
 
 # 4. FUNÇÕES DE GERAÇÃO COM IA E AGENDAMENTO ⏰
@@ -1147,15 +1157,28 @@ async def confirmar_pausa_programada(message: types.Message, state: FSMContext):
         scheduler.pause()
         servicos_pausados.append("rotina")
         
+    await message.answer("⏳ Configurando pausa e gerando aviso imediato para o grupo...")
+    
+    # ✅ NOVO: Geração e envio do aviso exato no momento do acionamento
+    prompt = (
+        f"Você é assistente de afiliados da Shopee. Crie um aviso curto dizendo que a postagem de "
+        f"novos materiais está pausada a partir de agora, mas que a equipe voltará a enviar vídeos fresquinhos no dia {data_retorno_str}. "
+        f"Sugira aproveitarem o tempo para baixar os materiais antigos. "
+        f"Use emojis. Entregue APENAS a mensagem pronta, sem aspas."
+    )
+    texto_aviso = await gerar_mensagem_gemini(prompt)
+    msg_imediata = await bot.send_message(GRUPO_ID, texto_aviso)
+    
     dados_pausa = {
         "ativa": True,
         "data_retorno": data_retorno_str,
-        "servicos_pausados": servicos_pausados
+        "servicos_pausados": servicos_pausados,
+        "id_aviso_imediato": msg_imediata.message_id # Salva o ID para exclusão na rotina das 9h
     }
     salvar_pausa_programada(dados_pausa)
     
-    if EXIBIR_LOGS: logger.info(f"🛑 Pausa programada até {data_retorno_str}. Serviços: {servicos_pausados}")
-    await message.answer(f"🛑 <b>Pausa Configurada com Sucesso!</b>\n\nO robô enviará um aviso amigável ao grupo todos os dias às 09h00 informando o retorno para o dia {data_retorno_str}.\nNo dia marcado, ele acordará automaticamente.", parse_mode="HTML", reply_markup=obter_teclado_principal())
+    if EXIBIR_LOGS: logger.info(f"🛑 Pausa programada até {data_retorno_str}. Aviso imediato disparado. Serviços: {servicos_pausados}")
+    await message.answer(f"🛑 <b>Pausa Configurada com Sucesso!</b>\n\nO aviso já foi enviado ao grupo. A partir de amanhã, o robô atualizará esse aviso todos os dias às 09h00 informando o retorno para o dia {data_retorno_str}.\nNo dia marcado, ele acordará automaticamente.", parse_mode="HTML", reply_markup=obter_teclado_principal())
     await state.clear()
 
 # --- LÓGICA DE GERENCIAMENTO DE DIVULGAÇÃO ---
