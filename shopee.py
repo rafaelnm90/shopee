@@ -517,6 +517,10 @@ def agendar_tarefas_diarias():
     
     # Executa o sorteio dinâmico e inteligente
     for tipo, config in dados_rotina.items():
+        if tipo == "pausado":
+            if EXIBIR_LOGS: logger.info("⏭️ Pulando a chave de controle do sistema ('pausado')...")
+            continue
+            
         freq = config.get("frequencia", 1)
         inicio = config.get("inicio", 6)
         fim = config.get("fim", 22)
