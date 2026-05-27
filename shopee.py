@@ -394,12 +394,12 @@ async def apagar_mensagem_automatica(msg_id):
     except Exception as e:
         if EXIBIR_LOGS: logger.info(f"⚠️ Faxina: A mensagem {msg_id} já havia sido apagada manualmente ou não foi encontrada.")
 
-async def disparar_mensagem(tipo):
-    if EXIBIR_LOGS: logger.info(f"🔍 Validando status antes de disparar a rotina '{tipo}'...")
+async def disparar_mensagem(tipo, forcar=False):
+    if EXIBIR_LOGS: logger.info(f"🔍 Validando status antes de disparar a rotina '{tipo}' (Forçar: {forcar})...")
     
     # ✅ NOVO: Trava lógica que substitui o bloqueio global do scheduler
     dados_rotina = ler_config_rotina()
-    if dados_rotina.get("pausado", False):
+    if dados_rotina.get("pausado", False) and not forcar:
         if EXIBIR_LOGS: logger.info(f"🛑 Disparo abortado ({tipo}): As rotinas estão pausadas no sistema.")
         return
 
@@ -615,28 +615,32 @@ async def comando_start(message: types.Message):
 async def manual_bom_dia(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("Gerando e enviando mensagem de Bom Dia... ⏳")
-    await disparar_mensagem("bom_dia")
+    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Bom Dia.")
+    await disparar_mensagem("bom_dia", forcar=True)
     await message.answer("Mensagem de Bom Dia enviada ao grupo com sucesso! ✅")
 
 @dp.message(F.text == "Enviar mensagem de Boa Noite 🌙")
 async def manual_boa_noite(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("Gerando e enviando mensagem de Boa Noite... ⏳")
-    await disparar_mensagem("boa_noite")
+    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Boa Noite.")
+    await disparar_mensagem("boa_noite", forcar=True)
     await message.answer("Mensagem de Boa Noite enviada ao grupo com sucesso! ✅")
 
 @dp.message(F.text == "Enviar mensagem de Incentivo 🔥")
 async def manual_incentivo(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("Gerando e enviando mensagem de Incentivo... ⏳")
-    await disparar_mensagem("incentivo")
+    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Incentivo.")
+    await disparar_mensagem("incentivo", forcar=True)
     await message.answer("Mensagem de Incentivo enviada ao grupo com sucesso! ✅")
 
 @dp.message(F.text == "Enviar Convite do Grupo 📢")
 async def manual_link_grupo(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("Gerando e enviando divulgação do grupo... ⏳")
-    await disparar_mensagem("link_grupo")
+    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Convite do Grupo.")
+    await disparar_mensagem("link_grupo", forcar=True)
     await message.answer("Mensagem de divulgação enviada ao grupo com sucesso! ✅")
 
 # ❌ NOVO: Handler Global para Cancelar via Botão (Agora 100% à prova de falhas)
