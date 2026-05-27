@@ -846,20 +846,20 @@ async def receber_links_tiktok(message: types.Message, state: FSMContext):
     links = data.get('links_tiktok', [])
 
     if message.text in ["Finalizar ✅", "/finalizar"]:
-         if EXIBIR_LOGS: logger.info("✅ Fluxo TikTok concluído manualmente.")
-         await finalizar_postagem(message, state)
-         return
+        if EXIBIR_LOGS: logger.info("✅ Fluxo TikTok concluído manualmente.")
+        await finalizar_postagem(message, state)
+        return
 
     links.append(message.text)
     await state.update_data(links_tiktok=links)
     
     if len(links) >= 6:
-         if EXIBIR_LOGS: logger.info("✅ 🎯 Limite máximo de links do TikTok alcançado.")
-         await message.answer("Link TikTok 6/6 registrado.\nLimite atingido, finalizando a postagem...", parse_mode="HTML")
-         await finalizar_postagem(message, state)
+        if EXIBIR_LOGS: logger.info("✅ 🎯 Limite máximo de links do TikTok alcançado.")
+        await message.answer("Link TikTok 6/6 registrado.\nLimite atingido, finalizando a postagem...", parse_mode="HTML")
+        await finalizar_postagem(message, state)
     else:
-         if EXIBIR_LOGS: logger.info(f"🔗 Link TikTok {len(links)}/6 validado.")
-         await message.answer(f"Link TikTok {len(links)}/6 registrado. Envie o próximo ou clique em Finalizar.", reply_markup=teclado_finalizar)
+        if EXIBIR_LOGS: logger.info(f"🔗 Link TikTok {len(links)}/6 validado.")
+        await message.answer(f"Link TikTok {len(links)}/6 registrado. Envie o próximo ou clique em Finalizar.", reply_markup=teclado_finalizar)
 
 async def finalizar_postagem(message: types.Message, state: FSMContext):
     data = await state.get_data()
