@@ -189,17 +189,18 @@ teclado_opcoes_rotina = ReplyKeyboardMarkup(
 
 # 🛠️ Função dinâmica para o menu de pausa e status
 def obter_teclado_e_status_pausa():
+    if EXIBIR_LOGS: logger.info("🔍 Lendo status atual das automações...")
     dados = ler_alvos_divulgacao()
     spam_pausado = dados.get("pausado", False)
     
-    from apscheduler.schedulers.base import STATE_RUNNING
-    rotina_rodando = scheduler.state == STATE_RUNNING
+    dados_rotina = ler_config_rotina()
+    rotina_pausada = dados_rotina.get("pausado", False)
     
     texto_spam = "Retomar SPAM em Grupos ▶️" if spam_pausado else "Pausar SPAM em Grupos ⏸️"
-    texto_rotina = "Pausar Mensagens de Rotina ⏸️" if rotina_rodando else "Retomar Mensagens de Rotina ▶️"
+    texto_rotina = "Retomar Mensagens de Rotina ▶️" if rotina_pausada else "Pausar Mensagens de Rotina ⏸️"
     
     status_spam = "🔴 PAUSADO" if spam_pausado else "🟢 ATIVO"
-    status_rotina = "🟢 ATIVAS" if rotina_rodando else "🔴 PAUSADAS"
+    status_rotina = "🔴 PAUSADAS" if rotina_pausada else "🟢 ATIVAS"
     
     painel = (
         "🛠️ <b>Painel de Controle de Automações:</b>\n\n"
@@ -217,6 +218,7 @@ def obter_teclado_e_status_pausa():
         resize_keyboard=True,
         is_persistent=True
     )
+    if EXIBIR_LOGS: logger.info("✅ Painel de status montado com sucesso.")
     return painel, teclado
 
 # 🛠️ Função centralizadora do menu principal
@@ -244,6 +246,7 @@ def salvar_pausa_programada(dados):
         json.dump(dados, f, indent=4)
 
 async def verificar_pausa_diaria():
+    if EXIBIR_LOGS: logger.info("⏰ Iniciando verificação diária de pausa programada...")
     dados_pausa = ler_pausa_programada()
     if not dados_pausa.get("ativa"):
         return
@@ -265,10 +268,12 @@ async def verificar_pausa_diaria():
             dados_div = ler_alvos_divulgacao()
             dados_div["pausado"] = False
             salvar_alvos_divulgacao(dados_div)
+            if EXIBIR_LOGS: logger.info("✅ SPAM reativado.")
         if "rotina" in servicos:
-            from apscheduler.schedulers.base import STATE_PAUSED
-            if scheduler.state == STATE_PAUSED:
-                scheduler.resume()
+            dados_rotina = ler_config_rotina()
+            dados_rotina["pausado"] = False
+            salvar_config_rotina(dados_rotina)
+            if EXIBIR_LOGS: logger.info("✅ Mensagens de rotina reativadas.")
         
         dados_pausa["ativa"] = False
         dados_pausa["servicos_pausados"] = []
@@ -298,6 +303,7 @@ async def verificar_pausa_diaria():
         texto = await gerar_mensagem_gemini(prompt)
         msg_enviada = await bot.send_message(GRUPO_ID, texto)
         registrar_lixeira(msg_enviada.message_id)
+        if EXIBIR_LOGS: logger.info("✅ Aviso diário enviado com sucesso.")
 # ----------------------------------
 
 # 4. FUNÇÕES DE GERAÇÃO COM IA E AGENDAMENTO ⏰
@@ -389,6 +395,14 @@ async def apagar_mensagem_automatica(msg_id):
         if EXIBIR_LOGS: logger.info(f"⚠️ Faxina: A mensagem {msg_id} já havia sido apagada manualmente ou não foi encontrada.")
 
 async def disparar_mensagem(tipo):
+    if EXIBIR_LOGS: logger.info(f"🔍 Validando status antes de disparar a rotina '{tipo}'...")
+    
+    # ✅ NOVO: Trava lógica que substitui o bloqueio global do scheduler
+    dados_rotina = ler_config_rotina()
+    if dados_rotina.get("pausado", False):
+        if EXIBIR_LOGS: logger.info(f"🛑 Disparo abortado ({tipo}): As rotinas estão pausadas no sistema.")
+        return
+
     # ✅ Contexto atualizado com limitação estrita de caracteres
     contexto_afiliado = (
         "Você é um assistente de suporte para afiliados da Shopee. "
@@ -460,6 +474,7 @@ async def disparar_mensagem(tipo):
         registrar_lixeira(msg_gem.message_id)
 
 def ler_config_rotina():
+    if EXIBIR_LOGS: logger.info("📂 Lendo configurações de rotina...")
     try:
         with open("config_rotina.json", "r") as f:
             dados = json.load(f)
@@ -468,15 +483,20 @@ def ler_config_rotina():
                 dados["link_grupo"] = {"inicio": 9, "fim": 21, "frequencia": 3}
             if "divulgar_gem" not in dados:
                 dados["divulgar_gem"] = {"inicio": 8, "fim": 22, "frequencia": 1}
+            # ✅ Nova chave para gerenciar o status de pausa via JSON
+            if "pausado" not in dados:
+                dados["pausado"] = False
             return dados
     except (FileNotFoundError, json.JSONDecodeError):
         # Configuração padrão de segurança se o arquivo não existir
+        if EXIBIR_LOGS: logger.warning("⚠️ Arquivo config_rotina.json não encontrado. Criando padrão inicial.")
         return {
             "bom_dia": {"inicio": 6, "fim": 9, "frequencia": 1},
             "incentivo": {"inicio": 10, "fim": 20, "frequencia": 2},
             "boa_noite": {"inicio": 21, "fim": 23, "frequencia": 1},
             "link_grupo": {"inicio": 9, "fim": 21, "frequencia": 3},
-            "divulgar_gem": {"inicio": 8, "fim": 22, "frequencia": 1}
+            "divulgar_gem": {"inicio": 8, "fim": 22, "frequencia": 1},
+            "pausado": False
         }
 
 def salvar_config_rotina(dados):
@@ -1035,18 +1055,23 @@ async def alternar_pausa_divulgacao(message: types.Message):
 
 @dp.message(ConfigPausa.menu_principal, F.text.in_(["Pausar Mensagens de Rotina ⏸️", "Retomar Mensagens de Rotina ▶️"]))
 async def alternar_pausa_rotina(message: types.Message):
-    from apscheduler.schedulers.base import STATE_RUNNING
+    if EXIBIR_LOGS: logger.info("⚙️ Processando comando manual de pausa nas rotinas...")
+    dados_rotina = ler_config_rotina()
+    status_atual = dados_rotina.get("pausado", False)
+    novo_status = not status_atual
     
-    if scheduler.state == STATE_RUNNING:
-        scheduler.pause()
-        if EXIBIR_LOGS: logger.info("⏸️ Mensagens de Rotina PAUSADAS.")
+    dados_rotina["pausado"] = novo_status
+    salvar_config_rotina(dados_rotina)
+    
+    painel, teclado = obter_teclado_e_status_pausa()
+    
+    if novo_status:
+        if EXIBIR_LOGS: logger.info("⏸️ Mensagens de Rotina PAUSADAS via painel.")
         await message.answer("⏸️ <b>Mensagens de Rotina PAUSADAS.</b>\nAs mensagens automáticas do grupo foram suspensas.", parse_mode="HTML")
     else:
-        scheduler.resume()
-        if EXIBIR_LOGS: logger.info("▶️ Mensagens de Rotina ATIVADAS.")
+        if EXIBIR_LOGS: logger.info("▶️ Mensagens de Rotina ATIVADAS via painel.")
         await message.answer("▶️ <b>Mensagens de Rotina ATIVAS.</b>\nAs mensagens automáticas voltarão a ser enviadas.", parse_mode="HTML")
         
-    painel, teclado = obter_teclado_e_status_pausa()
     await message.answer(painel, reply_markup=teclado, parse_mode="HTML")
 
 # ✅ NOVO: Handler específico para corrigir o "Voltar" na pausa programada
@@ -1105,11 +1130,12 @@ async def processar_data_retorno(message: types.Message, state: FSMContext):
     await state.update_data(data_retorno_str=data_retorno_str)
     
     # Mapeia o funcionamento atual de forma orgânica
+    if EXIBIR_LOGS: logger.info("🔍 Mapeando serviços ativos para a tela de pausa programada...")
     dados_div = ler_alvos_divulgacao()
     spam_ativo = not dados_div.get("pausado", False)
     
-    from apscheduler.schedulers.base import STATE_RUNNING
-    rotina_ativa = scheduler.state == STATE_RUNNING
+    dados_rotina = ler_config_rotina()
+    rotina_ativa = not dados_rotina.get("pausado", False)
     
     if not spam_ativo and not rotina_ativa:
         await message.answer(f"Ambos os serviços já estão pausados manualmente.\nApenas a rotina diária de avisos será agendada até {data_retorno_str}.\nConfirma?", reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Confirmar Pausa ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True))
@@ -1132,6 +1158,7 @@ async def processar_data_retorno(message: types.Message, state: FSMContext):
 
 @dp.message(PausaProgramadaFluxo.aguardando_selecao_servicos)
 async def confirmar_pausa_programada(message: types.Message, state: FSMContext):
+    if EXIBIR_LOGS: logger.info("⚙️ Processando a seleção da pausa programada...")
     if message.text == "Encerrar Pausa Agora ▶️":
         dados_pausa = ler_pausa_programada()
         servicos = dados_pausa.get("servicos_pausados", [])
@@ -1140,10 +1167,12 @@ async def confirmar_pausa_programada(message: types.Message, state: FSMContext):
             dados_div = ler_alvos_divulgacao()
             dados_div["pausado"] = False
             salvar_alvos_divulgacao(dados_div)
+            if EXIBIR_LOGS: logger.info("✅ SPAM reativado após encerramento forçado.")
         if "rotina" in servicos:
-            from apscheduler.schedulers.base import STATE_PAUSED
-            if scheduler.state == STATE_PAUSED:
-                scheduler.resume()
+            dados_rotina = ler_config_rotina()
+            dados_rotina["pausado"] = False
+            salvar_config_rotina(dados_rotina)
+            if EXIBIR_LOGS: logger.info("✅ Mensagens de rotina reativadas após encerramento forçado.")
                 
         dados_pausa["ativa"] = False
         dados_pausa["servicos_pausados"] = []
@@ -1168,7 +1197,9 @@ async def confirmar_pausa_programada(message: types.Message, state: FSMContext):
         servicos_pausados.append("spam")
         
     if message.text in ["Pausar Ambos", "Apenas Rotina", "Pausar Rotina"]:
-        scheduler.pause()
+        dados_rotina = ler_config_rotina()
+        dados_rotina["pausado"] = True
+        salvar_config_rotina(dados_rotina)
         servicos_pausados.append("rotina")
         
     # Sorteio de um motivo dinâmico para a pausa
@@ -1556,8 +1587,10 @@ async def main():
     if EXIBIR_LOGS: logger.info("🔍 Verificando status de pausa programada na inicialização...")
     dados_pausa = ler_pausa_programada()
     if dados_pausa.get("ativa") and "rotina" in dados_pausa.get("servicos_pausados", []):
-        scheduler.pause()
-        if EXIBIR_LOGS: logger.info("⏸️ Rotinas estavam em pausa programada. Agendador pausado com sucesso.")
+        dados_rotina = ler_config_rotina()
+        dados_rotina["pausado"] = True
+        salvar_config_rotina(dados_rotina)
+        if EXIBIR_LOGS: logger.info("⏸️ Rotinas estavam em pausa programada. Marcado como pausado no JSON com sucesso.")
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
