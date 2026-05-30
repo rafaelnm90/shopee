@@ -40,12 +40,13 @@ def carregar_configuracoes():
 
 async def gerar_texto_divulgacao(repeticoes=6):
     if EXIBIR_LOGS: print(f"✅ Função iniciada com {repeticoes} repetições.")
+    if EXIBIR_LOGS: logger.info("🚀 Montando prompt persuasivo focado em engajamento e conversão...")
     prompt = (
-        "Você é um copywriter criativo divulgando um grupo do Telegram para afiliados da Shopee. "
-        "Crie UMA ÚNICA FRASE curta, muito chamativa e DIFERENTE de todas que você já criou anteriormente. "
-        "OBRIGATÓRIO: Informe que o grupo é um ACERVO DE VÍDEOS EDITADOS com técnicas anti-punição (contra produtos irrelevantes/contrafeitos). "
-        "Use gírias, emojis variados e tom persuasivo. "
-        "Comece com ⚠️. Entregue APENAS a frase final, sem aspas."
+        "Você atua como um copywriter persuasivo e focado em conversão, divulgando um grupo do Telegram exclusivo para afiliados da Shopee. "
+        "Crie UMA ÚNICA FRASE curta, altamente chamativa, convidativa e diferente de todas as anteriores. "
+        "Foque em atrair o usuário oferecendo acesso imediato a um acervo de ouro com vídeos prontos e validados que aumentam as comissões e visualizações na plataforma. "
+        "Use um tom entusiasmado, adicione emojis variados para despertar interesse orgânico, mas sem parecer apelativo ou alarmista. "
+        "Entregue APENAS a frase final, sem aspas."
     )
     
     modelos_disponiveis = [
