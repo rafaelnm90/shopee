@@ -684,6 +684,12 @@ async def receber_video(message: types.Message, state: FSMContext):
     file_id = message.video.file_id
     
     try:
+        # ✨ Proteção contra concorrência: Reserva o número instantaneamente
+        async with _lock_contador:
+            numero_atual = ler_contador()
+            salvar_contador(numero_atual + 1)
+            if EXIBIR_LOGS: logger.info(f"🔒 Concorrência blindada: Número {numero_atual} reservado. Próximo será {numero_atual + 1}.")
+
         # 1. Download do vídeo para o servidor Ubuntu
         file_info = await bot.get_file(file_id)
         video_path = f"temp_{file_id}.mp4"
@@ -691,7 +697,7 @@ async def receber_video(message: types.Message, state: FSMContext):
 
         # 2. Upload para a API do Gemini processar a Copy
         def analisar_video():
-            import time # ✅ Biblioteca necessária para criar a pausa de verificação
+            import time
             if EXIBIR_LOGS: logger.info("📤 Fazendo upload do vídeo para o Google Storage...")
             video_gemini = client.files.upload(file=video_path)
             
@@ -706,8 +712,9 @@ async def receber_video(message: types.Message, state: FSMContext):
 
             if EXIBIR_LOGS: logger.info("✅ Vídeo pronto! Gerando a copy persuasiva...")
             
-            # ✅ Lê o número atual para informar a IA
-            numero_atual = ler_contador()
+            # ✅ O número utilizado já foi travado e reservado acima
+            
+            # ✅ Prompt ajustado para remover a repetição do nome no título
             
             # ✅ Prompt ajustado para remover a repetição do nome no título
             prompt_ia = (
@@ -745,8 +752,8 @@ async def receber_video(message: types.Message, state: FSMContext):
         # 3. Limpeza do servidor
         if os.path.exists(video_path): os.remove(video_path)
         
-        # ✅ Salva APENAS o texto limpo da IA na memória para a postagem final
-        await state.update_data(video_id=file_id, nome_produto=chamada_gerada, links=[])
+        # ✅ Salva o texto da IA na memória e repassa o número que reservamos no início
+        await state.update_data(video_id=file_id, nome_produto=chamada_gerada, links=[], numero_reservado=numero_atual)
         await msg_status.delete()
         
         # ✅ Junta o texto da IA com uma pergunta orientativa apenas para exibição ao administrador
@@ -761,7 +768,7 @@ async def receber_video(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.error(f"❌ Erro na IA ou Download: {erro_str}")
         await msg_status.delete()
         
-        # ✅ Analisa o erro e traduz para o usuário
+        # ✅ Analisa o erro e traduz para o utilizador
         motivo = "Falha no servidor."
         if "file is too big" in erro_str.lower():
             motivo = "O vídeo ultrapassa o limite de 20MB do Telegram para Bots."
@@ -772,7 +779,8 @@ async def receber_video(message: types.Message, state: FSMContext):
             
         await message.answer(f"⚠️ A IA não conseguiu processar este vídeo.\n**Motivo:** {motivo}\n\nDigite manualmente APENAS O NOME DO PRODUTO ou clique em Cancelar:", reply_markup=teclado_cancelar)
         
-        await state.update_data(video_id=file_id, links=[])
+        # ✅ Em caso de erro, também preservamos o número já reservado
+        await state.update_data(video_id=file_id, links=[], numero_reservado=numero_atual)
         await state.set_state(PostagemFluxo.aguardando_chamada_manual)
 
 @dp.message(PostagemFluxo.aguardando_confirmacao_nome)
@@ -787,7 +795,9 @@ async def confirmar_nome(message: types.Message, state: FSMContext):
 
 @dp.message(PostagemFluxo.aguardando_chamada_manual)
 async def receber_chamada_manual(message: types.Message, state: FSMContext):
-    numero_atual = ler_contador()
+    data = await state.get_data()
+    numero_atual = data.get('numero_reservado')
+    
     nome_formatado = f"Vídeo {numero_atual}\n📦 Item: {message.text.strip()}"
     
     if EXIBIR_LOGS: logger.info(f"✍️ Identificação manual formatada automaticamente: Vídeo {numero_atual}.")
@@ -895,8 +905,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     links_tiktok = data.get('links_tiktok', [])
     
     if EXIBIR_LOGS: logger.info("📤 Iniciando montagem inteligente da legenda (3 níveis).")
-    async with _lock_contador:
-        numero_atual = ler_contador()
+    # ✅ A leitura e o incremento do contador foram movidos para a primeira etapa do fluxo
     
     # Substitui a quebra de linha por espaço e formata o título
     titulo_limpo = nome.replace('\n', ' | ')
@@ -975,12 +984,12 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo com a legenda encapsulada.")
         await bot.send_video(chat_id=GRUPO_ID, video=video, caption=legenda_final, parse_mode="HTML")
     
-    # Incrementa o contador para o próximo vídeo
+    # Valida qual é o próximo número de forma segura apenas para informar o utilizador
     async with _lock_contador:
-        salvar_contador(numero_atual + 1)
-    if EXIBIR_LOGS: logger.info(f"🔢 Contador atualizado de {numero_atual} para {numero_atual + 1}.")
+        proximo_numero = ler_contador()
+    if EXIBIR_LOGS: logger.info("✅ Postagem consolidada. O incremento do contador ocorreu com sucesso no início do fluxo.")
     
-    await message.answer(f"Postagem enviada com sucesso! ✅\nO próximo vídeo será o número {numero_atual + 1}.", reply_markup=obter_teclado_principal())
+    await message.answer(f"Postagem enviada com sucesso! ✅\nO próximo vídeo será o número {proximo_numero}.", reply_markup=obter_teclado_principal())
     await state.clear()
 
 # ✅ Handlers para Gerenciar a Numeração
