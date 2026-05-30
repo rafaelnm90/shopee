@@ -325,12 +325,13 @@ async def verificar_retorno_pausa_minuto():
 async def gerar_mensagem_gemini(prompt):
     # Lista técnica em ordem de prioridade para garantir a melhor mensagem
     modelos_disponiveis = [
-        "gemini-3.1-pro-preview",       # 1. Inteligência superior
-        "gemini-2.5-pro",               # 2. Estabilidade e raciocínio
-        "gemini-3-flash-preview",       # 3. Equilíbrio e rapidez
-        "gemini-2.5-flash",             # 4. Versatilidade (Workhorse)
-        "gemini-3.1-flash-lite-preview",# 5. Alta velocidade
-        "gemini-2.5-flash-lite"         # 6. Fallback final leve
+        "gemini-3.1-pro-preview",
+        "gemini-3.5-flash",
+        "gemini-3-flash-preview",
+        "gemini-3.1-flash-lite-preview",
+        "gemini-2.5-pro",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite"
     ]
 
     if EXIBIR_LOGS: logger.info("🧠 Iniciando processamento em cascata com a nova SDK...")
