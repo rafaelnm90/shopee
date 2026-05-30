@@ -30,7 +30,7 @@ jobs:
             
             # Reinicia o serviço principal (shopee) com tolerância a falhas de parada
             sudo systemctl stop shopee_bot.service || true
-            (sudo pkill -9 -f shopee.py &) ; sleep 2
+            sudo systemctl kill -s SIGKILL shopee_bot.service || true
             sudo systemctl start shopee_bot.service
             
             EXIBIR_LOGS="true"
@@ -39,6 +39,6 @@ jobs:
             if [ "$EXIBIR_LOGS" = "true" ]; then echo "🚀 Parando o serviço atual..."; fi
             sudo systemctl stop divulgacao_bot.service || true
             if [ "$EXIBIR_LOGS" = "true" ]; then echo "🧹 Aniquilando processos residuais na memória..."; fi
-            (sudo pkill -9 -f divulgacao_canal.py &) ; sleep 2
+            sudo systemctl kill -s SIGKILL divulgacao_bot.service || true
             if [ "$EXIBIR_LOGS" = "true" ]; then echo "✅ Iniciando a nova versão limpa do Userbot..."; fi
             sudo systemctl start divulgacao_bot.service
