@@ -374,6 +374,12 @@ def salvar_lixeira(dados):
     with open("lixeira_mensagens.json", "w") as f:
         json.dump(dados, f, indent=4)
 
+# ✅ Função de limpeza extra para o arquivo de histórico
+def limpar_historico_antigo():
+    if os.path.exists("historico_mensagens.json"):
+        os.remove("historico_mensagens.json")
+        if EXIBIR_LOGS: logger.info("🧹 Histórico de mensagens do userbot reiniciado.")
+
 def registrar_lixeira(msg_id):
     from datetime import datetime, timedelta
     dados = ler_lixeira()
