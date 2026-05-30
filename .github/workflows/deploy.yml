@@ -32,7 +32,10 @@ jobs:
             
             EXIBIR_LOGS=true
             
-            # Reinicia o Userbot de divulgação de forma nativa e registra log visual
-            if [ "$EXIBIR_LOGS" = true ]; then echo "🚀 Iniciando a transição do Userbot..."; fi
-            sudo systemctl restart divulgacao_bot.service
-            if [ "$EXIBIR_LOGS" = true ]; then echo "✅ Sucesso, Userbot em execução nativa."; fi
+            # Reinicia o Userbot de divulgação com limpeza rigorosa de processos zumbis
+            if [ "$EXIBIR_LOGS" = true ]; then echo "🚀 Parando o serviço atual..."; fi
+            sudo systemctl stop divulgacao_bot.service
+            if [ "$EXIBIR_LOGS" = true ]; then echo "🧹 Aniquilando processos residuais na memória..."; fi
+            sudo pkill -9 -f divulgacao_canal.py || true
+            if [ "$EXIBIR_LOGS" = true ]; then echo "✅ Iniciando a nova versão limpa do Userbot..."; fi
+            sudo systemctl start divulgacao_bot.service
