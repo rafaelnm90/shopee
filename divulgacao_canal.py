@@ -45,7 +45,8 @@ async def gerar_texto_divulgacao(repeticoes=6):
         "Você atua como um copywriter persuasivo e focado em conversão, divulgando um grupo do Telegram exclusivo para afiliados da Shopee. "
         "Crie UMA ÚNICA FRASE curta, altamente chamativa, convidativa e diferente de todas as anteriores. "
         "Foque em atrair o usuário oferecendo acesso imediato a um acervo de ouro com vídeos prontos e validados que aumentam as comissões e visualizações na plataforma. "
-        "Use um tom entusiasmado, adicione emojis variados para despertar interesse orgânico, mas sem parecer apelativo ou alarmista. "
+        "OBRIGATÓRIO: Inicie a sua resposta com uma sequência de 10 a 15 emojis repetidos de impacto (como 🚨, 🚀, 🔥 ou 💰) para criar uma forte barreira visual na tela. "
+        "Use um tom entusiasmado, adicione outros emojis variados ao longo do texto para despertar interesse orgânico, mas sem parecer apelativo ou alarmista. "
         "Entregue APENAS a frase final, sem aspas."
     )
     
@@ -79,7 +80,7 @@ async def gerar_texto_divulgacao(repeticoes=6):
 
     if not frase_ia:
         if EXIBIR_LOGS: logger.error("❌ Todos os modelos falharam. A utilizar frase padrão de segurança.")
-        frase_ia = "⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️⚠️\nFugindo de ban por Produto Irrelevante ou Contrafeito? Acesse nosso acervo de vídeos editados e validados!"
+        frase_ia = "🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨\nQuer turbinar suas vendas hoje? Acesse nosso acervo de ouro com vídeos validados e prontos para viralizar na Shopee!"
 
     # Monta o bloco curto com o link obrigatório e a quebra de linha em branco
     bloco_unico = f"{frase_ia}\n\nLINK PARA O GRUPO:👇\nhttps://t.me/shopee_video_afiliado"
