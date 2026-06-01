@@ -45,6 +45,7 @@ async def gerar_texto_divulgacao(repeticoes=6):
         "Você atua como um copywriter persuasivo e focado em conversão, divulgando um grupo do Telegram exclusivo para afiliados da Shopee. "
         "Crie UMA ÚNICA FRASE curta, altamente chamativa, convidativa e diferente de todas as anteriores. A cada nova solicitação, varie completamente a estrutura, o tom e a estratégia de persuasão para garantir originalidade."
         "Foque em atrair o usuário oferecendo acesso imediato a um acervo de ouro com vídeos prontos e validados que aumentam as comissões e visualizações na plataforma. "
+        "É OBRIGATÓRIO informar organicamente na frase que o acesso ao grupo é GRÁTIS (exatamente assim, em letras maiúsculas). "
         "OBRIGATÓRIO: Inicie a sua resposta com uma sequência de 10 a 15 emojis repetidos de impacto (como 🚨, 🚀, ⚠️, 🔥 ou 💰) para criar uma forte barreira visual na tela, trocando a combinação a cada execução. "
         "Use um tom entusiasmado, adicione outros emojis variados ao longo do texto para despertar interesse orgânico, mas sem parecer apelativo ou alarmista. "
         "Entregue APENAS a frase final, sem aspas."
