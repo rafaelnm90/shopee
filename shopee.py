@@ -668,10 +668,21 @@ async def manual_link_grupo(message: types.Message):
 # ❌ NOVO: Handler Global para Cancelar via Botão (Agora 100% à prova de falhas)
 @dp.message(F.text == "Cancelar ❌", StateFilter("*"))
 async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("❌ Ação cancelada ou resetada via botão.")
-    await state.clear()
-    await message.answer("Ação cancelada e memória limpa. Voltando ao menu...", reply_markup=obter_teclado_principal())
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("❌ Ação cancelada ou resetada via botão.")
+
+    if EXIBIR_LOGS: logger.info("🔍 Verificando pendências de numeração na memória antes de limpar...")
+    data = await state.get_data()
+    numero_reservado = data.get('numero_reservado')
+
+    if numero_reservado:
+        if EXIBIR_LOGS: logger.info(f"⏪ Revertendo numeração: devolvendo o número {numero_reservado} ao contador...")
+        async with _lock_contador:
+            salvar_contador(numero_reservado)
+        if EXIBIR_LOGS: logger.info(f"✅ Sucesso! O contador foi restaurado para {numero_reservado}.")
+
+    await state.clear()
+    await message.answer("Ação cancelada e memória limpa. Voltando ao menu...", reply_markup=obter_teclado_principal())
 
 @dp.message(Command("postar"))
 @dp.message(F.text == "Criar Postagem 📝")
