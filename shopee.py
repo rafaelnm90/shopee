@@ -617,11 +617,12 @@ def agendar_tarefas_diarias():
             min_c_noite = random.randint(0, 59)
             
             tipo_alerta = f"campanha_{i}_{data_futura.day:02d}.{data_futura.month:02d}"
-        if EXIBIR_LOGS: logger.info(f"🏷️ Tag de alerta formatada com sucesso: {tipo_alerta}")
-        
-        scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_manha, minute=min_c_manha, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_manha', replace_existing=True)
-        scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_tarde, minute=min_c_tarde, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_tarde', replace_existing=True)
-        scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_noite, minute=min_c_noite, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_noite', replace_existing=True)
+            
+            if EXIBIR_LOGS: logger.info(f"🏷️ Tag de alerta formatada com sucesso: {tipo_alerta}")
+            
+            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_manha, minute=min_c_manha, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_manha', replace_existing=True)
+            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_tarde, minute=min_c_tarde, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_tarde', replace_existing=True)
+            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_noite, minute=min_c_noite, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_noite', replace_existing=True)
             
             if EXIBIR_LOGS:
                 logger.info(f"⏳ Alerta Campanha Manhã: {hora_c_manha:02d}:{min_c_manha:02d}")
