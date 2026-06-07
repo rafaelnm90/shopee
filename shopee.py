@@ -382,38 +382,34 @@ def limpar_historico_antigo():
         if EXIBIR_LOGS: logger.info("🧹 Histórico de mensagens do userbot reiniciado.")
 
 def registrar_lixeira(msg_id):
-    from datetime import datetime, timedelta
     dados = ler_lixeira()
-    data_exclusao = (datetime.now(fuso_horario) + timedelta(hours=24)).isoformat()
-    dados["mensagens"].append({"id": msg_id, "excluir_em": data_exclusao})
+    # ✅ Agora salvamos apenas o ID da mensagem, sem calcular tempo de expiração
+    dados["mensagens"].append({"id": msg_id})
     salvar_lixeira(dados)
-    if EXIBIR_LOGS: logger.info(f"💾 ID {msg_id} salvo na lixeira persistente para exclusão em 24h.")
+    if EXIBIR_LOGS: logger.info(f"💾 ID {msg_id} salvo na lixeira persistente para exclusão na próxima madrugada (03h00).")
 
 async def varredor_de_lixeira():
-    from datetime import datetime
-    if EXIBIR_LOGS: logger.info("🧹 Iniciando varredura da lixeira persistente...")
+    if EXIBIR_LOGS: logger.info("🧹 Iniciando varredura diária da lixeira persistente (03h00)...")
     dados = ler_lixeira()
     mensagens = dados.get("mensagens", [])
-    mensagens_restantes = []
-    agora = datetime.now(fuso_horario)
     
     for msg in mensagens:
         try:
-            data_exclusao = datetime.fromisoformat(msg["excluir_em"])
-            if agora >= data_exclusao:
-                await apagar_mensagem_automatica(msg["id"])
-            else:
-                mensagens_restantes.append(msg)
+            # Compatibilidade mantida caso existam mensagens salvas no formato antigo
+            msg_id = msg["id"] if isinstance(msg, dict) else msg
+            await apagar_mensagem_automatica(msg_id)
         except Exception as e:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Falha ao ler data da lixeira: {e}")
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao processar item da lixeira: {e}")
             
-    dados["mensagens"] = mensagens_restantes
+    # Esvazia a lixeira completamente de uma só vez após o loop de limpeza
+    dados["mensagens"] = []
     salvar_lixeira(dados)
+    if EXIBIR_LOGS: logger.info("✅ Lixeira persistente esvaziada com sucesso.")
 
 async def apagar_mensagem_automatica(msg_id):
     try:
         await bot.delete_message(chat_id=GRUPO_ID, message_id=msg_id)
-        if EXIBIR_LOGS: logger.info(f"🧹 Faxina concluída: Mensagem automática {msg_id} apagada após 24h.")
+        if EXIBIR_LOGS: logger.info(f"🧹 Faxina concluída: Mensagem automática {msg_id} apagada da lixeira.")
     except Exception as e:
         if EXIBIR_LOGS: logger.info(f"⚠️ Faxina: A mensagem {msg_id} já havia sido apagada manualmente ou não foi encontrada.")
 
@@ -1673,8 +1669,8 @@ async def main():
     # Agendador mestre que roda todo dia às 00:01
     scheduler.add_job(agendar_tarefas_diarias, 'cron', hour=0, minute=1)
     
-    # ✅ Agendador da lixeira persistente (roda a cada hora no minuto 0)
-    scheduler.add_job(varredor_de_lixeira, 'cron', minute=0)
+    # ✅ Agendador da lixeira persistente (roda todos os dias pontualmente às 03:00)
+    scheduler.add_job(varredor_de_lixeira, 'cron', hour=3, minute=0, timezone=fuso_horario)
     
     # ✅ Novo: Despertador e aviso da Pausa Programada (roda às 09:00)
     scheduler.add_job(verificar_pausa_diaria, 'cron', hour=9, minute=0, timezone=fuso_horario)
