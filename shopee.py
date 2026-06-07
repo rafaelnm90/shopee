@@ -455,13 +455,18 @@ async def disparar_mensagem(tipo, forcar=False):
         )
 
     elif tipo.startswith("campanha_"):
-        dias_restantes = int(tipo.split("_")[1])
+        partes = tipo.split("_")
+        dias_restantes = int(partes[1])
+        data_dupla = partes[2] if len(partes) > 2 else ""
+        
+        if EXIBIR_LOGS: logger.info(f"📅 Extração concluída: Data dupla {data_dupla} (Faltam {dias_restantes} dias).")
+
         if dias_restantes == 0:
-            aviso = "É HOJE o evento de data dupla! Disparem seus links nas redes!"
+            aviso = f"É HOJE o evento de data dupla {data_dupla}! Disparem seus links nas redes!"
         elif dias_restantes == 1:
-            aviso = "É AMANHÃ o evento de data dupla! Preparem todos os materiais!"
+            aviso = f"É AMANHÃ o evento de data dupla {data_dupla}! Preparem todos os materiais!"
         else:
-            aviso = f"Faltam {dias_restantes} dias para o evento de data dupla. Antecipem a organização!"
+            aviso = f"Faltam {dias_restantes} dias para o evento de data dupla {data_dupla}. Antecipem a organização!"
         
         prompt = (
             f"Você atua como assistente de afiliados. Crie um alerta baseado no seguinte status: '{aviso}'. "
@@ -529,10 +534,11 @@ def salvar_config_rotina(dados):
 def agendar_tarefas_diarias():
     if EXIBIR_LOGS: logger.info("🔄 Sorteando horários de rotina com inteligência anti-spam...")
     
-    # Limpa exclusivamente os jobs antigos de rotina para evitar duplicatas ao forçar re-sorteio
+    # Limpa os jobs antigos de rotina e de campanhas para evitar duplicatas ao forçar re-sorteio
     for job in scheduler.get_jobs():
-        if job.id.startswith('job_rotina_'):
+        if job.id.startswith('job_rotina_') or job.id.startswith('job_campanha_'):
             job.remove()
+            if EXIBIR_LOGS: logger.info(f"🧹 Registro de agendamento antigo apagado da memória: {job.id}")
 
     dados_rotina = ler_config_rotina()
     horarios_ocupados = [] 
@@ -614,11 +620,12 @@ def agendar_tarefas_diarias():
             hora_c_noite = random.randint(18, 21)
             min_c_noite = random.randint(0, 59)
             
-            tipo_alerta = f"campanha_{i}"
-            
-            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_manha, minute=min_c_manha, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_manha', replace_existing=True)
-            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_tarde, minute=min_c_tarde, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_tarde', replace_existing=True)
-            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_noite, minute=min_c_noite, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_noite', replace_existing=True)
+            tipo_alerta = f"campanha_{i}_{data_futura.day:02d}.{data_futura.month:02d}"
+        if EXIBIR_LOGS: logger.info(f"🏷️ Tag de alerta formatada com sucesso: {tipo_alerta}")
+        
+        scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_manha, minute=min_c_manha, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_manha', replace_existing=True)
+        scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_tarde, minute=min_c_tarde, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_tarde', replace_existing=True)
+        scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_noite, minute=min_c_noite, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_noite', replace_existing=True)
             
             if EXIBIR_LOGS:
                 logger.info(f"⏳ Alerta Campanha Manhã: {hora_c_manha:02d}:{min_c_manha:02d}")
