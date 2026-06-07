@@ -661,7 +661,8 @@ def salvar_config_rotina(dados):
 
 def agendar_tarefas_diarias():
     if EXIBIR_LOGS: logger.info("🔄 Sorteando horários de rotina com inteligência anti-spam...")
-        agendar_fila_postagens()
+    
+    agendar_fila_postagens()
     
     # Limpa os jobs antigos de rotina e de campanhas para evitar duplicatas ao forçar re-sorteio
     for job in scheduler.get_jobs():
