@@ -1150,8 +1150,11 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
                 "-c:a", "aac", "-b:a", "128k",
                 caminho_processado
             ]
-            subprocess.run(comando, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if EXIBIR_LOGS: logger.info("✅ Processamento da mídia pelo FFmpeg finalizado.")
+            try:
+                subprocess.run(comando, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if EXIBIR_LOGS: logger.info("✅ Processamento da mídia pelo FFmpeg finalizado.")
+            except FileNotFoundError:
+                if EXIBIR_LOGS: logger.error("❌ Falha: Binário 'ffmpeg' não encontrado no servidor. A preservar o ficheiro original intacto.")
             
         await asyncio.to_thread(comprimir_video)
         
