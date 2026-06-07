@@ -1134,39 +1134,11 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
                 if EXIBIR_LOGS: logger.warning("🚨 Limite crítico excedido no Nível 3. Ativando Nível 4 (Divisão de Postagem).")
                 nivel_4_ativado = True
 
-    # 🗜️ Processamento do vídeo via FFmpeg (Padronização e renovação da data)
-    arquivo_para_envio = video_id_fallback
+    # ✅ Renova a data do arquivo sem recompressão
     caminho_processado = None
-    
     if caminho_video_original and os.path.exists(caminho_video_original):
-        if EXIBIR_LOGS: logger.info("🗜️ Iniciando padronização de resolução do vídeo com FFmpeg...")
-        msg_processamento = await message.answer("🗜️ <i>Otimizando a qualidade do vídeo para envio...</i>", parse_mode="HTML")
-        caminho_processado = f"pronto_{video_id_fallback}.mp4"
-        
-        def comprimir_video():
-            if EXIBIR_LOGS: logger.info("🚀 Configurando motor FFmpeg para reprocessamento mantendo a escala de resolução original...")
-            comando = [
-                "ffmpeg", "-y", "-i", caminho_video_original,
-                "-c:v", "libx264", "-preset", "fast", "-crf", "28",
-                "-c:a", "aac", "-b:a", "128k",
-                caminho_processado
-            ]
-            try:
-                subprocess.run(comando, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                if EXIBIR_LOGS: logger.info("✅ Processamento da mídia pelo FFmpeg finalizado.")
-            except FileNotFoundError:
-                if EXIBIR_LOGS: logger.error("❌ Falha: Binário 'ffmpeg' não encontrado no servidor. A preservar o ficheiro original intacto.")
-            
-        await asyncio.to_thread(comprimir_video)
-        
-        if os.path.exists(caminho_processado):
-            if EXIBIR_LOGS: logger.info("✅ Vídeo processado com sucesso. Preparando upload inédito.")
-            arquivo_para_envio = FSInputFile(caminho_processado)
-        else:
-            if EXIBIR_LOGS: logger.warning("⚠️ Falha ao processar com FFmpeg. Enviando arquivo original físico.")
-            arquivo_para_envio = FSInputFile(caminho_video_original)
-            
-        await msg_processamento.delete()
+        subprocess.run(["touch", caminho_video_original])
+        if EXIBIR_LOGS: logger.info("📅 Data do arquivo renovada sem recompressão.")
 
     hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
     
