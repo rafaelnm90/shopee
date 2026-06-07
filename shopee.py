@@ -234,6 +234,137 @@ def obter_teclado_principal():
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
+# --- SISTEMA DE FILA DE POSTAGENS ASSÍNCRONAS ---
+def ler_fila_postagens():
+    try:
+        with open("fila_postagens.json", "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"fila": []}
+
+def salvar_fila_postagens(dados):
+    with open("fila_postagens.json", "w") as f:
+        json.dump(dados, f, indent=4)
+
+def agendar_fila_postagens():
+    if EXIBIR_LOGS: logger.info("🔄 Calculando distribuição orgânica de vídeos da fila...")
+    for job in scheduler.get_jobs():
+        if job.id.startswith('job_fila_postagem_'):
+            job.remove()
+            
+    dados_pausa = ler_pausa_programada()
+    if dados_pausa.get("ativa"):
+        if EXIBIR_LOGS: logger.info("🛑 Fila de postagens represada: A pausa programada está ativa.")
+        return
+        
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    if not fila:
+        return
+        
+    agora = datetime.now(fuso_horario)
+    hoje_str = agora.strftime("%Y-%m-%d")
+    
+    # Só posta vídeos que foram inseridos antes de hoje (agendados pro dia seguinte) ou represados
+    from datetime import timedelta
+    videos_para_hoje = [item for item in fila if item.get("data_adicao") < hoje_str]
+    
+    if not videos_para_hoje:
+        if EXIBIR_LOGS: logger.info("⏳ Todos os vídeos na fila estão agendados aguardando o dia de amanhã.")
+        return
+        
+    dados_rotina = ler_config_rotina()
+    config_bom_dia = dados_rotina.get("bom_dia", {"inicio": 6, "fim": 9})
+    config_boa_noite = dados_rotina.get("boa_noite", {"inicio": 21, "fim": 23})
+    
+    hora_inicio_permitida = config_bom_dia.get("inicio", 6)
+    hora_fim_permitida = config_boa_noite.get("fim", 23)
+    
+    if agora.hour >= hora_fim_permitida:
+        if EXIBIR_LOGS: logger.warning("⚠️ Janela de postagem de hoje já encerrou. Fila aguardará até amanhã.")
+        return
+        
+    hora_inicio_efetiva = max(agora.hour, hora_inicio_permitida)
+    
+    # Dá um respiro de 5 minutos se o robô acabou de acordar de uma pausa
+    minuto_inicio = agora.minute + 5 if hora_inicio_efetiva == agora.hour else 0
+    minutos_disponiveis = ((hora_fim_permitida * 60) + 59) - ((hora_inicio_efetiva * 60) + minuto_inicio)
+    
+    if minutos_disponiveis < 5:
+        if EXIBIR_LOGS: logger.warning("⚠️ Tempo insuficiente para espaçar os vídeos hoje.")
+        return
+        
+    qtd_videos = len(videos_para_hoje)
+    espacamento_medio = minutos_disponiveis // qtd_videos
+    minuto_atual_busca = (hora_inicio_efetiva * 60) + minuto_inicio
+    
+    for index, item in enumerate(videos_para_hoje):
+        limite_sorteio = minuto_atual_busca + espacamento_medio - 1
+        if limite_sorteio < minuto_atual_busca: limite_sorteio = minuto_atual_busca
+        
+        minuto_sorteado = random.randint(minuto_atual_busca, limite_sorteio)
+        max_minuto_permitido = (hora_fim_permitida * 60) + 59
+        if minuto_sorteado > max_minuto_permitido:
+            minuto_sorteado = max_minuto_permitido
+            
+        hora_job = minuto_sorteado // 60
+        min_job = minuto_sorteado % 60
+        
+        job_id = f"job_fila_postagem_{item['id']}"
+        horario_disparo = agora.replace(hour=hora_job, minute=min_job, second=random.randint(0, 59))
+        if horario_disparo < agora:
+            horario_disparo = agora + timedelta(minutes=random.randint(1, 3))
+            
+        scheduler.add_job(executar_postagem_fila, 'date', run_date=horario_disparo, args=[item['id']], id=job_id, replace_existing=True)
+        if EXIBIR_LOGS: logger.info(f"✅ Fila de Amanhã/Retorno: Vídeo {index+1}/{qtd_videos} distribuído orgânicamente para as {horario_disparo.strftime('%H:%M:%S')}")
+        
+        minuto_atual_busca += espacamento_medio
+
+async def executar_postagem_fila(item_id):
+    if EXIBIR_LOGS: logger.info(f"📤 Disparando postagem assíncrona programada...")
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    
+    item = next((x for x in fila if x["id"] == item_id), None)
+    if not item:
+        return
+        
+    caminho_video = item.get("caminho_video")
+    video_id = item.get("video_id")
+    legenda = item.get("legenda")
+    
+    try:
+        if caminho_video and os.path.exists(caminho_video):
+            arquivo = FSInputFile(caminho_video)
+            msg = await bot.send_video(chat_id=GRUPO_ID, video=arquivo, caption=legenda, parse_mode="HTML")
+            
+            # Atualiza todos os itens que usam esse mesmo arquivo de Nível 4 com o novo ID para evitar uploads duplicados
+            novo_file_id = msg.video.file_id
+            for x in fila:
+                if x.get("caminho_video") == caminho_video and x["id"] != item_id:
+                    x["video_id"] = novo_file_id
+                    x["caminho_video"] = None
+        elif video_id:
+            await bot.send_video(chat_id=GRUPO_ID, video=video_id, caption=legenda, parse_mode="HTML")
+        else:
+            if EXIBIR_LOGS: logger.error(f"❌ Falha: Vídeo expirou ou foi perdido fisicamente da máquina.")
+            
+        if EXIBIR_LOGS: logger.info("✅ Postagem distribuída com sucesso!")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Falha ao postar vídeo da fila: {e}")
+    finally:
+        # Exclui o item da fila após tentativa
+        fila = [x for x in fila if x["id"] != item_id]
+        fila_data["fila"] = fila
+        salvar_fila_postagens(fila_data)
+        
+        # Faxina responsável: só exclui o vídeo físico se nenhum outro item da fila precisar dele
+        if caminho_video and os.path.exists(caminho_video):
+            ainda_usado = any(x.get("caminho_video") == caminho_video for x in fila)
+            if not ainda_usado:
+                os.remove(caminho_video)
+                if EXIBIR_LOGS: logger.info("🧹 Faxina: Arquivo fonte excluído permanentemente após esvaziar da fila.")
+
 # --- SISTEMA DE PAUSA PROGRAMADA ---
 def ler_pausa_programada():
     try:
@@ -319,6 +450,7 @@ async def verificar_retorno_pausa_minuto():
         dados_pausa["servicos_pausados"] = []
         dados_pausa.pop("id_aviso_imediato", None)
         salvar_pausa_programada(dados_pausa)
+        agendar_fila_postagens()
         if EXIBIR_LOGS: logger.info("✅ Serviços reativados e pausa programada encerrada com sucesso.")
 # ----------------------------------
 
@@ -529,6 +661,7 @@ def salvar_config_rotina(dados):
 
 def agendar_tarefas_diarias():
     if EXIBIR_LOGS: logger.info("🔄 Sorteando horários de rotina com inteligência anti-spam...")
+        agendar_fila_postagens()
     
     # Limpa os jobs antigos de rotina e de campanhas para evitar duplicatas ao forçar re-sorteio
     for job in scheduler.get_jobs():
@@ -1030,36 +1163,45 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
             
         await msg_processamento.delete()
 
+    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    
+    def adicionar_a_fila(caminho_vid, vid_id, caption):
+        fila_data = ler_fila_postagens()
+        item = {
+            "id": f"{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}",
+            "caminho_video": caminho_vid,
+            "video_id": vid_id,
+            "legenda": caption,
+            "data_adicao": hoje_str
+        }
+        fila_data.setdefault("fila", []).append(item)
+        salvar_fila_postagens(fila_data)
+
+    caminho_final = caminho_processado if caminho_processado and os.path.exists(caminho_processado) else caminho_video_original
+    
+    if caminho_processado and caminho_video_original and os.path.exists(caminho_video_original):
+        os.remove(caminho_video_original)
+
     if nivel_4_ativado:
-        # Envia a publicação fracionada em duas mensagens
         legenda_shopee = montar_legenda(texto_longo, is_rodape=False, plataforma_alvo="Apenas Shopee 🛒")
-        if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo 1/2 (Exclusivo Shopee) com arquivo inédito.")
-        msg_1 = await bot.send_video(chat_id=GRUPO_ID, video=arquivo_para_envio, caption=legenda_shopee, parse_mode="HTML")
-        
-        # Reaproveita o ID recém-gerado no Telegram para evitar re-upload duplo
-        novo_file_id = msg_1.video.file_id
+        if EXIBIR_LOGS: logger.info("📦 Agendando vídeo 1/2 (Shopee) na fila invisível para amanhã.")
+        adicionar_a_fila(caminho_final, None, legenda_shopee)
         
         legenda_tiktok = montar_legenda(texto_longo, is_rodape=False, plataforma_alvo="Apenas TikTok 🎵")
-        if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo 2/2 (Exclusivo TikTok) com ID atualizado.")
-        await bot.send_video(chat_id=GRUPO_ID, video=novo_file_id, caption=legenda_tiktok, parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info("📦 Agendando vídeo 2/2 (TikTok) na fila invisível para amanhã.")
+        adicionar_a_fila(caminho_final, None, legenda_tiktok)
     else:
-        # Envia o vídeo com a legenda consolidada e validada
-        if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo consolidado com arquivo inédito.")
-        await bot.send_video(chat_id=GRUPO_ID, video=arquivo_para_envio, caption=legenda_final, parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info("📦 Agendando vídeo consolidado na fila invisível para amanhã.")
+        adicionar_a_fila(caminho_final, video_id_fallback if not caminho_final else None, legenda_final)
         
-    # 🧹 Faxina dos arquivos locais após o upload
-    if caminho_video_original and os.path.exists(caminho_video_original):
-        os.remove(caminho_video_original)
-    if caminho_processado and os.path.exists(caminho_processado):
-        os.remove(caminho_processado)
-    if EXIBIR_LOGS: logger.info("🧹 Arquivos de vídeo temporários excluídos do servidor.")
+    if EXIBIR_LOGS: logger.info("💾 Arquivo físico adormecido. A limpeza ocorrerá automaticamente após o upload escalonado amanhã.")
     
-    # Valida qual é o próximo número de forma segura apenas para informar o utilizador
     async with _lock_contador:
         proximo_numero = ler_contador()
-    if EXIBIR_LOGS: logger.info("✅ Postagem consolidada. O incremento do contador ocorreu com sucesso no início do fluxo.")
+        
+    agendar_fila_postagens()
     
-    await message.answer(f"Postagem enviada com sucesso! ✅\nO próximo vídeo será o número {proximo_numero}.", reply_markup=obter_teclado_principal())
+    await message.answer(f"Postagem processada e agendada para amanhã! 📅✅\nO sistema distribuirá os vídeos de forma invisível ao longo do dia. O próximo vídeo assumirá o número {proximo_numero}.", reply_markup=obter_teclado_principal())
     await state.clear()
 
 # ✅ Handlers para Gerenciar a Numeração
