@@ -1009,14 +1009,15 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
         caminho_processado = f"pronto_{video_id_fallback}.mp4"
         
         def comprimir_video():
+            if EXIBIR_LOGS: logger.info("🚀 Configurando motor FFmpeg para reprocessamento mantendo a escala de resolução original...")
             comando = [
                 "ffmpeg", "-y", "-i", caminho_video_original,
-                "-vf", "scale='min(720,iw)':-2",
                 "-c:v", "libx264", "-preset", "fast", "-crf", "28",
                 "-c:a", "aac", "-b:a", "128k",
                 caminho_processado
             ]
             subprocess.run(comando, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if EXIBIR_LOGS: logger.info("✅ Processamento da mídia pelo FFmpeg finalizado.")
             
         await asyncio.to_thread(comprimir_video)
         
