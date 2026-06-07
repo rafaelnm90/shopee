@@ -14,7 +14,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command, StateFilter
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, FSInputFile
+import subprocess
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from google import genai
 
@@ -681,6 +682,12 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
             salvar_contador(numero_reservado)
         if EXIBIR_LOGS: logger.info(f"✅ Sucesso! O contador foi restaurado para {numero_reservado}.")
 
+    # 🧹 Limpeza de arquivos de vídeo que ficaram órfãos
+    caminho_video = data.get('video_path')
+    if caminho_video and os.path.exists(caminho_video):
+        os.remove(caminho_video)
+        if EXIBIR_LOGS: logger.info("🧹 Vídeo temporário excluído do servidor devido ao cancelamento.")
+
     await state.clear()
     await message.answer("Ação cancelada e memória limpa. Voltando ao menu...", reply_markup=obter_teclado_principal())
 
@@ -766,12 +773,10 @@ async def receber_video(message: types.Message, state: FSMContext):
 
         # Executa a IA de forma assíncrona para não travar o bot
         chamada_gerada = await asyncio.to_thread(analisar_video)
+        if EXIBIR_LOGS: logger.info("💾 Mantendo o vídeo no servidor para re-upload posterior com data atualizada.")
         
-        # 3. Limpeza do servidor
-        if os.path.exists(video_path): os.remove(video_path)
-        
-        # ✅ Salva o texto da IA na memória e repassa o número que reservamos no início
-        await state.update_data(video_id=file_id, nome_produto=chamada_gerada, links=[], numero_reservado=numero_atual)
+        # ✅ Salva o texto da IA e o caminho do vídeo físico na memória
+        await state.update_data(video_path=video_path, video_id=file_id, nome_produto=chamada_gerada, links=[], numero_reservado=numero_atual)
         await msg_status.delete()
         
         # ✅ Junta o texto da IA com uma pergunta orientativa apenas para exibição ao administrador
@@ -782,8 +787,8 @@ async def receber_video(message: types.Message, state: FSMContext):
 
     except Exception as e:
         erro_str = str(e)
-        if os.path.exists(f"temp_{file_id}.mp4"): os.remove(f"temp_{file_id}.mp4")
         if EXIBIR_LOGS: logger.error(f"❌ Erro na IA ou Download: {erro_str}")
+        if EXIBIR_LOGS: logger.info("💾 Mantendo o vídeo original no servidor apesar do erro na IA.")
         await msg_status.delete()
         
         # ✅ Analisa o erro e traduz para o utilizador
@@ -793,12 +798,13 @@ async def receber_video(message: types.Message, state: FSMContext):
         elif "429" in erro_str:
             motivo = "Limite de velocidade da IA atingido. Aguarde 1 minuto."
         else:
-            motivo = erro_str[:150] # Exibe o começo do erro técnico
+            motivo = erro_str[:150] 
             
         await message.answer(f"⚠️ A IA não conseguiu processar este vídeo.\n**Motivo:** {motivo}\n\nDigite manualmente APENAS O NOME DO PRODUTO ou clique em Cancelar:", reply_markup=teclado_cancelar)
         
-        # ✅ Em caso de erro, também preservamos o número já reservado
-        await state.update_data(video_id=file_id, links=[], numero_reservado=numero_atual)
+        # ✅ Em caso de erro, preservamos o arquivo físico e o número já reservado
+        video_path_recuperacao = f"temp_{file_id}.mp4"
+        await state.update_data(video_path=video_path_recuperacao, video_id=file_id, links=[], numero_reservado=numero_atual)
         await state.set_state(PostagemFluxo.aguardando_chamada_manual)
 
 @dp.message(PostagemFluxo.aguardando_confirmacao_nome)
@@ -915,7 +921,8 @@ async def receber_links_tiktok(message: types.Message, state: FSMContext):
 async def finalizar_postagem(message: types.Message, state: FSMContext):
     data = await state.get_data()
     nome = data['nome_produto']
-    video = data['video_id']
+    video_id_fallback = data.get('video_id')
+    caminho_video_original = data.get('video_path')
     plataforma = data['plataforma_escolhida']
     link_vid_shopee = data.get('link_video_shopee', "")
     link_vid_tiktok = data.get('link_video_tiktok', "")
@@ -988,19 +995,59 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
                 if EXIBIR_LOGS: logger.warning("🚨 Limite crítico excedido no Nível 3. Ativando Nível 4 (Divisão de Postagem).")
                 nivel_4_ativado = True
 
+    # 🗜️ Processamento do vídeo via FFmpeg (Padronização e renovação da data)
+    arquivo_para_envio = video_id_fallback
+    caminho_processado = None
+    
+    if caminho_video_original and os.path.exists(caminho_video_original):
+        if EXIBIR_LOGS: logger.info("🗜️ Iniciando padronização de resolução do vídeo com FFmpeg...")
+        msg_processamento = await message.answer("🗜️ <i>Otimizando a qualidade do vídeo para envio...</i>", parse_mode="HTML")
+        caminho_processado = f"pronto_{video_id_fallback}.mp4"
+        
+        def comprimir_video():
+            comando = [
+                "ffmpeg", "-y", "-i", caminho_video_original,
+                "-vf", "scale='min(720,iw)':-2",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "28",
+                "-c:a", "aac", "-b:a", "128k",
+                caminho_processado
+            ]
+            subprocess.run(comando, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            
+        await asyncio.to_thread(comprimir_video)
+        
+        if os.path.exists(caminho_processado):
+            if EXIBIR_LOGS: logger.info("✅ Vídeo processado com sucesso. Preparando upload inédito.")
+            arquivo_para_envio = FSInputFile(caminho_processado)
+        else:
+            if EXIBIR_LOGS: logger.warning("⚠️ Falha ao processar com FFmpeg. Enviando arquivo original físico.")
+            arquivo_para_envio = FSInputFile(caminho_video_original)
+            
+        await msg_processamento.delete()
+
     if nivel_4_ativado:
         # Envia a publicação fracionada em duas mensagens
         legenda_shopee = montar_legenda(texto_longo, is_rodape=False, plataforma_alvo="Apenas Shopee 🛒")
-        if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo 1/2 (Exclusivo Shopee).")
-        await bot.send_video(chat_id=GRUPO_ID, video=video, caption=legenda_shopee, parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo 1/2 (Exclusivo Shopee) com arquivo inédito.")
+        msg_1 = await bot.send_video(chat_id=GRUPO_ID, video=arquivo_para_envio, caption=legenda_shopee, parse_mode="HTML")
+        
+        # Reaproveita o ID recém-gerado no Telegram para evitar re-upload duplo
+        novo_file_id = msg_1.video.file_id
         
         legenda_tiktok = montar_legenda(texto_longo, is_rodape=False, plataforma_alvo="Apenas TikTok 🎵")
-        if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo 2/2 (Exclusivo TikTok).")
-        await bot.send_video(chat_id=GRUPO_ID, video=video, caption=legenda_tiktok, parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo 2/2 (Exclusivo TikTok) com ID atualizado.")
+        await bot.send_video(chat_id=GRUPO_ID, video=novo_file_id, caption=legenda_tiktok, parse_mode="HTML")
     else:
         # Envia o vídeo com a legenda consolidada e validada
-        if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo com a legenda encapsulada.")
-        await bot.send_video(chat_id=GRUPO_ID, video=video, caption=legenda_final, parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info("🎥 Disparando vídeo consolidado com arquivo inédito.")
+        await bot.send_video(chat_id=GRUPO_ID, video=arquivo_para_envio, caption=legenda_final, parse_mode="HTML")
+        
+    # 🧹 Faxina dos arquivos locais após o upload
+    if caminho_video_original and os.path.exists(caminho_video_original):
+        os.remove(caminho_video_original)
+    if caminho_processado and os.path.exists(caminho_processado):
+        os.remove(caminho_processado)
+    if EXIBIR_LOGS: logger.info("🧹 Arquivos de vídeo temporários excluídos do servidor.")
     
     # Valida qual é o próximo número de forma segura apenas para informar o utilizador
     async with _lock_contador:
