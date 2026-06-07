@@ -226,8 +226,9 @@ def obter_teclado_e_status_pausa():
 def obter_teclado_principal():
     botoes = [
         [KeyboardButton(text="Criar Postagem 📝")],
-        [KeyboardButton(text="Pausar Postagens 🛑")],
+        [KeyboardButton(text="Gerenciar Fila 📋")],
         [KeyboardButton(text="Editar Número da Postagem 🔢")],
+        [KeyboardButton(text="Pausar Postagens 🛑")],
         [KeyboardButton(text="Enviar mensagem de Bom Dia ☀️"), KeyboardButton(text="Enviar mensagem de Incentivo 🔥")],
         [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙"), KeyboardButton(text="Enviar Convite do Grupo 📢")],
         [KeyboardButton(text="Configurações Gerais ⚙️")]
@@ -1812,6 +1813,188 @@ async def salvar_horario_rotina(message: types.Message, state: FSMContext):
     
     await message.answer("✅ Configuração salva! Os novos horários já foram sorteados e agendados para hoje.", reply_markup=teclado_configuracoes_gerais)
     await state.clear()
+
+# --- SISTEMA DE GERENCIAMENTO DE FILA (INTERATIVO) ---
+class GerenciarFilaFluxo(StatesGroup):
+    menu_principal = State()
+    aguardando_posicao_excluir = State()
+    aguardando_posicao_editar = State()
+    aguardando_nova_legenda = State()
+    aguardando_posicao_reordenar = State()
+    aguardando_nova_posicao = State()
+
+teclado_gerenciar_fila = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Excluir Vídeo 🗑️"), KeyboardButton(text="Editar Legenda ✏️")],
+        [KeyboardButton(text="Mover Posição ↕️"), KeyboardButton(text="Voltar ao Início 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+@dp.message(F.text == "Gerenciar Fila 📋")
+async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("📋 Acessando painel de gestão da fila...")
+    
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    
+    if not fila:
+        await message.answer("A fila de postagens está vazia neste momento.", reply_markup=obter_teclado_principal())
+        return
+        
+    texto = "📋 <b>Fila de Postagens Agendadas</b>\n\n"
+    for i, item in enumerate(fila, 1):
+        legenda = item.get("legenda", "")
+        primeira_linha = legenda.split('\n')[0].replace('<b>', '').replace('</b>', '')[:40]
+        if not primeira_linha: primeira_linha = f"Vídeo {i}"
+        
+        data_add = item.get("data_adicao", "Desconhecida")
+        texto += f"<b>{i}.</b> {primeira_linha}...\n📅 <i>Adicionado em: {data_add}</i>\n\n"
+        
+    texto += "O que deseja fazer com a fila?"
+    await message.answer(texto, reply_markup=teclado_gerenciar_fila, parse_mode="HTML")
+    await state.set_state(GerenciarFilaFluxo.menu_principal)
+
+@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Voltar ao Início 🔙")
+async def sair_menu_fila(message: types.Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
+
+@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Excluir Vídeo 🗑️")
+async def pedir_exclusao_fila(message: types.Message, state: FSMContext):
+    await message.answer("Digite o <b>NÚMERO</b> da posição do vídeo que deseja excluir:", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(GerenciarFilaFluxo.aguardando_posicao_excluir)
+
+@dp.message(GerenciarFilaFluxo.aguardando_posicao_excluir)
+async def processar_exclusao_fila(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
+        return
+        
+    posicao = int(message.text) - 1
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    
+    if 0 <= posicao < len(fila):
+        item_removido = fila.pop(posicao)
+        caminho_video = item_removido.get("caminho_video")
+        
+        if caminho_video and os.path.exists(caminho_video):
+            ainda_usado = any(x.get("caminho_video") == caminho_video for x in fila)
+            if not ainda_usado:
+                os.remove(caminho_video)
+                if EXIBIR_LOGS: logger.info("🧹 Fila: Ficheiro físico excluído após remoção manual.")
+                
+        fila_data["fila"] = fila
+        salvar_fila_postagens(fila_data)
+        
+        if EXIBIR_LOGS: logger.info(f"🗑️ Fila: Vídeo na posição {posicao+1} removido com sucesso.")
+        agendar_fila_postagens() 
+        
+        await message.answer("✅ Vídeo excluído com sucesso e horários recalculados!", reply_markup=obter_teclado_principal())
+        await state.clear()
+    else:
+        await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
+
+@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Editar Legenda ✏️")
+async def pedir_edicao_fila(message: types.Message, state: FSMContext):
+    await message.answer("Digite o <b>NÚMERO</b> da posição do vídeo que deseja editar:", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(GerenciarFilaFluxo.aguardando_posicao_editar)
+
+@dp.message(GerenciarFilaFluxo.aguardando_posicao_editar)
+async def processar_posicao_editar_fila(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
+        return
+        
+    posicao = int(message.text) - 1
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    
+    if 0 <= posicao < len(fila):
+        await state.update_data(posicao_edicao=posicao)
+        legenda_atual = fila[posicao].get("legenda", "")
+        
+        await message.answer(f"Aqui está a legenda atual para copiar e editar:\n\n<code>{legenda_atual}</code>\n\nEnvie agora a <b>NOVA LEGENDA COMPLETA</b>:", parse_mode="HTML", reply_markup=teclado_cancelar)
+        await state.set_state(GerenciarFilaFluxo.aguardando_nova_legenda)
+    else:
+        await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
+
+@dp.message(GerenciarFilaFluxo.aguardando_nova_legenda)
+async def salvar_nova_legenda_fila(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    posicao = data.get("posicao_edicao")
+    nova_legenda = message.html_text 
+    
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    
+    if 0 <= posicao < len(fila):
+        fila[posicao]["legenda"] = nova_legenda
+        salvar_fila_postagens(fila_data)
+        if EXIBIR_LOGS: logger.info(f"✏️ Fila: Legenda do vídeo na posição {posicao+1} atualizada.")
+        
+        await message.answer("✅ Legenda atualizada com sucesso!", reply_markup=obter_teclado_principal())
+        await state.clear()
+    else:
+        await message.answer("Erro de sincronização. Operação cancelada.", reply_markup=obter_teclado_principal())
+        await state.clear()
+
+@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Mover Posição ↕️")
+async def pedir_reordenar_fila(message: types.Message, state: FSMContext):
+    await message.answer("Digite o <b>NÚMERO</b> da posição atual do vídeo que deseja mover:", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(GerenciarFilaFluxo.aguardando_posicao_reordenar)
+
+@dp.message(GerenciarFilaFluxo.aguardando_posicao_reordenar)
+async def pedir_nova_posicao_fila(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
+        return
+        
+    posicao_atual = int(message.text) - 1
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    
+    if 0 <= posicao_atual < len(fila):
+        await state.update_data(posicao_origem=posicao_atual)
+        await message.answer(f"O vídeo está na posição {posicao_atual+1}. Para qual posição deseja enviá-lo? (Ex: 1 para o topo)", reply_markup=teclado_cancelar)
+        await state.set_state(GerenciarFilaFluxo.aguardando_nova_posicao)
+    else:
+        await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
+
+@dp.message(GerenciarFilaFluxo.aguardando_nova_posicao)
+async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
+        return
+        
+    nova_posicao = int(message.text) - 1
+    data = await state.get_data()
+    posicao_origem = data.get("posicao_origem")
+    
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    
+    if 0 <= posicao_origem < len(fila):
+        if nova_posicao < 0: nova_posicao = 0
+        if nova_posicao >= len(fila): nova_posicao = len(fila) - 1
+        
+        item = fila.pop(posicao_origem)
+        fila.insert(nova_posicao, item)
+        
+        fila_data["fila"] = fila
+        salvar_fila_postagens(fila_data)
+        
+        if EXIBIR_LOGS: logger.info(f"↕️ Fila: Vídeo movido da posição {posicao_origem+1} para {nova_posicao+1}.")
+        agendar_fila_postagens() 
+        
+        await message.answer(f"✅ Vídeo movido com sucesso para a posição {nova_posicao+1} e horários recalculados!", reply_markup=obter_teclado_principal())
+        await state.clear()
+    else:
+        await message.answer("Erro de sincronização. Operação cancelada.", reply_markup=obter_teclado_principal())
+        await state.clear()
 
 async def main():
     # Agendador mestre que roda todo dia às 00:01
