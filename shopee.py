@@ -287,6 +287,12 @@ def agendar_fila_postagens():
         
         # Extrai a hora exata do "Bom Dia" e "Boa Noite" já sorteados para HOJE
         for job in scheduler.get_jobs():
+            # Extrai a hora exata do "Bom Dia" e "Boa Noite" já sorteados para HOJE, e constrói o radar
+        horarios_ocupados = []
+        for job in scheduler.get_jobs():
+            if job.next_run_time and not job.id.startswith('job_fila_postagem_'):
+                horarios_ocupados.append(job.next_run_time.astimezone(fuso_horario))
+                
             if job.id.startswith('job_rotina_bom_dia_'):
                 hora_inicio = job.next_run_time.astimezone(fuso_horario).hour
                 min_inicio = job.next_run_time.astimezone(fuso_horario).minute
@@ -311,19 +317,43 @@ def agendar_fila_postagens():
         qtd_videos = len(videos_para_hoje)
         espacamento_medio = minutos_disponiveis // qtd_videos
         minuto_atual_busca = inicio_real
+        INTERVALO_MINIMO = 15 # Distância de segurança (minutos) entre o vídeo e qualquer outra mensagem
         
         for index, item in enumerate(videos_para_hoje):
             limite_sorteio = minuto_atual_busca + timedelta(minutes=espacamento_medio - 1)
             if limite_sorteio < minuto_atual_busca: limite_sorteio = minuto_atual_busca
             
-            # Sorteio do minuto exato dentro do bloco de tempo do vídeo
-            minutos_offset = random.randint(0, int((limite_sorteio - minuto_atual_busca).total_seconds() / 60))
-            horario_disparo = minuto_atual_busca + timedelta(minutes=minutos_offset, seconds=random.randint(0, 59))
+            max_minutos_offset = int((limite_sorteio - minuto_atual_busca).total_seconds() / 60)
+            sucesso = False
+            horario_disparo = None
             
-            # Proteção estrita: Não deixar ultrapassar o Boa Noite
-            if horario_disparo > limite_fim_hoje:
-                horario_disparo = limite_fim_hoje
+            for tentativa in range(100):
+                minutos_offset = random.randint(0, max_minutos_offset)
+                horario_candidato = minuto_atual_busca + timedelta(minutes=minutos_offset, seconds=random.randint(0, 59))
                 
+                if horario_candidato > limite_fim_hoje:
+                    horario_candidato = limite_fim_hoje
+                    
+                colisao = False
+                for ocupado in horarios_ocupados:
+                    if abs((horario_candidato - ocupado).total_seconds() / 60) < INTERVALO_MINIMO:
+                        colisao = True
+                        break
+                        
+                if not colisao:
+                    horario_disparo = horario_candidato
+                    sucesso = True
+                    break
+                    
+            if not sucesso:
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Vídeo {index+1}: Sem lacuna limpa. Forçando encaixe de segurança.")
+                meio_offset = max_minutos_offset // 2
+                horario_disparo = minuto_atual_busca + timedelta(minutes=meio_offset)
+                if horario_disparo > limite_fim_hoje: horario_disparo = limite_fim_hoje
+
+            # Alimenta o radar para que os próximos vídeos se afastem deste
+            horarios_ocupados.append(horario_disparo)
+            
             job_id = f"job_fila_postagem_{item['id']}"
             scheduler.add_job(executar_postagem_fila, 'date', run_date=horario_disparo, args=[item['id']], id=job_id, replace_existing=True)
             if EXIBIR_LOGS: logger.info(f"✅ Fila de Amanhã/Retorno: Vídeo {index+1}/{qtd_videos} distribuído organicamente para as {horario_disparo.strftime('%H:%M:%S')}")
