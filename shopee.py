@@ -279,13 +279,13 @@ def agendar_fila_postagens():
     config_bom_dia = dados_rotina.get("bom_dia", {"inicio": 6, "fim": 9})
     config_boa_noite = dados_rotina.get("boa_noite", {"inicio": 21, "fim": 23})
         
-        # Padrões baseados na configuração, caso os horários ainda não estejam no agendador
+    # Padrões baseados na configuração, caso os horários ainda não estejam no agendador
     hora_inicio = config_bom_dia.get("inicio", 6)
     min_inicio = 0
     hora_fim = config_boa_noite.get("inicio", 21)
     min_fim = 0
     
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando processamento do radar de ocupação de horários da fila...")
+    if EXIBIR_LOGS: logger.info("🚀 A iniciar o processamento do radar de ocupação de horários da fila...")
     
     # Extrai a hora exata do "Bom Dia" e "Boa Noite" já sorteados para HOJE, e constrói o radar
     horarios_ocupados = []
