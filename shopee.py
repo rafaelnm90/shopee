@@ -276,51 +276,59 @@ def agendar_fila_postagens():
         return
         
     dados_rotina = ler_config_rotina()
-    config_bom_dia = dados_rotina.get("bom_dia", {"inicio": 6, "fim": 9})
-    config_boa_noite = dados_rotina.get("boa_noite", {"inicio": 21, "fim": 23})
-    
-    hora_inicio_permitida = config_bom_dia.get("inicio", 6)
-    hora_fim_permitida = config_boa_noite.get("fim", 23)
-    
-    if agora.hour >= hora_fim_permitida:
-        if EXIBIR_LOGS: logger.warning("⚠️ Janela de postagem de hoje já encerrou. Fila aguardará até amanhã.")
-        return
+        config_bom_dia = dados_rotina.get("bom_dia", {"inicio": 6, "fim": 9})
+        config_boa_noite = dados_rotina.get("boa_noite", {"inicio": 21, "fim": 23})
         
-    hora_inicio_efetiva = max(agora.hour, hora_inicio_permitida)
-    
-    # Dá um respiro de 5 minutos se o robô acabou de acordar de uma pausa
-    minuto_inicio = agora.minute + 5 if hora_inicio_efetiva == agora.hour else 0
-    minutos_disponiveis = ((hora_fim_permitida * 60) + 59) - ((hora_inicio_efetiva * 60) + minuto_inicio)
-    
-    if minutos_disponiveis < 5:
-        if EXIBIR_LOGS: logger.warning("⚠️ Tempo insuficiente para espaçar os vídeos hoje.")
-        return
+        # Padrões baseados na configuração, caso os horários ainda não estejam no agendador
+        hora_inicio = config_bom_dia.get("inicio", 6)
+        min_inicio = 0
+        hora_fim = config_boa_noite.get("inicio", 21)
+        min_fim = 0
         
-    qtd_videos = len(videos_para_hoje)
-    espacamento_medio = minutos_disponiveis // qtd_videos
-    minuto_atual_busca = (hora_inicio_efetiva * 60) + minuto_inicio
-    
-    for index, item in enumerate(videos_para_hoje):
-        limite_sorteio = minuto_atual_busca + espacamento_medio - 1
-        if limite_sorteio < minuto_atual_busca: limite_sorteio = minuto_atual_busca
+        # Extrai a hora exata do "Bom Dia" e "Boa Noite" já sorteados para HOJE
+        for job in scheduler.get_jobs():
+            if job.id.startswith('job_rotina_bom_dia_'):
+                hora_inicio = job.next_run_time.astimezone(fuso_horario).hour
+                min_inicio = job.next_run_time.astimezone(fuso_horario).minute
+            elif job.id.startswith('job_rotina_boa_noite_'):
+                hora_fim = job.next_run_time.astimezone(fuso_horario).hour
+                min_fim = job.next_run_time.astimezone(fuso_horario).minute
+                
+        limite_inicio_hoje = agora.replace(hour=hora_inicio, minute=min_inicio, second=0, microsecond=0) + timedelta(minutes=5)
+        limite_fim_hoje = agora.replace(hour=hora_fim, minute=min_fim, second=0, microsecond=0) - timedelta(minutes=5)
         
-        minuto_sorteado = random.randint(minuto_atual_busca, limite_sorteio)
-        max_minuto_permitido = (hora_fim_permitida * 60) + 59
-        if minuto_sorteado > max_minuto_permitido:
-            minuto_sorteado = max_minuto_permitido
+        if agora >= limite_fim_hoje:
+            if EXIBIR_LOGS: logger.warning("⚠️ Janela de postagem de hoje já encerrou. Fila aguardará até amanhã.")
+            return
             
-        hora_job = minuto_sorteado // 60
-        min_job = minuto_sorteado % 60
+        inicio_real = max(agora + timedelta(minutes=5), limite_inicio_hoje)
+        minutos_disponiveis = int((limite_fim_hoje - inicio_real).total_seconds() / 60)
         
-        job_id = f"job_fila_postagem_{item['id']}"
-        horario_disparo = agora.replace(hour=hora_job, minute=min_job, second=random.randint(0, 59))
-        if horario_disparo < agora:
-            horario_disparo = agora + timedelta(minutes=random.randint(1, 3))
+        if minutos_disponiveis < 5:
+            if EXIBIR_LOGS: logger.warning("⚠️ Tempo insuficiente para espaçar os vídeos hoje.")
+            return
             
-        scheduler.add_job(executar_postagem_fila, 'date', run_date=horario_disparo, args=[item['id']], id=job_id, replace_existing=True)
-        if EXIBIR_LOGS: logger.info(f"✅ Fila de Amanhã/Retorno: Vídeo {index+1}/{qtd_videos} distribuído orgânicamente para as {horario_disparo.strftime('%H:%M:%S')}")
+        qtd_videos = len(videos_para_hoje)
+        espacamento_medio = minutos_disponiveis // qtd_videos
+        minuto_atual_busca = inicio_real
         
-        minuto_atual_busca += espacamento_medio
+        for index, item in enumerate(videos_para_hoje):
+            limite_sorteio = minuto_atual_busca + timedelta(minutes=espacamento_medio - 1)
+            if limite_sorteio < minuto_atual_busca: limite_sorteio = minuto_atual_busca
+            
+            # Sorteio do minuto exato dentro do bloco de tempo do vídeo
+            minutos_offset = random.randint(0, int((limite_sorteio - minuto_atual_busca).total_seconds() / 60))
+            horario_disparo = minuto_atual_busca + timedelta(minutes=minutos_offset, seconds=random.randint(0, 59))
+            
+            # Proteção estrita: Não deixar ultrapassar o Boa Noite
+            if horario_disparo > limite_fim_hoje:
+                horario_disparo = limite_fim_hoje
+                
+            job_id = f"job_fila_postagem_{item['id']}"
+            scheduler.add_job(executar_postagem_fila, 'date', run_date=horario_disparo, args=[item['id']], id=job_id, replace_existing=True)
+            if EXIBIR_LOGS: logger.info(f"✅ Fila de Amanhã/Retorno: Vídeo {index+1}/{qtd_videos} distribuído organicamente para as {horario_disparo.strftime('%H:%M:%S')}")
+            
+            minuto_atual_busca += timedelta(minutes=espacamento_medio)
 
 async def executar_postagem_fila(item_id):
     if EXIBIR_LOGS: logger.info(f"📤 Disparando postagem assíncrona programada...")
@@ -664,8 +672,6 @@ def salvar_config_rotina(dados):
 def agendar_tarefas_diarias():
     if EXIBIR_LOGS: logger.info("🔄 Sorteando horários de rotina com inteligência anti-spam...")
     
-    agendar_fila_postagens()
-    
     # Limpa os jobs antigos de rotina e de campanhas para evitar duplicatas ao forçar re-sorteio
     for job in scheduler.get_jobs():
         if job.id.startswith('job_rotina_') or job.id.startswith('job_campanha_'):
@@ -765,6 +771,9 @@ def agendar_tarefas_diarias():
                 logger.info(f"⏳ Alerta Campanha Tarde: {hora_c_tarde:02d}:{min_c_tarde:02d}")
                 logger.info(f"⏳ Alerta Campanha Noite: {hora_c_noite:02d}:{min_c_noite:02d}")
             break
+
+    # Agora sim, com as rotinas já sorteadas, chamamos a fila de postagens para se basear nelas
+    agendar_fila_postagens()
 
 # 5. HANDLERS DE COMANDO E INTERAÇÃO
 @dp.message(Command("start"))
@@ -1797,12 +1806,13 @@ class GerenciarFilaFluxo(StatesGroup):
     aguardando_nova_posicao = State()
     aguardando_posicao_numeracao = State()
     aguardando_nova_numeracao = State()
+    aguardando_posicao_publicar = State()
 
 teclado_gerenciar_fila = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Excluir Vídeo 🗑️"), KeyboardButton(text="Editar Legenda ✏️")],
-        [KeyboardButton(text="Editar Numeração 🔢"), KeyboardButton(text="Mover Posição ↕️")],
-        [KeyboardButton(text="Voltar ao Início 🔙")]
+        [KeyboardButton(text="Publicar Agora 🚀"), KeyboardButton(text="Excluir Vídeo 🗑️")],
+        [KeyboardButton(text="Editar Legenda ✏️"), KeyboardButton(text="Editar Numeração 🔢")],
+        [KeyboardButton(text="Mover Posição ↕️"), KeyboardButton(text="Voltar ao Início 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -2005,13 +2015,13 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         await message.answer("Erro de sincronização. Operação cancelada.", reply_markup=obter_teclado_principal())
         await state.clear()
 
-@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Editar Numeração 🔢")
-async def pedir_posicao_numeracao_fila(message: types.Message, state: FSMContext):
-    await message.answer("Digite o <b>NÚMERO</b> da posição do vídeo na fila onde deseja iniciar a alteração da numeração:", reply_markup=teclado_cancelar, parse_mode="HTML")
-    await state.set_state(GerenciarFilaFluxo.aguardando_posicao_numeracao)
+@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Publicar Agora 🚀")
+async def pedir_posicao_publicar(message: types.Message, state: FSMContext):
+    await message.answer("Digite o <b>NÚMERO</b> da posição do vídeo na fila que deseja publicar imediatamente:", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(GerenciarFilaFluxo.aguardando_posicao_publicar)
 
-@dp.message(GerenciarFilaFluxo.aguardando_posicao_numeracao)
-async def pedir_novo_numero_fila(message: types.Message, state: FSMContext):
+@dp.message(GerenciarFilaFluxo.aguardando_posicao_publicar)
+async def processar_publicacao_imediata(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
         await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
         return
@@ -2019,50 +2029,86 @@ async def pedir_novo_numero_fila(message: types.Message, state: FSMContext):
     posicao = int(message.text) - 1
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
-    
-    if 0 <= posicao < len(fila):
-        await state.update_data(posicao_numeracao=posicao)
-        await message.answer(f"O vídeo está na posição {posicao+1}. Qual deverá ser o <b>NOVO NÚMERO</b> deste vídeo? (Os seguintes serão atualizados em cascata)", reply_markup=teclado_cancelar, parse_mode="HTML")
-        await state.set_state(GerenciarFilaFluxo.aguardando_nova_numeracao)
-    else:
-        await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
-
-@dp.message(GerenciarFilaFluxo.aguardando_nova_numeracao)
-async def processar_nova_numeracao_fila(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
-        await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
-        return
-        
-    novo_numero = int(message.text)
-    data = await state.get_data()
-    posicao_inicial = data.get("posicao_numeracao")
-    
-    fila_data = ler_fila_postagens()
-    fila = fila_data.get("fila", [])
     import re
     
-    if 0 <= posicao_inicial < len(fila):
-        if EXIBIR_LOGS: logger.info(f"🔢 Iniciando renumeração em cascata a partir da posição {posicao_inicial+1} com o valor inicial {novo_numero}...")
-        numero_atual_cascata = novo_numero
+    if 0 <= posicao < len(fila):
+        item = fila.pop(posicao)
         
-        for i in range(posicao_inicial, len(fila)):
-            legenda_antiga = fila[i].get("legenda", "")
-            nova_legenda = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{numero_atual_cascata}', legenda_antiga)
-            fila[i]["legenda"] = nova_legenda
-            if EXIBIR_LOGS: logger.info(f"🔄 Cascata: Posição {i+1} atualizada para o número {numero_atual_cascata}.")
-            numero_atual_cascata += 1
-            
-        fila_data["fila"] = fila
-        salvar_fila_postagens(fila_data)
-        
+        # 1. Extrai o número correto (o que deveria ser o próximo a nível global)
         async with _lock_contador:
-            salvar_contador(numero_atual_cascata)
-        if EXIBIR_LOGS: logger.info(f"✅ Contador global sincronizado para o próximo vídeo: {numero_atual_cascata}.")
+            numero_disparo = ler_contador()
+            
+        if EXIBIR_LOGS: logger.info(f"🚀 Iniciando antecipação do vídeo na posição {posicao+1}. Novo número atribuído: {numero_disparo}.")
         
-        await message.answer(f"✅ Numeração em cascata aplicada com sucesso!\nO próximo vídeo inédito a ser criado assumirá o número {numero_atual_cascata}.", reply_markup=obter_teclado_principal())
-        await state.clear()
+        # 2. Atualiza estritamente a legenda do vídeo selecionado para publicação
+        legenda_disparo = item.get("legenda", "")
+        nova_legenda_disparo = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{numero_disparo}', legenda_disparo, count=1)
+        
+        caminho_video = item.get("caminho_video")
+        video_id = item.get("video_id")
+        
+        msg_status = await message.answer("📤 A preparar ficheiros e a publicar o vídeo agora mesmo... Aguarde.", reply_markup=teclado_cancelar)
+        
+        sucesso_upload = False
+        try:
+            # 3. Disparo imediato para o Telegram
+            if caminho_video and os.path.exists(caminho_video):
+                arquivo = FSInputFile(caminho_video)
+                msg = await bot.send_video(chat_id=GRUPO_ID, video=arquivo, caption=nova_legenda_disparo, parse_mode="HTML")
+                sucesso_upload = True
+                
+                novo_file_id = msg.video.file_id
+                for x in fila:
+                    if x.get("caminho_video") == caminho_video:
+                        x["video_id"] = novo_file_id
+                        x["caminho_video"] = None
+            elif video_id:
+                await bot.send_video(chat_id=GRUPO_ID, video=video_id, caption=nova_legenda_disparo, parse_mode="HTML")
+                sucesso_upload = True
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Falha no disparo imediato: {e}")
+            await msg_status.delete()
+            await message.answer(f"Ocorreu um erro técnico ao publicar o vídeo: {e}", reply_markup=obter_teclado_principal())
+            await state.clear()
+            return
+            
+        await msg_status.delete()
+            
+        if sucesso_upload:
+            if EXIBIR_LOGS: logger.info("✅ Vídeo antecipado submetido com sucesso no grupo.")
+            
+            if caminho_video and os.path.exists(caminho_video):
+                ainda_usado = any(x.get("caminho_video") == caminho_video for x in fila)
+                if not ainda_usado:
+                    os.remove(caminho_video)
+                    if EXIBIR_LOGS: logger.info("🧹 Ficheiro físico removido do servidor após o disparo antecipado.")
+            
+            # 4. Numeração em cascata da fila restante
+            numero_atual_cascata = numero_disparo + 1
+            if fila:
+                if EXIBIR_LOGS: logger.info(f"🔄 A iniciar renumeração da fila restante em cascata a partir de {numero_atual_cascata}...")
+                for i in range(len(fila)):
+                    legenda_antiga = fila[i].get("legenda", "")
+                    nova_legenda = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{numero_atual_cascata}', legenda_antiga, count=1)
+                    fila[i]["legenda"] = nova_legenda
+                    numero_atual_cascata += 1
+                    
+            fila_data["fila"] = fila
+            salvar_fila_postagens(fila_data)
+            
+            # 5. Gravação final e blindagem de concorrência
+            async with _lock_contador:
+                salvar_contador(numero_atual_cascata)
+                
+            if EXIBIR_LOGS: logger.info(f"✅ Sistema sincronizado. O contador aguarda a próxima postagem no número: {numero_atual_cascata}.")
+            
+            # 6. Recálculo da fragmentação da hora para alocar o buraco deixado pela exclusão
+            agendar_fila_postagens()
+            
+            await message.answer(f"🚀 Publicação realizada com sucesso!\n🔄 A fila foi renumerada e os horários restantes de hoje foram recalculados para absorver o novo espaçamento.", reply_markup=obter_teclado_principal())
+            await state.clear()
     else:
-        await message.answer("Erro de sincronização. Operação cancelada.", reply_markup=obter_teclado_principal())
+        await message.answer("Erro de sincronização ou posição inválida. Operação cancelada.", reply_markup=obter_teclado_principal())
         await state.clear()
 
 async def main():
