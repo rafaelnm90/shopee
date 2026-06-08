@@ -85,9 +85,10 @@ class PausaProgramadaFluxo(StatesGroup):
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
-fuso_horario = ZoneInfo("America/Sao_Paulo")
+FUSO_STR = "America/Sao_Paulo"
+fuso_horario = ZoneInfo(FUSO_STR)
 _lock_contador = asyncio.Lock()
-scheduler = AsyncIOScheduler(timezone=fuso_horario)
+scheduler = AsyncIOScheduler(timezone=FUSO_STR)
 
 # --- NOVOS TECLADOS DE CONTROLE ---
 # 🛠️ Teclado para seleção da plataforma
@@ -718,7 +719,7 @@ def agendar_tarefas_diarias():
                     min_sorteado = minuto_absoluto % 60
                     
                     job_id = f"job_rotina_{tipo}_{i}"
-                    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=min_sorteado, timezone=fuso_horario, args=[tipo], id=job_id, replace_existing=True)
+                    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=min_sorteado, timezone=FUSO_STR, args=[tipo], id=job_id, replace_existing=True)
                     if EXIBIR_LOGS: logger.info(f"✅ {tipo.upper()} [{i+1}/{freq}]: Agendado para {hora_sorteada:02d}:{min_sorteado:02d} (Tentativas: {tentativa+1})")
                     sucesso = True
                     break
@@ -731,7 +732,7 @@ def agendar_tarefas_diarias():
                 min_sorteado = minuto_absoluto_fallback % 60
                 
                 job_id = f"job_rotina_{tipo}_{i}"
-                scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=min_sorteado, timezone=fuso_horario, args=[tipo], id=job_id, replace_existing=True)
+                scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=min_sorteado, timezone=FUSO_STR, args=[tipo], id=job_id, replace_existing=True)
                 if EXIBIR_LOGS: logger.info(f"📅 {tipo.upper()} [{i+1}/{freq}]: Agendamento fallback para {hora_sorteada:02d}:{min_sorteado:02d}")
 
     from datetime import datetime, timedelta
@@ -755,9 +756,9 @@ def agendar_tarefas_diarias():
             
             if EXIBIR_LOGS: logger.info(f"🏷️ Tag de alerta formatada com sucesso: {tipo_alerta}")
             
-            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_manha, minute=min_c_manha, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_manha', replace_existing=True)
-            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_tarde, minute=min_c_tarde, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_tarde', replace_existing=True)
-            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_noite, minute=min_c_noite, timezone=fuso_horario, args=[tipo_alerta], id='job_campanha_noite', replace_existing=True)
+            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_manha, minute=min_c_manha, timezone=FUSO_STR, args=[tipo_alerta], id='job_campanha_manha', replace_existing=True)
+            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_tarde, minute=min_c_tarde, timezone=FUSO_STR, args=[tipo_alerta], id='job_campanha_tarde', replace_existing=True)
+            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_noite, minute=min_c_noite, timezone=FUSO_STR, args=[tipo_alerta], id='job_campanha_noite', replace_existing=True)
             
             if EXIBIR_LOGS:
                 logger.info(f"⏳ Alerta Campanha Manhã: {hora_c_manha:02d}:{min_c_manha:02d}")
@@ -2066,17 +2067,17 @@ async def processar_nova_numeracao_fila(message: types.Message, state: FSMContex
 
 async def main():
     # Agendador mestre que roda todo dia às 00:01
-    scheduler.add_job(agendar_tarefas_diarias, 'cron', hour=0, minute=1)
+    scheduler.add_job(agendar_tarefas_diarias, 'cron', hour=0, minute=1, timezone=FUSO_STR)
     
     # ✅ Agendador da lixeira persistente (roda todos os dias pontualmente às 03:00)
-    scheduler.add_job(varredor_de_lixeira, 'cron', hour=3, minute=0, timezone=fuso_horario)
+    scheduler.add_job(varredor_de_lixeira, 'cron', hour=3, minute=0, timezone=FUSO_STR)
     
     # ✅ Novo: Despertador e aviso da Pausa Programada (roda às 09:00)
-    scheduler.add_job(verificar_pausa_diaria, 'cron', hour=9, minute=0, timezone=fuso_horario)
+    scheduler.add_job(verificar_pausa_diaria, 'cron', hour=9, minute=0, timezone=FUSO_STR)
     
     # ✅ Novo: Verificador de retorno da Pausa Programada (roda a cada 1 minuto)
     if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento de retomada de pausa minuto a minuto...")
-    scheduler.add_job(verificar_retorno_pausa_minuto, 'interval', minutes=1, timezone=fuso_horario)
+    scheduler.add_job(verificar_retorno_pausa_minuto, 'interval', minutes=1, timezone=FUSO_STR)
     
     # Roda o agendador imediatamente ao ligar o bot para garantir o dia atual
     agendar_tarefas_diarias()
