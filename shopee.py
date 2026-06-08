@@ -1794,11 +1794,14 @@ class GerenciarFilaFluxo(StatesGroup):
     aguardando_nova_legenda = State()
     aguardando_posicao_reordenar = State()
     aguardando_nova_posicao = State()
+    aguardando_posicao_numeracao = State()
+    aguardando_nova_numeracao = State()
 
 teclado_gerenciar_fila = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Excluir Vídeo 🗑️"), KeyboardButton(text="Editar Legenda ✏️")],
-        [KeyboardButton(text="Mover Posição ↕️"), KeyboardButton(text="Voltar ao Início 🔙")]
+        [KeyboardButton(text="Editar Numeração 🔢"), KeyboardButton(text="Mover Posição ↕️")],
+        [KeyboardButton(text="Voltar ao Início 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -1963,6 +1966,66 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         agendar_fila_postagens() 
         
         await message.answer(f"✅ Vídeo movido com sucesso para a posição {nova_posicao+1} e horários recalculados!", reply_markup=obter_teclado_principal())
+        await state.clear()
+    else:
+        await message.answer("Erro de sincronização. Operação cancelada.", reply_markup=obter_teclado_principal())
+        await state.clear()
+
+@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Editar Numeração 🔢")
+async def pedir_posicao_numeracao_fila(message: types.Message, state: FSMContext):
+    await message.answer("Digite o <b>NÚMERO</b> da posição do vídeo na fila onde deseja iniciar a alteração da numeração:", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(GerenciarFilaFluxo.aguardando_posicao_numeracao)
+
+@dp.message(GerenciarFilaFluxo.aguardando_posicao_numeracao)
+async def pedir_novo_numero_fila(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
+        return
+        
+    posicao = int(message.text) - 1
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    
+    if 0 <= posicao < len(fila):
+        await state.update_data(posicao_numeracao=posicao)
+        await message.answer(f"O vídeo está na posição {posicao+1}. Qual deverá ser o <b>NOVO NÚMERO</b> deste vídeo? (Os seguintes serão atualizados em cascata)", reply_markup=teclado_cancelar, parse_mode="HTML")
+        await state.set_state(GerenciarFilaFluxo.aguardando_nova_numeracao)
+    else:
+        await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
+
+@dp.message(GerenciarFilaFluxo.aguardando_nova_numeracao)
+async def processar_nova_numeracao_fila(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
+        return
+        
+    novo_numero = int(message.text)
+    data = await state.get_data()
+    posicao_inicial = data.get("posicao_numeracao")
+    
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    import re
+    
+    if 0 <= posicao_inicial < len(fila):
+        if EXIBIR_LOGS: logger.info(f"🔢 Iniciando renumeração em cascata a partir da posição {posicao_inicial+1} com o valor inicial {novo_numero}...")
+        numero_atual_cascata = novo_numero
+        
+        for i in range(posicao_inicial, len(fila)):
+            legenda_antiga = fila[i].get("legenda", "")
+            nova_legenda = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{numero_atual_cascata}', legenda_antiga)
+            fila[i]["legenda"] = nova_legenda
+            if EXIBIR_LOGS: logger.info(f"🔄 Cascata: Posição {i+1} atualizada para o número {numero_atual_cascata}.")
+            numero_atual_cascata += 1
+            
+        fila_data["fila"] = fila
+        salvar_fila_postagens(fila_data)
+        
+        async with _lock_contador:
+            salvar_contador(numero_atual_cascata)
+        if EXIBIR_LOGS: logger.info(f"✅ Contador global sincronizado para o próximo vídeo: {numero_atual_cascata}.")
+        
+        await message.answer(f"✅ Numeração em cascata aplicada com sucesso!\nO próximo vídeo inédito a ser criado assumirá o número {numero_atual_cascata}.", reply_markup=obter_teclado_principal())
         await state.clear()
     else:
         await message.answer("Erro de sincronização. Operação cancelada.", reply_markup=obter_teclado_principal())
