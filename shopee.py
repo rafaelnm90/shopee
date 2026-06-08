@@ -1959,13 +1959,46 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         item = fila.pop(posicao_origem)
         fila.insert(nova_posicao, item)
         
+        import re
+        
+        # 1. Identificação do Ponto de Partida (menor número da fila)
+        menor_numero = float('inf')
+        for f_item in fila:
+            match = re.search(r'(?i)Vídeo\s+(\d+)', f_item.get("legenda", ""))
+            if match:
+                num = int(match.group(1))
+                if num < menor_numero:
+                    menor_numero = num
+                    
+        # Fallback de segurança caso a fila perca a formatação
+        if menor_numero == float('inf'):
+            async with _lock_contador:
+                menor_numero = ler_contador()
+                
+        if EXIBIR_LOGS: logger.info(f"🔄 Iniciando auto-correção da numeração da fila a partir do Vídeo {menor_numero}...")
+        
+        # 2. Renumeração Dinâmica de cima para baixo
+        numero_atual_cascata = menor_numero
+        for i in range(len(fila)):
+            legenda_antiga = fila[i].get("legenda", "")
+            # Atualiza apenas a primeira ocorrência do padrão para evitar mexer no resto da cópia
+            nova_legenda = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{numero_atual_cascata}', legenda_antiga, count=1)
+            fila[i]["legenda"] = nova_legenda
+            numero_atual_cascata += 1
+            
         fila_data["fila"] = fila
         salvar_fila_postagens(fila_data)
         
+        # 3. Sincronização do Contador Global
+        async with _lock_contador:
+            salvar_contador(numero_atual_cascata)
+        
         if EXIBIR_LOGS: logger.info(f"↕️ Fila: Vídeo movido da posição {posicao_origem+1} para {nova_posicao+1}.")
+        if EXIBIR_LOGS: logger.info(f"✅ Auto-correção concluída. Contador global atualizado para a próxima postagem: {numero_atual_cascata}.")
+        
         agendar_fila_postagens() 
         
-        await message.answer(f"✅ Vídeo movido com sucesso para a posição {nova_posicao+1} e horários recalculados!", reply_markup=obter_teclado_principal())
+        await message.answer(f"✅ Vídeo movido para a posição {nova_posicao+1}!\n🔄 A numeração de toda a fila foi corrigida em cascata e os horários recalculados com sucesso.", reply_markup=obter_teclado_principal())
         await state.clear()
     else:
         await message.answer("Erro de sincronização. Operação cancelada.", reply_markup=obter_teclado_principal())
