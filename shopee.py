@@ -280,85 +280,85 @@ def agendar_fila_postagens():
     config_boa_noite = dados_rotina.get("boa_noite", {"inicio": 21, "fim": 23})
         
         # Padrões baseados na configuração, caso os horários ainda não estejam no agendador
-        hora_inicio = config_bom_dia.get("inicio", 6)
-        min_inicio = 0
-        hora_fim = config_boa_noite.get("inicio", 21)
-        min_fim = 0
+    hora_inicio = config_bom_dia.get("inicio", 6)
+    min_inicio = 0
+    hora_fim = config_boa_noite.get("inicio", 21)
+    min_fim = 0
+    
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando processamento do radar de ocupação de horários da fila...")
+    
+    # Extrai a hora exata do "Bom Dia" e "Boa Noite" já sorteados para HOJE, e constrói o radar
+    horarios_ocupados = []
+    for job in scheduler.get_jobs():
+        if job.next_run_time and not job.id.startswith('job_fila_postagem_'):
+            horarios_ocupados.append(job.next_run_time.astimezone(fuso_horario))
+            
+        if job.id.startswith('job_rotina_bom_dia_'):
+            hora_inicio = job.next_run_time.astimezone(fuso_horario).hour
+            min_inicio = job.next_run_time.astimezone(fuso_horario).minute
+        elif job.id.startswith('job_rotina_boa_noite_'):
+            hora_fim = job.next_run_time.astimezone(fuso_horario).hour
+            min_fim = job.next_run_time.astimezone(fuso_horario).minute
+            
+    limite_inicio_hoje = agora.replace(hour=hora_inicio, minute=min_inicio, second=0, microsecond=0) + timedelta(minutes=5)
+    limite_fim_hoje = agora.replace(hour=hora_fim, minute=min_fim, second=0, microsecond=0) - timedelta(minutes=5)
+    
+    if agora >= limite_fim_hoje:
+        if EXIBIR_LOGS: logger.warning("⚠️ Janela de postagem de hoje já encerrou. Fila aguardará até amanhã.")
+        return
         
-        # Extrai a hora exata do "Bom Dia" e "Boa Noite" já sorteados para HOJE
-        for job in scheduler.get_jobs():
-            # Extrai a hora exata do "Bom Dia" e "Boa Noite" já sorteados para HOJE, e constrói o radar
-        horarios_ocupados = []
-        for job in scheduler.get_jobs():
-            if job.next_run_time and not job.id.startswith('job_fila_postagem_'):
-                horarios_ocupados.append(job.next_run_time.astimezone(fuso_horario))
+    inicio_real = max(agora + timedelta(minutes=5), limite_inicio_hoje)
+    minutos_disponiveis = int((limite_fim_hoje - inicio_real).total_seconds() / 60)
+    
+    if minutos_disponiveis < 5:
+        if EXIBIR_LOGS: logger.warning("⚠️ Tempo insuficiente para espaçar os vídeos hoje.")
+        return
+        
+    qtd_videos = len(videos_para_hoje)
+    espacamento_medio = minutos_disponiveis // qtd_videos
+    minuto_atual_busca = inicio_real
+    INTERVALO_MINIMO = 15 # Distância de segurança (minutos) entre o vídeo e qualquer outra mensagem
+    
+    for index, item in enumerate(videos_para_hoje):
+        limite_sorteio = minuto_atual_busca + timedelta(minutes=espacamento_medio - 1)
+        if limite_sorteio < minuto_atual_busca: limite_sorteio = minuto_atual_busca
+        
+        max_minutos_offset = int((limite_sorteio - minuto_atual_busca).total_seconds() / 60)
+        sucesso = False
+        horario_disparo = None
+        
+        for tentativa in range(100):
+            minutos_offset = random.randint(0, max_minutos_offset)
+            horario_candidato = minuto_atual_busca + timedelta(minutes=minutos_offset, seconds=random.randint(0, 59))
+            
+            if horario_candidato > limite_fim_hoje:
+                horario_candidato = limite_fim_hoje
                 
-            if job.id.startswith('job_rotina_bom_dia_'):
-                hora_inicio = job.next_run_time.astimezone(fuso_horario).hour
-                min_inicio = job.next_run_time.astimezone(fuso_horario).minute
-            elif job.id.startswith('job_rotina_boa_noite_'):
-                hora_fim = job.next_run_time.astimezone(fuso_horario).hour
-                min_fim = job.next_run_time.astimezone(fuso_horario).minute
-                
-        limite_inicio_hoje = agora.replace(hour=hora_inicio, minute=min_inicio, second=0, microsecond=0) + timedelta(minutes=5)
-        limite_fim_hoje = agora.replace(hour=hora_fim, minute=min_fim, second=0, microsecond=0) - timedelta(minutes=5)
-        
-        if agora >= limite_fim_hoje:
-            if EXIBIR_LOGS: logger.warning("⚠️ Janela de postagem de hoje já encerrou. Fila aguardará até amanhã.")
-            return
-            
-        inicio_real = max(agora + timedelta(minutes=5), limite_inicio_hoje)
-        minutos_disponiveis = int((limite_fim_hoje - inicio_real).total_seconds() / 60)
-        
-        if minutos_disponiveis < 5:
-            if EXIBIR_LOGS: logger.warning("⚠️ Tempo insuficiente para espaçar os vídeos hoje.")
-            return
-            
-        qtd_videos = len(videos_para_hoje)
-        espacamento_medio = minutos_disponiveis // qtd_videos
-        minuto_atual_busca = inicio_real
-        INTERVALO_MINIMO = 15 # Distância de segurança (minutos) entre o vídeo e qualquer outra mensagem
-        
-        for index, item in enumerate(videos_para_hoje):
-            limite_sorteio = minuto_atual_busca + timedelta(minutes=espacamento_medio - 1)
-            if limite_sorteio < minuto_atual_busca: limite_sorteio = minuto_atual_busca
-            
-            max_minutos_offset = int((limite_sorteio - minuto_atual_busca).total_seconds() / 60)
-            sucesso = False
-            horario_disparo = None
-            
-            for tentativa in range(100):
-                minutos_offset = random.randint(0, max_minutos_offset)
-                horario_candidato = minuto_atual_busca + timedelta(minutes=minutos_offset, seconds=random.randint(0, 59))
-                
-                if horario_candidato > limite_fim_hoje:
-                    horario_candidato = limite_fim_hoje
-                    
-                colisao = False
-                for ocupado in horarios_ocupados:
-                    if abs((horario_candidato - ocupado).total_seconds() / 60) < INTERVALO_MINIMO:
-                        colisao = True
-                        break
-                        
-                if not colisao:
-                    horario_disparo = horario_candidato
-                    sucesso = True
+            colisao = False
+            for ocupado in horarios_ocupados:
+                if abs((horario_candidato - ocupado).total_seconds() / 60) < INTERVALO_MINIMO:
+                    colisao = True
                     break
                     
-            if not sucesso:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Vídeo {index+1}: Sem lacuna limpa. Forçando encaixe de segurança.")
-                meio_offset = max_minutos_offset // 2
-                horario_disparo = minuto_atual_busca + timedelta(minutes=meio_offset)
-                if horario_disparo > limite_fim_hoje: horario_disparo = limite_fim_hoje
+            if not colisao:
+                horario_disparo = horario_candidato
+                sucesso = True
+                break
+                
+        if not sucesso:
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Vídeo {index+1}: Sem lacuna limpa. Forçando encaixe de segurança.")
+            meio_offset = max_minutos_offset // 2
+            horario_disparo = minuto_atual_busca + timedelta(minutes=meio_offset)
+            if horario_disparo > limite_fim_hoje: horario_disparo = limite_fim_hoje
 
-            # Alimenta o radar para que os próximos vídeos se afastem deste
-            horarios_ocupados.append(horario_disparo)
-            
-            job_id = f"job_fila_postagem_{item['id']}"
-            scheduler.add_job(executar_postagem_fila, 'date', run_date=horario_disparo, args=[item['id']], id=job_id, replace_existing=True)
-            if EXIBIR_LOGS: logger.info(f"✅ Fila de Amanhã/Retorno: Vídeo {index+1}/{qtd_videos} distribuído organicamente para as {horario_disparo.strftime('%H:%M:%S')}")
-            
-            minuto_atual_busca += timedelta(minutes=espacamento_medio)
+        # Alimenta o radar para que os próximos vídeos se afastem deste
+        horarios_ocupados.append(horario_disparo)
+        
+        job_id = f"job_fila_postagem_{item['id']}"
+        scheduler.add_job(executar_postagem_fila, 'date', run_date=horario_disparo, args=[item['id']], id=job_id, replace_existing=True)
+        if EXIBIR_LOGS: logger.info(f"✅ Fila de Amanhã/Retorno: Vídeo {index+1}/{qtd_videos} distribuído organicamente para as {horario_disparo.strftime('%H:%M:%S')}")
+        
+        minuto_atual_busca += timedelta(minutes=espacamento_medio)
 
 async def executar_postagem_fila(item_id):
     if EXIBIR_LOGS: logger.info(f"📤 Disparando postagem assíncrona programada...")
