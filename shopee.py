@@ -276,8 +276,8 @@ def agendar_fila_postagens():
         return
         
     dados_rotina = ler_config_rotina()
-        config_bom_dia = dados_rotina.get("bom_dia", {"inicio": 6, "fim": 9})
-        config_boa_noite = dados_rotina.get("boa_noite", {"inicio": 21, "fim": 23})
+    config_bom_dia = dados_rotina.get("bom_dia", {"inicio": 6, "fim": 9})
+    config_boa_noite = dados_rotina.get("boa_noite", {"inicio": 21, "fim": 23})
         
         # Padrões baseados na configuração, caso os horários ainda não estejam no agendador
         hora_inicio = config_bom_dia.get("inicio", 6)
