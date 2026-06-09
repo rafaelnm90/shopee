@@ -290,15 +290,18 @@ def agendar_fila_postagens():
     # Extrai a hora exata do "Bom Dia" e "Boa Noite" já sorteados para HOJE, e constrói o radar
     horarios_ocupados = []
     for job in scheduler.get_jobs():
-        if job.next_run_time and not job.id.startswith('job_fila_postagem_'):
-            horarios_ocupados.append(job.next_run_time.astimezone(fuso_horario))
+        proxima_execucao = getattr(job, 'next_run_time', None)
+        
+        if proxima_execucao and not job.id.startswith('job_fila_postagem_'):
+            horarios_ocupados.append(proxima_execucao.astimezone(fuso_horario))
+            if EXIBIR_LOGS: logger.info(f"🔎 Radar validou com segurança o horário do job '{job.id}'.")
             
-        if job.id.startswith('job_rotina_bom_dia_'):
-            hora_inicio = job.next_run_time.astimezone(fuso_horario).hour
-            min_inicio = job.next_run_time.astimezone(fuso_horario).minute
-        elif job.id.startswith('job_rotina_boa_noite_'):
-            hora_fim = job.next_run_time.astimezone(fuso_horario).hour
-            min_fim = job.next_run_time.astimezone(fuso_horario).minute
+        if job.id.startswith('job_rotina_bom_dia_') and proxima_execucao:
+            hora_inicio = proxima_execucao.astimezone(fuso_horario).hour
+            min_inicio = proxima_execucao.astimezone(fuso_horario).minute
+        elif job.id.startswith('job_rotina_boa_noite_') and proxima_execucao:
+            hora_fim = proxima_execucao.astimezone(fuso_horario).hour
+            min_fim = proxima_execucao.astimezone(fuso_horario).minute
             
     limite_inicio_hoje = agora.replace(hour=hora_inicio, minute=min_inicio, second=0, microsecond=0) + timedelta(minutes=5)
     limite_fim_hoje = agora.replace(hour=hora_fim, minute=min_fim, second=0, microsecond=0) - timedelta(minutes=5)
