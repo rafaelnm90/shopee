@@ -83,6 +83,12 @@ class PausaProgramadaFluxo(StatesGroup):
     aguardando_data_retorno = State()
     aguardando_selecao_servicos = State()
 
+class EspiaoFluxo(StatesGroup):
+    menu_principal = State()
+    aguardando_novo_alvo = State()
+    aguardando_remocao_alvo = State()
+    aguardando_canal_destino = State()
+
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 FUSO_STR = "America/Sao_Paulo"
@@ -226,7 +232,7 @@ def obter_teclado_e_status_pausa():
 # 🛠️ Função centralizadora do menu principal
 def obter_teclado_principal():
     botoes = [
-        [KeyboardButton(text="Criar Postagem 📝")],
+        [KeyboardButton(text="Criar Postagem 📝"), KeyboardButton(text="Painel do Espião 🕵️")],
         [KeyboardButton(text="Gerenciar Fila 📋")],
         [KeyboardButton(text="Editar Número da Postagem 🔢")],
         [KeyboardButton(text="Pausar Postagens 🛑")],
@@ -235,6 +241,27 @@ def obter_teclado_principal():
         [KeyboardButton(text="Configurações Gerais ⚙️")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+
+# --- SISTEMA DO ESPIÃO (CONFIGURAÇÕES) ---
+def ler_alvos_espiao():
+    try:
+        with open("alvos_espiao.json", "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"alvos": [], "canal_destino": None}
+
+def salvar_alvos_espiao(dados):
+    with open("alvos_espiao.json", "w") as f:
+        json.dump(dados, f, indent=4)
+
+teclado_opcoes_espiao = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Adicionar Concorrente ➕"), KeyboardButton(text="Remover Concorrente 🗑️")],
+        [KeyboardButton(text="Definir Canal de Destino 🎯"), KeyboardButton(text="Voltar ao Início 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
 
 # --- SISTEMA DE FILA DE POSTAGENS ASSÍNCRONAS ---
 def ler_fila_postagens():
@@ -1289,6 +1316,90 @@ async def voltar_configs(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
+
+# --- HANDLERS DO PAINEL DO ESPIÃO 🕵️ ---
+@dp.message(F.text == "Painel do Espião 🕵️")
+async def menu_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🕵️ Acessando Painel do Espião...")
+    dados = ler_alvos_espiao()
+    alvos = dados.get("alvos", [])
+    destino = dados.get("canal_destino", "Não definido")
+    
+    texto = f"🕵️ <b>Painel do Espião de Concorrentes</b>\n\n"
+    texto += f"🎯 <b>Canal de Destino:</b> {destino}\n\n"
+    texto += "📡 <b>Grupos Monitorados:</b>\n"
+    if alvos:
+        for i, alvo in enumerate(alvos, 1):
+            texto += f"   {i}. {alvo}\n"
+    else:
+        texto += "   <i>Nenhum grupo sendo monitorado no momento.</i>\n"
+        
+    await message.answer(texto, reply_markup=teclado_opcoes_espiao, parse_mode="HTML")
+    await state.set_state(EspiaoFluxo.menu_principal)
+
+@dp.message(EspiaoFluxo.menu_principal, F.text == "Adicionar Concorrente ➕")
+async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
+    await message.answer("Envie o @username, link ou ID do grupo do concorrente que deseja monitorar:", reply_markup=teclado_cancelar)
+    await state.set_state(EspiaoFluxo.aguardando_novo_alvo)
+
+@dp.message(EspiaoFluxo.aguardando_novo_alvo)
+async def salvar_alvo_espiao(message: types.Message, state: FSMContext):
+    novo_alvo = message.text.strip()
+    dados = ler_alvos_espiao()
+    if novo_alvo not in dados["alvos"]:
+        dados["alvos"].append(novo_alvo)
+        salvar_alvos_espiao(dados)
+        if EXIBIR_LOGS: logger.info(f"✅ Novo alvo do espião adicionado: {novo_alvo}")
+        await message.answer(f"Alvo '{novo_alvo}' adicionado ao radar!", reply_markup=obter_teclado_principal())
+    else:
+        await message.answer("Este alvo já está na lista.", reply_markup=obter_teclado_principal())
+    await state.clear()
+
+@dp.message(EspiaoFluxo.menu_principal, F.text == "Remover Concorrente 🗑️")
+async def pedir_remocao_espiao(message: types.Message, state: FSMContext):
+    dados = ler_alvos_espiao()
+    alvos = dados.get("alvos", [])
+    if not alvos:
+        await message.answer("Não há concorrentes para remover.", reply_markup=teclado_opcoes_espiao)
+        return
+    
+    texto = "Qual alvo deseja excluir? Digite o <b>NÚMERO</b> correspondente:\n\n"
+    for i, alvo in enumerate(alvos, 1):
+        texto += f"{i}. {alvo}\n"
+    await message.answer(texto, reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(EspiaoFluxo.aguardando_remocao_alvo)
+
+@dp.message(EspiaoFluxo.aguardando_remocao_alvo)
+async def processar_remocao_espiao(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas o NÚMERO.", reply_markup=teclado_cancelar)
+        return
+    indice = int(message.text) - 1
+    dados = ler_alvos_espiao()
+    if 0 <= indice < len(dados.get("alvos", [])):
+        removido = dados["alvos"].pop(indice)
+        salvar_alvos_espiao(dados)
+        if EXIBIR_LOGS: logger.info(f"🗑️ Alvo do espião removido: {removido}")
+        await message.answer(f"Alvo '{removido}' removido do radar!", reply_markup=obter_teclado_principal())
+    else:
+        await message.answer("Número inválido. Ação cancelada.", reply_markup=obter_teclado_principal())
+    await state.clear()
+
+@dp.message(EspiaoFluxo.menu_principal, F.text == "Definir Canal de Destino 🎯")
+async def pedir_destino_espiao(message: types.Message, state: FSMContext):
+    await message.answer("Envie o @username ou ID do seu Canal onde o bot postará os vídeos clonados (Ex: -100123456789):", reply_markup=teclado_cancelar)
+    await state.set_state(EspiaoFluxo.aguardando_canal_destino)
+
+@dp.message(EspiaoFluxo.aguardando_canal_destino)
+async def salvar_destino_espiao(message: types.Message, state: FSMContext):
+    destino = message.text.strip()
+    dados = ler_alvos_espiao()
+    dados["canal_destino"] = destino
+    salvar_alvos_espiao(dados)
+    if EXIBIR_LOGS: logger.info(f"🎯 Canal de destino do espião atualizado para: {destino}")
+    await message.answer("Canal de destino configurado com sucesso!", reply_markup=obter_teclado_principal())
+    await state.clear()
 
 @dp.message(F.text == "Pausar/Retomar Automações ⏸️")
 async def menu_pausa(message: types.Message, state: FSMContext):
