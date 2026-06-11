@@ -2389,11 +2389,32 @@ async def processar_fila_espiao():
             "Na primeira linha, destaque o nome do produto. "
             "Não adicione links nem frases de encerramento na sua resposta."
         )
-        response = client.models.generate_content(
-            model="gemini-2.5-flash", # Modelo flash otimizado para tarefas massivas
-            contents=[video_gemini, prompt]
-        )
-        return response.text.strip()
+        modelos_espiao = [
+            "gemini-2.5-flash",
+            "gemini-3-flash-preview",
+            "gemini-2.5-flash-lite",
+            "gemini-3.5-flash"
+        ]
+        
+        for modelo_nome in modelos_espiao:
+            try:
+                if EXIBIR_LOGS: logger.info(f"⏳ [Espião] Consultando motor: {modelo_nome}...")
+                response = client.models.generate_content(
+                    model=modelo_nome,
+                    contents=[video_gemini, prompt]
+                )
+                if response and response.text:
+                    if EXIBIR_LOGS: logger.info(f"✅ [Espião] Sucesso com o modelo {modelo_nome}!")
+                    return response.text.strip()
+            except Exception as erro_modelo:
+                if "429" in str(erro_modelo):
+                    if EXIBIR_LOGS: logger.warning(f"⚠️ [Espião] Limite atingido em {modelo_nome}. Tentando o próximo...")
+                    continue
+                else:
+                    if EXIBIR_LOGS: logger.warning(f"⚠️ [Espião] Erro no modelo {modelo_nome}: {erro_modelo}")
+                    continue
+                    
+        raise Exception("Todos os modelos da cascata falharam por limite de cota ou erro.")
         
     try:
         if EXIBIR_LOGS: logger.info("🧠 Solicitando à IA a criação de uma nova Copy para o vídeo clonado...")
