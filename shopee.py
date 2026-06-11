@@ -25,6 +25,8 @@ ADMIN_ID = 1226920464
 GRUPO_ID = -1003909405581
 LINK_GRUPO = "https://t.me/shopee_video_afiliado"
 GEMINI_API_KEY = os.getenv('GEMINI_KEY')
+SHOPEE_APP_ID = os.getenv('SHOPEE_APP_ID')
+SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
 
 # Inicializa o cliente moderno da SDK do Google
 client = genai.Client(api_key=GEMINI_API_KEY)
@@ -2255,6 +2257,108 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
         await message.answer("Erro de sincronização ou posição inválida. Operação cancelada.", reply_markup=obter_teclado_principal())
         await state.clear()
 
+# --- MOTOR DE PROCESSAMENTO DO ESPIÃO ---
+def ler_fila_clonagem():
+    try:
+        with open("fila_clonagem.json", "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"fila": []}
+
+def salvar_fila_clonagem(dados):
+    with open("fila_clonagem.json", "w") as f:
+        json.dump(dados, f, indent=4)
+
+async def converter_link_shopee(link_original):
+    if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
+        if EXIBIR_LOGS: logger.warning("⏳ [API Shopee] Chaves ausentes no .env. Ignorando conversão e mantendo o link interceptado.")
+        return link_original
+        
+    # A lógica criptográfica de requisição para a API oficial entrará aqui
+    if EXIBIR_LOGS: logger.info("🔄 [API Shopee] Conversão de link processada (Aguardando implementação oficial).")
+    return link_original
+
+async def processar_fila_espiao():
+    dados_espiao = ler_alvos_espiao()
+    canal_destino = dados_espiao.get("canal_destino")
+    
+    if not canal_destino:
+        return # Aborta o processo silenciosamente se o destino não foi configurado no painel
+        
+    fila_data = ler_fila_clonagem()
+    fila = fila_data.get("fila", [])
+    
+    # Busca o primeiro vídeo da fila que ainda não foi publicado
+    item_pendente = next((item for item in fila if not item.get("processado")), None)
+    if not item_pendente:
+        return
+        
+    caminho_video = item_pendente["caminho_video"]
+    link_original = item_pendente["link_original"]
+    item_id = item_pendente["id"]
+    
+    if not os.path.exists(caminho_video):
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Ficheiro {caminho_video} não encontrado. Marcando clone {item_id} como falho.")
+        item_pendente["processado"] = True
+        salvar_fila_clonagem(fila_data)
+        return
+        
+    if EXIBIR_LOGS: logger.info(f"🕵️ Iniciando processamento automático do clone: {item_id}")
+    
+    # 1. Passagem do link pela Shopee
+    link_final = await converter_link_shopee(link_original)
+    
+    # 2. Análise do vídeo pela IA para reescrita autoral
+    def gerar_copy_clone():
+        import time
+        video_gemini = client.files.upload(file=caminho_video)
+        
+        while video_gemini.state.name == "PROCESSING":
+            time.sleep(2)
+            video_gemini = client.files.get(name=video_gemini.name)
+            
+        if video_gemini.state.name == "FAILED":
+            raise Exception("Falha de processamento no servidor do Google.")
+            
+        prompt = (
+            "Você atua como um copywriter. Assista ao vídeo e identifique qual é o produto demonstrado. "
+            "Crie UMA legenda de vendas curta, persuasiva e com emojis para o Telegram. "
+            "Na primeira linha, destaque o nome do produto. "
+            "Não adicione links nem frases de encerramento na sua resposta."
+        )
+        response = client.models.generate_content(
+            model="gemini-2.5-flash", # Modelo flash otimizado para tarefas massivas
+            contents=[video_gemini, prompt]
+        )
+        return response.text.strip()
+        
+    try:
+        if EXIBIR_LOGS: logger.info("🧠 Solicitando à IA a criação de uma nova Copy para o vídeo clonado...")
+        texto_ia = await asyncio.to_thread(gerar_copy_clone)
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro na IA ao processar clone: {e}")
+        texto_ia = "🛍️ <b>Achadinho Incrível!</b>\n\nConfira essa oferta especial que garimpamos para você."
+        
+    legenda_postagem = f"{texto_ia}\n\n🛒 <b>Compre aqui:</b>\n{link_final}"
+    
+    # 3. Disparo isolado no Canal Paralelo
+    try:
+        arquivo = FSInputFile(caminho_video)
+        await bot.send_video(chat_id=canal_destino, video=arquivo, caption=legenda_postagem, parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info(f"✅ Clone {item_id} publicado com sucesso no canal {canal_destino}!")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Falha ao postar clone no Telegram: {e}")
+        
+    # 4. Encerramento e Faxina
+    item_pendente["processado"] = True
+    salvar_fila_clonagem(fila_data)
+    
+    try:
+        os.remove(caminho_video)
+        if EXIBIR_LOGS: logger.info("🧹 Ficheiro de vídeo do clone removido do disco.")
+    except:
+        pass
+
 async def main():
     # Agendador mestre que roda todo dia às 00:01
     scheduler.add_job(agendar_tarefas_diarias, 'cron', hour=0, minute=1, timezone=FUSO_STR)
@@ -2268,6 +2372,9 @@ async def main():
     # ✅ Novo: Verificador de retorno da Pausa Programada (roda a cada 1 minuto)
     if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento de retomada de pausa minuto a minuto...")
     scheduler.add_job(verificar_retorno_pausa_minuto, 'interval', minutes=1, timezone=FUSO_STR)
+    
+    # ✅ Verificador do Espião: Processa vídeos clonados a cada 5 minutos
+    scheduler.add_job(processar_fila_espiao, 'interval', minutes=5, timezone=FUSO_STR)
     
     # Roda o agendador imediatamente ao ligar o bot para garantir o dia atual
     agendar_tarefas_diarias()
