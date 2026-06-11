@@ -2286,7 +2286,19 @@ async def converter_link_shopee(link_original):
         if EXIBIR_LOGS: logger.warning("⏳ [API Shopee] Chaves ausentes no .env. Ignorando conversão e mantendo o link original.")
         return link_original
 
-    if EXIBIR_LOGS: logger.info(f"🔗 [API Shopee] Iniciando criptografia para o link: {link_original}")
+    link_processar = link_original
+    
+    if "shp.ee" in link_original or "shope.ee" in link_original or "s.shopee.com.br" in link_original:
+        if EXIBIR_LOGS: logger.info(f"🔍 Detectado link encurtado. A iniciar a expansão do URL: {link_original}")
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(link_original, allow_redirects=True) as resp:
+                    link_processar = str(resp.url)
+                    if EXIBIR_LOGS: logger.info(f"✅ Expansão concluída. URL longo obtido: {link_processar}")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro ao tentar expandir o link: {e}. Será mantido o original.")
+
+    if EXIBIR_LOGS: logger.info(f"🔗 [API Shopee] A iniciar criptografia para o link: {link_processar}")
 
     timestamp = int(time.time())
     endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
@@ -2295,7 +2307,7 @@ async def converter_link_shopee(link_original):
     payload = {
         "query": "mutation generateShortLink($originUrl: String!) { generateShortLink(input: {originUrl: $originUrl}) { shortLink } }",
         "variables": {
-            "originUrl": link_original
+            "originUrl": link_processar
         }
     }
     
