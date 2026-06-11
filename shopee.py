@@ -474,11 +474,12 @@ async def verificar_pausa_diaria():
     motivo_salvo = dados_pausa.get("motivo", "organização interna e curadoria de novos conteúdos")
 
     prompt = (
-        f"Você é assistente de afiliados da Shopee. Crie um aviso de desculpas aos usuários informando que a postagem de "
-        f"novos materiais continua temporariamente pausada pelo seguinte motivo: {motivo_salvo}. "
-        f"Diga de forma compreensível que a equipe voltará a enviar vídeos fresquinhos no dia {data_retorno_str}. "
-        f"Sugira que aproveitem o tempo para organizar os links e baixar os materiais antigos. "
-        f"Use emojis variados. Entregue APENAS a mensagem pronta, sem aspas."
+        f"Você é um assistente de afiliados. Crie um aviso MUITO CURTO E DIRETO informando "
+        f"que as postagens continuam pausadas para {motivo_salvo}. "
+        f"Avise que retornaremos no dia {data_retorno_str}. "
+        f"REGRA ABSOLUTA: Use no máximo 2 a 3 linhas e não ultrapasse 150 caracteres. "
+        f"Seja direto, não peça desculpas e evite longas explicações. "
+        f"Use emojis e entregue APENAS o texto da mensagem final."
     )
     texto = await gerar_mensagem_gemini(prompt)
     msg_enviada = await bot.send_message(GRUPO_ID, texto)
@@ -1594,11 +1595,12 @@ async def confirmar_pausa_programada(message: types.Message, state: FSMContext):
 
     # ✅ NOVO: Geração e envio do aviso exato no momento do acionamento
     prompt = (
-        f"Você é assistente de afiliados da Shopee. Crie um aviso imediato pedindo desculpas aos usuários e informando que a postagem de "
-        f"novos materiais está pausada a partir de agora pelo seguinte motivo: {motivo_escolhido}. "
-        f"Explique de forma clara que a equipe voltará a enviar vídeos validados no dia {data_retorno_str}. "
-        f"Sugira que aproveitem o tempo para baixar os materiais antigos. "
-        f"Use emojis variados. Entregue APENAS a mensagem pronta, sem aspas."
+        f"Você é um assistente de afiliados. Crie um aviso imediato MUITO CURTO E DIRETO "
+        f"informando que as postagens estão pausadas a partir de agora para {motivo_escolhido}. "
+        f"Avise que o retorno será no dia {data_retorno_str}. "
+        f"REGRA ABSOLUTA: Use no máximo 2 a 3 linhas e não ultrapasse 150 caracteres. "
+        f"Seja direto, não peça desculpas longas e não dê explicações chatas. "
+        f"Use emojis e entregue APENAS o texto da mensagem final."
     )
     texto_aviso = await gerar_mensagem_gemini(prompt)
     msg_imediata = await bot.send_message(GRUPO_ID, texto_aviso)
