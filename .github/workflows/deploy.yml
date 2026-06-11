@@ -42,3 +42,11 @@ jobs:
             sudo systemctl kill -s SIGKILL divulgacao_bot.service || true
             if [ "$EXIBIR_LOGS" = "true" ]; then echo "✅ Iniciando a nova versão limpa do Userbot..."; fi
             sudo systemctl start divulgacao_bot.service
+
+            # Reinicia o Módulo Espião de Clonagem
+            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🕵️ Parando o Módulo Espião..."; fi
+            sudo systemctl stop espiao_bot.service || true
+            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🧹 Limpando processos da escuta..."; fi
+            sudo systemctl kill -s SIGKILL espiao_bot.service || true
+            if [ "$EXIBIR_LOGS" = "true" ]; then echo "✅ Iniciando a nova versão do Espião..."; fi
+            sudo systemctl start espiao_bot.service
