@@ -2409,7 +2409,7 @@ async def processar_fila_espiao():
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao postar clone no Telegram: {e}")
         
     # 4. Encerramento e Faxina
-    item_pendente["processado"] = True
+    fila_data["fila"] = [item for item in fila if item["id"] != item_id]
     salvar_fila_clonagem(fila_data)
     
     try:
