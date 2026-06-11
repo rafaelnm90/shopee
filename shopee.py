@@ -2289,16 +2289,11 @@ async def converter_link_shopee(link_original):
     if EXIBIR_LOGS: logger.info(f"🔗 [API Shopee] Iniciando criptografia para o link: {link_original}")
 
     timestamp = int(time.time())
-    endpoint = "https://open-api.shopee.com.br/graphql"
+    endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
 
+    # A query foi condensada em uma linha para evitar erros de leitura (espaços invisíveis) da Shopee
     payload = {
-        "query": """
-            mutation generateShortLink($originUrl: String!) {
-                generateShortLink(input: {originUrl: $originUrl}) {
-                    shortLink
-                }
-            }
-        """,
+        "query": "mutation generateShortLink($originUrl: String!) { generateShortLink(input: {originUrl: $originUrl}) { shortLink } }",
         "variables": {
             "originUrl": link_original
         }
@@ -2306,12 +2301,9 @@ async def converter_link_shopee(link_original):
     
     payload_json = json.dumps(payload, separators=(',', ':'))
 
-    fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}"
-    assinatura = hmac.new(
-        SHOPEE_APP_SECRET.encode('utf-8'),
-        fator_base.encode('utf-8'),
-        hashlib.sha256
-    ).hexdigest()
+    # A API de Afiliados exige concatenação simples com a senha no final, e não HMAC
+    fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}{SHOPEE_APP_SECRET}"
+    assinatura = hashlib.sha256(fator_base.encode('utf-8')).hexdigest()
 
     headers = {
         "Content-Type": "application/json",
