@@ -8,6 +8,10 @@ import json
 import asyncio
 import random
 from datetime import datetime
+import time
+import hmac
+import hashlib
+import aiohttp
 from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
@@ -2271,12 +2275,59 @@ def salvar_fila_clonagem(dados):
 
 async def converter_link_shopee(link_original):
     if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
-        if EXIBIR_LOGS: logger.warning("⏳ [API Shopee] Chaves ausentes no .env. Ignorando conversão e mantendo o link interceptado.")
+        if EXIBIR_LOGS: logger.warning("⏳ [API Shopee] Chaves ausentes no .env. Ignorando conversão e mantendo o link original.")
         return link_original
-        
-    # A lógica criptográfica de requisição para a API oficial entrará aqui
-    if EXIBIR_LOGS: logger.info("🔄 [API Shopee] Conversão de link processada (Aguardando implementação oficial).")
-    return link_original
+
+    if EXIBIR_LOGS: logger.info(f"🔗 [API Shopee] Iniciando criptografia para o link: {link_original}")
+
+    timestamp = int(time.time())
+    endpoint = "https://open-api.shopee.com.br/graphql"
+
+    payload = {
+        "query": """
+            mutation generateShortLink($originUrl: String!) {
+                generateShortLink(input: {originUrl: $originUrl}) {
+                    shortLink
+                }
+            }
+        """,
+        "variables": {
+            "originUrl": link_original
+        }
+    }
+    
+    payload_json = json.dumps(payload, separators=(',', ':'))
+
+    fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}"
+    assinatura = hmac.new(
+        SHOPEE_APP_SECRET.encode('utf-8'),
+        fator_base.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"SHA256 Credential={SHOPEE_APP_ID}, Timestamp={timestamp}, Signature={assinatura}"
+    }
+
+    if EXIBIR_LOGS: logger.info("📤 [API Shopee] Enviando requisição assinada para os servidores...")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(endpoint, headers=headers, data=payload_json) as response:
+                resposta_dados = await response.json()
+
+                if response.status == 200 and "data" in resposta_dados and resposta_dados["data"].get("generateShortLink"):
+                    novo_link = resposta_dados["data"]["generateShortLink"]["shortLink"]
+                    if EXIBIR_LOGS: logger.info(f"✅ [API Shopee] Link convertido com sucesso: {novo_link}")
+                    return novo_link
+                else:
+                    if EXIBIR_LOGS: logger.error(f"❌ [API Shopee] Falha na conversão. Resposta: {resposta_dados}")
+                    return link_original
+
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [API Shopee] Erro de comunicação com o servidor: {e}")
+        return link_original
 
 async def processar_fila_espiao():
     dados_espiao = ler_alvos_espiao()
