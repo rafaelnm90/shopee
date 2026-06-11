@@ -473,10 +473,13 @@ async def verificar_pausa_diaria():
 
     motivo_salvo = dados_pausa.get("motivo", "organização interna e curadoria de novos conteúdos")
 
+    # Extrai apenas o dia e o mês (DD/MM) da string original
+    data_curta = data_retorno_str.split(" ")[0][:5]
+
     prompt = (
         f"Você é um assistente de afiliados. Crie um aviso MUITO CURTO E DIRETO informando "
         f"que as postagens continuam pausadas para {motivo_salvo}. "
-        f"Avise que retornaremos no dia {data_retorno_str}. "
+        f"Avise que retornaremos no dia {data_curta}. "
         f"REGRA ABSOLUTA: Use no máximo 2 a 3 linhas e não ultrapasse 150 caracteres. "
         f"Seja direto, não peça desculpas e evite longas explicações. "
         f"Use emojis e entregue APENAS o texto da mensagem final."
@@ -1593,11 +1596,14 @@ async def confirmar_pausa_programada(message: types.Message, state: FSMContext):
     motivo_escolhido = random.choice(motivos_pausa)
     if EXIBIR_LOGS: logger.info(f"🎲 Motivo de pausa sorteado: {motivo_escolhido}")
 
+    # Extrai apenas o dia e o mês (DD/MM) da string original
+    data_curta = data_retorno_str.split(" ")[0][:5]
+
     # ✅ NOVO: Geração e envio do aviso exato no momento do acionamento
     prompt = (
         f"Você é um assistente de afiliados. Crie um aviso imediato MUITO CURTO E DIRETO "
         f"informando que as postagens estão pausadas a partir de agora para {motivo_escolhido}. "
-        f"Avise que o retorno será no dia {data_retorno_str}. "
+        f"Avise que o retorno será no dia {data_curta}. "
         f"REGRA ABSOLUTA: Use no máximo 2 a 3 linhas e não ultrapasse 150 caracteres. "
         f"Seja direto, não peça desculpas longas e não dê explicações chatas. "
         f"Use emojis e entregue APENAS o texto da mensagem final."
