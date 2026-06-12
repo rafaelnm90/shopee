@@ -261,8 +261,8 @@ def obter_teclado_principal():
         [KeyboardButton(text="Gerenciar Fila 📋")],
         [KeyboardButton(text="Editar Número da Postagem 🔢")],
         [KeyboardButton(text="Pausar Postagens 🛑")],
-        [KeyboardButton(text="Enviar mensagem de Bom Dia ☀️"), KeyboardButton(text="Enviar mensagem de Incentivo 🔥")],
-        [KeyboardButton(text="Enviar mensagem de Boa Noite 🌙"), KeyboardButton(text="Enviar Convite do Grupo 📢")],
+        [KeyboardButton(text="Disparar Bom Dia ☀️"), KeyboardButton(text="Disparar Incentivo 🔥")],
+        [KeyboardButton(text="Disparar Boa Noite 🌙"), KeyboardButton(text="Disparar Convite 📢")],
         [KeyboardButton(text="Configurações Gerais ⚙️")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -871,7 +871,7 @@ async def comando_start(message: types.Message):
     await message.answer("Painel de Controle atualizado. Escolha uma ação abaixo:", reply_markup=obter_teclado_principal())
 
 # ✅ Handlers para Envio Manual de Mensagens via Botões
-@dp.message(F.text == "Enviar mensagem de Bom Dia ☀️")
+@dp.message(F.text == "Disparar Bom Dia ☀️")
 async def manual_bom_dia(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("Gerando e enviando mensagem de Bom Dia... ⏳")
@@ -879,7 +879,7 @@ async def manual_bom_dia(message: types.Message):
     await disparar_mensagem("bom_dia", forcar=True)
     await message.answer("Mensagem de Bom Dia enviada ao grupo com sucesso! ✅")
 
-@dp.message(F.text == "Enviar mensagem de Boa Noite 🌙")
+@dp.message(F.text == "Disparar Boa Noite 🌙")
 async def manual_boa_noite(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("Gerando e enviando mensagem de Boa Noite... ⏳")
@@ -887,7 +887,7 @@ async def manual_boa_noite(message: types.Message):
     await disparar_mensagem("boa_noite", forcar=True)
     await message.answer("Mensagem de Boa Noite enviada ao grupo com sucesso! ✅")
 
-@dp.message(F.text == "Enviar mensagem de Incentivo 🔥")
+@dp.message(F.text == "Disparar Incentivo 🔥")
 async def manual_incentivo(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("Gerando e enviando mensagem de Incentivo... ⏳")
@@ -895,7 +895,7 @@ async def manual_incentivo(message: types.Message):
     await disparar_mensagem("incentivo", forcar=True)
     await message.answer("Mensagem de Incentivo enviada ao grupo com sucesso! ✅")
 
-@dp.message(F.text == "Enviar Convite do Grupo 📢")
+@dp.message(F.text == "Disparar Convite 📢")
 async def manual_link_grupo(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("Gerando e enviando divulgação do grupo... ⏳")
