@@ -279,10 +279,19 @@ def salvar_alvos_espiao(dados):
     with open("alvos_espiao.json", "w") as f:
         json.dump(dados, f, indent=4)
 
+teclado_menu_espiao = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Grupos Vigiados 📡")],
+        [KeyboardButton(text="Voltar aos Canais 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
 teclado_opcoes_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Concorrente ➕"), KeyboardButton(text="Remover Concorrente 🗑️")],
-        [KeyboardButton(text="Definir Canal de Destino 🎯"), KeyboardButton(text="Voltar ao Início 🔙")]
+        [KeyboardButton(text="Definir Canal de Destino 🎯"), KeyboardButton(text="Voltar ao Menu Espião 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -1336,6 +1345,18 @@ async def voltar_inicio(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
 
+@dp.message(F.text == "Voltar aos Canais 🔙")
+async def voltar_outros_canais(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    await message.answer("Selecione o robô ou módulo secundário que deseja gerir:", reply_markup=teclado_outros_canais)
+
+@dp.message(F.text == "Voltar ao Menu Espião 🔙")
+async def voltar_menu_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    await message.answer("🕵️ <b>Painel Principal do Espião</b>\nO que deseja acessar?", reply_markup=teclado_menu_espiao, parse_mode="HTML")
+
 @dp.message(F.text == "Voltar 🔙")
 async def voltar_configs(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
@@ -1344,16 +1365,22 @@ async def voltar_configs(message: types.Message, state: FSMContext):
 
 # --- HANDLERS DO PAINEL DO ESPIÃO 🕵️ ---
 @dp.message(F.text == "Espião Afiliados 🕵️")
-async def menu_espiao(message: types.Message, state: FSMContext):
+async def menu_espiao_principal(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🕵️ Acessando Painel do Espião de Afiliados...")
+    if EXIBIR_LOGS: logger.info("🕵️ Acessando a página inicial do módulo Espião...")
+    await message.answer("🕵️ <b>Painel Principal do Espião</b>\nO que deseja acessar?", reply_markup=teclado_menu_espiao, parse_mode="HTML")
+
+@dp.message(F.text == "Grupos Vigiados 📡")
+async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("📡 Acessando a lista de grupos vigiados do Espião...")
     dados = ler_alvos_espiao()
     alvos = dados.get("alvos", [])
     destino = dados.get("canal_destino", "Não definido")
     
-    texto = f"🕵️ <b>Painel do Espião de Concorrentes</b>\n\n"
+    texto = f"📡 <b>Gestão de Grupos Vigiados</b>\n\n"
     texto += f"🎯 <b>Canal de Destino:</b> {destino}\n\n"
-    texto += "📡 <b>Grupos Monitorados:</b>\n"
+    texto += "<b>Na Escuta:</b>\n"
     if alvos:
         for i, alvo in enumerate(alvos, 1):
             texto += f"   {i}. {alvo}\n"
