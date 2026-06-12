@@ -2391,6 +2391,19 @@ async def processar_fila_espiao():
         return # Aborta o processo silenciosamente se o destino não foi configurado no painel
         
     fila_data = ler_fila_clonagem()
+    
+    # ✅ NOVA LÓGICA: Verificação do relógio orgânico de pausas
+    agora = datetime.now()
+    proximo_proc_str = fila_data.get("proximo_processamento")
+    
+    if proximo_proc_str:
+        try:
+            proximo_proc = datetime.strptime(proximo_proc_str, "%Y-%m-%d %H:%M:%S")
+            if agora < proximo_proc:
+                return # O relógio de pausa ainda não expirou, aborta a execução silenciosamente
+        except ValueError:
+            pass # Se houver um erro de leitura na data antiga, prossegue
+            
     fila = fila_data.get("fila", [])
     
     # Busca o primeiro vídeo da fila que ainda não foi publicado
@@ -2469,9 +2482,17 @@ async def processar_fila_espiao():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao postar clone no Telegram: {e}")
         
-    # 4. Encerramento e Faxina
+    # 4. Encerramento, Faxina e Agendamento Orgânico
     fila_data["fila"] = [item for item in fila if item["id"] != item_id]
+    
+    # ✅ Sorteia um intervalo aleatório entre 3 e 7 minutos para adormecer o motor
+    minutos_espera = random.randint(3, 7)
+    from datetime import timedelta
+    proximo_horario = datetime.now() + timedelta(minutes=minutos_espera)
+    fila_data["proximo_processamento"] = proximo_horario.strftime("%Y-%m-%d %H:%M:%S")
+    
     salvar_fila_clonagem(fila_data)
+    if EXIBIR_LOGS: logger.info(f"⏳ Pausa orgânica ativada. O próximo vídeo da fila só será postado após as {proximo_horario.strftime('%H:%M:%S')} (Pausa de {minutos_espera} min).")
     
     try:
         os.remove(caminho_video)
@@ -2493,8 +2514,8 @@ async def main():
     if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento de retomada de pausa minuto a minuto...")
     scheduler.add_job(verificar_retorno_pausa_minuto, 'interval', minutes=1, timezone=FUSO_STR)
     
-    # ✅ Verificador do Espião: Processa vídeos clonados a cada 5 minutos
-    scheduler.add_job(processar_fila_espiao, 'interval', minutes=5, timezone=FUSO_STR)
+    # ✅ Verificador do Espião: O motor verifica a fila a cada 1 minuto (a cadência aleatória é gerida internamente)
+    scheduler.add_job(processar_fila_espiao, 'interval', minutes=1, timezone=FUSO_STR)
     
     # Roda o agendador imediatamente ao ligar o bot para garantir o dia atual
     agendar_tarefas_diarias()
