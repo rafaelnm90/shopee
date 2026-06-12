@@ -50,8 +50,8 @@ def salvar_na_fila_clonagem(caminho_video, link_shopee):
         json.dump(dados, f, indent=4)
     if EXIBIR_LOGS: logger.info(f"📦 Item salvo na fila de clonagem com sucesso (ID: {item['id']}).")
 
-# O padrão de escuta monitorará qualquer link encortado da Shopee nas mensagens
-PADRAO_SHOPEE = re.compile(r'(https?://(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee)/[A-Za-z0-9_-]+)')
+# ✅ O padrão foi ampliado para capturar links com parâmetros complexos e domínios mais curtos
+PADRAO_SHOPEE = re.compile(r'(https?://(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+)')
 
 @client.on(events.NewMessage)
 async def interceptar_mensagem(event):
@@ -72,15 +72,27 @@ async def interceptar_mensagem(event):
     match = PADRAO_SHOPEE.search(texto)
     
     # Ignora mensagens de bate-papo, processa apenas se tiver link e mídia de vídeo
-    if match and event.media and isinstance(event.media, MessageMediaDocument):
-        if event.file.mime_type and 'video' in event.file.mime_type:
-            link_capturado = match.group(1)
-            if EXIBIR_LOGS: logger.info(f"🎯 ALVO LOCALIZADO! Link da Shopee extraído: {link_capturado}")
-            
-            if EXIBIR_LOGS: logger.info("📥 Iniciando download do vídeo em segundo plano...")
-            caminho_salvo = await event.download_media(file="temp_clone_")
-            
-            salvar_na_fila_clonagem(caminho_salvo, link_capturado)
+    if match:
+        link_capturado = match.group(1)
+        
+        # Limpa pontuações que possam ter ficado agarradas ao final do link
+        link_capturado = link_capturado.rstrip(").,;!?")
+        
+        if event.media and isinstance(event.media, MessageMediaDocument):
+            if event.file.mime_type and 'video' in event.file.mime_type:
+                if EXIBIR_LOGS: logger.info(f"🎯 ALVO LOCALIZADO! Link da Shopee extraído cirurgicamente: {link_capturado}")
+                
+                if "magazineluiza" in texto.lower() or "meli.li" in texto.lower() or "mercadolivre" in texto.lower():
+                    if EXIBIR_LOGS: logger.info("✂️ Concorrência ignorada: A postagem continha outros domínios, mas apenas o da Shopee foi filtrado.")
+                
+                if EXIBIR_LOGS: logger.info("📥 Iniciando download do vídeo em segundo plano...")
+                caminho_salvo = await event.download_media(file="temp_clone_")
+                
+                salvar_na_fila_clonagem(caminho_salvo, link_capturado)
+            else:
+                if EXIBIR_LOGS: logger.info(f"⏭️ Ignorado: O link {link_capturado} foi encontrado, mas o anexo não é um formato de vídeo suportado.")
+        else:
+            if EXIBIR_LOGS: logger.info(f"⏭️ Ignorado: O link {link_capturado} foi encontrado, mas a postagem não contém um anexo de vídeo direto.")
 
 async def main():
     if EXIBIR_LOGS: logger.info("🕵️ Iniciando o Módulo Espião de Clonagem...")
