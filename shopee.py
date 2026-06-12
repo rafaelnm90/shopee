@@ -32,6 +32,16 @@ GEMINI_API_KEY = os.getenv('GEMINI_KEY')
 SHOPEE_APP_ID = os.getenv('SHOPEE_APP_ID')
 SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
 
+MODELOS_CASCATA_GEMINI = [
+    "gemini-2.5-flash",
+    "gemini-3-flash-preview",
+    "gemini-2.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.1-pro-preview",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-2.5-pro"
+]
+
 # Inicializa o cliente moderno da SDK do Google
 client = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -536,20 +546,10 @@ async def verificar_retorno_pausa_minuto():
 
 # 4. FUNÇÕES DE GERAÇÃO COM IA E AGENDAMENTO ⏰
 async def gerar_mensagem_gemini(prompt):
-    # Lista técnica em ordem de prioridade para garantir a melhor mensagem
-    modelos_disponiveis = [
-        "gemini-3.1-pro-preview",
-        "gemini-3.5-flash",
-        "gemini-3-flash-preview",
-        "gemini-3.1-flash-lite-preview",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite"
-    ]
 
     if EXIBIR_LOGS: logger.info("🧠 Iniciando processamento em cascata com a nova SDK...")
 
-    for modelo_nome in modelos_disponiveis:
+    for modelo_nome in MODELOS_CASCATA_GEMINI:
         try:
             if EXIBIR_LOGS: logger.info(f"⏳ Consultando motor: {modelo_nome}...")
             
@@ -570,7 +570,7 @@ async def gerar_mensagem_gemini(prompt):
                 await asyncio.sleep(2)
             else:
                 if EXIBIR_LOGS: logger.warning(f"⚠️ Modelo {modelo_nome} indisponível: {erro_str[:50]}...")
-            continue 
+            continue
 
     if EXIBIR_LOGS: logger.error("❌ Falha crítica: Nenhum motor da cascata respondeu.")
     return "🚀 Novos materiais disponíveis! Bora postar e converter!"
@@ -2384,22 +2384,13 @@ async def processar_fila_espiao():
             raise Exception("Falha de processamento no servidor do Google.")
             
         prompt = (
-            "Você atua como um copywriter. Assista ao vídeo e identifique qual é o produto demonstrado. "
-            "Crie UMA legenda de vendas curta, persuasiva e com emojis para o Telegram. "
-            "Na primeira linha, destaque o nome do produto. "
-            "Não adicione links nem frases de encerramento na sua resposta."
+            "Assista ao vídeo e identifique qual é o produto demonstrado. "
+            "A sua resposta deve conter APENAS o nome do produto acompanhado de um emoji correspondente no início. "
+            "É estritamente proibido criar textos de vendas, descrições, gatilhos mentais ou frases de encerramento. "
+            "Exemplo de saída esperada: 👟 Tênis Casual Feminino"
         )
-        modelos_espiao = [
-            "gemini-3.1-pro-preview",
-            "gemini-3.5-flash",
-            "gemini-3-flash-preview",
-            "gemini-3.1-flash-lite-preview",
-            "gemini-2.5-pro",
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite"
-        ]
         
-        for modelo_nome in modelos_espiao:
+        for modelo_nome in MODELOS_CASCATA_GEMINI:
             try:
                 if EXIBIR_LOGS: logger.info(f"⏳ [Espião] Consultando motor: {modelo_nome}...")
                 response = client.models.generate_content(
@@ -2424,9 +2415,9 @@ async def processar_fila_espiao():
         texto_ia = await asyncio.to_thread(gerar_copy_clone)
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro na IA ao processar clone: {e}")
-        texto_ia = "🛍️ <b>Achadinho Incrível!</b>\n\nConfira essa oferta especial que garimpamos para você."
+        texto_ia = "🛍️ <b>Vídeo do Produto</b>"
         
-    legenda_postagem = f"{texto_ia}\n\n🛒 <b>Compre aqui:</b>\n{link_final}"
+    legenda_postagem = f"{texto_ia}\n\n🔗 <b>Link do Produto:</b>\n{link_final}"
     
     # 3. Disparo isolado no Canal Paralelo
     try:
