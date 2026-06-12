@@ -211,6 +211,15 @@ teclado_opcoes_rotina = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
+teclado_outros_canais = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Espião Afiliados 🕵️")],
+        [KeyboardButton(text="Voltar ao Início 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
 # 🛠️ Função dinâmica para o menu de pausa e status
 def obter_teclado_e_status_pausa():
     if EXIBIR_LOGS: logger.info("🔍 Lendo status atual das automações...")
@@ -248,7 +257,7 @@ def obter_teclado_e_status_pausa():
 # 🛠️ Função centralizadora do menu principal
 def obter_teclado_principal():
     botoes = [
-        [KeyboardButton(text="Criar Postagem 📝"), KeyboardButton(text="Painel do Espião 🕵️")],
+        [KeyboardButton(text="Criar Postagem 📝"), KeyboardButton(text="Outros Canais 🗂️")],
         [KeyboardButton(text="Gerenciar Fila 📋")],
         [KeyboardButton(text="Editar Número da Postagem 🔢")],
         [KeyboardButton(text="Pausar Postagens 🛑")],
@@ -1315,6 +1324,12 @@ async def menu_configuracoes(message: types.Message):
     if EXIBIR_LOGS: logger.info("⚙️ Acessando Configurações Gerais.")
     await message.answer("Menu de Configurações Avançadas.\nEscolha uma opção abaixo:", reply_markup=teclado_configuracoes_gerais)
 
+@dp.message(F.text == "Outros Canais 🗂️")
+async def menu_outros_canais(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🗂️ Acessando a gaveta de Outros Canais.")
+    await message.answer("Selecione o robô ou módulo secundário que deseja gerir:", reply_markup=teclado_outros_canais)
+
 @dp.message(F.text == "Voltar ao Início 🔙")
 async def voltar_inicio(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
@@ -1328,10 +1343,10 @@ async def voltar_configs(message: types.Message, state: FSMContext):
     await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
 
 # --- HANDLERS DO PAINEL DO ESPIÃO 🕵️ ---
-@dp.message(F.text == "Painel do Espião 🕵️")
+@dp.message(F.text == "Espião Afiliados 🕵️")
 async def menu_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🕵️ Acessando Painel do Espião...")
+    if EXIBIR_LOGS: logger.info("🕵️ Acessando Painel do Espião de Afiliados...")
     dados = ler_alvos_espiao()
     alvos = dados.get("alvos", [])
     destino = dados.get("canal_destino", "Não definido")
