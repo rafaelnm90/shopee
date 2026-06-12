@@ -17,6 +17,16 @@ API_ID = int(os.getenv('API_ID'))
 API_HASH = os.getenv('API_HASH')
 GEMINI_API_KEY = os.getenv('GEMINI_KEY')
 
+MODELOS_CASCATA_GEMINI = [
+    "gemini-2.5-flash",
+    "gemini-3-flash-preview",
+    "gemini-2.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.1-pro-preview",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-2.5-pro"
+]
+
 # Inicializa o cliente do Google
 client_genai = genai.Client(api_key=GEMINI_API_KEY)
 
@@ -51,18 +61,8 @@ async def gerar_texto_divulgacao(repeticoes=6):
         "Entregue APENAS a frase final, sem aspas."
     )
     
-    modelos_disponiveis = [
-        "gemini-3.1-pro-preview",
-        "gemini-3.5-flash",
-        "gemini-3-flash-preview",
-        "gemini-3.1-flash-lite-preview",
-        "gemini-2.5-pro",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite"
-    ]
-    
-    frase_ia = None
-    for modelo_nome in modelos_disponiveis:
+   frase_ia = None
+    for modelo_nome in MODELOS_CASCATA_GEMINI:
         try:
             if EXIBIR_LOGS: logger.info(f"⏳ A consultar o motor de IA: {modelo_nome}...")
             response = await asyncio.to_thread(
