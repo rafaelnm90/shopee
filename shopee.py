@@ -257,18 +257,22 @@ def obter_teclado_e_status_pausa():
 # 🛠️ Função do novo Menu Inicial Raiz
 def obter_teclado_raiz():
     botoes = [
-        [KeyboardButton(text="Canal Principal 📺"), KeyboardButton(text="Outros Canais 🗂️")]
+        [KeyboardButton(text="Canal Principal 📺"), KeyboardButton(text="Outros Canais 🗂️")],
+        [KeyboardButton(text="Relatório Geral 📊")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
 # 🛠️ Função centralizadora da pasta do Canal Principal
 def obter_teclado_principal():
     botoes = [
-        [KeyboardButton(text="Criar Postagem 📝"), KeyboardButton(text="Gerenciar Fila 📋")],
-        [KeyboardButton(text="Editar Número da Postagem 🔢"), KeyboardButton(text="Pausar Postagens 🛑")],
+        [KeyboardButton(text="Criar Postagem 📝")],
+        [KeyboardButton(text="Gerenciar Fila 📋")],
+        [KeyboardButton(text="Editar Número da Postagem 🔢")], 
+        [KeyboardButton(text="Pausar Postagens 🛑")],
         [KeyboardButton(text="Disparar Bom Dia ☀️"), KeyboardButton(text="Disparar Incentivo 🔥")],
         [KeyboardButton(text="Disparar Boa Noite 🌙"), KeyboardButton(text="Disparar Convite 📢")],
-        [KeyboardButton(text="Configurações Gerais ⚙️"), KeyboardButton(text="Voltar ao Início 🔙")]
+        [KeyboardButton(text="Configurações Gerais ⚙️")], 
+        [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
@@ -880,6 +884,150 @@ async def menu_canal_principal(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("📂 Acessando a pasta do Canal Principal.")
     await message.answer("📺 <b>Menu do Canal Principal</b>\nGerencie as postagens e rotinas abaixo:", reply_markup=obter_teclado_principal(), parse_mode="HTML")
+
+async def buscar_dados_financeiros_shopee(dias_retroativos=30):
+    if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
+        return None
+        
+    from datetime import timedelta
+    agora = datetime.now(fuso_horario)
+    inicio = agora - timedelta(days=dias_retroativos)
+    
+    start_ts = int(inicio.replace(hour=0, minute=0, second=0).timestamp())
+    end_ts = int(agora.replace(hour=23, minute=59, second=59).timestamp())
+    
+    endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
+    
+    payload = {
+        "query": """query getConversionReport($purchaseTimeStart: Int!, $purchaseTimeEnd: Int!, $limit: Int!) {
+            conversionReport(purchaseTimeStart: $purchaseTimeStart, purchaseTimeEnd: $purchaseTimeEnd, limit: $limit) {
+                nodes {
+                    purchaseTime
+                    shopeeCommissionCapped
+                    sellerCommission
+                    totalCommission
+                    orders {
+                        orderStatus
+                    }
+                }
+            }
+        }""",
+        "variables": {
+            "purchaseTimeStart": start_ts,
+            "purchaseTimeEnd": end_ts,
+            "limit": 500
+        }
+    }
+    
+    payload_json = json.dumps(payload, separators=(',', ':'))
+    timestamp = int(time.time())
+    fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}{SHOPEE_APP_SECRET}"
+    assinatura = hashlib.sha256(fator_base.encode('utf-8')).hexdigest()
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"SHA256 Credential={SHOPEE_APP_ID}, Timestamp={timestamp}, Signature={assinatura}"
+    }
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(endpoint, headers=headers, data=payload_json) as response:
+                if response.status == 200:
+                    dados = await response.json()
+                    return dados.get("data", {}).get("conversionReport", {}).get("nodes", [])
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro na consulta financeira à API Shopee: {e}")
+    return []
+
+@dp.message(F.text == "Relatório Geral 📊")
+async def gerar_relatorio_completo(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    msg_status = await message.answer("📊 Extraindo métricas do servidor e sincronizando API Financeira... Aguarde ⏳")
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando auditoria completa do sistema e finanças...")
+    
+    # 1. Auditoria de Saúde do Sistema
+    numero_atual = ler_contador()
+    fila_princ = len(ler_fila_postagens().get("fila", []))
+    fila_espiao = len(ler_fila_clonagem().get("fila", []))
+    radar = len(ler_alvos_espiao().get("alvos", []))
+    
+    dados_pausa = ler_pausa_programada()
+    dados_div = ler_alvos_divulgacao()
+    dados_rotina = ler_config_rotina()
+    
+    if dados_pausa.get("ativa"):
+        status_sis = f"🔴 PAUSADO até {dados_pausa.get('data_retorno')}"
+    else:
+        spam_ok = not dados_div.get("pausado", False)
+        rotina_ok = not dados_rotina.get("pausado", False)
+        if spam_ok and rotina_ok:
+            status_sis = "🟢 ATIVO (Rotina e SPAM rodando)"
+        elif spam_ok or rotina_ok:
+            status_sis = "🟡 PARCIAL (Algum serviço pausado)"
+        else:
+            status_sis = "🔴 PARADO (Serviços suspensos manualmente)"
+            
+    # 2. Extração Financeira
+    from datetime import timedelta
+    conversoes = await buscar_dados_financeiros_shopee(30)
+    
+    total_pedidos = len(conversoes) if conversoes else 0
+    pagos, pendentes, cancelados = 0, 0, 0
+    comissao_shopee, comissao_extra, faturamento_total = 0.0, 0.0, 0.0
+    
+    hoje = datetime.now(fuso_horario)
+    diario = { (hoje - timedelta(days=i)).strftime("%d/%m"): 0.0 for i in range(7) }
+    
+    if conversoes:
+        for conv in conversoes:
+            orders = conv.get("orders", [])
+            status = orders[0].get("orderStatus", "") if orders else ""
+            
+            if status == "COMPLETED": pagos += 1
+            elif status == "CANCELLED": cancelados += 1
+            else: pendentes += 1
+            
+            c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
+            c_extra = float(conv.get("sellerCommission", "0"))
+            c_total = float(conv.get("totalCommission", "0"))
+            
+            comissao_shopee += c_shopee
+            comissao_extra += c_extra
+            faturamento_total += c_total
+            
+            dt_compra = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=fuso_horario).strftime("%d/%m")
+            if dt_compra in diario:
+                diario[dt_compra] += c_total
+                
+    # Função para converter formato de moeda para o padrão brasileiro
+    def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    
+    texto = (
+        "📊 <b>RELATÓRIO GERAL DA OPERAÇÃO</b>\n\n"
+        "⚙️ <b>SAÚDE DO SISTEMA</b>\n"
+        f"• Próximo Vídeo: <b>{numero_atual}</b>\n"
+        f"• Fila Principal: <b>{fila_princ} agendados</b>\n"
+        f"• Fila do Espião: <b>{fila_espiao} aguardando</b>\n"
+        f"• Radar Espião: <b>{radar} vigiados</b>\n"
+        f"• Status: <b>{status_sis}</b>\n\n"
+        "💰 <b>BALANÇO FINANCEIRO (Últimos 30 Dias)</b>\n"
+        f"• Total de Pedidos: <b>{total_pedidos}</b>\n"
+        f"• Conversão: {pagos} Pagos | {pendentes} Pendentes | {cancelados} Cancelados\n"
+        f"• Comissão Shopee: R$ {f_br(comissao_shopee)}\n"
+        f"• Comissão Extra (AMS): R$ {f_br(comissao_extra)}\n"
+        f"• Faturamento Bruto: <b>R$ {f_br(faturamento_total)}</b>\n\n"
+        "📈 <b>DESEMPENHO DIÁRIO (Últimos 7 Dias)</b>\n"
+    )
+    
+    for i in range(7):
+        dt_chave = (hoje - timedelta(days=i)).strftime("%d/%m")
+        valor = diario.get(dt_chave, 0.0)
+        marc = " (Hoje)" if i == 0 else ""
+        texto += f"• {dt_chave}{marc}: R$ {f_br(valor)}\n"
+        
+    await msg_status.delete()
+    await message.answer(texto, parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info("✅ Relatório gerado e exibido com sucesso!")
 
 # ✅ Handlers para Envio Manual de Mensagens via Botões
 @dp.message(F.text == "Disparar Bom Dia ☀️")
