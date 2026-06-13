@@ -254,16 +254,21 @@ def obter_teclado_e_status_pausa():
     if EXIBIR_LOGS: logger.info("✅ Painel de status montado com sucesso.")
     return painel, teclado
 
-# 🛠️ Função centralizadora do menu principal
+# 🛠️ Função do novo Menu Inicial Raiz
+def obter_teclado_raiz():
+    botoes = [
+        [KeyboardButton(text="Canal Principal 📺"), KeyboardButton(text="Outros Canais 🗂️")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+
+# 🛠️ Função centralizadora da pasta do Canal Principal
 def obter_teclado_principal():
     botoes = [
-        [KeyboardButton(text="Criar Postagem 📝"), KeyboardButton(text="Outros Canais 🗂️")],
-        [KeyboardButton(text="Gerenciar Fila 📋")],
-        [KeyboardButton(text="Editar Número da Postagem 🔢")],
-        [KeyboardButton(text="Pausar Postagens 🛑")],
+        [KeyboardButton(text="Criar Postagem 📝"), KeyboardButton(text="Gerenciar Fila 📋")],
+        [KeyboardButton(text="Editar Número da Postagem 🔢"), KeyboardButton(text="Pausar Postagens 🛑")],
         [KeyboardButton(text="Disparar Bom Dia ☀️"), KeyboardButton(text="Disparar Incentivo 🔥")],
         [KeyboardButton(text="Disparar Boa Noite 🌙"), KeyboardButton(text="Disparar Convite 📢")],
-        [KeyboardButton(text="Configurações Gerais ⚙️")]
+        [KeyboardButton(text="Configurações Gerais ⚙️"), KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
@@ -867,8 +872,14 @@ def agendar_tarefas_diarias():
 @dp.message(Command("start"))
 async def comando_start(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("⌨️ Atualizando menu principal.")
-    await message.answer("Painel de Controle atualizado. Escolha uma ação abaixo:", reply_markup=obter_teclado_principal())
+    if EXIBIR_LOGS: logger.info("⌨️ Iniciando o bot no Menu Raiz.")
+    await message.answer("🏠 Painel de Controle Inicial. Escolha uma área para gerenciar:", reply_markup=obter_teclado_raiz())
+
+@dp.message(F.text == "Canal Principal 📺")
+async def menu_canal_principal(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("📂 Acessando a pasta do Canal Principal.")
+    await message.answer("📺 <b>Menu do Canal Principal</b>\nGerencie as postagens e rotinas abaixo:", reply_markup=obter_teclado_principal(), parse_mode="HTML")
 
 # ✅ Handlers para Envio Manual de Mensagens via Botões
 @dp.message(F.text == "Disparar Bom Dia ☀️")
@@ -1343,7 +1354,7 @@ async def menu_outros_canais(message: types.Message):
 async def voltar_inicio(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
+    await message.answer("🏠 Voltando ao Painel Inicial.", reply_markup=obter_teclado_raiz())
 
 @dp.message(F.text == "Voltar aos Canais 🔙")
 async def voltar_outros_canais(message: types.Message, state: FSMContext):
