@@ -173,9 +173,7 @@ teclado_confirmar_zerar = ReplyKeyboardMarkup(
 # --- NOVOS TECLADOS DE CONFIGURAÇÃO ---
 teclado_configuracoes_gerais = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Mensagens de Rotina ⏰")],
-        [KeyboardButton(text="SPAM em Grupos 📢")],
-        [KeyboardButton(text="Pausar/Retomar Automações ⏸️")],
+        [KeyboardButton(text="Mensagens de Rotina ⏰"), KeyboardButton(text="SPAM em Grupos 📢")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ],
     resize_keyboard=True,
@@ -186,7 +184,7 @@ teclado_opcoes_divulgacao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Alvo ➕"), KeyboardButton(text="Excluir Alvo 🗑️")],
         [KeyboardButton(text="Editar Configurações ⚙️"), KeyboardButton(text="Forçar Disparo Agora 🚀")],
-        [KeyboardButton(text="Voltar 🔙")]
+        [KeyboardButton(text="Pausar SPAM ⏸️"), KeyboardButton(text="Voltar 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -205,7 +203,8 @@ teclado_opcoes_rotina = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
         [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
-        [KeyboardButton(text="Editar Boa Noite 🌙"), KeyboardButton(text="Voltar 🔙")]
+        [KeyboardButton(text="Editar Boa Noite 🌙"), KeyboardButton(text="Pausar Rotinas ⏸️")],
+        [KeyboardButton(text="Voltar 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -219,40 +218,6 @@ teclado_outros_canais = ReplyKeyboardMarkup(
     resize_keyboard=True,
     is_persistent=True
 )
-
-# 🛠️ Função dinâmica para o menu de pausa e status
-def obter_teclado_e_status_pausa():
-    if EXIBIR_LOGS: logger.info("🔍 Lendo status atual das automações...")
-    dados = ler_alvos_divulgacao()
-    spam_pausado = dados.get("pausado", False)
-    
-    dados_rotina = ler_config_rotina()
-    rotina_pausada = dados_rotina.get("pausado", False)
-    
-    texto_spam = "Retomar SPAM em Grupos ▶️" if spam_pausado else "Pausar SPAM em Grupos ⏸️"
-    texto_rotina = "Retomar Mensagens de Rotina ▶️" if rotina_pausada else "Pausar Mensagens de Rotina ⏸️"
-    
-    status_spam = "🔴 PAUSADO" if spam_pausado else "🟢 ATIVO"
-    status_rotina = "🔴 PAUSADAS" if rotina_pausada else "🟢 ATIVAS"
-    
-    painel = (
-        "🛠️ <b>Painel de Controle de Automações:</b>\n\n"
-        f"📢 <b>SPAM em Grupos:</b> {status_spam}\n"
-        f"⏰ <b>Mensagens de Rotina:</b> {status_rotina}\n\n"
-        "Selecione a ação desejada abaixo:"
-    )
-    
-    teclado = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=texto_spam)],
-            [KeyboardButton(text=texto_rotina)],
-            [KeyboardButton(text="Voltar 🔙")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
-    if EXIBIR_LOGS: logger.info("✅ Painel de status montado com sucesso.")
-    return painel, teclado
 
 # 🛠️ Função do novo Menu Inicial Raiz
 def obter_teclado_raiz():
@@ -932,9 +897,18 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(endpoint, headers=headers, data=payload_json) as response:
+                
+                # ✅ NOVA AUDITORIA: Captura a resposta exata enviada pela Shopee em formato de texto
+                dados_crus = await response.text()
+                if EXIBIR_LOGS: logger.info(f"🔍 [API Shopee - Relatório] Resposta crua do servidor: {dados_crus}")
+                
                 if response.status == 200:
-                    dados = await response.json()
+                    import json
+                    dados = json.loads(dados_crus)
                     return dados.get("data", {}).get("conversionReport", {}).get("nodes", [])
+                else:
+                    if EXIBIR_LOGS: logger.error(f"❌ Erro HTTP {response.status}: {dados_crus}")
+                    
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro na consulta financeira à API Shopee: {e}")
     return []
@@ -1489,8 +1463,22 @@ async def salvar_novo_numero(message: types.Message, state: FSMContext):
 @dp.message(F.text == "Configurações Gerais ⚙️")
 async def menu_configuracoes(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("⚙️ Acessando Configurações Gerais.")
-    await message.answer("Menu de Configurações Avançadas.\nEscolha uma opção abaixo:", reply_markup=teclado_configuracoes_gerais)
+    if EXIBIR_LOGS: logger.info("⚙️ Acessando Dashboard de Configurações Gerais.")
+    
+    dados_div = ler_alvos_divulgacao()
+    status_spam = "🔴 PAUSADO" if dados_div.get("pausado", False) else "🟢 ATIVO"
+    
+    dados_rotina = ler_config_rotina()
+    status_rotina = "🔴 PAUSADAS" if dados_rotina.get("pausado", False) else "🟢 ATIVAS"
+    
+    texto = (
+        "⚙️ <b>Central de Configurações Gerais</b>\n\n"
+        "📊 <b>Status Atual das Automações:</b>\n"
+        f"📢 SPAM em Grupos: {status_spam}\n"
+        f"⏰ Mensagens de Rotina: {status_rotina}\n\n"
+        "Escolha o módulo que deseja configurar abaixo:"
+    )
+    await message.answer(texto, reply_markup=teclado_configuracoes_gerais, parse_mode="HTML")
 
 @dp.message(F.text == "Outros Canais 🗂️")
 async def menu_outros_canais(message: types.Message):
@@ -1612,53 +1600,38 @@ async def salvar_destino_espiao(message: types.Message, state: FSMContext):
     await message.answer("Canal de destino configurado com sucesso!", reply_markup=obter_teclado_principal())
     await state.clear()
 
-@dp.message(F.text == "Pausar/Retomar Automações ⏸️")
-async def menu_pausa(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
-    painel, teclado = obter_teclado_e_status_pausa()
-    if EXIBIR_LOGS: logger.info("⏸️ Acessando painel dinâmico de automações.")
-    await message.answer(painel, reply_markup=teclado, parse_mode="HTML")
-    await state.set_state(ConfigPausa.menu_principal)
-
-@dp.message(ConfigPausa.menu_principal, F.text.in_(["Pausar SPAM em Grupos ⏸️", "Retomar SPAM em Grupos ▶️"]))
-async def alternar_pausa_divulgacao(message: types.Message):
+# ✅ NOVOS INTERRUPTORES INTERNOS DE PAUSA
+@dp.message(ConfigDivulgacao.menu_principal, F.text.in_(["Pausar SPAM ⏸️", "Retomar SPAM ▶️"]))
+async def alternar_pausa_spam_interno(message: types.Message, state: FSMContext):
     dados = ler_alvos_divulgacao()
-    status_atual = dados.get("pausado", False)
-    novo_status = not status_atual
+    novo_status = not dados.get("pausado", False)
     dados["pausado"] = novo_status
     salvar_alvos_divulgacao(dados)
-    
-    painel, teclado = obter_teclado_e_status_pausa()
-    
+
     if novo_status:
-        if EXIBIR_LOGS: logger.info("⏸️ SPAM em grupos PAUSADO.")
+        if EXIBIR_LOGS: logger.info("⏸️ SPAM em grupos PAUSADO internamente.")
         await message.answer("⏸️ <b>SPAM em Grupos PAUSADO.</b>\nO Userbot não enviará mais convites.", parse_mode="HTML")
     else:
-        if EXIBIR_LOGS: logger.info("▶️ SPAM em grupos ATIVADO.")
+        if EXIBIR_LOGS: logger.info("▶️ SPAM em grupos ATIVADO internamente.")
         await message.answer("▶️ <b>SPAM em Grupos ATIVO.</b>\nO Userbot voltará a operar normalmente.", parse_mode="HTML")
-        
-    await message.answer(painel, reply_markup=teclado, parse_mode="HTML")
 
-@dp.message(ConfigPausa.menu_principal, F.text.in_(["Pausar Mensagens de Rotina ⏸️", "Retomar Mensagens de Rotina ▶️"]))
-async def alternar_pausa_rotina(message: types.Message):
-    if EXIBIR_LOGS: logger.info("⚙️ Processando comando manual de pausa nas rotinas...")
+    await gerenciar_divulgacao(message, state)
+
+@dp.message(ConfigRotina.menu_principal, F.text.in_(["Pausar Rotinas ⏸️", "Retomar Rotinas ▶️"]))
+async def alternar_pausa_rotinas_interno(message: types.Message, state: FSMContext):
     dados_rotina = ler_config_rotina()
-    status_atual = dados_rotina.get("pausado", False)
-    novo_status = not status_atual
-    
+    novo_status = not dados_rotina.get("pausado", False)
     dados_rotina["pausado"] = novo_status
     salvar_config_rotina(dados_rotina)
-    
-    painel, teclado = obter_teclado_e_status_pausa()
-    
+
     if novo_status:
-        if EXIBIR_LOGS: logger.info("⏸️ Mensagens de Rotina PAUSADAS via painel.")
+        if EXIBIR_LOGS: logger.info("⏸️ Mensagens de Rotina PAUSADAS internamente.")
         await message.answer("⏸️ <b>Mensagens de Rotina PAUSADAS.</b>\nAs mensagens automáticas do grupo foram suspensas.", parse_mode="HTML")
     else:
-        if EXIBIR_LOGS: logger.info("▶️ Mensagens de Rotina ATIVADAS via painel.")
+        if EXIBIR_LOGS: logger.info("▶️ Mensagens de Rotina ATIVADAS internamente.")
         await message.answer("▶️ <b>Mensagens de Rotina ATIVAS.</b>\nAs mensagens automáticas voltarão a ser enviadas.", parse_mode="HTML")
-        
-    await message.answer(painel, reply_markup=teclado, parse_mode="HTML")
+
+    await gerenciar_rotina(message, state)
 
 # ✅ NOVO: Handler específico para corrigir o "Voltar" na pausa programada
 @dp.message(PausaProgramadaFluxo.aguardando_selecao_servicos, F.text == "Voltar 🔙")
@@ -1870,7 +1843,18 @@ async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
     else:
         texto += "Nenhum alvo cadastrado no momento.\n"
         
-    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_opcoes_divulgacao)
+    texto_botao_pausa = "Retomar SPAM ▶️" if dados.get("pausado") else "Pausar SPAM ⏸️"
+    teclado_dinamico_spam = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Adicionar Alvo ➕"), KeyboardButton(text="Excluir Alvo 🗑️")],
+            [KeyboardButton(text="Editar Configurações ⚙️"), KeyboardButton(text="Forçar Disparo Agora 🚀")],
+            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+        
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_dinamico_spam)
     await state.set_state(ConfigDivulgacao.menu_principal)
 
 @dp.message(ConfigDivulgacao.menu_principal, F.text == "Adicionar Alvo ➕")
@@ -2073,8 +2057,20 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
             texto += f"   Janela de Sorteio: {config['inicio']}h às {config['fim']}h\n"
             texto += f"   Disparos por Dia: {config['frequencia']}x\n\n"
         
+    texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado") else "Pausar Rotinas ⏸️"
+    teclado_dinamico_rotina = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
+            [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
+            [KeyboardButton(text="Editar Boa Noite 🌙"), KeyboardButton(text=texto_botao_pausa)],
+            [KeyboardButton(text="Voltar 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+        
     texto += "Selecione o que deseja editar abaixo:"
-    await message.answer(texto, reply_markup=teclado_opcoes_rotina, parse_mode="HTML")
+    await message.answer(texto, reply_markup=teclado_dinamico_rotina, parse_mode="HTML")
     await state.set_state(ConfigRotina.menu_principal)
 
 @dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖"]))
