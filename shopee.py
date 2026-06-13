@@ -2415,6 +2415,28 @@ async def processar_fila_espiao():
     link_original = item_pendente["link_original"]
     item_id = item_pendente["id"]
     
+    # ✅ NOVO: Verificação de validade temporal da postagem (6 horas)
+    data_captura_str = item_pendente.get("data_captura")
+    if data_captura_str:
+        try:
+            data_captura = datetime.strptime(data_captura_str, "%Y-%m-%d %H:%M:%S")
+            horas_na_fila = (agora - data_captura).total_seconds() / 3600
+            
+            if horas_na_fila > 6:
+                if EXIBIR_LOGS: logger.warning(f"⏳ Clone {item_id} expirou (esperou {horas_na_fila:.1f}h). Ficheiro descartado para priorizar ofertas recentes.")
+                
+                # Executa a faxina física e remove o item obsoleto
+                fila_data["fila"] = [item for item in fila if item["id"] != item_id]
+                salvar_fila_clonagem(fila_data)
+                
+                try:
+                    if os.path.exists(caminho_video): os.remove(caminho_video)
+                except:
+                    pass
+                return # Aborta o processamento para que o próximo ciclo pegue um vídeo novo
+        except ValueError:
+            pass # Continua normalmente caso o formato da data seja antigo
+            
     if not os.path.exists(caminho_video):
         if EXIBIR_LOGS: logger.warning(f"⚠️ Ficheiro {caminho_video} não encontrado. Marcando clone {item_id} como falho.")
         item_pendente["processado"] = True
