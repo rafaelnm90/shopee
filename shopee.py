@@ -174,7 +174,7 @@ teclado_confirmar_zerar = ReplyKeyboardMarkup(
 teclado_configuracoes_gerais = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Mensagens de Rotina ⏰"), KeyboardButton(text="SPAM em Grupos 📢")],
-        [KeyboardButton(text="Voltar ao Início 🔙")]
+        [KeyboardButton(text="Voltar 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -184,7 +184,7 @@ teclado_opcoes_divulgacao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Alvo ➕"), KeyboardButton(text="Excluir Alvo 🗑️")],
         [KeyboardButton(text="Editar Configurações ⚙️"), KeyboardButton(text="Forçar Disparo Agora 🚀")],
-        [KeyboardButton(text="Pausar SPAM ⏸️"), KeyboardButton(text="Voltar 🔙")]
+        [KeyboardButton(text="Pausar SPAM ⏸️"), KeyboardButton(text="Voltar às Configs 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -204,7 +204,7 @@ teclado_opcoes_rotina = ReplyKeyboardMarkup(
         [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
         [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
         [KeyboardButton(text="Editar Boa Noite 🌙"), KeyboardButton(text="Pausar Rotinas ⏸️")],
-        [KeyboardButton(text="Voltar 🔙")]
+        [KeyboardButton(text="Voltar às Configs 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -230,10 +230,8 @@ def obter_teclado_raiz():
 # 🛠️ Função centralizadora da pasta do Canal Principal
 def obter_teclado_principal():
     botoes = [
-        [KeyboardButton(text="Criar Postagem 📝")],
-        [KeyboardButton(text="Gerenciar Fila 📋")],
-        [KeyboardButton(text="Editar Número da Postagem 🔢")], 
-        [KeyboardButton(text="Pausar Postagens 🛑")],
+        [KeyboardButton(text="Criar Postagem 📝"), KeyboardButton(text="Gerenciar Fila 📋")],
+        [KeyboardButton(text="Editar Número da Postagem 🔢"), KeyboardButton(text="Pausar Postagens 🛑")],
         [KeyboardButton(text="Disparar Bom Dia ☀️"), KeyboardButton(text="Disparar Incentivo 🔥")],
         [KeyboardButton(text="Disparar Boa Noite 🌙"), KeyboardButton(text="Disparar Convite 📢")],
         [KeyboardButton(text="Configurações Gerais ⚙️")], 
@@ -1497,17 +1495,12 @@ async def voltar_outros_canais(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Selecione o robô ou módulo secundário que deseja gerir:", reply_markup=teclado_outros_canais)
 
-@dp.message(F.text == "Voltar ao Menu Espião 🔙")
-async def voltar_menu_espiao(message: types.Message, state: FSMContext):
+@dp.message(F.text == "Voltar às Configs 🔙")
+async def voltar_para_configuracoes(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🔙 Retornando à Central de Configurações Gerais.")
     await state.clear()
-    await message.answer("🕵️ <b>Painel Principal do Espião</b>\nO que deseja acessar?", reply_markup=teclado_menu_espiao, parse_mode="HTML")
-
-@dp.message(F.text == "Voltar 🔙")
-async def voltar_configs(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
-    await state.clear()
-    await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
+    await menu_configuracoes(message)
 
 # --- HANDLERS DO PAINEL DO ESPIÃO 🕵️ ---
 @dp.message(F.text == "Espião Afiliados 🕵️")
@@ -1847,7 +1840,7 @@ async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
         keyboard=[
             [KeyboardButton(text="Adicionar Alvo ➕"), KeyboardButton(text="Excluir Alvo 🗑️")],
             [KeyboardButton(text="Editar Configurações ⚙️"), KeyboardButton(text="Forçar Disparo Agora 🚀")],
-            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar 🔙")]
+            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Configs 🔙")]
         ],
         resize_keyboard=True,
         is_persistent=True
@@ -2062,7 +2055,7 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
             [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
             [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
             [KeyboardButton(text="Editar Boa Noite 🌙"), KeyboardButton(text=texto_botao_pausa)],
-            [KeyboardButton(text="Voltar 🔙")]
+            [KeyboardButton(text="Voltar às Configs 🔙")]
         ],
         resize_keyboard=True,
         is_persistent=True
