@@ -29,6 +29,40 @@ def carregar_alvos():
     except (FileNotFoundError, json.JSONDecodeError):
         return []
 
+def verificar_e_registrar_espelho(link_shopee):
+    arquivo_espelhos = "registro_espelhos.json"
+    agora = datetime.now()
+    try:
+        with open(arquivo_espelhos, "r") as f:
+            dados = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        dados = {"espelhos": {}}
+
+    # Executa a limpeza automática de links registados há mais de 24 horas
+    chaves_para_remover = []
+    for link, data_str in dados.get("espelhos", {}).items():
+        try:
+            data_registro = datetime.strptime(data_str, "%Y-%m-%d %H:%M:%S")
+            if (agora - data_registro).total_seconds() > 86400:
+                chaves_para_remover.append(link)
+        except ValueError:
+            chaves_para_remover.append(link)
+            
+    for chave in chaves_para_remover:
+        del dados["espelhos"][chave]
+
+    # Verifica se o link novo já existe no radar recente
+    if link_shopee in dados.get("espelhos", {}):
+        with open(arquivo_espelhos, "w") as f:
+            json.dump(dados, f, indent=4)
+        return True 
+
+    # Se for novidade, regista com a data e hora atuais
+    dados.setdefault("espelhos", {})[link_shopee] = agora.strftime("%Y-%m-%d %H:%M:%S")
+    with open(arquivo_espelhos, "w") as f:
+        json.dump(dados, f, indent=4)
+    return False
+
 def salvar_na_fila_clonagem(caminho_video, link_shopee):
     arquivo_fila = "fila_clonagem.json"
     try:
@@ -78,8 +112,12 @@ async def interceptar_mensagem(event):
         # Limpa pontuações que possam ter ficado agarradas ao final do link
         link_capturado = link_capturado.rstrip(").,;!?")
         
+        # ✅ NOVO: Bloqueio imediato de vídeos duplicados (Espelhos)
+        if verificar_e_registrar_espelho(link_capturado):
+            if EXIBIR_LOGS: logger.info(f"🪞 Espelho bloqueado! O produto {link_capturado} já foi capturado nas últimas 24 horas.")
+            return # Encerra o processamento da mensagem aqui mesmo, sem baixar o vídeo
+            
         if event.media and isinstance(event.media, MessageMediaDocument):
-            if event.file.mime_type and 'video' in event.file.mime_type:
                 if EXIBIR_LOGS: logger.info(f"🎯 ALVO LOCALIZADO! Link da Shopee extraído cirurgicamente: {link_capturado}")
                 
                 if "magazineluiza" in texto.lower() or "meli.li" in texto.lower() or "mercadolivre" in texto.lower():
