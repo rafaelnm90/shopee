@@ -903,7 +903,6 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
                 if EXIBIR_LOGS: logger.info(f"🔍 [API Shopee - Relatório] Resposta crua do servidor: {dados_crus}")
                 
                 if response.status == 200:
-                    import json
                     dados = json.loads(dados_crus)
                     return dados.get("data", {}).get("conversionReport", {}).get("nodes", [])
                 else:
