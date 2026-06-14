@@ -174,7 +174,7 @@ teclado_confirmar_zerar = ReplyKeyboardMarkup(
 teclado_configuracoes_gerais = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Mensagens de Rotina ⏰"), KeyboardButton(text="SPAM em Grupos 📢")],
-        [KeyboardButton(text="Voltar 🔙")]
+        [KeyboardButton(text="Voltar ao Início 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -1501,6 +1501,12 @@ async def voltar_para_configuracoes(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("🔙 Retornando à Central de Configurações Gerais.")
     await state.clear()
     await menu_configuracoes(message)
+
+@dp.message(F.text == "Voltar ao Menu Espião 🔙")
+async def voltar_menu_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    await message.answer("🕵️ <b>Painel Principal do Espião</b>\nO que deseja acessar?", reply_markup=teclado_menu_espiao, parse_mode="HTML")
 
 # --- HANDLERS DO PAINEL DO ESPIÃO 🕵️ ---
 @dp.message(F.text == "Espião Afiliados 🕵️")
