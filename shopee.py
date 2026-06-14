@@ -850,19 +850,22 @@ async def menu_canal_principal(message: types.Message):
 
 async def buscar_dados_financeiros_shopee(dias_retroativos=30):
     if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
+        if EXIBIR_LOGS: logger.warning("⏳ [API Shopee] Chaves financeiras ausentes no .env.")
         return None
         
     from datetime import timedelta
     agora = datetime.now(fuso_horario)
     inicio = agora - timedelta(days=dias_retroativos)
     
+    # 1. Geração correta dos Timestamps UNIX para GraphQL
     start_ts = int(inicio.replace(hour=0, minute=0, second=0).timestamp())
     end_ts = int(agora.replace(hour=23, minute=59, second=59).timestamp())
     
     endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
     
+    # 2. Formatação rigorosa da Query (Documentação Oficial Shopee)
     payload = {
-        "query": """query getConversionReport($purchaseTimeStart: Int64!, $purchaseTimeEnd: Int64!, $limit: Int!) {
+        "query": """query getConversionReport($purchaseTimeStart: Int, $purchaseTimeEnd: Int, $limit: Int) {
             conversionReport(purchaseTimeStart: $purchaseTimeStart, purchaseTimeEnd: $purchaseTimeEnd, limit: $limit) {
                 nodes {
                     purchaseTime
@@ -882,8 +885,11 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
         }
     }
     
+    # 3. Compactação JSON exata (A Shopee recusa espaços em branco)
     payload_json = json.dumps(payload, separators=(',', ':'))
     timestamp = int(time.time())
+    
+    # 4. Assinatura de Segurança HMAC SHA256
     fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}{SHOPEE_APP_SECRET}"
     assinatura = hashlib.sha256(fator_base.encode('utf-8')).hexdigest()
     
@@ -896,18 +902,25 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
         async with aiohttp.ClientSession() as session:
             async with session.post(endpoint, headers=headers, data=payload_json) as response:
                 
-                # ✅ NOVA AUDITORIA: Captura a resposta exata enviada pela Shopee em formato de texto
                 dados_crus = await response.text()
-                if EXIBIR_LOGS: logger.info(f"🔍 [API Shopee - Relatório] Resposta crua do servidor: {dados_crus}")
+                if EXIBIR_LOGS: logger.info(f"🔍 [API Shopee - Auditoria] {dados_crus}")
                 
                 if response.status == 200:
                     dados = json.loads(dados_crus)
+                    
+                    # 5. Validação da devolução de dados e tratamento de erro oficial Shopee
+                    erros_shopee = dados.get("errors")
+                    if erros_shopee:
+                        mensagem_erro = erros_shopee[0].get("message", "Erro Desconhecido")
+                        if EXIBIR_LOGS: logger.error(f"❌ A Shopee recusou a consulta: {mensagem_erro}")
+                        return []
+                        
                     return dados.get("data", {}).get("conversionReport", {}).get("nodes", [])
                 else:
-                    if EXIBIR_LOGS: logger.error(f"❌ Erro HTTP {response.status}: {dados_crus}")
+                    if EXIBIR_LOGS: logger.error(f"❌ Erro de Conexão {response.status}: {dados_crus}")
                     
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro na consulta financeira à API Shopee: {e}")
+        if EXIBIR_LOGS: logger.error(f"❌ Erro crítico no motor financeiro: {e}")
     return []
 
 @dp.message(F.text == "Relatório Geral 📊")
