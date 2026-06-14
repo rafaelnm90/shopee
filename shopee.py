@@ -862,7 +862,7 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
     endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
     
     payload = {
-        "query": """query getConversionReport($purchaseTimeStart: Int!, $purchaseTimeEnd: Int!, $limit: Int!) {
+        "query": """query getConversionReport($purchaseTimeStart: Int64!, $purchaseTimeEnd: Int64!, $limit: Int!) {
             conversionReport(purchaseTimeStart: $purchaseTimeStart, purchaseTimeEnd: $purchaseTimeEnd, limit: $limit) {
                 nodes {
                     purchaseTime
