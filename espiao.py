@@ -118,25 +118,69 @@ async def interceptar_mensagem(event):
             return # Encerra o processamento da mensagem aqui mesmo, sem baixar o vídeo
             
         if event.media and isinstance(event.media, MessageMediaDocument):
-                if EXIBIR_LOGS: logger.info(f"🎯 ALVO LOCALIZADO! Link da Shopee extraído cirurgicamente: {link_capturado}")
-                
-                if "magazineluiza" in texto.lower() or "meli.li" in texto.lower() or "mercadolivre" in texto.lower():
-                    if EXIBIR_LOGS: logger.info("✂️ Concorrência ignorada: A postagem continha outros domínios, mas apenas o da Shopee foi filtrado.")
-                
-                if EXIBIR_LOGS: logger.info("📥 Iniciando download do vídeo em segundo plano...")
-                caminho_salvo = await event.download_media(file="temp_clone_")
-                
-                salvar_na_fila_clonagem(caminho_salvo, link_capturado)
-            else:
-                if EXIBIR_LOGS: logger.info(f"⏭️ Ignorado: O link {link_capturado} foi encontrado, mas o anexo não é um formato de vídeo suportado.")
+            if EXIBIR_LOGS: logger.info(f"🎯 ALVO LOCALIZADO! Link da Shopee extraído cirurgicamente: {link_capturado}")
+            
+            if "magazineluiza" in texto.lower() or "meli.li" in texto.lower() or "mercadolivre" in texto.lower():
+                if EXIBIR_LOGS: logger.info("✂️ Concorrência ignorada: A postagem continha outros domínios, mas apenas o da Shopee foi filtrado.")
+            
+            if EXIBIR_LOGS: logger.info("📥 Iniciando download do vídeo em segundo plano...")
+            caminho_salvo = await event.download_media(file="temp_clone_")
+            
+            salvar_na_fila_clonagem(caminho_salvo, link_capturado)
         else:
             if EXIBIR_LOGS: logger.info(f"⏭️ Ignorado: O link {link_capturado} foi encontrado, mas a postagem não contém um anexo de vídeo direto.")
+
+# ✅ NOVO: Radar assíncrono que varre a lista e audita a permissão de acesso aos grupos
+async def monitorar_status_alvos():
+    while True:
+        try:
+            with open("alvos_espiao.json", "r") as f:
+                dados = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            dados = {"alvos": [], "canal_destino": None, "status_alvos": {}}
+            
+        alvos = dados.get("alvos", [])
+        status_alvos = dados.get("status_alvos", {})
+        houve_alteracao = False
+        
+        for alvo in alvos:
+            try:
+                # 📡 Ping na API do Telegram para verificar a existência e a permissão
+                entidade = await client.get_entity(alvo)
+                nome = getattr(entidade, 'title', getattr(entidade, 'username', str(alvo)))
+                novo_status = {"status": "ok", "nome": nome}
+            except Exception as e:
+                novo_status = {"status": "erro", "erro": "Acesso negado"}
+                
+            # Evita desgaste no disco salvando apenas se o status do alvo mudou
+            if status_alvos.get(alvo) != novo_status:
+                status_alvos[alvo] = novo_status
+                houve_alteracao = True
+            
+            await asyncio.sleep(2) # Pausa de segurança anti-flood da API do Telegram
+            
+        # 🧹 Faxina: remove da memória alvos que você já deletou pelo painel do bot
+        chaves_removidas = [k for k in list(status_alvos.keys()) if k not in alvos]
+        for k in chaves_removidas:
+            del status_alvos[k]
+            houve_alteracao = True
+            
+        if houve_alteracao:
+            dados["status_alvos"] = status_alvos
+            with open("alvos_espiao.json", "w") as f:
+                json.dump(dados, f, indent=4)
+                
+        await asyncio.sleep(30) # Roda a verificação de status a cada 30 segundos
 
 async def main():
     if EXIBIR_LOGS: logger.info("🕵️ Iniciando o Módulo Espião de Clonagem...")
     await client.start()
     alvos = carregar_alvos()
     if EXIBIR_LOGS: logger.info(f"📡 Radar ativo para {len(alvos)} concorrentes.")
+    
+    # Inicia a tarefa fantasma que auditará os grupos
+    asyncio.create_task(monitorar_status_alvos())
+    
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
