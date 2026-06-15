@@ -2421,8 +2421,10 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             nome_video = match_video.group(0).title() if match_video else "Vídeo ?"
             nome_item = match_item.group(1).strip() if match_item else "Sem descrição"
             
-            # Formata a Data para o padrão brasileiro
-            if data_adicao_str:
+            # 🚀 CORREÇÃO: Lê a maturação forçada para exibição no painel
+            if data_adicao_str == "2000-01-01":
+                data_br = "Manual (Prioridade)"
+            elif data_adicao_str:
                 try:
                     data_br = datetime.strptime(data_adicao_str, "%Y-%m-%d").strftime("%d/%m/%Y")
                 except:
@@ -2433,7 +2435,7 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             # Define a Previsão de Postagem
             if is_pausado:
                 status_previsao = "Pausado 🛑"
-            elif data_adicao_str < hoje_str:
+            elif data_adicao_str < hoje_str or data_adicao_str == "2000-01-01":
                 status_previsao = "Hoje 🟢"
             else:
                 status_previsao = "Amanhã 🟡"
@@ -2620,6 +2622,11 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         if nova_posicao >= len(fila): nova_posicao = len(fila) - 1
         
         item = fila.pop(posicao_origem)
+        
+        # 🚀 ESTRATÉGIA DE MATURAÇÃO: Se o vídeo foi movido manualmente, ele assume urgência.
+        # Burlamos a trava de data para garantir que a ordem visual case com a ordem de postagem real.
+        item["data_adicao"] = "2000-01-01"
+        
         fila.insert(nova_posicao, item)
         
         import re
