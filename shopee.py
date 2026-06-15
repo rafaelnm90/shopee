@@ -1055,7 +1055,16 @@ async def manual_link_grupo(message: types.Message):
 @dp.message(F.text == "Cancelar ❌", StateFilter("*"))
 async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("❌ Ação cancelada ou resetada via botão.")
+    
+    estado_atual = await state.get_state()
+    if EXIBIR_LOGS: logger.info(f"❌ Ação cancelada via botão. Estado anterior: {estado_atual}")
+
+    # 🔁 Roteamento Inteligente: Se estiver no Gerenciador de Fila, volta apenas para o submenu da fila
+    if estado_atual and estado_atual.startswith("GerenciarFilaFluxo"):
+        await state.clear()
+        await message.answer("Ação cancelada.", reply_markup=teclado_gerenciar_fila)
+        await menu_gerenciar_fila(message, state)
+        return
 
     if EXIBIR_LOGS: logger.info("🔍 Verificando pendências de numeração na memória antes de limpar...")
     data = await state.get_data()
@@ -2299,21 +2308,52 @@ async def processar_posicao_editar_fila(message: types.Message, state: FSMContex
     else:
         await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
 
-@dp.message(GerenciarFilaFluxo.aguardando_nova_legenda)
-async def salvar_nova_legenda_fila(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    posicao = data.get("posicao_edicao")
-    nova_legenda = message.html_text 
-    
+@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Editar Numeração 🔢")
+async def pedir_edicao_numeracao_fila(message: types.Message, state: FSMContext):
+    await message.answer("Digite o <b>NÚMERO</b> da posição do vídeo na fila que deseja alterar a numeração:", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(GerenciarFilaFluxo.aguardando_posicao_numeracao)
+
+@dp.message(GerenciarFilaFluxo.aguardando_posicao_numeracao)
+async def pedir_novo_numero_fila(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
+        return
+        
+    posicao = int(message.text) - 1
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
     
     if 0 <= posicao < len(fila):
-        fila[posicao]["legenda"] = nova_legenda
-        salvar_fila_postagens(fila_data)
-        if EXIBIR_LOGS: logger.info(f"✏️ Fila: Legenda do vídeo na posição {posicao+1} atualizada.")
+        await state.update_data(posicao_numeracao=posicao)
+        await message.answer(f"O vídeo está na posição {posicao+1}. Qual será o <b>NOVO NÚMERO</b> deste vídeo?", reply_markup=teclado_cancelar, parse_mode="HTML")
+        await state.set_state(GerenciarFilaFluxo.aguardando_nova_numeracao)
+    else:
+        await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
+
+@dp.message(GerenciarFilaFluxo.aguardando_nova_numeracao)
+async def salvar_nova_numeracao_fila(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
+        return
         
-        await message.answer("✅ Legenda atualizada com sucesso!", reply_markup=obter_teclado_principal())
+    novo_numero = int(message.text)
+    data = await state.get_data()
+    posicao = data.get("posicao_numeracao")
+    
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    import re
+    
+    if 0 <= posicao < len(fila):
+        legenda_antiga = fila[posicao].get("legenda", "")
+        # Substitui a numeração antiga na primeira linha pelo novo número introduzido
+        nova_legenda = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{novo_numero}', legenda_antiga, count=1)
+        fila[posicao]["legenda"] = nova_legenda
+        
+        salvar_fila_postagens(fila_data)
+        if EXIBIR_LOGS: logger.info(f"🔢 Fila: Numeração do vídeo na posição {posicao+1} atualizada para {novo_numero}.")
+        
+        await message.answer(f"✅ Numeração do vídeo atualizada para {novo_numero} com sucesso!", reply_markup=obter_teclado_principal())
         await state.clear()
     else:
         await message.answer("Erro de sincronização. Operação cancelada.", reply_markup=obter_teclado_principal())
