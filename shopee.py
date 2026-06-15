@@ -1062,7 +1062,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     # 🔁 Roteamento Inteligente: Se estiver no Gerenciador de Fila, volta apenas para o submenu da fila
     if estado_atual and estado_atual.startswith("GerenciarFilaFluxo"):
         await state.clear()
-        await message.answer("Ação cancelada.", reply_markup=teclado_gerenciar_fila)
+        await message.answer("Ação cancelada.")
         await menu_gerenciar_fila(message, state)
         return
 
@@ -2279,8 +2279,8 @@ async def processar_exclusao_fila(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.info(f"🗑️ Fila: Vídeo na posição {posicao+1} removido com sucesso.")
         agendar_fila_postagens() 
         
-        await message.answer("✅ Vídeo excluído com sucesso e horários recalculados!", reply_markup=obter_teclado_principal())
-        await state.clear()
+        await message.answer("✅ Vídeo excluído com sucesso e horários recalculados!")
+        await menu_gerenciar_fila(message, state)
     else:
         await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
 
@@ -2308,68 +2308,25 @@ async def processar_posicao_editar_fila(message: types.Message, state: FSMContex
     else:
         await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
 
-@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Editar Numeração 🔢")
-async def pedir_edicao_numeracao_fila(message: types.Message, state: FSMContext):
-    await message.answer("Digite o <b>NÚMERO</b> da posição do vídeo na fila que deseja alterar a numeração:", reply_markup=teclado_cancelar, parse_mode="HTML")
-    await state.set_state(GerenciarFilaFluxo.aguardando_posicao_numeracao)
-
-@dp.message(GerenciarFilaFluxo.aguardando_posicao_numeracao)
-async def pedir_novo_numero_fila(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
-        await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
-        return
-        
-    posicao = int(message.text) - 1
-    fila_data = ler_fila_postagens()
-    fila = fila_data.get("fila", [])
-    
-    if 0 <= posicao < len(fila):
-        await state.update_data(posicao_numeracao=posicao)
-        await message.answer(f"O vídeo está na posição {posicao+1}. Qual será o <b>NOVO NÚMERO</b> deste vídeo?", reply_markup=teclado_cancelar, parse_mode="HTML")
-        await state.set_state(GerenciarFilaFluxo.aguardando_nova_numeracao)
-    else:
-        await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
-
-@dp.message(GerenciarFilaFluxo.aguardando_nova_numeracao)
-async def salvar_nova_numeracao_fila(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
-        await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
-        return
-        
-    novo_numero_inicial = int(message.text)
+@dp.message(GerenciarFilaFluxo.aguardando_nova_legenda)
+async def salvar_nova_legenda_fila(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    posicao = data.get("posicao_numeracao")
+    posicao = data.get("posicao_edicao")
+    nova_legenda = message.html_text 
     
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
-    import re
     
     if 0 <= posicao < len(fila):
-        if EXIBIR_LOGS: logger.info(f"🔄 Iniciando renumeração em cascata a partir da posição {posicao+1} com o número {novo_numero_inicial}...")
-        
-        numero_atual_cascata = novo_numero_inicial
-        
-        # Percorre a fila apenas a partir do vídeo selecionado para baixo
-        for i in range(posicao, len(fila)):
-            legenda_antiga = fila[i].get("legenda", "")
-            nova_legenda = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{numero_atual_cascata}', legenda_antiga, count=1)
-            fila[i]["legenda"] = nova_legenda
-            if EXIBIR_LOGS: logger.info(f"✏️ Fila: Posição {i+1} atualizada para Vídeo {numero_atual_cascata}.")
-            numero_atual_cascata += 1
-            
+        fila[posicao]["legenda"] = nova_legenda
         salvar_fila_postagens(fila_data)
+        if EXIBIR_LOGS: logger.info(f"✏️ Fila: Legenda do vídeo na posição {posicao+1} atualizada.")
         
-        # Sincroniza o contador global para que a próxima postagem assuma o último número +1
-        async with _lock_contador:
-            salvar_contador(numero_atual_cascata)
-        
-        if EXIBIR_LOGS: logger.info(f"✅ Renumeração concluída! Contador global ajustado para a próxima postagem virgem: {numero_atual_cascata}.")
-        
-        await message.answer(f"✅ Numeração atualizada em cascata a partir do vídeo {novo_numero_inicial} com sucesso!", reply_markup=obter_teclado_principal())
-        await state.clear()
+        await message.answer("✅ Legenda atualizada com sucesso!")
+        await menu_gerenciar_fila(message, state)
     else:
-        await message.answer("Erro de sincronização. Operação cancelada.", reply_markup=obter_teclado_principal())
-        await state.clear()
+        await message.answer("Erro de sincronização. Operação cancelada.")
+        await menu_gerenciar_fila(message, state)
 
 @dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Mover Posição ↕️")
 async def pedir_reordenar_fila(message: types.Message, state: FSMContext):
@@ -2452,11 +2409,74 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         
         agendar_fila_postagens() 
         
-        await message.answer(f"✅ Vídeo movido para a posição {nova_posicao+1}!\n🔄 A numeração de toda a fila foi corrigida em cascata e os horários recalculados com sucesso.", reply_markup=obter_teclado_principal())
-        await state.clear()
+        await message.answer(f"✅ Vídeo movido para a posição {nova_posicao+1}!\n🔄 A numeração de toda a fila foi corrigida em cascata e os horários recalculados com sucesso.")
+        await menu_gerenciar_fila(message, state)
     else:
-        await message.answer("Erro de sincronização. Operação cancelada.", reply_markup=obter_teclado_principal())
-        await state.clear()
+        await message.answer("Erro de sincronização. Operação cancelada.")
+        await menu_gerenciar_fila(message, state)
+
+@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Editar Numeração 🔢")
+async def pedir_edicao_numeracao_fila(message: types.Message, state: FSMContext):
+    await message.answer("Digite o <b>NÚMERO</b> da posição do vídeo na fila que deseja alterar a numeração:", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(GerenciarFilaFluxo.aguardando_posicao_numeracao)
+
+@dp.message(GerenciarFilaFluxo.aguardando_posicao_numeracao)
+async def pedir_novo_numero_fila(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
+        return
+        
+    posicao = int(message.text) - 1
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    
+    if 0 <= posicao < len(fila):
+        await state.update_data(posicao_numeracao=posicao)
+        await message.answer(f"O vídeo está na posição {posicao+1}. Qual será o <b>NOVO NÚMERO</b> deste vídeo?", reply_markup=teclado_cancelar, parse_mode="HTML")
+        await state.set_state(GerenciarFilaFluxo.aguardando_nova_numeracao)
+    else:
+        await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
+
+@dp.message(GerenciarFilaFluxo.aguardando_nova_numeracao)
+async def salvar_nova_numeracao_fila(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
+        return
+        
+    novo_numero_inicial = int(message.text)
+    data = await state.get_data()
+    posicao = data.get("posicao_numeracao")
+    
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    import re
+    
+    if 0 <= posicao < len(fila):
+        if EXIBIR_LOGS: logger.info(f"🔄 Iniciando renumeração em cascata a partir da posição {posicao+1} com o número {novo_numero_inicial}...")
+        
+        numero_atual_cascata = novo_numero_inicial
+        
+        # Percorre a fila apenas a partir do vídeo selecionado para baixo
+        for i in range(posicao, len(fila)):
+            legenda_antiga = fila[i].get("legenda", "")
+            nova_legenda = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{numero_atual_cascata}', legenda_antiga, count=1)
+            fila[i]["legenda"] = nova_legenda
+            if EXIBIR_LOGS: logger.info(f"✏️ Fila: Posição {i+1} atualizada para Vídeo {numero_atual_cascata}.")
+            numero_atual_cascata += 1
+            
+        salvar_fila_postagens(fila_data)
+        
+        # Sincroniza o contador global para que a próxima postagem assuma o último número +1
+        async with _lock_contador:
+            salvar_contador(numero_atual_cascata)
+        
+        if EXIBIR_LOGS: logger.info(f"✅ Renumeração concluída! Contador global ajustado para a próxima postagem virgem: {numero_atual_cascata}.")
+        
+        await message.answer(f"✅ Numeração atualizada em cascata a partir do vídeo {novo_numero_inicial} com sucesso!")
+        await menu_gerenciar_fila(message, state)
+    else:
+        await message.answer("Erro de sincronização. Operação cancelada.")
+        await menu_gerenciar_fila(message, state)
 
 @dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Publicar Agora 🚀")
 async def pedir_posicao_publicar(message: types.Message, state: FSMContext):
@@ -2511,8 +2531,8 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Falha no disparo imediato: {e}")
             await msg_status.delete()
-            await message.answer(f"Ocorreu um erro técnico ao publicar o vídeo: {e}", reply_markup=obter_teclado_principal())
-            await state.clear()
+            await message.answer(f"Ocorreu um erro técnico ao publicar o vídeo: {e}")
+            await menu_gerenciar_fila(message, state)
             return
             
         await msg_status.delete()
@@ -2548,11 +2568,11 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
             # 6. Recálculo da fragmentação da hora para alocar o buraco deixado pela exclusão
             agendar_fila_postagens()
             
-            await message.answer(f"🚀 Publicação realizada com sucesso!\n🔄 A fila foi renumerada e os horários restantes de hoje foram recalculados para absorver o novo espaçamento.", reply_markup=obter_teclado_principal())
-            await state.clear()
+            await message.answer(f"🚀 Publicação realizada com sucesso!\n🔄 A fila foi renumerada e os horários restantes de hoje foram recalculados para absorver o novo espaçamento.")
+            await menu_gerenciar_fila(message, state)
     else:
-        await message.answer("Erro de sincronização ou posição inválida. Operação cancelada.", reply_markup=obter_teclado_principal())
-        await state.clear()
+        await message.answer("Erro de sincronização ou posição inválida. Operação cancelada.")
+        await menu_gerenciar_fila(message, state)
 
 # --- MOTOR DE PROCESSAMENTO DO ESPIÃO ---
 def ler_fila_clonagem():
