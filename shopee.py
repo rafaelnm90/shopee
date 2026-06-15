@@ -2199,6 +2199,7 @@ class GerenciarFilaFluxo(StatesGroup):
     aguardando_posicao_numeracao = State()
     aguardando_nova_numeracao = State()
     aguardando_posicao_publicar = State()
+    aguardando_confirmacao_publicar = State()
 
 teclado_gerenciar_fila = ReplyKeyboardMarkup(
     keyboard=[
@@ -2539,7 +2540,7 @@ async def pedir_posicao_publicar(message: types.Message, state: FSMContext):
     await state.set_state(GerenciarFilaFluxo.aguardando_posicao_publicar)
 
 @dp.message(GerenciarFilaFluxo.aguardando_posicao_publicar)
-async def processar_publicacao_imediata(message: types.Message, state: FSMContext):
+async def preparar_publicacao_imediata(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
         await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
         return
@@ -2547,9 +2548,44 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
     posicao = int(message.text) - 1
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
-    import re
     
     if 0 <= posicao < len(fila):
+        import re
+        legenda = fila[posicao].get("legenda", "")
+        if legenda:
+            legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
+            resumo = legenda_limpa.split('\n')[0][:50]
+        else:
+            resumo = "Vídeo sem descrição"
+            
+        await state.update_data(posicao_publicar=posicao)
+        if EXIBIR_LOGS: logger.info(f"🚀 Fila: Preparando publicação antecipada para a posição {posicao+1}.")
+        
+        teclado_confirmacao_publicar = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Publicar Vídeo 🚀"), KeyboardButton(text="Cancelar ❌")]],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        
+        await message.answer(f"Você selecionou o vídeo na posição <b>{posicao+1}</b>:\n📝 <i>{resumo}...</i>\n\nTem certeza de que deseja publicar este vídeo agora mesmo e recalcular o restante da fila?", reply_markup=teclado_confirmacao_publicar, parse_mode="HTML")
+        await state.set_state(GerenciarFilaFluxo.aguardando_confirmacao_publicar)
+    else:
+        await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
+
+@dp.message(GerenciarFilaFluxo.aguardando_confirmacao_publicar)
+async def processar_publicacao_imediata(message: types.Message, state: FSMContext):
+    if message.text != "Publicar Vídeo 🚀":
+        await message.answer("Por favor, utilize os botões abaixo para aprovar ou cancelar a publicação.")
+        return
+
+    data = await state.get_data()
+    posicao = data.get("posicao_publicar")
+
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    import re
+    
+    if posicao is not None and 0 <= posicao < len(fila):
         item = fila.pop(posicao)
         
         # 1. Extrai o número correto (o que deveria ser o próximo a nível global)
