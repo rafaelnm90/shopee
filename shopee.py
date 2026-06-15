@@ -1556,16 +1556,36 @@ async def menu_espiao_principal(message: types.Message, state: FSMContext):
 async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("📡 Acessando a lista de grupos vigiados do Espião...")
-    dados = ler_alvos_espiao()
+    
+    # ✅ NOVO: Leitura direta e atualizada do arquivo para pegar o status real do Userbot
+    try:
+        with open("alvos_espiao.json", "r") as f:
+            dados = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        dados = {"alvos": [], "canal_destino": None, "status_alvos": {}}
+        
     alvos = dados.get("alvos", [])
     destino = dados.get("canal_destino", "Não definido")
+    status_alvos = dados.get("status_alvos", {})
     
     texto = f"📡 <b>Gestão de Grupos Vigiados</b>\n\n"
     texto += f"🎯 <b>Canal de Destino:</b> {destino}\n\n"
     texto += "<b>Na Escuta:</b>\n"
+    
     if alvos:
         for i, alvo in enumerate(alvos, 1):
-            texto += f"   {i}. {alvo}\n"
+            info = status_alvos.get(alvo, {})
+            status_ico = "⏳" # Status pendente enquanto o Userbot não verifica
+            detalhe = alvo
+            
+            if info.get("status") == "ok":
+                status_ico = "✅"
+                detalhe = f"{info.get('nome')} <code>({alvo})</code>"
+            elif info.get("status") == "erro":
+                status_ico = "❌"
+                detalhe = f"<code>{alvo}</code> - <i>Acesso negado/Link inválido</i>"
+                
+            texto += f"   {i}. {status_ico} {detalhe}\n"
     else:
         texto += "   <i>Nenhum grupo sendo monitorado no momento.</i>\n"
         
