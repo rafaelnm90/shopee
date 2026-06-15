@@ -1579,15 +1579,32 @@ async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.aguardando_novo_alvo)
 async def salvar_alvo_espiao(message: types.Message, state: FSMContext):
-    novo_alvo = message.text.strip()
+    import re
+    entrada_bruta = message.text.strip()
+    alvo_formatado = entrada_bruta
+    
+    # 🧹 Higienizador Inteligente: Formata IDs numéricos automaticamente
+    # Verifica se o usuário digitou apenas números (com ou sem o sinal de menos)
+    if re.match(r'^-?\d+$', entrada_bruta):
+        # Remove o sinal de menos se houver, para padronizar a análise
+        so_numeros = entrada_bruta.replace("-", "")
+        
+        # Garante que o ID comece obrigatoriamente com -100
+        if not so_numeros.startswith("100"):
+            alvo_formatado = f"-100{so_numeros}"
+        else:
+            alvo_formatado = f"-{so_numeros}"
+            
     dados = ler_alvos_espiao()
-    if novo_alvo not in dados["alvos"]:
-        dados["alvos"].append(novo_alvo)
+    
+    # Verifica se o alvo formatado já existe na lista
+    if alvo_formatado not in dados["alvos"]:
+        dados["alvos"].append(alvo_formatado)
         salvar_alvos_espiao(dados)
-        if EXIBIR_LOGS: logger.info(f"✅ Novo alvo do espião adicionado: {novo_alvo}")
-        await message.answer(f"✅ Alvo '{novo_alvo}' adicionado ao radar!")
+        if EXIBIR_LOGS: logger.info(f"✅ Novo alvo do espião padronizado e adicionado: {alvo_formatado}")
+        await message.answer(f"✅ Alvo cadastrado com sucesso no formato padrão:\n<b>{alvo_formatado}</b>", parse_mode="HTML")
     else:
-        await message.answer("⚠️ Este alvo já está na lista.")
+        await message.answer(f"⚠️ O alvo <b>{alvo_formatado}</b> já está na sua lista de monitoramento.", parse_mode="HTML")
         
     # Recarrega o menu mantendo o usuário na tela do espião
     await menu_grupos_vigiados(message, state)
