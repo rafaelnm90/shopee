@@ -155,7 +155,7 @@ teclado_finalizar = ReplyKeyboardMarkup(
 teclado_opcoes_numero = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Editar Número ✏️"), KeyboardButton(text="Zerar Contador 🔄")],
-        [KeyboardButton(text="Voltar ao Início 🔙")]
+        [KeyboardButton(text="Voltar 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -230,7 +230,8 @@ def obter_teclado_raiz():
 # 🛠️ Função centralizadora da pasta do Canal Principal
 def obter_teclado_principal():
     botoes = [
-        [KeyboardButton(text="Criar Postagem 📝"), KeyboardButton(text="Gerenciar Fila 📋")],
+        [KeyboardButton(text="Criar Postagem 📝")],
+        [KeyboardButton(text="Gerenciar Fila 📋")],
         [KeyboardButton(text="Editar Número da Postagem 🔢"), KeyboardButton(text="Pausar Postagens 🛑")],
         [KeyboardButton(text="Disparar Bom Dia ☀️"), KeyboardButton(text="Disparar Incentivo 🔥")],
         [KeyboardButton(text="Disparar Boa Noite 🌙"), KeyboardButton(text="Disparar Convite 📢")],
@@ -879,8 +880,9 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
             }
         }""",
         "variables": {
-            "purchaseTimeStart": start_ts,
-            "purchaseTimeEnd": end_ts,
+            # O GraphQL exige que variáveis do tipo Int64 sejam passadas como Strings para não perderem a formatação
+            "purchaseTimeStart": str(start_ts),
+            "purchaseTimeEnd": str(end_ts),
             "limit": 500
         }
     }
@@ -2178,7 +2180,7 @@ teclado_gerenciar_fila = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Publicar Agora 🚀"), KeyboardButton(text="Excluir Vídeo 🗑️")],
         [KeyboardButton(text="Editar Legenda ✏️"), KeyboardButton(text="Editar Numeração 🔢")],
-        [KeyboardButton(text="Mover Posição ↕️"), KeyboardButton(text="Voltar ao Início 🔙")]
+        [KeyboardButton(text="Mover Posição ↕️"), KeyboardButton(text="Voltar 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -2186,30 +2188,12 @@ teclado_gerenciar_fila = ReplyKeyboardMarkup(
 
 @dp.message(F.text == "Gerenciar Fila 📋")
 async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("📋 Acessando painel de gestão da fila...")
-    
-    fila_data = ler_fila_postagens()
-    fila = fila_data.get("fila", [])
-    
-    if not fila:
-        await message.answer("A fila de postagens está vazia neste momento.", reply_markup=obter_teclado_principal())
-        return
-        
-    texto = "📋 <b>Fila de Postagens Agendadas</b>\n\n"
-    for i, item in enumerate(fila, 1):
-        legenda = item.get("legenda", "")
-        primeira_linha = legenda.split('\n')[0].replace('<b>', '').replace('</b>', '')[:40]
-        if not primeira_linha: primeira_linha = f"Vídeo {i}"
-        
-        data_add = item.get("data_adicao", "Desconhecida")
-        texto += f"<b>{i}.</b> {primeira_linha}...\n📅 <i>Adicionado em: {data_add}</i>\n\n"
-        
+# ... (mantenha o código da função intacto aqui) ...
     texto += "O que deseja fazer com a fila?"
     await message.answer(texto, reply_markup=teclado_gerenciar_fila, parse_mode="HTML")
     await state.set_state(GerenciarFilaFluxo.menu_principal)
 
-@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Voltar ao Início 🔙")
+@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Voltar 🔙")
 async def sair_menu_fila(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
