@@ -2191,6 +2191,7 @@ async def salvar_horario_rotina(message: types.Message, state: FSMContext):
 class GerenciarFilaFluxo(StatesGroup):
     menu_principal = State()
     aguardando_posicao_excluir = State()
+    aguardando_confirmacao_exclusao = State()
     aguardando_posicao_editar = State()
     aguardando_nova_legenda = State()
     aguardando_posicao_reordenar = State()
@@ -2254,7 +2255,7 @@ async def pedir_exclusao_fila(message: types.Message, state: FSMContext):
     await state.set_state(GerenciarFilaFluxo.aguardando_posicao_excluir)
 
 @dp.message(GerenciarFilaFluxo.aguardando_posicao_excluir)
-async def processar_exclusao_fila(message: types.Message, state: FSMContext):
+async def confirmar_posicao_exclusao_fila(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
         await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
         return
@@ -2264,6 +2265,41 @@ async def processar_exclusao_fila(message: types.Message, state: FSMContext):
     fila = fila_data.get("fila", [])
     
     if 0 <= posicao < len(fila):
+        import re
+        legenda = fila[posicao].get("legenda", "")
+        if legenda:
+            legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
+            resumo = legenda_limpa.split('\n')[0][:50]
+        else:
+            resumo = "Vídeo sem descrição"
+            
+        await state.update_data(posicao_excluir=posicao)
+        if EXIBIR_LOGS: logger.info(f"🗑️ Fila: Solicitação de exclusão para posição {posicao+1} iniciada. Aguardando confirmação.")
+        
+        teclado_confirmacao_exclusao = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Aprovar Exclusão ✅"), KeyboardButton(text="Cancelar ❌")]],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        
+        await message.answer(f"Você selecionou o vídeo na posição <b>{posicao+1}</b>:\n📝 <i>{resumo}...</i>\n\nTem certeza de que deseja excluir este vídeo da fila?", reply_markup=teclado_confirmacao_exclusao, parse_mode="HTML")
+        await state.set_state(GerenciarFilaFluxo.aguardando_confirmacao_exclusao)
+    else:
+        await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
+
+@dp.message(GerenciarFilaFluxo.aguardando_confirmacao_exclusao)
+async def processar_exclusao_fila(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar Exclusão ✅":
+        await message.answer("Por favor, utilize os botões abaixo para aprovar ou cancelar a exclusão.")
+        return
+        
+    data = await state.get_data()
+    posicao = data.get("posicao_excluir")
+    
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    
+    if posicao is not None and 0 <= posicao < len(fila):
         item_removido = fila.pop(posicao)
         caminho_video = item_removido.get("caminho_video")
         
@@ -2271,7 +2307,7 @@ async def processar_exclusao_fila(message: types.Message, state: FSMContext):
             ainda_usado = any(x.get("caminho_video") == caminho_video for x in fila)
             if not ainda_usado:
                 os.remove(caminho_video)
-                if EXIBIR_LOGS: logger.info("🧹 Fila: Ficheiro físico excluído após remoção manual.")
+                if EXIBIR_LOGS: logger.info("🧹 Fila: Ficheiro físico excluído após remoção manual com confirmação dupla.")
                 
         fila_data["fila"] = fila
         salvar_fila_postagens(fila_data)
@@ -2282,7 +2318,8 @@ async def processar_exclusao_fila(message: types.Message, state: FSMContext):
         await message.answer("✅ Vídeo excluído com sucesso e horários recalculados!")
         await menu_gerenciar_fila(message, state)
     else:
-        await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
+        await message.answer("Erro de sincronização. Operação cancelada.")
+        await menu_gerenciar_fila(message, state)
 
 @dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Editar Legenda ✏️")
 async def pedir_edicao_fila(message: types.Message, state: FSMContext):
@@ -2344,8 +2381,17 @@ async def pedir_nova_posicao_fila(message: types.Message, state: FSMContext):
     fila = fila_data.get("fila", [])
     
     if 0 <= posicao_atual < len(fila):
+        import re
+        legenda = fila[posicao_atual].get("legenda", "")
+        if legenda:
+            legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
+            resumo = legenda_limpa.split('\n')[0][:50]
+        else:
+            resumo = "Vídeo sem descrição"
+            
         await state.update_data(posicao_origem=posicao_atual)
-        await message.answer(f"O vídeo está na posição {posicao_atual+1}. Para qual posição deseja enviá-lo? (Ex: 1 para o topo)", reply_markup=teclado_cancelar)
+        if EXIBIR_LOGS: logger.info(f"↕️ Fila: Posição de origem {posicao_atual+1} selecionada para mover.")
+        await message.answer(f"O vídeo selecionado na posição <b>{posicao_atual+1}</b> é:\n📝 <i>{resumo}...</i>\n\nPara qual posição deseja enviá-lo? (Ex: 1 para o topo)", reply_markup=teclado_cancelar, parse_mode="HTML")
         await state.set_state(GerenciarFilaFluxo.aguardando_nova_posicao)
     else:
         await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
@@ -2431,8 +2477,17 @@ async def pedir_novo_numero_fila(message: types.Message, state: FSMContext):
     fila = fila_data.get("fila", [])
     
     if 0 <= posicao < len(fila):
+        import re
+        legenda = fila[posicao].get("legenda", "")
+        if legenda:
+            legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
+            resumo = legenda_limpa.split('\n')[0][:50]
+        else:
+            resumo = "Vídeo sem descrição"
+            
         await state.update_data(posicao_numeracao=posicao)
-        await message.answer(f"O vídeo está na posição {posicao+1}. Qual será o <b>NOVO NÚMERO</b> deste vídeo?", reply_markup=teclado_cancelar, parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info(f"🔢 Fila: Posição {posicao+1} selecionada para edição de numeração.")
+        await message.answer(f"O vídeo selecionado na posição <b>{posicao+1}</b> é:\n📝 <i>{resumo}...</i>\n\nQual será o <b>NOVO NÚMERO</b> deste vídeo?", reply_markup=teclado_cancelar, parse_mode="HTML")
         await state.set_state(GerenciarFilaFluxo.aguardando_nova_numeracao)
     else:
         await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
