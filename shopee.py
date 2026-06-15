@@ -177,7 +177,7 @@ teclado_confirmar_zerar = ReplyKeyboardMarkup(
 teclado_configuracoes_gerais = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Mensagens de Rotina ⏰"), KeyboardButton(text="SPAM em Grupos 📢")],
-        [KeyboardButton(text="Voltar ao Início 🔙")]
+        [KeyboardButton(text="Voltar 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -2401,19 +2401,48 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
     texto += f"Total de vídeos agendados: <b>{len(fila)}</b>\n\n"
     
     if fila:
-        if EXIBIR_LOGS: logger.info("🔍 Lendo itens da fila para montagem do painel visual com higienização de tags...")
+        if EXIBIR_LOGS: logger.info("🔍 Lendo itens da fila para montagem do painel visual enriquecido...")
         import re
+        from datetime import datetime
+        
+        dados_pausa = ler_pausa_programada()
+        is_pausado = dados_pausa.get("ativa", False)
+        agora = datetime.now(fuso_horario)
+        hoje_str = agora.strftime("%Y-%m-%d")
+        
         for i, item in enumerate(fila, 1):
             legenda = item.get("legenda", "")
-            if legenda:
-                # Extrai todas as tags HTML para evitar corrupção sintática no Telegram
-                legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
-                resumo = legenda_limpa.split('\n')[0][:30]
+            data_adicao_str = item.get("data_adicao", "")
+            
+            # Extrai Número do Vídeo e Nome do Item da Legenda HTML
+            match_video = re.search(r'(?i)Vídeo\s+\d+', legenda)
+            match_item = re.search(r'📦\s*Item:\s*([^\n<]+)', legenda)
+            
+            nome_video = match_video.group(0).title() if match_video else "Vídeo ?"
+            nome_item = match_item.group(1).strip() if match_item else "Sem descrição"
+            
+            # Formata a Data para o padrão brasileiro
+            if data_adicao_str:
+                try:
+                    data_br = datetime.strptime(data_adicao_str, "%Y-%m-%d").strftime("%d/%m/%Y")
+                except:
+                    data_br = "Data desconhecida"
             else:
-                resumo = "Vídeo sem descrição"
-            texto += f"<b>{i}.</b> {resumo}...\n"
-        texto += "\nO que deseja fazer com a fila?"
-        if EXIBIR_LOGS: logger.info("✅ Painel visual da fila montado e sanitizado com sucesso.")
+                data_br = "Data desconhecida"
+                
+            # Define a Previsão de Postagem
+            if is_pausado:
+                status_previsao = "Pausado 🛑"
+            elif data_adicao_str < hoje_str:
+                status_previsao = "Hoje 🟢"
+            else:
+                status_previsao = "Amanhã 🟡"
+                
+            texto += f"<b>{i}. {nome_video}</b> | 📦 {nome_item[:25]}...\n"
+            texto += f"   └ Criado em: {data_br} | Previsão: {status_previsao}\n\n"
+            
+        texto += "O que deseja fazer com a fila?"
+        if EXIBIR_LOGS: logger.info("✅ Painel visual da fila montado com metadados com sucesso.")
     else:
         texto += "A sua fila está completamente vazia no momento.\nO que deseja fazer?"
         if EXIBIR_LOGS: logger.info("⚠️ Fila vazia detectada ao montar o painel.")
