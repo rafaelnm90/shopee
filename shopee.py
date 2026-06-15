@@ -1585,10 +1585,12 @@ async def salvar_alvo_espiao(message: types.Message, state: FSMContext):
         dados["alvos"].append(novo_alvo)
         salvar_alvos_espiao(dados)
         if EXIBIR_LOGS: logger.info(f"✅ Novo alvo do espião adicionado: {novo_alvo}")
-        await message.answer(f"Alvo '{novo_alvo}' adicionado ao radar!", reply_markup=obter_teclado_principal())
+        await message.answer(f"✅ Alvo '{novo_alvo}' adicionado ao radar!")
     else:
-        await message.answer("Este alvo já está na lista.", reply_markup=obter_teclado_principal())
-    await state.clear()
+        await message.answer("⚠️ Este alvo já está na lista.")
+        
+    # Recarrega o menu mantendo o usuário na tela do espião
+    await menu_grupos_vigiados(message, state)
 
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Remover Concorrente 🗑️")
 async def pedir_remocao_espiao(message: types.Message, state: FSMContext):
@@ -1615,10 +1617,12 @@ async def processar_remocao_espiao(message: types.Message, state: FSMContext):
         removido = dados["alvos"].pop(indice)
         salvar_alvos_espiao(dados)
         if EXIBIR_LOGS: logger.info(f"🗑️ Alvo do espião removido: {removido}")
-        await message.answer(f"Alvo '{removido}' removido do radar!", reply_markup=obter_teclado_principal())
+        await message.answer(f"✅ Alvo '{removido}' removido do radar!")
     else:
-        await message.answer("Número inválido. Ação cancelada.", reply_markup=obter_teclado_principal())
-    await state.clear()
+        await message.answer("⚠️ Número inválido. Ação cancelada.")
+        
+    # Recarrega o menu mantendo o usuário na tela do espião
+    await menu_grupos_vigiados(message, state)
 
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Definir Canal de Destino 🎯")
 async def pedir_destino_espiao(message: types.Message, state: FSMContext):
@@ -1632,8 +1636,10 @@ async def salvar_destino_espiao(message: types.Message, state: FSMContext):
     dados["canal_destino"] = destino
     salvar_alvos_espiao(dados)
     if EXIBIR_LOGS: logger.info(f"🎯 Canal de destino do espião atualizado para: {destino}")
-    await message.answer("Canal de destino configurado com sucesso!", reply_markup=obter_teclado_principal())
-    await state.clear()
+    await message.answer("✅ Canal de destino configurado com sucesso!")
+    
+    # Recarrega o menu mantendo o usuário na tela do espião
+    await menu_grupos_vigiados(message, state)
 
 # ✅ NOVOS INTERRUPTORES INTERNOS DE PAUSA
 @dp.message(ConfigDivulgacao.menu_principal, F.text.in_(["Pausar SPAM ⏸️", "Retomar SPAM ▶️"]))
