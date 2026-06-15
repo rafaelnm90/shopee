@@ -837,15 +837,17 @@ def agendar_tarefas_diarias():
     agendar_fila_postagens()
 
 # 5. HANDLERS DE COMANDO E INTERAÇÃO
-@dp.message(Command("start"))
-async def comando_start(message: types.Message):
+@dp.message(Command("start"), StateFilter("*"))
+async def comando_start(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
+    await state.clear()
     if EXIBIR_LOGS: logger.info("⌨️ Iniciando o bot no Menu Raiz.")
     await message.answer("🏠 Painel de Controle Inicial. Escolha uma área para gerenciar:", reply_markup=obter_teclado_raiz())
 
-@dp.message(F.text == "Canal Principal 📺")
-async def menu_canal_principal(message: types.Message):
+@dp.message(F.text == "Canal Principal 📺", StateFilter("*"))
+async def menu_canal_principal(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
+    await state.clear()
     if EXIBIR_LOGS: logger.info("📂 Acessando a pasta do Canal Principal.")
     await message.answer("📺 <b>Menu do Canal Principal</b>\nGerencie as postagens e rotinas abaixo:", reply_markup=obter_teclado_principal(), parse_mode="HTML")
 
@@ -925,9 +927,10 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
         if EXIBIR_LOGS: logger.error(f"❌ Erro crítico no motor financeiro: {e}")
     return []
 
-@dp.message(F.text == "Relatório Geral 📊")
-async def gerar_relatorio_completo(message: types.Message):
+@dp.message(F.text == "Relatório Geral 📊", StateFilter("*"))
+async def gerar_relatorio_completo(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
+    await state.clear()
     msg_status = await message.answer("📊 Extraindo métricas do servidor e sincronizando API Financeira... Aguarde ⏳")
     if EXIBIR_LOGS: logger.info("🚀 Iniciando auditoria completa do sistema e finanças...")
     
@@ -1073,10 +1076,11 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Ação cancelada e memória limpa. Voltando ao menu...", reply_markup=obter_teclado_principal())
 
-@dp.message(Command("postar"))
-@dp.message(F.text == "Criar Postagem 📝")
+@dp.message(Command("postar"), StateFilter("*"))
+@dp.message(F.text == "Criar Postagem 📝", StateFilter("*"))
 async def iniciar_postagem(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
+    await state.clear()
     if EXIBIR_LOGS: logger.info("🎬 Iniciando postagem com IA Copywriter.")
     await message.answer("Excelente! Envie o vídeo do produto e eu criarei a legenda de vendas para você.", reply_markup=teclado_cancelar)
     await state.set_state(PostagemFluxo.aguardando_video)
@@ -1425,9 +1429,10 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     await state.clear()
 
 # ✅ Handlers para Gerenciar a Numeração
-@dp.message(F.text == "Editar Número da Postagem 🔢")
-async def menu_editar_numero(message: types.Message):
+@dp.message(F.text == "Editar Número da Postagem 🔢", StateFilter("*"))
+async def menu_editar_numero(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
+    await state.clear()
     numero_atual = ler_contador()
     await message.answer(f"O próximo vídeo será o <b>{numero_atual}</b>.\nEscolha uma ação abaixo:", reply_markup=teclado_opcoes_numero, parse_mode="HTML")
 
@@ -1472,9 +1477,10 @@ async def salvar_novo_numero(message: types.Message, state: FSMContext):
     else:
         await message.answer("Por favor, digite apenas números. Exemplo: 50", reply_markup=teclado_cancelar)
 
-@dp.message(F.text == "Configurações Gerais ⚙️")
-async def menu_configuracoes(message: types.Message):
+@dp.message(F.text == "Configurações Gerais ⚙️", StateFilter("*"))
+async def menu_configuracoes(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
+    await state.clear()
     if EXIBIR_LOGS: logger.info("⚙️ Acessando Dashboard de Configurações Gerais.")
     
     dados_div = ler_alvos_divulgacao()
@@ -1492,36 +1498,43 @@ async def menu_configuracoes(message: types.Message):
     )
     await message.answer(texto, reply_markup=teclado_configuracoes_gerais, parse_mode="HTML")
 
-@dp.message(F.text == "Outros Canais 🗂️")
-async def menu_outros_canais(message: types.Message):
+@dp.message(F.text == "Outros Canais 🗂️", StateFilter("*"))
+async def menu_outros_canais(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
+    await state.clear()
     if EXIBIR_LOGS: logger.info("🗂️ Acessando a gaveta de Outros Canais.")
     await message.answer("Selecione o robô ou módulo secundário que deseja gerir:", reply_markup=teclado_outros_canais)
 
-@dp.message(F.text == "Voltar ao Início 🔙")
+@dp.message(F.text == "Voltar ao Início 🔙", StateFilter("*"))
 async def voltar_inicio(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     await message.answer("🏠 Voltando ao Painel Inicial.", reply_markup=obter_teclado_raiz())
 
-@dp.message(F.text == "Voltar aos Canais 🔙")
+@dp.message(F.text == "Voltar aos Canais 🔙", StateFilter("*"))
 async def voltar_outros_canais(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     await message.answer("Selecione o robô ou módulo secundário que deseja gerir:", reply_markup=teclado_outros_canais)
 
-@dp.message(F.text == "Voltar às Configs 🔙")
+@dp.message(F.text == "Voltar às Configs 🔙", StateFilter("*"))
 async def voltar_para_configuracoes(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🔙 Retornando à Central de Configurações Gerais.")
     await state.clear()
-    await menu_configuracoes(message)
+    await menu_configuracoes(message, state)
 
-@dp.message(F.text == "Voltar ao Menu Espião 🔙")
+@dp.message(F.text == "Voltar ao Menu Espião 🔙", StateFilter("*"))
 async def voltar_menu_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     await message.answer("🕵️ <b>Painel Principal do Espião</b>\nO que deseja acessar?", reply_markup=teclado_menu_espiao, parse_mode="HTML")
+
+@dp.message(F.text == "Voltar 🔙", StateFilter("*"))
+async def voltar_configs(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
 
 # --- HANDLERS DO PAINEL DO ESPIÃO 🕵️ ---
 @dp.message(F.text == "Espião Afiliados 🕵️")
@@ -1655,9 +1668,10 @@ async def voltar_pausa_para_inicio(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Operação cancelada. Voltando ao menu principal.", reply_markup=obter_teclado_principal())
 
-@dp.message(F.text == "Pausar Postagens 🛑")
+@dp.message(F.text == "Pausar Postagens 🛑", StateFilter("*"))
 async def iniciar_pausa_programada(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
+    await state.clear()
     dados_pausa = ler_pausa_programada()
     
     if dados_pausa.get("ativa"):
