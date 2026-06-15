@@ -342,6 +342,27 @@ def agendar_fila_postagens():
             
     limite_inicio_hoje = agora.replace(hour=hora_inicio, minute=min_inicio, second=0, microsecond=0) + timedelta(minutes=5)
     limite_fim_hoje = agora.replace(hour=hora_fim, minute=min_fim, second=0, microsecond=0) - timedelta(minutes=5)
+    dados_rotina = ler_config_rotina()
+    
+    # 🚀 LÓGICA DINÂMICA: Lê os limites exatos configurados pelo administrador no painel
+    hora_fim_bom_dia = dados_rotina.get("bom_dia", {}).get("fim", 9)
+    hora_inicio_boa_noite = dados_rotina.get("boa_noite", {}).get("inicio", 21)
+    
+    if EXIBIR_LOGS: logger.info("🚀 Construindo miolo útil dinâmico da fila de vídeos baseado nas configurações do painel...")
+    
+    horarios_ocupados = []
+    for job in scheduler.get_jobs():
+        proxima_execucao = getattr(job, 'next_run_time', None)
+        if proxima_execucao and not job.id.startswith('job_fila_postagem_'):
+            horarios_ocupados.append(proxima_execucao.astimezone(fuso_horario))
+            if EXIBIR_LOGS: logger.info(f"🔎 Radar de colisão validou o horário da rotina '{job.id}'.")
+            
+    # Fronteira Inicial: Exatamente na hora de término da janela do Bom Dia (ex: se fim=10, começa 10:00:00)
+    limite_inicio_hoje = agora.replace(hour=hora_fim_bom_dia, minute=0, second=0, microsecond=0)
+    
+    # Fronteira Final: Exatamente no último minuto útil antes de começar o Boa Noite (ex: se inicio=20, termina 19:59:59)
+    hora_limite_final = hora_inicio_boa_noite - 1 if hora_inicio_boa_noite > 0 else 23
+    limite_fim_hoje = agora.replace(hour=hora_limite_final, minute=59, second=59, microsecond=0)
     
     if agora >= limite_fim_hoje:
         if EXIBIR_LOGS: logger.warning("⚠️ Janela de postagem de hoje já encerrou. Fila aguardará até amanhã.")
@@ -401,17 +422,46 @@ def agendar_fila_postagens():
         minuto_atual_busca += timedelta(minutes=espacamento_medio)
 
 async def executar_postagem_fila(item_id):
-    if EXIBIR_LOGS: logger.info(f"📤 Disparando postagem assíncrona programada...")
+    if EXIBIR_LOGS: logger.info(f"📤 Iniciando processo de extração de vídeo da fila...")
+    
+    agora = datetime.now(fuso_horario)
+    hoje_str = agora.strftime("%Y-%m-%d")
+    
+    # 🚀 CORREÇÃO: Trava de segurança baseada nos limites dinâmicos do painel
+    dados_rotina = ler_config_rotina()
+    hora_abertura_videos = dados_rotina.get("bom_dia", {}).get("fim", 9)
+    hora_fechamento_videos = dados_rotina.get("boa_noite", {}).get("inicio", 21)
+    
+    # Trava Matinal: Impede a postagem se o horário ainda for exclusividade da saudação matinal
+    if agora.hour < hora_abertura_videos:
+        if EXIBIR_LOGS: logger.warning(f"🛑 Trava Ativada: A janela de vídeos só abre às {hora_abertura_videos}h. Vídeo retido e empurrado 15 mins.")
+        from datetime import timedelta
+        novo_horario = agora + timedelta(minutes=15)
+        job_id_reagendado = f"job_fila_postagem_adiado_{int(agora.timestamp())}"
+        scheduler.add_job(executar_postagem_fila, 'date', run_date=novo_horario, args=[item_id], id=job_id_reagendado, replace_existing=True)
+        return
+
+    # Trava Noturna: Impede postagem se tivermos atingido ou ultrapassado o início do Boa Noite
+    if agora.hour >= hora_fechamento_videos:
+        if EXIBIR_LOGS: logger.warning(f"🛑 Trava Noturna Ativada: A janela de vídeos encerrou às {hora_fechamento_videos-1}h59. Vídeo retido para amanhã.")
+        return
+
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
     
-    item = next((x for x in fila if x["id"] == item_id), None)
+    # Leitura estrita com base no índice atualizado
+    item = next((x for x in fila if x.get("data_adicao") < hoje_str), None)
+    
     if not item:
+        if EXIBIR_LOGS: logger.warning("⚠️ Nenhum vídeo elegível encontrado na fila para extração.")
         return
         
+    item_id_real = item["id"]
     caminho_video = item.get("caminho_video")
     video_id = item.get("video_id")
     legenda = item.get("legenda")
+    
+    if EXIBIR_LOGS: logger.info(f"🎯 Extração concluída. Vídeo {item_id_real} capturado do topo da fila atualizada.")
     
     try:
         if caminho_video and os.path.exists(caminho_video):
@@ -433,8 +483,8 @@ async def executar_postagem_fila(item_id):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao postar vídeo da fila: {e}")
     finally:
-        # Exclui o item da fila após tentativa
-        fila = [x for x in fila if x["id"] != item_id]
+        # Exclui o item real extraído da fila após a tentativa
+        fila = [x for x in fila if x["id"] != item_id_real]
         fila_data["fila"] = fila
         salvar_fila_postagens(fila_data)
         
@@ -690,6 +740,18 @@ async def disparar_mensagem(tipo, forcar=False):
     msg_enviada = await bot.send_message(GRUPO_ID, texto)
     
     registrar_lixeira(msg_enviada.message_id)
+
+    # 🚀 CORREÇÃO: Registrar o disparo da rotina para liberar ou travar a fila de vídeos
+    agora_tz = datetime.now(fuso_horario)
+    hoje_str = agora_tz.strftime("%Y-%m-%d")
+    dados_rot_atualizados = ler_config_rotina()
+    if tipo == "bom_dia":
+        dados_rot_atualizados["ultimo_bom_dia"] = hoje_str
+        if EXIBIR_LOGS: logger.info("✅ Bandeira de 'Bom Dia' registrada. Fila de vídeos liberada para hoje.")
+    elif tipo == "boa_noite":
+        dados_rot_atualizados["ultimo_boa_noite"] = hoje_str
+        if EXIBIR_LOGS: logger.info("✅ Bandeira de 'Boa Noite' registrada. Fila de vídeos suspensa até amanhã.")
+    salvar_config_rotina(dados_rot_atualizados)
     
     # ✅ Disparo condicional: Envia o link separado apenas na divulgação e no GEM
     if tipo == "link_grupo":
