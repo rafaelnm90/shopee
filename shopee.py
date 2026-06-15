@@ -2203,7 +2203,7 @@ teclado_gerenciar_fila = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Publicar Agora 🚀")],
         [KeyboardButton(text="Excluir Vídeo 🗑️")],
-        [KeyboardButton(text="Editar Legenda ✏️"), KeyboardButton(text="Editar Numeração 🔢")],
+        [KeyboardButton(text="Editar Numeração 🔢"), KeyboardButton(text="Editar Legenda ✏️")],
         [KeyboardButton(text="Mover Posição ↕️"), KeyboardButton(text="Voltar 🔙")]
     ],
     resize_keyboard=True,
