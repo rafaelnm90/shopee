@@ -102,8 +102,11 @@ class PausaProgramadaFluxo(StatesGroup):
 class EspiaoFluxo(StatesGroup):
     menu_principal = State()
     aguardando_novo_alvo = State()
+    aguardando_confirmacao_alvo = State() # ✅ NOVO
     aguardando_remocao_alvo = State()
+    aguardando_confirmacao_remocao = State() # ✅ NOVO
     aguardando_canal_destino = State()
+    aguardando_confirmacao_destino = State() # ✅ NOVO
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -1065,6 +1068,13 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await message.answer("Ação cancelada.")
         await menu_gerenciar_fila(message, state)
         return
+        
+    # 🔁 Roteamento Inteligente: Se estiver no Espião, volta para a tela de Grupos Vigiados
+    if estado_atual and estado_atual.startswith("EspiaoFluxo"):
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await menu_grupos_vigiados(message, state)
+        return
 
     if EXIBIR_LOGS: logger.info("🔍 Verificando pendências de numeração na memória antes de limpar...")
     data = await state.get_data()
@@ -1598,26 +1608,40 @@ async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
     await state.set_state(EspiaoFluxo.aguardando_novo_alvo)
 
 @dp.message(EspiaoFluxo.aguardando_novo_alvo)
-async def salvar_alvo_espiao(message: types.Message, state: FSMContext):
+async def confirmar_alvo_espiao(message: types.Message, state: FSMContext):
     import re
     entrada_bruta = message.text.strip()
     alvo_formatado = entrada_bruta
     
-    # 🧹 Higienizador Inteligente: Formata IDs numéricos automaticamente
-    # Verifica se o usuário digitou apenas números (com ou sem o sinal de menos)
+    # 🧹 Higienizador Inteligente
     if re.match(r'^-?\d+$', entrada_bruta):
-        # Remove o sinal de menos se houver, para padronizar a análise
         so_numeros = entrada_bruta.replace("-", "")
-        
-        # Garante que o ID comece obrigatoriamente com -100
         if not so_numeros.startswith("100"):
             alvo_formatado = f"-100{so_numeros}"
         else:
             alvo_formatado = f"-{so_numeros}"
             
+    await state.update_data(novo_alvo_formatado=alvo_formatado)
+    
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    await message.answer(f"Deseja adicionar o alvo abaixo ao radar do Espião?\n\n<b>{alvo_formatado}</b>", reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(EspiaoFluxo.aguardando_confirmacao_alvo)
+
+@dp.message(EspiaoFluxo.aguardando_confirmacao_alvo)
+async def salvar_alvo_espiao(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, clique em Aprovar ou Cancelar.")
+        return
+        
+    data = await state.get_data()
+    alvo_formatado = data.get("novo_alvo_formatado")
     dados = ler_alvos_espiao()
     
-    # Verifica se o alvo formatado já existe na lista
     if alvo_formatado not in dados["alvos"]:
         dados["alvos"].append(alvo_formatado)
         salvar_alvos_espiao(dados)
@@ -1626,7 +1650,6 @@ async def salvar_alvo_espiao(message: types.Message, state: FSMContext):
     else:
         await message.answer(f"⚠️ O alvo <b>{alvo_formatado}</b> já está na sua lista de monitoramento.", parse_mode="HTML")
         
-    # Recarrega o menu mantendo o usuário na tela do espião
     await menu_grupos_vigiados(message, state)
 
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Remover Concorrente 🗑️")
@@ -1644,21 +1667,49 @@ async def pedir_remocao_espiao(message: types.Message, state: FSMContext):
     await state.set_state(EspiaoFluxo.aguardando_remocao_alvo)
 
 @dp.message(EspiaoFluxo.aguardando_remocao_alvo)
-async def processar_remocao_espiao(message: types.Message, state: FSMContext):
+async def confirmar_remocao_espiao(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
         await message.answer("Por favor, digite apenas o NÚMERO.", reply_markup=teclado_cancelar)
         return
+        
     indice = int(message.text) - 1
     dados = ler_alvos_espiao()
-    if 0 <= indice < len(dados.get("alvos", [])):
+    alvos = dados.get("alvos", [])
+    
+    if 0 <= indice < len(alvos):
+        alvo_selecionado = alvos[indice]
+        await state.update_data(indice_remocao=indice)
+        
+        teclado_confirmacao = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        
+        await message.answer(f"Tem certeza de que deseja parar de monitorar o alvo abaixo?\n\n<b>{alvo_selecionado}</b>", reply_markup=teclado_confirmacao, parse_mode="HTML")
+        await state.set_state(EspiaoFluxo.aguardando_confirmacao_remocao)
+    else:
+        await message.answer("⚠️ Número inválido. Tente novamente:", reply_markup=teclado_cancelar)
+
+@dp.message(EspiaoFluxo.aguardando_confirmacao_remocao)
+async def processar_remocao_espiao(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, clique em Aprovar ou Cancelar.")
+        return
+        
+    data = await state.get_data()
+    indice = data.get("indice_remocao")
+    dados = ler_alvos_espiao()
+    alvos = dados.get("alvos", [])
+    
+    if indice is not None and 0 <= indice < len(alvos):
         removido = dados["alvos"].pop(indice)
         salvar_alvos_espiao(dados)
         if EXIBIR_LOGS: logger.info(f"🗑️ Alvo do espião removido: {removido}")
         await message.answer(f"✅ Alvo '{removido}' removido do radar!")
     else:
-        await message.answer("⚠️ Número inválido. Ação cancelada.")
+        await message.answer("⚠️ Erro de sincronização. Ação cancelada.")
         
-    # Recarrega o menu mantendo o usuário na tela do espião
     await menu_grupos_vigiados(message, state)
 
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Definir Canal de Destino 🎯")
@@ -1667,15 +1718,35 @@ async def pedir_destino_espiao(message: types.Message, state: FSMContext):
     await state.set_state(EspiaoFluxo.aguardando_canal_destino)
 
 @dp.message(EspiaoFluxo.aguardando_canal_destino)
-async def salvar_destino_espiao(message: types.Message, state: FSMContext):
+async def confirmar_destino_espiao(message: types.Message, state: FSMContext):
     destino = message.text.strip()
+    await state.update_data(novo_destino=destino)
+    
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    await message.answer(f"Os vídeos clonados serão enviados automaticamente para o canal:\n\n<b>{destino}</b>\n\nConfirma essa alteração?", reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(EspiaoFluxo.aguardando_confirmacao_destino)
+
+@dp.message(EspiaoFluxo.aguardando_confirmacao_destino)
+async def salvar_destino_espiao(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, clique em Aprovar ou Cancelar.")
+        return
+        
+    data = await state.get_data()
+    destino = data.get("novo_destino")
+    
     dados = ler_alvos_espiao()
     dados["canal_destino"] = destino
     salvar_alvos_espiao(dados)
+    
     if EXIBIR_LOGS: logger.info(f"🎯 Canal de destino do espião atualizado para: {destino}")
     await message.answer("✅ Canal de destino configurado com sucesso!")
     
-    # Recarrega o menu mantendo o usuário na tela do espião
     await menu_grupos_vigiados(message, state)
 
 # ✅ NOVOS INTERRUPTORES INTERNOS DE PAUSA
