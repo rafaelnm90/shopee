@@ -2200,7 +2200,7 @@ teclado_gerenciar_fila = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-@dp.message(F.text == "Gerenciar Fila 📋")
+@dp.message(F.text == "Gerenciar Fila 📋", StateFilter("*"))
 async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
@@ -2213,14 +2213,19 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
     texto += f"Total de vídeos agendados: <b>{len(fila)}</b>\n\n"
     
     if fila:
-        if EXIBIR_LOGS: logger.info("🔍 Lendo itens da fila para montagem do painel visual...")
+        if EXIBIR_LOGS: logger.info("🔍 Lendo itens da fila para montagem do painel visual com higienização de tags...")
+        import re
         for i, item in enumerate(fila, 1):
             legenda = item.get("legenda", "")
-            # Captura um pequeno fragmento da primeira linha para identificação visual rápida
-            resumo = legenda.split('\n')[0][:30] if legenda else "Vídeo sem descrição"
+            if legenda:
+                # Extrai todas as tags HTML para evitar corrupção sintática no Telegram
+                legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
+                resumo = legenda_limpa.split('\n')[0][:30]
+            else:
+                resumo = "Vídeo sem descrição"
             texto += f"<b>{i}.</b> {resumo}...\n"
         texto += "\nO que deseja fazer com a fila?"
-        if EXIBIR_LOGS: logger.info("✅ Painel visual da fila montado com sucesso.")
+        if EXIBIR_LOGS: logger.info("✅ Painel visual da fila montado e sanitizado com sucesso.")
     else:
         texto += "A sua fila está completamente vazia no momento.\nO que deseja fazer?"
         if EXIBIR_LOGS: logger.info("⚠️ Fila vazia detectada ao montar o painel.")
