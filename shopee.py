@@ -2336,7 +2336,7 @@ async def salvar_nova_numeracao_fila(message: types.Message, state: FSMContext):
         await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
         return
         
-    novo_numero = int(message.text)
+    novo_numero_inicial = int(message.text)
     data = await state.get_data()
     posicao = data.get("posicao_numeracao")
     
@@ -2345,15 +2345,27 @@ async def salvar_nova_numeracao_fila(message: types.Message, state: FSMContext):
     import re
     
     if 0 <= posicao < len(fila):
-        legenda_antiga = fila[posicao].get("legenda", "")
-        # Substitui a numeração antiga na primeira linha pelo novo número introduzido
-        nova_legenda = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{novo_numero}', legenda_antiga, count=1)
-        fila[posicao]["legenda"] = nova_legenda
+        if EXIBIR_LOGS: logger.info(f"🔄 Iniciando renumeração em cascata a partir da posição {posicao+1} com o número {novo_numero_inicial}...")
         
+        numero_atual_cascata = novo_numero_inicial
+        
+        # Percorre a fila apenas a partir do vídeo selecionado para baixo
+        for i in range(posicao, len(fila)):
+            legenda_antiga = fila[i].get("legenda", "")
+            nova_legenda = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{numero_atual_cascata}', legenda_antiga, count=1)
+            fila[i]["legenda"] = nova_legenda
+            if EXIBIR_LOGS: logger.info(f"✏️ Fila: Posição {i+1} atualizada para Vídeo {numero_atual_cascata}.")
+            numero_atual_cascata += 1
+            
         salvar_fila_postagens(fila_data)
-        if EXIBIR_LOGS: logger.info(f"🔢 Fila: Numeração do vídeo na posição {posicao+1} atualizada para {novo_numero}.")
         
-        await message.answer(f"✅ Numeração do vídeo atualizada para {novo_numero} com sucesso!", reply_markup=obter_teclado_principal())
+        # Sincroniza o contador global para que a próxima postagem assuma o último número +1
+        async with _lock_contador:
+            salvar_contador(numero_atual_cascata)
+        
+        if EXIBIR_LOGS: logger.info(f"✅ Renumeração concluída! Contador global ajustado para a próxima postagem virgem: {numero_atual_cascata}.")
+        
+        await message.answer(f"✅ Numeração atualizada em cascata a partir do vídeo {novo_numero_inicial} com sucesso!", reply_markup=obter_teclado_principal())
         await state.clear()
     else:
         await message.answer("Erro de sincronização. Operação cancelada.", reply_markup=obter_teclado_principal())
