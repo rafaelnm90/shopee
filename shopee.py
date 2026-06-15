@@ -2202,8 +2202,29 @@ teclado_gerenciar_fila = ReplyKeyboardMarkup(
 
 @dp.message(F.text == "Gerenciar Fila 📋")
 async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
-# ... (mantenha o código da função intacto aqui) ...
-    texto += "O que deseja fazer com a fila?"
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    if EXIBIR_LOGS: logger.info("📋 Acessando o painel de gerenciamento de fila...")
+    
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    
+    texto = "📋 <b>Gerenciador de Fila de Postagens</b>\n\n"
+    texto += f"Total de vídeos agendados: <b>{len(fila)}</b>\n\n"
+    
+    if fila:
+        if EXIBIR_LOGS: logger.info("🔍 Lendo itens da fila para montagem do painel visual...")
+        for i, item in enumerate(fila, 1):
+            legenda = item.get("legenda", "")
+            # Captura um pequeno fragmento da primeira linha para identificação visual rápida
+            resumo = legenda.split('\n')[0][:30] if legenda else "Vídeo sem descrição"
+            texto += f"<b>{i}.</b> {resumo}...\n"
+        texto += "\nO que deseja fazer com a fila?"
+        if EXIBIR_LOGS: logger.info("✅ Painel visual da fila montado com sucesso.")
+    else:
+        texto += "A sua fila está completamente vazia no momento.\nO que deseja fazer?"
+        if EXIBIR_LOGS: logger.info("⚠️ Fila vazia detectada ao montar o painel.")
+
     await message.answer(texto, reply_markup=teclado_gerenciar_fila, parse_mode="HTML")
     await state.set_state(GerenciarFilaFluxo.menu_principal)
 
