@@ -1150,6 +1150,16 @@ async def manual_boa_noite(message: types.Message):
 @dp.message(F.text == "Disparar Incentivo 🔥")
 async def manual_incentivo(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
+    
+    dados_rotina = ler_config_rotina()
+    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    
+    # Valida se o dia já começou (Bom Dia) e se ainda não terminou (Boa Noite)
+    if dados_rotina.get("ultimo_bom_dia") != hoje_str or dados_rotina.get("ultimo_boa_noite") == hoje_str:
+        if EXIBIR_LOGS: logger.warning("🛑 Clique manual rejeitado: Fora do expediente.")
+        await message.answer("⚠️ <b>Ação Bloqueada:</b> Você só pode disparar esta mensagem durante o expediente (após o 'Bom Dia' e antes do 'Boa Noite').", parse_mode="HTML")
+        return
+        
     await message.answer("Gerando e enviando mensagem de Incentivo... ⏳")
     if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Incentivo.")
     await disparar_mensagem("incentivo", forcar=True)
@@ -1158,6 +1168,16 @@ async def manual_incentivo(message: types.Message):
 @dp.message(F.text == "Disparar Convite 📢")
 async def manual_link_grupo(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
+    
+    dados_rotina = ler_config_rotina()
+    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    
+    # Valida se o dia já começou (Bom Dia) e se ainda não terminou (Boa Noite)
+    if dados_rotina.get("ultimo_bom_dia") != hoje_str or dados_rotina.get("ultimo_boa_noite") == hoje_str:
+        if EXIBIR_LOGS: logger.warning("🛑 Clique manual rejeitado: Fora do expediente.")
+        await message.answer("⚠️ <b>Ação Bloqueada:</b> Você só pode disparar esta mensagem durante o expediente (após o 'Bom Dia' e antes do 'Boa Noite').", parse_mode="HTML")
+        return
+        
     await message.answer("Gerando e enviando divulgação do grupo... ⏳")
     if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Convite do Grupo.")
     await disparar_mensagem("link_grupo", forcar=True)
