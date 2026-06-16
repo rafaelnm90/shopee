@@ -348,6 +348,9 @@ def agendar_fila_postagens():
     hora_fim_bom_dia = dados_rotina.get("bom_dia", {}).get("fim", 9)
     hora_inicio_boa_noite = dados_rotina.get("boa_noite", {}).get("inicio", 21)
     
+    ultimo_bd = dados_rotina.get("ultimo_bom_dia", "")
+    ultimo_bn = dados_rotina.get("ultimo_boa_noite", "")
+    
     if EXIBIR_LOGS: logger.info("🚀 Construindo miolo útil dinâmico da fila de vídeos baseado nas configurações do painel...")
     
     horarios_ocupados = []
@@ -357,12 +360,18 @@ def agendar_fila_postagens():
             horarios_ocupados.append(proxima_execucao.astimezone(fuso_horario))
             if EXIBIR_LOGS: logger.info(f"🔎 Radar de colisão validou o horário da rotina '{job.id}'.")
             
-    # Fronteira Inicial: Exatamente na hora de término da janela do Bom Dia (ex: se fim=10, começa 10:00:00)
-    limite_inicio_hoje = agora.replace(hour=hora_fim_bom_dia, minute=0, second=0, microsecond=0)
+    # Fronteira Inicial Elástica: Se o 'Bom Dia' foi forçado, a janela abre agora. Senão, respeita o limite.
+    if ultimo_bd == hoje_str:
+        limite_inicio_hoje = agora
+    else:
+        limite_inicio_hoje = agora.replace(hour=hora_fim_bom_dia, minute=0, second=0, microsecond=0)
     
-    # Fronteira Final: Exatamente no último minuto útil antes de começar o Boa Noite (ex: se inicio=20, termina 19:59:59)
-    hora_limite_final = hora_inicio_boa_noite - 1 if hora_inicio_boa_noite > 0 else 23
-    limite_fim_hoje = agora.replace(hour=hora_limite_final, minute=59, second=59, microsecond=0)
+    # Fronteira Final Rígida: Se o 'Boa Noite' foi forçado, a janela fecha imediatamente.
+    if ultimo_bn == hoje_str:
+        limite_fim_hoje = agora
+    else:
+        hora_limite_final = hora_inicio_boa_noite - 1 if hora_inicio_boa_noite > 0 else 23
+        limite_fim_hoje = agora.replace(hour=hora_limite_final, minute=59, second=59, microsecond=0)
     
     if agora >= limite_fim_hoje:
         if EXIBIR_LOGS: logger.warning("⚠️ Janela de postagem de hoje já encerrou. Fila aguardará até amanhã.")
@@ -432,8 +441,11 @@ async def executar_postagem_fila(item_id):
     hora_abertura_videos = dados_rotina.get("bom_dia", {}).get("fim", 9)
     hora_fechamento_videos = dados_rotina.get("boa_noite", {}).get("inicio", 21)
     
-    # Trava Matinal: Impede a postagem se o horário ainda for exclusividade da saudação matinal
-    if agora.hour < hora_abertura_videos:
+    ultimo_bd = dados_rotina.get("ultimo_bom_dia", "")
+    ultimo_bn = dados_rotina.get("ultimo_boa_noite", "")
+    
+    # Trava Matinal: Impede a postagem se ainda for exclusividade da saudação, a menos que o Bom Dia já tenha sido forçado
+    if agora.hour < hora_abertura_videos and ultimo_bd != hoje_str:
         if EXIBIR_LOGS: logger.warning(f"🛑 Trava Ativada: A janela de vídeos só abre às {hora_abertura_videos}h. Vídeo retido e empurrado 15 mins.")
         from datetime import timedelta
         novo_horario = agora + timedelta(minutes=15)
@@ -441,16 +453,16 @@ async def executar_postagem_fila(item_id):
         scheduler.add_job(executar_postagem_fila, 'date', run_date=novo_horario, args=[item_id], id=job_id_reagendado, replace_existing=True)
         return
 
-    # Trava Noturna: Impede postagem se tivermos atingido ou ultrapassado o início do Boa Noite
-    if agora.hour >= hora_fechamento_videos:
-        if EXIBIR_LOGS: logger.warning(f"🛑 Trava Noturna Ativada: A janela de vídeos encerrou às {hora_fechamento_videos-1}h59. Vídeo retido para amanhã.")
+    # Trava Noturna: Impede a postagem se tivermos atingido o Boa Noite ou se ele já foi forçado manualmente
+    if agora.hour >= hora_fechamento_videos or ultimo_bn == hoje_str:
+        if EXIBIR_LOGS: logger.warning(f"🛑 Trava Noturna Ativada: O expediente encerrou. Vídeo retido para amanhã.")
         return
 
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
     
     # Leitura estrita com base no índice atualizado
-    item = next((x for x in fila if x.get("data_adicao") < hoje_str), None)
+    item = next((x for x in fila if x.get("data_adicao") < hoje_str or x.get("data_adicao") == "2000-01-01"), None)
     
     if not item:
         if EXIBIR_LOGS: logger.warning("⚠️ Nenhum vídeo elegível encontrado na fila para extração.")
@@ -672,13 +684,22 @@ async def apagar_mensagem_automatica(msg_id):
 async def disparar_mensagem(tipo, forcar=False):
     if EXIBIR_LOGS: logger.info(f"🔍 Validando status antes de disparar a rotina '{tipo}' (Forçar: {forcar})...")
     
-    # ✅ NOVO: Trava lógica que substitui o bloqueio global do scheduler
     dados_rotina = ler_config_rotina()
+    
     if dados_rotina.get("pausado", False) and not forcar:
         if EXIBIR_LOGS: logger.info(f"🛑 Disparo abortado ({tipo}): As rotinas estão pausadas no sistema.")
         return
+        
+    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    
+    # 🚀 LÓGICA DE TRAVA ABSOLUTA (ANTI-ACIDENTE)
+    if tipo == "bom_dia" and dados_rotina.get("ultimo_bom_dia") == hoje_str:
+        if EXIBIR_LOGS: logger.warning("🛑 Bloqueio Anti-Acidente: O 'Bom Dia' já foi enviado hoje.")
+        return
+    if tipo == "boa_noite" and dados_rotina.get("ultimo_boa_noite") == hoje_str:
+        if EXIBIR_LOGS: logger.warning("🛑 Bloqueio Anti-Acidente: O 'Boa Noite' já foi enviado hoje.")
+        return
 
-    # ✅ Contexto atualizado com limitação estrita de caracteres
     contexto_afiliado = (
         "Você é um assistente de suporte para afiliados da Shopee. "
         "REGRA ABSOLUTA: Sua resposta deve ser extremamente curta e direta, "
@@ -741,19 +762,26 @@ async def disparar_mensagem(tipo, forcar=False):
     
     registrar_lixeira(msg_enviada.message_id)
 
-    # 🚀 CORREÇÃO: Registrar o disparo da rotina para liberar ou travar a fila de vídeos
     agora_tz = datetime.now(fuso_horario)
     hoje_str = agora_tz.strftime("%Y-%m-%d")
     dados_rot_atualizados = ler_config_rotina()
+    
+    recalcular_fila = False
     if tipo == "bom_dia":
         dados_rot_atualizados["ultimo_bom_dia"] = hoje_str
-        if EXIBIR_LOGS: logger.info("✅ Bandeira de 'Bom Dia' registrada. Fila de vídeos liberada para hoje.")
+        recalcular_fila = True
+        if EXIBIR_LOGS: logger.info("✅ Bandeira de 'Bom Dia' registada. Fila de vídeos liberada para hoje.")
     elif tipo == "boa_noite":
         dados_rot_atualizados["ultimo_boa_noite"] = hoje_str
-        if EXIBIR_LOGS: logger.info("✅ Bandeira de 'Boa Noite' registrada. Fila de vídeos suspensa até amanhã.")
+        recalcular_fila = True
+        if EXIBIR_LOGS: logger.info("✅ Bandeira de 'Boa Noite' registada. Fila de vídeos suspensa até amanhã.")
     salvar_config_rotina(dados_rot_atualizados)
     
-    # ✅ Disparo condicional: Envia o link separado apenas na divulgação e no GEM
+    # Recalcula a distribuição orgânica dos vídeos se a fronteira do dia sofreu alteração forçada
+    if recalcular_fila:
+        if EXIBIR_LOGS: logger.info("🔄 Alteração de fronteira detetada. A recalcular toda a fila de postagens em tempo real...")
+        agendar_fila_postagens()
+    
     if tipo == "link_grupo":
         link_separado = f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}"
         if EXIBIR_LOGS: logger.info("🔗 Enviando link do grupo em mensagem isolada.")
@@ -1087,6 +1115,15 @@ async def gerar_relatorio_completo(message: types.Message, state: FSMContext):
 @dp.message(F.text == "Disparar Bom Dia ☀️")
 async def manual_bom_dia(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
+    
+    dados_rotina = ler_config_rotina()
+    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    
+    if dados_rotina.get("ultimo_bom_dia") == hoje_str:
+        if EXIBIR_LOGS: logger.warning("🛑 Clique manual rejeitado: Bom Dia já enviado.")
+        await message.answer("⚠️ <b>Bloqueio Anti-Acidente:</b> O 'Bom Dia' de hoje já foi enviado ao grupo. Ação cancelada.", parse_mode="HTML")
+        return
+
     await message.answer("Gerando e enviando mensagem de Bom Dia... ⏳")
     if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Bom Dia.")
     await disparar_mensagem("bom_dia", forcar=True)
@@ -1095,6 +1132,15 @@ async def manual_bom_dia(message: types.Message):
 @dp.message(F.text == "Disparar Boa Noite 🌙")
 async def manual_boa_noite(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
+    
+    dados_rotina = ler_config_rotina()
+    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    
+    if dados_rotina.get("ultimo_boa_noite") == hoje_str:
+        if EXIBIR_LOGS: logger.warning("🛑 Clique manual rejeitado: Boa Noite já enviado.")
+        await message.answer("⚠️ <b>Bloqueio Anti-Acidente:</b> O 'Boa Noite' de hoje já foi enviado ao grupo. Ação cancelada.", parse_mode="HTML")
+        return
+
     await message.answer("Gerando e enviando mensagem de Boa Noite... ⏳")
     if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Boa Noite.")
     await disparar_mensagem("boa_noite", forcar=True)
