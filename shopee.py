@@ -2409,6 +2409,7 @@ class GerenciarFilaFluxo(StatesGroup):
     aguardando_nova_legenda = State()
     aguardando_posicao_reordenar = State()
     aguardando_nova_posicao = State()
+    aguardando_data_posicao = State()
     aguardando_posicao_numeracao = State()
     aguardando_nova_numeracao = State()
     aguardando_posicao_publicar = State()
@@ -2472,10 +2473,15 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             # Define a Previsão de Postagem
             if is_pausado:
                 status_previsao = "Pausado 🛑"
-            elif data_adicao_str < hoje_str or data_adicao_str == "2000-01-01":
+            elif data_adicao_str == "2000-01-01" or data_adicao_str <= hoje_str:
                 status_previsao = "Hoje 🟢"
             else:
-                status_previsao = "Amanhã 🟡"
+                from datetime import timedelta
+                amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+                if data_adicao_str == amanha_str:
+                    status_previsao = "Amanhã 🟡"
+                else:
+                    status_previsao = "Depois de Amanhã 🔵"
                 
             texto += f"<b>{i}. {nome_video}</b> | 📦 {nome_item[:25]}...\n"
             texto += f"   └ Criado em: {data_br} | Previsão: {status_previsao}\n\n"
@@ -2493,6 +2499,43 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
 async def sair_menu_fila(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
+
+async def aplicar_renumeracao_e_salvar(fila, message, state):
+    import re
+    if EXIBIR_LOGS: logger.info("🔄 Iniciando auto-correção da numeração da fila...")
+    
+    menor_numero = float('inf')
+    for f_item in fila:
+        match = re.search(r'(?i)Vídeo\s+(\d+)', f_item.get("legenda", ""))
+        if match:
+            num = int(match.group(1))
+            if num < menor_numero:
+                menor_numero = num
+                
+    if menor_numero == float('inf'):
+        async with _lock_contador:
+            menor_numero = ler_contador()
+            
+    numero_atual_cascata = menor_numero
+    for i in range(len(fila)):
+        legenda_antiga = fila[i].get("legenda", "")
+        nova_legenda = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{numero_atual_cascata}', legenda_antiga, count=1)
+        fila[i]["legenda"] = nova_legenda
+        numero_atual_cascata += 1
+        
+    fila_data = ler_fila_postagens()
+    fila_data["fila"] = fila
+    salvar_fila_postagens(fila_data)
+    
+    async with _lock_contador:
+        salvar_contador(numero_atual_cascata)
+    
+    if EXIBIR_LOGS: logger.info(f"✅ Auto-correção concluída. Próxima postagem: {numero_atual_cascata}.")
+    
+    agendar_fila_postagens() 
+    
+    await message.answer(f"✅ Operação concluída com sucesso!\n🔄 A numeração de toda a fila foi corrigida em cascata e os horários recalculados.")
+    await menu_gerenciar_fila(message, state)
 
 @dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Excluir Vídeo 🗑️")
 async def pedir_exclusao_fila(message: types.Message, state: FSMContext):
@@ -2554,14 +2597,9 @@ async def processar_exclusao_fila(message: types.Message, state: FSMContext):
                 os.remove(caminho_video)
                 if EXIBIR_LOGS: logger.info("🧹 Fila: Ficheiro físico excluído após remoção manual com confirmação dupla.")
                 
-        fila_data["fila"] = fila
-        salvar_fila_postagens(fila_data)
-        
         if EXIBIR_LOGS: logger.info(f"🗑️ Fila: Vídeo na posição {posicao+1} removido com sucesso.")
-        agendar_fila_postagens() 
         
-        await message.answer("✅ Vídeo excluído com sucesso e horários recalculados!")
-        await menu_gerenciar_fila(message, state)
+        await aplicar_renumeracao_e_salvar(fila, message, state)
     else:
         await message.answer("Erro de sincronização. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
@@ -2651,6 +2689,12 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
     data = await state.get_data()
     posicao_origem = data.get("posicao_origem")
     
+    if posicao_origem == nova_posicao:
+        if EXIBIR_LOGS: logger.info("⚠️ Fila: Posição de destino igual à de origem. Ação cancelada.")
+        await message.answer("O vídeo já se encontra nesta posição. Nenhuma alteração foi efetuada.", reply_markup=obter_teclado_principal())
+        await state.clear()
+        return
+
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
     
@@ -2658,55 +2702,97 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         if nova_posicao < 0: nova_posicao = 0
         if nova_posicao >= len(fila): nova_posicao = len(fila) - 1
         
-        item = fila.pop(posicao_origem)
+        from datetime import timedelta
+        agora = datetime.now(fuso_horario)
+        hoje_str = agora.strftime("%Y-%m-%d")
+        amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
         
-        # 🚀 ESTRATÉGIA DE MATURAÇÃO: Se o vídeo foi movido manualmente, ele assume urgência.
-        # Burlamos a trava de data para garantir que a ordem visual case com a ordem de postagem real.
-        item["data_adicao"] = "2000-01-01"
+        fila_simulada = fila.copy()
+        item_movido = fila_simulada.pop(posicao_origem)
         
-        fila.insert(nova_posicao, item)
+        if len(fila_simulada) == 0:
+            item_movido["data_adicao"] = "2000-01-01"
+            fila_simulada.insert(nova_posicao, item_movido)
+            if EXIBIR_LOGS: logger.info("↕️ Fila: Único vídeo movido e mantido para Hoje.")
+            await aplicar_renumeracao_e_salvar(fila_simulada, message, state)
+            return
         
-        import re
+        prev_idx = nova_posicao - 1
+        next_idx = nova_posicao
         
-        # 1. Identificação do Ponto de Partida (menor número da fila)
-        menor_numero = float('inf')
-        for f_item in fila:
-            match = re.search(r'(?i)Vídeo\s+(\d+)', f_item.get("legenda", ""))
-            if match:
-                num = int(match.group(1))
-                if num < menor_numero:
-                    menor_numero = num
-                    
-        # Fallback de segurança caso a fila perca a formatação
-        if menor_numero == float('inf'):
-            async with _lock_contador:
-                menor_numero = ler_contador()
-                
-        if EXIBIR_LOGS: logger.info(f"🔄 Iniciando auto-correção da numeração da fila a partir do Vídeo {menor_numero}...")
-        
-        # 2. Renumeração Dinâmica de cima para baixo
-        numero_atual_cascata = menor_numero
-        for i in range(len(fila)):
-            legenda_antiga = fila[i].get("legenda", "")
-            # Atualiza apenas a primeira ocorrência do padrão para evitar mexer no resto da cópia
-            nova_legenda = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{numero_atual_cascata}', legenda_antiga, count=1)
-            fila[i]["legenda"] = nova_legenda
-            numero_atual_cascata += 1
+        def obter_classe_data(data_str):
+            if data_str == "2000-01-01" or data_str <= hoje_str: return "Hoje 🟢"
+            if data_str == amanha_str: return "Amanhã 🟡"
+            return "Depois de Amanhã 🔵"
             
-        fila_data["fila"] = fila
-        salvar_fila_postagens(fila_data)
+        prev_status = obter_classe_data(fila_simulada[prev_idx].get("data_adicao", "")) if prev_idx >= 0 else None
+        next_status = obter_classe_data(fila_simulada[next_idx].get("data_adicao", "")) if next_idx < len(fila_simulada) else None
         
-        # 3. Sincronização do Contador Global
-        async with _lock_contador:
-            salvar_contador(numero_atual_cascata)
-        
-        if EXIBIR_LOGS: logger.info(f"↕️ Fila: Vídeo movido da posição {posicao_origem+1} para {nova_posicao+1}.")
-        if EXIBIR_LOGS: logger.info(f"✅ Auto-correção concluída. Contador global atualizado para a próxima postagem: {numero_atual_cascata}.")
-        
-        agendar_fila_postagens() 
-        
-        await message.answer(f"✅ Vídeo movido para a posição {nova_posicao+1}!\n🔄 A numeração de toda a fila foi corrigida em cascata e os horários recalculados com sucesso.")
+        opcoes = []
+        if prev_status == next_status and prev_status is not None:
+            opcoes = [prev_status]
+        elif prev_status is None: 
+            opcoes = ["Hoje 🟢"] if next_status == "Hoje 🟢" else ["Hoje 🟢", next_status]
+        elif next_status is None: 
+            if prev_status == "Hoje 🟢": opcoes = ["Hoje 🟢", "Amanhã 🟡"]
+            elif prev_status == "Amanhã 🟡": opcoes = ["Amanhã 🟡", "Depois de Amanhã 🔵"]
+            else: opcoes = ["Depois de Amanhã 🔵"]
+        else: 
+            if prev_status != next_status:
+                opcoes = [prev_status, next_status]
+                
+        if len(opcoes) == 1:
+            escolha = opcoes[0]
+            if escolha == "Hoje 🟢": item_movido["data_adicao"] = "2000-01-01"
+            elif escolha == "Amanhã 🟡": item_movido["data_adicao"] = amanha_str
+            else: item_movido["data_adicao"] = (agora + timedelta(days=2)).strftime("%Y-%m-%d")
+            
+            fila_simulada.insert(nova_posicao, item_movido)
+            if EXIBIR_LOGS: logger.info(f"↕️ Fila: Vídeo movido automaticamente para a posição {nova_posicao+1} com o status {escolha}.")
+            await aplicar_renumeracao_e_salvar(fila_simulada, message, state)
+        else:
+            await state.update_data(nova_posicao=nova_posicao)
+            botoes = [[KeyboardButton(text=op)] for op in opcoes]
+            botoes.append([KeyboardButton(text="Cancelar ❌")])
+            teclado_escolha_data = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+            await message.answer(f"O vídeo será movido para a posição {nova_posicao+1}.\nPara quando deseja agendar este vídeo nesta nova posição?", reply_markup=teclado_escolha_data)
+            await state.set_state(GerenciarFilaFluxo.aguardando_data_posicao)
+    else:
+        await message.answer("Erro de sincronização. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
+
+@dp.message(GerenciarFilaFluxo.aguardando_data_posicao)
+async def processar_data_posicao_fila(message: types.Message, state: FSMContext):
+    texto = message.text
+    if not any(op in texto for op in ["Hoje", "Amanhã", "Depois de Amanhã"]):
+        await message.answer("Por favor, escolha uma opção válida através dos botões.")
+        return
+
+    data = await state.get_data()
+    posicao_origem = data.get("posicao_origem")
+    nova_posicao = data.get("nova_posicao")
+    
+    from datetime import timedelta
+    agora = datetime.now(fuso_horario)
+    
+    if "Hoje" in texto: 
+        nova_data_adicao = "2000-01-01"
+    elif "Amanhã" in texto and "Depois" not in texto: 
+        nova_data_adicao = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+    else: 
+        nova_data_adicao = (agora + timedelta(days=2)).strftime("%Y-%m-%d")
+
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    
+    if 0 <= posicao_origem < len(fila):
+        fila_simulada = fila.copy()
+        item_movido = fila_simulada.pop(posicao_origem)
+        item_movido["data_adicao"] = nova_data_adicao
+        fila_simulada.insert(nova_posicao, item_movido)
+        
+        if EXIBIR_LOGS: logger.info(f"↕️ Fila: Vídeo movido com data definida manualmente ({texto}) para a posição {nova_posicao+1}.")
+        await aplicar_renumeracao_e_salvar(fila_simulada, message, state)
     else:
         await message.answer("Erro de sincronização. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
