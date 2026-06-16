@@ -304,44 +304,14 @@ def agendar_fila_postagens():
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
     
-    # Só posta vídeos que foram inseridos antes de hoje (agendados pro dia seguinte) ou represados
+    # 🚀 CORREÇÃO: O Agendador agora enxerga a maturação forçada (Ano 2000) e os inclui no sorteio do dia
     from datetime import timedelta
-    videos_para_hoje = [item for item in fila if item.get("data_adicao") < hoje_str]
+    videos_para_hoje = [item for item in fila if item.get("data_adicao") < hoje_str or item.get("data_adicao") == "2000-01-01"]
     
     if not videos_para_hoje:
         if EXIBIR_LOGS: logger.info("⏳ Todos os vídeos na fila estão agendados aguardando o dia de amanhã.")
         return
         
-    dados_rotina = ler_config_rotina()
-    config_bom_dia = dados_rotina.get("bom_dia", {"inicio": 6, "fim": 9})
-    config_boa_noite = dados_rotina.get("boa_noite", {"inicio": 21, "fim": 23})
-        
-    # Padrões baseados na configuração, caso os horários ainda não estejam no agendador
-    hora_inicio = config_bom_dia.get("inicio", 6)
-    min_inicio = 0
-    hora_fim = config_boa_noite.get("inicio", 21)
-    min_fim = 0
-    
-    if EXIBIR_LOGS: logger.info("🚀 A iniciar o processamento do radar de ocupação de horários da fila...")
-    
-    # Extrai a hora exata do "Bom Dia" e "Boa Noite" já sorteados para HOJE, e constrói o radar
-    horarios_ocupados = []
-    for job in scheduler.get_jobs():
-        proxima_execucao = getattr(job, 'next_run_time', None)
-        
-        if proxima_execucao and not job.id.startswith('job_fila_postagem_'):
-            horarios_ocupados.append(proxima_execucao.astimezone(fuso_horario))
-            if EXIBIR_LOGS: logger.info(f"🔎 Radar validou com segurança o horário do job '{job.id}'.")
-            
-        if job.id.startswith('job_rotina_bom_dia_') and proxima_execucao:
-            hora_inicio = proxima_execucao.astimezone(fuso_horario).hour
-            min_inicio = proxima_execucao.astimezone(fuso_horario).minute
-        elif job.id.startswith('job_rotina_boa_noite_') and proxima_execucao:
-            hora_fim = proxima_execucao.astimezone(fuso_horario).hour
-            min_fim = proxima_execucao.astimezone(fuso_horario).minute
-            
-    limite_inicio_hoje = agora.replace(hour=hora_inicio, minute=min_inicio, second=0, microsecond=0) + timedelta(minutes=5)
-    limite_fim_hoje = agora.replace(hour=hora_fim, minute=min_fim, second=0, microsecond=0) - timedelta(minutes=5)
     dados_rotina = ler_config_rotina()
     
     # 🚀 LÓGICA DINÂMICA: Lê os limites exatos configurados pelo administrador no painel
