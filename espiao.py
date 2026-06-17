@@ -133,15 +133,37 @@ async def interceptar_mensagem(event):
 async def validar_e_obter_entidade(client, alvo):
     alvo_str = str(alvo).strip()
     
-    # Se não for um ID numérico (ex: @username ou link t.me)
-    if not alvo_str.lstrip('-').isdigit():
-        return await client.get_entity(alvo_str), alvo_str
+    if EXIBIR_LOGS: logger.info(f"🧹 [Auditor] Higienizando alvo bruto: {alvo_str}")
 
-    # ✂️ Remove qualquer prefixo '-' ou '-100' / '100' para extrair a raiz pura do ID
+    # 1. Filtro de Links Privados (ex: https://t.me/c/12345678/10)
+    match_privado = re.search(r't\.me/c/(\d+)', alvo_str)
+    if match_privado:
+        numero_extraido = match_privado.group(1)
+        alvo_str = f"-100{numero_extraido}"
+        if EXIBIR_LOGS: logger.info(f"🔗 [Auditor] Link privado detetado. Convertido para ID base: {alvo_str}")
+
+    # 2. Filtro de Usernames e Links Públicos (ex: https://t.me/username)
+    elif "t.me/" in alvo_str or alvo_str.startswith("@") or not alvo_str.lstrip('-').isdigit():
+        username_puro = re.sub(r'https?://(www\.)?t\.me/', '', alvo_str)
+        username_puro = username_puro.split('/')[0].split('?')[0]
+        username_puro = username_puro.lstrip('@')
+        
+        variacoes_publicas = [f"@{username_puro}", username_puro]
+        
+        for var in variacoes_publicas:
+            try:
+                if EXIBIR_LOGS: logger.info(f"🔍 [Auditor] Testando variação de username: {var}")
+                ent = await client.get_entity(var)
+                if EXIBIR_LOGS: logger.info(f"✅ [Auditor] Variação {var} aceite pela API do Telegram!")
+                return ent, var
+            except Exception:
+                continue
+        raise Exception("Nenhuma variação de username funcionou.")
+
+    # 3. Tratamento de IDs Numéricos
     so_numeros = re.sub(r'^-?(100)?', '', alvo_str)
     
-    # Lista de variações inteligentes a testar na API
-    variacoes = [
+    variacoes_numericas = [
         alvo_str, 
         f"-100{so_numeros}", 
         f"-{so_numeros}", 
@@ -149,20 +171,20 @@ async def validar_e_obter_entidade(client, alvo):
     ]
     
     variacoes_unicas = []
-    for v in variacoes:
+    for v in variacoes_numericas:
         if v not in variacoes_unicas:
             variacoes_unicas.append(v)
             
     for var in variacoes_unicas:
         try:
-            if EXIBIR_LOGS: logger.info(f"🔍 [Auditor] Testando variação de ID: {var}")
+            if EXIBIR_LOGS: logger.info(f"🔍 [Auditor] Testando variação numérica de ID: {var}")
             ent = await client.get_entity(int(var))
-            if EXIBIR_LOGS: logger.info(f"✅ [Auditor] Variação {var} aceita pela API do Telegram!")
-            return ent, str(var) # Retorna a entidade e a variação exata que funcionou
+            if EXIBIR_LOGS: logger.info(f"✅ [Auditor] Variação {var} aceite pela API do Telegram!")
+            return ent, str(var)
         except Exception:
             continue
             
-    raise Exception("Nenhuma variação funcionou.")
+    raise Exception("Nenhuma variação de ID numérico funcionou.")
 
 # ✅ NOVO: Radar assíncrono que varre a lista, testa variações e audita a permissão
 async def monitorar_status_alvos():
