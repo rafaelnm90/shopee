@@ -237,10 +237,11 @@ def obter_teclado_principal():
     botoes = [
         [KeyboardButton(text="Criar Postagem 📝")],
         [KeyboardButton(text="Gerenciar Fila 📋")],
-        [KeyboardButton(text="Editar Número da Postagem 🔢"), KeyboardButton(text="Pausar Postagens 🛑")],
-        [KeyboardButton(text="Disparar Bom Dia ☀️"), KeyboardButton(text="Disparar Incentivo 🔥")],
-        [KeyboardButton(text="Disparar Boa Noite 🌙"), KeyboardButton(text="Disparar Convite 📢")],
-        [KeyboardButton(text="Configurações Gerais ⚙️")], 
+        [KeyboardButton(text="Editar Número da Postagem 🔢"), KeyboardButton(text="Disparar Promo Viral 🚀")],
+        [KeyboardButton(text="Disparar Bom Dia ☀️"), KeyboardButton(text="Disparar Boa Noite 🌙")],
+        [KeyboardButton(text="Disparar Incentivo 🔥"), KeyboardButton(text="Disparar Convite 📢")],
+        [KeyboardButton(text="Pausar Postagens 🛑")],
+        [KeyboardButton(text="⚙️ Automações (SPAM e Rotina)")], 
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -260,6 +261,7 @@ def salvar_alvos_espiao(dados):
 teclado_menu_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Grupos Vigiados 📡")],
+        [KeyboardButton(text="Rotinas do Espião ⏰"), KeyboardButton(text="SPAM do Espião 📢")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -1187,6 +1189,23 @@ async def manual_link_grupo(message: types.Message):
     await disparar_mensagem("link_grupo", forcar=True)
     await message.answer("Mensagem de divulgação enviada ao grupo com sucesso! ✅")
 
+@dp.message(F.text == "Disparar Promo Viral 🚀")
+async def manual_promo_viral(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    
+    dados_rotina = ler_config_rotina()
+    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    
+    if dados_rotina.get("ultimo_bom_dia") != hoje_str or dados_rotina.get("ultimo_boa_noite") == hoje_str:
+        if EXIBIR_LOGS: logger.warning("🛑 Clique manual rejeitado: Fora do expediente.")
+        await message.answer("⚠️ <b>Ação Bloqueada:</b> Você só pode disparar esta mensagem durante o expediente.", parse_mode="HTML")
+        return
+        
+    await message.answer("Gerando e enviando divulgação do canal parceiro... ⏳")
+    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Promo Viral.")
+    await disparar_mensagem("promo_viral", forcar=True)
+    await message.answer("Mensagem de Promo Viral enviada ao grupo com sucesso! ✅")
+
 # ❌ NOVO: Handler Global para Cancelar via Botão (Agora 100% à prova de falhas)
 @dp.message(F.text == "Cancelar ❌", StateFilter("*"))
 async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
@@ -1656,11 +1675,11 @@ async def salvar_novo_numero(message: types.Message, state: FSMContext):
     else:
         await message.answer("Por favor, digite apenas números. Exemplo: 50", reply_markup=teclado_cancelar)
 
-@dp.message(F.text == "Configurações Gerais ⚙️", StateFilter("*"))
+@dp.message(F.text == "⚙️ Automações (SPAM e Rotina)", StateFilter("*"))
 async def menu_configuracoes(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    if EXIBIR_LOGS: logger.info("⚙️ Acessando Dashboard de Configurações Gerais.")
+    if EXIBIR_LOGS: logger.info("⚙️ Acessando Dashboard de Configurações Gerais de Automações.")
     
     dados_div = ler_alvos_divulgacao()
     status_spam = "🔴 PAUSADO" if dados_div.get("pausado", False) else "🟢 ATIVO"
@@ -1906,6 +1925,30 @@ async def salvar_destino_espiao(message: types.Message, state: FSMContext):
     await message.answer("✅ Canal de destino configurado com sucesso!")
     
     await menu_grupos_vigiados(message, state)
+
+@dp.message(F.text == "Rotinas do Espião ⏰", StateFilter("*"))
+async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    dados = ler_config_rotina()
+    # Resgata a configuração da propaganda que o Viral fará do Principal
+    config = dados.get("promo_principal", {"inicio": 10, "fim": 20, "frequencia": 1})
+    
+    texto = "⏰ <b>Rotina do Espião (Canal Viral)</b>\n\n"
+    texto += f"🔹 <b>Propaganda cruzada para o Canal Principal</b>\n"
+    texto += f"   Janela de Sorteio: {config['inicio']}h às {config['fim']}h\n"
+    texto += f"   Disparos por Dia: {config['frequencia']}x\n\n"
+    texto += "Selecione o que deseja editar abaixo:"
+    
+    teclado = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Editar Promo Afiliados 🛍️")],
+            [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
+    await state.set_state(ConfigRotina.menu_principal)
 
 # ✅ NOVOS INTERRUPTORES INTERNOS DE PAUSA
 @dp.message(ConfigDivulgacao.menu_principal, F.text.in_(["Pausar SPAM ⏸️", "Retomar SPAM ▶️"]))
@@ -2352,12 +2395,11 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
         "incentivo": "Incentivo 🔥",
         "link_grupo": "Convite do Grupo 🔗",
         "divulgar_gem": "Prompt GEM 🤖",
-        "promo_viral": "Promo Viral 🚀",
-        "promo_principal": "Promo Afiliados 🛍️"
+        "promo_viral": "Promo Viral 🚀"
     }
     
     # Ordem de exibição forçada para organizar o painel
-    ordem_exibicao = ["bom_dia", "incentivo", "link_grupo", "divulgar_gem", "promo_viral", "promo_principal", "boa_noite"]
+    ordem_exibicao = ["bom_dia", "incentivo", "link_grupo", "divulgar_gem", "promo_viral", "boa_noite"]
     
     for tipo in ordem_exibicao:
         if tipo in dados:
@@ -2372,9 +2414,8 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
         keyboard=[
             [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
             [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
-            [KeyboardButton(text="Editar Promo Viral 🚀"), KeyboardButton(text="Editar Promo Afiliados 🛍️")],
-            [KeyboardButton(text="Editar Boa Noite 🌙"), KeyboardButton(text=texto_botao_pausa)],
-            [KeyboardButton(text="Voltar às Configs 🔙")]
+            [KeyboardButton(text="Editar Promo Viral 🚀"), KeyboardButton(text="Editar Boa Noite 🌙")],
+            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Configs 🔙")]
         ],
         resize_keyboard=True,
         is_persistent=True
