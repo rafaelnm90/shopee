@@ -130,7 +130,38 @@ async def interceptar_mensagem(event):
         else:
             if EXIBIR_LOGS: logger.info(f"⏭️ Ignorado: O link {link_capturado} foi encontrado, mas a postagem não contém um anexo de vídeo direto.")
 
-# ✅ NOVO: Radar assíncrono que varre a lista e audita a permissão de acesso aos grupos
+async def validar_e_obter_entidade(client, alvo):
+    alvo_str = str(alvo).strip()
+    
+    # Se não for um ID numérico (ex: @username ou link t.me)
+    if not alvo_str.lstrip('-').isdigit():
+        return await client.get_entity(alvo_str), alvo_str
+
+    so_numeros = alvo_str.replace("-", "")
+    
+    # Lista de variações inteligentes a testar na API
+    variacoes = [
+        alvo_str, 
+        f"-100{so_numeros}", 
+        f"-{so_numeros}", 
+        so_numeros
+    ]
+    
+    variacoes_unicas = []
+    for v in variacoes:
+        if v not in variacoes_unicas:
+            variacoes_unicas.append(v)
+            
+    for var in variacoes_unicas:
+        try:
+            ent = await client.get_entity(int(var))
+            return ent, str(var) # Retorna a entidade e a variação exata que funcionou
+        except Exception:
+            continue
+            
+    raise Exception("Nenhuma variação funcionou.")
+
+# ✅ NOVO: Radar assíncrono que varre a lista, testa variações e audita a permissão
 async def monitorar_status_alvos():
     while True:
         # 1. Leitura inicial para saber quem devemos verificar agora
@@ -142,21 +173,24 @@ async def monitorar_status_alvos():
             
         alvos_para_verificar = dados_iniciais.get("alvos", [])
         novos_status_coletados = {}
+        mapa_correcoes = {}
         
-        # 2. Verificação demorada das entidades na API do Telegram
+        # 2. Verificação com Teste de Variações de ID
         for alvo in alvos_para_verificar:
             try:
-                # ✅ Correção: Transforma IDs numéricos em texto para números inteiros (int) para a API aceitar
-                alvo_api = int(alvo) if str(alvo).lstrip('-').isdigit() else alvo
-                
-                entidade = await client.get_entity(alvo_api)
-                nome = getattr(entidade, 'title', getattr(entidade, 'username', str(alvo)))
+                entidade, alvo_correto = await validar_e_obter_entidade(client, alvo)
+                nome = getattr(entidade, 'title', getattr(entidade, 'username', str(alvo_correto)))
                 novo_status = {"status": "ok", "nome": nome}
-            except Exception as e:
-                novo_status = {"status": "erro", "erro": "Acesso negado"}
                 
-            novos_status_coletados[alvo] = novo_status
-            await asyncio.sleep(2) # Pausa de segurança anti-flood da API do Telegram
+                if str(alvo) != alvo_correto:
+                    mapa_correcoes[str(alvo)] = alvo_correto
+                    
+                novos_status_coletados[alvo_correto] = novo_status
+                
+            except Exception:
+                novos_status_coletados[str(alvo)] = {"status": "erro", "erro": "Acesso negado/Link inválido"}
+                
+            await asyncio.sleep(2) # Pausa de segurança anti-flood da API
             
         # 3. Leitura FRESCA logo antes de gravar para evitar sobrescrever exclusões recentes
         try:
@@ -165,33 +199,45 @@ async def monitorar_status_alvos():
         except (FileNotFoundError, json.JSONDecodeError):
             dados_frescos = {"alvos": [], "canal_destino": None, "status_alvos": {}}
             
-        alvos_reais_agora = dados_frescos.get("alvos", [])
+        alvos_reais_agora = [str(a) for a in dados_frescos.get("alvos", [])]
         status_alvos_antigos = dados_frescos.get("status_alvos", {})
+        
         status_alvos_final = {}
+        nova_lista_alvos = []
         houve_alteracao = False
         
-        # 4. Atualiza os status APENAS dos alvos que sobreviveram na lista
+        # 4. Aplica as auto-correções na lista principal de alvos
         for alvo in alvos_reais_agora:
-            if alvo in novos_status_coletados:
-                status_alvos_final[alvo] = novos_status_coletados[alvo]
-                if status_alvos_antigos.get(alvo) != novos_status_coletados[alvo]:
+            alvo_final = mapa_correcoes.get(alvo, alvo)
+            nova_lista_alvos.append(alvo_final)
+            
+            if alvo != alvo_final:
+                houve_alteracao = True
+                if EXIBIR_LOGS: logger.info(f"🔧 Auditor corrigiu automaticamente o ID: {alvo} -> {alvo_final}")
+        
+        # 5. Atualiza os status APENAS dos alvos que sobreviveram na lista
+        for alvo_final in nova_lista_alvos:
+            if alvo_final in novos_status_coletados:
+                status_alvos_final[alvo_final] = novos_status_coletados[alvo_final]
+                if status_alvos_antigos.get(alvo_final) != novos_status_coletados[alvo_final]:
                     houve_alteracao = True
-            elif alvo in status_alvos_antigos:
-                # Alvo adicionado enquanto verificávamos, mantém o status antigo (se existir)
-                status_alvos_final[alvo] = status_alvos_antigos[alvo]
+            elif alvo_final in status_alvos_antigos:
+                # Mantém status antigo de canais adicionados há segundos pelo bot
+                status_alvos_final[alvo_final] = status_alvos_antigos[alvo_final]
                 
-        # 5. Deteta se houve remoção de alvos durante a verificação
+        # 6. Deteta se houve remoção de alvos durante a verificação
         for alvo_antigo in status_alvos_antigos.keys():
-            if alvo_antigo not in alvos_reais_agora:
+            if alvo_antigo not in nova_lista_alvos:
                 houve_alteracao = True
                 
-        # 6. Gravação limpa apenas se houver alterações nos status
+        # 7. Gravação limpa e definitiva
         if houve_alteracao:
+            dados_frescos["alvos"] = nova_lista_alvos
             dados_frescos["status_alvos"] = status_alvos_final
             with open("alvos_espiao.json", "w") as f:
                 json.dump(dados_frescos, f, indent=4)
                 
-        await asyncio.sleep(30) # Roda a verificação de status a cada 30 segundos
+        await asyncio.sleep(30)
 
 async def main():
     if EXIBIR_LOGS: logger.info("🕵️ Iniciando o Módulo Espião de Clonagem...")
