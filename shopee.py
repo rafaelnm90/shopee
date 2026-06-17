@@ -1719,19 +1719,20 @@ async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.aguardando_novo_alvo)
 async def confirmar_alvo_espiao(message: types.Message, state: FSMContext):
-    import re
     entrada_bruta = message.text.strip()
-    alvo_formatado = entrada_bruta
     
-    # 🧹 Higienizador Inteligente
-    if re.match(r'^-?\d+$', entrada_bruta):
-        so_numeros = entrada_bruta.replace("-", "")
-        if not so_numeros.startswith("100"):
-            alvo_formatado = f"-100{so_numeros}"
-        else:
-            alvo_formatado = f"-{so_numeros}"
-            
-    await state.update_data(novo_alvo_formatado=alvo_formatado)
+    # 🧹 O Higienizador rígido foi removido. O bot passará o dado bruto para o 
+    # motor Espião auditar e corrigir o ID automaticamente.
+    await state.update_data(novo_alvo_formatado=entrada_bruta)
+    
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    await message.answer(f"Deseja adicionar o alvo abaixo ao radar do Espião?\n<i>(O motor testará os formatos de ID e corrigirá automaticamente se necessário)</i>\n\n<b>{entrada_bruta}</b>", reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(EspiaoFluxo.aguardando_confirmacao_alvo)
     
     teclado_confirmacao = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
