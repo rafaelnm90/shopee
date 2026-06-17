@@ -137,7 +137,7 @@ teclado_cancelar = ReplyKeyboardMarkup(
 # 🛠️ Teclado de confirmação da análise da inteligência artificial
 teclado_confirmacao = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Tentar Novamente 🔄")],
+        [KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Digitar Nome ✍️")],
         [KeyboardButton(text="Cancelar ❌")]
     ],
     resize_keyboard=True,
@@ -1314,10 +1314,12 @@ async def receber_video(message: types.Message, state: FSMContext):
 @dp.message(PostagemFluxo.aguardando_confirmacao_nome)
 async def confirmar_nome(message: types.Message, state: FSMContext):
     if message.text == "Aprovar ✅":
+        if EXIBIR_LOGS: logger.info("✅ Nome aprovado. Avançando para seleção de plataforma.")
         # ✅ Fluxo modificado: em vez de pedir os links de produto, pede a plataforma primeiro
         await message.answer("Onde você postou/vai postar este vídeo?", reply_markup=teclado_plataforma)
         await state.set_state(PostagemFluxo.aguardando_plataforma)
-    elif message.text == "Tentar Novamente 🔄":
+    elif message.text == "Digitar Nome ✍️":
+        if EXIBIR_LOGS: logger.info("✍️ Transição manual solicitada para digitação do nome do produto.")
         await message.answer("Sem problemas. Digite manualmente APENAS O NOME DO PRODUTO:", reply_markup=teclado_cancelar)
         await state.set_state(PostagemFluxo.aguardando_chamada_manual)
 
