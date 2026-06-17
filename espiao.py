@@ -242,6 +242,15 @@ async def monitorar_status_alvos():
 async def main():
     if EXIBIR_LOGS: logger.info("🕵️ Iniciando o Módulo Espião de Clonagem...")
     await client.start()
+    
+    # ✅ NOVO: Força o cache do histórico para o Userbot reconhecer os IDs numéricos privados
+    if EXIBIR_LOGS: logger.info("🔄 Sincronizando banco de dados de grupos e access_hashes...")
+    try:
+        await client.get_dialogs()
+        if EXIBIR_LOGS: logger.info("✅ Sincronização concluída! IDs numéricos agora serão reconhecidos pelo Auditor.")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Aviso na sincronização: {e}")
+        
     alvos = carregar_alvos()
     if EXIBIR_LOGS: logger.info(f"📡 Radar ativo para {len(alvos)} concorrentes.")
     
