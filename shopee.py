@@ -1510,24 +1510,38 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
     
-    # 🚀 LÓGICA DE INTELIGÊNCIA TEMPORAL: Decide se o vídeo entra na fila de Hoje ou Amanhã
+    # 🚀 LÓGICA DE INTELIGÊNCIA TEMPORAL: Decide a data base se o vídeo entra na fila de Hoje ou Amanhã
     dados_rotina = ler_config_rotina()
     if dados_rotina.get("ultimo_bom_dia") == hoje_str:
         from datetime import timedelta
-        data_agendamento = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
-        if EXIBIR_LOGS: logger.info("⏰ Expediente aberto ('Bom Dia' já disparado). Vídeo novo empurrado para a fila de Amanhã.")
+        data_agendamento_base = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+        if EXIBIR_LOGS: logger.info("⏰ Expediente aberto ('Bom Dia' disparado). Data base projetada para Amanhã.")
     else:
-        data_agendamento = hoje_str
-        if EXIBIR_LOGS: logger.info("⏰ Madrugada/Manhã ('Bom Dia' pendente). Vídeo novo inserido na fila de Hoje.")
+        data_agendamento_base = hoje_str
+        if EXIBIR_LOGS: logger.info("⏰ Madrugada/Manhã ('Bom Dia' pendente). Data base projetada para Hoje.")
     
     def adicionar_a_fila(caminho_vid, vid_id, caption):
         fila_data = ler_fila_postagens()
+        
+        if EXIBIR_LOGS: logger.info("🔍 Inspecionando a fila para garantir o alinhamento cronológico...")
+        maior_data = data_agendamento_base
+        
+        for x in fila_data.get("fila", []):
+            data_x = x.get("data_adicao", "")
+            if data_x and data_x != "2000-01-01" and data_x > maior_data:
+                maior_data = data_x
+                
+        if maior_data > data_agendamento_base:
+            if EXIBIR_LOGS: logger.info(f"📆 Vídeos futuros encontrados. O novo item assumirá o final da fila: {maior_data}")
+        else:
+            if EXIBIR_LOGS: logger.info(f"📅 Nenhuma data futura bloqueando. Aplicando data base: {maior_data}")
+            
         item = {
             "id": f"{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}",
             "caminho_video": caminho_vid,
             "video_id": vid_id,
             "legenda": caption,
-            "data_adicao": data_agendamento
+            "data_adicao": maior_data
         }
         fila_data.setdefault("fila", []).append(item)
         salvar_fila_postagens(fila_data)
