@@ -90,6 +90,14 @@ class ConfigDivulgacao(StatesGroup):
     aguardando_selecao_alvo = State()
     aguardando_valores_unificados = State()
 
+class ConfigDivulgacaoViral(StatesGroup):
+    menu_principal = State()
+    aguardando_alvos = State()
+    aguardando_exclusao_alvo = State()
+    aguardando_tipo_edicao = State()
+    aguardando_selecao_alvo = State()
+    aguardando_valores_unificados = State()
+
 class ConfigRotina(StatesGroup):
     menu_principal = State()
     aguardando_novo_horario = State()
@@ -1967,6 +1975,22 @@ async def alternar_pausa_spam_interno(message: types.Message, state: FSMContext)
 
     await gerenciar_divulgacao(message, state)
 
+@dp.message(ConfigDivulgacaoViral.menu_principal, F.text.in_(["Pausar SPAM ⏸️", "Retomar SPAM ▶️"]))
+async def alternar_pausa_spam_viral_interno(message: types.Message, state: FSMContext):
+    dados = ler_alvos_divulgacao_viral()
+    novo_status = not dados.get("pausado", False)
+    dados["pausado"] = novo_status
+    salvar_alvos_divulgacao_viral(dados)
+
+    if novo_status:
+        if EXIBIR_LOGS: logger.info("⏸️ SPAM Viral PAUSADO internamente.")
+        await message.answer("⏸️ <b>SPAM Viral PAUSADO.</b>\nO Userbot não enviará convites para o Viral.", parse_mode="HTML")
+    else:
+        if EXIBIR_LOGS: logger.info("▶️ SPAM Viral ATIVADO internamente.")
+        await message.answer("▶️ <b>SPAM Viral ATIVO.</b>\nO Userbot voltará a operar normalmente para o Viral.", parse_mode="HTML")
+
+    await gerenciar_divulgacao_viral(message, state)
+
 @dp.message(ConfigRotina.menu_principal, F.text.in_(["Pausar Rotinas ⏸️", "Retomar Rotinas ▶️"]))
 async def alternar_pausa_rotinas_interno(message: types.Message, state: FSMContext):
     dados_rotina = ler_config_rotina()
@@ -2381,6 +2405,240 @@ async def acionar_disparo_imediato(message: types.Message):
     salvar_alvos_divulgacao(dados)
     if EXIBIR_LOGS: logger.info("🚀 Comando de disparo forçado enviado para o arquivo JSON.")
     await message.answer("🚀 <b>Disparo Imediato Acionado!</b>\nO Userbot detectará o comando e enviará a rajada de convites em até 5 segundos.", parse_mode="HTML", reply_markup=teclado_opcoes_divulgacao)
+
+# --- LÓGICA DE GERENCIAMENTO DE DIVULGAÇÃO (CANAL VIRAL) ---
+def ler_alvos_divulgacao_viral():
+    try:
+        with open("alvos_divulgacao_viral.json", "r") as f:
+            dados = json.load(f)
+            if "repeticoes_internas" not in dados: dados["repeticoes_internas"] = 6
+            if "replicas_mensagem" not in dados: dados["replicas_mensagem"] = 5
+            return dados
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"alvos": [], "frequencia_por_hora": 0, "pausado": False, "forcar_disparo": False, "repeticoes_internas": 6, "replicas_mensagem": 5}
+
+def salvar_alvos_divulgacao_viral(dados):
+    with open("alvos_divulgacao_viral.json", "w") as f:
+        json.dump(dados, f, indent=4)
+
+@dp.message(F.text == "SPAM do Espião 📢", StateFilter("*"))
+async def gerenciar_divulgacao_viral(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("📢 Acessando o painel de SPAM do Canal Viral...")
+    dados = ler_alvos_divulgacao_viral()
+    alvos = dados.get("alvos", [])
+    freq_g = dados.get("frequencia_por_hora", 0)
+    rep_int_g = dados.get("repeticoes_internas", 6)
+    rep_msg_g = dados.get("replicas_mensagem", 5)
+    status_pausa = "⏸️ Pausado" if dados.get("pausado") else "▶️ Rodando"
+    config_alvos = dados.get("config_alvos", {})
+
+    texto = f"📊 <b>Status da Divulgação do Viral</b> [{status_pausa}]\n\n"
+    texto += f"🌍 <b>Padrão Global:</b>\n"
+    texto += f"Frequência: {freq_g} msgs/hora\nRepetições no Texto: {rep_int_g}x\nRéplicas por Disparo: {rep_msg_g}x\n\n"
+    texto += "🎯 <b>Alvos Ativos:</b>\n"
+    
+    if alvos:
+        for i, alvo in enumerate(alvos, 1):
+            conf = config_alvos.get(alvo, {})
+            f_a = conf.get("frequencia", freq_g)
+            ri_a = conf.get("repeticoes", rep_int_g)
+            rm_a = conf.get("replicas", rep_msg_g)
+            
+            marcador = " (Personalizado)" if conf else ""
+            texto += f"{i}. {alvo}{marcador}\n"
+            texto += f"   └ Freq: {f_a}/h | Rep: {ri_a}x | Rép: {rm_a}x\n"
+    else:
+        texto += "Nenhum alvo cadastrado no momento.\n"
+        
+    texto_botao_pausa = "Retomar SPAM ▶️" if dados.get("pausado") else "Pausar SPAM ⏸️"
+    teclado_dinamico_spam_viral = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Adicionar Alvo Viral ➕"), KeyboardButton(text="Excluir Alvo Viral 🗑️")],
+            [KeyboardButton(text="Editar Configs Viral ⚙️"), KeyboardButton(text="Forçar Disparo Viral 🚀")],
+            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar ao Menu Espião 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+        
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_dinamico_spam_viral)
+    await state.set_state(ConfigDivulgacaoViral.menu_principal)
+
+@dp.message(ConfigDivulgacaoViral.menu_principal, F.text == "Adicionar Alvo Viral ➕")
+async def pedir_alvo_viral(message: types.Message, state: FSMContext):
+    await message.answer("Envie os links ou IDs dos grupos separados por vírgula para o SPAM VIRAL.\nExemplo: <code>https://t.me/grupo_viral, -1009999999</code>", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(ConfigDivulgacaoViral.aguardando_alvos)
+
+@dp.message(ConfigDivulgacaoViral.aguardando_alvos)
+async def salvar_alvo_viral(message: types.Message, state: FSMContext):
+    novos_alvos = [alvo.strip() for alvo in message.text.split(",") if alvo.strip()]
+    if not novos_alvos:
+        await message.answer("Nenhum alvo detectado. Tente novamente:", reply_markup=teclado_cancelar)
+        return
+        
+    dados = ler_alvos_divulgacao_viral()
+    dados["alvos"].extend(novos_alvos)
+    dados["alvos"] = list(dict.fromkeys(dados["alvos"]))
+    salvar_alvos_divulgacao_viral(dados)
+    
+    if EXIBIR_LOGS: logger.info(f"✅ Novos alvos virais adicionados: {novos_alvos}")
+    await message.answer("Alvos do Viral adicionados com sucesso!")
+    await gerenciar_divulgacao_viral(message, state)
+
+@dp.message(ConfigDivulgacaoViral.menu_principal, F.text == "Excluir Alvo Viral 🗑️")
+async def pedir_exclusao_viral(message: types.Message, state: FSMContext):
+    dados = ler_alvos_divulgacao_viral()
+    alvos = dados.get("alvos", [])
+    if not alvos:
+        await message.answer("Não há alvos cadastrados para excluir.")
+        await gerenciar_divulgacao_viral(message, state)
+        return
+        
+    texto = "Qual alvo do Viral deseja excluir? Digite o <b>NÚMERO</b> correspondente da lista abaixo:\n\n"
+    for i, alvo in enumerate(alvos, 1):
+        texto += f"{i}. {alvo}\n"
+    await message.answer(texto, reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(ConfigDivulgacaoViral.aguardando_exclusao_alvo)
+
+@dp.message(ConfigDivulgacaoViral.aguardando_exclusao_alvo)
+async def processar_exclusao_viral(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas o NÚMERO do alvo.", reply_markup=teclado_cancelar)
+        return
+        
+    indice = int(message.text) - 1
+    dados = ler_alvos_divulgacao_viral()
+    alvos = dados.get("alvos", [])
+    
+    if 0 <= indice < len(alvos):
+        removido = alvos.pop(indice)
+        dados["alvos"] = alvos
+        salvar_alvos_divulgacao_viral(dados)
+        if EXIBIR_LOGS: logger.info(f"🗑️ Alvo viral removido com sucesso: {removido}")
+        await message.answer(f"Alvo Viral '{removido}' excluído com sucesso!")
+        await gerenciar_divulgacao_viral(message, state)
+    else:
+        await message.answer("Número inválido. Tente novamente:", reply_markup=teclado_cancelar)
+
+@dp.message(ConfigDivulgacaoViral.menu_principal, F.text == "Editar Configs Viral ⚙️")
+async def iniciar_edicao_spam_viral(message: types.Message, state: FSMContext):
+    await message.answer("Deseja editar o Padrão Global ou configurar um Alvo Específico para o Viral?", reply_markup=teclado_tipo_edicao)
+    await state.set_state(ConfigDivulgacaoViral.aguardando_tipo_edicao)
+
+@dp.message(ConfigDivulgacaoViral.aguardando_tipo_edicao, F.text.in_(["Global 🌍", "Por Alvo 🎯"]))
+async def selecionar_tipo_edicao_viral(message: types.Message, state: FSMContext):
+    is_global = message.text == "Global 🌍"
+    await state.update_data(edicao_global=is_global)
+    
+    dados = ler_alvos_divulgacao_viral()
+    
+    if is_global:
+        freq_atual = dados.get("frequencia_por_hora", 0)
+        rep_atual = dados.get("repeticoes_internas", 6)
+        repl_atual = dados.get("replicas_mensagem", 5)
+        
+        texto_explicativo = (
+            "🌍 <b>Edição do Padrão Global (Viral)</b>\n\n"
+            "Envie os três valores juntos separados por vírgula nesta exata ordem:\n\n"
+            "<b>1️⃣ Frequência:</b> Disparos por hora efetuados pelo bot.\n"
+            "<b>2️⃣ Repetições:</b> Blocos de texto contidos na mensagem longa.\n"
+            "<b>3️⃣ Réplicas:</b> Mensagens disparadas seguidas na mesma rajada.\n\n"
+            f"<i>Exemplo com a sua configuração atual:</i>\n<code>{freq_atual}, {rep_atual}, {repl_atual}</code>"
+        )
+        await message.answer(texto_explicativo, reply_markup=teclado_cancelar, parse_mode="HTML")
+        await state.set_state(ConfigDivulgacaoViral.aguardando_valores_unificados)
+    else:
+        alvos = dados.get("alvos", [])
+        if not alvos:
+            await message.answer("Não há alvos para editar. Adicione um primeiro.")
+            await gerenciar_divulgacao_viral(message, state)
+            return
+        
+        texto = "Qual alvo deseja personalizar? Digite o <b>NÚMERO</b> correspondente da lista abaixo:\n\n"
+        for i, alvo in enumerate(alvos, 1):
+            texto += f"{i}. {alvo}\n"
+        await message.answer(texto, reply_markup=teclado_cancelar, parse_mode="HTML")
+        await state.set_state(ConfigDivulgacaoViral.aguardando_selecao_alvo)
+
+@dp.message(ConfigDivulgacaoViral.aguardando_selecao_alvo)
+async def selecionar_alvo_edicao_viral(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas o NÚMERO.", reply_markup=teclado_cancelar)
+        return
+    indice = int(message.text) - 1
+    dados = ler_alvos_divulgacao_viral()
+    alvos = dados.get("alvos", [])
+    
+    if 0 <= indice < len(alvos):
+        alvo_selecionado = alvos[indice]
+        await state.update_data(alvo_em_edicao=alvo_selecionado)
+        
+        config_alvos = dados.get("config_alvos", {})
+        conf_alvo = config_alvos.get(alvo_selecionado, {})
+        
+        freq_atual = conf_alvo.get("frequencia", dados.get("frequencia_por_hora", 0))
+        rep_atual = conf_alvo.get("repeticoes", dados.get("repeticoes_internas", 6))
+        repl_atual = conf_alvo.get("replicas", dados.get("replicas_mensagem", 5))
+        
+        texto_explicativo = (
+            f"🎯 <b>Edição do Alvo (Viral):</b> {alvo_selecionado}\n\n"
+            "Envie os três valores juntos separados por vírgula nesta exata ordem:\n\n"
+            "<b>1️⃣ Frequência:</b> Disparos por hora efetuados pelo bot.\n"
+            "<b>2️⃣ Repetições:</b> Blocos de texto contidos na mensagem longa.\n"
+            "<b>3️⃣ Réplicas:</b> Mensagens disparadas seguidas na mesma rajada.\n\n"
+            f"<i>Exemplo com a sua configuração atual:</i>\n<code>{freq_atual}, {rep_atual}, {repl_atual}</code>"
+        )
+        await message.answer(texto_explicativo, reply_markup=teclado_cancelar, parse_mode="HTML")
+        await state.set_state(ConfigDivulgacaoViral.aguardando_valores_unificados)
+    else:
+        await message.answer("Número inválido. Tente novamente:", reply_markup=teclado_cancelar)
+
+@dp.message(ConfigDivulgacaoViral.aguardando_valores_unificados)
+async def salvar_valores_unificados_viral(message: types.Message, state: FSMContext):
+    import re
+    match = re.match(r"^(\d+)\s*,\s*(\d+)\s*,\s*(\d+)$", message.text.strip())
+    
+    if not match:
+        await message.answer("Formato inválido. Envie os três números isolados por vírgula (Exemplo: 3, 6, 5).", reply_markup=teclado_cancelar)
+        return
+        
+    freq, rep, repl = map(int, match.groups())
+    
+    data = await state.get_data()
+    is_global = data.get("edicao_global")
+    alvo = data.get("alvo_em_edicao")
+    
+    dados = ler_alvos_divulgacao_viral()
+    if "config_alvos" not in dados:
+        dados["config_alvos"] = {}
+        
+    if is_global:
+        dados["frequencia_por_hora"] = freq
+        dados["repeticoes_internas"] = rep
+        dados["replicas_mensagem"] = repl
+        msg_final = f"✅ <b>Padrão Global (Viral) atualizado!</b>\nFrequência: {freq}x/h | Repetições: {rep}x | Réplicas: {repl}x"
+    else:
+        if alvo not in dados["config_alvos"]:
+            dados["config_alvos"][alvo] = {}
+        dados["config_alvos"][alvo]["frequencia"] = freq
+        dados["config_alvos"][alvo]["repeticoes"] = rep
+        dados["config_alvos"][alvo]["replicas"] = repl
+        msg_final = f"✅ <b>Alvo personalizado (Viral) atualizado!</b>\nAlvo: {alvo}\nFrequência: {freq}x/h | Repetições: {rep}x | Réplicas: {repl}x"
+        
+    salvar_alvos_divulgacao_viral(dados)
+    if EXIBIR_LOGS: logger.info(f"⚙️ Configuração Viral salva. Global: {is_global} | Freq: {freq}, Rep: {rep}, Repl: {repl}")
+    
+    await message.answer(msg_final, parse_mode="HTML")
+    await gerenciar_divulgacao_viral(message, state)
+
+@dp.message(ConfigDivulgacaoViral.menu_principal, F.text == "Forçar Disparo Viral 🚀")
+async def acionar_disparo_imediato_viral(message: types.Message):
+    dados = ler_alvos_divulgacao_viral()
+    dados["forcar_disparo"] = True
+    salvar_alvos_divulgacao_viral(dados)
+    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo forçado enviado para o JSON do Viral.")
+    await message.answer("🚀 <b>Disparo Imediato Viral Acionado!</b>\nO Userbot detectará o comando e enviará a rajada de convites.", parse_mode="HTML")
 
 # --- LÓGICA DE MENSAGENS DE ROTINA ---
 @dp.message(F.text == "Mensagens de Rotina ⏰")
