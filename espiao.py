@@ -146,7 +146,10 @@ async def monitorar_status_alvos():
         # 2. Verificação demorada das entidades na API do Telegram
         for alvo in alvos_para_verificar:
             try:
-                entidade = await client.get_entity(alvo)
+                # ✅ Correção: Transforma IDs numéricos em texto para números inteiros (int) para a API aceitar
+                alvo_api = int(alvo) if str(alvo).lstrip('-').isdigit() else alvo
+                
+                entidade = await client.get_entity(alvo_api)
                 nome = getattr(entidade, 'title', getattr(entidade, 'username', str(alvo)))
                 novo_status = {"status": "ok", "nome": nome}
             except Exception as e:
