@@ -1505,7 +1505,18 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
         subprocess.run(["touch", caminho_video_original])
         if EXIBIR_LOGS: logger.info("📅 Data do arquivo renovada sem recompressão.")
 
-    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    agora = datetime.now(fuso_horario)
+    hoje_str = agora.strftime("%Y-%m-%d")
+    
+    # 🚀 LÓGICA DE INTELIGÊNCIA TEMPORAL: Decide se o vídeo entra na fila de Hoje ou Amanhã
+    dados_rotina = ler_config_rotina()
+    if dados_rotina.get("ultimo_bom_dia") == hoje_str:
+        from datetime import timedelta
+        data_agendamento = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+        if EXIBIR_LOGS: logger.info("⏰ Expediente aberto ('Bom Dia' já disparado). Vídeo novo empurrado para a fila de Amanhã.")
+    else:
+        data_agendamento = hoje_str
+        if EXIBIR_LOGS: logger.info("⏰ Madrugada/Manhã ('Bom Dia' pendente). Vídeo novo inserido na fila de Hoje.")
     
     def adicionar_a_fila(caminho_vid, vid_id, caption):
         fila_data = ler_fila_postagens()
@@ -1514,7 +1525,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
             "caminho_video": caminho_vid,
             "video_id": vid_id,
             "legenda": caption,
-            "data_adicao": hoje_str
+            "data_adicao": data_agendamento
         }
         fila_data.setdefault("fila", []).append(item)
         salvar_fila_postagens(fila_data)
