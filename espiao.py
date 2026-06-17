@@ -133,42 +133,60 @@ async def interceptar_mensagem(event):
 # ✅ NOVO: Radar assíncrono que varre a lista e audita a permissão de acesso aos grupos
 async def monitorar_status_alvos():
     while True:
+        # 1. Leitura inicial para saber quem devemos verificar agora
         try:
             with open("alvos_espiao.json", "r") as f:
-                dados = json.load(f)
+                dados_iniciais = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
-            dados = {"alvos": [], "canal_destino": None, "status_alvos": {}}
+            dados_iniciais = {"alvos": [], "canal_destino": None, "status_alvos": {}}
             
-        alvos = dados.get("alvos", [])
-        status_alvos = dados.get("status_alvos", {})
-        houve_alteracao = False
+        alvos_para_verificar = dados_iniciais.get("alvos", [])
+        novos_status_coletados = {}
         
-        for alvo in alvos:
+        # 2. Verificação demorada das entidades na API do Telegram
+        for alvo in alvos_para_verificar:
             try:
-                # 📡 Ping na API do Telegram para verificar a existência e a permissão
                 entidade = await client.get_entity(alvo)
                 nome = getattr(entidade, 'title', getattr(entidade, 'username', str(alvo)))
                 novo_status = {"status": "ok", "nome": nome}
             except Exception as e:
                 novo_status = {"status": "erro", "erro": "Acesso negado"}
                 
-            # Evita desgaste no disco salvando apenas se o status do alvo mudou
-            if status_alvos.get(alvo) != novo_status:
-                status_alvos[alvo] = novo_status
-                houve_alteracao = True
-            
+            novos_status_coletados[alvo] = novo_status
             await asyncio.sleep(2) # Pausa de segurança anti-flood da API do Telegram
             
-        # 🧹 Faxina: remove da memória alvos que você já deletou pelo painel do bot
-        chaves_removidas = [k for k in list(status_alvos.keys()) if k not in alvos]
-        for k in chaves_removidas:
-            del status_alvos[k]
-            houve_alteracao = True
+        # 3. Leitura FRESCA logo antes de gravar para evitar sobrescrever exclusões recentes
+        try:
+            with open("alvos_espiao.json", "r") as f:
+                dados_frescos = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            dados_frescos = {"alvos": [], "canal_destino": None, "status_alvos": {}}
             
+        alvos_reais_agora = dados_frescos.get("alvos", [])
+        status_alvos_antigos = dados_frescos.get("status_alvos", {})
+        status_alvos_final = {}
+        houve_alteracao = False
+        
+        # 4. Atualiza os status APENAS dos alvos que sobreviveram na lista
+        for alvo in alvos_reais_agora:
+            if alvo in novos_status_coletados:
+                status_alvos_final[alvo] = novos_status_coletados[alvo]
+                if status_alvos_antigos.get(alvo) != novos_status_coletados[alvo]:
+                    houve_alteracao = True
+            elif alvo in status_alvos_antigos:
+                # Alvo adicionado enquanto verificávamos, mantém o status antigo (se existir)
+                status_alvos_final[alvo] = status_alvos_antigos[alvo]
+                
+        # 5. Deteta se houve remoção de alvos durante a verificação
+        for alvo_antigo in status_alvos_antigos.keys():
+            if alvo_antigo not in alvos_reais_agora:
+                houve_alteracao = True
+                
+        # 6. Gravação limpa apenas se houver alterações nos status
         if houve_alteracao:
-            dados["status_alvos"] = status_alvos
+            dados_frescos["status_alvos"] = status_alvos_final
             with open("alvos_espiao.json", "w") as f:
-                json.dump(dados, f, indent=4)
+                json.dump(dados_frescos, f, indent=4)
                 
         await asyncio.sleep(30) # Roda a verificação de status a cada 30 segundos
 
