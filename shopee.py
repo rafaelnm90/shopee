@@ -2509,21 +2509,24 @@ async def sair_menu_fila(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
 
-async def aplicar_renumeracao_e_salvar(fila, message, state):
+async def aplicar_renumeracao_e_salvar(fila, message, state, numero_base=None):
     import re
     if EXIBIR_LOGS: logger.info("🔄 Iniciando auto-correção da numeração da fila...")
     
-    menor_numero = float('inf')
-    for f_item in fila:
-        match = re.search(r'(?i)Vídeo\s+(\d+)', f_item.get("legenda", ""))
-        if match:
-            num = int(match.group(1))
-            if num < menor_numero:
-                menor_numero = num
+    if numero_base is not None:
+        menor_numero = numero_base
+    else:
+        menor_numero = float('inf')
+        for f_item in fila:
+            match = re.search(r'(?i)Vídeo\s+(\d+)', f_item.get("legenda", ""))
+            if match:
+                num = int(match.group(1))
+                if num < menor_numero:
+                    menor_numero = num
                 
-    if menor_numero == float('inf'):
-        async with _lock_contador:
-            menor_numero = ler_contador()
+        if menor_numero == float('inf'):
+            async with _lock_contador:
+                menor_numero = ler_contador()
             
     numero_atual_cascata = menor_numero
     for i in range(len(fila)):
@@ -2597,6 +2600,20 @@ async def processar_exclusao_fila(message: types.Message, state: FSMContext):
     fila = fila_data.get("fila", [])
     
     if posicao is not None and 0 <= posicao < len(fila):
+        import re
+        
+        # 🔍 Congela o menor número da fila ANTES de apagar o vídeo
+        menor_numero_antes = float('inf')
+        for f_item in fila:
+            match = re.search(r'(?i)Vídeo\s+(\d+)', f_item.get("legenda", ""))
+            if match:
+                num = int(match.group(1))
+                if num < menor_numero_antes:
+                    menor_numero_antes = num
+                    
+        if menor_numero_antes == float('inf'):
+            menor_numero_antes = None
+
         item_removido = fila.pop(posicao)
         caminho_video = item_removido.get("caminho_video")
         
@@ -2608,7 +2625,7 @@ async def processar_exclusao_fila(message: types.Message, state: FSMContext):
                 
         if EXIBIR_LOGS: logger.info(f"🗑️ Fila: Vídeo na posição {posicao+1} removido com sucesso.")
         
-        await aplicar_renumeracao_e_salvar(fila, message, state)
+        await aplicar_renumeracao_e_salvar(fila, message, state, numero_base=menor_numero_antes)
     else:
         await message.answer("Erro de sincronização. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
