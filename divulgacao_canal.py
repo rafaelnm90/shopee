@@ -48,6 +48,14 @@ def carregar_configuracoes():
         if EXIBIR_LOGS: logger.warning("⚠️ Arquivo alvos_divulgacao.json não encontrado. Aguardando o bot principal criá-lo.")
         return None
 
+def carregar_configuracoes_viral():
+    try:
+        with open("alvos_divulgacao_viral.json", "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        if EXIBIR_LOGS: logger.warning("⚠️ Arquivo alvos_divulgacao_viral.json não encontrado. Aguardando o bot principal criá-lo.")
+        return None
+
 async def gerar_texto_divulgacao(repeticoes=6):
     if EXIBIR_LOGS: print(f"✅ Função iniciada com {repeticoes} repetições.")
     if EXIBIR_LOGS: logger.info("🚀 Montando prompt persuasivo focado em engajamento e conversão...")
@@ -61,7 +69,7 @@ async def gerar_texto_divulgacao(repeticoes=6):
         "Entregue APENAS a frase final, sem aspas."
     )
     
-   frase_ia = None
+    frase_ia = None
     for modelo_nome in MODELOS_CASCATA_GEMINI:
         try:
             if EXIBIR_LOGS: logger.info(f"⏳ A consultar o motor de IA: {modelo_nome}...")
@@ -124,100 +132,222 @@ async def enviar_mensagem(alvo):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao enviar rajada para {alvo}: {e}")
 
+async def gerar_texto_divulgacao_viral(repeticoes=6):
+    if EXIBIR_LOGS: logger.info(f"🚀 [VIRAL] Montando prompt persuasivo para o Acervo Viral...")
+    prompt = (
+        "Você atua como um copywriter persuasivo e focado em conversão, divulgando um grupo do Telegram exclusivo para afiliados da Shopee chamado 'Acervo Viral Shopee'. "
+        "Crie UMA ÚNICA FRASE curta, altamente chamativa, convidativa e diferente de todas as anteriores. "
+        "Foque em atrair os afiliados oferecendo acesso imediato aos vídeos mais virais, achados do TikTok e tendências do momento, mantendo a mesma pegada agressiva de aumentar comissões e faturamento em alta. "
+        "É OBRIGATÓRIO informar organicamente na frase que o acesso ao grupo é GRÁTIS (exatamente assim, em letras maiúsculas). "
+        "OBRIGATÓRIO: Inicie a sua resposta com uma sequência de 10 a 15 emojis repetidos de impacto (como 🚨, 🚀, ⚠️, 🔥 ou 💰) para criar uma forte barreira visual na tela. "
+        "Use um tom entusiasmado e adicione outros emojis variados. Entregue APENAS a frase final, sem aspas."
+    )
+    
+    frase_ia = None
+    for modelo_nome in MODELOS_CASCATA_GEMINI:
+        try:
+            if EXIBIR_LOGS: logger.info(f"⏳ [VIRAL] A consultar o motor de IA: {modelo_nome}...")
+            response = await asyncio.to_thread(
+                client_genai.models.generate_content,
+                model=modelo_nome,
+                contents=prompt
+            )
+            if response and response.text:
+                if EXIBIR_LOGS: logger.info(f"✅ [VIRAL] Sucesso com o modelo {modelo_nome}!")
+                frase_ia = response.text.strip()
+                break
+        except Exception as e:
+            erro_str = str(e)
+            if "429" in erro_str:
+                if EXIBIR_LOGS: logger.warning(f"⚠️ [VIRAL] Limite atingido em {modelo_nome}. A tentar a próxima alternativa...")
+            else:
+                if EXIBIR_LOGS: logger.warning(f"⚠️ [VIRAL] Modelo {modelo_nome} indisponível: {erro_str[:50]}...")
+            continue
+
+    if not frase_ia:
+        if EXIBIR_LOGS: logger.error("❌ [VIRAL] Todos os modelos falharam. A utilizar frase padrão de segurança.")
+        frase_ia = "🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨\nAfiliado, venha pegar os produtos mais virais e bombados do momento no nosso acervo 100% GRÁTIS!"
+
+    bloco_unico = f"{frase_ia}\n\nLINK PARA O GRUPO VIRAL:👇\nhttps://t.me/acervo_viral_shopee"
+    
+    if EXIBIR_LOGS: logger.info(f"🔄 [VIRAL] Multiplicando bloco de texto {repeticoes} vezes na mesma mensagem.")
+    
+    texto_multiplicado = "\n\n\n".join([bloco_unico] * repeticoes)
+    
+    return texto_multiplicado
+
+async def enviar_mensagem_viral(alvo):
+    if EXIBIR_LOGS: logger.info(f"🔍 [VIRAL] Validando status de pausa antes do disparo para {alvo}...")
+    config = carregar_configuracoes_viral()
+    if config and config.get("pausado", False):
+        if EXIBIR_LOGS: logger.warning("🛑 [VIRAL] Disparo cancelado: O sistema de SPAM Viral está pausado no momento.")
+        return
+        
+    config_alvos = config.get("config_alvos", {}) if config else {}
+    conf_alvo = config_alvos.get(alvo, {})
+    
+    replicas = conf_alvo.get("replicas", config.get("replicas_mensagem", 5) if config else 5)
+    repeticoes = conf_alvo.get("repeticoes", config.get("repeticoes_internas", 6) if config else 6)
+    
+    texto = await gerar_texto_divulgacao_viral(repeticoes)
+    try:
+        entidade = await client.get_entity(alvo)
+        
+        if EXIBIR_LOGS: logger.info(f"📤 [VIRAL] Iniciando disparo em rajada de {replicas} mensagens para {alvo}...")
+        
+        for i in range(replicas):
+            await client.send_message(entidade, texto)
+            if EXIBIR_LOGS: logger.info(f"📩 [VIRAL] Mensagem {i+1}/{replicas} enviada.")
+            if i < replicas - 1:
+                await asyncio.sleep(1.5)
+            
+        if EXIBIR_LOGS: logger.info(f"✅ [VIRAL] Rajada de {replicas} mensagens concluída com sucesso para {alvo}!")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [VIRAL] Falha ao enviar rajada para {alvo}: {e}")
+
 # Novo dicionário global para rastrear os agendamentos cruzando a virada das horas
 ultimos_agendamentos_por_alvo = {}
 
 def programar_envios_da_hora():
     global ultimos_agendamentos_por_alvo
-    config = carregar_configuracoes()
-    if not config or not config.get("alvos"):
-        return
-        
-    if config.get("pausado", False):
-        if EXIBIR_LOGS: logger.info("⏸️ Divulgação pausada pelo painel. Pulando sorteio desta hora.")
-        return
-
-    alvos = config["alvos"]
-    freq_global = config.get("frequencia_por_hora", 0)
-    config_alvos = config.get("config_alvos", {})
-    
     agora = datetime.now()
     INTERVALO_MINIMO = 15 # Distanciamento rigoroso de 15 minutos
     
-    for alvo in alvos:
-        conf_alvo = config_alvos.get(alvo, {})
-        freq_alvo = conf_alvo.get("frequencia", freq_global)
+    # --- PARTE 1: AGENDAMENTO DO SPAM PRINCIPAL ---
+    config_princ = carregar_configuracoes()
+    if config_princ and config_princ.get("alvos") and not config_princ.get("pausado", False):
+        alvos_princ = config_princ["alvos"]
+        freq_global_princ = config_princ.get("frequencia_por_hora", 0)
+        config_alvos_princ = config_princ.get("config_alvos", {})
         
-        if freq_alvo <= 0: continue
-        
-        if EXIBIR_LOGS: logger.info(f"🔄 Sorteando {freq_alvo} envios para {alvo} na hora atual ({agora.hour}h)...")
-
-        # Fatiamento da hora para alocação otimizada
-        espacamento_ideal = 58 // freq_alvo if freq_alvo > 0 else 58
-
-        for i in range(freq_alvo):
-            sucesso = False
+        for alvo in alvos_princ:
+            conf_alvo = config_alvos_princ.get(alvo, {})
+            freq_alvo = conf_alvo.get("frequencia", freq_global_princ)
             
-            min_inicio_busca = (i * espacamento_ideal) + 1
-            min_fim_busca = min(((i + 1) * espacamento_ideal), 59)
-            if min_fim_busca <= min_inicio_busca:
-                min_fim_busca = 59
-                
-            for tentativa in range(100):
-                minuto_sorteado = random.randint(min_inicio_busca, min_fim_busca)
-                horario_disparo = agora.replace(minute=minuto_sorteado, second=random.randint(0, 59))
-                
-                # Checagem de colisão com o histórico
-                ultimo_envio = ultimos_agendamentos_por_alvo.get(alvo)
-                colisao = False
-                
-                if ultimo_envio:
-                    diferenca = (horario_disparo - ultimo_envio).total_seconds() / 60
-                    if abs(diferenca) < INTERVALO_MINIMO:
+            if freq_alvo <= 0: continue
+            if EXIBIR_LOGS: logger.info(f"🔄 Sorteando {freq_alvo} envios PRINCIPAIS para {alvo} na hora atual ({agora.hour}h)...")
+            espacamento_ideal = 58 // freq_alvo if freq_alvo > 0 else 58
+
+            for i in range(freq_alvo):
+                sucesso = False
+                min_inicio_busca = (i * espacamento_ideal) + 1
+                min_fim_busca = min(((i + 1) * espacamento_ideal), 59)
+                if min_fim_busca <= min_inicio_busca: min_fim_busca = 59
+                    
+                for tentativa in range(100):
+                    minuto_sorteado = random.randint(min_inicio_busca, min_fim_busca)
+                    horario_disparo = agora.replace(minute=minuto_sorteado, second=random.randint(0, 59))
+                    
+                    ultimo_envio = ultimos_agendamentos_por_alvo.get(alvo)
+                    colisao = False
+                    
+                    if ultimo_envio and abs((horario_disparo - ultimo_envio).total_seconds() / 60) < INTERVALO_MINIMO:
                         colisao = True
-                
-                # Impede agendamentos no passado
-                if horario_disparo < agora:
-                    colisao = True
+                    if horario_disparo < agora:
+                        colisao = True
+                        
+                    if not colisao:
+                        ultimos_agendamentos_por_alvo[alvo] = horario_disparo
+                        scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo, args=[alvo])
+                        if EXIBIR_LOGS: logger.info(f"✅ Disparo PRINCIPAL {i+1}/{freq_alvo} para {alvo} agendado às {horario_disparo.strftime('%H:%M:%S')}")
+                        sucesso = True
+                        break
+                        
+                if not sucesso:
+                    if EXIBIR_LOGS: logger.warning(f"⚠️ {alvo} [{i+1}/{freq_alvo}]: Acionando fallback forçado PRINCIPAL.")
+                    ultimo_conhecido = ultimos_agendamentos_por_alvo.get(alvo, agora)
+                    horario_disparo_fallback = ultimo_conhecido + timedelta(minutes=INTERVALO_MINIMO + random.randint(1, 3))
+                    ultimos_agendamentos_por_alvo[alvo] = horario_disparo_fallback
+                    scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo_fallback, args=[alvo])
+                    if EXIBIR_LOGS: logger.info(f"🛡️ Fallback: Disparo {i+1} empurrado para {horario_disparo_fallback.strftime('%H:%M:%S')}")
+
+    # --- PARTE 2: AGENDAMENTO DO SPAM VIRAL ---
+    config_viral = carregar_configuracoes_viral()
+    if config_viral and config_viral.get("alvos") and not config_viral.get("pausado", False):
+        alvos_viral = config_viral["alvos"]
+        freq_global_viral = config_viral.get("frequencia_por_hora", 0)
+        config_alvos_viral = config_viral.get("config_alvos", {})
+        
+        for alvo in alvos_viral:
+            conf_alvo = config_alvos_viral.get(alvo, {})
+            freq_alvo = conf_alvo.get("frequencia", freq_global_viral)
+            
+            if freq_alvo <= 0: continue
+            if EXIBIR_LOGS: logger.info(f"🔄 [VIRAL] Sorteando {freq_alvo} envios para {alvo} na hora atual ({agora.hour}h)...")
+            espacamento_ideal = 58 // freq_alvo if freq_alvo > 0 else 58
+
+            for i in range(freq_alvo):
+                sucesso = False
+                min_inicio_busca = (i * espacamento_ideal) + 1
+                min_fim_busca = min(((i + 1) * espacamento_ideal), 59)
+                if min_fim_busca <= min_inicio_busca: min_fim_busca = 59
                     
-                if not colisao:
-                    ultimos_agendamentos_por_alvo[alvo] = horario_disparo
-                    scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo, args=[alvo])
-                    if EXIBIR_LOGS: logger.info(f"✅ Disparo {i+1}/{freq_alvo} para {alvo} agendado às {horario_disparo.strftime('%H:%M:%S')} (Tentativas: {tentativa+1})")
-                    sucesso = True
-                    break
+                for tentativa in range(100):
+                    minuto_sorteado = random.randint(min_inicio_busca, min_fim_busca)
+                    horario_disparo = agora.replace(minute=minuto_sorteado, second=random.randint(0, 59))
                     
-            if not sucesso:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ {alvo} [{i+1}/{freq_alvo}]: Janela muito curta. Acionando fallback forçado para empurrar o envio.")
-                
-                ultimo_conhecido = ultimos_agendamentos_por_alvo.get(alvo, agora)
-                # Adiciona 15 minutos de segurança mais um fator aleatório curto
-                horario_disparo_fallback = ultimo_conhecido + timedelta(minutes=INTERVALO_MINIMO + random.randint(1, 3))
-                
-                ultimos_agendamentos_por_alvo[alvo] = horario_disparo_fallback
-                scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo_fallback, args=[alvo])
-                if EXIBIR_LOGS: logger.info(f"🛡️ Fallback ativado: Disparo {i+1} empurrado para as {horario_disparo_fallback.strftime('%H:%M:%S')}")
+                    # A mágica do cruzamento: Ele checa o mesmo dicionário de histórico do alvo, evitando colisões com o Principal
+                    ultimo_envio = ultimos_agendamentos_por_alvo.get(alvo)
+                    colisao = False
+                    
+                    if ultimo_envio and abs((horario_disparo - ultimo_envio).total_seconds() / 60) < INTERVALO_MINIMO:
+                        colisao = True
+                    if horario_disparo < agora:
+                        colisao = True
+                        
+                    if not colisao:
+                        ultimos_agendamentos_por_alvo[alvo] = horario_disparo
+                        scheduler.add_job(enviar_mensagem_viral, 'date', run_date=horario_disparo, args=[alvo])
+                        if EXIBIR_LOGS: logger.info(f"✅ [VIRAL] Disparo {i+1}/{freq_alvo} para {alvo} agendado às {horario_disparo.strftime('%H:%M:%S')}")
+                        sucesso = True
+                        break
+                        
+                if not sucesso:
+                    if EXIBIR_LOGS: logger.warning(f"⚠️ [VIRAL] {alvo} [{i+1}/{freq_alvo}]: Acionando fallback forçado.")
+                    ultimo_conhecido = ultimos_agendamentos_por_alvo.get(alvo, agora)
+                    horario_disparo_fallback = ultimo_conhecido + timedelta(minutes=INTERVALO_MINIMO + random.randint(1, 3))
+                    ultimos_agendamentos_por_alvo[alvo] = horario_disparo_fallback
+                    scheduler.add_job(enviar_mensagem_viral, 'date', run_date=horario_disparo_fallback, args=[alvo])
+                    if EXIBIR_LOGS: logger.info(f"🛡️ [VIRAL] Fallback: Disparo {i+1} empurrado para {horario_disparo_fallback.strftime('%H:%M:%S')}")
 
 async def monitorar_comandos():
     while True:
-        config = carregar_configuracoes()
-        if config and config.get("forcar_disparo"):
-            if config.get("pausado", False):
-                if EXIBIR_LOGS: logger.warning("🛑 Comando forçado ignorado: O sistema de SPAM está pausado.")
-                config["forcar_disparo"] = False
+        # 1. Verifica Comandos do SPAM Principal
+        config_princ = carregar_configuracoes()
+        if config_princ and config_princ.get("forcar_disparo"):
+            if config_princ.get("pausado", False):
+                if EXIBIR_LOGS: logger.warning("🛑 Comando forçado ignorado: O sistema de SPAM Principal está pausado.")
+                config_princ["forcar_disparo"] = False
                 with open("alvos_divulgacao.json", "w") as f:
-                    json.dump(config, f, indent=4)
+                    json.dump(config_princ, f, indent=4)
             else:
-                if EXIBIR_LOGS: logger.info("🚀 Comando de DISPARO FORÇADO detectado! Iniciando rajada...")
-                
-                # Limpa a flag imediatamente no JSON para o bot não ficar repetindo em loop
-                config["forcar_disparo"] = False
+                if EXIBIR_LOGS: logger.info("🚀 Comando de DISPARO FORÇADO PRINCIPAL detectado! Iniciando rajada...")
+                config_princ["forcar_disparo"] = False
                 with open("alvos_divulgacao.json", "w") as f:
-                    json.dump(config, f, indent=4)
+                    json.dump(config_princ, f, indent=4)
                     
-                alvos = config.get("alvos", [])
-                for alvo in alvos:
+                alvos_princ = config_princ.get("alvos", [])
+                for alvo in alvos_princ:
                     await enviar_mensagem(alvo)
+
+        # 2. Verifica Comandos do SPAM Viral
+        config_viral = carregar_configuracoes_viral()
+        if config_viral and config_viral.get("forcar_disparo"):
+            if config_viral.get("pausado", False):
+                if EXIBIR_LOGS: logger.warning("🛑 [VIRAL] Comando forçado ignorado: O sistema de SPAM Viral está pausado.")
+                config_viral["forcar_disparo"] = False
+                with open("alvos_divulgacao_viral.json", "w") as f:
+                    json.dump(config_viral, f, indent=4)
+            else:
+                if EXIBIR_LOGS: logger.info("🚀 [VIRAL] Comando de DISPARO FORÇADO VIRAL detectado! Iniciando rajada...")
+                config_viral["forcar_disparo"] = False
+                with open("alvos_divulgacao_viral.json", "w") as f:
+                    json.dump(config_viral, f, indent=4)
+                    
+                alvos_viral = config_viral.get("alvos", [])
+                for alvo in alvos_viral:
+                    await enviar_mensagem_viral(alvo)
+
         await asyncio.sleep(5)
 
 async def main():
