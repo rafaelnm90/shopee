@@ -2428,8 +2428,8 @@ teclado_gerenciar_fila = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Publicar Agora 🚀")],
         [KeyboardButton(text="Excluir Vídeo 🗑️")],
-        [KeyboardButton(text="Editar Numeração 🔢"), KeyboardButton(text="Editar Legenda ✏️")],
-        [KeyboardButton(text="Mover Posição ↕️"), KeyboardButton(text="Voltar 🔙")]
+        [KeyboardButton(text="Editar Numeração 🔢"), KeyboardButton(text="Mover Posição ↕️")],
+        [KeyboardButton(text="Editar Legenda ✏️"), KeyboardButton(text="Voltar 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -2716,13 +2716,17 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         hoje_str = agora.strftime("%Y-%m-%d")
         amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
         
+        # ✅ Extração do status do expediente para anular a data "Hoje" se necessário
+        dados_rotina = ler_config_rotina()
+        expediente_encerrado = dados_rotina.get("ultimo_boa_noite") == hoje_str
+        
         fila_simulada = fila.copy()
         item_movido = fila_simulada.pop(posicao_origem)
         
         if len(fila_simulada) == 0:
-            item_movido["data_adicao"] = "2000-01-01"
+            item_movido["data_adicao"] = amanha_str if expediente_encerrado else "2000-01-01"
             fila_simulada.insert(nova_posicao, item_movido)
-            if EXIBIR_LOGS: logger.info("↕️ Fila: Único vídeo movido e mantido para Hoje.")
+            if EXIBIR_LOGS: logger.info("↕️ Fila: Único vídeo movido e mantido de acordo com o expediente da operação.")
             await aplicar_renumeracao_e_salvar(fila_simulada, message, state)
             return
         
@@ -2749,6 +2753,13 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         else: 
             if prev_status != next_status:
                 opcoes = [prev_status, next_status]
+        
+        # ✅ Supressão automática da opção "Hoje" caso a rotina "Boa Noite" já tenha decorrido
+        if expediente_encerrado:
+            opcoes = [op for op in opcoes if op != "Hoje 🟢"]
+            if not opcoes:
+                opcoes = ["Amanhã 🟡"]
+                if EXIBIR_LOGS: logger.info("🌙 Expediente encerrado: Hipótese 'Hoje 🟢' suprimida preventivamente da reordenação.")
                 
         if len(opcoes) == 1:
             escolha = opcoes[0]
