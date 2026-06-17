@@ -28,6 +28,8 @@ API_TOKEN = os.getenv('TELEGRAM_TOKEN')
 ADMIN_ID = 1226920464
 GRUPO_ID = -1003909405581
 LINK_GRUPO = "https://t.me/shopee_video_afiliado"
+GRUPO_VIRAL_ID = -1003932482573
+LINK_GRUPO_VIRAL = "https://t.me/acervo_viral_shopee"
 GEMINI_API_KEY = os.getenv('GEMINI_KEY')
 SHOPEE_APP_ID = os.getenv('SHOPEE_APP_ID')
 SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
@@ -613,18 +615,16 @@ def salvar_lixeira(dados):
     with open("lixeira_mensagens.json", "w") as f:
         json.dump(dados, f, indent=4)
 
-# ✅ Função de limpeza extra para o arquivo de histórico
 def limpar_historico_antigo():
     if os.path.exists("historico_mensagens.json"):
         os.remove("historico_mensagens.json")
         if EXIBIR_LOGS: logger.info("🧹 Histórico de mensagens do userbot reiniciado.")
 
-def registrar_lixeira(msg_id):
+def registrar_lixeira(msg_id, chat_id=GRUPO_ID):
     dados = ler_lixeira()
-    # ✅ Agora salvamos apenas o ID da mensagem, sem calcular tempo de expiração
-    dados["mensagens"].append({"id": msg_id})
+    dados["mensagens"].append({"id": msg_id, "chat_id": chat_id})
     salvar_lixeira(dados)
-    if EXIBIR_LOGS: logger.info(f"💾 ID {msg_id} salvo na lixeira persistente para exclusão na próxima madrugada (03h00).")
+    if EXIBIR_LOGS: logger.info(f"💾 ID {msg_id} (Chat: {chat_id}) salvo na lixeira persistente para exclusão na madrugada (03h00).")
 
 async def varredor_de_lixeira():
     if EXIBIR_LOGS: logger.info("🧹 Iniciando varredura diária da lixeira persistente (03h00)...")
@@ -633,20 +633,20 @@ async def varredor_de_lixeira():
     
     for msg in mensagens:
         try:
-            # Compatibilidade mantida caso existam mensagens salvas no formato antigo
+            # Compatibilidade mantida com o formato antigo e adaptação para o novo
             msg_id = msg["id"] if isinstance(msg, dict) else msg
-            await apagar_mensagem_automatica(msg_id)
+            chat_destino = msg.get("chat_id", GRUPO_ID) if isinstance(msg, dict) else GRUPO_ID
+            await apagar_mensagem_automatica(msg_id, chat_destino)
         except Exception as e:
             if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao processar item da lixeira: {e}")
             
-    # Esvazia a lixeira completamente de uma só vez após o loop de limpeza
     dados["mensagens"] = []
     salvar_lixeira(dados)
     if EXIBIR_LOGS: logger.info("✅ Lixeira persistente esvaziada com sucesso.")
 
-async def apagar_mensagem_automatica(msg_id):
+async def apagar_mensagem_automatica(msg_id, chat_id=GRUPO_ID):
     try:
-        await bot.delete_message(chat_id=GRUPO_ID, message_id=msg_id)
+        await bot.delete_message(chat_id=chat_id, message_id=msg_id)
         if EXIBIR_LOGS: logger.info(f"🧹 Faxina concluída: Mensagem automática {msg_id} apagada da lixeira.")
     except Exception as e:
         if EXIBIR_LOGS: logger.info(f"⚠️ Faxina: A mensagem {msg_id} já havia sido apagada manualmente ou não foi encontrada.")
@@ -726,11 +726,28 @@ async def disparar_mensagem(tipo, forcar=False):
             "toda vez que gerar esse texto, use emojis e entregue apenas a mensagem pronta, sem aspas."
         )
 
+    elif tipo == "promo_viral":
+        prompt = (
+            "Você atua como assistente de afiliados. Crie uma mensagem MUITO CURTA E DIRETA (MÁXIMO 150 CARACTERES) "
+            "apresentando o nosso canal parceiro 'Acervo Viral Shopee'. Diga que lá postamos apenas os produtos virais "
+            "mais bombados do momento. Use emojis, varie o texto e entregue apenas a mensagem pronta, sem aspas e sem links."
+        )
+    elif tipo == "promo_principal":
+        prompt = (
+            "Você atua como assistente de afiliados. Crie uma mensagem MUITO CURTA E DIRETA (MÁXIMO 150 CARACTERES) "
+            "apresentando o nosso canal principal 'Acervo Afiliados Shopee'. Diga que lá entregamos as melhores "
+            "ferramentas e achados para aumentar as comissões. Use emojis, varie o texto e entregue apenas a mensagem pronta."
+        )
+
     texto = await gerar_mensagem_gemini(prompt)
-    if EXIBIR_LOGS: logger.info(f"🚀 Enviando mensagem principal ({tipo}): {texto[:20]}...")
-    msg_enviada = await bot.send_message(GRUPO_ID, texto)
     
-    registrar_lixeira(msg_enviada.message_id)
+    # ✅ Roteamento de chat: Define qual grupo receberá qual mensagem
+    chat_destino = GRUPO_VIRAL_ID if tipo == "promo_principal" else GRUPO_ID
+    
+    if EXIBIR_LOGS: logger.info(f"🚀 Enviando rotina ({tipo}) para o chat {chat_destino}: {texto[:20]}...")
+    msg_enviada = await bot.send_message(chat_destino, texto)
+    
+    registrar_lixeira(msg_enviada.message_id, chat_destino)
 
     agora_tz = datetime.now(fuso_horario)
     hoje_str = agora_tz.strftime("%Y-%m-%d")
@@ -762,6 +779,16 @@ async def disparar_mensagem(tipo, forcar=False):
         if EXIBIR_LOGS: logger.info("🤖 Enviando link do GEM em mensagem isolada.")
         msg_gem = await bot.send_message(GRUPO_ID, link_gem, parse_mode="HTML")
         registrar_lixeira(msg_gem.message_id)
+    elif tipo == "promo_viral":
+        link_viral = f"👇 <b>Acesse o Canal Parceiro:</b>\n{LINK_GRUPO_VIRAL}"
+        if EXIBIR_LOGS: logger.info("🔗 Enviando link do Acervo Viral.")
+        msg_viral = await bot.send_message(GRUPO_ID, link_viral, parse_mode="HTML")
+        registrar_lixeira(msg_viral.message_id, GRUPO_ID)
+    elif tipo == "promo_principal":
+        link_princ = f"👇 <b>Acesse o Canal Principal:</b>\n{LINK_GRUPO}"
+        if EXIBIR_LOGS: logger.info("🔗 Enviando link do Acervo Afiliados.")
+        msg_princ = await bot.send_message(GRUPO_VIRAL_ID, link_princ, parse_mode="HTML")
+        registrar_lixeira(msg_princ.message_id, GRUPO_VIRAL_ID)    
 
 def ler_config_rotina():
     if EXIBIR_LOGS: logger.info("📂 Lendo configurações de rotina...")
@@ -773,6 +800,11 @@ def ler_config_rotina():
                 dados["link_grupo"] = {"inicio": 9, "fim": 21, "frequencia": 3}
             if "divulgar_gem" not in dados:
                 dados["divulgar_gem"] = {"inicio": 8, "fim": 22, "frequencia": 1}
+            # ✅ Novas chaves para a parceria cruzada
+            if "promo_viral" not in dados:
+                dados["promo_viral"] = {"inicio": 10, "fim": 20, "frequencia": 1}
+            if "promo_principal" not in dados:
+                dados["promo_principal"] = {"inicio": 10, "fim": 20, "frequencia": 1}
             # ✅ Nova chave para gerenciar o status de pausa via JSON
             if "pausado" not in dados:
                 dados["pausado"] = False
@@ -786,6 +818,8 @@ def ler_config_rotina():
             "boa_noite": {"inicio": 21, "fim": 23, "frequencia": 1},
             "link_grupo": {"inicio": 9, "fim": 21, "frequencia": 3},
             "divulgar_gem": {"inicio": 8, "fim": 22, "frequencia": 1},
+            "promo_viral": {"inicio": 10, "fim": 20, "frequencia": 1},
+            "promo_principal": {"inicio": 10, "fim": 20, "frequencia": 1},
             "pausado": False
         }
 
@@ -2317,11 +2351,13 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
         "boa_noite": "Boa Noite 🌙",
         "incentivo": "Incentivo 🔥",
         "link_grupo": "Convite do Grupo 🔗",
-        "divulgar_gem": "Prompt GEM 🤖"
+        "divulgar_gem": "Prompt GEM 🤖",
+        "promo_viral": "Promo Viral 🚀",
+        "promo_principal": "Promo Afiliados 🛍️"
     }
     
     # Ordem de exibição forçada para organizar o painel
-    ordem_exibicao = ["bom_dia", "incentivo", "link_grupo", "divulgar_gem", "boa_noite"]
+    ordem_exibicao = ["bom_dia", "incentivo", "link_grupo", "divulgar_gem", "promo_viral", "promo_principal", "boa_noite"]
     
     for tipo in ordem_exibicao:
         if tipo in dados:
@@ -2336,6 +2372,7 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
         keyboard=[
             [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
             [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
+            [KeyboardButton(text="Editar Promo Viral 🚀"), KeyboardButton(text="Editar Promo Afiliados 🛍️")],
             [KeyboardButton(text="Editar Boa Noite 🌙"), KeyboardButton(text=texto_botao_pausa)],
             [KeyboardButton(text="Voltar às Configs 🔙")]
         ],
@@ -2347,14 +2384,16 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=teclado_dinamico_rotina, parse_mode="HTML")
     await state.set_state(ConfigRotina.menu_principal)
 
-@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖"]))
+@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Promo Viral 🚀", "Editar Promo Afiliados 🛍️"]))
 async def pedir_horario_rotina(message: types.Message, state: FSMContext):
     tipo_map = {
         "Editar Bom Dia ☀️": "bom_dia",
         "Editar Boa Noite 🌙": "boa_noite",
         "Editar Incentivo 🔥": "incentivo",
         "Editar Convite 🔗": "link_grupo",
-        "Editar Prompt GEM 🤖": "divulgar_gem"
+        "Editar Prompt GEM 🤖": "divulgar_gem",
+        "Editar Promo Viral 🚀": "promo_viral",
+        "Editar Promo Afiliados 🛍️": "promo_principal"
     }
     tipo = tipo_map[message.text]
     await state.update_data(tipo_edicao=tipo)
