@@ -1730,17 +1730,9 @@ async def confirmar_alvo_espiao(message: types.Message, state: FSMContext):
         resize_keyboard=True,
         is_persistent=True
     )
-    
+
+    if EXIBIR_LOGS: logger.info("⏳ Aguardando aprovação para auditar o novo alvo do espião...")
     await message.answer(f"Deseja adicionar o alvo abaixo ao radar do Espião?\n<i>(O motor testará os formatos de ID e corrigirá automaticamente se necessário)</i>\n\n<b>{entrada_bruta}</b>", reply_markup=teclado_confirmacao, parse_mode="HTML")
-    await state.set_state(EspiaoFluxo.aguardando_confirmacao_alvo)
-    
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
-    
-    await message.answer(f"Deseja adicionar o alvo abaixo ao radar do Espião?\n\n<b>{alvo_formatado}</b>", reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(EspiaoFluxo.aguardando_confirmacao_alvo)
 
 @dp.message(EspiaoFluxo.aguardando_confirmacao_alvo)
@@ -1750,15 +1742,20 @@ async def salvar_alvo_espiao(message: types.Message, state: FSMContext):
         return
         
     data = await state.get_data()
-    alvo_formatado = data.get("novo_alvo_formatado")
+    alvo_formatado = data.get("novo_alvo_formatado").strip()
     dados = ler_alvos_espiao()
     
-    if alvo_formatado not in dados["alvos"]:
-        dados["alvos"].append(alvo_formatado)
+    # Validação semântica: ignora o '@' e passa para minúsculas para barrar duplicados
+    alvo_limpo = alvo_formatado.lstrip('@').lower()
+    alvos_existentes_limpos = [str(a).lstrip('@').lower() for a in dados.get("alvos", [])]
+    
+    if alvo_limpo not in alvos_existentes_limpos:
+        dados.setdefault("alvos", []).append(alvo_formatado)
         salvar_alvos_espiao(dados)
-        if EXIBIR_LOGS: logger.info(f"✅ Novo alvo do espião padronizado e adicionado: {alvo_formatado}")
-        await message.answer(f"✅ Alvo cadastrado com sucesso no formato padrão:\n<b>{alvo_formatado}</b>", parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info(f"✅ Novo alvo do espião adicionado na base de dados: {alvo_formatado}")
+        await message.answer(f"✅ Alvo cadastrado com sucesso:\n<b>{alvo_formatado}</b>", parse_mode="HTML")
     else:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Tentativa de duplicar alvo bloqueada. O alvo '{alvo_formatado}' já existe.")
         await message.answer(f"⚠️ O alvo <b>{alvo_formatado}</b> já está na sua lista de monitoramento.", parse_mode="HTML")
         
     await menu_grupos_vigiados(message, state)
