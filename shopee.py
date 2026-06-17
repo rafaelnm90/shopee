@@ -2766,26 +2766,24 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         prev_idx = nova_posicao - 1
         next_idx = nova_posicao
         
-        def obter_classe_data(data_str):
-            if data_str == "2000-01-01" or data_str <= hoje_str: return "Hoje 🟢"
-            if data_str == amanha_str: return "Amanhã 🟡"
-            return "Depois de Amanhã 🔵"
+        def obter_indice_data(data_str):
+            if data_str == "2000-01-01" or data_str <= hoje_str: return 0
+            if data_str == amanha_str: return 1
+            return 2
             
-        prev_status = obter_classe_data(fila_simulada[prev_idx].get("data_adicao", "")) if prev_idx >= 0 else None
-        next_status = obter_classe_data(fila_simulada[next_idx].get("data_adicao", "")) if next_idx < len(fila_simulada) else None
+        prev_idx_data = obter_indice_data(fila_simulada[prev_idx].get("data_adicao", "")) if prev_idx >= 0 else 0
+        next_idx_data = obter_indice_data(fila_simulada[next_idx].get("data_adicao", "")) if next_idx < len(fila_simulada) else 2
         
-        opcoes = []
-        if prev_status == next_status and prev_status is not None:
-            opcoes = [prev_status]
-        elif prev_status is None: 
-            opcoes = ["Hoje 🟢"] if next_status == "Hoje 🟢" else ["Hoje 🟢", next_status]
-        elif next_status is None: 
-            if prev_status == "Hoje 🟢": opcoes = ["Hoje 🟢", "Amanhã 🟡"]
-            elif prev_status == "Amanhã 🟡": opcoes = ["Amanhã 🟡", "Depois de Amanhã 🔵"]
-            else: opcoes = ["Depois de Amanhã 🔵"]
-        else: 
-            if prev_status != next_status:
-                opcoes = [prev_status, next_status]
+        inicio_op = min(prev_idx_data, next_idx_data)
+        fim_op = max(prev_idx_data, next_idx_data)
+        
+        todas_opcoes = ["Hoje 🟢", "Amanhã 🟡", "Depois de Amanhã 🔵"]
+        
+        if prev_idx >= 0 and next_idx < len(fila_simulada) and prev_idx_data == next_idx_data:
+            opcoes = [todas_opcoes[prev_idx_data]]
+        else:
+            opcoes = todas_opcoes[inicio_op:fim_op + 1]
+            if EXIBIR_LOGS: logger.info(f"🧠 Lacunas preenchidas com as datas intermediárias: {opcoes}")
         
         # ✅ Supressão automática da opção "Hoje" caso a rotina "Boa Noite" já tenha decorrido
         if expediente_encerrado:
