@@ -137,7 +137,8 @@ async def validar_e_obter_entidade(client, alvo):
     if not alvo_str.lstrip('-').isdigit():
         return await client.get_entity(alvo_str), alvo_str
 
-    so_numeros = alvo_str.replace("-", "")
+    # ✂️ Remove qualquer prefixo '-' ou '-100' / '100' para extrair a raiz pura do ID
+    so_numeros = re.sub(r'^-?(100)?', '', alvo_str)
     
     # Lista de variações inteligentes a testar na API
     variacoes = [
@@ -154,7 +155,9 @@ async def validar_e_obter_entidade(client, alvo):
             
     for var in variacoes_unicas:
         try:
+            if EXIBIR_LOGS: logger.info(f"🔍 [Auditor] Testando variação de ID: {var}")
             ent = await client.get_entity(int(var))
+            if EXIBIR_LOGS: logger.info(f"✅ [Auditor] Variação {var} aceita pela API do Telegram!")
             return ent, str(var) # Retorna a entidade e a variação exata que funcionou
         except Exception:
             continue
