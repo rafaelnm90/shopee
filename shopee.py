@@ -3772,12 +3772,23 @@ async def processar_fila_espiao():
         if video_gemini.state.name == "FAILED":
             raise Exception("Falha de processamento no servidor do Google.")
             
+        if EXIBIR_LOGS: logger.info("🚀 Preparando prompt com a lista estrita de setores da Shopee...")
+            
         prompt = (
             "Assista ao vídeo e identifique qual é o produto demonstrado. "
-            "A sua resposta deve conter APENAS o nome do produto acompanhado de um emoji correspondente no início. "
-            "É estritamente proibido criar textos de vendas, descrições, gatilhos mentais ou frases de encerramento. "
-            "Exemplo de saída esperada: 👟 Tênis Casual Feminino"
+            "Sua resposta deve conter EXATAMENTE duas linhas.\n"
+            "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no início (Exemplo: 👟 Tênis Casual Feminino).\n"
+            "Na segunda linha, inclua as hashtags correspondentes aos setores do produto.\n"
+            "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
+            "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
+            "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
+            "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
+            "#AcessoriosDeModa, #BrinquedosEHobbies, #Papelaria, #LivrosERevistas, #RoupasMasculinas, #Automoveis, #MaeEBebe, "
+            "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
+            "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
         )
+        
+        if EXIBIR_LOGS: logger.info("✅ Prompt atualizado e formatado. Iniciando requisição à IA...")
         
         for modelo_nome in MODELOS_CASCATA_GEMINI:
             try:
