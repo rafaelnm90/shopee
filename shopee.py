@@ -269,17 +269,17 @@ def salvar_alvos_espiao(dados):
 teclado_menu_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Grupos Vigiados 📡")],
-        [KeyboardButton(text="Rotinas do Espião ⏰"), KeyboardButton(text="SPAM do Espião 📢")],
+        [KeyboardButton(text="⚙️ Automações do Espião")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
 )
 
-teclado_opcoes_espiao = ReplyKeyboardMarkup(
+teclado_automacoes_espiao = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Adicionar Concorrente ➕"), KeyboardButton(text="Remover Concorrente 🗑️")],
-        [KeyboardButton(text="Definir Canal de Destino 🎯"), KeyboardButton(text="Voltar ao Menu Espião 🔙")]
+        [KeyboardButton(text="Rotinas do Espião ⏰"), KeyboardButton(text="SPAM do Espião 📢")],
+        [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -1740,6 +1740,34 @@ async def voltar_menu_espiao(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("🕵️ <b>Painel Principal do Espião</b>\nO que deseja acessar?", reply_markup=teclado_menu_espiao, parse_mode="HTML")
 
+@dp.message(F.text == "⚙️ Automações do Espião", StateFilter("*"))
+async def menu_automacoes_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    if EXIBIR_LOGS: logger.info("⚙️ Acessando Dashboard de Automações do Espião.")
+    
+    dados_div = ler_alvos_divulgacao_viral()
+    status_spam = "🔴 PAUSADO" if dados_div.get("pausado", False) else "🟢 ATIVO"
+    
+    dados_rotina = ler_config_rotina()
+    status_rotina = "🔴 PAUSADAS" if dados_rotina.get("pausado", False) else "🟢 ATIVAS"
+    
+    texto = (
+        "⚙️ <b>Central de Automações do Espião</b>\n\n"
+        "📊 <b>Status Atual das Automações:</b>\n"
+        f"📢 SPAM do Viral: {status_spam}\n"
+        f"⏰ Rotinas do Viral: {status_rotina}\n\n"
+        "Escolha o módulo que deseja configurar abaixo:"
+    )
+    await message.answer(texto, reply_markup=teclado_automacoes_espiao, parse_mode="HTML")
+
+@dp.message(F.text == "Voltar às Automações 🔙", StateFilter("*"))
+async def voltar_para_automacoes_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🔙 Retornando à Central de Automações do Espião.")
+    await state.clear()
+    await menu_automacoes_espiao(message, state)
+
 @dp.message(F.text == "Voltar 🔙", StateFilter("*"))
 async def voltar_configs(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
@@ -1954,7 +1982,7 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     teclado = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Editar Promo Afiliados 🛍️")],
-            [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
+            [KeyboardButton(text="Voltar às Automações 🔙")]
         ],
         resize_keyboard=True,
         is_persistent=True
@@ -2460,7 +2488,7 @@ async def gerenciar_divulgacao_viral(message: types.Message, state: FSMContext):
         keyboard=[
             [KeyboardButton(text="Adicionar Alvo Viral ➕"), KeyboardButton(text="Excluir Alvo Viral 🗑️")],
             [KeyboardButton(text="Editar Configs Viral ⚙️"), KeyboardButton(text="Forçar Disparo Viral 🚀")],
-            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar ao Menu Espião 🔙")]
+            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Automações 🔙")]
         ],
         resize_keyboard=True,
         is_persistent=True
