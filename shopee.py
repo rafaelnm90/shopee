@@ -278,8 +278,18 @@ teclado_menu_espiao = ReplyKeyboardMarkup(
 
 teclado_automacoes_espiao = ReplyKeyboardMarkup(
     keyboard=[
+        [KeyboardButton(text="Disparar Promo Afiliados 🛍️"), KeyboardButton(text="Disparar Convite Viral 📢")],
         [KeyboardButton(text="Rotinas do Espião ⏰"), KeyboardButton(text="SPAM do Espião 📢")],
         [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+teclado_opcoes_espiao = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Adicionar Concorrente ➕"), KeyboardButton(text="Remover Concorrente 🗑️")],
+        [KeyboardButton(text="Definir Canal de Destino 🎯"), KeyboardButton(text="Voltar ao Menu Espião 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -643,8 +653,8 @@ async def varredor_de_lixeira():
     
     for msg in mensagens:
         try:
-            # Compatibilidade mantida com o formato antigo e adaptação para o novo
-            msg_id = msg["id"] if isinstance(msg, dict) else msg
+            # Recupera o ID e o chat correto da mensagem salva
+            msg_id = msg.get("id") if isinstance(msg, dict) else msg
             chat_destino = msg.get("chat_id", GRUPO_ID) if isinstance(msg, dict) else GRUPO_ID
             await apagar_mensagem_automatica(msg_id, chat_destino)
         except Exception as e:
@@ -657,9 +667,9 @@ async def varredor_de_lixeira():
 async def apagar_mensagem_automatica(msg_id, chat_id=GRUPO_ID):
     try:
         await bot.delete_message(chat_id=chat_id, message_id=msg_id)
-        if EXIBIR_LOGS: logger.info(f"🧹 Faxina concluída: Mensagem automática {msg_id} apagada da lixeira.")
+        if EXIBIR_LOGS: logger.info(f"🧹 Faxina concluída: Mensagem {msg_id} apagada do chat {chat_id}.")
     except Exception as e:
-        if EXIBIR_LOGS: logger.info(f"⚠️ Faxina: A mensagem {msg_id} já havia sido apagada manualmente ou não foi encontrada.")
+        if EXIBIR_LOGS: logger.info(f"⚠️ Faxina: A mensagem {msg_id} já havia sido apagada manualmente.")
 
 async def disparar_mensagem(tipo, forcar=False):
     if EXIBIR_LOGS: logger.info(f"🔍 Validando status antes de disparar a rotina '{tipo}' (Forçar: {forcar})...")
@@ -705,6 +715,11 @@ async def disparar_mensagem(tipo, forcar=False):
         prompt = (
             f"{contexto_afiliado} Não peça para postar vídeos. Crie um convite rápido e chamativo pedindo aos membros que convidem "
             "amigos afiliados para o nosso grupo gratuito. Não adicione nenhum link na sua resposta. Use emojis."
+        )
+    elif tipo == "link_grupo_viral":
+        prompt = (
+            f"{contexto_afiliado} Crie um convite curto e empolgante pedindo aos seguidores que convidem "
+            "seus amigos para conhecerem o nosso acervo de produtos virais. Não adicione nenhum link na sua resposta. Use emojis."
         )
 
     elif tipo.startswith("campanha_"):
@@ -755,8 +770,9 @@ async def disparar_mensagem(tipo, forcar=False):
 
     texto = await gerar_mensagem_gemini(prompt)
     
+    # Bloco Modificado
     # ✅ Roteamento de chat: Define qual grupo receberá qual mensagem
-    chat_destino = GRUPO_VIRAL_ID if tipo == "promo_principal" else GRUPO_ID
+    chat_destino = GRUPO_VIRAL_ID if tipo in ["promo_principal", "link_grupo_viral"] else GRUPO_ID
     
     if EXIBIR_LOGS: logger.info(f"🚀 Enviando rotina ({tipo}) para o chat {chat_destino}: {texto[:20]}...")
     msg_enviada = await bot.send_message(chat_destino, texto)
@@ -782,6 +798,17 @@ async def disparar_mensagem(tipo, forcar=False):
     if recalcular_fila:
         if EXIBIR_LOGS: logger.info("🔄 Alteração de fronteira detetada. A recalcular toda a fila de postagens em tempo real...")
         agendar_fila_postagens()
+    
+    if tipo == "link_grupo":
+        link_separado = f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}"
+        if EXIBIR_LOGS: logger.info("🔗 Enviando link do grupo em mensagem isolada.")
+        msg_link = await bot.send_message(GRUPO_ID, link_separado, parse_mode="HTML")
+        registrar_lixeira(msg_link.message_id, GRUPO_ID)
+    elif tipo == "link_grupo_viral":
+        link_separado = f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO_VIRAL}"
+        if EXIBIR_LOGS: logger.info("🔗 Enviando link do grupo viral em mensagem isolada.")
+        msg_link = await bot.send_message(GRUPO_VIRAL_ID, link_separado, parse_mode="HTML")
+        registrar_lixeira(msg_link.message_id, GRUPO_VIRAL_ID)
     
     if tipo == "link_grupo":
         link_separado = f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}"
@@ -1217,6 +1244,41 @@ async def manual_promo_viral(message: types.Message):
     if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Promo Viral.")
     await disparar_mensagem("promo_viral", forcar=True)
     await message.answer("Mensagem de Promo Viral enviada ao grupo com sucesso! ✅")
+
+# Bloco Modificado
+@dp.message(F.text == "Disparar Promo Afiliados 🛍️")
+async def manual_promo_afiliados(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    
+    dados_rotina = ler_config_rotina()
+    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    
+    if dados_rotina.get("ultimo_bom_dia") != hoje_str or dados_rotina.get("ultimo_boa_noite") == hoje_str:
+        if EXIBIR_LOGS: logger.warning("🛑 Clique manual rejeitado: Fora do expediente.")
+        await message.answer("⚠️ <b>Ação Bloqueada:</b> Você só pode disparar esta mensagem durante o expediente.", parse_mode="HTML")
+        return
+        
+    await message.answer("Gerando e enviando divulgação do canal principal... ⏳")
+    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Promo Afiliados.")
+    await disparar_mensagem("promo_principal", forcar=True)
+    await message.answer("Propaganda do canal principal enviada ao canal viral com sucesso! ✅")
+
+@dp.message(F.text == "Disparar Convite Viral 📢")
+async def manual_convite_viral(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    
+    dados_rotina = ler_config_rotina()
+    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    
+    if dados_rotina.get("ultimo_bom_dia") != hoje_str or dados_rotina.get("ultimo_boa_noite") == hoje_str:
+        if EXIBIR_LOGS: logger.warning("🛑 Clique manual rejeitado: Fora do expediente.")
+        await message.answer("⚠️ <b>Ação Bloqueada:</b> Você só pode disparar esta mensagem durante o expediente.", parse_mode="HTML")
+        return
+        
+    await message.answer("Gerando e enviando convite do canal viral... ⏳")
+    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Convite Viral.")
+    await disparar_mensagem("link_grupo_viral", forcar=True)
+    await message.answer("Convite de recrutamento enviado ao canal viral com sucesso! ✅")
 
 # ❌ NOVO: Handler Global para Cancelar via Botão (Agora 100% à prova de falhas)
 @dp.message(F.text == "Cancelar ❌", StateFilter("*"))
