@@ -1128,6 +1128,41 @@ async def gerar_relatorio_completo(message: types.Message, state: FSMContext):
     # Função para converter formato de moeda para o padrão brasileiro
     def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
+    # ✅ 3. NOVO: Teste Visual da Cascata Gemini com atualização ao vivo
+    if EXIBIR_LOGS: logger.info("🧠 Iniciando teste de diagnóstico dos motores Gemini...")
+    texto_modelos = "\n🧠 <b>STATUS DA CASCATA DE IA (GEMINI)</b>\n"
+    
+    for modelo in MODELOS_CASCATA_GEMINI:
+        try:
+            await msg_status.edit_text(f"📊 <i>Extraindo finanças e testando IA...</i>\n🔎 Verificando saúde do modelo: <code>{modelo}</code> ⏳", parse_mode="HTML")
+            
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=modelo,
+                contents="Responda apenas 'ok'"
+            )
+            if response and response.text:
+                texto_modelos += f"• <code>{modelo}</code>: 🟢 Online\n"
+                if EXIBIR_LOGS: logger.info(f"✅ Diagnóstico {modelo}: Online.")
+            else:
+                texto_modelos += f"• <code>{modelo}</code>: 🟡 Resposta Vazia\n"
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Diagnóstico {modelo}: Resposta vazia.")
+        except Exception as e:
+            erro_str = str(e).lower()
+            if "429" in erro_str or "quota" in erro_str or "exhausted" in erro_str:
+                texto_modelos += f"• <code>{modelo}</code>: 🟡 Cota Esgotada\n"
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Diagnóstico {modelo}: Cota de uso esgotada.")
+            elif "404" in erro_str or "not found" in erro_str:
+                texto_modelos += f"• <code>{modelo}</code>: 🔴 Descontinuado\n"
+                if EXIBIR_LOGS: logger.error(f"❌ Diagnóstico {modelo}: Descontinuado ou inexistente.")
+            elif "503" in erro_str or "overloaded" in erro_str:
+                texto_modelos += f"• <code>{modelo}</code>: 🔴 Servidor Indisponível\n"
+                if EXIBIR_LOGS: logger.error(f"❌ Diagnóstico {modelo}: Servidor do Google sobrecarregado.")
+            else:
+                erro_curto = str(e).replace('\n', ' ')[:30]
+                texto_modelos += f"• <code>{modelo}</code>: 🔴 Erro ({erro_curto}...)\n"
+                if EXIBIR_LOGS: logger.error(f"❌ Diagnóstico {modelo}: Erro inesperado - {erro_curto}")
+
     texto = (
         "📊 <b>RELATÓRIO GERAL DA OPERAÇÃO</b>\n\n"
         "⚙️ <b>SAÚDE DO SISTEMA</b>\n"
@@ -1150,7 +1185,10 @@ async def gerar_relatorio_completo(message: types.Message, state: FSMContext):
         valor = diario.get(dt_chave, 0.0)
         marc = " (Hoje)" if i == 0 else ""
         texto += f"• {dt_chave}{marc}: R$ {f_br(valor)}\n"
-        
+
+    # Adiciona o resultado visual da IA ao texto principal
+    texto += texto_modelos
+    
     await msg_status.delete()
     await message.answer(texto, parse_mode="HTML")
     if EXIBIR_LOGS: logger.info("✅ Relatório gerado e exibido com sucesso!")
@@ -2825,7 +2863,7 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
     await state.update_data(menu_origem="principal") # ✅ Adicione esta linha exata aqui
     await state.set_state(ConfigRotina.menu_principal)
 
-@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Conv. Afiliados 🛍️", "Editar Convite do Grupo 🔗"]))
+@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Conv. Principal 🛍️", "Editar Convite do Grupo 🔗", "Editar Prompt GEM 🤖\u200b"]))
 async def pedir_horario_rotina(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info(f"✏️ Iniciando edição da rotina: {message.text}")
     tipo_map = {
@@ -2835,8 +2873,9 @@ async def pedir_horario_rotina(message: types.Message, state: FSMContext):
         "Editar Convite 🔗": "link_grupo",
         "Editar Prompt GEM 🤖": "divulgar_gem",
         "Editar Convite Viral 🚀": "promo_viral",
-        "Editar Conv. Afiliados 🛍️": "promo_principal",
-        "Editar Convite do Grupo 🔗": "link_grupo_viral"
+        "Editar Conv. Principal 🛍️": "promo_principal",
+        "Editar Convite do Grupo 🔗": "link_grupo_viral",
+        "Editar Prompt GEM 🤖\u200b": "divulgar_gem_viral"
     }
     tipo = tipo_map[message.text]
     await state.update_data(tipo_edicao=tipo)
@@ -2904,8 +2943,13 @@ async def salvar_horario_rotina(message: types.Message, state: FSMContext):
     # Força o re-sorteio imediato para aplicar as novas regras hoje mesmo
     agendar_tarefas_diarias()
     
-    await message.answer("✅ Configuração salva! Os novos horários já foram sorteados e agendados para hoje.", reply_markup=teclado_configuracoes_gerais)
-    await state.clear()
+    origem = data.get("menu_origem")
+    await message.answer("✅ Configuração salva! Os novos horários já foram sorteados e agendados para hoje.")
+    
+    if origem == "espiao":
+        await gerenciar_rotina_espiao(message, state)
+    else:
+        await gerenciar_rotina(message, state)
 
 # --- SISTEMA DE GERENCIAMENTO DE FILA (INTERATIVO) ---
 class GerenciarFilaFluxo(StatesGroup):
