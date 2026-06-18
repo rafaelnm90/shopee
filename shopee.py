@@ -1312,15 +1312,16 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         return
         
     # 🔁 Roteamento Inteligente: Se estiver nas Rotinas
-    if estado_atual and estado_atual.startswith("ConfigRotina"):
-        tipo_edicao = data.get('tipo_edicao')
-        await state.clear()
-        await message.answer("Ação cancelada.")
-        if tipo_edicao == "promo_principal":
-            await gerenciar_rotina_espiao(message, state)
-        else:
-            await gerenciar_rotina(message, state)
-        return
+        if estado_atual and estado_atual.startswith("ConfigRotina"):
+            tipo_edicao = data.get('tipo_edicao')
+            await state.clear()
+            if EXIBIR_LOGS: logger.info("🔙 Cancelando edição de rotina e redirecionando ao menu correto.")
+            await message.answer("Ação cancelada.")
+            if tipo_edicao in ["promo_principal", "link_grupo_viral"]:
+                await gerenciar_rotina_espiao(message, state)
+            else:
+                await gerenciar_rotina(message, state)
+            return
 
     if EXIBIR_LOGS: logger.info("🔍 Verificando pendências de numeração na memória antes de limpar...")
     numero_reservado = data.get('numero_reservado')
@@ -2056,21 +2057,22 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     config_promo = dados.get("promo_principal", {"inicio": 10, "fim": 20, "frequencia": 1})
     config_convite = dados.get("link_grupo_viral", {"inicio": 9, "fim": 21, "frequencia": 2})
     
+    if EXIBIR_LOGS: logger.info("⚙️ Acessando painel de Rotinas do Espião...")
     texto = "⏰ <b>Rotina do Espião (Canal Viral)</b>\n\n"
     
-    texto += f"🔹 <b>Promo Afiliados (Para o Canal Principal)</b>\n"
-    texto += f"   Janela de Sorteio: {config_promo['inicio']}h às {config_promo['fim']}h\n"
-    texto += f"   Disparos por Dia: {config_promo['frequencia']}x\n\n"
-    
-    texto += f"🔹 <b>Convite Viral (Para o próprio grupo)</b>\n"
+    texto += f"🔹 <b>Convite do Grupo 🔗 (Para o próprio grupo)</b>\n"
     texto += f"   Janela de Sorteio: {config_convite['inicio']}h às {config_convite['fim']}h\n"
     texto += f"   Disparos por Dia: {config_convite['frequencia']}x\n\n"
+    
+    texto += f"🔹 <b>Convite do Grupo Afiliados 🛍️ (Para o Canal Principal)</b>\n"
+    texto += f"   Janela de Sorteio: {config_promo['inicio']}h às {config_promo['fim']}h\n"
+    texto += f"   Disparos por Dia: {config_promo['frequencia']}x\n\n"
     
     texto += "Selecione o que deseja editar abaixo:"
     
     teclado = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Editar Promo Afiliados 🛍️"), KeyboardButton(text="Editar Convite Viral 📢")],
+            [KeyboardButton(text="Editar Convite do Grupo 🔗"), KeyboardButton(text="Editar Conv. Afiliados 🛍️")],
             [KeyboardButton(text="Voltar às Automações 🔙")]
         ],
         resize_keyboard=True,
@@ -2774,47 +2776,48 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
         "incentivo": "Incentivo 🔥",
         "link_grupo": "Convite do Grupo 🔗",
         "divulgar_gem": "Prompt GEM 🤖",
-        "promo_viral": "Promo Viral 🚀"
-    }
-    
-    # Ordem de exibição forçada para organizar o painel
-    ordem_exibicao = ["bom_dia", "incentivo", "link_grupo", "divulgar_gem", "promo_viral", "boa_noite"]
-    
-    for tipo in ordem_exibicao:
-        if tipo in dados:
-            config = dados[tipo]
-            nome_exibicao = nomes_amigaveis.get(tipo, tipo.replace("_", " ").title())
-            texto += f"🔹 <b>{nome_exibicao}</b>\n"
-            texto += f"   Janela de Sorteio: {config['inicio']}h às {config['fim']}h\n"
-            texto += f"   Disparos por Dia: {config['frequencia']}x\n\n"
+        "promo_viral": "Convite do Grupo Viral 🚀"
+        }
         
-    texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado") else "Pausar Rotinas ⏸️"
-    teclado_dinamico_rotina = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
-            [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
-            [KeyboardButton(text="Editar Promo Viral 🚀"), KeyboardButton(text="Editar Boa Noite 🌙")],
-            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Configs 🔙")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+        # Ordem de exibição forçada para organizar o painel
+        ordem_exibicao = ["bom_dia", "incentivo", "link_grupo", "divulgar_gem", "promo_viral", "boa_noite"]
+        
+        for tipo in ordem_exibicao:
+            if tipo in dados:
+                config = dados[tipo]
+                nome_exibicao = nomes_amigaveis.get(tipo, tipo.replace("_", " ").title())
+                texto += f"🔹 <b>{nome_exibicao}</b>\n"
+                texto += f"   Janela de Sorteio: {config['inicio']}h às {config['fim']}h\n"
+                texto += f"   Disparos por Dia: {config['frequencia']}x\n\n"
+            
+        texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado") else "Pausar Rotinas ⏸️"
+        teclado_dinamico_rotina = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
+                [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
+                [KeyboardButton(text="Editar Convite Viral 🚀"), KeyboardButton(text="Editar Boa Noite 🌙")],
+                [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Configs 🔙")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
         
     texto += "Selecione o que deseja editar abaixo:"
     await message.answer(texto, reply_markup=teclado_dinamico_rotina, parse_mode="HTML")
     await state.set_state(ConfigRotina.menu_principal)
 
-@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Promo Viral 🚀", "Editar Promo Afiliados 🛍️", "Editar Convite Viral 📢"]))
+@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Conv. Afiliados 🛍️", "Editar Convite do Grupo 🔗"]))
 async def pedir_horario_rotina(message: types.Message, state: FSMContext):
+    if EXIBIR_LOGS: logger.info(f"✏️ Iniciando edição da rotina: {message.text}")
     tipo_map = {
         "Editar Bom Dia ☀️": "bom_dia",
         "Editar Boa Noite 🌙": "boa_noite",
         "Editar Incentivo 🔥": "incentivo",
         "Editar Convite 🔗": "link_grupo",
         "Editar Prompt GEM 🤖": "divulgar_gem",
-        "Editar Promo Viral 🚀": "promo_viral",
-        "Editar Promo Afiliados 🛍️": "promo_principal",
-        "Editar Convite Viral 📢": "link_grupo_viral"
+        "Editar Convite Viral 🚀": "promo_viral",
+        "Editar Conv. Afiliados 🛍️": "promo_principal",
+        "Editar Convite do Grupo 🔗": "link_grupo_viral"
     }
     tipo = tipo_map[message.text]
     await state.update_data(tipo_edicao=tipo)
