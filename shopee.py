@@ -69,6 +69,7 @@ class PostagemFluxo(StatesGroup):
     aguardando_video = State()             
     aguardando_confirmacao_nome = State()  
     aguardando_chamada_manual = State()    
+    aguardando_decisao_erro = State()
     # ✅ Novos estados para o fluxo aprimorado
     aguardando_plataforma = State()
     aguardando_link_video_shopee = State()
@@ -140,6 +141,16 @@ teclado_plataforma = ReplyKeyboardMarkup(
 # 🛠️ Teclado básico para etapas de entrada de dados
 teclado_cancelar = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Cancelar ❌")]],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+# 🛠️ Teclado para erro na IA (NOVO)
+teclado_erro_ia = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Tentar Novamente 🔄"), KeyboardButton(text="Digitar Manualmente ✍️")],
+        [KeyboardButton(text="Cancelar ❌")]
+    ],
     resize_keyboard=True,
     is_persistent=True
 )
@@ -1515,12 +1526,103 @@ async def receber_video(message: types.Message, state: FSMContext):
         else:
             motivo = erro_str[:150] 
             
-        await message.answer(f"⚠️ A IA não conseguiu processar este vídeo.\n**Motivo:** {motivo}\n\nDigite manualmente APENAS O NOME DO PRODUTO ou clique em Cancelar:", reply_markup=teclado_cancelar)
+        # ✅ NOVO: Exibe o teclado com as três opções claras
+        await message.answer(f"⚠️ A IA não conseguiu processar este vídeo.\n**Motivo:** {motivo}\n\nO que você deseja fazer agora?", reply_markup=teclado_erro_ia)
         
         # ✅ Em caso de erro, preservamos o arquivo físico e o número já reservado
         video_path_recuperacao = f"temp_{file_id}.mp4"
         await state.update_data(video_path=video_path_recuperacao, video_id=file_id, links=[], numero_reservado=numero_atual)
+        
+        # ✅ Redireciona para o novo estado de decisão
+        await state.set_state(PostagemFluxo.aguardando_decisao_erro)
+
+@dp.message(PostagemFluxo.aguardando_decisao_erro)
+async def processar_erro_ia(message: types.Message, state: FSMContext):
+    if message.text == "Digitar Manualmente ✍️":
+        if EXIBIR_LOGS: logger.info("✍️ Usuário optou por digitar manualmente após erro da IA.")
+        await message.answer("Sem problemas. Digite manualmente APENAS O NOME DO PRODUTO ou kit:", reply_markup=teclado_cancelar)
         await state.set_state(PostagemFluxo.aguardando_chamada_manual)
+        
+    elif message.text == "Tentar Novamente 🔄":
+        if EXIBIR_LOGS: logger.info("🔄 Usuário optou por tentar processar o vídeo na IA novamente.")
+        data = await state.get_data()
+        video_path = data.get('video_path')
+        numero_atual = data.get('numero_reservado')
+        
+        # Trava de segurança caso o arquivo físico tenha sido corrompido ou apagado
+        if not video_path or not os.path.exists(video_path):
+            await message.answer("⚠️ O arquivo de vídeo foi perdido no servidor. Por favor, clique em Cancelar e envie o vídeo novamente.", reply_markup=teclado_erro_ia)
+            return
+            
+        msg_status = await message.answer("🔄 Reenviando vídeo para a IA analisar... Aguarde. ⏳", reply_markup=teclado_cancelar)
+        
+        def analisar_video_retry():
+            import time
+            if EXIBIR_LOGS: logger.info("📤 Fazendo re-upload do vídeo para o Google Storage...")
+            video_gemini = client.files.upload(file=video_path)
+            
+            while video_gemini.state.name == "PROCESSING":
+                time.sleep(2)
+                video_gemini = client.files.get(name=video_gemini.name)
+                
+            if video_gemini.state.name == "FAILED":
+                raise Exception("Falha de processamento no servidor do Google.")
+                
+            prompt_ia = (
+                f"Assista ao vídeo INTEIRO para identificar o produto ou kit principal. "
+                f"Sua resposta deve conter EXATAMENTE duas linhas. "
+                f"Na primeira linha, escreva estritamente: 'Vídeo {numero_atual}'. "
+                f"Na segunda linha, escreva '📦 Item: ' seguido do nome do produto ou kit identificado. "
+                f"Exemplo de saída esperada:\n"
+                f"Vídeo {numero_atual}\n"
+                f"📦 Item: Kit Dove Reconstrução\n"
+                f"Não adicione nenhuma outra palavra, ponto final extra ou descrição."
+            )
+            
+            try:
+                response = client.models.generate_content(
+                    model="gemini-3-flash-preview",
+                    contents=[video_gemini, prompt_ia]
+                )
+            except Exception as erro_modelo:
+                if "429" in str(erro_modelo):
+                    if EXIBIR_LOGS: logger.warning("⚠️ Limite do 3-flash atingido. Usando 2.5-flash como fallback...")
+                    response = client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=[video_gemini, prompt_ia]
+                    )
+                else:
+                    raise erro_modelo
+                    
+            return response.text.strip()
+            
+        try:
+            chamada_gerada = await asyncio.to_thread(analisar_video_retry)
+            await msg_status.delete()
+            
+            # Se der certo, salva e manda para a etapa de confirmar o nome
+            await state.update_data(nome_produto=chamada_gerada)
+            
+            mensagem_aprovacao = f"{chamada_gerada}\n\n👉 <b>Esta identificação está correta?</b> Escolha uma opção abaixo:"
+            await message.answer(mensagem_aprovacao, reply_markup=teclado_confirmacao, parse_mode="HTML")
+            await state.set_state(PostagemFluxo.aguardando_confirmacao_nome)
+            
+        except Exception as e:
+            erro_str = str(e)
+            if EXIBIR_LOGS: logger.error(f"❌ Erro na tentativa de reprocessamento: {erro_str}")
+            await msg_status.delete()
+            
+            motivo = "Falha no servidor."
+            if "429" in erro_str:
+                motivo = "Limite de velocidade da IA atingido. Aguarde 1 minuto."
+            else:
+                motivo = erro_str[:150] 
+                
+            await message.answer(f"⚠️ A IA falhou novamente.\n**Motivo:** {motivo}\n\nO que você deseja fazer agora?", reply_markup=teclado_erro_ia)
+            
+    else:
+        # Pega entradas soltas que não sejam os botões mapeados
+        await message.answer("Por favor, use um dos botões abaixo ou clique em Cancelar ❌:", reply_markup=teclado_erro_ia)
 
 @dp.message(PostagemFluxo.aguardando_confirmacao_nome)
 async def confirmar_nome(message: types.Message, state: FSMContext):
