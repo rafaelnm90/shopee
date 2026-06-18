@@ -675,9 +675,13 @@ async def disparar_mensagem(tipo, forcar=False):
     if EXIBIR_LOGS: logger.info(f"🔍 Validando status antes de disparar a rotina '{tipo}' (Forçar: {forcar})...")
     
     dados_rotina = ler_config_rotina()
+    is_viral = tipo in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral"]
     
-    if dados_rotina.get("pausado", False) and not forcar:
-        if EXIBIR_LOGS: logger.info(f"🛑 Disparo abortado ({tipo}): As rotinas estão pausadas no sistema.")
+    if is_viral and dados_rotina.get("pausado_viral", False) and not forcar:
+        if EXIBIR_LOGS: logger.info(f"🛑 Disparo abortado ({tipo}): As rotinas do VIRAL estão pausadas no sistema.")
+        return
+    elif not is_viral and dados_rotina.get("pausado", False) and not forcar:
+        if EXIBIR_LOGS: logger.info(f"🛑 Disparo abortado ({tipo}): As rotinas do PRINCIPAL estão pausadas no sistema.")
         return
         
     hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
@@ -841,6 +845,7 @@ def ler_config_rotina():
             if "promo_principal" not in dados: dados["promo_principal"] = {"inicio": 10, "fim": 20, "frequencia": 1}
             if "divulgar_gem_viral" not in dados: dados["divulgar_gem_viral"] = {"inicio": 8, "fim": 22, "frequencia": 1}
             if "pausado" not in dados: dados["pausado"] = False
+            if "pausado_viral" not in dados: dados["pausado_viral"] = False
             return dados
     except (FileNotFoundError, json.JSONDecodeError):
         # Configuração padrão de segurança se o arquivo não existir
@@ -1818,7 +1823,7 @@ async def menu_automacoes_espiao(message: types.Message, state: FSMContext):
     status_spam = "🔴 PAUSADO" if dados_div.get("pausado", False) else "🟢 ATIVO"
     
     dados_rotina = ler_config_rotina()
-    status_rotina = "🔴 PAUSADAS" if dados_rotina.get("pausado", False) else "🟢 ATIVAS"
+    status_rotina = "🔴 PAUSADAS" if dados_rotina.get("pausado_viral", False) else "🟢 ATIVAS"
     
     texto = (
         "⚙️ <b>Central de Automações do Espião</b>\n\n"
@@ -2062,7 +2067,7 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     texto += "Selecione o que deseja editar abaixo:"
     
     # ✅ NOVO: Verificação do status e adição do botão de pausa dinâmico
-    texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado") else "Pausar Rotinas ⏸️"
+    texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado_viral") else "Pausar Rotinas ⏸️"
     
     teclado = ReplyKeyboardMarkup(
         keyboard=[
@@ -2112,25 +2117,35 @@ async def alternar_pausa_spam_viral_interno(message: types.Message, state: FSMCo
 
 @dp.message(ConfigRotina.menu_principal, F.text.in_(["Pausar Rotinas ⏸️", "Retomar Rotinas ▶️"]))
 async def alternar_pausa_rotinas_interno(message: types.Message, state: FSMContext):
-    dados_rotina = ler_config_rotina()
-    novo_status = not dados_rotina.get("pausado", False)
-    dados_rotina["pausado"] = novo_status
-    salvar_config_rotina(dados_rotina)
-
-    if novo_status:
-        if EXIBIR_LOGS: logger.info("⏸️ Mensagens de Rotina PAUSADAS internamente.")
-        await message.answer("⏸️ <b>Mensagens de Rotina PAUSADAS.</b>\nAs mensagens automáticas do grupo foram suspensas.", parse_mode="HTML")
-    else:
-        if EXIBIR_LOGS: logger.info("▶️ Mensagens de Rotina ATIVADAS internamente.")
-        await message.answer("▶️ <b>Mensagens de Rotina ATIVAS.</b>\nAs mensagens automáticas voltarão a ser enviadas.", parse_mode="HTML")
-
-    # ✅ NOVO: Roteamento que devolve a interface para a aba de onde você clicou
     data = await state.get_data()
-    if data.get("menu_origem") == "espiao":
-        if EXIBIR_LOGS: logger.info("🔄 Redirecionando de volta ao painel de rotinas do Espião...")
+    origem = data.get("menu_origem")
+    dados_rotina = ler_config_rotina()
+
+    if origem == "espiao":
+        novo_status = not dados_rotina.get("pausado_viral", False)
+        dados_rotina["pausado_viral"] = novo_status
+        salvar_config_rotina(dados_rotina)
+        
+        if novo_status:
+            if EXIBIR_LOGS: logger.info("⏸️ Rotinas do VIRAL pausadas internamente.")
+            await message.answer("⏸️ <b>Rotinas do Canal Viral PAUSADAS.</b>\nAs mensagens automáticas foram suspensas.", parse_mode="HTML")
+        else:
+            if EXIBIR_LOGS: logger.info("▶️ Rotinas do VIRAL ativadas internamente.")
+            await message.answer("▶️ <b>Rotinas do Canal Viral ATIVAS.</b>\nAs mensagens automáticas voltarão a ser enviadas.", parse_mode="HTML")
+        
         await gerenciar_rotina_espiao(message, state)
     else:
-        if EXIBIR_LOGS: logger.info("🔄 Redirecionando de volta ao painel de rotinas Principal...")
+        novo_status = not dados_rotina.get("pausado", False)
+        dados_rotina["pausado"] = novo_status
+        salvar_config_rotina(dados_rotina)
+        
+        if novo_status:
+            if EXIBIR_LOGS: logger.info("⏸️ Rotinas do PRINCIPAL pausadas internamente.")
+            await message.answer("⏸️ <b>Mensagens de Rotina PAUSADAS.</b>\nAs mensagens automáticas do grupo foram suspensas.", parse_mode="HTML")
+        else:
+            if EXIBIR_LOGS: logger.info("▶️ Rotinas do PRINCIPAL ativadas internamente.")
+            await message.answer("▶️ <b>Mensagens de Rotina ATIVAS.</b>\nAs mensagens automáticas voltarão a ser enviadas.", parse_mode="HTML")
+            
         await gerenciar_rotina(message, state)
 
 # ✅ NOVO: Handler específico para corrigir o "Voltar" na pausa programada
