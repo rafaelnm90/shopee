@@ -35,13 +35,13 @@ SHOPEE_APP_ID = os.getenv('SHOPEE_APP_ID')
 SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
 
 MODELOS_CASCATA_GEMINI = [
-    "gemini-2.5-flash",
-    "gemini-3-flash-preview",
-    "gemini-2.5-flash-lite",
-    "gemini-3.5-flash",
     "gemini-3.1-pro-preview",
+    "gemini-2.5-pro",
+    "gemini-3.5-flash",
+    "gemini-3-flash-preview",
+    "gemini-2.5-flash",
     "gemini-3.1-flash-lite-preview",
-    "gemini-2.5-pro"
+    "gemini-2.5-flash-lite"
 ]
 
 # Inicializa o cliente moderno da SDK do Google
@@ -828,7 +828,7 @@ async def disparar_mensagem(tipo, forcar=False):
         msg_viral = await bot.send_message(GRUPO_ID, link_viral, parse_mode="HTML")
         registrar_lixeira(msg_viral.message_id, GRUPO_ID)
     elif tipo == "promo_principal":
-        link_princ = f"👇 <b>Acesse o Canal Principal:</b>\n{LINK_GRUPO}"
+        link_princ = f"👇 <b>Acesse o Canal Parceiro:</b>\n{LINK_GRUPO}"
         if EXIBIR_LOGS: logger.info("🔗 Enviando link do Acervo Afiliados.")
         msg_princ = await bot.send_message(GRUPO_VIRAL_ID, link_princ, parse_mode="HTML")
         registrar_lixeira(msg_princ.message_id, GRUPO_VIRAL_ID)    
