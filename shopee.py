@@ -714,12 +714,16 @@ async def disparar_mensagem(tipo, forcar=False):
     elif tipo == "link_grupo":
         prompt = (
             f"{contexto_afiliado} Não peça para postar vídeos. Crie um convite rápido e chamativo pedindo aos membros que convidem "
-            "amigos afiliados para o nosso grupo gratuito. Não adicione nenhum link na sua resposta. Use emojis."
+            "amigos afiliados para o nosso grupo gratuito. "
+            "REGRA: Parta do pressuposto de que o leitor JÁ ESTÁ NO GRUPO. O objetivo é encorajá-lo a trazer novas pessoas. "
+            "Não adicione nenhum link na sua resposta. Use emojis."
         )
     elif tipo == "link_grupo_viral":
         prompt = (
-            f"{contexto_afiliado} Crie um convite curto e empolgante pedindo aos seguidores que convidem "
-            "seus amigos para conhecerem o nosso canal parceiro de produtos virais, 100% gratuito. Não adicione nenhum link na sua resposta. Use emojis."
+            f"{contexto_afiliado} Crie um convite curto e empolgante pedindo aos membros que convidem "
+            "seus amigos para entrarem neste nosso acervo de vídeos virais. "
+            "REGRA ABSOLUTA: Parta do pressuposto de que o leitor JÁ ESTÁ NO GRUPO, portanto NÃO use o termo 'canal parceiro'. "
+            "O foco é apenas encorajá-los a trazer novas pessoas para o nosso grupo gratuito. Não adicione nenhum link na sua resposta. Use emojis."
         )
 
     elif tipo.startswith("campanha_"):
@@ -754,17 +758,17 @@ async def disparar_mensagem(tipo, forcar=False):
     elif tipo == "promo_viral":
         prompt = (
             "Você atua como assistente de afiliados da Shopee. Crie uma mensagem MUITO CURTA E DIRETA (MÁXIMO 150 CARACTERES) "
-            "convidando os membros para conhecerem o nosso canal parceiro 'Acervo Viral Shopee'. "
-            "Explique de forma direta que lá disponibilizamos dezenas de vídeos virais (estilo 'copia e cola', direto das tendências) "
-            "totalmente prontos e GRÁTIS para os afiliados baixarem e postarem nas suas redes para lucrar. "
+            "convidando os membros do canal principal para conhecerem o nosso 'canal parceiro'. "
+            "É OBRIGATÓRIO usar o termo exato 'canal parceiro' e explicar de forma clara que é um 'grupo gratuito com o intuito de auxiliar os afiliados com a obtenção de vídeos'. "
+            "Diga que lá disponibilizamos vídeos virais estilo 'copia e cola' diretos das tendências. "
             "Use emojis, varie o texto a cada geração e entregue apenas a mensagem pronta, sem aspas e sem links."
         )
     elif tipo == "promo_principal":
         prompt = (
             "Você atua como assistente de afiliados da Shopee. Crie uma mensagem MUITO CURTA E DIRETA (MÁXIMO 150 CARACTERES) "
-            "convidando os membros para conhecerem o nosso canal parceiro 'Acervo Afiliados Shopee'. "
-            "Explique de forma direta que lá distribuímos de forma totalmente GRATUITA os melhores vídeos já editados e selecionados a dedo "
-            "(conteúdo mais premium/gourmet) prontos para os afiliados baixarem e aumentarem suas comissões. "
+            "convidando os membros do canal viral para conhecerem o nosso 'canal parceiro'. "
+            "É OBRIGATÓRIO usar o termo exato 'canal parceiro' e explicar de forma clara que é um 'grupo gratuito com o intuito de auxiliar os afiliados com a obtenção de vídeos'. "
+            "Diga que no Acervo Afiliados nós distribuímos conteúdo mais premium, editado e selecionado a dedo. "
             "Use emojis, varie o texto a cada geração e entregue apenas a mensagem pronta, sem aspas e sem links."
         )
 
