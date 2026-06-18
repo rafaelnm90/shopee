@@ -809,17 +809,11 @@ async def disparar_mensagem(tipo, forcar=False):
         if EXIBIR_LOGS: logger.info("🔗 Enviando link do grupo viral em mensagem isolada.")
         msg_link = await bot.send_message(GRUPO_VIRAL_ID, link_separado, parse_mode="HTML")
         registrar_lixeira(msg_link.message_id, GRUPO_VIRAL_ID)
-    
-    if tipo == "link_grupo":
-        link_separado = f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}"
-        if EXIBIR_LOGS: logger.info("🔗 Enviando link do grupo em mensagem isolada.")
-        msg_link = await bot.send_message(GRUPO_ID, link_separado, parse_mode="HTML")
-        registrar_lixeira(msg_link.message_id)
     elif tipo == "divulgar_gem":
         link_gem = "👇 <b>Acesse o Prompt Automatizado:</b>\nhttps://gemini.google.com/gem/1HtJMuknyMZ76utOu-i6c_xvc3vmQx7bT?usp=sharing"
         if EXIBIR_LOGS: logger.info("🤖 Enviando link do GEM em mensagem isolada.")
         msg_gem = await bot.send_message(GRUPO_ID, link_gem, parse_mode="HTML")
-        registrar_lixeira(msg_gem.message_id)
+        registrar_lixeira(msg_gem.message_id, GRUPO_ID)
     elif tipo == "promo_viral":
         link_viral = f"👇 <b>Acesse o Canal Parceiro:</b>\n{LINK_GRUPO_VIRAL}"
         if EXIBIR_LOGS: logger.info("🔗 Enviando link do Acervo Viral.")
