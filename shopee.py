@@ -269,7 +269,7 @@ def salvar_alvos_espiao(dados):
 teclado_menu_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Grupos Vigiados 📡")],
-        [KeyboardButton(text="Disparar Conv. Principal 🛍️"), KeyboardButton(text="Disparar Convite do Grupo 🔗\u200b")],
+        [KeyboardButton(text="Disparar Convite do Grupo 🔗\u200b"), KeyboardButton(text="Disparar Conv. Principal 🛍️")],
         [KeyboardButton(text="⚙️ Automações (SPAM e Rotina)\u200b")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
@@ -2061,16 +2061,20 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     
     texto += "Selecione o que deseja editar abaixo:"
     
+    # ✅ NOVO: Verificação do status e adição do botão de pausa dinâmico
+    texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado") else "Pausar Rotinas ⏸️"
+    
     teclado = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Editar Convite do Grupo 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖\u200b")],
-            [KeyboardButton(text="Editar Conv. Principal 🛍️")],
+            [KeyboardButton(text="Editar Conv. Principal 🛍️"), KeyboardButton(text=texto_botao_pausa)],
             [KeyboardButton(text="Voltar às Automações 🔙")]
         ],
         resize_keyboard=True,
         is_persistent=True
     )
     await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
+    await state.update_data(menu_origem="espiao") # ✅ Salva a origem para não quebrar a navegação
     await state.set_state(ConfigRotina.menu_principal)
 
 # ✅ NOVOS INTERRUPTORES INTERNOS DE PAUSA
@@ -2120,7 +2124,14 @@ async def alternar_pausa_rotinas_interno(message: types.Message, state: FSMConte
         if EXIBIR_LOGS: logger.info("▶️ Mensagens de Rotina ATIVADAS internamente.")
         await message.answer("▶️ <b>Mensagens de Rotina ATIVAS.</b>\nAs mensagens automáticas voltarão a ser enviadas.", parse_mode="HTML")
 
-    await gerenciar_rotina(message, state)
+    # ✅ NOVO: Roteamento que devolve a interface para a aba de onde você clicou
+    data = await state.get_data()
+    if data.get("menu_origem") == "espiao":
+        if EXIBIR_LOGS: logger.info("🔄 Redirecionando de volta ao painel de rotinas do Espião...")
+        await gerenciar_rotina_espiao(message, state)
+    else:
+        if EXIBIR_LOGS: logger.info("🔄 Redirecionando de volta ao painel de rotinas Principal...")
+        await gerenciar_rotina(message, state)
 
 # ✅ NOVO: Handler específico para corrigir o "Voltar" na pausa programada
 @dp.message(PausaProgramadaFluxo.aguardando_selecao_servicos, F.text == "Voltar 🔙")
@@ -2796,6 +2807,7 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
     
     texto += "Selecione o que deseja editar abaixo:"
     await message.answer(texto, reply_markup=teclado_dinamico_rotina, parse_mode="HTML")
+    await state.update_data(menu_origem="principal") # ✅ Adicione esta linha exata aqui
     await state.set_state(ConfigRotina.menu_principal)
 
 @dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Conv. Afiliados 🛍️", "Editar Convite do Grupo 🔗"]))
