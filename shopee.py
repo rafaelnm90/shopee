@@ -245,9 +245,9 @@ def obter_teclado_principal():
     botoes = [
         [KeyboardButton(text="Criar Postagem 📝")],
         [KeyboardButton(text="Gerenciar Fila 📋")],
-        [KeyboardButton(text="Editar Número da Postagem 🔢"), KeyboardButton(text="Disparar Promo Viral 🚀")],
+        [KeyboardButton(text="Editar Número da Postagem 🔢"), KeyboardButton(text="Disparar Convite Viral 🚀")],
         [KeyboardButton(text="Disparar Bom Dia ☀️"), KeyboardButton(text="Disparar Boa Noite 🌙")],
-        [KeyboardButton(text="Disparar Incentivo 🔥"), KeyboardButton(text="Disparar Convite 📢")],
+        [KeyboardButton(text="Disparar Incentivo 🔥"), KeyboardButton(text="Disparar Convite do Grupo 🔗")],
         [KeyboardButton(text="Pausar Postagens 🛑")],
         [KeyboardButton(text="⚙️ Automações (SPAM e Rotina)")], 
         [KeyboardButton(text="Voltar ao Início 🔙")]
@@ -269,7 +269,7 @@ def salvar_alvos_espiao(dados):
 teclado_menu_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Grupos Vigiados 📡")],
-        [KeyboardButton(text="Disparar Promo Afiliados 🛍️"), KeyboardButton(text="Disparar Convite Viral 📢")],
+        [KeyboardButton(text="Disparar Convite Afiliados 🛍️"), KeyboardButton(text="Disparar Convite do Grupo 🔗 ")],
         [KeyboardButton(text="⚙️ Automações (SPAM e Rotina) ")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
@@ -1204,7 +1204,7 @@ async def manual_incentivo(message: types.Message):
     await disparar_mensagem("incentivo", forcar=True)
     await message.answer("Mensagem de Incentivo enviada ao grupo com sucesso! ✅")
 
-@dp.message(F.text == "Disparar Convite 📢")
+@dp.message(F.text == "Disparar Convite do Grupo 🔗")
 async def manual_link_grupo(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     
@@ -1222,7 +1222,7 @@ async def manual_link_grupo(message: types.Message):
     await disparar_mensagem("link_grupo", forcar=True)
     await message.answer("Mensagem de divulgação enviada ao grupo com sucesso! ✅")
 
-@dp.message(F.text == "Disparar Promo Viral 🚀")
+@dp.message(F.text == "Disparar Convite Viral 🚀")
 async def manual_promo_viral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     
@@ -1240,7 +1240,7 @@ async def manual_promo_viral(message: types.Message):
     await message.answer("Mensagem de Promo Viral enviada ao grupo com sucesso! ✅")
 
 # Bloco Modificado
-@dp.message(F.text == "Disparar Promo Afiliados 🛍️")
+@dp.message(F.text == "Disparar Convite Afiliados 🛍️")
 async def manual_promo_afiliados(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     
@@ -1257,7 +1257,7 @@ async def manual_promo_afiliados(message: types.Message):
     await disparar_mensagem("promo_principal", forcar=True)
     await message.answer("Propaganda do canal principal enviada ao canal viral com sucesso! ✅")
 
-@dp.message(F.text == "Disparar Convite Viral 📢")
+@dp.message(F.text == "Disparar Convite do Grupo 🔗 ")
 async def manual_convite_viral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     
