@@ -270,7 +270,7 @@ teclado_menu_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Grupos Vigiados 📡")],
         [KeyboardButton(text="Disparar Promo Afiliados 🛍️"), KeyboardButton(text="Disparar Convite Viral 📢")],
-        [KeyboardButton(text="⚙️ Automações do Espião")],
+        [KeyboardButton(text="⚙️ Automações (SPAM e Rotina) ")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -1770,11 +1770,11 @@ async def salvar_novo_numero(message: types.Message, state: FSMContext):
     else:
         await message.answer("Por favor, digite apenas números. Exemplo: 50", reply_markup=teclado_cancelar)
 
-@dp.message(F.text == "⚙️ Automações (SPAM e Rotina) ", StateFilter("*"))
-async def menu_automacoes_espiao(message: types.Message, state: FSMContext):
+@dp.message(F.text == "⚙️ Automações (SPAM e Rotina)", StateFilter("*"))
+async def menu_configuracoes(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    if EXIBIR_LOGS: logger.info("⚙️ Acessando Dashboard de Automações do Espião.")
+    if EXIBIR_LOGS: logger.info("⚙️ Acessando Dashboard de Configurações Gerais de Automações.")
     
     dados_div = ler_alvos_divulgacao()
     status_spam = "🔴 PAUSADO" if dados_div.get("pausado", False) else "🟢 ATIVO"
@@ -1823,7 +1823,7 @@ async def voltar_menu_espiao(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("🕵️ <b>Painel Principal do Espião</b>\nO que deseja acessar?", reply_markup=teclado_menu_espiao, parse_mode="HTML")
 
-@dp.message(F.text == "⚙️ Automações do Espião", StateFilter("*"))
+@dp.message(F.text == "⚙️ Automações (SPAM e Rotina) ", StateFilter("*"))
 async def menu_automacoes_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
