@@ -3874,13 +3874,14 @@ async def processar_fila_espiao():
         if video_gemini.state.name == "FAILED":
             raise Exception("Falha de processamento no servidor do Google.")
             
-        if EXIBIR_LOGS: logger.info("🚀 Preparando prompt com a lista estrita de setores da Shopee...")
+        if EXIBIR_LOGS: logger.info("🚀 Preparando prompt com a lista estrita de setores e blindagem semântica...")
             
         prompt = (
             "Assista ao vídeo e identifique qual é o produto demonstrado. "
             "Sua resposta deve conter EXATAMENTE duas linhas.\n"
             "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no início (Exemplo: 👟 Tênis Casual Feminino).\n"
             "Na segunda linha, inclua as hashtags correspondentes aos setores do produto.\n"
+            "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras (exemplo prático: um organizador de sacos plásticos de cozinha pertence a #CasaEDecoracao e NUNCA a #BolsasFemininas, pois não é um acessório de moda).\n"
             "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
             "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
             "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
@@ -3890,7 +3891,7 @@ async def processar_fila_espiao():
             "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
         )
         
-        if EXIBIR_LOGS: logger.info("✅ Prompt atualizado e formatado. Iniciando requisição à IA...")
+        if EXIBIR_LOGS: logger.info("✅ Prompt blindado e atualizado. Iniciando requisição à IA...")
         
         for modelo_nome in MODELOS_CASCATA_GEMINI:
             try:
