@@ -269,8 +269,8 @@ def salvar_alvos_espiao(dados):
 teclado_menu_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Grupos Vigiados 📡")],
-        [KeyboardButton(text="Disparar Convite Afiliados 🛍️"), KeyboardButton(text="Disparar Convite do Grupo 🔗 ")],
-        [KeyboardButton(text="⚙️ Automações (SPAM e Rotina) ")],
+        [KeyboardButton(text="Disparar Conv. Principal 🛍️"), KeyboardButton(text="Disparar Convite do Grupo 🔗\u200b")],
+        [KeyboardButton(text="⚙️ Automações (SPAM e Rotina)\u200b")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -742,7 +742,7 @@ async def disparar_mensagem(tipo, forcar=False):
             f"Transmita urgência, use emojis e entregue estritamente o texto pronto, sem aspas."
         )
 
-    elif tipo == "divulgar_gem":
+    elif tipo in ["divulgar_gem", "divulgar_gem_viral"]:
         prompt = (
             "Você atua como assistente de afiliados. Crie uma mensagem curta (MÁXIMO 200 CARACTERES) "
             "perguntando se a equipe está com dificuldade para criar legendas e hashtags. "
@@ -772,7 +772,7 @@ async def disparar_mensagem(tipo, forcar=False):
     
     # Bloco Modificado
     # ✅ Roteamento de chat: Define qual grupo receberá qual mensagem
-    chat_destino = GRUPO_VIRAL_ID if tipo in ["promo_principal", "link_grupo_viral"] else GRUPO_ID
+    chat_destino = GRUPO_VIRAL_ID if tipo in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral"] else GRUPO_ID
     
     if EXIBIR_LOGS: logger.info(f"🚀 Enviando rotina ({tipo}) para o chat {chat_destino}: {texto[:20]}...")
     msg_enviada = await bot.send_message(chat_destino, texto)
@@ -809,11 +809,11 @@ async def disparar_mensagem(tipo, forcar=False):
         if EXIBIR_LOGS: logger.info("🔗 Enviando link do grupo viral em mensagem isolada.")
         msg_link = await bot.send_message(GRUPO_VIRAL_ID, link_separado, parse_mode="HTML")
         registrar_lixeira(msg_link.message_id, GRUPO_VIRAL_ID)
-    elif tipo == "divulgar_gem":
+    elif tipo in ["divulgar_gem", "divulgar_gem_viral"]:
         link_gem = "👇 <b>Acesse o Prompt Automatizado:</b>\nhttps://gemini.google.com/gem/1HtJMuknyMZ76utOu-i6c_xvc3vmQx7bT?usp=sharing"
         if EXIBIR_LOGS: logger.info("🤖 Enviando link do GEM em mensagem isolada.")
-        msg_gem = await bot.send_message(GRUPO_ID, link_gem, parse_mode="HTML")
-        registrar_lixeira(msg_gem.message_id, GRUPO_ID)
+        msg_gem = await bot.send_message(chat_destino, link_gem, parse_mode="HTML")
+        registrar_lixeira(msg_gem.message_id, chat_destino)
     elif tipo == "promo_viral":
         link_viral = f"👇 <b>Acesse o Canal Parceiro:</b>\n{LINK_GRUPO_VIRAL}"
         if EXIBIR_LOGS: logger.info("🔗 Enviando link do Acervo Viral.")
@@ -831,18 +831,12 @@ def ler_config_rotina():
         with open("config_rotina.json", "r") as f:
             dados = json.load(f)
             # Adiciona chaves padrão se não existirem (retrocompatibilidade)
-            if "link_grupo" not in dados:
-                dados["link_grupo"] = {"inicio": 9, "fim": 21, "frequencia": 3}
-            if "divulgar_gem" not in dados:
-                dados["divulgar_gem"] = {"inicio": 8, "fim": 22, "frequencia": 1}
-            # ✅ Novas chaves para a parceria cruzada
-            if "promo_viral" not in dados:
-                dados["promo_viral"] = {"inicio": 10, "fim": 20, "frequencia": 1}
-            if "promo_principal" not in dados:
-                dados["promo_principal"] = {"inicio": 10, "fim": 20, "frequencia": 1}
-            # ✅ Nova chave para gerenciar o status de pausa via JSON
-            if "pausado" not in dados:
-                dados["pausado"] = False
+            if "link_grupo" not in dados: dados["link_grupo"] = {"inicio": 9, "fim": 21, "frequencia": 3}
+            if "divulgar_gem" not in dados: dados["divulgar_gem"] = {"inicio": 8, "fim": 22, "frequencia": 1}
+            if "promo_viral" not in dados: dados["promo_viral"] = {"inicio": 10, "fim": 20, "frequencia": 1}
+            if "promo_principal" not in dados: dados["promo_principal"] = {"inicio": 10, "fim": 20, "frequencia": 1}
+            if "divulgar_gem_viral" not in dados: dados["divulgar_gem_viral"] = {"inicio": 8, "fim": 22, "frequencia": 1}
+            if "pausado" not in dados: dados["pausado"] = False
             return dados
     except (FileNotFoundError, json.JSONDecodeError):
         # Configuração padrão de segurança se o arquivo não existir
@@ -855,6 +849,7 @@ def ler_config_rotina():
             "divulgar_gem": {"inicio": 8, "fim": 22, "frequencia": 1},
             "promo_viral": {"inicio": 10, "fim": 20, "frequencia": 1},
             "promo_principal": {"inicio": 10, "fim": 20, "frequencia": 1},
+            "divulgar_gem_viral": {"inicio": 8, "fim": 22, "frequencia": 1},
             "pausado": False
         }
 
@@ -1240,37 +1235,23 @@ async def manual_promo_viral(message: types.Message):
     await message.answer("Mensagem de Promo Viral enviada ao grupo com sucesso! ✅")
 
 # Bloco Modificado
-@dp.message(F.text == "Disparar Convite Afiliados 🛍️")
+@dp.message(F.text == "Disparar Conv. Principal 🛍️")
 async def manual_promo_afiliados(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     
-    dados_rotina = ler_config_rotina()
-    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
-    
-    if dados_rotina.get("ultimo_bom_dia") != hoje_str or dados_rotina.get("ultimo_boa_noite") == hoje_str:
-        if EXIBIR_LOGS: logger.warning("🛑 Clique manual rejeitado: Fora do expediente.")
-        await message.answer("⚠️ <b>Ação Bloqueada:</b> Você só pode disparar esta mensagem durante o expediente.", parse_mode="HTML")
-        return
-        
+    # ❌ Bloqueio de expediente removido a pedido do administrador
     await message.answer("Gerando e enviando divulgação do canal principal... ⏳")
-    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Promo Afiliados.")
+    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Convite Principal.")
     await disparar_mensagem("promo_principal", forcar=True)
     await message.answer("Propaganda do canal principal enviada ao canal viral com sucesso! ✅")
 
-@dp.message(F.text == "Disparar Convite do Grupo 🔗 ")
+@dp.message(F.text == "Disparar Convite do Grupo 🔗\u200b")
 async def manual_convite_viral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     
-    dados_rotina = ler_config_rotina()
-    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
-    
-    if dados_rotina.get("ultimo_bom_dia") != hoje_str or dados_rotina.get("ultimo_boa_noite") == hoje_str:
-        if EXIBIR_LOGS: logger.warning("🛑 Clique manual rejeitado: Fora do expediente.")
-        await message.answer("⚠️ <b>Ação Bloqueada:</b> Você só pode disparar esta mensagem durante o expediente.", parse_mode="HTML")
-        return
-        
+    # ❌ Bloqueio de expediente removido a pedido do administrador
     await message.answer("Gerando e enviando convite do canal viral... ⏳")
-    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Convite Viral.")
+    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Convite do Grupo Viral.")
     await disparar_mensagem("link_grupo_viral", forcar=True)
     await message.answer("Convite de recrutamento enviado ao canal viral com sucesso! ✅")
 
@@ -1313,16 +1294,16 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         return
         
     # 🔁 Roteamento Inteligente: Se estiver nas Rotinas
-        if estado_atual and estado_atual.startswith("ConfigRotina"):
-            tipo_edicao = data.get('tipo_edicao')
-            await state.clear()
-            if EXIBIR_LOGS: logger.info("🔙 Cancelando edição de rotina e redirecionando ao menu correto.")
-            await message.answer("Ação cancelada.")
-            if tipo_edicao in ["promo_principal", "link_grupo_viral"]:
-                await gerenciar_rotina_espiao(message, state)
-            else:
-                await gerenciar_rotina(message, state)
-            return
+    if estado_atual and estado_atual.startswith("ConfigRotina"):
+        tipo_edicao = data.get('tipo_edicao')
+        await state.clear()
+        if EXIBIR_LOGS: logger.info("🔙 Cancelando edição de rotina e redirecionando ao menu correto.")
+        await message.answer("Ação cancelada.")
+        if tipo_edicao in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral"]:
+            await gerenciar_rotina_espiao(message, state)
+        else:
+            await gerenciar_rotina(message, state)
+        return
 
     if EXIBIR_LOGS: logger.info("🔍 Verificando pendências de numeração na memória antes de limpar...")
     numero_reservado = data.get('numero_reservado')
@@ -1823,7 +1804,7 @@ async def voltar_menu_espiao(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("🕵️ <b>Painel Principal do Espião</b>\nO que deseja acessar?", reply_markup=teclado_menu_espiao, parse_mode="HTML")
 
-@dp.message(F.text == "⚙️ Automações (SPAM e Rotina) ", StateFilter("*"))
+@dp.message(F.text == "⚙️ Automações (SPAM e Rotina)\u200b", StateFilter("*"))
 async def menu_automacoes_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
@@ -2054,9 +2035,10 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     dados = ler_config_rotina()
     
-    # Resgata as configurações de ambas as rotinas
-    config_promo = dados.get("promo_principal", {"inicio": 10, "fim": 20, "frequencia": 1})
+    # Resgata as configurações das três rotinas do canal viral
     config_convite = dados.get("link_grupo_viral", {"inicio": 9, "fim": 21, "frequencia": 2})
+    config_gem = dados.get("divulgar_gem_viral", {"inicio": 8, "fim": 22, "frequencia": 1})
+    config_promo = dados.get("promo_principal", {"inicio": 10, "fim": 20, "frequencia": 1})
     
     if EXIBIR_LOGS: logger.info("⚙️ Acessando painel de Rotinas do Espião...")
     texto = "⏰ <b>Rotina do Espião (Canal Viral)</b>\n\n"
@@ -2064,8 +2046,12 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     texto += f"🔹 <b>Convite do Grupo 🔗 (Para o próprio grupo)</b>\n"
     texto += f"   Janela de Sorteio: {config_convite['inicio']}h às {config_convite['fim']}h\n"
     texto += f"   Disparos por Dia: {config_convite['frequencia']}x\n\n"
+
+    texto += f"🔹 <b>Prompt GEM 🤖 (Para o próprio grupo)</b>\n"
+    texto += f"   Janela de Sorteio: {config_gem['inicio']}h às {config_gem['fim']}h\n"
+    texto += f"   Disparos por Dia: {config_gem['frequencia']}x\n\n"
     
-    texto += f"🔹 <b>Convite do Grupo Afiliados 🛍️ (Para o Canal Principal)</b>\n"
+    texto += f"🔹 <b>Convite do Grupo Principal 🛍️ (Para o Canal Principal)</b>\n"
     texto += f"   Janela de Sorteio: {config_promo['inicio']}h às {config_promo['fim']}h\n"
     texto += f"   Disparos por Dia: {config_promo['frequencia']}x\n\n"
     
@@ -2073,7 +2059,8 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     
     teclado = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Editar Convite do Grupo 🔗"), KeyboardButton(text="Editar Conv. Afiliados 🛍️")],
+            [KeyboardButton(text="Editar Convite do Grupo 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖\u200b")],
+            [KeyboardButton(text="Editar Conv. Principal 🛍️")],
             [KeyboardButton(text="Voltar às Automações 🔙")]
         ],
         resize_keyboard=True,
