@@ -1186,6 +1186,41 @@ async def gerar_relatorio_completo(message: types.Message, state: FSMContext):
         marc = " (Hoje)" if i == 0 else ""
         texto += f"• {dt_chave}{marc}: R$ {f_br(valor)}\n"
 
+    # ✅ 3. NOVO: Teste Visual da Cascata Gemini com atualização ao vivo
+    if EXIBIR_LOGS: logger.info("🧠 Iniciando teste de diagnóstico dos motores Gemini...")
+    texto_modelos = "\n🧠 <b>STATUS DA CASCATA DE IA (GEMINI)</b>\n"
+    
+    for i, modelo in enumerate(MODELOS_CASCATA_GEMINI, 1):
+        try:
+            await msg_status.edit_text(f"📊 <i>Extraindo finanças e testando IA...</i>\n🔎 Verificando motor ({i}/{len(MODELOS_CASCATA_GEMINI)}): <code>{modelo}</code> ⏳", parse_mode="HTML")
+            
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=modelo,
+                contents="Responda apenas 'ok'"
+            )
+            if response and response.text:
+                texto_modelos += f"• {i}º <code>{modelo}</code>: 🟢 Online\n"
+                if EXIBIR_LOGS: logger.info(f"✅ Diagnóstico {i}º ({modelo}): Online.")
+            else:
+                texto_modelos += f"• {i}º <code>{modelo}</code>: 🟡 Resposta Vazia\n"
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Diagnóstico {i}º ({modelo}): Resposta vazia.")
+        except Exception as e:
+            erro_str = str(e).lower()
+            if "429" in erro_str or "quota" in erro_str or "exhausted" in erro_str:
+                texto_modelos += f"• {i}º <code>{modelo}</code>: 🟡 Cota Esgotada (Renova aprox. 04h00)\n"
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Diagnóstico {i}º ({modelo}): Cota de uso esgotada.")
+            elif "404" in erro_str or "not found" in erro_str:
+                texto_modelos += f"• {i}º <code>{modelo}</code>: 🔴 Descontinuado (Remover da lista)\n"
+                if EXIBIR_LOGS: logger.error(f"❌ Diagnóstico {i}º ({modelo}): Descontinuado ou inexistente.")
+            elif "503" in erro_str or "overloaded" in erro_str:
+                texto_modelos += f"• {i}º <code>{modelo}</code>: 🔴 Servidor Indisponível\n"
+                if EXIBIR_LOGS: logger.error(f"❌ Diagnóstico {i}º ({modelo}): Servidor do Google sobrecarregado.")
+            else:
+                erro_curto = str(e).replace('\n', ' ')[:30]
+                texto_modelos += f"• {i}º <code>{modelo}</code>: 🔴 Erro ({erro_curto}...)\n"
+                if EXIBIR_LOGS: logger.error(f"❌ Diagnóstico {i}º ({modelo}): Erro inesperado - {erro_curto}")
+
     # Adiciona o resultado visual da IA ao texto principal
     texto += texto_modelos
     
@@ -3021,7 +3056,7 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             else:
                 data_br = "Data desconhecida"
                 
-            # Define a Previsão de Postagem
+            # Define a Previsão de Postagem base
             if is_pausado:
                 status_previsao = "Pausado 🛑"
             elif data_adicao_str == "2000-01-01" or data_adicao_str <= hoje_str:
@@ -3033,9 +3068,20 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
                     status_previsao = "Amanhã 🟡"
                 else:
                     status_previsao = "Depois de Amanhã 🔵"
+
+            # ✅ NOVO: Interrogação Silenciosa do Motor para extrair a hora exata
+            hora_agendada_str = ""
+            job_id_esperado = f"job_fila_postagem_{item.get('id')}"
+            job_encontrado = scheduler.get_job(job_id_esperado)
+            
+            if job_encontrado and getattr(job_encontrado, 'next_run_time', None):
+                hora_exata = job_encontrado.next_run_time.astimezone(fuso_horario).strftime("%H:%M")
+                hora_agendada_str = f" às {hora_exata}"
+                
+            status_previsao_final = f"{status_previsao}{hora_agendada_str}"
                 
             texto += f"<b>{i}. {nome_video}</b> | 📦 {nome_item[:25]}...\n"
-            texto += f"   └ Criado em: {data_br} | Previsão: {status_previsao}\n\n"
+            texto += f"   └ Criado em: {data_br} | Previsão: {status_previsao_final}\n\n"
             
         texto += "O que deseja fazer com a fila?"
         if EXIBIR_LOGS: logger.info("✅ Painel visual da fila montado com metadados com sucesso.")
