@@ -738,15 +738,19 @@ async def disparar_mensagem(tipo, forcar=False):
 
     elif tipo == "promo_viral":
         prompt = (
-            "Você atua como assistente de afiliados. Crie uma mensagem MUITO CURTA E DIRETA (MÁXIMO 150 CARACTERES) "
-            "apresentando o nosso canal parceiro 'Acervo Viral Shopee'. Diga que lá postamos apenas os produtos virais "
-            "mais bombados do momento. Use emojis, varie o texto e entregue apenas a mensagem pronta, sem aspas e sem links."
+            "Você atua como assistente de afiliados da Shopee. Crie uma mensagem MUITO CURTA E DIRETA (MÁXIMO 150 CARACTERES) "
+            "convidando os membros para conhecerem o nosso canal parceiro 'Acervo Viral Shopee'. "
+            "Explique de forma direta que lá disponibilizamos dezenas de vídeos virais (estilo 'copia e cola', direto das tendências) "
+            "totalmente prontos para os afiliados baixarem e postarem nas suas redes para lucrar. "
+            "Use emojis, varie o texto a cada geração e entregue apenas a mensagem pronta, sem aspas e sem links."
         )
     elif tipo == "promo_principal":
         prompt = (
-            "Você atua como assistente de afiliados. Crie uma mensagem MUITO CURTA E DIRETA (MÁXIMO 150 CARACTERES) "
-            "apresentando o nosso canal principal 'Acervo Afiliados Shopee'. Diga que lá entregamos as melhores "
-            "ferramentas e achados para aumentar as comissões. Use emojis, varie o texto e entregue apenas a mensagem pronta."
+            "Você atua como assistente de afiliados da Shopee. Crie uma mensagem MUITO CURTA E DIRETA (MÁXIMO 150 CARACTERES) "
+            "convidando os membros para conhecerem o nosso canal principal 'Acervo Afiliados Shopee'. "
+            "Explique de forma direta que lá disponibilizamos os melhores vídeos já editados e selecionados a dedo "
+            "(conteúdo mais premium/gourmet) prontos para os afiliados baixarem e aumentarem suas comissões. "
+            "Use emojis, varie o texto a cada geração e entregue apenas a mensagem pronta, sem aspas e sem links."
         )
 
     texto = await gerar_mensagem_gemini(prompt)
