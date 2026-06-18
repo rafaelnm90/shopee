@@ -2777,31 +2777,31 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
         "link_grupo": "Convite do Grupo 🔗",
         "divulgar_gem": "Prompt GEM 🤖",
         "promo_viral": "Convite do Grupo Viral 🚀"
-        }
+    }
+    
+    # Ordem de exibição forçada para organizar o painel
+    ordem_exibicao = ["bom_dia", "incentivo", "link_grupo", "divulgar_gem", "promo_viral", "boa_noite"]
+    
+    for tipo in ordem_exibicao:
+        if tipo in dados:
+            config = dados[tipo]
+            nome_exibicao = nomes_amigaveis.get(tipo, tipo.replace("_", " ").title())
+            texto += f"🔹 <b>{nome_exibicao}</b>\n"
+            texto += f"   Janela de Sorteio: {config['inicio']}h às {config['fim']}h\n"
+            texto += f"   Disparos por Dia: {config['frequencia']}x\n\n"
         
-        # Ordem de exibição forçada para organizar o painel
-        ordem_exibicao = ["bom_dia", "incentivo", "link_grupo", "divulgar_gem", "promo_viral", "boa_noite"]
-        
-        for tipo in ordem_exibicao:
-            if tipo in dados:
-                config = dados[tipo]
-                nome_exibicao = nomes_amigaveis.get(tipo, tipo.replace("_", " ").title())
-                texto += f"🔹 <b>{nome_exibicao}</b>\n"
-                texto += f"   Janela de Sorteio: {config['inicio']}h às {config['fim']}h\n"
-                texto += f"   Disparos por Dia: {config['frequencia']}x\n\n"
-            
-        texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado") else "Pausar Rotinas ⏸️"
-        teclado_dinamico_rotina = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
-                [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
-                [KeyboardButton(text="Editar Convite Viral 🚀"), KeyboardButton(text="Editar Boa Noite 🌙")],
-                [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Configs 🔙")]
-            ],
-            resize_keyboard=True,
-            is_persistent=True
-        )
-        
+    texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado") else "Pausar Rotinas ⏸️"
+    teclado_dinamico_rotina = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
+            [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
+            [KeyboardButton(text="Editar Convite Viral 🚀"), KeyboardButton(text="Editar Boa Noite 🌙")],
+            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Configs 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
     texto += "Selecione o que deseja editar abaixo:"
     await message.answer(texto, reply_markup=teclado_dinamico_rotina, parse_mode="HTML")
     await state.set_state(ConfigRotina.menu_principal)
