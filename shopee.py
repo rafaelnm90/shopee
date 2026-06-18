@@ -268,8 +268,9 @@ def salvar_alvos_espiao(dados):
 
 teclado_menu_espiao = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Grupos Vigiados 📡"), KeyboardButton(text="⚙️ Automações do Espião")],
+        [KeyboardButton(text="Grupos Vigiados 📡")],
         [KeyboardButton(text="Disparar Promo Afiliados 🛍️"), KeyboardButton(text="Disparar Convite Viral 📢")],
+        [KeyboardButton(text="⚙️ Automações do Espião")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
