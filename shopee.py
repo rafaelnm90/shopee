@@ -268,8 +268,8 @@ def salvar_alvos_espiao(dados):
 
 teclado_menu_espiao = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Grupos Vigiados 📡")],
-        [KeyboardButton(text="⚙️ Automações do Espião")],
+        [KeyboardButton(text="Grupos Vigiados 📡"), KeyboardButton(text="⚙️ Automações do Espião")],
+        [KeyboardButton(text="Disparar Promo Afiliados 🛍️"), KeyboardButton(text="Disparar Convite Viral 📢")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -278,7 +278,6 @@ teclado_menu_espiao = ReplyKeyboardMarkup(
 
 teclado_automacoes_espiao = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Disparar Promo Afiliados 🛍️"), KeyboardButton(text="Disparar Convite Viral 📢")],
         [KeyboardButton(text="Rotinas do Espião ⏰"), KeyboardButton(text="SPAM do Espião 📢")],
         [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
     ],
@@ -719,7 +718,7 @@ async def disparar_mensagem(tipo, forcar=False):
     elif tipo == "link_grupo_viral":
         prompt = (
             f"{contexto_afiliado} Crie um convite curto e empolgante pedindo aos seguidores que convidem "
-            "seus amigos para conhecerem o nosso acervo de produtos virais. Não adicione nenhum link na sua resposta. Use emojis."
+            "seus amigos para conhecerem o nosso canal parceiro de produtos virais, 100% gratuito. Não adicione nenhum link na sua resposta. Use emojis."
         )
 
     elif tipo.startswith("campanha_"):
@@ -756,14 +755,14 @@ async def disparar_mensagem(tipo, forcar=False):
             "Você atua como assistente de afiliados da Shopee. Crie uma mensagem MUITO CURTA E DIRETA (MÁXIMO 150 CARACTERES) "
             "convidando os membros para conhecerem o nosso canal parceiro 'Acervo Viral Shopee'. "
             "Explique de forma direta que lá disponibilizamos dezenas de vídeos virais (estilo 'copia e cola', direto das tendências) "
-            "totalmente prontos para os afiliados baixarem e postarem nas suas redes para lucrar. "
+            "totalmente prontos e GRÁTIS para os afiliados baixarem e postarem nas suas redes para lucrar. "
             "Use emojis, varie o texto a cada geração e entregue apenas a mensagem pronta, sem aspas e sem links."
         )
     elif tipo == "promo_principal":
         prompt = (
             "Você atua como assistente de afiliados da Shopee. Crie uma mensagem MUITO CURTA E DIRETA (MÁXIMO 150 CARACTERES) "
-            "convidando os membros para conhecerem o nosso canal principal 'Acervo Afiliados Shopee'. "
-            "Explique de forma direta que lá disponibilizamos os melhores vídeos já editados e selecionados a dedo "
+            "convidando os membros para conhecerem o nosso canal parceiro 'Acervo Afiliados Shopee'. "
+            "Explique de forma direta que lá distribuímos de forma totalmente GRATUITA os melhores vídeos já editados e selecionados a dedo "
             "(conteúdo mais premium/gourmet) prontos para os afiliados baixarem e aumentarem suas comissões. "
             "Use emojis, varie o texto a cada geração e entregue apenas a mensagem pronta, sem aspas e sem links."
         )
@@ -1282,22 +1281,48 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     estado_atual = await state.get_state()
     if EXIBIR_LOGS: logger.info(f"❌ Ação cancelada via botão. Estado anterior: {estado_atual}")
 
-    # 🔁 Roteamento Inteligente: Se estiver no Gerenciador de Fila, volta apenas para o submenu da fila
+    data = await state.get_data()
+
+    # 🔁 Roteamento Inteligente: Se estiver no Gerenciador de Fila
     if estado_atual and estado_atual.startswith("GerenciarFilaFluxo"):
         await state.clear()
         await message.answer("Ação cancelada.")
         await menu_gerenciar_fila(message, state)
         return
         
-    # 🔁 Roteamento Inteligente: Se estiver no Espião, volta para a tela de Grupos Vigiados
+    # 🔁 Roteamento Inteligente: Se estiver no Espião (Grupos Vigiados)
     if estado_atual and estado_atual.startswith("EspiaoFluxo"):
         await state.clear()
         await message.answer("Ação cancelada.")
         await menu_grupos_vigiados(message, state)
         return
 
+    # 🔁 Roteamento Inteligente: Se estiver no SPAM Principal
+    if estado_atual and estado_atual.startswith("ConfigDivulgacao:"):
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await gerenciar_divulgacao(message, state)
+        return
+
+    # 🔁 Roteamento Inteligente: Se estiver no SPAM Viral
+    if estado_atual and estado_atual.startswith("ConfigDivulgacaoViral"):
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await gerenciar_divulgacao_viral(message, state)
+        return
+        
+    # 🔁 Roteamento Inteligente: Se estiver nas Rotinas
+    if estado_atual and estado_atual.startswith("ConfigRotina"):
+        tipo_edicao = data.get('tipo_edicao')
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        if tipo_edicao == "promo_principal":
+            await gerenciar_rotina_espiao(message, state)
+        else:
+            await gerenciar_rotina(message, state)
+        return
+
     if EXIBIR_LOGS: logger.info("🔍 Verificando pendências de numeração na memória antes de limpar...")
-    data = await state.get_data()
     numero_reservado = data.get('numero_reservado')
 
     if numero_reservado:
