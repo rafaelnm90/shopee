@@ -84,6 +84,31 @@ def salvar_na_fila_clonagem(caminho_video, link_shopee):
         json.dump(dados, f, indent=4)
     if EXIBIR_LOGS: logger.info(f"📦 Item salvo na fila de clonagem com sucesso (ID: {item['id']}).")
 
+def registrar_historico_espiao(nome_grupo):
+    import json
+    import os
+    arquivo_hist = "historico_espiao.json"
+    
+    try:
+        if os.path.exists(arquivo_hist):
+            with open(arquivo_hist, "r") as f:
+                historico = json.load(f)
+        else:
+            historico = {"total": 0, "grupos": {}}
+    except (FileNotFoundError, json.JSONDecodeError):
+        historico = {"total": 0, "grupos": {}}
+        
+    historico["total"] = historico.get("total", 0) + 1
+    
+    grupos = historico.get("grupos", {})
+    grupos[nome_grupo] = grupos.get(nome_grupo, 0) + 1
+    historico["grupos"] = grupos
+    
+    with open(arquivo_hist, "w") as f:
+        json.dump(historico, f, indent=4)
+        
+    if EXIBIR_LOGS: logger.info(f"📊 [Estatística] +1 vídeo contabilizado para o histórico do grupo: {nome_grupo}")
+
 # ✅ O padrão foi ampliado para capturar links com parâmetros complexos e domínios mais curtos
 PADRAO_SHOPEE = re.compile(r'(https?://(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+)')
 
@@ -127,6 +152,10 @@ async def interceptar_mensagem(event):
             caminho_salvo = await event.download_media(file="temp_clone_")
             
             salvar_na_fila_clonagem(caminho_salvo, link_capturado)
+            
+            # 📊 Adiciona a pontuação ao painel estatístico do Espião
+            nome_chat = getattr(chat, 'title', chat_username if chat_username else chat_id)
+            registrar_historico_espiao(nome_chat)
         else:
             if EXIBIR_LOGS: logger.info(f"⏭️ Ignorado: O link {link_capturado} foi encontrado, mas a postagem não contém um anexo de vídeo direto.")
 
