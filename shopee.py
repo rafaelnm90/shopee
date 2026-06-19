@@ -338,7 +338,7 @@ def agendar_fila_postagens():
     hoje_str = agora.strftime("%Y-%m-%d")
     
     from datetime import timedelta
-    videos_para_hoje = [item for item in fila if item.get("data_adicao") < hoje_str or item.get("data_adicao") == "2000-01-01"]
+    videos_para_hoje = [item for item in fila if item.get("data_adicao") <= hoje_str or item.get("data_adicao") == "2000-01-01"]
     
     if not videos_para_hoje:
         if EXIBIR_LOGS: logger.info("⏳ Todos os vídeos na fila estão agendados aguardando o dia de amanhã.")
@@ -479,7 +479,7 @@ async def executar_postagem_fila(item_id):
     fila = fila_data.get("fila", [])
     
     # Leitura estrita com base no índice atualizado
-    item = next((x for x in fila if x.get("data_adicao") < hoje_str or x.get("data_adicao") == "2000-01-01"), None)
+    item = next((x for x in fila if x.get("data_adicao") <= hoje_str or x.get("data_adicao") == "2000-01-01"), None)
     
     if not item:
         if EXIBIR_LOGS: logger.warning("⚠️ Nenhum vídeo elegível encontrado na fila para extração.")
