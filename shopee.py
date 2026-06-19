@@ -337,7 +337,6 @@ def agendar_fila_postagens():
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
     
-    # 🚀 CORREÇÃO: O Agendador agora enxerga a maturação forçada (Ano 2000) e os inclui no sorteio do dia
     from datetime import timedelta
     videos_para_hoje = [item for item in fila if item.get("data_adicao") < hoje_str or item.get("data_adicao") == "2000-01-01"]
     
@@ -346,105 +345,107 @@ def agendar_fila_postagens():
         return
         
     dados_rotina = ler_config_rotina()
-    
-    # 🚀 LÓGICA DINÂMICA: Lê os limites exatos configurados pelo administrador no painel
-    hora_fim_bom_dia = dados_rotina.get("bom_dia", {}).get("fim", 9)
-    hora_inicio_boa_noite = dados_rotina.get("boa_noite", {}).get("inicio", 21)
-    
     ultimo_bd = dados_rotina.get("ultimo_bom_dia", "")
     ultimo_bn = dados_rotina.get("ultimo_boa_noite", "")
     
-    if EXIBIR_LOGS: logger.info("🚀 Construindo miolo útil dinâmico da fila de vídeos baseado nas configurações do painel...")
+    if EXIBIR_LOGS: logger.info("🚀 Construindo miolo útil dinâmico ancorado no Bom Dia e Boa Noite...")
     
     horarios_ocupados = []
     for job in scheduler.get_jobs():
         proxima_execucao = getattr(job, 'next_run_time', None)
         if proxima_execucao and not job.id.startswith('job_fila_postagem_'):
             horarios_ocupados.append(proxima_execucao.astimezone(fuso_horario))
-            if EXIBIR_LOGS: logger.info(f"🔎 Radar de colisão validou o horário da rotina '{job.id}'.")
             
-    # Fronteira Inicial Elástica: Se o 'Bom Dia' foi forçado, a janela abre agora. Senão, respeita o limite.
+    # Fronteira Inicial Dinâmica (Ancorada no Bom Dia)
+    job_bd = scheduler.get_job('job_rotina_bom_dia_0')
     if ultimo_bd == hoje_str:
-        limite_inicio_hoje = agora
+        limite_inicio_hoje = max(agora + timedelta(minutes=2), agora.replace(hour=0, minute=0, second=0, microsecond=0))
+    elif job_bd and getattr(job_bd, 'next_run_time', None):
+        limite_inicio_hoje = max(agora + timedelta(minutes=2), job_bd.next_run_time.astimezone(fuso_horario) + timedelta(minutes=10))
     else:
-        limite_inicio_hoje = agora.replace(hour=hora_fim_bom_dia, minute=0, second=0, microsecond=0)
+        hora_fim_bom_dia = dados_rotina.get("bom_dia", {}).get("fim", 9)
+        limite_inicio_hoje = max(agora + timedelta(minutes=2), agora.replace(hour=hora_fim_bom_dia, minute=0, second=0, microsecond=0))
     
-    # Fronteira Final Rígida: Se o 'Boa Noite' foi forçado, a janela fecha imediatamente.
+    # Fronteira Final Dinâmica (Ancorada no Boa Noite)
+    job_bn = scheduler.get_job('job_rotina_boa_noite_0')
     if ultimo_bn == hoje_str:
         limite_fim_hoje = agora
+    elif job_bn and getattr(job_bn, 'next_run_time', None):
+        limite_fim_hoje = job_bn.next_run_time.astimezone(fuso_horario) - timedelta(minutes=15)
     else:
+        hora_inicio_boa_noite = dados_rotina.get("boa_noite", {}).get("inicio", 21)
         hora_limite_final = hora_inicio_boa_noite - 1 if hora_inicio_boa_noite > 0 else 23
         limite_fim_hoje = agora.replace(hour=hora_limite_final, minute=59, second=59, microsecond=0)
     
     if agora >= limite_fim_hoje:
-            if EXIBIR_LOGS: logger.warning("⚠️ O expediente de hoje encerrou. Transbordando vídeos retidos para amanhã.")
-            amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
-            for item in videos_para_hoje:
-                item["data_adicao"] = amanha_str
-            salvar_fila_postagens(fila_data)
-            return
-            
-        inicio_real = max(agora + timedelta(minutes=2), limite_inicio_hoje)
-        minutos_disponiveis = int((limite_fim_hoje - inicio_real).total_seconds() / 60)
-        
-        qtd_videos = len(videos_para_hoje)
-        espacamento_medio = minutos_disponiveis // qtd_videos if qtd_videos > 0 else 15
-        
-        if espacamento_medio < 10:
-            espacamento_medio = 10
-            
-        minuto_atual_busca = inicio_real
-        INTERVALO_MINIMO = 15
-        
-        houve_transbordo = False
+        if EXIBIR_LOGS: logger.warning("⚠️ O expediente de hoje encerrou. Transbordando vídeos retidos para amanhã.")
         amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+        for item in videos_para_hoje:
+            item["data_adicao"] = amanha_str
+        salvar_fila_postagens(fila_data)
+        return
         
-        for index, item in enumerate(videos_para_hoje):
-            limite_sorteio = minuto_atual_busca + timedelta(minutes=espacamento_medio - 1)
-            if limite_sorteio < minuto_atual_busca: limite_sorteio = minuto_atual_busca
+    inicio_real = limite_inicio_hoje
+    minutos_disponiveis = int((limite_fim_hoje - inicio_real).total_seconds() / 60)
+    
+    qtd_videos = len(videos_para_hoje)
+    espacamento_medio = minutos_disponiveis // qtd_videos if qtd_videos > 0 else 15
+    
+    if espacamento_medio < 10:
+        espacamento_medio = 10
+        
+    minuto_atual_busca = inicio_real
+    INTERVALO_MINIMO = 15
+    
+    houve_transbordo = False
+    amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+    
+    for index, item in enumerate(videos_para_hoje):
+        limite_sorteio = minuto_atual_busca + timedelta(minutes=espacamento_medio - 1)
+        if limite_sorteio < minuto_atual_busca: limite_sorteio = minuto_atual_busca
+        
+        max_minutos_offset = int((limite_sorteio - minuto_atual_busca).total_seconds() / 60)
+        if max_minutos_offset < 0: max_minutos_offset = 0
+        
+        sucesso = False
+        horario_disparo = None
+        
+        for tentativa in range(100):
+            minutos_offset = random.randint(0, max_minutos_offset)
+            horario_candidato = minuto_atual_busca + timedelta(minutes=minutos_offset, seconds=random.randint(0, 59))
             
-            max_minutos_offset = int((limite_sorteio - minuto_atual_busca).total_seconds() / 60)
-            if max_minutos_offset < 0: max_minutos_offset = 0
-            
-            sucesso = False
-            horario_disparo = None
-            
-            for tentativa in range(100):
-                minutos_offset = random.randint(0, max_minutos_offset)
-                horario_candidato = minuto_atual_busca + timedelta(minutes=minutos_offset, seconds=random.randint(0, 59))
-                
-                colisao = False
-                for ocupado in horarios_ocupados:
-                    if abs((horario_candidato - ocupado).total_seconds() / 60) < INTERVALO_MINIMO:
-                        colisao = True
-                        break
-                        
-                if not colisao:
-                    horario_disparo = horario_candidato
-                    sucesso = True
+            colisao = False
+            for ocupado in horarios_ocupados:
+                if abs((horario_candidato - ocupado).total_seconds() / 60) < INTERVALO_MINIMO:
+                    colisao = True
                     break
                     
-            if not sucesso:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Vídeo {index+1}: Sem lacuna limpa. Forçando encaixe de segurança.")
-                horario_disparo = minuto_atual_busca + timedelta(minutes=5)
-
-            if horario_disparo >= limite_fim_hoje:
-                if EXIBIR_LOGS: logger.warning(f"🛑 O vídeo excedeu o horário limite ({horario_disparo.strftime('%H:%M:%S')}). Transbordando para amanhã.")
-                item["data_adicao"] = amanha_str
-                houve_transbordo = True
-                continue
+            if not colisao:
+                horario_disparo = horario_candidato
+                sucesso = True
+                break
                 
-            horarios_ocupados.append(horario_disparo)
+        if not sucesso:
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Vídeo {index+1}: Sem lacuna limpa. Forçando encaixe de segurança.")
+            horario_disparo = minuto_atual_busca + timedelta(minutes=5)
+
+        if horario_disparo >= limite_fim_hoje:
+            if EXIBIR_LOGS: logger.warning(f"🛑 O vídeo excedeu o horário limite ({horario_disparo.strftime('%H:%M:%S')}). Transbordando para amanhã.")
+            item["data_adicao"] = amanha_str
+            houve_transbordo = True
+            continue
             
-            job_id = f"job_fila_postagem_{item['id']}"
-            scheduler.add_job(executar_postagem_fila, 'date', run_date=horario_disparo, args=[item['id']], id=job_id, replace_existing=True)
-            if EXIBIR_LOGS: logger.info(f"✅ Fila: Vídeo {index+1}/{qtd_videos} distribuído organicamente para as {horario_disparo.strftime('%H:%M:%S')}")
-            
-            minuto_atual_busca = horario_disparo + timedelta(minutes=espacamento_medio)
-            
-        if houve_transbordo:
-            salvar_fila_postagens(fila_data)
-            if EXIBIR_LOGS: logger.info("✅ Fila atualizada no sistema após o transbordo dos vídeos excedentes.")
+        horarios_ocupados.append(horario_disparo)
+        
+        job_id = f"job_fila_postagem_{item['id']}"
+        scheduler.add_job(executar_postagem_fila, 'date', run_date=horario_disparo, args=[item['id']], id=job_id, replace_existing=True)
+        if EXIBIR_LOGS: logger.info(f"✅ Fila: Vídeo {index+1}/{qtd_videos} distribuído organicamente para as {horario_disparo.strftime('%H:%M:%S')}")
+        
+        minuto_atual_busca = horario_disparo + timedelta(minutes=espacamento_medio)
+        
+    if houve_transbordo:
+        salvar_fila_postagens(fila_data)
+        if EXIBIR_LOGS: logger.info("✅ Fila atualizada no sistema após o transbordo dos vídeos excedentes.")
 
 async def executar_postagem_fila(item_id):
     if EXIBIR_LOGS: logger.info(f"📤 Iniciando processo de extração de vídeo da fila...")
@@ -938,111 +939,129 @@ def salvar_config_rotina(dados):
         json.dump(dados, f, indent=4)
 
 def agendar_tarefas_diarias():
-    if EXIBIR_LOGS: logger.info("🔄 Sorteando horários de rotina com inteligência anti-spam...")
+    if EXIBIR_LOGS: logger.info("🔄 Reestruturando a grade: Sorteando horários com inteligência de lacunas (Gap-Filling)...")
     
-    # Limpa os jobs antigos de rotina e de campanhas para evitar duplicatas ao forçar re-sorteio
     for job in scheduler.get_jobs():
         if job.id.startswith('job_rotina_') or job.id.startswith('job_campanha_'):
             job.remove()
-            if EXIBIR_LOGS: logger.info(f"🧹 Registro de agendamento antigo apagado da memória: {job.id}")
+            if EXIBIR_LOGS: logger.info(f"🧹 Agendamento antigo apagado da memória: {job.id}")
 
     dados_rotina = ler_config_rotina()
-    horarios_ocupados = [] 
-    INTERVALO_MINIMO = 30 # Distância mínima em minutos entre qualquer mensagem
+    agora = datetime.now(fuso_horario)
+    hoje_str = agora.strftime("%Y-%m-%d")
     
-    # Executa o sorteio dinâmico e inteligente
-    for tipo, config in dados_rotina.items():
-        # 🚀 CORREÇÃO: Pula chaves de texto/controle para não causar crash ao procurar propriedades
-        if tipo in ["pausado", "ultimo_bom_dia", "ultimo_boa_noite"] or not isinstance(config, dict):
-            if EXIBIR_LOGS: logger.info(f"⏭️ Pulando a chave de controle de sistema ('{tipo}')...")
+    # 1. ABERTURA E FECHAMENTO RÍGIDOS (Cadeados do Expediente)
+    for tipo in ["bom_dia", "boa_noite"]:
+        if tipo not in dados_rotina or type(dados_rotina[tipo]) is not dict:
             continue
             
-        freq = config.get("frequencia", 1)
-        inicio = config.get("inicio", 6)
-        fim = config.get("fim", 22)
-        
-        limite_superior = fim - 1 if fim > inicio else fim
-        if EXIBIR_LOGS: logger.info(f"🧮 Configurando {tipo}: {freq}x entre {inicio}h e {limite_superior}h59.")
-        
-        # Calcula o espaçamento ideal para distribuir mensagens do mesmo tipo
-        minutos_disponiveis = (limite_superior * 60 + 59) - (inicio * 60)
-        espacamento_ideal = minutos_disponiveis // freq if freq > 1 else 0
-        
-        for i in range(freq):
-            sucesso = False
+        ultimo_disparo = dados_rotina.get(f"ultimo_{tipo}", "")
+        if ultimo_disparo == hoje_str:
+            if EXIBIR_LOGS: logger.info(f"⏭️ {tipo.replace('_', ' ').title()} já disparado hoje. Pulando agendamento inicial.")
+            continue
             
-            # Subdivide a janela total em sub-blocos para cada disparo
-            min_inicio_busca = (inicio * 60) + (i * espacamento_ideal)
-            if freq > 1:
-                min_fim_busca = min((inicio * 60) + ((i + 1) * espacamento_ideal), (limite_superior * 60 + 59))
-            else:
-                min_fim_busca = (limite_superior * 60 + 59)
-                
-            for tentativa in range(100):
-                minuto_absoluto = random.randint(min_inicio_busca, min_fim_busca)
-                
-                # Validação global rigorosa contra sobreposição (30 minutos)
-                colisao = False
-                for ocupado in horarios_ocupados:
-                    if abs(minuto_absoluto - ocupado) < INTERVALO_MINIMO:
-                        colisao = True
-                        break
-                
-                if not colisao:
-                    horarios_ocupados.append(minuto_absoluto)
-                    hora_sorteada = minuto_absoluto // 60
-                    min_sorteado = minuto_absoluto % 60
-                    
-                    job_id = f"job_rotina_{tipo}_{i}"
-                    scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=min_sorteado, timezone=FUSO_STR, args=[tipo], id=job_id, replace_existing=True)
-                    if EXIBIR_LOGS: logger.info(f"✅ {tipo.upper()} [{i+1}/{freq}]: Agendado para {hora_sorteada:02d}:{min_sorteado:02d} (Tentativas: {tentativa+1})")
-                    sucesso = True
-                    break
-                    
-            if not sucesso:
-                # O motor aplica o fallback restrito caso a janela esteja muito congestionada
-                if EXIBIR_LOGS: logger.warning(f"⚠️ {tipo.upper()} [{i+1}/{freq}]: Limite de tentativas excedido. Aplicando fallback forçado na lacuna.")
-                minuto_absoluto_fallback = random.randint(min_inicio_busca, min_fim_busca)
-                hora_sorteada = minuto_absoluto_fallback // 60
-                min_sorteado = minuto_absoluto_fallback % 60
-                
-                job_id = f"job_rotina_{tipo}_{i}"
-                scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=min_sorteado, timezone=FUSO_STR, args=[tipo], id=job_id, replace_existing=True)
-                if EXIBIR_LOGS: logger.info(f"📅 {tipo.upper()} [{i+1}/{freq}]: Agendamento fallback para {hora_sorteada:02d}:{min_sorteado:02d}")
+        config = dados_rotina[tipo]
+        inicio = config.get("inicio", 6 if tipo == "bom_dia" else 21)
+        fim = config.get("fim", 9 if tipo == "bom_dia" else 23)
+        limite_superior = fim - 1 if fim > inicio else fim
+        
+        min_inicio_busca = inicio * 60
+        min_fim_busca = limite_superior * 60 + 59
+        
+        minuto_absoluto = random.randint(min_inicio_busca, min_fim_busca)
+        hora_sorteada = minuto_absoluto // 60
+        min_sorteado = minuto_absoluto % 60
+        
+        horario_candidato = agora.replace(hour=hora_sorteada, minute=min_sorteado, second=0, microsecond=0)
+        
+        if horario_candidato <= agora:
+            horario_candidato = agora + timedelta(minutes=5)
+            hora_sorteada, min_sorteado = horario_candidato.hour, horario_candidato.minute
+            
+        job_id = f"job_rotina_{tipo}_0"
+        scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=min_sorteado, timezone=FUSO_STR, args=[tipo], id=job_id, replace_existing=True)
+        if EXIBIR_LOGS: logger.info(f"🔒 Fronteira {tipo.upper()} cravada às {hora_sorteada:02d}:{min_sorteado:02d}.")
 
-    from datetime import datetime, timedelta
-    hoje_alvo = datetime.now(fuso_horario)
+    # 2. DISTRIBUIÇÃO DOS VÍDEOS (Espinha Dorsal)
+    agendar_fila_postagens()
     
+    # 3. MAPEAMENTO DAS LACUNAS DE TEMPO
+    eventos_fixos = []
+    for job in scheduler.get_jobs():
+        if job.id.startswith('job_rotina_bom_dia') or job.id.startswith('job_rotina_boa_noite') or job.id.startswith('job_fila_postagem_'):
+            if getattr(job, 'next_run_time', None):
+                tempo_evento = job.next_run_time.astimezone(fuso_horario)
+                if tempo_evento.date() == agora.date():
+                    eventos_fixos.append(tempo_evento)
+                    
+    eventos_fixos.append(max(agora, agora.replace(hour=6, minute=0, second=0, microsecond=0)))
+    hora_fim_padrao = dados_rotina.get("boa_noite", {}).get("fim", 23)
+    eventos_fixos.append(agora.replace(hour=max(0, hora_fim_padrao - 1), minute=59, second=59, microsecond=0))
+    
+    eventos_fixos.sort()
+    
+    def encontrar_maior_lacuna_e_inserir(duracao_minima=15):
+        from datetime import timedelta
+        maior_gap = timedelta(0)
+        ponto_insercao = None
+        idx_insercao = -1
+        
+        for i in range(len(eventos_fixos) - 1):
+            gap = eventos_fixos[i+1] - eventos_fixos[i]
+            if gap > maior_gap:
+                maior_gap = gap
+                ponto_insercao = eventos_fixos[i] + (gap / 2)
+                idx_insercao = i + 1
+                
+        if maior_gap.total_seconds() / 60 >= duracao_minima:
+            eventos_fixos.insert(idx_insercao, ponto_insercao)
+            return ponto_insercao
+        return None
+
+    # 4. PREENCHIMENTO DINÂMICO (Intercalação nas maiores lacunas)
+    from datetime import timedelta
+    tipos_restantes = [t for t in dados_rotina.keys() if t not in ["bom_dia", "boa_noite", "pausado", "pausado_viral", "ultimo_bom_dia", "ultimo_boa_noite"]]
+    
+    tarefas_para_distribuir = []
+    for tipo in tipos_restantes:
+        config = dados_rotina[tipo]
+        if type(config) is dict:
+            for i in range(config.get("frequencia", 1)):
+                tarefas_para_distribuir.append((tipo, i))
+                
+    random.shuffle(tarefas_para_distribuir) 
+    
+    for tipo, indice in tarefas_para_distribuir:
+        horario_ideal = encontrar_maior_lacuna_e_inserir(duracao_minima=20)
+        
+        if horario_ideal:
+            job_id = f"job_rotina_{tipo}_{indice}"
+            scheduler.add_job(disparar_mensagem, 'date', run_date=horario_ideal, args=[tipo], id=job_id, replace_existing=True)
+            if EXIBIR_LOGS: logger.info(f"🧩 Lacuna preenchida: {tipo.upper()} [{indice+1}] encaixado exatamente às {horario_ideal.strftime('%H:%M:%S')}.")
+        else:
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Grade superlotada! Acionando fallback forçado para {tipo.upper()} [{indice+1}].")
+            minutos_offset = random.randint(15, 60)
+            horario_fallback = agora + timedelta(minutes=minutos_offset)
+            job_id = f"job_rotina_{tipo}_{indice}"
+            scheduler.add_job(disparar_mensagem, 'date', run_date=horario_fallback, args=[tipo], id=job_id, replace_existing=True)
+
+    # 5. AGENDAMENTO DAS CAMPANHAS ESPECIAIS
     for i in range(4):
-        data_futura = hoje_alvo + timedelta(days=i)
+        data_futura = agora + timedelta(days=i)
         if data_futura.day == data_futura.month:
             if EXIBIR_LOGS: logger.info(f"🎉 Mega Campanha {data_futura.day:02d}.{data_futura.month:02d} rastreada! Faltam {i} dias.")
-            
-            hora_c_manha = random.randint(8, 11)
-            min_c_manha = random.randint(0, 59)
-            
-            hora_c_tarde = random.randint(14, 17)
-            min_c_tarde = random.randint(0, 59)
-            
-            hora_c_noite = random.randint(18, 21)
-            min_c_noite = random.randint(0, 59)
-            
             tipo_alerta = f"campanha_{i}_{data_futura.day:02d}.{data_futura.month:02d}"
             
-            if EXIBIR_LOGS: logger.info(f"🏷️ Tag de alerta formatada com sucesso: {tipo_alerta}")
-            
-            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_manha, minute=min_c_manha, timezone=FUSO_STR, args=[tipo_alerta], id='job_campanha_manha', replace_existing=True)
-            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_tarde, minute=min_c_tarde, timezone=FUSO_STR, args=[tipo_alerta], id='job_campanha_tarde', replace_existing=True)
-            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_c_noite, minute=min_c_noite, timezone=FUSO_STR, args=[tipo_alerta], id='job_campanha_noite', replace_existing=True)
-            
-            if EXIBIR_LOGS:
-                logger.info(f"⏳ Alerta Campanha Manhã: {hora_c_manha:02d}:{min_c_manha:02d}")
-                logger.info(f"⏳ Alerta Campanha Tarde: {hora_c_tarde:02d}:{min_c_tarde:02d}")
-                logger.info(f"⏳ Alerta Campanha Noite: {hora_c_noite:02d}:{min_c_noite:02d}")
+            for p in ["manha", "tarde", "noite"]:
+                horario_campanha = encontrar_maior_lacuna_e_inserir(duracao_minima=10)
+                if not horario_campanha:
+                    if p == "manha": horario_campanha = agora.replace(hour=random.randint(8,11), minute=random.randint(0,59))
+                    elif p == "tarde": horario_campanha = agora.replace(hour=random.randint(14,17), minute=random.randint(0,59))
+                    else: horario_campanha = agora.replace(hour=random.randint(18,21), minute=random.randint(0,59))
+                    
+                scheduler.add_job(disparar_mensagem, 'date', run_date=horario_campanha, args=[tipo_alerta], id=f'job_campanha_{p}', replace_existing=True)
+                if EXIBIR_LOGS: logger.info(f"⏳ Alerta Campanha {p.title()} encaixado às: {horario_campanha.strftime('%H:%M:%S')}")
             break
-
-    # Agora sim, com as rotinas já sorteadas, chamamos a fila de postagens para se basear nelas
-    agendar_fila_postagens()
 
 # 5. HANDLERS DE COMANDO E INTERAÇÃO
 @dp.message(Command("start"), StateFilter("*"))
