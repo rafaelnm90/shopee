@@ -246,7 +246,7 @@ teclado_outros_canais = ReplyKeyboardMarkup(
 # 🛠️ Função do novo Menu Inicial Raiz
 def obter_teclado_raiz():
     botoes = [
-        [KeyboardButton(text="Canal Principal 📺"), KeyboardButton(text="Outros Canais 🗂️")],
+        [KeyboardButton(text="Canal Afiliados 📺"), KeyboardButton(text="Outros Canais 🗂️")],
         [KeyboardButton(text="Relatório Geral 📊")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -280,7 +280,7 @@ def salvar_alvos_espiao(dados):
 teclado_menu_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Grupos Vigiados 📡")],
-        [KeyboardButton(text="Disparar Convite do Grupo 🔗\u200b"), KeyboardButton(text="Disparar Conv. Principal 🛍️")],
+        [KeyboardButton(text="Disparar Convite Afiliados 🚀"), KeyboardButton(text="Disparar Convite do Grupo 🔗\u200b")],
         [KeyboardButton(text="⚙️ Automações (SPAM e Rotina)\u200b")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
@@ -992,12 +992,12 @@ async def comando_start(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("⌨️ Iniciando o bot no Menu Raiz.")
     await message.answer("🏠 Painel de Controle Inicial. Escolha uma área para gerenciar:", reply_markup=obter_teclado_raiz())
 
-@dp.message(F.text == "Canal Principal 📺", StateFilter("*"))
+@dp.message(F.text == "Canal Afiliados 📺", StateFilter("*"))
 async def menu_canal_principal(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    if EXIBIR_LOGS: logger.info("📂 Acessando a pasta do Canal Principal.")
-    await message.answer("📺 <b>Menu do Canal Principal</b>\nGerencie as postagens e rotinas abaixo:", reply_markup=obter_teclado_principal(), parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info("📂 Acessando a pasta do Canal Afiliados.")
+    await message.answer("📺 <b>Menu do Canal Afiliados</b>\nGerencie as postagens e rotinas abaixo:", reply_markup=obter_teclado_principal(), parse_mode="HTML")
 
 async def buscar_dados_financeiros_shopee(dias_retroativos=30):
     if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
@@ -1328,15 +1328,15 @@ async def manual_promo_viral(message: types.Message):
     await message.answer("Mensagem de Promo Viral enviada ao grupo com sucesso! ✅")
 
 # Bloco Modificado
-@dp.message(F.text == "Disparar Conv. Principal 🛍️")
+@dp.message(F.text == "Disparar Convite Afiliados 🚀")
 async def manual_promo_afiliados(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     
     # ❌ Bloqueio de expediente removido a pedido do administrador
-    await message.answer("Gerando e enviando divulgação do canal principal... ⏳")
-    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Convite Principal.")
+    await message.answer("Gerando e enviando divulgação do canal de afiliados... ⏳")
+    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo manual autorizado para Convite Afiliados.")
     await disparar_mensagem("promo_principal", forcar=True)
-    await message.answer("Propaganda do canal principal enviada ao canal viral com sucesso! ✅")
+    await message.answer("Propaganda do canal de afiliados enviada ao canal viral com sucesso! ✅")
 
 @dp.message(F.text == "Disparar Convite do Grupo 🔗\u200b")
 async def manual_convite_viral(message: types.Message):
@@ -2235,7 +2235,7 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     texto += f"   Janela de Sorteio: {config_gem['inicio']}h às {config_gem['fim']}h\n"
     texto += f"   Disparos por Dia: {config_gem['frequencia']}x\n\n"
     
-    texto += f"🔹 <b>Convite do Grupo Principal 🛍️ (Para o Canal Principal)</b>\n"
+    texto += f"🔹 <b>Convite do Grupo Afiliados 🛍️ (Para o Canal Afiliados)</b>\n"
     texto += f"   Janela de Sorteio: {config_promo['inicio']}h às {config_promo['fim']}h\n"
     texto += f"   Disparos por Dia: {config_promo['frequencia']}x\n\n"
     
@@ -2247,7 +2247,7 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     teclado = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Editar Convite do Grupo 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖\u200b")],
-            [KeyboardButton(text="Editar Conv. Principal 🛍️"), KeyboardButton(text=texto_botao_pausa)],
+            [KeyboardButton(text="Editar Convite Afiliados 🚀"), KeyboardButton(text=texto_botao_pausa)],
             [KeyboardButton(text="Voltar às Automações 🔙")]
         ],
         resize_keyboard=True,
@@ -3000,7 +3000,7 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
     await state.update_data(menu_origem="principal") # ✅ Adicione esta linha exata aqui
     await state.set_state(ConfigRotina.menu_principal)
 
-@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Conv. Principal 🛍️", "Editar Convite do Grupo 🔗", "Editar Prompt GEM 🤖\u200b"]))
+@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Convite Afiliados 🚀", "Editar Convite do Grupo 🔗", "Editar Prompt GEM 🤖\u200b"]))
 async def pedir_horario_rotina(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info(f"✏️ Iniciando edição da rotina: {message.text}")
     tipo_map = {
@@ -3010,12 +3010,11 @@ async def pedir_horario_rotina(message: types.Message, state: FSMContext):
         "Editar Convite 🔗": "link_grupo",
         "Editar Prompt GEM 🤖": "divulgar_gem",
         "Editar Convite Viral 🚀": "promo_viral",
-        "Editar Conv. Principal 🛍️": "promo_principal",
+        "Editar Convite Afiliados 🚀": "promo_principal",
         "Editar Convite do Grupo 🔗": "link_grupo_viral",
         "Editar Prompt GEM 🤖\u200b": "divulgar_gem_viral"
     }
     tipo = tipo_map[message.text]
-    await state.update_data(tipo_edicao=tipo)
     
     # ✅ Lê as configurações atuais para criar os exemplos dinâmicos
     dados_atuais = ler_config_rotina()
