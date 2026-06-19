@@ -377,61 +377,74 @@ def agendar_fila_postagens():
         limite_fim_hoje = agora.replace(hour=hora_limite_final, minute=59, second=59, microsecond=0)
     
     if agora >= limite_fim_hoje:
-        if EXIBIR_LOGS: logger.warning("⚠️ Janela de postagem de hoje já encerrou. Fila aguardará até amanhã.")
-        return
-        
-    inicio_real = max(agora + timedelta(minutes=5), limite_inicio_hoje)
-    minutos_disponiveis = int((limite_fim_hoje - inicio_real).total_seconds() / 60)
-    
-    if minutos_disponiveis < 5:
-        if EXIBIR_LOGS: logger.warning("⚠️ Tempo insuficiente para espaçar os vídeos hoje.")
-        return
-        
-    qtd_videos = len(videos_para_hoje)
-    espacamento_medio = minutos_disponiveis // qtd_videos
-    minuto_atual_busca = inicio_real
-    INTERVALO_MINIMO = 15 # Distância de segurança (minutos) entre o vídeo e qualquer outra mensagem
-    
-    for index, item in enumerate(videos_para_hoje):
-        limite_sorteio = minuto_atual_busca + timedelta(minutes=espacamento_medio - 1)
-        if limite_sorteio < minuto_atual_busca: limite_sorteio = minuto_atual_busca
-        
-        max_minutos_offset = int((limite_sorteio - minuto_atual_busca).total_seconds() / 60)
-        sucesso = False
-        horario_disparo = None
-        
-        for tentativa in range(100):
-            minutos_offset = random.randint(0, max_minutos_offset)
-            horario_candidato = minuto_atual_busca + timedelta(minutes=minutos_offset, seconds=random.randint(0, 59))
+            if EXIBIR_LOGS: logger.warning("⚠️ O expediente de hoje encerrou. Transbordando vídeos retidos para amanhã.")
+            amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+            for item in videos_para_hoje:
+                item["data_adicao"] = amanha_str
+            salvar_fila_postagens(fila_data)
+            return
             
-            if horario_candidato > limite_fim_hoje:
-                horario_candidato = limite_fim_hoje
+        inicio_real = max(agora + timedelta(minutes=2), limite_inicio_hoje)
+        minutos_disponiveis = int((limite_fim_hoje - inicio_real).total_seconds() / 60)
+        
+        qtd_videos = len(videos_para_hoje)
+        espacamento_medio = minutos_disponiveis // qtd_videos if qtd_videos > 0 else 15
+        
+        if espacamento_medio < 10:
+            espacamento_medio = 10
+            
+        minuto_atual_busca = inicio_real
+        INTERVALO_MINIMO = 15
+        
+        houve_transbordo = False
+        amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        for index, item in enumerate(videos_para_hoje):
+            limite_sorteio = minuto_atual_busca + timedelta(minutes=espacamento_medio - 1)
+            if limite_sorteio < minuto_atual_busca: limite_sorteio = minuto_atual_busca
+            
+            max_minutos_offset = int((limite_sorteio - minuto_atual_busca).total_seconds() / 60)
+            if max_minutos_offset < 0: max_minutos_offset = 0
+            
+            sucesso = False
+            horario_disparo = None
+            
+            for tentativa in range(100):
+                minutos_offset = random.randint(0, max_minutos_offset)
+                horario_candidato = minuto_atual_busca + timedelta(minutes=minutos_offset, seconds=random.randint(0, 59))
                 
-            colisao = False
-            for ocupado in horarios_ocupados:
-                if abs((horario_candidato - ocupado).total_seconds() / 60) < INTERVALO_MINIMO:
-                    colisao = True
+                colisao = False
+                for ocupado in horarios_ocupados:
+                    if abs((horario_candidato - ocupado).total_seconds() / 60) < INTERVALO_MINIMO:
+                        colisao = True
+                        break
+                        
+                if not colisao:
+                    horario_disparo = horario_candidato
+                    sucesso = True
                     break
                     
-            if not colisao:
-                horario_disparo = horario_candidato
-                sucesso = True
-                break
-                
-        if not sucesso:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Vídeo {index+1}: Sem lacuna limpa. Forçando encaixe de segurança.")
-            meio_offset = max_minutos_offset // 2
-            horario_disparo = minuto_atual_busca + timedelta(minutes=meio_offset)
-            if horario_disparo > limite_fim_hoje: horario_disparo = limite_fim_hoje
+            if not sucesso:
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Vídeo {index+1}: Sem lacuna limpa. Forçando encaixe de segurança.")
+                horario_disparo = minuto_atual_busca + timedelta(minutes=5)
 
-        # Alimenta o radar para que os próximos vídeos se afastem deste
-        horarios_ocupados.append(horario_disparo)
-        
-        job_id = f"job_fila_postagem_{item['id']}"
-        scheduler.add_job(executar_postagem_fila, 'date', run_date=horario_disparo, args=[item['id']], id=job_id, replace_existing=True)
-        if EXIBIR_LOGS: logger.info(f"✅ Fila de Amanhã/Retorno: Vídeo {index+1}/{qtd_videos} distribuído organicamente para as {horario_disparo.strftime('%H:%M:%S')}")
-        
-        minuto_atual_busca += timedelta(minutes=espacamento_medio)
+            if horario_disparo >= limite_fim_hoje:
+                if EXIBIR_LOGS: logger.warning(f"🛑 O vídeo excedeu o horário limite ({horario_disparo.strftime('%H:%M:%S')}). Transbordando para amanhã.")
+                item["data_adicao"] = amanha_str
+                houve_transbordo = True
+                continue
+                
+            horarios_ocupados.append(horario_disparo)
+            
+            job_id = f"job_fila_postagem_{item['id']}"
+            scheduler.add_job(executar_postagem_fila, 'date', run_date=horario_disparo, args=[item['id']], id=job_id, replace_existing=True)
+            if EXIBIR_LOGS: logger.info(f"✅ Fila: Vídeo {index+1}/{qtd_videos} distribuído organicamente para as {horario_disparo.strftime('%H:%M:%S')}")
+            
+            minuto_atual_busca = horario_disparo + timedelta(minutes=espacamento_medio)
+            
+        if houve_transbordo:
+            salvar_fila_postagens(fila_data)
+            if EXIBIR_LOGS: logger.info("✅ Fila atualizada no sistema após o transbordo dos vídeos excedentes.")
 
 async def executar_postagem_fila(item_id):
     if EXIBIR_LOGS: logger.info(f"📤 Iniciando processo de extração de vídeo da fila...")
