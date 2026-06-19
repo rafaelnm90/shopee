@@ -3918,9 +3918,19 @@ async def processar_fila_espiao():
         texto_ia = await asyncio.to_thread(gerar_copy_clone)
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro na IA ao processar clone: {e}")
-        texto_ia = "🛍️ <b>Vídeo do Produto</b>"
+        texto_ia = "🛍️ Vídeo do Produto\n#Oferta"
         
-    legenda_postagem = f"{texto_ia}\n\n🔗 <b>Link do Produto:</b>\n{link_final}"
+    # Fatiar o texto da IA para separar o Nome das Hashtags
+    linhas_ia = texto_ia.split('\n')
+    nome_produto = linhas_ia[0].strip()
+    hashtags = '\n'.join(linhas_ia[1:]).strip() if len(linhas_ia) > 1 else ""
+    
+    # Montagem da legenda com a nova estética estruturada
+    legenda_postagem = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_final}"
+    
+    # Adiciona as hashtags em itálico no rodapé, caso existam
+    if hashtags:
+        legenda_postagem += f"\n\n<i>{hashtags}</i>"
     
     # 3. Disparo isolado no Canal Paralelo
     try:
