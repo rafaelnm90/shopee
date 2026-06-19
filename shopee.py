@@ -522,6 +522,50 @@ def salvar_pausa_programada(dados):
     with open("pausa_programada.json", "w") as f:
         json.dump(dados, f, indent=4)
 
+def recalcular_datas_pos_pausa():
+    if EXIBIR_LOGS: logger.info("🔄 Iniciando recálculo de datas da fila pós-pausa...")
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    
+    if not fila:
+        if EXIBIR_LOGS: logger.info("⚠️ Fila vazia, nenhum ajuste de data necessário.")
+        return
+        
+    from datetime import datetime, timedelta
+    agora = datetime.now(fuso_horario)
+    hoje_obj = agora.date()
+    
+    menor_data_obj = None
+    for item in fila:
+        d_str = item.get("data_adicao", "")
+        if d_str and d_str != "2000-01-01":
+            try:
+                d_obj = datetime.strptime(d_str, "%Y-%m-%d").date()
+                if menor_data_obj is None or d_obj < menor_data_obj:
+                    menor_data_obj = d_obj
+            except ValueError:
+                pass
+                
+    if menor_data_obj and menor_data_obj < hoje_obj:
+        offset_dias = (hoje_obj - menor_data_obj).days
+        if EXIBIR_LOGS: logger.info(f"⏳ Deslocamento identificado: {offset_dias} dias. Aplicando offset na fila...")
+        
+        for item in fila:
+            d_str = item.get("data_adicao", "")
+            if d_str and d_str != "2000-01-01":
+                try:
+                    d_obj = datetime.strptime(d_str, "%Y-%m-%d").date()
+                    nova_data = d_obj + timedelta(days=offset_dias)
+                    item["data_adicao"] = nova_data.strftime("%Y-%m-%d")
+                except ValueError:
+                    pass
+        
+        fila_data["fila"] = fila
+        salvar_fila_postagens(fila_data)
+        if EXIBIR_LOGS: logger.info("✅ Datas da fila recalculadas e salvas com sucesso.")
+    else:
+        if EXIBIR_LOGS: logger.info("✅ O primeiro vídeo da fila já está no futuro ou presente. Nenhum offset necessário.")
+
 async def verificar_pausa_diaria():
     if EXIBIR_LOGS: logger.info("⏰ Iniciando verificação diária de pausa programada (envio de aviso)...")
     dados_pausa = ler_pausa_programada()
@@ -599,6 +643,7 @@ async def verificar_retorno_pausa_minuto():
         dados_pausa["servicos_pausados"] = []
         dados_pausa.pop("id_aviso_imediato", None)
         salvar_pausa_programada(dados_pausa)
+        recalcular_datas_pos_pausa()
         agendar_fila_postagens()
         if EXIBIR_LOGS: logger.info("✅ Serviços reativados e pausa programada encerrada com sucesso.")
 # ----------------------------------
@@ -2485,7 +2530,8 @@ async def confirmar_pausa_programada(message: types.Message, state: FSMContext):
         dados_pausa["ativa"] = False
         dados_pausa["servicos_pausados"] = []
         salvar_pausa_programada(dados_pausa)
-        await message.answer("▶️ Pausa programada encerrada e serviços reativados com sucesso!", reply_markup=obter_teclado_principal())
+        recalcular_datas_pos_pausa()
+        await message.answer("▶️ Pausa programada encerrada, fila recalculada e serviços reativados com sucesso!", reply_markup=obter_teclado_principal())
         await state.clear()
         return
 
@@ -3499,28 +3545,43 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         prev_idx = nova_posicao - 1
         next_idx = nova_posicao
         
-        def obter_indice_data(data_str):
-            if data_str == "2000-01-01" or data_str <= hoje_str: return 0
-            if data_str == amanha_str: return 1
-            return 2
+        if EXIBIR_LOGS: logger.info(f"🚀 Calculando intervalo de datas para a posição {nova_posicao+1}...")
+        
+        data_min_str = fila_simulada[prev_idx].get("data_adicao", "2000-01-01") if prev_idx >= 0 else "2000-01-01"
+        data_max_str = fila_simulada[next_idx].get("data_adicao") if next_idx < len(fila_simulada) else None
+        
+        if data_min_str == "2000-01-01" or data_min_str < hoje_str:
+            data_min_str = hoje_str
             
-        prev_idx_data = obter_indice_data(fila_simulada[prev_idx].get("data_adicao", "")) if prev_idx >= 0 else 0
-        next_idx_data = obter_indice_data(fila_simulada[next_idx].get("data_adicao", "")) if next_idx < len(fila_simulada) else 2
+        from datetime import datetime, timedelta
+        data_min_obj = datetime.strptime(data_min_str, "%Y-%m-%d")
         
-        inicio_op = min(prev_idx_data, next_idx_data)
-        fim_op = max(prev_idx_data, next_idx_data)
-        
-        todas_opcoes = ["Hoje 🟢", "Amanhã 🟡", "Depois de Amanhã 🔵"]
-        
-        if prev_idx >= 0 and next_idx < len(fila_simulada) and prev_idx_data == next_idx_data:
-            opcoes = [todas_opcoes[prev_idx_data]]
+        if data_max_str is None or data_max_str == "2000-01-01":
+            data_max_obj = data_min_obj + timedelta(days=1)
         else:
-            opcoes = todas_opcoes[inicio_op:fim_op + 1]
-            if EXIBIR_LOGS: logger.info(f"🧠 Lacunas preenchidas com as datas intermediárias: {opcoes}")
-        
-        # ✅ Supressão automática da opção "Hoje" caso a rotina "Boa Noite" já tenha decorrido
+            data_max_obj = datetime.strptime(data_max_str, "%Y-%m-%d")
+            
+        if data_max_obj < data_min_obj:
+            data_max_obj = data_min_obj
+            
+        opcoes = []
+        d_atual = data_min_obj
+        while d_atual <= data_max_obj:
+            d_str = d_atual.strftime("%Y-%m-%d")
+            if d_str == hoje_str:
+                opcoes.append("Hoje 🟢")
+            elif d_str == amanha_str:
+                opcoes.append("Amanhã 🟡")
+            else:
+                opcoes.append(f"{d_atual.strftime('%d/%m/%Y')} 🔵")
+            d_atual += timedelta(days=1)
+            if len(opcoes) >= 3: 
+                break
+                
+        if EXIBIR_LOGS: logger.info(f"✅ Botões dinâmicos gerados com base no contexto: {opcoes}")
+
         if expediente_encerrado:
-            opcoes = [op for op in opcoes if op != "Hoje 🟢"]
+            opcoes = [op for op in opcoes if "Hoje" not in op]
             if not opcoes:
                 opcoes = ["Amanhã 🟡"]
                 if EXIBIR_LOGS: logger.info("🌙 Expediente encerrado: Hipótese 'Hoje 🟢' suprimida preventivamente da reordenação.")
@@ -3548,7 +3609,9 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
 @dp.message(GerenciarFilaFluxo.aguardando_data_posicao)
 async def processar_data_posicao_fila(message: types.Message, state: FSMContext):
     texto = message.text
-    if not any(op in texto for op in ["Hoje", "Amanhã", "Depois de Amanhã"]):
+    if "Hoje" in texto or "Amanhã" in texto or "🔵" in texto:
+        pass
+    else:
         await message.answer("Por favor, escolha uma opção válida através dos botões.")
         return
 
@@ -3556,15 +3619,22 @@ async def processar_data_posicao_fila(message: types.Message, state: FSMContext)
     posicao_origem = data.get("posicao_origem")
     nova_posicao = data.get("nova_posicao")
     
-    from datetime import timedelta
+    from datetime import datetime, timedelta
     agora = datetime.now(fuso_horario)
     
     if "Hoje" in texto: 
         nova_data_adicao = "2000-01-01"
-    elif "Amanhã" in texto and "Depois" not in texto: 
+    elif "Amanhã" in texto: 
         nova_data_adicao = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
-    else: 
-        nova_data_adicao = (agora + timedelta(days=2)).strftime("%Y-%m-%d")
+    else:
+        import re
+        match = re.search(r'(\d{2}/\d{2}/\d{4})', texto)
+        if match:
+            nova_data_adicao = datetime.strptime(match.group(1), "%d/%m/%Y").strftime("%Y-%m-%d")
+        else:
+            nova_data_adicao = (agora + timedelta(days=2)).strftime("%Y-%m-%d")
+            
+    if EXIBIR_LOGS: logger.info(f"📅 Data mapeada a partir do botão: {nova_data_adicao}")
 
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
