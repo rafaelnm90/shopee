@@ -279,7 +279,7 @@ def salvar_alvos_espiao(dados):
 
 teclado_menu_espiao = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Grupos Vigiados 📡")],
+        [KeyboardButton(text="Grupos Vigiados 📡"), KeyboardButton(text="Fila do Espião 🕵️‍♂️")],
         [KeyboardButton(text="Disparar Convite Afiliados 🚀"), KeyboardButton(text="Disparar Convite do Grupo 🔗\u200b")],
         [KeyboardButton(text="⚙️ Automações (SPAM e Rotina)\u200b")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
@@ -2028,6 +2028,64 @@ async def menu_espiao_principal(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🕵️ Acessando a página inicial do módulo Espião...")
     await message.answer("🕵️ <b>Painel Principal do Espião</b>\nO que deseja acessar?", reply_markup=teclado_menu_espiao, parse_mode="HTML")
+
+@dp.message(F.text == "Fila do Espião 🕵️‍♂️", StateFilter("*"))
+async def relatorio_fila_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    
+    # 1. Ler Fila Atual e Próximo Processamento
+    fila_data = ler_fila_clonagem()
+    fila = fila_data.get("fila", [])
+    
+    videos_pendentes = len([item for item in fila if not item.get("processado")])
+    proximo_proc_str = fila_data.get("proximo_processamento", "")
+    
+    hora_formatada = "Imediato / Não agendado"
+    if proximo_proc_str:
+        try:
+            from datetime import datetime
+            proximo_proc = datetime.strptime(proximo_proc_str, "%Y-%m-%d %H:%M:%S")
+            hora_formatada = proximo_proc.strftime("%H:%M")
+        except ValueError:
+            pass
+            
+    # 2. Ler Histórico de Capturas
+    import os
+    import json
+    try:
+        if os.path.exists("historico_espiao.json"):
+            with open("historico_espiao.json", "r") as f:
+                historico = json.load(f)
+        else:
+            historico = {"total": 0, "grupos": {}}
+    except (FileNotFoundError, json.JSONDecodeError):
+        historico = {"total": 0, "grupos": {}}
+        
+    total_clonado = historico.get("total", 0)
+    grupos = historico.get("grupos", {})
+    
+    # 3. Montar a Mensagem
+    texto = f"🕵️ <b>Fila e Desempenho do Espião</b>\n\n"
+    texto += f"⏳ <b>Na Fila Agora:</b> {videos_pendentes} vídeos aguardando.\n"
+    texto += f"⏰ <b>Próximo Clone às:</b> {hora_formatada}\n\n"
+    
+    texto += f"🏆 <b>Ranking Histórico de Capturas</b>\n"
+    texto += f"Total clonado até hoje: <b>{total_clonado} vídeos</b>\n\n"
+    
+    if total_clonado > 0 and grupos:
+        grupos_ordenados = sorted(grupos.items(), key=lambda x: x[1], reverse=True)
+        medalhas = ["🥇", "🥈", "🥉"]
+        
+        for i, (grupo, qtd) in enumerate(grupos_ordenados):
+            porcentagem = (qtd / total_clonado) * 100
+            medalha = medalhas[i] if i < 3 else "🔸"
+            texto += f"{medalha} {grupo}: {qtd} vídeos ({porcentagem:.1f}%)\n"
+    else:
+        texto += "<i>Nenhum dado histórico registrado ainda.</i>"
+        
+    if EXIBIR_LOGS: logger.info("📊 Relatório de Fila e Desempenho do Espião gerado com sucesso.")
+    await message.answer(texto, reply_markup=teclado_menu_espiao, parse_mode="HTML")
 
 @dp.message(F.text == "Grupos Vigiados 📡")
 async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
