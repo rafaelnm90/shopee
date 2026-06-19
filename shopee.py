@@ -772,18 +772,20 @@ async def disparar_mensagem(tipo, forcar=False):
 
     elif tipo == "promo_viral":
         prompt = (
-            "Você atua como assistente de afiliados da Shopee. Crie uma mensagem MUITO CURTA E DIRETA (MÁXIMO 150 CARACTERES) "
-            "convidando os membros do canal principal para conhecerem o nosso 'canal parceiro'. "
-            "É OBRIGATÓRIO usar o termo exato 'canal parceiro' e explicar de forma clara que é um 'grupo gratuito com o intuito de auxiliar os afiliados com a obtenção de vídeos'. "
-            "Diga que lá disponibilizamos vídeos virais estilo 'copia e cola' diretos das tendências. "
+            "Você é um criador de conteúdo conversando com sua comunidade de afiliados. "
+            "Crie um convite MUITO CURTO E NATURAL (MÁXIMO 150 CARACTERES) chamando a galera para conhecer o nosso canal parceiro. "
+            "Explique de forma fluida e humana que lá é um grupo gratuito focado em vídeos virais estilo 'copia e cola' diretos das tendências. "
+            "REGRA ABSOLUTA: Aja como um humano. Não use o formato robótico 'Título: descrição' ou 'Canal parceiro: grupo...'. "
+            "Integre a explicação no meio da conversa de forma orgânica e amigável. "
             "Use emojis, varie o texto a cada geração e entregue apenas a mensagem pronta, sem aspas e sem links."
         )
     elif tipo == "promo_principal":
         prompt = (
-            "Você atua como assistente de afiliados da Shopee. Crie uma mensagem MUITO CURTA E DIRETA (MÁXIMO 150 CARACTERES) "
-            "convidando os membros do canal viral para conhecerem o nosso 'canal parceiro'. "
-            "É OBRIGATÓRIO usar o termo exato 'canal parceiro' e explicar de forma clara que é um 'grupo gratuito com o intuito de auxiliar os afiliados com a obtenção de vídeos'. "
-            "Diga que no Acervo Afiliados nós distribuímos conteúdo mais premium, editado e selecionado a dedo. "
+            "Você é um criador de conteúdo conversando com sua comunidade de afiliados. "
+            "Crie um convite MUITO CURTO E NATURAL (MÁXIMO 150 CARACTERES) chamando a galera para conhecer o nosso canal parceiro (Acervo Afiliados). "
+            "Explique de forma fluida e humana que lá é um grupo gratuito onde distribuímos conteúdos mais premium, editados e selecionados a dedo. "
+            "REGRA ABSOLUTA: Aja como um humano. Não use o formato robótico 'Título: descrição' ou 'Canal parceiro: grupo...'. "
+            "Integre a explicação no meio da conversa de forma orgânica e amigável. "
             "Use emojis, varie o texto a cada geração e entregue apenas a mensagem pronta, sem aspas e sem links."
         )
 
