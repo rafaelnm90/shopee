@@ -3354,20 +3354,13 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
         texto += "A sua fila está completamente vazia no momento.\nO que deseja fazer?"
         if EXIBIR_LOGS: logger.info("⚠️ Fila vazia detectada ao montar o painel.")
 
-    if EXIBIR_LOGS: logger.info("🔍 Mapeando rotinas ativas no agendador...")
+    if EXIBIR_LOGS: logger.info("🔍 Mapeando limites do expediente no agendador...")
     from datetime import datetime
     agora_rotina = datetime.now(fuso_horario)
     rotinas_agendadas = []
     nomes_amigaveis = {
         "bom_dia": "☀️ Bom Dia",
-        "boa_noite": "🌙 Boa Noite",
-        "incentivo": "🔥 Incentivo",
-        "link_grupo": "🔗 Convite do Grupo",
-        "divulgar_gem": "🤖 Prompt GEM",
-        "promo_viral": "🚀 Convite Viral",
-        "promo_principal": "🚀 Convite Afiliados",
-        "link_grupo_viral": "🔗 Convite Viral",
-        "divulgar_gem_viral": "🤖 Prompt GEM Viral"
+        "boa_noite": "🌙 Boa Noite"
     }
     
     for job in scheduler.get_jobs():
@@ -3375,15 +3368,16 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             tempo_evento = job.next_run_time.astimezone(fuso_horario)
             if tempo_evento.date() == agora_rotina.date():
                 tipo_rotina = job.args[0] if job.args else "desconhecida"
-                nome_exibicao = nomes_amigaveis.get(tipo_rotina, tipo_rotina.replace("_", " ").title())
-                rotinas_agendadas.append((tempo_evento, nome_exibicao))
-                
+                if tipo_rotina in ["bom_dia", "boa_noite"]:
+                    nome_exibicao = nomes_amigaveis.get(tipo_rotina, tipo_rotina.replace("_", " ").title())
+                    rotinas_agendadas.append((tempo_evento, nome_exibicao))
+                    
     if rotinas_agendadas:
         rotinas_agendadas.sort(key=lambda x: x[0])
-        texto += "\n\n🗓️ <b>Agenda de Rotinas (Hoje)</b>\n"
+        texto += "\n\n🗓️ <b>Janela de Postagens (Hoje)</b>\n"
         for tempo, nome in rotinas_agendadas:
             texto += f"⏰ {tempo.strftime('%H:%M')} - {nome}\n"
-        if EXIBIR_LOGS: logger.info("✅ Agenda de rotinas anexada ao painel visual.")
+        if EXIBIR_LOGS: logger.info("✅ Limites do expediente anexados ao painel visual.")
 
     await message.answer(texto, reply_markup=teclado_gerenciar_fila, parse_mode="HTML")
     await state.set_state(GerenciarFilaFluxo.menu_principal)
