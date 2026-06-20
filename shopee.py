@@ -7,7 +7,7 @@ import logging
 import json
 import asyncio
 import random
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 import hmac
 import hashlib
@@ -3586,7 +3586,6 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         if nova_posicao < 0: nova_posicao = 0
         if nova_posicao >= len(fila): nova_posicao = len(fila) - 1
         
-        from datetime import timedelta
         agora = datetime.now(fuso_horario)
         hoje_str = agora.strftime("%Y-%m-%d")
         amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -3616,7 +3615,6 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         if data_min_str == "2000-01-01" or data_min_str < hoje_str:
             data_min_str = hoje_str
             
-        from datetime import datetime, timedelta
         data_min_obj = datetime.strptime(data_min_str, "%Y-%m-%d")
         
         if data_max_str is None or data_max_str == "2000-01-01":
@@ -3682,7 +3680,6 @@ async def processar_data_posicao_fila(message: types.Message, state: FSMContext)
     posicao_origem = data.get("posicao_origem")
     nova_posicao = data.get("nova_posicao")
     
-    from datetime import datetime, timedelta
     agora = datetime.now(fuso_horario)
     
     if "Hoje" in texto: 
