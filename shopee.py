@@ -3614,50 +3614,10 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         
         await state.update_data(nova_posicao=nova_posicao)
         
-        import re
-        legenda = fila[posicao_origem].get("legenda", "")
-        if legenda:
-            legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
-            resumo = legenda_limpa.split('\n')[0][:50]
-        else:
-            resumo = "Vídeo sem descrição"
-
-        teclado_confirmacao = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="Aprovar Mudança ✅"), KeyboardButton(text="Cancelar ❌")]],
-            resize_keyboard=True,
-            is_persistent=True
-        )
-        
-        texto = f"Você está prestes a mover o vídeo:\n📝 <i>{resumo}...</i>\n\n"
-        texto += f"Da posição <b>{posicao_origem + 1}</b> ➡️ Para a posição <b>{nova_posicao + 1}</b>.\n\n"
-        texto += "Confirma essa alteração?"
-        
-        if EXIBIR_LOGS: logger.info(f"↕️ Fila: Pedindo confirmação para mover da pos {posicao_origem+1} para {nova_posicao+1}.")
-        await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
-        await state.set_state(GerenciarFilaFluxo.aguardando_confirmacao_reordenar)
-    else:
-        await message.answer("Erro de sincronização. Operação cancelada.")
-        await menu_gerenciar_fila(message, state)
-
-@dp.message(GerenciarFilaFluxo.aguardando_confirmacao_reordenar)
-async def processar_confirmacao_reordenar(message: types.Message, state: FSMContext):
-    if message.text != "Aprovar Mudança ✅":
-        await message.answer("Por favor, clique em Aprovar ou Cancelar.")
-        return
-
-    data = await state.get_data()
-    posicao_origem = data.get("posicao_origem")
-    nova_posicao = data.get("nova_posicao")
-
-    fila_data = ler_fila_postagens()
-    fila = fila_data.get("fila", [])
-
-    if 0 <= posicao_origem < len(fila):
         agora = datetime.now(fuso_horario)
         hoje_str = agora.strftime("%Y-%m-%d")
         amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
         
-        # ✅ Extração do status do expediente para anular a data "Hoje" se necessário
         dados_rotina = ler_config_rotina()
         expediente_encerrado = dados_rotina.get("ultimo_boa_noite") == hoje_str
         
@@ -3665,16 +3625,13 @@ async def processar_confirmacao_reordenar(message: types.Message, state: FSMCont
         item_movido = fila_simulada.pop(posicao_origem)
         
         if len(fila_simulada) == 0:
-            item_movido["data_adicao"] = amanha_str if expediente_encerrado else "2000-01-01"
-            fila_simulada.insert(nova_posicao, item_movido)
-            if EXIBIR_LOGS: logger.info("↕️ Fila: Único vídeo movido e mantido de acordo com o expediente da operação.")
-            await aplicar_renumeracao_e_salvar(fila_simulada, message, state)
+            nova_data_adicao = amanha_str if expediente_encerrado else "2000-01-01"
+            await state.update_data(nova_data_adicao=nova_data_adicao)
+            await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
             return
         
         prev_idx = nova_posicao - 1
         next_idx = nova_posicao
-        
-        if EXIBIR_LOGS: logger.info(f"🚀 Calculando intervalo de datas para a posição {nova_posicao+1}...")
         
         data_min_str = fila_simulada[prev_idx].get("data_adicao", "2000-01-01") if prev_idx >= 0 else "2000-01-01"
         data_max_str = fila_simulada[next_idx].get("data_adicao") if next_idx < len(fila_simulada) else None
@@ -3705,24 +3662,20 @@ async def processar_confirmacao_reordenar(message: types.Message, state: FSMCont
             d_atual += timedelta(days=1)
             if len(opcoes) >= 3: 
                 break
-                
-        if EXIBIR_LOGS: logger.info(f"✅ Botões dinâmicos gerados com base no contexto: {opcoes}")
 
         if expediente_encerrado:
             opcoes = [op for op in opcoes if "Hoje" not in op]
             if not opcoes:
                 opcoes = ["Amanhã 🟡"]
-                if EXIBIR_LOGS: logger.info("🌙 Expediente encerrado: Hipótese 'Hoje 🟢' suprimida preventivamente da reordenação.")
                 
         if len(opcoes) == 1:
             escolha = opcoes[0]
-            if escolha == "Hoje 🟢": item_movido["data_adicao"] = "2000-01-01"
-            elif escolha == "Amanhã 🟡": item_movido["data_adicao"] = amanha_str
-            else: item_movido["data_adicao"] = (agora + timedelta(days=2)).strftime("%Y-%m-%d")
+            if escolha == "Hoje 🟢": nova_data_adicao = "2000-01-01"
+            elif escolha == "Amanhã 🟡": nova_data_adicao = amanha_str
+            else: nova_data_adicao = (agora + timedelta(days=2)).strftime("%Y-%m-%d")
             
-            fila_simulada.insert(nova_posicao, item_movido)
-            if EXIBIR_LOGS: logger.info(f"↕️ Fila: Vídeo movido automaticamente para a posição {nova_posicao+1} com o status {escolha}.")
-            await aplicar_renumeracao_e_salvar(fila_simulada, message, state)
+            await state.update_data(nova_data_adicao=nova_data_adicao)
+            await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
         else:
             botoes = [[KeyboardButton(text=op)] for op in opcoes]
             botoes.append([KeyboardButton(text="Cancelar ❌")])
@@ -3760,18 +3713,56 @@ async def processar_data_posicao_fila(message: types.Message, state: FSMContext)
         else:
             nova_data_adicao = (agora + timedelta(days=2)).strftime("%Y-%m-%d")
             
-    if EXIBIR_LOGS: logger.info(f"📅 Data mapeada a partir do botão: {nova_data_adicao}")
+    await state.update_data(nova_data_adicao=nova_data_adicao)
+    
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
+
+async def enviar_confirmacao_reordenar(message: types.Message, state: FSMContext, fila, posicao_origem, nova_posicao):
+    import re
+    legenda = fila[posicao_origem].get("legenda", "")
+    if legenda:
+        legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
+        resumo = legenda_limpa.split('\n')[0][:50]
+    else:
+        resumo = "Vídeo sem descrição"
+
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar Mudança ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    texto = f"Você está prestes a mover o vídeo:\n📝 <i>{resumo}...</i>\n\n"
+    texto += f"Da posição <b>{posicao_origem + 1}</b> ➡️ Para a posição <b>{nova_posicao + 1}</b>.\n\n"
+    texto += "Confirma essa alteração?"
+    
+    if EXIBIR_LOGS: logger.info(f"↕️ Fila: Coleta finalizada. Pedindo confirmação para mover da pos {posicao_origem+1} para {nova_posicao+1}.")
+    await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(GerenciarFilaFluxo.aguardando_confirmacao_reordenar)
+
+@dp.message(GerenciarFilaFluxo.aguardando_confirmacao_reordenar)
+async def processar_confirmacao_reordenar(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar Mudança ✅":
+        await message.answer("Por favor, clique em Aprovar ou Cancelar.")
+        return
+
+    data = await state.get_data()
+    posicao_origem = data.get("posicao_origem")
+    nova_posicao = data.get("nova_posicao")
+    nova_data_adicao = data.get("nova_data_adicao")
 
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
-    
+
     if 0 <= posicao_origem < len(fila):
         fila_simulada = fila.copy()
         item_movido = fila_simulada.pop(posicao_origem)
         item_movido["data_adicao"] = nova_data_adicao
         fila_simulada.insert(nova_posicao, item_movido)
         
-        if EXIBIR_LOGS: logger.info(f"↕️ Fila: Vídeo movido com data definida manualmente ({texto}) para a posição {nova_posicao+1}.")
+        if EXIBIR_LOGS: logger.info(f"↕️ Fila: Confirmação recebida. Vídeo movido com sucesso para a posição {nova_posicao+1}.")
         await aplicar_renumeracao_e_salvar(fila_simulada, message, state)
     else:
         await message.answer("Erro de sincronização. Operação cancelada.")
