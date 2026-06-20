@@ -3202,6 +3202,7 @@ async def pedir_horario_rotina(message: types.Message, state: FSMContext):
             reply_markup=teclado_cancelar,
             parse_mode="HTML"
         )
+    await state.update_data(tipo_edicao=tipo)
     await state.set_state(ConfigRotina.aguardando_novo_horario)
 
 @dp.message(ConfigRotina.aguardando_novo_horario)
@@ -3258,6 +3259,7 @@ class GerenciarFilaFluxo(StatesGroup):
     aguardando_nova_legenda = State()
     aguardando_posicao_reordenar = State()
     aguardando_nova_posicao = State()
+    aguardando_confirmacao_reordenar = State()
     aguardando_data_posicao = State()
     aguardando_posicao_numeracao = State()
     aguardando_nova_numeracao = State()
@@ -3610,6 +3612,47 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         if nova_posicao < 0: nova_posicao = 0
         if nova_posicao >= len(fila): nova_posicao = len(fila) - 1
         
+        await state.update_data(nova_posicao=nova_posicao)
+        
+        import re
+        legenda = fila[posicao_origem].get("legenda", "")
+        if legenda:
+            legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
+            resumo = legenda_limpa.split('\n')[0][:50]
+        else:
+            resumo = "Vídeo sem descrição"
+
+        teclado_confirmacao = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Aprovar Mudança ✅"), KeyboardButton(text="Cancelar ❌")]],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        
+        texto = f"Você está prestes a mover o vídeo:\n📝 <i>{resumo}...</i>\n\n"
+        texto += f"Da posição <b>{posicao_origem + 1}</b> ➡️ Para a posição <b>{nova_posicao + 1}</b>.\n\n"
+        texto += "Confirma essa alteração?"
+        
+        if EXIBIR_LOGS: logger.info(f"↕️ Fila: Pedindo confirmação para mover da pos {posicao_origem+1} para {nova_posicao+1}.")
+        await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
+        await state.set_state(GerenciarFilaFluxo.aguardando_confirmacao_reordenar)
+    else:
+        await message.answer("Erro de sincronização. Operação cancelada.")
+        await menu_gerenciar_fila(message, state)
+
+@dp.message(GerenciarFilaFluxo.aguardando_confirmacao_reordenar)
+async def processar_confirmacao_reordenar(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar Mudança ✅":
+        await message.answer("Por favor, clique em Aprovar ou Cancelar.")
+        return
+
+    data = await state.get_data()
+    posicao_origem = data.get("posicao_origem")
+    nova_posicao = data.get("nova_posicao")
+
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+
+    if 0 <= posicao_origem < len(fila):
         agora = datetime.now(fuso_horario)
         hoje_str = agora.strftime("%Y-%m-%d")
         amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -3681,7 +3724,6 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
             if EXIBIR_LOGS: logger.info(f"↕️ Fila: Vídeo movido automaticamente para a posição {nova_posicao+1} com o status {escolha}.")
             await aplicar_renumeracao_e_salvar(fila_simulada, message, state)
         else:
-            await state.update_data(nova_posicao=nova_posicao)
             botoes = [[KeyboardButton(text=op)] for op in opcoes]
             botoes.append([KeyboardButton(text="Cancelar ❌")])
             teclado_escolha_data = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
