@@ -338,7 +338,7 @@ def agendar_fila_postagens():
     hoje_str = agora.strftime("%Y-%m-%d")
     
     from datetime import timedelta
-    videos_para_hoje = [item for item in fila if item.get("data_adicao") <= hoje_str or item.get("data_adicao") == "2000-01-01"]
+    videos_para_hoje = [item for item in fila if (item.get("data_adicao") <= hoje_str or item.get("data_adicao") == "2000-01-01") and not item.get("postado")]
     
     if not videos_para_hoje:
         if EXIBIR_LOGS: logger.info("⏳ Todos os vídeos na fila estão agendados aguardando o dia de amanhã.")
@@ -478,8 +478,8 @@ async def executar_postagem_fila(item_id):
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
     
-    # Leitura estrita com base no índice atualizado
-    item = next((x for x in fila if x.get("data_adicao") <= hoje_str or x.get("data_adicao") == "2000-01-01"), None)
+    # Leitura estrita com base no índice atualizado, ignorando os já postados
+    item = next((x for x in fila if (x.get("data_adicao") <= hoje_str or x.get("data_adicao") == "2000-01-01") and not x.get("postado")), None)
     
     if not item:
         if EXIBIR_LOGS: logger.warning("⚠️ Nenhum vídeo elegível encontrado na fila para extração.")
@@ -512,17 +512,17 @@ async def executar_postagem_fila(item_id):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao postar vídeo da fila: {e}")
     finally:
-        # Exclui o item real extraído da fila após a tentativa
-        fila = [x for x in fila if x["id"] != item_id_real]
+        # Marca o item como postado em vez de excluí-lo (para manter o histórico visual no painel)
+        for x in fila:
+            if x["id"] == item_id_real:
+                x["postado"] = True
+                break
         fila_data["fila"] = fila
         salvar_fila_postagens(fila_data)
+        if EXIBIR_LOGS: logger.info(f"✅ Vídeo {item_id_real} marcado como 'Já postado' no histórico da fila.")
         
-        # Faxina responsável: só exclui o vídeo físico se nenhum outro item da fila precisar dele
-        if caminho_video and os.path.exists(caminho_video):
-            ainda_usado = any(x.get("caminho_video") == caminho_video for x in fila)
-            if not ainda_usado:
-                os.remove(caminho_video)
-                if EXIBIR_LOGS: logger.info("🧹 Faxina: Arquivo fonte excluído permanentemente após esvaziar da fila.")
+        # A faxina física real do arquivo foi transferida para a limpeza da madrugada em agendar_tarefas_diarias
+        # para permitir que o vídeo fique visível no painel até o final do dia.
 
 # --- SISTEMA DE PAUSA PROGRAMADA ---
 def ler_pausa_programada():
@@ -950,6 +950,28 @@ def salvar_config_rotina(dados):
 
 def agendar_tarefas_diarias():
     if EXIBIR_LOGS: logger.info("🔄 Reestruturando a grade: Sorteando horários com inteligência de lacunas (Gap-Filling)...")
+        # --- Limpeza de Madrugada: Remove vídeos já postados no dia anterior ---
+    fila_data = ler_fila_postagens()
+    fila_original = fila_data.get("fila", [])
+    fila_limpa = []
+    for x in fila_original:
+        if not x.get("postado"):
+            fila_limpa.append(x)
+        else:
+            caminho_vid = x.get("caminho_video")
+            if caminho_vid and os.path.exists(caminho_vid):
+                ainda_usado = any(v.get("caminho_video") == caminho_vid and not v.get("postado") for v in fila_original)
+                if not ainda_usado:
+                    try:
+                        os.remove(caminho_vid)
+                        if EXIBIR_LOGS: logger.info(f"🧹 Ficheiro {caminho_vid} excluído na limpeza de madrugada.")
+                    except:
+                        pass
+    if len(fila_original) != len(fila_limpa):
+        fila_data["fila"] = fila_limpa
+        salvar_fila_postagens(fila_data)
+        if EXIBIR_LOGS: logger.info(f"🧹 Limpeza da fila: {len(fila_original) - len(fila_limpa)} vídeos postados foram eliminados.")
+    # -------------------------------------------------------------------------
     
     for job in scheduler.get_jobs():
         if job.id.startswith('job_rotina_') or job.id.startswith('job_campanha_'):
@@ -3286,22 +3308,54 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
     
-    texto = "📋 <b>Gerenciador de Fila de Postagens</b>\n\n"
+    texto = "📋 <b>Gerenciador de Fila de Postagens</b>\n"
     texto += f"Total de vídeos agendados: <b>{len(fila)}</b>\n\n"
+    
+    # --- CAPTURA DE BOM DIA / BOA NOITE ---
+    from datetime import datetime
+    agora = datetime.now(fuso_horario)
+    hoje_str = agora.strftime("%Y-%m-%d")
+    
+    hora_bd, hora_bn = "Não agendado", "Não agendado"
+    for job in scheduler.get_jobs():
+        if job.id == 'job_rotina_bom_dia_0' and getattr(job, 'next_run_time', None):
+            if job.next_run_time.astimezone(fuso_horario).date() == agora.date():
+                hora_bd = job.next_run_time.astimezone(fuso_horario).strftime("%H:%M")
+        if job.id == 'job_rotina_boa_noite_0' and getattr(job, 'next_run_time', None):
+            if job.next_run_time.astimezone(fuso_horario).date() == agora.date():
+                hora_bn = job.next_run_time.astimezone(fuso_horario).strftime("%H:%M")
+    
+    dados_rotina = ler_config_rotina()
+    if dados_rotina.get("ultimo_bom_dia") == hoje_str:
+        hora_bd = "✅ Já enviado"
+    if dados_rotina.get("ultimo_boa_noite") == hoje_str:
+        hora_bn = "✅ Já enviado"
+        
+    texto += f"☀️ <b>Bom Dia:</b> {hora_bd}\n"
+    texto += "━━━━━━━━━━━━━━━━━━\n"
     
     if fila:
         if EXIBIR_LOGS: logger.info("🔍 Lendo itens da fila para montagem do painel visual enriquecido...")
         import re
-        from datetime import datetime
         
         dados_pausa = ler_pausa_programada()
         is_pausado = dados_pausa.get("ativa", False)
-        agora = datetime.now(fuso_horario)
-        hoje_str = agora.strftime("%Y-%m-%d")
+        
+        imprimiu_bn = False
         
         for i, item in enumerate(fila, 1):
             legenda = item.get("legenda", "")
             data_adicao_str = item.get("data_adicao", "")
+            is_postado = item.get("postado", False)
+            
+            # Identifica se o vídeo pertence ao dia de Hoje
+            is_hoje = is_postado or data_adicao_str == "2000-01-01" or (data_adicao_str and data_adicao_str <= hoje_str)
+            
+            # Se for o primeiro vídeo de "Amanhã" (ou além) e ainda não imprimimos a tampa de Boa Noite, imprime agora
+            if not is_hoje and not imprimiu_bn:
+                texto += "━━━━━━━━━━━━━━━━━━\n"
+                texto += f"🌙 <b>Boa Noite:</b> {hora_bn}\n\n"
+                imprimiu_bn = True
             
             # Extrai Número do Vídeo e Nome do Item da Legenda HTML
             match_video = re.search(r'(?i)Vídeo\s+\d+', legenda)
@@ -3310,74 +3364,62 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             nome_video = match_video.group(0).title() if match_video else "Vídeo ?"
             nome_item = match_item.group(1).strip() if match_item else "Sem descrição"
             
-            # 🚀 CORREÇÃO: Lê a maturação forçada para exibição no painel
-            if data_adicao_str == "2000-01-01":
-                data_br = "Manual (Prioridade)"
-            elif data_adicao_str:
-                try:
-                    data_br = datetime.strptime(data_adicao_str, "%Y-%m-%d").strftime("%d/%m/%Y")
-                except:
-                    data_br = "Data desconhecida"
+            if is_postado:
+                status_previsao_final = "✅ <b>Já postado</b>"
             else:
-                data_br = "Data desconhecida"
-                
-            # Define a Previsão de Postagem base
-            if is_pausado:
-                status_previsao = "Pausado 🛑"
-            elif data_adicao_str == "2000-01-01" or data_adicao_str <= hoje_str:
-                status_previsao = "Hoje 🟢"
-            else:
-                from datetime import timedelta
-                amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
-                if data_adicao_str == amanha_str:
-                    status_previsao = "Amanhã 🟡"
+                if data_adicao_str == "2000-01-01":
+                    data_br = "Manual (Prioridade)"
+                elif data_adicao_str:
+                    try:
+                        data_br = datetime.strptime(data_adicao_str, "%Y-%m-%d").strftime("%d/%m/%Y")
+                    except:
+                        data_br = "Data desconhecida"
                 else:
-                    status_previsao = "Depois de Amanhã 🔵"
+                    data_br = "Data desconhecida"
+                    
+                # Define a Previsão de Postagem base
+                if is_pausado:
+                    status_previsao = "Pausado 🛑"
+                elif data_adicao_str == "2000-01-01" or data_adicao_str <= hoje_str:
+                    status_previsao = "Hoje 🟢"
+                else:
+                    from datetime import timedelta
+                    amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+                    if data_adicao_str == amanha_str:
+                        status_previsao = "Amanhã 🟡"
+                    else:
+                        status_previsao = "Depois de Amanhã 🔵"
 
-            # ✅ NOVO: Interrogação Silenciosa do Motor para extrair a hora exata
-            hora_agendada_str = ""
-            job_id_esperado = f"job_fila_postagem_{item.get('id')}"
-            job_encontrado = scheduler.get_job(job_id_esperado)
-            
-            if job_encontrado and getattr(job_encontrado, 'next_run_time', None):
-                hora_exata = job_encontrado.next_run_time.astimezone(fuso_horario).strftime("%H:%M")
-                hora_agendada_str = f" às {hora_exata}"
+                # Interrogação Silenciosa do Motor para extrair a hora exata
+                hora_agendada_str = ""
+                job_id_esperado = f"job_fila_postagem_{item.get('id')}"
+                job_encontrado = scheduler.get_job(job_id_esperado)
                 
-            status_previsao_final = f"{status_previsao}{hora_agendada_str}"
+                if job_encontrado and getattr(job_encontrado, 'next_run_time', None):
+                    hora_exata = job_encontrado.next_run_time.astimezone(fuso_horario).strftime("%H:%M")
+                    hora_agendada_str = f" às {hora_exata}"
+                    
+                status_previsao_final = f"{status_previsao}{hora_agendada_str}"
                 
             texto += f"<b>{i}. {nome_video}</b> | 📦 {nome_item[:25]}...\n"
-            texto += f"   └ Criado em: {data_br} | Previsão: {status_previsao_final}\n\n"
+            if is_postado:
+                texto += f"   └ Status: {status_previsao_final}\n\n"
+            else:
+                texto += f"   └ Criado em: {data_br} | Previsão: {status_previsao_final}\n\n"
+                
+        # Se terminou de varrer toda a fila e não encontrou vídeos de "Amanhã", a tampa do Boa Noite vai no final
+        if not imprimiu_bn:
+            texto += "━━━━━━━━━━━━━━━━━━\n"
+            texto += f"🌙 <b>Boa Noite:</b> {hora_bn}\n\n"
             
-        texto += "O que deseja fazer com a fila?"
-        if EXIBIR_LOGS: logger.info("✅ Painel visual da fila montado com metadados com sucesso.")
+        if EXIBIR_LOGS: logger.info("✅ Painel visual da fila montado com metadados e fronteiras com sucesso.")
     else:
-        texto += "A sua fila está completamente vazia no momento.\nO que deseja fazer?"
+        texto += "\n<i>A sua fila está completamente vazia no momento.</i>\n"
+        texto += "━━━━━━━━━━━━━━━━━━\n"
+        texto += f"🌙 <b>Boa Noite:</b> {hora_bn}\n\n"
         if EXIBIR_LOGS: logger.info("⚠️ Fila vazia detectada ao montar o painel.")
 
-    if EXIBIR_LOGS: logger.info("🔍 Mapeando limites do expediente no agendador...")
-    from datetime import datetime
-    agora_rotina = datetime.now(fuso_horario)
-    rotinas_agendadas = []
-    nomes_amigaveis = {
-        "bom_dia": "☀️ Bom Dia",
-        "boa_noite": "🌙 Boa Noite"
-    }
-    
-    for job in scheduler.get_jobs():
-        if job.id.startswith('job_rotina_') and getattr(job, 'next_run_time', None):
-            tempo_evento = job.next_run_time.astimezone(fuso_horario)
-            if tempo_evento.date() == agora_rotina.date():
-                tipo_rotina = job.args[0] if job.args else "desconhecida"
-                if tipo_rotina in ["bom_dia", "boa_noite"]:
-                    nome_exibicao = nomes_amigaveis.get(tipo_rotina, tipo_rotina.replace("_", " ").title())
-                    rotinas_agendadas.append((tempo_evento, nome_exibicao))
-                    
-    if rotinas_agendadas:
-        rotinas_agendadas.sort(key=lambda x: x[0])
-        texto += "\n\n🗓️ <b>Janela de Postagens (Hoje)</b>\n"
-        for tempo, nome in rotinas_agendadas:
-            texto += f"⏰ {tempo.strftime('%H:%M')} - {nome}\n"
-        if EXIBIR_LOGS: logger.info("✅ Limites do expediente anexados ao painel visual.")
+    texto += "O que deseja fazer com a fila?"
 
     await message.answer(texto, reply_markup=teclado_gerenciar_fila, parse_mode="HTML")
     await state.set_state(GerenciarFilaFluxo.menu_principal)
