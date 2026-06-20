@@ -872,8 +872,15 @@ async def disparar_mensagem(tipo, forcar=False):
         dados_rot_atualizados["ultimo_boa_noite"] = hoje_str
         recalcular_fila = True
         if EXIBIR_LOGS: logger.info("✅ Bandeira de 'Boa Noite' registada. Fila de vídeos suspensa até amanhã.")
-    salvar_config_rotina(dados_rot_atualizados)
+    # Registra o disparo no histórico diário para evitar sobrecarga em caso de reinício do servidor
+    hoje_historico = agora_tz.strftime("%Y-%m-%d")
+    if dados_rot_atualizados.get("historico_diario", {}).get("data") != hoje_historico:
+        dados_rot_atualizados["historico_diario"] = {"data": hoje_historico, "contagem": {}}
     
+    contagem_atual = dados_rot_atualizados["historico_diario"]["contagem"].get(tipo, 0)
+    dados_rot_atualizados["historico_diario"]["contagem"][tipo] = contagem_atual + 1
+    salvar_config_rotina(dados_rot_atualizados)
+
     # Recalcula a distribuição orgânica dos vídeos se a fronteira do dia sofreu alteração forçada
     if recalcular_fila:
         if EXIBIR_LOGS: logger.info("🔄 Alteração de fronteira detetada. A recalcular toda a fila de postagens em tempo real...")
@@ -918,6 +925,7 @@ def ler_config_rotina():
             if "divulgar_gem_viral" not in dados: dados["divulgar_gem_viral"] = {"inicio": 8, "fim": 22, "frequencia": 1}
             if "pausado" not in dados: dados["pausado"] = False
             if "pausado_viral" not in dados: dados["pausado_viral"] = False
+            if "historico_diario" not in dados: dados["historico_diario"] = {"data": "", "contagem": {}}
             return dados
     except (FileNotFoundError, json.JSONDecodeError):
         # Configuração padrão de segurança se o arquivo não existir
@@ -931,7 +939,9 @@ def ler_config_rotina():
             "promo_viral": {"inicio": 10, "fim": 20, "frequencia": 1},
             "promo_principal": {"inicio": 10, "fim": 20, "frequencia": 1},
             "divulgar_gem_viral": {"inicio": 8, "fim": 22, "frequencia": 1},
-            "pausado": False
+            "pausado": False,
+            "pausado_viral": False,
+            "historico_diario": {"data": "", "contagem": {}}
         }
 
 def salvar_config_rotina(dados):
@@ -1020,14 +1030,28 @@ def agendar_tarefas_diarias():
 
     # 4. PREENCHIMENTO DINÂMICO (Intercalação nas maiores lacunas)
     from datetime import timedelta
-    tipos_restantes = [t for t in dados_rotina.keys() if t not in ["bom_dia", "boa_noite", "pausado", "pausado_viral", "ultimo_bom_dia", "ultimo_boa_noite"]]
+    tipos_restantes = [t for t in dados_rotina.keys() if t not in ["bom_dia", "boa_noite", "pausado", "pausado_viral", "ultimo_bom_dia", "ultimo_boa_noite", "historico_diario"]]
+    
+    hoje_historico = agora.strftime("%Y-%m-%d")
+    historico = dados_rotina.get("historico_diario", {})
+    if historico.get("data") != hoje_historico:
+        contagem_hoje = {}
+    else:
+        contagem_hoje = historico.get("contagem", {})
     
     tarefas_para_distribuir = []
     for tipo in tipos_restantes:
         config = dados_rotina[tipo]
         if type(config) is dict:
-            for i in range(config.get("frequencia", 1)):
-                tarefas_para_distribuir.append((tipo, i))
+            frequencia_total = config.get("frequencia", 1)
+            disparos_ja_feitos = contagem_hoje.get(tipo, 0)
+            frequencia_restante = frequencia_total - disparos_ja_feitos
+            
+            if frequencia_restante > 0:
+                for i in range(frequencia_restante):
+                    tarefas_para_distribuir.append((tipo, i + disparos_ja_feitos))
+            elif frequencia_total > 0:
+                if EXIBIR_LOGS: logger.info(f"✅ Rotina {tipo.upper()} já atingiu a cota diária ({disparos_ja_feitos}/{frequencia_total}). Ignorando reagendamento.")
                 
     random.shuffle(tarefas_para_distribuir) 
     
