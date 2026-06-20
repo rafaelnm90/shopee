@@ -3927,82 +3927,18 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
     fila = fila_data.get("fila", [])
     import re
     
-    if posicao is not None and 0 <= posicao < len(fila):
-        item = fila.pop(posicao)
-        
-        # 1. Extrai o número correto (o que deveria ser o próximo a nível global)
-        async with _lock_contador:
-            numero_disparo = ler_contador()
-            
-        if EXIBIR_LOGS: logger.info(f"🚀 Iniciando antecipação do vídeo na posição {posicao+1}. Novo número atribuído: {numero_disparo}.")
-        
-        # 2. Atualiza estritamente a legenda do vídeo selecionado para publicação
-        legenda_disparo = item.get("legenda", "")
-        nova_legenda_disparo = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{numero_disparo}', legenda_disparo, count=1)
-        
-        caminho_video = item.get("caminho_video")
-        video_id = item.get("video_id")
-        
-        msg_status = await message.answer("📤 A preparar ficheiros e a publicar o vídeo agora mesmo... Aguarde.", reply_markup=teclado_cancelar)
-        
-        sucesso_upload = False
-        try:
-            # 3. Disparo imediato para o Telegram
-            if caminho_video and os.path.exists(caminho_video):
-                arquivo = FSInputFile(caminho_video)
-                msg = await bot.send_video(chat_id=GRUPO_ID, video=arquivo, caption=nova_legenda_disparo, parse_mode="HTML")
-                sucesso_upload = True
-                
-                novo_file_id = msg.video.file_id
-                for x in fila:
-                    if x.get("caminho_video") == caminho_video:
-                        x["video_id"] = novo_file_id
-                        x["caminho_video"] = None
-            elif video_id:
-                await bot.send_video(chat_id=GRUPO_ID, video=video_id, caption=nova_legenda_disparo, parse_mode="HTML")
-                sucesso_upload = True
-        except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Falha no disparo imediato: {e}")
-            await msg_status.delete()
-            await message.answer(f"Ocorreu um erro técnico ao publicar o vídeo: {e}")
-            await menu_gerenciar_fila(message, state)
-            return
-            
-        await msg_status.delete()
-            
-        if sucesso_upload:
-            if EXIBIR_LOGS: logger.info("✅ Vídeo antecipado submetido com sucesso no grupo.")
-            
-            if caminho_video and os.path.exists(caminho_video):
-                ainda_usado = any(x.get("caminho_video") == caminho_video for x in fila)
-                if not ainda_usado:
-                    os.remove(caminho_video)
-                    if EXIBIR_LOGS: logger.info("🧹 Ficheiro físico removido do servidor após o disparo antecipado.")
-            
-            # 4. Numeração em cascata da fila restante
-            numero_atual_cascata = numero_disparo + 1
-            if fila:
-                if EXIBIR_LOGS: logger.info(f"🔄 A iniciar renumeração da fila restante em cascata a partir de {numero_atual_cascata}...")
-                for i in range(len(fila)):
-                    legenda_antiga = fila[i].get("legenda", "")
-                    nova_legenda = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{numero_atual_cascata}', legenda_antiga, count=1)
-                    fila[i]["legenda"] = nova_legenda
-                    numero_atual_cascata += 1
-                    
-            fila_data["fila"] = fila
-            salvar_fila_postagens(fila_data)
-            
-            # 5. Gravação final e blindagem de concorrência
-            async with _lock_contador:
-                salvar_contador(numero_atual_cascata)
-                
-            if EXIBIR_LOGS: logger.info(f"✅ Sistema sincronizado. O contador aguarda a próxima postagem no número: {numero_atual_cascata}.")
-            
-            # 6. Recálculo da fragmentação da hora para alocar o buraco deixado pela exclusão
-            agendar_fila_postagens()
-            
-            await message.answer(f"🚀 Publicação realizada com sucesso!\n🔄 A fila foi renumerada e os horários restantes de hoje foram recalculados para absorver o novo espaçamento.")
-            await menu_gerenciar_fila(message, state)
+    @dp.message(GerenciarFilaFluxo.aguardando_confirmacao_publicar)
+async def processar_publicacao_imediata(message: types.Message, state: FSMContext):
+    if message.text != "Publicar Vídeo 🚀":
+        await message.answer("Por favor, utilize os botões abaixo para aprovar ou cancelar a publicação.")
+        return
+
+    data = await state.get_data()
+    posicao = data.get("posicao_publicar")
+
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    import re
     else:
         await message.answer("Erro de sincronização ou posição inválida. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
