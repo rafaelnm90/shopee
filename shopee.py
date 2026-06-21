@@ -391,11 +391,13 @@ def agendar_fila_postagens():
     qtd_videos = len(videos_para_hoje)
     espacamento_medio = minutos_disponiveis // qtd_videos if qtd_videos > 0 else 15
     
-    if espacamento_medio < 10:
-        espacamento_medio = 10
+    # ✅ COMPRESSÃO DINÂMICA: O limite mínimo cai para 3 minutos. Se tiver muitos vídeos, ele espreme em vez de ejetar para amanhã.
+    if espacamento_medio < 3:
+        espacamento_medio = 3
         
     minuto_atual_busca = inicio_real
-    INTERVALO_MINIMO = 15
+    # ✅ INTERVALO DE SEGURANÇA REDUZIDO PARA ENCAIXE FORÇADO NO MESMO DIA
+    INTERVALO_MINIMO = 3
     
     houve_transbordo = False
     amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -426,8 +428,9 @@ def agendar_fila_postagens():
                 break
                 
         if not sucesso:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Vídeo {index+1}: Sem lacuna limpa. Forçando encaixe de segurança.")
-            horario_disparo = minuto_atual_busca + timedelta(minutes=5)
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Vídeo {index+1}: Sem lacuna limpa. Forçando encaixe de segurança com 3 min de distância.")
+            # ✅ Fallback reduzido para garantir que os vídeos caibam no expediente
+            horario_disparo = minuto_atual_busca + timedelta(minutes=3)
 
         if horario_disparo >= limite_fim_hoje:
             if EXIBIR_LOGS: logger.warning(f"🛑 O vídeo excedeu o horário limite ({horario_disparo.strftime('%H:%M:%S')}). Transbordando para amanhã.")
