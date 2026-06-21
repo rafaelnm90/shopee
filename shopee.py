@@ -3336,11 +3336,11 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
     
     if dados_rotina.get("ultimo_bom_dia") == hoje_str:
         hora_exata_bd = dados_rotina.get("hora_ultimo_bom_dia")
-        hora_bd = f"✅ {hora_exata_bd}" if hora_exata_bd else "✅ Enviado hoje"
+        hora_bd = f"{hora_exata_bd}" if hora_exata_bd else "Indisponível"
         
     if dados_rotina.get("ultimo_boa_noite") == hoje_str:
         hora_exata_bn = dados_rotina.get("hora_ultimo_boa_noite")
-        hora_bn = f"✅ {hora_exata_bn}" if hora_exata_bn else "✅ Enviado hoje"
+        hora_bn = f"{hora_exata_bn}" if hora_exata_bn else "Indisponível"
         
     texto += f"☀️ <b>Bom Dia ({data_dia_br}):</b> {hora_bd}\n"
     texto += "━━━━━━━━━━━━━━━━━━\n"
