@@ -516,6 +516,8 @@ async def executar_postagem_fila(item_id):
         for x in fila:
             if x["id"] == item_id_real:
                 x["postado"] = True
+                x["horario_postagem"] = agora.strftime("%H:%M")
+                if EXIBIR_LOGS: logger.info(f"🚀 Horário de postagem registrado na fila: {x['horario_postagem']}")
                 break
         fila_data["fila"] = fila
         salvar_fila_postagens(fila_data)
@@ -3330,6 +3332,7 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
                 hora_bn = job.next_run_time.astimezone(fuso_horario).strftime("%H:%M")
     
     dados_rotina = ler_config_rotina()
+    data_dia_br = agora.strftime("%d/%m")
     
     if dados_rotina.get("ultimo_bom_dia") == hoje_str:
         hora_exata_bd = dados_rotina.get("hora_ultimo_bom_dia")
@@ -3339,7 +3342,7 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
         hora_exata_bn = dados_rotina.get("hora_ultimo_boa_noite")
         hora_bn = f"✅ {hora_exata_bn}" if hora_exata_bn else "✅ Enviado hoje"
         
-    texto += f"☀️ <b>Bom Dia:</b> {hora_bd}\n"
+    texto += f"☀️ <b>Bom Dia ({data_dia_br}):</b> {hora_bd}\n"
     texto += "━━━━━━━━━━━━━━━━━━\n"
     
     if fila:
@@ -3362,7 +3365,7 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             # Se for o primeiro vídeo de "Amanhã" (ou além) e ainda não imprimimos a tampa de Boa Noite, imprime agora
             if not is_hoje and not imprimiu_bn:
                 texto += "━━━━━━━━━━━━━━━━━━\n"
-                texto += f"🌙 <b>Boa Noite:</b> {hora_bn}\n\n"
+                texto += f"🌙 <b>Boa Noite ({data_dia_br}):</b> {hora_bn}\n\n"
                 imprimiu_bn = True
             
             # Extrai Número do Vídeo e Nome do Item da Legenda HTML
@@ -3373,7 +3376,8 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             nome_item = match_item.group(1).strip() if match_item else "Sem descrição"
             
             if is_postado:
-                status_previsao_final = "✅ <b>Já postado</b>"
+                horario_envio = item.get("horario_postagem", "Horário indisponível")
+                status_previsao_final = f"✅ <b>Postado hoje às {horario_envio}</b>"
             else:
                 if data_adicao_str == "2000-01-01":
                     data_br = "Manual (Prioridade)"
@@ -3418,13 +3422,13 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
         # Se terminou de varrer toda a fila e não encontrou vídeos de "Amanhã", a tampa do Boa Noite vai no final
         if not imprimiu_bn:
             texto += "━━━━━━━━━━━━━━━━━━\n"
-            texto += f"🌙 <b>Boa Noite:</b> {hora_bn}\n\n"
+            texto += f"🌙 <b>Boa Noite ({data_dia_br}):</b> {hora_bn}\n\n"
             
         if EXIBIR_LOGS: logger.info("✅ Painel visual da fila montado com metadados e fronteiras com sucesso.")
     else:
         texto += "\n<i>A sua fila está completamente vazia no momento.</i>\n"
         texto += "━━━━━━━━━━━━━━━━━━\n"
-        texto += f"🌙 <b>Boa Noite:</b> {hora_bn}\n\n"
+        texto += f"🌙 <b>Boa Noite ({data_dia_br}):</b> {hora_bn}\n\n"
         if EXIBIR_LOGS: logger.info("⚠️ Fila vazia detectada ao montar o painel.")
 
     texto += "O que deseja fazer com a fila?"
@@ -3978,7 +3982,8 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
             
             # 3. Preserva o vídeo no histórico em vez de excluí-lo
             item["postado"] = True
-            if EXIBIR_LOGS: logger.info(f"✅ Vídeo da posição {posicao+1} marcado como 'postado' para exibir no histórico de hoje.")
+            item["horario_postagem"] = datetime.now(fuso_horario).strftime("%H:%M")
+            if EXIBIR_LOGS: logger.info(f"🚀 Vídeo da posição {posicao+1} marcado como 'postado' às {item['horario_postagem']} no histórico.")
             
             if caminho_video and os.path.exists(caminho_video):
                 ainda_usado = any(x.get("caminho_video") == caminho_video and not x.get("postado", False) for x in fila)
