@@ -796,7 +796,7 @@ async def disparar_mensagem(tipo, forcar=False):
         prompt = (
             f"{contexto_afiliado} Crie um convite curto e empolgante pedindo aos membros que convidem "
             "seus amigos para entrarem neste nosso acervo de vídeos virais. "
-            "REGRA ABSOLUTA: Parta do pressuposto de que o leitor JÁ ESTÁ NO GRUPO, portanto NÃO use o termo 'canal parceiro'. "
+            "REGRA ABSOLUTA: Parta do pressuposto de que o leitor JÁ ESTÁ NO GRUPO. "
             "O foco é apenas encorajá-los a trazer novas pessoas para o nosso grupo gratuito. Não adicione nenhum link na sua resposta. Use emojis."
         )
 
@@ -831,27 +831,26 @@ async def disparar_mensagem(tipo, forcar=False):
 
     elif tipo == "promo_viral":
         prompt = (
-            "Você é um criador de conteúdo conversando com sua comunidade de afiliados. "
-            "Crie um convite MUITO CURTO E NATURAL (MÁXIMO 150 CARACTERES) chamando a galera para conhecer o nosso canal parceiro. "
-            "Explique de forma fluida e humana que lá é um grupo gratuito focado em vídeos virais estilo 'copia e cola' diretos das tendências. "
-            "REGRA ABSOLUTA: Aja como um humano. Não use o formato robótico 'Título: descrição' ou 'Canal parceiro: grupo...'. "
-            "Integre a explicação no meio da conversa de forma orgânica e amigável. "
+            "Você é um criador de conteúdo recomendando o canal de um parceiro para a sua comunidade. "
+            "Crie uma recomendação MUITO CURTA E NATURAL (MÁXIMO 150 CARACTERES) chamando a galera para conhecer o trabalho desse parceiro. "
+            "Explique de forma fluida e humana que o dono de lá tem um grupo gratuito focado em vídeos virais estilo 'copia e cola' diretos das tendências. "
+            "REGRA ABSOLUTA: Aja como um humano recomendando o trabalho de outra pessoa. NUNCA use palavras que deem a entender que o grupo é seu (evite 'nosso grupo', 'eu criei', 'estou postando'). "
+            "Refira-se ao grupo na terceira pessoa ('o parceiro posta', 'o canal deles'). "
             "Use emojis, varie o texto a cada geração e entregue apenas a mensagem pronta, sem aspas e sem links."
         )
     elif tipo == "promo_principal":
         prompt = (
-            "Você é um criador de conteúdo conversando com sua comunidade de afiliados. "
-            "Crie um convite MUITO CURTO E NATURAL (MÁXIMO 150 CARACTERES) chamando a galera para conhecer o nosso canal parceiro (Acervo Afiliados). "
-            "Explique de forma fluida e humana que lá é um grupo gratuito onde distribuímos conteúdos mais premium, editados e selecionados a dedo. "
-            "REGRA ABSOLUTA: Aja como um humano. Não use o formato robótico 'Título: descrição' ou 'Canal parceiro: grupo...'. "
-            "Integre a explicação no meio da conversa de forma orgânica e amigável. "
+            "Você é um criador de conteúdo recomendando o canal de um parceiro para a sua comunidade. "
+            "Crie uma recomendação MUITO CURTA E NATURAL (MÁXIMO 150 CARACTERES) chamando a galera para conhecer o canal parceiro (Acervo Afiliados). "
+            "Explique de forma fluida e humana que o dono de lá libera o acesso a um grupo gratuito com conteúdos premium, editados e selecionados a dedo. "
+            "REGRA ABSOLUTA: Aja como um humano recomendando o trabalho de outra pessoa. NUNCA use palavras que deem a entender que o grupo é seu (evite 'nosso grupo', 'estou liberando', 'nós distribuímos'). "
+            "Refira-se ao grupo na terceira pessoa ('eles liberam', 'o parceiro solta'). "
             "Use emojis, varie o texto a cada geração e entregue apenas a mensagem pronta, sem aspas e sem links."
         )
 
     texto = await gerar_mensagem_gemini(prompt)
     
-    # Bloco Modificado
-    # ✅ Roteamento de chat: Define qual grupo receberá qual mensagem
+    # Roteamento de chat: Define qual grupo receberá qual mensagem
     chat_destino = GRUPO_VIRAL_ID if tipo in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral"] else GRUPO_ID
     
     if EXIBIR_LOGS: logger.info(f"🚀 Enviando rotina ({tipo}) para o chat {chat_destino}: {texto[:20]}...")
@@ -864,14 +863,19 @@ async def disparar_mensagem(tipo, forcar=False):
     dados_rot_atualizados = ler_config_rotina()
     
     recalcular_fila = False
+    hora_exata_disparo = agora_tz.strftime("%H:%M")
+    
     if tipo == "bom_dia":
         dados_rot_atualizados["ultimo_bom_dia"] = hoje_str
+        dados_rot_atualizados["hora_ultimo_bom_dia"] = hora_exata_disparo
         recalcular_fila = True
-        if EXIBIR_LOGS: logger.info("✅ Bandeira de 'Bom Dia' registada. Fila de vídeos liberada para hoje.")
+        if EXIBIR_LOGS: logger.info(f"✅ Bandeira de 'Bom Dia' registada às {hora_exata_disparo}. Fila de vídeos liberada para hoje.")
     elif tipo == "boa_noite":
         dados_rot_atualizados["ultimo_boa_noite"] = hoje_str
+        dados_rot_atualizados["hora_ultimo_boa_noite"] = hora_exata_disparo
         recalcular_fila = True
-        if EXIBIR_LOGS: logger.info("✅ Bandeira de 'Boa Noite' registada. Fila de vídeos suspensa até amanhã.")
+        if EXIBIR_LOGS: logger.info(f"✅ Bandeira de 'Boa Noite' registada às {hora_exata_disparo}. Fila de vídeos suspensa até amanhã.")
+        
     # Registra o disparo no histórico diário para evitar sobrecarga em caso de reinício do servidor
     hoje_historico = agora_tz.strftime("%Y-%m-%d")
     if dados_rot_atualizados.get("historico_diario", {}).get("data") != hoje_historico:
@@ -910,7 +914,7 @@ async def disparar_mensagem(tipo, forcar=False):
         link_princ = f"👇 <b>Acesse o Canal Parceiro:</b>\n{LINK_GRUPO}"
         if EXIBIR_LOGS: logger.info("🔗 Enviando link do Acervo Afiliados.")
         msg_princ = await bot.send_message(GRUPO_VIRAL_ID, link_princ, parse_mode="HTML")
-        registrar_lixeira(msg_princ.message_id, GRUPO_VIRAL_ID)    
+        registrar_lixeira(msg_princ.message_id, GRUPO_VIRAL_ID)   
 
 def ler_config_rotina():
     if EXIBIR_LOGS: logger.info("📂 Lendo configurações de rotina...")
@@ -3326,10 +3330,14 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
                 hora_bn = job.next_run_time.astimezone(fuso_horario).strftime("%H:%M")
     
     dados_rotina = ler_config_rotina()
+    
     if dados_rotina.get("ultimo_bom_dia") == hoje_str:
-        hora_bd = "✅ Já enviado"
+        hora_exata_bd = dados_rotina.get("hora_ultimo_bom_dia")
+        hora_bd = f"✅ {hora_exata_bd}" if hora_exata_bd else "✅ Enviado hoje"
+        
     if dados_rotina.get("ultimo_boa_noite") == hoje_str:
-        hora_bn = "✅ Já enviado"
+        hora_exata_bn = dados_rotina.get("hora_ultimo_boa_noite")
+        hora_bn = f"✅ {hora_exata_bn}" if hora_exata_bn else "✅ Enviado hoje"
         
     texto += f"☀️ <b>Bom Dia:</b> {hora_bd}\n"
     texto += "━━━━━━━━━━━━━━━━━━\n"
