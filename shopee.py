@@ -1063,6 +1063,11 @@ def agendar_tarefas_diarias():
     from datetime import timedelta
     tipos_restantes = [t for t in dados_rotina.keys() if t not in ["bom_dia", "boa_noite", "pausado", "pausado_viral", "ultimo_bom_dia", "ultimo_boa_noite", "historico_diario"]]
     
+    # ✅ NOVO: Separação de Trilhas (Principal vs Viral)
+    rotinas_virais_lista = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral"]
+    rotinas_principais = [t for t in tipos_restantes if t not in rotinas_virais_lista]
+    rotinas_virais = [t for t in tipos_restantes if t in rotinas_virais_lista]
+    
     hoje_historico = agora.strftime("%Y-%m-%d")
     historico = dados_rotina.get("historico_diario", {})
     if historico.get("data") != hoje_historico:
@@ -1070,8 +1075,9 @@ def agendar_tarefas_diarias():
     else:
         contagem_hoje = historico.get("contagem", {})
     
+    # 4.1 AGENDAMENTO DA GRADE PRINCIPAL (Rastreando as lacunas reais)
     tarefas_para_distribuir = []
-    for tipo in tipos_restantes:
+    for tipo in rotinas_principais:
         config = dados_rotina[tipo]
         if type(config) is dict:
             frequencia_total = config.get("frequencia", 1)
@@ -1099,6 +1105,41 @@ def agendar_tarefas_diarias():
             horario_fallback = agora + timedelta(minutes=minutos_offset)
             job_id = f"job_rotina_{tipo}_{indice}"
             scheduler.add_job(disparar_mensagem, 'date', run_date=horario_fallback, args=[tipo], id=job_id, replace_existing=True)
+
+    # 4.5. AGENDAMENTO PARALELO PARA O CANAL VIRAL (Sem roubar espaço da grade principal)
+    tarefas_virais = []
+    for tipo in rotinas_virais:
+        config = dados_rotina[tipo]
+        if type(config) is dict:
+            frequencia_total = config.get("frequencia", 1)
+            disparos_ja_feitos = contagem_hoje.get(tipo, 0)
+            frequencia_restante = frequencia_total - disparos_ja_feitos
+            
+            if frequencia_restante > 0:
+                for i in range(frequencia_restante):
+                    tarefas_virais.append((tipo, i + disparos_ja_feitos, config))
+            elif frequencia_total > 0:
+                if EXIBIR_LOGS: logger.info(f"✅ Rotina VIRAL {tipo.upper()} já atingiu a cota diária.")
+                
+    for tipo, indice, config in tarefas_virais:
+        inicio = config.get("inicio", 8)
+        fim = config.get("fim", 22)
+        
+        min_inicio_busca = inicio * 60
+        min_fim_busca = fim * 60 + 59
+        
+        minuto_absoluto = random.randint(min_inicio_busca, min_fim_busca)
+        hora_sorteada = minuto_absoluto // 60
+        min_sorteado = minuto_absoluto % 60
+        
+        horario_candidato = agora.replace(hour=hora_sorteada, minute=min_sorteado, second=0, microsecond=0)
+        
+        if horario_candidato <= agora:
+            horario_candidato = agora + timedelta(minutes=random.randint(5, 60))
+            
+        job_id = f"job_rotina_{tipo}_{indice}"
+        scheduler.add_job(disparar_mensagem, 'date', run_date=horario_candidato, args=[tipo], id=job_id, replace_existing=True)
+        if EXIBIR_LOGS: logger.info(f"🦠 Agendamento VIRAL Paralelo: {tipo.upper()} [{indice+1}] marcado para {horario_candidato.strftime('%H:%M:%S')} (Grade Livre).")
 
     # 5. AGENDAMENTO DAS CAMPANHAS ESPECIAIS
     for i in range(4):
