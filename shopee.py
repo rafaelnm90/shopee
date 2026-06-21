@@ -3498,6 +3498,11 @@ async def confirmar_posicao_exclusao_fila(message: types.Message, state: FSMCont
     
     if 0 <= posicao < len(fila):
         import re
+        if fila[posicao].get("postado", False):
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Fila: Tentativa de excluir vídeo já postado na posição {posicao+1} bloqueada.")
+            await message.answer("⚠️ <b>Ação Bloqueada:</b> Este vídeo já foi postado e serve apenas como histórico. Por favor, escolha outro número ou clique em Cancelar ❌.", parse_mode="HTML")
+            return
+            
         legenda = fila[posicao].get("legenda", "")
         if legenda:
             legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
@@ -3578,6 +3583,11 @@ async def processar_posicao_editar_fila(message: types.Message, state: FSMContex
     fila = fila_data.get("fila", [])
     
     if 0 <= posicao < len(fila):
+        if fila[posicao].get("postado", False):
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Fila: Tentativa de editar legenda de vídeo já postado na posição {posicao+1} bloqueada.")
+            await message.answer("⚠️ <b>Ação Bloqueada:</b> Este vídeo já foi postado e serve apenas como histórico. Por favor, escolha outro número ou clique em Cancelar ❌.", parse_mode="HTML")
+            return
+            
         await state.update_data(posicao_edicao=posicao)
         legenda_atual = fila[posicao].get("legenda", "")
         
@@ -3623,6 +3633,11 @@ async def pedir_nova_posicao_fila(message: types.Message, state: FSMContext):
     
     if 0 <= posicao_atual < len(fila):
         import re
+        if fila[posicao_atual].get("postado", False):
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Fila: Tentativa de mover vídeo já postado na posição {posicao_atual+1} bloqueada.")
+            await message.answer("⚠️ <b>Ação Bloqueada:</b> Este vídeo já foi postado e serve apenas como histórico. Por favor, escolha outro número ou clique em Cancelar ❌.", parse_mode="HTML")
+            return
+            
         legenda = fila[posicao_atual].get("legenda", "")
         if legenda:
             legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
@@ -3833,6 +3848,11 @@ async def pedir_novo_numero_fila(message: types.Message, state: FSMContext):
     
     if 0 <= posicao < len(fila):
         import re
+        if fila[posicao].get("postado", False):
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Fila: Tentativa de editar numeração de vídeo já postado na posição {posicao+1} bloqueada.")
+            await message.answer("⚠️ <b>Ação Bloqueada:</b> Este vídeo já foi postado e serve apenas como histórico. Por favor, escolha outro número ou clique em Cancelar ❌.", parse_mode="HTML")
+            return
+            
         legenda = fila[posicao].get("legenda", "")
         if legenda:
             legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
@@ -3905,6 +3925,11 @@ async def preparar_publicacao_imediata(message: types.Message, state: FSMContext
     
     if 0 <= posicao < len(fila):
         import re
+        if fila[posicao].get("postado", False):
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Fila: Tentativa de publicar novamente vídeo já postado na posição {posicao+1} bloqueada.")
+            await message.answer("⚠️ <b>Ação Bloqueada:</b> Este vídeo já foi postado e serve apenas como histórico. Por favor, escolha outro número ou clique em Cancelar ❌.", parse_mode="HTML")
+            return
+            
         legenda = fila[posicao].get("legenda", "")
         if legenda:
             legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
