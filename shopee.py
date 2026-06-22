@@ -3471,11 +3471,11 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
                     
                 status_previsao_final = f"{status_previsao}{hora_agendada_str}"
                 
-            texto += f"<b>{i}. {nome_video}</b> | 📦 {nome_item[:25]}...\n"
+            ttexto += f"<b>{i}. {nome_video}</b> | 📦 {nome_item[:25]}...\n"
             if is_postado:
                 texto += f"   └ Status: {status_previsao_final}\n\n"
             else:
-                texto += f"   └ Criado em: {data_br} | Previsão: {status_previsao_final}\n\n"
+                texto += f"   └ Lote (Data-Alvo): {data_br} | Previsão: {status_previsao_final}\n\n"
                 
         # Se terminou de varrer toda a fila e não encontrou vídeos de "Amanhã", a tampa do Boa Noite vai no final
         if not imprimiu_bn:
