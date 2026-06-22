@@ -444,7 +444,8 @@ def agendar_fila_postagens():
         scheduler.add_job(executar_postagem_fila, 'date', run_date=horario_disparo, args=[item['id']], id=job_id, replace_existing=True)
         if EXIBIR_LOGS: logger.info(f"✅ Fila: Vídeo {index+1}/{qtd_videos} distribuído organicamente para as {horario_disparo.strftime('%H:%M:%S')}")
         
-        minuto_atual_busca = horario_disparo + timedelta(minutes=espacamento_medio)
+        # ✅ CORREÇÃO MATEMÁTICA: Avança a grade com base no bloco estático, e não no horário sorteado (Fim do Efeito Bola de Neve)
+        minuto_atual_busca = minuto_atual_busca + timedelta(minutes=espacamento_medio)
         
     if houve_transbordo:
         salvar_fila_postagens(fila_data)
