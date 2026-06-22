@@ -886,9 +886,19 @@ async def disparar_mensagem(tipo, forcar=False):
     if dados_rot_atualizados.get("historico_diario", {}).get("data") != hoje_historico:
         dados_rot_atualizados["historico_diario"] = {"data": hoje_historico, "contagem": {}}
     
-    contagem_atual = dados_rot_atualizados["historico_diario"]["contagem"].get(tipo, 0)
-    dados_rot_atualizados["historico_diario"]["contagem"][tipo] = contagem_atual + 1
+    # ✅ NOVO: Armazena o horário exato em lista em vez de apenas contar os disparos
+    historico_tipo = dados_rot_atualizados["historico_diario"]["contagem"].get(tipo, [])
+    if isinstance(historico_tipo, int):
+        historico_tipo = [] # Proteção de retrocompatibilidade para limpar registros antigos de números
+        
+    historico_tipo.append(hora_exata_disparo)
+    dados_rot_atualizados["historico_diario"]["contagem"][tipo] = historico_tipo
     salvar_config_rotina(dados_rot_atualizados)
+    
+    if EXIBIR_LOGS: 
+        qtd_disparos = len(historico_tipo)
+        horarios_str = ", ".join(historico_tipo)
+        logger.info(f"📊 Auditoria de Rotina | {tipo.upper()}: {qtd_disparos}º envio diário efetuado. Horários de hoje: [{horarios_str}]")
 
     # Recalcula a distribuição orgânica dos vídeos se a fronteira do dia sofreu alteração forçada
     if recalcular_fila:
@@ -1074,6 +1084,10 @@ def agendar_tarefas_diarias():
         contagem_hoje = {}
     else:
         contagem_hoje = historico.get("contagem", {})
+        
+    def obter_qtd_disparos(tipo_rotina):
+        registro = contagem_hoje.get(tipo_rotina, [])
+        return len(registro) if isinstance(registro, list) else registro
     
     # 4.1 AGENDAMENTO DA GRADE PRINCIPAL (Rastreando as lacunas reais)
     tarefas_para_distribuir = []
@@ -1081,7 +1095,7 @@ def agendar_tarefas_diarias():
         config = dados_rotina[tipo]
         if type(config) is dict:
             frequencia_total = config.get("frequencia", 1)
-            disparos_ja_feitos = contagem_hoje.get(tipo, 0)
+            disparos_ja_feitos = obter_qtd_disparos(tipo)
             frequencia_restante = frequencia_total - disparos_ja_feitos
             
             if frequencia_restante > 0:
@@ -1112,7 +1126,7 @@ def agendar_tarefas_diarias():
         config = dados_rotina[tipo]
         if type(config) is dict:
             frequencia_total = config.get("frequencia", 1)
-            disparos_ja_feitos = contagem_hoje.get(tipo, 0)
+            disparos_ja_feitos = obter_qtd_disparos(tipo)
             frequencia_restante = frequencia_total - disparos_ja_feitos
             
             if frequencia_restante > 0:
