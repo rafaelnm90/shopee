@@ -2025,25 +2025,14 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     def adicionar_a_fila(caminho_vid, vid_id, caption):
         fila_data = ler_fila_postagens()
         
-        if EXIBIR_LOGS: logger.info("🔍 Inspecionando a fila para garantir o alinhamento cronológico...")
-        maior_data = data_agendamento_base
-        
-        for x in fila_data.get("fila", []):
-            data_x = x.get("data_adicao", "")
-            if data_x and data_x != "2000-01-01" and data_x > maior_data:
-                maior_data = data_x
-                
-        if maior_data > data_agendamento_base:
-            if EXIBIR_LOGS: logger.info(f"📆 Vídeos futuros encontrados. O novo item assumirá o final da fila: {maior_data}")
-        else:
-            if EXIBIR_LOGS: logger.info(f"📅 Nenhuma data futura bloqueando. Aplicando data base: {maior_data}")
+        if EXIBIR_LOGS: logger.info(f"📅 Aplicando blindagem temporal. Data base fixada: {data_agendamento_base}")
             
         item = {
             "id": f"{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}",
             "caminho_video": caminho_vid,
             "video_id": vid_id,
             "legenda": caption,
-            "data_adicao": maior_data
+            "data_adicao": data_agendamento_base
         }
         fila_data.setdefault("fila", []).append(item)
         salvar_fila_postagens(fila_data)
