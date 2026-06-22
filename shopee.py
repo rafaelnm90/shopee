@@ -3460,7 +3460,7 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
                     
                 status_previsao_final = f"{status_previsao}{hora_agendada_str}"
                 
-            ttexto += f"<b>{i}. {nome_video}</b> | 📦 {nome_item[:25]}...\n"
+            texto += f"<b>{i}. {nome_video}</b> | 📦 {nome_item[:25]}...\n"
             if is_postado:
                 texto += f"   └ Status: {status_previsao_final}\n\n"
             else:
