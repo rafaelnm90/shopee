@@ -526,6 +526,7 @@ async def executar_postagem_fila(item_id):
             if x["id"] == item_id_real:
                 x["postado"] = True
                 x["horario_postagem"] = agora.strftime("%H:%M")
+                x["data_postagem"] = hoje_str # ✅ NOVO: Registra o dia para a faxina não apagar no restart
                 if EXIBIR_LOGS: logger.info(f"🚀 Horário de postagem registrado na fila: {x['horario_postagem']}")
                 break
         fila_data["fila"] = fila
@@ -999,14 +1000,22 @@ def salvar_config_rotina(dados):
 
 def agendar_tarefas_diarias():
     if EXIBIR_LOGS: logger.info("🔄 Reestruturando a grade: Sorteando horários com inteligência de lacunas (Gap-Filling)...")
-        # --- Limpeza de Madrugada: Remove vídeos já postados no dia anterior ---
+    
+    agora_faxina = datetime.now(fuso_horario)
+    hoje_faxina_str = agora_faxina.strftime("%Y-%m-%d")
+    
+    # --- Limpeza de Madrugada: Remove vídeos já postados em dias anteriores ---
     fila_data = ler_fila_postagens()
     fila_original = fila_data.get("fila", [])
     fila_limpa = []
+    
     for x in fila_original:
         if not x.get("postado"):
-            fila_limpa.append(x)
+            fila_limpa.append(x) # Vídeo pendente, continua na fila
+        elif x.get("data_postagem") == hoje_faxina_str:
+            fila_limpa.append(x) # Vídeo postado HOJE, mantido para o histórico visual do painel
         else:
+            # Vídeo antigo (ou de versão anterior do bot), vai para a lixeira
             caminho_vid = x.get("caminho_video")
             if caminho_vid and os.path.exists(caminho_vid):
                 ainda_usado = any(v.get("caminho_video") == caminho_vid and not v.get("postado") for v in fila_original)
@@ -1016,10 +1025,11 @@ def agendar_tarefas_diarias():
                         if EXIBIR_LOGS: logger.info(f"🧹 Ficheiro {caminho_vid} excluído na limpeza de madrugada.")
                     except:
                         pass
+                        
     if len(fila_original) != len(fila_limpa):
         fila_data["fila"] = fila_limpa
         salvar_fila_postagens(fila_data)
-        if EXIBIR_LOGS: logger.info(f"🧹 Limpeza da fila: {len(fila_original) - len(fila_limpa)} vídeos postados foram eliminados.")
+        if EXIBIR_LOGS: logger.info(f"🧹 Limpeza da fila: {len(fila_original) - len(fila_limpa)} vídeos de dias anteriores foram eliminados.")
     # -------------------------------------------------------------------------
     
     for job in scheduler.get_jobs():
@@ -4370,8 +4380,10 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
             if EXIBIR_LOGS: logger.info("✅ Vídeo antecipado submetido com sucesso no grupo.")
             
             # 3. Preserva o vídeo no histórico em vez de excluí-lo
+            agora_manual = datetime.now(fuso_horario)
             item["postado"] = True
-            item["horario_postagem"] = datetime.now(fuso_horario).strftime("%H:%M")
+            item["horario_postagem"] = agora_manual.strftime("%H:%M")
+            item["data_postagem"] = agora_manual.strftime("%Y-%m-%d") # ✅ NOVO: Registra o dia para a faxina
             if EXIBIR_LOGS: logger.info(f"🚀 Vídeo da posição {posicao+1} marcado como 'postado' às {item['horario_postagem']} no histórico.")
             
             if caminho_video and os.path.exists(caminho_video):
