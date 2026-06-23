@@ -3862,6 +3862,46 @@ async def salvar_nova_legenda_fila(message: types.Message, state: FSMContext):
         await menu_gerenciar_fila(message, state)
 
 async def pedir_reordenar_fila(message: types.Message, state: FSMContext):
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    
+    # Descobre quantos vídeos realmente faltam postar
+    indices_pendentes = [i for i, item in enumerate(fila) if not item.get("postado", False)]
+    
+    # 🚀 ATALHO INTELIGENTE: Se só existe 1 vídeo, pula as perguntas de posição!
+    if len(indices_pendentes) == 1:
+        posicao_unica = indices_pendentes[0]
+        await state.update_data(posicao_origem=posicao_unica, nova_posicao=posicao_unica)
+        
+        agora = datetime.now(fuso_horario)
+        hoje_str = agora.strftime("%Y-%m-%d")
+        
+        dados_rotina = ler_config_rotina()
+        expediente_encerrado = dados_rotina.get("ultimo_boa_noite") == hoje_str
+        
+        opcoes = []
+        if not expediente_encerrado:
+            opcoes.append("Hoje 🟢")
+        opcoes.append("Amanhã 🟡")
+        
+        # Adiciona os próximos 3 dias para dar flexibilidade
+        for i in range(2, 5):
+            d_futuro = agora + timedelta(days=i)
+            opcoes.append(f"{d_futuro.strftime('%d/%m/%Y')} 🔵")
+            
+        botoes = [[KeyboardButton(text=op)] for op in opcoes[:3]] # Primeira linha com 3 botões
+        if len(opcoes) > 3:
+            botoes.append([KeyboardButton(text=op) for op in opcoes[3:]]) # Segunda linha com os restantes
+        botoes.append([KeyboardButton(text="Cancelar ❌")])
+        
+        teclado_escolha_data = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+        
+        if EXIBIR_LOGS: logger.info("↕️ Fila: Atalho acionado (Apenas 1 vídeo na fila). Pulando perguntas de posição.")
+        await message.answer("Como há <b>apenas 1 vídeo pendente</b>, não é necessário escolher posições.\n\nPara quando deseja agendar este vídeo?", reply_markup=teclado_escolha_data, parse_mode="HTML")
+        await state.set_state(GerenciarFilaFluxo.aguardando_data_posicao)
+        return
+
+    # Comportamento normal se houver mais de 1 vídeo
     await message.answer("Digite o <b>NÚMERO</b> da posição atual do vídeo que deseja mover:", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(GerenciarFilaFluxo.aguardando_posicao_reordenar)
 
@@ -3905,12 +3945,6 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
     nova_posicao = int(message.text) - 1
     data = await state.get_data()
     posicao_origem = data.get("posicao_origem")
-    
-    if posicao_origem == nova_posicao:
-        if EXIBIR_LOGS: logger.info("⚠️ Fila: Posição de destino igual à de origem. Ação cancelada.")
-        await message.answer("O vídeo já se encontra nesta posição. Nenhuma alteração foi efetuada.", reply_markup=obter_teclado_principal())
-        await state.clear()
-        return
 
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
@@ -4028,6 +4062,7 @@ async def processar_data_posicao_fila(message: types.Message, state: FSMContext)
 
 async def enviar_confirmacao_reordenar(message: types.Message, state: FSMContext, fila, posicao_origem, nova_posicao):
     import re
+    from datetime import datetime
     legenda = fila[posicao_origem].get("legenda", "")
     if legenda:
         legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
@@ -4041,11 +4076,25 @@ async def enviar_confirmacao_reordenar(message: types.Message, state: FSMContext
         is_persistent=True
     )
     
-    texto = f"Você está prestes a mover o vídeo:\n📝 <i>{resumo}...</i>\n\n"
-    texto += f"Da posição <b>{posicao_origem + 1}</b> ➡️ Para a posição <b>{nova_posicao + 1}</b>.\n\n"
+    data = await state.get_data()
+    nova_data_adicao = data.get("nova_data_adicao")
+    
+    # Formata a data para ficar amigável na mensagem de confirmação
+    if nova_data_adicao == "2000-01-01":
+        data_amigavel = "Imediato/Hoje"
+    else:
+        data_amigavel = datetime.strptime(nova_data_adicao, "%Y-%m-%d").strftime("%d/%m/%Y")
+    
+    texto = f"Você está prestes a alterar o agendamento do vídeo:\n📝 <i>{resumo}...</i>\n\n"
+    
+    # Só exibe a mudança de posição se ela realmente mudou
+    if posicao_origem != nova_posicao:
+        texto += f"Da posição <b>{posicao_origem + 1}</b> ➡️ Para a posição <b>{nova_posicao + 1}</b>.\n"
+        
+    texto += f"🗓️ Nova Data Alvo: <b>{data_amigavel}</b>\n\n"
     texto += "Confirma essa alteração?"
     
-    if EXIBIR_LOGS: logger.info(f"↕️ Fila: Coleta finalizada. Pedindo confirmação para mover da pos {posicao_origem+1} para {nova_posicao+1}.")
+    if EXIBIR_LOGS: logger.info(f"↕️ Fila: Coleta finalizada. Pedindo confirmação para confirmar as alterações.")
     await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(GerenciarFilaFluxo.aguardando_confirmacao_reordenar)
 
