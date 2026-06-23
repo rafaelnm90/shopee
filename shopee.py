@@ -2769,6 +2769,25 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
     dados_pausa = ler_pausa_programada()
     servicos = dados_pausa.get("servicos_pausados", [])
     
+    # ✅ NOVO: Apaga a mensagem de aviso que ficou pendente no grupo
+    id_aviso = dados_pausa.get("id_aviso_imediato")
+    if id_aviso:
+        await apagar_mensagem_automatica(id_aviso, GRUPO_ID)
+        if EXIBIR_LOGS: logger.info("🧹 Aviso de pausa antigo excluído do grupo.")
+        
+    msg_status = await message.answer("⏳ Gerando mensagem de retorno com a IA...", reply_markup=teclado_cancelar)
+    
+    # ✅ NOVO: A IA gera o aviso de retorno ao trabalho
+    prompt_retorno = (
+        "Você é um assistente de afiliados. Crie uma mensagem MUITO CURTA E EMPOLGANTE "
+        "avisando o grupo que a pausa de manutenção acabou, o canal voltou à ativa e os "
+        "vídeos com ofertas voltarão a ser postados normalmente a partir de agora. "
+        "REGRA ABSOLUTA: Seja direto (máximo 150 caracteres), use emojis animados e entregue APENAS o texto pronto."
+    )
+    texto_retorno = await gerar_mensagem_gemini(prompt_retorno)
+    await bot.send_message(GRUPO_ID, texto_retorno)
+    await msg_status.delete()
+    
     if "spam" in servicos:
         dados_div = ler_alvos_divulgacao()
         dados_div["pausado"] = False
@@ -2782,9 +2801,11 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
             
     dados_pausa["ativa"] = False
     dados_pausa["servicos_pausados"] = []
+    dados_pausa.pop("id_aviso_imediato", None)
     salvar_pausa_programada(dados_pausa)
     recalcular_datas_pos_pausa()
-    await message.answer("▶️ Pausa programada encerrada, fila recalculada e serviços reativados com sucesso!", reply_markup=obter_teclado_principal())
+    
+    await message.answer("▶️ Pausa programada encerrada! O aviso antigo foi apagado e a mensagem de retorno foi postada no grupo. Serviços reativados com sucesso!", reply_markup=obter_teclado_principal())
     await state.clear()
 
 # --- LÓGICA DE GERENCIAMENTO DE DIVULGAÇÃO ---
