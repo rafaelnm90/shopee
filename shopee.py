@@ -1146,7 +1146,7 @@ def agendar_tarefas_diarias():
         return len(registro) if isinstance(registro, list) else registro
     
     # 4.1 AGENDAMENTO DA GRADE PRINCIPAL (Rastreando as lacunas reais)
-    tarefas_para_distribuir = []
+    grupos_tarefas = {}
     for tipo in rotinas_principais:
         config = dados_rotina[tipo]
         if type(config) is dict:
@@ -1155,23 +1155,41 @@ def agendar_tarefas_diarias():
             frequencia_restante = frequencia_total - disparos_ja_feitos
             
             if frequencia_restante > 0:
-                for i in range(frequencia_restante):
-                    tarefas_para_distribuir.append((tipo, i + disparos_ja_feitos))
+                grupos_tarefas[tipo] = [(tipo, i + disparos_ja_feitos) for i in range(frequencia_restante)]
             elif frequencia_total > 0:
                 if EXIBIR_LOGS: logger.info(f"✅ Rotina {tipo.upper()} já atingiu a cota diária ({disparos_ja_feitos}/{frequencia_total}). Ignorando reagendamento.")
                 
-    random.shuffle(tarefas_para_distribuir) 
+    tarefas_para_distribuir = []
+    chaves_grupos = list(grupos_tarefas.keys())
+    while chaves_grupos:
+        random.shuffle(chaves_grupos)
+        chaves_remover = []
+        for chave in chaves_grupos:
+            if grupos_tarefas[chave]:
+                tarefas_para_distribuir.append(grupos_tarefas[chave].pop(0))
+            if not grupos_tarefas[chave]:
+                chaves_remover.append(chave)
+        for chave in chaves_remover:
+            chaves_grupos.remove(chave)
+            
+    ultimo_tipo_agendado = None
     
     for tipo, indice in tarefas_para_distribuir:
-        horario_ideal = encontrar_maior_lacuna_e_inserir(duracao_minima=20)
+        duracao_min_gap = 20
+        if tipo == ultimo_tipo_agendado:
+            duracao_min_gap = 60
+            if EXIBIR_LOGS: logger.info(f"🛡️ Bloqueio de repetição ativado para {tipo.upper()}. Forçando lacuna mínima de 60 minutos.")
+            
+        horario_ideal = encontrar_maior_lacuna_e_inserir(duracao_minima=duracao_min_gap)
         
         if horario_ideal:
             job_id = f"job_rotina_{tipo}_{indice}"
             scheduler.add_job(disparar_mensagem, 'date', run_date=horario_ideal, args=[tipo], id=job_id, replace_existing=True)
+            ultimo_tipo_agendado = tipo
             if EXIBIR_LOGS: logger.info(f"🧩 Lacuna preenchida: {tipo.upper()} [{indice+1}] encaixado exatamente às {horario_ideal.strftime('%H:%M:%S')}.")
         else:
             if EXIBIR_LOGS: logger.warning(f"⚠️ Grade superlotada! Acionando fallback forçado para {tipo.upper()} [{indice+1}].")
-            minutos_offset = random.randint(15, 60)
+            minutos_offset = random.randint(30, 90) if tipo == ultimo_tipo_agendado else random.randint(15, 60)
             horario_fallback = agora + timedelta(minutes=minutos_offset)
             
             # 🚧 Impede que o desvio force a porta de saída
@@ -1181,9 +1199,10 @@ def agendar_tarefas_diarias():
                 
             job_id = f"job_rotina_{tipo}_{indice}"
             scheduler.add_job(disparar_mensagem, 'date', run_date=horario_fallback, args=[tipo], id=job_id, replace_existing=True)
+            ultimo_tipo_agendado = tipo
 
     # 4.5. AGENDAMENTO PARALELO PARA O CANAL VIRAL (Sem roubar espaço da grade principal)
-    tarefas_virais = []
+    grupos_virais = {}
     for tipo in rotinas_virais:
         config = dados_rotina[tipo]
         if type(config) is dict:
@@ -1192,10 +1211,24 @@ def agendar_tarefas_diarias():
             frequencia_restante = frequencia_total - disparos_ja_feitos
             
             if frequencia_restante > 0:
-                for i in range(frequencia_restante):
-                    tarefas_virais.append((tipo, i + disparos_ja_feitos, config))
+                grupos_virais[tipo] = [(tipo, i + disparos_ja_feitos, config) for i in range(frequencia_restante)]
             elif frequencia_total > 0:
                 if EXIBIR_LOGS: logger.info(f"✅ Rotina VIRAL {tipo.upper()} já atingiu a cota diária.")
+                
+    tarefas_virais = []
+    chaves_virais = list(grupos_virais.keys())
+    while chaves_virais:
+        random.shuffle(chaves_virais)
+        chaves_remover = []
+        for chave in chaves_virais:
+            if grupos_virais[chave]:
+                tarefas_virais.append(grupos_virais[chave].pop(0))
+            if not grupos_virais[chave]:
+                chaves_remover.append(chave)
+        for chave in chaves_remover:
+            chaves_virais.remove(chave)
+            
+    ultimo_tipo_viral = None
                 
     for tipo, indice, config in tarefas_virais:
         inicio = config.get("inicio", 8)
@@ -1210,6 +1243,10 @@ def agendar_tarefas_diarias():
         
         horario_candidato = agora.replace(hour=hora_sorteada, minute=min_sorteado, second=0, microsecond=0)
         
+        if tipo == ultimo_tipo_viral:
+            horario_candidato += timedelta(minutes=random.randint(60, 120))
+            if EXIBIR_LOGS: logger.info(f"🛡️ Bloqueio de repetição ativado para VIRAL {tipo.upper()}. Empurrando agendamento para a frente.")
+            
         # 🚧 Impede que qualquer rotina paralela fure a fila do Bom Dia
         if horario_candidato <= fronteira_inicial:
             horario_candidato = fronteira_inicial + timedelta(minutes=random.randint(5, 60))
@@ -1224,6 +1261,7 @@ def agendar_tarefas_diarias():
             
         job_id = f"job_rotina_{tipo}_{indice}"
         scheduler.add_job(disparar_mensagem, 'date', run_date=horario_candidato, args=[tipo], id=job_id, replace_existing=True)
+        ultimo_tipo_viral = tipo
         if EXIBIR_LOGS: logger.info(f"🦠 Agendamento VIRAL Paralelo: {tipo.upper()} [{indice+1}] marcado para {horario_candidato.strftime('%H:%M:%S')} (Grade Livre).")
 
     # 5. AGENDAMENTO DAS CAMPANHAS ESPECIAIS
