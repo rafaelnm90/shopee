@@ -256,13 +256,16 @@ def obter_teclado_raiz():
 
 # 🛠️ Função centralizadora da pasta do Canal Principal
 def obter_teclado_principal():
+    dados_pausa = ler_pausa_programada()
+    texto_botao_pausa = "Retomar Postagens ▶️" if dados_pausa.get("ativa") else "Pausar Postagens 🛑"
+    
     botoes = [
         [KeyboardButton(text="Criar Postagem 📝")],
         [KeyboardButton(text="Gerenciar Fila 📋")],
         [KeyboardButton(text="Editar Número da Postagem 🔢"), KeyboardButton(text="Disparar Convite Viral 🚀")],
         [KeyboardButton(text="Disparar Bom Dia ☀️"), KeyboardButton(text="Disparar Boa Noite 🌙")],
         [KeyboardButton(text="Disparar Incentivo 🔥"), KeyboardButton(text="Disparar Convite do Grupo 🔗")],
-        [KeyboardButton(text="Pausar Postagens 🛑")],
+        [KeyboardButton(text=texto_botao_pausa)],
         [KeyboardButton(text="⚙️ Automações (SPAM e Rotina)")], 
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
@@ -2597,7 +2600,7 @@ async def voltar_pausa_para_inicio(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Operação cancelada. Voltando ao menu principal.", reply_markup=obter_teclado_principal())
 
-@dp.message(F.text == "Pausar Postagens 🛑", StateFilter("*"))
+@dp.message(F.text.in_(["Pausar Postagens 🛑", "Retomar Postagens ▶️"]), StateFilter("*"))
 async def iniciar_pausa_programada(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
