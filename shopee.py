@@ -1077,9 +1077,33 @@ def agendar_tarefas_diarias():
                 if tempo_evento.date() == agora.date():
                     eventos_fixos.append(tempo_evento)
                     
-    eventos_fixos.append(max(agora, agora.replace(hour=6, minute=0, second=0, microsecond=0)))
-    hora_fim_padrao = dados_rotina.get("boa_noite", {}).get("fim", 23)
-    eventos_fixos.append(agora.replace(hour=max(0, hora_fim_padrao - 1), minute=59, second=59, microsecond=0))
+   # 🚧 TRAVA DA PORTA DE ENTRADA (Abre a Loja no Bom Dia)
+    ultimo_bd = dados_rotina.get("ultimo_bom_dia", "")
+    job_bd = scheduler.get_job('job_rotina_bom_dia_0')
+    
+    if ultimo_bd == hoje_str:
+        fronteira_inicial = agora
+    elif job_bd and getattr(job_bd, 'next_run_time', None):
+        fronteira_inicial = job_bd.next_run_time.astimezone(fuso_horario)
+    else:
+        hora_inicio_bd = dados_rotina.get("bom_dia", {}).get("inicio", 6)
+        fronteira_inicial = max(agora, agora.replace(hour=hora_inicio_bd, minute=0, second=0, microsecond=0))
+        
+    eventos_fixos.append(fronteira_inicial)
+    
+    # 🚧 TRAVA DA PORTA DE SAÍDA (Cadeado no Boa Noite)
+    ultimo_bn = dados_rotina.get("ultimo_boa_noite", "")
+    job_bn = scheduler.get_job('job_rotina_boa_noite_0')
+    
+    if ultimo_bn == hoje_str:
+        fronteira_final = agora # A loja já fechou
+    elif job_bn and getattr(job_bn, 'next_run_time', None):
+        fronteira_final = job_bn.next_run_time.astimezone(fuso_horario)
+    else:
+        hora_fim_bn = dados_rotina.get("boa_noite", {}).get("fim", 23)
+        fronteira_final = agora.replace(hour=max(0, hora_fim_bn - 1), minute=59, second=59, microsecond=0)
+        
+    eventos_fixos.append(fronteira_final)
     
     eventos_fixos.sort()
     
@@ -1149,6 +1173,12 @@ def agendar_tarefas_diarias():
             if EXIBIR_LOGS: logger.warning(f"⚠️ Grade superlotada! Acionando fallback forçado para {tipo.upper()} [{indice+1}].")
             minutos_offset = random.randint(15, 60)
             horario_fallback = agora + timedelta(minutes=minutos_offset)
+            
+            # 🚧 Impede que o desvio force a porta de saída
+            if horario_fallback >= fronteira_final:
+                horario_fallback = fronteira_final - timedelta(minutes=random.randint(5, 30))
+                if horario_fallback <= agora: horario_fallback = agora + timedelta(minutes=2)
+                
             job_id = f"job_rotina_{tipo}_{indice}"
             scheduler.add_job(disparar_mensagem, 'date', run_date=horario_fallback, args=[tipo], id=job_id, replace_existing=True)
 
@@ -1180,8 +1210,17 @@ def agendar_tarefas_diarias():
         
         horario_candidato = agora.replace(hour=hora_sorteada, minute=min_sorteado, second=0, microsecond=0)
         
+        # 🚧 Impede que qualquer rotina paralela fure a fila do Bom Dia
+        if horario_candidato <= fronteira_inicial:
+            horario_candidato = fronteira_inicial + timedelta(minutes=random.randint(5, 60))
+            
+        # 🚧 Impede que qualquer rotina paralela force o cadeado do Boa Noite
+        if horario_candidato >= fronteira_final:
+            horario_candidato = fronteira_final - timedelta(minutes=random.randint(5, 60))
+            
+        # Se após os empurrões a hora ficar colada no passado, joga alguns minutos para a frente
         if horario_candidato <= agora:
-            horario_candidato = agora + timedelta(minutes=random.randint(5, 60))
+            horario_candidato = agora + timedelta(minutes=random.randint(2, 10))
             
         job_id = f"job_rotina_{tipo}_{indice}"
         scheduler.add_job(disparar_mensagem, 'date', run_date=horario_candidato, args=[tipo], id=job_id, replace_existing=True)
