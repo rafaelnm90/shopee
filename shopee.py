@@ -198,15 +198,17 @@ teclado_confirmar_zerar = ReplyKeyboardMarkup(
 )
 
 # --- NOVOS TECLADOS DE CONFIGURAÇÃO ---
-teclado_configuracoes_gerais = ReplyKeyboardMarkup(
-    keyboard=[
+def obter_teclado_configuracoes_gerais():
+    dados_pausa = ler_pausa_programada()
+    texto_botao_pausa = "Retomar Postagens ▶️" if dados_pausa.get("ativa") else "Pausar Postagens 🛑"
+    
+    botoes = [
         [KeyboardButton(text="Mensagens de Rotina ⏰"), KeyboardButton(text="SPAM em Grupos 📢")],
+        [KeyboardButton(text="Editar Número da Postagem 🔢"), KeyboardButton(text=texto_botao_pausa)],
         [KeyboardButton(text="🔄 Atualizar Rotinas")],
         [KeyboardButton(text="Voltar 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+    ]
+    return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
 teclado_opcoes_divulgacao = ReplyKeyboardMarkup(
     keyboard=[
@@ -257,16 +259,12 @@ def obter_teclado_raiz():
 
 # 🛠️ Função centralizadora da pasta do Canal Principal
 def obter_teclado_principal():
-    dados_pausa = ler_pausa_programada()
-    texto_botao_pausa = "Retomar Postagens ▶️" if dados_pausa.get("ativa") else "Pausar Postagens 🛑"
-    
     botoes = [
         [KeyboardButton(text="Criar Postagem 📝")],
         [KeyboardButton(text="Gerenciar Fila 📋")],
-        [KeyboardButton(text="Editar Número da Postagem 🔢"), KeyboardButton(text="Disparar Convite Viral 🚀")],
         [KeyboardButton(text="Disparar Bom Dia ☀️"), KeyboardButton(text="Disparar Boa Noite 🌙")],
         [KeyboardButton(text="Disparar Incentivo 🔥"), KeyboardButton(text="Disparar Convite do Grupo 🔗")],
-        [KeyboardButton(text=texto_botao_pausa)],
+        [KeyboardButton(text="Disparar Convite Viral 🚀")],
         [KeyboardButton(text="🛠️ Configurações Avançadas")], 
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
@@ -2270,7 +2268,7 @@ async def menu_configuracoes(message: types.Message, state: FSMContext):
         f"⏰ Mensagens de Rotina: {status_rotina}\n\n"
         "Escolha o módulo que deseja configurar abaixo:"
     )
-    await message.answer(texto, reply_markup=teclado_configuracoes_gerais, parse_mode="HTML")
+    await message.answer(texto, reply_markup=obter_teclado_configuracoes_gerais(), parse_mode="HTML")
 
 # ✅ NOVO: Botão de Pânico / Reset Mestre (Versão Completa)
 @dp.message(F.text == "🔄 Atualizar Rotinas", StateFilter("*"))
@@ -3049,7 +3047,7 @@ async def salvar_alvo(message: types.Message, state: FSMContext):
     salvar_alvos_divulgacao(dados)
     
     if EXIBIR_LOGS: logger.info(f"✅ Novos alvos adicionados: {novos_alvos}")
-    await message.answer("Alvos adicionados com sucesso!", reply_markup=teclado_configuracoes_gerais)
+    await message.answer("Alvos adicionados com sucesso!", reply_markup=obter_teclado_configuracoes_gerais())
     await state.clear()
 
 @dp.message(ConfigDivulgacao.menu_principal, F.text == "Excluir Alvo 🗑️")
@@ -3081,7 +3079,7 @@ async def processar_exclusao(message: types.Message, state: FSMContext):
         dados["alvos"] = alvos
         salvar_alvos_divulgacao(dados)
         if EXIBIR_LOGS: logger.info(f"🗑️ Alvo removido com sucesso: {removido}")
-        await message.answer(f"Alvo '{removido}' excluído com sucesso!", reply_markup=teclado_configuracoes_gerais)
+        await message.answer(f"Alvo '{removido}' excluído com sucesso!", reply_markup=obter_teclado_configuracoes_gerais())
         await state.clear()
     else:
         await message.answer("Número inválido. Tente novamente:", reply_markup=teclado_cancelar)
@@ -3194,7 +3192,7 @@ async def salvar_valores_unificados(message: types.Message, state: FSMContext):
     salvar_alvos_divulgacao(dados)
     if EXIBIR_LOGS: logger.info(f"⚙️ Configuração salva numa única passagem. Global: {is_global} | Freq: {freq}, Rep: {rep}, Repl: {repl}")
     
-    await message.answer(msg_final, reply_markup=teclado_configuracoes_gerais, parse_mode="HTML")
+    await message.answer(msg_final, reply_markup=obter_teclado_configuracoes_gerais(), parse_mode="HTML")
     await state.clear()
 
 @dp.message(ConfigDivulgacao.menu_principal, F.text == "Forçar Disparo Agora 🚀")
