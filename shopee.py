@@ -2203,7 +2203,7 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     
     if EXIBIR_LOGS: logger.info("🔄 Acionado o Reset Mestre do Expediente...")
-    msg_status = await message.answer("🔄 Iniciando o protocolo de Reset Mestre...\n1️⃣ Limpando memória de rotinas...", reply_markup=teclado_cancelar)
+    msg_status = await message.answer("🔄 Iniciando o protocolo de Reset Mestre e recalculando a grade. Aguarde...", reply_markup=teclado_cancelar)
     
     # 1. Dá a "pílula de amnésia" no robô (Limpa o histórico e o painel visual)
     dados_rotina = ler_config_rotina()
@@ -2215,7 +2215,6 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
     salvar_config_rotina(dados_rotina)
     
     # 2. O Resgate dos Vídeos (Puxa de volta os vídeos empurrados para amanhã)
-    await msg_status.edit_text("🔄 Resgatando vídeos exilados para amanhã...")
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
     
@@ -2228,7 +2227,6 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
     salvar_fila_postagens(fila_data)
     
     # 3. Varre a agenda antiga e recalcula a distribuição
-    await msg_status.edit_text("🔄 Remontando a grade de horários e lacunas...")
     agendar_tarefas_diarias()
     
     await msg_status.delete()
