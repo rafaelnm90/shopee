@@ -2140,15 +2140,14 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     
     # 🚀 LÓGICA DE INTELIGÊNCIA TEMPORAL E FILA ESTRITA (FIFO)
     dados_rotina = ler_config_rotina()
-    expediente_encerrado = dados_rotina.get("ultimo_boa_noite") == hoje_str
     
-    # 1. Define a data base olhando para o cadeado da loja
-    if expediente_encerrado:
+    # 1. Define a data base olhando para a bandeira do Bom Dia
+    if dados_rotina.get("ultimo_bom_dia") == hoje_str:
         data_agendamento_base = amanha_str
-        if EXIBIR_LOGS: logger.info("⏰ Expediente encerrado ('Boa Noite' disparado). Data base projetada para Amanhã.")
+        if EXIBIR_LOGS: logger.info("⏰ O 'Bom Dia' de hoje já passou. Data base projetada para Amanhã.")
     else:
         data_agendamento_base = "2000-01-01" # Flag interna para 'Imediato/Hoje'
-        if EXIBIR_LOGS: logger.info("⏰ Expediente aberto. Data base projetada para Hoje.")
+        if EXIBIR_LOGS: logger.info("⏰ O 'Bom Dia' de hoje ainda não passou (Madrugada/Manhã). Data base projetada para Hoje.")
         
     # 2. 🚧 Trava de Ordem Cronológica (Não permite furar a fila)
     fila_data_temp = ler_fila_postagens()
@@ -2157,10 +2156,9 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
         ultima_data_str = fila_temp[-1].get("data_adicao", "2000-01-01")
         
         # Se o último vídeo da fila já foi empurrado para o futuro, o novo vídeo tem que acompanhá-lo.
-        if ultima_data_str != "2000-01-01":
-            if data_agendamento_base == "2000-01-01" or ultima_data_str > data_agendamento_base:
-                data_agendamento_base = ultima_data_str
-                if EXIBIR_LOGS: logger.info(f"🚧 FIFO: O novo vídeo foi empurrado para o fim da fila: {data_agendamento_base}")
+        if ultima_data_str != "2000-01-01" and ultima_data_str > data_agendamento_base:
+            data_agendamento_base = ultima_data_str
+            if EXIBIR_LOGS: logger.info(f"🚧 FIFO: O novo vídeo foi empurrado para o fim da fila: {data_agendamento_base}")
     
     def adicionar_a_fila(caminho_vid, vid_id, caption):
         fila_data = ler_fila_postagens()
