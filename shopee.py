@@ -601,13 +601,11 @@ async def verificar_pausa_diaria():
         
     if EXIBIR_LOGS: logger.info("🛑 Pausa ativa. Enviando aviso diário ao grupo principal...")
     
-    id_aviso_imediato = dados_pausa.pop("id_aviso_imediato", None)
-    
+    # 1. Recupera e apaga o aviso antigo
+    id_aviso_imediato = dados_pausa.get("id_aviso_imediato")
     if id_aviso_imediato:
         if EXIBIR_LOGS: logger.info("🧹 Excluindo aviso antigo para dar lugar ao novo aviso diário...")
         await apagar_mensagem_automatica(id_aviso_imediato, GRUPO_ID)
-        
-    salvar_pausa_programada(dados_pausa)
 
     motivo_salvo = dados_pausa.get("motivo", "organização interna e curadoria de novos conteúdos")
     data_curta = data_retorno_str.split(" ")[0][:5]
@@ -622,10 +620,14 @@ async def verificar_pausa_diaria():
     )
     texto = await gerar_mensagem_gemini(prompt)
     
+    # 2. Envia o novo aviso
     msg_enviada = await bot.send_message(GRUPO_ID, texto)
-    registrar_lixeira(msg_enviada.message_id, GRUPO_ID)
     
-    if EXIBIR_LOGS: logger.info("✅ Aviso diário enviado com sucesso ao Canal Afiliados.")
+    # ✅ CORREÇÃO: Atualiza o ID na memória da pausa em vez de atirar para a lixeira
+    dados_pausa["id_aviso_imediato"] = msg_enviada.message_id
+    salvar_pausa_programada(dados_pausa)
+    
+    if EXIBIR_LOGS: logger.info("✅ Aviso diário enviado e salvo na memória com sucesso.")
 
 async def verificar_retorno_pausa_minuto():
     dados_pausa = ler_pausa_programada()
@@ -665,8 +667,12 @@ async def verificar_retorno_pausa_minuto():
             "REGRA ABSOLUTA: Seja direto (máximo 150 caracteres), use emojis animados e entregue APENAS o texto pronto."
         )
         texto_retorno = await gerar_mensagem_gemini(prompt_retorno)
-        await bot.send_message(GRUPO_ID, texto_retorno)
-        if EXIBIR_LOGS: logger.info("✅ Mensagem triunfal de retorno postada no grupo.")
+        
+        # ✅ CORREÇÃO: Salva a mensagem enviada numa variável e joga o ID na lixeira
+        msg_retorno = await bot.send_message(GRUPO_ID, texto_retorno)
+        registrar_lixeira(msg_retorno.message_id, GRUPO_ID)
+        
+        if EXIBIR_LOGS: logger.info("✅ Mensagem triunfal de retorno postada no grupo e enviada para a lixeira.")
             
         servicos = dados_pausa.get("servicos_pausados", [])
         
@@ -2785,7 +2791,11 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
         "REGRA ABSOLUTA: Seja direto (máximo 150 caracteres), use emojis animados e entregue APENAS o texto pronto."
     )
     texto_retorno = await gerar_mensagem_gemini(prompt_retorno)
-    await bot.send_message(GRUPO_ID, texto_retorno)
+    
+    # ✅ CORREÇÃO: Salva a mensagem enviada numa variável e joga o ID na lixeira
+    msg_retorno = await bot.send_message(GRUPO_ID, texto_retorno)
+    registrar_lixeira(msg_retorno.message_id, GRUPO_ID)
+    
     await msg_status.delete()
     
     if "spam" in servicos:
