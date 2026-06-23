@@ -3644,7 +3644,7 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             
         if EXIBIR_LOGS: logger.info("✅ Painel visual da fila montado com metadados e fronteiras com sucesso.")
     else:
-        texto += "\n<i>A sua fila está completamente vazia no momento.</i>\n"
+        texto += "\n<i>A sua fila está completamente vazia no momento.</i>\n\n"
         texto += "━━━━━━━━━━━━━━━━━━\n"
         texto += f"🌙 <b>Boa Noite ({data_dia_br}):</b> {hora_bn}\n\n"
         if EXIBIR_LOGS: logger.info("⚠️ Fila vazia detectada ao montar o painel.")
