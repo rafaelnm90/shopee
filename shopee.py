@@ -3699,7 +3699,35 @@ async def aplicar_renumeracao_e_salvar(fila, message, state, numero_base=None):
     await message.answer(f"✅ Operação concluída com sucesso!\n🔄 A numeração de toda a fila foi corrigida em cascata e os horários recalculados.")
     await menu_gerenciar_fila(message, state)
 
-@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Excluir Vídeo 🗑️")
+# ✅ NOVO: Muralha de Segurança - Trava todas as edições se a fila estiver vazia
+@dp.message(GerenciarFilaFluxo.menu_principal, F.text.in_(["Publicar Agora 🚀", "Excluir Vídeo 🗑️", "Editar Numeração 🔢", "Mover Posição ↕️", "Editar Legenda ✏️"]))
+async def trava_fila_vazia(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    
+    # Verifica se a fila está vazia ou se só tem vídeos já postados
+    videos_pendentes = [item for item in fila if not item.get("postado", False)]
+    
+    if not videos_pendentes:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Fila: Tentativa de usar '{message.text}' bloqueada (Fila vazia).")
+        await message.answer(f"⚠️ <b>Ação Bloqueada:</b> A sua fila de vídeos está vazia no momento.\n\nNão há nenhum vídeo agendado para poder utilizar a função de {message.text.split(' ')[1]}.", parse_mode="HTML")
+        await menu_gerenciar_fila(message, state) # Recarrega o menu principal da fila
+        return
+        
+    # 🔁 Roteamento Inteligente (Se tiver vídeos, ele deixa passar para o handler correto)
+    if message.text == "Excluir Vídeo 🗑️":
+        await pedir_exclusao_fila(message, state)
+    elif message.text == "Editar Legenda ✏️":
+        await pedir_edicao_fila(message, state)
+    elif message.text == "Mover Posição ↕️":
+        await pedir_reordenar_fila(message, state)
+    elif message.text == "Editar Numeração 🔢":
+        await pedir_edicao_numeracao_fila(message, state)
+    elif message.text == "Publicar Agora 🚀":
+        await pedir_posicao_publicar(message, state)
+
 async def pedir_exclusao_fila(message: types.Message, state: FSMContext):
     await message.answer("Digite o <b>NÚMERO</b> da posição do vídeo que deseja excluir:", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(GerenciarFilaFluxo.aguardando_posicao_excluir)
@@ -3785,7 +3813,6 @@ async def processar_exclusao_fila(message: types.Message, state: FSMContext):
         await message.answer("Erro de sincronização. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
 
-@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Editar Legenda ✏️")
 async def pedir_edicao_fila(message: types.Message, state: FSMContext):
     await message.answer("Digite o <b>NÚMERO</b> da posição do vídeo que deseja editar:", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(GerenciarFilaFluxo.aguardando_posicao_editar)
@@ -3834,7 +3861,6 @@ async def salvar_nova_legenda_fila(message: types.Message, state: FSMContext):
         await message.answer("Erro de sincronização. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
 
-@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Mover Posição ↕️")
 async def pedir_reordenar_fila(message: types.Message, state: FSMContext):
     await message.answer("Digite o <b>NÚMERO</b> da posição atual do vídeo que deseja mover:", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(GerenciarFilaFluxo.aguardando_posicao_reordenar)
@@ -4049,7 +4075,6 @@ async def processar_confirmacao_reordenar(message: types.Message, state: FSMCont
         await message.answer("Erro de sincronização. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
 
-@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Editar Numeração 🔢")
 async def pedir_edicao_numeracao_fila(message: types.Message, state: FSMContext):
     await message.answer("Digite o <b>NÚMERO</b> da posição do vídeo na fila que deseja alterar a numeração:", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(GerenciarFilaFluxo.aguardando_posicao_numeracao)
@@ -4126,7 +4151,6 @@ async def salvar_nova_numeracao_fila(message: types.Message, state: FSMContext):
         await message.answer("Erro de sincronização. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
 
-@dp.message(GerenciarFilaFluxo.menu_principal, F.text == "Publicar Agora 🚀")
 async def pedir_posicao_publicar(message: types.Message, state: FSMContext):
     await message.answer("Digite o <b>NÚMERO</b> da posição do vídeo na fila que deseja publicar imediatamente:", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(GerenciarFilaFluxo.aguardando_posicao_publicar)
