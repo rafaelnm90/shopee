@@ -109,6 +109,9 @@ class ConfigPausa(StatesGroup):
 class PausaProgramadaFluxo(StatesGroup):
     aguardando_data_retorno = State()
     aguardando_selecao_servicos = State()
+    aguardando_confirmacao_pausa = State()
+    aguardando_intencao_encerramento = State()
+    aguardando_confirmacao_encerramento = State()
 
 class EspiaoFluxo(StatesGroup):
     menu_principal = State()
@@ -596,17 +599,17 @@ async def verificar_pausa_diaria():
     if not data_retorno_str:
         return
         
-    if EXIBIR_LOGS: logger.info("🛑 Pausa ativa. Enviando aviso diário ao grupo...")
+    if EXIBIR_LOGS: logger.info("🛑 Pausa ativa. Enviando aviso diário ao grupo principal...")
     
     id_aviso_imediato = dados_pausa.pop("id_aviso_imediato", None)
+    
     if id_aviso_imediato:
-        if EXIBIR_LOGS: logger.info("🧹 Excluindo aviso de ativação imediata para dar lugar ao aviso diário...")
-        await apagar_mensagem_automatica(id_aviso_imediato)
-        salvar_pausa_programada(dados_pausa)
+        if EXIBIR_LOGS: logger.info("🧹 Excluindo aviso antigo para dar lugar ao novo aviso diário...")
+        await apagar_mensagem_automatica(id_aviso_imediato, GRUPO_ID)
+        
+    salvar_pausa_programada(dados_pausa)
 
     motivo_salvo = dados_pausa.get("motivo", "organização interna e curadoria de novos conteúdos")
-
-    # Extrai apenas o dia e o mês (DD/MM) da string original
     data_curta = data_retorno_str.split(" ")[0][:5]
 
     prompt = (
@@ -618,9 +621,11 @@ async def verificar_pausa_diaria():
         f"Use emojis e entregue APENAS o texto da mensagem final."
     )
     texto = await gerar_mensagem_gemini(prompt)
+    
     msg_enviada = await bot.send_message(GRUPO_ID, texto)
-    registrar_lixeira(msg_enviada.message_id)
-    if EXIBIR_LOGS: logger.info("✅ Aviso diário enviado com sucesso.")
+    registrar_lixeira(msg_enviada.message_id, GRUPO_ID)
+    
+    if EXIBIR_LOGS: logger.info("✅ Aviso diário enviado com sucesso ao Canal Afiliados.")
 
 async def verificar_retorno_pausa_minuto():
     dados_pausa = ler_pausa_programada()
@@ -646,6 +651,23 @@ async def verificar_retorno_pausa_minuto():
     
     if hoje >= data_retorno:
         if EXIBIR_LOGS: logger.info("⏰ Data e hora de retorno atingidas! Reativando serviços pausados...")
+        
+        # Apaga a placa de "Fechado"
+        id_aviso = dados_pausa.pop("id_aviso_imediato", None)
+        if id_aviso:
+            await apagar_mensagem_automatica(id_aviso, GRUPO_ID)
+            
+        # ✅ NOVO: A IA gera o aviso de retorno ao trabalho silenciosamente no background
+        prompt_retorno = (
+            "Você é um assistente de afiliados. Crie uma mensagem MUITO CURTA E EMPOLGANTE "
+            "avisando o grupo que a pausa de manutenção acabou, o canal voltou à ativa e os "
+            "vídeos com ofertas voltarão a ser postados normalmente a partir de hoje. "
+            "REGRA ABSOLUTA: Seja direto (máximo 150 caracteres), use emojis animados e entregue APENAS o texto pronto."
+        )
+        texto_retorno = await gerar_mensagem_gemini(prompt_retorno)
+        await bot.send_message(GRUPO_ID, texto_retorno)
+        if EXIBIR_LOGS: logger.info("✅ Mensagem triunfal de retorno postada no grupo.")
+            
         servicos = dados_pausa.get("servicos_pausados", [])
         
         if "spam" in servicos:
@@ -661,7 +683,6 @@ async def verificar_retorno_pausa_minuto():
         
         dados_pausa["ativa"] = False
         dados_pausa["servicos_pausados"] = []
-        dados_pausa.pop("id_aviso_imediato", None)
         salvar_pausa_programada(dados_pausa)
         recalcular_datas_pos_pausa()
         agendar_fila_postagens()
@@ -2563,6 +2584,7 @@ async def alternar_pausa_rotinas_interno(message: types.Message, state: FSMConte
 # ✅ NOVO: Handler específico para corrigir o "Voltar" na pausa programada
 @dp.message(PausaProgramadaFluxo.aguardando_selecao_servicos, F.text == "Voltar 🔙")
 @dp.message(PausaProgramadaFluxo.aguardando_data_retorno, F.text == "Voltar 🔙")
+@dp.message(PausaProgramadaFluxo.aguardando_intencao_encerramento, F.text == "Voltar 🔙")
 async def voltar_pausa_para_inicio(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🔙 Comando Voltar acionado na Pausa Programada.")
@@ -2580,7 +2602,7 @@ async def iniciar_pausa_programada(message: types.Message, state: FSMContext):
         texto = f"⚠️ <b>Pausa Programada Ativa!</b>\nO robô está em modo de descanso até <b>{data_retorno}</b>.\n\nDeseja cancelar esta pausa e retomar os serviços agora?"
         teclado = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Encerrar Pausa Agora ▶️")], [KeyboardButton(text="Voltar 🔙")]], resize_keyboard=True, is_persistent=True)
         await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
-        await state.set_state(PausaProgramadaFluxo.aguardando_selecao_servicos)
+        await state.set_state(PausaProgramadaFluxo.aguardando_intencao_encerramento)
         return
         
     await message.answer("📅 <b>Configurar Pausa Programada</b>\n\nDigite a data e a hora exatas do seu <b>retorno</b> no formato DD/MM HH:MM (Exemplo: 29/05 15:00).\nO robô voltará a funcionar automaticamente neste momento exato.", parse_mode="HTML", reply_markup=teclado_cancelar)
@@ -2623,7 +2645,9 @@ async def processar_data_retorno(message: types.Message, state: FSMContext):
     rotina_ativa = not dados_rotina.get("pausado", False)
     
     if not spam_ativo and not rotina_ativa:
-        await message.answer(f"Ambos os serviços já estão pausados manualmente.\nApenas a rotina diária de avisos será agendada até {data_retorno_str}.\nConfirma?", reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Confirmar Pausa ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True))
+        await state.update_data(servicos_selecionados="Nenhum (Apenas Avisos)")
+        await message.answer(f"Ambos os serviços já estão pausados manualmente.\nApenas a rotina diária de avisos será agendada até {data_retorno_str}.\nConfirma o agendamento desta pausa?", reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Confirmar Pausa ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True))
+        await state.set_state(PausaProgramadaFluxo.aguardando_confirmacao_pausa)
     else:
         opcoes = []
         if spam_ativo and rotina_ativa:
@@ -2638,51 +2662,46 @@ async def processar_data_retorno(message: types.Message, state: FSMContext):
         
         texto = f"Data e hora de retorno: <b>{data_retorno_str}</b>.\nQuais serviços você deseja pausar automaticamente agora?"
         await message.answer(texto, parse_mode="HTML", reply_markup=ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True))
-        
-    await state.set_state(PausaProgramadaFluxo.aguardando_selecao_servicos)
+        await state.set_state(PausaProgramadaFluxo.aguardando_selecao_servicos)
 
 @dp.message(PausaProgramadaFluxo.aguardando_selecao_servicos)
-async def confirmar_pausa_programada(message: types.Message, state: FSMContext):
-    if EXIBIR_LOGS: logger.info("⚙️ Processando a seleção da pausa programada...")
-    if message.text == "Encerrar Pausa Agora ▶️":
-        dados_pausa = ler_pausa_programada()
-        servicos = dados_pausa.get("servicos_pausados", [])
-        
-        if "spam" in servicos:
-            dados_div = ler_alvos_divulgacao()
-            dados_div["pausado"] = False
-            salvar_alvos_divulgacao(dados_div)
-            if EXIBIR_LOGS: logger.info("✅ SPAM reativado após encerramento forçado.")
-        if "rotina" in servicos:
-            dados_rotina = ler_config_rotina()
-            dados_rotina["pausado"] = False
-            salvar_config_rotina(dados_rotina)
-            if EXIBIR_LOGS: logger.info("✅ Mensagens de rotina reativadas após encerramento forçado.")
-                
-        dados_pausa["ativa"] = False
-        dados_pausa["servicos_pausados"] = []
-        salvar_pausa_programada(dados_pausa)
-        recalcular_datas_pos_pausa()
-        await message.answer("▶️ Pausa programada encerrada, fila recalculada e serviços reativados com sucesso!", reply_markup=obter_teclado_principal())
-        await state.clear()
-        return
-
-    opcoes_validas = ["Pausar Ambos", "Apenas SPAM", "Apenas Rotina", "Pausar SPAM", "Pausar Rotina", "Confirmar Pausa ✅"]
+async def processar_selecao_servicos(message: types.Message, state: FSMContext):
+    opcoes_validas = ["Pausar Ambos", "Apenas SPAM", "Apenas Rotina", "Pausar SPAM", "Pausar Rotina"]
     if message.text not in opcoes_validas:
         await message.answer("Use um dos botões para escolher.", reply_markup=teclado_cancelar)
         return
         
+    await state.update_data(servicos_selecionados=message.text)
     data = await state.get_data()
     data_retorno_str = data["data_retorno_str"]
-    servicos_pausados = []
     
-    if message.text in ["Pausar Ambos", "Apenas SPAM", "Pausar SPAM"]:
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Confirmar Pausa ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    await message.answer(f"Você escolheu: <b>{message.text}</b>\nO robô ficará pausado até <b>{data_retorno_str}</b>.\n\nConfirma o agendamento desta pausa?", reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(PausaProgramadaFluxo.aguardando_confirmacao_pausa)
+
+@dp.message(PausaProgramadaFluxo.aguardando_confirmacao_pausa)
+async def confirmar_pausa_programada_final(message: types.Message, state: FSMContext):
+    if message.text != "Confirmar Pausa ✅":
+        await message.answer("Por favor, clique em Confirmar Pausa ✅ ou Cancelar ❌.")
+        return
+
+    data = await state.get_data()
+    data_retorno_str = data["data_retorno_str"]
+    selecao = data.get("servicos_selecionados", "")
+    
+    servicos_pausados = []
+    if selecao in ["Pausar Ambos", "Apenas SPAM", "Pausar SPAM"]:
         dados_div = ler_alvos_divulgacao()
         dados_div["pausado"] = True
         salvar_alvos_divulgacao(dados_div)
         servicos_pausados.append("spam")
         
-    if message.text in ["Pausar Ambos", "Apenas Rotina", "Pausar Rotina"]:
+    if selecao in ["Pausar Ambos", "Apenas Rotina", "Pausar Rotina"]:
         dados_rotina = ler_config_rotina()
         dados_rotina["pausado"] = True
         salvar_config_rotina(dados_rotina)
@@ -2702,7 +2721,6 @@ async def confirmar_pausa_programada(message: types.Message, state: FSMContext):
     # Extrai apenas o dia e o mês (DD/MM) da string original
     data_curta = data_retorno_str.split(" ")[0][:5]
 
-    # ✅ NOVO: Geração e envio do aviso exato no momento do acionamento
     prompt = (
         f"Você é um assistente de afiliados. Crie um aviso imediato MUITO CURTO E DIRETO "
         f"informando que as postagens estão pausadas a partir de agora para {motivo_escolhido}. "
@@ -2711,20 +2729,62 @@ async def confirmar_pausa_programada(message: types.Message, state: FSMContext):
         f"Seja direto, não peça desculpas longas e não dê explicações chatas. "
         f"Use emojis e entregue APENAS o texto da mensagem final."
     )
+    msg_status = await message.answer("⏳ Configurando a pausa e gerando o aviso no grupo...", reply_markup=teclado_cancelar)
     texto_aviso = await gerar_mensagem_gemini(prompt)
     msg_imediata = await bot.send_message(GRUPO_ID, texto_aviso)
+    await msg_status.delete()
     
     dados_pausa = {
         "ativa": True,
         "data_retorno": data_retorno_str,
         "servicos_pausados": servicos_pausados,
-        "id_aviso_imediato": msg_imediata.message_id, # Salva o ID para exclusão na rotina das 9h
-        "motivo": motivo_escolhido # ✅ NOVO: Salva o motivo para manter a coerência diária
+        "id_aviso_imediato": msg_imediata.message_id, 
+        "motivo": motivo_escolhido 
     }
     salvar_pausa_programada(dados_pausa)
     
     if EXIBIR_LOGS: logger.info(f"🛑 Pausa programada até {data_retorno_str}. Aviso imediato disparado. Serviços: {servicos_pausados}")
     await message.answer(f"🛑 <b>Pausa Configurada com Sucesso!</b>\n\nO aviso já foi enviado ao grupo. A partir de amanhã, o robô atualizará esse aviso todos os dias às 09h00 informando o retorno para o dia {data_retorno_str}.\nNo dia marcado, ele acordará automaticamente.", parse_mode="HTML", reply_markup=obter_teclado_principal())
+    await state.clear()
+
+@dp.message(PausaProgramadaFluxo.aguardando_intencao_encerramento)
+async def pedir_confirmacao_encerramento(message: types.Message, state: FSMContext):
+    if message.text == "Encerrar Pausa Agora ▶️":
+        teclado_confirmacao = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Aprovar Encerramento ✅"), KeyboardButton(text="Cancelar ❌")]],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        await message.answer("⚠️ Tem certeza de que deseja <b>encerrar a pausa agora</b>, recalcular a fila e acordar o robô imediatamente?", reply_markup=teclado_confirmacao, parse_mode="HTML")
+        await state.set_state(PausaProgramadaFluxo.aguardando_confirmacao_encerramento)
+    else:
+        await message.answer("Use os botões abaixo para escolher.", reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Encerrar Pausa Agora ▶️")], [KeyboardButton(text="Voltar 🔙")]], resize_keyboard=True, is_persistent=True))
+
+@dp.message(PausaProgramadaFluxo.aguardando_confirmacao_encerramento)
+async def processar_encerramento_pausa(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar Encerramento ✅":
+        await message.answer("Por favor, clique em Aprovar Encerramento ✅ ou Cancelar ❌.")
+        return
+
+    dados_pausa = ler_pausa_programada()
+    servicos = dados_pausa.get("servicos_pausados", [])
+    
+    if "spam" in servicos:
+        dados_div = ler_alvos_divulgacao()
+        dados_div["pausado"] = False
+        salvar_alvos_divulgacao(dados_div)
+        if EXIBIR_LOGS: logger.info("✅ SPAM reativado após encerramento forçado.")
+    if "rotina" in servicos:
+        dados_rotina = ler_config_rotina()
+        dados_rotina["pausado"] = False
+        salvar_config_rotina(dados_rotina)
+        if EXIBIR_LOGS: logger.info("✅ Mensagens de rotina reativadas após encerramento forçado.")
+            
+    dados_pausa["ativa"] = False
+    dados_pausa["servicos_pausados"] = []
+    salvar_pausa_programada(dados_pausa)
+    recalcular_datas_pos_pausa()
+    await message.answer("▶️ Pausa programada encerrada, fila recalculada e serviços reativados com sucesso!", reply_markup=obter_teclado_principal())
     await state.clear()
 
 # --- LÓGICA DE GERENCIAMENTO DE DIVULGAÇÃO ---
