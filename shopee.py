@@ -201,7 +201,7 @@ teclado_confirmar_zerar = ReplyKeyboardMarkup(
 teclado_configuracoes_gerais = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Mensagens de Rotina ⏰"), KeyboardButton(text="SPAM em Grupos 📢")],
-        [KeyboardButton(text="🔄 Resetar Expediente")],
+        [KeyboardButton(text="🔄 Atualizar Cronograma")],
         [KeyboardButton(text="Voltar 🔙")]
     ],
     resize_keyboard=True,
@@ -267,7 +267,7 @@ def obter_teclado_principal():
         [KeyboardButton(text="Disparar Bom Dia ☀️"), KeyboardButton(text="Disparar Boa Noite 🌙")],
         [KeyboardButton(text="Disparar Incentivo 🔥"), KeyboardButton(text="Disparar Convite do Grupo 🔗")],
         [KeyboardButton(text=texto_botao_pausa)],
-        [KeyboardButton(text="⚙️ Automações (SPAM e Rotina)")], 
+        [KeyboardButton(text="🛠️ Configurações Avançadas")], 
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -2176,7 +2176,7 @@ async def salvar_novo_numero(message: types.Message, state: FSMContext):
     else:
         await message.answer("Por favor, digite apenas números. Exemplo: 50", reply_markup=teclado_cancelar)
 
-@dp.message(F.text == "⚙️ Automações (SPAM e Rotina)", StateFilter("*"))
+@dp.message(F.text == "🛠️ Configurações Avançadas", StateFilter("*"))
 async def menu_configuracoes(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
@@ -2198,7 +2198,7 @@ async def menu_configuracoes(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=teclado_configuracoes_gerais, parse_mode="HTML")
 
 # ✅ NOVO: Botão de Pânico / Reset Mestre (Versão Completa)
-@dp.message(F.text == "🔄 Resetar Expediente", StateFilter("*"))
+@dp.message(F.text == "🔄 Atualizar Cronograma", StateFilter("*"))
 async def resetar_expediente(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     
