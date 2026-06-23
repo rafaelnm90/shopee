@@ -2166,33 +2166,48 @@ async def menu_configuracoes(message: types.Message, state: FSMContext):
     )
     await message.answer(texto, reply_markup=teclado_configuracoes_gerais, parse_mode="HTML")
 
-# ✅ NOVO: Botão de Pânico / Reset Mestre
+# ✅ NOVO: Botão de Pânico / Reset Mestre (Versão Completa)
 @dp.message(F.text == "🔄 Resetar Expediente", StateFilter("*"))
 async def resetar_expediente(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     
     if EXIBIR_LOGS: logger.info("🔄 Acionado o Reset Mestre do Expediente...")
+    msg_status = await message.answer("🔄 Iniciando o protocolo de Reset Mestre...\n1️⃣ Limpando memória de rotinas...", reply_markup=teclado_cancelar)
     
-    # 1. Dá a "pílula de amnésia" no robô (Limpa o histórico de hoje)
+    # 1. Dá a "pílula de amnésia" no robô (Limpa o histórico e o painel visual)
     dados_rotina = ler_config_rotina()
     dados_rotina["ultimo_bom_dia"] = ""
+    dados_rotina["hora_ultimo_bom_dia"] = "" # Limpa do painel visual
     dados_rotina["ultimo_boa_noite"] = ""
+    dados_rotina["hora_ultimo_boa_noite"] = "" # Limpa do painel visual
     dados_rotina["historico_diario"] = {"data": "", "contagem": {}}
     salvar_config_rotina(dados_rotina)
     
-    msg_status = await message.answer("🔄 Limpando a memória de hoje e recalculando toda a grade. Aguarde...", reply_markup=teclado_cancelar)
+    # 2. O Resgate dos Vídeos (Puxa de volta os vídeos empurrados para amanhã)
+    await msg_status.edit_text("🔄 Resgatando vídeos exilados para amanhã...")
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
     
-    # 2. Varre a agenda antiga e recalcula a distribuição com base nas horas que restam no dia
+    for item in fila:
+        if not item.get("postado"):
+            # Devolve o status "Imediato/Hoje" (código 2000-01-01) para todos os pendentes
+            item["data_adicao"] = "2000-01-01"
+            
+    fila_data["fila"] = fila
+    salvar_fila_postagens(fila_data)
+    
+    # 3. Varre a agenda antiga e recalcula a distribuição
+    await msg_status.edit_text("🔄 Remontando a grade de horários e lacunas...")
     agendar_tarefas_diarias()
     
     await msg_status.delete()
     
     texto = (
         "🔄 <b>Expediente Resetado com Sucesso!</b>\n\n"
-        "O robô esqueceu tudo o que aconteceu hoje e <b>recalculou toda a grade do zero</b> a partir deste exato minuto.\n\n"
-        "✅ Horários de Bom Dia/Boa Noite foram recriados.\n"
-        "✅ Frequência de avisos e incentivos foi restaurada.\n"
-        "✅ Os vídeos agendados foram distribuídos de forma segura nas novas lacunas."
+        "O robô esqueceu o falso encerramento e <b>recalculou toda a grade do zero</b>.\n\n"
+        "✅ O painel de horários foi zerado.\n"
+        "✅ A cota de disparos de rotina foi renovada.\n"
+        "✅ <b>Os vídeos empurrados para amanhã foram resgatados e distribuídos no dia de hoje!</b>"
     )
     await message.answer(texto, parse_mode="HTML", reply_markup=obter_teclado_principal())
     await state.clear()
