@@ -1759,12 +1759,14 @@ async def receber_video(message: types.Message, state: FSMContext):
 
 @dp.message(PostagemFluxo.aguardando_decisao_erro)
 async def processar_erro_ia(message: types.Message, state: FSMContext):
-    if message.text == "Digitar Manualmente ✍️":
+    texto = message.text.strip()
+    
+    if texto == "Digitar Manualmente ✍️":
         if EXIBIR_LOGS: logger.info("✍️ Usuário optou por digitar manualmente após erro da IA.")
         await message.answer("Sem problemas. Digite manualmente APENAS O NOME DO PRODUTO ou kit:", reply_markup=teclado_cancelar)
         await state.set_state(PostagemFluxo.aguardando_chamada_manual)
         
-    elif message.text == "Tentar Novamente 🔄":
+    elif texto == "Tentar Novamente 🔄":
         if EXIBIR_LOGS: logger.info("🔄 Usuário optou por tentar processar o vídeo na IA novamente.")
         data = await state.get_data()
         video_path = data.get('video_path')
@@ -1821,9 +1823,7 @@ async def processar_erro_ia(message: types.Message, state: FSMContext):
             chamada_gerada = await asyncio.to_thread(analisar_video_retry)
             await msg_status.delete()
             
-            # Se der certo, salva e manda para a etapa de confirmar o nome
             await state.update_data(nome_produto=chamada_gerada)
-            
             mensagem_aprovacao = f"{chamada_gerada}\n\n👉 <b>Esta identificação está correta?</b> Escolha uma opção abaixo:"
             await message.answer(mensagem_aprovacao, reply_markup=teclado_confirmacao, parse_mode="HTML")
             await state.set_state(PostagemFluxo.aguardando_confirmacao_nome)
@@ -1832,7 +1832,6 @@ async def processar_erro_ia(message: types.Message, state: FSMContext):
             erro_str = str(e)
             if EXIBIR_LOGS: logger.error(f"❌ Erro na tentativa de reprocessamento: {erro_str}")
             await msg_status.delete()
-            
             motivo = "Falha no servidor."
             if "429" in erro_str:
                 motivo = "Limite de velocidade da IA atingido. Aguarde 1 minuto."
@@ -1841,21 +1840,38 @@ async def processar_erro_ia(message: types.Message, state: FSMContext):
                 
             await message.answer(f"⚠️ A IA falhou novamente.\n**Motivo:** {motivo}\n\nO que você deseja fazer agora?", reply_markup=teclado_erro_ia)
             
-    else:
-        # Pega entradas soltas que não sejam os botões mapeados
-        await message.answer("Por favor, use um dos botões abaixo ou clique em Cancelar ❌:", reply_markup=teclado_erro_ia)
+    elif texto != "Cancelar ❌":
+        # 🚀 ATALHO: O usuário digitou o nome do produto diretamente na tela de erro
+        if EXIBIR_LOGS: logger.info("✍️ Atalho: Usuário digitou o texto direto ignorando os botões de erro.")
+        data = await state.get_data()
+        numero_atual = data.get('numero_reservado')
+        
+        nome_formatado = f"Vídeo {numero_atual}\n📦 Item: {texto}"
+        await state.update_data(nome_produto=nome_formatado)
+        await message.answer(f"Identificação salva como:\n\n{nome_formatado}\n\nOnde você postou/vai postar este vídeo?", reply_markup=teclado_plataforma)
+        await state.set_state(PostagemFluxo.aguardando_plataforma)
 
 @dp.message(PostagemFluxo.aguardando_confirmacao_nome)
 async def confirmar_nome(message: types.Message, state: FSMContext):
-    if message.text == "Aprovar ✅":
+    texto = message.text.strip()
+    if texto == "Aprovar ✅":
         if EXIBIR_LOGS: logger.info("✅ Nome aprovado. Avançando para seleção de plataforma.")
-        # ✅ Fluxo modificado: em vez de pedir os links de produto, pede a plataforma primeiro
         await message.answer("Onde você postou/vai postar este vídeo?", reply_markup=teclado_plataforma)
         await state.set_state(PostagemFluxo.aguardando_plataforma)
-    elif message.text == "Digitar Nome ✍️":
+    elif texto == "Digitar Nome ✍️":
         if EXIBIR_LOGS: logger.info("✍️ Transição manual solicitada para digitação do nome do produto.")
         await message.answer("Sem problemas. Digite manualmente APENAS O NOME DO PRODUTO:", reply_markup=teclado_cancelar)
         await state.set_state(PostagemFluxo.aguardando_chamada_manual)
+    elif texto != "Cancelar ❌":
+        # 🚀 ATALHO: O usuário digitou o nome do produto diretamente na tela de confirmação
+        if EXIBIR_LOGS: logger.info("✍️ Atalho: Usuário digitou o texto direto sobrepondo a IA.")
+        data = await state.get_data()
+        numero_atual = data.get('numero_reservado')
+        
+        nome_formatado = f"Vídeo {numero_atual}\n📦 Item: {texto}"
+        await state.update_data(nome_produto=nome_formatado)
+        await message.answer(f"Identificação corrigida e salva como:\n\n{nome_formatado}\n\nOnde você postou/vai postar este vídeo?", reply_markup=teclado_plataforma)
+        await state.set_state(PostagemFluxo.aguardando_plataforma)
 
 @dp.message(PostagemFluxo.aguardando_chamada_manual)
 async def receber_chamada_manual(message: types.Message, state: FSMContext):
@@ -2043,16 +2059,31 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
 
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
+    amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
     
-    # 🚀 LÓGICA DE INTELIGÊNCIA TEMPORAL: Decide a data base se o vídeo entra na fila de Hoje ou Amanhã
+    # 🚀 LÓGICA DE INTELIGÊNCIA TEMPORAL E FILA ESTRITA (FIFO)
     dados_rotina = ler_config_rotina()
-    if dados_rotina.get("ultimo_bom_dia") == hoje_str:
-        from datetime import timedelta
-        data_agendamento_base = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
-        if EXIBIR_LOGS: logger.info("⏰ Expediente aberto ('Bom Dia' disparado). Data base projetada para Amanhã.")
+    expediente_encerrado = dados_rotina.get("ultimo_boa_noite") == hoje_str
+    
+    # 1. Define a data base olhando para o cadeado da loja
+    if expediente_encerrado:
+        data_agendamento_base = amanha_str
+        if EXIBIR_LOGS: logger.info("⏰ Expediente encerrado ('Boa Noite' disparado). Data base projetada para Amanhã.")
     else:
-        data_agendamento_base = hoje_str
-        if EXIBIR_LOGS: logger.info("⏰ Madrugada/Manhã ('Bom Dia' pendente). Data base projetada para Hoje.")
+        data_agendamento_base = "2000-01-01" # Flag interna para 'Imediato/Hoje'
+        if EXIBIR_LOGS: logger.info("⏰ Expediente aberto. Data base projetada para Hoje.")
+        
+    # 2. 🚧 Trava de Ordem Cronológica (Não permite furar a fila)
+    fila_data_temp = ler_fila_postagens()
+    fila_temp = fila_data_temp.get("fila", [])
+    if fila_temp:
+        ultima_data_str = fila_temp[-1].get("data_adicao", "2000-01-01")
+        
+        # Se o último vídeo da fila já foi empurrado para o futuro, o novo vídeo tem que acompanhá-lo.
+        if ultima_data_str != "2000-01-01":
+            if data_agendamento_base == "2000-01-01" or ultima_data_str > data_agendamento_base:
+                data_agendamento_base = ultima_data_str
+                if EXIBIR_LOGS: logger.info(f"🚧 FIFO: O novo vídeo foi empurrado para o fim da fila: {data_agendamento_base}")
     
     def adicionar_a_fila(caminho_vid, vid_id, caption):
         fila_data = ler_fila_postagens()
