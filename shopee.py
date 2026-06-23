@@ -201,6 +201,7 @@ teclado_confirmar_zerar = ReplyKeyboardMarkup(
 teclado_configuracoes_gerais = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Mensagens de Rotina ⏰"), KeyboardButton(text="SPAM em Grupos 📢")],
+        [KeyboardButton(text="🔄 Resetar Expediente")],
         [KeyboardButton(text="Voltar 🔙")]
     ],
     resize_keyboard=True,
@@ -2164,6 +2165,37 @@ async def menu_configuracoes(message: types.Message, state: FSMContext):
         "Escolha o módulo que deseja configurar abaixo:"
     )
     await message.answer(texto, reply_markup=teclado_configuracoes_gerais, parse_mode="HTML")
+
+# ✅ NOVO: Botão de Pânico / Reset Mestre
+@dp.message(F.text == "🔄 Resetar Expediente", StateFilter("*"))
+async def resetar_expediente(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    
+    if EXIBIR_LOGS: logger.info("🔄 Acionado o Reset Mestre do Expediente...")
+    
+    # 1. Dá a "pílula de amnésia" no robô (Limpa o histórico de hoje)
+    dados_rotina = ler_config_rotina()
+    dados_rotina["ultimo_bom_dia"] = ""
+    dados_rotina["ultimo_boa_noite"] = ""
+    dados_rotina["historico_diario"] = {"data": "", "contagem": {}}
+    salvar_config_rotina(dados_rotina)
+    
+    msg_status = await message.answer("🔄 Limpando a memória de hoje e recalculando toda a grade. Aguarde...", reply_markup=teclado_cancelar)
+    
+    # 2. Varre a agenda antiga e recalcula a distribuição com base nas horas que restam no dia
+    agendar_tarefas_diarias()
+    
+    await msg_status.delete()
+    
+    texto = (
+        "🔄 <b>Expediente Resetado com Sucesso!</b>\n\n"
+        "O robô esqueceu tudo o que aconteceu hoje e <b>recalculou toda a grade do zero</b> a partir deste exato minuto.\n\n"
+        "✅ Horários de Bom Dia/Boa Noite foram recriados.\n"
+        "✅ Frequência de avisos e incentivos foi restaurada.\n"
+        "✅ Os vídeos agendados foram distribuídos de forma segura nas novas lacunas."
+    )
+    await message.answer(texto, parse_mode="HTML", reply_markup=obter_teclado_principal())
+    await state.clear()
 
 @dp.message(F.text == "Outros Canais 🗂️", StateFilter("*"))
 async def menu_outros_canais(message: types.Message, state: FSMContext):
