@@ -2354,12 +2354,13 @@ async def voltar_outros_canais(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Selecione o robô ou módulo secundário que deseja gerir:", reply_markup=teclado_outros_canais)
 
-@dp.message(F.text == "Voltar às Configs 🔙", StateFilter("*"))
-async def voltar_para_configuracoes(message: types.Message, state: FSMContext):
+@dp.message(F.text == "Voltar ao Menu Espião 🔙", StateFilter("*"))
+async def voltar_menu_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🔙 Retornando à Central de Configurações Gerais.")
+    if EXIBIR_LOGS: logger.info("🔙 Retornando ao Menu Principal do Espião...")
     await state.clear()
-    await menu_configuracoes(message, state)
+    # Redireciona a execução diretamente para a função principal para exibir o painel completo
+    await menu_espiao_principal(message, state)
 
 @dp.message(F.text == "Voltar ao Menu Espião 🔙", StateFilter("*"))
 async def voltar_menu_espiao(message: types.Message, state: FSMContext):
@@ -2414,16 +2415,14 @@ async def menu_espiao_principal(message: types.Message, state: FSMContext):
     fila = fila_data.get("fila", [])
     videos_pendentes = len([item for item in fila if not item.get("processado")])
     
-    # 2. Obter canais monitorizados e destino do ficheiro de configuração
-    try:
-        with open("config_espiao.json", "r") as f:
-            config_espiao = json.load(f)
-    except Exception:
-        config_espiao = {}
-        
-    concorrentes = config_espiao.get("concorrentes", [])
+    # 2. Obter canais monitorizados e destino do ficheiro de configuração (CORRIGIDO)
+    dados_espiao = ler_alvos_espiao()
+    concorrentes = dados_espiao.get("alvos", [])
     qtd_concorrentes = len(concorrentes)
-    canal_destino = config_espiao.get("canal_destino", "Não definido")
+    canal_destino = dados_espiao.get("canal_destino")
+    
+    if not canal_destino:
+        canal_destino = "Não definido"
     
     # 3. Construir a mensagem unificada do painel
     texto = "🕵️ <b>Painel Principal do Espião</b>\n\n"
