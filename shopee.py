@@ -1328,11 +1328,13 @@ async def resetar_sessao_inatividade(chat_id: int, user_id: int):
     if EXIBIR_LOGS: logger.info(f"⏳ Cronômetro de inatividade zerou (Tarefa pendente: {estado_atual}). Limpando memória FSM e atualizando a interface minimalista.")
     await state.clear()
     
-    # 2. Envia recarregamento discreto para forçar a atualização do teclado no Telegram
+    # 2. Envia recarregamento discreto, aguarda leitura da interface e apaga a mensagem
     try:
-        await bot.send_message(chat_id, "🔄", reply_markup=obter_teclado_raiz())
+        msg = await bot.send_message(chat_id, "🔄", reply_markup=obter_teclado_raiz())
+        await asyncio.sleep(1.5)
+        await bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao atualizar o teclado após inatividade: {e}")
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao atualizar o teclado silenciosamente: {e}")
 
 class InatividadeMiddleware(BaseMiddleware):
     async def __call__(
