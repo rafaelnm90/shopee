@@ -1331,10 +1331,16 @@ async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int 
     # 2. Notifica o encerramento, aguarda renderização e limpa o chat
     try:
         if EXIBIR_LOGS: logger.info("✅ Restaurando o menu principal por inatividade e efetuando limpeza...")
-        msg = await bot.send_message(chat_id, "Sessão expirada por inatividade. Menu principal restaurado.", reply_markup=obter_teclado_raiz())
+        
+        # Passo A: Envia o aviso temporário SEM botões
+        msg_aviso = await bot.send_message(chat_id, "⏳ Sessão expirada por inatividade. Limpando tela...")
         await asyncio.sleep(1.5)
-        await bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
-        if EXIBIR_LOGS: logger.info("🧹 Mensagem de inatividade apagada com sucesso.")
+        await bot.delete_message(chat_id=chat_id, message_id=msg_aviso.message_id)
+        
+        # Passo B: Envia a mensagem âncora definitiva COM os botões do menu raiz
+        await bot.send_message(chat_id, "🏠 Painel Inicial restaurado.", reply_markup=obter_teclado_raiz())
+        
+        if EXIBIR_LOGS: logger.info("🧹 Mensagem temporária apagada e botões restaurados com sucesso.")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao atualizar o teclado e limpar chat: {e}")
 
