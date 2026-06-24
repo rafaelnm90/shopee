@@ -809,13 +809,19 @@ async def disparar_mensagem(tipo, forcar=False):
         
     hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
     
-    # 🚀 LÓGICA DE TRAVA ABSOLUTA (ANTI-ACIDENTE)
+    # 🚀 LÓGICA DE TRAVA ABSOLUTA E EXPEDIENTE
     if tipo == "bom_dia" and dados_rotina.get("ultimo_bom_dia") == hoje_str:
         if EXIBIR_LOGS: logger.warning("🛑 Bloqueio Anti-Acidente: O 'Bom Dia' já foi enviado hoje.")
         return
     if tipo == "boa_noite" and dados_rotina.get("ultimo_boa_noite") == hoje_str:
         if EXIBIR_LOGS: logger.warning("🛑 Bloqueio Anti-Acidente: O 'Boa Noite' já foi enviado hoje.")
         return
+        
+    # ✅ NOVA TRAVA: Se o Boa Noite já foi acionado (manual ou automático), cancela os disparos das outras rotinas
+    if tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
+        if dados_rotina.get("ultimo_boa_noite") == hoje_str:
+            if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): O expediente já foi encerrado pelo 'Boa Noite'.")
+            return
 
     contexto_afiliado = (
         "Você é um assistente de suporte para afiliados da Shopee. "
@@ -1287,6 +1293,14 @@ def agendar_tarefas_diarias():
         # Se após os empurrões a hora ficar colada no passado, joga alguns minutos para a frente
         if horario_candidato <= agora:
             horario_candidato = agora + timedelta(minutes=random.randint(2, 10))
+            
+        # ✅ NOVA TRAVA ANTI-COLISÃO (Evita duas mensagens serem postadas no mesmo minuto)
+        for job_existente in scheduler.get_jobs():
+            if getattr(job_existente, 'next_run_time', None):
+                tempo_existente = job_existente.next_run_time.astimezone(fuso_horario)
+                # Se cair no mesmo minuto e hora (margem de 2 minutos de diferença)
+                if abs((horario_candidato - tempo_existente).total_seconds()) < 120:
+                    horario_candidato += timedelta(minutes=random.randint(3, 8))
             
         job_id = f"job_rotina_{tipo}_{indice}"
         scheduler.add_job(disparar_mensagem, 'date', run_date=horario_candidato, args=[tipo], id=job_id, replace_existing=True)
