@@ -312,6 +312,15 @@ teclado_opcoes_espiao = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
+teclado_fila_espiao = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Atualizar Fila 🔄")],
+        [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
 # --- SISTEMA DE FILA DE POSTAGENS ASSÍNCRONAS ---
 def ler_fila_postagens():
     try:
@@ -2408,7 +2417,7 @@ async def menu_espiao_principal(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("🕵️ Acessando a página inicial do módulo Espião...")
     await message.answer("🕵️ <b>Painel Principal do Espião</b>\nO que deseja acessar?", reply_markup=teclado_menu_espiao, parse_mode="HTML")
 
-@dp.message(F.text == "Fila do Espião 🕵️‍♂️", StateFilter("*"))
+@dp.message(F.text.in_(["Fila do Espião 🕵️‍♂️", "Atualizar Fila 🔄"]), StateFilter("*"))
 async def relatorio_fila_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
@@ -2463,8 +2472,8 @@ async def relatorio_fila_espiao(message: types.Message, state: FSMContext):
     else:
         texto += "<i>Nenhum dado histórico registrado ainda.</i>"
         
-    if EXIBIR_LOGS: logger.info("📊 Relatório de Fila e Desempenho do Espião gerado com sucesso.")
-    await message.answer(texto, reply_markup=teclado_menu_espiao, parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info("📊 Relatório de Fila e Desempenho do Espião gerado e exibido com sucesso.")
+    await message.answer(texto, reply_markup=teclado_fila_espiao, parse_mode="HTML")
 
 @dp.message(F.text == "Grupos Vigiados 📡")
 async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
