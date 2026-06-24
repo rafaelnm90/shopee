@@ -1349,20 +1349,23 @@ class InatividadeMiddleware(BaseMiddleware):
         if event.from_user and event.from_user.id == ADMIN_ID:
             job_id = f"job_inatividade_{event.from_user.id}"
             
-            # 1. Elimina o cronómetro antigo sempre que digita ou clica num botão novo
-            if scheduler.get_job(job_id):
-                scheduler.remove_job(job_id)
-                
-            # 2. Inicia uma nova contagem limpa de 15 minutos
+            # 1. Inicia uma nova contagem limpa de 15 minutos
             from datetime import datetime, timedelta
             novo_limite = datetime.now(fuso_horario) + timedelta(minutes=15)
-            scheduler.add_job(resetar_sessao_inatividade, 'date', run_date=novo_limite, args=[event.chat.id, event.from_user.id], id=job_id)
             
             # Captura o thread_id para manter a compatibilidade da chave de memória
             thread_id = getattr(event, 'message_thread_id', None)
             if EXIBIR_LOGS: logger.info(f"⏰ Registrando nova contagem de inatividade. Thread ID: {thread_id}")
             
-            scheduler.add_job(resetar_sessao_inatividade, 'date', run_date=novo_limite, args=[event.chat.id, event.from_user.id, thread_id], id=job_id)
+            # 2. Adiciona ou sobrepõe o cronômetro antigo de forma limpa e unificada
+            scheduler.add_job(
+                resetar_sessao_inatividade, 
+                'date', 
+                run_date=novo_limite, 
+                args=[event.chat.id, event.from_user.id, thread_id], 
+                id=job_id,
+                replace_existing=True
+            )
             
         return await handler(event, data)
 
