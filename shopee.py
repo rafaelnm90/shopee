@@ -1317,11 +1317,22 @@ from typing import Callable, Dict, Any, Awaitable
 from aiogram.fsm.storage.base import StorageKey
 
 async def resetar_sessao_inatividade(chat_id: int, user_id: int):
-    if EXIBIR_LOGS: logger.info("⏳ Cronômetro de inatividade zerou. Limpando memória FSM de forma silenciosa e ejetando o usuário para a raiz.")
-    
     # 1. Recupera o estado de navegação atual do utilizador de forma remota
     state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=chat_id, user_id=user_id))
+    estado_atual = await state.get_state()
+    
+    # Trava de inteligência: Se já estiver na raiz (estado vazio), a função morre silenciosamente
+    if not estado_atual:
+        return
+        
+    if EXIBIR_LOGS: logger.info(f"⏳ Cronômetro de inatividade zerou (Tarefa pendente: {estado_atual}). Limpando memória FSM e atualizando a interface minimalista.")
     await state.clear()
+    
+    # 2. Envia recarregamento discreto para forçar a atualização do teclado no Telegram
+    try:
+        await bot.send_message(chat_id, "🔄", reply_markup=obter_teclado_raiz())
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao atualizar o teclado após inatividade: {e}")
 
 class InatividadeMiddleware(BaseMiddleware):
     async def __call__(
