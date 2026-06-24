@@ -284,7 +284,7 @@ def salvar_alvos_espiao(dados):
 
 teclado_menu_espiao = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Grupos Vigiados 📡"), KeyboardButton(text="Fila do Espião 🕵️‍♂️")],
+        [KeyboardButton(text="Grupos Vigiados 📡")],
         [KeyboardButton(text="Disparar Convite Afiliados 🚀"), KeyboardButton(text="Disparar Convite do Grupo 🔗\u200b")],
         [KeyboardButton(text="⚙️ Automações (SPAM e Rotina)\u200b")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
@@ -306,15 +306,6 @@ teclado_opcoes_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Definir Canal de Destino 🎯")],
         [KeyboardButton(text="Adicionar Concorrente ➕"), KeyboardButton(text="Remover Concorrente 🗑️")],
-        [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
-
-teclado_fila_espiao = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Atualizar Fila 🔄")],
         [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
     ],
     resize_keyboard=True,
@@ -2414,66 +2405,35 @@ async def voltar_configs(message: types.Message, state: FSMContext):
 @dp.message(F.text == "Espião Afiliados 🕵️")
 async def menu_espiao_principal(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🕵️ Acessando a página inicial do módulo Espião...")
-    await message.answer("🕵️ <b>Painel Principal do Espião</b>\nO que deseja acessar?", reply_markup=teclado_menu_espiao, parse_mode="HTML")
-
-@dp.message(F.text.in_(["Fila do Espião 🕵️‍♂️", "Atualizar Fila 🔄"]), StateFilter("*"))
-async def relatorio_fila_espiao(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
     await state.clear()
     
-    # 1. Ler Fila Atual e Próximo Processamento
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando consolidação de estatísticas para o painel do Espião...")
+    
+    # 1. Obter quantidade de vídeos pendentes na fila
     fila_data = ler_fila_clonagem()
     fila = fila_data.get("fila", [])
-    
     videos_pendentes = len([item for item in fila if not item.get("processado")])
-    proximo_proc_str = fila_data.get("proximo_processamento", "")
     
-    hora_formatada = "Imediato / Não agendado"
-    if proximo_proc_str:
-        try:
-            from datetime import datetime
-            proximo_proc = datetime.strptime(proximo_proc_str, "%Y-%m-%d %H:%M:%S")
-            hora_formatada = proximo_proc.strftime("%H:%M")
-        except ValueError:
-            pass
-            
-    # 2. Ler Histórico de Capturas
-    import os
-    import json
+    # 2. Obter canais monitorizados e destino do ficheiro de configuração
     try:
-        if os.path.exists("historico_espiao.json"):
-            with open("historico_espiao.json", "r") as f:
-                historico = json.load(f)
-        else:
-            historico = {"total": 0, "grupos": {}}
-    except (FileNotFoundError, json.JSONDecodeError):
-        historico = {"total": 0, "grupos": {}}
+        with open("config_espiao.json", "r") as f:
+            config_espiao = json.load(f)
+    except Exception:
+        config_espiao = {}
         
-    total_clonado = historico.get("total", 0)
-    grupos = historico.get("grupos", {})
+    concorrentes = config_espiao.get("concorrentes", [])
+    qtd_concorrentes = len(concorrentes)
+    canal_destino = config_espiao.get("canal_destino", "Não definido")
     
-    # 3. Montar a Mensagem
-    texto = f"🕵️ <b>Fila e Desempenho do Espião</b>\n\n"
-    texto += f"⏳ <b>Na Fila Agora:</b> {videos_pendentes} vídeos aguardando.\n"
-    texto += f"⏰ <b>Próximo Clone às:</b> {hora_formatada}\n\n"
+    # 3. Construir a mensagem unificada do painel
+    texto = "🕵️ <b>Painel Principal do Espião</b>\n\n"
+    texto += f"📦 <b>Fila de clonagem:</b> {videos_pendentes} vídeos aguardando.\n"
+    texto += f"📡 <b>Radar operacional:</b> {qtd_concorrentes} concorrentes vigiados.\n"
+    texto += f"🎯 <b>Canal de destino:</b> <code>{canal_destino}</code>\n\n"
+    texto += "Escolha uma opção para gerenciar:"
     
-    texto += f"🏆 <b>Ranking Histórico de Capturas</b>\n"
-    texto += f"Total clonado até hoje: <b>{total_clonado} vídeos</b>\n\n"
-    
-    if total_clonado > 0 and grupos:
-        grupos_ordenados = sorted(grupos.items(), key=lambda x: x[1], reverse=True)
-        medalhas = ["🥇", "🥈", "🥉"]
-        
-        for i, (grupo, qtd) in enumerate(grupos_ordenados):
-            porcentagem = (qtd / total_clonado) * 100
-            medalha = medalhas[i] if i < 3 else "🔸"
-            texto += f"{medalha} {grupo}: {qtd} vídeos ({porcentagem:.1f}%)\n"
-    else:
-        texto += "<i>Nenhum dado histórico registrado ainda.</i>"
-        
-    if EXIBIR_LOGS: logger.info("📊 Relatório de Fila e Desempenho do Espião gerado e exibido com sucesso.")
-    await message.answer(texto, reply_markup=teclado_fila_espiao, parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info("✅ Sucesso: Painel unificado do Espião renderizado com logs operacionais.")
+    await message.answer(texto, reply_markup=teclado_menu_espiao, parse_mode="HTML")
 
 @dp.message(F.text == "Grupos Vigiados 📡")
 async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
