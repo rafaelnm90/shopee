@@ -304,8 +304,9 @@ teclado_automacoes_espiao = ReplyKeyboardMarkup(
 
 teclado_opcoes_espiao = ReplyKeyboardMarkup(
     keyboard=[
+        [KeyboardButton(text="Definir Canal de Destino 🎯")],
         [KeyboardButton(text="Adicionar Concorrente ➕"), KeyboardButton(text="Remover Concorrente 🗑️")],
-        [KeyboardButton(text="Definir Canal de Destino 🎯"), KeyboardButton(text="Voltar ao Menu Espião 🔙")]
+        [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
