@@ -1317,22 +1317,11 @@ from typing import Callable, Dict, Any, Awaitable
 from aiogram.fsm.storage.base import StorageKey
 
 async def resetar_sessao_inatividade(chat_id: int, user_id: int):
-    if EXIBIR_LOGS: logger.info("⏳ Cronômetro de inatividade zerou. Limpando memória FSM e ejetando o usuário para a raiz.")
+    if EXIBIR_LOGS: logger.info("⏳ Cronômetro de inatividade zerou. Limpando memória FSM de forma silenciosa e ejetando o usuário para a raiz.")
     
     # 1. Recupera o estado de navegação atual do utilizador de forma remota
     state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=chat_id, user_id=user_id))
     await state.clear()
-    
-    # 2. Avisa e devolve o teclado principal
-    try:
-        texto_aviso = (
-            "⏳ <b>Sessão Expirada por Inatividade</b>\n\n"
-            "O limite de 15 minutos sem interação foi atingido.\n"
-            "Por motivos de segurança e organização, todas as ações que estavam pendentes foram canceladas e o sistema regressou ao <b>Menu Inicial</b>."
-        )
-        await bot.send_message(chat_id, texto_aviso, reply_markup=obter_teclado_raiz(), parse_mode="HTML")
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar aviso de inatividade: {e}")
 
 class InatividadeMiddleware(BaseMiddleware):
     async def __call__(
