@@ -1301,6 +1301,54 @@ def agendar_tarefas_diarias():
                 if EXIBIR_LOGS: logger.info(f"⏳ Alerta Campanha {p.title()} encaixado às: {horario_campanha.strftime('%H:%M:%S')}")
             break
 
+# --- SISTEMA DE SESSÃO E INATIVIDADE ---
+from aiogram import BaseMiddleware
+from typing import Callable, Dict, Any, Awaitable
+from aiogram.fsm.storage.base import StorageKey
+
+async def resetar_sessao_inatividade(chat_id: int, user_id: int):
+    if EXIBIR_LOGS: logger.info("⏳ Cronômetro de inatividade zerou. Limpando memória FSM e ejetando o usuário para a raiz.")
+    
+    # 1. Recupera o estado de navegação atual do utilizador de forma remota
+    state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=chat_id, user_id=user_id))
+    await state.clear()
+    
+    # 2. Avisa e devolve o teclado principal
+    try:
+        texto_aviso = (
+            "⏳ <b>Sessão Expirada por Inatividade</b>\n\n"
+            "O limite de 15 minutos sem interação foi atingido.\n"
+            "Por motivos de segurança e organização, todas as ações que estavam pendentes foram canceladas e o sistema regressou ao <b>Menu Inicial</b>."
+        )
+        await bot.send_message(chat_id, texto_aviso, reply_markup=obter_teclado_raiz(), parse_mode="HTML")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar aviso de inatividade: {e}")
+
+class InatividadeMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[types.Message, Dict[str, Any]], Awaitable[Any]],
+        event: types.Message,
+        data: Dict[str, Any]
+    ) -> Any:
+        # O filtro garante que o cronómetro só é aplicado a si (Administrador)
+        if event.from_user and event.from_user.id == ADMIN_ID:
+            job_id = f"job_inatividade_{event.from_user.id}"
+            
+            # 1. Elimina o cronómetro antigo sempre que digita ou clica num botão novo
+            if scheduler.get_job(job_id):
+                scheduler.remove_job(job_id)
+                
+            # 2. Inicia uma nova contagem limpa de 15 minutos
+            from datetime import datetime, timedelta
+            novo_limite = datetime.now(fuso_horario) + timedelta(minutes=15)
+            scheduler.add_job(resetar_sessao_inatividade, 'date', run_date=novo_limite, args=[event.chat.id, event.from_user.id], id=job_id)
+            
+        return await handler(event, data)
+
+# Acopla o interceptador de inatividade ao núcleo do robô para vigiar todas as mensagens
+dp.message.middleware(InatividadeMiddleware())
+
 # 5. HANDLERS DE COMANDO E INTERAÇÃO
 @dp.message(Command("start"), StateFilter("*"))
 async def comando_start(message: types.Message, state: FSMContext):
