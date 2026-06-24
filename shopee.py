@@ -465,8 +465,6 @@ async def executar_postagem_fila(item_id):
     # 🚀 CORREÇÃO: Trava de segurança baseada nos limites dinâmicos do painel
     dados_rotina = ler_config_rotina()
     hora_abertura_videos = dados_rotina.get("bom_dia", {}).get("fim", 9)
-    hora_fechamento_videos = dados_rotina.get("boa_noite", {}).get("inicio", 21)
-    
     ultimo_bd = dados_rotina.get("ultimo_bom_dia", "")
     ultimo_bn = dados_rotina.get("ultimo_boa_noite", "")
     
@@ -479,9 +477,21 @@ async def executar_postagem_fila(item_id):
         scheduler.add_job(executar_postagem_fila, 'date', run_date=novo_horario, args=[item_id], id=job_id_reagendado, replace_existing=True)
         return
 
-    # Trava Noturna: Impede a postagem se tivermos atingido o Boa Noite ou se ele já foi forçado manualmente
-    if agora.hour >= hora_fechamento_videos or ultimo_bn == hoje_str:
-        if EXIBIR_LOGS: logger.warning(f"🛑 Trava Noturna Ativada: O expediente encerrou. Vídeo retido para amanhã.")
+    # Trava Noturna Dinâmica: Avalia o horário exato do Boa Noite agendado, e não apenas a hora estática
+    job_bn = scheduler.get_job('job_rotina_boa_noite_0')
+    
+    if ultimo_bn == hoje_str:
+        expediente_encerrado = True
+    elif job_bn and getattr(job_bn, 'next_run_time', None):
+        from datetime import timedelta
+        limite_fim_hoje = job_bn.next_run_time.astimezone(fuso_horario) - timedelta(minutes=15)
+        expediente_encerrado = agora >= limite_fim_hoje
+    else:
+        hora_fechamento_videos = dados_rotina.get("boa_noite", {}).get("inicio", 21)
+        expediente_encerrado = agora.hour >= hora_fechamento_videos
+
+    if expediente_encerrado:
+        if EXIBIR_LOGS: logger.warning(f"🛑 Trava Noturna Ativada: O limite dinâmico do expediente encerrou. Vídeo retido para amanhã.")
         return
 
     fila_data = ler_fila_postagens()
