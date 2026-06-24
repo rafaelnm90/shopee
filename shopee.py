@@ -1316,9 +1316,9 @@ from aiogram import BaseMiddleware
 from typing import Callable, Dict, Any, Awaitable
 from aiogram.fsm.storage.base import StorageKey
 
-async def resetar_sessao_inatividade(chat_id: int, user_id: int):
+async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int = None):
     # 1. Recupera o estado de navegação atual do utilizador de forma remota
-    state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=chat_id, user_id=user_id))
+    state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=chat_id, user_id=user_id, thread_id=thread_id))
     estado_atual = await state.get_state()
     
     # Trava de inteligência: Se já estiver na raiz (estado vazio), a função morre silenciosamente
@@ -1328,13 +1328,12 @@ async def resetar_sessao_inatividade(chat_id: int, user_id: int):
     if EXIBIR_LOGS: logger.info(f"⏳ Cronômetro de inatividade zerou (Tarefa pendente: {estado_atual}). Limpando memória FSM e atualizando a interface minimalista.")
     await state.clear()
     
-    # 2. Envia recarregamento discreto, aguarda leitura da interface e apaga a mensagem
+    # 2. Notifica o encerramento para garantir tempo de renderização da interface
     try:
-        msg = await bot.send_message(chat_id, "🔄", reply_markup=obter_teclado_raiz())
-        await asyncio.sleep(1.5)
-        await bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
+        if EXIBIR_LOGS: logger.info("✅ Restaurando o menu principal por inatividade.")
+        await bot.send_message(chat_id, "Sessão expirada por inatividade. Menu principal restaurado.", reply_markup=obter_teclado_raiz())
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao atualizar o teclado silenciosamente: {e}")
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao atualizar o teclado: {e}")
 
 class InatividadeMiddleware(BaseMiddleware):
     async def __call__(
