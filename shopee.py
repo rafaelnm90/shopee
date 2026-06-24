@@ -1328,12 +1328,15 @@ async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int 
     if EXIBIR_LOGS: logger.info(f"⏳ Cronômetro de inatividade zerou (Tarefa pendente: {estado_atual}). Limpando memória FSM e atualizando a interface minimalista.")
     await state.clear()
     
-    # 2. Notifica o encerramento para garantir tempo de renderização da interface
+    # 2. Notifica o encerramento, aguarda renderização e limpa o chat
     try:
-        if EXIBIR_LOGS: logger.info("✅ Restaurando o menu principal por inatividade.")
-        await bot.send_message(chat_id, "Sessão expirada por inatividade. Menu principal restaurado.", reply_markup=obter_teclado_raiz())
+        if EXIBIR_LOGS: logger.info("✅ Restaurando o menu principal por inatividade e efetuando limpeza...")
+        msg = await bot.send_message(chat_id, "Sessão expirada por inatividade. Menu principal restaurado.", reply_markup=obter_teclado_raiz())
+        await asyncio.sleep(1.5)
+        await bot.delete_message(chat_id=chat_id, message_id=msg.message_id)
+        if EXIBIR_LOGS: logger.info("🧹 Mensagem de inatividade apagada com sucesso.")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao atualizar o teclado: {e}")
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao atualizar o teclado e limpar chat: {e}")
 
 class InatividadeMiddleware(BaseMiddleware):
     async def __call__(
@@ -1354,6 +1357,12 @@ class InatividadeMiddleware(BaseMiddleware):
             from datetime import datetime, timedelta
             novo_limite = datetime.now(fuso_horario) + timedelta(minutes=15)
             scheduler.add_job(resetar_sessao_inatividade, 'date', run_date=novo_limite, args=[event.chat.id, event.from_user.id], id=job_id)
+            
+            # Captura o thread_id para manter a compatibilidade da chave de memória
+            thread_id = getattr(event, 'message_thread_id', None)
+            if EXIBIR_LOGS: logger.info(f"⏰ Registrando nova contagem de inatividade. Thread ID: {thread_id}")
+            
+            scheduler.add_job(resetar_sessao_inatividade, 'date', run_date=novo_limite, args=[event.chat.id, event.from_user.id, thread_id], id=job_id)
             
         return await handler(event, data)
 
