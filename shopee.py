@@ -498,13 +498,19 @@ async def executar_postagem_fila(item_id):
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
     
-    # Leitura estrita com base no índice atualizado, ignorando os já postados
-    item = next((x for x in fila if (x.get("data_adicao") <= hoje_str or x.get("data_adicao") == "2000-01-01") and not x.get("postado")), None)
+    if EXIBIR_LOGS: logger.info(f"🔎 Buscando o vídeo exato na fila pelo ID: {item_id}...")
+    
+    # Leitura estrita com base no ID exato passado pelo agendador
+    item = next((x for x in fila if x.get("id") == item_id and not x.get("postado")), None)
     
     if not item:
-        if EXIBIR_LOGS: logger.warning("⚠️ Nenhum vídeo elegível encontrado na fila para extração.")
-        return
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Vídeo alvo ({item_id}) não encontrado. Acionando busca de segurança (fallback)...")
+        item = next((x for x in fila if (x.get("data_adicao") <= hoje_str or x.get("data_adicao") == "2000-01-01") and not x.get("postado")), None)
         
+        if not item:
+            if EXIBIR_LOGS: logger.warning("❌ Nenhum vídeo elegível encontrado na fila para extração.")
+            return
+            
     item_id_real = item["id"]
     caminho_video = item.get("caminho_video")
     video_id = item.get("video_id")
@@ -915,12 +921,16 @@ async def disparar_mensagem(tipo, forcar=False):
     if tipo == "bom_dia":
         dados_rot_atualizados["ultimo_bom_dia"] = hoje_str
         dados_rot_atualizados["hora_ultimo_bom_dia"] = hora_exata_disparo
-        recalcular_fila = True
+        # Desativa o recálculo forçado para preservar a grade da madrugada
+        recalcular_fila = False 
+        if EXIBIR_LOGS: logger.info("🛠️ Correção aplicada: Gatilho de recálculo da fila neutralizado no 'Bom Dia'.")
         if EXIBIR_LOGS: logger.info(f"✅ Bandeira de 'Bom Dia' registada às {hora_exata_disparo}. Fila de vídeos liberada para hoje.")
     elif tipo == "boa_noite":
         dados_rot_atualizados["ultimo_boa_noite"] = hoje_str
         dados_rot_atualizados["hora_ultimo_boa_noite"] = hora_exata_disparo
-        recalcular_fila = True
+        # Desativa o recálculo forçado no Boa Noite para manter a integridade da agenda
+        recalcular_fila = False 
+        if EXIBIR_LOGS: logger.info("🛠️ Correção aplicada: Gatilho de recálculo da fila neutralizado no 'Boa Noite'.")
         if EXIBIR_LOGS: logger.info(f"✅ Bandeira de 'Boa Noite' registada às {hora_exata_disparo}. Fila de vídeos suspensa até amanhã.")
         
     # Registra o disparo no histórico diário para evitar sobrecarga em caso de reinício do servidor
