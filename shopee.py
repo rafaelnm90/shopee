@@ -1334,13 +1334,15 @@ async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int 
     # 1. Recupera o estado de navegação atual do utilizador de forma remota
     state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=chat_id, user_id=user_id, thread_id=thread_id))
     estado_atual = await state.get_state()
+    data = await state.get_data()
     
-    # Trava de inteligência: Se já estiver na raiz (estado vazio), a função morre silenciosamente
-    if not estado_atual:
+    # Trava de inteligência: Se já estiver na raiz (estado vazio E flag confirmada), a função morre silenciosamente
+    if not estado_atual and data.get("painel_atual") == "raiz":
         return
         
     if EXIBIR_LOGS: logger.info(f"⏳ Cronômetro de inatividade zerou (Tarefa pendente: {estado_atual}). Limpando memória FSM e atualizando a interface minimalista.")
     await state.clear()
+    await state.update_data(painel_atual="raiz")
     
     # 2. Notifica o encerramento, aguarda renderização e limpa o chat
     try:
@@ -1397,6 +1399,7 @@ dp.message.middleware(InatividadeMiddleware())
 async def comando_start(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
+    await state.update_data(painel_atual="raiz")
     if EXIBIR_LOGS: logger.info("⌨️ Iniciando o bot no Menu Raiz.")
     await message.answer("🏠 Painel de Controle Inicial. Escolha uma área para gerenciar:", reply_markup=obter_teclado_raiz())
 
@@ -1509,27 +1512,21 @@ def salvar_historico_financeiro(dados):
 @dp.message(F.text == "Relatório Financeiro 💰", StateFilter("*"))
 async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    msg_status = await message.answer("💰 Sincronizando API Financeira com a Shopee (Últimos 14 dias)... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando extração financeira e processamento da projeção preditiva baseada em calendário...")
+    msg_status = await message.answer("💰 Sincronizando API Financeira com a Shopee (Varredura de 30 dias)... Aguarde ⏳")
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando extração profunda e atualização estrutural do banco de dados...")
     
-    conversoes = await buscar_dados_financeiros_shopee(15)
+    conversoes = await buscar_dados_financeiros_shopee(30)
     
     total_pedidos = len(conversoes) if conversoes else 0
     pagos, pendentes, cancelados = 0, 0, 0
-    comissao_shopee, comissao_vendedor, comissao_aprovada = 0.0, 0.0, 0.0
-    comissao_pendente = 0.0
-    
     hoje = datetime.now(fuso_horario)
     
-    # 🎯 Ajuste: Criar listas de datas com formatação ano-mês-dia para o banco de dados
-    dias_validos_obj = [hoje - timedelta(days=i) for i in range(1, 15)]
-    diario_total_db = { d.strftime("%Y-%m-%d"): 0.0 for d in dias_validos_obj }
+    diario_api = {}
     
     if conversoes:
         for conv in conversoes:
             orders = conv.get("orders", [])
-            if not orders:
-                continue
+            if not orders: continue
 
             c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
             c_extra = float(conv.get("sellerCommission", "0"))
@@ -1537,7 +1534,8 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             dt_obj = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=fuso_horario)
             dt_db_str = dt_obj.strftime("%Y-%m-%d")
             
-            na_janela_diaria = dt_db_str in diario_total_db
+            if dt_db_str not in diario_api:
+                diario_api[dt_db_str] = {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0}
             
             tem_aprovado = False
             tem_pendente = False
@@ -1554,49 +1552,81 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
                     tem_pendente = True
             
             if tem_aprovado:
-                comissao_shopee += c_shopee
-                comissao_vendedor += c_extra
-                comissao_aprovada += c_total
-                if na_janela_diaria: diario_total_db[dt_db_str] += c_total
+                diario_api[dt_db_str]["aprovado"] += c_total
+                diario_api[dt_db_str]["shopee"] += c_shopee
+                diario_api[dt_db_str]["vendedor"] += c_extra
             elif tem_pendente:
-                comissao_pendente += c_total
-                if na_janela_diaria: diario_total_db[dt_db_str] += c_total
-                
+                diario_api[dt_db_str]["pendente"] += c_total
+    
     taxa_conversao = (pagos / total_pedidos * 100) if total_pedidos > 0 else 0.0
-    comissao_total_estimada = comissao_aprovada + comissao_pendente
     
-    melhor_dia_str = max(diario_total_db, key=diario_total_db.get) if diario_total_db else "N/A"
-    melhor_valor = diario_total_db[melhor_dia_str] if diario_total_db else 0.0
-    melhor_dia_br = datetime.strptime(melhor_dia_str, "%Y-%m-%d").strftime("%d/%m") if melhor_dia_str != "N/A" else "N/A"
-                
-    def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    
-    # 🧠 INTEGRAÇÃO DO BANCO DE DADOS E ESTUDO ANALÍTICO BASEADO EM CALENDÁRIO
-    if EXIBIR_LOGS: logger.info("💾 Atualizando o banco de dados histórico local (historico_financeiro.json)...")
+    if EXIBIR_LOGS: logger.info("💾 Atualizando o banco de dados histórico local (formato 3D)...")
     historico = ler_historico_financeiro()
     
-    # Limpeza de segurança: Retém apenas os últimos 120 dias
-    limite_120d = (hoje - timedelta(days=120)).strftime("%Y-%m-%d")
-    historico_limpo = {k: v for k, v in historico.items() if k >= limite_120d}
+    # Limpeza absoluta por mês civil (Retém estritamente o mês atual e os 3 anteriores)
+    historico_limpo = {}
     
-    # Insere os dados consolidados da varredura atual (sobrescrevendo atualizações de status da Shopee)
-    for d_str, v_total in diario_total_db.items():
-        historico_limpo[d_str] = v_total
+    # Migração e filtragem baseada no calendário real
+    for k, v in historico.items():
+        try:
+            dt_obj = datetime.strptime(k, "%Y-%m-%d")
+            dif_meses = (hoje.year - dt_obj.year) * 12 + (hoje.month - dt_obj.month)
+            
+            # Se a diferença de meses for entre 0 (atual) e 3, mantém no banco de dados
+            if 0 <= dif_meses <= 3:
+                # Garante que dados velhos no formato float sejam convertidos para dicionário
+                if isinstance(v, float) or isinstance(v, int):
+                    historico_limpo[k] = {"aprovado": float(v), "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0}
+                else:
+                    historico_limpo[k] = v
+        except ValueError:
+            pass # Proteção: ignora silenciosamente dados com formato de data inválido
+                
+    # Mescla dados da API (30 dias)
+    ontem_str = (hoje - timedelta(days=1)).strftime("%Y-%m-%d")
+    
+    for i in range(30):
+        d_str = (hoje - timedelta(days=i)).strftime("%Y-%m-%d")
+        v_api = diario_api.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0})
+        v_total_api = v_api["aprovado"] + v_api["pendente"]
         
+        v_antigo = historico_limpo.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0})
+        v_total_antigo = v_antigo["aprovado"] + v_antigo["pendente"]
+        
+        if v_total_api > 0:
+            historico_limpo[d_str] = v_api
+        else:
+            if d_str == hoje.strftime("%Y-%m-%d") or d_str == ontem_str:
+                pass # Período de carência
+            elif d_str not in historico_limpo:
+                historico_limpo[d_str] = {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0}
+                
     salvar_historico_financeiro(historico_limpo)
-    if EXIBIR_LOGS: logger.info(f"✅ Histórico salvo! Total de dias arquivados: {len(historico_limpo)}.")
     
-    # Cálculo das médias por mês calendário
-    if EXIBIR_LOGS: logger.info("🧮 Executando algoritmo de ponderação por mês calendário...")
+    import locale
+    try:
+        locale.setlocale(locale.LC_TIME, 'pt_BR.utf8')
+    except:
+        pass
+        
+    # --- CÁLCULOS DO MÊS ATUAL ---
+    mes_atual = hoje.strftime("%Y-%m")
+    aprovado_mes = sum(v["aprovado"] for k, v in historico_limpo.items() if k.startswith(mes_atual))
+    pendente_mes = sum(v["pendente"] for k, v in historico_limpo.items() if k.startswith(mes_atual))
+    shopee_mes = sum(v["shopee"] for k, v in historico_limpo.items() if k.startswith(mes_atual))
+    vendedor_mes = sum(v["vendedor"] for k, v in historico_limpo.items() if k.startswith(mes_atual))
+    total_mes = aprovado_mes + pendente_mes
+    
+    # --- CÁLCULO PONDERADO (IA) ---
     meses_soma = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0}
     meses_dias = {0: 0, 1: 0, 2: 0, 3: 0}
     
-    for data_str, valor in historico_limpo.items():
+    for data_str, dados_dia in historico_limpo.items():
         dt_obj = datetime.strptime(data_str, "%Y-%m-%d")
         dif_meses = (hoje.year - dt_obj.year) * 12 + (hoje.month - dt_obj.month)
         
         if 0 <= dif_meses <= 3:
-            meses_soma[dif_meses] += valor
+            meses_soma[dif_meses] += (dados_dia["aprovado"] + dados_dia["pendente"])
             meses_dias[dif_meses] += 1
             
     pesos_originais = {0: 40, 1: 30, 2: 20, 3: 10}
@@ -1611,38 +1641,51 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
                 media_ponderada_diaria += media_mes * peso_ajustado
                 
     projecao_mensal = media_ponderada_diaria * 30
-    ticket_medio_comissao = (comissao_total_estimada / total_pedidos) if total_pedidos > 0 else 0.0
-    if EXIBIR_LOGS: logger.info(f"🔮 Projeção calculada: Média ponderada diária de R$ {f_br(media_ponderada_diaria)}. Estimativa de 30 dias: R$ {f_br(projecao_mensal)}.")
+    
+    def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    
+    nome_mes = hoje.strftime('%B').title() if not hoje.strftime('%B').isdigit() else "Atual"
     
     texto = (
-        "💰 <b>BALANÇO FINANCEIRO (14 Dias Consolidados)</b>\n\n"
-        f"• Comissão Aprovada: <b>R$ {f_br(comissao_aprovada)}</b>\n"
-        f"  └ <i>Comissão Shopee: R$ {f_br(comissao_shopee)} | Comissão Vendedor: R$ {f_br(comissao_vendedor)}</i>\n"
-        f"• Comissão Pendente: <b>R$ {f_br(comissao_pendente)}</b>\n"
-        f"• Total Previsto: <b>R$ {f_br(comissao_total_estimada)}</b>\n\n"
+        f"📅 <b>BALANÇO DO MÊS {nome_mes.upper()}</b>\n\n"
+        f"• Comissão Aprovada: <b>R$ {f_br(aprovado_mes)}</b>\n"
+        f"  └ <i>Shopee: R$ {f_br(shopee_mes)} | Vendedor: R$ {f_br(vendedor_mes)}</i>\n"
+        f"• Comissão Pendente: <b>R$ {f_br(pendente_mes)}</b>\n"
+        f"• Total do Mês: <b>R$ {f_br(total_mes)}</b>\n\n"
         
-        "📊 <b>MÉTRICAS ESTRATÉGICAS</b>\n"
+        "📊 <b>MÉTRICAS DA VARREDURA (Últimos 30 Dias)</b>\n"
         f"• Taxa de Conversão: <b>{taxa_conversao:.1f}%</b>\n"
         f"• Pedidos: {pagos} Pagos | {pendentes} Pendentes | {cancelados} Cancelados\n\n"
         
-        "🧠 <b>ESTUDO ANALÍTICO (IA)</b>\n"
+        "🧠 <b>ESTUDO ANALÍTICO PONDERADO</b>\n"
         f"• Base de Análise: <b>{len(historico_limpo)} dias armazenados</b>\n"
-        f"• Ticket Médio de Comissão: <b>R$ {f_br(ticket_medio_comissao)}</b> por conversão\n"
         f"• Ritmo Diário Ponderado: <b>R$ {f_br(media_ponderada_diaria)}</b> / dia\n"
         f"• Projeção do Mês (30d): <b>R$ {f_br(projecao_mensal)}</b>\n\n"
         
-        "📈 <b>DESEMPENHO DIÁRIO</b>\n"
+        "📈 <b>DESEMPENHO DIÁRIO (Últimos 14 Dias)</b>\n"
     )
     
+    # Encontrar melhor dia nos últimos 14 para o display visual
+    dias_exibicao = [(hoje - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(1, 15)]
+    melhor_dia_str = "N/A"
+    melhor_valor = 0.0
+    
+    for d in dias_exibicao:
+        if d in historico_limpo:
+            v_tot = historico_limpo[d]["aprovado"] + historico_limpo[d]["pendente"]
+            if v_tot > melhor_valor:
+                melhor_valor = v_tot
+                melhor_dia_str = d
+    
     if melhor_valor > 0:
+        melhor_dia_br = datetime.strptime(melhor_dia_str, "%Y-%m-%d").strftime("%d/%m")
         texto += f"🔥 <b>Melhor Dia:</b> {melhor_dia_br} (R$ {f_br(melhor_valor)})\n\n"
     
-    # Converte de volta para string DD/MM apenas para renderizar o relatório visualmente
-    for d_obj in dias_validos_obj:
-        d_str_db = d_obj.strftime("%Y-%m-%d")
-        d_str_br = d_obj.strftime("%d/%m")
-        valor_dia = diario_total_db.get(d_str_db, 0.0)
-        texto += f"• {d_str_br}: R$ {f_br(valor_dia)}\n"
+    for d_str in dias_exibicao:
+        d_br = datetime.strptime(d_str, "%Y-%m-%d").strftime("%d/%m")
+        dados_dia = historico_limpo.get(d_str, {"aprovado": 0.0, "pendente": 0.0})
+        v_tot = dados_dia["aprovado"] + dados_dia["pendente"]
+        texto += f"• {d_br}: R$ {f_br(v_tot)}\n"
             
     await msg_status.delete()
     await message.answer(texto, parse_mode="HTML")
@@ -2473,6 +2516,7 @@ async def menu_outros_canais(message: types.Message, state: FSMContext):
 async def voltar_inicio(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
+    await state.update_data(painel_atual="raiz")
     await message.answer("🏠 Voltando ao Painel Inicial.", reply_markup=obter_teclado_raiz())
 
 @dp.message(F.text == "Voltar aos Canais 🔙", StateFilter("*"))
@@ -4740,6 +4784,91 @@ async def processar_fila_espiao():
     except:
         pass
 
+async def sincronizar_financeiro_horario():
+    if EXIBIR_LOGS: logger.info("⏰ [Financeiro] Iniciando varredura horária de pendências na API da Shopee...")
+    
+    historico = ler_historico_financeiro()
+    agora = datetime.now(fuso_horario)
+    
+    ontem_str = (agora - timedelta(days=1)).strftime("%Y-%m-%d")
+    anteontem_str = (agora - timedelta(days=2)).strftime("%Y-%m-%d")
+    
+    precisa_verificar = False
+    
+    # Compatibilidade com o novo dicionário 3D
+    dados_ontem = historico.get(ontem_str)
+    dados_anteontem = historico.get(anteontem_str)
+    
+    if not dados_ontem or (isinstance(dados_ontem, dict) and dados_ontem["aprovado"] + dados_ontem["pendente"] == 0.0):
+        precisa_verificar = True
+    if not dados_anteontem:
+        precisa_verificar = True
+        
+    if not precisa_verificar:
+        if EXIBIR_LOGS: logger.info("✅ [Financeiro] Dados recentes já consolidados. Varredura suspensa.")
+        return
+        
+    if EXIBIR_LOGS: logger.info("🔍 [Financeiro] Valores pendentes detectados. Consultando a API...")
+    conversoes = await buscar_dados_financeiros_shopee(3)
+    
+    if not conversoes:
+        return
+        
+    diario_api = {
+        ontem_str: {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0},
+        anteontem_str: {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0}
+    }
+    
+    for conv in conversoes:
+        orders = conv.get("orders", [])
+        if not orders: continue
+        
+        c_total = float(conv.get("totalCommission", "0"))
+        c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
+        c_extra = float(conv.get("sellerCommission", "0"))
+        dt_obj = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=fuso_horario)
+        dt_db_str = dt_obj.strftime("%Y-%m-%d")
+        
+        if dt_db_str in diario_api:
+            tem_aprovado = False
+            tem_pendente = False
+            for order in orders:
+                status = order.get("orderStatus", "")
+                if status == "COMPLETED": tem_aprovado = True
+                elif status == "PENDING": tem_pendente = True
+            
+            if tem_aprovado:
+                diario_api[dt_db_str]["aprovado"] += c_total
+                diario_api[dt_db_str]["shopee"] += c_shopee
+                diario_api[dt_db_str]["vendedor"] += c_extra
+            elif tem_pendente:
+                diario_api[dt_db_str]["pendente"] += c_total
+                
+    houve_atualizacao = False
+    
+    for d_str in [ontem_str, anteontem_str]:
+        v_api = diario_api[d_str]
+        v_total_api = v_api["aprovado"] + v_api["pendente"]
+        
+        v_antigo = historico.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0})
+        if isinstance(v_antigo, float): v_antigo = {"aprovado": v_antigo, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0}
+        v_total_antigo = v_antigo["aprovado"] + v_antigo["pendente"]
+        
+        if v_total_api > 0 and v_total_api > v_total_antigo:
+            historico[d_str] = v_api
+            houve_atualizacao = True
+            if EXIBIR_LOGS: logger.info(f"🔓 [Financeiro] Trancamento Positivo! O dia {d_str} saiu do zero para R$ {v_total_api:.2f}.")
+        elif d_str == anteontem_str and not historico.get(d_str):
+            historico[d_str] = {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0}
+            houve_atualizacao = True
+            if EXIBIR_LOGS: logger.info(f"🔒 [Financeiro] Trancamento por Tempo Limite! O dia {d_str} foi consolidado definitivamente como R$ 0.00.")
+        
+    if houve_atualizacao:
+        salvar_historico_financeiro(historico)
+        
+    if houve_atualizacao:
+        salvar_historico_financeiro(historico)
+
 async def main():
     # Agendador mestre que roda todo dia às 00:01
     scheduler.add_job(agendar_tarefas_diarias, 'cron', hour=0, minute=1, timezone=FUSO_STR)
@@ -4756,6 +4885,9 @@ async def main():
     
     # ✅ Verificador do Espião: O motor verifica a fila a cada 1 minuto (a cadência aleatória é gerida internamente)
     scheduler.add_job(processar_fila_espiao, 'interval', minutes=1, timezone=FUSO_STR)
+
+    # ✅ Novo: Sincronização financeira horária para resgatar dados em atraso da Shopee
+    scheduler.add_job(sincronizar_financeiro_horario, 'cron', minute=0, timezone=FUSO_STR)
     
     # Roda o agendador imediatamente ao ligar o bot para garantir o dia atual
     agendar_tarefas_diarias()
