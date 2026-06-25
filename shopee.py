@@ -1499,18 +1499,24 @@ async def menu_relatorio_geral(message: types.Message, state: FSMContext):
 async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     msg_status = await message.answer("💰 Sincronizando API Financeira com a Shopee (Últimos 14 dias)... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando extração financeira restrita a 14 dias (incluindo métricas pendentes)...")
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando extração financeira com D-1 consolidado e cálculos de projeção mensal...")
     
-    conversoes = await buscar_dados_financeiros_shopee(14)
+    # Busca 15 dias na API para garantir que teremos 14 dias consolidados completos (excluindo hoje)
+    conversoes = await buscar_dados_financeiros_shopee(15)
     
     total_pedidos = len(conversoes) if conversoes else 0
     pagos, pendentes, cancelados = 0, 0, 0
-    comissao_shopee, comissao_extra, comissao_total = 0.0, 0.0, 0.0
+    comissao_shopee, comissao_extra, comissao_aprovada = 0.0, 0.0, 0.0
     comissao_pendente = 0.0
     dinheiro_na_mesa = 0.0
     
     hoje = datetime.now(fuso_horario)
-    diario = { (hoje - timedelta(days=i)).strftime("%d/%m"): 0.0 for i in range(14) }
+    
+    # 🎯 Ajuste: Começa do dia 1 (Ontem) até o dia 14, ignorando o "Hoje" devido ao delay da API Shopee
+    dias_validos = [(hoje - timedelta(days=i)).strftime("%d/%m") for i in range(1, 15)]
+    
+    diario_aprovado = { d: 0.0 for d in dias_validos }
+    diario_pendente = { d: 0.0 for d in dias_validos }
     
     if conversoes:
         for conv in conversoes:
@@ -1524,69 +1530,86 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             c_total = float(conv.get("totalCommission", "0"))
             dt_compra = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=fuso_horario).strftime("%d/%m")
             
-            pedido_valido = False
-            pedido_cancelado = False
-            pedido_pendente = False
+            na_janela_diaria = dt_compra in dias_validos
+            
+            tem_aprovado = False
+            tem_pendente = False
+            tem_cancelado = False
             
             for order in orders:
                 status = order.get("orderStatus", "")
                 
                 if status == "COMPLETED":
                     pagos += 1
-                    pedido_valido = True
+                    tem_aprovado = True
                 elif status == "CANCELLED":
                     cancelados += 1
-                    pedido_cancelado = True
+                    tem_cancelado = True
                 else:
                     pendentes += 1
-                    pedido_pendente = True
+                    tem_pendente = True
             
-            if pedido_valido:
+            if tem_aprovado:
                 comissao_shopee += c_shopee
                 comissao_extra += c_extra
-                comissao_total += c_total
-                if dt_compra in diario:
-                    diario[dt_compra] += c_total
-            elif pedido_pendente:
+                comissao_aprovada += c_total
+                if na_janela_diaria: diario_aprovado[dt_compra] += c_total
+            elif tem_pendente:
                 comissao_pendente += c_total
-                if dt_compra in diario:
-                    diario[dt_compra] += c_total
-                    
-            if pedido_cancelado:
+                if na_janela_diaria: diario_pendente[dt_compra] += c_total
+            elif tem_cancelado:
                 dinheiro_na_mesa += c_total
                 
     taxa_conversao = (pagos / total_pedidos * 100) if total_pedidos > 0 else 0.0
+    taxa_perda = (cancelados / (pagos + cancelados) * 100) if (pagos + cancelados) > 0 else 0.0
     
-    melhor_dia = max(diario, key=diario.get) if diario else "N/A"
-    melhor_valor = diario[melhor_dia] if diario else 0.0
+    # 🧠 INTELIGÊNCIA E MÉTRICAS EXTRAS
+    comissao_total_estimada = comissao_aprovada + comissao_pendente
+    ticket_medio_comissao = (comissao_total_estimada / total_pedidos) if total_pedidos > 0 else 0.0
+    media_diaria = comissao_total_estimada / 14
+    projecao_mensal = media_diaria * 30
+    
+    diario_total = { d: diario_aprovado[d] + diario_pendente[d] for d in dias_validos }
+    melhor_dia = max(diario_total, key=diario_total.get) if diario_total else "N/A"
+    melhor_valor = diario_total[melhor_dia] if diario_total else 0.0
                 
     def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
-    if EXIBIR_LOGS: logger.info(f"✅ Consolidação de comissões finalizada. Aprovado: R$ {f_br(comissao_total)} | Pendente: R$ {f_br(comissao_pendente)}")
+    if EXIBIR_LOGS: logger.info(f"📊 Relatório processado. Aprovado: R$ {f_br(comissao_aprovada)} | Pendente: R$ {f_br(comissao_pendente)} | Média: R$ {f_br(media_diaria)}/dia.")
     
     texto = (
-        "💰 <b>BALANÇO FINANCEIRO (Últimos 14 Dias)</b>\n\n"
-        f"• Sua Comissão (Aprovada): <b>R$ {f_br(comissao_total)}</b>\n"
+        "💰 <b>BALANÇO FINANCEIRO (14 Dias Consolidados)</b>\n\n"
+        f"• Comissão Aprovada: <b>R$ {f_br(comissao_aprovada)}</b>\n"
         f"  └ <i>Shopee: R$ {f_br(comissao_shopee)} | AMS: R$ {f_br(comissao_extra)}</i>\n"
-        f"• Sua Comissão (Pendente): <b>R$ {f_br(comissao_pendente)}</b>\n\n"
+        f"• Comissão Pendente: <b>R$ {f_br(comissao_pendente)}</b>\n"
+        f"• Total Previsto: <b>R$ {f_br(comissao_total_estimada)}</b>\n\n"
+        
         "📊 <b>MÉTRICAS ESTRATÉGICAS</b>\n"
-        f"• Cliques Convertidos: <b>{total_pedidos}</b>\n"
-        f"• Vendas Concluídas (Itens): <b>{pagos}</b>\n"
-        f"• Vendas Pendentes (Itens): <b>{pendentes}</b>\n"
-        f"• Taxa de Conversão: <b>{taxa_conversao:.1f}%</b> (Vendas vs Cliques)\n"
-        f"• Dinheiro na Mesa: <b>R$ {f_br(dinheiro_na_mesa)}</b> em comissões perdidas\n\n"
+        f"• Taxa de Conversão: <b>{taxa_conversao:.1f}%</b>\n"
+        f"• Pedidos: {pagos} Pagos | {pendentes} Pendentes | {cancelados} Cancelados\n"
+        f"• Dinheiro na Mesa: <b>R$ {f_br(dinheiro_na_mesa)}</b> ({taxa_perda:.1f}% de perdas)\n\n"
+        
+        "🧠 <b>ESTUDO ANALÍTICO (IA)</b>\n"
+        f"• Ticket Médio de Comissão: <b>R$ {f_br(ticket_medio_comissao)}</b> por clique convertido\n"
+        f"• Média Diária Consolidada: <b>R$ {f_br(media_diaria)}</b> / dia\n"
+        f"• Projeção de Fechamento (30d): <b>R$ {f_br(projecao_mensal)}</b>\n\n"
+        
         "📈 <b>DESEMPENHO DIÁRIO</b>\n"
     )
     
     if melhor_valor > 0:
-        texto += f"🔥 <b>Melhor Dia:</b> {melhor_dia} (R$ {f_br(melhor_valor)} de comissão)\n\n"
+        texto += f"🔥 <b>Melhor Dia:</b> {melhor_dia} (R$ {f_br(melhor_valor)})\n\n"
     
-    for i in range(14):
-        dt_chave = (hoje - timedelta(days=i)).strftime("%d/%m")
-        valor = diario.get(dt_chave, 0.0)
-        marc = " (Hoje)" if i == 0 else ""
-        texto += f"• {dt_chave}{marc}: R$ {f_br(valor)}\n"
+    for dt_chave in dias_validos:
+        v_aprovado = diario_aprovado.get(dt_chave, 0.0)
+        v_pendente = diario_pendente.get(dt_chave, 0.0)
+        v_total = v_aprovado + v_pendente
         
+        if v_total > 0:
+            texto += f"• {dt_chave}: R$ {f_br(v_total)} <i>(Aprov: {f_br(v_aprovado)} | Pend: {f_br(v_pendente)})</i>\n"
+        else:
+            texto += f"• {dt_chave}: R$ 0,00\n"
+            
     await msg_status.delete()
     await message.answer(texto, parse_mode="HTML")
 
