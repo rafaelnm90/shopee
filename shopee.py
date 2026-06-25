@@ -1431,6 +1431,7 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
                     shopeeCommissionCapped
                     sellerCommission
                     totalCommission
+                    gmv
                     orders {
                         orderStatus
                     }
@@ -1485,7 +1486,7 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
 
 def obter_teclado_relatorios():
     botoes = [
-        [KeyboardButton(text="Relatório Financeiro 💰")],
+        [KeyboardButton(text="Relatório Financeiro 💰"), KeyboardButton(text="Diagnóstico de IA 🧠")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -1500,13 +1501,15 @@ async def menu_relatorio_geral(message: types.Message, state: FSMContext):
 async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     msg_status = await message.answer("💰 Sincronizando API Financeira com a Shopee (Últimos 14 dias)... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando extração financeira restrita a 14 dias e filtrando apenas aprovados...")
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando extração financeira restrita a 14 dias e filtrando métricas avançadas...")
     
     conversoes = await buscar_dados_financeiros_shopee(14)
     
     total_pedidos = len(conversoes) if conversoes else 0
     pagos, pendentes, cancelados = 0, 0, 0
-    comissao_shopee, comissao_extra, faturamento_total = 0.0, 0.0, 0.0
+    comissao_shopee, comissao_extra, comissao_total = 0.0, 0.0, 0.0
+    gmv_total = 0.0
+    dinheiro_na_mesa = 0.0
     
     hoje = datetime.now(fuso_horario)
     diario = { (hoje - timedelta(days=i)).strftime("%d/%m"): 0.0 for i in range(14) }
@@ -1515,18 +1518,18 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         for conv in conversoes:
             orders = conv.get("orders", [])
             
-            # Se não houver itens na lista "orders" associados a essa conversão, passa para o próximo
             if not orders:
                 continue
 
-            # Extração dos dados
+            # Extração dos dados brutos
             c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
             c_extra = float(conv.get("sellerCommission", "0"))
             c_total = float(conv.get("totalCommission", "0"))
+            v_gmv = float(conv.get("gmv", "0"))  # O valor real gasto pelo cliente
             dt_compra = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=fuso_horario).strftime("%d/%m")
             
-            # Variáveis para a validação do status "COMPLETED"
             pedido_valido = False
+            pedido_cancelado = False
             
             for order in orders:
                 status = order.get("orderStatus", "")
@@ -1536,28 +1539,47 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
                     pedido_valido = True
                 elif status == "CANCELLED":
                     cancelados += 1
+                    pedido_cancelado = True
                 else:
                     pendentes += 1
             
-            # Apenas soma os valores diários se o pedido estiver confirmado
             if pedido_valido:
                 comissao_shopee += c_shopee
                 comissao_extra += c_extra
-                faturamento_total += c_total
+                comissao_total += c_total
+                gmv_total += v_gmv
                 if dt_compra in diario:
                     diario[dt_compra] += c_total
+                    
+            if pedido_cancelado:
+                dinheiro_na_mesa += c_total
+                
+    # Motor de cálculos estratégicos
+    taxa_conversao = (pagos / total_pedidos * 100) if total_pedidos > 0 else 0.0
+    ticket_medio = (gmv_total / pagos) if pagos > 0 else 0.0
+    yield_medio = (comissao_total / gmv_total * 100) if gmv_total > 0 else 0.0
+    
+    melhor_dia = max(diario, key=diario.get) if diario else "N/A"
+    melhor_valor = diario[melhor_dia] if diario else 0.0
                 
     def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
     texto = (
         "💰 <b>BALANÇO FINANCEIRO (Últimos 14 Dias)</b>\n\n"
-        f"• Total de Cliques/Pedidos: <b>{total_pedidos}</b>\n"
-        f"• Conversões: {pagos} Pagos | {pendentes} Pendentes | {cancelados} Cancelados\n"
-        f"• Comissão Shopee: R$ {f_br(comissao_shopee)}\n"
-        f"• Comissão Extra (AMS): R$ {f_br(comissao_extra)}\n"
-        f"• Faturamento Bruto (Aprovado): <b>R$ {f_br(faturamento_total)}</b>\n\n"
-        "📈 <b>DESEMPENHO DIÁRIO (14 Dias)</b>\n"
+        f"• Vendas Brutas (GMV): <b>R$ {f_br(gmv_total)}</b>\n"
+        f"• Sua Comissão (Aprovada): <b>R$ {f_br(comissao_total)}</b>\n"
+        f"  └ <i>Shopee: R$ {f_br(comissao_shopee)} | AMS: R$ {f_br(comissao_extra)}</i>\n\n"
+        "📊 <b>MÉTRICAS ESTRATÉGICAS</b>\n"
+        f"• Pedidos Gerados: <b>{total_pedidos}</b>\n"
+        f"• Taxa de Conversão: <b>{taxa_conversao:.1f}%</b> (Pagos vs Gerados)\n"
+        f"• Ticket Médio: <b>R$ {f_br(ticket_medio)}</b> por compra\n"
+        f"• Rentabilidade: <b>{yield_medio:.1f}%</b> (Sua fatia da venda)\n"
+        f"• Dinheiro na Mesa: <b>R$ {f_br(dinheiro_na_mesa)}</b> em comissões canceladas\n\n"
+        "📈 <b>DESEMPENHO DIÁRIO</b>\n"
     )
+    
+    if melhor_valor > 0:
+        texto += f"🔥 <b>Melhor Dia:</b> {melhor_dia} (R$ {f_br(melhor_valor)} de comissão)\n\n"
     
     for i in range(14):
         dt_chave = (hoje - timedelta(days=i)).strftime("%d/%m")
@@ -1567,6 +1589,42 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         
     await msg_status.delete()
     await message.answer(texto, parse_mode="HTML")
+
+@dp.message(F.text == "Diagnóstico de IA 🧠", StateFilter("*"))
+async def gerar_relatorio_ia(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    msg_status = await message.answer("🧠 Iniciando teste de diagnóstico dos motores Gemini... Aguarde ⏳")
+    if EXIBIR_LOGS: logger.info("🧠 Iniciando teste visual e sequencial da Cascata Gemini...")
+    
+    texto_modelos = "🧠 <b>STATUS DA CASCATA DE IA (GEMINI)</b>\n\n"
+    
+    for i, modelo in enumerate(MODELOS_CASCATA_GEMINI, 1):
+        try:
+            await msg_status.edit_text(f"🧠 <i>Testando motores IA...</i>\n🔎 Verificando motor ({i}/{len(MODELOS_CASCATA_GEMINI)}): <code>{modelo}</code> ⏳", parse_mode="HTML")
+            
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=modelo,
+                contents="Responda apenas 'ok'"
+            )
+            if response and response.text:
+                texto_modelos += f"• {i}º <code>{modelo}</code>: 🟢 Online\n"
+            else:
+                texto_modelos += f"• {i}º <code>{modelo}</code>: 🟡 Resposta Vazia\n"
+        except Exception as e:
+            erro_str = str(e).lower()
+            if "429" in erro_str or "quota" in erro_str or "exhausted" in erro_str:
+                texto_modelos += f"• {i}º <code>{modelo}</code>: 🟡 Cota Esgotada (Renova aprox. 04h00)\n"
+            elif "404" in erro_str or "not found" in erro_str:
+                texto_modelos += f"• {i}º <code>{modelo}</code>: 🔴 Descontinuado\n"
+            elif "503" in erro_str or "overloaded" in erro_str:
+                texto_modelos += f"• {i}º <code>{modelo}</code>: 🔴 Servidor Indisponível\n"
+            else:
+                erro_curto = str(e).replace('\n', ' ')[:30]
+                texto_modelos += f"• {i}º <code>{modelo}</code>: 🔴 Erro ({erro_curto}...)\n"
+
+    await msg_status.delete()
+    await message.answer(texto_modelos, parse_mode="HTML")
 
 # ✅ Handlers para Envio Manual de Mensagens via Botões
 @dp.message(F.text == "Disparar Bom Dia ☀️")
