@@ -1485,8 +1485,7 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
 
 def obter_teclado_relatorios():
     botoes = [
-        [KeyboardButton(text="Relatório Financeiro 💰"), KeyboardButton(text="Saúde do Sistema ⚙️")],
-        [KeyboardButton(text="Diagnóstico de IA 🧠")],
+        [KeyboardButton(text="Relatório Financeiro 💰")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -1515,26 +1514,38 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     if conversoes:
         for conv in conversoes:
             orders = conv.get("orders", [])
-            status = orders[0].get("orderStatus", "") if orders else ""
             
+            # Se não houver itens na lista "orders" associados a essa conversão, passa para o próximo
+            if not orders:
+                continue
+
+            # Extração dos dados
             c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
             c_extra = float(conv.get("sellerCommission", "0"))
             c_total = float(conv.get("totalCommission", "0"))
+            dt_compra = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=fuso_horario).strftime("%d/%m")
             
-            # ✅ Correção Matemática: Apenas soma os valores e faturamentos se o pedido estiver concluído e pago
-            if status == "COMPLETED": 
-                pagos += 1
+            # Variáveis para a validação do status "COMPLETED"
+            pedido_valido = False
+            
+            for order in orders:
+                status = order.get("orderStatus", "")
+                
+                if status == "COMPLETED":
+                    pagos += 1
+                    pedido_valido = True
+                elif status == "CANCELLED":
+                    cancelados += 1
+                else:
+                    pendentes += 1
+            
+            # Apenas soma os valores diários se o pedido estiver confirmado
+            if pedido_valido:
                 comissao_shopee += c_shopee
                 comissao_extra += c_extra
                 faturamento_total += c_total
-                
-                dt_compra = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=fuso_horario).strftime("%d/%m")
                 if dt_compra in diario:
                     diario[dt_compra] += c_total
-            elif status == "CANCELLED": 
-                cancelados += 1
-            else: 
-                pendentes += 1
                 
     def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
@@ -1556,77 +1567,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         
     await msg_status.delete()
     await message.answer(texto, parse_mode="HTML")
-
-@dp.message(F.text == "Saúde do Sistema ⚙️", StateFilter("*"))
-async def gerar_relatorio_sistema(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🚀 Extraindo dados de saúde do sistema...")
-    numero_atual = ler_contador()
-    fila_princ = len(ler_fila_postagens().get("fila", []))
-    fila_espiao = len(ler_fila_clonagem().get("fila", []))
-    radar = len(ler_alvos_espiao().get("alvos", []))
-    
-    dados_pausa = ler_pausa_programada()
-    dados_div = ler_alvos_divulgacao()
-    dados_rotina = ler_config_rotina()
-    
-    if dados_pausa.get("ativa"):
-        status_sis = f"🔴 PAUSADO até {dados_pausa.get('data_retorno')}"
-    else:
-        spam_ok = not dados_div.get("pausado", False)
-        rotina_ok = not dados_rotina.get("pausado", False)
-        if spam_ok and rotina_ok:
-            status_sis = "🟢 ATIVO (Rotina e SPAM rodando)"
-        elif spam_ok or rotina_ok:
-            status_sis = "🟡 PARCIAL (Algum serviço pausado)"
-        else:
-            status_sis = "🔴 PARADO (Serviços suspensos manualmente)"
-
-    texto = (
-        "⚙️ <b>SAÚDE DO SISTEMA</b>\n\n"
-        f"• Próximo Vídeo: <b>{numero_atual}</b>\n"
-        f"• Fila Principal: <b>{fila_princ} agendados</b>\n"
-        f"• Fila do Espião: <b>{fila_espiao} aguardando</b>\n"
-        f"• Radar Espião: <b>{radar} vigiados</b>\n"
-        f"• Status: <b>{status_sis}</b>\n"
-    )
-    await message.answer(texto, parse_mode="HTML")
-
-@dp.message(F.text == "Diagnóstico de IA 🧠", StateFilter("*"))
-async def gerar_relatorio_ia(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
-    msg_status = await message.answer("🧠 Iniciando teste de diagnóstico dos motores Gemini... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("🧠 Iniciando teste visual e sequencial da Cascata Gemini...")
-    
-    texto_modelos = "🧠 <b>STATUS DA CASCATA DE IA (GEMINI)</b>\n\n"
-    
-    for i, modelo in enumerate(MODELOS_CASCATA_GEMINI, 1):
-        try:
-            await msg_status.edit_text(f"🧠 <i>Testando motores IA...</i>\n🔎 Verificando motor ({i}/{len(MODELOS_CASCATA_GEMINI)}): <code>{modelo}</code> ⏳", parse_mode="HTML")
-            
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model=modelo,
-                contents="Responda apenas 'ok'"
-            )
-            if response and response.text:
-                texto_modelos += f"• {i}º <code>{modelo}</code>: 🟢 Online\n"
-            else:
-                texto_modelos += f"• {i}º <code>{modelo}</code>: 🟡 Resposta Vazia\n"
-        except Exception as e:
-            erro_str = str(e).lower()
-            if "429" in erro_str or "quota" in erro_str or "exhausted" in erro_str:
-                texto_modelos += f"• {i}º <code>{modelo}</code>: 🟡 Cota Esgotada (Renova aprox. 04h00)\n"
-            elif "404" in erro_str or "not found" in erro_str:
-                texto_modelos += f"• {i}º <code>{modelo}</code>: 🔴 Descontinuado\n"
-            elif "503" in erro_str or "overloaded" in erro_str:
-                texto_modelos += f"• {i}º <code>{modelo}</code>: 🔴 Servidor Indisponível\n"
-            else:
-                erro_curto = str(e).replace('\n', ' ')[:30]
-                texto_modelos += f"• {i}º <code>{modelo}</code>: 🔴 Erro ({erro_curto}...)\n"
-
-    await msg_status.delete()
-    await message.answer(texto_modelos, parse_mode="HTML")
 
 # ✅ Handlers para Envio Manual de Mensagens via Botões
 @dp.message(F.text == "Disparar Bom Dia ☀️")
@@ -2433,12 +2373,6 @@ async def voltar_menu_espiao(message: types.Message, state: FSMContext):
     await state.clear()
     # Redireciona a execução diretamente para a função principal para exibir o painel completo
     await menu_espiao_principal(message, state)
-
-@dp.message(F.text == "Voltar ao Menu Espião 🔙", StateFilter("*"))
-async def voltar_menu_espiao(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
-    await state.clear()
-    await message.answer("🕵️ <b>Painel Principal do Espião</b>\nO que deseja acessar?", reply_markup=teclado_menu_espiao, parse_mode="HTML")
 
 @dp.message(F.text == "⚙️ Automações (SPAM e Rotina)\u200b", StateFilter("*"))
 async def menu_automacoes_espiao(message: types.Message, state: FSMContext):
