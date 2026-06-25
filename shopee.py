@@ -1431,7 +1431,6 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
                     shopeeCommissionCapped
                     sellerCommission
                     totalCommission
-                    gmv
                     orders {
                         orderStatus
                     }
@@ -1439,7 +1438,6 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
             }
         }""",
         "variables": {
-            # O GraphQL exige que variáveis do tipo Int64 sejam passadas como Strings para não perderem a formatação
             "purchaseTimeStart": str(start_ts),
             "purchaseTimeEnd": str(end_ts),
             "limit": 500
@@ -1501,14 +1499,13 @@ async def menu_relatorio_geral(message: types.Message, state: FSMContext):
 async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     msg_status = await message.answer("💰 Sincronizando API Financeira com a Shopee (Últimos 14 dias)... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando extração financeira restrita a 14 dias e filtrando métricas avançadas...")
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando extração financeira restrita a 14 dias e filtrando apenas aprovados...")
     
     conversoes = await buscar_dados_financeiros_shopee(14)
     
     total_pedidos = len(conversoes) if conversoes else 0
     pagos, pendentes, cancelados = 0, 0, 0
     comissao_shopee, comissao_extra, comissao_total = 0.0, 0.0, 0.0
-    gmv_total = 0.0
     dinheiro_na_mesa = 0.0
     
     hoje = datetime.now(fuso_horario)
@@ -1521,11 +1518,9 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             if not orders:
                 continue
 
-            # Extração dos dados brutos
             c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
             c_extra = float(conv.get("sellerCommission", "0"))
             c_total = float(conv.get("totalCommission", "0"))
-            v_gmv = float(conv.get("gmv", "0"))  # O valor real gasto pelo cliente
             dt_compra = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=fuso_horario).strftime("%d/%m")
             
             pedido_valido = False
@@ -1547,17 +1542,13 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
                 comissao_shopee += c_shopee
                 comissao_extra += c_extra
                 comissao_total += c_total
-                gmv_total += v_gmv
                 if dt_compra in diario:
                     diario[dt_compra] += c_total
                     
             if pedido_cancelado:
                 dinheiro_na_mesa += c_total
                 
-    # Motor de cálculos estratégicos
     taxa_conversao = (pagos / total_pedidos * 100) if total_pedidos > 0 else 0.0
-    ticket_medio = (gmv_total / pagos) if pagos > 0 else 0.0
-    yield_medio = (comissao_total / gmv_total * 100) if gmv_total > 0 else 0.0
     
     melhor_dia = max(diario, key=diario.get) if diario else "N/A"
     melhor_valor = diario[melhor_dia] if diario else 0.0
@@ -1566,16 +1557,13 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     
     texto = (
         "💰 <b>BALANÇO FINANCEIRO (Últimos 14 Dias)</b>\n\n"
-        f"• Vendas Brutas (GMV): <b>R$ {f_br(gmv_total)}</b>\n"
         f"• Sua Comissão (Aprovada): <b>R$ {f_br(comissao_total)}</b>\n"
         f"  └ <i>Shopee: R$ {f_br(comissao_shopee)} | AMS: R$ {f_br(comissao_extra)}</i>\n\n"
         "📊 <b>MÉTRICAS ESTRATÉGICAS</b>\n"
         f"• Cliques Convertidos: <b>{total_pedidos}</b>\n"
         f"• Vendas Concluídas (Itens): <b>{pagos}</b>\n"
         f"• Taxa de Conversão: <b>{taxa_conversao:.1f}%</b> (Vendas vs Cliques)\n"
-        f"• Ticket Médio: <b>R$ {f_br(ticket_medio)}</b> por item\n"
-        f"• Rentabilidade: <b>{yield_medio:.1f}%</b> (Sua fatia da venda)\n"
-        f"• Dinheiro na Mesa: <b>R$ {f_br(dinheiro_na_mesa)}</b> em comissões canceladas\n\n"
+        f"• Dinheiro na Mesa: <b>R$ {f_br(dinheiro_na_mesa)}</b> em comissões perdidas\n\n"
         "📈 <b>DESEMPENHO DIÁRIO</b>\n"
     )
     
