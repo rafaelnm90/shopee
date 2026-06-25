@@ -1499,13 +1499,14 @@ async def menu_relatorio_geral(message: types.Message, state: FSMContext):
 async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     msg_status = await message.answer("💰 Sincronizando API Financeira com a Shopee (Últimos 14 dias)... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando extração financeira restrita a 14 dias e filtrando apenas aprovados...")
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando extração financeira restrita a 14 dias (incluindo métricas pendentes)...")
     
     conversoes = await buscar_dados_financeiros_shopee(14)
     
     total_pedidos = len(conversoes) if conversoes else 0
     pagos, pendentes, cancelados = 0, 0, 0
     comissao_shopee, comissao_extra, comissao_total = 0.0, 0.0, 0.0
+    comissao_pendente = 0.0
     dinheiro_na_mesa = 0.0
     
     hoje = datetime.now(fuso_horario)
@@ -1525,6 +1526,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             
             pedido_valido = False
             pedido_cancelado = False
+            pedido_pendente = False
             
             for order in orders:
                 status = order.get("orderStatus", "")
@@ -1537,11 +1539,16 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
                     pedido_cancelado = True
                 else:
                     pendentes += 1
+                    pedido_pendente = True
             
             if pedido_valido:
                 comissao_shopee += c_shopee
                 comissao_extra += c_extra
                 comissao_total += c_total
+                if dt_compra in diario:
+                    diario[dt_compra] += c_total
+            elif pedido_pendente:
+                comissao_pendente += c_total
                 if dt_compra in diario:
                     diario[dt_compra] += c_total
                     
@@ -1555,13 +1562,17 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
                 
     def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
+    if EXIBIR_LOGS: logger.info(f"✅ Consolidação de comissões finalizada. Aprovado: R$ {f_br(comissao_total)} | Pendente: R$ {f_br(comissao_pendente)}")
+    
     texto = (
         "💰 <b>BALANÇO FINANCEIRO (Últimos 14 Dias)</b>\n\n"
         f"• Sua Comissão (Aprovada): <b>R$ {f_br(comissao_total)}</b>\n"
-        f"  └ <i>Shopee: R$ {f_br(comissao_shopee)} | AMS: R$ {f_br(comissao_extra)}</i>\n\n"
+        f"  └ <i>Shopee: R$ {f_br(comissao_shopee)} | AMS: R$ {f_br(comissao_extra)}</i>\n"
+        f"• Sua Comissão (Pendente): <b>R$ {f_br(comissao_pendente)}</b>\n\n"
         "📊 <b>MÉTRICAS ESTRATÉGICAS</b>\n"
         f"• Cliques Convertidos: <b>{total_pedidos}</b>\n"
         f"• Vendas Concluídas (Itens): <b>{pagos}</b>\n"
+        f"• Vendas Pendentes (Itens): <b>{pendentes}</b>\n"
         f"• Taxa de Conversão: <b>{taxa_conversao:.1f}%</b> (Vendas vs Cliques)\n"
         f"• Dinheiro na Mesa: <b>R$ {f_br(dinheiro_na_mesa)}</b> em comissões perdidas\n\n"
         "📈 <b>DESEMPENHO DIÁRIO</b>\n"
