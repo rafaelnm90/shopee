@@ -1483,14 +1483,84 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
         if EXIBIR_LOGS: logger.error(f"❌ Erro crítico no motor financeiro: {e}")
     return []
 
+def obter_teclado_relatorios():
+    botoes = [
+        [KeyboardButton(text="Relatório Financeiro 💰"), KeyboardButton(text="Saúde do Sistema ⚙️")],
+        [KeyboardButton(text="Diagnóstico de IA 🧠")],
+        [KeyboardButton(text="Voltar ao Início 🔙")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+
 @dp.message(F.text == "Relatório Geral 📊", StateFilter("*"))
-async def gerar_relatorio_completo(message: types.Message, state: FSMContext):
+async def menu_relatorio_geral(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    msg_status = await message.answer("📊 Extraindo métricas do servidor e sincronizando API Financeira... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando auditoria completa do sistema e finanças...")
+    await message.answer("📊 <b>Central de Relatórios</b>\nEscolha qual métrica deseja analisar:", reply_markup=obter_teclado_relatorios(), parse_mode="HTML")
+
+@dp.message(F.text == "Relatório Financeiro 💰", StateFilter("*"))
+async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    msg_status = await message.answer("💰 Sincronizando API Financeira com a Shopee (Últimos 14 dias)... Aguarde ⏳")
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando extração financeira restrita a 14 dias e filtrando apenas aprovados...")
     
-    # 1. Auditoria de Saúde do Sistema
+    conversoes = await buscar_dados_financeiros_shopee(14)
+    
+    total_pedidos = len(conversoes) if conversoes else 0
+    pagos, pendentes, cancelados = 0, 0, 0
+    comissao_shopee, comissao_extra, faturamento_total = 0.0, 0.0, 0.0
+    
+    hoje = datetime.now(fuso_horario)
+    diario = { (hoje - timedelta(days=i)).strftime("%d/%m"): 0.0 for i in range(14) }
+    
+    if conversoes:
+        for conv in conversoes:
+            orders = conv.get("orders", [])
+            status = orders[0].get("orderStatus", "") if orders else ""
+            
+            c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
+            c_extra = float(conv.get("sellerCommission", "0"))
+            c_total = float(conv.get("totalCommission", "0"))
+            
+            # ✅ Correção Matemática: Apenas soma os valores e faturamentos se o pedido estiver concluído e pago
+            if status == "COMPLETED": 
+                pagos += 1
+                comissao_shopee += c_shopee
+                comissao_extra += c_extra
+                faturamento_total += c_total
+                
+                dt_compra = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=fuso_horario).strftime("%d/%m")
+                if dt_compra in diario:
+                    diario[dt_compra] += c_total
+            elif status == "CANCELLED": 
+                cancelados += 1
+            else: 
+                pendentes += 1
+                
+    def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    
+    texto = (
+        "💰 <b>BALANÇO FINANCEIRO (Últimos 14 Dias)</b>\n\n"
+        f"• Total de Cliques/Pedidos: <b>{total_pedidos}</b>\n"
+        f"• Conversões: {pagos} Pagos | {pendentes} Pendentes | {cancelados} Cancelados\n"
+        f"• Comissão Shopee: R$ {f_br(comissao_shopee)}\n"
+        f"• Comissão Extra (AMS): R$ {f_br(comissao_extra)}\n"
+        f"• Faturamento Bruto (Aprovado): <b>R$ {f_br(faturamento_total)}</b>\n\n"
+        "📈 <b>DESEMPENHO DIÁRIO (14 Dias)</b>\n"
+    )
+    
+    for i in range(14):
+        dt_chave = (hoje - timedelta(days=i)).strftime("%d/%m")
+        valor = diario.get(dt_chave, 0.0)
+        marc = " (Hoje)" if i == 0 else ""
+        texto += f"• {dt_chave}{marc}: R$ {f_br(valor)}\n"
+        
+    await msg_status.delete()
+    await message.answer(texto, parse_mode="HTML")
+
+@dp.message(F.text == "Saúde do Sistema ⚙️", StateFilter("*"))
+async def gerar_relatorio_sistema(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🚀 Extraindo dados de saúde do sistema...")
     numero_atual = ler_contador()
     fila_princ = len(ler_fila_postagens().get("fila", []))
     fila_espiao = len(ler_fila_clonagem().get("fila", []))
@@ -1511,107 +1581,28 @@ async def gerar_relatorio_completo(message: types.Message, state: FSMContext):
             status_sis = "🟡 PARCIAL (Algum serviço pausado)"
         else:
             status_sis = "🔴 PARADO (Serviços suspensos manualmente)"
-            
-    # 2. Extração Financeira
-    from datetime import timedelta
-    conversoes = await buscar_dados_financeiros_shopee(30)
-    
-    total_pedidos = len(conversoes) if conversoes else 0
-    pagos, pendentes, cancelados = 0, 0, 0
-    comissao_shopee, comissao_extra, faturamento_total = 0.0, 0.0, 0.0
-    
-    hoje = datetime.now(fuso_horario)
-    diario = { (hoje - timedelta(days=i)).strftime("%d/%m"): 0.0 for i in range(7) }
-    
-    if conversoes:
-        for conv in conversoes:
-            orders = conv.get("orders", [])
-            status = orders[0].get("orderStatus", "") if orders else ""
-            
-            if status == "COMPLETED": pagos += 1
-            elif status == "CANCELLED": cancelados += 1
-            else: pendentes += 1
-            
-            c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
-            c_extra = float(conv.get("sellerCommission", "0"))
-            c_total = float(conv.get("totalCommission", "0"))
-            
-            comissao_shopee += c_shopee
-            comissao_extra += c_extra
-            faturamento_total += c_total
-            
-            dt_compra = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=fuso_horario).strftime("%d/%m")
-            if dt_compra in diario:
-                diario[dt_compra] += c_total
-                
-    # Função para converter formato de moeda para o padrão brasileiro
-    def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    
-    # ✅ 3. NOVO: Teste Visual da Cascata Gemini com atualização ao vivo
-    if EXIBIR_LOGS: logger.info("🧠 Iniciando teste de diagnóstico dos motores Gemini...")
-    texto_modelos = "\n🧠 <b>STATUS DA CASCATA DE IA (GEMINI)</b>\n"
-    
-    for modelo in MODELOS_CASCATA_GEMINI:
-        try:
-            await msg_status.edit_text(f"📊 <i>Extraindo finanças e testando IA...</i>\n🔎 Verificando saúde do modelo: <code>{modelo}</code> ⏳", parse_mode="HTML")
-            
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model=modelo,
-                contents="Responda apenas 'ok'"
-            )
-            if response and response.text:
-                texto_modelos += f"• <code>{modelo}</code>: 🟢 Online\n"
-                if EXIBIR_LOGS: logger.info(f"✅ Diagnóstico {modelo}: Online.")
-            else:
-                texto_modelos += f"• <code>{modelo}</code>: 🟡 Resposta Vazia\n"
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Diagnóstico {modelo}: Resposta vazia.")
-        except Exception as e:
-            erro_str = str(e).lower()
-            if "429" in erro_str or "quota" in erro_str or "exhausted" in erro_str:
-                texto_modelos += f"• <code>{modelo}</code>: 🟡 Cota Esgotada\n"
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Diagnóstico {modelo}: Cota de uso esgotada.")
-            elif "404" in erro_str or "not found" in erro_str:
-                texto_modelos += f"• <code>{modelo}</code>: 🔴 Descontinuado\n"
-                if EXIBIR_LOGS: logger.error(f"❌ Diagnóstico {modelo}: Descontinuado ou inexistente.")
-            elif "503" in erro_str or "overloaded" in erro_str:
-                texto_modelos += f"• <code>{modelo}</code>: 🔴 Servidor Indisponível\n"
-                if EXIBIR_LOGS: logger.error(f"❌ Diagnóstico {modelo}: Servidor do Google sobrecarregado.")
-            else:
-                erro_curto = str(e).replace('\n', ' ')[:30]
-                texto_modelos += f"• <code>{modelo}</code>: 🔴 Erro ({erro_curto}...)\n"
-                if EXIBIR_LOGS: logger.error(f"❌ Diagnóstico {modelo}: Erro inesperado - {erro_curto}")
 
     texto = (
-        "📊 <b>RELATÓRIO GERAL DA OPERAÇÃO</b>\n\n"
-        "⚙️ <b>SAÚDE DO SISTEMA</b>\n"
+        "⚙️ <b>SAÚDE DO SISTEMA</b>\n\n"
         f"• Próximo Vídeo: <b>{numero_atual}</b>\n"
         f"• Fila Principal: <b>{fila_princ} agendados</b>\n"
         f"• Fila do Espião: <b>{fila_espiao} aguardando</b>\n"
         f"• Radar Espião: <b>{radar} vigiados</b>\n"
-        f"• Status: <b>{status_sis}</b>\n\n"
-        "💰 <b>BALANÇO FINANCEIRO (Últimos 30 Dias)</b>\n"
-        f"• Total de Pedidos: <b>{total_pedidos}</b>\n"
-        f"• Conversão: {pagos} Pagos | {pendentes} Pendentes | {cancelados} Cancelados\n"
-        f"• Comissão Shopee: R$ {f_br(comissao_shopee)}\n"
-        f"• Comissão Extra (AMS): R$ {f_br(comissao_extra)}\n"
-        f"• Faturamento Bruto: <b>R$ {f_br(faturamento_total)}</b>\n\n"
-        "📈 <b>DESEMPENHO DIÁRIO (Últimos 7 Dias)</b>\n"
+        f"• Status: <b>{status_sis}</b>\n"
     )
-    
-    for i in range(7):
-        dt_chave = (hoje - timedelta(days=i)).strftime("%d/%m")
-        valor = diario.get(dt_chave, 0.0)
-        marc = " (Hoje)" if i == 0 else ""
-        texto += f"• {dt_chave}{marc}: R$ {f_br(valor)}\n"
+    await message.answer(texto, parse_mode="HTML")
 
-    # ✅ 3. NOVO: Teste Visual da Cascata Gemini com atualização ao vivo
-    if EXIBIR_LOGS: logger.info("🧠 Iniciando teste de diagnóstico dos motores Gemini...")
-    texto_modelos = "\n🧠 <b>STATUS DA CASCATA DE IA (GEMINI)</b>\n"
+@dp.message(F.text == "Diagnóstico de IA 🧠", StateFilter("*"))
+async def gerar_relatorio_ia(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    msg_status = await message.answer("🧠 Iniciando teste de diagnóstico dos motores Gemini... Aguarde ⏳")
+    if EXIBIR_LOGS: logger.info("🧠 Iniciando teste visual e sequencial da Cascata Gemini...")
+    
+    texto_modelos = "🧠 <b>STATUS DA CASCATA DE IA (GEMINI)</b>\n\n"
     
     for i, modelo in enumerate(MODELOS_CASCATA_GEMINI, 1):
         try:
-            await msg_status.edit_text(f"📊 <i>Extraindo finanças e testando IA...</i>\n🔎 Verificando motor ({i}/{len(MODELOS_CASCATA_GEMINI)}): <code>{modelo}</code> ⏳", parse_mode="HTML")
+            await msg_status.edit_text(f"🧠 <i>Testando motores IA...</i>\n🔎 Verificando motor ({i}/{len(MODELOS_CASCATA_GEMINI)}): <code>{modelo}</code> ⏳", parse_mode="HTML")
             
             response = await asyncio.to_thread(
                 client.models.generate_content,
@@ -1620,32 +1611,22 @@ async def gerar_relatorio_completo(message: types.Message, state: FSMContext):
             )
             if response and response.text:
                 texto_modelos += f"• {i}º <code>{modelo}</code>: 🟢 Online\n"
-                if EXIBIR_LOGS: logger.info(f"✅ Diagnóstico {i}º ({modelo}): Online.")
             else:
                 texto_modelos += f"• {i}º <code>{modelo}</code>: 🟡 Resposta Vazia\n"
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Diagnóstico {i}º ({modelo}): Resposta vazia.")
         except Exception as e:
             erro_str = str(e).lower()
             if "429" in erro_str or "quota" in erro_str or "exhausted" in erro_str:
                 texto_modelos += f"• {i}º <code>{modelo}</code>: 🟡 Cota Esgotada (Renova aprox. 04h00)\n"
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Diagnóstico {i}º ({modelo}): Cota de uso esgotada.")
             elif "404" in erro_str or "not found" in erro_str:
-                texto_modelos += f"• {i}º <code>{modelo}</code>: 🔴 Descontinuado (Remover da lista)\n"
-                if EXIBIR_LOGS: logger.error(f"❌ Diagnóstico {i}º ({modelo}): Descontinuado ou inexistente.")
+                texto_modelos += f"• {i}º <code>{modelo}</code>: 🔴 Descontinuado\n"
             elif "503" in erro_str or "overloaded" in erro_str:
                 texto_modelos += f"• {i}º <code>{modelo}</code>: 🔴 Servidor Indisponível\n"
-                if EXIBIR_LOGS: logger.error(f"❌ Diagnóstico {i}º ({modelo}): Servidor do Google sobrecarregado.")
             else:
                 erro_curto = str(e).replace('\n', ' ')[:30]
                 texto_modelos += f"• {i}º <code>{modelo}</code>: 🔴 Erro ({erro_curto}...)\n"
-                if EXIBIR_LOGS: logger.error(f"❌ Diagnóstico {i}º ({modelo}): Erro inesperado - {erro_curto}")
 
-    # Adiciona o resultado visual da IA ao texto principal
-    texto += texto_modelos
-    
     await msg_status.delete()
-    await message.answer(texto, parse_mode="HTML")
-    if EXIBIR_LOGS: logger.info("✅ Relatório gerado e exibido com sucesso!")
+    await message.answer(texto_modelos, parse_mode="HTML")
 
 # ✅ Handlers para Envio Manual de Mensagens via Botões
 @dp.message(F.text == "Disparar Bom Dia ☀️")
