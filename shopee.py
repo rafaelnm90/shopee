@@ -1495,120 +1495,154 @@ async def menu_relatorio_geral(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("📊 <b>Central de Relatórios</b>\nEscolha qual métrica deseja analisar:", reply_markup=obter_teclado_relatorios(), parse_mode="HTML")
 
+def ler_historico_financeiro():
+    try:
+        with open("historico_financeiro.json", "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def salvar_historico_financeiro(dados):
+    with open("historico_financeiro.json", "w") as f:
+        json.dump(dados, f, indent=4)
+
 @dp.message(F.text == "Relatório Financeiro 💰", StateFilter("*"))
 async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     msg_status = await message.answer("💰 Sincronizando API Financeira com a Shopee (Últimos 14 dias)... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando extração financeira com D-1 consolidado e cálculos de projeção mensal...")
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando extração financeira e processamento da projeção preditiva baseada em calendário...")
     
-    # Busca 15 dias na API para garantir que teremos 14 dias consolidados completos (excluindo hoje)
     conversoes = await buscar_dados_financeiros_shopee(15)
     
     total_pedidos = len(conversoes) if conversoes else 0
     pagos, pendentes, cancelados = 0, 0, 0
-    comissao_shopee, comissao_extra, comissao_aprovada = 0.0, 0.0, 0.0
+    comissao_shopee, comissao_vendedor, comissao_aprovada = 0.0, 0.0, 0.0
     comissao_pendente = 0.0
-    dinheiro_na_mesa = 0.0
     
     hoje = datetime.now(fuso_horario)
     
-    # 🎯 Ajuste: Começa do dia 1 (Ontem) até o dia 14, ignorando o "Hoje" devido ao delay da API Shopee
-    dias_validos = [(hoje - timedelta(days=i)).strftime("%d/%m") for i in range(1, 15)]
-    
-    diario_aprovado = { d: 0.0 for d in dias_validos }
-    diario_pendente = { d: 0.0 for d in dias_validos }
+    # 🎯 Ajuste: Criar listas de datas com formatação ano-mês-dia para o banco de dados
+    dias_validos_obj = [hoje - timedelta(days=i) for i in range(1, 15)]
+    diario_total_db = { d.strftime("%Y-%m-%d"): 0.0 for d in dias_validos_obj }
     
     if conversoes:
         for conv in conversoes:
             orders = conv.get("orders", [])
-            
             if not orders:
                 continue
 
             c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
             c_extra = float(conv.get("sellerCommission", "0"))
             c_total = float(conv.get("totalCommission", "0"))
-            dt_compra = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=fuso_horario).strftime("%d/%m")
+            dt_obj = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=fuso_horario)
+            dt_db_str = dt_obj.strftime("%Y-%m-%d")
             
-            na_janela_diaria = dt_compra in dias_validos
+            na_janela_diaria = dt_db_str in diario_total_db
             
             tem_aprovado = False
             tem_pendente = False
-            tem_cancelado = False
             
             for order in orders:
                 status = order.get("orderStatus", "")
-                
                 if status == "COMPLETED":
                     pagos += 1
                     tem_aprovado = True
                 elif status == "CANCELLED":
                     cancelados += 1
-                    tem_cancelado = True
                 else:
                     pendentes += 1
                     tem_pendente = True
             
             if tem_aprovado:
                 comissao_shopee += c_shopee
-                comissao_extra += c_extra
+                comissao_vendedor += c_extra
                 comissao_aprovada += c_total
-                if na_janela_diaria: diario_aprovado[dt_compra] += c_total
+                if na_janela_diaria: diario_total_db[dt_db_str] += c_total
             elif tem_pendente:
                 comissao_pendente += c_total
-                if na_janela_diaria: diario_pendente[dt_compra] += c_total
-            elif tem_cancelado:
-                dinheiro_na_mesa += c_total
+                if na_janela_diaria: diario_total_db[dt_db_str] += c_total
                 
     taxa_conversao = (pagos / total_pedidos * 100) if total_pedidos > 0 else 0.0
-    taxa_perda = (cancelados / (pagos + cancelados) * 100) if (pagos + cancelados) > 0 else 0.0
-    
-    # 🧠 INTELIGÊNCIA E MÉTRICAS EXTRAS
     comissao_total_estimada = comissao_aprovada + comissao_pendente
-    ticket_medio_comissao = (comissao_total_estimada / total_pedidos) if total_pedidos > 0 else 0.0
-    media_diaria = comissao_total_estimada / 14
-    projecao_mensal = media_diaria * 30
     
-    diario_total = { d: diario_aprovado[d] + diario_pendente[d] for d in dias_validos }
-    melhor_dia = max(diario_total, key=diario_total.get) if diario_total else "N/A"
-    melhor_valor = diario_total[melhor_dia] if diario_total else 0.0
+    melhor_dia_str = max(diario_total_db, key=diario_total_db.get) if diario_total_db else "N/A"
+    melhor_valor = diario_total_db[melhor_dia_str] if diario_total_db else 0.0
+    melhor_dia_br = datetime.strptime(melhor_dia_str, "%Y-%m-%d").strftime("%d/%m") if melhor_dia_str != "N/A" else "N/A"
                 
     def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
-    if EXIBIR_LOGS: logger.info(f"📊 Relatório processado. Aprovado: R$ {f_br(comissao_aprovada)} | Pendente: R$ {f_br(comissao_pendente)} | Média: R$ {f_br(media_diaria)}/dia.")
+    # 🧠 INTEGRAÇÃO DO BANCO DE DADOS E ESTUDO ANALÍTICO BASEADO EM CALENDÁRIO
+    if EXIBIR_LOGS: logger.info("💾 Atualizando o banco de dados histórico local (historico_financeiro.json)...")
+    historico = ler_historico_financeiro()
+    
+    # Limpeza de segurança: Retém apenas os últimos 120 dias
+    limite_120d = (hoje - timedelta(days=120)).strftime("%Y-%m-%d")
+    historico_limpo = {k: v for k, v in historico.items() if k >= limite_120d}
+    
+    # Insere os dados consolidados da varredura atual (sobrescrevendo atualizações de status da Shopee)
+    for d_str, v_total in diario_total_db.items():
+        historico_limpo[d_str] = v_total
+        
+    salvar_historico_financeiro(historico_limpo)
+    if EXIBIR_LOGS: logger.info(f"✅ Histórico salvo! Total de dias arquivados: {len(historico_limpo)}.")
+    
+    # Cálculo das médias por mês calendário
+    if EXIBIR_LOGS: logger.info("🧮 Executando algoritmo de ponderação por mês calendário...")
+    meses_soma = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0}
+    meses_dias = {0: 0, 1: 0, 2: 0, 3: 0}
+    
+    for data_str, valor in historico_limpo.items():
+        dt_obj = datetime.strptime(data_str, "%Y-%m-%d")
+        dif_meses = (hoje.year - dt_obj.year) * 12 + (hoje.month - dt_obj.month)
+        
+        if 0 <= dif_meses <= 3:
+            meses_soma[dif_meses] += valor
+            meses_dias[dif_meses] += 1
+            
+    pesos_originais = {0: 40, 1: 30, 2: 20, 3: 10}
+    peso_total_valido = sum(pesos_originais[m] for m in range(4) if meses_dias[m] > 0)
+    
+    media_ponderada_diaria = 0.0
+    if peso_total_valido > 0:
+        for m in range(4):
+            if meses_dias[m] > 0:
+                media_mes = meses_soma[m] / meses_dias[m]
+                peso_ajustado = pesos_originais[m] / peso_total_valido
+                media_ponderada_diaria += media_mes * peso_ajustado
+                
+    projecao_mensal = media_ponderada_diaria * 30
+    ticket_medio_comissao = (comissao_total_estimada / total_pedidos) if total_pedidos > 0 else 0.0
+    if EXIBIR_LOGS: logger.info(f"🔮 Projeção calculada: Média ponderada diária de R$ {f_br(media_ponderada_diaria)}. Estimativa de 30 dias: R$ {f_br(projecao_mensal)}.")
     
     texto = (
         "💰 <b>BALANÇO FINANCEIRO (14 Dias Consolidados)</b>\n\n"
         f"• Comissão Aprovada: <b>R$ {f_br(comissao_aprovada)}</b>\n"
-        f"  └ <i>Shopee: R$ {f_br(comissao_shopee)} | AMS: R$ {f_br(comissao_extra)}</i>\n"
+        f"  └ <i>Comissão Shopee: R$ {f_br(comissao_shopee)} | Comissão Vendedor: R$ {f_br(comissao_vendedor)}</i>\n"
         f"• Comissão Pendente: <b>R$ {f_br(comissao_pendente)}</b>\n"
         f"• Total Previsto: <b>R$ {f_br(comissao_total_estimada)}</b>\n\n"
         
         "📊 <b>MÉTRICAS ESTRATÉGICAS</b>\n"
         f"• Taxa de Conversão: <b>{taxa_conversao:.1f}%</b>\n"
-        f"• Pedidos: {pagos} Pagos | {pendentes} Pendentes | {cancelados} Cancelados\n"
-        f"• Dinheiro na Mesa: <b>R$ {f_br(dinheiro_na_mesa)}</b> ({taxa_perda:.1f}% de perdas)\n\n"
+        f"• Pedidos: {pagos} Pagos | {pendentes} Pendentes | {cancelados} Cancelados\n\n"
         
         "🧠 <b>ESTUDO ANALÍTICO (IA)</b>\n"
-        f"• Ticket Médio de Comissão: <b>R$ {f_br(ticket_medio_comissao)}</b> por clique convertido\n"
-        f"• Média Diária Consolidada: <b>R$ {f_br(media_diaria)}</b> / dia\n"
-        f"• Projeção de Fechamento (30d): <b>R$ {f_br(projecao_mensal)}</b>\n\n"
+        f"• Base de Análise: <b>{len(historico_limpo)} dias armazenados</b>\n"
+        f"• Ticket Médio de Comissão: <b>R$ {f_br(ticket_medio_comissao)}</b> por conversão\n"
+        f"• Ritmo Diário Ponderado: <b>R$ {f_br(media_ponderada_diaria)}</b> / dia\n"
+        f"• Projeção do Mês (30d): <b>R$ {f_br(projecao_mensal)}</b>\n\n"
         
         "📈 <b>DESEMPENHO DIÁRIO</b>\n"
     )
     
     if melhor_valor > 0:
-        texto += f"🔥 <b>Melhor Dia:</b> {melhor_dia} (R$ {f_br(melhor_valor)})\n\n"
+        texto += f"🔥 <b>Melhor Dia:</b> {melhor_dia_br} (R$ {f_br(melhor_valor)})\n\n"
     
-    for dt_chave in dias_validos:
-        v_aprovado = diario_aprovado.get(dt_chave, 0.0)
-        v_pendente = diario_pendente.get(dt_chave, 0.0)
-        v_total = v_aprovado + v_pendente
-        
-        if v_total > 0:
-            texto += f"• {dt_chave}: R$ {f_br(v_total)} <i>(Aprov: {f_br(v_aprovado)} | Pend: {f_br(v_pendente)})</i>\n"
-        else:
-            texto += f"• {dt_chave}: R$ 0,00\n"
+    # Converte de volta para string DD/MM apenas para renderizar o relatório visualmente
+    for d_obj in dias_validos_obj:
+        d_str_db = d_obj.strftime("%Y-%m-%d")
+        d_str_br = d_obj.strftime("%d/%m")
+        valor_dia = diario_total_db.get(d_str_db, 0.0)
+        texto += f"• {d_str_br}: R$ {f_br(valor_dia)}\n"
             
     await msg_status.delete()
     await message.answer(texto, parse_mode="HTML")
