@@ -478,7 +478,6 @@ async def executar_postagem_fila(item_id):
     # ✅ NOVA TRAVA MATINAL ABSOLUTA E MARGEM DE RESPIRO
     if ultimo_bd != hoje_str:
         if EXIBIR_LOGS: logger.warning("🛑 Trava Ativada: O expediente ainda não foi aberto pelo 'Bom Dia'. Retendo vídeo...")
-        from datetime import timedelta
         
         # Inteligência: Espia a agenda para empurrar o vídeo para 15 minutos DEPOIS do Bom Dia
         job_bd = scheduler.get_job('job_rotina_bom_dia_0')
@@ -493,7 +492,6 @@ async def executar_postagem_fila(item_id):
         return
         
     elif hora_ultimo_bd:
-        from datetime import datetime, timedelta
         hora_bd_obj = datetime.strptime(hora_ultimo_bd, "%H:%M").time()
         momento_bd = datetime.combine(agora.date(), hora_bd_obj).replace(tzinfo=fuso_horario)
         minutos_passados = (agora - momento_bd).total_seconds() / 60
@@ -854,7 +852,6 @@ async def disparar_mensagem(tipo, forcar=False):
             
         hora_ultimo_bd = dados_rotina.get("hora_ultimo_bom_dia", "")
         if hora_ultimo_bd:
-            from datetime import datetime, timedelta
             hora_bd_obj = datetime.strptime(hora_ultimo_bd, "%H:%M").time()
             momento_bd = datetime.combine(agora_tz.date(), hora_bd_obj).replace(tzinfo=fuso_horario)
             minutos_passados = (agora_tz - momento_bd).total_seconds() / 60
@@ -1190,7 +1187,6 @@ def agendar_tarefas_diarias():
     eventos_fixos.sort()
     
     def encontrar_maior_lacuna_e_inserir(duracao_minima=15):
-        from datetime import timedelta
         maior_gap = timedelta(0)
         ponto_insercao = None
         idx_insercao = -1
@@ -1208,7 +1204,6 @@ def agendar_tarefas_diarias():
         return None
 
     # 4. PREENCHIMENTO DINÂMICO (Intercalação nas maiores lacunas)
-    from datetime import timedelta
     tipos_restantes = [t for t in dados_rotina.keys() if t not in ["bom_dia", "boa_noite", "pausado", "pausado_viral", "ultimo_bom_dia", "ultimo_boa_noite", "historico_diario"]]
     
     # ✅ NOVO: Separação de Trilhas (Principal vs Viral)
