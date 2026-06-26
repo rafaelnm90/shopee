@@ -357,10 +357,14 @@ def agendar_fila_postagens():
     if EXIBIR_LOGS: logger.info("🚀 Construindo miolo útil dinâmico ancorado no Bom Dia e Boa Noite...")
     
     horarios_ocupados = []
+    rotinas_virais_lista = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral"]
+    
     for job in scheduler.get_jobs():
         proxima_execucao = getattr(job, 'next_run_time', None)
         if proxima_execucao and not job.id.startswith('job_fila_postagem_'):
-            horarios_ocupados.append(proxima_execucao.astimezone(fuso_horario))
+            # ✅ Isolamento Absoluto: O motor de produtos Afiliado ignora a agenda do mundo Viral
+            if not any(rv in job.id for rv in rotinas_virais_lista):
+                horarios_ocupados.append(proxima_execucao.astimezone(fuso_horario))
             
     # Fronteira Inicial Dinâmica (Ancorada no Bom Dia)
     job_bd = scheduler.get_job('job_rotina_bom_dia_0')
@@ -397,13 +401,13 @@ def agendar_fila_postagens():
     qtd_videos = len(videos_para_hoje)
     espacamento_medio = minutos_disponiveis // qtd_videos if qtd_videos > 0 else 15
     
-    # ✅ COMPRESSÃO DINÂMICA: O limite mínimo cai para 3 minutos. Se tiver muitos vídeos, ele espreme em vez de ejetar para amanhã.
-    if espacamento_medio < 3:
-        espacamento_medio = 3
+    # ✅ COMPRESSÃO DINÂMICA E TRAVA DE SILÊNCIO: Protege 15 minutos em torno de cada rotina do Afiliado.
+    if espacamento_medio < 15:
+        espacamento_medio = 15
         
     minuto_atual_busca = inicio_real
-    # ✅ INTERVALO DE SEGURANÇA REDUZIDO PARA ENCAIXE FORÇADO NO MESMO DIA
-    INTERVALO_MINIMO = 3
+    # ✅ CAMPO DE FORÇA: 15 minutos obrigatórios de distância de qualquer rotina
+    INTERVALO_MINIMO = 15
     
     houve_transbordo = False
     amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -1294,13 +1298,20 @@ def agendar_tarefas_diarias():
         if horario_candidato <= agora:
             horario_candidato = agora + timedelta(minutes=random.randint(2, 10))
             
-        # ✅ NOVA TRAVA ANTI-COLISÃO (Evita duas mensagens serem postadas no mesmo minuto)
-        for job_existente in scheduler.get_jobs():
-            if getattr(job_existente, 'next_run_time', None):
-                tempo_existente = job_existente.next_run_time.astimezone(fuso_horario)
-                # Se cair no mesmo minuto e hora (margem de 2 minutos de diferença)
-                if abs((horario_candidato - tempo_existente).total_seconds()) < 120:
-                    horario_candidato += timedelta(minutes=random.randint(3, 8))
+        # ✅ NOVA TRAVA ANTI-COLISÃO ISOLADA (Evita choque visual apenas dentro do próprio Mundo Viral - margem de 2 min)
+            conflito_geral = False
+            for job_existente in scheduler.get_jobs():
+                if getattr(job_existente, 'next_run_time', None) and any(rv in job_existente.id for rv in rotinas_virais_lista):
+                    tempo_existente = job_existente.next_run_time.astimezone(fuso_horario)
+                    if abs((candidato - tempo_existente).total_seconds()) < 120:
+                        conflito_geral = True
+                        break
+                        
+            if conflito_geral:
+                candidato += timedelta(minutes=random.randint(3, 8))
+                
+            horario_candidato = candidato
+            break # Passou pelas travas cronológicas, sai do loop
             
         job_id = f"job_rotina_{tipo}_{indice}"
         scheduler.add_job(disparar_mensagem, 'date', run_date=horario_candidato, args=[tipo], id=job_id, replace_existing=True)
@@ -4683,6 +4694,22 @@ async def processar_fila_espiao():
         salvar_fila_clonagem(fila_data)
         return
         
+    # ✅ NOVO: Trava de Silêncio do Mundo Viral (Radar de 15 minutos)
+    agora_tz = datetime.now(fuso_horario)
+    rotinas_virais = ["job_rotina_promo_principal", "job_rotina_link_grupo_viral", "job_rotina_divulgar_gem_viral"]
+    conflito_silencio = False
+    
+    for job in scheduler.get_jobs():
+        if any(rv in job.id for rv in rotinas_virais) and getattr(job, 'next_run_time', None):
+            tempo_rotina = job.next_run_time.astimezone(fuso_horario)
+            if abs((agora_tz - tempo_rotina).total_seconds() / 60) <= 15:
+                conflito_silencio = True
+                break
+                
+    if conflito_silencio:
+        if EXIBIR_LOGS: logger.info(f"🤫 [Espião] Trava de Silêncio ativada! O motor detectou uma rotina Viral a ±15min. Adormecendo clone {item_id} temporariamente...")
+        return # Aborta silenciosamente e tenta novamente na próxima varredura de 1 minuto
+        
     if EXIBIR_LOGS: logger.info(f"🕵️ Iniciando processamento automático do clone: {item_id}")
     
     # 1. Passagem do link pela Shopee
@@ -4865,9 +4892,6 @@ async def sincronizar_financeiro_horario():
         
     if houve_atualizacao:
         salvar_historico_financeiro(historico)
-        
-    if houve_atualizacao:
-        salvar_historico_financeiro(historico)
 
 async def main():
     # Agendador mestre que roda todo dia às 00:01
@@ -4891,9 +4915,6 @@ async def main():
     
     # Roda o agendador imediatamente ao ligar o bot para garantir o dia atual
     agendar_tarefas_diarias()
-    
-    # Roda a faxina imediatamente ao ligar para limpar pendências de quedas
-    asyncio.create_task(varredor_de_lixeira())
     
     scheduler.start()
     if EXIBIR_LOGS: logger.info("🔍 Verificando status de pausa programada na inicialização...")
