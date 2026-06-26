@@ -1525,7 +1525,7 @@ def salvar_historico_financeiro(dados):
 @dp.message(F.text == "Relatório Financeiro 💰", StateFilter("*"))
 async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    msg_status = await message.answer("💰 Sincronizando API Financeira com a Shopee e gerando gráficos... Aguarde ⏳")
+    msg_status = await message.answer("💰 Sincronizando API Financeira com a Shopee e processando relatório... Aguarde ⏳")
     if EXIBIR_LOGS: logger.info("🚀 Iniciando extração profunda e atualização estrutural do banco de dados...")
     
     conversoes = await buscar_dados_financeiros_shopee(30)
@@ -1579,9 +1579,8 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     
     taxa_conversao = (pagos / total_pedidos * 100) if total_pedidos > 0 else 0.0
     
-    if EXIBIR_LOGS: logger.info("💾 Atualizando o banco de dados histórico local (formato 3D com métricas)...")
+    if EXIBIR_LOGS: logger.info("💾 Atualizando o banco de dados histórico local...")
     historico = ler_historico_financeiro()
-    
     historico_limpo = {}
     
     for k, v in historico.items():
@@ -1607,7 +1606,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         v_total_api = v_api["aprovado"] + v_api["pendente"]
         
         v_antigo = historico_limpo.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0})
-        v_total_antigo = v_antigo["aprovado"] + v_antigo["pendente"]
         
         if v_total_api > 0:
             historico_limpo[d_str] = v_api
@@ -1619,26 +1617,29 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
                 
     salvar_historico_financeiro(historico_limpo)
     
-    import locale
-    try:
-        locale.setlocale(locale.LC_TIME, 'pt_BR.utf8')
-    except:
-        pass
+    # --- TRADUTORES MANUAIS DE MESES ---
+    MESES_PT = {
+        "01": "Janeiro", "02": "Fevereiro", "03": "Março", "04": "Abril",
+        "05": "Maio", "06": "Junho", "07": "Julho", "08": "Agosto",
+        "09": "Setembro", "10": "Outubro", "11": "Novembro", "12": "Dezembro"
+    }
+    MESES_ABREV_PT = {
+        "01": "Jan", "02": "Fev", "03": "Mar", "04": "Abr",
+        "05": "Mai", "06": "Jun", "07": "Jul", "08": "Ago",
+        "09": "Set", "10": "Out", "11": "Nov", "12": "Dez"
+    }
         
-    mes_atual = hoje.strftime("%Y-%m")
-    aprovado_mes = sum(v["aprovado"] for k, v in historico_limpo.items() if k.startswith(mes_atual))
-    pendente_mes = sum(v["pendente"] for k, v in historico_limpo.items() if k.startswith(mes_atual))
-    shopee_mes = sum(v["shopee"] for k, v in historico_limpo.items() if k.startswith(mes_atual))
-    vendedor_mes = sum(v["vendedor"] for k, v in historico_limpo.items() if k.startswith(mes_atual))
+    mes_atual_str = hoje.strftime("%Y-%m")
+    aprovado_mes = sum(v["aprovado"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
+    pendente_mes = sum(v["pendente"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
+    shopee_mes = sum(v["shopee"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
+    vendedor_mes = sum(v["vendedor"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     
-    qtd_aprovado_mes = sum(v.get("qtd_aprovado", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual))
-    qtd_pendente_mes = sum(v.get("qtd_pendente", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual))
+    qtd_aprovado_mes = sum(v.get("qtd_aprovado", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
+    qtd_pendente_mes = sum(v.get("qtd_pendente", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     total_mes = aprovado_mes + pendente_mes
     
-    meses_soma = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0}
-    meses_dias = {0: 0, 1: 0, 2: 0, 3: 0}
-    
-    if EXIBIR_LOGS: logger.info("📈 Consolidando os dados do histórico mensal para os cálculos de crescimento...")
+    # Agrupamento Mensal
     dados_por_mes = {}
     for data_str, dados_dia in historico_limpo.items():
         mes_key = data_str[:7]
@@ -1649,32 +1650,13 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         dados_por_mes[mes_key]["pendente"] += dados_dia.get("pendente", 0.0)
         dados_por_mes[mes_key]["qtd_aprovado"] += dados_dia.get("qtd_aprovado", 0)
         dados_por_mes[mes_key]["qtd_pendente"] += dados_dia.get("qtd_pendente", 0)
-
-        dt_obj = datetime.strptime(data_str, "%Y-%m-%d")
-        dif_meses = (hoje.year - dt_obj.year) * 12 + (hoje.month - dt_obj.month)
-        if 0 <= dif_meses <= 3:
-            meses_soma[dif_meses] += (dados_dia["aprovado"] + dados_dia["pendente"])
-            meses_dias[dif_meses] += 1
-            
-    pesos_originais = {0: 40, 1: 30, 2: 20, 3: 10}
-    peso_total_valido = sum(pesos_originais[m] for m in range(4) if meses_dias[m] > 0)
-    
-    media_ponderada_diaria = 0.0
-    if peso_total_valido > 0:
-        for m in range(4):
-            if meses_dias[m] > 0:
-                media_mes = meses_soma[m] / meses_dias[m]
-                peso_ajustado = pesos_originais[m] / peso_total_valido
-                media_ponderada_diaria += media_mes * peso_ajustado
-                
-    projecao_mensal = media_ponderada_diaria * 30
     
     def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
-    nome_mes = hoje.strftime('%B').title() if not hoje.strftime('%B').isdigit() else "Atual"
+    nome_mes_extenso = MESES_PT.get(hoje.strftime('%m'), "Atual").upper()
     
     texto = (
-        f"📅 <b>BALANÇO DO MÊS {nome_mes.upper()}</b>\n\n"
+        f"📅 <b>BALANÇO DO MÊS DE {nome_mes_extenso}</b>\n\n"
         f"• Comissão Aprovada: <b>R$ {f_br(aprovado_mes)}</b> <i>({qtd_aprovado_mes} pedidos)</i>\n"
         f"  └ <i>Shopee: R$ {f_br(shopee_mes)} | Vendedor: R$ {f_br(vendedor_mes)}</i>\n"
         f"• Comissão Pendente: <b>R$ {f_br(pendente_mes)}</b> <i>({qtd_pendente_mes} pedidos)</i>\n"
@@ -1689,7 +1671,8 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         total_m = dados_m["aprovado"] + dados_m["pendente"]
         
         try:
-            mes_fmt = datetime.strptime(mes, "%Y-%m").strftime("%b/%y").title()
+            ano_str, mes_str = mes.split('-')
+            mes_fmt = f"{MESES_PT.get(mes_str, mes_str)}/{ano_str[2:]}"
         except:
             mes_fmt = mes
 
@@ -1705,50 +1688,62 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
                 variacao_texto = " <b>(📈 +100%)</b>"
 
         texto += f"• <b>{mes_fmt}</b>: R$ {f_br(total_m)}{variacao_texto}\n"
-        texto += f"  ├ Conf: R$ {f_br(dados_m['aprovado'])} ({dados_m['qtd_aprovado']} ped)\n"
-        texto += f"  └ Pend: R$ {f_br(dados_m['pendente'])} ({dados_m['qtd_pendente']} ped)\n\n"
+        texto += f"  ├ Conf: R$ {f_br(dados_m['aprovado'])} ({dados_m['qtd_aprovado']} pedidos)\n"
+        texto += f"  └ Pend: R$ {f_br(dados_m['pendente'])} ({dados_m['qtd_pendente']} pedidos)\n\n"
 
     texto += (
         "📊 <b>MÉTRICAS DA VARREDURA (Últimos 30 Dias)</b>\n"
         f"• Taxa de Conversão: <b>{taxa_conversao:.1f}%</b>\n"
         f"• Pedidos Totais: {pagos} Pagos | {pendentes} Pendentes | {cancelados} Cancel.\n\n"
-        
-        "🧠 <b>ESTUDO ANALÍTICO PONDERADO</b>\n"
-        f"• Projeção do Mês (30d): <b>R$ {f_br(projecao_mensal)}</b>\n\n"
-        
-        "📈 <b>DESEMPENHO DIÁRIO (Últimos 14 Dias)</b>\n"
     )
-    
-    dias_exibicao = [(hoje - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(1, 15)]
-    melhor_dia_str = "N/A"
-    melhor_valor = 0.0
-    
-    for d in dias_exibicao:
-        if d in historico_limpo:
-            v_tot = historico_limpo[d]["aprovado"] + historico_limpo[d]["pendente"]
-            if v_tot > melhor_valor:
-                melhor_valor = v_tot
-                melhor_dia_str = d
-    
-    if melhor_valor > 0:
-        melhor_dia_br = datetime.strptime(melhor_dia_str, "%Y-%m-%d").strftime("%d/%m")
-        texto += f"🔥 <b>Melhor Dia:</b> {melhor_dia_br} (R$ {f_br(melhor_valor)})\n\n"
+
+    # --- CÁLCULOS DE RECORDES (TODO O HISTÓRICO) ---
+    todos_totais = {}
+    for d, vals in historico_limpo.items():
+        if d <= hoje.strftime("%Y-%m-%d"):
+            v_tot = vals.get("aprovado", 0.0) + vals.get("pendente", 0.0)
+            todos_totais[d] = v_tot
+            
+    if todos_totais:
+        melhor_dia_str = max(todos_totais, key=todos_totais.get)
+        pior_dia_str = min(todos_totais, key=todos_totais.get)
+        media_global = sum(todos_totais.values()) / len(todos_totais)
+        
+        melhor_dia_br = datetime.strptime(melhor_dia_str, "%Y-%m-%d").strftime("%d/%m/%Y")
+        pior_dia_br = datetime.strptime(pior_dia_str, "%Y-%m-%d").strftime("%d/%m/%Y")
+        
+        texto += "🏆 <b>RECORDES GLOBAIS (Todo o Histórico)</b>\n"
+        texto += f"• 🥇 Melhor Dia: {melhor_dia_br} (<b>R$ {f_br(todos_totais[melhor_dia_str])}</b>)\n"
+        texto += f"• 📉 Pior Dia: {pior_dia_br} (<b>R$ {f_br(todos_totais[pior_dia_str])}</b>)\n"
+        texto += f"• ⚖️ Média Diária: <b>R$ {f_br(media_global)}</b>\n\n"
+
+    # --- DESEMPENHO DIÁRIO (7 DIAS) ---
+    texto += "📈 <b>DESEMPENHO DIÁRIO (Últimos 7 Dias)</b>\n"
+    dias_exibicao = [(hoje - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(1, 8)]
     
     for d_str in dias_exibicao:
         d_br = datetime.strptime(d_str, "%Y-%m-%d").strftime("%d/%m")
         dados_dia = historico_limpo.get(d_str, {"aprovado": 0.0, "pendente": 0.0})
-        v_tot = dados_dia["aprovado"] + dados_dia["pendente"]
-        texto += f"• {d_br}: R$ {f_br(v_tot)}\n"
+        v_aprov = dados_dia.get("aprovado", 0.0)
+        v_pend = dados_dia.get("pendente", 0.0)
+        v_tot = v_aprov + v_pend
+        texto += f"• {d_br}: <b>R$ {f_br(v_tot)}</b> (✅ R$ {f_br(v_aprov)} | ⏳ R$ {f_br(v_pend)})\n"
+
+    # 1. Envia a mensagem de texto (garante que fique acima)
+    await msg_status.delete()
+    await message.answer(texto, parse_mode="HTML")
         
+    # 2. Desenha e envia o gráfico (ficará abaixo)
     try:
-        if EXIBIR_LOGS: logger.info("📊 Desenhando gráfico visual com matplotlib...")
+        if EXIBIR_LOGS: logger.info("📈 Desenhando gráfico visual com matplotlib...")
         meses_grafico = sorted(dados_por_mes.keys())
         valores_grafico = [dados_por_mes[m]["aprovado"] + dados_por_mes[m]["pendente"] for m in meses_grafico]
         
         labels_grafico = []
         for m in meses_grafico:
             try:
-                labels_grafico.append(datetime.strptime(m, "%Y-%m").strftime("%b").title())
+                ano_str, mes_str = m.split('-')
+                labels_grafico.append(MESES_ABREV_PT.get(mes_str, mes_str))
             except:
                 labels_grafico.append(m)
 
@@ -1775,14 +1770,11 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         buf.seek(0)
         plt.close()
         
-        if EXIBIR_LOGS: logger.info("✅ Gráfico gerado e convertido para bytes. Enviando mensagem para o Telegram...")
-        await message.answer_photo(photo=types.BufferedInputFile(buf.getvalue(), filename="grafico.png"), caption=texto, parse_mode="HTML")
-        await msg_status.delete()
+        if EXIBIR_LOGS: logger.info("✅ Imagem do gráfico enviada para o Telegram.")
+        await message.answer_photo(photo=types.BufferedInputFile(buf.getvalue(), filename="grafico.png"))
         
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao processar e enviar a imagem do gráfico: {e}")
-        await msg_status.delete()
-        await message.answer(texto, parse_mode="HTML")
 
 @dp.message(F.text == "Diagnóstico de IA 🧠", StateFilter("*"))
 async def gerar_relatorio_ia(message: types.Message, state: FSMContext):
