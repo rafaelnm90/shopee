@@ -1585,12 +1585,14 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             dt_db_str = dt_obj.strftime("%Y-%m-%d")
             
             if dt_db_str not in diario_api:
-                diario_api[dt_db_str] = {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0}
+                diario_api[dt_db_str] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
             
             tem_aprovado = False
             tem_pendente = False
+            tem_cancelado = False
             qtd_aprovado_atual = 0
             qtd_pendente_atual = 0
+            qtd_cancelado_atual = 0
             
             for order in orders:
                 status = order.get("orderStatus", "")
@@ -1600,6 +1602,8 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
                     qtd_aprovado_atual += 1
                 elif status == "CANCELLED":
                     cancelados += 1
+                    tem_cancelado = True
+                    qtd_cancelado_atual += 1
                 else:
                     pendentes += 1
                     tem_pendente = True
@@ -1613,6 +1617,9 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             elif tem_pendente:
                 diario_api[dt_db_str]["pendente"] += c_total
                 diario_api[dt_db_str]["qtd_pendente"] += qtd_pendente_atual
+            elif tem_cancelado:
+                diario_api[dt_db_str]["cancelado"] += c_total
+                diario_api[dt_db_str]["qtd_cancelado"] += qtd_cancelado_atual
     
     taxa_conversao = (pagos / total_pedidos * 100) if total_pedidos > 0 else 0.0
     
@@ -1622,12 +1629,13 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     
     for k, v in historico.items():
         try:
-            # Trava de limite de 3 meses removida para manter o ano inteiro no histórico
             if isinstance(v, float) or isinstance(v, int):
-                historico_limpo[k] = {"aprovado": float(v), "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0}
+                historico_limpo[k] = {"aprovado": float(v), "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
             else:
                 v.setdefault("qtd_aprovado", 0)
                 v.setdefault("qtd_pendente", 0)
+                v.setdefault("qtd_cancelado", 0)
+                v.setdefault("cancelado", 0.0)
                 v.setdefault("clicks", 0)
                 historico_limpo[k] = v
         except ValueError:
@@ -1637,19 +1645,20 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     
     for i in range(30):
         d_str = (hoje - timedelta(days=i)).strftime("%Y-%m-%d")
-        v_api = diario_api.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0})
-        v_antigo = historico_limpo.get(d_str, {"clicks": 0})
+        v_api = diario_api.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0})
+        v_antigo = historico_limpo.get(d_str, {"clicks": 0, "cancelado": 0.0, "qtd_cancelado": 0})
+        
         v_api["clicks"] = v_antigo.get("clicks", 0)
         
         v_total_api = v_api["aprovado"] + v_api["pendente"]
         
-        if v_total_api > 0 or v_api["clicks"] > 0:
+        if v_total_api > 0 or v_api["clicks"] > 0 or v_api["cancelado"] > 0:
             historico_limpo[d_str] = v_api
         else:
             if d_str == hoje.strftime("%Y-%m-%d") or d_str == ontem_str:
                 pass 
             elif d_str not in historico_limpo:
-                historico_limpo[d_str] = {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0}
+                historico_limpo[d_str] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
                 
     salvar_historico_financeiro(historico_limpo)
     
@@ -1675,18 +1684,22 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     clicks_mes = sum(v.get("clicks", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     total_mes = aprovado_mes + pendente_mes
     
-    # Agrupamento Mensal
+    # Agrupamento Mensal e Anual
     dados_por_mes = {}
+    dados_por_ano = {}
+    
     for data_str, dados_dia in historico_limpo.items():
         mes_key = data_str[:7]
+        ano_key = data_str[:4]
+        
         if mes_key not in dados_por_mes:
-            dados_por_mes[mes_key] = {"aprovado": 0.0, "pendente": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0}
+            dados_por_mes[mes_key] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
+        if ano_key not in dados_por_ano:
+            dados_por_ano[ano_key] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
             
-        dados_por_mes[mes_key]["aprovado"] += dados_dia.get("aprovado", 0.0)
-        dados_por_mes[mes_key]["pendente"] += dados_dia.get("pendente", 0.0)
-        dados_por_mes[mes_key]["qtd_aprovado"] += dados_dia.get("qtd_aprovado", 0)
-        dados_por_mes[mes_key]["qtd_pendente"] += dados_dia.get("qtd_pendente", 0)
-        dados_por_mes[mes_key]["clicks"] += dados_dia.get("clicks", 0)
+        for k in ["aprovado", "pendente", "cancelado", "qtd_aprovado", "qtd_pendente", "qtd_cancelado", "clicks"]:
+            dados_por_mes[mes_key][k] += dados_dia.get(k, 0)
+            dados_por_ano[ano_key][k] += dados_dia.get(k, 0)
     
     def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
@@ -1727,7 +1740,31 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
 
         texto += f"• <b>{mes_fmt}</b>: R$ {f_br(total_m)}{variacao_texto}\n"
         texto += f"  ├ Conf: R$ {f_br(dados_m['aprovado'])} ({dados_m['qtd_aprovado']} pedidos)\n"
-        texto += f"  └ Pend: R$ {f_br(dados_m['pendente'])} ({dados_m['qtd_pendente']} pedidos)\n\n"
+        texto += f"  ├ Pend: R$ {f_br(dados_m['pendente'])} ({dados_m['qtd_pendente']} pedidos)\n"
+        texto += f"  └ Canc: R$ {f_br(dados_m.get('cancelado', 0.0))} ({dados_m.get('qtd_cancelado', 0)} pedidos)\n\n"
+
+    texto += "🗓️ <b>HISTÓRICO ANUAL E CRESCIMENTO</b>\n"
+    anos_ordenados_desc = sorted(dados_por_ano.keys(), reverse=True)
+    
+    for i, ano in enumerate(anos_ordenados_desc):
+        dados_a = dados_por_ano[ano]
+        total_a = dados_a["aprovado"] + dados_a["pendente"]
+        
+        variacao_texto = ""
+        if i < len(anos_ordenados_desc) - 1:
+            ano_anterior = anos_ordenados_desc[i+1]
+            total_ant = dados_por_ano[ano_anterior]["aprovado"] + dados_por_ano[ano_anterior]["pendente"]
+            if total_ant > 0:
+                variacao = ((total_a - total_ant) / total_ant) * 100
+                sinal = "📈 +" if variacao >= 0 else "📉 "
+                variacao_texto = f" <b>({sinal}{variacao:.1f}%)</b>"
+            elif total_ant == 0 and total_a > 0:
+                variacao_texto = " <b>(📈 +100%)</b>"
+
+        texto += f"• <b>{ano}</b>: R$ {f_br(total_a)}{variacao_texto}\n"
+        texto += f"  ├ Conf: R$ {f_br(dados_a['aprovado'])} ({dados_a['qtd_aprovado']} pedidos)\n"
+        texto += f"  ├ Pend: R$ {f_br(dados_a['pendente'])} ({dados_a['qtd_pendente']} pedidos)\n"
+        texto += f"  └ Canc: R$ {f_br(dados_a.get('cancelado', 0.0))} ({dados_a.get('qtd_cancelado', 0)} pedidos)\n\n"
 
     texto += (
         "📊 <b>MÉTRICAS DA VARREDURA (Últimos 30 Dias)</b>\n"
@@ -1759,19 +1796,26 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     
     for d_str in dias_exibicao:
         d_br = datetime.strptime(d_str, "%Y-%m-%d").strftime("%d/%m")
-        dados_dia = historico_limpo.get(d_str, {"aprovado": 0.0, "pendente": 0.0})
+        dados_dia = historico_limpo.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0})
         v_aprov = dados_dia.get("aprovado", 0.0)
         v_pend = dados_dia.get("pendente", 0.0)
+        v_canc = dados_dia.get("cancelado", 0.0)
+        q_aprov = dados_dia.get("qtd_aprovado", 0)
+        q_pend = dados_dia.get("qtd_pendente", 0)
+        q_canc = dados_dia.get("qtd_cancelado", 0)
         v_tot = v_aprov + v_pend
-        texto += f"• {d_br}: <b>R$ {f_br(v_tot)}</b> (✅ R$ {f_br(v_aprov)} | ⏳ R$ {f_br(v_pend)})\n"
+        
+        texto += f"• <b>{d_br}</b>: R$ {f_br(v_tot)}\n"
+        texto += f"  ├ Conf: R$ {f_br(v_aprov)} ({q_aprov} pedidos)\n"
+        texto += f"  ├ Pend: R$ {f_br(v_pend)} ({q_pend} pedidos)\n"
+        texto += f"  └ Canc: R$ {f_br(v_canc)} ({q_canc} pedidos)\n\n"
 
     await msg_status.delete()
     await message.answer(texto, parse_mode="HTML")
         
     try:
-        if EXIBIR_LOGS: logger.info("📈 Desenhando gráfico visual com eixo duplo...")
+        if EXIBIR_LOGS: logger.info("📈 Desenhando gráfico visual estático de 12 meses...")
         
-        # Filtra todos os 12 meses do ano atual
         ano_atual_str = str(hoje.year)
         meses_ano_atual = [f"{ano_atual_str}-{str(m).zfill(2)}" for m in range(1, 13)]
         
@@ -1781,10 +1825,8 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         valores_pedidos = []
         
         for m in meses_ano_atual:
-            try:
-                labels_grafico.append(MESES_ABREV_PT.get(m.split('-')[1], m))
-            except:
-                labels_grafico.append(m)
+            mes_numero = m.split('-')[1]
+            labels_grafico.append(MESES_ABREV_PT.get(mes_numero, mes_numero))
                 
             if m in dados_por_mes:
                 valores_comissao.append(dados_por_mes[m]["aprovado"] + dados_por_mes[m]["pendente"])
@@ -1798,12 +1840,10 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         fig, ax1 = plt.subplots(figsize=(8, 5), facecolor='#f4f4f9')
         ax1.set_facecolor('#f4f4f9')
         
-        # Eixo 1 (Esquerda) - Gráfico de Barras para Comissão
         bars = ax1.bar(labels_grafico, valores_comissao, color='#ff6600', edgecolor='black', linewidth=0.5, label='Comissão Total (R$)')
         ax1.set_ylabel('Comissão (R$)', fontsize=10, color='#333333')
         ax1.grid(axis='y', linestyle='--', alpha=0.5)
         
-        # Eixo 2 (Direita) - Gráfico de Linhas para Clicks e Pedidos
         ax2 = ax1.twinx()
         line1, = ax2.plot(labels_grafico, valores_clicks, color='#0066cc', marker='o', linestyle='-', linewidth=2, label='Clicks')
         line2, = ax2.plot(labels_grafico, valores_pedidos, color='#2ca02c', marker='s', linestyle='--', linewidth=2, label='Pedidos Vendidos')
@@ -1811,13 +1851,11 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         
         plt.title(f'Evolução de Faturamento e Tráfego ({ano_atual_str})', fontsize=12, fontweight='bold', color='#333333')
         
-        # Rótulos dinâmicos nas barras
         for bar in bars:
             yval = bar.get_height()
             if yval > 0:
                 ax1.text(bar.get_x() + bar.get_width()/2, yval + (max(valores_comissao)*0.02), f'R${yval:.0f}', ha='center', va='bottom', fontsize=8, fontweight='bold', color='#333333')
 
-        # Combina as legendas
         lines_1, labels_1 = ax1.get_legend_handles_labels()
         lines_2, labels_2 = ax2.get_legend_handles_labels()
         ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper left', fontsize=9)
@@ -4962,7 +5000,7 @@ async def sincronizar_financeiro_horario():
     dados_ontem = historico.get(ontem_str)
     dados_anteontem = historico.get(anteontem_str)
     
-    if not dados_ontem or (isinstance(dados_ontem, dict) and dados_ontem["aprovado"] + dados_ontem["pendente"] == 0.0):
+    if not dados_ontem or (isinstance(dados_ontem, dict) and dados_ontem.get("aprovado", 0.0) + dados_ontem.get("pendente", 0.0) == 0.0):
         precisa_verificar = True
     if not dados_anteontem:
         precisa_verificar = True
@@ -4978,8 +5016,8 @@ async def sincronizar_financeiro_horario():
         return
         
     diario_api = {
-        ontem_str: {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0},
-        anteontem_str: {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0}
+        ontem_str: {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0},
+        anteontem_str: {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
     }
     
     for conv in conversoes:
@@ -4995,17 +5033,24 @@ async def sincronizar_financeiro_horario():
         if dt_db_str in diario_api:
             tem_aprovado = False
             tem_pendente = False
+            tem_cancelado = False
             for order in orders:
                 status = order.get("orderStatus", "")
                 if status == "COMPLETED": tem_aprovado = True
                 elif status == "PENDING": tem_pendente = True
+                elif status == "CANCELLED": tem_cancelado = True
             
             if tem_aprovado:
                 diario_api[dt_db_str]["aprovado"] += c_total
                 diario_api[dt_db_str]["shopee"] += c_shopee
                 diario_api[dt_db_str]["vendedor"] += c_extra
+                diario_api[dt_db_str]["qtd_aprovado"] += 1
             elif tem_pendente:
                 diario_api[dt_db_str]["pendente"] += c_total
+                diario_api[dt_db_str]["qtd_pendente"] += 1
+            elif tem_cancelado:
+                diario_api[dt_db_str]["cancelado"] += c_total
+                diario_api[dt_db_str]["qtd_cancelado"] += 1
                 
     houve_atualizacao = False
     
@@ -5013,14 +5058,15 @@ async def sincronizar_financeiro_horario():
         v_api = diario_api[d_str]
         v_total_api = v_api["aprovado"] + v_api["pendente"]
         
-        v_antigo = historico.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0})
-        if isinstance(v_antigo, float): v_antigo = {"aprovado": v_antigo, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0}
+        v_antigo = historico.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0})
+        if isinstance(v_antigo, float): v_antigo = {"aprovado": v_antigo, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
         
         v_total_antigo = v_antigo["aprovado"] + v_antigo["pendente"]
         
-        # Restaurar os valores de pedidos e clicks manuais preservando a estrutura
-        v_api["qtd_aprovado"] = v_antigo.get("qtd_aprovado", 0)
-        v_api["qtd_pendente"] = v_antigo.get("qtd_pendente", 0)
+        v_api["qtd_aprovado"] = v_antigo.get("qtd_aprovado", 0) if v_api["qtd_aprovado"] == 0 else v_api["qtd_aprovado"]
+        v_api["qtd_pendente"] = v_antigo.get("qtd_pendente", 0) if v_api["qtd_pendente"] == 0 else v_api["qtd_pendente"]
+        v_api["cancelado"] = v_antigo.get("cancelado", 0.0) if v_api["cancelado"] == 0.0 else v_api["cancelado"]
+        v_api["qtd_cancelado"] = v_antigo.get("qtd_cancelado", 0) if v_api["qtd_cancelado"] == 0 else v_api["qtd_cancelado"]
         v_api["clicks"] = v_antigo.get("clicks", 0)
         
         if v_total_api > 0 and v_total_api > v_total_antigo:
@@ -5028,7 +5074,7 @@ async def sincronizar_financeiro_horario():
             houve_atualizacao = True
             if EXIBIR_LOGS: logger.info(f"🔓 [Financeiro] Trancamento Positivo! O dia {d_str} saiu do zero para R$ {v_total_api:.2f}.")
         elif d_str == anteontem_str and not historico.get(d_str):
-            historico[d_str] = {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0}
+            historico[d_str] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
             houve_atualizacao = True
             if EXIBIR_LOGS: logger.info(f"🔒 [Financeiro] Trancamento por Tempo Limite! O dia {d_str} consolidado como R$ 0.00.")
         
