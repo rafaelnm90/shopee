@@ -22,6 +22,8 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, FSInputFile
 import subprocess
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from google import genai
+import matplotlib.pyplot as plt
+import io
 
 # 1. CONSTANTES E TOKENS
 API_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -1523,7 +1525,7 @@ def salvar_historico_financeiro(dados):
 @dp.message(F.text == "Relatório Financeiro 💰", StateFilter("*"))
 async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    msg_status = await message.answer("💰 Sincronizando API Financeira com a Shopee (Varredura de 30 dias)... Aguarde ⏳")
+    msg_status = await message.answer("💰 Sincronizando API Financeira com a Shopee e gerando gráficos... Aguarde ⏳")
     if EXIBIR_LOGS: logger.info("🚀 Iniciando extração profunda e atualização estrutural do banco de dados...")
     
     conversoes = await buscar_dados_financeiros_shopee(30)
@@ -1546,71 +1548,74 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             dt_db_str = dt_obj.strftime("%Y-%m-%d")
             
             if dt_db_str not in diario_api:
-                diario_api[dt_db_str] = {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0}
+                diario_api[dt_db_str] = {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0}
             
             tem_aprovado = False
             tem_pendente = False
+            qtd_aprovado_atual = 0
+            qtd_pendente_atual = 0
             
             for order in orders:
                 status = order.get("orderStatus", "")
                 if status == "COMPLETED":
                     pagos += 1
                     tem_aprovado = True
+                    qtd_aprovado_atual += 1
                 elif status == "CANCELLED":
                     cancelados += 1
                 else:
                     pendentes += 1
                     tem_pendente = True
+                    qtd_pendente_atual += 1
             
             if tem_aprovado:
                 diario_api[dt_db_str]["aprovado"] += c_total
                 diario_api[dt_db_str]["shopee"] += c_shopee
                 diario_api[dt_db_str]["vendedor"] += c_extra
+                diario_api[dt_db_str]["qtd_aprovado"] += qtd_aprovado_atual
             elif tem_pendente:
                 diario_api[dt_db_str]["pendente"] += c_total
+                diario_api[dt_db_str]["qtd_pendente"] += qtd_pendente_atual
     
     taxa_conversao = (pagos / total_pedidos * 100) if total_pedidos > 0 else 0.0
     
-    if EXIBIR_LOGS: logger.info("💾 Atualizando o banco de dados histórico local (formato 3D)...")
+    if EXIBIR_LOGS: logger.info("💾 Atualizando o banco de dados histórico local (formato 3D com métricas)...")
     historico = ler_historico_financeiro()
     
-    # Limpeza absoluta por mês civil (Retém estritamente o mês atual e os 3 anteriores)
     historico_limpo = {}
     
-    # Migração e filtragem baseada no calendário real
     for k, v in historico.items():
         try:
             dt_obj = datetime.strptime(k, "%Y-%m-%d")
             dif_meses = (hoje.year - dt_obj.year) * 12 + (hoje.month - dt_obj.month)
             
-            # Se a diferença de meses for entre 0 (atual) e 3, mantém no banco de dados
             if 0 <= dif_meses <= 3:
-                # Garante que dados velhos no formato float sejam convertidos para dicionário
                 if isinstance(v, float) or isinstance(v, int):
-                    historico_limpo[k] = {"aprovado": float(v), "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0}
+                    historico_limpo[k] = {"aprovado": float(v), "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0}
                 else:
+                    v.setdefault("qtd_aprovado", 0)
+                    v.setdefault("qtd_pendente", 0)
                     historico_limpo[k] = v
         except ValueError:
-            pass # Proteção: ignora silenciosamente dados com formato de data inválido
+            pass 
                 
-    # Mescla dados da API (30 dias)
     ontem_str = (hoje - timedelta(days=1)).strftime("%Y-%m-%d")
     
     for i in range(30):
         d_str = (hoje - timedelta(days=i)).strftime("%Y-%m-%d")
-        v_api = diario_api.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0})
+        v_api = diario_api.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0})
         v_total_api = v_api["aprovado"] + v_api["pendente"]
         
-        v_antigo = historico_limpo.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0})
+        v_antigo = historico_limpo.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0})
         v_total_antigo = v_antigo["aprovado"] + v_antigo["pendente"]
         
         if v_total_api > 0:
             historico_limpo[d_str] = v_api
         else:
             if d_str == hoje.strftime("%Y-%m-%d") or d_str == ontem_str:
-                pass # Período de carência
+                pass 
             elif d_str not in historico_limpo:
-                historico_limpo[d_str] = {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0}
+                historico_limpo[d_str] = {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0}
                 
     salvar_historico_financeiro(historico_limpo)
     
@@ -1620,22 +1625,33 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     except:
         pass
         
-    # --- CÁLCULOS DO MÊS ATUAL ---
     mes_atual = hoje.strftime("%Y-%m")
     aprovado_mes = sum(v["aprovado"] for k, v in historico_limpo.items() if k.startswith(mes_atual))
     pendente_mes = sum(v["pendente"] for k, v in historico_limpo.items() if k.startswith(mes_atual))
     shopee_mes = sum(v["shopee"] for k, v in historico_limpo.items() if k.startswith(mes_atual))
     vendedor_mes = sum(v["vendedor"] for k, v in historico_limpo.items() if k.startswith(mes_atual))
+    
+    qtd_aprovado_mes = sum(v.get("qtd_aprovado", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual))
+    qtd_pendente_mes = sum(v.get("qtd_pendente", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual))
     total_mes = aprovado_mes + pendente_mes
     
-    # --- CÁLCULO PONDERADO (IA) ---
     meses_soma = {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0}
     meses_dias = {0: 0, 1: 0, 2: 0, 3: 0}
     
+    if EXIBIR_LOGS: logger.info("📈 Consolidando os dados do histórico mensal para os cálculos de crescimento...")
+    dados_por_mes = {}
     for data_str, dados_dia in historico_limpo.items():
+        mes_key = data_str[:7]
+        if mes_key not in dados_por_mes:
+            dados_por_mes[mes_key] = {"aprovado": 0.0, "pendente": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0}
+            
+        dados_por_mes[mes_key]["aprovado"] += dados_dia.get("aprovado", 0.0)
+        dados_por_mes[mes_key]["pendente"] += dados_dia.get("pendente", 0.0)
+        dados_por_mes[mes_key]["qtd_aprovado"] += dados_dia.get("qtd_aprovado", 0)
+        dados_por_mes[mes_key]["qtd_pendente"] += dados_dia.get("qtd_pendente", 0)
+
         dt_obj = datetime.strptime(data_str, "%Y-%m-%d")
         dif_meses = (hoje.year - dt_obj.year) * 12 + (hoje.month - dt_obj.month)
-        
         if 0 <= dif_meses <= 3:
             meses_soma[dif_meses] += (dados_dia["aprovado"] + dados_dia["pendente"])
             meses_dias[dif_meses] += 1
@@ -1659,24 +1675,50 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     
     texto = (
         f"📅 <b>BALANÇO DO MÊS {nome_mes.upper()}</b>\n\n"
-        f"• Comissão Aprovada: <b>R$ {f_br(aprovado_mes)}</b>\n"
+        f"• Comissão Aprovada: <b>R$ {f_br(aprovado_mes)}</b> <i>({qtd_aprovado_mes} pedidos)</i>\n"
         f"  └ <i>Shopee: R$ {f_br(shopee_mes)} | Vendedor: R$ {f_br(vendedor_mes)}</i>\n"
-        f"• Comissão Pendente: <b>R$ {f_br(pendente_mes)}</b>\n"
+        f"• Comissão Pendente: <b>R$ {f_br(pendente_mes)}</b> <i>({qtd_pendente_mes} pedidos)</i>\n"
         f"• Total do Mês: <b>R$ {f_br(total_mes)}</b>\n\n"
+    )
+    
+    texto += "🗓️ <b>HISTÓRICO MENSAL E CRESCIMENTO</b>\n"
+    meses_ordenados_desc = sorted(dados_por_mes.keys(), reverse=True)
+    
+    for i, mes in enumerate(meses_ordenados_desc):
+        dados_m = dados_por_mes[mes]
+        total_m = dados_m["aprovado"] + dados_m["pendente"]
         
+        try:
+            mes_fmt = datetime.strptime(mes, "%Y-%m").strftime("%b/%y").title()
+        except:
+            mes_fmt = mes
+
+        variacao_texto = ""
+        if i < len(meses_ordenados_desc) - 1:
+            mes_anterior = meses_ordenados_desc[i+1]
+            total_ant = dados_por_mes[mes_anterior]["aprovado"] + dados_por_mes[mes_anterior]["pendente"]
+            if total_ant > 0:
+                variacao = ((total_m - total_ant) / total_ant) * 100
+                sinal = "📈 +" if variacao >= 0 else "📉 "
+                variacao_texto = f" <b>({sinal}{variacao:.1f}%)</b>"
+            elif total_ant == 0 and total_m > 0:
+                variacao_texto = " <b>(📈 +100%)</b>"
+
+        texto += f"• <b>{mes_fmt}</b>: R$ {f_br(total_m)}{variacao_texto}\n"
+        texto += f"  ├ Conf: R$ {f_br(dados_m['aprovado'])} ({dados_m['qtd_aprovado']} ped)\n"
+        texto += f"  └ Pend: R$ {f_br(dados_m['pendente'])} ({dados_m['qtd_pendente']} ped)\n\n"
+
+    texto += (
         "📊 <b>MÉTRICAS DA VARREDURA (Últimos 30 Dias)</b>\n"
         f"• Taxa de Conversão: <b>{taxa_conversao:.1f}%</b>\n"
-        f"• Pedidos: {pagos} Pagos | {pendentes} Pendentes | {cancelados} Cancelados\n\n"
+        f"• Pedidos Totais: {pagos} Pagos | {pendentes} Pendentes | {cancelados} Cancel.\n\n"
         
         "🧠 <b>ESTUDO ANALÍTICO PONDERADO</b>\n"
-        f"• Base de Análise: <b>{len(historico_limpo)} dias armazenados</b>\n"
-        f"• Ritmo Diário Ponderado: <b>R$ {f_br(media_ponderada_diaria)}</b> / dia\n"
         f"• Projeção do Mês (30d): <b>R$ {f_br(projecao_mensal)}</b>\n\n"
         
         "📈 <b>DESEMPENHO DIÁRIO (Últimos 14 Dias)</b>\n"
     )
     
-    # Encontrar melhor dia nos últimos 14 para o display visual
     dias_exibicao = [(hoje - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(1, 15)]
     melhor_dia_str = "N/A"
     melhor_valor = 0.0
@@ -1697,9 +1739,50 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         dados_dia = historico_limpo.get(d_str, {"aprovado": 0.0, "pendente": 0.0})
         v_tot = dados_dia["aprovado"] + dados_dia["pendente"]
         texto += f"• {d_br}: R$ {f_br(v_tot)}\n"
-            
-    await msg_status.delete()
-    await message.answer(texto, parse_mode="HTML")
+        
+    try:
+        if EXIBIR_LOGS: logger.info("📊 Desenhando gráfico visual com matplotlib...")
+        meses_grafico = sorted(dados_por_mes.keys())
+        valores_grafico = [dados_por_mes[m]["aprovado"] + dados_por_mes[m]["pendente"] for m in meses_grafico]
+        
+        labels_grafico = []
+        for m in meses_grafico:
+            try:
+                labels_grafico.append(datetime.strptime(m, "%Y-%m").strftime("%b").title())
+            except:
+                labels_grafico.append(m)
+
+        plt.figure(figsize=(7, 4), facecolor='#f4f4f9')
+        ax = plt.gca()
+        ax.set_facecolor('#f4f4f9')
+        
+        bars = plt.bar(labels_grafico, valores_grafico, color='#ff6600', edgecolor='black', linewidth=0.5)
+        plt.title('Evolução do Faturamento Mensal', fontsize=12, fontweight='bold', color='#333333')
+        plt.ylabel('Valor (R$)', fontsize=10, color='#333333')
+        plt.grid(axis='y', linestyle='--', alpha=0.5)
+        
+        for bar in bars:
+            yval = bar.get_height()
+            plt.text(bar.get_x() + bar.get_width()/2, yval + (max(valores_grafico)*0.02), f'R${yval:.0f}', ha='center', va='bottom', fontsize=9, fontweight='bold', color='#333333')
+
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+        plt.tight_layout()
+        
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', dpi=150)
+        buf.seek(0)
+        plt.close()
+        
+        if EXIBIR_LOGS: logger.info("✅ Gráfico gerado e convertido para bytes. Enviando mensagem para o Telegram...")
+        await message.answer_photo(photo=types.BufferedInputFile(buf.getvalue(), filename="grafico.png"), caption=texto, parse_mode="HTML")
+        await msg_status.delete()
+        
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Falha ao processar e enviar a imagem do gráfico: {e}")
+        await msg_status.delete()
+        await message.answer(texto, parse_mode="HTML")
 
 @dp.message(F.text == "Diagnóstico de IA 🧠", StateFilter("*"))
 async def gerar_relatorio_ia(message: types.Message, state: FSMContext):
