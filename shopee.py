@@ -472,26 +472,6 @@ async def executar_postagem_fila(item_id):
     # 🚀 CORREÇÃO: Trava de segurança absoluta baseada na abertura do expediente
     dados_rotina = ler_config_rotina()
     ultimo_bd = dados_rotina.get("ultimo_bom_dia", "")
-    ultimo_bn = dados_rotina.get("ultimo_boa_noite", "")
-    
-    # ✅ NOVA TRAVA MATINAL ABSOLUTA: O vídeo só sai se o Bom Dia já tiver sido postado
-    if ultimo_bd != hoje_str:
-        if EXIBIR_LOGS: logger.warning("🛑 Trava Ativada: O expediente ainda não foi aberto pelo 'Bom Dia'. Vídeo retido e empurrado 15 mins.")
-        from datetime import timedelta
-        novo_horario = agora + timedelta(minutes=15)
-        job_id_reagendado = f"job_fila_postagem_adiado_{int(agora.timestamp())}"
-        scheduler.add_job(executar_postagem_fila, 'date', run_date=novo_horario, args=[item_id], id=job_id_reagendado, replace_existing=True)
-        return
-
-    async def executar_postagem_fila(item_id):
-    if EXIBIR_LOGS: logger.info(f"📤 Iniciando processo de extração de vídeo da fila...")
-    
-    agora = datetime.now(fuso_horario)
-    hoje_str = agora.strftime("%Y-%m-%d")
-    
-    # 🚀 CORREÇÃO: Trava de segurança absoluta baseada na abertura do expediente
-    dados_rotina = ler_config_rotina()
-    ultimo_bd = dados_rotina.get("ultimo_bom_dia", "")
     hora_ultimo_bd = dados_rotina.get("hora_ultimo_bom_dia", "")
     ultimo_bn = dados_rotina.get("ultimo_boa_noite", "")
     
