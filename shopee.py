@@ -1548,7 +1548,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             dt_db_str = dt_obj.strftime("%Y-%m-%d")
             
             if dt_db_str not in diario_api:
-                diario_api[dt_db_str] = {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0}
+                diario_api[dt_db_str] = {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0}
             
             tem_aprovado = False
             tem_pendente = False
@@ -1585,16 +1585,14 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     
     for k, v in historico.items():
         try:
-            dt_obj = datetime.strptime(k, "%Y-%m-%d")
-            dif_meses = (hoje.year - dt_obj.year) * 12 + (hoje.month - dt_obj.month)
-            
-            if 0 <= dif_meses <= 3:
-                if isinstance(v, float) or isinstance(v, int):
-                    historico_limpo[k] = {"aprovado": float(v), "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0}
-                else:
-                    v.setdefault("qtd_aprovado", 0)
-                    v.setdefault("qtd_pendente", 0)
-                    historico_limpo[k] = v
+            # Trava de limite de 3 meses removida para manter o ano inteiro no histórico
+            if isinstance(v, float) or isinstance(v, int):
+                historico_limpo[k] = {"aprovado": float(v), "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0}
+            else:
+                v.setdefault("qtd_aprovado", 0)
+                v.setdefault("qtd_pendente", 0)
+                v.setdefault("clicks", 0)
+                historico_limpo[k] = v
         except ValueError:
             pass 
                 
@@ -1602,22 +1600,22 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     
     for i in range(30):
         d_str = (hoje - timedelta(days=i)).strftime("%Y-%m-%d")
-        v_api = diario_api.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0})
+        v_api = diario_api.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0})
+        v_antigo = historico_limpo.get(d_str, {"clicks": 0})
+        v_api["clicks"] = v_antigo.get("clicks", 0)
+        
         v_total_api = v_api["aprovado"] + v_api["pendente"]
         
-        v_antigo = historico_limpo.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0})
-        
-        if v_total_api > 0:
+        if v_total_api > 0 or v_api["clicks"] > 0:
             historico_limpo[d_str] = v_api
         else:
             if d_str == hoje.strftime("%Y-%m-%d") or d_str == ontem_str:
                 pass 
             elif d_str not in historico_limpo:
-                historico_limpo[d_str] = {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0}
+                historico_limpo[d_str] = {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0}
                 
     salvar_historico_financeiro(historico_limpo)
     
-    # --- TRADUTORES MANUAIS DE MESES ---
     MESES_PT = {
         "01": "Janeiro", "02": "Fevereiro", "03": "Março", "04": "Abril",
         "05": "Maio", "06": "Junho", "07": "Julho", "08": "Agosto",
@@ -1637,6 +1635,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     
     qtd_aprovado_mes = sum(v.get("qtd_aprovado", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     qtd_pendente_mes = sum(v.get("qtd_pendente", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
+    clicks_mes = sum(v.get("clicks", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     total_mes = aprovado_mes + pendente_mes
     
     # Agrupamento Mensal
@@ -1644,12 +1643,13 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     for data_str, dados_dia in historico_limpo.items():
         mes_key = data_str[:7]
         if mes_key not in dados_por_mes:
-            dados_por_mes[mes_key] = {"aprovado": 0.0, "pendente": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0}
+            dados_por_mes[mes_key] = {"aprovado": 0.0, "pendente": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0}
             
         dados_por_mes[mes_key]["aprovado"] += dados_dia.get("aprovado", 0.0)
         dados_por_mes[mes_key]["pendente"] += dados_dia.get("pendente", 0.0)
         dados_por_mes[mes_key]["qtd_aprovado"] += dados_dia.get("qtd_aprovado", 0)
         dados_por_mes[mes_key]["qtd_pendente"] += dados_dia.get("qtd_pendente", 0)
+        dados_por_mes[mes_key]["clicks"] += dados_dia.get("clicks", 0)
     
     def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
@@ -1660,7 +1660,8 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         f"• Comissão Aprovada: <b>R$ {f_br(aprovado_mes)}</b> <i>({qtd_aprovado_mes} pedidos)</i>\n"
         f"  └ <i>Shopee: R$ {f_br(shopee_mes)} | Vendedor: R$ {f_br(vendedor_mes)}</i>\n"
         f"• Comissão Pendente: <b>R$ {f_br(pendente_mes)}</b> <i>({qtd_pendente_mes} pedidos)</i>\n"
-        f"• Total do Mês: <b>R$ {f_br(total_mes)}</b>\n\n"
+        f"• Total do Mês: <b>R$ {f_br(total_mes)}</b>\n"
+        f"• Clicks do Mês: <b>{clicks_mes}</b>\n\n"
     )
     
     texto += "🗓️ <b>HISTÓRICO MENSAL E CRESCIMENTO</b>\n"
@@ -1697,7 +1698,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         f"• Pedidos Totais: {pagos} Pagos | {pendentes} Pendentes | {cancelados} Cancel.\n\n"
     )
 
-    # --- CÁLCULOS DE RECORDES (TODO O HISTÓRICO) ---
     todos_totais = {}
     for d, vals in historico_limpo.items():
         if d <= hoje.strftime("%Y-%m-%d"):
@@ -1717,7 +1717,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         texto += f"• 📉 Pior Dia: {pior_dia_br} (<b>R$ {f_br(todos_totais[pior_dia_str])}</b>)\n"
         texto += f"• ⚖️ Média Diária: <b>R$ {f_br(media_global)}</b>\n\n"
 
-    # --- DESEMPENHO DIÁRIO (7 DIAS) ---
     texto += "📈 <b>DESEMPENHO DIÁRIO (Últimos 7 Dias)</b>\n"
     dias_exibicao = [(hoje - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(1, 8)]
     
@@ -1729,39 +1728,65 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         v_tot = v_aprov + v_pend
         texto += f"• {d_br}: <b>R$ {f_br(v_tot)}</b> (✅ R$ {f_br(v_aprov)} | ⏳ R$ {f_br(v_pend)})\n"
 
-    # 1. Envia a mensagem de texto (garante que fique acima)
     await msg_status.delete()
     await message.answer(texto, parse_mode="HTML")
         
-    # 2. Desenha e envia o gráfico (ficará abaixo)
     try:
-        if EXIBIR_LOGS: logger.info("📈 Desenhando gráfico visual com matplotlib...")
-        meses_grafico = sorted(dados_por_mes.keys())
-        valores_grafico = [dados_por_mes[m]["aprovado"] + dados_por_mes[m]["pendente"] for m in meses_grafico]
+        if EXIBIR_LOGS: logger.info("📈 Desenhando gráfico visual com eixo duplo...")
+        
+        # Filtra todos os 12 meses do ano atual
+        ano_atual_str = str(hoje.year)
+        meses_ano_atual = [f"{ano_atual_str}-{str(m).zfill(2)}" for m in range(1, 13)]
         
         labels_grafico = []
-        for m in meses_grafico:
+        valores_comissao = []
+        valores_clicks = []
+        valores_pedidos = []
+        
+        for m in meses_ano_atual:
             try:
-                ano_str, mes_str = m.split('-')
-                labels_grafico.append(MESES_ABREV_PT.get(mes_str, mes_str))
+                labels_grafico.append(MESES_ABREV_PT.get(m.split('-')[1], m))
             except:
                 labels_grafico.append(m)
+                
+            if m in dados_por_mes:
+                valores_comissao.append(dados_por_mes[m]["aprovado"] + dados_por_mes[m]["pendente"])
+                valores_pedidos.append(dados_por_mes[m].get("qtd_aprovado", 0) + dados_por_mes[m].get("qtd_pendente", 0))
+                valores_clicks.append(dados_por_mes[m].get("clicks", 0))
+            else:
+                valores_comissao.append(0.0)
+                valores_pedidos.append(0)
+                valores_clicks.append(0)
 
-        plt.figure(figsize=(7, 4), facecolor='#f4f4f9')
-        ax = plt.gca()
-        ax.set_facecolor('#f4f4f9')
+        fig, ax1 = plt.subplots(figsize=(8, 5), facecolor='#f4f4f9')
+        ax1.set_facecolor('#f4f4f9')
         
-        bars = plt.bar(labels_grafico, valores_grafico, color='#ff6600', edgecolor='black', linewidth=0.5)
-        plt.title('Evolução do Faturamento Mensal', fontsize=12, fontweight='bold', color='#333333')
-        plt.ylabel('Valor (R$)', fontsize=10, color='#333333')
-        plt.grid(axis='y', linestyle='--', alpha=0.5)
+        # Eixo 1 (Esquerda) - Gráfico de Barras para Comissão
+        bars = ax1.bar(labels_grafico, valores_comissao, color='#ff6600', edgecolor='black', linewidth=0.5, label='Comissão Total (R$)')
+        ax1.set_ylabel('Comissão (R$)', fontsize=10, color='#333333')
+        ax1.grid(axis='y', linestyle='--', alpha=0.5)
         
+        # Eixo 2 (Direita) - Gráfico de Linhas para Clicks e Pedidos
+        ax2 = ax1.twinx()
+        line1, = ax2.plot(labels_grafico, valores_clicks, color='#0066cc', marker='o', linestyle='-', linewidth=2, label='Clicks')
+        line2, = ax2.plot(labels_grafico, valores_pedidos, color='#2ca02c', marker='s', linestyle='--', linewidth=2, label='Pedidos Vendidos')
+        ax2.set_ylabel('Quantidade (Clicks / Pedidos)', fontsize=10, color='#333333')
+        
+        plt.title(f'Evolução de Faturamento e Tráfego ({ano_atual_str})', fontsize=12, fontweight='bold', color='#333333')
+        
+        # Rótulos dinâmicos nas barras
         for bar in bars:
             yval = bar.get_height()
-            plt.text(bar.get_x() + bar.get_width()/2, yval + (max(valores_grafico)*0.02), f'R${yval:.0f}', ha='center', va='bottom', fontsize=9, fontweight='bold', color='#333333')
+            if yval > 0:
+                ax1.text(bar.get_x() + bar.get_width()/2, yval + (max(valores_comissao)*0.02), f'R${yval:.0f}', ha='center', va='bottom', fontsize=8, fontweight='bold', color='#333333')
 
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
+        # Combina as legendas
+        lines_1, labels_1 = ax1.get_legend_handles_labels()
+        lines_2, labels_2 = ax2.get_legend_handles_labels()
+        ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper left', fontsize=9)
+
+        ax1.spines['top'].set_visible(False)
+        ax2.spines['top'].set_visible(False)
 
         plt.tight_layout()
         
@@ -4897,7 +4922,6 @@ async def sincronizar_financeiro_horario():
     
     precisa_verificar = False
     
-    # Compatibilidade com o novo dicionário 3D
     dados_ontem = historico.get(ontem_str)
     dados_anteontem = historico.get(anteontem_str)
     
@@ -4917,8 +4941,8 @@ async def sincronizar_financeiro_horario():
         return
         
     diario_api = {
-        ontem_str: {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0},
-        anteontem_str: {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0}
+        ontem_str: {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0},
+        anteontem_str: {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0}
     }
     
     for conv in conversoes:
@@ -4952,18 +4976,24 @@ async def sincronizar_financeiro_horario():
         v_api = diario_api[d_str]
         v_total_api = v_api["aprovado"] + v_api["pendente"]
         
-        v_antigo = historico.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0})
-        if isinstance(v_antigo, float): v_antigo = {"aprovado": v_antigo, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0}
+        v_antigo = historico.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0})
+        if isinstance(v_antigo, float): v_antigo = {"aprovado": v_antigo, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0}
+        
         v_total_antigo = v_antigo["aprovado"] + v_antigo["pendente"]
+        
+        # Restaurar os valores de pedidos e clicks manuais preservando a estrutura
+        v_api["qtd_aprovado"] = v_antigo.get("qtd_aprovado", 0)
+        v_api["qtd_pendente"] = v_antigo.get("qtd_pendente", 0)
+        v_api["clicks"] = v_antigo.get("clicks", 0)
         
         if v_total_api > 0 and v_total_api > v_total_antigo:
             historico[d_str] = v_api
             houve_atualizacao = True
             if EXIBIR_LOGS: logger.info(f"🔓 [Financeiro] Trancamento Positivo! O dia {d_str} saiu do zero para R$ {v_total_api:.2f}.")
         elif d_str == anteontem_str and not historico.get(d_str):
-            historico[d_str] = {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0}
+            historico[d_str] = {"aprovado": 0.0, "pendente": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "clicks": 0}
             houve_atualizacao = True
-            if EXIBIR_LOGS: logger.info(f"🔒 [Financeiro] Trancamento por Tempo Limite! O dia {d_str} foi consolidado definitivamente como R$ 0.00.")
+            if EXIBIR_LOGS: logger.info(f"🔒 [Financeiro] Trancamento por Tempo Limite! O dia {d_str} consolidado como R$ 0.00.")
         
     if houve_atualizacao:
         salvar_historico_financeiro(historico)
