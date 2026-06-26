@@ -469,20 +469,62 @@ async def executar_postagem_fila(item_id):
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
     
-    # 🚀 CORREÇÃO: Trava de segurança baseada nos limites dinâmicos do painel
+    # 🚀 CORREÇÃO: Trava de segurança absoluta baseada na abertura do expediente
     dados_rotina = ler_config_rotina()
-    hora_abertura_videos = dados_rotina.get("bom_dia", {}).get("fim", 9)
     ultimo_bd = dados_rotina.get("ultimo_bom_dia", "")
     ultimo_bn = dados_rotina.get("ultimo_boa_noite", "")
     
-    # Trava Matinal: Impede a postagem se ainda for exclusividade da saudação, a menos que o Bom Dia já tenha sido forçado
-    if agora.hour < hora_abertura_videos and ultimo_bd != hoje_str:
-        if EXIBIR_LOGS: logger.warning(f"🛑 Trava Ativada: A janela de vídeos só abre às {hora_abertura_videos}h. Vídeo retido e empurrado 15 mins.")
+    # ✅ NOVA TRAVA MATINAL ABSOLUTA: O vídeo só sai se o Bom Dia já tiver sido postado
+    if ultimo_bd != hoje_str:
+        if EXIBIR_LOGS: logger.warning("🛑 Trava Ativada: O expediente ainda não foi aberto pelo 'Bom Dia'. Vídeo retido e empurrado 15 mins.")
         from datetime import timedelta
         novo_horario = agora + timedelta(minutes=15)
         job_id_reagendado = f"job_fila_postagem_adiado_{int(agora.timestamp())}"
         scheduler.add_job(executar_postagem_fila, 'date', run_date=novo_horario, args=[item_id], id=job_id_reagendado, replace_existing=True)
         return
+
+    async def executar_postagem_fila(item_id):
+    if EXIBIR_LOGS: logger.info(f"📤 Iniciando processo de extração de vídeo da fila...")
+    
+    agora = datetime.now(fuso_horario)
+    hoje_str = agora.strftime("%Y-%m-%d")
+    
+    # 🚀 CORREÇÃO: Trava de segurança absoluta baseada na abertura do expediente
+    dados_rotina = ler_config_rotina()
+    ultimo_bd = dados_rotina.get("ultimo_bom_dia", "")
+    hora_ultimo_bd = dados_rotina.get("hora_ultimo_bom_dia", "")
+    ultimo_bn = dados_rotina.get("ultimo_boa_noite", "")
+    
+    # ✅ NOVA TRAVA MATINAL ABSOLUTA E MARGEM DE RESPIRO
+    if ultimo_bd != hoje_str:
+        if EXIBIR_LOGS: logger.warning("🛑 Trava Ativada: O expediente ainda não foi aberto pelo 'Bom Dia'. Retendo vídeo...")
+        from datetime import timedelta
+        
+        # Inteligência: Espia a agenda para empurrar o vídeo para 15 minutos DEPOIS do Bom Dia
+        job_bd = scheduler.get_job('job_rotina_bom_dia_0')
+        if job_bd and getattr(job_bd, 'next_run_time', None):
+            tempo_bom_dia = job_bd.next_run_time.astimezone(fuso_horario)
+            novo_horario = max(agora + timedelta(minutes=15), tempo_bom_dia + timedelta(minutes=15))
+        else:
+            novo_horario = agora + timedelta(minutes=15)
+            
+        job_id_reagendado = f"job_fila_postagem_adiado_{int(agora.timestamp())}"
+        scheduler.add_job(executar_postagem_fila, 'date', run_date=novo_horario, args=[item_id], id=job_id_reagendado, replace_existing=True)
+        return
+        
+    elif hora_ultimo_bd:
+        from datetime import datetime, timedelta
+        hora_bd_obj = datetime.strptime(hora_ultimo_bd, "%H:%M").time()
+        momento_bd = datetime.combine(agora.date(), hora_bd_obj).replace(tzinfo=fuso_horario)
+        minutos_passados = (agora - momento_bd).total_seconds() / 60
+        
+        if minutos_passados < 10:
+            if EXIBIR_LOGS: logger.warning(f"🛑 Trava de Respiro: O 'Bom Dia' saiu há apenas {int(minutos_passados)} min. Empurrando vídeo para respeitar a margem de 10 a 15 min.")
+            novo_horario = momento_bd + timedelta(minutes=12)
+            if novo_horario <= agora: novo_horario = agora + timedelta(minutes=2)
+            job_id_reagendado = f"job_fila_postagem_adiado_{int(agora.timestamp())}"
+            scheduler.add_job(executar_postagem_fila, 'date', run_date=novo_horario, args=[item_id], id=job_id_reagendado, replace_existing=True)
+            return
 
     # Trava Noturna Dinâmica: Avalia o horário exato do Boa Noite agendado, e não apenas a hora estática
     job_bn = scheduler.get_job('job_rotina_boa_noite_0')
@@ -812,7 +854,8 @@ async def disparar_mensagem(tipo, forcar=False):
     elif not is_viral and dados_rotina.get("pausado", False) and not forcar:
         if EXIBIR_LOGS: logger.info(f"🛑 Disparo abortado ({tipo}): As rotinas do PRINCIPAL estão pausadas no sistema.")
         return
-        
+
+    agora_tz = datetime.now(fuso_horario)
     hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
     
     # 🚀 LÓGICA DE TRAVA ABSOLUTA E EXPEDIENTE
@@ -823,8 +866,26 @@ async def disparar_mensagem(tipo, forcar=False):
         if EXIBIR_LOGS: logger.warning("🛑 Bloqueio Anti-Acidente: O 'Boa Noite' já foi enviado hoje.")
         return
         
-    # ✅ NOVA TRAVA: Se o Boa Noite já foi acionado (manual ou automático), cancela os disparos das outras rotinas
+    # ✅ NOVA TRAVA: Controle absoluto do Expediente e Margem de Respiro
     if tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
+        if dados_rotina.get("ultimo_bom_dia") != hoje_str:
+            if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): O expediente ainda não foi aberto pelo 'Bom Dia'.")
+            return
+            
+        hora_ultimo_bd = dados_rotina.get("hora_ultimo_bom_dia", "")
+        if hora_ultimo_bd:
+            from datetime import datetime, timedelta
+            hora_bd_obj = datetime.strptime(hora_ultimo_bd, "%H:%M").time()
+            momento_bd = datetime.combine(agora_tz.date(), hora_bd_obj).replace(tzinfo=fuso_horario)
+            minutos_passados = (agora_tz - momento_bd).total_seconds() / 60
+            
+            if minutos_passados < 10:
+                if EXIBIR_LOGS: logger.warning(f"🛑 Disparo ({tipo}) adiado: O 'Bom Dia' saiu há apenas {int(minutos_passados)} min. Reagendando para respeitar a margem de segurança.")
+                novo_horario = momento_bd + timedelta(minutes=random.randint(12, 25))
+                job_id = f"job_rotina_{tipo}_reagendado_{int(agora_tz.timestamp())}"
+                scheduler.add_job(disparar_mensagem, 'date', run_date=novo_horario, args=[tipo], id=job_id, replace_existing=True)
+                return
+                
         if dados_rotina.get("ultimo_boa_noite") == hoje_str:
             if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): O expediente já foi encerrado pelo 'Boa Noite'.")
             return
@@ -1233,7 +1294,11 @@ def agendar_tarefas_diarias():
             minutos_offset = random.randint(30, 90) if tipo == ultimo_tipo_agendado else random.randint(15, 60)
             horario_fallback = agora + timedelta(minutes=minutos_offset)
             
-            # 🚧 Impede que o desvio force a porta de saída
+            # 🚧 Impede que o desvio fure a porta de entrada (Bom Dia)
+            if horario_fallback <= fronteira_inicial:
+                horario_fallback = fronteira_inicial + timedelta(minutes=random.randint(15, 45))
+                
+            # 🚧 Impede que o desvio force a porta de saída (Boa Noite)
             if horario_fallback >= fronteira_final:
                 horario_fallback = fronteira_final - timedelta(minutes=random.randint(5, 30))
                 if horario_fallback <= agora: horario_fallback = agora + timedelta(minutes=2)
@@ -1301,19 +1366,16 @@ def agendar_tarefas_diarias():
             horario_candidato = agora + timedelta(minutes=random.randint(2, 10))
             
         # ✅ NOVA TRAVA ANTI-COLISÃO ISOLADA (Evita choque visual apenas dentro do próprio Mundo Viral - margem de 2 min)
-            conflito_geral = False
-            for job_existente in scheduler.get_jobs():
-                if getattr(job_existente, 'next_run_time', None) and any(rv in job_existente.id for rv in rotinas_virais_lista):
-                    tempo_existente = job_existente.next_run_time.astimezone(fuso_horario)
-                    if abs((candidato - tempo_existente).total_seconds()) < 120:
-                        conflito_geral = True
-                        break
-                        
-            if conflito_geral:
-                candidato += timedelta(minutes=random.randint(3, 8))
-                
-            horario_candidato = candidato
-            break # Passou pelas travas cronológicas, sai do loop
+        conflito_geral = False
+        for job_existente in scheduler.get_jobs():
+            if getattr(job_existente, 'next_run_time', None) and any(rv in job_existente.id for rv in rotinas_virais_lista):
+                tempo_existente = job_existente.next_run_time.astimezone(fuso_horario)
+                if abs((horario_candidato - tempo_existente).total_seconds()) < 120:
+                    conflito_geral = True
+                    break
+                    
+        if conflito_geral:
+            horario_candidato += timedelta(minutes=random.randint(3, 8))
             
         job_id = f"job_rotina_{tipo}_{indice}"
         scheduler.add_job(disparar_mensagem, 'date', run_date=horario_candidato, args=[tipo], id=job_id, replace_existing=True)
