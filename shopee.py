@@ -1593,22 +1593,22 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             c_shopee_frac = c_shopee / qtd_itens
             c_extra_frac = c_extra / qtd_itens
 
-            for order in orders:
-                status = order.get("orderStatus", "")
+           for order in orders:
+                status = order.get("orderStatus", "").upper()
                 if status == "COMPLETED":
                     pagos += 1
                     diario_api[dt_db_str]["aprovado"] += c_total_frac
                     diario_api[dt_db_str]["shopee"] += c_shopee_frac
                     diario_api[dt_db_str]["vendedor"] += c_extra_frac
                     diario_api[dt_db_str]["qtd_aprovado"] += 1
-                elif status == "CANCELLED":
-                    cancelados += 1
-                    diario_api[dt_db_str]["cancelado"] += c_total_frac
-                    diario_api[dt_db_str]["qtd_cancelado"] += 1
-                else:
+                elif status == "PENDING":
                     pendentes += 1
                     diario_api[dt_db_str]["pendente"] += c_total_frac
                     diario_api[dt_db_str]["qtd_pendente"] += 1
+                elif status in ["CANCELLED", "INVALID", "REJECTED"]:
+                    cancelados += 1
+                    diario_api[dt_db_str]["cancelado"] += c_total_frac
+                    diario_api[dt_db_str]["qtd_cancelado"] += 1
     
     taxa_conversao = (pagos / total_pedidos * 100) if total_pedidos > 0 else 0.0
     
@@ -5046,18 +5046,18 @@ async def sincronizar_financeiro_horario():
             c_extra_frac = c_extra / qtd_itens
 
             for order in orders:
-                status = order.get("orderStatus", "")
+                status = order.get("orderStatus", "").upper()
                 if status == "COMPLETED":
                     diario_api[dt_db_str]["aprovado"] += c_total_frac
                     diario_api[dt_db_str]["shopee"] += c_shopee_frac
                     diario_api[dt_db_str]["vendedor"] += c_extra_frac
                     diario_api[dt_db_str]["qtd_aprovado"] += 1
-                elif status == "CANCELLED":
-                    diario_api[dt_db_str]["cancelado"] += c_total_frac
-                    diario_api[dt_db_str]["qtd_cancelado"] += 1
-                else:
+                elif status == "PENDING":
                     diario_api[dt_db_str]["pendente"] += c_total_frac
                     diario_api[dt_db_str]["qtd_pendente"] += 1
+                elif status in ["CANCELLED", "INVALID", "REJECTED"]:
+                    diario_api[dt_db_str]["cancelado"] += c_total_frac
+                    diario_api[dt_db_str]["qtd_cancelado"] += 1
                 
     houve_atualizacao = False
     
