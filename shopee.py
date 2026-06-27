@@ -1605,7 +1605,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
                     pendentes += 1
                     diario_api[dt_db_str]["pendente"] += c_total_frac
                     diario_api[dt_db_str]["qtd_pendente"] += 1
-                elif status in ["CANCELLED", "INVALID", "REJECTED"]:
+                else:
                     cancelados += 1
                     diario_api[dt_db_str]["cancelado"] += c_total_frac
                     diario_api[dt_db_str]["qtd_cancelado"] += 1
@@ -5055,7 +5055,7 @@ async def sincronizar_financeiro_horario():
                 elif status == "PENDING":
                     diario_api[dt_db_str]["pendente"] += c_total_frac
                     diario_api[dt_db_str]["qtd_pendente"] += 1
-                elif status in ["CANCELLED", "INVALID", "REJECTED"]:
+                else:
                     diario_api[dt_db_str]["cancelado"] += c_total_frac
                     diario_api[dt_db_str]["qtd_cancelado"] += 1
                 
