@@ -1587,39 +1587,28 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             if dt_db_str not in diario_api:
                 diario_api[dt_db_str] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
             
-            tem_aprovado = False
-            tem_pendente = False
-            tem_cancelado = False
-            qtd_aprovado_atual = 0
-            qtd_pendente_atual = 0
-            qtd_cancelado_atual = 0
-            
+            if EXIBIR_LOGS: logger.info("🧮 Analisando transação e desmembrando carrinho misto...")
+            qtd_itens = len(orders)
+            c_total_frac = c_total / qtd_itens
+            c_shopee_frac = c_shopee / qtd_itens
+            c_extra_frac = c_extra / qtd_itens
+
             for order in orders:
                 status = order.get("orderStatus", "")
                 if status == "COMPLETED":
                     pagos += 1
-                    tem_aprovado = True
-                    qtd_aprovado_atual += 1
+                    diario_api[dt_db_str]["aprovado"] += c_total_frac
+                    diario_api[dt_db_str]["shopee"] += c_shopee_frac
+                    diario_api[dt_db_str]["vendedor"] += c_extra_frac
+                    diario_api[dt_db_str]["qtd_aprovado"] += 1
                 elif status == "CANCELLED":
                     cancelados += 1
-                    tem_cancelado = True
-                    qtd_cancelado_atual += 1
+                    diario_api[dt_db_str]["cancelado"] += c_total_frac
+                    diario_api[dt_db_str]["qtd_cancelado"] += 1
                 else:
                     pendentes += 1
-                    tem_pendente = True
-                    qtd_pendente_atual += 1
-            
-            if tem_aprovado:
-                diario_api[dt_db_str]["aprovado"] += c_total
-                diario_api[dt_db_str]["shopee"] += c_shopee
-                diario_api[dt_db_str]["vendedor"] += c_extra
-                diario_api[dt_db_str]["qtd_aprovado"] += qtd_aprovado_atual
-            elif tem_pendente:
-                diario_api[dt_db_str]["pendente"] += c_total
-                diario_api[dt_db_str]["qtd_pendente"] += qtd_pendente_atual
-            elif tem_cancelado:
-                diario_api[dt_db_str]["cancelado"] += c_total
-                diario_api[dt_db_str]["qtd_cancelado"] += qtd_cancelado_atual
+                    diario_api[dt_db_str]["pendente"] += c_total_frac
+                    diario_api[dt_db_str]["qtd_pendente"] += 1
     
     taxa_conversao = (pagos / total_pedidos * 100) if total_pedidos > 0 else 0.0
     
@@ -5050,26 +5039,25 @@ async def sincronizar_financeiro_horario():
         dt_db_str = dt_obj.strftime("%Y-%m-%d")
         
         if dt_db_str in diario_api:
-            tem_aprovado = False
-            tem_pendente = False
-            tem_cancelado = False
+            if EXIBIR_LOGS: logger.info("🧮 Sincronizando e desmembrando transação em background...")
+            qtd_itens = len(orders)
+            c_total_frac = c_total / qtd_itens
+            c_shopee_frac = c_shopee / qtd_itens
+            c_extra_frac = c_extra / qtd_itens
+
             for order in orders:
                 status = order.get("orderStatus", "")
-                if status == "COMPLETED": tem_aprovado = True
-                elif status == "PENDING": tem_pendente = True
-                elif status == "CANCELLED": tem_cancelado = True
-            
-            if tem_aprovado:
-                diario_api[dt_db_str]["aprovado"] += c_total
-                diario_api[dt_db_str]["shopee"] += c_shopee
-                diario_api[dt_db_str]["vendedor"] += c_extra
-                diario_api[dt_db_str]["qtd_aprovado"] += 1
-            elif tem_pendente:
-                diario_api[dt_db_str]["pendente"] += c_total
-                diario_api[dt_db_str]["qtd_pendente"] += 1
-            elif tem_cancelado:
-                diario_api[dt_db_str]["cancelado"] += c_total
-                diario_api[dt_db_str]["qtd_cancelado"] += 1
+                if status == "COMPLETED":
+                    diario_api[dt_db_str]["aprovado"] += c_total_frac
+                    diario_api[dt_db_str]["shopee"] += c_shopee_frac
+                    diario_api[dt_db_str]["vendedor"] += c_extra_frac
+                    diario_api[dt_db_str]["qtd_aprovado"] += 1
+                elif status == "CANCELLED":
+                    diario_api[dt_db_str]["cancelado"] += c_total_frac
+                    diario_api[dt_db_str]["qtd_cancelado"] += 1
+                else:
+                    diario_api[dt_db_str]["pendente"] += c_total_frac
+                    diario_api[dt_db_str]["qtd_pendente"] += 1
                 
     houve_atualizacao = False
     
@@ -5088,10 +5076,10 @@ async def sincronizar_financeiro_horario():
         v_api["qtd_cancelado"] = v_antigo.get("qtd_cancelado", 0) if v_api["qtd_cancelado"] == 0 else v_api["qtd_cancelado"]
         v_api["clicks"] = v_antigo.get("clicks", 0)
         
-        if v_total_api > 0 and v_total_api > v_total_antigo:
+        if v_total_api != v_total_antigo or v_api["qtd_cancelado"] != v_antigo.get("qtd_cancelado", 0):
             historico[d_str] = v_api
             houve_atualizacao = True
-            if EXIBIR_LOGS: logger.info(f"🔓 [Financeiro] Trancamento Positivo! O dia {d_str} saiu do zero para R$ {v_total_api:.2f}.")
+            if EXIBIR_LOGS: logger.info(f"🔓 [Financeiro] Atualização salva! O dia {d_str} sofreu variação real (Atual: R$ {v_total_api:.2f} | Anterior: R$ {v_total_antigo:.2f}).")
         elif d_str == anteontem_str and not historico.get(d_str):
             historico[d_str] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
             houve_atualizacao = True
