@@ -1738,10 +1738,16 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             elif total_ant == 0 and total_m > 0:
                 variacao_texto = " <b>(📈 +100%)</b>"
 
+        if EXIBIR_LOGS: logger.info(f"🧮 Calculando proporções do mês {mes_fmt}...")
+        total_pedidos_m = dados_m['qtd_aprovado'] + dados_m['qtd_pendente'] + dados_m.get('qtd_cancelado', 0)
+        pct_aprov_m = (dados_m['qtd_aprovado'] / total_pedidos_m * 100) if total_pedidos_m > 0 else 0.0
+        pct_pend_m = (dados_m['qtd_pendente'] / total_pedidos_m * 100) if total_pedidos_m > 0 else 0.0
+        pct_canc_m = (dados_m.get('qtd_cancelado', 0) / total_pedidos_m * 100) if total_pedidos_m > 0 else 0.0
+
         texto += f"• <b>{mes_fmt}</b>: R$ {f_br(total_m)}{variacao_texto}\n"
-        texto += f"  ├ Conf: R$ {f_br(dados_m['aprovado'])} ({dados_m['qtd_aprovado']} pedidos)\n"
-        texto += f"  ├ Pend: R$ {f_br(dados_m['pendente'])} ({dados_m['qtd_pendente']} pedidos)\n"
-        texto += f"  └ Canc: R$ {f_br(dados_m.get('cancelado', 0.0))} ({dados_m.get('qtd_cancelado', 0)} pedidos)\n\n"
+        texto += f"  ├ Conf: R$ {f_br(dados_m['aprovado'])} ({dados_m['qtd_aprovado']} pedidos - {pct_aprov_m:.1f}%)\n"
+        texto += f"  ├ Pend: R$ {f_br(dados_m['pendente'])} ({dados_m['qtd_pendente']} pedidos - {pct_pend_m:.1f}%)\n"
+        texto += f"  └ Canc: R$ {f_br(dados_m.get('cancelado', 0.0))} ({dados_m.get('qtd_cancelado', 0)} pedidos - {pct_canc_m:.1f}%)\n\n"
 
     texto += "🗓️ <b>HISTÓRICO ANUAL E CRESCIMENTO</b>\n"
     anos_ordenados_desc = sorted(dados_por_ano.keys(), reverse=True)
@@ -1761,10 +1767,16 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             elif total_ant == 0 and total_a > 0:
                 variacao_texto = " <b>(📈 +100%)</b>"
 
+        if EXIBIR_LOGS: logger.info(f"🧮 Calculando proporções do ano {ano}...")
+        total_pedidos_a = dados_a['qtd_aprovado'] + dados_a['qtd_pendente'] + dados_a.get('qtd_cancelado', 0)
+        pct_aprov_a = (dados_a['qtd_aprovado'] / total_pedidos_a * 100) if total_pedidos_a > 0 else 0.0
+        pct_pend_a = (dados_a['qtd_pendente'] / total_pedidos_a * 100) if total_pedidos_a > 0 else 0.0
+        pct_canc_a = (dados_a.get('qtd_cancelado', 0) / total_pedidos_a * 100) if total_pedidos_a > 0 else 0.0
+
         texto += f"• <b>{ano}</b>: R$ {f_br(total_a)}{variacao_texto}\n"
-        texto += f"  ├ Conf: R$ {f_br(dados_a['aprovado'])} ({dados_a['qtd_aprovado']} pedidos)\n"
-        texto += f"  ├ Pend: R$ {f_br(dados_a['pendente'])} ({dados_a['qtd_pendente']} pedidos)\n"
-        texto += f"  └ Canc: R$ {f_br(dados_a.get('cancelado', 0.0))} ({dados_a.get('qtd_cancelado', 0)} pedidos)\n\n"
+        texto += f"  ├ Conf: R$ {f_br(dados_a['aprovado'])} ({dados_a['qtd_aprovado']} pedidos - {pct_aprov_a:.1f}%)\n"
+        texto += f"  ├ Pend: R$ {f_br(dados_a['pendente'])} ({dados_a['qtd_pendente']} pedidos - {pct_pend_a:.1f}%)\n"
+        texto += f"  └ Canc: R$ {f_br(dados_a.get('cancelado', 0.0))} ({dados_a.get('qtd_cancelado', 0)} pedidos - {pct_canc_a:.1f}%)\n\n"
 
     texto += (
         "📊 <b>MÉTRICAS DA VARREDURA (Últimos 30 Dias)</b>\n"
@@ -1805,10 +1817,16 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         q_canc = dados_dia.get("qtd_cancelado", 0)
         v_tot = v_aprov + v_pend
         
+        if EXIBIR_LOGS: logger.info(f"🧮 Calculando proporções diárias para {d_br}...")
+        total_pedidos_d = q_aprov + q_pend + q_canc
+        pct_aprov_d = (q_aprov / total_pedidos_d * 100) if total_pedidos_d > 0 else 0.0
+        pct_pend_d = (q_pend / total_pedidos_d * 100) if total_pedidos_d > 0 else 0.0
+        pct_canc_d = (q_canc / total_pedidos_d * 100) if total_pedidos_d > 0 else 0.0
+        
         texto += f"• <b>{d_br}</b>: R$ {f_br(v_tot)}\n"
-        texto += f"  ├ Conf: R$ {f_br(v_aprov)} ({q_aprov} pedidos)\n"
-        texto += f"  ├ Pend: R$ {f_br(v_pend)} ({q_pend} pedidos)\n"
-        texto += f"  └ Canc: R$ {f_br(v_canc)} ({q_canc} pedidos)\n\n"
+        texto += f"  ├ Conf: R$ {f_br(v_aprov)} ({q_aprov} pedidos - {pct_aprov_d:.1f}%)\n"
+        texto += f"  ├ Pend: R$ {f_br(v_pend)} ({q_pend} pedidos - {pct_pend_d:.1f}%)\n"
+        texto += f"  └ Canc: R$ {f_br(v_canc)} ({q_canc} pedidos - {pct_canc_d:.1f}%)\n\n"
 
     await msg_status.delete()
     await message.answer(texto, parse_mode="HTML")
@@ -1829,18 +1847,19 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             labels_grafico.append(MESES_ABREV_PT.get(mes_numero, mes_numero))
                 
             if m in dados_por_mes:
-                valores_comissao.append(dados_por_mes[m]["aprovado"] + dados_por_mes[m]["pendente"])
-                valores_pedidos.append(dados_por_mes[m].get("qtd_aprovado", 0) + dados_por_mes[m].get("qtd_pendente", 0))
+                valores_comissao.append(dados_por_mes[m]["aprovado"])
+                valores_pedidos.append(dados_por_mes[m].get("qtd_aprovado", 0))
                 valores_clicks.append(dados_por_mes[m].get("clicks", 0))
             else:
                 valores_comissao.append(0.0)
                 valores_pedidos.append(0)
                 valores_clicks.append(0)
 
+        if EXIBIR_LOGS: logger.info("📈 Estruturando gráfico exclusivamente para comissões aprovadas.")
         fig, ax1 = plt.subplots(figsize=(8, 5), facecolor='#f4f4f9')
         ax1.set_facecolor('#f4f4f9')
         
-        bars = ax1.bar(labels_grafico, valores_comissao, color='#ff6600', edgecolor='black', linewidth=0.5, label='Comissão Total (R$)')
+        bars = ax1.bar(labels_grafico, valores_comissao, color='#ff6600', edgecolor='black', linewidth=0.5, label='Comissão Aprovada (R$)')
         ax1.set_ylabel('Comissão (R$)', fontsize=10, color='#333333')
         ax1.grid(axis='y', linestyle='--', alpha=0.5)
         
