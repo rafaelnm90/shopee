@@ -1593,7 +1593,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             c_shopee_frac = c_shopee / qtd_itens
             c_extra_frac = c_extra / qtd_itens
 
-           for order in orders:
+            for order in orders:
                 status = order.get("orderStatus", "").upper()
                 if status == "COMPLETED":
                     pagos += 1
