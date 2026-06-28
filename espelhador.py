@@ -242,10 +242,20 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
     if rotas:
         texto += "📡 <b>Rotas Ativas:</b>\n"
         for i, rota in enumerate(rotas, 1):
+            destino_rota = rota['destino']
+            
+            # 🔍 Consulta o motor de agendamento em tempo real para contar a fila desta rota específica
+            qtd_fila = 0
+            if scheduler_instance:
+                for job in scheduler_instance.get_jobs():
+                    if job.id.startswith("espelho_") and f"_{destino_rota}_" in job.id:
+                        qtd_fila += 1
+
             texto += f"<b>{i}. {rota['nome']}</b>\n"
             texto += f"   Origem: <code>{rota['origem']}</code>\n"
-            texto += f"   Destino: <code>{rota['destino']}</code>\n"
-            texto += f"   Atraso: ⏳ {rota['delay']} minutos\n\n"
+            texto += f"   Destino: <code>{destino_rota}</code>\n"
+            texto += f"   Atraso: ⏳ {rota['delay']} minutos\n"
+            texto += f"   Fila: 📦 {qtd_fila} vídeos aguardando\n\n"
     else:
         texto += "<i>Nenhuma rota de espelhamento cadastrada no momento.</i>\n\n"
         
