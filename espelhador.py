@@ -14,6 +14,7 @@ from aiogram import Router, Bot, types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.filters import StateFilter
 
 if EXIBIR_LOGS:
     logger = logging.getLogger("Espelhador")
@@ -133,7 +134,7 @@ async def disparar_espelho(destino, texto, media_id, tipo_media):
         if EXIBIR_LOGS: logger.error(f"❌ Falha no disparo do espelho para {destino}: {e}")
 
 # --- INTERCEPTADOR GLOBAL ---
-@router.message()
+@router.message(F.chat.type.in_({"group", "supergroup"}))
 @router.channel_post()
 async def motor_interceptacao(message: types.Message):
     if not bot_instance or not scheduler_instance:
@@ -196,12 +197,12 @@ async def motor_interceptacao(message: types.Message):
         if EXIBIR_LOGS: logger.info(f"⏳ Cópia da rota '{nome_rota}' agendada para daqui a {delay_minutos} minutos.")
 
 # --- NAVEGAÇÃO E PAINEL ---
-@router.message(F.text == "Cancelar Operação ❌")
+@router.message(F.text == "Cancelar Operação ❌", StateFilter("*"))
 async def cancelar_espelhador(message: types.Message, state: FSMContext):
     await state.clear()
     await painel_espelhador(message, state)
 
-@router.message(F.text == "Espelhador de Canais 🔄")
+@router.message(F.text == "Espelhador de Canais 🔄", StateFilter("*"))
 async def painel_espelhador(message: types.Message, state: FSMContext):
     await state.clear()
     dados = ler_espelhos()
