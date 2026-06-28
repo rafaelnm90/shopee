@@ -177,6 +177,12 @@ async def motor_interceptacao(message: types.Message):
 
     if EXIBIR_LOGS: logger.info(f"🔄 Interceptação acionada! Nova postagem detectada na origem {chat_id_str}.")
 
+    # ✅ Captura a ID original de onde a mensagem foi reencaminhada (se existir)
+    forward_origem_id = None
+    if message.forward_origin:
+        if hasattr(message.forward_origin, 'chat'):
+            forward_origem_id = str(message.forward_origin.chat.id)
+
     texto_original = message.html_text or ""
     texto_processado = texto_original
     links = re.findall(r'(https?://\S+)', texto_original)
@@ -207,6 +213,12 @@ async def motor_interceptacao(message: types.Message):
 
     for rota in rotas_ativas:
         destino = rota["destino"]
+        
+        # ✅ Filtro Anti-Loop: Impede que o vídeo retorne para o canal de onde nasceu
+        if forward_origem_id == destino:
+            if EXIBIR_LOGS: logger.warning(f"🚫 [Anti-Loop Ativado] O vídeo recebido nasceu no canal de destino ({destino}). Ignorando a clonagem nesta rota.")
+            continue
+            
         delay_minutos = int(rota.get("delay", 0))
         nome_rota = rota.get("nome", "Desconhecida")
         
