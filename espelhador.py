@@ -78,10 +78,8 @@ def salvar_espelhos(dados):
 
 # --- VALIDAÇÃO DE ACESSO ---
 async def validar_link_ou_id_grupo(entrada):
-    if not bot_instance: 
-        return None
+    if not bot_instance: return None
     
-    # Limpeza extrema de caracteres invisíveis
     entrada_limpa = ''.join(c for c in entrada if c.isprintable()).strip()
     entradas_para_testar = []
     
@@ -90,30 +88,24 @@ async def validar_link_ou_id_grupo(entrada):
         if not username.startswith("+"):
             entradas_para_testar.append(f"@{username}")
     else:
-        entradas_para_testar.append(entrada_limpa)
-        
-        # Identifica se a entrada é composta apenas por números (com ou sem hífen)
-        is_numeric = entrada_limpa.replace('-', '').isdigit()
-        
-        if is_numeric:
-            # Correção inteligente do ID de Canal
-            if entrada_limpa.startswith("100") and len(entrada_limpa) > 10:
-                entradas_para_testar.append(f"-{entrada_limpa}")
-            elif not entrada_limpa.startswith("-100") and not entrada_limpa.startswith("-"):
-                entradas_para_testar.append(f"-100{entrada_limpa}")
-        elif not entrada_limpa.startswith("@"):
-            entradas_para_testar.append(f"@{entrada_limpa}")
+        # Se for numérico, forçamos a formatação correta -100 + números
+        if entrada_limpa.replace('-', '').isdigit():
+            numeros = entrada_limpa.replace('-', '')
+            # Remove o 100 se ele já estiver lá, para não duplicar, e força o -100
+            if numeros.startswith("100") and len(numeros) > 10:
+                numeros = numeros[3:]
+            entradas_para_testar.append(f"-100{numeros}")
+        else:
+            # Caso contrário, tenta como username
+            if not entrada_limpa.startswith("@"):
+                entradas_para_testar.append(f"@{entrada_limpa}")
+            else:
+                entradas_para_testar.append(entrada_limpa)
 
     for teste in entradas_para_testar:
         try:
-            # MURALHA DE SEGURANÇA: Cast obrigatório para INT.
-            # A API do Telegram recusa IDs numéricos passados como String (Texto).
-            teste_str = str(teste)
-            if teste_str.replace('-', '').isdigit():
-                chat_alvo = int(teste_str)
-            else:
-                chat_alvo = teste_str
-                
+            # Conversão segura para inteiro para evitar erro de ChatNotFound
+            chat_alvo = int(teste) if str(teste).replace('-', '').isdigit() else teste
             chat = await bot_instance.get_chat(chat_alvo)
             return str(chat.id)
         except Exception as e:
