@@ -104,19 +104,19 @@ async def validar_link_ou_id_grupo(entrada):
             entradas_para_testar.append(f"@{entrada_limpa}")
 
     for teste in entradas_para_testar:
-        try:
-            # MURALHA DE SEGURANÇA: Cast obrigatório para INT.
-            # A API do Telegram recusa IDs numéricos passados como String (Texto).
-            teste_str = str(teste)
-            if teste_str.replace('-', '').isdigit():
-                chat_alvo = int(teste_str)
-            else:
-                chat_alvo = teste_str
+                # ✅ MODO FLEXÍVEL: Validamos o formato do ID sem exigir consulta de metadados.
+                # Se for um formato numérico válido de Telegram ID, aceitamos o destino.
+                # Isto permite configurar destinos onde o robô é apenas membro, não admin.
+                if str(teste).startswith("@") or (str(teste).replace('-', '').isdigit() and len(str(teste).replace('-', '')) > 5):
+                    if EXIBIR_LOGS: logger.info(f"ℹ️ Validação flexível aceitou o ID/User: {teste}")
+                    return str(teste)
                 
-            chat = await bot_instance.get_chat(chat_alvo)
-            return str(chat.id)
-        except Exception as e:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Validação falhou para '{teste}': {e}")
+                # Se não for óbvio, tentamos uma consulta leve apenas para confirmar existência
+                try:
+                    chat = await bot_instance.get_chat(teste)
+                    return str(chat.id)
+                except Exception:
+                    continue
             continue
             
     return None
