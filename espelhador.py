@@ -176,9 +176,18 @@ async def motor_interceptacao(message: types.Message):
     if not bot_instance or not scheduler_instance:
         return
 
+    # O Telegram envia o ID numérico, mas também fornece o username do canal (se for público)
     chat_id_str = str(message.chat.id)
+    chat_username = f"@{message.chat.username.lower()}" if message.chat.username else ""
+    
     dados = ler_espelhos()
-    rotas_ativas = [r for r in dados.get("rotas", []) if r["origem"] == chat_id_str]
+    rotas_ativas = []
+    
+    # Cruzamento de dados: O robô agora reconhece a origem por ID numérico OU por @username
+    for r in dados.get("rotas", []):
+        origem_rota = str(r["origem"]).lower()
+        if origem_rota == chat_id_str or origem_rota == chat_username:
+            rotas_ativas.append(r)
     
     if not rotas_ativas:
         return
