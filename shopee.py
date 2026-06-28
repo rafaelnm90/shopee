@@ -2760,6 +2760,13 @@ async def voltar_para_automacoes_espiao(message: types.Message, state: FSMContex
     await state.clear()
     await menu_automacoes_espiao(message, state)
 
+@dp.message(F.text == "Voltar às Configs 🔙", StateFilter("*"))
+async def voltar_para_configs_avancadas(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🔙 Retornando à Central de Configurações Avançadas.")
+    await state.clear()
+    await menu_configuracoes(message, state)
+
 @dp.message(F.text == "Voltar 🔙", StateFilter("*"))
 async def voltar_configs(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
