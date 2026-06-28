@@ -67,6 +67,34 @@ def salvar_espelhos(dados):
     with open("espelhos_config.json", "w") as f:
         json.dump(dados, f, indent=4)
 
+# --- VALIDAÇÃO DE ACESSO ---
+async def validar_link_ou_id_grupo(entrada):
+    if not bot_instance: return None
+    
+    entradas_para_testar = []
+    entrada_limpa = entrada.strip()
+    
+    if "t.me/" in entrada_limpa:
+        username = entrada_limpa.split("t.me/")[-1].split("/")[0]
+        if not username.startswith("+"):
+            entradas_para_testar.append(f"@{username}")
+    else:
+        entradas_para_testar.append(entrada_limpa)
+        if entrada_limpa.replace('-', '').isdigit():
+            if not entrada_limpa.startswith("-100") and not entrada_limpa.startswith("@"):
+                entradas_para_testar.append(f"-100{entrada_limpa.replace('-', '')}")
+        elif not entrada_limpa.startswith("@"):
+            entradas_para_testar.append(f"@{entrada_limpa}")
+
+    for teste in entradas_para_testar:
+        try:
+            chat = await bot_instance.get_chat(teste)
+            return str(chat.id)
+        except Exception:
+            continue
+            
+    return None
+
 # --- CONVERSÃO DE LINKS SHOPEE ---
 async def converter_link_shopee_espelho(link_original):
     app_id = os.getenv('SHOPEE_APP_ID')
@@ -231,15 +259,33 @@ async def iniciar_cadastro_rota(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.aguardando_origem)
 async def receber_origem(message: types.Message, state: FSMContext):
-    await state.update_data(origem=message.text.strip())
-    await message.answer("Excelente. Agora envie o ID numérico ou @username do <b>Canal de DESTINO</b> (Para onde o robô vai enviar a cópia):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
-    await state.set_state(EspelhadorFluxo.aguardando_destino)
+    msg_status = await message.answer("⏳ Validando permissões e acesso ao canal de origem...", reply_markup=teclado_espelhador_cancelar)
+    origem_id = await validar_link_ou_id_grupo(message.text)
+    await msg_status.delete()
+    
+    if origem_id:
+        if EXIBIR_LOGS: logger.info(f"✅ Origem validada com sucesso: {origem_id}")
+        await state.update_data(origem=origem_id)
+        await message.answer(f"✅ Origem confirmada: <code>{origem_id}</code>\n\nExcelente. Agora envie o ID numérico ou @username do <b>Canal de DESTINO</b> (Para onde o robô vai enviar a cópia):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+        await state.set_state(EspelhadorFluxo.aguardando_destino)
+    else:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Falha na validação da origem: {message.text}")
+        await message.answer("⚠️ <b>Canal não encontrado ou sem permissão!</b>\nCertifique-se de que o ID ou @username está correto e de que o bot é administrador do canal.\n\nTente enviar novamente:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
 
 @router.message(EspelhadorFluxo.aguardando_destino)
 async def receber_destino(message: types.Message, state: FSMContext):
-    await state.update_data(destino=message.text.strip())
-    await message.answer("Por fim, digite o <b>Atraso de Publicação em Minutos</b> (Apenas números, ex: 15):\nDigite 0 se quiser que a cópia seja imediata.", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
-    await state.set_state(EspelhadorFluxo.aguardando_delay)
+    msg_status = await message.answer("⏳ Validando permissões e acesso ao canal de destino...", reply_markup=teclado_espelhador_cancelar)
+    destino_id = await validar_link_ou_id_grupo(message.text)
+    await msg_status.delete()
+    
+    if destino_id:
+        if EXIBIR_LOGS: logger.info(f"✅ Destino validado com sucesso: {destino_id}")
+        await state.update_data(destino=destino_id)
+        await message.answer(f"✅ Destino confirmado: <code>{destino_id}</code>\n\nPor fim, digite o <b>Atraso de Publicação em Minutos</b> (Apenas números, ex: 15):\nDigite 0 se quiser que a cópia seja imediata.", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+        await state.set_state(EspelhadorFluxo.aguardando_delay)
+    else:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Falha na validação do destino: {message.text}")
+        await message.answer("⚠️ <b>Canal não encontrado ou sem permissão!</b>\nCertifique-se de que o ID ou @username está correto e de que o bot é administrador do canal.\n\nTente enviar novamente:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
 
 @router.message(EspelhadorFluxo.aguardando_delay)
 async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
