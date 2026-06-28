@@ -241,15 +241,18 @@ async def motor_interceptacao(message: types.Message):
         
         horario_disparo = agora + timedelta(minutes=delay_minutos)
         
-        job_id = f"espelho_{message.message_id}_{destino}_{int(agora.timestamp())}"
-        
-        scheduler_instance.add_job(
-            disparar_espelho, 
-            'date', 
-            run_date=horario_disparo, 
-            args=[destino, texto_processado, media_id, tipo_media], 
-            id=job_id
-        )
+        if EXIBIR_LOGS: logger.info(f"🚀 Iniciando a geração de ID único para a rota '{nome_rota}'...")
+            nome_rota_formatado = nome_rota.replace(' ', '_')
+            job_id = f"espelho_{nome_rota_formatado}_{message.message_id}_{destino}_{int(agora.timestamp())}"
+            if EXIBIR_LOGS: logger.info(f"✅ Sucesso na criação do ID estruturado: {job_id}")
+            
+            scheduler_instance.add_job(
+                disparar_espelho, 
+                'date', 
+                run_date=horario_disparo, 
+                args=[destino, texto_processado, media_id, tipo_media], 
+                id=job_id
+            )
         
         if EXIBIR_LOGS: logger.info(f"⏳ Cópia da rota '{nome_rota}' agendada para daqui a {delay_minutos} minutos.")
 
