@@ -243,6 +243,7 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
         texto += "📡 <b>Rotas Ativas:</b>\n"
         for i, rota in enumerate(rotas, 1):
             destino_rota = rota['destino']
+            status_alerta = " 🔴 <i>[ROTA QUEBRADA - Sem Acesso]</i>" if rota.get("status_verificacao") == "erro" else ""
             
             # 🔍 Consulta o motor de agendamento em tempo real para contar a fila desta rota específica
             qtd_fila = 0
@@ -251,7 +252,7 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
                     if job.id.startswith("espelho_") and f"_{destino_rota}_" in job.id:
                         qtd_fila += 1
 
-            texto += f"<b>{i}. {rota['nome']}</b>\n"
+            texto += f"<b>{i}. {rota['nome']}</b>{status_alerta}\n"
             texto += f"   Origem: <code>{rota['origem']}</code>\n"
             texto += f"   Destino: <code>{destino_rota}</code>\n"
             texto += f"   Atraso: ⏳ {rota['delay']} minutos\n"
