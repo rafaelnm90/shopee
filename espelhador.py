@@ -38,7 +38,9 @@ class EspelhadorFluxo(StatesGroup):
     aguardando_origem = State()
     aguardando_destino = State()
     aguardando_delay = State()
+    aguardando_confirmacao_criacao = State() # ✅ NOVO ESTADO
     aguardando_remocao = State()
+    aguardando_confirmacao_remocao_rota = State() # ✅ NOVO ESTADO
 
 teclado_espelhador_menu = ReplyKeyboardMarkup(
     keyboard=[
@@ -51,6 +53,13 @@ teclado_espelhador_menu = ReplyKeyboardMarkup(
 
 teclado_espelhador_cancelar = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Cancelar Operação ❌")]],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+# ✅ NOVO: Teclado de Dupla Confirmação
+teclado_espelhador_confirmacao = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
     resize_keyboard=True,
     is_persistent=True
 )
@@ -311,15 +320,39 @@ async def receber_destino(message: types.Message, state: FSMContext):
         await message.answer("⚠️ <b>Canal não encontrado ou sem permissão!</b>\nCertifique-se de que o ID ou @username está correto e de que o bot é administrador do canal.\n\nTente enviar novamente:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
 
 @router.message(EspelhadorFluxo.aguardando_delay)
-async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
+async def receber_delay_rota(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
         await message.answer("Por favor, digite apenas números inteiros para os minutos.", reply_markup=teclado_espelhador_cancelar)
         return
         
+    delay = int(message.text)
+    await state.update_data(delay=delay)
+    
     data = await state.get_data()
     origem = data.get("origem")
     destino = data.get("destino")
-    delay = int(message.text)
+    
+    texto_confirmacao = (
+        "⚠️ <b>Confirmação de Nova Rota</b>\n\n"
+        f"<b>Origem:</b> <code>{origem}</code>\n"
+        f"<b>Destino:</b> <code>{destino}</code>\n"
+        f"<b>Atraso:</b> ⏳ {delay} minutos\n\n"
+        "Deseja aprovar e ativar este espelhamento agora?"
+    )
+    
+    await message.answer(texto_confirmacao, reply_markup=teclado_espelhador_confirmacao, parse_mode="HTML")
+    await state.set_state(EspelhadorFluxo.aguardando_confirmacao_criacao)
+
+@router.message(EspelhadorFluxo.aguardando_confirmacao_criacao)
+async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, utilize os botões para Aprovar ✅ ou Cancelar ❌ a criação.")
+        return
+
+    data = await state.get_data()
+    origem = data.get("origem")
+    destino = data.get("destino")
+    delay = data.get("delay")
     
     dados = ler_espelhos()
     num_rota = len(dados.get("rotas", [])) + 1
@@ -337,7 +370,7 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
     
     if EXIBIR_LOGS: logger.info(f"✅ Rota de espelho cadastrada: Origem {origem} > Destino {destino} com delay de {delay}min.")
     
-    await message.answer(f"✅ Rota <b>{nome_rota}</b> criada com sucesso!", parse_mode="HTML")
+    await message.answer(f"✅ Rota <b>{nome_rota}</b> criada e ativada com sucesso!", parse_mode="HTML")
     await painel_espelhador(message, state)
 
 @router.message(EspelhadorFluxo.menu_principal, F.text == "Remover Rota 🗑️")
@@ -357,7 +390,7 @@ async def iniciar_remocao_rota(message: types.Message, state: FSMContext):
     await state.set_state(EspelhadorFluxo.aguardando_remocao)
 
 @router.message(EspelhadorFluxo.aguardando_remocao)
-async def processar_remocao_rota(message: types.Message, state: FSMContext):
+async def pedir_confirmacao_remocao(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
         await message.answer("Por favor, digite apenas o número da rota.", reply_markup=teclado_espelhador_cancelar)
         return
@@ -367,6 +400,33 @@ async def processar_remocao_rota(message: types.Message, state: FSMContext):
     rotas = dados.get("rotas", [])
     
     if 0 <= indice < len(rotas):
+        rota_alvo = rotas[indice]
+        await state.update_data(indice_remocao=indice)
+        
+        texto_confirmacao = (
+            f"⚠️ Tem a certeza de que deseja remover permanentemente a rota <b>{rota_alvo['nome']}</b>?\n\n"
+            f"<b>Origem:</b> <code>{rota_alvo['origem']}</code>\n"
+            f"<b>Destino:</b> <code>{rota_alvo['destino']}</code>"
+        )
+        
+        await message.answer(texto_confirmacao, reply_markup=teclado_espelhador_confirmacao, parse_mode="HTML")
+        await state.set_state(EspelhadorFluxo.aguardando_confirmacao_remocao_rota)
+    else:
+        await message.answer("Número inválido. Tente novamente ou clique em Cancelar ❌.", reply_markup=teclado_espelhador_cancelar)
+
+@router.message(EspelhadorFluxo.aguardando_confirmacao_remocao_rota)
+async def processar_remocao_rota(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, utilize os botões para Aprovar ✅ ou Cancelar ❌ a exclusão.")
+        return
+
+    data = await state.get_data()
+    indice = data.get("indice_remocao")
+    
+    dados = ler_espelhos()
+    rotas = dados.get("rotas", [])
+    
+    if indice is not None and 0 <= indice < len(rotas):
         rota_removida = rotas.pop(indice)
         dados["rotas"] = rotas
         salvar_espelhos(dados)
@@ -375,4 +435,5 @@ async def processar_remocao_rota(message: types.Message, state: FSMContext):
         await message.answer(f"A rota <b>{rota_removida['nome']}</b> foi apagada e os espelhamentos foram interrompidos.", parse_mode="HTML")
         await painel_espelhador(message, state)
     else:
-        await message.answer("Número inválido. Tente novamente ou clique em cancelar.", reply_markup=teclado_espelhador_cancelar)
+        await message.answer("Erro de sincronização. Operação cancelada.")
+        await painel_espelhador(message, state)
