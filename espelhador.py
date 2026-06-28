@@ -76,42 +76,31 @@ def salvar_espelhos(dados):
     with open("espelhos_config.json", "w") as f:
         json.dump(dados, f, indent=4)
 
-# --- VALIDAÇÃO DE ACESSO ---
+# --- VALIDAÇÃO DE ACESSO (MODO TRUST) ---
 async def validar_link_ou_id_grupo(entrada):
-    if not bot_instance: return None
+    # Removemos a verificação bot_instance.get_chat() para evitar bloqueios de API.
+    # O robô agora confia que o ID fornecido está correto.
     
     entrada_limpa = ''.join(c for c in entrada if c.isprintable()).strip()
-    entradas_para_testar = []
     
+    # Se for link t.me
     if "t.me/" in entrada_limpa:
         username = entrada_limpa.split("t.me/")[-1].split("/")[0]
         if not username.startswith("+"):
-            entradas_para_testar.append(f"@{username}")
-    else:
-        # Se for numérico, forçamos a formatação correta -100 + números
-        if entrada_limpa.replace('-', '').isdigit():
-            numeros = entrada_limpa.replace('-', '')
-            # Remove o 100 se ele já estiver lá, para não duplicar, e força o -100
-            if numeros.startswith("100") and len(numeros) > 10:
-                numeros = numeros[3:]
-            entradas_para_testar.append(f"-100{numeros}")
-        else:
-            # Caso contrário, tenta como username
-            if not entrada_limpa.startswith("@"):
-                entradas_para_testar.append(f"@{entrada_limpa}")
-            else:
-                entradas_para_testar.append(entrada_limpa)
-
-    for teste in entradas_para_testar:
-        try:
-            # Conversão segura para inteiro para evitar erro de ChatNotFound
-            chat_alvo = int(teste) if str(teste).replace('-', '').isdigit() else teste
-            chat = await bot_instance.get_chat(chat_alvo)
-            return str(chat.id)
-        except Exception as e:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Validação falhou para '{teste}': {e}")
-            continue
+            return f"@{username}"
             
+    # Se for ID numérico (ex: 3673555953 ou -1003673555953)
+    if entrada_limpa.replace('-', '').isdigit():
+        numeros = entrada_limpa.replace('-', '')
+        # Normaliza o ID para o padrão -100...
+        if numeros.startswith("100") and len(numeros) > 10:
+            numeros = numeros[3:]
+        return f"-100{numeros}"
+    
+    # Se for @username simples
+    if entrada_limpa.startswith("@"):
+        return entrada_limpa
+        
     return None
 
 # --- CONVERSÃO DE LINKS SHOPEE ---
