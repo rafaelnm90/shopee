@@ -25,6 +25,8 @@ from google import genai
 import matplotlib.pyplot as plt
 import io
 
+import espelhador
+
 # 1. CONSTANTES E TOKENS
 API_TOKEN = os.getenv('TELEGRAM_TOKEN')
 ADMIN_ID = 1226920464
@@ -126,6 +128,9 @@ class EspiaoFluxo(StatesGroup):
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
+
+dp.include_router(espelhador.router)
+espelhador.configurar_dependencias(bot, scheduler)
 FUSO_STR = "America/Sao_Paulo"
 fuso_horario = ZoneInfo(FUSO_STR)
 _lock_contador = asyncio.Lock()
@@ -244,7 +249,7 @@ teclado_opcoes_rotina = ReplyKeyboardMarkup(
 
 teclado_outros_canais = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Espião Afiliados 🕵️")],
+        [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ],
     resize_keyboard=True,
