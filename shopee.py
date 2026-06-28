@@ -128,13 +128,13 @@ class EspiaoFluxo(StatesGroup):
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
-
-dp.include_router(espelhador.router)
-espelhador.configurar_dependencias(bot, scheduler)
 FUSO_STR = "America/Sao_Paulo"
 fuso_horario = ZoneInfo(FUSO_STR)
 _lock_contador = asyncio.Lock()
 scheduler = AsyncIOScheduler(timezone=FUSO_STR)
+
+dp.include_router(espelhador.router)
+espelhador.configurar_dependencias(bot, scheduler)
 
 # --- NOVOS TECLADOS DE CONTROLE ---
 # 🛠️ Teclado para seleção da plataforma
