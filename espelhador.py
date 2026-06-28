@@ -80,8 +80,9 @@ def salvar_espelhos(dados):
 async def validar_link_ou_id_grupo(entrada):
     if not bot_instance: return None
     
+    # Limpeza extrema de caracteres invisíveis que possam corromper a leitura
+    entrada_limpa = ''.join(c for c in entrada if c.isprintable()).strip()
     entradas_para_testar = []
-    entrada_limpa = entrada.strip()
     
     if "t.me/" in entrada_limpa:
         username = entrada_limpa.split("t.me/")[-1].split("/")[0]
@@ -89,17 +90,33 @@ async def validar_link_ou_id_grupo(entrada):
             entradas_para_testar.append(f"@{username}")
     else:
         entradas_para_testar.append(entrada_limpa)
-        if entrada_limpa.replace('-', '').isdigit():
-            if not entrada_limpa.startswith("-100") and not entrada_limpa.startswith("@"):
-                entradas_para_testar.append(f"-100{entrada_limpa.replace('-', '')}")
+        
+        # Identifica se a entrada é composta apenas por números (com ou sem hífen)
+        is_numeric = entrada_limpa.replace('-', '').isdigit()
+        
+        if is_numeric:
+            # Correção inteligente do ID de Canal
+            if entrada_limpa.startswith("100") and len(entrada_limpa) > 10:
+                entradas_para_testar.append(f"-{entrada_limpa}")
+            elif not entrada_limpa.startswith("-100") and not entrada_limpa.startswith("-"):
+                entradas_para_testar.append(f"-100{entrada_limpa}")
         elif not entrada_limpa.startswith("@"):
             entradas_para_testar.append(f"@{entrada_limpa}")
 
     for teste in entradas_para_testar:
         try:
-            chat = await bot_instance.get_chat(teste)
+            # MURALHA DE SEGURANÇA: Cast obrigatório para INT.
+            # A API do Telegram recusa IDs numéricos passados como String (Texto).
+            teste_str = str(teste)
+            if teste_str.replace('-', '').isdigit():
+                chat_alvo = int(teste_str)
+            else:
+                chat_alvo = teste_str
+                
+            chat = await bot_instance.get_chat(chat_alvo)
             return str(chat.id)
-        except Exception:
+        except Exception as e:
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Validação falhou para '{teste}': {e}")
             continue
             
     return None
