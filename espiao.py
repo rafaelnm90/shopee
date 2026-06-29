@@ -534,7 +534,13 @@ async def monitorar_status_espelhos():
                                 
                             alterado = True
                             if EXIBIR_LOGS: logger.info(f"✅ Username convertido para ID na rota {rota['nome']}: {canal} -> {novo_id}")
+                        canal = novo_id # Atualiza a variável para guardar o status no ID novo
                         
+                        if "status_canais" not in rota: rota["status_canais"] = {}
+                        if rota["status_canais"].get(str(canal)) != "ok":
+                            rota["status_canais"][str(canal)] = "ok"
+                            alterado = True
+
                         if rota.get("status_verificacao") == "erro":
                             rota["status_verificacao"] = "ok"
                             alterado = True
@@ -542,6 +548,12 @@ async def monitorar_status_espelhos():
                             
                     except Exception as e:
                         if EXIBIR_LOGS: logger.warning(f"⚠️ Falha de acesso em {canal} ({tipo_ponta}) da rota {rota['nome']}: {e}")
+                        
+                        if "status_canais" not in rota: rota["status_canais"] = {}
+                        if rota["status_canais"].get(str(canal)) != "erro":
+                            rota["status_canais"][str(canal)] = "erro"
+                            alterado = True
+                            
                         if rota.get("status_verificacao") != "erro":
                             rota["status_verificacao"] = "erro"
                             alterado = True
