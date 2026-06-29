@@ -2570,24 +2570,32 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
 
     if nivel_4_ativado:
         legenda_shopee = montar_legenda(texto_longo, is_rodape=False, plataforma_alvo="Apenas Shopee 🛒")
-        if EXIBIR_LOGS: logger.info("📦 Agendando vídeo 1/2 (Shopee) na fila invisível para amanhã.")
+        if EXIBIR_LOGS: logger.info(f"📦 A agendar vídeo 1/2 (Shopee) na fila invisível para a data: {data_agendamento_base}.")
         adicionar_a_fila(caminho_final, None, legenda_shopee)
         
         legenda_tiktok = montar_legenda(texto_longo, is_rodape=False, plataforma_alvo="Apenas TikTok 🎵")
-        if EXIBIR_LOGS: logger.info("📦 Agendando vídeo 2/2 (TikTok) na fila invisível para amanhã.")
+        if EXIBIR_LOGS: logger.info(f"📦 A agendar vídeo 2/2 (TikTok) na fila invisível para a data: {data_agendamento_base}.")
         adicionar_a_fila(caminho_final, None, legenda_tiktok)
     else:
-        if EXIBIR_LOGS: logger.info("📦 Agendando vídeo consolidado na fila invisível para amanhã.")
+        if EXIBIR_LOGS: logger.info(f"📦 A agendar vídeo consolidado na fila invisível para a data: {data_agendamento_base}.")
         adicionar_a_fila(caminho_final, video_id_fallback if not caminho_final else None, legenda_final)
         
-    if EXIBIR_LOGS: logger.info("💾 Arquivo físico adormecido. A limpeza ocorrerá automaticamente após o upload escalonado amanhã.")
+    if EXIBIR_LOGS: logger.info("💾 Ficheiro físico adormecido. A limpeza ocorrerá automaticamente após o upload escalonado.")
     
     async with _lock_contador:
         proximo_numero = ler_contador()
         
-    agendar_fila_postagens()
+    # ✅ CORREÇÃO: O recálculo só acontece se o vídeo for para HOJE.
+    # Vídeos do futuro entram na fila sem afetar os horários já definidos para hoje.
+    if data_agendamento_base == "2000-01-01" or data_agendamento_base <= hoje_str:
+        if EXIBIR_LOGS: logger.info("🔄 O novo vídeo é para hoje. A recalcular a grelha de publicações em tempo real...")
+        agendar_fila_postagens()
+        texto_data = "hoje! 🟢"
+    else:
+        if EXIBIR_LOGS: logger.info(f"⏭️ O novo vídeo é para o futuro ({data_agendamento_base}). A grelha de hoje não será afetada.")
+        texto_data = "o futuro! 📅✅"
     
-    await message.answer(f"Postagem processada e agendada para amanhã! 📅✅\nO sistema distribuirá os vídeos de forma invisível ao longo do dia. O próximo vídeo assumirá o número {proximo_numero}.", reply_markup=obter_teclado_principal())
+    await message.answer(f"Publicação processada e agendada para {texto_data}\nO sistema distribuirá os vídeos de forma orgânica. O próximo vídeo assumirá o número {proximo_numero}.", reply_markup=obter_teclado_principal())
     await state.clear()
 
 # ✅ Handlers para Gerenciar a Numeração
