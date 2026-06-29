@@ -5100,80 +5100,54 @@ async def sincronizar_financeiro_horario():
     if houve_atualizacao:
         salvar_historico_financeiro(historico)
 
-async def checkup_semanal_grupos():
-    if EXIBIR_LOGS: logger.info("🩺 Iniciando Check-up Semanal de Grupos (Espião e Espelhador)...")
-
-    # 1. Check-up do Espião
+async def checkup_diario_grupos():
+    if EXIBIR_LOGS: logger.info("🚀 Consolidando relatório de saúde diário do sistema...")
+    
+    relatorio = "📊 <b>Relatório Diário de Saúde dos Robôs</b>\n\n"
+    
+    # 1. Auditoria passiva do Espião (lendo o status gerado pelo Userbot)
     try:
-        with open("alvos_espiao.json", "r") as f:
+        with open("alvos_espiao.json", "r", encoding="utf-8") as f:
             dados_espiao = json.load(f)
-    except:
-        dados_espiao = {"alvos": [], "status_alvos": {}}
-
-    alvos_espiao = dados_espiao.get("alvos", [])
-    status_alvos = {}
-
-    for alvo in alvos_espiao:
-        id_limpo = alvo.strip()
-        if id_limpo.replace('-', '').isdigit() and not id_limpo.startswith("-100"):
-            id_teste = f"-100{id_limpo.replace('-', '')}"
-        else:
-            id_teste = id_limpo
-
-        try:
-            chat = await bot.get_chat(id_teste)
-            status_alvos[alvo] = {"status": "ok", "nome": chat.title or chat.username or "Sem Nome"}
-        except Exception:
-            try:
-                chat = await bot.get_chat(f"@{id_limpo.replace('@', '')}")
-                status_alvos[alvo] = {"status": "ok", "nome": chat.title or chat.username or "Sem Nome"}
-            except:
-                status_alvos[alvo] = {"status": "erro"}
-
-    dados_espiao["status_alvos"] = status_alvos
-    with open("alvos_espiao.json", "w") as f:
-        json.dump(dados_espiao, f, indent=4)
+            
+        alvos = dados_espiao.get("alvos", [])
+        status_alvos = dados_espiao.get("status_alvos", {})
         
-    # 2. Check-up do Espelhador
+        erros_espiao = 0
+        for alvo in alvos:
+            info = status_alvos.get(alvo, {})
+            if info.get("status") == "erro":
+                erros_espiao += 1
+                
+        relatorio += f"👁️ <b>Espião de Afiliados:</b>\n"
+        relatorio += f"✅ Ativos: {len(alvos) - erros_espiao}\n"
+        relatorio += f"🔴 Com falhas de acesso: {erros_espiao}\n"
+    except FileNotFoundError:
+        relatorio += "👁️ <b>Espião de Afiliados:</b> <i>Dados não encontrados.</i>\n"
+
+    relatorio += "\n"
+    
+    # 2. Auditoria passiva do Espelhador
     try:
-        with open("espelhos_config.json", "r") as f:
-            dados_espelhos = json.load(f)
-    except:
-        dados_espelhos = {"rotas": []}
-
-    rotas = dados_espelhos.get("rotas", [])
-    for rota in rotas:
-        status_rota = "ok"
-        for canal in [rota.get("origem"), rota.get("destino")]:
-            if not canal: continue
-            id_limpo = canal.strip()
-            if id_limpo.replace('-', '').isdigit() and not id_limpo.startswith("-100"):
-                id_teste = f"-100{id_limpo.replace('-', '')}"
-            else:
-                id_teste = id_limpo
-
-            try:
-                await bot.get_chat(id_teste)
-            except Exception:
-                try:
-                    await bot.get_chat(f"@{id_limpo.replace('@', '')}")
-                except:
-                    status_rota = "erro"
-                    break
-
-        rota["status_verificacao"] = status_rota
-
-    dados_espelhos["rotas"] = rotas
-    with open("espelhos_config.json", "w") as f:
-        json.dump(dados_espelhos, f, indent=4)
-
-    if EXIBIR_LOGS: logger.info("✅ Check-up Semanal concluído com sucesso.")
+        with open("espelhos_config.json", "r", encoding="utf-8") as f:
+            dados_espelho = json.load(f)
+            
+        rotas = dados_espelho.get("rotas", [])
+        erros_espelho = [r for r in rotas if r.get("status_verificacao") == "erro"]
+        
+        relatorio += f"🔄 <b>Espelhador de Canais:</b>\n"
+        relatorio += f"✅ Rotas ativas: {len(rotas) - len(erros_espelho)}\n"
+        relatorio += f"🔴 Rotas quebradas: {len(erros_espelho)}\n"
+    except FileNotFoundError:
+        relatorio += "🔄 <b>Espelhador de Canais:</b> <i>Nenhuma rota configurada.</i>\n"
+        
+    relatorio += "\n<i>*O Userbot testa a conexão constantemente e converte usernames para IDs. Use os painéis para verificar e corrigir as falhas apontadas acima.</i>"
+    
     try:
-        await bot.send_message(ADMIN_ID, "🩺 <b>Check-up Semanal Concluído!</b>\nA varredura de acesso aos grupos do Espião e do Espelhador foi finalizada.\nConsulte os painéis para verificar se há rotas ou alvos inativos (marcados com ❌ ou 🔴).", parse_mode="HTML")
-    except:
-        pass
-
-async def main():
+        await bot.send_message(chat_id=ADMIN_ID, text=relatorio, parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info("✅ Relatório de saúde diário consolidado e enviado ao administrador com sucesso.")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"⚠️ Erro ao disparar a mensagem do relatório diário: {e}")
     # Agendador mestre que roda todo dia às 00:01
     scheduler.add_job(agendar_tarefas_diarias, 'cron', hour=0, minute=1, timezone=FUSO_STR)
     
@@ -5193,8 +5167,8 @@ async def main():
     # ✅ Novo: Sincronização financeira horária para resgatar dados em atraso da Shopee
     scheduler.add_job(sincronizar_financeiro_horario, 'cron', minute=0, timezone=FUSO_STR)
 
-    # ✅ Novo: Check-up semanal de permissões em grupos roda todo domingo às 11:00
-    scheduler.add_job(checkup_semanal_grupos, 'cron', day_of_week='sun', hour=11, minute=0, timezone=FUSO_STR)
+    # ✅ Novo: Check-up diário de permissões em grupos roda todos os dias às 11:00
+    scheduler.add_job(checkup_diario_grupos, 'cron', hour=11, minute=0, timezone=FUSO_STR)
     
     # Roda o agendador imediatamente ao ligar o bot para garantir o dia atual
     agendar_tarefas_diarias()
