@@ -33,18 +33,22 @@ def configurar_dependencias(bot: Bot, scheduler):
     if EXIBIR_LOGS: logger.info("🔌 Conexão estabelecida: Dependências do Espelhador injetadas com sucesso.")
 
 # --- MÁQUINA DE ESTADOS E TECLADOS ---
+# Bloco Modificado (Substituir o bloco existente por este)
 class EspelhadorFluxo(StatesGroup):
     menu_principal = State()
     aguardando_origem = State()
     aguardando_destino = State()
     aguardando_delay = State()
-    aguardando_confirmacao_criacao = State() # ✅ NOVO ESTADO
+    aguardando_confirmacao_criacao = State()
     aguardando_remocao = State()
-    aguardando_confirmacao_remocao_rota = State() # ✅ NOVO ESTADO
+    aguardando_confirmacao_remocao_rota = State()
+    aguardando_edicao_escolha_rota = State()
+    aguardando_edicao_novo_delay = State()
 
 teclado_espelhador_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Rota ➕"), KeyboardButton(text="Remover Rota 🗑️")],
+        [KeyboardButton(text="Editar Rota ✏️")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -136,9 +140,10 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
             status_canais = rota.get("status_canais", {})
             
             texto += f"<b>{i}. {rota['nome']}</b>\n"
+            # Bloco Modificado (Substituir o bloco existente por este)
             texto += f"   ⏳ Atraso: {rota['delay']} minutos\n"
             texto += f"   📦 Fila: {qtd_fila} vídeo(s)\n"
-            texto += f"   Origens:\n"
+            texto += f"   📥 <b>Origens:</b>\n"
             
             origens = rota.get('origens', [])
             # Retrocompatibilidade com rotas antigas caso existam
@@ -146,14 +151,13 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
                 origens = [rota['origem']]
                 
             for idx, o in enumerate(origens):
-                prefixo = "   └" if idx == len(origens) - 1 else "   ├"
                 info_o = status_canais.get(str(o), {})
                 if isinstance(info_o, str): info_o = {"status": info_o, "nome": str(o)}
                 
                 status_ico = "❌" if info_o.get("status") == "erro" else "✅"
                 nome_o = info_o.get("nome", str(o))
                 display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
-                texto += f"{prefixo} {status_ico} {display_o}\n"
+                texto += f"      ├ {status_ico} {display_o}\n"
                 
             info_d = status_canais.get(str(destino_rota), {})
             if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
@@ -161,7 +165,8 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
             status_destino_ico = "❌" if info_d.get("status") == "erro" else "✅"
             nome_d = info_d.get("nome", str(destino_rota))
             display_d = f"{nome_d} (<code>{destino_rota}</code>)" if nome_d != str(destino_rota) else f"<code>{destino_rota}</code>"
-            texto += f"   Destino: {status_destino_ico} {display_d}\n\n"
+            texto += f"   🎯 <b>Destino:</b>\n"
+            texto += f"      └ {status_destino_ico} {display_d}\n\n"
     else:
         texto += "<i>Nenhuma rota de espelhamento cadastrada no momento.</i>\n\n"
         
