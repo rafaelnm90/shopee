@@ -541,25 +541,21 @@ async def monitorar_status_espelhos():
                         continue
                         
                     try:
-                        # Garante que IDs numéricos salvos como texto sejam lidos como números inteiros pelo Telegram
-                        canal_query = int(canal) if isinstance(canal, str) and canal.lstrip('-').isdigit() else canal
-                        entidade = await client.get_entity(canal_query)
+                        # ✅ NOVO: Utiliza a mesma inteligência de validação e correção do Grupos Vigiados
+                        entidade, canal_correto = await validar_e_obter_entidade(client, canal)
                         
-                        if isinstance(canal, str) and not canal.lstrip('-').isdigit():
-                            novo_id = str(entidade.id)
-                            if not novo_id.startswith('-100'):
-                                novo_id = f"-100{novo_id}"
-                                
+                        # Aplica a auto-correção na rota se a variação for diferente do que estava salvo
+                        if str(canal) != canal_correto:
                             if tipo_ponta == "origem_lista":
-                                rota["origens"][idx] = novo_id
+                                rota["origens"][idx] = canal_correto
                             elif tipo_ponta == "origem_legado":
-                                rota["origem"] = novo_id
+                                rota["origem"] = canal_correto
                             elif tipo_ponta == "destino":
-                                rota["destino"] = novo_id
-                                
+                                rota["destino"] = canal_correto
+                            
                             alterado = True
-                            if EXIBIR_LOGS: logger.info(f"✅ Username convertido para ID na rota {rota['nome']}: {canal} -> {novo_id}")
-                            canal = novo_id
+                            if EXIBIR_LOGS: logger.info(f"🔧 [Espelhador] ID corrigido automaticamente: {canal} -> {canal_correto}")
+                            canal = canal_correto # Atualiza a variável local para salvar o status
                         
                         nome_canal = getattr(entidade, 'title', getattr(entidade, 'username', str(canal)))
                         if "status_canais" not in rota: rota["status_canais"] = {}
