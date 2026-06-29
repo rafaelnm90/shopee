@@ -4124,8 +4124,7 @@ async def aplicar_renumeracao_e_salvar(fila, message, state, numero_base=None):
     fila_data["fila"] = fila
     salvar_fila_postagens(fila_data)
     
-    # Bloco Modificado, Inserido ou Removido (Substituir o bloco existente por este)
-        async with _lock_contador:
+    async with _lock_contador:
             contador_real = ler_contador()
             if numero_atual_cascata > contador_real:
                 salvar_contador(numero_atual_cascata)
