@@ -59,7 +59,7 @@ teclado_espelhador_cancelar = ReplyKeyboardMarkup(
 
 # ✅ NOVO: Teclado de Dupla Confirmação
 teclado_espelhador_confirmacao = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+    keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar Operação ❌")]],
     resize_keyboard=True,
     is_persistent=True
 )
@@ -255,7 +255,7 @@ async def receber_delay_rota(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.aguardando_confirmacao_criacao)
 async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
     if message.text != "Aprovar ✅":
-        await message.answer("Por favor, utilize os botões para Aprovar ✅ ou Cancelar ❌ a criação.")
+        await message.answer("Por favor, utilize os botões para Aprovar ✅ ou Cancelar Operação ❌ a criação.")
         return
 
     data = await state.get_data()
@@ -334,7 +334,7 @@ async def pedir_confirmacao_remocao(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.aguardando_confirmacao_remocao_rota)
 async def processar_remocao_rota(message: types.Message, state: FSMContext):
     if message.text != "Aprovar ✅":
-        await message.answer("Por favor, utilize os botões para Aprovar ✅ ou Cancelar ❌ a exclusão.")
+        await message.answer("Por favor, utilize os botões para Aprovar ✅ ou Cancelar Operação ❌ a exclusão.")
         return
 
     data = await state.get_data()
