@@ -420,10 +420,11 @@ async def monitorar_status_alvos():
             dados_iniciais = {"alvos": [], "canal_destino": None, "status_alvos": {}}
             
         alvos_para_verificar = dados_iniciais.get("alvos", [])
+        destino_para_verificar = dados_iniciais.get("canal_destino")
         novos_status_coletados = {}
         mapa_correcoes = {}
         
-        # 2. Verificação com Teste de Variações de ID
+        # 2. Verificação com Teste de Variações de ID (Origens)
         for alvo in alvos_para_verificar:
             try:
                 entidade, alvo_correto = await validar_e_obter_entidade(client, alvo)
@@ -439,6 +440,20 @@ async def monitorar_status_alvos():
                 novos_status_coletados[str(alvo)] = {"status": "erro", "erro": "Acesso negado/Link inválido"}
                 
             await asyncio.sleep(2) # Pausa de segurança anti-flood da API
+            
+        # 2.1 Verificação do Canal de Destino
+        status_destino_coletado = None
+        if destino_para_verificar:
+            try:
+                entidade_dest, dest_correto = await validar_e_obter_entidade(client, destino_para_verificar)
+                nome_dest = getattr(entidade_dest, 'title', getattr(entidade_dest, 'username', str(dest_correto)))
+                status_destino_coletado = {"status": "ok", "nome": nome_dest}
+                
+                if str(destino_para_verificar) != dest_correto:
+                    mapa_correcoes["_destino"] = dest_correto
+            except Exception:
+                status_destino_coletado = {"status": "erro", "nome": str(destino_para_verificar)}
+            await asyncio.sleep(2)
             
         # 3. Leitura FRESCA logo antes de gravar para evitar sobrescrever exclusões recentes
         try:
@@ -470,13 +485,23 @@ async def monitorar_status_alvos():
                 if status_alvos_antigos.get(alvo_final) != novos_status_coletados[alvo_final]:
                     houve_alteracao = True
             elif alvo_final in status_alvos_antigos:
-                # Mantém status antigo de canais adicionados há segundos pelo bot
                 status_alvos_final[alvo_final] = status_alvos_antigos[alvo_final]
                 
         # 6. Deteta se houve remoção de alvos durante a verificação
         for alvo_antigo in status_alvos_antigos.keys():
             if alvo_antigo not in nova_lista_alvos:
                 houve_alteracao = True
+                
+        # 6.1 Atualiza o Destino na base de dados
+        destino_fresco = dados_frescos.get("canal_destino")
+        if destino_fresco:
+            if "_destino" in mapa_correcoes and str(destino_fresco) == str(destino_para_verificar):
+                dados_frescos["canal_destino"] = mapa_correcoes["_destino"]
+                houve_alteracao = True
+                
+        if status_destino_coletado and dados_frescos.get("status_destino") != status_destino_coletado:
+            dados_frescos["status_destino"] = status_destino_coletado
+            houve_alteracao = True
                 
         # 7. Gravação limpa e definitiva
         if houve_alteracao:
