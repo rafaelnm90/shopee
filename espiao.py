@@ -260,9 +260,9 @@ async def motor_espelhador_userbot(event):
     links = re.findall(r'(https?://\S+)', texto_original)
     if links:
         if EXIBIR_LOGS: logger.info(f"🔗 [Espelhador] Convertendo {len(links)} links encontrados na postagem...")
-            for link in links:
-                novo_link = await converter_link_shopee_espelho(link)
-                texto_processado = texto_processado.replace(link, novo_link)
+        for link in links:
+            novo_link = await converter_link_shopee_espelho(link)
+            texto_processado = texto_processado.replace(link, novo_link)
 
     forward_origem_id = None
     if getattr(event, 'fwd_from', None) and getattr(event.fwd_from, 'from_id', None):
