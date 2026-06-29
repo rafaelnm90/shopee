@@ -455,14 +455,62 @@ async def monitorar_status_alvos():
             if alvo_antigo not in nova_lista_alvos:
                 houve_alteracao = True
                 
-        # 7. Gravação limpa e definitiva
-        if houve_alteracao:
-            dados_frescos["alvos"] = nova_lista_alvos
-            dados_frescos["status_alvos"] = status_alvos_final
-            with open("alvos_espiao.json", "w") as f:
-                json.dump(dados_frescos, f, indent=4)
+        async def monitorar_status_espelhos():
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento contínuo das rotas do Espelhador...")
+    while True:
+        try:
+            # Tenta carregar os dados atualizados de espelhamento
+            try:
+                with open("espelhos_config.json", "r", encoding="utf-8") as f:
+                    dados_espelho = json.load(f)
+            except FileNotFoundError:
+                dados_espelho = {"rotas": []}
+            
+            rotas = dados_espelho.get("rotas", [])
+            alterado = False
+            
+            for rota in rotas:
+                for ponta in ["origem", "destino"]:
+                    canal = rota.get(ponta)
+                    if not canal:
+                        continue
+                        
+                    try:
+                        # O Userbot tenta acessar a entidade para validar a conexão e existência
+                        entidade = await client.get_entity(canal)
+                        
+                        # Se for username (str), converte para ID numérico definitivo no banco
+                        if isinstance(canal, str) and not canal.lstrip('-').isdigit():
+                            novo_id = str(entidade.id)
+                            if not novo_id.startswith('-100'):
+                                novo_id = f"-100{novo_id}"
+                            rota[ponta] = novo_id
+                            alterado = True
+                            if EXIBIR_LOGS: logger.info(f"✅ Username convertido para ID na rota {rota['nome']}: {canal} -> {novo_id}")
+                        
+                        # Se antes constava como erro, limpa o status pois restaurou a comunicação
+                        if rota.get("status_verificacao") == "erro":
+                            rota["status_verificacao"] = "ok"
+                            alterado = True
+                            if EXIBIR_LOGS: logger.info(f"✅ Acesso restaurado para a rota: {rota['nome']}")
+                            
+                    except Exception as e:
+                        # Sem acesso (banido, link expirado ou canal apagado), marca a rota com erro
+                        if EXIBIR_LOGS: logger.warning(f"⚠️ Falha de acesso na {ponta} ({canal}) da rota {rota['nome']}: {e}")
+                        if rota.get("status_verificacao") != "erro":
+                            rota["status_verificacao"] = "erro"
+                            alterado = True
+                            
+            if alterado:
+                with open("espelhos_config.json", "w", encoding="utf-8") as f:
+                    json.dump(dados_espelho, f, indent=4, ensure_ascii=False)
+                if EXIBIR_LOGS: logger.info("✅ Arquivo de banco do Espelhador atualizado após auditoria.")
                 
-        await asyncio.sleep(30)
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"⚠️ Erro crítico no loop de monitoramento do espelhador: {e}")
+            
+        # Refaz a checagem a cada 12 horas (43200 segundos)
+        await asyncio.sleep(43200)
 
 async def main():
     if EXIBIR_LOGS: logger.info("🕵️ Iniciando o Módulo Espião de Clonagem...")
@@ -481,6 +529,9 @@ async def main():
     
     # Inicia a tarefa fantasma que auditará os grupos
     asyncio.create_task(monitorar_status_alvos())
+    
+    # ✅ NOVO: Inicia a tarefa fantasma que auditará as rotas do Espelhador
+    asyncio.create_task(monitorar_status_espelhos())
     
     await client.run_until_disconnected()
 
