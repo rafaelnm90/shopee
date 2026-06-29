@@ -143,6 +143,7 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
             # Bloco Modificado (Substituir o bloco existente por este)
             texto += f"   ⏳ Atraso: {rota['delay']} minutos\n"
             texto += f"   📦 Fila: {qtd_fila} vídeo(s)\n"
+            texto += "\n"
             texto += f"   📥 <b>Origens:</b>\n"
             
             origens = rota.get('origens', [])
