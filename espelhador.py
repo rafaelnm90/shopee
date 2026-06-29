@@ -158,6 +158,8 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
                 nome_o = info_o.get("nome", str(o))
                 display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
                 texto += f"      ├ {status_ico} {display_o}\n"
+
+            texto += "\n"
                 
             info_d = status_canais.get(str(destino_rota), {})
             if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
