@@ -495,7 +495,9 @@ async def monitorar_status_espelhos():
                         continue
                         
                     try:
-                        entidade = await client.get_entity(canal)
+                        # Garante que IDs numéricos salvos como texto sejam lidos como números inteiros pelo Telegram
+                        canal_query = int(canal) if isinstance(canal, str) and canal.lstrip('-').isdigit() else canal
+                        entidade = await client.get_entity(canal_query)
                         
                         if isinstance(canal, str) and not canal.lstrip('-').isdigit():
                             novo_id = str(entidade.id)
