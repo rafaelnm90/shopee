@@ -124,6 +124,8 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
     await state.clear()
     dados = ler_espelhos()
     rotas = dados.get("rotas", [])
+
+    tarefas_ativas = ler_contador_espelhador()
     
     texto = "🔄 <b>Painel do Espelhador de Canais</b>\n\n"
     texto += "Este módulo clona publicações de um grupo para outro automaticamente, convertendo os links e respeitando um atraso programado.\n\n"
@@ -132,9 +134,12 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
         texto += "📡 <b>Rotas Ativas:</b>\n"
         for i, rota in enumerate(rotas, 1):
             destino_rota = rota['destino']
-            status_alerta = " 🔴 <i>[ROTA QUEBRADA - Sem Acesso]</i>" if rota.get("status_verificacao") == "erro" else ""
+            qtd_fila = ler_contador_espelhador(rota['nome'])
+            status_canais = rota.get("status_canais", {})
             
-            texto += f"<b>{i}. {rota['nome']}</b>{status_alerta}\n"
+            texto += f"<b>{i}. {rota['nome']}</b>\n"
+            texto += f"   ⏳ Atraso: {rota['delay']} minutos\n"
+            texto += f"   📦 Fila: {qtd_fila} vídeo(s)\n"
             texto += f"   Origens:\n"
             
             origens = rota.get('origens', [])
@@ -144,12 +149,11 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
                 
             for idx, o in enumerate(origens):
                 prefixo = "   └" if idx == len(origens) - 1 else "   ├"
-                texto += f"{prefixo} <code>{o}</code>\n"
+                status_ico = "❌" if status_canais.get(str(o)) == "erro" else "✅"
+                texto += f"{prefixo} {status_ico} <code>{o}</code>\n"
                 
-            qtd_fila = ler_contador_espelhador(rota['nome'])
-            texto += f"   Destino: <code>{destino_rota}</code>\n"
-            texto += f"   ⏳ Atraso: {rota['delay']} minutos\n"
-            texto += f"   📦 Fila: {qtd_fila} vídeo(s)\n\n"
+            status_destino_ico = "❌" if status_canais.get(str(destino_rota)) == "erro" else "✅"
+            texto += f"   Destino: {status_destino_ico} <code>{destino_rota}</code>\n\n"
     else:
         texto += "<i>Nenhuma rota de espelhamento cadastrada no momento.</i>\n\n"
         
