@@ -72,10 +72,13 @@ def ler_espelhos():
     except (FileNotFoundError, json.JSONDecodeError):
         return {"rotas": []}
 
-def ler_contador_espelhador():
+def ler_contador_espelhador(nome_rota):
     try:
         with open("status_espelhador.json", "r") as f:
-            return json.load(f).get("ativas", 0)
+            dados = json.load(f)
+            if isinstance(dados, dict) and "ativas" not in dados:
+                return dados.get(nome_rota, 0)
+            return 0
     except (FileNotFoundError, json.JSONDecodeError):
         return 0
 
@@ -122,11 +125,8 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
     dados = ler_espelhos()
     rotas = dados.get("rotas", [])
     
-    tarefas_ativas = ler_contador_espelhador()
-    
     texto = "🔄 <b>Painel do Espelhador de Canais</b>\n\n"
     texto += "Este módulo clona publicações de um grupo para outro automaticamente, convertendo os links e respeitando um atraso programado.\n\n"
-    texto += f"📦 <b>Clonagens adormecidas na memória:</b> {tarefas_ativas} vídeo(s) a aguardar envio.\n\n"
     
     if rotas:
         texto += "📡 <b>Rotas Ativas:</b>\n"
@@ -146,8 +146,10 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
                 prefixo = "   └" if idx == len(origens) - 1 else "   ├"
                 texto += f"{prefixo} <code>{o}</code>\n"
                 
+            qtd_fila = ler_contador_espelhador(rota['nome'])
             texto += f"   Destino: <code>{destino_rota}</code>\n"
-            texto += f"   Atraso: ⏳ {rota['delay']} minutos\n\n"
+            texto += f"   ⏳ Atraso: {rota['delay']} minutos\n"
+            texto += f"   📦 Fila: {qtd_fila} vídeo(s)\n\n"
     else:
         texto += "<i>Nenhuma rota de espelhamento cadastrada no momento.</i>\n\n"
         
