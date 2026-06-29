@@ -124,18 +124,20 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
             destino_rota = rota['destino']
             status_alerta = " 🔴 <i>[ROTA QUEBRADA - Sem Acesso]</i>" if rota.get("status_verificacao") == "erro" else ""
             
-            # 🔍 Consulta o motor de agendamento em tempo real para contar a fila desta rota específica
-            qtd_fila = 0
-            if scheduler_instance:
-                for job in scheduler_instance.get_jobs():
-                    if job.id.startswith("espelho_") and f"_{destino_rota}_" in job.id:
-                        qtd_fila += 1
-
             texto += f"<b>{i}. {rota['nome']}</b>{status_alerta}\n"
-            texto += f"   Origem: <code>{rota['origem']}</code>\n"
+            texto += f"   Origens:\n"
+            
+            origens = rota.get('origens', [])
+            # Retrocompatibilidade com rotas antigas caso existam
+            if not origens and 'origem' in rota:
+                origens = [rota['origem']]
+                
+            for idx, o in enumerate(origens):
+                prefixo = "   └" if idx == len(origens) - 1 else "   ├"
+                texto += f"{prefixo} <code>{o}</code>\n"
+                
             texto += f"   Destino: <code>{destino_rota}</code>\n"
-            texto += f"   Atraso: ⏳ {rota['delay']} minutos\n"
-            texto += f"   Fila: 📦 {qtd_fila} vídeos aguardando\n\n"
+            texto += f"   Atraso: ⏳ {rota['delay']} minutos\n\n"
     else:
         texto += "<i>Nenhuma rota de espelhamento cadastrada no momento.</i>\n\n"
         
@@ -220,8 +222,8 @@ async def receber_delay_rota(message: types.Message, state: FSMContext):
     destino = data.get("destino")
     
     texto_confirmacao = (
-        f"⚠️ <b>Confirmação de Criação em Lote ({len(origens)} rotas)</b>\n\n"
-        f"<b>Origens Mapeadas:</b>\n"
+        f"⚠️ <b>Confirmação de Criação em Grupo</b>\n\n"
+        f"<b>Origens Mapeadas ({len(origens)}):</b>\n"
     )
     for o in origens:
         texto_confirmacao += f"└ <code>{o}</code>\n"
@@ -229,10 +231,10 @@ async def receber_delay_rota(message: types.Message, state: FSMContext):
     texto_confirmacao += (
         f"\n<b>Destino Único:</b> <code>{destino}</code>\n"
         f"<b>Atraso Aplicado:</b> ⏳ {delay} minutos\n\n"
-        "Deseja aprovar e ativar estes espelhamentos agora?"
+        "Deseja aprovar e ativar este espelhamento agrupado agora?"
     )
     
-    if EXIBIR_LOGS: logger.info(f"✅ Lote preparado para confirmação: {len(origens)} rotas apontando para {destino}.")
+    if EXIBIR_LOGS: logger.info(f"✅ Rota agrupada preparada para confirmação: {len(origens)} origens para {destino}.")
     await message.answer(texto_confirmacao, reply_markup=teclado_espelhador_confirmacao, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.aguardando_confirmacao_criacao)
 
@@ -249,27 +251,24 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
     
     dados = ler_espelhos()
     
-    if EXIBIR_LOGS: logger.info(f"🚀 Iniciando gravação no banco de dados para {len(origens)} novas rotas...")
+    if EXIBIR_LOGS: logger.info(f"🚀 A agrupar {len(origens)} origens numa única rota de espelhamento para o destino {destino}...")
     
-    for origem in origens:
-        num_rota = len(dados.get("rotas", [])) + 1
-        nome_rota = f"Espelho {num_rota}"
-        
-        nova_rota = {
-            "nome": nome_rota,
-            "origem": origem,
-            "destino": destino,
-            "delay": delay
-        }
-        
-        dados.setdefault("rotas", []).append(nova_rota)
-        if EXIBIR_LOGS: logger.info(f"✅ Rota anexada: {nome_rota} (Origem {origem} > Destino {destino} | Atraso: {delay}min).")
-        
+    num_rota = len(dados.get("rotas", [])) + 1
+    nome_rota = f"Espelho {num_rota}"
+    
+    nova_rota = {
+        "nome": nome_rota,
+        "origens": origens,
+        "destino": destino,
+        "delay": delay
+    }
+    
+    dados.setdefault("rotas", []).append(nova_rota)
     salvar_espelhos(dados)
     
-    if EXIBIR_LOGS: logger.info("✅ Operação em lote concluída e persistida com sucesso.")
+    if EXIBIR_LOGS: logger.info(f"✅ Rota agrupada criada com sucesso: {nome_rota}.")
     
-    await message.answer(f"✅ <b>{len(origens)} novas rotas</b> criadas e ativadas com sucesso!", parse_mode="HTML")
+    await message.answer(f"✅ <b>Rota {nome_rota}</b> criada agrupando {len(origens)} canais com sucesso!", parse_mode="HTML")
     await painel_espelhador(message, state)
 
 @router.message(EspelhadorFluxo.menu_principal, F.text == "Remover Rota 🗑️")
@@ -283,7 +282,8 @@ async def iniciar_remocao_rota(message: types.Message, state: FSMContext):
         
     texto = "Digite o <b>NÚMERO</b> da rota que deseja remover:\n\n"
     for i, rota in enumerate(rotas, 1):
-        texto += f"{i}. {rota['nome']} (Origem: {rota['origem']})\n"
+        qtd_origens = len(rota.get('origens', [rota.get('origem')]))
+        texto += f"{i}. {rota['nome']} ({qtd_origens} origens agrupadas)\n"
         
     await message.answer(texto, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.aguardando_remocao)
@@ -302,9 +302,13 @@ async def pedir_confirmacao_remocao(message: types.Message, state: FSMContext):
         rota_alvo = rotas[indice]
         await state.update_data(indice_remocao=indice)
         
+        origens = rota_alvo.get('origens', [])
+        if not origens and 'origem' in rota_alvo:
+            origens = [rota_alvo['origem']]
+        
         texto_confirmacao = (
-            f"⚠️ Tem a certeza de que deseja remover permanentemente a rota <b>{rota_alvo['nome']}</b>?\n\n"
-            f"<b>Origem:</b> <code>{rota_alvo['origem']}</code>\n"
+            f"⚠️ Tem a certeza de que deseja remover permanentemente a rota agrupada <b>{rota_alvo['nome']}</b>?\n\n"
+            f"<b>Canais de Origem que serão desconectados:</b> {len(origens)}\n"
             f"<b>Destino:</b> <code>{rota_alvo['destino']}</code>"
         )
         
