@@ -4,6 +4,10 @@ import logging
 import asyncio
 import re
 from datetime import datetime
+import time
+import hashlib
+import aiohttp
+from telethon import utils
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageMediaDocument
 from dotenv import load_dotenv
@@ -158,6 +162,128 @@ async def interceptar_mensagem(event):
             registrar_historico_espiao(nome_chat)
         else:
             if EXIBIR_LOGS: logger.info(f"⏭️ Ignorado: O link {link_capturado} foi encontrado, mas a postagem não contém um anexo de vídeo direto.")
+
+# --- MOTOR DO ESPELHADOR (USERBOT) ---
+def ler_espelhos_config():
+    try:
+        with open("espelhos_config.json", "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"rotas": []}
+
+async def converter_link_shopee_espelho(link_original):
+    app_id = os.getenv('SHOPEE_APP_ID')
+    app_secret = os.getenv('SHOPEE_APP_SECRET')
+    
+    if not app_id or not app_secret:
+        return link_original
+
+    link_processar = link_original
+    
+    if "shp.ee" in link_original or "shope.ee" in link_original or "s.shopee.com.br" in link_original:
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(link_original, allow_redirects=True) as resp:
+                    link_processar = str(resp.url)
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Erro ao expandir o link: {e}")
+
+    timestamp = int(time.time())
+    endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
+
+    payload = {
+        "query": "mutation generateShortLink($originUrl: String!) { generateShortLink(input: {originUrl: $originUrl}) { shortLink } }",
+        "variables": {"originUrl": link_processar}
+    }
+    
+    payload_json = json.dumps(payload, separators=(',', ':'))
+    fator_base = f"{app_id}{timestamp}{payload_json}{app_secret}"
+    assinatura = hashlib.sha256(fator_base.encode('utf-8')).hexdigest()
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"SHA256 Credential={app_id}, Timestamp={timestamp}, Signature={assinatura}"
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(endpoint, headers=headers, data=payload_json) as response:
+                resposta_dados = await response.json()
+                if response.status == 200 and "data" in resposta_dados and resposta_dados["data"].get("generateShortLink"):
+                    novo_link = resposta_dados["data"]["generateShortLink"]["shortLink"]
+                    if EXIBIR_LOGS: logger.info("🔗 [Espelhador] Conversão de comissão aplicada ao link com sucesso.")
+                    return novo_link
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Falha de comunicação com a Shopee na conversão: {e}")
+        
+    return link_original
+
+async def disparar_espelho_userbot(destino, texto, media, delay_minutos, nome_rota):
+    if delay_minutos > 0:
+        if EXIBIR_LOGS: logger.info(f"⏳ [Espelhador] Atraso ativado: A rota '{nome_rota}' aguardará {delay_minutos} minutos.")
+        await asyncio.sleep(delay_minutos * 60)
+    try:
+        try:
+            entidade_destino = await client.get_entity(destino)
+        except ValueError:
+            id_teste = int(destino) if str(destino).lstrip('-').isdigit() else destino
+            entidade_destino = await client.get_entity(id_teste)
+
+        await client.send_message(entidade_destino, texto, file=media, parse_mode="html")
+        if EXIBIR_LOGS: logger.info(f"✅ [Espelhador] Clonagem da rota '{nome_rota}' entregue no destino {destino}.")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Falha no disparo da rota '{nome_rota}' para {destino}: {e}")
+
+@client.on(events.NewMessage)
+async def motor_espelhador_userbot(event):
+    chat = await event.get_chat()
+    chat_id_str = str(chat.id)
+    chat_username = f"@{chat.username.lower()}" if getattr(chat, 'username', None) else ""
+    chat_id_completo = f"-100{chat.id}" if not chat_id_str.startswith("-100") else chat_id_str
+
+    dados = ler_espelhos_config()
+    rotas_ativas = []
+    
+    for r in dados.get("rotas", []):
+        origem_rota = str(r["origem"]).lower()
+        if origem_rota in [chat_id_str, chat_id_completo, chat_username]:
+            rotas_ativas.append(r)
+    
+    if not rotas_ativas:
+        return
+
+    if EXIBIR_LOGS: logger.info(f"🔄 [Espelhador] Interceptação acionada! Nova postagem detectada na origem {chat_id_str}.")
+
+    texto_original = event.text or ""
+    texto_processado = texto_original
+    
+    links = re.findall(r'(https?://\S+)', texto_original)
+    if links:
+        if EXIBIR_LOGS: logger.info(f"🔗 [Espelhador] Convertendo {len(links)} links encontrados na postagem...")
+            for link in links:
+                novo_link = await converter_link_shopee_espelho(link)
+                texto_processado = texto_processado.replace(link, novo_link)
+
+    forward_origem_id = None
+    if getattr(event, 'fwd_from', None) and getattr(event.fwd_from, 'from_id', None):
+        try:
+            fwd_id = utils.get_peer_id(event.fwd_from.from_id)
+            forward_origem_id = f"-100{fwd_id}" if not str(fwd_id).startswith("-100") else str(fwd_id)
+        except Exception:
+            pass
+
+    for rota in rotas_ativas:
+        destino = rota["destino"]
+        nome_rota = rota.get("nome", "Desconhecida")
+        
+        if forward_origem_id and (destino == forward_origem_id or destino.replace("-100", "") == forward_origem_id.replace("-100", "")):
+            if EXIBIR_LOGS: logger.warning(f"🚫 [Anti-Loop Ativado] O vídeo nasceu no destino ({destino}). Ignorando a clonagem nesta rota.")
+            continue
+            
+        delay_minutos = int(rota.get("delay", 0))
+        media = event.media
+        
+        asyncio.create_task(disparar_espelho_userbot(destino, texto_processado, media, delay_minutos, nome_rota))
 
 async def validar_e_obter_entidade(client, alvo):
     alvo_str = str(alvo).strip()
