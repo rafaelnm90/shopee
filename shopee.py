@@ -5156,6 +5156,8 @@ async def checkup_diario_grupos():
         if EXIBIR_LOGS: logger.info("✅ Relatório de saúde diário consolidado e enviado ao administrador com sucesso.")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"⚠️ Erro ao disparar a mensagem do relatório diário: {e}")
+
+async def main():
     # Agendador mestre que roda todo dia às 00:01
     scheduler.add_job(agendar_tarefas_diarias, 'cron', hour=0, minute=1, timezone=FUSO_STR)
     
