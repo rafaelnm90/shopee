@@ -2084,8 +2084,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
             await gerenciar_rotina(message, state)
         return
 
-    # Bloco Modificado, Inserido ou Removido (Substituir o bloco existente por este)
-        if EXIBIR_LOGS: logger.info("🔍 Limpeza de memória solicitada. A reserva de numeração será descartada para evitar retrocessos no contador global.")
+    if EXIBIR_LOGS: logger.info("🔍 Limpeza de memória solicitada. A reserva de numeração será descartada para evitar retrocessos no contador global.")
 
     # 🧹 Limpeza de arquivos de vídeo que ficaram órfãos
     caminho_video = data.get('video_path')
@@ -4125,12 +4124,12 @@ async def aplicar_renumeracao_e_salvar(fila, message, state, numero_base=None):
     salvar_fila_postagens(fila_data)
     
     async with _lock_contador:
-            contador_real = ler_contador()
-            if numero_atual_cascata > contador_real:
-                salvar_contador(numero_atual_cascata)
-                if EXIBIR_LOGS: logger.info(f"✅ Auto-correção concluída. Contador global avançou para: {numero_atual_cascata}.")
-            else:
-                if EXIBIR_LOGS: logger.info(f"🛡️ Bloqueio de retrocesso: Contador global mantido no {contador_real} (O cálculo de reordenação tentou aplicar {numero_atual_cascata}).")
+        contador_real = ler_contador()
+        if numero_atual_cascata > contador_real:
+            salvar_contador(numero_atual_cascata)
+            if EXIBIR_LOGS: logger.info(f"✅ Auto-correção concluída. Contador global avançou para: {numero_atual_cascata}.")
+        else:
+            if EXIBIR_LOGS: logger.info(f"🛡️ Bloqueio de retrocesso: Contador global mantido no {contador_real} (O cálculo de reordenação tentou aplicar {numero_atual_cascata}).")
     
     agendar_fila_postagens() 
     
