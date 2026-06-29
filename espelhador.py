@@ -144,23 +144,52 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.menu_principal, F.text == "Adicionar Rota ➕")
 async def iniciar_cadastro_rota(message: types.Message, state: FSMContext):
-    await message.answer("Envie o ID numérico ou @username do <b>Canal de ORIGEM</b> (De onde o robô vai copiar):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando fluxo de cadastro de novas rotas em lote...")
+    await message.answer("Envie os IDs numéricos, links ou @usernames dos <b>Canais de ORIGEM</b> (De onde o robô vai copiar).\nVocê pode enviar vários de uma vez separando por vírgula ou quebrando a linha:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.aguardando_origem)
 
 @router.message(EspelhadorFluxo.aguardando_origem)
 async def receber_origem(message: types.Message, state: FSMContext):
-    msg_status = await message.answer("⏳ Validando permissões e acesso ao canal de origem...", reply_markup=teclado_espelhador_cancelar)
-    origem_id = await validar_link_ou_id_grupo(message.text)
+    msg_status = await message.answer("⏳ Validando lote de canais de origem...", reply_markup=teclado_espelhador_cancelar)
+    
+    entradas_brutas = message.text.replace('\n', ',').split(',')
+    origens_validas = []
+    origens_invalidas = []
+    
+    if EXIBIR_LOGS: logger.info(f"🚀 Iniciando processamento em lote para {len(entradas_brutas)} possíveis origens...")
+
+    for entrada in entradas_brutas:
+        entrada = entrada.strip()
+        if not entrada:
+            continue
+            
+        origem_id = await validar_link_ou_id_grupo(entrada)
+        if origem_id:
+            if origem_id not in origens_validas:
+                origens_validas.append(origem_id)
+                if EXIBIR_LOGS: logger.info(f"✅ Canal de origem validado e adicionado ao lote: {origem_id}")
+        else:
+            origens_invalidas.append(entrada)
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Falha na validação do canal de origem: {entrada}")
+
     await msg_status.delete()
     
-    if origem_id:
-        if EXIBIR_LOGS: logger.info(f"✅ Origem validada com sucesso: {origem_id}")
-        await state.update_data(origem=origem_id)
-        await message.answer(f"✅ Origem confirmada: <code>{origem_id}</code>\n\nExcelente. Agora envie o ID numérico ou @username do <b>Canal de DESTINO</b> (Para onde o robô vai enviar a cópia):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+    if origens_validas:
+        await state.update_data(origens=origens_validas)
+        
+        texto_resposta = f"✅ <b>{len(origens_validas)} Origem(ns) confirmada(s):</b>\n"
+        for o in origens_validas:
+            texto_resposta += f"<code>{o}</code>\n"
+            
+        if origens_invalidas:
+            texto_resposta += f"\n⚠️ <i>{len(origens_invalidas)} entrada(s) ignorada(s) por formato inválido.</i>\n"
+            
+        texto_resposta += "\nExcelente. Agora envie o ID numérico ou @username do <b>Canal de DESTINO</b> (Para onde o robô vai enviar as cópias):"
+        await message.answer(texto_resposta, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_destino)
     else:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Falha na validação da origem: {message.text}")
-        await message.answer("⚠️ <b>Canal não encontrado ou sem permissão!</b>\nCertifique-se de que o ID ou @username está correto e de que o bot é administrador do canal.\n\nTente enviar novamente:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+        if EXIBIR_LOGS: logger.warning("❌ Nenhuma origem válida encontrada no lote.")
+        await message.answer("⚠️ <b>Nenhum canal válido encontrado!</b>\nCertifique-se de que os IDs ou @usernames estão corretos.\n\nTente enviar novamente:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
 
 @router.message(EspelhadorFluxo.aguardando_destino)
 async def receber_destino(message: types.Message, state: FSMContext):
@@ -187,17 +216,23 @@ async def receber_delay_rota(message: types.Message, state: FSMContext):
     await state.update_data(delay=delay)
     
     data = await state.get_data()
-    origem = data.get("origem")
+    origens = data.get("origens", [])
     destino = data.get("destino")
     
     texto_confirmacao = (
-        "⚠️ <b>Confirmação de Nova Rota</b>\n\n"
-        f"<b>Origem:</b> <code>{origem}</code>\n"
-        f"<b>Destino:</b> <code>{destino}</code>\n"
-        f"<b>Atraso:</b> ⏳ {delay} minutos\n\n"
-        "Deseja aprovar e ativar este espelhamento agora?"
+        f"⚠️ <b>Confirmação de Criação em Lote ({len(origens)} rotas)</b>\n\n"
+        f"<b>Origens Mapeadas:</b>\n"
+    )
+    for o in origens:
+        texto_confirmacao += f"└ <code>{o}</code>\n"
+        
+    texto_confirmacao += (
+        f"\n<b>Destino Único:</b> <code>{destino}</code>\n"
+        f"<b>Atraso Aplicado:</b> ⏳ {delay} minutos\n\n"
+        "Deseja aprovar e ativar estes espelhamentos agora?"
     )
     
+    if EXIBIR_LOGS: logger.info(f"✅ Lote preparado para confirmação: {len(origens)} rotas apontando para {destino}.")
     await message.answer(texto_confirmacao, reply_markup=teclado_espelhador_confirmacao, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.aguardando_confirmacao_criacao)
 
@@ -208,27 +243,33 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
         return
 
     data = await state.get_data()
-    origem = data.get("origem")
+    origens = data.get("origens", [])
     destino = data.get("destino")
     delay = data.get("delay")
     
     dados = ler_espelhos()
-    num_rota = len(dados.get("rotas", [])) + 1
-    nome_rota = f"Espelho {num_rota}"
     
-    nova_rota = {
-        "nome": nome_rota,
-        "origem": origem,
-        "destino": destino,
-        "delay": delay
-    }
+    if EXIBIR_LOGS: logger.info(f"🚀 Iniciando gravação no banco de dados para {len(origens)} novas rotas...")
     
-    dados.setdefault("rotas", []).append(nova_rota)
+    for origem in origens:
+        num_rota = len(dados.get("rotas", [])) + 1
+        nome_rota = f"Espelho {num_rota}"
+        
+        nova_rota = {
+            "nome": nome_rota,
+            "origem": origem,
+            "destino": destino,
+            "delay": delay
+        }
+        
+        dados.setdefault("rotas", []).append(nova_rota)
+        if EXIBIR_LOGS: logger.info(f"✅ Rota anexada: {nome_rota} (Origem {origem} > Destino {destino} | Atraso: {delay}min).")
+        
     salvar_espelhos(dados)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Rota de espelho cadastrada: Origem {origem} > Destino {destino} com delay de {delay}min.")
+    if EXIBIR_LOGS: logger.info("✅ Operação em lote concluída e persistida com sucesso.")
     
-    await message.answer(f"✅ Rota <b>{nome_rota}</b> criada e ativada com sucesso!", parse_mode="HTML")
+    await message.answer(f"✅ <b>{len(origens)} novas rotas</b> criadas e ativadas com sucesso!", parse_mode="HTML")
     await painel_espelhador(message, state)
 
 @router.message(EspelhadorFluxo.menu_principal, F.text == "Remover Rota 🗑️")
