@@ -72,6 +72,13 @@ def ler_espelhos():
     except (FileNotFoundError, json.JSONDecodeError):
         return {"rotas": []}
 
+def ler_contador_espelhador():
+    try:
+        with open("status_espelhador.json", "r") as f:
+            return json.load(f).get("ativas", 0)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return 0
+
 def salvar_espelhos(dados):
     with open("espelhos_config.json", "w") as f:
         json.dump(dados, f, indent=4)
@@ -115,8 +122,11 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
     dados = ler_espelhos()
     rotas = dados.get("rotas", [])
     
+    tarefas_ativas = ler_contador_espelhador()
+    
     texto = "🔄 <b>Painel do Espelhador de Canais</b>\n\n"
     texto += "Este módulo clona publicações de um grupo para outro automaticamente, convertendo os links e respeitando um atraso programado.\n\n"
+    texto += f"📦 <b>Clonagens adormecidas na memória:</b> {tarefas_ativas} vídeo(s) a aguardar envio.\n\n"
     
     if rotas:
         texto += "📡 <b>Rotas Ativas:</b>\n"
