@@ -559,7 +559,7 @@ async def monitorar_status_espelhos():
                                 
                             alterado = True
                             if EXIBIR_LOGS: logger.info(f"✅ Username convertido para ID na rota {rota['nome']}: {canal} -> {novo_id}")
-                                canal = novo_id # Atualiza a variável para guardar o status no ID novo
+                                canal = novo_id
                         
                         nome_canal = getattr(entidade, 'title', getattr(entidade, 'username', str(canal)))
                         if "status_canais" not in rota: rota["status_canais"] = {}
