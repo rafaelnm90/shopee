@@ -147,11 +147,21 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
                 
             for idx, o in enumerate(origens):
                 prefixo = "   └" if idx == len(origens) - 1 else "   ├"
-                status_ico = "❌" if status_canais.get(str(o)) == "erro" else "✅"
-                texto += f"{prefixo} {status_ico} <code>{o}</code>\n"
+                info_o = status_canais.get(str(o), {})
+                if isinstance(info_o, str): info_o = {"status": info_o, "nome": str(o)}
                 
-            status_destino_ico = "❌" if status_canais.get(str(destino_rota)) == "erro" else "✅"
-            texto += f"   Destino: {status_destino_ico} <code>{destino_rota}</code>\n\n"
+                status_ico = "❌" if info_o.get("status") == "erro" else "✅"
+                nome_o = info_o.get("nome", str(o))
+                display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
+                texto += f"{prefixo} {status_ico} {display_o}\n"
+                
+            info_d = status_canais.get(str(destino_rota), {})
+            if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
+            
+            status_destino_ico = "❌" if info_d.get("status") == "erro" else "✅"
+            nome_d = info_d.get("nome", str(destino_rota))
+            display_d = f"{nome_d} (<code>{destino_rota}</code>)" if nome_d != str(destino_rota) else f"<code>{destino_rota}</code>"
+            texto += f"   Destino: {status_destino_ico} {display_d}\n\n"
     else:
         texto += "<i>Nenhuma rota de espelhamento cadastrada no momento.</i>\n\n"
         
