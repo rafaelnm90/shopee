@@ -369,3 +369,63 @@ async def processar_remocao_rota(message: types.Message, state: FSMContext):
     else:
         await message.answer("Erro de sincronização. Operação cancelada.")
         await painel_espelhador(message, state)
+
+@router.message(EspelhadorFluxo.menu_principal, F.text == "Editar Rota ✏️")
+async def iniciar_edicao_rota(message: types.Message, state: FSMContext):
+    dados = ler_espelhos()
+    rotas = dados.get("rotas", [])
+    
+    if not rotas:
+        await message.answer("Não há rotas ativas para editar.", reply_markup=teclado_espelhador_menu)
+        return
+        
+    texto = "Digite o <b>NÚMERO</b> da rota que deseja editar o atraso (delay):\n\n"
+    for i, rota in enumerate(rotas, 1):
+        texto += f"{i}. {rota['nome']} (Atraso atual: {rota.get('delay', 0)} min)\n"
+        
+    await message.answer(texto, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+    await state.set_state(EspelhadorFluxo.aguardando_edicao_escolha_rota)
+
+@router.message(EspelhadorFluxo.aguardando_edicao_escolha_rota)
+async def pedir_novo_delay_rota(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas o número da rota.", reply_markup=teclado_espelhador_cancelar)
+        return
+        
+    indice = int(message.text) - 1
+    dados = ler_espelhos()
+    rotas = dados.get("rotas", [])
+    
+    if 0 <= indice < len(rotas):
+        rota_alvo = rotas[indice]
+        await state.update_data(indice_edicao=indice)
+        
+        await message.answer(f"A rota <b>{rota_alvo['nome']}</b> tem um atraso atual de <b>{rota_alvo.get('delay', 0)} minutos</b>.\n\nDigite o <b>NOVO ATRASO</b> em minutos (apenas números, 0 para imediato):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+        await state.set_state(EspelhadorFluxo.aguardando_edicao_novo_delay)
+    else:
+        await message.answer("Número inválido. Tente novamente ou clique em Cancelar Operação ❌.", reply_markup=teclado_espelhador_cancelar)
+
+@router.message(EspelhadorFluxo.aguardando_edicao_novo_delay)
+async def salvar_edicao_rota(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas números inteiros para os minutos.", reply_markup=teclado_espelhador_cancelar)
+        return
+        
+    novo_delay = int(message.text)
+    data = await state.get_data()
+    indice = data.get("indice_edicao")
+    
+    dados = ler_espelhos()
+    rotas = dados.get("rotas", [])
+    
+    if indice is not None and 0 <= indice < len(rotas):
+        rotas[indice]["delay"] = novo_delay
+        dados["rotas"] = rotas
+        salvar_espelhos(dados)
+        
+        if EXIBIR_LOGS: logger.info(f"✏️ Atraso da rota '{rotas[indice]['nome']}' atualizado para {novo_delay} minutos.")
+        await message.answer(f"✅ O atraso da rota <b>{rotas[indice]['nome']}</b> foi atualizado para {novo_delay} minutos com sucesso!", parse_mode="HTML")
+        await painel_espelhador(message, state)
+    else:
+        await message.answer("Erro de sincronização. Operação cancelada.")
+        await painel_espelhador(message, state)
