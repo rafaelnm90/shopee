@@ -67,6 +67,40 @@ def verificar_e_registrar_espelho(link_shopee):
         json.dump(dados, f, indent=4)
     return False
 
+def calcular_hash_video(caminho_arquivo):
+    hash_sha256 = hashlib.sha256()
+    try:
+        if EXIBIR_LOGS: logger.info(f"🔍 A calcular a assinatura digital (SHA-256) do ficheiro: {caminho_arquivo}...")
+        with open(caminho_arquivo, "rb") as f:
+            for bloco in iter(lambda: f.read(4096), b""):
+                hash_sha256.update(bloco)
+        resultado = hash_sha256.hexdigest()
+        if EXIBIR_LOGS: logger.info(f"✅ Assinatura única identificada: {resultado[:10]}...")
+        return resultado
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro na leitura física para calcular hash do ficheiro {caminho_arquivo}: {e}")
+        return None
+
+def verificar_e_registrar_hash(hash_video):
+    arquivo_hashes = "registro_hashes.json"
+    try:
+        with open(arquivo_hashes, "r") as f:
+            dados = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        dados = {"hashes": []}
+    
+    if hash_video in dados.get("hashes", []):
+        return True
+        
+    dados.setdefault("hashes", []).append(hash_video)
+    
+    if len(dados["hashes"]) > 500:
+        dados["hashes"] = dados["hashes"][-500:]
+        
+    with open(arquivo_hashes, "w") as f:
+        json.dump(dados, f, indent=4)
+    return False
+
 def salvar_na_fila_clonagem(caminho_video, link_shopee):
     arquivo_fila = "fila_clonagem.json"
     try:
@@ -155,6 +189,17 @@ async def interceptar_mensagem(event):
             if EXIBIR_LOGS: logger.info("📥 Iniciando download do vídeo em segundo plano...")
             caminho_salvo = await event.download_media(file="temp_clone_")
             
+            hash_arquivo = calcular_hash_video(caminho_salvo)
+            
+            if hash_arquivo and verificar_e_registrar_hash(hash_arquivo):
+                if EXIBIR_LOGS: logger.warning(f"🚫 Clone bloqueado! O vídeo possui uma assinatura digital idêntica a um ficheiro já processado.")
+                try:
+                    os.remove(caminho_salvo)
+                    if EXIBIR_LOGS: logger.info("🧹 Ficheiro físico duplicado eliminado com sucesso para poupar espaço.")
+                except Exception as e:
+                    if EXIBIR_LOGS: logger.error(f"❌ Erro ao tentar remover ficheiro duplicado: {e}")
+                return
+                
             salvar_na_fila_clonagem(caminho_salvo, link_capturado)
             
             # 📊 Adiciona a pontuação ao painel estatístico do Espião
