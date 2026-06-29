@@ -124,8 +124,6 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
     await state.clear()
     dados = ler_espelhos()
     rotas = dados.get("rotas", [])
-
-    tarefas_ativas = ler_contador_espelhador()
     
     texto = "🔄 <b>Painel do Espelhador de Canais</b>\n\n"
     texto += "Este módulo clona publicações de um grupo para outro automaticamente, convertendo os links e respeitando um atraso programado.\n\n"
