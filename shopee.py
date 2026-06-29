@@ -2821,9 +2821,18 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
     alvos = dados.get("alvos", [])
     destino = dados.get("canal_destino", "Não definido")
     status_alvos = dados.get("status_alvos", {})
+    status_destino = dados.get("status_destino", {})
     
     texto = f"📡 <b>Gestão de Grupos Vigiados</b>\n\n"
-    texto += f"🎯 <b>Canal de Destino:</b> {destino}\n\n"
+    
+    if destino != "Não definido":
+        nome_dest = status_destino.get("nome", str(destino))
+        icone_dest = "❌" if status_destino.get("status") == "erro" else "✅" if status_destino.get("status") == "ok" else "⏳"
+        display_destino = f"{icone_dest} {nome_dest} (<code>{destino}</code>)" if nome_dest != str(destino) else f"{icone_dest} <code>{destino}</code>"
+    else:
+        display_destino = "<i>Não definido</i>"
+        
+    texto += f"🎯 <b>Canal de Destino:</b> {display_destino}\n\n"
     texto += "<b>Na Escuta:</b>\n"
     
     if alvos:
