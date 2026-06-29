@@ -215,6 +215,20 @@ def ler_espelhos_config():
     except (FileNotFoundError, json.JSONDecodeError):
         return {"rotas": []}
 
+# Bloco Inserido (Copiar e colar este bloco)
+def atualizar_contador_espelhador(incremento):
+    arquivo = "status_espelhador.json"
+    try:
+        with open(arquivo, "r") as f:
+            dados = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        dados = {"ativas": 0}
+        
+    dados["ativas"] = max(0, dados.get("ativas", 0) + incremento)
+    
+    with open(arquivo, "w") as f:
+        json.dump(dados, f)
+
 async def converter_link_shopee_espelho(link_original):
     app_id = os.getenv('SHOPEE_APP_ID')
     app_secret = os.getenv('SHOPEE_APP_SECRET')
@@ -264,8 +278,13 @@ async def converter_link_shopee_espelho(link_original):
 
 async def disparar_espelho_userbot(destino, texto, media, delay_minutos, nome_rota):
     if delay_minutos > 0:
+        atualizar_contador_espelhador(1)
         if EXIBIR_LOGS: logger.info(f"⏳ [Espelhador] Atraso ativado: A rota '{nome_rota}' aguardará {delay_minutos} minutos.")
-        await asyncio.sleep(delay_minutos * 60)
+        try:
+            await asyncio.sleep(delay_minutos * 60)
+        finally:
+            atualizar_contador_espelhador(-1)
+            
     try:
         try:
             entidade_destino = await client.get_entity(destino)
@@ -537,6 +556,12 @@ async def monitorar_status_espelhos():
 
 async def main():
     if EXIBIR_LOGS: logger.info("🕵️ Iniciando o Módulo Espião de Clonagem...")
+    # ✅ Reseta o contador de espelhos pendentes caso o serviço tenha sido reiniciado
+    try:
+        with open("status_espelhador.json", "w") as f:
+            json.dump({"ativas": 0}, f)
+    except Exception:
+        pass
     await client.start()
     
     # ✅ NOVO: Força o cache do histórico para o Userbot reconhecer os IDs numéricos privados
