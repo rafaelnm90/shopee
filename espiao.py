@@ -534,11 +534,16 @@ async def monitorar_status_espelhos():
                                 
                             alterado = True
                             if EXIBIR_LOGS: logger.info(f"✅ Username convertido para ID na rota {rota['nome']}: {canal} -> {novo_id}")
-                        canal = novo_id # Atualiza a variável para guardar o status no ID novo
+                                canal = novo_id # Atualiza a variável para guardar o status no ID novo
                         
+                        nome_canal = getattr(entidade, 'title', getattr(entidade, 'username', str(canal)))
                         if "status_canais" not in rota: rota["status_canais"] = {}
-                        if rota["status_canais"].get(str(canal)) != "ok":
-                            rota["status_canais"][str(canal)] = "ok"
+                        
+                        info_atual = rota["status_canais"].get(str(canal), {})
+                        if not isinstance(info_atual, dict): info_atual = {}
+                        
+                        if info_atual.get("status") != "ok" or info_atual.get("nome") != nome_canal:
+                            rota["status_canais"][str(canal)] = {"status": "ok", "nome": nome_canal}
                             alterado = True
 
                         if rota.get("status_verificacao") == "erro":
@@ -550,8 +555,11 @@ async def monitorar_status_espelhos():
                         if EXIBIR_LOGS: logger.warning(f"⚠️ Falha de acesso em {canal} ({tipo_ponta}) da rota {rota['nome']}: {e}")
                         
                         if "status_canais" not in rota: rota["status_canais"] = {}
-                        if rota["status_canais"].get(str(canal)) != "erro":
-                            rota["status_canais"][str(canal)] = "erro"
+                        info_atual = rota["status_canais"].get(str(canal), {})
+                        if not isinstance(info_atual, dict): info_atual = {}
+                        
+                        if info_atual.get("status") != "erro":
+                            rota["status_canais"][str(canal)] = {"status": "erro", "nome": str(canal)}
                             alterado = True
                             
                         if rota.get("status_verificacao") != "erro":
