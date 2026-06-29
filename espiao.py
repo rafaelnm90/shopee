@@ -147,7 +147,6 @@ def registrar_historico_espiao(nome_grupo):
         
     if EXIBIR_LOGS: logger.info(f"📊 [Estatística] +1 vídeo contabilizado para o histórico do grupo: {nome_grupo}")
 
-# ✅ O padrão foi ampliado para capturar links com parâmetros complexos e domínios mais curtos
 PADRAO_SHOPEE = re.compile(r'(https?://(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+)')
 
 @client.on(events.NewMessage)
@@ -290,8 +289,12 @@ async def motor_espelhador_userbot(event):
     rotas_ativas = []
     
     for r in dados.get("rotas", []):
-        origem_rota = str(r["origem"]).lower()
-        if origem_rota in [chat_id_str, chat_id_completo, chat_username]:
+        # Suporte estruturado para a nova lista de origens ou para rotas antigas singulares
+        origens_rota = [str(o).lower() for o in r.get("origens", [])]
+        if "origem" in r:
+            origens_rota.append(str(r["origem"]).lower())
+            
+        if chat_id_str in origens_rota or chat_id_completo in origens_rota or chat_username in origens_rota:
             rotas_ativas.append(r)
     
     if not rotas_ativas:
@@ -386,7 +389,6 @@ async def validar_e_obter_entidade(client, alvo):
             
     raise Exception("Nenhuma variação de ID numérico funcionou.")
 
-# ✅ NOVO: Radar assíncrono que varre a lista, testa variações e audita a permissão
 async def monitorar_status_alvos():
     while True:
         # 1. Leitura inicial para saber quem devemos verificar agora
@@ -455,11 +457,19 @@ async def monitorar_status_alvos():
             if alvo_antigo not in nova_lista_alvos:
                 houve_alteracao = True
                 
-        async def monitorar_status_espelhos():
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento contínuo das rotas do Espelhador...")
+        # 7. Gravação limpa e definitiva
+        if houve_alteracao:
+            dados_frescos["alvos"] = nova_lista_alvos
+            dados_frescos["status_alvos"] = status_alvos_final
+            with open("alvos_espiao.json", "w") as f:
+                json.dump(dados_frescos, f, indent=4)
+                
+        await asyncio.sleep(30)
+
+async def monitorar_status_espelhos():
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento contínuo das rotas do Espelhador (suporte a grupos de canais)...")
     while True:
         try:
-            # Tenta carregar os dados atualizados de espelhamento
             try:
                 with open("espelhos_config.json", "r", encoding="utf-8") as f:
                     dados_espelho = json.load(f)
@@ -470,33 +480,45 @@ async def monitorar_status_alvos():
             alterado = False
             
             for rota in rotas:
-                for ponta in ["origem", "destino"]:
-                    canal = rota.get(ponta)
+                canais_para_verificar = []
+                
+                if "origens" in rota:
+                    for i, c in enumerate(rota["origens"]):
+                        canais_para_verificar.append(("origem_lista", c, i))
+                elif "origem" in rota:
+                    canais_para_verificar.append(("origem_legado", rota["origem"], None))
+                    
+                canais_para_verificar.append(("destino", rota.get("destino"), None))
+                
+                for tipo_ponta, canal, idx in canais_para_verificar:
                     if not canal:
                         continue
                         
                     try:
-                        # O Userbot tenta acessar a entidade para validar a conexão e existência
                         entidade = await client.get_entity(canal)
                         
-                        # Se for username (str), converte para ID numérico definitivo no banco
                         if isinstance(canal, str) and not canal.lstrip('-').isdigit():
                             novo_id = str(entidade.id)
                             if not novo_id.startswith('-100'):
                                 novo_id = f"-100{novo_id}"
-                            rota[ponta] = novo_id
+                                
+                            if tipo_ponta == "origem_lista":
+                                rota["origens"][idx] = novo_id
+                            elif tipo_ponta == "origem_legado":
+                                rota["origem"] = novo_id
+                            elif tipo_ponta == "destino":
+                                rota["destino"] = novo_id
+                                
                             alterado = True
                             if EXIBIR_LOGS: logger.info(f"✅ Username convertido para ID na rota {rota['nome']}: {canal} -> {novo_id}")
                         
-                        # Se antes constava como erro, limpa o status pois restaurou a comunicação
                         if rota.get("status_verificacao") == "erro":
                             rota["status_verificacao"] = "ok"
                             alterado = True
                             if EXIBIR_LOGS: logger.info(f"✅ Acesso restaurado para a rota: {rota['nome']}")
                             
                     except Exception as e:
-                        # Sem acesso (banido, link expirado ou canal apagado), marca a rota com erro
-                        if EXIBIR_LOGS: logger.warning(f"⚠️ Falha de acesso na {ponta} ({canal}) da rota {rota['nome']}: {e}")
+                        if EXIBIR_LOGS: logger.warning(f"⚠️ Falha de acesso em {canal} ({tipo_ponta}) da rota {rota['nome']}: {e}")
                         if rota.get("status_verificacao") != "erro":
                             rota["status_verificacao"] = "erro"
                             alterado = True
@@ -504,12 +526,11 @@ async def monitorar_status_alvos():
             if alterado:
                 with open("espelhos_config.json", "w", encoding="utf-8") as f:
                     json.dump(dados_espelho, f, indent=4, ensure_ascii=False)
-                if EXIBIR_LOGS: logger.info("✅ Arquivo de banco do Espelhador atualizado após auditoria.")
+                if EXIBIR_LOGS: logger.info("✅ Arquivo de banco do Espelhador atualizado após auditoria de grupos de canais.")
                 
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"⚠️ Erro crítico no loop de monitoramento do espelhador: {e}")
             
-        # Refaz a checagem a cada 12 horas (43200 segundos)
         await asyncio.sleep(43200)
 
 async def main():
