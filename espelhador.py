@@ -52,7 +52,7 @@ class EspelhadorFluxo(StatesGroup):
 teclado_espelhador_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Rota ➕"), KeyboardButton(text="Remover Rota 🗑️")],
-        [KeyboardButton(text="Editar Rota ✏️"), KeyboardButton(text="Esvaziar Fila 🚀")],
+        [KeyboardButton(text="Editar Rota ✏️"), KeyboardButton(text="Forçar Postagens 🚀")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -526,7 +526,7 @@ async def salvar_remocao_origem(message: types.Message, state: FSMContext):
     else:
         await message.answer("Número de origem inválido. Tente novamente:")
 
-@router.message(EspelhadorFluxo.menu_principal, F.text == "Esvaziar Fila 🚀")
+@router.message(EspelhadorFluxo.menu_principal, F.text == "Forçar Postagens 🚀")
 async def iniciar_esvaziar_fila(message: types.Message, state: FSMContext):
     dados = ler_espelhos()
     rotas = dados.get("rotas", [])
