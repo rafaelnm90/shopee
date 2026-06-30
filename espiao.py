@@ -230,70 +230,8 @@ def salvar_fila_espelhador(dados):
     with open("fila_espelhador.json", "w") as f:
         json.dump(dados, f, indent=4)
 
-def atualizar_contador_espelhador(incremento, nome_rota):
-    arquivo = "status_espelhador.json"
-    try:
-        with open(arquivo, "r") as f:
-            dados = json.load(f)
-            # Transição limpa caso exista o ficheiro no formato antigo
-            if not isinstance(dados, dict) or "ativas" in dados:
-                dados = {}
-    except (FileNotFoundError, json.JSONDecodeError):
-        dados = {}
-        
-    dados[nome_rota] = max(0, dados.get(nome_rota, 0) + incremento)
-    
-    with open(arquivo, "w") as f:
-        json.dump(dados, f)
-
-async def converter_link_shopee_espelho(link_original):
-    app_id = os.getenv('SHOPEE_APP_ID')
-    app_secret = os.getenv('SHOPEE_APP_SECRET')
-    
-    if not app_id or not app_secret:
-        return link_original
-
-    link_processar = link_original
-    
-    if "shp.ee" in link_original or "shope.ee" in link_original or "s.shopee.com.br" in link_original:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(link_original, allow_redirects=True) as resp:
-                    link_processar = str(resp.url)
-        except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Erro ao expandir o link: {e}")
-
-    timestamp = int(time.time())
-    endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
-
-    payload = {
-        "query": "mutation generateShortLink($originUrl: String!) { generateShortLink(input: {originUrl: $originUrl}) { shortLink } }",
-        "variables": {"originUrl": link_processar}
-    }
-    
-    payload_json = json.dumps(payload, separators=(',', ':'))
-    fator_base = f"{app_id}{timestamp}{payload_json}{app_secret}"
-    assinatura = hashlib.sha256(fator_base.encode('utf-8')).hexdigest()
-
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"SHA256 Credential={app_id}, Timestamp={timestamp}, Signature={assinatura}"
-    }
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(endpoint, headers=headers, data=payload_json) as response:
-                resposta_dados = await response.json()
-                if response.status == 200 and "data" in resposta_dados and resposta_dados["data"].get("generateShortLink"):
-                    novo_link = resposta_dados["data"]["generateShortLink"]["shortLink"]
-                    if EXIBIR_LOGS: logger.info("🔗 [Espelhador] Conversão de comissão aplicada ao link com sucesso.")
-                    return novo_link
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Falha de comunicação com a Shopee na conversão: {e}")
-        
-    return link_original
-
 async def processar_fila_espelhador_loop():
+    from datetime import timedelta # ✅ Correção 1: Injetando a importação de tempo ausente
     while True:
         try:
             fila_dados = ler_fila_espelhador()
@@ -352,7 +290,9 @@ async def processar_fila_espelhador_loop():
                     houve_alteracao_rota = True
             
             if houve_alteracao_rota:
-                salvar_espelhos(config)
+                # ✅ Correção 2: Salvando diretamente o arquivo JSON em vez de chamar função de outro script
+                with open("espelhos_config.json", "w", encoding="utf-8") as f:
+                    json.dump(config, f, indent=4, ensure_ascii=False)
                     
             fila_dados["fila"] = itens_restantes
             salvar_fila_espelhador(fila_dados)
