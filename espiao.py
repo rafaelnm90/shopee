@@ -20,6 +20,20 @@ API_ID = int(os.getenv('API_ID'))
 API_HASH = os.getenv('API_HASH')
 SHOPEE_APP_ID = os.getenv('SHOPEE_APP_ID')
 SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
+GEMINI_API_KEY = os.getenv('GEMINI_KEY')
+
+from google import genai
+client_genai = genai.Client(api_key=GEMINI_API_KEY)
+
+MODELOS_CASCATA_GEMINI = [
+    "gemini-3.1-pro-preview",
+    "gemini-2.5-pro",
+    "gemini-3.5-flash",
+    "gemini-3-flash-preview",
+    "gemini-2.5-flash",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-2.5-flash-lite"
+]
 
 if EXIBIR_LOGS:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -218,6 +232,51 @@ async def converter_link_shopee(link_original):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [API Shopee] Erro de comunicação com o servidor: {e}")
         return link_original
+
+async def gerar_legenda_com_ia_espelhador(caminho_video):
+    def processar_ia():
+        import time
+        if EXIBIR_LOGS: logger.info("📤 [IA] A fazer upload do vídeo para o Google Storage...")
+        video_gemini = client_genai.files.upload(file=caminho_video)
+        
+        while video_gemini.state.name == "PROCESSING":
+            time.sleep(2)
+            video_gemini = client_genai.files.get(name=video_gemini.name)
+            
+        if video_gemini.state.name == "FAILED":
+            raise Exception("Falha de processamento no servidor do Google.")
+
+        prompt = (
+            "Assista ao vídeo e crie um título MUITO CURTO para o produto demonstrado. "
+            "REGRA ABSOLUTA: O título deve ter no máximo 5 palavras e conter apenas 1 emoji no início. "
+            "Não adicione ponto final, descrições ou textos persuasivos. Entregue APENAS o título."
+        )
+
+        for modelo_nome in MODELOS_CASCATA_GEMINI:
+            try:
+                if EXIBIR_LOGS: logger.info(f"⏳ [IA] A consultar o motor: {modelo_nome}...")
+                response = client_genai.models.generate_content(
+                    model=modelo_nome,
+                    contents=[video_gemini, prompt]
+                )
+                if response and response.text:
+                    if EXIBIR_LOGS: logger.info(f"✅ [IA] Sucesso com o modelo {modelo_nome}!")
+                    return response.text.strip()
+            except Exception as erro_modelo:
+                if "429" in str(erro_modelo):
+                    if EXIBIR_LOGS: logger.warning(f"⚠️ [IA] Limite atingido em {modelo_nome}. A tentar o próximo...")
+                    continue
+                else:
+                    if EXIBIR_LOGS: logger.warning(f"⚠️ [IA] Erro no modelo {modelo_nome}: {erro_modelo}")
+                    continue
+        raise Exception("Todos os modelos da cascata falharam por limite de cota ou erro.")
+
+    try:
+        titulo = await asyncio.to_thread(processar_ia)
+        return titulo
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [IA] Falha na geração da legenda: {e}")
+        return None
 
 PADRAO_SHOPEE = re.compile(r'(https?://(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+)')
 
@@ -419,18 +478,26 @@ async def motor_espelhador_userbot(event):
     link_final_convertido = await converter_link_shopee(link_capturado)
     if EXIBIR_LOGS: logger.info("✅ [Espelhador] Sucesso: Link convertido utilizando a função nativa correta.")
 
-    # ✅ FILTRO DE HIGIENIZAÇÃO: Extrai o nome e reconstrói a legenda do zero
-    linhas = [linha.strip() for linha in texto_original.split('\n') if linha.strip()]
-    nome_sujo = linhas[0] if linhas else "Produto em Destaque"
+    if EXIBIR_LOGS: logger.info("📥 [Espelhador] Descarregando vídeo temporário para análise da IA...")
+    caminho_video_temp = await event.download_media(file="temp_analise_espelho_")
     
-    # Remove emojis, asteriscos e carateres especiais
-    nome_limpo = re.sub(r'[^\w\s\.,!?áéíóúãõâêçÁÉÍÓÚÃÕÂÊÇ-]', '', nome_sujo).replace('_', '').strip()
-    if not nome_limpo:
-        nome_limpo = "Produto em Destaque"
+    if caminho_video_temp:
+        titulo_ia = await gerar_legenda_com_ia_espelhador(caminho_video_temp)
         
-    texto_processado = f"<b>{nome_limpo}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_final_convertido}"
-            
-    if EXIBIR_LOGS: logger.info("🧹 [Espelhador] Legenda higienizada e reconstruída com sucesso.")
+        try:
+            os.remove(caminho_video_temp)
+            if EXIBIR_LOGS: logger.info("🧹 [Espelhador] Vídeo temporário removido do servidor após análise.")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Erro ao remover vídeo temporário: {e}")
+    else:
+        titulo_ia = None
+
+    if titulo_ia:
+        texto_processado = f"<b>{titulo_ia}</b>\n\n🔗 Link do Produto:\n{link_final_convertido}"
+        if EXIBIR_LOGS: logger.info("✅ [Espelhador] Legenda inteligente construída com sucesso.")
+    else:
+        texto_processado = f"🔗 Link do Produto:\n{link_final_convertido}"
+        if EXIBIR_LOGS: logger.warning("⚠️ [Espelhador] Fallback de segurança ativado: Legenda base apenas com o link.")
 
     forward_origem_id = None
     if getattr(event, 'fwd_from', None) and getattr(event.fwd_from, 'from_id', None):
