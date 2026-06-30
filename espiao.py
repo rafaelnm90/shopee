@@ -161,6 +161,10 @@ async def interceptar_mensagem(event):
     # Corrige formatações de IDs que o Telegram envia (com ou sem o -100)
     chat_id_completo = f"-100{chat.id}" if not chat_id.startswith("-100") else chat_id
     
+    if event.out and chat_username.lower() != "@shopee_video_afiliado":
+        if EXIBIR_LOGS: logger.info("🛡️ [Espião] Trava de autoria ativada: Ignorando postagem própria fora do canal imune para evitar loop.")
+        return
+    
     if chat_username not in alvos and chat_id not in alvos and chat_id_completo not in alvos:
         return
 
@@ -214,6 +218,17 @@ def ler_espelhos_config():
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {"rotas": []}
+
+def ler_fila_espelhador():
+    try:
+        with open("fila_espelhador.json", "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"fila": []}
+
+def salvar_fila_espelhador(dados):
+    with open("fila_espelhador.json", "w") as f:
+        json.dump(dados, f, indent=4)
 
 def atualizar_contador_espelhador(incremento, nome_rota):
     arquivo = "status_espelhador.json"
@@ -278,26 +293,74 @@ async def converter_link_shopee_espelho(link_original):
         
     return link_original
 
-async def disparar_espelho_userbot(destino, texto, media, delay_minutos, nome_rota):
-    if delay_minutos > 0:
-        atualizar_contador_espelhador(1, nome_rota)
-        if EXIBIR_LOGS: logger.info(f"⏳ [Espelhador] Atraso ativado: A rota '{nome_rota}' aguardará {delay_minutos} minutos.")
+async def processar_fila_espelhador_loop():
+    while True:
         try:
-            await asyncio.sleep(delay_minutos * 60)
-        finally:
-            atualizar_contador_espelhador(-1, nome_rota)
+            fila_dados = ler_fila_espelhador()
+            fila = fila_dados.get("fila", [])
+            if not fila:
+                await asyncio.sleep(5)
+                continue
+                
+            config = ler_espelhos_config()
+            rotas = {r.get("nome"): r for r in config.get("rotas", [])}
             
-    try:
-        try:
-            entidade_destino = await client.get_entity(destino)
-        except ValueError:
-            id_teste = int(destino) if str(destino).lstrip('-').isdigit() else destino
-            entidade_destino = await client.get_entity(id_teste)
+            itens_restantes = []
+            agora = datetime.now()
+            houve_alteracao_rota = False
+            
+            for item in fila:
+                nome_rota = item.get("nome_rota")
+                rota_config = rotas.get(nome_rota)
+                
+                if not rota_config:
+                    continue
+                    
+                data_captura = datetime.strptime(item["data_captura"], "%Y-%m-%d %H:%M:%S")
+                delay_minutos = int(rota_config.get("delay", 0))
+                esvaziar_agora = rota_config.get("esvaziar_agora", False)
+                
+                hora_disparo = data_captura + timedelta(minutes=delay_minutos)
+                
+                if agora >= hora_disparo or esvaziar_agora:
+                    try:
+                        chat_origem = int(item["chat_origem"])
+                        msg_id = item["msg_id"]
+                        destino = item["destino"]
+                        texto = item["texto_processado"]
+                        
+                        mensagem_original = await client.get_messages(chat_origem, ids=msg_id)
+                        if mensagem_original:
+                            try:
+                                entidade_destino = await client.get_entity(destino)
+                            except ValueError:
+                                id_teste = int(destino) if str(destino).lstrip('-').isdigit() else destino
+                                entidade_destino = await client.get_entity(id_teste)
 
-        await client.send_message(entidade_destino, texto, file=media, parse_mode="html")
-        if EXIBIR_LOGS: logger.info(f"✅ [Espelhador] Clonagem da rota '{nome_rota}' entregue no destino {destino}.")
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Falha no disparo da rota '{nome_rota}' para {destino}: {e}")
+                            await client.send_message(entidade_destino, texto, file=mensagem_original.media, parse_mode="html")
+                            if EXIBIR_LOGS: logger.info(f"✅ [Espelhador] Disparo dinâmico concluído na rota '{nome_rota}' para {destino}.")
+                        else:
+                            if EXIBIR_LOGS: logger.warning(f"⚠️ [Espelhador] Mensagem original apagada antes do disparo na rota '{nome_rota}'.")
+                    except Exception as e:
+                        if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Falha no disparo dinâmico da rota '{nome_rota}': {e}")
+                else:
+                    itens_restantes.append(item)
+                    
+            for r in config.get("rotas", []):
+                if r.get("esvaziar_agora"):
+                    r["esvaziar_agora"] = False
+                    houve_alteracao_rota = True
+            
+            if houve_alteracao_rota:
+                salvar_espelhos(config)
+                    
+            fila_dados["fila"] = itens_restantes
+            salvar_fila_espelhador(fila_dados)
+            
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro crítico no loop dinâmico do espelhador: {e}")
+        
+        await asyncio.sleep(5)
 
 @client.on(events.NewMessage)
 async def motor_espelhador_userbot(event):
@@ -306,11 +369,14 @@ async def motor_espelhador_userbot(event):
     chat_username = f"@{chat.username.lower()}" if getattr(chat, 'username', None) else ""
     chat_id_completo = f"-100{chat.id}" if not chat_id_str.startswith("-100") else chat_id_str
 
+    if event.out and chat_username != "@shopee_video_afiliado":
+        if EXIBIR_LOGS: logger.info("🛡️ [Espelhador] Trava de autoria ativada: Postagem própria ignorada para evitar loop cruzado.")
+        return
+
     dados = ler_espelhos_config()
     rotas_ativas = []
     
     for r in dados.get("rotas", []):
-        # Suporte estruturado para a nova lista de origens ou para rotas antigas singulares
         origens_rota = [str(o).lower() for o in r.get("origens", [])]
         if "origem" in r:
             origens_rota.append(str(r["origem"]).lower())
@@ -326,6 +392,13 @@ async def motor_espelhador_userbot(event):
     texto_original = event.text or ""
     texto_processado = texto_original
     
+    match_shopee = PADRAO_SHOPEE.search(texto_original)
+    if match_shopee:
+        link_capturado = match_shopee.group(1).rstrip(").,;!?")
+        if verificar_e_registrar_espelho(link_capturado):
+            if EXIBIR_LOGS: logger.info(f"🪞 [Espelhador] Duplicidade barrada! O link {link_capturado} já circulou na rede nas últimas 24 horas.")
+            return
+
     links = re.findall(r'(https?://\S+)', texto_original)
     if links:
         if EXIBIR_LOGS: logger.info(f"🔗 [Espelhador] Convertendo {len(links)} links encontrados na postagem...")
@@ -349,10 +422,19 @@ async def motor_espelhador_userbot(event):
             if EXIBIR_LOGS: logger.warning(f"🚫 [Anti-Loop Ativado] O vídeo nasceu no destino ({destino}). Ignorando a clonagem nesta rota.")
             continue
             
-        delay_minutos = int(rota.get("delay", 0))
-        media = event.media
-        
-        asyncio.create_task(disparar_espelho_userbot(destino, texto_processado, media, delay_minutos, nome_rota))
+        fila_dados = ler_fila_espelhador()
+        item = {
+            "id": f"espelho_{int(datetime.now().timestamp())}_{chat_id_str}",
+            "chat_origem": chat_id_completo,
+            "msg_id": event.id,
+            "destino": destino,
+            "nome_rota": nome_rota,
+            "texto_processado": texto_processado,
+            "data_captura": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        fila_dados["fila"].append(item)
+        salvar_fila_espelhador(fila_dados)
+        if EXIBIR_LOGS: logger.info(f"📦 [Espelhador] Vídeo enfileirado dinamicamente na rota '{nome_rota}'.")
 
 async def validar_e_obter_entidade(client, alvo):
     alvo_str = str(alvo).strip()
@@ -599,7 +681,6 @@ async def monitorar_status_espelhos():
 
 async def main():
     if EXIBIR_LOGS: logger.info("🕵️ Iniciando o Módulo Espião de Clonagem...")
-    # ✅ Reseta o contador individual de espelhos pendentes caso o serviço tenha sido reiniciado
     try:
         with open("status_espelhador.json", "w") as f:
             json.dump({}, f)
@@ -607,7 +688,6 @@ async def main():
         pass
     await client.start()
     
-    # ✅ NOVO: Força o cache do histórico para o Userbot reconhecer os IDs numéricos privados
     if EXIBIR_LOGS: logger.info("🔄 Sincronizando banco de dados de grupos e access_hashes...")
     try:
         await client.get_dialogs()
@@ -618,10 +698,8 @@ async def main():
     alvos = carregar_alvos()
     if EXIBIR_LOGS: logger.info(f"📡 Radar ativo para {len(alvos)} concorrentes.")
     
-    # Inicia a tarefa fantasma que auditará os grupos
+    asyncio.create_task(processar_fila_espelhador_loop())
     asyncio.create_task(monitorar_status_alvos())
-    
-    # ✅ NOVO: Inicia a tarefa fantasma que auditará as rotas do Espelhador
     asyncio.create_task(monitorar_status_espelhos())
     
     await client.run_until_disconnected()
