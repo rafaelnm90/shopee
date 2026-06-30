@@ -347,6 +347,51 @@ async def motor_espelhador_userbot(event):
             texto_processado = texto_processado.replace(link, novo_link)
 
     forward_origem_id = None
+    if not rotas_ativas:
+        return
+
+    # ✅ TRAVA DE MÍDIA OBRIGATÓRIA: Ignora mensagens de texto puro (spam, avisos, engajamento)
+    if getattr(event, 'media', None) is None or not isinstance(event.media, MessageMediaDocument):
+        if EXIBIR_LOGS: logger.info("⏭️ [Espelhador] Postagem ignorada: Não contém um anexo de vídeo.")
+        return
+
+    if EXIBIR_LOGS: logger.info(f"🔄 [Espelhador] Interceptação acionada! Novo vídeo detetado na origem {chat_id_str}.")
+
+    texto_original = event.text or ""
+    link_final_convertido = ""
+    
+    match_shopee = PADRAO_SHOPEE.search(texto_original)
+    if match_shopee:
+        link_capturado = match_shopee.group(1).rstrip(").,;!?")
+        if verificar_e_registrar_espelho(link_capturado):
+            if EXIBIR_LOGS: logger.info(f"🪞 [Espelhador] Duplicidade barrada! O link {link_capturado} já circulou na rede nas últimas 24 horas.")
+            return
+            
+        if EXIBIR_LOGS: logger.info("🔗 [Espelhador] A converter o link da Shopee encontrado...")
+        link_final_convertido = await converter_link_shopee_espelho(link_capturado)
+
+    # ✅ FILTRO DE HIGIENIZAÇÃO: Extrai o nome e reconstrói a legenda do zero
+    linhas = [linha.strip() for linha in texto_original.split('\n') if linha.strip()]
+    nome_sujo = linhas[0] if linhas else "Produto em Destaque"
+    
+    # Remove emojis, asteriscos e carateres especiais, mantendo apenas letras, números e pontuação básica
+    nome_limpo = re.sub(r'[^\w\s\.,!?áéíóúãõâêçÁÉÍÓÚÃÕÂÊÇ-]', '', nome_sujo).replace('_', '').strip()
+    if not nome_limpo:
+        nome_limpo = "Produto em Destaque"
+        
+    if link_final_convertido:
+        texto_processado = f"<b>{nome_limpo}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_final_convertido}"
+    else:
+        # Tenta capturar qualquer outro link caso não exista um oficial da Shopee
+        links_alternativos = re.findall(r'(https?://\S+)', texto_original)
+        if links_alternativos:
+            texto_processado = f"<b>{nome_limpo}</b>\n\n🔗 <b>Link do Produto:</b>\n{links_alternativos[0]}"
+        else:
+            texto_processado = f"<b>{nome_limpo}</b>"
+            
+    if EXIBIR_LOGS: logger.info("🧹 [Espelhador] Legenda higienizada e reconstruída com sucesso.")
+
+    forward_origem_id = None
     if getattr(event, 'fwd_from', None) and getattr(event.fwd_from, 'from_id', None):
         try:
             fwd_id = utils.get_peer_id(event.fwd_from.from_id)
