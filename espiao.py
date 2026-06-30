@@ -700,18 +700,18 @@ async def monitorar_status_espelhos():
                         if rota.get("status_verificacao") != "erro":
                             rota["status_verificacao"] = "erro"
                             alterado = True
-                        
-        if alterado:
-            with open("espelhos_config.json", "w", encoding="utf-8") as f:
-                json.dump(dados_espelho, f, indent=4, ensure_ascii=False)
-            if EXIBIR_LOGS: logger.info("✅ Arquivo de banco do Espelhador atualizado após auditoria de grupos de canais.")
+                            
+            if alterado:
+                with open("espelhos_config.json", "w", encoding="utf-8") as f:
+                    json.dump(dados_espelho, f, indent=4, ensure_ascii=False)
+                if EXIBIR_LOGS: logger.info("✅ Arquivo de banco do Espelhador atualizado após auditoria de grupos de canais.")
+                
+            if EXIBIR_LOGS: logger.info("✅ Auditoria de inicialização dos espelhos concluída. Encerrando ciclo de verificação.")
+            break
             
-        if EXIBIR_LOGS: logger.info("✅ Auditoria de inicialização dos espelhos concluída. Encerrando ciclo de verificação.")
-        break
-            
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"⚠️ Erro crítico na auditoria de inicialização do espelhador: {e}")
-        break
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"⚠️ Erro crítico na auditoria de inicialização do espelhador: {e}")
+            break
 
 async def main():
     if EXIBIR_LOGS: logger.info("🕵️ Iniciando o Módulo Espião de Clonagem...")
