@@ -36,7 +36,8 @@ if EXIBIR_LOGS:
     logger = logging.getLogger(__name__)
 
 # 3. INICIALIZAÇÃO DO CLIENTE E SCHEDULER
-client = TelegramClient('sessao_userbot', API_ID, API_HASH)
+# ✅ O nome da sessão foi alterado para criar um ficheiro .session independente
+client = TelegramClient('sessao_divulgacao', API_ID, API_HASH)
 scheduler = AsyncIOScheduler()
 
 # 4. FUNÇÕES DE IA E AGENDAMENTO
