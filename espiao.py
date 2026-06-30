@@ -33,18 +33,30 @@ def carregar_alvos():
     except (FileNotFoundError, json.JSONDecodeError):
         return []
 
-def verificar_e_registrar_espelho(link_shopee):
+def verificar_e_registrar_espelho(link_shopee, contexto="global"):
     arquivo_espelhos = "registro_espelhos.json"
     agora = datetime.now()
     try:
         with open(arquivo_espelhos, "r") as f:
             dados = json.load(f)
+            # Migração automática do formato antigo para o novo formato de contextos
+            if "espelhos" in dados:
+                dados_antigos = dados.pop("espelhos")
+                dados["contextos"] = {"global": dados_antigos}
     except (FileNotFoundError, json.JSONDecodeError):
-        dados = {"espelhos": {}}
+        dados = {"contextos": {}}
 
-    # Executa a limpeza automática de links registados há mais de 24 horas
+    if "contextos" not in dados:
+        dados["contextos"] = {}
+
+    if contexto not in dados["contextos"]:
+        dados["contextos"][contexto] = {}
+
+    historico = dados["contextos"][contexto]
+
+    # Executa a limpeza automática de links registados há mais de 24 horas NESTE CONTEXTO
     chaves_para_remover = []
-    for link, data_str in dados.get("espelhos", {}).items():
+    for link, data_str in historico.items():
         try:
             data_registro = datetime.strptime(data_str, "%Y-%m-%d %H:%M:%S")
             if (agora - data_registro).total_seconds() > 86400:
@@ -53,16 +65,16 @@ def verificar_e_registrar_espelho(link_shopee):
             chaves_para_remover.append(link)
             
     for chave in chaves_para_remover:
-        del dados["espelhos"][chave]
+        del historico[chave]
 
-    # Verifica se o link novo já existe no radar recente
-    if link_shopee in dados.get("espelhos", {}):
+    # Verifica se o link novo já existe no radar recente para o destino específico
+    if link_shopee in historico:
         with open(arquivo_espelhos, "w") as f:
             json.dump(dados, f, indent=4)
         return True 
 
-    # Se for novidade, regista com a data e hora atuais
-    dados.setdefault("espelhos", {})[link_shopee] = agora.strftime("%Y-%m-%d %H:%M:%S")
+    # Se for novidade, regista com a data e hora atuais neste contexto
+    historico[link_shopee] = agora.strftime("%Y-%m-%d %H:%M:%S")
     with open(arquivo_espelhos, "w") as f:
         json.dump(dados, f, indent=4)
     return False
@@ -178,9 +190,9 @@ async def interceptar_mensagem(event):
         # Limpa pontuações que possam ter ficado agarradas ao final do link
         link_capturado = link_capturado.rstrip(").,;!?")
         
-        # ✅ NOVO: Bloqueio imediato de vídeos duplicados (Espelhos)
-        if verificar_e_registrar_espelho(link_capturado):
-            if EXIBIR_LOGS: logger.info(f"🪞 Espelho bloqueado! O produto {link_capturado} já foi capturado nas últimas 24 horas.")
+        # ✅ NOVO: Bloqueio de vídeos duplicados no módulo Espião (Contexto Isolado)
+        if verificar_e_registrar_espelho(link_capturado, contexto="espiao"):
+            if EXIBIR_LOGS: logger.info(f"🪞 [Espião] Duplicidade barrada! O produto {link_capturado} já foi capturado nas últimas 24 horas.")
             return # Encerra o processamento da mensagem aqui mesmo, sem baixar o vídeo
             
         if event.media and isinstance(event.media, MessageMediaDocument):
@@ -361,12 +373,9 @@ async def motor_espelhador_userbot(event):
     link_final_convertido = ""
     
     match_shopee = PADRAO_SHOPEE.search(texto_original)
+    link_capturado = None
     if match_shopee:
         link_capturado = match_shopee.group(1).rstrip(").,;!?")
-        if verificar_e_registrar_espelho(link_capturado):
-            if EXIBIR_LOGS: logger.info(f"🪞 [Espelhador] Duplicidade barrada! O link {link_capturado} já circulou na rede nas últimas 24 horas.")
-            return
-            
         if EXIBIR_LOGS: logger.info("🔗 [Espelhador] A converter o link da Shopee encontrado...")
         link_final_convertido = await converter_link_shopee_espelho(link_capturado)
 
@@ -405,6 +414,11 @@ async def motor_espelhador_userbot(event):
         
         if forward_origem_id and (destino == forward_origem_id or destino.replace("-100", "") == forward_origem_id.replace("-100", "")):
             if EXIBIR_LOGS: logger.warning(f"🚫 [Anti-Loop Ativado] O vídeo nasceu no destino ({destino}). Ignorando a clonagem nesta rota.")
+            continue
+            
+        # ✅ VERIFICAÇÃO DE DUPLICIDADE ISOLADA POR ROTA (Usa o destino como contexto)
+        if link_capturado and verificar_e_registrar_espelho(link_capturado, contexto=str(destino)):
+            if EXIBIR_LOGS: logger.info(f"🪞 [Espelhador] Duplicidade barrada na rota '{nome_rota}'! O produto já foi postado neste destino nas últimas 24h.")
             continue
             
         fila_dados = ler_fila_espelhador()
