@@ -18,6 +18,8 @@ EXIBIR_LOGS = True
 # 1. CREDENCIAIS DA CONTA
 API_ID = int(os.getenv('API_ID'))
 API_HASH = os.getenv('API_HASH')
+SHOPEE_APP_ID = os.getenv('SHOPEE_APP_ID')
+SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
 
 if EXIBIR_LOGS:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -158,6 +160,64 @@ def registrar_historico_espiao(nome_grupo):
         json.dump(historico, f, indent=4)
         
     if EXIBIR_LOGS: logger.info(f"📊 [Estatística] +1 vídeo contabilizado para o histórico do grupo: {nome_grupo}")
+
+async def converter_link_shopee(link_original):
+    if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
+        if EXIBIR_LOGS: logger.warning("⏳ [API Shopee] Chaves ausentes no .env. Ignorando conversão e mantendo o link original.")
+        return link_original
+
+    link_processar = link_original
+    
+    if "shp.ee" in link_original or "shope.ee" in link_original or "s.shopee.com.br" in link_original:
+        if EXIBIR_LOGS: logger.info(f"🔍 Detectado link encurtado. A iniciar a expansão do URL: {link_original}")
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(link_original, allow_redirects=True) as resp:
+                    link_processar = str(resp.url)
+                    if EXIBIR_LOGS: logger.info(f"✅ Expansão concluída. URL longo obtido: {link_processar}")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro ao tentar expandir o link: {e}. Será mantido o original.")
+
+    if EXIBIR_LOGS: logger.info(f"🔗 [API Shopee] A iniciar criptografia para o link: {link_processar}")
+
+    timestamp = int(time.time())
+    endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
+
+    payload = {
+        "query": "mutation generateShortLink($originUrl: String!) { generateShortLink(input: {originUrl: $originUrl}) { shortLink } }",
+        "variables": {
+            "originUrl": link_processar
+        }
+    }
+    
+    payload_json = json.dumps(payload, separators=(',', ':'))
+
+    fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}{SHOPEE_APP_SECRET}"
+    assinatura = hashlib.sha256(fator_base.encode('utf-8')).hexdigest()
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"SHA256 Credential={SHOPEE_APP_ID}, Timestamp={timestamp}, Signature={assinatura}"
+    }
+
+    if EXIBIR_LOGS: logger.info("📤 [API Shopee] Enviando requisição assinada para os servidores...")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(endpoint, headers=headers, data=payload_json) as response:
+                resposta_dados = await response.json()
+
+                if response.status == 200 and "data" in resposta_dados and resposta_dados["data"].get("generateShortLink"):
+                    novo_link = resposta_dados["data"]["generateShortLink"]["shortLink"]
+                    if EXIBIR_LOGS: logger.info(f"✅ [API Shopee] Link convertido com sucesso: {novo_link}")
+                    return novo_link
+                else:
+                    if EXIBIR_LOGS: logger.error(f"❌ [API Shopee] Falha na conversão. Resposta: {resposta_dados}")
+                    return link_original
+
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [API Shopee] Erro de comunicação com o servidor: {e}")
+        return link_original
 
 PADRAO_SHOPEE = re.compile(r'(https?://(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+)')
 
@@ -563,7 +623,8 @@ async def monitorar_status_alvos():
             with open("alvos_espiao.json", "w") as f:
                 json.dump(dados_frescos, f, indent=4)
                 
-        await asyncio.sleep(30)
+        if EXIBIR_LOGS: logger.info("✅ Auditoria de inicialização dos alvos concluída. Encerrando ciclo de verificação.")
+        break
 
 async def monitorar_status_espelhos():
     if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento contínuo das rotas do Espelhador (suporte a grupos de canais)...")
@@ -639,16 +700,18 @@ async def monitorar_status_espelhos():
                         if rota.get("status_verificacao") != "erro":
                             rota["status_verificacao"] = "erro"
                             alterado = True
-                            
-            if alterado:
-                with open("espelhos_config.json", "w", encoding="utf-8") as f:
-                    json.dump(dados_espelho, f, indent=4, ensure_ascii=False)
-                if EXIBIR_LOGS: logger.info("✅ Arquivo de banco do Espelhador atualizado após auditoria de grupos de canais.")
-                
-        except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"⚠️ Erro crítico no loop de monitoramento do espelhador: {e}")
+                        
+        if alterado:
+            with open("espelhos_config.json", "w", encoding="utf-8") as f:
+                json.dump(dados_espelho, f, indent=4, ensure_ascii=False)
+            if EXIBIR_LOGS: logger.info("✅ Arquivo de banco do Espelhador atualizado após auditoria de grupos de canais.")
             
-        await asyncio.sleep(43200)
+        if EXIBIR_LOGS: logger.info("✅ Auditoria de inicialização dos espelhos concluída. Encerrando ciclo de verificação.")
+        break
+            
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"⚠️ Erro crítico na auditoria de inicialização do espelhador: {e}")
+        break
 
 async def main():
     if EXIBIR_LOGS: logger.info("🕵️ Iniciando o Módulo Espião de Clonagem...")
