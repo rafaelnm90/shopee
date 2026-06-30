@@ -356,7 +356,8 @@ async def motor_espelhador_userbot(event):
     
     if EXIBIR_LOGS: logger.info(f"🔄 [Espelhador] Interceptação acionada! Mídia e link detetados na origem {chat_id_str}.")
     if EXIBIR_LOGS: logger.info("🔗 [Espelhador] A converter o link da Shopee encontrado...")
-    link_final_convertido = await converter_link_shopee_espelho(link_capturado)
+    link_final_convertido = await converter_link_shopee(link_capturado)
+    if EXIBIR_LOGS: logger.info("✅ [Espelhador] Sucesso: Link convertido utilizando a função nativa correta.")
 
     # ✅ FILTRO DE HIGIENIZAÇÃO: Extrai o nome e reconstrói a legenda do zero
     linhas = [linha.strip() for linha in texto_original.split('\n') if linha.strip()]
