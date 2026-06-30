@@ -2084,7 +2084,19 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
             await gerenciar_rotina(message, state)
         return
 
-    if EXIBIR_LOGS: logger.info("🔍 Limpeza de memória solicitada. A reserva de numeração será descartada para evitar retrocessos no contador global.")
+    if EXIBIR_LOGS: logger.info("🔍 Limpeza de memória solicitada. Avaliando necessidade de rollback no contador global...")
+    
+    # ✅ SISTEMA DE ROLLBACK: Devolve o número reservado ao cancelar a criação da postagem
+    numero_reservado = data.get('numero_reservado')
+    if estado_atual and estado_atual.startswith("PostagemFluxo") and numero_reservado is not None:
+        async with _lock_contador:
+            contador_atual = ler_contador()
+            # Só executa o rollback se o contador não tiver avançado por outro processo simultâneo
+            if contador_atual == numero_reservado + 1:
+                salvar_contador(numero_reservado)
+                if EXIBIR_LOGS: logger.info(f"⏪ Rollback executado: Número {numero_reservado} foi devolvido ao contador global com sucesso.")
+            else:
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Rollback abortado: O contador já avançou para {contador_atual} e não pode ser revertido com segurança.")
 
     # 🧹 Limpeza de arquivos de vídeo que ficaram órfãos
     caminho_video = data.get('video_path')
