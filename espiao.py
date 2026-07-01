@@ -20,6 +20,9 @@ API_ID = int(os.getenv('API_ID'))
 API_HASH = os.getenv('API_HASH')
 SHOPEE_APP_ID = os.getenv('SHOPEE_APP_ID')
 SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
+
+# 2. CONFIGURAÇÕES GERAIS DO ESPIÃO
+LIMITE_REGISTROS_HASH = 1000
 GEMINI_API_KEY = os.getenv('GEMINI_KEY')
 
 from google import genai
@@ -122,8 +125,9 @@ def verificar_e_registrar_hash(hash_video):
         
     dados.setdefault("hashes", []).append(hash_video)
     
-    if len(dados["hashes"]) > 500:
-        dados["hashes"] = dados["hashes"][-500:]
+    if len(dados["hashes"]) > LIMITE_REGISTROS_HASH:
+        if EXIBIR_LOGS: logger.info(f"🧹 Limite de {LIMITE_REGISTROS_HASH} hashes atingido. Removendo os registos mais antigos para libertar espaço...")
+        dados["hashes"] = dados["hashes"][-LIMITE_REGISTROS_HASH:]
         
     with open(arquivo_hashes, "w") as f:
         json.dump(dados, f, indent=4)
@@ -478,10 +482,20 @@ async def motor_espelhador_userbot(event):
     link_final_convertido = await converter_link_shopee(link_capturado)
     if EXIBIR_LOGS: logger.info("✅ [Espelhador] Sucesso: Link convertido utilizando a função nativa correta.")
 
-    if EXIBIR_LOGS: logger.info("📥 [Espelhador] Descarregando vídeo temporário para análise da IA...")
+    if EXIBIR_LOGS: logger.info("📥 [Espelhador] Descarregando vídeo temporário para análise da IA e verificação de duplicidade...")
     caminho_video_temp = await event.download_media(file="temp_analise_espelho_")
     
     if caminho_video_temp:
+        # ✅ NOVA TRAVA ANTI-LOOP (Assinatura Digital do Vídeo)
+        hash_arquivo = calcular_hash_video(caminho_video_temp)
+        if hash_arquivo and verificar_e_registrar_hash(hash_arquivo):
+            if EXIBIR_LOGS: logger.warning("🚫 [Espelhador] Loop evitado! Este vídeo exato já foi processado recentemente pelo sistema. Ignorando...")
+            try:
+                os.remove(caminho_video_temp)
+            except Exception:
+                pass
+            return # Aborta todo o processo de espelhamento e quebra o ciclo
+            
         titulo_ia = await gerar_legenda_com_ia_espelhador(caminho_video_temp)
         
         try:
