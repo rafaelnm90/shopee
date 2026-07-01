@@ -112,22 +112,37 @@ def calcular_hash_video(caminho_arquivo):
         if EXIBIR_LOGS: logger.error(f"❌ Erro na leitura física para calcular hash do ficheiro {caminho_arquivo}: {e}")
         return None
 
-def verificar_e_registrar_hash(hash_video):
+def verificar_e_registrar_hash(hash_video, contexto="global"):
     arquivo_hashes = "registro_hashes.json"
     try:
         with open(arquivo_hashes, "r") as f:
             dados = json.load(f)
+            # Migração automática do formato antigo para o novo formato de contextos
+            if "hashes" in dados:
+                dados_antigos = dados.pop("hashes")
+                dados["contextos"] = {"global": dados_antigos}
     except (FileNotFoundError, json.JSONDecodeError):
-        dados = {"hashes": []}
+        dados = {"contextos": {}}
     
-    if hash_video in dados.get("hashes", []):
+    if "contextos" not in dados:
+        dados["contextos"] = {}
+
+    if contexto not in dados["contextos"]:
+        dados["contextos"][contexto] = []
+
+    historico = dados["contextos"][contexto]
+    
+    if hash_video in historico:
+        # Grava para garantir a atualização em caso de migração
+        with open(arquivo_hashes, "w") as f:
+            json.dump(dados, f, indent=4)
         return True
         
-    dados.setdefault("hashes", []).append(hash_video)
+    historico.append(hash_video)
     
-    if len(dados["hashes"]) > LIMITE_REGISTROS_HASH:
-        if EXIBIR_LOGS: logger.info(f"🧹 Limite de {LIMITE_REGISTROS_HASH} hashes atingido. Removendo os registos mais antigos para libertar espaço...")
-        dados["hashes"] = dados["hashes"][-LIMITE_REGISTROS_HASH:]
+    if len(historico) > LIMITE_REGISTROS_HASH:
+        if EXIBIR_LOGS: logger.info(f"🧹 Limite atingido no contexto {contexto}. Removendo os registos mais antigos para libertar espaço...")
+        dados["contextos"][contexto] = historico[-LIMITE_REGISTROS_HASH:]
         
     with open(arquivo_hashes, "w") as f:
         json.dump(dados, f, indent=4)
@@ -485,17 +500,10 @@ async def motor_espelhador_userbot(event):
     if EXIBIR_LOGS: logger.info("📥 [Espelhador] Descarregando vídeo temporário para análise da IA e verificação de duplicidade...")
     caminho_video_temp = await event.download_media(file="temp_analise_espelho_")
     
+    hash_arquivo = None
     if caminho_video_temp:
-        # ✅ NOVA TRAVA ANTI-LOOP (Assinatura Digital do Vídeo)
+        # ✅ Calcula o hash uma única vez para usar de forma isolada em cada rota
         hash_arquivo = calcular_hash_video(caminho_video_temp)
-        if hash_arquivo and verificar_e_registrar_hash(hash_arquivo):
-            if EXIBIR_LOGS: logger.warning("🚫 [Espelhador] Loop evitado! Este vídeo exato já foi processado recentemente pelo sistema. Ignorando...")
-            try:
-                os.remove(caminho_video_temp)
-            except Exception:
-                pass
-            return # Aborta todo o processo de espelhamento e quebra o ciclo
-            
         titulo_ia = await gerar_legenda_com_ia_espelhador(caminho_video_temp)
         
         try:
@@ -529,9 +537,14 @@ async def motor_espelhador_userbot(event):
             if EXIBIR_LOGS: logger.warning(f"🚫 [Anti-Loop Ativado] O vídeo nasceu no destino ({destino}). Ignorando a clonagem nesta rota.")
             continue
             
-        # ✅ VERIFICAÇÃO DE DUPLICIDADE ISOLADA POR ROTA (Usa o destino como contexto)
+        # ✅ VERIFICAÇÃO DE DUPLICIDADE DE LINK (Usa o destino como contexto)
         if link_capturado and verificar_e_registrar_espelho(link_capturado, contexto=str(destino)):
-            if EXIBIR_LOGS: logger.info(f"🪞 [Espelhador] Duplicidade barrada na rota '{nome_rota}'! O produto já foi postado neste destino nas últimas 24h.")
+            if EXIBIR_LOGS: logger.info(f"🪞 [Espelhador] Duplicidade barrada na rota '{nome_rota}'! O link já foi postado neste destino nas últimas 24h.")
+            continue
+            
+        # ✅ VERIFICAÇÃO DE DUPLICIDADE FÍSICA (Usa o destino como contexto)
+        if hash_arquivo and verificar_e_registrar_hash(hash_arquivo, contexto=str(destino)):
+            if EXIBIR_LOGS: logger.warning(f"🚫 [Espelhador] Loop evitado na rota '{nome_rota}'! O ficheiro de vídeo exato já foi postado neste destino.")
             continue
             
         fila_dados = ler_fila_espelhador()
