@@ -504,6 +504,14 @@ async def motor_espelhador_userbot(event):
     if caminho_video_temp:
         # ✅ Calcula o hash uma única vez para usar de forma isolada em cada rota
         hash_arquivo = calcular_hash_video(caminho_video_temp)
+        
+        # ✅ MURALHA ANTI-LOOP REVERSO: Regista o vídeo na memória do canal de ORIGEM.
+        # Assim, o robô sabe que o ficheiro já passou por lá e bloqueia qualquer reflexo de volta.
+        if hash_arquivo:
+            verificar_e_registrar_hash(hash_arquivo, contexto=chat_id_str)
+            if chat_id_completo != chat_id_str:
+                verificar_e_registrar_hash(hash_arquivo, contexto=chat_id_completo)
+                
         titulo_ia = await gerar_legenda_com_ia_espelhador(caminho_video_temp)
         
         try:
