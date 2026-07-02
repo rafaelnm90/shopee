@@ -35,8 +35,22 @@ if EXIBIR_LOGS:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
     logger = logging.getLogger(__name__)
 
-# 3. INICIALIZAÇÃO DO CLIENTE E SCHEDULER
-# ✅ O nome da sessão foi alterado para criar um ficheiro .session independente
+# 3. SISTEMA DE AUTOLIMPEZA E INICIALIZAÇÃO
+def limpar_travas_fantasma(nome_sessao):
+    import glob
+    import os
+    arquivos_trava = glob.glob(f"{nome_sessao}.session-journal") + glob.glob(f"{nome_sessao}.session.lock")
+    for arquivo in arquivos_trava:
+        try:
+            os.remove(arquivo)
+            if EXIBIR_LOGS: logger.info(f"🧹 [Auto-cura] Trava fantasma de crash removida: {arquivo}")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Auto-cura] Falha ao tentar remover trava {arquivo}: {e}")
+
+# ✅ Limpa resíduos de reboot forçado no servidor antes de tocar na base de dados
+limpar_travas_fantasma('sessao_divulgacao')
+
+# O nome da sessão é mantido independente
 client = TelegramClient('sessao_divulgacao', API_ID, API_HASH)
 scheduler = AsyncIOScheduler()
 
