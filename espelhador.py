@@ -37,13 +37,15 @@ class EspelhadorFluxo(StatesGroup):
     menu_principal = State()
     aguardando_origem = State()
     aguardando_destino = State()
-    aguardando_delay = State()
+    aguardando_janela = State()
+    aguardando_modo = State()
     aguardando_confirmacao_criacao = State()
     aguardando_remocao = State()
     aguardando_confirmacao_remocao_rota = State()
     aguardando_edicao_escolha_rota = State()
     aguardando_acao_edicao = State()
-    aguardando_edicao_novo_delay = State()
+    aguardando_edicao_nova_janela = State()
+    aguardando_edicao_novo_modo = State()
     aguardando_nova_origem = State()
     aguardando_remocao_origem = State()
     aguardando_rota_esvaziar = State()
@@ -142,9 +144,9 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
             status_canais = rota.get("status_canais", {})
             
             texto += f"<b>{i}. {rota['nome']}</b>\n"
-            # Bloco Modificado (Substituir o bloco existente por este)
-            texto += f"   ⏳ Atraso: {rota['delay']} minutos\n"
-            texto += f"   📦 Fila: {qtd_fila} vídeo(s)\n"
+            texto += f"   🕒 Janela de Postagem: {rota.get('inicio', 10)}h às {rota.get('fim', 22)}h\n"
+            texto += f"   🔀 Distribuição: {rota.get('modo', 'ordem').title()}\n"
+            texto += f"   📦 Fila de Espera: {qtd_fila} vídeo(s)\n"
             texto += "\n"
             texto += f"   📥 <b>Origens:</b>\n"
             
@@ -236,39 +238,66 @@ async def receber_destino(message: types.Message, state: FSMContext):
     if destino_id:
         if EXIBIR_LOGS: logger.info(f"✅ Destino validado com sucesso: {destino_id}")
         await state.update_data(destino=destino_id)
-        await message.answer(f"✅ Destino confirmado: <code>{destino_id}</code>\n\nPor fim, digite o <b>Atraso de Publicação em Minutos</b> (Apenas números, ex: 15):\nDigite 0 se quiser que a cópia seja imediata.", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
-        await state.set_state(EspelhadorFluxo.aguardando_delay)
+        await message.answer(f"✅ Destino confirmado: <code>{destino_id}</code>\n\nDefina a <b>Janela de Horário</b> para a postagem no dia seguinte.\nEnvie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code> para distribuir entre as 10h e as 22h):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+        await state.set_state(EspelhadorFluxo.aguardando_janela)
     else:
         if EXIBIR_LOGS: logger.warning(f"⚠️ Falha na validação do destino: {message.text}")
         await message.answer("⚠️ <b>Canal não encontrado ou sem permissão!</b>\nCertifique-se de que o ID ou @username está correto e de que o bot é administrador do canal.\n\nTente enviar novamente:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
 
-@router.message(EspelhadorFluxo.aguardando_delay)
-async def receber_delay_rota(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
-        await message.answer("Por favor, digite apenas números inteiros para os minutos.", reply_markup=teclado_espelhador_cancelar)
+@router.message(EspelhadorFluxo.aguardando_janela)
+async def receber_janela_rota(message: types.Message, state: FSMContext):
+    import re
+    match = re.match(r"^(\d{1,2})-(\d{1,2})$", message.text.strip())
+    if not match:
+        await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22", reply_markup=teclado_espelhador_cancelar)
         return
         
-    delay = int(message.text)
-    await state.update_data(delay=delay)
+    inicio, fim = map(int, match.groups())
+    if inicio >= fim or inicio < 0 or fim > 23:
+        await message.answer("Valores inválidos! A hora de início deve ser menor que a do fim.", reply_markup=teclado_espelhador_cancelar)
+        return
+
+    await state.update_data(inicio=inicio, fim=fim)
+    
+    teclado_modo = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")],
+            [KeyboardButton(text="Cancelar Operação ❌")]
+        ], resize_keyboard=True, is_persistent=True
+    )
+    await message.answer("Como deseja distribuir os vídeos retidos dentro dessa janela de horário no dia seguinte?", reply_markup=teclado_modo)
+    await state.set_state(EspelhadorFluxo.aguardando_modo)
+
+@router.message(EspelhadorFluxo.aguardando_modo)
+async def receber_modo_rota(message: types.Message, state: FSMContext):
+    if message.text not in ["Aleatório 🔀", "Ordem de Chegada ⬇️"]:
+        await message.answer("Por favor, use os botões para escolher o modo.", reply_markup=teclado_espelhador_cancelar)
+        return
+        
+    modo = "aleatorio" if message.text == "Aleatório 🔀" else "ordem"
+    await state.update_data(modo=modo)
     
     data = await state.get_data()
     origens = data.get("origens", [])
     destino = data.get("destino")
+    inicio = data.get("inicio")
+    fim = data.get("fim")
     
     texto_confirmacao = (
-        f"⚠️ <b>Confirmação de Criação em Grupo</b>\n\n"
+        f"⚠️ <b>Confirmação de Criação de Rota (D+1)</b>\n\n"
         f"<b>Origens Mapeadas ({len(origens)}):</b>\n"
     )
     for o in origens:
         texto_confirmacao += f"└ <code>{o}</code>\n"
         
     texto_confirmacao += (
-        f"\n<b>Destino Único:</b> <code>{destino}</code>\n"
-        f"<b>Atraso Aplicado:</b> ⏳ {delay} minutos\n\n"
-        "Deseja aprovar e ativar este espelhamento agrupado agora?"
+        f"\n<b>Destino:</b> <code>{destino}</code>\n"
+        f"<b>Distribuição:</b> {inicio}h às {fim}h\n"
+        f"<b>Ordem:</b> {message.text}\n\n"
+        "Deseja aprovar e ativar este espelhamento inteligente agora?"
     )
     
-    if EXIBIR_LOGS: logger.info(f"✅ Rota agrupada preparada para confirmação: {len(origens)} origens para {destino}.")
+    if EXIBIR_LOGS: logger.info(f"✅ Rota preparada para confirmação: {len(origens)} origens para {destino}.")
     await message.answer(texto_confirmacao, reply_markup=teclado_espelhador_confirmacao, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.aguardando_confirmacao_criacao)
 
@@ -281,11 +310,13 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
     data = await state.get_data()
     origens = data.get("origens", [])
     destino = data.get("destino")
-    delay = data.get("delay")
+    inicio = data.get("inicio")
+    fim = data.get("fim")
+    modo = data.get("modo")
     
     dados = ler_espelhos()
     
-    if EXIBIR_LOGS: logger.info(f"🚀 A agrupar {len(origens)} origens numa única rota de espelhamento para o destino {destino}...")
+    if EXIBIR_LOGS: logger.info(f"🚀 A agrupar {len(origens)} origens numa única rota de espelhamento D+1 para o destino {destino}...")
     
     num_rota = len(dados.get("rotas", [])) + 1
     nome_rota = f"Espelho {num_rota}"
@@ -294,15 +325,17 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
         "nome": nome_rota,
         "origens": origens,
         "destino": destino,
-        "delay": delay
+        "inicio": inicio,
+        "fim": fim,
+        "modo": modo
     }
     
     dados.setdefault("rotas", []).append(nova_rota)
     salvar_espelhos(dados)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Rota agrupada criada com sucesso: {nome_rota}.")
+    if EXIBIR_LOGS: logger.info(f"✅ Rota inteligente criada com sucesso: {nome_rota}.")
     
-    await message.answer(f"✅ <b>Rota {nome_rota}</b> criada agrupando {len(origens)} canais com sucesso!", parse_mode="HTML")
+    await message.answer(f"✅ <b>Rota {nome_rota}</b> ativada!\nOs vídeos capturados hoje serão postados amanhã entre as {inicio}h e as {fim}h.", parse_mode="HTML")
     await painel_espelhador(message, state)
 
 @router.message(EspelhadorFluxo.menu_principal, F.text == "Remover Rota 🗑️")
@@ -406,7 +439,8 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         await state.update_data(indice_edicao=indice)
         
         texto = f"⚙️ <b>Editando Rota: {rota_alvo['nome']}</b>\n"
-        texto += f"⏳ Atraso atual: {rota_alvo.get('delay', 0)} minutos\n"
+        texto += f"🕒 Janela atual: {rota_alvo.get('inicio', 10)}h às {rota_alvo.get('fim', 22)}h\n"
+        texto += f"🔀 Modo atual: {rota_alvo.get('modo', 'ordem').title()}\n"
         
         origens = rota_alvo.get('origens', [])
         if not origens and 'origem' in rota_alvo: origens = [rota_alvo['origem']]
@@ -415,8 +449,9 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         
         teclado_submenu = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="⏳ Modificar Atraso"), KeyboardButton(text="➕ Adicionar Origem")],
-                [KeyboardButton(text="🗑️ Remover Origem"), KeyboardButton(text="Cancelar Operação ❌")]
+                [KeyboardButton(text="🕒 Modificar Janela"), KeyboardButton(text="🔀 Modificar Modo")],
+                [KeyboardButton(text="➕ Adicionar Origem"), KeyboardButton(text="🗑️ Remover Origem")],
+                [KeyboardButton(text="Cancelar Operação ❌")]
             ], resize_keyboard=True, is_persistent=True)
             
         await message.answer(texto, reply_markup=teclado_submenu, parse_mode="HTML")
@@ -427,9 +462,18 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.aguardando_acao_edicao)
 async def processar_acao_edicao(message: types.Message, state: FSMContext):
     texto = message.text
-    if texto == "⏳ Modificar Atraso":
-        await message.answer("Digite o <b>NOVO ATRASO</b> em minutos (apenas números, 0 para imediato):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
-        await state.set_state(EspelhadorFluxo.aguardando_edicao_novo_delay)
+    if texto == "🕒 Modificar Janela":
+        await message.answer("Digite a <b>NOVA JANELA</b> no formato <code>Inicio-Fim</code> (Ex: 10-22):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+        await state.set_state(EspelhadorFluxo.aguardando_edicao_nova_janela)
+    elif texto == "🔀 Modificar Modo":
+        teclado_modo = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")],
+                [KeyboardButton(text="Cancelar Operação ❌")]
+            ], resize_keyboard=True, is_persistent=True
+        )
+        await message.answer("Escolha o novo modo de distribuição:", reply_markup=teclado_modo)
+        await state.set_state(EspelhadorFluxo.aguardando_edicao_novo_modo)
     elif texto == "➕ Adicionar Origem":
         await message.answer("Envie o ID numérico, link ou @username da nova origem que deseja adicionar a esta rota:", reply_markup=teclado_espelhador_cancelar)
         await state.set_state(EspelhadorFluxo.aguardando_nova_origem)
@@ -454,24 +498,51 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
     else:
         await message.answer("Use os botões do menu para escolher a ação.", reply_markup=teclado_espelhador_cancelar)
 
-@router.message(EspelhadorFluxo.aguardando_edicao_novo_delay)
-async def salvar_edicao_delay(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
-        await message.answer("Por favor, digite apenas números inteiros.", reply_markup=teclado_espelhador_cancelar)
+@router.message(EspelhadorFluxo.aguardando_edicao_nova_janela)
+async def salvar_edicao_janela(message: types.Message, state: FSMContext):
+    import re
+    match = re.match(r"^(\d{1,2})-(\d{1,2})$", message.text.strip())
+    if not match:
+        await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22", reply_markup=teclado_espelhador_cancelar)
         return
         
-    novo_delay = int(message.text)
+    inicio, fim = map(int, match.groups())
+    if inicio >= fim or inicio < 0 or fim > 23:
+        await message.answer("Valores inválidos! A hora de início deve ser menor que a do fim.", reply_markup=teclado_espelhador_cancelar)
+        return
+        
     data = await state.get_data()
     indice = data.get("indice_edicao")
     
     dados = ler_espelhos()
     rotas = dados.get("rotas", [])
-    rotas[indice]["delay"] = novo_delay
+    rotas[indice]["inicio"] = inicio
+    rotas[indice]["fim"] = fim
     dados["rotas"] = rotas
     salvar_espelhos(dados)
     
-    if EXIBIR_LOGS: logger.info(f"✏️ Atraso da rota '{rotas[indice]['nome']}' atualizado para {novo_delay} minutos.")
-    await message.answer(f"✅ O atraso foi atualizado para {novo_delay} minutos com sucesso! A fila adaptará o disparo ao vivo.", parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info(f"✏️ Janela da rota '{rotas[indice]['nome']}' atualizada para {inicio}h-{fim}h.")
+    await message.answer(f"✅ A janela foi atualizada para {inicio}h às {fim}h com sucesso!", parse_mode="HTML")
+    await painel_espelhador(message, state)
+
+@router.message(EspelhadorFluxo.aguardando_edicao_novo_modo)
+async def salvar_edicao_modo(message: types.Message, state: FSMContext):
+    if message.text not in ["Aleatório 🔀", "Ordem de Chegada ⬇️"]:
+        await message.answer("Por favor, use os botões para escolher o modo.", reply_markup=teclado_espelhador_cancelar)
+        return
+        
+    modo = "aleatorio" if message.text == "Aleatório 🔀" else "ordem"
+    data = await state.get_data()
+    indice = data.get("indice_edicao")
+    
+    dados = ler_espelhos()
+    rotas = dados.get("rotas", [])
+    rotas[indice]["modo"] = modo
+    dados["rotas"] = rotas
+    salvar_espelhos(dados)
+    
+    if EXIBIR_LOGS: logger.info(f"✏️ Modo da rota '{rotas[indice]['nome']}' atualizado para {modo}.")
+    await message.answer(f"✅ O modo de distribuição foi atualizado para {message.text} com sucesso!", parse_mode="HTML")
     await painel_espelhador(message, state)
 
 @router.message(EspelhadorFluxo.aguardando_nova_origem)
