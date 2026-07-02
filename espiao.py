@@ -42,6 +42,21 @@ if EXIBIR_LOGS:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
     logger = logging.getLogger(__name__)
 
+# ✅ SISTEMA DE AUTOLIMPEZA E AUTO-CURA
+def limpar_travas_fantasma(nome_sessao):
+    import glob
+    import os
+    arquivos_trava = glob.glob(f"{nome_sessao}.session-journal") + glob.glob(f"{nome_sessao}.session.lock")
+    for arquivo in arquivos_trava:
+        try:
+            os.remove(arquivo)
+            if EXIBIR_LOGS: logger.info(f"🧹 [Auto-cura] Trava fantasma de crash removida: {arquivo}")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Auto-cura] Falha ao tentar remover trava {arquivo}: {e}")
+
+# Limpa resíduos de base de dados trancada antes de iniciar
+limpar_travas_fantasma('sessao_espiao')
+
 client = TelegramClient('sessao_espiao', API_ID, API_HASH)
 
 def carregar_alvos():
