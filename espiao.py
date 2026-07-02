@@ -381,13 +381,14 @@ def salvar_fila_espelhador(dados):
         json.dump(dados, f, indent=4)
 
 async def processar_fila_espelhador_loop():
-    from datetime import timedelta # ✅ Correção 1: Injetando a importação de tempo ausente
+    from datetime import timedelta
+    import random
     while True:
         try:
             fila_dados = ler_fila_espelhador()
             fila = fila_dados.get("fila", [])
             if not fila:
-                await asyncio.sleep(5)
+                await asyncio.sleep(60) # Atraso alargado para poupar recursos na rede
                 continue
                 
             config = ler_espelhos_config()
@@ -395,8 +396,65 @@ async def processar_fila_espelhador_loop():
             
             itens_restantes = []
             agora = datetime.now()
+            hoje_str = agora.strftime("%Y-%m-%d")
             houve_alteracao_rota = False
+            houve_agendamento = False
             
+            # 1. Mapeamento e Agendamento Inteligente dos Vídeos Represados
+            itens_por_rota_desagendados = {}
+            for item in fila:
+                if item.get("horario_disparo"):
+                    continue # Já tem carimbo de distribuição matemática
+                
+                data_captura_obj = datetime.strptime(item["data_captura"], "%Y-%m-%d %H:%M:%S")
+                data_captura_str = data_captura_obj.strftime("%Y-%m-%d")
+                
+                # Só calcula o agendamento de vídeos que caíram na represa no DIA ANTERIOR (ou mais antigos)
+                if data_captura_str < hoje_str:
+                    nome_rota = item.get("nome_rota")
+                    itens_por_rota_desagendados.setdefault(nome_rota, []).append(item)
+
+            for nome_rota, itens in itens_por_rota_desagendados.items():
+                rota_config = rotas.get(nome_rota)
+                if not rota_config: continue
+                
+                inicio = int(rota_config.get("inicio", 10))
+                fim = int(rota_config.get("fim", 22))
+                modo = rota_config.get("modo", "ordem")
+                
+                if modo == "aleatorio":
+                    random.shuffle(itens)
+                else:
+                    itens.sort(key=lambda x: x["data_captura"])
+                
+                qtd = len(itens)
+                minutos_disponiveis = (fim - inicio) * 60
+                espacamento = minutos_disponiveis // qtd if qtd > 0 else 15
+                if espacamento < 1: espacamento = 1
+                
+                minuto_atual_busca = agora.replace(hour=inicio, minute=0, second=0, microsecond=0)
+                
+                # Adaptação para proteger o sistema caso o robô seja reiniciado a meio do expediente
+                if minuto_atual_busca < agora and agora.hour < fim:
+                    minutos_restantes = (fim - agora.hour) * 60 - agora.minute
+                    espacamento = minutos_restantes // qtd if qtd > 0 else 15
+                    if espacamento < 1: espacamento = 1
+                    minuto_atual_busca = agora + timedelta(minutes=1)
+                elif agora.hour >= fim:
+                    minuto_atual_busca = minuto_atual_busca + timedelta(days=1)
+
+                if EXIBIR_LOGS: logger.info(f"📅 [Espelhador] Distribuindo {qtd} vídeos retidos na rota '{nome_rota}' (Modo: {modo.title()}).")
+                
+                for item in itens:
+                    # Aplica variação orgânica para não parecerem mensagens robóticas cravadas no relógio
+                    variacao = random.randint(0, espacamento // 2) if espacamento > 2 else 0
+                    horario_agendado = minuto_atual_busca + timedelta(minutes=variacao)
+                    item["horario_disparo"] = horario_agendado.strftime("%Y-%m-%d %H:%M:%S")
+                    houve_agendamento = True
+                    
+                    minuto_atual_busca += timedelta(minutes=espacamento)
+            
+            # 2. Execução dos Disparos Agendados
             for item in fila:
                 nome_rota = item.get("nome_rota")
                 rota_config = rotas.get(nome_rota)
@@ -404,15 +462,20 @@ async def processar_fila_espelhador_loop():
                 if not rota_config:
                     continue
                     
-                data_captura = datetime.strptime(item["data_captura"], "%Y-%m-%d %H:%M:%S")
-                delay_minutos = int(rota_config.get("delay", 0))
                 esvaziar_agora = rota_config.get("esvaziar_agora", False)
+                horario_disparo_str = item.get("horario_disparo")
                 
-                hora_disparo = data_captura + timedelta(minutes=delay_minutos)
+                deve_disparar = esvaziar_agora
                 
-                if agora >= hora_disparo or esvaziar_agora:
+                if not deve_disparar and horario_disparo_str:
+                    horario_disparo_obj = datetime.strptime(horario_disparo_str, "%Y-%m-%d %H:%M:%S")
+                    if agora >= horario_disparo_obj:
+                        deve_disparar = True
+                
+                if deve_disparar:
                     try:
-                        chat_origem = int(item["chat_origem"])
+                        chat_origem_bruto = item["chat_origem"]
+                        chat_origem = int(chat_origem_bruto) if str(chat_origem_bruto).lstrip('-').isdigit() else chat_origem_bruto
                         msg_id = item["msg_id"]
                         destino = item["destino"]
                         texto = item["texto_processado"]
@@ -426,31 +489,32 @@ async def processar_fila_espelhador_loop():
                                 entidade_destino = await client.get_entity(id_teste)
 
                             await client.send_message(entidade_destino, texto, file=mensagem_original.media, parse_mode="html")
-                            if EXIBIR_LOGS: logger.info(f"✅ [Espelhador] Disparo dinâmico concluído na rota '{nome_rota}' para {destino}.")
+                            if EXIBIR_LOGS: logger.info(f"✅ [Espelhador] Disparo programado concluído na rota '{nome_rota}' para {destino}.")
                         else:
                             if EXIBIR_LOGS: logger.warning(f"⚠️ [Espelhador] Mensagem original apagada antes do disparo na rota '{nome_rota}'.")
                     except Exception as e:
-                        if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Falha no disparo dinâmico da rota '{nome_rota}': {e}")
+                        if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Falha no disparo da rota '{nome_rota}': {e}")
                 else:
                     itens_restantes.append(item)
                     
+            # 3. Trata comandos de ação manual e guarda os resultados
             for r in config.get("rotas", []):
                 if r.get("esvaziar_agora"):
                     r["esvaziar_agora"] = False
                     houve_alteracao_rota = True
             
             if houve_alteracao_rota:
-                # ✅ Correção 2: Salvando diretamente o arquivo JSON em vez de chamar função de outro script
                 with open("espelhos_config.json", "w", encoding="utf-8") as f:
                     json.dump(config, f, indent=4, ensure_ascii=False)
                     
-            fila_dados["fila"] = itens_restantes
-            salvar_fila_espelhador(fila_dados)
+            if len(fila) != len(itens_restantes) or houve_agendamento:
+                fila_dados["fila"] = itens_restantes
+                salvar_fila_espelhador(fila_dados)
             
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro crítico no loop dinâmico do espelhador: {e}")
+            if EXIBIR_LOGS: logger.error(f"❌ Erro crítico no motor de distribuição do espelhador: {e}")
         
-        await asyncio.sleep(5)
+        await asyncio.sleep(60) # Intervalo alargado para reduzir o peso na memória
 
 @client.on(events.NewMessage)
 async def motor_espelhador_userbot(event):
