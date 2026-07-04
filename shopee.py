@@ -1465,6 +1465,18 @@ async def menu_canal_principal(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("📂 Acessando a pasta do Canal Afiliados.")
     await message.answer("📺 <b>Menu do Canal Afiliados</b>\nGerencie as postagens e rotinas abaixo:", reply_markup=obter_teclado_principal(), parse_mode="HTML")
 
+# NOVO: Funções de Gestão do Banco de Pedidos Individuais
+def ler_banco_pedidos():
+    try:
+        with open("banco_pedidos.json", "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def salvar_banco_pedidos(dados):
+    with open("banco_pedidos.json", "w") as f:
+        json.dump(dados, f, indent=4)
+
 async def buscar_dados_financeiros_shopee(dias_retroativos=30):
     if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
         if EXIBIR_LOGS: logger.warning("⏳ [API Shopee] Chaves financeiras ausentes no .env.")
@@ -1474,13 +1486,11 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
     agora = datetime.now(fuso_horario)
     inicio = agora - timedelta(days=dias_retroativos)
     
-    # 1. Geração correta dos Timestamps UNIX para GraphQL
     start_ts = int(inicio.replace(hour=0, minute=0, second=0).timestamp())
     end_ts = int(agora.replace(hour=23, minute=59, second=59).timestamp())
     
     endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
     
-    # 2. Formatação rigorosa da Query (Documentação Oficial Shopee)
     payload = {
         "query": """query getConversionReport($purchaseTimeStart: Int64!, $purchaseTimeEnd: Int64!, $limit: Int!) {
             conversionReport(purchaseTimeStart: $purchaseTimeStart, purchaseTimeEnd: $purchaseTimeEnd, limit: $limit) {
@@ -1490,6 +1500,7 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
                     sellerCommission
                     totalCommission
                     orders {
+                        orderSn
                         orderStatus
                     }
                 }
@@ -1498,15 +1509,13 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
         "variables": {
             "purchaseTimeStart": str(start_ts),
             "purchaseTimeEnd": str(end_ts),
-            "limit": 500
+            "limit": 5000
         }
     }
     
-    # 3. Compactação JSON exata (A Shopee recusa espaços em branco)
     payload_json = json.dumps(payload, separators=(',', ':'))
     timestamp = int(time.time())
     
-    # 4. Assinatura de Segurança HMAC SHA256
     fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}{SHOPEE_APP_SECRET}"
     assinatura = hashlib.sha256(fator_base.encode('utf-8')).hexdigest()
     
@@ -1518,27 +1527,123 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(endpoint, headers=headers, data=payload_json) as response:
-                
                 dados_crus = await response.text()
-                if EXIBIR_LOGS: logger.info(f"🔍 [API Shopee - Auditoria] {dados_crus}")
-                
                 if response.status == 200:
                     dados = json.loads(dados_crus)
-                    
-                    # 5. Validação da devolução de dados e tratamento de erro oficial Shopee
                     erros_shopee = dados.get("errors")
                     if erros_shopee:
                         mensagem_erro = erros_shopee[0].get("message", "Erro Desconhecido")
                         if EXIBIR_LOGS: logger.error(f"❌ A Shopee recusou a consulta: {mensagem_erro}")
                         return []
-                        
                     return dados.get("data", {}).get("conversionReport", {}).get("nodes", [])
                 else:
                     if EXIBIR_LOGS: logger.error(f"❌ Erro de Conexão {response.status}: {dados_crus}")
-                    
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro crítico no motor financeiro: {e}")
     return []
+
+def processar_e_salvar_pedidos_api(conversoes):
+    pedidos_db = ler_banco_pedidos()
+    historico = ler_historico_financeiro()
+    
+    historico_limpo = {}
+    for k, v in historico.items():
+        if isinstance(v, float) or isinstance(v, int):
+            historico_limpo[k] = {"aprovado": float(v), "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
+        else:
+            v.setdefault("qtd_aprovado", 0)
+            v.setdefault("qtd_pendente", 0)
+            v.setdefault("qtd_cancelado", 0)
+            v.setdefault("cancelado", 0.0)
+            v.setdefault("clicks", 0)
+            historico_limpo[k] = v
+
+    if not conversoes:
+        return historico_limpo
+
+    houve_atualizacao = False
+    import random
+    
+    for conv in conversoes:
+        orders = conv.get("orders", [])
+        if not orders: continue
+        
+        c_total = float(conv.get("totalCommission", "0"))
+        c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
+        c_extra = float(conv.get("sellerCommission", "0"))
+        dt_obj = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=fuso_horario)
+        dt_db_str = dt_obj.strftime("%Y-%m-%d")
+        
+        qtd_itens = len(orders)
+        c_total_frac = c_total / qtd_itens
+        c_shopee_frac = c_shopee / qtd_itens
+        c_extra_frac = c_extra / qtd_itens
+
+        for order in orders:
+            order_sn = order.get("orderSn")
+            if not order_sn: 
+                order_sn = f"{conv.get('purchaseTime')}_{random.randint(1000,9999)}"
+                
+            novo_status = order.get("orderStatus", "").upper()
+            
+            if order_sn in pedidos_db:
+                estado_anterior = pedidos_db[order_sn]["status"]
+                if estado_anterior != novo_status:
+                    pedidos_db[order_sn]["status"] = novo_status
+                    houve_atualizacao = True
+                    
+                if c_total_frac > 0:
+                    if pedidos_db[order_sn]["comissao_total"] != c_total_frac:
+                        pedidos_db[order_sn]["comissao_total"] = c_total_frac
+                        pedidos_db[order_sn]["comissao_shopee"] = c_shopee_frac
+                        pedidos_db[order_sn]["comissao_vendedor"] = c_extra_frac
+                        houve_atualizacao = True
+            else:
+                pedidos_db[order_sn] = {
+                    "data": dt_db_str,
+                    "status": novo_status,
+                    "comissao_total": c_total_frac,
+                    "comissao_shopee": c_shopee_frac,
+                    "comissao_vendedor": c_extra_frac
+                }
+                houve_atualizacao = True
+                    
+    if houve_atualizacao:
+        salvar_banco_pedidos(pedidos_db)
+        if EXIBIR_LOGS: logger.info("💾 Banco de Pedidos Individuais consolidado e blindado!")
+        
+    dias_no_banco = set(p["data"] for p in pedidos_db.values())
+    
+    for d_str in dias_no_banco:
+        if d_str not in historico_limpo:
+            historico_limpo[d_str] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
+        else:
+            historico_limpo[d_str]["aprovado"] = 0.0
+            historico_limpo[d_str]["pendente"] = 0.0
+            historico_limpo[d_str]["cancelado"] = 0.0
+            historico_limpo[d_str]["qtd_aprovado"] = 0
+            historico_limpo[d_str]["qtd_pendente"] = 0
+            historico_limpo[d_str]["qtd_cancelado"] = 0
+            historico_limpo[d_str]["shopee"] = 0.0
+            historico_limpo[d_str]["vendedor"] = 0.0
+            
+    for sn, p in pedidos_db.items():
+        d_str = p["data"]
+        st = p["status"]
+        if st == "COMPLETED":
+            historico_limpo[d_str]["aprovado"] += p["comissao_total"]
+            historico_limpo[d_str]["shopee"] += p.get("comissao_shopee", 0.0)
+            historico_limpo[d_str]["vendedor"] += p.get("comissao_vendedor", 0.0)
+            historico_limpo[d_str]["qtd_aprovado"] += 1
+        elif st == "PENDING":
+            historico_limpo[d_str]["pendente"] += p["comissao_total"]
+            historico_limpo[d_str]["qtd_pendente"] += 1
+        else:
+            historico_limpo[d_str]["cancelado"] += p["comissao_total"]
+            historico_limpo[d_str]["qtd_cancelado"] += 1
+            
+    salvar_historico_financeiro(historico_limpo)
+    return historico_limpo
 
 def obter_teclado_relatorios():
     botoes = [
@@ -1568,93 +1673,24 @@ def salvar_historico_financeiro(dados):
 async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     msg_status = await message.answer("💰 Sincronizando API Financeira com a Shopee e processando relatório... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando extração profunda e atualização estrutural do banco de dados...")
+    if EXIBIR_LOGS: logger.info("🚀 Acionando extração de dados e recálculo dinâmico pelo Rastreio Individual...")
     
     conversoes = await buscar_dados_financeiros_shopee(30)
+    historico_limpo = processar_e_salvar_pedidos_api(conversoes)
     
-    total_pedidos = len(conversoes) if conversoes else 0
-    pagos, pendentes, cancelados = 0, 0, 0
+    from datetime import timedelta
     hoje = datetime.now(fuso_horario)
+    data_corte = (hoje - timedelta(days=30)).strftime("%Y-%m-%d")
     
-    diario_api = {}
-    
-    if conversoes:
-        for conv in conversoes:
-            orders = conv.get("orders", [])
-            if not orders: continue
-
-            c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
-            c_extra = float(conv.get("sellerCommission", "0"))
-            c_total = float(conv.get("totalCommission", "0"))
-            dt_obj = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=fuso_horario)
-            dt_db_str = dt_obj.strftime("%Y-%m-%d")
+    pagos, pendentes, cancelados = 0, 0, 0
+    for k, v in historico_limpo.items():
+        if k >= data_corte:
+            pagos += v.get("qtd_aprovado", 0)
+            pendentes += v.get("qtd_pendente", 0)
+            cancelados += v.get("qtd_cancelado", 0)
             
-            if dt_db_str not in diario_api:
-                diario_api[dt_db_str] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
-            
-            if EXIBIR_LOGS: logger.info("🧮 Analisando transação e desmembrando carrinho misto...")
-            qtd_itens = len(orders)
-            c_total_frac = c_total / qtd_itens
-            c_shopee_frac = c_shopee / qtd_itens
-            c_extra_frac = c_extra / qtd_itens
-
-            for order in orders:
-                status = order.get("orderStatus", "").upper()
-                if status == "COMPLETED":
-                    pagos += 1
-                    diario_api[dt_db_str]["aprovado"] += c_total_frac
-                    diario_api[dt_db_str]["shopee"] += c_shopee_frac
-                    diario_api[dt_db_str]["vendedor"] += c_extra_frac
-                    diario_api[dt_db_str]["qtd_aprovado"] += 1
-                elif status == "PENDING":
-                    pendentes += 1
-                    diario_api[dt_db_str]["pendente"] += c_total_frac
-                    diario_api[dt_db_str]["qtd_pendente"] += 1
-                else:
-                    cancelados += 1
-                    diario_api[dt_db_str]["cancelado"] += c_total_frac
-                    diario_api[dt_db_str]["qtd_cancelado"] += 1
-    
+    total_pedidos = pagos + pendentes + cancelados
     taxa_conversao = (pagos / total_pedidos * 100) if total_pedidos > 0 else 0.0
-    
-    if EXIBIR_LOGS: logger.info("💾 Atualizando o banco de dados histórico local...")
-    historico = ler_historico_financeiro()
-    historico_limpo = {}
-    
-    for k, v in historico.items():
-        try:
-            if isinstance(v, float) or isinstance(v, int):
-                historico_limpo[k] = {"aprovado": float(v), "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
-            else:
-                v.setdefault("qtd_aprovado", 0)
-                v.setdefault("qtd_pendente", 0)
-                v.setdefault("qtd_cancelado", 0)
-                v.setdefault("cancelado", 0.0)
-                v.setdefault("clicks", 0)
-                historico_limpo[k] = v
-        except ValueError:
-            pass 
-                
-    ontem_str = (hoje - timedelta(days=1)).strftime("%Y-%m-%d")
-    
-    for i in range(30):
-        d_str = (hoje - timedelta(days=i)).strftime("%Y-%m-%d")
-        v_api = diario_api.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0})
-        v_antigo = historico_limpo.get(d_str, {"clicks": 0, "cancelado": 0.0, "qtd_cancelado": 0})
-        
-        v_api["clicks"] = v_antigo.get("clicks", 0)
-        
-        v_total_api = v_api["aprovado"] + v_api["pendente"]
-        
-        if v_total_api > 0 or v_api["clicks"] > 0 or v_api["cancelado"] > 0:
-            historico_limpo[d_str] = v_api
-        else:
-            if d_str == hoje.strftime("%Y-%m-%d") or d_str == ontem_str:
-                pass 
-            elif d_str not in historico_limpo:
-                historico_limpo[d_str] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
-                
-    salvar_historico_financeiro(historico_limpo)
     
     MESES_PT = {
         "01": "Janeiro", "02": "Fevereiro", "03": "Março", "04": "Abril",
@@ -5032,98 +5068,48 @@ async def processar_fila_espiao():
         pass
 
 async def sincronizar_financeiro_horario():
-    if EXIBIR_LOGS: logger.info("⏰ [Financeiro] Iniciando varredura horária de pendências na API da Shopee...")
+    if EXIBIR_LOGS: logger.info("⏰ [Financeiro] Iniciando sincronização em background com a API Shopee...")
     
-    historico = ler_historico_financeiro()
-    agora = datetime.now(fuso_horario)
-    
-    ontem_str = (agora - timedelta(days=1)).strftime("%Y-%m-%d")
-    anteontem_str = (agora - timedelta(days=2)).strftime("%Y-%m-%d")
-    
-    precisa_verificar = False
-    
-    dados_ontem = historico.get(ontem_str)
-    dados_anteontem = historico.get(anteontem_str)
-    
-    if not dados_ontem or (isinstance(dados_ontem, dict) and dados_ontem.get("aprovado", 0.0) + dados_ontem.get("pendente", 0.0) == 0.0):
-        precisa_verificar = True
-    if not dados_anteontem:
-        precisa_verificar = True
-        
-    if not precisa_verificar:
-        if EXIBIR_LOGS: logger.info("✅ [Financeiro] Dados recentes já consolidados. Varredura suspensa.")
-        return
-        
-    if EXIBIR_LOGS: logger.info("🔍 [Financeiro] Valores pendentes detectados. Consultando a API...")
     conversoes = await buscar_dados_financeiros_shopee(3)
+    if conversoes:
+        processar_e_salvar_pedidos_api(conversoes)
+        if EXIBIR_LOGS: logger.info("✅ [Financeiro] Varredura horária concluída. Banco de Pedidos atualizado.")
+
+async def varredura_retroativa_pendentes():
+    if EXIBIR_LOGS: logger.info("🌙 [Pente Fino] Iniciando varredura de madrugada para caçar pedidos pendentes antigos...")
     
-    if not conversoes:
+    pedidos_db = ler_banco_pedidos()
+    if not pedidos_db:
         return
         
-    diario_api = {
-        ontem_str: {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0},
-        anteontem_str: {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
-    }
+    agora = datetime.now(fuso_horario)
+    data_mais_antiga = agora
+    tem_pendentes = False
     
-    for conv in conversoes:
-        orders = conv.get("orders", [])
-        if not orders: continue
-        
-        c_total = float(conv.get("totalCommission", "0"))
-        c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
-        c_extra = float(conv.get("sellerCommission", "0"))
-        dt_obj = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=fuso_horario)
-        dt_db_str = dt_obj.strftime("%Y-%m-%d")
-        
-        if dt_db_str in diario_api:
-            if EXIBIR_LOGS: logger.info("🧮 Sincronizando e desmembrando transação em background...")
-            qtd_itens = len(orders)
-            c_total_frac = c_total / qtd_itens
-            c_shopee_frac = c_shopee / qtd_itens
-            c_extra_frac = c_extra / qtd_itens
-
-            for order in orders:
-                status = order.get("orderStatus", "").upper()
-                if status == "COMPLETED":
-                    diario_api[dt_db_str]["aprovado"] += c_total_frac
-                    diario_api[dt_db_str]["shopee"] += c_shopee_frac
-                    diario_api[dt_db_str]["vendedor"] += c_extra_frac
-                    diario_api[dt_db_str]["qtd_aprovado"] += 1
-                elif status == "PENDING":
-                    diario_api[dt_db_str]["pendente"] += c_total_frac
-                    diario_api[dt_db_str]["qtd_pendente"] += 1
-                else:
-                    diario_api[dt_db_str]["cancelado"] += c_total_frac
-                    diario_api[dt_db_str]["qtd_cancelado"] += 1
+    for order_sn, dados in pedidos_db.items():
+        if dados.get("status") == "PENDING":
+            tem_pendentes = True
+            try:
+                data_pedido = datetime.strptime(dados["data"], "%Y-%m-%d").replace(tzinfo=fuso_horario)
+                if data_pedido < data_mais_antiga:
+                    data_mais_antiga = data_pedido
+            except ValueError:
+                pass
                 
-    houve_atualizacao = False
+    if not tem_pendentes:
+        if EXIBIR_LOGS: logger.info("✅ [Pente Fino] Nenhum pedido pendente no banco de dados. Varredura suspensa.")
+        return
+        
+    dias_retroativos = (agora - data_mais_antiga).days + 1
+    if dias_retroativos > 60: dias_retroativos = 60
+    if dias_retroativos < 5: dias_retroativos = 5
     
-    for d_str in [ontem_str, anteontem_str]:
-        v_api = diario_api[d_str]
-        v_total_api = v_api["aprovado"] + v_api["pendente"]
-        
-        v_antigo = historico.get(d_str, {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0})
-        if isinstance(v_antigo, float): v_antigo = {"aprovado": v_antigo, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
-        
-        v_total_antigo = v_antigo["aprovado"] + v_antigo["pendente"]
-        
-        v_api["qtd_aprovado"] = v_antigo.get("qtd_aprovado", 0) if v_api["qtd_aprovado"] == 0 else v_api["qtd_aprovado"]
-        v_api["qtd_pendente"] = v_antigo.get("qtd_pendente", 0) if v_api["qtd_pendente"] == 0 else v_api["qtd_pendente"]
-        v_api["cancelado"] = v_antigo.get("cancelado", 0.0) if v_api["cancelado"] == 0.0 else v_api["cancelado"]
-        v_api["qtd_cancelado"] = v_antigo.get("qtd_cancelado", 0) if v_api["qtd_cancelado"] == 0 else v_api["qtd_cancelado"]
-        v_api["clicks"] = v_antigo.get("clicks", 0)
-        
-        if v_total_api != v_total_antigo or v_api["qtd_cancelado"] != v_antigo.get("qtd_cancelado", 0):
-            historico[d_str] = v_api
-            houve_atualizacao = True
-            if EXIBIR_LOGS: logger.info(f"🔓 [Financeiro] Atualização salva! O dia {d_str} sofreu variação real (Atual: R$ {v_total_api:.2f} | Anterior: R$ {v_total_antigo:.2f}).")
-        elif d_str == anteontem_str and not historico.get(d_str):
-            historico[d_str] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
-            houve_atualizacao = True
-            if EXIBIR_LOGS: logger.info(f"🔒 [Financeiro] Trancamento por Tempo Limite! O dia {d_str} consolidado como R$ 0.00.")
-        
-    if houve_atualizacao:
-        salvar_historico_financeiro(historico)
+    if EXIBIR_LOGS: logger.info(f"🔍 [Pente Fino] Pendentes antigos detetados! A requisitar relatório dos últimos {dias_retroativos} dias à Shopee...")
+    
+    conversoes = await buscar_dados_financeiros_shopee(dias_retroativos)
+    if conversoes:
+        processar_e_salvar_pedidos_api(conversoes)
+        if EXIBIR_LOGS: logger.info("✅ [Pente Fino] Varredura profunda concluída! Pendentes antigos consolidados (Confirmados ou Cancelados).")
 
 async def checkup_diario_grupos():
     if EXIBIR_LOGS: logger.info("🚀 Consolidando relatório de saúde diário do sistema...")
@@ -5193,6 +5179,9 @@ async def main():
 
     # ✅ Novo: Sincronização financeira horária para resgatar dados em atraso da Shopee
     scheduler.add_job(sincronizar_financeiro_horario, 'cron', minute=0, timezone=FUSO_STR)
+    
+    # ✅ NOVO: Pente fino de madrugada (roda todos os dias às 02:00) para resgatar pendentes de meses anteriores
+    scheduler.add_job(varredura_retroativa_pendentes, 'cron', hour=2, minute=0, timezone=FUSO_STR)
 
     # ✅ Novo: Check-up diário de permissões em grupos roda todos os dias às 11:00
     scheduler.add_job(checkup_diario_grupos, 'cron', hour=11, minute=0, timezone=FUSO_STR)
