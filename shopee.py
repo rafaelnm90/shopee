@@ -1741,8 +1741,21 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         f"  └ <i>Shopee: R$ {f_br(shopee_mes)} | Vendedor: R$ {f_br(vendedor_mes)}</i>\n"
         f"• Comissão Pendente: <b>R$ {f_br(pendente_mes)}</b> <i>({qtd_pendente_mes} pedidos)</i>\n"
         f"• Total do Mês: <b>R$ {f_br(total_mes)}</b>\n"
-        f"• Clicks do Mês: <b>{clicks_mes}</b>\n\n"
     )
+    
+    # ✅ NOVA MÉTRICA: Estimativa de Faturamento
+    import calendar
+    dias_no_mes = calendar.monthrange(hoje.year, hoje.month)[1]
+    dia_atual = hoje.day
+    
+    if dia_atual > 0 and total_mes > 0:
+        media_diaria = total_mes / dia_atual
+        estimativa_mensal = media_diaria * dias_no_mes
+        texto += f"• 🔮 <i>Projeção Mensal Estimada: <b>R$ {f_br(estimativa_mensal)}</b></i>\n"
+    else:
+        texto += f"• 🔮 <i>Projeção Mensal Estimada: <b>Calculando...</b></i>\n"
+        
+    texto += f"• Clicks do Mês: <b>{clicks_mes}</b>\n\n"
     
     texto += "🗓️ <b>HISTÓRICO MENSAL E CRESCIMENTO</b>\n"
     meses_ordenados_desc = sorted(dados_por_mes.keys(), reverse=True)
@@ -1877,25 +1890,26 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             labels_grafico.append(MESES_ABREV_PT.get(mes_numero, mes_numero))
                 
             if m in dados_por_mes:
-                valores_comissao.append(dados_por_mes[m]["aprovado"])
-                valores_pedidos.append(dados_por_mes[m].get("qtd_aprovado", 0))
+                # O gráfico volta a apresentar a comissão total (Aprovado + Pendente) como deve ser
+                valores_comissao.append(dados_por_mes[m]["aprovado"] + dados_por_mes[m]["pendente"])
+                valores_pedidos.append(dados_por_mes[m].get("qtd_aprovado", 0) + dados_por_mes[m].get("qtd_pendente", 0))
                 valores_clicks.append(dados_por_mes[m].get("clicks", 0))
             else:
                 valores_comissao.append(0.0)
                 valores_pedidos.append(0)
                 valores_clicks.append(0)
 
-        if EXIBIR_LOGS: logger.info("📈 Estruturando gráfico exclusivamente para comissões aprovadas.")
+        if EXIBIR_LOGS: logger.info("📈 Estruturando gráfico...")
         fig, ax1 = plt.subplots(figsize=(8, 5), facecolor='#f4f4f9')
         ax1.set_facecolor('#f4f4f9')
         
-        bars = ax1.bar(labels_grafico, valores_comissao, color='#ff6600', edgecolor='black', linewidth=0.5, label='Comissão Aprovada (R$)')
+        bars = ax1.bar(labels_grafico, valores_comissao, color='#ff6600', edgecolor='black', linewidth=0.5, label='Comissão Total (R$)')
         ax1.set_ylabel('Comissão (R$)', fontsize=10, color='#333333')
         ax1.grid(axis='y', linestyle='--', alpha=0.5)
         
         ax2 = ax1.twinx()
         line1, = ax2.plot(labels_grafico, valores_clicks, color='#0066cc', marker='o', linestyle='-', linewidth=2, label='Clicks')
-        line2, = ax2.plot(labels_grafico, valores_pedidos, color='#2ca02c', marker='s', linestyle='--', linewidth=2, label='Pedidos Vendidos')
+        line2, = ax2.plot(labels_grafico, valores_pedidos, color='#2ca02c', marker='s', linestyle='--', linewidth=2, label='Pedidos Gerados')
         ax2.set_ylabel('Quantidade (Clicks / Pedidos)', fontsize=10, color='#333333')
         
         plt.title(f'Evolução de Faturamento e Tráfego ({ano_atual_str})', fontsize=12, fontweight='bold', color='#333333')
