@@ -12,6 +12,12 @@ from google import genai
 from dotenv import load_dotenv
 load_dotenv()
 
+# FORÇA O FUSO HORÁRIO DO BRASIL NA MEMÓRIA DO SCRIPT
+import time
+os.environ['TZ'] = 'America/Sao_Paulo'
+time.tzset()
+if EXIBIR_LOGS: print("⏰ Fuso horário ajustado internamente para America/Sao_Paulo")
+
 # 1. CREDENCIAIS DA CONTA
 API_ID = int(os.getenv('API_ID'))
 API_HASH = os.getenv('API_HASH')
