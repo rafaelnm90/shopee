@@ -1743,13 +1743,22 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         f"• Total do Mês: <b>R$ {f_br(total_mes)}</b>\n"
     )
     
-    # ✅ NOVA MÉTRICA: Estimativa de Faturamento
+    # ✅ NOVA MÉTRICA: Estimativa de Faturamento (CORRIGIDA CONTRA ATRASOS DA API)
     import calendar
     dias_no_mes = calendar.monthrange(hoje.year, hoje.month)[1]
     dia_atual = hoje.day
     
-    if dia_atual > 0 and total_mes > 0:
-        media_diaria = total_mes / dia_atual
+    # 1. Inteligência para ignorar o atraso da API da Shopee
+    dias_sincronizados = 0
+    for i in range(1, dia_atual + 1):
+        d_str = f"{hoje.year}-{hoje.month:02d}-{i:02d}"
+        dados_d = historico_limpo.get(d_str, {})
+        # Se o dia teve alguma movimentação (venda ou cancelamento), ele conta como dia útil sincronizado
+        if dados_d.get("aprovado", 0) + dados_d.get("pendente", 0) + dados_d.get("cancelado", 0) > 0:
+            dias_sincronizados = i
+            
+    if dias_sincronizados > 0 and total_mes > 0:
+        media_diaria = total_mes / dias_sincronizados
         estimativa_mensal = media_diaria * dias_no_mes
         texto += f"• 🔮 <i>Projeção Mensal Estimada: <b>R$ {f_br(estimativa_mensal)}</b></i>\n"
     else:
