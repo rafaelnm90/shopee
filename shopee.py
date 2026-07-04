@@ -1760,9 +1760,9 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     if dias_sincronizados > 0 and total_mes > 0:
         media_diaria = total_mes / dias_sincronizados
         estimativa_mensal = media_diaria * dias_no_mes
-        texto += f"• 🔮 <i>Projeção Mensal Estimada: <b>R$ {f_br(estimativa_mensal)}</b></i>\n"
+        texto += f"• <i>Projeção Mensal Estimada: <b>R$ {f_br(estimativa_mensal)}</b></i>\n\n"
     else:
-        texto += f"• 🔮 <i>Projeção Mensal Estimada: <b>Calculando...</b></i>\n"
+        texto += f"• <i>Projeção Mensal Estimada: <b>Calculando...</b></i>\n\n"
         
     texto += f"• Clicks do Mês: <b>{clicks_mes}</b>\n\n"
     
