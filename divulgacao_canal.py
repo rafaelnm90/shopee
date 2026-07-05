@@ -60,6 +60,10 @@ limpar_travas_fantasma('sessao_divulgacao')
 client = TelegramClient('sessao_divulgacao', API_ID, API_HASH)
 scheduler = AsyncIOScheduler()
 
+# 🚦 Semáforo de proteção assíncrona para o banco de dados SQLite
+telegram_lock = asyncio.Lock()
+if EXIBIR_LOGS: logger.info("🚦 Semáforo de controle de tráfego do Telegram ativado!")
+
 # 4. FUNÇÕES DE IA E AGENDAMENTO
 def carregar_configuracoes():
     try:
@@ -139,17 +143,20 @@ async def enviar_mensagem(alvo):
     
     texto = await gerar_texto_divulgacao(repeticoes)
     try:
-        entidade = await client.get_entity(alvo)
-        
-        if EXIBIR_LOGS: logger.info(f"📤 Iniciando disparo em rajada de {replicas} mensagens para {alvo}...")
-        
-        for i in range(replicas):
-            await client.send_message(entidade, texto)
-            if EXIBIR_LOGS: logger.info(f"📩 Mensagem {i+1}/{replicas} enviada.")
-            if i < replicas - 1: # Pausa apenas se houver uma próxima mensagem
-                await asyncio.sleep(1.5) # Pausa de segurança obrigatória contra bloqueio de flood
+        if EXIBIR_LOGS: logger.info(f"🚦 Aguardando sinal verde do banco de dados para {alvo}...")
+        async with telegram_lock:
+            if EXIBIR_LOGS: logger.info(f"🟢 Sinal verde! Acessando o Telegram para {alvo}...")
+            entidade = await client.get_entity(alvo)
             
-        if EXIBIR_LOGS: logger.info(f"✅ Rajada de {replicas} mensagens concluída com sucesso para {alvo}!")
+            if EXIBIR_LOGS: logger.info(f"📤 Iniciando disparo em rajada de {replicas} mensagens para {alvo}...")
+            
+            for i in range(replicas):
+                await client.send_message(entidade, texto)
+                if EXIBIR_LOGS: logger.info(f"📩 Mensagem {i+1}/{replicas} enviada.")
+                if i < replicas - 1: # Pausa apenas se houver uma próxima mensagem
+                    await asyncio.sleep(1.5) # Pausa de segurança obrigatória contra bloqueio de flood
+            
+            if EXIBIR_LOGS: logger.info(f"✅ Rajada de {replicas} mensagens concluída com sucesso para {alvo}!")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao enviar rajada para {alvo}: {e}")
 
@@ -212,17 +219,20 @@ async def enviar_mensagem_viral(alvo):
     
     texto = await gerar_texto_divulgacao_viral(repeticoes)
     try:
-        entidade = await client.get_entity(alvo)
-        
-        if EXIBIR_LOGS: logger.info(f"📤 [VIRAL] Iniciando disparo em rajada de {replicas} mensagens para {alvo}...")
-        
-        for i in range(replicas):
-            await client.send_message(entidade, texto)
-            if EXIBIR_LOGS: logger.info(f"📩 [VIRAL] Mensagem {i+1}/{replicas} enviada.")
-            if i < replicas - 1:
-                await asyncio.sleep(1.5)
+        if EXIBIR_LOGS: logger.info(f"🚦 [VIRAL] Aguardando sinal verde do banco de dados para {alvo}...")
+        async with telegram_lock:
+            if EXIBIR_LOGS: logger.info(f"🟢 [VIRAL] Sinal verde! Acessando o Telegram para {alvo}...")
+            entidade = await client.get_entity(alvo)
             
-        if EXIBIR_LOGS: logger.info(f"✅ [VIRAL] Rajada de {replicas} mensagens concluída com sucesso para {alvo}!")
+            if EXIBIR_LOGS: logger.info(f"📤 [VIRAL] Iniciando disparo em rajada de {replicas} mensagens para {alvo}...")
+            
+            for i in range(replicas):
+                await client.send_message(entidade, texto)
+                if EXIBIR_LOGS: logger.info(f"📩 [VIRAL] Mensagem {i+1}/{replicas} enviada.")
+                if i < replicas - 1:
+                    await asyncio.sleep(1.5)
+            
+            if EXIBIR_LOGS: logger.info(f"✅ [VIRAL] Rajada de {replicas} mensagens concluída com sucesso para {alvo}!")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [VIRAL] Falha ao enviar rajada para {alvo}: {e}")
 
