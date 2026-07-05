@@ -65,16 +65,16 @@ def carregar_configuracoes():
     try:
         with open("alvos_divulgacao.json", "r") as f:
             return json.load(f)
-    except FileNotFoundError:
-        if EXIBIR_LOGS: logger.warning("⚠️ Arquivo alvos_divulgacao.json não encontrado. Aguardando o bot principal criá-lo.")
+    except (FileNotFoundError, json.JSONDecodeError):
+        if EXIBIR_LOGS: logger.warning("⚠️ Arquivo alvos_divulgacao.json não encontrado ou corrompido. Aguardando o bot principal criá-lo.")
         return None
 
 def carregar_configuracoes_viral():
     try:
         with open("alvos_divulgacao_viral.json", "r") as f:
             return json.load(f)
-    except FileNotFoundError:
-        if EXIBIR_LOGS: logger.warning("⚠️ Arquivo alvos_divulgacao_viral.json não encontrado. Aguardando o bot principal criá-lo.")
+    except (FileNotFoundError, json.JSONDecodeError):
+        if EXIBIR_LOGS: logger.warning("⚠️ Arquivo alvos_divulgacao_viral.json não encontrado ou corrompido. Aguardando o bot principal criá-lo.")
         return None
 
 async def gerar_texto_divulgacao(repeticoes=6):
