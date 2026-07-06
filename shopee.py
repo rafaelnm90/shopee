@@ -1500,7 +1500,7 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
                     sellerCommission
                     totalCommission
                     orders {
-                        orderSn
+                        orderId
                         orderStatus
                     }
                 }
@@ -1585,7 +1585,7 @@ def processar_e_salvar_pedidos_api(conversoes):
         c_extra_frac = c_extra / qtd_itens
 
         for order in orders:
-            order_sn = order.get("orderSn")
+            order_sn = order.get("orderId")
             if not order_sn: 
                 order_sn = f"{conv.get('purchaseTime')}_{random.randint(1000,9999)}"
                 
