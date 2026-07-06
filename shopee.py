@@ -1716,8 +1716,10 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     
     qtd_aprovado_mes = sum(v.get("qtd_aprovado", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     qtd_pendente_mes = sum(v.get("qtd_pendente", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
+    qtd_cancelado_mes = sum(v.get("qtd_cancelado", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
+    cancelado_mes = sum(v.get("cancelado", 0.0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     clicks_mes = sum(v.get("clicks", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    total_mes = aprovado_mes + pendente_mes
+    total_mes = aprovado_mes + pendente_mes + cancelado_mes
     
     # Agrupamento Mensal e Anual
     dados_por_mes = {}
@@ -1745,7 +1747,8 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         f"• Comissão Aprovada: <b>R$ {f_br(aprovado_mes)}</b> <i>({qtd_aprovado_mes} pedidos)</i>\n"
         f"  └ <i>Shopee: R$ {f_br(shopee_mes)} | Vendedor: R$ {f_br(vendedor_mes)}</i>\n"
         f"• Comissão Pendente: <b>R$ {f_br(pendente_mes)}</b> <i>({qtd_pendente_mes} pedidos)</i>\n"
-        f"• Total do Mês: <b>R$ {f_br(total_mes)}</b>\n"
+        f"• Comissão Cancelada: <b>R$ {f_br(cancelado_mes)}</b> <i>({qtd_cancelado_mes} pedidos)</i>\n"
+        f"• Total Bruto do Mês: <b>R$ {f_br(total_mes)}</b>\n"
     )
     
     # ✅ NOVA MÉTRICA: Estimativa de Faturamento (CORRIGIDA CONTRA ATRASOS DA API)
@@ -1776,7 +1779,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     
     for i, mes in enumerate(meses_ordenados_desc):
         dados_m = dados_por_mes[mes]
-        total_m = dados_m["aprovado"] + dados_m["pendente"]
+        total_m = dados_m["aprovado"] + dados_m["pendente"] + dados_m.get("cancelado", 0.0)
         
         try:
             ano_str, mes_str = mes.split('-')
@@ -1787,7 +1790,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         variacao_texto = ""
         if i < len(meses_ordenados_desc) - 1:
             mes_anterior = meses_ordenados_desc[i+1]
-            total_ant = dados_por_mes[mes_anterior]["aprovado"] + dados_por_mes[mes_anterior]["pendente"]
+            total_ant = dados_por_mes[mes_anterior]["aprovado"] + dados_por_mes[mes_anterior]["pendente"] + dados_por_mes[mes_anterior].get("cancelado", 0.0)
             if total_ant > 0:
                 variacao = ((total_m - total_ant) / total_ant) * 100
                 sinal = "📈 +" if variacao >= 0 else "📉 "
@@ -1811,12 +1814,12 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     
     for i, ano in enumerate(anos_ordenados_desc):
         dados_a = dados_por_ano[ano]
-        total_a = dados_a["aprovado"] + dados_a["pendente"]
+        total_a = dados_a["aprovado"] + dados_a["pendente"] + dados_a.get("cancelado", 0.0)
         
         variacao_texto = ""
         if i < len(anos_ordenados_desc) - 1:
             ano_anterior = anos_ordenados_desc[i+1]
-            total_ant = dados_por_ano[ano_anterior]["aprovado"] + dados_por_ano[ano_anterior]["pendente"]
+            total_ant = dados_por_ano[ano_anterior]["aprovado"] + dados_por_ano[ano_anterior]["pendente"] + dados_por_ano[ano_anterior].get("cancelado", 0.0)
             if total_ant > 0:
                 variacao = ((total_a - total_ant) / total_ant) * 100
                 sinal = "📈 +" if variacao >= 0 else "📉 "
@@ -1844,7 +1847,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     todos_totais = {}
     for d, vals in historico_limpo.items():
         if d <= hoje.strftime("%Y-%m-%d"):
-            v_tot = vals.get("aprovado", 0.0) + vals.get("pendente", 0.0)
+            v_tot = vals.get("aprovado", 0.0) + vals.get("pendente", 0.0) + vals.get("cancelado", 0.0)
             todos_totais[d] = v_tot
             
     if todos_totais:
@@ -1872,7 +1875,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         q_aprov = dados_dia.get("qtd_aprovado", 0)
         q_pend = dados_dia.get("qtd_pendente", 0)
         q_canc = dados_dia.get("qtd_cancelado", 0)
-        v_tot = v_aprov + v_pend
+        v_tot = v_aprov + v_pend + v_canc
         
         if EXIBIR_LOGS: logger.info(f"🧮 Calculando proporções diárias para {d_br}...")
         total_pedidos_d = q_aprov + q_pend + q_canc
@@ -1904,9 +1907,9 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             labels_grafico.append(MESES_ABREV_PT.get(mes_numero, mes_numero))
                 
             if m in dados_por_mes:
-                # O gráfico volta a apresentar a comissão total (Aprovado + Pendente) como deve ser
-                valores_comissao.append(dados_por_mes[m]["aprovado"] + dados_por_mes[m]["pendente"])
-                valores_pedidos.append(dados_por_mes[m].get("qtd_aprovado", 0) + dados_por_mes[m].get("qtd_pendente", 0))
+                # O gráfico agora apresenta a comissão total bruta (Aprovado + Pendente + Cancelado)
+                valores_comissao.append(dados_por_mes[m]["aprovado"] + dados_por_mes[m]["pendente"] + dados_por_mes[m].get("cancelado", 0.0))
+                valores_pedidos.append(dados_por_mes[m].get("qtd_aprovado", 0) + dados_por_mes[m].get("qtd_pendente", 0) + dados_por_mes[m].get("qtd_cancelado", 0))
                 valores_clicks.append(dados_por_mes[m].get("clicks", 0))
             else:
                 valores_comissao.append(0.0)
