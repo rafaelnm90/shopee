@@ -1575,6 +1575,7 @@ def processar_e_salvar_pedidos_api(conversoes):
         from datetime import timezone
         dt_obj_utc = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=timezone.utc)
         dt_obj = dt_obj_utc.astimezone(fuso_horario)
+        if EXIBIR_LOGS: logger.info("✅ Fuso horário corrigido de UTC para America/Sao_Paulo com sucesso.")
         
         dt_db_str = dt_obj.strftime("%Y-%m-%d")
         
