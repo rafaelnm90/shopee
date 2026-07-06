@@ -1369,12 +1369,23 @@ def agendar_tarefas_diarias():
             if EXIBIR_LOGS: logger.info(f"🎉 Mega Campanha {data_futura.day:02d}.{data_futura.month:02d} rastreada! Faltam {i} dias.")
             tipo_alerta = f"campanha_{i}_{data_futura.day:02d}.{data_futura.month:02d}"
             
-            for p in ["manha", "tarde", "noite"]:
+            # Interliga a Campanha ao JSON para não repetir avisos já dados hoje
+            disparos_ja_feitos = obter_qtd_disparos(tipo_alerta)
+            turnos = ["manha", "tarde", "noite"]
+            
+            # Corta os turnos que já foram processados
+            turnos_pendentes = turnos[disparos_ja_feitos:]
+            
+            for p in turnos_pendentes:
                 horario_campanha = encontrar_maior_lacuna_e_inserir(duracao_minima=10)
                 if not horario_campanha:
                     if p == "manha": horario_campanha = agora.replace(hour=random.randint(8,11), minute=random.randint(0,59))
                     elif p == "tarde": horario_campanha = agora.replace(hour=random.randint(14,17), minute=random.randint(0,59))
                     else: horario_campanha = agora.replace(hour=random.randint(18,21), minute=random.randint(0,59))
+                    
+                # Trava contra viagem no tempo (Impede disparos imediatos em rajada)
+                if horario_campanha <= agora:
+                    horario_campanha = agora + timedelta(minutes=random.randint(3, 10))
                     
                 scheduler.add_job(disparar_mensagem, 'date', run_date=horario_campanha, args=[tipo_alerta], id=f'job_campanha_{p}', replace_existing=True)
                 if EXIBIR_LOGS: logger.info(f"⏳ Alerta Campanha {p.title()} encaixado às: {horario_campanha.strftime('%H:%M:%S')}")
