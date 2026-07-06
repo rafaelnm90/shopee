@@ -1571,7 +1571,11 @@ def processar_e_salvar_pedidos_api(conversoes):
         c_total = float(conv.get("totalCommission", "0"))
         c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
         c_extra = float(conv.get("sellerCommission", "0"))
-        dt_obj = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=fuso_horario)
+        
+        from datetime import timezone
+        dt_obj_utc = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=timezone.utc)
+        dt_obj = dt_obj_utc.astimezone(fuso_horario)
+        
         dt_db_str = dt_obj.strftime("%Y-%m-%d")
         
         qtd_itens = len(orders)
