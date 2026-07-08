@@ -1755,11 +1755,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     
     texto = (
         f"📅 <b>BALANÇO DO MÊS DE {nome_mes_extenso}</b>\n\n"
-        f"• Comissão Aprovada: <b>R$ {f_br(aprovado_mes)}</b> <i>({qtd_aprovado_mes} pedidos)</i>\n"
-        f"  └ <i>Shopee: R$ {f_br(shopee_mes)} | Vendedor: R$ {f_br(vendedor_mes)}</i>\n"
-        f"• Comissão Pendente: <b>R$ {f_br(pendente_mes)}</b> <i>({qtd_pendente_mes} pedidos)</i>\n"
-        f"• Comissão Cancelada: <b>R$ {f_br(cancelado_mes)}</b> <i>({qtd_cancelado_mes} pedidos)</i>\n"
-        f"• Total Bruto do Mês: <b>R$ {f_br(total_mes)}</b>\n"
     )
     
     # ✅ NOVA MÉTRICA: Estimativa de Faturamento (CORRIGIDA CONTRA ATRASOS DA API)
@@ -1779,11 +1774,9 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     if dias_sincronizados > 0 and total_mes > 0:
         media_diaria = total_mes / dias_sincronizados
         estimativa_mensal = media_diaria * dias_no_mes
-        texto += f"• Projeção Mensal Estimada: <b>R$ {f_br(estimativa_mensal)}</b>\n\n"
+        texto += f"🚀 <b>PROJEÇÃO MENSAL ESTIMADA: R$ {f_br(estimativa_mensal)}</b>\n\n"
     else:
-        texto += f"• Projeção Mensal Estimada: <b>Calculando...</b>\n\n"
-        
-    texto += f"• Clicks do Mês: <b>{clicks_mes}</b>\n\n"
+        texto += f"🚀 <b>PROJEÇÃO MENSAL ESTIMADA: Calculando...</b>\n\n"
     
     texto += "🗓️ <b>HISTÓRICO MENSAL E CRESCIMENTO</b>\n"
     meses_ordenados_desc = sorted(dados_por_mes.keys(), reverse=True)
@@ -1894,7 +1887,21 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         pct_pend_d = (q_pend / total_pedidos_d * 100) if total_pedidos_d > 0 else 0.0
         pct_canc_d = (q_canc / total_pedidos_d * 100) if total_pedidos_d > 0 else 0.0
         
-        texto += f"• <b>{d_br}</b>: R$ {f_br(v_tot)}\n"
+        variacao_texto = ""
+        d_obj = datetime.strptime(d_str, "%Y-%m-%d")
+        d_ant_str = (d_obj - timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        dados_ant = historico_limpo.get(d_ant_str, {})
+        v_tot_ant = dados_ant.get("aprovado", 0.0) + dados_ant.get("pendente", 0.0) + dados_ant.get("cancelado", 0.0)
+        
+        if v_tot_ant > 0:
+            variacao = ((v_tot - v_tot_ant) / v_tot_ant) * 100
+            sinal = "📈 +" if variacao >= 0 else "📉 "
+            variacao_texto = f" <b>({sinal}{variacao:.1f}%)</b>"
+        elif v_tot_ant == 0 and v_tot > 0:
+            variacao_texto = " <b>(📈 +100%)</b>"
+        
+        texto += f"• <b>{d_br}</b>: R$ {f_br(v_tot)}{variacao_texto}\n"
         texto += f"  ├ Conf: R$ {f_br(v_aprov)} ({q_aprov} pedidos - {pct_aprov_d:.1f}%)\n"
         texto += f"  ├ Pend: R$ {f_br(v_pend)} ({q_pend} pedidos - {pct_pend_d:.1f}%)\n"
         texto += f"  └ Canc: R$ {f_br(v_canc)} ({q_canc} pedidos - {pct_canc_d:.1f}%)\n\n"
@@ -1910,7 +1917,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         
         labels_grafico = []
         valores_comissao = []
-        valores_clicks = []
         valores_pedidos = []
         
         for m in meses_ano_atual:
@@ -1921,11 +1927,9 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
                 # O gráfico agora apresenta a comissão total bruta (Aprovado + Pendente + Cancelado)
                 valores_comissao.append(dados_por_mes[m]["aprovado"] + dados_por_mes[m]["pendente"] + dados_por_mes[m].get("cancelado", 0.0))
                 valores_pedidos.append(dados_por_mes[m].get("qtd_aprovado", 0) + dados_por_mes[m].get("qtd_pendente", 0) + dados_por_mes[m].get("qtd_cancelado", 0))
-                valores_clicks.append(dados_por_mes[m].get("clicks", 0))
             else:
                 valores_comissao.append(0.0)
                 valores_pedidos.append(0)
-                valores_clicks.append(0)
 
         if EXIBIR_LOGS: logger.info("📈 Estruturando gráfico...")
         fig, ax1 = plt.subplots(figsize=(8, 5), facecolor='#f4f4f9')
@@ -1936,11 +1940,10 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         ax1.grid(axis='y', linestyle='--', alpha=0.5)
         
         ax2 = ax1.twinx()
-        line1, = ax2.plot(labels_grafico, valores_clicks, color='#0066cc', marker='o', linestyle='-', linewidth=2, label='Clicks')
         line2, = ax2.plot(labels_grafico, valores_pedidos, color='#2ca02c', marker='s', linestyle='--', linewidth=2, label='Pedidos Gerados')
-        ax2.set_ylabel('Quantidade (Clicks / Pedidos)', fontsize=10, color='#333333')
+        ax2.set_ylabel('Quantidade de Pedidos', fontsize=10, color='#333333')
         
-        plt.title(f'Evolução de Faturamento e Tráfego ({ano_atual_str})', fontsize=12, fontweight='bold', color='#333333')
+        plt.title(f'Evolução de Faturamento e Vendas ({ano_atual_str})', fontsize=12, fontweight='bold', color='#333333')
         
         for bar in bars:
             yval = bar.get_height()
