@@ -1771,8 +1771,11 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         if dados_d.get("aprovado", 0) + dados_d.get("pendente", 0) + dados_d.get("cancelado", 0) > 0:
             dias_sincronizados = i
             
-    if dias_sincronizados > 0 and total_mes > 0:
-        media_diaria = total_mes / dias_sincronizados
+    faturamento_valido_mes = aprovado_mes + pendente_mes
+    
+    if dias_sincronizados > 0 and faturamento_valido_mes > 0:
+        if EXIBIR_LOGS: logger.info(f"🧮 Calculando projeção mensal sobre faturamento válido de R$ {faturamento_valido_mes:.2f} (excluindo cancelados)...")
+        media_diaria = faturamento_valido_mes / dias_sincronizados
         estimativa_mensal = media_diaria * dias_no_mes
         texto += f"🚀 <b>PROJEÇÃO MENSAL ESTIMADA: R$ {f_br(estimativa_mensal)}</b>\n\n"
     else:
