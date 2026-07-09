@@ -1780,21 +1780,24 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         estimativa_mensal = media_diaria * dias_no_mes
         texto += f"🚀 <b>PROJEÇÃO MENSAL ESTIMADA: R$ {f_br(estimativa_mensal)}</b>\n"
         
-        hoje_faturamento_str = hoje.strftime("%Y-%m-%d")
-        dados_hoje = historico_limpo.get(hoje_faturamento_str, {})
-        faturamento_hoje = dados_hoje.get("aprovado", 0.0) + dados_hoje.get("pendente", 0.0)
+        from datetime import timedelta
+        ontem = hoje - timedelta(days=1)
+        ontem_faturamento_str = ontem.strftime("%Y-%m-%d")
+        
+        dados_ontem = historico_limpo.get(ontem_faturamento_str, {})
+        faturamento_ontem = dados_ontem.get("aprovado", 0.0) + dados_ontem.get("pendente", 0.0)
         
         if media_diaria > 0:
-            variacao_hoje = ((faturamento_hoje - media_diaria) / media_diaria) * 100
-            sinal_hoje = "📈 +" if variacao_hoje >= 0 else "📉 "
-            texto_var = f"{sinal_hoje}{variacao_hoje:.1f}%"
-        elif media_diaria == 0 and faturamento_hoje > 0:
+            variacao_ontem = ((faturamento_ontem - media_diaria) / media_diaria) * 100
+            sinal_ontem = "📈 +" if variacao_ontem >= 0 else "📉 "
+            texto_var = f"{sinal_ontem}{variacao_ontem:.1f}%"
+        elif media_diaria == 0 and faturamento_ontem > 0:
             texto_var = "📈 +100.0%"
         else:
             texto_var = "0.0%"
             
-        texto += f"⚖️ <b>Média Diária: R$ {f_br(media_diaria)}</b> <i>(Hoje: R$ {f_br(faturamento_hoje)} | {texto_var})</i>\n\n"
-        if EXIBIR_LOGS: logger.info(f"📊 Desempenho do dia atual calculado: R$ {faturamento_hoje:.2f} face à média de R$ {media_diaria:.2f} ({texto_var})")
+        texto += f"⚖️ <b>Média Diária: R$ {f_br(media_diaria)}</b> <i>(Ontem: R$ {f_br(faturamento_ontem)} | {texto_var})</i>\n\n"
+        if EXIBIR_LOGS: logger.info(f"📊 Desempenho de ontem calculado: R$ {faturamento_ontem:.2f} face à média de R$ {media_diaria:.2f} ({texto_var})")
         
     else:
         texto += f"🚀 <b>PROJEÇÃO MENSAL ESTIMADA: Calculando...</b>\n\n"
