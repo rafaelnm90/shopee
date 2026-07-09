@@ -1772,12 +1772,30 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             dias_sincronizados = i
             
     faturamento_valido_mes = aprovado_mes + pendente_mes
+    estimativa_mensal = 0.0
     
     if dias_sincronizados > 0 and faturamento_valido_mes > 0:
         if EXIBIR_LOGS: logger.info(f"🧮 Calculando projeção mensal sobre faturamento válido de R$ {faturamento_valido_mes:.2f} (excluindo cancelados)...")
         media_diaria = faturamento_valido_mes / dias_sincronizados
         estimativa_mensal = media_diaria * dias_no_mes
-        texto += f"🚀 <b>PROJEÇÃO MENSAL ESTIMADA: R$ {f_br(estimativa_mensal)}</b>\n\n"
+        texto += f"🚀 <b>PROJEÇÃO MENSAL ESTIMADA: R$ {f_br(estimativa_mensal)}</b>\n"
+        
+        hoje_faturamento_str = hoje.strftime("%Y-%m-%d")
+        dados_hoje = historico_limpo.get(hoje_faturamento_str, {})
+        faturamento_hoje = dados_hoje.get("aprovado", 0.0) + dados_hoje.get("pendente", 0.0)
+        
+        if media_diaria > 0:
+            variacao_hoje = ((faturamento_hoje - media_diaria) / media_diaria) * 100
+            sinal_hoje = "📈 +" if variacao_hoje >= 0 else "📉 "
+            texto_var = f"{sinal_hoje}{variacao_hoje:.1f}%"
+        elif media_diaria == 0 and faturamento_hoje > 0:
+            texto_var = "📈 +100.0%"
+        else:
+            texto_var = "0.0%"
+            
+        texto += f"⚖️ <b>Média Diária: R$ {f_br(media_diaria)}</b> <i>(Hoje: R$ {f_br(faturamento_hoje)} | {texto_var})</i>\n\n"
+        if EXIBIR_LOGS: logger.info(f"📊 Desempenho do dia atual calculado: R$ {faturamento_hoje:.2f} face à média de R$ {media_diaria:.2f} ({texto_var})")
+        
     else:
         texto += f"🚀 <b>PROJEÇÃO MENSAL ESTIMADA: Calculando...</b>\n\n"
     
@@ -1921,37 +1939,53 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         labels_grafico = []
         valores_comissao = []
         valores_pedidos = []
+        valores_estimativa = []
+        
+        mes_atual_grafico = hoje.strftime("%Y-%m")
         
         for m in meses_ano_atual:
             mes_numero = m.split('-')[1]
             labels_grafico.append(MESES_ABREV_PT.get(mes_numero, mes_numero))
                 
-            if m in dados_por_mes:
-                # O gráfico agora apresenta a comissão total bruta (Aprovado + Pendente + Cancelado)
-                valores_comissao.append(dados_por_mes[m]["aprovado"] + dados_por_mes[m]["pendente"] + dados_por_mes[m].get("cancelado", 0.0))
-                valores_pedidos.append(dados_por_mes[m].get("qtd_aprovado", 0) + dados_por_mes[m].get("qtd_pendente", 0) + dados_por_mes[m].get("qtd_cancelado", 0))
+            v_aprov = dados_por_mes.get(m, {}).get("aprovado", 0.0)
+            v_pend = dados_por_mes.get(m, {}).get("pendente", 0.0)
+            v_valido = v_aprov + v_pend
+            
+            valores_comissao.append(v_valido)
+            
+            q_aprov = dados_por_mes.get(m, {}).get("qtd_aprovado", 0)
+            q_pend = dados_por_mes.get(m, {}).get("qtd_pendente", 0)
+            valores_pedidos.append(q_aprov + q_pend)
+            
+            if m == mes_atual_grafico:
+                valores_estimativa.append(estimativa_mensal)
+            elif m < mes_atual_grafico:
+                valores_estimativa.append(v_valido)
             else:
-                valores_comissao.append(0.0)
-                valores_pedidos.append(0)
+                valores_estimativa.append(float('nan'))
 
         if EXIBIR_LOGS: logger.info("📈 Estruturando gráfico...")
         fig, ax1 = plt.subplots(figsize=(8, 5), facecolor='#f4f4f9')
         ax1.set_facecolor('#f4f4f9')
         
-        bars = ax1.bar(labels_grafico, valores_comissao, color='#ff6600', edgecolor='black', linewidth=0.5, label='Comissão Total (R$)')
+        bars = ax1.bar(labels_grafico, valores_comissao, color='#ff6600', edgecolor='black', linewidth=0.5, label='Comissão Atual (R$)')
+        line_est, = ax1.plot(labels_grafico, valores_estimativa, color='#0066cc', marker='^', linestyle=':', linewidth=2, label='Projeção / Fechamento')
+        
         ax1.set_ylabel('Comissão (R$)', fontsize=10, color='#333333')
         ax1.grid(axis='y', linestyle='--', alpha=0.5)
         
         ax2 = ax1.twinx()
-        line2, = ax2.plot(labels_grafico, valores_pedidos, color='#2ca02c', marker='s', linestyle='--', linewidth=2, label='Pedidos Gerados')
+        line_ped, = ax2.plot(labels_grafico, valores_pedidos, color='#2ca02c', marker='s', linestyle='--', linewidth=2, label='Pedidos Gerados')
         ax2.set_ylabel('Quantidade de Pedidos', fontsize=10, color='#333333')
         
         plt.title(f'Evolução de Faturamento e Vendas ({ano_atual_str})', fontsize=12, fontweight='bold', color='#333333')
         
+        offset_y = max([v for v in valores_comissao + valores_estimativa if v == v]) * 0.02 if any(v == v for v in valores_comissao + valores_estimativa) else 0
+
         for bar in bars:
             yval = bar.get_height()
             if yval > 0:
-                ax1.text(bar.get_x() + bar.get_width()/2, yval + (max(valores_comissao)*0.02), f'R${yval:.0f}', ha='center', va='bottom', fontsize=8, fontweight='bold', color='#333333')
+                ax1.text(bar.get_x() + bar.get_width()/2, yval + offset_y, f'R${yval:.0f}', ha='center', va='bottom', fontsize=8, fontweight='bold', color='#333333')
 
         lines_1, labels_1 = ax1.get_legend_handles_labels()
         lines_2, labels_2 = ax2.get_legend_handles_labels()
