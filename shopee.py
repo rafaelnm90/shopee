@@ -1528,8 +1528,8 @@ async def buscar_ofertas_shopee(keyword, limite=10):
     timestamp = int(time.time())
     
     payload = {
-        "query": """query getProductOffer($keyword: String!, $limit: Int!, $sortType: Int, $shopType: [Int]) {
-            productOfferV2(keyword: $keyword, limit: $limit, sortType: $sortType, shopType: $shopType) {
+        "query": """query getProductOffer($keyword: String!, $limit: Int!, $sortType: Int) {
+            productOfferV2(keyword: $keyword, limit: $limit, sortType: $sortType) {
                 nodes {
                     itemId
                     productName
@@ -1544,8 +1544,7 @@ async def buscar_ofertas_shopee(keyword, limite=10):
         "variables": {
             "keyword": keyword,
             "limit": limite,
-            "sortType": 2,          # 🚀 Traz os mais vendidos primeiro (Foco Viral)
-            "shopType": [1, 2, 4]   # 🛡️ Apenas Shopee Mall e Vendedores Indicados/Indicados+
+            "sortType": 2
         }
     }
     
