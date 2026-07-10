@@ -130,6 +130,7 @@ class AchadinhosFluxo(StatesGroup):
     menu_principal = State()
     aguardando_nome = State()
     aguardando_destino = State()
+    aguardando_thread_id = State() # ✅ NOVO: Estado para capturar o Tópico
     aguardando_keywords = State()
     aguardando_remocao = State()
     aguardando_confirmacao_remocao = State()
@@ -281,7 +282,7 @@ teclado_menu_achadinhos = ReplyKeyboardMarkup(
 teclado_edicao_nicho = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Editar Nome 📝"), KeyboardButton(text="Editar Destino 🎯")],
-        [KeyboardButton(text="Editar Palavras-chave 🔑")],
+        [KeyboardButton(text="Editar Tópico 💬"), KeyboardButton(text="Editar Palavras-chave 🔑")],
         [KeyboardButton(text="Cancelar ❌")]
     ],
     resize_keyboard=True,
@@ -1640,6 +1641,7 @@ async def processar_garimpo_automatico():
     for nicho in nichos:
         nome_nicho = nicho.get("nome")
         destino = nicho.get("destino")
+        thread_id_nicho = nicho.get("thread_id", "0")
         keywords = nicho.get("keywords", [])
         
         if not keywords or not destino:
@@ -1682,7 +1684,13 @@ async def processar_garimpo_automatico():
                             
             if os.path.exists(temp_img):
                 arquivo_img = FSInputFile(temp_img)
-                await bot.send_photo(chat_id=destino, photo=arquivo_img, caption=legenda_final, parse_mode="HTML")
+                
+                # 🚀 Roteamento Inteligente: Define se o disparo vai para o chat raiz ou para a gaveta do tópico
+                thread_param = None
+                if thread_id_nicho and str(thread_id_nicho) != "0":
+                    thread_param = int(thread_id_nicho)
+                    
+                await bot.send_photo(chat_id=destino, photo=arquivo_img, caption=legenda_final, parse_mode="HTML", message_thread_id=thread_param)
                 
                 enviados.append(item_id)
                 salvar_achadinhos_enviados(enviados)
@@ -3142,10 +3150,17 @@ async def pedir_destino_nicho(message: types.Message, state: FSMContext):
     await state.set_state(AchadinhosFluxo.aguardando_destino)
 
 @dp.message(AchadinhosFluxo.aguardando_destino)
-async def pedir_keywords_nicho(message: types.Message, state: FSMContext):
+async def pedir_thread_nicho(message: types.Message, state: FSMContext):
     destino_nicho = message.text.strip()
     await state.update_data(novo_destino_nicho=destino_nicho)
-    await message.answer(f"Canal salvo: <code>{destino_nicho}</code>\n\nPor fim, digite as <b>Palavras-chave</b> que o motor usará para rastrear produtos na Shopee. Separe-as por vírgula.\nExemplo: <code>smartwatch, fone bluetooth, gamer</code>", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await message.answer(f"Grupo salvo: <code>{destino_nicho}</code>\n\nAgora, informe o <b>ID do Tópico (Thread)</b> específico para este nicho.\n<i>(Se não houver tópicos ou for um canal normal, digite apenas <b>0</b>)</i>:", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(AchadinhosFluxo.aguardando_thread_id)
+
+@dp.message(AchadinhosFluxo.aguardando_thread_id)
+async def pedir_keywords_nicho(message: types.Message, state: FSMContext):
+    thread_id = message.text.strip()
+    await state.update_data(novo_thread_id=thread_id)
+    await message.answer(f"Tópico salvo: <code>{thread_id}</code>\n\nPor fim, digite as <b>Palavras-chave</b> que o motor usará para rastrear produtos na Shopee. Separe-as por vírgula.\nExemplo: <code>smartwatch, fone bluetooth, gamer</code>", parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(AchadinhosFluxo.aguardando_keywords)
 
 @dp.message(AchadinhosFluxo.aguardando_keywords)
@@ -3160,11 +3175,13 @@ async def salvar_novo_nicho(message: types.Message, state: FSMContext):
     data = await state.get_data()
     nome = data.get("novo_nome_nicho")
     destino = data.get("novo_destino_nicho")
+    thread_id = data.get("novo_thread_id", "0")
     
     config = ler_achadinhos_config()
     novo_nicho = {
         "nome": nome,
         "destino": destino,
+        "thread_id": thread_id,
         "keywords": keywords_lista
     }
     
@@ -3273,7 +3290,8 @@ async def selecionar_campo_edicao(message: types.Message, state: FSMContext):
 async def pedir_novo_valor_edicao(message: types.Message, state: FSMContext):
     opcoes = {
         "Editar Nome 📝": ("nome", "Digite o novo <b>Nome</b> para este nicho:"),
-        "Editar Destino 🎯": ("destino", "Digite o novo <b>ID do Canal</b> de destino:"),
+        "Editar Destino 🎯": ("destino", "Digite o novo <b>ID do Canal/Grupo</b> de destino:"),
+        "Editar Tópico 💬": ("thread_id", "Digite o novo <b>ID do Tópico (Thread)</b> (ou 0 para geral):"),
         "Editar Palavras-chave 🔑": ("keywords", "Digite a nova lista de <b>Palavras-chave</b> separadas por vírgula:")
     }
     
