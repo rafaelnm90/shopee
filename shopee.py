@@ -1528,13 +1528,14 @@ async def buscar_ofertas_shopee(keyword, limite=10):
     timestamp = int(time.time())
     
     payload = {
-        "query": """query getProductOffer($keyword: String!, $limit: Int!) {
-            productOfferV2(keyword: $keyword, limit: $limit) {
+        "query": """query getProductOffer($keyword: String!, $limit: Int!, $sortType: Int, $shopType: [Int]) {
+            productOfferV2(keyword: $keyword, limit: $limit, sortType: $sortType, shopType: $shopType) {
                 nodes {
                     itemId
                     productName
                     price
                     priceDiscountRate
+                    ratingStar
                     imageUrl
                     productLink
                 }
@@ -1542,7 +1543,9 @@ async def buscar_ofertas_shopee(keyword, limite=10):
         }""",
         "variables": {
             "keyword": keyword,
-            "limit": limite
+            "limit": limite,
+            "sortType": 2,          # 🚀 Traz os mais vendidos primeiro (Foco Viral)
+            "shopType": [1, 2, 4]   # 🛡️ Apenas Shopee Mall e Vendedores Indicados/Indicados+
         }
     }
     
@@ -1569,14 +1572,19 @@ async def buscar_ofertas_shopee(keyword, limite=10):
         if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Erro crítico na prospecção de ofertas: {e}")
     return []
 
-async def converter_link_achadinho(link_original):
+async def converter_link_achadinho(link_original, sub_id_nicho="geral"):
     endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
     timestamp = int(time.time())
     
+    import re
+    # Limpa espaços e caracteres especiais para criar uma tag de rastreio limpa
+    sub_id_limpo = re.sub(r'[^a-zA-Z0-9_]', '_', str(sub_id_nicho).strip())[:40]
+    
     payload = {
-        "query": "mutation generateShortLink($originUrl: String!) { generateShortLink(input: {originUrl: $originUrl}) { shortLink } }",
+        "query": "mutation generateShortLink($originUrl: String!, $subIds: [String]) { generateShortLink(input: {originUrl: $originUrl, subIds: $subIds}) { shortLink } }",
         "variables": {
-            "originUrl": link_original
+            "originUrl": link_original,
+            "subIds": [sub_id_limpo] # 🎯 Rastreio de Origem (Aparecerá no painel da Shopee)
         }
     }
     
@@ -1599,12 +1607,13 @@ async def converter_link_achadinho(link_original):
         if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Falha ao encurtar a URL da oferta: {e}")
     return link_original
 
-async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto):
+async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_loja):
     if EXIBIR_LOGS: logger.info(f"🧠 [Achadinhos] Estruturando estratégia de Copywriting para o produto...")
     
     prompt = (
         f"Você é um copywriter especialista em e-commerce alimentando um canal de achadinhos. "
         f"Crie um texto de venda MUITO CURTO para este produto: '{nome_produto}'. "
+        f"A loja possui uma excelente avaliação de ⭐ {nota_loja}/5 estrelas. "
         f"O preço original era R$ {preco_original} e agora a loja aplicou {desconto} de desconto. "
         f"REGRA ABSOLUTA: Comece com uma frase extremamente chamativa focada em resolver um problema ou gerar desejo. "
         f"Apresente a queda de preço focando na urgência de levar agora. "
@@ -1672,11 +1681,13 @@ async def processar_garimpo_automatico():
         taxa_desconto = item_escolhido.get("priceDiscountRate")
         desconto = f"{taxa_desconto}%" if taxa_desconto else "Promoção Especial"
         
+        nota_loja = item_escolhido.get("ratingStar", "4.8")
+        
         img_url = item_escolhido.get("imageUrl")
         link_original = item_escolhido.get("productLink")
         
-        texto_ia = await gerar_copy_achadinho_ia(nome, preco, desconto)
-        link_curto = await converter_link_achadinho(link_original)
+        texto_ia = await gerar_copy_achadinho_ia(nome, preco, desconto, nota_loja)
+        link_curto = await converter_link_achadinho(link_original, nome_nicho)
         legenda_final = f"{texto_ia}\n{link_curto}"
         
         try:
