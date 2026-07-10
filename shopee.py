@@ -1534,7 +1534,7 @@ async def buscar_ofertas_shopee(keyword, limite=10):
                     itemId
                     productName
                     price
-                    discount
+                    discountRate
                     imageUrl
                     productLink
                 }
@@ -1666,7 +1666,10 @@ async def processar_garimpo_automatico():
         item_id = str(item_escolhido.get("itemId"))
         nome = item_escolhido.get("productName", "Produto Exclusivo")
         preco = item_escolhido.get("price", "Consultar na Loja")
-        desconto = item_escolhido.get("discount", "Promoção Especial")
+        
+        taxa_desconto = item_escolhido.get("discountRate")
+        desconto = f"{taxa_desconto}%" if taxa_desconto else "Promoção Especial"
+        
         img_url = item_escolhido.get("imageUrl")
         link_original = item_escolhido.get("productLink")
         
