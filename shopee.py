@@ -1700,8 +1700,14 @@ async def processar_garimpo_automatico():
                 
                 os.remove(temp_img)
                 if EXIBIR_LOGS: logger.info(f"✅ [Achadinhos] Operação concluída. Oferta fresca entregue ao canal {destino}!")
+                
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Falha estrutural ao tratar mídia física do produto: {e}")
+            
+        # 🛡️ Trava de Segurança para Escala (Previne banimento do Telegram e limite do Gemini)
+        tempo_espera = random.randint(15, 35)
+        if EXIBIR_LOGS: logger.info(f"⏳ Diluição de Tráfego: Aguardando {tempo_espera}s antes de processar o próximo nicho...")
+        await asyncio.sleep(tempo_espera)
 
 # ----------------------------------
 
