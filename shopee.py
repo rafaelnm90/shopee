@@ -5570,11 +5570,18 @@ async def processar_fila_espiao():
         if EXIBIR_LOGS: logger.info("🚀 Preparando prompt com a lista estrita de setores e blindagem semântica...")
             
         prompt = (
-            "Aja como um catalogador de vídeos. Assista ao vídeo e identifique o produto. "
-            "Sua resposta deve conter EXATAMENTE e APENAS duas linhas, sem nenhuma palavra ou frase extra. "
-            "Linha 1: O nome do produto de forma limpa, clara e comercial (com 1 emoji). "
-            "Linha 2: Apenas 3 a 5 hashtags estratégicas e relacionadas ao produto. "
-            "REGRA ABSOLUTA: Não crie textos persuasivos, descrições ou saudações. Entregue estritamente o Nome na primeira linha e as Hashtags na segunda, para que o sistema possa fatiar os dados perfeitamente."
+            "Assista ao vídeo e identifique qual é o produto demonstrado. "
+            "Sua resposta deve conter EXATAMENTE duas linhas.\n"
+            "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no início (Exemplo: 👟 Tênis Casual Feminino).\n"
+            "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
+            "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras (exemplo prático: um organizador de sacos plásticos de cozinha pertence a #CasaEDecoracao e NUNCA a #BolsasFemininas, pois não é um acessório de moda).\n"
+            "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
+            "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
+            "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
+            "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
+            "#AcessoriosDeModa, #BrinquedosEHobbies, #Papelaria, #LivrosERevistas, #RoupasMasculinas, #Automoveis, #MaeEBebe, "
+            "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
+            "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
         )
         
         if EXIBIR_LOGS: logger.info("✅ Prompt blindado e atualizado. Iniciando requisição à IA...")
