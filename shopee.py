@@ -250,6 +250,7 @@ teclado_opcoes_rotina = ReplyKeyboardMarkup(
 teclado_outros_canais = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
+        [KeyboardButton(text="Gerador de Achadinhos 🛍️")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ],
     resize_keyboard=True,
@@ -1459,6 +1460,217 @@ class InatividadeMiddleware(BaseMiddleware):
 
 # Acopla o interceptador de inatividade ao núcleo do robô para vigiar todas as mensagens
 dp.message.middleware(InatividadeMiddleware())
+
+# ----------------------------------
+# NOVO MÓDULO: GERADOR AUTÔNOMO DE ACHADINHOS 🛍️
+# ----------------------------------
+def ler_achadinhos_config():
+    try:
+        with open("achadinhos_config.json", "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        # Exemplo de estrutura inicial injetada caso o arquivo não exista
+        modelo_padrao = {
+            "nichos": [
+                {
+                    "nome": "Tecnologia e Eletrônicos",
+                    "destino": "-1003932482573", 
+                    "keywords": ["smartwatch", "fone bluetooth", "powerbank", "gamer"]
+                }
+            ]
+        }
+        with open("achadinhos_config.json", "w") as f:
+            json.dump(modelo_padrao, f, indent=4)
+        return modelo_padrao
+
+def ler_achadinhos_enviados():
+    try:
+        with open("achadinhos_enviados.json", "r") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return []
+
+def salvar_achadinhos_enviados(lista):
+    if len(lista) > 500:
+        lista = lista[-500:]
+    with open("achadinhos_enviados.json", "w") as f:
+        json.dump(lista, f, indent=4)
+
+async def buscar_ofertas_shopee(keyword, limite=10):
+    if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
+        if EXIBIR_LOGS: logger.warning("⏳ [Achadinhos] Chaves da API ausentes no .env.")
+        return []
+        
+    endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
+    timestamp = int(time.time())
+    
+    payload = {
+        "query": """query getProductOffer($keyword: String!, $limit: Int!) {
+            productOfferV2(keyword: $keyword, limit: $limit) {
+                nodes {
+                    itemId
+                    productName
+                    price
+                    discount
+                    imageUrl
+                    productLink
+                }
+            }
+        }""",
+        "variables": {
+            "keyword": keyword,
+            "limit": limite
+        }
+    }
+    
+    payload_json = json.dumps(payload, separators=(',', ':'))
+    fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}{SHOPEE_APP_SECRET}"
+    assinatura = hashlib.sha256(fator_base.encode('utf-8')).hexdigest()
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"SHA256 Credential={SHOPEE_APP_ID}, Timestamp={timestamp}, Signature={assinatura}"
+    }
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(endpoint, headers=headers, data=payload_json) as response:
+                if response.status == 200:
+                    dados = await response.json()
+                    erros = dados.get("errors")
+                    if erros:
+                        if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] A API negou o rastreio: {erros[0].get('message')}")
+                        return []
+                    return dados.get("data", {}).get("productOfferV2", {}).get("nodes", [])
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Erro crítico na prospecção de ofertas: {e}")
+    return []
+
+async def converter_link_achadinho(link_original):
+    endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
+    timestamp = int(time.time())
+    
+    payload = {
+        "query": "mutation generateShortLink($originUrl: String!) { generateShortLink(input: {originUrl: $originUrl}) { shortLink } }",
+        "variables": {
+            "originUrl": link_original
+        }
+    }
+    
+    payload_json = json.dumps(payload, separators=(',', ':'))
+    fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}{SHOPEE_APP_SECRET}"
+    assinatura = hashlib.sha256(fator_base.encode('utf-8')).hexdigest()
+    
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"SHA256 Credential={SHOPEE_APP_ID}, Timestamp={timestamp}, Signature={assinatura}"
+    }
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(endpoint, headers=headers, data=payload_json) as response:
+                dados = await response.json()
+                if response.status == 200 and "data" in dados and dados["data"].get("generateShortLink"):
+                    return dados["data"]["generateShortLink"]["shortLink"]
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Falha ao encurtar a URL da oferta: {e}")
+    return link_original
+
+async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto):
+    if EXIBIR_LOGS: logger.info(f"🧠 [Achadinhos] Estruturando estratégia de Copywriting para o produto...")
+    
+    prompt = (
+        f"Você é um copywriter especialista em e-commerce alimentando um canal de achadinhos. "
+        f"Crie um texto de venda MUITO CURTO para este produto: '{nome_produto}'. "
+        f"O preço original era R$ {preco_original} e agora a loja aplicou {desconto} de desconto. "
+        f"REGRA ABSOLUTA: Comece com uma frase extremamente chamativa focada em resolver um problema ou gerar desejo. "
+        f"Apresente a queda de preço focando na urgência de levar agora. "
+        f"Não ultrapasse 4 linhas. Não use palavras complexas, seja direto e use emojis atraentes. "
+        f"Finalize o texto estritamente com: '🔗 Confira a oferta no link abaixo: 👇'"
+    )
+    
+    for modelo_nome in MODELOS_CASCATA_GEMINI:
+        try:
+            response = await asyncio.to_thread(
+                client.models.generate_content,
+                model=modelo_nome,
+                contents=prompt
+            )
+            if response and response.text:
+                if EXIBIR_LOGS: logger.info("✅ [Achadinhos] Texto validado e extraído com sucesso da IA!")
+                return response.text.strip()
+        except Exception:
+            continue
+            
+    return f"🔥 Achadinho Imperdível!\n📦 {nome_produto}\nDe R$ {preco_original} com {desconto} de desconto!\n\n🔗 Confira a oferta no link abaixo: 👇"
+
+async def processar_garimpo_automatico():
+    if EXIBIR_LOGS: logger.info("🕵️‍♂️ [Achadinhos] Iniciando operação de garimpo varrendo todos os nichos mapeados...")
+    config = ler_achadinhos_config()
+    nichos = config.get("nichos", [])
+    
+    if not nichos:
+        if EXIBIR_LOGS: logger.warning("⚠️ [Achadinhos] O radar está vazio. Adicione nichos ao arquivo achadinhos_config.json.")
+        return
+        
+    enviados = ler_achadinhos_enviados()
+    
+    for nicho in nichos:
+        nome_nicho = nicho.get("nome")
+        destino = nicho.get("destino")
+        keywords = nicho.get("keywords", [])
+        
+        if not keywords or not destino:
+            continue
+            
+        keyword_sorteada = random.choice(keywords)
+        if EXIBIR_LOGS: logger.info(f"🔎 [Achadinhos] Rastreando o setor '{nome_nicho}' buscando por: '{keyword_sorteada}'.")
+        
+        ofertas = await buscar_ofertas_shopee(keyword_sorteada, limite=15)
+        
+        item_escolhido = None
+        for oferta in ofertas:
+            item_id = str(oferta.get("itemId"))
+            if item_id not in enviados:
+                item_escolhido = oferta
+                break
+                
+        if not item_escolhido:
+            if EXIBIR_LOGS: logger.info(f"⏭️ [Achadinhos] Todas as tendências de '{keyword_sorteada}' já foram exploradas recentemente. Indo para a próxima.")
+            continue
+            
+        item_id = str(item_escolhido.get("itemId"))
+        nome = item_escolhido.get("productName", "Produto Exclusivo")
+        preco = item_escolhido.get("price", "Consultar na Loja")
+        desconto = item_escolhido.get("discount", "Promoção Especial")
+        img_url = item_escolhido.get("imageUrl")
+        link_original = item_escolhido.get("productLink")
+        
+        texto_ia = await gerar_copy_achadinho_ia(nome, preco, desconto)
+        link_curto = await converter_link_achadinho(link_original)
+        legenda_final = f"{texto_ia}\n{link_curto}"
+        
+        try:
+            temp_img = f"temp_achado_{item_id}.jpg"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(img_url) as resp:
+                    if resp.status == 200:
+                        with open(temp_img, "wb") as f:
+                            f.write(await resp.read())
+                            
+            if os.path.exists(temp_img):
+                arquivo_img = FSInputFile(temp_img)
+                await bot.send_photo(chat_id=destino, photo=arquivo_img, caption=legenda_final, parse_mode="HTML")
+                
+                enviados.append(item_id)
+                salvar_achadinhos_enviados(enviados)
+                
+                os.remove(temp_img)
+                if EXIBIR_LOGS: logger.info(f"✅ [Achadinhos] Operação concluída. Oferta fresca entregue ao canal {destino}!")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Falha estrutural ao tratar mídia física do produto: {e}")
+
+# ----------------------------------
 
 # 5. HANDLERS DE COMANDO E INTERAÇÃO
 @dp.message(Command("start"), StateFilter("*"))
@@ -2857,6 +3069,42 @@ async def voltar_outros_canais(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     await message.answer("Selecione o robô ou módulo secundário que deseja gerir:", reply_markup=teclado_outros_canais)
+
+@dp.message(F.text == "Gerador de Achadinhos 🛍️", StateFilter("*"))
+async def painel_achadinhos(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    
+    config = ler_achadinhos_config()
+    nichos = config.get("nichos", [])
+    
+    texto = "🛍️ <b>Painel do Gerador de Achadinhos</b>\n\n"
+    texto += f"O motor autônomo está configurado para inspecionar <b>{len(nichos)} nicho(s) de mercado</b> em ciclo.\n"
+    
+    for i, nicho in enumerate(nichos, 1):
+        texto += f"\n🎯 <b>{i}. {nicho.get('nome')}</b>\n"
+        texto += f"   └ Canal Alvo: <code>{nicho.get('destino')}</code>\n"
+        texto += f"   └ Termos Rastreados: {', '.join(nicho.get('keywords', []))}\n"
+        
+    texto += "\n<i>Para editar os segmentos, acesse o ficheiro achadinhos_config.json na sua infraestrutura.</i>"
+        
+    teclado = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Forçar Garimpo 🚀")],
+            [KeyboardButton(text="Voltar aos Canais 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
+
+@dp.message(F.text == "Forçar Garimpo 🚀")
+async def forcar_garimpo_achadinhos(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    await message.answer("🚀 <b>Motor Acionado!</b> O garimpo extrairá as melhores ofertas nos nichos mapeados de forma silenciosa no servidor. Em instantes elas cairão nos canais.", parse_mode="HTML")
+    # Dispara a tarefa sem congelar a conversa atual do bot
+    asyncio.create_task(processar_garimpo_automatico())
 
 @dp.message(F.text == "Voltar ao Menu Espião 🔙", StateFilter("*"))
 async def voltar_menu_espiao(message: types.Message, state: FSMContext):
@@ -5270,6 +5518,9 @@ async def main():
 
     # ✅ Novo: Check-up diário de permissões em grupos roda todos os dias às 11:00
     scheduler.add_job(checkup_diario_grupos, 'cron', hour=11, minute=0, timezone=FUSO_STR)
+    
+    # ✅ Novo: Motor Autônomo de Garimpo de Achadinhos (Gatilho de 2 em 2 horas)
+    scheduler.add_job(processar_garimpo_automatico, 'interval', hours=2, timezone=FUSO_STR)
     
     # Roda o agendador imediatamente ao ligar o bot para garantir o dia atual
     agendar_tarefas_diarias()
