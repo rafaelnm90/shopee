@@ -5570,10 +5570,11 @@ async def processar_fila_espiao():
         if EXIBIR_LOGS: logger.info("🚀 Preparando prompt com a lista estrita de setores e blindagem semântica...")
             
         prompt = (
-            "Aja como um copywriter focado em conversão. Assista ao vídeo e crie uma legenda curta "
-            "(máximo 3 linhas) que gere curiosidade extrema no consumidor sobre o produto exibido. "
-            "A primeira linha deve conter o nome do item de forma chamativa. Use emojis estratégicos. "
-            "Adicione 3 a 5 hashtags curtas no final. Não invente preços e não insira links."
+            "Aja como um catalogador de vídeos. Assista ao vídeo e identifique o produto. "
+            "Sua resposta deve conter EXATAMENTE e APENAS duas linhas, sem nenhuma palavra ou frase extra. "
+            "Linha 1: O nome do produto de forma limpa, clara e comercial (com 1 emoji). "
+            "Linha 2: Apenas 3 a 5 hashtags estratégicas e relacionadas ao produto. "
+            "REGRA ABSOLUTA: Não crie textos persuasivos, descrições ou saudações. Entregue estritamente o Nome na primeira linha e as Hashtags na segunda, para que o sistema possa fatiar os dados perfeitamente."
         )
         
         if EXIBIR_LOGS: logger.info("✅ Prompt blindado e atualizado. Iniciando requisição à IA...")
