@@ -1609,7 +1609,9 @@ async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto):
         f"REGRA ABSOLUTA: Comece com uma frase extremamente chamativa focada em resolver um problema ou gerar desejo. "
         f"Apresente a queda de preço focando na urgência de levar agora. "
         f"Não ultrapasse 4 linhas. Não use palavras complexas, seja direto e use emojis atraentes. "
-        f"Finalize o texto estritamente com: '🔗 Confira a oferta no link abaixo: 👇'"
+        f"Finalize o texto estritamente com: '🔗 Confira a oferta no link abaixo: 👇'\n\n"
+        f"REGRA ABSOLUTA DE INTEGRIDADE NUMÉRICA:\n"
+        f"Você está estritamente proibido de calcular, deduzir, arredondar ou inventar qualquer valor financeiro. O preço fornecido nos dados brutos é um fato imutável e intocável. Utilize EXATAMENTE os números informados na sua redação. Se o valor final com desconto não estiver matematicamente explícito na entrada de dados, não tente adivinhá-lo sob nenhuma circunstância. Concentre a persuasão do texto exclusivamente nos benefícios físicos do produto e no gatilho de escassez, preservando a integridade absoluta da etiqueta de preço."
     )
     
     for modelo_nome in MODELOS_CASCATA_GEMINI:
@@ -5550,18 +5552,10 @@ async def processar_fila_espiao():
         if EXIBIR_LOGS: logger.info("🚀 Preparando prompt com a lista estrita de setores e blindagem semântica...")
             
         prompt = (
-            "Assista ao vídeo e identifique qual é o produto demonstrado. "
-            "Sua resposta deve conter EXATAMENTE duas linhas.\n"
-            "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no início (Exemplo: 👟 Tênis Casual Feminino).\n"
-            "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
-            "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras (exemplo prático: um organizador de sacos plásticos de cozinha pertence a #CasaEDecoracao e NUNCA a #BolsasFemininas, pois não é um acessório de moda).\n"
-            "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
-            "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
-            "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
-            "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
-            "#AcessoriosDeModa, #BrinquedosEHobbies, #Papelaria, #LivrosERevistas, #RoupasMasculinas, #Automoveis, #MaeEBebe, "
-            "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
-            "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
+            "Aja como um copywriter focado em conversão. Assista ao vídeo e crie uma legenda curta "
+            "(máximo 3 linhas) que gere curiosidade extrema no consumidor sobre o produto exibido. "
+            "A primeira linha deve conter o nome do item de forma chamativa. Use emojis estratégicos. "
+            "Adicione 3 a 5 hashtags curtas no final. Não invente preços e não insira links."
         )
         
         if EXIBIR_LOGS: logger.info("✅ Prompt blindado e atualizado. Iniciando requisição à IA...")
