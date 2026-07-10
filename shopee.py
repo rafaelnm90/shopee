@@ -126,6 +126,17 @@ class EspiaoFluxo(StatesGroup):
     aguardando_canal_destino = State()
     aguardando_confirmacao_destino = State() # ✅ NOVO
 
+class AchadinhosFluxo(StatesGroup):
+    menu_principal = State()
+    aguardando_nome = State()
+    aguardando_destino = State()
+    aguardando_keywords = State()
+    aguardando_remocao = State()
+    aguardando_confirmacao_remocao = State()
+    aguardando_selecao_edicao = State()
+    aguardando_campo_edicao = State()
+    aguardando_novo_valor_edicao = State()
+
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 FUSO_STR = "America/Sao_Paulo"
@@ -252,6 +263,26 @@ teclado_outros_canais = ReplyKeyboardMarkup(
         [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
         [KeyboardButton(text="Gerador de Achadinhos 🛍️")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+teclado_menu_achadinhos = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Adicionar Nicho ➕"), KeyboardButton(text="Remover Nicho 🗑️")],
+        [KeyboardButton(text="Editar Nicho ✏️"), KeyboardButton(text="Forçar Garimpo 🚀")],
+        [KeyboardButton(text="Voltar aos Canais 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+teclado_edicao_nicho = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Editar Nome 📝"), KeyboardButton(text="Editar Destino 🎯")],
+        [KeyboardButton(text="Editar Palavras-chave 🔑")],
+        [KeyboardButton(text="Cancelar ❌")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -1469,16 +1500,7 @@ def ler_achadinhos_config():
         with open("achadinhos_config.json", "r") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        # Exemplo de estrutura inicial injetada caso o arquivo não exista
-        modelo_padrao = {
-            "nichos": [
-                {
-                    "nome": "Tecnologia e Eletrônicos",
-                    "destino": "-1003932482573", 
-                    "keywords": ["smartwatch", "fone bluetooth", "powerbank", "gamer"]
-                }
-            ]
-        }
+        modelo_padrao = {"nichos": []}
         with open("achadinhos_config.json", "w") as f:
             json.dump(modelo_padrao, f, indent=4)
         return modelo_padrao
@@ -2405,6 +2427,13 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await gerenciar_divulgacao_viral(message, state)
         return
         
+    # 🔁 Roteamento Inteligente: Se estiver no Gerador de Achadinhos
+    if estado_atual and estado_atual.startswith("AchadinhosFluxo"):
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await painel_achadinhos(message, state)
+        return
+        
     # 🔁 Roteamento Inteligente: Se estiver nas Rotinas
     if estado_atual and estado_atual.startswith("ConfigRotina"):
         tipo_edicao = data.get('tipo_edicao')
@@ -3081,30 +3110,205 @@ async def painel_achadinhos(message: types.Message, state: FSMContext):
     texto = "🛍️ <b>Painel do Gerador de Achadinhos</b>\n\n"
     texto += f"O motor autônomo está configurado para inspecionar <b>{len(nichos)} nicho(s) de mercado</b> em ciclo.\n"
     
-    for i, nicho in enumerate(nichos, 1):
-        texto += f"\n🎯 <b>{i}. {nicho.get('nome')}</b>\n"
-        texto += f"   └ Canal Alvo: <code>{nicho.get('destino')}</code>\n"
-        texto += f"   └ Termos Rastreados: {', '.join(nicho.get('keywords', []))}\n"
-        
-    texto += "\n<i>Para editar os segmentos, acesse o ficheiro achadinhos_config.json na sua infraestrutura.</i>"
-        
-    teclado = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Forçar Garimpo 🚀")],
-            [KeyboardButton(text="Voltar aos Canais 🔙")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
-    
-    await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
+    if not nichos:
+        texto += "\n<i>Nenhum nicho configurado. Clique em 'Adicionar Nicho ➕' para começar.</i>"
+    else:
+        for i, nicho in enumerate(nichos, 1):
+            texto += f"\n🎯 <b>{i}. {nicho.get('nome')}</b>\n"
+            texto += f"   └ Canal Alvo: <code>{nicho.get('destino')}</code>\n"
+            texto += f"   └ Termos Rastreados: {', '.join(nicho.get('keywords', []))}\n"
+            
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_menu_achadinhos)
+    await state.set_state(AchadinhosFluxo.menu_principal)
 
-@dp.message(F.text == "Forçar Garimpo 🚀")
+@dp.message(F.text == "Forçar Garimpo 🚀", StateFilter("*"))
 async def forcar_garimpo_achadinhos(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("🚀 <b>Motor Acionado!</b> O garimpo extrairá as melhores ofertas nos nichos mapeados de forma silenciosa no servidor. Em instantes elas cairão nos canais.", parse_mode="HTML")
-    # Dispara a tarefa sem congelar a conversa atual do bot
     asyncio.create_task(processar_garimpo_automatico())
+
+# --- FLUXO: ADICIONAR NICHO ---
+@dp.message(AchadinhosFluxo.menu_principal, F.text == "Adicionar Nicho ➕")
+async def pedir_nome_nicho(message: types.Message, state: FSMContext):
+    await message.answer("Vamos configurar um novo robô de garimpo!\n\nQual será o <b>Nome deste nicho</b>? (Ex: Achadinhos Tech, Moda Feminina)", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(AchadinhosFluxo.aguardando_nome)
+
+@dp.message(AchadinhosFluxo.aguardando_nome)
+async def pedir_destino_nicho(message: types.Message, state: FSMContext):
+    nome_nicho = message.text.strip()
+    await state.update_data(novo_nome_nicho=nome_nicho)
+    if EXIBIR_LOGS: logger.info(f"🛍️ Criando novo nicho: {nome_nicho}")
+    await message.answer(f"Nome salvo: <b>{nome_nicho}</b>\n\nAgora, envie o <b>ID Numérico</b> do canal no Telegram onde o robô irá postar estas ofertas (Ex: -100123456789):", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(AchadinhosFluxo.aguardando_destino)
+
+@dp.message(AchadinhosFluxo.aguardando_destino)
+async def pedir_keywords_nicho(message: types.Message, state: FSMContext):
+    destino_nicho = message.text.strip()
+    await state.update_data(novo_destino_nicho=destino_nicho)
+    await message.answer(f"Canal salvo: <code>{destino_nicho}</code>\n\nPor fim, digite as <b>Palavras-chave</b> que o motor usará para rastrear produtos na Shopee. Separe-as por vírgula.\nExemplo: <code>smartwatch, fone bluetooth, gamer</code>", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(AchadinhosFluxo.aguardando_keywords)
+
+@dp.message(AchadinhosFluxo.aguardando_keywords)
+async def salvar_novo_nicho(message: types.Message, state: FSMContext):
+    keywords_raw = message.text.strip()
+    keywords_lista = [k.strip() for k in keywords_raw.split(",") if k.strip()]
+    
+    if not keywords_lista:
+        await message.answer("Nenhuma palavra-chave detectada. Tente novamente separando por vírgulas:", reply_markup=teclado_cancelar)
+        return
+
+    data = await state.get_data()
+    nome = data.get("novo_nome_nicho")
+    destino = data.get("novo_destino_nicho")
+    
+    config = ler_achadinhos_config()
+    novo_nicho = {
+        "nome": nome,
+        "destino": destino,
+        "keywords": keywords_lista
+    }
+    
+    config.setdefault("nichos", []).append(novo_nicho)
+    with open("achadinhos_config.json", "w") as f:
+        json.dump(config, f, indent=4)
+        
+    if EXIBIR_LOGS: logger.info(f"✅ Nicho '{nome}' adicionado com sucesso e ativo no radar!")
+    await message.answer(f"✅ Nicho <b>{nome}</b> criado e ativado com sucesso!", parse_mode="HTML")
+    await painel_achadinhos(message, state)
+
+# --- FLUXO: REMOVER NICHO ---
+@dp.message(AchadinhosFluxo.menu_principal, F.text == "Remover Nicho 🗑️")
+async def pedir_remocao_nicho(message: types.Message, state: FSMContext):
+    config = ler_achadinhos_config()
+    nichos = config.get("nichos", [])
+    
+    if not nichos:
+        await message.answer("Não há nichos configurados para remover.")
+        return
+        
+    texto = "Qual nicho deseja excluir? Digite o <b>NÚMERO</b> correspondente:\n\n"
+    for i, nicho in enumerate(nichos, 1):
+        texto += f"<b>{i}.</b> {nicho.get('nome')} (Canal: {nicho.get('destino')})\n"
+        
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(AchadinhosFluxo.aguardando_remocao)
+
+@dp.message(AchadinhosFluxo.aguardando_remocao)
+async def confirmar_remocao_nicho(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas o número do nicho.")
+        return
+        
+    indice = int(message.text) - 1
+    config = ler_achadinhos_config()
+    nichos = config.get("nichos", [])
+    
+    if 0 <= indice < len(nichos):
+        nicho_selecionado = nichos[indice]
+        await state.update_data(indice_nicho_remocao=indice)
+        
+        teclado_confirmacao = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Confirmar Exclusão ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
+        await message.answer(f"Tem certeza que deseja apagar permanentemente o nicho <b>{nicho_selecionado.get('nome')}</b> do motor?", parse_mode="HTML", reply_markup=teclado_confirmacao)
+        await state.set_state(AchadinhosFluxo.aguardando_confirmacao_remocao)
+    else:
+        await message.answer("Número inválido. Tente novamente:")
+
+@dp.message(AchadinhosFluxo.aguardando_confirmacao_remocao)
+async def processar_remocao_nicho(message: types.Message, state: FSMContext):
+    if message.text != "Confirmar Exclusão ✅":
+        await message.answer("Use os botões para confirmar ou cancelar.")
+        return
+        
+    data = await state.get_data()
+    indice = data.get("indice_nicho_remocao")
+    
+    config = ler_achadinhos_config()
+    if indice is not None and 0 <= indice < len(config.get("nichos", [])):
+        removido = config["nichos"].pop(indice)
+        with open("achadinhos_config.json", "w") as f:
+            json.dump(config, f, indent=4)
+        if EXIBIR_LOGS: logger.info(f"🗑️ Nicho '{removido.get('nome')}' excluído.")
+        await message.answer(f"✅ Nicho '{removido.get('nome')}' removido com sucesso!")
+    
+    await painel_achadinhos(message, state)
+
+# --- FLUXO: EDITAR NICHO ---
+@dp.message(AchadinhosFluxo.menu_principal, F.text == "Editar Nicho ✏️")
+async def pedir_edicao_nicho(message: types.Message, state: FSMContext):
+    config = ler_achadinhos_config()
+    nichos = config.get("nichos", [])
+    
+    if not nichos:
+        await message.answer("Não há nichos configurados para editar.")
+        return
+        
+    texto = "Qual nicho deseja editar? Digite o <b>NÚMERO</b> correspondente:\n\n"
+    for i, nicho in enumerate(nichos, 1):
+        texto += f"<b>{i}.</b> {nicho.get('nome')}\n"
+        
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(AchadinhosFluxo.aguardando_selecao_edicao)
+
+@dp.message(AchadinhosFluxo.aguardando_selecao_edicao)
+async def selecionar_campo_edicao(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas o número.")
+        return
+        
+    indice = int(message.text) - 1
+    config = ler_achadinhos_config()
+    nichos = config.get("nichos", [])
+    
+    if 0 <= indice < len(nichos):
+        nicho = nichos[indice]
+        await state.update_data(indice_nicho_edicao=indice)
+        
+        texto = f"🎯 Editando: <b>{nicho.get('nome')}</b>\nO que você deseja alterar?"
+        await message.answer(texto, parse_mode="HTML", reply_markup=teclado_edicao_nicho)
+        await state.set_state(AchadinhosFluxo.aguardando_campo_edicao)
+    else:
+        await message.answer("Número inválido. Tente novamente:")
+
+@dp.message(AchadinhosFluxo.aguardando_campo_edicao)
+async def pedir_novo_valor_edicao(message: types.Message, state: FSMContext):
+    opcoes = {
+        "Editar Nome 📝": ("nome", "Digite o novo <b>Nome</b> para este nicho:"),
+        "Editar Destino 🎯": ("destino", "Digite o novo <b>ID do Canal</b> de destino:"),
+        "Editar Palavras-chave 🔑": ("keywords", "Digite a nova lista de <b>Palavras-chave</b> separadas por vírgula:")
+    }
+    
+    selecao = opcoes.get(message.text)
+    if not selecao:
+        await message.answer("Use os botões abaixo para escolher o que editar.")
+        return
+        
+    campo, pergunta = selecao
+    await state.update_data(campo_edicao=campo)
+    await message.answer(pergunta, parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(AchadinhosFluxo.aguardando_novo_valor_edicao)
+
+@dp.message(AchadinhosFluxo.aguardando_novo_valor_edicao)
+async def salvar_edicao_nicho(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    indice = data.get("indice_nicho_edicao")
+    campo = data.get("campo_edicao")
+    novo_valor = message.text.strip()
+    
+    config = ler_achadinhos_config()
+    nichos = config.get("nichos", [])
+    
+    if 0 <= indice < len(nichos):
+        if campo == "keywords":
+            novo_valor = [k.strip() for k in novo_valor.split(",") if k.strip()]
+            
+        nichos[indice][campo] = novo_valor
+        with open("achadinhos_config.json", "w") as f:
+            json.dump(config, f, indent=4)
+            
+        if EXIBIR_LOGS: logger.info(f"✏️ Nicho {indice+1} atualizado. Campo '{campo}' alterado.")
+        await message.answer("✅ Nicho atualizado com sucesso!")
+    
+    await painel_achadinhos(message, state)
 
 @dp.message(F.text == "Voltar ao Menu Espião 🔙", StateFilter("*"))
 async def voltar_menu_espiao(message: types.Message, state: FSMContext):
