@@ -1661,17 +1661,24 @@ async def processar_garimpo_automatico():
         keyword_sorteada = random.choice(keywords)
         if EXIBIR_LOGS: logger.info(f"🔎 [Achadinhos] Rastreando o setor '{nome_nicho}' buscando por: '{keyword_sorteada}'.")
         
-        ofertas = await buscar_ofertas_shopee(keyword_sorteada, limite=15)
+        # Aumentamos a "pesca" para 40 produtos virais para ter uma amostra rica
+        ofertas = await buscar_ofertas_shopee(keyword_sorteada, limite=40)
+        
+        # 🧠 Curadoria: O robô organiza a lista internamente do maior desconto para o menor
+        ofertas.sort(key=lambda x: int(x.get("priceDiscountRate") or 0), reverse=True)
         
         item_escolhido = None
         for oferta in ofertas:
             item_id = str(oferta.get("itemId"))
-            if item_id not in enviados:
+            taxa_desconto = int(oferta.get("priceDiscountRate") or 0)
+            
+            # 🛡️ Trava de Qualidade: Só aprova se for inédito E o desconto for de no mínimo 15%
+            if item_id not in enviados and taxa_desconto >= 15:
                 item_escolhido = oferta
                 break
                 
         if not item_escolhido:
-            if EXIBIR_LOGS: logger.info(f"⏭️ [Achadinhos] Todas as tendências de '{keyword_sorteada}' já foram exploradas recentemente. Indo para a próxima.")
+            if EXIBIR_LOGS: logger.info(f"⏭️ [Achadinhos] Nenhum produto inédito com desconto matador (>= 15%) encontrado para '{keyword_sorteada}'. Poupando a vitrine.")
             continue
             
         item_id = str(item_escolhido.get("itemId"))
