@@ -45,6 +45,9 @@ class EspelhadorFluxo(StatesGroup):
     aguardando_edicao_escolha_rota = State()
     aguardando_acao_edicao = State()
     aguardando_edicao_nova_janela = State()
+    aguardando_acao_edicao = State()
+    aguardando_edicao_novo_nome = State()
+    aguardando_edicao_nova_janela = State()
     aguardando_edicao_novo_modo = State()
     aguardando_nova_origem = State()
     aguardando_remocao_origem = State()
@@ -449,9 +452,9 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         
         teclado_submenu = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="🕒 Modificar Janela"), KeyboardButton(text="🔀 Modificar Modo")],
-                [KeyboardButton(text="➕ Adicionar Origem"), KeyboardButton(text="🗑️ Remover Origem")],
-                [KeyboardButton(text="Cancelar Operação ❌")]
+                [KeyboardButton(text="📝 Editar Nome"), KeyboardButton(text="🕒 Modificar Janela")],
+                [KeyboardButton(text="🔀 Modificar Modo"), KeyboardButton(text="➕ Adicionar Origem")],
+                [KeyboardButton(text="🗑️ Remover Origem"), KeyboardButton(text="Cancelar Operação ❌")]
             ], resize_keyboard=True, is_persistent=True)
             
         await message.answer(texto, reply_markup=teclado_submenu, parse_mode="HTML")
@@ -462,7 +465,10 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.aguardando_acao_edicao)
 async def processar_acao_edicao(message: types.Message, state: FSMContext):
     texto = message.text
-    if texto == "🕒 Modificar Janela":
+    if texto == "📝 Editar Nome":
+        await message.answer("Digite o <b>NOVO NOME</b> para esta rota (Ex: Espelho Principal):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+        await state.set_state(EspelhadorFluxo.aguardando_edicao_novo_nome)
+    elif texto == "🕒 Modificar Janela":
         await message.answer("Digite a <b>NOVA JANELA</b> no formato <code>Inicio-Fim</code> (Ex: 10-22):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_edicao_nova_janela)
     elif texto == "🔀 Modificar Modo":
@@ -497,6 +503,39 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
         await state.set_state(EspelhadorFluxo.aguardando_remocao_origem)
     else:
         await message.answer("Use os botões do menu para escolher a ação.", reply_markup=teclado_espelhador_cancelar)
+
+@router.message(EspelhadorFluxo.aguardando_edicao_novo_nome)
+async def salvar_edicao_nome(message: types.Message, state: FSMContext):
+    novo_nome = message.text.strip()
+    data = await state.get_data()
+    indice = data.get("indice_edicao")
+    
+    dados = ler_espelhos()
+    rotas = dados.get("rotas", [])
+    
+    nome_antigo = rotas[indice]["nome"]
+    rotas[indice]["nome"] = novo_nome
+    dados["rotas"] = rotas
+    salvar_espelhos(dados)
+    
+    # Sincroniza a fila de espelhamento para que os vídeos retidos não fiquem órfãos
+    try:
+        fila_dados = ler_fila_espelhador()
+        fila = fila_dados.get("fila", [])
+        houve_alteracao = False
+        for item in fila:
+            if item.get("nome_rota") == nome_antigo:
+                item["nome_rota"] = novo_nome
+                houve_alteracao = True
+        if houve_alteracao:
+            salvar_fila_espelhador(fila_dados)
+            if EXIBIR_LOGS: logger.info(f"🔄 Fila de espelhamento sincronizada com o novo nome da rota.")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao sincronizar a fila de espelhamento após mudança de nome: {e}")
+
+    if EXIBIR_LOGS: logger.info(f"✏️ Nome da rota '{nome_antigo}' atualizado para '{novo_nome}'.")
+    await message.answer(f"✅ O nome da rota foi atualizado para <b>{novo_nome}</b> com sucesso!", parse_mode="HTML")
+    await painel_espelhador(message, state)
 
 @router.message(EspelhadorFluxo.aguardando_edicao_nova_janela)
 async def salvar_edicao_janela(message: types.Message, state: FSMContext):
