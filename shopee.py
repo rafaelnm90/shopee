@@ -141,6 +141,11 @@ class AchadinhosFluxo(StatesGroup):
 class RelatoriosFluxo(StatesGroup):
     menu_filas = State()
 
+# ✅ NOVO: Máquina de Estados para a configuração do agendamento do Espião
+class ConfigRotinaEspiao(StatesGroup):
+    aguardando_janela = State()
+    aguardando_modo = State()
+
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 FUSO_STR = "America/Sao_Paulo"
@@ -348,6 +353,16 @@ teclado_automacoes_espiao = ReplyKeyboardMarkup(
 teclado_opcoes_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Definir Canal de Destino 🎯")],
+        [KeyboardButton(text="Adicionar Concorrente ➕"), KeyboardButton(text="Remover Concorrente 🗑️")],
+        [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+teclado_opcoes_espiao = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Definir Canal de Destino 🎯"), KeyboardButton(text="Editar Agendamento 🕒")],
         [KeyboardButton(text="Adicionar Concorrente ➕"), KeyboardButton(text="Remover Concorrente 🗑️")],
         [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
     ],
@@ -3559,7 +3574,7 @@ async def menu_espiao_principal(message: types.Message, state: FSMContext):
     fila = fila_data.get("fila", [])
     videos_pendentes = len([item for item in fila if not item.get("processado")])
     
-    # 2. Obter canais monitorizados e destino do ficheiro de configuração (CORRIGIDO)
+   # 2. Obter canais monitorizados e destino do ficheiro de configuração (CORRIGIDO)
     dados_espiao = ler_alvos_espiao()
     concorrentes = dados_espiao.get("alvos", [])
     qtd_concorrentes = len(concorrentes)
@@ -3567,12 +3582,18 @@ async def menu_espiao_principal(message: types.Message, state: FSMContext):
     
     if not canal_destino:
         canal_destino = "Não definido"
+
+    # ✅ NOVO: Resgate das configurações de tempo e distribuição do Espião
+    inicio_e = dados_espiao.get("inicio", 10)
+    fim_e = dados_espiao.get("fim", 22)
+    modo_e = dados_espiao.get("modo", "aleatorio").title()
     
     # 3. Construir a mensagem unificada do painel
     texto = "🕵️ <b>Painel Principal do Espião</b>\n\n"
     texto += f"📦 <b>Fila de clonagem:</b> {videos_pendentes} vídeos aguardando.\n"
     texto += f"📡 <b>Radar operacional:</b> {qtd_concorrentes} concorrentes vigiados.\n"
-    texto += f"🎯 <b>Canal de destino:</b> <code>{canal_destino}</code>\n\n"
+    texto += f"🎯 <b>Canal de destino:</b> <code>{canal_destino}</code>\n"
+    texto += f"🕒 <b>Janela de Postagem:</b> {inicio_e}h às {fim_e}h (Modo: {modo_e})\n\n"
     texto += "Escolha uma opção para gerenciar:"
     
     if EXIBIR_LOGS: logger.info("✅ Sucesso: Painel unificado do Espião renderizado com logs operacionais.")
@@ -3770,6 +3791,70 @@ async def salvar_destino_espiao(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info(f"🎯 Canal de destino do espião atualizado para: {destino}")
     await message.answer("✅ Canal de destino configurado com sucesso!")
     
+    await menu_grupos_vigiados(message, state)
+
+@dp.message(F.text == "Editar Agendamento 🕒", StateFilter("*"))
+async def iniciar_config_tempo_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando configuração da janela de horário do Espião.")
+    
+    dados = ler_alvos_espiao()
+    inicio = dados.get("inicio", 10)
+    fim = dados.get("fim", 22)
+    
+    await message.answer(
+        f"Defina a <b>Janela de Horário</b> útil em que o Espião pode postar os vídeos D+1 no canal.\n\n"
+        f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>):\n"
+        f"<i>Janela atual: {inicio}h às {fim}h</i>", 
+        reply_markup=teclado_cancelar, 
+        parse_mode="HTML"
+    )
+    await state.set_state(ConfigRotinaEspiao.aguardando_janela)
+
+@dp.message(ConfigRotinaEspiao.aguardando_janela)
+async def receber_janela_espiao(message: types.Message, state: FSMContext):
+    match = re.match(r"^(\d{1,2})-(\d{1,2})$", message.text.strip())
+    if not match:
+        await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22", reply_markup=teclado_cancelar)
+        return
+        
+    inicio, fim = map(int, match.groups())
+    if inicio >= fim or inicio < 0 or fim > 23:
+        await message.answer("Valores inválidos! A hora de início deve ser menor que a do fim.", reply_markup=teclado_cancelar)
+        return
+
+    await state.update_data(espiao_inicio=inicio, fmt_espiao_fim=fim)
+    
+    teclado_modo = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")],
+            [KeyboardButton(text="Cancelar ❌")]
+        ], resize_keyboard=True, is_persistent=True
+    )
+    await message.answer("Como deseja distribuir os vídeos retidos dentro dessa janela de horário no dia seguinte?", reply_markup=teclado_modo)
+    await state.set_state(ConfigRotinaEspiao.aguardando_modo)
+
+@dp.message(ConfigRotinaEspiao.aguardando_modo)
+async def salvar_config_tempo_espiao(message: types.Message, state: FSMContext):
+    if message.text not in ["Aleatório 🔀", "Ordem de Chegada ⬇️"]:
+        await message.answer("Por favor, use os botões para escolher o modo.", reply_markup=teclado_cancelar)
+        return
+        
+    modo = "aleatorio" if message.text == "Aleatório 🔀" else "ordem"
+    data = await state.get_data()
+    inicio = data.get("espiao_inicio")
+    fim = data.get("fmt_espiao_fim")
+    
+    dados = ler_alvos_espiao()
+    dados["inicio"] = inicio
+    dados["fim"] = fim
+    dados["modo"] = modo
+    salvar_alvos_espiao(dados)
+    
+    if EXIBIR_LOGS: logger.info(f"✅ Configuração do Espião salva: Janela {inicio}h-{fim}h | Modo: {modo}")
+    await message.answer(f"✅ <b>Configurações do Espião Salvas!</b>\nJanela: {inicio}h às {fim}h\nDistribuição: {message.text}")
+    await state.clear()
     await menu_grupos_vigiados(message, state)
 
 @dp.message(F.text == "Rotinas do Espião ⏰", StateFilter("*"))
@@ -5623,50 +5708,89 @@ async def processar_fila_espiao():
         
     fila_data = ler_fila_clonagem()
     
-    # ✅ NOVA LÓGICA: Verificação do relógio orgânico de pausas
-    agora = datetime.now()
-    proximo_proc_str = fila_data.get("proximo_processamento")
+    # ✅ LÓGICA TEMPORAL AVANÇADA D+1 E GAP-FILLING PARA O ESPIÃO
+    agora = datetime.now(fuso_horario)
+    hoje_str = agora.strftime("%Y-%m-%d")
     
+    proximo_proc_str = fila_data.get("proximo_processamento")
     if proximo_proc_str:
         try:
-            proximo_proc = datetime.strptime(proximo_proc_str, "%Y-%m-%d %H:%M:%S")
+            proximo_proc = datetime.strptime(proximo_proc_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
             if agora < proximo_proc:
-                return # O relógio de pausa ainda não expirou, aborta a execução silenciosamente
+                return
         except ValueError:
-            pass # Se houver um erro de leitura na data antiga, prossegue
+            pass
             
     fila = fila_data.get("fila", [])
     
-    # Busca o primeiro vídeo da fila que ainda não foi publicado
-    item_pendente = next((item for item in fila if not item.get("processado")), None)
-    if not item_pendente:
+    # Filtra todos os itens elegíveis D+1 (capturados antes de hoje e não processados)
+    itens_elegiveis = []
+    for item in fila:
+        if not item.get("processado"):
+            data_cap_str = item.get("data_captura", "")
+            if data_cap_str:
+                dia_cap = data_cap_str.split(" ")[0]
+                if dia_cap < hoje_str:
+                    itens_elegiveis.append(item)
+
+    if not itens_elegiveis:
         return
-        
+
+    # Injeção das configurações da janela útil obtidas do JSON do Espião
+    inicio_janela = dados_espiao.get("inicio", 10)
+    fim_janela = dados_espiao.get("fim", 22)
+    modo_distribuicao = dados_espiao.get("modo", "aleatorio")
+
+    # Corta a execução se estiver fora da janela útil de postagens configurada pelo admin
+    if agora.hour < inicio_janela or agora.hour >= fim_janela:
+        if EXIBIR_LOGS: logger.info(f"💤 [Espião] Fora da janela de postagem útil ({inicio_janela}h às {fim_janela}h). Represando vídeos.")
+        return
+
+    # ✅ MODO ALEATÓRIO VS ORDEM DE CHEGADA: Escolha estratégica do alvo do ciclo
+    if modo_distribuicao == "aleatorio":
+        item_pendente = random.choice(itens_elegiveis)
+        if EXIBIR_LOGS: logger.info(f"🔀 [Espião] Modo Aleatório ativo. Selecionado em lote: {item_pendente['id']}")
+    else:
+        # Ordem de chegada clássica (FIFO): Garante o mais antigo primeiro
+        itens_elegiveis.sort(key=lambda x: x.get("data_captura", ""))
+        item_pendente = itens_elegiveis[0]
+        if EXIBIR_LOGS: logger.info(f"⬇️ [Espião] Modo Ordem de Chegada ativo. Selecionado mais antigo: {item_pendente['id']}")
+
     caminho_video = item_pendente["caminho_video"]
     link_original = item_pendente["link_original"]
     item_id = item_pendente["id"]
     
-    # ✅ NOVO: Verificação de validade temporal da postagem (6 horas)
+    # Verificação de validade temporal ampliada para 48 horas (D+1) para evitar expiração precoce
     data_captura_str = item_pendente.get("data_captura")
     if data_captura_str:
         try:
-            data_captura = datetime.strptime(data_captura_str, "%Y-%m-%d %H:%M:%S")
+            data_captura = datetime.strptime(data_captura_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
             horas_na_fila = (agora - data_captura).total_seconds() / 3600
-            
-            if horas_na_fila > 6:
-                if EXIBIR_LOGS: logger.warning(f"⏳ Clone {item_id} expirou (esperou {horas_na_fila:.1f}h). Ficheiro descartado para priorizar ofertas recentes.")
-                
-                # Executa a faxina física e remove o item obsoleto
+            if horas_na_fila > 48:
+                if EXIBIR_LOGS: logger.warning(f"⏳ Clone {item_id} expirou ({horas_na_fila:.1f}h). Descartando (Prazo D+1 estourado).")
                 fila_data["fila"] = [item for item in fila if item["id"] != item_id]
                 salvar_fila_clonagem(fila_data)
-                
                 try:
                     if os.path.exists(caminho_video): os.remove(caminho_video)
                 except:
                     pass
-                return # Aborta o processamento para que o próximo ciclo pegue um vídeo novo
+                return
         except ValueError:
-            pass # Continua normalmente caso o formato da data seja antigo
+            pass
+
+    # Trava de Silêncio do Mundo Viral (Não posta se houver rotina crítica agendada no intervalo de 15 minutos)
+    rotinas_virais = ["job_rotina_promo_principal", "job_rotina_link_grupo_viral", "job_rotina_divulgar_gem_viral"]
+    conflito_silencio = False
+    for job in scheduler.get_jobs():
+        if any(rv in job.id for rv in rotinas_virais) and getattr(job, 'next_run_time', None):
+            tempo_rotina = job.next_run_time.astimezone(fuso_horario)
+            if abs((agora - tempo_rotina).total_seconds() / 60) <= 15:
+                conflito_silencio = True
+                break
+                
+    if conflito_silencio:
+        if EXIBIR_LOGS: logger.info(f"🤫 [Espião] Trava de Silêncio ativa (Rotina a ±15min). Adormecendo clone {item_id}...")
+        return
             
     if not os.path.exists(caminho_video):
         if EXIBIR_LOGS: logger.warning(f"⚠️ Ficheiro {caminho_video} não encontrado. Marcando clone {item_id} como falho.")
