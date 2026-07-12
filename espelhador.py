@@ -757,6 +757,10 @@ async def gerar_relatorio_fila_principal(message: types.Message, state: FSMConte
         await message.answer("📭 A fila de espelhamento D+1 está vazia no momento.", parse_mode="HTML")
         return
 
+    # Carrega as configurações das rotas para pegar a janela de horário
+    dados_rotas = ler_espelhos()
+    mapa_rotas = {r["nome"]: r for r in dados_rotas.get("rotas", [])}
+
     rotas_agrupadas = {}
     for item in fila:
         nome = item.get("nome_rota", "Rota Desconhecida")
@@ -766,16 +770,21 @@ async def gerar_relatorio_fila_principal(message: types.Message, state: FSMConte
 
     texto = "📊 <b>Relatório da Fila (D+1)</b>\n\n"
     for nome_rota, itens in rotas_agrupadas.items():
-        texto += f"📡 <b>Rota: {nome_rota}</b> ({len(itens)} vídeos aguardando)\n"
+        rota_info = mapa_rotas.get(nome_rota, {})
+        inicio = rota_info.get("inicio", 10)
+        fim = rota_info.get("fim", 22)
         
-        # Limita a exibição aos primeiros 15 vídeos de cada rota para não travar o Telegram
+        texto += f"📡 <b>Rota: {nome_rota}</b> ({len(itens)} vídeos aguardando)\n"
+        texto += f"🕒 <b>Postagem:</b> Dia seguinte, entre {inicio}h e {fim}h\n"
+        
+        # Limita a exibição aos primeiros 15 vídeos de cada rota para o texto não ficar gigante
         for i, v in enumerate(itens[:15], 1):
             data_cap = v.get("data_captura", "Data não registrada")
             origem = v.get("origem", "Origem não mapeada")
             texto += f"  ├ {i}. Origem: <code>{origem}</code> | Captura: {data_cap}\n"
         
         if len(itens) > 15:
-            texto += f"  └ <i>... e mais {len(itens) - 15} vídeos aguardando.</i>\n"
+            texto += f"  └ <i>... e mais {len(itens) - 15} vídeos na fila.</i>\n"
         texto += "\n"
 
     await message.answer(texto, parse_mode="HTML")
