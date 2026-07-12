@@ -33,7 +33,6 @@ def configurar_dependencias(bot: Bot, scheduler):
     if EXIBIR_LOGS: logger.info("🔌 Conexão estabelecida: Dependências do Espelhador injetadas com sucesso.")
 
 # --- MÁQUINA DE ESTADOS E TECLADOS ---
-# --- MÁQUINA DE ESTADOS E TECLADOS ---
 class EspelhadorFluxo(StatesGroup):
     menu_principal = State()
     aguardando_origem = State()
@@ -59,7 +58,7 @@ teclado_espelhador_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Rota ➕"), KeyboardButton(text="Remover Rota 🗑️")],
         [KeyboardButton(text="Editar Rota ✏️"), KeyboardButton(text="Forçar Postagens 🚀")],
-        [KeyboardButton(text="Relatório da Fila 📊"), KeyboardButton(text="Voltar aos Canais 🔙")]
+        [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -725,66 +724,3 @@ async def confirmar_esvaziar(message: types.Message, state: FSMContext):
     else:
         await message.answer("Número inválido. Tente novamente.", reply_markup=teclado_espelhador_cancelar)
 
-@router.message(EspelhadorFluxo.aguardando_confirmacao_esvaziar)
-async def processar_esvaziar(message: types.Message, state: FSMContext):
-    if message.text != "Aprovar ✅":
-        await message.answer("Ação de esvaziamento cancelada.", reply_markup=teclado_espelhador_menu)
-        await painel_espelhador(message, state)
-        return
-        
-    data = await state.get_data()
-    indice = data.get("indice_esvaziar")
-    dados = ler_espelhos()
-    rota = dados["rotas"][indice]
-    
-    rota["esvaziar_agora"] = True
-    salvar_espelhos(dados)
-    
-    if EXIBIR_LOGS: logger.info(f"🚀 Comando de esvaziamento imediato acionado para a rota '{rota['nome']}'.")
-    await message.answer(f"🚀 <b>Comando Enviado!</b>\nO motor reconheceu a instrução e iniciará a publicação de todos os vídeos pendentes da rota <b>{rota['nome']}</b> em poucos segundos.", parse_mode="HTML")
-    await painel_espelhador(message, state)
-
-@router.message(EspelhadorFluxo.menu_principal, F.text == "Relatório da Fila 📊")
-async def gerar_relatorio_fila_principal(message: types.Message, state: FSMContext):
-    try:
-        with open("fila_espelhador.json", "r", encoding="utf-8") as f:
-            dados_fila = json.load(f)
-            fila = dados_fila.get("fila", [])
-    except (FileNotFoundError, json.JSONDecodeError):
-        fila = []
-
-    if not fila:
-        await message.answer("📭 A fila de espelhamento D+1 está vazia no momento.", parse_mode="HTML")
-        return
-
-    # Carrega as configurações das rotas para pegar a janela de horário
-    dados_rotas = ler_espelhos()
-    mapa_rotas = {r["nome"]: r for r in dados_rotas.get("rotas", [])}
-
-    rotas_agrupadas = {}
-    for item in fila:
-        nome = item.get("nome_rota", "Rota Desconhecida")
-        if nome not in rotas_agrupadas:
-            rotas_agrupadas[nome] = []
-        rotas_agrupadas[nome].append(item)
-
-    texto = "📊 <b>Relatório da Fila (D+1)</b>\n\n"
-    for nome_rota, itens in rotas_agrupadas.items():
-        rota_info = mapa_rotas.get(nome_rota, {})
-        inicio = rota_info.get("inicio", 10)
-        fim = rota_info.get("fim", 22)
-        
-        texto += f"📡 <b>Rota: {nome_rota}</b> ({len(itens)} vídeos aguardando)\n"
-        texto += f"🕒 <b>Postagem:</b> Dia seguinte, entre {inicio}h e {fim}h\n"
-        
-        # Limita a exibição aos primeiros 15 vídeos de cada rota para o texto não ficar gigante
-        for i, v in enumerate(itens[:15], 1):
-            data_cap = v.get("data_captura", "Data não registrada")
-            origem = v.get("origem", "Origem não mapeada")
-            texto += f"  ├ {i}. Origem: <code>{origem}</code> | Captura: {data_cap}\n"
-        
-        if len(itens) > 15:
-            texto += f"  └ <i>... e mais {len(itens) - 15} vídeos na fila.</i>\n"
-        texto += "\n"
-
-    await message.answer(texto, parse_mode="HTML")
