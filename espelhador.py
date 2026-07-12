@@ -33,6 +33,7 @@ def configurar_dependencias(bot: Bot, scheduler):
     if EXIBIR_LOGS: logger.info("🔌 Conexão estabelecida: Dependências do Espelhador injetadas com sucesso.")
 
 # --- MÁQUINA DE ESTADOS E TECLADOS ---
+# --- MÁQUINA DE ESTADOS E TECLADOS ---
 class EspelhadorFluxo(StatesGroup):
     menu_principal = State()
     aguardando_origem = State()
