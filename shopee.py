@@ -138,6 +138,9 @@ class AchadinhosFluxo(StatesGroup):
     aguardando_campo_edicao = State()
     aguardando_novo_valor_edicao = State()
 
+class RelatoriosFluxo(StatesGroup):
+    menu_filas = State()
+
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 FUSO_STR = "America/Sao_Paulo"
@@ -1934,9 +1937,147 @@ def processar_e_salvar_pedidos_api(conversoes):
 def obter_teclado_relatorios():
     botoes = [
         [KeyboardButton(text="Relatório Financeiro 💰"), KeyboardButton(text="Diagnóstico de IA 🧠")],
+        [KeyboardButton(text="Relatórios de Filas 📋")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+
+def obter_teclado_relatorios_filas():
+    botoes = [
+        [KeyboardButton(text="Fila do Espelhador 🔄"), KeyboardButton(text="Fila do Espião 🕵️")],
+        [KeyboardButton(text="Fila de Achadinhos 🛍️")],
+        [KeyboardButton(text="Voltar aos Relatórios 🔙")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+
+@dp.message(F.text == "Relatórios de Filas 📋", StateFilter("*"))
+async def menu_relatorios_filas(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🚀 Acessando o submenu de Relatórios de Filas...")
+    
+    await state.clear()
+    await message.answer("📋 <b>Central de Filas</b>\nEscolha qual fila ou radar deseja analisar:", reply_markup=obter_teclado_relatorios_filas(), parse_mode="HTML")
+    await state.set_state(RelatoriosFluxo.menu_filas)
+    if EXIBIR_LOGS: logger.info("✅ Menu de Relatórios de Filas exibido com sucesso!")
+
+@dp.message(F.text == "Voltar aos Relatórios 🔙", StateFilter("*"))
+async def voltar_relatorios_geral(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu principal de relatórios...")
+    await state.clear()
+    await menu_relatorio_geral(message, state)
+
+@dp.message(RelatoriosFluxo.menu_filas, F.text == "Fila do Espelhador 🔄")
+async def relatorio_fila_espelhador_novo(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("📊 Iniciando compilação do relatório da fila do Espelhador...")
+    try:
+        with open("fila_espelhador.json", "r", encoding="utf-8") as f:
+            dados_fila = json.load(f)
+            fila = dados_fila.get("fila", [])
+    except (FileNotFoundError, json.JSONDecodeError):
+        fila = []
+
+    if not fila:
+        await message.answer("📭 A fila de espelhamento D+1 está vazia no momento.", parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info("✅ Relatório gerado (Fila vazia).")
+        return
+
+    import espelhador
+    dados_rotas = espelhador.ler_espelhos()
+    mapa_rotas = {r["nome"]: r for r in dados_rotas.get("rotas", [])}
+
+    rotas_agrupadas = {}
+    for item in fila:
+        nome = item.get("nome_rota", "Rota Desconhecida")
+        if nome not in rotas_agrupadas:
+            rotas_agrupadas[nome] = []
+        rotas_agrupadas[nome].append(item)
+
+    texto = "📊 <b>Relatório da Fila do Espelhador (D+1)</b>\n\n"
+    for nome_rota, itens in rotas_agrupadas.items():
+        rota_info = mapa_rotas.get(nome_rota, {})
+        inicio = rota_info.get("inicio", 10)
+        fim = rota_info.get("fim", 22)
+        
+        texto += f"📡 <b>Rota: {nome_rota}</b> ({len(itens)} vídeos aguardando)\n"
+        texto += f"🕒 <b>Postagem:</b> Dia seguinte, entre {inicio}h e {fim}h\n"
+        
+        for i, v in enumerate(itens[:15], 1):
+            data_cap = v.get("data_captura", "Data não registrada")
+            origem = v.get("chat_origem", "Origem não mapeada")
+            texto += f"  ├ {i}. Origem: <code>{origem}</code> | Captura: {data_cap}\n"
+        
+        if len(itens) > 15:
+            texto += f"  └ <i>... e mais {len(itens) - 15} vídeos na fila.</i>\n"
+        texto += "\n"
+
+    await message.answer(texto, parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info("✅ Relatório do Espelhador entregue com sucesso!")
+
+@dp.message(RelatoriosFluxo.menu_filas, F.text == "Fila do Espião 🕵️")
+async def relatorio_fila_espiao_novo(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("📊 Iniciando compilação do relatório da fila do Espião...")
+    try:
+        with open("fila_clonagem.json", "r", encoding="utf-8") as f:
+            dados_fila = json.load(f)
+            fila = dados_fila.get("fila", [])
+    except (FileNotFoundError, json.JSONDecodeError):
+        fila = []
+        
+    pendentes = [item for item in fila if not item.get("processado")]
+
+    if not pendentes:
+        await message.answer("📭 A fila do espião de clonagem está vazia no momento. Nenhum vídeo aguardando IA.", parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info("✅ Relatório gerado (Fila vazia).")
+        return
+
+    texto = f"📊 <b>Relatório da Fila do Espião</b>\n\n"
+    texto += f"📦 <b>Vídeos clonados aguardando processamento da IA:</b> {len(pendentes)}\n\n"
+    
+    for i, v in enumerate(pendentes[:15], 1):
+        data_cap = v.get("data_captura", "Data não registrada")
+        link_orig = v.get("link_original", "Link desconhecido")
+        texto += f"  ├ {i}. Captura: {data_cap}\n"
+        texto += f"  │  └ 🔗 {link_orig}\n"
+    
+    if len(pendentes) > 15:
+        texto += f"  └ <i>... e mais {len(pendentes) - 15} vídeos na fila.</i>\n"
+
+    await message.answer(texto, parse_mode="HTML", disable_web_page_preview=True)
+    if EXIBIR_LOGS: logger.info("✅ Relatório do Espião entregue com sucesso!")
+
+@dp.message(RelatoriosFluxo.menu_filas, F.text == "Fila de Achadinhos 🛍️")
+async def relatorio_fila_achadinhos_novo(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("📊 Iniciando compilação do status do radar de Achadinhos...")
+    
+    try:
+        with open("achadinhos_config.json", "r") as f:
+            config = json.load(f)
+            nichos = config.get("nichos", [])
+    except:
+        nichos = []
+        
+    try:
+        with open("achadinhos_enviados.json", "r") as f:
+            enviados = json.load(f)
+    except:
+        enviados = []
+        
+    texto = "🛍️ <b>Status do Gerador de Achadinhos</b>\n\n"
+    texto += "<i>Nota: Diferente do Espelhador, os Achadinhos não ficam retidos numa fila aguardando horário. O motor raspa a Shopee de 2 em 2 hours e publica imediatamente. Abaixo está o raio-x do radar operacional:</i>\n\n"
+    
+    texto += f"📡 <b>Nichos mapeados no radar:</b> {len(nichos)}\n"
+    texto += f"📦 <b>Produtos já garimpados e publicados:</b> {len(enviados)}\n\n"
+    
+    for i, n in enumerate(nichos, 1):
+        texto += f"  ├ {i}. <b>{n.get('nome')}</b> ({len(n.get('keywords', []))} termos rastreados)\n"
+        texto += f"  │  └ 🎯 Destino: <code>{n.get('destino')}</code>\n"
+
+    await message.answer(texto, parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info("✅ Relatório de Achadinhos entregue com sucesso!")
 
 @dp.message(F.text == "Relatório Geral 📊", StateFilter("*"))
 async def menu_relatorio_geral(message: types.Message, state: FSMContext):
