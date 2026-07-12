@@ -1960,7 +1960,6 @@ def obter_teclado_relatorios():
 def obter_teclado_relatorios_filas():
     botoes = [
         [KeyboardButton(text="Fila do Espião 🕵️"), KeyboardButton(text="Fila do Espelhador 🔄")],
-        [KeyboardButton(text="Fila de Achadinhos 🛍️")],
         [KeyboardButton(text="Voltar aos Relatórios 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -2103,37 +2102,6 @@ async def relatorio_fila_espiao_novo(message: types.Message, state: FSMContext):
 
     await message.answer(texto, parse_mode="HTML", disable_web_page_preview=True)
     if EXIBIR_LOGS: logger.info("✅ Relatório do Espião entregue com sucesso!")
-
-@dp.message(RelatoriosFluxo.menu_filas, F.text == "Fila de Achadinhos 🛍️")
-async def relatorio_fila_achadinhos_novo(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("📊 Iniciando compilação do status do radar de Achadinhos...")
-    
-    try:
-        with open("achadinhos_config.json", "r") as f:
-            config = json.load(f)
-            nichos = config.get("nichos", [])
-    except:
-        nichos = []
-        
-    try:
-        with open("achadinhos_enviados.json", "r") as f:
-            enviados = json.load(f)
-    except:
-        enviados = []
-        
-    texto = "🛍️ <b>Status do Gerador de Achadinhos</b>\n\n"
-    texto += "<i>Nota: Diferente do Espelhador, os Achadinhos não ficam retidos numa fila aguardando horário. O motor raspa a Shopee de 2 em 2 hours e publica imediatamente. Abaixo está o raio-x do radar operacional:</i>\n\n"
-    
-    texto += f"📡 <b>Nichos mapeados no radar:</b> {len(nichos)}\n"
-    texto += f"📦 <b>Produtos já garimpados e publicados:</b> {len(enviados)}\n\n"
-    
-    for i, n in enumerate(nichos, 1):
-        texto += f"  ├ {i}. <b>{n.get('nome')}</b> ({len(n.get('keywords', []))} termos rastreados)\n"
-        texto += f"  │  └ 🎯 Destino: <code>{n.get('destino')}</code>\n"
-
-    await message.answer(texto, parse_mode="HTML")
-    if EXIBIR_LOGS: logger.info("✅ Relatório de Achadinhos entregue com sucesso!")
 
 @dp.message(F.text == "Relatório Geral 📊", StateFilter("*"))
 async def menu_relatorio_geral(message: types.Message, state: FSMContext):
