@@ -2014,6 +2014,7 @@ async def relatorio_fila_espelhador_novo(message: types.Message, state: FSMConte
         rota_info = mapa_rotas.get(nome_rota, {})
         inicio = rota_info.get("inicio", 10)
         fim = rota_info.get("fim", 22)
+        status_canais = rota_info.get("status_canais") or {}
         
         texto += f"📡 <b>Rota: {nome_rota}</b> ({len(itens)} vídeos aguardando)\n"
         texto += f"🕒 <b>Postagem:</b> Dia seguinte, entre {inicio}h e {fim}h\n"
@@ -2025,7 +2026,7 @@ async def relatorio_fila_espelhador_novo(message: types.Message, state: FSMConte
             nome_origem = origem_bruta
             info_o = status_canais.get(origem_bruta, {})
             
-            # Busca avançada: se a chave principal não for o ID numérico, procura dentro dos dados do userbot
+            # Busca avançada: rastreia o nome caso a origem salva não bata com a string exata
             if not info_o and origem_bruta.lstrip("-").isdigit():
                 for key, val in status_canais.items():
                     if isinstance(val, dict) and str(val.get("id")) == origem_bruta:
@@ -2060,7 +2061,7 @@ async def relatorio_fila_espiao_novo(message: types.Message, state: FSMContext):
     try:
         with open("alvos_espiao.json", "r", encoding="utf-8") as f:
             dados_espiao = json.load(f)
-            status_alvos = dados_espiao.get("status_alvos", {})
+            status_alvos = dados_espiao.get("status_alvos") or {}
     except (FileNotFoundError, json.JSONDecodeError):
         status_alvos = {}
         
@@ -2082,6 +2083,7 @@ async def relatorio_fila_espiao_novo(message: types.Message, state: FSMContext):
         nome_origem = origem_bruta
         info_o = status_alvos.get(origem_bruta, {})
         
+        # Busca avançada de fallback
         if not info_o and origem_bruta.lstrip("-").isdigit():
             for key, val in status_alvos.items():
                 if isinstance(val, dict) and str(val.get("id")) == origem_bruta:
