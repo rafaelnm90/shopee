@@ -65,14 +65,19 @@ async def converter_link_shopee(link_original):
             async with aiohttp.ClientSession() as session:
                 async with session.get(link_original, allow_redirects=True) as resp:
                     link_processar = str(resp.url)
-        except Exception:
-            pass
+                    # Limpeza vital: Remove os rastreadores do afiliado anterior para a API não rejeitar
+                    link_processar = link_processar.split('?')[0]
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro ao expandir URL: {e}")
 
     timestamp = int(time.time())
     endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
     payload = {
-        "query": "mutation generateShortLink($originUrl: String!) { generateShortLink(input: {originUrl: $originUrl}) { shortLink } }",
-        "variables": {"originUrl": link_processar}
+        "query": "mutation generateShortLink($originUrl: String!, $subIds: [String]) { generateShortLink(input: {originUrl: $originUrl, subIds: $subIds}) { shortLink } }",
+        "variables": {
+            "originUrl": link_processar,
+            "subIds": ["autorais"]
+        }
     }
     payload_json = json.dumps(payload, separators=(',', ':'))
     fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}{SHOPEE_APP_SECRET}"
@@ -88,9 +93,14 @@ async def converter_link_shopee(link_original):
             async with session.post(endpoint, headers=headers, data=payload_json) as response:
                 resposta_dados = await response.json()
                 if response.status == 200 and "data" in resposta_dados and resposta_dados["data"].get("generateShortLink"):
-                    return resposta_dados["data"]["generateShortLink"]["shortLink"]
-    except Exception:
-        pass
+                    novo_link = resposta_dados["data"]["generateShortLink"]["shortLink"]
+                    if EXIBIR_LOGS: logger.info(f"✅ Link de afiliado gerado com sucesso: {novo_link}")
+                    return novo_link
+                else:
+                    if EXIBIR_LOGS: logger.error(f"❌ A API da Shopee recusou a conversão: {resposta_dados}")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro de comunicação com a Shopee: {e}")
+        
     return link_original
 
 @client.on(events.NewMessage(chats=GRUPO_ORIGEM))
