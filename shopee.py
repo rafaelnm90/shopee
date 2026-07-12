@@ -2020,8 +2020,24 @@ async def relatorio_fila_espelhador_novo(message: types.Message, state: FSMConte
         
         for i, v in enumerate(itens[:15], 1):
             data_cap = v.get("data_captura", "Data não registrada")
-            origem = v.get("chat_origem", "Origem não mapeada")
-            texto += f"  ├ {i}. Origem: <code>{origem}</code> | Captura: {data_cap}\n"
+            origem_bruta = str(v.get("chat_origem", v.get("origem", "Origem não mapeada")))
+            
+            nome_origem = origem_bruta
+            info_o = status_canais.get(origem_bruta, {})
+            
+            # Busca avançada: se a chave principal não for o ID numérico, procura dentro dos dados do userbot
+            if not info_o and origem_bruta.lstrip("-").isdigit():
+                for key, val in status_canais.items():
+                    if isinstance(val, dict) and str(val.get("id")) == origem_bruta:
+                        info_o = val
+                        break
+                        
+            if isinstance(info_o, dict) and "nome" in info_o:
+                nome_origem = info_o["nome"]
+                
+            display_origem = f"{nome_origem}" if nome_origem != origem_bruta and nome_origem != "Origem não mapeada" else f"<code>{origem_bruta}</code>"
+            
+            texto += f"  ├ {i}. Origem: {display_origem} | Captura: {data_cap}\n"
         
         if len(itens) > 15:
             texto += f"  └ <i>... e mais {len(itens) - 15} vídeos na fila.</i>\n"
@@ -2041,6 +2057,13 @@ async def relatorio_fila_espiao_novo(message: types.Message, state: FSMContext):
     except (FileNotFoundError, json.JSONDecodeError):
         fila = []
         
+    try:
+        with open("alvos_espiao.json", "r", encoding="utf-8") as f:
+            dados_espiao = json.load(f)
+            status_alvos = dados_espiao.get("status_alvos", {})
+    except (FileNotFoundError, json.JSONDecodeError):
+        status_alvos = {}
+        
     pendentes = [item for item in fila if not item.get("processado")]
 
     if not pendentes:
@@ -2054,7 +2077,23 @@ async def relatorio_fila_espiao_novo(message: types.Message, state: FSMContext):
     for i, v in enumerate(pendentes[:15], 1):
         data_cap = v.get("data_captura", "Data não registrada")
         link_orig = v.get("link_original", "Link desconhecido")
-        texto += f"  ├ {i}. Captura: {data_cap}\n"
+        origem_bruta = str(v.get("chat_origem", v.get("origem", "Origem desconhecida")))
+        
+        nome_origem = origem_bruta
+        info_o = status_alvos.get(origem_bruta, {})
+        
+        if not info_o and origem_bruta.lstrip("-").isdigit():
+            for key, val in status_alvos.items():
+                if isinstance(val, dict) and str(val.get("id")) == origem_bruta:
+                    info_o = val
+                    break
+                    
+        if isinstance(info_o, dict) and "nome" in info_o:
+            nome_origem = info_o["nome"]
+            
+        display_origem = f"{nome_origem}" if nome_origem != origem_bruta and nome_origem != "Origem desconhecida" else f"<code>{origem_bruta}</code>"
+        
+        texto += f"  ├ {i}. Origem: {display_origem} | Captura: {data_cap}\n"
         texto += f"  │  └ 🔗 {link_orig}\n"
     
     if len(pendentes) > 15:
