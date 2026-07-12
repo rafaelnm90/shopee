@@ -59,7 +59,7 @@ teclado_espelhador_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Rota ➕"), KeyboardButton(text="Remover Rota 🗑️")],
         [KeyboardButton(text="Editar Rota ✏️"), KeyboardButton(text="Forçar Postagens 🚀")],
-        [KeyboardButton(text="Voltar aos Canais 🔙")]
+        [KeyboardButton(text="Relatório da Fila 📊"), KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -743,3 +743,39 @@ async def processar_esvaziar(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info(f"🚀 Comando de esvaziamento imediato acionado para a rota '{rota['nome']}'.")
     await message.answer(f"🚀 <b>Comando Enviado!</b>\nO motor reconheceu a instrução e iniciará a publicação de todos os vídeos pendentes da rota <b>{rota['nome']}</b> em poucos segundos.", parse_mode="HTML")
     await painel_espelhador(message, state)
+
+@router.message(EspelhadorFluxo.menu_principal, F.text == "Relatório da Fila 📊")
+async def gerar_relatorio_fila_principal(message: types.Message, state: FSMContext):
+    try:
+        with open("fila_espelhador.json", "r", encoding="utf-8") as f:
+            dados_fila = json.load(f)
+            fila = dados_fila.get("fila", [])
+    except (FileNotFoundError, json.JSONDecodeError):
+        fila = []
+
+    if not fila:
+        await message.answer("📭 A fila de espelhamento D+1 está vazia no momento.", parse_mode="HTML")
+        return
+
+    rotas_agrupadas = {}
+    for item in fila:
+        nome = item.get("nome_rota", "Rota Desconhecida")
+        if nome not in rotas_agrupadas:
+            rotas_agrupadas[nome] = []
+        rotas_agrupadas[nome].append(item)
+
+    texto = "📊 <b>Relatório da Fila (D+1)</b>\n\n"
+    for nome_rota, itens in rotas_agrupadas.items():
+        texto += f"📡 <b>Rota: {nome_rota}</b> ({len(itens)} vídeos aguardando)\n"
+        
+        # Limita a exibição aos primeiros 15 vídeos de cada rota para não travar o Telegram
+        for i, v in enumerate(itens[:15], 1):
+            data_cap = v.get("data_captura", "Data não registrada")
+            origem = v.get("origem", "Origem não mapeada")
+            texto += f"  ├ {i}. Origem: <code>{origem}</code> | Captura: {data_cap}\n"
+        
+        if len(itens) > 15:
+            texto += f"  └ <i>... e mais {len(itens) - 15} vídeos aguardando.</i>\n"
+        texto += "\n"
+
+    await message.answer(texto, parse_mode="HTML")
