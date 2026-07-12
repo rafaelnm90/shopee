@@ -1944,7 +1944,7 @@ def obter_teclado_relatorios():
 
 def obter_teclado_relatorios_filas():
     botoes = [
-        [KeyboardButton(text="Fila do Espelhador 🔄"), KeyboardButton(text="Fila do Espião 🕵️")],
+        [KeyboardButton(text="Fila do Espião 🕵️"), KeyboardButton(text="Fila do Espelhador 🔄")],
         [KeyboardButton(text="Fila de Achadinhos 🛍️")],
         [KeyboardButton(text="Voltar aos Relatórios 🔙")]
     ]
