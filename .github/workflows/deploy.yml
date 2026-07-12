@@ -51,14 +51,6 @@ jobs:
             if [ "$EXIBIR_LOGS" = "true" ]; then echo "✅ Iniciando a nova versão do Espião..."; fi
             sudo systemctl start espiao_bot.service
 
-            # Reinicia o Espelhador de Vídeos Autorais
-            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🔄 Parando o Espelhador Autorais..."; fi
-            sudo systemctl stop espelhador_autorais_bot.service || true
-            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🧹 Limpando processos do Espelhador..."; fi
-            sudo systemctl kill -s SIGKILL espelhador_autorais_bot.service || true
-            if [ "$EXIBIR_LOGS" = "true" ]; then echo "✅ Iniciando a nova versão do Espelhador..."; fi
-            sudo systemctl start espelhador_autorais_bot.service
-
             # Configuração automática do serviço do Espelhador
             sudo tee /etc/systemd/system/espelhador_autorais_bot.service > /dev/null <<EOF
             [Unit]
@@ -77,7 +69,7 @@ jobs:
             WantedBy=multi-user.target
             EOF
 
-            # Aplica as permissões e inicia o serviço
+            # Aplica as permissões no sistema operativo
             sudo systemctl daemon-reload
             sudo systemctl enable espelhador_autorais_bot.service
             
