@@ -151,10 +151,25 @@ dp = Dispatcher(storage=MemoryStorage())
 FUSO_STR = "America/Sao_Paulo"
 fuso_horario = ZoneInfo(FUSO_STR)
 _lock_contador = asyncio.Lock()
+
+# ✅ NOVO: Sistema de travas assíncronas para proteção contra Race Conditions
+if EXIBIR_LOGS: logger.info("🚀 Inicializando o gerenciador de travas (Locks) para os arquivos locais...")
+_locks_json = {
+    "fila_postagens.json": asyncio.Lock(),
+    "fila_clonagem.json": asyncio.Lock(),
+    "pausa_programada.json": asyncio.Lock(),
+    "config_rotina.json": asyncio.Lock(),
+    "alvos_espiao.json": asyncio.Lock(),
+    "banco_pedidos.json": asyncio.Lock()
+}
+if EXIBIR_LOGS: logger.info("✅ Travas de segurança dos bancos JSON prontas e ativas.")
+
 scheduler = AsyncIOScheduler(timezone=FUSO_STR)
 
+if EXIBIR_LOGS: logger.info("🔄 Acoplando o módulo externo Espelhador ao fluxo principal...")
 dp.include_router(espelhador.router)
 espelhador.configurar_dependencias(bot, scheduler)
+if EXIBIR_LOGS: logger.info("✅ Módulo Espelhador montado com segurança.")
 
 # --- NOVOS TECLADOS DE CONTROLE ---
 # 🛠️ Teclado para seleção da plataforma
