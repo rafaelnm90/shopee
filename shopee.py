@@ -617,6 +617,8 @@ async def executar_postagem_fila(item_id):
     
     try:
         sucesso = False
+        falha_irreversivel = False
+        
         if caminho_video and os.path.exists(caminho_video):
             arquivo = FSInputFile(caminho_video)
             msg = await bot.send_video(chat_id=GRUPO_ID, video=arquivo, caption=legenda, parse_mode="HTML")
@@ -633,16 +635,21 @@ async def executar_postagem_fila(item_id):
             sucesso = True
             if EXIBIR_LOGS: logger.info("🚀 [Fluxo] Vídeo ID enviado com sucesso para o Telegram.")
         else:
-            if EXIBIR_LOGS: logger.error("❌ Falha: Vídeo expirou ou foi perdido fisicamente da máquina.")
+            if EXIBIR_LOGS: logger.error("❌ Falha irreversível: Vídeo expirou ou foi perdido fisicamente da máquina. Acionando protocolo Dead-Letter.")
             registrar_erro_json("Vídeo expirou ou foi perdido fisicamente da máquina.", origem="shopee.py")
+            falha_irreversivel = True
 
-        if sucesso:
+        if sucesso or falha_irreversivel:
             for x in fila:
                 if x["id"] == item_id_real:
                     x["postado"] = True
                     x["horario_postagem"] = agora.strftime("%H:%M")
                     x["data_postagem"] = hoje_str
-                    if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Vídeo {item_id_real} marcado como 'Já postado' às {x['horario_postagem']}.")
+                    if falha_irreversivel:
+                        x["legenda"] = f"[ERRO: VÍDEO PERDIDO]\n{x.get('legenda', '')}"
+                        if EXIBIR_LOGS: logger.warning(f"🗑️ [Dead-Letter] Vídeo {item_id_real} descartado e marcado como falho na fila.")
+                    else:
+                        if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Vídeo {item_id_real} marcado como 'Já postado' às {x['horario_postagem']}.")
                     break
             fila_data["fila"] = fila
             salvar_fila_postagens(fila_data)
