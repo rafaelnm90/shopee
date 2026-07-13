@@ -1973,7 +1973,7 @@ def processar_e_salvar_pedidos_api(conversoes):
 def obter_teclado_relatorios():
     botoes = [
         [KeyboardButton(text="Relatório Financeiro 💰"), KeyboardButton(text="Diagnóstico de IA 🧠")],
-        [KeyboardButton(text="Relatórios de Filas 📋")],
+        [KeyboardButton(text="Relatórios de Filas 📋"), KeyboardButton(text="Logs de Erros ⚠️")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -2509,6 +2509,54 @@ async def gerar_relatorio_ia(message: types.Message, state: FSMContext):
 
     await msg_status.delete()
     await message.answer(texto_modelos, parse_mode="HTML")
+
+@dp.message(F.text == "Logs de Erros ⚠️", StateFilter("*"))
+async def gerar_relatorio_logs(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    msg_status = await message.answer("⚠️ A extrair o ficheiro de registo de falhas... Aguarde ⏳")
+    if EXIBIR_LOGS: logger.info("🚀 A iniciar a auditoria do ficheiro erros_logs.json...")
+    
+    arquivo_logs = "erros_logs.json"
+    
+    if not os.path.exists(arquivo_logs):
+        if EXIBIR_LOGS: logger.info("✅ O ficheiro de logs não existe. O sistema está perfeitamente limpo.")
+        await msg_status.edit_text("✅ <b>Sistema Limpo!</b>\nNão existe nenhum ficheiro de registo de erros no servidor. A automação está a funcionar perfeitamente.", parse_mode="HTML")
+        return
+        
+    try:
+        with open(arquivo_logs, "r", encoding="utf-8") as f:
+            logs = json.load(f)
+            
+        if not logs:
+            if EXIBIR_LOGS: logger.info("✅ O ficheiro de logs existe, mas está vazio. Sistema limpo.")
+            await msg_status.edit_text("✅ <b>Sistema Limpo!</b>\nO ficheiro de erros está vazio. Nenhuma falha foi registada recentemente.", parse_mode="HTML")
+            return
+            
+        if EXIBIR_LOGS: logger.info(f"📊 Ficheiro lido com sucesso. Foram encontrados {len(logs)} registos de erro.")
+        
+        ultimos_erros = logs[-5:]
+        ultimos_erros.reverse()
+        
+        texto = f"⚠️ <b>Relatório de Erros Recentes</b> (Últimos {len(ultimos_erros)})\n\n"
+        for i, erro in enumerate(ultimos_erros, 1):
+            data_hora = erro.get("timestamp", "Data desconhecida")
+            origem = erro.get("origem", "Desconhecida")
+            detalhe = str(erro.get("erro", ""))[:200]
+            
+            texto += f"<b>{i}. ⏱️ {data_hora}</b>\n"
+            texto += f"📍 <i>Origem:</i> {origem}\n"
+            texto += f"❌ <i>Falha:</i> <code>{detalhe}</code>\n\n"
+            
+        await msg_status.edit_text(texto, parse_mode="HTML")
+        
+        if EXIBIR_LOGS: logger.info("📤 A enviar o documento JSON completo para o chat do administrador...")
+        documento = FSInputFile(arquivo_logs)
+        await bot.send_document(chat_id=message.chat.id, document=documento, caption="📁 Ficheiro completo de logs em anexo.")
+        if EXIBIR_LOGS: logger.info("✅ Ficheiro de logs entregue com sucesso!")
+        
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao processar a leitura dos logs: {e}")
+        await msg_status.edit_text(f"❌ <b>Erro interno ao processar os logs:</b>\n<code>{e}</code>", parse_mode="HTML")
 
 # ✅ Handlers para Envio Manual de Mensagens via Botões
 @dp.message(F.text == "Disparar Bom Dia ☀️")
