@@ -2023,7 +2023,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.info(f"✅ Relatório do {tipo_fila} gerado (Fila vazia).")
         return
         
-    cache_nomes = {}
+    cache_nomes = ler_cache_nomes_grupos()  # 🚀 Carrega nomes já resolvidos antes
     rotas_agrupadas = {}
     
     # 1. Agrupamento de rotas e metadados
@@ -2124,16 +2124,19 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     if nome_encontrado:
                         nome_origem = nome_encontrado
                     
-                    # Tenta a API do Telegram apenas como último recurso
+                    # Tenta a API apenas se ainda for um número frio
                     if (nome_origem == origem_bruta or not nome_origem) and origem_bruta.lstrip("-").isdigit():
                         try:
-                            if EXIBIR_LOGS: logger.info(f"🔎 Consultando API do Telegram para o ID: {origem_bruta}...")
+                            if EXIBIR_LOGS: logger.info(f"🔎 Consultando API do Telegram para resolver nome amigável do ID: {origem_bruta}...")
                             chat_obj = await bot.get_chat(origem_bruta)
                             nome_origem = chat_obj.title or chat_obj.full_name or origem_bruta
                         except Exception:
                             pass
-                            
+                        finally:
+                            await asyncio.sleep(0.3)
                     cache_nomes[origem_bruta] = nome_origem
+                    if nome_origem != origem_bruta:
+                        salvar_nome_grupo(origem_bruta, nome_origem)
                     
                 display_origem = f"{nome_origem[:25]}" if nome_origem != origem_bruta else f"{origem_bruta}"
                 
@@ -2158,6 +2161,33 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         await message.answer(msg, parse_mode="HTML", disable_web_page_preview=True)
         
     if EXIBIR_LOGS: logger.info(f"✅ Relatório unificado do {tipo_fila} entregue com sucesso! (Dividido em {len(mensagens_para_enviar)} partes).")
+
+@dp.message(Command("nomeargrupo"), StateFilter("*"))
+async def nomear_grupo_manual(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+
+    partes = message.text.split(maxsplit=2)
+    if len(partes) < 3:
+        await message.answer(
+            "⚠️ <b>Uso:</b> <code>/nomeargrupo ID_ou_@username Nome do Grupo</code>\n\n"
+            "Use quando o bot não conseguir puxar o nome sozinho (ex: quando o bot não é membro do canal, só o Espião é).\n"
+            "Exemplo: <code>/nomeargrupo -1001234567890 Achadinhos da Maria</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    _, chat_id_bruto, nome = partes
+    nome = nome.strip()
+
+    chat_id_limpo = chat_id_bruto.strip()
+    if chat_id_limpo.replace('-', '').isdigit():
+        numeros = chat_id_limpo.replace('-', '')
+        if numeros.startswith("100") and len(numeros) > 10:
+            numeros = numeros[3:]
+        chat_id_limpo = f"-100{numeros}"
+
+    salvar_nome_grupo(chat_id_limpo, nome)
+    await message.answer(f"✅ Pronto! <code>{chat_id_limpo}</code> vai aparecer como <b>{nome}</b> nos próximos relatórios.", parse_mode="HTML")
 
 @dp.message(F.text == "Relatório Geral 📊", StateFilter("*"))
 async def menu_relatorio_geral(message: types.Message, state: FSMContext):
