@@ -5872,6 +5872,7 @@ async def processar_fila_espiao():
         texto_ia = await asyncio.to_thread(gerar_copy_clone)
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro na IA ao processar clone: {e}")
+        registrar_erro_json(f"processar_fila_espiao IA: {e}", origem="espiao.py")
         texto_ia = "🛍️ Vídeo do Produto\n#Oferta"
         
     # Fatiar o texto da IA para separar o Nome das Hashtags
