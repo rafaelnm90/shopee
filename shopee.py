@@ -2577,9 +2577,13 @@ async def limpar_historico_erros(callback: CallbackQuery):
     if os.path.exists(arquivo_logs):
         try:
             os.remove(arquivo_logs)
-            if EXIBIR_LOGS: logger.info("✅ Ficheiro erros_logs.json apagado fisicamente do servidor com sucesso.")
-            # Edita a mensagem original apagando o botão e confirmando a limpeza
-            await callback.message.edit_text("✅ <b>Histórico Limpo!</b>\nO ficheiro de erros foi excluído permanentemente do servidor. O sistema está agora a monitorizar do zero.", parse_mode="HTML")
+            
+            # ✅ NOVO: Cria o arquivo de trava na raiz do projeto para silenciar erros temporariamente
+            with open("trava_manutencao.txt", "w") as f:
+                f.write("ativo")
+                
+            if EXIBIR_LOGS: logger.info("✅ Ficheiro erros_logs.json apagado e trava_manutencao.txt ativada.")
+            await callback.message.edit_text("✅ <b>Histórico Limpo e Trava Ativada!</b>\nOs erros antigos foram apagados. O abafador de ruído está ativo enquanto você faz as correções no código.", parse_mode="HTML")
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro de permissão/sistema ao tentar apagar o ficheiro de logs: {e}")
             await callback.answer(f"Erro ao apagar: {e}", show_alert=True)
