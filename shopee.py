@@ -24,8 +24,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from google import genai
 import matplotlib.pyplot as plt
 import io
-
 import espelhador
+from utils import registrar_erro_json
 
 # 1. CONSTANTES E TOKENS
 API_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -612,13 +612,14 @@ async def executar_postagem_fila(item_id):
                     x["video_id"] = novo_file_id
                     x["caminho_video"] = None
             sucesso = True
-            if EXIBIR_LOGS: logger.info(f"🚀 [Fluxo] Vídeo enviado com sucesso para o Telegram.")
+            if EXIBIR_LOGS: logger.info("🚀 [Fluxo] Vídeo enviado com sucesso para o Telegram.")
         elif video_id:
             await bot.send_video(chat_id=GRUPO_ID, video=video_id, caption=legenda, parse_mode="HTML")
             sucesso = True
-            if EXIBIR_LOGS: logger.info(f"🚀 [Fluxo] Vídeo ID enviado com sucesso para o Telegram.")
+            if EXIBIR_LOGS: logger.info("🚀 [Fluxo] Vídeo ID enviado com sucesso para o Telegram.")
         else:
-            if EXIBIR_LOGS: logger.error(f"❌ Falha: Vídeo expirou ou foi perdido fisicamente da máquina.")
+            if EXIBIR_LOGS: logger.error("❌ Falha: Vídeo expirou ou foi perdido fisicamente da máquina.")
+            registrar_erro_json("Vídeo expirou ou foi perdido fisicamente da máquina.", origem="shopee.py")
 
         if sucesso:
             for x in fila:
@@ -631,10 +632,11 @@ async def executar_postagem_fila(item_id):
             fila_data["fila"] = fila
             salvar_fila_postagens(fila_data)
         else:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ [Fluxo] Postagem não concluída, status na fila preservado.")
+            if EXIBIR_LOGS: logger.warning("⚠️ [Fluxo] Postagem não concluída, status na fila preservado.")
 
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao postar vídeo da fila: {e}")
+        registrar_erro_json(f"executar_postagem_fila: {e}", origem="shopee.py")
         
         # A faxina física real do arquivo foi transferida para a limpeza da madrugada em agendar_tarefas_diarias
         # para permitir que o vídeo fique visível no painel até o final do dia.
