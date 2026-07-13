@@ -534,6 +534,7 @@ async def processar_fila_espelhador_loop():
             
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro crítico no motor de distribuição do espelhador: {e}")
+            registrar_erro_json(f"processar_fila_espelhador_loop: {e}", origem="espelhador.py")
         
         await asyncio.sleep(60) # Intervalo alargado para reduzir o peso na memória
 
