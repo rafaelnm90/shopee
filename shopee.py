@@ -2007,7 +2007,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     
     tipo_fila = "Espelhador" if "Espelhador" in message.text else "Espião"
-    if EXIBIR_LOGS: logger.info(f"📊 Iniciando compilação do relatório unificado para a fila do {tipo_fila}...")
+    if EXIBIR_LOGS: logger.info(f"📊 Iniciando compilação do relatório unificado (Sem limites) para a fila do {tipo_fila}...")
     
     arquivo_fila = "fila_espelhador.json" if tipo_fila == "Espelhador" else "fila_clonagem.json"
     try:
@@ -2023,12 +2023,10 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.info(f"✅ Relatório do {tipo_fila} gerado (Fila vazia).")
         return
         
-    texto = f"📊 <b>Relatório da Fila do {tipo_fila} (D+1)</b>\n\n"
     cache_nomes = {}
-    
-    # 1. Definir agrupamento de rotas e metadados dependendo do tipo da fila
     rotas_agrupadas = {}
     
+    # 1. Agrupamento de rotas e metadados
     if tipo_fila == "Espelhador":
         import espelhador
         dados_rotas = espelhador.ler_espelhos()
@@ -2055,20 +2053,29 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         }
         rotas_agrupadas["Radar Global"] = pendentes
         
-    # 2. Renderização Universal (O mesmo laço atende a ambas as filas perfeitamente)
+    # 2. Renderização Universal com Paginação Automática (Anti-Limite do Telegram)
+    mensagens_para_enviar = []
+    texto_atual = f"📊 <b>Relatório da Fila do {tipo_fila} (D+1)</b>\n\n"
+
     for nome_rota, itens in rotas_agrupadas.items():
         rota_info = mapa_rotas.get(nome_rota, {})
         inicio = rota_info.get("inicio", 10)
         fim = rota_info.get("fim", 22)
         status_canais = rota_info.get("status_canais") or rota_info.get("status_alvos") or {}
         
-        texto += f"📡 <b>Rota: {nome_rota}</b> ({len(itens)} vídeos aguardando)\n"
-        texto += f"🕒 <b>Postagem:</b> Dia seguinte, entre {inicio}h e {fim}h\n"
+        cabecalho_rota = f"📡 <b>Rota: {nome_rota}</b> ({len(itens)} vídeos aguardando)\n🕒 <b>Postagem:</b> Dia seguinte, entre {inicio}h e {fim}h\n"
         
-        for i, v in enumerate(itens[:15], 1):
+        if len(texto_atual) + len(cabecalho_rota) > 3800:
+            mensagens_para_enviar.append(texto_atual)
+            texto_atual = f"📊 <b>Relatório da Fila do {tipo_fila} (Continuação)</b>\n\n"
+            
+        texto_atual += cabecalho_rota
+        
+        for i, v in enumerate(itens, 1): # ✅ O limite [:15] foi removido para mostrar 100% da fila
             data_cap = v.get("data_captura", "Data não registrada")
             origem_bruta = str(v.get("chat_origem", v.get("origem", "Desconhecida")))
             
+            # Resolução Inteligente do Nome do Grupo
             if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 display_origem = "<code>Pendente de rastreio</code>"
             else:
@@ -2077,7 +2084,6 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     nome_origem = cache_nomes[origem_bruta]
                 else:
                     info_o = status_canais.get(origem_bruta, {})
-                    # Busca profunda cruzando dados numéricos
                     if not info_o and origem_bruta.lstrip("-").isdigit():
                         for val in status_canais.values():
                             if isinstance(val, dict) and str(val.get("id")) == origem_bruta:
@@ -2086,7 +2092,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     if isinstance(info_o, dict) and "nome" in info_o:
                         nome_origem = info_o["nome"]
                         
-                    # Última esperança: API oficial do Telegram
+                    # Tenta a API apenas se ainda for um número frio
                     if (nome_origem == origem_bruta or not nome_origem) and origem_bruta.lstrip("-").isdigit():
                         try:
                             chat_obj = await bot.get_chat(origem_bruta)
@@ -2095,16 +2101,36 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                             pass
                     cache_nomes[origem_bruta] = nome_origem
                     
-                display_origem = f"{nome_origem[:20]}" if nome_origem != origem_bruta else f"<code>{origem_bruta}</code>"
-                
-            texto += f"  ├ {i}. Origem: {display_origem} | Captura: {data_cap}\n"
+                display_origem = f"{nome_origem[:25]}" if nome_origem != origem_bruta else f"Grupo ID: <code>{origem_bruta}</code>"
             
-        if len(itens) > 15:
-            texto += f"  └ <i>... e mais {len(itens) - 15} vídeos na fila.</i>\n"
-        texto += "\n"
+            # ✅ NOVO: Construção do link de rastreabilidade do vídeo original
+            link_original = v.get("link_original", "")
+            if not link_original and v.get("mensagem_id") and origem_bruta.lstrip("-").isdigit():
+                # Tenta construir o link para o Espelhador (https://t.me/c/chat_id/msg_id)
+                chat_id_limpo = origem_bruta.replace("-100", "")
+                link_original = f"https://t.me/c/{chat_id_limpo}/{v.get('mensagem_id')}"
+                
+            link_display = f"<a href='{link_original}'>Ver Vídeo Original</a>" if link_original else "<i>Sem link direto</i>"
+            
+            # Monta a linha do vídeo com o link abaixo do nome
+            linha_video = f"  ├ {i}. Origem: {display_origem}\n  │  └ 🔗 {link_display} | ⏱️ {data_cap}\n"
+            
+            # Verifica se a mensagem atual vai estourar o limite do Telegram (4096 caracteres)
+            if len(texto_atual) + len(linha_video) > 3800:
+                mensagens_para_enviar.append(texto_atual)
+                texto_atual = f"📊 <b>Relatório da Fila do {tipo_fila} (Continuação)</b>\n\n📡 <b>Rota: {nome_rota} (Cont.)</b>\n"
+                
+            texto_atual += linha_video
+            
+        texto_atual += "\n"
 
-    await message.answer(texto, parse_mode="HTML", disable_web_page_preview=True)
-    if EXIBIR_LOGS: logger.info(f"✅ Relatório unificado do {tipo_fila} entregue com sucesso!")
+    mensagens_para_enviar.append(texto_atual)
+
+    # Envia todas as mensagens fatiadas em sequência
+    for msg in mensagens_para_enviar:
+        await message.answer(msg, parse_mode="HTML", disable_web_page_preview=True)
+        
+    if EXIBIR_LOGS: logger.info(f"✅ Relatório unificado do {tipo_fila} entregue com sucesso! (Dividido em {len(mensagens_para_enviar)} partes).")
 
 @dp.message(F.text == "Relatório Geral 📊", StateFilter("*"))
 async def menu_relatorio_geral(message: types.Message, state: FSMContext):
