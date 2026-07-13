@@ -2547,7 +2547,13 @@ async def gerar_relatorio_logs(message: types.Message, state: FSMContext):
             texto += f"📍 <i>Origem:</i> {origem}\n"
             texto += f"❌ <i>Falha:</i> <code>{detalhe}</code>\n\n"
             
-        await msg_status.edit_text(texto, parse_mode="HTML")
+        # ✅ NOVO: Criação do botão interativo anexado diretamente à mensagem de erro
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        teclado_limpar = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="Limpar Histórico de Erros 🧹", callback_data="limpar_logs")]]
+        )
+        
+        await msg_status.edit_text(texto, parse_mode="HTML", reply_markup=teclado_limpar)
         
         if EXIBIR_LOGS: logger.info("📤 A enviar o documento JSON completo para o chat do administrador...")
         documento = FSInputFile(arquivo_logs)
@@ -2557,6 +2563,32 @@ async def gerar_relatorio_logs(message: types.Message, state: FSMContext):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao processar a leitura dos logs: {e}")
         await msg_status.edit_text(f"❌ <b>Erro interno ao processar os logs:</b>\n<code>{e}</code>", parse_mode="HTML")
+
+# ✅ NOVO: Handler (Callback) para apagar fisicamente o ficheiro de logs após o clique
+from aiogram.types import CallbackQuery
+
+@dp.callback_query(F.data == "limpar_logs")
+async def limpar_historico_erros(callback: CallbackQuery):
+    if callback.from_user.id != ADMIN_ID: return
+    
+    if EXIBIR_LOGS: logger.info("🧹 Pedido de exclusão do histórico de erros recebido via botão interativo.")
+    
+    arquivo_logs = "erros_logs.json"
+    if os.path.exists(arquivo_logs):
+        try:
+            os.remove(arquivo_logs)
+            if EXIBIR_LOGS: logger.info("✅ Ficheiro erros_logs.json apagado fisicamente do servidor com sucesso.")
+            # Edita a mensagem original apagando o botão e confirmando a limpeza
+            await callback.message.edit_text("✅ <b>Histórico Limpo!</b>\nO ficheiro de erros foi excluído permanentemente do servidor. O sistema está agora a monitorizar do zero.", parse_mode="HTML")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro de permissão/sistema ao tentar apagar o ficheiro de logs: {e}")
+            await callback.answer(f"Erro ao apagar: {e}", show_alert=True)
+    else:
+        if EXIBIR_LOGS: logger.info("⚠️ O ficheiro de logs já não existia no momento da exclusão.")
+        await callback.message.edit_text("✅ <b>Sistema Limpo!</b>\nO ficheiro de erros já não existe no servidor.", parse_mode="HTML")
+        
+    # Finaliza a interação do callback para remover o ícone de carregamento no Telegram do utilizador
+    await callback.answer()
 
 # ✅ Handlers para Envio Manual de Mensagens via Botões
 @dp.message(F.text == "Disparar Bom Dia ☀️")
