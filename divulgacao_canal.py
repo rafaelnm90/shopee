@@ -46,6 +46,15 @@ if EXIBIR_LOGS:
 def limpar_travas_fantasma(nome_sessao):
     import glob
     import os
+    
+    # ✅ NOVO: Destrói a trava de manutenção no exato segundo em que o script inicia
+    if os.path.exists("trava_manutencao.txt"):
+        try:
+            os.remove("trava_manutencao.txt")
+            print("🔓 [Auto-cura] Trava de manutenção removida! Monitoramento de erros reativado.")
+        except:
+            pass
+
     arquivos_trava = glob.glob(f"{nome_sessao}.session-journal") + glob.glob(f"{nome_sessao}.session.lock")
     for arquivo in arquivos_trava:
         try:
