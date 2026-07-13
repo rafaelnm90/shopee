@@ -16,6 +16,8 @@ jobs:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
+          command_timeout: 30m
+          script_stop: true
           script: |
             # Acessa a pasta exata onde o bot está no servidor
             cd ~/shopee
@@ -26,7 +28,7 @@ jobs:
             
             # Atualiza as bibliotecas se houver mudanças
             source venv/bin/activate
-            pip install -r requirements.txt
+            pip install -r requirements.txt --no-cache-dir
             
             # Reinicia o serviço principal (shopee) com tolerância a falhas de parada
             sudo systemctl stop shopee_bot.service || true
