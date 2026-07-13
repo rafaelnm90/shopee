@@ -11,6 +11,7 @@ from telethon import utils
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageMediaDocument
 from dotenv import load_dotenv
+from utils import registrar_erro_json
 
 load_dotenv()
 EXIBIR_LOGS = True
