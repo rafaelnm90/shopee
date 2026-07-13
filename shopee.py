@@ -1981,167 +1981,111 @@ async def voltar_relatorios_geral(message: types.Message, state: FSMContext):
     await state.clear()
     await menu_relatorio_geral(message, state)
 
-@dp.message(RelatoriosFluxo.menu_filas, F.text == "Fila do Espelhador 🔄")
-async def relatorio_fila_espelhador_novo(message: types.Message, state: FSMContext):
+@dp.message(RelatoriosFluxo.menu_filas, F.text.in_(["Fila do Espelhador 🔄", "Fila do Espião 🕵️"]))
+async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("📊 Iniciando compilação do relatório da fila do Espelhador...")
+    
+    tipo_fila = "Espelhador" if "Espelhador" in message.text else "Espião"
+    if EXIBIR_LOGS: logger.info(f"📊 Iniciando compilação do relatório unificado para a fila do {tipo_fila}...")
+    
+    arquivo_fila = "fila_espelhador.json" if tipo_fila == "Espelhador" else "fila_clonagem.json"
     try:
-        with open("fila_espelhador.json", "r", encoding="utf-8") as f:
-            dados_fila = json.load(f)
-            fila = dados_fila.get("fila", [])
+        with open(arquivo_fila, "r", encoding="utf-8") as f:
+            fila = json.load(f).get("fila", [])
     except (FileNotFoundError, json.JSONDecodeError):
         fila = []
-
-    if not fila:
-        await message.answer("📭 A fila de espelhamento D+1 está vazia no momento.", parse_mode="HTML")
-        if EXIBIR_LOGS: logger.info("✅ Relatório gerado (Fila vazia).")
-        return
-
-    import espelhador
-    dados_rotas = espelhador.ler_espelhos()
-    mapa_rotas = {r["nome"]: r for r in dados_rotas.get("rotas", [])}
-
-    rotas_agrupadas = {}
-    for item in fila:
-        nome = item.get("nome_rota", "Rota Desconhecida")
-        if nome not in rotas_agrupadas:
-            rotas_agrupadas[nome] = []
-        rotas_agrupadas[nome].append(item)
-
-    texto = "📊 <b>Relatório da Fila do Espelhador (D+1)</b>\n\n"
+        
+    pendentes = [item for item in fila if not item.get("processado", False)] if tipo_fila == "Espião" else fila
     
-    # Cache temporário para não sobrecarregar a API
+    if not pendentes:
+        await message.answer(f"📭 A fila do {tipo_fila} está vazia no momento.", parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info(f"✅ Relatório do {tipo_fila} gerado (Fila vazia).")
+        return
+        
+    texto = f"📊 <b>Relatório da Fila do {tipo_fila} (D+1)</b>\n\n"
     cache_nomes = {}
     
+    # 1. Definir agrupamento de rotas e metadados dependendo do tipo da fila
+    rotas_agrupadas = {}
+    
+    if tipo_fila == "Espelhador":
+        import espelhador
+        dados_rotas = espelhador.ler_espelhos()
+        mapa_rotas = {r["nome"]: r for r in dados_rotas.get("rotas", [])}
+        
+        for item in pendentes:
+            nome_rota = item.get("nome_rota", "Rota Desconhecida")
+            if nome_rota not in rotas_agrupadas: rotas_agrupadas[nome_rota] = []
+            rotas_agrupadas[nome_rota].append(item)
+            
+    else: # Lógica para o Espião
+        try:
+            with open("alvos_espiao.json", "r", encoding="utf-8") as f:
+                dados_espiao = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            dados_espiao = {}
+            
+        mapa_rotas = {
+            "Radar Global": {
+                "inicio": dados_espiao.get("inicio", 10),
+                "fim": dados_espiao.get("fim", 22),
+                "status_canais": dados_espiao.get("status_alvos", {})
+            }
+        }
+        rotas_agrupadas["Radar Global"] = pendentes
+        
+    # 2. Renderização Universal (O mesmo laço atende a ambas as filas perfeitamente)
     for nome_rota, itens in rotas_agrupadas.items():
         rota_info = mapa_rotas.get(nome_rota, {})
         inicio = rota_info.get("inicio", 10)
         fim = rota_info.get("fim", 22)
-        status_canais = rota_info.get("status_canais") or {}
+        status_canais = rota_info.get("status_canais") or rota_info.get("status_alvos") or {}
         
         texto += f"📡 <b>Rota: {nome_rota}</b> ({len(itens)} vídeos aguardando)\n"
         texto += f"🕒 <b>Postagem:</b> Dia seguinte, entre {inicio}h e {fim}h\n"
         
         for i, v in enumerate(itens[:15], 1):
             data_cap = v.get("data_captura", "Data não registrada")
-            origem_bruta = str(v.get("chat_origem", v.get("origem", "Origem não mapeada")))
+            origem_bruta = str(v.get("chat_origem", v.get("origem", "Desconhecida")))
             
-            nome_origem = origem_bruta
-            
-            # 1. Tenta buscar no cache do painel
-            if origem_bruta in cache_nomes:
-                nome_origem = cache_nomes[origem_bruta]
+            if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
+                display_origem = "<code>Pendente de rastreio</code>"
             else:
-                # 2. Tenta buscar no banco de dados do userbot
-                info_o = status_canais.get(origem_bruta, {})
-                if not info_o and origem_bruta.lstrip("-").isdigit():
-                    for key, val in status_canais.items():
-                        if isinstance(val, dict) and str(val.get("id")) == origem_bruta:
-                            info_o = val
-                            break
-                if isinstance(info_o, dict) and "nome" in info_o:
-                    nome_origem = info_o["nome"]
+                nome_origem = origem_bruta
+                if origem_bruta in cache_nomes:
+                    nome_origem = cache_nomes[origem_bruta]
+                else:
+                    info_o = status_canais.get(origem_bruta, {})
+                    # Busca profunda cruzando dados numéricos
+                    if not info_o and origem_bruta.lstrip("-").isdigit():
+                        for val in status_canais.values():
+                            if isinstance(val, dict) and str(val.get("id")) == origem_bruta:
+                                info_o = val
+                                break
+                    if isinstance(info_o, dict) and "nome" in info_o:
+                        nome_origem = info_o["nome"]
+                        
+                    # Última esperança: API oficial do Telegram
+                    if (nome_origem == origem_bruta or not nome_origem) and origem_bruta.lstrip("-").isdigit():
+                        try:
+                            chat_obj = await bot.get_chat(origem_bruta)
+                            nome_origem = chat_obj.title or chat_obj.full_name or origem_bruta
+                        except Exception:
+                            pass
+                    cache_nomes[origem_bruta] = nome_origem
+                    
+                display_origem = f"{nome_origem[:20]}" if nome_origem != origem_bruta else f"<code>{origem_bruta}</code>"
                 
-                # 3. Se ainda for um ID numérico, busca o nome real dinamicamente na API do Telegram
-                if (nome_origem == origem_bruta or not nome_origem) and origem_bruta.lstrip("-").isdigit():
-                    try:
-                        chat_obj = await bot.get_chat(origem_bruta)
-                        nome_origem = chat_obj.title or chat_obj.full_name or origem_bruta
-                    except Exception:
-                        pass
-                
-                cache_nomes[origem_bruta] = nome_origem
-                
-            display_origem = f"{nome_origem[:20]}" if nome_origem != origem_bruta and nome_origem != "Origem não mapeada" else f"<code>{origem_bruta}</code>"
-            
             texto += f"  ├ {i}. Origem: {display_origem} | Captura: {data_cap}\n"
-        
+            
         if len(itens) > 15:
             texto += f"  └ <i>... e mais {len(itens) - 15} vídeos na fila.</i>\n"
         texto += "\n"
 
-    await message.answer(texto, parse_mode="HTML")
-    if EXIBIR_LOGS: logger.info("✅ Relatório do Espelhador entregue com sucesso!")
-
-@dp.message(RelatoriosFluxo.menu_filas, F.text == "Fila do Espião 🕵️")
-async def relatorio_fila_espiao_novo(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("📊 Iniciando compilação do relatório da fila do Espião...")
-    try:
-        with open("fila_clonagem.json", "r", encoding="utf-8") as f:
-            dados_fila = json.load(f)
-            fila = dados_fila.get("fila", [])
-    except (FileNotFoundError, json.JSONDecodeError):
-        fila = []
-        
-    try:
-        with open("alvos_espiao.json", "r", encoding="utf-8") as f:
-            dados_espiao = json.load(f)
-            inicio = dados_espiao.get("inicio", 10)
-            fim = dados_espiao.get("fim", 22)
-            status_alvos = dados_espiao.get("status_alvos") or {}
-    except (FileNotFoundError, json.JSONDecodeError):
-        inicio = 10
-        fim = 22
-        status_alvos = {}
-        
-    pendentes = [item for item in fila if not item.get("processado")]
-
-    if not pendentes:
-        await message.answer("📭 A fila do espião de clonagem está vazia no momento. Nenhum vídeo aguardando IA.", parse_mode="HTML")
-        if EXIBIR_LOGS: logger.info("✅ Relatório gerado (Fila vazia).")
-        return
-
-    texto = "📊 <b>Relatório da Fila do Espião (D+1)</b>\n\n"
-    texto += f"📡 <b>Rota: Radar Global</b> ({len(pendentes)} vídeos aguardando)\n"
-    texto += f"🕒 <b>Postagem:</b> Dia seguinte, entre {inicio}h e {fim}h\n"
-    
-    cache_nomes = {}
-    
-    for i, v in enumerate(pendentes[:15], 1):
-        data_cap = v.get("data_captura", "Data não registrada")
-        link_orig = v.get("link_original", "Sem link")
-        
-        # O Userbot do espião não salva a origem por padrão, mas tentamos ler caso exista
-        origem_bruta = str(v.get("chat_origem", v.get("origem", "Desconhecida")))
-        
-        if origem_bruta == "Desconhecida":
-            display_origem = "<code>Pendente de rastreio</code>"
-        else:
-            nome_origem = origem_bruta
-            if origem_bruta in cache_nomes:
-                nome_origem = cache_nomes[origem_bruta]
-            else:
-                info_o = status_alvos.get(origem_bruta, {})
-                if not info_o and origem_bruta.lstrip("-").isdigit():
-                    for key, val in status_alvos.items():
-                        if isinstance(val, dict) and str(val.get("id")) == origem_bruta:
-                            info_o = val
-                            break
-                if isinstance(info_o, dict) and "nome" in info_o:
-                    nome_origem = info_o["nome"]
-                    
-                # Busca em tempo real no Telegram como última esperança
-                if (nome_origem == origem_bruta or not nome_origem) and origem_bruta.lstrip("-").isdigit():
-                    try:
-                        chat_obj = await bot.get_chat(origem_bruta)
-                        nome_origem = chat_obj.title or chat_obj.full_name or origem_bruta
-                    except Exception:
-                        pass
-                cache_nomes[origem_bruta] = nome_origem
-                
-            display_origem = f"{nome_origem[:20]}" if nome_origem != origem_bruta else f"<code>{origem_bruta}</code>"
-        
-        texto += f"  ├ {i}. Origem: {display_origem} | Captura: {data_cap}\n"
-        # Restaura a exibição do link da Shopee para o Espião, pois é o metadado mais rico que ele tem
-        texto += f"  │  └ 🔗 {link_orig}\n"
-    
-    if len(pendentes) > 15:
-        texto += f"  └ <i>... e mais {len(pendentes) - 15} vídeos na fila.</i>\n"
-    texto += "\n"
-
     await message.answer(texto, parse_mode="HTML", disable_web_page_preview=True)
-    if EXIBIR_LOGS: logger.info("✅ Relatório do Espião entregue com sucesso!")
+    if EXIBIR_LOGS: logger.info(f"✅ Relatório unificado do {tipo_fila} entregue com sucesso!")
+
+@dp.message(F.text == "Relatório Geral 📊", StateFilter("*"))
 async def menu_relatorio_geral(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
