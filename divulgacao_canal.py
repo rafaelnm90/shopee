@@ -11,6 +11,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from google import genai
 from dotenv import load_dotenv
 load_dotenv()
+from utils import registrar_erro_json
 
 # FORÇA O FUSO HORÁRIO DO BRASIL NA MEMÓRIA DO SCRIPT
 import time
@@ -159,6 +160,7 @@ async def enviar_mensagem(alvo):
             if EXIBIR_LOGS: logger.info(f"✅ Rajada de {replicas} mensagens concluída com sucesso para {alvo}!")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao enviar rajada para {alvo}: {e}")
+        registrar_erro_json(f"enviar_mensagem ({alvo}): {e}", origem="divulgacao_canal.py")
 
 async def gerar_texto_divulgacao_viral(repeticoes=6):
     if EXIBIR_LOGS: logger.info(f"🚀 [VIRAL] Montando prompt persuasivo para o Acervo Viral...")
@@ -235,6 +237,7 @@ async def enviar_mensagem_viral(alvo):
             if EXIBIR_LOGS: logger.info(f"✅ [VIRAL] Rajada de {replicas} mensagens concluída com sucesso para {alvo}!")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [VIRAL] Falha ao enviar rajada para {alvo}: {e}")
+        registrar_erro_json(f"enviar_mensagem_viral ({alvo}): {e}", origem="divulgacao_canal.py")
 
 # Novo dicionário global para rastrear os agendamentos cruzando a virada das horas
 ultimos_agendamentos_por_alvo = {}
