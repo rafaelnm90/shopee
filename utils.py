@@ -47,3 +47,31 @@ def registrar_erro_json(mensagem_erro, origem="Geral", contexto_extra=None):
         if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Erro de {origem} registado com rastro no ficheiro JSON.")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao tentar registar log no JSON: {e}")
+
+# --- CACHE PERSISTENTE DE NOMES DE GRUPOS/CANAIS ---
+CACHE_NOMES_PATH = "cache_nomes_grupos.json"
+
+def ler_cache_nomes_grupos():
+    try:
+        with open(CACHE_NOMES_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {}
+
+def salvar_nome_grupo(chat_id, nome):
+    if not chat_id or not nome:
+        return
+    chave = str(chat_id).strip()
+    nome = str(nome).strip()
+    if not chave or not nome or nome == chave:
+        return
+    try:
+        cache = ler_cache_nomes_grupos()
+        if cache.get(chave) == nome:
+            return
+        cache[chave] = nome
+        with open(CACHE_NOMES_PATH, "w", encoding="utf-8") as f:
+            json.dump(cache, f, indent=4, ensure_ascii=False)
+        if EXIBIR_LOGS: logger.info(f"✅ Nome do grupo {chave} salvo em cache: {nome}")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Falha ao salvar nome do grupo {chave} em cache: {e}")
