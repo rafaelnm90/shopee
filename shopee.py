@@ -2074,34 +2074,28 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         for i, v in enumerate(itens, 1): # ✅ O limite [:15] foi removido para mostrar 100% da fila
             data_cap = v.get("data_captura", "Data não registrada")
             
-            # 🚀 CORREÇÃO 1: Expansão da busca de chaves de origem para não dar "Desconhecida"
+            # 🚀 CORREÇÃO 1: Expansão da busca de chaves para evitar origem Desconhecida
             origem_bruta = str(v.get("chat_origem", v.get("origem", v.get("grupo_id", v.get("canal_id", "Desconhecida")))))
             
-            # 🚀 NOVO: Construção do link de rastreabilidade do vídeo original
             link_original = v.get("link_original", "")
-            
-            # 🚀 CORREÇÃO 2: Ampliação da captura do ID da mensagem (msg_id ou message_id)
             msg_id = v.get("mensagem_id") or v.get("msg_id") or v.get("message_id")
             
-            # Tentativa profunda de extrair a origem_bruta do link se ainda estiver pendente
+            # Resgate estrutural em links
             if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 if link_original and "t.me/c/" in link_original:
                     try:
                         origem_bruta = "-100" + link_original.split("t.me/c/")[1].split("/")[0]
-                    except:
-                        pass
+                    except: pass
                 elif link_original and "t.me/" in link_original:
                     try:
                         origem_bruta = "@" + link_original.split("t.me/")[1].split("/")[0]
-                    except:
-                        pass
-                        
+                    except: pass
+
             if not link_original and msg_id and origem_bruta.lstrip("-").isdigit():
-                # Tenta construir o link para o Espelhador (https://t.me/c/chat_id/msg_id)
                 chat_id_limpo = origem_bruta.replace("-100", "")
                 link_original = f"https://t.me/c/{chat_id_limpo}/{msg_id}"
                 
-            # Resolução Inteligente do Nome do Grupo
+            # 🚀 CORREÇÃO DEFINITIVA: Cruzamento Agnóstico e Recursivo de Dados
             if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 display_origem = "<code>Pendente de rastreio</code>"
             else:
@@ -2109,41 +2103,40 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 if origem_bruta in cache_nomes:
                     nome_origem = cache_nomes[origem_bruta]
                 else:
-                    info_o = status_canais.get(origem_bruta, {})
-                    if not info_o and origem_bruta.lstrip("-").isdigit():
-                        for val in status_canais.values():
-                            if isinstance(val, dict) and str(val.get("id")) == origem_bruta:
-                                info_o = val
-                                break
-                    if isinstance(info_o, dict) and "nome" in info_o:
-                        nome_origem = info_o["nome"]
-                        
-                    # 🚀 CORREÇÃO 2.1: Busca profunda do nome nas configurações do Espelhador
-                    if tipo_fila == "Espelhador" and (nome_origem == origem_bruta or not nome_origem):
-                        for rota in dados_rotas.get("rotas", []):
-                            for org in rota.get("origens", []):
-                                if isinstance(org, dict) and str(org.get("id")) == origem_bruta:
-                                    nome_origem = org.get("nome", origem_bruta)
-                                    break
-                            if nome_origem != origem_bruta:
-                                break
-                                
-                    # Tenta a API apenas se ainda for um número frio
+                    def buscar_nome_por_id(dados, alvo_id):
+                        if isinstance(dados, dict):
+                            str_id = str(dados.get("id", ""))
+                            if str_id and (str_id == alvo_id or str_id.replace("-100", "") == alvo_id.replace("-100", "")):
+                                return dados.get("nome")
+                            for v in dados.values():
+                                res = buscar_nome_por_id(v, alvo_id)
+                                if res: return res
+                        elif isinstance(dados, list):
+                            for item in dados:
+                                res = buscar_nome_por_id(item, alvo_id)
+                                if res: return res
+                        return None
+
+                    # Busca profunda em toda a árvore de configuração do Espelhador ou Espião
+                    base_dados = locals().get("dados_rotas", {}) if tipo_fila == "Espelhador" else locals().get("dados_espiao", {})
+                    nome_encontrado = buscar_nome_por_id(base_dados, origem_bruta)
+                    
+                    if nome_encontrado:
+                        nome_origem = nome_encontrado
+                    
+                    # Tenta a API do Telegram apenas como último recurso
                     if (nome_origem == origem_bruta or not nome_origem) and origem_bruta.lstrip("-").isdigit():
                         try:
-                            if EXIBIR_LOGS: logger.info(f"🔎 Consultando API do Telegram para resolver nome amigável do ID: {origem_bruta}...")
+                            if EXIBIR_LOGS: logger.info(f"🔎 Consultando API do Telegram para o ID: {origem_bruta}...")
                             chat_obj = await bot.get_chat(origem_bruta)
                             nome_origem = chat_obj.title or chat_obj.full_name or origem_bruta
                         except Exception:
                             pass
+                            
                     cache_nomes[origem_bruta] = nome_origem
                     
-                # 🚀 CORREÇÃO 1.1: Se não encontrar o nome, exibe o ID limpo em vez de "Grupo ID: -100..."
-                if nome_origem != origem_bruta:
-                    display_origem = f"{nome_origem[:25]}"
-                else:
-                    display_origem = f"{origem_bruta}"
-            
+                display_origem = f"{nome_origem[:25]}" if nome_origem != origem_bruta else f"{origem_bruta}"
+                
             link_display = f"<a href='{link_original}'>Ver Vídeo Original</a>" if link_original else "<i>Sem link direto</i>"
             
             # Monta a linha do vídeo com o link abaixo do nome
