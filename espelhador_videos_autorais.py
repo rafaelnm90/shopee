@@ -7,7 +7,6 @@ import logging
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageMediaDocument
 from dotenv import load_dotenv
-
 load_dotenv()
 import json
 import random
@@ -17,6 +16,7 @@ import aiohttp
 import re
 from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from utils import registrar_erro_json
 
 # Expressão regular para encontrar links da Shopee na legenda
 PADRAO_SHOPEE = re.compile(r'(https?://(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+)')
@@ -154,6 +154,8 @@ async def interceptar_e_espelhar(event):
 
             except Exception as e:
                 if EXIBIR_LOGS: logger.error(f"❌ Falha ao tentar enviar o vídeo: {e}")
+                registrar_erro_json(f"interceptar_e_espelhar: {e}", origem="espelhador_videos_autorais.py")
+            
             finally:
                 try:
                     os.remove(caminho_video)
