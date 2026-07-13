@@ -2103,6 +2103,67 @@ async def relatorio_fila_espiao_novo(message: types.Message, state: FSMContext):
     await message.answer(texto, parse_mode="HTML", disable_web_page_preview=True)
     if EXIBIR_LOGS: logger.info("✅ Relatório do Espião entregue com sucesso!")
 
+@dp.message(RelatoriosFluxo.menu_filas, F.text == "Fila do Espião 🕵️")
+async def relatorio_fila_espiao_novo(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("📊 Iniciando compilação do relatório da fila do Espião...")
+    try:
+        with open("fila_clonagem.json", "r", encoding="utf-8") as f:
+            dados_fila = json.load(f)
+            fila = dados_fila.get("fila", [])
+    except (FileNotFoundError, json.JSONDecodeError):
+        fila = []
+        
+    try:
+        with open("alvos_espiao.json", "r", encoding="utf-8") as f:
+            dados_espiao = json.load(f)
+            status_alvos = dados_espiao.get("status_alvos") or {}
+            inicio = dados_espiao.get("inicio", 10)
+            fim = dados_espiao.get("fim", 22)
+    except (FileNotFoundError, json.JSONDecodeError):
+        status_alvos = {}
+        inicio = 10
+        fim = 22
+        
+    pendentes = [item for item in fila if not item.get("processado")]
+
+    if not pendentes:
+        await message.answer("📭 A fila do espião de clonagem está vazia no momento. Nenhum vídeo aguardando IA.", parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info("✅ Relatório gerado (Fila vazia).")
+        return
+
+    texto = "📊 <b>Relatório da Fila do Espião (D+1)</b>\n\n"
+    texto += f"📡 <b>Rota: Radar Global</b> ({len(pendentes)} vídeos aguardando)\n"
+    texto += f"🕒 <b>Postagem:</b> Dia seguinte, entre {inicio}h e {fim}h\n"
+    
+    for i, v in enumerate(pendentes[:15], 1):
+        data_cap = v.get("data_captura", "Data não registrada")
+        origem_bruta = str(v.get("chat_origem", v.get("origem", "Origem desconhecida")))
+        
+        nome_origem = origem_bruta
+        info_o = status_alvos.get(origem_bruta, {})
+        
+        # Busca avançada de fallback
+        if not info_o and origem_bruta.lstrip("-").isdigit():
+            for key, val in status_alvos.items():
+                if isinstance(val, dict) and str(val.get("id")) == origem_bruta:
+                    info_o = val
+                    break
+                    
+        if isinstance(info_o, dict) and "nome" in info_o:
+            nome_origem = info_o["nome"]
+            
+        display_origem = f"{nome_origem}" if nome_origem != origem_bruta and nome_origem != "Origem desconhecida" else f"<code>{origem_bruta}</code>"
+        
+        texto += f"  ├ {i}. Origem: {display_origem} | Captura: {data_cap}\n"
+    
+    if len(pendentes) > 15:
+        texto += f"  └ <i>... e mais {len(pendentes) - 15} vídeos na fila.</i>\n"
+    texto += "\n"
+
+    await message.answer(texto, parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info("✅ Relatório do Espião entregue com sucesso!")
+
 @dp.message(F.text == "Relatório Geral 📊", StateFilter("*"))
 async def menu_relatorio_geral(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
