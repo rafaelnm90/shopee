@@ -14,6 +14,10 @@ LOG_FILE = "erros_logs.json"
 
 def registrar_erro_json(mensagem_erro, origem="Geral", contexto_extra=None):
     try:
+        # ✅ NOVO: Se a trava de manutenção existir, o erro é completamente ignorado no JSON
+        if os.path.exists("trava_manutencao.txt"):
+            return
+
         if os.path.exists(LOG_FILE):
             with open(LOG_FILE, "r", encoding="utf-8") as f:
                 logs = json.load(f)
