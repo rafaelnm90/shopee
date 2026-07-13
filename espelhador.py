@@ -15,6 +15,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import StateFilter
+from utils import registrar_erro_json
 
 if EXIBIR_LOGS:
     logger = logging.getLogger("Espelhador")
