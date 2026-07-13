@@ -601,36 +601,40 @@ async def executar_postagem_fila(item_id):
     if EXIBIR_LOGS: logger.info(f"🎯 Extração concluída. Vídeo {item_id_real} capturado do topo da fila atualizada.")
     
     try:
+        sucesso = False
         if caminho_video and os.path.exists(caminho_video):
             arquivo = FSInputFile(caminho_video)
             msg = await bot.send_video(chat_id=GRUPO_ID, video=arquivo, caption=legenda, parse_mode="HTML")
             
-            # Atualiza todos os itens que usam esse mesmo arquivo de Nível 4 com o novo ID para evitar uploads duplicados
             novo_file_id = msg.video.file_id
             for x in fila:
                 if x.get("caminho_video") == caminho_video and x["id"] != item_id:
                     x["video_id"] = novo_file_id
                     x["caminho_video"] = None
+            sucesso = True
+            if EXIBIR_LOGS: logger.info(f"🚀 [Fluxo] Vídeo enviado com sucesso para o Telegram.")
         elif video_id:
             await bot.send_video(chat_id=GRUPO_ID, video=video_id, caption=legenda, parse_mode="HTML")
+            sucesso = True
+            if EXIBIR_LOGS: logger.info(f"🚀 [Fluxo] Vídeo ID enviado com sucesso para o Telegram.")
         else:
             if EXIBIR_LOGS: logger.error(f"❌ Falha: Vídeo expirou ou foi perdido fisicamente da máquina.")
-            
-        if EXIBIR_LOGS: logger.info("✅ Postagem distribuída com sucesso!")
+
+        if sucesso:
+            for x in fila:
+                if x["id"] == item_id_real:
+                    x["postado"] = True
+                    x["horario_postagem"] = agora.strftime("%H:%M")
+                    x["data_postagem"] = hoje_str
+                    if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Vídeo {item_id_real} marcado como 'Já postado' às {x['horario_postagem']}.")
+                    break
+            fila_data["fila"] = fila
+            salvar_fila_postagens(fila_data)
+        else:
+            if EXIBIR_LOGS: logger.warning(f"⚠️ [Fluxo] Postagem não concluída, status na fila preservado.")
+
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Falha ao postar vídeo da fila: {e}")
-    finally:
-        # Marca o item como postado em vez de excluí-lo (para manter o histórico visual no painel)
-        for x in fila:
-            if x["id"] == item_id_real:
-                x["postado"] = True
-                x["horario_postagem"] = agora.strftime("%H:%M")
-                x["data_postagem"] = hoje_str # ✅ NOVO: Registra o dia para a faxina não apagar no restart
-                if EXIBIR_LOGS: logger.info(f"🚀 Horário de postagem registrado na fila: {x['horario_postagem']}")
-                break
-        fila_data["fila"] = fila
-        salvar_fila_postagens(fila_data)
-        if EXIBIR_LOGS: logger.info(f"✅ Vídeo {item_id_real} marcado como 'Já postado' no histórico da fila.")
+        if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao postar vídeo da fila: {e}")
         
         # A faxina física real do arquivo foi transferida para a limpeza da madrugada em agendar_tarefas_diarias
         # para permitir que o vídeo fique visível no painel até o final do dia.
