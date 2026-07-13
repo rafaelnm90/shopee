@@ -2073,8 +2073,34 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         
         for i, v in enumerate(itens, 1): # ✅ O limite [:15] foi removido para mostrar 100% da fila
             data_cap = v.get("data_captura", "Data não registrada")
-            origem_bruta = str(v.get("chat_origem", v.get("origem", "Desconhecida")))
             
+            # 🚀 CORREÇÃO 1: Expansão da busca de chaves de origem para não dar "Desconhecida"
+            origem_bruta = str(v.get("chat_origem", v.get("origem", v.get("grupo_id", v.get("canal_id", "Desconhecida")))))
+            
+            # 🚀 NOVO: Construção do link de rastreabilidade do vídeo original
+            link_original = v.get("link_original", "")
+            
+            # 🚀 CORREÇÃO 2: Ampliação da captura do ID da mensagem (msg_id ou message_id)
+            msg_id = v.get("mensagem_id") or v.get("msg_id") or v.get("message_id")
+            
+            # Tentativa profunda de extrair a origem_bruta do link se ainda estiver pendente
+            if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
+                if link_original and "t.me/c/" in link_original:
+                    try:
+                        origem_bruta = "-100" + link_original.split("t.me/c/")[1].split("/")[0]
+                    except:
+                        pass
+                elif link_original and "t.me/" in link_original:
+                    try:
+                        origem_bruta = "@" + link_original.split("t.me/")[1].split("/")[0]
+                    except:
+                        pass
+                        
+            if not link_original and msg_id and origem_bruta.lstrip("-").isdigit():
+                # Tenta construir o link para o Espelhador (https://t.me/c/chat_id/msg_id)
+                chat_id_limpo = origem_bruta.replace("-100", "")
+                link_original = f"https://t.me/c/{chat_id_limpo}/{msg_id}"
+                
             # Resolução Inteligente do Nome do Grupo
             if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 display_origem = "<code>Pendente de rastreio</code>"
@@ -2092,24 +2118,32 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     if isinstance(info_o, dict) and "nome" in info_o:
                         nome_origem = info_o["nome"]
                         
+                    # 🚀 CORREÇÃO 2.1: Busca profunda do nome nas configurações do Espelhador
+                    if tipo_fila == "Espelhador" and (nome_origem == origem_bruta or not nome_origem):
+                        for rota in dados_rotas.get("rotas", []):
+                            for org in rota.get("origens", []):
+                                if isinstance(org, dict) and str(org.get("id")) == origem_bruta:
+                                    nome_origem = org.get("nome", origem_bruta)
+                                    break
+                            if nome_origem != origem_bruta:
+                                break
+                                
                     # Tenta a API apenas se ainda for um número frio
                     if (nome_origem == origem_bruta or not nome_origem) and origem_bruta.lstrip("-").isdigit():
                         try:
+                            if EXIBIR_LOGS: logger.info(f"🔎 Consultando API do Telegram para resolver nome amigável do ID: {origem_bruta}...")
                             chat_obj = await bot.get_chat(origem_bruta)
                             nome_origem = chat_obj.title or chat_obj.full_name or origem_bruta
                         except Exception:
                             pass
                     cache_nomes[origem_bruta] = nome_origem
                     
-                display_origem = f"{nome_origem[:25]}" if nome_origem != origem_bruta else f"Grupo ID: <code>{origem_bruta}</code>"
+                # 🚀 CORREÇÃO 1.1: Se não encontrar o nome, exibe o ID limpo em vez de "Grupo ID: -100..."
+                if nome_origem != origem_bruta:
+                    display_origem = f"{nome_origem[:25]}"
+                else:
+                    display_origem = f"{origem_bruta}"
             
-            # ✅ NOVO: Construção do link de rastreabilidade do vídeo original
-            link_original = v.get("link_original", "")
-            if not link_original and v.get("mensagem_id") and origem_bruta.lstrip("-").isdigit():
-                # Tenta construir o link para o Espelhador (https://t.me/c/chat_id/msg_id)
-                chat_id_limpo = origem_bruta.replace("-100", "")
-                link_original = f"https://t.me/c/{chat_id_limpo}/{v.get('mensagem_id')}"
-                
             link_display = f"<a href='{link_original}'>Ver Vídeo Original</a>" if link_original else "<i>Sem link direto</i>"
             
             # Monta a linha do vídeo com o link abaixo do nome
@@ -5843,7 +5877,11 @@ async def processar_fila_espiao():
     
     # ✅ LÓGICA TEMPORAL AVANÇADA D+1 E GAP-FILLING PARA O ESPIÃO
     agora = datetime.now(fuso_horario)
-    hoje_str = agora.strftime("%Y-%m-%d")
+    
+    # 🚀 CORREÇÃO 3: Desvio de Madrugada para o Expediente
+    # Vídeos capturados antes das 06:00 pertencem logicamente ao lote da noite anterior.
+    hoje_logico = agora if agora.hour >= 6 else agora - timedelta(days=1)
+    hoje_str = hoje_logico.strftime("%Y-%m-%d")
     
     proximo_proc_str = fila_data.get("proximo_processamento")
     if proximo_proc_str:
@@ -5856,15 +5894,25 @@ async def processar_fila_espiao():
             
     fila = fila_data.get("fila", [])
     
-    # Filtra todos os itens elegíveis D+1 (capturados antes de hoje e não processados)
+    # Filtra todos os itens elegíveis D+1 (capturados antes de hoje lógico e não processados)
     itens_elegiveis = []
     for item in fila:
         if not item.get("processado"):
             data_cap_str = item.get("data_captura", "")
             if data_cap_str:
-                dia_cap = data_cap_str.split(" ")[0]
-                if dia_cap < hoje_str:
-                    itens_elegiveis.append(item)
+                try:
+                    data_captura_obj = datetime.strptime(data_cap_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                    # Aplica o desvio da madrugada na data do vídeo
+                    cap_logico = data_captura_obj if data_captura_obj.hour >= 6 else data_captura_obj - timedelta(days=1)
+                    dia_cap = cap_logico.strftime("%Y-%m-%d")
+                    
+                    if dia_cap < hoje_str:
+                        itens_elegiveis.append(item)
+                except ValueError:
+                    # Fallback de segurança para formatos de data inesperados
+                    dia_cap = data_cap_str.split(" ")[0]
+                    if dia_cap < hoje_str:
+                        itens_elegiveis.append(item)
 
     if not itens_elegiveis:
         return
