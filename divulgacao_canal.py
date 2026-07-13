@@ -159,8 +159,14 @@ async def enviar_mensagem(alvo):
             
             if EXIBIR_LOGS: logger.info(f"✅ Rajada de {replicas} mensagens concluída com sucesso para {alvo}!")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Falha ao enviar rajada para {alvo}: {e}")
-        registrar_erro_json(f"enviar_mensagem ({alvo}): {e}", origem="divulgacao_canal.py")
+        erro_str = str(e).lower()
+        if "chat is restricted" in erro_str or "forbidden" in erro_str:
+            if EXIBIR_LOGS: logger.warning(f"🚫 Omitido: O chat {alvo} é restrito ou o bot foi silenciado neste grupo.")
+        elif "database is locked" in erro_str:
+            if EXIBIR_LOGS: logger.error(f"🔒 Bloqueio de concorrência no SQLite ao acessar {alvo}. Tentando recuperar na próxima rodada.")
+        else:
+            if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao enviar rajada para {alvo}: {e}")
+            registrar_erro_json(f"enviar_mensagem ({alvo}): {e}", origem="divulgacao_canal.py")
 
 async def gerar_texto_divulgacao_viral(repeticoes=6):
     if EXIBIR_LOGS: logger.info(f"🚀 [VIRAL] Montando prompt persuasivo para o Acervo Viral...")
@@ -236,8 +242,14 @@ async def enviar_mensagem_viral(alvo):
             
             if EXIBIR_LOGS: logger.info(f"✅ [VIRAL] Rajada de {replicas} mensagens concluída com sucesso para {alvo}!")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [VIRAL] Falha ao enviar rajada para {alvo}: {e}")
-        registrar_erro_json(f"enviar_mensagem_viral ({alvo}): {e}", origem="divulgacao_canal.py")
+        erro_str = str(e).lower()
+        if "chat is restricted" in erro_str or "forbidden" in erro_str:
+            if EXIBIR_LOGS: logger.warning(f"🚫 [VIRAL] Omitido: Permissão negada no chat {alvo}.")
+        elif "database is locked" in erro_str:
+            if EXIBIR_LOGS: logger.error(f"🔒 [VIRAL] Bloqueio de concorrência no SQLite ao acessar {alvo}.")
+        else:
+            if EXIBIR_LOGS: logger.error(f"❌ [VIRAL] Falha ao enviar rajada para {alvo}: {e}")
+            registrar_erro_json(f"enviar_mensagem_viral ({alvo}): {e}", origem="divulgacao_canal.py")
 
 # Novo dicionário global para rastrear os agendamentos cruzando a virada das horas
 ultimos_agendamentos_por_alvo = {}
