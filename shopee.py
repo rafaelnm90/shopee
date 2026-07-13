@@ -2704,58 +2704,61 @@ async def receber_video(message: types.Message, state: FSMContext):
         await bot.download_file(file_info.file_path, destination=video_path)
 
         # 2. Upload para a API do Gemini processar a Copy
-        def analisar_video():
-            import time
+        async def analisar_video():
             if EXIBIR_LOGS: logger.info("📤 Fazendo upload do vídeo para o Google Storage...")
-            video_gemini = client.files.upload(file=video_path)
+            video_gemini = await asyncio.to_thread(client.files.upload, file=video_path)
             
-            # OBRIGATÓRIO: Loop que aguarda a API processar o vídeo
-            if EXIBIR_LOGS: logger.info("⏳ Aguardando processamento do vídeo pelo Google...")
-            while video_gemini.state.name == "PROCESSING":
-                time.sleep(2)
-                video_gemini = client.files.get(name=video_gemini.name)
-                
-            if video_gemini.state.name == "FAILED":
-                raise Exception("Falha de processamento no servidor do Google.")
-
-            if EXIBIR_LOGS: logger.info("✅ Vídeo pronto! Gerando a copy persuasiva...")
-            
-            # ✅ O número utilizado já foi travado e reservado acima
-            
-            # ✅ Prompt ajustado para remover a repetição do nome no título
-            
-            # ✅ Prompt ajustado para remover a repetição do nome no título
-            prompt_ia = (
-                f"Assista ao vídeo INTEIRO para identificar o produto ou kit principal. "
-                f"Sua resposta deve conter EXATAMENTE duas linhas. "
-                f"Na primeira linha, escreva estritamente: 'Vídeo {numero_atual}'. "
-                f"Na segunda linha, escreva '📦 Item: ' seguido do nome do produto ou kit identificado. "
-                f"Exemplo de saída esperada:\n"
-                f"Vídeo {numero_atual}\n"
-                f"📦 Item: Kit Dove Reconstrução\n"
-                f"Não adicione nenhuma outra palavra, ponto final extra ou descrição."
-            )
-            
-            # ✅ Mini-cascata para o vídeo: Se o modelo 3-flash esgotar a cota, tenta o 2.5-flash
             try:
-                response = client.models.generate_content(
-                    model="gemini-3-flash-preview",
-                    contents=[video_gemini, prompt_ia]
+                # ✅ CORREÇÃO: Uso de asyncio.sleep para manter a loop de eventos fluida
+                if EXIBIR_LOGS: logger.info("⏳ Aguardando processamento do vídeo pelo Google...")
+                while video_gemini.state.name == "PROCESSING":
+                    await asyncio.sleep(2)
+                    video_gemini = await asyncio.to_thread(client.files.get, name=video_gemini.name)
+                    
+                if video_gemini.state.name == "FAILED":
+                    raise Exception("Falha de processamento no servidor do Google.")
+
+                if EXIBIR_LOGS: logger.info("✅ Vídeo pronto! Gerando a copy persuasiva...")
+                
+                # ✅ O número utilizado já foi travado e reservado acima
+                prompt_ia = (
+                    f"Assista ao vídeo INTEIRO para identificar o produto ou kit principal. "
+                    f"Sua resposta deve conter EXATAMENTE duas linhas. "
+                    f"Na primeira linha, escreva estritamente: 'Vídeo {numero_atual}'. "
+                    f"Na segunda linha, escreva '📦 Item: ' seguido do nome do produto ou kit identificado. "
+                    f"Exemplo de saída esperada:\n"
+                    f"Vídeo {numero_atual}\n"
+                    f"📦 Item: Kit Dove Reconstrução\n"
+                    f"Não adicione nenhuma outra palavra, ponto final extra ou descrição."
                 )
-            except Exception as erro_modelo:
-                if "429" in str(erro_modelo):
-                    if EXIBIR_LOGS: logger.warning("⚠️ Limite do 3-flash atingido. Usando 2.5-flash como fallback...")
-                    response = client.models.generate_content(
-                        model="gemini-2.5-flash",
+                
+                def chamar_modelo(modelo):
+                    return client.models.generate_content(
+                        model=modelo,
                         contents=[video_gemini, prompt_ia]
                     )
-                else:
-                    raise erro_modelo
+                
+                # ✅ Mini-cascata para o vídeo
+                try:
+                    response = await asyncio.to_thread(chamar_modelo, "gemini-3-flash-preview")
+                except Exception as erro_modelo:
+                    if "429" in str(erro_modelo):
+                        if EXIBIR_LOGS: logger.warning("⚠️ Limite do 3-flash atingido. Usando 2.5-flash como fallback...")
+                        response = await asyncio.to_thread(chamar_modelo, "gemini-2.5-flash")
+                    else:
+                        raise erro_modelo
 
-            return response.text.strip()
+                return response.text.strip()
+            finally:
+                # ✅ CORREÇÃO: Limpeza obrigatória no Storage do Google para blindar a cota
+                if EXIBIR_LOGS: logger.info("🧹 Excluindo vídeo do servidor do Google para liberar armazenamento da API...")
+                try:
+                    await asyncio.to_thread(client.files.delete, name=video_gemini.name)
+                except Exception as e_del:
+                    if EXIBIR_LOGS: logger.warning(f"⚠️ Falha ao excluir vídeo do Google: {e_del}")
 
-        # Executa a IA de forma assíncrona para não travar o bot
-        chamada_gerada = await asyncio.to_thread(analisar_video)
+        # Executa a IA de forma assíncrona pura
+        chamada_gerada = await analisar_video()
         if EXIBIR_LOGS: logger.info("💾 Mantendo o vídeo no servidor para re-upload posterior com data atualizada.")
         
         # ✅ Salva o texto da IA e o caminho do vídeo físico na memória
@@ -2815,48 +2818,56 @@ async def processar_erro_ia(message: types.Message, state: FSMContext):
             
         msg_status = await message.answer("🔄 Reenviando vídeo para a IA analisar... Aguarde. ⏳", reply_markup=teclado_cancelar)
         
-        def analisar_video_retry():
-            import time
+        async def analisar_video_retry():
             if EXIBIR_LOGS: logger.info("📤 Fazendo re-upload do vídeo para o Google Storage...")
-            video_gemini = client.files.upload(file=video_path)
-            
-            while video_gemini.state.name == "PROCESSING":
-                time.sleep(2)
-                video_gemini = client.files.get(name=video_gemini.name)
-                
-            if video_gemini.state.name == "FAILED":
-                raise Exception("Falha de processamento no servidor do Google.")
-                
-            prompt_ia = (
-                f"Assista ao vídeo INTEIRO para identificar o produto ou kit principal. "
-                f"Sua resposta deve conter EXATAMENTE duas linhas. "
-                f"Na primeira linha, escreva estritamente: 'Vídeo {numero_atual}'. "
-                f"Na segunda linha, escreva '📦 Item: ' seguido do nome do produto ou kit identificado. "
-                f"Exemplo de saída esperada:\n"
-                f"Vídeo {numero_atual}\n"
-                f"📦 Item: Kit Dove Reconstrução\n"
-                f"Não adicione nenhuma outra palavra, ponto final extra ou descrição."
-            )
+            video_gemini = await asyncio.to_thread(client.files.upload, file=video_path)
             
             try:
-                response = client.models.generate_content(
-                    model="gemini-3-flash-preview",
-                    contents=[video_gemini, prompt_ia]
+                # ✅ CORREÇÃO: Sleep assíncrono para eficiência de memória
+                while video_gemini.state.name == "PROCESSING":
+                    await asyncio.sleep(2)
+                    video_gemini = await asyncio.to_thread(client.files.get, name=video_gemini.name)
+                    
+                if video_gemini.state.name == "FAILED":
+                    raise Exception("Falha de processamento no servidor do Google.")
+                    
+                prompt_ia = (
+                    f"Assista ao vídeo INTEIRO para identificar o produto ou kit principal. "
+                    f"Sua resposta deve conter EXATAMENTE duas linhas. "
+                    f"Na primeira linha, escreva estritamente: 'Vídeo {numero_atual}'. "
+                    f"Na segunda linha, escreva '📦 Item: ' seguido do nome do produto ou kit identificado. "
+                    f"Exemplo de saída esperada:\n"
+                    f"Vídeo {numero_atual}\n"
+                    f"📦 Item: Kit Dove Reconstrução\n"
+                    f"Não adicione nenhuma outra palavra, ponto final extra ou descrição."
                 )
-            except Exception as erro_modelo:
-                if "429" in str(erro_modelo):
-                    if EXIBIR_LOGS: logger.warning("⚠️ Limite do 3-flash atingido. Usando 2.5-flash como fallback...")
-                    response = client.models.generate_content(
-                        model="gemini-2.5-flash",
+                
+                def chamar_modelo_retry(modelo):
+                    return client.models.generate_content(
+                        model=modelo,
                         contents=[video_gemini, prompt_ia]
                     )
-                else:
-                    raise erro_modelo
-                    
-            return response.text.strip()
+                
+                try:
+                    response = await asyncio.to_thread(chamar_modelo_retry, "gemini-3-flash-preview")
+                except Exception as erro_modelo:
+                    if "429" in str(erro_modelo):
+                        if EXIBIR_LOGS: logger.warning("⚠️ Limite do 3-flash atingido. Usando 2.5-flash como fallback...")
+                        response = await asyncio.to_thread(chamar_modelo_retry, "gemini-2.5-flash")
+                    else:
+                        raise erro_modelo
+                        
+                return response.text.strip()
+            finally:
+                # ✅ CORREÇÃO: Proteção do limite gratuito da chave API
+                if EXIBIR_LOGS: logger.info("🧹 Excluindo vídeo do Google (Retry) para preservar cota...")
+                try:
+                    await asyncio.to_thread(client.files.delete, name=video_gemini.name)
+                except Exception:
+                    pass
             
         try:
-            chamada_gerada = await asyncio.to_thread(analisar_video_retry)
+            chamada_gerada = await analisar_video_retry()
             await msg_status.delete()
             
             await state.update_data(nome_produto=chamada_gerada)
@@ -5832,59 +5843,71 @@ async def processar_fila_espiao():
     link_final = await converter_link_shopee(link_original)
     
     # 2. Análise do vídeo pela IA para reescrita autoral
-    def gerar_copy_clone():
-        import time
-        video_gemini = client.files.upload(file=caminho_video)
+    async def gerar_copy_clone():
+        if EXIBIR_LOGS: logger.info("📤 Fazendo upload do vídeo do espião para o Google Storage...")
+        video_gemini = await asyncio.to_thread(client.files.upload, file=caminho_video)
         
-        while video_gemini.state.name == "PROCESSING":
-            time.sleep(2)
-            video_gemini = client.files.get(name=video_gemini.name)
+        try:
+            # ✅ CORREÇÃO: Pausa convertida para preservar threads de processamento
+            while video_gemini.state.name == "PROCESSING":
+                await asyncio.sleep(2)
+                video_gemini = await asyncio.to_thread(client.files.get, name=video_gemini.name)
+                
+            if video_gemini.state.name == "FAILED":
+                raise Exception("Falha de processamento no servidor do Google.")
+                
+            if EXIBIR_LOGS: logger.info("🚀 Preparando prompt com a lista estrita de setores e blindagem semântica...")
+                
+            prompt = (
+                "Assista ao vídeo e identifique qual é o produto demonstrado. "
+                "Sua resposta deve conter EXATAMENTE duas linhas.\n"
+                "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no início (Exemplo: 👟 Tênis Casual Feminino).\n"
+                "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
+                "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras (exemplo prático: um organizador de sacos plásticos de cozinha pertence a #CasaEDecoracao e NUNCA a #BolsasFemininas, pois não é um acessório de moda).\n"
+                "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
+                "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
+                "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
+                "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
+                "#AcessoriosDeModa, #BrinquedosEHobbies, #Papelaria, #LivrosERevistas, #RoupasMasculinas, #Automoveis, #MaeEBebe, "
+                "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
+                "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
+            )
             
-        if video_gemini.state.name == "FAILED":
-            raise Exception("Falha de processamento no servidor do Google.")
+            if EXIBIR_LOGS: logger.info("✅ Prompt blindado e atualizado. Iniciando requisição à IA...")
             
-        if EXIBIR_LOGS: logger.info("🚀 Preparando prompt com a lista estrita de setores e blindagem semântica...")
-            
-        prompt = (
-            "Assista ao vídeo e identifique qual é o produto demonstrado. "
-            "Sua resposta deve conter EXATAMENTE duas linhas.\n"
-            "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no início (Exemplo: 👟 Tênis Casual Feminino).\n"
-            "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
-            "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras (exemplo prático: um organizador de sacos plásticos de cozinha pertence a #CasaEDecoracao e NUNCA a #BolsasFemininas, pois não é um acessório de moda).\n"
-            "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
-            "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
-            "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
-            "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
-            "#AcessoriosDeModa, #BrinquedosEHobbies, #Papelaria, #LivrosERevistas, #RoupasMasculinas, #Automoveis, #MaeEBebe, "
-            "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
-            "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
-        )
-        
-        if EXIBIR_LOGS: logger.info("✅ Prompt blindado e atualizado. Iniciando requisição à IA...")
-        
-        for modelo_nome in MODELOS_CASCATA_GEMINI:
-            try:
-                if EXIBIR_LOGS: logger.info(f"⏳ [Espião] Consultando motor: {modelo_nome}...")
-                response = client.models.generate_content(
+            def chamar_modelo_cascata(modelo_nome):
+                return client.models.generate_content(
                     model=modelo_nome,
                     contents=[video_gemini, prompt]
                 )
-                if response and response.text:
-                    if EXIBIR_LOGS: logger.info(f"✅ [Espião] Sucesso com o modelo {modelo_nome}!")
-                    return response.text.strip()
-            except Exception as erro_modelo:
-                if "429" in str(erro_modelo):
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ [Espião] Limite atingido em {modelo_nome}. Tentando o próximo...")
-                    continue
-                else:
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ [Espião] Erro no modelo {modelo_nome}: {erro_modelo}")
-                    continue
-                    
-        raise Exception("Todos os modelos da cascata falharam por limite de cota ou erro.")
-        
+
+            for modelo_nome in MODELOS_CASCATA_GEMINI:
+                try:
+                    if EXIBIR_LOGS: logger.info(f"⏳ [Espião] Consultando motor: {modelo_nome}...")
+                    response = await asyncio.to_thread(chamar_modelo_cascata, modelo_nome)
+                    if response and response.text:
+                        if EXIBIR_LOGS: logger.info(f"✅ [Espião] Sucesso com o modelo {modelo_nome}!")
+                        return response.text.strip()
+                except Exception as erro_modelo:
+                    if "429" in str(erro_modelo):
+                        if EXIBIR_LOGS: logger.warning(f"⚠️ [Espião] Limite atingido em {modelo_nome}. Tentando o próximo...")
+                        continue
+                    else:
+                        if EXIBIR_LOGS: logger.warning(f"⚠️ [Espião] Erro no modelo {modelo_nome}: {erro_modelo}")
+                        continue
+                        
+            raise Exception("Todos os modelos da cascata falharam por limite de cota ou erro.")
+        finally:
+            # ✅ CORREÇÃO: Limpeza do arquivo clone dos servidores do Google
+            if EXIBIR_LOGS: logger.info("🧹 Excluindo vídeo do Google (Clone) para liberar cota da API...")
+            try:
+                await asyncio.to_thread(client.files.delete, name=video_gemini.name)
+            except Exception:
+                pass
+                
     try:
         if EXIBIR_LOGS: logger.info("🧠 Solicitando à IA a criação de uma nova Copy para o vídeo clonado...")
-        texto_ia = await asyncio.to_thread(gerar_copy_clone)
+        texto_ia = await gerar_copy_clone()
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro na IA ao processar clone: {e}")
         registrar_erro_json(f"processar_fila_espiao IA: {e}", origem="espiao.py")
