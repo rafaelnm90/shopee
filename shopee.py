@@ -5742,6 +5742,7 @@ async def preparar_publicacao_imediata(message: types.Message, state: FSMContext
     else:
         await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
 
+# 🚀 CORREÇÃO: Vinculação do handler ao estado correto da FSM para processar o clique
 @dp.message(GerenciarFilaFluxo.aguardando_confirmacao_publicar)
 async def processar_publicacao_imediata(message: types.Message, state: FSMContext):
     if message.text != "Publicar Vídeo 🚀":
