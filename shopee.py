@@ -5102,15 +5102,15 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
                 else:
                     status_previsao_final = f"✅ <b>Postado hoje às {horario_envio}</b>"
             else:
-                    if data_adicao_str == "2000-01-01":
-                        data_br = "Manual (Prioridade)"
-                    elif data_adicao_str:
-                        try:
-                            data_br = datetime.strptime(data_adicao_str, "%Y-%m-%d").strftime("%d/%m/%Y")
-                        except:
-                            data_br = "Data desconhecida"
-                    else:
+                if data_adicao_str == "2000-01-01":
+                    data_br = "Manual (Prioridade)"
+                elif data_adicao_str:
+                    try:
+                        data_br = datetime.strptime(data_adicao_str, "%Y-%m-%d").strftime("%d/%m/%Y")
+                    except:
                         data_br = "Data desconhecida"
+                else:
+                    data_br = "Data desconhecida"
                     
                 # Define a Previsão de Postagem base
                 if is_pausado:
