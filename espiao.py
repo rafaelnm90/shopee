@@ -169,7 +169,7 @@ def verificar_e_registrar_hash(hash_video, contexto="global"):
         json.dump(dados, f, indent=4)
     return False
 
-def salvar_na_fila_clonagem(caminho_video, link_shopee, chat_origem="Desconhecida"):
+def salvar_na_fila_clonagem(caminho_video, link_shopee, chat_origem="Desconhecida", nome_origem=None):
     arquivo_fila = "fila_clonagem.json"
     try:
         with open(arquivo_fila, "r") as f:
@@ -180,6 +180,7 @@ def salvar_na_fila_clonagem(caminho_video, link_shopee, chat_origem="Desconhecid
     item = {
         "id": f"clone_{int(datetime.now().timestamp())}",
         "chat_origem": str(chat_origem),
+        "nome_origem": str(nome_origem) if nome_origem else str(chat_origem),
         "caminho_video": caminho_video,
         "link_original": link_shopee,
         "processado": False,
@@ -375,10 +376,12 @@ async def interceptar_mensagem(event):
                     if EXIBIR_LOGS: logger.error(f"❌ Erro ao tentar remover ficheiro duplicado: {e}")
                 return
                 
-            salvar_na_fila_clonagem(caminho_salvo, link_capturado, chat_origem=chat_id_completo)
+            # 📊 Nome real do grupo, já disponível via Telethon neste momento
+            nome_chat = getattr(chat, 'title', chat_username if chat_username else chat_id)
+
+            salvar_na_fila_clonagem(caminho_salvo, link_capturado, chat_origem=chat_id_completo, nome_origem=nome_chat)
             
             # 📊 Adiciona a pontuação ao painel estatístico do Espião
-            nome_chat = getattr(chat, 'title', chat_username if chat_username else chat_id)
             registrar_historico_espiao(nome_chat)
         else:
             if EXIBIR_LOGS: logger.info(f"⏭️ Ignorado: O link {link_capturado} foi encontrado, mas a postagem não contém um anexo de vídeo direto.")
@@ -545,6 +548,7 @@ async def motor_espelhador_userbot(event):
     chat_id_str = str(chat.id)
     chat_username = f"@{chat.username.lower()}" if getattr(chat, 'username', None) else ""
     chat_id_completo = f"-100{chat.id}" if not chat_id_str.startswith("-100") else chat_id_str
+    nome_chat = getattr(chat, 'title', chat_username if chat_username else chat_id_str)
 
     if event.out and chat_username != "@shopee_video_afiliado":
         if EXIBIR_LOGS: logger.info("🛡️ [Espelhador] Trava de autoria ativada: Postagem própria ignorada para evitar loop cruzado.")
@@ -646,6 +650,7 @@ async def motor_espelhador_userbot(event):
         item = {
             "id": f"espelho_{int(datetime.now().timestamp())}_{chat_id_str}",
             "chat_origem": chat_id_completo,
+            "nome_origem": nome_chat,
             "msg_id": event.id,
             "destino": destino,
             "nome_rota": nome_rota,
