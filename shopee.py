@@ -25,7 +25,7 @@ from google import genai
 import matplotlib.pyplot as plt
 import io
 import espelhador
-from utils import registrar_erro_json
+from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo
 
 # 1. CONSTANTES E TOKENS
 API_TOKEN = os.getenv('TELEGRAM_TOKEN')
