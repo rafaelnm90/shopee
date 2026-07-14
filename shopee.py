@@ -6318,3 +6318,34 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+
+@dp.callback_query_handler(lambda c: c.data == 'forcar_clones_espiao')
+async def forcar_clones_fila(callback_query: types.CallbackQuery):
+    if EXIBIR_LOGS:
+        print("🚀 Iniciando processo de forçar disparo dos clones...")
+        
+    try:
+        with open('fila_clonagem.json', 'r', encoding='utf-8') as f:
+            fila = json.load(f)
+            
+        quantidade = len(fila)
+        
+        if quantidade == 0:
+            if EXIBIR_LOGS:
+                print("⚠️ A fila de clonagem já está vazia.")
+            await callback_query.answer("A fila de clonagem já está vazia!", show_alert=True)
+            return
+            
+        if EXIBIR_LOGS:
+            print(f"📂 {quantidade} vídeos encontrados na fila. Solicitando confirmação...")
+            
+        markup_confirmacao = types.InlineKeyboardMarkup()
+        markup_confirmacao.add(types.InlineKeyboardButton("Aprovar ✅", callback_data="executar_forcar_clones"))
+        markup_confirmacao.add(types.InlineKeyboardButton("Cancelar ❌", callback_data="cancelar_operacao"))
+        
+        await callback_query.message.edit_text(f"Você tem {quantidade} vídeos retidos na fila de clonagem.\nDeseja forçar o processamento imediato de todos?", reply_markup=markup_confirmacao)
+        
+    except Exception as e:
+        if EXIBIR_LOGS:
+            print(f"❌ Erro ao ler fila de clonagem: {e}")
+        await callback_query.answer("Erro ao acessar a fila de clonagem.", show_alert=True)
