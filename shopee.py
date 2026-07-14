@@ -2107,9 +2107,17 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 display_origem = "<code>Pendente de rastreio</code>"
             else:
                 nome_origem = origem_bruta
+                nome_gravado_no_item = v.get("nome_origem")
                 
+                # 0. Prioridade máxima: nome que já veio gravado no próprio item da fila
+                #    (capturado pelo userbot no momento da interceptação, sem depender do bot/cache/API)
+                if nome_gravado_no_item and str(nome_gravado_no_item) != origem_bruta:
+                    nome_origem = str(nome_gravado_no_item)
+                    if origem_bruta not in cache_nomes:
+                        cache_nomes[origem_bruta] = nome_origem
+                        salvar_nome_grupo(origem_bruta, nome_origem)
                 # 1. O Porteiro: Busca instantânea no cache (memória rápida)
-                if origem_bruta in cache_nomes:
+                elif origem_bruta in cache_nomes:
                     nome_origem = cache_nomes[origem_bruta]
                 else:
                     nome_encontrado = None
