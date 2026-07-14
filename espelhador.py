@@ -727,45 +727,42 @@ async def confirmar_esvaziar(message: types.Message, state: FSMContext):
     else:
         await message.answer("Número inválido. Tente novamente.", reply_markup=teclado_espelhador_cancelar)
 
-@dp.callback_query_handler(lambda c: c.data == 'confirmar_esvaziar_fila', state=EspelhadorFluxo.aguardando_confirmacao_esvaziar)
-async def processar_esvaziar_fila(callback_query: types.CallbackQuery, state: FSMContext):
-    if EXIBIR_LOGS:
-        print("🚀 Iniciando processo de forçar postagens para o espelhador...")
-    
-    async with state.proxy() as data:
-        rota_selecionada = data.get('rota_selecionada')
-    
-    if not rota_selecionada:
-        if EXIBIR_LOGS:
-            print("❌ Erro: Rota não encontrada no estado da máquina.")
-        await callback_query.answer("Erro ao identificar a rota.", show_alert=True)
+# BLOCO MODIFICADO (Substituir todo o bloco @dp.callback_query_handler antigo por este)
+@router.message(EspelhadorFluxo.aguardando_confirmacao_esvaziar)
+async def processar_esvaziar_fila(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar ✅":
+        await message.answer("Operação cancelada.", reply_markup=teclado_espelhador_menu)
+        await painel_espelhador(message, state)
         return
 
-    if EXIBIR_LOGS:
-        print(f"📂 Rota identificada: {rota_selecionada}")
-        print("⏳ Atualizando arquivo espelhos_config.json...")
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando processo de forçar postagens para o espelhador...")
+    
+    data = await state.get_data()
+    indice_rota = data.get("indice_esvaziar")
+    
+    if indice_rota is None:
+        if EXIBIR_LOGS: logger.error("❌ Erro: Rota não encontrada no estado da máquina.")
+        await message.answer("Erro ao identificar a rota selecionada.")
+        return
 
     try:
-        with open('espelhos_config.json', 'r', encoding='utf-8') as f:
-            config = json.load(f)
+        dados = ler_espelhos()
+        rotas = dados.get("rotas", [])
         
-        for espelho in config.get('espelhos', []):
-            if espelho.get('id_rota') == rota_selecionada:
-                espelho['esvaziar_agora'] = True
-                break
-        
-        with open('espelhos_config.json', 'w', encoding='utf-8') as f:
-            json.dump(config, f, indent=4, ensure_ascii=False)
+        if 0 <= indice_rota < len(rotas):
+            rota_alvo = rotas[indice_rota]
+            rota_alvo["esvaziar_agora"] = True
             
-        if EXIBIR_LOGS:
-            print("✅ Sucesso: Arquivo atualizado. A fila será esvaziada no próximo ciclo.")
+            salvar_espelhos(dados)
             
-        await callback_query.message.edit_text(f"✅ Postagens forçadas com sucesso para a rota {rota_selecionada}! O sistema processará os vídeos pendentes em instantes.")
-        
+            if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Rota '{rota_alvo['nome']}' marcada para esvaziamento imediato.")
+            await message.answer(f"✅ <b>Postagens Forçadas!</b>\nTodos os vídeos pendentes na rota <b>{rota_alvo['nome']}</b> serão publicados nos canais em instantes.", parse_mode="HTML", reply_markup=teclado_espelhador_menu)
+        else:
+            await message.answer("A rota selecionada é inválida ou expirou.")
+            
     except Exception as e:
-        if EXIBIR_LOGS:
-            print(f"❌ Erro ao atualizar configuração do espelhador: {e}")
-        await callback_query.answer("Ocorreu um erro ao forçar as postagens.", show_alert=True)
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao atualizar configuração do espelhador: {e}")
+        await message.answer("Ocorreu um erro interno ao processar o esvaziamento.")
         
-    await state.finish()
+    await state.clear()
 
