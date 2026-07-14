@@ -5943,17 +5943,13 @@ async def processar_fila_espiao():
     canal_destino = dados_espiao.get("canal_destino")
     
     if not canal_destino:
-        return # Aborta o processo silenciosamente se o destino não foi configurado no painel
+        return 
         
     fila_data = ler_fila_clonagem()
     
-    # ✅ LÓGICA TEMPORAL AVANÇADA D+1 E GAP-FILLING PARA O ESPIÃO
+    # ✅ LÓGICA TEMPORAL 24H (00:00 às 23:59) D+1 PARA O ESPIÃO
     agora = datetime.now(fuso_horario)
-    
-    # 🚀 CORREÇÃO 3: Desvio de Madrugada para o Expediente
-    # Vídeos capturados antes das 06:00 pertencem logicamente ao lote da noite anterior.
-    hoje_logico = agora if agora.hour >= 6 else agora - timedelta(days=1)
-    hoje_str = hoje_logico.strftime("%Y-%m-%d")
+    hoje_str = agora.strftime("%Y-%m-%d")
     
     proximo_proc_str = fila_data.get("proximo_processamento")
     if proximo_proc_str:
@@ -5966,7 +5962,7 @@ async def processar_fila_espiao():
             
     fila = fila_data.get("fila", [])
     
-    # Filtra todos os itens elegíveis D+1 (capturados antes de hoje lógico e não processados)
+    # Filtra os itens elegíveis D+1 (capturados estritamente antes do dia civil de hoje e não processados)
     itens_elegiveis = []
     for item in fila:
         if not item.get("processado"):
@@ -5974,14 +5970,10 @@ async def processar_fila_espiao():
             if data_cap_str:
                 try:
                     data_captura_obj = datetime.strptime(data_cap_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
-                    # Aplica o desvio da madrugada na data do vídeo
-                    cap_logico = data_captura_obj if data_captura_obj.hour >= 6 else data_captura_obj - timedelta(days=1)
-                    dia_cap = cap_logico.strftime("%Y-%m-%d")
-                    
+                    dia_cap = data_captura_obj.strftime("%Y-%m-%d")
                     if dia_cap < hoje_str:
                         itens_elegiveis.append(item)
                 except ValueError:
-                    # Fallback de segurança para formatos de data inesperados
                     dia_cap = data_cap_str.split(" ")[0]
                     if dia_cap < hoje_str:
                         itens_elegiveis.append(item)
@@ -5989,25 +5981,9 @@ async def processar_fila_espiao():
     if not itens_elegiveis:
         return
 
-    # Injeção das configurações da janela útil obtidas do JSON do Espião
-    inicio_janela = dados_espiao.get("inicio", 10)
-    fim_janela = dados_espiao.get("fim", 22)
-    modo_distribuicao = dados_espiao.get("modo", "aleatorio")
-
-    # Corta a execução se estiver fora da janela útil de postagens configurada pelo admin
-    if agora.hour < inicio_janela or agora.hour >= fim_janela:
-        if EXIBIR_LOGS: logger.info(f"💤 [Espião] Fora da janela de postagem útil ({inicio_janela}h às {fim_janela}h). Represando vídeos.")
-        return
-
-    # ✅ MODO ALEATÓRIO VS ORDEM DE CHEGADA: Escolha estratégica do alvo do ciclo
-    if modo_distribuicao == "aleatorio":
-        item_pendente = random.choice(itens_elegiveis)
-        if EXIBIR_LOGS: logger.info(f"🔀 [Espião] Modo Aleatório ativo. Selecionado em lote: {item_pendente['id']}")
-    else:
-        # Ordem de chegada clássica (FIFO): Garante o mais antigo primeiro
-        itens_elegiveis.sort(key=lambda x: x.get("data_captura", ""))
-        item_pendente = itens_elegiveis[0]
-        if EXIBIR_LOGS: logger.info(f"⬇️ [Espião] Modo Ordem de Chegada ativo. Selecionado mais antigo: {item_pendente['id']}")
+    # ✅ SELEÇÃO ALEATÓRIA MANDATÓRIA (Estratégia acíclica permanente)
+    item_pendente = random.choice(itens_elegiveis)
+    if EXIBIR_LOGS: logger.info(f"🪞 [Espião] Sorteio aleatório ativo. Vídeo selecionado para a esteira: {item_pendente['id']}")
 
     caminho_video = item_pendente["caminho_video"]
     link_original = item_pendente["link_original"]
