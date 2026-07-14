@@ -2102,7 +2102,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 chat_id_limpo = origem_bruta.replace("-100", "")
                 link_original = f"https://t.me/c/{chat_id_limpo}/{msg_id}"
                 
-            # 🚀 CORREÇÃO DEFINITIVA: Cruzamento Agnóstico e Recursivo de Dados
+            # 🚀 CORREÇÃO DEFINITIVA: Cruzamento Inteligente de Dados
             if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 display_origem = "<code>Pendente de rastreio</code>"
             else:
@@ -2110,24 +2110,39 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 if origem_bruta in cache_nomes:
                     nome_origem = cache_nomes[origem_bruta]
                 else:
-                    def buscar_nome_por_id(dados, alvo_id):
-                        if isinstance(dados, dict):
-                            str_id = str(dados.get("id", ""))
-                            if str_id and (str_id == alvo_id or str_id.replace("-100", "") == alvo_id.replace("-100", "")):
-                                return dados.get("nome")
-                            for v in dados.values():
-                                res = buscar_nome_por_id(v, alvo_id)
-                                if res: return res
-                        elif isinstance(dados, list):
-                            for item in dados:
-                                res = buscar_nome_por_id(item, alvo_id)
-                                if res: return res
-                        return None
-
-                    # Busca profunda em toda a árvore de configuração do Espelhador ou Espião
+                    nome_encontrado = None
                     base_dados = locals().get("dados_rotas", {}) if tipo_fila == "Espelhador" else locals().get("dados_espiao", {})
-                    nome_encontrado = buscar_nome_por_id(base_dados, origem_bruta)
                     
+                    # 1. Busca Direta no Status do Userbot (Mapeamento do Espião)
+                    status_alvos = base_dados.get("status_alvos", {})
+                    if origem_bruta in status_alvos:
+                        nome_encontrado = status_alvos[origem_bruta].get("nome")
+                    
+                    # 2. Busca Flexível (Tentando ignorar o prefixo -100)
+                    if not nome_encontrado:
+                        for k, v in status_alvos.items():
+                            if k.replace("-100", "") == origem_bruta.replace("-100", ""):
+                                nome_encontrado = v.get("nome")
+                                break
+                                
+                    # 3. Busca Recursiva (Para as configurações do Espelhador)
+                    if not nome_encontrado:
+                        def busca_recursiva(dados, alvo_id):
+                            if isinstance(dados, dict):
+                                str_id = str(dados.get("id", dados.get("chat_id", "")))
+                                if str_id and (str_id == alvo_id or str_id.replace("-100", "") == alvo_id.replace("-100", "")):
+                                    return dados.get("nome")
+                                for v in dados.values():
+                                    res = busca_recursiva(v, alvo_id)
+                                    if res: return res
+                            elif isinstance(dados, list):
+                                for item in dados:
+                                    res = busca_recursiva(item, alvo_id)
+                                    if res: return res
+                            return None
+                            
+                        nome_encontrado = busca_recursiva(base_dados, origem_bruta)
+
                     if nome_encontrado:
                         nome_origem = nome_encontrado
                     
@@ -2141,6 +2156,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                             pass
                         finally:
                             await asyncio.sleep(0.3)
+                            
                     cache_nomes[origem_bruta] = nome_origem
                     if nome_origem != origem_bruta:
                         salvar_nome_grupo(origem_bruta, nome_origem)
