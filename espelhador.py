@@ -727,3 +727,45 @@ async def confirmar_esvaziar(message: types.Message, state: FSMContext):
     else:
         await message.answer("Número inválido. Tente novamente.", reply_markup=teclado_espelhador_cancelar)
 
+@dp.callback_query_handler(lambda c: c.data == 'confirmar_esvaziar_fila', state=EspelhadorFluxo.aguardando_confirmacao_esvaziar)
+async def processar_esvaziar_fila(callback_query: types.CallbackQuery, state: FSMContext):
+    if EXIBIR_LOGS:
+        print("🚀 Iniciando processo de forçar postagens para o espelhador...")
+    
+    async with state.proxy() as data:
+        rota_selecionada = data.get('rota_selecionada')
+    
+    if not rota_selecionada:
+        if EXIBIR_LOGS:
+            print("❌ Erro: Rota não encontrada no estado da máquina.")
+        await callback_query.answer("Erro ao identificar a rota.", show_alert=True)
+        return
+
+    if EXIBIR_LOGS:
+        print(f"📂 Rota identificada: {rota_selecionada}")
+        print("⏳ Atualizando arquivo espelhos_config.json...")
+
+    try:
+        with open('espelhos_config.json', 'r', encoding='utf-8') as f:
+            config = json.load(f)
+        
+        for espelho in config.get('espelhos', []):
+            if espelho.get('id_rota') == rota_selecionada:
+                espelho['esvaziar_agora'] = True
+                break
+        
+        with open('espelhos_config.json', 'w', encoding='utf-8') as f:
+            json.dump(config, f, indent=4, ensure_ascii=False)
+            
+        if EXIBIR_LOGS:
+            print("✅ Sucesso: Arquivo atualizado. A fila será esvaziada no próximo ciclo.")
+            
+        await callback_query.message.edit_text(f"✅ Postagens forçadas com sucesso para a rota {rota_selecionada}! O sistema processará os vídeos pendentes em instantes.")
+        
+    except Exception as e:
+        if EXIBIR_LOGS:
+            print(f"❌ Erro ao atualizar configuração do espelhador: {e}")
+        await callback_query.answer("Ocorreu um erro ao forçar as postagens.", show_alert=True)
+        
+    await state.finish()
+
