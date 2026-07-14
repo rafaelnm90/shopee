@@ -16,7 +16,6 @@ jobs:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
-          command_timeout: 30m
           script_stop: true
           script: |
             # Acessa a pasta exata onde o bot está no servidor
