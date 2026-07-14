@@ -2102,31 +2102,30 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 chat_id_limpo = origem_bruta.replace("-100", "")
                 link_original = f"https://t.me/c/{chat_id_limpo}/{msg_id}"
                 
-            # 🚀 CORREÇÃO DEFINITIVA: Cruzamento Inteligente de Dados
+            # 🚀 CORREÇÃO DEFINITIVA: Cache Otimizado e Busca Profunda
             if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 display_origem = "<code>Pendente de rastreio</code>"
             else:
                 nome_origem = origem_bruta
+                
+                # 1. O Porteiro: Busca instantânea no cache (memória rápida)
                 if origem_bruta in cache_nomes:
                     nome_origem = cache_nomes[origem_bruta]
                 else:
                     nome_encontrado = None
                     base_dados = locals().get("dados_rotas", {}) if tipo_fila == "Espelhador" else locals().get("dados_espiao", {})
-                    
-                    # 1. Busca Direta no Status do Userbot (Mapeamento do Espião)
                     status_alvos = base_dados.get("status_alvos", {})
-                    if origem_bruta in status_alvos:
-                        nome_encontrado = status_alvos[origem_bruta].get("nome")
                     
-                    # 2. Busca Flexível (Tentando ignorar o prefixo -100)
-                    if not nome_encontrado:
-                        for k, v in status_alvos.items():
-                            if k.replace("-100", "") == origem_bruta.replace("-100", ""):
-                                nome_encontrado = v.get("nome")
+                    # 2. A Vasculha Profunda: Procurando o ID dentro das propriedades de cada alvo do Userbot
+                    for alvo_key, dados_alvo in status_alvos.items():
+                        if isinstance(dados_alvo, dict):
+                            id_alvo = str(dados_alvo.get("id", ""))
+                            if id_alvo and (id_alvo == origem_bruta or id_alvo.replace("-100", "") == origem_bruta.replace("-100", "")):
+                                nome_encontrado = dados_alvo.get("nome")
                                 break
                                 
-                    # 3. Busca Recursiva (Para as configurações do Espelhador)
-                    if not nome_encontrado:
+                    # 2.1 Busca Recursiva (Para a estrutura complexa do Espelhador)
+                    if not nome_encontrado and tipo_fila == "Espelhador":
                         def busca_recursiva(dados, alvo_id):
                             if isinstance(dados, dict):
                                 str_id = str(dados.get("id", dados.get("chat_id", "")))
@@ -2140,26 +2139,27 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                                     res = busca_recursiva(item, alvo_id)
                                     if res: return res
                             return None
-                            
                         nome_encontrado = busca_recursiva(base_dados, origem_bruta)
 
                     if nome_encontrado:
                         nome_origem = nome_encontrado
                     
-                    # Tenta a API apenas se ainda for um número frio
+                    # Tenta a API apenas como último recurso se continuar a ser um número frio
                     if (nome_origem == origem_bruta or not nome_origem) and origem_bruta.lstrip("-").isdigit():
                         try:
-                            if EXIBIR_LOGS: logger.info(f"🔎 Consultando API do Telegram para resolver nome amigável do ID: {origem_bruta}...")
+                            if EXIBIR_LOGS: logger.info(f"🔎 Consultando API do Telegram para resolver ID frio: {origem_bruta}...")
                             chat_obj = await bot.get_chat(origem_bruta)
                             nome_origem = chat_obj.title or chat_obj.full_name or origem_bruta
                         except Exception:
                             pass
                         finally:
                             await asyncio.sleep(0.3)
-                            
+                    
+                    # 3. O Aprendizado: Salva no JSON definitivo para nunca mais precisar de vasculhar
                     cache_nomes[origem_bruta] = nome_origem
                     if nome_origem != origem_bruta:
                         salvar_nome_grupo(origem_bruta, nome_origem)
+                        if EXIBIR_LOGS: logger.info(f"💾 Memória Cache Atualizada: ID {origem_bruta} associado a '{nome_origem}'.")
                     
                 display_origem = f"{nome_origem[:25]}" if nome_origem != origem_bruta else f"{origem_bruta}"
                 
