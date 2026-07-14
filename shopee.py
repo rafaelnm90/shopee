@@ -2144,16 +2144,33 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     if nome_encontrado:
                         nome_origem = nome_encontrado
                     
-                    # Tenta a API apenas como último recurso se continuar a ser um número frio
+                    # Tenta a API apenas como último recurso através de um motor de tentativas progressivas
                     if (nome_origem == origem_bruta or not nome_origem) and origem_bruta.lstrip("-").isdigit():
-                        try:
-                            if EXIBIR_LOGS: logger.info(f"🔎 Consultando API do Telegram para resolver ID frio: {origem_bruta}...")
-                            chat_obj = await bot.get_chat(origem_bruta)
-                            nome_origem = chat_obj.title or chat_obj.full_name or origem_bruta
-                        except Exception:
-                            pass
-                        finally:
-                            await asyncio.sleep(0.3)
+                        so_numeros = origem_bruta.replace("-100", "").replace("-", "")
+                        variacoes = [
+                            origem_bruta,
+                            f"-100{so_numeros}",
+                            f"-{so_numeros}",
+                            so_numeros
+                        ]
+                        
+                        variacoes_unicas = []
+                        for v in variacoes:
+                            if v not in variacoes_unicas:
+                                variacoes_unicas.append(v)
+                                
+                        for var in variacoes_unicas:
+                            try:
+                                if EXIBIR_LOGS: logger.info(f"🔎 Testando variação de ID na API do Telegram: {var}...")
+                                chat_obj = await bot.get_chat(var)
+                                nome_origem = chat_obj.title or chat_obj.full_name or var
+                                origem_bruta = var # Fixa a chave com a variação correta aceite pela API
+                                if EXIBIR_LOGS: logger.info(f"✅ Variação {var} aceite! Nome resolvido: {nome_origem}")
+                                break # Sucesso alcançado, interrompe a bateria de testes
+                            except Exception:
+                                continue
+                            finally:
+                                await asyncio.sleep(0.3)
                     
                     # 3. O Aprendizado: Salva no JSON definitivo para nunca mais precisar de vasculhar
                     cache_nomes[origem_bruta] = nome_origem
