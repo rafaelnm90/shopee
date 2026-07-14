@@ -6135,7 +6135,6 @@ async def processar_fila_espiao():
     
     # ✅ Sorteia um intervalo aleatório entre 3 e 7 minutos para adormecer o motor
     minutos_espera = random.randint(3, 7)
-    from datetime import timedelta
     proximo_horario = datetime.now() + timedelta(minutes=minutos_espera)
     fila_data["proximo_processamento"] = proximo_horario.strftime("%Y-%m-%d %H:%M:%S")
     
