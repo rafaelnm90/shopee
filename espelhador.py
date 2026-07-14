@@ -15,7 +15,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import StateFilter
-from utils import registrar_erro_json
+from utils import registrar_erro_json, ler_cache_nomes_grupos
 
 if EXIBIR_LOGS:
     logger = logging.getLogger("Espelhador")
@@ -136,6 +136,7 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
     await state.clear()
     dados = ler_espelhos()
     rotas = dados.get("rotas", [])
+    cache_nomes = ler_cache_nomes_grupos()  # 🚀 Fallback para quando o status_canais ainda não foi auditado
     
     texto = "🔄 <b>Painel do Espelhador de Canais</b>\n\n"
     texto += "Este módulo clona publicações de um grupo para outro automaticamente, convertendo os links e respeitando um atraso programado.\n\n"
@@ -164,7 +165,7 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
                 if isinstance(info_o, str): info_o = {"status": info_o, "nome": str(o)}
                 
                 status_ico = "❌" if info_o.get("status") == "erro" else "✅"
-                nome_o = info_o.get("nome", str(o))
+                nome_o = info_o.get("nome") or cache_nomes.get(str(o), str(o))
                 display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
                 texto += f"      ├ {status_ico} {display_o}\n"
 
@@ -174,7 +175,7 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
             if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
             
             status_destino_ico = "❌" if info_d.get("status") == "erro" else "✅"
-            nome_d = info_d.get("nome", str(destino_rota))
+            nome_d = info_d.get("nome") or cache_nomes.get(str(destino_rota), str(destino_rota))
             display_d = f"{nome_d} (<code>{destino_rota}</code>)" if nome_d != str(destino_rota) else f"<code>{destino_rota}</code>"
             texto += f"   🎯 <b>Destino:</b>\n"
             texto += f"      └ {status_destino_ico} {display_d}\n\n"
