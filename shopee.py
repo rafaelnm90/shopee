@@ -3869,10 +3869,12 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
     texto += "<b>Na Escuta:</b>\n"
     
     if alvos:
+        cache_nomes_vigiados = ler_cache_nomes_grupos()  # 🚀 Fallback para grupos ainda não auditados pelo Userbot
         for i, alvo in enumerate(alvos, 1):
             info = status_alvos.get(alvo, {})
             status_ico = "⏳" # Status pendente enquanto o Userbot não verifica
-            detalhe = alvo
+            nome_cache = cache_nomes_vigiados.get(str(alvo))
+            detalhe = f"{nome_cache} <code>({alvo})</code>" if nome_cache else alvo
             
             if info.get("status") == "ok":
                 status_ico = "✅"
