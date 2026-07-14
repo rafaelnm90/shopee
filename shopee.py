@@ -6139,16 +6139,30 @@ async def processar_fila_espiao():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao postar clone no Telegram: {e}")
         
-    # 4. Encerramento, Faxina e Agendamento Orgânico
+    # 4. Encerramento, Faxina e Agendamento Orgânico Dinâmico
     fila_data["fila"] = [item for item in fila if item["id"] != item_id]
     
-    # ✅ Sorteia um intervalo aleatório entre 3 e 7 minutos para adormecer o motor
-    minutos_espera = random.randint(3, 7)
+    # ✅ MOTOR DE ESPAÇAMENTO DINÂMICO CONTÍNUO (00:00 às 23:59)
+    # Identifica matematicamente quantos minutos restam até o encerramento do dia atual
+    fim_do_dia = agora.replace(hour=23, minute=59, second=59, microsecond=0)
+    minutos_restantes = int((fim_do_dia - agora).total_seconds() / 60)
+    if minutos_restantes < 1:
+        minutos_restantes = 1
+        
+    # Divide os minutos restantes pela quantidade total de vídeos do lote que ainda restam
+    base_intervalo = minutos_restantes // len(itens_elegiveis)
+    
+    # Aplica flutuação aleatória de -5 a +5 minutos para dissolver qualquer padrão robótico fixo
+    minutos_espera = base_intervalo + random.randint(-5, 5)
+    if minutos_espera < 2:
+        minutos_espera = 2  # Respiro mínimo de segurança do servidor
+        
+    from datetime import timedelta
     proximo_horario = datetime.now() + timedelta(minutes=minutos_espera)
     fila_data["proximo_processamento"] = proximo_horario.strftime("%Y-%m-%d %H:%M:%S")
     
     salvar_fila_clonagem(fila_data)
-    if EXIBIR_LOGS: logger.info(f"⏳ Pausa orgânica ativada. O próximo vídeo da fila só será postado após as {proximo_horario.strftime('%H:%M:%S')} (Pausa de {minutos_espera} min).")
+    if EXIBIR_LOGS: logger.info(f"⏳ Escalonamento Inteligente: Restam {len(itens_elegiveis)} posts para {minutos_restantes} min. Próximo disparo em {minutos_espera} min ({proximo_horario.strftime('%H:%M:%S')}).")
     
     try:
         os.remove(caminho_video)
