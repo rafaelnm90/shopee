@@ -3324,17 +3324,19 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     if caminho_processado and caminho_video_original and os.path.exists(caminho_video_original):
         os.remove(caminho_video_original)
 
+    if EXIBIR_LOGS: logger.info("🚀 Aplicando blindagem: Assegurando persistência do video_id para o fallback de segurança...")
+
     if nivel_4_ativado:
         legenda_shopee = montar_legenda(texto_longo, is_rodape=False, plataforma_alvo="Apenas Shopee 🛒")
         if EXIBIR_LOGS: logger.info(f"📦 A agendar vídeo 1/2 (Shopee) na fila invisível para a data: {data_agendamento_base}.")
-        adicionar_a_fila(caminho_final, None, legenda_shopee)
+        adicionar_a_fila(caminho_final, video_id_fallback, legenda_shopee)
         
         legenda_tiktok = montar_legenda(texto_longo, is_rodape=False, plataforma_alvo="Apenas TikTok 🎵")
         if EXIBIR_LOGS: logger.info(f"📦 A agendar vídeo 2/2 (TikTok) na fila invisível para a data: {data_agendamento_base}.")
-        adicionar_a_fila(caminho_final, None, legenda_tiktok)
+        adicionar_a_fila(caminho_final, video_id_fallback, legenda_tiktok)
     else:
         if EXIBIR_LOGS: logger.info(f"📦 A agendar vídeo consolidado na fila invisível para a data: {data_agendamento_base}.")
-        adicionar_a_fila(caminho_final, video_id_fallback if not caminho_final else None, legenda_final)
+        adicionar_a_fila(caminho_final, video_id_fallback, legenda_final)
         
     if EXIBIR_LOGS: logger.info("💾 Ficheiro físico adormecido. A limpeza ocorrerá automaticamente após o upload escalonado.")
     
@@ -5090,19 +5092,25 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             nome_video = match_video.group(0).title() if match_video else "Vídeo ?"
             nome_item = match_item.group(1).strip() if match_item else "Sem descrição"
             
+            if EXIBIR_LOGS: logger.info(f"⚙️ Tratando segurança de string para a legenda do item {i}...")
+            legenda_segura = str(legenda) if legenda is not None else ""
+            
             if is_postado:
                 horario_envio = item.get("horario_postagem", "Horário indisponível")
-                status_previsao_final = f"✅ <b>Postado hoje às {horario_envio}</b>"
-            else:
-                if data_adicao_str == "2000-01-01":
-                    data_br = "Manual (Prioridade)"
-                elif data_adicao_str:
-                    try:
-                        data_br = datetime.strptime(data_adicao_str, "%Y-%m-%d").strftime("%d/%m/%Y")
-                    except:
-                        data_br = "Data desconhecida"
+                if "[ERRO: VÍDEO PERDIDO]" in legenda_segura:
+                    status_previsao_final = f"❌ <b>FALHA: Vídeo perdido às {horario_envio}</b>"
                 else:
-                    data_br = "Data desconhecida"
+                    status_previsao_final = f"✅ <b>Postado hoje às {horario_envio}</b>"
+            else:
+                    if data_adicao_str == "2000-01-01":
+                        data_br = "Manual (Prioridade)"
+                    elif data_adicao_str:
+                        try:
+                            data_br = datetime.strptime(data_adicao_str, "%Y-%m-%d").strftime("%d/%m/%Y")
+                        except:
+                            data_br = "Data desconhecida"
+                    else:
+                        data_br = "Data desconhecida"
                     
                 # Define a Previsão de Postagem base
                 if is_pausado:
