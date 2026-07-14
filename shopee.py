@@ -126,6 +126,7 @@ class EspiaoFluxo(StatesGroup):
     aguardando_confirmacao_remocao = State() # ✅ NOVO
     aguardando_canal_destino = State()
     aguardando_confirmacao_destino = State() # ✅ NOVO
+    aguardando_confirmacao_forcar_clones = State() # ✅ NOVO
 
 class AchadinhosFluxo(StatesGroup):
     menu_principal = State()
@@ -350,6 +351,7 @@ teclado_menu_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Grupos Vigiados 📡")],
         [KeyboardButton(text="Disparar Convite Afiliados 🚀"), KeyboardButton(text="Disparar Convite do Grupo 🔗\u200b")],
+        [KeyboardButton(text="Forçar Clones 🚀")],
         [KeyboardButton(text="⚙️ Automações (SPAM e Rotina)\u200b")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
@@ -3839,6 +3841,72 @@ async def menu_espiao_principal(message: types.Message, state: FSMContext):
     
     if EXIBIR_LOGS: logger.info("✅ Sucesso: Painel unificado do Espião renderizado com logs operacionais.")
     await message.answer(texto, reply_markup=teclado_menu_espiao, parse_mode="HTML")
+
+@dp.message(F.text == "Forçar Clones 🚀", StateFilter("*"))
+async def iniciar_esvaziar_clones(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    
+    fila_data = ler_fila_clonagem()
+    fila = fila_data.get("fila", [])
+    qtd_pendentes = len([i for i in fila if not i.get("processado")])
+    
+    if qtd_pendentes == 0:
+        await message.answer("A fila de clonagem já está vazia no momento.", reply_markup=teclado_menu_espiao)
+        return
+        
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    await message.answer(f"🚀 Tem certeza que deseja forçar o processamento de <b>{qtd_pendentes} vídeos</b> da fila do Espião imediatamente?", reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(EspiaoFluxo.aguardando_confirmacao_forcar_clones)
+
+@dp.message(EspiaoFluxo.aguardando_confirmacao_forcar_clones)
+async def processar_esvaziar_clones(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar ✅":
+        await message.answer("Operação cancelada.", reply_markup=teclado_menu_espiao)
+        await menu_espiao_principal(message, state)
+        return
+
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando processo de forçar clones para o Espião...")
+    
+    await message.answer("✅ <b>Clonagens Forçadas!</b>\nOs vídeos pendentes na fila do Espião serão analisados pela IA e postados em instantes. Você receberá um aviso quando o processo terminar.", parse_mode="HTML", reply_markup=teclado_menu_espiao)
+    await state.clear()
+    
+    # Chama o processo de forma assíncrona para não travar a interface do Telegram
+    asyncio.create_task(esvaziar_fila_espiao_background(message.chat.id))
+
+async def esvaziar_fila_espiao_background(chat_id):
+    if EXIBIR_LOGS: logger.info("🚀 [Espião] Iniciando rajada forçada em background...")
+    while True:
+        try:
+            dados = ler_fila_clonagem()
+            pendentes = [i for i in dados.get("fila", []) if not i.get("processado")]
+            if not pendentes:
+                if EXIBIR_LOGS: logger.info("✅ [Espião] Fila de clonagem esvaziada com sucesso!")
+                await bot.send_message(chat_id, "✅ <b>Concluído!</b>\nTodos os vídeos retidos na fila do Espião foram analisados pela IA e publicados com sucesso no seu canal.", parse_mode="HTML")
+                break
+            
+            # Anula as travas de tempo para permitir processamento imediato (Bypassa o D+1 artificialmente)
+            dados["proximo_processamento"] = "2000-01-01 00:00:00"
+            agora = datetime.now(fuso_horario)
+            ontem_str = (agora - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+            for item in dados.get("fila", []):
+                if not item.get("processado"):
+                    item["data_captura"] = ontem_str
+                    
+            salvar_fila_clonagem(dados)
+            
+            # Utiliza a função original intacta para fazer o trabalho pesado
+            await processar_fila_espiao()
+            await asyncio.sleep(5) # Pausa de segurança obrigatória entre postagens para evitar Timeout da API
+            
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro durante esvaziamento forçado: {e}")
+            await bot.send_message(chat_id, "⚠️ Ocorreu um erro durante o processamento em background. A rajada pode ter sido interrompida.")
+            break
 
 @dp.message(F.text == "Grupos Vigiados 📡")
 async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
