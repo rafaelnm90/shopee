@@ -169,7 +169,7 @@ def verificar_e_registrar_hash(hash_video, contexto="global"):
         json.dump(dados, f, indent=4)
     return False
 
-def salvar_na_fila_clonagem(caminho_video, link_shopee):
+def salvar_na_fila_clonagem(caminho_video, link_shopee, chat_origem="Desconhecida"):
     arquivo_fila = "fila_clonagem.json"
     try:
         with open(arquivo_fila, "r") as f:
@@ -179,6 +179,7 @@ def salvar_na_fila_clonagem(caminho_video, link_shopee):
         
     item = {
         "id": f"clone_{int(datetime.now().timestamp())}",
+        "chat_origem": str(chat_origem),
         "caminho_video": caminho_video,
         "link_original": link_shopee,
         "processado": False,
@@ -374,7 +375,7 @@ async def interceptar_mensagem(event):
                     if EXIBIR_LOGS: logger.error(f"❌ Erro ao tentar remover ficheiro duplicado: {e}")
                 return
                 
-            salvar_na_fila_clonagem(caminho_salvo, link_capturado)
+            salvar_na_fila_clonagem(caminho_salvo, link_capturado, chat_origem=chat_id_completo)
             
             # 📊 Adiciona a pontuação ao painel estatístico do Espião
             nome_chat = getattr(chat, 'title', chat_username if chat_username else chat_id)
