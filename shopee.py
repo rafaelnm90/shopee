@@ -146,6 +146,7 @@ class RelatoriosFluxo(StatesGroup):
 # ✅ NOVO: Máquina de Estados para a configuração do agendamento do Espião
 class ConfigRotinaEspiao(StatesGroup):
     aguardando_janela = State()
+    aguardando_intervalo_espiao = State()
     aguardando_modo = State()
 
 bot = Bot(token=API_TOKEN)
@@ -3882,13 +3883,15 @@ async def menu_espiao_principal(message: types.Message, state: FSMContext):
     inicio_e = dados_espiao.get("inicio", 10)
     fim_e = dados_espiao.get("fim", 22)
     modo_e = dados_espiao.get("modo", "aleatorio").title()
+    intervalo_e = dados_espiao.get("intervalo_dias", 1)
     
     # 3. Construir a mensagem unificada do painel
     texto = "🕵️ <b>Painel Principal do Espião</b>\n\n"
     texto += f"📦 <b>Fila de clonagem:</b> {videos_pendentes} vídeos aguardando.\n"
     texto += f"📡 <b>Radar operacional:</b> {qtd_concorrentes} concorrentes vigiados.\n"
     texto += f"🎯 <b>Canal de destino:</b> <code>{canal_destino}</code>\n"
-    texto += f"🕒 <b>Janela de Postagem:</b> {inicio_e}h às {fim_e}h (Modo: {modo_e})\n\n"
+    texto += f"🕒 <b>Janela de Postagem:</b> {inicio_e}h às {fim_e}h\n"
+    texto += f"📅 <b>Atraso (Defasagem):</b> D+{intervalo_e} (Modo: {modo_e})\n\n"
     texto += "Escolha uma opção para gerenciar:"
     
     if EXIBIR_LOGS: logger.info("✅ Sucesso: Painel unificado do Espião renderizado com logs operacionais.")
@@ -4189,34 +4192,58 @@ async def receber_janela_espiao(message: types.Message, state: FSMContext):
 
     await state.update_data(espiao_inicio=inicio, fmt_espiao_fim=fim)
     
+    teclado_dias = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Mesmo Dia (D+0) 🟢")],
+            [KeyboardButton(text="Dia Seguinte (D+1) 🟡")],
+            [KeyboardButton(text="Dois Dias (D+2) 🔵")],
+            [KeyboardButton(text="Cancelar ❌")]
+        ], resize_keyboard=True, is_persistent=True
+    )
+    await message.answer("Excelente! Agora escolha a defasagem temporal das postagens extraídas do Espião:", reply_markup=teclado_dias)
+    await state.set_state(ConfigRotinaEspiao.aguardando_intervalo_espiao)
+
+@dp.message(ConfigRotinaEspiao.aguardando_intervalo_espiao)
+async def receber_intervalo_espiao(message: types.Message, state: FSMContext):
+    mapa_dias = {"Mesmo Dia (D+0) 🟢": 0, "Dia Seguinte (D+1) 🟡": 1, "Dois Dias (D+2) 🔵": 2}
+    
+    if message.text not in mapa_dias:
+        await message.answer("Por favor, use os botões na tela para escolher o intervalo.", reply_markup=teclado_cancelar)
+        return
+        
+    intervalo = mapa_dias[message.text]
+    await state.update_data(intervalo_dias_espiao=intervalo)
+    
     teclado_modo = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")],
             [KeyboardButton(text="Cancelar ❌")]
         ], resize_keyboard=True, is_persistent=True
     )
-    await message.answer("Como deseja distribuir os vídeos retidos dentro dessa janela de horário no dia seguinte?", reply_markup=teclado_modo)
+    await message.answer("Como deseja distribuir os clones retidos dentro da janela estipulada?", reply_markup=teclado_modo)
     await state.set_state(ConfigRotinaEspiao.aguardando_modo)
 
 @dp.message(ConfigRotinaEspiao.aguardando_modo)
 async def salvar_config_tempo_espiao(message: types.Message, state: FSMContext):
     if message.text not in ["Aleatório 🔀", "Ordem de Chegada ⬇️"]:
-        await message.answer("Por favor, use os botões para escolher o modo.", reply_markup=teclado_cancelar)
+        await message.answer("Por favor, use os botões de seleção para definir o modo.", reply_markup=teclado_cancelar)
         return
         
     modo = "aleatorio" if message.text == "Aleatório 🔀" else "ordem"
     data = await state.get_data()
     inicio = data.get("espiao_inicio")
     fim = data.get("fmt_espiao_fim")
+    intervalo = data.get("intervalo_dias_espiao", 1)
     
     dados = ler_alvos_espiao()
     dados["inicio"] = inicio
     dados["fim"] = fim
+    dados["intervalo_dias"] = intervalo
     dados["modo"] = modo
     salvar_alvos_espiao(dados)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Configuração do Espião salva: Janela {inicio}h-{fim}h | Modo: {modo}")
-    await message.answer(f"✅ <b>Configurações do Espião Salvas!</b>\nJanela: {inicio}h às {fim}h\nDistribuição: {message.text}")
+    if EXIBIR_LOGS: logger.info(f"✅ Configuração do Espião salva: Janela {inicio}h-{fim}h | D+{intervalo} | Modo: {modo}")
+    await message.answer(f"✅ <b>Configurações do Espião Salvas!</b>\nJanela: {inicio}h às {fim}h\nAtraso: D+{intervalo}\nDistribuição: {message.text}", parse_mode="HTML")
     await state.clear()
     await menu_grupos_vigiados(message, state)
 
@@ -6077,8 +6104,9 @@ async def processar_fila_espiao():
         return 
         
     fila_data = ler_fila_clonagem()
+    intervalo_dias = dados_espiao.get("intervalo_dias", 1)
     
-    # ✅ LÓGICA TEMPORAL 24H (00:00 às 23:59) D+1 PARA O ESPIÃO
+    # ✅ LÓGICA TEMPORAL DINÂMICA (D+N) PARA O ESPIÃO
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
     
@@ -6093,7 +6121,7 @@ async def processar_fila_espiao():
             
     fila = fila_data.get("fila", [])
     
-    # Filtra os itens elegíveis D+1 (capturados estritamente antes do dia civil de hoje e não processados)
+    # Filtra os itens elegíveis considerando a defasagem configurada (D+0, D+1, etc.)
     itens_elegiveis = []
     for item in fila:
         if not item.get("processado"):
@@ -6101,12 +6129,16 @@ async def processar_fila_espiao():
             if data_cap_str:
                 try:
                     data_captura_obj = datetime.strptime(data_cap_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
-                    dia_cap = data_captura_obj.strftime("%Y-%m-%d")
-                    if dia_cap < hoje_str:
+                    data_alvo_obj = data_captura_obj + timedelta(days=intervalo_dias)
+                    dia_alvo = data_alvo_obj.strftime("%Y-%m-%d")
+                    if dia_alvo <= hoje_str:
                         itens_elegiveis.append(item)
                 except ValueError:
                     dia_cap = data_cap_str.split(" ")[0]
-                    if dia_cap < hoje_str:
+                    data_cap_obj = datetime.strptime(dia_cap, "%Y-%m-%d").replace(tzinfo=fuso_horario)
+                    data_alvo_obj = data_cap_obj + timedelta(days=intervalo_dias)
+                    dia_alvo = data_alvo_obj.strftime("%Y-%m-%d")
+                    if dia_alvo <= hoje_str:
                         itens_elegiveis.append(item)
 
     if not itens_elegiveis:
@@ -6120,14 +6152,15 @@ async def processar_fila_espiao():
     link_original = item_pendente["link_original"]
     item_id = item_pendente["id"]
     
-    # Verificação de validade temporal ampliada para 48 horas (D+1) para evitar expiração precoce
+    # Verificação de validade temporal ampliada baseada no intervalo de dias
     data_captura_str = item_pendente.get("data_captura")
     if data_captura_str:
         try:
             data_captura = datetime.strptime(data_captura_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
             horas_na_fila = (agora - data_captura).total_seconds() / 3600
-            if horas_na_fila > 48:
-                if EXIBIR_LOGS: logger.warning(f"⏳ Clone {item_id} expirou ({horas_na_fila:.1f}h). Descartando (Prazo D+1 estourado).")
+            limite_horas = (intervalo_dias * 24) + 24 # Expiração fluida (D+0 = 24h, D+1 = 48h, etc.)
+            if horas_na_fila > limite_horas:
+                if EXIBIR_LOGS: logger.warning(f"⏳ Clone {item_id} expirou ({horas_na_fila:.1f}h). Descartando (Prazo D+{intervalo_dias} estourado).")
                 fila_data["fila"] = [item for item in fila if item["id"] != item_id]
                 salvar_fila_clonagem(fila_data)
                 try:
