@@ -273,7 +273,9 @@ async def receber_janela_rota(message: types.Message, state: FSMContext):
             [KeyboardButton(text="Dia Seguinte (D+1) 🟡")],
             [KeyboardButton(text="Dois Dias (D+2) 🔵")],
             [KeyboardButton(text="Cancelar Operação ❌")]
-        ], resize_keyboard=True, is_persistent=True
+        ],
+        resize_keyboard=True,
+        is_persistent=True
     )
     await message.answer("Excelente! Agora escolha o intervalo de dias de maturação para a postagem (D+0 significa publicar no próprio dia em que o vídeo foi capturado):", reply_markup=teclado_dias)
     await state.set_state(EspelhadorFluxo.aguardando_intervalo_dias)
@@ -293,7 +295,9 @@ async def receber_intervalo_dias_rota(message: types.Message, state: FSMContext)
         keyboard=[
             [KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")],
             [KeyboardButton(text="Cancelar Operação ❌")]
-        ], resize_keyboard=True, is_persistent=True
+        ],
+        resize_keyboard=True,
+        is_persistent=True
     )
     await message.answer("Como deseja distribuir os vídeos retidos dentro dessa janela de horário?", reply_markup=teclado_modo)
     await state.set_state(EspelhadorFluxo.aguardando_modo)
