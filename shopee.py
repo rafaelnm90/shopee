@@ -318,7 +318,8 @@ teclado_edicao_nicho = ReplyKeyboardMarkup(
 def obter_teclado_raiz():
     botoes = [
         [KeyboardButton(text="Canal Afiliados 📺"), KeyboardButton(text="Outros Canais 🗂️")],
-        [KeyboardButton(text="Relatório Geral 📊")]
+        [KeyboardButton(text="Relatório Geral 📊")],
+        [KeyboardButton(text="Monitorar Servidor 🖥️")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
@@ -1787,6 +1788,57 @@ async def comando_start(message: types.Message, state: FSMContext):
     await state.update_data(painel_atual="raiz")
     if EXIBIR_LOGS: logger.info("⌨️ Iniciando o bot no Menu Raiz.")
     await message.answer("🏠 Painel de Controle Inicial. Escolha uma área para gerenciar:", reply_markup=obter_teclado_raiz())
+
+# BLOCO ESPECIFICAMENTE INSERIDO
+@dp.message(F.text == "Monitorar Servidor 🖥️", StateFilter("*"))
+async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    
+    if EXIBIR_LOGS: logger.info("🖥️ Iniciando auditoria assíncrona de saúde do servidor (Disco e Memória)...")
+    msg_status = await message.answer("🖥️ Lendo sensores da máquina Oracle... ⏳")
+    
+    try:
+        # Coleta as métricas de forma não bloqueante
+        comando_disco = await asyncio.create_subprocess_exec("df", "-h", "/", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout_disco, _ = await comando_disco.communicate()
+        linhas_disco = stdout_disco.decode().strip().split('\n')
+        
+        comando_ram = await asyncio.create_subprocess_exec("free", "-m", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        stdout_ram, _ = await comando_ram.communicate()
+        linhas_ram = stdout_ram.decode().strip().split('\n')
+        
+        import re
+        pct_disco = 0
+        if len(linhas_disco) > 1:
+            match = re.search(r'(\d+)%', linhas_disco[1])
+            if match: pct_disco = int(match.group(1))
+            
+        pct_ram = 0
+        if len(linhas_ram) > 1:
+            partes_ram = linhas_ram[1].split()
+            if len(partes_ram) >= 3:
+                total_ram = int(partes_ram[1])
+                usada_ram = int(partes_ram[2])
+                pct_ram = int((usada_ram / total_ram) * 100) if total_ram > 0 else 0
+
+        icone_disco = "🟢" if pct_disco < 75 else "🟡" if pct_disco < 90 else "🔴"
+        icone_ram = "🟢" if pct_ram < 75 else "🟡" if pct_ram < 90 else "🔴"
+        
+        texto = (
+            "🖥️ <b>Monitoramento do Servidor Oracle</b>\n\n"
+            f"{icone_disco} <b>Armazenamento (Disco /):</b>\n"
+            f"<code>{linhas_disco[0]}\n{linhas_disco[1] if len(linhas_disco) > 1 else 'Indisponível'}</code>\n\n"
+            f"{icone_ram} <b>Memória RAM (MB):</b>\n"
+            f"<code>{linhas_ram[0]}\n{linhas_ram[1] if len(linhas_ram) > 1 else 'Indisponível'}</code>\n\n"
+            "<i>Legenda: 🟢 Saudável | 🟡 Atenção | 🔴 Risco Crítico</i>"
+        )
+        
+        if EXIBIR_LOGS: logger.info(f"✅ Auditoria concluída em background. Disco: {pct_disco}% | RAM: {pct_ram}%")
+        await msg_status.edit_text(texto, parse_mode="HTML")
+        
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Falha ao tentar coletar métricas no terminal do Linux: {e}")
+        await msg_status.edit_text(f"❌ <b>Erro interno ao ler sensores:</b>\n<code>{e}</code>", parse_mode="HTML")
 
 @dp.message(F.text == "Canal Afiliados 📺", StateFilter("*"))
 async def menu_canal_principal(message: types.Message, state: FSMContext):
