@@ -471,7 +471,6 @@ async def iniciar_edicao_rota(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.aguardando_edicao_escolha_rota)
 
-# BLOCO ESPECIFICAMENTE MODIFICADO
 @router.message(EspelhadorFluxo.aguardando_edicao_escolha_rota)
 async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
