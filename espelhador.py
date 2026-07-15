@@ -302,15 +302,7 @@ async def receber_intervalo_dias_rota(message: types.Message, state: FSMContext)
     await message.answer("Como deseja distribuir os vídeos retidos dentro dessa janela de horário?", reply_markup=teclado_modo)
     await state.set_state(EspelhadorFluxo.aguardando_modo)
 
-@router.message(EspelhadorFluxo.aguardando_modo)
-async def receber_modo_rota(message: types.Message, state: FSMContext):
-            [KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")],
-            [KeyboardButton(text="Cancelar Operação ❌")]
-        ], resize_keyboard=True, is_persistent=True
-    )
-    await message.answer("Como deseja distribuir os vídeos retidos dentro dessa janela de horário no dia seguinte?", reply_markup=teclado_modo)
-    await state.set_state(EspelhadorFluxo.aguardando_modo)
-
+# BLOCO ESPECIFICAMENTE MODIFICADO (Apague tudo o que estiver quebrado e cole isto)
 @router.message(EspelhadorFluxo.aguardando_modo)
 async def receber_modo_rota(message: types.Message, state: FSMContext):
     if message.text not in ["Aleatório 🔀", "Ordem de Chegada ⬇️"]:
@@ -326,8 +318,10 @@ async def receber_modo_rota(message: types.Message, state: FSMContext):
     inicio = data.get("inicio")
     fim = data.get("fim")
     
+    intervalo_dias = data.get("intervalo_dias", 1)
+    
     texto_confirmacao = (
-        f"⚠️ <b>Confirmação de Criação de Rota (D+1)</b>\n\n"
+        f"⚠️ <b>Confirmação de Criação de Rota (D+{intervalo_dias})</b>\n\n"
         f"<b>Origens Mapeadas ({len(origens)}):</b>\n"
     )
     for o in origens:
