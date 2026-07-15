@@ -40,6 +40,7 @@ class EspelhadorFluxo(StatesGroup):
     aguardando_origem = State()
     aguardando_destino = State()
     aguardando_janela = State()
+    aguardando_intervalo_dias = State()
     aguardando_modo = State()
     aguardando_confirmacao_criacao = State()
     aguardando_remocao = State()
@@ -48,6 +49,7 @@ class EspelhadorFluxo(StatesGroup):
     aguardando_acao_edicao = State()
     aguardando_edicao_novo_nome = State()
     aguardando_edicao_nova_janela = State()
+    aguardando_edicao_intervalo_dias = State()
     aguardando_edicao_novo_modo = State()
     aguardando_nova_origem = State()
     aguardando_confirmacao_nova_origem = State()
@@ -265,8 +267,39 @@ async def receber_janela_rota(message: types.Message, state: FSMContext):
 
     await state.update_data(inicio=inicio, fim=fim)
     
+    teclado_dias = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Mesmo Dia (D+0) 🟢")],
+            [KeyboardButton(text="Dia Seguinte (D+1) 🟡")],
+            [KeyboardButton(text="Dois Dias (D+2) 🔵")],
+            [KeyboardButton(text="Cancelar Operação ❌")]
+        ], resize_keyboard=True, is_persistent=True
+    )
+    await message.answer("Excelente! Agora escolha o intervalo de dias de maturação para a postagem (D+0 significa publicar no próprio dia em que o vídeo foi capturado):", reply_markup=teclado_dias)
+    await state.set_state(EspelhadorFluxo.aguardando_intervalo_dias)
+
+@router.message(EspelhadorFluxo.aguardando_intervalo_dias)
+async def receber_intervalo_dias_rota(message: types.Message, state: FSMContext):
+    mapa_dias = {"Mesmo Dia (D+0) 🟢": 0, "Dia Seguinte (D+1) 🟡": 1, "Dois Dias (D+2) 🔵": 2}
+    
+    if message.text not in mapa_dias:
+        await message.answer("Por favor, utilize os botões em ecrã para escolher o intervalo de dias.", reply_markup=teclado_espelhador_cancelar)
+        return
+        
+    intervalo = mapa_dias[message.text]
+    await state.update_data(intervalo_dias=intervalo)
+    
     teclado_modo = ReplyKeyboardMarkup(
         keyboard=[
+            [KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")],
+            [KeyboardButton(text="Cancelar Operação ❌")]
+        ], resize_keyboard=True, is_persistent=True
+    )
+    await message.answer("Como deseja distribuir os vídeos retidos dentro dessa janela de horário?", reply_markup=teclado_modo)
+    await state.set_state(EspelhadorFluxo.aguardando_modo)
+
+@router.message(EspelhadorFluxo.aguardando_modo)
+async def receber_modo_rota(message: types.Message, state: FSMContext):
             [KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")],
             [KeyboardButton(text="Cancelar Operação ❌")]
         ], resize_keyboard=True, is_persistent=True
@@ -318,11 +351,13 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
     destino = data.get("destino")
     inicio = data.get("inicio")
     fim = data.get("fim")
+    # BLOCO ESPECIFICAMENTE MODIFICADO
+    intervalo_dias = data.get("intervalo_dias", 1)
     modo = data.get("modo")
     
     dados = ler_espelhos()
     
-    if EXIBIR_LOGS: logger.info(f"🚀 A agrupar {len(origens)} origens numa única rota de espelhamento D+1 para o destino {destino}...")
+    if EXIBIR_LOGS: logger.info(f"🚀 A agrupar {len(origens)} origens numa única rota de espelhamento (D+{intervalo_dias}) para o destino {destino}...")
     
     num_rota = len(dados.get("rotas", [])) + 1
     nome_rota = f"Espelho {num_rota}"
@@ -333,6 +368,7 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
         "destino": destino,
         "inicio": inicio,
         "fim": fim,
+        "intervalo_dias": intervalo_dias,
         "modo": modo
     }
     
@@ -341,7 +377,8 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
     
     if EXIBIR_LOGS: logger.info(f"✅ Rota inteligente criada com sucesso: {nome_rota}.")
     
-    await message.answer(f"✅ <b>Rota {nome_rota}</b> ativada!\nOs vídeos capturados hoje serão postados amanhã entre as {inicio}h e as {fim}h.", parse_mode="HTML")
+    dia_texto = "no próprio dia (D+0)" if intervalo_dias == 0 else f"com {intervalo_dias} dia(s) de atraso"
+    await message.answer(f"✅ <b>Rota {nome_rota}</b> ativada!\nOs vídeos capturados serão postados {dia_texto} entre as {inicio}h e as {fim}h.", parse_mode="HTML")
     await painel_espelhador(message, state)
 
 @router.message(EspelhadorFluxo.menu_principal, F.text == "Remover Rota 🗑️")
@@ -446,6 +483,8 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         
         texto = f"⚙️ <b>Editando Rota: {rota_alvo['nome']}</b>\n"
         texto += f"🕒 Janela atual: {rota_alvo.get('inicio', 10)}h às {rota_alvo.get('fim', 22)}h\n"
+        intervalo_atual = rota_alvo.get('intervalo_dias', 1)
+        texto += f"📅 Intervalo de Dias: D+{intervalo_atual}\n"
         texto += f"🔀 Modo atual: {rota_alvo.get('modo', 'ordem').title()}\n"
         
         origens = rota_alvo.get('origens', [])
@@ -456,8 +495,9 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         teclado_submenu = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="📝 Editar Nome"), KeyboardButton(text="🕒 Modificar Janela")],
-                [KeyboardButton(text="🔀 Modificar Modo"), KeyboardButton(text="➕ Adicionar Origem")],
-                [KeyboardButton(text="🗑️ Remover Origem"), KeyboardButton(text="Cancelar Operação ❌")]
+                [KeyboardButton(text="📅 Modificar Dias"), KeyboardButton(text="🔀 Modificar Modo")],
+                [KeyboardButton(text="➕ Adicionar Origem"), KeyboardButton(text="🗑️ Remover Origem")],
+                [KeyboardButton(text="Cancelar Operação ❌")]
             ], resize_keyboard=True, is_persistent=True)
             
         await message.answer(texto, reply_markup=teclado_submenu, parse_mode="HTML")
@@ -474,6 +514,17 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
     elif texto == "🕒 Modificar Janela":
         await message.answer("Digite a <b>NOVA JANELA</b> no formato <code>Inicio-Fim</code> (Ex: 10-22):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_edicao_nova_janela)
+    elif texto == "📅 Modificar Dias":
+        teclado_dias = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Mesmo Dia (D+0) 🟢")],
+                [KeyboardButton(text="Dia Seguinte (D+1) 🟡")],
+                [KeyboardButton(text="Dois Dias (D+2) 🔵")],
+                [KeyboardButton(text="Cancelar Operação ❌")]
+            ], resize_keyboard=True, is_persistent=True
+        )
+        await message.answer("Escolha o novo intervalo temporal de atraso para o espelhamento:", reply_markup=teclado_dias)
+        await state.set_state(EspelhadorFluxo.aguardando_edicao_intervalo_dias)
     elif texto == "🔀 Modificar Modo":
         teclado_modo = ReplyKeyboardMarkup(
             keyboard=[
@@ -565,6 +616,28 @@ async def salvar_edicao_janela(message: types.Message, state: FSMContext):
     
     if EXIBIR_LOGS: logger.info(f"✏️ Janela da rota '{rotas[indice]['nome']}' atualizada para {inicio}h-{fim}h.")
     await message.answer(f"✅ A janela foi atualizada para {inicio}h às {fim}h com sucesso!", parse_mode="HTML")
+    await painel_espelhador(message, state)
+
+@router.message(EspelhadorFluxo.aguardando_edicao_intervalo_dias)
+async def salvar_edicao_intervalo_dias(message: types.Message, state: FSMContext):
+    mapa_dias = {"Mesmo Dia (D+0) 🟢": 0, "Dia Seguinte (D+1) 🟡": 1, "Dois Dias (D+2) 🔵": 2}
+    
+    if message.text not in mapa_dias:
+        await message.answer("Por favor, utilize os botões para escolher o intervalo.", reply_markup=teclado_espelhador_cancelar)
+        return
+        
+    intervalo = mapa_dias[message.text]
+    data = await state.get_data()
+    indice = data.get("indice_edicao")
+    
+    dados = ler_espelhos()
+    rotas = dados.get("rotas", [])
+    rotas[indice]["intervalo_dias"] = intervalo
+    dados["rotas"] = rotas
+    salvar_espelhos(dados)
+    
+    if EXIBIR_LOGS: logger.info(f"✏️ Atraso dinâmico da rota '{rotas[indice]['nome']}' modificado para D+{intervalo}.")
+    await message.answer(f"✅ O intervalo temporal foi atualizado para D+{intervalo} com sucesso!", parse_mode="HTML")
     await painel_espelhador(message, state)
 
 @router.message(EspelhadorFluxo.aguardando_edicao_novo_modo)
