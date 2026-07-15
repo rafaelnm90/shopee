@@ -471,6 +471,7 @@ async def iniciar_edicao_rota(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.aguardando_edicao_escolha_rota)
 
+# BLOCO ESPECIFICAMENTE MODIFICADO
 @router.message(EspelhadorFluxo.aguardando_edicao_escolha_rota)
 async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
     if not message.text.isdigit():
@@ -487,12 +488,15 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         
         texto = f"⚙️ <b>Editando Rota: {rota_alvo['nome']}</b>\n"
         texto += f"🕒 Janela atual: {rota_alvo.get('inicio', 10)}h às {rota_alvo.get('fim', 22)}h\n"
+        
         intervalo_atual = rota_alvo.get('intervalo_dias', 1)
         texto += f"📅 Intervalo de Dias: D+{intervalo_atual}\n"
         texto += f"🔀 Modo atual: {rota_alvo.get('modo', 'ordem').title()}\n"
         
         origens = rota_alvo.get('origens', [])
-        if not origens and 'origem' in rota_alvo: origens = [rota_alvo['origem']]
+        if not origens and 'origem' in rota_alvo:
+            origens = [rota_alvo['origem']]
+            
         texto += f"📥 Origens: {len(origens)} canal(is)\n\n"
         texto += "Escolha a ação que deseja realizar:"
         
@@ -502,7 +506,10 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
                 [KeyboardButton(text="📅 Modificar Dias"), KeyboardButton(text="🔀 Modificar Modo")],
                 [KeyboardButton(text="➕ Adicionar Origem"), KeyboardButton(text="🗑️ Remover Origem")],
                 [KeyboardButton(text="Cancelar Operação ❌")]
-            ], resize_keyboard=True, is_persistent=True)
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
             
         await message.answer(texto, reply_markup=teclado_submenu, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_acao_edicao)
@@ -525,7 +532,9 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
                 [KeyboardButton(text="Dia Seguinte (D+1) 🟡")],
                 [KeyboardButton(text="Dois Dias (D+2) 🔵")],
                 [KeyboardButton(text="Cancelar Operação ❌")]
-            ], resize_keyboard=True, is_persistent=True
+            ],
+            resize_keyboard=True,
+            is_persistent=True
         )
         await message.answer("Escolha o novo intervalo temporal de atraso para o espelhamento:", reply_markup=teclado_dias)
         await state.set_state(EspelhadorFluxo.aguardando_edicao_intervalo_dias)
@@ -534,7 +543,9 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
             keyboard=[
                 [KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")],
                 [KeyboardButton(text="Cancelar Operação ❌")]
-            ], resize_keyboard=True, is_persistent=True
+            ],
+            resize_keyboard=True,
+            is_persistent=True
         )
         await message.answer("Escolha o novo modo de distribuição:", reply_markup=teclado_modo)
         await state.set_state(EspelhadorFluxo.aguardando_edicao_novo_modo)
@@ -547,7 +558,8 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
         rotas = ler_espelhos().get("rotas", [])
         rota = rotas[indice]
         origens = rota.get('origens', [])
-        if not origens and 'origem' in rota: origens = [rota['origem']]
+        if not origens and 'origem' in rota:
+            origens = [rota['origem']]
         
         if not origens:
             await message.answer("Esta rota não possui origens para remover.")
