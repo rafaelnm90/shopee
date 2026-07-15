@@ -6321,7 +6321,6 @@ async def processar_fila_espiao():
     if minutos_espera < 2:
         minutos_espera = 2  # Respiro mínimo de segurança do servidor
         
-    from datetime import timedelta
     proximo_horario = datetime.now() + timedelta(minutes=minutos_espera)
     fila_data["proximo_processamento"] = proximo_horario.strftime("%Y-%m-%d %H:%M:%S")
     
