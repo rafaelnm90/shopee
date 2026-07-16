@@ -278,8 +278,19 @@ async def converter_link_shopee(link_original):
 async def gerar_legenda_com_ia_espelhador(caminho_video):
     def processar_ia():
         import time
-        if EXIBIR_LOGS: logger.info("📤 [IA] A fazer upload do vídeo para o Google Storage...")
-        video_gemini = client_genai.files.upload(file=caminho_video)
+        if EXIBIR_LOGS: logger.info("🚀 [IA] A iniciar upload do vídeo para o Google Storage...")
+        
+        # Estrutura de retentativa para blindagem de rede (DNS/SSL)
+        video_gemini = None
+        for tentativa in range(3):
+            try:
+                video_gemini = client_genai.files.upload(file=caminho_video)
+                if video_gemini:
+                    break
+            except Exception as erro_rede:
+                if EXIBIR_LOGS: logger.warning(f"⚠️ [IA] Tentativa {tentativa+1}/3 falhou por instabilidade de rede: {erro_rede}")
+                if tentativa < 2: time.sleep(3)
+                else: raise erro_rede
         
         while video_gemini.state.name == "PROCESSING":
             time.sleep(2)
@@ -299,18 +310,19 @@ async def gerar_legenda_com_ia_espelhador(caminho_video):
                 if EXIBIR_LOGS: logger.info(f"⏳ [IA] A consultar o motor: {modelo_nome}...")
                 response = client_genai.models.generate_content(
                     model=modelo_nome,
-                    contents=[video_gemini, prompt]
+                    contents=prompt
                 )
                 if response and response.text:
                     if EXIBIR_LOGS: logger.info(f"✅ [IA] Sucesso com o modelo {modelo_nome}!")
                     return response.text.strip()
             except Exception as erro_modelo:
-                if "429" in str(erro_modelo):
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ [IA] Limite atingido em {modelo_nome}. A tentar o próximo...")
-                    continue
+                erro_str = str(erro_modelo).lower()
+                if "429" in erro_str or "quota" in erro_str:
+                    if EXIBIR_LOGS: logger.warning(f"⚠️ [IA] Limite atingido em {modelo_nome}. Pausando 3s antes do próximo motor...")
+                    time.sleep(3)
                 else:
                     if EXIBIR_LOGS: logger.warning(f"⚠️ [IA] Erro no modelo {modelo_nome}: {erro_modelo}")
-                    continue
+                continue
         raise Exception("Todos os modelos da cascata falharam por limite de cota ou erro.")
 
     try:
