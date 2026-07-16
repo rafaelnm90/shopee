@@ -155,6 +155,11 @@ async def enviar_mensagem(alvo):
     try:
         if EXIBIR_LOGS: logger.info(f"🚦 Aguardando sinal verde do banco de dados para {alvo}...")
         async with telegram_lock:
+            # ✅ Proteção ativa: Reconecta caso o socket tenha caído em background
+            if not client.is_connected():
+                if EXIBIR_LOGS: logger.info("🔄 [Auto-cura] Conexão perdida detectada. Forçando reconexão com o Telegram...")
+                await client.connect()
+                
             if EXIBIR_LOGS: logger.info(f"🟢 Sinal verde! Acessando o Telegram para {alvo}...")
             entidade = await client.get_entity(alvo)
             
@@ -238,6 +243,11 @@ async def enviar_mensagem_viral(alvo):
     try:
         if EXIBIR_LOGS: logger.info(f"🚦 [VIRAL] Aguardando sinal verde do banco de dados para {alvo}...")
         async with telegram_lock:
+            # ✅ Proteção ativa: Reconecta caso o socket tenha caído em background
+            if not client.is_connected():
+                if EXIBIR_LOGS: logger.info("🔄 [Auto-cura] Conexão perdida detectada no módulo Viral. Forçando reconexão...")
+                await client.connect()
+                
             if EXIBIR_LOGS: logger.info(f"🟢 [VIRAL] Sinal verde! Acessando o Telegram para {alvo}...")
             entidade = await client.get_entity(alvo)
             
