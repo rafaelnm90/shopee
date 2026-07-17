@@ -182,18 +182,7 @@ async def menu_comandos_autorais(event):
         else:
             await event.reply("⚠️ Comando incompleto. Tente: <code>/set_origem -100123456789</code>", parse_mode="html")
 
-    elif comando == '/set_destino':
-        if len(texto) > 1:
-            novo_valor = int(texto[1]) if texto[1].lstrip('-').isdigit() else texto[1]
-            nome_chat = await obter_nome_chat(novo_valor)
-            config_atual['destino'] = novo_valor
-            salvar_config_autorais(config_atual)
-            if EXIBIR_LOGS: logger.info(f"✅ Novo destino definido via chat: {novo_valor} ({nome_chat})")
-            await event.reply(f"✅ <b>Destino atualizado com sucesso!</b>\nOs vídeos serão enviados para:\n🏷️ <b>{nome_chat}</b>\n🆔 <code>{novo_valor}</code>", parse_mode="html")
-        else:
-            await event.reply("⚠️ Comando incompleto. Tente: <code>/set_destino @seu_canal</code>", parse_mode="html")
-
-@client.on(events.NewMessage(from_users='me', pattern=r'^/status_autorais|^/set_origem|^/set_destino'))
+    @client.on(events.NewMessage(from_users='me', pattern=r'^/status_autorais|^/set_origem|^/set_destino'))
 async def menu_comandos_autorais(event):
     global config_atual
     texto = event.raw_text.strip().split()
@@ -260,17 +249,16 @@ async def interceptar_e_espelhar(event):
             if EXIBIR_LOGS: logger.info("⏭️ Postagem ignorada: Não contém link da Shopee (nem embutido).")
             return
 
-        link_capturado = match_shopee.group(1).rstrip(").,;!?")
         if EXIBIR_LOGS: logger.info("🔗 A converter o link da Shopee para o seu ID de afiliado...")
-            link_novo = await converter_link_shopee(link_capturado)
-            
-            # ✅ Novo motor de substituição: Mantém a formatação original (negritos/emojis) e troca o link à força
-            texto_html = event.html or ""
-            texto_convertido = PADRAO_SHOPEE.sub(link_novo, texto_html)
-            
-            # Prevenção extra: Se o concorrente escondeu tanto o link que a substituição falhou, injetamos no final
-            if link_novo not in texto_convertido:
-                texto_convertido += f"\n\n🔗 <b>Link do Produto:</b>\n{link_novo}"
+        link_novo = await converter_link_shopee(link_capturado)
+        
+        # ✅ Novo motor de substituição: Mantém a formatação original (negritos/emojis) e troca o link à força
+        texto_html = event.html or ""
+        texto_convertido = PADRAO_SHOPEE.sub(link_novo, texto_html)
+        
+        # Prevenção extra: Se o concorrente escondeu tanto o link que a substituição falhou, injetamos no final
+        if link_novo not in texto_convertido:
+            texto_convertido += f"\n\n🔗 <b>Link do Produto:</b>\n{link_novo}"
 
             if EXIBIR_LOGS: logger.info("📥 Iniciando o download do vídeo...")
         caminho_video = await event.download_media(file="temp/temp_espelho_isolado_")
