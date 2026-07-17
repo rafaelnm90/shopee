@@ -153,14 +153,23 @@ async def interceptar_e_espelhar(event):
                     fila_dados[data_alvo] = []
                     
                 if len(fila_dados[data_alvo]) < 5:
+                    # 🚀 AQUI: Movemos para a pasta 'archive/' e salvamos o caminho
+                    os.makedirs("archive", exist_ok=True)
+                    # Usamos o caminho original com um nome único
+                    novo_caminho = f"archive/{os.path.basename(caminho_video)}"
+                    os.rename(caminho_video, novo_caminho)
+                    
                     fila_dados[data_alvo].append({
-                        "msg_id_destino": msg_enviada.id,
-                        "legenda": texto_convertido
+                        "msg_id_destino": msg_enviada.id, # Mantemos o ID para referência
+                        "legenda": texto_convertido,
+                        "caminho_arquivo": novo_caminho # ✅ Caminho físico no disco
                     })
                     salvar_fila_retorno(fila_dados)
-                    if EXIBIR_LOGS: logger.info(f"📅 Vídeo reservado para retorno à origem no dia {data_alvo} ({len(fila_dados[data_alvo])}/5).")
+                    if EXIBIR_LOGS: logger.info(f"📅 Vídeo arquivado em 'archive/' para retorno no dia {data_alvo}.")
                 else:
-                    if EXIBIR_LOGS: logger.info(f"⏭️ A cota de 5 vídeos para {data_alvo} já está cheia. Vídeo descartado da fila futura.")
+                    # Se não vai para a fila, deleta para não encher o disco
+                    os.remove(caminho_video)
+                    if EXIBIR_LOGS: logger.info(f"⏭️ A cota de 5 vídeos para {data_alvo} já está cheia. Vídeo descartado.")
 
             except Exception as e:
                 if EXIBIR_LOGS: logger.error(f"❌ Falha ao tentar enviar o vídeo: {e}")
@@ -173,21 +182,24 @@ async def interceptar_e_espelhar(event):
                 except Exception:
                     pass
 
-async def executar_postagem_retorno(msg_id_destino, legenda):
+async def executar_postagem_retorno(caminho_arquivo, legenda):
+    if EXIBIR_LOGS: logger.info(f"🚀 [Fluxo] Iniciando retorno do vídeo arquivado: {caminho_arquivo}")
     try:
-        if EXIBIR_LOGS: logger.info("🔄 A resgatar vídeo antigo para devolver à origem...")
-        msg_original = await client.get_messages(GRUPO_DESTINO, ids=msg_id_destino)
-        
-        if msg_original and getattr(msg_original, 'media', None):
+        # ✅ O robô busca o arquivo direto na pasta 'archive/' que criamos
+        if os.path.exists(caminho_arquivo):
             await client.send_file(
                 GRUPO_ORIGEM,
-                file=msg_original.media,
+                file=caminho_arquivo,
                 caption=legenda,
                 parse_mode="html"
             )
             if EXIBIR_LOGS: logger.info("✅ Vídeo de retorno publicado com sucesso no grupo de origem!")
+            
+            # Limpeza final após o sucesso do retorno
+            os.remove(caminho_arquivo)
+            if EXIBIR_LOGS: logger.info("🧹 Ficheiro arquivado removido após postagem final.")
         else:
-            if EXIBIR_LOGS: logger.warning("⚠️ Ficheiro original apagado do destino. Impossível concluir o retorno.")
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Ficheiro de arquivo não encontrado em {caminho_arquivo}. A postagem falhou.")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha no disparo de retorno: {e}")
 
@@ -212,11 +224,12 @@ def agendar_tarefas_diarias():
         if horario_disparo < agora:
             horario_disparo = agora + timedelta(minutes=random.randint(5, 45))
             
+        # ✅ ALTERAÇÃO: Agora passamos o caminho_arquivo que salvamos no JSON
         scheduler.add_job(
             executar_postagem_retorno, 
             'date', 
             run_date=horario_disparo, 
-            args=[video["msg_id_destino"], video["legenda"]]
+            args=[video["caminho_arquivo"], video["legenda"]] 
         )
         if EXIBIR_LOGS: logger.info(f"⏳ Vídeo de retorno {i+1} camuflado e agendado para as {horario_disparo.strftime('%H:%M')}.")
 
