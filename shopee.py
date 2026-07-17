@@ -143,6 +143,11 @@ class AchadinhosFluxo(StatesGroup):
     aguardando_campo_edicao = State()
     aguardando_novo_valor_edicao = State()
 
+class AutoraisFluxo(StatesGroup):
+    menu_principal = State()
+    aguardando_origem = State()
+    aguardando_destino = State()
+
 class RelatoriosFluxo(StatesGroup):
     menu_filas = State()
 
@@ -291,8 +296,17 @@ teclado_opcoes_rotina = ReplyKeyboardMarkup(
 teclado_outros_canais = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
-        [KeyboardButton(text="Gerador de Achadinhos 🛍️")],
+        [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Vídeos Autorais 🎥")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+teclado_menu_autorais = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Editar Origem 📥"), KeyboardButton(text="Editar Destino 📤")],
+        [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -1552,6 +1566,80 @@ class InatividadeMiddleware(BaseMiddleware):
 
 # Acopla o interceptador de inatividade ao núcleo do robô para vigiar todas as mensagens
 dp.message.middleware(InatividadeMiddleware())
+
+# ----------------------------------
+# NOVO MÓDULO: VÍDEOS AUTORAIS 🎥
+# ----------------------------------
+def ler_autorais_config():
+    try:
+        with open("autorais_config.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"origem": -1003673555953, "destino": "@videos_autorais"}
+
+def salvar_autorais_config(dados):
+    with open("autorais_config.json", "w", encoding="utf-8") as f:
+        json.dump(dados, f, indent=4, ensure_ascii=False)
+
+@dp.message(F.text == "Vídeos Autorais 🎥", StateFilter("*"))
+async def painel_autorais(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    
+    if EXIBIR_LOGS: logger.info("🎥 Acessando painel visual do Bot Vídeos Autorais...")
+    config = ler_autorais_config()
+    origem = config.get("origem", "Não definida")
+    destino = config.get("destino", "Não definido")
+    
+    texto = (
+        "🎥 <b>Painel do Bot Vídeos Autorais</b>\n\n"
+        f"📥 <b>Origem atual:</b> <code>{origem}</code>\n"
+        f"📤 <b>Destino atual:</b> <code>{destino}</code>\n\n"
+        "O robô Espelhador Isolado fará a escuta e o envio em tempo real baseando-se estritamente nestes valores.\n\n"
+        "Escolha o que deseja alterar:"
+    )
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_menu_autorais)
+    await state.set_state(AutoraisFluxo.menu_principal)
+
+@dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Origem 📥")
+async def pedir_origem_autorais(message: types.Message, state: FSMContext):
+    if EXIBIR_LOGS: logger.info("📥 Solicitando nova origem para vídeos autorais...")
+    await message.answer("Envie o <b>ID Numérico</b> ou <b>@username</b> do grupo de ORIGEM de onde o bot vai puxar os vídeos (Ex: -100123456789):", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(AutoraisFluxo.aguardando_origem)
+
+@dp.message(AutoraisFluxo.aguardando_origem)
+async def salvar_origem_autorais(message: types.Message, state: FSMContext):
+    novo_valor = message.text.strip()
+    if novo_valor.lstrip('-').isdigit():
+        novo_valor = int(novo_valor)
+        
+    config = ler_autorais_config()
+    config["origem"] = novo_valor
+    salvar_autorais_config(config)
+    
+    if EXIBIR_LOGS: logger.info(f"✅ Origem dos vídeos autorais atualizada para: {novo_valor}")
+    await message.answer(f"✅ <b>Origem atualizada com sucesso!</b>\nO robô agora escutará: <code>{novo_valor}</code>", parse_mode="HTML")
+    await painel_autorais(message, state)
+
+@dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Destino 📤")
+async def pedir_destino_autorais(message: types.Message, state: FSMContext):
+    if EXIBIR_LOGS: logger.info("📤 Solicitando novo destino para vídeos autorais...")
+    await message.answer("Envie o <b>ID Numérico</b> ou <b>@username</b> do canal de DESTINO para onde o bot vai enviar os vídeos convertidos (Ex: @meu_canal):", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(AutoraisFluxo.aguardando_destino)
+
+@dp.message(AutoraisFluxo.aguardando_destino)
+async def salvar_destino_autorais(message: types.Message, state: FSMContext):
+    novo_valor = message.text.strip()
+    if novo_valor.lstrip('-').isdigit():
+        novo_valor = int(novo_valor)
+        
+    config = ler_autorais_config()
+    config["destino"] = novo_valor
+    salvar_autorais_config(config)
+    
+    if EXIBIR_LOGS: logger.info(f"✅ Destino dos vídeos autorais atualizado para: {novo_valor}")
+    await message.answer(f"✅ <b>Destino atualizado com sucesso!</b>\nOs vídeos convertidos serão enviados instantaneamente para: <code>{novo_valor}</code>", parse_mode="HTML")
+    await painel_autorais(message, state)
 
 # ----------------------------------
 # NOVO MÓDULO: GERADOR AUTÔNOMO DE ACHADINHOS 🛍️
@@ -2916,6 +3004,13 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await state.clear()
         await message.answer("Ação cancelada.")
         await painel_achadinhos(message, state)
+        return
+
+    # 🔁 Roteamento Inteligente: Se estiver em Vídeos Autorais
+    if estado_atual and estado_atual.startswith("AutoraisFluxo"):
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await painel_autorais(message, state)
         return
         
     # 🔁 Roteamento Inteligente: Se estiver nas Rotinas
