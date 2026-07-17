@@ -5,7 +5,8 @@ After=network.target
 [Service]
 User=ubuntu
 WorkingDirectory=/home/ubuntu/shopee
-ExecStart=/home/ubuntu/shopee/venv/bin/python3 /home/ubuntu/shopee/NOME_DO_ARQUIVO.py
+Environment="PATH=/home/ubuntu/shopee/venv/bin"
+ExecStart=/home/ubuntu/shopee/venv/bin/python3 /home/ubuntu/shopee/divulgacao_canal.py
 Restart=always
 RestartSec=10
 
