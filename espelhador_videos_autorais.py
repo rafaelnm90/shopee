@@ -160,6 +160,8 @@ async def interceptar_e_espelhar(event):
     chat = await event.get_chat()
     origem_configurada = config_atual['origem']
     
+    eh_origem = False  # 🐛 Correção: Garante que a variável exista desde o início
+    
     if isinstance(origem_configurada, int) and getattr(event, 'chat_id', None) == origem_configurada:
         eh_origem = True
     elif isinstance(origem_configurada, str):
