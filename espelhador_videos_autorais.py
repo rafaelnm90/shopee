@@ -18,6 +18,9 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from utils import registrar_erro_json
 
+# ✅ Cria a pasta temp isolada na inicialização
+os.makedirs("temp", exist_ok=True)
+
 # Expressão regular para encontrar links da Shopee na legenda
 PADRAO_SHOPEE = re.compile(r'(https?://(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+)')
 
@@ -124,7 +127,7 @@ async def interceptar_e_espelhar(event):
         texto_convertido = texto_original.replace(link_capturado, link_novo)
 
         if EXIBIR_LOGS: logger.info("📥 Iniciando o download do vídeo...")
-        caminho_video = await event.download_media(file="temp_espelho_isolado_")
+        caminho_video = await event.download_media(file="temp/temp_espelho_isolado_")
         
         if caminho_video:
             try:
@@ -135,6 +138,13 @@ async def interceptar_e_espelhar(event):
                     parse_mode="html"
                 )
                 if EXIBIR_LOGS: logger.info("🚀 Vídeo publicado no canal de destino com o link atualizado!")
+                
+                # ✅ Exclusão instantânea imediata após o sucesso
+                try:
+                    os.remove(caminho_video)
+                    if EXIBIR_LOGS: logger.info("🧹 Ficheiro de vídeo temporário removido do servidor.")
+                except Exception:
+                    pass
                 
                 # Regra dos 15 dias e limite de 5 vídeos
                 data_alvo = (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d")
@@ -155,11 +165,11 @@ async def interceptar_e_espelhar(event):
             except Exception as e:
                 if EXIBIR_LOGS: logger.error(f"❌ Falha ao tentar enviar o vídeo: {e}")
                 registrar_erro_json(f"interceptar_e_espelhar: {e}", origem="espelhador_videos_autorais.py")
-            
-            finally:
+                
+                # ✅ Etiqueta de Falha (Isolamento para não travar o disco)
                 try:
-                    os.remove(caminho_video)
-                    if EXIBIR_LOGS: logger.info("🧹 Ficheiro de vídeo temporário removido do servidor.")
+                    os.rename(caminho_video, caminho_video + ".pendente")
+                    if EXIBIR_LOGS: logger.info(f"🏷️ Ficheiro isolado para limpeza posterior: {caminho_video}.pendente")
                 except Exception:
                     pass
 
