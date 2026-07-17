@@ -16,6 +16,9 @@ from utils import registrar_erro_json
 load_dotenv()
 EXIBIR_LOGS = True
 
+# ✅ Cria a pasta temp isolada na inicialização
+os.makedirs("temp", exist_ok=True)
+
 # FORÇA O FUSO HORÁRIO DO BRASIL NA MEMÓRIA DO SCRIPT
 os.environ['TZ'] = 'America/Sao_Paulo'
 time.tzset()
