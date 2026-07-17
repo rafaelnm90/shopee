@@ -241,6 +241,14 @@ async def main():
     if EXIBIR_LOGS: logger.info("⏳ Iniciando o robô Espelhador Isolado...")
     await client.start()
     
+    # ✅ NOVO: Sincronização obrigatória de cache para reconhecer IDs numéricos em sessões novas
+    if EXIBIR_LOGS: logger.info("🔄 Sincronizando banco de dados de grupos...")
+    try:
+        await client.get_dialogs()
+        if EXIBIR_LOGS: logger.info("✅ Sincronização concluída! ID do grupo reconhecido.")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Aviso na sincronização: {e}")
+
     scheduler.add_job(agendar_tarefas_diarias, 'cron', hour=1, minute=0)
     agendar_tarefas_diarias()
     scheduler.start()
