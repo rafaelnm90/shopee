@@ -1,0 +1,13 @@
+[Unit]
+Description=Robo Espelhador de Videos Autorais
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/shopee
+ExecStart=/home/ubuntu/shopee/venv/bin/python3 /home/ubuntu/shopee/espelhador_videos_autorais.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
