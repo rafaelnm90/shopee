@@ -156,9 +156,9 @@ async def menu_comandos_autorais(event):
 
 @client.on(events.NewMessage())
 async def interceptar_e_espelhar(event):
+    config_atual = carregar_config_autorais() # ✅ Essa linha obriga o robô a ler a sua alteração em tempo real
     chat = await event.get_chat()
     origem_configurada = config_atual['origem']
-    eh_origem = False
     
     if isinstance(origem_configurada, int) and getattr(event, 'chat_id', None) == origem_configurada:
         eh_origem = True
