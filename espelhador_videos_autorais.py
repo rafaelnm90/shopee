@@ -4,10 +4,6 @@ EXIBIR_LOGS = True
 import os
 import asyncio
 import logging
-from telethon import TelegramClient, events
-from telethon.tl.types import MessageMediaDocument
-from dotenv import load_dotenv
-load_dotenv()
 import json
 import random
 import time
@@ -15,11 +11,17 @@ import hashlib
 import aiohttp
 import re
 from datetime import datetime, timedelta
+from telethon import TelegramClient, events
+from telethon.tl.types import MessageMediaDocument
+from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from utils import registrar_erro_json
 
-# ✅ Cria a pasta temp isolada na inicialização
+load_dotenv()
+
+# ✅ Cria as pastas isoladas na inicialização
 os.makedirs("temp", exist_ok=True)
+os.makedirs("archive", exist_ok=True)
 
 # Expressão regular para encontrar links da Shopee na legenda
 PADRAO_SHOPEE = re.compile(r'(https?://(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+)')
@@ -32,18 +34,28 @@ SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
 scheduler = AsyncIOScheduler(timezone="America/Sao_Paulo")
 
 if EXIBIR_LOGS:
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
     logger = logging.getLogger(__name__)
 
-# 1. CREDENCIAIS E CONFIGURAÇÕES FIXAS
+# 1. CREDENCIAIS E CONFIGURAÇÕES
 API_ID = int(os.getenv('API_ID', 0)) 
 API_HASH = os.getenv('API_HASH', '')
 
-GRUPO_ORIGEM = -1003673555953 
-GRUPO_DESTINO = '@videos_autorais'
+def carregar_config_autorais():
+    try:
+        with open("autorais_config.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        # Valores de segurança caso o arquivo ainda não exista
+        return {"origem": -1003673555953, "destino": "@videos_autorais"}
+
+def salvar_config_autorais(config):
+    with open("autorais_config.json", "w", encoding="utf-8") as f:
+        json.dump(config, f, indent=4, ensure_ascii=False)
+
+config_atual = carregar_config_autorais()
 
 NOME_SESSAO = 'sessao_espelhador_isolado'
-
 client = TelegramClient(NOME_SESSAO, API_ID, API_HASH)
 
 def ler_fila_retorno():
@@ -68,7 +80,7 @@ async def converter_link_shopee(link_original):
             async with aiohttp.ClientSession() as session:
                 async with session.get(link_original, allow_redirects=True) as resp:
                     link_processar = str(resp.url)
-                    # Limpeza vital: Remove os rastreadores do afiliado anterior para a API não rejeitar
+                    # Limpeza vital para remover rastreadores do afiliado anterior
                     link_processar = link_processar.split('?')[0]
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro ao expandir URL: {e}")
@@ -106,9 +118,59 @@ async def converter_link_shopee(link_original):
         
     return link_original
 
-@client.on(events.NewMessage(chats=GRUPO_ORIGEM))
+@client.on(events.NewMessage(from_users='me', pattern=r'^/status_autorais|^/set_origem|^/set_destino'))
+async def menu_comandos_autorais(event):
+    global config_atual
+    texto = event.raw_text.strip().split()
+    comando = texto[0]
+
+    if comando == '/status_autorais':
+        if EXIBIR_LOGS: logger.info("⚙️ Comando /status_autorais acionado.")
+        msg = (f"🤖 <b>Painel do Bot Vídeos Autorais</b>\n\n"
+               f"📥 <b>Origem atual:</b> <code>{config_atual['origem']}</code>\n"
+               f"📤 <b>Destino atual:</b> <code>{config_atual['destino']}</code>\n\n"
+               f"<i>Para configurar, envie no chat:</i>\n"
+               f"<code>/set_origem [ID numérico ou @username]</code>\n"
+               f"<code>/set_destino [ID numérico ou @username]</code>")
+        await event.reply(msg, parse_mode="html")
+
+    elif comando == '/set_origem':
+        if len(texto) > 1:
+            novo_valor = int(texto[1]) if texto[1].lstrip('-').isdigit() else texto[1]
+            config_atual['origem'] = novo_valor
+            salvar_config_autorais(config_atual)
+            if EXIBIR_LOGS: logger.info(f"✅ Nova origem definida via chat: {novo_valor}")
+            await event.reply(f"✅ <b>Origem atualizada com sucesso!</b>\nO robô agora escutará: <code>{novo_valor}</code>", parse_mode="html")
+        else:
+            await event.reply("⚠️ Comando incompleto. Tente: <code>/set_origem -100123456789</code>", parse_mode="html")
+
+    elif comando == '/set_destino':
+        if len(texto) > 1:
+            novo_valor = int(texto[1]) if texto[1].lstrip('-').isdigit() else texto[1]
+            config_atual['destino'] = novo_valor
+            salvar_config_autorais(config_atual)
+            if EXIBIR_LOGS: logger.info(f"✅ Novo destino definido via chat: {novo_valor}")
+            await event.reply(f"✅ <b>Destino atualizado com sucesso!</b>\nOs vídeos serão enviados para: <code>{novo_valor}</code>", parse_mode="html")
+        else:
+            await event.reply("⚠️ Comando incompleto. Tente: <code>/set_destino @seu_canal</code>", parse_mode="html")
+
+@client.on(events.NewMessage())
 async def interceptar_e_espelhar(event):
-    if EXIBIR_LOGS: logger.info("🔍 Nova postagem detetada no grupo de origem.")
+    chat = await event.get_chat()
+    origem_configurada = config_atual['origem']
+    eh_origem = False
+    
+    if isinstance(origem_configurada, int) and getattr(event, 'chat_id', None) == origem_configurada:
+        eh_origem = True
+    elif isinstance(origem_configurada, str):
+        username_chat = getattr(chat, 'username', None)
+        if username_chat and f"@{username_chat}".lower() == origem_configurada.lower():
+            eh_origem = True
+            
+    if not eh_origem:
+        return
+
+    if EXIBIR_LOGS: logger.info("🔍 Nova postagem detetada no grupo de origem configurado.")
 
     if getattr(event, 'media', None) is None:
         return
@@ -132,19 +194,12 @@ async def interceptar_e_espelhar(event):
         if caminho_video:
             try:
                 msg_enviada = await client.send_file(
-                    GRUPO_DESTINO,
+                    config_atual['destino'],
                     file=caminho_video,
                     caption=texto_convertido,
                     parse_mode="html"
                 )
                 if EXIBIR_LOGS: logger.info("🚀 Vídeo publicado no canal de destino com o link atualizado!")
-                
-                # ✅ Exclusão instantânea imediata após o sucesso
-                try:
-                    os.remove(caminho_video)
-                    if EXIBIR_LOGS: logger.info("🧹 Ficheiro de vídeo temporário removido do servidor.")
-                except Exception:
-                    pass
                 
                 # Regra dos 15 dias e limite de 5 vídeos
                 data_alvo = (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d")
@@ -153,49 +208,47 @@ async def interceptar_e_espelhar(event):
                     fila_dados[data_alvo] = []
                     
                 if len(fila_dados[data_alvo]) < 5:
-                    # 🚀 AQUI: Movemos para a pasta 'archive/' e salvamos o caminho
-                    os.makedirs("archive", exist_ok=True)
-                    # Usamos o caminho original com um nome único
                     novo_caminho = f"archive/{os.path.basename(caminho_video)}"
                     os.rename(caminho_video, novo_caminho)
                     
                     fila_dados[data_alvo].append({
-                        "msg_id_destino": msg_enviada.id, # Mantemos o ID para referência
+                        "msg_id_destino": msg_enviada.id,
                         "legenda": texto_convertido,
-                        "caminho_arquivo": novo_caminho # ✅ Caminho físico no disco
+                        "caminho_arquivo": novo_caminho 
                     })
                     salvar_fila_retorno(fila_dados)
                     if EXIBIR_LOGS: logger.info(f"📅 Vídeo arquivado em 'archive/' para retorno no dia {data_alvo}.")
                 else:
-                    # Se não vai para a fila, deleta para não encher o disco
-                    os.remove(caminho_video)
-                    if EXIBIR_LOGS: logger.info(f"⏭️ A cota de 5 vídeos para {data_alvo} já está cheia. Vídeo descartado.")
+                    try:
+                        os.remove(caminho_video)
+                        if EXIBIR_LOGS: logger.info(f"⏭️ A cota para {data_alvo} já está cheia. Vídeo removido do disco.")
+                    except Exception:
+                        pass
 
             except Exception as e:
                 if EXIBIR_LOGS: logger.error(f"❌ Falha ao tentar enviar o vídeo: {e}")
                 registrar_erro_json(f"interceptar_e_espelhar: {e}", origem="espelhador_videos_autorais.py")
                 
-                # ✅ Etiqueta de Falha (Isolamento para não travar o disco)
-                try:
-                    os.rename(caminho_video, caminho_video + ".pendente")
-                    if EXIBIR_LOGS: logger.info(f"🏷️ Ficheiro isolado para limpeza posterior: {caminho_video}.pendente")
-                except Exception:
-                    pass
+                # Etiqueta de Falha
+                if os.path.exists(caminho_video):
+                    try:
+                        os.rename(caminho_video, caminho_video + ".pendente")
+                        if EXIBIR_LOGS: logger.info(f"🏷️ Ficheiro isolado para limpeza posterior: {caminho_video}.pendente")
+                    except Exception:
+                        pass
 
 async def executar_postagem_retorno(caminho_arquivo, legenda):
     if EXIBIR_LOGS: logger.info(f"🚀 [Fluxo] Iniciando retorno do vídeo arquivado: {caminho_arquivo}")
     try:
-        # ✅ O robô busca o arquivo direto na pasta 'archive/' que criamos
         if os.path.exists(caminho_arquivo):
             await client.send_file(
-                GRUPO_ORIGEM,
+                config_atual['origem'],
                 file=caminho_arquivo,
                 caption=legenda,
                 parse_mode="html"
             )
             if EXIBIR_LOGS: logger.info("✅ Vídeo de retorno publicado com sucesso no grupo de origem!")
             
-            # Limpeza final após o sucesso do retorno
             os.remove(caminho_arquivo)
             if EXIBIR_LOGS: logger.info("🧹 Ficheiro arquivado removido após postagem final.")
         else:
@@ -224,16 +277,14 @@ def agendar_tarefas_diarias():
         if horario_disparo < agora:
             horario_disparo = agora + timedelta(minutes=random.randint(5, 45))
             
-        # ✅ ALTERAÇÃO: Agora passamos o caminho_arquivo que salvamos no JSON
         scheduler.add_job(
             executar_postagem_retorno, 
             'date', 
             run_date=horario_disparo, 
-            args=[video["caminho_arquivo"], video["legenda"]] 
+            args=[video.get("caminho_arquivo", ""), video.get("legenda", "")] 
         )
-        if EXIBIR_LOGS: logger.info(f"⏳ Vídeo de retorno {i+1} camuflado e agendado para as {horario_disparo.strftime('%H:%M')}.")
+        if EXIBIR_LOGS: logger.info(f"⏳ Vídeo de retorno {i+1} agendado para as {horario_disparo.strftime('%H:%M')}.")
 
-    # Limpa a base de dados para manter o ficheiro leve
     del fila_dados[hoje_str]
     salvar_fila_retorno(fila_dados)
 
@@ -241,7 +292,6 @@ async def main():
     if EXIBIR_LOGS: logger.info("⏳ Iniciando o robô Espelhador Isolado...")
     await client.start()
     
-    # ✅ NOVO: Sincronização obrigatória de cache para reconhecer IDs numéricos em sessões novas
     if EXIBIR_LOGS: logger.info("🔄 Sincronizando banco de dados de grupos...")
     try:
         await client.get_dialogs()
