@@ -1,0 +1,13 @@
+[Unit]
+Description=Bot Shopee Video Autopostagem
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/shopee
+ExecStart=/home/ubuntu/shopee/venv/bin/python3 /home/ubuntu/shopee/shopee.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
