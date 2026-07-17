@@ -23,8 +23,29 @@ load_dotenv()
 os.makedirs("temp", exist_ok=True)
 os.makedirs("archive", exist_ok=True)
 
-# Expressão regular para encontrar links da Shopee na legenda
-PADRAO_SHOPEE = re.compile(r'(https?://(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+)')
+# Expressão regular aprimorada (ignora maiúsculas e aceita sem http)
+PADRAO_SHOPEE = re.compile(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+', re.IGNORECASE)
+
+def extrair_link_shopee(event):
+    """Busca links no texto puro e dentro de hiperlinks escondidos no Telegram"""
+    if EXIBIR_LOGS: logger.info("🔍 Analisando mensagem em busca de links...")
+    texto = event.raw_text or ""
+    match = PADRAO_SHOPEE.search(texto)
+    if match:
+        link = match.group(0)
+        if not link.startswith("http"):
+            link = "https://" + link
+        if EXIBIR_LOGS: logger.info("✅ Link encontrado no texto visível.")
+        return link.rstrip(").,;!?")
+        
+    if event.entities:
+        for entity in event.entities:
+            if hasattr(entity, 'url') and entity.url:
+                if PADRAO_SHOPEE.search(entity.url):
+                    if EXIBIR_LOGS: logger.info("✅ Link encontrado embutido/escondido na formatação.")
+                    return entity.url
+    if EXIBIR_LOGS: logger.info("⏭️ Nenhum link válido da Shopee encontrado.")
+    return None
 
 # Chaves da Shopee
 SHOPEE_APP_ID = os.getenv('SHOPEE_APP_ID')
@@ -118,6 +139,59 @@ async def converter_link_shopee(link_original):
         
     return link_original
 
+async def obter_nome_chat(valor):
+    """Função auxiliar para buscar o nome real do grupo/canal no Telegram"""
+    try:
+        alvo = int(valor) if str(valor).lstrip('-').isdigit() else valor
+        entidade = await client.get_entity(alvo)
+        return getattr(entidade, 'title', getattr(entidade, 'username', str(valor)))
+    except Exception:
+        return "Nome Desconhecido (ID não sincronizado)"
+
+@client.on(events.NewMessage(from_users='me', pattern=r'^/status_autorais|^/set_origem|^/set_destino'))
+async def menu_comandos_autorais(event):
+    global config_atual
+    texto = event.raw_text.strip().split()
+    comando = texto[0]
+
+    if comando == '/status_autorais':
+        if EXIBIR_LOGS: logger.info("⚙️ Comando /status_autorais acionado.")
+        
+        nome_origem = await obter_nome_chat(config_atual.get('origem'))
+        nome_destino = await obter_nome_chat(config_atual.get('destino'))
+        
+        msg = (f"🤖 <b>Painel do Bot Vídeos Autorais</b>\n\n"
+               f"📥 <b>Origem atual:</b> <code>{config_atual['origem']}</code>\n"
+               f"🏷️ <i>{nome_origem}</i>\n\n"
+               f"📤 <b>Destino atual:</b> <code>{config_atual['destino']}</code>\n"
+               f"🏷️ <i>{nome_destino}</i>\n\n"
+               f"<i>Para configurar, envie no chat:</i>\n"
+               f"<code>/set_origem [ID numérico ou @username]</code>\n"
+               f"<code>/set_destino [ID numérico ou @username]</code>")
+        await event.reply(msg, parse_mode="html")
+
+    elif comando == '/set_origem':
+        if len(texto) > 1:
+            novo_valor = int(texto[1]) if texto[1].lstrip('-').isdigit() else texto[1]
+            nome_chat = await obter_nome_chat(novo_valor)
+            config_atual['origem'] = novo_valor
+            salvar_config_autorais(config_atual)
+            if EXIBIR_LOGS: logger.info(f"✅ Nova origem definida via chat: {novo_valor} ({nome_chat})")
+            await event.reply(f"✅ <b>Origem atualizada com sucesso!</b>\nO robô agora escutará:\n🏷️ <b>{nome_chat}</b>\n🆔 <code>{novo_valor}</code>", parse_mode="html")
+        else:
+            await event.reply("⚠️ Comando incompleto. Tente: <code>/set_origem -100123456789</code>", parse_mode="html")
+
+    elif comando == '/set_destino':
+        if len(texto) > 1:
+            novo_valor = int(texto[1]) if texto[1].lstrip('-').isdigit() else texto[1]
+            nome_chat = await obter_nome_chat(novo_valor)
+            config_atual['destino'] = novo_valor
+            salvar_config_autorais(config_atual)
+            if EXIBIR_LOGS: logger.info(f"✅ Novo destino definido via chat: {novo_valor} ({nome_chat})")
+            await event.reply(f"✅ <b>Destino atualizado com sucesso!</b>\nOs vídeos serão enviados para:\n🏷️ <b>{nome_chat}</b>\n🆔 <code>{novo_valor}</code>", parse_mode="html")
+        else:
+            await event.reply("⚠️ Comando incompleto. Tente: <code>/set_destino @seu_canal</code>", parse_mode="html")
+
 @client.on(events.NewMessage(from_users='me', pattern=r'^/status_autorais|^/set_origem|^/set_destino'))
 async def menu_comandos_autorais(event):
     global config_atual
@@ -179,10 +253,10 @@ async def interceptar_e_espelhar(event):
 
     if isinstance(event.media, MessageMediaDocument):
         texto_original = event.text or ""
-        match_shopee = PADRAO_SHOPEE.search(texto_original)
+        link_capturado = extrair_link_shopee(event)
         
-        if not match_shopee:
-            if EXIBIR_LOGS: logger.info("⏭️ Postagem ignorada: Não contém link da Shopee.")
+        if not link_capturado:
+            if EXIBIR_LOGS: logger.info("⏭️ Postagem ignorada: Não contém link da Shopee (nem embutido).")
             return
 
         link_capturado = match_shopee.group(1).rstrip(").,;!?")
