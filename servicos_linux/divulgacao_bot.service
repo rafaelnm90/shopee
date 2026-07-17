@@ -3,11 +3,16 @@ Description=Userbot de Divulgacao Shopee
 After=network.target
 
 [Service]
+Type=simple
+Environment="EXIBIR_LOGS=True"
+Environment="PATH=/home/ubuntu/shopee/venv/bin"
+# Buscando e eliminando processos sobrepostos ou zumbis
+ExecStartPre=-/usr/bin/pkill -f divulgacao_canal.py
 User=ubuntu
 WorkingDirectory=/home/ubuntu/shopee
 ExecStart=/home/ubuntu/shopee/venv/bin/python3 /home/ubuntu/shopee/divulgacao_canal.py
 Restart=always
-RestartSec=10
+RestartSec=5
 
 [Install]
 WantedBy=multi-user.target
