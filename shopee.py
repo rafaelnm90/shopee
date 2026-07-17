@@ -632,19 +632,27 @@ async def executar_postagem_fila(item_id):
             msg = await bot.send_video(chat_id=GRUPO_ID, video=arquivo, caption=legenda, parse_mode="HTML")
             
             novo_file_id = msg.video.file_id
+            # Note que o seu código já converte os outros da fila para video_id! Isso é brilhante.
             for x in fila:
                 if x.get("caminho_video") == caminho_video and x["id"] != item_id:
                     x["video_id"] = novo_file_id
                     x["caminho_video"] = None
             sucesso = True
             if EXIBIR_LOGS: logger.info("🚀 [Fluxo] Vídeo enviado com sucesso para o Telegram.")
+            
+            # ✅ Exclusão instantânea no sucesso
+            try:
+                os.remove(caminho_video)
+            except Exception:
+                pass
+                
         elif video_id:
             await bot.send_video(chat_id=GRUPO_ID, video=video_id, caption=legenda, parse_mode="HTML")
             sucesso = True
             if EXIBIR_LOGS: logger.info("🚀 [Fluxo] Vídeo ID enviado com sucesso para o Telegram.")
         else:
-            if EXIBIR_LOGS: logger.error("❌ Falha irreversível: Vídeo expirou ou foi perdido fisicamente da máquina. Acionando protocolo Dead-Letter.")
-            registrar_erro_json("Vídeo expirou ou foi perdido fisicamente da máquina.", origem="shopee.py")
+            if EXIBIR_LOGS: logger.error("❌ Falha irreversível: Vídeo expirou ou foi perdido fisicamente da máquina.")
+            registrar_erro_json("Vídeo expirou ou foi perdido fisicamente.", origem="shopee.py")
             falha_irreversivel = True
 
         if sucesso or falha_irreversivel:
@@ -653,23 +661,21 @@ async def executar_postagem_fila(item_id):
                     x["postado"] = True
                     x["horario_postagem"] = agora.strftime("%H:%M")
                     x["data_postagem"] = hoje_str
-                    if falha_irreversivel:
-                        x["legenda"] = f"[ERRO: VÍDEO PERDIDO]\n{x.get('legenda', '')}"
-                        if EXIBIR_LOGS: logger.warning(f"🗑️ [Dead-Letter] Vídeo {item_id_real} descartado e marcado como falho na fila.")
-                    else:
-                        if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Vídeo {item_id_real} marcado como 'Já postado' às {x['horario_postagem']}.")
                     break
             fila_data["fila"] = fila
             salvar_fila_postagens(fila_data)
-        else:
-            if EXIBIR_LOGS: logger.warning("⚠️ [Fluxo] Postagem não concluída, status na fila preservado.")
 
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao postar vídeo da fila: {e}")
         registrar_erro_json(f"executar_postagem_fila: {e}", origem="shopee.py")
         
-        # A faxina física real do arquivo foi transferida para a limpeza da madrugada em agendar_tarefas_diarias
-        # para permitir que o vídeo fique visível no painel até o final do dia.
+        # ✅ Etiqueta de Falha (Isolamento)
+        if caminho_video and os.path.exists(caminho_video):
+            try:
+                os.rename(caminho_video, caminho_video + ".pendente")
+                if EXIBIR_LOGS: logger.info(f"🏷️ Ficheiro marcado como falho na fila: {caminho_video}.pendente")
+            except Exception:
+                pass
 
 # --- SISTEMA DE PAUSA PROGRAMADA ---
 def ler_pausa_programada():
@@ -1751,7 +1757,7 @@ async def processar_garimpo_automatico():
         legenda_final = f"{texto_ia}\n{link_curto}"
         
         try:
-            temp_img = f"temp_achado_{item_id}.jpg"
+            temp_img = f"temp/temp_achado_{item_id}.jpg"
             async with aiohttp.ClientSession() as session:
                 async with session.get(img_url) as resp:
                     if resp.status == 200:
@@ -2974,7 +2980,7 @@ async def receber_video(message: types.Message, state: FSMContext):
 
         # 1. Download do vídeo para o servidor Ubuntu
         file_info = await bot.get_file(file_id)
-        video_path = f"temp_{file_id}.mp4"
+        video_path = f"temp/temp_{file_id}.mp4"
         await bot.download_file(file_info.file_path, destination=video_path)
 
         # 2. Upload para a API do Gemini processar a Copy
@@ -3064,7 +3070,7 @@ async def receber_video(message: types.Message, state: FSMContext):
         await message.answer(f"⚠️ A IA não conseguiu processar este vídeo.\n**Motivo:** {motivo}\n\nO que você deseja fazer agora?", reply_markup=teclado_erro_ia)
         
         # ✅ Em caso de erro, preservamos o arquivo físico e o número já reservado
-        video_path_recuperacao = f"temp_{file_id}.mp4"
+        video_path_recuperacao = f"temp/temp_{file_id}.mp4"
         await state.update_data(video_path=video_path_recuperacao, video_id=file_id, links=[], numero_reservado=numero_atual)
         
         # ✅ Redireciona para o novo estado de decisão
@@ -5973,7 +5979,7 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
         
         sucesso_upload = False
         try:
-            # 2. Disparo imediato para o Telegram com a legenda original
+            # 2. Disparo imediato para o Telegram
             if caminho_video and os.path.exists(caminho_video):
                 arquivo = FSInputFile(caminho_video)
                 msg = await bot.send_video(chat_id=GRUPO_ID, video=arquivo, caption=legenda_disparo, parse_mode="HTML")
@@ -5984,11 +5990,25 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
                     if x.get("caminho_video") == caminho_video:
                         x["video_id"] = novo_file_id
                         x["caminho_video"] = None
+                        
+                # ✅ Exclusão instantânea no sucesso
+                try:
+                    os.remove(caminho_video)
+                except Exception:
+                    pass
             elif video_id:
                 await bot.send_video(chat_id=GRUPO_ID, video=video_id, caption=legenda_disparo, parse_mode="HTML")
                 sucesso_upload = True
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Falha no disparo imediato: {e}")
+            
+            # ✅ Etiqueta de Falha (Isolamento)
+            if caminho_video and os.path.exists(caminho_video):
+                try:
+                    os.rename(caminho_video, caminho_video + ".pendente")
+                except Exception:
+                    pass
+                    
             await msg_status.delete()
             await message.answer(f"Ocorreu um erro técnico ao publicar o vídeo: {e}")
             await menu_gerenciar_fila(message, state)
@@ -5999,11 +6019,11 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
         if sucesso_upload:
             if EXIBIR_LOGS: logger.info("✅ Vídeo antecipado submetido com sucesso no grupo.")
             
-            # 3. Preserva o vídeo no histórico em vez de excluí-lo
+            # 3. Preserva o vídeo no histórico
             agora_manual = datetime.now(fuso_horario)
             item["postado"] = True
             item["horario_postagem"] = agora_manual.strftime("%H:%M")
-            item["data_postagem"] = agora_manual.strftime("%Y-%m-%d") # ✅ NOVO: Registra o dia para a faxina
+            item["data_postagem"] = agora_manual.strftime("%Y-%m-%d")
             if EXIBIR_LOGS: logger.info(f"🚀 Vídeo da posição {posicao+1} marcado como 'postado' às {item['horario_postagem']} no histórico.")
             
             if caminho_video and os.path.exists(caminho_video):
@@ -6303,8 +6323,20 @@ async def processar_fila_espiao():
         arquivo = FSInputFile(caminho_video)
         await bot.send_video(chat_id=canal_destino, video=arquivo, caption=legenda_postagem, parse_mode="HTML")
         if EXIBIR_LOGS: logger.info(f"✅ Clone {item_id} publicado com sucesso no canal {canal_destino}!")
+        
+        try:
+            os.remove(caminho_video)
+            if EXIBIR_LOGS: logger.info("🧹 Ficheiro de clone temporário removido do disco após o sucesso.")
+        except Exception:
+            pass
+
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao postar clone no Telegram: {e}")
+        try:
+            os.rename(caminho_video, caminho_video + ".pendente")
+            if EXIBIR_LOGS: logger.info(f"🏷️ Clone isolado para limpeza posterior: {caminho_video}.pendente")
+        except Exception:
+            pass
         
     # 4. Encerramento, Faxina e Agendamento Orgânico Dinâmico
     fila_data["fila"] = [item for item in fila if item["id"] != item_id]
