@@ -335,7 +335,26 @@ async def gerar_legenda_com_ia_espelhador(caminho_video):
         if EXIBIR_LOGS: logger.error(f"❌ [IA] Falha na geração da legenda: {e}")
         return None
 
-PADRAO_SHOPEE = re.compile(r'(https?://(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+)')
+PADRAO_SHOPEE = re.compile(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+', re.IGNORECASE)
+
+def extrair_link_shopee(event):
+    """Busca links no texto puro e dentro de hiperlinks escondidos no Telegram"""
+    # 1. Tenta achar no texto visível
+    texto = event.raw_text or ""
+    match = PADRAO_SHOPEE.search(texto)
+    if match:
+        link = match.group(0)
+        if not link.startswith("http"):
+            link = "https://" + link
+        return link.rstrip(").,;!?")
+        
+    # 2. Busca profunda: procura nos botões e textos embutidos (hiperlinks)
+    if event.entities:
+        for entity in event.entities:
+            if hasattr(entity, 'url') and entity.url:
+                if PADRAO_SHOPEE.search(entity.url):
+                    return entity.url
+    return None
 
 @client.on(events.NewMessage)
 async def interceptar_mensagem(event):
@@ -356,15 +375,11 @@ async def interceptar_mensagem(event):
     if chat_username not in alvos and chat_id not in alvos and chat_id_completo not in alvos:
         return
 
-    texto = event.raw_text
-    match = PADRAO_SHOPEE.search(texto)
+    texto_original = event.text or ""
+    link_capturado = extrair_link_shopee(event)
     
-    # Ignora mensagens de bate-papo, processa apenas se tiver link e mídia de vídeo
-    if match:
-        link_capturado = match.group(1)
-        
-        # Limpa pontuações que possam ter ficado agarradas ao final do link
-        link_capturado = link_capturado.rstrip(").,;!?")
+    # Ignora mensagens de bate-papo, processa apenas se tiver link e mídia
+    if link_capturado:
         
         # ✅ NOVO: Bloqueio de vídeos duplicados no módulo Espião (Contexto Isolado)
         if verificar_e_registrar_espelho(link_capturado, contexto="espiao"):
@@ -589,14 +604,11 @@ async def motor_espelhador_userbot(event):
         return
 
     texto_original = event.text or ""
+    link_capturado = extrair_link_shopee(event)
     
-    # ✅ REGRA DE NEGÓCIO: Exige obrigatoriamente a presença de um link da Shopee
-    match_shopee = PADRAO_SHOPEE.search(texto_original)
-    if not match_shopee:
-        if EXIBIR_LOGS: logger.info("⏭️ [Espelhador] Postagem descartada: Contém mídia, mas não possui link de afiliado da Shopee.")
+    if not link_capturado:
+        if EXIBIR_LOGS: logger.info("⏭️ Postagem ignorada: Não contém link da Shopee (nem embutido).")
         return
-        
-    link_capturado = match_shopee.group(1).rstrip(").,;!?")
     
     if EXIBIR_LOGS: logger.info(f"🔄 [Espelhador] Interceptação acionada! Mídia e link detetados na origem {chat_id_str}.")
     if EXIBIR_LOGS: logger.info("🔗 [Espelhador] A converter o link da Shopee encontrado...")
