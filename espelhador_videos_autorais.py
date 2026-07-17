@@ -260,7 +260,7 @@ async def interceptar_e_espelhar(event):
         if link_novo not in texto_convertido:
             texto_convertido += f"\n\n🔗 <b>Link do Produto:</b>\n{link_novo}"
 
-            if EXIBIR_LOGS: logger.info("📥 Iniciando o download do vídeo...")
+        if EXIBIR_LOGS: logger.info("📥 Iniciando o download do vídeo...")
         caminho_video = await event.download_media(file="temp/temp_espelho_isolado_")
         
         if caminho_video:
