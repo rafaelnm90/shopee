@@ -98,21 +98,22 @@ async def converter_link_shopee(link_original):
     link_processar = link_original
     if "shp.ee" in link_original or "shope.ee" in link_original or "s.shopee.com.br" in link_original:
         try:
+            # Máscara de navegador para a Shopee não bloquear a leitura do link curto
+            headers_redirect = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
             async with aiohttp.ClientSession() as session:
-                async with session.get(link_original, allow_redirects=True) as resp:
-                    link_processar = str(resp.url)
-                    # Limpeza vital para remover rastreadores do afiliado anterior
-                    link_processar = link_processar.split('?')[0]
+                async with session.get(link_original, allow_redirects=True, headers=headers_redirect) as resp:
+                    link_processar = str(resp.url).split('?')[0]
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro ao expandir URL: {e}")
 
     timestamp = int(time.time())
     endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
+    
+    # Payload limpo, idêntico ao do seu Robô Espião (100% de aceitação)
     payload = {
-        "query": "mutation generateShortLink($originUrl: String!, $subIds: [String]) { generateShortLink(input: {originUrl: $originUrl, subIds: $subIds}) { shortLink } }",
+        "query": "mutation generateShortLink($originUrl: String!) { generateShortLink(input: {originUrl: $originUrl}) { shortLink } }",
         "variables": {
-            "originUrl": link_processar,
-            "subIds": ["autorais"]
+            "originUrl": link_processar
         }
     }
     payload_json = json.dumps(payload, separators=(',', ':'))
@@ -261,10 +262,17 @@ async def interceptar_e_espelhar(event):
 
         link_capturado = match_shopee.group(1).rstrip(").,;!?")
         if EXIBIR_LOGS: logger.info("🔗 A converter o link da Shopee para o seu ID de afiliado...")
-        link_novo = await converter_link_shopee(link_capturado)
-        texto_convertido = texto_original.replace(link_capturado, link_novo)
+            link_novo = await converter_link_shopee(link_capturado)
+            
+            # ✅ Novo motor de substituição: Mantém a formatação original (negritos/emojis) e troca o link à força
+            texto_html = event.html or ""
+            texto_convertido = PADRAO_SHOPEE.sub(link_novo, texto_html)
+            
+            # Prevenção extra: Se o concorrente escondeu tanto o link que a substituição falhou, injetamos no final
+            if link_novo not in texto_convertido:
+                texto_convertido += f"\n\n🔗 <b>Link do Produto:</b>\n{link_novo}"
 
-        if EXIBIR_LOGS: logger.info("📥 Iniciando o download do vídeo...")
+            if EXIBIR_LOGS: logger.info("📥 Iniciando o download do vídeo...")
         caminho_video = await event.download_media(file="temp/temp_espelho_isolado_")
         
         if caminho_video:
