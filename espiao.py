@@ -378,7 +378,7 @@ async def interceptar_mensagem(event):
                 if EXIBIR_LOGS: logger.info("✂️ Concorrência ignorada: A postagem continha outros domínios, mas apenas o da Shopee foi filtrado.")
             
             if EXIBIR_LOGS: logger.info("📥 Iniciando download do vídeo em segundo plano...")
-            caminho_salvo = await event.download_media(file="temp_clone_")
+            caminho_salvo = await event.download_media(file="temp/temp_clone_")
             
             hash_arquivo = calcular_hash_video(caminho_salvo)
             
@@ -604,7 +604,7 @@ async def motor_espelhador_userbot(event):
     if EXIBIR_LOGS: logger.info("✅ [Espelhador] Sucesso: Link convertido utilizando a função nativa correta.")
 
     if EXIBIR_LOGS: logger.info("📥 [Espelhador] Descarregando vídeo temporário para análise da IA e verificação de duplicidade...")
-    caminho_video_temp = await event.download_media(file="temp_analise_espelho_")
+    caminho_video_temp = await event.download_media(file="temp/temp_analise_espelho_")
     
     hash_arquivo = None
     if caminho_video_temp:
