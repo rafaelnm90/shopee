@@ -28,6 +28,9 @@ import espelhador
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo
 EXIBIR_LOGS = True
 
+# ✅ Cria a pasta temp isolada na inicialização
+os.makedirs("temp", exist_ok=True)
+
 # 1. CONSTANTES E TOKENS
 API_TOKEN = os.getenv('TELEGRAM_TOKEN')
 ADMIN_ID = 1226920464
