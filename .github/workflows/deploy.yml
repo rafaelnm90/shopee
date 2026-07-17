@@ -28,57 +28,34 @@ jobs:
             source venv/bin/activate
             pip install -r requirements.txt --no-cache-dir
             
-            # Reinicia o serviço principal (shopee) com tolerância a falhas de parada
+            # Recarrega as configurações do sistema caso algum .service tenha sido alterado no GitHub
+            sudo systemctl daemon-reload
+            
+            EXIBIR_LOGS="true"
+            
+            # 1. Reinicia o serviço principal (Shopee)
+            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🚀 Reiniciando Bot Shopee Principal..."; fi
             sudo systemctl stop shopee_bot.service || true
             sudo systemctl kill -s SIGKILL shopee_bot.service || true
             sudo systemctl start shopee_bot.service
             
-            EXIBIR_LOGS="true"
-            
-            # Reinicia o Userbot de divulgação com limpeza rigorosa de processos zumbis
-            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🚀 Parando o serviço atual..."; fi
+            # 2. Reinicia o Userbot de Divulgação
+            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🚀 Reiniciando Userbot de Divulgação..."; fi
             sudo systemctl stop divulgacao_bot.service || true
-            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🧹 Aniquilando processos residuais na memória..."; fi
             sudo systemctl kill -s SIGKILL divulgacao_bot.service || true
-            if [ "$EXIBIR_LOGS" = "true" ]; then echo "✅ Iniciando a nova versão limpa do Userbot..."; fi
             sudo systemctl start divulgacao_bot.service
 
-            # Reinicia o Módulo Espião de Clonagem
-            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🕵️ Parando o Módulo Espião..."; fi
+            # 3. Reinicia o Módulo Espião
+            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🕵️ Reiniciando Módulo Espião..."; fi
             sudo systemctl stop espiao_bot.service || true
-            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🧹 Limpando processos da escuta..."; fi
             sudo systemctl kill -s SIGKILL espiao_bot.service || true
-            if [ "$EXIBIR_LOGS" = "true" ]; then echo "✅ Iniciando a nova versão do Espião..."; fi
             sudo systemctl start espiao_bot.service
 
-            # Configuração automática do serviço do Espelhador
-            sudo tee /etc/systemd/system/espelhador_autorais_bot.service > /dev/null <<EOF
-            [Unit]
-            Description=Robo Espelhador de Videos Autorais
-            After=network.target
-
-            [Service]
-            User=ubuntu
-            WorkingDirectory=/home/ubuntu/shopee
-            Environment="PATH=/home/ubuntu/shopee/venv/bin"
-            ExecStart=/home/ubuntu/shopee/venv/bin/python espelhador_videos_autorais.py
-            Restart=always
-            RestartSec=10
-
-            [Install]
-            WantedBy=multi-user.target
-            EOF
-
-            # Aplica as permissões no sistema operativo
-            sudo systemctl daemon-reload
-            sudo systemctl enable espelhador_autorais_bot.service
-            
-            # Reinicia o Espelhador de Vídeos Autorais
-            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🔄 Parando o Espelhador Autorais..."; fi
+            # 4. Reinicia o Espelhador de Vídeos Autorais
+            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🔄 Reiniciando Espelhador Autorais..."; fi
             sudo systemctl stop espelhador_autorais_bot.service || true
-            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🧹 Limpando processos do Espelhador..."; fi
             sudo systemctl kill -s SIGKILL espelhador_autorais_bot.service || true
-            if [ "$EXIBIR_LOGS" = "true" ]; then echo "✅ Iniciando a nova versão do Espelhador..."; fi
             sudo systemctl start espelhador_autorais_bot.service
+            
             if [ "$EXIBIR_LOGS" = "true" ]; then echo "🚪 Encerrando a conexão SSH de forma limpa..."; fi
             exit 0
