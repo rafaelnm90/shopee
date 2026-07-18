@@ -246,12 +246,12 @@ async def interceptar_e_espelhar(event):
 async def executar_postagem_retorno(caminho_arquivo, legenda):
     if EXIBIR_LOGS: logger.info(f"🚀 [Fluxo] Iniciando retorno do vídeo arquivado: {caminho_arquivo}")
     try:
+        config_atualizada = carregar_config_autorais() # Lê a configuração em tempo real para o retorno
         if os.path.exists(caminho_arquivo):
             await client.send_file(
-                config_atual['origem'],
+                config_atualizada['origem'],
                 file=caminho_arquivo,
-                caption=legenda,
-                parse_mode="html"
+                caption=legenda
             )
             if EXIBIR_LOGS: logger.info("✅ Vídeo de retorno publicado com sucesso no grupo de origem!")
             
