@@ -207,13 +207,16 @@ async def interceptar_e_espelhar(event):
                 )
                 if EXIBIR_LOGS: logger.info("🚀 Vídeo publicado no canal de destino com o link atualizado!")
                 
-                # Regra dos 15 dias e limite de 5 vídeos
-                data_alvo = (datetime.now() + timedelta(days=15)).strftime("%Y-%m-%d")
+                # ✅ Regra dinâmica de dias e limite de vídeos lida diretamente do painel
+                dias_retorno = config_atual.get('dias_retorno', 15)
+                limite_videos = config_atual.get('limite_videos', 5)
+                
+                data_alvo = (datetime.now() + timedelta(days=dias_retorno)).strftime("%Y-%m-%d")
                 fila_dados = ler_fila_retorno()
                 if data_alvo not in fila_dados:
                     fila_dados[data_alvo] = []
                     
-                if len(fila_dados[data_alvo]) < 5:
+                if len(fila_dados[data_alvo]) < limite_videos:
                     novo_caminho = f"archive/{os.path.basename(caminho_video)}"
                     os.rename(caminho_video, novo_caminho)
                     
