@@ -186,24 +186,24 @@ async def interceptar_e_espelhar(event):
         if EXIBIR_LOGS: logger.info("🔗 A converter o link da Shopee para o seu ID de afiliado...")
         link_novo = await converter_link_shopee(link_capturado)
         
-        # ✅ Novo motor de substituição: Mantém a formatação original (negritos/emojis) e troca o link à força
-        texto_html = event.html or ""
-        texto_convertido = PADRAO_SHOPEE.sub(link_novo, texto_html)
+        # ✅ Novo motor de substituição: Telethon usa Markdown por padrão na propriedade .text
+        texto_base = event.text or ""
+        texto_convertido = PADRAO_SHOPEE.sub(link_novo, texto_base)
         
-        # Prevenção extra: Se o concorrente escondeu tanto o link que a substituição falhou, injetamos no final
+        # Prevenção extra: Se o concorrente escondeu o link na formatação, injetamos no final em formato Markdown
         if link_novo not in texto_convertido:
-            texto_convertido += f"\n\n🔗 <b>Link do Produto:</b>\n{link_novo}"
+            texto_convertido += f"\n\n🔗 **Link do Produto:**\n{link_novo}"
 
         if EXIBIR_LOGS: logger.info("📥 Iniciando o download do vídeo...")
         caminho_video = await event.download_media(file="temp/temp_espelho_isolado_")
         
         if caminho_video:
             try:
+                # O parse_mode foi removido para o Telethon aplicar os negritos originais automaticamente
                 msg_enviada = await client.send_file(
                     config_atual['destino'],
                     file=caminho_video,
-                    caption=texto_convertido,
-                    parse_mode="html"
+                    caption=texto_convertido
                 )
                 if EXIBIR_LOGS: logger.info("🚀 Vídeo publicado no canal de destino com o link atualizado!")
                 
