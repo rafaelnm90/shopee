@@ -76,6 +76,16 @@ def carregar_alvos():
     except (FileNotFoundError, json.JSONDecodeError):
         return []
 
+def ler_excecao_ponte():
+    """Lê dinamicamente o destino configurado no painel Autorais para atuar como ponte imune."""
+    try:
+        with open("autorais_config.json", "r", encoding="utf-8") as f:
+            dados = json.load(f)
+            val = str(dados.get("destino", "")).strip().lower()
+            return val if val else None
+    except Exception:
+        return None
+
 def verificar_e_registrar_espelho(link_shopee, contexto="global"):
     arquivo_espelhos = "registro_espelhos.json"
     agora = datetime.now()
@@ -360,19 +370,37 @@ def extrair_link_shopee(event):
 async def interceptar_mensagem(event):
     alvos = carregar_alvos()
     
-    # Verifica se a mensagem veio de um dos grupos monitorados
+    destino_autorais = ler_excecao_ponte()
+    
     chat = await event.get_chat()
     chat_id = str(chat.id)
-    chat_username = f"@{chat.username}" if getattr(chat, 'username', None) else ""
-    
-    # Corrige formatações de IDs que o Telegram envia (com ou sem o -100)
+    chat_username = f"@{chat.username.lower()}" if getattr(chat, 'username', None) else ""
     chat_id_completo = f"-100{chat.id}" if not chat_id.startswith("-100") else chat_id
     
-    if event.out and chat_username.lower() != "@shopee_video_afiliado":
-        if EXIBIR_LOGS: logger.info("🛡️ [Espião] Trava de autoria ativada: Ignorando postagem própria fora do canal imune para evitar loop.")
+    eh_ponte = False
+    if destino_autorais and destino_autorais in [chat_username, chat_id, chat_id_completo]:
+        eh_ponte = True
+
+    # Injeção dinâmica: Se for a ponte, garante que ela será ouvida como alvo independentemente de estar na lista
+    if eh_ponte and destino_autorais not in [str(a).lower() for a in alvos]:
+        alvos.append(destino_autorais)
+
+    # Identificação de Autoria Absoluta (Verifica se foi literalmente a sua conta principal que enviou)
+    me = await client.get_me()
+    foi_perfil_principal = getattr(event, 'sender_id', None) == me.id
+
+    # 1ª Trava (Rígida): Se a conta principal postar, cai no filtro e é bloqueada SEMPRE (evita o loop).
+    if foi_perfil_principal and chat_username != "@shopee_video_afiliado":
+        if EXIBIR_LOGS: logger.info("🛡️ [Espião] Postagem da conta principal bloqueada (Filtro Anti-Loop acionado).")
         return
-    
-    if chat_username not in alvos and chat_id not in alvos and chat_id_completo not in alvos:
+        
+    # 2ª Trava (Flexível): O Telegram marca event.out = True para canais se você for Admin. 
+    # Abrimos a exceção AQUI apenas para a ponte dinâmica.
+    if event.out and not eh_ponte and chat_username != "@shopee_video_afiliado":
+        if EXIBIR_LOGS: logger.info("🛡️ [Espião] Trava de canais ativada: Ignorando evento.")
+        return
+
+    if chat_username not in [str(a).lower() for a in alvos] and chat_id not in alvos and chat_id_completo not in alvos:
         return
 
     texto_original = event.text or ""
