@@ -146,8 +146,10 @@ class AchadinhosFluxo(StatesGroup):
 class AutoraisFluxo(StatesGroup):
     menu_principal = State()
     aguardando_origem = State()
-    aguardando_topico = State() # ✅ NOVO: Estado para capturar o Subcanal
+    aguardando_topico = State() 
     aguardando_destino = State()
+    aguardando_dias_retorno = State() # ✅ NOVO
+    aguardando_limite_videos = State() # ✅ NOVO
 
 class RelatoriosFluxo(StatesGroup):
     menu_filas = State()
@@ -307,6 +309,7 @@ teclado_outros_canais = ReplyKeyboardMarkup(
 teclado_menu_autorais = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Editar Origem 📥"), KeyboardButton(text="Editar Destino 📤")],
+        [KeyboardButton(text="Editar Dias (Retorno) ⏳"), KeyboardButton(text="Editar Limite (Retorno) 📦")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -1574,9 +1577,13 @@ dp.message.middleware(InatividadeMiddleware())
 def ler_autorais_config():
     try:
         with open("autorais_config.json", "r", encoding="utf-8") as f:
-            return json.load(f)
+            dados = json.load(f)
+            # Injeta chaves padrão caso seja um arquivo antigo
+            if "dias_retorno" not in dados: dados["dias_retorno"] = 15
+            if "limite_videos" not in dados: dados["limite_videos"] = 5
+            return dados
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"origem": -1003673555953, "destino": "@videos_autorais"}
+        return {"origem": -1003673555953, "origem_topico": None, "destino": "@videos_autorais", "dias_retorno": 15, "limite_videos": 5}
 
 def salvar_autorais_config(dados):
     with open("autorais_config.json", "w", encoding="utf-8") as f:
@@ -1592,12 +1599,17 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     origem = config.get("origem", "Não definida")
     topico = config.get("origem_topico", "0 (Todos)")
     destino = config.get("destino", "Não definido")
+    dias_retorno = config.get("dias_retorno", 15)
+    limite_videos = config.get("limite_videos", 5)
     
     texto = (
         "🎥 <b>Painel do Bot Vídeos Autorais</b>\n\n"
         f"📥 <b>Origem atual:</b> <code>{origem}</code>\n"
         f"📂 <b>Tópico (Subcanal):</b> <code>{topico}</code>\n\n"
         f"📤 <b>Destino atual:</b> <code>{destino}</code>\n\n"
+        f"♻️ <b>Regras de Retorno (Re-postagem):</b>\n"
+        f"⏳ Oculto por: <b>{dias_retorno} dias</b>\n"
+        f"📦 Cota Diária: <b>{limite_videos} vídeos/dia</b>\n\n"
         "O robô Espelhador Isolado fará a escuta e o envio em tempo real baseando-se estritamente nestes valores.\n\n"
         "Escolha o que deseja alterar:"
     )
@@ -1689,6 +1701,44 @@ async def salvar_destino_autorais(message: types.Message, state: FSMContext):
     
     if EXIBIR_LOGS: logger.info(f"✅ Destino dos vídeos autorais atualizado para: {id_real}")
     await message.answer(f"✅ <b>Destino atualizado com sucesso!</b>\nOs vídeos convertidos serão enviados instantaneamente para: <code>{id_real}</code>", parse_mode="HTML")
+    await painel_autorais(message, state)
+
+@dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Dias (Retorno) ⏳")
+async def pedir_dias_autorais(message: types.Message, state: FSMContext):
+    await message.answer("Por quantos <b>dias</b> o vídeo deve ficar arquivado e oculto até retornar para o grupo de origem? (Ex: 15)", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(AutoraisFluxo.aguardando_dias_retorno)
+
+@dp.message(AutoraisFluxo.aguardando_dias_retorno)
+async def salvar_dias_autorais(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("⚠️ Envie apenas números inteiros.", reply_markup=teclado_cancelar)
+        return
+        
+    novo_valor = int(message.text)
+    config = ler_autorais_config()
+    config["dias_retorno"] = novo_valor
+    salvar_autorais_config(config)
+    
+    await message.answer(f"✅ <b>Tempo de Retorno Atualizado!</b>\nOs vídeos interceptados ficarão arquivados por {novo_valor} dias antes de serem postados novamente.", parse_mode="HTML")
+    await painel_autorais(message, state)
+
+@dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Limite (Retorno) 📦")
+async def pedir_limite_autorais(message: types.Message, state: FSMContext):
+    await message.answer("Qual será o <b>limite máximo</b> de vídeos arquivados salvos por dia? (Ex: 5)", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(AutoraisFluxo.aguardando_limite_videos)
+
+@dp.message(AutoraisFluxo.aguardando_limite_videos)
+async def salvar_limite_autorais(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("⚠️ Envie apenas números inteiros.", reply_markup=teclado_cancelar)
+        return
+        
+    novo_valor = int(message.text)
+    config = ler_autorais_config()
+    config["limite_videos"] = novo_valor
+    salvar_autorais_config(config)
+    
+    await message.answer(f"✅ <b>Cota de Retorno Atualizada!</b>\nO robô arquivará no máximo {novo_valor} vídeos de retorno por dia.", parse_mode="HTML")
     await painel_autorais(message, state)
 
 # ----------------------------------
