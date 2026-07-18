@@ -372,35 +372,38 @@ async def interceptar_mensagem(event):
     
     destino_autorais = ler_excecao_ponte()
     
+    # Verifica se a mensagem veio de um dos grupos monitorados
     chat = await event.get_chat()
     chat_id = str(chat.id)
     chat_username = f"@{chat.username.lower()}" if getattr(chat, 'username', None) else ""
+    
+    # Corrige formatações de IDs que o Telegram envia (com ou sem o -100)
     chat_id_completo = f"-100{chat.id}" if not chat_id.startswith("-100") else chat_id
     
     eh_ponte = False
     if destino_autorais and destino_autorais in [chat_username, chat_id, chat_id_completo]:
         eh_ponte = True
 
-    # Injeção dinâmica: Se for a ponte, garante que ela será ouvida como alvo independentemente de estar na lista
+    # Injeção dinâmica: Se for a ponte, garante que ela será ouvida como alvo
     if eh_ponte and destino_autorais not in [str(a).lower() for a in alvos]:
         alvos.append(destino_autorais)
 
-    # Identificação de Autoria Absoluta (Verifica se foi literalmente a sua conta principal que enviou)
-    me = await client.get_me()
-    foi_perfil_principal = getattr(event, 'sender_id', None) == me.id
+    # Identificação de Autoria Absoluta (Perfil Principal)
+    try:
+        me = await client.get_me()
+        foi_perfil_principal = getattr(event, 'sender_id', None) == me.id
+    except Exception:
+        foi_perfil_principal = False
 
-    # 1ª Trava (Rígida): Se a conta principal postar, cai no filtro e é bloqueada SEMPRE (evita o loop).
     if foi_perfil_principal and chat_username != "@shopee_video_afiliado":
         if EXIBIR_LOGS: logger.info("🛡️ [Espião] Postagem da conta principal bloqueada (Filtro Anti-Loop acionado).")
         return
-        
-    # 2ª Trava (Flexível): O Telegram marca event.out = True para canais se você for Admin. 
-    # Abrimos a exceção AQUI apenas para a ponte dinâmica.
+
     if event.out and not eh_ponte and chat_username != "@shopee_video_afiliado":
         if EXIBIR_LOGS: logger.info("🛡️ [Espião] Trava de canais ativada: Ignorando evento.")
         return
-
-    if chat_username not in [str(a).lower() for a in alvos] and chat_id not in alvos and chat_id_completo not in alvos:
+    
+    if chat_username not in alvos and chat_id not in alvos and chat_id_completo not in alvos:
         return
 
     texto_original = event.text or ""
@@ -608,8 +611,24 @@ async def motor_espelhador_userbot(event):
     chat_id_completo = f"-100{chat.id}" if not chat_id_str.startswith("-100") else chat_id_str
     nome_chat = getattr(chat, 'title', chat_username if chat_username else chat_id_str)
 
-    if event.out and chat_username != "@shopee_video_afiliado":
-        if EXIBIR_LOGS: logger.info("🛡️ [Espelhador] Trava de autoria ativada: Postagem própria ignorada para evitar loop cruzado.")
+    destino_autorais = ler_excecao_ponte()
+    eh_ponte = False
+    if destino_autorais and destino_autorais in [chat_username, chat_id_str, chat_id_completo]:
+        eh_ponte = True
+
+    # Identificação de Autoria Absoluta (Perfil Principal)
+    try:
+        me = await client.get_me()
+        foi_perfil_principal = getattr(event, 'sender_id', None) == me.id
+    except Exception:
+        foi_perfil_principal = False
+
+    if foi_perfil_principal and chat_username != "@shopee_video_afiliado":
+        if EXIBIR_LOGS: logger.info("🛡️ [Espelhador] Postagem da conta principal bloqueada (Filtro Anti-Loop acionado).")
+        return
+
+    if event.out and not eh_ponte and chat_username != "@shopee_video_afiliado":
+        if EXIBIR_LOGS: logger.info("🛡️ [Espelhador] Trava de canais ativada: Postagem própria ignorada.")
         return
 
     dados = ler_espelhos_config()
