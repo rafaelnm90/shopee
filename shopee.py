@@ -146,6 +146,7 @@ class AchadinhosFluxo(StatesGroup):
 class AutoraisFluxo(StatesGroup):
     menu_principal = State()
     aguardando_origem = State()
+    aguardando_topico = State() # ✅ NOVO: Estado para capturar o Subcanal
     aguardando_destino = State()
 
 class RelatoriosFluxo(StatesGroup):
@@ -1589,11 +1590,13 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("🎥 Acessando painel visual do Bot Vídeos Autorais...")
     config = ler_autorais_config()
     origem = config.get("origem", "Não definida")
+    topico = config.get("origem_topico", "0 (Todos)")
     destino = config.get("destino", "Não definido")
     
     texto = (
         "🎥 <b>Painel do Bot Vídeos Autorais</b>\n\n"
         f"📥 <b>Origem atual:</b> <code>{origem}</code>\n"
+        f"📂 <b>Tópico (Subcanal):</b> <code>{topico}</code>\n\n"
         f"📤 <b>Destino atual:</b> <code>{destino}</code>\n\n"
         "O robô Espelhador Isolado fará a escuta e o envio em tempo real baseando-se estritamente nestes valores.\n\n"
         "Escolha o que deseja alterar:"
@@ -1608,17 +1611,51 @@ async def pedir_origem_autorais(message: types.Message, state: FSMContext):
     await state.set_state(AutoraisFluxo.aguardando_origem)
 
 @dp.message(AutoraisFluxo.aguardando_origem)
-async def salvar_origem_autorais(message: types.Message, state: FSMContext):
+async def pedir_topico_autorais(message: types.Message, state: FSMContext):
     novo_valor = message.text.strip()
-    if novo_valor.lstrip('-').isdigit():
-        novo_valor = int(novo_valor)
+    
+    msg_status = await message.answer("⏳ <b>Validando grupo de origem...</b>", parse_mode="HTML")
+    id_real = novo_valor
+    nome_chat = novo_valor
+    
+    # Validação inteligente: tenta ver se o Bot Principal tem acesso.
+    # Se não tiver, avisa, mas deixa passar porque a Conta Secundária pode ter o acesso físico.
+    try:
+        chat_obj = await bot.get_chat(novo_valor)
+        nome_chat = chat_obj.title or chat_obj.full_name or novo_valor
+        id_real = chat_obj.id
+        await msg_status.delete()
+        await message.answer(f"✅ Origem validada e encontrada: <b>{nome_chat}</b>", parse_mode="HTML")
+    except Exception as e:
+        await msg_status.delete()
+        await message.answer("⚠️ <b>Aviso de Permissão:</b> O Bot Principal não tem permissão para enxergar este grupo. O ID será salvo, pois a Conta Secundária é quem fará a extração física.", parse_mode="HTML")
+        if novo_valor.lstrip('-').isdigit():
+            id_real = int(novo_valor)
+    
+    await state.update_data(nova_origem=id_real)
+    
+    await message.answer("Agora, digite o <b>NÚMERO DO TÓPICO (Subcanal)</b> que ele deve monitorar.\n\n<i>Dica: Se os vídeos caem no chat 'Geral', digite <b>1</b>. Se for um canal sem tópicos, digite <b>0</b> para ler tudo.</i>", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(AutoraisFluxo.aguardando_topico)
+
+@dp.message(AutoraisFluxo.aguardando_topico)
+async def salvar_origem_autorais(message: types.Message, state: FSMContext):
+    if not message.text.isdigit():
+        await message.answer("⚠️ Formato inválido! Envie apenas o número do tópico (Ex: 1 ou 0).", reply_markup=teclado_cancelar)
+        return
         
+    topico = int(message.text)
+    topico_final = topico if topico > 0 else None
+    
+    data = await state.get_data()
+    nova_origem = data.get("nova_origem")
+    
     config = ler_autorais_config()
-    config["origem"] = novo_valor
+    config["origem"] = nova_origem
+    config["origem_topico"] = topico_final
     salvar_autorais_config(config)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Origem dos vídeos autorais atualizada para: {novo_valor}")
-    await message.answer(f"✅ <b>Origem atualizada com sucesso!</b>\nO robô agora escutará: <code>{novo_valor}</code>", parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info(f"✅ Origem dos vídeos autorais salva: {nova_origem} | Tópico: {topico_final}")
+    await message.answer(f"✅ <b>Origem e Tópico salvos com sucesso!</b>", parse_mode="HTML")
     await painel_autorais(message, state)
 
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Destino 📤")
@@ -1630,15 +1667,28 @@ async def pedir_destino_autorais(message: types.Message, state: FSMContext):
 @dp.message(AutoraisFluxo.aguardando_destino)
 async def salvar_destino_autorais(message: types.Message, state: FSMContext):
     novo_valor = message.text.strip()
-    if novo_valor.lstrip('-').isdigit():
-        novo_valor = int(novo_valor)
-        
+    
+    msg_status = await message.answer("⏳ <b>Validando canal de destino...</b>", parse_mode="HTML")
+    id_real = novo_valor
+    
+    try:
+        chat_obj = await bot.get_chat(novo_valor)
+        nome_chat = chat_obj.title or chat_obj.full_name or novo_valor
+        id_real = chat_obj.id
+        await msg_status.delete()
+        await message.answer(f"✅ Destino validado: <b>{nome_chat}</b>", parse_mode="HTML")
+    except Exception as e:
+        await msg_status.delete()
+        await message.answer("⚠️ <b>Aviso:</b> O bot não conseguiu encontrar este destino (verifique se ele é administrador do canal). O ID será salvo mesmo assim.", parse_mode="HTML")
+        if novo_valor.lstrip('-').isdigit():
+            id_real = int(novo_valor)
+            
     config = ler_autorais_config()
-    config["destino"] = novo_valor
+    config["destino"] = id_real
     salvar_autorais_config(config)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Destino dos vídeos autorais atualizado para: {novo_valor}")
-    await message.answer(f"✅ <b>Destino atualizado com sucesso!</b>\nOs vídeos convertidos serão enviados instantaneamente para: <code>{novo_valor}</code>", parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info(f"✅ Destino dos vídeos autorais atualizado para: {id_real}")
+    await message.answer(f"✅ <b>Destino atualizado com sucesso!</b>\nOs vídeos convertidos serão enviados instantaneamente para: <code>{id_real}</code>", parse_mode="HTML")
     await painel_autorais(message, state)
 
 # ----------------------------------
