@@ -417,10 +417,12 @@ async def interceptar_mensagem(event):
             if EXIBIR_LOGS: logger.info(f"🪞 [Espião] Duplicidade barrada! O produto {link_capturado} já foi capturado nas últimas 24 horas.")
             return # Encerra o processamento da mensagem aqui mesmo, sem baixar o vídeo
             
-        if event.media and isinstance(event.media, MessageMediaDocument):
+        # ✅ TRAVA DE MÍDIA FLEXÍVEL (Igual ao Espelhador)
+        if getattr(event, 'media', None) is not None:
             if EXIBIR_LOGS: logger.info(f"🎯 ALVO LOCALIZADO! Link da Shopee extraído cirurgicamente: {link_capturado}")
             
-            if "magazineluiza" in texto.lower() or "meli.li" in texto.lower() or "mercadolivre" in texto.lower():
+            # ✅ CORREÇÃO DO ERRO FATAL (texto_original em vez de texto)
+            if "magazineluiza" in texto_original.lower() or "meli.li" in texto_original.lower() or "mercadolivre" in texto_original.lower():
                 if EXIBIR_LOGS: logger.info("✂️ Concorrência ignorada: A postagem continha outros domínios, mas apenas o da Shopee foi filtrado.")
             
             if EXIBIR_LOGS: logger.info("📥 Iniciando download do vídeo em segundo plano...")
