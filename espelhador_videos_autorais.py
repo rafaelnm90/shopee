@@ -150,6 +150,16 @@ async def obter_nome_chat(valor):
         return "Nome Desconhecido (ID não sincronizado)"
 
 @client.on(events.NewMessage(from_users='me', pattern=r'^/status_autorais|^/set_origem|^/set_destino'))
+async def obter_nome_chat(valor):
+    """Função auxiliar para buscar o nome real do grupo/canal no Telegram"""
+    try:
+        alvo = int(valor) if str(valor).lstrip('-').isdigit() else valor
+        entidade = await client.get_entity(alvo)
+        return getattr(entidade, 'title', getattr(entidade, 'username', str(valor)))
+    except Exception:
+        return "Nome Desconhecido (ID não sincronizado)"
+
+@client.on(events.NewMessage(from_users='me', pattern=r'^/status_autorais|^/set_origem|^/set_destino'))
 async def menu_comandos_autorais(event):
     global config_atual
     texto = event.raw_text.strip().split()
@@ -182,43 +192,16 @@ async def menu_comandos_autorais(event):
         else:
             await event.reply("⚠️ Comando incompleto. Tente: <code>/set_origem -100123456789</code>", parse_mode="html")
 
-    @client.on(events.NewMessage(from_users='me', pattern=r'^/status_autorais|^/set_origem|^/set_destino'))
-async def menu_comandos_autorais(event):
-    global config_atual
-    texto = event.raw_text.strip().split()
-    comando = texto[0]
-
-    if comando == '/status_autorais':
-        if EXIBIR_LOGS: logger.info("⚙️ Comando /status_autorais acionado.")
-        msg = (f"🤖 <b>Painel do Bot Vídeos Autorais</b>\n\n"
-               f"📥 <b>Origem atual:</b> <code>{config_atual['origem']}</code>\n"
-               f"📤 <b>Destino atual:</b> <code>{config_atual['destino']}</code>\n\n"
-               f"<i>Para configurar, envie no chat:</i>\n"
-               f"<code>/set_origem [ID numérico ou @username]</code>\n"
-               f"<code>/set_destino [ID numérico ou @username]</code>")
-        await event.reply(msg, parse_mode="html")
-
-    elif comando == '/set_origem':
-        if len(texto) > 1:
-            novo_valor = int(texto[1]) if texto[1].lstrip('-').isdigit() else texto[1]
-            config_atual['origem'] = novo_valor
-            salvar_config_autorais(config_atual)
-            if EXIBIR_LOGS: logger.info(f"✅ Nova origem definida via chat: {novo_valor}")
-            await event.reply(f"✅ <b>Origem atualizada com sucesso!</b>\nO robô agora escutará: <code>{novo_valor}</code>", parse_mode="html")
-        else:
-            await event.reply("⚠️ Comando incompleto. Tente: <code>/set_origem -100123456789</code>", parse_mode="html")
-
     elif comando == '/set_destino':
         if len(texto) > 1:
             novo_valor = int(texto[1]) if texto[1].lstrip('-').isdigit() else texto[1]
+            nome_chat = await obter_nome_chat(novo_valor)
             config_atual['destino'] = novo_valor
             salvar_config_autorais(config_atual)
-            if EXIBIR_LOGS: logger.info(f"✅ Novo destino definido via chat: {novo_valor}")
-            await event.reply(f"✅ <b>Destino atualizado com sucesso!</b>\nOs vídeos serão enviados para: <code>{novo_valor}</code>", parse_mode="html")
+            if EXIBIR_LOGS: logger.info(f"✅ Novo destino definido via chat: {novo_valor} ({nome_chat})")
+            await event.reply(f"✅ <b>Destino atualizado com sucesso!</b>\nOs vídeos serão enviados para:\n🏷️ <b>{nome_chat}</b>\n🆔 <code>{novo_valor}</code>", parse_mode="html")
         else:
             await event.reply("⚠️ Comando incompleto. Tente: <code>/set_destino @seu_canal</code>", parse_mode="html")
-
-@client.on(events.NewMessage())
 async def interceptar_e_espelhar(event):
     config_atual = carregar_config_autorais() # ✅ Essa linha obriga o robô a ler a sua alteração em tempo real
     chat = await event.get_chat()
