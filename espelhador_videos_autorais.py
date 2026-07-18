@@ -149,17 +149,7 @@ async def obter_nome_chat(valor):
     except Exception:
         return "Nome Desconhecido (ID não sincronizado)"
 
-@client.on(events.NewMessage(from_users='me', pattern=r'^/status_autorais|^/set_origem|^/set_destino'))
-async def obter_nome_chat(valor):
-    """Função auxiliar para buscar o nome real do grupo/canal no Telegram"""
-    try:
-        alvo = int(valor) if str(valor).lstrip('-').isdigit() else valor
-        entidade = await client.get_entity(alvo)
-        return getattr(entidade, 'title', getattr(entidade, 'username', str(valor)))
-    except Exception:
-        return "Nome Desconhecido (ID não sincronizado)"
-
-@client.on(events.NewMessage(from_users='me', pattern=r'^/status_autorais|^/set_origem|^/set_destino'))
+@client.on(events.NewMessage(from_users='me', pattern=r'^/status_autorais|^/set_origem|^/set_destino|^/set_topico'))
 async def menu_comandos_autorais(event):
     global config_atual
     texto = event.raw_text.strip().split()
@@ -170,14 +160,17 @@ async def menu_comandos_autorais(event):
         
         nome_origem = await obter_nome_chat(config_atual.get('origem'))
         nome_destino = await obter_nome_chat(config_atual.get('destino'))
+        topico = config_atual.get('origem_topico', 'Todos (Geral)')
         
         msg = (f"🤖 <b>Painel do Bot Vídeos Autorais</b>\n\n"
-               f"📥 <b>Origem atual:</b> <code>{config_atual['origem']}</code>\n"
-               f"🏷️ <i>{nome_origem}</i>\n\n"
-               f"📤 <b>Destino atual:</b> <code>{config_atual['destino']}</code>\n"
+               f"📥 <b>Origem atual:</b> <code>{config_atual.get('origem')}</code>\n"
+               f"🏷️ <i>{nome_origem}</i>\n"
+               f"📂 <b>Tópico (Subcanal):</b> <code>{topico}</code>\n\n"
+               f"📤 <b>Destino atual:</b> <code>{config_atual.get('destino')}</code>\n"
                f"🏷️ <i>{nome_destino}</i>\n\n"
                f"<i>Para configurar, envie no chat:</i>\n"
                f"<code>/set_origem [ID numérico ou @username]</code>\n"
+               f"<code>/set_topico [ID numérico do tópico, ex: 1]</code>\n"
                f"<code>/set_destino [ID numérico ou @username]</code>")
         await event.reply(msg, parse_mode="html")
 
@@ -188,9 +181,24 @@ async def menu_comandos_autorais(event):
             config_atual['origem'] = novo_valor
             salvar_config_autorais(config_atual)
             if EXIBIR_LOGS: logger.info(f"✅ Nova origem definida via chat: {novo_valor} ({nome_chat})")
-            await event.reply(f"✅ <b>Origem atualizada com sucesso!</b>\nO robô agora escutará:\n🏷️ <b>{nome_chat}</b>\n🆔 <code>{novo_valor}</code>", parse_mode="html")
+            await event.reply(f"✅ <b>Origem atualizada com sucesso!</b>\n🏷️ <b>{nome_chat}</b>\n🆔 <code>{novo_valor}</code>", parse_mode="html")
         else:
             await event.reply("⚠️ Comando incompleto. Tente: <code>/set_origem -100123456789</code>", parse_mode="html")
+
+    elif comando == '/set_topico':
+        if len(texto) > 1:
+            novo_topico = int(texto[1]) if texto[1].isdigit() else None
+            if novo_topico is not None:
+                config_atual['origem_topico'] = novo_topico
+                salvar_config_autorais(config_atual)
+                if EXIBIR_LOGS: logger.info(f"✅ Novo tópico da origem definido: {novo_topico}")
+                await event.reply(f"✅ <b>Tópico atualizado com sucesso!</b>\nO robô agora vai escutar apenas os vídeos que caírem no subcanal: <code>{novo_topico}</code>", parse_mode="html")
+            else:
+                await event.reply("⚠️ ID de tópico inválido. Use apenas números. Ex: <code>/set_topico 1</code>", parse_mode="html")
+        else:
+            config_atual['origem_topico'] = None
+            salvar_config_autorais(config_atual)
+            await event.reply("✅ <b>Filtro de tópico removido!</b> O robô agora lerá todos os subcanais deste grupo.", parse_mode="html")
 
     elif comando == '/set_destino':
         if len(texto) > 1:
@@ -199,13 +207,16 @@ async def menu_comandos_autorais(event):
             config_atual['destino'] = novo_valor
             salvar_config_autorais(config_atual)
             if EXIBIR_LOGS: logger.info(f"✅ Novo destino definido via chat: {novo_valor} ({nome_chat})")
-            await event.reply(f"✅ <b>Destino atualizado com sucesso!</b>\nOs vídeos serão enviados para:\n🏷️ <b>{nome_chat}</b>\n🆔 <code>{novo_valor}</code>", parse_mode="html")
+            await event.reply(f"✅ <b>Destino atualizado com sucesso!</b>\n🏷️ <b>{nome_chat}</b>\n🆔 <code>{novo_valor}</code>", parse_mode="html")
         else:
             await event.reply("⚠️ Comando incompleto. Tente: <code>/set_destino @seu_canal</code>", parse_mode="html")
+            
+@client.on(events.NewMessage())
 async def interceptar_e_espelhar(event):
     config_atual = carregar_config_autorais() # ✅ Essa linha obriga o robô a ler a sua alteração em tempo real
     chat = await event.get_chat()
-    origem_configurada = config_atual['origem']
+    origem_configurada = config_atual.get('origem')
+    topico_configurado = config_atual.get('origem_topico')
     
     eh_origem = False  # 🐛 Correção: Garante que a variável exista desde o início
     
@@ -215,6 +226,15 @@ async def interceptar_e_espelhar(event):
         username_chat = getattr(chat, 'username', None)
         if username_chat and f"@{username_chat}".lower() == origem_configurada.lower():
             eh_origem = True
+
+    # ✅ VERIFICAÇÃO DE TÓPICO (Subcanal)
+    if eh_origem and topico_configurado:
+        # Extrai o ID do tópico da mensagem atual
+        topic_id_mensagem = getattr(event.message.reply_to, 'forum_topic_id', None)
+        
+        # Se a mensagem for de um tópico diferente do configurado, o robô ignora
+        if topic_id_mensagem != topico_configurado:
+            eh_origem = False
             
     if not eh_origem:
         return
