@@ -62,7 +62,13 @@ if EXIBIR_LOGS:
 API_ID = int(os.getenv('API_ID', 0)) 
 API_HASH = os.getenv('API_HASH', '')
 
-API_ID = int(os.getenv('API_ID', 0))
+def carregar_config_autorais():
+    try:
+        with open("autorais_config.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        # Valores genéricos de segurança. Tudo será editado pelo seu Bot Principal depois.
+        return {"origem": -1003673555953, "origem_topico": None, "destino": "@videos_autorais"}
 def salvar_config_autorais(config):
     with open("autorais_config.json", "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4, ensure_ascii=False)
@@ -133,96 +139,9 @@ async def converter_link_shopee(link_original):
         
     return link_original
 
-async def validar_chat(valor):
-    """Tenta acessar o chat para garantir que ele existe e o robô tem permissão"""
-    try:
-        alvo = int(valor) if str(valor).lstrip('-').isdigit() else valor
-        entidade = await client.get_entity(alvo)
-        nome = getattr(entidade, 'title', getattr(entidade, 'username', str(valor)))
-        return True, nome, alvo
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Falha ao validar acesso ao chat {valor}: {e}")
-        return False, str(e), None
-
-@client.on(events.NewMessage(func=lambda e: e.is_private, pattern=r'^/status_autorais|^/set_origem|^/set_destino|^/set_topico'))
-async def menu_comandos_autorais(event):
-    global config_atual
-    texto = event.raw_text.strip().split()
-    comando = texto[0]
-
-    if comando == '/status_autorais':
-        if EXIBIR_LOGS: logger.info("⚙️ Comando /status_autorais acionado via chat privado.")
-        
-        sucesso_orig, nome_origem, _ = await validar_chat(config_atual.get('origem'))
-        texto_origem = nome_origem if sucesso_orig else "ID Inválido ou Sem Acesso"
-        
-        sucesso_dest, nome_destino, _ = await validar_chat(config_atual.get('destino'))
-        texto_destino = nome_destino if sucesso_dest else "ID Inválido ou Sem Acesso"
-        
-        topico = config_atual.get('origem_topico', 'Todos (Geral)')
-        
-        msg = (f"🤖 <b>Painel do Bot Vídeos Autorais</b>\n\n"
-               f"📥 <b>Origem atual:</b> <code>{config_atual.get('origem')}</code>\n"
-               f"🏷️ <i>{texto_origem}</i>\n"
-               f"📂 <b>Tópico (Subcanal):</b> <code>{topico}</code>\n\n"
-               f"📤 <b>Destino atual:</b> <code>{config_atual.get('destino')}</code>\n"
-               f"🏷️ <i>{texto_destino}</i>\n\n"
-               f"<i>Para configurar, envie no chat:</i>\n"
-               f"<code>/set_origem [ID numérico ou @username]</code>\n"
-               f"<code>/set_topico [ID numérico do tópico, ex: 1]</code>\n"
-               f"<code>/set_destino [ID numérico ou @username]</code>")
-        await event.reply(msg, parse_mode="html")
-
-    elif comando == '/set_origem':
-        if len(texto) > 1:
-            valor_entrada = texto[1]
-            await event.reply("⏳ <b>Validando grupo de origem...</b>", parse_mode="html")
-            sucesso, nome_chat, id_real = await validar_chat(valor_entrada)
-            
-            if sucesso:
-                config_atual['origem'] = id_real
-                salvar_config_autorais(config_atual)
-                if EXIBIR_LOGS: logger.info(f"✅ Nova origem definida e validada: {id_real} ({nome_chat})")
-                await event.reply(f"✅ <b>Origem verificada e salva com sucesso!</b>\n🏷️ <b>{nome_chat}</b>\n🆔 <code>{id_real}</code>", parse_mode="html")
-            else:
-                await event.reply("❌ <b>Erro:</b> O perfil secundário não conseguiu encontrar ou não tem acesso a esse grupo.\nVerifique se o ID está correto e se a conta faz parte do grupo.", parse_mode="html")
-        else:
-            await event.reply("⚠️ Comando incompleto. Tente: <code>/set_origem -100123456789</code>", parse_mode="html")
-
-    elif comando == '/set_topico':
-        if len(texto) > 1:
-            novo_topico = int(texto[1]) if texto[1].isdigit() else None
-            if novo_topico is not None:
-                config_atual['origem_topico'] = novo_topico
-                salvar_config_autorais(config_atual)
-                if EXIBIR_LOGS: logger.info(f"✅ Novo tópico definido: {novo_topico}")
-                await event.reply(f"✅ <b>Tópico atualizado!</b>\nO robô escutará apenas o subcanal: <code>{novo_topico}</code>", parse_mode="html")
-            else:
-                await event.reply("⚠️ ID de tópico inválido. Use apenas números. Ex: <code>/set_topico 1</code>", parse_mode="html")
-        else:
-            config_atual['origem_topico'] = None
-            salvar_config_autorais(config_atual)
-            await event.reply("✅ <b>Filtro de tópico removido!</b> O robô agora lerá todos os subcanais deste grupo.", parse_mode="html")
-
-    elif comando == '/set_destino':
-        if len(texto) > 1:
-            valor_entrada = texto[1]
-            await event.reply("⏳ <b>Validando canal de destino...</b>", parse_mode="html")
-            sucesso, nome_chat, id_real = await validar_chat(valor_entrada)
-            
-            if sucesso:
-                config_atual['destino'] = id_real
-                salvar_config_autorais(config_atual)
-                if EXIBIR_LOGS: logger.info(f"✅ Novo destino definido e validado: {id_real} ({nome_chat})")
-                await event.reply(f"✅ <b>Destino verificado e salvo com sucesso!</b>\n🏷️ <b>{nome_chat}</b>\n🆔 <code>{id_real}</code>", parse_mode="html")
-            else:
-                await event.reply("❌ <b>Erro:</b> O perfil secundário não encontrou ou não tem permissão para postar nesse destino.", parse_mode="html")
-        else:
-            await event.reply("⚠️ Comando incompleto. Tente: <code>/set_destino @seu_canal</code>", parse_mode="html")
-
 @client.on(events.NewMessage())
 async def interceptar_e_espelhar(event):
-    config_atual = carregar_config_autorais() # Lendo a configuração em tempo real
+    config_atual = carregar_config_autorais() # Lê a configuração salva pelo seu Bot Principal
     chat = await event.get_chat()
     origem_configurada = config_atual.get('origem')
     topico_configurado = config_atual.get('origem_topico')
@@ -237,12 +156,12 @@ async def interceptar_e_espelhar(event):
             eh_origem = True
 
     # ✅ VERIFICAÇÃO DE TÓPICO (Subcanal)
-    if eh_origem and topico_configurado:
+    if eh_origem and topico_configurado is not None:
         topic_id = None
         if event.message.reply_to:
             topic_id = getattr(event.message.reply_to, 'forum_topic_id', getattr(event.message.reply_to, 'reply_to_msg_id', None))
         
-        # O Tópico "Geral" do Telegram costuma ser o ID 1 ou vir nulo na API
+        # O Tópico "Geral" costuma ser o ID 1 ou vir nulo na API do Telegram
         if topico_configurado == 1 and topic_id is None:
             pass 
         elif topic_id != topico_configurado:
