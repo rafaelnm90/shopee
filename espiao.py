@@ -306,11 +306,14 @@ async def gerar_legenda_com_ia_espelhador(caminho_video):
                 else: raise erro_rede
         
         while video_gemini.state.name == "PROCESSING":
+            if EXIBIR_LOGS: logger.info("⏳ [IA] O vídeo está sendo processado nos servidores da Google. Aguardando...")
             time.sleep(2)
             video_gemini = client_genai.files.get(name=video_gemini.name)
             
         if video_gemini.state.name == "FAILED":
             raise Exception("Falha de processamento no servidor do Google.")
+            
+        if EXIBIR_LOGS: logger.info("✅ [IA] Processamento concluído! O vídeo está pronto para leitura.")
 
         prompt = (
             "Assista ao vídeo e crie um título MUITO CURTO para o produto demonstrado. "
@@ -320,10 +323,10 @@ async def gerar_legenda_com_ia_espelhador(caminho_video):
 
         for modelo_nome in MODELOS_CASCATA_GEMINI:
             try:
-                if EXIBIR_LOGS: logger.info(f"⏳ [IA] A consultar o motor: {modelo_nome}...")
+                if EXIBIR_LOGS: logger.info(f"⏳ [IA] A consultar o motor {modelo_nome} enviando vídeo e texto...")
                 response = client_genai.models.generate_content(
                     model=modelo_nome,
-                    contents=prompt
+                    contents=[video_gemini, prompt]
                 )
                 if response and response.text:
                     if EXIBIR_LOGS: logger.info(f"✅ [IA] Sucesso com o modelo {modelo_nome}!")
