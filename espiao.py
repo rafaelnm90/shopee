@@ -316,10 +316,19 @@ async def gerar_legenda_com_ia_espelhador(caminho_video):
         if EXIBIR_LOGS: logger.info("✅ [IA] Processamento concluído! O vídeo está pronto para leitura.")
 
         prompt = (
-            "Assista ao vídeo e crie um título MUITO CURTO para o produto demonstrado. "
-            "REGRA ABSOLUTA: O título deve ter no máximo 5 palavras e conter apenas 1 emoji no início. "
-            "Não adicione ponto final, descrições ou textos persuasivos. Entregue APENAS o título."
-        )
+                "Assista ao vídeo e identifique qual é o produto demonstrado. "
+                "Sua resposta deve conter EXATAMENTE duas linhas.\n"
+                "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no início (Exemplo: 👟 Tênis Casual Feminino).\n"
+                "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
+                "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras (exemplo prático: um organizador de sacos plásticos de cozinha pertence a #CasaEDecoracao e NUNCA a #BolsasFemininas, pois não é um acessório de moda).\n"
+                "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
+                "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
+                "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
+                "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
+                "#AcessoriosDeModa, #BrinquedosEHobbies, #Papelaria, #LivrosERevistas, #RoupasMasculinas, #Automoveis, #MaeEBebe, "
+                "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
+                "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
+            )
 
         for modelo_nome in MODELOS_CASCATA_GEMINI:
             try:
