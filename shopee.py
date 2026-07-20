@@ -2398,7 +2398,19 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     except (FileNotFoundError, json.JSONDecodeError):
         fila = []
         
-    pendentes = [item for item in fila if not item.get("processado", False)] if tipo_fila == "Espião" else fila
+    # Lógica de filtragem corrigida para ambas as filas
+    pendentes = []
+    if tipo_fila == "Espião":
+        pendentes = [item for item in fila if not item.get("processado", False)]
+    elif tipo_fila == "Espelhador":
+        # O Espelhador precisa limpar do painel o que já foi publicado hoje ou em dias anteriores
+        agora_str = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
+        for item in fila:
+            if not item.get("processado", False):
+                # Se não tem data de publicação ou a data de publicação é no futuro, é pendente
+                data_pub = item.get("data_publicacao", "")
+                if not data_pub or data_pub > agora_str:
+                    pendentes.append(item)
     
     if not pendentes:
         await message.answer(f"📭 A fila do {tipo_fila} está vazia no momento.", parse_mode="HTML")
@@ -2435,9 +2447,24 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         }
         rotas_agrupadas["Radar Global"] = pendentes
         
+    # --- Obter a defasagem temporal real configurada ---
+    atraso_dias = 0
+    if tipo_fila == "Espelhador":
+        try:
+            with open("espelhos_config.json", "r", encoding="utf-8") as f:
+                 dados_espelho = json.load(f)
+                 # Considerando que a defasagem possa ser global ou por rota. Usamos a global como referência para o título.
+                 atraso_dias = dados_espelho.get("config_global", {}).get("intervalo_dias", 0)
+        except:
+             pass
+    elif tipo_fila == "Espião":
+         atraso_dias = dados_espiao.get("intervalo_dias", 1)
+         
+    titulo_atraso = f" (D+{atraso_dias})"
+
     # 2. Renderização Universal com Paginação Automática (Anti-Limite do Telegram)
     mensagens_para_enviar = []
-    texto_atual = f"📊 <b>Relatório da Fila do {tipo_fila} (D+1)</b>\n\n"
+    texto_atual = f"📊 <b>Relatório da Fila do {tipo_fila}{titulo_atraso}</b>\n\n"
 
     for nome_rota, itens in rotas_agrupadas.items():
         rota_info = mapa_rotas.get(nome_rota, {})
