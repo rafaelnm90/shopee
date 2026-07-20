@@ -2398,16 +2398,14 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     except (FileNotFoundError, json.JSONDecodeError):
         fila = []
         
-    # Lógica de filtragem corrigida para ambas as filas
+    # Lógica de filtragem corrigida (Pente Fino)
     pendentes = []
     if tipo_fila == "Espião":
         pendentes = [item for item in fila if not item.get("processado", False)]
     elif tipo_fila == "Espelhador":
-        # O Espelhador precisa limpar do painel o que já foi publicado hoje ou em dias anteriores
         agora_str = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
         for item in fila:
             if not item.get("processado", False):
-                # Se não tem data de publicação ou a data de publicação é no futuro, é pendente
                 data_pub = item.get("data_publicacao", "")
                 if not data_pub or data_pub > agora_str:
                     pendentes.append(item)
@@ -2417,10 +2415,9 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.info(f"✅ Relatório do {tipo_fila} gerado (Fila vazia).")
         return
         
-    cache_nomes = ler_cache_nomes_grupos()  # 🚀 Carrega nomes já resolvidos antes
+    cache_nomes = ler_cache_nomes_grupos()
     rotas_agrupadas = {}
     
-    # 1. Agrupamento de rotas e metadados
     if tipo_fila == "Espelhador":
         import espelhador
         dados_rotas = espelhador.ler_espelhos()
@@ -2431,7 +2428,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             if nome_rota not in rotas_agrupadas: rotas_agrupadas[nome_rota] = []
             rotas_agrupadas[nome_rota].append(item)
             
-    else: # Lógica para o Espião
+    else: 
         try:
             with open("alvos_espiao.json", "r", encoding="utf-8") as f:
                 dados_espiao = json.load(f)
@@ -2446,14 +2443,13 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             }
         }
         rotas_agrupadas["Radar Global"] = pendentes
-        
+
     # --- Obter a defasagem temporal real configurada ---
     atraso_dias = 0
     if tipo_fila == "Espelhador":
         try:
             with open("espelhos_config.json", "r", encoding="utf-8") as f:
                  dados_espelho = json.load(f)
-                 # Considerando que a defasagem possa ser global ou por rota. Usamos a global como referência para o título.
                  atraso_dias = dados_espelho.get("config_global", {}).get("intervalo_dias", 0)
         except:
              pass
@@ -2462,7 +2458,6 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
          
     titulo_atraso = f" (D+{atraso_dias})"
 
-    # 2. Renderização Universal com Paginação Automática (Anti-Limite do Telegram)
     mensagens_para_enviar = []
     texto_atual = f"📊 <b>Relatório da Fila do {tipo_fila}{titulo_atraso}</b>\n\n"
 
@@ -2483,28 +2478,22 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         for i, v in enumerate(itens, 1):
             data_cap = v.get("data_captura", "Data não registrada")
             
-            # 🚀 CORREÇÃO 1: Expansão da busca de chaves para evitar origem Desconhecida
             origem_bruta = str(v.get("chat_origem", v.get("origem", v.get("grupo_id", v.get("canal_id", "Desconhecida")))))
-            
             link_original = v.get("link_original", "")
             msg_id = v.get("mensagem_id") or v.get("msg_id") or v.get("message_id")
             
-            # Resgate estrutural em links
             if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 if link_original and "t.me/c/" in link_original:
-                    try:
-                        origem_bruta = "-100" + link_original.split("t.me/c/")[1].split("/")[0]
+                    try: origem_bruta = "-100" + link_original.split("t.me/c/")[1].split("/")[0]
                     except: pass
                 elif link_original and "t.me/" in link_original:
-                    try:
-                        origem_bruta = "@" + link_original.split("t.me/")[1].split("/")[0]
+                    try: origem_bruta = "@" + link_original.split("t.me/")[1].split("/")[0]
                     except: pass
 
             if not link_original and msg_id and origem_bruta.lstrip("-").isdigit():
                 chat_id_limpo = origem_bruta.replace("-100", "")
                 link_original = f"https://t.me/c/{chat_id_limpo}/{msg_id}"
                 
-            # 🚀 CORREÇÃO DEFINITIVA: Cache Otimizado e Busca Profunda
             if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 display_origem = "<code>Pendente de rastreio</code>"
             else:
@@ -2558,8 +2547,8 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                             try:
                                 chat_obj = await bot.get_chat(var)
                                 nome_origem = chat_obj.title or chat_obj.full_name or var
-                                origem_bruta = var
-                                break
+                                origem_bruta = var 
+                                break 
                             except Exception:
                                 continue
                             finally:
@@ -2571,9 +2560,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 
                 display_origem = f"{nome_origem[:25]}" if nome_origem != origem_bruta else f"{origem_bruta}"
                 
-            link_display = f"<a href='{link_original}'>Ver Vídeo Original</a>" if link_original else "<i>Sem link direto</i>"
-            
-            # --- CÁLCULO DINÂMICO DE PREVISÃO ---
+            # --- CÁLCULO DINÂMICO DE PREVISÃO E LAYOUT COMPACTO ---
             from datetime import datetime, timedelta
             
             if data_cap != "Data não registrada":
@@ -2581,11 +2568,9 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     formato = "%Y-%m-%d %H:%M:%S" if len(data_cap) > 10 else "%Y-%m-%d"
                     data_obj = datetime.strptime(data_cap, formato)
                     
-                    # Aplica a defasagem configurada (D+X)
                     data_alvo = data_obj + timedelta(days=atraso_dias)
                     hoje_obj = datetime.now(fuso_horario).date()
                     
-                    # Identificador visual do dia super compacto
                     if data_alvo.date() == hoje_obj:
                         status_dia = "🟢 Hoje"
                     elif data_alvo.date() == hoje_obj + timedelta(days=1):
@@ -2603,7 +2588,6 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 status_dia = "⚪ Indefinido"
                 data_cap_formatada = "Desconhecida"
 
-            # --- LAYOUT COMPACTO COM LINK EXPLÍCITO (2 LINHAS) ---
             link_display = f"<a href='{link_original}'>Ver Vídeo Original</a>" if link_original else "<i>Sem link direto</i>"
             
             linha_video = (
@@ -2619,11 +2603,12 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             
         texto_atual += "\n"
 
-    # Envia todas as mensagens fatiadas em sequência
+    mensagens_para_enviar.append(texto_atual)
+
     for msg in mensagens_para_enviar:
         await message.answer(msg, parse_mode="HTML", disable_web_page_preview=True)
         
-    if EXIBIR_LOGS: logger.info(f"✅ Relatório unificado do {tipo_fila} entregue com sucesso! (Dividido em {len(mensagens_para_enviar)} partes).")
+    if EXIBIR_LOGS: logger.info(f"✅ Relatório unificado do {tipo_fila} entregue com sucesso!")
 
 @dp.message(Command("nomeargrupo"), StateFilter("*"))
 async def nomear_grupo_manual(message: types.Message, state: FSMContext):
@@ -6833,6 +6818,47 @@ async def checkup_diario_grupos():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"⚠️ Erro ao disparar a mensagem do relatório diário: {e}")
 
+# =========================================================
+# COLE O CALLBACK AQUI, ANTES DO MAIN()
+# =========================================================
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+@dp.callback_query(F.data == 'forcar_clones_espiao')
+async def forcar_clones_fila(callback: types.CallbackQuery):
+    if EXIBIR_LOGS:
+        logger.info("🚀 Iniciando processo de forçar disparo dos clones...")
+        
+    try:
+        with open('fila_clonagem.json', 'r', encoding='utf-8') as f:
+            fila = json.load(f).get("fila", [])
+            
+        quantidade = len([i for i in fila if not i.get("processado")])
+        
+        if quantidade == 0:
+            if EXIBIR_LOGS: logger.info("⚠️ A fila de clonagem já está vazia.")
+            await callback.answer("A fila de clonagem já está vazia!", show_alert=True)
+            return
+            
+        if EXIBIR_LOGS: logger.info(f"📂 {quantidade} vídeos encontrados na fila. Solicitando confirmação...")
+            
+        markup_confirmacao = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(text="Aprovar ✅", callback_data="executar_forcar_clones"),
+                    InlineKeyboardButton(text="Cancelar ❌", callback_data="cancelar_operacao")
+                ]
+            ]
+        )
+        
+        await callback.message.edit_text(f"Você tem {quantidade} vídeos retidos na fila de clonagem.\nDeseja forçar o processamento imediato de todos?", reply_markup=markup_confirmacao)
+        
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila de clonagem: {e}")
+        await callback.answer("Erro ao acessar a fila de clonagem.", show_alert=True)
+
+# =========================================================
+# O MAIN() E O INICIADOR FICAM SEMPRE NO FINAL ABSOLUTO
+# =========================================================
 async def main():
     # Agendador mestre que roda todo dia às 00:01
     scheduler.add_job(agendar_tarefas_diarias, 'cron', hour=0, minute=1, timezone=FUSO_STR)
@@ -6877,34 +6903,3 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
-
-@dp.callback_query_handler(lambda c: c.data == 'forcar_clones_espiao')
-async def forcar_clones_fila(callback_query: types.CallbackQuery):
-    if EXIBIR_LOGS:
-        print("🚀 Iniciando processo de forçar disparo dos clones...")
-        
-    try:
-        with open('fila_clonagem.json', 'r', encoding='utf-8') as f:
-            fila = json.load(f)
-            
-        quantidade = len(fila)
-        
-        if quantidade == 0:
-            if EXIBIR_LOGS:
-                print("⚠️ A fila de clonagem já está vazia.")
-            await callback_query.answer("A fila de clonagem já está vazia!", show_alert=True)
-            return
-            
-        if EXIBIR_LOGS:
-            print(f"📂 {quantidade} vídeos encontrados na fila. Solicitando confirmação...")
-            
-        markup_confirmacao = types.InlineKeyboardMarkup()
-        markup_confirmacao.add(types.InlineKeyboardButton("Aprovar ✅", callback_data="executar_forcar_clones"))
-        markup_confirmacao.add(types.InlineKeyboardButton("Cancelar ❌", callback_data="cancelar_operacao"))
-        
-        await callback_query.message.edit_text(f"Você tem {quantidade} vídeos retidos na fila de clonagem.\nDeseja forçar o processamento imediato de todos?", reply_markup=markup_confirmacao)
-        
-    except Exception as e:
-        if EXIBIR_LOGS:
-            print(f"❌ Erro ao ler fila de clonagem: {e}")
-        await callback_query.answer("Erro ao acessar a fila de clonagem.", show_alert=True)
