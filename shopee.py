@@ -2480,7 +2480,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             
         texto_atual += cabecalho_rota
         
-        for i, v in enumerate(itens, 1): # ✅ O limite [:15] foi removido para mostrar 100% da fila
+        for i, v in enumerate(itens, 1):
             data_cap = v.get("data_captura", "Data não registrada")
             
             # 🚀 CORREÇÃO 1: Expansão da busca de chaves para evitar origem Desconhecida
@@ -2511,14 +2511,11 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 nome_origem = origem_bruta
                 nome_gravado_no_item = v.get("nome_origem")
                 
-                # 0. Prioridade máxima: nome que já veio gravado no próprio item da fila
-                #    (capturado pelo userbot no momento da interceptação, sem depender do bot/cache/API)
                 if nome_gravado_no_item and str(nome_gravado_no_item) != origem_bruta:
                     nome_origem = str(nome_gravado_no_item)
                     if origem_bruta not in cache_nomes:
                         cache_nomes[origem_bruta] = nome_origem
                         salvar_nome_grupo(origem_bruta, nome_origem)
-                # 1. O Porteiro: Busca instantânea no cache (memória rápida)
                 elif origem_bruta in cache_nomes:
                     nome_origem = cache_nomes[origem_bruta]
                 else:
@@ -2526,7 +2523,6 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     base_dados = locals().get("dados_rotas", {}) if tipo_fila == "Espelhador" else locals().get("dados_espiao", {})
                     status_alvos = base_dados.get("status_alvos", {})
                     
-                    # 2. A Vasculha Profunda: Procurando o ID dentro das propriedades de cada alvo do Userbot
                     for alvo_key, dados_alvo in status_alvos.items():
                         if isinstance(dados_alvo, dict):
                             id_alvo = str(dados_alvo.get("id", ""))
@@ -2534,19 +2530,18 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                                 nome_encontrado = dados_alvo.get("nome")
                                 break
                                 
-                    # 2.1 Busca Recursiva (Para a estrutura complexa do Espelhador)
                     if not nome_encontrado and tipo_fila == "Espelhador":
                         def busca_recursiva(dados, alvo_id):
                             if isinstance(dados, dict):
                                 str_id = str(dados.get("id", dados.get("chat_id", "")))
                                 if str_id and (str_id == alvo_id or str_id.replace("-100", "") == alvo_id.replace("-100", "")):
                                     return dados.get("nome")
-                                for v in dados.values():
-                                    res = busca_recursiva(v, alvo_id)
+                                for val in dados.values():
+                                    res = busca_recursiva(val, alvo_id)
                                     if res: return res
                             elif isinstance(dados, list):
-                                for item in dados:
-                                    res = busca_recursiva(item, alvo_id)
+                                for item_lista in dados:
+                                    res = busca_recursiva(item_lista, alvo_id)
                                     if res: return res
                             return None
                         nome_encontrado = busca_recursiva(base_dados, origem_bruta)
@@ -2554,48 +2549,68 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     if nome_encontrado:
                         nome_origem = nome_encontrado
                     
-                    # Tenta a API apenas como último recurso através de um motor de tentativas progressivas
                     if (nome_origem == origem_bruta or not nome_origem) and origem_bruta.lstrip("-").isdigit():
                         so_numeros = origem_bruta.replace("-100", "").replace("-", "")
-                        variacoes = [
-                            origem_bruta,
-                            f"-100{so_numeros}",
-                            f"-{so_numeros}",
-                            so_numeros
-                        ]
+                        variacoes = [origem_bruta, f"-100{so_numeros}", f"-{so_numeros}", so_numeros]
+                        variacoes_unicas = list(dict.fromkeys(variacoes))
                         
-                        variacoes_unicas = []
-                        for v in variacoes:
-                            if v not in variacoes_unicas:
-                                variacoes_unicas.append(v)
-                                
                         for var in variacoes_unicas:
                             try:
-                                if EXIBIR_LOGS: logger.info(f"🔎 Testando variação de ID na API do Telegram: {var}...")
                                 chat_obj = await bot.get_chat(var)
                                 nome_origem = chat_obj.title or chat_obj.full_name or var
-                                origem_bruta = var # Fixa a chave com a variação correta aceite pela API
-                                if EXIBIR_LOGS: logger.info(f"✅ Variação {var} aceite! Nome resolvido: {nome_origem}")
-                                break # Sucesso alcançado, interrompe a bateria de testes
+                                origem_bruta = var
+                                break
                             except Exception:
                                 continue
                             finally:
                                 await asyncio.sleep(0.3)
                     
-                    # 3. O Aprendizado: Salva no JSON definitivo para nunca mais precisar de vasculhar
                     cache_nomes[origem_bruta] = nome_origem
                     if nome_origem != origem_bruta:
                         salvar_nome_grupo(origem_bruta, nome_origem)
-                        if EXIBIR_LOGS: logger.info(f"💾 Memória Cache Atualizada: ID {origem_bruta} associado a '{nome_origem}'.")
-                    
+                
                 display_origem = f"{nome_origem[:25]}" if nome_origem != origem_bruta else f"{origem_bruta}"
                 
             link_display = f"<a href='{link_original}'>Ver Vídeo Original</a>" if link_original else "<i>Sem link direto</i>"
             
-            # Monta a linha do vídeo com o link abaixo do nome
-            linha_video = f"  ├ {i}. Origem: {display_origem}\n  │  └ 🔗 {link_display} | ⏱️ {data_cap}\n"
+            # --- CÁLCULO DINÂMICO DE PREVISÃO ---
+            from datetime import datetime, timedelta
             
-            # Verifica se a mensagem atual vai estourar o limite do Telegram (4096 caracteres)
+            if data_cap != "Data não registrada":
+                try:
+                    formato = "%Y-%m-%d %H:%M:%S" if len(data_cap) > 10 else "%Y-%m-%d"
+                    data_obj = datetime.strptime(data_cap, formato)
+                    
+                    # Aplica a defasagem configurada (D+X)
+                    data_alvo = data_obj + timedelta(days=atraso_dias)
+                    hoje_obj = datetime.now(fuso_horario).date()
+                    
+                    # Identificador visual do dia super compacto
+                    if data_alvo.date() == hoje_obj:
+                        status_dia = "🟢 Hoje"
+                    elif data_alvo.date() == hoje_obj + timedelta(days=1):
+                        status_dia = "🟡 Amanhã"
+                    elif data_alvo.date() < hoje_obj:
+                        status_dia = "🔴 Atrasado"
+                    else:
+                        status_dia = f"🔵 D+{abs((data_alvo.date() - hoje_obj).days)}"
+                        
+                    data_cap_formatada = data_obj.strftime("%d/%m %H:%M")
+                except Exception:
+                    status_dia = "⚪ Indefinido"
+                    data_cap_formatada = "??/?? ??"
+            else:
+                status_dia = "⚪ Indefinido"
+                data_cap_formatada = "Desconhecida"
+
+            # --- LAYOUT COMPACTO COM LINK EXPLÍCITO (2 LINHAS) ---
+            link_display = f"<a href='{link_original}'>Ver Vídeo Original</a>" if link_original else "<i>Sem link direto</i>"
+            
+            linha_video = (
+                f"<b>{i}.</b> [{status_dia}] {display_origem} <i>(📥 {data_cap_formatada})</i>\n"
+                f"  └ 🔗 {link_display}\n"
+            )
+            
             if len(texto_atual) + len(linha_video) > 3800:
                 mensagens_para_enviar.append(texto_atual)
                 texto_atual = f"📊 <b>Relatório da Fila do {tipo_fila} (Continuação)</b>\n\n📡 <b>Rota: {nome_rota} (Cont.)</b>\n"
@@ -2603,8 +2618,6 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             texto_atual += linha_video
             
         texto_atual += "\n"
-
-    mensagens_para_enviar.append(texto_atual)
 
     # Envia todas as mensagens fatiadas em sequência
     for msg in mensagens_para_enviar:
