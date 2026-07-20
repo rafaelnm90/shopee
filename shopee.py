@@ -1602,11 +1602,41 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     dias_retorno = config.get("dias_retorno", 15)
     limite_videos = config.get("limite_videos", 5)
     
+    cache_nomes = ler_cache_nomes_grupos()
+    
+    # Resolução visual da Origem
+    nome_origem = str(origem)
+    if str(origem) != "Não definida":
+        if str(origem) in cache_nomes:
+            nome_origem = f"{cache_nomes[str(origem)]} (<code>{origem}</code>)"
+        else:
+            try:
+                chat_obj = await bot.get_chat(origem)
+                nome = chat_obj.title or chat_obj.full_name
+                nome_origem = f"{nome} (<code>{origem}</code>)"
+                salvar_nome_grupo(str(origem), nome)
+            except Exception:
+                nome_origem = f"<code>{origem}</code>"
+                
+    # Resolução visual do Destino
+    nome_destino = str(destino)
+    if str(destino) != "Não definido":
+        if str(destino) in cache_nomes:
+            nome_destino = f"{cache_nomes[str(destino)]} (<code>{destino}</code>)"
+        else:
+            try:
+                chat_obj = await bot.get_chat(destino)
+                nome = chat_obj.title or chat_obj.full_name
+                nome_destino = f"{nome} (<code>{destino}</code>)"
+                salvar_nome_grupo(str(destino), nome)
+            except Exception:
+                nome_destino = f"<code>{destino}</code>"
+    
     texto = (
         "🎥 <b>Painel do Bot Vídeos Autorais</b>\n\n"
-        f"📥 <b>Origem atual:</b> <code>{origem}</code>\n"
+        f"📥 <b>Origem atual:</b> {nome_origem}\n"
         f"📂 <b>Tópico (Subcanal):</b> <code>{topico}</code>\n\n"
-        f"📤 <b>Destino atual:</b> <code>{destino}</code>\n\n"
+        f"📤 <b>Destino atual:</b> {nome_destino}\n\n"
         f"♻️ <b>Regras de Retorno (Re-postagem):</b>\n"
         f"⏳ Oculto por: <b>{dias_retorno} dias</b>\n"
         f"📦 Cota Diária: <b>{limite_videos} vídeos/dia</b>\n\n"
@@ -1624,26 +1654,49 @@ async def pedir_origem_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_origem)
 async def pedir_topico_autorais(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+        
     novo_valor = message.text.strip()
-    
     msg_status = await message.answer("⏳ <b>Validando grupo de origem...</b>", parse_mode="HTML")
+    
     id_real = novo_valor
     nome_chat = novo_valor
+    sucesso = False
     
-    # Validação inteligente: tenta ver se o Bot Principal tem acesso.
-    # Se não tiver, avisa, mas deixa passar porque a Conta Secundária pode ter o acesso físico.
-    try:
-        chat_obj = await bot.get_chat(novo_valor)
-        nome_chat = chat_obj.title or chat_obj.full_name or novo_valor
-        id_real = chat_obj.id
+    variacoes = [novo_valor]
+    if novo_valor.lstrip('-').isdigit():
+        so_num = novo_valor.replace("-100", "").replace("-", "")
+        variacoes = [novo_valor, f"-100{so_num}", f"-{so_num}", so_num]
+    elif "t.me/c/" in novo_valor:
+        so_num = novo_valor.split("t.me/c/")[1].split("/")[0]
+        variacoes = [f"-100{so_num}"]
+    elif "t.me/" in novo_valor:
+        username = novo_valor.split("t.me/")[1].split("/")[0]
+        variacoes = [f"@{username}"]
+        
+    for var in variacoes:
+        try:
+            chat_obj = await bot.get_chat(var)
+            nome_chat = chat_obj.title or chat_obj.full_name or var
+            id_real = chat_obj.id
+            sucesso = True
+            break
+        except Exception:
+            continue
+    
+    if sucesso:
         await msg_status.delete()
         await message.answer(f"✅ Origem validada e encontrada: <b>{nome_chat}</b>", parse_mode="HTML")
-    except Exception as e:
+        salvar_nome_grupo(str(id_real), nome_chat)
+    else:
         await msg_status.delete()
         await message.answer("⚠️ <b>Aviso de Permissão:</b> O Bot Principal não tem permissão para enxergar este grupo. O ID será salvo, pois a Conta Secundária é quem fará a extração física.", parse_mode="HTML")
         if novo_valor.lstrip('-').isdigit():
-            id_real = int(novo_valor)
-    
+            so_num = novo_valor.replace("-100", "").replace("-", "")
+            id_real = int(f"-100{so_num}")
+            
     await state.update_data(nova_origem=id_real)
     
     await message.answer("Agora, digite o <b>NÚMERO DO TÓPICO (Subcanal)</b> que ele deve monitorar.\n\n<i>Dica: Se os vídeos caem no chat 'Geral', digite <b>1</b>. Se for um canal sem tópicos, digite <b>0</b> para ler tudo.</i>", parse_mode="HTML", reply_markup=teclado_cancelar)
@@ -1651,6 +1704,10 @@ async def pedir_topico_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_topico)
 async def salvar_origem_autorais(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+        
     if not message.text.isdigit():
         await message.answer("⚠️ Formato inválido! Envie apenas o número do tópico (Ex: 1 ou 0).", reply_markup=teclado_cancelar)
         return
@@ -1678,22 +1735,48 @@ async def pedir_destino_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_destino)
 async def salvar_destino_autorais(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+        
     novo_valor = message.text.strip()
-    
     msg_status = await message.answer("⏳ <b>Validando canal de destino...</b>", parse_mode="HTML")
-    id_real = novo_valor
     
-    try:
-        chat_obj = await bot.get_chat(novo_valor)
-        nome_chat = chat_obj.title or chat_obj.full_name or novo_valor
-        id_real = chat_obj.id
+    id_real = novo_valor
+    nome_chat = novo_valor
+    sucesso = False
+    
+    variacoes = [novo_valor]
+    if novo_valor.lstrip('-').isdigit():
+        so_num = novo_valor.replace("-100", "").replace("-", "")
+        variacoes = [novo_valor, f"-100{so_num}", f"-{so_num}", so_num]
+    elif "t.me/c/" in novo_valor:
+        so_num = novo_valor.split("t.me/c/")[1].split("/")[0]
+        variacoes = [f"-100{so_num}"]
+    elif "t.me/" in novo_valor:
+        username = novo_valor.split("t.me/")[1].split("/")[0]
+        variacoes = [f"@{username}"]
+        
+    for var in variacoes:
+        try:
+            chat_obj = await bot.get_chat(var)
+            nome_chat = chat_obj.title or chat_obj.full_name or var
+            id_real = chat_obj.id
+            sucesso = True
+            break
+        except Exception:
+            continue
+
+    if sucesso:
         await msg_status.delete()
         await message.answer(f"✅ Destino validado: <b>{nome_chat}</b>", parse_mode="HTML")
-    except Exception as e:
+        salvar_nome_grupo(str(id_real), nome_chat)
+    else:
         await msg_status.delete()
         await message.answer("⚠️ <b>Aviso:</b> O bot não conseguiu encontrar este destino (verifique se ele é administrador do canal). O ID será salvo mesmo assim.", parse_mode="HTML")
         if novo_valor.lstrip('-').isdigit():
-            id_real = int(novo_valor)
+            so_num = novo_valor.replace("-100", "").replace("-", "")
+            id_real = int(f"-100{so_num}")
             
     config = ler_autorais_config()
     config["destino"] = id_real
@@ -1710,6 +1793,10 @@ async def pedir_dias_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_dias_retorno)
 async def salvar_dias_autorais(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+        
     if not message.text.isdigit():
         await message.answer("⚠️ Envie apenas números inteiros.", reply_markup=teclado_cancelar)
         return
@@ -1729,6 +1816,10 @@ async def pedir_limite_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_limite_videos)
 async def salvar_limite_autorais(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+        
     if not message.text.isdigit():
         await message.answer("⚠️ Envie apenas números inteiros.", reply_markup=teclado_cancelar)
         return
