@@ -1604,15 +1604,18 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     limite_videos = config.get("limite_videos", 5)
     
     cache_nomes = ler_cache_nomes_grupos()
-    
-    # --- Lógica Visual da Origem (Com Ícones) ---
+
+    # --- Lógica Avançada Visual da Origem ---
     nome_origem = str(origem)
     icone_origem = "⏳"
+    
     if str(origem) != "Não definida":
+        # 1. Procura primeiro no Cache Local
         if str(origem) in cache_nomes:
             nome_origem = f"{cache_nomes[str(origem)]} (<code>{origem}</code>)"
             icone_origem = "✅"
         else:
+            # 2. Tenta perguntar à API do Telegram
             try:
                 chat_obj = await bot.get_chat(origem)
                 nome = chat_obj.title or chat_obj.full_name
@@ -1620,10 +1623,29 @@ async def painel_autorais(message: types.Message, state: FSMContext):
                 salvar_nome_grupo(str(origem), nome)
                 icone_origem = "✅"
             except Exception:
-                nome_origem = f"<code>{origem}</code> - <i>Aguardando leitura do Userbot...</i>"
-                icone_origem = "⏳"
+                # 3. Tenta procurar na Base de Dados do Espião
+                nome_encontrado_no_espiao = False
+                try:
+                    with open("alvos_espiao.json", "r", encoding="utf-8") as f:
+                        dados_espiao = json.load(f)
+                        status_alvos = dados_espiao.get("status_alvos", {})
+                        
+                        for alvo_id, dados_alvo in status_alvos.items():
+                            if str(dados_alvo.get("id")) == str(origem) or str(dados_alvo.get("id")).replace("-100", "") == str(origem).replace("-100", ""):
+                                nome = dados_alvo.get("nome", "Desconhecido")
+                                nome_origem = f"{nome} (<code>{origem}</code>)"
+                                salvar_nome_grupo(str(origem), nome) # Guarda para a próxima vez
+                                icone_origem = "✅"
+                                nome_encontrado_no_espiao = True
+                                break
+                except Exception:
+                    pass
+
+                if not nome_encontrado_no_espiao:
+                    nome_origem = f"<code>{origem}</code> - <i>Aguardando leitura do Userbot...</i>"
+                    icone_origem = "⏳"
                 
-    # --- Lógica Visual do Destino (Com Ícones) ---
+    # --- Lógica Visual do Destino ---
     nome_destino = str(destino)
     icone_destino = "⏳"
     if str(destino) != "Não definido":
@@ -2577,8 +2599,9 @@ async def nomear_grupo_manual(message: types.Message, state: FSMContext):
         )
         return
 
-    _, chat_id_bruto, nome = partes
-    nome = nome.strip()
+    comando = partes[0]
+    chat_id_bruto = partes[1]
+    nome = partes[2].strip()
 
     chat_id_limpo = chat_id_bruto.strip()
     if chat_id_limpo.replace('-', '').isdigit():
@@ -2587,8 +2610,22 @@ async def nomear_grupo_manual(message: types.Message, state: FSMContext):
             numeros = numeros[3:]
         chat_id_limpo = f"-100{numeros}"
 
+    # Salva no cache geral do bot
     salvar_nome_grupo(chat_id_limpo, nome)
-    await message.answer(f"✅ Pronto! <code>{chat_id_limpo}</code> vai aparecer como <b>{nome}</b> nos próximos relatórios.", parse_mode="HTML")
+    
+    # Atualiza também o cache de vídeos autorais se for a origem ou destino atual
+    config_autorais = ler_autorais_config()
+    
+    origem_atual = str(config_autorais.get("origem", ""))
+    destino_atual = str(config_autorais.get("destino", ""))
+    
+    # Verifica variações do ID (-100, sem -100)
+    id_variacoes = [chat_id_limpo, chat_id_limpo.replace("-100", "-"), chat_id_limpo.replace("-100", "")]
+    
+    if any(var == origem_atual for var in id_variacoes) or any(var == destino_atual for var in id_variacoes):
+         await message.answer(f"✅ Pronto! <code>{chat_id_limpo}</code> vai aparecer como <b>{nome}</b> nos painéis e relatórios.", parse_mode="HTML")
+    else:
+         await message.answer(f"✅ Nome registado! <code>{chat_id_limpo}</code> foi associado a <b>{nome}</b>.", parse_mode="HTML")
 
 @dp.message(F.text == "Relatório Geral 📊", StateFilter("*"))
 async def menu_relatorio_geral(message: types.Message, state: FSMContext):
