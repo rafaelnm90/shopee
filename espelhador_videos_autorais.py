@@ -50,6 +50,19 @@ def extrair_link_shopee(event):
 # Chaves da Shopee
 SHOPEE_APP_ID = os.getenv('SHOPEE_APP_ID')
 SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
+GEMINI_API_KEY = os.getenv('GEMINI_KEY')
+from google import genai
+client_genai = genai.Client(api_key=GEMINI_API_KEY)
+
+MODELOS_CASCATA_GEMINI = [
+    "gemini-3.1-pro-preview",
+    "gemini-2.5-pro",
+    "gemini-3.5-flash",
+    "gemini-3-flash-preview",
+    "gemini-2.5-flash",
+    "gemini-3.1-flash-lite-preview",
+    "gemini-2.5-flash-lite"
+]
 
 # Inicialização do Agendador
 scheduler = AsyncIOScheduler(timezone="America/Sao_Paulo")
@@ -139,6 +152,82 @@ async def converter_link_shopee(link_original):
         
     return link_original
 
+async def gerar_legenda_autoral(caminho_video):
+    def processar_ia():
+        import time
+        if EXIBIR_LOGS: logger.info("🚀 [IA Autorais] A iniciar upload do vídeo para o Google Storage...")
+        
+        video_gemini = None
+        for tentativa in range(3):
+            try:
+                video_gemini = client_genai.files.upload(file=caminho_video)
+                if video_gemini:
+                    break
+            except Exception as erro_rede:
+                if EXIBIR_LOGS: logger.warning(f"⚠️ [IA Autorais] Tentativa {tentativa+1}/3 falhou: {erro_rede}")
+                if tentativa < 2: time.sleep(3)
+                else: raise erro_rede
+        
+        while video_gemini.state.name == "PROCESSING":
+            if EXIBIR_LOGS: logger.info("⏳ [IA Autorais] O vídeo está sendo processado nos servidores da Google...")
+            time.sleep(2)
+            video_gemini = client_genai.files.get(name=video_gemini.name)
+            
+        if video_gemini.state.name == "FAILED":
+            raise Exception("Falha de processamento no servidor do Google.")
+            
+        if EXIBIR_LOGS: logger.info("✅ [IA Autorais] Processamento concluído! O vídeo está pronto para leitura.")
+
+        prompt = (
+            "Assista ao vídeo e identifique qual é o produto demonstrado. "
+            "Sua resposta deve conter EXATAMENTE duas linhas.\n"
+            "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no início (Exemplo: 👟 Tênis Casual Feminino).\n"
+            "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
+            "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras (exemplo prático: um organizador de sacos plásticos de cozinha pertence a #CasaEDecoracao e NUNCA a #BolsasFemininas, pois não é um acessório de moda).\n"
+            "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
+            "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
+            "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
+            "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
+            "#AcessoriosDeModa, #BrinquedosEHobbies, #Papelaria, #LivrosERevistas, #RoupasMasculinas, #Automoveis, #MaeEBebe, "
+            "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
+            "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
+        )
+
+        try:
+            for modelo_nome in MODELOS_CASCATA_GEMINI:
+                try:
+                    if EXIBIR_LOGS: logger.info(f"⏳ [IA Autorais] A consultar o motor {modelo_nome} enviando vídeo e texto...")
+                    response = client_genai.models.generate_content(
+                        model=modelo_nome,
+                        contents=[video_gemini, prompt]
+                    )
+                    if response and response.text:
+                        if EXIBIR_LOGS: logger.info(f"✅ [IA Autorais] Sucesso com o modelo {modelo_nome}!")
+                        return response.text.strip()
+                except Exception as erro_modelo:
+                    erro_str = str(erro_modelo).lower()
+                    if "429" in erro_str or "quota" in erro_str:
+                        if EXIBIR_LOGS: logger.warning(f"⚠️ [IA Autorais] Limite atingido em {modelo_nome}. Pausando 3s...")
+                        time.sleep(3)
+                    else:
+                        if EXIBIR_LOGS: logger.warning(f"⚠️ [IA Autorais] Erro no modelo {modelo_nome}: {erro_modelo}")
+                    continue
+            raise Exception("Todos os modelos da cascata falharam por limite de cota ou erro.")
+        finally:
+            if video_gemini:
+                try:
+                    client_genai.files.delete(name=video_gemini.name)
+                    if EXIBIR_LOGS: logger.info("🧹 [IA Autorais] Ficheiro temporário removido da Cloud do Google.")
+                except Exception:
+                    pass
+
+    try:
+        titulo = await asyncio.to_thread(processar_ia)
+        return titulo
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [IA Autorais] Falha na geração da legenda: {e}")
+        return None
+
 @client.on(events.NewMessage())
 async def interceptar_e_espelhar(event):
     config_atual = carregar_config_autorais() # Lê a configuração salva pelo seu Bot Principal
@@ -199,13 +288,27 @@ async def interceptar_e_espelhar(event):
         
         if caminho_video:
             try:
+                if EXIBIR_LOGS: logger.info("🧠 Solicitando à IA a criação de uma nova Copy autoral...")
+                texto_ia = await gerar_legenda_autoral(caminho_video)
+                
+                if texto_ia:
+                    linhas_ia = texto_ia.split('\n')
+                    nome_produto = linhas_ia[0].strip()
+                    hashtags = '\n'.join(linhas_ia[1:]).strip() if len(linhas_ia) > 1 else ""
+                    
+                    legenda_final = f"**{nome_produto}**\n\n🔗 **Link do Produto:**\n{link_novo}"
+                    if hashtags:
+                        legenda_final += f"\n\n_{hashtags}_"
+                else:
+                    legenda_final = f"🛍️ **Vídeo do Produto**\n\n🔗 **Link do Produto:**\n{link_novo}"
+
                 # O parse_mode foi removido para o Telethon aplicar os negritos originais automaticamente
                 msg_enviada = await client.send_file(
                     config_atual['destino'],
                     file=caminho_video,
-                    caption=texto_convertido
+                    caption=legenda_final
                 )
-                if EXIBIR_LOGS: logger.info("🚀 Vídeo publicado no canal de destino com o link atualizado!")
+                if EXIBIR_LOGS: logger.info("🚀 Vídeo publicado no canal de destino com a nova legenda autoral!")
                 
                 # ✅ Regra dinâmica de dias e limite de vídeos lida diretamente do painel
                 dias_retorno = config_atual.get('dias_retorno', 15)
