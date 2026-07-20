@@ -1594,6 +1594,9 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     
+    if EXIBIR_LOGS: logger.info("🎥 Acessando painel visual do Bot Vídeos Autorais...")
+    config = ler_autorais_config()
+    
     origem = config.get("origem", "Não definida")
     topico = config.get("origem_topico", "0 (Todos)")
     destino = config.get("destino", "Não definido")
