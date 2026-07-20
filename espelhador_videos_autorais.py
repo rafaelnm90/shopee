@@ -228,10 +228,18 @@ async def gerar_legenda_autoral(caminho_video):
         if EXIBIR_LOGS: logger.error(f"❌ [IA Autorais] Falha na geração da legenda: {e}")
         return None
 
+from utils import salvar_nome_grupo # Adicione isso caso não esteja no topo do arquivo
+
 @client.on(events.NewMessage())
 async def interceptar_e_espelhar(event):
     config_atual = carregar_config_autorais() # Lê a configuração salva pelo seu Bot Principal
     chat = await event.get_chat()
+    
+    # --- A MÁGICA ACONTECE AQUI ---
+    if chat and hasattr(chat, 'title'):
+        salvar_nome_grupo(str(chat.id), chat.title)
+    # ------------------------------
+    
     origem_configurada = config_atual.get('origem')
     topico_configurado = config_atual.get('origem_topico')
     
