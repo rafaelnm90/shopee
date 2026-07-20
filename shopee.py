@@ -1605,39 +1605,47 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     
     cache_nomes = ler_cache_nomes_grupos()
     
-    # Resolução visual da Origem
+    # --- Lógica Visual da Origem (Com Ícones) ---
     nome_origem = str(origem)
+    icone_origem = "⏳"
     if str(origem) != "Não definida":
         if str(origem) in cache_nomes:
             nome_origem = f"{cache_nomes[str(origem)]} (<code>{origem}</code>)"
+            icone_origem = "✅"
         else:
             try:
                 chat_obj = await bot.get_chat(origem)
                 nome = chat_obj.title or chat_obj.full_name
                 nome_origem = f"{nome} (<code>{origem}</code>)"
                 salvar_nome_grupo(str(origem), nome)
+                icone_origem = "✅"
             except Exception:
-                nome_origem = f"<code>{origem}</code>"
+                nome_origem = f"<code>{origem}</code> - <i>Aguardando leitura do Userbot...</i>"
+                icone_origem = "⏳"
                 
-    # Resolução visual do Destino
+    # --- Lógica Visual do Destino (Com Ícones) ---
     nome_destino = str(destino)
+    icone_destino = "⏳"
     if str(destino) != "Não definido":
         if str(destino) in cache_nomes:
             nome_destino = f"{cache_nomes[str(destino)]} (<code>{destino}</code>)"
+            icone_destino = "✅"
         else:
             try:
                 chat_obj = await bot.get_chat(destino)
                 nome = chat_obj.title or chat_obj.full_name
                 nome_destino = f"{nome} (<code>{destino}</code>)"
                 salvar_nome_grupo(str(destino), nome)
+                icone_destino = "✅"
             except Exception:
-                nome_destino = f"<code>{destino}</code>"
+                nome_destino = f"<code>{destino}</code> - <i>Acesso Negado</i>"
+                icone_destino = "❌"
     
     texto = (
         "🎥 <b>Painel do Bot Vídeos Autorais</b>\n\n"
-        f"📥 <b>Origem atual:</b> {nome_origem}\n"
+        f"{icone_origem} <b>Origem atual:</b> {nome_origem}\n"
         f"📂 <b>Tópico (Subcanal):</b> <code>{topico}</code>\n\n"
-        f"📤 <b>Destino atual:</b> {nome_destino}\n\n"
+        f"{icone_destino} <b>Destino atual:</b> {nome_destino}\n\n"
         f"♻️ <b>Regras de Retorno (Re-postagem):</b>\n"
         f"⏳ Oculto por: <b>{dias_retorno} dias</b>\n"
         f"📦 Cota Diária: <b>{limite_videos} vídeos/dia</b>\n\n"
