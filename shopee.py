@@ -2561,7 +2561,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 display_origem = f"{nome_origem[:25]}" if nome_origem != origem_bruta else f"{origem_bruta}"
                 
             # --- CÁLCULO DINÂMICO DE PREVISÃO E LAYOUT COMPACTO ---
-            from datetime import datetime, timedelta
+            # ✅ Removido o import local (from datetime import datetime, timedelta) que quebrava o escopo!
             
             if data_cap != "Data não registrada":
                 try:
