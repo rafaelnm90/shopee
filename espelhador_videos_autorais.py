@@ -306,7 +306,7 @@ async def interceptar_e_espelhar(event):
                     
                     legenda_final = f"**{nome_produto}**\n\n🔗 **Link do Produto:**\n{link_novo}"
                     if hashtags:
-                        legenda_final += f"\n\n_{hashtags}_"
+                        legenda_final += f"\n\n{hashtags}"
                 else:
                     legenda_final = f"🛍️ **Vídeo do Produto**\n\n🔗 **Link do Produto:**\n{link_novo}"
 
