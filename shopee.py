@@ -6673,7 +6673,7 @@ async def processar_fila_espiao(forcar=False):
             prompt = (
                 "Assista ao vídeo e identifique qual é o produto demonstrado. "
                 "Sua resposta deve conter EXATAMENTE duas linhas.\n"
-                "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no início (Exemplo: 👟 Tênis Casual Feminino).\n"
+                "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no final (Exemplo: Tênis Casual Feminino 👟).\n"
                 "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
                 "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras (exemplo prático: um organizador de sacos plásticos de cozinha pertence a #CasaEDecoracao e NUNCA a #BolsasFemininas, pois não é um acessório de moda).\n"
                 "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combining mais de uma se aplicável: "
@@ -6710,7 +6710,7 @@ async def processar_fila_espiao(forcar=False):
         texto_ia = await gerar_copy_clone()
     except Exception as e:
         registrar_erro_json(f"processar_fila_espiao IA: {e}", origem="espiao.py")
-        texto_ia = "🛍️ Vídeo do Produto\n#Oferta"
+        texto_ia = "Vídeo do Produto 🛍️\n#Oferta"
         
     linhas_ia = texto_ia.split('\n')
     nome_produto = linhas_ia[0].strip()
