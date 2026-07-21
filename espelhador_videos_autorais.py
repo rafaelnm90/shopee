@@ -181,7 +181,7 @@ async def gerar_legenda_autoral(caminho_video):
         prompt = (
             "Assista ao vídeo e identifique qual é o produto demonstrado. "
             "Sua resposta deve conter EXATAMENTE duas linhas.\n"
-            "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no início (Exemplo: 👟 Tênis Casual Feminino).\n"
+            "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no final (Exemplo: Tênis Casual Feminino 👟).\n"
             "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
             "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras (exemplo prático: um organizador de sacos plásticos de cozinha pertence a #CasaEDecoracao e NUNCA a #BolsasFemininas, pois não é um acessório de moda).\n"
             "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
@@ -306,15 +306,15 @@ async def interceptar_e_espelhar(event):
                     
                     legenda_final = f"**{nome_produto}**\n\n🔗 **Link do Produto:**\n{link_novo}"
                     if hashtags:
-                        legenda_final += f"\n\n{hashtags}"
+                        legenda_final += f"\n\n_{hashtags}_"
                 else:
-                    legenda_final = f"🛍️ **Vídeo do Produto**\n\n🔗 **Link do Produto:**\n{link_novo}"
+                    legenda_final = f"**Vídeo do Produto** 🛍️\n\n🔗 **Link do Produto:**\n{link_novo}"
 
-                # O parse_mode foi removido para o Telethon aplicar os negritos originais automaticamente
                 msg_enviada = await client.send_file(
                     config_atual['destino'],
                     file=caminho_video,
-                    caption=legenda_final
+                    caption=legenda_final,
+                    parse_mode='md'
                 )
                 if EXIBIR_LOGS: logger.info("🚀 Vídeo publicado no canal de destino com a nova legenda autoral!")
                 
@@ -365,7 +365,8 @@ async def executar_postagem_retorno(caminho_arquivo, legenda):
             await client.send_file(
                 config_atualizada['origem'],
                 file=caminho_arquivo,
-                caption=legenda
+                caption=legenda,
+                parse_mode='md'
             )
             if EXIBIR_LOGS: logger.info("✅ Vídeo de retorno publicado com sucesso no grupo de origem!")
             
