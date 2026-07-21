@@ -2647,9 +2647,25 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 status_dia = "⚪ Indefinido"
                 data_cap_formatada = "Desconhecida"
 
+            # --- 6. CÁLCULO DE PREVISÃO EXATA E COMPACTA ---
+            if tipo_fila == "Espelhador":
+                data_pub = v.get("data_publicacao", "")
+                if data_pub:
+                    try:
+                        dp_obj = datetime.strptime(data_pub, "%Y-%m-%d %H:%M:%S")
+                        previsao_texto = dp_obj.strftime("%d/%m às %H:%M")
+                    except:
+                        previsao_texto = "Pendente na esteira"
+                else:
+                    previsao_texto = "Pendente na esteira"
+            else: # Lógica para o Espião
+                # Simplificado: Como o dia já está na primeira linha, focamos apenas no horário
+                previsao_texto = f"Sorteio {inicio}h-{fim}h"
+
+            # --- 7. NOVO LAYOUT VISUAL SUPER COMPACTO (2 LINHAS) ---
             linha_video = (
-                f"<b>{i}.</b> [{status_dia}] {display_origem} <i>(📥 {data_cap_formatada})</i>\n"
-                f"  └ 🔗 {link_display}\n"
+                f"<b>{i}.</b> {status_dia} | 📡 {display_origem}\n"
+                f"   └ 📥 Cap: {data_cap_formatada} ➡️ 📤 Prev: {previsao_texto} | 🔗 {link_display}\n"
             )
             
             if len(texto_atual) + len(linha_video) > 3800:
