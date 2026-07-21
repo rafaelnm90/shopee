@@ -416,6 +416,20 @@ async def main():
     if EXIBIR_LOGS: logger.info("🔄 Sincronizando banco de dados de grupos...")
     try:
         await client.get_dialogs()
+        
+        # ✅ Lógica de Identificação Automática Visual
+        config_atual = carregar_config_autorais()
+        for chave in ['origem', 'destino']:
+            alvo = config_atual.get(chave)
+            if alvo and str(alvo) not in ["Não definida", "Não definido"]:
+                try:
+                    entidade = await client.get_entity(alvo)
+                    nome_alvo = getattr(entidade, 'title', getattr(entidade, 'username', str(alvo)))
+                    salvar_nome_grupo(str(alvo), nome_alvo)
+                    if EXIBIR_LOGS: logger.info(f"✅ Nome da {chave} ({nome_alvo}) extraído e salvo no cache automaticamente.")
+                except Exception as err:
+                    if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível auditar a {chave} na inicialização: {err}")
+                    
         if EXIBIR_LOGS: logger.info("✅ Sincronização concluída! ID do grupo reconhecido.")
     except Exception as e:
         if EXIBIR_LOGS: logger.warning(f"⚠️ Aviso na sincronização: {e}")
