@@ -2673,10 +2673,11 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 else:
                     previsao_texto = f"Sorteio {inicio}h-{fim}h"
 
-            # --- 7. NOVO LAYOUT VISUAL SUPER COMPACTO (2 LINHAS) ---
+           # --- 7. NOVO LAYOUT VISUAL EM 3 LINHAS ---
             linha_video = (
                 f"<b>{i}.</b> {status_dia} | 📡 {display_origem}\n"
-                f"   └ 📥 Cap: {data_cap_formatada} ➡️ 📤 Prev: {previsao_texto} | 🔗 {link_display}\n"
+                f"   └ 📥 Cap: {data_cap_formatada} ➡️ 📤 Prev: {previsao_texto}\n"
+                f"   └ 🔗 {link_display}\n"
             )
             
             if len(texto_atual) + len(linha_video) > 3800:
