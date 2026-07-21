@@ -2394,16 +2394,72 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     arquivo_fila = "fila_espelhador.json" if tipo_fila == "Espelhador" else "fila_clonagem.json"
     try:
         with open(arquivo_fila, "r", encoding="utf-8") as f:
-            fila = json.load(f).get("fila", [])
+            fila_data = json.load(f)
+            fila = fila_data.get("fila", [])
     except (FileNotFoundError, json.JSONDecodeError):
+        fila_data = {"fila": []}
         fila = []
+
+    # --- Obter a defasagem temporal real configurada (Precisamos disso cedo para o Espião) ---
+    atraso_dias = 0
+    dados_espiao = {}
+    if tipo_fila == "Espelhador":
+        try:
+            with open("espelhos_config.json", "r", encoding="utf-8") as f:
+                 dados_espelho = json.load(f)
+                 atraso_dias = dados_espelho.get("config_global", {}).get("intervalo_dias", 0)
+        except: pass
+    elif tipo_fila == "Espião":
+        try:
+            with open("alvos_espiao.json", "r", encoding="utf-8") as f:
+                dados_espiao = json.load(f)
+                atraso_dias = dados_espiao.get("intervalo_dias", 1)
+        except: pass
         
-    # Lógica de filtragem corrigida (Pente Fino)
+    # Lógica de filtragem corrigida (Pente Fino ATIVO)
     pendentes = []
+    agora = datetime.now(fuso_horario)
+    agora_str = agora.strftime("%Y-%m-%d %H:%M:%S")
+    
     if tipo_fila == "Espião":
-        pendentes = [item for item in fila if not item.get("processado", False)]
+        fila_limpa = []
+        houve_alteracao = False
+        limite_horas = (atraso_dias * 24) + 24 # Expiração fluida (Ex: D+1 expira em 48h)
+        
+        for item in fila:
+            # Elimina da vista os que já foram marcados como processados/falhos
+            if item.get("processado", False):
+                houve_alteracao = True
+                continue
+                
+            data_cap_str = item.get("data_captura", "")
+            if data_cap_str:
+                try:
+                    data_captura = datetime.strptime(data_cap_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                    horas_na_fila = (agora - data_captura).total_seconds() / 3600
+                    
+                    # Elimina os vídeos fantasmas que ficaram presos no estado "Atrasado"
+                    if horas_na_fila > limite_horas:
+                        if EXIBIR_LOGS: logger.info(f"🧹 Pente Fino (Relatório): Removendo clone expirado ({horas_na_fila:.1f}h).")
+                        houve_alteracao = True
+                        caminho_video = item.get("caminho_video")
+                        if caminho_video and os.path.exists(caminho_video):
+                            try: os.remove(caminho_video)
+                            except: pass
+                        continue # Pula este item, ele não vai para a fila limpa
+                except ValueError:
+                    pass
+            
+            fila_limpa.append(item)
+            
+        # Se encontrou lixo, salva o JSON limpo imediatamente
+        if houve_alteracao:
+            fila_data["fila"] = fila_limpa
+            salvar_fila_clonagem(fila_data)
+            
+        pendentes = fila_limpa
+        
     elif tipo_fila == "Espelhador":
-        agora_str = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
         for item in fila:
             if not item.get("processado", False):
                 data_pub = item.get("data_publicacao", "")
@@ -2429,12 +2485,6 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             rotas_agrupadas[nome_rota].append(item)
             
     else: 
-        try:
-            with open("alvos_espiao.json", "r", encoding="utf-8") as f:
-                dados_espiao = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            dados_espiao = {}
-            
         mapa_rotas = {
             "Radar Global": {
                 "inicio": dados_espiao.get("inicio", 10),
@@ -2443,18 +2493,6 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             }
         }
         rotas_agrupadas["Radar Global"] = pendentes
-
-    # --- Obter a defasagem temporal real configurada ---
-    atraso_dias = 0
-    if tipo_fila == "Espelhador":
-        try:
-            with open("espelhos_config.json", "r", encoding="utf-8") as f:
-                 dados_espelho = json.load(f)
-                 atraso_dias = dados_espelho.get("config_global", {}).get("intervalo_dias", 0)
-        except:
-             pass
-    elif tipo_fila == "Espião":
-         atraso_dias = dados_espiao.get("intervalo_dias", 1)
          
     titulo_atraso = f" (D+{atraso_dias})"
 
@@ -2482,6 +2520,20 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             link_original = v.get("link_original", "")
             msg_id = v.get("mensagem_id") or v.get("msg_id") or v.get("message_id")
             
+            # ✅ CORREÇÃO 1: Construção prioritária do link do Telegram (Ignora a Shopee no Relatório)
+            link_telegram = ""
+            if msg_id and origem_bruta not in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
+                if origem_bruta.lstrip("-").isdigit():
+                    chat_id_limpo = origem_bruta.replace("-100", "").replace("-", "")
+                    link_telegram = f"https://t.me/c/{chat_id_limpo}/{msg_id}"
+                elif origem_bruta.startswith("@"):
+                    username = origem_bruta.replace("@", "")
+                    link_telegram = f"https://t.me/{username}/{msg_id}"
+            
+            # Se não conseguir montar o do Telegram, usa o original como backup
+            link_display_url = link_telegram if link_telegram else link_original
+            
+            # Resgate estrutural de origem
             if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 if link_original and "t.me/c/" in link_original:
                     try: origem_bruta = "-100" + link_original.split("t.me/c/")[1].split("/")[0]
@@ -2489,10 +2541,6 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 elif link_original and "t.me/" in link_original:
                     try: origem_bruta = "@" + link_original.split("t.me/")[1].split("/")[0]
                     except: pass
-
-            if not link_original and msg_id and origem_bruta.lstrip("-").isdigit():
-                chat_id_limpo = origem_bruta.replace("-100", "")
-                link_original = f"https://t.me/c/{chat_id_limpo}/{msg_id}"
                 
             if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 display_origem = "<code>Pendente de rastreio</code>"
@@ -2560,16 +2608,13 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 
                 display_origem = f"{nome_origem[:25]}" if nome_origem != origem_bruta else f"{origem_bruta}"
                 
-            # --- CÁLCULO DINÂMICO DE PREVISÃO E LAYOUT COMPACTO ---
-            # ✅ Removido o import local (from datetime import datetime, timedelta) que quebrava o escopo!
-            
             if data_cap != "Data não registrada":
                 try:
                     formato = "%Y-%m-%d %H:%M:%S" if len(data_cap) > 10 else "%Y-%m-%d"
                     data_obj = datetime.strptime(data_cap, formato)
                     
                     data_alvo = data_obj + timedelta(days=atraso_dias)
-                    hoje_obj = datetime.now(fuso_horario).date()
+                    hoje_obj = agora.date()
                     
                     if data_alvo.date() == hoje_obj:
                         status_dia = "🟢 Hoje"
@@ -2588,7 +2633,8 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 status_dia = "⚪ Indefinido"
                 data_cap_formatada = "Desconhecida"
 
-            link_display = f"<a href='{link_original}'>Ver Vídeo Original</a>" if link_original else "<i>Sem link direto</i>"
+            # ✅ CORREÇÃO 2: Usa a URL prioritária do Telegram formatada
+            link_display = f"<a href='{link_display_url}'>Ver Vídeo Original</a>" if link_display_url else "<i>Sem link direto</i>"
             
             linha_video = (
                 f"<b>{i}.</b> [{status_dia}] {display_origem} <i>(📥 {data_cap_formatada})</i>\n"
