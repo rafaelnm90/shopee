@@ -2520,7 +2520,17 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             link_original = v.get("link_original", "")
             msg_id = v.get("mensagem_id") or v.get("msg_id") or v.get("message_id")
             
-            # ✅ CORREÇÃO 1: Construção prioritária do link do Telegram (Ignora a Shopee no Relatório)
+            # --- 1. RESGATE ESTRUTURAL DE ORIGEM ---
+            if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
+                if link_original and "t.me/c/" in link_original:
+                    try: origem_bruta = "-100" + link_original.split("t.me/c/")[1].split("/")[0]
+                    except: pass
+                elif link_original and "t.me/" in link_original:
+                    try: origem_bruta = "@" + link_original.split("t.me/")[1].split("/")[0]
+                    except: pass
+
+            # --- 2. CONSTRUÇÃO PRIORITÁRIA DO LINK DO TELEGRAM ---
+            # Ignora o link da Shopee gravado e força a rota para a mensagem original no Telegram
             link_telegram = ""
             if msg_id and origem_bruta not in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 if origem_bruta.lstrip("-").isdigit():
@@ -2530,18 +2540,21 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     username = origem_bruta.replace("@", "")
                     link_telegram = f"https://t.me/{username}/{msg_id}"
             
-            # Se não conseguir montar o do Telegram, usa o original como backup
-            link_display_url = link_telegram if link_telegram else link_original
+            # --- 3. ETIQUETA INTELIGENTE PARA O LINK ---
+            link_final_exibicao = link_telegram if link_telegram else link_original
             
-            # Resgate estrutural de origem
-            if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
-                if link_original and "t.me/c/" in link_original:
-                    try: origem_bruta = "-100" + link_original.split("t.me/c/")[1].split("/")[0]
-                    except: pass
-                elif link_original and "t.me/" in link_original:
-                    try: origem_bruta = "@" + link_original.split("t.me/")[1].split("/")[0]
-                    except: pass
+            if link_final_exibicao:
+                if "t.me" in link_final_exibicao:
+                    texto_link = "Ver Post no Telegram"
+                elif "shopee" in link_final_exibicao or "shp.ee" in link_final_exibicao:
+                    texto_link = "Ver Produto na Shopee"
+                else:
+                    texto_link = "Ver Link"
+                link_display = f"<a href='{link_final_exibicao}'>{texto_link}</a>"
+            else:
+                link_display = "<i>Sem link direto</i>"
                 
+            # --- 4. RESOLUÇÃO DE NOMES COM CACHE E BUSCA PROFUNDA ---
             if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 display_origem = "<code>Pendente de rastreio</code>"
             else:
@@ -2608,13 +2621,14 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 
                 display_origem = f"{nome_origem[:25]}" if nome_origem != origem_bruta else f"{origem_bruta}"
                 
+            # --- 5. CÁLCULO DINÂMICO DE PREVISÃO E LAYOUT COMPACTO ---
             if data_cap != "Data não registrada":
                 try:
                     formato = "%Y-%m-%d %H:%M:%S" if len(data_cap) > 10 else "%Y-%m-%d"
                     data_obj = datetime.strptime(data_cap, formato)
                     
                     data_alvo = data_obj + timedelta(days=atraso_dias)
-                    hoje_obj = agora.date()
+                    hoje_obj = datetime.now(fuso_horario).date()
                     
                     if data_alvo.date() == hoje_obj:
                         status_dia = "🟢 Hoje"
@@ -2633,9 +2647,6 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 status_dia = "⚪ Indefinido"
                 data_cap_formatada = "Desconhecida"
 
-            # ✅ CORREÇÃO 2: Usa a URL prioritária do Telegram formatada
-            link_display = f"<a href='{link_display_url}'>Ver Vídeo Original</a>" if link_display_url else "<i>Sem link direto</i>"
-            
             linha_video = (
                 f"<b>{i}.</b> [{status_dia}] {display_origem} <i>(📥 {data_cap_formatada})</i>\n"
                 f"  └ 🔗 {link_display}\n"
