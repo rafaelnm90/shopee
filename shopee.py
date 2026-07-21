@@ -2621,31 +2621,34 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 
                 display_origem = f"{nome_origem[:25]}" if nome_origem != origem_bruta else f"{origem_bruta}"
                 
-            # --- 5. CÁLCULO DINÂMICO DE PREVISÃO E LAYOUT COMPACTO ---
+            # --- 5. CÁLCULO DINÂMICO DE DATAS ---
+            status_dia = "⚪ Indefinido"
+            data_cap_formatada = "Desconhecida"
+            data_alvo = None
+            
             if data_cap != "Data não registrada":
                 try:
                     formato = "%Y-%m-%d %H:%M:%S" if len(data_cap) > 10 else "%Y-%m-%d"
                     data_obj = datetime.strptime(data_cap, formato)
+                    data_cap_formatada = data_obj.strftime("%d/%m às %H:%M")
                     
                     data_alvo = data_obj + timedelta(days=atraso_dias)
-                    hoje_obj = datetime.now(fuso_horario).date()
+                    hoje_obj = agora.date()
                     
                     if data_alvo.date() == hoje_obj:
-                        status_dia = "🟢 Hoje"
+                        # ✅ INTELIGÊNCIA: Se já passou da hora limite, a janela fechou
+                        if agora.hour >= fim:
+                            status_dia = "🔴 Atrasado (Janela Fechada)"
+                        else:
+                            status_dia = "🟢 Hoje"
                     elif data_alvo.date() == hoje_obj + timedelta(days=1):
                         status_dia = "🟡 Amanhã"
                     elif data_alvo.date() < hoje_obj:
                         status_dia = "🔴 Atrasado"
                     else:
                         status_dia = f"🔵 D+{abs((data_alvo.date() - hoje_obj).days)}"
-                        
-                    data_cap_formatada = data_obj.strftime("%d/%m %H:%M")
                 except Exception:
-                    status_dia = "⚪ Indefinido"
-                    data_cap_formatada = "??/?? ??"
-            else:
-                status_dia = "⚪ Indefinido"
-                data_cap_formatada = "Desconhecida"
+                    pass
 
             # --- 6. CÁLCULO DE PREVISÃO EXATA E COMPACTA ---
             if tipo_fila == "Espelhador":
@@ -2659,8 +2662,16 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 else:
                     previsao_texto = "Pendente na esteira"
             else: # Lógica para o Espião
-                # Simplificado: Como o dia já está na primeira linha, focamos apenas no horário
-                previsao_texto = f"Sorteio {inicio}h-{fim}h"
+                if "Fechada" in status_dia:
+                    previsao_texto = f"Amanhã {inicio}h-{fim}h"
+                    status_dia = "🔴 Atrasado" # Limpa a tag para o layout
+                elif "Atrasado" in status_dia:
+                    if agora.hour >= fim:
+                        previsao_texto = f"Amanhã {inicio}h-{fim}h"
+                    else:
+                        previsao_texto = "Imediato"
+                else:
+                    previsao_texto = f"Sorteio {inicio}h-{fim}h"
 
             # --- 7. NOVO LAYOUT VISUAL SUPER COMPACTO (2 LINHAS) ---
             linha_video = (
@@ -4383,7 +4394,6 @@ async def esvaziar_fila_espiao_background(chat_id):
                 await bot.send_message(chat_id, "✅ <b>Concluído!</b>\nTodos os vídeos retidos na fila do Espião foram analisados pela IA e publicados com sucesso no seu canal.", parse_mode="HTML")
                 break
             
-            # Anula as travas de tempo para permitir processamento imediato (Bypassa o D+1 artificialmente)
             dados["proximo_processamento"] = "2000-01-01 00:00:00"
             agora = datetime.now(fuso_horario)
             ontem_str = (agora - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
@@ -4393,9 +4403,9 @@ async def esvaziar_fila_espiao_background(chat_id):
                     
             salvar_fila_clonagem(dados)
             
-            # Utiliza a função original intacta para fazer o trabalho pesado
-            await processar_fila_espiao()
-            await asyncio.sleep(5) # Pausa de segurança obrigatória entre postagens para evitar Timeout da API
+            # ✅ O PARÂMETRO 'forcar=True' ORDENA AO BOT IGNORAR A JANELA DE TEMPO
+            await processar_fila_espiao(forcar=True)
+            await asyncio.sleep(5) 
             
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro durante esvaziamento forçado: {e}")
@@ -6549,7 +6559,7 @@ async def converter_link_shopee(link_original):
         if EXIBIR_LOGS: logger.error(f"❌ [API Shopee] Erro de comunicação com o servidor: {e}")
         return link_original
 
-async def processar_fila_espiao():
+async def processar_fila_espiao(forcar=False):
     dados_espiao = ler_alvos_espiao()
     canal_destino = dados_espiao.get("canal_destino")
     
@@ -6559,10 +6569,17 @@ async def processar_fila_espiao():
     fila_data = ler_fila_clonagem()
     intervalo_dias = dados_espiao.get("intervalo_dias", 1)
     
-    # ✅ LÓGICA TEMPORAL DINÂMICA (D+N) PARA O ESPIÃO
+    # ✅ RESGATE DA JANELA DE HORÁRIO
+    inicio_janela = dados_espiao.get("inicio", 10)
+    fim_janela = dados_espiao.get("fim", 22)
+    
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
-    
+
+    # 🛑 TRAVA DE EXPEDIENTE: Se não for um disparo forçado e estiver fora da hora, o bot dorme
+    if not forcar and (agora.hour < inicio_janela or agora.hour >= fim_janela):
+        return
+        
     proximo_proc_str = fila_data.get("proximo_processamento")
     if proximo_proc_str:
         try:
@@ -6574,7 +6591,6 @@ async def processar_fila_espiao():
             
     fila = fila_data.get("fila", [])
     
-    # Filtra os itens elegíveis considerando a defasagem configurada (D+0, D+1, etc.)
     itens_elegiveis = []
     for item in fila:
         if not item.get("processado"):
@@ -6597,34 +6613,30 @@ async def processar_fila_espiao():
     if not itens_elegiveis:
         return
 
-    # ✅ SELEÇÃO ALEATÓRIA MANDATÓRIA (Estratégia acíclica permanente)
     item_pendente = random.choice(itens_elegiveis)
-    if EXIBIR_LOGS: logger.info(f"🪞 [Espião] Sorteio aleatório ativo. Vídeo selecionado para a esteira: {item_pendente['id']}")
+    if EXIBIR_LOGS: logger.info(f"🪞 [Espião] Sorteio aleatório ativo. Vídeo selecionado: {item_pendente['id']}")
 
     caminho_video = item_pendente["caminho_video"]
     link_original = item_pendente["link_original"]
     item_id = item_pendente["id"]
     
-    # Verificação de validade temporal ampliada baseada no intervalo de dias
     data_captura_str = item_pendente.get("data_captura")
     if data_captura_str:
         try:
             data_captura = datetime.strptime(data_captura_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
             horas_na_fila = (agora - data_captura).total_seconds() / 3600
-            limite_horas = (intervalo_dias * 24) + 24 # Expiração fluida (D+0 = 24h, D+1 = 48h, etc.)
+            limite_horas = (intervalo_dias * 24) + 24 
             if horas_na_fila > limite_horas:
-                if EXIBIR_LOGS: logger.warning(f"⏳ Clone {item_id} expirou ({horas_na_fila:.1f}h). Descartando (Prazo D+{intervalo_dias} estourado).")
+                if EXIBIR_LOGS: logger.warning(f"⏳ Clone {item_id} expirou ({horas_na_fila:.1f}h). Descartando.")
                 fila_data["fila"] = [item for item in fila if item["id"] != item_id]
                 salvar_fila_clonagem(fila_data)
                 try:
                     if os.path.exists(caminho_video): os.remove(caminho_video)
-                except:
-                    pass
+                except: pass
                 return
         except ValueError:
             pass
 
-    # Trava de Silêncio do Mundo Viral (Não posta se houver rotina crítica agendada no intervalo de 15 minutos)
     rotinas_virais = ["job_rotina_promo_principal", "job_rotina_link_grupo_viral", "job_rotina_divulgar_gem_viral"]
     conflito_silencio = False
     for job in scheduler.get_jobs():
@@ -6635,51 +6647,27 @@ async def processar_fila_espiao():
                 break
                 
     if conflito_silencio:
-        if EXIBIR_LOGS: logger.info(f"🤫 [Espião] Trava de Silêncio ativa (Rotina a ±15min). Adormecendo clone {item_id}...")
+        if EXIBIR_LOGS: logger.info(f"🤫 [Espião] Trava de Silêncio ativa. Adormecendo clone {item_id}...")
         return
             
     if not os.path.exists(caminho_video):
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Ficheiro {caminho_video} não encontrado. Marcando clone {item_id} como falho.")
         item_pendente["processado"] = True
         salvar_fila_clonagem(fila_data)
         return
         
-    # ✅ NOVO: Trava de Silêncio do Mundo Viral (Radar de 15 minutos)
-    agora_tz = datetime.now(fuso_horario)
-    rotinas_virais = ["job_rotina_promo_principal", "job_rotina_link_grupo_viral", "job_rotina_divulgar_gem_viral"]
-    conflito_silencio = False
+    if EXIBIR_LOGS: logger.info(f"🕵️ Processando clone: {item_id}")
     
-    for job in scheduler.get_jobs():
-        if any(rv in job.id for rv in rotinas_virais) and getattr(job, 'next_run_time', None):
-            tempo_rotina = job.next_run_time.astimezone(fuso_horario)
-            if abs((agora_tz - tempo_rotina).total_seconds() / 60) <= 15:
-                conflito_silencio = True
-                break
-                
-    if conflito_silencio:
-        if EXIBIR_LOGS: logger.info(f"🤫 [Espião] Trava de Silêncio ativada! O motor detectou uma rotina Viral a ±15min. Adormecendo clone {item_id} temporariamente...")
-        return # Aborta silenciosamente e tenta novamente na próxima varredura de 1 minuto
-        
-    if EXIBIR_LOGS: logger.info(f"🕵️ Iniciando processamento automático do clone: {item_id}")
-    
-    # 1. Passagem do link pela Shopee
     link_final = await converter_link_shopee(link_original)
     
-    # 2. Análise do vídeo pela IA para reescrita autoral
     async def gerar_copy_clone():
-        if EXIBIR_LOGS: logger.info("📤 Fazendo upload do vídeo do espião para o Google Storage...")
         video_gemini = await asyncio.to_thread(client.files.upload, file=caminho_video)
-        
         try:
-            # ✅ CORREÇÃO: Pausa convertida para preservar threads de processamento
             while video_gemini.state.name == "PROCESSING":
                 await asyncio.sleep(2)
                 video_gemini = await asyncio.to_thread(client.files.get, name=video_gemini.name)
                 
             if video_gemini.state.name == "FAILED":
-                raise Exception("Falha de processamento no servidor do Google.")
-                
-            if EXIBIR_LOGS: logger.info("🚀 Preparando prompt com a lista estrita de setores e blindagem semântica...")
+                raise Exception("Falha no Google.")
                 
             prompt = (
                 "Assista ao vídeo e identifique qual é o produto demonstrado. "
@@ -6687,7 +6675,7 @@ async def processar_fila_espiao():
                 "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no início (Exemplo: 👟 Tênis Casual Feminino).\n"
                 "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
                 "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras (exemplo prático: um organizador de sacos plásticos de cozinha pertence a #CasaEDecoracao e NUNCA a #BolsasFemininas, pois não é um acessório de moda).\n"
-                "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
+                "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combining mais de uma se aplicável: "
                 "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
                 "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
                 "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
@@ -6695,8 +6683,6 @@ async def processar_fila_espiao():
                 "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
                 "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
             )
-            
-            if EXIBIR_LOGS: logger.info("✅ Prompt blindado e atualizado. Iniciando requisição à IA...")
             
             def chamar_modelo_cascata(modelo_nome):
                 return client.models.generate_content(
@@ -6706,97 +6692,68 @@ async def processar_fila_espiao():
 
             for modelo_nome in MODELOS_CASCATA_GEMINI:
                 try:
-                    if EXIBIR_LOGS: logger.info(f"⏳ [Espião] Consultando motor: {modelo_nome}...")
                     response = await asyncio.to_thread(chamar_modelo_cascata, modelo_nome)
                     if response and response.text:
-                        if EXIBIR_LOGS: logger.info(f"✅ [Espião] Sucesso com o modelo {modelo_nome}!")
                         return response.text.strip()
                 except Exception as erro_modelo:
                     if "429" in str(erro_modelo):
-                        if EXIBIR_LOGS: logger.warning(f"⚠️ [Espião] Limite atingido em {modelo_nome}. Tentando o próximo...")
                         continue
                     else:
-                        if EXIBIR_LOGS: logger.warning(f"⚠️ [Espião] Erro no modelo {modelo_nome}: {erro_modelo}")
                         continue
-                        
-            raise Exception("Todos os modelos da cascata falharam por limite de cota ou erro.")
+            raise Exception("Falha total da cascata.")
         finally:
-            # ✅ CORREÇÃO: Limpeza do arquivo clone dos servidores do Google
-            if EXIBIR_LOGS: logger.info("🧹 Excluindo vídeo do Google (Clone) para liberar cota da API...")
-            try:
-                await asyncio.to_thread(client.files.delete, name=video_gemini.name)
-            except Exception:
-                pass
+            try: await asyncio.to_thread(client.files.delete, name=video_gemini.name)
+            except: pass
                 
     try:
-        if EXIBIR_LOGS: logger.info("🧠 Solicitando à IA a criação de uma nova Copy para o vídeo clonado...")
         texto_ia = await gerar_copy_clone()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro na IA ao processar clone: {e}")
         registrar_erro_json(f"processar_fila_espiao IA: {e}", origem="espiao.py")
         texto_ia = "🛍️ Vídeo do Produto\n#Oferta"
         
-    # Fatiar o texto da IA para separar o Nome das Hashtags
     linhas_ia = texto_ia.split('\n')
     nome_produto = linhas_ia[0].strip()
     hashtags = '\n'.join(linhas_ia[1:]).strip() if len(linhas_ia) > 1 else ""
     
-    # Montagem da legenda com a nova estética estruturada
     legenda_postagem = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_final}"
-    
-    # Adiciona as hashtags em itálico no rodapé, caso existam
     if hashtags:
         legenda_postagem += f"\n\n<i>{hashtags}</i>"
     
-    # 3. Disparo isolado no Canal Paralelo
     try:
         arquivo = FSInputFile(caminho_video)
         await bot.send_video(chat_id=canal_destino, video=arquivo, caption=legenda_postagem, parse_mode="HTML")
-        if EXIBIR_LOGS: logger.info(f"✅ Clone {item_id} publicado com sucesso no canal {canal_destino}!")
-        
-        try:
-            os.remove(caminho_video)
-            if EXIBIR_LOGS: logger.info("🧹 Ficheiro de clone temporário removido do disco após o sucesso.")
-        except Exception:
-            pass
-
+        if EXIBIR_LOGS: logger.info(f"✅ Clone {item_id} publicado!")
+        try: os.remove(caminho_video)
+        except: pass
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Falha ao postar clone no Telegram: {e}")
-        try:
-            os.rename(caminho_video, caminho_video + ".pendente")
-            if EXIBIR_LOGS: logger.info(f"🏷️ Clone isolado para limpeza posterior: {caminho_video}.pendente")
-        except Exception:
-            pass
+        if EXIBIR_LOGS: logger.error(f"❌ Falha ao postar clone: {e}")
+        try: os.rename(caminho_video, caminho_video + ".pendente")
+        except: pass
         
-    # 4. Encerramento, Faxina e Agendamento Orgânico Dinâmico
     fila_data["fila"] = [item for item in fila if item["id"] != item_id]
     
-    # ✅ MOTOR DE ESPAÇAMENTO DINÂMICO CONTÍNUO (00:00 às 23:59)
-    # Identifica matematicamente quantos minutos restam até o encerramento do dia atual
-    fim_do_dia = agora.replace(hour=23, minute=59, second=59, microsecond=0)
-    minutos_restantes = int((fim_do_dia - agora).total_seconds() / 60)
-    if minutos_restantes < 1:
-        minutos_restantes = 1
+    # ✅ MOTOR DE ESPAÇAMENTO DINÂMICO (Baseado estritamente na Janela)
+    if forcar:
+        minutos_espera = 0
+        proximo_horario = agora
+    else:
+        fim_da_janela = agora.replace(hour=max(0, fim_janela - 1), minute=59, second=59, microsecond=0)
+        minutos_restantes = int((fim_da_janela - agora).total_seconds() / 60)
+        if minutos_restantes < 1:
+            minutos_restantes = 1
+            
+        base_intervalo = minutos_restantes // len(itens_elegiveis) if len(itens_elegiveis) > 0 else 1
+        minutos_espera = base_intervalo + random.randint(-5, 5)
+        if minutos_espera < 2:
+            minutos_espera = 2  
+            
+        proximo_horario = agora + timedelta(minutes=minutos_espera)
         
-    # Divide os minutos restantes pela quantidade total de vídeos do lote que ainda restam
-    base_intervalo = minutos_restantes // len(itens_elegiveis)
-    
-    # Aplica flutuação aleatória de -5 a +5 minutos para dissolver qualquer padrão robótico fixo
-    minutos_espera = base_intervalo + random.randint(-5, 5)
-    if minutos_espera < 2:
-        minutos_espera = 2  # Respiro mínimo de segurança do servidor
-        
-    proximo_horario = datetime.now() + timedelta(minutes=minutos_espera)
     fila_data["proximo_processamento"] = proximo_horario.strftime("%Y-%m-%d %H:%M:%S")
-    
     salvar_fila_clonagem(fila_data)
-    if EXIBIR_LOGS: logger.info(f"⏳ Escalonamento Inteligente: Restam {len(itens_elegiveis)} posts para {minutos_restantes} min. Próximo disparo em {minutos_espera} min ({proximo_horario.strftime('%H:%M:%S')}).")
     
-    try:
-        os.remove(caminho_video)
-        if EXIBIR_LOGS: logger.info("🧹 Ficheiro de vídeo do clone removido do disco.")
-    except:
-        pass
+    try: os.remove(caminho_video)
+    except: pass
 
 async def sincronizar_financeiro_horario():
     if EXIBIR_LOGS: logger.info("⏰ [Financeiro] Iniciando sincronização em background com a API Shopee...")
