@@ -304,17 +304,17 @@ async def interceptar_e_espelhar(event):
                     nome_produto = linhas_ia[0].strip()
                     hashtags = '\n'.join(linhas_ia[1:]).strip() if len(linhas_ia) > 1 else ""
                     
-                    legenda_final = f"**{nome_produto}**\n\n🔗 **Link do Produto:**\n{link_novo}"
+                    legenda_final = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_novo}"
                     if hashtags:
-                        legenda_final += f"\n\n_{hashtags}_"
+                        legenda_final += f"\n\n<i>{hashtags}</i>"
                 else:
-                    legenda_final = f"**Vídeo do Produto** 🛍️\n\n🔗 **Link do Produto:**\n{link_novo}"
+                    legenda_final = f"<b>Vídeo do Produto</b> 🛍️\n\n🔗 <b>Link do Produto:</b>\n{link_novo}"
 
                 msg_enviada = await client.send_file(
                     config_atual['destino'],
                     file=caminho_video,
                     caption=legenda_final,
-                    parse_mode='md'
+                    parse_mode='html'
                 )
                 if EXIBIR_LOGS: logger.info("🚀 Vídeo publicado no canal de destino com a nova legenda autoral!")
                 
