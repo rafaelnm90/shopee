@@ -430,8 +430,8 @@ async def interceptar_mensagem(event):
             if EXIBIR_LOGS: logger.info(f"🪞 [Espião] Duplicidade barrada! O produto {link_capturado} já foi capturado nas últimas 24 horas.")
             return # Encerra o processamento da mensagem aqui mesmo, sem baixar o vídeo
             
-        # ✅ TRAVA DE MÍDIA FLEXÍVEL (Igual ao Espelhador)
-        if getattr(event, 'media', None) is not None:
+        # ✅ TRAVA ESTRITA DE MÍDIA: Filtra rigorosamente apenas vídeos, ignorando fotos
+        if getattr(event, 'video', None) is not None:
             if EXIBIR_LOGS: logger.info(f"🎯 ALVO LOCALIZADO! Link da Shopee extraído cirurgicamente: {link_capturado}")
             
             # ✅ CORREÇÃO DO ERRO FATAL (texto_original em vez de texto)
@@ -660,9 +660,9 @@ async def motor_espelhador_userbot(event):
     if not rotas_ativas:
         return
 
-    # ✅ TRAVA DE MÍDIA FLEXÍVEL: Exige anexo visual, mas não restringe o formato técnico
-    if getattr(event, 'media', None) is None:
-        if EXIBIR_LOGS: logger.info("⏭️ [Espelhador] Postagem descartada: Não contém um anexo visual.")
+    # ✅ TRAVA ESTRITA DE MÍDIA: Exige estritamente formato de vídeo, bloqueando fotografias
+    if getattr(event, 'video', None) is None:
+        if EXIBIR_LOGS: logger.info("⏭️ [Espelhador] Postagem descartada: Contém o link, mas a mídia não é um vídeo.")
         return
 
     texto_original = event.text or ""
