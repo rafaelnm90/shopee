@@ -2663,24 +2663,37 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     data_alvo = data_obj + timedelta(days=atraso_dias)
                     hoje_obj = agora.date()
                     
-                    if data_alvo.date() == hoje_obj:
-                        # ✅ INTELIGÊNCIA: Se já passou da hora limite, a janela fechou
-                        if agora.hour >= fim:
-                            status_dia = "🔴 Atrasado (Janela Fechada)"
+                    if tipo_fila == "Espelhador":
+                        horario_disparo_str = v.get("horario_disparo", "")
+                        if horario_disparo_str:
+                            hd_obj = datetime.strptime(horario_disparo_str, "%Y-%m-%d %H:%M:%S")
+                            if hd_obj.date() == hoje_obj:
+                                status_dia = "🔴 Atrasado" if agora > hd_obj else "🟢 Hoje"
+                            elif hd_obj.date() > hoje_obj:
+                                status_dia = "🟡 Amanhã" if hd_obj.date() == hoje_obj + timedelta(days=1) else f"🔵 D+{abs((hd_obj.date() - hoje_obj).days)}"
+                            else:
+                                status_dia = "🔴 Atrasado"
                         else:
-                            status_dia = "🟢 Hoje"
-                    elif data_alvo.date() == hoje_obj + timedelta(days=1):
-                        status_dia = "🟡 Amanhã"
-                    elif data_alvo.date() < hoje_obj:
-                        status_dia = "🔴 Atrasado"
+                            status_dia = "🟡 Represa (D+1)" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
                     else:
-                        status_dia = f"🔵 D+{abs((data_alvo.date() - hoje_obj).days)}"
+                        if data_alvo.date() == hoje_obj:
+                            # ✅ INTELIGÊNCIA: Se já passou da hora limite, a janela fechou
+                            if agora.hour >= fim:
+                                status_dia = "🔴 Atrasado (Janela Fechada)"
+                            else:
+                                status_dia = "🟢 Hoje"
+                        elif data_alvo.date() == hoje_obj + timedelta(days=1):
+                            status_dia = "🟡 Amanhã"
+                        elif data_alvo.date() < hoje_obj:
+                            status_dia = "🔴 Atrasado"
+                        else:
+                            status_dia = f"🔵 D+{abs((data_alvo.date() - hoje_obj).days)}"
                 except Exception:
                     pass
 
             # --- 6. CÁLCULO DE PREVISÃO EXATA E COMPACTA ---
             if tipo_fila == "Espelhador":
-                data_pub = v.get("data_publicacao", "")
+                data_pub = v.get("horario_disparo", "")
                 if data_pub:
                     try:
                         dp_obj = datetime.strptime(data_pub, "%Y-%m-%d %H:%M:%S")
@@ -2688,7 +2701,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     except:
                         previsao_texto = "Pendente na esteira"
                 else:
-                    previsao_texto = "Pendente na esteira"
+                    previsao_texto = "Aguardando virada do dia"
             else: # Lógica para o Espião
                 is_postado = v.get("processado", False)
                 horario_postagem = v.get("horario_postagem", "")
