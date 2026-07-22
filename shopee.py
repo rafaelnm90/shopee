@@ -2427,10 +2427,16 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         houve_alteracao = False
         limite_horas = (atraso_dias * 24) + 24 # Expiração fluida (Ex: D+1 expira em 48h)
         
+        hoje_str = agora.strftime("%Y-%m-%d")
+        
         for item in fila:
-            # Elimina da vista os que já foram marcados como processados/falhos
+            # ✅ CORREÇÃO: Mantém no visual os que foram postados HOJE. Deleta os antigos.
             if item.get("processado", False):
-                houve_alteracao = True
+                if item.get("data_postagem") == hoje_str:
+                    if EXIBIR_LOGS: logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo postado hoje ({item.get('id')}) no visual da fila.")
+                    fila_limpa.append(item)
+                else:
+                    houve_alteracao = True
                 continue
                 
             data_cap_str = item.get("data_captura", "")
@@ -2506,7 +2512,18 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         fim = rota_info.get("fim", 22)
         status_canais = rota_info.get("status_canais") or rota_info.get("status_alvos") or {}
         
-        cabecalho_rota = f"📡 <b>Rota: {nome_rota}</b> ({len(itens)} vídeos aguardando)\n🕒 <b>Postagem:</b> Dia seguinte, entre {inicio}h e {fim}h\n"
+        info_sorteio = ""
+        if tipo_fila == "Espião":
+            qtd_aguardando = len([i for i in itens if not i.get("processado")])
+            proximo_proc = fila_data.get("proximo_processamento")
+            if proximo_proc and proximo_proc != "2000-01-01 00:00:00":
+                try:
+                    hora_sorteio = datetime.strptime(proximo_proc, "%Y-%m-%d %H:%M:%S").strftime("%H:%M")
+                    info_sorteio = f"🎲 <b>Próximo Sorteio:</b> Previsto para {hora_sorteio}\n"
+                except: pass
+            cabecalho_rota = f"📡 <b>Rota: {nome_rota}</b> ({qtd_aguardando} vídeos na urna)\n🕒 <b>Janela:</b> {inicio}h às {fim}h\n{info_sorteio}"
+        else:
+            cabecalho_rota = f"📡 <b>Rota: {nome_rota}</b> ({len(itens)} vídeos aguardando)\n🕒 <b>Postagem:</b> Dia seguinte, entre {inicio}h e {fim}h\n"
         
         if len(texto_atual) + len(cabecalho_rota) > 3800:
             mensagens_para_enviar.append(texto_atual)
@@ -2663,16 +2680,23 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 else:
                     previsao_texto = "Pendente na esteira"
             else: # Lógica para o Espião
-                if "Fechada" in status_dia:
-                    previsao_texto = f"Amanhã {inicio}h-{fim}h"
-                    status_dia = "🔴 Atrasado" # Limpa a tag para o layout
-                elif "Atrasado" in status_dia:
-                    if agora.hour >= fim:
-                        previsao_texto = f"Amanhã {inicio}h-{fim}h"
-                    else:
-                        previsao_texto = "Imediato"
+                is_postado = v.get("processado", False)
+                horario_postagem = v.get("horario_postagem", "")
+                
+                if is_postado:
+                    status_dia = "✅ Postado"
+                    previsao_texto = f"Hoje às {horario_postagem}"
                 else:
-                    previsao_texto = f"Sorteio {inicio}h-{fim}h"
+                    if "Fechada" in status_dia:
+                        previsao_texto = f"Amanhã {inicio}h-{fim}h"
+                        status_dia = "🔴 Atrasado" # Limpa a tag para o layout
+                    elif "Atrasado" in status_dia:
+                        if agora.hour >= fim:
+                            previsao_texto = f"Amanhã {inicio}h-{fim}h"
+                        else:
+                            previsao_texto = "Imediato"
+                    else:
+                        previsao_texto = f"Sorteio {inicio}h-{fim}h"
 
            # --- 7. NOVO LAYOUT VISUAL EM 3 LINHAS ---
             linha_video = (
@@ -6732,7 +6756,15 @@ async def processar_fila_espiao(forcar=False):
         try: os.rename(caminho_video, caminho_video + ".pendente")
         except: pass
         
-    fila_data["fila"] = [item for item in fila if item["id"] != item_id]
+    # ✅ CORREÇÃO: Em vez de apagar, marca como processado para manter no relatório até ao fim do dia
+        for item in fila:
+            if item["id"] == item_id:
+                item["processado"] = True
+                item["data_postagem"] = agora.strftime("%Y-%m-%d")
+                item["horario_postagem"] = agora.strftime("%H:%M")
+                if EXIBIR_LOGS: logger.info(f"💾 [Espião] Vídeo {item_id} marcado como 'Postado' às {item['horario_postagem']} na memória da fila.")
+                break
+        fila_data["fila"] = fila
     
     # ✅ MOTOR DE ESPAÇAMENTO DINÂMICO (Baseado estritamente na Janela)
     if forcar:
@@ -6751,8 +6783,12 @@ async def processar_fila_espiao(forcar=False):
             
         proximo_horario = agora + timedelta(minutes=minutos_espera)
         
-    fila_data["proximo_processamento"] = proximo_horario.strftime("%Y-%m-%d %H:%M:%S")
-    salvar_fila_clonagem(fila_data)
+    # ✅ FAXINA AUTOMÁTICA: Remove os vídeos postados em dias anteriores para o JSON não inchar
+        hoje_faxina = agora.strftime("%Y-%m-%d")
+        fila_data["fila"] = [i for i in fila_data["fila"] if not i.get("processado") or i.get("data_postagem") == hoje_faxina]
+        
+        fila_data["proximo_processamento"] = proximo_horario.strftime("%Y-%m-%d %H:%M:%S")
+        salvar_fila_clonagem(fila_data)
     
     try: os.remove(caminho_video)
     except: pass
