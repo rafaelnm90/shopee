@@ -647,23 +647,30 @@ async def executar_postagem_fila(item_id):
         falha_irreversivel = False
         
         if caminho_video and os.path.exists(caminho_video):
-            arquivo = FSInputFile(caminho_video)
-            msg = await bot.send_video(chat_id=GRUPO_ID, video=arquivo, caption=legenda, parse_mode="HTML")
-            
-            novo_file_id = msg.video.file_id
-            # Note que o seu código já converte os outros da fila para video_id! Isso é brilhante.
-            for x in fila:
-                if x.get("caminho_video") == caminho_video and x["id"] != item_id:
-                    x["video_id"] = novo_file_id
-                    x["caminho_video"] = None
-            sucesso = True
-            if EXIBIR_LOGS: logger.info("🚀 [Fluxo] Vídeo enviado com sucesso para o Telegram.")
-            
-            # ✅ Exclusão instantânea no sucesso
-            try:
-                os.remove(caminho_video)
-            except Exception:
-                pass
+            # ✅ SEGUNDA TRAVA DE SEGURANÇA: Bloqueio físico de imagens antes do upload
+                    if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
+                        if EXIBIR_LOGS: logger.warning(f"🚫 [Segurança] Upload cancelado! O ficheiro {caminho_video} é uma imagem, não um vídeo.")
+                        try: os.remove(caminho_video)
+                        except: pass
+                        falha_irreversivel = True
+                    else:
+                        arquivo = FSInputFile(caminho_video)
+                        msg = await bot.send_video(chat_id=GRUPO_ID, video=arquivo, caption=legenda, parse_mode="HTML")
+                        
+                        novo_file_id = msg.video.file_id
+                        # Note que o seu código já converte os outros da fila para video_id! Isso é brilhante.
+                        for x in fila:
+                            if x.get("caminho_video") == caminho_video and x["id"] != item_id:
+                                x["video_id"] = novo_file_id
+                                x["caminho_video"] = None
+                        sucesso = True
+                        if EXIBIR_LOGS: logger.info("🚀 [Fluxo] Vídeo enviado com sucesso para o Telegram.")
+                        
+                        # ✅ Exclusão instantânea no sucesso
+                        try:
+                            os.remove(caminho_video)
+                        except Exception:
+                            pass
                 
         elif video_id:
             await bot.send_video(chat_id=GRUPO_ID, video=video_id, caption=legenda, parse_mode="HTML")
@@ -6470,6 +6477,11 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
         try:
             # 2. Disparo imediato para o Telegram
             if caminho_video and os.path.exists(caminho_video):
+                # ✅ SEGUNDA TRAVA DE SEGURANÇA: Inspeção da extensão física
+                if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
+                    if EXIBIR_LOGS: logger.warning("🚫 [Segurança] Disparo imediato abortado! O ficheiro é uma imagem.")
+                    raise Exception("O ficheiro físico validado é uma imagem e não um vídeo.")
+                    
                 arquivo = FSInputFile(caminho_video)
                 msg = await bot.send_video(chat_id=GRUPO_ID, video=arquivo, caption=legenda_disparo, parse_mode="HTML")
                 sucesso_upload = True
