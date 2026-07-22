@@ -6780,7 +6780,11 @@ async def processar_fila_espiao(forcar=False):
     if hashtags:
         legenda_postagem += f"\n\n<i>{hashtags}</i>"
     
-    try:
+    # ✅ SEGUNDA TRAVA DE SEGURANÇA: Inspeção física para o Espião
+        if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
+            if EXIBIR_LOGS: logger.warning(f"🚫 [Segurança] Disparo do Espião abortado! O ficheiro {caminho_video} é uma imagem.")
+            raise Exception("O ficheiro retido é uma imagem.")
+            
         arquivo = FSInputFile(caminho_video)
         await bot.send_video(chat_id=canal_destino, video=arquivo, caption=legenda_postagem, parse_mode="HTML")
         if EXIBIR_LOGS: logger.info(f"✅ Clone {item_id} publicado!")
