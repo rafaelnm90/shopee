@@ -583,6 +583,11 @@ async def processar_fila_espelhador_loop():
                         
                         mensagem_original = await client.get_messages(chat_origem, ids=msg_id)
                         if mensagem_original:
+                            # ✅ SEGUNDA TRAVA DE SEGURANÇA: Verifica novamente o tipo de mídia antes de enviar
+                            if getattr(mensagem_original, 'video', None) is None:
+                                if EXIBIR_LOGS: logger.warning(f"🚫 [Segurança] Espelhador abortou o envio! A mensagem {msg_id} perdeu o formato de vídeo.")
+                                continue
+                                
                             try:
                                 entidade_destino = await client.get_entity(destino)
                             except ValueError:
