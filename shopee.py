@@ -2499,6 +2499,16 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 "status_canais": dados_espiao.get("status_alvos", {})
             }
         }
+        
+        # ✅ ORDENAÇÃO INTELIGENTE DO ESPIÃO
+        # Grupo 0 (Topo): Postados hoje, ordenados pela hora de postagem
+        # Grupo 1 (Fundo): Pendentes, ordenados pela data e hora de captura
+        def chave_ordenacao(item):
+            if item.get("processado", False):
+                return (0, item.get("horario_postagem", "00:00"))
+            return (1, item.get("data_captura", "2099-01-01 00:00:00"))
+            
+        pendentes.sort(key=chave_ordenacao)
         rotas_agrupadas["Radar Global"] = pendentes
          
     titulo_atraso = f" (D+{atraso_dias})"
