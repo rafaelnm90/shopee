@@ -299,7 +299,8 @@ teclado_opcoes_rotina = ReplyKeyboardMarkup(
 teclado_outros_canais = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
-        [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Vídeos Autorais 🎥")],
+        [KeyboardButton(text="Gerador de Achadinhos 🛍️")],
+        [KeyboardButton(text="Vídeos Autorais 🎥")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ],
     resize_keyboard=True,
