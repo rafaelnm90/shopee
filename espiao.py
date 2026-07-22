@@ -182,7 +182,7 @@ def verificar_e_registrar_hash(hash_video, contexto="global"):
         json.dump(dados, f, indent=4)
     return False
 
-def salvar_na_fila_clonagem(caminho_video, link_shopee, chat_origem="Desconhecida", nome_origem=None):
+def salvar_na_fila_clonagem(caminho_video, link_shopee, chat_origem="Desconhecida", nome_origem=None, msg_id=None):
     arquivo_fila = "fila_clonagem.json"
     try:
         with open(arquivo_fila, "r") as f:
@@ -194,6 +194,7 @@ def salvar_na_fila_clonagem(caminho_video, link_shopee, chat_origem="Desconhecid
         "id": f"clone_{int(datetime.now().timestamp())}",
         "chat_origem": str(chat_origem),
         "nome_origem": str(nome_origem) if nome_origem else str(chat_origem),
+        "msg_id": msg_id,
         "caminho_video": caminho_video,
         "link_original": link_shopee,
         "processado": False,
@@ -454,7 +455,7 @@ async def interceptar_mensagem(event):
             # 📊 Nome real do grupo, já disponível via Telethon neste momento
             nome_chat = getattr(chat, 'title', chat_username if chat_username else chat_id)
 
-            salvar_na_fila_clonagem(caminho_salvo, link_capturado, chat_origem=chat_id_completo, nome_origem=nome_chat)
+            salvar_na_fila_clonagem(caminho_salvo, link_capturado, chat_origem=chat_id_completo, nome_origem=nome_chat, msg_id=event.id)
             
             # 📊 Adiciona a pontuação ao painel estatístico do Espião
             registrar_historico_espiao(nome_chat)
