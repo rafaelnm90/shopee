@@ -678,17 +678,52 @@ async def executar_postagem_fila(item_id):
             conexao.close()
         except: pass
 
+# --- GERENCIADOR CENTRAL DE CONFIGURAÇÕES (SQLITE) ---
+def ler_config_bd(chave, padrao=None, arquivo_legado=None):
+    if padrao is None: padrao = {}
+    try:
+        conexao = sqlite3.connect("banco_dados.db")
+        cursor = conexao.cursor()
+        cursor.execute("SELECT valor FROM configuracoes WHERE chave = ?", (chave,))
+        resultado = cursor.fetchone()
+        conexao.close()
+        
+        if resultado:
+            return json.loads(resultado[0])
+            
+        # Auto-migração transparente do JSON antigo para a nova tabela do SQLite
+        import os
+        if arquivo_legado and os.path.exists(arquivo_legado):
+            with open(arquivo_legado, "r", encoding="utf-8") as f:
+                dados_antigos = json.load(f)
+            salvar_config_bd(chave, dados_antigos)
+            os.rename(arquivo_legado, arquivo_legado + ".bkp")
+            if EXIBIR_LOGS: logger.info(f"📦 Migração concluída: '{arquivo_legado}' movido para o SQLite com sucesso.")
+            return dados_antigos
+            
+        return padrao
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler configuração '{chave}' do SQLite: {e}")
+        return padrao
+
+def salvar_config_bd(chave, dados):
+    try:
+        conexao = sqlite3.connect("banco_dados.db")
+        cursor = conexao.cursor()
+        dados_str = json.dumps(dados, ensure_ascii=False)
+        cursor.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)", (chave, dados_str))
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar configuração '{chave}' no SQLite: {e}")
+
 # --- SISTEMA DE PAUSA PROGRAMADA ---
 def ler_pausa_programada():
-    try:
-        with open("pausa_programada.json", "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"ativa": False, "data_retorno": None, "servicos_pausados": []}
+    padrao = {"ativa": False, "data_retorno": None, "servicos_pausados": []}
+    return ler_config_bd("pausa_programada", padrao, arquivo_legado="pausa_programada.json")
 
 def salvar_pausa_programada(dados):
-    with open("pausa_programada.json", "w") as f:
-        json.dump(dados, f, indent=4)
+    salvar_config_bd("pausa_programada", dados)
 
 def recalcular_datas_pos_pausa():
     if EXIBIR_LOGS: logger.info("🔄 Iniciando recálculo de datas no SQLite pós-pausa...")
@@ -1137,40 +1172,36 @@ async def disparar_mensagem(tipo, forcar=False):
         registrar_lixeira(msg_princ.message_id, GRUPO_VIRAL_ID)   
 
 def ler_config_rotina():
-    if EXIBIR_LOGS: logger.info("📂 Lendo configurações de rotina...")
-    try:
-        with open("config_rotina.json", "r") as f:
-            dados = json.load(f)
-            # Adiciona chaves padrão se não existirem (retrocompatibilidade)
-            if "link_grupo" not in dados: dados["link_grupo"] = {"inicio": 9, "fim": 21, "frequencia": 3}
-            if "divulgar_gem" not in dados: dados["divulgar_gem"] = {"inicio": 8, "fim": 22, "frequencia": 1}
-            if "promo_viral" not in dados: dados["promo_viral"] = {"inicio": 10, "fim": 20, "frequencia": 1}
-            if "promo_principal" not in dados: dados["promo_principal"] = {"inicio": 10, "fim": 20, "frequencia": 1}
-            if "divulgar_gem_viral" not in dados: dados["divulgar_gem_viral"] = {"inicio": 8, "fim": 22, "frequencia": 1}
-            if "pausado" not in dados: dados["pausado"] = False
-            if "pausado_viral" not in dados: dados["pausado_viral"] = False
-            if "historico_diario" not in dados: dados["historico_diario"] = {"data": "", "contagem": {}}
-            return dados
-    except (FileNotFoundError, json.JSONDecodeError):
-        # Configuração padrão de segurança se o arquivo não existir
-        if EXIBIR_LOGS: logger.warning("⚠️ Arquivo config_rotina.json não encontrado. Criando padrão inicial.")
-        return {
-            "bom_dia": {"inicio": 6, "fim": 9, "frequencia": 1},
-            "incentivo": {"inicio": 10, "fim": 20, "frequencia": 2},
-            "boa_noite": {"inicio": 21, "fim": 23, "frequencia": 1},
-            "link_grupo": {"inicio": 9, "fim": 21, "frequencia": 3},
-            "divulgar_gem": {"inicio": 8, "fim": 22, "frequencia": 1},
-            "promo_viral": {"inicio": 10, "fim": 20, "frequencia": 1},
-            "promo_principal": {"inicio": 10, "fim": 20, "frequencia": 1},
-            "divulgar_gem_viral": {"inicio": 8, "fim": 22, "frequencia": 1},
-            "pausado": False,
-            "pausado_viral": False,
-            "historico_diario": {"data": "", "contagem": {}}
-        }
+    padrao = {
+        "bom_dia": {"inicio": 6, "fim": 9, "frequencia": 1},
+        "incentivo": {"inicio": 10, "fim": 20, "frequencia": 2},
+        "boa_noite": {"inicio": 21, "fim": 23, "frequencia": 1},
+        "link_grupo": {"inicio": 9, "fim": 21, "frequencia": 3},
+        "divulgar_gem": {"inicio": 8, "fim": 22, "frequencia": 1},
+        "promo_viral": {"inicio": 10, "fim": 20, "frequencia": 1},
+        "promo_principal": {"inicio": 10, "fim": 20, "frequencia": 1},
+        "divulgar_gem_viral": {"inicio": 8, "fim": 22, "frequencia": 1},
+        "pausado": False,
+        "pausado_viral": False,
+        "historico_diario": {"data": "", "contagem": {}}
+    }
+    
+    dados = ler_config_bd("config_rotina", padrao, arquivo_legado="config_rotina.json")
+    
+    # Injeta chaves padrão que possam estar faltando em arquivos de versões antigas
+    houve_alteracao = False
+    for chave, valor in padrao.items():
+        if chave not in dados:
+            dados[chave] = valor
+            houve_alteracao = True
+            
+    if houve_alteracao:
+        salvar_config_bd("config_rotina", dados)
+        
+    return dados
 
 def salvar_config_rotina(dados):
-    with open("config_rotina.json", "w") as f:
-        json.dump(dados, f, indent=4)
+    salvar_config_bd("config_rotina", dados)
 
 def agendar_tarefas_diarias():
     if EXIBIR_LOGS: logger.info("🔄 Sorteando horários fixos de rotina (Bom Dia, Boa Noite, Campanhas)...")
@@ -5249,19 +5280,24 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
 
 # --- LÓGICA DE GERENCIAMENTO DE DIVULGAÇÃO ---
 def ler_alvos_divulgacao():
-    try:
-        with open("alvos_divulgacao.json", "r") as f:
-            dados = json.load(f)
-            # ✅ Garante que as novas chaves existam mesmo em arquivos antigos
-            if "repeticoes_internas" not in dados: dados["repeticoes_internas"] = 6
-            if "replicas_mensagem" not in dados: dados["replicas_mensagem"] = 5
-            return dados
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"alvos": [], "frequencia_por_hora": 0, "pausado": False, "forcar_disparo": False, "repeticoes_internas": 6, "replicas_mensagem": 5}
+    padrao = {"alvos": [], "frequencia_por_hora": 0, "pausado": False, "forcar_disparo": False, "repeticoes_internas": 6, "replicas_mensagem": 5}
+    dados = ler_config_bd("alvos_divulgacao", padrao, arquivo_legado="alvos_divulgacao.json")
+    
+    houve_alteracao = False
+    if "repeticoes_internas" not in dados: 
+        dados["repeticoes_internas"] = 6
+        houve_alteracao = True
+    if "replicas_mensagem" not in dados: 
+        dados["replicas_mensagem"] = 5
+        houve_alteracao = True
+        
+    if houve_alteracao:
+        salvar_config_bd("alvos_divulgacao", dados)
+        
+    return dados
 
 def salvar_alvos_divulgacao(dados):
-    with open("alvos_divulgacao.json", "w") as f:
-        json.dump(dados, f, indent=4)
+    salvar_config_bd("alvos_divulgacao", dados)
 
 @dp.message(F.text == "SPAM em Grupos 📢")
 async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
@@ -5482,18 +5518,24 @@ async def acionar_disparo_imediato(message: types.Message):
 
 # --- LÓGICA DE GERENCIAMENTO DE DIVULGAÇÃO (CANAL VIRAL) ---
 def ler_alvos_divulgacao_viral():
-    try:
-        with open("alvos_divulgacao_viral.json", "r") as f:
-            dados = json.load(f)
-            if "repeticoes_internas" not in dados: dados["repeticoes_internas"] = 6
-            if "replicas_mensagem" not in dados: dados["replicas_mensagem"] = 5
-            return dados
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"alvos": [], "frequencia_por_hora": 0, "pausado": False, "forcar_disparo": False, "repeticoes_internas": 6, "replicas_mensagem": 5}
+    padrao = {"alvos": [], "frequencia_por_hora": 0, "pausado": False, "forcar_disparo": False, "repeticoes_internas": 6, "replicas_mensagem": 5}
+    dados = ler_config_bd("alvos_divulgacao_viral", padrao, arquivo_legado="alvos_divulgacao_viral.json")
+    
+    houve_alteracao = False
+    if "repeticoes_internas" not in dados: 
+        dados["repeticoes_internas"] = 6
+        houve_alteracao = True
+    if "replicas_mensagem" not in dados: 
+        dados["replicas_mensagem"] = 5
+        houve_alteracao = True
+        
+    if houve_alteracao:
+        salvar_config_bd("alvos_divulgacao_viral", dados)
+        
+    return dados
 
 def salvar_alvos_divulgacao_viral(dados):
-    with open("alvos_divulgacao_viral.json", "w") as f:
-        json.dump(dados, f, indent=4)
+    salvar_config_bd("alvos_divulgacao_viral", dados)
 
 @dp.message(F.text == "SPAM do Espião 📢", StateFilter("*"))
 async def gerenciar_divulgacao_viral(message: types.Message, state: FSMContext):
