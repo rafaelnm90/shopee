@@ -24,12 +24,38 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from google import genai
 import matplotlib.pyplot as plt
 import io
+import sqlite3
 import espelhador
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo
 EXIBIR_LOGS = True
 
 # ✅ Cria a pasta temp isolada na inicialização
 os.makedirs("temp", exist_ok=True)
+
+def inicializar_banco_sqlite():
+    if EXIBIR_LOGS: logger.info("🚀 Preparando a fundação de dados em SQLite...")
+    conexao = sqlite3.connect("banco_dados.db")
+    cursor = conexao.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS fila_postagens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id_unico TEXT UNIQUE,
+            caminho_video TEXT,
+            video_id TEXT,
+            legenda TEXT,
+            data_alvo TEXT,
+            status TEXT DEFAULT 'PENDENTE',
+            prioridade INTEGER DEFAULT 0,
+            data_postagem TEXT,
+            horario_postagem TEXT
+        )
+    ''')
+    conexao.commit()
+    conexao.close()
+    if EXIBIR_LOGS: logger.info("✅ Tabela 'fila_postagens' blindada e pronta para receber operações de leitura/escrita.")
+
+inicializar_banco_sqlite()
 
 # 1. CONSTANTES E TOKENS
 API_TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -169,7 +195,6 @@ _lock_contador = asyncio.Lock()
 # ✅ NOVO: Sistema de travas assíncronas para proteção contra Race Conditions
 if EXIBIR_LOGS: logger.info("🚀 Inicializando o gerenciador de travas (Locks) para os arquivos locais...")
 _locks_json = {
-    "fila_postagens.json": asyncio.Lock(),
     "fila_clonagem.json": asyncio.Lock(),
     "pausa_programada.json": asyncio.Lock(),
     "config_rotina.json": asyncio.Lock(),
@@ -414,294 +439,241 @@ teclado_opcoes_espiao = ReplyKeyboardMarkup(
 
 # --- SISTEMA DE FILA DE POSTAGENS ASSÍNCRONAS ---
 def ler_fila_postagens():
+    import os
+    # 📦 Módulo de migração silenciosa (Executa apenas na primeira vez)
+    if os.path.exists("fila_postagens.json"):
+        try:
+            if EXIBIR_LOGS: logger.info("📦 Migrando dados antigos do JSON para o banco SQLite...")
+            with open("fila_postagens.json", "r") as f:
+                dados_antigos = json.load(f)
+            
+            salvar_fila_postagens(dados_antigos)
+            os.rename("fila_postagens.json", "fila_postagens_bkp.json")
+            if EXIBIR_LOGS: logger.info("✅ Migração concluída com sucesso! Ficheiro antigo arquivado.")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro na migração do JSON: {e}")
+
     try:
-        with open("fila_postagens.json", "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+        conexao = sqlite3.connect("banco_dados.db")
+        conexao.row_factory = sqlite3.Row
+        cursor = conexao.cursor()
+        
+        # Retorna ordenado pela data e depois pela prioridade para manter a ordem visual
+        cursor.execute("SELECT * FROM fila_postagens ORDER BY data_alvo ASC, prioridade ASC")
+        linhas = cursor.fetchall()
+        conexao.close()
+        
+        fila = []
+        for linha in linhas:
+            fila.append({
+                "id": linha["id_unico"],
+                "caminho_video": linha["caminho_video"],
+                "video_id": linha["video_id"],
+                "legenda": linha["legenda"],
+                "data_adicao": linha["data_alvo"],
+                "postado": True if linha["status"] == 'CONCLUIDO' else False,
+                "horario_postagem": linha["horario_postagem"],
+                "data_postagem": linha["data_postagem"],
+                "prioridade": linha["prioridade"]
+            })
+        return {"fila": fila}
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila do SQLite: {e}")
         return {"fila": []}
 
 def salvar_fila_postagens(dados):
-    with open("fila_postagens.json", "w") as f:
-        json.dump(dados, f, indent=4)
+    # Função adaptador temporária para não quebrar os menus antigos
+    try:
+        conexao = sqlite3.connect("banco_dados.db")
+        cursor = conexao.cursor()
+        fila = dados.get("fila", [])
+        
+        cursor.execute("DELETE FROM fila_postagens")
+        for i, item in enumerate(fila):
+            status = 'CONCLUIDO' if item.get("postado") else 'PENDENTE'
+            cursor.execute('''
+                INSERT INTO fila_postagens 
+                (id_unico, caminho_video, video_id, legenda, data_alvo, status, prioridade, data_postagem, horario_postagem)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                item.get("id"),
+                item.get("caminho_video"),
+                item.get("video_id"),
+                item.get("legenda"),
+                item.get("data_adicao"),
+                status,
+                i + 1,
+                item.get("data_postagem"),
+                item.get("horario_postagem")
+            ))
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao reescrever fila no SQLite: {e}")
+
+return {"fila": fila}
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila do SQLite: {e}")
+        return {"fila": []}
+
+# 🧹 O antigo salvar_fila_postagens() foi completamente eliminado nesta fase.
+# Todas as gravações agora ocorrem através de queries atómicas (UPDATE/INSERT/DELETE).
 
 def agendar_fila_postagens():
-    if EXIBIR_LOGS: logger.info("🔄 Calculando distribuição orgânica de vídeos da fila...")
+    # ✅ NOVO MOTOR DE FILA (Fase 3): O agendamento em massa foi desativado!
+    # A função atua apenas como um "adaptador" para remover lixos antigos da memória.
+    if EXIBIR_LOGS: logger.info("🔄 Efeito Dominó desativado. Limpando agendamentos estáticos de postagem...")
     for job in scheduler.get_jobs():
         if job.id.startswith('job_fila_postagem_'):
             job.remove()
-            
+
+async def motor_fila_minuto():
+    # 1. Verifica se a loja está aberta (Expediente)
+    agora = datetime.now(fuso_horario)
+    hoje_str = agora.strftime("%Y-%m-%d")
+    
     dados_pausa = ler_pausa_programada()
-    if dados_pausa.get("ativa"):
-        if EXIBIR_LOGS: logger.info("🛑 Fila de postagens represada: A pausa programada está ativa.")
-        return
-        
-    fila_data = ler_fila_postagens()
-    fila = fila_data.get("fila", [])
-    if not fila:
-        return
-        
-    agora = datetime.now(fuso_horario)
-    hoje_str = agora.strftime("%Y-%m-%d")
+    if dados_pausa.get("ativa"): return
     
-    from datetime import timedelta
-    videos_para_hoje = [item for item in fila if (item.get("data_adicao") <= hoje_str or item.get("data_adicao") == "2000-01-01") and not item.get("postado")]
-    
-    if not videos_para_hoje:
-        if EXIBIR_LOGS: logger.info("⏳ Todos os vídeos na fila estão agendados aguardando o dia de amanhã.")
-        return
-        
     dados_rotina = ler_config_rotina()
     ultimo_bd = dados_rotina.get("ultimo_bom_dia", "")
     ultimo_bn = dados_rotina.get("ultimo_boa_noite", "")
     
-    if EXIBIR_LOGS: logger.info("🚀 Construindo miolo útil dinâmico ancorado no Bom Dia e Boa Noite...")
-    
-    horarios_ocupados = []
-    rotinas_virais_lista = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral"]
-    
-    for job in scheduler.get_jobs():
-        proxima_execucao = getattr(job, 'next_run_time', None)
-        if proxima_execucao and not job.id.startswith('job_fila_postagem_'):
-            # ✅ Isolamento Absoluto: O motor de produtos Afiliado ignora a agenda do mundo Viral
-            if not any(rv in job.id for rv in rotinas_virais_lista):
-                horarios_ocupados.append(proxima_execucao.astimezone(fuso_horario))
-            
-    # Fronteira Inicial Dinâmica (Ancorada no Bom Dia)
-    job_bd = scheduler.get_job('job_rotina_bom_dia_0')
-    if ultimo_bd == hoje_str:
-        limite_inicio_hoje = max(agora + timedelta(minutes=2), agora.replace(hour=0, minute=0, second=0, microsecond=0))
-    elif job_bd and getattr(job_bd, 'next_run_time', None):
-        limite_inicio_hoje = max(agora + timedelta(minutes=2), job_bd.next_run_time.astimezone(fuso_horario) + timedelta(minutes=10))
-    else:
-        hora_fim_bom_dia = dados_rotina.get("bom_dia", {}).get("fim", 9)
-        limite_inicio_hoje = max(agora + timedelta(minutes=2), agora.replace(hour=hora_fim_bom_dia, minute=0, second=0, microsecond=0))
-    
-    # Fronteira Final Dinâmica (Ancorada no Boa Noite)
-    job_bn = scheduler.get_job('job_rotina_boa_noite_0')
-    if ultimo_bn == hoje_str:
-        limite_fim_hoje = agora
-    elif job_bn and getattr(job_bn, 'next_run_time', None):
-        limite_fim_hoje = job_bn.next_run_time.astimezone(fuso_horario) - timedelta(minutes=15)
-    else:
-        hora_inicio_boa_noite = dados_rotina.get("boa_noite", {}).get("inicio", 21)
-        hora_limite_final = hora_inicio_boa_noite - 1 if hora_inicio_boa_noite > 0 else 23
-        limite_fim_hoje = agora.replace(hour=hora_limite_final, minute=59, second=59, microsecond=0)
-    
-    if agora >= limite_fim_hoje:
-        if EXIBIR_LOGS: logger.warning("⚠️ O expediente de hoje encerrou. Transbordando vídeos retidos para amanhã.")
-        amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
-        for item in videos_para_hoje:
-            item["data_adicao"] = amanha_str
-        salvar_fila_postagens(fila_data)
-        return
+    if ultimo_bd != hoje_str or ultimo_bn == hoje_str:
+        return # Fora do expediente
         
-    inicio_real = limite_inicio_hoje
-    minutos_disponiveis = int((limite_fim_hoje - inicio_real).total_seconds() / 60)
-    
-    qtd_videos = len(videos_para_hoje)
-    espacamento_medio = minutos_disponiveis // qtd_videos if qtd_videos > 0 else 15
-    
-    # ✅ COMPRESSÃO DINÂMICA E TRAVA DE SILÊNCIO: Protege 15 minutos em torno de cada rotina do Afiliado.
-    if espacamento_medio < 15:
-        espacamento_medio = 15
-        
-    minuto_atual_busca = inicio_real
-    # ✅ CAMPO DE FORÇA: 15 minutos obrigatórios de distância de qualquer rotina
-    INTERVALO_MINIMO = 15
-    
-    houve_transbordo = False
-    amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
-    
-    for index, item in enumerate(videos_para_hoje):
-        limite_sorteio = minuto_atual_busca + timedelta(minutes=espacamento_medio - 1)
-        if limite_sorteio < minuto_atual_busca: limite_sorteio = minuto_atual_busca
-        
-        max_minutos_offset = int((limite_sorteio - minuto_atual_busca).total_seconds() / 60)
-        if max_minutos_offset < 0: max_minutos_offset = 0
-        
-        sucesso = False
-        horario_disparo = None
-        
-        for tentativa in range(100):
-            minutos_offset = random.randint(0, max_minutos_offset)
-            horario_candidato = minuto_atual_busca + timedelta(minutes=minutos_offset, seconds=random.randint(0, 59))
-            
-            colisao = False
-            for ocupado in horarios_ocupados:
-                if abs((horario_candidato - ocupado).total_seconds() / 60) < INTERVALO_MINIMO:
-                    colisao = True
-                    break
-                    
-            if not colisao:
-                horario_disparo = horario_candidato
-                sucesso = True
-                break
-                
-        if not sucesso:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Vídeo {index+1}: Sem lacuna limpa. Forçando encaixe de segurança com 3 min de distância.")
-            # ✅ Fallback reduzido para garantir que os vídeos caibam no expediente
-            horario_disparo = minuto_atual_busca + timedelta(minutes=3)
-
-        if horario_disparo >= limite_fim_hoje:
-            if EXIBIR_LOGS: logger.warning(f"🛑 O vídeo excedeu o horário limite ({horario_disparo.strftime('%H:%M:%S')}). Transbordando para amanhã.")
-            item["data_adicao"] = amanha_str
-            houve_transbordo = True
-            continue
-            
-        horarios_ocupados.append(horario_disparo)
-        
-        job_id = f"job_fila_postagem_{item['id']}"
-        scheduler.add_job(executar_postagem_fila, 'date', run_date=horario_disparo, args=[item['id']], id=job_id, replace_existing=True)
-        if EXIBIR_LOGS: logger.info(f"✅ Fila: Vídeo {index+1}/{qtd_videos} distribuído organicamente para as {horario_disparo.strftime('%H:%M:%S')}")
-        
-        # ✅ CORREÇÃO MATEMÁTICA: Avança a grade com base no bloco estático, e não no horário sorteado (Fim do Efeito Bola de Neve)
-        minuto_atual_busca = minuto_atual_busca + timedelta(minutes=espacamento_medio)
-        
-    if houve_transbordo:
-        salvar_fila_postagens(fila_data)
-        if EXIBIR_LOGS: logger.info("✅ Fila atualizada no sistema após o transbordo dos vídeos excedentes.")
-
-async def executar_postagem_fila(item_id):
-    if EXIBIR_LOGS: logger.info(f"📤 Iniciando processo de extração de vídeo da fila...")
-    
-    agora = datetime.now(fuso_horario)
-    hoje_str = agora.strftime("%Y-%m-%d")
-    
-    # 🚀 CORREÇÃO: Trava de segurança absoluta baseada na abertura do expediente
-    dados_rotina = ler_config_rotina()
-    ultimo_bd = dados_rotina.get("ultimo_bom_dia", "")
     hora_ultimo_bd = dados_rotina.get("hora_ultimo_bom_dia", "")
-    ultimo_bn = dados_rotina.get("ultimo_boa_noite", "")
-    
-    # ✅ NOVA TRAVA MATINAL ABSOLUTA E MARGEM DE RESPIRO
-    if ultimo_bd != hoje_str:
-        if EXIBIR_LOGS: logger.warning("🛑 Trava Ativada: O expediente ainda não foi aberto pelo 'Bom Dia'. Retendo vídeo...")
-        
-        # Inteligência: Espia a agenda para empurrar o vídeo para 15 minutos DEPOIS do Bom Dia
-        job_bd = scheduler.get_job('job_rotina_bom_dia_0')
-        if job_bd and getattr(job_bd, 'next_run_time', None):
-            tempo_bom_dia = job_bd.next_run_time.astimezone(fuso_horario)
-            novo_horario = max(agora + timedelta(minutes=15), tempo_bom_dia + timedelta(minutes=15))
-        else:
-            novo_horario = agora + timedelta(minutes=15)
-            
-        job_id_reagendado = f"job_fila_postagem_adiado_{int(agora.timestamp())}"
-        scheduler.add_job(executar_postagem_fila, 'date', run_date=novo_horario, args=[item_id], id=job_id_reagendado, replace_existing=True)
-        return
-        
-    elif hora_ultimo_bd:
+    if hora_ultimo_bd:
         hora_bd_obj = datetime.strptime(hora_ultimo_bd, "%H:%M").time()
         momento_bd = datetime.combine(agora.date(), hora_bd_obj).replace(tzinfo=fuso_horario)
-        minutos_passados = (agora - momento_bd).total_seconds() / 60
+        if (agora - momento_bd).total_seconds() / 60 < 15:
+            return # Respiro matinal (aguarda 15 min do Bom Dia)
+            
+    try:
+        conexao = sqlite3.connect("banco_dados.db")
+        cursor = conexao.cursor()
         
-        if minutos_passados < 10:
-            if EXIBIR_LOGS: logger.warning(f"🛑 Trava de Respiro: O 'Bom Dia' saiu há apenas {int(minutos_passados)} min. Empurrando vídeo para respeitar a margem de 10 a 15 min.")
-            novo_horario = momento_bd + timedelta(minutes=12)
-            if novo_horario <= agora: novo_horario = agora + timedelta(minutes=2)
-            job_id_reagendado = f"job_fila_postagem_adiado_{int(agora.timestamp())}"
-            scheduler.add_job(executar_postagem_fila, 'date', run_date=novo_horario, args=[item_id], id=job_id_reagendado, replace_existing=True)
-            return
-
-    # Trava Noturna Dinâmica: Avalia o horário exato do Boa Noite agendado, e não apenas a hora estática
-    job_bn = scheduler.get_job('job_rotina_boa_noite_0')
-    
-    if ultimo_bn == hoje_str:
-        expediente_encerrado = True
-    elif job_bn and getattr(job_bn, 'next_run_time', None):
-        from datetime import timedelta
-        limite_fim_hoje = job_bn.next_run_time.astimezone(fuso_horario) - timedelta(minutes=15)
-        expediente_encerrado = agora >= limite_fim_hoje
-    else:
-        hora_fechamento_videos = dados_rotina.get("boa_noite", {}).get("inicio", 21)
-        expediente_encerrado = agora.hour >= hora_fechamento_videos
-
-    if expediente_encerrado:
-        if EXIBIR_LOGS: logger.warning(f"🛑 Trava Noturna Ativada: O limite dinâmico do expediente encerrou. Vídeo retido para amanhã.")
-        return
-
-    fila_data = ler_fila_postagens()
-    fila = fila_data.get("fila", [])
-    
-    if EXIBIR_LOGS: logger.info(f"🔎 Buscando o vídeo exato na fila pelo ID: {item_id}...")
-    
-    # Leitura estrita com base no ID exato passado pelo agendador
-    item = next((x for x in fila if x.get("id") == item_id and not x.get("postado")), None)
-    
-    if not item:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Vídeo alvo ({item_id}) não encontrado. Acionando busca de segurança (fallback)...")
-        item = next((x for x in fila if (x.get("data_adicao") <= hoje_str or x.get("data_adicao") == "2000-01-01") and not x.get("postado")), None)
+        # 2. Inteligência de Espaçamento Orgânico Dinâmico
+        cursor.execute("SELECT COUNT(*) FROM fila_postagens WHERE status = 'PENDENTE' AND (data_alvo <= ? OR data_alvo = '2000-01-01')", (hoje_str,))
+        qtd_videos = cursor.fetchone()[0]
         
-        if not item:
-            if EXIBIR_LOGS: logger.warning("❌ Nenhum vídeo elegível encontrado na fila para extração.")
+        if qtd_videos == 0:
+            conexao.close()
             return
             
-    item_id_real = item["id"]
-    caminho_video = item.get("caminho_video")
-    video_id = item.get("video_id")
-    legenda = item.get("legenda")
-    
-    if EXIBIR_LOGS: logger.info(f"🎯 Extração concluída. Vídeo {item_id_real} capturado do topo da fila atualizada.")
+        INTERVALO_MINIMO = 15
+        job_bn = scheduler.get_job('job_rotina_boa_noite_0')
+        if job_bn and getattr(job_bn, 'next_run_time', None):
+            limite_fim = job_bn.next_run_time.astimezone(fuso_horario)
+        else:
+            hora_fim = dados_rotina.get("boa_noite", {}).get("inicio", 21)
+            limite_fim = agora.replace(hour=hora_fim, minute=59)
+            
+        minutos_restantes = (limite_fim - agora).total_seconds() / 60
+        if minutos_restantes > 0:
+            # Reduz a janela em 10% garantindo que o último caiba com folga antes de fechar a loja
+            gap_organico = int((minutos_restantes * 0.9) / qtd_videos)
+            INTERVALO_MINIMO = max(15, min(gap_organico, 90)) # Garante um limite visual entre 15 e 90 minutos
+            
+        # 3. Verifica a distância de tempo do último vídeo (O Semáforo)
+        cursor.execute("SELECT horario_postagem FROM fila_postagens WHERE data_postagem = ? AND status = 'CONCLUIDO' ORDER BY horario_postagem DESC LIMIT 1", (hoje_str,))
+        ultimo_vid = cursor.fetchone()
+        if ultimo_vid and ultimo_vid[0]:
+            hora_ult_vid = datetime.strptime(ultimo_vid[0], "%H:%M").time()
+            dt_ult_vid = datetime.combine(agora.date(), hora_ult_vid).replace(tzinfo=fuso_horario)
+            if (agora - dt_ult_vid).total_seconds() / 60 < INTERVALO_MINIMO:
+                conexao.close()
+                return
+                
+        # 4. Verifica colisão com rotinas fixas (Abre alas de 15 minutos)
+        for job in scheduler.get_jobs():
+            if not job.id.startswith('job_fila_postagem_') and getattr(job, 'next_run_time', None):
+                diff = abs((agora - job.next_run_time.astimezone(fuso_horario)).total_seconds() / 60)
+                if diff < 15:
+                    conexao.close()
+                    return
+                    
+        # 5. Semáforo Verde! Puxa a mercadoria com a prioridade mais alta
+        cursor.execute("SELECT id_unico FROM fila_postagens WHERE status = 'PENDENTE' AND (data_alvo <= ? OR data_alvo = '2000-01-01') ORDER BY prioridade ASC LIMIT 1", (hoje_str,))
+        proximo = cursor.fetchone()
+        
+        if proximo:
+            id_unico = proximo[0]
+            cursor.execute("UPDATE fila_postagens SET status = 'PROCESSANDO' WHERE id_unico = ?", (id_unico,))
+            conexao.commit()
+            conexao.close()
+            
+            if EXIBIR_LOGS: logger.info(f"🚦 Semáforo Verde (Gap Orgânico: {INTERVALO_MINIMO}m)! O Relógio Central puxou o vídeo {id_unico}.")
+            await executar_postagem_fila(id_unico)
+        else:
+            conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro no Relógio Central: {e}")
+
+async def executar_postagem_fila(item_id):
+    if EXIBIR_LOGS: logger.info(f"📤 Iniciando upload físico do vídeo pela nova esteira SQLite...")
+    agora = datetime.now(fuso_horario)
+    hoje_str = agora.strftime("%Y-%m-%d")
     
     try:
+        conexao = sqlite3.connect("banco_dados.db")
+        conexao.row_factory = sqlite3.Row
+        cursor = conexao.cursor()
+        cursor.execute("SELECT * FROM fila_postagens WHERE id_unico = ?", (item_id,))
+        item = cursor.fetchone()
+        
+        if not item:
+            conexao.close()
+            return
+            
+        caminho_video = item["caminho_video"]
+        video_id = item["video_id"]
+        legenda = item["legenda"]
+        
         sucesso = False
         falha_irreversivel = False
+        novo_file_id = None
         
         if caminho_video and os.path.exists(caminho_video):
-            # ✅ SEGUNDA TRAVA DE SEGURANÇA: Bloqueio físico de imagens antes do upload
-                    if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
-                        if EXIBIR_LOGS: logger.warning(f"🚫 [Segurança] Upload cancelado! O ficheiro {caminho_video} é uma imagem, não um vídeo.")
-                        try: os.remove(caminho_video)
-                        except: pass
-                        falha_irreversivel = True
-                    else:
-                        arquivo = FSInputFile(caminho_video)
-                        msg = await bot.send_video(chat_id=GRUPO_ID, video=arquivo, caption=legenda, parse_mode="HTML")
-                        
-                        novo_file_id = msg.video.file_id
-                        # Note que o seu código já converte os outros da fila para video_id! Isso é brilhante.
-                        for x in fila:
-                            if x.get("caminho_video") == caminho_video and x["id"] != item_id:
-                                x["video_id"] = novo_file_id
-                                x["caminho_video"] = None
-                        sucesso = True
-                        if EXIBIR_LOGS: logger.info("🚀 [Fluxo] Vídeo enviado com sucesso para o Telegram.")
-                        
-                        # ✅ Exclusão instantânea no sucesso
-                        try:
-                            os.remove(caminho_video)
-                        except Exception:
-                            pass
-                
+            # ✅ SEGUNDA TRAVA DE SEGURANÇA MANTIDA INTACTA
+            if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
+                if EXIBIR_LOGS: logger.warning(f"🚫 [Segurança] Upload cancelado! Ficheiro é uma imagem.")
+                try: os.remove(caminho_video)
+                except: pass
+                falha_irreversivel = True
+            else:
+                arquivo = FSInputFile(caminho_video)
+                msg = await bot.send_video(chat_id=GRUPO_ID, video=arquivo, caption=legenda, parse_mode="HTML")
+                novo_file_id = msg.video.file_id
+                sucesso = True
+                if EXIBIR_LOGS: logger.info("🚀 [Fluxo] Vídeo enviado com sucesso pelo Motor Central.")
+                try: os.remove(caminho_video)
+                except: pass
         elif video_id:
             await bot.send_video(chat_id=GRUPO_ID, video=video_id, caption=legenda, parse_mode="HTML")
             sucesso = True
-            if EXIBIR_LOGS: logger.info("🚀 [Fluxo] Vídeo ID enviado com sucesso para o Telegram.")
         else:
-            if EXIBIR_LOGS: logger.error("❌ Falha irreversível: Vídeo expirou ou foi perdido fisicamente da máquina.")
-            registrar_erro_json("Vídeo expirou ou foi perdido fisicamente.", origem="shopee.py")
+            if EXIBIR_LOGS: logger.error("❌ Falha irreversível: Vídeo expirou ou foi perdido fisicamente.")
             falha_irreversivel = True
-
+            
         if sucesso or falha_irreversivel:
-            for x in fila:
-                if x["id"] == item_id_real:
-                    x["postado"] = True
-                    x["horario_postagem"] = agora.strftime("%H:%M")
-                    x["data_postagem"] = hoje_str
-                    break
-            fila_data["fila"] = fila
-            salvar_fila_postagens(fila_data)
-
+            novo_status = 'CONCLUIDO' if sucesso else 'ERRO'
+            cursor.execute("UPDATE fila_postagens SET status = ?, data_postagem = ?, horario_postagem = ? WHERE id_unico = ?", (novo_status, hoje_str, agora.strftime("%H:%M"), item_id))
+            
+            if sucesso and novo_file_id:
+                cursor.execute("UPDATE fila_postagens SET video_id = ?, caminho_video = NULL WHERE caminho_video = ? AND id_unico != ?", (novo_file_id, caminho_video, item_id))
+            conexao.commit()
+            
+        conexao.close()
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao postar vídeo da fila: {e}")
-        registrar_erro_json(f"executar_postagem_fila: {e}", origem="shopee.py")
-        
-        # ✅ Etiqueta de Falha (Isolamento)
-        if caminho_video and os.path.exists(caminho_video):
-            try:
-                os.rename(caminho_video, caminho_video + ".pendente")
-                if EXIBIR_LOGS: logger.info(f"🏷️ Ficheiro marcado como falho na fila: {caminho_video}.pendente")
-            except Exception:
-                pass
+        try:
+            conexao = sqlite3.connect("banco_dados.db")
+            cursor = conexao.cursor()
+            cursor.execute("UPDATE fila_postagens SET status = 'ERRO' WHERE id_unico = ?", (item_id,))
+            conexao.commit()
+            conexao.close()
+        except: pass
 
 # --- SISTEMA DE PAUSA PROGRAMADA ---
 def ler_pausa_programada():
@@ -716,48 +688,45 @@ def salvar_pausa_programada(dados):
         json.dump(dados, f, indent=4)
 
 def recalcular_datas_pos_pausa():
-    if EXIBIR_LOGS: logger.info("🔄 Iniciando recálculo de datas da fila pós-pausa...")
-    fila_data = ler_fila_postagens()
-    fila = fila_data.get("fila", [])
-    
-    if not fila:
-        if EXIBIR_LOGS: logger.info("⚠️ Fila vazia, nenhum ajuste de data necessário.")
-        return
+    if EXIBIR_LOGS: logger.info("🔄 Iniciando recálculo de datas no SQLite pós-pausa...")
+    try:
+        conexao = sqlite3.connect("banco_dados.db")
+        cursor = conexao.cursor()
         
-    from datetime import datetime, timedelta
-    agora = datetime.now(fuso_horario)
-    hoje_obj = agora.date()
-    
-    menor_data_obj = None
-    for item in fila:
-        d_str = item.get("data_adicao", "")
-        if d_str and d_str != "2000-01-01":
-            try:
+        cursor.execute("SELECT MIN(data_alvo) FROM fila_postagens WHERE status = 'PENDENTE' AND data_alvo != '2000-01-01'")
+        resultado = cursor.fetchone()
+        menor_data_str = resultado[0] if resultado else None
+        
+        if not menor_data_str:
+            conexao.close()
+            if EXIBIR_LOGS: logger.info("⚠️ Fila vazia ou sem datas futuras, nenhum ajuste necessário.")
+            return
+            
+        from datetime import datetime, timedelta
+        agora = datetime.now(fuso_horario)
+        hoje_obj = agora.date()
+        menor_data_obj = datetime.strptime(menor_data_str, "%Y-%m-%d").date()
+        
+        if menor_data_obj < hoje_obj:
+            offset_dias = (hoje_obj - menor_data_obj).days
+            if EXIBIR_LOGS: logger.info(f"⏳ Deslocamento: {offset_dias} dias. Aplicando offset no banco...")
+            
+            cursor.execute("SELECT id_unico, data_alvo FROM fila_postagens WHERE status = 'PENDENTE' AND data_alvo != '2000-01-01'")
+            itens = cursor.fetchall()
+            
+            for id_unico, d_str in itens:
                 d_obj = datetime.strptime(d_str, "%Y-%m-%d").date()
-                if menor_data_obj is None or d_obj < menor_data_obj:
-                    menor_data_obj = d_obj
-            except ValueError:
-                pass
+                nova_data = d_obj + timedelta(days=offset_dias)
+                cursor.execute("UPDATE fila_postagens SET data_alvo = ? WHERE id_unico = ?", (nova_data.strftime("%Y-%m-%d"), id_unico))
                 
-    if menor_data_obj and menor_data_obj < hoje_obj:
-        offset_dias = (hoje_obj - menor_data_obj).days
-        if EXIBIR_LOGS: logger.info(f"⏳ Deslocamento identificado: {offset_dias} dias. Aplicando offset na fila...")
-        
-        for item in fila:
-            d_str = item.get("data_adicao", "")
-            if d_str and d_str != "2000-01-01":
-                try:
-                    d_obj = datetime.strptime(d_str, "%Y-%m-%d").date()
-                    nova_data = d_obj + timedelta(days=offset_dias)
-                    item["data_adicao"] = nova_data.strftime("%Y-%m-%d")
-                except ValueError:
-                    pass
-        
-        fila_data["fila"] = fila
-        salvar_fila_postagens(fila_data)
-        if EXIBIR_LOGS: logger.info("✅ Datas da fila recalculadas e salvas com sucesso.")
-    else:
-        if EXIBIR_LOGS: logger.info("✅ O primeiro vídeo da fila já está no futuro ou presente. Nenhum offset necessário.")
+            conexao.commit()
+            if EXIBIR_LOGS: logger.info("✅ Datas recalculadas no SQLite com sucesso.")
+        else:
+            if EXIBIR_LOGS: logger.info("✅ O primeiro vídeo da fila já está no futuro ou presente. Nenhum offset necessário.")
+            
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao recalcular datas pós-pausa: {e}")
 
 async def verificar_pausa_diaria():
     if EXIBIR_LOGS: logger.info("⏰ Iniciando verificação diária de pausa programada (envio de aviso)...")
@@ -1194,37 +1163,38 @@ def salvar_config_rotina(dados):
         json.dump(dados, f, indent=4)
 
 def agendar_tarefas_diarias():
-    if EXIBIR_LOGS: logger.info("🔄 Reestruturando a grade: Sorteando horários com inteligência de lacunas (Gap-Filling)...")
+    if EXIBIR_LOGS: logger.info("🔄 Sorteando horários fixos de rotina (Bom Dia, Boa Noite, Campanhas)...")
     
     agora_faxina = datetime.now(fuso_horario)
     hoje_faxina_str = agora_faxina.strftime("%Y-%m-%d")
     
-    # --- Limpeza de Madrugada: Remove vídeos já postados em dias anteriores ---
-    fila_data = ler_fila_postagens()
-    fila_original = fila_data.get("fila", [])
-    fila_limpa = []
-    
-    for x in fila_original:
-        if not x.get("postado"):
-            fila_limpa.append(x) # Vídeo pendente, continua na fila
-        elif x.get("data_postagem") == hoje_faxina_str:
-            fila_limpa.append(x) # Vídeo postado HOJE, mantido para o histórico visual do painel
-        else:
-            # Vídeo antigo (ou de versão anterior do bot), vai para a lixeira
-            caminho_vid = x.get("caminho_video")
-            if caminho_vid and os.path.exists(caminho_vid):
-                ainda_usado = any(v.get("caminho_video") == caminho_vid and not v.get("postado") for v in fila_original)
-                if not ainda_usado:
-                    try:
-                        os.remove(caminho_vid)
-                        if EXIBIR_LOGS: logger.info(f"🧹 Ficheiro {caminho_vid} excluído na limpeza de madrugada.")
-                    except:
-                        pass
-                        
-    if len(fila_original) != len(fila_limpa):
-        fila_data["fila"] = fila_limpa
-        salvar_fila_postagens(fila_data)
-        if EXIBIR_LOGS: logger.info(f"🧹 Limpeza da fila: {len(fila_original) - len(fila_limpa)} vídeos de dias anteriores foram eliminados.")
+    # --- Limpeza de Madrugada no SQLite: Remove físicos e registros de dias anteriores ---
+    try:
+        conexao = sqlite3.connect("banco_dados.db")
+        cursor = conexao.cursor()
+        
+        # Puxa os ficheiros associados a vídeos antigos para deletá-los
+        cursor.execute("SELECT caminho_video FROM fila_postagens WHERE status IN ('CONCLUIDO', 'ERRO') AND data_postagem != ?", (hoje_faxina_str,))
+        para_apagar = cursor.fetchall()
+        
+        for item in para_apagar:
+            cam = item[0]
+            if cam and os.path.exists(cam):
+                # Confirma que não há outro pendente usando o mesmo ficheiro físico
+                cursor.execute("SELECT COUNT(*) FROM fila_postagens WHERE caminho_video = ? AND status = 'PENDENTE'", (cam,))
+                em_uso = cursor.fetchone()[0]
+                if em_uso == 0:
+                    try: os.remove(cam)
+                    except: pass
+                
+        cursor.execute("DELETE FROM fila_postagens WHERE status IN ('CONCLUIDO', 'ERRO') AND data_postagem != ?", (hoje_faxina_str,))
+        apagados = cursor.rowcount
+        conexao.commit()
+        conexao.close()
+        
+        if EXIBIR_LOGS and apagados > 0: logger.info(f"🧹 Limpeza da madrugada: {apagados} registos antigos eliminados do SQLite.")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro na faxina da madrugada (SQLite): {e}")
     # -------------------------------------------------------------------------
     
     for job in scheduler.get_jobs():
@@ -3908,19 +3878,28 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
             if EXIBIR_LOGS: logger.info(f"🚧 FIFO: O novo vídeo foi empurrado para o fim da fila: {data_agendamento_base}")
     
     def adicionar_a_fila(caminho_vid, vid_id, caption):
-        fila_data = ler_fila_postagens()
+        if EXIBIR_LOGS: logger.info(f"📅 Inserindo no Banco SQLite de forma concorrente. Data alvo: {data_agendamento_base}")
+        id_unico = f"{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}"
         
-        if EXIBIR_LOGS: logger.info(f"📅 Aplicando blindagem temporal. Data base fixada: {data_agendamento_base}")
+        try:
+            conexao = sqlite3.connect("banco_dados.db")
+            cursor = conexao.cursor()
             
-        item = {
-            "id": f"{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}",
-            "caminho_video": caminho_vid,
-            "video_id": vid_id,
-            "legenda": caption,
-            "data_adicao": data_agendamento_base
-        }
-        fila_data.setdefault("fila", []).append(item)
-        salvar_fila_postagens(fila_data)
+            # Descobre a próxima prioridade para este dia
+            cursor.execute("SELECT MAX(prioridade) FROM fila_postagens WHERE data_alvo = ?", (data_agendamento_base,))
+            resultado = cursor.fetchone()[0]
+            proxima_prioridade = (resultado if resultado else 0) + 1
+            
+            cursor.execute('''
+                INSERT INTO fila_postagens (id_unico, caminho_video, video_id, legenda, data_alvo, prioridade)
+                VALUES (?, ?, ?, ?, ?, ?)
+            ''', (id_unico, caminho_vid, vid_id, caption, data_agendamento_base, proxima_prioridade))
+            
+            conexao.commit()
+            conexao.close()
+            if EXIBIR_LOGS: logger.info(f"✅ Vídeo blindado no SQLite com prioridade {proxima_prioridade}.")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro grave ao inserir vídeo direto no banco: {e}")
 
     caminho_final = caminho_processado if caminho_processado and os.path.exists(caminho_processado) else caminho_video_original
     
@@ -5860,48 +5839,59 @@ async def sair_menu_fila(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
 
-async def aplicar_renumeracao_e_salvar(fila, message, state, numero_base=None):
+async def aplicar_renumeracao_e_salvar(fila_ids_ordenada, message, state, numero_base=None):
     import re
-    if EXIBIR_LOGS: logger.info("🔄 Iniciando auto-correção da numeração da fila...")
+    if EXIBIR_LOGS: logger.info("🔄 Reorganizando prioridades e numeração no SQLite...")
     
-    if numero_base is not None:
-        menor_numero = numero_base
-    else:
-        menor_numero = float('inf')
-        for f_item in fila:
-            match = re.search(r'(?i)Vídeo\s+(\d+)', f_item.get("legenda", ""))
-            if match:
-                num = int(match.group(1))
-                if num < menor_numero:
-                    menor_numero = num
-                
-        if menor_numero == float('inf'):
-            async with _lock_contador:
-                menor_numero = ler_contador()
-            
-    numero_atual_cascata = menor_numero
-    for i in range(len(fila)):
-        legenda_antiga = fila[i].get("legenda", "")
-        nova_legenda = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{numero_atual_cascata}', legenda_antiga, count=1)
-        fila[i]["legenda"] = nova_legenda
-        numero_atual_cascata += 1
-        
-    fila_data = ler_fila_postagens()
-    fila_data["fila"] = fila
-    salvar_fila_postagens(fila_data)
-    
-    async with _lock_contador:
-        contador_real = ler_contador()
-        if numero_atual_cascata > contador_real:
-            salvar_contador(numero_atual_cascata)
-            if EXIBIR_LOGS: logger.info(f"✅ Auto-correção concluída. Contador global avançou para: {numero_atual_cascata}.")
+    try:
+        conexao = sqlite3.connect("banco_dados.db")
+        conexao.row_factory = sqlite3.Row
+        cursor = conexao.cursor()
+
+        if numero_base is not None:
+            menor_numero = numero_base
         else:
-            if EXIBIR_LOGS: logger.info(f"🛡️ Bloqueio de retrocesso: Contador global mantido no {contador_real} (O cálculo de reordenação tentou aplicar {numero_atual_cascata}).")
-    
-    agendar_fila_postagens() 
-    
-    await message.answer(f"✅ Operação concluída com sucesso!\n🔄 A numeração de toda a fila foi corrigida em cascata e os horários recalculados.")
-    await menu_gerenciar_fila(message, state)
+            menor_numero = float('inf')
+            for id_item in fila_ids_ordenada:
+                cursor.execute("SELECT legenda FROM fila_postagens WHERE id_unico = ?", (id_item,))
+                resultado = cursor.fetchone()
+                if resultado:
+                    match = re.search(r'(?i)Vídeo\s+(\d+)', resultado["legenda"])
+                    if match:
+                        num = int(match.group(1))
+                        if num < menor_numero:
+                            menor_numero = num
+            if menor_numero == float('inf'):
+                async with _lock_contador:
+                    menor_numero = ler_contador()
+
+        numero_atual_cascata = menor_numero
+
+        for i, id_item in enumerate(fila_ids_ordenada):
+            cursor.execute("SELECT legenda FROM fila_postagens WHERE id_unico = ?", (id_item,))
+            resultado = cursor.fetchone()
+            if resultado:
+                legenda_antiga = resultado["legenda"]
+                nova_legenda = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{numero_atual_cascata}', legenda_antiga, count=1)
+                nova_prioridade = i + 1
+
+                cursor.execute("UPDATE fila_postagens SET legenda = ?, prioridade = ? WHERE id_unico = ?", (nova_legenda, nova_prioridade, id_item))
+                numero_atual_cascata += 1
+
+        conexao.commit()
+        conexao.close()
+
+        async with _lock_contador:
+            contador_real = ler_contador()
+            if numero_atual_cascata > contador_real:
+                salvar_contador(numero_atual_cascata)
+                if EXIBIR_LOGS: logger.info(f"✅ Auto-correção do banco concluída. Novo contador global: {numero_atual_cascata}.")
+
+        await message.answer("✅ Operação concluída com sucesso!\n🔄 A fila foi sincronizada de forma segura no Banco de Dados.")
+        await menu_gerenciar_fila(message, state)
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao organizar SQLite: {e}")
+        await message.answer(f"❌ Erro interno ao salvar no banco: {e}")
 
 # ✅ NOVO: Muralha de Segurança - Trava todas as edições se a fila estiver vazia
 @dp.message(GerenciarFilaFluxo.menu_principal, F.text.in_(["Publicar Agora 🚀", "Excluir Vídeo 🗑️", "Editar Numeração 🔢", "Mover Posição ↕️", "Editar Legenda ✏️"]))
@@ -5987,35 +5977,43 @@ async def processar_exclusao_fila(message: types.Message, state: FSMContext):
     fila = fila_data.get("fila", [])
     
     if posicao is not None and 0 <= posicao < len(fila):
-        import re
-        
-        # 🔍 Congela o menor número da fila ANTES de apagar o vídeo
-        menor_numero_antes = float('inf')
-        for f_item in fila:
-            match = re.search(r'(?i)Vídeo\s+(\d+)', f_item.get("legenda", ""))
-            if match:
-                num = int(match.group(1))
-                if num < menor_numero_antes:
-                    menor_numero_antes = num
-                    
-        if menor_numero_antes == float('inf'):
-            menor_numero_antes = None
+            import re
+            
+            menor_numero_antes = float('inf')
+            for f_item in fila:
+                match = re.search(r'(?i)Vídeo\s+(\d+)', f_item.get("legenda", ""))
+                if match:
+                    num = int(match.group(1))
+                    if num < menor_numero_antes:
+                        menor_numero_antes = num
+            if menor_numero_antes == float('inf'): menor_numero_antes = None
 
-        item_removido = fila.pop(posicao)
-        caminho_video = item_removido.get("caminho_video")
-        
-        if caminho_video and os.path.exists(caminho_video):
-            ainda_usado = any(x.get("caminho_video") == caminho_video for x in fila)
-            if not ainda_usado:
-                os.remove(caminho_video)
-                if EXIBIR_LOGS: logger.info("🧹 Fila: Ficheiro físico excluído após remoção manual com confirmação dupla.")
-                
-        if EXIBIR_LOGS: logger.info(f"🗑️ Fila: Vídeo na posição {posicao+1} removido com sucesso.")
-        
-        await aplicar_renumeracao_e_salvar(fila, message, state, numero_base=menor_numero_antes)
-    else:
-        await message.answer("Erro de sincronização. Operação cancelada.")
-        await menu_gerenciar_fila(message, state)
+            item_removido = fila.pop(posicao)
+            id_remover = item_removido.get("id")
+            caminho_video = item_removido.get("caminho_video")
+            
+            try:
+                conexao = sqlite3.connect("banco_dados.db")
+                cursor = conexao.cursor()
+                cursor.execute("DELETE FROM fila_postagens WHERE id_unico = ?", (id_remover,))
+                conexao.commit()
+                conexao.close()
+            except Exception as e:
+                if EXIBIR_LOGS: logger.error(f"❌ Erro ao apagar do banco: {e}")
+
+            if caminho_video and os.path.exists(caminho_video):
+                ainda_usado = any(x.get("caminho_video") == caminho_video for x in fila)
+                if not ainda_usado:
+                    try: os.remove(caminho_video)
+                    except: pass
+                    
+            if EXIBIR_LOGS: logger.info(f"🗑️ Vídeo {id_remover} apagado do banco.")
+            
+            fila_ids = [item["id"] for item in fila]
+            await aplicar_renumeracao_e_salvar(fila_ids, message, state, numero_base=menor_numero_antes)
+        else:
+            await message.answer("Erro de sincronização. Operação cancelada.")
+            await menu_gerenciar_fila(message, state)
 
 async def pedir_edicao_fila(message: types.Message, state: FSMContext):
     await message.answer("Digite o <b>NÚMERO</b> da posição do vídeo que deseja editar:", reply_markup=teclado_cancelar, parse_mode="HTML")
@@ -6055,11 +6053,18 @@ async def salvar_nova_legenda_fila(message: types.Message, state: FSMContext):
     fila = fila_data.get("fila", [])
     
     if 0 <= posicao < len(fila):
-        fila[posicao]["legenda"] = nova_legenda
-        salvar_fila_postagens(fila_data)
-        if EXIBIR_LOGS: logger.info(f"✏️ Fila: Legenda do vídeo na posição {posicao+1} atualizada.")
-        
-        await message.answer("✅ Legenda atualizada com sucesso!")
+        id_item = fila[posicao]["id"]
+        try:
+            conexao = sqlite3.connect("banco_dados.db")
+            cursor = conexao.cursor()
+            cursor.execute("UPDATE fila_postagens SET legenda = ? WHERE id_unico = ?", (nova_legenda, id_item))
+            conexao.commit()
+            conexao.close()
+            if EXIBIR_LOGS: logger.info(f"✏️ Fila: Legenda do vídeo {id_item} atualizada no SQLite.")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro ao editar legenda: {e}")
+            
+        await message.answer("✅ Legenda atualizada com sucesso direto no banco de dados!")
         await menu_gerenciar_fila(message, state)
     else:
         await message.answer("Erro de sincronização. Operação cancelada.")
@@ -6319,11 +6324,23 @@ async def processar_confirmacao_reordenar(message: types.Message, state: FSMCont
     if 0 <= posicao_origem < len(fila):
         fila_simulada = fila.copy()
         item_movido = fila_simulada.pop(posicao_origem)
-        item_movido["data_adicao"] = nova_data_adicao
+        
+        id_movido = item_movido.get("id")
+        try:
+            conexao = sqlite3.connect("banco_dados.db")
+            cursor = conexao.cursor()
+            cursor.execute("UPDATE fila_postagens SET data_alvo = ? WHERE id_unico = ?", (nova_data_adicao, id_movido))
+            conexao.commit()
+            conexao.close()
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro ao mudar data_alvo no DB: {e}")
+            
         fila_simulada.insert(nova_posicao, item_movido)
         
-        if EXIBIR_LOGS: logger.info(f"↕️ Fila: Confirmação recebida. Vídeo movido com sucesso para a posição {nova_posicao+1}.")
-        await aplicar_renumeracao_e_salvar(fila_simulada, message, state)
+        if EXIBIR_LOGS: logger.info(f"↕️ Fila: Confirmação recebida. Vídeo reordenado via SQLite.")
+        
+        fila_ids = [item["id"] for item in fila_simulada]
+        await aplicar_renumeracao_e_salvar(fila_ids, message, state)
     else:
         await message.answer("Erro de sincronização. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
@@ -6378,28 +6395,11 @@ async def salvar_nova_numeracao_fila(message: types.Message, state: FSMContext):
     import re
     
     if 0 <= posicao < len(fila):
-        if EXIBIR_LOGS: logger.info(f"🔄 Iniciando renumeração em cascata a partir da posição {posicao+1} com o número {novo_numero_inicial}...")
+        if EXIBIR_LOGS: logger.info(f"🔄 Iniciando renumeração via SQLite a partir da posição {posicao+1}...")
         
-        numero_atual_cascata = novo_numero_inicial
-        
-        # Percorre a fila apenas a partir do vídeo selecionado para baixo
-        for i in range(posicao, len(fila)):
-            legenda_antiga = fila[i].get("legenda", "")
-            nova_legenda = re.sub(r'(?i)(Vídeo\s+)\d+', rf'\g<1>{numero_atual_cascata}', legenda_antiga, count=1)
-            fila[i]["legenda"] = nova_legenda
-            if EXIBIR_LOGS: logger.info(f"✏️ Fila: Posição {i+1} atualizada para Vídeo {numero_atual_cascata}.")
-            numero_atual_cascata += 1
-            
-        salvar_fila_postagens(fila_data)
-        
-        # Sincroniza o contador global para que a próxima postagem assuma o último número +1
-        async with _lock_contador:
-            salvar_contador(numero_atual_cascata)
-        
-        if EXIBIR_LOGS: logger.info(f"✅ Renumeração concluída! Contador global ajustado para a próxima postagem virgem: {numero_atual_cascata}.")
-        
-        await message.answer(f"✅ Numeração atualizada em cascata a partir do vídeo {novo_numero_inicial} com sucesso!")
-        await menu_gerenciar_fila(message, state)
+        # Pega a lista de IDs a partir da posição selecionada
+        fila_ids_alvo = [item["id"] for item in fila[posicao:]]
+        await aplicar_renumeracao_e_salvar(fila_ids_alvo, message, state, numero_base=novo_numero_inicial)
     else:
         await message.answer("Erro de sincronização. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
@@ -6484,32 +6484,18 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
                     
                 arquivo = FSInputFile(caminho_video)
                 msg = await bot.send_video(chat_id=GRUPO_ID, video=arquivo, caption=legenda_disparo, parse_mode="HTML")
-                sucesso_upload = True
-                
                 novo_file_id = msg.video.file_id
-                for x in fila:
-                    if x.get("caminho_video") == caminho_video:
-                        x["video_id"] = novo_file_id
-                        x["caminho_video"] = None
-                        
-                # ✅ Exclusão instantânea no sucesso
-                try:
-                    os.remove(caminho_video)
-                except Exception:
-                    pass
+                sucesso_upload = True
+                try: os.remove(caminho_video)
+                except: pass
             elif video_id:
                 await bot.send_video(chat_id=GRUPO_ID, video=video_id, caption=legenda_disparo, parse_mode="HTML")
                 sucesso_upload = True
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Falha no disparo imediato: {e}")
-            
-            # ✅ Etiqueta de Falha (Isolamento)
             if caminho_video and os.path.exists(caminho_video):
-                try:
-                    os.rename(caminho_video, caminho_video + ".pendente")
-                except Exception:
-                    pass
-                    
+                try: os.rename(caminho_video, caminho_video + ".pendente")
+                except: pass
             await msg_status.delete()
             await message.answer(f"Ocorreu um erro técnico ao publicar o vídeo: {e}")
             await menu_gerenciar_fila(message, state)
@@ -6518,31 +6504,32 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
         await msg_status.delete()
             
         if sucesso_upload:
-            if EXIBIR_LOGS: logger.info("✅ Vídeo antecipado submetido com sucesso no grupo.")
+            if EXIBIR_LOGS: logger.info("✅ Vídeo manual submetido. Atualizando SQLite...")
             
-            # 3. Preserva o vídeo no histórico
             agora_manual = datetime.now(fuso_horario)
-            item["postado"] = True
-            item["horario_postagem"] = agora_manual.strftime("%H:%M")
-            item["data_postagem"] = agora_manual.strftime("%Y-%m-%d")
-            if EXIBIR_LOGS: logger.info(f"🚀 Vídeo da posição {posicao+1} marcado como 'postado' às {item['horario_postagem']} no histórico.")
+            id_unico = item["id"]
+            
+            try:
+                conexao = sqlite3.connect("banco_dados.db")
+                cursor = conexao.cursor()
+                cursor.execute("UPDATE fila_postagens SET status = 'CONCLUIDO', data_postagem = ?, horario_postagem = ? WHERE id_unico = ?", 
+                               (agora_manual.strftime("%Y-%m-%d"), agora_manual.strftime("%H:%M"), id_unico))
+                               
+                if novo_file_id:
+                    cursor.execute("UPDATE fila_postagens SET video_id = ?, caminho_video = NULL WHERE caminho_video = ? AND id_unico != ?", 
+                                   (novo_file_id, caminho_video, id_unico))
+                conexao.commit()
+                conexao.close()
+            except Exception as e:
+                if EXIBIR_LOGS: logger.error(f"❌ Erro ao atualizar status manual no DB: {e}")
             
             if caminho_video and os.path.exists(caminho_video):
                 ainda_usado = any(x.get("caminho_video") == caminho_video and not x.get("postado", False) for x in fila)
                 if not ainda_usado:
-                    try:
-                        os.remove(caminho_video)
-                        if EXIBIR_LOGS: logger.info("🧹 Ficheiro físico removido do servidor após o disparo antecipado.")
-                    except:
-                        pass
+                    try: os.remove(caminho_video)
+                    except: pass
             
-            fila_data["fila"] = fila
-            salvar_fila_postagens(fila_data)
-            
-            # 4. Recálculo da fragmentação da hora para alocar o buraco (sem corromper os outros números)
-            agendar_fila_postagens()
-            
-            await message.answer("🚀 Publicação realizada com sucesso!\n✅ O vídeo foi marcado como postado no histórico e a grade de horários de hoje foi reajustada.")
+            await message.answer("🚀 Publicação realizada com sucesso!\n✅ O vídeo foi marcado como concluído direto no banco de dados.")
             await menu_gerenciar_fila(message, state)
     else:
         await message.answer("Erro de sincronização ou posição inválida. Operação cancelada.")
@@ -6991,9 +6978,12 @@ async def main():
 
     # ✅ Novo: Check-up diário de permissões em grupos roda todos os dias às 11:00
     scheduler.add_job(checkup_diario_grupos, 'cron', hour=11, minute=0, timezone=FUSO_STR)
-    
+
     # ✅ Novo: Motor Autônomo de Garimpo de Achadinhos (Gatilho de 2 em 2 horas)
     scheduler.add_job(processar_garimpo_automatico, 'interval', hours=2, timezone=FUSO_STR)
+    
+    # ✅ NOVO MOTOR DE FILA (Fase 3): O Relógio Central bate a cada 1 minuto
+    scheduler.add_job(motor_fila_minuto, 'interval', minutes=1, timezone=FUSO_STR)
     
     # Roda o agendador imediatamente ao ligar o bot para garantir o dia atual
     agendar_tarefas_diarias()
