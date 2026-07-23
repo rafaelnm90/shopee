@@ -2511,7 +2511,8 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 except: pass
             cabecalho_rota = f"📡 <b>Rota: {nome_rota}</b> ({qtd_aguardando} vídeos na urna)\n🕒 <b>Janela:</b> {inicio}h às {fim}h\n{info_sorteio}"
         else:
-            cabecalho_rota = f"📡 <b>Rota: {nome_rota}</b> ({len(itens)} vídeos aguardando)\n🕒 <b>Postagem:</b> Dia seguinte, entre {inicio}h e {fim}h\n"
+            texto_postagem = "Imediata (D+0)" if atraso_dias == 0 else f"D+{atraso_dias}, entre {inicio}h e {fim}h"
+            cabecalho_rota = f"📡 <b>Rota: {nome_rota}</b> ({len(itens)} vídeos aguardando)\n🕒 <b>Postagem:</b> {texto_postagem}\n"
         
         if len(texto_atual) + len(cabecalho_rota) > 3800:
             mensagens_para_enviar.append(texto_atual)
@@ -2652,7 +2653,13 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                             else:
                                 status_dia = "🔴 Atrasado"
                         else:
-                            status_dia = "🟡 Represa (D+1)" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
+                            # ✅ CORREÇÃO: Aplica a tag correta baseada no D+0, D+1 ou D+2
+                            if atraso_dias == 0:
+                                status_dia = "🟢 Na Fila (D+0)" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
+                            elif atraso_dias == 1:
+                                status_dia = "🟡 Represa (D+1)" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
+                            else:
+                                status_dia = f"🔵 Represa (D+{atraso_dias})" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
                     else:
                         if data_alvo.date() == hoje_obj:
                             # ✅ INTELIGÊNCIA: Se já passou da hora limite, a janela fechou
@@ -2679,7 +2686,8 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     except:
                         previsao_texto = "Pendente na esteira"
                 else:
-                    previsao_texto = "Aguardando virada do dia"
+                    # ✅ CORREÇÃO: Altera o texto se for processamento no mesmo dia
+                    previsao_texto = "Processamento Imediato" if atraso_dias == 0 else "Aguardando virada do dia"
             else: # Lógica para o Espião
                 is_postado = v.get("processado", False)
                 horario_postagem = v.get("horario_postagem", "")
