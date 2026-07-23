@@ -29,6 +29,11 @@ import espelhador
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo
 EXIBIR_LOGS = True
 
+# 2. CONFIGURAÇÃO DE LOGS 🚀 (Movido para o topo para garantir carregamento global)
+if EXIBIR_LOGS:
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+    logger = logging.getLogger(__name__)
+
 # ✅ Cria a pasta temp isolada na inicialização
 os.makedirs("temp", exist_ok=True)
 
@@ -80,11 +85,6 @@ MODELOS_CASCATA_GEMINI = [
 
 # Inicializa o cliente moderno da SDK do Google
 client = genai.Client(api_key=GEMINI_API_KEY)
-
-# 2. CONFIGURAÇÃO DE LOGS 🚀
-if EXIBIR_LOGS:
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-    logger = logging.getLogger(__name__)
 
 # 2.5 SISTEMA DE NUMERAÇÃO DE VÍDEOS 🔢
 def ler_contador():
