@@ -115,6 +115,7 @@ class PostagemFluxo(StatesGroup):
 class ConfigFluxo(StatesGroup):
     aguardando_novo_numero = State()
     aguardando_confirmacao_zerar = State()
+    aguardando_confirmacao_zerar_filas = State()
 
 class ConfigDivulgacao(StatesGroup):
     menu_principal = State()
@@ -286,7 +287,7 @@ def obter_teclado_configuracoes_gerais():
     botoes = [
         [KeyboardButton(text="Mensagens de Rotina ⏰"), KeyboardButton(text="SPAM em Grupos 📢")],
         [KeyboardButton(text="Editar Número da Postagem 🔢"), KeyboardButton(text=texto_botao_pausa)],
-        [KeyboardButton(text="🔄 Atualizar Rotinas")],
+        [KeyboardButton(text="🔄 Atualizar Rotinas"), KeyboardButton(text="Zerar Filas e Tarefas 🧹")],
         [KeyboardButton(text="Voltar 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -4036,6 +4037,146 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
         "✅ <b>Os vídeos empurrados para amanhã foram resgatados e distribuídos no dia de hoje!</b>"
     )
     await message.answer(texto, parse_mode="HTML", reply_markup=obter_teclado_principal())
+    await state.clear()
+
+@dp.message(F.text == "Zerar Filas e Tarefas 🧹", StateFilter("*"))
+async def confirmar_zerar_filas_tarefas(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("⚠️ Solicitando confirmação para zerar TODAS as filas e tarefas pendentes.")
+    
+    teclado_confirmar_zerar_filas = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Aprovar Limpeza 🧹"), KeyboardButton(text="Cancelar ❌")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    texto = (
+        "⚠️ <b>ALERTA DE LIMPEZA PROFUNDA</b> ⚠️\n\n"
+        "Esta ação irá <b>APAGAR PERMANENTEMENTE</b>:\n"
+        "🗑️ Todos os vídeos pendentes na Fila de Postagens Principal.\n"
+        "🗑️ Todos os clones retidos nas filas do Espião e do Espelhador.\n"
+        "🗑️ Todos os agendamentos na memória ligados a postagens pendentes.\n\n"
+        "<i>(As suas configurações, textos de rotina, horários e alvos permanecerão perfeitamente intactos.)</i>\n\n"
+        "Aprova a purga de todas as tarefas pendentes?"
+    )
+    await message.answer(texto, reply_markup=teclado_confirmar_zerar_filas, parse_mode="HTML")
+    await state.set_state(ConfigFluxo.aguardando_confirmacao_zerar_filas)
+
+@dp.message(ConfigFluxo.aguardando_confirmacao_zerar_filas)
+async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+        
+    if message.text != "Aprovar Limpeza 🧹":
+        await message.answer("Por favor, clique em Aprovar Limpeza 🧹 ou Cancelar ❌.")
+        return
+        
+    msg_status = await message.answer("🧹 <b>Iniciando varredura profunda no servidor...</b> Isso pode levar alguns segundos. ⏳", reply_markup=teclado_cancelar, parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando o protocolo de aniquilação total de filas, tarefas e lixo acumulado...")
+    
+    relatorio = {
+        "db": 0,
+        "espiao": 0,
+        "espelhador": 0,
+        "jobs": 0,
+        "arquivos": 0,
+        "espaco_mb": 0.0
+    }
+
+    def apagar_arquivo(caminho):
+        if caminho and os.path.exists(caminho):
+            try:
+                tamanho = os.path.getsize(caminho) / (1024 * 1024) # Converte bytes para MB
+                os.remove(caminho)
+                relatorio["arquivos"] += 1
+                relatorio["espaco_mb"] += tamanho
+            except: pass
+
+    # 1. Limpar Fila Principal (SQLite) e extrair mídias físicas
+    try:
+        conexao = sqlite3.connect("banco_dados.db")
+        cursor = conexao.cursor()
+        cursor.execute("SELECT caminho_video FROM fila_postagens WHERE status = 'PENDENTE'")
+        for (caminho_video,) in cursor.fetchall():
+            apagar_arquivo(caminho_video)
+        
+        cursor.execute("DELETE FROM fila_postagens WHERE status = 'PENDENTE'")
+        relatorio["db"] = cursor.rowcount
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao limpar Fila Principal: {e}")
+        
+    # 2. Limpar Fila do Espião e suas mídias
+    try:
+        fila_clonagem = ler_fila_clonagem()
+        mantidos_espiao = []
+        for item in fila_clonagem.get("fila", []):
+            if item.get("processado"):
+                mantidos_espiao.append(item)
+            else:
+                apagar_arquivo(item.get("caminho_video"))
+                relatorio["espiao"] += 1
+        fila_clonagem["fila"] = mantidos_espiao
+        salvar_fila_clonagem(fila_clonagem)
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao limpar Fila do Espião: {e}")
+        
+    # 3. Limpar Fila do Espelhador e suas mídias
+    try:
+        with open("fila_espelhador.json", "r", encoding="utf-8") as f:
+            fila_espelhador = json.load(f)
+        mantidos_espelhador = []
+        for item in fila_espelhador.get("fila", []):
+            if item.get("processado"):
+                mantidos_espelhador.append(item)
+            else:
+                apagar_arquivo(item.get("caminho_video"))
+                relatorio["espelhador"] += 1
+        fila_espelhador["fila"] = mantidos_espelhador
+        with open("fila_espelhador.json", "w", encoding="utf-8") as f:
+            json.dump(fila_espelhador, f, indent=4)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao limpar Fila do Espelhador: {e}")
+
+    # 4. Limpar Agendamentos de Postagem da Memória (Scheduler)
+    for job in scheduler.get_jobs():
+        if job.id.startswith('job_fila_postagem_'):
+            job.remove()
+            relatorio["jobs"] += 1
+
+    # 5. Faxina Profunda Cega na Pasta Temp (Lixo e Órfãos)
+    try:
+        if EXIBIR_LOGS: logger.info("🧹 Inspecionando a pasta temp/ em busca de lixo não rastreado...")
+        if os.path.exists("temp"):
+            for filename in os.listdir("temp"):
+                caminho_completo = os.path.join("temp", filename)
+                if os.path.isfile(caminho_completo):
+                    apagar_arquivo(caminho_completo)
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao esvaziar pasta temp: {e}")
+
+    await msg_status.delete()
+    
+    texto_final = (
+        "✨ <b>Limpeza Profunda Concluída!</b>\n\n"
+        "Aqui está o relatório do que foi eliminado:\n"
+        f"🗑️ <b>{relatorio['db']}</b> registros deletados do Banco Principal\n"
+        f"🗑️ <b>{relatorio['espiao']}</b> clones cancelados no Espião\n"
+        f"🗑️ <b>{relatorio['espelhador']}</b> espelhamentos abortados\n"
+        f"⏱️ <b>{relatorio['jobs']}</b> agendamentos fantasmas removidos\n"
+        f"🧹 <b>{relatorio['arquivos']}</b> arquivos físicos de vídeo/mídia apagados\n"
+        f"💾 <b>{relatorio['espaco_mb']:.2f} MB</b> de espaço liberado no servidor!\n\n"
+        "O seu ambiente está higienizado, leve e pronto para novas postagens."
+    )
+    
+    if EXIBIR_LOGS: logger.info(f"✅ Faxina concluída. {relatorio['espaco_mb']:.2f} MB liberados. {relatorio['arquivos']} arquivos obliterados.")
+    await message.answer(texto_final, parse_mode="HTML", reply_markup=obter_teclado_configuracoes_gerais())
     await state.clear()
 
 @dp.message(F.text == "Outros Canais 🗂️", StateFilter("*"))
