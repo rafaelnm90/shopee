@@ -372,6 +372,14 @@ def obter_teclado_raiz():
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
+def obter_teclado_principal():
+    botoes = [
+        [KeyboardButton(text="Criar Postagem 📝"), KeyboardButton(text="Gerenciar Fila 📋")],
+        [KeyboardButton(text="🛠️ Configurações Avançadas")],
+        [KeyboardButton(text="Voltar ao Início 🔙")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+
 # 🛠️ Novo Sub-Menu do Servidor
 def obter_teclado_opcoes_servidor():
     botoes = [
