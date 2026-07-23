@@ -1594,19 +1594,11 @@ dp.message.middleware(InatividadeMiddleware())
 # NOVO MÓDULO: VÍDEOS AUTORAIS 🎥
 # ----------------------------------
 def ler_autorais_config():
-    try:
-        with open("autorais_config.json", "r", encoding="utf-8") as f:
-            dados = json.load(f)
-            # Injeta chaves padrão caso seja um arquivo antigo
-            if "dias_retorno" not in dados: dados["dias_retorno"] = 15
-            if "limite_videos" not in dados: dados["limite_videos"] = 5
-            return dados
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"origem": -1003673555953, "origem_topico": None, "destino": "@videos_autorais", "dias_retorno": 15, "limite_videos": 5}
+    padrao = {"origem": -1003673555953, "origem_topico": None, "destino": "@videos_autorais", "dias_retorno": 15, "limite_videos": 5}
+    return ler_config_bd("autorais_config", padrao, arquivo_legado="autorais_config.json")
 
 def salvar_autorais_config(dados):
-    with open("autorais_config.json", "w", encoding="utf-8") as f:
-        json.dump(dados, f, indent=4, ensure_ascii=False)
+    salvar_config_bd("autorais_config", dados)
 
 @dp.message(F.text == "Vídeos Autorais 🎥", StateFilter("*"))
 async def painel_autorais(message: types.Message, state: FSMContext):
@@ -1886,27 +1878,18 @@ async def salvar_limite_autorais(message: types.Message, state: FSMContext):
 # NOVO MÓDULO: GERADOR AUTÔNOMO DE ACHADINHOS 🛍️
 # ----------------------------------
 def ler_achadinhos_config():
-    try:
-        with open("achadinhos_config.json", "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        modelo_padrao = {"nichos": []}
-        with open("achadinhos_config.json", "w") as f:
-            json.dump(modelo_padrao, f, indent=4)
-        return modelo_padrao
+    return ler_config_bd("achadinhos_config", {"nichos": []}, arquivo_legado="achadinhos_config.json")
+
+def salvar_achadinhos_config(dados):
+    salvar_config_bd("achadinhos_config", dados)
 
 def ler_achadinhos_enviados():
-    try:
-        with open("achadinhos_enviados.json", "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
+    return ler_config_bd("achadinhos_enviados", [], arquivo_legado="achadinhos_enviados.json")
 
 def salvar_achadinhos_enviados(lista):
     if len(lista) > 500:
         lista = lista[-500:]
-    with open("achadinhos_enviados.json", "w") as f:
-        json.dump(lista, f, indent=4)
+    salvar_config_bd("achadinhos_enviados", lista)
 
 async def buscar_ofertas_shopee(keyword, limite=10):
     if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
@@ -4358,8 +4341,7 @@ async def salvar_novo_nicho(message: types.Message, state: FSMContext):
     }
     
     config.setdefault("nichos", []).append(novo_nicho)
-    with open("achadinhos_config.json", "w") as f:
-        json.dump(config, f, indent=4)
+    salvar_achadinhos_config(config)
         
     if EXIBIR_LOGS: logger.info(f"✅ Nicho '{nome}' adicionado com sucesso e ativo no radar!")
     await message.answer(f"✅ Nicho <b>{nome}</b> criado e ativado com sucesso!", parse_mode="HTML")
@@ -4414,8 +4396,7 @@ async def processar_remocao_nicho(message: types.Message, state: FSMContext):
     config = ler_achadinhos_config()
     if indice is not None and 0 <= indice < len(config.get("nichos", [])):
         removido = config["nichos"].pop(indice)
-        with open("achadinhos_config.json", "w") as f:
-            json.dump(config, f, indent=4)
+        salvar_achadinhos_config(config)
         if EXIBIR_LOGS: logger.info(f"🗑️ Nicho '{removido.get('nome')}' excluído.")
         await message.answer(f"✅ Nicho '{removido.get('nome')}' removido com sucesso!")
     
@@ -4492,8 +4473,7 @@ async def salvar_edicao_nicho(message: types.Message, state: FSMContext):
             novo_valor = [k.strip() for k in novo_valor.split(",") if k.strip()]
             
         nichos[indice][campo] = novo_valor
-        with open("achadinhos_config.json", "w") as f:
-            json.dump(config, f, indent=4)
+        salvar_achadinhos_config(config)
             
         if EXIBIR_LOGS: logger.info(f"✏️ Nicho {indice+1} atualizado. Campo '{campo}' alterado.")
         await message.answer("✅ Nicho atualizado com sucesso!")
