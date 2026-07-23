@@ -708,10 +708,17 @@ async def motor_espelhador_userbot(event):
         titulo_ia = None
 
     if titulo_ia:
-        texto_processado = f"<b>{titulo_ia}</b>\n\n🔗 Link do Produto:\n{link_final_convertido}"
-        if EXIBIR_LOGS: logger.info("✅ [Espelhador] Legenda inteligente construída com sucesso.")
+        linhas_ia = titulo_ia.split('\n')
+        nome_produto = linhas_ia[0].strip()
+        hashtags = '\n'.join(linhas_ia[1:]).strip() if len(linhas_ia) > 1 else ""
+        
+        texto_processado = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_final_convertido}"
+        if hashtags:
+            texto_processado += f"\n\n<i>{hashtags}</i>"
+            
+        if EXIBIR_LOGS: logger.info("✅ [Espelhador] Legenda inteligente construída com sucesso (Título -> Link -> Hashtags).")
     else:
-        texto_processado = f"🔗 Link do Produto:\n{link_final_convertido}"
+        texto_processado = f"🔗 <b>Link do Produto:</b>\n{link_final_convertido}"
         if EXIBIR_LOGS: logger.warning("⚠️ [Espelhador] Fallback de segurança ativado: Legenda base apenas com o link.")
 
     forward_origem_id = None
