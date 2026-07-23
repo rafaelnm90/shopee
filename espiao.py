@@ -68,69 +68,70 @@ limpar_travas_fantasma('sessao_espiao')
 
 client = TelegramClient('sessao_espiao', API_ID, API_HASH)
 
-def carregar_alvos():
+import sqlite3
+import random
+
+def ler_config_bd_espiao(chave, padrao=None):
+    if padrao is None: padrao = {}
     try:
-        with open("alvos_espiao.json", "r") as f:
-            dados = json.load(f)
-            return dados.get("alvos", [])
-    except (FileNotFoundError, json.JSONDecodeError):
-        return []
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("SELECT valor FROM configuracoes WHERE chave = ?", (chave,))
+        resultado = cursor.fetchone()
+        conexao.close()
+        if resultado:
+            return json.loads(resultado[0])
+        return padrao
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler '{chave}' do SQLite: {e}")
+        return padrao
+
+def salvar_config_bd_espiao(chave, dados):
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        dados_str = json.dumps(dados, ensure_ascii=False)
+        cursor.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)", (chave, dados_str))
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar '{chave}' no SQLite: {e}")
+
+def carregar_alvos():
+    dados = ler_config_bd_espiao("alvos_espiao", padrao={"alvos": []})
+    return dados.get("alvos", [])
 
 def ler_excecao_ponte():
     """Lê dinamicamente o destino configurado no painel Autorais para atuar como ponte imune."""
-    try:
-        with open("autorais_config.json", "r", encoding="utf-8") as f:
-            dados = json.load(f)
-            val = str(dados.get("destino", "")).strip().lower()
-            return val if val else None
-    except Exception:
-        return None
+    dados = ler_config_bd_espiao("autorais_config", padrao={})
+    val = str(dados.get("destino", "")).strip().lower()
+    return val if val else None
 
 def verificar_e_registrar_espelho(link_shopee, contexto="global"):
-    arquivo_espelhos = "registro_espelhos.json"
-    agora = datetime.now()
+    agora_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        with open(arquivo_espelhos, "r") as f:
-            dados = json.load(f)
-            # Migração automática do formato antigo para o novo formato de contextos
-            if "espelhos" in dados:
-                dados_antigos = dados.pop("espelhos")
-                dados["contextos"] = {"global": dados_antigos}
-    except (FileNotFoundError, json.JSONDecodeError):
-        dados = {"contextos": {}}
-
-    if "contextos" not in dados:
-        dados["contextos"] = {}
-
-    if contexto not in dados["contextos"]:
-        dados["contextos"][contexto] = {}
-
-    historico = dados["contextos"][contexto]
-
-    # Executa a limpeza automática de links registados há mais de 24 horas NESTE CONTEXTO
-    chaves_para_remover = []
-    for link, data_str in historico.items():
-        try:
-            data_registro = datetime.strptime(data_str, "%Y-%m-%d %H:%M:%S")
-            if (agora - data_registro).total_seconds() > 86400:
-                chaves_para_remover.append(link)
-        except ValueError:
-            chaves_para_remover.append(link)
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        
+        # Limpeza de links com mais de 24 horas no contexto específico
+        cursor.execute("DELETE FROM registros_unicos WHERE tipo = 'espelho' AND contexto = ? AND datetime(data_registro) <= datetime('now', '-1 day')", (contexto,))
+        
+        # Verifica se o link já existe
+        cursor.execute("SELECT 1 FROM registros_unicos WHERE identificador = ? AND contexto = ? AND tipo = 'espelho'", (link_shopee, contexto))
+        existe = cursor.fetchone()
+        
+        if existe:
+            conexao.close()
+            return True
             
-    for chave in chaves_para_remover:
-        del historico[chave]
-
-    # Verifica se o link novo já existe no radar recente para o destino específico
-    if link_shopee in historico:
-        with open(arquivo_espelhos, "w") as f:
-            json.dump(dados, f, indent=4)
-        return True 
-
-    # Se for novidade, regista com a data e hora atuais neste contexto
-    historico[link_shopee] = agora.strftime("%Y-%m-%d %H:%M:%S")
-    with open(arquivo_espelhos, "w") as f:
-        json.dump(dados, f, indent=4)
-    return False
+        # Regista novo link se for novidade
+        cursor.execute("INSERT INTO registros_unicos (identificador, contexto, tipo, data_registro) VALUES (?, ?, 'espelho', ?)", (link_shopee, contexto, agora_str))
+        conexao.commit()
+        conexao.close()
+        return False
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao verificar espelho no SQLite: {e}")
+        return False
 
 def calcular_hash_video(caminho_arquivo):
     hash_sha256 = hashlib.sha256()
@@ -147,89 +148,58 @@ def calcular_hash_video(caminho_arquivo):
         return None
 
 def verificar_e_registrar_hash(hash_video, contexto="global"):
-    arquivo_hashes = "registro_hashes.json"
+    agora_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        with open(arquivo_hashes, "r") as f:
-            dados = json.load(f)
-            # Migração automática do formato antigo para o novo formato de contextos
-            if "hashes" in dados:
-                dados_antigos = dados.pop("hashes")
-                dados["contextos"] = {"global": dados_antigos}
-    except (FileNotFoundError, json.JSONDecodeError):
-        dados = {"contextos": {}}
-    
-    if "contextos" not in dados:
-        dados["contextos"] = {}
-
-    if contexto not in dados["contextos"]:
-        dados["contextos"][contexto] = []
-
-    historico = dados["contextos"][contexto]
-    
-    if hash_video in historico:
-        # Grava para garantir a atualização em caso de migração
-        with open(arquivo_hashes, "w") as f:
-            json.dump(dados, f, indent=4)
-        return True
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
         
-    historico.append(hash_video)
-    
-    if len(historico) > LIMITE_REGISTROS_HASH:
-        if EXIBIR_LOGS: logger.info(f"🧹 Limite atingido no contexto {contexto}. Removendo os registos mais antigos para libertar espaço...")
-        dados["contextos"][contexto] = historico[-LIMITE_REGISTROS_HASH:]
+        cursor.execute("SELECT 1 FROM registros_unicos WHERE identificador = ? AND contexto = ? AND tipo = 'hash'", (hash_video, contexto))
+        existe = cursor.fetchone()
         
-    with open(arquivo_hashes, "w") as f:
-        json.dump(dados, f, indent=4)
-    return False
+        if existe:
+            conexao.close()
+            return True
+            
+        cursor.execute("INSERT INTO registros_unicos (identificador, contexto, tipo, data_registro) VALUES (?, ?, 'hash', ?)", (hash_video, contexto, agora_str))
+        
+        # Exclui os mais antigos para respeitar o limite global de segurança
+        cursor.execute(f"DELETE FROM registros_unicos WHERE tipo = 'hash' AND contexto = ? AND identificador NOT IN (SELECT identificador FROM registros_unicos WHERE tipo = 'hash' AND contexto = ? ORDER BY data_registro DESC LIMIT {LIMITE_REGISTROS_HASH})", (contexto, contexto))
+        
+        conexao.commit()
+        conexao.close()
+        return False
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao verificar hash no SQLite: {e}")
+        return False
 
 def salvar_na_fila_clonagem(caminho_video, link_shopee, chat_origem="Desconhecida", nome_origem=None, msg_id=None):
-    arquivo_fila = "fila_clonagem.json"
-    try:
-        with open(arquivo_fila, "r") as f:
-            dados = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        dados = {"fila": []}
-        
-    item = {
-        "id": f"clone_{int(datetime.now().timestamp())}",
-        "chat_origem": str(chat_origem),
-        "nome_origem": str(nome_origem) if nome_origem else str(chat_origem),
-        "msg_id": msg_id,
-        "caminho_video": caminho_video,
-        "link_original": link_shopee,
-        "processado": False,
-        "data_captura": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    }
+    id_unico = f"clone_{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}"
+    data_captura = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    nome_origem_str = str(nome_origem) if nome_origem else str(chat_origem)
     
-    dados["fila"].append(item)
-    with open(arquivo_fila, "w") as f:
-        json.dump(dados, f, indent=4)
-    if EXIBIR_LOGS: logger.info(f"📦 Item salvo na fila de clonagem com sucesso (ID: {item['id']}).")
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute('''
+            INSERT INTO fila_espiao (id_unico, chat_origem, nome_origem, msg_id, caminho_video, link_original, processado, data_captura)
+            VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+        ''', (id_unico, str(chat_origem), nome_origem_str, msg_id, caminho_video, link_shopee, data_captura))
+        conexao.commit()
+        conexao.close()
+        if EXIBIR_LOGS: logger.info(f"📦 Item salvo na fila_espiao (SQLite) com sucesso (ID: {id_unico}).")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar na fila_espiao do SQLite: {e}")
 
 def registrar_historico_espiao(nome_grupo):
-    import json
-    import os
-    arquivo_hist = "historico_espiao.json"
+    historico = ler_config_bd_espiao("historico_espiao", padrao={"total": 0, "grupos": {}})
     
-    try:
-        if os.path.exists(arquivo_hist):
-            with open(arquivo_hist, "r") as f:
-                historico = json.load(f)
-        else:
-            historico = {"total": 0, "grupos": {}}
-    except (FileNotFoundError, json.JSONDecodeError):
-        historico = {"total": 0, "grupos": {}}
-        
     historico["total"] = historico.get("total", 0) + 1
-    
     grupos = historico.get("grupos", {})
     grupos[nome_grupo] = grupos.get(nome_grupo, 0) + 1
     historico["grupos"] = grupos
     
-    with open(arquivo_hist, "w") as f:
-        json.dump(historico, f, indent=4)
-        
-    if EXIBIR_LOGS: logger.info(f"📊 [Estatística] +1 vídeo contabilizado para o histórico do grupo: {nome_grupo}")
+    salvar_config_bd_espiao("historico_espiao", historico)
+    if EXIBIR_LOGS: logger.info(f"📊 [Estatística] +1 vídeo contabilizado no SQLite para o grupo: {nome_grupo}")
 
 async def converter_link_shopee(link_original):
     if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
