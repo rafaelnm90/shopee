@@ -75,16 +75,43 @@ if EXIBIR_LOGS:
 API_ID = int(os.getenv('API_ID', 0)) 
 API_HASH = os.getenv('API_HASH', '')
 
-def carregar_config_autorais():
+import sqlite3
+
+def ler_config_bd_autorais(chave, padrao=None):
+    if padrao is None: padrao = {}
     try:
-        with open("autorais_config.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        # Valores genéricos de segurança. Tudo será editado pelo seu Bot Principal depois.
-        return {"origem": -1003673555953, "origem_topico": None, "destino": "@videos_autorais"}
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("SELECT valor FROM configuracoes WHERE chave = ?", (chave,))
+        resultado = cursor.fetchone()
+        conexao.close()
+        if resultado:
+            return json.loads(resultado[0])
+        return padrao
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler '{chave}' do SQLite: {e}")
+        return padrao
+
+def salvar_config_bd_autorais(chave, dados):
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        dados_str = json.dumps(dados, ensure_ascii=False)
+        cursor.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)", (chave, dados_str))
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar '{chave}' no SQLite: {e}")
+
+def carregar_config_autorais():
+    padrao = {"origem": -1003673555953, "origem_topico": None, "destino": "@videos_autorais"}
+    dados = ler_config_bd_autorais("autorais_config", padrao)
+    if not dados and EXIBIR_LOGS:
+        logger.warning("⚠️ Configuração 'autorais_config' não encontrada. Aguardando o bot principal criá-la.")
+    return dados
+
 def salvar_config_autorais(config):
-    with open("autorais_config.json", "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=4, ensure_ascii=False)
+    salvar_config_bd_autorais("autorais_config", config)
 
 config_atual = carregar_config_autorais()
 
@@ -93,14 +120,45 @@ client = TelegramClient(NOME_SESSAO, API_ID, API_HASH)
 
 def ler_fila_retorno():
     try:
-        with open("fila_retorno.json", "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao.row_factory = sqlite3.Row
+        cursor = conexao.cursor()
+        cursor.execute("SELECT * FROM fila_autorais")
+        linhas = cursor.fetchall()
+        conexao.close()
+        
+        dados = {}
+        for linha in linhas:
+            dt = linha["data_alvo"]
+            if dt not in dados:
+                dados[dt] = []
+            dados[dt].append({
+                "msg_id_destino": linha["msg_id_destino"],
+                "legenda": linha["legenda"],
+                "caminho_arquivo": linha["caminho_arquivo"]
+            })
+        return dados
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila_autorais do SQLite: {e}")
         return {}
 
 def salvar_fila_retorno(dados):
-    with open("fila_retorno.json", "w", encoding="utf-8") as f:
-        json.dump(dados, f, indent=4, ensure_ascii=False)
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        
+        # Limpa e reconstrói a tabela baseada na memória manipulada para garantir integridade
+        cursor.execute("DELETE FROM fila_autorais")
+        for dt, lista in dados.items():
+            for item in lista:
+                cursor.execute('''
+                    INSERT INTO fila_autorais (msg_id_destino, legenda, caminho_arquivo, data_alvo)
+                    VALUES (?, ?, ?, ?)
+                ''', (item.get("msg_id_destino"), item.get("legenda"), item.get("caminho_arquivo"), dt))
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar fila_autorais no SQLite: {e}")
 
 async def converter_link_shopee(link_original):
     if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
