@@ -871,34 +871,50 @@ def salvar_lixeira(dados):
     with open("lixeira_mensagens.json", "w") as f:
         json.dump(dados, f, indent=4)
 
+# --- SISTEMA DE LIXEIRA PERSISTENTE (MIGRADO PARA SQLITE) ---
 def limpar_historico_antigo():
     if os.path.exists("historico_mensagens.json"):
         os.remove("historico_mensagens.json")
         if EXIBIR_LOGS: logger.info("🧹 Histórico de mensagens do userbot reiniciado.")
 
 def registrar_lixeira(msg_id, chat_id=GRUPO_ID):
-    dados = ler_lixeira()
-    dados["mensagens"].append({"id": msg_id, "chat_id": chat_id})
-    salvar_lixeira(dados)
-    if EXIBIR_LOGS: logger.info(f"💾 ID {msg_id} (Chat: {chat_id}) salvo na lixeira persistente para exclusão na madrugada (03h00).")
+    try:
+        conexao = sqlite3.connect("banco_dados.db")
+        cursor = conexao.cursor()
+        agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute("INSERT INTO lixeira_mensagens (msg_id, chat_id, data_inclusao) VALUES (?, ?, ?)", (msg_id, str(chat_id), agora))
+        conexao.commit()
+        conexao.close()
+        if EXIBIR_LOGS: logger.info(f"💾 ID {msg_id} (Chat: {chat_id}) salvo na lixeira persistente (SQLite) para exclusão na madrugada.")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao registrar lixeira no banco: {e}")
 
 async def varredor_de_lixeira():
     if EXIBIR_LOGS: logger.info("🧹 Iniciando varredura diária da lixeira persistente (03h00)...")
-    dados = ler_lixeira()
-    mensagens = dados.get("mensagens", [])
-    
-    for msg in mensagens:
-        try:
-            # Recupera o ID e o chat correto da mensagem salva
-            msg_id = msg.get("id") if isinstance(msg, dict) else msg
-            chat_destino = msg.get("chat_id", GRUPO_ID) if isinstance(msg, dict) else GRUPO_ID
-            await apagar_mensagem_automatica(msg_id, chat_destino)
-        except Exception as e:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao processar item da lixeira: {e}")
+    try:
+        conexao = sqlite3.connect("banco_dados.db")
+        cursor = conexao.cursor()
+        cursor.execute("SELECT id, msg_id, chat_id FROM lixeira_mensagens")
+        mensagens = cursor.fetchall()
+        
+        ids_apagados = []
+        for linha in mensagens:
+            id_banco, msg_id, chat_id = linha
+            try:
+                await apagar_mensagem_automatica(msg_id, chat_id)
+                ids_apagados.append(id_banco)
+            except Exception as e:
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao processar item da lixeira: {e}")
+                ids_apagados.append(id_banco) # Remove do banco mesmo com falha para não travar
+        
+        for id_banco in ids_apagados:
+            cursor.execute("DELETE FROM lixeira_mensagens WHERE id = ?", (id_banco,))
             
-    dados["mensagens"] = []
-    salvar_lixeira(dados)
-    if EXIBIR_LOGS: logger.info("✅ Lixeira persistente esvaziada com sucesso.")
+        conexao.commit()
+        conexao.close()
+        if EXIBIR_LOGS: logger.info("✅ Lixeira persistente (SQLite) esvaziada com sucesso.")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro na varredura da lixeira: {e}")
 
 async def apagar_mensagem_automatica(msg_id, chat_id=GRUPO_ID):
     try:
@@ -3152,41 +3168,39 @@ async def gerar_relatorio_ia(message: types.Message, state: FSMContext):
 @dp.message(F.text == "Logs de Erros ⚠️", StateFilter("*"))
 async def gerar_relatorio_logs(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    msg_status = await message.answer("⚠️ A extrair o ficheiro de registo de falhas... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("🚀 A iniciar a auditoria do ficheiro erros_logs.json...")
+    msg_status = await message.answer("⚠️ A extrair o histórico de falhas do banco de dados... Aguarde ⏳")
+    if EXIBIR_LOGS: logger.info("🚀 A iniciar a auditoria da tabela erros_logs...")
     
-    arquivo_logs = "erros_logs.json"
-    
-    if not os.path.exists(arquivo_logs):
-        if EXIBIR_LOGS: logger.info("✅ O ficheiro de logs não existe. O sistema está perfeitamente limpo.")
-        await msg_status.edit_text("✅ <b>Sistema Limpo!</b>\nNão existe nenhum ficheiro de registo de erros no servidor. A automação está a funcionar perfeitamente.", parse_mode="HTML")
-        return
-        
     try:
-        with open(arquivo_logs, "r", encoding="utf-8") as f:
-            logs = json.load(f)
-            
-        if not logs:
-            if EXIBIR_LOGS: logger.info("✅ O ficheiro de logs existe, mas está vazio. Sistema limpo.")
-            await msg_status.edit_text("✅ <b>Sistema Limpo!</b>\nO ficheiro de erros está vazio. Nenhuma falha foi registada recentemente.", parse_mode="HTML")
+        conexao = sqlite3.connect("banco_dados.db")
+        conexao.row_factory = sqlite3.Row
+        cursor = conexao.cursor()
+        
+        # Puxa os últimos 5 erros ordenados do mais recente para o mais antigo
+        cursor.execute("SELECT * FROM erros_logs ORDER BY id DESC LIMIT 5")
+        erros_db = cursor.fetchall()
+        
+        cursor.execute("SELECT COUNT(*) FROM erros_logs")
+        total_erros = cursor.fetchone()[0]
+        conexao.close()
+        
+        if total_erros == 0:
+            if EXIBIR_LOGS: logger.info("✅ A tabela de logs está vazia. Sistema limpo.")
+            await msg_status.edit_text("✅ <b>Sistema Limpo!</b>\nNão existe nenhum registo de erros no banco de dados. A automação está a funcionar perfeitamente.", parse_mode="HTML")
             return
             
-        if EXIBIR_LOGS: logger.info(f"📊 Ficheiro lido com sucesso. Foram encontrados {len(logs)} registos de erro.")
+        if EXIBIR_LOGS: logger.info(f"📊 Leitura concluída. Foram encontrados {total_erros} registos no total.")
         
-        ultimos_erros = logs[-5:]
-        ultimos_erros.reverse()
-        
-        texto = f"⚠️ <b>Relatório de Erros Recentes</b> (Últimos {len(ultimos_erros)})\n\n"
-        for i, erro in enumerate(ultimos_erros, 1):
-            data_hora = erro.get("timestamp", "Data desconhecida")
-            origem = erro.get("origem", "Desconhecida")
-            detalhe = str(erro.get("erro", ""))[:200]
+        texto = f"⚠️ <b>Relatório de Erros Recentes</b> (Últimos {len(erros_db)} de {total_erros})\n\n"
+        for i, erro in enumerate(erros_db, 1):
+            data_hora = erro["timestamp"]
+            origem = erro["origem"]
+            detalhe = str(erro["erro"])[:200]
             
             texto += f"<b>{i}. ⏱️ {data_hora}</b>\n"
             texto += f"📍 <i>Origem:</i> {origem}\n"
             texto += f"❌ <i>Falha:</i> <code>{detalhe}</code>\n\n"
             
-        # ✅ NOVO: Criação do botão interativo anexado diretamente à mensagem de erro
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
         teclado_limpar = InlineKeyboardMarkup(
             inline_keyboard=[[InlineKeyboardButton(text="Limpar Histórico de Erros 🧹", callback_data="limpar_logs")]]
@@ -3194,16 +3208,11 @@ async def gerar_relatorio_logs(message: types.Message, state: FSMContext):
         
         await msg_status.edit_text(texto, parse_mode="HTML", reply_markup=teclado_limpar)
         
-        if EXIBIR_LOGS: logger.info("📤 A enviar o documento JSON completo para o chat do administrador...")
-        documento = FSInputFile(arquivo_logs)
-        await bot.send_document(chat_id=message.chat.id, document=documento, caption="📁 Ficheiro completo de logs em anexo.")
-        if EXIBIR_LOGS: logger.info("✅ Ficheiro de logs entregue com sucesso!")
-        
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao processar a leitura dos logs: {e}")
+        if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao processar a leitura dos logs no SQLite: {e}")
         await msg_status.edit_text(f"❌ <b>Erro interno ao processar os logs:</b>\n<code>{e}</code>", parse_mode="HTML")
 
-# ✅ NOVO: Handler (Callback) para apagar fisicamente o ficheiro de logs após o clique
+# ✅ NOVO: Handler (Callback) para limpar o histórico do banco de dados
 from aiogram.types import CallbackQuery
 
 @dp.callback_query(F.data == "limpar_logs")
@@ -3212,25 +3221,23 @@ async def limpar_historico_erros(callback: CallbackQuery):
     
     if EXIBIR_LOGS: logger.info("🧹 Pedido de exclusão do histórico de erros recebido via botão interativo.")
     
-    arquivo_logs = "erros_logs.json"
-    if os.path.exists(arquivo_logs):
-        try:
-            os.remove(arquivo_logs)
-            
-            # ✅ NOVO: Cria o arquivo de trava na raiz do projeto para silenciar erros temporariamente
-            with open("trava_manutencao.txt", "w") as f:
-                f.write("ativo")
-                
-            if EXIBIR_LOGS: logger.info("✅ Ficheiro erros_logs.json apagado e trava_manutencao.txt ativada.")
-            await callback.message.edit_text("✅ <b>Histórico Limpo e Trava Ativada!</b>\nOs erros antigos foram apagados. O abafador de ruído está ativo enquanto você faz as correções no código.", parse_mode="HTML")
-        except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro de permissão/sistema ao tentar apagar o ficheiro de logs: {e}")
-            await callback.answer(f"Erro ao apagar: {e}", show_alert=True)
-    else:
-        if EXIBIR_LOGS: logger.info("⚠️ O ficheiro de logs já não existia no momento da exclusão.")
-        await callback.message.edit_text("✅ <b>Sistema Limpo!</b>\nO ficheiro de erros já não existe no servidor.", parse_mode="HTML")
+    try:
+        conexao = sqlite3.connect("banco_dados.db")
+        cursor = conexao.cursor()
+        cursor.execute("DELETE FROM erros_logs")
+        conexao.commit()
+        conexao.close()
         
-    # Finaliza a interação do callback para remover o ícone de carregamento no Telegram do utilizador
+        # Cria o arquivo de trava na raiz do projeto para silenciar erros temporariamente
+        with open("trava_manutencao.txt", "w") as f:
+            f.write("ativo")
+            
+        if EXIBIR_LOGS: logger.info("✅ Tabela erros_logs limpa e trava_manutencao.txt ativada.")
+        await callback.message.edit_text("✅ <b>Histórico Limpo e Trava Ativada!</b>\nOs erros antigos foram apagados do banco de dados. O abafador de ruído está ativo enquanto você faz as correções no código.", parse_mode="HTML")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro de permissão/sistema ao tentar limpar a tabela de logs: {e}")
+        await callback.answer(f"Erro ao apagar: {e}", show_alert=True)
+        
     await callback.answer()
 
 # ✅ Handlers para Envio Manual de Mensagens via Botões
