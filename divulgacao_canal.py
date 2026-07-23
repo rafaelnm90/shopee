@@ -74,22 +74,46 @@ scheduler = AsyncIOScheduler()
 telegram_lock = asyncio.Lock()
 if EXIBIR_LOGS: logger.info("🚦 Semáforo de controle de tráfego do Telegram ativado!")
 
+import sqlite3
+
+def ler_config_bd_divulgacao(chave, padrao=None):
+    if padrao is None: padrao = {}
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("SELECT valor FROM configuracoes WHERE chave = ?", (chave,))
+        resultado = cursor.fetchone()
+        conexao.close()
+        if resultado:
+            return json.loads(resultado[0])
+        return padrao
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler '{chave}' do SQLite: {e}")
+        return padrao
+
+def salvar_config_bd_divulgacao(chave, dados):
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        dados_str = json.dumps(dados, ensure_ascii=False)
+        cursor.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)", (chave, dados_str))
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar '{chave}' no SQLite: {e}")
+
 # 4. FUNÇÕES DE IA E AGENDAMENTO
 def carregar_configuracoes():
-    try:
-        with open("alvos_divulgacao.json", "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        if EXIBIR_LOGS: logger.warning("⚠️ Arquivo alvos_divulgacao.json não encontrado ou corrompido. Aguardando o bot principal criá-lo.")
-        return None
+    dados = ler_config_bd_divulgacao("alvos_divulgacao", padrao=None)
+    if not dados and EXIBIR_LOGS:
+        logger.warning("⚠️ Configuração 'alvos_divulgacao' não encontrada no banco. Aguardando o bot principal criá-la.")
+    return dados
 
 def carregar_configuracoes_viral():
-    try:
-        with open("alvos_divulgacao_viral.json", "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        if EXIBIR_LOGS: logger.warning("⚠️ Arquivo alvos_divulgacao_viral.json não encontrado ou corrompido. Aguardando o bot principal criá-lo.")
-        return None
+    dados = ler_config_bd_divulgacao("alvos_divulgacao_viral", padrao=None)
+    if not dados and EXIBIR_LOGS:
+        logger.warning("⚠️ Configuração 'alvos_divulgacao_viral' não encontrada no banco. Aguardando o bot principal criá-la.")
+    return dados
 
 async def gerar_texto_divulgacao(repeticoes=6):
     if EXIBIR_LOGS: print(f"✅ Função iniciada com {repeticoes} repetições.")
@@ -383,14 +407,12 @@ async def monitorar_comandos():
             if config_princ.get("pausado", False):
                 if EXIBIR_LOGS: logger.warning("🛑 Comando forçado ignorado: O sistema de SPAM Principal está pausado.")
                 config_princ["forcar_disparo"] = False
-                with open("alvos_divulgacao.json", "w") as f:
-                    json.dump(config_princ, f, indent=4)
+                salvar_config_bd_divulgacao("alvos_divulgacao", config_princ)
             else:
                 if EXIBIR_LOGS: logger.info("🚀 Comando de DISPARO FORÇADO PRINCIPAL detectado! Iniciando rajada...")
                 config_princ["forcar_disparo"] = False
-                with open("alvos_divulgacao.json", "w") as f:
-                    json.dump(config_princ, f, indent=4)
-                    
+                salvar_config_bd_divulgacao("alvos_divulgacao", config_princ)
+                
                 alvos_princ = config_princ.get("alvos", [])
                 for alvo in alvos_princ:
                     await enviar_mensagem(alvo)
@@ -401,14 +423,12 @@ async def monitorar_comandos():
             if config_viral.get("pausado", False):
                 if EXIBIR_LOGS: logger.warning("🛑 [VIRAL] Comando forçado ignorado: O sistema de SPAM Viral está pausado.")
                 config_viral["forcar_disparo"] = False
-                with open("alvos_divulgacao_viral.json", "w") as f:
-                    json.dump(config_viral, f, indent=4)
+                salvar_config_bd_divulgacao("alvos_divulgacao_viral", config_viral)
             else:
                 if EXIBIR_LOGS: logger.info("🚀 [VIRAL] Comando de DISPARO FORÇADO VIRAL detectado! Iniciando rajada...")
                 config_viral["forcar_disparo"] = False
-                with open("alvos_divulgacao_viral.json", "w") as f:
-                    json.dump(config_viral, f, indent=4)
-                    
+                salvar_config_bd_divulgacao("alvos_divulgacao_viral", config_viral)
+                
                 alvos_viral = config_viral.get("alvos", [])
                 for alvo in alvos_viral:
                     await enviar_mensagem_viral(alvo)
