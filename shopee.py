@@ -367,7 +367,7 @@ teclado_edicao_nicho = ReplyKeyboardMarkup(
 def obter_teclado_raiz():
     botoes = [
         [KeyboardButton(text="Canal Afiliados 📺"), KeyboardButton(text="Outros Canais 🗂️")],
-        [KeyboardButton(text="Relatório Geral 📊"), 
+        [KeyboardButton(text="Relatório Geral 📊")],
         [KeyboardButton(text="Opções do Servidor ⚙️")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
