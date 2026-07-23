@@ -511,11 +511,6 @@ def salvar_fila_postagens(dados):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao reescrever fila no SQLite: {e}")
 
-return {"fila": fila}
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila do SQLite: {e}")
-        return {"fila": []}
-
 # 🧹 O antigo salvar_fila_postagens() foi completamente eliminado nesta fase.
 # Todas as gravações agora ocorrem através de queries atómicas (UPDATE/INSERT/DELETE).
 
