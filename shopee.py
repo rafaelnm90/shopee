@@ -5962,7 +5962,7 @@ async def processar_exclusao_fila(message: types.Message, state: FSMContext):
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
     
-    iif posicao is not None and 0 <= posicao < len(fila):
+    if posicao is not None and 0 <= posicao < len(fila):
         import re
         
         menor_numero_antes = float('inf')
