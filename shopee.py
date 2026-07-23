@@ -573,7 +573,7 @@ async def motor_fila_minuto():
         if minutos_restantes > 0:
             # Reduz a janela em 10% garantindo que o último caiba com folga antes de fechar a loja
             gap_organico = int((minutos_restantes * 0.9) / qtd_videos)
-            INTERVALO_MINIMO = max(15, min(gap_organico, 90)) # Garante um limite visual entre 15 e 90 minutos
+            INTERVALO_MINIMO = max(15, min(gap_organico, 90))
             
         # 3. Verifica a distância de tempo do último vídeo (O Semáforo)
         cursor.execute("SELECT horario_postagem FROM fila_postagens WHERE data_postagem = ? AND status = 'CONCLUIDO' ORDER BY horario_postagem DESC LIMIT 1", (hoje_str,))
@@ -740,7 +740,6 @@ async def verificar_pausa_diaria():
         
     if EXIBIR_LOGS: logger.info("🛑 Pausa ativa. Enviando aviso diário ao grupo principal...")
     
-    # 1. Recupera e apaga o aviso antigo
     id_aviso_imediato = dados_pausa.get("id_aviso_imediato")
     if id_aviso_imediato:
         if EXIBIR_LOGS: logger.info("🧹 Excluindo aviso antigo para dar lugar ao novo aviso diário...")
@@ -759,10 +758,7 @@ async def verificar_pausa_diaria():
     )
     texto = await gerar_mensagem_gemini(prompt)
     
-    # 2. Envia o novo aviso
     msg_enviada = await bot.send_message(GRUPO_ID, texto)
-    
-    # ✅ CORREÇÃO: Atualiza o ID na memória da pausa em vez de atirar para a lixeira
     dados_pausa["id_aviso_imediato"] = msg_enviada.message_id
     salvar_pausa_programada(dados_pausa)
     
@@ -783,7 +779,6 @@ async def verificar_retorno_pausa_minuto():
     try:
         data_retorno = datetime.strptime(data_retorno_str, "%d/%m/%Y %H:%M").replace(tzinfo=fuso_horario)
     except ValueError:
-        # Fallback de segurança caso haja uma data configurada previamente no formato antigo
         try:
             data_retorno = datetime.strptime(data_retorno_str, "%d/%m/%Y").date()
             hoje = hoje.date()
@@ -793,12 +788,10 @@ async def verificar_retorno_pausa_minuto():
     if hoje >= data_retorno:
         if EXIBIR_LOGS: logger.info("⏰ Data e hora de retorno atingidas! Reativando serviços pausados...")
         
-        # Apaga a placa de "Fechado"
         id_aviso = dados_pausa.pop("id_aviso_imediato", None)
         if id_aviso:
             await apagar_mensagem_automatica(id_aviso, GRUPO_ID)
             
-        # ✅ NOVO: A IA gera o aviso de retorno ao trabalho silenciosamente no background
         prompt_retorno = (
             "Você é um assistente de afiliados. Crie uma mensagem MUITO CURTA E EMPOLGANTE "
             "avisando o grupo que a pausa de manutenção acabou, o canal voltou à ativa e os "
@@ -806,8 +799,6 @@ async def verificar_retorno_pausa_minuto():
             "REGRA ABSOLUTA: Seja direto (máximo 150 caracteres), use emojis animados e entregue APENAS o texto pronto."
         )
         texto_retorno = await gerar_mensagem_gemini(prompt_retorno)
-        
-        # ✅ CORREÇÃO: Salva a mensagem enviada numa variável e joga o ID na lixeira
         msg_retorno = await bot.send_message(GRUPO_ID, texto_retorno)
         registrar_lixeira(msg_retorno.message_id, GRUPO_ID)
         
