@@ -5962,44 +5962,44 @@ async def processar_exclusao_fila(message: types.Message, state: FSMContext):
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
     
-    if posicao is not None and 0 <= posicao < len(fila):
-            import re
-            
-            menor_numero_antes = float('inf')
-            for f_item in fila:
-                match = re.search(r'(?i)Vídeo\s+(\d+)', f_item.get("legenda", ""))
-                if match:
-                    num = int(match.group(1))
-                    if num < menor_numero_antes:
-                        menor_numero_antes = num
-            if menor_numero_antes == float('inf'): menor_numero_antes = None
+    iif posicao is not None and 0 <= posicao < len(fila):
+        import re
+        
+        menor_numero_antes = float('inf')
+        for f_item in fila:
+            match = re.search(r'(?i)Vídeo\s+(\d+)', f_item.get("legenda", ""))
+            if match:
+                num = int(match.group(1))
+                if num < menor_numero_antes:
+                    menor_numero_antes = num
+        if menor_numero_antes == float('inf'): menor_numero_antes = None
 
-            item_removido = fila.pop(posicao)
-            id_remover = item_removido.get("id")
-            caminho_video = item_removido.get("caminho_video")
-            
-            try:
-                conexao = sqlite3.connect("banco_dados.db")
-                cursor = conexao.cursor()
-                cursor.execute("DELETE FROM fila_postagens WHERE id_unico = ?", (id_remover,))
-                conexao.commit()
-                conexao.close()
-            except Exception as e:
-                if EXIBIR_LOGS: logger.error(f"❌ Erro ao apagar do banco: {e}")
+        item_removido = fila.pop(posicao)
+        id_remover = item_removido.get("id")
+        caminho_video = item_removido.get("caminho_video")
+        
+        try:
+            conexao = sqlite3.connect("banco_dados.db")
+            cursor = conexao.cursor()
+            cursor.execute("DELETE FROM fila_postagens WHERE id_unico = ?", (id_remover,))
+            conexao.commit()
+            conexao.close()
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro ao apagar do banco: {e}")
 
-            if caminho_video and os.path.exists(caminho_video):
-                ainda_usado = any(x.get("caminho_video") == caminho_video for x in fila)
-                if not ainda_usado:
-                    try: os.remove(caminho_video)
-                    except: pass
-                    
-            if EXIBIR_LOGS: logger.info(f"🗑️ Vídeo {id_remover} apagado do banco.")
-            
-            fila_ids = [item["id"] for item in fila]
-            await aplicar_renumeracao_e_salvar(fila_ids, message, state, numero_base=menor_numero_antes)
-        else:
-            await message.answer("Erro de sincronização. Operação cancelada.")
-            await menu_gerenciar_fila(message, state)
+        if caminho_video and os.path.exists(caminho_video):
+            ainda_usado = any(x.get("caminho_video") == caminho_video for x in fila)
+            if not ainda_usado:
+                try: os.remove(caminho_video)
+                except: pass
+                
+        if EXIBIR_LOGS: logger.info(f"🗑️ Vídeo {id_remover} apagado do banco.")
+        
+        fila_ids = [item["id"] for item in fila]
+        await aplicar_renumeracao_e_salvar(fila_ids, message, state, numero_base=menor_numero_antes)
+    else:
+        await message.answer("Erro de sincronização. Operação cancelada.")
+        await menu_gerenciar_fila(message, state)
 
 async def pedir_edicao_fila(message: types.Message, state: FSMContext):
     await message.answer("Digite o <b>NÚMERO</b> da posição do vídeo que deseja editar:", reply_markup=teclado_cancelar, parse_mode="HTML")
@@ -6753,14 +6753,16 @@ async def processar_fila_espiao(forcar=False):
     if hashtags:
         legenda_postagem += f"\n\n<i>{hashtags}</i>"
     
-    # ✅ SEGUNDA TRAVA DE SEGURANÇA: Inspeção física para o Espião
+    try:
+        if EXIBIR_LOGS: logger.info("🚀 Iniciando disparo do vídeo para o canal destino...")
+        # ✅ SEGUNDA TRAVA DE SEGURANÇA: Inspeção física para o Espião
         if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
             if EXIBIR_LOGS: logger.warning(f"🚫 [Segurança] Disparo do Espião abortado! O ficheiro {caminho_video} é uma imagem.")
             raise Exception("O ficheiro retido é uma imagem.")
             
         arquivo = FSInputFile(caminho_video)
         await bot.send_video(chat_id=canal_destino, video=arquivo, caption=legenda_postagem, parse_mode="HTML")
-        if EXIBIR_LOGS: logger.info(f"✅ Clone {item_id} publicado!")
+        if EXIBIR_LOGS: logger.info(f"✅ Clone {item_id} publicado com sucesso!")
         try: os.remove(caminho_video)
         except: pass
     except Exception as e:
@@ -6769,14 +6771,14 @@ async def processar_fila_espiao(forcar=False):
         except: pass
         
     # ✅ CORREÇÃO: Em vez de apagar, marca como processado para manter no relatório até ao fim do dia
-        for item in fila:
-            if item["id"] == item_id:
-                item["processado"] = True
-                item["data_postagem"] = agora.strftime("%Y-%m-%d")
-                item["horario_postagem"] = agora.strftime("%H:%M")
-                if EXIBIR_LOGS: logger.info(f"💾 [Espião] Vídeo {item_id} marcado como 'Postado' às {item['horario_postagem']} na memória da fila.")
-                break
-        fila_data["fila"] = fila
+    for item in fila:
+        if item["id"] == item_id:
+            item["processado"] = True
+            item["data_postagem"] = agora.strftime("%Y-%m-%d")
+            item["horario_postagem"] = agora.strftime("%H:%M")
+            if EXIBIR_LOGS: logger.info(f"💾 [Espião] Vídeo {item_id} marcado como 'Postado' às {item['horario_postagem']} na memória da fila.")
+            break
+    fila_data["fila"] = fila
     
     # ✅ MOTOR DE ESPAÇAMENTO DINÂMICO (Baseado estritamente na Janela)
     if forcar:
@@ -6796,11 +6798,11 @@ async def processar_fila_espiao(forcar=False):
         proximo_horario = agora + timedelta(minutes=minutos_espera)
         
     # ✅ FAXINA AUTOMÁTICA: Remove os vídeos postados em dias anteriores para o JSON não inchar
-        hoje_faxina = agora.strftime("%Y-%m-%d")
-        fila_data["fila"] = [i for i in fila_data["fila"] if not i.get("processado") or i.get("data_postagem") == hoje_faxina]
-        
-        fila_data["proximo_processamento"] = proximo_horario.strftime("%Y-%m-%d %H:%M:%S")
-        salvar_fila_clonagem(fila_data)
+    hoje_faxina = agora.strftime("%Y-%m-%d")
+    fila_data["fila"] = [i for i in fila_data["fila"] if not i.get("processado") or i.get("data_postagem") == hoje_faxina]
+    
+    fila_data["proximo_processamento"] = proximo_horario.strftime("%Y-%m-%d %H:%M:%S")
+    salvar_fila_clonagem(fila_data)
     
     try: os.remove(caminho_video)
     except: pass
