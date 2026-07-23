@@ -367,21 +367,27 @@ teclado_edicao_nicho = ReplyKeyboardMarkup(
 def obter_teclado_raiz():
     botoes = [
         [KeyboardButton(text="Canal Afiliados 📺"), KeyboardButton(text="Outros Canais 🗂️")],
-        [KeyboardButton(text="Relatório Geral 📊")],
-        [KeyboardButton(text="Monitorar Servidor 🖥️")]
+        [KeyboardButton(text="Relatório Geral 📊"), KeyboardButton(text="Opções do Servidor ⚙️")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
-# 🛠️ Função centralizadora da pasta do Canal Principal
-def obter_teclado_principal():
+# 🛠️ Novo Sub-Menu do Servidor
+def obter_teclado_opcoes_servidor():
     botoes = [
-        [KeyboardButton(text="Criar Postagem 📝")],
-        [KeyboardButton(text="Gerenciar Fila 📋")],
-        [KeyboardButton(text="Disparar Bom Dia ☀️"), KeyboardButton(text="Disparar Boa Noite 🌙")],
-        [KeyboardButton(text="Disparar Incentivo 🔥"), KeyboardButton(text="Disparar Convite do Grupo 🔗")],
-        [KeyboardButton(text="Disparar Convite Viral 🚀")],
-        [KeyboardButton(text="🛠️ Configurações Avançadas")], 
+        [KeyboardButton(text="Monitorar Servidor 🖥️"), KeyboardButton(text="Zerar Filas e Tarefas 🧹")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
+    ]
+    return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+
+def obter_teclado_configuracoes_gerais():
+    dados_pausa = ler_pausa_programada()
+    texto_botao_pausa = "Retomar Postagens ▶️" if dados_pausa.get("ativa") else "Pausar Postagens 🛑"
+    
+    botoes = [
+        [KeyboardButton(text="Mensagens de Rotina ⏰"), KeyboardButton(text="SPAM em Grupos 📢")],
+        [KeyboardButton(text="Editar Número da Postagem 🔢"), KeyboardButton(text=texto_botao_pausa)],
+        [KeyboardButton(text="🔄 Atualizar Rotinas")],
+        [KeyboardButton(text="Voltar 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
@@ -2074,6 +2080,13 @@ async def comando_start(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("⌨️ Iniciando o bot no Menu Raiz.")
     await message.answer("🏠 Painel de Controle Inicial. Escolha uma área para gerenciar:", reply_markup=obter_teclado_raiz())
 
+@dp.message(F.text == "Opções do Servidor ⚙️", StateFilter("*"))
+async def menu_opcoes_servidor_handler(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    if EXIBIR_LOGS: logger.info("⚙️ Acessando o painel de Opções do Servidor.")
+    await message.answer("⚙️ <b>Opções do Servidor</b>\nEscolha uma ferramenta de manutenção global:", reply_markup=obter_teclado_opcoes_servidor(), parse_mode="HTML")
+
 # BLOCO ESPECIFICAMENTE INSERIDO
 @dp.message(F.text == "Monitorar Servidor 🖥️", StateFilter("*"))
 async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
@@ -3330,6 +3343,12 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 
     data = await state.get_data()
 
+    # 🔁 Roteamento Inteligente: Se estiver na confirmação de Zerar Filas Globais
+    if estado_atual == "ConfigFluxo:aguardando_confirmacao_zerar_filas":
+        await state.clear()
+        await message.answer("Ação cancelada. O sistema não foi limpo.", reply_markup=obter_teclado_opcoes_servidor())
+        return
+
     # 🔁 Roteamento Inteligente: Se estiver no Gerenciador de Fila
     if estado_atual and estado_atual.startswith("GerenciarFilaFluxo"):
         await state.clear()
@@ -4176,7 +4195,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
     )
     
     if EXIBIR_LOGS: logger.info(f"✅ Faxina concluída. {relatorio['espaco_mb']:.2f} MB liberados. {relatorio['arquivos']} arquivos obliterados.")
-    await message.answer(texto_final, parse_mode="HTML", reply_markup=obter_teclado_configuracoes_gerais())
+    await message.answer(texto_final, parse_mode="HTML", reply_markup=obter_teclado_opcoes_servidor())
     await state.clear()
 
 @dp.message(F.text == "Outros Canais 🗂️", StateFilter("*"))
