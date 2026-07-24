@@ -21,7 +21,10 @@ from aiogram.filters import Command, StateFilter
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, FSInputFile
 import subprocess
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from google import genai
+# ✅ Importação dos nossos novos módulos blindados (Fase 2)
+from api_gemini import gerar_texto_gemini, analisar_video_gemini, MODELOS_CASCATA_GEMINI, client_genai
+from api_shopee import converter_link_shopee, buscar_ofertas_shopee
+
 import matplotlib.pyplot as plt
 import io
 import sqlite3
@@ -29,7 +32,7 @@ import espelhador
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo
 EXIBIR_LOGS = True
 
-# 2. CONFIGURAÇÃO DE LOGS 🚀 (Movido para o topo para garantir carregamento global)
+# 2. CONFIGURAÇÃO DE LOGS 🚀
 if EXIBIR_LOGS:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
     logger = logging.getLogger(__name__)
@@ -69,22 +72,9 @@ GRUPO_ID = -1003909405581
 LINK_GRUPO = "https://t.me/shopee_video_afiliado"
 GRUPO_VIRAL_ID = -1003932482573
 LINK_GRUPO_VIRAL = "https://t.me/acervo_viral_shopee"
-GEMINI_API_KEY = os.getenv('GEMINI_KEY')
 SHOPEE_APP_ID = os.getenv('SHOPEE_APP_ID')
 SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
-
-MODELOS_CASCATA_GEMINI = [
-    "gemini-3.1-pro-preview",
-    "gemini-2.5-pro",
-    "gemini-3.5-flash",
-    "gemini-3-flash-preview",
-    "gemini-2.5-flash",
-    "gemini-3.1-flash-lite-preview",
-    "gemini-2.5-flash-lite"
-]
-
-# Inicializa o cliente moderno da SDK do Google
-client = genai.Client(api_key=GEMINI_API_KEY)
+# As chaves do Gemini e a cascata foram removidas. Agora são geridas com total segurança pelo api_gemini.py
 
 # 2.5 SISTEMA DE NUMERAÇÃO DE VÍDEOS 🔢
 def ler_contador():
@@ -873,33 +863,9 @@ async def verificar_retorno_pausa_minuto():
 
 # 4. FUNÇÕES DE GERAÇÃO COM IA E AGENDAMENTO ⏰
 async def gerar_mensagem_gemini(prompt):
-
-    if EXIBIR_LOGS: logger.info("🧠 Iniciando processamento em cascata com a nova SDK...")
-
-    for modelo_nome in MODELOS_CASCATA_GEMINI:
-        try:
-            if EXIBIR_LOGS: logger.info(f"⏳ Consultando motor: {modelo_nome}...")
-            
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model=modelo_nome,
-                contents=prompt
-            )
-            
-            if response and response.text:
-                if EXIBIR_LOGS: logger.info(f"✅ Sucesso total com o modelo {modelo_nome}!")
-                return response.text.strip()
-                
-        except Exception as e:
-            erro_str = str(e)
-            if "429" in erro_str:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Limite atingido em {modelo_nome}. Pausando 2s...")
-                await asyncio.sleep(2)
-            else:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Modelo {modelo_nome} indisponível: {erro_str[:50]}...")
-            continue
-
-    if EXIBIR_LOGS: logger.error("❌ Falha crítica: Nenhum motor da cascata respondeu.")
+    texto = await gerar_texto_gemini(prompt, EXIBIR_LOGS)
+    if texto:
+        return texto
     return "🚀 Novos materiais disponíveis! Bora postar e converter!"
 
 # --- SISTEMA DE LIXEIRA PERSISTENTE ---
@@ -1899,93 +1865,6 @@ def salvar_achadinhos_enviados(lista):
         lista = lista[-500:]
     salvar_config_bd("achadinhos_enviados", lista)
 
-async def buscar_ofertas_shopee(keyword, limite=10):
-    if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
-        if EXIBIR_LOGS: logger.warning("⏳ [Achadinhos] Chaves da API ausentes no .env.")
-        return []
-        
-    endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
-    timestamp = int(time.time())
-    
-    payload = {
-        "query": """query getProductOffer($keyword: String!, $limit: Int!, $sortType: Int) {
-            productOfferV2(keyword: $keyword, limit: $limit, sortType: $sortType) {
-                nodes {
-                    itemId
-                    productName
-                    price
-                    priceDiscountRate
-                    ratingStar
-                    imageUrl
-                    productLink
-                }
-            }
-        }""",
-        "variables": {
-            "keyword": keyword,
-            "limit": limite,
-            "sortType": 2
-        }
-    }
-    
-    payload_json = json.dumps(payload, separators=(',', ':'))
-    fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}{SHOPEE_APP_SECRET}"
-    assinatura = hashlib.sha256(fator_base.encode('utf-8')).hexdigest()
-    
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"SHA256 Credential={SHOPEE_APP_ID}, Timestamp={timestamp}, Signature={assinatura}"
-    }
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(endpoint, headers=headers, data=payload_json) as response:
-                if response.status == 200:
-                    dados = await response.json()
-                    erros = dados.get("errors")
-                    if erros:
-                        if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] A API negou o rastreio: {erros[0].get('message')}")
-                        return []
-                    return dados.get("data", {}).get("productOfferV2", {}).get("nodes", [])
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Erro crítico na prospecção de ofertas: {e}")
-    return []
-
-async def converter_link_achadinho(link_original, sub_id_nicho="geral"):
-    endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
-    timestamp = int(time.time())
-    
-    import re
-    # Limpa espaços e caracteres especiais para criar uma tag de rastreio limpa
-    sub_id_limpo = re.sub(r'[^a-zA-Z0-9_]', '_', str(sub_id_nicho).strip())[:40]
-    
-    payload = {
-        "query": "mutation generateShortLink($originUrl: String!, $subIds: [String]) { generateShortLink(input: {originUrl: $originUrl, subIds: $subIds}) { shortLink } }",
-        "variables": {
-            "originUrl": link_original,
-            "subIds": [sub_id_limpo] # 🎯 Rastreio de Origem (Aparecerá no painel da Shopee)
-        }
-    }
-    
-    payload_json = json.dumps(payload, separators=(',', ':'))
-    fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}{SHOPEE_APP_SECRET}"
-    assinatura = hashlib.sha256(fator_base.encode('utf-8')).hexdigest()
-    
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"SHA256 Credential={SHOPEE_APP_ID}, Timestamp={timestamp}, Signature={assinatura}"
-    }
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(endpoint, headers=headers, data=payload_json) as response:
-                dados = await response.json()
-                if response.status == 200 and "data" in dados and dados["data"].get("generateShortLink"):
-                    return dados["data"]["generateShortLink"]["shortLink"]
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Falha ao encurtar a URL da oferta: {e}")
-    return link_original
-
 async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_loja):
     if EXIBIR_LOGS: logger.info(f"🧠 [Achadinhos] Estruturando estratégia de Copywriting para o produto...")
     
@@ -2002,19 +1881,10 @@ async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_l
         f"Você está estritamente proibido de calcular, deduzir, arredondar ou inventar qualquer valor financeiro. O preço fornecido nos dados brutos é um fato imutável e intocável. Utilize EXATAMENTE os números informados na sua redação. Se o valor final com desconto não estiver matematicamente explícito na entrada de dados, não tente adivinhá-lo sob nenhuma circunstância. Concentre a persuasão do texto exclusivamente nos benefícios físicos do produto e no gatilho de escassez, preservando a integridade absoluta da etiqueta de preço."
     )
     
-    for modelo_nome in MODELOS_CASCATA_GEMINI:
-        try:
-            response = await asyncio.to_thread(
-                client.models.generate_content,
-                model=modelo_nome,
-                contents=prompt
-            )
-            if response and response.text:
-                if EXIBIR_LOGS: logger.info("✅ [Achadinhos] Texto validado e extraído com sucesso da IA!")
-                return response.text.strip()
-        except Exception:
-            continue
-            
+    texto_gerado = await gerar_texto_gemini(prompt, EXIBIR_LOGS)
+    if texto_gerado:
+        return texto_gerado
+        
     return f"🔥 Achadinho Imperdível!\n📦 {nome_produto}\nDe R$ {preco_original} com {desconto} de desconto!\n\n🔗 Confira a oferta no link abaixo: 👇"
 
 async def processar_garimpo_automatico():
@@ -2073,7 +1943,7 @@ async def processar_garimpo_automatico():
         link_original = item_escolhido.get("productLink")
         
         texto_ia = await gerar_copy_achadinho_ia(nome, preco, desconto, nota_loja)
-        link_curto = await converter_link_achadinho(link_original, nome_nicho)
+        link_curto = await converter_link_shopee(link_original, nome_nicho, EXIBIR_LOGS)
         legenda_final = f"{texto_ia}\n{link_curto}"
         
         try:
@@ -3164,7 +3034,7 @@ async def gerar_relatorio_ia(message: types.Message, state: FSMContext):
             await msg_status.edit_text(f"🧠 <i>Testando motores IA...</i>\n🔎 Verificando motor ({i}/{len(MODELOS_CASCATA_GEMINI)}): <code>{modelo}</code> ⏳", parse_mode="HTML")
             
             response = await asyncio.to_thread(
-                client.models.generate_content,
+                client_genai.models.generate_content,
                 model=modelo,
                 contents="Responda apenas 'ok'"
             )
@@ -3494,62 +3364,21 @@ async def receber_video(message: types.Message, state: FSMContext):
         video_path = f"temp/temp_{file_id}.mp4"
         await bot.download_file(file_info.file_path, destination=video_path)
 
-        # 2. Upload para a API do Gemini processar a Copy
-        async def analisar_video():
-            if EXIBIR_LOGS: logger.info("📤 Fazendo upload do vídeo para o Google Storage...")
-            video_gemini = await asyncio.to_thread(client.files.upload, file=video_path)
-            
-            try:
-                # ✅ CORREÇÃO: Uso de asyncio.sleep para manter a loop de eventos fluida
-                if EXIBIR_LOGS: logger.info("⏳ Aguardando processamento do vídeo pelo Google...")
-                while video_gemini.state.name == "PROCESSING":
-                    await asyncio.sleep(2)
-                    video_gemini = await asyncio.to_thread(client.files.get, name=video_gemini.name)
-                    
-                if video_gemini.state.name == "FAILED":
-                    raise Exception("Falha de processamento no servidor do Google.")
-
-                if EXIBIR_LOGS: logger.info("✅ Vídeo pronto! Gerando a copy persuasiva...")
-                
-                # ✅ O número utilizado já foi travado e reservado acima
-                prompt_ia = (
-                    f"Assista ao vídeo INTEIRO para identificar o produto ou kit principal. "
-                    f"Sua resposta deve conter EXATAMENTE duas linhas. "
-                    f"Na primeira linha, escreva estritamente: 'Vídeo {numero_atual}'. "
-                    f"Na segunda linha, escreva '📦 Item: ' seguido do nome do produto ou kit identificado. "
-                    f"Exemplo de saída esperada:\n"
-                    f"Vídeo {numero_atual}\n"
-                    f"📦 Item: Kit Dove Reconstrução\n"
-                    f"Não adicione nenhuma outra palavra, ponto final extra ou descrição."
-                )
-                
-                def chamar_modelo(modelo):
-                    return client.models.generate_content(
-                        model=modelo,
-                        contents=[video_gemini, prompt_ia]
-                    )
-                
-                # ✅ Mini-cascata para o vídeo
-                try:
-                    response = await asyncio.to_thread(chamar_modelo, "gemini-3-flash-preview")
-                except Exception as erro_modelo:
-                    if "429" in str(erro_modelo):
-                        if EXIBIR_LOGS: logger.warning("⚠️ Limite do 3-flash atingido. Usando 2.5-flash como fallback...")
-                        response = await asyncio.to_thread(chamar_modelo, "gemini-2.5-flash")
-                    else:
-                        raise erro_modelo
-
-                return response.text.strip()
-            finally:
-                # ✅ CORREÇÃO: Limpeza obrigatória no Storage do Google para blindar a cota
-                if EXIBIR_LOGS: logger.info("🧹 Excluindo vídeo do servidor do Google para liberar armazenamento da API...")
-                try:
-                    await asyncio.to_thread(client.files.delete, name=video_gemini.name)
-                except Exception as e_del:
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ Falha ao excluir vídeo do Google: {e_del}")
-
-        # Executa a IA de forma assíncrona pura
-        chamada_gerada = await analisar_video()
+        # 2. Processa a Copy pela API Central do Gemini
+        prompt_ia = (
+            f"Assista ao vídeo INTEIRO para identificar o produto ou kit principal. "
+            f"Sua resposta deve conter EXATAMENTE duas linhas. "
+            f"Na primeira linha, escreva estritamente: 'Vídeo {numero_atual}'. "
+            f"Na segunda linha, escreva '📦 Item: ' seguido do nome do produto ou kit identificado. "
+            f"Exemplo de saída esperada:\n"
+            f"Vídeo {numero_atual}\n"
+            f"📦 Item: Kit Dove Reconstrução\n"
+            f"Não adicione nenhuma outra palavra, ponto final extra ou descrição."
+        )
+        
+        chamada_gerada = await analisar_video_gemini(video_path, prompt_ia, EXIBIR_LOGS)
+        if not chamada_gerada:
+            raise Exception("Falha total na análise do vídeo pela IA.")
         if EXIBIR_LOGS: logger.info("💾 Mantendo o vídeo no servidor para re-upload posterior com data atualizada.")
         
         # ✅ Salva o texto da IA e o caminho do vídeo físico na memória
@@ -3609,56 +3438,21 @@ async def processar_erro_ia(message: types.Message, state: FSMContext):
             
         msg_status = await message.answer("🔄 Reenviando vídeo para a IA analisar... Aguarde. ⏳", reply_markup=teclado_cancelar)
         
-        async def analisar_video_retry():
-            if EXIBIR_LOGS: logger.info("📤 Fazendo re-upload do vídeo para o Google Storage...")
-            video_gemini = await asyncio.to_thread(client.files.upload, file=video_path)
-            
-            try:
-                # ✅ CORREÇÃO: Sleep assíncrono para eficiência de memória
-                while video_gemini.state.name == "PROCESSING":
-                    await asyncio.sleep(2)
-                    video_gemini = await asyncio.to_thread(client.files.get, name=video_gemini.name)
-                    
-                if video_gemini.state.name == "FAILED":
-                    raise Exception("Falha de processamento no servidor do Google.")
-                    
-                prompt_ia = (
-                    f"Assista ao vídeo INTEIRO para identificar o produto ou kit principal. "
-                    f"Sua resposta deve conter EXATAMENTE duas linhas. "
-                    f"Na primeira linha, escreva estritamente: 'Vídeo {numero_atual}'. "
-                    f"Na segunda linha, escreva '📦 Item: ' seguido do nome do produto ou kit identificado. "
-                    f"Exemplo de saída esperada:\n"
-                    f"Vídeo {numero_atual}\n"
-                    f"📦 Item: Kit Dove Reconstrução\n"
-                    f"Não adicione nenhuma outra palavra, ponto final extra ou descrição."
-                )
-                
-                def chamar_modelo_retry(modelo):
-                    return client.models.generate_content(
-                        model=modelo,
-                        contents=[video_gemini, prompt_ia]
-                    )
-                
-                try:
-                    response = await asyncio.to_thread(chamar_modelo_retry, "gemini-3-flash-preview")
-                except Exception as erro_modelo:
-                    if "429" in str(erro_modelo):
-                        if EXIBIR_LOGS: logger.warning("⚠️ Limite do 3-flash atingido. Usando 2.5-flash como fallback...")
-                        response = await asyncio.to_thread(chamar_modelo_retry, "gemini-2.5-flash")
-                    else:
-                        raise erro_modelo
-                        
-                return response.text.strip()
-            finally:
-                # ✅ CORREÇÃO: Proteção do limite gratuito da chave API
-                if EXIBIR_LOGS: logger.info("🧹 Excluindo vídeo do Google (Retry) para preservar cota...")
-                try:
-                    await asyncio.to_thread(client.files.delete, name=video_gemini.name)
-                except Exception:
-                    pass
-            
+        prompt_ia = (
+            f"Assista ao vídeo INTEIRO para identificar o produto ou kit principal. "
+            f"Sua resposta deve conter EXATAMENTE duas linhas. "
+            f"Na primeira linha, escreva estritamente: 'Vídeo {numero_atual}'. "
+            f"Na segunda linha, escreva '📦 Item: ' seguido do nome do produto ou kit identificado. "
+            f"Exemplo de saída esperada:\n"
+            f"Vídeo {numero_atual}\n"
+            f"📦 Item: Kit Dove Reconstrução\n"
+            f"Não adicione nenhuma outra palavra, ponto final extra ou descrição."
+        )
+        
         try:
-            chamada_gerada = await analisar_video_retry()
+            chamada_gerada = await analisar_video_gemini(video_path, prompt_ia, EXIBIR_LOGS)
+            if not chamada_gerada:
+                raise Exception("Falha total na análise de re-processamento.")
             await msg_status.delete()
             
             await state.update_data(nome_produto=chamada_gerada)
@@ -6753,65 +6547,7 @@ def salvar_fila_clonagem(dados):
     with open("fila_clonagem.json", "w") as f:
         json.dump(dados, f, indent=4)
 
-async def converter_link_shopee(link_original):
-    if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
-        if EXIBIR_LOGS: logger.warning("⏳ [API Shopee] Chaves ausentes no .env. Ignorando conversão e mantendo o link original.")
-        return link_original
-
-    link_processar = link_original
-    
-    if "shp.ee" in link_original or "shope.ee" in link_original or "s.shopee.com.br" in link_original:
-        if EXIBIR_LOGS: logger.info(f"🔍 Detectado link encurtado. A iniciar a expansão do URL: {link_original}")
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(link_original, allow_redirects=True) as resp:
-                    link_processar = str(resp.url)
-                    if EXIBIR_LOGS: logger.info(f"✅ Expansão concluída. URL longo obtido: {link_processar}")
-        except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro ao tentar expandir o link: {e}. Será mantido o original.")
-
-    if EXIBIR_LOGS: logger.info(f"🔗 [API Shopee] A iniciar criptografia para o link: {link_processar}")
-
-    timestamp = int(time.time())
-    endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
-
-    # A query foi condensada em uma linha para evitar erros de leitura (espaços invisíveis) da Shopee
-    payload = {
-        "query": "mutation generateShortLink($originUrl: String!) { generateShortLink(input: {originUrl: $originUrl}) { shortLink } }",
-        "variables": {
-            "originUrl": link_processar
-        }
-    }
-    
-    payload_json = json.dumps(payload, separators=(',', ':'))
-
-    # A API de Afiliados exige concatenação simples com a senha no final, e não HMAC
-    fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}{SHOPEE_APP_SECRET}"
-    assinatura = hashlib.sha256(fator_base.encode('utf-8')).hexdigest()
-
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"SHA256 Credential={SHOPEE_APP_ID}, Timestamp={timestamp}, Signature={assinatura}"
-    }
-
-    if EXIBIR_LOGS: logger.info("📤 [API Shopee] Enviando requisição assinada para os servidores...")
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(endpoint, headers=headers, data=payload_json) as response:
-                resposta_dados = await response.json()
-
-                if response.status == 200 and "data" in resposta_dados and resposta_dados["data"].get("generateShortLink"):
-                    novo_link = resposta_dados["data"]["generateShortLink"]["shortLink"]
-                    if EXIBIR_LOGS: logger.info(f"✅ [API Shopee] Link convertido com sucesso: {novo_link}")
-                    return novo_link
-                else:
-                    if EXIBIR_LOGS: logger.error(f"❌ [API Shopee] Falha na conversão. Resposta: {resposta_dados}")
-                    return link_original
-
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [API Shopee] Erro de comunicação com o servidor: {e}")
-        return link_original
+# A função converter_link_shopee foi deletada daqui.
 
 async def processar_fila_espiao(forcar=False):
     dados_espiao = ler_alvos_espiao()
@@ -6913,54 +6649,24 @@ async def processar_fila_espiao(forcar=False):
     
     link_final = await converter_link_shopee(link_original)
     
-    async def gerar_copy_clone():
-        video_gemini = await asyncio.to_thread(client.files.upload, file=caminho_video)
-        try:
-            while video_gemini.state.name == "PROCESSING":
-                await asyncio.sleep(2)
-                video_gemini = await asyncio.to_thread(client.files.get, name=video_gemini.name)
-                
-            if video_gemini.state.name == "FAILED":
-                raise Exception("Falha no Google.")
-                
-            prompt = (
-                "Assista ao vídeo e identifique qual é o produto demonstrado. "
-                "Sua resposta deve conter EXATAMENTE duas linhas.\n"
-                "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no final (Exemplo: Tênis Casual Feminino 👟).\n"
-                "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
-                "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras (exemplo prático: um organizador de sacos plásticos de cozinha pertence a #CasaEDecoracao e NUNCA a #BolsasFemininas, pois não é um acessório de moda).\n"
-                "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combining mais de uma se aplicável: "
-                "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
-                "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
-                "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
-                "#AcessoriosDeModa, #BrinquedosEHobbies, #Papelaria, #LivrosERevistas, #RoupasMasculinas, #Automoveis, #MaeEBebe, "
-                "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
-                "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
-            )
-            
-            def chamar_modelo_cascata(modelo_nome):
-                return client.models.generate_content(
-                    model=modelo_nome,
-                    contents=[video_gemini, prompt]
-                )
-
-            for modelo_nome in MODELOS_CASCATA_GEMINI:
-                try:
-                    response = await asyncio.to_thread(chamar_modelo_cascata, modelo_nome)
-                    if response and response.text:
-                        return response.text.strip()
-                except Exception as erro_modelo:
-                    if "429" in str(erro_modelo):
-                        continue
-                    else:
-                        continue
-            raise Exception("Falha total da cascata.")
-        finally:
-            try: await asyncio.to_thread(client.files.delete, name=video_gemini.name)
-            except: pass
-                
     try:
-        texto_ia = await gerar_copy_clone()
+        prompt_espiao = (
+            "Assista ao vídeo e identifique qual é o produto demonstrado. "
+            "Sua resposta deve conter EXATAMENTE duas linhas.\n"
+            "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no final (Exemplo: Tênis Casual Feminino 👟).\n"
+            "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
+            "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras.\n"
+            "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
+            "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
+            "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
+            "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
+            "#AcessoriosDeModa, #BrinquedosEHobbies, #Papelaria, #LivrosERevistas, #RoupasMasculinas, #Automoveis, #MaeEBebe, "
+            "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
+            "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
+        )
+        texto_ia = await analisar_video_gemini(caminho_video, prompt_espiao, EXIBIR_LOGS)
+        if not texto_ia:
+            raise Exception("O módulo central da IA não retornou dados válidos.")
     except Exception as e:
         registrar_erro_json(f"processar_fila_espiao IA: {e}", origem="espiao.py")
         texto_ia = "Vídeo do Produto 🛍️\n#Oferta"
