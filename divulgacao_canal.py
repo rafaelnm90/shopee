@@ -8,10 +8,12 @@ import random
 from datetime import datetime, timedelta
 from telethon import TelegramClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from google import genai
 from dotenv import load_dotenv
 load_dotenv()
 from utils import registrar_erro_json
+
+# ✅ Importando o nosso Cérebro Central
+from api_gemini import gerar_texto_gemini
 
 # FORÇA O FUSO HORÁRIO DO BRASIL NA MEMÓRIA DO SCRIPT
 import time
@@ -22,20 +24,7 @@ if EXIBIR_LOGS: print("⏰ Fuso horário ajustado internamente para America/Sao_
 # 1. CREDENCIAIS DA CONTA
 API_ID = int(os.getenv('API_ID'))
 API_HASH = os.getenv('API_HASH')
-GEMINI_API_KEY = os.getenv('GEMINI_KEY')
-
-MODELOS_CASCATA_GEMINI = [
-    "gemini-2.5-flash",
-    "gemini-3-flash-preview",
-    "gemini-2.5-flash-lite",
-    "gemini-3.5-flash",
-    "gemini-3.1-pro-preview",
-    "gemini-3.1-flash-lite-preview",
-    "gemini-2.5-pro"
-]
-
-# Inicializa o cliente do Google
-client_genai = genai.Client(api_key=GEMINI_API_KEY)
+# A chave do Gemini e a cascata foram movidas para o módulo api_gemini.py com segurança.
 
 # 2. CONFIGURAÇÃO DE LOGS 🚀
 if EXIBIR_LOGS:
@@ -128,26 +117,7 @@ async def gerar_texto_divulgacao(repeticoes=6):
         "Entregue APENAS a frase final, sem aspas."
     )
     
-    frase_ia = None
-    for modelo_nome in MODELOS_CASCATA_GEMINI:
-        try:
-            if EXIBIR_LOGS: logger.info(f"⏳ A consultar o motor de IA: {modelo_nome}...")
-            response = await asyncio.to_thread(
-                client_genai.models.generate_content,
-                model=modelo_nome,
-                contents=prompt
-            )
-            if response and response.text:
-                if EXIBIR_LOGS: logger.info(f"✅ Sucesso com o modelo {modelo_nome}!")
-                frase_ia = response.text.strip()
-                break
-        except Exception as e:
-            erro_str = str(e)
-            if "429" in erro_str:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Limite atingido em {modelo_nome}. A tentar a próxima alternativa...")
-            else:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Modelo {modelo_nome} indisponível: {erro_str[:50]}...")
-            continue
+    frase_ia = await gerar_texto_gemini(prompt, EXIBIR_LOGS)
 
     if not frase_ia:
         if EXIBIR_LOGS: logger.error("❌ Todos os modelos falharam. A utilizar frase padrão de segurança.")
@@ -217,26 +187,7 @@ async def gerar_texto_divulgacao_viral(repeticoes=6):
         "Use um tom entusiasmado e adicione outros emojis variados. Entregue APENAS a frase final, sem aspas."
     )
     
-    frase_ia = None
-    for modelo_nome in MODELOS_CASCATA_GEMINI:
-        try:
-            if EXIBIR_LOGS: logger.info(f"⏳ [VIRAL] A consultar o motor de IA: {modelo_nome}...")
-            response = await asyncio.to_thread(
-                client_genai.models.generate_content,
-                model=modelo_nome,
-                contents=prompt
-            )
-            if response and response.text:
-                if EXIBIR_LOGS: logger.info(f"✅ [VIRAL] Sucesso com o modelo {modelo_nome}!")
-                frase_ia = response.text.strip()
-                break
-        except Exception as e:
-            erro_str = str(e)
-            if "429" in erro_str:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ [VIRAL] Limite atingido em {modelo_nome}. A tentar a próxima alternativa...")
-            else:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ [VIRAL] Modelo {modelo_nome} indisponível: {erro_str[:50]}...")
-            continue
+    frase_ia = await gerar_texto_gemini(prompt, EXIBIR_LOGS)
 
     if not frase_ia:
         if EXIBIR_LOGS: logger.error("❌ [VIRAL] Todos os modelos falharam. A utilizar frase padrão de segurança.")
