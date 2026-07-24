@@ -24,28 +24,17 @@ os.environ['TZ'] = 'America/Sao_Paulo'
 time.tzset()
 if EXIBIR_LOGS: print("⏰ Fuso horário ajustado internamente para America/Sao_Paulo")
 
-# 1. CREDENCIAIS DA CONTA
+# 1. CREDENCIAIS DA CONTA (Telegram)
 API_ID = int(os.getenv('API_ID'))
 API_HASH = os.getenv('API_HASH')
-SHOPEE_APP_ID = os.getenv('SHOPEE_APP_ID')
-SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
+# As chaves da Shopee e do Gemini foram movidas para os módulos centrais.
+
+# ✅ Importando as pontes centrais da IA e da Shopee
+from api_gemini import analisar_video_gemini
+from api_shopee import converter_link_shopee
 
 # 2. CONFIGURAÇÕES GERAIS DO ESPIÃO
 LIMITE_REGISTROS_HASH = 1000
-GEMINI_API_KEY = os.getenv('GEMINI_KEY')
-
-from google import genai
-client_genai = genai.Client(api_key=GEMINI_API_KEY)
-
-MODELOS_CASCATA_GEMINI = [
-    "gemini-3.1-pro-preview",
-    "gemini-2.5-pro",
-    "gemini-3.5-flash",
-    "gemini-3-flash-preview",
-    "gemini-2.5-flash",
-    "gemini-3.1-flash-lite-preview",
-    "gemini-2.5-flash-lite"
-]
 
 if EXIBIR_LOGS:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
@@ -201,132 +190,26 @@ def registrar_historico_espiao(nome_grupo):
     salvar_config_bd_espiao("historico_espiao", historico)
     if EXIBIR_LOGS: logger.info(f"📊 [Estatística] +1 vídeo contabilizado no SQLite para o grupo: {nome_grupo}")
 
-async def converter_link_shopee(link_original):
-    if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
-        if EXIBIR_LOGS: logger.warning("⏳ [API Shopee] Chaves ausentes no .env. Ignorando conversão e mantendo o link original.")
-        return link_original
-
-    link_processar = link_original
-    
-    if "shp.ee" in link_original or "shope.ee" in link_original or "s.shopee.com.br" in link_original:
-        if EXIBIR_LOGS: logger.info(f"🔍 Detectado link encurtado. A iniciar a expansão do URL: {link_original}")
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(link_original, allow_redirects=True) as resp:
-                    link_processar = str(resp.url)
-                    if EXIBIR_LOGS: logger.info(f"✅ Expansão concluída. URL longo obtido: {link_processar}")
-        except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro ao tentar expandir o link: {e}. Será mantido o original.")
-
-    if EXIBIR_LOGS: logger.info(f"🔗 [API Shopee] A iniciar criptografia para o link: {link_processar}")
-
-    timestamp = int(time.time())
-    endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
-
-    payload = {
-        "query": "mutation generateShortLink($originUrl: String!) { generateShortLink(input: {originUrl: $originUrl}) { shortLink } }",
-        "variables": {
-            "originUrl": link_processar
-        }
-    }
-    
-    payload_json = json.dumps(payload, separators=(',', ':'))
-
-    fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}{SHOPEE_APP_SECRET}"
-    assinatura = hashlib.sha256(fator_base.encode('utf-8')).hexdigest()
-
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"SHA256 Credential={SHOPEE_APP_ID}, Timestamp={timestamp}, Signature={assinatura}"
-    }
-
-    if EXIBIR_LOGS: logger.info("📤 [API Shopee] Enviando requisição assinada para os servidores...")
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(endpoint, headers=headers, data=payload_json) as response:
-                resposta_dados = await response.json()
-
-                if response.status == 200 and "data" in resposta_dados and resposta_dados["data"].get("generateShortLink"):
-                    novo_link = resposta_dados["data"]["generateShortLink"]["shortLink"]
-                    if EXIBIR_LOGS: logger.info(f"✅ [API Shopee] Link convertido com sucesso: {novo_link}")
-                    return novo_link
-                else:
-                    if EXIBIR_LOGS: logger.error(f"❌ [API Shopee] Falha na conversão. Resposta: {resposta_dados}")
-                    return link_original
-
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [API Shopee] Erro de comunicação com o servidor: {e}")
-        return link_original
+# A função converter_link_shopee foi deletada daqui. O script usará a importada de api_shopee.py.
 
 async def gerar_legenda_com_ia_espelhador(caminho_video):
-    def processar_ia():
-        import time
-        if EXIBIR_LOGS: logger.info("🚀 [IA] A iniciar upload do vídeo para o Google Storage...")
-        
-        # Estrutura de retentativa para blindagem de rede (DNS/SSL)
-        video_gemini = None
-        for tentativa in range(3):
-            try:
-                video_gemini = client_genai.files.upload(file=caminho_video)
-                if video_gemini:
-                    break
-            except Exception as erro_rede:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ [IA] Tentativa {tentativa+1}/3 falhou por instabilidade de rede: {erro_rede}")
-                if tentativa < 2: time.sleep(3)
-                else: raise erro_rede
-        
-        while video_gemini.state.name == "PROCESSING":
-            if EXIBIR_LOGS: logger.info("⏳ [IA] O vídeo está sendo processado nos servidores da Google. Aguardando...")
-            time.sleep(2)
-            video_gemini = client_genai.files.get(name=video_gemini.name)
-            
-        if video_gemini.state.name == "FAILED":
-            raise Exception("Falha de processamento no servidor do Google.")
-            
-        if EXIBIR_LOGS: logger.info("✅ [IA] Processamento concluído! O vídeo está pronto para leitura.")
-
-        prompt = (
-                "Assista ao vídeo e identifique qual é o produto demonstrado. "
-                "Sua resposta deve conter EXATAMENTE duas linhas.\n"
-                "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no início (Exemplo: 👟 Tênis Casual Feminino).\n"
-                "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
-                "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras (exemplo prático: um organizador de sacos plásticos de cozinha pertence a #CasaEDecoracao e NUNCA a #BolsasFemininas, pois não é um acessório de moda).\n"
-                "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
-                "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
-                "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
-                "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
-                "#AcessoriosDeModa, #BrinquedosEHobbies, #Papelaria, #LivrosERevistas, #RoupasMasculinas, #Automoveis, #MaeEBebe, "
-                "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
-                "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
-            )
-
-        for modelo_nome in MODELOS_CASCATA_GEMINI:
-            try:
-                if EXIBIR_LOGS: logger.info(f"⏳ [IA] A consultar o motor {modelo_nome} enviando vídeo e texto...")
-                response = client_genai.models.generate_content(
-                    model=modelo_nome,
-                    contents=[video_gemini, prompt]
-                )
-                if response and response.text:
-                    if EXIBIR_LOGS: logger.info(f"✅ [IA] Sucesso com o modelo {modelo_nome}!")
-                    return response.text.strip()
-            except Exception as erro_modelo:
-                erro_str = str(erro_modelo).lower()
-                if "429" in erro_str or "quota" in erro_str:
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ [IA] Limite atingido em {modelo_nome}. Pausando 3s antes do próximo motor...")
-                    time.sleep(3)
-                else:
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ [IA] Erro no modelo {modelo_nome}: {erro_modelo}")
-                continue
-        raise Exception("Todos os modelos da cascata falharam por limite de cota ou erro.")
-
-    try:
-        titulo = await asyncio.to_thread(processar_ia)
-        return titulo
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [IA] Falha na geração da legenda: {e}")
-        return None
+    prompt = (
+        "Assista ao vídeo e identifique qual é o produto demonstrado. "
+        "Sua resposta deve conter EXATAMENTE duas linhas.\n"
+        "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no início (Exemplo: 👟 Tênis Casual Feminino).\n"
+        "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
+        "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras.\n"
+        "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
+        "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
+        "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
+        "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
+        "#AcessoriosDeModa, #BrinquedosEHobbies, #Papelaria, #LivrosERevistas, #RoupasMasculinas, #Automoveis, #MaeEBebe, "
+        "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
+        "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
+    )
+    
+    titulo = await analisar_video_gemini(caminho_video, prompt, EXIBIR_LOGS)
+    return titulo
 
 PADRAO_SHOPEE = re.compile(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+', re.IGNORECASE)
 
@@ -648,8 +531,8 @@ async def motor_espelhador_userbot(event):
         return
     
     if EXIBIR_LOGS: logger.info(f"🔄 [Espelhador] Interceptação acionada! Mídia e link detetados na origem {chat_id_str}.")
-    if EXIBIR_LOGS: logger.info("🔗 [Espelhador] A converter o link da Shopee encontrado...")
-    link_final_convertido = await converter_link_shopee(link_capturado)
+    if EXIBIR_LOGS: logger.info("🔗 [Espelhador] A converter o link da Shopee encontrado via API Central...")
+    link_final_convertido = await converter_link_shopee(link_capturado, "geral", EXIBIR_LOGS)
     if EXIBIR_LOGS: logger.info("✅ [Espelhador] Sucesso: Link convertido utilizando a função nativa correta.")
 
     if EXIBIR_LOGS: logger.info("📥 [Espelhador] Descarregando vídeo temporário para análise da IA e verificação de duplicidade...")
