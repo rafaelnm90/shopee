@@ -521,15 +521,63 @@ def salvar_fila_postagens(dados):
 # Todas as gravações agora ocorrem através de queries atómicas (UPDATE/INSERT/DELETE).
 
 def agendar_fila_postagens():
-    # ✅ NOVO MOTOR DE FILA (Fase 3): O agendamento em massa foi desativado!
-    # A função atua apenas como um "adaptador" para remover lixos antigos da memória.
-    if EXIBIR_LOGS: logger.info("🔄 Efeito Dominó desativado. Limpando agendamentos estáticos de postagem...")
+    if EXIBIR_LOGS: logger.info("🔄 Recalculando e agendando fila de postagens organicamente...")
+    # 1. Limpa agendamentos antigos para evitar duplicidade
     for job in scheduler.get_jobs():
         if job.id.startswith('job_fila_postagem_'):
             job.remove()
 
+    # 2. Busca vídeos pendentes para hoje no SQLite
+    agora = datetime.now(fuso_horario)
+    hoje_str = agora.strftime("%Y-%m-%d")
+    
+    try:
+        conexao = sqlite3.connect("banco_dados.db")
+        conexao.row_factory = sqlite3.Row
+        cursor = conexao.cursor()
+        cursor.execute("SELECT id_unico FROM fila_postagens WHERE status = 'PENDENTE' AND (data_alvo <= ? OR data_alvo = '2000-01-01') ORDER BY prioridade ASC", (hoje_str,))
+        pendentes_hoje = cursor.fetchall()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila no agendador: {e}")
+        return
+
+    if not pendentes_hoje:
+        return
+
+    dados_rotina = ler_config_rotina()
+    
+    # 3. Determina o limite de tempo até o Boa Noite
+    job_bn = scheduler.get_job('job_rotina_boa_noite_0')
+    if job_bn and getattr(job_bn, 'next_run_time', None):
+        limite_fim = job_bn.next_run_time.astimezone(fuso_horario)
+    else:
+        hora_fim = dados_rotina.get("boa_noite", {}).get("inicio", 21)
+        limite_fim = agora.replace(hour=hora_fim, minute=59)
+
+    minutos_disponiveis = (limite_fim - agora).total_seconds() / 60
+
+    if minutos_disponiveis > 0:
+        espacamento = minutos_disponiveis / len(pendentes_hoje)
+        tempo_acumulado = agora + timedelta(minutes=2) # Inicia em 2 minutos
+
+        for item in pendentes_hoje:
+            id_unico = item["id_unico"]
+            job_id = f"job_fila_postagem_{id_unico}"
+            
+            scheduler.add_job(
+                executar_postagem_fila, 
+                'date', 
+                run_date=tempo_acumulado, 
+                args=[id_unico], 
+                id=job_id, 
+                replace_existing=True
+            )
+            if EXIBIR_LOGS: logger.info(f"⏳ Postagem {id_unico} agendada estaticamente para {tempo_acumulado.strftime('%H:%M:%S')}")
+            tempo_acumulado += timedelta(minutes=espacamento)
+
 async def motor_fila_minuto():
-    # 1. Verifica se a loja está aberta (Expediente)
+    # ✅ NOVO FISCAL HÍBRIDO (Watchdog): Apenas vigia a memória e auto-cura a grade
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
     
@@ -543,73 +591,24 @@ async def motor_fila_minuto():
     if ultimo_bd != hoje_str or ultimo_bn == hoje_str:
         return # Fora do expediente
         
-    hora_ultimo_bd = dados_rotina.get("hora_ultimo_bom_dia", "")
-    if hora_ultimo_bd:
-        hora_bd_obj = datetime.strptime(hora_ultimo_bd, "%H:%M").time()
-        momento_bd = datetime.combine(agora.date(), hora_bd_obj).replace(tzinfo=fuso_horario)
-        if (agora - momento_bd).total_seconds() / 60 < 15:
-            return # Respiro matinal (aguarda 15 min do Bom Dia)
-            
     try:
         conexao = sqlite3.connect("banco_dados.db")
         cursor = conexao.cursor()
-        
-        # 2. Inteligência de Espaçamento Orgânico Dinâmico
         cursor.execute("SELECT COUNT(*) FROM fila_postagens WHERE status = 'PENDENTE' AND (data_alvo <= ? OR data_alvo = '2000-01-01')", (hoje_str,))
-        qtd_videos = cursor.fetchone()[0]
+        qtd_db = cursor.fetchone()[0]
+        conexao.close()
         
-        if qtd_videos == 0:
-            conexao.close()
-            return
+        if qtd_db > 0:
+            # Verifica quantos vídeos estão realmente na memória do agendador
+            qtd_jobs = sum(1 for job in scheduler.get_jobs() if job.id.startswith('job_fila_postagem_'))
             
-        INTERVALO_MINIMO = 15
-        job_bn = scheduler.get_job('job_rotina_boa_noite_0')
-        if job_bn and getattr(job_bn, 'next_run_time', None):
-            limite_fim = job_bn.next_run_time.astimezone(fuso_horario)
-        else:
-            hora_fim = dados_rotina.get("boa_noite", {}).get("inicio", 21)
-            limite_fim = agora.replace(hour=hora_fim, minute=59)
-            
-        minutos_restantes = (limite_fim - agora).total_seconds() / 60
-        if minutos_restantes > 0:
-            # Reduz a janela em 10% garantindo que o último caiba com folga antes de fechar a loja
-            gap_organico = int((minutos_restantes * 0.9) / qtd_videos)
-            INTERVALO_MINIMO = max(15, min(gap_organico, 90))
-            
-        # 3. Verifica a distância de tempo do último vídeo (O Semáforo)
-        cursor.execute("SELECT horario_postagem FROM fila_postagens WHERE data_postagem = ? AND status = 'CONCLUIDO' ORDER BY horario_postagem DESC LIMIT 1", (hoje_str,))
-        ultimo_vid = cursor.fetchone()
-        if ultimo_vid and ultimo_vid[0]:
-            hora_ult_vid = datetime.strptime(ultimo_vid[0], "%H:%M").time()
-            dt_ult_vid = datetime.combine(agora.date(), hora_ult_vid).replace(tzinfo=fuso_horario)
-            if (agora - dt_ult_vid).total_seconds() / 60 < INTERVALO_MINIMO:
-                conexao.close()
-                return
+            # Se o banco tem vídeo, mas a memória está vazia, o sistema falhou (reboot, crash, etc)
+            if qtd_jobs == 0:
+                if EXIBIR_LOGS: logger.warning("⚠️ O Fiscal detectou vídeos perdidos sem agendamento! Forçando auto-cura da grade...")
+                agendar_fila_postagens()
                 
-        # 4. Verifica colisão com rotinas fixas (Abre alas de 15 minutos)
-        for job in scheduler.get_jobs():
-            if not job.id.startswith('job_fila_postagem_') and getattr(job, 'next_run_time', None):
-                diff = abs((agora - job.next_run_time.astimezone(fuso_horario)).total_seconds() / 60)
-                if diff < 15:
-                    conexao.close()
-                    return
-                    
-        # 5. Semáforo Verde! Puxa a mercadoria com a prioridade mais alta
-        cursor.execute("SELECT id_unico FROM fila_postagens WHERE status = 'PENDENTE' AND (data_alvo <= ? OR data_alvo = '2000-01-01') ORDER BY prioridade ASC LIMIT 1", (hoje_str,))
-        proximo = cursor.fetchone()
-        
-        if proximo:
-            id_unico = proximo[0]
-            cursor.execute("UPDATE fila_postagens SET status = 'PROCESSANDO' WHERE id_unico = ?", (id_unico,))
-            conexao.commit()
-            conexao.close()
-            
-            if EXIBIR_LOGS: logger.info(f"🚦 Semáforo Verde (Gap Orgânico: {INTERVALO_MINIMO}m)! O Relógio Central puxou o vídeo {id_unico}.")
-            await executar_postagem_fila(id_unico)
-        else:
-            conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro no Relógio Central: {e}")
+        if EXIBIR_LOGS: logger.error(f"❌ Erro no Fiscal da Fila: {e}")
 
 async def executar_postagem_fila(item_id):
     if EXIBIR_LOGS: logger.info(f"📤 Iniciando upload físico do vídeo pela nova esteira SQLite...")
@@ -2553,7 +2552,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     if tipo_fila == "Espelhador":
                         horario_disparo_str = v.get("horario_disparo", "")
                         if horario_disparo_str:
-                            hd_obj = datetime.strptime(horario_disparo_str, "%Y-%m-%d %H:%M:%S")
+                            hd_obj = datetime.strptime(horario_disparo_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
                             if hd_obj.date() == hoje_obj:
                                 status_dia = "🔴 Atrasado" if agora > hd_obj else "🟢 Hoje"
                             elif hd_obj.date() > hoje_obj:
@@ -5811,7 +5810,7 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
                     
                 status_previsao_final = f"{status_previsao}{hora_agendada_str}"
                 
-            texto += f"<b>{i}. {nome_video}</b> | 📦 {nome_item[:25]}...\n"
+            texto += f"<b>{i}. {nome_video}</b> | 📦 {nome_item}\n"
             if is_postado:
                 texto += f"   └ Status: {status_previsao_final}\n\n"
             else:
@@ -5946,7 +5945,7 @@ async def confirmar_posicao_exclusao_fila(message: types.Message, state: FSMCont
         legenda = fila[posicao].get("legenda", "")
         if legenda:
             legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
-            resumo = legenda_limpa.split('\n')[0][:50]
+            resumo = legenda_limpa.split('\n')[0]
         else:
             resumo = "Vídeo sem descrição"
             
@@ -6134,7 +6133,7 @@ async def pedir_nova_posicao_fila(message: types.Message, state: FSMContext):
         legenda = fila[posicao_atual].get("legenda", "")
         if legenda:
             legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
-            resumo = legenda_limpa.split('\n')[0][:50]
+            resumo = legenda_limpa.split('\n')[0]
         else:
             resumo = "Vídeo sem descrição"
             
@@ -6275,7 +6274,7 @@ async def enviar_confirmacao_reordenar(message: types.Message, state: FSMContext
     legenda = fila[posicao_origem].get("legenda", "")
     if legenda:
         legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
-        resumo = legenda_limpa.split('\n')[0][:50]
+        resumo = legenda_limpa.split('\n')[0]
     else:
         resumo = "Vídeo sem descrição"
 
@@ -6369,7 +6368,7 @@ async def pedir_novo_numero_fila(message: types.Message, state: FSMContext):
         legenda = fila[posicao].get("legenda", "")
         if legenda:
             legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
-            resumo = legenda_limpa.split('\n')[0][:50]
+            resumo = legenda_limpa.split('\n')[0]
         else:
             resumo = "Vídeo sem descrição"
             
@@ -6428,7 +6427,7 @@ async def preparar_publicacao_imediata(message: types.Message, state: FSMContext
         legenda = fila[posicao].get("legenda", "")
         if legenda:
             legenda_limpa = re.sub(r'<[^>]+>', '', legenda)
-            resumo = legenda_limpa.split('\n')[0][:50]
+            resumo = legenda_limpa.split('\n')[0]
         else:
             resumo = "Vídeo sem descrição"
             
@@ -6896,7 +6895,7 @@ async def main():
     # ✅ Novo: Motor Autônomo de Garimpo de Achadinhos (Gatilho de 2 em 2 horas)
     scheduler.add_job(processar_garimpo_automatico, 'interval', hours=2, timezone=FUSO_STR)
     
-    # ✅ NOVO MOTOR DE FILA (Fase 3): O Relógio Central bate a cada 1 minuto
+    # ✅ WATCHDOG: O Fiscal Híbrido bate a cada 1 minuto apenas para auditar a memória
     scheduler.add_job(motor_fila_minuto, 'interval', minutes=1, timezone=FUSO_STR)
     
     # Roda o agendador imediatamente ao ligar o bot para garantir o dia atual
