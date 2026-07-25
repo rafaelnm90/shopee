@@ -161,23 +161,34 @@ def verificar_e_registrar_hash(hash_video, contexto="global"):
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao verificar hash no SQLite: {e}")
         return False
 
+def ler_fila_clonagem():
+    return ler_config_bd_espiao("fila_clonagem", {"fila": []})
+
+def salvar_fila_clonagem(dados):
+    salvar_config_bd_espiao("fila_clonagem", dados)
+
 def salvar_na_fila_clonagem(caminho_video, link_shopee, chat_origem="Desconhecida", nome_origem=None, msg_id=None):
     id_unico = f"clone_{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}"
     data_captura = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     nome_origem_str = str(nome_origem) if nome_origem else str(chat_origem)
     
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
-        cursor = conexao.cursor()
-        cursor.execute('''
-            INSERT INTO fila_espiao (id_unico, chat_origem, nome_origem, msg_id, caminho_video, link_original, processado, data_captura)
-            VALUES (?, ?, ?, ?, ?, ?, 0, ?)
-        ''', (id_unico, str(chat_origem), nome_origem_str, msg_id, caminho_video, link_shopee, data_captura))
-        conexao.commit()
-        conexao.close()
-        if EXIBIR_LOGS: logger.info(f"📦 Item salvo na fila_espiao (SQLite) com sucesso (ID: {id_unico}).")
+        dados = ler_fila_clonagem()
+        item = {
+            "id": id_unico,
+            "chat_origem": str(chat_origem),
+            "nome_origem": nome_origem_str,
+            "msg_id": msg_id,
+            "caminho_video": caminho_video,
+            "link_original": link_shopee,
+            "processado": False,
+            "data_captura": data_captura
+        }
+        dados.setdefault("fila", []).append(item)
+        salvar_fila_clonagem(dados)
+        if EXIBIR_LOGS: logger.info(f"📦 Clone salvo de forma unificada no SQLite com sucesso (ID: {id_unico}).")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar na fila_espiao do SQLite: {e}")
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar na fila unificada do SQLite: {e}")
 
 def registrar_historico_espiao(nome_grupo):
     historico = ler_config_bd_espiao("historico_espiao", padrao={"total": 0, "grupos": {}})
@@ -674,11 +685,7 @@ async def validar_e_obter_entidade(client, alvo):
 async def monitorar_status_alvos():
     while True:
         # 1. Leitura inicial para saber quem devemos verificar agora
-        try:
-            with open("alvos_espiao.json", "r") as f:
-                dados_iniciais = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            dados_iniciais = {"alvos": [], "canal_destino": None, "status_alvos": {}}
+        dados_iniciais = ler_config_bd_espiao("alvos_espiao", {"alvos": [], "canal_destino": None, "status_alvos": {}})
             
         alvos_para_verificar = dados_iniciais.get("alvos", [])
         destino_para_verificar = dados_iniciais.get("canal_destino")
@@ -717,11 +724,7 @@ async def monitorar_status_alvos():
             await asyncio.sleep(2)
             
         # 3. Leitura FRESCA logo antes de gravar para evitar sobrescrever exclusões recentes
-        try:
-            with open("alvos_espiao.json", "r") as f:
-                dados_frescos = json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
-            dados_frescos = {"alvos": [], "canal_destino": None, "status_alvos": {}}
+        dados_frescos = ler_config_bd_espiao("alvos_espiao", {"alvos": [], "canal_destino": None, "status_alvos": {}})
             
         alvos_reais_agora = [str(a) for a in dados_frescos.get("alvos", [])]
         status_alvos_antigos = dados_frescos.get("status_alvos", {})
@@ -768,8 +771,7 @@ async def monitorar_status_alvos():
         if houve_alteracao:
             dados_frescos["alvos"] = nova_lista_alvos
             dados_frescos["status_alvos"] = status_alvos_final
-            with open("alvos_espiao.json", "w") as f:
-                json.dump(dados_frescos, f, indent=4)
+            salvar_config_bd_espiao("alvos_espiao", dados_frescos)
                 
         if EXIBIR_LOGS: logger.info("✅ Auditoria de inicialização dos alvos concluída. Encerrando ciclo de verificação.")
         break
