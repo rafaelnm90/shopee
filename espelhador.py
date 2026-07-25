@@ -643,24 +643,26 @@ async def salvar_edicao_intervalo_dias(message: types.Message, state: FSMContext
     dados = ler_espelhos()
     rotas = dados.get("rotas", [])
     
-    intervalo_antigo = rotas[indice].get("intervalo_dias", 1) # 📡 Sensor de mudança
     rotas[indice]["intervalo_dias"] = intervalo
-    
-    # 🔫 GATILHO DE DESCARGA: Se mudou de D+X para D+0, força o disparo!
-    gatilho_acionado = False
-    if intervalo_antigo > 0 and intervalo == 0:
-        rotas[indice]["esvaziar_agora"] = True
-        gatilho_acionado = True
-        
     dados["rotas"] = rotas
     salvar_espelhos(dados)
     
-    if gatilho_acionado:
-        if EXIBIR_LOGS: logger.info(f"⚠️ [Gatilho de Descarga] Mudança para D+0 na rota {rotas[indice]['nome']}. Esvaziando represa...")
-        await message.answer("⚠️ <b>Gatilho de Descarga Acionado!</b>\nComo alterou para D+0 (Imediato), todos os vídeos represados nesta rota estão a ser enviados para a catraca de postagem.", parse_mode="HTML")
+    # 🔫 O NOVO GATILHO INTELIGENTE: Limpa o carimbo de horário para forçar o Motor a recalcular!
+    try:
+        fila_dados = ler_fila_espelhador()
+        houve_reset = False
+        for item in fila_dados.get("fila", []):
+            if item.get("nome_rota") == rotas[indice]["nome"] and not item.get("processado"):
+                item["horario_disparo"] = "" # Limpa para o Motor agir
+                houve_reset = True
+        if houve_reset:
+            salvar_fila_espelhador(fila_dados)
+            if EXIBIR_LOGS: logger.info(f"🔄 Fila da rota '{rotas[indice]['nome']}' resetada para recálculo orgânico.")
+    except Exception as e:
+        pass
     
     if EXIBIR_LOGS: logger.info(f"✏️ Atraso dinâmico da rota '{rotas[indice]['nome']}' modificado para D+{intervalo}.")
-    await message.answer(f"✅ O intervalo temporal foi atualizado para D+{intervalo} com sucesso!", parse_mode="HTML")
+    await message.answer(f"✅ O intervalo temporal foi atualizado para D+{intervalo}!\nO Motor Central já está a recalcular os horários de forma orgânica e respeitando a janela.", parse_mode="HTML")
     await painel_espelhador(message, state)
 
 @router.message(EspelhadorFluxo.aguardando_edicao_novo_modo)
