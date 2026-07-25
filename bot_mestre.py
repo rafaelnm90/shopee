@@ -2422,14 +2422,33 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             
             if link_final_exibicao:
                 if "t.me" in link_final_exibicao:
-                    texto_link = "Ver Post no Telegram"
+                    texto_link = "📥 Origem" if tipo_fila == "Espião" else "Ver Post no Telegram"
                 elif "shopee" in link_final_exibicao or "shp.ee" in link_final_exibicao:
                     texto_link = "Ver Produto na Shopee"
                 else:
                     texto_link = "Ver Link"
                 link_display = f"<a href='{link_final_exibicao}'>{texto_link}</a>"
             else:
-                link_display = "<i>Sem link direto</i>"
+                link_display = "<i>Sem link de origem</i>"
+                
+            # ✅ NOVO: Se o vídeo já foi postado, adiciona o link de destino (se disponível)
+            if v.get("processado", False) and tipo_fila == "Espião":
+                id_destino = str(dados_espiao.get("canal_destino", ""))
+                msg_id_postada = v.get("msg_postada_id") # O bot precisará passar a salvar este ID no futuro
+                
+                if id_destino and msg_id_postada:
+                    # Constrói o link para o canal de destino
+                    if id_destino.lstrip("-").isdigit():
+                        id_limpo = id_destino.replace("-100", "").replace("-", "")
+                        link_dest = f"https://t.me/c/{id_limpo}/{msg_id_postada}"
+                    else:
+                        username_dest = id_destino.replace("@", "")
+                        link_dest = f"https://t.me/{username_dest}/{msg_id_postada}"
+                        
+                    link_display += f" | <a href='{link_dest}'>📤 Destino</a>"
+                elif id_destino and not id_destino.lstrip("-").isdigit():
+                    # Fallback: Se não tem o ID da mensagem exata, leva pelo menos para o canal
+                    link_display += f" | <a href='https://t.me/{id_destino.replace('@', '')}'>📤 Destino</a>"
                 
             # --- 4. RESOLUÇÃO DE NOMES COM CACHE E BUSCA PROFUNDA ---
             if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
@@ -5705,12 +5724,17 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             legenda = item.get("legenda", "")
             data_adicao_str = item.get("data_adicao", "")
             is_postado = item.get("postado", False)
+            data_postagem_str = item.get("data_postagem", "")
             
-            # Identifica se o vídeo pertence ao dia de Hoje
-            is_hoje = is_postado or data_adicao_str == "2000-01-01" or (data_adicao_str and data_adicao_str <= hoje_str)
+            # 🛡️ PENTE FINO: Só exibe os vídeos PENDENTES ou os que foram POSTADOS HOJE
+            if is_postado and data_postagem_str != hoje_str:
+                continue
+            
+            # Identifica se o vídeo pertence ao dia de Hoje (para fins de exibição da divisória do Boa Noite)
+            is_hoje = (data_adicao_str == "2000-01-01" or (data_adicao_str and data_adicao_str <= hoje_str))
             
             # Se for o primeiro vídeo de "Amanhã" (ou além) e ainda não imprimimos a tampa de Boa Noite, imprime agora
-            if not is_hoje and not imprimiu_bn:
+            if not is_hoje and not is_postado and not imprimiu_bn:
                 texto += "━━━━━━━━━━━━━━━━━━\n"
                 texto += f"🌙 <b>Boa Noite ({data_dia_br}):</b> {hora_bn}\n\n"
                 imprimiu_bn = True
@@ -6631,8 +6655,12 @@ async def processar_fila_espiao(forcar=False):
             if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
                 raise Exception("O ficheiro retido é uma imagem.")
             arquivo = FSInputFile(caminho_video)
-            await bot.send_video(chat_id=canal_destino, video=arquivo, caption=legenda_postagem, parse_mode="HTML")
-            if EXIBIR_LOGS: logger.info(f"✅ Clone {item_id} publicado com sucesso!")
+            msg_enviada = await bot.send_video(chat_id=canal_destino, video=arquivo, caption=legenda_postagem, parse_mode="HTML")
+            
+            # ✅ NOVO: Grava o ID da mensagem para o link de destino funcionar
+            item_pendente["msg_postada_id"] = msg_enviada.message_id
+            
+            if EXIBIR_LOGS: logger.info(f"✅ Clone {item_id} publicado com sucesso! ID: {msg_enviada.message_id}")
             try: os.remove(caminho_video)
             except: pass
         except Exception as e:
