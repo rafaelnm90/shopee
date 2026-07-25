@@ -12,6 +12,7 @@ from telethon import TelegramClient, events
 from telethon.tl.types import MessageMediaDocument
 from dotenv import load_dotenv
 from utils import registrar_erro_json
+from motor_filas import calcular_horarios_distribuicao # ⚙️ Novo Motor Centralizado
 
 load_dotenv()
 EXIBIR_LOGS = True
@@ -374,50 +375,31 @@ async def processar_fila_espelhador_loop():
                 data_captura_obj = datetime.strptime(item["data_captura"], "%Y-%m-%d %H:%M:%S")
                 data_captura_str = data_captura_obj.strftime("%Y-%m-%d")
                 
-                # Só calcula o agendamento de vídeos que caíram na represa no DIA ANTERIOR (ou mais antigos)
-                if data_captura_str < hoje_str:
-                    nome_rota = item.get("nome_rota")
+                nome_rota = item.get("nome_rota")
+                rota_config = rotas.get(nome_rota)
+                
+                if not rota_config: continue
+                intervalo_dias = int(rota_config.get("intervalo_dias", 1))
+                
+                # Se for D+0 ou se for de dias anteriores (D+X maturados)
+                if intervalo_dias == 0 or data_captura_str < hoje_str:
                     itens_por_rota_desagendados.setdefault(nome_rota, []).append(item)
 
             for nome_rota, itens in itens_por_rota_desagendados.items():
                 rota_config = rotas.get(nome_rota)
                 if not rota_config: continue
                 
-                inicio = int(rota_config.get("inicio", 10))
-                fim = int(rota_config.get("fim", 22))
-                modo = rota_config.get("modo", "ordem")
+                # Prepara as regras específicas desta rota
+                config_fila = {
+                    "inicio": int(rota_config.get("inicio", 10)),
+                    "fim": int(rota_config.get("fim", 22)),
+                    "modo": rota_config.get("modo", "ordem"),
+                    "intervalo_dias": int(rota_config.get("intervalo_dias", 1))
+                }
                 
-                if modo == "aleatorio":
-                    random.shuffle(itens)
-                else:
-                    itens.sort(key=lambda x: x["data_captura"])
-                
-                qtd = len(itens)
-                minutos_disponiveis = (fim - inicio) * 60
-                espacamento = minutos_disponiveis // qtd if qtd > 0 else 15
-                if espacamento < 1: espacamento = 1
-                
-                minuto_atual_busca = agora.replace(hour=inicio, minute=0, second=0, microsecond=0)
-                
-                # Adaptação para proteger o sistema caso o robô seja reiniciado a meio do expediente
-                if minuto_atual_busca < agora and agora.hour < fim:
-                    minutos_restantes = (fim - agora.hour) * 60 - agora.minute
-                    espacamento = minutos_restantes // qtd if qtd > 0 else 15
-                    if espacamento < 1: espacamento = 1
-                    minuto_atual_busca = agora + timedelta(minutes=1)
-                elif agora.hour >= fim:
-                    minuto_atual_busca = minuto_atual_busca + timedelta(days=1)
-
-                if EXIBIR_LOGS: logger.info(f"📅 [Espelhador] Distribuindo {qtd} vídeos retidos na rota '{nome_rota}' (Modo: {modo.title()}).")
-                
-                for item in itens:
-                    # Aplica variação orgânica para não parecerem mensagens robóticas cravadas no relógio
-                    variacao = random.randint(0, espacamento // 2) if espacamento > 2 else 0
-                    horario_agendado = minuto_atual_busca + timedelta(minutes=variacao)
-                    item["horario_disparo"] = horario_agendado.strftime("%Y-%m-%d %H:%M:%S")
-                    houve_agendamento = True
-                    
-                    minuto_atual_busca += timedelta(minutes=espacamento)
+                if EXIBIR_LOGS: logger.info(f"📅 [Espelhador] Motor Central acionado para {len(itens)} vídeos na rota '{nome_rota}'...")
+                calcular_horarios_distribuicao(itens, config_fila, forcar=False)
+                houve_agendamento = True
             
             # 2. Execução dos Disparos Agendados
             for item in fila:
