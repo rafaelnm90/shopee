@@ -13,9 +13,13 @@ from telethon.tl.types import MessageMediaDocument
 from dotenv import load_dotenv
 from utils import registrar_erro_json
 from motor_filas import calcular_horarios_distribuicao # ⚙️ Novo Motor Centralizado
+from zoneinfo import ZoneInfo
 
 load_dotenv()
 EXIBIR_LOGS = True
+
+FUSO_STR = "America/Sao_Paulo"
+fuso_horario = ZoneInfo(FUSO_STR)
 
 # ✅ Cria a pasta temp isolada na inicialização
 os.makedirs("temp", exist_ok=True)
@@ -361,10 +365,11 @@ async def processar_fila_espelhador_loop():
             rotas = {r.get("nome"): r for r in config.get("rotas", [])}
             
             itens_restantes = []
-            agora = datetime.now(fuso_horario) # ✅ CORREÇÃO: Forçando fuso horário do Brasil
+            agora = datetime.now(fuso_horario) # ✅ Usa o fuso horário oficial
             hoje_str = agora.strftime("%Y-%m-%d")
             houve_alteracao_rota = False
             houve_agendamento = False
+            houve_disparo = False
             
             # --- 1. PREPARAÇÃO PARA O MOTOR CENTRAL ---
             itens_por_rota_desagendados = {}
@@ -376,11 +381,11 @@ async def processar_fila_espelhador_loop():
                 
                 # Se o botão de Forçar for apertado no Telegram, limpa o horário!
                 esvaziar_agora = rota_config.get("esvaziar_agora", False)
-                if esvaziar_agora:
+                if esvaziar_agora and not item.get("processado"):
                     item["horario_disparo"] = ""
                     
-                if item.get("horario_disparo"):
-                    continue # Já tem carimbo de distribuição matemática
+                if item.get("horario_disparo") or item.get("processado"):
+                    continue # Já tem carimbo de distribuição matemática ou já foi postado
                 
                 data_captura_obj = datetime.strptime(item["data_captura"], "%Y-%m-%d %H:%M:%S")
                 data_captura_str = data_captura_obj.strftime("%Y-%m-%d")
@@ -412,12 +417,13 @@ async def processar_fila_espelhador_loop():
                 rota_config = rotas.get(nome_rota)
                 
                 if not rota_config:
+                    itens_restantes.append(item)
                     continue
                     
                 horario_disparo_str = item.get("horario_disparo")
                 deve_disparar = False
                 
-                if horario_disparo_str:
+                if not item.get("processado") and horario_disparo_str:
                     try:
                         horario_disparo_obj = datetime.strptime(horario_disparo_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
                         if agora >= horario_disparo_obj:
@@ -437,23 +443,30 @@ async def processar_fila_espelhador_loop():
                             # ✅ SEGUNDA TRAVA DE SEGURANÇA: Verifica novamente o tipo de mídia antes de enviar
                             if getattr(mensagem_original, 'video', None) is None:
                                 if EXIBIR_LOGS: logger.warning(f"🚫 [Segurança] Espelhador abortou o envio! A mensagem {msg_id} perdeu o formato de vídeo.")
-                                continue
-                                
-                            try:
-                                entidade_destino = await client.get_entity(destino)
-                            except ValueError:
-                                id_teste = int(destino) if str(destino).lstrip('-').isdigit() else destino
-                                entidade_destino = await client.get_entity(id_teste)
+                            else:
+                                try:
+                                    entidade_destino = await client.get_entity(destino)
+                                except ValueError:
+                                    id_teste = int(destino) if str(destino).lstrip('-').isdigit() else destino
+                                    entidade_destino = await client.get_entity(id_teste)
 
-                            await client.send_message(entidade_destino, texto, file=mensagem_original.media, parse_mode="html")
-                            if EXIBIR_LOGS: logger.info(f"✅ [Espelhador] Disparo programado concluído na rota '{nome_rota}' para {destino}.")
-                            
-                            # 🛡️ Catraca limitadora de segurança (Previne banimento em disparos de rajada ou D+0)
-                            await asyncio.sleep(15)
+                                msg_enviada = await client.send_message(entidade_destino, texto, file=mensagem_original.media, parse_mode="html")
+                                
+                                item["msg_postada_id"] = msg_enviada.id # Grava o ID para o painel mostrar o link de destino
+                                if EXIBIR_LOGS: logger.info(f"✅ [Espelhador] Disparo concluído na rota '{nome_rota}' para {destino}.")
+                                
+                                await asyncio.sleep(15) # Catraca anti-ban
                         else:
-                            if EXIBIR_LOGS: logger.warning(f"⚠️ [Espelhador] Mensagem original apagada antes do disparo na rota '{nome_rota}'.")
+                            if EXIBIR_LOGS: logger.warning(f"⚠️ [Espelhador] Mensagem original {msg_id} apagada antes do disparo na rota '{nome_rota}'.")
                     except Exception as e:
                         if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Falha no disparo da rota '{nome_rota}': {e}")
+                    
+                    # ✅ MANTÉM NO HISTÓRICO: O vídeo foi enviado, e agora fica salvo para aparecer no relatório!
+                    item["processado"] = True
+                    item["data_postagem"] = agora.strftime("%Y-%m-%d")
+                    item["horario_postagem"] = agora.strftime("%H:%M")
+                    itens_restantes.append(item)
+                    houve_disparo = True
                 else:
                     itens_restantes.append(item)
                     
@@ -467,7 +480,8 @@ async def processar_fila_espelhador_loop():
                 with open("espelhos_config.json", "w", encoding="utf-8") as f:
                     json.dump(config, f, indent=4, ensure_ascii=False)
                     
-            if len(fila) != len(itens_restantes) or houve_agendamento:
+            # Salva a fila se houver matemática nova, vídeos processados ou faxina.
+            if len(fila) != len(itens_restantes) or houve_agendamento or houve_disparo:
                 fila_dados["fila"] = itens_restantes
                 salvar_fila_espelhador(fila_dados)
             
