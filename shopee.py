@@ -863,18 +863,6 @@ async def gerar_mensagem_gemini(prompt):
         return texto
     return "🚀 Novos materiais disponíveis! Bora postar e converter!"
 
-# --- SISTEMA DE LIXEIRA PERSISTENTE ---
-def ler_lixeira():
-    try:
-        with open("lixeira_mensagens.json", "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"mensagens": []}
-
-def salvar_lixeira(dados):
-    with open("lixeira_mensagens.json", "w") as f:
-        json.dump(dados, f, indent=4)
-
 # --- SISTEMA DE LIXEIRA PERSISTENTE (MIGRADO PARA SQLITE) ---
 def limpar_historico_antigo():
     if os.path.exists("historico_mensagens.json"):
@@ -2051,15 +2039,10 @@ async def menu_canal_principal(message: types.Message, state: FSMContext):
 
 # NOVO: Funções de Gestão do Banco de Pedidos Individuais
 def ler_banco_pedidos():
-    try:
-        with open("banco_pedidos.json", "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    return ler_config_bd("banco_pedidos", padrao={}, arquivo_legado="banco_pedidos.json")
 
 def salvar_banco_pedidos(dados):
-    with open("banco_pedidos.json", "w") as f:
-        json.dump(dados, f, indent=4)
+    salvar_config_bd("banco_pedidos", dados)
 
 async def buscar_dados_financeiros_shopee(dias_retroativos=30):
     if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
@@ -2681,15 +2664,10 @@ async def menu_relatorio_geral(message: types.Message, state: FSMContext):
     await message.answer("📊 <b>Central de Relatórios</b>\nEscolha qual métrica deseja analisar:", reply_markup=obter_teclado_relatorios(), parse_mode="HTML")
 
 def ler_historico_financeiro():
-    try:
-        with open("historico_financeiro.json", "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    return ler_config_bd("historico_financeiro", padrao={}, arquivo_legado="historico_financeiro.json")
 
 def salvar_historico_financeiro(dados):
-    with open("historico_financeiro.json", "w") as f:
-        json.dump(dados, f, indent=4)
+    salvar_config_bd("historico_financeiro", dados)
 
 @dp.message(F.text == "Relatório Financeiro 💰", StateFilter("*"))
 async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
