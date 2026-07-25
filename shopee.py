@@ -2389,19 +2389,9 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         fim = rota_info.get("fim", 22)
         status_canais = rota_info.get("status_canais") or rota_info.get("status_alvos") or {}
         
-        info_sorteio = ""
-        if tipo_fila == "Espião":
-            qtd_aguardando = len([i for i in itens if not i.get("processado")])
-            proximo_proc = fila_data.get("proximo_processamento")
-            if proximo_proc and proximo_proc != "2000-01-01 00:00:00":
-                try:
-                    hora_sorteio = datetime.strptime(proximo_proc, "%Y-%m-%d %H:%M:%S").strftime("%H:%M")
-                    info_sorteio = f"🎲 <b>Próximo Sorteio:</b> Previsto para {hora_sorteio}\n"
-                except: pass
-            cabecalho_rota = f"📡 <b>Rota: {nome_rota}</b> ({qtd_aguardando} vídeos na urna)\n🕒 <b>Janela:</b> {inicio}h às {fim}h\n{info_sorteio}"
-        else:
-            texto_postagem = "Imediata (D+0)" if atraso_dias == 0 else f"D+{atraso_dias}, entre {inicio}h e {fim}h"
-            cabecalho_rota = f"📡 <b>Rota: {nome_rota}</b> ({len(itens)} vídeos aguardando)\n🕒 <b>Postagem:</b> {texto_postagem}\n"
+        # Novo Cabeçalho Unificado (Sem Urna de Sorteio)
+        texto_postagem = "Imediata (D+0)" if atraso_dias == 0 else f"D+{atraso_dias}, entre {inicio}h e {fim}h"
+        cabecalho_rota = f"📡 <b>Rota: {nome_rota}</b> ({len([i for i in itens if not i.get('processado')])} vídeos agendados)\n🕒 <b>Postagem:</b> {texto_postagem}\n"
         
         if len(texto_atual) + len(cabecalho_rota) > 3800:
             mensagens_para_enviar.append(texto_atual)
@@ -4720,6 +4710,8 @@ async def salvar_config_tempo_espiao(message: types.Message, state: FSMContext):
     intervalo = data.get("intervalo_dias_espiao", 1)
     
     dados = ler_alvos_espiao()
+    intervalo_antigo = dados.get("intervalo_dias", 1) # Sensor de mudança
+    
     dados["inicio"] = inicio
     dados["fim"] = fim
     dados["intervalo_dias"] = intervalo
@@ -4729,6 +4721,13 @@ async def salvar_config_tempo_espiao(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info(f"✅ Configuração do Espião salva: Janela {inicio}h-{fim}h | D+{intervalo} | Modo: {modo}")
     await message.answer(f"✅ <b>Configurações do Espião Salvas!</b>\nJanela: {inicio}h às {fim}h\nAtraso: D+{intervalo}\nDistribuição: {message.text}", parse_mode="HTML")
     await state.clear()
+    
+    # 🔫 O GATILHO DE DESCARGA: Se mudou de D+X para D+0, força o disparo!
+    if intervalo_antigo > 0 and intervalo == 0:
+        if EXIBIR_LOGS: logger.info("⚠️ [Gatilho de Descarga] Mudança de D+X para D+0 detectada! Esvaziando a represa de forma orgânica...")
+        await message.answer("⚠️ <b>Gatilho de Descarga Acionado!</b>\nComo você alterou para D+0 (Imediato), todos os vídeos que estavam represados para os próximos dias sofreram intervenção. Eles serão postados na catraca de segurança de 15 segundos.")
+        asyncio.create_task(processar_fila_espiao(forcar=True))
+        
     await menu_grupos_vigiados(message, state)
 
 @dp.message(F.text == "Rotinas do Espião ⏰", StateFilter("*"))
