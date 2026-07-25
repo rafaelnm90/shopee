@@ -442,6 +442,9 @@ async def processar_fila_espelhador_loop():
 
                             await client.send_message(entidade_destino, texto, file=mensagem_original.media, parse_mode="html")
                             if EXIBIR_LOGS: logger.info(f"✅ [Espelhador] Disparo programado concluído na rota '{nome_rota}' para {destino}.")
+                            
+                            # 🛡️ Catraca limitadora de segurança (Previne banimento em disparos de rajada ou D+0)
+                            await asyncio.sleep(15)
                         else:
                             if EXIBIR_LOGS: logger.warning(f"⚠️ [Espelhador] Mensagem original apagada antes do disparo na rota '{nome_rota}'.")
                     except Exception as e:
