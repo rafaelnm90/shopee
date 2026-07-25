@@ -4712,11 +4712,20 @@ async def salvar_config_tempo_espiao(message: types.Message, state: FSMContext):
     await message.answer(f"✅ <b>Configurações do Espião Salvas!</b>\nJanela: {inicio}h às {fim}h\nAtraso: D+{intervalo}\nDistribuição: {message.text}", parse_mode="HTML")
     await state.clear()
     
-    # 🔫 O GATILHO DE DESCARGA: Se mudou de D+X para D+0, força o disparo!
+    # 🔫 O GATILHO DE DESCARGA INTELIGENTE: Limpa o carimbo e deixa o Motor organizar!
     if intervalo_antigo > 0 and intervalo == 0:
-        if EXIBIR_LOGS: logger.info("⚠️ [Gatilho de Descarga] Mudança de D+X para D+0 detectada! Esvaziando a represa de forma orgânica...")
-        await message.answer("⚠️ <b>Gatilho de Descarga Acionado!</b>\nComo você alterou para D+0 (Imediato), todos os vídeos que estavam represados para os próximos dias sofreram intervenção. Eles serão postados na catraca de segurança de 15 segundos.")
-        asyncio.create_task(processar_fila_espiao(forcar=True))
+        fila_data = ler_fila_clonagem()
+        houve_reset = False
+        for item in fila_data.get("fila", []):
+            if not item.get("processado"):
+                item["horario_disparo"] = "" # Limpa para o Motor agir
+                houve_reset = True
+        
+        if houve_reset:
+            salvar_fila_clonagem(fila_data)
+            
+        if EXIBIR_LOGS: logger.info("⚠️ [Gatilho de Descarga] Mudança de D+X para D+0 detectada! Resetando a fila do Espião para recálculo orgânico.")
+        await message.answer("⚠️ <b>Gatilho de Descarga Acionado!</b>\nComo você alterou para D+0 (Imediato), todos os vídeos retidos no Espião foram atualizados.\nO Motor Central já está a recalcular os horários deles para postagem imediata (respeitando a sua janela).", parse_mode="HTML")
         
     await menu_grupos_vigiados(message, state)
 
