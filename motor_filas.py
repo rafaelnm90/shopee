@@ -200,18 +200,19 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
         linha_origem = "   └ 🔗 <i>Sem link de origem</i>"
         
     linha_destino = ""
-    # Se o item tiver link de destino ou se for o robô Espião/Espelhador com o ID da mensagem postada
-    link_final_dest = link_destino or item.get("link_original")
     
-    # Se o vídeo já foi processado ou está na fila aguardando disparo, exibe o destino com o recuo correto
-    if link_final_dest:
-        if "shopee" in str(link_final_dest) or "shp.ee" in str(link_final_dest):
+    # Garante que o link de destino aponte exclusivamente para onde o vídeo foi/será postado
+    if link_destino:
+        if "shopee" in str(link_destino) or "shp.ee" in str(link_destino):
             texto_link_dest = "Ver Produto na Shopee (Destino)"
         else:
             texto_link_dest = "Ver Post no Telegram (Destino)"
-        linha_destino = f"\n   └ 🔗 <a href='{link_final_dest}'>{texto_link_dest}</a>"
-    elif not is_postado:
-        # Se estiver na fila pendente, mantém a linha de destino como um espaço reservado
+        linha_destino = f"\n   └ 🔗 <a href='{link_destino}'>{texto_link_dest}</a>"
+    elif is_postado:
+        # Se foi postado, mas o banco de dados antigo não tem o ID exato da mensagem
+        linha_destino = f"\n   └ 🔗 <i>Ver Post no Telegram (Link indisponível)</i>"
+    else:
+        # Espaço reservado para vídeos que estão na fila
         linha_destino = f"\n   └ 🔗 <i>Aguardando postagem (Destino)</i>"
 
     if EXIBIR_LOGS:
