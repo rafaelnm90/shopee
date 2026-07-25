@@ -3999,6 +3999,37 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao esvaziar pasta temp: {e}")
 
+    # 5. NOVO: Apagar arquivos de backup (.bkp) na raiz
+    if limpar_tudo:
+        try:
+            for filename in os.listdir("."):
+                if filename.endswith(".bkp") and os.path.isfile(filename):
+                    apagar_arquivo(filename)
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro ao tentar apagar arquivos de backup: {e}")
+
+    # 6. NOVO: Limpeza de Logs do Servidor Linux
+    status_ubuntu = "Não executada"
+    if limpar_tudo:
+        try:
+            if EXIBIR_LOGS: logger.info("🖥️ Acionando terminal Linux para limpeza de logs do journalctl...")
+            comando_linux = await asyncio.create_subprocess_exec(
+                "sudo", "journalctl", "--vacuum-time=2d",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, stderr = await comando_linux.communicate()
+            
+            if comando_linux.returncode == 0:
+                status_ubuntu = "✅ Concluída (Mantendo últimos 2 dias)"
+                if EXIBIR_LOGS: logger.info("✅ Logs do Ubuntu limpos com sucesso.")
+            else:
+                status_ubuntu = "⚠️ Falha de permissão (sudo)"
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível limpar journalctl: {stderr.decode().strip()}")
+        except Exception as e:
+            status_ubuntu = "❌ Erro ao acessar terminal"
+            if EXIBIR_LOGS: logger.error(f"❌ Erro na execução do journalctl: {e}")
+
     await msg_status.delete()
     
     texto_final = (
@@ -4009,9 +4040,13 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
         f"🗑️ <b>{relatorio['espelhador']}</b> itens do Espelhador\n"
         f"⏱️ <b>{relatorio['jobs']}</b> agendamentos cancelados\n"
         f"🧹 <b>{relatorio['arquivos']}</b> ficheiros físicos apagados\n"
-        f"💾 <b>{relatorio['espaco_mb']:.2f} MB</b> liberados no servidor!\n\n"
-        "O seu ambiente de trabalho está atualizado."
+        f"💾 <b>{relatorio['espaco_mb']:.2f} MB</b> liberados no servidor!\n"
     )
+    
+    if limpar_tudo:
+        texto_final += f"\n🖥️ <b>Limpeza do Sistema Operacional:</b>\nLogs do Ubuntu: {status_ubuntu}\n"
+        
+    texto_final += "\nO seu ambiente de trabalho está atualizado."
     
     if EXIBIR_LOGS: logger.info(f"✅ Faxina concluída ({message.text}). {relatorio['espaco_mb']:.2f} MB liberados.")
     await message.answer(texto_final, parse_mode="HTML", reply_markup=obter_teclado_opcoes_servidor())
