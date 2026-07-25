@@ -98,15 +98,21 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
 
     # --- 0. RESGATE E HIGIENIZAÇÃO DO NOME COMPLETO ---
     nome_bruto = item.get("nome_produto") or item.get("legenda") or item.get("titulo") or ""
-    nome_limpo = ""
+    
+    nome_limpo = "Aguardando análise da IA 🧠" 
+    
     if nome_bruto:
         legenda_limpa = re.sub(r'<[^>]+>', '', str(nome_bruto)).strip()
-        # Se for Fila Principal, pega a linha do Item. Se for Espião, pega a 1ª linha.
         match_item = re.search(r'📦\s*Item:\s*([^\n]+)', legenda_limpa)
         if match_item:
             nome_limpo = match_item.group(1).strip()
         else:
-            nome_limpo = legenda_limpa.split('\n')[0].strip()
+            primeira_linha = legenda_limpa.split('\n')[0].strip()
+            if primeira_linha:
+                nome_limpo = primeira_linha
+
+    # ✅ CORREÇÃO: Resgate Universal de Horário (Puxa a chave correta independente do Robô)
+    horario_universal = item.get("horario_disparo") or item.get("data_publicacao") or ""
 
     # --- 1. CÁLCULO DINÂMICO DE DATAS E STATUS ---
     status_dia = "⚪ Indefinido"
@@ -124,9 +130,13 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
             data_alvo_esperada_obj = data_obj + timedelta(days=atraso_dias)
             
             if tipo_fila == "Espelhador":
-                horario_disparo_str = item.get("horario_disparo", "")
-                if horario_disparo_str:
-                    hd_obj = datetime.strptime(horario_disparo_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                if horario_universal:
+                    # Tenta ler com ou sem as horas exatas
+                    try:
+                        hd_obj = datetime.strptime(horario_universal, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                    except ValueError:
+                        hd_obj = datetime.strptime(horario_universal, "%Y-%m-%d").replace(tzinfo=fuso_horario)
+
                     if hd_obj.date() == hoje_obj:
                         status_dia = "🔴 Atrasado" if agora > hd_obj else "🟢 Hoje"
                     elif hd_obj.date() > hoje_obj:
@@ -144,7 +154,6 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
             pass
 
     # --- 2. CÁLCULO DE PREVISÃO EXATA ---
-    data_pub = item.get("horario_disparo", "")
     is_postado = item.get("processado", False)
     horario_postagem = item.get("horario_postagem", "")
     data_postagem_str = item.get("data_postagem", "")
@@ -160,14 +169,18 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
         else:
             previsao_texto = f"Hoje às {horario_postagem}"
     else:
-        if data_pub:
+        if horario_universal:
             try:
-                dp_obj = datetime.strptime(data_pub, "%Y-%m-%d %H:%M:%S")
+                dp_obj = datetime.strptime(horario_universal, "%Y-%m-%d %H:%M:%S")
                 previsao_texto = dp_obj.strftime("%d/%m às %H:%M")
             except:
-                previsao_texto = "Pendente"
+                # Se não tem hora cadastrada (só a data), exibe apenas o dia
+                try:
+                    dp_obj = datetime.strptime(horario_universal, "%Y-%m-%d")
+                    previsao_texto = dp_obj.strftime("%d/%m")
+                except:
+                    previsao_texto = "Pendente"
         else:
-            # Não calculou ainda: Exibe apenas a data do dia alvo sem forçar horário
             if data_alvo_esperada_obj:
                 previsao_texto = data_alvo_esperada_obj.strftime("%d/%m")
             else:
@@ -194,16 +207,15 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
             texto_link_dest = "Ver Post no Telegram (Destino)"
         linha_destino = f"\n   └ 🔗 <a href='{link_destino}'>{texto_link_dest}</a>"
 
-    # --- 4. MONTAGEM ESTRUTURAL DO LAYOUT (Conforme solicitado) ---
+    # --- 4. MONTAGEM ESTRUTURAL DO LAYOUT ---
     bloco = f"<b>{index}.</b> {status_dia} | 📡 {display_origem}\n"
     
-    # ✅ CORREÇÃO: A linha do nome agora é estrita. Se não houver nome, imprimirá o fallback.
-    bloco += f"   └ Nome: {nome_limpo}\n"
+    if nome_limpo:
+        bloco += f"   └ Nome: {nome_limpo}\n"
         
     bloco += f"   └ 📥 Cap: {data_cap_formatada} ➡️ 📤 Prev: {previsao_texto}\n"
     bloco += f"{linha_origem}{linha_destino}\n"
     
-    # --- 5. INJEÇÃO DE DETALHES ESPECÍFICOS ---
     if detalhes_extras:
         bloco += f"   └ {detalhes_extras}\n"
         
