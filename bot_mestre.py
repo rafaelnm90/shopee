@@ -6656,8 +6656,9 @@ async def processar_fila_espiao(forcar=False):
             arquivo = FSInputFile(caminho_video)
             msg_enviada = await bot.send_video(chat_id=canal_destino, video=arquivo, caption=legenda_postagem, parse_mode="HTML")
             
-            # ✅ NOVO: Grava o ID da mensagem para o link de destino funcionar
+            # ✅ CORREÇÃO DUPLA: Grava o ID do Destino e a Legenda Nova (com o Nome da IA) no banco de dados!
             item_pendente["msg_postada_id"] = msg_enviada.message_id
+            item_pendente["legenda"] = legenda_postagem
             
             if EXIBIR_LOGS: logger.info(f"✅ Clone {item_id} publicado com sucesso! ID: {msg_enviada.message_id}")
             try: os.remove(caminho_video)
