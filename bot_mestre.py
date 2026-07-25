@@ -171,6 +171,7 @@ class AutoraisFluxo(StatesGroup):
 
 class RelatoriosFluxo(StatesGroup):
     menu_filas = State()
+    aguardando_rota_espelhador = State() # ✅ NOVO: Estado para selecionar qual rota visualizar
 
 # ✅ NOVO: Máquina de Estados para a configuração do agendamento do Espião
 class ConfigRotinaEspiao(StatesGroup):
@@ -2241,10 +2242,47 @@ async def voltar_relatorios_geral(message: types.Message, state: FSMContext):
     await menu_relatorio_geral(message, state)
 
 @dp.message(RelatoriosFluxo.menu_filas, F.text.in_(["Fila do Espelhador 🔄", "Fila do Espião 🕵️"]))
+@dp.message(RelatoriosFluxo.aguardando_rota_espelhador)
 async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     
-    tipo_fila = "Espelhador" if "Espelhador" in message.text else "Espião"
+    estado_atual = await state.get_state()
+    rota_selecionada = None
+    
+    # 1. TRATAMENTO DO NOVO MENU DE MÚLTIPLAS ROTAS (ESPELHADOR)
+    if estado_atual == RelatoriosFluxo.aguardando_rota_espelhador:
+        if message.text == "Voltar aos Relatórios 🔙":
+            if EXIBIR_LOGS: logger.info("🔙 Cancelando seleção de rota e retornando.")
+            await state.clear()
+            await menu_relatorios_filas(message, state)
+            return
+            
+        tipo_fila = "Espelhador"
+        if message.text.startswith("Rota: "):
+            rota_selecionada = message.text.replace("Rota: ", "")
+        if EXIBIR_LOGS: logger.info(f"📊 Rota específica selecionada para exibição: {rota_selecionada or 'Todas'}")
+    else:
+        tipo_fila = "Espelhador" if "Espelhador" in message.text else "Espião"
+        
+        # Se for o Espelhador e existirem múltiplas rotas, cria a interrupção visual
+        if tipo_fila == "Espelhador":
+            import painel_espelhos
+            dados_rotas = painel_espelhos.ler_espelhos()
+            rotas = dados_rotas.get("rotas", [])
+            
+            if len(rotas) > 1:
+                if EXIBIR_LOGS: logger.info("🔄 Múltiplas rotas detectadas no Espelhador. Exibindo menu de seleção...")
+                botoes = []
+                for r in rotas:
+                    botoes.append([KeyboardButton(text=f"Rota: {r['nome']}")])
+                botoes.append([KeyboardButton(text="Todas as Rotas 🌐")])
+                botoes.append([KeyboardButton(text="Voltar aos Relatórios 🔙")])
+                
+                teclado = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+                await message.answer("🔄 <b>Múltiplas rotas detectadas!</b>\nQual fila do Espelhador deseja analisar?", reply_markup=teclado, parse_mode="HTML")
+                await state.set_state(RelatoriosFluxo.aguardando_rota_espelhador)
+                return
+
     if EXIBIR_LOGS: logger.info(f"📊 Iniciando compilação do relatório unificado (Sem limites) para a fila do {tipo_fila}...")
     
     if tipo_fila == "Espião":
@@ -2325,11 +2363,36 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         pendentes = fila_limpa
         
     elif tipo_fila == "Espelhador":
+        fila_limpa = []
+        houve_alteracao = False
+        hoje_str = agora.strftime("%Y-%m-%d")
+        
         for item in fila:
-            if not item.get("processado", False):
-                data_pub = item.get("data_publicacao", "")
-                if not data_pub or data_pub > agora_str:
-                    pendentes.append(item)
+            # ✅ CORREÇÃO: Mantém no visual os que foram postados HOJE no Espelhador.
+            if item.get("processado", False):
+                if item.get("data_postagem") == hoje_str:
+                    if EXIBIR_LOGS: logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo postado hoje ({item.get('id', 'SemID')}) no visual da fila do Espelhador.")
+                    fila_limpa.append(item)
+                else:
+                    houve_alteracao = True
+                continue
+                
+            fila_limpa.append(item)
+            
+        # Se encontrou lixo antigo, salva o JSON limpo imediatamente para poupar processamento futuro
+        if houve_alteracao:
+            fila_data["fila"] = fila_limpa
+            try:
+                with open("fila_espelhador.json", "w", encoding="utf-8") as f:
+                    json.dump(fila_data, f, indent=4)
+            except Exception as e:
+                if EXIBIR_LOGS: logger.error(f"❌ Erro ao limpar fila espelhador: {e}")
+            
+        pendentes = fila_limpa
+        
+        # ✅ NOVO: Aplica o filtro de listagem caso o usuário tenha clicado em uma rota específica
+        if rota_selecionada and rota_selecionada != "Todas as Rotas 🌐":
+            pendentes = [i for i in pendentes if i.get("nome_rota") == rota_selecionada]
     
     if not pendentes:
         await message.answer(f"📭 A fila do {tipo_fila} está vazia no momento.", parse_mode="HTML")
