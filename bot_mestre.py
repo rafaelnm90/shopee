@@ -2519,9 +2519,13 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 
             # --- 5. PREPARAÇÃO DO LINK DE DESTINO (Apenas se postado) ---
             link_destino = None
-            if v.get("processado", False) and tipo_fila == "Espião":
-                id_destino = str(dados_espiao.get("canal_destino", ""))
-                msg_id_postada = v.get("msg_postada_id") 
+            if v.get("processado", False):
+                if tipo_fila == "Espião":
+                    id_destino = str(dados_espiao.get("canal_destino", ""))
+                else:
+                    id_destino = str(v.get("chat_destino") or v.get("destino") or "")
+                    
+                msg_id_postada = v.get("msg_postada_id") or v.get("mensagem_id_destino")
                 
                 if id_destino and msg_id_postada:
                     if id_destino.lstrip("-").isdigit():
@@ -2532,6 +2536,9 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                         link_destino = f"https://t.me/{username_dest}/{msg_id_postada}"
                 elif id_destino and not id_destino.lstrip("-").isdigit():
                     link_destino = f"https://t.me/{id_destino.replace('@', '')}"
+
+                if EXIBIR_LOGS and link_destino:
+                    logger.info(f"🔗 [Destino] Rota resolvida para a fila do {tipo_fila}.")
 
             # --- 6. ACIONANDO O MOTOR CENTRAL PARA O DESIGN DA FILA ---
             from motor_filas import gerar_layout_item_padrao
