@@ -87,3 +87,95 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
         logger.info(f"✅ [Motor Filas] Distribuição concluída. (Modo: {modo}, Atraso: D+{intervalo_dias}, Forçado: {forcar})")
 
     return itens_para_agendar
+
+def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_horario, display_origem, link_origem, link_destino=None, detalhes_extras=None):
+    """
+    🎨 Componente Visual Centralizado (Padrão MVC)
+    Gera o layout de 3 linhas para as filas (Espião, Espelhador, etc.).
+    
+    🚨 REGRA DE OURO: Esta é a base estrutural imutável. 
+    Para adicionar detalhes específicos de um robô futuro, passe-os no parâmetro opcional 'detalhes_extras'.
+    Nunca altere o esqueleto principal para não quebrar a simetria visual da frota.
+    """
+    # --- 1. CÁLCULO DINÂMICO DE DATAS ---
+    status_dia = "⚪ Indefinido"
+    data_cap_formatada = "Desconhecida"
+    data_cap_str = item.get("data_captura", "Data não registrada")
+    
+    hoje_obj = agora.date()
+    hoje_str = agora.strftime("%Y-%m-%d")
+
+    if data_cap_str != "Data não registrada":
+        try:
+            formato = "%Y-%m-%d %H:%M:%S" if len(data_cap_str) > 10 else "%Y-%m-%d"
+            data_obj = datetime.strptime(data_cap_str, formato)
+            data_cap_formatada = data_obj.strftime("%d/%m às %H:%M")
+            
+            if tipo_fila == "Espelhador":
+                horario_disparo_str = item.get("horario_disparo", "")
+                if horario_disparo_str:
+                    hd_obj = datetime.strptime(horario_disparo_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                    if hd_obj.date() == hoje_obj:
+                        status_dia = "🔴 Atrasado" if agora > hd_obj else "🟢 Hoje"
+                    elif hd_obj.date() > hoje_obj:
+                        status_dia = "🟡 Amanhã" if hd_obj.date() == hoje_obj + timedelta(days=1) else f"🔵 D+{abs((hd_obj.date() - hoje_obj).days)}"
+                    else:
+                        status_dia = "🔴 Atrasado"
+            else:
+                if atraso_dias == 0:
+                    status_dia = "🟢 Na Fila (D+0)" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
+                elif atraso_dias == 1:
+                    status_dia = "🟡 Represa (D+1)" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
+                else:
+                    status_dia = f"🔵 Represa (D+{atraso_dias})" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
+        except Exception:
+            pass
+
+    # --- 2. CÁLCULO DE PREVISÃO EXATA ---
+    data_pub = item.get("horario_disparo", "")
+    if data_pub:
+        try:
+            dp_obj = datetime.strptime(data_pub, "%Y-%m-%d %H:%M:%S")
+            previsao_texto = dp_obj.strftime("%d/%m às %H:%M")
+        except:
+            previsao_texto = "Pendente na esteira"
+    else:
+        previsao_texto = "Aguardando cálculo"
+        
+    is_postado = item.get("processado", False)
+    horario_postagem = item.get("horario_postagem", "")
+    
+    if is_postado:
+        status_dia = "✅ Postado"
+        previsao_texto = f"Hoje às {horario_postagem}"
+    elif "Fechada" in status_dia:
+        status_dia = "🔴 Atrasado"
+
+    # --- 3. ETIQUETA INTELIGENTE PARA OS LINKS ---
+    if link_origem:
+        if "t.me" in link_origem:
+            texto_link_origem = "📥 Origem" if tipo_fila == "Espião" else "Ver Post"
+        elif "shopee" in link_origem or "shp.ee" in link_origem:
+            texto_link_origem = "Ver Produto"
+        else:
+            texto_link_origem = "Ver Link"
+        link_display = f"<a href='{link_origem}'>{texto_link_origem}</a>"
+    else:
+        link_display = "<i>Sem link de origem</i>"
+        
+    # O destino só aparece se o vídeo estiver concluído E houver link
+    if is_postado and link_destino:
+        link_display += f" | <a href='{link_destino}'>📤 Destino</a>"
+
+    # --- 4. LAYOUT VISUAL EM 3 LINHAS ---
+    bloco = (
+        f"<b>{index}.</b> {status_dia} | 📡 {display_origem}\n"
+        f"   └ 📥 Cap: {data_cap_formatada} ➡️ 📤 Prev: {previsao_texto}\n"
+        f"   └ 🔗 {link_display}\n"
+    )
+    
+    # --- 5. INJEÇÃO DE DETALHES ESPECÍFICOS ---
+    if detalhes_extras:
+        bloco += f"   └ {detalhes_extras}\n"
+        
+    return bloco
