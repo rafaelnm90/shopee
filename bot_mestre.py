@@ -423,16 +423,7 @@ teclado_automacoes_espiao = ReplyKeyboardMarkup(
 teclado_opcoes_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Definir Canal de Destino 🎯")],
-        [KeyboardButton(text="Adicionar Concorrente ➕"), KeyboardButton(text="Remover Concorrente 🗑️")],
-        [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
-
-teclado_opcoes_espiao = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Definir Canal de Destino 🎯"), KeyboardButton(text="Editar Agendamento 🕒")],
+        [KeyboardButton(text="Editar Janela 🕒"), KeyboardButton(text="Editar Atraso ⏳")],
         [KeyboardButton(text="Adicionar Concorrente ➕"), KeyboardButton(text="Remover Concorrente 🗑️")],
         [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
     ],
@@ -3220,8 +3211,8 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await menu_gerenciar_fila(message, state)
         return
         
-    # 🔁 Roteamento Inteligente: Se estiver no Espião (Grupos Vigiados)
-    if estado_atual and estado_atual.startswith("EspiaoFluxo"):
+    # 🔁 Roteamento Inteligente: Se estiver no Espião (Grupos Vigiados ou Configurando Tempos)
+    if estado_atual and (estado_atual.startswith("EspiaoFluxo") or estado_atual.startswith("ConfigRotinaEspiao")):
         await state.clear()
         await message.answer("Ação cancelada.")
         await menu_grupos_vigiados(message, state)
@@ -4623,18 +4614,18 @@ async def salvar_destino_espiao(message: types.Message, state: FSMContext):
     
     await menu_grupos_vigiados(message, state)
 
-@dp.message(F.text == "Editar Agendamento 🕒", StateFilter("*"))
-async def iniciar_config_tempo_espiao(message: types.Message, state: FSMContext):
+@dp.message(F.text == "Editar Janela 🕒", StateFilter("*"))
+async def iniciar_config_janela_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando configuração da janela de horário do Espião.")
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando configuração isolada da janela de horário do Espião.")
     
     dados = ler_alvos_espiao()
     inicio = dados.get("inicio", 10)
     fim = dados.get("fim", 22)
     
     await message.answer(
-        f"Defina a <b>Janela de Horário</b> útil em que o Espião pode postar os vídeos D+1 no canal.\n\n"
+        f"Defina a <b>Janela de Horário</b> útil em que o Espião pode postar os vídeos.\n\n"
         f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>):\n"
         f"<i>Janela atual: {inicio}h às {fim}h</i>", 
         reply_markup=teclado_cancelar, 
@@ -4644,6 +4635,7 @@ async def iniciar_config_tempo_espiao(message: types.Message, state: FSMContext)
 
 @dp.message(ConfigRotinaEspiao.aguardando_janela)
 async def receber_janela_espiao(message: types.Message, state: FSMContext):
+    import re
     match = re.match(r"^(\d{1,2})-(\d{1,2})$", message.text.strip())
     if not match:
         await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22", reply_markup=teclado_cancelar)
@@ -4654,7 +4646,20 @@ async def receber_janela_espiao(message: types.Message, state: FSMContext):
         await message.answer("Valores inválidos! A hora de início deve ser menor que a do fim.", reply_markup=teclado_cancelar)
         return
 
-    await state.update_data(espiao_inicio=inicio, fmt_espiao_fim=fim)
+    dados = ler_alvos_espiao()
+    dados["inicio"] = inicio
+    dados["fim"] = fim
+    salvar_alvos_espiao(dados)
+    
+    if EXIBIR_LOGS: logger.info(f"✅ Nova Janela do Espião salva: {inicio}h às {fim}h")
+    await message.answer(f"✅ <b>Janela Atualizada!</b>\nOs vídeos serão distribuídos estritamente entre {inicio}h e {fim}h.", parse_mode="HTML")
+    await state.clear()
+    await menu_grupos_vigiados(message, state)
+
+@dp.message(F.text == "Editar Atraso ⏳", StateFilter("*"))
+async def iniciar_config_atraso_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
     
     teclado_dias = ReplyKeyboardMarkup(
         keyboard=[
@@ -4664,7 +4669,7 @@ async def receber_janela_espiao(message: types.Message, state: FSMContext):
             [KeyboardButton(text="Cancelar ❌")]
         ], resize_keyboard=True, is_persistent=True
     )
-    await message.answer("Excelente! Agora escolha a defasagem temporal das postagens extraídas do Espião:", reply_markup=teclado_dias)
+    await message.answer("Escolha a defasagem temporal (Atraso) das postagens extraídas do Espião:", reply_markup=teclado_dias)
     await state.set_state(ConfigRotinaEspiao.aguardando_intervalo_espiao)
 
 @dp.message(ConfigRotinaEspiao.aguardando_intervalo_espiao)
@@ -4695,21 +4700,17 @@ async def salvar_config_tempo_espiao(message: types.Message, state: FSMContext):
         
     modo = "aleatorio" if message.text == "Aleatório 🔀" else "ordem"
     data = await state.get_data()
-    inicio = data.get("espiao_inicio")
-    fim = data.get("fmt_espiao_fim")
     intervalo = data.get("intervalo_dias_espiao", 1)
     
     dados = ler_alvos_espiao()
-    intervalo_antigo = dados.get("intervalo_dias", 1) # Sensor de mudança
+    intervalo_antigo = dados.get("intervalo_dias", 1)
     
-    dados["inicio"] = inicio
-    dados["fim"] = fim
     dados["intervalo_dias"] = intervalo
     dados["modo"] = modo
     salvar_alvos_espiao(dados)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Configuração do Espião salva: Janela {inicio}h-{fim}h | D+{intervalo} | Modo: {modo}")
-    await message.answer(f"✅ <b>Configurações do Espião Salvas!</b>\nJanela: {inicio}h às {fim}h\nAtraso: D+{intervalo}\nDistribuição: {message.text}", parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info(f"✅ Configuração do Espião salva: D+{intervalo} | Modo: {modo}")
+    await message.answer(f"✅ <b>Atraso do Espião Salvo!</b>\nAtraso: D+{intervalo}\nDistribuição: {message.text}", parse_mode="HTML")
     await state.clear()
     
     # 🔫 O GATILHO DE DESCARGA INTELIGENTE: Limpa o carimbo e deixa o Motor organizar!
@@ -4718,7 +4719,7 @@ async def salvar_config_tempo_espiao(message: types.Message, state: FSMContext):
         houve_reset = False
         for item in fila_data.get("fila", []):
             if not item.get("processado"):
-                item["horario_disparo"] = "" # Limpa para o Motor agir
+                item["horario_disparo"] = "" 
                 houve_reset = True
         
         if houve_reset:
