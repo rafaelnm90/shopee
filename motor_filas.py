@@ -196,8 +196,8 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
     # --- 4. MONTAGEM ESTRUTURAL DO LAYOUT (Conforme solicitado) ---
     bloco = f"<b>{index}.</b> {status_dia} | 📡 {display_origem}\n"
     
-    if nome_limpo:
-        bloco += f"   └ Nome: {nome_limpo}\n"
+    # ✅ CORREÇÃO: A linha do nome agora é estrita. Se não houver nome, imprimirá o fallback.
+    bloco += f"   └ Nome: {nome_limpo}\n"
         
     bloco += f"   └ 📥 Cap: {data_cap_formatada} ➡️ 📤 Prev: {previsao_texto}\n"
     bloco += f"{linha_origem}{linha_destino}\n"
