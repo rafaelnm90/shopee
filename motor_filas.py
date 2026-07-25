@@ -200,12 +200,22 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
         linha_origem = "   └ 🔗 <i>Sem link de origem</i>"
         
     linha_destino = ""
-    if is_postado and link_destino:
-        if "shopee" in link_destino or "shp.ee" in link_destino:
+    # Se o item tiver link de destino ou se for o robô Espião/Espelhador com o ID da mensagem postada
+    link_final_dest = link_destino or item.get("link_original")
+    
+    # Se o vídeo já foi processado ou está na fila aguardando disparo, exibe o destino com o recuo correto
+    if link_final_dest:
+        if "shopee" in str(link_final_dest) or "shp.ee" in str(link_final_dest):
             texto_link_dest = "Ver Produto na Shopee (Destino)"
         else:
             texto_link_dest = "Ver Post no Telegram (Destino)"
-        linha_destino = f"\n   └ 🔗 <a href='{link_destino}'>{texto_link_dest}</a>"
+        linha_destino = f"\n   └ 🔗 <a href='{link_final_dest}'>{texto_link_dest}</a>"
+    elif not is_postado:
+        # Se estiver na fila pendente, mantém a linha de destino como um espaço reservado
+        linha_destino = f"\n   └ 🔗 <i>Aguardando postagem (Destino)</i>"
+
+    if EXIBIR_LOGS:
+        logger.info(f"🎨 [Layout] Formatando item {index} | Status: {status_dia} | Destino injetado.")
 
     # --- 4. MONTAGEM ESTRUTURAL DO LAYOUT ---
     bloco = f"<b>{index}.</b> {status_dia} | 📡 {display_origem}\n"
@@ -214,7 +224,7 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
         bloco += f"   └ Nome: {nome_limpo}\n"
         
     bloco += f"   └ 📥 Cap: {data_cap_formatada} ➡️ 📤 Prev: {previsao_texto}\n"
-    bloco += f"{linha_origem}{linha_destino}\n"
+    bloco += f"{linha_origem}{linha_destino}\n\n"  # Adicionado o espaçamento duplo de respiro no final do item
     
     if detalhes_extras:
         bloco += f"   └ {detalhes_extras}\n"
