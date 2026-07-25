@@ -29,7 +29,7 @@ from motor_filas import calcular_horarios_distribuicao # ⚙️ Novo Motor Centr
 import matplotlib.pyplot as plt
 import io
 import sqlite3
-import espelhador
+import painel_espelhos
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo
 EXIBIR_LOGS = True
 
@@ -198,8 +198,8 @@ if EXIBIR_LOGS: logger.info("✅ Travas de segurança dos bancos JSON prontas e 
 scheduler = AsyncIOScheduler(timezone=FUSO_STR)
 
 if EXIBIR_LOGS: logger.info("🔄 Acoplando o módulo externo Espelhador ao fluxo principal...")
-dp.include_router(espelhador.router)
-espelhador.configurar_dependencias(bot, scheduler)
+dp.include_router(painel_espelhos.router)
+painel_espelhos.configurar_dependencias(bot, scheduler)
 if EXIBIR_LOGS: logger.info("✅ Módulo Espelhador montado com segurança.")
 
 # --- NOVOS TECLADOS DE CONTROLE ---
@@ -2350,8 +2350,8 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     rotas_agrupadas = {}
     
     if tipo_fila == "Espelhador":
-        import espelhador
-        dados_rotas = espelhador.ler_espelhos()
+        import painel_espelhos
+        dados_rotas = painel_espelhos.ler_espelhos()
         mapa_rotas = {r["nome"]: r for r in dados_rotas.get("rotas", [])}
         
         for item in pendentes:
