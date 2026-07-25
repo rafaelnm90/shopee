@@ -361,35 +361,38 @@ async def processar_fila_espelhador_loop():
             rotas = {r.get("nome"): r for r in config.get("rotas", [])}
             
             itens_restantes = []
-            agora = datetime.now()
+            agora = datetime.now(fuso_horario) # ✅ CORREÇÃO: Forçando fuso horário do Brasil
             hoje_str = agora.strftime("%Y-%m-%d")
             houve_alteracao_rota = False
             houve_agendamento = False
             
-            # 1. Mapeamento e Agendamento Inteligente dos Vídeos Represados
+            # --- 1. PREPARAÇÃO PARA O MOTOR CENTRAL ---
             itens_por_rota_desagendados = {}
             for item in fila:
+                nome_rota = item.get("nome_rota")
+                rota_config = rotas.get(nome_rota)
+                
+                if not rota_config: continue
+                
+                # Se o botão de Forçar for apertado no Telegram, limpa o horário!
+                esvaziar_agora = rota_config.get("esvaziar_agora", False)
+                if esvaziar_agora:
+                    item["horario_disparo"] = ""
+                    
                 if item.get("horario_disparo"):
                     continue # Já tem carimbo de distribuição matemática
                 
                 data_captura_obj = datetime.strptime(item["data_captura"], "%Y-%m-%d %H:%M:%S")
                 data_captura_str = data_captura_obj.strftime("%Y-%m-%d")
-                
-                nome_rota = item.get("nome_rota")
-                rota_config = rotas.get(nome_rota)
-                
-                if not rota_config: continue
                 intervalo_dias = int(rota_config.get("intervalo_dias", 1))
                 
-                # Se for D+0 ou se for de dias anteriores (D+X maturados)
-                if intervalo_dias == 0 or data_captura_str < hoje_str:
+                if intervalo_dias == 0 or data_captura_str < hoje_str or esvaziar_agora:
                     itens_por_rota_desagendados.setdefault(nome_rota, []).append(item)
 
             for nome_rota, itens in itens_por_rota_desagendados.items():
                 rota_config = rotas.get(nome_rota)
                 if not rota_config: continue
                 
-                # Prepara as regras específicas desta rota
                 config_fila = {
                     "inicio": int(rota_config.get("inicio", 10)),
                     "fim": int(rota_config.get("fim", 22)),
@@ -397,11 +400,13 @@ async def processar_fila_espelhador_loop():
                     "intervalo_dias": int(rota_config.get("intervalo_dias", 1))
                 }
                 
-                if EXIBIR_LOGS: logger.info(f"📅 [Espelhador] Motor Central acionado para {len(itens)} vídeos na rota '{nome_rota}'...")
-                calcular_horarios_distribuicao(itens, config_fila, forcar=False)
+                forcar_rota = rota_config.get("esvaziar_agora", False)
+                
+                if EXIBIR_LOGS: logger.info(f"📅 [Espelhador] Motor Central acionado para {len(itens)} vídeos na rota '{nome_rota}' (Forçar: {forcar_rota})...")
+                calcular_horarios_distribuicao(itens, config_fila, forcar=forcar_rota)
                 houve_agendamento = True
             
-            # 2. Execução dos Disparos Agendados
+            # --- 2. EXECUÇÃO DOS DISPAROS (Confiando 100% no Motor) ---
             for item in fila:
                 nome_rota = item.get("nome_rota")
                 rota_config = rotas.get(nome_rota)
@@ -409,15 +414,15 @@ async def processar_fila_espelhador_loop():
                 if not rota_config:
                     continue
                     
-                esvaziar_agora = rota_config.get("esvaziar_agora", False)
                 horario_disparo_str = item.get("horario_disparo")
+                deve_disparar = False
                 
-                deve_disparar = esvaziar_agora
-                
-                if not deve_disparar and horario_disparo_str:
-                    horario_disparo_obj = datetime.strptime(horario_disparo_str, "%Y-%m-%d %H:%M:%S")
-                    if agora >= horario_disparo_obj:
-                        deve_disparar = True
+                if horario_disparo_str:
+                    try:
+                        horario_disparo_obj = datetime.strptime(horario_disparo_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                        if agora >= horario_disparo_obj:
+                            deve_disparar = True
+                    except Exception: pass
                 
                 if deve_disparar:
                     try:
