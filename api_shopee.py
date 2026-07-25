@@ -50,10 +50,10 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", exibir_logs
     sub_id_limpo = re.sub(r'[^a-zA-Z0-9_]', '_', str(sub_id_nicho).strip())[:40]
 
     payload = {
-        "query": "mutation generateShortLink($originUrl: String!, $subIds: [String]) { generateShortLink(input: {originUrl: $originUrl, subIds: $subIds}) { shortLink } }",
+        "query": "mutation generateShortLink($originUrl: String!, $subIds: [String!]) { generateShortLink(input: {originUrl: $originUrl, subIds: $subIds}) { shortLink } }",
         "variables": {
             "originUrl": link_processar,
-            "subIds": [sub_id_limpo] if sub_id_nicho != "geral" else []
+            "subIds": [sub_id_limpo]
         }
     }
 
