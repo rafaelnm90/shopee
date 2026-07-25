@@ -369,9 +369,24 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
     
     if EXIBIR_LOGS: logger.info(f"🚀 A agrupar {len(origens)} origens numa única rota de espelhamento (D+{intervalo_dias}) para o destino {destino}...")
     
-    num_rota = len(dados.get("rotas", [])) + 1
-    nome_rota = f"Espelho {num_rota}"
+    # --- Lógica Inteligente de Nomeação da Rota ---
+    from utils import ler_cache_nomes_grupos
+    cache_nomes = ler_cache_nomes_grupos()
     
+    primeira_origem = str(origens[0]) if origens else "Geral"
+    nome_origem = cache_nomes.get(primeira_origem, primeira_origem)
+    
+    nome_base = f"Espelho: {nome_origem}"
+    nome_rota = nome_base
+    contador = 1
+    
+    rotas_existentes = dados.get("rotas", [])
+    while any(r.get("nome") == nome_rota for r in rotas_existentes):
+        contador += 1
+        nome_rota = f"{nome_base} ({contador})"
+        
+    if EXIBIR_LOGS: logger.info(f"🏷️ Rota nomeada automaticamente como: {nome_rota}")
+
     nova_rota = {
         "nome": nome_rota,
         "origens": origens,
