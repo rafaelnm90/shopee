@@ -2555,36 +2555,25 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 except Exception:
                     pass
 
-            # --- 6. CÁLCULO DE PREVISÃO EXATA E COMPACTA ---
-            if tipo_fila == "Espelhador":
-                data_pub = v.get("horario_disparo", "")
-                if data_pub:
-                    try:
-                        dp_obj = datetime.strptime(data_pub, "%Y-%m-%d %H:%M:%S")
-                        previsao_texto = dp_obj.strftime("%d/%m às %H:%M")
-                    except:
-                        previsao_texto = "Pendente na esteira"
-                else:
-                    # ✅ CORREÇÃO: Altera o texto se for processamento no mesmo dia
-                    previsao_texto = "Processamento Imediato" if atraso_dias == 0 else "Aguardando virada do dia"
-            else: # Lógica para o Espião
-                is_postado = v.get("processado", False)
-                horario_postagem = v.get("horario_postagem", "")
+            # --- 6. CÁLCULO DE PREVISÃO EXATA E COMPACTA (UNIFICADO) ---
+            data_pub = v.get("horario_disparo", "")
+            if data_pub:
+                try:
+                    dp_obj = datetime.strptime(data_pub, "%Y-%m-%d %H:%M:%S")
+                    previsao_texto = dp_obj.strftime("%d/%m às %H:%M")
+                except:
+                    previsao_texto = "Pendente na esteira"
+            else:
+                previsao_texto = "Aguardando cálculo da IA"
                 
-                if is_postado:
-                    status_dia = "✅ Postado"
-                    previsao_texto = f"Hoje às {horario_postagem}"
-                else:
-                    if "Fechada" in status_dia:
-                        previsao_texto = f"Amanhã {inicio}h-{fim}h"
-                        status_dia = "🔴 Atrasado" # Limpa a tag para o layout
-                    elif "Atrasado" in status_dia:
-                        if agora.hour >= fim:
-                            previsao_texto = f"Amanhã {inicio}h-{fim}h"
-                        else:
-                            previsao_texto = "Imediato"
-                    else:
-                        previsao_texto = f"Sorteio {inicio}h-{fim}h"
+            is_postado = v.get("processado", False)
+            horario_postagem = v.get("horario_postagem", "")
+            
+            if is_postado:
+                status_dia = "✅ Postado"
+                previsao_texto = f"Hoje às {horario_postagem}"
+            elif "Fechada" in status_dia:
+                status_dia = "🔴 Atrasado"
 
            # --- 7. NOVO LAYOUT VISUAL EM 3 LINHAS ---
             linha_video = (
@@ -6558,186 +6547,176 @@ def salvar_fila_clonagem(dados):
 async def processar_fila_espiao(forcar=False):
     dados_espiao = ler_alvos_espiao()
     canal_destino = dados_espiao.get("canal_destino")
-    
-    if not canal_destino:
-        return 
+    if not canal_destino: return 
         
     fila_data = ler_fila_clonagem()
+    fila = fila_data.get("fila", [])
     intervalo_dias = dados_espiao.get("intervalo_dias", 1)
     
-    # ✅ RESGATE DA JANELA DE HORÁRIO
     inicio_janela = dados_espiao.get("inicio", 10)
     fim_janela = dados_espiao.get("fim", 22)
+    modo = dados_espiao.get("modo", "aleatorio")
     
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
 
-    # 🛑 TRAVA DE EXPEDIENTE: Se não for um disparo forçado e estiver fora da hora, o bot dorme
-    if not forcar and (agora.hour < inicio_janela or agora.hour >= fim_janela):
-        return
-        
-    proximo_proc_str = fila_data.get("proximo_processamento")
-    if proximo_proc_str:
-        try:
-            proximo_proc = datetime.strptime(proximo_proc_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
-            if agora < proximo_proc:
-                return
-        except ValueError:
-            pass
-            
-    fila = fila_data.get("fila", [])
+    # --- 1. MOTOR MATEMÁTICO DE DISTRIBUIÇÃO ---
+    itens_para_agendar = []
     
-    itens_elegiveis = []
     for item in fila:
-        if not item.get("processado"):
+        if item.get("processado"): continue
+        
+        # Se forçou descarga, limpa o horário para aplicar a catraca imediata
+        if forcar: item["horario_disparo"] = ""
+        
+        if not item.get("horario_disparo"):
             data_cap_str = item.get("data_captura", "")
             if data_cap_str:
                 try:
-                    data_captura_obj = datetime.strptime(data_cap_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
-                    data_alvo_obj = data_captura_obj + timedelta(days=intervalo_dias)
-                    dia_alvo = data_alvo_obj.strftime("%Y-%m-%d")
-                    if dia_alvo <= hoje_str:
-                        itens_elegiveis.append(item)
+                    data_cap_obj = datetime.strptime(data_cap_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
                 except ValueError:
-                    dia_cap = data_cap_str.split(" ")[0]
-                    data_cap_obj = datetime.strptime(dia_cap, "%Y-%m-%d").replace(tzinfo=fuso_horario)
-                    data_alvo_obj = data_cap_obj + timedelta(days=intervalo_dias)
-                    dia_alvo = data_alvo_obj.strftime("%Y-%m-%d")
-                    if dia_alvo <= hoje_str:
-                        itens_elegiveis.append(item)
-
-    if not itens_elegiveis:
-        return
-
-    item_pendente = random.choice(itens_elegiveis)
-    if EXIBIR_LOGS: logger.info(f"🪞 [Espião] Sorteio aleatório ativo. Vídeo selecionado: {item_pendente['id']}")
-
-    caminho_video = item_pendente["caminho_video"]
-    link_original = item_pendente["link_original"]
-    item_id = item_pendente["id"]
-    
-    data_captura_str = item_pendente.get("data_captura")
-    if data_captura_str:
-        try:
-            data_captura = datetime.strptime(data_captura_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
-            horas_na_fila = (agora - data_captura).total_seconds() / 3600
-            limite_horas = (intervalo_dias * 24) + 24 
-            if horas_na_fila > limite_horas:
-                if EXIBIR_LOGS: logger.warning(f"⏳ Clone {item_id} expirou ({horas_na_fila:.1f}h). Descartando.")
-                fila_data["fila"] = [item for item in fila if item["id"] != item_id]
-                salvar_fila_clonagem(fila_data)
-                try:
-                    if os.path.exists(caminho_video): os.remove(caminho_video)
-                except: pass
-                return
-        except ValueError:
-            pass
-
-    rotinas_virais = ["job_rotina_promo_principal", "job_rotina_link_grupo_viral", "job_rotina_divulgar_gem_viral"]
-    conflito_silencio = False
-    for job in scheduler.get_jobs():
-        if any(rv in job.id for rv in rotinas_virais) and getattr(job, 'next_run_time', None):
-            tempo_rotina = job.next_run_time.astimezone(fuso_horario)
-            if abs((agora - tempo_rotina).total_seconds() / 60) <= 15:
-                conflito_silencio = True
-                break
+                    data_cap_obj = datetime.strptime(data_cap_str.split(" ")[0], "%Y-%m-%d").replace(tzinfo=fuso_horario)
+                    
+                data_alvo_obj = data_cap_obj + timedelta(days=intervalo_dias)
+                dia_alvo = data_alvo_obj.strftime("%Y-%m-%d")
                 
-    if conflito_silencio:
-        if EXIBIR_LOGS: logger.info(f"🤫 [Espião] Trava de Silêncio ativa. Adormecendo clone {item_id}...")
-        return
+                # Resgata o vídeo se for para hoje, ou se estivermos puxando o gatilho
+                if dia_alvo <= hoje_str or forcar:
+                    itens_para_agendar.append(item)
+
+    if itens_para_agendar:
+        import random
+        if modo == "aleatorio": random.shuffle(itens_para_agendar)
+        else: itens_para_agendar.sort(key=lambda x: x.get("data_captura", ""))
+
+        if intervalo_dias == 0 and not forcar:
+            # 📏 D+0: Postagem Imediata respeitando a Janela da Madrugada
+            for item in itens_para_agendar:
+                if agora.hour < inicio_janela:
+                    horario_calc = agora.replace(hour=inicio_janela, minute=random.randint(0, 5), second=0)
+                elif agora.hour >= fim_janela:
+                    horario_calc = (agora + timedelta(days=1)).replace(hour=inicio_janela, minute=random.randint(0, 5), second=0)
+                else:
+                    horario_calc = agora + timedelta(seconds=random.randint(5, 15))
+                    
+                item["horario_disparo"] = horario_calc.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            # 📏 D+X ou DESCARGA FORÇADA: Distribuição diluída
+            qtd = len(itens_para_agendar)
+            if forcar:
+                minuto_atual_busca = agora
+                espacamento_segundos = 15 # Catraca Anti-Ban de Rajada
+            else:
+                if agora.hour >= fim_janela:
+                    minuto_atual_busca = (agora + timedelta(days=1)).replace(hour=inicio_janela, minute=0, second=0)
+                else:
+                    hora_partida = max(agora.hour, inicio_janela)
+                    minuto_atual_busca = agora.replace(hour=hora_partida, minute=agora.minute if hora_partida == agora.hour else 0, second=0)
+                    
+                minutos_disponiveis = (fim_janela * 60) - (minuto_atual_busca.hour * 60 + minuto_atual_busca.minute)
+                espacamento_segundos = max(15, int((minutos_disponiveis * 60) / qtd))
             
-    if not os.path.exists(caminho_video):
-        item_pendente["processado"] = True
+            for item in itens_para_agendar:
+                variacao = random.randint(0, espacamento_segundos // 4) if espacamento_segundos > 60 and not forcar else 0
+                horario_agendado = minuto_atual_busca + timedelta(seconds=variacao)
+                item["horario_disparo"] = horario_agendado.strftime("%Y-%m-%d %H:%M:%S")
+                minuto_atual_busca += timedelta(seconds=espacamento_segundos)
+        
         salvar_fila_clonagem(fila_data)
-        return
-        
-    if EXIBIR_LOGS: logger.info(f"🕵️ Processando clone: {item_id}")
-    
-    link_final = await converter_link_shopee(link_original)
-    
-    try:
-        prompt_espiao = (
-            "Assista ao vídeo e identifique qual é o produto demonstrado. "
-            "Sua resposta deve conter EXATAMENTE duas linhas.\n"
-            "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no final (Exemplo: Tênis Casual Feminino 👟).\n"
-            "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
-            "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras.\n"
-            "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
-            "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
-            "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
-            "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
-            "#AcessoriosDeModa, #BrinquedosEHobbies, #Papelaria, #LivrosERevistas, #RoupasMasculinas, #Automoveis, #MaeEBebe, "
-            "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
-            "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
-        )
-        texto_ia = await analisar_video_gemini(caminho_video, prompt_espiao, EXIBIR_LOGS)
-        if not texto_ia:
-            raise Exception("O módulo central da IA não retornou dados válidos.")
-    except Exception as e:
-        registrar_erro_json(f"processar_fila_espiao IA: {e}", origem="espiao.py")
-        texto_ia = "Vídeo do Produto 🛍️\n#Oferta"
-        
-    linhas_ia = texto_ia.split('\n')
-    nome_produto = linhas_ia[0].strip()
-    hashtags = '\n'.join(linhas_ia[1:]).strip() if len(linhas_ia) > 1 else ""
-    
-    legenda_postagem = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_final}"
-    if hashtags:
-        legenda_postagem += f"\n\n<i>{hashtags}</i>"
-    
-    try:
-        if EXIBIR_LOGS: logger.info("🚀 Iniciando disparo do vídeo para o canal destino...")
-        # ✅ SEGUNDA TRAVA DE SEGURANÇA: Inspeção física para o Espião
-        if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
-            if EXIBIR_LOGS: logger.warning(f"🚫 [Segurança] Disparo do Espião abortado! O ficheiro {caminho_video} é uma imagem.")
-            raise Exception("O ficheiro retido é uma imagem.")
-            
-        arquivo = FSInputFile(caminho_video)
-        await bot.send_video(chat_id=canal_destino, video=arquivo, caption=legenda_postagem, parse_mode="HTML")
-        if EXIBIR_LOGS: logger.info(f"✅ Clone {item_id} publicado com sucesso!")
-        try: os.remove(caminho_video)
-        except: pass
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Falha ao postar clone: {e}")
-        try: os.rename(caminho_video, caminho_video + ".pendente")
-        except: pass
-        
-    # ✅ CORREÇÃO: Em vez de apagar, marca como processado para manter no relatório até ao fim do dia
+        if EXIBIR_LOGS: logger.info(f"📅 [Espião] Matemática aplicada! {len(itens_para_agendar)} clones receberam o carimbo de horário.")
+
+    # --- 2. MOTOR DE EXECUÇÃO (A Catraca Anti-Ban) ---
+    itens_para_disparar = []
     for item in fila:
-        if item["id"] == item_id:
-            item["processado"] = True
-            item["data_postagem"] = agora.strftime("%Y-%m-%d")
-            item["horario_postagem"] = agora.strftime("%H:%M")
-            if EXIBIR_LOGS: logger.info(f"💾 [Espião] Vídeo {item_id} marcado como 'Postado' às {item['horario_postagem']} na memória da fila.")
-            break
-    fila_data["fila"] = fila
-    
-    # ✅ MOTOR DE ESPAÇAMENTO DINÂMICO (Baseado estritamente na Janela)
-    if forcar:
-        minutos_espera = 0
-        proximo_horario = agora
-    else:
-        fim_da_janela = agora.replace(hour=max(0, fim_janela - 1), minute=59, second=59, microsecond=0)
-        minutos_restantes = int((fim_da_janela - agora).total_seconds() / 60)
-        if minutos_restantes < 1:
-            minutos_restantes = 1
+        if not item.get("processado") and item.get("horario_disparo"):
+            try:
+                hd_obj = datetime.strptime(item["horario_disparo"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                if hd_obj <= agora:
+                    itens_para_disparar.append(item)
+            except Exception: pass
+                
+    if not itens_para_disparar:
+        hoje_faxina = agora.strftime("%Y-%m-%d")
+        fila_limpa = [i for i in fila if not i.get("processado") or i.get("data_postagem") == hoje_faxina]
+        if len(fila_limpa) != len(fila):
+            fila_data["fila"] = fila_limpa
+            salvar_fila_clonagem(fila_data)
+        return
+
+    for item_pendente in itens_para_disparar:
+        # TRAVA DE SILÊNCIO (VIRAL)
+        rotinas_virais = ["job_rotina_promo_principal", "job_rotina_link_grupo_viral", "job_rotina_divulgar_gem_viral"]
+        conflito_silencio = False
+        for job in scheduler.get_jobs():
+            if any(rv in job.id for rv in rotinas_virais) and getattr(job, 'next_run_time', None):
+                tempo_rotina = job.next_run_time.astimezone(fuso_horario)
+                if abs((agora - tempo_rotina).total_seconds() / 60) <= 15:
+                    conflito_silencio = True
+                    break
+        if conflito_silencio:
+            if EXIBIR_LOGS: logger.info(f"🤫 [Espião] Trava de Silêncio ativa. Adormecendo clone {item_pendente['id']}...")
+            break # Volta no próximo minuto
             
-        base_intervalo = minutos_restantes // len(itens_elegiveis) if len(itens_elegiveis) > 0 else 1
-        minutos_espera = base_intervalo + random.randint(-5, 5)
-        if minutos_espera < 2:
-            minutos_espera = 2  
+        caminho_video = item_pendente["caminho_video"]
+        link_original = item_pendente["link_original"]
+        item_id = item_pendente["id"]
+
+        if not os.path.exists(caminho_video):
+            item_pendente["processado"] = True
+            salvar_fila_clonagem(fila_data)
+            continue
             
-        proximo_horario = agora + timedelta(minutes=minutos_espera)
+        if EXIBIR_LOGS: logger.info(f"🕵️ Processando clone agendado: {item_id}")
+        link_final = await converter_link_shopee(link_original)
         
-    # ✅ FAXINA AUTOMÁTICA: Remove os vídeos postados em dias anteriores para o JSON não inchar
-    hoje_faxina = agora.strftime("%Y-%m-%d")
-    fila_data["fila"] = [i for i in fila_data["fila"] if not i.get("processado") or i.get("data_postagem") == hoje_faxina]
-    
-    fila_data["proximo_processamento"] = proximo_horario.strftime("%Y-%m-%d %H:%M:%S")
-    salvar_fila_clonagem(fila_data)
-    
-    try: os.remove(caminho_video)
-    except: pass
+        try:
+            prompt_espiao = (
+                "Assista ao vídeo e identifique qual é o produto demonstrado. "
+                "Sua resposta deve conter EXATAMENTE duas linhas.\n"
+                "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no final (Exemplo: Tênis Casual Feminino 👟).\n"
+                "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
+                "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras.\n"
+                "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
+                "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
+                "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
+                "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
+                "#AcessoriosDeModa, #BrinquedosEHobbies, #Papelaria, #LivrosERevistas, #RoupasMasculinas, #Automoveis, #MaeEBebe, "
+                "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
+                "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
+            )
+            texto_ia = await analisar_video_gemini(caminho_video, prompt_espiao, EXIBIR_LOGS)
+            if not texto_ia: raise Exception("IA não retornou dados.")
+        except Exception as e:
+            registrar_erro_json(f"processar_fila_espiao IA: {e}", origem="espiao.py")
+            texto_ia = "Vídeo do Produto 🛍️\n#Oferta"
+            
+        linhas_ia = texto_ia.split('\n')
+        nome_produto = linhas_ia[0].strip()
+        hashtags = '\n'.join(linhas_ia[1:]).strip() if len(linhas_ia) > 1 else ""
+        
+        legenda_postagem = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_final}"
+        if hashtags: legenda_postagem += f"\n\n<i>{hashtags}</i>"
+        
+        try:
+            if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
+                raise Exception("O ficheiro retido é uma imagem.")
+            arquivo = FSInputFile(caminho_video)
+            await bot.send_video(chat_id=canal_destino, video=arquivo, caption=legenda_postagem, parse_mode="HTML")
+            if EXIBIR_LOGS: logger.info(f"✅ Clone {item_id} publicado com sucesso!")
+            try: os.remove(caminho_video)
+            except: pass
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Falha ao postar clone: {e}")
+            try: os.rename(caminho_video, caminho_video + ".pendente")
+            except: pass
+            
+        item_pendente["processado"] = True
+        item_pendente["data_postagem"] = agora.strftime("%Y-%m-%d")
+        item_pendente["horario_postagem"] = agora.strftime("%H:%M")
+        salvar_fila_clonagem(fila_data)
+        
+        # 🛡️ Catraca limitadora de segurança (Previne banimento no D+0)
+        await asyncio.sleep(15)
 
 async def sincronizar_financeiro_horario():
     if EXIBIR_LOGS: logger.info("⏰ [Financeiro] Iniciando sincronização em background com a API Shopee...")
