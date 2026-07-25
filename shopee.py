@@ -6828,8 +6828,8 @@ async def forcar_clones_fila(callback: types.CallbackQuery):
         logger.info("🚀 Iniciando processo de forçar disparo dos clones...")
         
     try:
-        with open('fila_clonagem.json', 'r', encoding='utf-8') as f:
-            fila = json.load(f).get("fila", [])
+        dados = ler_fila_clonagem()
+        fila = dados.get("fila", [])
             
         quantidade = len([i for i in fila if not i.get("processado")])
         
