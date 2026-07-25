@@ -5,7 +5,7 @@ After=network.target
 [Service]
 User=ubuntu
 WorkingDirectory=/home/ubuntu/shopee
-ExecStart=/home/ubuntu/shopee/venv/bin/python3 /home/ubuntu/shopee/espiao.py
+ExecStart=/home/ubuntu/shopee/venv/bin/python3 /home/ubuntu/shopee/motor_userbot.py
 Restart=always
 RestartSec=10
 
