@@ -642,9 +642,22 @@ async def salvar_edicao_intervalo_dias(message: types.Message, state: FSMContext
     
     dados = ler_espelhos()
     rotas = dados.get("rotas", [])
+    
+    intervalo_antigo = rotas[indice].get("intervalo_dias", 1) # 📡 Sensor de mudança
     rotas[indice]["intervalo_dias"] = intervalo
+    
+    # 🔫 GATILHO DE DESCARGA: Se mudou de D+X para D+0, força o disparo!
+    gatilho_acionado = False
+    if intervalo_antigo > 0 and intervalo == 0:
+        rotas[indice]["esvaziar_agora"] = True
+        gatilho_acionado = True
+        
     dados["rotas"] = rotas
     salvar_espelhos(dados)
+    
+    if gatilho_acionado:
+        if EXIBIR_LOGS: logger.info(f"⚠️ [Gatilho de Descarga] Mudança para D+0 na rota {rotas[indice]['nome']}. Esvaziando represa...")
+        await message.answer("⚠️ <b>Gatilho de Descarga Acionado!</b>\nComo alterou para D+0 (Imediato), todos os vídeos represados nesta rota estão a ser enviados para a catraca de postagem.", parse_mode="HTML")
     
     if EXIBIR_LOGS: logger.info(f"✏️ Atraso dinâmico da rota '{rotas[indice]['nome']}' modificado para D+{intervalo}.")
     await message.answer(f"✅ O intervalo temporal foi atualizado para D+{intervalo} com sucesso!", parse_mode="HTML")
