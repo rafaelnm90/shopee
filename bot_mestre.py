@@ -6569,20 +6569,45 @@ async def processar_fila_espiao(forcar=False):
                     break
                     
         if conflito_silencio:
-            # ✅ REAGENDAMENTO INTELIGENTE: Em vez de adormecer silenciosamente e exibir "Atrasado" na tela,
-            # atualizamos o banco de dados calculando o minuto exato em que a trava será aberta!
+            # ✅ REAGENDAMENTO EM CASCATA (EFEITO DOMINÓ)
             if tempo_conflito:
                 novo_horario_seguro = tempo_conflito + timedelta(minutes=16)
-                # Se o cálculo jogar para o passado (ex: a rotina foi há 14 minutos), empurra para daqui a pouco
                 if novo_horario_seguro <= agora:
                     novo_horario_seguro = agora + timedelta(minutes=2)
             else:
                 novo_horario_seguro = agora + timedelta(minutes=16)
                 
-            item_pendente["horario_disparo"] = novo_horario_seguro.strftime("%Y-%m-%d %H:%M:%S")
-            salvar_fila_clonagem(fila_data)
+            # Em vez de colocar todos no mesmo minuto, recriamos a fila mantendo espaçamento orgânico
+            pendentes = [i for i in fila if not i.get("processado")]
             
-            if EXIBIR_LOGS: logger.info(f"🤫 [Espião] Trava de 15 min ativada! Clone reagendado para {novo_horario_seguro.strftime('%H:%M:%S')} para exibir a previsão precisa no painel.")
+            # Ordena pela previsão atual para manter o FIFO
+            def sort_by_date(x):
+                try: return datetime.strptime(x.get("horario_disparo", "2099-01-01 00:00:00"), "%Y-%m-%d %H:%M:%S")
+                except: return datetime.max
+            pendentes.sort(key=sort_by_date)
+            
+            tempo_acumulado = novo_horario_seguro
+            houve_alteracao = False
+            
+            for p in pendentes:
+                try:
+                    h_atual = datetime.strptime(p.get("horario_disparo", "2000-01-01 00:00:00"), "%Y-%m-%d %H:%M:%S")
+                except:
+                    h_atual = datetime.min
+                    
+                # Se o vídeo está marcado para um horário dentro do bloqueio (ou antes), empurramos ele
+                if h_atual < tempo_acumulado:
+                    p["horario_disparo"] = tempo_acumulado.strftime("%Y-%m-%d %H:%M:%S")
+                    tempo_acumulado += timedelta(seconds=20) # Espaçamento de segurança
+                    houve_alteracao = True
+                else:
+                    # Se o vídeo já está seguro no futuro, a catraca pula para logo depois dele
+                    tempo_acumulado = h_atual + timedelta(seconds=20)
+                    
+            if houve_alteracao:
+                salvar_fila_clonagem(fila_data)
+                if EXIBIR_LOGS: logger.info(f"🤫 [Espião] Trava ativada! Fila indiana empurrada com sucesso a partir de {novo_horario_seguro.strftime('%H:%M:%S')}.")
+                
             break # Volta no próximo minuto
             
         caminho_video = item_pendente["caminho_video"]
