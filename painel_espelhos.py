@@ -82,6 +82,17 @@ teclado_espelhador_confirmacao = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
+# ✅ NOVO: Teclado Inteligente para Injeção Múltipla de Origens
+teclado_espelhador_abrangencia = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Apenas nesta Rota 🎯")],
+        [KeyboardButton(text="Em TODAS as Rotas 🌍")],
+        [KeyboardButton(text="Cancelar Operação ❌")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
 # --- BANCO DE DADOS DO ESPELHADOR ---
 def ler_espelhos():
     try:
@@ -687,50 +698,122 @@ async def salvar_edicao_modo(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.aguardando_nova_origem)
 async def confirmar_nova_origem(message: types.Message, state: FSMContext):
-    msg_status = await message.answer("⏳ Validando permissões da nova origem...", reply_markup=teclado_espelhador_cancelar)
+    msg_status = await message.answer("⏳ Validando link e buscando nome do canal...", reply_markup=teclado_espelhador_cancelar)
     origem_id = await validar_link_ou_id_grupo(message.text)
-    await msg_status.delete()
     
-    if origem_id:
-        data = await state.get_data()
-        indice = data.get("indice_edicao")
-        dados = ler_espelhos()
-        rota = dados["rotas"][indice]
-        origens = rota.get('origens', [])
-        if not origens and 'origem' in rota: origens = [rota['origem']]
-        
-        if origem_id not in origens:
-            await state.update_data(origem_para_adicionar=origem_id)
-            await message.answer(f"Deseja adicionar a origem <code>{origem_id}</code> à rota <b>{rota['nome']}</b>?", reply_markup=teclado_espelhador_confirmacao, parse_mode="HTML")
-            await state.set_state(EspelhadorFluxo.aguardando_confirmacao_nova_origem)
-        else:
-            await message.answer("⚠️ Esta origem já está cadastrada nesta rota.", reply_markup=teclado_espelhador_cancelar)
-    else:
-        await message.answer("⚠️ Canal não encontrado ou inválido. Tente novamente:", reply_markup=teclado_espelhador_cancelar)
-
-@router.message(EspelhadorFluxo.aguardando_confirmacao_nova_origem)
-async def processar_nova_origem(message: types.Message, state: FSMContext):
-    if message.text != "Aprovar ✅":
-        await message.answer("Operação cancelada.", reply_markup=teclado_espelhador_menu)
-        await painel_espelhador(message, state)
+    if not origem_id:
+        await msg_status.delete()
+        await message.answer("⚠️ Canal não encontrado ou formato inválido. Tente novamente:", reply_markup=teclado_espelhador_cancelar)
         return
+
+    # ✅ MELHORIA 5: Resolução Imediata de Nome via Bot Oficial
+    nome_encontrado = str(origem_id)
+    try:
+        chat_obj = await bot_instance.get_chat(origem_id)
+        nome_encontrado = chat_obj.title or chat_obj.full_name or str(origem_id)
+        
+        from utils import salvar_nome_grupo
+        salvar_nome_grupo(str(origem_id), nome_encontrado)
+        if EXIBIR_LOGS: logger.info(f"✅ Nome da origem resolvido imediatamente: {nome_encontrado}")
+    except Exception:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Bot oficial sem acesso inicial à origem {origem_id}. O Userbot auditará no próximo ciclo.")
+
+    await msg_status.delete()
 
     data = await state.get_data()
     indice = data.get("indice_edicao")
+    dados = ler_espelhos()
+    rotas = dados.get("rotas", [])
+    rota_atual = rotas[indice]
+    
+    origens_atuais = rota_atual.get('origens', [])
+    if not origens_atuais and 'origem' in rota_atual: origens_atuais = [rota_atual['origem']]
+    
+    await state.update_data(origem_para_adicionar=origem_id)
+    
+    # ✅ MOTOR DE ABRANGÊNCIA CONDICIONAL
+    if len(rotas) > 1:
+        texto = (
+            f"✅ <b>Origem Validada:</b> {nome_encontrado} (<code>{origem_id}</code>)\n\n"
+            f"O seu sistema possui <b>{len(rotas)} rotas ativas</b>. Onde deseja adicionar esta origem?"
+        )
+        await message.answer(texto, reply_markup=teclado_espelhador_abrangencia, parse_mode="HTML")
+    else:
+        if origem_id in origens_atuais:
+            await message.answer("⚠️ Esta origem já está cadastrada nesta rota.", reply_markup=teclado_espelhador_cancelar)
+            return
+            
+        texto = (
+            f"✅ <b>Origem Validada:</b> {nome_encontrado} (<code>{origem_id}</code>)\n\n"
+            f"Deseja adicionar esta origem à rota <b>{rota_atual['nome']}</b>?"
+        )
+        await message.answer(texto, reply_markup=teclado_espelhador_confirmacao, parse_mode="HTML")
+    
+    await state.set_state(EspelhadorFluxo.aguardando_confirmacao_nova_origem)
+
+@router.message(EspelhadorFluxo.aguardando_confirmacao_nova_origem)
+async def processar_nova_origem(message: types.Message, state: FSMContext):
+    opcoes_validas = ["Aprovar ✅", "Apenas nesta Rota 🎯", "Em TODAS as Rotas 🌍"]
+    
+    if message.text == "Cancelar Operação ❌":
+        await message.answer("Operação cancelada.", reply_markup=teclado_espelhador_menu)
+        await painel_espelhador(message, state)
+        return
+        
+    if message.text not in opcoes_validas:
+        await message.answer("Por favor, utilize os botões para confirmar ou cancelar.")
+        return
+
+    data = await state.get_data()
+    indice_atual = data.get("indice_edicao")
     origem_id = data.get("origem_para_adicionar")
     
     dados = ler_espelhos()
-    rota = dados["rotas"][indice]
-    origens = rota.get('origens', [])
-    if not origens and 'origem' in rota: origens = [rota['origem']]
+    rotas = dados.get("rotas", [])
     
-    origens.append(origem_id)
-    rota['origens'] = origens
-    if 'origem' in rota: del rota['origem']
-    salvar_espelhos(dados)
+    insercoes = 0
+    ignorados = 0
     
-    if EXIBIR_LOGS: logger.info(f"➕ Nova origem {origem_id} inserida na rota '{rota['nome']}'.")
-    await message.answer(f"✅ Origem <code>{origem_id}</code> adicionada com sucesso!", parse_mode="HTML")
+    # ✅ INJEÇÃO GLOBAL (COM PENTE FINO ANTI-DUPLICIDADE)
+    if message.text == "Em TODAS as Rotas 🌍":
+        for r in rotas:
+            origens_r = r.get('origens', [])
+            if not origens_r and 'origem' in r: origens_r = [r['origem']]
+            
+            if origem_id not in origens_r:
+                origens_r.append(origem_id)
+                r['origens'] = origens_r
+                if 'origem' in r: del r['origem']
+                insercoes += 1
+            else:
+                ignorados += 1
+        
+        msg_final = f"✅ Origem <code>{origem_id}</code> processada globalmente!\n\n"
+        msg_final += f"📥 Adicionada em: <b>{insercoes} rota(s)</b>.\n"
+        if ignorados > 0:
+            msg_final += f"⏭️ Ignorada em: <b>{ignorados} rota(s)</b> (já existia)."
+            
+    # ✅ INJEÇÃO INDIVIDUAL (Rota Específica)
+    else:
+        rota = rotas[indice_atual]
+        origens_r = rota.get('origens', [])
+        if not origens_r and 'origem' in rota: origens_r = [rota['origem']]
+        
+        if origem_id not in origens_r:
+            origens_r.append(origem_id)
+            rota['origens'] = origens_r
+            if 'origem' in rota: del rota['origem']
+            insercoes += 1
+            msg_final = f"✅ Origem <code>{origem_id}</code> adicionada à rota <b>{rota['nome']}</b> com sucesso!"
+        else:
+            msg_final = f"⚠️ A origem <code>{origem_id}</code> já existia na rota <b>{rota['nome']}</b>."
+    
+    # 💾 Salvamento e Finalização
+    if insercoes > 0:
+        salvar_espelhos(dados)
+        if EXIBIR_LOGS: logger.info(f"➕ Nova origem {origem_id} injetada. Inserções: {insercoes}. Ignorados: {ignorados}.")
+        
+    await message.answer(msg_final, parse_mode="HTML")
     await painel_espelhador(message, state)
 
 @router.message(EspelhadorFluxo.aguardando_remocao_origem)
