@@ -2256,14 +2256,17 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     tipo_fila = "Espelhador" if "Espelhador" in message.text else "Espião"
     if EXIBIR_LOGS: logger.info(f"📊 Iniciando compilação do relatório unificado (Sem limites) para a fila do {tipo_fila}...")
     
-    arquivo_fila = "fila_espelhador.json" if tipo_fila == "Espelhador" else "fila_clonagem.json"
-    try:
-        with open(arquivo_fila, "r", encoding="utf-8") as f:
-            fila_data = json.load(f)
-            fila = fila_data.get("fila", [])
-    except (FileNotFoundError, json.JSONDecodeError):
-        fila_data = {"fila": []}
-        fila = []
+    if tipo_fila == "Espião":
+        fila_data = ler_fila_clonagem()
+        fila = fila_data.get("fila", [])
+    else:
+        try:
+            with open("fila_espelhador.json", "r", encoding="utf-8") as f:
+                fila_data = json.load(f)
+                fila = fila_data.get("fila", [])
+        except (FileNotFoundError, json.JSONDecodeError):
+            fila_data = {"fila": []}
+            fila = []
 
     # --- Obter a defasagem temporal real configurada (Precisamos disso cedo para o Espião) ---
     atraso_dias = 0
