@@ -33,29 +33,29 @@ jobs:
             
             EXIBIR_LOGS="true"
             
-            # 1. Reinicia o serviço principal (Shopee)
-            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🚀 Reiniciando Bot Shopee Principal..."; fi
-            sudo systemctl stop shopee_bot.service || true
-            sudo systemctl kill -s SIGKILL shopee_bot.service || true
-            sudo systemctl start shopee_bot.service
+            # 1. Reinicia o Bot Mestre (Antigo Shopee)
+            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🚀 Reiniciando Bot Mestre..."; fi
+            sudo systemctl stop bot_mestre.service || true
+            sudo systemctl kill -s SIGKILL bot_mestre.service || true
+            sudo systemctl start bot_mestre.service
             
-            # 2. Reinicia o Userbot de Divulgação
-            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🚀 Reiniciando Userbot de Divulgação..."; fi
-            sudo systemctl stop divulgacao_bot.service || true
-            sudo systemctl kill -s SIGKILL divulgacao_bot.service || true
-            sudo systemctl start divulgacao_bot.service
+            # 2. Reinicia o Userbot de Divulgacao
+            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🚀 Reiniciando Divulgação Canal..."; fi
+            sudo systemctl stop divulgacao_canal.service || true
+            sudo systemctl kill -s SIGKILL divulgacao_canal.service || true
+            sudo systemctl start divulgacao_canal.service
 
-            # 3. Reinicia o Módulo Espião
-            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🕵️ Reiniciando Módulo Espião..."; fi
-            sudo systemctl stop espiao_bot.service || true
-            sudo systemctl kill -s SIGKILL espiao_bot.service || true
-            sudo systemctl start espiao_bot.service
+            # 3. Reinicia o Motor Userbot (Antigo Espião)
+            if [ "$EXIBIR_LOGS" = "true" ]; then echo "🕵️ Reiniciando Motor Userbot..."; fi
+            sudo systemctl stop motor_userbot.service || true
+            sudo systemctl kill -s SIGKILL motor_userbot.service || true
+            sudo systemctl start motor_userbot.service
 
-            # 4. Reinicia o Espelhador de Vídeos Autorais
+            # 4. Reinicia o Espelhador de Videos Autorais
             if [ "$EXIBIR_LOGS" = "true" ]; then echo "🔄 Reiniciando Espelhador Autorais..."; fi
-            sudo systemctl stop espelhador_autorais_bot.service || true
-            sudo systemctl kill -s SIGKILL espelhador_autorais_bot.service || true
-            sudo systemctl start espelhador_autorais_bot.service
+            sudo systemctl stop espelhador_videos_autorais.service || true
+            sudo systemctl kill -s SIGKILL espelhador_videos_autorais.service || true
+            sudo systemctl start espelhador_videos_autorais.service
             
             if [ "$EXIBIR_LOGS" = "true" ]; then echo "🚪 Encerrando a conexão SSH de forma limpa..."; fi
             exit 0
