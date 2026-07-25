@@ -40,18 +40,19 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
 
     if intervalo_dias == 0 and not forcar:
         # 📏 D+0: Postagem Imediata respeitando a Janela de Horário
+        tempo_acumulado = agora
         for item in itens_para_agendar:
-            if agora.hour < inicio_janela:
+            if tempo_acumulado.hour < inicio_janela:
                 # De madrugada: Joga para o minuto inicial da abertura
-                horario_calc = agora.replace(hour=inicio_janela, minute=random.randint(0, 5), second=0)
-            elif agora.hour >= fim_janela:
+                tempo_acumulado = tempo_acumulado.replace(hour=inicio_janela, minute=random.randint(0, 5), second=0)
+            elif tempo_acumulado.hour >= fim_janela:
                 # Após o expediente: Joga para a abertura do dia seguinte
-                horario_calc = (agora + timedelta(days=1)).replace(hour=inicio_janela, minute=random.randint(0, 5), second=0)
-            else:
-                # Dentro do expediente: Imediato com pequeno delay natural
-                horario_calc = agora + timedelta(seconds=random.randint(5, 15))
+                tempo_acumulado = (tempo_acumulado + timedelta(days=1)).replace(hour=inicio_janela, minute=random.randint(0, 5), second=0)
+            
+            # Adiciona o delay natural em cascata para D+0 (Evita engarrafamento no mesmo segundo)
+            tempo_acumulado += timedelta(seconds=random.randint(20, 45))
                 
-            item["horario_disparo"] = horario_calc.strftime("%Y-%m-%d %H:%M:%S")
+            item["horario_disparo"] = tempo_acumulado.strftime("%Y-%m-%d %H:%M:%S")
     else:
         # 📏 D+X ou DESCARGA FORÇADA: Distribuição diluída (Catraca Anti-Ban)
         qtd = len(itens_para_agendar)
