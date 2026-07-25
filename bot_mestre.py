@@ -6557,14 +6557,32 @@ async def processar_fila_espiao(forcar=False):
         # TRAVA DE SILÊNCIO (VIRAL)
         rotinas_virais = ["job_rotina_promo_principal", "job_rotina_link_grupo_viral", "job_rotina_divulgar_gem_viral"]
         conflito_silencio = False
+        tempo_conflito = None
+        
         for job in scheduler.get_jobs():
             if any(rv in job.id for rv in rotinas_virais) and getattr(job, 'next_run_time', None):
                 tempo_rotina = job.next_run_time.astimezone(fuso_horario)
+                # Mantemos a sua regra rigorosa de proteção de 15 minutos
                 if abs((agora - tempo_rotina).total_seconds() / 60) <= 15:
                     conflito_silencio = True
+                    tempo_conflito = tempo_rotina
                     break
+                    
         if conflito_silencio:
-            if EXIBIR_LOGS: logger.info(f"🤫 [Espião] Trava de Silêncio ativa. Adormecendo clone {item_pendente['id']}...")
+            # ✅ REAGENDAMENTO INTELIGENTE: Em vez de adormecer silenciosamente e exibir "Atrasado" na tela,
+            # atualizamos o banco de dados calculando o minuto exato em que a trava será aberta!
+            if tempo_conflito:
+                novo_horario_seguro = tempo_conflito + timedelta(minutes=16)
+                # Se o cálculo jogar para o passado (ex: a rotina foi há 14 minutos), empurra para daqui a pouco
+                if novo_horario_seguro <= agora:
+                    novo_horario_seguro = agora + timedelta(minutes=2)
+            else:
+                novo_horario_seguro = agora + timedelta(minutes=16)
+                
+            item_pendente["horario_disparo"] = novo_horario_seguro.strftime("%Y-%m-%d %H:%M:%S")
+            salvar_fila_clonagem(fila_data)
+            
+            if EXIBIR_LOGS: logger.info(f"🤫 [Espião] Trava de 15 min ativada! Clone reagendado para {novo_horario_seguro.strftime('%H:%M:%S')} para exibir a previsão precisa no painel.")
             break # Volta no próximo minuto
             
         caminho_video = item_pendente["caminho_video"]
