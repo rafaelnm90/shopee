@@ -16,6 +16,7 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import StateFilter
 from utils import registrar_erro_json, ler_cache_nomes_grupos
+from motor_filas import calcular_horarios_distribuicao # ⚙️ Novo Motor Centralizado
 EXIBIR_LOGS = True
 
 if EXIBIR_LOGS:
