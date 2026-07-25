@@ -24,6 +24,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 # ✅ Importação dos nossos novos módulos blindados (Fase 2)
 from api_gemini import gerar_texto_gemini, analisar_video_gemini, MODELOS_CASCATA_GEMINI, client_genai
 from api_shopee import converter_link_shopee, buscar_ofertas_shopee
+from motor_filas import calcular_horarios_distribuicao # ⚙️ Novo Motor Centralizado
 
 import matplotlib.pyplot as plt
 import io
@@ -6585,45 +6586,19 @@ async def processar_fila_espiao(forcar=False):
                     itens_para_agendar.append(item)
 
     if itens_para_agendar:
-        import random
-        if modo == "aleatorio": random.shuffle(itens_para_agendar)
-        else: itens_para_agendar.sort(key=lambda x: x.get("data_captura", ""))
-
-        if intervalo_dias == 0 and not forcar:
-            # 📏 D+0: Postagem Imediata respeitando a Janela da Madrugada
-            for item in itens_para_agendar:
-                if agora.hour < inicio_janela:
-                    horario_calc = agora.replace(hour=inicio_janela, minute=random.randint(0, 5), second=0)
-                elif agora.hour >= fim_janela:
-                    horario_calc = (agora + timedelta(days=1)).replace(hour=inicio_janela, minute=random.randint(0, 5), second=0)
-                else:
-                    horario_calc = agora + timedelta(seconds=random.randint(5, 15))
-                    
-                item["horario_disparo"] = horario_calc.strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            # 📏 D+X ou DESCARGA FORÇADA: Distribuição diluída
-            qtd = len(itens_para_agendar)
-            if forcar:
-                minuto_atual_busca = agora
-                espacamento_segundos = 15 # Catraca Anti-Ban de Rajada
-            else:
-                if agora.hour >= fim_janela:
-                    minuto_atual_busca = (agora + timedelta(days=1)).replace(hour=inicio_janela, minute=0, second=0)
-                else:
-                    hora_partida = max(agora.hour, inicio_janela)
-                    minuto_atual_busca = agora.replace(hour=hora_partida, minute=agora.minute if hora_partida == agora.hour else 0, second=0)
-                    
-                minutos_disponiveis = (fim_janela * 60) - (minuto_atual_busca.hour * 60 + minuto_atual_busca.minute)
-                espacamento_segundos = max(15, int((minutos_disponiveis * 60) / qtd))
-            
-            for item in itens_para_agendar:
-                variacao = random.randint(0, espacamento_segundos // 4) if espacamento_segundos > 60 and not forcar else 0
-                horario_agendado = minuto_atual_busca + timedelta(seconds=variacao)
-                item["horario_disparo"] = horario_agendado.strftime("%Y-%m-%d %H:%M:%S")
-                minuto_atual_busca += timedelta(seconds=espacamento_segundos)
+        # ✅ ACIONANDO O NOVO MOTOR MATEMÁTICO CENTRALIZADO
+        config_fila = {
+            "inicio": inicio_janela,
+            "fim": fim_janela,
+            "modo": modo,
+            "intervalo_dias": intervalo_dias
+        }
+        
+        # O Motor Central aplica a regra de D+X, catraca anti-ban e espaçamento orgânico
+        calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar)
         
         salvar_fila_clonagem(fila_data)
-        if EXIBIR_LOGS: logger.info(f"📅 [Espião] Matemática aplicada! {len(itens_para_agendar)} clones receberam o carimbo de horário.")
+        if EXIBIR_LOGS: logger.info(f"📅 [Espião] Motor Central acionado! {len(itens_para_agendar)} clones organizados com sucesso.")
 
     # --- 2. MOTOR DE EXECUÇÃO (A Catraca Anti-Ban) ---
     itens_para_disparar = []
