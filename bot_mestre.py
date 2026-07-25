@@ -424,7 +424,7 @@ teclado_opcoes_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Definir Canal de Destino 🎯")],
         [KeyboardButton(text="Editar Janela 🕒"), KeyboardButton(text="Editar Atraso ⏳")],
-        [KeyboardButton(text="Adicionar Concorrente ➕"), KeyboardButton(text="Remover Concorrente 🗑️")],
+        [KeyboardButton(text="Adicionar Grupo Vigiado ➕"), KeyboardButton(text="Remover Grupo Vigiado 🗑️")],
         [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
     ],
     resize_keyboard=True,
@@ -1586,11 +1586,10 @@ async def painel_autorais(message: types.Message, state: FSMContext):
                 # 3. Tenta procurar na Base de Dados do Espião
                 nome_encontrado_no_espiao = False
                 try:
-                    with open("alvos_espiao.json", "r", encoding="utf-8") as f:
-                        dados_espiao = json.load(f)
-                        status_alvos = dados_espiao.get("status_alvos", {})
+                    dados_espiao = ler_alvos_espiao()
+                    status_alvos = dados_espiao.get("status_alvos", {})
                         
-                        for alvo_id, dados_alvo in status_alvos.items():
+                    for alvo_id, dados_alvo in status_alvos.items():
                             if str(dados_alvo.get("id")) == str(origem) or str(dados_alvo.get("id")).replace("-100", "") == str(origem).replace("-100", ""):
                                 nome = dados_alvo.get("nome", "Desconhecido")
                                 nome_origem = f"{nome} (<code>{origem}</code>)"
@@ -4423,12 +4422,8 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("📡 Acessando a lista de grupos vigiados do Espião...")
     
-    # ✅ NOVO: Leitura direta e atualizada do arquivo para pegar o status real do Userbot
-    try:
-        with open("alvos_espiao.json", "r") as f:
-            dados = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        dados = {"alvos": [], "canal_destino": None, "status_alvos": {}}
+    # ✅ CORREÇÃO: Utilizando a função central que acessa o banco SQLite e garante a persistência!
+    dados = ler_alvos_espiao()
         
     alvos = dados.get("alvos", [])
     destino = dados.get("canal_destino", "Não definido")
@@ -4469,55 +4464,13 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=teclado_opcoes_espiao, parse_mode="HTML")
     await state.set_state(EspiaoFluxo.menu_principal)
 
-@dp.message(EspiaoFluxo.menu_principal, F.text == "Adicionar Concorrente ➕")
+@dp.message(EspiaoFluxo.menu_principal, F.text == "Adicionar Grupo Vigiado ➕")
 async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
-    await message.answer("Envie o @username, link ou ID do grupo do concorrente que deseja monitorar:", reply_markup=teclado_cancelar)
-    await state.set_state(EspiaoFluxo.aguardando_novo_alvo)
+    await message.answer("Envie o @username, link ou ID do grupo que deseja monitorar:", reply_markup=teclado_cancelar)
 
-@dp.message(EspiaoFluxo.aguardando_novo_alvo)
-async def confirmar_alvo_espiao(message: types.Message, state: FSMContext):
-    entrada_bruta = message.text.strip()
-    
-    # 🧹 O Higienizador rígido foi removido. O bot passará o dado bruto para o 
-    # motor Espião auditar e corrigir o ID automaticamente.
-    await state.update_data(novo_alvo_formatado=entrada_bruta)
-    
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+# ... [Pule as funções do meio e vá até a de remoção] ...
 
-    if EXIBIR_LOGS: logger.info("⏳ Aguardando aprovação para auditar o novo alvo do espião...")
-    await message.answer(f"Deseja adicionar o alvo abaixo ao radar do Espião?\n<i>(O motor testará os formatos de ID e corrigirá automaticamente se necessário)</i>\n\n<b>{entrada_bruta}</b>", reply_markup=teclado_confirmacao, parse_mode="HTML")
-    await state.set_state(EspiaoFluxo.aguardando_confirmacao_alvo)
-
-@dp.message(EspiaoFluxo.aguardando_confirmacao_alvo)
-async def salvar_alvo_espiao(message: types.Message, state: FSMContext):
-    if message.text != "Aprovar ✅":
-        await message.answer("Por favor, clique em Aprovar ou Cancelar.")
-        return
-        
-    data = await state.get_data()
-    alvo_formatado = data.get("novo_alvo_formatado").strip()
-    dados = ler_alvos_espiao()
-    
-    # Validação semântica: ignora o '@' e passa para minúsculas para barrar duplicados
-    alvo_limpo = alvo_formatado.lstrip('@').lower()
-    alvos_existentes_limpos = [str(a).lstrip('@').lower() for a in dados.get("alvos", [])]
-    
-    if alvo_limpo not in alvos_existentes_limpos:
-        dados.setdefault("alvos", []).append(alvo_formatado)
-        salvar_alvos_espiao(dados)
-        if EXIBIR_LOGS: logger.info(f"✅ Novo alvo do espião adicionado na base de dados: {alvo_formatado}")
-        await message.answer(f"✅ Alvo cadastrado com sucesso:\n<b>{alvo_formatado}</b>", parse_mode="HTML")
-    else:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Tentativa de duplicar alvo bloqueada. O alvo '{alvo_formatado}' já existe.")
-        await message.answer(f"⚠️ O alvo <b>{alvo_formatado}</b> já está na sua lista de monitoramento.", parse_mode="HTML")
-        
-    await menu_grupos_vigiados(message, state)
-
-@dp.message(EspiaoFluxo.menu_principal, F.text == "Remover Concorrente 🗑️")
+@dp.message(EspiaoFluxo.menu_principal, F.text == "Remover Grupo Vigiado 🗑️")
 async def pedir_remocao_espiao(message: types.Message, state: FSMContext):
     dados = ler_alvos_espiao()
     alvos = dados.get("alvos", [])
