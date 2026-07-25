@@ -392,15 +392,11 @@ def obter_teclado_configuracoes_gerais():
 
 # --- SISTEMA DO ESPIÃO (CONFIGURAÇÕES) ---
 def ler_alvos_espiao():
-    try:
-        with open("alvos_espiao.json", "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"alvos": [], "canal_destino": None}
+    padrao = {"alvos": [], "canal_destino": None, "status_alvos": {}}
+    return ler_config_bd("alvos_espiao", padrao, arquivo_legado="alvos_espiao.json")
 
 def salvar_alvos_espiao(dados):
-    with open("alvos_espiao.json", "w") as f:
-        json.dump(dados, f, indent=4)
+    salvar_config_bd("alvos_espiao", dados)
 
 teclado_menu_espiao = ReplyKeyboardMarkup(
     keyboard=[
@@ -6536,15 +6532,11 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
 
 # --- MOTOR DE PROCESSAMENTO DO ESPIÃO ---
 def ler_fila_clonagem():
-    try:
-        with open("fila_clonagem.json", "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"fila": []}
+    padrao = {"fila": []}
+    return ler_config_bd("fila_clonagem", padrao, arquivo_legado="fila_clonagem.json")
 
 def salvar_fila_clonagem(dados):
-    with open("fila_clonagem.json", "w") as f:
-        json.dump(dados, f, indent=4)
+    salvar_config_bd("fila_clonagem", dados)
 
 # A função converter_link_shopee foi deletada daqui.
 
