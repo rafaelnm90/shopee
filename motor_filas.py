@@ -138,14 +138,14 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
                         hd_obj = datetime.strptime(horario_universal, "%Y-%m-%d").replace(tzinfo=fuso_horario)
 
                     if hd_obj.date() == hoje_obj:
-                        status_dia = "🔴 Atrasado" if agora > hd_obj else "🟢 Hoje"
+                        status_dia = "🔴 Atrasado" if agora > hd_obj else "⏳ Hoje"
                     elif hd_obj.date() > hoje_obj:
                         status_dia = "🟡 Amanhã" if hd_obj.date() == hoje_obj + timedelta(days=1) else f"🔵 D+{abs((hd_obj.date() - hoje_obj).days)}"
                     else:
                         status_dia = "🔴 Atrasado"
             else:
                 if atraso_dias == 0:
-                    status_dia = f"🟢 Na Fila (D+{atraso_dias})" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
+                    status_dia = f"⏳ Na Fila (D+{atraso_dias})" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
                 elif atraso_dias == 1:
                     status_dia = f"🟡 Represa (D+{atraso_dias})" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
                 else:
