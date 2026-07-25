@@ -2417,7 +2417,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     username = origem_bruta.replace("@", "")
                     link_telegram = f"https://t.me/{username}/{msg_id}"
             
-            # --- 3. ETIQUETA INTELIGENTE PARA O LINK ---
+            # --- 3. PREPARAÇÃO DO LINK DE ORIGEM ---
             link_final_exibicao = link_telegram if link_telegram else link_original
             
             if link_final_exibicao:
@@ -2517,79 +2517,35 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 
                 display_origem = f"{nome_origem[:25]}" if nome_origem != origem_bruta else f"{origem_bruta}"
                 
-            # --- 5. CÁLCULO DINÂMICO DE DATAS ---
-            status_dia = "⚪ Indefinido"
-            data_cap_formatada = "Desconhecida"
-            data_alvo = None
-            
-            if data_cap != "Data não registrada":
-                try:
-                    formato = "%Y-%m-%d %H:%M:%S" if len(data_cap) > 10 else "%Y-%m-%d"
-                    data_obj = datetime.strptime(data_cap, formato)
-                    data_cap_formatada = data_obj.strftime("%d/%m às %H:%M")
-                    
-                    data_alvo = data_obj + timedelta(days=atraso_dias)
-                    hoje_obj = agora.date()
-                    
-                    if tipo_fila == "Espelhador":
-                        horario_disparo_str = v.get("horario_disparo", "")
-                        if horario_disparo_str:
-                            hd_obj = datetime.strptime(horario_disparo_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
-                            if hd_obj.date() == hoje_obj:
-                                status_dia = "🔴 Atrasado" if agora > hd_obj else "🟢 Hoje"
-                            elif hd_obj.date() > hoje_obj:
-                                status_dia = "🟡 Amanhã" if hd_obj.date() == hoje_obj + timedelta(days=1) else f"🔵 D+{abs((hd_obj.date() - hoje_obj).days)}"
-                            else:
-                                status_dia = "🔴 Atrasado"
-                        else:
-                            # ✅ CORREÇÃO: Aplica a tag correta baseada no D+0, D+1 ou D+2
-                            if atraso_dias == 0:
-                                status_dia = "🟢 Na Fila (D+0)" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
-                            elif atraso_dias == 1:
-                                status_dia = "🟡 Represa (D+1)" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
-                            else:
-                                status_dia = f"🔵 Represa (D+{atraso_dias})" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
-                    else:
-                        if data_alvo.date() == hoje_obj:
-                            # ✅ INTELIGÊNCIA: Se já passou da hora limite, a janela fechou
-                            if agora.hour >= fim:
-                                status_dia = "🔴 Atrasado (Janela Fechada)"
-                            else:
-                                status_dia = "🟢 Hoje"
-                        elif data_alvo.date() == hoje_obj + timedelta(days=1):
-                            status_dia = "🟡 Amanhã"
-                        elif data_alvo.date() < hoje_obj:
-                            status_dia = "🔴 Atrasado"
-                        else:
-                            status_dia = f"🔵 D+{abs((data_alvo.date() - hoje_obj).days)}"
-                except Exception:
-                    pass
-
-            # --- 6. CÁLCULO DE PREVISÃO EXATA E COMPACTA (UNIFICADO) ---
-            data_pub = v.get("horario_disparo", "")
-            if data_pub:
-                try:
-                    dp_obj = datetime.strptime(data_pub, "%Y-%m-%d %H:%M:%S")
-                    previsao_texto = dp_obj.strftime("%d/%m às %H:%M")
-                except:
-                    previsao_texto = "Pendente na esteira"
-            else:
-                previsao_texto = "Aguardando cálculo da IA"
+            # --- 5. PREPARAÇÃO DO LINK DE DESTINO (Apenas se postado) ---
+            link_destino = None
+            if v.get("processado", False) and tipo_fila == "Espião":
+                id_destino = str(dados_espiao.get("canal_destino", ""))
+                msg_id_postada = v.get("msg_postada_id") 
                 
-            is_postado = v.get("processado", False)
-            horario_postagem = v.get("horario_postagem", "")
-            
-            if is_postado:
-                status_dia = "✅ Postado"
-                previsao_texto = f"Hoje às {horario_postagem}"
-            elif "Fechada" in status_dia:
-                status_dia = "🔴 Atrasado"
+                if id_destino and msg_id_postada:
+                    if id_destino.lstrip("-").isdigit():
+                        id_limpo = id_destino.replace("-100", "").replace("-", "")
+                        link_destino = f"https://t.me/c/{id_limpo}/{msg_id_postada}"
+                    else:
+                        username_dest = id_destino.replace("@", "")
+                        link_destino = f"https://t.me/{username_dest}/{msg_id_postada}"
+                elif id_destino and not id_destino.lstrip("-").isdigit():
+                    link_destino = f"https://t.me/{id_destino.replace('@', '')}"
 
-           # --- 7. NOVO LAYOUT VISUAL EM 3 LINHAS ---
-            linha_video = (
-                f"<b>{i}.</b> {status_dia} | 📡 {display_origem}\n"
-                f"   └ 📥 Cap: {data_cap_formatada} ➡️ 📤 Prev: {previsao_texto}\n"
-                f"   └ 🔗 {link_display}\n"
+            # --- 6. ACIONANDO O MOTOR CENTRAL PARA O DESIGN DA FILA ---
+            from motor_filas import gerar_layout_item_padrao
+            
+            linha_video = gerar_layout_item_padrao(
+                index=i, 
+                item=v, 
+                tipo_fila=tipo_fila, 
+                atraso_dias=atraso_dias, 
+                agora=agora, 
+                fuso_horario=fuso_horario, 
+                display_origem=display_origem, 
+                link_origem=link_final_exibicao, 
+                link_destino=link_destino
             )
             
             if len(texto_atual) + len(linha_video) > 3800:
