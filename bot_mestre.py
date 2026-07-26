@@ -158,6 +158,7 @@ class ConfigDivulgacaoViral(StatesGroup):
 class ConfigRotina(StatesGroup):
     menu_principal = State()
     aguardando_novo_horario = State()
+    aguardando_confirmacao_pausa = State() # ✅ NOVO: Estado para confirmar a pausa
 
 class ConfigPausa(StatesGroup):
     menu_principal = State()
@@ -3358,11 +3359,12 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         
     # 🔁 Roteamento Inteligente: Se estiver nas Rotinas
     if estado_atual and estado_atual.startswith("ConfigRotina"):
+        menu_orig = data.get('menu_origem')
         tipo_edicao = data.get('tipo_edicao')
         await state.clear()
-        if EXIBIR_LOGS: logger.info("🔙 Cancelando edição de rotina e redirecionando ao menu correto.")
+        if EXIBIR_LOGS: logger.info("🔙 Cancelando configuração de rotina e redirecionando ao menu correto.")
         await message.answer("Ação cancelada.")
-        if tipo_edicao in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral"]:
+        if menu_orig == "espiao" or tipo_edicao in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral"]:
             await gerenciar_rotina_espiao(message, state)
         else:
             await gerenciar_rotina(message, state)
@@ -4890,13 +4892,43 @@ async def alternar_pausa_spam_viral_interno(message: types.Message, state: FSMCo
     await gerenciar_divulgacao_viral(message, state)
 
 @dp.message(ConfigRotina.menu_principal, F.text.in_(["Pausar Rotinas ⏸️", "Retomar Rotinas ▶️"]))
-async def alternar_pausa_rotinas_interno(message: types.Message, state: FSMContext):
+async def pedir_confirmacao_pausa_rotinas(message: types.Message, state: FSMContext):
+    acao = "pausar" if "Pausar" in message.text else "retomar"
+    await state.update_data(acao_pausa_rotina=acao)
+    
+    texto_botao = "Confirmar Pausa ✅" if acao == "pausar" else "Confirmar Retomada ✅"
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=texto_botao), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    if acao == "pausar":
+        texto = "⚠️ Tem certeza de que deseja <b>PAUSAR</b> as mensagens de rotina deste módulo?"
+    else:
+        texto = (
+            "⚠️ Tem certeza de que deseja <b>RETOMAR</b> as mensagens de rotina?\n\n"
+            "🧠 <i>O sistema avaliará o histórico de hoje e distribuirá de forma inteligente apenas as mensagens "
+            "que ainda estão faltando para o dia, garantindo uma postagem orgânica sem sobreposições.</i>"
+        )
+        
+    await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(ConfigRotina.aguardando_confirmacao_pausa)
+
+@dp.message(ConfigRotina.aguardando_confirmacao_pausa)
+async def processar_pausa_rotinas_interno(message: types.Message, state: FSMContext):
+    if "Confirmar" not in message.text:
+        await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
+        return
+
     data = await state.get_data()
     origem = data.get("menu_origem")
+    acao = data.get("acao_pausa_rotina")
     dados_rotina = ler_config_rotina()
+    
+    novo_status = True if acao == "pausar" else False
 
     if origem == "espiao":
-        novo_status = not dados_rotina.get("pausado_viral", False)
         dados_rotina["pausado_viral"] = novo_status
         salvar_config_rotina(dados_rotina)
         
@@ -4904,12 +4936,12 @@ async def alternar_pausa_rotinas_interno(message: types.Message, state: FSMConte
             if EXIBIR_LOGS: logger.info("⏸️ Rotinas do VIRAL pausadas internamente.")
             await message.answer("⏸️ <b>Rotinas do Canal Viral PAUSADAS.</b>\nAs mensagens automáticas foram suspensas.", parse_mode="HTML")
         else:
-            if EXIBIR_LOGS: logger.info("▶️ Rotinas do VIRAL ativadas internamente.")
-            await message.answer("▶️ <b>Rotinas do Canal Viral ATIVAS.</b>\nAs mensagens automáticas voltarão a ser enviadas.", parse_mode="HTML")
+            if EXIBIR_LOGS: logger.info("▶️ Rotinas do VIRAL ativadas. Invocando Motor de Recálculo...")
+            await message.answer("▶️ <b>Rotinas do Canal Viral ATIVAS.</b>\nAs mensagens voltarão a ser enviadas.\n🔄 Recalculando grade...", parse_mode="HTML")
+            agendar_tarefas_diarias() # Recálculo Inteligente
         
         await gerenciar_rotina_espiao(message, state)
     else:
-        novo_status = not dados_rotina.get("pausado", False)
         dados_rotina["pausado"] = novo_status
         salvar_config_rotina(dados_rotina)
         
@@ -4917,8 +4949,9 @@ async def alternar_pausa_rotinas_interno(message: types.Message, state: FSMConte
             if EXIBIR_LOGS: logger.info("⏸️ Rotinas do PRINCIPAL pausadas internamente.")
             await message.answer("⏸️ <b>Mensagens de Rotina PAUSADAS.</b>\nAs mensagens automáticas do grupo foram suspensas.", parse_mode="HTML")
         else:
-            if EXIBIR_LOGS: logger.info("▶️ Rotinas do PRINCIPAL ativadas internamente.")
-            await message.answer("▶️ <b>Mensagens de Rotina ATIVAS.</b>\nAs mensagens automáticas voltarão a ser enviadas.", parse_mode="HTML")
+            if EXIBIR_LOGS: logger.info("▶️ Rotinas do PRINCIPAL ativadas. Invocando Motor de Recálculo...")
+            await message.answer("▶️ <b>Mensagens de Rotina ATIVAS.</b>\nAs mensagens voltarão a ser enviadas.\n🔄 Recalculando grade...", parse_mode="HTML")
+            agendar_tarefas_diarias() # Recálculo Inteligente
             
         await gerenciar_rotina(message, state)
 
@@ -5772,6 +5805,7 @@ class GerenciarFilaFluxo(StatesGroup):
     aguardando_nova_legenda = State()
     aguardando_posicao_reordenar = State()
     aguardando_nova_posicao = State()
+    aguardando_decisao_limiar = State() # ✅ NOVO: Estado de decisão de fronteira
     aguardando_confirmacao_reordenar = State()
     aguardando_data_posicao = State()
     aguardando_posicao_numeracao = State()
@@ -6278,21 +6312,110 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
             dados_rotina = ler_config_rotina()
             expediente_encerrado = dados_rotina.get("ultimo_boa_noite") == hoje_str
             nova_data_adicao = amanha_str if expediente_encerrado else "2000-01-01"
+            await state.update_data(nova_data_adicao=nova_data_adicao)
+            await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
         else:
-            # ✅ CORREÇÃO MESTRE: Herda automaticamente a data-alvo da posição desejada
-            idx_referencia = nova_posicao
-            if idx_referencia >= len(fila_simulada):
-                idx_referencia = len(fila_simulada) - 1
+            # ✅ NOVA LÓGICA: Detecção Matemática de Limiar (Fronteira entre dias)
+            date_prev = None
+            date_next = None
             
-            nova_data_adicao = fila_simulada[idx_referencia].get("data_adicao", "2000-01-01")
-
-        await state.update_data(nova_data_adicao=nova_data_adicao)
-        
-        # Pula direto para a confirmação de reordenar! UX muito mais rápida e sem falha temporal.
-        await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
+            if nova_posicao > 0:
+                date_prev = fila_simulada[nova_posicao - 1].get("data_adicao", "2000-01-01")
+            
+            if nova_posicao < len(fila_simulada):
+                date_next = fila_simulada[nova_posicao].get("data_adicao", "2000-01-01")
+                
+            agora = datetime.now(fuso_horario)
+            hoje_str = agora.strftime("%Y-%m-%d")
+            amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+            
+            def format_date(d_str):
+                if d_str == "2000-01-01" or d_str <= hoje_str: return "Hoje 🟢"
+                if d_str == amanha_str: return "Amanhã 🟡"
+                try: return f"{datetime.strptime(d_str, '%Y-%m-%d').strftime('%d/%m/%Y')} 🔵"
+                except: return "Data Desconhecida"
+                
+            if date_prev and date_next:
+                label_prev = format_date(date_prev)
+                label_next = format_date(date_next)
+                
+                # Se os rótulos de dia forem diferentes, é um limiar!
+                if label_prev != label_next:
+                    await state.update_data(data_limiar_prev=date_prev, data_limiar_next=date_next)
+                    
+                    botoes = [
+                        [KeyboardButton(text=label_prev), KeyboardButton(text=label_next)],
+                        [KeyboardButton(text="Cancelar ❌")]
+                    ]
+                    teclado_limiar = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+                    
+                    texto_pergunta = (
+                        f"🤔 <b>Decisão de Limiar</b>\n\n"
+                        f"A posição escolhida fica exatamente na divisa entre duas datas.\n"
+                        f"Você deseja que este vídeo seja agendado para <b>{label_prev}</b> ou para <b>{label_next}</b>?"
+                    )
+                    if EXIBIR_LOGS: logger.info("🚧 Fila: Limiar de data detectado. Interrompendo fluxo para solicitar decisão do usuário.")
+                    await message.answer(texto_pergunta, reply_markup=teclado_limiar, parse_mode="HTML")
+                    await state.set_state(GerenciarFilaFluxo.aguardando_decisao_limiar)
+                    return # Interrompe a execução e aguarda o botão
+                    
+            # Se não houver limiar (mesmo dia) ou for nas pontas extremas, herda naturalmente
+            if date_next: nova_data_adicao = date_next
+            elif date_prev: nova_data_adicao = date_prev
+            else: nova_data_adicao = "2000-01-01"
+                
+            await state.update_data(nova_data_adicao=nova_data_adicao)
+            await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
     else:
         await message.answer("Erro de sincronização. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
+
+# ✅ NOVO: Handler que processa o clique no botão do Limiar
+@dp.message(GerenciarFilaFluxo.aguardando_decisao_limiar)
+async def processar_decisao_limiar(message: types.Message, state: FSMContext):
+    texto = message.text
+    
+    if texto == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+
+    data = await state.get_data()
+    date_prev = data.get("data_limiar_prev")
+    date_next = data.get("data_limiar_next")
+    posicao_origem = data.get("posicao_origem")
+    nova_posicao = data.get("nova_posicao")
+    
+    agora = datetime.now(fuso_horario)
+    hoje_str = agora.strftime("%Y-%m-%d")
+    amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+    
+    def format_date(d_str):
+        if d_str == "2000-01-01" or d_str <= hoje_str: return "Hoje 🟢"
+        if d_str == amanha_str: return "Amanhã 🟡"
+        try: return f"{datetime.strptime(d_str, '%Y-%m-%d').strftime('%d/%m/%Y')} 🔵"
+        except: return "Data Desconhecida"
+        
+    label_prev = format_date(date_prev)
+    label_next = format_date(date_next)
+    
+    nova_data_adicao = None
+    if texto == label_prev:
+        nova_data_adicao = date_prev
+    elif texto == label_next:
+        nova_data_adicao = date_next
+        
+    if not nova_data_adicao:
+        await message.answer("Por favor, utilize os botões na tela para escolher a data.")
+        return
+        
+    if EXIBIR_LOGS: logger.info(f"✅ Decisão de limiar recebida: O vídeo herdará a data '{texto}'.")
+    await state.update_data(nova_data_adicao=nova_data_adicao)
+    
+    fila_data = ler_fila_postagens()
+    fila = fila_data.get("fila", [])
+    
+    # Continua o fluxo normalmente para a confirmação visual
+    await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
 
 @dp.message(GerenciarFilaFluxo.aguardando_data_posicao)
 async def processar_data_posicao_fila(message: types.Message, state: FSMContext):
