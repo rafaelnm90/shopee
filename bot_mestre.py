@@ -2555,7 +2555,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     if not nome_encontrado and tipo_fila == "Espelhador":
                         def busca_recursiva(dados, alvo_id):
                             if isinstance(dados, dict):
-                                str_id = str(dados.get("id", dados.get("chat_id", "")))
+                                str_id = str(dados.get("id", dados.get("chat_id", dados.get("origem", ""))))
                                 if str_id and (str_id == alvo_id or str_id.replace("-100", "") == alvo_id.replace("-100", "")):
                                     return dados.get("nome")
                                 for val in dados.values():
