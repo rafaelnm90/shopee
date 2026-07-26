@@ -6012,22 +6012,22 @@ async def aplicar_renumeracao_e_salvar(fila_ids_ordenada, message, state, numero
                 numero_atual_cascata += 1
 
         conexao.commit()
-            conexao.close()
+        conexao.close()
 
-            async with _lock_contador:
-                # ✅ CORREÇÃO MESTRE: O contador global SEMPRE herda o próximo número da cascata, 
-                # independentemente de ser maior ou menor. Isso garante sincronia total.
-                salvar_contador(numero_atual_cascata)
-                if EXIBIR_LOGS: logger.info(f"✅ Auto-correção do banco concluída. Novo contador global forçado para: {numero_atual_cascata}.")
+        async with _lock_contador:
+            # ✅ CORREÇÃO MESTRE: O contador global SEMPRE herda o próximo número da cascata, 
+            # independentemente de ser maior ou menor. Isso garante sincronia total.
+            salvar_contador(numero_atual_cascata)
+            if EXIBIR_LOGS: logger.info(f"✅ Auto-correção do banco concluída. Novo contador global forçado para: {numero_atual_cascata}.")
 
-            # ✅ NOVO GATILHO INTELIGENTE: Aciona o recálculo automático da grade!
-            # Isso faz exatamente a mesma coisa que o botão "Atualizar Rotinas",
-            # garantindo que os horários sejam recalculados para respeitar a nova ordem da fila sem atropelos.
-            if EXIBIR_LOGS: logger.info("🔄 Alteração na fila detectada. Acionando recálculo inteligente dos horários...")
-            agendar_tarefas_diarias()
+        # ✅ NOVO GATILHO INTELIGENTE: Aciona o recálculo automático da grade!
+        # Isso faz exatamente a mesma coisa que o botão "Atualizar Rotinas",
+        # garantindo que os horários sejam recalculados para respeitar a nova ordem da fila sem atropelos.
+        if EXIBIR_LOGS: logger.info("🔄 Alteração na fila detectada. Acionando recálculo inteligente dos horários...")
+        agendar_tarefas_diarias()
 
-            await message.answer("✅ Operação concluída com sucesso!\n🔄 A fila e os horários foram sincronizados perfeitamente.")
-            await menu_gerenciar_fila(message, state)
+        await message.answer("✅ Operação concluída com sucesso!\n🔄 A fila e os horários foram sincronizados perfeitamente.")
+        await menu_gerenciar_fila(message, state)
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao organizar SQLite: {e}")
         await message.answer(f"❌ Erro interno ao salvar no banco: {e}")
