@@ -46,6 +46,7 @@ def inicializar_banco_sqlite():
     conexao = sqlite3.connect("banco_dados.db")
     cursor = conexao.cursor()
     
+    # 1. Tabela da Fila de Vídeos Central
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS fila_postagens (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,9 +61,38 @@ def inicializar_banco_sqlite():
             horario_postagem TEXT
         )
     ''')
+    
+    # 2. Tabela de Configurações (Guarda o status do Bom Dia/Boa Noite)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS configuracoes (
+            chave TEXT PRIMARY KEY,
+            valor TEXT
+        )
+    ''')
+    
+    # 3. Tabela da Lixeira Persistente (Guarda os IDs para apagar às 03h00)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS lixeira_mensagens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            msg_id INTEGER,
+            chat_id TEXT,
+            data_inclusao TEXT
+        )
+    ''')
+    
+    # 4. Tabela de Logs de Erros
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS erros_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT,
+            origem TEXT,
+            erro TEXT
+        )
+    ''')
+    
     conexao.commit()
     conexao.close()
-    if EXIBIR_LOGS: logger.info("✅ Tabela 'fila_postagens' blindada e pronta para receber operações de leitura/escrita.")
+    if EXIBIR_LOGS: logger.info("✅ Estrutura SQLite blindada e pronta para receber operações de leitura/escrita.")
 
 inicializar_banco_sqlite()
 
@@ -631,7 +661,7 @@ async def motor_fila_minuto():
         if EXIBIR_LOGS: logger.error(f"❌ Erro no Fiscal da Fila: {e}")
 
 async def executar_postagem_fila(item_id):
-    if EXIBIR_LOGS: logger.info(f"📤 Iniciando upload físico do vídeo pela nova esteira SQLite...")
+    if EXIBIR_LOGS: logger.info(f"📤 Iniciando processamento do vídeo {item_id}...")
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
     
@@ -643,6 +673,13 @@ async def executar_postagem_fila(item_id):
         item = cursor.fetchone()
         
         if not item:
+            conexao.close()
+            return
+            
+        # 🛡️ TRAVA ABSOLUTA ANTI-DUPLICIDADE: Se o vídeo não for mais 'PENDENTE', aborta imediatamente.
+        # Isso impede que o Fiscal (Watchdog) ou qualquer atraso de rede gere postagens duplas.
+        if item["status"] != 'PENDENTE':
+            if EXIBIR_LOGS: logger.warning(f"🛑 Bloqueio ativado: O vídeo já foi processado anteriormente (Status: {item['status']}). Postagem duplicada evitada.")
             conexao.close()
             return
             
