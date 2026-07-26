@@ -679,7 +679,9 @@ async def salvar_edicao_nome(message: types.Message, state: FSMContext):
 
     if EXIBIR_LOGS: logger.info(f"✏️ Nome da rota '{nome_antigo}' atualizado para '{novo_nome}'.")
     await message.answer(f"✅ O nome da rota foi atualizado para <b>{novo_nome}</b> com sucesso!", parse_mode="HTML")
-    await painel_espelhador(message, state)
+    # ✅ CORREÇÃO: Volta para o menu de edição da rota atual
+    message.text = str(indice + 1)
+    await selecionar_acao_edicao(message, state)
 
 @router.message(EspelhadorFluxo.aguardando_edicao_novo_destino)
 async def salvar_edicao_destino(message: types.Message, state: FSMContext):
@@ -704,7 +706,9 @@ async def salvar_edicao_destino(message: types.Message, state: FSMContext):
 
     if EXIBIR_LOGS: logger.info(f"✏️ Destino da rota '{nome_rota}' atualizado para {novo_destino}.")
     await message.answer(f"✅ O destino da rota <b>{nome_rota}</b> foi atualizado para <code>{novo_destino}</code> com sucesso!", parse_mode="HTML")
-    await painel_espelhador(message, state)
+    # ✅ CORREÇÃO: Volta para o menu de edição da rota atual
+    message.text = str(indice + 1)
+    await selecionar_acao_edicao(message, state)
 
 @router.message(EspelhadorFluxo.aguardando_edicao_nova_janela)
 async def salvar_edicao_janela(message: types.Message, state: FSMContext):
@@ -731,7 +735,9 @@ async def salvar_edicao_janela(message: types.Message, state: FSMContext):
     
     if EXIBIR_LOGS: logger.info(f"✏️ Janela da rota '{rotas[indice]['nome']}' atualizada para {inicio}h-{fim}h.")
     await message.answer(f"✅ A janela foi atualizada para {inicio}h às {fim}h com sucesso!", parse_mode="HTML")
-    await painel_espelhador(message, state)
+    # ✅ CORREÇÃO: Volta para o menu de edição da rota atual
+    message.text = str(indice + 1)
+    await selecionar_acao_edicao(message, state)
 
 @router.message(EspelhadorFluxo.aguardando_edicao_intervalo_dias)
 async def salvar_edicao_intervalo_dias(message: types.Message, state: FSMContext):
@@ -768,7 +774,9 @@ async def salvar_edicao_intervalo_dias(message: types.Message, state: FSMContext
     
     if EXIBIR_LOGS: logger.info(f"✏️ Atraso dinâmico da rota '{rotas[indice]['nome']}' modificado para D+{intervalo}.")
     await message.answer(f"✅ O intervalo temporal foi atualizado para D+{intervalo}!\nO Motor Central já está a recalcular os horários de forma orgânica e respeitando a janela.", parse_mode="HTML")
-    await painel_espelhador(message, state)
+    # ✅ CORREÇÃO: Volta para o menu de edição da rota atual
+    message.text = str(indice + 1)
+    await selecionar_acao_edicao(message, state)
 
 @router.message(EspelhadorFluxo.aguardando_edicao_novo_modo)
 async def salvar_edicao_modo(message: types.Message, state: FSMContext):
@@ -788,7 +796,9 @@ async def salvar_edicao_modo(message: types.Message, state: FSMContext):
     
     if EXIBIR_LOGS: logger.info(f"✏️ Modo da rota '{rotas[indice]['nome']}' atualizado para {modo}.")
     await message.answer(f"✅ O modo de distribuição foi atualizado para {message.text} com sucesso!", parse_mode="HTML")
-    await painel_espelhador(message, state)
+    # ✅ CORREÇÃO: Volta para o menu de edição da rota atual
+    message.text = str(indice + 1)
+    await selecionar_acao_edicao(message, state)
 
 @router.message(EspelhadorFluxo.aguardando_nova_origem)
 async def confirmar_nova_origem(message: types.Message, state: FSMContext):
