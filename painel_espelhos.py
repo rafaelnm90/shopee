@@ -515,11 +515,37 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         texto += f"📅 Intervalo de Dias: D+{intervalo_atual}\n"
         texto += f"🔀 Modo atual: {rota_alvo.get('modo', 'ordem').title()}\n"
         
+        # ✅ NOVO: Exibe a lista detalhada de origens e o destino no painel de edição
         origens = rota_alvo.get('origens', [])
         if not origens and 'origem' in rota_alvo:
             origens = [rota_alvo['origem']]
             
-        texto += f"📥 Origens: {len(origens)} canal(is)\n\n"
+        texto += f"\n📥 <b>Origens ({len(origens)}):</b>\n"
+        
+        from utils import ler_cache_nomes_grupos
+        cache_nomes = ler_cache_nomes_grupos()
+        status_canais = rota_alvo.get("status_canais", {})
+
+        for o in origens:
+            info_o = status_canais.get(str(o), {})
+            if isinstance(info_o, str): info_o = {"status": info_o, "nome": str(o)}
+            
+            status_ico = "❌" if info_o.get("status") == "erro" else "✅"
+            nome_o = info_o.get("nome") or cache_nomes.get(str(o), str(o))
+            display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
+            texto += f"  ├ {status_ico} {display_o}\n"
+
+        destino_rota = rota_alvo.get('destino')
+        info_d = status_canais.get(str(destino_rota), {})
+        if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
+        
+        status_destino_ico = "❌" if info_d.get("status") == "erro" else "✅"
+        nome_d = info_d.get("nome") or cache_nomes.get(str(destino_rota), str(destino_rota))
+        display_d = f"{nome_d} (<code>{destino_rota}</code>)" if nome_d != str(destino_rota) else f"<code>{destino_rota}</code>"
+        
+        texto += f"\n🎯 <b>Destino:</b>\n"
+        texto += f"  └ {status_destino_ico} {display_d}\n\n"
+        
         texto += "Escolha a ação que deseja realizar:"
         
         teclado_submenu = ReplyKeyboardMarkup(
