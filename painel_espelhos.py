@@ -53,6 +53,7 @@ class EspelhadorFluxo(StatesGroup):
     aguardando_edicao_nova_janela = State()
     aguardando_edicao_intervalo_dias = State() # ✅ ESTADO QUE HAVIA SUMIDO
     aguardando_edicao_novo_modo = State()
+    aguardando_acao_origem = State() # ✅ ESTADO ADICIONADO PARA O SUBMENU
     aguardando_nova_origem = State()
     aguardando_confirmacao_nova_origem = State()
     aguardando_remocao_origem = State()
@@ -525,8 +526,8 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
             keyboard=[
                 [KeyboardButton(text="📝 Editar Nome"), KeyboardButton(text="🎯 Editar Destino")],
                 [KeyboardButton(text="🕒 Modificar Janela"), KeyboardButton(text="📅 Modificar Dias")],
-                [KeyboardButton(text="🔀 Modificar Modo"), KeyboardButton(text="➕ Adicionar Origem")],
-                [KeyboardButton(text="🗑️ Remover Origem"), KeyboardButton(text="Cancelar Operação ❌")]
+                [KeyboardButton(text="🔀 Modificar Modo"), KeyboardButton(text="📥 Editar Origens")],
+                [KeyboardButton(text="Cancelar Operação ❌")]
             ],
             resize_keyboard=True,
             is_persistent=True
@@ -570,7 +571,25 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
         )
         await message.answer("Escolha o novo modo de distribuição:", reply_markup=teclado_modo)
         await state.set_state(EspelhadorFluxo.aguardando_edicao_novo_modo)
-    elif texto == "➕ Adicionar Origem":
+    elif texto == "📥 Editar Origens":
+        teclado_origens = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="➕ Adicionar Origem"), KeyboardButton(text="🗑️ Remover Origem")],
+                [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        await message.answer("O que você deseja fazer com as origens desta rota?", reply_markup=teclado_origens)
+        await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
+    else:
+        await message.answer("Use os botões do menu para escolher a ação.", reply_markup=teclado_espelhador_cancelar)
+
+# ✅ NOVA FUNÇÃO PARA PROCESSAR O SUBMENU
+@router.message(EspelhadorFluxo.aguardando_acao_origem)
+async def processar_acao_origem(message: types.Message, state: FSMContext):
+    texto = message.text
+    if texto == "➕ Adicionar Origem":
         await message.answer("Envie o ID numérico, link ou @username da nova origem que deseja adicionar a esta rota:", reply_markup=teclado_espelhador_cancelar)
         await state.set_state(EspelhadorFluxo.aguardando_nova_origem)
     elif texto == "🗑️ Remover Origem":
@@ -579,8 +598,7 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
         rotas = ler_espelhos().get("rotas", [])
         rota = rotas[indice]
         origens = rota.get('origens', [])
-        if not origens and 'origem' in rota:
-            origens = [rota['origem']]
+        if not origens and 'origem' in rota: origens = [rota['origem']]
         
         if not origens:
             await message.answer("Esta rota não possui origens para remover.")
@@ -592,8 +610,13 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
             
         await message.answer(msg_txt, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_remocao_origem)
+    elif texto == "🔙 Voltar ao Menu de Edição":
+        data = await state.get_data()
+        # Atalho inteligente para renderizar o menu anterior novamente
+        message.text = str(data.get("indice_edicao") + 1)
+        await selecionar_acao_edicao(message, state)
     else:
-        await message.answer("Use os botões do menu para escolher a ação.", reply_markup=teclado_espelhador_cancelar)
+        await message.answer("Use os botões do menu para escolher a ação.")
 
 @router.message(EspelhadorFluxo.aguardando_edicao_novo_nome)
 async def salvar_edicao_nome(message: types.Message, state: FSMContext):
