@@ -4469,8 +4469,49 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Adicionar Grupo Vigiado ➕")
 async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
     await message.answer("Envie o @username, link ou ID do grupo que deseja monitorar:", reply_markup=teclado_cancelar)
+    await state.set_state(EspiaoFluxo.aguardando_novo_alvo)
 
-# ... [Pule as funções do meio e vá até a de remoção] ...
+@dp.message(EspiaoFluxo.aguardando_novo_alvo)
+async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
+    novo_alvo = message.text.strip()
+    
+    # Validação Básica: O Userbot fará a validação profunda, aqui apenas limpamos a entrada
+    alvo_limpo = novo_alvo
+    if "t.me/" in novo_alvo:
+        alvo_limpo = "@" + novo_alvo.split("t.me/")[1].split("/")[0]
+        
+    await state.update_data(novo_alvo_espiao=alvo_limpo)
+    
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    await message.answer(f"Você está prestes a adicionar o seguinte alvo ao radar do Espião:\n\n<b>{alvo_limpo}</b>\n\nConfirma a adição?", reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(EspiaoFluxo.aguardando_confirmacao_alvo)
+
+@dp.message(EspiaoFluxo.aguardando_confirmacao_alvo)
+async def confirmar_adicao_alvo_espiao(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, clique em Aprovar ✅ ou Cancelar ❌.", reply_markup=teclado_cancelar)
+        return
+        
+    data = await state.get_data()
+    alvo_confirmado = data.get("novo_alvo_espiao")
+    
+    dados = ler_alvos_espiao()
+    if alvo_confirmado not in dados.get("alvos", []):
+        dados.setdefault("alvos", []).append(alvo_confirmado)
+        salvar_alvos_espiao(dados)
+        
+        if EXIBIR_LOGS: logger.info(f"✅ Novo alvo do espião adicionado ao radar: {alvo_confirmado}")
+        await message.answer(f"✅ Alvo <b>{alvo_confirmado}</b> adicionado ao radar com sucesso!\nO Userbot verificará o acesso neste canal no próximo ciclo de varredura.", parse_mode="HTML")
+    else:
+        await message.answer("⚠️ Este alvo já estava sendo monitorado pelo Espião.")
+        
+    await state.clear()
+    await menu_grupos_vigiados(message, state)
 
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Remover Grupo Vigiado 🗑️")
 async def pedir_remocao_espiao(message: types.Message, state: FSMContext):
