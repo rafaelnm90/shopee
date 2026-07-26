@@ -63,8 +63,8 @@ class EspelhadorFluxo(StatesGroup):
 
 teclado_espelhador_menu = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Adicionar Rota ➕"), KeyboardButton(text="Editar Rota ✏️")],
-        [KeyboardButton(text="Forçar Postagens 🚀"), KeyboardButton(text="Remover Rota 🗑️")],
+        [KeyboardButton(text="Adicionar Espelho ➕"), KeyboardButton(text="Editar Espelho ✏️")],
+        [KeyboardButton(text="Forçar Postagens 🚀"), KeyboardButton(text="Remover Espelho 🗑️")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -178,16 +178,15 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
             nome_d = info_d.get("nome") or cache_nomes.get(str(destino_rota), str(destino_rota))
             display_d = f"{nome_d} (<code>{destino_rota}</code>)" if nome_d != str(destino_rota) else f"<code>{destino_rota}</code>"
             
-            texto += f"   🎯 <b>Destino:</b>\n"
-            texto += f"      └ {status_destino_ico} {display_d}\n\n"
+            texto += f"🎯 <b>Canal de Destino:</b> {status_destino_ico} {display_d}\n\n"
 
             # --- 2. ORIGENS MOSTRADAS LOGO ABAIXO ---
-            texto += f"   📥 <b>Origens:</b>\n"
-            
             origens = rota.get('origens', [])
             # Retrocompatibilidade com rotas antigas caso existam
             if not origens and 'origem' in rota:
                 origens = [rota['origem']]
+                
+            texto += f"📥 <b>Na escuta:</b>\n"
                 
             for idx, o in enumerate(origens):
                 info_o = status_canais.get(str(o), {})
@@ -196,7 +195,7 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
                 status_ico = "❌" if info_o.get("status") == "erro" else "✅"
                 nome_o = info_o.get("nome") or cache_nomes.get(str(o), str(o))
                 display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
-                texto += f"      ├ {status_ico} {display_o}\n"
+                texto += f"  {idx + 1}. {status_ico} {display_o}\n"
 
             texto += "\n"
     else:
@@ -205,7 +204,7 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=teclado_espelhador_menu, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.menu_principal)
 
-@router.message(EspelhadorFluxo.menu_principal, F.text == "Adicionar Rota ➕")
+@router.message(EspelhadorFluxo.menu_principal, F.text == "Adicionar Espelho ➕")
 async def iniciar_cadastro_rota(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("🚀 Iniciando fluxo de cadastro de novas rotas em lote...")
     await message.answer("Envie os IDs numéricos, links ou @usernames dos <b>Canais de ORIGEM</b> (De onde o robô vai copiar).\nVocê pode enviar vários de uma vez separando por vírgula ou quebrando a linha:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
@@ -411,13 +410,21 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
     await message.answer(f"✅ <b>Rota {nome_rota}</b> ativada!\nOs vídeos capturados serão postados {dia_texto} entre as {inicio}h e as {fim}h.", parse_mode="HTML")
     await painel_espelhador(message, state)
 
-@router.message(EspelhadorFluxo.menu_principal, F.text == "Remover Rota 🗑️")
+@router.message(EspelhadorFluxo.menu_principal, F.text == "Remover Espelho 🗑️")
 async def iniciar_remocao_rota(message: types.Message, state: FSMContext):
     dados = ler_espelhos()
     rotas = dados.get("rotas", [])
     
     if not rotas:
         await message.answer("Não há rotas ativas para remover.", reply_markup=teclado_espelhador_menu)
+        return
+
+    # ✅ NOVO: Atalho Inteligente! Se houver apenas 1 rota, pula a pergunta e vai direto para a confirmação de remoção.
+    if len(rotas) == 1:
+        if EXIBIR_LOGS: logger.info("⏭️ Atalho UX acionado: Apenas 1 rota disponível. Pulando tela de seleção para remoção.")
+        msg_simulada = message.model_copy(update={"text": "1"})
+        if EXIBIR_LOGS: logger.info("🔄 Criada mensagem simulada para desvio seguro (Pydantic).")
+        await pedir_confirmacao_remocao(msg_simulada, state)
         return
         
     texto = "Digite o <b>NÚMERO</b> da rota que deseja remover:\n\n"
@@ -481,7 +488,7 @@ async def processar_remocao_rota(message: types.Message, state: FSMContext):
         await message.answer("Erro de sincronização. Operação cancelada.")
         await painel_espelhador(message, state)
 
-@router.message(EspelhadorFluxo.menu_principal, F.text == "Editar Rota ✏️")
+@router.message(EspelhadorFluxo.menu_principal, F.text == "Editar Espelho ✏️")
 async def iniciar_edicao_rota(message: types.Message, state: FSMContext):
     dados = ler_espelhos()
     rotas = dados.get("rotas", [])
@@ -539,24 +546,23 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         nome_d = info_d.get("nome") or cache_nomes.get(str(destino_rota), str(destino_rota))
         display_d = f"{nome_d} (<code>{destino_rota}</code>)" if nome_d != str(destino_rota) else f"<code>{destino_rota}</code>"
         
-        texto += f"\n🎯 <b>Destino:</b>\n"
-        texto += f"  └ {status_destino_ico} {display_d}\n\n"
+        texto += f"\n🎯 <b>Canal de Destino:</b> {status_destino_ico} {display_d}\n\n"
 
         # --- 2. ORIGENS MOSTRADAS LOGO ABAIXO ---
         origens = rota_alvo.get('origens', [])
         if not origens and 'origem' in rota_alvo:
             origens = [rota_alvo['origem']]
             
-        texto += f"📥 <b>Origens ({len(origens)}):</b>\n"
+        texto += f"📥 <b>Na escuta ({len(origens)}):</b>\n"
         
-        for o in origens:
+        for idx, o in enumerate(origens):
             info_o = status_canais.get(str(o), {})
             if isinstance(info_o, str): info_o = {"status": info_o, "nome": str(o)}
             
             status_ico = "❌" if info_o.get("status") == "erro" else "✅"
             nome_o = info_o.get("nome") or cache_nomes.get(str(o), str(o))
             display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
-            texto += f"  ├ {status_ico} {display_o}\n"
+            texto += f"  {idx + 1}. {status_ico} {display_o}\n"
         
         texto += "\nEscolha a ação que deseja realizar:"
         
