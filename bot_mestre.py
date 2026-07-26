@@ -6015,10 +6015,10 @@ async def aplicar_renumeracao_e_salvar(fila_ids_ordenada, message, state, numero
         conexao.close()
 
         async with _lock_contador:
-            contador_real = ler_contador()
-            if numero_atual_cascata > contador_real:
-                salvar_contador(numero_atual_cascata)
-                if EXIBIR_LOGS: logger.info(f"✅ Auto-correção do banco concluída. Novo contador global: {numero_atual_cascata}.")
+            # ✅ CORREÇÃO MESTRE: O contador global SEMPRE herda o próximo número da cascata, 
+            # independentemente de ser maior ou menor. Isso garante sincronia total.
+            salvar_contador(numero_atual_cascata)
+            if EXIBIR_LOGS: logger.info(f"✅ Auto-correção do banco concluída. Novo contador global forçado para: {numero_atual_cascata}.")
 
         await message.answer("✅ Operação concluída com sucesso!\n🔄 A fila foi sincronizada de forma segura no Banco de Dados.")
         await menu_gerenciar_fila(message, state)
