@@ -6292,80 +6292,100 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
     fila = fila_data.get("fila", [])
     
     if 0 <= posicao_origem < len(fila):
-        # ✅ NOVA TRAVA: Impede mover um vídeo pendente para a posição de um vídeo já postado!
+        # ✅ TRAVA DE PROTEÇÃO: Impede mover vídeo para a posição de vídeos postados
         if 0 <= nova_posicao < len(fila) and fila[nova_posicao].get("postado", False):
             await message.answer("⚠️ <b>Ação Bloqueada:</b> Você não pode mover um vídeo pendente para o lugar de um vídeo que já foi postado.\n\nEscolha uma posição livre abaixo dos postados:", parse_mode="HTML")
             return
 
         if nova_posicao < 0: nova_posicao = 0
-        if nova_posicao >= len(fila): nova_posicao = len(fila) - 1
         
         await state.update_data(nova_posicao=nova_posicao)
         
+        # 1. Simulação Perfeita: Removemos o item da posição original
         fila_simulada = fila.copy()
         item_movido = fila_simulada.pop(posicao_origem)
         
+        agora = datetime.now(fuso_horario)
+        hoje_str = agora.strftime("%Y-%m-%d")
+        amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        def format_date(d_str):
+            if d_str == "2000-01-01" or d_str <= hoje_str: return "Hoje 🟢"
+            if d_str == amanha_str: return "Amanhã 🟡"
+            try: return f"{datetime.strptime(d_str, '%Y-%m-%d').strftime('%d/%m/%Y')} 🔵"
+            except: return "Data Desconhecida"
+        
+        # Se a fila ficou vazia (só havia 1 vídeo)
         if len(fila_simulada) == 0:
-            agora = datetime.now(fuso_horario)
-            hoje_str = agora.strftime("%Y-%m-%d")
-            amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
             dados_rotina = ler_config_rotina()
             expediente_encerrado = dados_rotina.get("ultimo_boa_noite") == hoje_str
             nova_data_adicao = amanha_str if expediente_encerrado else "2000-01-01"
             await state.update_data(nova_data_adicao=nova_data_adicao)
             await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
+            return
+            
+        # 2. Inserção Virtual: Colocamos o item na nova posição para testar os vizinhos
+        if nova_posicao >= len(fila_simulada):
+            fila_simulada.append(item_movido)
+            nova_posicao_virtual = len(fila_simulada) - 1
         else:
-            # ✅ NOVA LÓGICA: Detecção Matemática de Limiar (Fronteira entre dias)
-            date_prev = None
-            date_next = None
+            fila_simulada.insert(nova_posicao, item_movido)
+            nova_posicao_virtual = nova_posicao
             
-            if nova_posicao > 0:
-                date_prev = fila_simulada[nova_posicao - 1].get("data_adicao", "2000-01-01")
+        # 3. Análise de Vizinhança
+        date_prev = None
+        date_next = None
+        
+        # Vizinho de cima
+        if nova_posicao_virtual > 0:
+            date_prev = fila_simulada[nova_posicao_virtual - 1].get("data_adicao", "2000-01-01")
             
-            if nova_posicao < len(fila_simulada):
-                date_next = fila_simulada[nova_posicao].get("data_adicao", "2000-01-01")
-                
-            agora = datetime.now(fuso_horario)
-            hoje_str = agora.strftime("%Y-%m-%d")
-            amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+        # Vizinho de baixo
+        if nova_posicao_virtual < len(fila_simulada) - 1:
+            date_next = fila_simulada[nova_posicao_virtual + 1].get("data_adicao", "2000-01-01")
+        else:
+            # ✅ CORREÇÃO MESTRE DO VÍDEO: Se moveu para o ÚLTIMO lugar da fila, o vizinho de baixo
+            # é logicamente o dia seguinte ao dia do penúltimo vídeo.
+            if date_prev:
+                # Se for "Hoje" (2000-01-01), o próximo é amanhã
+                if date_prev == "2000-01-01" or date_prev <= hoje_str:
+                    date_next = amanha_str
+                else:
+                    d_obj = datetime.strptime(date_prev, "%Y-%m-%d")
+                    date_next = (d_obj + timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        # 4. Verificação de Limiar
+        if date_prev and date_next:
+            label_prev = format_date(date_prev)
+            label_next = format_date(date_next)
             
-            def format_date(d_str):
-                if d_str == "2000-01-01" or d_str <= hoje_str: return "Hoje 🟢"
-                if d_str == amanha_str: return "Amanhã 🟡"
-                try: return f"{datetime.strptime(d_str, '%Y-%m-%d').strftime('%d/%m/%Y')} 🔵"
-                except: return "Data Desconhecida"
+            # Se os rótulos de dia forem diferentes, detectamos um limiar!
+            if label_prev != label_next:
+                await state.update_data(data_limiar_prev=date_prev, data_limiar_next=date_next)
                 
-            if date_prev and date_next:
-                label_prev = format_date(date_prev)
-                label_next = format_date(date_next)
+                botoes = [
+                    [KeyboardButton(text=label_prev), KeyboardButton(text=label_next)],
+                    [KeyboardButton(text="Cancelar ❌")]
+                ]
+                teclado_limiar = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
                 
-                # Se os rótulos de dia forem diferentes, é um limiar!
-                if label_prev != label_next:
-                    await state.update_data(data_limiar_prev=date_prev, data_limiar_next=date_next)
-                    
-                    botoes = [
-                        [KeyboardButton(text=label_prev), KeyboardButton(text=label_next)],
-                        [KeyboardButton(text="Cancelar ❌")]
-                    ]
-                    teclado_limiar = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
-                    
-                    texto_pergunta = (
-                        f"🤔 <b>Decisão de Limiar</b>\n\n"
-                        f"A posição escolhida fica exatamente na divisa entre duas datas.\n"
-                        f"Você deseja que este vídeo seja agendado para <b>{label_prev}</b> ou para <b>{label_next}</b>?"
-                    )
-                    if EXIBIR_LOGS: logger.info("🚧 Fila: Limiar de data detectado. Interrompendo fluxo para solicitar decisão do usuário.")
-                    await message.answer(texto_pergunta, reply_markup=teclado_limiar, parse_mode="HTML")
-                    await state.set_state(GerenciarFilaFluxo.aguardando_decisao_limiar)
-                    return # Interrompe a execução e aguarda o botão
-                    
-            # Se não houver limiar (mesmo dia) ou for nas pontas extremas, herda naturalmente
-            if date_next: nova_data_adicao = date_next
-            elif date_prev: nova_data_adicao = date_prev
-            else: nova_data_adicao = "2000-01-01"
-                
-            await state.update_data(nova_data_adicao=nova_data_adicao)
-            await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
+                texto_pergunta = (
+                    f"🤔 <b>Decisão de Limiar</b>\n\n"
+                    f"A posição escolhida fica exatamente na divisa entre duas datas.\n"
+                    f"Você deseja que este vídeo seja agendado para <b>{label_prev}</b> ou para <b>{label_next}</b>?"
+                )
+                if EXIBIR_LOGS: logger.info(f"🚧 Fila: Limiar de data detectado ({label_prev} vs {label_next}). Solicitando decisão.")
+                await message.answer(texto_pergunta, reply_markup=teclado_limiar, parse_mode="HTML")
+                await state.set_state(GerenciarFilaFluxo.aguardando_decisao_limiar)
+                return 
+
+        # 5. Se não houver limiar (ex: moveu dentro do mesmo dia)
+        if date_prev: nova_data_adicao = date_prev
+        elif date_next: nova_data_adicao = date_next
+        else: nova_data_adicao = "2000-01-01"
+            
+        await state.update_data(nova_data_adicao=nova_data_adicao)
+        await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
     else:
         await message.answer("Erro de sincronização. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
