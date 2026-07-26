@@ -490,6 +490,13 @@ async def iniciar_edicao_rota(message: types.Message, state: FSMContext):
         await message.answer("Não há rotas ativas para editar.", reply_markup=teclado_espelhador_menu)
         return
         
+    # ✅ NOVO: Atalho Inteligente! Se houver apenas 1 rota, pula a pergunta e vai direto para a edição.
+    if len(rotas) == 1:
+        if EXIBIR_LOGS: logger.info("⏭️ Atalho UX acionado: Apenas 1 rota disponível. Pulando tela de seleção.")
+        message.text = "1"
+        await selecionar_acao_edicao(message, state)
+        return
+        
     texto = "Digite o <b>NÚMERO</b> da rota que deseja configurar:\n\n"
     for i, rota in enumerate(rotas, 1):
         texto += f"{i}. {rota['nome']}\n"
