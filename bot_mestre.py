@@ -6130,79 +6130,38 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
     fila = fila_data.get("fila", [])
     
     if 0 <= posicao_origem < len(fila):
+        # ✅ NOVA TRAVA: Impede mover um vídeo pendente para a posição de um vídeo já postado!
+        if 0 <= nova_posicao < len(fila) and fila[nova_posicao].get("postado", False):
+            await message.answer("⚠️ <b>Ação Bloqueada:</b> Você não pode mover um vídeo pendente para o lugar de um vídeo que já foi postado.\n\nEscolha uma posição livre abaixo dos postados:", parse_mode="HTML")
+            return
+
         if nova_posicao < 0: nova_posicao = 0
         if nova_posicao >= len(fila): nova_posicao = len(fila) - 1
         
         await state.update_data(nova_posicao=nova_posicao)
         
-        agora = datetime.now(fuso_horario)
-        hoje_str = agora.strftime("%Y-%m-%d")
-        amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
-        
-        dados_rotina = ler_config_rotina()
-        expediente_encerrado = dados_rotina.get("ultimo_boa_noite") == hoje_str
-        
         fila_simulada = fila.copy()
         item_movido = fila_simulada.pop(posicao_origem)
         
         if len(fila_simulada) == 0:
+            agora = datetime.now(fuso_horario)
+            hoje_str = agora.strftime("%Y-%m-%d")
+            amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+            dados_rotina = ler_config_rotina()
+            expediente_encerrado = dados_rotina.get("ultimo_boa_noite") == hoje_str
             nova_data_adicao = amanha_str if expediente_encerrado else "2000-01-01"
-            await state.update_data(nova_data_adicao=nova_data_adicao)
-            await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
-            return
-        
-        prev_idx = nova_posicao - 1
-        next_idx = nova_posicao
-        
-        data_min_str = fila_simulada[prev_idx].get("data_adicao", "2000-01-01") if prev_idx >= 0 else "2000-01-01"
-        data_max_str = fila_simulada[next_idx].get("data_adicao") if next_idx < len(fila_simulada) else None
-        
-        if data_min_str == "2000-01-01" or data_min_str < hoje_str:
-            data_min_str = hoje_str
-            
-        data_min_obj = datetime.strptime(data_min_str, "%Y-%m-%d")
-        
-        if data_max_str is None or data_max_str == "2000-01-01":
-            data_max_obj = data_min_obj + timedelta(days=1)
         else:
-            data_max_obj = datetime.strptime(data_max_str, "%Y-%m-%d")
+            # ✅ CORREÇÃO MESTRE: Herda automaticamente a data-alvo da posição desejada
+            idx_referencia = nova_posicao
+            if idx_referencia >= len(fila_simulada):
+                idx_referencia = len(fila_simulada) - 1
             
-        if data_max_obj < data_min_obj:
-            data_max_obj = data_min_obj
-            
-        opcoes = []
-        d_atual = data_min_obj
-        while d_atual <= data_max_obj:
-            d_str = d_atual.strftime("%Y-%m-%d")
-            if d_str == hoje_str:
-                opcoes.append("Hoje 🟢")
-            elif d_str == amanha_str:
-                opcoes.append("Amanhã 🟡")
-            else:
-                opcoes.append(f"{d_atual.strftime('%d/%m/%Y')} 🔵")
-            d_atual += timedelta(days=1)
-            if len(opcoes) >= 3: 
-                break
+            nova_data_adicao = fila_simulada[idx_referencia].get("data_adicao", "2000-01-01")
 
-        if expediente_encerrado:
-            opcoes = [op for op in opcoes if "Hoje" not in op]
-            if not opcoes:
-                opcoes = ["Amanhã 🟡"]
-                
-        if len(opcoes) == 1:
-            escolha = opcoes[0]
-            if escolha == "Hoje 🟢": nova_data_adicao = "2000-01-01"
-            elif escolha == "Amanhã 🟡": nova_data_adicao = amanha_str
-            else: nova_data_adicao = (agora + timedelta(days=2)).strftime("%Y-%m-%d")
-            
-            await state.update_data(nova_data_adicao=nova_data_adicao)
-            await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
-        else:
-            botoes = [[KeyboardButton(text=op)] for op in opcoes]
-            botoes.append([KeyboardButton(text="Cancelar ❌")])
-            teclado_escolha_data = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
-            await message.answer(f"O vídeo será movido para a posição {nova_posicao+1}.\nPara quando deseja agendar este vídeo nesta nova posição?", reply_markup=teclado_escolha_data)
-            await state.set_state(GerenciarFilaFluxo.aguardando_data_posicao)
+        await state.update_data(nova_data_adicao=nova_data_adicao)
+        
+        # Pula direto para a confirmação de reordenar! UX muito mais rápida e sem falha temporal.
+        await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
     else:
         await message.answer("Erro de sincronização. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
