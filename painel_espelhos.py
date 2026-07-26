@@ -170,6 +170,18 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
             texto += f"   🔀 Distribuição: {rota.get('modo', 'ordem').title()}\n"
             texto += f"   📦 Fila de Espera: {qtd_fila} vídeo(s)\n"
             texto += "\n"
+            # --- 1. DESTINO MOSTRADO PRIMEIRO ---
+            info_d = status_canais.get(str(destino_rota), {})
+            if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
+            
+            status_destino_ico = "❌" if info_d.get("status") == "erro" else "✅"
+            nome_d = info_d.get("nome") or cache_nomes.get(str(destino_rota), str(destino_rota))
+            display_d = f"{nome_d} (<code>{destino_rota}</code>)" if nome_d != str(destino_rota) else f"<code>{destino_rota}</code>"
+            
+            texto += f"   🎯 <b>Destino:</b>\n"
+            texto += f"      └ {status_destino_ico} {display_d}\n\n"
+
+            # --- 2. ORIGENS MOSTRADAS LOGO ABAIXO ---
             texto += f"   📥 <b>Origens:</b>\n"
             
             origens = rota.get('origens', [])
@@ -187,15 +199,6 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
                 texto += f"      ├ {status_ico} {display_o}\n"
 
             texto += "\n"
-                
-            info_d = status_canais.get(str(destino_rota), {})
-            if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
-            
-            status_destino_ico = "❌" if info_d.get("status") == "erro" else "✅"
-            nome_d = info_d.get("nome") or cache_nomes.get(str(destino_rota), str(destino_rota))
-            display_d = f"{nome_d} (<code>{destino_rota}</code>)" if nome_d != str(destino_rota) else f"<code>{destino_rota}</code>"
-            texto += f"   🎯 <b>Destino:</b>\n"
-            texto += f"      └ {status_destino_ico} {display_d}\n\n"
     else:
         texto += "<i>Nenhuma rota de espelhamento cadastrada no momento.</i>\n\n"
         
