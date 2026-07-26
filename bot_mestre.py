@@ -3838,7 +3838,7 @@ async def menu_configuracoes(message: types.Message, state: FSMContext):
 # ✅ NOVO: Atualizar Rotinas (Versão Recálculo Inteligente)
 @dp.message(F.text == "🔄 Atualizar Rotinas", StateFilter("*"))
 async def resetar_expediente(message: types.Message, state: FSMContext):
-    if message.fromuser.id != ADMIN_ID: return
+    if message.from_user.id != ADMIN_ID: return
     
     if EXIBIR_LOGS: logger.info("🔄 Acionado o Recálculo Inteligente de Rotinas...")
     msg_status = await message.answer("🔄 Analisando o histórico de hoje e recalculando a grade restante. Aguarde...", reply_markup=teclado_cancelar)
