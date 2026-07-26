@@ -49,8 +49,8 @@ class EspelhadorFluxo(StatesGroup):
     aguardando_edicao_escolha_rota = State()
     aguardando_acao_edicao = State()
     aguardando_edicao_novo_nome = State()
+    aguardando_edicao_novo_destino = State() # ✅ NOVO ESTADO AQUI
     aguardando_edicao_nova_janela = State()
-    aguardando_edicao_intervalo_dias = State()
     aguardando_edicao_novo_modo = State()
     aguardando_nova_origem = State()
     aguardando_confirmacao_nova_origem = State()
@@ -522,10 +522,10 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         
         teclado_submenu = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="📝 Editar Nome"), KeyboardButton(text="🕒 Modificar Janela")],
-                [KeyboardButton(text="📅 Modificar Dias"), KeyboardButton(text="🔀 Modificar Modo")],
-                [KeyboardButton(text="➕ Adicionar Origem"), KeyboardButton(text="🗑️ Remover Origem")],
-                [KeyboardButton(text="Cancelar Operação ❌")]
+                [KeyboardButton(text="📝 Editar Nome"), KeyboardButton(text="🎯 Editar Destino")],
+                [KeyboardButton(text="🕒 Modificar Janela"), KeyboardButton(text="📅 Modificar Dias")],
+                [KeyboardButton(text="🔀 Modificar Modo"), KeyboardButton(text="➕ Adicionar Origem")],
+                [KeyboardButton(text="🗑️ Remover Origem"), KeyboardButton(text="Cancelar Operação ❌")]
             ],
             resize_keyboard=True,
             is_persistent=True
@@ -542,9 +542,9 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
     if texto == "📝 Editar Nome":
         await message.answer("Digite o <b>NOVO NOME</b> para esta rota (Ex: Espelho Principal):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_edicao_novo_nome)
-    elif texto == "🕒 Modificar Janela":
-        await message.answer("Digite a <b>NOVA JANELA</b> no formato <code>Inicio-Fim</code> (Ex: 10-22):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
-        await state.set_state(EspelhadorFluxo.aguardando_edicao_nova_janela)
+    elif texto == "🎯 Editar Destino":
+        await message.answer("Envie o ID numérico, link ou @username do <b>NOVO CANAL DE DESTINO</b> para esta rota:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+        await state.set_state(EspelhadorFluxo.aguardando_edicao_novo_destino)
     elif texto == "📅 Modificar Dias":
         teclado_dias = ReplyKeyboardMarkup(
             keyboard=[
@@ -625,6 +625,31 @@ async def salvar_edicao_nome(message: types.Message, state: FSMContext):
 
     if EXIBIR_LOGS: logger.info(f"✏️ Nome da rota '{nome_antigo}' atualizado para '{novo_nome}'.")
     await message.answer(f"✅ O nome da rota foi atualizado para <b>{novo_nome}</b> com sucesso!", parse_mode="HTML")
+    await painel_espelhador(message, state)
+
+@router.message(EspelhadorFluxo.aguardando_edicao_novo_destino)
+async def salvar_edicao_destino(message: types.Message, state: FSMContext):
+    msg_status = await message.answer("⏳ Validando o novo canal de destino...", reply_markup=teclado_espelhador_cancelar)
+    novo_destino = await validar_link_ou_id_grupo(message.text)
+
+    if not novo_destino:
+        await msg_status.delete()
+        await message.answer("⚠️ Canal não encontrado ou formato inválido. Tente novamente:", reply_markup=teclado_espelhador_cancelar)
+        return
+
+    await msg_status.delete()
+    data = await state.get_data()
+    indice = data.get("indice_edicao")
+
+    dados = ler_espelhos()
+    rotas = dados.get("rotas", [])
+    nome_rota = rotas[indice]["nome"]
+    rotas[indice]["destino"] = novo_destino
+    dados["rotas"] = rotas
+    salvar_espelhos(dados)
+
+    if EXIBIR_LOGS: logger.info(f"✏️ Destino da rota '{nome_rota}' atualizado para {novo_destino}.")
+    await message.answer(f"✅ O destino da rota <b>{nome_rota}</b> foi atualizado para <code>{novo_destino}</code> com sucesso!", parse_mode="HTML")
     await painel_espelhador(message, state)
 
 @router.message(EspelhadorFluxo.aguardando_edicao_nova_janela)
