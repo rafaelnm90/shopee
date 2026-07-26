@@ -5927,10 +5927,8 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
                 else:
                     from datetime import timedelta
                     amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
-                    if data_adicao_str == amanha_str:
-                        status_previsao = "Amanhã 🟡"
-                    else:
-                        status_previsao = "Depois de Amanhã 🔵"
+                    # ✅ CORREÇÃO MESTRE: Limite rígido. Qualquer data futura será tratada como Amanhã.
+                    status_previsao = "Amanhã 🟡"
 
                 # ✅ CORREÇÃO: Interrogação Silenciosa do Motor APENAS para vídeos de HOJE
                 hora_agendada_str = ""
@@ -6345,18 +6343,16 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         date_next = None
         
         if is_ultimo_item:
-            # ✅ CORREÇÃO MESTRE: O vídeo foi movido para o final da fila.
-            # O vizinho "anterior" é o penúltimo vídeo (que agora é o último da fila original).
-            # O vizinho "próximo" será logicamente o dia seguinte ao do vizinho anterior.
             date_prev = fila_simulada[nova_posicao_virtual - 1].get("data_adicao", "2000-01-01")
             
+            # ✅ CORREÇÃO: Limite rígido. Se o penúltimo for Hoje, o próximo pode ser Amanhã.
+            # Se o penúltimo JÁ for Amanhã, o próximo TAMBÉM SERÁ Amanhã (Não existe "depois de amanhã").
             if date_prev == "2000-01-01" or date_prev <= hoje_str:
                 date_next = amanha_str
             else:
-                d_obj = datetime.strptime(date_prev, "%Y-%m-%d")
-                date_next = (d_obj + timedelta(days=1)).strftime("%Y-%m-%d")
+                date_next = amanha_str # Trava a data no amanhã
                 
-            if EXIBIR_LOGS: logger.info(f"🚧 Fila: Movimento para o final da fila. Limiar aberto gerado: {date_prev} vs {date_next}.")
+            if EXIBIR_LOGS: logger.info(f"🚧 Fila: Movimento para o final da fila. Limiar aberto gerado com trava diária: {date_prev} vs {date_next}.")
         else:
             # Comportamento normal: O vídeo foi inserido no meio da fila.
             if nova_posicao_virtual > 0:
@@ -6364,6 +6360,10 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
                 
             if nova_posicao_virtual < len(fila_simulada) - 1:
                 date_next = fila_simulada[nova_posicao_virtual + 1].get("data_adicao", "2000-01-01")
+                
+            # ✅ CORREÇÃO: Garante que os vizinhos nunca ultrapassem o limite de Amanhã
+            if date_prev and date_prev > amanha_str: date_prev = amanha_str
+            if date_next and date_next > amanha_str: date_next = amanha_str
         
         # 4. Verificação de Limiar (Aciona a Pergunta ao Usuário)
         if date_prev and date_next:
