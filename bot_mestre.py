@@ -536,33 +536,64 @@ def agendar_fila_postagens():
 
     dados_rotina = ler_config_rotina()
     
-    # 3. Determina o limite de tempo até o Boa Noite
+    # 3. Determina as fronteiras de expediente (Bom Dia e Boa Noite)
+    job_bd = scheduler.get_job('job_rotina_bom_dia_0')
+    if job_bd and getattr(job_bd, 'next_run_time', None):
+        limite_inicio = job_bd.next_run_time.astimezone(fuso_horario)
+    else:
+        hora_inicio = dados_rotina.get("bom_dia", {}).get("inicio", 6)
+        limite_inicio = agora.replace(hour=hora_inicio, minute=0, second=0, microsecond=0)
+
     job_bn = scheduler.get_job('job_rotina_boa_noite_0')
     if job_bn and getattr(job_bn, 'next_run_time', None):
         limite_fim = job_bn.next_run_time.astimezone(fuso_horario)
     else:
         hora_fim = dados_rotina.get("boa_noite", {}).get("inicio", 21)
-        limite_fim = agora.replace(hour=hora_fim, minute=59)
+        limite_fim = agora.replace(hour=hora_fim, minute=59, second=59, microsecond=0)
 
-    minutos_disponiveis = (limite_fim - agora).total_seconds() / 60
+    # 4. Define o Início Real da Distribuição
+    # Garante que NUNCA poste antes do Bom Dia e NUNCA poste imediatamente se clicarem em atualizar.
+    import random
+    from datetime import timedelta
+    margem_agora = timedelta(minutes=random.randint(15, 30))
+    margem_bom_dia = timedelta(minutes=random.randint(10, 25))
+    
+    inicio_real = max(agora + margem_agora, limite_inicio + margem_bom_dia)
+
+    # Se já estivermos além do expediente (passou do Boa Noite), cancela o agendamento por hoje
+    if inicio_real >= limite_fim:
+        if EXIBIR_LOGS: logger.warning("⚠️ O expediente de postagens encerrou por hoje. Vídeos aguardarão na fila para amanhã.")
+        return
+
+    minutos_disponiveis = (limite_fim - inicio_real).total_seconds() / 60
 
     if minutos_disponiveis > 0:
         espacamento = minutos_disponiveis / len(pendentes_hoje)
-        tempo_acumulado = agora + timedelta(minutes=2) # Inicia em 2 minutos
+        tempo_acumulado = inicio_real
 
         for item in pendentes_hoje:
             id_unico = item["id_unico"]
             job_id = f"job_fila_postagem_{id_unico}"
             
+            # Pequena variação para não ficar cravado matematicamente
+            variacao = random.randint(-4, 4)
+            horario_final = tempo_acumulado + timedelta(minutes=variacao)
+
+            # Travas de segurança adicionais
+            if horario_final > limite_fim:
+                horario_final = limite_fim - timedelta(minutes=random.randint(1, 5))
+            if horario_final <= agora:
+                horario_final = agora + timedelta(minutes=random.randint(5, 15))
+
             scheduler.add_job(
                 executar_postagem_fila, 
                 'date', 
-                run_date=tempo_acumulado, 
+                run_date=horario_final, 
                 args=[id_unico], 
                 id=job_id, 
                 replace_existing=True
             )
-            if EXIBIR_LOGS: logger.info(f"⏳ Postagem {id_unico} agendada estaticamente para {tempo_acumulado.strftime('%H:%M:%S')}")
+            if EXIBIR_LOGS: logger.info(f"⏳ Postagem {id_unico[:8]} agendada organicamente para {horario_final.strftime('%H:%M:%S')}")
             tempo_acumulado += timedelta(minutes=espacamento)
 
 async def motor_fila_minuto():
