@@ -2308,10 +2308,11 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         except: pass
     elif tipo_fila == "Espião":
         try:
-            with open("alvos_espiao.json", "r", encoding="utf-8") as f:
-                dados_espiao = json.load(f)
-                atraso_dias = dados_espiao.get("intervalo_dias", 1)
-        except: pass
+            if EXIBIR_LOGS: logger.info("🔍 Extraindo configurações de destino do Espião via banco SQLite...")
+            dados_espiao = ler_alvos_espiao()
+            atraso_dias = dados_espiao.get("intervalo_dias", 1)
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro ao resgatar configurações do Espião: {e}")
         
     # Lógica de filtragem corrigida (Pente Fino ATIVO)
     pendentes = []
@@ -2456,11 +2457,23 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         for i, v in enumerate(itens, 1):
             data_cap = v.get("data_captura", "Data não registrada")
             
-            origem_bruta = str(v.get("chat_origem", v.get("origem", v.get("grupo_id", v.get("canal_id", "Desconhecida")))))
+            origem_bruta = str(v.get("chat_origem", v.get("origem", v.get("grupo_id", v.get("canal_id", "")))))
             link_original = v.get("link_original", "")
             msg_id = v.get("mensagem_id") or v.get("msg_id") or v.get("message_id")
             
-            # --- 1. RESGATE ESTRUTURAL DE ORIGEM ---
+            # --- 1. RESGATE ESTRUTURAL DE ORIGEM E ROTA ---
+            if not origem_bruta or origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None"]:
+                nome_rota_item = v.get("nome_rota")
+                if tipo_fila == "Espelhador" and nome_rota_item:
+                    import painel_espelhos
+                    dados_rotas_temp = painel_espelhos.ler_espelhos()
+                    for r in dados_rotas_temp.get("rotas", []):
+                        if r.get("nome") == nome_rota_item:
+                            origem_bruta = str(r.get("origem", "Desconhecida"))
+                            break
+                if not origem_bruta or origem_bruta == "None":
+                    origem_bruta = "Desconhecida"
+
             if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 if link_original and "t.me/c/" in link_original:
                     try: origem_bruta = "-100" + link_original.split("t.me/c/")[1].split("/")[0]
