@@ -49,8 +49,9 @@ class EspelhadorFluxo(StatesGroup):
     aguardando_edicao_escolha_rota = State()
     aguardando_acao_edicao = State()
     aguardando_edicao_novo_nome = State()
-    aguardando_edicao_novo_destino = State() # ✅ NOVO ESTADO AQUI
+    aguardando_edicao_novo_destino = State() # ✅ NOVO ESTADO ADICIONADO AQUI
     aguardando_edicao_nova_janela = State()
+    aguardando_edicao_intervalo_dias = State() # ✅ ESTADO QUE HAVIA SUMIDO
     aguardando_edicao_novo_modo = State()
     aguardando_nova_origem = State()
     aguardando_confirmacao_nova_origem = State()
