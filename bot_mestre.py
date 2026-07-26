@@ -4475,11 +4475,30 @@ async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
 async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
     novo_alvo = message.text.strip()
     
-    # Validação Básica: O Userbot fará a validação profunda, aqui apenas limpamos a entrada
+    # Validação Básica
     alvo_limpo = novo_alvo
     if "t.me/" in novo_alvo:
         alvo_limpo = "@" + novo_alvo.split("t.me/")[1].split("/")[0]
         
+    msg_status = await message.answer("⏳ <b>Validando link e buscando nome do canal...</b>", parse_mode="HTML", reply_markup=teclado_cancelar)
+        
+    # ✅ NOVO: Resolução Imediata de Nome via Bot Oficial
+    nome_encontrado = str(alvo_limpo)
+    try:
+        # Tenta extrair o nome em tempo real
+        chat_obj = await bot.get_chat(alvo_limpo)
+        nome_encontrado = chat_obj.title or chat_obj.full_name or str(alvo_limpo)
+        
+        # Salva imediatamente no cache do bot para uso no painel
+        from utils import salvar_nome_grupo
+        salvar_nome_grupo(str(alvo_limpo), nome_encontrado)
+        
+        if EXIBIR_LOGS: logger.info(f"✅ Nome do alvo Espião resolvido imediatamente: {nome_encontrado}")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Bot oficial sem acesso inicial ao alvo {alvo_limpo}. O Userbot auditará no próximo ciclo.")
+
+    await msg_status.delete()
+
     await state.update_data(novo_alvo_espiao=alvo_limpo)
     
     teclado_confirmacao = ReplyKeyboardMarkup(
@@ -4488,7 +4507,7 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
         is_persistent=True
     )
     
-    await message.answer(f"Você está prestes a adicionar o seguinte alvo ao radar do Espião:\n\n<b>{alvo_limpo}</b>\n\nConfirma a adição?", reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await message.answer(f"Você está prestes a adicionar o seguinte alvo ao radar do Espião:\n\n<b>{nome_encontrado}</b> (<code>{alvo_limpo}</code>)\n\nConfirma a adição?", reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(EspiaoFluxo.aguardando_confirmacao_alvo)
 
 @dp.message(EspiaoFluxo.aguardando_confirmacao_alvo)
