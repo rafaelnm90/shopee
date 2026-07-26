@@ -63,8 +63,8 @@ class EspelhadorFluxo(StatesGroup):
 
 teclado_espelhador_menu = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Adicionar Rota ➕"), KeyboardButton(text="Remover Rota 🗑️")],
-        [KeyboardButton(text="Editar Rota ✏️"), KeyboardButton(text="Forçar Postagens 🚀")],
+        [KeyboardButton(text="Adicionar Rota ➕"), KeyboardButton(text="Editar Rota ✏️")],
+        [KeyboardButton(text="Forçar Postagens 🚀"), KeyboardButton(text="Remover Rota 🗑️")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -518,25 +518,10 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         texto += f"📅 Intervalo de Dias: D+{intervalo_atual}\n"
         texto += f"🔀 Modo atual: {rota_alvo.get('modo', 'ordem').title()}\n"
         
-        # ✅ NOVO: Exibe a lista detalhada de origens e o destino no painel de edição
-        origens = rota_alvo.get('origens', [])
-        if not origens and 'origem' in rota_alvo:
-            origens = [rota_alvo['origem']]
-            
-        texto += f"\n📥 <b>Origens ({len(origens)}):</b>\n"
-        
+        # --- 1. DESTINO MOSTRADO PRIMEIRO NO MODO DE EDIÇÃO ---
         from utils import ler_cache_nomes_grupos
         cache_nomes = ler_cache_nomes_grupos()
         status_canais = rota_alvo.get("status_canais", {})
-
-        for o in origens:
-            info_o = status_canais.get(str(o), {})
-            if isinstance(info_o, str): info_o = {"status": info_o, "nome": str(o)}
-            
-            status_ico = "❌" if info_o.get("status") == "erro" else "✅"
-            nome_o = info_o.get("nome") or cache_nomes.get(str(o), str(o))
-            display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
-            texto += f"  ├ {status_ico} {display_o}\n"
 
         destino_rota = rota_alvo.get('destino')
         info_d = status_canais.get(str(destino_rota), {})
@@ -548,8 +533,24 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         
         texto += f"\n🎯 <b>Destino:</b>\n"
         texto += f"  └ {status_destino_ico} {display_d}\n\n"
+
+        # --- 2. ORIGENS MOSTRADAS LOGO ABAIXO ---
+        origens = rota_alvo.get('origens', [])
+        if not origens and 'origem' in rota_alvo:
+            origens = [rota_alvo['origem']]
+            
+        texto += f"📥 <b>Origens ({len(origens)}):</b>\n"
         
-        texto += "Escolha a ação que deseja realizar:"
+        for o in origens:
+            info_o = status_canais.get(str(o), {})
+            if isinstance(info_o, str): info_o = {"status": info_o, "nome": str(o)}
+            
+            status_ico = "❌" if info_o.get("status") == "erro" else "✅"
+            nome_o = info_o.get("nome") or cache_nomes.get(str(o), str(o))
+            display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
+            texto += f"  ├ {status_ico} {display_o}\n"
+        
+        texto += "\nEscolha a ação que deseja realizar:"
         
         teclado_submenu = ReplyKeyboardMarkup(
             keyboard=[
