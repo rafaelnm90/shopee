@@ -922,7 +922,7 @@ async def disparar_mensagem(tipo, forcar=False):
         return
 
     agora_tz = datetime.now(fuso_horario)
-    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    hoje_str = agora_tz.strftime("%Y-%m-%d")
     
     # 🚀 LÓGICA DE TRAVA ABSOLUTA E EXPEDIENTE
     if tipo == "bom_dia" and dados_rotina.get("ultimo_bom_dia") == hoje_str:
@@ -954,6 +954,35 @@ async def disparar_mensagem(tipo, forcar=False):
         if dados_rotina.get("ultimo_boa_noite") == hoje_str:
             if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): O expediente já foi encerrado pelo 'Boa Noite'.")
             return
+
+    # ✅ TRAVA DE CONCORRÊNCIA: Registra o histórico ANTES de chamar a IA. 
+    # Isso impede que o botão "Atualizar Rotinas" cause duplicidade se for clicado enquanto o Gemini processa o texto.
+    hora_exata_disparo = agora_tz.strftime("%H:%M")
+    
+    if tipo == "bom_dia":
+        dados_rotina["ultimo_bom_dia"] = hoje_str
+        dados_rotina["hora_ultimo_bom_dia"] = hora_exata_disparo
+        if EXIBIR_LOGS: logger.info(f"✅ Bandeira de 'Bom Dia' registada às {hora_exata_disparo}. Fila de vídeos liberada para hoje.")
+    elif tipo == "boa_noite":
+        dados_rotina["ultimo_boa_noite"] = hoje_str
+        dados_rotina["hora_ultimo_boa_noite"] = hora_exata_disparo
+        if EXIBIR_LOGS: logger.info(f"✅ Bandeira de 'Boa Noite' registada às {hora_exata_disparo}. Fila de vídeos suspensa até amanhã.")
+        
+    if dados_rotina.get("historico_diario", {}).get("data") != hoje_str:
+        dados_rotina["historico_diario"] = {"data": hoje_str, "contagem": {}}
+    
+    historico_tipo = dados_rotina["historico_diario"]["contagem"].get(tipo, [])
+    if isinstance(historico_tipo, int):
+        historico_tipo = [] 
+        
+    historico_tipo.append(hora_exata_disparo)
+    dados_rotina["historico_diario"]["contagem"][tipo] = historico_tipo
+    salvar_config_rotina(dados_rotina)
+    
+    if EXIBIR_LOGS: 
+        qtd_disparos = len(historico_tipo)
+        horarios_str = ", ".join(historico_tipo)
+        logger.info(f"📊 Auditoria de Rotina | {tipo.upper()}: {qtd_disparos}º envio diário efetuado. Horários de hoje: [{horarios_str}]")
 
     contexto_afiliado = (
         "Você é um assistente de suporte para afiliados da Shopee. "
@@ -1017,7 +1046,8 @@ async def disparar_mensagem(tipo, forcar=False):
             "perguntando se a equipe está com dificuldade para criar legendas e hashtags. "
             "Convide-os a usar nosso prompt automatizado. Insinue de forma sutil que utilizar a "
             "versão PRO do Gemini resulta em textos muito melhores. Altere as palavras e a abordagem "
-            "toda vez que gerar esse texto, use emojis e entregue apenas a mensagem pronta, sem aspas."
+            "toda vez que gerar esse texto, use emojis e entregue apenas a mensagem pronta, sem aspas. "
+            "REGRA ABSOLUTA E INQUEBRÁVEL: NUNCA inicie o texto com saudações temporais (como 'Bom dia', 'Boa tarde' ou 'Boa noite'). Vá direto ao assunto para não confundir a audiência."
         )
 
     elif tipo == "promo_viral":
@@ -1048,52 +1078,6 @@ async def disparar_mensagem(tipo, forcar=False):
     msg_enviada = await bot.send_message(chat_destino, texto)
     
     registrar_lixeira(msg_enviada.message_id, chat_destino)
-
-    agora_tz = datetime.now(fuso_horario)
-    hoje_str = agora_tz.strftime("%Y-%m-%d")
-    dados_rot_atualizados = ler_config_rotina()
-    
-    recalcular_fila = False
-    hora_exata_disparo = agora_tz.strftime("%H:%M")
-    
-    if tipo == "bom_dia":
-        dados_rot_atualizados["ultimo_bom_dia"] = hoje_str
-        dados_rot_atualizados["hora_ultimo_bom_dia"] = hora_exata_disparo
-        # Desativa o recálculo forçado para preservar a grade da madrugada
-        recalcular_fila = False 
-        if EXIBIR_LOGS: logger.info("🛠️ Correção aplicada: Gatilho de recálculo da fila neutralizado no 'Bom Dia'.")
-        if EXIBIR_LOGS: logger.info(f"✅ Bandeira de 'Bom Dia' registada às {hora_exata_disparo}. Fila de vídeos liberada para hoje.")
-    elif tipo == "boa_noite":
-        dados_rot_atualizados["ultimo_boa_noite"] = hoje_str
-        dados_rot_atualizados["hora_ultimo_boa_noite"] = hora_exata_disparo
-        # Desativa o recálculo forçado no Boa Noite para manter a integridade da agenda
-        recalcular_fila = False 
-        if EXIBIR_LOGS: logger.info("🛠️ Correção aplicada: Gatilho de recálculo da fila neutralizado no 'Boa Noite'.")
-        if EXIBIR_LOGS: logger.info(f"✅ Bandeira de 'Boa Noite' registada às {hora_exata_disparo}. Fila de vídeos suspensa até amanhã.")
-        
-    # Registra o disparo no histórico diário para evitar sobrecarga em caso de reinício do servidor
-    hoje_historico = agora_tz.strftime("%Y-%m-%d")
-    if dados_rot_atualizados.get("historico_diario", {}).get("data") != hoje_historico:
-        dados_rot_atualizados["historico_diario"] = {"data": hoje_historico, "contagem": {}}
-    
-    # ✅ NOVO: Armazena o horário exato em lista em vez de apenas contar os disparos
-    historico_tipo = dados_rot_atualizados["historico_diario"]["contagem"].get(tipo, [])
-    if isinstance(historico_tipo, int):
-        historico_tipo = [] # Proteção de retrocompatibilidade para limpar registros antigos de números
-        
-    historico_tipo.append(hora_exata_disparo)
-    dados_rot_atualizados["historico_diario"]["contagem"][tipo] = historico_tipo
-    salvar_config_rotina(dados_rot_atualizados)
-    
-    if EXIBIR_LOGS: 
-        qtd_disparos = len(historico_tipo)
-        horarios_str = ", ".join(historico_tipo)
-        logger.info(f"📊 Auditoria de Rotina | {tipo.upper()}: {qtd_disparos}º envio diário efetuado. Horários de hoje: [{horarios_str}]")
-
-    # Recalcula a distribuição orgânica dos vídeos se a fronteira do dia sofreu alteração forçada
-    if recalcular_fila:
-        if EXIBIR_LOGS: logger.info("🔄 Alteração de fronteira detetada. A recalcular toda a fila de postagens em tempo real...")
-        agendar_fila_postagens()
     
     if tipo == "link_grupo":
         link_separado = f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}"
@@ -1119,7 +1103,7 @@ async def disparar_mensagem(tipo, forcar=False):
         link_princ = f"👇 <b>Acesse o Canal Parceiro:</b>\n{LINK_GRUPO}"
         if EXIBIR_LOGS: logger.info("🔗 Enviando link do Acervo Afiliados.")
         msg_princ = await bot.send_message(GRUPO_VIRAL_ID, link_princ, parse_mode="HTML")
-        registrar_lixeira(msg_princ.message_id, GRUPO_VIRAL_ID)   
+        registrar_lixeira(msg_princ.message_id, GRUPO_VIRAL_ID)
 
 def ler_config_rotina():
     padrao = {
@@ -3854,25 +3838,16 @@ async def menu_configuracoes(message: types.Message, state: FSMContext):
 # ✅ NOVO: Atualizar Rotinas (Versão Recálculo Inteligente)
 @dp.message(F.text == "🔄 Atualizar Rotinas", StateFilter("*"))
 async def resetar_expediente(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
+    if message.fromuser.id != ADMIN_ID: return
     
     if EXIBIR_LOGS: logger.info("🔄 Acionado o Recálculo Inteligente de Rotinas...")
     msg_status = await message.answer("🔄 Analisando o histórico de hoje e recalculando a grade restante. Aguarde...", reply_markup=teclado_cancelar)
     
-    # 1. O Resgate dos Vídeos (Puxa de volta os vídeos empurrados para amanhã)
-    # Isso garante que se a janela do dia for ampliada, os vídeos voltem para preencher os buracos de hoje.
-    fila_data = ler_fila_postagens()
-    fila = fila_data.get("fila", [])
+    # ✅ CORREÇÃO: O destrutivo "Resgate dos Vídeos" foi removido.
+    # O sistema agora respeita a data alvo definida no banco de dados para cada vídeo.
+    # Ele apenas irá reorganizar os buracos de tempo de HOJE.
     
-    for item in fila:
-        if not item.get("postado"):
-            # Devolve o status "Imediato/Hoje" (código 2000-01-01) para os pendentes
-            item["data_adicao"] = "2000-01-01"
-            
-    fila_data["fila"] = fila
-    salvar_fila_postagens(fila_data)
-    
-    # 2. Varre a agenda antiga e recalcula a distribuição baseada no que AINDA FALTA postar
+    # Varre a agenda antiga e recalcula a distribuição baseada no que AINDA FALTA postar
     agendar_tarefas_diarias()
     
     await msg_status.delete()
@@ -3882,7 +3857,7 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
         "O robô leu o seu histórico e <b>recalculou a grade de forma inteligente</b>.\n\n"
         "✅ O que já foi postado hoje (como Bom Dia) foi preservado.\n"
         "✅ As cotas de mensagens restantes foram redistribuídas.\n"
-        "✅ <b>Os vídeos agendados foram reorganizados para aproveitar a janela de hoje!</b>"
+        "✅ <b>Os vídeos de HOJE foram reorganizados para aproveitar a janela de tempo restante, preservando os vídeos agendados para o futuro!</b>"
     )
     await message.answer(texto, parse_mode="HTML", reply_markup=obter_teclado_principal())
     await state.clear()
@@ -5795,14 +5770,15 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
                     else:
                         status_previsao = "Depois de Amanhã 🔵"
 
-                # Interrogação Silenciosa do Motor para extrair a hora exata
+                # ✅ CORREÇÃO: Interrogação Silenciosa do Motor APENAS para vídeos de HOJE
                 hora_agendada_str = ""
-                job_id_esperado = f"job_fila_postagem_{item.get('id')}"
-                job_encontrado = scheduler.get_job(job_id_esperado)
-                
-                if job_encontrado and getattr(job_encontrado, 'next_run_time', None):
-                    hora_exata = job_encontrado.next_run_time.astimezone(fuso_horario).strftime("%H:%M")
-                    hora_agendada_str = f" às {hora_exata}"
+                if status_previsao == "Hoje 🟢":
+                    job_id_esperado = f"job_fila_postagem_{item.get('id')}"
+                    job_encontrado = scheduler.get_job(job_id_esperado)
+                    
+                    if job_encontrado and getattr(job_encontrado, 'next_run_time', None):
+                        hora_exata = job_encontrado.next_run_time.astimezone(fuso_horario).strftime("%H:%M")
+                        hora_agendada_str = f" às {hora_exata}"
                     
                 status_previsao_final = f"{status_previsao}{hora_agendada_str}"
                 
@@ -6327,6 +6303,17 @@ async def processar_confirmacao_reordenar(message: types.Message, state: FSMCont
             cursor.execute("UPDATE fila_postagens SET data_alvo = ? WHERE id_unico = ?", (nova_data_adicao, id_movido))
             conexao.commit()
             conexao.close()
+            
+            # ✅ CORREÇÃO: Se o vídeo foi empurrado para o futuro, remove a "bomba relógio" da memória de hoje
+            agora = datetime.now(fuso_horario)
+            hoje_str = agora.strftime("%Y-%m-%d")
+            if nova_data_adicao != "2000-01-01" and nova_data_adicao > hoje_str:
+                job_id_remover = f"job_fila_postagem_{id_movido}"
+                try:
+                    scheduler.remove_job(job_id_remover)
+                    if EXIBIR_LOGS: logger.info(f"🧹 Agendamento de memória removido para o vídeo {id_movido} (Movido para o futuro).")
+                except: pass
+                
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro ao mudar data_alvo no DB: {e}")
             
