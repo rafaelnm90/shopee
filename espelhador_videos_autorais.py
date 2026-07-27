@@ -149,7 +149,58 @@ def salvar_fila_retorno(dados):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar fila_autorais no SQLite: {e}")
 
-# A função converter_link_shopee foi deletada daqui. O script usará a importada de api_shopee.py.
+async def verificar_e_otimizar_video(caminho_video):
+    """
+    Inspeciona a resolução física do arquivo.
+    Se for inferior a 720p, realiza o upscaling com FFmpeg em background.
+    """
+    if not caminho_video or not os.path.exists(caminho_video): return caminho_video
+    
+    try:
+        if EXIBIR_LOGS: logger.info(f"🔎 [Upscaling] Inspecionando resolução física de: {caminho_video}")
+        
+        comando_probe = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error", "-select_streams", "v:0", 
+            "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", caminho_video,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await comando_probe.communicate()
+        dimensoes = stdout.decode().strip()
+        
+        if not dimensoes or "x" not in dimensoes:
+            if EXIBIR_LOGS: logger.warning("⚠️ [Upscaling] Falha ao ler metadados. Ignorando otimização.")
+            return caminho_video
+            
+        largura, altura = map(int, dimensoes.split("x"))
+        menor_dimensao = min(largura, altura)
+        
+        if menor_dimensao >= 720:
+            if EXIBIR_LOGS: logger.info(f"✅ [Upscaling] Qualidade aprovada ({largura}x{altura}). Nenhuma maquiagem necessária.")
+            return caminho_video
+            
+        if EXIBIR_LOGS: logger.info(f"🛠️ [Upscaling] Resolução baixa detectada ({largura}x{altura}). Iniciando renderização para 720p...")
+        
+        caminho_temp = f"{caminho_video}_upscaled.mp4"
+        
+        comando_ffmpeg = await asyncio.create_subprocess_exec(
+            "ffmpeg", "-y", "-i", caminho_video, 
+            "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:color=black", 
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-c:a", "copy", caminho_temp,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        await comando_ffmpeg.communicate()
+        
+        if comando_ffmpeg.returncode == 0 and os.path.exists(caminho_temp):
+            os.replace(caminho_temp, caminho_video)
+            if EXIBIR_LOGS: logger.info(f"✨ [Upscaling] Sucesso! Vídeo re-renderizado para 720x1280 e substituído.")
+        else:
+            if EXIBIR_LOGS: logger.error("❌ [Upscaling] Falha na renderização do FFmpeg. Mantendo arquivo original.")
+            if os.path.exists(caminho_temp): os.remove(caminho_temp)
+            
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Upscaling] Erro na função de otimização: {e}")
+        
+    return caminho_video
 
 async def gerar_legenda_autoral(caminho_video):
     prompt = (
@@ -235,6 +286,8 @@ async def interceptar_e_espelhar(event):
 
         if EXIBIR_LOGS: logger.info("📥 Iniciando o download do vídeo...")
         caminho_video = await event.download_media(file="temp/temp_espelho_isolado_")
+        # ✅ NOVA TRAVA DE QUALIDADE E UPSCALING
+        caminho_video = await verificar_e_otimizar_video(caminho_video)
         
         if caminho_video:
             try:
