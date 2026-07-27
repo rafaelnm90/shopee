@@ -77,6 +77,16 @@ teclado_espelhador_cancelar = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
+# ✅ NOVO: Teclado para Definição da Janela de Horário da Rota
+teclado_espelhador_janela = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Dia Todo (24h) 🕛")],
+        [KeyboardButton(text="Cancelar Operação ❌")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
 # ✅ NOVO: Teclado de Dupla Confirmação
 teclado_espelhador_confirmacao = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar Operação ❌")]],
@@ -308,7 +318,7 @@ async def receber_destino(message: types.Message, state: FSMContext):
     if destino_id:
         if EXIBIR_LOGS: logger.info(f"✅ Destino validado com sucesso: {destino_id}")
         await state.update_data(destino=destino_id)
-        await message.answer(f"✅ Destino confirmado: <code>{destino_id}</code>\n\nDefina a <b>Janela de Horário</b> para a postagem no dia seguinte.\nEnvie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code> para distribuir entre as 10h e as 22h):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+        await message.answer(f"✅ Destino confirmado: <code>{destino_id}</code>\n\nDefina a <b>Janela de Horário</b> para a postagem no dia seguinte.\nEnvie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>) ou clique no botão abaixo para rodar 24h:", reply_markup=teclado_espelhador_janela, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_janela)
     else:
         if EXIBIR_LOGS: logger.warning(f"⚠️ Falha na validação do destino: {message.text}")
@@ -317,17 +327,25 @@ async def receber_destino(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.aguardando_janela)
 async def receber_janela_rota(message: types.Message, state: FSMContext):
     import re
-    match = re.match(r"^(\d{1,2})-(\d{1,2})$", message.text.strip())
-    if not match:
-        await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22", reply_markup=teclado_espelhador_cancelar)
-        return
-        
-    inicio, fim = map(int, match.groups())
-    if inicio >= fim or inicio < 0 or fim > 23:
-        await message.answer("Valores inválidos! A hora de início deve ser menor que a do fim.", reply_markup=teclado_espelhador_cancelar)
-        return
+    texto = message.text.strip()
+    
+    if texto == "Dia Todo (24h) 🕛" or texto.lower() == "dia todo":
+        inicio = 0
+        fim = 24
+        if EXIBIR_LOGS: logger.info("🕛 Janela configurada para Dia Todo (24h).")
+    else:
+        match = re.match(r"^(\d{1,2})-(\d{1,2})$", texto)
+        if not match:
+            await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22, ou clique em 'Dia Todo (24h) 🕛'.", reply_markup=teclado_espelhador_janela)
+            return
+            
+        inicio, fim = map(int, match.groups())
+        if inicio >= fim or inicio < 0 or fim > 24:
+            await message.answer("Valores inválidos! A hora de início deve ser menor que a do fim.", reply_markup=teclado_espelhador_janela)
+            return
 
     await state.update_data(inicio=inicio, fim=fim)
+    if EXIBIR_LOGS: logger.info(f"✅ Janela da rota configurada com sucesso: {inicio}h as {fim}h.")
     
     teclado_dias = ReplyKeyboardMarkup(
         keyboard=[
