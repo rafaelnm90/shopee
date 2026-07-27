@@ -146,22 +146,31 @@ async def validar_link_ou_id_grupo(entrada):
 @router.message(F.text == "Cancelar Operação ❌", StateFilter("*"))
 async def cancelar_espelhador(message: types.Message, state: FSMContext):
     estado_atual = await state.get_state()
+    data = await state.get_data()
     
-    # 🚀 CORREÇÃO DO VÍDEO (ITEM 5): Se estiver adicionando ou removendo origem, volta pro menu delas!
-    if estado_atual in ["EspelhadorFluxo:aguardando_nova_origem", "EspelhadorFluxo:aguardando_remocao_origem"]:
-        teclado_origens = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="➕ Adicionar Origem"), KeyboardButton(text="🗑️ Remover Origem")],
-                [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
-            ],
-            resize_keyboard=True,
-            is_persistent=True
-        )
-        await message.answer("Ação cancelada. O que você deseja fazer com as origens desta rota?", reply_markup=teclado_origens)
-        await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
+    # 🚀 CORREÇÃO: Lista de todos os estados de dentro do submenu de edição
+    estados_edicao = [
+        "EspelhadorFluxo:aguardando_acao_origem",
+        "EspelhadorFluxo:aguardando_nova_origem",
+        "EspelhadorFluxo:aguardando_confirmacao_nova_origem",
+        "EspelhadorFluxo:aguardando_remocao_origem",
+        "EspelhadorFluxo:aguardando_confirmacao_remocao_origem",
+        "EspelhadorFluxo:aguardando_edicao_novo_nome",
+        "EspelhadorFluxo:aguardando_edicao_novo_destino",
+        "EspelhadorFluxo:aguardando_edicao_nova_janela",
+        "EspelhadorFluxo:aguardando_edicao_intervalo_dias",
+        "EspelhadorFluxo:aguardando_edicao_novo_modo"
+    ]
+    
+    # Se cancelou durante a edição, volta para o menu de 8 botões daquela rota específica!
+    if estado_atual in estados_edicao and "indice_edicao" in data:
+        if EXIBIR_LOGS: logger.info("🔙 Cancelamento acionado na edição. Voltando ao menu da rota.")
+        novo_texto = str(data["indice_edicao"] + 1)
+        msg_simulada = message.model_copy(update={"text": novo_texto})
+        await selecionar_acao_edicao(msg_simulada, state)
         return
         
-    # Se não for o caso acima, faz o cancelamento normal voltando à raiz do Espelhador
+    # Se cancelou em qualquer outro lugar, volta pro menu inicial do Espelhador
     await state.clear()
     await painel_espelhador(message, state)
 
@@ -651,7 +660,7 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
 async def processar_acao_origem(message: types.Message, state: FSMContext):
     texto = message.text
     if texto == "➕ Adicionar Origem":
-        await message.answer("Envie o ID numérico, link ou @username da nova origem que deseja adicionar a esta rota:", reply_markup=teclado_espelhador_cancelar)
+        await message.answer("Envie os IDs numéricos, links ou @usernames da nova origem.\n<i>(Para adicionar vários de uma vez, separe por vírgula. Ex: @grupo1, -100123, https://t.me/grupo2)</i>:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_nova_origem)
     elif texto == "🗑️ Remover Origem":
         data = await state.get_data()
@@ -665,15 +674,14 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
             await message.answer("Esta rota não possui origens para remover.")
             return
             
-        msg_txt = "Qual origem deseja remover? Digite o <b>NÚMERO</b> correspondente:\n\n"
+        msg_txt = "Qual origem deseja remover? Digite o <b>NÚMERO</b> correspondente.\n<i>(Para remover várias de uma vez, separe por vírgula. Ex: 1, 3, 4)</i>\n\n"
         for i, orig in enumerate(origens, 1):
-            msg_txt += f"{i}. <code>{orig}</code>\n"
+            msg_txt += f"<b>{i}.</b> <code>{orig}</code>\n"
             
         await message.answer(msg_txt, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_remocao_origem)
     elif texto == "🔙 Voltar ao Menu de Edição":
         data = await state.get_data()
-        # Atalho inteligente para renderizar o menu anterior novamente
         novo_texto = str(data.get("indice_edicao") + 1)
         msg_simulada = message.model_copy(update={"text": novo_texto})
         if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu de edição via mensagem simulada.")
@@ -954,7 +962,11 @@ async def processar_nova_origem(message: types.Message, state: FSMContext):
         salvar_espelhos(dados)
         
     await message.answer(msg_final, parse_mode="HTML")
-    await painel_espelhador(message, state)
+    
+    # 🚀 CORREÇÃO: Volta suavemente ao menu da rota após aprovar
+    novo_texto = str(indice_atual + 1)
+    msg_simulada = message.model_copy(update={"text": novo_texto})
+    await selecionar_acao_edicao(msg_simulada, state)
 
 @router.message(EspelhadorFluxo.aguardando_remocao_origem)
 async def confirmar_remocao_origem(message: types.Message, state: FSMContext):
@@ -990,8 +1002,7 @@ async def confirmar_remocao_origem(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.aguardando_confirmacao_remocao_origem)
 async def processar_remocao_origem(message: types.Message, state: FSMContext):
     if message.text != "Aprovar ✅":
-        await message.answer("Operação cancelada.", reply_markup=teclado_espelhador_menu)
-        await painel_espelhador(message, state)
+        await message.answer("Por favor, utilize os botões para Aprovar ✅ ou Cancelar Operação ❌.")
         return
 
     data = await state.get_data()
@@ -1003,7 +1014,7 @@ async def processar_remocao_origem(message: types.Message, state: FSMContext):
     origens = rota.get('origens', [])
     if not origens and 'origem' in rota: origens = [rota['origem']]
     
-    # Ordena de trás para frente
+    # Ordena de trás para frente para evitar bugs na remoção múltipla
     indices_remover.sort(reverse=True)
     
     removidos = 0
@@ -1019,7 +1030,10 @@ async def processar_remocao_origem(message: types.Message, state: FSMContext):
     else:
         await message.answer("Erro de sincronização. As origens não puderam ser removidas.")
         
-    await painel_espelhador(message, state)
+    # 🚀 CORREÇÃO: Volta suavemente ao menu da rota após aprovar
+    novo_texto = str(indice_rota + 1)
+    msg_simulada = message.model_copy(update={"text": novo_texto})
+    await selecionar_acao_edicao(msg_simulada, state)
 
 @router.message(EspelhadorFluxo.menu_principal, F.text == "Forçar Postagens 🚀")
 async def iniciar_esvaziar_fila(message: types.Message, state: FSMContext):
