@@ -541,7 +541,7 @@ def salvar_fila_postagens(dados):
 # Todas as gravações agora ocorrem através de queries atómicas (UPDATE/INSERT/DELETE).
 
 def agendar_fila_postagens():
-    if EXIBIR_LOGS: logger.info("🔄 Recalculando e agendando fila de postagens organicamente...")
+    if EXIBIR_LOGS: logger.info("🔄 Recalculando e agendando fila de postagens de forma DINÂMICA (Variação 50%)...")
     # 1. Limpa agendamentos antigos para evitar duplicidade
     for job in scheduler.get_jobs():
         if job.id.startswith('job_fila_postagem_'):
@@ -582,50 +582,64 @@ def agendar_fila_postagens():
         hora_fim = dados_rotina.get("boa_noite", {}).get("inicio", 21)
         limite_fim = agora.replace(hour=hora_fim, minute=59, second=59, microsecond=0)
 
-    # 4. Define o Início Real da Distribuição
-    # Garante que NUNCA poste antes do Bom Dia e NUNCA poste imediatamente se clicarem em atualizar.
+    # 4. Cálculo Dinâmico de Tempo Restante com Variação de 50%
     import random
     from datetime import timedelta
-    margem_agora = timedelta(minutes=random.randint(15, 30))
-    margem_bom_dia = timedelta(minutes=random.randint(10, 25))
     
-    inicio_real = max(agora + margem_agora, limite_inicio + margem_bom_dia)
+    # Cria uma margem para o vídeo não sair imediatamente colado ao "agora" ou ao "Bom dia"
+    margem_seguranca = timedelta(minutes=random.randint(15, 30))
+    inicio_real = max(agora + margem_seguranca, limite_inicio + margem_seguranca)
 
-    # Se já estivermos além do expediente (passou do Boa Noite), cancela o agendamento por hoje
+    # Se já estivermos além do expediente, cancela o agendamento por hoje
     if inicio_real >= limite_fim:
         if EXIBIR_LOGS: logger.warning("⚠️ O expediente de postagens encerrou por hoje. Vídeos aguardarão na fila para amanhã.")
         return
 
     minutos_disponiveis = (limite_fim - inicio_real).total_seconds() / 60
+    qtd_pendentes = len(pendentes_hoje)
+    
+    # Divide o tempo restante em "blocos" iguais para cada vídeo pendente
+    espacamento_bloco = minutos_disponiveis / qtd_pendentes
+    tempo_acumulado = inicio_real
 
-    if minutos_disponiveis > 0:
-        espacamento = minutos_disponiveis / len(pendentes_hoje)
-        tempo_acumulado = inicio_real
+    for item in pendentes_hoje:
+        id_unico = item["id_unico"]
+        job_id = f"job_fila_postagem_{id_unico}"
+        
+        # Descobre o meio exato do bloco de tempo deste vídeo
+        meio_do_bloco = tempo_acumulado + timedelta(minutes=(espacamento_bloco / 2))
+        
+        # ✅ A SUA LÓGICA DE 50%: 
+        # Se o bloco tem 5 horas, a metade é 2h30. 50% dessa metade é 1h15.
+        # O vídeo vai flutuar dinamicamente entre -1h15 e +1h15 a partir do meio!
+        variacao_max = int((espacamento_bloco / 2) * 0.50)
+        
+        # Trava mínima para não dar erro se o bloco for minúsculo (ex: só sobrou 5 minutos do dia)
+        variacao_max = max(2, variacao_max) 
+        
+        # Sorteia a variação dentro do limiar de 50%
+        variacao = random.randint(-variacao_max, variacao_max)
+        
+        horario_final = meio_do_bloco + timedelta(minutes=variacao)
 
-        for item in pendentes_hoje:
-            id_unico = item["id_unico"]
-            job_id = f"job_fila_postagem_{id_unico}"
-            
-            # Pequena variação para não ficar cravado matematicamente
-            variacao = random.randint(-4, 4)
-            horario_final = tempo_acumulado + timedelta(minutes=variacao)
+        # Travas finais de segurança
+        if horario_final >= limite_fim:
+            horario_final = limite_fim - timedelta(minutes=random.randint(2, 8))
+        if horario_final <= agora:
+            horario_final = agora + timedelta(minutes=random.randint(5, 15))
 
-            # Travas de segurança adicionais
-            if horario_final > limite_fim:
-                horario_final = limite_fim - timedelta(minutes=random.randint(1, 5))
-            if horario_final <= agora:
-                horario_final = agora + timedelta(minutes=random.randint(5, 15))
-
-            scheduler.add_job(
-                executar_postagem_fila, 
-                'date', 
-                run_date=horario_final, 
-                args=[id_unico], 
-                id=job_id, 
-                replace_existing=True
-            )
-            if EXIBIR_LOGS: logger.info(f"⏳ Postagem {id_unico[:8]} agendada organicamente para {horario_final.strftime('%H:%M:%S')}")
-            tempo_acumulado += timedelta(minutes=espacamento)
+        scheduler.add_job(
+            executar_postagem_fila, 
+            'date', 
+            run_date=horario_final, 
+            args=[id_unico], 
+            id=job_id, 
+            replace_existing=True
+        )
+        if EXIBIR_LOGS: logger.info(f"⏳ Postagem {id_unico[:8]} agendada dinamicamente para {horario_final.strftime('%H:%M:%S')}")
+        
+        # Avança a linha do tempo para o início do bloco do próximo vídeo
+        tempo_acumulado += timedelta(minutes=espacamento_bloco)
 
 async def motor_fila_minuto():
     # ✅ NOVO FISCAL HÍBRIDO (Watchdog): Apenas vigia a memória e auto-cura a grade
@@ -2492,17 +2506,19 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 "status_canais": dados_espiao.get("status_alvos", {})
             }
         }
-        
-        # ✅ ORDENAÇÃO INTELIGENTE DO ESPIÃO
-        # Grupo 0 (Topo): Postados hoje, ordenados pela hora de postagem
-        # Grupo 1 (Fundo): Pendentes, ordenados pela data e hora de captura
-        def chave_ordenacao(item):
-            if item.get("processado", False):
-                return (0, item.get("horario_postagem", "00:00"))
-            return (1, item.get("data_captura", "2099-01-01 00:00:00"))
-            
-        pendentes.sort(key=chave_ordenacao)
         rotas_agrupadas["Radar Global"] = pendentes
+
+    # ✅ ORDENAÇÃO UNIVERSAL E INTELIGENTE (ESPIÃO E ESPELHADOR)
+    def chave_ordenacao_universal(item):
+        # Grupo 0 (Topo): Vídeos já postados, ordenados pelo horário de postagem real
+        if item.get("processado", False) or item.get("processado") == 1:
+            return (0, item.get("horario_postagem", "00:00"))
+        # Grupo 1 (Fundo): Vídeos pendentes, ordenados pelo horário exato que vão disparar
+        else:
+            return (1, item.get("horario_disparo") or item.get("data_captura", "2099-01-01 00:00:00"))
+
+    for nome_rota in rotas_agrupadas:
+        rotas_agrupadas[nome_rota].sort(key=chave_ordenacao_universal)
          
     titulo_atraso = f" (D+{atraso_dias})"
 
