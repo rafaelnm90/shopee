@@ -2417,11 +2417,28 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         pendentes = fila_limpa
         
     elif tipo_fila == "Espelhador":
+        import painel_espelhos
+        dados_rotas_atualizadas = painel_espelhos.ler_espelhos()
+        lista_rotas = dados_rotas_atualizadas.get("rotas", [])
+
         fila_limpa = []
         houve_alteracao = False
         hoje_str = agora.strftime("%Y-%m-%d")
         
         for item in fila:
+            # 🚀 AUTO-CORREÇÃO DINÂMICA: Entende cada espelho cruzando a origem e destino
+            nome_antigo = item.get("nome_rota", "")
+            origem_item = str(item.get("chat_origem", item.get("origem", "")))
+            destino_item = str(item.get("chat_destino", item.get("destino", "")))
+            
+            for r in lista_rotas:
+                if origem_item and destino_item and str(r.get("origem", "")) == origem_item and str(r.get("destino", "")) == destino_item:
+                    nome_atualizado = r.get("nome")
+                    if nome_atualizado and nome_antigo != nome_atualizado:
+                        item["nome_rota"] = nome_atualizado
+                        houve_alteracao = True
+                    break
+
             # ✅ CORREÇÃO: Mantém no visual os que foram postados HOJE no Espelhador.
             if item.get("processado", False):
                 if item.get("data_postagem") == hoje_str:
@@ -2433,12 +2450,13 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 
             fila_limpa.append(item)
             
-        # Se encontrou lixo antigo, salva o JSON limpo imediatamente para poupar processamento futuro
+        # Se encontrou lixo antigo ou atualizou os nomes dos robôs, salva o JSON silenciosamente
         if houve_alteracao:
             fila_data["fila"] = fila_limpa
             try:
                 with open("fila_espelhador.json", "w", encoding="utf-8") as f:
                     json.dump(fila_data, f, indent=4)
+                if EXIBIR_LOGS: logger.info("✅ Auto-correção: Nomes das rotas sincronizados e lixo antigo limpo.")
             except Exception as e:
                 if EXIBIR_LOGS: logger.error(f"❌ Erro ao limpar fila espelhador: {e}")
             
