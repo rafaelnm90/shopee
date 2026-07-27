@@ -4969,9 +4969,9 @@ async def processar_pausa_rotinas_interno(message: types.Message, state: FSMCont
             if EXIBIR_LOGS: logger.info("⏸️ Rotinas do VIRAL pausadas internamente.")
             await message.answer("⏸️ <b>Rotinas do Canal Viral PAUSADAS.</b>\nAs mensagens automáticas foram suspensas.", parse_mode="HTML")
         else:
-            if EXIBIR_LOGS: logger.info("▶️ Rotinas do PRINCIPAL ativadas. Invocando Motor de Recálculo...")
-            await message.answer("▶️ <b>Mensagens de Rotina ATIVAS.</b>\nAs mensagens voltarão a ser enviadas.\n🔄 Recalculando grade...", parse_mode="HTML")
-            agendar_tarefas_diarias(escopo="principal") # Recálculo Exclusivo do Principal
+            if EXIBIR_LOGS: logger.info("▶️ Rotinas do VIRAL ativadas. Invocando Motor de Recálculo exclusivo...")
+            await message.answer("▶️ <b>Rotinas do Canal Viral ATIVAS.</b>\nAs mensagens voltarão a ser enviadas.\n🔄 Recalculando grade do Viral...", parse_mode="HTML")
+            agendar_tarefas_diarias(escopo="viral") # Recálculo Exclusivo do Viral
         
         await gerenciar_rotina_espiao(message, state)
     else:
@@ -4980,11 +4980,11 @@ async def processar_pausa_rotinas_interno(message: types.Message, state: FSMCont
         
         if novo_status:
             if EXIBIR_LOGS: logger.info("⏸️ Rotinas do PRINCIPAL pausadas internamente.")
-            await message.answer("⏸️ <b>Mensagens de Rotina PAUSADAS.</b>\nAs mensagens automáticas do grupo foram suspensas.", parse_mode="HTML")
+            await message.answer("⏸️ <b>Mensagens de Rotina PAUSADAS.</b>\nAs mensagens automáticas do grupo principal foram suspensas.", parse_mode="HTML")
         else:
-            if EXIBIR_LOGS: logger.info("▶️ Rotinas do PRINCIPAL ativadas. Invocando Motor de Recálculo...")
-            await message.answer("▶️ <b>Mensagens de Rotina ATIVAS.</b>\nAs mensagens voltarão a ser enviadas.\n🔄 Recalculando grade...", parse_mode="HTML")
-            agendar_tarefas_diarias() # Recálculo Inteligente
+            if EXIBIR_LOGS: logger.info("▶️ Rotinas do PRINCIPAL ativadas. Invocando Motor de Recálculo exclusivo...")
+            await message.answer("▶️ <b>Mensagens de Rotina ATIVAS.</b>\nAs mensagens voltarão a ser enviadas.\n🔄 Recalculando grade do Principal...", parse_mode="HTML")
+            agendar_tarefas_diarias(escopo="principal") # Recálculo Exclusivo do Principal
             
         await gerenciar_rotina(message, state)
 
@@ -6055,7 +6055,7 @@ async def aplicar_renumeracao_e_salvar(fila_ids_ordenada, message, state, numero
         # Isso faz exatamente a mesma coisa que o botão "Atualizar Rotinas",
         # garantindo que os horários sejam recalculados para respeitar a nova ordem da fila sem atropelos.
         if EXIBIR_LOGS: logger.info("🔄 Alteração na fila detectada. Acionando recálculo inteligente dos horários...")
-        agendar_tarefas_diarias()
+        agendar_tarefas_diarias(escopo="principal") # Garante que mexer na fila não reseta o canal viral
 
         await message.answer("✅ Operação concluída com sucesso!\n🔄 A fila e os horários foram sincronizados perfeitamente.")
         await menu_gerenciar_fila(message, state)
