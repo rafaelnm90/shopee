@@ -3939,7 +3939,6 @@ async def menu_configuracoes(message: types.Message, state: FSMContext):
     )
     await message.answer(texto, reply_markup=obter_teclado_configuracoes_gerais(), parse_mode="HTML")
 
-# ✅ NOVO: Atualizar Rotinas (Versão Recálculo Inteligente)
 @dp.message(F.text == "🔄 Atualizar Rotinas", StateFilter("*"))
 async def resetar_expediente(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
@@ -3947,22 +3946,72 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("🔄 Acionado o Recálculo Inteligente de Rotinas...")
     msg_status = await message.answer("🔄 Analisando o histórico de hoje e recalculando a grade restante. Aguarde...", reply_markup=teclado_cancelar)
     
-    # ✅ CORREÇÃO: O destrutivo "Resgate dos Vídeos" foi removido.
-    # O sistema agora respeita a data alvo definida no banco de dados para cada vídeo.
-    # Ele apenas irá reorganizar os buracos de tempo de HOJE.
-    
-    # Varre a agenda antiga e recalcula a distribuição baseada no que AINDA FALTA postar
+    # --- 1. FOTO DO ANTES (Captura o estado atual da memória) ---
+    jobs_antes = {}
+    for job in scheduler.get_jobs():
+        if getattr(job, 'next_run_time', None):
+            jobs_antes[job.id] = job.next_run_time.astimezone(fuso_horario).strftime("%H:%M")
+
+    # --- 2. EXECUTA O RECÁLCULO ---
     agendar_tarefas_diarias()
     
+    # --- 3. FOTO DO DEPOIS (Captura o novo estado da memória) ---
+    jobs_depois = {}
+    for job in scheduler.get_jobs():
+        if getattr(job, 'next_run_time', None):
+            jobs_depois[job.id] = job.next_run_time.astimezone(fuso_horario).strftime("%H:%M")
+
     await msg_status.delete()
     
-    texto = (
-        "🔄 <b>Rotinas Atualizadas com Sucesso!</b>\n\n"
-        "O robô leu o seu histórico e <b>recalculou a grade de forma inteligente</b>.\n\n"
-        "✅ O que já foi postado hoje (como Bom Dia) foi preservado.\n"
-        "✅ As cotas de mensagens restantes foram redistribuídas.\n"
-        "✅ <b>Os vídeos de HOJE foram reorganizados para aproveitar a janela de tempo restante, preservando os vídeos agendados para o futuro!</b>"
-    )
+    # --- 4. CONSTRUÇÃO DO PAINEL VISUAL (Relatório de Mudanças) ---
+    texto = "🔄 <b>Grade Recalculada com Sucesso!</b>\n\n"
+    texto += "Aqui está o relatório do que mudou no seu dia:\n\n"
+    
+    mudancas_rotinas = []
+    mudancas_videos = []
+    
+    # Compara o Antes e o Depois
+    for job_id, hora_nova in jobs_depois.items():
+        hora_antiga = jobs_antes.get(job_id)
+        
+        # Avalia se a hora mudou ou se é um item totalmente novo
+        if hora_antiga and hora_antiga != hora_nova:
+            if "rotina" in job_id or "campanha" in job_id:
+                # Tratamento visual para os textos de rotina
+                nome_amigavel = job_id.replace("job_rotina_", "").replace("job_campanha_", "").replace("_0", "").replace("_", " ").title()
+                mudancas_rotinas.append(f"🔹 <b>{nome_amigavel}:</b> {hora_antiga} ➡️ {hora_nova}")
+                
+            elif "fila_postagem" in job_id:
+                # Faz um resgate cirúrgico no SQLite para descobrir o Número Visual do Vídeo
+                id_unico = job_id.replace("job_fila_postagem_", "")
+                nome_video = f"Vídeo {id_unico[:4]}"
+                try:
+                    import sqlite3, re
+                    conexao = sqlite3.connect("banco_dados.db")
+                    cursor = conexao.cursor()
+                    cursor.execute("SELECT legenda FROM fila_postagens WHERE id_unico = ?", (id_unico,))
+                    res = cursor.fetchone()
+                    if res:
+                        match = re.search(r'(?i)Vídeo\s+\d+', res[0])
+                        if match: nome_video = match.group(0).title()
+                    conexao.close()
+                except: pass
+                mudancas_videos.append(f"📦 <b>{nome_video}:</b> {hora_antiga} ➡️ {hora_nova}")
+                
+        elif not hora_antiga:
+            if "fila_postagem" in job_id:
+                mudancas_videos.append(f"📦 <b>Novo Vídeo Encaixado:</b> ➡️ {hora_nova}")
+                
+    if mudancas_rotinas:
+        texto += "⏰ <b>Rotinas e Avisos:</b>\n" + "\n".join(mudancas_rotinas) + "\n\n"
+    if mudancas_videos:
+        texto += "🎬 <b>Fila de Vídeos:</b>\n" + "\n".join(mudancas_videos) + "\n\n"
+        
+    if not mudancas_rotinas and not mudancas_videos:
+        texto += "<i>Nenhuma mudança de horário ocorreu neste recálculo.</i>\n\n"
+        
+    texto += "✅ <b>Tudo pronto para rodar!</b>"
+
     await message.answer(texto, parse_mode="HTML", reply_markup=obter_teclado_principal())
     await state.clear()
 
