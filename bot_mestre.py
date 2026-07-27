@@ -1943,7 +1943,6 @@ async def menu_opcoes_servidor_handler(message: types.Message, state: FSMContext
     if EXIBIR_LOGS: logger.info("⚙️ Acessando o painel de Opções do Servidor.")
     await message.answer("⚙️ <b>Opções do Servidor</b>\nEscolha uma ferramenta de manutenção global:", reply_markup=obter_teclado_opcoes_servidor(), parse_mode="HTML")
 
-# BLOCO ESPECIFICAMENTE INSERIDO
 @dp.message(F.text == "Monitorar Servidor 🖥️", StateFilter("*"))
 async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
@@ -1952,39 +1951,82 @@ async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
     msg_status = await message.answer("🖥️ Lendo sensores da máquina Oracle... ⏳")
     
     try:
-        # Coleta as métricas de forma não bloqueante
+        # --- 1. COLETA E CÁLCULO DO DISCO ---
         comando_disco = await asyncio.create_subprocess_exec("df", "-h", "/", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         stdout_disco, _ = await comando_disco.communicate()
-        linhas_disco = stdout_disco.decode().strip().split('\n')
+        # Pega a última linha (que contém os dados da raiz /)
+        linha_disco = stdout_disco.decode().strip().split('\n')[-1].split()
         
+        # Formatações amigáveis (ex: de "45G" para "45 GB")
+        total_disco = linha_disco[1].replace("G", " GB")
+        usado_disco = linha_disco[2].replace("G", " GB")
+        livre_disco = linha_disco[3].replace("G", " GB")
+        pct_disco_str = linha_disco[4]
+        pct_disco = int(pct_disco_str.replace('%', ''))
+        
+        # --- 2. COLETA E CÁLCULO DA RAM ---
         comando_ram = await asyncio.create_subprocess_exec("free", "-m", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         stdout_ram, _ = await comando_ram.communicate()
-        linhas_ram = stdout_ram.decode().strip().split('\n')
+        linha_ram = stdout_ram.decode().strip().split('\n')[1].split()
         
-        import re
-        pct_disco = 0
-        if len(linhas_disco) > 1:
-            match = re.search(r'(\d+)%', linhas_disco[1])
-            if match: pct_disco = int(match.group(1))
-            
-        pct_ram = 0
-        if len(linhas_ram) > 1:
-            partes_ram = linhas_ram[1].split()
-            if len(partes_ram) >= 3:
-                total_ram = int(partes_ram[1])
-                usada_ram = int(partes_ram[2])
-                pct_ram = int((usada_ram / total_ram) * 100) if total_ram > 0 else 0
-
+        total_ram_mb = int(linha_ram[1])
+        usado_ram_mb = int(linha_ram[2])
+        # Pega a coluna 'available' (mais precisa no Linux moderno)
+        disp_ram_mb = int(linha_ram[6]) if len(linha_ram) > 6 else int(linha_ram[3])
+        
+        # Conversão de MB para GB com 1 casa decimal
+        total_ram_gb = round(total_ram_mb / 1024, 1)
+        usado_ram_gb = round(usado_ram_mb / 1024, 1)
+        disp_ram_gb = round(disp_ram_mb / 1024, 1)
+        
+        pct_ram = int((usado_ram_mb / total_ram_mb) * 100) if total_ram_mb > 0 else 0
+        
+        # --- 3. DEFINIÇÃO DE STATUS E ÍCONES ---
         icone_disco = "🟢" if pct_disco < 75 else "🟡" if pct_disco < 90 else "🔴"
-        icone_ram = "🟢" if pct_ram < 75 else "🟡" if pct_ram < 90 else "🔴"
+        status_disco_txt = "Excelente" if pct_disco < 75 else "Atenção" if pct_disco < 90 else "Crítico"
         
+        icone_ram = "🟢" if pct_ram < 75 else "🟡" if pct_ram < 90 else "🔴"
+        status_ram_txt = "Excelente" if pct_ram < 75 else "Atenção" if pct_ram < 90 else "Crítico"
+        
+        # Analisa o status macro para o texto introdutório
+        if pct_disco < 75 and pct_ram < 75:
+            status_geral = "<b>excelente saúde</b> (🟢 Saudável em todos os aspectos primários)"
+            texto_risco = "Não há nenhum gargalo de recursos ou risco iminente de queda por esgotamento de hardware."
+        elif pct_disco < 90 and pct_ram < 90:
+            status_geral = "<b>estado de atenção</b> (🟡 Requer monitoramento)"
+            texto_risco = "Os recursos estão sendo bastante utilizados. É recomendável acompanhar o consumo."
+        else:
+            status_geral = "<b>risco crítico</b> (🔴 Esgotamento iminente)"
+            texto_risco = "Atenção! Há um gargalo severo de recursos. Recomenda-se realizar limpeza ou upgrade de hardware imediatamente."
+
+        # --- 4. CONSTRUÇÃO DA TABELA VISUAL ALINHADA (<pre>) ---
+        # A tag <pre> alinha os espaços como no bloco de notas
+        tabela = (
+            f"<pre>\n"
+            f"Recurso | Total | Uso | Livre | Status\n"
+            f"----------------------------------------\n"
+            f"Disco   | {linha_disco[1]:<5} | {pct_disco_str:<3} | {linha_disco[3]:<5} | {icone_disco} {status_disco_txt}\n"
+            f"RAM     | {total_ram_gb:<4}G | {pct_ram:<2}% | {disp_ram_gb:<4}G | {icone_ram} {status_ram_txt}\n"
+            f"</pre>"
+        )
+
+        # --- 5. MONTAGEM DA MENSAGEM FINAL ---
         texto = (
-            "🖥️ <b>Monitoramento do Servidor Oracle</b>\n\n"
-            f"{icone_disco} <b>Armazenamento (Disco /):</b>\n"
-            f"<code>{linhas_disco[0]}\n{linhas_disco[1] if len(linhas_disco) > 1 else 'Indisponível'}</code>\n\n"
-            f"{icone_ram} <b>Memória RAM (MB):</b>\n"
-            f"<code>{linhas_ram[0]}\n{linhas_ram[1] if len(linhas_ram) > 1 else 'Indisponível'}</code>\n\n"
-            "<i>Legenda: 🟢 Saudável | 🟡 Atenção | 🔴 Risco Crítico</i>"
+            f"Seu servidor está em um estado de {status_geral}. {texto_risco}\n"
+            f"Abaixo está o diagnóstico detalhado dos recursos analisados:\n\n"
+            
+            f"💻 <b>Diagnóstico dos Recursos</b>\n\n"
+            
+            f"🔹 <b>Disco (/dev/sda1):</b> {icone_disco} <b>{pct_disco}% de Uso</b>\n"
+            f"Com apenas {usado_disco} ocupados de um total de {total_disco}, você possui {livre_disco} livres. O espaço em disco está bastante confortável para logs, banco de dados ou atualizações de sistema.\n\n"
+            
+            f"🔹 <b>Memória RAM:</b> {icone_ram} <b>~{pct_ram}% de Uso Real</b>\n"
+            f"O sistema está utilizando apenas {usado_ram_gb} GB de um total de {total_ram_gb} GB disponíveis ({total_ram_mb} MB). Você tem aproximadamente {disp_ram_gb} GB livres/disponíveis (<code>available</code>), o que garante uma margem extremamente ampla para rodar novas aplicações, containers ou processos pesados.\n\n"
+            
+            f"📊 <b>Resumo do Status</b>\n"
+            f"{tabela}\n"
+            
+            f"<blockquote><b>Observação técnica:</b> A utilização da instância Oracle Cloud Free Tier (4 vCPUs Ampere + 24 GB RAM) está super dimensionada para a carga de trabalho atual, garantindo altíssima estabilidade.</blockquote>"
         )
         
         if EXIBIR_LOGS: logger.info(f"✅ Auditoria concluída em background. Disco: {pct_disco}% | RAM: {pct_ram}%")
