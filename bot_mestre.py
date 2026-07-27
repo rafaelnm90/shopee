@@ -4556,46 +4556,53 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Adicionar Grupo Vigiado ➕")
 async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
-    await message.answer("Envie o @username, link ou ID do grupo que deseja monitorar:", reply_markup=teclado_cancelar)
+    await message.answer("Envie os @usernames, links ou IDs dos grupos que deseja monitorar.\nVocê pode enviar vários separando por vírgula (Ex: <code>@grupo1, -100123, https://t.me/grupo2</code>):", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(EspiaoFluxo.aguardando_novo_alvo)
 
 @dp.message(EspiaoFluxo.aguardando_novo_alvo)
 async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
-    novo_alvo = message.text.strip()
+    entradas_brutas = message.text.replace('\n', ',').split(',')
     
-    # Validação Básica
-    alvo_limpo = novo_alvo
-    if "t.me/" in novo_alvo:
-        alvo_limpo = "@" + novo_alvo.split("t.me/")[1].split("/")[0]
+    alvos_limpos = []
+    for entrada in entradas_brutas:
+        alvo = entrada.strip()
+        if not alvo: continue
+        if "t.me/" in alvo:
+            alvo = "@" + alvo.split("t.me/")[1].split("/")[0]
+        alvos_limpos.append(alvo)
         
-    msg_status = await message.answer("⏳ <b>Validando link e buscando nome do canal...</b>", parse_mode="HTML", reply_markup=teclado_cancelar)
+    if not alvos_limpos:
+        await message.answer("Nenhum alvo detectado. Tente novamente:", reply_markup=teclado_cancelar)
+        return
+
+    msg_status = await message.answer("⏳ <b>Validando links e buscando nomes...</b>", parse_mode="HTML", reply_markup=teclado_cancelar)
         
-    # ✅ NOVO: Resolução Imediata de Nome via Bot Oficial
-    nome_encontrado = str(alvo_limpo)
-    try:
-        # Tenta extrair o nome em tempo real
-        chat_obj = await bot.get_chat(alvo_limpo)
-        nome_encontrado = chat_obj.title or chat_obj.full_name or str(alvo_limpo)
-        
-        # Salva imediatamente no cache do bot para uso no painel
-        from utils import salvar_nome_grupo
-        salvar_nome_grupo(str(alvo_limpo), nome_encontrado)
-        
-        if EXIBIR_LOGS: logger.info(f"✅ Nome do alvo Espião resolvido imediatamente: {nome_encontrado}")
-    except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Bot oficial sem acesso inicial ao alvo {alvo_limpo}. O Userbot auditará no próximo ciclo.")
+    alvos_validados = []
+    from utils import salvar_nome_grupo
+    
+    for alvo_limpo in alvos_limpos:
+        nome_encontrado = str(alvo_limpo)
+        try:
+            chat_obj = await bot.get_chat(alvo_limpo)
+            nome_encontrado = chat_obj.title or chat_obj.full_name or str(alvo_limpo)
+            salvar_nome_grupo(str(alvo_limpo), nome_encontrado)
+            if EXIBIR_LOGS: logger.info(f"✅ Nome do alvo Espião resolvido: {nome_encontrado}")
+        except Exception:
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Bot oficial sem acesso inicial ao alvo {alvo_limpo}.")
+            
+        alvos_validados.append({"id": alvo_limpo, "nome": nome_encontrado})
 
     await msg_status.delete()
-
-    await state.update_data(novo_alvo_espiao=alvo_limpo)
+    await state.update_data(novos_alvos_espiao=alvos_validados)
     
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
     
-    await message.answer(f"Você está prestes a adicionar o seguinte alvo ao radar do Espião:\n\n<b>{nome_encontrado}</b> (<code>{alvo_limpo}</code>)\n\nConfirma a adição?", reply_markup=teclado_confirmacao, parse_mode="HTML")
+    texto_confirmacao = f"Você está prestes a adicionar <b>{len(alvos_validados)} alvo(s)</b> ao radar do Espião:\n\n"
+    for av in alvos_validados:
+        texto_confirmacao += f"🔹 <b>{av['nome']}</b> (<code>{av['id']}</code>)\n"
+    texto_confirmacao += "\nConfirma a adição?"
+    
+    await message.answer(texto_confirmacao, reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(EspiaoFluxo.aguardando_confirmacao_alvo)
 
 @dp.message(EspiaoFluxo.aguardando_confirmacao_alvo)
@@ -4605,17 +4612,24 @@ async def confirmar_adicao_alvo_espiao(message: types.Message, state: FSMContext
         return
         
     data = await state.get_data()
-    alvo_confirmado = data.get("novo_alvo_espiao")
+    alvos_novos = data.get("novos_alvos_espiao", [])
     
     dados = ler_alvos_espiao()
-    if alvo_confirmado not in dados.get("alvos", []):
-        dados.setdefault("alvos", []).append(alvo_confirmado)
+    alvos_existentes = dados.get("alvos", [])
+    
+    adicionados = 0
+    for av in alvos_novos:
+        if av['id'] not in alvos_existentes:
+            alvos_existentes.append(av['id'])
+            adicionados += 1
+            
+    if adicionados > 0:
+        dados["alvos"] = alvos_existentes
         salvar_alvos_espiao(dados)
-        
-        if EXIBIR_LOGS: logger.info(f"✅ Novo alvo do espião adicionado ao radar: {alvo_confirmado}")
-        await message.answer(f"✅ Alvo <b>{alvo_confirmado}</b> adicionado ao radar com sucesso!\nO Userbot verificará o acesso neste canal no próximo ciclo de varredura.", parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info(f"✅ {adicionados} novos alvos do espião adicionados ao radar.")
+        await message.answer(f"✅ <b>{adicionados} alvo(s) adicionado(s) ao radar com sucesso!</b>\nO Userbot verificará o acesso neste(s) canal(is) no próximo ciclo.", parse_mode="HTML")
     else:
-        await message.answer("⚠️ Este alvo já estava sendo monitorado pelo Espião.")
+        await message.answer("⚠️ Todos os alvos enviados já estavam sendo monitorados pelo Espião.")
         
     await state.clear()
     await menu_grupos_vigiados(message, state)
@@ -4628,7 +4642,7 @@ async def pedir_remocao_espiao(message: types.Message, state: FSMContext):
         await message.answer("Não há concorrentes para remover.", reply_markup=teclado_opcoes_espiao)
         return
     
-    texto = "Qual alvo deseja excluir? Digite o <b>NÚMERO</b> correspondente:\n\n"
+    texto = "Qual alvo deseja excluir? Digite o <b>NÚMERO</b> correspondente.\n<i>(Para remover vários, separe por vírgula. Ex: 1, 3, 4)</i>\n\n"
     for i, alvo in enumerate(alvos, 1):
         texto += f"{i}. {alvo}\n"
     await message.answer(texto, reply_markup=teclado_cancelar, parse_mode="HTML")
@@ -4636,28 +4650,31 @@ async def pedir_remocao_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.aguardando_remocao_alvo)
 async def confirmar_remocao_espiao(message: types.Message, state: FSMContext):
-    if not message.text.isdigit():
-        await message.answer("Por favor, digite apenas o NÚMERO.", reply_markup=teclado_cancelar)
-        return
-        
-    indice = int(message.text) - 1
+    entradas = message.text.replace(' ', '').split(',')
+    indices_para_remover = []
+    
     dados = ler_alvos_espiao()
     alvos = dados.get("alvos", [])
     
-    if 0 <= indice < len(alvos):
-        alvo_selecionado = alvos[indice]
-        await state.update_data(indice_remocao=indice)
+    for entrada in entradas:
+        if entrada.isdigit():
+            idx = int(entrada) - 1
+            if 0 <= idx < len(alvos) and idx not in indices_para_remover:
+                indices_para_remover.append(idx)
+                
+    if not indices_para_remover:
+        await message.answer("⚠️ Nenhum número válido detectado. Tente novamente:", reply_markup=teclado_cancelar)
+        return
         
-        teclado_confirmacao = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-            resize_keyboard=True,
-            is_persistent=True
-        )
+    await state.update_data(indices_remocao=indices_para_remover)
+    
+    texto_confirmacao = f"Tem certeza de que deseja parar de monitorar os <b>{len(indices_para_remover)} alvo(s)</b> abaixo?\n\n"
+    for idx in indices_para_remover:
+        texto_confirmacao += f"🗑️ <b>{alvos[idx]}</b>\n"
         
-        await message.answer(f"Tem certeza de que deseja parar de monitorar o alvo abaixo?\n\n<b>{alvo_selecionado}</b>", reply_markup=teclado_confirmacao, parse_mode="HTML")
-        await state.set_state(EspiaoFluxo.aguardando_confirmacao_remocao)
-    else:
-        await message.answer("⚠️ Número inválido. Tente novamente:", reply_markup=teclado_cancelar)
+    teclado_confirmacao = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
+    await message.answer(texto_confirmacao, reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(EspiaoFluxo.aguardando_confirmacao_remocao)
 
 @dp.message(EspiaoFluxo.aguardando_confirmacao_remocao)
 async def processar_remocao_espiao(message: types.Message, state: FSMContext):
@@ -4666,15 +4683,23 @@ async def processar_remocao_espiao(message: types.Message, state: FSMContext):
         return
         
     data = await state.get_data()
-    indice = data.get("indice_remocao")
+    indices = data.get("indices_remocao", [])
+    
     dados = ler_alvos_espiao()
     alvos = dados.get("alvos", [])
     
-    if indice is not None and 0 <= indice < len(alvos):
-        removido = dados["alvos"].pop(indice)
+    # IMPORTANTE: Ordena de trás para frente para não bagunçar os índices ao fazer o pop()
+    indices.sort(reverse=True)
+    
+    removidos = []
+    for idx in indices:
+        if 0 <= idx < len(alvos):
+            removidos.append(alvos.pop(idx))
+            
+    if removidos:
         salvar_alvos_espiao(dados)
-        if EXIBIR_LOGS: logger.info(f"🗑️ Alvo do espião removido: {removido}")
-        await message.answer(f"✅ Alvo '{removido}' removido do radar!")
+        if EXIBIR_LOGS: logger.info(f"🗑️ {len(removidos)} alvos do espião removidos.")
+        await message.answer(f"✅ <b>{len(removidos)} alvo(s) removido(s) do radar!</b>", parse_mode="HTML")
     else:
         await message.answer("⚠️ Erro de sincronização. Ação cancelada.")
         
