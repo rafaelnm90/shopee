@@ -98,7 +98,7 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
 
     # --- 0. RESGATE E HIGIENIZAÇÃO DO NOME COMPLETO ---
     # 🚀 ADICIONADO: Expansão das chaves de busca para cobrir as variáveis do Espelhador
-    nome_bruto = item.get("nome_produto") or item.get("legenda") or item.get("titulo") or item.get("texto") or item.get("caption") or item.get("text") or ""
+    nome_bruto = item.get("nome_produto") or item.get("legenda") or item.get("texto_processado") or item.get("titulo") or item.get("texto") or item.get("caption") or item.get("text") or ""
     
     nome_limpo = "Aguardando análise da IA 🧠" 
     
