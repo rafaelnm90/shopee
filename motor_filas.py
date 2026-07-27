@@ -97,21 +97,27 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
     import re
 
     # --- 0. RESGATE E HIGIENIZAÇÃO DO NOME COMPLETO ---
-    nome_bruto = item.get("nome_produto") or item.get("legenda") or item.get("titulo") or ""
+    # 🚀 ADICIONADO: Expansão das chaves de busca para cobrir as variáveis do Espelhador
+    nome_bruto = item.get("nome_produto") or item.get("legenda") or item.get("titulo") or item.get("texto") or item.get("caption") or item.get("text") or ""
     
     nome_limpo = "Aguardando análise da IA 🧠" 
     
     if nome_bruto:
         legenda_limpa = re.sub(r'<[^>]+>', '', str(nome_bruto)).strip()
         match_item = re.search(r'📦\s*Item:\s*([^\n]+)', legenda_limpa)
+        
         if match_item:
             nome_limpo = match_item.group(1).strip()
         else:
-            primeira_linha = legenda_limpa.split('\n')[0].strip()
-            if primeira_linha:
-                nome_limpo = primeira_linha
+            # 🚀 CORREÇÃO: Limpa quebras de linha fantasmas antes de extrair o topo do texto
+            linhas_validas = [linha.strip() for linha in legenda_limpa.split('\n') if linha.strip()]
+            if linhas_validas:
+                # Remove hashtags caso a primeira linha seja apenas marcação
+                primeira_linha = re.sub(r'#\w+', '', linhas_validas[0]).strip()
+                if primeira_linha:
+                    nome_limpo = primeira_linha
 
-    # ✅ CORREÇÃO: Resgate Universal de Horário (Puxa a chave correta independente do Robô)
+    # ✅ Resgate Universal de Horário (Puxa a chave correta independente do Robô)
     horario_universal = item.get("horario_disparo") or item.get("data_publicacao") or ""
 
     # --- 1. CÁLCULO DINÂMICO DE DATAS E STATUS ---
