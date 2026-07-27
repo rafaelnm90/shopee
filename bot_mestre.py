@@ -142,10 +142,10 @@ class ConfigDivulgacao(StatesGroup):
     menu_principal = State()
     aguardando_alvos = State()
     aguardando_exclusao_alvo = State()
-    # Novos estados para a edição unificada (Global vs Individual)
     aguardando_tipo_edicao = State()
     aguardando_selecao_alvo = State()
     aguardando_valores_unificados = State()
+    aguardando_confirmacao_pausa = State() # ✅ NOVO
 
 class ConfigDivulgacaoViral(StatesGroup):
     menu_principal = State()
@@ -154,6 +154,7 @@ class ConfigDivulgacaoViral(StatesGroup):
     aguardando_tipo_edicao = State()
     aguardando_selecao_alvo = State()
     aguardando_valores_unificados = State()
+    aguardando_confirmacao_pausa = State() # ✅ NOVO
 
 class ConfigRotina(StatesGroup):
     menu_principal = State()
@@ -4933,11 +4934,35 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     await state.update_data(menu_origem="espiao") # ✅ Salva a origem para não quebrar a navegação
     await state.set_state(ConfigRotina.menu_principal)
 
-# ✅ NOVOS INTERRUPTORES INTERNOS DE PAUSA
+# ✅ NOVOS INTERRUPTORES INTERNOS DE PAUSA (COM CONFIRMAÇÃO)
+
+# --- SPAM PRINCIPAL ---
 @dp.message(ConfigDivulgacao.menu_principal, F.text.in_(["Pausar SPAM ⏸️", "Retomar SPAM ▶️"]))
-async def alternar_pausa_spam_interno(message: types.Message, state: FSMContext):
+async def pedir_confirmacao_pausa_spam(message: types.Message, state: FSMContext):
+    acao = "pausar" if "Pausar" in message.text else "retomar"
+    await state.update_data(acao_pausa_spam=acao)
+    
+    texto_botao = "Confirmar Pausa ✅" if acao == "pausar" else "Confirmar Retomada ✅"
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=texto_botao), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    texto = f"⚠️ Tem certeza de que deseja <b>{'PAUSAR' if acao == 'pausar' else 'RETOMAR'}</b> o SPAM em Grupos?"
+    await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(ConfigDivulgacao.aguardando_confirmacao_pausa)
+
+@dp.message(ConfigDivulgacao.aguardando_confirmacao_pausa)
+async def processar_pausa_spam_interno(message: types.Message, state: FSMContext):
+    if "Confirmar" not in message.text:
+        await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
+        return
+
+    data = await state.get_data()
+    novo_status = True if data.get("acao_pausa_spam") == "pausar" else False
+
     dados = ler_alvos_divulgacao()
-    novo_status = not dados.get("pausado", False)
     dados["pausado"] = novo_status
     salvar_alvos_divulgacao(dados)
 
@@ -4950,10 +4975,34 @@ async def alternar_pausa_spam_interno(message: types.Message, state: FSMContext)
 
     await gerenciar_divulgacao(message, state)
 
+
+# --- SPAM VIRAL (ESPIÃO) ---
 @dp.message(ConfigDivulgacaoViral.menu_principal, F.text.in_(["Pausar SPAM ⏸️", "Retomar SPAM ▶️"]))
-async def alternar_pausa_spam_viral_interno(message: types.Message, state: FSMContext):
+async def pedir_confirmacao_pausa_spam_viral(message: types.Message, state: FSMContext):
+    acao = "pausar" if "Pausar" in message.text else "retomar"
+    await state.update_data(acao_pausa_spam_viral=acao)
+    
+    texto_botao = "Confirmar Pausa ✅" if acao == "pausar" else "Confirmar Retomada ✅"
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=texto_botao), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    texto = f"⚠️ Tem certeza de que deseja <b>{'PAUSAR' if acao == 'pausar' else 'RETOMAR'}</b> o SPAM Viral?"
+    await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(ConfigDivulgacaoViral.aguardando_confirmacao_pausa)
+
+@dp.message(ConfigDivulgacaoViral.aguardando_confirmacao_pausa)
+async def processar_pausa_spam_viral_interno(message: types.Message, state: FSMContext):
+    if "Confirmar" not in message.text:
+        await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
+        return
+
+    data = await state.get_data()
+    novo_status = True if data.get("acao_pausa_spam_viral") == "pausar" else False
+
     dados = ler_alvos_divulgacao_viral()
-    novo_status = not dados.get("pausado", False)
     dados["pausado"] = novo_status
     salvar_alvos_divulgacao_viral(dados)
 
