@@ -464,6 +464,16 @@ teclado_opcoes_espiao = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
+# 🛠️ Novo Teclado para Janela do Espião
+teclado_janela_espiao = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Dia Todo (24h) 🕛")],
+        [KeyboardButton(text="Cancelar ❌")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
 # --- SISTEMA DE FILA DE POSTAGENS ASSÍNCRONAS ---
 def ler_fila_postagens():
     import os
@@ -4787,9 +4797,9 @@ async def iniciar_config_janela_espiao(message: types.Message, state: FSMContext
     
     await message.answer(
         f"Defina a <b>Janela de Horário</b> útil em que o Espião pode postar os vídeos.\n\n"
-        f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>):\n"
+        f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>) ou clique no botão abaixo para rodar 24h:\n"
         f"<i>Janela atual: {inicio}h às {fim}h</i>", 
-        reply_markup=teclado_cancelar, 
+        reply_markup=teclado_janela_espiao, # ✅ Passa a usar o novo teclado
         parse_mode="HTML"
     )
     await state.set_state(ConfigRotinaEspiao.aguardando_janela)
@@ -4797,15 +4807,23 @@ async def iniciar_config_janela_espiao(message: types.Message, state: FSMContext
 @dp.message(ConfigRotinaEspiao.aguardando_janela)
 async def receber_janela_espiao(message: types.Message, state: FSMContext):
     import re
-    match = re.match(r"^(\d{1,2})-(\d{1,2})$", message.text.strip())
-    if not match:
-        await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22", reply_markup=teclado_cancelar)
-        return
-        
-    inicio, fim = map(int, match.groups())
-    if inicio >= fim or inicio < 0 or fim > 23:
-        await message.answer("Valores inválidos! A hora de início deve ser menor que a do fim.", reply_markup=teclado_cancelar)
-        return
+    texto = message.text.strip()
+    
+    # ✅ Identifica o clique no botão ou se foi digitado manualmente
+    if texto == "Dia Todo (24h) 🕛" or texto.lower() == "dia todo":
+        inicio = 0
+        fim = 24
+    else:
+        match = re.match(r"^(\d{1,2})-(\d{1,2})$", texto)
+        if not match:
+            await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22, ou clique em 'Dia Todo (24h) 🕛'.", reply_markup=teclado_janela_espiao)
+            return
+            
+        inicio, fim = map(int, match.groups())
+        # ✅ O limite do fim mudou para 24 para suportar a mecânica do dia todo
+        if inicio >= fim or inicio < 0 or fim > 24:
+            await message.answer("Valores inválidos! A hora de início deve ser menor que a do fim.", reply_markup=teclado_janela_espiao)
+            return
 
     dados = ler_alvos_espiao()
     dados["inicio"] = inicio
@@ -4813,7 +4831,11 @@ async def receber_janela_espiao(message: types.Message, state: FSMContext):
     salvar_alvos_espiao(dados)
     
     if EXIBIR_LOGS: logger.info(f"✅ Nova Janela do Espião salva: {inicio}h às {fim}h")
-    await message.answer(f"✅ <b>Janela Atualizada!</b>\nOs vídeos serão distribuídos estritamente entre {inicio}h e {fim}h.", parse_mode="HTML")
+    
+    # ✅ Mensagem dinâmica adaptada para o que o usuário escolheu
+    texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"estritamente entre {inicio}h e {fim}h"
+    await message.answer(f"✅ <b>Janela Atualizada!</b>\nOs vídeos serão distribuídos {texto_exibicao}.", parse_mode="HTML")
+    
     await state.clear()
     await menu_grupos_vigiados(message, state)
 
