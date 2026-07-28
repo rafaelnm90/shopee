@@ -30,7 +30,7 @@ import matplotlib.pyplot as plt
 import io
 import sqlite3
 import painel_espelhos
-from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo
+from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
 EXIBIR_LOGS = True
 
 # 2. CONFIGURAÇÃO DE LOGS 🚀
@@ -2403,15 +2403,19 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             origem_item = str(item.get("chat_origem", item.get("origem", "")))
             destino_item = str(item.get("chat_destino", item.get("destino", "")))
             
+            # Resgata o atraso configurado DAQUELA ROTA específica
+            atraso_dias_rota = 1
+            
             for r in lista_rotas:
                 if origem_item and destino_item and str(r.get("origem", "")) == origem_item and str(r.get("destino", "")) == destino_item:
                     nome_atualizado = r.get("nome")
+                    atraso_dias_rota = int(r.get("intervalo_dias", 1))
                     if nome_atualizado and nome_antigo != nome_atualizado:
                         item["nome_rota"] = nome_atualizado
                         houve_alteracao = True
                     break
 
-            # ✅ CORREÇÃO: Mantém no visual os que foram postados HOJE no Espelhador.
+            # Mantém no visual os que foram postados HOJE no Espelhador.
             if item.get("processado", False):
                 if item.get("data_postagem") == hoje_str:
                     if EXIBIR_LOGS: logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo postado hoje ({item.get('id', 'SemID')}) no visual da fila do Espelhador.")
@@ -2419,6 +2423,26 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 else:
                     houve_alteracao = True
                 continue
+
+            # ✅ NOVO: PENTE FINO DE VALIDADE (Padronizado com o Espião)
+            data_cap_str = item.get("data_captura", "")
+            if data_cap_str:
+                try:
+                    data_captura = datetime.strptime(data_cap_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                    horas_na_fila = (agora - data_captura).total_seconds() / 3600
+                    limite_horas = (atraso_dias_rota * 24) + 24 # Expiração baseada no atraso DAQUELA rota
+                    
+                    # Elimina os vídeos fantasmas que ficaram presos
+                    if horas_na_fila > limite_horas:
+                        if EXIBIR_LOGS: logger.info(f"🧹 Pente Fino (Relatório): Removendo clone do Espelhador expirado ({horas_na_fila:.1f}h). Rota: {item.get('nome_rota')}")
+                        houve_alteracao = True
+                        caminho_video = item.get("caminho_video")
+                        if caminho_video and os.path.exists(caminho_video):
+                            try: os.remove(caminho_video)
+                            except: pass
+                        continue # Pula este item, deletando-o da fila
+                except ValueError:
+                    pass
                 
             fila_limpa.append(item)
             
@@ -4606,45 +4630,43 @@ async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
 async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
     entradas_brutas = message.text.replace('\n', ',').split(',')
     
-    alvos_limpos = []
-    for entrada in entradas_brutas:
-        alvo = entrada.strip()
-        if not alvo: continue
-        if "t.me/" in alvo:
-            alvo = "@" + alvo.split("t.me/")[1].split("/")[0]
-        alvos_limpos.append(alvo)
-        
-    if not alvos_limpos:
-        await message.answer("Nenhum alvo detectado. Tente novamente:", reply_markup=teclado_cancelar)
-        return
+    msg_status = await message.answer("⏳ <b>Validando links, subgrupos e buscando nomes...</b>", parse_mode="HTML", reply_markup=teclado_cancelar)
 
-    msg_status = await message.answer("⏳ <b>Validando links e buscando nomes...</b>", parse_mode="HTML", reply_markup=teclado_cancelar)
-        
     alvos_validados = []
-    from utils import salvar_nome_grupo
-    
-    for alvo_limpo in alvos_limpos:
-        nome_encontrado = str(alvo_limpo)
-        try:
-            chat_obj = await bot.get_chat(alvo_limpo)
-            nome_encontrado = chat_obj.title or chat_obj.full_name or str(alvo_limpo)
-            salvar_nome_grupo(str(alvo_limpo), nome_encontrado)
-            if EXIBIR_LOGS: logger.info(f"✅ Nome do alvo Espião resolvido: {nome_encontrado}")
-        except Exception:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Bot oficial sem acesso inicial ao alvo {alvo_limpo}.")
-            
-        alvos_validados.append({"id": alvo_limpo, "nome": nome_encontrado})
+    alvos_rejeitados = []
+
+    for entrada in entradas_brutas:
+        if not entrada.strip(): continue
+
+        sucesso, id_final, nome = await validar_e_formatar_alvo(bot, entrada)
+
+        if sucesso:
+            alvos_validados.append({"id": id_final, "nome": nome})
+            salvar_nome_grupo(id_final, nome)
+        else:
+            alvos_rejeitados.append(entrada)
 
     await msg_status.delete()
+
+    if not alvos_validados:
+        await message.answer("⚠️ <b>Nenhum alvo detectado ou todos deram negativo.</b>\nVerifique as permissões, links ou IDs e tente novamente:", parse_mode="HTML", reply_markup=teclado_cancelar)
+        return
+
     await state.update_data(novos_alvos_espiao=alvos_validados)
-    
-    teclado_confirmacao = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
     
     texto_confirmacao = f"Você está prestes a adicionar <b>{len(alvos_validados)} alvo(s)</b> ao radar do Espião:\n\n"
     for av in alvos_validados:
-        texto_confirmacao += f"🔹 <b>{av['nome']}</b> (<code>{av['id']}</code>)\n"
+        tag_subgrupo = " <i>(Subgrupo focado)</i>" if ":" in av['id'] else ""
+        texto_confirmacao += f"🔹 <b>{av['nome']}</b> (<code>{av['id']}</code>){tag_subgrupo}\n"
+
+    if alvos_rejeitados:
+        texto_confirmacao += f"\n⚠️ <b>Aviso:</b> {len(alvos_rejeitados)} entrada(s) falharam na validação ou o bot não tem acesso:\n"
+        for rej in alvos_rejeitados:
+            texto_confirmacao += f"❌ <code>{rej}</code>\n"
+
     texto_confirmacao += "\nConfirma a adição?"
     
+    teclado_confirmacao = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
     await message.answer(texto_confirmacao, reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(EspiaoFluxo.aguardando_confirmacao_alvo)
 
@@ -4896,8 +4918,8 @@ async def salvar_config_tempo_espiao(message: types.Message, state: FSMContext):
     await message.answer(f"✅ <b>Atraso do Espião Salvo!</b>\nAtraso: D+{intervalo}\nDistribuição: {message.text}", parse_mode="HTML")
     await state.clear()
     
-    # 🔫 O GATILHO DE DESCARGA INTELIGENTE: Limpa o carimbo e deixa o Motor organizar!
-    if intervalo_antigo > 0 and intervalo == 0:
+    # 🔫 GATILHO INTELIGENTE PADRONIZADO: Limpa o carimbo se houver QUALQUER mudança de dias!
+    if intervalo_antigo != intervalo:
         fila_data = ler_fila_clonagem()
         houve_reset = False
         for item in fila_data.get("fila", []):
@@ -4908,8 +4930,8 @@ async def salvar_config_tempo_espiao(message: types.Message, state: FSMContext):
         if houve_reset:
             salvar_fila_clonagem(fila_data)
             
-        if EXIBIR_LOGS: logger.info("⚠️ [Gatilho de Descarga] Mudança de D+X para D+0 detectada! Resetando a fila do Espião para recálculo orgânico.")
-        await message.answer("⚠️ <b>Gatilho de Descarga Acionado!</b>\nComo você alterou para D+0 (Imediato), todos os vídeos retidos no Espião foram atualizados.\nO Motor Central já está a recalcular os horários deles para postagem imediata (respeitando a sua janela).", parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info(f"🔄 [Gatilho] Mudança de D+{intervalo_antigo} para D+{intervalo} detectada! Resetando a fila do Espião para recálculo orgânico.")
+        await message.answer(f"⚠️ <b>Gatilho de Recálculo Acionado!</b>\nComo você alterou a defasagem de D+{intervalo_antigo} para D+{intervalo}, todos os horários pendentes foram resetados.\nO Motor Central já está a recalcular os horários de forma orgânica e respeitando a sua janela.", parse_mode="HTML")
         
     await menu_grupos_vigiados(message, state)
 
