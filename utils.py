@@ -110,3 +110,59 @@ def salvar_nome_grupo(chat_id, nome):
         if EXIBIR_LOGS: logger.info(f"✅ Nome do grupo {chave} salvo no cache do SQLite: {nome_str}")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao salvar nome do grupo {chave} no cache SQLite: {e}")
+
+# --- NOVO: MOTOR INTELIGENTE DE VALIDAÇÃO DE ALVOS ---
+async def validar_e_formatar_alvo(bot_instance, entrada):
+    """
+    Analisa a entrada, extrai o subgrupo (tópico) se existir,
+    testa as variações de ID no Telegram e devolve o ID confirmado + Nome.
+    """
+    entrada = str(entrada).strip()
+    if not entrada:
+        return False, None, None
+
+    chat_base = entrada
+    topico_id = None
+
+    # 1. Extrair ID base e Subgrupo (Tópico)
+    if "t.me/c/" in entrada:
+        partes = entrada.split("t.me/c/")[1].split("/")
+        chat_base = f"-100{partes[0]}"
+        if len(partes) > 1 and partes[1].isdigit(): topico_id = partes[1]
+    elif "t.me/" in entrada:
+        partes = entrada.split("t.me/")[1].split("/")
+        chat_base = f"@{partes[0]}"
+        if len(partes) > 1 and partes[1].isdigit(): topico_id = partes[1]
+    elif ":" in entrada:
+        partes = entrada.split(":")
+        chat_base = partes[0]
+        if len(partes) > 1 and partes[1].isdigit(): topico_id = partes[1]
+    elif "/" in entrada and not "http" in entrada:
+        partes = entrada.split("/")
+        chat_base = partes[0]
+        if len(partes) > 1 and partes[1].isdigit(): topico_id = partes[1]
+
+    # 2. Gerar variações de ID para o teste
+    variacoes = [chat_base]
+    if chat_base.lstrip('-').isdigit():
+        so_num = chat_base.replace("-100", "").replace("-", "")
+        variacoes = [chat_base, f"-100{so_num}", f"-{so_num}", so_num]
+
+    # 3. Testar no Telegram
+    id_confirmado = None
+    nome_confirmado = None
+    for var in variacoes:
+        try:
+            chat_obj = await bot_instance.get_chat(var)
+            id_confirmado = str(chat_obj.id)
+            nome_confirmado = chat_obj.title or chat_obj.full_name or id_confirmado
+            break 
+        except Exception:
+            continue 
+
+    # 4. Retornar os resultados
+    if id_confirmado:
+        id_final = f"{id_confirmado}:{topico_id}" if topico_id else id_confirmado
+        return True, id_final, nome_confirmado
+    else:
+        return False, entrada, None
