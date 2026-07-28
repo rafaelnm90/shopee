@@ -15,7 +15,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import StateFilter
-from utils import registrar_erro_json, ler_cache_nomes_grupos
+from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
 from motor_filas import calcular_horarios_distribuicao # ⚙️ Novo Motor Centralizado
 EXIBIR_LOGS = True
 
@@ -124,33 +124,6 @@ def ler_contador_espelhador(nome_rota):
 def salvar_espelhos(dados):
     with open("espelhos_config.json", "w") as f:
         json.dump(dados, f, indent=4)
-
-# --- VALIDAÇÃO DE ACESSO (MODO TRUST) ---
-async def validar_link_ou_id_grupo(entrada):
-    # Removemos a verificação bot_instance.get_chat() para evitar bloqueios de API.
-    # O robô agora confia que o ID fornecido está correto.
-    
-    entrada_limpa = ''.join(c for c in entrada if c.isprintable()).strip()
-    
-    # Se for link t.me
-    if "t.me/" in entrada_limpa:
-        username = entrada_limpa.split("t.me/")[-1].split("/")[0]
-        if not username.startswith("+"):
-            return f"@{username}"
-            
-    # Se for ID numérico (ex: 3673555953 ou -1003673555953)
-    if entrada_limpa.replace('-', '').isdigit():
-        numeros = entrada_limpa.replace('-', '')
-        # Normaliza o ID para o padrão -100...
-        if numeros.startswith("100") and len(numeros) > 10:
-            numeros = numeros[3:]
-        return f"-100{numeros}"
-    
-    # Se for @username simples
-    if entrada_limpa.startswith("@"):
-        return entrada_limpa
-        
-    return None
 
 # --- NAVEGAÇÃO E PAINEL ---
 @router.message(F.text == "Cancelar Operação ❌", StateFilter("*"))
@@ -268,7 +241,7 @@ async def iniciar_cadastro_rota(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.aguardando_origem)
 async def receber_origem(message: types.Message, state: FSMContext):
-    msg_status = await message.answer("⏳ Validando lote de canais de origem...", reply_markup=teclado_espelhador_cancelar)
+    msg_status = await message.answer("⏳ Validando lote de canais de origem e subgrupos...", reply_markup=teclado_espelhador_cancelar)
     
     entradas_brutas = message.text.replace('\n', ',').split(',')
     origens_validas = []
@@ -277,18 +250,18 @@ async def receber_origem(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info(f"🚀 Iniciando processamento em lote para {len(entradas_brutas)} possíveis origens...")
 
     for entrada in entradas_brutas:
-        entrada = entrada.strip()
-        if not entrada:
-            continue
+        if not entrada.strip(): continue
             
-        origem_id = await validar_link_ou_id_grupo(entrada)
-        if origem_id:
-            if origem_id not in origens_validas:
-                origens_validas.append(origem_id)
-                if EXIBIR_LOGS: logger.info(f"✅ Canal de origem validado e adicionado ao lote: {origem_id}")
+        sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada)
+        
+        if sucesso:
+            if id_final not in origens_validas:
+                origens_validas.append(id_final)
+                salvar_nome_grupo(id_final, nome)
+                if EXIBIR_LOGS: logger.info(f"✅ Canal de origem validado: {id_final}")
         else:
             origens_invalidas.append(entrada)
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Falha na validação do canal de origem: {entrada}")
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Falha na validação da origem: {entrada}")
 
     await msg_status.delete()
     
@@ -312,10 +285,11 @@ async def receber_origem(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.aguardando_destino)
 async def receber_destino(message: types.Message, state: FSMContext):
     msg_status = await message.answer("⏳ Validando permissões e acesso ao canal de destino...", reply_markup=teclado_espelhador_cancelar)
-    destino_id = await validar_link_ou_id_grupo(message.text)
+    sucesso, destino_id, nome = await validar_e_formatar_alvo(bot_instance, message.text)
     await msg_status.delete()
     
-    if destino_id:
+    if sucesso:
+        salvar_nome_grupo(destino_id, nome)
         if EXIBIR_LOGS: logger.info(f"✅ Destino validado com sucesso: {destino_id}")
         await state.update_data(destino=destino_id)
         await message.answer(f"✅ Destino confirmado: <code>{destino_id}</code>\n\nDefina a <b>Janela de Horário</b> para a postagem no dia seguinte.\nEnvie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>) ou clique no botão abaixo para rodar 24h:", reply_markup=teclado_espelhador_janela, parse_mode="HTML")
@@ -767,13 +741,14 @@ async def salvar_edicao_nome(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.aguardando_edicao_novo_destino)
 async def salvar_edicao_destino(message: types.Message, state: FSMContext):
     msg_status = await message.answer("⏳ Validando o novo canal de destino...", reply_markup=teclado_espelhador_cancelar)
-    novo_destino = await validar_link_ou_id_grupo(message.text)
+    sucesso, novo_destino, nome = await validar_e_formatar_alvo(bot_instance, message.text)
 
-    if not novo_destino:
+    if not sucesso:
         await msg_status.delete()
         await message.answer("⚠️ Canal não encontrado ou formato inválido. Tente novamente:", reply_markup=teclado_espelhador_cancelar)
         return
 
+    salvar_nome_grupo(novo_destino, nome)
     await msg_status.delete()
     data = await state.get_data()
     indice = data.get("indice_edicao")
@@ -894,24 +869,16 @@ async def confirmar_nova_origem(message: types.Message, state: FSMContext):
     entradas_brutas = message.text.replace('\n', ',').split(',')
     origens_validas = []
     
-    msg_status = await message.answer("⏳ Validando links e buscando nomes...", reply_markup=teclado_espelhador_cancelar)
-    
-    from utils import salvar_nome_grupo
+    msg_status = await message.answer("⏳ Validando links, subgrupos e buscando nomes...", reply_markup=teclado_espelhador_cancelar)
     
     for entrada in entradas_brutas:
-        entrada = entrada.strip()
-        if not entrada: continue
+        if not entrada.strip(): continue
         
-        origem_id = await validar_link_ou_id_grupo(entrada)
-        if origem_id and origem_id not in [o['id'] for o in origens_validas]:
-            nome_encontrado = str(origem_id)
-            try:
-                chat_obj = await bot_instance.get_chat(origem_id)
-                nome_encontrado = chat_obj.title or chat_obj.full_name or str(origem_id)
-                salvar_nome_grupo(str(origem_id), nome_encontrado)
-            except Exception:
-                pass
-            origens_validas.append({"id": origem_id, "nome": nome_encontrado})
+        sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada)
+        
+        if sucesso and id_final not in [o['id'] for o in origens_validas]:
+            salvar_nome_grupo(id_final, nome)
+            origens_validas.append({"id": id_final, "nome": nome})
 
     await msg_status.delete()
 
