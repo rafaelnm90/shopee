@@ -133,7 +133,16 @@ async def validar_e_formatar_alvo(bot_instance, entrada):
         partes = entrada.split("t.me/")[1].split("/")
         chat_base = f"@{partes[0]}"
         if len(partes) > 1 and partes[1].isdigit(): topico_id = partes[1]
-    elif ":" in entrada:
+    elif "web.telegram.org" in entrada and "#" in entrada:
+        # ✅ NOVO: Trata o Telegram Web "K" e "A", separando o tópico pelo underline (_)
+        parte_web = entrada.split("#")[1].split("/")[0]
+        if "_" in parte_web:
+            partes_web = parte_web.split("_")
+            chat_base = partes_web[0]
+            if partes_web[1].isdigit(): topico_id = partes_web[1]
+        else:
+            chat_base = parte_web
+    elif ":" in entrada and not "http" in entrada:
         partes = entrada.split(":")
         chat_base = partes[0]
         if len(partes) > 1 and partes[1].isdigit(): topico_id = partes[1]
