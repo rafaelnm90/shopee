@@ -338,7 +338,32 @@ async def interceptar_mensagem(event):
         if EXIBIR_LOGS: logger.info("🛡️ [Espião] Trava de canais ativada: Ignorando evento.")
         return
     
-    if chat_username not in alvos and chat_id not in alvos and chat_id_completo not in alvos:
+    # ✅ NOVO: Identifica se a mensagem foi enviada em um Tópico (Subgrupo)
+    topico_id_evento = None
+    if event.message.reply_to:
+        topico_id_evento = getattr(event.message.reply_to, 'forum_topic_id', getattr(event.message.reply_to, 'reply_to_msg_id', None))
+
+    # ✅ NOVO: Verifica se o grupo e o subgrupo batem com os alvos do banco de dados
+    eh_alvo_espiao = False
+    for alvo in alvos:
+        alvo_str = str(alvo).lower()
+        alvo_base = alvo_str.split(':')[0]
+        alvo_topico = int(alvo_str.split(':')[1]) if ':' in alvo_str and alvo_str.split(':')[1].isdigit() else None
+        
+        if alvo_base in [chat_id, chat_id_completo, chat_username]:
+            if alvo_topico is not None:
+                # Trata o Tópico Geral (pode vir como 1 ou vazio)
+                t_evento = topico_id_evento if topico_id_evento else 1
+                t_alvo = alvo_topico if alvo_topico else 1
+                if t_evento == t_alvo:
+                    eh_alvo_espiao = True
+                    break
+            else:
+                # Se não tem tópico na configuração, escuta o grupo todo
+                eh_alvo_espiao = True
+                break
+
+    if not eh_alvo_espiao:
         return
 
     texto_original = event.text or ""
@@ -575,6 +600,11 @@ async def motor_espelhador_userbot(event):
         if EXIBIR_LOGS: logger.info("🛡️ [Espelhador] Trava de canais ativada: Postagem própria ignorada.")
         return
 
+    # ✅ NOVO: Identifica se a mensagem foi enviada em um Tópico (Subgrupo)
+    topico_id_evento = None
+    if event.message.reply_to:
+        topico_id_evento = getattr(event.message.reply_to, 'forum_topic_id', getattr(event.message.reply_to, 'reply_to_msg_id', None))
+
     dados = ler_espelhos_config()
     rotas_ativas = []
     
@@ -583,7 +613,24 @@ async def motor_espelhador_userbot(event):
         if "origem" in r:
             origens_rota.append(str(r["origem"]).lower())
             
-        if chat_id_str in origens_rota or chat_id_completo in origens_rota or chat_username in origens_rota:
+        # ✅ NOVO: Faz a checagem inteligente de origem + tópico
+        para_esta_rota = False
+        for origem in origens_rota:
+            origem_base = origem.split(':')[0]
+            origem_topico = int(origem.split(':')[1]) if ':' in origem and origem.split(':')[1].isdigit() else None
+            
+            if origem_base in [chat_id_str, chat_id_completo, chat_username]:
+                if origem_topico is not None:
+                    t_evento = topico_id_evento if topico_id_evento else 1
+                    t_origem = origem_topico if origem_topico else 1
+                    if t_evento == t_origem:
+                        para_esta_rota = True
+                        break
+                else:
+                    para_esta_rota = True
+                    break
+                    
+        if para_esta_rota:
             rotas_ativas.append(r)
     
     if not rotas_ativas:
@@ -694,6 +741,14 @@ async def validar_e_obter_entidade(client, alvo):
     
     if EXIBIR_LOGS: logger.info(f"🧹 [Auditor] Higienizando alvo bruto: {alvo_str}")
 
+    # ✅ NOVO: Separa e guarda o ID do tópico (se existir) para não quebrar a API
+    topico_id = None
+    if ":" in alvo_str:
+        partes = alvo_str.split(":", 1)
+        alvo_str = partes[0]
+        if partes[1].isdigit():
+            topico_id = partes[1]
+
     # 1. Filtro de Links Privados (ex: https://t.me/c/12345678/10)
     match_privado = re.search(r't\.me/c/(\d+)', alvo_str)
     if match_privado:
@@ -714,10 +769,38 @@ async def validar_e_obter_entidade(client, alvo):
                 if EXIBIR_LOGS: logger.info(f"🔍 [Auditor] Testando variação de username: {var}")
                 ent = await client.get_entity(var)
                 if EXIBIR_LOGS: logger.info(f"✅ [Auditor] Variação {var} aceite pela API do Telegram!")
-                return ent, var
+                id_final = f"{var}:{topico_id}" if topico_id else var
+                return ent, id_final
             except Exception:
                 continue
         raise Exception("Nenhuma variação de username funcionou.")
+
+    # 3. Tratamento de IDs Numéricos
+    so_numeros = re.sub(r'^-?(100)?', '', alvo_str)
+    
+    variacoes_numericas = [
+        alvo_str, 
+        f"-100{so_numeros}", 
+        f"-{so_numeros}", 
+        so_numeros
+    ]
+    
+    variacoes_unicas = []
+    for v in variacoes_numericas:
+        if v not in variacoes_unicas:
+            variacoes_unicas.append(v)
+            
+    for var in variacoes_unicas:
+        try:
+            if EXIBIR_LOGS: logger.info(f"🔍 [Auditor] Testando variação numérica de ID: {var}")
+            ent = await client.get_entity(int(var))
+            if EXIBIR_LOGS: logger.info(f"✅ [Auditor] Variação {var} aceite pela API do Telegram!")
+            id_final = f"{var}:{topico_id}" if topico_id else str(var)
+            return ent, id_final
+        except Exception:
+            continue
+            
+    raise Exception("Nenhuma variação de ID numérico funcionou.")
 
     # 3. Tratamento de IDs Numéricos
     so_numeros = re.sub(r'^-?(100)?', '', alvo_str)
