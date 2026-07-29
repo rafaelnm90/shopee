@@ -2914,17 +2914,15 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         f"📅 <b>BALANÇO DO MÊS DE {nome_mes_extenso}</b>\n\n"
     )
     
-    # ✅ NOVA MÉTRICA: Estimativa de Faturamento (CORRIGIDA CONTRA ATRASOS DA API)
+    # ✅ NOVA MÉTRICA: Estimativa de Faturamento
     import calendar
     dias_no_mes = calendar.monthrange(hoje.year, hoje.month)[1]
     dia_atual = hoje.day
     
-    # 1. Inteligência para ignorar o atraso da API da Shopee
     dias_sincronizados = 0
     for i in range(1, dia_atual + 1):
         d_str = f"{hoje.year}-{hoje.month:02d}-{i:02d}"
         dados_d = historico_limpo.get(d_str, {})
-        # Se o dia teve alguma movimentação (venda ou cancelamento), ele conta como dia útil sincronizado
         if dados_d.get("aprovado", 0) + dados_d.get("pendente", 0) + dados_d.get("cancelado", 0) > 0:
             dias_sincronizados = i
             
@@ -2932,7 +2930,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     estimativa_mensal = 0.0
     
     if dias_sincronizados > 0 and faturamento_valido_mes > 0:
-        if EXIBIR_LOGS: logger.info(f"🧮 Calculando projeção mensal sobre faturamento válido de R$ {faturamento_valido_mes:.2f} (excluindo cancelados)...")
         media_diaria = faturamento_valido_mes / dias_sincronizados
         estimativa_mensal = media_diaria * dias_no_mes
         texto += f"🚀 <b>PROJEÇÃO MENSAL ESTIMADA: R$ {f_br(estimativa_mensal)}</b>\n"
@@ -2954,8 +2951,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             texto_var = "0.0%"
             
         texto += f"⚖️ <b>Média Diária: R$ {f_br(media_diaria)}</b> <i>(Ontem: R$ {f_br(faturamento_ontem)} | {texto_var})</i>\n\n"
-        if EXIBIR_LOGS: logger.info(f"📊 Desempenho de ontem calculado: R$ {faturamento_ontem:.2f} face à média de R$ {media_diaria:.2f} ({texto_var})")
-        
     else:
         texto += f"🚀 <b>PROJEÇÃO MENSAL ESTIMADA: Calculando...</b>\n\n"
     
@@ -2983,11 +2978,10 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             elif total_ant == 0 and total_m > 0:
                 variacao_texto = " <b>(📈 +100%)</b>"
 
-        if EXIBIR_LOGS: logger.info(f"🧮 Calculando proporções do mês {mes_fmt}...")
-        total_pedidos_m = dados_m['qtd_aprovado'] + dados_m['qtd_pendente'] + dados_m.get('qtd_cancelado', 0)
-        pct_aprov_m = (dados_m['qtd_aprovado'] / total_pedidos_m * 100) if total_pedidos_m > 0 else 0.0
-        pct_pend_m = (dados_m['qtd_pendente'] / total_pedidos_m * 100) if total_pedidos_m > 0 else 0.0
-        pct_canc_m = (dados_m.get('qtd_cancelado', 0) / total_pedidos_m * 100) if total_pedidos_m > 0 else 0.0
+        # ✅ CORREÇÃO: Porcentagem baseada no VALOR (R$) e não mais na quantidade de pedidos!
+        pct_aprov_m = (dados_m['aprovado'] / total_m * 100) if total_m > 0 else 0.0
+        pct_pend_m = (dados_m['pendente'] / total_m * 100) if total_m > 0 else 0.0
+        pct_canc_m = (dados_m.get('cancelado', 0.0) / total_m * 100) if total_m > 0 else 0.0
 
         texto += f"• <b>{mes_fmt}</b>: R$ {f_br(total_m)}{variacao_texto}\n"
         texto += f"  ├ Conf: R$ {f_br(dados_m['aprovado'])} ({dados_m['qtd_aprovado']} pedidos - {pct_aprov_m:.1f}%)\n"
@@ -3012,11 +3006,10 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             elif total_ant == 0 and total_a > 0:
                 variacao_texto = " <b>(📈 +100%)</b>"
 
-        if EXIBIR_LOGS: logger.info(f"🧮 Calculando proporções do ano {ano}...")
-        total_pedidos_a = dados_a['qtd_aprovado'] + dados_a['qtd_pendente'] + dados_a.get('qtd_cancelado', 0)
-        pct_aprov_a = (dados_a['qtd_aprovado'] / total_pedidos_a * 100) if total_pedidos_a > 0 else 0.0
-        pct_pend_a = (dados_a['qtd_pendente'] / total_pedidos_a * 100) if total_pedidos_a > 0 else 0.0
-        pct_canc_a = (dados_a.get('qtd_cancelado', 0) / total_pedidos_a * 100) if total_pedidos_a > 0 else 0.0
+        # ✅ CORREÇÃO: Porcentagem baseada no VALOR (R$)
+        pct_aprov_a = (dados_a['aprovado'] / total_a * 100) if total_a > 0 else 0.0
+        pct_pend_a = (dados_a['pendente'] / total_a * 100) if total_a > 0 else 0.0
+        pct_canc_a = (dados_a.get('cancelado', 0.0) / total_a * 100) if total_a > 0 else 0.0
 
         texto += f"• <b>{ano}</b>: R$ {f_br(total_a)}{variacao_texto}\n"
         texto += f"  ├ Conf: R$ {f_br(dados_a['aprovado'])} ({dados_a['qtd_aprovado']} pedidos - {pct_aprov_a:.1f}%)\n"
@@ -3062,11 +3055,10 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         q_canc = dados_dia.get("qtd_cancelado", 0)
         v_tot = v_aprov + v_pend + v_canc
         
-        if EXIBIR_LOGS: logger.info(f"🧮 Calculando proporções diárias para {d_br}...")
-        total_pedidos_d = q_aprov + q_pend + q_canc
-        pct_aprov_d = (q_aprov / total_pedidos_d * 100) if total_pedidos_d > 0 else 0.0
-        pct_pend_d = (q_pend / total_pedidos_d * 100) if total_pedidos_d > 0 else 0.0
-        pct_canc_d = (q_canc / total_pedidos_d * 100) if total_pedidos_d > 0 else 0.0
+        # ✅ CORREÇÃO: Porcentagem baseada no VALOR (R$)
+        pct_aprov_d = (v_aprov / v_tot * 100) if v_tot > 0 else 0.0
+        pct_pend_d = (v_pend / v_tot * 100) if v_tot > 0 else 0.0
+        pct_canc_d = (v_canc / v_tot * 100) if v_tot > 0 else 0.0
         
         variacao_texto = ""
         d_obj = datetime.strptime(d_str, "%Y-%m-%d")
@@ -3129,7 +3121,9 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         ax1.set_facecolor('#f4f4f9')
         
         bars = ax1.bar(labels_grafico, valores_comissao, color='#ff6600', edgecolor='black', linewidth=0.5, label='Comissão Atual (R$)')
-        line_est, = ax1.plot(labels_grafico, valores_estimativa, color='#0066cc', marker='^', linestyle=':', linewidth=2, label='Projeção / Fechamento')
+        
+        # ✅ CORREÇÃO: Cor roxa (blue-violet) aplicada à linha de projeção
+        line_est, = ax1.plot(labels_grafico, valores_estimativa, color='#8A2BE2', marker='^', linestyle=':', linewidth=2, label='Projeção / Fechamento')
         
         ax1.set_ylabel('Comissão (R$)', fontsize=10, color='#333333')
         ax1.grid(axis='y', linestyle='--', alpha=0.5)
@@ -3147,9 +3141,29 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             if yval > 0:
                 ax1.text(bar.get_x() + bar.get_width()/2, yval + offset_y, f'R${yval:.0f}', ha='center', va='bottom', fontsize=8, fontweight='bold', color='#333333')
 
-        lines_1, labels_1 = ax1.get_legend_handles_labels()
-        lines_2, labels_2 = ax2.get_legend_handles_labels()
-        ax1.legend(lines_1 + lines_2, labels_1 + labels_2, loc='upper left', fontsize=9)
+        # ✅ CORREÇÃO: Reorganizando a ordem da legenda do gráfico
+        lines_1, labels_1 = ax1.get_legend_handles_labels() # [Barras, Linha Roxa]
+        lines_2, labels_2 = ax2.get_legend_handles_labels() # [Linha Verde]
+        
+        handles_ordenados = []
+        labels_ordenados = []
+        
+        # 1º Pedidos (Linha Verde do ax2)
+        if lines_2:
+            handles_ordenados.append(lines_2[0])
+            labels_ordenados.append(labels_2[0])
+            
+        # 2º Projeção (Linha Roxa do ax1)
+        if len(lines_1) > 1:
+            handles_ordenados.append(lines_1[1])
+            labels_ordenados.append(labels_1[1])
+            
+        # 3º Comissão Atual (Barras Laranja do ax1)
+        if len(lines_1) > 0:
+            handles_ordenados.append(lines_1[0])
+            labels_ordenados.append(labels_1[0])
+
+        ax1.legend(handles_ordenados, labels_ordenados, loc='upper left', fontsize=9)
 
         ax1.spines['top'].set_visible(False)
         ax2.spines['top'].set_visible(False)
