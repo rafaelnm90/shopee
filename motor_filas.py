@@ -135,27 +135,26 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
             data_cap_formatada = data_obj.strftime("%d/%m às %H:%M")
             data_alvo_esperada_obj = data_obj + timedelta(days=atraso_dias)
             
-            if tipo_fila == "Espelhador":
-                if horario_universal:
-                    # Tenta ler com ou sem as horas exatas
-                    try:
-                        hd_obj = datetime.strptime(horario_universal, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
-                    except ValueError:
-                        hd_obj = datetime.strptime(horario_universal, "%Y-%m-%d").replace(tzinfo=fuso_horario)
+            if horario_universal:
+                try:
+                    hd_obj = datetime.strptime(horario_universal, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                except ValueError:
+                    hd_obj = datetime.strptime(horario_universal, "%Y-%m-%d").replace(tzinfo=fuso_horario)
 
-                    if hd_obj.date() == hoje_obj:
-                        status_dia = "🔴 Atrasado" if agora > hd_obj else "⏳ Hoje"
-                    elif hd_obj.date() > hoje_obj:
-                        status_dia = "🟡 Amanhã" if hd_obj.date() == hoje_obj + timedelta(days=1) else f"🔵 D+{abs((hd_obj.date() - hoje_obj).days)}"
-                    else:
-                        status_dia = "🔴 Atrasado"
-            else:
-                if atraso_dias == 0:
-                    status_dia = f"⏳ Na Fila (D+{atraso_dias})" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
-                elif atraso_dias == 1:
-                    status_dia = f"🟡 Represa (D+{atraso_dias})" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
+                if hd_obj.date() == hoje_obj:
+                    status_dia = "🔴 Atrasado" if agora > hd_obj else f"⏳ Represa (D+{atraso_dias})"
+                elif hd_obj.date() > hoje_obj:
+                    status_dia = "🟡 Amanhã" if hd_obj.date() == hoje_obj + timedelta(days=1) else f"🔵 Represa (D+{abs((hd_obj.date() - hoje_obj).days)})"
                 else:
-                    status_dia = f"🔵 Represa (D+{atraso_dias})" if data_obj.date() == hoje_obj else "🔴 Retido/Falha"
+                    status_dia = "🔴 Retido/Falha"
+            else:
+                if data_alvo_esperada_obj.date() == hoje_obj:
+                    status_dia = f"⏳ Represa (D+{atraso_dias})"
+                elif data_alvo_esperada_obj.date() > hoje_obj:
+                    status_dia = "🟡 Amanhã" if data_alvo_esperada_obj.date() == hoje_obj + timedelta(days=1) else f"🔵 Represa (D+{abs((data_alvo_esperada_obj.date() - hoje_obj).days)})"
+                else:
+                    status_dia = "🔴 Retido/Falha"
+
         except Exception:
             pass
 
