@@ -775,7 +775,7 @@ async def validar_e_obter_entidade(client, alvo):
                 continue
         raise Exception("Nenhuma variação de username funcionou.")
 
-    # 3. Tratamento de IDs Numéricos
+    # 3. Tratamento de IDs Numéricos (Agora sem duplicação!)
     so_numeros = re.sub(r'^-?(100)?', '', alvo_str)
     
     variacoes_numericas = [
@@ -802,214 +802,224 @@ async def validar_e_obter_entidade(client, alvo):
             
     raise Exception("Nenhuma variação de ID numérico funcionou.")
 
-    # 3. Tratamento de IDs Numéricos
-    so_numeros = re.sub(r'^-?(100)?', '', alvo_str)
-    
-    variacoes_numericas = [
-        alvo_str, 
-        f"-100{so_numeros}", 
-        f"-{so_numeros}", 
-        so_numeros
-    ]
-    
-    variacoes_unicas = []
-    for v in variacoes_numericas:
-        if v not in variacoes_unicas:
-            variacoes_unicas.append(v)
-            
-    for var in variacoes_unicas:
-        try:
-            if EXIBIR_LOGS: logger.info(f"🔍 [Auditor] Testando variação numérica de ID: {var}")
-            ent = await client.get_entity(int(var))
-            if EXIBIR_LOGS: logger.info(f"✅ [Auditor] Variação {var} aceite pela API do Telegram!")
-            return ent, str(var)
-        except Exception:
-            continue
-            
-    raise Exception("Nenhuma variação de ID numérico funcionou.")
-
 async def monitorar_status_alvos():
+    ultimo_alvos = None
+    ultimo_destino = None
+    ultima_modificacao = 0
+
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento ultraleve (1 min) para os alvos do Espião...")
+    
     while True:
-        # 1. Leitura inicial para saber quem devemos verificar agora
-        dados_iniciais = ler_config_bd_espiao("alvos_espiao", {"alvos": [], "canal_destino": None, "status_alvos": {}})
-            
-        alvos_para_verificar = dados_iniciais.get("alvos", [])
-        destino_para_verificar = dados_iniciais.get("canal_destino")
-        novos_status_coletados = {}
-        mapa_correcoes = {}
-        
-        # 2. Verificação com Teste de Variações de ID (Origens)
-        for alvo in alvos_para_verificar:
+        try:
+            # 1. Verifica a data de modificação do banco de dados (Custo zero pro CPU)
             try:
-                entidade, alvo_correto = await validar_e_obter_entidade(client, alvo)
-                nome = getattr(entidade, 'title', getattr(entidade, 'username', str(alvo_correto)))
-                novo_status = {"status": "ok", "nome": nome}
+                modificacao_atual = os.path.getmtime("banco_dados.db")
+            except OSError:
+                modificacao_atual = 0
+
+            if modificacao_atual != ultima_modificacao:
+                # 2. Se o arquivo foi modificado, carregamos a lista
+                dados_iniciais = ler_config_bd_espiao("alvos_espiao", {"alvos": [], "canal_destino": None, "status_alvos": {}})
                 
-                if str(alvo) != alvo_correto:
-                    mapa_correcoes[str(alvo)] = alvo_correto
+                alvos_atuais = [str(a) for a in dados_iniciais.get("alvos", [])]
+                destino_atual = str(dados_iniciais.get("canal_destino")) if dados_iniciais.get("canal_destino") else None
+
+                # 3. Compara a "foto" (Snapshot). Mudou algo nos alvos ou no destino?
+                if alvos_atuais != ultimo_alvos or destino_atual != ultimo_destino:
+                    if EXIBIR_LOGS: logger.info("🔍 [Auditor] Mudança detectada nos alvos do Espião. Iniciando validação...")
                     
-                novos_status_coletados[alvo_correto] = novo_status
-                
-            except Exception:
-                novos_status_coletados[str(alvo)] = {"status": "erro", "erro": "Acesso negado/Link inválido"}
-                
-            await asyncio.sleep(2) # Pausa de segurança anti-flood da API
-            
-        # 2.1 Verificação do Canal de Destino
-        status_destino_coletado = None
-        if destino_para_verificar:
-            try:
-                entidade_dest, dest_correto = await validar_e_obter_entidade(client, destino_para_verificar)
-                nome_dest = getattr(entidade_dest, 'title', getattr(entidade_dest, 'username', str(dest_correto)))
-                status_destino_coletado = {"status": "ok", "nome": nome_dest}
-                
-                if str(destino_para_verificar) != dest_correto:
-                    mapa_correcoes["_destino"] = dest_correto
-            except Exception:
-                status_destino_coletado = {"status": "erro", "nome": str(destino_para_verificar)}
-            await asyncio.sleep(2)
-            
-        # 3. Leitura FRESCA logo antes de gravar para evitar sobrescrever exclusões recentes
-        dados_frescos = ler_config_bd_espiao("alvos_espiao", {"alvos": [], "canal_destino": None, "status_alvos": {}})
-            
-        alvos_reais_agora = [str(a) for a in dados_frescos.get("alvos", [])]
-        status_alvos_antigos = dados_frescos.get("status_alvos", {})
-        
-        status_alvos_final = {}
-        nova_lista_alvos = []
-        houve_alteracao = False
-        
-        # 4. Aplica as auto-correções na lista principal de alvos
-        for alvo in alvos_reais_agora:
-            alvo_final = mapa_correcoes.get(alvo, alvo)
-            nova_lista_alvos.append(alvo_final)
-            
-            if alvo != alvo_final:
-                houve_alteracao = True
-                if EXIBIR_LOGS: logger.info(f"🔧 Auditor corrigiu automaticamente o ID: {alvo} -> {alvo_final}")
-        
-        # 5. Atualiza os status APENAS dos alvos que sobreviveram na lista
-        for alvo_final in nova_lista_alvos:
-            if alvo_final in novos_status_coletados:
-                status_alvos_final[alvo_final] = novos_status_coletados[alvo_final]
-                if status_alvos_antigos.get(alvo_final) != novos_status_coletados[alvo_final]:
-                    houve_alteracao = True
-            elif alvo_final in status_alvos_antigos:
-                status_alvos_final[alvo_final] = status_alvos_antigos[alvo_final]
-                
-        # 6. Deteta se houve remoção de alvos durante a verificação
-        for alvo_antigo in status_alvos_antigos.keys():
-            if alvo_antigo not in nova_lista_alvos:
-                houve_alteracao = True
-                
-        # 6.1 Atualiza o Destino na base de dados
-        destino_fresco = dados_frescos.get("canal_destino")
-        if destino_fresco:
-            if "_destino" in mapa_correcoes and str(destino_fresco) == str(destino_para_verificar):
-                dados_frescos["canal_destino"] = mapa_correcoes["_destino"]
-                houve_alteracao = True
-                
-        if status_destino_coletado and dados_frescos.get("status_destino") != status_destino_coletado:
-            dados_frescos["status_destino"] = status_destino_coletado
-            houve_alteracao = True
-                
-        # 7. Gravação limpa e definitiva
-        if houve_alteracao:
-            dados_frescos["alvos"] = nova_lista_alvos
-            dados_frescos["status_alvos"] = status_alvos_final
-            salvar_config_bd_espiao("alvos_espiao", dados_frescos)
-                
-        if EXIBIR_LOGS: logger.info("✅ Auditoria concluída. O Userbot fará uma nova varredura de nomes em 6 horas.")
-        
-        # Pausa por 6 horas (21600 segundos) e depois roda de novo infinitamente
-        await asyncio.sleep(21600)
+                    novos_status_coletados = {}
+                    mapa_correcoes = {}
+                    
+                    for alvo in alvos_atuais:
+                        try:
+                            entidade, alvo_correto = await validar_e_obter_entidade(client, alvo)
+                            nome = getattr(entidade, 'title', getattr(entidade, 'username', str(alvo_correto)))
+                            novos_status_coletados[alvo_correto] = {"status": "ok", "nome": nome}
+                            
+                            if str(alvo) != alvo_correto:
+                                mapa_correcoes[str(alvo)] = alvo_correto
+                        except Exception:
+                            novos_status_coletados[str(alvo)] = {"status": "erro", "erro": "Acesso negado/Link inválido"}
+                            
+                        await asyncio.sleep(2) # Pausa de segurança
+                        
+                    status_destino_coletado = None
+                    if destino_atual:
+                        try:
+                            entidade_dest, dest_correto = await validar_e_obter_entidade(client, destino_atual)
+                            nome_dest = getattr(entidade_dest, 'title', getattr(entidade_dest, 'username', str(dest_correto)))
+                            status_destino_coletado = {"status": "ok", "nome": nome_dest}
+                            if str(destino_atual) != dest_correto:
+                                mapa_correcoes["_destino"] = dest_correto
+                        except Exception:
+                            status_destino_coletado = {"status": "erro", "nome": str(destino_atual)}
+                        await asyncio.sleep(2)
+                        
+                    dados_frescos = ler_config_bd_espiao("alvos_espiao", {"alvos": [], "canal_destino": None, "status_alvos": {}})
+                    alvos_reais_agora = [str(a) for a in dados_frescos.get("alvos", [])]
+                    status_alvos_antigos = dados_frescos.get("status_alvos", {})
+                    
+                    status_alvos_final = {}
+                    nova_lista_alvos = []
+                    houve_alteracao = False
+                    
+                    for alvo in alvos_reais_agora:
+                        alvo_final = mapa_correcoes.get(alvo, alvo)
+                        nova_lista_alvos.append(alvo_final)
+                        if alvo != alvo_final:
+                            houve_alteracao = True
+                    
+                    for alvo_final in nova_lista_alvos:
+                        if alvo_final in novos_status_coletados:
+                            status_alvos_final[alvo_final] = novos_status_coletados[alvo_final]
+                            if status_alvos_antigos.get(alvo_final) != novos_status_coletados[alvo_final]:
+                                houve_alteracao = True
+                        elif alvo_final in status_alvos_antigos:
+                            status_alvos_final[alvo_final] = status_alvos_antigos[alvo_final]
+                            
+                    for alvo_antigo in status_alvos_antigos.keys():
+                        if alvo_antigo not in nova_lista_alvos:
+                            houve_alteracao = True
+                            
+                    destino_fresco = dados_frescos.get("canal_destino")
+                    if destino_fresco:
+                        if "_destino" in mapa_correcoes and str(destino_fresco) == str(destino_atual):
+                            dados_frescos["canal_destino"] = mapa_correcoes["_destino"]
+                            houve_alteracao = True
+                            
+                    if status_destino_coletado and dados_frescos.get("status_destino") != status_destino_coletado:
+                        dados_frescos["status_destino"] = status_destino_coletado
+                        houve_alteracao = True
+                            
+                    if houve_alteracao:
+                        dados_frescos["alvos"] = nova_lista_alvos
+                        dados_frescos["status_alvos"] = status_alvos_final
+                        salvar_config_bd_espiao("alvos_espiao", dados_frescos)
+                        
+                    # 4. Salva a nova foto e atualiza a data de modificação
+                    ultimo_alvos = nova_lista_alvos
+                    ultimo_destino = str(dados_frescos.get("canal_destino")) if dados_frescos.get("canal_destino") else None
+                    
+                    try:
+                        ultima_modificacao = os.path.getmtime("banco_dados.db")
+                    except OSError:
+                        ultima_modificacao = modificacao_atual
+                        
+                    if EXIBIR_LOGS: logger.info("✅ Auditoria do Espião concluída. Nomes atualizados!")
+                else:
+                    # O arquivo mudou, mas foram outras configurações e não a lista. Apenas ignora.
+                    ultima_modificacao = modificacao_atual
+
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"⚠️ Erro no loop de monitoramento do Espião: {e}")
+
+        # 5. Dorme exatamente 60 segundos
+        await asyncio.sleep(60)
 
 async def monitorar_status_espelhos():
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento contínuo das rotas do Espelhador (suporte a grupos de canais)...")
+    ultima_assinatura_rotas = None
+    ultima_modificacao = 0
+
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento ultraleve (1 min) para as rotas do Espelhador...")
     while True:
         try:
+            # 1. Verifica a data de modificação do arquivo (Custo zero pro CPU)
             try:
-                with open("espelhos_config.json", "r", encoding="utf-8") as f:
-                    dados_espelho = json.load(f)
-            except FileNotFoundError:
-                dados_espelho = {"rotas": []}
-            
-            rotas = dados_espelho.get("rotas", [])
-            alterado = False
-            
-            for rota in rotas:
-                canais_para_verificar = []
-                
-                if "origens" in rota:
-                    for i, c in enumerate(rota["origens"]):
-                        canais_para_verificar.append(("origem_lista", c, i))
-                elif "origem" in rota:
-                    canais_para_verificar.append(("origem_legado", rota["origem"], None))
-                    
-                canais_para_verificar.append(("destino", rota.get("destino"), None))
-                
-                for tipo_ponta, canal, idx in canais_para_verificar:
-                    if not canal:
-                        continue
-                        
-                    try:
-                        # ✅ NOVO: Utiliza a mesma inteligência de validação e correção do Grupos Vigiados
-                        entidade, canal_correto = await validar_e_obter_entidade(client, canal)
-                        
-                        # Aplica a auto-correção na rota se a variação for diferente do que estava salvo
-                        if str(canal) != canal_correto:
-                            if tipo_ponta == "origem_lista":
-                                rota["origens"][idx] = canal_correto
-                            elif tipo_ponta == "origem_legado":
-                                rota["origem"] = canal_correto
-                            elif tipo_ponta == "destino":
-                                rota["destino"] = canal_correto
-                            
-                            alterado = True
-                            if EXIBIR_LOGS: logger.info(f"🔧 [Espelhador] ID corrigido automaticamente: {canal} -> {canal_correto}")
-                            canal = canal_correto # Atualiza a variável local para salvar o status
-                        
-                        nome_canal = getattr(entidade, 'title', getattr(entidade, 'username', str(canal)))
-                        if "status_canais" not in rota: rota["status_canais"] = {}
-                        
-                        info_atual = rota["status_canais"].get(str(canal), {})
-                        if not isinstance(info_atual, dict): info_atual = {}
-                        
-                        if info_atual.get("status") != "ok" or info_atual.get("nome") != nome_canal:
-                            rota["status_canais"][str(canal)] = {"status": "ok", "nome": nome_canal}
-                            alterado = True
+                modificacao_atual = os.path.getmtime("espelhos_config.json")
+            except OSError:
+                modificacao_atual = 0
 
-                        if rota.get("status_verificacao") == "erro":
-                            rota["status_verificacao"] = "ok"
-                            alterado = True
-                            if EXIBIR_LOGS: logger.info(f"✅ Acesso restaurado para a rota: {rota['nome']}")
-                            
-                    except Exception as e:
-                        if EXIBIR_LOGS: logger.warning(f"⚠️ Falha de acesso em {canal} ({tipo_ponta}) da rota {rota['nome']}: {e}")
-                        
-                        if "status_canais" not in rota: rota["status_canais"] = {}
-                        info_atual = rota["status_canais"].get(str(canal), {})
-                        if not isinstance(info_atual, dict): info_atual = {}
-                        
-                        if info_atual.get("status") != "erro":
-                            rota["status_canais"][str(canal)] = {"status": "erro", "nome": str(canal)}
-                            alterado = True
-                            
-                        if rota.get("status_verificacao") != "erro":
-                            rota["status_verificacao"] = "erro"
-                            alterado = True
-                            
-            if alterado:
-                with open("espelhos_config.json", "w", encoding="utf-8") as f:
-                    json.dump(dados_espelho, f, indent=4, ensure_ascii=False)
-                if EXIBIR_LOGS: logger.info("✅ Arquivo de banco do Espelhador atualizado após auditoria de grupos de canais.")
+            if modificacao_atual != ultima_modificacao:
+                try:
+                    with open("espelhos_config.json", "r", encoding="utf-8") as f:
+                        dados_espelho = json.load(f)
+                except FileNotFoundError:
+                    dados_espelho = {"rotas": []}
                 
-            if EXIBIR_LOGS: logger.info("✅ Auditoria de inicialização dos espelhos concluída. Encerrando ciclo de verificação.")
-            break
-            
+                rotas = dados_espelho.get("rotas", [])
+                
+                # 2. Cria a "foto" da assinatura atual
+                assinatura_atual = str([{ "origens": r.get("origens", [r.get("origem")]), "destino": r.get("destino") } for r in rotas])
+                
+                # 3. Compara se os canais alvos realmente mudaram
+                if assinatura_atual != ultima_assinatura_rotas:
+                    if EXIBIR_LOGS: logger.info("🔍 [Auditor] Mudança detectada nas rotas do Espelhador. Iniciando validação...")
+                    alterado = False
+                    
+                    for rota in rotas:
+                        canais_para_verificar = []
+                        
+                        if "origens" in rota:
+                            for i, c in enumerate(rota["origens"]):
+                                canais_para_verificar.append(("origem_lista", c, i))
+                        elif "origem" in rota:
+                            canais_para_verificar.append(("origem_legado", rota["origem"], None))
+                            
+                        canais_para_verificar.append(("destino", rota.get("destino"), None))
+                        
+                        for tipo_ponta, canal, idx in canais_para_verificar:
+                            if not canal: continue
+                                
+                            try:
+                                entidade, canal_correto = await validar_e_obter_entidade(client, canal)
+                                
+                                if str(canal) != canal_correto:
+                                    if tipo_ponta == "origem_lista": rota["origens"][idx] = canal_correto
+                                    elif tipo_ponta == "origem_legado": rota["origem"] = canal_correto
+                                    elif tipo_ponta == "destino": rota["destino"] = canal_correto
+                                    alterado = True
+                                    canal = canal_correto 
+                                
+                                nome_canal = getattr(entidade, 'title', getattr(entidade, 'username', str(canal)))
+                                if "status_canais" not in rota: rota["status_canais"] = {}
+                                
+                                info_atual = rota["status_canais"].get(str(canal), {})
+                                if not isinstance(info_atual, dict): info_atual = {}
+                                
+                                if info_atual.get("status") != "ok" or info_atual.get("nome") != nome_canal:
+                                    rota["status_canais"][str(canal)] = {"status": "ok", "nome": nome_canal}
+                                    alterado = True
+
+                                if rota.get("status_verificacao") == "erro":
+                                    rota["status_verificacao"] = "ok"
+                                    alterado = True
+                                    
+                            except Exception as e:
+                                if "status_canais" not in rota: rota["status_canais"] = {}
+                                info_atual = rota["status_canais"].get(str(canal), {})
+                                if not isinstance(info_atual, dict): info_atual = {}
+                                
+                                if info_atual.get("status") != "erro":
+                                    rota["status_canais"][str(canal)] = {"status": "erro", "nome": str(canal)}
+                                    alterado = True
+                                    
+                                if rota.get("status_verificacao") != "erro":
+                                    rota["status_verificacao"] = "erro"
+                                    alterado = True
+                                    
+                    if alterado:
+                        with open("espelhos_config.json", "w", encoding="utf-8") as f:
+                            json.dump(dados_espelho, f, indent=4, ensure_ascii=False)
+                        if EXIBIR_LOGS: logger.info("✅ Arquivo do Espelhador atualizado e sincronizado após auditoria.")
+                        
+                    # 4. Atualiza as assinaturas
+                    ultima_assinatura_rotas = str([{ "origens": r.get("origens", [r.get("origem")]), "destino": r.get("destino") } for r in rotas])
+                    
+                    try:
+                        ultima_modificacao = os.path.getmtime("espelhos_config.json")
+                    except OSError:
+                        ultima_modificacao = modificacao_atual
+                        
+                    if EXIBIR_LOGS: logger.info("✅ Auditoria do Espelhador concluída. Nomes atualizados!")
+                else:
+                    ultima_modificacao = modificacao_atual
+
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"⚠️ Erro crítico na auditoria de inicialização do espelhador: {e}")
-            break
+            if EXIBIR_LOGS: logger.error(f"⚠️ Erro na auditoria do espelhador: {e}")
+            
+        # 5. Dorme exatamente 60 segundos
+        await asyncio.sleep(60)
 
 async def main():
     if EXIBIR_LOGS: logger.info("🕵️ Iniciando o Módulo Espião de Clonagem...")
