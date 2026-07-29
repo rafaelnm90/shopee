@@ -2561,12 +2561,15 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
 
     # ✅ ORDENAÇÃO UNIVERSAL E INTELIGENTE (ESPIÃO E ESPELHADOR)
     def chave_ordenacao_universal(item):
-        # Grupo 0 (Topo): Vídeos já postados, ordenados pelo horário de postagem real
+        # Grupo 0 (Topo): Vídeos já postados
         if item.get("processado", False) or item.get("processado") == 1:
             return (0, item.get("horario_postagem", "00:00"))
-        # Grupo 1 (Fundo): Vídeos pendentes, ordenados pelo horário exato que vão disparar
+        # Grupo 1 (Meio): Vídeos pendentes que já têm horário de disparo
+        elif item.get("horario_disparo"):
+            return (1, item.get("horario_disparo"))
+        # Grupo 2 (Fundo): Vídeos que ainda não têm horário (ainda vão para a IA), ordenados pela captura
         else:
-            return (1, item.get("horario_disparo") or item.get("data_captura", "2099-01-01 00:00:00"))
+            return (2, item.get("data_captura", "2099-01-01 00:00:00"))
 
     for nome_rota in rotas_agrupadas:
         rotas_agrupadas[nome_rota].sort(key=chave_ordenacao_universal)
