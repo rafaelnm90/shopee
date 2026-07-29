@@ -2978,7 +2978,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             elif total_ant == 0 and total_m > 0:
                 variacao_texto = " <b>(📈 +100%)</b>"
 
-        # ✅ CORREÇÃO APLICADA: Porcentagem com base na QUANTIDADE DE PEDIDOS do mês.
         total_pedidos_m = dados_m['qtd_aprovado'] + dados_m['qtd_pendente'] + dados_m.get('qtd_cancelado', 0)
         pct_aprov_m = (dados_m['qtd_aprovado'] / total_pedidos_m * 100) if total_pedidos_m > 0 else 0.0
         pct_pend_m = (dados_m['qtd_pendente'] / total_pedidos_m * 100) if total_pedidos_m > 0 else 0.0
@@ -3007,7 +3006,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             elif total_ant == 0 and total_a > 0:
                 variacao_texto = " <b>(📈 +100%)</b>"
 
-        # ✅ CORREÇÃO APLICADA: Porcentagem com base na QUANTIDADE DE PEDIDOS do ano.
         total_pedidos_a = dados_a['qtd_aprovado'] + dados_a['qtd_pendente'] + dados_a.get('qtd_cancelado', 0)
         pct_aprov_a = (dados_a['qtd_aprovado'] / total_pedidos_a * 100) if total_pedidos_a > 0 else 0.0
         pct_pend_a = (dados_a['qtd_pendente'] / total_pedidos_a * 100) if total_pedidos_a > 0 else 0.0
@@ -3021,9 +3019,11 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     texto += (
         "📊 <b>MÉTRICAS DA VARREDURA (Últimos 30 Dias)</b>\n"
         f"• Taxa de Conversão: <b>{taxa_conversao:.1f}%</b>\n"
-        f"• Pedidos Totais: {pagos} Pagos | {pendentes} Pendentes | {cancelados} Cancel.\n\n"
+        f"• Pedidos Totais: {pagos} Pagos | {pendentes} Pendentes | {cancelados} Cancel.\n"
+        "<blockquote><i>A Taxa de Conversão indica a porcentagem de pedidos que foram efetivamente PAGOS (Confirmados) em relação ao volume total de pedidos gerados, ajudando a medir a qualidade e o poder de compra do seu tráfego atual.</i></blockquote>\n\n"
     )
 
+    # ✅ RESTAURANDO OS RECORDES GLOBAIS AQUI
     todos_totais = {}
     for d, vals in historico_limpo.items():
         if d <= hoje.strftime("%Y-%m-%d"):
@@ -3057,7 +3057,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         q_canc = dados_dia.get("qtd_cancelado", 0)
         v_tot = v_aprov + v_pend + v_canc
         
-        # ✅ CORREÇÃO APLICADA: Porcentagem com base na QUANTIDADE DE PEDIDOS do dia.
         total_pedidos_d = q_aprov + q_pend + q_canc
         pct_aprov_d = (q_aprov / total_pedidos_d * 100) if total_pedidos_d > 0 else 0.0
         pct_pend_d = (q_pend / total_pedidos_d * 100) if total_pedidos_d > 0 else 0.0
@@ -3123,11 +3122,8 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         fig, ax1 = plt.subplots(figsize=(8, 5), facecolor='#f4f4f9')
         ax1.set_facecolor('#f4f4f9')
         
-        # ✅ CORREÇÃO APLICADA: Cor das barras mudada para "Azul Caneta Bic" (#00008B)
-        bars = ax1.bar(labels_grafico, valores_comissao, color='#00008B', edgecolor='black', linewidth=0.5, label='Comissão Atual (R$)')
-        
-        # ✅ CORREÇÃO APLICADA: Cor da linha de projeção mudada para "Vermelho" (#FF0000)
-        line_est, = ax1.plot(labels_grafico, valores_estimativa, color='#FF0000', marker='^', linestyle=':', linewidth=2, label='Projeção / Fechamento')
+        bars = ax1.bar(labels_grafico, valores_comissao, color='#4B0082', edgecolor='black', linewidth=0.5, label='Comissão Atual (R$)')
+        line_est, = ax1.plot(labels_grafico, valores_estimativa, color='#FF8C00', marker='^', linestyle=':', linewidth=2, label='Projeção / Fechamento')
         
         ax1.set_ylabel('Comissão (R$)', fontsize=10, color='#333333')
         ax1.grid(axis='y', linestyle='--', alpha=0.5)
@@ -3145,27 +3141,21 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             if yval > 0:
                 ax1.text(bar.get_x() + bar.get_width()/2, yval + offset_y, f'R${yval:.0f}', ha='center', va='bottom', fontsize=8, fontweight='bold', color='#333333')
 
-        # ✅ CORREÇÃO APLICADA: Reordenamento da legenda do gráfico.
-        lines_1, labels_1 = ax1.get_legend_handles_labels() 
-        lines_2, labels_2 = ax2.get_legend_handles_labels() 
+        lines_1, labels_1 = ax1.get_legend_handles_labels()
+        lines_2, labels_2 = ax2.get_legend_handles_labels()
         
         handles_ordenados = []
         labels_ordenados = []
         
-        # 1º Pedidos (Linha Verde do ax2)
-        if lines_2:
-            handles_ordenados.append(lines_2[0])
-            labels_ordenados.append(labels_2[0])
-            
-        # 2º Projeção (Linha Vermelha do ax1)
-        if len(lines_1) > 1:
-            handles_ordenados.append(lines_1[1])
-            labels_ordenados.append(labels_1[1])
-            
-        # 3º Comissão Atual (Barras Azuis do ax1)
         if len(lines_1) > 0:
             handles_ordenados.append(lines_1[0])
             labels_ordenados.append(labels_1[0])
+        if len(lines_1) > 1:
+            handles_ordenados.append(lines_1[1])
+            labels_ordenados.append(labels_1[1])
+        if lines_2:
+            handles_ordenados.append(lines_2[0])
+            labels_ordenados.append(labels_2[0])
 
         ax1.legend(handles_ordenados, labels_ordenados, loc='upper left', fontsize=9)
 
