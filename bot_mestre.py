@@ -3124,8 +3124,9 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         fig, ax1 = plt.subplots(figsize=(8, 5), facecolor='#f4f4f9')
         ax1.set_facecolor('#f4f4f9')
         
-        bars = ax1.bar(labels_grafico, valores_comissao, color='#00008B', edgecolor='black', linewidth=0.5, label='Comissão Atual (R$)')
-        line_est, = ax1.plot(labels_grafico, valores_estimativa, color='#FF0000', marker='^', linestyle=':', linewidth=2, label='Projeção / Fechamento')
+        # ✅ CORREÇÃO 4: Cor Roxo Caneta Bic nas barras e Laranja de contraste na linha de projeção
+        bars = ax1.bar(labels_grafico, valores_comissao, color='#4B0082', edgecolor='black', linewidth=0.5, label='Comissão Atual (R$)')
+        line_est, = ax1.plot(labels_grafico, valores_estimativa, color='#FF8C00', marker='^', linestyle=':', linewidth=2, label='Projeção / Fechamento')
         
         ax1.set_ylabel('Comissão (R$)', fontsize=10, color='#333333')
         ax1.grid(axis='y', linestyle='--', alpha=0.5)
@@ -3143,22 +3144,29 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             if yval > 0:
                 ax1.text(bar.get_x() + bar.get_width()/2, yval + offset_y, f'R${yval:.0f}', ha='center', va='bottom', fontsize=8, fontweight='bold', color='#333333')
 
-        lines_1, labels_1 = ax1.get_legend_handles_labels()
-        lines_2, labels_2 = ax2.get_legend_handles_labels()
+        # ✅ CORREÇÃO 3: Nova ordem da legenda (Comissão, Projeção, Pedidos)
+        # Extraindo handles e labels
+        lines_1, labels_1 = ax1.get_legend_handles_labels() 
+        lines_2, labels_2 = ax2.get_legend_handles_labels() 
+        
+        # Juntando todos os handles e labels em dicionários para facilitar o acesso
+        todos_handles = lines_1 + lines_2
+        todos_labels = labels_1 + labels_2
+        mapa_legenda = dict(zip(todos_labels, todos_handles))
+        
+        # Ordem desejada explícita
+        ordem_desejada = ['Comissão Atual (R$)', 'Projeção / Fechamento', 'Pedidos Gerados']
         
         handles_ordenados = []
         labels_ordenados = []
         
-        if len(lines_1) > 0:
-            handles_ordenados.append(lines_1[0])
-            labels_ordenados.append(labels_1[0])
-        if len(lines_1) > 1:
-            handles_ordenados.append(lines_1[1])
-            labels_ordenados.append(labels_1[1])
-        if lines_2:
-            handles_ordenados.append(lines_2[0])
-            labels_ordenados.append(labels_2[0])
+        # Construindo a legenda na ordem desejada
+        for label in ordem_desejada:
+            if label in mapa_legenda:
+                handles_ordenados.append(mapa_legenda[label])
+                labels_ordenados.append(label)
 
+        # Adicionando a legenda ao gráfico
         ax1.legend(handles_ordenados, labels_ordenados, loc='upper left', fontsize=9)
 
         ax1.spines['top'].set_visible(False)
