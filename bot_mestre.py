@@ -137,6 +137,7 @@ class ConfigFluxo(StatesGroup):
     aguardando_novo_numero = State()
     aguardando_confirmacao_zerar = State()
     aguardando_confirmacao_zerar_filas = State()
+    aguardando_confirmacao_reiniciar = State() # ✅ NOVO ESTADO
 
 class ConfigDivulgacao(StatesGroup):
     menu_principal = State()
@@ -408,6 +409,7 @@ def obter_teclado_principal():
 def obter_teclado_opcoes_servidor():
     botoes = [
         [KeyboardButton(text="Monitorar Servidor 🖥️"), KeyboardButton(text="Zerar Filas e Tarefas 🧹")],
+        [KeyboardButton(text="Reiniciar Robôs 🔄")], # ✅ NOVO BOTÃO AQUI
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -2047,6 +2049,69 @@ async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao tentar coletar métricas no terminal do Linux: {e}")
         await msg_status.edit_text(f"❌ <b>Erro interno ao ler sensores:</b>\n<code>{e}</code>", parse_mode="HTML")
 
+@dp.message(F.text == "Reiniciar Robôs 🔄", StateFilter("*"))
+async def confirmar_reiniciar_robos(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("⚠️ Solicitando confirmação para reiniciar os serviços do servidor.")
+    
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar Reinício ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    texto = (
+        "⚠️ <b>ATENÇÃO!</b>\n\n"
+        "Você está prestes a reiniciar <b>TODOS</b> os robôs simultaneamente no servidor Linux:\n\n"
+        "🔹 Motor Espião (Userbot)\n"
+        "🔹 Espelhador (Vídeos Autorais)\n"
+        "🔹 Divulgação de Canais (Spam)\n"
+        "🔹 Bot Mestre (Painel Principal)\n\n"
+        "<i>Isso causará uma breve interrupção. O painel ficará mudo por alguns segundos até que o sistema inteiro acorde e se reconecte ao Telegram.</i>\n\n"
+        "Confirma o reinício de todos os sistemas?"
+    )
+    await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(ConfigFluxo.aguardando_confirmacao_reiniciar)
+
+@dp.message(ConfigFluxo.aguardando_confirmacao_reiniciar)
+async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar Reinício ✅":
+        await message.answer("Por favor, clique em Aprovar Reinício ✅ ou Cancelar ❌.")
+        return
+
+    await state.clear()
+    msg_status = await message.answer("🔄 <b>Reiniciando os serviços no servidor Linux...</b>\n<i>Aguarde...</i>", parse_mode="HTML", reply_markup=obter_teclado_opcoes_servidor())
+    
+    if EXIBIR_LOGS: logger.info("🔄 Comando de reinício global acionado pelo administrador.")
+    
+    # Baseado na sua pasta services_linux do Github
+    servicos_background = [
+        "motor_userbot_bot.service",
+        "espelhador_videos_autorais_bot.service",
+        "divulgacao_canal_bot.service"
+    ]
+
+    import subprocess
+    # 1. Reinicia os serviços secundários em background
+    for servico in servicos_background:
+        try:
+            subprocess.Popen(["sudo", "systemctl", "restart", servico])
+            if EXIBIR_LOGS: logger.info(f"✅ Disparado reinício para: {servico}")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro ao reiniciar {servico}: {e}")
+            
+    # Dá tempo para as threads do Linux processarem os outros robôs
+    await asyncio.sleep(2)
+
+    await msg_status.edit_text("✅ <b>Sistemas Secundários Reiniciados!</b>\n🔄 Reiniciando o Bot Principal agora. O Painel voltará online em 5 segundos!", parse_mode="HTML")
+    
+    # 2. Reinicia a si mesmo (Este comando vai forçar a interrupção imediata do bot mestre)
+    try:
+        if EXIBIR_LOGS: logger.info("🔄 Reiniciando o próprio serviço (bot_mestre_bot.service). O script será interrompido agora!")
+        subprocess.Popen(["sudo", "systemctl", "restart", "bot_mestre_bot.service"])
+    except Exception:
+        pass
+
 @dp.message(F.text == "Canal Afiliados 📺", StateFilter("*"))
 async def menu_canal_principal(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
@@ -3325,10 +3390,10 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 
     data = await state.get_data()
 
-    # 🔁 Roteamento Inteligente: Se estiver na confirmação de Zerar Filas Globais
-    if estado_atual == "ConfigFluxo:aguardando_confirmacao_zerar_filas":
+    # 🔁 Roteamento Inteligente: Se estiver na confirmação de Zerar Filas Globais ou Reiniciar
+    if estado_atual in ["ConfigFluxo:aguardando_confirmacao_zerar_filas", "ConfigFluxo:aguardando_confirmacao_reiniciar"]:
         await state.clear()
-        await message.answer("Ação cancelada. O sistema não foi limpo.", reply_markup=obter_teclado_opcoes_servidor())
+        await message.answer("Ação cancelada. Nenhuma alteração foi feita no servidor.", reply_markup=obter_teclado_opcoes_servidor())
         return
 
     # 🔁 Roteamento Inteligente: Se estiver no Gerenciador de Fila
