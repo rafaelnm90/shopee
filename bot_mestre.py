@@ -4629,38 +4629,65 @@ async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
 @dp.message(EspiaoFluxo.aguardando_novo_alvo)
 async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
     entradas_brutas = message.text.replace('\n', ',').split(',')
-    
     msg_status = await message.answer("⏳ <b>Validando links, subgrupos e buscando nomes...</b>", parse_mode="HTML", reply_markup=teclado_cancelar)
 
-    alvos_validados = []
+    # 1. Lê os alvos que já existem no banco de dados
+    dados_existentes = ler_alvos_espiao()
+    alvos_existentes = dados_existentes.get("alvos", [])
+
+    alvos_novos_para_adicionar = []
+    alvos_ja_monitorados = []
     alvos_rejeitados = []
 
+    # 2. Valida as entradas
     for entrada in entradas_brutas:
         if not entrada.strip(): continue
 
         sucesso, id_final, nome = await validar_e_formatar_alvo(bot, entrada)
 
         if sucesso:
-            alvos_validados.append({"id": id_final, "nome": nome})
-            salvar_nome_grupo(id_final, nome)
+            # 3. Faz a checagem inteligente ANTES de pedir aprovação
+            if id_final in alvos_existentes:
+                alvos_ja_monitorados.append({"id": id_final, "nome": nome})
+            elif id_final not in [a["id"] for a in alvos_novos_para_adicionar]:
+                alvos_novos_para_adicionar.append({"id": id_final, "nome": nome})
+                salvar_nome_grupo(id_final, nome)
         else:
             alvos_rejeitados.append(entrada)
 
     await msg_status.delete()
 
-    if not alvos_validados:
-        await message.answer("⚠️ <b>Nenhum alvo detectado ou todos deram negativo.</b>\nVerifique as permissões, links ou IDs e tente novamente:", parse_mode="HTML", reply_markup=teclado_cancelar)
+    # Cenário A: Não há NENHUM alvo NOVO para adicionar
+    if not alvos_novos_para_adicionar:
+        texto_resposta = ""
+        if alvos_ja_monitorados:
+            texto_resposta += f"⚠️ <b>Ação desnecessária:</b> Os {len(alvos_ja_monitorados)} grupo(s) válidos que você enviou já estavam sendo monitorados pelo Espião!\n"
+        if alvos_rejeitados:
+            texto_resposta += f"\n❌ <b>Falha na validação:</b> {len(alvos_rejeitados)} entrada(s) não foram reconhecidas pelo Telegram.\n"
+        
+        if not texto_resposta:
+            texto_resposta = "⚠️ Nenhum alvo válido detectado."
+
+        # Volta direto para o painel principal sem pedir "Aprovar"
+        await message.answer(texto_resposta, parse_mode="HTML")
+        await state.clear()
+        await menu_grupos_vigiados(message, state)
         return
 
-    await state.update_data(novos_alvos_espiao=alvos_validados)
+    # Cenário B: Existem alvos NOVOS. Monta a tela de confirmação apenas com os novos.
+    await state.update_data(novos_alvos_espiao=alvos_novos_para_adicionar)
     
-    texto_confirmacao = f"Você está prestes a adicionar <b>{len(alvos_validados)} alvo(s)</b> ao radar do Espião:\n\n"
-    for av in alvos_validados:
+    texto_confirmacao = f"Você está prestes a adicionar <b>{len(alvos_novos_para_adicionar)} NOVO(S) alvo(s)</b> ao radar do Espião:\n\n"
+    for av in alvos_novos_para_adicionar:
         tag_subgrupo = " <i>(Subgrupo focado)</i>" if ":" in av['id'] else ""
         texto_confirmacao += f"🔹 <b>{av['nome']}</b> (<code>{av['id']}</code>){tag_subgrupo}\n"
 
+    # Avisos secundários para manter o usuário informado
+    if alvos_ja_monitorados:
+        texto_confirmacao += f"\nℹ️ <i>Nota: {len(alvos_ja_monitorados)} entrada(s) foram ignoradas por já estarem no radar.</i>\n"
+
     if alvos_rejeitados:
-        texto_confirmacao += f"\n⚠️ <b>Aviso:</b> {len(alvos_rejeitados)} entrada(s) falharam na validação ou o bot não tem acesso:\n"
+        texto_confirmacao += f"\n⚠️ <b>Aviso:</b> {len(alvos_rejeitados)} entrada(s) falharam na validação:\n"
         for rej in alvos_rejeitados:
             texto_confirmacao += f"❌ <code>{rej}</code>\n"
 
