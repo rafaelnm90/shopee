@@ -2080,7 +2080,9 @@ async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
         return
 
     await state.clear()
-    msg_status = await message.answer("🔄 <b>Reiniciando os serviços no servidor Linux...</b>\n<i>Aguarde...</i>", parse_mode="HTML", reply_markup=obter_teclado_opcoes_servidor())
+    
+    # 1. Envia a mensagem de status SEM o teclado embutido
+    msg_status = await message.answer("🔄 <b>Reiniciando os serviços no servidor Linux...</b>\n<i>Aguarde...</i>", parse_mode="HTML")
     
     if EXIBIR_LOGS: logger.info("🔄 Comando de reinício global acionado pelo administrador.")
     
@@ -2092,7 +2094,7 @@ async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
     ]
 
     import subprocess
-    # 1. Reinicia os serviços secundários em background
+    # 2. Reinicia os serviços secundários em background
     for servico in servicos_background:
         try:
             subprocess.Popen(["sudo", "systemctl", "restart", servico])
@@ -2103,9 +2105,11 @@ async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
     # Dá tempo para as threads do Linux processarem os outros robôs
     await asyncio.sleep(2)
 
-    await msg_status.edit_text("✅ <b>Sistemas Secundários Reiniciados!</b>\n🔄 Reiniciando o Bot Principal agora. O Painel voltará online em 5 segundos!", parse_mode="HTML")
+    # 3. Apaga a mensagem temporária e envia a nova mensagem de Sucesso COM o teclado
+    await msg_status.delete()
+    await message.answer("✅ <b>Sistemas Secundários Reiniciados!</b>\n🔄 Reiniciando o Bot Principal agora. O Painel voltará online em 5 segundos!", parse_mode="HTML", reply_markup=obter_teclado_opcoes_servidor())
     
-    # 2. Reinicia a si mesmo (Este comando vai forçar a interrupção imediata do bot mestre)
+    # 4. Reinicia a si mesmo (Este comando vai forçar a interrupção imediata do bot mestre)
     try:
         if EXIBIR_LOGS: logger.info("🔄 Reiniciando o próprio serviço (bot_mestre_bot.service). O script será interrompido agora!")
         subprocess.Popen(["sudo", "systemctl", "restart", "bot_mestre_bot.service"])
