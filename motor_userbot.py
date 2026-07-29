@@ -919,8 +919,10 @@ async def monitorar_status_alvos():
             dados_frescos["status_alvos"] = status_alvos_final
             salvar_config_bd_espiao("alvos_espiao", dados_frescos)
                 
-        if EXIBIR_LOGS: logger.info("✅ Auditoria de inicialização dos alvos concluída. Encerrando ciclo de verificação.")
-        break
+        if EXIBIR_LOGS: logger.info("✅ Auditoria concluída. O Userbot fará uma nova varredura de nomes em 6 horas.")
+        
+        # Pausa por 6 horas (21600 segundos) e depois roda de novo infinitamente
+        await asyncio.sleep(21600)
 
 async def monitorar_status_espelhos():
     if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento contínuo das rotas do Espelhador (suporte a grupos de canais)...")
