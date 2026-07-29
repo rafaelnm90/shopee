@@ -174,4 +174,10 @@ async def validar_e_formatar_alvo(bot_instance, entrada):
         id_final = f"{id_confirmado}:{topico_id}" if topico_id else id_confirmado
         return True, id_final, nome_confirmado
     else:
+        # ✅ CORREÇÃO (MODO TRUST): Se o bot não tem permissão para ler o grupo para pegar o nome,
+        # MAS o que você enviou é claramente um ID numérico ou @username, ele aprova mesmo assim!
+        if chat_base.lstrip('-').isdigit() or chat_base.startswith("@"):
+            id_final = f"{chat_base}:{topico_id}" if topico_id else chat_base
+            return True, id_final, chat_base # Retorna o próprio ID no lugar do nome
+
         return False, entrada, None
