@@ -126,34 +126,40 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
     data_cap_str = item.get("data_captura", "Data não registrada")
     
     hoje_obj = agora.date()
-    data_alvo_esperada_obj = None
+    amanha_obj = hoje_obj + timedelta(days=1)
 
     if data_cap_str != "Data não registrada":
         try:
             formato = "%Y-%m-%d %H:%M:%S" if len(data_cap_str) > 10 else "%Y-%m-%d"
             data_obj = datetime.strptime(data_cap_str, formato)
             data_cap_formatada = data_obj.strftime("%d/%m às %H:%M")
-            data_alvo_esperada_obj = data_obj + timedelta(days=atraso_dias)
             
+            # Data em que o vídeo deveria idealmente ser postado, baseado no D+X
+            data_alvo_obj = (data_obj + timedelta(days=atraso_dias)).date()
+            
+            # Se já tem um horário definido (ex: Espelhador ou Espião já processado)
             if horario_universal:
                 try:
-                    hd_obj = datetime.strptime(horario_universal, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                    hd_obj = datetime.strptime(horario_universal, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario).date()
                 except ValueError:
-                    hd_obj = datetime.strptime(horario_universal, "%Y-%m-%d").replace(tzinfo=fuso_horario)
+                    hd_obj = datetime.strptime(horario_universal, "%Y-%m-%d").replace(tzinfo=fuso_horario).date()
 
-                if hd_obj.date() == hoje_obj:
-                    status_dia = "🔴 Atrasado" if agora > hd_obj else f"⏳ Represa (D+{atraso_dias})"
-                elif hd_obj.date() > hoje_obj:
-                    status_dia = "🟡 Amanhã" if hd_obj.date() == hoje_obj + timedelta(days=1) else f"🔵 Represa (D+{abs((hd_obj.date() - hoje_obj).days)})"
+                if hd_obj == hoje_obj:
+                    status_dia = "🟢 Agendado p/ Hoje"
+                elif hd_obj == amanha_obj:
+                    status_dia = "🟡 Agendado p/ Amanhã"
+                elif hd_obj > amanha_obj:
+                    status_dia = f"🔵 Agendado p/ {hd_obj.strftime('%d/%m')}"
                 else:
-                    status_dia = "🔴 Retido/Falha"
+                    status_dia = "🔴 Atrasado"
+            # Se não tem horário definido (ex: Espião ainda vai processar na IA)
             else:
-                if data_alvo_esperada_obj.date() == hoje_obj:
-                    status_dia = f"⏳ Represa (D+{atraso_dias})"
-                elif data_alvo_esperada_obj.date() > hoje_obj:
-                    status_dia = "🟡 Amanhã" if data_alvo_esperada_obj.date() == hoje_obj + timedelta(days=1) else f"🔵 Represa (D+{abs((data_alvo_esperada_obj.date() - hoje_obj).days)})"
+                if data_alvo_obj <= hoje_obj:
+                    status_dia = "🟢 Agendado p/ Hoje"
+                elif data_alvo_obj == amanha_obj:
+                    status_dia = "🟡 Agendado p/ Amanhã"
                 else:
-                    status_dia = "🔴 Retido/Falha"
+                    status_dia = f"🔵 Agendado p/ {data_alvo_obj.strftime('%d/%m')}"
 
         except Exception:
             pass
