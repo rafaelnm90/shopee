@@ -3023,10 +3023,12 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         "<blockquote><i>A Taxa de Conversão indica a porcentagem de pedidos que foram efetivamente PAGOS (Confirmados) em relação ao volume total de pedidos gerados, ajudando a medir a qualidade e o poder de compra do seu tráfego atual.</i></blockquote>\n\n"
     )
 
+    # ✅ CORREÇÃO DOS RECORDES: Calculando valores apenas sobre receita válida e sem bloco de texto adicional
     todos_totais = {}
     for d, vals in historico_limpo.items():
         if d <= hoje.strftime("%Y-%m-%d"):
-            v_tot = vals.get("aprovado", 0.0) + vals.get("pendente", 0.0) + vals.get("cancelado", 0.0)
+            # O Recorde agora soma Apenas Confirmado + Pendente (O valor cancelado não entra para o recorde de faturamento real!)
+            v_tot = vals.get("aprovado", 0.0) + vals.get("pendente", 0.0)
             todos_totais[d] = v_tot
             
     if todos_totais:
@@ -3040,10 +3042,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         texto += "🏆 <b>RECORDES GLOBAIS (Todo o Histórico)</b>\n"
         texto += f"• 🥇 Melhor Dia: {melhor_dia_br} (<b>R$ {f_br(todos_totais[melhor_dia_str])}</b>)\n"
         texto += f"• 📉 Pior Dia: {pior_dia_br} (<b>R$ {f_br(todos_totais[pior_dia_str])}</b>)\n"
-        texto += f"• ⚖️ Média Diária: <b>R$ {f_br(media_global)}</b>\n"
-        
-        # ✅ NOVA ANÁLISE DINÂMICA DE RECORDES AQUI!
-        texto += f"<blockquote><i>O seu pico histórico de vendas ocorreu em {melhor_dia_br}, gerando um total de R$ {f_br(todos_totais[melhor_dia_str])}. O objetivo principal das automações é elevar gradativamente a sua Média Diária atual (R$ {f_br(media_global)}) para que os dias de recorde se tornem o novo padrão de recebimento.</i></blockquote>\n\n"
+        texto += f"• ⚖️ Média Diária: <b>R$ {f_br(media_global)}</b>\n\n"
 
     texto += "📈 <b>DESEMPENHO DIÁRIO (Últimos 7 Dias)</b>\n"
     dias_exibicao = [(hoje - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(1, 8)]
@@ -3124,9 +3123,9 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         fig, ax1 = plt.subplots(figsize=(8, 5), facecolor='#f4f4f9')
         ax1.set_facecolor('#f4f4f9')
         
-        # ✅ CORREÇÃO 4: Cor Roxo Caneta Bic nas barras e Laranja de contraste na linha de projeção
-        bars = ax1.bar(labels_grafico, valores_comissao, color='#4B0082', edgecolor='black', linewidth=0.5, label='Comissão Atual (R$)')
-        line_est, = ax1.plot(labels_grafico, valores_estimativa, color='#FF8C00', marker='^', linestyle=':', linewidth=2, label='Projeção / Fechamento')
+        # ✅ CORES CORRETAS APLICADAS (As suas escolhidas)
+        bars = ax1.bar(labels_grafico, valores_comissao, color='#00008B', edgecolor='black', linewidth=0.5, label='Comissão Atual (R$)')
+        line_est, = ax1.plot(labels_grafico, valores_estimativa, color='#FF0000', marker='^', linestyle=':', linewidth=2, label='Projeção / Fechamento')
         
         ax1.set_ylabel('Comissão (R$)', fontsize=10, color='#333333')
         ax1.grid(axis='y', linestyle='--', alpha=0.5)
@@ -3144,29 +3143,23 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             if yval > 0:
                 ax1.text(bar.get_x() + bar.get_width()/2, yval + offset_y, f'R${yval:.0f}', ha='center', va='bottom', fontsize=8, fontweight='bold', color='#333333')
 
-        # ✅ CORREÇÃO 3: Nova ordem da legenda (Comissão, Projeção, Pedidos)
-        # Extraindo handles e labels
+        # ✅ ORDEM DA LEGENDA CORRIGIDA EXATAMENTE PARA: 1º Pedidos, 2º Projeção, 3º Comissão.
         lines_1, labels_1 = ax1.get_legend_handles_labels() 
         lines_2, labels_2 = ax2.get_legend_handles_labels() 
         
-        # Juntando todos os handles e labels em dicionários para facilitar o acesso
         todos_handles = lines_1 + lines_2
         todos_labels = labels_1 + labels_2
         mapa_legenda = dict(zip(todos_labels, todos_handles))
         
-        # Ordem desejada explícita
-        ordem_desejada = ['Comissão Atual (R$)', 'Projeção / Fechamento', 'Pedidos Gerados']
+        ordem_desejada = ['Pedidos Gerados', 'Projeção / Fechamento', 'Comissão Atual (R$)']
         
         handles_ordenados = []
         labels_ordenados = []
-        
-        # Construindo a legenda na ordem desejada
         for label in ordem_desejada:
             if label in mapa_legenda:
                 handles_ordenados.append(mapa_legenda[label])
                 labels_ordenados.append(label)
 
-        # Adicionando a legenda ao gráfico
         ax1.legend(handles_ordenados, labels_ordenados, loc='upper left', fontsize=9)
 
         ax1.spines['top'].set_visible(False)
