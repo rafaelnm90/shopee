@@ -3023,11 +3023,9 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         "<blockquote><i>A Taxa de Conversão indica a porcentagem de pedidos que foram efetivamente PAGOS (Confirmados) em relação ao volume total de pedidos gerados, ajudando a medir a qualidade e o poder de compra do seu tráfego atual.</i></blockquote>\n\n"
     )
 
-    # ✅ CORREÇÃO DOS RECORDES: Calculando valores apenas sobre receita válida e sem bloco de texto adicional
     todos_totais = {}
     for d, vals in historico_limpo.items():
         if d <= hoje.strftime("%Y-%m-%d"):
-            # O Recorde agora soma Apenas Confirmado + Pendente (O valor cancelado não entra para o recorde de faturamento real!)
             v_tot = vals.get("aprovado", 0.0) + vals.get("pendente", 0.0)
             todos_totais[d] = v_tot
             
@@ -3042,7 +3040,10 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         texto += "🏆 <b>RECORDES GLOBAIS (Todo o Histórico)</b>\n"
         texto += f"• 🥇 Melhor Dia: {melhor_dia_br} (<b>R$ {f_br(todos_totais[melhor_dia_str])}</b>)\n"
         texto += f"• 📉 Pior Dia: {pior_dia_br} (<b>R$ {f_br(todos_totais[pior_dia_str])}</b>)\n"
-        texto += f"• ⚖️ Média Diária: <b>R$ {f_br(media_global)}</b>\n\n"
+        texto += f"• ⚖️ Média Diária: <b>R$ {f_br(media_global)}</b>\n"
+        
+        # ✅ LEGENDA DOS RECORDES DE VOLTA AQUI
+        texto += f"<blockquote><i>O seu pico histórico de vendas ocorreu em {melhor_dia_br}, gerando um total de R$ {f_br(todos_totais[melhor_dia_str])}. O objetivo principal das automações é elevar gradativamente a sua Média Diária atual (R$ {f_br(media_global)}) para que os dias de recorde se tornem o novo padrão de recebimento.</i></blockquote>\n\n"
 
     texto += "📈 <b>DESEMPENHO DIÁRIO (Últimos 7 Dias)</b>\n"
     dias_exibicao = [(hoje - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(1, 8)]
