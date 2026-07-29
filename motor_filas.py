@@ -127,6 +127,7 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
     
     hoje_obj = agora.date()
     amanha_obj = hoje_obj + timedelta(days=1)
+    data_alvo_esperada_obj = None # ✅ CORREÇÃO: Variável restaurada aqui!
 
     if data_cap_str != "Data não registrada":
         try:
@@ -135,7 +136,8 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
             data_cap_formatada = data_obj.strftime("%d/%m às %H:%M")
             
             # Data em que o vídeo deveria idealmente ser postado, baseado no D+X
-            data_alvo_obj = (data_obj + timedelta(days=atraso_dias)).date()
+            data_alvo_esperada_obj = data_obj + timedelta(days=atraso_dias) # ✅ Nome original restaurado
+            data_alvo_obj = data_alvo_esperada_obj.date()
             
             # Se já tem um horário definido (ex: Espelhador ou Espião já processado)
             if horario_universal:
