@@ -3023,7 +3023,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         "<blockquote><i>A Taxa de Conversão indica a porcentagem de pedidos que foram efetivamente PAGOS (Confirmados) em relação ao volume total de pedidos gerados, ajudando a medir a qualidade e o poder de compra do seu tráfego atual.</i></blockquote>\n\n"
     )
 
-    # ✅ RESTAURANDO OS RECORDES GLOBAIS AQUI
     todos_totais = {}
     for d, vals in historico_limpo.items():
         if d <= hoje.strftime("%Y-%m-%d"):
@@ -3041,7 +3040,10 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         texto += "🏆 <b>RECORDES GLOBAIS (Todo o Histórico)</b>\n"
         texto += f"• 🥇 Melhor Dia: {melhor_dia_br} (<b>R$ {f_br(todos_totais[melhor_dia_str])}</b>)\n"
         texto += f"• 📉 Pior Dia: {pior_dia_br} (<b>R$ {f_br(todos_totais[pior_dia_str])}</b>)\n"
-        texto += f"• ⚖️ Média Diária: <b>R$ {f_br(media_global)}</b>\n\n"
+        texto += f"• ⚖️ Média Diária: <b>R$ {f_br(media_global)}</b>\n"
+        
+        # ✅ NOVA ANÁLISE DINÂMICA DE RECORDES AQUI!
+        texto += f"<blockquote><i>O seu pico histórico de vendas ocorreu em {melhor_dia_br}, gerando um total de R$ {f_br(todos_totais[melhor_dia_str])}. O objetivo principal das automações é elevar gradativamente a sua Média Diária atual (R$ {f_br(media_global)}) para que os dias de recorde se tornem o novo padrão de recebimento.</i></blockquote>\n\n"
 
     texto += "📈 <b>DESEMPENHO DIÁRIO (Últimos 7 Dias)</b>\n"
     dias_exibicao = [(hoje - timedelta(days=i)).strftime("%Y-%m-%d") for i in range(1, 8)]
@@ -3122,8 +3124,8 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         fig, ax1 = plt.subplots(figsize=(8, 5), facecolor='#f4f4f9')
         ax1.set_facecolor('#f4f4f9')
         
-        bars = ax1.bar(labels_grafico, valores_comissao, color='#4B0082', edgecolor='black', linewidth=0.5, label='Comissão Atual (R$)')
-        line_est, = ax1.plot(labels_grafico, valores_estimativa, color='#FF8C00', marker='^', linestyle=':', linewidth=2, label='Projeção / Fechamento')
+        bars = ax1.bar(labels_grafico, valores_comissao, color='#00008B', edgecolor='black', linewidth=0.5, label='Comissão Atual (R$)')
+        line_est, = ax1.plot(labels_grafico, valores_estimativa, color='#FF0000', marker='^', linestyle=':', linewidth=2, label='Projeção / Fechamento')
         
         ax1.set_ylabel('Comissão (R$)', fontsize=10, color='#333333')
         ax1.grid(axis='y', linestyle='--', alpha=0.5)
