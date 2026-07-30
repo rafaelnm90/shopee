@@ -63,8 +63,9 @@ class EspelhadorFluxo(StatesGroup):
 
 teclado_espelhador_menu = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Adicionar Espelho ➕"), KeyboardButton(text="Editar Espelho ✏️")],
-        [KeyboardButton(text="Forçar Postagens 🚀"), KeyboardButton(text="Remover Espelho 🗑️")],
+        [KeyboardButton(text="Adicionar Espelho ➕"), KeyboardButton(text="Remover Espelho 🗑️")],
+        [KeyboardButton(text="Editar Espelho ✏️")],
+        [KeyboardButton(text="Forçar Postagens 🚀")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -236,7 +237,7 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.menu_principal, F.text == "Adicionar Espelho ➕")
 async def iniciar_cadastro_rota(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("🚀 Iniciando fluxo de cadastro de novas rotas em lote...")
-    await message.answer("Envie os IDs numéricos, links ou @usernames dos <b>Canais de ORIGEM</b> (De onde o robô vai copiar).\nVocê pode enviar vários de uma vez separando por vírgula ou quebrando a linha:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+    await message.answer("Envie os @usernames, links ou IDs dos grupos que deseja monitorar como <b>ORIGEM</b>.\nVocê pode enviar vários separando por vírgula (Ex: <code>@grupo1, -100123, https://t.me/grupo2</code>):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.aguardando_origem)
 
 @router.message(EspelhadorFluxo.aguardando_origem)
@@ -672,7 +673,7 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
 async def processar_acao_origem(message: types.Message, state: FSMContext):
     texto = message.text
     if texto == "➕ Adicionar Origem":
-        await message.answer("Envie os IDs numéricos, links ou @usernames da nova origem.\n<i>(Para adicionar vários de uma vez, separe por vírgula. Ex: @grupo1, -100123, https://t.me/grupo2)</i>:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+        await message.answer("Envie os @usernames, links ou IDs dos grupos que deseja adicionar como <b>ORIGEM</b>.\nVocê pode enviar vários separando por vírgula (Ex: <code>@grupo1, -100123, https://t.me/grupo2</code>):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_nova_origem)
     elif texto == "🗑️ Remover Origem":
         data = await state.get_data()
