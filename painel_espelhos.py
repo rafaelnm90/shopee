@@ -40,6 +40,8 @@ class EspelhadorFluxo(StatesGroup):
     menu_principal = State()
     aguardando_origem = State()
     aguardando_destino = State()
+    aguardando_destino_criacao = State() # ✅ NOVO: Passo 1 da criação
+    aguardando_origem_criacao = State()  # ✅ NOVO: Passo 2 da criação
     aguardando_janela = State()
     aguardando_intervalo_dias = State()
     aguardando_modo = State()
@@ -236,33 +238,48 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.menu_principal, F.text == "Adicionar Espelho ➕")
 async def iniciar_cadastro_rota(message: types.Message, state: FSMContext):
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando fluxo de cadastro de novas rotas em lote...")
-    await message.answer("Envie os @usernames, links ou IDs dos grupos que deseja monitorar como <b>ORIGEM</b>.\nVocê pode enviar vários separando por vírgula (Ex: <code>@grupo1, -100123, https://t.me/grupo2</code>):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
-    await state.set_state(EspelhadorFluxo.aguardando_origem)
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando fluxo de cadastro de espelho (Passo 1: Destino)...")
+    await message.answer("Para começar, envie o ID numérico ou @username do <b>Canal de DESTINO</b> (Para onde o robô vai enviar as cópias):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+    await state.set_state(EspelhadorFluxo.aguardando_destino_criacao)
 
-@router.message(EspelhadorFluxo.aguardando_origem)
-async def receber_origem(message: types.Message, state: FSMContext):
-    msg_status = await message.answer("⏳ Validando lote de canais de origem e subgrupos...", reply_markup=teclado_espelhador_cancelar)
+@router.message(EspelhadorFluxo.aguardando_destino_criacao)
+async def receber_destino_criacao(message: types.Message, state: FSMContext):
+    msg_status = await message.answer("⏳ Validando permissões e acesso ao canal de destino...", reply_markup=teclado_espelhador_cancelar)
+    sucesso, destino_id, nome = await validar_e_formatar_alvo(bot_instance, message.text)
+    await msg_status.delete()
     
+    if sucesso:
+        salvar_nome_grupo(destino_id, nome)
+        if EXIBIR_LOGS: logger.info(f"✅ Destino validado com sucesso: {destino_id}")
+        await state.update_data(destino=destino_id, nome_destino=nome) # Salva o nome para usar lá no Passo 3
+        
+        texto_origens = (
+            f"✅ Destino confirmado: <code>{destino_id}</code>\n\n"
+            "Agora, envie os @usernames, links ou IDs dos grupos que deseja monitorar como <b>ORIGEM</b>.\n"
+            "Você pode enviar vários separando por vírgula (Ex: <code>@grupo1, -100123, https://t.me/grupo2</code>):"
+        )
+        await message.answer(texto_origens, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+        await state.set_state(EspelhadorFluxo.aguardando_origem_criacao)
+    else:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Falha na validação do destino: {message.text}")
+        await message.answer("⚠️ <b>Canal não encontrado ou sem permissão!</b>\nCertifique-se de que o ID ou @username está correto e de que o bot é administrador do canal.\n\nTente enviar novamente:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+
+@router.message(EspelhadorFluxo.aguardando_origem_criacao)
+async def receber_origem_criacao(message: types.Message, state: FSMContext):
+    msg_status = await message.answer("⏳ Validando lote de canais de origem e subgrupos...", reply_markup=teclado_espelhador_cancelar)
     entradas_brutas = message.text.replace('\n', ',').split(',')
     origens_validas = []
     origens_invalidas = []
     
-    if EXIBIR_LOGS: logger.info(f"🚀 Iniciando processamento em lote para {len(entradas_brutas)} possíveis origens...")
-
     for entrada in entradas_brutas:
         if not entrada.strip(): continue
-            
         sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada)
-        
         if sucesso:
             if id_final not in origens_validas:
                 origens_validas.append(id_final)
                 salvar_nome_grupo(id_final, nome)
-                if EXIBIR_LOGS: logger.info(f"✅ Canal de origem validado: {id_final}")
         else:
             origens_invalidas.append(entrada)
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Falha na validação da origem: {entrada}")
 
     await msg_status.delete()
     
@@ -276,28 +293,12 @@ async def receber_origem(message: types.Message, state: FSMContext):
         if origens_invalidas:
             texto_resposta += f"\n⚠️ <i>{len(origens_invalidas)} entrada(s) ignorada(s) por formato inválido.</i>\n"
             
-        texto_resposta += "\nExcelente. Agora envie o ID numérico ou @username do <b>Canal de DESTINO</b> (Para onde o robô vai enviar as cópias):"
-        await message.answer(texto_resposta, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
-        await state.set_state(EspelhadorFluxo.aguardando_destino)
+        texto_resposta += "\nExcelente. Agora defina a <b>Janela de Horário</b> para a postagem.\nEnvie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>) ou clique no botão abaixo para rodar 24h:"
+        await message.answer(texto_resposta, reply_markup=teclado_espelhador_janela, parse_mode="HTML")
+        await state.set_state(EspelhadorFluxo.aguardando_janela)
     else:
         if EXIBIR_LOGS: logger.warning("❌ Nenhuma origem válida encontrada no lote.")
         await message.answer("⚠️ <b>Nenhum canal válido encontrado!</b>\nCertifique-se de que os IDs ou @usernames estão corretos.\n\nTente enviar novamente:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
-
-@router.message(EspelhadorFluxo.aguardando_destino)
-async def receber_destino(message: types.Message, state: FSMContext):
-    msg_status = await message.answer("⏳ Validando permissões e acesso ao canal de destino...", reply_markup=teclado_espelhador_cancelar)
-    sucesso, destino_id, nome = await validar_e_formatar_alvo(bot_instance, message.text)
-    await msg_status.delete()
-    
-    if sucesso:
-        salvar_nome_grupo(destino_id, nome)
-        if EXIBIR_LOGS: logger.info(f"✅ Destino validado com sucesso: {destino_id}")
-        await state.update_data(destino=destino_id)
-        await message.answer(f"✅ Destino confirmado: <code>{destino_id}</code>\n\nDefina a <b>Janela de Horário</b> para a postagem no dia seguinte.\nEnvie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>) ou clique no botão abaixo para rodar 24h:", reply_markup=teclado_espelhador_janela, parse_mode="HTML")
-        await state.set_state(EspelhadorFluxo.aguardando_janela)
-    else:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Falha na validação do destino: {message.text}")
-        await message.answer("⚠️ <b>Canal não encontrado ou sem permissão!</b>\nCertifique-se de que o ID ou @username está correto e de que o bot é administrador do canal.\n\nTente enviar novamente:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
 
 @router.message(EspelhadorFluxo.aguardando_janela)
 async def receber_janela_rota(message: types.Message, state: FSMContext):
@@ -402,24 +403,16 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
     data = await state.get_data()
     origens = data.get("origens", [])
     destino = data.get("destino")
+    nome_destino = data.get("nome_destino", destino) # ✅ Pega o nome do destino salvo no Passo 1
     inicio = data.get("inicio")
     fim = data.get("fim")
-    # BLOCO ESPECIFICAMENTE MODIFICADO
     intervalo_dias = data.get("intervalo_dias", 1)
     modo = data.get("modo")
     
     dados = ler_espelhos()
     
-    if EXIBIR_LOGS: logger.info(f"🚀 A agrupar {len(origens)} origens numa única rota de espelhamento (D+{intervalo_dias}) para o destino {destino}...")
-    
-    # --- Lógica Inteligente de Nomeação da Rota ---
-    from utils import ler_cache_nomes_grupos
-    cache_nomes = ler_cache_nomes_grupos()
-    
-    primeira_origem = str(origens[0]) if origens else "Geral"
-    nome_origem = cache_nomes.get(primeira_origem, primeira_origem)
-    
-    nome_base = f"Espelho: {nome_origem}"
+    # ✅ NOVO: Nomeação Inteligente Baseada no Destino (Como pediu no vídeo)
+    nome_base = f"Espelho: {nome_destino}"
     nome_rota = nome_base
     contador = 1
     
