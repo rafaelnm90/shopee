@@ -146,13 +146,13 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando ao submenu de Origens.")
         teclado_origens = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="➕ Adicionar Origem"), KeyboardButton(text="🗑️ Remover Origem")],
+                [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
                 [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
             ],
             resize_keyboard=True,
             is_persistent=True
         )
-        await message.answer("Ação cancelada. O que você deseja fazer com as origens desta rota?", reply_markup=teclado_origens)
+        await message.answer("Ação cancelada. O que você deseja fazer com os canais vigiados desta rota?", reply_markup=teclado_origens)
         await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
         return
 
@@ -202,19 +202,8 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
             texto += f"   🔀 Distribuição: {rota.get('modo', 'ordem').title()}\n"
             texto += f"   📦 Fila de Espera: {qtd_fila} vídeo(s)\n"
             texto += "\n"
-            # --- 1. DESTINO MOSTRADO PRIMEIRO ---
-            info_d = status_canais.get(str(destino_rota), {})
-            if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
-            
-            status_destino_ico = "❌" if info_d.get("status") == "erro" else "✅"
-            nome_d = info_d.get("nome") or cache_nomes.get(str(destino_rota), str(destino_rota))
-            display_d = f"{nome_d} (<code>{destino_rota}</code>)" if nome_d != str(destino_rota) else f"<code>{destino_rota}</code>"
-            
-            texto += f"🎯 <b>Canal de Destino:</b> {status_destino_ico} {display_d}\n\n"
-
-            # --- 2. ORIGENS MOSTRADAS LOGO ABAIXO ---
+            # --- 1. ORIGENS MOSTRADAS PRIMEIRO ---
             origens = rota.get('origens', [])
-            # Retrocompatibilidade com rotas antigas caso existam
             if not origens and 'origem' in rota:
                 origens = [rota['origem']]
                 
@@ -227,9 +216,18 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
                 status_ico = "❌" if info_o.get("status") == "erro" else "✅"
                 nome_o = info_o.get("nome") or cache_nomes.get(str(o), str(o))
                 display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
-                texto += f"  {idx + 1}. {status_ico} {display_o}\n"
+                # ✅ Alinhamento perfeito com 01, 02
+                texto += f"<code>{idx + 1:02d}.</code> {status_ico} {display_o}\n"
 
-            texto += "\n"
+            # --- 2. DESTINO MOSTRADO LOGO ABAIXO ---
+            info_d = status_canais.get(str(destino_rota), {})
+            if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
+            
+            status_destino_ico = "❌" if info_d.get("status") == "erro" else "✅"
+            nome_d = info_d.get("nome") or cache_nomes.get(str(destino_rota), str(destino_rota))
+            display_d = f"{nome_d} (<code>{destino_rota}</code>)" if nome_d != str(destino_rota) else f"<code>{destino_rota}</code>"
+            
+            texto += f"\n🎯 <b>Canal de Destino:</b> {status_destino_ico} {display_d}\n\n"
     else:
         texto += "<i>Nenhuma rota de espelhamento cadastrada no momento.</i>\n\n"
         
@@ -255,7 +253,7 @@ async def receber_destino_criacao(message: types.Message, state: FSMContext):
         
         texto_origens = (
             f"✅ Destino confirmado: <code>{destino_id}</code>\n\n"
-            "Agora, envie os @usernames, links ou IDs dos grupos que deseja monitorar como <b>ORIGEM</b>.\n"
+            "Agora, envie os @usernames, links ou IDs dos grupos/canais que deseja <b>MONITORAR</b> (Na Escuta).\n"
             "Você pode enviar vários separando por vírgula (Ex: <code>@grupo1, -100123, https://t.me/grupo2</code>):"
         )
         await message.answer(texto_origens, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
@@ -378,7 +376,7 @@ async def receber_modo_rota(message: types.Message, state: FSMContext):
     
     texto_confirmacao = (
         f"⚠️ <b>Confirmação de Criação de Rota (D+{intervalo_dias})</b>\n\n"
-        f"<b>Origens Mapeadas ({len(origens)}):</b>\n"
+        f"<b>Canais Vigiados ({len(origens)}):</b>\n"
     )
     for o in origens:
         texto_confirmacao += f"└ <code>{o}</code>\n"
@@ -462,7 +460,7 @@ async def iniciar_remocao_rota(message: types.Message, state: FSMContext):
     texto = "Digite o <b>NÚMERO</b> da rota que deseja remover:\n\n"
     for i, rota in enumerate(rotas, 1):
         qtd_origens = len(rota.get('origens', [rota.get('origem')]))
-        texto += f"{i}. {rota['nome']} ({qtd_origens} origens agrupadas)\n"
+        texto += f"{i}. {rota['nome']} ({qtd_origens} canais vigiados agrupados)\n"
         
     await message.answer(texto, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.aguardando_remocao)
@@ -565,22 +563,11 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         texto += f"📅 Intervalo de Dias: D+{intervalo_atual}\n"
         texto += f"🔀 Modo atual: {rota_alvo.get('modo', 'ordem').title()}\n"
         
-        # --- 1. DESTINO MOSTRADO PRIMEIRO NO MODO DE EDIÇÃO ---
         from utils import ler_cache_nomes_grupos
         cache_nomes = ler_cache_nomes_grupos()
         status_canais = rota_alvo.get("status_canais", {})
 
-        destino_rota = rota_alvo.get('destino')
-        info_d = status_canais.get(str(destino_rota), {})
-        if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
-        
-        status_destino_ico = "❌" if info_d.get("status") == "erro" else "✅"
-        nome_d = info_d.get("nome") or cache_nomes.get(str(destino_rota), str(destino_rota))
-        display_d = f"{nome_d} (<code>{destino_rota}</code>)" if nome_d != str(destino_rota) else f"<code>{destino_rota}</code>"
-        
-        texto += f"\n🎯 <b>Canal de Destino:</b> {status_destino_ico} {display_d}\n\n"
-
-        # --- 2. ORIGENS MOSTRADAS LOGO ABAIXO ---
+        # --- 1. ORIGENS MOSTRADAS PRIMEIRO NO MODO DE EDIÇÃO ---
         origens = rota_alvo.get('origens', [])
         if not origens and 'origem' in rota_alvo:
             origens = [rota_alvo['origem']]
@@ -594,15 +581,28 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
             status_ico = "❌" if info_o.get("status") == "erro" else "✅"
             nome_o = info_o.get("nome") or cache_nomes.get(str(o), str(o))
             display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
-            texto += f"  {idx + 1}. {status_ico} {display_o}\n"
+            # ✅ Alinhamento perfeito com 01, 02
+            texto += f"<code>{idx + 1:02d}.</code> {status_ico} {display_o}\n"
+
+        # --- 2. DESTINO MOSTRADO LOGO ABAIXO ---
+        destino_rota = rota_alvo.get('destino')
+        info_d = status_canais.get(str(destino_rota), {})
+        if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
         
-        texto += "\nEscolha a ação que deseja realizar:"
+        status_destino_ico = "❌" if info_d.get("status") == "erro" else "✅"
+        nome_d = info_d.get("nome") or cache_nomes.get(str(destino_rota), str(destino_rota))
+        display_d = f"{nome_d} (<code>{destino_rota}</code>)" if nome_d != str(destino_rota) else f"<code>{destino_rota}</code>"
         
+        texto += f"\n🎯 <b>Canal de Destino:</b> {status_destino_ico} {display_d}\n\n"
+        
+        texto += "Escolha a ação que deseja realizar:"
+        
+        # ✅ BUG CORRIGIDO AQUI: Trocado "Editar Origens" por "Canais Vigiados"
         teclado_submenu = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="📝 Editar Nome"), KeyboardButton(text="🎯 Editar Destino")],
                 [KeyboardButton(text="🕒 Modificar Janela"), KeyboardButton(text="📅 Modificar Dias")],
-                [KeyboardButton(text="🔀 Modificar Modo"), KeyboardButton(text="📥 Editar Origens")],
+                [KeyboardButton(text="🔀 Modificar Modo"), KeyboardButton(text="📥 Canais Vigiados")],
                 [KeyboardButton(text="Cancelar Operação ❌")]
             ],
             resize_keyboard=True,
@@ -647,16 +647,17 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
         )
         await message.answer("Escolha o novo modo de distribuição:", reply_markup=teclado_modo)
         await state.set_state(EspelhadorFluxo.aguardando_edicao_novo_modo)
-    elif texto == "📥 Editar Origens":
+    elif texto == "📥 Canais Vigiados":
+        # ✅ BUG CORRIGIDO AQUI: Botões atualizados para "Canal" para bater com o processar_acao_origem
         teclado_origens = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="➕ Adicionar Origem"), KeyboardButton(text="🗑️ Remover Origem")],
+                [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
                 [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
             ],
             resize_keyboard=True,
             is_persistent=True
         )
-        await message.answer("O que você deseja fazer com as origens desta rota?", reply_markup=teclado_origens)
+        await message.answer("O que você deseja fazer com os canais monitorados desta rota?", reply_markup=teclado_origens)
         await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
     else:
         await message.answer("Use os botões do menu para escolher a ação.", reply_markup=teclado_espelhador_cancelar)
@@ -665,10 +666,10 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.aguardando_acao_origem)
 async def processar_acao_origem(message: types.Message, state: FSMContext):
     texto = message.text
-    if texto == "➕ Adicionar Origem":
-        await message.answer("Envie os @usernames, links ou IDs dos grupos que deseja adicionar como <b>ORIGEM</b>.\nVocê pode enviar vários separando por vírgula (Ex: <code>@grupo1, -100123, https://t.me/grupo2</code>):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+    if texto == "➕ Adicionar Canal":
+        await message.answer("Envie os @usernames, links ou IDs dos grupos/canais adicionais que deseja <b>MONITORAR</b>.\nVocê pode enviar vários separando por vírgula (Ex: <code>@grupo1, -100123, https://t.me/grupo2</code>):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_nova_origem)
-    elif texto == "🗑️ Remover Origem":
+    elif texto == "🗑️ Remover Canal":
         data = await state.get_data()
         indice = data.get("indice_edicao")
         rotas = ler_espelhos().get("rotas", [])
@@ -677,10 +678,10 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
         if not origens and 'origem' in rota: origens = [rota['origem']]
         
         if not origens:
-            await message.answer("Esta rota não possui origens para remover.")
+            await message.answer("Esta rota não possui canais vigiados para remover.")
             return
             
-        msg_txt = "Qual origem deseja remover? Digite o <b>NÚMERO</b> correspondente.\n<i>(Para remover várias de uma vez, separe por vírgula. Ex: 1, 3, 4)</i>\n\n"
+        msg_txt = "Qual canal deseja parar de vigiar? Digite o <b>NÚMERO</b> correspondente.\n<i>(Para remover vários de uma vez, separe por vírgula. Ex: 1, 3, 4)</i>\n\n"
         for i, orig in enumerate(origens, 1):
             msg_txt += f"<b>{i}.</b> <code>{orig}</code>\n"
             
