@@ -457,9 +457,9 @@ teclado_automacoes_espiao = ReplyKeyboardMarkup(
 
 teclado_opcoes_espiao = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Definir Canal de Destino 🎯")],
+        [KeyboardButton(text="Definir Destino 🎯")],
+        [KeyboardButton(text="Adicionar Grupo ➕"), KeyboardButton(text="Remover Grupo 🗑️")],
         [KeyboardButton(text="Editar Janela 🕒"), KeyboardButton(text="Editar Atraso ⏳")],
-        [KeyboardButton(text="Adicionar Grupo Vigiado ➕"), KeyboardButton(text="Remover Grupo Vigiado 🗑️")],
         [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
     ],
     resize_keyboard=True,
@@ -4702,9 +4702,9 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=teclado_opcoes_espiao, parse_mode="HTML")
     await state.set_state(EspiaoFluxo.menu_principal)
 
-@dp.message(EspiaoFluxo.menu_principal, F.text == "Adicionar Grupo Vigiado ➕")
+@dp.message(EspiaoFluxo.menu_principal, F.text == "Adicionar Grupo ➕")
 async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
-    await message.answer("Envie os @usernames, links ou IDs dos grupos que deseja monitorar.\nVocê pode enviar vários separando por vírgula (Ex: <code>@grupo1, -100123, https://t.me/grupo2</code>):", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await message.answer("Envie os @usernames, links ou IDs dos grupos que deseja monitorar como <b>ORIGEM</b>.\nVocê pode enviar vários separando por vírgula (Ex: <code>@grupo1, -100123, https://t.me/grupo2</code>):", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(EspiaoFluxo.aguardando_novo_alvo)
 
 @dp.message(EspiaoFluxo.aguardando_novo_alvo)
@@ -4807,7 +4807,7 @@ async def confirmar_adicao_alvo_espiao(message: types.Message, state: FSMContext
     await state.clear()
     await menu_grupos_vigiados(message, state)
 
-@dp.message(EspiaoFluxo.menu_principal, F.text == "Remover Grupo Vigiado 🗑️")
+@dp.message(EspiaoFluxo.menu_principal, F.text == "Remover Grupo 🗑️")
 async def pedir_remocao_espiao(message: types.Message, state: FSMContext):
     dados = ler_alvos_espiao()
     alvos = dados.get("alvos", [])
@@ -4878,7 +4878,7 @@ async def processar_remocao_espiao(message: types.Message, state: FSMContext):
         
     await menu_grupos_vigiados(message, state)
 
-@dp.message(EspiaoFluxo.menu_principal, F.text == "Definir Canal de Destino 🎯")
+@dp.message(EspiaoFluxo.menu_principal, F.text == "Definir Destino 🎯")
 async def pedir_destino_espiao(message: types.Message, state: FSMContext):
     await message.answer("Envie o @username ou ID do seu Canal onde o bot postará os vídeos clonados (Ex: -100123456789):", reply_markup=teclado_cancelar)
     await state.set_state(EspiaoFluxo.aguardando_canal_destino)
