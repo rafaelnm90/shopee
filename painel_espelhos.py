@@ -202,7 +202,17 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
             texto += f"   🔀 Distribuição: {rota.get('modo', 'ordem').title()}\n"
             texto += f"   📦 Fila de Espera: {qtd_fila} vídeo(s)\n"
             texto += "\n"
-            # --- 1. ORIGENS MOSTRADAS PRIMEIRO ---
+           # --- 1. DESTINO MOSTRADO PRIMEIRO ---
+            info_d = status_canais.get(str(destino_rota), {})
+            if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
+            
+            status_destino_ico = "❌" if info_d.get("status") == "erro" else "✅"
+            nome_d = info_d.get("nome") or cache_nomes.get(str(destino_rota), str(destino_rota))
+            display_d = f"{nome_d} (<code>{destino_rota}</code>)" if nome_d != str(destino_rota) else f"<code>{destino_rota}</code>"
+            
+            texto += f"🎯 <b>Canal de Destino:</b> {status_destino_ico} {display_d}\n\n"
+
+            # --- 2. ORIGENS MOSTRADAS LOGO ABAIXO ---
             origens = rota.get('origens', [])
             if not origens and 'origem' in rota:
                 origens = [rota['origem']]
@@ -218,16 +228,7 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
                 display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
                 # ✅ Alinhamento perfeito com 01, 02
                 texto += f"<code>{idx + 1:02d}.</code> {status_ico} {display_o}\n"
-
-            # --- 2. DESTINO MOSTRADO LOGO ABAIXO ---
-            info_d = status_canais.get(str(destino_rota), {})
-            if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
-            
-            status_destino_ico = "❌" if info_d.get("status") == "erro" else "✅"
-            nome_d = info_d.get("nome") or cache_nomes.get(str(destino_rota), str(destino_rota))
-            display_d = f"{nome_d} (<code>{destino_rota}</code>)" if nome_d != str(destino_rota) else f"<code>{destino_rota}</code>"
-            
-            texto += f"\n🎯 <b>Canal de Destino:</b> {status_destino_ico} {display_d}\n\n"
+            texto += "\n"
     else:
         texto += "<i>Nenhuma rota de espelhamento cadastrada no momento.</i>\n\n"
         
@@ -567,7 +568,18 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         cache_nomes = ler_cache_nomes_grupos()
         status_canais = rota_alvo.get("status_canais", {})
 
-        # --- 1. ORIGENS MOSTRADAS PRIMEIRO NO MODO DE EDIÇÃO ---
+        # --- 1. DESTINO MOSTRADO PRIMEIRO NO MODO DE EDIÇÃO ---
+        destino_rota = rota_alvo.get('destino')
+        info_d = status_canais.get(str(destino_rota), {})
+        if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
+        
+        status_destino_ico = "❌" if info_d.get("status") == "erro" else "✅"
+        nome_d = info_d.get("nome") or cache_nomes.get(str(destino_rota), str(destino_rota))
+        display_d = f"{nome_d} (<code>{destino_rota}</code>)" if nome_d != str(destino_rota) else f"<code>{destino_rota}</code>"
+        
+        texto += f"\n🎯 <b>Canal de Destino:</b> {status_destino_ico} {display_d}\n\n"
+
+        # --- 2. ORIGENS MOSTRADAS LOGO ABAIXO ---
         origens = rota_alvo.get('origens', [])
         if not origens and 'origem' in rota_alvo:
             origens = [rota_alvo['origem']]
@@ -583,19 +595,8 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
             display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
             # ✅ Alinhamento perfeito com 01, 02
             texto += f"<code>{idx + 1:02d}.</code> {status_ico} {display_o}\n"
-
-        # --- 2. DESTINO MOSTRADO LOGO ABAIXO ---
-        destino_rota = rota_alvo.get('destino')
-        info_d = status_canais.get(str(destino_rota), {})
-        if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
         
-        status_destino_ico = "❌" if info_d.get("status") == "erro" else "✅"
-        nome_d = info_d.get("nome") or cache_nomes.get(str(destino_rota), str(destino_rota))
-        display_d = f"{nome_d} (<code>{destino_rota}</code>)" if nome_d != str(destino_rota) else f"<code>{destino_rota}</code>"
-        
-        texto += f"\n🎯 <b>Canal de Destino:</b> {status_destino_ico} {display_d}\n\n"
-        
-        texto += "Escolha a ação que deseja realizar:"
+        texto += "\nEscolha a ação que deseja realizar:"
         
         # ✅ BUG CORRIGIDO AQUI: Trocado "Editar Origens" por "Canais Vigiados"
         teclado_submenu = ReplyKeyboardMarkup(
