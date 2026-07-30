@@ -644,6 +644,14 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
     elif texto == "🎯 Editar Destino":
         await message.answer("Envie o ID numérico, link ou @username do <b>NOVO CANAL DE DESTINO</b> para esta rota:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_edicao_novo_destino)
+    elif texto == "🕒 Modificar Janela":
+        await message.answer(
+            "Defina a <b>Nova Janela de Horário</b> para a postagem nesta rota.\n"
+            "Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>) ou clique no botão abaixo para rodar 24h:", 
+            reply_markup=teclado_espelhador_janela, 
+            parse_mode="HTML"
+        )
+        await state.set_state(EspelhadorFluxo.aguardando_edicao_nova_janela)
     elif texto == "📅 Modificar Dias":
         teclado_dias = ReplyKeyboardMarkup(
             keyboard=[
@@ -669,7 +677,6 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
         await message.answer("Escolha o novo modo de distribuição:", reply_markup=teclado_modo)
         await state.set_state(EspelhadorFluxo.aguardando_edicao_novo_modo)
     elif texto == "📥 Canais Vigiados":
-        # ✅ BUG CORRIGIDO AQUI: Botões atualizados para "Canal" para bater com o processar_acao_origem
         teclado_origens = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
