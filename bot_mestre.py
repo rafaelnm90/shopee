@@ -4724,60 +4724,61 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
 
     # 2. Valida as entradas
     for entrada in entradas_brutas:
-        if not entrada.strip(): continue
+        entrada_limpa = entrada.strip()
+        if not entrada_limpa: continue
 
-        sucesso, id_final, nome = await validar_e_formatar_alvo(bot, entrada)
+        sucesso, id_final, nome = await validar_e_formatar_alvo(bot, entrada_limpa)
 
         if sucesso:
             # 3. Faz a checagem inteligente ANTES de pedir aprovação
             if id_final in alvos_existentes:
-                alvos_ja_monitorados.append({"id": id_final, "nome": nome})
+                alvos_ja_monitorados.append(entrada_limpa)
             elif id_final not in [a["id"] for a in alvos_novos_para_adicionar]:
                 alvos_novos_para_adicionar.append({"id": id_final, "nome": nome})
                 salvar_nome_grupo(id_final, nome)
+            else:
+                alvos_ja_monitorados.append(entrada_limpa) # Duplicado dentro do próprio envio atual
         else:
-            alvos_rejeitados.append(entrada)
+            alvos_rejeitados.append(entrada_limpa)
 
     await msg_status.delete()
 
+    # 4. Monta o relatório visual transparente
+    texto_resposta = ""
+
+    if alvos_novos_para_adicionar:
+        texto_resposta += f"✅ <b>{len(alvos_novos_para_adicionar)} NOVO(S) alvo(s) válido(s):</b>\n"
+        for av in alvos_novos_para_adicionar:
+            tag_subgrupo = " <i>(Subgrupo)</i>" if ":" in av['id'] else ""
+            texto_resposta += f"🔹 <b>{av['nome']}</b> (<code>{av['id']}</code>){tag_subgrupo}\n"
+        texto_resposta += "\n"
+
+    if alvos_ja_monitorados:
+        texto_resposta += f"ℹ️ <b>{len(alvos_ja_monitorados)} ignorado(s) por já estar no radar (Duplicados):</b>\n"
+        for dup in alvos_ja_monitorados:
+            texto_resposta += f"🔸 <code>{dup}</code>\n"
+        texto_resposta += "\n"
+
+    if alvos_rejeitados:
+        texto_resposta += f"❌ <b>{len(alvos_rejeitados)} falharam (Formato inválido ou link Privado):</b>\n"
+        for rej in alvos_rejeitados:
+            texto_resposta += f"🔻 <code>{rej}</code>\n"
+        texto_resposta += "\n"
+
     # Cenário A: Não há NENHUM alvo NOVO para adicionar
     if not alvos_novos_para_adicionar:
-        texto_resposta = ""
-        if alvos_ja_monitorados:
-            texto_resposta += f"⚠️ <b>Ação desnecessária:</b> Os {len(alvos_ja_monitorados)} grupo(s) válidos que você enviou já estavam sendo monitorados pelo Espião!\n"
-        if alvos_rejeitados:
-            texto_resposta += f"\n❌ <b>Falha na validação:</b> {len(alvos_rejeitados)} entrada(s) não foram reconhecidas pelo Telegram.\n"
-        
-        if not texto_resposta:
-            texto_resposta = "⚠️ Nenhum alvo válido detectado."
-
-        # Volta direto para o painel principal sem pedir "Aprovar"
+        texto_resposta += "⚠️ <b>Nenhum alvo novo foi aprovado.</b>"
         await message.answer(texto_resposta, parse_mode="HTML")
         await state.clear()
         await menu_grupos_vigiados(message, state)
         return
 
-    # Cenário B: Existem alvos NOVOS. Monta a tela de confirmação apenas com os novos.
+    # Cenário B: Existem alvos NOVOS. Pede a confirmação.
     await state.update_data(novos_alvos_espiao=alvos_novos_para_adicionar)
-    
-    texto_confirmacao = f"Você está prestes a adicionar <b>{len(alvos_novos_para_adicionar)} NOVO(S) alvo(s)</b> ao radar do Espião:\n\n"
-    for av in alvos_novos_para_adicionar:
-        tag_subgrupo = " <i>(Subgrupo focado)</i>" if ":" in av['id'] else ""
-        texto_confirmacao += f"🔹 <b>{av['nome']}</b> (<code>{av['id']}</code>){tag_subgrupo}\n"
-
-    # Avisos secundários para manter o usuário informado
-    if alvos_ja_monitorados:
-        texto_confirmacao += f"\nℹ️ <i>Nota: {len(alvos_ja_monitorados)} entrada(s) foram ignoradas por já estarem no radar.</i>\n"
-
-    if alvos_rejeitados:
-        texto_confirmacao += f"\n⚠️ <b>Aviso:</b> {len(alvos_rejeitados)} entrada(s) falharam na validação:\n"
-        for rej in alvos_rejeitados:
-            texto_confirmacao += f"❌ <code>{rej}</code>\n"
-
-    texto_confirmacao += "\nConfirma a adição?"
+    texto_resposta += "Confirma a adição dos novos alvos?"
     
     teclado_confirmacao = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
-    await message.answer(texto_confirmacao, reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await message.answer(texto_resposta, reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(EspiaoFluxo.aguardando_confirmacao_alvo)
 
 @dp.message(EspiaoFluxo.aguardando_confirmacao_alvo)
