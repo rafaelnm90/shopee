@@ -2574,7 +2574,8 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     for nome_rota in rotas_agrupadas:
         rotas_agrupadas[nome_rota].sort(key=chave_ordenacao_universal)
          
-    titulo_atraso = f" (D+{atraso_dias})"
+    # ✅ CORREÇÃO: Oculta o título global de atraso se for o Espelhador (pois cada rota tem o seu)
+    titulo_atraso = f" (D+{atraso_dias})" if tipo_fila == "Espião" else ""
 
     mensagens_para_enviar = []
     texto_atual = f"📊 <b>Relatório da Fila do {tipo_fila}{titulo_atraso}</b>\n\n"
@@ -2583,10 +2584,13 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         rota_info = mapa_rotas.get(nome_rota, {})
         inicio = rota_info.get("inicio", 10)
         fim = rota_info.get("fim", 22)
+        
+        # ✅ Puxa o atraso específico DESTA rota (ou usa o global se for o Espião)
+        atraso_dias_rota = int(rota_info.get("intervalo_dias", atraso_dias)) 
         status_canais = rota_info.get("status_canais") or rota_info.get("status_alvos") or {}
         
-        # Novo Cabeçalho Unificado (Sem Urna de Sorteio)
-        texto_postagem = "Imediata (D+0)" if atraso_dias == 0 else f"D+{atraso_dias}, entre {inicio}h e {fim}h"
+        # ✅ Agora o cabeçalho mostra o valor real da rota
+        texto_postagem = "Imediata (D+0)" if atraso_dias_rota == 0 else f"D+{atraso_dias_rota}, entre {inicio}h e {fim}h"
         cabecalho_rota = f"📡 <b>Rota: {nome_rota}</b> ({len([i for i in itens if not i.get('processado')])} vídeos agendados)\n🕒 <b>Postagem:</b> {texto_postagem}\n"
         
         if len(texto_atual) + len(cabecalho_rota) > 3800:
@@ -2624,7 +2628,6 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     except: pass
 
             # --- 2. CONSTRUÇÃO PRIORITÁRIA DO LINK DO TELEGRAM ---
-            # Ignora o link da Shopee gravado e força a rota para a mensagem original no Telegram
             link_telegram = ""
             if msg_id and origem_bruta not in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 if origem_bruta.lstrip("-").isdigit():
@@ -2648,13 +2651,11 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             else:
                 link_display = "<i>Sem link de origem</i>"
                 
-            # ✅ NOVO: Se o vídeo já foi postado, adiciona o link de destino (se disponível)
             if v.get("processado", False) and tipo_fila == "Espião":
                 id_destino = str(dados_espiao.get("canal_destino", ""))
-                msg_id_postada = v.get("msg_postada_id") # O bot precisará passar a salvar este ID no futuro
+                msg_id_postada = v.get("msg_postada_id")
                 
                 if id_destino and msg_id_postada:
-                    # Constrói o link para o canal de destino
                     if id_destino.lstrip("-").isdigit():
                         id_limpo = id_destino.replace("-100", "").replace("-", "")
                         link_dest = f"https://t.me/c/{id_limpo}/{msg_id_postada}"
@@ -2664,7 +2665,6 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                         
                     link_display += f" | <a href='{link_dest}'>📤 Destino</a>"
                 elif id_destino and not id_destino.lstrip("-").isdigit():
-                    # Fallback: Se não tem o ID da mensagem exata, leva pelo menos para o canal
                     link_display += f" | <a href='https://t.me/{id_destino.replace('@', '')}'>📤 Destino</a>"
                 
             # --- 4. RESOLUÇÃO DE NOMES COM CACHE E BUSCA PROFUNDA ---
@@ -2742,7 +2742,6 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 else:
                     id_destino = str(v.get("chat_destino") or v.get("destino") or "")
                     
-                # Busca exaustiva e unificada pelo ID da mensagem em ambas as chaves possíveis
                 msg_id_postada = v.get("msg_postada_id") or v.get("mensagem_id_destino") or v.get("msg_id")
                 
                 if id_destino and msg_id_postada:
@@ -2755,9 +2754,6 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 elif id_destino and not id_destino.lstrip("-").isdigit():
                     link_destino = f"https://t.me/{id_destino.replace('@', '')}"
 
-                if EXIBIR_LOGS and link_destino:
-                    logger.info(f"🔗 [Destino] Link resolvido com sucesso para a fila do {tipo_fila} (ID: {msg_id_postada}).")
-
             # --- 6. ACIONANDO O MOTOR CENTRAL PARA O DESIGN DA FILA ---
             from motor_filas import gerar_layout_item_padrao
             
@@ -2765,7 +2761,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 index=i, 
                 item=v, 
                 tipo_fila=tipo_fila, 
-                atraso_dias=atraso_dias, 
+                atraso_dias=atraso_dias_rota,  # ✅ AGORA REPASSA O ATRASO CORRETO DE CADA ROTA!
                 agora=agora, 
                 fuso_horario=fuso_horario, 
                 display_origem=display_origem, 
