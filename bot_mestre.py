@@ -2978,10 +2978,9 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             elif total_ant == 0 and total_m > 0:
                 variacao_texto = " <b>(📈 +100%)</b>"
 
-        total_pedidos_m = dados_m['qtd_aprovado'] + dados_m['qtd_pendente'] + dados_m.get('qtd_cancelado', 0)
-        pct_aprov_m = (dados_m['qtd_aprovado'] / total_pedidos_m * 100) if total_pedidos_m > 0 else 0.0
-        pct_pend_m = (dados_m['qtd_pendente'] / total_pedidos_m * 100) if total_pedidos_m > 0 else 0.0
-        pct_canc_m = (dados_m.get('qtd_cancelado', 0) / total_pedidos_m * 100) if total_pedidos_m > 0 else 0.0
+        pct_aprov_m = (dados_m['aprovado'] / total_m * 100) if total_m > 0 else 0.0
+        pct_pend_m = (dados_m['pendente'] / total_m * 100) if total_m > 0 else 0.0
+        pct_canc_m = (dados_m.get('cancelado', 0.0) / total_m * 100) if total_m > 0 else 0.0
 
         texto += f"• <b>{mes_fmt}</b>: R$ {f_br(total_m)}{variacao_texto}\n"
         texto += f"  ├ Conf: R$ {f_br(dados_m['aprovado'])} ({dados_m['qtd_aprovado']} pedidos - {pct_aprov_m:.1f}%)\n"
@@ -3006,10 +3005,9 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             elif total_ant == 0 and total_a > 0:
                 variacao_texto = " <b>(📈 +100%)</b>"
 
-        total_pedidos_a = dados_a['qtd_aprovado'] + dados_a['qtd_pendente'] + dados_a.get('qtd_cancelado', 0)
-        pct_aprov_a = (dados_a['qtd_aprovado'] / total_pedidos_a * 100) if total_pedidos_a > 0 else 0.0
-        pct_pend_a = (dados_a['qtd_pendente'] / total_pedidos_a * 100) if total_pedidos_a > 0 else 0.0
-        pct_canc_a = (dados_a.get('qtd_cancelado', 0) / total_pedidos_a * 100) if total_pedidos_a > 0 else 0.0
+        pct_aprov_a = (dados_a['aprovado'] / total_a * 100) if total_a > 0 else 0.0
+        pct_pend_a = (dados_a['pendente'] / total_a * 100) if total_a > 0 else 0.0
+        pct_canc_a = (dados_a.get('cancelado', 0.0) / total_a * 100) if total_a > 0 else 0.0
 
         texto += f"• <b>{ano}</b>: R$ {f_br(total_a)}{variacao_texto}\n"
         texto += f"  ├ Conf: R$ {f_br(dados_a['aprovado'])} ({dados_a['qtd_aprovado']} pedidos - {pct_aprov_a:.1f}%)\n"
@@ -3059,10 +3057,9 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         q_canc = dados_dia.get("qtd_cancelado", 0)
         v_tot = v_aprov + v_pend + v_canc
         
-        total_pedidos_d = q_aprov + q_pend + q_canc
-        pct_aprov_d = (q_aprov / total_pedidos_d * 100) if total_pedidos_d > 0 else 0.0
-        pct_pend_d = (q_pend / total_pedidos_d * 100) if total_pedidos_d > 0 else 0.0
-        pct_canc_d = (q_canc / total_pedidos_d * 100) if total_pedidos_d > 0 else 0.0
+        pct_aprov_d = (v_aprov / v_tot * 100) if v_tot > 0 else 0.0
+        pct_pend_d = (v_pend / v_tot * 100) if v_tot > 0 else 0.0
+        pct_canc_d = (v_canc / v_tot * 100) if v_tot > 0 else 0.0
         
         variacao_texto = ""
         d_obj = datetime.strptime(d_str, "%Y-%m-%d")
