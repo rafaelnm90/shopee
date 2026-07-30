@@ -268,9 +268,14 @@ async def receber_origem_criacao(message: types.Message, state: FSMContext):
     msg_status = await message.answer("⏳ Validando lote de canais de origem e subgrupos...", reply_markup=teclado_espelhador_cancelar)
     entradas_brutas = message.text.replace('\n', ',').split(',')
     
+    # Puxa o destino que foi salvo no Passo 1 da criação
+    data = await state.get_data()
+    destino_atual = str(data.get("destino", ""))
+    
     origens_validas = []
     origens_duplicadas = []
     origens_invalidas = []
+    origens_em_loop = [] # 🛑 Nova lista para a trava anti-loop
     
     for entrada in entradas_brutas:
         entrada_limpa = entrada.strip()
@@ -279,7 +284,10 @@ async def receber_origem_criacao(message: types.Message, state: FSMContext):
         sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada_limpa)
         
         if sucesso:
-            if id_final not in origens_validas:
+            # 🛑 Trava Anti-Loop: Bloqueia se a origem for igual ao destino da rota
+            if destino_atual and id_final.replace("-100", "") == destino_atual.replace("-100", ""):
+                origens_em_loop.append(entrada_limpa)
+            elif id_final not in origens_validas:
                 origens_validas.append(id_final)
                 salvar_nome_grupo(id_final, nome)
             else:
@@ -295,6 +303,12 @@ async def receber_origem_criacao(message: types.Message, state: FSMContext):
         texto_resposta += f"✅ <b>{len(origens_validas)} Origem(ns) validada(s):</b>\n"
         for o in origens_validas:
             texto_resposta += f"🔹 <code>{o}</code>\n"
+        texto_resposta += "\n"
+
+    if origens_em_loop:
+        texto_resposta += f"🛑 <b>{len(origens_em_loop)} bloqueada(s) por Anti-Loop (É o destino desta rota):</b>\n"
+        for loop in origens_em_loop:
+            texto_resposta += f"🔻 <code>{loop}</code>\n"
         texto_resposta += "\n"
 
     if origens_duplicadas:
@@ -316,7 +330,7 @@ async def receber_origem_criacao(message: types.Message, state: FSMContext):
         await state.set_state(EspelhadorFluxo.aguardando_janela)
     else:
         if EXIBIR_LOGS: logger.warning("❌ Nenhuma origem válida encontrada no lote.")
-        texto_resposta += "⚠️ <b>Nenhum canal válido aprovado!</b>\nCertifique-se de que os IDs não são links de convite privados.\n\nTente enviar novamente:"
+        texto_resposta += "⚠️ <b>Nenhum canal válido aprovado!</b>\nCertifique-se de que os IDs não são links de convite privados ou iguais ao destino.\n\nTente enviar novamente:"
         await message.answer(texto_resposta, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
 
 @router.message(EspelhadorFluxo.aguardando_janela)
@@ -906,10 +920,11 @@ async def confirmar_nova_origem(message: types.Message, state: FSMContext):
     origens_validas = []
     origens_duplicadas = []
     origens_invalidas = []
+    origens_em_loop = [] # 🛑 Nova lista para a trava anti-loop
     
     msg_status = await message.answer("⏳ Validando links, subgrupos e buscando nomes...", reply_markup=teclado_espelhador_cancelar)
     
-    # Puxa os dados da rota atual para saber o que JÁ ESTÁ cadastrado
+    # Puxa os dados da rota atual para saber o que JÁ ESTÁ cadastrado e qual é o Destino
     data = await state.get_data()
     indice = data.get("indice_edicao")
     dados = ler_espelhos()
@@ -917,6 +932,7 @@ async def confirmar_nova_origem(message: types.Message, state: FSMContext):
     rota_atual = rotas[indice]
     origens_atuais = rota_atual.get('origens', [])
     if not origens_atuais and 'origem' in rota_atual: origens_atuais = [rota_atual['origem']]
+    destino_atual = str(rota_atual.get("destino", ""))
     
     for entrada in entradas_brutas:
         entrada_limpa = entrada.strip()
@@ -925,8 +941,10 @@ async def confirmar_nova_origem(message: types.Message, state: FSMContext):
         sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada_limpa)
         
         if sucesso:
-            # Verifica se já está na rota ou se enviou repetido agora
-            if id_final in origens_atuais or id_final in [o['id'] for o in origens_validas]:
+            # 🛑 Trava Anti-Loop: Bloqueia se a origem for igual ao destino da rota
+            if destino_atual and id_final.replace("-100", "") == destino_atual.replace("-100", ""):
+                origens_em_loop.append(entrada_limpa)
+            elif id_final in origens_atuais or id_final in [o['id'] for o in origens_validas]:
                 origens_duplicadas.append(entrada_limpa)
             else:
                 salvar_nome_grupo(id_final, nome)
@@ -942,6 +960,12 @@ async def confirmar_nova_origem(message: types.Message, state: FSMContext):
         texto_resumo += f"✅ <b>{len(origens_validas)} NOVO(S) canal(is) validado(s):</b>\n"
         for o in origens_validas:
             texto_resumo += f"🔹 {o['nome']} (<code>{o['id']}</code>)\n"
+        texto_resumo += "\n"
+
+    if origens_em_loop:
+        texto_resumo += f"🛑 <b>{len(origens_em_loop)} bloqueada(s) por Anti-Loop (É o destino desta rota):</b>\n"
+        for loop in origens_em_loop:
+            texto_resumo += f"🔻 <code>{loop}</code>\n"
         texto_resumo += "\n"
 
     if origens_duplicadas:
