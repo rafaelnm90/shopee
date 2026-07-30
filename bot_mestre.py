@@ -2352,9 +2352,8 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             return
             
         tipo_fila = "Espelhador"
-        if message.text.startswith("Rota: "):
-            rota_selecionada = message.text.replace("Rota: ", "")
-        if EXIBIR_LOGS: logger.info(f"📊 Rota específica selecionada para exibição: {rota_selecionada or 'Todas'}")
+        rota_selecionada = message.text
+        if EXIBIR_LOGS: logger.info(f"📊 Rota específica selecionada para exibição: {rota_selecionada}")
     else:
         tipo_fila = "Espelhador" if "Espelhador" in message.text else "Espião"
         
@@ -2367,9 +2366,15 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             if len(rotas) > 1:
                 if EXIBIR_LOGS: logger.info("🔄 Múltiplas rotas detectadas no Espelhador. Exibindo menu de seleção...")
                 botoes = []
+                
+                # Primeiro botão isolado no topo
+                botoes.append([KeyboardButton(text="Todos os Espelhos 🌐")])
+                
+                # Um botão para cada espelho
                 for r in rotas:
-                    botoes.append([KeyboardButton(text=f"Rota: {r['nome']}")])
-                botoes.append([KeyboardButton(text="Todas as Rotas 🌐")])
+                    botoes.append([KeyboardButton(text=r['nome'])])
+                    
+                # Botão de voltar no final
                 botoes.append([KeyboardButton(text="Voltar aos Relatórios 🔙")])
                 
                 teclado = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -2528,7 +2533,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         pendentes = fila_limpa
         
         # ✅ NOVO: Aplica o filtro de listagem caso o usuário tenha clicado em uma rota específica
-        if rota_selecionada and rota_selecionada != "Todas as Rotas 🌐":
+        if rota_selecionada and rota_selecionada != "Todos os Espelhos 🌐":
             pendentes = [i for i in pendentes if i.get("nome_rota") == rota_selecionada]
     
     if not pendentes:
