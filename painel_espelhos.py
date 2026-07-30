@@ -794,16 +794,24 @@ async def salvar_edicao_destino(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.aguardando_edicao_nova_janela)
 async def salvar_edicao_janela(message: types.Message, state: FSMContext):
     import re
-    match = re.match(r"^(\d{1,2})-(\d{1,2})$", message.text.strip())
-    if not match:
-        await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22", reply_markup=teclado_espelhador_cancelar)
-        return
-        
-    inicio, fim = map(int, match.groups())
-    if inicio >= fim or inicio < 0 or fim > 23:
-        await message.answer("Valores inválidos! A hora de início deve ser menor que a do fim.", reply_markup=teclado_espelhador_cancelar)
-        return
-        
+    texto = message.text.strip()
+    
+    # ✅ Identifica o clique no botão ou se foi digitado manualmente
+    if texto == "Dia Todo (24h) 🕛" or texto.lower() == "dia todo":
+        inicio = 0
+        fim = 24
+        if EXIBIR_LOGS: logger.info("🕛 Janela de edição configurada para Dia Todo (24h).")
+    else:
+        match = re.match(r"^(\d{1,2})-(\d{1,2})$", texto)
+        if not match:
+            await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22, ou clique em 'Dia Todo (24h) 🕛'.", reply_markup=teclado_espelhador_janela)
+            return
+            
+        inicio, fim = map(int, match.groups())
+        if inicio >= fim or inicio < 0 or fim > 24:
+            await message.answer("Valores inválidos! A hora de início deve ser menor que a do fim.", reply_markup=teclado_espelhador_janela)
+            return
+            
     data = await state.get_data()
     indice = data.get("indice_edicao")
     
@@ -815,7 +823,11 @@ async def salvar_edicao_janela(message: types.Message, state: FSMContext):
     salvar_espelhos(dados)
     
     if EXIBIR_LOGS: logger.info(f"✏️ Janela da rota '{rotas[indice]['nome']}' atualizada para {inicio}h-{fim}h.")
-    await message.answer(f"✅ A janela foi atualizada para {inicio}h às {fim}h com sucesso!", parse_mode="HTML")
+    
+    # ✅ Mensagem dinâmica adaptada para o que o usuário escolheu
+    texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"entre as {inicio}h e as {fim}h"
+    await message.answer(f"✅ A janela foi atualizada para postar {texto_exibicao} com sucesso!", parse_mode="HTML")
+    
     # ✅ CORREÇÃO: Volta para o menu de edição da rota atual
     novo_texto = str(indice + 1)
     msg_simulada = message.model_copy(update={"text": novo_texto})
