@@ -4714,13 +4714,15 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
     entradas_brutas = message.text.replace('\n', ',').split(',')
     msg_status = await message.answer("⏳ <b>Validando links, subgrupos e buscando nomes...</b>", parse_mode="HTML", reply_markup=teclado_cancelar)
 
-    # 1. Lê os alvos que já existem no banco de dados
+    # 1. Lê os alvos que já existem no banco de dados e o destino
     dados_existentes = ler_alvos_espiao()
     alvos_existentes = dados_existentes.get("alvos", [])
+    canal_destino = str(dados_existentes.get("canal_destino", ""))
 
     alvos_novos_para_adicionar = []
     alvos_ja_monitorados = []
     alvos_rejeitados = []
+    alvos_em_loop = [] # 🛑 Nova lista para a trava anti-loop
 
     # 2. Valida as entradas
     for entrada in entradas_brutas:
@@ -4731,7 +4733,10 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
 
         if sucesso:
             # 3. Faz a checagem inteligente ANTES de pedir aprovação
-            if id_final in alvos_existentes:
+            # 🛑 Trava Anti-Loop: Verifica se o ID do alvo é igual ao ID do destino
+            if canal_destino and id_final.replace("-100", "") == canal_destino.replace("-100", ""):
+                alvos_em_loop.append(entrada_limpa)
+            elif id_final in alvos_existentes:
                 alvos_ja_monitorados.append(entrada_limpa)
             elif id_final not in [a["id"] for a in alvos_novos_para_adicionar]:
                 alvos_novos_para_adicionar.append({"id": id_final, "nome": nome})
@@ -4751,6 +4756,12 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
         for av in alvos_novos_para_adicionar:
             tag_subgrupo = " <i>(Subgrupo)</i>" if ":" in av['id'] else ""
             texto_resposta += f"🔹 <b>{av['nome']}</b> (<code>{av['id']}</code>){tag_subgrupo}\n"
+        texto_resposta += "\n"
+
+    if alvos_em_loop:
+        texto_resposta += f"🛑 <b>{len(alvos_em_loop)} bloqueado(s) por Anti-Loop (É o canal de destino):</b>\n"
+        for loop in alvos_em_loop:
+            texto_resposta += f"🔻 <code>{loop}</code>\n"
         texto_resposta += "\n"
 
     if alvos_ja_monitorados:
