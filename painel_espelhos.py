@@ -267,37 +267,57 @@ async def receber_destino_criacao(message: types.Message, state: FSMContext):
 async def receber_origem_criacao(message: types.Message, state: FSMContext):
     msg_status = await message.answer("⏳ Validando lote de canais de origem e subgrupos...", reply_markup=teclado_espelhador_cancelar)
     entradas_brutas = message.text.replace('\n', ',').split(',')
+    
     origens_validas = []
+    origens_duplicadas = []
     origens_invalidas = []
     
     for entrada in entradas_brutas:
-        if not entrada.strip(): continue
-        sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada)
+        entrada_limpa = entrada.strip()
+        if not entrada_limpa: continue
+        
+        sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada_limpa)
+        
         if sucesso:
             if id_final not in origens_validas:
                 origens_validas.append(id_final)
                 salvar_nome_grupo(id_final, nome)
+            else:
+                origens_duplicadas.append(entrada_limpa)
         else:
-            origens_invalidas.append(entrada)
+            origens_invalidas.append(entrada_limpa)
 
     await msg_status.delete()
     
+    texto_resposta = ""
+
+    if origens_validas:
+        texto_resposta += f"✅ <b>{len(origens_validas)} Origem(ns) validada(s):</b>\n"
+        for o in origens_validas:
+            texto_resposta += f"🔹 <code>{o}</code>\n"
+        texto_resposta += "\n"
+
+    if origens_duplicadas:
+        texto_resposta += f"ℹ️ <b>{len(origens_duplicadas)} repetida(s) no envio (Duplicadas):</b>\n"
+        for dup in origens_duplicadas:
+            texto_resposta += f"🔸 <code>{dup}</code>\n"
+        texto_resposta += "\n"
+
+    if origens_invalidas:
+        texto_resposta += f"❌ <b>{len(origens_invalidas)} falharam (Formato inválido ou link Privado):</b>\n"
+        for rej in origens_invalidas:
+            texto_resposta += f"🔻 <code>{rej}</code>\n"
+        texto_resposta += "\n"
+    
     if origens_validas:
         await state.update_data(origens=origens_validas)
-        
-        texto_resposta = f"✅ <b>{len(origens_validas)} Origem(ns) confirmada(s):</b>\n"
-        for o in origens_validas:
-            texto_resposta += f"<code>{o}</code>\n"
-            
-        if origens_invalidas:
-            texto_resposta += f"\n⚠️ <i>{len(origens_invalidas)} entrada(s) ignorada(s) por formato inválido.</i>\n"
-            
-        texto_resposta += "\nExcelente. Agora defina a <b>Janela de Horário</b> para a postagem.\nEnvie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>) ou clique no botão abaixo para rodar 24h:"
+        texto_resposta += "Excelente. Agora defina a <b>Janela de Horário</b> para a postagem.\nEnvie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>) ou clique no botão abaixo para rodar 24h:"
         await message.answer(texto_resposta, reply_markup=teclado_espelhador_janela, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_janela)
     else:
         if EXIBIR_LOGS: logger.warning("❌ Nenhuma origem válida encontrada no lote.")
-        await message.answer("⚠️ <b>Nenhum canal válido encontrado!</b>\nCertifique-se de que os IDs ou @usernames estão corretos.\n\nTente enviar novamente:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+        texto_resposta += "⚠️ <b>Nenhum canal válido aprovado!</b>\nCertifique-se de que os IDs não são links de convite privados.\n\nTente enviar novamente:"
+        await message.answer(texto_resposta, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
 
 @router.message(EspelhadorFluxo.aguardando_janela)
 async def receber_janela_rota(message: types.Message, state: FSMContext):
@@ -863,52 +883,72 @@ async def salvar_edicao_modo(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.aguardando_nova_origem)
 async def confirmar_nova_origem(message: types.Message, state: FSMContext):
     entradas_brutas = message.text.replace('\n', ',').split(',')
+    
     origens_validas = []
+    origens_duplicadas = []
+    origens_invalidas = []
     
     msg_status = await message.answer("⏳ Validando links, subgrupos e buscando nomes...", reply_markup=teclado_espelhador_cancelar)
     
-    for entrada in entradas_brutas:
-        if not entrada.strip(): continue
-        
-        sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada)
-        
-        if sucesso and id_final not in [o['id'] for o in origens_validas]:
-            salvar_nome_grupo(id_final, nome)
-            origens_validas.append({"id": id_final, "nome": nome})
-
-    await msg_status.delete()
-
-    if not origens_validas:
-        await message.answer("⚠️ Nenhum canal válido encontrado ou formato incorreto. Tente novamente:", reply_markup=teclado_espelhador_cancelar)
-        return
-
+    # Puxa os dados da rota atual para saber o que JÁ ESTÁ cadastrado
     data = await state.get_data()
     indice = data.get("indice_edicao")
     dados = ler_espelhos()
     rotas = dados.get("rotas", [])
     rota_atual = rotas[indice]
-    
     origens_atuais = rota_atual.get('origens', [])
     if not origens_atuais and 'origem' in rota_atual: origens_atuais = [rota_atual['origem']]
     
-    # Filtra as que já estão na rota atual
-    origens_para_adicionar = [o for o in origens_validas if o['id'] not in origens_atuais]
-    
-    if not origens_para_adicionar:
-        await message.answer("⚠️ Todas as origens enviadas já estão cadastradas nesta rota.", reply_markup=teclado_espelhador_cancelar)
+    for entrada in entradas_brutas:
+        entrada_limpa = entrada.strip()
+        if not entrada_limpa: continue
+        
+        sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada_limpa)
+        
+        if sucesso:
+            # Verifica se já está na rota ou se enviou repetido agora
+            if id_final in origens_atuais or id_final in [o['id'] for o in origens_validas]:
+                origens_duplicadas.append(entrada_limpa)
+            else:
+                salvar_nome_grupo(id_final, nome)
+                origens_validas.append({"id": id_final, "nome": nome})
+        else:
+            origens_invalidas.append(entrada_limpa)
+
+    await msg_status.delete()
+
+    texto_resumo = ""
+
+    if origens_validas:
+        texto_resumo += f"✅ <b>{len(origens_validas)} NOVO(S) canal(is) validado(s):</b>\n"
+        for o in origens_validas:
+            texto_resumo += f"🔹 {o['nome']} (<code>{o['id']}</code>)\n"
+        texto_resumo += "\n"
+
+    if origens_duplicadas:
+        texto_resumo += f"ℹ️ <b>{len(origens_duplicadas)} ignorado(s) por já estarem na rota (Duplicados):</b>\n"
+        for dup in origens_duplicadas:
+            texto_resumo += f"🔸 <code>{dup}</code>\n"
+        texto_resumo += "\n"
+
+    if origens_invalidas:
+        texto_resumo += f"❌ <b>{len(origens_invalidas)} falharam (Formato inválido ou link Privado):</b>\n"
+        for rej in origens_invalidas:
+            texto_resumo += f"🔻 <code>{rej}</code>\n"
+        texto_resumo += "\n"
+
+    if not origens_validas:
+        texto_resumo += "⚠️ <b>Nenhum canal novo foi aprovado.</b> Tente novamente:"
+        await message.answer(texto_resumo, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
         return
 
-    await state.update_data(origens_para_adicionar=origens_para_adicionar)
-    
-    texto_resumo = f"✅ <b>{len(origens_para_adicionar)} Origem(ns) Validada(s):</b>\n"
-    for o in origens_para_adicionar:
-        texto_resumo += f"└ {o['nome']} (<code>{o['id']}</code>)\n"
+    await state.update_data(origens_para_adicionar=origens_validas)
     
     if len(rotas) > 1:
-        texto_resumo += f"\nO seu sistema possui <b>{len(rotas)} rotas ativas</b>. Onde deseja adicionar?"
+        texto_resumo += f"O seu sistema possui <b>{len(rotas)} rotas ativas</b>. Onde deseja adicionar?"
         await message.answer(texto_resumo, reply_markup=teclado_espelhador_abrangencia, parse_mode="HTML")
     else:
-        texto_resumo += f"\nDeseja adicionar à rota <b>{rota_atual['nome']}</b>?"
+        texto_resumo += f"Deseja adicionar à rota <b>{rota_atual['nome']}</b>?"
         await message.answer(texto_resumo, reply_markup=teclado_espelhador_confirmacao, parse_mode="HTML")
     
     await state.set_state(EspelhadorFluxo.aguardando_confirmacao_nova_origem)
