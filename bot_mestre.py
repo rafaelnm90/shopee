@@ -4670,21 +4670,13 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
     
     texto = f"📡 <b>Gestão de Grupos Vigiados</b>\n\n"
     
-    if destino != "Não definido":
-        nome_dest = status_destino.get("nome", str(destino))
-        icone_dest = "❌" if status_destino.get("status") == "erro" else "✅" if status_destino.get("status") == "ok" else "⏳"
-        display_destino = f"{icone_dest} {nome_dest} (<code>{destino}</code>)" if nome_dest != str(destino) else f"{icone_dest} <code>{destino}</code>"
-    else:
-        display_destino = "<i>Não definido</i>"
-        
-    texto += f"🎯 <b>Canal de Destino:</b> {display_destino}\n\n"
-    texto += "<b>Na Escuta:</b>\n"
+    texto += "📥 <b>Na Escuta:</b>\n"
     
     if alvos:
-        cache_nomes_vigiados = ler_cache_nomes_grupos()  # 🚀 Fallback para grupos ainda não auditados pelo Userbot
+        cache_nomes_vigiados = ler_cache_nomes_grupos()
         for i, alvo in enumerate(alvos, 1):
             info = status_alvos.get(alvo, {})
-            status_ico = "⏳" # Status pendente enquanto o Userbot não verifica
+            status_ico = "⏳"
             nome_cache = cache_nomes_vigiados.get(str(alvo))
             detalhe = f"{nome_cache} <code>({alvo})</code>" if nome_cache else alvo
             
@@ -4695,9 +4687,20 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
                 status_ico = "❌"
                 detalhe = f"<code>{alvo}</code> - <i>Acesso negado/Link inválido</i>"
                 
-            texto += f"   {i}. {status_ico} {detalhe}\n"
+            # ✅ Alinhamento perfeito com 01, 02 e bloco monospace
+            texto += f"<code>{i:02d}.</code> {status_ico} {detalhe}\n"
     else:
-        texto += "   <i>Nenhum grupo sendo monitorado no momento.</i>\n"
+        texto += "<i>Nenhum grupo sendo monitorado no momento.</i>\n"
+
+    if destino != "Não definido":
+        nome_dest = status_destino.get("nome", str(destino))
+        icone_dest = "❌" if status_destino.get("status") == "erro" else "✅" if status_destino.get("status") == "ok" else "⏳"
+        display_destino = f"{icone_dest} {nome_dest} (<code>{destino}</code>)" if nome_dest != str(destino) else f"{icone_dest} <code>{destino}</code>"
+    else:
+        display_destino = "<i>Não definido</i>"
+        
+    # ✅ Destino movido para baixo e isolado
+    texto += f"\n🎯 <b>Canal de Destino:</b> {display_destino}\n\n"
         
     await message.answer(texto, reply_markup=teclado_opcoes_espiao, parse_mode="HTML")
     await state.set_state(EspiaoFluxo.menu_principal)
