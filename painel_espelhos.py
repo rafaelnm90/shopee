@@ -600,9 +600,9 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         # ✅ BUG CORRIGIDO AQUI: Trocado "Editar Origens" por "Canais Vigiados"
         teclado_submenu = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="📝 Editar Nome"), KeyboardButton(text="🎯 Editar Destino")],
+                [KeyboardButton(text="📝 Editar Nome"), KeyboardButton(text="🔀 Modificar Modo")],
+                [KeyboardButton(text="🎯 Editar Destino"), KeyboardButton(text="📥 Canais Vigiados")],
                 [KeyboardButton(text="🕒 Modificar Janela"), KeyboardButton(text="📅 Modificar Dias")],
-                [KeyboardButton(text="🔀 Modificar Modo"), KeyboardButton(text="📥 Canais Vigiados")],
                 [KeyboardButton(text="Cancelar Operação ❌")]
             ],
             resize_keyboard=True,
