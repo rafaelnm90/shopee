@@ -80,6 +80,13 @@ teclado_espelhador_cancelar = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
+# ✅ NOVO: Teclado exclusivo de navegação para voltar sem "cancelar"
+teclado_espelhador_voltar = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="Voltar ao Painel 🔙")]],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
 # ✅ NOVO: Teclado para Definição da Janela de Horário da Rota
 teclado_espelhador_janela = ReplyKeyboardMarkup(
     keyboard=[
@@ -129,7 +136,7 @@ def salvar_espelhos(dados):
         json.dump(dados, f, indent=4)
 
 # --- NAVEGAÇÃO E PAINEL ---
-@router.message(F.text == "Cancelar Operação ❌", StateFilter("*"))
+@router.message(F.text.in_(["Cancelar Operação ❌", "Voltar ao Painel 🔙"]), StateFilter("*"))
 async def cancelar_espelhador(message: types.Message, state: FSMContext):
     estado_atual = await state.get_state()
     data = await state.get_data()
@@ -509,7 +516,7 @@ async def iniciar_remocao_rota(message: types.Message, state: FSMContext):
         qtd_origens = len(rota.get('origens', [rota.get('origem')]))
         texto += f"{i}. {rota['nome']} ({qtd_origens} canais vigiados agrupados)\n"
         
-    await message.answer(texto, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+    await message.answer(texto, reply_markup=teclado_espelhador_voltar, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.aguardando_remocao)
 
 @router.message(EspelhadorFluxo.aguardando_remocao)
@@ -586,7 +593,7 @@ async def iniciar_edicao_rota(message: types.Message, state: FSMContext):
     for i, rota in enumerate(rotas, 1):
         texto += f"{i}. {rota['nome']}\n"
         
-    await message.answer(texto, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+    await message.answer(texto, reply_markup=teclado_espelhador_voltar, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.aguardando_edicao_escolha_rota)
 
 @router.message(EspelhadorFluxo.aguardando_edicao_escolha_rota)
@@ -650,7 +657,7 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
                 [KeyboardButton(text="📝 Editar Nome"), KeyboardButton(text="🔀 Modificar Modo")],
                 [KeyboardButton(text="🎯 Editar Destino"), KeyboardButton(text="📥 Canais Vigiados")],
                 [KeyboardButton(text="🕒 Modificar Janela"), KeyboardButton(text="📅 Modificar Dias")],
-                [KeyboardButton(text="Cancelar Operação ❌")]
+                [KeyboardButton(text="Voltar ao Painel 🔙")]
             ],
             resize_keyboard=True,
             is_persistent=True
