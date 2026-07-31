@@ -82,7 +82,7 @@ teclado_espelhador_cancelar = ReplyKeyboardMarkup(
 
 # ✅ NOVO: Teclado exclusivo de navegação para voltar sem "cancelar"
 teclado_espelhador_voltar = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text="Voltar ao Painel 🔙")]],
+    keyboard=[[KeyboardButton(text="Voltar ao Menu Espelho 🔙")]],
     resize_keyboard=True,
     is_persistent=True
 )
@@ -136,10 +136,9 @@ def salvar_espelhos(dados):
         json.dump(dados, f, indent=4)
 
 # --- NAVEGAÇÃO E PAINEL ---
-@router.message(F.text.in_(["Cancelar Operação ❌", "Voltar ao Painel 🔙"]), StateFilter("*"))
+@router.message(F.text.in_(["Cancelar Operação ❌", "Voltar ao Menu Espelho 🔙"]), StateFilter("*"))
 async def cancelar_espelhador(message: types.Message, state: FSMContext):
     estado_atual = await state.get_state()
-    data = await state.get_data()
     
     # --- NÍVEL 3: Submenu de Origens (Volta para os botões Adicionar/Remover Origem) ---
     estados_origem = [
@@ -657,7 +656,7 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
                 [KeyboardButton(text="📝 Editar Nome"), KeyboardButton(text="🔀 Modificar Modo")],
                 [KeyboardButton(text="🎯 Editar Destino"), KeyboardButton(text="📥 Canais Vigiados")],
                 [KeyboardButton(text="🕒 Modificar Janela"), KeyboardButton(text="📅 Modificar Dias")],
-                [KeyboardButton(text="Voltar ao Painel 🔙")]
+                [KeyboardButton(text="Voltar ao Menu Espelho 🔙")]
             ],
             resize_keyboard=True,
             is_persistent=True
