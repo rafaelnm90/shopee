@@ -385,6 +385,13 @@ async def receber_intervalo_dias_rota(message: types.Message, state: FSMContext)
     intervalo = mapa_dias[message.text]
     await state.update_data(intervalo_dias=intervalo)
     
+    # ✅ NOVO: Pula a pergunta de Modo se for D+0 e salva direto como "ordem"
+    if intervalo == 0:
+        if EXIBIR_LOGS: logger.info("⏭️ Atalho UX acionado: D+0 forçando modo 'Ordem de Chegada'.")
+        msg_simulada = message.model_copy(update={"text": "Ordem de Chegada ⬇️"})
+        await receber_modo_rota(msg_simulada, state)
+        return
+        
     teclado_modo = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")],
@@ -874,16 +881,21 @@ async def salvar_edicao_intervalo_dias(message: types.Message, state: FSMContext
     rotas = dados.get("rotas", [])
     
     rotas[indice]["intervalo_dias"] = intervalo
+    
+    # ✅ NOVO: Se o usuário mudar para D+0, o robô força automaticamente o modo para "ordem"
+    if intervalo == 0:
+        rotas[indice]["modo"] = "ordem"
+        if EXIBIR_LOGS: logger.info(f"🔄 Modo da rota '{rotas[indice]['nome']}' forçado para 'ordem' devido ao D+0.")
+        
     dados["rotas"] = rotas
     salvar_espelhos(dados)
     
-    # 🔫 O NOVO GATILHO INTELIGENTE: Limpa o carimbo de horário para forçar o Motor a recalcular!
     try:
         fila_dados = ler_fila_espelhador()
         houve_reset = False
         for item in fila_dados.get("fila", []):
             if item.get("nome_rota") == rotas[indice]["nome"] and not item.get("processado"):
-                item["horario_disparo"] = "" # Limpa para o Motor agir
+                item["horario_disparo"] = "" 
                 houve_reset = True
         if houve_reset:
             salvar_fila_espelhador(fila_dados)
@@ -892,8 +904,11 @@ async def salvar_edicao_intervalo_dias(message: types.Message, state: FSMContext
         pass
     
     if EXIBIR_LOGS: logger.info(f"✏️ Atraso dinâmico da rota '{rotas[indice]['nome']}' modificado para D+{intervalo}.")
-    await message.answer(f"✅ O intervalo temporal foi atualizado para D+{intervalo}!\nO Motor Central já está a recalcular os horários de forma orgânica e respeitando a janela.", parse_mode="HTML")
-    # ✅ CORREÇÃO: Volta para o menu de edição da rota atual
+    
+    # ✅ Aviso dinâmico informando a mudança automática do modo
+    aviso_extra = "\n⚠️ <b>Nota:</b> O modo de distribuição foi automaticamente alterado para <i>Ordem de Chegada</i> para garantir a postagem imediata no mesmo dia." if intervalo == 0 else ""
+    await message.answer(f"✅ O intervalo temporal foi atualizado para D+{intervalo}!{aviso_extra}\nO Motor Central já está a recalcular os horários de forma orgânica e respeitando a janela.", parse_mode="HTML")
+    
     novo_texto = str(indice + 1)
     msg_simulada = message.model_copy(update={"text": novo_texto})
     if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu da rota atual via mensagem simulada (Dias).")
