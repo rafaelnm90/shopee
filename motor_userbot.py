@@ -323,15 +323,22 @@ async def interceptar_mensagem(event):
     if eh_ponte and destino_autorais not in [str(a).lower() for a in alvos]:
         alvos.append(destino_autorais)
 
-    # Identificação de Autoria Absoluta (Perfil Principal)
+    # Identificação de Autoria Absoluta (Perfil Principal e Bot Oficial)
     try:
         me = await client.get_me()
-        foi_perfil_principal = getattr(event, 'sender_id', None) == me.id
+        remetente_id = getattr(event, 'sender_id', None)
+        
+        # Puxa o ID do Bot Oficial direto do seu Token (os números antes do ':')
+        bot_token = os.getenv('TELEGRAM_TOKEN', '')
+        bot_oficial_id = int(bot_token.split(':')[0]) if ':' in bot_token else None
+        
+        # Bloqueia se foi enviado pelo Userbot OU pelo Bot Oficial
+        foi_nossa_equipe = (remetente_id == me.id) or (remetente_id == bot_oficial_id)
     except Exception:
-        foi_perfil_principal = False
+        foi_nossa_equipe = False
 
-    if foi_perfil_principal and chat_username != "@shopee_video_afiliado":
-        if EXIBIR_LOGS: logger.info("🛡️ [Espião] Postagem da conta principal bloqueada (Filtro Anti-Loop acionado).")
+    if foi_nossa_equipe and chat_username != "@shopee_video_afiliado":
+        if EXIBIR_LOGS: logger.info("🛡️ [Espião] Postagem do próprio sistema bloqueada (Userbot ou Bot Oficial).")
         return
 
     if event.out and not eh_ponte and chat_username != "@shopee_video_afiliado":
@@ -585,15 +592,22 @@ async def motor_espelhador_userbot(event):
     if destino_autorais and destino_autorais in [chat_username, chat_id_str, chat_id_completo]:
         eh_ponte = True
 
-    # Identificação de Autoria Absoluta (Perfil Principal)
+    # Identificação de Autoria Absoluta (Perfil Principal e Bot Oficial)
     try:
         me = await client.get_me()
-        foi_perfil_principal = getattr(event, 'sender_id', None) == me.id
+        remetente_id = getattr(event, 'sender_id', None)
+        
+        # Puxa o ID do Bot Oficial direto do seu Token (os números antes do ':')
+        bot_token = os.getenv('TELEGRAM_TOKEN', '')
+        bot_oficial_id = int(bot_token.split(':')[0]) if ':' in bot_token else None
+        
+        # Bloqueia se foi enviado pelo Userbot OU pelo Bot Oficial
+        foi_nossa_equipe = (remetente_id == me.id) or (remetente_id == bot_oficial_id)
     except Exception:
-        foi_perfil_principal = False
+        foi_nossa_equipe = False
 
-    if foi_perfil_principal and chat_username != "@shopee_video_afiliado":
-        if EXIBIR_LOGS: logger.info("🛡️ [Espelhador] Postagem da conta principal bloqueada (Filtro Anti-Loop acionado).")
+    if foi_nossa_equipe and chat_username != "@shopee_video_afiliado":
+        if EXIBIR_LOGS: logger.info("🛡️ [Espelhador] Postagem do próprio sistema bloqueada (Userbot ou Bot Oficial).")
         return
 
     if event.out and not eh_ponte and chat_username != "@shopee_video_afiliado":
