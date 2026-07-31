@@ -238,7 +238,12 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.menu_principal, F.text == "Adicionar Espelho ➕")
 async def iniciar_cadastro_rota(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("🚀 Iniciando fluxo de cadastro de espelho (Passo 1: Destino)...")
-    await message.answer("Para começar, envie o ID numérico ou @username do <b>Canal de DESTINO</b> (Para onde o robô vai enviar as cópias):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+    await message.answer(
+        "Para começar, envie o <b>ID Numérico, Link ou @username</b> do Canal de DESTINO (Para onde o robô vai enviar as cópias):\n"
+        "<i>Exemplo: -100123456789 ou https://t.me/meucanal</i>", 
+        reply_markup=teclado_espelhador_cancelar, 
+        parse_mode="HTML"
+    )
     await state.set_state(EspelhadorFluxo.aguardando_destino_criacao)
 
 @router.message(EspelhadorFluxo.aguardando_destino_criacao)
@@ -656,7 +661,12 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
         await message.answer("Digite o <b>NOVO NOME</b> para esta rota (Ex: Espelho Principal):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_edicao_novo_nome)
     elif texto == "🎯 Editar Destino":
-        await message.answer("Envie o ID numérico, link ou @username do <b>NOVO CANAL DE DESTINO</b> para esta rota:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+        await message.answer(
+            "Envie o <b>ID Numérico, Link ou @username</b> do NOVO Canal de DESTINO para esta rota:\n"
+            "<i>Exemplo: -100123456789 ou https://t.me/meucanal</i>", 
+            reply_markup=teclado_espelhador_cancelar, 
+            parse_mode="HTML"
+        )
         await state.set_state(EspelhadorFluxo.aguardando_edicao_novo_destino)
     elif texto == "🕒 Modificar Janela":
         await message.answer(
