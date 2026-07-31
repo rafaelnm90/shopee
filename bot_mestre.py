@@ -4900,8 +4900,20 @@ async def pedir_destino_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.aguardando_canal_destino)
 async def confirmar_destino_espiao(message: types.Message, state: FSMContext):
-    destino = message.text.strip()
-    await state.update_data(novo_destino=destino)
+    msg_status = await message.answer("⏳ Validando o canal de destino e buscando nome...", reply_markup=teclado_cancelar)
+    
+    # Passa o link/ID pelo nosso Motor Inteligente de Validação
+    sucesso, destino_id, nome = await validar_e_formatar_alvo(bot, message.text.strip())
+    
+    await msg_status.delete()
+    
+    if not sucesso:
+        await message.answer("⚠️ <b>Canal não encontrado ou formato inválido.</b>\nCertifique-se de que o ID ou link está correto. Tente novamente:", reply_markup=teclado_cancelar, parse_mode="HTML")
+        return
+        
+    # Salva o nome amigável no cache e guarda o ID limpo na memória da conversa
+    salvar_nome_grupo(destino_id, nome)
+    await state.update_data(novo_destino=destino_id)
     
     teclado_confirmacao = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
@@ -4909,7 +4921,10 @@ async def confirmar_destino_espiao(message: types.Message, state: FSMContext):
         is_persistent=True
     )
     
-    await message.answer(f"Os vídeos clonados serão enviados automaticamente para o canal:\n\n<b>{destino}</b>\n\nConfirma essa alteração?", reply_markup=teclado_confirmacao, parse_mode="HTML")
+    # Mostra de forma bonita e padronizada (Nome + ID)
+    nome_exibicao = f"{nome} (<code>{destino_id}</code>)" if nome != destino_id else f"<code>{destino_id}</code>"
+    
+    await message.answer(f"Os vídeos clonados serão enviados automaticamente para o canal:\n\n<b>{nome_exibicao}</b>\n\nConfirma essa alteração?", reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(EspiaoFluxo.aguardando_confirmacao_destino)
 
 @dp.message(EspiaoFluxo.aguardando_confirmacao_destino)
