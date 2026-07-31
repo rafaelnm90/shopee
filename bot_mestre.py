@@ -4895,7 +4895,12 @@ async def processar_remocao_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Definir Destino 🎯")
 async def pedir_destino_espiao(message: types.Message, state: FSMContext):
-    await message.answer("Envie o @username ou ID do seu Canal onde o bot postará os vídeos clonados (Ex: -100123456789):", reply_markup=teclado_cancelar)
+    await message.answer(
+        "Envie o <b>ID Numérico, Link ou @username</b> do Canal de DESTINO (Para onde o robô vai enviar os vídeos clonados):\n"
+        "<i>Exemplo: -100123456789 ou https://t.me/meucanal</i>", 
+        parse_mode="HTML", 
+        reply_markup=teclado_cancelar
+    )
     await state.set_state(EspiaoFluxo.aguardando_canal_destino)
 
 @dp.message(EspiaoFluxo.aguardando_canal_destino)
