@@ -5031,6 +5031,13 @@ async def receber_intervalo_espiao(message: types.Message, state: FSMContext):
     intervalo = mapa_dias[message.text]
     await state.update_data(intervalo_dias_espiao=intervalo)
     
+    # ✅ NOVO: Pula a pergunta de Modo se for D+0 e salva direto como "ordem"
+    if intervalo == 0:
+        if EXIBIR_LOGS: logger.info("⏭️ Atalho UX acionado: D+0 forçando modo 'Ordem de Chegada'.")
+        msg_simulada = message.model_copy(update={"text": "Ordem de Chegada ⬇️"})
+        await salvar_config_tempo_espiao(msg_simulada, state)
+        return
+        
     teclado_modo = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")],
