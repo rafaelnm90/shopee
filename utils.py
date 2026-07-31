@@ -115,7 +115,7 @@ def salvar_nome_grupo(chat_id, nome):
 async def validar_e_formatar_alvo(bot_instance, entrada):
     """
     Analisa a entrada, extrai o subgrupo (tópico) se existir,
-    testa as variações de ID no Telegram e devolve o ID confirmado + Nome.
+    testa as variações de ID no Telegram e devolve o ID numérico confirmado + Nome.
     """
     entrada = str(entrada).strip()
     if not entrada:
@@ -164,6 +164,9 @@ async def validar_e_formatar_alvo(bot_instance, entrada):
         try:
             chat_obj = await bot_instance.get_chat(var)
             id_confirmado = str(chat_obj.id)
+            # Adiciona o -100 ao ID confirmado se for um supergrupo/canal
+            if chat_obj.type in ["supergroup", "channel"] and not id_confirmado.startswith("-100"):
+                 id_confirmado = f"-100{id_confirmado}"
             nome_confirmado = chat_obj.title or chat_obj.full_name or id_confirmado
             break 
         except Exception:
@@ -176,8 +179,14 @@ async def validar_e_formatar_alvo(bot_instance, entrada):
     else:
         # ✅ CORREÇÃO (MODO TRUST): Se o bot não tem permissão para ler o grupo para pegar o nome,
         # MAS o que você enviou é claramente um ID numérico ou @username, ele aprova mesmo assim!
+        # No Modo Trust, tentaremos extrair o ID numérico do username se possível.
         if chat_base.lstrip('-').isdigit() or chat_base.startswith("@"):
-            id_final = f"{chat_base}:{topico_id}" if topico_id else chat_base
-            return True, id_final, chat_base # Retorna o próprio ID no lugar do nome
+             if chat_base.startswith("@"):
+                  # Modo Trust não pode resolver usernames em IDs numéricos de forma confiável
+                  # É mais seguro falhar e pedir o ID numérico do que arriscar um loop
+                  return False, entrada, None 
+             else:
+                  id_final = f"{chat_base}:{topico_id}" if topico_id else chat_base
+                  return True, id_final, chat_base # Retorna o próprio ID no lugar do nome
 
         return False, entrada, None
