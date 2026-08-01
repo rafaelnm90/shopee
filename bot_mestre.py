@@ -1656,6 +1656,51 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado_menu_autorais)
     await state.set_state(AutoraisFluxo.menu_principal)
 
+@dp.message(AutoraisFluxo.menu_principal, F.text == "Regras de Retorno ♻️")
+async def submenu_regras_retorno(message: types.Message, state: FSMContext):
+    await message.answer("♻️ <b>Regras de Retorno</b>\nEscolha o que deseja editar:", reply_markup=teclado_submenu_retorno, parse_mode="HTML")
+
+@dp.message(AutoraisFluxo.menu_principal, F.text == "Status do Robô ⏸️")
+async def submenu_status_robo(message: types.Message, state: FSMContext):
+    config = ler_autorais_config()
+    texto_repostagem = "Retomar Re-postagem ▶️" if config.get("pausar_repostagem") else "Pausar Re-postagem ⏸️"
+    texto_robo = "Retomar Robô Completo ▶️" if config.get("pausar_robo_completo") else "Pausar Robô Completo ⏸️"
+
+    teclado_submenu_pausa = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=texto_repostagem)],
+            [KeyboardButton(text=texto_robo)],
+            [KeyboardButton(text="Voltar ao Menu Autorais 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer("⏸️ <b>Controle de Pausa</b>\nSelecione o serviço que deseja pausar ou retomar:", reply_markup=teclado_submenu_pausa, parse_mode="HTML")
+
+@dp.message(AutoraisFluxo.menu_principal, F.text.in_(["Pausar Re-postagem ⏸️", "Retomar Re-postagem ▶️"]))
+async def toggle_pausa_repostagem(message: types.Message, state: FSMContext):
+    config = ler_autorais_config()
+    config["pausar_repostagem"] = not config.get("pausar_repostagem", False)
+    salvar_autorais_config(config)
+
+    status = "PAUSADA 🔴" if config["pausar_repostagem"] else "RETOMADA 🟢"
+    await message.answer(f"✅ A re-postagem automática de vídeos antigos foi <b>{status}</b>.", parse_mode="HTML")
+    await submenu_status_robo(message, state) 
+
+@dp.message(AutoraisFluxo.menu_principal, F.text.in_(["Pausar Robô Completo ⏸️", "Retomar Robô Completo ▶️"]))
+async def toggle_pausa_robo(message: types.Message, state: FSMContext):
+    config = ler_autorais_config()
+    config["pausar_robo_completo"] = not config.get("pausar_robo_completo", False)
+    salvar_autorais_config(config)
+
+    status = "PAUSADO 🔴" if config["pausar_robo_completo"] else "RETOMADO 🟢"
+    await message.answer(f"✅ O funcionamento geral do robô Espelhador Isolado foi <b>{status}</b>.", parse_mode="HTML")
+    await submenu_status_robo(message, state) 
+
+@dp.message(AutoraisFluxo.menu_principal, F.text == "Voltar ao Menu Autorais 🔙")
+async def voltar_menu_autorais(message: types.Message, state: FSMContext):
+    await painel_autorais(message, state)
+
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Origem 📥")
 async def pedir_origem_autorais(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("📥 Solicitando nova origem para vídeos autorais...")
