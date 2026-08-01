@@ -512,8 +512,19 @@ async def iniciar_remocao_rota(message: types.Message, state: FSMContext):
         
     texto = "Digite o <b>NÚMERO</b> da rota que deseja remover:\n\n"
     for i, rota in enumerate(rotas, 1):
+        nome_exibicao = rota.get('nome', '')
+        
+        # ✅ NOVO: Se o nome for apenas o ID bruto, tenta buscar o nome real no cache
+        if "Espelho: -100" in nome_exibicao or "Espelho: @" in nome_exibicao:
+            try:
+                nome_cache = obter_nome_grupo(rota.get('destino'))
+                if nome_cache and nome_cache != rota.get('destino'):
+                    nome_exibicao = f"Espelho: {nome_cache}"
+            except Exception:
+                pass
+                
         qtd_origens = len(rota.get('origens', [rota.get('origem')]))
-        texto += f"{i}. {rota['nome']} ({qtd_origens} canais vigiados agrupados)\n"
+        texto += f"{i}. {nome_exibicao} ({qtd_origens} canais vigiados agrupados)\n"
         
     await message.answer(texto, reply_markup=teclado_espelhador_voltar, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.aguardando_remocao)
@@ -590,7 +601,18 @@ async def iniciar_edicao_rota(message: types.Message, state: FSMContext):
         
     texto = "Digite o <b>NÚMERO</b> da rota que deseja configurar:\n\n"
     for i, rota in enumerate(rotas, 1):
-        texto += f"{i}. {rota['nome']}\n"
+        nome_exibicao = rota.get('nome', '')
+        
+        # ✅ NOVO: Se o nome for apenas o ID bruto, tenta buscar o nome real no cache
+        if "Espelho: -100" in nome_exibicao or "Espelho: @" in nome_exibicao:
+            try:
+                nome_cache = obter_nome_grupo(rota.get('destino'))
+                if nome_cache and nome_cache != rota.get('destino'):
+                    nome_exibicao = f"Espelho: {nome_cache}"
+            except Exception:
+                pass
+                
+        texto += f"{i}. {nome_exibicao}\n"
         
     await message.answer(texto, reply_markup=teclado_espelhador_voltar, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.aguardando_edicao_escolha_rota)
