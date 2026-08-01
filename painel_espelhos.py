@@ -511,20 +511,32 @@ async def iniciar_remocao_rota(message: types.Message, state: FSMContext):
         return
         
     texto = "Digite o <b>NÚMERO</b> da rota que deseja remover:\n\n"
+    houve_alteracao = False
+    
     for i, rota in enumerate(rotas, 1):
         nome_exibicao = rota.get('nome', '')
+        destino = rota.get('destino', '')
         
-        # ✅ NOVO: Se o nome for apenas o ID bruto, tenta buscar o nome real no cache
+        # ✅ NOVO: Busca o nome real direto no Telegram e conserta o banco de dados
         if "Espelho: -100" in nome_exibicao or "Espelho: @" in nome_exibicao:
             try:
-                nome_cache = obter_nome_grupo(rota.get('destino'))
-                if nome_cache and nome_cache != rota.get('destino'):
-                    nome_exibicao = f"Espelho: {nome_cache}"
+                chat_obj = await message.bot.get_chat(destino)
+                nome_real = chat_obj.title or chat_obj.full_name or destino
+                if nome_real and nome_real != destino:
+                    nome_exibicao = f"Espelho: {nome_real}"
+                    rota['nome'] = nome_exibicao
+                    houve_alteracao = True
             except Exception:
-                pass
+                pass # Se der erro de permissão, mantém o que está
                 
         qtd_origens = len(rota.get('origens', [rota.get('origem')]))
         texto += f"{i}. {nome_exibicao} ({qtd_origens} canais vigiados agrupados)\n"
+        
+    # Se o bot corrigiu algum nome, ele salva no JSON para não precisar buscar de novo
+    if houve_alteracao:
+        dados_atuais = ler_espelhos()
+        dados_atuais["rotas"] = rotas
+        salvar_espelhos(dados_atuais)
         
     await message.answer(texto, reply_markup=teclado_espelhador_voltar, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.aguardando_remocao)
@@ -600,19 +612,31 @@ async def iniciar_edicao_rota(message: types.Message, state: FSMContext):
         return
         
     texto = "Digite o <b>NÚMERO</b> da rota que deseja configurar:\n\n"
+    houve_alteracao = False
+    
     for i, rota in enumerate(rotas, 1):
         nome_exibicao = rota.get('nome', '')
+        destino = rota.get('destino', '')
         
-        # ✅ NOVO: Se o nome for apenas o ID bruto, tenta buscar o nome real no cache
+        # ✅ NOVO: Busca o nome real direto no Telegram e conserta o banco de dados
         if "Espelho: -100" in nome_exibicao or "Espelho: @" in nome_exibicao:
             try:
-                nome_cache = obter_nome_grupo(rota.get('destino'))
-                if nome_cache and nome_cache != rota.get('destino'):
-                    nome_exibicao = f"Espelho: {nome_cache}"
+                chat_obj = await message.bot.get_chat(destino)
+                nome_real = chat_obj.title or chat_obj.full_name or destino
+                if nome_real and nome_real != destino:
+                    nome_exibicao = f"Espelho: {nome_real}"
+                    rota['nome'] = nome_exibicao
+                    houve_alteracao = True
             except Exception:
                 pass
                 
         texto += f"{i}. {nome_exibicao}\n"
+        
+    # Se o bot corrigiu algum nome, ele salva no JSON para não precisar buscar de novo
+    if houve_alteracao:
+        dados_atuais = ler_espelhos()
+        dados_atuais["rotas"] = rotas
+        salvar_espelhos(dados_atuais)
         
     await message.answer(texto, reply_markup=teclado_espelhador_voltar, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.aguardando_edicao_escolha_rota)
