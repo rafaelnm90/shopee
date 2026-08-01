@@ -2879,15 +2879,15 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 # O CÓDIGO NORMAL DA ORIGEM DOS OUTROS MÓDULOS COMEÇA AQUI
                 if not origem_bruta or origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None"]:
                     nome_rota_item = v.get("nome_rota")
-                if tipo_fila == "Espelhador" and nome_rota_item:
-                    import painel_espelhos
-                    dados_rotas_temp = painel_espelhos.ler_espelhos()
-                    for r in dados_rotas_temp.get("rotas", []):
-                        if r.get("nome") == nome_rota_item:
-                            origem_bruta = str(r.get("origem", "Desconhecida"))
-                            break
-                if not origem_bruta or origem_bruta == "None":
-                    origem_bruta = "Desconhecida"
+                    if tipo_fila == "Espelhador" and nome_rota_item:
+                        import painel_espelhos
+                        dados_rotas_temp = painel_espelhos.ler_espelhos()
+                        for r in dados_rotas_temp.get("rotas", []):
+                            if r.get("nome") == nome_rota_item:
+                                origem_bruta = str(r.get("origem", "Desconhecida"))
+                                break
+                    if not origem_bruta or origem_bruta == "None":
+                        origem_bruta = "Desconhecida"
 
             if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 if link_original and "t.me/c/" in link_original:
