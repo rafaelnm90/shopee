@@ -1638,16 +1638,17 @@ async def painel_autorais(message: types.Message, state: FSMContext):
                 nome_destino = f"<code>{destino}</code> - <i>Acesso Negado</i>"
                 icone_destino = "❌"
     
+    # --- NOVA FORMATAÇÃO DO TEXTO APLICADA AQUI ---
     texto = (
         "🎥 <b>Painel do Bot Vídeos Autorais</b>\n\n"
         f"<b>- Status Geral:</b>\n"
         f"    🤖 Robô Completo: <b>{status_robo}</b>\n"
-        f"    ♻️ Re-postagem: <b>{status_repost}</b>\n\n"
+        f"    ♻️ Repostagem: <b>{status_repost}</b>\n\n"
         f"<b>- Origem atual:</b>\n"
         f"    {icone_origem} {nome_origem}\n\n"
         f"<b>- Destino atual:</b>\n"
         f"    {icone_destino} {nome_destino}\n\n"
-        f"♻️ <b>Regras de Retorno (Re-postagem):</b>\n"
+        f"♻️ <b>Regras de Repostagem:</b>\n"
         f"⏳ Oculto por: <b>{dias_retorno} dias</b>\n"
         f"📦 Cota Diária: <b>{limite_videos} vídeos/dia</b>\n\n"
         "O robô Espelhador Isolado fará a escuta e o envio em tempo real baseando-se estritamente nestes valores.\n\n"
@@ -1656,14 +1657,17 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado_menu_autorais)
     await state.set_state(AutoraisFluxo.menu_principal)
 
-@dp.message(AutoraisFluxo.menu_principal, F.text == "Regras de Retorno ♻️")
+# ----------------------------------------------------
+# SUBSTITUA OS HANDLERS DOS SUBMENUS POR ESTES:
+# ----------------------------------------------------
+@dp.message(AutoraisFluxo.menu_principal, F.text == "Regras de Repostagem ♻️")
 async def submenu_regras_retorno(message: types.Message, state: FSMContext):
-    await message.answer("♻️ <b>Regras de Retorno</b>\nEscolha o que deseja editar:", reply_markup=teclado_submenu_retorno, parse_mode="HTML")
+    await message.answer("♻️ <b>Regras de Repostagem</b>\nEscolha o que deseja editar:", reply_markup=teclado_submenu_retorno, parse_mode="HTML")
 
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Status do Robô ⏸️")
 async def submenu_status_robo(message: types.Message, state: FSMContext):
     config = ler_autorais_config()
-    texto_repostagem = "Retomar Re-postagem ▶️" if config.get("pausar_repostagem") else "Pausar Re-postagem ⏸️"
+    texto_repostagem = "Retomar Repostagem ▶️" if config.get("pausar_repostagem") else "Pausar Repostagem ⏸️"
     texto_robo = "Retomar Robô Completo ▶️" if config.get("pausar_robo_completo") else "Pausar Robô Completo ⏸️"
 
     teclado_submenu_pausa = ReplyKeyboardMarkup(
@@ -1677,15 +1681,28 @@ async def submenu_status_robo(message: types.Message, state: FSMContext):
     )
     await message.answer("⏸️ <b>Controle de Pausa</b>\nSelecione o serviço que deseja pausar ou retomar:", reply_markup=teclado_submenu_pausa, parse_mode="HTML")
 
-@dp.message(AutoraisFluxo.menu_principal, F.text.in_(["Pausar Re-postagem ⏸️", "Retomar Re-postagem ▶️"]))
+@dp.message(AutoraisFluxo.menu_principal, F.text.in_(["Pausar Repostagem ⏸️", "Retomar Repostagem ▶️"]))
 async def toggle_pausa_repostagem(message: types.Message, state: FSMContext):
     config = ler_autorais_config()
     config["pausar_repostagem"] = not config.get("pausar_repostagem", False)
     salvar_autorais_config(config)
 
     status = "PAUSADA 🔴" if config["pausar_repostagem"] else "RETOMADA 🟢"
-    await message.answer(f"✅ A re-postagem automática de vídeos antigos foi <b>{status}</b>.", parse_mode="HTML")
+    await message.answer(f"✅ A repostagem automática de vídeos antigos foi <b>{status}</b>.", parse_mode="HTML")
     await submenu_status_robo(message, state) 
+
+# ----------------------------------------------------
+# ATENÇÃO: SUBSTITUA OS GATILHOS ANTIGOS DE "DIAS" E "LIMITE" PARA RECONHECER O NOVO TEXTO:
+# ----------------------------------------------------
+@dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Dias ⏳")
+async def pedir_dias_autorais(message: types.Message, state: FSMContext):
+    await message.answer("Por quantos <b>dias</b> o vídeo deve ficar arquivado e oculto até retornar para o grupo de origem? (Ex: 15)", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(AutoraisFluxo.aguardando_dias_retorno)
+
+@dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Limite 📦")
+async def pedir_limite_autorais(message: types.Message, state: FSMContext):
+    await message.answer("Qual será o <b>limite máximo</b> de vídeos arquivados salvos por dia? (Ex: 5)", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(AutoraisFluxo.aguardando_limite_videos)
 
 @dp.message(AutoraisFluxo.menu_principal, F.text.in_(["Pausar Robô Completo ⏸️", "Retomar Robô Completo ▶️"]))
 async def toggle_pausa_robo(message: types.Message, state: FSMContext):
