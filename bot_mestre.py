@@ -2702,17 +2702,30 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             origem_item = str(item.get("chat_origem", item.get("origem", "")))
             destino_item = str(item.get("chat_destino", item.get("destino", "")))
             
-            # Resgata o atraso configurado DAQUELA ROTA específica
+            # ✅ NOVO: Flag para verificar se a rota do vídeo ainda existe
+            rota_encontrada = False
             atraso_dias_rota = 1
             
             for r in lista_rotas:
-                if origem_item and destino_item and str(r.get("origem", "")) == origem_item and str(r.get("destino", "")) == destino_item:
+                # Compara usando apenas a origem (que é a chave principal do espelhador)
+                if origem_item and str(r.get("origem", "")) == origem_item:
+                    rota_encontrada = True
                     nome_atualizado = r.get("nome")
                     atraso_dias_rota = int(r.get("intervalo_dias", 1))
                     if nome_atualizado and nome_antigo != nome_atualizado:
                         item["nome_rota"] = nome_atualizado
                         houve_alteracao = True
                     break
+
+            # 🛡️ PENTE FINO: Se a rota não existe mais, deleta o vídeo órfão!
+            if not rota_encontrada:
+                if EXIBIR_LOGS: logger.info(f"🧹 Pente Fino: Removendo vídeo órfão de uma rota excluída (Origem: {origem_item}).")
+                houve_alteracao = True
+                caminho_video = item.get("caminho_video")
+                if caminho_video and os.path.exists(caminho_video):
+                    try: os.remove(caminho_video)
+                    except: pass
+                continue # Pula este item, ele não vai para a fila limpa
 
             # Mantém no visual os que foram postados HOJE no Espelhador.
             if item.get("processado", False):
