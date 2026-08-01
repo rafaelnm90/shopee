@@ -1608,11 +1608,14 @@ async def painel_autorais(message: types.Message, state: FSMContext):
                 nome_destino = f"<code>{destino}</code> - <i>Acesso Negado</i>"
                 icone_destino = "❌"
     
+    # --- NOVA FORMATAÇÃO DO TEXTO APLICADA AQUI ---
     texto = (
         "🎥 <b>Painel do Bot Vídeos Autorais</b>\n\n"
-        f"{icone_origem} <b>Origem atual:</b> {nome_origem}\n"
+        f"➖ <b>Origem atual:</b>\n"
+        f"   └ {icone_origem} {nome_origem}\n"
         f"📂 <b>Tópico (Subcanal):</b> <code>{topico}</code>\n\n"
-        f"{icone_destino} <b>Destino atual:</b> {nome_destino}\n\n"
+        f"➖ <b>Destino atual:</b>\n"
+        f"   └ {icone_destino} {nome_destino}\n\n"
         f"♻️ <b>Regras de Retorno (Re-postagem):</b>\n"
         f"⏳ Oculto por: <b>{dias_retorno} dias</b>\n"
         f"📦 Cota Diária: <b>{limite_videos} vídeos/dia</b>\n\n"
