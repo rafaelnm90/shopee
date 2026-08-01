@@ -1529,11 +1529,38 @@ dp.message.middleware(InatividadeMiddleware())
 # NOVO MÓDULO: VÍDEOS AUTORAIS 🎥
 # ----------------------------------
 def ler_autorais_config():
-    padrao = {"origem": -1003673555953, "origem_topico": None, "destino": "@videos_autorais", "dias_retorno": 15, "limite_videos": 5}
+    padrao = {
+        "origem": -1003673555953, 
+        "origem_topico": None, 
+        "destino": "@videos_autorais", 
+        "dias_retorno": 15, 
+        "limite_videos": 5,
+        "pausar_repostagem": False,
+        "pausar_robo_completo": False
+    }
     return ler_config_bd("autorais_config", padrao, arquivo_legado="autorais_config.json")
 
 def salvar_autorais_config(dados):
     salvar_config_bd("autorais_config", dados)
+
+teclado_menu_autorais = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Editar Origem 📥"), KeyboardButton(text="Editar Destino 📤")],
+        [KeyboardButton(text="Regras de Retorno ♻️"), KeyboardButton(text="Status do Robô ⏸️")],
+        [KeyboardButton(text="Voltar aos Canais 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+teclado_submenu_retorno = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Editar Dias (Retorno) ⏳"), KeyboardButton(text="Editar Limite (Retorno) 📦")],
+        [KeyboardButton(text="Voltar ao Menu Autorais 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
 
 @dp.message(F.text == "Vídeos Autorais 🎥", StateFilter("*"))
 async def painel_autorais(message: types.Message, state: FSMContext):
@@ -1545,13 +1572,17 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     
     origem = config.get("origem", "Não definida")
     topico = config.get("origem_topico")
-    
-    # ✅ LÓGICA DO SUB-ID: Prepara o tópico para ficar grudado ao ID (ex: :2289)
     topico_str = f":{topico}" if topico else ""
-    
     destino = config.get("destino", "Não definido")
     dias_retorno = config.get("dias_retorno", 15)
     limite_videos = config.get("limite_videos", 5)
+    
+    # Verifica os status de pausa
+    pausar_repost = config.get("pausar_repostagem", False)
+    pausar_robo = config.get("pausar_robo_completo", False)
+    
+    status_robo = "🔴 Pausado" if pausar_robo else "🟢 Ativo"
+    status_repost = "🔴 Pausada" if pausar_repost else "🟢 Ativa"
     
     cache_nomes = ler_cache_nomes_grupos()
 
@@ -1560,13 +1591,10 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     icone_origem = "⏳"
     
     if str(origem) != "Não definida":
-        # 1. Procura primeiro no Cache Local
         if str(origem) in cache_nomes:
-            # 💡 Sub-id injetado direto no bloco do <code>
             nome_origem = f"{cache_nomes[str(origem)]} (<code>{origem}{topico_str}</code>)"
             icone_origem = "✅"
         else:
-            # 2. Tenta perguntar à API do Telegram
             try:
                 chat_obj = await bot.get_chat(origem)
                 nome = chat_obj.title or chat_obj.full_name
@@ -1574,22 +1602,19 @@ async def painel_autorais(message: types.Message, state: FSMContext):
                 salvar_nome_grupo(str(origem), nome)
                 icone_origem = "✅"
             except Exception:
-                # 3. Tenta procurar na Base de Dados do Espião
                 nome_encontrado_no_espiao = False
                 try:
                     dados_espiao = ler_alvos_espiao()
                     status_alvos = dados_espiao.get("status_alvos", {})
-                        
                     for alvo_id, dados_alvo in status_alvos.items():
                             if str(dados_alvo.get("id")) == str(origem) or str(dados_alvo.get("id")).replace("-100", "") == str(origem).replace("-100", ""):
                                 nome = dados_alvo.get("nome", "Desconhecido")
                                 nome_origem = f"{nome} (<code>{origem}{topico_str}</code>)"
-                                salvar_nome_grupo(str(origem), nome) # Guarda para a próxima vez
+                                salvar_nome_grupo(str(origem), nome)
                                 icone_origem = "✅"
                                 nome_encontrado_no_espiao = True
                                 break
-                except Exception:
-                    pass
+                except Exception: pass
 
                 if not nome_encontrado_no_espiao:
                     nome_origem = f"<code>{origem}{topico_str}</code> - <i>Aguardando leitura do Userbot...</i>"
@@ -1613,9 +1638,11 @@ async def painel_autorais(message: types.Message, state: FSMContext):
                 nome_destino = f"<code>{destino}</code> - <i>Acesso Negado</i>"
                 icone_destino = "❌"
     
-    # --- NOVA FORMATAÇÃO DO TEXTO APLICADA AQUI ---
     texto = (
         "🎥 <b>Painel do Bot Vídeos Autorais</b>\n\n"
+        f"<b>- Status Geral:</b>\n"
+        f"    🤖 Robô Completo: <b>{status_robo}</b>\n"
+        f"    ♻️ Re-postagem: <b>{status_repost}</b>\n\n"
         f"<b>- Origem atual:</b>\n"
         f"    {icone_origem} {nome_origem}\n\n"
         f"<b>- Destino atual:</b>\n"
