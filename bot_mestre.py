@@ -2819,25 +2819,29 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     titulo_atraso = f" (D+{atraso_dias})" if tipo_fila in ["Espião", "Autorais"] else ""
 
     mensagens_para_enviar = []
-    texto_atual = f"📊 <b>Relatório da Fila do {tipo_fila}{titulo_atraso}</b>\n\n"
+    primeira_rota = True
 
     for nome_rota, itens in rotas_agrupadas.items():
+        # ✅ Insere uma mensagem divisória antes de começar a próxima rota
+        if not primeira_rota:
+            mensagens_para_enviar.append("➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n🔄 <i>Próximo Espelho...</i>\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖")
+
+        if primeira_rota:
+            texto_atual = f"📊 <b>Relatório da Fila {tipo_fila}{titulo_atraso}</b>\n\n"
+            primeira_rota = False
+        else:
+            texto_atual = "" # Rota nova = Mensagem limpa nova
+
         rota_info = mapa_rotas.get(nome_rota, {})
         inicio = rota_info.get("inicio", 10)
         fim = rota_info.get("fim", 22)
         
-        # ✅ Puxa o atraso específico DESTA rota (ou usa o global se for o Espião)
         atraso_dias_rota = int(rota_info.get("intervalo_dias", atraso_dias)) 
         status_canais = rota_info.get("status_canais") or rota_info.get("status_alvos") or {}
         
-        # ✅ Agora o cabeçalho mostra o valor real da rota
         texto_postagem = "Imediata (D+0)" if atraso_dias_rota == 0 else f"D+{atraso_dias_rota}, entre {inicio}h e {fim}h"
-        cabecalho_rota = f"📡 <b>Rota: {nome_rota}</b> ({len([i for i in itens if not i.get('processado')])} vídeos agendados)\n🕒 <b>Postagem:</b> {texto_postagem}\n"
+        cabecalho_rota = f"📡 <b>Rota: {nome_rota}</b> ({len([i for i in itens if not i.get('processado')])} vídeos agendados)\n🕒 <b>Postagem:</b> {texto_postagem}\n\n"
         
-        if len(texto_atual) + len(cabecalho_rota) > 3800:
-            mensagens_para_enviar.append(texto_atual)
-            texto_atual = f"📊 <b>Relatório da Fila do {tipo_fila} (Continuação)</b>\n\n"
-            
         texto_atual += cabecalho_rota
         
         for i, v in enumerate(itens, 1):
@@ -3031,7 +3035,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 index=i, 
                 item=v, 
                 tipo_fila=tipo_fila, 
-                atraso_dias=atraso_dias_rota,  # ✅ AGORA REPASSA O ATRASO CORRETO DE CADA ROTA!
+                atraso_dias=atraso_dias_rota, 
                 agora=agora, 
                 fuso_horario=fuso_horario, 
                 display_origem=display_origem, 
@@ -3041,14 +3045,15 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             
             if len(texto_atual) + len(linha_video) > 3800:
                 mensagens_para_enviar.append(texto_atual)
-                texto_atual = f"📊 <b>Relatório da Fila do {tipo_fila} (Continuação)</b>\n\n📡 <b>Rota: {nome_rota} (Cont.)</b>\n"
+                texto_atual = f"📡 <b>Rota: {nome_rota} (Continuação)</b>\n\n"
                 
             texto_atual += linha_video
             
-        texto_atual += "\n"
+        # ✅ Salva a rota atual na lista de mensagens ANTES de ir para a próxima rota
+        if texto_atual.strip():
+            mensagens_para_enviar.append(texto_atual)
 
-    mensagens_para_enviar.append(texto_atual)
-
+    # Dispara todas as mensagens (Relatórios e Divisórias) separadamente
     for msg in mensagens_para_enviar:
         await message.answer(msg, parse_mode="HTML", disable_web_page_preview=True)
         
