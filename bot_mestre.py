@@ -2546,10 +2546,6 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         tipo_fila = "Espelhador"
         rota_selecionada = message.text
         if EXIBIR_LOGS: logger.info(f"📊 Rota específica selecionada para exibição: {rota_selecionada}")
-    @dp.message(RelatoriosFluxo.menu_filas, F.text.in_(["Fila do Espelhador 🔄", "Fila do Espião 🕵️", "Fila de Autorais 🎥"]))
-@dp.message(RelatoriosFluxo.aguardando_rota_espelhador)
-async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
-# ... algumas linhas abaixo ...
     else:
         if "Espelhador" in message.text:
             tipo_fila = "Espelhador"
