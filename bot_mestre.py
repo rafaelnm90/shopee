@@ -2505,6 +2505,7 @@ def obter_teclado_relatorios():
 def obter_teclado_relatorios_filas():
     botoes = [
         [KeyboardButton(text="Fila do Espião 🕵️"), KeyboardButton(text="Fila do Espelhador 🔄")],
+        [KeyboardButton(text="Fila de Autorais 🎥")],
         [KeyboardButton(text="Voltar aos Relatórios 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -2526,7 +2527,7 @@ async def voltar_relatorios_geral(message: types.Message, state: FSMContext):
     await state.clear()
     await menu_relatorio_geral(message, state)
 
-@dp.message(RelatoriosFluxo.menu_filas, F.text.in_(["Fila do Espelhador 🔄", "Fila do Espião 🕵️"]))
+@dp.message(RelatoriosFluxo.menu_filas, F.text.in_(["Fila do Espelhador 🔄", "Fila do Espião 🕵️", "Fila de Autorais 🎥"]))
 @dp.message(RelatoriosFluxo.aguardando_rota_espelhador)
 async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
@@ -2545,8 +2546,17 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         tipo_fila = "Espelhador"
         rota_selecionada = message.text
         if EXIBIR_LOGS: logger.info(f"📊 Rota específica selecionada para exibição: {rota_selecionada}")
+    @dp.message(RelatoriosFluxo.menu_filas, F.text.in_(["Fila do Espelhador 🔄", "Fila do Espião 🕵️", "Fila de Autorais 🎥"]))
+@dp.message(RelatoriosFluxo.aguardando_rota_espelhador)
+async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
+# ... algumas linhas abaixo ...
     else:
-        tipo_fila = "Espelhador" if "Espelhador" in message.text else "Espião"
+        if "Espelhador" in message.text:
+            tipo_fila = "Espelhador"
+        elif "Autorais" in message.text:
+            tipo_fila = "Autorais"
+        else:
+            tipo_fila = "Espião"
         
         # Se for o Espelhador e existirem múltiplas rotas, cria a interrupção visual
         if tipo_fila == "Espelhador":
@@ -2578,6 +2588,28 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     if tipo_fila == "Espião":
         fila_data = ler_fila_clonagem()
         fila = fila_data.get("fila", [])
+    elif tipo_fila == "Autorais":
+        try:
+            conexao = sqlite3.connect("banco_dados.db")
+            conexao.row_factory = sqlite3.Row
+            cursor = conexao.cursor()
+            cursor.execute("SELECT * FROM fila_autorais ORDER BY data_alvo ASC")
+            linhas = cursor.fetchall()
+            conexao.close()
+            
+            fila = []
+            for linha in linhas:
+                fila.append({
+                    "id": str(linha["id"]),
+                    "msg_id_destino": linha["msg_id_destino"],
+                    "legenda": linha["legenda"],
+                    "caminho_video": linha["caminho_arquivo"],
+                    "data_alvo": linha["data_alvo"],
+                    "processado": False
+                })
+        except Exception as e:
+            fila = []
+            if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila_autorais: {e}")
     else:
         try:
             with open("fila_espelhador.json", "r", encoding="utf-8") as f:
@@ -2596,6 +2628,9 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                  dados_espelho = json.load(f)
                  atraso_dias = dados_espelho.get("config_global", {}).get("intervalo_dias", 0)
         except: pass
+    elif tipo_fila == "Autorais":
+        config_aut = ler_autorais_config()
+        atraso_dias = config_aut.get("dias_retorno", 15)
     elif tipo_fila == "Espião":
         try:
             if EXIBIR_LOGS: logger.info("🔍 Extraindo configurações de destino do Espião via banco SQLite...")
@@ -2652,6 +2687,9 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             salvar_fila_clonagem(fila_data)
             
         pendentes = fila_limpa
+        
+    elif tipo_fila == "Autorais":
+        pendentes = fila # Vídeos autorais são apagados na hora da postagem, então tudo o que está aqui é pendente.
         
     elif tipo_fila == "Espelhador":
         import painel_espelhos
@@ -2745,6 +2783,19 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             if nome_rota not in rotas_agrupadas: rotas_agrupadas[nome_rota] = []
             rotas_agrupadas[nome_rota].append(item)
             
+    elif tipo_fila == "Autorais":
+        mapa_rotas = {
+            "Repostagem Autoral": {
+                "inicio": 10,
+                "fim": 20,
+                "status_canais": {},
+                "intervalo_dias": atraso_dias
+            }
+        }
+        for item in pendentes:
+            item["nome_rota"] = "Repostagem Autoral"
+        rotas_agrupadas["Repostagem Autoral"] = pendentes
+
     else: 
         mapa_rotas = {
             "Radar Global": {
@@ -2757,21 +2808,19 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
 
     # ✅ ORDENAÇÃO UNIVERSAL E INTELIGENTE (ESPIÃO E ESPELHADOR)
     def chave_ordenacao_universal(item):
-        # Grupo 0 (Topo): Vídeos já postados
         if item.get("processado", False) or item.get("processado") == 1:
             return (0, item.get("horario_postagem", "00:00"))
-        # Grupo 1 (Meio): Vídeos pendentes que já têm horário de disparo
         elif item.get("horario_disparo"):
             return (1, item.get("horario_disparo"))
-        # Grupo 2 (Fundo): Vídeos que ainda não têm horário (ainda vão para a IA), ordenados pela captura
+        elif item.get("data_alvo"): # Específico para a Fila de Autorais
+            return (1, item.get("data_alvo") + " 10:00:00")
         else:
             return (2, item.get("data_captura", "2099-01-01 00:00:00"))
 
     for nome_rota in rotas_agrupadas:
         rotas_agrupadas[nome_rota].sort(key=chave_ordenacao_universal)
          
-    # ✅ CORREÇÃO: Oculta o título global de atraso se for o Espelhador (pois cada rota tem o seu)
-    titulo_atraso = f" (D+{atraso_dias})" if tipo_fila == "Espião" else ""
+    titulo_atraso = f" (D+{atraso_dias})" if tipo_fila in ["Espião", "Autorais"] else ""
 
     mensagens_para_enviar = []
     texto_atual = f"📊 <b>Relatório da Fila do {tipo_fila}{titulo_atraso}</b>\n\n"
@@ -2802,9 +2851,38 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             link_original = v.get("link_original", "")
             msg_id = v.get("mensagem_id") or v.get("msg_id") or v.get("message_id")
             
-            # --- 1. RESGATE ESTRUTURAL DE ORIGEM E ROTA ---
-            if not origem_bruta or origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None"]:
-                nome_rota_item = v.get("nome_rota")
+            # --- 1. RESGATE ESTRUTURAL (Com suporte exclusivo a Autorais) ---
+            if tipo_fila == "Autorais":
+                origem_bruta = str(config_aut.get("destino", ""))
+                id_destino = str(config_aut.get("origem", ""))
+                msg_id = v.get("msg_id_destino")
+                
+                link_telegram = ""
+                if msg_id and origem_bruta:
+                    if origem_bruta.lstrip("-").isdigit():
+                        chat_id_limpo = origem_bruta.replace("-100", "").replace("-", "")
+                        link_telegram = f"https://t.me/c/{chat_id_limpo}/{msg_id}"
+                    elif origem_bruta.startswith("@"):
+                        username = origem_bruta.replace("@", "")
+                        link_telegram = f"https://t.me/{username}/{msg_id}"
+                
+                link_final_exibicao = link_telegram
+                
+                data_alvo_str = v.get("data_alvo")
+                try:
+                    data_alvo_obj = datetime.strptime(data_alvo_str, "%Y-%m-%d")
+                    data_cap_obj = data_alvo_obj - timedelta(days=atraso_dias_rota)
+                    v["data_captura"] = data_cap_obj.strftime("%Y-%m-%d 00:00:00")
+                    v["horario_disparo"] = data_alvo_str 
+                except: pass
+                
+                nome_origem = cache_nomes.get(origem_bruta, origem_bruta)
+                display_origem = f"📦 Acervo: {nome_origem[:20]}"
+                link_destino = None
+            else:
+                # O CÓDIGO NORMAL DA ORIGEM DOS OUTROS MÓDULOS COMEÇA AQUI
+                if not origem_bruta or origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None"]:
+                    nome_rota_item = v.get("nome_rota")
                 if tipo_fila == "Espelhador" and nome_rota_item:
                     import painel_espelhos
                     dados_rotas_temp = painel_espelhos.ler_espelhos()
