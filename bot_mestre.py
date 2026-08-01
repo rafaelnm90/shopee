@@ -3538,7 +3538,14 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     if estado_atual and estado_atual.startswith("AutoraisFluxo"):
         await state.clear()
         await message.answer("Ação cancelada.")
-        await painel_autorais(message, state)
+        
+        # Verifica se estava editando Dias ou Limites para voltar ao SUBMENU
+        if estado_atual in ["AutoraisFluxo:aguardando_dias_retorno", "AutoraisFluxo:aguardando_limite_videos"]:
+            await submenu_regras_retorno(message, state)
+        else:
+            # Caso contrário (origem/destino), volta pro menu principal dos Autorais
+            await painel_autorais(message, state)
+            
         return
         
     # 🔁 Roteamento Inteligente: Se estiver nas Rotinas
