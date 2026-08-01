@@ -139,6 +139,7 @@ def salvar_espelhos(dados):
 @router.message(F.text.in_(["Cancelar Operação ❌", "Voltar ao Menu Espelho 🔙"]), StateFilter("*"))
 async def cancelar_espelhador(message: types.Message, state: FSMContext):
     estado_atual = await state.get_state()
+    data = await state.get_data() # ✅ ESSA É A LINHA QUE FALTAVA!
     
     # --- NÍVEL 3: Submenu de Origens (Volta para os botões Adicionar/Remover Origem) ---
     estados_origem = [
