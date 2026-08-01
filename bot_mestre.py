@@ -2697,21 +2697,21 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         hoje_str = agora.strftime("%Y-%m-%d")
         
         for item in fila:
-            # 🚀 AUTO-CORREÇÃO DINÂMICA: Entende cada espelho cruzando a origem e destino
+            # 🚀 AUTO-CORREÇÃO DINÂMICA: Entende cada espelho cruzando a origem, destino OU Nome
             nome_antigo = item.get("nome_rota", "")
             origem_item = str(item.get("chat_origem", item.get("origem", "")))
-            destino_item = str(item.get("chat_destino", item.get("destino", "")))
             
             # ✅ NOVO: Flag para verificar se a rota do vídeo ainda existe
             rota_encontrada = False
             atraso_dias_rota = 1
             
             for r in lista_rotas:
-                # Compara usando apenas a origem (que é a chave principal do espelhador)
-                if origem_item and str(r.get("origem", "")) == origem_item:
+                # Compara usando a origem OU o nome da rota (para compatibilidade com itens antigos)
+                if (origem_item and str(r.get("origem", "")) == origem_item) or (nome_antigo and r.get("nome", "") == nome_antigo):
                     rota_encontrada = True
                     nome_atualizado = r.get("nome")
                     atraso_dias_rota = int(r.get("intervalo_dias", 1))
+                    
                     if nome_atualizado and nome_antigo != nome_atualizado:
                         item["nome_rota"] = nome_atualizado
                         houve_alteracao = True
@@ -2719,7 +2719,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
 
             # 🛡️ PENTE FINO: Se a rota não existe mais, deleta o vídeo órfão!
             if not rota_encontrada:
-                if EXIBIR_LOGS: logger.info(f"🧹 Pente Fino: Removendo vídeo órfão de uma rota excluída (Origem: {origem_item}).")
+                if EXIBIR_LOGS: logger.info(f"🧹 Pente Fino: Removendo vídeo órfão de uma rota excluída (Rota antiga: {nome_antigo}).")
                 houve_alteracao = True
                 caminho_video = item.get("caminho_video")
                 if caminho_video and os.path.exists(caminho_video):
