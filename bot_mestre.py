@@ -1554,6 +1554,33 @@ teclado_submenu_retorno = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
+def calcular_dias_restantes_autorais():
+    """Busca o vídeo mais antigo na fila de autorais e calcula quantos dias faltam para ele ser postado."""
+    try:
+        conexao = sqlite3.connect("banco_dados.db")
+        cursor = conexao.cursor()
+        # Busca a data mais próxima que está agendada
+        cursor.execute("SELECT MIN(data_alvo) FROM fila_autorais")
+        resultado = cursor.fetchone()
+        conexao.close()
+
+        if resultado and resultado[0]:
+            data_alvo_str = resultado[0]
+            
+            # Compara a data do banco com o dia de hoje
+            hoje = datetime.now(fuso_horario).date()
+            data_alvo = datetime.strptime(data_alvo_str, "%Y-%m-%d").date()
+
+            dias_restantes = (data_alvo - hoje).days
+            
+            # Só retorna a contagem se ainda faltarem dias (> 0)
+            if dias_restantes > 0:
+                return dias_restantes
+        return None
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao calcular dias para repostagem: {e}")
+        return None
+
 @dp.message(F.text == "Vídeos Autorais 🎥", StateFilter("*"))
 async def painel_autorais(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
@@ -1576,6 +1603,14 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     status_robo = "🔴 Pausado" if pausar_robo else "🟢 Ativo"
     status_repost = "🔴 Pausada" if pausar_repost else "🟢 Ativa"
     
+    # ✅ LÓGICA DA CONTAGEM REGRESSIVA
+    texto_contagem = ""
+    # A contagem só aparece se a repostagem NÃO estiver pausada
+    if not pausar_repost:
+        dias_restantes = calcular_dias_restantes_autorais()
+        if dias_restantes:
+            texto_contagem = f"⏳ <i>Faltam {dias_restantes} dias para iniciar a repostagem.</i>\n"
+
     cache_nomes = ler_cache_nomes_grupos()
 
     # --- Lógica Avançada Visual da Origem ---
@@ -1630,7 +1665,7 @@ async def painel_autorais(message: types.Message, state: FSMContext):
                 nome_destino = f"<code>{destino}</code> - <i>Acesso Negado</i>"
                 icone_destino = "❌"
     
-    # --- NOVA FORMATAÇÃO DO TEXTO APLICADA AQUI ---
+    # --- MONTAGEM DO TEXTO ---
     texto = (
         "🎥 <b>Painel do Bot Vídeos Autorais</b>\n\n"
         f"<b>- Status Geral:</b>\n"
@@ -1642,7 +1677,8 @@ async def painel_autorais(message: types.Message, state: FSMContext):
         f"    {icone_destino} {nome_destino}\n\n"
         f"♻️ <b>Regras de Repostagem:</b>\n"
         f"⏳ Oculto por: <b>{dias_retorno} dias</b>\n"
-        f"📦 Cota Diária: <b>{limite_videos} vídeos/dia</b>\n\n"
+        f"📦 Cota Diária: <b>{limite_videos} vídeos/dia</b>\n"
+        f"{texto_contagem}\n"
         "O robô Espelhador Isolado fará a escuta e o envio em tempo real baseando-se estritamente nestes valores.\n\n"
         "Escolha o que deseja alterar:"
     )
