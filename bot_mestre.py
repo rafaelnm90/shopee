@@ -1714,7 +1714,7 @@ async def toggle_pausa_robo(message: types.Message, state: FSMContext):
     await message.answer(f"✅ O funcionamento geral do robô Espelhador Isolado foi <b>{status}</b>.", parse_mode="HTML")
     await submenu_status_robo(message, state) 
 
-@dp.message(AutoraisFluxo.menu_principal, F.text == "Voltar ao Menu Autorais 🔙")
+@dp.message(F.text == "Voltar ao Menu Autorais 🔙", StateFilter("*"))
 async def voltar_menu_autorais(message: types.Message, state: FSMContext):
     await painel_autorais(message, state)
 
