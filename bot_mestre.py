@@ -1652,6 +1652,7 @@ async def painel_autorais(message: types.Message, state: FSMContext):
 # ----------------------------------------------------
 # SUBSTITUA OS HANDLERS DOS SUBMENUS POR ESTES:
 # ----------------------------------------------------
+
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Regras de Repostagem ♻️")
 async def submenu_regras_retorno(message: types.Message, state: FSMContext):
     await message.answer("♻️ <b>Regras de Repostagem</b>\nEscolha o que deseja editar:", reply_markup=teclado_submenu_retorno, parse_mode="HTML")
@@ -1672,6 +1673,8 @@ async def submenu_status_robo(message: types.Message, state: FSMContext):
         is_persistent=True
     )
     await message.answer("⏸️ <b>Controle de Pausa</b>\nSelecione o serviço que deseja pausar ou retomar:", reply_markup=teclado_submenu_pausa, parse_mode="HTML")
+    # ✅ IMPORTANTE: Volta o estado para o menu principal dos autorais para que os botões funcionem corretamente
+    await state.set_state(AutoraisFluxo.menu_principal)
 
 # --- LÓGICA DE CONFIRMAÇÃO DE PAUSA DA REPOSTAGEM ---
 @dp.message(AutoraisFluxo.menu_principal, F.text.in_(["Pausar Repostagem ⏸️", "Retomar Repostagem ▶️"]))
@@ -1714,7 +1717,6 @@ async def processar_pausa_repostagem(message: types.Message, state: FSMContext):
     status = "PAUSADA 🔴" if config["pausar_repostagem"] else "RETOMADA 🟢"
     await message.answer(f"✅ A repostagem automática de vídeos antigos foi <b>{status}</b>.", parse_mode="HTML")
     await submenu_status_robo(message, state)
-
 
 # --- LÓGICA DE CONFIRMAÇÃO DE PAUSA DO ROBÔ COMPLETO ---
 @dp.message(AutoraisFluxo.menu_principal, F.text.in_(["Pausar Robô Completo ⏸️", "Retomar Robô Completo ▶️"]))
@@ -1770,16 +1772,6 @@ async def pedir_dias_autorais(message: types.Message, state: FSMContext):
 async def pedir_limite_autorais(message: types.Message, state: FSMContext):
     await message.answer("Qual será o <b>limite máximo</b> de vídeos arquivados salvos por dia? (Ex: 5)", parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(AutoraisFluxo.aguardando_limite_videos)
-
-@dp.message(AutoraisFluxo.menu_principal, F.text.in_(["Pausar Robô Completo ⏸️", "Retomar Robô Completo ▶️"]))
-async def toggle_pausa_robo(message: types.Message, state: FSMContext):
-    config = ler_autorais_config()
-    config["pausar_robo_completo"] = not config.get("pausar_robo_completo", False)
-    salvar_autorais_config(config)
-
-    status = "PAUSADO 🔴" if config["pausar_robo_completo"] else "RETOMADO 🟢"
-    await message.answer(f"✅ O funcionamento geral do robô Espelhador Isolado foi <b>{status}</b>.", parse_mode="HTML")
-    await submenu_status_robo(message, state) 
 
 @dp.message(F.text == "Voltar ao Menu Autorais 🔙", StateFilter("*"))
 async def voltar_menu_autorais(message: types.Message, state: FSMContext):
