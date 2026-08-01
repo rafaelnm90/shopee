@@ -361,7 +361,7 @@ teclado_outros_canais = ReplyKeyboardMarkup(
 teclado_menu_autorais = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Editar Origem 📥"), KeyboardButton(text="Editar Destino 📤")],
-        [KeyboardButton(text="Editar Dias (Retorno) ⏳"), KeyboardButton(text="Editar Limite (Retorno) 📦")],
+        [KeyboardButton(text="Regras de Repostagem ♻️"), KeyboardButton(text="Status do Robô ⏸️")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -1555,7 +1555,7 @@ teclado_menu_autorais = ReplyKeyboardMarkup(
 
 teclado_submenu_retorno = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Editar Dias (Retorno) ⏳"), KeyboardButton(text="Editar Limite (Retorno) 📦")],
+        [KeyboardButton(text="Editar Dias ⏳"), KeyboardButton(text="Editar Limite 📦")],
         [KeyboardButton(text="Voltar ao Menu Autorais 🔙")]
     ],
     resize_keyboard=True,
