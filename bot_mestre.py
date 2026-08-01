@@ -199,8 +199,10 @@ class AutoraisFluxo(StatesGroup):
     aguardando_origem = State()
     aguardando_topico = State() 
     aguardando_destino = State()
-    aguardando_dias_retorno = State() # ✅ NOVO
-    aguardando_limite_videos = State() # ✅ NOVO
+    aguardando_dias_retorno = State() 
+    aguardando_limite_videos = State()
+    aguardando_confirmacao_pausa_repost = State() # ✅ NOVO
+    aguardando_confirmacao_pausa_robo = State() # ✅ NOVO
 
 class RelatoriosFluxo(StatesGroup):
     menu_filas = State()
@@ -1671,15 +1673,76 @@ async def submenu_status_robo(message: types.Message, state: FSMContext):
     )
     await message.answer("⏸️ <b>Controle de Pausa</b>\nSelecione o serviço que deseja pausar ou retomar:", reply_markup=teclado_submenu_pausa, parse_mode="HTML")
 
+# --- LÓGICA DE CONFIRMAÇÃO DE PAUSA DA REPOSTAGEM ---
 @dp.message(AutoraisFluxo.menu_principal, F.text.in_(["Pausar Repostagem ⏸️", "Retomar Repostagem ▶️"]))
-async def toggle_pausa_repostagem(message: types.Message, state: FSMContext):
+async def pedir_confirmacao_repostagem(message: types.Message, state: FSMContext):
+    acao = "pausar" if "Pausar" in message.text else "retomar"
+    await state.update_data(acao_repost=acao)
+
+    texto_botao = "Confirmar Pausa ✅" if acao == "pausar" else "Confirmar Retomada ✅"
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=texto_botao), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
+    texto = f"⚠️ Tem certeza de que deseja <b>{'PAUSAR' if acao == 'pausar' else 'RETOMAR'}</b> a repostagem automática de vídeos antigos?"
+    await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(AutoraisFluxo.aguardando_confirmacao_pausa_repost)
+
+@dp.message(AutoraisFluxo.aguardando_confirmacao_pausa_repost)
+async def processar_pausa_repostagem(message: types.Message, state: FSMContext):
+    if "Confirmar" not in message.text:
+        await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
+        return
+
     config = ler_autorais_config()
-    config["pausar_repostagem"] = not config.get("pausar_repostagem", False)
+    data = await state.get_data()
+    acao = data.get("acao_repost")
+    
+    # Se a ação for "pausar", ele salva como True, senão salva como False
+    config["pausar_repostagem"] = (acao == "pausar")
     salvar_autorais_config(config)
 
     status = "PAUSADA 🔴" if config["pausar_repostagem"] else "RETOMADA 🟢"
     await message.answer(f"✅ A repostagem automática de vídeos antigos foi <b>{status}</b>.", parse_mode="HTML")
-    await submenu_status_robo(message, state) 
+    await submenu_status_robo(message, state)
+
+
+# --- LÓGICA DE CONFIRMAÇÃO DE PAUSA DO ROBÔ COMPLETO ---
+@dp.message(AutoraisFluxo.menu_principal, F.text.in_(["Pausar Robô Completo ⏸️", "Retomar Robô Completo ▶️"]))
+async def pedir_confirmacao_robo(message: types.Message, state: FSMContext):
+    acao = "pausar" if "Pausar" in message.text else "retomar"
+    await state.update_data(acao_robo=acao)
+
+    texto_botao = "Confirmar Pausa ✅" if acao == "pausar" else "Confirmar Retomada ✅"
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=texto_botao), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
+    texto = f"⚠️ Tem certeza de que deseja <b>{'PAUSAR' if acao == 'pausar' else 'RETOMAR'}</b> o funcionamento geral do robô Espelhador Isolado?"
+    await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(AutoraisFluxo.aguardando_confirmacao_pausa_robo)
+
+@dp.message(AutoraisFluxo.aguardando_confirmacao_pausa_robo)
+async def processar_pausa_robo(message: types.Message, state: FSMContext):
+    if "Confirmar" not in message.text:
+        await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
+        return
+
+    config = ler_autorais_config()
+    data = await state.get_data()
+    acao = data.get("acao_robo")
+
+    # Se a ação for "pausar", ele salva como True, senão salva como False
+    config["pausar_robo_completo"] = (acao == "pausar")
+    salvar_autorais_config(config)
+
+    status = "PAUSADO 🔴" if config["pausar_robo_completo"] else "RETOMADO 🟢"
+    await message.answer(f"✅ O funcionamento geral do robô Espelhador Isolado foi <b>{status}</b>.", parse_mode="HTML")
+    await submenu_status_robo(message, state)
 
 # ----------------------------------------------------
 # ATENÇÃO: SUBSTITUA OS GATILHOS ANTIGOS DE "DIAS" E "LIMITE" PARA RECONHECER O NOVO TEXTO:
@@ -3539,9 +3602,14 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await state.clear()
         await message.answer("Ação cancelada.")
         
-        # Verifica se estava editando Dias ou Limites para voltar ao SUBMENU
+        # Verifica se estava editando Dias ou Limites para voltar ao SUBMENU de Retorno
         if estado_atual in ["AutoraisFluxo:aguardando_dias_retorno", "AutoraisFluxo:aguardando_limite_videos"]:
             await submenu_regras_retorno(message, state)
+            
+        # Verifica se estava confirmando Pausas para voltar ao SUBMENU de Status
+        elif estado_atual in ["AutoraisFluxo:aguardando_confirmacao_pausa_repost", "AutoraisFluxo:aguardando_confirmacao_pausa_robo"]:
+            await submenu_status_robo(message, state)
+            
         else:
             # Caso contrário (origem/destino), volta pro menu principal dos Autorais
             await painel_autorais(message, state)
