@@ -191,24 +191,56 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
     await state.clear()
     dados = ler_espelhos()
     rotas = dados.get("rotas", [])
-    cache_nomes = ler_cache_nomes_grupos()  # 🚀 Fallback para quando o status_canais ainda não foi auditado
+    cache_nomes = ler_cache_nomes_grupos()  # 🚀 Fallback
     
     texto = "🔄 <b>Painel do Espelhador de Canais</b>\n\n"
     texto += "Este módulo clona publicações de um grupo para outro automaticamente, convertendo os links e respeitando um atraso programado.\n\n"
     
+    houve_alteracao = False # ✅ Prepara a variável para salvar o arquivo se houver correção
+
     if rotas:
         texto += "📡 <b>Rotas Ativas:</b>\n"
         for i, rota in enumerate(rotas, 1):
-            destino_rota = rota['destino']
-            qtd_fila = ler_contador_espelhador(rota['nome'])
+            nome_rota = rota.get('nome', f'Rota {i}')
+            destino_rota = rota.get('destino', '')
             status_canais = rota.get("status_canais", {})
             
-            texto += f"<b>{i}. {rota['nome']}</b>\n"
+            # ✅ NOVO: Autocura Inteligente Definitiva (Lê a própria memória)
+            if "Espelho: -100" in nome_rota or "Espelho: @" in nome_rota or "https://" in nome_rota:
+                nome_real = None
+                
+                # 1. Tenta achar o nome salvo no próprio arquivo JSON (Aonde vimos que funciona!)
+                info_d = status_canais.get(str(destino_rota), {})
+                if isinstance(info_d, dict) and info_d.get("nome") and info_d.get("nome") != str(destino_rota):
+                    nome_real = info_d.get("nome")
+                    
+                # 2. Se não achar, tenta no cache global
+                elif str(destino_rota) in cache_nomes and cache_nomes[str(destino_rota)] != str(destino_rota):
+                    nome_real = cache_nomes[str(destino_rota)]
+                    
+                # 3. Em último caso, tenta bater na API do Telegram
+                if not nome_real:
+                    try:
+                        chat_obj = await message.bot.get_chat(destino_rota)
+                        nome_real = chat_obj.title or chat_obj.full_name
+                    except Exception:
+                        pass
+                        
+                # Se achou o nome real em qualquer um dos 3 passos, conserta a rota
+                if nome_real:
+                    nome_rota = f"Espelho: {nome_real}"
+                    rota['nome'] = nome_rota
+                    houve_alteracao = True
+
+            qtd_fila = ler_contador_espelhador(rota['nome'])
+            
+            texto += f"<b>{i}. {nome_rota}</b>\n"
             texto += f"   🕒 Janela de Postagem: {rota.get('inicio', 10)}h às {rota.get('fim', 22)}h\n"
             texto += f"   🔀 Distribuição: {rota.get('modo', 'ordem').title()}\n"
             texto += f"   📦 Fila de Espera: {qtd_fila} vídeo(s)\n"
             texto += "\n"
-           # --- 1. DESTINO MOSTRADO PRIMEIRO ---
+            
+            # --- 1. DESTINO MOSTRADO PRIMEIRO ---
             info_d = status_canais.get(str(destino_rota), {})
             if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
             
@@ -232,9 +264,14 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
                 status_ico = "❌" if info_o.get("status") == "erro" else "✅"
                 nome_o = info_o.get("nome") or cache_nomes.get(str(o), str(o))
                 display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
-                # ✅ Alinhamento perfeito com 01, 02
                 texto += f"<code>{idx + 1:02d}.</code> {status_ico} {display_o}\n"
             texto += "\n"
+            
+        # ✅ NOVO: Salva as alterações no banco de dados se a autocura rodou
+        if houve_alteracao:
+            dados["rotas"] = rotas
+            salvar_espelhos(dados)
+            
     else:
         texto += "<i>Nenhuma rota de espelhamento cadastrada no momento.</i>\n\n"
         
