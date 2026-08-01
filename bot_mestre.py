@@ -1544,7 +1544,11 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     config = ler_autorais_config()
     
     origem = config.get("origem", "Não definida")
-    topico = config.get("origem_topico", "0 (Todos)")
+    topico = config.get("origem_topico")
+    
+    # ✅ LÓGICA DO SUB-ID: Prepara o tópico para ficar grudado ao ID (ex: :2289)
+    topico_str = f":{topico}" if topico else ""
+    
     destino = config.get("destino", "Não definido")
     dias_retorno = config.get("dias_retorno", 15)
     limite_videos = config.get("limite_videos", 5)
@@ -1558,14 +1562,15 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     if str(origem) != "Não definida":
         # 1. Procura primeiro no Cache Local
         if str(origem) in cache_nomes:
-            nome_origem = f"{cache_nomes[str(origem)]} (<code>{origem}</code>)"
+            # 💡 Sub-id injetado direto no bloco do <code>
+            nome_origem = f"{cache_nomes[str(origem)]} (<code>{origem}{topico_str}</code>)"
             icone_origem = "✅"
         else:
             # 2. Tenta perguntar à API do Telegram
             try:
                 chat_obj = await bot.get_chat(origem)
                 nome = chat_obj.title or chat_obj.full_name
-                nome_origem = f"{nome} (<code>{origem}</code>)"
+                nome_origem = f"{nome} (<code>{origem}{topico_str}</code>)"
                 salvar_nome_grupo(str(origem), nome)
                 icone_origem = "✅"
             except Exception:
@@ -1578,7 +1583,7 @@ async def painel_autorais(message: types.Message, state: FSMContext):
                     for alvo_id, dados_alvo in status_alvos.items():
                             if str(dados_alvo.get("id")) == str(origem) or str(dados_alvo.get("id")).replace("-100", "") == str(origem).replace("-100", ""):
                                 nome = dados_alvo.get("nome", "Desconhecido")
-                                nome_origem = f"{nome} (<code>{origem}</code>)"
+                                nome_origem = f"{nome} (<code>{origem}{topico_str}</code>)"
                                 salvar_nome_grupo(str(origem), nome) # Guarda para a próxima vez
                                 icone_origem = "✅"
                                 nome_encontrado_no_espiao = True
@@ -1587,7 +1592,7 @@ async def painel_autorais(message: types.Message, state: FSMContext):
                     pass
 
                 if not nome_encontrado_no_espiao:
-                    nome_origem = f"<code>{origem}</code> - <i>Aguardando leitura do Userbot...</i>"
+                    nome_origem = f"<code>{origem}{topico_str}</code> - <i>Aguardando leitura do Userbot...</i>"
                     icone_origem = "⏳"
                 
     # --- Lógica Visual do Destino ---
@@ -1612,8 +1617,7 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     texto = (
         "🎥 <b>Painel do Bot Vídeos Autorais</b>\n\n"
         f"<b>- Origem atual:</b>\n"
-        f"    {icone_origem} {nome_origem}\n"
-        f"📂 <b>Tópico (Subcanal):</b> <code>{topico}</code>\n\n"
+        f"    {icone_origem} {nome_origem}\n\n"
         f"<b>- Destino atual:</b>\n"
         f"    {icone_destino} {nome_destino}\n\n"
         f"♻️ <b>Regras de Retorno (Re-postagem):</b>\n"
