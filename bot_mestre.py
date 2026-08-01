@@ -358,16 +358,6 @@ teclado_outros_canais = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-teclado_menu_autorais = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Editar Origem 📥"), KeyboardButton(text="Editar Destino 📤")],
-        [KeyboardButton(text="Regras de Repostagem ♻️"), KeyboardButton(text="Status do Robô ⏸️")],
-        [KeyboardButton(text="Voltar aos Canais 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
-
 teclado_menu_achadinhos = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Nicho ➕"), KeyboardButton(text="Remover Nicho 🗑️")],
@@ -1546,7 +1536,7 @@ def salvar_autorais_config(dados):
 teclado_menu_autorais = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Editar Origem 📥"), KeyboardButton(text="Editar Destino 📤")],
-        [KeyboardButton(text="Regras de Retorno ♻️"), KeyboardButton(text="Status do Robô ⏸️")],
+        [KeyboardButton(text="Regras de Repostagem ♻️"), KeyboardButton(text="Status do Robô ⏸️")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
