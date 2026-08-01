@@ -1692,6 +1692,13 @@ async def pedir_confirmacao_repostagem(message: types.Message, state: FSMContext
 
 @dp.message(AutoraisFluxo.aguardando_confirmacao_pausa_repost)
 async def processar_pausa_repostagem(message: types.Message, state: FSMContext):
+    # ✅ Lógica para o botão Cancelar
+    if message.text == "Cancelar ❌":
+        await message.answer("Ação cancelada.")
+        await submenu_status_robo(message, state) 
+        return
+
+    # ✅ Lógica para quando ele não apertar nem Cancelar e nem Confirmar
     if "Confirmar" not in message.text:
         await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
         return
@@ -1728,6 +1735,13 @@ async def pedir_confirmacao_robo(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_confirmacao_pausa_robo)
 async def processar_pausa_robo(message: types.Message, state: FSMContext):
+    # ✅ Lógica para o botão Cancelar
+    if message.text == "Cancelar ❌":
+        await message.answer("Ação cancelada.")
+        await submenu_status_robo(message, state) 
+        return
+
+    # ✅ Lógica para quando ele não apertar nem Cancelar e nem Confirmar
     if "Confirmar" not in message.text:
         await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
         return
