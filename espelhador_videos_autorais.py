@@ -225,7 +225,12 @@ from utils import salvar_nome_grupo # Adicione isso caso não esteja no topo do 
 
 @client.on(events.NewMessage())
 async def interceptar_e_espelhar(event):
-    config_atual = carregar_config_autorais() # Lê a configuração salva pelo seu Bot Principal
+    config_atual = carregar_config_autorais()
+    
+    # ✅ VERIFICAÇÃO DE PAUSA GLOBAL DO ROBÔ AUTORAL
+    if config_atual.get("pausar_robo_completo", False):
+        return
+        
     chat = await event.get_chat()
     
     # --- A MÁGICA ACONTECE AQUI ---
@@ -374,6 +379,25 @@ async def executar_postagem_retorno(caminho_arquivo, legenda):
 
 def agendar_tarefas_diarias():
     if EXIBIR_LOGS: logger.info("🗓️ A verificar a agenda de retornos do dia...")
+    
+    # ✅ VERIFICAÇÃO DE PAUSA: Se estiver pausado, empurra os vídeos de hoje para amanhã!
+    config_atual = carregar_config_autorais()
+    if config_atual.get("pausar_robo_completo", False) or config_atual.get("pausar_repostagem", False):
+        if EXIBIR_LOGS: logger.info("🛑 Retornos cancelados hoje: O sistema está pausado. Os vídeos serão empurrados para amanhã.")
+        
+        hoje_str = datetime.now().strftime("%Y-%m-%d")
+        amanha_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        fila_dados = ler_fila_retorno()
+        if hoje_str in fila_dados and fila_dados[hoje_str]:
+            if amanha_str not in fila_dados:
+                fila_dados[amanha_str] = []
+            # Move os vídeos de hoje para amanhã
+            fila_dados[amanha_str].extend(fila_dados[hoje_str])
+            del fila_dados[hoje_str]
+            salvar_fila_retorno(fila_dados)
+        return
+
     hoje_str = datetime.now().strftime("%Y-%m-%d")
     fila_dados = ler_fila_retorno()
     videos_hoje = fila_dados.get(hoje_str, [])
