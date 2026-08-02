@@ -2881,27 +2881,34 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 
                 link_final_exibicao = link_telegram
                 
-                # ✅ NOVO: Extrair o nome do produto da legenda
+                # ✅ NOVO: Extrair o nome do produto da legenda (Aprimorado)
                 legenda = v.get("legenda", "")
                 import re
                 
-                # Tenta primeiro extrair se estiver no formato "📦 Item: Nome"
+                # 1. Tenta extrair do formato padrão do bot "📦 Item: Nome"
                 match_item = re.search(r'📦\s*Item:\s*([^\n<]+)', legenda)
                 if match_item:
                     nome_produto = match_item.group(1).strip()
                 else:
-                    # Se não tiver "📦 Item:", pega a primeira linha limpa (ignorando HTML)
+                    # 2. Busca a primeira linha útil que NÃO seja um link e NÃO seja hashtag
                     legenda_limpa = re.sub(r'<[^>]+>', '', legenda).strip()
-                    primeira_linha = legenda_limpa.split('\n')[0] if legenda_limpa else ""
+                    linhas = legenda_limpa.split('\n')
+                    nome_produto = "Vídeo sem descrição"
                     
-                    # Remove o prefixo "Vídeo X |" se existir
-                    match_video = re.search(r'(?i)Vídeo\s+\d+\s*\|\s*(.+)', primeira_linha)
-                    if match_video:
-                        nome_produto = match_video.group(1).strip()
-                    else:
-                        nome_produto = primeira_linha if primeira_linha else "Sem nome"
-                        
-                v["nome_origem"] = nome_produto # O motor usa 'nome_origem' para exibir o nome do item no layout
+                    for linha in linhas:
+                        l = linha.strip()
+                        # Ignora linhas vazias, links da shopee/telegram e hashtags soltas
+                        if l and "http" not in l.lower() and not l.startswith("#"):
+                            # Remove "Vídeo X | " se existir no começo
+                            match_video = re.search(r'(?i)^Vídeo\s+\d+\s*\|\s*(.+)', l)
+                            if match_video:
+                                nome_produto = match_video.group(1).strip()
+                            else:
+                                nome_produto = l
+                            break # Achou o nome! Interrompe a busca.
+                            
+                # Limita o tamanho do nome para não quebrar a estética do painel
+                v["nome_origem"] = f"{nome_produto[:40]}..." if len(nome_produto) > 40 else nome_produto
                 
                 data_alvo_str = v.get("data_alvo")
                 try:
