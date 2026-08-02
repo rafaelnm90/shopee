@@ -137,7 +137,8 @@ class ConfigFluxo(StatesGroup):
     aguardando_novo_numero = State()
     aguardando_confirmacao_zerar = State()
     aguardando_confirmacao_zerar_filas = State()
-    aguardando_acao_limpeza = State() # ✅ NOVO ESTADO PARA A CONFIRMAÇÃO
+    aguardando_selecao_limpeza = State() # ✅ NOVO: Passo 1 (Escolher o que limpar)
+    aguardando_acao_limpeza = State()    # ✅ NOVO: Passo 2 (Confirmar a limpeza)
     aguardando_confirmacao_reiniciar = State()
 
 class ConfigDivulgacao(StatesGroup):
