@@ -457,6 +457,7 @@ teclado_opcoes_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Definir Destino 🎯")],
         [KeyboardButton(text="Adicionar Grupo ➕"), KeyboardButton(text="Remover Grupo 🗑️")],
+        [KeyboardButton(text="Listar Todos 📜")],
         [KeyboardButton(text="Editar Janela 🕒"), KeyboardButton(text="Editar Atraso ⏳")],
         [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
     ],
@@ -5151,6 +5152,40 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
             await message.answer(msg, parse_mode="HTML")
             
     await state.set_state(EspiaoFluxo.menu_principal)
+
+
+@dp.message(EspiaoFluxo.menu_principal, F.text == "Listar Todos 📜")
+async def listar_todos_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    
+    dados = ler_alvos_espiao()
+    alvos = dados.get("alvos", [])
+    
+    if not alvos:
+        await message.answer("Não há grupos sendo monitorados no momento.")
+        return
+        
+    cache_nomes = ler_cache_nomes_grupos()
+    status_alvos = dados.get("status_alvos", {})
+    
+    texto = "📜 <b>Lista Completa de Grupos Vigiados (Espião)</b>\n\n"
+    mensagens = []
+    
+    for i, alvo in enumerate(alvos, 1):
+        info = status_alvos.get(str(alvo), {})
+        nome = info.get("nome") or cache_nomes.get(str(alvo), str(alvo))
+        linha = f"<b>{i}.</b> {nome} (<code>{alvo}</code>)\n"
+        
+        # Quebra a mensagem se ficar muito grande para o limite do Telegram
+        if len(texto) + len(linha) > 3800:
+            mensagens.append(texto)
+            texto = ""
+        texto += linha
+        
+    mensagens.append(texto)
+    
+    for msg in mensagens:
+        await message.answer(msg, parse_mode="HTML")
 
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Adicionar Grupo ➕")
 async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
