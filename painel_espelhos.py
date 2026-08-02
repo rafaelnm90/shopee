@@ -1056,17 +1056,29 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
         status_canais = rota.get("status_canais", {})
         
         lista_analise = []
-        for o in origens:
+        # Usar enumerate(origens, 1) para guardar a posição real do canal na lista de remoção
+        for index, o in enumerate(origens, 1):
             alvo_str = str(o)
             info = status_canais.get(alvo_str, {})
             if isinstance(info, str): info = {"status": info, "nome": alvo_str}
             nome = info.get("nome") or cache_nomes.get(alvo_str, alvo_str)
             
+            # Puxa o status para definir o ícone (✅ ou ❌)
+            status_ico = "❌" if info.get("status") == "erro" else "✅"
+            
             is_num = alvo_str.lstrip("-").replace(":", "").isdigit()
             base_id = alvo_str.split(":")[0].replace("-100", "").replace("-", "") if is_num else alvo_str.split(":")[0]
             topic = alvo_str.split(":")[1] if ":" in alvo_str else "0"
             
-            lista_analise.append({"original": alvo_str, "nome": nome, "is_num": is_num, "base_id": base_id, "topic": topic})
+            lista_analise.append({
+                "index": index,
+                "original": alvo_str,
+                "nome": nome,
+                "is_num": is_num,
+                "base_id": base_id,
+                "topic": topic,
+                "status_ico": status_ico
+            })
 
         duplicados = []
         pares_verificados = set()
@@ -1094,10 +1106,11 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
         texto_resp = "⚠️ <b>Aviso: Possíveis Duplicados Detectados</b>\n\n"
         for A, B, motivo in duplicados:
             texto_resp += f"🔹 <b>{A['nome']}</b>\n"
-            texto_resp += f"   ├ <code>{A['original']}</code>\n"
-            texto_resp += f"   └ <code>{B['original']}</code>\n"
+            texto_resp += f"   ├ <b>{A['index']}.</b> {A['status_ico']} <code>{A['original']}</code>\n"
+            texto_resp += f"   └ <b>{B['index']}.</b> {B['status_ico']} <code>{B['original']}</code>\n"
             texto_resp += f"   <i>(Motivo: {motivo})</i>\n\n"
             
+        texto_resp += "💡 <i>Dica: Se um deles for um duplicado indesejado, vá em 'Remover Canal' e exclua um dos IDs.</i>"
         await message.answer(texto_resp, parse_mode="HTML")
         
     elif texto == "🔙 Voltar ao Menu de Edição":
