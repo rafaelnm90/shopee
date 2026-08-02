@@ -5202,7 +5202,9 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
     canal_destino = str(dados_existentes.get("canal_destino", ""))
     blacklist = [str(b) for b in dados_existentes.get("blacklist", [])]
     
-    if texto == "Importar Banco Global 🌍":
+    is_importacao_global = texto == "Importar Banco Global 🌍"
+    
+    if is_importacao_global:
         msg_status = await message.answer("⏳ <b>Importando Banco Global e cruzando com a Lista Negra...</b>", parse_mode="HTML", reply_markup=teclado_cancelar)
         from utils import obter_banco_global_origens
         entradas_brutas = obter_banco_global_origens()
@@ -5226,7 +5228,13 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
         entrada_limpa = entrada.strip()
         if not entrada_limpa: continue
 
-        sucesso, id_final, nome = await validar_e_formatar_alvo(bot, entrada_limpa)
+        # Se for do Banco Global, pula a lentidão da rede
+        if is_importacao_global:
+            sucesso = True
+            id_final = entrada_limpa
+            nome = entrada_limpa
+        else:
+            sucesso, id_final, nome = await validar_e_formatar_alvo(bot, entrada_limpa)
 
         if sucesso:
             id_base = id_final.replace("-100", "")
@@ -5238,7 +5246,8 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
                 alvos_ja_monitorados.append(entrada_limpa)
             elif id_final not in [a["id"] for a in alvos_novos_para_adicionar]:
                 alvos_novos_para_adicionar.append({"id": id_final, "nome": nome})
-                salvar_nome_grupo(id_final, nome)
+                if not is_importacao_global:
+                    salvar_nome_grupo(id_final, nome)
             else:
                 alvos_ja_monitorados.append(entrada_limpa) 
         else:
@@ -5246,31 +5255,38 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
 
     await msg_status.delete()
 
-    # 5. Restauro do texto original conforme pedido
     texto_resposta = ""
 
     if alvos_novos_para_adicionar:
         texto_resposta += f"✅ <b>{len(alvos_novos_para_adicionar)} NOVO(S) alvo(s) válido(s):</b>\n"
-        for av in alvos_novos_para_adicionar:
+        for av in alvos_novos_para_adicionar[:15]:
             texto_resposta += f"🔹 {av['nome']} (<code>{av['id']}</code>)\n"
+        if len(alvos_novos_para_adicionar) > 15:
+            texto_resposta += f"<i>... e mais {len(alvos_novos_para_adicionar) - 15} alvos.</i>\n"
         texto_resposta += "\n"
 
     if alvos_em_loop:
-        texto_resposta += f"🛑 <b>{len(alvos_em_loop)} bloqueado(s) por Anti-Loop (É o canal de destino):</b>\n"
-        for loop in alvos_em_loop:
+        texto_resposta += f"🛑 <b>{len(alvos_em_loop)} bloqueado(s) por Anti-Loop:</b>\n"
+        for loop in alvos_em_loop[:10]:
             texto_resposta += f"🔻 <code>{loop}</code>\n"
+        if len(alvos_em_loop) > 10:
+            texto_resposta += f"<i>... e mais {len(alvos_em_loop) - 10} alvos.</i>\n"
         texto_resposta += "\n"
 
     if alvos_ja_monitorados:
-        texto_resposta += f"ℹ️ <b>{len(alvos_ja_monitorados)} ignorado(s) por já estar no radar (Duplicados):</b>\n"
-        for dup in alvos_ja_monitorados:
+        texto_resposta += f"ℹ️ <b>{len(alvos_ja_monitorados)} ignorado(s) por já estar no radar:</b>\n"
+        for dup in alvos_ja_monitorados[:10]:
             texto_resposta += f"🔸 <code>{dup}</code>\n"
+        if len(alvos_ja_monitorados) > 10:
+            texto_resposta += f"<i>... e mais {len(alvos_ja_monitorados) - 10} alvos.</i>\n"
         texto_resposta += "\n"
 
     if alvos_rejeitados:
-        texto_resposta += f"❌ <b>{len(alvos_rejeitados)} falharam (Formato inválido ou link Privado):</b>\n"
-        for rej in alvos_rejeitados:
+        texto_resposta += f"❌ <b>{len(alvos_rejeitados)} falharam (Formato inválido/Blacklist):</b>\n"
+        for rej in alvos_rejeitados[:10]:
             texto_resposta += f"🔻 <code>{rej}</code>\n"
+        if len(alvos_rejeitados) > 10:
+            texto_resposta += f"<i>... e mais {len(alvos_rejeitados) - 10} alvos.</i>\n"
         texto_resposta += "\n"
 
     if not alvos_novos_para_adicionar:
