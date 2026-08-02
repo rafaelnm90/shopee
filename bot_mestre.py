@@ -3754,27 +3754,8 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     # 🔁 Roteamento Inteligente: Se estiver na CONFIRMAÇÃO de Limpeza, volta para a SELEÇÃO de Limpeza
     if estado_atual == "ConfigFluxo:aguardando_acao_limpeza":
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando à seleção de limpeza de filas.")
-        
-        teclado_opcoes_limpeza = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Limpar Tudo (Geral) 💥")],
-                [KeyboardButton(text="Limpar Fila do Espião 🕵️"), KeyboardButton(text="Limpar Fila Espelhador 🔄")],
-                [KeyboardButton(text="Limpar Fila Autorais 🎥"), KeyboardButton(text="Cancelar ❌")]
-            ],
-            resize_keyboard=True,
-            is_persistent=True
-        )
-        
-        texto = (
-            "🧹 <b>CENTRAL DE LIMPEZA DO SERVIDOR</b>\n\n"
-            "Escolha qual módulo você deseja esvaziar. As suas configurações do robô (textos, horários, alvos) <b>nunca</b> são apagadas.\n\n"
-            "🛡️ <i>Nota: A Fila Principal (SQLite) está protegida e nunca será apagada por este menu.</i>"
-        )
-        
-        # Seta o estado correto e recria o menu diretamente sem depender de outras funções
-        await state.set_state(ConfigFluxo.aguardando_selecao_limpeza)
-        await message.answer("Ação cancelada. Retornando ao menu anterior...", reply_markup=teclado_opcoes_limpeza)
-        await message.answer(texto, reply_markup=teclado_opcoes_limpeza, parse_mode="HTML")
+        await message.answer("Ação cancelada. Retornando ao menu de limpeza...")
+        await menu_zerar_filas_tarefas(message, state)
         return
         
     # 🔁 Roteamento Inteligente: Se cancelar da seleção de limpeza ou do reinício, volta pro painel de Servidor
@@ -4482,7 +4463,7 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
     await state.clear()
 
 @dp.message(F.text == "Zerar Filas e Tarefas 🧹", StateFilter("*"))
-async def confirmar_zerar_filas_tarefas(message: types.Message, state: FSMContext):
+async def menu_zerar_filas_tarefas(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("⚠️ Solicitando seleção do tipo de limpeza de filas.")
     
@@ -4506,9 +4487,9 @@ async def confirmar_zerar_filas_tarefas(message: types.Message, state: FSMContex
         "👉 <b>Geral:</b> Esvazia o Espião, Espelhador, Autorais, apaga o lixo temporário, exclui backups e limpa logs do Ubuntu."
     )
     await message.answer(texto, reply_markup=teclado_opcoes_limpeza, parse_mode="HTML")
-    await state.set_state(ConfigFluxo.aguardando_confirmacao_zerar_filas)
+    await state.set_state(ConfigFluxo.aguardando_selecao_limpeza)
 
-@dp.message(ConfigFluxo.aguardando_confirmacao_zerar_filas)
+@dp.message(ConfigFluxo.aguardando_selecao_limpeza)
 async def pedir_confirmacao_acao_limpeza(message: types.Message, state: FSMContext):
     opcoes_validas = [
         "Limpar Tudo (Geral) 💥", "Limpar Fila do Espião 🕵️", "Limpar Fila Espelhador 🔄", "Limpar Fila Autorais 🎥"
@@ -4522,7 +4503,6 @@ async def pedir_confirmacao_acao_limpeza(message: types.Message, state: FSMConte
         await message.answer("Por favor, utilize os botões abaixo para escolher a limpeza.")
         return
 
-    # Salva a escolha do usuário
     await state.update_data(tipo_limpeza=message.text)
 
     teclado_confirmacao = ReplyKeyboardMarkup(
@@ -4531,7 +4511,7 @@ async def pedir_confirmacao_acao_limpeza(message: types.Message, state: FSMConte
         is_persistent=True
     )
 
-    await message.answer(f"⚠️ <b>Atenção:</b> Você está prestes a executar a operação: <b>{message.text}</b>.\n\nEsta ação é irreversível. Deseja continuar?", reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await message.answer(f"⚠️ <b>Atenção:</b> Você está prestes a executar a operação: <b>{message.text}</b>.\n\nEsta ação apagará arquivos físicos e limpará a fila selecionada. Deseja continuar?", reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(ConfigFluxo.aguardando_acao_limpeza)
 
 @dp.message(ConfigFluxo.aguardando_acao_limpeza)
@@ -4578,8 +4558,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
             fila_clonagem = ler_fila_clonagem()
             mantidos_espiao = []
             for item in fila_clonagem.get("fila", []):
-                # O BOT MANTÉM OS VÍDEOS PROCESSADOS, APAGANDO APENAS OS PENDENTES
-                if item.get("processado"):
+                if item.get("processado") in [True, 1, "true", "True"]:
                     mantidos_espiao.append(item)
                 else:
                     apagar_arquivo(item.get("caminho_video"))
@@ -4587,7 +4566,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
             fila_clonagem["fila"] = mantidos_espiao
             salvar_fila_clonagem(fila_clonagem)
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro ao limpar Fila do Espião: {e}")
+            pass
             
     # 2. Limpar Fila do Espelhador
     if limpar_espelhador:
@@ -4596,7 +4575,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
                 fila_espelhador = json.load(f)
             mantidos_espelhador = []
             for item in fila_espelhador.get("fila", []):
-                if item.get("processado"):
+                if item.get("processado") in [True, 1, "true", "True"]:
                     mantidos_espelhador.append(item)
                 else:
                     apagar_arquivo(item.get("caminho_video"))
@@ -4604,10 +4583,8 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
             fila_espelhador["fila"] = mantidos_espelhador
             with open("fila_espelhador.json", "w", encoding="utf-8") as f:
                 json.dump(fila_espelhador, f, indent=4)
-        except FileNotFoundError:
-            pass
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro ao limpar Fila do Espelhador: {e}")
+            pass
 
     # 3. Limpar Fila de Autorais
     if limpar_autorais:
@@ -4615,19 +4592,17 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
             conexao = sqlite3.connect("banco_dados.db")
             cursor = conexao.cursor()
             
-            # Puxa apenas os vídeos que NÃO foram processados para apagar fisicamente
             cursor.execute("SELECT caminho_arquivo FROM fila_autorais WHERE processado = 0")
             para_apagar = cursor.fetchall()
             for item in para_apagar:
                 apagar_arquivo(item[0])
                 relatorio["autorais"] += 1
                 
-            # Deleta os registros pendentes do banco
             cursor.execute("DELETE FROM fila_autorais WHERE processado = 0")
             conexao.commit()
             conexao.close()
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro ao limpar Fila de Autorais: {e}")
+            pass
 
     # 4. Faxina Cega na Pasta Temp
     try:
@@ -4637,7 +4612,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
                 if os.path.isfile(caminho_completo):
                     apagar_arquivo(caminho_completo)
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao esvaziar pasta temp: {e}")
+        pass
 
     # 5. Apagar arquivos de backup (.bkp) na raiz
     if limpar_tudo:
@@ -4646,20 +4621,18 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
                 if filename.endswith(".bkp") and os.path.isfile(filename):
                     apagar_arquivo(filename)
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro ao tentar apagar arquivos de backup: {e}")
+            pass
 
     # 6. Limpeza de Logs do Servidor Linux
     status_ubuntu = "Não executada"
     if limpar_tudo:
         try:
-            if EXIBIR_LOGS: logger.info("🖥️ Acionando terminal Linux para limpeza de logs...")
             comando_linux = await asyncio.create_subprocess_exec(
                 "sudo", "journalctl", "--vacuum-time=2d",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            stdout, stderr = await comando_linux.communicate()
-            
+            await comando_linux.communicate()
             if comando_linux.returncode == 0:
                 status_ubuntu = "✅ Concluída (Mantendo últimos 2 dias)"
             else:
@@ -4684,8 +4657,9 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
         
     texto_final += "\nO seu ambiente de trabalho está atualizado."
     
-    await message.answer(texto_final, parse_mode="HTML", reply_markup=obter_teclado_opcoes_servidor())
-    await state.clear()
+    # ✅ CORREÇÃO MESTRE: Exibe a mensagem de sucesso e puxa o menu de limpeza novamente
+    await message.answer(texto_final, parse_mode="HTML")
+    await menu_zerar_filas_tarefas(message, state)
 
 @dp.message(F.text == "Outros Canais 🗂️", StateFilter("*"))
 async def menu_outros_canais(message: types.Message, state: FSMContext):
