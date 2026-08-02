@@ -453,7 +453,7 @@ teclado_automacoes_espiao = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-tteclado_opcoes_espiao = ReplyKeyboardMarkup(
+teclado_opcoes_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Definir Destino 🎯")],
         [KeyboardButton(text="Adicionar Grupo ➕"), KeyboardButton(text="Remover Grupo 🗑️")],
