@@ -5471,7 +5471,12 @@ async def confirmar_adicao_alvo_espiao(message: types.Message, state: FSMContext
 @dp.message(EspiaoFluxo.aguardando_acao_blacklist)
 async def acao_blacklist_espiao(message: types.Message, state: FSMContext):
     if message.text == "➕ Add à Blacklist":
-        await message.answer("Envie o(s) ID(s) que deseja BLOQUEAR no Espião (separados por vírgula):", reply_markup=teclado_cancelar)
+        texto_bl = (
+            "Envie os @usernames, links ou IDs dos canais que deseja <b>BLOQUEAR</b> no Espião.\n"
+            "OBS: Você pode enviar vários separando por vírgula (Ex: @grupo1, -100123, https://t.me/grupo2, https://web.telegram.org/a/#-1002856422690):\n\n"
+            "<blockquote>💡 <b>Dica:</b> Você pode colar uma lista inteira. O robô irá ignorar formatos inválidos e bloquear os corretos automaticamente.</blockquote>"
+        )
+        await message.answer(texto_bl, reply_markup=teclado_cancelar, parse_mode="HTML")
         await state.set_state(EspiaoFluxo.aguardando_blacklist_add)
     elif message.text == "🗑️ Remover da Blacklist":
         await message.answer("Envie os IDs que deseja liberar (separados por vírgula):", reply_markup=teclado_cancelar)
