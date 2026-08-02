@@ -187,6 +187,7 @@ class EspiaoFluxo(StatesGroup):
     aguardando_blacklist_add = State()
     aguardando_blacklist_remove = State()
     aguardando_confirmacao_blacklist_conflito = State()
+    aguardando_acao_analise = State()
 
 class AchadinhosFluxo(StatesGroup):
     menu_principal = State()
@@ -457,13 +458,34 @@ teclado_opcoes_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Definir Destino 🎯")],
         [KeyboardButton(text="Adicionar Grupo ➕"), KeyboardButton(text="Remover Grupo 🗑️")],
-        [KeyboardButton(text="Listar Todos 📜"), KeyboardButton(text="⚠️ Duplicados")],
+        [KeyboardButton(text="Analisar Canais Vigiados 🔎")],
         [KeyboardButton(text="Editar Janela 🕒"), KeyboardButton(text="Editar Atraso ⏳")],
         [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
 )
+
+@dp.message(EspiaoFluxo.menu_principal, F.text == "Analisar Canais Vigiados 🔎")
+async def menu_analise_canais_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    
+    teclado_analise = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Listar Todos 📜"), KeyboardButton(text="⚠️ Duplicados")],
+            [KeyboardButton(text="Voltar às Opções 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer("🔎 <b>Análise de Canais Vigiados</b>\nEscolha a ferramenta que deseja utilizar:", reply_markup=teclado_analise, parse_mode="HTML")
+    await state.set_state(EspiaoFluxo.aguardando_acao_analise)
+
+@dp.message(F.text == "Voltar às Opções 🔙", StateFilter("*"))
+async def voltar_opcoes_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    await menu_grupos_vigiados(message, state)
 
 # 🛠️ Novo Teclado para Janela do Espião
 teclado_janela_espiao = ReplyKeyboardMarkup(
@@ -5154,7 +5176,7 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
     await state.set_state(EspiaoFluxo.menu_principal)
 
 
-@dp.message(EspiaoFluxo.menu_principal, F.text == "Listar Todos 📜")
+@dp.message(EspiaoFluxo.aguardando_acao_analise, F.text == "Listar Todos 📜")
 async def listar_todos_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     
@@ -5191,7 +5213,7 @@ async def listar_todos_espiao(message: types.Message, state: FSMContext):
     for msg in mensagens:
         await message.answer(msg, parse_mode="HTML")
 
-@dp.message(EspiaoFluxo.menu_principal, F.text == "⚠️ Duplicados")
+@dp.message(EspiaoFluxo.aguardando_acao_analise, F.text == "⚠️ Duplicados")
 async def verificar_duplicados_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     
