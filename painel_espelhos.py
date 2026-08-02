@@ -163,7 +163,7 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         teclado_origens = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
-                [KeyboardButton(text="📜 Listar Todos")],
+                [KeyboardButton(text="📜 Listar Todos"), KeyboardButton(text="⚠️ Duplicados")],
                 [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
             ],
             resize_keyboard=True,
@@ -951,7 +951,7 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
         teclado_origens = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
-                [KeyboardButton(text="📜 Listar Todos")],
+                [KeyboardButton(text="📜 Listar Todos"), KeyboardButton(text="⚠️ Duplicados")],
                 [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
             ],
             resize_keyboard=True,
@@ -1037,6 +1037,68 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
         
         for msg in mensagens:
             await message.answer(msg, parse_mode="HTML")
+
+    elif texto == "⚠️ Duplicados":
+        data = await state.get_data()
+        indice = data.get("indice_edicao")
+        rotas = ler_espelhos().get("rotas", [])
+        rota = rotas[indice]
+        origens = rota.get('origens', [])
+        if not origens and 'origem' in rota: origens = [rota['origem']]
+        
+        if len(origens) < 2:
+            await message.answer("Não há canais suficientes nesta rota para procurar duplicados.")
+            return
+            
+        msg_status = await message.answer("⏳ Analisando a lista em busca de duplicados...")
+        
+        cache_nomes = ler_cache_nomes_grupos()
+        status_canais = rota.get("status_canais", {})
+        
+        lista_analise = []
+        for o in origens:
+            alvo_str = str(o)
+            info = status_canais.get(alvo_str, {})
+            if isinstance(info, str): info = {"status": info, "nome": alvo_str}
+            nome = info.get("nome") or cache_nomes.get(alvo_str, alvo_str)
+            
+            is_num = alvo_str.lstrip("-").replace(":", "").isdigit()
+            base_id = alvo_str.split(":")[0].replace("-100", "").replace("-", "") if is_num else alvo_str.split(":")[0]
+            topic = alvo_str.split(":")[1] if ":" in alvo_str else "0"
+            
+            lista_analise.append({"original": alvo_str, "nome": nome, "is_num": is_num, "base_id": base_id, "topic": topic})
+
+        duplicados = []
+        pares_verificados = set()
+
+        for i in range(len(lista_analise)):
+            for j in range(i + 1, len(lista_analise)):
+                A = lista_analise[i]
+                B = lista_analise[j]
+                
+                par_key = tuple(sorted([A["original"], B["original"]]))
+                if par_key in pares_verificados: continue
+                pares_verificados.add(par_key)
+                
+                if A["base_id"] == B["base_id"] and A["topic"] == B["topic"]:
+                    duplicados.append((A, B, "Mesmo ID Base"))
+                elif A["nome"] == B["nome"] and (A["is_num"] != B["is_num"]):
+                    duplicados.append((A, B, "Mesmo nome (@Link vs ID)"))
+
+        await msg_status.delete()
+
+        if not duplicados:
+            await message.answer("✅ <b>Tudo limpo!</b>\nO sistema não detectou nenhum canal duplicado nesta rota.", parse_mode="HTML")
+            return
+            
+        texto_resp = "⚠️ <b>Aviso: Possíveis Duplicados Detectados</b>\n\n"
+        for A, B, motivo in duplicados:
+            texto_resp += f"🔹 <b>{A['nome']}</b>\n"
+            texto_resp += f"   ├ <code>{A['original']}</code>\n"
+            texto_resp += f"   └ <code>{B['original']}</code>\n"
+            texto_resp += f"   <i>(Motivo: {motivo})</i>\n\n"
+            
+        await message.answer(texto_resp, parse_mode="HTML")
         
     elif texto == "🔙 Voltar ao Menu de Edição":
         data = await state.get_data()
@@ -1572,7 +1634,7 @@ async def salvar_bl_add_espelhador(message: types.Message, state: FSMContext):
     teclado_origens = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
-                [KeyboardButton(text="📜 Listar Todos")],
+                [KeyboardButton(text="📜 Listar Todos"), KeyboardButton(text="⚠️ Duplicados")],
                 [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
             ],
             resize_keyboard=True,
@@ -1592,7 +1654,7 @@ async def salvar_bl_rem_espelhador(message: types.Message, state: FSMContext):
     teclado_origens = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
-                [KeyboardButton(text="📜 Listar Todos")],
+                [KeyboardButton(text="📜 Listar Todos"), KeyboardButton(text="⚠️ Duplicados")],
                 [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
             ],
             resize_keyboard=True,
