@@ -458,7 +458,6 @@ teclado_opcoes_espiao = ReplyKeyboardMarkup(
         [KeyboardButton(text="Definir Destino 🎯")],
         [KeyboardButton(text="Adicionar Grupo ➕"), KeyboardButton(text="Remover Grupo 🗑️")],
         [KeyboardButton(text="Editar Janela 🕒"), KeyboardButton(text="Editar Atraso ⏳")],
-        [KeyboardButton(text="Lista Negra (Blacklist) ⛔")],
         [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
     ],
     resize_keyboard=True,
@@ -5155,13 +5154,48 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Adicionar Grupo ➕")
 async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
-    teclado_dinamico = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Importar Banco Global 🌍")], [KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
-    await message.answer("Envie os @usernames, links ou IDs dos grupos que deseja monitorar...\n\n💡 <b>Dica:</b> Você pode colar uma lista ou clicar no botão abaixo para puxar o <b>Banco Global</b> (o robô ignorará os grupos duplicados e os da Lista Negra automaticamente):", reply_markup=teclado_dinamico, parse_mode="HTML")
+    teclado_dinamico = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Importar Banco Global 🌍")], 
+            [KeyboardButton(text="Lista Negra (Blacklist) ⛔")],
+            [KeyboardButton(text="Cancelar ❌")]
+        ], 
+        resize_keyboard=True, 
+        is_persistent=True
+    )
+    await message.answer(
+        "Envie os @usernames, links ou IDs dos grupos que deseja monitorar...\n\n"
+        "💡 <b>Dica:</b> Você pode colar uma lista ou clicar no botão abaixo para puxar o <b>Banco Global</b> (o robô ignorará os grupos duplicados e os da Lista Negra automaticamente):", 
+        reply_markup=teclado_dinamico, 
+        parse_mode="HTML"
+    )
     await state.set_state(EspiaoFluxo.aguardando_novo_alvo)
 
 @dp.message(EspiaoFluxo.aguardando_novo_alvo)
 async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
     texto = message.text
+    
+    # 🎯 NOVA REDIREÇÃO DA BLACKLIST
+    if texto == "Lista Negra (Blacklist) ⛔":
+        dados = ler_alvos_espiao()
+        blacklist = dados.get("blacklist", [])
+        texto_bl = "⛔ <b>Lista Negra do Espião</b>\nOs canais abaixo <b>NUNCA</b> serão importados ou monitorados:\n\n"
+        if blacklist:
+            for i, b in enumerate(blacklist, 1): texto_bl += f"{i}. <code>{b}</code>\n"
+        else: texto_bl += "<i>A lista negra está vazia.</i>\n"
+        
+        tcl = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Remover da Blacklist")], 
+                [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
+            ], 
+            resize_keyboard=True, 
+            is_persistent=True
+        )
+        await message.answer(texto_bl, reply_markup=tcl, parse_mode="HTML")
+        await state.set_state(EspiaoFluxo.aguardando_acao_blacklist)
+        return
+        
     dados_existentes = ler_alvos_espiao()
     alvos_existentes = dados_existentes.get("alvos", [])
     canal_destino = str(dados_existentes.get("canal_destino", ""))
@@ -5185,9 +5219,8 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
     alvos_novos_para_adicionar = []
     alvos_ja_monitorados = []
     alvos_rejeitados = []
-    alvos_em_loop = [] # 🛑 Nova lista para a trava anti-loop
+    alvos_em_loop = [] 
 
-    # 2. Valida as entradas
     for entrada in entradas_brutas:
         entrada_limpa = entrada.strip()
         if not entrada_limpa: continue
@@ -5196,10 +5229,8 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
 
         if sucesso:
             id_base = id_final.replace("-100", "")
-            # Cruza com a Blacklist primeiro!
             if id_final in blacklist or id_base in [b.replace("-100", "") for b in blacklist]:
                 alvos_rejeitados.append(f"{entrada_limpa} (Blacklist ⛔)")
-            # 🛑 Trava Anti-Loop: Verifica se o ID do alvo é igual ao ID do destino
             elif canal_destino and id_base == canal_destino.replace("-100", ""):
                 alvos_em_loop.append(entrada_limpa)
             elif id_final in alvos_existentes:
@@ -5208,20 +5239,19 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
                 alvos_novos_para_adicionar.append({"id": id_final, "nome": nome})
                 salvar_nome_grupo(id_final, nome)
             else:
-                alvos_ja_monitorados.append(entrada_limpa) # Duplicado dentro do próprio envio atual
+                alvos_ja_monitorados.append(entrada_limpa) 
         else:
             alvos_rejeitados.append(entrada_limpa)
 
     await msg_status.delete()
 
-    # 4. Monta o relatório visual transparente
+    # 5. Restauro do texto original conforme pedido
     texto_resposta = ""
 
     if alvos_novos_para_adicionar:
         texto_resposta += f"✅ <b>{len(alvos_novos_para_adicionar)} NOVO(S) alvo(s) válido(s):</b>\n"
         for av in alvos_novos_para_adicionar:
-            tag_subgrupo = " <i>(Subgrupo)</i>" if ":" in av['id'] else ""
-            texto_resposta += f"🔹 <b>{av['nome']}</b> (<code>{av['id']}</code>){tag_subgrupo}\n"
+            texto_resposta += f"🔹 {av['nome']} (<code>{av['id']}</code>)\n"
         texto_resposta += "\n"
 
     if alvos_em_loop:
@@ -5242,7 +5272,6 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
             texto_resposta += f"🔻 <code>{rej}</code>\n"
         texto_resposta += "\n"
 
-    # Cenário A: Não há NENHUM alvo NOVO para adicionar
     if not alvos_novos_para_adicionar:
         texto_resposta += "⚠️ <b>Nenhum alvo novo foi aprovado.</b>"
         await message.answer(texto_resposta, parse_mode="HTML")
@@ -5250,7 +5279,6 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
         await menu_grupos_vigiados(message, state)
         return
 
-    # Cenário B: Existem alvos NOVOS. Pede a confirmação.
     await state.update_data(novos_alvos_espiao=alvos_novos_para_adicionar)
     texto_resposta += "Confirma a adição dos novos alvos?"
     
@@ -5286,18 +5314,6 @@ async def confirmar_adicao_alvo_espiao(message: types.Message, state: FSMContext
         
     await state.clear()
     await menu_grupos_vigiados(message, state)
-
-@dp.message(EspiaoFluxo.menu_principal, F.text == "Lista Negra (Blacklist) ⛔")
-async def gerenciar_blacklist_espiao(message: types.Message, state: FSMContext):
-    dados = ler_alvos_espiao()
-    blacklist = dados.get("blacklist", [])
-    texto = "⛔ <b>Lista Negra do Espião</b>\nOs canais abaixo <b>NUNCA</b> serão importados ou monitorados:\n\n"
-    if blacklist:
-        for i, b in enumerate(blacklist, 1): texto += f"{i}. <code>{b}</code>\n"
-    else: texto += "<i>A lista negra está vazia.</i>\n"
-    tcl = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Remover da Blacklist")], [KeyboardButton(text="Voltar ao Menu Espião 🔙")]], resize_keyboard=True, is_persistent=True)
-    await message.answer(texto, reply_markup=tcl, parse_mode="HTML")
-    await state.set_state(EspiaoFluxo.aguardando_acao_blacklist)
 
 @dp.message(EspiaoFluxo.aguardando_acao_blacklist)
 async def acao_blacklist_espiao(message: types.Message, state: FSMContext):
