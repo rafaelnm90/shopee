@@ -2644,41 +2644,40 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     agora_str = agora.strftime("%Y-%m-%d %H:%M:%S")
     
     if tipo_fila == "Espião":
-        fila_limpa = []
-        houve_alteracao = False
-        limite_horas = (atraso_dias * 24) + 24 # Expiração fluida (Ex: D+1 expira em 48h)
-        
-        hoje_str = agora.strftime("%Y-%m-%d")
-        
-        for item in fila:
-            # ✅ CORREÇÃO: Mantém no visual os que foram postados HOJE. Deleta os antigos.
-            if item.get("processado", False):
-                if item.get("data_postagem") == hoje_str:
-                    if EXIBIR_LOGS: logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo postado hoje ({item.get('id')}) no visual da fila.")
-                    fila_limpa.append(item)
-                else:
-                    houve_alteracao = True
-                continue
-                
-            data_cap_str = item.get("data_captura", "")
-            if data_cap_str:
-                try:
-                    data_captura = datetime.strptime(data_cap_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
-                    horas_na_fila = (agora - data_captura).total_seconds() / 3600
-                    
-                    # Elimina os vídeos fantasmas que ficaram presos no estado "Atrasado"
-                    if horas_na_fila > limite_horas:
-                        if EXIBIR_LOGS: logger.info(f"🧹 Pente Fino (Relatório): Removendo clone expirado ({horas_na_fila:.1f}h).")
+            fila_limpa = []
+            houve_alteracao = False
+            limite_horas = (atraso_dias * 24) + 24 # Expiração fluida (Ex: D+1 expira em 48h)
+
+            hoje_str = agora.strftime("%Y-%m-%d")
+
+            for item in fila:
+                # ✅ CORREÇÃO BLINDADA: Aceita qualquer formato de "True" para forçar a permanência
+                if item.get("processado") in [True, 1, "true", "True"]:
+                    if str(item.get("data_postagem")) == hoje_str:
+                        if EXIBIR_LOGS: logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo postado hoje ({item.get('id')}) no visual da fila.")
+                        fila_limpa.append(item)
+                    else:
                         houve_alteracao = True
-                        caminho_video = item.get("caminho_video")
-                        if caminho_video and os.path.exists(caminho_video):
-                            try: os.remove(caminho_video)
-                            except: pass
-                        continue # Pula este item, ele não vai para a fila limpa
-                except ValueError:
-                    pass
-            
-            fila_limpa.append(item)
+                    continue
+
+                data_cap_str = item.get("data_captura", "")
+                if data_cap_str:
+                    try:
+                        data_captura = datetime.strptime(data_cap_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                        horas_na_fila = (agora - data_captura).total_seconds() / 3600
+                        
+                        # Elimina os vídeos fantasmas que ficaram presos no estado "Atrasado"
+                        if horas_na_fila > limite_horas:
+                            houve_alteracao = True
+                            caminho_video = item.get("caminho_video")
+                            if caminho_video and os.path.exists(caminho_video):
+                                try: os.remove(caminho_video)
+                                except: pass
+                            continue
+                    except ValueError:
+                        pass
+                
+                fila_limpa.append(item)
             
         # Se encontrou lixo, salva o JSON limpo imediatamente
         if houve_alteracao:
