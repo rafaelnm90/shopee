@@ -1025,8 +1025,12 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
         for i, o in enumerate(origens, 1):
             info = status_canais.get(str(o), {})
             if isinstance(info, str): info = {"status": info, "nome": str(o)}
+            
+            # Puxa o status para definir o ícone (✅ ou ❌)
+            status_ico = "❌" if info.get("status") == "erro" else "✅"
+            
             nome = info.get("nome") or cache_nomes.get(str(o), str(o))
-            linha = f"<b>{i}.</b> {nome} (<code>{o}</code>)\n"
+            linha = f"<b>{i}.</b> {status_ico} {nome} (<code>{o}</code>)\n"
             
             if len(texto_lista) + len(linha) > 3800:
                 mensagens.append(texto_lista)
