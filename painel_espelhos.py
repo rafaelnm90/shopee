@@ -1674,7 +1674,12 @@ async def processar_esvaziar_fila(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.aguardando_acao_blacklist)
 async def acao_bl_espelhador(message: types.Message, state: FSMContext):
     if message.text == "➕ Add à Blacklist":
-        await message.answer("Envie o(s) ID(s) para BLOQUEAR NESTA ROTA (separados por vírgula):", reply_markup=teclado_espelhador_cancelar)
+        texto_bl = (
+            "Envie os @usernames, links ou IDs dos canais que deseja <b>BLOQUEAR NESTA ROTA</b>.\n"
+            "OBS: Você pode enviar vários separando por vírgula (Ex: @grupo1, -100123, https://t.me/grupo2, https://web.telegram.org/a/#-1002856422690):\n\n"
+            "<blockquote>💡 <b>Dica:</b> Você pode colar uma lista inteira. O robô irá ignorar formatos inválidos e bloquear os corretos automaticamente.</blockquote>"
+        )
+        await message.answer(texto_bl, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_blacklist_add)
     elif message.text == "🗑️ Rem. da Blacklist":
         await message.answer("Envie os IDs para LIBERAR NESTA ROTA (separados por vírgula):", reply_markup=teclado_espelhador_cancelar)
