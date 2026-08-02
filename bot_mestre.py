@@ -5082,6 +5082,9 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
     
     if alvos:
         cache_nomes_vigiados = ler_cache_nomes_grupos()
+        linhas_geradas = []
+        
+        # 1. Pré-processa todas as linhas para saber quais têm erro
         for i, alvo in enumerate(alvos, 1):
             info = status_alvos.get(alvo, {})
             status_ico = "⏳"
@@ -5095,20 +5098,48 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
                 status_ico = "❌"
                 detalhe = f"<code>{alvo}</code> - <i>Acesso negado/Link inválido</i>"
                 
-            linha = f"<code>{i:02d}.</code> {status_ico} {detalhe}\n"
-            
-            # Se o texto ultrapassar o limite seguro, quebra a mensagem e começa uma nova
-            if len(texto) + len(linha) > 3800:
-                mensagens_para_enviar.append(texto)
-                texto = "📥 <b>Na Escuta (Continuação):</b>\n"
-                
-            texto += linha
+            linhas_geradas.append({
+                "texto": f"<code>{i:02d}.</code> {status_ico} {detalhe}\n",
+                "tem_erro": status_ico == "❌"
+            })
+
+        # 2. Motor de Ocultação Inteligente
+        total = len(linhas_geradas)
+        if total <= 15:
+            # Se a lista for pequena, mostra tudo
+            for linha in linhas_geradas:
+                texto += linha["texto"]
+        else:
+            # Se for grande, mostra 5 primeiros, 5 últimos, e força exibição dos erros
+            for i in range(5):
+                texto += linhas_geradas[i]["texto"]
+
+            ocultos_ok = 0
+            for i in range(5, total - 5):
+                if linhas_geradas[i]["tem_erro"]:
+                    if ocultos_ok > 0:
+                        texto += f"   <i>... e mais {ocultos_ok} canais operando normalmente ...</i>\n"
+                        ocultos_ok = 0
+                    texto += linhas_geradas[i]["texto"]
+                else:
+                    ocultos_ok += 1
+
+            if ocultos_ok > 0:
+                texto += f"   <i>... e mais {ocultos_ok} canais operando normalmente ...</i>\n"
+
+            for i in range(total - 5, total):
+                texto += linhas_geradas[i]["texto"]
     else:
         texto += "<i>Nenhum grupo sendo monitorado no momento.</i>\n\n"
         
+    # Tratamento caso a lista de erros seja gigantesca (Limites do Telegram)
+    while len(texto) > 3800:
+        corte = texto.rfind('\n', 0, 3800)
+        mensagens_para_enviar.append(texto[:corte])
+        texto = texto[corte:]
+        
     mensagens_para_enviar.append(texto)
     
-    # Envia as mensagens fatiadas, colocando o teclado apenas na última
     for i, msg in enumerate(mensagens_para_enviar):
         if i == len(mensagens_para_enviar) - 1:
             await message.answer(msg, reply_markup=teclado_opcoes_espiao, parse_mode="HTML")
