@@ -5515,11 +5515,9 @@ async def processar_add_blacklist_espiao(message: types.Message, state: FSMConte
         if alvo_para_bl not in novos_blacklist and alvo_para_bl not in blacklist:
             novos_blacklist.append(alvo_para_bl)
 
-        # Verifica se o ID (ou a base do ID) já está na escuta atual
-        id_base = alvo_para_bl.replace("-100", "").split(":")[0]
+        # ✅ NOVA LÓGICA CIRÚRGICA: Só avisa/remove se o ID completo (ID:Tópico) bater
         for alvo_monitorado in alvos_atuais:
-            base_monitorado = str(alvo_monitorado).replace("-100", "").split(":")[0]
-            if id_base == base_monitorado and alvo_monitorado not in conflitos:
+            if alvo_para_bl == str(alvo_monitorado) and alvo_monitorado not in conflitos:
                 conflitos.append(alvo_monitorado)
 
     await msg_status.delete()
