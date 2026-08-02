@@ -137,7 +137,8 @@ class ConfigFluxo(StatesGroup):
     aguardando_novo_numero = State()
     aguardando_confirmacao_zerar = State()
     aguardando_confirmacao_zerar_filas = State()
-    aguardando_confirmacao_reiniciar = State() # ✅ NOVO ESTADO
+    aguardando_acao_limpeza = State() # ✅ NOVO ESTADO PARA A CONFIRMAÇÃO
+    aguardando_confirmacao_reiniciar = State()
 
 class ConfigDivulgacao(StatesGroup):
     menu_principal = State()
@@ -3751,7 +3752,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     data = await state.get_data()
 
     # 🔁 Roteamento Inteligente: Se estiver na confirmação de Zerar Filas Globais ou Reiniciar
-    if estado_atual in ["ConfigFluxo:aguardando_confirmacao_zerar_filas", "ConfigFluxo:aguardando_confirmacao_reiniciar"]:
+    if estado_atual in ["ConfigFluxo:aguardando_confirmacao_zerar_filas", "ConfigFluxo:aguardando_acao_limpeza", "ConfigFluxo:aguardando_confirmacao_reiniciar"]:
         await state.clear()
         await message.answer("Ação cancelada. Nenhuma alteração foi feita no servidor.", reply_markup=obter_teclado_opcoes_servidor())
         return
@@ -4482,7 +4483,7 @@ async def confirmar_zerar_filas_tarefas(message: types.Message, state: FSMContex
     await state.set_state(ConfigFluxo.aguardando_confirmacao_zerar_filas)
 
 @dp.message(ConfigFluxo.aguardando_confirmacao_zerar_filas)
-async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContext):
+async def pedir_confirmacao_acao_limpeza(message: types.Message, state: FSMContext):
     opcoes_validas = [
         "Limpar Tudo (Geral) 💥", "Limpar Fila do Espião 🕵️", "Limpar Fila Espelhador 🔄", "Limpar Fila Autorais 🎥"
     ]
@@ -4494,14 +4495,39 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
     if message.text not in opcoes_validas:
         await message.answer("Por favor, utilize os botões abaixo para escolher a limpeza.")
         return
+
+    # Salva a escolha do usuário
+    await state.update_data(tipo_limpeza=message.text)
+
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar Exclusão ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
+    await message.answer(f"⚠️ <b>Atenção:</b> Você está prestes a executar a operação: <b>{message.text}</b>.\n\nEsta ação é irreversível. Deseja continuar?", reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(ConfigFluxo.aguardando_acao_limpeza)
+
+@dp.message(ConfigFluxo.aguardando_acao_limpeza)
+async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
         
-    msg_status = await message.answer(f"🧹 <b>Executando: {message.text}...</b> Isso pode levar alguns segundos. ⏳", reply_markup=teclado_cancelar, parse_mode="HTML")
-    if EXIBIR_LOGS: logger.info(f"🚀 Iniciando protocolo de limpeza modular: {message.text}")
+    if message.text != "Aprovar Exclusão ✅":
+        await message.answer("Por favor, utilize os botões para aprovar ou cancelar a exclusão.")
+        return
+
+    data = await state.get_data()
+    tipo_limpeza = data.get("tipo_limpeza")
+
+    msg_status = await message.answer(f"🧹 <b>Executando: {tipo_limpeza}...</b> Isso pode levar alguns segundos. ⏳", reply_markup=teclado_cancelar, parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info(f"🚀 Iniciando protocolo de limpeza modular: {tipo_limpeza}")
     
-    limpar_tudo = message.text == "Limpar Tudo (Geral) 💥"
-    limpar_espiao = message.text == "Limpar Fila do Espião 🕵️" or limpar_tudo
-    limpar_espelhador = message.text == "Limpar Fila Espelhador 🔄" or limpar_tudo
-    limpar_autorais = message.text == "Limpar Fila Autorais 🎥" or limpar_tudo
+    limpar_tudo = tipo_limpeza == "Limpar Tudo (Geral) 💥"
+    limpar_espiao = tipo_limpeza == "Limpar Fila do Espião 🕵️" or limpar_tudo
+    limpar_espelhador = tipo_limpeza == "Limpar Fila Espelhador 🔄" or limpar_tudo
+    limpar_autorais = tipo_limpeza == "Limpar Fila Autorais 🎥" or limpar_tudo
 
     relatorio = {
         "espiao": 0,
