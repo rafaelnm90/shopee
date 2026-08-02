@@ -2881,34 +2881,35 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 
                 link_final_exibicao = link_telegram
                 
-                # ✅ NOVO: Extrair o nome do produto da legenda (Aprimorado)
+                # ✅ NOVO: Extração Inteligente do Nome
                 legenda = v.get("legenda", "")
                 import re
                 
-                # 1. Tenta extrair do formato padrão do bot "📦 Item: Nome"
                 match_item = re.search(r'📦\s*Item:\s*([^\n<]+)', legenda)
                 if match_item:
                     nome_produto = match_item.group(1).strip()
                 else:
-                    # 2. Busca a primeira linha útil que NÃO seja um link e NÃO seja hashtag
                     legenda_limpa = re.sub(r'<[^>]+>', '', legenda).strip()
                     linhas = legenda_limpa.split('\n')
-                    nome_produto = "Vídeo sem descrição"
+                    nome_produto = ""
                     
                     for linha in linhas:
                         l = linha.strip()
-                        # Ignora linhas vazias, links da shopee/telegram e hashtags soltas
-                        if l and "http" not in l.lower() and not l.startswith("#"):
-                            # Remove "Vídeo X | " se existir no começo
+                        # Ignora linhas vazias, links (http ou shp.ee) e hashtags soltas
+                        if l and "http" not in l.lower() and "shp.ee" not in l.lower() and not l.startswith("#"):
                             match_video = re.search(r'(?i)^Vídeo\s+\d+\s*\|\s*(.+)', l)
                             if match_video:
                                 nome_produto = match_video.group(1).strip()
                             else:
                                 nome_produto = l
-                            break # Achou o nome! Interrompe a busca.
+                            break
                             
-                # Limita o tamanho do nome para não quebrar a estética do painel
-                v["nome_origem"] = f"{nome_produto[:40]}..." if len(nome_produto) > 40 else nome_produto
+                    if not nome_produto:
+                        nome_produto = "Produto Autoral (Sem Descrição)"
+
+                # 🔥 O PULO DO GATO: Injetamos o padrão visual perfeito na 'legenda' temporária.
+                # Assim, o 'motor_filas.py' vai ler o nome limpo em vez de pegar o link por engano!
+                v["legenda"] = f"Vídeo {i}\n📦 Item: {nome_produto[:45]}\n{legenda}"
                 
                 data_alvo_str = v.get("data_alvo")
                 try:
