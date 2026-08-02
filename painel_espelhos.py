@@ -376,22 +376,29 @@ async def receber_origem_criacao(message: types.Message, state: FSMContext):
     origens_em_loop = [] # 🛑 Nova lista para a trava anti-loop
     
     for entrada in entradas_brutas:
-        entrada_limpa = entrada.strip()
-        if not entrada_limpa: continue
-        
-        sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada_limpa)
-        
-        if sucesso:
-            # 🛑 Trava Anti-Loop: Bloqueia se a origem for igual ao destino da rota
-            if destino_atual and id_final.replace("-100", "") == destino_atual.replace("-100", ""):
-                origens_em_loop.append(entrada_limpa)
-            elif id_final not in origens_validas:
-                origens_validas.append(id_final)
-                salvar_nome_grupo(id_final, nome)
+            entrada_limpa = entrada.strip()
+            if not entrada_limpa: continue
+            
+            sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada_limpa)
+            
+            if sucesso:
+                id_base = id_final.replace("-100", "")
+                
+                # ⛔ Verifica Blacklist
+                if id_final in blacklist or id_base in [b.replace("-100", "") for b in blacklist]:
+                    origens_invalidas.append(f"{entrada_limpa} (Blacklist ⛔)")
+                # 🛑 Trava Anti-Loop: Bloqueia se a origem for igual ao destino da rota
+                elif destino_atual and id_base == destino_atual.replace("-100", ""):
+                    origens_em_loop.append(entrada_limpa)
+                # ℹ️ Verifica Duplicidade
+                elif id_final in origens_atuais or id_final in [o['id'] for o in origens_validas]:
+                    origens_duplicadas.append(entrada_limpa)
+                # ✅ Adiciona nova origem válida
+                else:
+                    salvar_nome_grupo(id_final, nome)
+                    origens_validas.append({"id": id_final, "nome": nome})
             else:
-                origens_duplicadas.append(entrada_limpa)
-        else:
-            origens_invalidas.append(entrada_limpa)
+                origens_invalidas.append(entrada_limpa)
 
     await msg_status.delete()
     
@@ -1090,20 +1097,17 @@ async def confirmar_nova_origem(message: types.Message, state: FSMContext):
         
         if sucesso:
             id_base = id_final.replace("-100", "")
+            
+            # ⛔ Verifica Blacklist
             if id_final in blacklist or id_base in [b.replace("-100", "") for b in blacklist]:
                 origens_invalidas.append(f"{entrada_limpa} (Blacklist ⛔)")
-            elif destino_atual and id_final.replace("-100", "") == destino_atual.replace("-100", ""):
-        entrada_limpa = entrada.strip()
-        if not entrada_limpa: continue
-        
-        sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada_limpa)
-        
-        if sucesso:
             # 🛑 Trava Anti-Loop: Bloqueia se a origem for igual ao destino da rota
-            if destino_atual and id_final.replace("-100", "") == destino_atual.replace("-100", ""):
+            elif destino_atual and id_base == destino_atual.replace("-100", ""):
                 origens_em_loop.append(entrada_limpa)
+            # ℹ️ Verifica Duplicidade
             elif id_final in origens_atuais or id_final in [o['id'] for o in origens_validas]:
                 origens_duplicadas.append(entrada_limpa)
+            # ✅ Adiciona nova origem válida
             else:
                 salvar_nome_grupo(id_final, nome)
                 origens_validas.append({"id": id_final, "nome": nome})
@@ -1145,8 +1149,8 @@ async def confirmar_nova_origem(message: types.Message, state: FSMContext):
 
     await state.update_data(origens_para_adicionar=origens_validas)
     
-    if len(rotas) > 1:
-        texto_resumo += f"O seu sistema possui <b>{len(rotas)} rotas ativas</b>. Onde deseja adicionar?"
+    if len(dados.get("rotas", [])) > 1:
+        texto_resumo += f"O seu sistema possui <b>{len(dados['rotas'])} rotas ativas</b>. Onde deseja adicionar?"
         await message.answer(texto_resumo, reply_markup=teclado_espelhador_abrangencia, parse_mode="HTML")
     else:
         texto_resumo += f"Deseja adicionar à rota <b>{rota_atual['nome']}</b>?"
