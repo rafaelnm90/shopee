@@ -930,7 +930,7 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         teclado_submenu = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="📝 Editar Nome"), KeyboardButton(text="🔀 Modificar Modo")],
-                [KeyboardButton(text="🎯 Editar Destino"), KeyboardButton(text="📥 Canais Vigiados")],
+                [KeyboardButton(text="🎯 Editar Destino"), KeyboardButton(text="📥 Editar Canais")],
                 [KeyboardButton(text="🕒 Modificar Janela"), KeyboardButton(text="📅 Modificar Dias")],
                 [KeyboardButton(text="Voltar ao Menu Espelho 🔙")]
             ],
@@ -989,7 +989,7 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
         )
         await message.answer("Escolha o novo modo de distribuição:", reply_markup=teclado_modo)
         await state.set_state(EspelhadorFluxo.aguardando_edicao_novo_modo)
-    elif texto == "📥 Canais Vigiados":
+    elif texto == "📥 Editar Canais":
         teclado_origens = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
