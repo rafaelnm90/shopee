@@ -3754,12 +3754,30 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     # 🔁 Roteamento Inteligente: Se estiver na CONFIRMAÇÃO de Limpeza, volta para a SELEÇÃO de Limpeza
     if estado_atual == "ConfigFluxo:aguardando_acao_limpeza":
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando à seleção de limpeza de filas.")
-        await message.answer("Exclusão cancelada.", reply_markup=types.ReplyKeyboardRemove())
-        # Chama a função de menu de limpeza diretamente para renderizar a tela novamente
-        await menu_zerar_filas_tarefas(message, state)
+        
+        teclado_opcoes_limpeza = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Limpar Tudo (Geral) 💥")],
+                [KeyboardButton(text="Limpar Fila do Espião 🕵️"), KeyboardButton(text="Limpar Fila Espelhador 🔄")],
+                [KeyboardButton(text="Limpar Fila Autorais 🎥"), KeyboardButton(text="Cancelar ❌")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        
+        texto = (
+            "🧹 <b>CENTRAL DE LIMPEZA DO SERVIDOR</b>\n\n"
+            "Escolha qual módulo você deseja esvaziar. As suas configurações do robô (textos, horários, alvos) <b>nunca</b> são apagadas.\n\n"
+            "🛡️ <i>Nota: A Fila Principal (SQLite) está protegida e nunca será apagada por este menu.</i>"
+        )
+        
+        # Seta o estado correto e recria o menu diretamente sem depender de outras funções
+        await state.set_state(ConfigFluxo.aguardando_selecao_limpeza)
+        await message.answer("Ação cancelada. Retornando ao menu anterior...", reply_markup=teclado_opcoes_limpeza)
+        await message.answer(texto, reply_markup=teclado_opcoes_limpeza, parse_mode="HTML")
         return
         
-    # 🔁 Roteamento Inteligente: Se cancelar do menu de seleção ou do reinício, volta pro Servidor
+    # 🔁 Roteamento Inteligente: Se cancelar da seleção de limpeza ou do reinício, volta pro painel de Servidor
     if estado_atual in ["ConfigFluxo:aguardando_selecao_limpeza", "ConfigFluxo:aguardando_confirmacao_reiniciar"]:
         await state.clear()
         await message.answer("Ação cancelada. Nenhuma alteração foi feita no servidor.", reply_markup=obter_teclado_opcoes_servidor())
