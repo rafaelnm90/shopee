@@ -183,10 +183,10 @@ class EspiaoFluxo(StatesGroup):
     aguardando_canal_destino = State()
     aguardando_confirmacao_destino = State()
     aguardando_confirmacao_forcar_clones = State()
-    # ✅ NOVOS ESTADOS DA BLACKLIST:
     aguardando_acao_blacklist = State()
     aguardando_blacklist_add = State()
     aguardando_blacklist_remove = State()
+    aguardando_confirmacao_blacklist_conflito = State()
 
 class AchadinhosFluxo(StatesGroup):
     menu_principal = State()
@@ -5457,14 +5457,103 @@ async def acao_blacklist_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.aguardando_blacklist_add)
 async def processar_add_blacklist_espiao(message: types.Message, state: FSMContext):
-    novos = [s.strip() for s in message.text.split(",")]
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+
+    import re
+    texto = message.text
+    # ✅ Identifica links comuns e também web.telegram.org
+    padroes = re.findall(r'(-100\d+(?::\d+)?|@\w+|https?://t\.me/[^\s\)]+|https?://web\.telegram\.org/[^\s\)]+)', texto)
+    if padroes: entradas_brutas = list(dict.fromkeys(padroes))
+    else: entradas_brutas = texto.replace('\n', ',').split(',')
+
+    msg_status = await message.answer("⏳ A processar e validar IDs para a Lista Negra...", reply_markup=teclado_cancelar)
+
     dados = ler_alvos_espiao()
+    alvos_atuais = dados.get("alvos", [])
     blacklist = dados.get("blacklist", [])
-    for n in novos:
-        if n and n not in blacklist: blacklist.append(n)
+
+    novos_blacklist = []
+    conflitos = []
+
+    for entrada in entradas_brutas:
+        entrada_limpa = entrada.strip()
+        if not entrada_limpa: continue
+
+        # Extrai o ID limpo usando o validador do sistema
+        sucesso, id_final, _ = await validar_e_formatar_alvo(bot, entrada_limpa)
+        alvo_para_bl = id_final if sucesso else entrada_limpa
+
+        if alvo_para_bl not in novos_blacklist and alvo_para_bl not in blacklist:
+            novos_blacklist.append(alvo_para_bl)
+
+        # Verifica se o ID (ou a base do ID) já está na escuta atual
+        id_base = alvo_para_bl.replace("-100", "").split(":")[0]
+        for alvo_monitorado in alvos_atuais:
+            base_monitorado = str(alvo_monitorado).replace("-100", "").split(":")[0]
+            if id_base == base_monitorado and alvo_monitorado not in conflitos:
+                conflitos.append(alvo_monitorado)
+
+    await msg_status.delete()
+
+    if not novos_blacklist:
+        await message.answer("Nenhum canal novo válido detetado ou todos já estavam na Lista Negra.")
+        await menu_grupos_vigiados(message, state)
+        return
+
+    # 🛑 Se encontrar o canal na escuta, exige confirmação para apagar
+    if conflitos:
+        await state.update_data(novos_blacklist=novos_blacklist, alvos_para_remover=conflitos)
+        texto_aviso = (
+            f"⚠️ <b>Atenção: Conflito Detetado!</b>\n\n"
+            f"Você está a tentar adicionar canais à Lista Negra que <b>já estão a ser monitorizados</b> pelo Espião.\n\n"
+            f"Canais que serão <b>AUTOMATICAMENTE REMOVIDOS</b> da escuta:\n"
+        )
+        for c in conflitos:
+            texto_aviso += f"🗑️ <code>{c}</code>\n"
+
+        texto_aviso += "\nDeseja aprovar a adição à Lista Negra e a exclusão destes canais da escuta simultaneamente?"
+
+        teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
+        await message.answer(texto_aviso, reply_markup=teclado_conf, parse_mode="HTML")
+        await state.set_state(EspiaoFluxo.aguardando_confirmacao_blacklist_conflito)
+    else:
+        # Se não houver conflito, adiciona direto
+        for n in novos_blacklist:
+            blacklist.append(n)
+        dados["blacklist"] = blacklist
+        salvar_alvos_espiao(dados)
+        await message.answer(f"✅ <b>{len(novos_blacklist)} canal(is) bloqueado(s) na Lista Negra do Espião!</b>", parse_mode="HTML")
+        await menu_grupos_vigiados(message, state)
+
+@dp.message(EspiaoFluxo.aguardando_confirmacao_blacklist_conflito)
+async def confirmar_blacklist_conflito_espiao(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar ✅":
+        await message.answer("Operação cancelada.", reply_markup=teclado_cancelar)
+        await menu_grupos_vigiados(message, state)
+        return
+
+    data = await state.get_data()
+    novos_blacklist = data.get("novos_blacklist", [])
+    alvos_para_remover = data.get("alvos_para_remover", [])
+
+    dados = ler_alvos_espiao()
+    alvos_atuais = dados.get("alvos", [])
+    blacklist = dados.get("blacklist", [])
+
+    # Remove os conflitos da escuta e salva
+    alvos_atualizados = [a for a in alvos_atuais if a not in alvos_para_remover]
+    dados["alvos"] = alvos_atualizados
+
+    for n in novos_blacklist:
+        if n not in blacklist:
+            blacklist.append(n)
     dados["blacklist"] = blacklist
+
     salvar_alvos_espiao(dados)
-    await message.answer(f"✅ {len(novos)} IDs bloqueados na Lista Negra do Espião!")
+
+    await message.answer(f"✅ <b>Sucesso!</b>\n⛔ {len(novos_blacklist)} canal(is) adicionado(s) à Lista Negra.\n🗑️ {len(alvos_para_remover)} canal(is) removido(s) da escuta do Espião.", parse_mode="HTML")
     await menu_grupos_vigiados(message, state)
 
 @dp.message(EspiaoFluxo.aguardando_blacklist_remove)
