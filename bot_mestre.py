@@ -5059,7 +5059,6 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("📡 Acessando a lista de grupos vigiados do Espião...")
     
-    # ✅ CORREÇÃO: Utilizando a função central que acessa o banco SQLite e garante a persistência!
     dados = ler_alvos_espiao()
         
     alvos = dados.get("alvos", [])
@@ -5076,9 +5075,10 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
     else:
         display_destino = "<i>Não definido</i>"
         
-    # ✅ Destino no topo!
     texto += f"🎯 <b>Canal de Destino:</b> {display_destino}\n\n"
     texto += "📥 <b>Na Escuta:</b>\n"
+    
+    mensagens_para_enviar = []
     
     if alvos:
         cache_nomes_vigiados = ler_cache_nomes_grupos()
@@ -5095,12 +5095,26 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
                 status_ico = "❌"
                 detalhe = f"<code>{alvo}</code> - <i>Acesso negado/Link inválido</i>"
                 
-            # ✅ Alinhamento perfeito com 01, 02 e bloco monospace
-            texto += f"<code>{i:02d}.</code> {status_ico} {detalhe}\n"
+            linha = f"<code>{i:02d}.</code> {status_ico} {detalhe}\n"
+            
+            # Se o texto ultrapassar o limite seguro, quebra a mensagem e começa uma nova
+            if len(texto) + len(linha) > 3800:
+                mensagens_para_enviar.append(texto)
+                texto = "📥 <b>Na Escuta (Continuação):</b>\n"
+                
+            texto += linha
     else:
         texto += "<i>Nenhum grupo sendo monitorado no momento.</i>\n\n"
         
-    await message.answer(texto, reply_markup=teclado_opcoes_espiao, parse_mode="HTML")
+    mensagens_para_enviar.append(texto)
+    
+    # Envia as mensagens fatiadas, colocando o teclado apenas na última
+    for i, msg in enumerate(mensagens_para_enviar):
+        if i == len(mensagens_para_enviar) - 1:
+            await message.answer(msg, reply_markup=teclado_opcoes_espiao, parse_mode="HTML")
+        else:
+            await message.answer(msg, parse_mode="HTML")
+            
     await state.set_state(EspiaoFluxo.menu_principal)
 
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Adicionar Grupo ➕")
@@ -5229,9 +5243,24 @@ async def pedir_remocao_espiao(message: types.Message, state: FSMContext):
         return
     
     texto = "Qual alvo deseja excluir? Digite o <b>NÚMERO</b> correspondente.\n<i>(Para remover vários, separe por vírgula. Ex: 1, 3, 4)</i>\n\n"
+    
+    mensagens_para_enviar = []
+    
     for i, alvo in enumerate(alvos, 1):
-        texto += f"{i}. {alvo}\n"
-    await message.answer(texto, reply_markup=teclado_cancelar, parse_mode="HTML")
+        linha = f"{i}. {alvo}\n"
+        if len(texto) + len(linha) > 3800:
+            mensagens_para_enviar.append(texto)
+            texto = ""
+        texto += linha
+        
+    mensagens_para_enviar.append(texto)
+    
+    for i, msg in enumerate(mensagens_para_enviar):
+        if i == len(mensagens_para_enviar) - 1:
+            await message.answer(msg, reply_markup=teclado_cancelar, parse_mode="HTML")
+        else:
+            await message.answer(msg, parse_mode="HTML")
+            
     await state.set_state(EspiaoFluxo.aguardando_remocao_alvo)
 
 @dp.message(EspiaoFluxo.aguardando_remocao_alvo)
