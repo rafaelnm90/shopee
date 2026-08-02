@@ -457,7 +457,7 @@ teclado_opcoes_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Definir Destino 🎯")],
         [KeyboardButton(text="Adicionar Grupo ➕"), KeyboardButton(text="Remover Grupo 🗑️")],
-        [KeyboardButton(text="Listar Todos 📜")],
+        [KeyboardButton(text="Listar Todos 📜"), KeyboardButton(text="⚠️ Duplicados")],
         [KeyboardButton(text="Editar Janela 🕒"), KeyboardButton(text="Editar Atraso ⏳")],
         [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
     ],
@@ -5186,6 +5186,69 @@ async def listar_todos_espiao(message: types.Message, state: FSMContext):
     
     for msg in mensagens:
         await message.answer(msg, parse_mode="HTML")
+
+@dp.message(EspiaoFluxo.menu_principal, F.text == "⚠️ Duplicados")
+async def verificar_duplicados_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    
+    dados = ler_alvos_espiao()
+    alvos = dados.get("alvos", [])
+    
+    if len(alvos) < 2:
+        await message.answer("Não há grupos suficientes para procurar duplicados.")
+        return
+        
+    msg_status = await message.answer("⏳ Analisando a lista em busca de duplicados...")
+    
+    cache_nomes = ler_cache_nomes_grupos()
+    status_alvos = dados.get("status_alvos", {})
+    
+    lista_analise = []
+    for alvo in alvos:
+        alvo_str = str(alvo)
+        info = status_alvos.get(alvo_str, {})
+        nome = info.get("nome") or cache_nomes.get(alvo_str, alvo_str)
+        
+        is_num = alvo_str.lstrip("-").replace(":", "").isdigit()
+        base_id = alvo_str.split(":")[0].replace("-100", "").replace("-", "") if is_num else alvo_str.split(":")[0]
+        topic = alvo_str.split(":")[1] if ":" in alvo_str else "0"
+        
+        lista_analise.append({"original": alvo_str, "nome": nome, "is_num": is_num, "base_id": base_id, "topic": topic})
+
+    duplicados = []
+    pares_verificados = set()
+
+    for i in range(len(lista_analise)):
+        for j in range(i + 1, len(lista_analise)):
+            A = lista_analise[i]
+            B = lista_analise[j]
+            
+            par_key = tuple(sorted([A["original"], B["original"]]))
+            if par_key in pares_verificados: continue
+            pares_verificados.add(par_key)
+            
+            # Regra 1: Mesmo ID Base e Mesmo Tópico
+            if A["base_id"] == B["base_id"] and A["topic"] == B["topic"]:
+                duplicados.append((A, B, "Mesmo ID Base"))
+            # Regra 2: Mesmo Nome, mas um é Link (@) e o outro é ID Numérico
+            elif A["nome"] == B["nome"] and (A["is_num"] != B["is_num"]):
+                duplicados.append((A, B, "Mesmo nome (@Link vs ID)"))
+
+    await msg_status.delete()
+
+    if not duplicados:
+        await message.answer("✅ <b>Tudo limpo!</b>\nO sistema não detectou nenhum canal duplicado na sua lista.", parse_mode="HTML")
+        return
+        
+    texto = "⚠️ <b>Aviso: Possíveis Duplicados Detectados</b>\n\n"
+    for A, B, motivo in duplicados:
+        texto += f"🔹 <b>{A['nome']}</b>\n"
+        texto += f"   ├ <code>{A['original']}</code>\n"
+        texto += f"   └ <code>{B['original']}</code>\n"
+        texto += f"   <i>(Motivo: {motivo})</i>\n\n"
+        
+    texto += "💡 <i>Dica: Se um deles for um duplicado indesejado, vá em 'Remover Grupo' e exclua um dos IDs.</i>"
+    await message.answer(texto, parse_mode="HTML")
 
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Adicionar Grupo ➕")
 async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
