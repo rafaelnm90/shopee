@@ -3751,12 +3751,20 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 
     data = await state.get_data()
 
-    # 🔁 Roteamento Inteligente: Se estiver na confirmação de Zerar Filas Globais ou Reiniciar
-    if estado_atual in ["ConfigFluxo:aguardando_confirmacao_zerar_filas", "ConfigFluxo:aguardando_acao_limpeza", "ConfigFluxo:aguardando_confirmacao_reiniciar"]:
+    # 🔁 Roteamento Inteligente: Se estiver na CONFIRMAÇÃO de Limpeza, volta para a SELEÇÃO de Limpeza
+    if estado_atual == "ConfigFluxo:aguardando_acao_limpeza":
+        if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando à seleção de limpeza de filas.")
+        await message.answer("Exclusão cancelada.", reply_markup=types.ReplyKeyboardRemove())
+        # Chama a função de menu de limpeza diretamente para renderizar a tela novamente
+        await menu_zerar_filas_tarefas(message, state)
+        return
+        
+    # 🔁 Roteamento Inteligente: Se cancelar do menu de seleção ou do reinício, volta pro Servidor
+    if estado_atual in ["ConfigFluxo:aguardando_selecao_limpeza", "ConfigFluxo:aguardando_confirmacao_reiniciar"]:
         await state.clear()
         await message.answer("Ação cancelada. Nenhuma alteração foi feita no servidor.", reply_markup=obter_teclado_opcoes_servidor())
         return
-
+        
     # 🔁 Roteamento Inteligente: Se estiver no Gerenciador de Fila
     if estado_atual and estado_atual.startswith("GerenciarFilaFluxo"):
         await state.clear()
