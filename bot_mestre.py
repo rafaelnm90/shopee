@@ -2687,7 +2687,15 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         pendentes = fila_limpa
         
     elif tipo_fila == "Autorais":
-        pendentes = fila # Vídeos autorais são apagados na hora da postagem, então tudo o que está aqui é pendente.
+        # ✅ CORREÇÃO: O robô Autoral mantém os processados no banco. Filtramos apenas os pendentes!
+        fila_limpa = []
+        for item in fila:
+            # Pula vídeos antigos que já foram marcados como processados no SQLite
+            if item.get("processado", False) or item.get("processado") == 1:
+                continue 
+            fila_limpa.append(item)
+            
+        pendentes = fila_limpa
         
     elif tipo_fila == "Espelhador":
         import painel_espelhos
@@ -2820,13 +2828,14 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     # ✅ ORDENAÇÃO UNIVERSAL E INTELIGENTE (ESPIÃO E ESPELHADOR)
     def chave_ordenacao_universal(item):
         if item.get("processado", False) or item.get("processado") == 1:
-            return (0, item.get("horario_postagem", "00:00"))
+            return (0, str(item.get("horario_postagem", "00:00")))
         elif item.get("horario_disparo"):
-            return (1, item.get("horario_disparo"))
+            return (1, str(item.get("horario_disparo")))
         elif item.get("data_alvo"): # Específico para a Fila de Autorais
-            return (1, item.get("data_alvo") + " 10:00:00")
+            # 🛡️ TRAVA: Garante que data_alvo é uma string válida antes de concatenar
+            return (1, str(item.get("data_alvo")) + " 10:00:00")
         else:
-            return (2, item.get("data_captura", "2099-01-01 00:00:00"))
+            return (2, str(item.get("data_captura", "2099-01-01 00:00:00")))
 
     for nome_rota in rotas_agrupadas:
         rotas_agrupadas[nome_rota].sort(key=chave_ordenacao_universal)
