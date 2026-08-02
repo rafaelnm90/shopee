@@ -65,6 +65,7 @@ class EspelhadorFluxo(StatesGroup):
     aguardando_acao_blacklist = State()
     aguardando_blacklist_add = State()
     aguardando_blacklist_remove = State()
+    aguardando_confirmacao_blacklist_conflito = State()
 
 teclado_espelhador_menu = ReplyKeyboardMarkup(
     keyboard=[
@@ -155,7 +156,8 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         "EspelhadorFluxo:aguardando_confirmacao_remocao_origem",
         "EspelhadorFluxo:aguardando_acao_blacklist",
         "EspelhadorFluxo:aguardando_blacklist_add",
-        "EspelhadorFluxo:aguardando_blacklist_remove"
+        "EspelhadorFluxo:aguardando_blacklist_remove",
+        "EspelhadorFluxo:aguardando_confirmacao_blacklist_conflito" # ✅ ADICIONAR NA LISTA DE CANCELAMENTO
     ]
     
     if estado_atual in estados_origem:
@@ -1680,16 +1682,120 @@ async def acao_bl_espelhador(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.aguardando_blacklist_add)
 async def salvar_bl_add_espelhador(message: types.Message, state: FSMContext):
-    novos = [s.strip() for s in message.text.split(",")]
+    if message.text == "Cancelar Operação ❌":
+        return # O handler de cancelamento lá em cima já capta este botão
+
+    import re
+    texto = message.text
+    padroes = re.findall(r'(-100\d+(?::\d+)?|@\w+|https?://t\.me/[^\s\)]+|https?://web\.telegram\.org/[^\s\)]+)', texto)
+    if padroes: entradas_brutas = list(dict.fromkeys(padroes))
+    else: entradas_brutas = texto.replace('\n', ',').split(',')
+
+    msg_status = await message.answer("⏳ A validar IDs para a Lista Negra...", reply_markup=teclado_espelhador_cancelar)
+
     data = await state.get_data()
     idx = data.get("indice_edicao")
     dados = ler_espelhos()
-    bl = dados["rotas"][idx].get("blacklist", [])
-    for n in novos:
-        if n and n not in bl: bl.append(n)
-    dados["rotas"][idx]["blacklist"] = bl
+    rota_atual = dados["rotas"][idx]
+    origens_atuais = rota_atual.get("origens", [])
+    if not origens_atuais and 'origem' in rota_atual: origens_atuais = [rota_atual['origem']]
+    blacklist = rota_atual.get("blacklist", [])
+
+    novos_blacklist = []
+    conflitos = []
+
+    for entrada in entradas_brutas:
+        entrada_limpa = entrada.strip()
+        if not entrada_limpa: continue
+
+        sucesso, id_final, _ = await validar_e_formatar_alvo(bot_instance, entrada_limpa)
+        alvo_para_bl = id_final if sucesso else entrada_limpa
+
+        if alvo_para_bl not in novos_blacklist and alvo_para_bl not in blacklist:
+            novos_blacklist.append(alvo_para_bl)
+
+        id_base = alvo_para_bl.replace("-100", "").split(":")[0]
+        for alvo_monitorado in origens_atuais:
+            base_monitorado = str(alvo_monitorado).replace("-100", "").split(":")[0]
+            if id_base == base_monitorado and alvo_monitorado not in conflitos:
+                conflitos.append(alvo_monitorado)
+
+    await msg_status.delete()
+
+    if not novos_blacklist:
+        await message.answer("Nenhum canal válido detetado ou todos já estavam na Blacklist.")
+        novo_texto = str(idx + 1)
+        msg_simulada = message.model_copy(update={"text": novo_texto})
+        await selecionar_acao_edicao(msg_simulada, state)
+        return
+
+    if conflitos:
+        await state.update_data(novos_blacklist=novos_blacklist, alvos_para_remover=conflitos)
+        texto_aviso = (
+            f"⚠️ <b>Atenção: Conflito Detetado!</b>\n\n"
+            f"Você está a tentar adicionar canais à Lista Negra que <b>já estão a ser monitorizados</b> nesta rota.\n\n"
+            f"Canais que serão <b>AUTOMATICAMENTE REMOVIDOS</b> da escuta:\n"
+        )
+        for c in conflitos:
+            texto_aviso += f"🗑️ <code>{c}</code>\n"
+
+        texto_aviso += "\nDeseja aprovar a adição à Lista Negra e a exclusão destes canais da escuta da rota?"
+
+        teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True, is_persistent=True)
+        await message.answer(texto_aviso, reply_markup=teclado_conf, parse_mode="HTML")
+        await state.set_state(EspelhadorFluxo.aguardando_confirmacao_blacklist_conflito)
+    else:
+        for n in novos_blacklist:
+            blacklist.append(n)
+        dados["rotas"][idx]["blacklist"] = blacklist
+        salvar_espelhos(dados)
+        
+        teclado_origens = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
+                [KeyboardButton(text="📜 Listar Todos"), KeyboardButton(text="⚠️ Duplicados")],
+                [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        await message.answer(f"✅ <b>{len(novos_blacklist)} canal(is) bloqueado(s) na Lista Negra da rota!</b>", parse_mode="HTML", reply_markup=teclado_origens)
+        await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
+
+@router.message(EspelhadorFluxo.aguardando_confirmacao_blacklist_conflito)
+async def confirmar_blacklist_conflito_espelhador(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar ✅":
+        await message.answer("Operação cancelada.", reply_markup=teclado_espelhador_cancelar)
+        data = await state.get_data()
+        idx = data.get("indice_edicao")
+        novo_texto = str(idx + 1)
+        msg_simulada = message.model_copy(update={"text": novo_texto})
+        await selecionar_acao_edicao(msg_simulada, state)
+        return
+
+    data = await state.get_data()
+    idx = data.get("indice_edicao")
+    novos_blacklist = data.get("novos_blacklist", [])
+    alvos_para_remover = data.get("alvos_para_remover", [])
+
+    dados = ler_espelhos()
+    rota_atual = dados["rotas"][idx]
+    origens_atuais = rota_atual.get("origens", [])
+    if not origens_atuais and 'origem' in rota_atual: origens_atuais = [rota_atual['origem']]
+    blacklist = rota_atual.get("blacklist", [])
+
+    # Remove os conflitos da escuta
+    origens_atualizadas = [a for a in origens_atuais if a not in alvos_para_remover]
+    dados["rotas"][idx]["origens"] = origens_atualizadas
+    if "origem" in dados["rotas"][idx]: del dados["rotas"][idx]["origem"]
+
+    for n in novos_blacklist:
+        if n not in blacklist:
+            blacklist.append(n)
+    dados["rotas"][idx]["blacklist"] = blacklist
+
     salvar_espelhos(dados)
-    
+
     teclado_origens = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
@@ -1699,7 +1805,7 @@ async def salvar_bl_add_espelhador(message: types.Message, state: FSMContext):
         resize_keyboard=True,
         is_persistent=True
     )
-    await message.answer("✅ Blacklist da rota atualizada!", reply_markup=teclado_origens)
+    await message.answer(f"✅ <b>Sucesso!</b>\n⛔ {len(novos_blacklist)} canal(is) adicionado(s) à Lista Negra.\n🗑️ {len(alvos_para_remover)} canal(is) removido(s) da escuta da rota.", parse_mode="HTML", reply_markup=teclado_origens)
     await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
 
 @router.message(EspelhadorFluxo.aguardando_blacklist_remove)
