@@ -145,14 +145,17 @@ def obter_teclado_importacao_espelhador():
 @router.message(F.text.in_(["Cancelar Operação ❌", "Voltar ao Menu Espelho 🔙"]), StateFilter("*"))
 async def cancelar_espelhador(message: types.Message, state: FSMContext):
     estado_atual = await state.get_state()
-    data = await state.get_data() # ✅ ESSA É A LINHA QUE FALTAVA!
+    data = await state.get_data()
     
-    # --- NÍVEL 3: Submenu de Origens (Volta para os botões Adicionar/Remover Origem) ---
+    # --- NÍVEL 3: Submenu de Origens (Volta para os botões Adicionar/Remover/Blacklist) ---
     estados_origem = [
         "EspelhadorFluxo:aguardando_nova_origem",
         "EspelhadorFluxo:aguardando_confirmacao_nova_origem",
         "EspelhadorFluxo:aguardando_remocao_origem",
-        "EspelhadorFluxo:aguardando_confirmacao_remocao_origem"
+        "EspelhadorFluxo:aguardando_confirmacao_remocao_origem",
+        "EspelhadorFluxo:aguardando_acao_blacklist",
+        "EspelhadorFluxo:aguardando_blacklist_add",
+        "EspelhadorFluxo:aguardando_blacklist_remove"
     ]
     
     if estado_atual in estados_origem:
@@ -160,6 +163,7 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         teclado_origens = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
+                [KeyboardButton(text="Lista Negra (Blacklist) ⛔")],
                 [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
             ],
             resize_keyboard=True,
@@ -169,7 +173,7 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
         return
 
-    # --- NÍVEL 2: Submenu de Edição da Rota (Volta para os 8 botões de configuração) ---
+    # --- NÍVEL 2: Submenu de Edição da Rota (Volta para os botões de configuração) ---
     estados_edicao = [
         "EspelhadorFluxo:aguardando_acao_origem", # Cancelando de dentro do menu de origens
         "EspelhadorFluxo:aguardando_edicao_novo_nome",
@@ -745,18 +749,16 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
             status_ico = "❌" if info_o.get("status") == "erro" else "✅"
             nome_o = info_o.get("nome") or cache_nomes.get(str(o), str(o))
             display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
-            # ✅ Alinhamento perfeito com 01, 02
             texto += f"<code>{idx + 1:02d}.</code> {status_ico} {display_o}\n"
         
         texto += "\nEscolha a ação que deseja realizar:"
         
-        # ✅ BUG CORRIGIDO AQUI: Trocado "Editar Origens" por "Canais Vigiados"
+        # ✅ Menu limpo sem Blacklist (Foi para dentro de Canais Vigiados)
         teclado_submenu = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="📝 Editar Nome"), KeyboardButton(text="🔀 Modificar Modo")],
                 [KeyboardButton(text="🎯 Editar Destino"), KeyboardButton(text="📥 Canais Vigiados")],
                 [KeyboardButton(text="🕒 Modificar Janela"), KeyboardButton(text="📅 Modificar Dias")],
-                [KeyboardButton(text="Lista Negra (Blacklist) ⛔")],
                 [KeyboardButton(text="Voltar ao Menu Espelho 🔙")]
             ],
             resize_keyboard=True,
@@ -818,6 +820,7 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
         teclado_origens = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
+                [KeyboardButton(text="Lista Negra (Blacklist) ⛔")],
                 [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
             ],
             resize_keyboard=True,
@@ -825,17 +828,6 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
         )
         await message.answer("O que você deseja fazer com os canais monitorados desta rota?", reply_markup=teclado_origens)
         await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
-    elif texto == "Lista Negra (Blacklist) ⛔":
-        data = await state.get_data()
-        rota = ler_espelhos()["rotas"][data.get("indice_edicao")]
-        bl = rota.get("blacklist", [])
-        txt = f"⛔ <b>Lista Negra da Rota '{rota['nome']}'</b>\n"
-        if bl:
-            for i, b in enumerate(bl, 1): txt += f"{i}. <code>{b}</code>\n"
-        else: txt += "<i>Nenhuma restrição cadastrada.</i>\n"
-        tcl = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Rem. da Blacklist")], [KeyboardButton(text="Voltar ao Menu Espelho 🔙")]], resize_keyboard=True)
-        await message.answer(txt, reply_markup=tcl, parse_mode="HTML")
-        await state.set_state(EspelhadorFluxo.aguardando_acao_blacklist)
     else:
         await message.answer("Use os botões do menu para escolher a ação.")
 
@@ -864,6 +856,17 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
             
         await message.answer(msg_txt, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_remocao_origem)
+    elif texto == "Lista Negra (Blacklist) ⛔":
+        data = await state.get_data()
+        rota = ler_espelhos()["rotas"][data.get("indice_edicao")]
+        bl = rota.get("blacklist", [])
+        txt = f"⛔ <b>Lista Negra da Rota '{rota['nome']}'</b>\n"
+        if bl:
+            for i, b in enumerate(bl, 1): txt += f"{i}. <code>{b}</code>\n"
+        else: txt += "<i>Nenhuma restrição cadastrada.</i>\n"
+        tcl = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Rem. da Blacklist")], [KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True, is_persistent=True)
+        await message.answer(txt, reply_markup=tcl, parse_mode="HTML")
+        await state.set_state(EspelhadorFluxo.aguardando_acao_blacklist)
     elif texto == "🔙 Voltar ao Menu de Edição":
         data = await state.get_data()
         novo_texto = str(data.get("indice_edicao") + 1)
@@ -1380,9 +1383,18 @@ async def salvar_bl_add_espelhador(message: types.Message, state: FSMContext):
         if n and n not in bl: bl.append(n)
     dados["rotas"][idx]["blacklist"] = bl
     salvar_espelhos(dados)
-    await message.answer("✅ Blacklist da rota atualizada!")
-    msg_simulada = message.model_copy(update={"text": str(idx + 1)})
-    await selecionar_acao_edicao(msg_simulada, state)
+    
+    teclado_origens = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
+            [KeyboardButton(text="Lista Negra (Blacklist) ⛔")],
+            [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer("✅ Blacklist da rota atualizada!", reply_markup=teclado_origens)
+    await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
 
 @router.message(EspelhadorFluxo.aguardando_blacklist_remove)
 async def salvar_bl_rem_espelhador(message: types.Message, state: FSMContext):
@@ -1393,6 +1405,15 @@ async def salvar_bl_rem_espelhador(message: types.Message, state: FSMContext):
     bl = dados["rotas"][idx].get("blacklist", [])
     dados["rotas"][idx]["blacklist"] = [b for b in bl if b not in remover]
     salvar_espelhos(dados)
-    await message.answer("✅ Blacklist da rota atualizada!")
-    msg_simulada = message.model_copy(update={"text": str(idx + 1)})
-    await selecionar_acao_edicao(msg_simulada, state)
+    
+    teclado_origens = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
+            [KeyboardButton(text="Lista Negra (Blacklist) ⛔")],
+            [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer("✅ Blacklist da rota atualizada!", reply_markup=teclado_origens)
+    await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
