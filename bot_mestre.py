@@ -2589,19 +2589,21 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             conexao = sqlite3.connect("banco_dados.db")
             conexao.row_factory = sqlite3.Row
             cursor = conexao.cursor()
-            cursor.execute("SELECT * FROM fila_autorais ORDER BY data_alvo ASC")
+            cursor.execute("SELECT * FROM fila_autorais ORDER BY data_alvo ASC, horario_disparo ASC")
             linhas = cursor.fetchall()
             conexao.close()
             
             fila = []
             for linha in linhas:
                 fila.append({
-                    "id": str(linha["id"]),
+                    "id": str(linha["id_unico"]),
                     "msg_id_destino": linha["msg_id_destino"],
                     "legenda": linha["legenda"],
                     "caminho_video": linha["caminho_arquivo"],
+                    "data_captura": linha["data_captura"],
                     "data_alvo": linha["data_alvo"],
-                    "processado": False
+                    "horario_disparo": linha["horario_disparo"],
+                    "processado": bool(linha["processado"])
                 })
         except Exception as e:
             fila = []
@@ -2913,14 +2915,6 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 
                 # 2. Enganamos o motor injetando "📦 Item: " na legenda para ele exibir no '└ Nome:'
                 v["legenda"] = f"📦 Item: {nome_produto[:45]}\n{legenda}"
-                
-                data_alvo_str = v.get("data_alvo")
-                try:
-                    data_alvo_obj = datetime.strptime(data_alvo_str, "%Y-%m-%d")
-                    data_cap_obj = data_alvo_obj - timedelta(days=atraso_dias_rota)
-                    v["data_captura"] = data_cap_obj.strftime("%Y-%m-%d 00:00:00")
-                    v["horario_disparo"] = data_alvo_str 
-                except: pass
                 
                 nome_origem = cache_nomes.get(origem_bruta, origem_bruta)
                 display_origem = f"📦 Acervo: {nome_origem[:20]}"
