@@ -47,9 +47,10 @@ def extrair_link_shopee(event):
     if EXIBIR_LOGS: logger.info("⏭️ Nenhum link válido da Shopee encontrado.")
     return None
 
-# ✅ Importando os Módulos Centrais de IA e Shopee
+## ✅ Importando os Módulos Centrais de IA e Shopee
 from api_gemini import analisar_video_gemini
 from api_shopee import converter_link_shopee
+from motor_filas import calcular_horarios_distribuicao # ⚙️ Motor Central Importado
 
 # As chaves da Shopee e do Gemini foram movidas para os módulos centrais.
 
@@ -112,38 +113,61 @@ def ler_fila_retorno():
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
+        
+        # Prevenção: Cria a tabela caso o init não tenha rodado
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS fila_autorais (
+                id_unico TEXT PRIMARY KEY,
+                msg_id_destino INTEGER,
+                legenda TEXT,
+                caminho_arquivo TEXT,
+                data_captura TEXT,
+                data_alvo TEXT,
+                horario_disparo TEXT,
+                processado INTEGER DEFAULT 0
+            )
+        ''')
         cursor.execute("SELECT * FROM fila_autorais")
         linhas = cursor.fetchall()
         conexao.close()
         
-        dados = {}
+        fila = []
         for linha in linhas:
-            dt = linha["data_alvo"]
-            if dt not in dados:
-                dados[dt] = []
-            dados[dt].append({
+            fila.append({
+                "id_unico": linha["id_unico"],
                 "msg_id_destino": linha["msg_id_destino"],
                 "legenda": linha["legenda"],
-                "caminho_arquivo": linha["caminho_arquivo"]
+                "caminho_arquivo": linha["caminho_arquivo"],
+                "data_captura": linha["data_captura"],
+                "data_alvo": linha["data_alvo"],
+                "horario_disparo": linha["horario_disparo"],
+                "processado": bool(linha["processado"])
             })
-        return dados
+        return {"fila": fila}
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila_autorais do SQLite: {e}")
-        return {}
+        return {"fila": []}
 
 def salvar_fila_retorno(dados):
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
         
-        # Limpa e reconstrói a tabela baseada na memória manipulada para garantir integridade
         cursor.execute("DELETE FROM fila_autorais")
-        for dt, lista in dados.items():
-            for item in lista:
-                cursor.execute('''
-                    INSERT INTO fila_autorais (msg_id_destino, legenda, caminho_arquivo, data_alvo)
-                    VALUES (?, ?, ?, ?)
-                ''', (item.get("msg_id_destino"), item.get("legenda"), item.get("caminho_arquivo"), dt))
+        for item in dados.get("fila", []):
+            cursor.execute('''
+                INSERT INTO fila_autorais (id_unico, msg_id_destino, legenda, caminho_arquivo, data_captura, data_alvo, horario_disparo, processado)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                item.get("id_unico"), 
+                item.get("msg_id_destino"), 
+                item.get("legenda"), 
+                item.get("caminho_arquivo"), 
+                item.get("data_captura"), 
+                item.get("data_alvo"), 
+                item.get("horario_disparo", ""), 
+                1 if item.get("processado") else 0
+            ))
         conexao.commit()
         conexao.close()
     except Exception as e:
@@ -322,19 +346,27 @@ async def interceptar_e_espelhar(event):
                 dias_retorno = config_atual.get('dias_retorno', 15)
                 limite_videos = config_atual.get('limite_videos', 5)
                 
-                data_alvo = (datetime.now() + timedelta(days=dias_retorno)).strftime("%Y-%m-%d")
+                agora = datetime.now()
+                data_alvo = (agora + timedelta(days=dias_retorno)).strftime("%Y-%m-%d")
+                
                 fila_dados = ler_fila_retorno()
-                if data_alvo not in fila_dados:
-                    fila_dados[data_alvo] = []
-                    
-                if len(fila_dados[data_alvo]) < limite_videos:
+                videos_no_dia = len([v for v in fila_dados.get("fila", []) if v.get("data_alvo") == data_alvo and not v.get("processado")])
+                
+                if videos_no_dia < limite_videos:
                     novo_caminho = f"archive/{os.path.basename(caminho_video)}"
                     os.rename(caminho_video, novo_caminho)
                     
-                    fila_dados[data_alvo].append({
+                    id_unico = f"autoral_{int(agora.timestamp())}_{random.randint(1000, 9999)}"
+                    
+                    fila_dados.setdefault("fila", []).append({
+                        "id_unico": id_unico,
                         "msg_id_destino": msg_enviada.id,
                         "legenda": texto_convertido,
-                        "caminho_arquivo": novo_caminho 
+                        "caminho_arquivo": novo_caminho,
+                        "data_captura": agora.strftime("%Y-%m-%d %H:%M:%S"),
+                        "data_alvo": data_alvo,
+                        "horario_disparo": "",
+                        "processado": False
                     })
                     salvar_fila_retorno(fila_dados)
                     if EXIBIR_LOGS: logger.info(f"📅 Vídeo arquivado em 'archive/' para retorno no dia {data_alvo}.")
@@ -357,76 +389,103 @@ async def interceptar_e_espelhar(event):
                     except Exception:
                         pass
 
-async def executar_postagem_retorno(caminho_arquivo, legenda):
-    if EXIBIR_LOGS: logger.info(f"🚀 [Fluxo] Iniciando retorno do vídeo arquivado: {caminho_arquivo}")
-    try:
-        config_atualizada = carregar_config_autorais() # Lê a configuração em tempo real para o retorno
-        if os.path.exists(caminho_arquivo):
-            await client.send_file(
-                config_atualizada['origem'],
-                file=caminho_arquivo,
-                caption=legenda,
-                parse_mode='md'
-            )
-            if EXIBIR_LOGS: logger.info("✅ Vídeo de retorno publicado com sucesso no grupo de origem!")
-            
-            os.remove(caminho_arquivo)
-            if EXIBIR_LOGS: logger.info("🧹 Ficheiro arquivado removido após postagem final.")
-        else:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Ficheiro de arquivo não encontrado em {caminho_arquivo}. A postagem falhou.")
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Falha no disparo de retorno: {e}")
-
-def agendar_tarefas_diarias():
-    if EXIBIR_LOGS: logger.info("🗓️ A verificar a agenda de retornos do dia...")
+async def processar_fila_autorais_loop():
+    if EXIBIR_LOGS: logger.info("🚀 [Motor Autorais] Loop de processamento autônomo iniciado.")
     
-    # ✅ VERIFICAÇÃO DE PAUSA: Se estiver pausado, empurra os vídeos de hoje para amanhã!
-    config_atual = carregar_config_autorais()
-    if config_atual.get("pausar_robo_completo", False) or config_atual.get("pausar_repostagem", False):
-        if EXIBIR_LOGS: logger.info("🛑 Retornos cancelados hoje: O sistema está pausado. Os vídeos serão empurrados para amanhã.")
-        
-        hoje_str = datetime.now().strftime("%Y-%m-%d")
-        amanha_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-        
-        fila_dados = ler_fila_retorno()
-        if hoje_str in fila_dados and fila_dados[hoje_str]:
-            if amanha_str not in fila_dados:
-                fila_dados[amanha_str] = []
-            # Move os vídeos de hoje para amanhã
-            fila_dados[amanha_str].extend(fila_dados[hoje_str])
-            del fila_dados[hoje_str]
-            salvar_fila_retorno(fila_dados)
-        return
-
-    hoje_str = datetime.now().strftime("%Y-%m-%d")
-    fila_dados = ler_fila_retorno()
-    videos_hoje = fila_dados.get(hoje_str, [])
-
-    if not videos_hoje:
-        if EXIBIR_LOGS: logger.info("♻️ Nenhum vídeo antigo agendado para retornar hoje.")
-        return
-
-    random.shuffle(videos_hoje)
-    agora = datetime.now()
-    
-    for i, video in enumerate(videos_hoje):
-        hora_sorteio = random.randint(10, 20)
-        minuto_sorteio = random.randint(0, 59)
-        horario_disparo = agora.replace(hour=hora_sorteio, minute=minuto_sorteio, second=0, microsecond=0)
-        
-        if horario_disparo < agora:
-            horario_disparo = agora + timedelta(minutes=random.randint(5, 45))
+    while True:
+        try:
+            fila_dados = ler_fila_retorno()
+            fila = fila_dados.get("fila", [])
             
-        scheduler.add_job(
-            executar_postagem_retorno, 
-            'date', 
-            run_date=horario_disparo, 
-            args=[video.get("caminho_arquivo", ""), video.get("legenda", "")] 
-        )
-        if EXIBIR_LOGS: logger.info(f"⏳ Vídeo de retorno {i+1} agendado para as {horario_disparo.strftime('%H:%M')}.")
+            if not fila:
+                await asyncio.sleep(60)
+                continue
+                
+            config_atual = carregar_config_autorais()
+            
+            # Se pausado, não processa postagens (empurra organicamente)
+            if config_atual.get("pausar_robo_completo", False) or config_atual.get("pausar_repostagem", False):
+                await asyncio.sleep(60)
+                continue
 
-    del fila_dados[hoje_str]
-    salvar_fila_retorno(fila_dados)
+            agora = datetime.now()
+            hoje_str = agora.strftime("%Y-%m-%d")
+            
+            # --- 1. MOTOR MATEMÁTICO DE DISTRIBUIÇÃO ---
+            itens_desagendados = []
+            for item in fila:
+                if item.get("processado"): continue
+                
+                # Se ainda não tem horário disparado e a data_alvo já chegou
+                if not item.get("horario_disparo") and item.get("data_alvo") <= hoje_str:
+                    itens_desagendados.append(item)
+                    
+            if itens_desagendados:
+                # Regras fixas de negócio para os Autorais
+                config_fila = {
+                    "inicio": 10,
+                    "fim": 20,
+                    "modo": "aleatorio", # Vídeos de retorno misturam-se naturalmente
+                    "intervalo_dias": 0  # 0 pois a data_alvo já confere o atraso de meses
+                }
+                
+                if EXIBIR_LOGS: logger.info(f"⚙️ [Motor Autorais] Acionando Motor Central para {len(itens_desagendados)} vídeos de retorno...")
+                calcular_horarios_distribuicao(itens_desagendados, config_fila, forcar=False)
+                salvar_fila_retorno(fila_dados)
+
+            # --- 2. EXECUÇÃO DOS DISPAROS (Catraca do Motor) ---
+            houve_disparo = False
+            itens_restantes = []
+            
+            for item in fila:
+                if item.get("processado"):
+                    itens_restantes.append(item)
+                    continue
+                    
+                hd_str = item.get("horario_disparo")
+                deve_disparar = False
+                
+                if hd_str:
+                    try:
+                        hd_obj = datetime.strptime(hd_str, "%Y-%m-%d %H:%M:%S")
+                        if agora >= hd_obj:
+                            deve_disparar = True
+                    except: pass
+                    
+                if deve_disparar:
+                    caminho_arquivo = item.get("caminho_arquivo")
+                    legenda = item.get("legenda")
+                    
+                    try:
+                        if os.path.exists(caminho_arquivo):
+                            await client.send_file(
+                                config_atual['origem'],
+                                file=caminho_arquivo,
+                                caption=legenda,
+                                parse_mode='md'
+                            )
+                            if EXIBIR_LOGS: logger.info(f"✅ [Motor Autorais] Vídeo de retorno {item.get('id_unico')} publicado com sucesso!")
+                            
+                            os.remove(caminho_arquivo)
+                            if EXIBIR_LOGS: logger.info("🧹 Ficheiro arquivado removido após postagem final.")
+                        else:
+                            if EXIBIR_LOGS: logger.warning(f"⚠️ Ficheiro arquivado não encontrado em {caminho_arquivo}.")
+                    except Exception as e:
+                        if EXIBIR_LOGS: logger.error(f"❌ Falha no disparo de retorno: {e}")
+                        
+                    item["processado"] = True
+                    houve_disparo = True
+                    
+                itens_restantes.append(item)
+                
+            if houve_disparo:
+                fila_dados["fila"] = itens_restantes
+                salvar_fila_retorno(fila_dados)
+
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro no loop de postagem de autorais: {e}")
+            
+        await asyncio.sleep(60) # Respira 1 minuto e volta a procurar
 
 async def main():
     if EXIBIR_LOGS: logger.info("⏳ Iniciando o robô Espelhador Isolado...")
@@ -453,9 +512,8 @@ async def main():
     except Exception as e:
         if EXIBIR_LOGS: logger.warning(f"⚠️ Aviso na sincronização: {e}")
 
-    scheduler.add_job(agendar_tarefas_diarias, 'cron', hour=1, minute=0)
-    agendar_tarefas_diarias()
-    scheduler.start()
+    # Aciona o Loop do motor em Background
+    asyncio.create_task(processar_fila_autorais_loop())
     
     if EXIBIR_LOGS: logger.info("🤖 Sistema a rodar. A escutar o grupo de origem continuamente...")
     await client.run_until_disconnected()
