@@ -5472,7 +5472,7 @@ async def confirmar_adicao_alvo_espiao(message: types.Message, state: FSMContext
 async def acao_blacklist_espiao(message: types.Message, state: FSMContext):
     if message.text == "➕ Add à Blacklist":
         texto_bl = (
-            "Envie os @usernames, links ou IDs dos canais que deseja <b>BLOQUEAR</b> no Espião.\n"
+            "Envie os @usernames, links ou IDs dos canais que deseja <b>BLOQUEAR</b> no Espião.\n\n"
             "OBS: Você pode enviar vários separando por vírgula (Ex: @grupo1, -100123, https://t.me/grupo2, https://web.telegram.org/a/#-1002856422690):\n\n"
             "<blockquote>💡 <b>Dica:</b> Você pode colar uma lista inteira. O robô irá ignorar formatos inválidos e bloquear os corretos automaticamente.</blockquote>"
         )
