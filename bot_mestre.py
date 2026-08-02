@@ -2687,13 +2687,37 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         pendentes = fila_limpa
         
     elif tipo_fila == "Autorais":
-        # ✅ CORREÇÃO: O robô Autoral mantém os processados no banco. Filtramos apenas os pendentes!
         fila_limpa = []
-        for item in fila:
-            # Pula vídeos antigos que já foram marcados como processados no SQLite
-            if item.get("processado", False) or item.get("processado") == 1:
-                continue 
-            fila_limpa.append(item)
+        hoje_str = agora.strftime("%Y-%m-%d")
+        houve_alteracao = False
+        
+        try:
+            conexao = sqlite3.connect("banco_dados.db")
+            cursor = conexao.cursor()
+            
+            for item in fila:
+                if item.get("processado", False) or item.get("processado") == 1:
+                    # O robô autoral usa o horario_disparo para marcar o momento exato da postagem
+                    horario_disp = item.get("horario_disparo", "")
+                    
+                    # Se foi postado hoje, mantém ele vivo para aparecer no relatório!
+                    if horario_disp and horario_disp.startswith(hoje_str):
+                        if EXIBIR_LOGS: logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo autoral postado hoje ({item.get('id')}) no visual da fila.")
+                        fila_limpa.append(item)
+                    else:
+                        # Se já virou o dia, apaga o registro do banco de dados para não acumular
+                        cursor.execute("DELETE FROM fila_autorais WHERE id_unico = ?", (item["id"],))
+                        houve_alteracao = True
+                    continue
+                
+                # Se for pendente, continua na lista normalmente
+                fila_limpa.append(item)
+                
+            if houve_alteracao:
+                conexao.commit()
+            conexao.close()
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro no pente fino da fila_autorais: {e}")
             
         pendentes = fila_limpa
         
@@ -4435,34 +4459,32 @@ async def confirmar_zerar_filas_tarefas(message: types.Message, state: FSMContex
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("⚠️ Solicitando seleção do tipo de limpeza de filas.")
     
-    # ✅ CORREÇÃO: Botão da Fila Principal removido para proteger o banco de dados
     teclado_opcoes_limpeza = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Limpar Tudo (Geral) 💥")],
             [KeyboardButton(text="Limpar Fila do Espião 🕵️"), KeyboardButton(text="Limpar Fila Espelhador 🔄")],
-            [KeyboardButton(text="Cancelar ❌")]
+            [KeyboardButton(text="Limpar Fila Autorais 🎥"), KeyboardButton(text="Cancelar ❌")]
         ],
         resize_keyboard=True,
         is_persistent=True
     )
     
-    # ✅ CORREÇÃO: Texto explicativo detalhando exatamente o que é apagado
     texto = (
         "🧹 <b>CENTRAL DE LIMPEZA DO SERVIDOR</b>\n\n"
         "Escolha qual módulo você deseja esvaziar. As suas configurações do robô (textos, horários, alvos) <b>nunca</b> são apagadas.\n\n"
         "🛡️ <i>Nota: A Fila Principal (SQLite) está protegida e nunca será apagada por este menu.</i>\n\n"
         "👉 <b>Fila Espião:</b> Apaga clones retidos no radar e exclui os arquivos de vídeo do servidor.\n"
-        "👉 <b>Fila Espelhador:</b> Apaga a repassagem de vídeos entre canais e seus respectivos vídeos físicos.\n"
-        "👉 <b>Geral:</b> Esvazia o Espião, o Espelhador, apaga o lixo da pasta temporária, exclui backups (.bkp) antigos e limpa os logs de sistema do servidor Ubuntu."
+        "👉 <b>Fila Espelhador:</b> Apaga a repassagem de vídeos pendentes e seus respectivos arquivos.\n"
+        "👉 <b>Fila Autorais:</b> Apaga os vídeos de retorno pendentes no banco de dados e arquivos físicos.\n"
+        "👉 <b>Geral:</b> Esvazia o Espião, Espelhador, Autorais, apaga o lixo temporário, exclui backups e limpa logs do Ubuntu."
     )
     await message.answer(texto, reply_markup=teclado_opcoes_limpeza, parse_mode="HTML")
     await state.set_state(ConfigFluxo.aguardando_confirmacao_zerar_filas)
 
 @dp.message(ConfigFluxo.aguardando_confirmacao_zerar_filas)
 async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContext):
-    # ✅ CORREÇÃO: Fila Principal removida das opções válidas
     opcoes_validas = [
-        "Limpar Tudo (Geral) 💥", "Limpar Fila do Espião 🕵️", "Limpar Fila Espelhador 🔄"
+        "Limpar Tudo (Geral) 💥", "Limpar Fila do Espião 🕵️", "Limpar Fila Espelhador 🔄", "Limpar Fila Autorais 🎥"
     ]
 
     if message.text == "Cancelar ❌":
@@ -4476,14 +4498,15 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
     msg_status = await message.answer(f"🧹 <b>Executando: {message.text}...</b> Isso pode levar alguns segundos. ⏳", reply_markup=teclado_cancelar, parse_mode="HTML")
     if EXIBIR_LOGS: logger.info(f"🚀 Iniciando protocolo de limpeza modular: {message.text}")
     
-    # Flags de execução baseadas na escolha do usuário (Fila Principal removida da verificação)
     limpar_tudo = message.text == "Limpar Tudo (Geral) 💥"
     limpar_espiao = message.text == "Limpar Fila do Espião 🕵️" or limpar_tudo
     limpar_espelhador = message.text == "Limpar Fila Espelhador 🔄" or limpar_tudo
+    limpar_autorais = message.text == "Limpar Fila Autorais 🎥" or limpar_tudo
 
     relatorio = {
         "espiao": 0,
         "espelhador": 0,
+        "autorais": 0,
         "arquivos": 0,
         "espaco_mb": 0.0
     }
@@ -4491,7 +4514,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
     def apagar_arquivo(caminho):
         if caminho and os.path.exists(caminho):
             try:
-                tamanho = os.path.getsize(caminho) / (1024 * 1024) # Converte bytes para MB
+                tamanho = os.path.getsize(caminho) / (1024 * 1024)
                 os.remove(caminho)
                 relatorio["arquivos"] += 1
                 relatorio["espaco_mb"] += tamanho
@@ -4503,6 +4526,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
             fila_clonagem = ler_fila_clonagem()
             mantidos_espiao = []
             for item in fila_clonagem.get("fila", []):
+                # O BOT MANTÉM OS VÍDEOS PROCESSADOS, APAGANDO APENAS OS PENDENTES
                 if item.get("processado"):
                     mantidos_espiao.append(item)
                 else:
@@ -4533,7 +4557,27 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro ao limpar Fila do Espelhador: {e}")
 
-    # 3. Faxina Cega na Pasta Temp (Sempre roda para matar arquivos soltos)
+    # 3. Limpar Fila de Autorais
+    if limpar_autorais:
+        try:
+            conexao = sqlite3.connect("banco_dados.db")
+            cursor = conexao.cursor()
+            
+            # Puxa apenas os vídeos que NÃO foram processados para apagar fisicamente
+            cursor.execute("SELECT caminho_arquivo FROM fila_autorais WHERE processado = 0")
+            para_apagar = cursor.fetchall()
+            for item in para_apagar:
+                apagar_arquivo(item[0])
+                relatorio["autorais"] += 1
+                
+            # Deleta os registros pendentes do banco
+            cursor.execute("DELETE FROM fila_autorais WHERE processado = 0")
+            conexao.commit()
+            conexao.close()
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro ao limpar Fila de Autorais: {e}")
+
+    # 4. Faxina Cega na Pasta Temp
     try:
         if os.path.exists("temp"):
             for filename in os.listdir("temp"):
@@ -4543,7 +4587,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao esvaziar pasta temp: {e}")
 
-    # 4. Apagar arquivos de backup (.bkp) na raiz
+    # 5. Apagar arquivos de backup (.bkp) na raiz
     if limpar_tudo:
         try:
             for filename in os.listdir("."):
@@ -4552,11 +4596,11 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro ao tentar apagar arquivos de backup: {e}")
 
-    # 5. Limpeza de Logs do Servidor Linux
+    # 6. Limpeza de Logs do Servidor Linux
     status_ubuntu = "Não executada"
     if limpar_tudo:
         try:
-            if EXIBIR_LOGS: logger.info("🖥️ Acionando terminal Linux para limpeza de logs do journalctl...")
+            if EXIBIR_LOGS: logger.info("🖥️ Acionando terminal Linux para limpeza de logs...")
             comando_linux = await asyncio.create_subprocess_exec(
                 "sudo", "journalctl", "--vacuum-time=2d",
                 stdout=asyncio.subprocess.PIPE,
@@ -4566,32 +4610,28 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
             
             if comando_linux.returncode == 0:
                 status_ubuntu = "✅ Concluída (Mantendo últimos 2 dias)"
-                if EXIBIR_LOGS: logger.info("✅ Logs do Ubuntu limpos com sucesso.")
             else:
                 status_ubuntu = "⚠️ Falha de permissão (sudo)"
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível limpar journalctl: {stderr.decode().strip()}")
         except Exception as e:
             status_ubuntu = "❌ Erro ao acessar terminal"
-            if EXIBIR_LOGS: logger.error(f"❌ Erro na execução do journalctl: {e}")
 
     await msg_status.delete()
     
-    # ✅ CORREÇÃO: Relatório final limpo sem mencionar a fila principal
     texto_final = (
         "✨ <b>Operação Concluída!</b>\n\n"
         "Relatório de eliminação:\n"
         f"🗑️ <b>{relatorio['espiao']}</b> clones do Espião\n"
         f"🗑️ <b>{relatorio['espelhador']}</b> itens do Espelhador\n"
+        f"🗑️ <b>{relatorio['autorais']}</b> vídeos de Autorais\n"
         f"🧹 <b>{relatorio['arquivos']}</b> ficheiros físicos temporários apagados\n"
         f"💾 <b>{relatorio['espaco_mb']:.2f} MB</b> liberados no servidor!\n"
     )
     
     if limpar_tudo:
-        texto_final += f"\n🖥️ <b>Limpeza do Sistema Operacional:</b>\nLogs do Ubuntu: {status_ubuntu}\n"
+        texto_final += f"\n🖥️ <b>Limpeza do SO:</b>\nLogs do Ubuntu: {status_ubuntu}\n"
         
     texto_final += "\nO seu ambiente de trabalho está atualizado."
     
-    if EXIBIR_LOGS: logger.info(f"✅ Faxina concluída ({message.text}). {relatorio['espaco_mb']:.2f} MB liberados.")
     await message.answer(texto_final, parse_mode="HTML", reply_markup=obter_teclado_opcoes_servidor())
     await state.clear()
 
