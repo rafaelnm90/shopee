@@ -344,7 +344,7 @@ async def receber_destino_criacao(message: types.Message, state: FSMContext):
         texto_origens = (
             f"✅ Destino confirmado: <code>{destino_id}</code>\n\n"
             "Agora, envie os @usernames, links ou IDs dos grupos/canais que deseja <b>MONITORAR</b> (Na Escuta).\n"
-            "Você pode enviar vários separando por vírgula (Ex: <code>@grupo1, -100123, https://t.me/grupo2</code>):"
+            "OBS: Você pode enviar vários separando por vírgula (Ex: <code>@grupo1, -100123, https://t.me/grupo2</code>):"
         )
         await message.answer(texto_origens, reply_markup=obter_teclado_importacao_espelhador(), parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_origem_criacao)
