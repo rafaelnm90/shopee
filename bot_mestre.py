@@ -5204,16 +5204,28 @@ async def verificar_duplicados_espiao(message: types.Message, state: FSMContext)
     status_alvos = dados.get("status_alvos", {})
     
     lista_analise = []
-    for alvo in alvos:
+    # Usar enumerate(alvos, 1) para guardar a posição real do canal na lista de remoção
+    for index, alvo in enumerate(alvos, 1):
         alvo_str = str(alvo)
         info = status_alvos.get(alvo_str, {})
         nome = info.get("nome") or cache_nomes.get(alvo_str, alvo_str)
+        
+        # Puxa o status para definir o ícone (✅ ou ❌)
+        status_ico = "❌" if info.get("status") == "erro" else "✅"
         
         is_num = alvo_str.lstrip("-").replace(":", "").isdigit()
         base_id = alvo_str.split(":")[0].replace("-100", "").replace("-", "") if is_num else alvo_str.split(":")[0]
         topic = alvo_str.split(":")[1] if ":" in alvo_str else "0"
         
-        lista_analise.append({"original": alvo_str, "nome": nome, "is_num": is_num, "base_id": base_id, "topic": topic})
+        lista_analise.append({
+            "index": index,
+            "original": alvo_str,
+            "nome": nome,
+            "is_num": is_num,
+            "base_id": base_id,
+            "topic": topic,
+            "status_ico": status_ico
+        })
 
     duplicados = []
     pares_verificados = set()
@@ -5243,8 +5255,8 @@ async def verificar_duplicados_espiao(message: types.Message, state: FSMContext)
     texto = "⚠️ <b>Aviso: Possíveis Duplicados Detectados</b>\n\n"
     for A, B, motivo in duplicados:
         texto += f"🔹 <b>{A['nome']}</b>\n"
-        texto += f"   ├ <code>{A['original']}</code>\n"
-        texto += f"   └ <code>{B['original']}</code>\n"
+        texto += f"   ├ <b>{A['index']}.</b> {A['status_ico']} <code>{A['original']}</code>\n"
+        texto += f"   └ <b>{B['index']}.</b> {B['status_ico']} <code>{B['original']}</code>\n"
         texto += f"   <i>(Motivo: {motivo})</i>\n\n"
         
     texto += "💡 <i>Dica: Se um deles for um duplicado indesejado, vá em 'Remover Grupo' e exclua um dos IDs.</i>"
