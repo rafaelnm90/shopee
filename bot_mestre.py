@@ -5165,7 +5165,7 @@ async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
     )
     await message.answer(
         "Envie os @usernames, links ou IDs dos grupos que deseja monitorar como ORIGEM.\n"
-        "Você pode enviar vários separando por vírgula (Ex: @grupo1, -100123, https://t.me/grupo2):\n\n"
+        "OBS: Você pode enviar vários separando por vírgula (Ex: @grupo1, -100123, https://t.me/grupo2):\n\n"
         "<blockquote>💡 <b>Dica:</b> Você pode colar uma lista ou clicar no botão abaixo para puxar o <b>Banco Global</b> (o robô ignorará os grupos duplicados e os da Lista Negra automaticamente).</blockquote>", 
         reply_markup=teclado_dinamico, 
         parse_mode="HTML"
