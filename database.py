@@ -81,14 +81,17 @@ def inicializar_banco():
         )
     ''')
 
-    # 5. Fila de Retorno / Autorais (Substitui fila_retorno.json)
+    # 5. Fila de Retorno / Autorais (Padronizada com o Motor Central)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS fila_autorais (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id_unico TEXT PRIMARY KEY,
             msg_id_destino INTEGER,
             legenda TEXT,
             caminho_arquivo TEXT,
-            data_alvo TEXT
+            data_captura TEXT,
+            data_alvo TEXT,
+            horario_disparo TEXT,
+            processado INTEGER DEFAULT 0
         )
     ''')
 
