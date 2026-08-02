@@ -260,51 +260,56 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
             texto += f"🎯 <b>Canal de Destino:</b> {status_destino_ico} {display_d}\n\n"
 
             # --- 2. ORIGENS MOSTRADAS LOGO ABAIXO ---
-            origens = rota.get('origens', [])
-            if not origens and 'origem' in rota:
-                origens = [rota['origem']]
-                
-            texto += f"📥 <b>Na escuta:</b>\n"
+        origens = rota_alvo.get('origens', [])
+        if not origens and 'origem' in rota_alvo:
+            origens = [rota_alvo['origem']]
             
-            linhas_origem = []
-            for idx, o in enumerate(origens):
-                info_o = status_canais.get(str(o), {})
-                if isinstance(info_o, str): info_o = {"status": info_o, "nome": str(o)}
-                
-                status_ico = "❌" if info_o.get("status") == "erro" else "✅"
-                nome_o = info_o.get("nome") or cache_nomes.get(str(o), str(o))
-                display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
-                
-                linhas_origem.append({
-                    "texto": f"<code>{idx + 1:02d}.</code> {status_ico} {display_o}\n",
-                    "tem_erro": status_ico == "❌"
-                })
+        texto += f"📥 <b>Na escuta ({len(origens)}):</b>\n"
+        
+        linhas_origem = []
+        for idx, o in enumerate(origens):
+            info_o = status_canais.get(str(o), {})
+            if isinstance(info_o, str): info_o = {"status": info_o, "nome": str(o)}
+            
+            status_ico = "❌" if info_o.get("status") == "erro" else "✅"
+            nome_o = info_o.get("nome") or cache_nomes.get(str(o), str(o))
+            display_o = f"{nome_o} (<code>{o}</code>)" if nome_o != str(o) else f"<code>{o}</code>"
+            
+            linhas_origem.append({
+                "texto": f"<code>{idx + 1:02d}.</code> {status_ico} {display_o}\n",
+                "tem_erro": status_ico == "❌"
+            })
 
-            total_origens = len(linhas_origem)
-            if total_origens <= 15:
-                for linha in linhas_origem:
-                    texto += linha["texto"]
-            else:
-                for idx in range(5):
+        total_origens = len(linhas_origem)
+        
+        # Lógica de Ocultação Inteligente (Muralha Anti-Crash)
+        if total_origens <= 15:
+            for linha in linhas_origem:
+                texto += linha["texto"]
+        else:
+            # Mostra os 5 primeiros
+            for idx in range(5):
+                texto += linhas_origem[idx]["texto"]
+
+            ocultos_ok = 0
+            # Varre o meio da lista ocultando os OKs e exibindo apenas os ERROS
+            for idx in range(5, total_origens - 5):
+                if linhas_origem[idx]["tem_erro"]:
+                    if ocultos_ok > 0:
+                        texto += f"   <i>... e mais {ocultos_ok} canais operando normalmente ...</i>\n"
+                        ocultos_ok = 0
                     texto += linhas_origem[idx]["texto"]
+                else:
+                    ocultos_ok += 1
 
-                ocultos_ok = 0
-                for idx in range(5, total_origens - 5):
-                    if linhas_origem[idx]["tem_erro"]:
-                        if ocultos_ok > 0:
-                            texto += f"   <i>... e mais {ocultos_ok} canais operando normalmente ...</i>\n"
-                            ocultos_ok = 0
-                        texto += linhas_origem[idx]["texto"]
-                    else:
-                        ocultos_ok += 1
+            if ocultos_ok > 0:
+                texto += f"   <i>... e mais {ocultos_ok} canais operando normalmente ...</i>\n"
 
-                if ocultos_ok > 0:
-                    texto += f"   <i>... e mais {ocultos_ok} canais operando normalmente ...</i>\n"
-
-                for idx in range(total_origens - 5, total_origens):
-                    texto += linhas_origem[idx]["texto"]
-                    
-            texto += "\n"
+            # Mostra os 5 últimos
+            for idx in range(total_origens - 5, total_origens):
+                texto += linhas_origem[idx]["texto"]
+        
+        texto += "\nEscolha a ação que deseja realizar:"
             
         # ✅ NOVO: Salva as alterações no banco de dados se a autocura rodou
         if houve_alteracao:
