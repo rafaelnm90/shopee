@@ -355,7 +355,9 @@ async def receber_destino_criacao(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.aguardando_origem_criacao)
 async def receber_origem_criacao(message: types.Message, state: FSMContext):
     texto = message.text
-    if texto == "Importar Banco Global 🌍":
+    is_importacao_global = texto == "Importar Banco Global 🌍"
+    
+    if is_importacao_global:
         msg_status = await message.answer("⏳ <b>Importando Banco Global...</b>", parse_mode="HTML", reply_markup=teclado_espelhador_cancelar)
         from utils import obter_banco_global_origens
         entradas_brutas = obter_banco_global_origens()
@@ -370,66 +372,72 @@ async def receber_origem_criacao(message: types.Message, state: FSMContext):
         else: entradas_brutas = texto.replace('\n', ',').split(',')
         msg_status = await message.answer("⏳ Validando lote de canais de origem e subgrupos...", reply_markup=teclado_espelhador_cancelar)
     
-    # Puxa o destino que foi salvo no Passo 1 da criação
     data = await state.get_data()
     destino_atual = str(data.get("destino", ""))
     
     origens_validas = []
     origens_duplicadas = []
     origens_invalidas = []
-    origens_em_loop = [] # 🛑 Nova lista para a trava anti-loop
+    origens_em_loop = [] 
     
     for entrada in entradas_brutas:
-            entrada_limpa = entrada.strip()
-            if not entrada_limpa: continue
-            
+        entrada_limpa = entrada.strip()
+        if not entrada_limpa: continue
+        
+        # Pula a rede se vier do Banco Global
+        if is_importacao_global:
+            sucesso = True
+            id_final = entrada_limpa
+            nome = entrada_limpa
+        else:
             sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada_limpa)
-            
-            if sucesso:
-                id_base = id_final.replace("-100", "")
-                
-                # ⛔ Verifica Blacklist
-                if id_final in blacklist or id_base in [b.replace("-100", "") for b in blacklist]:
-                    origens_invalidas.append(f"{entrada_limpa} (Blacklist ⛔)")
-                # 🛑 Trava Anti-Loop: Bloqueia se a origem for igual ao destino da rota
-                elif destino_atual and id_base == destino_atual.replace("-100", ""):
-                    origens_em_loop.append(entrada_limpa)
-                # ℹ️ Verifica Duplicidade
-                elif id_final in origens_atuais or id_final in [o['id'] for o in origens_validas]:
-                    origens_duplicadas.append(entrada_limpa)
-                # ✅ Adiciona nova origem válida
-                else:
-                    salvar_nome_grupo(id_final, nome)
-                    origens_validas.append({"id": id_final, "nome": nome})
+        
+        if sucesso:
+            id_base = id_final.replace("-100", "")
+            if destino_atual and id_base == destino_atual.replace("-100", ""):
+                origens_em_loop.append(entrada_limpa)
+            elif id_final in [o['id'] for o in origens_validas]:
+                origens_duplicadas.append(entrada_limpa)
             else:
-                origens_invalidas.append(entrada_limpa)
+                if not is_importacao_global:
+                    salvar_nome_grupo(id_final, nome)
+                origens_validas.append({"id": id_final, "nome": nome})
+        else:
+            origens_invalidas.append(entrada_limpa)
 
     await msg_status.delete()
-    
     texto_resposta = ""
 
     if origens_validas:
         texto_resposta += f"✅ <b>{len(origens_validas)} Origem(ns) validada(s):</b>\n"
-        for o in origens_validas:
-            texto_resposta += f"🔹 <code>{o}</code>\n"
+        for o in origens_validas[:15]:
+            texto_resposta += f"🔹 <code>{o['id']}</code>\n"
+        if len(origens_validas) > 15:
+            texto_resposta += f"<i>... e mais {len(origens_validas) - 15} canais.</i>\n"
         texto_resposta += "\n"
 
     if origens_em_loop:
-        texto_resposta += f"🛑 <b>{len(origens_em_loop)} bloqueada(s) por Anti-Loop (É o destino desta rota):</b>\n"
-        for loop in origens_em_loop:
+        texto_resposta += f"🛑 <b>{len(origens_em_loop)} bloqueada(s) por Anti-Loop:</b>\n"
+        for loop in origens_em_loop[:10]:
             texto_resposta += f"🔻 <code>{loop}</code>\n"
+        if len(origens_em_loop) > 10:
+            texto_resposta += f"<i>... e mais {len(origens_em_loop) - 10} canais.</i>\n"
         texto_resposta += "\n"
 
     if origens_duplicadas:
-        texto_resposta += f"ℹ️ <b>{len(origens_duplicadas)} repetida(s) no envio (Duplicadas):</b>\n"
-        for dup in origens_duplicadas:
+        texto_resposta += f"ℹ️ <b>{len(origens_duplicadas)} repetida(s) no envio:</b>\n"
+        for dup in origens_duplicadas[:10]:
             texto_resposta += f"🔸 <code>{dup}</code>\n"
+        if len(origens_duplicadas) > 10:
+            texto_resposta += f"<i>... e mais {len(origens_duplicadas) - 10} canais.</i>\n"
         texto_resposta += "\n"
 
     if origens_invalidas:
-        texto_resposta += f"❌ <b>{len(origens_invalidas)} falharam (Formato inválido ou link Privado):</b>\n"
-        for rej in origens_invalidas:
+        texto_resposta += f"❌ <b>{len(origens_invalidas)} falharam (Formato inválido/Link Privado):</b>\n"
+        for rej in origens_invalidas[:10]:
             texto_resposta += f"🔻 <code>{rej}</code>\n"
+        if len(origens_invalidas) > 10:
+            texto_resposta += f"<i>... e mais {len(origens_invalidas) - 10} canais.</i>\n"
         texto_resposta += "\n"
     
     if origens_validas:
@@ -441,6 +449,131 @@ async def receber_origem_criacao(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.warning("❌ Nenhuma origem válida encontrada no lote.")
         texto_resposta += "⚠️ <b>Nenhum canal válido aprovado!</b>\nCertifique-se de que os IDs não são links de convite privados ou iguais ao destino.\n\nTente enviar novamente:"
         await message.answer(texto_resposta, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+
+
+@router.message(EspelhadorFluxo.aguardando_nova_origem)
+async def confirmar_nova_origem(message: types.Message, state: FSMContext):
+    texto = message.text
+    data = await state.get_data()
+    indice = data.get("indice_edicao")
+    dados = ler_espelhos()
+    rota_atual = dados["rotas"][indice]
+    
+    if texto == "Lista Negra (Blacklist) ⛔":
+        bl = rota_atual.get("blacklist", [])
+        txt = f"⛔ <b>Lista Negra da Rota '{rota_atual['nome']}'</b>\n"
+        if bl:
+            for i, b in enumerate(bl, 1): txt += f"{i}. <code>{b}</code>\n"
+        else: txt += "<i>Nenhuma restrição cadastrada.</i>\n"
+        tcl = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Rem. da Blacklist")], [KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True)
+        await message.answer(txt, reply_markup=tcl, parse_mode="HTML")
+        await state.set_state(EspelhadorFluxo.aguardando_acao_blacklist)
+        return
+        
+    origens_atuais = rota_atual.get('origens', [])
+    if not origens_atuais and 'origem' in rota_atual: origens_atuais = [rota_atual['origem']]
+    destino_atual = str(rota_atual.get("destino", ""))
+    blacklist = [str(b) for b in rota_atual.get("blacklist", [])]
+    
+    is_importacao_global = texto == "Importar Banco Global 🌍"
+    
+    if is_importacao_global:
+        msg_status = await message.answer("⏳ <b>Importando e cruzando Banco Global com a Lista Negra da rota...</b>", parse_mode="HTML", reply_markup=teclado_espelhador_cancelar)
+        from utils import obter_banco_global_origens
+        entradas_brutas = obter_banco_global_origens()
+        if not entradas_brutas:
+            await msg_status.delete()
+            await message.answer("⚠️ Banco Global vazio.")
+            return
+    else:
+        import re
+        padroes = re.findall(r'(-100\d+(?::\d+)?|@\w+|https?://t\.me/[^\s\)]+)', texto)
+        if padroes: entradas_brutas = list(dict.fromkeys(padroes))
+        else: entradas_brutas = texto.replace('\n', ',').split(',')
+        msg_status = await message.answer("⏳ Validando grupos...", reply_markup=teclado_espelhador_cancelar)
+
+    origens_validas = []
+    origens_duplicadas = []
+    origens_invalidas = []
+    origens_em_loop = [] 
+
+    for entrada in entradas_brutas:
+        entrada_limpa = entrada.strip()
+        if not entrada_limpa: continue
+        
+        if is_importacao_global:
+            sucesso = True
+            id_final = entrada_limpa
+            nome = entrada_limpa
+        else:
+            sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada_limpa)
+            
+        if sucesso:
+            id_base = id_final.replace("-100", "")
+            
+            if id_final in blacklist or id_base in [b.replace("-100", "") for b in blacklist]:
+                origens_invalidas.append(f"{entrada_limpa} (Blacklist ⛔)")
+            elif destino_atual and id_base == destino_atual.replace("-100", ""):
+                origens_em_loop.append(entrada_limpa)
+            elif id_final in origens_atuais or id_final in [o['id'] for o in origens_validas]:
+                origens_duplicadas.append(entrada_limpa)
+            else:
+                if not is_importacao_global:
+                    salvar_nome_grupo(id_final, nome)
+                origens_validas.append({"id": id_final, "nome": nome})
+        else:
+            origens_invalidas.append(entrada_limpa)
+
+    await msg_status.delete()
+    texto_resumo = ""
+
+    if origens_validas:
+        texto_resumo += f"✅ <b>{len(origens_validas)} NOVO(S) canal(is) validado(s):</b>\n"
+        for o in origens_validas[:15]:
+            texto_resumo += f"🔹 {o['nome']} (<code>{o['id']}</code>)\n"
+        if len(origens_validas) > 15:
+            texto_resumo += f"<i>... e mais {len(origens_validas) - 15} canais.</i>\n"
+        texto_resumo += "\n"
+
+    if origens_em_loop:
+        texto_resumo += f"🛑 <b>{len(origens_em_loop)} bloqueada(s) por Anti-Loop:</b>\n"
+        for loop in origens_em_loop[:10]:
+            texto_resumo += f"🔻 <code>{loop}</code>\n"
+        if len(origens_em_loop) > 10:
+            texto_resumo += f"<i>... e mais {len(origens_em_loop) - 10} canais.</i>\n"
+        texto_resumo += "\n"
+
+    if origens_duplicadas:
+        texto_resumo += f"ℹ️ <b>{len(origens_duplicadas)} ignorado(s) por já estarem na rota:</b>\n"
+        for dup in origens_duplicadas[:10]:
+            texto_resumo += f"🔸 <code>{dup}</code>\n"
+        if len(origens_duplicadas) > 10:
+            texto_resumo += f"<i>... e mais {len(origens_duplicadas) - 10} canais.</i>\n"
+        texto_resumo += "\n"
+
+    if origens_invalidas:
+        texto_resumo += f"❌ <b>{len(origens_invalidas)} falharam (Formato inválido/Blacklist):</b>\n"
+        for rej in origens_invalidas[:10]:
+            texto_resumo += f"🔻 <code>{rej}</code>\n"
+        if len(origens_invalidas) > 10:
+            texto_resumo += f"<i>... e mais {len(origens_invalidas) - 10} canais.</i>\n"
+        texto_resumo += "\n"
+
+    if not origens_validas:
+        texto_resumo += "⚠️ <b>Nenhum canal novo foi aprovado.</b> Tente novamente:"
+        await message.answer(texto_resumo, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+        return
+
+    await state.update_data(origens_para_adicionar=origens_validas)
+    
+    if len(dados.get("rotas", [])) > 1:
+        texto_resumo += f"O seu sistema possui <b>{len(dados['rotas'])} rotas ativas</b>. Onde deseja adicionar?"
+        await message.answer(texto_resumo, reply_markup=teclado_espelhador_abrangencia, parse_mode="HTML")
+    else:
+        texto_resumo += f"Deseja adicionar à rota <b>{rota_atual['nome']}</b>?"
+        await message.answer(texto_resumo, reply_markup=teclado_espelhador_confirmacao, parse_mode="HTML")
+    
+    await state.set_state(EspelhadorFluxo.aguardando_confirmacao_nova_origem)
 
 @router.message(EspelhadorFluxo.aguardando_janela)
 async def receber_janela_rota(message: types.Message, state: FSMContext):
