@@ -62,6 +62,9 @@ class EspelhadorFluxo(StatesGroup):
     aguardando_confirmacao_remocao_origem = State()
     aguardando_rota_esvaziar = State()
     aguardando_confirmacao_esvaziar = State()
+    aguardando_acao_blacklist = State()
+    aguardando_blacklist_add = State()
+    aguardando_blacklist_remove = State()
 
 teclado_espelhador_menu = ReplyKeyboardMarkup(
     keyboard=[
@@ -134,6 +137,9 @@ def ler_contador_espelhador(nome_rota):
 def salvar_espelhos(dados):
     with open("espelhos_config.json", "w") as f:
         json.dump(dados, f, indent=4)
+
+def obter_teclado_importacao_espelhador():
+    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Importar Banco Global 🌍")], [KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True, is_persistent=True)
 
 # --- NAVEGAÇÃO E PAINEL ---
 @router.message(F.text.in_(["Cancelar Operação ❌", "Voltar ao Menu Espelho 🔙"]), StateFilter("*"))
@@ -336,7 +342,7 @@ async def receber_destino_criacao(message: types.Message, state: FSMContext):
             "Agora, envie os @usernames, links ou IDs dos grupos/canais que deseja <b>MONITORAR</b> (Na Escuta).\n"
             "Você pode enviar vários separando por vírgula (Ex: <code>@grupo1, -100123, https://t.me/grupo2</code>):"
         )
-        await message.answer(texto_origens, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+        await message.answer(texto_origens, reply_markup=obter_teclado_importacao_espelhador(), parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_origem_criacao)
     else:
         if EXIBIR_LOGS: logger.warning(f"⚠️ Falha na validação do destino: {message.text}")
@@ -344,8 +350,21 @@ async def receber_destino_criacao(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.aguardando_origem_criacao)
 async def receber_origem_criacao(message: types.Message, state: FSMContext):
-    msg_status = await message.answer("⏳ Validando lote de canais de origem e subgrupos...", reply_markup=teclado_espelhador_cancelar)
-    entradas_brutas = message.text.replace('\n', ',').split(',')
+    texto = message.text
+    if texto == "Importar Banco Global 🌍":
+        msg_status = await message.answer("⏳ <b>Importando Banco Global...</b>", parse_mode="HTML", reply_markup=teclado_espelhador_cancelar)
+        from utils import obter_banco_global_origens
+        entradas_brutas = obter_banco_global_origens()
+        if not entradas_brutas:
+            await msg_status.delete()
+            await message.answer("⚠️ O Banco Global está vazio.")
+            return
+    else:
+        import re
+        padroes = re.findall(r'(-100\d+(?::\d+)?|@\w+|https?://t\.me/[^\s\)]+)', texto)
+        if padroes: entradas_brutas = list(dict.fromkeys(padroes))
+        else: entradas_brutas = texto.replace('\n', ',').split(',')
+        msg_status = await message.answer("⏳ Validando lote de canais de origem e subgrupos...", reply_markup=teclado_espelhador_cancelar)
     
     # Puxa o destino que foi salvo no Passo 1 da criação
     data = await state.get_data()
@@ -730,6 +749,7 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
                 [KeyboardButton(text="📝 Editar Nome"), KeyboardButton(text="🔀 Modificar Modo")],
                 [KeyboardButton(text="🎯 Editar Destino"), KeyboardButton(text="📥 Canais Vigiados")],
                 [KeyboardButton(text="🕒 Modificar Janela"), KeyboardButton(text="📅 Modificar Dias")],
+                [KeyboardButton(text="Lista Negra (Blacklist) ⛔")],
                 [KeyboardButton(text="Voltar ao Menu Espelho 🔙")]
             ],
             resize_keyboard=True,
@@ -798,15 +818,26 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
         )
         await message.answer("O que você deseja fazer com os canais monitorados desta rota?", reply_markup=teclado_origens)
         await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
+    elif texto == "Lista Negra (Blacklist) ⛔":
+        data = await state.get_data()
+        rota = ler_espelhos()["rotas"][data.get("indice_edicao")]
+        bl = rota.get("blacklist", [])
+        txt = f"⛔ <b>Lista Negra da Rota '{rota['nome']}'</b>\n"
+        if bl:
+            for i, b in enumerate(bl, 1): txt += f"{i}. <code>{b}</code>\n"
+        else: txt += "<i>Nenhuma restrição cadastrada.</i>\n"
+        tcl = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Rem. da Blacklist")], [KeyboardButton(text="Voltar ao Menu Espelho 🔙")]], resize_keyboard=True)
+        await message.answer(txt, reply_markup=tcl, parse_mode="HTML")
+        await state.set_state(EspelhadorFluxo.aguardando_acao_blacklist)
     else:
-        await message.answer("Use os botões do menu para escolher a ação.", reply_markup=teclado_espelhador_cancelar)
+        await message.answer("Use os botões do menu para escolher a ação.")
 
 # ✅ NOVA FUNÇÃO PARA PROCESSAR O SUBMENU
 @router.message(EspelhadorFluxo.aguardando_acao_origem)
 async def processar_acao_origem(message: types.Message, state: FSMContext):
     texto = message.text
     if texto == "➕ Adicionar Canal":
-        await message.answer("Envie os @usernames, links ou IDs dos grupos/canais adicionais que deseja <b>MONITORAR</b>.\nVocê pode enviar vários separando por vírgula (Ex: <code>@grupo1, -100123, https://t.me/grupo2</code>):", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
+        await message.answer("Envie os canais adicionais que deseja monitorar...\nOu use o botão abaixo para importar o Banco Global:", reply_markup=obter_teclado_importacao_espelhador(), parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_nova_origem)
     elif texto == "🗑️ Remover Canal":
         data = await state.get_data()
@@ -1020,26 +1051,48 @@ async def salvar_edicao_modo(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.aguardando_nova_origem)
 async def confirmar_nova_origem(message: types.Message, state: FSMContext):
-    entradas_brutas = message.text.replace('\n', ',').split(',')
-    
-    origens_validas = []
-    origens_duplicadas = []
-    origens_invalidas = []
-    origens_em_loop = [] # 🛑 Nova lista para a trava anti-loop
-    
-    msg_status = await message.answer("⏳ Validando links, subgrupos e buscando nomes...", reply_markup=teclado_espelhador_cancelar)
-    
-    # Puxa os dados da rota atual para saber o que JÁ ESTÁ cadastrado e qual é o Destino
+    texto = message.text
     data = await state.get_data()
     indice = data.get("indice_edicao")
     dados = ler_espelhos()
-    rotas = dados.get("rotas", [])
-    rota_atual = rotas[indice]
+    rota_atual = dados["rotas"][indice]
+    
     origens_atuais = rota_atual.get('origens', [])
     if not origens_atuais and 'origem' in rota_atual: origens_atuais = [rota_atual['origem']]
     destino_atual = str(rota_atual.get("destino", ""))
+    blacklist = [str(b) for b in rota_atual.get("blacklist", [])]
     
+    if texto == "Importar Banco Global 🌍":
+        msg_status = await message.answer("⏳ <b>Importando e cruzando Banco Global com a Lista Negra da rota...</b>", parse_mode="HTML", reply_markup=teclado_espelhador_cancelar)
+        from utils import obter_banco_global_origens
+        entradas_brutas = obter_banco_global_origens()
+        if not entradas_brutas:
+            await msg_status.delete()
+            await message.answer("⚠️ Banco Global vazio.")
+            return
+    else:
+        import re
+        padroes = re.findall(r'(-100\d+(?::\d+)?|@\w+|https?://t\.me/[^\s\)]+)', texto)
+        if padroes: entradas_brutas = list(dict.fromkeys(padroes))
+        else: entradas_brutas = texto.replace('\n', ',').split(',')
+        msg_status = await message.answer("⏳ Validando grupos...", reply_markup=teclado_espelhador_cancelar)
+
+    origens_validas = []
+    origens_duplicadas = []
+    origens_invalidas = []
+    origens_em_loop = [] 
+
     for entrada in entradas_brutas:
+        entrada_limpa = entrada.strip()
+        if not entrada_limpa: continue
+        
+        sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada_limpa)
+        
+        if sucesso:
+            id_base = id_final.replace("-100", "")
+            if id_final in blacklist or id_base in [b.replace("-100", "") for b in blacklist]:
+                origens_invalidas.append(f"{entrada_limpa} (Blacklist ⛔)")
+            elif destino_atual and id_final.replace("-100", "") == destino_atual.replace("-100", ""):
         entrada_limpa = entrada.strip()
         if not entrada_limpa: continue
         
@@ -1303,3 +1356,39 @@ async def processar_esvaziar_fila(message: types.Message, state: FSMContext):
         
     await state.clear()
 
+@router.message(EspelhadorFluxo.aguardando_acao_blacklist)
+async def acao_bl_espelhador(message: types.Message, state: FSMContext):
+    if message.text == "➕ Add à Blacklist":
+        await message.answer("Envie o(s) ID(s) para BLOQUEAR NESTA ROTA (separados por vírgula):", reply_markup=teclado_espelhador_cancelar)
+        await state.set_state(EspelhadorFluxo.aguardando_blacklist_add)
+    elif message.text == "🗑️ Rem. da Blacklist":
+        await message.answer("Envie os IDs para LIBERAR NESTA ROTA (separados por vírgula):", reply_markup=teclado_espelhador_cancelar)
+        await state.set_state(EspelhadorFluxo.aguardando_blacklist_remove)
+
+@router.message(EspelhadorFluxo.aguardando_blacklist_add)
+async def salvar_bl_add_espelhador(message: types.Message, state: FSMContext):
+    novos = [s.strip() for s in message.text.split(",")]
+    data = await state.get_data()
+    idx = data.get("indice_edicao")
+    dados = ler_espelhos()
+    bl = dados["rotas"][idx].get("blacklist", [])
+    for n in novos:
+        if n and n not in bl: bl.append(n)
+    dados["rotas"][idx]["blacklist"] = bl
+    salvar_espelhos(dados)
+    await message.answer("✅ Blacklist da rota atualizada!")
+    msg_simulada = message.model_copy(update={"text": str(idx + 1)})
+    await selecionar_acao_edicao(msg_simulada, state)
+
+@router.message(EspelhadorFluxo.aguardando_blacklist_remove)
+async def salvar_bl_rem_espelhador(message: types.Message, state: FSMContext):
+    remover = [s.strip() for s in message.text.split(",")]
+    data = await state.get_data()
+    idx = data.get("indice_edicao")
+    dados = ler_espelhos()
+    bl = dados["rotas"][idx].get("blacklist", [])
+    dados["rotas"][idx]["blacklist"] = [b for b in bl if b not in remover]
+    salvar_espelhos(dados)
+    await message.answer("✅ Blacklist da rota atualizada!")
+    msg_simulada = message.model_copy(update={"text": str(idx + 1)})
+    await selecionar_acao_edicao(msg_simulada, state)
