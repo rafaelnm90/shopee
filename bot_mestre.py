@@ -2881,6 +2881,28 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 
                 link_final_exibicao = link_telegram
                 
+                # ✅ NOVO: Extrair o nome do produto da legenda
+                legenda = v.get("legenda", "")
+                import re
+                
+                # Tenta primeiro extrair se estiver no formato "📦 Item: Nome"
+                match_item = re.search(r'📦\s*Item:\s*([^\n<]+)', legenda)
+                if match_item:
+                    nome_produto = match_item.group(1).strip()
+                else:
+                    # Se não tiver "📦 Item:", pega a primeira linha limpa (ignorando HTML)
+                    legenda_limpa = re.sub(r'<[^>]+>', '', legenda).strip()
+                    primeira_linha = legenda_limpa.split('\n')[0] if legenda_limpa else ""
+                    
+                    # Remove o prefixo "Vídeo X |" se existir
+                    match_video = re.search(r'(?i)Vídeo\s+\d+\s*\|\s*(.+)', primeira_linha)
+                    if match_video:
+                        nome_produto = match_video.group(1).strip()
+                    else:
+                        nome_produto = primeira_linha if primeira_linha else "Sem nome"
+                        
+                v["nome_origem"] = nome_produto # O motor usa 'nome_origem' para exibir o nome do item no layout
+                
                 data_alvo_str = v.get("data_alvo")
                 try:
                     data_alvo_obj = datetime.strptime(data_alvo_str, "%Y-%m-%d")
