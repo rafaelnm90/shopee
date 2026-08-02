@@ -844,7 +844,13 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
             resize_keyboard=True, 
             is_persistent=True
         )
-        await message.answer("Envie os canais adicionais que deseja monitorar...\nOu use as opções abaixo:", reply_markup=teclado_dinamico, parse_mode="HTML")
+        await message.answer(
+            "Envie os @usernames, links ou IDs dos grupos que deseja monitorar como ORIGEM.\n"
+            "OBS: Você pode enviar vários separando por vírgula (Ex: @grupo1, -100123, https://t.me/grupo2):\n\n"
+            "<blockquote>💡 <b>Dica:</b> Você pode colar uma lista ou clicar no botão abaixo para puxar o <b>Banco Global</b> (o robô ignorará os grupos duplicados e os da Lista Negra automaticamente).</blockquote>", 
+            reply_markup=teclado_dinamico, 
+            parse_mode="HTML"
+        )
         await state.set_state(EspelhadorFluxo.aguardando_nova_origem)
         
     elif texto == "🗑️ Remover Canal":
