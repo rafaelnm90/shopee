@@ -5173,8 +5173,12 @@ async def listar_todos_espiao(message: types.Message, state: FSMContext):
     
     for i, alvo in enumerate(alvos, 1):
         info = status_alvos.get(str(alvo), {})
+        
+        # Puxa o status para definir o ícone (✅ ou ❌)
+        status_ico = "❌" if info.get("status") == "erro" else "✅"
+        
         nome = info.get("nome") or cache_nomes.get(str(alvo), str(alvo))
-        linha = f"<b>{i}.</b> {nome} (<code>{alvo}</code>)\n"
+        linha = f"<b>{i}.</b> {status_ico} {nome} (<code>{alvo}</code>)\n"
         
         # Quebra a mensagem se ficar muito grande para o limite do Telegram
         if len(texto) + len(linha) > 3800:
