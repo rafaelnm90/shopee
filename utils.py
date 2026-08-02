@@ -190,3 +190,43 @@ async def validar_e_formatar_alvo(bot_instance, entrada):
                   return True, id_final, chat_base # Retorna o próprio ID no lugar do nome
 
         return False, entrada, None
+
+def obter_banco_global_origens():
+    """Varre todos os bancos de dados e junta todos os IDs monitorados no sistema."""
+    origens_globais = set()
+    try:
+        conexao = obter_conexao_utils()
+        cursor = conexao.cursor()
+        
+        # 1. Puxa do Espião
+        cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'alvos_espiao'")
+        res = cursor.fetchone()
+        if res:
+            dados_espiao = json.loads(res[0])
+            for alvo in dados_espiao.get("alvos", []):
+                origens_globais.add(str(alvo))
+                
+        # 2. Puxa de Autorais
+        cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'autorais_config'")
+        res = cursor.fetchone()
+        if res:
+            dados_aut = json.loads(res[0])
+            origem = dados_aut.get("origem")
+            if origem and str(origem) not in ["Não definida", "Não definido"]:
+                origens_globais.add(str(origem))
+                
+        conexao.close()
+    except Exception: pass
+    
+    # 3. Puxa do Espelhador (JSON)
+    try:
+        with open("espelhos_config.json", "r", encoding="utf-8") as f:
+            dados_espelhos = json.load(f)
+            for rota in dados_espelhos.get("rotas", []):
+                for o in rota.get("origens", []):
+                    origens_globais.add(str(o))
+                if "origem" in rota:
+                    origens_globais.add(str(rota["origem"]))
+    except Exception: pass
+    
+    return list(origens_globais)
