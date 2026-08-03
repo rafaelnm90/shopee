@@ -66,6 +66,8 @@ class EspelhadorFluxo(StatesGroup):
     aguardando_blacklist_add = State()
     aguardando_blacklist_remove = State()
     aguardando_confirmacao_blacklist_conflito = State()
+    # ✅ NOVO ESTADO DE ANÁLISE:
+    aguardando_acao_analise = State()
 
 teclado_espelhador_menu = ReplyKeyboardMarkup(
     keyboard=[
@@ -165,8 +167,6 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         teclado_origens = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
-                [KeyboardButton(text="📜 Listar Todos"), KeyboardButton(text="❌ Erros")],
-                [KeyboardButton(text="⚠️ Duplicados")],
                 [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
             ],
             resize_keyboard=True,
@@ -176,7 +176,7 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
         return
 
-@router.message(EspelhadorFluxo.aguardando_acao_origem, F.text == "❌ Erros")
+@router.message(EspelhadorFluxo.aguardando_acao_analise, F.text == "❌ Erros")
 async def listar_erros_espelhador(message: types.Message, state: FSMContext):
     data = await state.get_data()
     indice = data.get("indice_edicao")
@@ -242,6 +242,7 @@ async def remover_erros_espelhador_callback(callback: types.CallbackQuery, state
     # --- NÍVEL 2: Submenu de Edição da Rota (Volta para os botões de configuração) ---
     estados_edicao = [
         "EspelhadorFluxo:aguardando_acao_origem", # Cancelando de dentro do menu de origens
+        "EspelhadorFluxo:aguardando_acao_analise", # ✅ ADICIONADO AQUI
         "EspelhadorFluxo:aguardando_edicao_novo_nome",
         "EspelhadorFluxo:aguardando_edicao_novo_destino",
         "EspelhadorFluxo:aguardando_edicao_nova_janela",
@@ -1006,12 +1007,13 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         
         texto += "\nEscolha a ação que deseja realizar:"
         
-        # ✅ Menu limpo sem Blacklist (Foi para dentro de Canais Vigiados)
+        # ✅ Menu com o novo botão "Analisar Canais Vigiados"
         teclado_submenu = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="📝 Editar Nome"), KeyboardButton(text="🔀 Modificar Modo")],
                 [KeyboardButton(text="🎯 Editar Destino"), KeyboardButton(text="📥 Editar Canais")],
                 [KeyboardButton(text="🕒 Modificar Janela"), KeyboardButton(text="📅 Modificar Dias")],
+                [KeyboardButton(text="Analisar Canais Vigiados 🔎")],
                 [KeyboardButton(text="Voltar ao Menu Espelho 🔙")]
             ],
             resize_keyboard=True,
@@ -1083,11 +1085,22 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
         )
         await message.answer("Escolha o novo modo de distribuição:", reply_markup=teclado_modo)
         await state.set_state(EspelhadorFluxo.aguardando_edicao_novo_modo)
+    elif texto == "Analisar Canais Vigiados 🔎":
+        teclado_analise = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="📜 Listar Todos"), KeyboardButton(text="❌ Erros")],
+                [KeyboardButton(text="⚠️ Duplicados")],
+                [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        await message.answer("🔎 <b>Análise de Canais Vigiados</b>\nEscolha a ferramenta que deseja utilizar:", reply_markup=teclado_analise, parse_mode="HTML")
+        await state.set_state(EspelhadorFluxo.aguardando_acao_analise)
     elif texto == "📥 Editar Canais":
         teclado_origens = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
-                [KeyboardButton(text="📜 Listar Todos"), KeyboardButton(text="⚠️ Duplicados")],
                 [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
             ],
             resize_keyboard=True,
@@ -1139,121 +1152,6 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
         await message.answer(msg_txt, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_remocao_origem)
 
-    elif texto == "📜 Listar Todos":
-        data = await state.get_data()
-        indice = data.get("indice_edicao")
-        rotas = ler_espelhos().get("rotas", [])
-        rota = rotas[indice]
-        origens = rota.get('origens', [])
-        if not origens and 'origem' in rota: origens = [rota['origem']]
-        
-        if not origens:
-            await message.answer("Esta rota não possui canais vigiados.")
-            return
-            
-        cache_nomes = ler_cache_nomes_grupos()
-        status_canais = rota.get("status_canais", {})
-        
-        texto_lista = f"📜 <b>Lista Completa de Canais Vigiados: {rota['nome']}</b>\n\n"
-        mensagens = []
-        
-        for i, o in enumerate(origens, 1):
-            info = status_canais.get(str(o), {})
-            if isinstance(info, str): info = {"status": info, "nome": str(o)}
-            
-            # Puxa o status para definir o ícone (✅ ou ❌)
-            status_ico = "❌" if info.get("status") == "erro" else "✅"
-            
-            nome = info.get("nome") or cache_nomes.get(str(o), str(o))
-            linha = f"<b>{i}.</b> {status_ico} {nome} (<code>{o}</code>)\n"
-            
-            if len(texto_lista) + len(linha) > 3800:
-                mensagens.append(texto_lista)
-                texto_lista = ""
-            texto_lista += linha
-            
-        mensagens.append(texto_lista)
-        
-        for msg in mensagens:
-            await message.answer(msg, parse_mode="HTML")
-
-    elif texto == "⚠️ Duplicados":
-        data = await state.get_data()
-        indice = data.get("indice_edicao")
-        rotas = ler_espelhos().get("rotas", [])
-        rota = rotas[indice]
-        origens = rota.get('origens', [])
-        if not origens and 'origem' in rota: origens = [rota['origem']]
-        
-        if len(origens) < 2:
-            await message.answer("Não há canais suficientes nesta rota para procurar duplicados.")
-            return
-            
-        msg_status = await message.answer("⏳ Analisando a lista em busca de duplicados...")
-        
-        cache_nomes = ler_cache_nomes_grupos()
-        status_canais = rota.get("status_canais", {})
-        
-        lista_analise = []
-        # Usar enumerate(origens, 1) para guardar a posição real do canal na lista de remoção
-        for index, o in enumerate(origens, 1):
-            alvo_str = str(o)
-            info = status_canais.get(alvo_str, {})
-            if isinstance(info, str): info = {"status": info, "nome": alvo_str}
-            nome = info.get("nome") or cache_nomes.get(alvo_str, alvo_str)
-            
-            # Puxa o status para definir o ícone (✅ ou ❌)
-            status_ico = "❌" if info.get("status") == "erro" else "✅"
-            
-            is_num = alvo_str.lstrip("-").replace(":", "").isdigit()
-            base_id = alvo_str.split(":")[0].replace("-100", "").replace("-", "") if is_num else alvo_str.split(":")[0]
-            topic = alvo_str.split(":")[1] if ":" in alvo_str else "0"
-            
-            lista_analise.append({
-                "index": index,
-                "original": alvo_str,
-                "nome": nome,
-                "is_num": is_num,
-                "base_id": base_id,
-                "topic": topic,
-                "status_ico": status_ico
-            })
-
-        duplicados = []
-        pares_verificados = set()
-
-        for i in range(len(lista_analise)):
-            for j in range(i + 1, len(lista_analise)):
-                A = lista_analise[i]
-                B = lista_analise[j]
-                
-                par_key = tuple(sorted([A["original"], B["original"]]))
-                if par_key in pares_verificados: continue
-                pares_verificados.add(par_key)
-                
-                if A["base_id"] == B["base_id"] and A["topic"] == B["topic"]:
-                    duplicados.append((A, B, "Mesmo ID Base"))
-                elif A["nome"] == B["nome"] and (A["is_num"] != B["is_num"]):
-                    duplicados.append((A, B, "Mesmo nome (@Link vs ID)"))
-
-        await msg_status.delete()
-
-        if not duplicados:
-            await message.answer("✅ <b>Tudo limpo!</b>\nO sistema não detectou nenhum canal duplicado nesta rota.", parse_mode="HTML")
-            return
-            
-        texto_resp = "⚠️ <b>Aviso: Possíveis Duplicados Detectados</b>\n\n"
-        for A, B, motivo in duplicados:
-            texto_resp += f"🔹 <b>{A['nome']}</b>\n"
-            texto_resp += f"   ├ <b>{A['index']}.</b> {A['status_ico']} <code>{A['original']}</code>\n"
-            texto_resp += f"   └ <b>{B['index']}.</b> {B['status_ico']} <code>{B['original']}</code>\n"
-            texto_resp += f"   <i>(Motivo: {motivo})</i>\n\n"
-            
-        teclado_remover_dup = InlineKeyboardMarkup(
-            inline_keyboard=[[InlineKeyboardButton(text="🤖 Auto-Remover Duplicados", callback_data="remover_duplicados_espelhador")]]
-        )
-        await message.answer(texto_resp, parse_mode="HTML", reply_markup=teclado_remover_dup)
-        
     elif texto == "🔙 Voltar ao Menu de Edição":
         data = await state.get_data()
         novo_texto = str(data.get("indice_edicao") + 1)
@@ -1263,6 +1161,124 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
         
     else:
         await message.answer("Use os botões do menu para escolher a ação.")
+
+# ==========================================
+# NOVAS FUNÇÕES INDEPENDENTES DE ANÁLISE
+# ==========================================
+
+@router.message(EspelhadorFluxo.aguardando_acao_analise, F.text == "📜 Listar Todos")
+async def listar_todos_espelhador(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    indice = data.get("indice_edicao")
+    rotas = ler_espelhos().get("rotas", [])
+    rota = rotas[indice]
+    origens = rota.get('origens', [])
+    if not origens and 'origem' in rota: origens = [rota['origem']]
+    
+    if not origens:
+        await message.answer("Esta rota não possui canais vigiados.")
+        return
+        
+    cache_nomes = ler_cache_nomes_grupos()
+    status_canais = rota.get("status_canais", {})
+    
+    texto_lista = f"📜 <b>Lista Completa de Canais Vigiados: {rota['nome']}</b>\n\n"
+    mensagens = []
+    
+    for i, o in enumerate(origens, 1):
+        info = status_canais.get(str(o), {})
+        if isinstance(info, str): info = {"status": info, "nome": str(o)}
+        
+        status_ico = "❌" if info.get("status") == "erro" else "✅"
+        nome = info.get("nome") or cache_nomes.get(str(o), str(o))
+        linha = f"<b>{i}.</b> {status_ico} {nome} (<code>{o}</code>)\n"
+        
+        if len(texto_lista) + len(linha) > 3800:
+            mensagens.append(texto_lista)
+            texto_lista = ""
+        texto_lista += linha
+        
+    mensagens.append(texto_lista)
+    
+    for msg in mensagens:
+        await message.answer(msg, parse_mode="HTML")
+
+@router.message(EspelhadorFluxo.aguardando_acao_analise, F.text == "⚠️ Duplicados")
+async def verificar_duplicados_espelhador(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    indice = data.get("indice_edicao")
+    rotas = ler_espelhos().get("rotas", [])
+    rota = rotas[indice]
+    origens = rota.get('origens', [])
+    if not origens and 'origem' in rota: origens = [rota['origem']]
+    
+    if len(origens) < 2:
+        await message.answer("Não há canais suficientes nesta rota para procurar duplicados.")
+        return
+        
+    msg_status = await message.answer("⏳ Analisando a lista em busca de duplicados...")
+    
+    cache_nomes = ler_cache_nomes_grupos()
+    status_canais = rota.get("status_canais", {})
+    
+    lista_analise = []
+    for index, o in enumerate(origens, 1):
+        alvo_str = str(o)
+        info = status_canais.get(alvo_str, {})
+        if isinstance(info, str): info = {"status": info, "nome": alvo_str}
+        nome = info.get("nome") or cache_nomes.get(alvo_str, alvo_str)
+        
+        status_ico = "❌" if info.get("status") == "erro" else "✅"
+        
+        is_num = alvo_str.lstrip("-").replace(":", "").isdigit()
+        base_id = alvo_str.split(":")[0].replace("-100", "").replace("-", "") if is_num else alvo_str.split(":")[0]
+        topic = alvo_str.split(":")[1] if ":" in alvo_str else "0"
+        
+        lista_analise.append({
+            "index": index,
+            "original": alvo_str,
+            "nome": nome,
+            "is_num": is_num,
+            "base_id": base_id,
+            "topic": topic,
+            "status_ico": status_ico
+        })
+
+    duplicados = []
+    pares_verificados = set()
+
+    for i in range(len(lista_analise)):
+        for j in range(i + 1, len(lista_analise)):
+            A = lista_analise[i]
+            B = lista_analise[j]
+            
+            par_key = tuple(sorted([A["original"], B["original"]]))
+            if par_key in pares_verificados: continue
+            pares_verificados.add(par_key)
+            
+            if A["base_id"] == B["base_id"] and A["topic"] == B["topic"]:
+                duplicados.append((A, B, "Mesmo ID Base"))
+            elif A["nome"] == B["nome"] and (A["is_num"] != B["is_num"]):
+                duplicados.append((A, B, "Mesmo nome (@Link vs ID)"))
+
+    await msg_status.delete()
+
+    if not duplicados:
+        await message.answer("✅ <b>Tudo limpo!</b>\nO sistema não detectou nenhum canal duplicado nesta rota.", parse_mode="HTML")
+        return
+        
+    texto_resp = "⚠️ <b>Aviso: Possíveis Duplicados Detectados</b>\n\n"
+    for A, B, motivo in duplicados:
+        texto_resp += f"🔹 <b>{A['nome']}</b>\n"
+        texto_resp += f"   ├ <b>{A['index']}.</b> {A['status_ico']} <code>{A['original']}</code>\n"
+        texto_resp += f"   └ <b>{B['index']}.</b> {B['status_ico']} <code>{B['original']}</code>\n"
+        texto_resp += f"   <i>(Motivo: {motivo})</i>\n\n"
+        
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    teclado_remover_dup = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🤖 Auto-Remover Duplicados", callback_data="remover_duplicados_espelhador")]]
+    )
+    await message.answer(texto_resp, parse_mode="HTML", reply_markup=teclado_remover_dup)
 
 @router.callback_query(F.data == "remover_duplicados_espelhador")
 async def remover_duplicados_espelhador_callback(callback: types.CallbackQuery, state: FSMContext):
@@ -1913,7 +1929,6 @@ async def salvar_bl_add_espelhador(message: types.Message, state: FSMContext):
         teclado_origens = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
-                [KeyboardButton(text="📜 Listar Todos"), KeyboardButton(text="⚠️ Duplicados")],
                 [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
             ],
             resize_keyboard=True,
@@ -1958,12 +1973,11 @@ async def confirmar_blacklist_conflito_espelhador(message: types.Message, state:
 
     teclado_origens = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
-            [KeyboardButton(text="📜 Listar Todos"), KeyboardButton(text="⚠️ Duplicados")],
-            [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
+                [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
+                [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
     )
     await message.answer(f"✅ <b>Sucesso!</b>\n⛔ {len(novos_blacklist)} canal(is) adicionado(s) à Lista Negra.\n🗑️ {len(alvos_para_remover)} canal(is) removido(s) da escuta da rota.", parse_mode="HTML", reply_markup=teclado_origens)
     await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
@@ -1980,12 +1994,11 @@ async def salvar_bl_rem_espelhador(message: types.Message, state: FSMContext):
     
     teclado_origens = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
-            [KeyboardButton(text="📜 Listar Todos"), KeyboardButton(text="⚠️ Duplicados")],
-            [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
+                [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
+                [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
     )
     await message.answer("✅ Blacklist da rota atualizada!", reply_markup=teclado_origens)
     await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
