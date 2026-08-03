@@ -165,7 +165,8 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         teclado_origens = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
-                [KeyboardButton(text="📜 Listar Todos"), KeyboardButton(text="⚠️ Duplicados")],
+                [KeyboardButton(text="📜 Listar Todos"), KeyboardButton(text="❌ Erros")],
+                [KeyboardButton(text="⚠️ Duplicados")],
                 [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
             ],
             resize_keyboard=True,
@@ -174,6 +175,69 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         await message.answer("Ação cancelada. O que você deseja fazer com os canais vigiados desta rota?", reply_markup=teclado_origens)
         await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
         return
+
+@router.message(EspelhadorFluxo.aguardando_acao_origem, F.text == "❌ Erros")
+async def listar_erros_espelhador(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    indice = data.get("indice_edicao")
+    rotas = ler_espelhos().get("rotas", [])
+    rota = rotas[indice]
+    origens = rota.get('origens', [])
+    if not origens and 'origem' in rota: origens = [rota['origem']]
+    
+    if not origens:
+        await message.answer("Esta rota não possui canais vigiados.")
+        return
+        
+    cache_nomes = ler_cache_nomes_grupos()
+    status_canais = rota.get("status_canais", {})
+    canais_com_erro = []
+    texto = f"❌ <b>Canais com Erro de Acesso: {rota['nome']}</b>\n\n"
+    
+    for i, o in enumerate(origens, 1):
+        info = status_canais.get(str(o), {})
+        if isinstance(info, str): info = {"status": info, "nome": str(o)}
+        
+        if info.get("status") == "erro":
+            nome = info.get("nome") or cache_nomes.get(str(o), str(o))
+            canais_com_erro.append(str(o))
+            texto += f"<b>{i}.</b> ❌ {nome} (<code>{o}</code>)\n"
+            
+    if not canais_com_erro:
+        await message.answer("✅ <b>Tudo limpo!</b>\nNão há nenhum canal com erro de acesso nesta rota.", parse_mode="HTML")
+        return
+        
+    teclado_remover_erros = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Remover Todos com Erro 🗑️", callback_data="remover_erros_espelhador")]]
+    )
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_remover_erros)
+
+@router.callback_query(F.data == "remover_erros_espelhador")
+async def remover_erros_espelhador_callback(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    indice = data.get("indice_edicao")
+    dados = ler_espelhos()
+    rota = dados["rotas"][indice]
+    origens_atuais = rota.get('origens', [])
+    if not origens_atuais and 'origem' in rota: origens_atuais = [rota['origem']]
+    status_canais = rota.get("status_canais", {})
+    
+    origens_limpas = []
+    removidos = 0
+    for o in origens_atuais:
+        info = status_canais.get(str(o), {})
+        if isinstance(info, str): info = {"status": info, "nome": str(o)}
+        if info.get("status") == "erro": removidos += 1
+        else: origens_limpas.append(o)
+            
+    if removidos > 0:
+        rota['origens'] = origens_limpas
+        if 'origem' in rota: del rota['origem']
+        salvar_espelhos(dados)
+        await callback.message.edit_text(f"✅ <b>Limpeza Concluída!</b>\n{removidos} canal(is) com erro foram desvinculados da rota.", parse_mode="HTML")
+    else:
+        await callback.message.edit_text("Nenhum canal com erro foi encontrado para remover.")
+    await callback.answer()
 
     # --- NÍVEL 2: Submenu de Edição da Rota (Volta para os botões de configuração) ---
     estados_edicao = [
@@ -351,8 +415,8 @@ async def receber_destino_criacao(message: types.Message, state: FSMContext):
         
         texto_origens = (
             f"✅ Destino confirmado: <code>{destino_id}</code>\n\n"
-            "Agora, envie os @usernames, links ou IDs dos grupos/canais que deseja <b>MONITORAR</b> (Na Escuta).\n"
-            "OBS: Você pode enviar vários separando por vírgula (Ex: <code>@grupo1, -100123, https://t.me/grupo2</code>):"
+            "Agora, envie os @usernames, links ou IDs dos grupos/canais que deseja <b>MONITORAR</b> (Na Escuta).\n\n"
+            "OBS: Você pode enviar vários separando por vírgula (Ex: <code>@grupo1, -100123, https://t.me/grupo2, https://web.telegram.org/a/#-1002856422690</code>):"
         )
         await message.answer(texto_origens, reply_markup=obter_teclado_importacao_espelhador(), parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_origem_criacao)
@@ -1006,7 +1070,6 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
     else:
         await message.answer("Use os botões do menu para escolher a ação.")
 
-# ✅ NOVA FUNÇÃO PARA PROCESSAR O SUBMENU
 @router.message(EspelhadorFluxo.aguardando_acao_origem)
 async def processar_acao_origem(message: types.Message, state: FSMContext):
     texto = message.text
@@ -1021,8 +1084,8 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
             is_persistent=True
         )
         await message.answer(
-            "Envie os @usernames, links ou IDs dos grupos que deseja monitorar como ORIGEM.\n"
-            "OBS: Você pode enviar vários separando por vírgula (Ex: @grupo1, -100123, https://t.me/grupo2):\n\n"
+            "Envie os @usernames, links ou IDs dos grupos que deseja monitorar como ORIGEM.\n\n"
+            "OBS: Você pode enviar vários separando por vírgula (Ex: @grupo1, -100123, https://t.me/grupo2, https://web.telegram.org/a/#-1002856422690):\n\n"
             "<blockquote>💡 <b>Dica:</b> Você pode colar uma lista ou clicar no botão abaixo para puxar o <b>Banco Global</b> (o robô ignorará os grupos duplicados e os da Lista Negra automaticamente).</blockquote>", 
             reply_markup=teclado_dinamico, 
             parse_mode="HTML"
