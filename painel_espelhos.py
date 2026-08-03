@@ -388,7 +388,21 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
     else:
         texto += "<i>Nenhuma rota de espelhamento cadastrada no momento.</i>\n\n"
         
-    await message.answer(texto, reply_markup=teclado_espelhador_menu, parse_mode="HTML")
+    mensagens_para_enviar = []
+    while len(texto) > 3800:
+        corte = texto.rfind('\n', 0, 3800)
+        if corte == -1: corte = 3800
+        mensagens_para_enviar.append(texto[:corte])
+        texto = texto[corte:]
+        
+    mensagens_para_enviar.append(texto)
+    
+    for i, msg in enumerate(mensagens_para_enviar):
+        if i == len(mensagens_para_enviar) - 1:
+            await message.answer(msg, reply_markup=teclado_espelhador_menu, parse_mode="HTML")
+        else:
+            await message.answer(msg, parse_mode="HTML")
+            
     await state.set_state(EspelhadorFluxo.menu_principal)
 
 @router.message(EspelhadorFluxo.menu_principal, F.text == "Adicionar Espelho ➕")
@@ -1004,7 +1018,21 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
             is_persistent=True
         )
             
-        await message.answer(texto, reply_markup=teclado_submenu, parse_mode="HTML")
+        mensagens_para_enviar = []
+        while len(texto) > 3800:
+            corte = texto.rfind('\n', 0, 3800)
+            if corte == -1: corte = 3800
+            mensagens_para_enviar.append(texto[:corte])
+            texto = texto[corte:]
+            
+        mensagens_para_enviar.append(texto)
+        
+        for i, msg in enumerate(mensagens_para_enviar):
+            if i == len(mensagens_para_enviar) - 1:
+                await message.answer(msg, reply_markup=teclado_submenu, parse_mode="HTML")
+            else:
+                await message.answer(msg, parse_mode="HTML")
+                
         await state.set_state(EspelhadorFluxo.aguardando_acao_edicao)
     else:
         await message.answer("Número inválido. Tente novamente ou clique em Cancelar.", reply_markup=teclado_espelhador_cancelar)
