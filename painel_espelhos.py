@@ -144,12 +144,19 @@ def salvar_espelhos(dados):
 def obter_teclado_importacao_espelhador():
     return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Importar Banco Global 🌍")], [KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True, is_persistent=True)
 
-# --- NAVEGAÇÃO E PAINEL ---
-@router.message(F.text.in_(["Cancelar Operação ❌", "Voltar ao Menu Espelho 🔙"]), StateFilter("*"))
+@router.message(F.text.in_(["Cancelar Operação ❌", "Voltar ao Menu Espelho 🔙", "Voltar ao Menu de Edição"]), StateFilter("*"))
 async def cancelar_espelhador(message: types.Message, state: FSMContext):
     estado_atual = await state.get_state()
     data = await state.get_data()
     
+    # ✅ Se o utilizador clicou em voltar a partir de submenus de canais/análise, volta para o menu de edição da rota atual
+    if message.text in ["Voltar ao Menu Espelho 🔙", "Voltar ao Menu de Edição"] and data.get("indice_edicao") is not None:
+        if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu de edição da rota atual.")
+        novo_texto = str(data["indice_edicao"] + 1)
+        msg_simulada = message.model_copy(update={"text": novo_texto})
+        await selecionar_acao_edicao(msg_simulada, state)
+        return
+
     # --- NÍVEL 3: Submenu de Origens (Volta para os botões Adicionar/Remover/Blacklist) ---
     estados_origem = [
         "EspelhadorFluxo:aguardando_nova_origem",
@@ -159,7 +166,7 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         "EspelhadorFluxo:aguardando_acao_blacklist",
         "EspelhadorFluxo:aguardando_blacklist_add",
         "EspelhadorFluxo:aguardando_blacklist_remove",
-        "EspelhadorFluxo:aguardando_confirmacao_blacklist_conflito" # ✅ ADICIONAR NA LISTA DE CANCELAMENTO
+        "EspelhadorFluxo:aguardando_confirmacao_blacklist_conflito"
     ]
     
     if estado_atual in estados_origem:
@@ -175,6 +182,31 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         await message.answer("Ação cancelada. O que você deseja fazer com os canais vigiados desta rota?", reply_markup=teclado_origens)
         await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
         return
+
+    # --- NÍVEL 2: Submenu de Edição da Rota (Volta para os botões de configuração) ---
+    estados_edicao = [
+        "EspelhadorFluxo:aguardando_acao_origem", 
+        "EspelhadorFluxo:aguardando_acao_analise",
+        "EspelhadorFluxo:aguardando_edicao_novo_nome",
+        "EspelhadorFluxo:aguardando_edicao_novo_destino",
+        "EspelhadorFluxo:aguardando_edicao_nova_janela",
+        "EspelhadorFluxo:aguardando_edicao_intervalo_dias",
+        "EspelhadorFluxo:aguardando_edicao_novo_modo"
+    ]
+    
+    if estado_atual in estados_edicao and data.get("indice_edicao") is not None:
+        if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando ao menu de Edição da Rota.")
+        await message.answer("Ação cancelada. Retornando às configurações da rota...")
+        novo_texto = str(data["indice_edicao"] + 1)
+        msg_simulada = message.model_copy(update={"text": novo_texto})
+        await selecionar_acao_edicao(msg_simulada, state)
+        return
+
+    # --- NÍVEL 1: Cancelamento Raiz (Volta para o Painel Principal do Espelhador) ---
+    if EXIBIR_LOGS: logger.info("🔙 Cancelamento Global: Voltando ao Painel Principal do Espelhador.")
+    await state.clear()
+    await message.answer("Operação cancelada.", reply_markup=teclado_espelhador_menu)
+    await painel_espelhador(message, state)
 
 @router.message(EspelhadorFluxo.aguardando_acao_analise, F.text == "❌ Erros")
 async def listar_erros_espelhador(message: types.Message, state: FSMContext):
@@ -238,17 +270,6 @@ async def remover_erros_espelhador_callback(callback: types.CallbackQuery, state
     else:
         await callback.message.edit_text("Nenhum canal com erro foi encontrado para remover.")
     await callback.answer()
-
-    # --- NÍVEL 2: Submenu de Edição da Rota (Volta para os botões de configuração) ---
-    estados_edicao = [
-        "EspelhadorFluxo:aguardando_acao_origem", # Cancelando de dentro do menu de origens
-        "EspelhadorFluxo:aguardando_acao_analise", # ✅ ADICIONADO AQUI PARA O BOTÃO FUNCIONAR
-        "EspelhadorFluxo:aguardando_edicao_novo_nome",
-        "EspelhadorFluxo:aguardando_edicao_novo_destino",
-        "EspelhadorFluxo:aguardando_edicao_nova_janela",
-        "EspelhadorFluxo:aguardando_edicao_intervalo_dias",
-        "EspelhadorFluxo:aguardando_edicao_novo_modo"
-    ]
     
     if estado_atual in estados_edicao and data.get("indice_edicao") is not None:
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando ao menu de Edição da Rota.")
