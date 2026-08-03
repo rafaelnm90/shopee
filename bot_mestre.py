@@ -437,7 +437,7 @@ teclado_menu_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Grupos Vigiados 📡")],
         [KeyboardButton(text="Disparar Convite Afiliados 🚀"), KeyboardButton(text="Disparar Convite do Grupo 🔗\u200b")],
-        [KeyboardButton(text="Forçar Clones 🚀")],
+        [KeyboardButton(text="Forçar Postagens 🚀")],
         [KeyboardButton(text="⚙️ Automações (SPAM e Rotina)\u200b")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
@@ -5026,7 +5026,7 @@ async def menu_espiao_principal(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("✅ Sucesso: Painel unificado do Espião renderizado com logs operacionais.")
     await message.answer(texto, reply_markup=teclado_menu_espiao, parse_mode="HTML")
 
-@dp.message(F.text == "Forçar Clones 🚀", StateFilter("*"))
+@dp.message(F.text == "Forçar Postagens 🚀", StateFilter("*"))
 async def iniciar_esvaziar_clones(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     
