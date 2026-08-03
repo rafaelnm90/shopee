@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from aiogram import Router, Bot, types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import StateFilter
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
 from motor_filas import calcular_horarios_distribuicao # ⚙️ Novo Motor Centralizado
