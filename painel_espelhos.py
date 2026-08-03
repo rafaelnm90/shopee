@@ -242,7 +242,7 @@ async def remover_erros_espelhador_callback(callback: types.CallbackQuery, state
     # --- NÍVEL 2: Submenu de Edição da Rota (Volta para os botões de configuração) ---
     estados_edicao = [
         "EspelhadorFluxo:aguardando_acao_origem", # Cancelando de dentro do menu de origens
-        "EspelhadorFluxo:aguardando_acao_analise", # ✅ ADICIONADO AQUI
+        "EspelhadorFluxo:aguardando_acao_analise", # ✅ ADICIONADO AQUI PARA O BOTÃO FUNCIONAR
         "EspelhadorFluxo:aguardando_edicao_novo_nome",
         "EspelhadorFluxo:aguardando_edicao_novo_destino",
         "EspelhadorFluxo:aguardando_edicao_nova_janela",
