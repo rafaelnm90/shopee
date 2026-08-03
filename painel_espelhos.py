@@ -264,6 +264,18 @@ async def remover_erros_espelhador_callback(callback: types.CallbackQuery, state
     await message.answer("Operação cancelada.", reply_markup=teclado_espelhador_menu)
     await painel_espelhador(message, state)
 
+@router.message(EspelhadorFluxo.aguardando_acao_analise, F.text == "🔙 Voltar ao Menu de Edição")
+async def voltar_de_analise_para_edicao(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    indice = data.get("indice_edicao")
+    if indice is not None:
+        novo_texto = str(indice + 1)
+        msg_simulada = message.model_copy(update={"text": novo_texto})
+        if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu de edição a partir da análise.")
+        await selecionar_acao_edicao(msg_simulada, state)
+    else:
+        await painel_espelhos(message, state)
+
 @router.message(F.text == "Espelhador de Canais 🔄", StateFilter("*"))
 async def painel_espelhador(message: types.Message, state: FSMContext):
     await state.clear()
