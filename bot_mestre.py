@@ -18,7 +18,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command, StateFilter
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, FSInputFile
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 import subprocess
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 # ✅ Importação dos nossos novos módulos blindados (Fase 2)
@@ -472,7 +472,8 @@ async def menu_analise_canais_espiao(message: types.Message, state: FSMContext):
     
     teclado_analise = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Listar Todos 📜"), KeyboardButton(text="⚠️ Duplicados")],
+            [KeyboardButton(text="Listar Todos 📜"), KeyboardButton(text="❌ Erros")],
+            [KeyboardButton(text="⚠️ Duplicados")],
             [KeyboardButton(text="Voltar às Opções 🔙")]
         ],
         resize_keyboard=True,
@@ -480,6 +481,58 @@ async def menu_analise_canais_espiao(message: types.Message, state: FSMContext):
     )
     await message.answer("🔎 <b>Análise de Canais Vigiados</b>\nEscolha a ferramenta que deseja utilizar:", reply_markup=teclado_analise, parse_mode="HTML")
     await state.set_state(EspiaoFluxo.aguardando_acao_analise)
+
+@dp.message(EspiaoFluxo.aguardando_acao_analise, F.text == "❌ Erros")
+async def listar_erros_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    dados = ler_alvos_espiao()
+    alvos = dados.get("alvos", [])
+    if not alvos:
+        await message.answer("Não há grupos sendo monitorados.")
+        return
+        
+    cache_nomes = ler_cache_nomes_grupos()
+    status_alvos = dados.get("status_alvos", {})
+    canais_com_erro = []
+    texto = "❌ <b>Canais com Erro de Acesso (Espião)</b>\n\n"
+    
+    for i, alvo in enumerate(alvos, 1):
+        info = status_alvos.get(str(alvo), {})
+        if info.get("status") == "erro":
+            nome = info.get("nome") or cache_nomes.get(str(alvo), str(alvo))
+            canais_com_erro.append(str(alvo))
+            texto += f"<b>{i}.</b> ❌ {nome} (<code>{alvo}</code>)\n"
+            
+    if not canais_com_erro:
+        await message.answer("✅ <b>Tudo limpo!</b>\nNão há nenhum canal com erro de acesso no Espião.", parse_mode="HTML")
+        return
+        
+    teclado_remover_erros = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="Remover Todos com Erro 🗑️", callback_data="remover_erros_espiao")]]
+    )
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_remover_erros)
+
+@dp.callback_query(F.data == "remover_erros_espiao")
+async def remover_erros_espiao_callback(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID: return
+    dados = ler_alvos_espiao()
+    alvos_atuais = dados.get("alvos", [])
+    status_alvos = dados.get("status_alvos", {})
+    
+    alvos_limpos = []
+    removidos = 0
+    for alvo in alvos_atuais:
+        info = status_alvos.get(str(alvo), {})
+        if info.get("status") == "erro": removidos += 1
+        else: alvos_limpos.append(alvo)
+            
+    if removidos > 0:
+        dados["alvos"] = alvos_limpos
+        salvar_alvos_espiao(dados)
+        await callback.message.edit_text(f"✅ <b>Limpeza Concluída!</b>\n{removidos} canal(is) com erro foram removidos da escuta.", parse_mode="HTML")
+    else:
+        await callback.message.edit_text("Nenhum canal com erro foi encontrado para remover.")
+    await callback.answer()
 
 @dp.message(F.text == "Voltar às Opções 🔙", StateFilter("*"))
 async def voltar_opcoes_espiao(message: types.Message, state: FSMContext):
@@ -5226,41 +5279,29 @@ async def listar_todos_espiao(message: types.Message, state: FSMContext):
 @dp.message(EspiaoFluxo.aguardando_acao_analise, F.text == "⚠️ Duplicados")
 async def verificar_duplicados_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    
     dados = ler_alvos_espiao()
     alvos = dados.get("alvos", [])
-    
     if len(alvos) < 2:
         await message.answer("Não há grupos suficientes para procurar duplicados.")
         return
         
     msg_status = await message.answer("⏳ Analisando a lista em busca de duplicados...")
-    
     cache_nomes = ler_cache_nomes_grupos()
     status_alvos = dados.get("status_alvos", {})
     
     lista_analise = []
-    # Usar enumerate(alvos, 1) para guardar a posição real do canal na lista de remoção
     for index, alvo in enumerate(alvos, 1):
         alvo_str = str(alvo)
         info = status_alvos.get(alvo_str, {})
         nome = info.get("nome") or cache_nomes.get(alvo_str, alvo_str)
-        
-        # Puxa o status para definir o ícone (✅ ou ❌)
         status_ico = "❌" if info.get("status") == "erro" else "✅"
-        
         is_num = alvo_str.lstrip("-").replace(":", "").isdigit()
         base_id = alvo_str.split(":")[0].replace("-100", "").replace("-", "") if is_num else alvo_str.split(":")[0]
         topic = alvo_str.split(":")[1] if ":" in alvo_str else "0"
         
         lista_analise.append({
-            "index": index,
-            "original": alvo_str,
-            "nome": nome,
-            "is_num": is_num,
-            "base_id": base_id,
-            "topic": topic,
-            "status_ico": status_ico
+            "index": index, "original": alvo_str, "nome": nome,
+            "is_num": is_num, "base_id": base_id, "topic": topic, "status_ico": status_ico
         })
 
     duplicados = []
@@ -5270,15 +5311,12 @@ async def verificar_duplicados_espiao(message: types.Message, state: FSMContext)
         for j in range(i + 1, len(lista_analise)):
             A = lista_analise[i]
             B = lista_analise[j]
-            
             par_key = tuple(sorted([A["original"], B["original"]]))
             if par_key in pares_verificados: continue
             pares_verificados.add(par_key)
             
-            # Regra 1: Mesmo ID Base e Mesmo Tópico
             if A["base_id"] == B["base_id"] and A["topic"] == B["topic"]:
                 duplicados.append((A, B, "Mesmo ID Base"))
-            # Regra 2: Mesmo Nome, mas um é Link (@) e o outro é ID Numérico
             elif A["nome"] == B["nome"] and (A["is_num"] != B["is_num"]):
                 duplicados.append((A, B, "Mesmo nome (@Link vs ID)"))
 
@@ -5295,8 +5333,67 @@ async def verificar_duplicados_espiao(message: types.Message, state: FSMContext)
         texto += f"   └ <b>{B['index']}.</b> {B['status_ico']} <code>{B['original']}</code>\n"
         texto += f"   <i>(Motivo: {motivo})</i>\n\n"
         
-    texto += "💡 <i>Dica: Se um deles for um duplicado indesejado, vá em 'Remover Grupo' e exclua um dos IDs.</i>"
-    await message.answer(texto, parse_mode="HTML")
+    teclado_remover_dup = InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text="🤖 Auto-Remover Duplicados", callback_data="remover_duplicados_espiao")]]
+    )
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_remover_dup)
+
+@dp.callback_query(F.data == "remover_duplicados_espiao")
+async def remover_duplicados_espiao_callback(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID: return
+    dados = ler_alvos_espiao()
+    alvos = dados.get("alvos", [])
+    status_alvos = dados.get("status_alvos", {})
+    cache_nomes = ler_cache_nomes_grupos()
+    
+    lista_analise = []
+    for index, alvo in enumerate(alvos, 1):
+        alvo_str = str(alvo)
+        info = status_alvos.get(alvo_str, {})
+        nome = info.get("nome") or cache_nomes.get(alvo_str, alvo_str)
+        is_num = alvo_str.lstrip("-").replace(":", "").isdigit()
+        base_id = alvo_str.split(":")[0].replace("-100", "").replace("-", "") if is_num else alvo_str.split(":")[0]
+        topic = alvo_str.split(":")[1] if ":" in alvo_str else "0"
+        
+        lista_analise.append({
+            "original": alvo_str, "nome": nome, "is_num": is_num,
+            "status": info.get("status", "ok"), "base_id": base_id, "topic": topic
+        })
+
+    alvos_para_remover = set()
+    pares_verificados = set()
+
+    for i in range(len(lista_analise)):
+        for j in range(i + 1, len(lista_analise)):
+            A = lista_analise[i]
+            B = lista_analise[j]
+            if A["original"] in alvos_para_remover or B["original"] in alvos_para_remover: continue
+                
+            par_key = tuple(sorted([A["original"], B["original"]]))
+            if par_key in pares_verificados: continue
+            pares_verificados.add(par_key)
+            
+            is_dup = False
+            if A["base_id"] == B["base_id"] and A["topic"] == B["topic"]: is_dup = True
+            elif A["nome"] == B["nome"] and (A["is_num"] != B["is_num"]): is_dup = True
+
+            if is_dup:
+                if A["status"] == "ok" and B["status"] == "erro": alvos_para_remover.add(B["original"])
+                elif B["status"] == "ok" and A["status"] == "erro": alvos_para_remover.add(A["original"])
+                elif A["is_num"] and not B["is_num"]: alvos_para_remover.add(B["original"])
+                elif B["is_num"] and not A["is_num"]: alvos_para_remover.add(A["original"])
+                else: alvos_para_remover.add(B["original"]) 
+                    
+    if alvos_para_remover:
+        alvos_limpos = [a for a in alvos if str(a) not in alvos_para_remover]
+        dados["alvos"] = alvos_limpos
+        salvar_alvos_espiao(dados)
+        texto_removidos = "✅ <b>Duplicados Removidos Automaticamente!</b>\nOs seguintes canais foram descartados:\n"
+        for r in alvos_para_remover: texto_removidos += f"🗑️ <code>{r}</code>\n"
+        await callback.message.edit_text(texto_removidos, parse_mode="HTML")
+    else:
+        await callback.message.edit_text("Nenhum duplicado válido para remoção automática encontrado.")
+    await callback.answer()
 
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Adicionar Grupo ➕")
 async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
