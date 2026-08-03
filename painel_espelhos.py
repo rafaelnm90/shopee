@@ -1221,8 +1221,10 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
             texto_resp += f"   └ <b>{B['index']}.</b> {B['status_ico']} <code>{B['original']}</code>\n"
             texto_resp += f"   <i>(Motivo: {motivo})</i>\n\n"
             
-        texto_resp += "💡 <i>Dica: Se um deles for um duplicado indesejado, vá em 'Remover Canal' e exclua um dos IDs.</i>"
-        await message.answer(texto_resp, parse_mode="HTML")
+        teclado_remover_dup = InlineKeyboardMarkup(
+            inline_keyboard=[[InlineKeyboardButton(text="🤖 Auto-Remover Duplicados", callback_data="remover_duplicados_espelhador")]]
+        )
+        await message.answer(texto_resp, parse_mode="HTML", reply_markup=teclado_remover_dup)
         
     elif texto == "🔙 Voltar ao Menu de Edição":
         data = await state.get_data()
@@ -1233,6 +1235,69 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
         
     else:
         await message.answer("Use os botões do menu para escolher a ação.")
+
+@router.callback_query(F.data == "remover_duplicados_espelhador")
+async def remover_duplicados_espelhador_callback(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    indice = data.get("indice_edicao")
+    dados = ler_espelhos()
+    rota = dados["rotas"][indice]
+    origens = rota.get('origens', [])
+    if not origens and 'origem' in rota: origens = [rota['origem']]
+    status_canais = rota.get("status_canais", {})
+    cache_nomes = ler_cache_nomes_grupos()
+    
+    lista_analise = []
+    for index, o in enumerate(origens, 1):
+        alvo_str = str(o)
+        info = status_canais.get(alvo_str, {})
+        if isinstance(info, str): info = {"status": info, "nome": alvo_str}
+        nome = info.get("nome") or cache_nomes.get(alvo_str, alvo_str)
+        is_num = alvo_str.lstrip("-").replace(":", "").isdigit()
+        base_id = alvo_str.split(":")[0].replace("-100", "").replace("-", "") if is_num else alvo_str.split(":")[0]
+        topic = alvo_str.split(":")[1] if ":" in alvo_str else "0"
+        
+        lista_analise.append({
+            "original": alvo_str, "nome": nome, "is_num": is_num,
+            "status": info.get("status", "ok"), "base_id": base_id, "topic": topic
+        })
+
+    alvos_para_remover = set()
+    pares_verificados = set()
+
+    for i in range(len(lista_analise)):
+        for j in range(i + 1, len(lista_analise)):
+            A = lista_analise[i]
+            B = lista_analise[j]
+            if A["original"] in alvos_para_remover or B["original"] in alvos_para_remover: continue
+                
+            par_key = tuple(sorted([A["original"], B["original"]]))
+            if par_key in pares_verificados: continue
+            pares_verificados.add(par_key)
+            
+            is_dup = False
+            if A["base_id"] == B["base_id"] and A["topic"] == B["topic"]: is_dup = True
+            elif A["nome"] == B["nome"] and (A["is_num"] != B["is_num"]): is_dup = True
+
+            if is_dup:
+                if A["status"] == "ok" and B["status"] == "erro": alvos_para_remover.add(B["original"])
+                elif B["status"] == "ok" and A["status"] == "erro": alvos_para_remover.add(A["original"])
+                elif A["is_num"] and not B["is_num"]: alvos_para_remover.add(B["original"])
+                elif B["is_num"] and not A["is_num"]: alvos_para_remover.add(A["original"])
+                else: alvos_para_remover.add(B["original"]) 
+                    
+    if alvos_para_remover:
+        origens_limpas = [o for o in origens if str(o) not in alvos_para_remover]
+        rota['origens'] = origens_limpas
+        if 'origem' in rota: del rota['origem']
+        salvar_espelhos(dados)
+        
+        texto_removidos = "✅ <b>Duplicados Removidos Automaticamente!</b>\nOs seguintes canais foram desvinculados da rota:\n"
+        for r in alvos_para_remover: texto_removidos += f"🗑️ <code>{r}</code>\n"
+        await callback.message.edit_text(texto_removidos, parse_mode="HTML")
+    else:
+        await callback.message.edit_text("Nenhum duplicado válido para remoção automática encontrado.")
+    await callback.answer()
 
 @router.message(EspelhadorFluxo.aguardando_edicao_novo_nome)
 async def salvar_edicao_nome(message: types.Message, state: FSMContext):
