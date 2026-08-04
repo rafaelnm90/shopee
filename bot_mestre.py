@@ -5893,6 +5893,27 @@ async def receber_janela_espiao(message: types.Message, state: FSMContext):
     await message.answer(f"Deseja confirmar a nova janela para postar <b>{texto_exibicao}</b>?", parse_mode="HTML", reply_markup=teclado_conf)
     await state.set_state(ConfigRotinaEspiao.aguardando_confirmacao_janela)
 
+@dp.message(ConfigRotinaEspiao.aguardando_confirmacao_janela)
+async def confirmar_janela_espiao(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar ✅":
+        await message.answer("Operação cancelada.")
+        await menu_grupos_vigiados(message, state)
+        return
+        
+    data = await state.get_data()
+    inicio = data.get("inicio")
+    fim = data.get("fim")
+    
+    dados = ler_alvos_espiao()
+    dados["inicio"] = inicio
+    dados["fim"] = fim
+    salvar_alvos_espiao(dados)
+    
+    texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"estritamente entre as {inicio}h e as {fim}h"
+    await message.answer(f"✅ <b>Janela do Espião Salva!</b>\nO robô postará {texto_exibicao}.", parse_mode="HTML")
+    await state.clear()
+    await menu_grupos_vigiados(message, state)
+
 @dp.message(ConfigRotinaEspiao.aguardando_intervalo_espiao)
 async def receber_intervalo_espiao(message: types.Message, state: FSMContext):
     mapa_dias = {"Mesmo Dia (D+0) 🟢": 0, "Dia Seguinte (D+1) 🟡": 1, "Dois Dias (D+2) 🔵": 2}
