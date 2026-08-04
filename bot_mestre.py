@@ -3860,7 +3860,8 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         "EspiaoFluxo:aguardando_acao_blacklist",
         "EspiaoFluxo:aguardando_blacklist_add",
         "EspiaoFluxo:aguardando_blacklist_remove",
-        "EspiaoFluxo:aguardando_confirmacao_blacklist_conflito"
+        "EspiaoFluxo:aguardando_confirmacao_blacklist_conflito",
+        "EspiaoFluxo:aguardando_confirmacao_forcar_clones" # <--- ADICIONAR ESTA LINHA AQUI
     ]
     
     if estado_atual and (estado_atual in estados_espiao_raiz or estado_atual.startswith("ConfigRotinaEspiao")):
