@@ -5048,10 +5048,10 @@ async def menu_espiao_principal(message: types.Message, state: FSMContext):
     
     if EXIBIR_LOGS: logger.info("🚀 Iniciando consolidação de estatísticas para o painel do Espião...")
     
-    # 1. Obter quantidade de vídeos pendentes na fila
+    # 1. Obter quantidade de vídeos pendentes na fila (✅ BLINDADO)
     fila_data = ler_fila_clonagem()
     fila = fila_data.get("fila", [])
-    videos_pendentes = len([item for item in fila if not item.get("processado")])
+    videos_pendentes = len([item for item in fila if item.get("processado") not in [True, 1, "true", "True"]])
     
    # 2. Obter canais monitorizados e destino do ficheiro de configuração (CORRIGIDO)
     dados_espiao = ler_alvos_espiao()
@@ -5086,7 +5086,9 @@ async def iniciar_esvaziar_clones(message: types.Message, state: FSMContext):
     
     fila_data = ler_fila_clonagem()
     fila = fila_data.get("fila", [])
-    qtd_pendentes = len([i for i in fila if not i.get("processado")])
+    
+    # ✅ CORREÇÃO DE BLINDAGEM: Garante que só vai contar e forçar os pendentes reais
+    qtd_pendentes = len([i for i in fila if i.get("processado") not in [True, 1, "true", "True"]])
     
     if qtd_pendentes == 0:
         await message.answer("A fila de clonagem já está vazia no momento.", reply_markup=teclado_menu_espiao)
@@ -5121,7 +5123,10 @@ async def esvaziar_fila_espiao_background(chat_id):
     while True:
         try:
             dados = ler_fila_clonagem()
-            pendentes = [i for i in dados.get("fila", []) if not i.get("processado")]
+            
+            # ✅ CORREÇÃO DE BLINDAGEM: Filtra apenas os pendentes
+            pendentes = [i for i in dados.get("fila", []) if i.get("processado") not in [True, 1, "true", "True"]]
+            
             if not pendentes:
                 if EXIBIR_LOGS: logger.info("✅ [Espião] Fila de clonagem esvaziada com sucesso!")
                 await bot.send_message(chat_id, "✅ <b>Concluído!</b>\nTodos os vídeos retidos na fila do Espião foram analisados pela IA e publicados com sucesso no seu canal.", parse_mode="HTML")
@@ -5130,8 +5135,10 @@ async def esvaziar_fila_espiao_background(chat_id):
             dados["proximo_processamento"] = "2000-01-01 00:00:00"
             agora = datetime.now(fuso_horario)
             ontem_str = (agora - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
+            
             for item in dados.get("fila", []):
-                if not item.get("processado"):
+                # ✅ CORREÇÃO DE BLINDAGEM: Altera a data APENAS dos que NÃO foram processados
+                if item.get("processado") not in [True, 1, "true", "True"]:
                     item["data_captura"] = ontem_str
                     
             salvar_fila_clonagem(dados)
