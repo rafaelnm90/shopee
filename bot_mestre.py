@@ -5871,6 +5871,10 @@ async def iniciar_config_janela_espiao(message: types.Message, state: FSMContext
 
 @dp.message(ConfigRotinaEspiao.aguardando_janela)
 async def receber_janela_espiao(message: types.Message, state: FSMContext):
+    # ✅ VIA EXPRESSA DE CANCELAMENTO
+    if message.text == "Cancelar ❌":
+        return await cancelar_fluxo_global(message, state)
+        
     import re
     texto = message.text.strip()
     
@@ -5893,44 +5897,12 @@ async def receber_janela_espiao(message: types.Message, state: FSMContext):
     await message.answer(f"Deseja confirmar a nova janela para postar <b>{texto_exibicao}</b>?", parse_mode="HTML", reply_markup=teclado_conf)
     await state.set_state(ConfigRotinaEspiao.aguardando_confirmacao_janela)
 
-@dp.message(ConfigRotinaEspiao.aguardando_confirmacao_janela)
-async def confirmar_janela_espiao(message: types.Message, state: FSMContext):
-    if message.text != "Aprovar ✅":
-        await message.answer("Operação cancelada.")
-        await menu_grupos_vigiados(message, state)
-        return
-        
-    data = await state.get_data()
-    inicio, fim = data.get("inicio"), data.get("fim")
-    
-    dados = ler_alvos_espiao()
-    dados["inicio"] = inicio
-    dados["fim"] = fim
-    salvar_alvos_espiao(dados)
-    
-    texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"estritamente entre {inicio}h e {fim}h"
-    await message.answer(f"✅ <b>Janela Atualizada!</b>\nOs vídeos serão distribuídos {texto_exibicao}.", parse_mode="HTML")
-    await state.clear()
-    await menu_grupos_vigiados(message, state)
-
-@dp.message(F.text == "Editar Atraso ⏳", StateFilter("*"))
-async def iniciar_config_atraso_espiao(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
-    await state.clear()
-    
-    teclado_dias = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Mesmo Dia (D+0) 🟢")],
-            [KeyboardButton(text="Dia Seguinte (D+1) 🟡")],
-            [KeyboardButton(text="Dois Dias (D+2) 🔵")],
-            [KeyboardButton(text="Cancelar ❌")]
-        ], resize_keyboard=True, is_persistent=True
-    )
-    await message.answer("Escolha a defasagem temporal (Atraso) das postagens extraídas do Espião:", reply_markup=teclado_dias)
-    await state.set_state(ConfigRotinaEspiao.aguardando_intervalo_espiao)
-
 @dp.message(ConfigRotinaEspiao.aguardando_intervalo_espiao)
 async def receber_intervalo_espiao(message: types.Message, state: FSMContext):
+    # ✅ VIA EXPRESSA DE CANCELAMENTO
+    if message.text == "Cancelar ❌":
+        return await cancelar_fluxo_global(message, state)
+        
     mapa_dias = {"Mesmo Dia (D+0) 🟢": 0, "Dia Seguinte (D+1) 🟡": 1, "Dois Dias (D+2) 🔵": 2}
     if message.text not in mapa_dias:
         await message.answer("Por favor, use os botões na tela para escolher o intervalo.", reply_markup=teclado_cancelar)
@@ -5952,6 +5924,10 @@ async def receber_intervalo_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigRotinaEspiao.aguardando_modo)
 async def salvar_config_tempo_espiao(message: types.Message, state: FSMContext):
+    # ✅ VIA EXPRESSA DE CANCELAMENTO
+    if message.text == "Cancelar ❌":
+        return await cancelar_fluxo_global(message, state)
+        
     if message.text not in ["Aleatório 🔀", "Ordem de Chegada ⬇️"]:
         await message.answer("Por favor, use os botões de seleção para definir o modo.", reply_markup=teclado_cancelar)
         return
