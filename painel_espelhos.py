@@ -1447,6 +1447,10 @@ async def salvar_edicao_destino(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.aguardando_edicao_nova_janela)
 async def salvar_edicao_janela(message: types.Message, state: FSMContext):
+    # ✅ VIA EXPRESSA DE CANCELAMENTO
+    if message.text == "Cancelar Operação ❌":
+        return await cancelar_espelhador(message, state)
+        
     import re
     texto = message.text.strip()
     if texto == "Dia Todo (24h) 🕛" or texto.lower() == "dia todo":
@@ -1463,28 +1467,12 @@ async def salvar_edicao_janela(message: types.Message, state: FSMContext):
     await message.answer(f"Deseja confirmar a janela de postagem <b>{texto_exibicao}</b>?", parse_mode="HTML", reply_markup=teclado_conf)
     await state.set_state(EspelhadorFluxo.aguardando_confirmacao_edicao_janela)
 
-@router.message(EspelhadorFluxo.aguardando_confirmacao_edicao_janela)
-async def confirmar_edicao_janela(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    indice = data.get("indice_edicao")
-    if message.text != "Aprovar ✅":
-        novo_texto = str(indice + 1)
-        msg_simulada = message.model_copy(update={"text": novo_texto})
-        return await selecionar_acao_edicao(msg_simulada, state)
-        
-    inicio, fim = data.get("inicio"), data.get("fim")
-    dados = ler_espelhos()
-    dados["rotas"][indice]["inicio"] = inicio
-    dados["rotas"][indice]["fim"] = fim
-    salvar_espelhos(dados)
-    
-    texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"entre as {inicio}h e as {fim}h"
-    await message.answer(f"✅ A janela foi atualizada para postar {texto_exibicao} com sucesso!", parse_mode="HTML")
-    msg_simulada = message.model_copy(update={"text": str(indice + 1)})
-    await selecionar_acao_edicao(msg_simulada, state)
-
 @router.message(EspelhadorFluxo.aguardando_edicao_intervalo_dias)
 async def salvar_edicao_intervalo_dias(message: types.Message, state: FSMContext):
+    # ✅ VIA EXPRESSA DE CANCELAMENTO
+    if message.text == "Cancelar Operação ❌":
+        return await cancelar_espelhador(message, state)
+        
     mapa_dias = {"Mesmo Dia (D+0) 🟢": 0, "Dia Seguinte (D+1) 🟡": 1, "Dois Dias (D+2) 🔵": 2}
     if message.text not in mapa_dias: return await message.answer("Escolha com os botões.", reply_markup=teclado_espelhador_cancelar)
         
@@ -1496,37 +1484,12 @@ async def salvar_edicao_intervalo_dias(message: types.Message, state: FSMContext
     await message.answer(f"Deseja confirmar o intervalo temporal D+{intervalo}?{aviso_extra}", parse_mode="HTML", reply_markup=teclado_conf)
     await state.set_state(EspelhadorFluxo.aguardando_confirmacao_edicao_dias)
 
-@router.message(EspelhadorFluxo.aguardando_confirmacao_edicao_dias)
-async def confirmar_edicao_dias(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    indice = data.get("indice_edicao")
-    if message.text != "Aprovar ✅":
-        msg_simulada = message.model_copy(update={"text": str(indice + 1)})
-        return await selecionar_acao_edicao(msg_simulada, state)
-        
-    intervalo = data.get("intervalo_dias")
-    dados = ler_espelhos()
-    dados["rotas"][indice]["intervalo_dias"] = intervalo
-    if intervalo == 0: dados["rotas"][indice]["modo"] = "ordem"
-    salvar_espelhos(dados)
-    
-    try:
-        fila_dados = ler_fila_espelhador()
-        houve_reset = False
-        for item in fila_dados.get("fila", []):
-            if item.get("nome_rota") == dados["rotas"][indice]["nome"] and item.get("processado") not in [True, 1, "true", "True"]:
-                item["horario_disparo"] = "" 
-                houve_reset = True
-        if houve_reset: salvar_fila_espelhador(fila_dados)
-    except: pass
-    
-    aviso_extra = "\n⚠️ O modo de distribuição foi automaticamente alterado para <i>Ordem de Chegada</i>." if intervalo == 0 else ""
-    await message.answer(f"✅ O intervalo temporal foi atualizado para D+{intervalo}!{aviso_extra}\nO Motor Central já está a recalcular os horários.", parse_mode="HTML")
-    msg_simulada = message.model_copy(update={"text": str(indice + 1)})
-    await selecionar_acao_edicao(msg_simulada, state)
-
 @router.message(EspelhadorFluxo.aguardando_edicao_novo_modo)
 async def salvar_edicao_modo(message: types.Message, state: FSMContext):
+    # ✅ VIA EXPRESSA DE CANCELAMENTO
+    if message.text == "Cancelar Operação ❌":
+        return await cancelar_espelhador(message, state)
+        
     if message.text not in ["Aleatório 🔀", "Ordem de Chegada ⬇️"]: return await message.answer("Use os botões.", reply_markup=teclado_espelhador_cancelar)
     modo = "aleatorio" if message.text == "Aleatório 🔀" else "ordem"
     await state.update_data(modo=modo)
