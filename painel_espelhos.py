@@ -133,7 +133,8 @@ def ler_contador_espelhador(nome_rota):
     try:
         with open("fila_espelhador.json", "r") as f:
             dados = json.load(f)
-            return len([item for item in dados.get("fila", []) if item.get("nome_rota") == nome_rota])
+            # ✅ CORREÇÃO: Conta APENAS os vídeos que NÃO foram processados
+            return len([item for item in dados.get("fila", []) if item.get("nome_rota") == nome_rota and item.get("processado") not in [True, 1, "true", "True"]])
     except (FileNotFoundError, json.JSONDecodeError):
         return 0
 
