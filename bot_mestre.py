@@ -215,11 +215,12 @@ class RelatoriosFluxo(StatesGroup):
     menu_filas = State()
     aguardando_rota_espelhador = State() # ✅ NOVO: Estado para selecionar qual rota visualizar
 
-# ✅ NOVO: Máquina de Estados para a configuração do agendamento do Espião
 class ConfigRotinaEspiao(StatesGroup):
     aguardando_janela = State()
+    aguardando_confirmacao_janela = State() # ✅ NOVO
     aguardando_intervalo_espiao = State()
     aguardando_modo = State()
+    aguardando_confirmacao_tempo = State() # ✅ NOVO
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -5873,33 +5874,42 @@ async def receber_janela_espiao(message: types.Message, state: FSMContext):
     import re
     texto = message.text.strip()
     
-    # ✅ Identifica o clique no botão ou se foi digitado manualmente
     if texto == "Dia Todo (24h) 🕛" or texto.lower() == "dia todo":
-        inicio = 0
-        fim = 24
+        inicio, fim = 0, 24
     else:
         match = re.match(r"^(\d{1,2})-(\d{1,2})$", texto)
         if not match:
-            await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22, ou clique em 'Dia Todo (24h) 🕛'.", reply_markup=teclado_janela_espiao)
+            await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22.", reply_markup=teclado_janela_espiao)
             return
-            
         inicio, fim = map(int, match.groups())
-        # ✅ O limite do fim mudou para 24 para suportar a mecânica do dia todo
         if inicio >= fim or inicio < 0 or fim > 24:
             await message.answer("Valores inválidos! A hora de início deve ser menor que a do fim.", reply_markup=teclado_janela_espiao)
             return
 
+    await state.update_data(inicio=inicio, fim=fim)
+    texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"estritamente entre {inicio}h e {fim}h"
+    
+    teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
+    await message.answer(f"Deseja confirmar a nova janela para postar <b>{texto_exibicao}</b>?", parse_mode="HTML", reply_markup=teclado_conf)
+    await state.set_state(ConfigRotinaEspiao.aguardando_confirmacao_janela)
+
+@dp.message(ConfigRotinaEspiao.aguardando_confirmacao_janela)
+async def confirmar_janela_espiao(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar ✅":
+        await message.answer("Operação cancelada.")
+        await menu_grupos_vigiados(message, state)
+        return
+        
+    data = await state.get_data()
+    inicio, fim = data.get("inicio"), data.get("fim")
+    
     dados = ler_alvos_espiao()
     dados["inicio"] = inicio
     dados["fim"] = fim
     salvar_alvos_espiao(dados)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Nova Janela do Espião salva: {inicio}h às {fim}h")
-    
-    # ✅ Mensagem dinâmica adaptada para o que o usuário escolheu
     texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"estritamente entre {inicio}h e {fim}h"
     await message.answer(f"✅ <b>Janela Atualizada!</b>\nOs vídeos serão distribuídos {texto_exibicao}.", parse_mode="HTML")
-    
     await state.clear()
     await menu_grupos_vigiados(message, state)
 
@@ -5922,7 +5932,6 @@ async def iniciar_config_atraso_espiao(message: types.Message, state: FSMContext
 @dp.message(ConfigRotinaEspiao.aguardando_intervalo_espiao)
 async def receber_intervalo_espiao(message: types.Message, state: FSMContext):
     mapa_dias = {"Mesmo Dia (D+0) 🟢": 0, "Dia Seguinte (D+1) 🟡": 1, "Dois Dias (D+2) 🔵": 2}
-    
     if message.text not in mapa_dias:
         await message.answer("Por favor, use os botões na tela para escolher o intervalo.", reply_markup=teclado_cancelar)
         return
@@ -5930,19 +5939,14 @@ async def receber_intervalo_espiao(message: types.Message, state: FSMContext):
     intervalo = mapa_dias[message.text]
     await state.update_data(intervalo_dias_espiao=intervalo)
     
-    # ✅ NOVO: Pula a pergunta de Modo se for D+0 e salva direto como "ordem"
     if intervalo == 0:
-        if EXIBIR_LOGS: logger.info("⏭️ Atalho UX acionado: D+0 forçando modo 'Ordem de Chegada'.")
-        msg_simulada = message.model_copy(update={"text": "Ordem de Chegada ⬇️"})
-        await salvar_config_tempo_espiao(msg_simulada, state)
+        await state.update_data(modo="ordem")
+        teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
+        await message.answer(f"Deseja confirmar o atraso de D+0 (Mesmo Dia) com modo de Ordem de Chegada?", reply_markup=teclado_conf)
+        await state.set_state(ConfigRotinaEspiao.aguardando_confirmacao_tempo)
         return
         
-    teclado_modo = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")],
-            [KeyboardButton(text="Cancelar ❌")]
-        ], resize_keyboard=True, is_persistent=True
-    )
+    teclado_modo = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")], [KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
     await message.answer("Como deseja distribuir os clones retidos dentro da janela estipulada?", reply_markup=teclado_modo)
     await state.set_state(ConfigRotinaEspiao.aguardando_modo)
 
@@ -5953,8 +5957,25 @@ async def salvar_config_tempo_espiao(message: types.Message, state: FSMContext):
         return
         
     modo = "aleatorio" if message.text == "Aleatório 🔀" else "ordem"
+    await state.update_data(modo=modo)
+    
     data = await state.get_data()
     intervalo = data.get("intervalo_dias_espiao", 1)
+    
+    teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
+    await message.answer(f"Deseja confirmar o atraso de D+{intervalo} com distribuição {message.text}?", reply_markup=teclado_conf)
+    await state.set_state(ConfigRotinaEspiao.aguardando_confirmacao_tempo)
+
+@dp.message(ConfigRotinaEspiao.aguardando_confirmacao_tempo)
+async def confirmar_tempo_espiao(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar ✅":
+        await message.answer("Operação cancelada.")
+        await menu_grupos_vigiados(message, state)
+        return
+        
+    data = await state.get_data()
+    intervalo = data.get("intervalo_dias_espiao", 1)
+    modo = data.get("modo", "aleatorio")
     
     dados = ler_alvos_espiao()
     intervalo_antigo = dados.get("intervalo_dias", 1)
@@ -5963,24 +5984,20 @@ async def salvar_config_tempo_espiao(message: types.Message, state: FSMContext):
     dados["modo"] = modo
     salvar_alvos_espiao(dados)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Configuração do Espião salva: D+{intervalo} | Modo: {modo}")
-    await message.answer(f"✅ <b>Atraso do Espião Salvo!</b>\nAtraso: D+{intervalo}\nDistribuição: {message.text}", parse_mode="HTML")
+    modo_texto = "Ordem de Chegada ⬇️" if modo == "ordem" else "Aleatório 🔀"
+    await message.answer(f"✅ <b>Atraso do Espião Salvo!</b>\nAtraso: D+{intervalo}\nDistribuição: {modo_texto}", parse_mode="HTML")
     await state.clear()
     
-    # 🔫 GATILHO INTELIGENTE PADRONIZADO: Limpa o carimbo se houver QUALQUER mudança de dias!
     if intervalo_antigo != intervalo:
         fila_data = ler_fila_clonagem()
         houve_reset = False
         for item in fila_data.get("fila", []):
-            if not item.get("processado"):
+            if item.get("processado") not in [True, 1, "true", "True"]:
                 item["horario_disparo"] = "" 
                 houve_reset = True
-        
         if houve_reset:
             salvar_fila_clonagem(fila_data)
-            
-        if EXIBIR_LOGS: logger.info(f"🔄 [Gatilho] Mudança de D+{intervalo_antigo} para D+{intervalo} detectada! Resetando a fila do Espião para recálculo orgânico.")
-        await message.answer(f"⚠️ <b>Gatilho de Recálculo Acionado!</b>\nComo você alterou a defasagem de D+{intervalo_antigo} para D+{intervalo}, todos os horários pendentes foram resetados.\nO Motor Central já está a recalcular os horários de forma orgânica e respeitando a sua janela.", parse_mode="HTML")
+        await message.answer(f"⚠️ <b>Gatilho de Recálculo Acionado!</b>\nComo você alterou a defasagem, todos os horários pendentes foram resetados.", parse_mode="HTML")
         
     await menu_grupos_vigiados(message, state)
 
