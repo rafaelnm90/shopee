@@ -5914,6 +5914,22 @@ async def confirmar_janela_espiao(message: types.Message, state: FSMContext):
     await state.clear()
     await menu_grupos_vigiados(message, state)
 
+@dp.message(F.text == "Editar Atraso ⏳", StateFilter("*"))
+async def iniciar_config_atraso_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    
+    teclado_dias = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Mesmo Dia (D+0) 🟢")],
+            [KeyboardButton(text="Dia Seguinte (D+1) 🟡")],
+            [KeyboardButton(text="Dois Dias (D+2) 🔵")],
+            [KeyboardButton(text="Cancelar ❌")]
+        ], resize_keyboard=True, is_persistent=True
+    )
+    await message.answer("Escolha a defasagem temporal (Atraso) das postagens extraídas do Espião:", reply_markup=teclado_dias)
+    await state.set_state(ConfigRotinaEspiao.aguardando_intervalo_espiao)
+
 @dp.message(ConfigRotinaEspiao.aguardando_intervalo_espiao)
 async def receber_intervalo_espiao(message: types.Message, state: FSMContext):
     mapa_dias = {"Mesmo Dia (D+0) 🟢": 0, "Dia Seguinte (D+1) 🟡": 1, "Dois Dias (D+2) 🔵": 2}
