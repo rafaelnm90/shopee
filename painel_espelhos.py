@@ -1447,10 +1447,6 @@ async def salvar_edicao_destino(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.aguardando_edicao_nova_janela)
 async def salvar_edicao_janela(message: types.Message, state: FSMContext):
-    # ✅ VIA EXPRESSA DE CANCELAMENTO
-    if message.text == "Cancelar Operação ❌":
-        return await cancelar_espelhador(message, state)
-        
     import re
     texto = message.text.strip()
     if texto == "Dia Todo (24h) 🕛" or texto.lower() == "dia todo":
@@ -1469,10 +1465,6 @@ async def salvar_edicao_janela(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.aguardando_edicao_intervalo_dias)
 async def salvar_edicao_intervalo_dias(message: types.Message, state: FSMContext):
-    # ✅ VIA EXPRESSA DE CANCELAMENTO
-    if message.text == "Cancelar Operação ❌":
-        return await cancelar_espelhador(message, state)
-        
     mapa_dias = {"Mesmo Dia (D+0) 🟢": 0, "Dia Seguinte (D+1) 🟡": 1, "Dois Dias (D+2) 🔵": 2}
     if message.text not in mapa_dias: return await message.answer("Escolha com os botões.", reply_markup=teclado_espelhador_cancelar)
         
@@ -1486,10 +1478,6 @@ async def salvar_edicao_intervalo_dias(message: types.Message, state: FSMContext
 
 @router.message(EspelhadorFluxo.aguardando_edicao_novo_modo)
 async def salvar_edicao_modo(message: types.Message, state: FSMContext):
-    # ✅ VIA EXPRESSA DE CANCELAMENTO
-    if message.text == "Cancelar Operação ❌":
-        return await cancelar_espelhador(message, state)
-        
     if message.text not in ["Aleatório 🔀", "Ordem de Chegada ⬇️"]: return await message.answer("Use os botões.", reply_markup=teclado_espelhador_cancelar)
     modo = "aleatorio" if message.text == "Aleatório 🔀" else "ordem"
     await state.update_data(modo=modo)
