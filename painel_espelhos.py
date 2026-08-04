@@ -73,7 +73,7 @@ teclado_espelhador_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Espelho ➕"), KeyboardButton(text="Remover Espelho 🗑️")],
         [KeyboardButton(text="Editar Espelho ✏️")],
-        [KeyboardButton(text="Forçar Postagens 🚀")],
+        [KeyboardButton(text="Forçar Espelhos 🚀")], # <--- Alterado aqui
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -149,7 +149,15 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
     estado_atual = await state.get_state()
     data = await state.get_data()
 
-    # --- NÍVEL 3: Submenu de Origens (Volta para os botões Adicionar/Remover/Blacklist) ---
+    # --- PROTEÇÃO ANTI-FANTASMA: Se estiver escolhendo a rota, volta sempre para a raiz ---
+    if estado_atual in ["EspelhadorFluxo:aguardando_edicao_escolha_rota", "EspelhadorFluxo:aguardando_remocao", "EspelhadorFluxo:aguardando_rota_esvaziar", "EspelhadorFluxo:aguardando_destino_criacao"]:
+        if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando ao Painel Principal do Espelhador.")
+        await state.clear()
+        await message.answer("Operação cancelada.", reply_markup=teclado_espelhador_menu)
+        await painel_espelhador(message, state)
+        return
+
+    # --- NÍVEL 3: Submenu de Origens ---
     estados_origem = [
         "EspelhadorFluxo:aguardando_nova_origem",
         "EspelhadorFluxo:aguardando_confirmacao_nova_origem",
@@ -160,7 +168,6 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         "EspelhadorFluxo:aguardando_blacklist_remove",
         "EspelhadorFluxo:aguardando_confirmacao_blacklist_conflito"
     ]
-    
     if estado_atual in estados_origem:
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando ao submenu de Origens.")
         teclado_origens = ReplyKeyboardMarkup(
@@ -175,7 +182,7 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
         return
 
-    # --- NÍVEL 2: Submenu de Edição da Rota (Volta para os botões de configuração) ---
+    # --- NÍVEL 2: Submenu de Edição da Rota ---
     estados_edicao = [
         "EspelhadorFluxo:aguardando_acao_origem", 
         "EspelhadorFluxo:aguardando_acao_analise",
@@ -185,7 +192,6 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         "EspelhadorFluxo:aguardando_edicao_intervalo_dias",
         "EspelhadorFluxo:aguardando_edicao_novo_modo"
     ]
-    
     if estado_atual in estados_edicao and data.get("indice_edicao") is not None:
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando ao menu de Edição da Rota.")
         await message.answer("Ação cancelada. Retornando às configurações da rota...")
@@ -194,8 +200,8 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         await selecionar_acao_edicao(msg_simulada, state)
         return
 
-    # --- NÍVEL 1: Cancelamento Raiz (Volta para o Painel Principal do Espelhador) ---
-    if EXIBIR_LOGS: logger.info("🔙 Cancelamento Global: Voltando ao Painel Principal do Espelhador.")
+    # --- NÍVEL 1: Cancelamento Raiz (Fallback de Segurança) ---
+    if EXIBIR_LOGS: logger.info("🔙 Cancelamento Global/Fallback: Voltando ao Painel Principal do Espelhador.")
     await state.clear()
     await message.answer("Operação cancelada.", reply_markup=teclado_espelhador_menu)
     await painel_espelhador(message, state)
@@ -1789,7 +1795,7 @@ async def processar_remocao_origem(message: types.Message, state: FSMContext):
     msg_simulada = message.model_copy(update={"text": novo_texto})
     await selecionar_acao_edicao(msg_simulada, state)
 
-@router.message(EspelhadorFluxo.menu_principal, F.text == "Forçar Postagens 🚀")
+@router.message(EspelhadorFluxo.menu_principal, F.text == "Forçar Espelhos 🚀") # <--- Alterado aqui
 async def iniciar_esvaziar_fila(message: types.Message, state: FSMContext):
     dados = ler_espelhos()
     rotas = dados.get("rotas", [])
