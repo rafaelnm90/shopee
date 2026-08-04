@@ -68,6 +68,9 @@ class EspelhadorFluxo(StatesGroup):
     aguardando_confirmacao_blacklist_conflito = State()
     # ✅ NOVO ESTADO DE ANÁLISE:
     aguardando_acao_analise = State()
+    aguardando_confirmacao_edicao_janela = State()
+    aguardando_confirmacao_edicao_dias = State()
+    aguardando_confirmacao_edicao_modo = State()
 
 teclado_espelhador_menu = ReplyKeyboardMarkup(
     keyboard=[
@@ -1446,116 +1449,108 @@ async def salvar_edicao_destino(message: types.Message, state: FSMContext):
 async def salvar_edicao_janela(message: types.Message, state: FSMContext):
     import re
     texto = message.text.strip()
-    
-    # ✅ Identifica o clique no botão ou se foi digitado manualmente
     if texto == "Dia Todo (24h) 🕛" or texto.lower() == "dia todo":
-        inicio = 0
-        fim = 24
-        if EXIBIR_LOGS: logger.info("🕛 Janela de edição configurada para Dia Todo (24h).")
+        inicio, fim = 0, 24
     else:
         match = re.match(r"^(\d{1,2})-(\d{1,2})$", texto)
-        if not match:
-            await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22, ou clique em 'Dia Todo (24h) 🕛'.", reply_markup=teclado_espelhador_janela)
-            return
-            
+        if not match: return await message.answer("Formato inválido!", reply_markup=teclado_espelhador_janela)
         inicio, fim = map(int, match.groups())
-        if inicio >= fim or inicio < 0 or fim > 24:
-            await message.answer("Valores inválidos! A hora de início deve ser menor que a do fim.", reply_markup=teclado_espelhador_janela)
-            return
+        if inicio >= fim or inicio < 0 or fim > 24: return await message.answer("Valores inválidos!", reply_markup=teclado_espelhador_janela)
             
+    await state.update_data(inicio=inicio, fim=fim)
+    texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"entre as {inicio}h e as {fim}h"
+    teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True, is_persistent=True)
+    await message.answer(f"Deseja confirmar a janela de postagem <b>{texto_exibicao}</b>?", parse_mode="HTML", reply_markup=teclado_conf)
+    await state.set_state(EspelhadorFluxo.aguardando_confirmacao_edicao_janela)
+
+@router.message(EspelhadorFluxo.aguardando_confirmacao_edicao_janela)
+async def confirmar_edicao_janela(message: types.Message, state: FSMContext):
     data = await state.get_data()
     indice = data.get("indice_edicao")
-    
+    if message.text != "Aprovar ✅":
+        novo_texto = str(indice + 1)
+        msg_simulada = message.model_copy(update={"text": novo_texto})
+        return await selecionar_acao_edicao(msg_simulada, state)
+        
+    inicio, fim = data.get("inicio"), data.get("fim")
     dados = ler_espelhos()
-    rotas = dados.get("rotas", [])
-    rotas[indice]["inicio"] = inicio
-    rotas[indice]["fim"] = fim
-    dados["rotas"] = rotas
+    dados["rotas"][indice]["inicio"] = inicio
+    dados["rotas"][indice]["fim"] = fim
     salvar_espelhos(dados)
     
-    if EXIBIR_LOGS: logger.info(f"✏️ Janela da rota '{rotas[indice]['nome']}' atualizada para {inicio}h-{fim}h.")
-    
-    # ✅ Mensagem dinâmica adaptada para o que o usuário escolheu
     texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"entre as {inicio}h e as {fim}h"
     await message.answer(f"✅ A janela foi atualizada para postar {texto_exibicao} com sucesso!", parse_mode="HTML")
-    
-    # ✅ CORREÇÃO: Volta para o menu de edição da rota atual
-    novo_texto = str(indice + 1)
-    msg_simulada = message.model_copy(update={"text": novo_texto})
-    if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu da rota atual via mensagem simulada (Janela).")
+    msg_simulada = message.model_copy(update={"text": str(indice + 1)})
     await selecionar_acao_edicao(msg_simulada, state)
 
 @router.message(EspelhadorFluxo.aguardando_edicao_intervalo_dias)
 async def salvar_edicao_intervalo_dias(message: types.Message, state: FSMContext):
     mapa_dias = {"Mesmo Dia (D+0) 🟢": 0, "Dia Seguinte (D+1) 🟡": 1, "Dois Dias (D+2) 🔵": 2}
-    
-    if message.text not in mapa_dias:
-        await message.answer("Por favor, utilize os botões para escolher o intervalo.", reply_markup=teclado_espelhador_cancelar)
-        return
+    if message.text not in mapa_dias: return await message.answer("Escolha com os botões.", reply_markup=teclado_espelhador_cancelar)
         
     intervalo = mapa_dias[message.text]
+    await state.update_data(intervalo_dias=intervalo)
+    
+    aviso_extra = "\n⚠️ <b>Nota:</b> O modo será alterado para <i>Ordem de Chegada</i>." if intervalo == 0 else ""
+    teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True, is_persistent=True)
+    await message.answer(f"Deseja confirmar o intervalo temporal D+{intervalo}?{aviso_extra}", parse_mode="HTML", reply_markup=teclado_conf)
+    await state.set_state(EspelhadorFluxo.aguardando_confirmacao_edicao_dias)
+
+@router.message(EspelhadorFluxo.aguardando_confirmacao_edicao_dias)
+async def confirmar_edicao_dias(message: types.Message, state: FSMContext):
     data = await state.get_data()
     indice = data.get("indice_edicao")
-    
-    dados = ler_espelhos()
-    rotas = dados.get("rotas", [])
-    
-    rotas[indice]["intervalo_dias"] = intervalo
-    
-    # ✅ NOVO: Se o usuário mudar para D+0, o robô força automaticamente o modo para "ordem"
-    if intervalo == 0:
-        rotas[indice]["modo"] = "ordem"
-        if EXIBIR_LOGS: logger.info(f"🔄 Modo da rota '{rotas[indice]['nome']}' forçado para 'ordem' devido ao D+0.")
+    if message.text != "Aprovar ✅":
+        msg_simulada = message.model_copy(update={"text": str(indice + 1)})
+        return await selecionar_acao_edicao(msg_simulada, state)
         
-    dados["rotas"] = rotas
+    intervalo = data.get("intervalo_dias")
+    dados = ler_espelhos()
+    dados["rotas"][indice]["intervalo_dias"] = intervalo
+    if intervalo == 0: dados["rotas"][indice]["modo"] = "ordem"
     salvar_espelhos(dados)
     
     try:
         fila_dados = ler_fila_espelhador()
         houve_reset = False
         for item in fila_dados.get("fila", []):
-            if item.get("nome_rota") == rotas[indice]["nome"] and not item.get("processado"):
+            if item.get("nome_rota") == dados["rotas"][indice]["nome"] and item.get("processado") not in [True, 1, "true", "True"]:
                 item["horario_disparo"] = "" 
                 houve_reset = True
-        if houve_reset:
-            salvar_fila_espelhador(fila_dados)
-            if EXIBIR_LOGS: logger.info(f"🔄 Fila da rota '{rotas[indice]['nome']}' resetada para recálculo orgânico.")
-    except Exception as e:
-        pass
+        if houve_reset: salvar_fila_espelhador(fila_dados)
+    except: pass
     
-    if EXIBIR_LOGS: logger.info(f"✏️ Atraso dinâmico da rota '{rotas[indice]['nome']}' modificado para D+{intervalo}.")
-    
-    # ✅ Aviso dinâmico informando a mudança automática do modo
-    aviso_extra = "\n⚠️ <b>Nota:</b> O modo de distribuição foi automaticamente alterado para <i>Ordem de Chegada</i> para garantir a postagem imediata no mesmo dia." if intervalo == 0 else ""
-    await message.answer(f"✅ O intervalo temporal foi atualizado para D+{intervalo}!{aviso_extra}\nO Motor Central já está a recalcular os horários de forma orgânica e respeitando a janela.", parse_mode="HTML")
-    
-    novo_texto = str(indice + 1)
-    msg_simulada = message.model_copy(update={"text": novo_texto})
-    if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu da rota atual via mensagem simulada (Dias).")
+    aviso_extra = "\n⚠️ O modo de distribuição foi automaticamente alterado para <i>Ordem de Chegada</i>." if intervalo == 0 else ""
+    await message.answer(f"✅ O intervalo temporal foi atualizado para D+{intervalo}!{aviso_extra}\nO Motor Central já está a recalcular os horários.", parse_mode="HTML")
+    msg_simulada = message.model_copy(update={"text": str(indice + 1)})
     await selecionar_acao_edicao(msg_simulada, state)
 
 @router.message(EspelhadorFluxo.aguardando_edicao_novo_modo)
 async def salvar_edicao_modo(message: types.Message, state: FSMContext):
-    if message.text not in ["Aleatório 🔀", "Ordem de Chegada ⬇️"]:
-        await message.answer("Por favor, use os botões para escolher o modo.", reply_markup=teclado_espelhador_cancelar)
-        return
-        
+    if message.text not in ["Aleatório 🔀", "Ordem de Chegada ⬇️"]: return await message.answer("Use os botões.", reply_markup=teclado_espelhador_cancelar)
     modo = "aleatorio" if message.text == "Aleatório 🔀" else "ordem"
+    await state.update_data(modo=modo)
+    
+    teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True, is_persistent=True)
+    await message.answer(f"Deseja confirmar o modo de distribuição {message.text}?", parse_mode="HTML", reply_markup=teclado_conf)
+    await state.set_state(EspelhadorFluxo.aguardando_confirmacao_edicao_modo)
+
+@router.message(EspelhadorFluxo.aguardando_confirmacao_edicao_modo)
+async def confirmar_edicao_modo(message: types.Message, state: FSMContext):
     data = await state.get_data()
     indice = data.get("indice_edicao")
-    
+    if message.text != "Aprovar ✅":
+        msg_simulada = message.model_copy(update={"text": str(indice + 1)})
+        return await selecionar_acao_edicao(msg_simulada, state)
+        
+    modo = data.get("modo")
     dados = ler_espelhos()
-    rotas = dados.get("rotas", [])
-    rotas[indice]["modo"] = modo
-    dados["rotas"] = rotas
+    dados["rotas"][indice]["modo"] = modo
     salvar_espelhos(dados)
     
-    if EXIBIR_LOGS: logger.info(f"✏️ Modo da rota '{rotas[indice]['nome']}' atualizado para {modo}.")
-    await message.answer(f"✅ O modo de distribuição foi atualizado para {message.text} com sucesso!", parse_mode="HTML")
-    # ✅ CORREÇÃO: Volta para o menu de edição da rota atual
-    novo_texto = str(indice + 1)
-    msg_simulada = message.model_copy(update={"text": novo_texto})
-    if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu da rota atual via mensagem simulada (Modo).")
+    modo_texto = "Aleatório 🔀" if modo == "aleatorio" else "Ordem de Chegada ⬇️"
+    await message.answer(f"✅ O modo de distribuição foi atualizado para {modo_texto} com sucesso!", parse_mode="HTML")
+    msg_simulada = message.model_copy(update={"text": str(indice + 1)})
     await selecionar_acao_edicao(msg_simulada, state)
 
 @router.message(EspelhadorFluxo.aguardando_nova_origem)
