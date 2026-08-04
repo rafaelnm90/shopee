@@ -274,21 +274,15 @@ async def remover_erros_espelhador_callback(callback: types.CallbackQuery, state
         await callback.message.edit_text(f"✅ <b>Limpeza Concluída!</b>\n{removidos} canal(is) com erro foram desvinculados da rota.", parse_mode="HTML")
     else:
         await callback.message.edit_text("Nenhum canal com erro foi encontrado para remover.")
+    
     await callback.answer()
     
-    if estado_atual in estados_edicao and data.get("indice_edicao") is not None:
-        if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando ao menu de Edição da Rota.")
-        await message.answer("Ação cancelada. Retornando às configurações da rota...")
-        novo_texto = str(data["indice_edicao"] + 1)
-        msg_simulada = message.model_copy(update={"text": novo_texto})
+    # ✅ CORREÇÃO: Usando callback.message para simular o retorno com segurança
+    if indice is not None:
+        if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu de Edição da Rota após limpeza.")
+        novo_texto = str(indice + 1)
+        msg_simulada = callback.message.model_copy(update={"text": novo_texto})
         await selecionar_acao_edicao(msg_simulada, state)
-        return
-
-    # --- NÍVEL 1: Cancelamento Raiz (Volta para o Painel Principal do Espelhador) ---
-    if EXIBIR_LOGS: logger.info("🔙 Cancelamento Global: Voltando ao Painel Principal do Espelhador.")
-    await state.clear()
-    await message.answer("Operação cancelada.", reply_markup=teclado_espelhador_menu)
-    await painel_espelhador(message, state)
 
 @router.message(EspelhadorFluxo.aguardando_acao_analise, F.text == "🔙 Voltar ao Menu de Edição")
 async def voltar_de_analise_para_edicao(message: types.Message, state: FSMContext):
@@ -575,130 +569,6 @@ async def receber_origem_criacao(message: types.Message, state: FSMContext):
         texto_resposta += "⚠️ <b>Nenhum canal válido aprovado!</b>\nCertifique-se de que os IDs não são links de convite privados ou iguais ao destino.\n\nTente enviar novamente:"
         await message.answer(texto_resposta, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
 
-
-@router.message(EspelhadorFluxo.aguardando_nova_origem)
-async def confirmar_nova_origem(message: types.Message, state: FSMContext):
-    texto = message.text
-    data = await state.get_data()
-    indice = data.get("indice_edicao")
-    dados = ler_espelhos()
-    rota_atual = dados["rotas"][indice]
-    
-    if texto == "Lista Negra (Blacklist) ⛔":
-        bl = rota_atual.get("blacklist", [])
-        txt = f"⛔ <b>Lista Negra da Rota '{rota_atual['nome']}'</b>\n"
-        if bl:
-            for i, b in enumerate(bl, 1): txt += f"{i}. <code>{b}</code>\n"
-        else: txt += "<i>Nenhuma restrição cadastrada.</i>\n"
-        tcl = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Rem. da Blacklist")], [KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True)
-        await message.answer(txt, reply_markup=tcl, parse_mode="HTML")
-        await state.set_state(EspelhadorFluxo.aguardando_acao_blacklist)
-        return
-        
-    origens_atuais = rota_atual.get('origens', [])
-    if not origens_atuais and 'origem' in rota_atual: origens_atuais = [rota_atual['origem']]
-    destino_atual = str(rota_atual.get("destino", ""))
-    blacklist = [str(b) for b in rota_atual.get("blacklist", [])]
-    
-    is_importacao_global = texto == "Importar Banco Global 🌍"
-    
-    if is_importacao_global:
-        msg_status = await message.answer("⏳ <b>Importando e cruzando Banco Global com a Lista Negra da rota...</b>", parse_mode="HTML", reply_markup=teclado_espelhador_cancelar)
-        from utils import obter_banco_global_origens
-        entradas_brutas = obter_banco_global_origens()
-        if not entradas_brutas:
-            await msg_status.delete()
-            await message.answer("⚠️ Banco Global vazio.")
-            return
-    else:
-        import re
-        padroes = re.findall(r'(-100\d+(?::\d+)?|@\w+|https?://t\.me/[^\s\)]+)', texto)
-        if padroes: entradas_brutas = list(dict.fromkeys(padroes))
-        else: entradas_brutas = texto.replace('\n', ',').split(',')
-        msg_status = await message.answer("⏳ Validando grupos...", reply_markup=teclado_espelhador_cancelar)
-
-    origens_validas = []
-    origens_duplicadas = []
-    origens_invalidas = []
-    origens_em_loop = [] 
-
-    for entrada in entradas_brutas:
-        entrada_limpa = entrada.strip()
-        if not entrada_limpa: continue
-        
-        if is_importacao_global:
-            sucesso = True
-            id_final = entrada_limpa
-            nome = entrada_limpa
-        else:
-            sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada_limpa)
-            
-        if sucesso:
-            id_base = id_final.replace("-100", "")
-            
-            if id_final in blacklist or id_base in [b.replace("-100", "") for b in blacklist]:
-                origens_invalidas.append(f"{entrada_limpa} (Blacklist ⛔)")
-            elif destino_atual and id_base == destino_atual.replace("-100", ""):
-                origens_em_loop.append(entrada_limpa)
-            elif id_final in origens_atuais or id_final in [o['id'] for o in origens_validas]:
-                origens_duplicadas.append(entrada_limpa)
-            else:
-                if not is_importacao_global:
-                    salvar_nome_grupo(id_final, nome)
-                origens_validas.append({"id": id_final, "nome": nome})
-        else:
-            origens_invalidas.append(entrada_limpa)
-
-    await msg_status.delete()
-    texto_resumo = ""
-
-    if origens_validas:
-        texto_resumo += f"✅ <b>{len(origens_validas)} NOVO(S) canal(is) validado(s):</b>\n"
-        for o in origens_validas[:15]:
-            texto_resumo += f"🔹 {o['nome']} (<code>{o['id']}</code>)\n"
-        if len(origens_validas) > 15:
-            texto_resumo += f"<i>... e mais {len(origens_validas) - 15} canais.</i>\n"
-        texto_resumo += "\n"
-
-    if origens_em_loop:
-        texto_resumo += f"🛑 <b>{len(origens_em_loop)} bloqueada(s) por Anti-Loop:</b>\n"
-        for loop in origens_em_loop[:10]:
-            texto_resumo += f"🔻 <code>{loop}</code>\n"
-        if len(origens_em_loop) > 10:
-            texto_resumo += f"<i>... e mais {len(origens_em_loop) - 10} canais.</i>\n"
-        texto_resumo += "\n"
-
-    if origens_duplicadas:
-        texto_resumo += f"ℹ️ <b>{len(origens_duplicadas)} ignorado(s) por já estarem na rota:</b>\n"
-        for dup in origens_duplicadas[:10]:
-            texto_resumo += f"🔸 <code>{dup}</code>\n"
-        if len(origens_duplicadas) > 10:
-            texto_resumo += f"<i>... e mais {len(origens_duplicadas) - 10} canais.</i>\n"
-        texto_resumo += "\n"
-
-    if origens_invalidas:
-        texto_resumo += f"❌ <b>{len(origens_invalidas)} falharam (Formato inválido/Blacklist):</b>\n"
-        for rej in origens_invalidas[:10]:
-            texto_resumo += f"🔻 <code>{rej}</code>\n"
-        if len(origens_invalidas) > 10:
-            texto_resumo += f"<i>... e mais {len(origens_invalidas) - 10} canais.</i>\n"
-        texto_resumo += "\n"
-
-    if not origens_validas:
-        texto_resumo += "⚠️ <b>Nenhum canal novo foi aprovado.</b> Tente novamente:"
-        await message.answer(texto_resumo, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
-        return
-
-    await state.update_data(origens_para_adicionar=origens_validas)
-    
-    if len(dados.get("rotas", [])) > 1:
-        texto_resumo += f"O seu sistema possui <b>{len(dados['rotas'])} rotas ativas</b>. Onde deseja adicionar?"
-        await message.answer(texto_resumo, reply_markup=teclado_espelhador_abrangencia, parse_mode="HTML")
-    else:
-        texto_resumo += f"Deseja adicionar à rota <b>{rota_atual['nome']}</b>?"
-        await message.answer(texto_resumo, reply_markup=teclado_espelhador_confirmacao, parse_mode="HTML")
-    
-    await state.set_state(EspelhadorFluxo.aguardando_confirmacao_nova_origem)
 
 @router.message(EspelhadorFluxo.aguardando_janela)
 async def receber_janela_rota(message: types.Message, state: FSMContext):
@@ -1469,13 +1339,15 @@ async def salvar_edicao_janela(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.aguardando_edicao_intervalo_dias)
 async def salvar_edicao_intervalo_dias(message: types.Message, state: FSMContext):
     mapa_dias = {"Mesmo Dia (D+0) 🟢": 0, "Dia Seguinte (D+1) 🟡": 1, "Dois Dias (D+2) 🔵": 2}
-    if message.text not in mapa_dias: return await message.answer("Escolha com os botões.", reply_markup=teclado_espelhador_cancelar)
+    if message.text not in mapa_dias: 
+        return await message.answer("Escolha com os botões.", reply_markup=teclado_espelhador_cancelar)
         
     intervalo = mapa_dias[message.text]
     await state.update_data(intervalo_dias=intervalo)
     
     aviso_extra = "\n⚠️ <b>Nota:</b> O modo será alterado para <i>Ordem de Chegada</i>." if intervalo == 0 else ""
     teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True, is_persistent=True)
+    
     await message.answer(f"Deseja confirmar o intervalo temporal D+{intervalo}?{aviso_extra}", parse_mode="HTML", reply_markup=teclado_conf)
     await state.set_state(EspelhadorFluxo.aguardando_confirmacao_edicao_dias)
 
