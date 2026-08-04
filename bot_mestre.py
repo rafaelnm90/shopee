@@ -5871,10 +5871,6 @@ async def iniciar_config_janela_espiao(message: types.Message, state: FSMContext
 
 @dp.message(ConfigRotinaEspiao.aguardando_janela)
 async def receber_janela_espiao(message: types.Message, state: FSMContext):
-    # ✅ VIA EXPRESSA DE CANCELAMENTO
-    if message.text == "Cancelar ❌":
-        return await cancelar_fluxo_global(message, state)
-        
     import re
     texto = message.text.strip()
     
@@ -5899,10 +5895,6 @@ async def receber_janela_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigRotinaEspiao.aguardando_intervalo_espiao)
 async def receber_intervalo_espiao(message: types.Message, state: FSMContext):
-    # ✅ VIA EXPRESSA DE CANCELAMENTO
-    if message.text == "Cancelar ❌":
-        return await cancelar_fluxo_global(message, state)
-        
     mapa_dias = {"Mesmo Dia (D+0) 🟢": 0, "Dia Seguinte (D+1) 🟡": 1, "Dois Dias (D+2) 🔵": 2}
     if message.text not in mapa_dias:
         await message.answer("Por favor, use os botões na tela para escolher o intervalo.", reply_markup=teclado_cancelar)
@@ -5919,15 +5911,11 @@ async def receber_intervalo_espiao(message: types.Message, state: FSMContext):
         return
         
     teclado_modo = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")], [KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
-    await message.answer("Como deseja distribuir os clones retidos dentro da janela estipulada?", reply_markup=teclado_modo)
+    await message.answer("Como deseja distribute os clones retidos dentro da janela estipulada?", reply_markup=teclado_modo)
     await state.set_state(ConfigRotinaEspiao.aguardando_modo)
 
 @dp.message(ConfigRotinaEspiao.aguardando_modo)
 async def salvar_config_tempo_espiao(message: types.Message, state: FSMContext):
-    # ✅ VIA EXPRESSA DE CANCELAMENTO
-    if message.text == "Cancelar ❌":
-        return await cancelar_fluxo_global(message, state)
-        
     if message.text not in ["Aleatório 🔀", "Ordem de Chegada ⬇️"]:
         await message.answer("Por favor, use os botões de seleção para definir o modo.", reply_markup=teclado_cancelar)
         return
