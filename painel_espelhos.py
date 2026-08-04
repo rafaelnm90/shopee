@@ -144,18 +144,10 @@ def salvar_espelhos(dados):
 def obter_teclado_importacao_espelhador():
     return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Importar Banco Global 🌍")], [KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True, is_persistent=True)
 
-@router.message(F.text.in_(["Cancelar Operação ❌", "Voltar ao Menu Espelho 🔙", "Voltar ao Menu de Edição"]), StateFilter("*"))
+@router.message(F.text.in_(["Cancelar Operação ❌", "Voltar ao Menu Espelho 🔙", "🔙 Voltar ao Menu de Edição"]), StateFilter("*"))
 async def cancelar_espelhador(message: types.Message, state: FSMContext):
     estado_atual = await state.get_state()
     data = await state.get_data()
-    
-    # ✅ Se o utilizador clicou em voltar a partir de submenus de canais/análise, volta para o menu de edição da rota atual
-    if message.text in ["Voltar ao Menu Espelho 🔙", "Voltar ao Menu de Edição"] and data.get("indice_edicao") is not None:
-        if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu de edição da rota atual.")
-        novo_texto = str(data["indice_edicao"] + 1)
-        msg_simulada = message.model_copy(update={"text": novo_texto})
-        await selecionar_acao_edicao(msg_simulada, state)
-        return
 
     # --- NÍVEL 3: Submenu de Origens (Volta para os botões Adicionar/Remover/Blacklist) ---
     estados_origem = [
