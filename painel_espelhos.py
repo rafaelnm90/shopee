@@ -194,7 +194,10 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         "EspelhadorFluxo:aguardando_edicao_novo_destino",
         "EspelhadorFluxo:aguardando_edicao_nova_janela",
         "EspelhadorFluxo:aguardando_edicao_intervalo_dias",
-        "EspelhadorFluxo:aguardando_edicao_novo_modo"
+        "EspelhadorFluxo:aguardando_edicao_novo_modo",
+        "EspelhadorFluxo:aguardando_confirmacao_edicao_janela", # ✅ ADICIONADO
+        "EspelhadorFluxo:aguardando_confirmacao_edicao_dias",   # ✅ ADICIONADO
+        "EspelhadorFluxo:aguardando_confirmacao_edicao_modo"    # ✅ ADICIONADO
     ]
     if estado_atual in estados_edicao and data.get("indice_edicao") is not None:
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando ao menu de Edição da Rota.")
@@ -1475,6 +1478,71 @@ async def salvar_edicao_intervalo_dias(message: types.Message, state: FSMContext
     teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True, is_persistent=True)
     await message.answer(f"Deseja confirmar o intervalo temporal D+{intervalo}?{aviso_extra}", parse_mode="HTML", reply_markup=teclado_conf)
     await state.set_state(EspelhadorFluxo.aguardando_confirmacao_edicao_dias)
+
+@router.message(EspelhadorFluxo.aguardando_confirmacao_edicao_janela)
+async def confirmar_edicao_janela(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    indice = data.get("indice_edicao")
+    
+    if message.text != "Aprovar ✅":
+        msg_simulada = message.model_copy(update={"text": str(indice + 1)})
+        return await selecionar_acao_edicao(msg_simulada, state)
+        
+    inicio = data.get("inicio")
+    fim = data.get("fim")
+    
+    dados = ler_espelhos()
+    dados["rotas"][indice]["inicio"] = inicio
+    dados["rotas"][indice]["fim"] = fim
+    salvar_espelhos(dados)
+    
+    texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"entre as {inicio}h e as {fim}h"
+    await message.answer(f"✅ A janela de postagem foi atualizada para <b>{texto_exibicao}</b> com sucesso!", parse_mode="HTML")
+    
+    msg_simulada = message.model_copy(update={"text": str(indice + 1)})
+    await selecionar_acao_edicao(msg_simulada, state)
+
+@router.message(EspelhadorFluxo.aguardando_confirmacao_edicao_dias)
+async def confirmar_edicao_dias(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    indice = data.get("indice_edicao")
+    
+    if message.text != "Aprovar ✅":
+        msg_simulada = message.model_copy(update={"text": str(indice + 1)})
+        return await selecionar_acao_edicao(msg_simulada, state)
+        
+    intervalo = data.get("intervalo_dias")
+    dados = ler_espelhos()
+    
+    intervalo_antigo = dados["rotas"][indice].get("intervalo_dias", 1)
+    
+    dados["rotas"][indice]["intervalo_dias"] = intervalo
+    # Se for D+0, força o modo para 'ordem' (anti-ban natural)
+    if intervalo == 0:
+        dados["rotas"][indice]["modo"] = "ordem"
+        
+    salvar_espelhos(dados)
+    
+    await message.answer(f"✅ O intervalo de dias foi atualizado para <b>D+{intervalo}</b> com sucesso!", parse_mode="HTML")
+    
+    # Resetar horários pendentes na fila se o intervalo mudou
+    if intervalo_antigo != intervalo:
+        try:
+            nome_rota = dados["rotas"][indice]["nome"]
+            fila_dados = ler_fila_espelhador()
+            houve_reset = False
+            for item in fila_dados.get("fila", []):
+                if item.get("nome_rota") == nome_rota and not item.get("processado"):
+                    item["horario_disparo"] = ""
+                    houve_reset = True
+            if houve_reset:
+                salvar_fila_espelhador(fila_dados)
+                await message.answer(f"⚠️ <b>Gatilho de Recálculo Acionado!</b>\nComo a defasagem da rota '{nome_rota}' mudou, os horários pendentes foram resetados para reorganização.", parse_mode="HTML")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro ao resetar fila_espelhador após mudança de dias: {e}")
+    
+    msg_simulada = message.model_copy(update={"text": str(indice + 1)})
+    await selecionar_acao_edicao(msg_simulada, state)
 
 @router.message(EspelhadorFluxo.aguardando_edicao_novo_modo)
 async def salvar_edicao_modo(message: types.Message, state: FSMContext):
