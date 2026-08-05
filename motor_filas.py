@@ -155,21 +155,24 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
                 else:
                     status_dia = "🔴 Atrasado"
             # Se não tem horário definido (ex: Espião ainda vai processar na IA)
-            else:
-                if data_alvo_obj <= hoje_obj:
-                    status_dia = "🟢 Agendado p/ Hoje"
-                elif data_alvo_obj == amanha_obj:
-                    status_dia = "🟡 Agendado p/ Amanhã"
                 else:
-                    status_dia = f"🔵 Agendado p/ {data_alvo_obj.strftime('%d/%m')}"
+                    if data_alvo_obj < hoje_obj:
+                        status_dia = "🔴 Atrasado"
+                    elif data_alvo_obj == hoje_obj:
+                        status_dia = "🟢 Agendado p/ Hoje"
+                    elif data_alvo_obj == amanha_obj:
+                        status_dia = "🟡 Agendado p/ Amanhã"
+                    else:
+                        status_dia = f"🔵 Agendado p/ {data_alvo_obj.strftime('%d/%m')}"
 
-        except Exception:
-            pass
+            except Exception:
+                pass
 
     # --- 2. CÁLCULO DE PREVISÃO EXATA ---
     is_postado = item.get("processado", False)
     horario_postagem = item.get("horario_postagem", "")
     data_postagem_str = item.get("data_postagem", "")
+    is_pausado = item.get("is_pausado", False)
     
     if is_postado:
         status_dia = "✅ Postado"
@@ -185,22 +188,39 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
         if horario_universal:
             try:
                 dp_obj = datetime.strptime(horario_universal, "%Y-%m-%d %H:%M:%S")
-                previsao_texto = dp_obj.strftime("%d/%m às %H:%M")
+                if dp_obj.date() < hoje_obj:
+                    status_dia = "🔴 Atrasado"
+                    previsao_texto = "Pendente (Atrasado)"
+                else:
+                    previsao_texto = dp_obj.strftime("%d/%m às %H:%M")
             except:
                 # Se não tem hora cadastrada (só a data), exibe apenas o dia
                 try:
                     dp_obj = datetime.strptime(horario_universal, "%Y-%m-%d")
-                    previsao_texto = dp_obj.strftime("%d/%m")
+                    if dp_obj.date() < hoje_obj:
+                        status_dia = "🔴 Atrasado"
+                        previsao_texto = "Pendente (Atrasado)"
+                    else:
+                        previsao_texto = dp_obj.strftime("%d/%m")
                 except:
                     previsao_texto = "Pendente"
         else:
             if data_alvo_esperada_obj:
-                previsao_texto = data_alvo_esperada_obj.strftime("%d/%m")
+                if data_alvo_esperada_obj.date() < hoje_obj:
+                    status_dia = "🔴 Atrasado"
+                    previsao_texto = "Pendente (Atrasado)"
+                else:
+                    previsao_texto = data_alvo_esperada_obj.strftime("%d/%m")
             else:
                 previsao_texto = "Aguardando..."
 
-    if not is_postado and "Fechada" in status_dia:
-        status_dia = "🔴 Atrasado"
+        # Formatação prioritária de pausa (sobrescreve o visual se a fila estiver pausada)
+        if is_pausado:
+            status_dia = "🛑 Pausado"
+            if previsao_texto == "Pendente (Atrasado)":
+                previsao_texto = "Retido (Pausado)"
+            elif data_alvo_esperada_obj and data_alvo_esperada_obj.date() >= hoje_obj:
+                previsao_texto = f"{data_alvo_esperada_obj.strftime('%d/%m')} (Se Ativo)"
 
     # --- 3. ETIQUETA INTELIGENTE PARA OS LINKS (ORIGEM E DESTINO) ---
     if link_origem:
