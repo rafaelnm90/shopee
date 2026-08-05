@@ -3928,6 +3928,14 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
             await gerenciar_rotina(message, state)
         return
 
+    # 🔁 Roteamento Inteligente: Se estiver na Pausa Programada
+    if estado_atual and estado_atual.startswith("PausaProgramadaFluxo"):
+        await state.clear()
+        if EXIBIR_LOGS: logger.info("🔙 Cancelamento da Pausa Programada. Voltando para Configurações Avançadas.")
+        await message.answer("Ação cancelada. Retornando ao menu de configurações...")
+        await menu_configuracoes(message, state)
+        return
+
     if EXIBIR_LOGS: logger.info("🔍 Limpeza de memória solicitada. Avaliando necessidade de rollback no contador global...")
     
     # ✅ SISTEMA DE ROLLBACK: Devolve o número reservado ao cancelar a criação da postagem
@@ -6202,7 +6210,8 @@ async def voltar_pausa_para_inicio(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🔙 Comando Voltar acionado na Pausa Programada.")
     await state.clear()
-    await message.answer("Operação cancelada. Voltando ao menu principal.", reply_markup=obter_teclado_principal())
+    await message.answer("Operação cancelada. Voltando ao menu de configurações...")
+    await menu_configuracoes(message, state)
 
 @dp.message(F.text.in_(["Pausar Postagens 🛑", "Retomar Postagens ▶️"]), StateFilter("*"))
 async def iniciar_pausa_programada(message: types.Message, state: FSMContext):
