@@ -2918,8 +2918,12 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 "intervalo_dias": atraso_dias
             }
         }
+        config_aut = ler_autorais_config()
+        is_pausado = config_aut.get("pausar_repostagem", False) or config_aut.get("pausar_robo_completo", False)
+        
         for item in pendentes:
             item["nome_rota"] = "Repostagem Autoral"
+            item["is_pausado"] = is_pausado
         rotas_agrupadas["Repostagem Autoral"] = pendentes
 
     else: 
