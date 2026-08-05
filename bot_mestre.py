@@ -201,6 +201,18 @@ class AchadinhosFluxo(StatesGroup):
     aguardando_campo_edicao = State()
     aguardando_novo_valor_edicao = State()
 
+class SubmissaoAdminFluxo(StatesGroup):
+    menu_principal = State()
+    aguardando_grupo = State()
+    aguardando_topico_envio = State()
+    aguardando_topico_destino = State()
+
+def ler_submissao_config():
+    return ler_config_bd("submissao_config", padrao={"ativo": False, "grupo_id": None, "topico_envio": None, "topico_destino": None})
+
+def salvar_submissao_config(dados):
+    salvar_config_bd("submissao_config", dados)
+
 class AutoraisFluxo(StatesGroup):
     menu_principal = State()
     aguardando_origem = State()
@@ -360,7 +372,7 @@ teclado_opcoes_rotina = ReplyKeyboardMarkup(
 teclado_outros_canais = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
-        [KeyboardButton(text="Vídeos Autorais 🎥")],
+        [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Submissões do Público 📬")],
         [KeyboardButton(text="Gerador de Achadinhos 🛍️")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ],
@@ -3926,6 +3938,14 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
             await gerenciar_rotina_espiao(message, state)
         else:
             await gerenciar_rotina(message, state)
+        return
+
+    # 🔁 Roteamento Inteligente: Se estiver nas Submissões do Público
+    if estado_atual and estado_atual.startswith("SubmissaoAdminFluxo"):
+        await state.clear()
+        if EXIBIR_LOGS: logger.info("🔙 Cancelamento do Painel de Submissões.")
+        await message.answer("Ação cancelada.")
+        await menu_outros_canais(message, state)
         return
 
     # 🔁 Roteamento Inteligente: Se estiver na Pausa Programada
@@ -8340,6 +8360,233 @@ async def forcar_clones_fila(callback: types.CallbackQuery):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila de clonagem: {e}")
         await callback.answer("Erro ao acessar a fila de clonagem.", show_alert=True)
+
+# ==========================================
+# PAINEL ADMIN: SUBMISSÕES DO PÚBLICO 📬
+# ==========================================
+teclado_menu_submissao = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Ativar/Desativar Submissões ⏯️")],
+        [KeyboardButton(text="Configurar Grupo e Tópicos 🎯")],
+        [KeyboardButton(text="Voltar aos Canais 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+@dp.message(F.text == "Submissões do Público 📬", StateFilter("*"))
+async def painel_submissoes(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    
+    config = ler_submissao_config()
+    status = "🟢 ATIVADO" if config.get("ativo") else "🔴 DESATIVADO"
+    grupo = config.get("grupo_id", "Não definido")
+    t_envio = config.get("topico_envio", "?")
+    t_destino = config.get("topico_destino", "?")
+    
+    if grupo != "Não definido":
+        cache_nomes = ler_cache_nomes_grupos()
+        nome_grupo = cache_nomes.get(str(grupo), str(grupo))
+        display_config = f"{nome_grupo}\n📥 Escutando no Tópico: {t_envio}\n📤 Postando no Tópico: {t_destino}"
+    else:
+        display_config = "Nenhuma configuração salva."
+
+    texto = (
+        "📬 <b>Painel de Submissões em Grupo</b>\n\n"
+        "O robô atuará como moderador dentro do seu Supergrupo.\n"
+        "Ele escutará os envios no Tópico de Conversa, analisará com a IA "
+        "e postará automaticamente os vídeos aprovados no Tópico Vitrine.\n\n"
+        f"<b>Status Atual:</b> {status}\n"
+        f"<b>Configuração:</b>\n{display_config}\n\n"
+        "Escolha uma opção abaixo:"
+    )
+    
+    await message.answer(texto, reply_markup=teclado_menu_submissao, parse_mode="HTML")
+    await state.set_state(SubmissaoAdminFluxo.menu_principal)
+
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Ativar/Desativar Submissões ⏯️")
+async def toggle_submissoes(message: types.Message, state: FSMContext):
+    config = ler_submissao_config()
+    if not config.get("grupo_id"):
+        return await message.answer("⚠️ Você precisa configurar o Grupo e os Tópicos primeiro.")
+        
+    config["ativo"] = not config.get("ativo", False)
+    salvar_submissao_config(config)
+    status = "ATIVADAS" if config["ativo"] else "DESATIVADAS"
+    await message.answer(f"✅ As submissões públicas foram <b>{status}</b>.", parse_mode="HTML")
+    await painel_submissoes(message, state)
+
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurar Grupo e Tópicos 🎯")
+async def pedir_grupo_submissao(message: types.Message, state: FSMContext):
+    await message.answer("Envie o <b>ID Numérico</b> do Supergrupo principal onde tudo vai acontecer (Ex: -1001234567890):", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(SubmissaoAdminFluxo.aguardando_grupo)
+
+@dp.message(SubmissaoAdminFluxo.aguardando_grupo)
+async def processar_grupo_submissao(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+        
+    msg_status = await message.answer("⏳ Validando grupo...")
+    sucesso, id_final, nome = await validar_e_formatar_alvo(bot, message.text)
+    await msg_status.delete()
+    
+    if sucesso:
+        salvar_nome_grupo(id_final, nome)
+        await state.update_data(novo_grupo=id_final)
+        await message.answer(f"✅ Grupo validado: <b>{nome}</b>\n\nAgora, digite o <b>ID do Tópico (Sub ID) DE CONVERSA</b> (Onde os usuários vão mandar os vídeos):", parse_mode="HTML", reply_markup=teclado_cancelar)
+        await state.set_state(SubmissaoAdminFluxo.aguardando_topico_envio)
+    else:
+        await message.answer("⚠️ Grupo não encontrado. Tente novamente:", reply_markup=teclado_cancelar)
+
+@dp.message(SubmissaoAdminFluxo.aguardando_topico_envio)
+async def pedir_topico_destino_submissao(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+        
+    t_envio = message.text.strip()
+    if not t_envio.isdigit(): return await message.answer("Digite apenas números.", reply_markup=teclado_cancelar)
+    
+    await state.update_data(novo_topico_envio=int(t_envio))
+    await message.answer("✅ Tópico de envio salvo.\n\nPor fim, digite o <b>ID do Tópico (Sub ID) VITRINE</b> (Onde o robô vai postar os aprovados):", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(SubmissaoAdminFluxo.aguardando_topico_destino)
+
+@dp.message(SubmissaoAdminFluxo.aguardando_topico_destino)
+async def salvar_config_completa_submissao(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+        
+    t_destino = message.text.strip()
+    if not t_destino.isdigit(): return await message.answer("Digite apenas números.", reply_markup=teclado_cancelar)
+    
+    data = await state.get_data()
+    config = ler_submissao_config()
+    
+    config["grupo_id"] = data.get("novo_grupo")
+    config["topico_envio"] = data.get("novo_topico_envio")
+    config["topico_destino"] = int(t_destino)
+    salvar_submissao_config(config)
+    
+    await message.answer("✅ Arquitetura de Tópicos configurada com sucesso!")
+    await painel_submissoes(message, state)
+
+# ==========================================
+# FLUXO DO USUÁRIO: MODERAÇÃO NOS TÓPICOS 🧠
+# ==========================================
+@dp.message(F.chat.type.in_(["supergroup", "group"]))
+async def escutar_submissoes_grupo(message: types.Message):
+    config = ler_submissao_config()
+    if not config.get("ativo"): return
+    
+    grupo_id = config.get("grupo_id")
+    topico_envio = config.get("topico_envio")
+    topico_destino = config.get("topico_destino")
+    
+    if not grupo_id or topico_envio is None or topico_destino is None: return
+    
+    # 1. Trava de Roteamento: Verifica se está no grupo e no tópico corretos
+    chat_id_str = str(message.chat.id)
+    if chat_id_str != str(grupo_id) and chat_id_str.replace("-100", "") != str(grupo_id).replace("-100", ""): return
+    
+    thread_atual = message.message_thread_id or 0
+    if str(thread_atual) != str(topico_envio): return
+    
+    # Se for o Admin (Você) postando no tópico, ignora para não criar loops
+    if message.from_user.id == ADMIN_ID: return
+    
+    # 2. Exige que a pessoa mande o vídeo com o link na legenda
+    if message.video:
+        legenda = message.caption or ""
+        
+        # Filtro de links nativos e convertidos
+        if "shopee" not in legenda.lower() and "shp.ee" not in legenda.lower():
+            aviso = await message.reply("⚠️ <b>Aviso:</b> Para submeter uma oferta, você precisa enviar o vídeo com o <b>Link de Afiliado da Shopee na legenda</b> da mesma mensagem.", parse_mode="HTML")
+            await asyncio.sleep(10)
+            try:
+                await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+                await bot.delete_message(chat_id=message.chat.id, message_id=aviso.message_id)
+            except: pass
+            return
+
+        msg_status = await message.reply("⏳ <b>Analisando a sua oferta...</b> A IA está passando um pente-fino no seu vídeo.", parse_mode="HTML")
+        
+        try:
+            file_info = await bot.get_file(message.video.file_id)
+            video_path = f"temp/submissao_{message.video.file_id}.mp4"
+            await bot.download_file(file_info.file_path, destination=video_path)
+            
+            prompt = (
+                "Você é o moderador de segurança de um grupo de ofertas da Shopee. "
+                "Assista a este vídeo e determine se ele é adequado para publicação. "
+                "REGRAS DE APROVAÇÃO: O vídeo DEVE ser uma demonstração real e nítida de um produto físico para venda. "
+                "REGRAS DE REJEIÇÃO: O vídeo NÃO PODE conter nudez, cenas explícitas, memes aleatórios, brincadeiras, vídeos pessoais ou ser apenas texto. "
+                "Responda ESTRITAMENTE em duas linhas.\n"
+                "Linha 1: Escreva exatamente '[APROVADO]' ou '[REJEITADO]'.\n"
+                "Linha 2: Se rejeitado, dê um motivo curto ao usuário. Se aprovado, escreva APENAS o nome do produto identificado."
+            )
+            
+            analise_ia = await analisar_video_gemini(video_path, prompt, EXIBIR_LOGS)
+            os.remove(video_path)
+            
+            if not analise_ia:
+                return await msg_status.edit_text("❌ Falha temporária na IA. Tente novamente mais tarde.")
+                
+            linhas = analise_ia.split('\n')
+            veredicto = linhas[0].strip().upper()
+            
+            user_mention = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
+            
+            if "[APROVADO]" in veredicto:
+                nome_produto = linhas[1].strip() if len(linhas) > 1 else "Oferta Exclusiva"
+                
+                # Extrai apenas o link da legenda do usuário para montar a postagem oficial limpa
+                import re
+                links = re.findall(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+', legenda, re.IGNORECASE)
+                link_produto = links[0] if links else "Link na legenda"
+                
+                legenda_final = (
+                    f"🔥 <b>Oferta da Comunidade!</b>\n"
+                    f"👤 Dica enviada por: {user_mention}\n\n"
+                    f"📦 <b>Produto:</b> {nome_produto}\n"
+                    f"🔗 <b>Link:</b>\n{link_produto}"
+                )
+                
+                # Posta o vídeo no Tópico Vitrine (Destino)
+                await bot.send_video(
+                    chat_id=message.chat.id, 
+                    video=message.video.file_id, 
+                    caption=legenda_final, 
+                    parse_mode="HTML",
+                    message_thread_id=topico_destino
+                )
+                
+                # Avisa no Tópico de Envio que deu tudo certo e apaga o vídeo da área de chat
+                await msg_status.edit_text(f"🎉 <b>Parabéns, {user_mention}!</b> Seu vídeo passou no filtro da IA e a oferta acabou de ser postada no nosso Tópico de Ofertas!", parse_mode="HTML")
+                try: await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+                except: pass
+                
+            else:
+                motivo = linhas[1].strip() if len(linhas) > 1 else "Conteúdo inadequado para e-commerce."
+                await msg_status.edit_text(f"🛑 <b>Oferta Rejeitada.</b>\n👤 Usuário: {user_mention}\n<b>Motivo da IA:</b> {motivo}\n\n<i>O seu vídeo foi apagado. Envie apenas vídeos demonstrativos de produtos reais.</i>", parse_mode="HTML")
+                try: await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+                except: pass
+                
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro na submissão do grupo: {e}")
+            await msg_status.edit_text("❌ Ocorreu um erro interno ao processar o vídeo.")
+            
+    else:
+        # Se mandou apenas texto/foto no tópico de envios (excluindo os avisos do bot)
+        if message.from_user.is_bot: return
+        aviso = await message.reply("👋 Olá! Para submeter uma oferta, você precisa enviar um <b>VÍDEO</b> com o <b>Link da Shopee na legenda</b> da mensagem.", parse_mode="HTML")
+        await asyncio.sleep(10)
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
+            await bot.delete_message(chat_id=message.chat.id, message_id=aviso.message_id)
+        except: pass
 
 # =========================================================
 # O MAIN() E O INICIADOR FICAM SEMPRE NO FINAL ABSOLUTO
