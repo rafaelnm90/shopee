@@ -411,14 +411,43 @@ async def processar_fila_autorais_loop():
             agora = datetime.now()
             hoje_str = agora.strftime("%Y-%m-%d")
             
-            # --- 1. MOTOR MATEMÁTICO DE DISTRIBUIÇÃO ---
+            # --- 1. MOTOR MATEMÁTICO E FAXINA DE ATRASADOS ---
             itens_desagendados = []
+            houve_limpeza = False
+            
             for item in fila:
                 if item.get("processado"): continue
                 
-                # Se ainda não tem horário disparado e a data_alvo já chegou
-                if not item.get("horario_disparo") and item.get("data_alvo") <= hoje_str:
-                    itens_desagendados.append(item)
+                if not item.get("horario_disparo"):
+                    data_alvo = item.get("data_alvo")
+                    
+                    # ✅ TRAVA DE SEGURANÇA: Se a data ficou no passado, o vídeo perde a validade e é excluído sumariamente
+                    if data_alvo < hoje_str:
+                        caminho_arquivo = item.get("caminho_arquivo")
+                        if caminho_arquivo and os.path.exists(caminho_arquivo):
+                            try: os.remove(caminho_arquivo)
+                            except: pass
+                        
+                        try:
+                            conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+                            cursor = conexao.cursor()
+                            cursor.execute("DELETE FROM fila_autorais WHERE id_unico = ?", (item["id_unico"],))
+                            conexao.commit()
+                            conexao.close()
+                            houve_limpeza = True
+                            if EXIBIR_LOGS: logger.info(f"🧹 [Auto-Limpeza] Vídeo Autoral retido e vencido ({data_alvo}) foi deletado para evitar avalanche.")
+                        except Exception as e:
+                            pass
+                        continue # Pula para o próximo vídeo, este já foi apagado
+                        
+                    # Se for EXATAMENTE o dia de hoje, adiciona para ser postado!
+                    if data_alvo == hoje_str:
+                        itens_desagendados.append(item)
+            
+            if houve_limpeza:
+                # Recarrega a fila do banco de dados para evitar tentar processar os arquivos que acabamos de deletar
+                fila_dados = ler_fila_retorno()
+                fila = fila_dados.get("fila", [])
                     
             if itens_desagendados:
                 # Regras fixas de negócio para os Autorais
