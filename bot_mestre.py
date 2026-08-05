@@ -372,7 +372,7 @@ teclado_opcoes_rotina = ReplyKeyboardMarkup(
 teclado_outros_canais = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
-        [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Submissões do Público 📬")],
+        [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
         [KeyboardButton(text="Gerador de Achadinhos 🛍️")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ],
@@ -8374,7 +8374,7 @@ teclado_menu_submissao = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-@dp.message(F.text == "Submissões do Público 📬", StateFilter("*"))
+@dp.message(F.text == "Grupo Público 📬", StateFilter("*"))
 async def painel_submissoes(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
@@ -8393,7 +8393,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         display_config = "Nenhuma configuração salva."
 
     texto = (
-        "📬 <b>Painel de Submissões em Grupo</b>\n\n"
+        "📬 <b>Painel do Grupo Público</b>\n\n"
         "O robô atuará como moderador dentro do seu Supergrupo.\n"
         "Ele escutará os envios no Tópico de Conversa, analisará com a IA "
         "e postará automaticamente os vídeos aprovados no Tópico Vitrine.\n\n"
