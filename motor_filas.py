@@ -155,18 +155,18 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
                 else:
                     status_dia = "🔴 Atrasado"
             # Se não tem horário definido (ex: Espião ainda vai processar na IA)
+            else:
+                if data_alvo_obj < hoje_obj:
+                    status_dia = "🔴 Atrasado"
+                elif data_alvo_obj == hoje_obj:
+                    status_dia = "🟢 Agendado p/ Hoje"
+                elif data_alvo_obj == amanha_obj:
+                    status_dia = "🟡 Agendado p/ Amanhã"
                 else:
-                    if data_alvo_obj < hoje_obj:
-                        status_dia = "🔴 Atrasado"
-                    elif data_alvo_obj == hoje_obj:
-                        status_dia = "🟢 Agendado p/ Hoje"
-                    elif data_alvo_obj == amanha_obj:
-                        status_dia = "🟡 Agendado p/ Amanhã"
-                    else:
-                        status_dia = f"🔵 Agendado p/ {data_alvo_obj.strftime('%d/%m')}"
+                    status_dia = f"🔵 Agendado p/ {data_alvo_obj.strftime('%d/%m')}"
 
-            except Exception:
-                pass
+        except Exception:
+            pass
 
     # --- 2. CÁLCULO DE PREVISÃO EXATA ---
     is_postado = item.get("processado", False)
