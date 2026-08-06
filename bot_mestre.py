@@ -1613,6 +1613,7 @@ class InatividadeMiddleware(BaseMiddleware):
             
         return await handler(event, data)
 
+# Bloco modificado:
 class BloqueioAdminMiddleware(BaseMiddleware):
     async def __call__(
         self,
@@ -1621,11 +1622,19 @@ class BloqueioAdminMiddleware(BaseMiddleware):
         data: Dict[str, Any]
     ) -> Any:
         usuario = getattr(event, "from_user", None)
+        chat = getattr(event, "chat", None)
+        texto = getattr(event, "text", "")
         
+        # 1. Bloqueia sumariamente quem não for ADMIN
         if usuario and getattr(usuario, "id", None) != ADMIN_ID:
-            if EXIBIR_LOGS: logger.warning(f"🛡️ [Segurança Global] Acesso bloqueado. Usuário não autorizado: {usuario.id} ({usuario.full_name})")
             return 
             
+        # 2. Bloqueia o próprio ADMIN se usar o bot em grupo (evita expor botões)
+        # A única exceção é o comando de faxina visual
+        if chat and chat.type != "private" and texto != "/limpar_teclado":
+            if EXIBIR_LOGS: logger.warning("🛡️ [Segurança Global] Comando de Admin bloqueado no grupo para evitar exposição visual do painel.")
+            return 
+
         return await handler(event, data)
 
 # Acopla os interceptadores de segurança e inatividade ao núcleo do robô
@@ -2248,6 +2257,17 @@ async def processar_garimpo_automatico():
 # ----------------------------------
 
 # 5. HANDLERS DE COMANDO E INTERAÇÃO
+
+@dp.message(Command("limpar_teclado"), StateFilter("*"))
+async def limpar_teclado_grupo(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    msg = await message.answer("🧹 Limpando painel de botões preso no grupo...", reply_markup=types.ReplyKeyboardRemove())
+    await asyncio.sleep(2)
+    try:
+        await msg.delete()
+        await message.delete()
+    except: pass
+
 @dp.message(Command("start"), F.chat.type == "private", StateFilter("*"))
 async def comando_start(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
