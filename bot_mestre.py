@@ -203,9 +203,8 @@ class AchadinhosFluxo(StatesGroup):
 
 class SubmissaoAdminFluxo(StatesGroup):
     menu_principal = State()
-    aguardando_grupo = State()
-    aguardando_topico_envio = State()
-    aguardando_topico_destino = State()
+    aguardando_link_envio = State()
+    aguardando_link_destino = State()
 
 def ler_submissao_config():
     return ler_config_bd("submissao_config", padrao={"ativo": False, "grupo_id": None, "topico_envio": None, "topico_destino": None})
@@ -8418,60 +8417,82 @@ async def toggle_submissoes(message: types.Message, state: FSMContext):
     await painel_submissoes(message, state)
 
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurar Grupo e Tópicos 🎯")
-async def pedir_grupo_submissao(message: types.Message, state: FSMContext):
-    await message.answer("Envie o <b>ID Numérico</b> do Supergrupo principal onde tudo vai acontecer (Ex: -1001234567890):", parse_mode="HTML", reply_markup=teclado_cancelar)
-    await state.set_state(SubmissaoAdminFluxo.aguardando_grupo)
+async def pedir_link_envio_submissao(message: types.Message, state: FSMContext):
+    texto = (
+        "💡 <b>Vamos configurar usando os links do Telegram Web/Desktop!</b>\n\n"
+        "1️⃣ Acesse o tópico <b>DE CONVERSA</b> (Onde os usuários vão mandar os vídeos).\n"
+        "2️⃣ Copie a URL do navegador (ou copie o link de qualquer mensagem lá dentro).\n"
+        "3️⃣ Envie o link aqui.\n\n"
+        "<i>Exemplo: https://web.telegram.org/a/#-1001234567890_5</i>"
+    )
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(SubmissaoAdminFluxo.aguardando_link_envio)
 
-@dp.message(SubmissaoAdminFluxo.aguardando_grupo)
-async def processar_grupo_submissao(message: types.Message, state: FSMContext):
+@dp.message(SubmissaoAdminFluxo.aguardando_link_envio)
+async def processar_link_envio_submissao(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await cancelar_fluxo_global(message, state)
         return
         
-    msg_status = await message.answer("⏳ Validando grupo...")
+    msg_status = await message.answer("⏳ Extraindo IDs e validando o Tópico de Envio...")
     sucesso, id_final, nome = await validar_e_formatar_alvo(bot, message.text)
     await msg_status.delete()
     
     if sucesso:
-        salvar_nome_grupo(id_final, nome)
-        await state.update_data(novo_grupo=id_final)
-        await message.answer(f"✅ Grupo validado: <b>{nome}</b>\n\nAgora, digite o <b>ID do Tópico (Sub ID) DE CONVERSA</b> (Onde os usuários vão mandar os vídeos):", parse_mode="HTML", reply_markup=teclado_cancelar)
-        await state.set_state(SubmissaoAdminFluxo.aguardando_topico_envio)
-    else:
-        await message.answer("⚠️ Grupo não encontrado. Tente novamente:", reply_markup=teclado_cancelar)
-
-@dp.message(SubmissaoAdminFluxo.aguardando_topico_envio)
-async def pedir_topico_destino_submissao(message: types.Message, state: FSMContext):
-    if message.text == "Cancelar ❌":
-        await cancelar_fluxo_global(message, state)
-        return
+        if ":" in id_final:
+            grupo_id, topico_id = id_final.split(":")
+        else:
+            grupo_id = id_final
+            topico_id = "0"
+            
+        salvar_nome_grupo(grupo_id, nome)
+        await state.update_data(novo_grupo=grupo_id, novo_topico_envio=int(topico_id))
         
-    t_envio = message.text.strip()
-    if not t_envio.isdigit(): return await message.answer("Digite apenas números.", reply_markup=teclado_cancelar)
-    
-    await state.update_data(novo_topico_envio=int(t_envio))
-    await message.answer("✅ Tópico de envio salvo.\n\nPor fim, digite o <b>ID do Tópico (Sub ID) VITRINE</b> (Onde o robô vai postar os aprovados):", parse_mode="HTML", reply_markup=teclado_cancelar)
-    await state.set_state(SubmissaoAdminFluxo.aguardando_topico_destino)
+        texto = (
+            f"✅ <b>Grupo:</b> {nome}\n"
+            f"✅ <b>Tópico de Envio:</b> {topico_id}\n\n"
+            "Agora, entre no tópico <b>VITRINE</b> (Onde o robô vai postar os vídeos aprovados), "
+            "copie o link dele da mesma forma e envie aqui:"
+        )
+        await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar)
+        await state.set_state(SubmissaoAdminFluxo.aguardando_link_destino)
+    else:
+        await message.answer("⚠️ Link não reconhecido ou bot sem permissão no grupo. Tente novamente:", reply_markup=teclado_cancelar)
 
-@dp.message(SubmissaoAdminFluxo.aguardando_topico_destino)
+@dp.message(SubmissaoAdminFluxo.aguardando_link_destino)
 async def salvar_config_completa_submissao(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await cancelar_fluxo_global(message, state)
         return
         
-    t_destino = message.text.strip()
-    if not t_destino.isdigit(): return await message.answer("Digite apenas números.", reply_markup=teclado_cancelar)
+    msg_status = await message.answer("⏳ Validando o Tópico Vitrine...")
+    sucesso, id_final, nome = await validar_e_formatar_alvo(bot, message.text)
+    await msg_status.delete()
     
-    data = await state.get_data()
-    config = ler_submissao_config()
-    
-    config["grupo_id"] = data.get("novo_grupo")
-    config["topico_envio"] = data.get("novo_topico_envio")
-    config["topico_destino"] = int(t_destino)
-    salvar_submissao_config(config)
-    
-    await message.answer("✅ Arquitetura de Tópicos configurada com sucesso!")
-    await painel_submissoes(message, state)
+    if sucesso:
+        if ":" in id_final:
+            grupo_id_dest, topico_id_dest = id_final.split(":")
+        else:
+            grupo_id_dest = id_final
+            topico_id_dest = "0"
+            
+        data = await state.get_data()
+        grupo_id_envio = data.get("novo_grupo")
+        
+        if grupo_id_dest != grupo_id_envio:
+            await message.answer("⚠️ <b>Atenção:</b> O tópico Vitrine precisa pertencer ao MESMO grupo do tópico de Envio!\n\nPor favor, envie o link do tópico correto:", parse_mode="HTML", reply_markup=teclado_cancelar)
+            return
+            
+        config = ler_submissao_config()
+        config["grupo_id"] = grupo_id_envio
+        config["topico_envio"] = data.get("novo_topico_envio")
+        config["topico_destino"] = int(topico_id_dest)
+        salvar_submissao_config(config)
+        
+        await message.answer("✅ <b>Perfeito!</b> Os tópicos foram interligados com sucesso.", parse_mode="HTML")
+        await painel_submissoes(message, state) # Lembra que este painel já teve o nome atualizado lá em cima!
+    else:
+        await message.answer("⚠️ Link não reconhecido. Tente novamente:", reply_markup=teclado_cancelar)
 
 # ==========================================
 # FLUXO DO USUÁRIO: MODERAÇÃO NOS TÓPICOS 🧠
