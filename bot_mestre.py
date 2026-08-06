@@ -8828,16 +8828,21 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
         veredicto = linhas[0].strip().upper()
         
         user_obj = event.from_user
-        user_mention = f"@{user_obj.username}" if user_obj.username else user_obj.first_name
+        
+        # Cria menção clicável: usa o @username ou força um link interno no nome da pessoa
+        if user_obj.username:
+            user_mention = f"@{user_obj.username}"
+        else:
+            user_mention = f"<a href='tg://user?id={user_obj.id}'>{user_obj.first_name}</a>"
         
         if "[APROVADO]" in veredicto:
             nome_produto = linhas[1].strip() if len(linhas) > 1 else "Oferta Exclusiva 🛍️"
             hashtags_ia = linhas[2].strip() if len(linhas) > 2 else ""
             
-            # Montagem estruturada unindo a IA com os dados do Bot
+            # Montagem estruturada invertendo a ordem (Remetente primeiro, Nome depois)
             legenda_final = (
-                f"<b>{nome_produto}</b>\n\n"
                 f"👤 Dica enviada por: {user_mention}\n\n"
+                f"<b>{nome_produto}</b>\n\n"
                 f"🔗 <b>Link do Produto:</b>\n{link_shopee}"
             )
             
