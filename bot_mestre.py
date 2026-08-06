@@ -8500,20 +8500,14 @@ async def salvar_config_completa_submissao(message: types.Message, state: FSMCon
         await message.answer("⚠️ Link não reconhecido. Tente novamente:", reply_markup=teclado_cancelar)
 
 # ==========================================
-# GERADOR DO BOTÃO FIXO (Comando Admin) 📌
+# GERADOR DO BOTÃO FIXO (Aberto para Todos) 📌
 # ==========================================
 from aiogram.filters import Command
 
 @dp.message(Command("botao_ofertas"))
 async def gerar_botao_permanente(message: types.Message):
-    if EXIBIR_LOGS: logger.info(f"📥 Comando /botao_ofertas recebido! Usuário ID: {message.from_user.id} | Chat ID: {message.chat.id}")
-    
-    # Apenas você (Admin) pode gerar este botão
-    if message.from_user.id != ADMIN_ID: 
-        if EXIBIR_LOGS: logger.warning(f"🚫 Comando bloqueado: Usuário {message.from_user.id} tentou usar o comando, mas não é o Admin ({ADMIN_ID}).")
-        return
-        
-    if EXIBIR_LOGS: logger.info("✅ Usuário autorizado. Gerando o botão fixo...")
+    if EXIBIR_LOGS: 
+        logger.info(f"📥 Solicitada criação do botão público no tópico. Usuário: {message.from_user.id}")
     
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     teclado_iniciar = InlineKeyboardMarkup(inline_keyboard=[
@@ -8524,22 +8518,23 @@ async def gerar_botao_permanente(message: types.Message):
         await message.answer(
             "👋 <b>Bem-vindo ao canal de submissões!</b>\n\n"
             "Quer divulgar a sua oferta da Shopee na nossa comunidade e faturar junto com a gente?\n\n"
-            "É muito simples! Clique no botão abaixo e o nosso robô vai te guiar passo a passo para enviar o vídeo e o seu link.\n\n"
+            "Clique no botão abaixo e o nosso robô vai te guiar passo a passo para enviar o vídeo e os seus links!\n\n"
             "<i>(As ofertas aprovadas pela nossa IA serão postadas automaticamente no mural público com os seus créditos!)</i>",
             reply_markup=teclado_iniciar,
             parse_mode="HTML",
             message_thread_id=message.message_thread_id
         )
-        if EXIBIR_LOGS: logger.info("✅ Mensagem com botão enviada com sucesso para o tópico!")
+        if EXIBIR_LOGS: 
+            logger.info("✅ Mensagem com o botão de submissão criada no tópico.")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao tentar enviar a mensagem com o botão: {e}")
-        
-    # Apaga o seu comando "/botao_ofertas" para ficar limpo
+        if EXIBIR_LOGS: 
+            logger.error(f"❌ Erro ao enviar a mensagem com botão: {e}")
+            
+    # Remove a mensagem de comando para manter o tópico limpo
     try: 
         await message.delete()
-        if EXIBIR_LOGS: logger.info("🧹 Comando /botao_ofertas apagado do chat para manter a limpeza.")
-    except Exception as e: 
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível apagar o comando /botao_ofertas (Falta de permissão de admin no grupo?): {e}")
+    except Exception: 
+        pass
 
 # ==========================================
 # FLUXO DO USUÁRIO: MODERAÇÃO GUIADA POR BOTÕES 🧠
@@ -8548,17 +8543,23 @@ async def gerar_botao_permanente(message: types.Message):
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 def checar_permissao_topico(message: types.Message):
-    """Função auxiliar para validar se o usuário está no grupo e tópico corretos."""
+    """Valida se a mensagem pertence ao grupo e tópico configurados para submissão pública."""
     config = ler_submissao_config()
-    if not config.get("ativo"): return False, None
+    if not config.get("ativo"): 
+        return False, None
     grupo_id = config.get("grupo_id")
     topico_envio = config.get("topico_envio")
-    if not grupo_id or topico_envio is None: return False, None
+    if not grupo_id or topico_envio is None: 
+        return False, None
+        
     chat_id_str = str(message.chat.id)
-    if chat_id_str != str(grupo_id) and chat_id_str.replace("-100", "") != str(grupo_id).replace("-100", ""): return False, None
-    if str(message.message_thread_id or 0) != str(topico_envio): return False, None
-    if message.from_user.id == ADMIN_ID: return False, None # Ignora o Admin
-    if message.from_user.is_bot: return False, None # Ignora outros bots
+    if chat_id_str != str(grupo_id) and chat_id_str.replace("-100", "") != str(grupo_id).replace("-100", ""): 
+        return False, None
+    if str(message.message_thread_id or 0) != str(topico_envio): 
+        return False, None
+    if message.from_user.is_bot: 
+        return False, None # Filtra apenas outros bots para evitar loops
+        
     return True, config
 
 # 1. GATILHO INICIAL: Qualquer mensagem fora de ordem aciona o botão de Iniciar
@@ -8568,24 +8569,37 @@ async def interceptar_envio_livre(message: types.Message, state: FSMContext):
     if not permitido: return
     
     # Apaga a mensagem que o usuário mandou solta para manter o chat limpo
-    try: await message.delete()
-    except: pass
+    try: await message.dele# Interceptador para mensagens enviadas fora do fluxo de botões
+@dp.message(F.chat.type.in_(["supergroup", "group"]), StateFilter(None))
+async def interceptar_envio_livre(message: types.Message, state: FSMContext):
+    permitido, config = checar_permissao_topico(message)
+    if not permitido: 
+        return
     
+    # Remove o envio avulso para evitar poluição visual
+    try: 
+        await message.delete()
+    except Exception: 
+        pass
+    
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     teclado_iniciar = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎬 Iniciar Postagem de Oferta", callback_data="iniciar_wizard_oferta")]
     ])
     
     user_mention = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
     aviso = await message.answer(
-        f"👋 Olá, {user_mention}! Quer divulgar sua oferta na nossa comunidade?\n\n"
-        "Clique no botão abaixo e eu vou te guiar passo a passo para enviar o seu vídeo e os seus links!",
+        f"👋 Olá, {user_mention}! Para submeter uma oferta, por favor utilize o painel interativo abaixo:",
         reply_markup=teclado_iniciar,
         message_thread_id=message.message_thread_id
     )
-    # Apaga o convite após 15 segundos para não poluir o grupo
+    
+    # Remove a notificação temporária após 15 segundos
     await asyncio.sleep(15)
-    try: await aviso.delete()
-    except: pass
+    try: 
+        await aviso.delete()
+    except Exception: 
+        pass
 
 # 2. PASSO 1: Clicou no botão -> Pede o Vídeo
 @dp.callback_query(F.data == "iniciar_wizard_oferta")
