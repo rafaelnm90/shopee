@@ -8540,6 +8540,7 @@ async def gerar_botao_permanente(message: types.Message):
 # ==========================================
 
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+import asyncio
 
 def checar_permissao_topico(message: types.Message):
     """Valida se a mensagem pertence ao grupo e tópico configurados para submissão pública."""
@@ -8560,6 +8561,19 @@ def checar_permissao_topico(message: types.Message):
         return False, None # Filtra apenas outros bots para evitar loops
         
     return True, config
+
+async def auto_limpar_sessao(chat_id, message_id, state: FSMContext, tempo=180):
+    """Timer fantasma de 3 minutos. Apaga o painel se o usuário abandonar a submissão no meio."""
+    await asyncio.sleep(tempo)
+    try: 
+        await bot.delete_message(chat_id, message_id)
+    except: 
+        pass
+    
+    # Limpa a memória apenas se o usuário ainda estiver na mesma sessão
+    data = await state.get_data()
+    if data.get("msg_wizard_id") == message_id:
+        await state.clear()
 
 # 1. GATILHO INICIAL: Qualquer mensagem fora de ordem aciona o botão de Iniciar
 @dp.message(F.chat.type.in_(["supergroup", "group"]), StateFilter(None))
@@ -8582,7 +8596,8 @@ async def interceptar_envio_livre(message: types.Message, state: FSMContext):
     user_mention = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
     aviso = await message.answer(
         f"👋 Olá, {user_mention}! Para submeter uma oferta, por favor utilize o painel interativo abaixo:",
-        reply_markup=teclado_iniciar
+        reply_markup=teclado_iniciar,
+        message_thread_id=message.message_thread_id
     )
     
     # Remove a notificação temporária após 15 segundos
@@ -8592,119 +8607,130 @@ async def interceptar_envio_livre(message: types.Message, state: FSMContext):
     except Exception: 
         pass
 
-# 2. PASSO 1: Clicou no botão -> Pede o Vídeo
+# 2. PASSO 1: Clicou no botão -> Pede o Vídeo (Cria o Painel Deslizante)
 @dp.callback_query(F.data == "iniciar_wizard_oferta")
 async def wizard_pedir_video(callback: types.CallbackQuery, state: FSMContext):
     teclado_cancelar_inline = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Cancelar", callback_data="cancelar_wizard")]])
     
-    await callback.message.answer(
+    msg_passo = await callback.message.answer(
         "📍 <b>PASSO 1 de 3:</b>\n\n"
         "Por favor, envie aqui o <b>VÍDEO</b> do produto que você deseja divulgar.",
         parse_mode="HTML",
-        reply_markup=teclado_cancelar_inline
+        reply_markup=teclado_cancelar_inline,
+        message_thread_id=callback.message.message_thread_id
     )
     await state.set_state(SubmissaoUsuarioInterativa.aguardando_video)
+    await state.update_data(msg_wizard_id=msg_passo.message_id)
     await callback.answer()
+    
+    # Inicia o timer de autodestruição caso o usuário abandone o menu
+    asyncio.create_task(auto_limpar_sessao(callback.message.chat.id, msg_passo.message_id, state, 180))
 
-# 3. PASSO 2: Recebe o Vídeo -> Pede a Shopee
+# 3. PASSO 2: Recebe o Vídeo -> Edita o Painel pedindo a Shopee
 @dp.message(SubmissaoUsuarioInterativa.aguardando_video)
 async def wizard_receber_video(message: types.Message, state: FSMContext):
     permitido, config = checar_permissao_topico(message)
     if not permitido: return
-    try: await message.delete() # Limpa o vídeo do tópico temporariamente
+    try: await message.delete() # Limpa o vídeo do usuário
     except: pass
 
+    data = await state.get_data()
+    msg_wizard_id = data.get("msg_wizard_id")
+
     if not message.video:
-        aviso = await message.answer("⚠️ Por favor, envie um arquivo de <b>VÍDEO</b> para continuarmos.", parse_mode="HTML")
-        await asyncio.sleep(5)
+        aviso = await message.answer("⚠️ Por favor, envie um arquivo de <b>VÍDEO</b>.", message_thread_id=message.message_thread_id)
+        await asyncio.sleep(4)
         try: await aviso.delete()
         except: pass
         return
 
     await state.update_data(video_file_id=message.video.file_id)
-    
     teclado_cancelar_inline = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Cancelar", callback_data="cancelar_wizard")]])
-    await message.answer(
-        "📍 <b>PASSO 2 de 3:</b>\n\n"
-        "Ótimo! Vídeo recebido. 🎬\n\n"
-        "Agora, cole aqui o seu <b>Link de Afiliado da SHOPEE</b> 🛒 referente a este produto:",
-        parse_mode="HTML",
-        reply_markup=teclado_cancelar_inline
-    )
+    
+    try:
+        await bot.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=msg_wizard_id,
+            text="📍 <b>PASSO 2 de 3:</b>\n\nÓtimo! Vídeo recebido. 🎬\n\nAgora, cole aqui o seu <b>Link de Afiliado da SHOPEE</b> 🛒 referente a este produto:",
+            parse_mode="HTML",
+            reply_markup=teclado_cancelar_inline
+        )
+    except: pass
     await state.set_state(SubmissaoUsuarioInterativa.aguardando_shopee)
 
-# 4. PASSO 3: Recebe Shopee -> Pede TikTok (Opcional)
+# 4. PASSO 3: Recebe Shopee -> Edita o Painel pedindo TikTok (Opcional)
 @dp.message(SubmissaoUsuarioInterativa.aguardando_shopee)
 async def wizard_receber_shopee(message: types.Message, state: FSMContext):
     permitido, config = checar_permissao_topico(message)
     if not permitido: return
-    try: await message.delete()
+    try: await message.delete() # Limpa o link do usuário
     except: pass
 
+    data = await state.get_data()
+    msg_wizard_id = data.get("msg_wizard_id")
     link = message.text
+
     if not link or ("shopee" not in link.lower() and "shp.ee" not in link.lower()):
-        aviso = await message.answer("⚠️ O link precisa ser da Shopee. Tente novamente colando o link correto:")
-        await asyncio.sleep(5)
+        aviso = await message.answer("⚠️ O link precisa ser da Shopee. Tente novamente colando o link correto:", message_thread_id=message.message_thread_id)
+        await asyncio.sleep(4)
         try: await aviso.delete()
         except: pass
         return
 
     await state.update_data(link_shopee=link)
-    
     teclado_tiktok = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Pular TikTok ⏭️", callback_data="pular_tiktok")],
         [InlineKeyboardButton(text="❌ Cancelar Tudo", callback_data="cancelar_wizard")]
     ])
     
-    await message.answer(
-        "📍 <b>PASSO 3 de 3 (Opcional):</b>\n\n"
-        "Você também tem o <b>Link de Afiliado do TIKTOK</b> 🎵 para este produto?\n\n"
-        "Se sim, cole o link aqui. Se não tiver, basta clicar no botão <b>Pular</b> abaixo.",
-        parse_mode="HTML",
-        reply_markup=teclado_tiktok
-    )
+    try:
+        await bot.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=msg_wizard_id,
+            text="📍 <b>PASSO 3 de 3 (Opcional):</b>\n\nVocê também tem o <b>Link de Afiliado do TIKTOK</b> 🎵 para este produto?\n\nSe sim, cole o link aqui. Se não tiver, basta clicar no botão <b>Pular</b> abaixo.",
+            parse_mode="HTML",
+            reply_markup=teclado_tiktok
+        )
+    except: pass
     await state.set_state(SubmissaoUsuarioInterativa.aguardando_tiktok)
 
-# 5. PASSO FINAL: IA Processa e Posta
+# 5. PASSO FINAL: IA Processa e Posta (Edita o Painel para o Veredito)
 @dp.message(SubmissaoUsuarioInterativa.aguardando_tiktok)
-@dp.callback_query(F.data == "pular_tiktok", StateFilter("*")) # ✅ Correção 1: Libera o botão em qualquer estado
+@dp.callback_query(F.data == "pular_tiktok", StateFilter("*"))
 async def wizard_finalizar_processamento(event, state: FSMContext):
     is_callback = isinstance(event, types.CallbackQuery)
     message = event.message if is_callback else event
     
-    # ✅ Correção 2: Pula a trava de permissão se for um clique de botão (pois sabemos que é seguro)
     if not is_callback:
         permitido, config = checar_permissao_topico(message)
         if not permitido: return
-    else:
-        config = ler_submissao_config()
-        
-    data = await state.get_data()
-    link_tiktok = None
-    
-    if is_callback:
-        await event.answer("TikTok ignorado.")
-        # Apaga a mensagem que continha a pergunta e os botões para limpar a tela
-        try: await message.delete() 
-        except: pass
-    else:
-        try: await event.delete() 
+        try: await event.delete() # Limpa o link do tiktok
         except: pass
         
         link_tiktok = event.text
         if "tiktok" not in link_tiktok.lower():
-            aviso = await message.answer("⚠️ Link inválido. Envie um link do TikTok ou clique em Pular.")
-            await asyncio.sleep(5)
+            aviso = await message.answer("⚠️ Link inválido. Envie um link do TikTok ou clique em Pular.", message_thread_id=message.message_thread_id)
+            await asyncio.sleep(4)
             try: await aviso.delete()
             except: pass
             return
+    else:
+        config = ler_submissao_config()
+        link_tiktok = None
 
-    msg_status = await message.answer(
-        "⏳ <b>Avaliando Oferta...</b>\n\n"
-        "Tudo recebido! Nossa Inteligência Artificial está analisando o seu vídeo para garantir que ele segue as regras da comunidade.",
-        parse_mode="HTML"
-    )
-    await state.clear() # Limpa a memória para permitir novos envios
+    data = await state.get_data()
+    msg_wizard_id = data.get("msg_wizard_id")
+    
+    try:
+        await bot.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=msg_wizard_id,
+            text="⏳ <b>Avaliando Oferta...</b>\n\nA IA está analisando o seu vídeo para garantir que ele segue as regras da comunidade.",
+            parse_mode="HTML"
+        )
+    except: pass
+    
+    await state.clear() # Libera a memória instantaneamente para novos envios
 
     try:
         video_id = data.get("video_file_id")
@@ -8714,20 +8740,24 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
         video_path = f"temp/submissao_{video_id}.mp4"
         await bot.download_file(file_info.file_path, destination=video_path)
         
+        # O Cérebro da IA foi atualizado para gerar Hashtags na terceira linha
         prompt = (
             "Você é o moderador de segurança de um grupo de ofertas. Assista a este vídeo. "
             "REGRAS: O vídeo DEVE ser a demonstração de um produto físico para venda. "
             "NÃO PODE: Nudez, violência, memes, dancinhas, vídeos pessoais ou ser apenas texto. "
-            "Responda ESTRITAMENTE em duas linhas.\n"
+            "Responda ESTRITAMENTE em três linhas.\n"
             "Linha 1: Escreva '[APROVADO]' ou '[REJEITADO]'.\n"
-            "Linha 2: Se rejeitado, dê o motivo. Se aprovado, escreva APENAS o nome do produto."
+            "Linha 2: Se rejeitado, dê o motivo. Se aprovado, escreva APENAS o nome do produto.\n"
+            "Linha 3: Se aprovado, escreva 2 a 3 hashtags relevantes para o produto (ex: #Beleza #Moda). Se rejeitado, deixe em branco."
         )
         
         analise_ia = await analisar_video_gemini(video_path, prompt, EXIBIR_LOGS)
         os.remove(video_path)
         
         if not analise_ia:
-            return await msg_status.edit_text("❌ Falha temporária na IA. Tente submeter novamente.")
+            try: await bot.edit_message_text(chat_id=message.chat.id, message_id=msg_wizard_id, text="❌ Falha temporária na IA. Tente submeter novamente.")
+            except: pass
+            return
             
         linhas = analise_ia.split('\n')
         veredicto = linhas[0].strip().upper()
@@ -8737,17 +8767,22 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
         
         if "[APROVADO]" in veredicto:
             nome_produto = linhas[1].strip() if len(linhas) > 1 else "Oferta Exclusiva"
+            hashtags_ia = linhas[2].strip() if len(linhas) > 2 else ""
             
+            # Formatação atualizada idêntica ao Canal Viral
             legenda_final = (
-                f"🔥 <b>Nova Oferta da Comunidade!</b>\n"
-                f"👤 Dica enviada por: {user_mention}\n\n"
-                f"📦 <b>Produto:</b> {nome_produto}\n\n"
-                f"🛒 <b>Comprar na Shopee:</b>\n{link_shopee}"
+                f"{nome_produto}\n\n"
+                f"Dica enviada por: {user_mention}\n\n"
+                f"🔗 <b>Link do Produto:</b>\n{link_shopee}"
             )
             
             if link_tiktok:
-                legenda_final += f"\n\n🎵 <b>Comprar no TikTok:</b>\n{link_tiktok}"
+                legenda_final += f"\n\n🎵 <b>Link do TikTok:</b>\n{link_tiktok}"
             
+            if hashtags_ia:
+                legenda_final += f"\n\n<i>{hashtags_ia}</i>"
+            
+            # Posta na Vitrine
             await bot.send_video(
                 chat_id=message.chat.id, 
                 video=video_id, 
@@ -8756,28 +8791,54 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
                 message_thread_id=config.get("topico_destino")
             )
             
-            await msg_status.edit_text(f"🎉 <b>Aprovado, {user_mention}!</b> Seu vídeo passou no filtro da IA e a oferta já está brilhando no mural da comunidade!", parse_mode="HTML")
+            try:
+                await bot.edit_message_text(
+                    chat_id=message.chat.id, 
+                    message_id=msg_wizard_id, 
+                    text=f"🎉 <b>Aprovado!</b> A dica de {user_mention} já está brilhando no mural!", 
+                    parse_mode="HTML"
+                )
+            except: pass
             
         else:
             motivo = linhas[1].strip() if len(linhas) > 1 else "Conteúdo inadequado para e-commerce."
-            await msg_status.edit_text(f"🛑 <b>Oferta Rejeitada.</b>\n👤 Usuário: {user_mention}\n<b>Motivo da IA:</b> {motivo}\n\n<i>O vídeo foi bloqueado. Por favor, submeta apenas demonstrações de produtos.</i>", parse_mode="HTML")
+            try:
+                await bot.edit_message_text(
+                    chat_id=message.chat.id, 
+                    message_id=msg_wizard_id, 
+                    text=f"🛑 <b>Oferta Rejeitada.</b>\n👤 Usuário: {user_mention}\n<b>Motivo:</b> {motivo}", 
+                    parse_mode="HTML"
+                )
+            except: pass
             
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro na submissão guiada: {e}")
-        await msg_status.edit_text("❌ Ocorreu um erro interno ao processar o arquivo.")
+        try: await bot.edit_message_text(chat_id=message.chat.id, message_id=msg_wizard_id, text="❌ Ocorreu um erro interno ao processar o arquivo.")
+        except: pass
         
-    await asyncio.sleep(20)
-    try: await msg_status.delete()
+    # Limpa a mensagem final da tela após 15 segundos para zerar a conversa
+    await asyncio.sleep(15)
+    try: await bot.delete_message(message.chat.id, msg_wizard_id)
     except: pass
 
-# Cancelamento manual do usuário
-@dp.callback_query(F.data == "cancelar_wizard", StateFilter("*")) # ✅ Correção: O botão de cancelar agora funciona em qualquer etapa
+# Cancelamento manual do usuário (Limpa tudo instantaneamente)
+@dp.callback_query(F.data == "cancelar_wizard", StateFilter("*"))
 async def wizard_cancelar(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    msg_wizard_id = data.get("msg_wizard_id")
     await state.clear()
-    await callback.message.edit_text("❌ Envio de oferta cancelado.")
-    await asyncio.sleep(5)
-    try: await callback.message.delete()
+    
+    try:
+        await callback.message.edit_text("❌ Envio de oferta cancelado.")
     except: pass
+    
+    await asyncio.sleep(3)
+    if msg_wizard_id:
+        try: await bot.delete_message(callback.message.chat.id, msg_wizard_id)
+        except: pass
+    else:
+        try: await callback.message.delete()
+        except: pass
 
 # =========================================================
 # O MAIN() E O INICIADOR FICAM SEMPRE NO FINAL ABSOLUTO
