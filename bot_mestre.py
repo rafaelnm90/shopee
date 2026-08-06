@@ -8740,15 +8740,21 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
         video_path = f"temp/submissao_{video_id}.mp4"
         await bot.download_file(file_info.file_path, destination=video_path)
         
-        # O Cérebro da IA foi atualizado para gerar Hashtags na terceira linha
         prompt = (
-            "Você é o moderador de segurança de um grupo de ofertas. Assista a este vídeo. "
-            "REGRAS: O vídeo DEVE ser a demonstração de um produto físico para venda. "
-            "NÃO PODE: Nudez, violência, memes, dancinhas, vídeos pessoais ou ser apenas texto. "
-            "Responda ESTRITAMENTE em três linhas.\n"
-            "Linha 1: Escreva '[APROVADO]' ou '[REJEITADO]'.\n"
-            "Linha 2: Se rejeitado, dê o motivo. Se aprovado, escreva APENAS o nome do produto.\n"
-            "Linha 3: Se aprovado, escreva 2 a 3 hashtags relevantes para o produto (ex: #Beleza #Moda). Se rejeitado, deixe em branco."
+            "Você atua como moderador de segurança de um grupo de e-commerce. Assista ao vídeo INTEIRO. "
+            "REGRAS DE APROVAÇÃO: O vídeo DEVE ser a demonstração de um produto físico para venda. "
+            "REGRAS DE REJEIÇÃO: NÃO PODE conter nudez, violência, memes, dancinhas, vídeos pessoais ou ser apenas texto. "
+            "Sua resposta deve conter EXATAMENTE TRÊS linhas.\n"
+            "Linha 1: Escreva estritamente '[APROVADO]' ou '[REJEITADO]'.\n"
+            "Linha 2: Se rejeitado, dê um motivo curto. Se aprovado, escreva APENAS o nome do produto acompanhado de um emoji correspondente no final (Ex: Tênis Casual Feminino 👟).\n"
+            "Linha 3: Se rejeitado, deixe em branco. Se aprovado, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Separe-as APENAS com espaços em branco, NUNCA utilize vírgulas. "
+            "REGRA ABSOLUTA DE HASHTAGS: Você SÓ PODE escolher hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
+            "#RoupasFemininas #SapatosFemininos #CelularesEDispositivos #AcessoriosParaVeiculos #Relogios "
+            "#AlimentosEBebidas #CasaEDecoracao #SapatosMasculinos #EsportesELazer #BolsasMasculinas #BolsasFemininas "
+            "#RoupasPlusSize #ModaInfantil #Eletrodomesticos #Motocicletas #AnimaisDomesticos #CamerasEDrones #Beleza "
+            "#AcessoriosDeModa #BrinquedosEHobbies #Papelaria #LivrosERevistas #RoupasMasculinas #Automoveis #MaeEBebe "
+            "#ComputadoresEAcessorios #Saude #ViagensEBagagens #JogosEConsoles #Audio. "
+            "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags ou adicionar mensagens extras."
         )
         
         analise_ia = await analisar_video_gemini(video_path, prompt, EXIBIR_LOGS)
@@ -8766,13 +8772,13 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
         user_mention = f"@{user_obj.username}" if user_obj.username else user_obj.first_name
         
         if "[APROVADO]" in veredicto:
-            nome_produto = linhas[1].strip() if len(linhas) > 1 else "Oferta Exclusiva"
+            nome_produto = linhas[1].strip() if len(linhas) > 1 else "Oferta Exclusiva 🛍️"
             hashtags_ia = linhas[2].strip() if len(linhas) > 2 else ""
             
-            # Formatação atualizada idêntica ao Canal Viral
+            # Montagem estruturada unindo a IA com os dados do Bot
             legenda_final = (
-                f"{nome_produto}\n\n"
-                f"Dica enviada por: {user_mention}\n\n"
+                f"<b>{nome_produto}</b>\n\n"
+                f"👤 Dica enviada por: {user_mention}\n\n"
                 f"🔗 <b>Link do Produto:</b>\n{link_shopee}"
             )
             
