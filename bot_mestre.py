@@ -8667,23 +8667,30 @@ async def wizard_receber_shopee(message: types.Message, state: FSMContext):
 
 # 5. PASSO FINAL: IA Processa e Posta
 @dp.message(SubmissaoUsuarioInterativa.aguardando_tiktok)
-@dp.callback_query(F.data == "pular_tiktok")
+@dp.callback_query(F.data == "pular_tiktok", StateFilter("*")) # ✅ Correção 1: Libera o botão em qualquer estado
 async def wizard_finalizar_processamento(event, state: FSMContext):
-    # Pega o contexto dependendo se o usuário digitou o link ou clicou no botão "Pular"
     is_callback = isinstance(event, types.CallbackQuery)
     message = event.message if is_callback else event
     
-    permitido, config = checar_permissao_topico(message)
-    if not permitido: return
-    
+    # ✅ Correção 2: Pula a trava de permissão se for um clique de botão (pois sabemos que é seguro)
+    if not is_callback:
+        permitido, config = checar_permissao_topico(message)
+        if not permitido: return
+    else:
+        config = ler_submissao_config()
+        
     data = await state.get_data()
     link_tiktok = None
     
     if is_callback:
         await event.answer("TikTok ignorado.")
-    else:
-        try: await event.delete()
+        # Apaga a mensagem que continha a pergunta e os botões para limpar a tela
+        try: await message.delete() 
         except: pass
+    else:
+        try: await event.delete() 
+        except: pass
+        
         link_tiktok = event.text
         if "tiktok" not in link_tiktok.lower():
             aviso = await message.answer("⚠️ Link inválido. Envie um link do TikTok ou clique em Pular.")
@@ -8697,7 +8704,7 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
         "Tudo recebido! Nossa Inteligência Artificial está analisando o seu vídeo para garantir que ele segue as regras da comunidade.",
         parse_mode="HTML"
     )
-    await state.clear() # Limpa o estado para o usuário poder submeter outro enquanto esse processa
+    await state.clear() # Limpa a memória para permitir novos envios
 
     try:
         video_id = data.get("video_file_id")
@@ -8725,7 +8732,6 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
         linhas = analise_ia.split('\n')
         veredicto = linhas[0].strip().upper()
         
-        # Pega as informações do usuário que iniciou o processo
         user_obj = event.from_user
         user_mention = f"@{user_obj.username}" if user_obj.username else user_obj.first_name
         
@@ -8742,7 +8748,6 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
             if link_tiktok:
                 legenda_final += f"\n\n🎵 <b>Comprar no TikTok:</b>\n{link_tiktok}"
             
-            # Posta no Tópico Vitrine (AQUI É bot.send_video, então OBRIGATÓRIO ter message_thread_id explicitamente)
             await bot.send_video(
                 chat_id=message.chat.id, 
                 video=video_id, 
@@ -8751,7 +8756,6 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
                 message_thread_id=config.get("topico_destino")
             )
             
-            # Avisa no Tópico de Conversa
             await msg_status.edit_text(f"🎉 <b>Aprovado, {user_mention}!</b> Seu vídeo passou no filtro da IA e a oferta já está brilhando no mural da comunidade!", parse_mode="HTML")
             
         else:
@@ -8762,13 +8766,12 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
         if EXIBIR_LOGS: logger.error(f"❌ Erro na submissão guiada: {e}")
         await msg_status.edit_text("❌ Ocorreu um erro interno ao processar o arquivo.")
         
-    # Apaga o status final após 20 segundos para manter o tópico de conversa 100% limpo
     await asyncio.sleep(20)
     try: await msg_status.delete()
     except: pass
 
 # Cancelamento manual do usuário
-@dp.callback_query(F.data == "cancelar_wizard")
+@dp.callback_query(F.data == "cancelar_wizard", StateFilter("*")) # ✅ Correção: O botão de cancelar agora funciona em qualquer etapa
 async def wizard_cancelar(callback: types.CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.edit_text("❌ Envio de oferta cancelado.")
