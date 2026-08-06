@@ -8521,8 +8521,7 @@ async def gerar_botao_permanente(message: types.Message):
             "Clique no botão abaixo e o nosso robô vai te guiar passo a passo para enviar o vídeo e os seus links!\n\n"
             "<i>(As ofertas aprovadas pela nossa IA serão postadas automaticamente no mural público com os seus créditos!)</i>",
             reply_markup=teclado_iniciar,
-            parse_mode="HTML",
-            message_thread_id=message.message_thread_id
+            parse_mode="HTML"
         )
         if EXIBIR_LOGS: 
             logger.info("✅ Mensagem com o botão de submissão criada no tópico.")
@@ -8583,8 +8582,7 @@ async def interceptar_envio_livre(message: types.Message, state: FSMContext):
     user_mention = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
     aviso = await message.answer(
         f"👋 Olá, {user_mention}! Para submeter uma oferta, por favor utilize o painel interativo abaixo:",
-        reply_markup=teclado_iniciar,
-        message_thread_id=message.message_thread_id
+        reply_markup=teclado_iniciar
     )
     
     # Remove a notificação temporária após 15 segundos
@@ -8603,8 +8601,7 @@ async def wizard_pedir_video(callback: types.CallbackQuery, state: FSMContext):
         "📍 <b>PASSO 1 de 3:</b>\n\n"
         "Por favor, envie aqui o <b>VÍDEO</b> do produto que você deseja divulgar.",
         parse_mode="HTML",
-        reply_markup=teclado_cancelar_inline,
-        message_thread_id=callback.message.message_thread_id
+        reply_markup=teclado_cancelar_inline
     )
     await state.set_state(SubmissaoUsuarioInterativa.aguardando_video)
     await callback.answer()
@@ -8632,8 +8629,7 @@ async def wizard_receber_video(message: types.Message, state: FSMContext):
         "Ótimo! Vídeo recebido. 🎬\n\n"
         "Agora, cole aqui o seu <b>Link de Afiliado da SHOPEE</b> 🛒 referente a este produto:",
         parse_mode="HTML",
-        reply_markup=teclado_cancelar_inline,
-        message_thread_id=message.message_thread_id
+        reply_markup=teclado_cancelar_inline
     )
     await state.set_state(SubmissaoUsuarioInterativa.aguardando_shopee)
 
@@ -8665,8 +8661,7 @@ async def wizard_receber_shopee(message: types.Message, state: FSMContext):
         "Você também tem o <b>Link de Afiliado do TIKTOK</b> 🎵 para este produto?\n\n"
         "Se sim, cole o link aqui. Se não tiver, basta clicar no botão <b>Pular</b> abaixo.",
         parse_mode="HTML",
-        reply_markup=teclado_tiktok,
-        message_thread_id=message.message_thread_id
+        reply_markup=teclado_tiktok
     )
     await state.set_state(SubmissaoUsuarioInterativa.aguardando_tiktok)
 
@@ -8700,8 +8695,7 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
     msg_status = await message.answer(
         "⏳ <b>Avaliando Oferta...</b>\n\n"
         "Tudo recebido! Nossa Inteligência Artificial está analisando o seu vídeo para garantir que ele segue as regras da comunidade.",
-        parse_mode="HTML",
-        message_thread_id=message.message_thread_id
+        parse_mode="HTML"
     )
     await state.clear() # Limpa o estado para o usuário poder submeter outro enquanto esse processa
 
@@ -8748,7 +8742,7 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
             if link_tiktok:
                 legenda_final += f"\n\n🎵 <b>Comprar no TikTok:</b>\n{link_tiktok}"
             
-            # Posta no Tópico Vitrine (ID 6 do seu grupo)
+            # Posta no Tópico Vitrine (AQUI É bot.send_video, então OBRIGATÓRIO ter message_thread_id explicitamente)
             await bot.send_video(
                 chat_id=message.chat.id, 
                 video=video_id, 
@@ -8757,7 +8751,7 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
                 message_thread_id=config.get("topico_destino")
             )
             
-            # Avisa no Tópico de Conversa (ID 5)
+            # Avisa no Tópico de Conversa
             await msg_status.edit_text(f"🎉 <b>Aprovado, {user_mention}!</b> Seu vídeo passou no filtro da IA e a oferta já está brilhando no mural da comunidade!", parse_mode="HTML")
             
         else:
