@@ -1613,7 +1613,24 @@ class InatividadeMiddleware(BaseMiddleware):
             
         return await handler(event, data)
 
-# Acopla o interceptador de inatividade ao núcleo do robô para vigiar todas as mensagens
+class BloqueioAdminMiddleware(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[Any, Dict[str, Any]], Awaitable[Any]],
+        event: Any,
+        data: Dict[str, Any]
+    ) -> Any:
+        usuario = getattr(event, "from_user", None)
+        
+        if usuario and getattr(usuario, "id", None) != ADMIN_ID:
+            if EXIBIR_LOGS: logger.warning(f"🛡️ [Segurança Global] Acesso bloqueado. Usuário não autorizado: {usuario.id} ({usuario.full_name})")
+            return 
+            
+        return await handler(event, data)
+
+# Acopla os interceptadores de segurança e inatividade ao núcleo do robô
+dp.message.middleware(BloqueioAdminMiddleware())
+dp.callback_query.middleware(BloqueioAdminMiddleware())
 dp.message.middleware(InatividadeMiddleware())
 
 # ----------------------------------
