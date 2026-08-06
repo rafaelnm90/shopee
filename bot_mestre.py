@@ -2231,7 +2231,7 @@ async def processar_garimpo_automatico():
 # ----------------------------------
 
 # 5. HANDLERS DE COMANDO E INTERAÇÃO
-@dp.message(Command("start"), StateFilter("*"))
+@dp.message(Command("start"), F.chat.type == "private", StateFilter("*"))
 async def comando_start(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
@@ -8845,6 +8845,29 @@ async def wizard_cancelar(callback: types.CallbackQuery, state: FSMContext):
     else:
         try: await callback.message.delete()
         except: pass
+
+# ==========================================
+# LIMPADOR DE TECLADO FANTASMA 🧹
+# ==========================================
+from aiogram.types import ReplyKeyboardRemove
+
+@dp.message(Command("limpar_painel"))
+async def limpar_teclado_fantasma(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    
+    # O comando ReplyKeyboardRemove() força o Telegram a vaporizar os botões da tela
+    aviso = await message.answer(
+        "🧹 <b>Limpando lixo visual...</b>\nO painel de administração foi removido deste grupo!", 
+        reply_markup=ReplyKeyboardRemove(),
+        parse_mode="HTML"
+    )
+    
+    # Apaga as mensagens após 4 segundos para ninguém perceber
+    await asyncio.sleep(4)
+    try: 
+        await message.delete()
+        await aviso.delete()
+    except: pass
 
 # =========================================================
 # O MAIN() E O INICIADOR FICAM SEMPRE NO FINAL ABSOLUTO
