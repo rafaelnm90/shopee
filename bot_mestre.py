@@ -1625,15 +1625,35 @@ class BloqueioAdminMiddleware(BaseMiddleware):
         chat = getattr(event, "chat", None)
         texto = getattr(event, "text", "")
         
-        # 1. Bloqueia sumariamente quem não for ADMIN
+        # 1. VIA VERDE: Verifica se a mensagem está no grupo e tópico de submissão
+        is_submissao = False
+        if chat:
+            try:
+                config_sub = ler_submissao_config()
+                if config_sub and config_sub.get("ativo"):
+                    grupo_alvo = config_sub.get("grupo_id")
+                    topico_alvo = config_sub.get("topico_envio")
+                    
+                    thread_id = getattr(event, "message_thread_id", None)
+                    
+                    # Valida se está exatamente no grupo e no tópico configurado
+                    if str(chat.id) == str(grupo_alvo):
+                        if str(thread_id) == str(topico_alvo):
+                            is_submissao = True
+            except Exception:
+                pass
+
+        # 2. Bloqueia quem não for ADMIN, EXCETO se estiver na Via Verde
         if usuario and getattr(usuario, "id", None) != ADMIN_ID:
-            return 
-            
-        # 2. Bloqueia o próprio ADMIN se usar o bot em grupo (evita expor botões)
-        # A única exceção é o comando de faxina visual
-        if chat and chat.type != "private" and texto != "/limpar_teclado":
-            if EXIBIR_LOGS: logger.warning("🛡️ [Segurança Global] Comando de Admin bloqueado no grupo para evitar exposição visual do painel.")
-            return 
+            if not is_submissao:
+                return 
+                
+        # 3. Bloqueia o próprio ADMIN se usar o bot em grupo (evita expor botões)
+        # Exceções: Comando de faxina visual ou testar a própria Via Verde
+        if usuario and getattr(usuario, "id", None) == ADMIN_ID:
+            if chat and chat.type != "private" and texto != "/limpar_teclado" and not is_submissao:
+                if EXIBIR_LOGS: logger.warning("🛡️ [Segurança Global] Comando de Admin bloqueado no grupo para evitar exposição visual do painel.")
+                return 
 
         return await handler(event, data)
 
