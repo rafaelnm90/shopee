@@ -8566,13 +8566,6 @@ def checar_permissao_topico(message: types.Message):
 @dp.message(F.chat.type.in_(["supergroup", "group"]), StateFilter(None))
 async def interceptar_envio_livre(message: types.Message, state: FSMContext):
     permitido, config = checar_permissao_topico(message)
-    if not permitido: return
-    
-    # Apaga a mensagem que o usuário mandou solta para manter o chat limpo
-    try: await message.dele# Interceptador para mensagens enviadas fora do fluxo de botões
-@dp.message(F.chat.type.in_(["supergroup", "group"]), StateFilter(None))
-async def interceptar_envio_livre(message: types.Message, state: FSMContext):
-    permitido, config = checar_permissao_topico(message)
     if not permitido: 
         return
     
