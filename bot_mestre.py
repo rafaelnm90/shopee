@@ -206,6 +206,11 @@ class SubmissaoAdminFluxo(StatesGroup):
     aguardando_link_envio = State()
     aguardando_link_destino = State()
 
+class SubmissaoUsuarioInterativa(StatesGroup):
+    aguardando_video = State()
+    aguardando_shopee = State()
+    aguardando_tiktok = State()
+
 def ler_submissao_config():
     return ler_config_bd("submissao_config", padrao={"ativo": False, "grupo_id": None, "topico_envio": None, "topico_destino": None})
 
@@ -8495,119 +8500,238 @@ async def salvar_config_completa_submissao(message: types.Message, state: FSMCon
         await message.answer("⚠️ Link não reconhecido. Tente novamente:", reply_markup=teclado_cancelar)
 
 # ==========================================
-# FLUXO DO USUÁRIO: MODERAÇÃO NOS TÓPICOS 🧠
+# FLUXO DO USUÁRIO: MODERAÇÃO GUIADA POR BOTÕES 🧠
 # ==========================================
-@dp.message(F.chat.type.in_(["supergroup", "group"]))
-async def escutar_submissoes_grupo(message: types.Message):
+
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+def checar_permissao_topico(message: types.Message):
+    """Função auxiliar para validar se o usuário está no grupo e tópico corretos."""
     config = ler_submissao_config()
-    if not config.get("ativo"): return
-    
+    if not config.get("ativo"): return False, None
     grupo_id = config.get("grupo_id")
     topico_envio = config.get("topico_envio")
-    topico_destino = config.get("topico_destino")
-    
-    if not grupo_id or topico_envio is None or topico_destino is None: return
-    
-    # 1. Trava de Roteamento: Verifica se está no grupo e no tópico corretos
+    if not grupo_id or topico_envio is None: return False, None
     chat_id_str = str(message.chat.id)
-    if chat_id_str != str(grupo_id) and chat_id_str.replace("-100", "") != str(grupo_id).replace("-100", ""): return
+    if chat_id_str != str(grupo_id) and chat_id_str.replace("-100", "") != str(grupo_id).replace("-100", ""): return False, None
+    if str(message.message_thread_id or 0) != str(topico_envio): return False, None
+    if message.from_user.id == ADMIN_ID: return False, None # Ignora o Admin
+    if message.from_user.is_bot: return False, None # Ignora outros bots
+    return True, config
+
+# 1. GATILHO INICIAL: Qualquer mensagem fora de ordem aciona o botão de Iniciar
+@dp.message(F.chat.type.in_(["supergroup", "group"]), StateFilter(None))
+async def interceptar_envio_livre(message: types.Message, state: FSMContext):
+    permitido, config = checar_permissao_topico(message)
+    if not permitido: return
     
-    thread_atual = message.message_thread_id or 0
-    if str(thread_atual) != str(topico_envio): return
+    # Apaga a mensagem que o usuário mandou solta para manter o chat limpo
+    try: await message.delete()
+    except: pass
     
-    # Se for o Admin (Você) postando no tópico, ignora para não criar loops
-    if message.from_user.id == ADMIN_ID: return
+    teclado_iniciar = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🎬 Iniciar Postagem de Oferta", callback_data="iniciar_wizard_oferta")]
+    ])
     
-    # 2. Exige que a pessoa mande o vídeo com o link na legenda
-    if message.video:
-        legenda = message.caption or ""
-        
-        # Filtro de links nativos e convertidos
-        if "shopee" not in legenda.lower() and "shp.ee" not in legenda.lower():
-            aviso = await message.reply("⚠️ <b>Aviso:</b> Para submeter uma oferta, você precisa enviar o vídeo com o <b>Link de Afiliado da Shopee na legenda</b> da mesma mensagem.", parse_mode="HTML")
-            await asyncio.sleep(10)
-            try:
-                await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-                await bot.delete_message(chat_id=message.chat.id, message_id=aviso.message_id)
+    user_mention = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
+    aviso = await message.answer(
+        f"👋 Olá, {user_mention}! Quer divulgar sua oferta na nossa comunidade?\n\n"
+        "Clique no botão abaixo e eu vou te guiar passo a passo para enviar o seu vídeo e os seus links!",
+        reply_markup=teclado_iniciar,
+        message_thread_id=message.message_thread_id
+    )
+    # Apaga o convite após 15 segundos para não poluir o grupo
+    await asyncio.sleep(15)
+    try: await aviso.delete()
+    except: pass
+
+# 2. PASSO 1: Clicou no botão -> Pede o Vídeo
+@dp.callback_query(F.data == "iniciar_wizard_oferta")
+async def wizard_pedir_video(callback: types.CallbackQuery, state: FSMContext):
+    teclado_cancelar_inline = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Cancelar", callback_data="cancelar_wizard")]])
+    
+    await callback.message.answer(
+        "📍 <b>PASSO 1 de 3:</b>\n\n"
+        "Por favor, envie aqui o <b>VÍDEO</b> do produto que você deseja divulgar.",
+        parse_mode="HTML",
+        reply_markup=teclado_cancelar_inline,
+        message_thread_id=callback.message.message_thread_id
+    )
+    await state.set_state(SubmissaoUsuarioInterativa.aguardando_video)
+    await callback.answer()
+
+# 3. PASSO 2: Recebe o Vídeo -> Pede a Shopee
+@dp.message(SubmissaoUsuarioInterativa.aguardando_video)
+async def wizard_receber_video(message: types.Message, state: FSMContext):
+    permitido, config = checar_permissao_topico(message)
+    if not permitido: return
+    try: await message.delete() # Limpa o vídeo do tópico temporariamente
+    except: pass
+
+    if not message.video:
+        aviso = await message.answer("⚠️ Por favor, envie um arquivo de <b>VÍDEO</b> para continuarmos.", parse_mode="HTML")
+        await asyncio.sleep(5)
+        try: await aviso.delete()
+        except: pass
+        return
+
+    await state.update_data(video_file_id=message.video.file_id)
+    
+    teclado_cancelar_inline = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Cancelar", callback_data="cancelar_wizard")]])
+    await message.answer(
+        "📍 <b>PASSO 2 de 3:</b>\n\n"
+        "Ótimo! Vídeo recebido. 🎬\n\n"
+        "Agora, cole aqui o seu <b>Link de Afiliado da SHOPEE</b> 🛒 referente a este produto:",
+        parse_mode="HTML",
+        reply_markup=teclado_cancelar_inline,
+        message_thread_id=message.message_thread_id
+    )
+    await state.set_state(SubmissaoUsuarioInterativa.aguardando_shopee)
+
+# 4. PASSO 3: Recebe Shopee -> Pede TikTok (Opcional)
+@dp.message(SubmissaoUsuarioInterativa.aguardando_shopee)
+async def wizard_receber_shopee(message: types.Message, state: FSMContext):
+    permitido, config = checar_permissao_topico(message)
+    if not permitido: return
+    try: await message.delete()
+    except: pass
+
+    link = message.text
+    if not link or ("shopee" not in link.lower() and "shp.ee" not in link.lower()):
+        aviso = await message.answer("⚠️ O link precisa ser da Shopee. Tente novamente colando o link correto:")
+        await asyncio.sleep(5)
+        try: await aviso.delete()
+        except: pass
+        return
+
+    await state.update_data(link_shopee=link)
+    
+    teclado_tiktok = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Pular TikTok ⏭️", callback_data="pular_tiktok")],
+        [InlineKeyboardButton(text="❌ Cancelar Tudo", callback_data="cancelar_wizard")]
+    ])
+    
+    await message.answer(
+        "📍 <b>PASSO 3 de 3 (Opcional):</b>\n\n"
+        "Você também tem o <b>Link de Afiliado do TIKTOK</b> 🎵 para este produto?\n\n"
+        "Se sim, cole o link aqui. Se não tiver, basta clicar no botão <b>Pular</b> abaixo.",
+        parse_mode="HTML",
+        reply_markup=teclado_tiktok,
+        message_thread_id=message.message_thread_id
+    )
+    await state.set_state(SubmissaoUsuarioInterativa.aguardando_tiktok)
+
+# 5. PASSO FINAL: IA Processa e Posta
+@dp.message(SubmissaoUsuarioInterativa.aguardando_tiktok)
+@dp.callback_query(F.data == "pular_tiktok")
+async def wizard_finalizar_processamento(event, state: FSMContext):
+    # Pega o contexto dependendo se o usuário digitou o link ou clicou no botão "Pular"
+    is_callback = isinstance(event, types.CallbackQuery)
+    message = event.message if is_callback else event
+    
+    permitido, config = checar_permissao_topico(message)
+    if not permitido: return
+    
+    data = await state.get_data()
+    link_tiktok = None
+    
+    if is_callback:
+        await event.answer("TikTok ignorado.")
+    else:
+        try: await event.delete()
+        except: pass
+        link_tiktok = event.text
+        if "tiktok" not in link_tiktok.lower():
+            aviso = await message.answer("⚠️ Link inválido. Envie um link do TikTok ou clique em Pular.")
+            await asyncio.sleep(5)
+            try: await aviso.delete()
             except: pass
             return
 
-        msg_status = await message.reply("⏳ <b>Analisando a sua oferta...</b> A IA está passando um pente-fino no seu vídeo.", parse_mode="HTML")
+    msg_status = await message.answer(
+        "⏳ <b>Avaliando Oferta...</b>\n\n"
+        "Tudo recebido! Nossa Inteligência Artificial está analisando o seu vídeo para garantir que ele segue as regras da comunidade.",
+        parse_mode="HTML",
+        message_thread_id=message.message_thread_id
+    )
+    await state.clear() # Limpa o estado para o usuário poder submeter outro enquanto esse processa
+
+    try:
+        video_id = data.get("video_file_id")
+        link_shopee = data.get("link_shopee")
         
-        try:
-            file_info = await bot.get_file(message.video.file_id)
-            video_path = f"temp/submissao_{message.video.file_id}.mp4"
-            await bot.download_file(file_info.file_path, destination=video_path)
+        file_info = await bot.get_file(video_id)
+        video_path = f"temp/submissao_{video_id}.mp4"
+        await bot.download_file(file_info.file_path, destination=video_path)
+        
+        prompt = (
+            "Você é o moderador de segurança de um grupo de ofertas. Assista a este vídeo. "
+            "REGRAS: O vídeo DEVE ser a demonstração de um produto físico para venda. "
+            "NÃO PODE: Nudez, violência, memes, dancinhas, vídeos pessoais ou ser apenas texto. "
+            "Responda ESTRITAMENTE em duas linhas.\n"
+            "Linha 1: Escreva '[APROVADO]' ou '[REJEITADO]'.\n"
+            "Linha 2: Se rejeitado, dê o motivo. Se aprovado, escreva APENAS o nome do produto."
+        )
+        
+        analise_ia = await analisar_video_gemini(video_path, prompt, EXIBIR_LOGS)
+        os.remove(video_path)
+        
+        if not analise_ia:
+            return await msg_status.edit_text("❌ Falha temporária na IA. Tente submeter novamente.")
             
-            prompt = (
-                "Você é o moderador de segurança de um grupo de ofertas da Shopee. "
-                "Assista a este vídeo e determine se ele é adequado para publicação. "
-                "REGRAS DE APROVAÇÃO: O vídeo DEVE ser uma demonstração real e nítida de um produto físico para venda. "
-                "REGRAS DE REJEIÇÃO: O vídeo NÃO PODE conter nudez, cenas explícitas, memes aleatórios, brincadeiras, vídeos pessoais ou ser apenas texto. "
-                "Responda ESTRITAMENTE em duas linhas.\n"
-                "Linha 1: Escreva exatamente '[APROVADO]' ou '[REJEITADO]'.\n"
-                "Linha 2: Se rejeitado, dê um motivo curto ao usuário. Se aprovado, escreva APENAS o nome do produto identificado."
+        linhas = analise_ia.split('\n')
+        veredicto = linhas[0].strip().upper()
+        
+        # Pega as informações do usuário que iniciou o processo
+        user_obj = event.from_user
+        user_mention = f"@{user_obj.username}" if user_obj.username else user_obj.first_name
+        
+        if "[APROVADO]" in veredicto:
+            nome_produto = linhas[1].strip() if len(linhas) > 1 else "Oferta Exclusiva"
+            
+            legenda_final = (
+                f"🔥 <b>Nova Oferta da Comunidade!</b>\n"
+                f"👤 Dica enviada por: {user_mention}\n\n"
+                f"📦 <b>Produto:</b> {nome_produto}\n\n"
+                f"🛒 <b>Comprar na Shopee:</b>\n{link_shopee}"
             )
             
-            analise_ia = await analisar_video_gemini(video_path, prompt, EXIBIR_LOGS)
-            os.remove(video_path)
+            if link_tiktok:
+                legenda_final += f"\n\n🎵 <b>Comprar no TikTok:</b>\n{link_tiktok}"
             
-            if not analise_ia:
-                return await msg_status.edit_text("❌ Falha temporária na IA. Tente novamente mais tarde.")
-                
-            linhas = analise_ia.split('\n')
-            veredicto = linhas[0].strip().upper()
+            # Posta no Tópico Vitrine (ID 6 do seu grupo)
+            await bot.send_video(
+                chat_id=message.chat.id, 
+                video=video_id, 
+                caption=legenda_final, 
+                parse_mode="HTML",
+                message_thread_id=config.get("topico_destino")
+            )
             
-            user_mention = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
+            # Avisa no Tópico de Conversa (ID 5)
+            await msg_status.edit_text(f"🎉 <b>Aprovado, {user_mention}!</b> Seu vídeo passou no filtro da IA e a oferta já está brilhando no mural da comunidade!", parse_mode="HTML")
             
-            if "[APROVADO]" in veredicto:
-                nome_produto = linhas[1].strip() if len(linhas) > 1 else "Oferta Exclusiva"
-                
-                # Extrai apenas o link da legenda do usuário para montar a postagem oficial limpa
-                import re
-                links = re.findall(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+', legenda, re.IGNORECASE)
-                link_produto = links[0] if links else "Link na legenda"
-                
-                legenda_final = (
-                    f"🔥 <b>Oferta da Comunidade!</b>\n"
-                    f"👤 Dica enviada por: {user_mention}\n\n"
-                    f"📦 <b>Produto:</b> {nome_produto}\n"
-                    f"🔗 <b>Link:</b>\n{link_produto}"
-                )
-                
-                # Posta o vídeo no Tópico Vitrine (Destino)
-                await bot.send_video(
-                    chat_id=message.chat.id, 
-                    video=message.video.file_id, 
-                    caption=legenda_final, 
-                    parse_mode="HTML",
-                    message_thread_id=topico_destino
-                )
-                
-                # Avisa no Tópico de Envio que deu tudo certo e apaga o vídeo da área de chat
-                await msg_status.edit_text(f"🎉 <b>Parabéns, {user_mention}!</b> Seu vídeo passou no filtro da IA e a oferta acabou de ser postada no nosso Tópico de Ofertas!", parse_mode="HTML")
-                try: await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-                except: pass
-                
-            else:
-                motivo = linhas[1].strip() if len(linhas) > 1 else "Conteúdo inadequado para e-commerce."
-                await msg_status.edit_text(f"🛑 <b>Oferta Rejeitada.</b>\n👤 Usuário: {user_mention}\n<b>Motivo da IA:</b> {motivo}\n\n<i>O seu vídeo foi apagado. Envie apenas vídeos demonstrativos de produtos reais.</i>", parse_mode="HTML")
-                try: await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-                except: pass
-                
-        except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro na submissão do grupo: {e}")
-            await msg_status.edit_text("❌ Ocorreu um erro interno ao processar o vídeo.")
+        else:
+            motivo = linhas[1].strip() if len(linhas) > 1 else "Conteúdo inadequado para e-commerce."
+            await msg_status.edit_text(f"🛑 <b>Oferta Rejeitada.</b>\n👤 Usuário: {user_mention}\n<b>Motivo da IA:</b> {motivo}\n\n<i>O vídeo foi bloqueado. Por favor, submeta apenas demonstrações de produtos.</i>", parse_mode="HTML")
             
-    else:
-        # Se mandou apenas texto/foto no tópico de envios (excluindo os avisos do bot)
-        if message.from_user.is_bot: return
-        aviso = await message.reply("👋 Olá! Para submeter uma oferta, você precisa enviar um <b>VÍDEO</b> com o <b>Link da Shopee na legenda</b> da mensagem.", parse_mode="HTML")
-        await asyncio.sleep(10)
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=message.message_id)
-            await bot.delete_message(chat_id=message.chat.id, message_id=aviso.message_id)
-        except: pass
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro na submissão guiada: {e}")
+        await msg_status.edit_text("❌ Ocorreu um erro interno ao processar o arquivo.")
+        
+    # Apaga o status final após 20 segundos para manter o tópico de conversa 100% limpo
+    await asyncio.sleep(20)
+    try: await msg_status.delete()
+    except: pass
+
+# Cancelamento manual do usuário
+@dp.callback_query(F.data == "cancelar_wizard")
+async def wizard_cancelar(callback: types.CallbackQuery, state: FSMContext):
+    await state.clear()
+    await callback.message.edit_text("❌ Envio de oferta cancelado.")
+    await asyncio.sleep(5)
+    try: await callback.message.delete()
+    except: pass
 
 # =========================================================
 # O MAIN() E O INICIADOR FICAM SEMPRE NO FINAL ABSOLUTO
