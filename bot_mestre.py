@@ -8654,7 +8654,7 @@ async def interceptar_envio_livre(message: types.Message, state: FSMContext):
     aviso = await message.answer(
         f"👋 Olá, {user_mention}! Para submeter uma oferta, por favor utilize o painel interativo abaixo:",
         reply_markup=teclado_iniciar,
-        message_thread_id=message.message_thread_id
+        parse_mode="HTML"
     )
     
     # Remove a notificação temporária após 15 segundos
@@ -8673,8 +8673,7 @@ async def wizard_pedir_video(callback: types.CallbackQuery, state: FSMContext):
         "📍 <b>PASSO 1 de 3:</b>\n\n"
         "Por favor, envie aqui o <b>VÍDEO</b> do produto que você deseja divulgar.",
         parse_mode="HTML",
-        reply_markup=teclado_cancelar_inline,
-        message_thread_id=callback.message.message_thread_id
+        reply_markup=teclado_cancelar_inline
     )
     await state.set_state(SubmissaoUsuarioInterativa.aguardando_video)
     await state.update_data(msg_wizard_id=msg_passo.message_id)
@@ -8695,7 +8694,7 @@ async def wizard_receber_video(message: types.Message, state: FSMContext):
     msg_wizard_id = data.get("msg_wizard_id")
 
     if not message.video:
-        aviso = await message.answer("⚠️ Por favor, envie um arquivo de <b>VÍDEO</b>.", message_thread_id=message.message_thread_id)
+        aviso = await message.answer("⚠️ Por favor, envie um arquivo de <b>VÍDEO</b>.", parse_mode="HTML")
         await asyncio.sleep(4)
         try: await aviso.delete()
         except: pass
@@ -8728,7 +8727,7 @@ async def wizard_receber_shopee(message: types.Message, state: FSMContext):
     link = message.text
 
     if not link or ("shopee" not in link.lower() and "shp.ee" not in link.lower()):
-        aviso = await message.answer("⚠️ O link precisa ser da Shopee. Tente novamente colando o link correto:", message_thread_id=message.message_thread_id)
+        aviso = await message.answer("⚠️ O link precisa ser da Shopee. Tente novamente colando o link correto:", parse_mode="HTML")
         await asyncio.sleep(4)
         try: await aviso.delete()
         except: pass
@@ -8766,7 +8765,7 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
         
         link_tiktok = event.text
         if "tiktok" not in link_tiktok.lower():
-            aviso = await message.answer("⚠️ Link inválido. Envie um link do TikTok ou clique em Pular.", message_thread_id=message.message_thread_id)
+            aviso = await message.answer("⚠️ Link inválido. Envie um link do TikTok ou clique em Pular.", parse_mode="HTML")
             await asyncio.sleep(4)
             try: await aviso.delete()
             except: pass
