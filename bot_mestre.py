@@ -1613,7 +1613,6 @@ class InatividadeMiddleware(BaseMiddleware):
             
         return await handler(event, data)
 
-# Bloco modificado:
 class BloqueioAdminMiddleware(BaseMiddleware):
     async def __call__(
         self,
@@ -1622,8 +1621,13 @@ class BloqueioAdminMiddleware(BaseMiddleware):
         data: Dict[str, Any]
     ) -> Any:
         usuario = getattr(event, "from_user", None)
-        chat = getattr(event, "chat", None)
-        texto = getattr(event, "text", "")
+        
+        # Identifica se é uma mensagem de texto ou um clique num botão (CallbackQuery)
+        is_callback = hasattr(event, "data")
+        mensagem_base = event.message if is_callback else event
+        
+        chat = getattr(mensagem_base, "chat", None)
+        texto = getattr(event, "text", getattr(event, "data", ""))
         
         # 1. VIA VERDE: Verifica se a mensagem está no grupo e tópico de submissão
         is_submissao = False
@@ -1634,12 +1638,12 @@ class BloqueioAdminMiddleware(BaseMiddleware):
                     grupo_alvo = config_sub.get("grupo_id")
                     topico_alvo = config_sub.get("topico_envio")
                     
-                    thread_id = getattr(event, "message_thread_id", None)
+                    thread_id = getattr(mensagem_base, "message_thread_id", None)
                     
                     # Valida se está exatamente no grupo e no tópico configurado
-                    if str(chat.id) == str(grupo_alvo):
-                        if str(thread_id) == str(topico_alvo):
-                            is_submissao = True
+                    if str(chat.id) == str(grupo_alvo) and str(thread_id) == str(topico_alvo):
+                        is_submissao = True
+                        if is_callback and EXIBIR_LOGS: logger.info("🟢 [Via Verde] Clique de botão autorizado no painel de submissão.")
             except Exception:
                 pass
 
@@ -1649,15 +1653,14 @@ class BloqueioAdminMiddleware(BaseMiddleware):
                 return 
                 
         # 3. Bloqueia o próprio ADMIN se usar o bot em grupo (evita expor botões)
-        # Exceções: Comando de faxina visual ou testar a própria Via Verde
         if usuario and getattr(usuario, "id", None) == ADMIN_ID:
             if chat and chat.type != "private" and texto != "/limpar_teclado" and not is_submissao:
-                if EXIBIR_LOGS: logger.warning("🛡️ [Segurança Global] Comando de Admin bloqueado no grupo para evitar exposição visual do painel.")
+                if getattr(event, "text", None) and EXIBIR_LOGS: logger.warning("🛡️ [Segurança Global] Comando bloqueado no grupo para evitar exposição visual.")
                 return 
 
         return await handler(event, data)
 
-# Acopla os interceptadores de segurança e inatividade ao núcleo do robô
+# Acopla os interceptadores de segurança e inatividade ao núcleo do robô para vigiar todas as mensagens
 dp.message.middleware(BloqueioAdminMiddleware())
 dp.callback_query.middleware(BloqueioAdminMiddleware())
 dp.message.middleware(InatividadeMiddleware())
