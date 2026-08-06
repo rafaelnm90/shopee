@@ -8506,26 +8506,40 @@ from aiogram.filters import Command
 
 @dp.message(Command("botao_ofertas"))
 async def gerar_botao_permanente(message: types.Message):
+    if EXIBIR_LOGS: logger.info(f"📥 Comando /botao_ofertas recebido! Usuário ID: {message.from_user.id} | Chat ID: {message.chat.id}")
+    
     # Apenas você (Admin) pode gerar este botão
-    if message.from_user.id != ADMIN_ID: return
+    if message.from_user.id != ADMIN_ID: 
+        if EXIBIR_LOGS: logger.warning(f"🚫 Comando bloqueado: Usuário {message.from_user.id} tentou usar o comando, mas não é o Admin ({ADMIN_ID}).")
+        return
+        
+    if EXIBIR_LOGS: logger.info("✅ Usuário autorizado. Gerando o botão fixo...")
     
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     teclado_iniciar = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎬 Iniciar Postagem de Oferta", callback_data="iniciar_wizard_oferta")]
     ])
     
-    await message.answer(
-        "👋 <b>Bem-vindo ao canal de submissões!</b>\n\n"
-        "Quer divulgar a sua oferta da Shopee na nossa comunidade e faturar junto com a gente?\n\n"
-        "É muito simples! Clique no botão abaixo e o nosso robô vai te guiar passo a passo para enviar o vídeo e o seu link.\n\n"
-        "<i>(As ofertas aprovadas pela nossa IA serão postadas automaticamente no mural público com os seus créditos!)</i>",
-        reply_markup=teclado_iniciar,
-        parse_mode="HTML",
-        message_thread_id=message.message_thread_id
-    )
+    try:
+        await message.answer(
+            "👋 <b>Bem-vindo ao canal de submissões!</b>\n\n"
+            "Quer divulgar a sua oferta da Shopee na nossa comunidade e faturar junto com a gente?\n\n"
+            "É muito simples! Clique no botão abaixo e o nosso robô vai te guiar passo a passo para enviar o vídeo e o seu link.\n\n"
+            "<i>(As ofertas aprovadas pela nossa IA serão postadas automaticamente no mural público com os seus créditos!)</i>",
+            reply_markup=teclado_iniciar,
+            parse_mode="HTML",
+            message_thread_id=message.message_thread_id
+        )
+        if EXIBIR_LOGS: logger.info("✅ Mensagem com botão enviada com sucesso para o tópico!")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao tentar enviar a mensagem com o botão: {e}")
+        
     # Apaga o seu comando "/botao_ofertas" para ficar limpo
-    try: await message.delete()
-    except: pass
+    try: 
+        await message.delete()
+        if EXIBIR_LOGS: logger.info("🧹 Comando /botao_ofertas apagado do chat para manter a limpeza.")
+    except Exception as e: 
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível apagar o comando /botao_ofertas (Falta de permissão de admin no grupo?): {e}")
 
 # ==========================================
 # FLUXO DO USUÁRIO: MODERAÇÃO GUIADA POR BOTÕES 🧠
