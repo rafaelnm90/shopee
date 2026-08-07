@@ -255,29 +255,6 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
     arquivos_pdf_pasta = [f for f in os.listdir(pasta_extracao) if f.lower().endswith('.pdf')]
     notas_encontradas = 0
     lojas_sem_pdf = []
-    
-    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
-    cursor = conexao.cursor()
-    
-    arquivos_pdf_pasta = [f for f in os.listdir(pasta_extracao) if f.lower().endswith('.pdf')]
-    notas_encontradas = 0
-    lojas_sem_pdf = []
-    resumo_tabela = ""
-    
-    for index, row in df.iterrows():
-    try:
-        df = pd.read_csv(csv_path, sep=None, engine='python')
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler CSV: {e}")
-        await msg_status.edit_text(f"❌ Erro ao ler o arquivo CSV: {e}")
-        return
-
-    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
-    cursor = conexao.cursor()
-    
-    arquivos_pdf_pasta = [f for f in os.listdir(pasta_extracao) if f.lower().endswith('.pdf')]
-    notas_encontradas = 0
-    lojas_sem_pdf = []
     resumo_tabela = ""
     
     for index, row in df.iterrows():
