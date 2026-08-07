@@ -1121,26 +1121,29 @@ async def disparar_mensagem(tipo, forcar=False):
         
     # ✅ NOVA TRAVA: Controle absoluto do Expediente e Margem de Respiro
     if tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
-        if dados_rotina.get("ultimo_bom_dia") != hoje_str:
-            if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): O expediente ainda não foi aberto pelo 'Bom Dia'.")
-            return
-            
-        hora_ultimo_bd = dados_rotina.get("hora_ultimo_bom_dia", "")
-        if hora_ultimo_bd:
-            hora_bd_obj = datetime.strptime(hora_ultimo_bd, "%H:%M").time()
-            momento_bd = datetime.combine(agora_tz.date(), hora_bd_obj).replace(tzinfo=fuso_horario)
-            minutos_passados = (agora_tz - momento_bd).total_seconds() / 60
-            
-            if minutos_passados < 10:
-                if EXIBIR_LOGS: logger.warning(f"🛑 Disparo ({tipo}) adiado: O 'Bom Dia' saiu há apenas {int(minutos_passados)} min. Reagendando para respeitar a margem de segurança.")
-                novo_horario = momento_bd + timedelta(minutes=random.randint(12, 25))
-                job_id = f"job_rotina_{tipo}_reagendado_{int(agora_tz.timestamp())}"
-                scheduler.add_job(disparar_mensagem, 'date', run_date=novo_horario, args=[tipo], id=job_id, replace_existing=True)
+        
+        # 🚀 CORREÇÃO: Se for um disparo forçado (botão manual), ignora as regras de expediente
+        if not forcar:
+            if dados_rotina.get("ultimo_bom_dia") != hoje_str:
+                if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): O expediente ainda não foi aberto pelo 'Bom Dia'.")
                 return
                 
-        if dados_rotina.get("ultimo_boa_noite") == hoje_str:
-            if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): O expediente já foi encerrado pelo 'Boa Noite'.")
-            return
+            hora_ultimo_bd = dados_rotina.get("hora_ultimo_bom_dia", "")
+            if hora_ultimo_bd:
+                hora_bd_obj = datetime.strptime(hora_ultimo_bd, "%H:%M").time()
+                momento_bd = datetime.combine(agora_tz.date(), hora_bd_obj).replace(tzinfo=fuso_horario)
+                minutos_passados = (agora_tz - momento_bd).total_seconds() / 60
+                
+                if minutos_passados < 10:
+                    if EXIBIR_LOGS: logger.warning(f"🛑 Disparo ({tipo}) adiado: O 'Bom Dia' saiu há apenas {int(minutos_passados)} min. Reagendando para respeitar a margem de segurança.")
+                    novo_horario = momento_bd + timedelta(minutes=random.randint(12, 25))
+                    job_id = f"job_rotina_{tipo}_reagendado_{int(agora_tz.timestamp())}"
+                    scheduler.add_job(disparar_mensagem, 'date', run_date=novo_horario, args=[tipo], id=job_id, replace_existing=True)
+                    return
+                    
+            if dados_rotina.get("ultimo_boa_noite") == hoje_str:
+                if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): O expediente já foi encerrado pelo 'Boa Noite'.")
+                return
 
     # ✅ TRAVA DE CONCORRÊNCIA: Registra o histórico ANTES de chamar a IA. 
     # Isso impede que o botão "Atualizar Rotinas" cause duplicidade se for clicado enquanto o Gemini processa o texto.
