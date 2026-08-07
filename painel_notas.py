@@ -45,6 +45,7 @@ def configurar_dependencias(bot: Bot, scheduler):
 class PainelNotasFluxo(StatesGroup):
     aguardando_csv = State()
     aguardando_zip = State()
+    aguardando_aprovacao = State()
 
 teclado_notas_cancelar = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Cancelar ❌")]],
@@ -88,7 +89,7 @@ async def enviar_email_brevo(para_email, para_nome, assunto, corpo_html, caminho
 # ==========================================
 # MOTOR DE DISPARO EM LOTE
 # ==========================================
-async def processar_fila_envios():
+async def processar_fila_envios(chat_id=None, message_id=None):
     if EXIBIR_LOGS: logger.info("🚀 Iniciando esteira de disparos de notas fiscais...")
     
     conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -101,10 +102,23 @@ async def processar_fila_envios():
         conexao.close()
         return
 
+    total_notas = len(pendentes)
     envios_realizados = 0
     falhas_etapa = []
+    relatorio_visual = "📋 <b>Relatório de Envio de Notas</b>\n\n"
     
-    for item in pendentes:
+    for idx, item in enumerate(pendentes, 1):
+        id_registro = item["id"]
+        loja = item["nome_loja"]
+        email = item["email_destino"]
+        pdf = item["caminho_pdf"]
+        nome_arquivo = os.path.basename(pdf)
+        
+        if chat_id and message_id and bot_instance:
+            try:
+                await bot_instance.edit_message_text(f"⏳ <b>Enviando nota {idx}/{total_notas}</b> : Conectando com a loja {loja}...", chat_id=chat_id, message_id=message_id, parse_mode="HTML")
+            except Exception: pass
+
         if envios_realizados >= LIMITE_DIARIO:
             if EXIBIR_LOGS: logger.warning(f"⏳ Limite diário atingido. Programando retomada para {PAUSA_HORAS} horas.")
             agora = datetime.now()
@@ -113,6 +127,13 @@ async def processar_fila_envios():
             
             assunto_admin = "[Sistema de Notas Shopee] Aviso de Pausa: Etapa Concluída"
             corpo_admin = f"<p>O limite diário de {LIMITE_DIARIO} foi atingido.</p><p>O script foi programado para retomar a próxima etapa em {retomada.strftime('%d/%m/%Y %H:%M')}.</p><p>Envios realizados nesta etapa: {envios_realizados}</p>"
+            
+            relatorio_visual += f"\n⏸️ <b>PAUSA DE SEGURANÇA:</b> O limite de {LIMITE_DIARIO} envios foi atingido. A esteira foi pausada e voltará automaticamente em {retomada.strftime('%d/%m às %H:%M')}."
+            
+            if chat_id and message_id and bot_instance:
+                try: await bot_instance.edit_message_text(relatorio_visual[:4000], chat_id=chat_id, message_id=message_id, parse_mode="HTML")
+                except Exception: pass
+            
             if falhas_etapa:
                 corpo_admin += "<p><b>ATENÇÃO: Foram registrados os seguintes erros:</b></p><ul>"
                 for f in falhas_etapa: corpo_admin += f"<li>{f}</li>"
@@ -122,11 +143,6 @@ async def processar_fila_envios():
             conexao.close()
             return
 
-        id_registro = item["id"]
-        loja = item["nome_loja"]
-        email = item["email_destino"]
-        pdf = item["caminho_pdf"]
-        
         assunto = f"Sua Nota Fiscal de Comissão - {loja}"
         corpo = f"<p>Olá, {loja}.</p><p>Segue em anexo a Nota Fiscal referente às comissões do programa de afiliados da Shopee.</p><p>Qualquer dúvida, estamos à disposição.</p>"
         
@@ -136,17 +152,25 @@ async def processar_fila_envios():
         if status_api in [200, 201]:
             cursor.execute("UPDATE fila_notas SET status = 'ENVIADO' WHERE id = ?", (id_registro,))
             envios_realizados += 1
+            relatorio_visual += f"🟢 <b>Concluído</b> | {loja} | {email} | {nome_arquivo}\n"
             if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Nota enviada para {loja} ({email}).")
         else:
             erro_msg = f"Erro API {status_api}: {resposta_api}"
             cursor.execute("UPDATE fila_notas SET status = 'ERRO', motivo_erro = ? WHERE id = ?", (erro_msg, id_registro))
             falhas_etapa.append(f"⚠️ Falha ao processar loja {loja}: {erro_msg}")
+            relatorio_visual += f"🔴 <b>Erro API</b> | {loja} | {email} | {nome_arquivo}\n"
+            relatorio_visual += f"   └ ⚠️ <b>O que houve:</b> O e-mail foi rejeitado pelo servidor ou o arquivo possui falhas.\n"
+            relatorio_visual += f"   └ 🛠️ <b>Como corrigir:</b> Verifique o contato no CSV e a validade do PDF, e submeta a loja novamente.\n"
             if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar para {loja}: {erro_msg}")
             
         conexao.commit()
         await asyncio.sleep(1)
 
     conexao.close()
+    
+    if chat_id and message_id and bot_instance:
+        try: await bot_instance.edit_message_text(relatorio_visual[:4000], chat_id=chat_id, message_id=message_id, parse_mode="HTML")
+        except Exception: pass
     
     assunto_final = "[Sistema de Notas Shopee] Processo Totalmente Concluído"
     corpo_final = f"<p>Todas as notas pendentes na planilha foram processadas com sucesso.</p><p>Envios realizados nesta última etapa: {envios_realizados}</p>"
@@ -157,7 +181,7 @@ async def processar_fila_envios():
         
     await enviar_email_brevo(EMAIL_ADMIN, "Administrador", assunto_final, corpo_final)
     
-    if bot_instance:
+    if bot_instance and not chat_id:
         from bot_mestre import ADMIN_ID
         await bot_instance.send_message(ADMIN_ID, f"🎉 <b>Processamento de Notas Finalizado!</b>\nForam processados {envios_realizados} envios. O relatório detalhado foi enviado para o seu e-mail.", parse_mode="HTML")
 
@@ -232,6 +256,30 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
     notas_encontradas = 0
     lojas_sem_pdf = []
     
+    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+    cursor = conexao.cursor()
+    
+    arquivos_pdf_pasta = [f for f in os.listdir(pasta_extracao) if f.lower().endswith('.pdf')]
+    notas_encontradas = 0
+    lojas_sem_pdf = []
+    resumo_tabela = ""
+    
+    for index, row in df.iterrows():
+    try:
+        df = pd.read_csv(csv_path, sep=None, engine='python')
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler CSV: {e}")
+        await msg_status.edit_text(f"❌ Erro ao ler o arquivo CSV: {e}")
+        return
+
+    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+    cursor = conexao.cursor()
+    
+    arquivos_pdf_pasta = [f for f in os.listdir(pasta_extracao) if f.lower().endswith('.pdf')]
+    notas_encontradas = 0
+    lojas_sem_pdf = []
+    resumo_tabela = ""
+    
     for index, row in df.iterrows():
         nome_loja = str(row.get('Nome da loja', '')).strip()
         email_loja = str(row.get('E-mail', '')).strip()
@@ -250,34 +298,63 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
                 
         if pdf_encontrado:
             cursor.execute('''
-                INSERT INTO fila_notas (nome_loja, email_destino, caminho_pdf)
-                VALUES (?, ?, ?)
+                INSERT INTO fila_notas (nome_loja, email_destino, caminho_pdf, status)
+                VALUES (?, ?, ?, 'RASCUNHO')
             ''', (nome_loja, email_loja, pdf_encontrado))
             notas_encontradas += 1
+            resumo_tabela += f"📄 {nome_loja} | {email_loja} | {pdf_file}\n"
         else:
             lojas_sem_pdf.append(nome_loja)
             
     conexao.commit()
     conexao.close()
     
-    # Limpeza
     try:
         os.remove(csv_path)
         os.remove(caminho_zip)
     except: pass
     
     resumo = f"✅ <b>Cruzamento finalizado!</b>\n\n"
-    resumo += f"📄 Notas mapeadas prontas para envio: <b>{notas_encontradas}</b>\n"
+    resumo += f"📄 Notas mapeadas: <b>{notas_encontradas}</b>\n"
     if lojas_sem_pdf:
-        resumo += f"⚠️ Lojas sem PDF encontrado (não enviadas): <b>{len(lojas_sem_pdf)}</b>\n"
+        resumo += f"⚠️ Lojas sem PDF encontrado: <b>{len(lojas_sem_pdf)}</b>\n\n"
         
-    resumo += "\nO motor de disparos foi ativado em background. Você receberá relatórios pelo e-mail."
-    await msg_status.edit_text(resumo, parse_mode="HTML")
+    if notas_encontradas > 0:
+        resumo += "📋 <b>Resumo do que será enviado:</b>\n"
+        resumo += resumo_tabela
+        resumo += "\nDeseja aprovar e iniciar os envios agora?"
+        
+        teclado_aprovacao = ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Aprovar Envio ✅"), KeyboardButton(text="Cancelar ❌")]],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        await msg_status.edit_text(resumo[:3900], parse_mode="HTML")
+        await message.answer("Por favor, valide o resumo acima:", reply_markup=teclado_aprovacao)
+        await state.set_state(PainelNotasFluxo.aguardando_aprovacao)
+    else:
+        await msg_status.edit_text(f"⚠️ Nenhuma nota foi combinada com sucesso.\nLojas que falharam: {len(lojas_sem_pdf)}", parse_mode="HTML")
+        from bot_mestre import obter_teclado_outros_canais
+        await message.answer("Operação abortada.", reply_markup=obter_teclado_outros_canais())
+        await state.clear()
+
+@router.message(PainelNotasFluxo.aguardando_aprovacao)
+async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar Envio ✅":
+        await message.answer("Por favor, utilize os botões em ecrã para Aprovar Envio ✅ ou Cancelar ❌.")
+        return
+
+    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+    cursor = conexao.cursor()
+    cursor.execute("UPDATE fila_notas SET status = 'PENDENTE' WHERE status = 'RASCUNHO'")
+    conexao.commit()
+    conexao.close()
+    
+    msg_dinamica = await message.answer("⏳ <b>Preparando o motor de envios...</b>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    
+    if EXIBIR_LOGS: logger.info("⏰ Acionando motor de envio via Brevo.")
+    asyncio.create_task(processar_fila_envios(chat_id=message.chat.id, message_id=msg_dinamica.message_id))
     
     from bot_mestre import obter_teclado_outros_canais
-    await message.answer("Painel atualizado.", reply_markup=obter_teclado_outros_canais())
+    await message.answer("O painel principal está liberado. A tabela acima será atualizada em tempo real.", reply_markup=obter_teclado_outros_canais())
     await state.clear()
-    
-    if notas_encontradas > 0:
-        if EXIBIR_LOGS: logger.info("⏰ Acionando motor assíncrono de envio via Brevo.")
-        scheduler_instance.add_job(processar_fila_envios, 'date', run_date=datetime.now() + timedelta(seconds=5), id='inicio_notas', replace_existing=True)
