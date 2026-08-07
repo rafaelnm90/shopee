@@ -8,6 +8,8 @@ import sqlite3
 import base64
 import logging
 import shutil
+import unicodedata
+import re
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from aiogram import Router, Bot, types, F
@@ -55,6 +57,18 @@ teclado_notas_cancelar = ReplyKeyboardMarkup(
 
 PASTA_TEMP = "temp/notas_fiscais"
 os.makedirs(PASTA_TEMP, exist_ok=True)
+
+def normalizar_texto(texto):
+    if not isinstance(texto, str):
+        return ""
+    # Remove acentos
+    texto = ''.join(c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn')
+    # Coloca em minúsculo
+    texto = texto.lower()
+    # Remove caracteres especiais (mantém apenas letras, números e espaços)
+    texto = re.sub(r'[^a-z0-9\s]', ' ', texto)
+    # Remove espaços duplos
+    return re.sub(r'\s+', ' ', texto).strip()
 
 # ==========================================
 # INTEGRAÇÃO COM A API DO BREVO
@@ -265,13 +279,20 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
             continue
             
         pdf_encontrado = None
-        nome_busca = nome_loja.lower()
+        nome_csv_norm = normalizar_texto(nome_loja)
         
         for pdf_file in arquivos_pdf_pasta:
-            pdf_lower = pdf_file.lower()
-            if f"rnm- {nome_busca}" in pdf_lower or f"rnm-{nome_busca}" in pdf_lower:
-                pdf_encontrado = os.path.join(pasta_extracao, pdf_file)
-                break
+            nome_pdf_norm = normalizar_texto(pdf_file)
+            
+            # Extrai apenas a parte do nome da loja no arquivo PDF (o que vem entre 'rnm' e 'pdf')
+            match_pdf = re.search(r'rnm\s*(.+)\s*pdf', nome_pdf_norm)
+            if match_pdf:
+                nome_loja_pdf = match_pdf.group(1).strip()
+                
+                # Cruza se o nome extraído do PDF estiver contido no nome do CSV (ou vice-versa)
+                if nome_loja_pdf in nome_csv_norm or nome_csv_norm in nome_loja_pdf:
+                    pdf_encontrado = os.path.join(pasta_extracao, pdf_file)
+                    break
                 
         if pdf_encontrado:
             cursor.execute('''
