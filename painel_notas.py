@@ -300,7 +300,7 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
                 VALUES (?, ?, ?, 'RASCUNHO')
             ''', (nome_loja, email_loja, pdf_encontrado))
             notas_encontradas += 1
-            resumo_tabela += f"📄 {nome_loja} | {email_loja} | {pdf_file}\n"
+            resumo_tabela += f"📄 <b>{pdf_file}</b>\n   └ Loja: {nome_loja} | E-mail: {email_loja}\n"
         else:
             lojas_sem_pdf.append(nome_loja)
             
@@ -313,9 +313,15 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
     except: pass
     
     resumo = f"✅ <b>Cruzamento finalizado!</b>\n\n"
-    resumo += f"📄 Notas mapeadas: <b>{notas_encontradas}</b>\n"
+    resumo += f"📊 <b>Balanço Geral:</b>\n"
+    resumo += f"✅ Notas prontas para envio: <b>{notas_encontradas}</b>\n"
+    resumo += f"❌ Lojas sem PDF: <b>{len(lojas_sem_pdf)}</b>\n\n"
+    
     if lojas_sem_pdf:
-        resumo += f"⚠️ Lojas sem PDF encontrado: <b>{len(lojas_sem_pdf)}</b>\n\n"
+        resumo += "⚠️ <b>Não localizadas (FALHA NO CRUZAMENTO):</b>\n"
+        for loja in lojas_sem_pdf:
+            resumo += f"   ❌ {loja}\n"
+        resumo += "\n"
         
     if notas_encontradas > 0:
         resumo += "📋 <b>Resumo do que será enviado:</b>\n"
@@ -327,11 +333,20 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
             resize_keyboard=True,
             is_persistent=True
         )
-        await msg_status.edit_text(resumo[:3900], parse_mode="HTML")
+        
+        # Limita o tamanho caso haja muitas notas (limite do Telegram)
+        if len(resumo) > 3900:
+            await msg_status.edit_text(resumo[:3900] + "\n\n[...Lista truncada devido ao limite de texto do Telegram...]", parse_mode="HTML")
+        else:
+            await msg_status.edit_text(resumo, parse_mode="HTML")
+            
         await message.answer("Por favor, valide o resumo acima:", reply_markup=teclado_aprovacao)
         await state.set_state(PainelNotasFluxo.aguardando_aprovacao)
     else:
-        await msg_status.edit_text(f"⚠️ Nenhuma nota foi combinada com sucesso.\nLojas que falharam: {len(lojas_sem_pdf)}", parse_mode="HTML")
+        resumo_falha = f"⚠️ <b>Nenhuma nota foi combinada com sucesso.</b>\n\n❌ <b>Lojas que falharam ({len(lojas_sem_pdf)}):</b>\n"
+        for loja in lojas_sem_pdf:
+            resumo_falha += f"   - {loja}\n"
+        await msg_status.edit_text(resumo_falha[:3900], parse_mode="HTML")
         from bot_mestre import obter_teclado_outros_canais
         await message.answer("Operação abortada.", reply_markup=obter_teclado_outros_canais())
         await state.clear()
