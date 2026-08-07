@@ -132,10 +132,10 @@ async def gerar_texto_divulgacao(repeticoes=6):
     
     return texto_multiplicado
 
-async def enviar_mensagem(alvo):
+async def enviar_mensagem(alvo, forcar=False):
     if EXIBIR_LOGS: logger.info(f"🔍 Validando status de pausa antes do disparo para {alvo}...")
     config = carregar_configuracoes()
-    if config and config.get("pausado", False):
+    if config and config.get("pausado", False) and not forcar:
         if EXIBIR_LOGS: logger.warning("🛑 Disparo cancelado: O sistema de SPAM está pausado no momento.")
         return
         
@@ -201,10 +201,10 @@ async def gerar_texto_divulgacao_viral(repeticoes=6):
     
     return texto_multiplicado
 
-async def enviar_mensagem_viral(alvo):
+async def enviar_mensagem_viral(alvo, forcar=False):
     if EXIBIR_LOGS: logger.info(f"🔍 [VIRAL] Validando status de pausa antes do disparo para {alvo}...")
     config = carregar_configuracoes_viral()
-    if config and config.get("pausado", False):
+    if config and config.get("pausado", False) and not forcar:
         if EXIBIR_LOGS: logger.warning("🛑 [VIRAL] Disparo cancelado: O sistema de SPAM Viral está pausado no momento.")
         return
         
@@ -355,34 +355,24 @@ async def monitorar_comandos():
         # 1. Verifica Comandos do SPAM Principal
         config_princ = carregar_configuracoes()
         if config_princ and config_princ.get("forcar_disparo"):
-            if config_princ.get("pausado", False):
-                if EXIBIR_LOGS: logger.warning("🛑 Comando forçado ignorado: O sistema de SPAM Principal está pausado.")
-                config_princ["forcar_disparo"] = False
-                salvar_config_bd_divulgacao("alvos_divulgacao", config_princ)
-            else:
-                if EXIBIR_LOGS: logger.info("🚀 Comando de DISPARO FORÇADO PRINCIPAL detectado! Iniciando rajada...")
-                config_princ["forcar_disparo"] = False
-                salvar_config_bd_divulgacao("alvos_divulgacao", config_princ)
-                
-                alvos_princ = config_princ.get("alvos", [])
-                for alvo in alvos_princ:
-                    await enviar_mensagem(alvo)
+            if EXIBIR_LOGS: logger.info("🚀 Comando de DISPARO FORÇADO PRINCIPAL detectado! Iniciando rajada (ignorando pausa)...")
+            config_princ["forcar_disparo"] = False
+            salvar_config_bd_divulgacao("alvos_divulgacao", config_princ)
+            
+            alvos_princ = config_princ.get("alvos", [])
+            for alvo in alvos_princ:
+                await enviar_mensagem(alvo, forcar=True)
 
         # 2. Verifica Comandos do SPAM Viral
         config_viral = carregar_configuracoes_viral()
         if config_viral and config_viral.get("forcar_disparo"):
-            if config_viral.get("pausado", False):
-                if EXIBIR_LOGS: logger.warning("🛑 [VIRAL] Comando forçado ignorado: O sistema de SPAM Viral está pausado.")
-                config_viral["forcar_disparo"] = False
-                salvar_config_bd_divulgacao("alvos_divulgacao_viral", config_viral)
-            else:
-                if EXIBIR_LOGS: logger.info("🚀 [VIRAL] Comando de DISPARO FORÇADO VIRAL detectado! Iniciando rajada...")
-                config_viral["forcar_disparo"] = False
-                salvar_config_bd_divulgacao("alvos_divulgacao_viral", config_viral)
-                
-                alvos_viral = config_viral.get("alvos", [])
-                for alvo in alvos_viral:
-                    await enviar_mensagem_viral(alvo)
+            if EXIBIR_LOGS: logger.info("🚀 [VIRAL] Comando de DISPARO FORÇADO VIRAL detectado! Iniciando rajada (ignorando pausa)...")
+            config_viral["forcar_disparo"] = False
+            salvar_config_bd_divulgacao("alvos_divulgacao_viral", config_viral)
+            
+            alvos_viral = config_viral.get("alvos", [])
+            for alvo in alvos_viral:
+                await enviar_mensagem_viral(alvo, forcar=True)
 
         await asyncio.sleep(5)
 
