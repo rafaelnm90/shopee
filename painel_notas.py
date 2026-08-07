@@ -494,7 +494,7 @@ async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
         elif nota['tipo'] == 'manual':
             tipo_icone = "✍️"
             
-        resumo_tabela += f"{tipo_icone} <b>{nota['pdf']}</b>\n   └ Loja: {nota['loja']} | E-mail: {nota['email']}\n"
+        resumo_tabela += f"{tipo_icone} <b>{nota['pdf']}</b>\n   └ Loja: {nota['loja']} | E-mail: {nota['email']}\n\n"
         
     conexao.commit()
     conexao.close()
