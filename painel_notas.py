@@ -10,6 +10,7 @@ import logging
 import shutil
 import unicodedata
 import re
+import difflib
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from aiogram import Router, Bot, types, F
@@ -47,6 +48,8 @@ def configurar_dependencias(bot: Bot, scheduler):
 class PainelNotasFluxo(StatesGroup):
     aguardando_csv = State()
     aguardando_zip = State()
+    revisando_similares = State()
+    pareamento_manual = State()
     aguardando_aprovacao = State()
 
 teclado_notas_cancelar = ReplyKeyboardMarkup(
@@ -263,13 +266,13 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
         await msg_status.edit_text(f"❌ Erro ao ler o arquivo CSV: {e}")
         return
 
-    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
-    cursor = conexao.cursor()
-    
+    await msg_status.edit_text("✅ Extração concluída. Iniciando motor de cruzamento e auditoria...")
+
     arquivos_pdf_pasta = [f for f in os.listdir(pasta_extracao) if f.lower().endswith('.pdf')]
-    notas_encontradas = 0
-    lojas_sem_pdf = []
-    resumo_tabela = ""
+    
+    notas_validadas = []
+    lojas_pendentes = []
+    pdfs_pendentes = arquivos_pdf_pasta.copy()
     
     for index, row in df.iterrows():
         nome_loja = str(row.get('Nome da loja', '')).strip()
@@ -278,32 +281,221 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
         if pd.isna(nome_loja) or pd.isna(email_loja) or not nome_loja or not email_loja:
             continue
             
-        pdf_encontrado = None
         nome_csv_norm = normalizar_texto(nome_loja)
+        encontrou_exato = False
         
-        for pdf_file in arquivos_pdf_pasta:
+        for pdf_file in pdfs_pendentes.copy():
             nome_pdf_norm = normalizar_texto(pdf_file)
-            
-            # Extrai apenas a parte do nome da loja no arquivo PDF (o que vem entre 'rnm' e 'pdf')
             match_pdf = re.search(r'rnm\s*(.+)\s*pdf', nome_pdf_norm)
             if match_pdf:
                 nome_loja_pdf = match_pdf.group(1).strip()
-                
-                # Cruza se o nome extraído do PDF estiver contido no nome do CSV (ou vice-versa)
                 if nome_loja_pdf in nome_csv_norm or nome_csv_norm in nome_loja_pdf:
-                    pdf_encontrado = os.path.join(pasta_extracao, pdf_file)
+                    notas_validadas.append({'loja': nome_loja, 'email': email_loja, 'pdf': pdf_file, 'tipo': 'exato'})
+                    pdfs_pendentes.remove(pdf_file)
+                    encontrou_exato = True
                     break
-                
-        if pdf_encontrado:
-            cursor.execute('''
-                INSERT INTO fila_notas (nome_loja, email_destino, caminho_pdf, status)
-                VALUES (?, ?, ?, 'RASCUNHO')
-            ''', (nome_loja, email_loja, pdf_encontrado))
-            notas_encontradas += 1
-            resumo_tabela += f"📄 <b>{pdf_file}</b>\n   └ Loja: {nome_loja} | E-mail: {email_loja}\n"
-        else:
-            lojas_sem_pdf.append(nome_loja)
+                    
+        if not encontrou_exato:
+            lojas_pendentes.append({'loja': nome_loja, 'email': email_loja})
             
+    pares_similares = []
+    for loja_dict in lojas_pendentes.copy():
+        nome_csv_norm = normalizar_texto(loja_dict['loja'])
+        melhor_ratio = 0
+        melhor_pdf = None
+        
+        for pdf_file in pdfs_pendentes:
+            nome_pdf_norm = normalizar_texto(pdf_file)
+            match_pdf = re.search(r'rnm\s*(.+)\s*pdf', nome_pdf_norm)
+            if match_pdf:
+                nome_loja_pdf = match_pdf.group(1).strip()
+                ratio = difflib.SequenceMatcher(None, nome_csv_norm, nome_loja_pdf).ratio()
+                if ratio > 0.75 and ratio > melhor_ratio:
+                    melhor_ratio = ratio
+                    melhor_pdf = pdf_file
+                    
+        if melhor_pdf:
+            pares_similares.append({'loja_dict': loja_dict, 'pdf': melhor_pdf})
+            lojas_pendentes.remove(loja_dict)
+            pdfs_pendentes.remove(melhor_pdf)
+
+    await state.update_data(
+        notas_validadas=notas_validadas,
+        lojas_pendentes=lojas_pendentes,
+        pdfs_pendentes=pdfs_pendentes,
+        pares_similares=pares_similares,
+        pasta_extracao=pasta_extracao,
+        csv_path_temp=csv_path,
+        zip_path_temp=caminho_zip
+    )
+    
+    if pares_similares:
+        if EXIBIR_LOGS: logger.info("🔍 Inspecionando similaridades de notas fiscais...")
+        await enviar_proxima_similaridade(message, state)
+    elif lojas_pendentes and pdfs_pendentes:
+        if EXIBIR_LOGS: logger.info("🛠️ Entrando no modo de pareamento manual de notas fiscais...")
+        await enviar_lista_manual(message, state)
+    else:
+        if EXIBIR_LOGS: logger.info("📊 Gerando resumo final do cruzamento...")
+        await gerar_resumo_final_notas(message, state)
+
+async def enviar_proxima_similaridade(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    pares_similares = data.get('pares_similares', [])
+    
+    if not pares_similares:
+        lojas_pendentes = data.get('lojas_pendentes', [])
+        pdfs_pendentes = data.get('pdfs_pendentes', [])
+        if lojas_pendentes and pdfs_pendentes:
+            await enviar_lista_manual(message, state)
+        else:
+            await gerar_resumo_final_notas(message, state)
+        return
+
+    par_atual = pares_similares[0]
+    texto = (
+        "🔍 <b>Similaridade Encontrada:</b>\n\n"
+        f"Loja na Planilha: <b>{par_atual['loja_dict']['loja']}</b>\n"
+        f"Arquivo PDF: <b>{par_atual['pdf']}</b>\n\n"
+        "Deseja associar estes dois?"
+    )
+    teclado = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Sim ✅"), KeyboardButton(text="Não ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
+    await state.set_state(PainelNotasFluxo.revisando_similares)
+
+@router.message(PainelNotasFluxo.revisando_similares)
+async def processar_resposta_similaridade(message: types.Message, state: FSMContext):
+    resposta = message.text
+    if resposta not in ["Sim ✅", "Não ❌"]:
+        await message.answer("⚠️ Use os botões em ecrã: Sim ✅ ou Não ❌.")
+        return
+        
+    data = await state.get_data()
+    pares_similares = data.get('pares_similares', [])
+    notas_validadas = data.get('notas_validadas', [])
+    lojas_pendentes = data.get('lojas_pendentes', [])
+    pdfs_pendentes = data.get('pdfs_pendentes', [])
+    
+    par_atual = pares_similares.pop(0)
+    
+    if resposta == "Sim ✅":
+        notas_validadas.append({'loja': par_atual['loja_dict']['loja'], 'email': par_atual['loja_dict']['email'], 'pdf': par_atual['pdf'], 'tipo': 'similar'})
+        if EXIBIR_LOGS: logger.info(f"✅ Associação aprovada: {par_atual['loja_dict']['loja']} <> {par_atual['pdf']}")
+    else:
+        lojas_pendentes.append(par_atual['loja_dict'])
+        pdfs_pendentes.append(par_atual['pdf'])
+        if EXIBIR_LOGS: logger.info(f"❌ Associação recusada: {par_atual['loja_dict']['loja']} <> {par_atual['pdf']}")
+        
+    await state.update_data(pares_similares=pares_similares, notas_validadas=notas_validadas, lojas_pendentes=lojas_pendentes, pdfs_pendentes=pdfs_pendentes)
+    await enviar_proxima_similaridade(message, state)
+
+async def enviar_lista_manual(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    lojas = data.get('lojas_pendentes', [])
+    pdfs = data.get('pdfs_pendentes', [])
+    
+    texto = "⚠️ <b>Auditoria Manual Necessária</b>\nAs lojas e PDFs abaixo não parearam automaticamente.\n\n"
+    texto += "🏬 <b>Lojas Pendentes:</b>\n"
+    for i, loja in enumerate(lojas):
+        texto += f"<b>{i}</b> - {loja['loja']}\n"
+        
+    texto += "\n📄 <b>PDFs Sobrando:</b>\n"
+    for i, pdf in enumerate(pdfs):
+        letra = chr(65 + (i % 26)) + (str(i // 26) if i >= 26 else "")
+        texto += f"<b>{letra}</b> - {pdf}\n"
+        
+    texto += "\nPara associar, digite o número da loja e a letra do PDF (Ex: <b>0A</b>, <b>1B</b>).\nSe não houver mais associações, clique em Encerrar."
+    
+    teclado = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Encerrar e Ir para o Resumo ⏭️"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    if len(texto) > 3900:
+        await message.answer(texto[:3900] + "\n[Lista truncada...]", reply_markup=teclado, parse_mode="HTML")
+    else:
+        await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
+        
+    await state.set_state(PainelNotasFluxo.pareamento_manual)
+
+@router.message(PainelNotasFluxo.pareamento_manual)
+async def processar_pareamento_manual(message: types.Message, state: FSMContext):
+    if message.text == "Encerrar e Ir para o Resumo ⏭️":
+        await gerar_resumo_final_notas(message, state)
+        return
+        
+    codigo = message.text.upper().strip()
+    match = re.match(r'^(\d+)([A-Z]\d*)$', codigo)
+    
+    if not match:
+        await message.answer("⚠️ Formato inválido. Digite um número seguido de uma letra (Ex: 0A, 1B) ou clique em Encerrar.")
+        return
+        
+    num_idx = int(match.group(1))
+    letra_codigo = match.group(2)
+    
+    data = await state.get_data()
+    lojas = data.get('lojas_pendentes', [])
+    pdfs = data.get('pdfs_pendentes', [])
+    notas_validadas = data.get('notas_validadas', [])
+    
+    letra_idx = -1
+    for i in range(len(pdfs)):
+        l = chr(65 + (i % 26)) + (str(i // 26) if i >= 26 else "")
+        if l == letra_codigo:
+            letra_idx = i
+            break
+            
+    if num_idx >= len(lojas) or letra_idx == -1 or letra_idx >= len(pdfs):
+        await message.answer("⚠️ Código não encontrado nas listas atuais. Tente novamente.")
+        return
+        
+    loja_selecionada = lojas.pop(num_idx)
+    pdf_selecionado = pdfs.pop(letra_idx)
+    
+    notas_validadas.append({'loja': loja_selecionada['loja'], 'email': loja_selecionada['email'], 'pdf': pdf_selecionado, 'tipo': 'manual'})
+    if EXIBIR_LOGS: logger.info(f"✅ Pareamento manual aceito: {loja_selecionada['loja']} <> {pdf_selecionado}")
+    
+    await state.update_data(lojas_pendentes=lojas, pdfs_pendentes=pdfs, notas_validadas=notas_validadas)
+    await message.answer(f"✅ <b>Associado com sucesso:</b>\n{loja_selecionada['loja']} ↔️ {pdf_selecionado}", parse_mode="HTML")
+    
+    if lojas and pdfs:
+        await enviar_lista_manual(message, state)
+    else:
+        await gerar_resumo_final_notas(message, state)
+
+async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    notas_validadas = data.get('notas_validadas', [])
+    lojas_pendentes = data.get('lojas_pendentes', [])
+    pasta_extracao = data.get('pasta_extracao')
+    csv_path = data.get('csv_path_temp')
+    caminho_zip = data.get('zip_path_temp')
+    
+    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+    cursor = conexao.cursor()
+    
+    resumo_tabela = ""
+    for nota in notas_validadas:
+        caminho_completo = os.path.join(pasta_extracao, nota['pdf'])
+        cursor.execute('''
+            INSERT INTO fila_notas (nome_loja, email_destino, caminho_pdf, status)
+            VALUES (?, ?, ?, 'RASCUNHO')
+        ''', (nota['loja'], nota['email'], caminho_completo))
+        
+        tipo_icone = "📄"
+        if nota['tipo'] == 'similar':
+            tipo_icone = "🔍"
+        elif nota['tipo'] == 'manual':
+            tipo_icone = "✍️"
+            
+        resumo_tabela += f"{tipo_icone} <b>{nota['pdf']}</b>\n   └ Loja: {nota['loja']} | E-mail: {nota['email']}\n"
+        
     conexao.commit()
     conexao.close()
     
@@ -312,18 +504,18 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
         os.remove(caminho_zip)
     except: pass
     
-    resumo = f"✅ <b>Cruzamento finalizado!</b>\n\n"
+    resumo = f"✅ <b>Validação finalizada!</b>\n\n"
     resumo += f"📊 <b>Balanço Geral:</b>\n"
-    resumo += f"✅ Notas prontas para envio: <b>{notas_encontradas}</b>\n"
-    resumo += f"❌ Lojas sem PDF: <b>{len(lojas_sem_pdf)}</b>\n\n"
+    resumo += f"✅ Notas prontas para envio: <b>{len(notas_validadas)}</b>\n"
+    resumo += f"❌ Lojas sem PDF: <b>{len(lojas_pendentes)}</b>\n\n"
     
-    if lojas_sem_pdf:
-        resumo += "⚠️ <b>Não localizadas (FALHA NO CRUZAMENTO):</b>\n"
-        for loja in lojas_sem_pdf:
-            resumo += f"   ❌ {loja}\n"
+    if lojas_pendentes:
+        resumo += "⚠️ <b>Não localizadas na auditoria:</b>\n"
+        for loja in lojas_pendentes:
+            resumo += f"   ❌ {loja['loja']}\n"
         resumo += "\n"
         
-    if notas_encontradas > 0:
+    if notas_validadas:
         resumo += "📋 <b>Resumo do que será enviado:</b>\n"
         resumo += resumo_tabela
         resumo += "\nDeseja aprovar e iniciar os envios agora?"
@@ -334,19 +526,17 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
             is_persistent=True
         )
         
-        # Limita o tamanho caso haja muitas notas (limite do Telegram)
         if len(resumo) > 3900:
-            await msg_status.edit_text(resumo[:3900] + "\n\n[...Lista truncada devido ao limite de texto do Telegram...]", parse_mode="HTML")
+            await message.answer(resumo[:3900] + "\n\n[...Lista truncada devido ao limite de texto...]", parse_mode="HTML", reply_markup=teclado_aprovacao)
         else:
-            await msg_status.edit_text(resumo, parse_mode="HTML")
+            await message.answer(resumo, parse_mode="HTML", reply_markup=teclado_aprovacao)
             
-        await message.answer("Por favor, valide o resumo acima:", reply_markup=teclado_aprovacao)
         await state.set_state(PainelNotasFluxo.aguardando_aprovacao)
     else:
-        resumo_falha = f"⚠️ <b>Nenhuma nota foi combinada com sucesso.</b>\n\n❌ <b>Lojas que falharam ({len(lojas_sem_pdf)}):</b>\n"
-        for loja in lojas_sem_pdf:
-            resumo_falha += f"   - {loja}\n"
-        await msg_status.edit_text(resumo_falha[:3900], parse_mode="HTML")
+        resumo_falha = f"⚠️ <b>Nenhuma nota foi combinada com sucesso.</b>\n\n❌ <b>Lojas pendentes ({len(lojas_pendentes)}):</b>\n"
+        for loja in lojas_pendentes:
+            resumo_falha += f"   - {loja['loja']}\n"
+        await message.answer(resumo_falha[:3900], parse_mode="HTML")
         from bot_mestre import obter_teclado_outros_canais
         await message.answer("Operação abortada.", reply_markup=obter_teclado_outros_canais())
         await state.clear()
