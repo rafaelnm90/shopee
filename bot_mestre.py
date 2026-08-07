@@ -30,6 +30,7 @@ import matplotlib.pyplot as plt
 import io
 import sqlite3
 import painel_espelhos
+import painel_notas
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
 EXIBIR_LOGS = True
 
@@ -262,6 +263,11 @@ dp.include_router(painel_espelhos.router)
 painel_espelhos.configurar_dependencias(bot, scheduler)
 if EXIBIR_LOGS: logger.info("✅ Módulo Espelhador montado com segurança.")
 
+if EXIBIR_LOGS: logger.info("🔄 Acoplando o módulo de Disparo de Notas ao fluxo principal...")
+dp.include_router(painel_notas.router)
+painel_notas.configurar_dependencias(bot, scheduler)
+if EXIBIR_LOGS: logger.info("✅ Módulo de Notas montado com segurança.")
+
 # --- NOVOS TECLADOS DE CONTROLE ---
 # 🛠️ Teclado para seleção da plataforma
 teclado_plataforma = ReplyKeyboardMarkup(
@@ -373,16 +379,19 @@ teclado_opcoes_rotina = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-teclado_outros_canais = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
-        [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
-        [KeyboardButton(text="Gerador de Achadinhos 🛍️")],
-        [KeyboardButton(text="Voltar ao Início 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+def obter_teclado_outros_canais():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
+            [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
+            [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Disparador de Notas 🧾")],
+            [KeyboardButton(text="Voltar ao Início 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
+teclado_outros_canais = obter_teclado_outros_canais()
 
 teclado_menu_achadinhos = ReplyKeyboardMarkup(
     keyboard=[
@@ -4078,11 +4087,18 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await gerenciar_divulgacao_viral(message, state)
         return
         
-    # 🔁 Roteamento Inteligente: Se estiver no Gerador de Achadinhos
+   # 🔁 Roteamento Inteligente: Se estiver no Gerador de Achadinhos
     if estado_atual and estado_atual.startswith("AchadinhosFluxo"):
         await state.clear()
         await message.answer("Ação cancelada.")
         await painel_achadinhos(message, state)
+        return
+
+    # 🔁 Roteamento Inteligente: Se estiver no Disparador de Notas
+    if estado_atual and estado_atual.startswith("PainelNotasFluxo"):
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await message.answer("Selecione o robô ou módulo secundário que deseja gerir:", reply_markup=teclado_outros_canais)
         return
 
     # 🔁 Roteamento Inteligente: Se estiver em Vídeos Autorais
