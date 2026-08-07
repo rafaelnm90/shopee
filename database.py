@@ -152,6 +152,18 @@ def inicializar_banco():
         )
     ''')
 
+    # 11. Fila de Notas Fiscais (Shopee Afiliados)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS fila_notas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome_loja TEXT,
+            email_destino TEXT,
+            caminho_pdf TEXT,
+            status TEXT DEFAULT 'PENDENTE',
+            motivo_erro TEXT
+        )
+    ''')
+
     conexao.commit()
     conexao.close()
     
