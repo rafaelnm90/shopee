@@ -595,8 +595,8 @@ async def enviar_lista_manual(message: types.Message, state: FSMContext):
     
     teclado = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Ver PDF 👁️"), KeyboardButton(text="Pular Loja ⏭️")],
-            [KeyboardButton(text="Encerrar e Ir para o Resumo ⏭️"), KeyboardButton(text="Abortar ❌")]
+            [KeyboardButton(text="Pular Loja ⏭️"), KeyboardButton(text="Encerrar e Ir para o Resumo ⏭️")],
+            [KeyboardButton(text="Ver PDF 👁️"), KeyboardButton(text="Abortar ❌")]
         ],
         resize_keyboard=True,
         is_persistent=True
@@ -910,5 +910,5 @@ async def processar_inspecao_final(message: types.Message, state: FSMContext):
         resize_keyboard=True,
         is_persistent=True
     )
-    await message.answer("✅ <b>Visualização concluída.</b>\n\nDeseja aprovar e iniciar os envios agora?", reply_markup=teclado_aprovacao)
+    await message.answer("✅ <b>Visualização concluída.</b>\n\nDeseja aprovar e iniciar os envios agora?", reply_markup=teclado_aprovacao, parse_mode="HTML")
     await state.set_state(PainelNotasFluxo.aguardando_aprovacao)
