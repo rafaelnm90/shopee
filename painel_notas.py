@@ -369,7 +369,10 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
         if f.lower() in pdfs_protegidos:
             qtd_ignorados += 1
             # Remove o arquivo físico duplicado, já que ele não será enviado novamente
-            try: os.remove(os.path.join(pasta_extracao, f)) except: pass
+            try:
+                os.remove(os.path.join(pasta_extracao, f))
+            except Exception:
+                pass
         else:
             arquivos_pdf_pasta.append(f)
 
