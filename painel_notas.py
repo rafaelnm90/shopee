@@ -70,7 +70,7 @@ def obter_teclado_menu_notas():
     )
 
 teclado_notas_cancelar = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text="Cancelar ❌")]],
+    keyboard=[[KeyboardButton(text="Abortar ❌")]],
     resize_keyboard=True,
     is_persistent=True
 )
@@ -284,6 +284,14 @@ async def processar_fila_envios(chat_id=None, message_id=None):
 # ==========================================
 # FLUXO INTERATIVO (TELEGRAM)
 # ==========================================
+
+# 🛡️ NOVO: Interceptador Universal de Cancelamento exclusivo para as Notas
+@router.message(F.text == "Abortar ❌", StateFilter("*"))
+async def abortador_universal_notas(message: types.Message, state: FSMContext):
+    if EXIBIR_LOGS: logger.info("❌ Operação de notas abortada pelo usuário.")
+    await message.answer("Operação cancelada. Retornando ao menu do disparador...", reply_markup=obter_teclado_menu_notas())
+    await state.set_state(PainelNotasFluxo.menu_principal)
+
 @router.message(F.text == "Disparador de Notas 🧾", StateFilter("*"))
 async def iniciar_painel_notas(message: types.Message, state: FSMContext):
     await state.clear()
@@ -582,13 +590,13 @@ async def enviar_lista_manual(message: types.Message, state: FSMContext):
         letra = chr(65 + (i % 26)) + (str(i // 26) if i >= 26 else "")
         texto += f"<b>{letra}</b> - {pdf}\n"
         
-    texto += "\n👉 <b>Digite a LETRA</b> correspondente ao PDF desta loja.\n"
+    ttexto += "\n👉 <b>Digite a LETRA</b> correspondente ao PDF desta loja.\n"
     texto += "🔎 <i>Dica: Para visualizar um PDF antes de associar, clique em <b>Ver PDF 👁️</b>.</i>"
     
     teclado = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Pular Loja ⏭️"), KeyboardButton(text="Encerrar e Ir para o Resumo ⏭️")],
-            [KeyboardButton(text="Ver PDF 👁️"), KeyboardButton(text="Cancelar ❌")]
+            [KeyboardButton(text="Ver PDF 👁️"), KeyboardButton(text="Pular Loja ⏭️")],
+            [KeyboardButton(text="Encerrar e Ir para o Resumo ⏭️"), KeyboardButton(text="Abortar ❌")]
         ],
         resize_keyboard=True,
         is_persistent=True
@@ -607,11 +615,6 @@ async def processar_pareamento_manual(message: types.Message, state: FSMContext)
     
     if texto_usuario == "ENCERRAR E IR PARA O RESUMO ⏭️":
         await gerar_resumo_final_notas(message, state)
-        return
-        
-    if texto_usuario == "CANCELAR ❌":
-        await message.answer("Ação cancelada. Voltando ao menu do disparador...", reply_markup=obter_teclado_menu_notas())
-        await state.set_state(PainelNotasFluxo.menu_principal)
         return
 
     if "VER PDF" in texto_usuario:
@@ -688,7 +691,7 @@ async def processar_inspecao_manual(message: types.Message, state: FSMContext):
 
     # Se o usuário clicar em qualquer botão do teclado enquanto tenta visualizar, 
     # repassa a ação para a função de pareamento para não quebrar o fluxo.
-    if texto_usuario in ["CANCELAR ❌", "ENCERRAR E IR PARA O RESUMO ⏭️"] or "PULAR LOJA" in texto_usuario:
+    if texto_usuario in ["ENCERRAR E IR PARA O RESUMO ⏭️"] or "PULAR LOJA" in texto_usuario:
         await state.set_state(PainelNotasFluxo.pareamento_manual)
         await processar_pareamento_manual(message, state)
         return
@@ -778,7 +781,7 @@ async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
         
         teclado_aprovacao = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="Aprovar Envio ✅"), KeyboardButton(text="Cancelar ❌")],
+                [KeyboardButton(text="Aprovar Envio ✅"), KeyboardButton(text="Abortar ❌")],
                 [KeyboardButton(text="Ver PDF 👁️")]
             ],
             resize_keyboard=True,
@@ -840,13 +843,8 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
         await state.set_state(PainelNotasFluxo.inspecionando_pdf_final)
         return
 
-    if texto_usuario == "Cancelar ❌":
-        await message.answer("Operação cancelada com sucesso.", reply_markup=obter_teclado_menu_notas())
-        await state.set_state(PainelNotasFluxo.menu_principal)
-        return
-
     if texto_usuario != "Aprovar Envio ✅":
-        await message.answer("Por favor, utilize os botões em ecrã para Aprovar Envio ✅, Ver PDF 👁️ ou Cancelar ❌.")
+        await message.answer("Por favor, utilize os botões em ecrã para Aprovar Envio ✅, Ver PDF 👁️ ou Abortar ❌.")
         return
 
     conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -881,17 +879,12 @@ async def processar_inspecao_final(message: types.Message, state: FSMContext):
     pasta_extracao = data.get('pasta_extracao')
     texto_usuario = message.text.strip().upper()
 
-    # Se clicar nos botões, repassa a ação limpa
-    if texto_usuario in ["CANCELAR ❌", "APROVAR ENVIO ✅"]:
-        if texto_usuario == "CANCELAR ❌":
-            await message.answer("Operação cancelada.", reply_markup=obter_teclado_menu_notas())
-            await state.set_state(PainelNotasFluxo.menu_principal)
-        else:
-            await state.set_state(PainelNotasFluxo.aguardando_aprovacao)
-            await processar_aprovacao_envio(message, state)
+    if texto_usuario in ["APROVAR ENVIO ✅"]:
+        await state.set_state(PainelNotasFluxo.aguardando_aprovacao)
+        await processar_aprovacao_envio(message, state)
         return
 
-    if texto_usuario == "VER PDF 👁️":
+    if "VER PDF" in texto_usuario:
         await message.answer("🔎 Digite o <b>NÚMERO</b> da nota que deseja visualizar (Ex: 1, 2):", parse_mode="HTML")
         return
 
@@ -911,7 +904,7 @@ async def processar_inspecao_final(message: types.Message, state: FSMContext):
 
     teclado_aprovacao = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Aprovar Envio ✅"), KeyboardButton(text="Cancelar ❌")],
+            [KeyboardButton(text="Aprovar Envio ✅"), KeyboardButton(text="Abortar ❌")],
             [KeyboardButton(text="Ver PDF 👁️")]
         ],
         resize_keyboard=True,
