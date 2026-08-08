@@ -590,7 +590,7 @@ async def enviar_lista_manual(message: types.Message, state: FSMContext):
         letra = chr(65 + (i % 26)) + (str(i // 26) if i >= 26 else "")
         texto += f"<b>{letra}</b> - {pdf}\n"
         
-    ttexto += "\n👉 <b>Digite a LETRA</b> correspondente ao PDF desta loja.\n"
+    texto += "\n👉 <b>Digite a LETRA</b> correspondente ao PDF desta loja.\n"
     texto += "🔎 <i>Dica: Para visualizar um PDF antes de associar, clique em <b>Ver PDF 👁️</b>.</i>"
     
     teclado = ReplyKeyboardMarkup(
