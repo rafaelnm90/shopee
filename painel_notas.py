@@ -339,8 +339,18 @@ async def processar_menu_notas(message: types.Message, state: FSMContext):
         await message.answer(texto, parse_mode="HTML")
         
     elif "Voltar" in opcao:
-        from bot_mestre import obter_teclado_outros_canais
-        await message.answer("Retornando ao painel central...", reply_markup=obter_teclado_outros_canais())
+        if EXIBIR_LOGS: logger.info("🔙 Retornando à gaveta de Outros Canais de forma isolada.")
+        teclado_outros = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
+                [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
+                [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Disparador de Notas 🧾")],
+                [KeyboardButton(text="Voltar ao Início 🔙")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        await message.answer("Retornando ao painel central...", reply_markup=teclado_outros)
         await state.clear()
         
     else:
@@ -600,9 +610,8 @@ async def processar_pareamento_manual(message: types.Message, state: FSMContext)
         return
         
     if texto_usuario == "CANCELAR ❌":
-        from bot_mestre import obter_teclado_outros_canais
-        await message.answer("Operação abortada.", reply_markup=obter_teclado_outros_canais())
-        await state.clear()
+        await message.answer("Ação cancelada. Voltando ao menu do disparador...", reply_markup=obter_teclado_menu_notas())
+        await state.set_state(PainelNotasFluxo.menu_principal)
         return
 
     if texto_usuario == "VER PDF 👁️":
@@ -769,8 +778,8 @@ async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
         
         teclado_aprovacao = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="Aprovar Envio ✅")],
-                [KeyboardButton(text="Ver PDF 👁️"), KeyboardButton(text="Cancelar ❌")]
+                [KeyboardButton(text="Aprovar Envio ✅"), KeyboardButton(text="Cancelar ❌")],
+                [KeyboardButton(text="Ver PDF 👁️")]
             ],
             resize_keyboard=True,
             is_persistent=True
@@ -795,9 +804,8 @@ async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
             
         await message.answer(resumo_falha[:3900], parse_mode="HTML")
         
-        from bot_mestre import obter_teclado_outros_canais
-        await message.answer("Operação abortada.", reply_markup=obter_teclado_outros_canais())
-        await state.clear()
+        await message.answer("Operação abortada.", reply_markup=obter_teclado_menu_notas())
+        await state.set_state(PainelNotasFluxo.menu_principal)
 
 @router.message(PainelNotasFluxo.aguardando_aprovacao)
 async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
@@ -833,9 +841,8 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
         return
 
     if texto_usuario == "Cancelar ❌":
-        from bot_mestre import obter_teclado_outros_canais
-        await message.answer("Operação cancelada com sucesso.", reply_markup=obter_teclado_outros_canais())
-        await state.clear()
+        await message.answer("Operação cancelada com sucesso.", reply_markup=obter_teclado_menu_notas())
+        await state.set_state(PainelNotasFluxo.menu_principal)
         return
 
     if texto_usuario != "Aprovar Envio ✅":
@@ -853,8 +860,18 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("⏰ Acionando motor de envio via Brevo.")
     asyncio.create_task(processar_fila_envios(chat_id=message.chat.id, message_id=msg_dinamica.message_id))
     
-    from bot_mestre import obter_teclado_outros_canais
-    await message.answer("O painel principal está liberado. A tabela acima será atualizada em tempo real.", reply_markup=obter_teclado_outros_canais())
+    if EXIBIR_LOGS: logger.info("🔙 Liberando a interface central após aprovação da fila.")
+    teclado_outros = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
+            [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
+            [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Disparador de Notas 🧾")],
+            [KeyboardButton(text="Voltar ao Início 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer("O painel principal está liberado. A tabela acima será atualizada em tempo real.", reply_markup=teclado_outros)
     await state.clear()
 
 @router.message(PainelNotasFluxo.inspecionando_pdf_final)
@@ -867,9 +884,8 @@ async def processar_inspecao_final(message: types.Message, state: FSMContext):
     # Se clicar nos botões, repassa a ação limpa
     if texto_usuario in ["CANCELAR ❌", "APROVAR ENVIO ✅"]:
         if texto_usuario == "CANCELAR ❌":
-            from bot_mestre import obter_teclado_outros_canais
-            await message.answer("Operação abortada.", reply_markup=obter_teclado_outros_canais())
-            await state.clear()
+            await message.answer("Operação cancelada.", reply_markup=obter_teclado_menu_notas())
+            await state.set_state(PainelNotasFluxo.menu_principal)
         else:
             await state.set_state(PainelNotasFluxo.aguardando_aprovacao)
             await processar_aprovacao_envio(message, state)
@@ -895,8 +911,8 @@ async def processar_inspecao_final(message: types.Message, state: FSMContext):
 
     teclado_aprovacao = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Aprovar Envio ✅")],
-            [KeyboardButton(text="Ver PDF 👁️"), KeyboardButton(text="Cancelar ❌")]
+            [KeyboardButton(text="Aprovar Envio ✅"), KeyboardButton(text="Cancelar ❌")],
+            [KeyboardButton(text="Ver PDF 👁️")]
         ],
         resize_keyboard=True,
         is_persistent=True
