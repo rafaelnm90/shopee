@@ -803,36 +803,6 @@ async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
 async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
     texto_usuario = message.text.strip()
     
-    if texto_usuario == "Ver PDF 👁️":
-        data = await state.get_data()
-        notas_validadas = data.get('notas_validadas', [])
-        if not notas_validadas:
-            await message.answer("⚠️ Nenhuma nota validada para visualizar.")
-            return
-
-        if "Ver PDF" in texto_usuario:
-        data = await state.get_data()
-        notas_validadas = data.get('notas_validadas', [])
-        pasta_extracao = data.get('pasta_extracao')
-        
-        if not notas_validadas:
-            await message.answer("⚠️ Nenhuma nota validada para visualizar.")
-            return
-
-        if len(notas_validadas) == 1:
-            # Se só tem 1 nota na aprovação final, mostra ela direto
-            nota = notas_validadas[0]
-            caminho_completo = os.path.join(pasta_extracao, nota['pdf'])
-            try:
-                arquivo_telegram = types.FSInputFile(caminho_completo)
-                await message.answer_document(arquivo_telegram, caption=f"🔎 <b>Arquivo Validado:</b> {nota['pdf']}", parse_mode="HTML")
-            except Exception as e:
-                await message.answer(f"❌ Erro ao enviar o arquivo: {e}")
-            return
-        else:@router.message(PainelNotasFluxo.aguardando_aprovacao)
-async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
-    texto_usuario = message.text.strip()
-    
     if "Ver PDF" in texto_usuario:
         data = await state.get_data()
         notas_validadas = data.get('notas_validadas', [])
