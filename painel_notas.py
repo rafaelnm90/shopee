@@ -69,15 +69,6 @@ teclado_notas_cancelar = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-teclado_retorno_local = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Disparador de Notas 🧾")],
-        [KeyboardButton(text="Voltar ao Início 🏠")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
-
 PASTA_TEMP = "temp/notas_fiscais"
 os.makedirs(PASTA_TEMP, exist_ok=True)
 
@@ -333,7 +324,17 @@ async def processar_menu_notas(message: types.Message, state: FSMContext):
         await message.answer(texto, parse_mode="HTML")
         
     elif "Voltar" in opcao:
-        await message.answer("Retornando ao painel central...", reply_markup=teclado_retorno_local)
+        teclado_outros = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Espião Afiliados 🕵️‍♂️"), KeyboardButton(text="Espelhador de Canais 🔄")],
+                [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 👥")],
+                [KeyboardButton(text="Gerador de Achadinhos 🪄"), KeyboardButton(text="Disparador de Notas 🧾")],
+                [KeyboardButton(text="Voltar ao Início 🏠")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        await message.answer("Retornando ao painel central...", reply_markup=teclado_outros)
         await state.clear()
         
     else:
@@ -689,7 +690,18 @@ async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
         for loja in lojas_pendentes:
             resumo_falha += f"   - {loja['loja']}\n"
         await message.answer(resumo_falha[:3900], parse_mode="HTML")
-        await message.answer("Operação abortada.", reply_markup=teclado_retorno_local)
+        
+        teclado_outros = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Espião Afiliados 🕵️‍♂️"), KeyboardButton(text="Espelhador de Canais 🔄")],
+                [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 👥")],
+                [KeyboardButton(text="Gerador de Achadinhos 🪄"), KeyboardButton(text="Disparador de Notas 🧾")],
+                [KeyboardButton(text="Voltar ao Início 🏠")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        await message.answer("Operação abortada.", reply_markup=teclado_outros)
         await state.clear()
 
 @router.message(PainelNotasFluxo.aguardando_aprovacao)
@@ -709,5 +721,15 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("⏰ Acionando motor de envio via Brevo.")
     asyncio.create_task(processar_fila_envios(chat_id=message.chat.id, message_id=msg_dinamica.message_id))
     
-    await message.answer("O painel principal está liberado. A tabela acima será atualizada em tempo real.", reply_markup=teclado_retorno_local)
+    teclado_outros = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Espião Afiliados 🕵️‍♂️"), KeyboardButton(text="Espelhador de Canais 🔄")],
+            [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 👥")],
+            [KeyboardButton(text="Gerador de Achadinhos 🪄"), KeyboardButton(text="Disparador de Notas 🧾")],
+            [KeyboardButton(text="Voltar ao Início 🏠")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer("O painel principal está liberado. A tabela acima será atualizada em tempo real.", reply_markup=teclado_outros)
     await state.clear()
