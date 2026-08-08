@@ -4096,9 +4096,9 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 
     # 🔁 Roteamento Inteligente: Se estiver no Disparador de Notas
     if estado_atual and estado_atual.startswith("PainelNotasFluxo"):
-        await state.clear()
-        await message.answer("Ação cancelada.")
-        await message.answer("Selecione o robô ou módulo secundário que deseja gerir:", reply_markup=teclado_outros_canais)
+        import painel_notas
+        await message.answer("Ação cancelada. Voltando ao menu do disparador...", reply_markup=painel_notas.obter_teclado_menu_notas())
+        await state.set_state(painel_notas.PainelNotasFluxo.menu_principal)
         return
 
     # 🔁 Roteamento Inteligente: Se estiver em Vídeos Autorais
