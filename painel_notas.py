@@ -555,20 +555,28 @@ async def enviar_lista_manual(message: types.Message, state: FSMContext):
     lojas = data.get('lojas_pendentes', [])
     pdfs = data.get('pdfs_pendentes', [])
     
-    texto = "⚠️ <b>Auditoria Manual Necessária</b>\nAs lojas e PDFs abaixo não parearam automaticamente.\n\n"
-    texto += "🏬 <b>Lojas Pendentes:</b>\n"
-    for i, loja in enumerate(lojas):
-        texto += f"<b>{i}</b> - {loja['loja']}\n"
+    if not lojas or not pdfs:
+        await gerar_resumo_final_notas(message, state)
+        return
         
-    texto += "\n📄 <b>PDFs Sobrando:</b>\n"
+    loja_atual = lojas[0]
+    
+    texto = "⚠️ <b>Auditoria Manual Passo a Passo</b>\n\n"
+    texto += f"🏬 <b>Loja Pendente:</b> {loja_atual['loja']}\n"
+    texto += f"✉️ <b>E-mail:</b> {loja_atual['email']}\n\n"
+    texto += "📄 <b>PDFs Disponíveis:</b>\n"
+    
     for i, pdf in enumerate(pdfs):
         letra = chr(65 + (i % 26)) + (str(i // 26) if i >= 26 else "")
         texto += f"<b>{letra}</b> - {pdf}\n"
         
-    texto += "\nPara associar, digite o número da loja e a letra do PDF (Ex: <b>0A</b>, <b>1B</b>).\nSe não houver mais associações, clique em Encerrar."
+    texto += "\n👉 <b>Digite a LETRA</b> correspondente ao PDF desta loja."
     
     teclado = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Encerrar e Ir para o Resumo ⏭️"), KeyboardButton(text="Cancelar ❌")]],
+        keyboard=[
+            [KeyboardButton(text="Pular Loja ⏭️")],
+            [KeyboardButton(text="Encerrar e Ir para o Resumo ⏭️"), KeyboardButton(text="Cancelar ❌")]
+        ],
         resize_keyboard=True,
         is_persistent=True
     )
@@ -582,37 +590,38 @@ async def enviar_lista_manual(message: types.Message, state: FSMContext):
 
 @router.message(PainelNotasFluxo.pareamento_manual)
 async def processar_pareamento_manual(message: types.Message, state: FSMContext):
-    if message.text == "Encerrar e Ir para o Resumo ⏭️":
+    texto_usuario = message.text.strip().upper()
+    
+    if texto_usuario == "ENCERRAR E IR PARA O RESUMO ⏭️":
         await gerar_resumo_final_notas(message, state)
         return
         
-    codigo = message.text.upper().strip()
-    match = re.match(r'^(\d+)([A-Z]\d*)$', codigo)
-    
-    if not match:
-        await message.answer("⚠️ Formato inválido. Digite um número seguido de uma letra (Ex: 0A, 1B) ou clique em Encerrar.")
-        return
-        
-    num_idx = int(match.group(1))
-    letra_codigo = match.group(2)
-    
     data = await state.get_data()
     lojas = data.get('lojas_pendentes', [])
     pdfs = data.get('pdfs_pendentes', [])
     notas_validadas = data.get('notas_validadas', [])
     
+    if "PULAR LOJA" in texto_usuario:
+        if lojas:
+            loja_pulada = lojas.pop(0)
+            lojas.append(loja_pulada)
+            await state.update_data(lojas_pendentes=lojas)
+            await message.answer(f"⏭️ Loja <b>{loja_pulada['loja']}</b> movida para o final da fila.", parse_mode="HTML")
+            await enviar_lista_manual(message, state)
+        return
+        
     letra_idx = -1
     for i in range(len(pdfs)):
         l = chr(65 + (i % 26)) + (str(i // 26) if i >= 26 else "")
-        if l == letra_codigo:
+        if l == texto_usuario:
             letra_idx = i
             break
             
-    if num_idx >= len(lojas) or letra_idx == -1 or letra_idx >= len(pdfs):
-        await message.answer("⚠️ Código não encontrado nas listas atuais. Tente novamente.")
+    if letra_idx == -1:
+        await message.answer("⚠️ Letra inválida. Digite apenas a letra correspondente ao PDF (Ex: A, B, C) ou use os botões.")
         return
         
-    loja_selecionada = lojas.pop(num_idx)
+    loja_selecionada = lojas.pop(0)
     pdf_selecionado = pdfs.pop(letra_idx)
     
     notas_validadas.append({'loja': loja_selecionada['loja'], 'email': loja_selecionada['email'], 'pdf': pdf_selecionado, 'tipo': 'manual'})
