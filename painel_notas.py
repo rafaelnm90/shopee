@@ -46,11 +46,22 @@ def configurar_dependencias(bot: Bot, scheduler):
     if EXIBIR_LOGS: logger.info("🔌 Conexão estabelecida: Dependências do Disparador de Notas injetadas com sucesso.")
 
 class PainelNotasFluxo(StatesGroup):
+    menu_principal = State()
     aguardando_csv = State()
     aguardando_zip = State()
     revisando_similares = State()
     pareamento_manual = State()
     aguardando_aprovacao = State()
+
+teclado_menu_notas = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Iniciar Envios 🚀")],
+        [KeyboardButton(text="Informações de Acesso ℹ️")],
+        [KeyboardButton(text="Voltar ↩️")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
 
 teclado_notas_cancelar = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Cancelar ❌")]],
@@ -103,9 +114,6 @@ async def enviar_email_brevo(para_email, para_nome, assunto, corpo_html, caminho
             texto_resposta = await resposta.text()
             return resposta.status, texto_resposta
 
-# ==========================================
-# MOTOR DE DISPARO EM LOTE
-# ==========================================
 async def processar_fila_envios(chat_id=None, message_id=None):
     if EXIBIR_LOGS: logger.info("🚀 Iniciando esteira de disparos de notas fiscais...")
     
@@ -121,8 +129,13 @@ async def processar_fila_envios(chat_id=None, message_id=None):
 
     total_notas = len(pendentes)
     envios_realizados = 0
+    erros = 0
     falhas_etapa = []
     relatorio_visual = "📋 <b>Relatório de Envio de Notas</b>\n\n"
+    
+    pasta_extracao = None
+    if pendentes:
+        pasta_extracao = os.path.dirname(pendentes[0]["caminho_pdf"])
     
     for idx, item in enumerate(pendentes, 1):
         id_registro = item["id"]
@@ -131,9 +144,11 @@ async def processar_fila_envios(chat_id=None, message_id=None):
         pdf = item["caminho_pdf"]
         nome_arquivo = os.path.basename(pdf)
         
+        texto_progresso = f"⏳ <b>Processando envios...</b>\n\nEnviando nota {idx} de {total_notas}...\n👉 <b>Loja:</b> {loja}"
+        
         if chat_id and message_id and bot_instance:
             try:
-                await bot_instance.edit_message_text(f"⏳ <b>Enviando nota {idx}/{total_notas}</b> : Conectando com a loja {loja}...", chat_id=chat_id, message_id=message_id, parse_mode="HTML")
+                await bot_instance.edit_message_text(texto_progresso, chat_id=chat_id, message_id=message_id, parse_mode="HTML")
             except Exception: pass
 
         if envios_realizados >= LIMITE_DIARIO:
@@ -164,38 +179,60 @@ async def processar_fila_envios(chat_id=None, message_id=None):
         corpo = f"<p>Olá, {loja}.</p><p>Segue em anexo a Nota Fiscal referente às comissões do programa de afiliados da Shopee.</p><p>Qualquer dúvida, estamos à disposição.</p>"
         
         if EXIBIR_LOGS: logger.info(f"⚙️ Processando envio para Loja: {loja}...")
-        status_api, resposta_api = await enviar_email_brevo(email, loja, assunto, corpo, pdf)
         
-        if status_api in [200, 201]:
-            cursor.execute("UPDATE fila_notas SET status = 'ENVIADO' WHERE id = ?", (id_registro,))
-            envios_realizados += 1
-            relatorio_visual += f"🟢 <b>Concluído</b> | {loja} | {email} | {nome_arquivo}\n"
-            if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Nota enviada para {loja} ({email}).")
+        try:
+            status_api, resposta_api = await enviar_email_brevo(email, loja, assunto, corpo, pdf)
             
-            # LIMPEZA: Apaga o PDF físico imediatamente após o sucesso
-            try:
-                os.remove(pdf)
-            except Exception: pass
-        else:
-            erro_msg = f"Erro API {status_api}: {resposta_api}"
+            if status_api in [200, 201]:
+                cursor.execute("UPDATE fila_notas SET status = 'ENVIADO' WHERE id = ?", (id_registro,))
+                envios_realizados += 1
+                relatorio_visual += f"🟢 <b>Concluído</b> | {loja} | {email} | {nome_arquivo}\n\n"
+                if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Nota enviada para {loja} ({email}).")
+                
+                try:
+                    os.remove(pdf)
+                except Exception: pass
+            else:
+                erro_msg = f"Erro API {status_api}: {resposta_api}"
+                cursor.execute("UPDATE fila_notas SET status = 'ERRO', motivo_erro = ? WHERE id = ?", (erro_msg, id_registro))
+                erros += 1
+                falhas_etapa.append(f"⚠️ Falha ao processar loja {loja}: {erro_msg}")
+                relatorio_visual += f"🔴 <b>Erro API</b> | {loja} | {email} | {nome_arquivo}\n"
+                if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar para {loja}: {erro_msg}")
+                
+        except Exception as e:
+            erro_msg = f"Erro Interno: {e}"
             cursor.execute("UPDATE fila_notas SET status = 'ERRO', motivo_erro = ? WHERE id = ?", (erro_msg, id_registro))
-            falhas_etapa.append(f"⚠️ Falha ao processar loja {loja}: {erro_msg}")
-            relatorio_visual += f"🔴 <b>Erro API</b> | {loja} | {email} | {nome_arquivo}\n"
-            relatorio_visual += f"   └ ⚠️ <b>O que houve:</b> O e-mail foi rejeitado pelo servidor ou o arquivo possui falhas.\n"
-            relatorio_visual += f"   └ 🛠️ <b>Como corrigir:</b> Verifique o contato no CSV e a validade do PDF, e submeta a loja novamente.\n"
-            if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar para {loja}: {erro_msg}")
+            erros += 1
+            falhas_etapa.append(f"⚠️ Erro de rede/crítico na loja {loja}: {e}")
+            relatorio_visual += f"🔴 <b>Erro Interno</b> | {loja} | {email} | {nome_arquivo}\n"
+            if EXIBIR_LOGS: logger.error(f"❌ Erro Crítico ao enviar para {loja}: {e}")
             
         conexao.commit()
         await asyncio.sleep(1)
 
     conexao.close()
     
+    try:
+        if pasta_extracao and os.path.exists(pasta_extracao) and "extraido_" in pasta_extracao:
+            shutil.rmtree(pasta_extracao)
+    except Exception: pass
+    
+    resumo_final = f"🏁 <b>Envios Concluídos!</b>\n\n"
+    resumo_final += f"✅ Sucessos: <b>{envios_realizados}</b>\n"
+    resumo_final += f"❌ Erros: <b>{erros}</b>\n\n"
+    resumo_final += relatorio_visual
+    
     if chat_id and message_id and bot_instance:
-        try: await bot_instance.edit_message_text(relatorio_visual[:4000], chat_id=chat_id, message_id=message_id, parse_mode="HTML")
+        try:
+            if len(resumo_final) > 3900:
+                await bot_instance.edit_message_text(resumo_final[:3900] + "\n\n[...Lista truncada devido ao limite...]", chat_id=chat_id, message_id=message_id, parse_mode="HTML")
+            else:
+                await bot_instance.edit_message_text(resumo_final, chat_id=chat_id, message_id=message_id, parse_mode="HTML")
         except Exception: pass
     
     assunto_final = "[Sistema de Notas Shopee] Processo Totalmente Concluído"
-    corpo_final = f"<p>Todas as notas pendentes na planilha foram processadas com sucesso.</p><p>Envios realizados nesta última etapa: {envios_realizados}</p>"
+    corpo_final = f"<p>Todas as notas pendentes na fila foram processadas.</p><p>Envios realizados nesta etapa: {envios_realizados}</p>"
     if falhas_etapa:
         corpo_final += "<p><b>Erros registrados nesta etapa:</b></p><ul>"
         for f in falhas_etapa: corpo_final += f"<li>{f}</li>"
@@ -205,7 +242,9 @@ async def processar_fila_envios(chat_id=None, message_id=None):
     
     if bot_instance and not chat_id:
         from bot_mestre import ADMIN_ID
-        await bot_instance.send_message(ADMIN_ID, f"🎉 <b>Processamento de Notas Finalizado!</b>\nForam processados {envios_realizados} envios. O relatório detalhado foi enviado para o seu e-mail.", parse_mode="HTML")
+        try:
+            await bot_instance.send_message(ADMIN_ID, f"🎉 <b>Processamento de Notas Finalizado!</b>\nForam processados {envios_realizados} envios. O relatório detalhado foi enviado para o seu e-mail.", parse_mode="HTML")
+        except Exception: pass
 
 # ==========================================
 # FLUXO INTERATIVO (TELEGRAM)
@@ -213,13 +252,52 @@ async def processar_fila_envios(chat_id=None, message_id=None):
 @router.message(F.text == "Disparador de Notas 🧾", StateFilter("*"))
 async def iniciar_painel_notas(message: types.Message, state: FSMContext):
     await state.clear()
-    if EXIBIR_LOGS: logger.info("🧾 Acessando o painel do Disparador de Notas Fiscais.")
-    texto = (
-        "🧾 <b>Disparador Automático de Notas Fiscais</b>\n\n"
-        "Para iniciar, por favor envie o arquivo <b>CSV extraído da Shopee</b> contendo as comissões e os e-mails dos lojistas."
-    )
-    await message.answer(texto, reply_markup=teclado_notas_cancelar, parse_mode="HTML")
-    await state.set_state(PainelNotasFluxo.aguardando_csv)
+    if EXIBIR_LOGS: logger.info("🧾 Acessando o menu do Disparador de Notas Fiscais.")
+    texto = "🧾 <b>Painel do Disparador de Notas</b>\nSelecione uma das opções abaixo:"
+    await message.answer(texto, reply_markup=teclado_menu_notas, parse_mode="HTML")
+    await state.set_state(PainelNotasFluxo.menu_principal)
+
+@router.message(PainelNotasFluxo.menu_principal)
+async def processar_menu_notas(message: types.Message, state: FSMContext):
+    opcao = message.text
+    if opcao == "Iniciar Envios 🚀":
+        texto = (
+            "🧾 <b>Disparador Automático de Notas Fiscais</b>\n\n"
+            "Para iniciar, por favor envie o arquivo <b>CSV extraído da Shopee</b> contendo as comissões e os e-mails dos lojistas."
+        )
+        await message.answer(texto, reply_markup=teclado_notas_cancelar, parse_mode="HTML")
+        await state.set_state(PainelNotasFluxo.aguardando_csv)
+        
+    elif opcao == "Informações de Acesso ℹ️":
+        if EXIBIR_LOGS: logger.info("🔐 Consultando credenciais seguras no .env.")
+        brevo_link = os.getenv('BREVO_LINK', 'https://app.brevo.com/')
+        brevo_login = os.getenv('BREVO_LOGIN', 'Não configurado no .env')
+        brevo_senha = os.getenv('BREVO_SENHA', 'Não configurado no .env')
+        
+        gmail_link = os.getenv('GMAIL_LINK', 'https://mail.google.com/')
+        gmail_login = os.getenv('GMAIL_LOGIN', 'Não configurado no .env')
+        gmail_senha = os.getenv('GMAIL_SENHA', 'Não configurado no .env')
+        
+        texto = (
+            "🔐 <b>Informações de Acesso (Privado)</b>\n\n"
+            "✉️ <b>Plataforma Brevo (Disparos API):</b>\n"
+            f"🔗 <b>Link:</b> {brevo_link}\n"
+            f"👤 <b>Login:</b> <code>{brevo_login}</code>\n"
+            f"🔑 <b>Senha:</b> <tg-spoiler>{brevo_senha}</tg-spoiler>\n\n"
+            "📧 <b>Conta Gmail (E-mail Remetente):</b>\n"
+            f"🔗 <b>Link:</b> {gmail_link}\n"
+            f"👤 <b>Login:</b> <code>{gmail_login}</code>\n"
+            f"🔑 <b>Senha:</b> <tg-spoiler>{gmail_senha}</tg-spoiler>\n\n"
+            "<i>(Toque nas senhas para revelá-las ou nos logins para copiar)</i>"
+        )
+        await message.answer(texto, parse_mode="HTML")
+        
+    elif opcao == "Voltar ↩️":
+        from bot_mestre import obter_teclado_outros_canais
+        await message.answer("Retornando ao painel central...", reply_markup=obter_teclado_outros_canais())
+        await state.clear()
+    else:
+        await message.answer("⚠️ Por favor, escolha uma das opções utilizando os botões do teclado.")
 
 @router.message(PainelNotasFluxo.aguardando_csv, F.document)
 async def receber_csv(message: types.Message, state: FSMContext):
