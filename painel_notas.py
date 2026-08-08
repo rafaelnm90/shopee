@@ -625,11 +625,11 @@ async def processar_pareamento_manual(message: types.Message, state: FSMContext)
             except Exception as e:
                 await message.answer(f"❌ Erro ao enviar o arquivo: {e}")
             return
-        else:
-            # Se tem mais de 1, pergunta qual quer ver
-            await message.answer("🔎 Digite a <b>LETRA</b> do PDF que você deseja visualizar (Ex: A, B, C):", parse_mode="HTML")
-            await state.set_state(PainelNotasFluxo.inspecionando_pdf_manual)
-            return
+        
+        # Se tem mais de 1, pergunta qual quer ver (sem o 'else' para evitar o erro de recuo)
+        await message.answer("🔎 Digite a <b>LETRA</b> do PDF que você deseja visualizar (Ex: A, B, C):", parse_mode="HTML")
+        await state.set_state(PainelNotasFluxo.inspecionando_pdf_manual)
+        return
         
     data = await state.get_data()
     lojas = data.get('lojas_pendentes', [])
@@ -803,7 +803,7 @@ async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
 async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
     texto_usuario = message.text.strip()
     
-    if "Ver PDF" in texto_usuario:
+    if "VER PDF" in texto_usuario.upper():
         data = await state.get_data()
         notas_validadas = data.get('notas_validadas', [])
         pasta_extracao = data.get('pasta_extracao')
@@ -822,14 +822,15 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
             except Exception as e:
                 await message.answer(f"❌ Erro ao enviar o arquivo: {e}")
             return
-        else:
-            texto = "🔎 <b>Qual nota você deseja visualizar?</b>\nDigite o <b>NÚMERO</b> correspondente:\n\n"
-            for i, nota in enumerate(notas_validadas, 1):
-                texto += f"<b>{i}</b> - {nota['pdf']}\n"
+        
+        # Se tem mais de 1, pergunta qual quer ver (sem o 'else')
+        texto = "🔎 <b>Qual nota você deseja visualizar?</b>\nDigite o <b>NÚMERO</b> correspondente:\n\n"
+        for i, nota in enumerate(notas_validadas, 1):
+            texto += f"<b>{i}</b> - {nota['pdf']}\n"
 
-            await message.answer(texto, parse_mode="HTML")
-            await state.set_state(PainelNotasFluxo.inspecionando_pdf_final)
-            return
+        await message.answer(texto, parse_mode="HTML")
+        await state.set_state(PainelNotasFluxo.inspecionando_pdf_final)
+        return
 
     if texto_usuario == "Cancelar ❌":
         from bot_mestre import obter_teclado_outros_canais
