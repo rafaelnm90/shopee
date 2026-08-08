@@ -171,6 +171,11 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             envios_realizados += 1
             relatorio_visual += f"🟢 <b>Concluído</b> | {loja} | {email} | {nome_arquivo}\n"
             if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Nota enviada para {loja} ({email}).")
+            
+            # LIMPEZA: Apaga o PDF físico imediatamente após o sucesso
+            try:
+                os.remove(pdf)
+            except Exception: pass
         else:
             erro_msg = f"Erro API {status_api}: {resposta_api}"
             cursor.execute("UPDATE fila_notas SET status = 'ERRO', motivo_erro = ? WHERE id = ?", (erro_msg, id_registro))
@@ -266,10 +271,30 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
         await msg_status.edit_text(f"❌ Erro ao ler o arquivo CSV: {e}")
         return
 
-    await msg_status.edit_text("✅ Extração concluída. Iniciando motor de cruzamento e auditoria...")
+    await msg_status.edit_text("✅ Extração concluída. Verificando histórico de envios e cruzando dados...")
 
-    arquivos_pdf_pasta = [f for f in os.listdir(pasta_extracao) if f.lower().endswith('.pdf')]
+    # CONSULTA O HISTÓRICO DE NOTAS JÁ ENVIADAS OU PENDENTES
+    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+    cursor = conexao.cursor()
+    cursor.execute("SELECT caminho_pdf FROM fila_notas WHERE status IN ('ENVIADO', 'PENDENTE')")
+    historico = cursor.fetchall()
+    conexao.close()
     
+    # Extrai apenas os nomes dos arquivos já processados
+    pdfs_protegidos = [os.path.basename(row[0]).lower() for row in historico if row[0]]
+
+    arquivos_pdf_pasta_brutos = [f for f in os.listdir(pasta_extracao) if f.lower().endswith('.pdf')]
+    arquivos_pdf_pasta = []
+    qtd_ignorados = 0
+    
+    for f in arquivos_pdf_pasta_brutos:
+        if f.lower() in pdfs_protegidos:
+            qtd_ignorados += 1
+            # Remove o arquivo físico duplicado, já que ele não será enviado novamente
+            try: os.remove(os.path.join(pasta_extracao, f)) except: pass
+        else:
+            arquivos_pdf_pasta.append(f)
+
     notas_validadas = []
     lojas_pendentes = []
     pdfs_pendentes = arquivos_pdf_pasta.copy()
@@ -326,7 +351,8 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
         pares_similares=pares_similares,
         pasta_extracao=pasta_extracao,
         csv_path_temp=csv_path,
-        zip_path_temp=caminho_zip
+        zip_path_temp=caminho_zip,
+        qtd_ignorados=qtd_ignorados
     )
     
     if pares_similares:
@@ -507,7 +533,12 @@ async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
     resumo = f"✅ <b>Validação finalizada!</b>\n\n"
     resumo += f"📊 <b>Balanço Geral:</b>\n"
     resumo += f"✅ Notas prontas para envio: <b>{len(notas_validadas)}</b>\n"
-    resumo += f"❌ Lojas sem PDF: <b>{len(lojas_pendentes)}</b>\n\n"
+    resumo += f"❌ Lojas sem PDF: <b>{len(lojas_pendentes)}</b>\n"
+    
+    qtd_ignorados = data.get('qtd_ignorados', 0)
+    if qtd_ignorados > 0:
+        resumo += f"♻️ Ignorados (Já enviados anteriormente): <b>{qtd_ignorados}</b>\n"
+    resumo += "\n"
     
     if lojas_pendentes:
         resumo += "⚠️ <b>Não localizadas na auditoria:</b>\n"
