@@ -1,4 +1,5 @@
 EXIBIR_LOGS = True
+FILTRO_ANTI_SPAM = True  # Mude para False para ignorar o histórico e enviar notas repetidas
 import os
 import zipfile
 import pandas as pd
@@ -53,15 +54,18 @@ class PainelNotasFluxo(StatesGroup):
     pareamento_manual = State()
     aguardando_aprovacao = State()
 
-teclado_menu_notas = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Iniciar Envios 🚀")],
-        [KeyboardButton(text="Informações de Acesso ℹ️")],
-        [KeyboardButton(text="Voltar ↩️")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+def obter_teclado_menu_notas():
+    status_filtro = "LIGADO 🟢" if FILTRO_ANTI_SPAM else "DESLIGADO 🔴"
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Iniciar Envios 🚀")],
+            [KeyboardButton(text=f"Filtro Anti-Spam: {status_filtro}")],
+            [KeyboardButton(text="Informações de Acesso ℹ️")],
+            [KeyboardButton(text="Voltar ↩️")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
 
 teclado_notas_cancelar = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Cancelar ❌")]],
@@ -283,7 +287,7 @@ async def iniciar_painel_notas(message: types.Message, state: FSMContext):
     await state.clear()
     if EXIBIR_LOGS: logger.info("🧾 Acessando o menu do Disparador de Notas Fiscais.")
     texto = "🧾 <b>Painel do Disparador de Notas</b>\nSelecione uma das opções abaixo:"
-    await message.answer(texto, reply_markup=teclado_menu_notas, parse_mode="HTML")
+    await message.answer(texto, reply_markup=obter_teclado_menu_notas(), parse_mode="HTML")
     await state.set_state(PainelNotasFluxo.menu_principal)
 
 @router.message(PainelNotasFluxo.menu_principal)
@@ -297,6 +301,15 @@ async def processar_menu_notas(message: types.Message, state: FSMContext):
         )
         await message.answer(texto, reply_markup=teclado_notas_cancelar, parse_mode="HTML")
         await state.set_state(PainelNotasFluxo.aguardando_csv)
+        
+    elif "Filtro Anti-Spam" in opcao:
+        global FILTRO_ANTI_SPAM
+        FILTRO_ANTI_SPAM = not FILTRO_ANTI_SPAM
+        
+        estado_texto = "ATIVADO ✅" if FILTRO_ANTI_SPAM else "DESATIVADO ⚠️ (Cuidado com duplicatas)"
+        if EXIBIR_LOGS: logger.info(f"⚙️ Alternância de segurança: O Filtro Anti-Spam foi alterado para {FILTRO_ANTI_SPAM}.")
+        
+        await message.answer(f"⚙️ O Filtro de Histórico foi <b>{estado_texto}</b>.", reply_markup=obter_teclado_menu_notas(), parse_mode="HTML")
         
     elif "Informações" in opcao:
         if EXIBIR_LOGS: logger.info("🔐 Consultando credenciais seguras no .env.")
@@ -390,17 +403,22 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
         await msg_status.edit_text(f"❌ Erro ao ler o arquivo CSV: {e}")
         return
 
-    await msg_status.edit_text("✅ Extração concluída. Verificando histórico de envios e cruzando dados...")
-
-    # CONSULTA O HISTÓRICO DE NOTAS JÁ ENVIADAS OU PENDENTES
-    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
-    cursor = conexao.cursor()
-    cursor.execute("SELECT caminho_pdf FROM fila_notas WHERE status IN ('ENVIADO', 'PENDENTE')")
-    historico = cursor.fetchall()
-    conexao.close()
-    
-    # Extrai apenas os nomes dos arquivos já processados
-    pdfs_protegidos = [os.path.basename(row[0]).lower() for row in historico if row[0]]
+    if FILTRO_ANTI_SPAM:
+        await msg_status.edit_text("✅ Extração concluída. Verificando histórico de envios e cruzando dados...")
+        
+        # CONSULTA O HISTÓRICO DE NOTAS JÁ ENVIADAS OU PENDENTES
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("SELECT caminho_pdf FROM fila_notas WHERE status IN ('ENVIADO', 'PENDENTE')")
+        historico = cursor.fetchall()
+        conexao.close()
+        
+        # Extrai apenas os nomes dos arquivos já processados
+        pdfs_protegidos = [os.path.basename(row[0]).lower() for row in historico if row[0]]
+    else:
+        await msg_status.edit_text("✅ Extração concluída. ⚠️ Filtro Anti-Spam DESATIVADO. Cruzando todos os dados...")
+        if EXIBIR_LOGS: logger.warning("⚠️ Filtro Anti-Spam desligado. O histórico do banco de dados será ignorado.")
+        pdfs_protegidos = []
 
     arquivos_pdf_pasta_brutos = [f for f in os.listdir(pasta_extracao) if f.lower().endswith('.pdf')]
     arquivos_pdf_pasta = []
