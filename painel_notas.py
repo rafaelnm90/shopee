@@ -587,8 +587,8 @@ async def enviar_lista_manual(message: types.Message, state: FSMContext):
     
     teclado = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Pular Loja ⏭️"), KeyboardButton(text="Ver PDF 👁️")],
-            [KeyboardButton(text="Encerrar e Ir para o Resumo ⏭️"), KeyboardButton(text="Cancelar ❌")]
+            [KeyboardButton(text="Pular Loja ⏭️"), KeyboardButton(text="Encerrar e Ir para o Resumo ⏭️")],
+            [KeyboardButton(text="Ver PDF 👁️"), KeyboardButton(text="Cancelar ❌")]
         ],
         resize_keyboard=True,
         is_persistent=True
@@ -614,11 +614,6 @@ async def processar_pareamento_manual(message: types.Message, state: FSMContext)
         await state.set_state(PainelNotasFluxo.menu_principal)
         return
 
-    if texto_usuario == "VER PDF 👁️":
-        await message.answer("🔎 Digite a <b>LETRA</b> do PDF que você deseja visualizar (Ex: A, B, C):", parse_mode="HTML")
-        await state.set_state(PainelNotasFluxo.inspecionando_pdf_manual)
-        return
-
     if "VER PDF" in texto_usuario:
         data = await state.get_data()
         pdfs = data.get('pdfs_pendentes', [])
@@ -635,8 +630,13 @@ async def processar_pareamento_manual(message: types.Message, state: FSMContext)
                 await message.answer(f"❌ Erro ao enviar o arquivo: {e}")
             return
         
-        # Se tem mais de 1, pergunta qual quer ver (sem o 'else' para evitar o erro de recuo)
-        await message.answer("🔎 Digite a <b>LETRA</b> do PDF que você deseja visualizar (Ex: A, B, C):", parse_mode="HTML")
+        # Se tem mais de 1, pergunta qual quer ver
+        texto_opcoes = "🔎 <b>Qual PDF você deseja visualizar?</b>\nDigite a <b>LETRA</b> correspondente (Ex: A, B, C):\n\n"
+        for i, pdf in enumerate(pdfs):
+            letra = chr(65 + (i % 26)) + (str(i // 26) if i >= 26 else "")
+            texto_opcoes += f"<b>{letra}</b> - {pdf}\n"
+            
+        await message.answer(texto_opcoes, parse_mode="HTML")
         await state.set_state(PainelNotasFluxo.inspecionando_pdf_manual)
         return
         
