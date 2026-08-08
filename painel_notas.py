@@ -52,7 +52,9 @@ class PainelNotasFluxo(StatesGroup):
     aguardando_zip = State()
     revisando_similares = State()
     pareamento_manual = State()
+    inspecionando_pdf_manual = State()  # Adicionado
     aguardando_aprovacao = State()
+    inspecionando_pdf_final = State()   # Adicionado
 
 def obter_teclado_menu_notas():
     status_filtro = "LIGADO 🟢" if FILTRO_ANTI_SPAM else "DESLIGADO 🔴"
@@ -571,11 +573,11 @@ async def enviar_lista_manual(message: types.Message, state: FSMContext):
         texto += f"<b>{letra}</b> - {pdf}\n"
         
     texto += "\n👉 <b>Digite a LETRA</b> correspondente ao PDF desta loja.\n"
-    texto += "🔎 <i>Dica: Para visualizar o PDF antes de associar, digite <b>VER LETRA</b> (Ex: VER A).</i>"
+    texto += "🔎 <i>Dica: Para visualizar um PDF antes de associar, clique em <b>Ver PDF 👁️</b>.</i>"
     
     teclado = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Pular Loja ⏭️")],
+            [KeyboardButton(text="Pular Loja ⏭️"), KeyboardButton(text="Ver PDF 👁️")],
             [KeyboardButton(text="Encerrar e Ir para o Resumo ⏭️"), KeyboardButton(text="Cancelar ❌")]
         ],
         resize_keyboard=True,
@@ -597,11 +599,21 @@ async def processar_pareamento_manual(message: types.Message, state: FSMContext)
         await gerar_resumo_final_notas(message, state)
         return
         
+    if texto_usuario == "CANCELAR ❌":
+        from bot_mestre import obter_teclado_outros_canais
+        await message.answer("Operação abortada.", reply_markup=obter_teclado_outros_canais())
+        await state.clear()
+        return
+
+    if texto_usuario == "VER PDF 👁️":
+        await message.answer("🔎 Digite a <b>LETRA</b> do PDF que você deseja visualizar (Ex: A, B, C):", parse_mode="HTML")
+        await state.set_state(PainelNotasFluxo.inspecionando_pdf_manual)
+        return
+        
     data = await state.get_data()
     lojas = data.get('lojas_pendentes', [])
     pdfs = data.get('pdfs_pendentes', [])
     notas_validadas = data.get('notas_validadas', [])
-    pasta_extracao = data.get('pasta_extracao')
     
     if "PULAR LOJA" in texto_usuario:
         if lojas:
@@ -612,37 +624,17 @@ async def processar_pareamento_manual(message: types.Message, state: FSMContext)
             await enviar_lista_manual(message, state)
         return
         
-    # Verifica se é um comando de inspeção (ex: VER A ou LER B)
-    is_inspecao = False
-    letra_buscada = texto_usuario
-    if texto_usuario.startswith("VER ") or texto_usuario.startswith("LER "):
-        is_inspecao = True
-        letra_buscada = texto_usuario.split(" ")[1].strip()
-
     letra_idx = -1
     for i in range(len(pdfs)):
         l = chr(65 + (i % 26)) + (str(i // 26) if i >= 26 else "")
-        if l == letra_buscada:
+        if l == texto_usuario:
             letra_idx = i
             break
             
     if letra_idx == -1:
-        await message.answer("⚠️ Letra inválida. Digite apenas a letra (Ex: A) ou VER A para visualizar.")
+        await message.answer("⚠️ Letra inválida. Digite apenas a letra correspondente ao PDF (Ex: A, B, C) ou use os botões.")
         return
         
-    pdf_alvo = pdfs[letra_idx]
-    
-    if is_inspecao:
-        caminho_completo = os.path.join(pasta_extracao, pdf_alvo)
-        try:
-            arquivo_telegram = types.FSInputFile(caminho_completo)
-            caption_texto = f"🔎 <b>Inspecionando:</b> {pdf_alvo}\n\nSe for este o arquivo correto, digite apenas a letra <b>{letra_buscada}</b> para associar à loja <b>{lojas[0]['loja']}</b>."
-            await message.answer_document(arquivo_telegram, caption=caption_texto, parse_mode="HTML")
-        except Exception as e:
-            await message.answer(f"❌ Erro ao enviar o arquivo PDF: {e}")
-        return
-
-    # Se não for inspeção, procede com a associação normal e remove da fila
     loja_selecionada = lojas.pop(0)
     pdf_selecionado = pdfs.pop(letra_idx)
     
@@ -656,6 +648,40 @@ async def processar_pareamento_manual(message: types.Message, state: FSMContext)
         await enviar_lista_manual(message, state)
     else:
         await gerar_resumo_final_notas(message, state)
+
+@router.message(PainelNotasFluxo.inspecionando_pdf_manual)
+async def processar_inspecao_manual(message: types.Message, state: FSMContext):
+    texto_usuario = message.text.strip().upper()
+    data = await state.get_data()
+    pdfs = data.get('pdfs_pendentes', [])
+    pasta_extracao = data.get('pasta_extracao')
+
+    if texto_usuario == "CANCELAR ❌":
+        from bot_mestre import obter_teclado_outros_canais
+        await message.answer("Operação abortada.", reply_markup=obter_teclado_outros_canais())
+        await state.clear()
+        return
+
+    letra_idx = -1
+    for i in range(len(pdfs)):
+        l = chr(65 + (i % 26)) + (str(i // 26) if i >= 26 else "")
+        if l == texto_usuario:
+            letra_idx = i
+            break
+
+    if letra_idx == -1:
+        await message.answer("⚠️ Letra não encontrada. Visualização cancelada.")
+    else:
+        pdf_alvo = pdfs[letra_idx]
+        caminho_completo = os.path.join(pasta_extracao, pdf_alvo)
+        try:
+            arquivo_telegram = types.FSInputFile(caminho_completo)
+            await message.answer_document(arquivo_telegram, caption=f"🔎 <b>Arquivo Inspecionado:</b> {pdf_alvo}", parse_mode="HTML")
+        except Exception as e:
+            await message.answer(f"❌ Erro ao enviar o arquivo: {e}")
+
+    await message.answer("👉 Agora, digite a <b>LETRA</b> para associar à loja, ou clique em <b>Ver PDF 👁️</b> para olhar outra.", parse_mode="HTML")
+    await state.set_state(PainelNotasFluxo.pareamento_manual)
 
 async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
     data = await state.get_data()
@@ -714,7 +740,10 @@ async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
         resumo += "\nDeseja aprovar e iniciar os envios agora?"
         
         teclado_aprovacao = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="Aprovar Envio ✅"), KeyboardButton(text="Cancelar ❌")]],
+            keyboard=[
+                [KeyboardButton(text="Aprovar Envio ✅")],
+                [KeyboardButton(text="Ver PDF 👁️"), KeyboardButton(text="Cancelar ❌")]
+            ],
             resize_keyboard=True,
             is_persistent=True
         )
@@ -737,8 +766,31 @@ async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
 
 @router.message(PainelNotasFluxo.aguardando_aprovacao)
 async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
-    if message.text != "Aprovar Envio ✅":
-        await message.answer("Por favor, utilize os botões em ecrã para Aprovar Envio ✅ ou Cancelar ❌.")
+    texto_usuario = message.text.strip()
+    
+    if texto_usuario == "Ver PDF 👁️":
+        data = await state.get_data()
+        notas_validadas = data.get('notas_validadas', [])
+        if not notas_validadas:
+            await message.answer("⚠️ Nenhuma nota validada para visualizar.")
+            return
+
+        texto = "🔎 <b>Qual nota você deseja visualizar?</b>\nDigite o <b>NÚMERO</b> correspondente:\n\n"
+        for i, nota in enumerate(notas_validadas, 1):
+            texto += f"<b>{i}</b> - {nota['pdf']}\n"
+
+        await message.answer(texto, parse_mode="HTML")
+        await state.set_state(PainelNotasFluxo.inspecionando_pdf_final)
+        return
+
+    if texto_usuario == "Cancelar ❌":
+        from bot_mestre import obter_teclado_outros_canais
+        await message.answer("Operação cancelada com sucesso.", reply_markup=obter_teclado_outros_canais())
+        await state.clear()
+        return
+
+    if texto_usuario != "Aprovar Envio ✅":
+        await message.answer("Por favor, utilize os botões em ecrã para Aprovar Envio ✅, Ver PDF 👁️ ou Cancelar ❌.")
         return
 
     conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -755,3 +807,40 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
     from bot_mestre import obter_teclado_outros_canais
     await message.answer("O painel principal está liberado. A tabela acima será atualizada em tempo real.", reply_markup=obter_teclado_outros_canais())
     await state.clear()
+
+@router.message(PainelNotasFluxo.inspecionando_pdf_final)
+async def processar_inspecao_final(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    notas_validadas = data.get('notas_validadas', [])
+    pasta_extracao = data.get('pasta_extracao')
+    texto_usuario = message.text.strip().upper()
+
+    if texto_usuario == "CANCELAR ❌":
+        from bot_mestre import obter_teclado_outros_canais
+        await message.answer("Operação abortada.", reply_markup=obter_teclado_outros_canais())
+        await state.clear()
+        return
+
+    try:
+        idx = int(texto_usuario) - 1
+        if 0 <= idx < len(notas_validadas):
+            nota = notas_validadas[idx]
+            caminho_completo = os.path.join(pasta_extracao, nota['pdf'])
+            arquivo_telegram = types.FSInputFile(caminho_completo)
+            await message.answer_document(arquivo_telegram, caption=f"🔎 <b>Arquivo Validado:</b> {nota['pdf']}", parse_mode="HTML")
+        else:
+            await message.answer("⚠️ Número inválido. Visualização cancelada.")
+    except ValueError:
+        await message.answer("⚠️ Por favor, digite apenas o <b>NÚMERO</b> correspondente à nota (Ex: 1, 2) ou cancele.", parse_mode="HTML")
+        return # Continua esperando caso ele digite letras por engano
+
+    teclado_aprovacao = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Aprovar Envio ✅")],
+            [KeyboardButton(text="Ver PDF 👁️"), KeyboardButton(text="Cancelar ❌")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer("Deseja aprovar e iniciar os envios agora?", reply_markup=teclado_aprovacao)
+    await state.set_state(PainelNotasFluxo.aguardando_aprovacao)
