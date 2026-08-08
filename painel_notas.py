@@ -131,7 +131,9 @@ async def processar_fila_envios(chat_id=None, message_id=None):
     envios_realizados = 0
     erros = 0
     falhas_etapa = []
-    relatorio_visual = "📋 <b>Relatório de Envio de Notas</b>\n\n"
+    
+    # Inicia a string de log que será atualizada a cada passo
+    log_dinamico = f"🚀 <b>Iniciando Motor de Envios</b>\nProcessando {total_notas} notas pendentes...\n\n"
     
     pasta_extracao = None
     if pendentes:
@@ -144,11 +146,18 @@ async def processar_fila_envios(chat_id=None, message_id=None):
         pdf = item["caminho_pdf"]
         nome_arquivo = os.path.basename(pdf)
         
-        texto_progresso = f"⏳ <b>Processando envios...</b>\n\nEnviando nota {idx} de {total_notas}...\n👉 <b>Loja:</b> {loja}"
+        # Adiciona a informação de processamento atual ao log
+        log_dinamico += f"⏳ ({idx}/{total_notas}) Enviando para: {loja}...\n"
         
         if chat_id and message_id and bot_instance:
             try:
-                await bot_instance.edit_message_text(texto_progresso, chat_id=chat_id, message_id=message_id, parse_mode="HTML")
+                # O limite do Telegram é 4096 caracteres. Para evitar erros, limitamos o texto.
+                # Para garantir que as últimas atualizações apareçam se o texto ficar muito longo, mantemos o final.
+                texto_exibicao = log_dinamico
+                if len(texto_exibicao) > 4000:
+                    texto_exibicao = "...\n" + log_dinamico[-3990:]
+                
+                await bot_instance.edit_message_text(texto_exibicao, chat_id=chat_id, message_id=message_id, parse_mode="HTML")
             except Exception: pass
 
         if envios_realizados >= LIMITE_DIARIO:
@@ -160,10 +169,10 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             assunto_admin = "[Sistema de Notas Shopee] Aviso de Pausa: Etapa Concluída"
             corpo_admin = f"<p>O limite diário de {LIMITE_DIARIO} foi atingido.</p><p>O script foi programado para retomar a próxima etapa em {retomada.strftime('%d/%m/%Y %H:%M')}.</p><p>Envios realizados nesta etapa: {envios_realizados}</p>"
             
-            relatorio_visual += f"\n⏸️ <b>PAUSA DE SEGURANÇA:</b> O limite de {LIMITE_DIARIO} envios foi atingido. A esteira foi pausada e voltará automaticamente em {retomada.strftime('%d/%m às %H:%M')}."
+            log_dinamico += f"\n⏸️ <b>PAUSA DE SEGURANÇA:</b> Limite de {LIMITE_DIARIO} atingido. Retomada em {retomada.strftime('%d/%m às %H:%M')}."
             
             if chat_id and message_id and bot_instance:
-                try: await bot_instance.edit_message_text(relatorio_visual[:4000], chat_id=chat_id, message_id=message_id, parse_mode="HTML")
+                try: await bot_instance.edit_message_text(log_dinamico[:4000], chat_id=chat_id, message_id=message_id, parse_mode="HTML")
                 except Exception: pass
             
             if falhas_etapa:
@@ -186,7 +195,11 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             if status_api in [200, 201]:
                 cursor.execute("UPDATE fila_notas SET status = 'ENVIADO' WHERE id = ?", (id_registro,))
                 envios_realizados += 1
-                relatorio_visual += f"🟢 <b>Concluído</b> | {loja} | {email} | {nome_arquivo}\n\n"
+                
+                # Remove a linha "Enviando..." e adiciona o resultado
+                log_dinamico = log_dinamico.replace(f"⏳ ({idx}/{total_notas}) Enviando para: {loja}...\n", "")
+                log_dinamico += f"🟢 Concluído | {loja}\n"
+                
                 if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Nota enviada para {loja} ({email}).")
                 
                 try:
@@ -197,7 +210,11 @@ async def processar_fila_envios(chat_id=None, message_id=None):
                 cursor.execute("UPDATE fila_notas SET status = 'ERRO', motivo_erro = ? WHERE id = ?", (erro_msg, id_registro))
                 erros += 1
                 falhas_etapa.append(f"⚠️ Falha ao processar loja {loja}: {erro_msg}")
-                relatorio_visual += f"🔴 <b>Erro API</b> | {loja} | {email} | {nome_arquivo}\n"
+                
+                # Remove a linha "Enviando..." e adiciona o resultado
+                log_dinamico = log_dinamico.replace(f"⏳ ({idx}/{total_notas}) Enviando para: {loja}...\n", "")
+                log_dinamico += f"🔴 Erro API | {loja}\n"
+                
                 if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar para {loja}: {erro_msg}")
                 
         except Exception as e:
@@ -205,10 +222,24 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             cursor.execute("UPDATE fila_notas SET status = 'ERRO', motivo_erro = ? WHERE id = ?", (erro_msg, id_registro))
             erros += 1
             falhas_etapa.append(f"⚠️ Erro de rede/crítico na loja {loja}: {e}")
-            relatorio_visual += f"🔴 <b>Erro Interno</b> | {loja} | {email} | {nome_arquivo}\n"
+            
+            # Remove a linha "Enviando..." e adiciona o resultado
+            log_dinamico = log_dinamico.replace(f"⏳ ({idx}/{total_notas}) Enviando para: {loja}...\n", "")
+            log_dinamico += f"🔴 Erro Interno | {loja}\n"
+            
             if EXIBIR_LOGS: logger.error(f"❌ Erro Crítico ao enviar para {loja}: {e}")
             
         conexao.commit()
+        
+        # Atualiza a interface com o resultado da nota processada
+        if chat_id and message_id and bot_instance:
+             try:
+                 texto_exibicao = log_dinamico
+                 if len(texto_exibicao) > 4000:
+                     texto_exibicao = "...\n" + log_dinamico[-3990:]
+                 await bot_instance.edit_message_text(texto_exibicao, chat_id=chat_id, message_id=message_id, parse_mode="HTML")
+             except Exception: pass
+             
         await asyncio.sleep(1)
 
     conexao.close()
@@ -218,17 +249,15 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             shutil.rmtree(pasta_extracao)
     except Exception: pass
     
-    resumo_final = f"🏁 <b>Envios Concluídos!</b>\n\n"
-    resumo_final += f"✅ Sucessos: <b>{envios_realizados}</b>\n"
-    resumo_final += f"❌ Erros: <b>{erros}</b>\n\n"
-    resumo_final += relatorio_visual
+    # Finaliza o log
+    log_dinamico += f"\n🏁 <b>Envios Concluídos!</b>\n✅ Sucessos: <b>{envios_realizados}</b>\n❌ Erros: <b>{erros}</b>\n"
     
     if chat_id and message_id and bot_instance:
         try:
-            if len(resumo_final) > 3900:
-                await bot_instance.edit_message_text(resumo_final[:3900] + "\n\n[...Lista truncada devido ao limite...]", chat_id=chat_id, message_id=message_id, parse_mode="HTML")
-            else:
-                await bot_instance.edit_message_text(resumo_final, chat_id=chat_id, message_id=message_id, parse_mode="HTML")
+             texto_exibicao = log_dinamico
+             if len(texto_exibicao) > 4000:
+                  texto_exibicao = "...\n" + log_dinamico[-3990:]
+             await bot_instance.edit_message_text(texto_exibicao, chat_id=chat_id, message_id=message_id, parse_mode="HTML")
         except Exception: pass
     
     assunto_final = "[Sistema de Notas Shopee] Processo Totalmente Concluído"
