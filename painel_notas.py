@@ -288,8 +288,9 @@ async def iniciar_painel_notas(message: types.Message, state: FSMContext):
 
 @router.message(PainelNotasFluxo.menu_principal)
 async def processar_menu_notas(message: types.Message, state: FSMContext):
-    opcao = message.text
-    if opcao == "Iniciar Envios 🚀":
+    opcao = message.text.strip()
+    
+    if "Iniciar Envios" in opcao:
         texto = (
             "🧾 <b>Disparador Automático de Notas Fiscais</b>\n\n"
             "Para iniciar, por favor envie o arquivo <b>CSV extraído da Shopee</b> contendo as comissões e os e-mails dos lojistas."
@@ -297,15 +298,16 @@ async def processar_menu_notas(message: types.Message, state: FSMContext):
         await message.answer(texto, reply_markup=teclado_notas_cancelar, parse_mode="HTML")
         await state.set_state(PainelNotasFluxo.aguardando_csv)
         
-    elif opcao == "Informações de Acesso ℹ️":
+    elif "Informações" in opcao:
         if EXIBIR_LOGS: logger.info("🔐 Consultando credenciais seguras no .env.")
-        brevo_link = os.getenv('BREVO_LINK', 'https://app.brevo.com/')
-        brevo_login = os.getenv('BREVO_LOGIN', 'Não configurado no .env')
-        brevo_senha = os.getenv('BREVO_SENHA', 'Não configurado no .env')
         
-        gmail_link = os.getenv('GMAIL_LINK', 'https://mail.google.com/')
-        gmail_login = os.getenv('GMAIL_LOGIN', 'Não configurado no .env')
-        gmail_senha = os.getenv('GMAIL_SENHA', 'Não configurado no .env')
+        brevo_link = "https://app.brevo.com/"
+        brevo_login = "rnm.notas@gmail.com"
+        brevo_senha = os.getenv('BREVO_SENHA', 'Não configurada')
+        
+        gmail_link = "https://mail.google.com/"
+        gmail_login = "rnm.notas@gmail.com"
+        gmail_senha = os.getenv('GMAIL_SENHA', 'Não configurada')
         
         texto = (
             "🔐 <b>Informações de Acesso (Privado)</b>\n\n"
@@ -321,10 +323,11 @@ async def processar_menu_notas(message: types.Message, state: FSMContext):
         )
         await message.answer(texto, parse_mode="HTML")
         
-    elif opcao == "Voltar ↩️":
+    elif "Voltar" in opcao:
         from bot_mestre import obter_teclado_outros_canais
         await message.answer("Retornando ao painel central...", reply_markup=obter_teclado_outros_canais())
         await state.clear()
+        
     else:
         await message.answer("⚠️ Por favor, escolha uma das opções utilizando os botões do teclado.")
 
