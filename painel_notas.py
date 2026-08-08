@@ -570,7 +570,8 @@ async def enviar_lista_manual(message: types.Message, state: FSMContext):
         letra = chr(65 + (i % 26)) + (str(i // 26) if i >= 26 else "")
         texto += f"<b>{letra}</b> - {pdf}\n"
         
-    texto += "\n👉 <b>Digite a LETRA</b> correspondente ao PDF desta loja."
+    texto += "\n👉 <b>Digite a LETRA</b> correspondente ao PDF desta loja.\n"
+    texto += "🔎 <i>Dica: Para visualizar o PDF antes de associar, digite <b>VER LETRA</b> (Ex: VER A).</i>"
     
     teclado = ReplyKeyboardMarkup(
         keyboard=[
@@ -600,6 +601,7 @@ async def processar_pareamento_manual(message: types.Message, state: FSMContext)
     lojas = data.get('lojas_pendentes', [])
     pdfs = data.get('pdfs_pendentes', [])
     notas_validadas = data.get('notas_validadas', [])
+    pasta_extracao = data.get('pasta_extracao')
     
     if "PULAR LOJA" in texto_usuario:
         if lojas:
@@ -610,17 +612,37 @@ async def processar_pareamento_manual(message: types.Message, state: FSMContext)
             await enviar_lista_manual(message, state)
         return
         
+    # Verifica se é um comando de inspeção (ex: VER A ou LER B)
+    is_inspecao = False
+    letra_buscada = texto_usuario
+    if texto_usuario.startswith("VER ") or texto_usuario.startswith("LER "):
+        is_inspecao = True
+        letra_buscada = texto_usuario.split(" ")[1].strip()
+
     letra_idx = -1
     for i in range(len(pdfs)):
         l = chr(65 + (i % 26)) + (str(i // 26) if i >= 26 else "")
-        if l == texto_usuario:
+        if l == letra_buscada:
             letra_idx = i
             break
             
     if letra_idx == -1:
-        await message.answer("⚠️ Letra inválida. Digite apenas a letra correspondente ao PDF (Ex: A, B, C) ou use os botões.")
+        await message.answer("⚠️ Letra inválida. Digite apenas a letra (Ex: A) ou VER A para visualizar.")
         return
         
+    pdf_alvo = pdfs[letra_idx]
+    
+    if is_inspecao:
+        caminho_completo = os.path.join(pasta_extracao, pdf_alvo)
+        try:
+            arquivo_telegram = types.FSInputFile(caminho_completo)
+            caption_texto = f"🔎 <b>Inspecionando:</b> {pdf_alvo}\n\nSe for este o arquivo correto, digite apenas a letra <b>{letra_buscada}</b> para associar à loja <b>{lojas[0]['loja']}</b>."
+            await message.answer_document(arquivo_telegram, caption=caption_texto, parse_mode="HTML")
+        except Exception as e:
+            await message.answer(f"❌ Erro ao enviar o arquivo PDF: {e}")
+        return
+
+    # Se não for inspeção, procede com a associação normal e remove da fila
     loja_selecionada = lojas.pop(0)
     pdf_selecionado = pdfs.pop(letra_idx)
     
