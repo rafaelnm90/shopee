@@ -577,7 +577,7 @@ async def enviar_lista_manual(message: types.Message, state: FSMContext):
     
     teclado = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Ver PDF 👁️"), KeyboardButton(text="Pular Loja ⏭️")],
+            [KeyboardButton(text="Pular Loja ⏭️"), KeyboardButton(text="Ver PDF 👁️")],
             [KeyboardButton(text="Encerrar e Ir para o Resumo ⏭️"), KeyboardButton(text="Cancelar ❌")]
         ],
         resize_keyboard=True,
@@ -609,6 +609,27 @@ async def processar_pareamento_manual(message: types.Message, state: FSMContext)
         await message.answer("🔎 Digite a <b>LETRA</b> do PDF que você deseja visualizar (Ex: A, B, C):", parse_mode="HTML")
         await state.set_state(PainelNotasFluxo.inspecionando_pdf_manual)
         return
+
+    if "VER PDF" in texto_usuario:
+        data = await state.get_data()
+        pdfs = data.get('pdfs_pendentes', [])
+        pasta_extracao = data.get('pasta_extracao')
+        
+        if len(pdfs) == 1:
+            # Se só tem 1 PDF, envia ele direto na tela sem mudar de estado
+            pdf_alvo = pdfs[0]
+            caminho_completo = os.path.join(pasta_extracao, pdf_alvo)
+            try:
+                arquivo_telegram = types.FSInputFile(caminho_completo)
+                await message.answer_document(arquivo_telegram, caption=f"🔎 <b>Arquivo:</b> {pdf_alvo}\n\n👉 Digite <b>A</b> para associar ou pule a loja.", parse_mode="HTML")
+            except Exception as e:
+                await message.answer(f"❌ Erro ao enviar o arquivo: {e}")
+            return
+        else:
+            # Se tem mais de 1, pergunta qual quer ver
+            await message.answer("🔎 Digite a <b>LETRA</b> do PDF que você deseja visualizar (Ex: A, B, C):", parse_mode="HTML")
+            await state.set_state(PainelNotasFluxo.inspecionando_pdf_manual)
+            return
         
     data = await state.get_data()
     lojas = data.get('lojas_pendentes', [])
@@ -762,9 +783,16 @@ async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
             
         await state.set_state(PainelNotasFluxo.aguardando_aprovacao)
     else:
-        resumo_falha = f"⚠️ <b>Nenhuma nota foi combinada com sucesso.</b>\n\n❌ <b>Lojas pendentes ({len(lojas_pendentes)}):</b>\n"
+        qtd_ignorados = data.get('qtd_ignorados', 0)
+        resumo_falha = ""
+        
+        if qtd_ignorados > 0:
+            resumo_falha += f"🛑 <b>Bloqueio Anti-Spam:</b> <b>{qtd_ignorados}</b> arquivo(s) bloqueado(s) pois já constam como ENVIADOS no histórico.\n\n"
+            
+        resumo_falha += f"⚠️ <b>Nenhuma nota foi combinada com sucesso.</b>\n\n❌ <b>Lojas pendentes ({len(lojas_pendentes)}):</b>\n"
         for loja in lojas_pendentes:
             resumo_falha += f"   - {loja['loja']}\n"
+            
         await message.answer(resumo_falha[:3900], parse_mode="HTML")
         
         from bot_mestre import obter_teclado_outros_canais
@@ -782,13 +810,56 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
             await message.answer("⚠️ Nenhuma nota validada para visualizar.")
             return
 
-        texto = "🔎 <b>Qual nota você deseja visualizar?</b>\nDigite o <b>NÚMERO</b> correspondente:\n\n"
-        for i, nota in enumerate(notas_validadas, 1):
-            texto += f"<b>{i}</b> - {nota['pdf']}\n"
+        if "Ver PDF" in texto_usuario:
+        data = await state.get_data()
+        notas_validadas = data.get('notas_validadas', [])
+        pasta_extracao = data.get('pasta_extracao')
+        
+        if not notas_validadas:
+            await message.answer("⚠️ Nenhuma nota validada para visualizar.")
+            return
 
-        await message.answer(texto, parse_mode="HTML")
-        await state.set_state(PainelNotasFluxo.inspecionando_pdf_final)
-        return
+        if len(notas_validadas) == 1:
+            # Se só tem 1 nota na aprovação final, mostra ela direto
+            nota = notas_validadas[0]
+            caminho_completo = os.path.join(pasta_extracao, nota['pdf'])
+            try:
+                arquivo_telegram = types.FSInputFile(caminho_completo)
+                await message.answer_document(arquivo_telegram, caption=f"🔎 <b>Arquivo Validado:</b> {nota['pdf']}", parse_mode="HTML")
+            except Exception as e:
+                await message.answer(f"❌ Erro ao enviar o arquivo: {e}")
+            return
+        else:@router.message(PainelNotasFluxo.aguardando_aprovacao)
+async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
+    texto_usuario = message.text.strip()
+    
+    if "Ver PDF" in texto_usuario:
+        data = await state.get_data()
+        notas_validadas = data.get('notas_validadas', [])
+        pasta_extracao = data.get('pasta_extracao')
+        
+        if not notas_validadas:
+            await message.answer("⚠️ Nenhuma nota validada para visualizar.")
+            return
+
+        if len(notas_validadas) == 1:
+            # Se só tem 1 nota na aprovação final, mostra ela direto
+            nota = notas_validadas[0]
+            caminho_completo = os.path.join(pasta_extracao, nota['pdf'])
+            try:
+                arquivo_telegram = types.FSInputFile(caminho_completo)
+                await message.answer_document(arquivo_telegram, caption=f"🔎 <b>Arquivo Validado:</b> {nota['pdf']}", parse_mode="HTML")
+            except Exception as e:
+                await message.answer(f"❌ Erro ao enviar o arquivo: {e}")
+            return
+        else:
+            texto = "🔎 <b>Qual nota você deseja visualizar?</b>\nDigite o <b>NÚMERO</b> correspondente:\n\n"
+            for i, nota in enumerate(notas_validadas, 1):
+                texto += f"<b>{i}</b> - {nota['pdf']}\n"
+
+            await message.answer(texto, parse_mode="HTML")
+            await state.set_state(PainelNotasFluxo.inspecionando_pdf_final)
+            return
 
     if texto_usuario == "Cancelar ❌":
         from bot_mestre import obter_teclado_outros_canais
