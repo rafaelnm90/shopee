@@ -3027,95 +3027,90 @@ def processar_e_salvar_pedidos_api(conversoes):
     pedidos_db = ler_banco_pedidos()
     historico = ler_historico_financeiro()
     
-    historico_limpo = {}
-    for k, v in historico.items():
-        if isinstance(v, float) or isinstance(v, int):
-            historico_limpo[k] = {"aprovado": float(v), "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
-        else:
-            v.setdefault("qtd_aprovado", 0)
-            v.setdefault("qtd_pendente", 0)
-            v.setdefault("qtd_cancelado", 0)
-            v.setdefault("cancelado", 0.0)
-            v.setdefault("clicks", 0)
-            historico_limpo[k] = v
-
-    if not conversoes:
-        return historico_limpo
-
     houve_atualizacao = False
     import random
+    from datetime import timezone
     
-    for conv in conversoes:
-        orders = conv.get("orders", [])
-        if not orders: continue
-        
-        c_total = float(conv.get("totalCommission", "0"))
-        c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
-        c_extra = float(conv.get("sellerCommission", "0"))
-        
-        from datetime import timezone
-        dt_obj_utc = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=timezone.utc)
-        dt_obj = dt_obj_utc.astimezone(fuso_horario)
-        if EXIBIR_LOGS: logger.info("✅ Fuso horário corrigido de UTC para America/Sao_Paulo com sucesso.")
-        
-        dt_db_str = dt_obj.strftime("%Y-%m-%d")
-        
-        qtd_itens = len(orders)
-        c_total_frac = c_total / qtd_itens
-        c_shopee_frac = c_shopee / qtd_itens
-        c_extra_frac = c_extra / qtd_itens
-
-        for order in orders:
-            order_sn = order.get("orderId")
-            if not order_sn: 
-                order_sn = f"{conv.get('purchaseTime')}_{random.randint(1000,9999)}"
-                
-            novo_status = order.get("orderStatus", "").upper()
+    # 1. Alimenta o banco de pedidos (A prova de falhas, pois usa o ID único do pedido)
+    if conversoes:
+        for conv in conversoes:
+            orders = conv.get("orders", [])
+            if not orders: continue
             
-            if order_sn in pedidos_db:
-                estado_anterior = pedidos_db[order_sn]["status"]
-                if estado_anterior != novo_status:
-                    pedidos_db[order_sn]["status"] = novo_status
-                    houve_atualizacao = True
+            c_total = float(conv.get("totalCommission", "0"))
+            c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
+            c_extra = float(conv.get("sellerCommission", "0"))
+            
+            dt_obj_utc = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=timezone.utc)
+            dt_obj = dt_obj_utc.astimezone(fuso_horario)
+            if EXIBIR_LOGS: logger.info("✅ Fuso horário corrigido de UTC para America/Sao_Paulo com sucesso.")
+            
+            dt_db_str = dt_obj.strftime("%Y-%m-%d")
+            
+            qtd_itens = len(orders)
+            c_total_frac = c_total / qtd_itens
+            c_shopee_frac = c_shopee / qtd_itens
+            c_extra_frac = c_extra / qtd_itens
+
+            for order in orders:
+                order_sn = order.get("orderId")
+                if not order_sn: 
+                    order_sn = f"{conv.get('purchaseTime')}_{random.randint(1000,9999)}"
                     
-                if c_total_frac > 0:
-                    if pedidos_db[order_sn]["comissao_total"] != c_total_frac:
-                        pedidos_db[order_sn]["comissao_total"] = c_total_frac
-                        pedidos_db[order_sn]["comissao_shopee"] = c_shopee_frac
-                        pedidos_db[order_sn]["comissao_vendedor"] = c_extra_frac
+                novo_status = order.get("orderStatus", "").upper()
+                
+                if order_sn in pedidos_db:
+                    estado_anterior = pedidos_db[order_sn]["status"]
+                    if estado_anterior != novo_status:
+                        pedidos_db[order_sn]["status"] = novo_status
                         houve_atualizacao = True
-            else:
-                pedidos_db[order_sn] = {
-                    "data": dt_db_str,
-                    "status": novo_status,
-                    "comissao_total": c_total_frac,
-                    "comissao_shopee": c_shopee_frac,
-                    "comissao_vendedor": c_extra_frac
-                }
-                houve_atualizacao = True
+                        
+                    if c_total_frac > 0:
+                        if pedidos_db[order_sn]["comissao_total"] != c_total_frac:
+                            pedidos_db[order_sn]["comissao_total"] = c_total_frac
+                            pedidos_db[order_sn]["comissao_shopee"] = c_shopee_frac
+                            pedidos_db[order_sn]["comissao_vendedor"] = c_extra_frac
+                            houve_atualizacao = True
+                else:
+                    pedidos_db[order_sn] = {
+                        "data": dt_db_str,
+                        "status": novo_status,
+                        "comissao_total": c_total_frac,
+                        "comissao_shopee": c_shopee_frac,
+                        "comissao_vendedor": c_extra_frac
+                    }
+                    houve_atualizacao = True
                     
     if houve_atualizacao:
         salvar_banco_pedidos(pedidos_db)
         if EXIBIR_LOGS: logger.info("💾 Banco de Pedidos Individuais consolidado e blindado!")
         
-    dias_no_banco = set(p["data"] for p in pedidos_db.values())
+    # 2. A MÁGICA DA CORREÇÃO: Limpamos a lousa suja e recalculamos a matemática 100% limpa!
+    historico_limpo = {}
     
-    for d_str in dias_no_banco:
-        if d_str not in historico_limpo:
-            historico_limpo[d_str] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
+    # Zera todas as comissões do histórico velho para destruir as duplicidades (Mantém só os cliques, se houver)
+    for k, v in historico.items():
+        if isinstance(v, dict):
+            v["aprovado"] = 0.0
+            v["pendente"] = 0.0
+            v["cancelado"] = 0.0
+            v["shopee"] = 0.0
+            v["vendedor"] = 0.0
+            v["qtd_aprovado"] = 0
+            v["qtd_pendente"] = 0
+            v["qtd_cancelado"] = 0
+            historico_limpo[k] = v
         else:
-            historico_limpo[d_str]["aprovado"] = 0.0
-            historico_limpo[d_str]["pendente"] = 0.0
-            historico_limpo[d_str]["cancelado"] = 0.0
-            historico_limpo[d_str]["qtd_aprovado"] = 0
-            historico_limpo[d_str]["qtd_pendente"] = 0
-            historico_limpo[d_str]["qtd_cancelado"] = 0
-            historico_limpo[d_str]["shopee"] = 0.0
-            historico_limpo[d_str]["vendedor"] = 0.0
+            historico_limpo[k] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
             
+    # Reconstrói a tabela financeira somando exatamento os pedidos válidos
     for sn, p in pedidos_db.items():
         d_str = p["data"]
         st = p["status"]
+        
+        if d_str not in historico_limpo:
+            historico_limpo[d_str] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
+            
         if st == "COMPLETED":
             historico_limpo[d_str]["aprovado"] += p["comissao_total"]
             historico_limpo[d_str]["shopee"] += p.get("comissao_shopee", 0.0)
