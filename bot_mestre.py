@@ -783,6 +783,10 @@ async def gerar_extrato_rapido(message: types.Message, state: FSMContext):
     historico_limpo = ler_historico_financeiro()
     taxa_imposto = ler_config_bd("imposto_taxa", 6.0)
     
+    # 🟢 O cérebro do DRE clonado para o mês atual
+    saldo_caixa_atual = float(ler_config_bd("saldo_caixa_shopee", 0.0))
+    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m")
+    
     conexao = sqlite3.connect("banco_dados.db")
     cursor = conexao.cursor()
     
@@ -798,11 +802,15 @@ async def gerar_extrato_rapido(message: types.Message, state: FSMContext):
             mes_gasto = d[2][:7] # Extrai YYYY-MM
             custos_pontuais[mes_gasto] = custos_pontuais.get(mes_gasto, 0.0) + d[0]
             
-    # Agrupa o faturamento por mês
+    # Agrupa o faturamento por mês (Para o histórico passado)
     faturamento_mensal = {}
     for data_str, dados_dia in historico_limpo.items():
         mes_key = data_str[:7]
         faturamento_mensal[mes_key] = faturamento_mensal.get(mes_key, 0.0) + dados_dia.get("aprovado", 0.0)
+        
+    # Garante que o mês atual apareça no extrato mesmo se a API ainda não leu nada novo hoje
+    if hoje_str not in faturamento_mensal and saldo_caixa_atual > 0:
+        faturamento_mensal[hoje_str] = 0.0
         
     if not faturamento_mensal:
         await msg_status.edit_text("<i>Nenhum histórico financeiro encontrado ainda.</i>", parse_mode="HTML")
@@ -816,7 +824,12 @@ async def gerar_extrato_rapido(message: types.Message, state: FSMContext):
     texto = "📜 <b>Extrato Rápido (Últimos 6 Meses)</b>\n\n"
     
     for mes in meses_ordenados:
-        faturamento = faturamento_mensal[mes]
+        # 🟢 A MÁGICA DA SINCRONIZAÇÃO: Se for o mês atual, usa o saldo cravado do DRE!
+        if mes == hoje_str:
+            faturamento = saldo_caixa_atual
+        else:
+            faturamento = faturamento_mensal[mes]
+            
         imposto = faturamento * (taxa_imposto / 100)
         custo_pontual_mes = custos_pontuais.get(mes, 0.0)
         custo_total_mes = custos_fixos_mensais + custo_pontual_mes
@@ -831,13 +844,13 @@ async def gerar_extrato_rapido(message: types.Message, state: FSMContext):
         icone_lucro = "✅" if lucro >= 0 else "🛑"
         
         texto += f"📅 <b>{nome_mes}</b>\n"
-        texto += f"   💰 Confirmado no Mês: R$ {f_br(faturamento)}\n"
+        texto += f"   💰 Confirmado: R$ {f_br(faturamento)}\n"
         texto += f"   🏛️ Provisão Imposto: - R$ {f_br(imposto)}\n"
         texto += f"   📉 Custos Totais: - R$ {f_br(custo_total_mes)}\n"
         texto += f"   {icone_lucro} <b>LUCRO LIVRE DO MÊS: R$ {f_br(lucro)}</b>\n\n"
         
-    texto += "<i>*Os custos incluem suas despesas fixas + despesas pontuais do respectivo mês.</i>\n"
-    texto += "<i>*Este extrato reflete o quanto cada mês isolado contribuiu para o seu caixa atual.</i>"
+    texto += "<i>*O mês atual está sincronizado em tempo real com o seu Caixa da Shopee.</i>\n"
+    texto += "<i>*Os custos incluem suas despesas fixas + despesas pontuais do respectivo mês.</i>"
     
     await msg_status.edit_text(texto, parse_mode="HTML")
 
