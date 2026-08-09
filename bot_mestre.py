@@ -267,7 +267,7 @@ class FinanceiroFluxo(StatesGroup):
     aguardando_valor_imposto = State()
     aguardando_valor_saque = State()
     aguardando_exclusao_saque = State()
-    aguardando_ajuste_historico = State() # 🟢 NOME CORRIGIDO AQUI
+    aguardando_saldo_shopee = State() # 🟢 NOME ATUALIZADO AQUI
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -429,7 +429,7 @@ def obter_teclado_centro_financeiro():
         keyboard=[
             [KeyboardButton(text="Balanço e DRE 📈"), KeyboardButton(text="Gestão de Custos 📉")],
             [KeyboardButton(text="Provisão de Impostos 🏛️"), KeyboardButton(text="Fluxo de Caixa (Saques) 🏦")],
-            [KeyboardButton(text="Ajuste Histórico (App) ⚖️"), KeyboardButton(text="Disparador de Notas 🧾")],
+            [KeyboardButton(text="Definir Saldo (App) 💰"), KeyboardButton(text="Disparador de Notas 🧾")],
             [KeyboardButton(text="Voltar ao Início 🔙")]
         ],
         resize_keyboard=True,
@@ -682,38 +682,29 @@ async def salvar_valor_saque(message: types.Message, state: FSMContext):
         conexao.commit()
         conexao.close()
         
-        if EXIBIR_LOGS: logger.info(f"🏦 Novo saque registrado: R$ {valor}")
+        # 🟢 A MÁGICA: Deduz o saque diretamente do saldo da Shopee do Robô!
+        saldo_atual = float(ler_config_bd("saldo_caixa_shopee", 0.0))
+        novo_saldo = saldo_atual - valor
+        if novo_saldo < 0: novo_saldo = 0.0
+        salvar_config_bd("saldo_caixa_shopee", novo_saldo)
+        
+        if EXIBIR_LOGS: logger.info(f"🏦 Novo saque registrado e deduzido: R$ {valor}")
         
         valor_br = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        await message.answer(f"✅ Saque de <b>R$ {valor_br}</b> registrado com sucesso no caixa!", parse_mode="HTML")
+        await message.answer(f"✅ Saque de <b>R$ {valor_br}</b> registrado com sucesso e deduzido do seu saldo preso na Shopee!", parse_mode="HTML")
         await listar_saques(message, state)
     except ValueError:
         await message.answer("⚠️ Valor numérico inválido. Digite apenas números (Ex: 500.00):", reply_markup=teclado_cancelar)
 
-@dp.message(FinanceiroFluxo.menu_principal, F.text == "Remover Último Saque 🗑️")
-async def pedir_remocao_saque(message: types.Message, state: FSMContext):
-    conexao = sqlite3.connect("banco_dados.db")
-    cursor = conexao.cursor()
-    cursor.execute("SELECT id, valor, data_registro FROM financeiro_saques ORDER BY id DESC LIMIT 1")
-    ultimo_saque = cursor.fetchone()
-    conexao.close()
-    
-    if not ultimo_saque:
-        await message.answer("Não há saques registrados para remover.", reply_markup=teclado_cancelar)
-        return
-        
-    id_db, valor, data_reg = ultimo_saque
-    data_br = datetime.strptime(data_reg, "%Y-%m-%d").strftime("%d/%m/%Y")
-    valor_br = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    
-    await state.update_data(id_ultimo_saque=id_db)
-    
-    teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar Exclusão Saque ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
-    await message.answer(f"⚠️ Deseja realmente excluir o último registro de saque?\n\n• <i>{data_br}</i> - <b>R$ {valor_br}</b>", reply_markup=teclado_conf, parse_mode="HTML")
-    await state.set_state(FinanceiroFluxo.aguardando_exclusao_saque)
-
 @dp.message(FinanceiroFluxo.aguardando_exclusao_saque)
 async def processar_remocao_saque(message: types.Message, state: FSMContext):
+    # 🛡️ Trava de Cancelamento
+    if message.text == "Cancelar ❌":
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await listar_saques(message, state)
+        return
+        
     if message.text != "Aprovar Exclusão Saque ✅":
         await message.answer("Operação cancelada.")
         await listar_saques(message, state)
@@ -724,41 +715,90 @@ async def processar_remocao_saque(message: types.Message, state: FSMContext):
     
     conexao = sqlite3.connect("banco_dados.db")
     cursor = conexao.cursor()
+    
+    # 🟢 A MÁGICA: Recupera o valor do saque para devolver (estornar) ao saldo da Shopee!
+    cursor.execute("SELECT valor FROM financeiro_saques WHERE id = ?", (id_db,))
+    resultado = cursor.fetchone()
+    if resultado:
+        valor_saque = resultado[0]
+        saldo_atual = float(ler_config_bd("saldo_caixa_shopee", 0.0))
+        salvar_config_bd("saldo_caixa_shopee", saldo_atual + valor_saque)
+        
     cursor.execute("DELETE FROM financeiro_saques WHERE id = ?", (id_db,))
     conexao.commit()
     conexao.close()
     
-    if EXIBIR_LOGS: logger.info("🗑️ Último registro de saque apagado.")
-    await message.answer("✅ Registro de saque apagado com sucesso!")
+    if EXIBIR_LOGS: logger.info("🗑️ Último registro de saque apagado e estornado pro caixa.")
+    await message.answer("✅ Registro de saque apagado com sucesso! O valor retornou ao saldo da Shopee.")
     await listar_saques(message, state)
 
+
+# --- 5. DEFINIR SALDO BASE (LIVRO CAIXA AUTOMÁTICO) ---
+@dp.message(FinanceiroFluxo.menu_principal, F.text == "Definir Saldo (App) 💰")
+async def pedir_saldo_shopee(message: types.Message, state: FSMContext):
+    saldo_atual = float(ler_config_bd("saldo_caixa_shopee", 0.0))
+    valor_br = f"{saldo_atual:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    
+    texto = (
+        f"💰 <b>Definir Saldo Inicial</b>\n\n"
+        f"O saldo atual gravado no robô é: <b>R$ {valor_br}</b>\n\n"
+        f"Digite o valor exato que aparece no seu saldo 'A Receber' do App da Shopee.\n"
+        f"A partir de agora, o robô vai somar automaticamente qualquer venda que mudar para 'Confirmado' dentro deste valor.\n\n"
+        f"Digite o valor (Exemplo: <code>746.29</code>):"
+    )
+    await message.answer(texto, reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(FinanceiroFluxo.aguardando_saldo_shopee)
+
+@dp.message(FinanceiroFluxo.aguardando_saldo_shopee)
+async def salvar_saldo_shopee(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await menu_centro_financeiro(message, state)
+        return
+        
+    texto_valor = message.text.strip().replace("R$", "").replace(" ", "").replace(",", ".")
+    try:
+        valor = float(texto_valor)
+        msg_status = await message.answer("🔄 Sincronizando e fotografando o passado para evitar duplicações... Aguarde ⏳", reply_markup=teclado_cancelar)
+        
+        # Puxa 90 dias e salva o status atual de tudo SEM mexer no saldo
+        conversoes = await buscar_dados_financeiros_shopee(90)
+        if conversoes:
+            processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=True)
+            
+        # Agora define o saldo base limpo
+        salvar_config_bd("saldo_caixa_shopee", valor)
+        if EXIBIR_LOGS: logger.info(f"💰 Saldo Base definido cirurgicamente para R$ {valor}.")
+        
+        await msg_status.delete()
+        valor_br = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        await message.answer(f"✅ <b>Saldo Atualizado!</b>\nO robô assumiu <b>R$ {valor_br}</b> como base.\nA partir de amanhã, as novas confirmações serão somadas automaticamente aqui.", parse_mode="HTML")
+        await menu_centro_financeiro(message, state)
+    except ValueError:
+        await message.answer("⚠️ Valor inválido. Digite apenas números e ponto (Ex: 746.29):", reply_markup=teclado_cancelar)
 
 # --- 4. BALANÇO E DRE (INTELIGÊNCIA CONTÁBIL) 📈 ---
 @dp.message(FinanceiroFluxo.menu_principal, F.text == "Balanço e DRE 📈")
 async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
-    msg_status = await message.answer("📈 Consultando a Shopee e reestruturando o Balanço... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("📊 Compilando DRE a partir da API com divisão Caixa vs Competência...")
+    msg_status = await message.answer("📈 Consultando a Shopee e processando Caixa... Aguarde ⏳")
+    if EXIBIR_LOGS: logger.info("📊 Compilando DRE a partir do Ledger...")
     
-    # 1. A API varre os 90 dias permitidos
-    conversoes = await buscar_dados_financeiros_shopee(90)
+    # Puxa os dados normais da API (30 dias) e aplica a lógica de soma automática no ledger
+    conversoes = await buscar_dados_financeiros_shopee(30)
     historico_limpo = processar_e_salvar_pedidos_api(conversoes)
     
     hoje = datetime.now(fuso_horario)
     mes_atual_str = hoje.strftime("%Y-%m")
     
-    # --- VISÃO 1: DESEMPENHO DE VENDAS DO MÊS ATUAL ---
-    # Aqui filtramos estritamente o que foi comprado este mês (Para você avaliar seu marketing)
+    # VISÃO 1: DESEMPENHO DE VENDAS
     aprovado_mes_api = sum(v["aprovado"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     pendente_mes_api = sum(v["pendente"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     faturamento_mes_api = aprovado_mes_api + pendente_mes_api
     
-    # --- VISÃO 2: TOTAL CONFIRMADO DA API (OS 90 DIAS) ---
-    # 🟢 AQUI ESTÁ A CORREÇÃO: Pega TODAS as confirmações que a API conseguiu ler nos 90 dias
-    total_aprovado_api = sum(v["aprovado"] for k, v in historico_limpo.items())
-    
-    # 2. Resgata Variáveis do Banco de Dados
+    # VISÃO 2: CAIXA REAL (Ledger Automático)
+    saldo_shopee = float(ler_config_bd("saldo_caixa_shopee", 0.0))
     taxa_imposto = ler_config_bd("imposto_taxa", 6.0)
-    ajuste_furo_app = float(ler_config_bd("ajuste_historico_furo", 0.0))
     
     conexao = sqlite3.connect("banco_dados.db")
     cursor = conexao.cursor()
@@ -770,12 +810,7 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     cursor.execute("SELECT SUM(valor) FROM financeiro_saques")
     total_sacado_db = cursor.fetchone()[0]
     total_sacado = float(total_sacado_db) if total_sacado_db else 0.0
-    
     conexao.close()
-    
-    # --- VISÃO 3: CAIXA REAL (SOMA DO PASSADO INVISÍVEL COM O PRESENTE DA API) ---
-    caixa_total_aprovado = total_aprovado_api + ajuste_furo_app
-    saldo_shopee = caixa_total_aprovado - total_sacado
     
     if saldo_shopee < 1.00: 
         saldo_shopee = 0.0
@@ -783,7 +818,6 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     imposto_real = saldo_shopee * (taxa_imposto / 100)
     lucro_livre_real = saldo_shopee - imposto_real - total_custos
     
-    # 5. Formatação do Texto (DRE)
     def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
     MESES_PT = {
@@ -796,17 +830,16 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     texto_dre = (
         f"📊 <b>Balanço Financeiro Global | {nome_mes}</b>\n\n"
         
-        f"<b>1. DESEMPENHO (Competência da API)</b>\n"
-        f"<i>(Vendas ocorridas puramente dentro do mês de {nome_mes})</i>\n"
+        f"<b>1. DESEMPENHO DE VENDAS</b>\n"
+        f"<i>(Volume faturado puramente no mês de {nome_mes})</i>\n"
         f"   🛒 Volume Gerado: <b>R$ {f_br(faturamento_mes_api)}</b>\n"
         f"   └ <i>Confirmado: R$ {f_br(aprovado_mes_api)}</i>\n"
         f"   └ <i>Pendente: R$ {f_br(pendente_mes_api)}</i>\n\n"
         
         f"━━━━━━━━━━━━━━━━━━\n"
         f"<b>2. CAIXA REAL (Situação do Dinheiro)</b>\n"
-        f"<i>(Tudo que a API leu em 90 dias + O Furo Histórico >90 dias)</i>\n\n"
-        f"   📡 Total API (90 Dias): R$ {f_br(total_aprovado_api)}\n"
-        f"   ⚖️ Furo Histórico Oculto: R$ {f_br(ajuste_furo_app)}\n"
+        f"<i>(O Saldo do Aplicativo atualizado em Tempo Real)</i>\n\n"
+        
         f"   💰 <b>Preso na Shopee: R$ {f_br(saldo_shopee)}</b>\n\n"
         
         f"   <b>Deduções Imediatas:</b>\n"
@@ -825,25 +858,6 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     
     await msg_status.delete()
     await message.answer(texto_dre, parse_mode="HTML")
-
-# --- 5. AJUSTE HISTÓRICO (O FURO DOS 90 DIAS) ---
-@dp.message(FinanceiroFluxo.menu_principal, F.text == "Ajuste Histórico (App) ⚖️")
-async def pedir_ajuste_historico(message: types.Message, state: FSMContext):
-    valor_atual = ler_config_bd("ajuste_historico_furo", 0.0)
-    valor_br = f"{valor_atual:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    
-    texto = (
-        f"⚖️ <b>Ajuste de Furo Histórico</b>\n\n"
-        f"Valor atual configurado: <b>R$ {valor_br}</b>\n\n"
-        f"A API da Shopee só nos permite ler os últimos 90 dias. Para o bot bater o valor exato com o seu Aplicativo, precisamos preencher esse 'furo' de vendas mais antigas.\n\n"
-        f"<b>Como calcular:</b>\n"
-        f"1. Olhe o valor 'A Receber' no App da Shopee.\n"
-        f"2. Olhe o 'Total API (90 Dias)' no Balanço do bot.\n"
-        f"3. Subtraia um do outro e digite a diferença aqui (Ex: Se o App diz 2000 e a API diz 1500, digite <code>500.00</code>).\n\n"
-        f"Digite o valor:"
-    )
-    await message.answer(texto, reply_markup=teclado_cancelar, parse_mode="HTML")
-    await state.set_state(FinanceiroFluxo.aguardando_ajuste_historico)
 
 @dp.message(FinanceiroFluxo.aguardando_ajuste_historico)
 async def salvar_ajuste_historico(message: types.Message, state: FSMContext):
@@ -3032,99 +3046,94 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
         if EXIBIR_LOGS: logger.error(f"❌ Erro crítico no motor financeiro: {e}")
     return []
 
-def processar_e_salvar_pedidos_api(conversoes):
+def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
     pedidos_db = ler_banco_pedidos()
     historico = ler_historico_financeiro()
     
-    historico_limpo = {}
-    for k, v in historico.items():
-        if isinstance(v, float) or isinstance(v, int):
-            historico_limpo[k] = {"aprovado": float(v), "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
-        else:
-            v.setdefault("qtd_aprovado", 0)
-            v.setdefault("qtd_pendente", 0)
-            v.setdefault("qtd_cancelado", 0)
-            v.setdefault("cancelado", 0.0)
-            v.setdefault("clicks", 0)
-            historico_limpo[k] = v
-
-    if not conversoes:
-        return historico_limpo
-
+    # 🟢 O Robô carrega a sua conta bancária virtual
+    saldo_caixa = float(ler_config_bd("saldo_caixa_shopee", 0.0))
     houve_atualizacao = False
+    from datetime import timezone
     import random
     
-    for conv in conversoes:
-        orders = conv.get("orders", [])
-        if not orders: continue
-        
-        c_total = float(conv.get("totalCommission", "0"))
-        c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
-        c_extra = float(conv.get("sellerCommission", "0"))
-        
-        from datetime import timezone
-        dt_obj_utc = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=timezone.utc)
-        dt_obj = dt_obj_utc.astimezone(fuso_horario)
-        if EXIBIR_LOGS: logger.info("✅ Fuso horário corrigido de UTC para America/Sao_Paulo com sucesso.")
-        
-        dt_db_str = dt_obj.strftime("%Y-%m-%d")
-        
-        qtd_itens = len(orders)
-        c_total_frac = c_total / qtd_itens
-        c_shopee_frac = c_shopee / qtd_itens
-        c_extra_frac = c_extra / qtd_itens
-
-        for order in orders:
-            order_sn = order.get("orderId")
-            if not order_sn: 
-                order_sn = f"{conv.get('purchaseTime')}_{random.randint(1000,9999)}"
-                
-            novo_status = order.get("orderStatus", "").upper()
+    if conversoes:
+        for conv in conversoes:
+            orders = conv.get("orders", [])
+            if not orders: continue
             
-            if order_sn in pedidos_db:
-                estado_anterior = pedidos_db[order_sn]["status"]
-                if estado_anterior != novo_status:
-                    pedidos_db[order_sn]["status"] = novo_status
-                    houve_atualizacao = True
+            c_total = float(conv.get("totalCommission", "0"))
+            c_shopee = float(conv.get("shopeeCommissionCapped", "0"))
+            c_extra = float(conv.get("sellerCommission", "0"))
+            
+            dt_obj_utc = datetime.fromtimestamp(conv.get("purchaseTime", 0), tz=timezone.utc)
+            dt_obj = dt_obj_utc.astimezone(fuso_horario)
+            dt_db_str = dt_obj.strftime("%Y-%m-%d")
+            
+            qtd_itens = len(orders)
+            c_total_frac = c_total / qtd_itens
+            c_shopee_frac = c_shopee / qtd_itens
+            c_extra_frac = c_extra / qtd_itens
+
+            for idx_order, order in enumerate(orders):
+                order_sn = order.get("orderId")
+                if not order_sn: 
+                    order_sn = f"shopee_vid_{conv.get('purchaseTime')}_{idx_order}"
                     
-                if c_total_frac > 0:
-                    if pedidos_db[order_sn]["comissao_total"] != c_total_frac:
+                novo_status = order.get("orderStatus", "").upper()
+                
+                if order_sn in pedidos_db:
+                    estado_anterior = pedidos_db[order_sn]["status"]
+                    if estado_anterior != novo_status:
+                        pedidos_db[order_sn]["status"] = novo_status
+                        houve_atualizacao = True
+                        
+                        # 🟢 A MÁGICA: Se o pedido MUDOU para Confirmado agora, ele soma no seu Saldo!
+                        if not ignorar_ledger:
+                            if estado_anterior != "COMPLETED" and novo_status == "COMPLETED":
+                                saldo_caixa += c_total_frac
+                                if EXIBIR_LOGS: logger.info(f"💰 Transição detectada! Pedido confirmado: + R${c_total_frac:.2f}")
+                            elif estado_anterior == "COMPLETED" and novo_status != "COMPLETED":
+                                saldo_caixa -= c_total_frac # Estorno de segurança
+                                
+                    # Atualiza comissões caso o valor tenha sido ajustado pela Shopee
+                    if c_total_frac > 0 and pedidos_db[order_sn].get("comissao_total", 0) != c_total_frac:
+                        if not ignorar_ledger and novo_status == "COMPLETED":
+                            diferenca = c_total_frac - pedidos_db[order_sn]["comissao_total"]
+                            saldo_caixa += diferenca
+                        
                         pedidos_db[order_sn]["comissao_total"] = c_total_frac
                         pedidos_db[order_sn]["comissao_shopee"] = c_shopee_frac
                         pedidos_db[order_sn]["comissao_vendedor"] = c_extra_frac
                         houve_atualizacao = True
-            else:
-                pedidos_db[order_sn] = {
-                    "data": dt_db_str,
-                    "status": novo_status,
-                    "comissao_total": c_total_frac,
-                    "comissao_shopee": c_shopee_frac,
-                    "comissao_vendedor": c_extra_frac
-                }
-                houve_atualizacao = True
+                else:
+                    # É um Pedido Novo Inédito
+                    pedidos_db[order_sn] = {
+                        "data": dt_db_str,
+                        "status": novo_status,
+                        "comissao_total": c_total_frac,
+                        "comissao_shopee": c_shopee_frac,
+                        "comissao_vendedor": c_extra_frac
+                    }
+                    houve_atualizacao = True
+                    # Se ele já nasceu confirmado na API, soma no Saldo
+                    if not ignorar_ledger and novo_status == "COMPLETED":
+                        saldo_caixa += c_total_frac
+                        if EXIBIR_LOGS: logger.info(f"💰 Novo pedido já nasceu confirmado! + R${c_total_frac:.2f}")
                     
     if houve_atualizacao:
         salvar_banco_pedidos(pedidos_db)
-        if EXIBIR_LOGS: logger.info("💾 Banco de Pedidos Individuais consolidado e blindado!")
-        
-    dias_no_banco = set(p["data"] for p in pedidos_db.values())
-    
-    for d_str in dias_no_banco:
-        if d_str not in historico_limpo:
-            historico_limpo[d_str] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
-        else:
-            historico_limpo[d_str]["aprovado"] = 0.0
-            historico_limpo[d_str]["pendente"] = 0.0
-            historico_limpo[d_str]["cancelado"] = 0.0
-            historico_limpo[d_str]["qtd_aprovado"] = 0
-            historico_limpo[d_str]["qtd_pendente"] = 0
-            historico_limpo[d_str]["qtd_cancelado"] = 0
-            historico_limpo[d_str]["shopee"] = 0.0
-            historico_limpo[d_str]["vendedor"] = 0.0
+        if not ignorar_ledger:
+            salvar_config_bd("saldo_caixa_shopee", saldo_caixa) # Salva a conta bancária
             
+    # Reconstrói a visão de desempenho do DRE (Fica intacta para o gráfico)
+    historico_limpo = {}
     for sn, p in pedidos_db.items():
         d_str = p["data"]
         st = p["status"]
+        
+        if d_str not in historico_limpo:
+            historico_limpo[d_str] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
+            
         if st == "COMPLETED":
             historico_limpo[d_str]["aprovado"] += p["comissao_total"]
             historico_limpo[d_str]["shopee"] += p.get("comissao_shopee", 0.0)
