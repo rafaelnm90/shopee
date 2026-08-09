@@ -285,6 +285,22 @@ async def processar_fila_envios(chat_id=None, message_id=None):
         corpo_final += "</ul>"
         
     await enviar_email_brevo(EMAIL_ADMIN, "Administrador", assunto_final, corpo_final)
+    
+    # 🔙 Devolve a interface ao usuário com o teclado original do painel central
+    if chat_id and message_id and bot_instance:
+        teclado_outros = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
+                [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
+                [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Disparador de Notas 🧾")],
+                [KeyboardButton(text="Voltar ao Início 🔙")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        try:
+            await bot_instance.send_message(chat_id, "O painel principal está liberado.", reply_markup=teclado_outros)
+        except Exception: pass
 
 # ==========================================
 # FLUXO INTERATIVO (TELEGRAM)
@@ -878,36 +894,13 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
     # O teclado principal é removido imediatamente
     msg_dinamica = await message.answer("⏳ <b>Preparando o motor de envios...</b>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     
-    if EXIBIR_LOGS: logger.info("⏰ Acionando motor de envio via Brevo em background blindado.")
+    if EXIBIR_LOGS: logger.info("⏰ Acionando motor de envio via Brevo.")
     
-    # Wrapper isolado para aguardar o fim do processo ANTES de liberar a interface
-    async def executador_blindado(chat_id, msg_id):
-        # Aqui, os IDs são passados para que o processador atualize a tela
-        await processar_fila_envios(chat_id=chat_id, message_id=msg_id)
-        
-        if EXIBIR_LOGS: logger.info("🔙 Liberando a interface central após término absoluto da fila.")
-        teclado_outros = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
-                [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
-                [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Disparador de Notas 🧾")],
-                [KeyboardButton(text="Voltar ao Início 🔙")]
-            ],
-            resize_keyboard=True,
-            is_persistent=True
-        )
-        try:
-            await bot_instance.send_message(chat_id, "✅ <b>Operação finalizada!</b>\nTodos os e-mails foram enviados e a interface foi liberada.", reply_markup=teclado_outros, parse_mode="HTML")
-        except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar mensagem de finalização: {e}")
-        
-        await state.clear()
-
-    # Cria a tarefa em background passando os parâmetros de chat e mensagem
-    asyncio.create_task(executador_blindado(message.chat.id, msg_dinamica.message_id))
-
-    # Cria a tarefa em background passando os parâmetros de chat e mensagem
-    asyncio.create_task(executador_blindado(message.chat.id, msg_dinamica.message_id))
+    # A tarefa é lançada em segundo plano
+    asyncio.create_task(processar_fila_envios(chat_id=message.chat.id, message_id=msg_dinamica.message_id))
+    
+    # Limpa o estado atual
+    await state.clear()
 
 @router.message(PainelNotasFluxo.inspecionando_pdf_final)
 async def processar_inspecao_final(message: types.Message, state: FSMContext):
