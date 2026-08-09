@@ -476,6 +476,13 @@ async def menu_impostos(message: types.Message, state: FSMContext):
 
 @dp.message(FinanceiroFluxo.aguardando_valor_imposto)
 async def salvar_imposto(message: types.Message, state: FSMContext):
+    # 🛡️ Trava de Cancelamento
+    if message.text == "Cancelar ❌":
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await menu_centro_financeiro(message, state)
+        return
+        
     texto = message.text.strip().replace(",", ".")
     try:
         nova_taxa = float(texto)
@@ -523,6 +530,13 @@ async def pedir_nome_custo(message: types.Message, state: FSMContext):
 
 @dp.message(FinanceiroFluxo.aguardando_nome_despesa)
 async def pedir_valor_custo(message: types.Message, state: FSMContext):
+    # 🛡️ Trava de Cancelamento
+    if message.text == "Cancelar ❌":
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await menu_centro_financeiro(message, state)
+        return
+        
     nome_custo = message.text.strip()
     await state.update_data(nome_despesa=nome_custo)
     await message.answer(f"Custo: <b>{nome_custo}</b>\n\nDigite o <b>VALOR MENSAL</b> dessa despesa (Exemplo: <code>50.00</code> ou <code>120,50</code>):", reply_markup=teclado_cancelar, parse_mode="HTML")
@@ -530,6 +544,13 @@ async def pedir_valor_custo(message: types.Message, state: FSMContext):
 
 @dp.message(FinanceiroFluxo.aguardando_valor_despesa)
 async def salvar_valor_custo(message: types.Message, state: FSMContext):
+    # 🛡️ Trava de Cancelamento
+    if message.text == "Cancelar ❌":
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await listar_custos(message, state)
+        return
+        
     texto_valor = message.text.strip().replace("R$", "").replace(" ", "").replace(",", ".")
     try:
         valor = float(texto_valor)
@@ -567,6 +588,13 @@ async def pedir_remocao_custo(message: types.Message, state: FSMContext):
 
 @dp.message(FinanceiroFluxo.aguardando_exclusao_despesa)
 async def processar_remocao_custo(message: types.Message, state: FSMContext):
+    # 🛡️ Trava de Cancelamento
+    if message.text == "Cancelar ❌":
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await listar_custos(message, state)
+        return
+        
     numero_digitado = message.text.strip()
     data = await state.get_data()
     mapa_custos = data.get("mapa_custos", {})
@@ -635,6 +663,13 @@ async def pedir_valor_saque(message: types.Message, state: FSMContext):
 
 @dp.message(FinanceiroFluxo.aguardando_valor_saque)
 async def salvar_valor_saque(message: types.Message, state: FSMContext):
+    # 🛡️ Trava de Cancelamento
+    if message.text == "Cancelar ❌":
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await listar_saques(message, state)
+        return
+        
     texto_valor = message.text.strip().replace("R$", "").replace(" ", "").replace(",", ".")
     try:
         valor = float(texto_valor)
