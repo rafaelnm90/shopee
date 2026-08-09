@@ -859,27 +859,6 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     await msg_status.delete()
     await message.answer(texto_dre, parse_mode="HTML")
 
-@dp.message(FinanceiroFluxo.aguardando_ajuste_historico)
-async def salvar_ajuste_historico(message: types.Message, state: FSMContext):
-    if message.text == "Cancelar ❌":
-        await state.clear()
-        await message.answer("Ação cancelada.")
-        await menu_centro_financeiro(message, state)
-        return
-        
-    texto_valor = message.text.strip().replace("R$", "").replace(" ", "").replace(",", ".")
-    try:
-        valor = float(texto_valor)
-        salvar_config_bd("ajuste_historico_furo", valor)
-        
-        if EXIBIR_LOGS: logger.info(f"⚖️ Ajuste histórico atualizado para R$ {valor}.")
-        
-        valor_br = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        await message.answer(f"✅ <b>Ajuste salvo com sucesso!</b>\nO valor de R$ {valor_br} será somado à leitura da API permanentemente para corrigir a defasagem dos 90 dias.", parse_mode="HTML")
-        await menu_centro_financeiro(message, state)
-    except ValueError:
-        await message.answer("⚠️ Valor inválido. Digite apenas números e ponto (Ex: 500.00):", reply_markup=teclado_cancelar)
-
 teclado_menu_achadinhos = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Nicho ➕"), KeyboardButton(text="Remover Nicho 🗑️")],
