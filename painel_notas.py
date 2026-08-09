@@ -297,68 +297,6 @@ async def iniciar_painel_notas(message: types.Message, state: FSMContext):
     await state.set_state(PainelNotasFluxo.menu_principal)
 
 @router.message(PainelNotasFluxo.menu_principal)
-async def processar_menu_notas(message: types.Message, state: FSMContext):
-    opcao = message.text.strip()
-    
-    if "Iniciar Envios" in opcao:
-        texto = (
-            "🧾 <b>Disparador Automático de Notas Fiscais</b>\n\n"
-            "Para iniciar, por favor envie o arquivo <b>CSV extraído da Shopee</b> contendo as comissões e os e-mails dos lojistas."
-        )
-        await message.answer(texto, reply_markup=teclado_notas_cancelar, parse_mode="HTML")
-        await state.set_state(PainelNotasFluxo.aguardando_csv)
-        
-    elif "Filtro Anti-Spam" in opcao:
-        global FILTRO_ANTI_SPAM
-        FILTRO_ANTI_SPAM = not FILTRO_ANTI_SPAM
-        
-        estado_texto = "ATIVADO ✅" if FILTRO_ANTI_SPAM else "DESATIVADO ⚠️ (Cuidado com duplicatas)"
-        if EXIBIR_LOGS: logger.info(f"⚙️ Alternância de segurança: O Filtro Anti-Spam foi alterado para {FILTRO_ANTI_SPAM}.")
-        
-        await message.answer(f"⚙️ O Filtro de Histórico foi <b>{estado_texto}</b>.", reply_markup=obter_teclado_menu_notas(), parse_mode="HTML")
-        
-    elif "Informações" in opcao:
-        if EXIBIR_LOGS: logger.info("🔐 Consultando credenciais seguras no .env.")
-        
-        brevo_link = "https://app.brevo.com/"
-        brevo_login = "rnm.notas@gmail.com"
-        brevo_senha = os.getenv('BREVO_SENHA', 'Não configurada')
-        
-        gmail_link = "https://mail.google.com/"
-        gmail_login = "rnm.notas@gmail.com"
-        gmail_senha = os.getenv('GMAIL_SENHA', 'Não configurada')
-        
-        texto = (
-            "🔐 <b>Informações de Acesso (Privado)</b>\n\n"
-            "✉️ <b>Plataforma Brevo (Disparos API):</b>\n"
-            f"🔗 <b>Link:</b> {brevo_link}\n"
-            f"👤 <b>Login:</b> <code>{brevo_login}</code>\n"
-            f"🔑 <b>Senha:</b> <tg-spoiler>{brevo_senha}</tg-spoiler>\n\n"
-            "📧 <b>Conta Gmail (E-mail Remetente):</b>\n"
-            f"🔗 <b>Link:</b> {gmail_link}\n"
-            f"👤 <b>Login:</b> <code>{gmail_login}</code>\n"
-            f"🔑 <b>Senha:</b> <tg-spoiler>{gmail_senha}</tg-spoiler>\n\n"
-            "<i>(Toque nas senhas para revelá-las ou nos logins para copiar)</i>"
-        )
-        await message.answer(texto, parse_mode="HTML")
-        
-    elif "Voltar" in opcao:
-        if EXIBIR_LOGS: logger.info("🔙 Retornando à gaveta de Outros Canais de forma isolada.")
-        teclado_outros = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
-                [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
-                [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Disparador de Notas 🧾")],
-                [KeyboardButton(text="Voltar ao Início 🔙")]
-            ],
-            resize_keyboard=True,
-            is_persistent=True
-        )
-        await message.answer("Retornando ao painel central...", reply_markup=teclado_outros)
-        await state.clear()
-        
-    else:
-        await message.answer("⚠️ Por favor, escolha uma das opções utilizando os botões do teclado.")
 
 @router.message(PainelNotasFluxo.aguardando_csv, F.document)
 async def receber_csv(message: types.Message, state: FSMContext):
