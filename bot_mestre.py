@@ -91,6 +91,25 @@ def inicializar_banco_sqlite():
         )
     ''')
     
+    # 5. Tabela de Despesas Operacionais (Centro Financeiro)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS financeiro_despesas (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT,
+            valor REAL,
+            data_registro TEXT
+        )
+    ''')
+    
+    # 6. Tabela de Histórico de Saques (Centro Financeiro)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS financeiro_saques (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            valor REAL,
+            data_registro TEXT
+        )
+    ''')
+    
     conexao.commit()
     conexao.close()
     if EXIBIR_LOGS: logger.info("✅ Estrutura SQLite blindada e pronta para receber operações de leitura/escrita.")
@@ -238,6 +257,16 @@ class ConfigRotinaEspiao(StatesGroup):
     aguardando_intervalo_espiao = State()
     aguardando_modo = State()
     aguardando_confirmacao_tempo = State() # ✅ NOVO
+
+# --- MÁQUINA DE ESTADOS DO CENTRO FINANCEIRO ---
+class FinanceiroFluxo(StatesGroup):
+    menu_principal = State()
+    aguardando_nome_despesa = State()
+    aguardando_valor_despesa = State()
+    aguardando_exclusao_despesa = State()
+    aguardando_valor_imposto = State()
+    aguardando_valor_saque = State()
+    aguardando_exclusao_saque = State()
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -397,8 +426,9 @@ teclado_outros_canais = obter_teclado_outros_canais()
 def obter_teclado_centro_financeiro():
     return ReplyKeyboardMarkup(
         keyboard=[
+            [KeyboardButton(text="Balanço e DRE 📈"), KeyboardButton(text="Gestão de Custos 📉")],
+            [KeyboardButton(text="Provisão de Impostos 🏛️"), KeyboardButton(text="Fluxo de Caixa (Saques) 🏦")],
             [KeyboardButton(text="Disparador de Notas 🧾")],
-            # Futuramente você pode adicionar outros botões financeiros aqui
             [KeyboardButton(text="Voltar ao Início 🔙")]
         ],
         resize_keyboard=True,
@@ -410,7 +440,8 @@ async def menu_centro_financeiro(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     if EXIBIR_LOGS: logger.info("💸 Acessando a gaveta do Centro Financeiro.")
-    await message.answer("💸 <b>Centro Financeiro</b>\nSelecione a ferramenta desejada:", reply_markup=obter_teclado_centro_financeiro(), parse_mode="HTML")
+    await message.answer("💸 <b>Centro Financeiro</b>\nSelecione a ferramenta de gestão desejada:", reply_markup=obter_teclado_centro_financeiro(), parse_mode="HTML")
+    await state.set_state(FinanceiroFluxo.menu_principal)
 
 teclado_menu_achadinhos = ReplyKeyboardMarkup(
     keyboard=[
