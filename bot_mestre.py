@@ -267,6 +267,7 @@ class FinanceiroFluxo(StatesGroup):
     aguardando_valor_imposto = State()
     aguardando_valor_saque = State()
     aguardando_exclusao_saque = State()
+    aguardando_saldo_inicial = State() # ✅ ADICIONADO AQUI
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -428,7 +429,7 @@ def obter_teclado_centro_financeiro():
         keyboard=[
             [KeyboardButton(text="Balanço e DRE 📈"), KeyboardButton(text="Gestão de Custos 📉")],
             [KeyboardButton(text="Provisão de Impostos 🏛️"), KeyboardButton(text="Fluxo de Caixa (Saques) 🏦")],
-            [KeyboardButton(text="Disparador de Notas 🧾")],
+            [KeyboardButton(text="Saldo Inicial Mensal 💰"), KeyboardButton(text="Disparador de Notas 🧾")],
             [KeyboardButton(text="Voltar ao Início 🔙")]
         ],
         resize_keyboard=True,
@@ -736,64 +737,73 @@ async def processar_remocao_saque(message: types.Message, state: FSMContext):
 @dp.message(FinanceiroFluxo.menu_principal, F.text == "Balanço e DRE 📈")
 async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     msg_status = await message.answer("📈 Consultando a Shopee e reestruturando o Balanço... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("📊 Compilando DRE a partir da API (Últimos 30 Dias) com divisão Caixa vs Competência...")
+    if EXIBIR_LOGS: logger.info("📊 Compilando DRE a partir da API (Mês Atual) com divisão Caixa vs Competência...")
     
-    # 1. Puxa os dados FRESCOS da API a cada clique (Últimos 30 dias reais)
-    conversoes = await buscar_dados_financeiros_shopee(30)
+    # 1. Puxamos 90 dias da API, mas vamos filtrar apenas o que nasceu neste mês
+    conversoes = await buscar_dados_financeiros_shopee(90)
     historico_limpo = processar_e_salvar_pedidos_api(conversoes)
     
-    # --- VISÃO 1: DESEMPENHO DE VENDAS (ÚLTIMOS 30 DIAS) ---
-    # Somamos tudo que a API encontrou na janela de 30 dias, sem cortar no dia 1º
-    aprovado_30d = sum(v["aprovado"] for k, v in historico_limpo.items())
-    pendente_30d = sum(v["pendente"] for k, v in historico_limpo.items())
-    faturamento_30d = aprovado_30d + pendente_30d
+    hoje = datetime.now(fuso_horario)
+    mes_atual_str = hoje.strftime("%Y-%m")
+    
+    # --- VISÃO 1: DESEMPENHO DE VENDAS DO MÊS ATUAL ---
+    aprovado_mes_api = sum(v["aprovado"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
+    pendente_mes_api = sum(v["pendente"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
+    faturamento_mes_api = aprovado_mes_api + pendente_mes_api
     
     # 2. Resgata Variáveis do Banco de Dados
     taxa_imposto = ler_config_bd("imposto_taxa", 6.0)
     
+    # Mágica do Auto-Reset: Só usa o saldo inicial se ele for do mês atual
+    dados_saldo = ler_config_bd("saldo_inicial_mes", {"mes": "", "valor": 0.0})
+    saldo_inicial = dados_saldo["valor"] if dados_saldo["mes"] == mes_atual_str else 0.0
+    
     conexao = sqlite3.connect("banco_dados.db")
     cursor = conexao.cursor()
     
-    # Custos Operacionais
     cursor.execute("SELECT SUM(valor) FROM financeiro_despesas")
     total_custos_db = cursor.fetchone()[0]
     total_custos = float(total_custos_db) if total_custos_db else 0.0
     
-    # Dinheiro Sacado (Fluxo de Caixa Real)
     cursor.execute("SELECT SUM(valor) FROM financeiro_saques")
     total_sacado_db = cursor.fetchone()[0]
     total_sacado = float(total_sacado_db) if total_sacado_db else 0.0
     
     conexao.close()
     
-    # --- VISÃO 2: CAIXA REAL (DINHEIRO NA MÃO) ---
-    # O dinheiro que realmente existe disponível para saque na Shopee
-    saldo_shopee = aprovado_30d - total_sacado
+    # --- VISÃO 2: CAIXA REAL (SOMA DO PASSADO COM O PRESENTE) ---
+    caixa_total_aprovado = saldo_inicial + aprovado_mes_api
+    saldo_shopee = caixa_total_aprovado - total_sacado
     
-    # Adicionamos a margem de segurança de 1 dólar/real para arredondamentos flutuantes de API
     if saldo_shopee < 1.00: 
         saldo_shopee = 0.0
         
-    # A MÁGICA: Deduz impostos e custos fixos APENAS do dinheiro real que você já tem garantido!
     imposto_real = saldo_shopee * (taxa_imposto / 100)
     lucro_livre_real = saldo_shopee - imposto_real - total_custos
     
     # 5. Formatação do Texto (DRE)
     def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
+    MESES_PT = {
+        "01": "Janeiro", "02": "Fevereiro", "03": "Março", "04": "Abril",
+        "05": "Maio", "06": "Junho", "07": "Julho", "08": "Agosto",
+        "09": "Setembro", "10": "Outubro", "11": "Novembro", "12": "Dezembro"
+    }
+    nome_mes = MESES_PT.get(hoje.strftime('%m'), "Mês Atual").upper()
+    
     texto_dre = (
-        f"📊 <b>Balanço Financeiro Global</b>\n\n"
+        f"📊 <b>Balanço Financeiro Global | {nome_mes}</b>\n\n"
         
-        f"<b>1. DESEMPENHO (ÚLTIMOS 30 DIAS)</b>\n"
-        f"<i>(Avalia a sua performance de vendas recente, somando tudo que a API encontrou)</i>\n"
-        f"   🛒 Volume Gerado: <b>R$ {f_br(faturamento_30d)}</b>\n"
-        f"   └ <i>Confirmado: R$ {f_br(aprovado_30d)}</i>\n"
-        f"   └ <i>Pendente: R$ {f_br(pendente_30d)}</i>\n\n"
+        f"<b>1. DESEMPENHO (Competência da API)</b>\n"
+        f"<i>(Vendas ocorridas puramente dentro do mês de {nome_mes})</i>\n"
+        f"   🛒 Volume Gerado: <b>R$ {f_br(faturamento_mes_api)}</b>\n"
+        f"   └ <i>Confirmado: R$ {f_br(aprovado_mes_api)}</i>\n"
+        f"   └ <i>Pendente: R$ {f_br(pendente_mes_api)}</i>\n\n"
         
         f"━━━━━━━━━━━━━━━━━━\n"
-        f"<b>2. CAIXA REAL DISPONÍVEL (O que importa)</b>\n"
-        f"<i>(Baseado exclusivamente nas comissões confirmadas que estão aguardando saque)</i>\n\n"
-        f"   💰 <b>Saldo Preso na Shopee: R$ {f_br(saldo_shopee)}</b>\n\n"
+        f"<b>2. CAIXA REAL (Situação do Dinheiro)</b>\n"
+        f"<i>(Saldo herdado + O que já confirmou este mês)</i>\n\n"
+        f"   💰 <b>Preso na Shopee: R$ {f_br(saldo_shopee)}</b>\n\n"
         
         f"   <b>Deduções Imediatas:</b>\n"
         f"   🏛️ Provisão Imposto ({taxa_imposto}%): <b>- R$ {f_br(imposto_real)}</b>\n"
@@ -802,15 +812,59 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     
     if lucro_livre_real >= 0:
         texto_dre += f"   ✅ <b>LUCRO LIVRE NO CAIXA: R$ {f_br(lucro_livre_real)}</b>\n"
-        texto_dre += f"   <i>(Este é o dinheiro real que vai sobrar no seu bolso se você sacar tudo hoje e pagar as contas).</i>\n\n"
+        texto_dre += f"   <i>(Dinheiro limpo que sobra se você sacar tudo hoje).</i>\n\n"
     else:
         texto_dre += f"   🛑 <b>DÉFICIT NO CAIXA: R$ {f_br(lucro_livre_real)}</b>\n"
-        texto_dre += f"   <i>(O saldo aprovado atual não cobre as suas despesas fixas. Você precisará gerar mais vendas).</i>\n\n"
+        texto_dre += f"   <i>(O saldo atual não cobre as suas despesas fixas).</i>\n\n"
         
-    texto_dre += f"💸 Saldo histórico já sacado: R$ {f_br(total_sacado)}\n"
+    texto_dre += f"💸 Saldo já sacado: R$ {f_br(total_sacado)}\n"
     
     await msg_status.delete()
     await message.answer(texto_dre, parse_mode="HTML")
+
+# --- 5. SALDO INICIAL MENSAL (CORREÇÃO DE CAIXA) ---
+@dp.message(FinanceiroFluxo.menu_principal, F.text == "Saldo Inicial Mensal 💰")
+async def pedir_saldo_inicial(message: types.Message, state: FSMContext):
+    dados_saldo = ler_config_bd("saldo_inicial_mes", {"mes": "", "valor": 0.0})
+    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m")
+    
+    # Zera visualmente se for um mês novo
+    valor_atual = dados_saldo["valor"] if dados_saldo["mes"] == hoje_str else 0.0
+    valor_br = f"{valor_atual:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    
+    texto = (
+        f"💰 <b>Saldo Inicial do Mês (Sincronizador)</b>\n\n"
+        f"Valor base deste mês: <b>R$ {valor_br}</b>\n\n"
+        f"Para igualar o robô ao Aplicativo da Shopee, digite o valor de comissões que vieram de meses passados.\n"
+        f"<i>(Dica: Pegue o valor 'A Receber' do App e subtraia o que o bot já exibe como 'Confirmado' de Agosto)</i>\n\n"
+        f"Digite o valor (Exemplo: <code>621.03</code>):"
+    )
+    await message.answer(texto, reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(FinanceiroFluxo.aguardando_saldo_inicial)
+
+@dp.message(FinanceiroFluxo.aguardando_saldo_inicial)
+async def salvar_saldo_inicial(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await menu_centro_financeiro(message, state)
+        return
+        
+    texto_valor = message.text.strip().replace("R$", "").replace(" ", "").replace(",", ".")
+    try:
+        valor = float(texto_valor)
+        mes_atual = datetime.now(fuso_horario).strftime("%Y-%m")
+        
+        # Salva o valor atrelado ao mês atual para que ele se auto-destrua no mês que vem
+        salvar_config_bd("saldo_inicial_mes", {"mes": mes_atual, "valor": valor})
+        
+        if EXIBIR_LOGS: logger.info(f"💰 Saldo inicial do mês {mes_atual} definido para R$ {valor}.")
+        
+        valor_br = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        await message.answer(f"✅ <b>Saldo Inicial salvo!</b>\nO valor de R$ {valor_br} será a base do DRE deste mês.", parse_mode="HTML")
+        await menu_centro_financeiro(message, state)
+    except ValueError:
+        await message.answer("⚠️ Valor inválido. Digite apenas números e ponto (Ex: 621.03):", reply_markup=teclado_cancelar)
 
 teclado_menu_achadinhos = ReplyKeyboardMarkup(
     keyboard=[
