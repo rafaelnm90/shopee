@@ -122,7 +122,7 @@ async def enviar_email_brevo(para_email, para_nome, assunto, corpo_html, caminho
             return resposta.status, texto_resposta
 
 async def processar_fila_envios(chat_id=None, message_id=None):
-    global bot_instance # 🛡️ NOVO: Garante o uso do bot_instance global
+    global bot_instance 
     if EXIBIR_LOGS: logger.info("🚀 Iniciando esteira de disparos de notas fiscais...")
     
     conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -140,9 +140,6 @@ async def processar_fila_envios(chat_id=None, message_id=None):
     erros = 0
     falhas_etapa = []
     
-    # Inicia a string de log que será atualizada a cada passo
-    log_dinamico = f"🚀 <b>Iniciando Motor de Envios</b>\nProcessando {total_notas} notas pendentes...\n\n"
-    
     pasta_extracao = None
     if pendentes:
         pasta_extracao = os.path.dirname(pendentes[0]["caminho_pdf"])
@@ -153,24 +150,18 @@ async def processar_fila_envios(chat_id=None, message_id=None):
         email = item["email_destino"]
         pdf = item["caminho_pdf"]
         
-        # Resgata o valor (compatibilidade com registros antigos caso a coluna esteja vazia)
+        # Resgata o valor
         valor = item["valor"] if "valor" in item.keys() and item["valor"] else "0,00"
         
-        nome_arquivo = os.path.basename(pdf)
-        
-        log_dinamico += f"⏳ ({idx}/{total_notas}) Enviando para: {loja}...\n"
-        
+        # 🔥 MÁGICA DA CONTAGEM DINÂMICA AQUI 🔥
+        # Edita a mensagem na tela em tempo real igual ao teste de IA
         if chat_id and message_id and bot_instance:
             try:
-                # O limite do Telegram é 4096 caracteres. Para evitar erros, limitamos o texto.
-                # Para garantir que as últimas atualizações apareçam se o texto ficar muito longo, mantemos o final.
-                texto_exibicao = log_dinamico
-                if len(texto_exibicao) > 4000:
-                    texto_exibicao = "...\n" + log_dinamico[-3990:]
-                
-                await bot_instance.edit_message_text(texto_exibicao, chat_id=chat_id, message_id=message_id, parse_mode="HTML")
+                status_dinamico = f"🚀 <i>Disparando notas fiscais...</i>\n⏳ Enviando nota ({idx}/{total_notas}): <code>{loja}</code>"
+                await bot_instance.edit_message_text(status_dinamico, chat_id=chat_id, message_id=message_id, parse_mode="HTML")
             except Exception: pass
 
+        # Verificação do Limite Diário
         if envios_realizados >= LIMITE_DIARIO:
             if EXIBIR_LOGS: logger.warning(f"⏳ Limite diário atingido. Programando retomada para {PAUSA_HORAS} horas.")
             agora = datetime.now()
@@ -180,12 +171,6 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             assunto_admin = "[Sistema de Notas Shopee] Aviso de Pausa: Etapa Concluída"
             corpo_admin = f"<p>O limite diário de {LIMITE_DIARIO} foi atingido.</p><p>O script foi programado para retomar a próxima etapa em {retomada.strftime('%d/%m/%Y %H:%M')}.</p><p>Envios realizados nesta etapa: {envios_realizados}</p>"
             
-            log_dinamico += f"\n⏸️ <b>PAUSA DE SEGURANÇA:</b> Limite de {LIMITE_DIARIO} atingido. Retomada em {retomada.strftime('%d/%m às %H:%M')}."
-            
-            if chat_id and message_id and bot_instance:
-                try: await bot_instance.edit_message_text(log_dinamico[:4000], chat_id=chat_id, message_id=message_id, parse_mode="HTML")
-                except Exception: pass
-            
             if falhas_etapa:
                 corpo_admin += "<p><b>ATENÇÃO: Foram registrados os seguintes erros:</b></p><ul>"
                 for f in falhas_etapa: corpo_admin += f"<li>{f}</li>"
@@ -193,6 +178,12 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             
             await enviar_email_brevo(EMAIL_ADMIN, "Administrador", assunto_admin, corpo_admin)
             conexao.close()
+            
+            # Edita a interface informando a pausa
+            if chat_id and message_id and bot_instance:
+                try: 
+                    await bot_instance.edit_message_text(f"⏸️ <b>PAUSA DE SEGURANÇA:</b> Limite de {LIMITE_DIARIO} atingido.\nRetomada automática programada para {retomada.strftime('%d/%m às %H:%M')}.", chat_id=chat_id, message_id=message_id, parse_mode="HTML")
+                except Exception: pass
             return
 
         assunto = f"Sua Nota Fiscal de Comissão Shopee - {loja}"
@@ -211,26 +202,14 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             if status_api in [200, 201]:
                 cursor.execute("UPDATE fila_notas SET status = 'ENVIADO' WHERE id = ?", (id_registro,))
                 envios_realizados += 1
-                
-                # Remove a linha "Enviando..." e adiciona o resultado
-                log_dinamico = log_dinamico.replace(f"⏳ ({idx}/{total_notas}) Enviando para: {loja}...\n", "")
-                log_dinamico += f"🟢 Concluído | {loja}\n"
-                
                 if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Nota enviada para {loja} ({email}).")
-                
-                try:
-                    os.remove(pdf)
+                try: os.remove(pdf)
                 except Exception: pass
             else:
                 erro_msg = f"Erro API {status_api}: {resposta_api}"
                 cursor.execute("UPDATE fila_notas SET status = 'ERRO', motivo_erro = ? WHERE id = ?", (erro_msg, id_registro))
                 erros += 1
                 falhas_etapa.append(f"⚠️ Falha ao processar loja {loja}: {erro_msg}")
-                
-                # Remove a linha "Enviando..." e adiciona o resultado
-                log_dinamico = log_dinamico.replace(f"⏳ ({idx}/{total_notas}) Enviando para: {loja}...\n", "")
-                log_dinamico += f"🔴 Erro API | {loja}\n"
-                
                 if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar para {loja}: {erro_msg}")
                 
         except Exception as e:
@@ -238,25 +217,10 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             cursor.execute("UPDATE fila_notas SET status = 'ERRO', motivo_erro = ? WHERE id = ?", (erro_msg, id_registro))
             erros += 1
             falhas_etapa.append(f"⚠️ Erro de rede/crítico na loja {loja}: {e}")
-            
-            # Remove a linha "Enviando..." e adiciona o resultado
-            log_dinamico = log_dinamico.replace(f"⏳ ({idx}/{total_notas}) Enviando para: {loja}...\n", "")
-            log_dinamico += f"🔴 Erro Interno | {loja}\n"
-            
             if EXIBIR_LOGS: logger.error(f"❌ Erro Crítico ao enviar para {loja}: {e}")
             
         conexao.commit()
-        
-        # Atualiza a interface com o resultado da nota processada
-        if chat_id and message_id and bot_instance:
-             try:
-                 texto_exibicao = log_dinamico
-                 if len(texto_exibicao) > 4000:
-                     texto_exibicao = "...\n" + log_dinamico[-3990:]
-                 await bot_instance.edit_message_text(texto_exibicao, chat_id=chat_id, message_id=message_id, parse_mode="HTML")
-             except Exception: pass
-             
-        await asyncio.sleep(1)
+        await asyncio.sleep(1) # Intervalo mantido para evitar Rate Limit (Flood)
 
     conexao.close()
     
@@ -265,18 +229,20 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             shutil.rmtree(pasta_extracao)
     except Exception: pass
     
-    # Finaliza o log
-    log_dinamico += f"\n🏁 <b>Envios Concluídos!</b>\n✅ Sucessos: <b>{envios_realizados}</b>\n❌ Erros: <b>{erros}</b>\n"
-    
+    # --- 🔥 SUBSTITUIÇÃO FINAL APÓS O LOOP 🔥 ---
     if chat_id and message_id and bot_instance:
         try:
-             texto_exibicao = log_dinamico
-             if len(texto_exibicao) > 4000:
-                  texto_exibicao = "...\n" + log_dinamico[-3990:]
-             # Edita a mensagem pela última vez com o resumo final da etapa
-             await bot_instance.edit_message_text(texto_exibicao, chat_id=chat_id, message_id=message_id, parse_mode="HTML")
+            texto_conclusao = (
+                f"✅ <b>Operação finalizada!</b>\n"
+                f"Todos os e-mails foram processados e a interface foi liberada.\n\n"
+                f"📊 <b>Resumo:</b>\n"
+                f"✅ Sucessos: <b>{envios_realizados}</b>\n"
+                f"❌ Erros: <b>{erros}</b>"
+            )
+            await bot_instance.edit_message_text(texto_conclusao, chat_id=chat_id, message_id=message_id, parse_mode="HTML")
         except Exception: pass
     
+    # Relatório Admin via Email
     assunto_final = "[Sistema de Notas Shopee] Processo Totalmente Concluído"
     corpo_final = f"<p>Todas as notas pendentes na fila foram processadas.</p><p>Envios realizados nesta etapa: {envios_realizados}</p>"
     if falhas_etapa:
@@ -286,7 +252,7 @@ async def processar_fila_envios(chat_id=None, message_id=None):
         
     await enviar_email_brevo(EMAIL_ADMIN, "Administrador", assunto_final, corpo_final)
     
-    # 🔙 Devolve a interface ao usuário com o teclado original do painel central
+    # Devolve a interface ao usuário com o teclado original do painel central
     if chat_id and message_id and bot_instance:
         teclado_outros = ReplyKeyboardMarkup(
             keyboard=[
