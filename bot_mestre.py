@@ -735,22 +735,18 @@ async def processar_remocao_saque(message: types.Message, state: FSMContext):
 # --- 4. BALANÇO E DRE (INTELIGÊNCIA CONTÁBIL) 📈 ---
 @dp.message(FinanceiroFluxo.menu_principal, F.text == "Balanço e DRE 📈")
 async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
-    msg_status = await message.answer("📈 Lendo a base de dados financeira e reestruturando o Balanço... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("📊 Compilando DRE a partir do banco de dados local com divisão Caixa vs Competência...")
+    msg_status = await message.answer("📈 Consultando a Shopee e reestruturando o Balanço... Aguarde ⏳")
+    if EXIBIR_LOGS: logger.info("📊 Compilando DRE a partir da API (Últimos 30 Dias) com divisão Caixa vs Competência...")
     
-    # 1. Puxa os dados direto do banco de dados local
-    historico_limpo = ler_historico_financeiro()
+    # 1. Puxa os dados FRESCOS da API a cada clique (Últimos 30 dias reais)
+    conversoes = await buscar_dados_financeiros_shopee(30)
+    historico_limpo = processar_e_salvar_pedidos_api(conversoes)
     
-    hoje = datetime.now(fuso_horario)
-    mes_atual_str = hoje.strftime("%Y-%m")
-    
-    # --- VISÃO 1: DESEMPENHO DE VENDAS DO MÊS (COMPETÊNCIA) ---
-    aprovado_mes = sum(v["aprovado"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    pendente_mes = sum(v["pendente"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    faturamento_mes = aprovado_mes + pendente_mes
-    
-    # --- VISÃO 2: CAIXA REAL (DINHEIRO NA MÃO) ---
-    total_aprovado_historico = sum(v["aprovado"] for k, v in historico_limpo.items())
+    # --- VISÃO 1: DESEMPENHO DE VENDAS (ÚLTIMOS 30 DIAS) ---
+    # Somamos tudo que a API encontrou na janela de 30 dias, sem cortar no dia 1º
+    aprovado_30d = sum(v["aprovado"] for k, v in historico_limpo.items())
+    pendente_30d = sum(v["pendente"] for k, v in historico_limpo.items())
+    faturamento_30d = aprovado_30d + pendente_30d
     
     # 2. Resgata Variáveis do Banco de Dados
     taxa_imposto = ler_config_bd("imposto_taxa", 6.0)
@@ -770,10 +766,11 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     
     conexao.close()
     
+    # --- VISÃO 2: CAIXA REAL (DINHEIRO NA MÃO) ---
     # O dinheiro que realmente existe disponível para saque na Shopee
-    saldo_shopee = total_aprovado_historico - total_sacado
+    saldo_shopee = aprovado_30d - total_sacado
     
-    # Adicionamos uma margem de segurança de 1 dólar/real para arredondamentos de API
+    # Adicionamos a margem de segurança de 1 dólar/real para arredondamentos flutuantes de API
     if saldo_shopee < 1.00: 
         saldo_shopee = 0.0
         
@@ -784,25 +781,18 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     # 5. Formatação do Texto (DRE)
     def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
-    MESES_PT = {
-        "01": "Janeiro", "02": "Fevereiro", "03": "Março", "04": "Abril",
-        "05": "Maio", "06": "Junho", "07": "Julho", "08": "Agosto",
-        "09": "Setembro", "10": "Outubro", "11": "Novembro", "12": "Dezembro"
-    }
-    nome_mes = MESES_PT.get(hoje.strftime('%m'), "Mês Atual").upper()
-    
     texto_dre = (
         f"📊 <b>Balanço Financeiro Global</b>\n\n"
         
-        f"<b>1. DESEMPENHO DE {nome_mes} (Competência)</b>\n"
-        f"<i>(Avalia a sua performance de vendas no mês atual, independente de quando a Shopee vai pagar)</i>\n"
-        f"   🛒 Volume Gerado: <b>R$ {f_br(faturamento_mes)}</b>\n"
-        f"   └ <i>Confirmado: R$ {f_br(aprovado_mes)}</i>\n"
-        f"   └ <i>Pendente: R$ {f_br(pendente_mes)}</i>\n\n"
+        f"<b>1. DESEMPENHO (ÚLTIMOS 30 DIAS)</b>\n"
+        f"<i>(Avalia a sua performance de vendas recente, somando tudo que a API encontrou)</i>\n"
+        f"   🛒 Volume Gerado: <b>R$ {f_br(faturamento_30d)}</b>\n"
+        f"   └ <i>Confirmado: R$ {f_br(aprovado_30d)}</i>\n"
+        f"   └ <i>Pendente: R$ {f_br(pendente_30d)}</i>\n\n"
         
         f"━━━━━━━━━━━━━━━━━━\n"
         f"<b>2. CAIXA REAL DISPONÍVEL (O que importa)</b>\n"
-        f"<i>(Baseado exclusivamente em comissões já confirmadas que estão aguardando o seu saque)</i>\n\n"
+        f"<i>(Baseado exclusivamente nas comissões confirmadas que estão aguardando saque)</i>\n\n"
         f"   💰 <b>Saldo Preso na Shopee: R$ {f_br(saldo_shopee)}</b>\n\n"
         
         f"   <b>Deduções Imediatas:</b>\n"
