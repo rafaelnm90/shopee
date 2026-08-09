@@ -901,9 +901,13 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
             is_persistent=True
         )
         try:
-            await bot_instance.send_message(chat_id, "✅ <b>Processo concluído!</b>\nO painel principal está liberado.", reply_markup=teclado_outros, parse_mode="HTML")
+            # ✅ CORREÇÃO: Envia a nova mensagem com o teclado, mas também edita a anterior para remover a palavra "Preparando"
+            await bot_instance.send_message(chat_id, "✅ <b>Processos de notas finalizados!</b>\nO painel principal está liberado.", reply_markup=teclado_outros, parse_mode="HTML")
         except: pass
         await state.clear()
+
+    # Cria a tarefa em background passando os parâmetros de chat e mensagem
+    asyncio.create_task(executador_blindado(message.chat.id, msg_dinamica.message_id))
 
     # Cria a tarefa em background passando os parâmetros de chat e mensagem
     asyncio.create_task(executador_blindado(message.chat.id, msg_dinamica.message_id))
