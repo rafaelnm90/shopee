@@ -433,10 +433,10 @@ teclado_outros_canais = obter_teclado_outros_canais()
 def obter_teclado_centro_financeiro():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Balanço e DRE 📈"), KeyboardButton(text="Gestão de Custos 📉")],
+            [KeyboardButton(text="Extrato Rápido 📜"), KeyboardButton(text="Gestão de Custos 📉")],
             [KeyboardButton(text="Provisão de Impostos 🏛️"), KeyboardButton(text="Fluxo de Caixa 🏦")],
-            [KeyboardButton(text="Definir Saldo (App) 💰"), KeyboardButton(text="Extrato Rápido 📜")],
-            [KeyboardButton(text="Disparador de Notas 🧾"), KeyboardButton(text="Voltar ao Início 🔙")]
+            [KeyboardButton(text="Definir Saldo (App) 💰"), KeyboardButton(text="Disparador de Notas 🧾")],
+            [KeyboardButton(text="Voltar ao Início 🔙")]
         ],
         resize_keyboard=True,
         is_persistent=True
@@ -709,71 +709,6 @@ async def salvar_saldo_shopee(message: types.Message, state: FSMContext):
         await menu_centro_financeiro(message, state)
     except ValueError:
         await message.answer("⚠️ Valor inválido. Digite apenas números e ponto (Ex: 746.29):", reply_markup=teclado_cancelar)
-
-# --- 4. BALANÇO E DRE (INTELIGÊNCIA CONTÁBIL) 📈 ---
-@dp.message(FinanceiroFluxo.menu_principal, F.text == "Balanço e DRE 📈")
-async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
-    msg_status = await message.answer("📈 Consultando a Shopee e processando Caixa... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("📊 Compilando DRE a partir do Ledger...")
-    
-    # Atualiza a catraca da API nos bastidores para puxar novas confirmações
-    conversoes = await buscar_dados_financeiros_shopee(30)
-    if conversoes:
-        processar_e_salvar_pedidos_api(conversoes)
-    
-    hoje = datetime.now(fuso_horario)
-    mes_atual_str = hoje.strftime("%Y-%m")
-    
-    # VISÃO ÚNICA: CAIXA REAL (Ledger Automático)
-    saldo_shopee = float(ler_config_bd("saldo_caixa_shopee", 0.0))
-    taxa_imposto = ler_config_bd("imposto_taxa", 6.0)
-    
-    conexao = sqlite3.connect("banco_dados.db")
-    cursor = conexao.cursor()
-    
-    cursor.execute("SELECT SUM(valor) FROM financeiro_despesas WHERE tipo = 'mensal' OR (tipo = 'pontual' AND data_registro LIKE ?)", (f"{mes_atual_str}%",))
-    total_custos_db = cursor.fetchone()[0]
-    total_custos = float(total_custos_db) if total_custos_db else 0.0
-    
-    conexao.close()
-    
-    if saldo_shopee < 1.00: 
-        saldo_shopee = 0.0
-        
-    imposto_real = saldo_shopee * (taxa_imposto / 100)
-    lucro_livre_real = saldo_shopee - imposto_real - total_custos
-    
-    def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    
-    MESES_PT = {
-        "01": "Janeiro", "02": "Fevereiro", "03": "Março", "04": "Abril",
-        "05": "Maio", "06": "Junho", "07": "Julho", "08": "Agosto",
-        "09": "Setembro", "10": "Outubro", "11": "Novembro", "12": "Dezembro"
-    }
-    nome_mes = MESES_PT.get(hoje.strftime('%m'), "Mês Atual").upper()
-    
-    texto_dre = (
-        f"📊 <b>Balanço Financeiro | {nome_mes}</b>\n\n"
-        
-        f"<b>LUCRO LÍQUIDO (Situação do Dinheiro)</b>\n"
-        f"<i>(O Saldo do Aplicativo atualizado em Tempo Real)</i>\n\n"
-        
-        f"   💰 <b>Preso na Shopee: R$ {f_br(saldo_shopee)}</b>\n\n"
-        
-        f"   <b>Deduções Imediatas:</b>\n"
-        f"   🏛️ Provisão Imposto ({taxa_imposto}%): <b>- R$ {f_br(imposto_real)}</b>\n"
-        f"   📉 Custos Cadastrados: <b>- R$ {f_br(total_custos)}</b>\n\n"
-    )
-    
-    if lucro_livre_real >= 0:
-        texto_dre += f"   ✅ <b>LUCRO LIVRE NO CAIXA: R$ {f_br(lucro_livre_real)}</b>\n"
-        texto_dre += f"   <i>(Dinheiro limpo que sobra se você liquidar o saldo hoje).</i>\n"
-    else:
-        texto_dre += f"   🛑 <b>DÉFICIT NO CAIXA: R$ {f_br(lucro_livre_real)}</b>\n"
-        texto_dre += f"   <i>(O saldo atual não cobre as suas despesas fixas).</i>\n"
-        
-    await msg_status.delete()
-    await message.answer(texto_dre, parse_mode="HTML")
 
 # --- 6. EXTRATO RÁPIDO (HISTÓRICO) 📜 ---
 @dp.message(FinanceiroFluxo.menu_principal, F.text == "Extrato Rápido 📜")
