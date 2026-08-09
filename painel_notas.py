@@ -150,11 +150,12 @@ async def processar_fila_envios(chat_id=None, message_id=None):
         email = item["email_destino"]
         pdf = item["caminho_pdf"]
         
-        # Resgata o valor
         valor = item["valor"] if "valor" in item.keys() and item["valor"] else "0,00"
         
-        # 🔥 MÁGICA DA CONTAGEM DINÂMICA AQUI 🔥
-        # Edita a mensagem na tela em tempo real igual ao teste de IA
+        # ---------------------------------------------------------
+        # 🔥 A MÁGICA DA CONTAGEM DINÂMICA (Igual ao bot_mestre.py)
+        # Substitui a mensagem antiga por uma linha limpa e curta
+        # ---------------------------------------------------------
         if chat_id and message_id and bot_instance:
             try:
                 status_dinamico = f"🚀 <i>Disparando notas fiscais...</i>\n⏳ Enviando nota ({idx}/{total_notas}): <code>{loja}</code>"
@@ -179,7 +180,6 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             await enviar_email_brevo(EMAIL_ADMIN, "Administrador", assunto_admin, corpo_admin)
             conexao.close()
             
-            # Edita a interface informando a pausa
             if chat_id and message_id and bot_instance:
                 try: 
                     await bot_instance.edit_message_text(f"⏸️ <b>PAUSA DE SEGURANÇA:</b> Limite de {LIMITE_DIARIO} atingido.\nRetomada automática programada para {retomada.strftime('%d/%m às %H:%M')}.", chat_id=chat_id, message_id=message_id, parse_mode="HTML")
@@ -194,15 +194,12 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             f"<p>Atenciosamente,<br><b>RNM Comércio e Intermediações LTDA</b></p>"
         )
         
-        if EXIBIR_LOGS: logger.info(f"⚙️ Processando envio para Loja: {loja} no valor de R$ {valor}...")
-        
         try:
             status_api, resposta_api = await enviar_email_brevo(email, loja, assunto, corpo, pdf)
             
             if status_api in [200, 201]:
                 cursor.execute("UPDATE fila_notas SET status = 'ENVIADO' WHERE id = ?", (id_registro,))
                 envios_realizados += 1
-                if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Nota enviada para {loja} ({email}).")
                 try: os.remove(pdf)
                 except Exception: pass
             else:
@@ -210,17 +207,15 @@ async def processar_fila_envios(chat_id=None, message_id=None):
                 cursor.execute("UPDATE fila_notas SET status = 'ERRO', motivo_erro = ? WHERE id = ?", (erro_msg, id_registro))
                 erros += 1
                 falhas_etapa.append(f"⚠️ Falha ao processar loja {loja}: {erro_msg}")
-                if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar para {loja}: {erro_msg}")
                 
         except Exception as e:
             erro_msg = f"Erro Interno: {e}"
             cursor.execute("UPDATE fila_notas SET status = 'ERRO', motivo_erro = ? WHERE id = ?", (erro_msg, id_registro))
             erros += 1
-            falhas_etapa.append(f"⚠️ Erro de rede/crítico na loja {loja}: {e}")
-            if EXIBIR_LOGS: logger.error(f"❌ Erro Crítico ao enviar para {loja}: {e}")
+            falhas_etapa.append(f"⚠️ Erro de rede na loja {loja}: {e}")
             
         conexao.commit()
-        await asyncio.sleep(1) # Intervalo mantido para evitar Rate Limit (Flood)
+        await asyncio.sleep(1) # Mantém uma cadência segura de 1 segundo entre envios
 
     conexao.close()
     
@@ -229,7 +224,10 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             shutil.rmtree(pasta_extracao)
     except Exception: pass
     
-    # --- 🔥 SUBSTITUIÇÃO FINAL APÓS O LOOP 🔥 ---
+    # ---------------------------------------------------------
+    # 🏁 SUBSTITUIÇÃO FINAL APÓS O LOOP
+    # Transforma o contador dinâmico no painel de resumo final
+    # ---------------------------------------------------------
     if chat_id and message_id and bot_instance:
         try:
             texto_conclusao = (
@@ -252,7 +250,7 @@ async def processar_fila_envios(chat_id=None, message_id=None):
         
     await enviar_email_brevo(EMAIL_ADMIN, "Administrador", assunto_final, corpo_final)
     
-    # Devolve a interface ao usuário com o teclado original do painel central
+    # Devolve a interface ao usuário com o teclado original
     if chat_id and message_id and bot_instance:
         teclado_outros = ReplyKeyboardMarkup(
             keyboard=[
