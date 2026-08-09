@@ -832,15 +832,27 @@ from aiogram.filters import Command
 async def forcar_importacao_historica(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     
-    msg_status = await message.answer("🔄 <b>Iniciando varredura histórica profunda...</b>\nIsso pode demorar alguns segundos, pois vou puxar a carga máxima permitida pela Shopee (Últimos 3 meses).", parse_mode="HTML")
+    msg_status = await message.answer("🔄 <b>Iniciando varredura histórica profunda...</b>\nComo a Shopee limita consultas gigantes, o robô fará 3 viagens no tempo (em fatias de 30 dias) para costurar os últimos 3 meses. Aguarde... ⏳", parse_mode="HTML")
     
-    # 1. Pede o limite MÁXIMO da API (90 dias)
-    conversoes = await buscar_dados_financeiros_shopee(90)
+    from datetime import timedelta
+    agora = datetime.now(fuso_horario)
+    sucessos = 0
     
-    if conversoes:
-        # 2. O motor interno vai olhar um por um e gravar no banco de dados
-        processar_e_salvar_pedidos_api(conversoes)
-        await msg_status.edit_text("✅ <b>Varredura Histórica Concluída!</b>\nO seu banco de dados local foi preenchido com a carga máxima de histórico (3 meses).\n\nVocê já pode ir ao <b>Centro Financeiro</b> e puxar o seu DRE novamente.", parse_mode="HTML")
+    # ⏱️ O robô faz 3 viagens no tempo para driblar o bloqueio da API
+    for i in range(3):
+        data_referencia = agora - timedelta(days=i*30)
+        
+        if EXIBIR_LOGS: logger.info(f"⏳ Puxando lote histórico {i+1}/3...")
+        conversoes = await buscar_dados_financeiros_shopee(30, data_referencia)
+        
+        if conversoes:
+            processar_e_salvar_pedidos_api(conversoes)
+            sucessos += 1
+            
+        await asyncio.sleep(2) # Pausa rápida para a Shopee não bloquear o bot
+        
+    if sucessos > 0:
+        await msg_status.edit_text("✅ <b>Varredura Histórica Concluída!</b>\nO seu banco de dados local foi preenchido com sucesso em lotes.\n\nVocê já pode ir ao <b>Centro Financeiro</b> e puxar o seu DRE atualizado.", parse_mode="HTML")
     else:
         await msg_status.edit_text("⚠️ A Shopee não retornou dados antigos ou ocorreu uma falha de conexão.")
 
@@ -2945,13 +2957,14 @@ def ler_banco_pedidos():
 def salvar_banco_pedidos(dados):
     salvar_config_bd("banco_pedidos", dados)
 
-async def buscar_dados_financeiros_shopee(dias_retroativos=30):
+async def buscar_dados_financeiros_shopee(dias_retroativos=30, data_base_final=None):
     if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
         if EXIBIR_LOGS: logger.warning("⏳ [API Shopee] Chaves financeiras ausentes no .env.")
         return None
         
     from datetime import timedelta
-    agora = datetime.now(fuso_horario)
+    # ⏱️ MÁGICA: Se passarmos uma data antiga, ele usa ela como ponto de partida!
+    agora = data_base_final if data_base_final else datetime.now(fuso_horario)
     inicio = agora - timedelta(days=dias_retroativos)
     
     start_ts = int(inicio.replace(hour=0, minute=0, second=0).timestamp())
