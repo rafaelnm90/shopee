@@ -52,9 +52,10 @@ class PainelNotasFluxo(StatesGroup):
     aguardando_zip = State()
     revisando_similares = State()
     pareamento_manual = State()
-    inspecionando_pdf_manual = State()  # Adicionado
+    inspecionando_pdf_manual = State()  
     aguardando_aprovacao = State()
-    inspecionando_pdf_final = State()   # Adicionado
+    inspecionando_pdf_final = State()   
+    enviando_notas = State() # 🛡️ NOVO: Estado de bloqueio total
 
 def obter_teclado_menu_notas():
     status_filtro = "LIGADO 🟢" if FILTRO_ANTI_SPAM else "DESLIGADO 🔴"
@@ -299,6 +300,11 @@ async def abortador_universal_notas(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("❌ Operação de notas abortada pelo usuário.")
     await message.answer("Operação cancelada. Retornando ao menu do disparador...", reply_markup=obter_teclado_menu_notas())
     await state.set_state(PainelNotasFluxo.menu_principal)
+
+# 🛡️ NOVO: Bloqueio total de botões enquanto as notas são enviadas
+@router.message(PainelNotasFluxo.enviando_notas)
+async def ignorar_durante_envio(message: types.Message):
+    await message.answer("⚠️ <b>Aguarde o fim do processo!</b>\nO robô está enviando as notas fiscais passo a passo. Nenhuma outra ação pode ser feita agora.", parse_mode="HTML")
 
 @router.message(F.text == "Disparador de Notas 🧾", StateFilter("*"))
 async def iniciar_painel_notas(message: types.Message, state: FSMContext):
@@ -864,30 +870,41 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
         await message.answer("Por favor, utilize os botões em ecrã para Aprovar Envio ✅, Ver PDF 👁️ ou Abortar ❌.")
         return
 
+    # 🛡️ TRAVA: Muda o estado imediatamente para bloquear a tela e impedir duplos cliques
+    await state.set_state(PainelNotasFluxo.enviando_notas)
+
     conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
     cursor = conexao.cursor()
     cursor.execute("UPDATE fila_notas SET status = 'PENDENTE' WHERE status = 'RASCUNHO'")
     conexao.commit()
     conexao.close()
     
+    # O teclado principal é removido imediatamente
     msg_dinamica = await message.answer("⏳ <b>Preparando o motor de envios...</b>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
     
-    if EXIBIR_LOGS: logger.info("⏰ Acionando motor de envio via Brevo.")
-    asyncio.create_task(processar_fila_envios(chat_id=message.chat.id, message_id=msg_dinamica.message_id))
+    if EXIBIR_LOGS: logger.info("⏰ Acionando motor de envio via Brevo em background blindado.")
     
-    if EXIBIR_LOGS: logger.info("🔙 Liberando a interface central após aprovação da fila.")
-    teclado_outros = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
-            [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
-            [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Disparador de Notas 🧾")],
-            [KeyboardButton(text="Voltar ao Início 🔙")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
-    await message.answer("O painel principal está liberado. A tabela acima será atualizada em tempo real.", reply_markup=teclado_outros)
-    await state.clear()
+    # Wrapper isolado para aguardar o fim do processo ANTES de liberar a interface
+    async def executador_blindado():
+        await processar_fila_envios(chat_id=message.chat.id, message_id=msg_dinamica.message_id)
+        
+        if EXIBIR_LOGS: logger.info("🔙 Liberando a interface central após término absoluto da fila.")
+        teclado_outros = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
+                [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
+                [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Disparador de Notas 🧾")],
+                [KeyboardButton(text="Voltar ao Início 🔙")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        try:
+            await bot_instance.send_message(message.chat.id, "✅ <b>Processo concluído!</b>\nO painel principal está liberado.", reply_markup=teclado_outros, parse_mode="HTML")
+        except: pass
+        await state.clear()
+
+    asyncio.create_task(executador_blindado())
 
 @router.message(PainelNotasFluxo.inspecionando_pdf_final)
 async def processar_inspecao_final(message: types.Message, state: FSMContext):
