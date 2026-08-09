@@ -464,8 +464,10 @@ def obter_teclado_gestao_custos():
         is_persistent=True
     )
 
-@dp.message(FinanceiroFluxo.menu_principal, F.text == "Voltar ao Centro Financeiro 🔙")
+@dp.message(F.text == "Voltar ao Centro Financeiro 🔙", StateFilter("*"))
 async def voltar_centro_financeiro(message: types.Message, state: FSMContext):
+    # Essa função agora é um "ímã" global. De qualquer lugar do bot, 
+    # se esse botão for clicado, ele te puxa direto para o painel financeiro.
     await menu_centro_financeiro(message, state)
 
 # --- 1. PROVISÃO DE IMPOSTOS ---
