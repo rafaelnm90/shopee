@@ -385,18 +385,18 @@ async def processar_menu_notas(message: types.Message, state: FSMContext):
         await message.answer(texto, parse_mode="HTML")
         
     elif "Voltar" in opcao:
-        if EXIBIR_LOGS: logger.info("🔙 Retornando à gaveta de Outros Canais de forma isolada.")
-        teclado_outros = ReplyKeyboardMarkup(
+        if EXIBIR_LOGS: logger.info("🔙 Retornando à gaveta do Centro Financeiro de forma isolada.")
+        
+        # O teclado agora reflete o novo menu "Centro Financeiro"
+        teclado_financeiro = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
-                [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
-                [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Disparador de Notas 🧾")],
+                [KeyboardButton(text="Disparador de Notas 🧾")],
                 [KeyboardButton(text="Voltar ao Início 🔙")]
             ],
             resize_keyboard=True,
             is_persistent=True
         )
-        await message.answer("Retornando ao painel central...", reply_markup=teclado_outros)
+        await message.answer("Retornando ao Centro Financeiro...", reply_markup=teclado_financeiro)
         await state.clear()
         
     else:
