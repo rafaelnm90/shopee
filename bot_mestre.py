@@ -267,7 +267,7 @@ class FinanceiroFluxo(StatesGroup):
     aguardando_valor_imposto = State()
     aguardando_valor_saque = State()
     aguardando_exclusao_saque = State()
-    aguardando_saldo_inicial = State() # ✅ ADICIONADO AQUI
+    aguardando_ajuste_historico = State() # 🟢 NOME CORRIGIDO AQUI
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -429,7 +429,7 @@ def obter_teclado_centro_financeiro():
         keyboard=[
             [KeyboardButton(text="Balanço e DRE 📈"), KeyboardButton(text="Gestão de Custos 📉")],
             [KeyboardButton(text="Provisão de Impostos 🏛️"), KeyboardButton(text="Fluxo de Caixa (Saques) 🏦")],
-            [KeyboardButton(text="Saldo Inicial Mensal 💰"), KeyboardButton(text="Disparador de Notas 🧾")],
+            [KeyboardButton(text="Ajuste Histórico (App) ⚖️"), KeyboardButton(text="Disparador de Notas 🧾")],
             [KeyboardButton(text="Voltar ao Início 🔙")]
         ],
         resize_keyboard=True,
@@ -822,28 +822,27 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     await msg_status.delete()
     await message.answer(texto_dre, parse_mode="HTML")
 
-# --- 5. SALDO INICIAL MENSAL (CORREÇÃO DE CAIXA) ---
-@dp.message(FinanceiroFluxo.menu_principal, F.text == "Saldo Inicial Mensal 💰")
-async def pedir_saldo_inicial(message: types.Message, state: FSMContext):
-    dados_saldo = ler_config_bd("saldo_inicial_mes", {"mes": "", "valor": 0.0})
-    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m")
-    
-    # Zera visualmente se for um mês novo
-    valor_atual = dados_saldo["valor"] if dados_saldo["mes"] == hoje_str else 0.0
+# --- 5. AJUSTE HISTÓRICO (O FURO DOS 90 DIAS) ---
+@dp.message(FinanceiroFluxo.menu_principal, F.text == "Ajuste Histórico (App) ⚖️")
+async def pedir_ajuste_historico(message: types.Message, state: FSMContext):
+    valor_atual = ler_config_bd("ajuste_historico_furo", 0.0)
     valor_br = f"{valor_atual:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
     
     texto = (
-        f"💰 <b>Saldo Inicial do Mês (Sincronizador)</b>\n\n"
-        f"Valor base deste mês: <b>R$ {valor_br}</b>\n\n"
-        f"Para igualar o robô ao Aplicativo da Shopee, digite o valor de comissões que vieram de meses passados.\n"
-        f"<i>(Dica: Pegue o valor 'A Receber' do App e subtraia o que o bot já exibe como 'Confirmado' de Agosto)</i>\n\n"
-        f"Digite o valor (Exemplo: <code>621.03</code>):"
+        f"⚖️ <b>Ajuste de Furo Histórico</b>\n\n"
+        f"Valor atual configurado: <b>R$ {valor_br}</b>\n\n"
+        f"A API da Shopee só nos permite ler os últimos 90 dias. Para o bot bater o valor exato com o seu Aplicativo, precisamos preencher esse 'furo' de vendas mais antigas.\n\n"
+        f"<b>Como calcular:</b>\n"
+        f"1. Olhe o valor 'A Receber' no App da Shopee.\n"
+        f"2. Olhe o 'Total API (90 Dias)' no Balanço do bot.\n"
+        f"3. Subtraia um do outro e digite a diferença aqui (Ex: Se o App diz 2000 e a API diz 1500, digite <code>500.00</code>).\n\n"
+        f"Digite o valor:"
     )
     await message.answer(texto, reply_markup=teclado_cancelar, parse_mode="HTML")
-    await state.set_state(FinanceiroFluxo.aguardando_saldo_inicial)
+    await state.set_state(FinanceiroFluxo.aguardando_ajuste_historico)
 
-@dp.message(FinanceiroFluxo.aguardando_saldo_inicial)
-async def salvar_saldo_inicial(message: types.Message, state: FSMContext):
+@dp.message(FinanceiroFluxo.aguardando_ajuste_historico)
+async def salvar_ajuste_historico(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await state.clear()
         await message.answer("Ação cancelada.")
@@ -853,18 +852,15 @@ async def salvar_saldo_inicial(message: types.Message, state: FSMContext):
     texto_valor = message.text.strip().replace("R$", "").replace(" ", "").replace(",", ".")
     try:
         valor = float(texto_valor)
-        mes_atual = datetime.now(fuso_horario).strftime("%Y-%m")
+        salvar_config_bd("ajuste_historico_furo", valor)
         
-        # Salva o valor atrelado ao mês atual para que ele se auto-destrua no mês que vem
-        salvar_config_bd("saldo_inicial_mes", {"mes": mes_atual, "valor": valor})
-        
-        if EXIBIR_LOGS: logger.info(f"💰 Saldo inicial do mês {mes_atual} definido para R$ {valor}.")
+        if EXIBIR_LOGS: logger.info(f"⚖️ Ajuste histórico atualizado para R$ {valor}.")
         
         valor_br = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        await message.answer(f"✅ <b>Saldo Inicial salvo!</b>\nO valor de R$ {valor_br} será a base do DRE deste mês.", parse_mode="HTML")
+        await message.answer(f"✅ <b>Ajuste salvo com sucesso!</b>\nO valor de R$ {valor_br} será somado à leitura da API permanentemente para corrigir a defasagem dos 90 dias.", parse_mode="HTML")
         await menu_centro_financeiro(message, state)
     except ValueError:
-        await message.answer("⚠️ Valor inválido. Digite apenas números e ponto (Ex: 621.03):", reply_markup=teclado_cancelar)
+        await message.answer("⚠️ Valor inválido. Digite apenas números e ponto (Ex: 500.00):", reply_markup=teclado_cancelar)
 
 teclado_menu_achadinhos = ReplyKeyboardMarkup(
     keyboard=[
