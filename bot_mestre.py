@@ -735,25 +735,24 @@ async def processar_remocao_saque(message: types.Message, state: FSMContext):
 # --- 4. BALANÇO E DRE (INTELIGÊNCIA CONTÁBIL) 📈 ---
 @dp.message(FinanceiroFluxo.menu_principal, F.text == "Balanço e DRE 📈")
 async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
-    msg_status = await message.answer("📈 Lendo a base de dados financeira e calculando DRE... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("📊 Compilando DRE a partir do banco de dados local...")
+    msg_status = await message.answer("📈 Lendo a base de dados financeira e reestruturando o Balanço... Aguarde ⏳")
+    if EXIBIR_LOGS: logger.info("📊 Compilando DRE a partir do banco de dados local com divisão Caixa vs Competência...")
     
-    # 1. Puxa os dados direto do banco de dados local (Mais rápido e pega todo o histórico)
+    # 1. Puxa os dados direto do banco de dados local
     historico_limpo = ler_historico_financeiro()
     
     hoje = datetime.now(fuso_horario)
     mes_atual_str = hoje.strftime("%Y-%m")
     
-    # Faturamento do MÊS ATUAL
+    # --- VISÃO 1: DESEMPENHO DE VENDAS DO MÊS (COMPETÊNCIA) ---
     aprovado_mes = sum(v["aprovado"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     pendente_mes = sum(v["pendente"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
+    faturamento_mes = aprovado_mes + pendente_mes
     
-    faturamento_valido_mes = aprovado_mes + pendente_mes
-    
-    # Faturamento TOTAL HISTÓRICO VERDADEIRO (Lendo de toda a vida da base de dados)
+    # --- VISÃO 2: CAIXA REAL (DINHEIRO NA MÃO) ---
     total_aprovado_historico = sum(v["aprovado"] for k, v in historico_limpo.items())
     
-    # 2. Resgata Variáveis do Banco de Dados SQLite
+    # 2. Resgata Variáveis do Banco de Dados
     taxa_imposto = ler_config_bd("imposto_taxa", 6.0)
     
     conexao = sqlite3.connect("banco_dados.db")
@@ -771,18 +770,16 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     
     conexao.close()
     
-    # 3. Matemática Contábil do Mês Atual (DRE Simples)
-    imposto_calculado = faturamento_valido_mes * (taxa_imposto / 100)
-    lucro_liquido = faturamento_valido_mes - imposto_calculado - total_custos
+    # O dinheiro que realmente existe disponível para saque na Shopee
+    saldo_shopee = total_aprovado_historico - total_sacado
     
-    margem_lucro = (lucro_liquido / faturamento_valido_mes * 100) if faturamento_valido_mes > 0 else 0.0
-    
-    # 4. Cálculo de Dinheiro Preso na Plataforma
-    saldo_retido = total_aprovado_historico - total_sacado
-    
-    # Adicionamos uma margem de segurança de 1 dólar/real para arredondamentos flutuantes de API
-    if saldo_retido < 1.00: 
-        saldo_retido = 0.0
+    # Adicionamos uma margem de segurança de 1 dólar/real para arredondamentos de API
+    if saldo_shopee < 1.00: 
+        saldo_shopee = 0.0
+        
+    # A MÁGICA: Deduz impostos e custos fixos APENAS do dinheiro real que você já tem garantido!
+    imposto_real = saldo_shopee * (taxa_imposto / 100)
+    lucro_livre_real = saldo_shopee - imposto_real - total_custos
     
     # 5. Formatação do Texto (DRE)
     def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -795,30 +792,32 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     nome_mes = MESES_PT.get(hoje.strftime('%m'), "Mês Atual").upper()
     
     texto_dre = (
-        f"📊 <b>DRE e Saúde Financeira | {nome_mes}</b>\n\n"
-        f"<b>1. RECEITA BRUTA:</b>\n"
-        f"   🟢 Faturamento: <b>R$ {f_br(faturamento_valido_mes)}</b>\n"
-        f"   <i>(Aprovado + Pendente)</i>\n\n"
-        f"<b>2. DEDUÇÕES:</b>\n"
-        f"   🏛️ Imposto ({taxa_imposto}%): <b>- R$ {f_br(imposto_calculado)}</b>\n"
-        f"   📉 Custos Fixos: <b>- R$ {f_br(total_custos)}</b>\n"
-        f"   <i>(As despesas cadastradas são debitadas integralmente do balanço mensal)</i>\n\n"
-        f"<b>3. RESULTADO (Lucro Real):</b>\n"
+        f"📊 <b>Balanço Financeiro Global</b>\n\n"
+        
+        f"<b>1. DESEMPENHO DE {nome_mes} (Competência)</b>\n"
+        f"<i>(Avalia a sua performance de vendas no mês atual, independente de quando a Shopee vai pagar)</i>\n"
+        f"   🛒 Volume Gerado: <b>R$ {f_br(faturamento_mes)}</b>\n"
+        f"   └ <i>Confirmado: R$ {f_br(aprovado_mes)}</i>\n"
+        f"   └ <i>Pendente: R$ {f_br(pendente_mes)}</i>\n\n"
+        
+        f"━━━━━━━━━━━━━━━━━━\n"
+        f"<b>2. CAIXA REAL DISPONÍVEL (O que importa)</b>\n"
+        f"<i>(Baseado exclusivamente em comissões já confirmadas que estão aguardando o seu saque)</i>\n\n"
+        f"   💰 <b>Saldo Preso na Shopee: R$ {f_br(saldo_shopee)}</b>\n\n"
+        
+        f"   <b>Deduções Imediatas:</b>\n"
+        f"   🏛️ Provisão Imposto ({taxa_imposto}%): <b>- R$ {f_br(imposto_real)}</b>\n"
+        f"   📉 Custos Fixos Mensais: <b>- R$ {f_br(total_custos)}</b>\n\n"
     )
     
-    if lucro_liquido >= 0:
-        texto_dre += f"   💰 Lucro Líquido: <b>R$ {f_br(lucro_liquido)}</b> 🟢\n"
+    if lucro_livre_real >= 0:
+        texto_dre += f"   ✅ <b>LUCRO LIVRE NO CAIXA: R$ {f_br(lucro_livre_real)}</b>\n"
+        texto_dre += f"   <i>(Este é o dinheiro real que vai sobrar no seu bolso se você sacar tudo hoje e pagar as contas).</i>\n\n"
     else:
-        texto_dre += f"   🛑 Prejuízo Líquido: <b>R$ {f_br(lucro_liquido)}</b> 🔴\n"
+        texto_dre += f"   🛑 <b>DÉFICIT NO CAIXA: R$ {f_br(lucro_livre_real)}</b>\n"
+        texto_dre += f"   <i>(O saldo aprovado atual não cobre as suas despesas fixas. Você precisará gerar mais vendas).</i>\n\n"
         
-    texto_dre += f"   📊 Margem de Lucro: <b>{margem_lucro:.1f}%</b>\n\n"
-    
-    texto_dre += "━━━━━━━━━━━━━━━━━━\n"
-    texto_dre += f"🏦 <b>FLUXO DE CAIXA (SITUAÇÃO DO DINHEIRO)</b>\n\n"
-    texto_dre += f"🔒 <b>Preso na Shopee: R$ {f_br(saldo_retido)}</b>\n"
-    texto_dre += f"<i>(Total já validado e aprovado que ainda não foi sacado/transferido para sua conta).</i>\n\n"
-    
-    texto_dre += f"💸 <b>Saldo já sacado: R$ {f_br(total_sacado)}</b>\n"
+    texto_dre += f"💸 Saldo histórico já sacado: R$ {f_br(total_sacado)}\n"
     
     await msg_status.delete()
     await message.answer(texto_dre, parse_mode="HTML")
