@@ -407,7 +407,7 @@ def obter_teclado_centro_financeiro():
 
 @dp.message(F.text == "Centro Financeiro 💸", StateFilter("*"))
 async def menu_centro_financeiro(message: types.Message, state: FSMContext):
-    if message.fromuser.id != ADMIN_ID: return
+    if message.from_user.id != ADMIN_ID: return
     await state.clear()
     if EXIBIR_LOGS: logger.info("💸 Acessando a gaveta do Centro Financeiro.")
     await message.answer("💸 <b>Centro Financeiro</b>\nSelecione a ferramenta desejada:", reply_markup=obter_teclado_centro_financeiro(), parse_mode="HTML")
