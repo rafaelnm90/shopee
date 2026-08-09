@@ -832,15 +832,15 @@ from aiogram.filters import Command
 async def forcar_importacao_historica(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     
-    msg_status = await message.answer("🔄 <b>Iniciando varredura histórica profunda...</b>\nIsso pode demorar alguns segundos, pois vou puxar os dados dos últimos 6 meses da Shopee.", parse_mode="HTML")
+    msg_status = await message.answer("🔄 <b>Iniciando varredura histórica profunda...</b>\nIsso pode demorar alguns segundos, pois vou puxar a carga máxima permitida pela Shopee (Últimos 3 meses).", parse_mode="HTML")
     
-    # 1. Pede 180 dias de histórico para a Shopee
-    conversoes = await buscar_dados_financeiros_shopee(180)
+    # 1. Pede o limite MÁXIMO da API (90 dias)
+    conversoes = await buscar_dados_financeiros_shopee(90)
     
     if conversoes:
         # 2. O motor interno vai olhar um por um e gravar no banco de dados
         processar_e_salvar_pedidos_api(conversoes)
-        await msg_status.edit_text("✅ <b>Varredura Histórica Concluída!</b>\nO seu banco de dados local foi preenchido com todo o seu histórico de vendas dos últimos 6 meses.\n\nVocê já pode ir ao <b>Centro Financeiro</b> e puxar o seu DRE novamente.", parse_mode="HTML")
+        await msg_status.edit_text("✅ <b>Varredura Histórica Concluída!</b>\nO seu banco de dados local foi preenchido com a carga máxima de histórico (3 meses).\n\nVocê já pode ir ao <b>Centro Financeiro</b> e puxar o seu DRE novamente.", parse_mode="HTML")
     else:
         await msg_status.edit_text("⚠️ A Shopee não retornou dados antigos ou ocorreu uma falha de conexão.")
 
