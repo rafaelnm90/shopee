@@ -737,9 +737,9 @@ async def processar_remocao_saque(message: types.Message, state: FSMContext):
 @dp.message(FinanceiroFluxo.menu_principal, F.text == "Balanço e DRE 📈")
 async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     msg_status = await message.answer("📈 Consultando a Shopee e reestruturando o Balanço... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("📊 Compilando DRE a partir da API (Mês Atual) com divisão Caixa vs Competência...")
+    if EXIBIR_LOGS: logger.info("📊 Compilando DRE a partir da API com divisão Caixa vs Competência...")
     
-    # 1. Puxamos 90 dias da API, mas vamos filtrar apenas o que nasceu neste mês
+    # 1. A API varre os 90 dias permitidos
     conversoes = await buscar_dados_financeiros_shopee(90)
     historico_limpo = processar_e_salvar_pedidos_api(conversoes)
     
@@ -747,16 +747,18 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     mes_atual_str = hoje.strftime("%Y-%m")
     
     # --- VISÃO 1: DESEMPENHO DE VENDAS DO MÊS ATUAL ---
+    # Aqui filtramos estritamente o que foi comprado este mês (Para você avaliar seu marketing)
     aprovado_mes_api = sum(v["aprovado"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     pendente_mes_api = sum(v["pendente"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     faturamento_mes_api = aprovado_mes_api + pendente_mes_api
     
+    # --- VISÃO 2: TOTAL CONFIRMADO DA API (OS 90 DIAS) ---
+    # 🟢 AQUI ESTÁ A CORREÇÃO: Pega TODAS as confirmações que a API conseguiu ler nos 90 dias
+    total_aprovado_api = sum(v["aprovado"] for k, v in historico_limpo.items())
+    
     # 2. Resgata Variáveis do Banco de Dados
     taxa_imposto = ler_config_bd("imposto_taxa", 6.0)
-    
-    # Mágica do Auto-Reset: Só usa o saldo inicial se ele for do mês atual
-    dados_saldo = ler_config_bd("saldo_inicial_mes", {"mes": "", "valor": 0.0})
-    saldo_inicial = dados_saldo["valor"] if dados_saldo["mes"] == mes_atual_str else 0.0
+    ajuste_furo_app = float(ler_config_bd("ajuste_historico_furo", 0.0))
     
     conexao = sqlite3.connect("banco_dados.db")
     cursor = conexao.cursor()
@@ -771,8 +773,8 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     
     conexao.close()
     
-    # --- VISÃO 2: CAIXA REAL (SOMA DO PASSADO COM O PRESENTE) ---
-    caixa_total_aprovado = saldo_inicial + aprovado_mes_api
+    # --- VISÃO 3: CAIXA REAL (SOMA DO PASSADO INVISÍVEL COM O PRESENTE DA API) ---
+    caixa_total_aprovado = total_aprovado_api + ajuste_furo_app
     saldo_shopee = caixa_total_aprovado - total_sacado
     
     if saldo_shopee < 1.00: 
@@ -802,7 +804,9 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
         
         f"━━━━━━━━━━━━━━━━━━\n"
         f"<b>2. CAIXA REAL (Situação do Dinheiro)</b>\n"
-        f"<i>(Saldo herdado + O que já confirmou este mês)</i>\n\n"
+        f"<i>(Tudo que a API leu em 90 dias + O Furo Histórico >90 dias)</i>\n\n"
+        f"   📡 Total API (90 Dias): R$ {f_br(total_aprovado_api)}\n"
+        f"   ⚖️ Furo Histórico Oculto: R$ {f_br(ajuste_furo_app)}\n"
         f"   💰 <b>Preso na Shopee: R$ {f_br(saldo_shopee)}</b>\n\n"
         
         f"   <b>Deduções Imediatas:</b>\n"
