@@ -885,8 +885,9 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("⏰ Acionando motor de envio via Brevo em background blindado.")
     
     # Wrapper isolado para aguardar o fim do processo ANTES de liberar a interface
-    async def executador_blindado():
-        await processar_fila_envios(chat_id=message.chat.id, message_id=msg_dinamica.message_id)
+    async def executador_blindado(chat_id, msg_id):
+        # Aqui, os IDs são passados para que o processador atualize a tela
+        await processar_fila_envios(chat_id=chat_id, message_id=msg_id)
         
         if EXIBIR_LOGS: logger.info("🔙 Liberando a interface central após término absoluto da fila.")
         teclado_outros = ReplyKeyboardMarkup(
@@ -900,11 +901,12 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
             is_persistent=True
         )
         try:
-            await bot_instance.send_message(message.chat.id, "✅ <b>Processo concluído!</b>\nO painel principal está liberado.", reply_markup=teclado_outros, parse_mode="HTML")
+            await bot_instance.send_message(chat_id, "✅ <b>Processo concluído!</b>\nO painel principal está liberado.", reply_markup=teclado_outros, parse_mode="HTML")
         except: pass
         await state.clear()
 
-    asyncio.create_task(executador_blindado())
+    # Cria a tarefa em background passando os parâmetros de chat e mensagem
+    asyncio.create_task(executador_blindado(message.chat.id, msg_dinamica.message_id))
 
 @router.message(PainelNotasFluxo.inspecionando_pdf_final)
 async def processar_inspecao_final(message: types.Message, state: FSMContext):
