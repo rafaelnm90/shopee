@@ -276,14 +276,14 @@ async def processar_fila_envios(chat_id=None, message_id=None):
 # FLUXO INTERATIVO (TELEGRAM)
 # ==========================================
 
-# 🛡️ NOVO: Interceptador Universal de Cancelamento exclusivo para as Notas
+# 🛡️ Interceptador Universal de Cancelamento exclusivo para as Notas
 @router.message(F.text == "Abortar ❌", StateFilter("*"))
 async def abortador_universal_notas(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("❌ Operação de notas abortada pelo usuário.")
     await message.answer("Operação cancelada. Retornando ao menu do disparador...", reply_markup=obter_teclado_menu_notas())
     await state.set_state(PainelNotasFluxo.menu_principal)
 
-# 🛡️ NOVO: Bloqueio total de botões enquanto as notas são enviadas
+# 🛡️ Bloqueio total de botões enquanto as notas são enviadas
 @router.message(PainelNotasFluxo.enviando_notas)
 async def ignorar_durante_envio(message: types.Message):
     await message.answer("⚠️ <b>Aguarde o fim do processo!</b>\nO robô está enviando as notas fiscais passo a passo. Nenhuma outra ação pode ser feita agora.", parse_mode="HTML")
@@ -296,13 +296,91 @@ async def iniciar_painel_notas(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=obter_teclado_menu_notas(), parse_mode="HTML")
     await state.set_state(PainelNotasFluxo.menu_principal)
 
-@router.message(PainelNotasFluxo.menu_principal)
 
-@router.message(PainelNotasFluxo.aguardando_csv, F.document)
+@router.message(PainelNotasFluxo.menu_principal)
+async def processar_menu_notas(message: types.Message, state: FSMContext):
+    # 🛡️ MURALHA DE BLINDAGEM 1: Evita crash se o usuário não enviar texto (ex: se enviar um documento aqui no menu)
+    if not message.text:
+        await message.answer("⚠️ <b>Ação Inválida:</b> Por favor, clique no botão <b>Iniciar Envios 🚀</b> antes de anexar as planilhas.", parse_mode="HTML")
+        return
+
+    opcao = message.text.strip()
+    
+    if "Iniciar Envios" in opcao:
+        texto = (
+            "🧾 <b>Disparador Automático de Notas Fiscais</b>\n\n"
+            "Para iniciar, por favor envie o arquivo <b>CSV extraído da Shopee</b> contendo as comissões e os e-mails dos lojistas."
+        )
+        await message.answer(texto, reply_markup=teclado_notas_cancelar, parse_mode="HTML")
+        await state.set_state(PainelNotasFluxo.aguardando_csv)
+        
+    elif "Filtro Anti-Spam" in opcao:
+        global FILTRO_ANTI_SPAM
+        FILTRO_ANTI_SPAM = not FILTRO_ANTI_SPAM
+        
+        estado_texto = "ATIVADO ✅" if FILTRO_ANTI_SPAM else "DESATIVADO ⚠️ (Cuidado com duplicatas)"
+        if EXIBIR_LOGS: logger.info(f"⚙️ Alternância de segurança: O Filtro Anti-Spam foi alterado para {FILTRO_ANTI_SPAM}.")
+        
+        await message.answer(f"⚙️ O Filtro de Histórico foi <b>{estado_texto}</b>.", reply_markup=obter_teclado_menu_notas(), parse_mode="HTML")
+        
+    elif "Informações" in opcao:
+        if EXIBIR_LOGS: logger.info("🔐 Consultando credenciais seguras no .env.")
+        
+        brevo_link = "https://app.brevo.com/"
+        brevo_login = "rnm.notas@gmail.com"
+        brevo_senha = os.getenv('BREVO_SENHA', 'Não configurada')
+        
+        gmail_link = "https://mail.google.com/"
+        gmail_login = "rnm.notas@gmail.com"
+        gmail_senha = os.getenv('GMAIL_SENHA', 'Não configurada')
+        
+        texto = (
+            "🔐 <b>Informações de Acesso (Privado)</b>\n\n"
+            "✉️ <b>Plataforma Brevo (Disparos API):</b>\n"
+            f"🔗 <b>Link:</b> {brevo_link}\n"
+            f"👤 <b>Login:</b> <code>{brevo_login}</code>\n"
+            f"🔑 <b>Senha:</b> <tg-spoiler>{brevo_senha}</tg-spoiler>\n\n"
+            "📧 <b>Conta Gmail (E-mail Remetente):</b>\n"
+            f"🔗 <b>Link:</b> {gmail_link}\n"
+            f"👤 <b>Login:</b> <code>{gmail_login}</code>\n"
+            f"🔑 <b>Senha:</b> <tg-spoiler>{gmail_senha}</tg-spoiler>\n\n"
+            "<i>(Toque nas senhas para revelá-las ou nos logins para copiar)</i>"
+        )
+        await message.answer(texto, parse_mode="HTML")
+        
+    elif "Voltar" in opcao:
+        if EXIBIR_LOGS: logger.info("🔙 Retornando à gaveta de Outros Canais de forma isolada.")
+        teclado_outros = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
+                [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
+                [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Disparador de Notas 🧾")],
+                [KeyboardButton(text="Voltar ao Início 🔙")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        await message.answer("Retornando ao painel central...", reply_markup=teclado_outros)
+        await state.clear()
+        
+    else:
+        await message.answer("⚠️ Por favor, escolha uma das opções utilizando os botões do teclado.")
+
+
+# Observe que eu tirei a trava rígida 'F.document' do decorador abaixo.
+# Isso permite que o bot intercepte o seu clique caso você clique em algo errado.
+@router.message(PainelNotasFluxo.aguardando_csv)
 async def receber_csv(message: types.Message, state: FSMContext):
+    # 🛡️ MURALHA DE BLINDAGEM 2: Evita crash caso você digite texto (ex: clicar no botão Anti-Spam sem querer)
+    if not message.document:
+        if message.text and message.text == "Abortar ❌":
+            return # Deixa o interceptador de cancelamento agir
+        await message.answer("⚠️ <b>Ação Inválida:</b> Eu estou aguardando o arquivo <b>.csv</b>. Por favor, anexe o documento ou clique em Abortar ❌.", parse_mode="HTML")
+        return
+
     doc = message.document
     if not doc.file_name.lower().endswith('.csv'):
-        await message.answer("⚠️ Por favor, envie um arquivo com o formato <b>.csv</b>.", parse_mode="HTML")
+        await message.answer("⚠️ O arquivo enviado não é válido. Por favor, envie um arquivo com o formato <b>.csv</b>.", parse_mode="HTML")
         return
         
     caminho_csv = os.path.join(PASTA_TEMP, doc.file_name)
@@ -314,11 +392,19 @@ async def receber_csv(message: types.Message, state: FSMContext):
     await message.answer("✅ Arquivo CSV recebido!\n\nAgora envie o arquivo <b>.ZIP</b> contendo todos os PDFs das Notas Fiscais.", parse_mode="HTML", reply_markup=teclado_notas_cancelar)
     await state.set_state(PainelNotasFluxo.aguardando_zip)
 
-@router.message(PainelNotasFluxo.aguardando_zip, F.document)
+
+@router.message(PainelNotasFluxo.aguardando_zip)
 async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
+    # 🛡️ MURALHA DE BLINDAGEM 3: Evita crash caso o usuário digite texto em vez do ZIP
+    if not message.document:
+        if message.text and message.text == "Abortar ❌":
+            return
+        await message.answer("⚠️ <b>Ação Inválida:</b> Eu estou aguardando o arquivo <b>.zip</b>. Por favor, anexe o documento ou clique em Abortar ❌.", parse_mode="HTML")
+        return
+
     doc = message.document
     if not doc.file_name.lower().endswith('.zip'):
-        await message.answer("⚠️ Por favor, envie um arquivo compactado <b>.zip</b>.", parse_mode="HTML")
+        await message.answer("⚠️ O arquivo enviado não é válido. Por favor, envie um arquivo compactado <b>.zip</b>.", parse_mode="HTML")
         return
         
     msg_status = await message.answer("📦 Arquivo ZIP recebido. Descompactando e iniciando o cruzamento de dados... ⏳")
@@ -350,6 +436,7 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
 
     if FILTRO_ANTI_SPAM:
         await msg_status.edit_text("✅ Extração concluída. Verificando histórico de envios e cruzando dados...")
+# O resto do código da função 'receber_zip_e_cruzar' que você já tem continua daqui para baixo normalmente.
         
         # CONSULTA O HISTÓRICO DE NOTAS JÁ ENVIADAS OU PENDENTES
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
