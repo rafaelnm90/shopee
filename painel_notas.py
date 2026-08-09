@@ -150,9 +150,12 @@ async def processar_fila_envios(chat_id=None, message_id=None):
         loja = item["nome_loja"]
         email = item["email_destino"]
         pdf = item["caminho_pdf"]
+        
+        # Resgata o valor (compatibilidade com registros antigos caso a coluna esteja vazia)
+        valor = item["valor"] if "valor" in item.keys() and item["valor"] else "0,00"
+        
         nome_arquivo = os.path.basename(pdf)
         
-        # Adiciona a informação de processamento atual ao log
         log_dinamico += f"⏳ ({idx}/{total_notas}) Enviando para: {loja}...\n"
         
         if chat_id and message_id and bot_instance:
@@ -190,10 +193,15 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             conexao.close()
             return
 
-        assunto = f"Sua Nota Fiscal de Comissão - {loja}"
-        corpo = f"<p>Olá, {loja}.</p><p>Segue em anexo a Nota Fiscal referente às comissões do programa de afiliados da Shopee.</p><p>Qualquer dúvida, estamos à disposição.</p>"
+        assunto = f"Sua Nota Fiscal de Comissão Shopee - {loja}"
+        corpo = (
+            f"<p>Olá, equipe da <b>{loja}</b>.</p><br>"
+            f"<p>Envio em anexo a Nota Fiscal de prestação de serviços referente às comissões geradas através do programa de afiliados da Shopee, no valor de R$ {valor}. O documento já está processado e pode ser direcionado para o controle contábil e financeiro da empresa.</p><br>"
+            f"<p>Fico à disposição caso precisem de algum esclarecimento.</p><br>"
+            f"<p>Atenciosamente,<br><b>RNM Comércio e Intermediações LTDA</b></p>"
+        )
         
-        if EXIBIR_LOGS: logger.info(f"⚙️ Processando envio para Loja: {loja}...")
+        if EXIBIR_LOGS: logger.info(f"⚙️ Processando envio para Loja: {loja} no valor de R$ {valor}...")
         
         try:
             status_api, resposta_api = await enviar_email_brevo(email, loja, assunto, corpo, pdf)
@@ -454,6 +462,10 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
         nome_loja = str(row.get('Nome da loja', '')).strip()
         email_loja = str(row.get('E-mail', '')).strip()
         
+        # Extração do valor contábil para injeção no e-mail
+        valor_bruto = str(row.get('Comissão Total do Vendedor', '0,00')).strip()
+        valor_limpo = valor_bruto.replace('R$', '').replace('R$ ', '').strip()
+        
         if pd.isna(nome_loja) or pd.isna(email_loja) or not nome_loja or not email_loja:
             continue
             
@@ -466,13 +478,13 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
             if match_pdf:
                 nome_loja_pdf = match_pdf.group(1).strip()
                 if nome_loja_pdf in nome_csv_norm or nome_csv_norm in nome_loja_pdf:
-                    notas_validadas.append({'loja': nome_loja, 'email': email_loja, 'pdf': pdf_file, 'tipo': 'exato'})
+                    notas_validadas.append({'loja': nome_loja, 'email': email_loja, 'pdf': pdf_file, 'tipo': 'exato', 'valor': valor_limpo})
                     pdfs_pendentes.remove(pdf_file)
                     encontrou_exato = True
                     break
                     
         if not encontrou_exato:
-            lojas_pendentes.append({'loja': nome_loja, 'email': email_loja})
+            lojas_pendentes.append({'loja': nome_loja, 'email': email_loja, 'valor': valor_limpo})
             
     pares_similares = []
     for loja_dict in lojas_pendentes.copy():
@@ -560,7 +572,7 @@ async def processar_resposta_similaridade(message: types.Message, state: FSMCont
     par_atual = pares_similares.pop(0)
     
     if resposta == "Sim ✅":
-        notas_validadas.append({'loja': par_atual['loja_dict']['loja'], 'email': par_atual['loja_dict']['email'], 'pdf': par_atual['pdf'], 'tipo': 'similar'})
+        notas_validadas.append({'loja': par_atual['loja_dict']['loja'], 'email': par_atual['loja_dict']['email'], 'pdf': par_atual['pdf'], 'tipo': 'similar', 'valor': par_atual['loja_dict']['valor']})
         if EXIBIR_LOGS: logger.info(f"✅ Associação aprovada: {par_atual['loja_dict']['loja']} <> {par_atual['pdf']}")
     else:
         lojas_pendentes.append(par_atual['loja_dict'])
@@ -671,7 +683,7 @@ async def processar_pareamento_manual(message: types.Message, state: FSMContext)
     loja_selecionada = lojas.pop(0)
     pdf_selecionado = pdfs.pop(letra_idx)
     
-    notas_validadas.append({'loja': loja_selecionada['loja'], 'email': loja_selecionada['email'], 'pdf': pdf_selecionado, 'tipo': 'manual'})
+    notas_validadas.append({'loja': loja_selecionada['loja'], 'email': loja_selecionada['email'], 'pdf': pdf_selecionado, 'tipo': 'manual', 'valor': loja_selecionada['valor']})
     if EXIBIR_LOGS: logger.info(f"✅ Pareamento manual aceito: {loja_selecionada['loja']} <> {pdf_selecionado}")
     
     await state.update_data(lojas_pendentes=lojas, pdfs_pendentes=pdfs, notas_validadas=notas_validadas)
@@ -734,13 +746,18 @@ async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
     conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
     cursor = conexao.cursor()
     
+    try:
+        cursor.execute("ALTER TABLE fila_notas ADD COLUMN valor TEXT")
+    except sqlite3.OperationalError:
+        pass
+    
     resumo_tabela = ""
     for nota in notas_validadas:
         caminho_completo = os.path.join(pasta_extracao, nota['pdf'])
         cursor.execute('''
-            INSERT INTO fila_notas (nome_loja, email_destino, caminho_pdf, status)
-            VALUES (?, ?, ?, 'RASCUNHO')
-        ''', (nota['loja'], nota['email'], caminho_completo))
+            INSERT INTO fila_notas (nome_loja, email_destino, caminho_pdf, status, valor)
+            VALUES (?, ?, ?, 'RASCUNHO', ?)
+        ''', (nota['loja'], nota['email'], caminho_completo, nota['valor']))
         
         tipo_icone = "📄"
         if nota['tipo'] == 'similar':
