@@ -716,19 +716,15 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     msg_status = await message.answer("📈 Consultando a Shopee e processando Caixa... Aguarde ⏳")
     if EXIBIR_LOGS: logger.info("📊 Compilando DRE a partir do Ledger...")
     
-    # Puxa os dados normais da API (30 dias) e aplica a lógica de soma automática no ledger
+    # Atualiza a catraca da API nos bastidores para puxar novas confirmações
     conversoes = await buscar_dados_financeiros_shopee(30)
-    historico_limpo = processar_e_salvar_pedidos_api(conversoes)
+    if conversoes:
+        processar_e_salvar_pedidos_api(conversoes)
     
     hoje = datetime.now(fuso_horario)
     mes_atual_str = hoje.strftime("%Y-%m")
     
-    # VISÃO 1: DESEMPENHO DE VENDAS
-    aprovado_mes_api = sum(v["aprovado"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    pendente_mes_api = sum(v["pendente"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    faturamento_mes_api = aprovado_mes_api + pendente_mes_api
-    
-    # VISÃO 2: CAIXA REAL (Ledger Automático)
+    # VISÃO ÚNICA: CAIXA REAL (Ledger Automático)
     saldo_shopee = float(ler_config_bd("saldo_caixa_shopee", 0.0))
     taxa_imposto = ler_config_bd("imposto_taxa", 6.0)
     
@@ -757,31 +753,24 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     nome_mes = MESES_PT.get(hoje.strftime('%m'), "Mês Atual").upper()
     
     texto_dre = (
-        f"📊 <b>Balanço Financeiro Global | {nome_mes}</b>\n\n"
+        f"📊 <b>Balanço Financeiro | {nome_mes}</b>\n\n"
         
-        f"<b>1. DESEMPENHO DE VENDAS</b>\n"
-        f"<i>(Volume faturado puramente no mês de {nome_mes})</i>\n"
-        f"   🛒 Volume Gerado: <b>R$ {f_br(faturamento_mes_api)}</b>\n"
-        f"   └ <i>Confirmado: R$ {f_br(aprovado_mes_api)}</i>\n"
-        f"   └ <i>Pendente: R$ {f_br(pendente_mes_api)}</i>\n\n"
-        
-        f"━━━━━━━━━━━━━━━━━━\n"
-        f"<b>2. CAIXA REAL (Situação do Dinheiro)</b>\n"
+        f"<b>LUCRO LÍQUIDO (Situação do Dinheiro)</b>\n"
         f"<i>(O Saldo do Aplicativo atualizado em Tempo Real)</i>\n\n"
         
         f"   💰 <b>Preso na Shopee: R$ {f_br(saldo_shopee)}</b>\n\n"
         
         f"   <b>Deduções Imediatas:</b>\n"
         f"   🏛️ Provisão Imposto ({taxa_imposto}%): <b>- R$ {f_br(imposto_real)}</b>\n"
-        f"   📉 Custos Fixos Cadastrados: <b>- R$ {f_br(total_custos)}</b>\n\n"
+        f"   📉 Custos Cadastrados: <b>- R$ {f_br(total_custos)}</b>\n\n"
     )
     
     if lucro_livre_real >= 0:
         texto_dre += f"   ✅ <b>LUCRO LIVRE NO CAIXA: R$ {f_br(lucro_livre_real)}</b>\n"
-        texto_dre += f"   <i>(Dinheiro limpo que sobra se você liquidar o saldo hoje).</i>\n\n"
+        texto_dre += f"   <i>(Dinheiro limpo que sobra se você liquidar o saldo hoje).</i>\n"
     else:
         texto_dre += f"   🛑 <b>DÉFICIT NO CAIXA: R$ {f_br(lucro_livre_real)}</b>\n"
-        texto_dre += f"   <i>(O saldo atual não cobre as suas despesas fixas).</i>\n\n"
+        texto_dre += f"   <i>(O saldo atual não cobre as suas despesas fixas).</i>\n"
         
     await msg_status.delete()
     await message.answer(texto_dre, parse_mode="HTML")
@@ -842,12 +831,13 @@ async def gerar_extrato_rapido(message: types.Message, state: FSMContext):
         icone_lucro = "✅" if lucro >= 0 else "🛑"
         
         texto += f"📅 <b>{nome_mes}</b>\n"
-        texto += f"   💰 Faturado: R$ {f_br(faturamento)}\n"
-        texto += f"   🏛️ Impostos: - R$ {f_br(imposto)}\n"
-        texto += f"   📉 Custos: - R$ {f_br(custo_total_mes)}\n"
-        texto += f"   {icone_lucro} <b>Líquido: R$ {f_br(lucro)}</b>\n\n"
+        texto += f"   💰 Confirmado no Mês: R$ {f_br(faturamento)}\n"
+        texto += f"   🏛️ Provisão Imposto: - R$ {f_br(imposto)}\n"
+        texto += f"   📉 Custos Totais: - R$ {f_br(custo_total_mes)}\n"
+        texto += f"   {icone_lucro} <b>LUCRO LIVRE DO MÊS: R$ {f_br(lucro)}</b>\n\n"
         
-    texto += "<i>*Os custos incluem suas despesas fixas + despesas pontuais do respectivo mês.</i>"
+    texto += "<i>*Os custos incluem suas despesas fixas + despesas pontuais do respectivo mês.</i>\n"
+    texto += "<i>*Este extrato reflete o quanto cada mês isolado contribuiu para o seu caixa atual.</i>"
     
     await msg_status.edit_text(texto, parse_mode="HTML")
 
