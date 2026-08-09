@@ -823,44 +823,6 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     await msg_status.delete()
     await message.answer(texto_dre, parse_mode="HTML")
 
-# ==========================================
-# 🛠️ BOTÃO DE MANUTENÇÃO: IMPORTAR HISTÓRICO ANTIGO 
-# ==========================================
-from aiogram.filters import Command
-
-@dp.message(Command("puxar_historico"))
-async def forcar_importacao_historica(message: types.Message):
-    if message.from_user.id != ADMIN_ID: return
-    
-    msg_status = await message.answer("🔄 <b>Iniciando Reset Financeiro e Varredura Profunda...</b>\nApagando lixo antigo e puxando a carga máxima permitida pela Shopee (Últimos 3 meses). Aguarde... ⏳", parse_mode="HTML")
-    
-    # 🛑 FAXINA COMPLETA ANTES DE COMEÇAR: Zera o banco sujo para evitar fantasmas!
-    salvar_banco_pedidos({})
-    salvar_historico_financeiro({})
-    if EXIBIR_LOGS: logger.info("🧹 Banco de pedidos e histórico zerados para receber a carga limpa.")
-
-    from datetime import timedelta
-    agora = datetime.now(fuso_horario)
-    sucessos = 0
-    
-    # ⏱️ O robô faz 3 viagens no tempo para driblar o bloqueio da API
-    for i in range(3):
-        data_referencia = agora - timedelta(days=i*30)
-        
-        if EXIBIR_LOGS: logger.info(f"⏳ Puxando lote histórico {i+1}/3...")
-        conversoes = await buscar_dados_financeiros_shopee(30, data_referencia)
-        
-        if conversoes:
-            processar_e_salvar_pedidos_api(conversoes)
-            sucessos += 1
-            
-        await asyncio.sleep(2) # Pausa rápida para a Shopee não bloquear o bot
-        
-    if sucessos > 0:
-        await msg_status.edit_text("✅ <b>Varredura Histórica Concluída!</b>\nO seu banco de dados local foi resetado e preenchido com sucesso em lotes.\n\nVocê já pode ir ao <b>Centro Financeiro</b> e puxar o seu DRE atualizado.", parse_mode="HTML")
-    else:
-        await msg_status.edit_text("⚠️ A Shopee não retornou dados antigos ou ocorreu uma falha de conexão.")
-
 teclado_menu_achadinhos = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Nicho ➕"), KeyboardButton(text="Remover Nicho 🗑️")],
