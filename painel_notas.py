@@ -64,7 +64,7 @@ def obter_teclado_menu_notas():
             [KeyboardButton(text="Iniciar Envios 🚀")],
             [KeyboardButton(text=f"Filtro Anti-Duplicidade: {status_filtro}")],
             [KeyboardButton(text="Informações de Acesso ℹ️")],
-            [KeyboardButton(text="Voltar ↩️")]
+            [KeyboardButton(text="Voltar ao Centro Financeiro 🔙")]
         ],
         resize_keyboard=True,
         is_persistent=True
