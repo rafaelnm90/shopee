@@ -443,6 +443,353 @@ async def menu_centro_financeiro(message: types.Message, state: FSMContext):
     await message.answer("💸 <b>Centro Financeiro</b>\nSelecione a ferramenta de gestão desejada:", reply_markup=obter_teclado_centro_financeiro(), parse_mode="HTML")
     await state.set_state(FinanceiroFluxo.menu_principal)
 
+# ==========================================
+# MÓDULO: CENTRO FINANCEIRO (FASE 2)
+# ==========================================
+
+def obter_teclado_gestao_custos():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Adicionar Custo ➕"), KeyboardButton(text="Remover Custo 🗑️")],
+            [KeyboardButton(text="Voltar ao Centro Financeiro 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
+@dp.message(FinanceiroFluxo.menu_principal, F.text == "Voltar ao Centro Financeiro 🔙")
+async def voltar_centro_financeiro(message: types.Message, state: FSMContext):
+    await menu_centro_financeiro(message, state)
+
+# --- 1. PROVISÃO DE IMPOSTOS ---
+@dp.message(FinanceiroFluxo.menu_principal, F.text == "Provisão de Impostos 🏛️")
+async def menu_impostos(message: types.Message, state: FSMContext):
+    taxa_atual = ler_config_bd("imposto_taxa", 6.0)
+    texto = (
+        f"🏛️ <b>Provisão de Impostos (Simples Nacional)</b>\n\n"
+        f"A sua alíquota atual configurada é: <b>{taxa_atual}%</b>\n\n"
+        f"O robô usa essa porcentagem para descontar virtualmente do seu faturamento bruto aprovado, ajudando a calcular o Lucro Líquido Real.\n\n"
+        f"Envie o novo valor percentual (Exemplo: <code>6.5</code> ou <code>10</code>) ou clique em Cancelar:"
+    )
+    await message.answer(texto, reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(FinanceiroFluxo.aguardando_valor_imposto)
+
+@dp.message(FinanceiroFluxo.aguardando_valor_imposto)
+async def salvar_imposto(message: types.Message, state: FSMContext):
+    texto = message.text.strip().replace(",", ".")
+    try:
+        nova_taxa = float(texto)
+        salvar_config_bd("imposto_taxa", nova_taxa)
+        if EXIBIR_LOGS: logger.info(f"🏛️ Alíquota de imposto atualizada no banco para {nova_taxa}%.")
+        await message.answer(f"✅ <b>Alíquota atualizada!</b>\nNovo imposto configurado para <b>{nova_taxa}%</b>.", parse_mode="HTML")
+        await menu_centro_financeiro(message, state)
+    except ValueError:
+        await message.answer("⚠️ Valor inválido. Digite apenas números e ponto (Ex: 6.5):", reply_markup=teclado_cancelar)
+
+# --- 2. GESTÃO DE CUSTOS ---
+@dp.message(FinanceiroFluxo.menu_principal, F.text == "Gestão de Custos 📉")
+async def listar_custos(message: types.Message, state: FSMContext):
+    conexao = sqlite3.connect("banco_dados.db")
+    cursor = conexao.cursor()
+    cursor.execute("SELECT id, nome, valor FROM financeiro_despesas")
+    despesas = cursor.fetchall()
+    conexao.close()
+    
+    texto = "📉 <b>Gestão de Custos Operacionais</b>\n\n"
+    total_custos = 0.0
+    
+    if despesas:
+        for i, (id_db, nome, valor) in enumerate(despesas, 1):
+            valor_br = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            texto += f"<b>{i}.</b> {nome} - R$ {valor_br}\n"
+            total_custos += valor
+            
+        total_br = f"{total_custos:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        texto += f"\n💰 <b>Custo Total Fixo:</b> R$ {total_br}"
+        
+        # Salva o mapa de IDs na memória para a função de exclusão
+        mapa_exclusao = {str(i): id_db for i, (id_db, nome, valor) in enumerate(despesas, 1)}
+        await state.update_data(mapa_custos=mapa_exclusao)
+    else:
+        texto += "<i>Nenhuma despesa cadastrada no momento. Todo o faturamento será considerado lucro bruto.</i>"
+        
+    await message.answer(texto, reply_markup=obter_teclado_gestao_custos(), parse_mode="HTML")
+    await state.set_state(FinanceiroFluxo.menu_principal)
+
+@dp.message(FinanceiroFluxo.menu_principal, F.text == "Adicionar Custo ➕")
+async def pedir_nome_custo(message: types.Message, state: FSMContext):
+    await message.answer("Digite o <b>NOME</b> da despesa fixa (Ex: Servidor Oracle, Domínio, API, Contador):", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(FinanceiroFluxo.aguardando_nome_despesa)
+
+@dp.message(FinanceiroFluxo.aguardando_nome_despesa)
+async def pedir_valor_custo(message: types.Message, state: FSMContext):
+    nome_custo = message.text.strip()
+    await state.update_data(nome_despesa=nome_custo)
+    await message.answer(f"Custo: <b>{nome_custo}</b>\n\nDigite o <b>VALOR MENSAL</b> dessa despesa (Exemplo: <code>50.00</code> ou <code>120,50</code>):", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(FinanceiroFluxo.aguardando_valor_despesa)
+
+@dp.message(FinanceiroFluxo.aguardando_valor_despesa)
+async def salvar_valor_custo(message: types.Message, state: FSMContext):
+    texto_valor = message.text.strip().replace("R$", "").replace(" ", "").replace(",", ".")
+    try:
+        valor = float(texto_valor)
+        data = await state.get_data()
+        nome = data.get("nome_despesa")
+        data_hoje = datetime.now().strftime("%Y-%m-%d")
+        
+        conexao = sqlite3.connect("banco_dados.db")
+        cursor = conexao.cursor()
+        cursor.execute("INSERT INTO financeiro_despesas (nome, valor, data_registro) VALUES (?, ?, ?)", (nome, valor, data_hoje))
+        conexao.commit()
+        conexao.close()
+        
+        if EXIBIR_LOGS: logger.info(f"📉 Nova despesa adicionada: {nome} - R$ {valor}")
+        
+        valor_br = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        await message.answer(f"✅ Despesa <b>{nome}</b> (R$ {valor_br}) cadastrada com sucesso no seu fluxo de caixa!", parse_mode="HTML")
+        
+        # Volta automaticamente para a lista atualizada
+        await listar_custos(message, state)
+    except ValueError:
+        await message.answer("⚠️ Valor numérico inválido. Digite apenas números (Ex: 50.00):", reply_markup=teclado_cancelar)
+
+@dp.message(FinanceiroFluxo.menu_principal, F.text == "Remover Custo 🗑️")
+async def pedir_remocao_custo(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    mapa_custos = data.get("mapa_custos", {})
+    
+    if not mapa_custos:
+        await message.answer("Não há custos cadastrados para remover.", reply_markup=obter_teclado_gestao_custos())
+        return
+        
+    await message.answer("Digite o <b>NÚMERO</b> do custo que deseja excluir da lista:", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(FinanceiroFluxo.aguardando_exclusao_despesa)
+
+@dp.message(FinanceiroFluxo.aguardando_exclusao_despesa)
+async def processar_remocao_custo(message: types.Message, state: FSMContext):
+    numero_digitado = message.text.strip()
+    data = await state.get_data()
+    mapa_custos = data.get("mapa_custos", {})
+    
+    if numero_digitado in mapa_custos:
+        id_db = mapa_custos[numero_digitado]
+        conexao = sqlite3.connect("banco_dados.db")
+        cursor = conexao.cursor()
+        cursor.execute("DELETE FROM financeiro_despesas WHERE id = ?", (id_db,))
+        conexao.commit()
+        conexao.close()
+        
+        if EXIBIR_LOGS: logger.info(f"🗑️ Despesa excluída do banco de dados (ID {id_db}).")
+        await message.answer("✅ Custo removido com sucesso!")
+        await listar_custos(message, state)
+    else:
+        await message.answer("⚠️ Número não encontrado na lista. Digite um número válido ou clique em Cancelar:", reply_markup=teclado_cancelar)
+
+# --- 3. FLUXO DE CAIXA (SAQUES) 🏦 ---
+@dp.message(FinanceiroFluxo.menu_principal, F.text == "Fluxo de Caixa (Saques) 🏦")
+async def listar_saques(message: types.Message, state: FSMContext):
+    conexao = sqlite3.connect("banco_dados.db")
+    cursor = conexao.cursor()
+    # Busca os últimos 5 saques para exibir um histórico enxuto
+    cursor.execute("SELECT id, valor, data_registro FROM financeiro_saques ORDER BY id DESC LIMIT 5")
+    ultimos_saques = cursor.fetchall()
+    
+    # Soma de todo o dinheiro já retirado
+    cursor.execute("SELECT SUM(valor) FROM financeiro_saques")
+    total_sacado_db = cursor.fetchone()[0]
+    total_sacado = float(total_sacado_db) if total_sacado_db else 0.0
+    conexao.close()
+    
+    texto = "🏦 <b>Fluxo de Caixa (Registros de Saque)</b>\n\n"
+    
+    if ultimos_saques:
+        texto += "<b>Últimas movimentações:</b>\n"
+        for i, (id_db, valor, data_reg) in enumerate(ultimos_saques, 1):
+            data_br = datetime.strptime(data_reg, "%Y-%m-%d").strftime("%d/%m/%Y")
+            valor_br = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            texto += f"• <i>{data_br}</i> - <b>R$ {valor_br}</b>\n"
+            
+        total_br = f"{total_sacado:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        texto += f"\n💵 <b>Total Já Sacado:</b> R$ {total_br}\n\n"
+    else:
+        texto += "<i>Você ainda não registrou nenhum saque no sistema.</i>\n\n"
+        
+    texto += "O que deseja fazer?"
+    
+    teclado_saques = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Registrar Saque 💸"), KeyboardButton(text="Remover Último Saque 🗑️")],
+            [KeyboardButton(text="Voltar ao Centro Financeiro 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    await message.answer(texto, reply_markup=teclado_saques, parse_mode="HTML")
+    await state.set_state(FinanceiroFluxo.menu_principal)
+
+@dp.message(FinanceiroFluxo.menu_principal, F.text == "Registrar Saque 💸")
+async def pedir_valor_saque(message: types.Message, state: FSMContext):
+    await message.answer("Digite o <b>VALOR</b> que foi transferido da Shopee para sua conta bancária (Exemplo: <code>500.00</code> ou <code>1200,50</code>):", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(FinanceiroFluxo.aguardando_valor_saque)
+
+@dp.message(FinanceiroFluxo.aguardando_valor_saque)
+async def salvar_valor_saque(message: types.Message, state: FSMContext):
+    texto_valor = message.text.strip().replace("R$", "").replace(" ", "").replace(",", ".")
+    try:
+        valor = float(texto_valor)
+        data_hoje = datetime.now().strftime("%Y-%m-%d")
+        
+        conexao = sqlite3.connect("banco_dados.db")
+        cursor = conexao.cursor()
+        cursor.execute("INSERT INTO financeiro_saques (valor, data_registro) VALUES (?, ?)", (valor, data_hoje))
+        conexao.commit()
+        conexao.close()
+        
+        if EXIBIR_LOGS: logger.info(f"🏦 Novo saque registrado: R$ {valor}")
+        
+        valor_br = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        await message.answer(f"✅ Saque de <b>R$ {valor_br}</b> registrado com sucesso no caixa!", parse_mode="HTML")
+        await listar_saques(message, state)
+    except ValueError:
+        await message.answer("⚠️ Valor numérico inválido. Digite apenas números (Ex: 500.00):", reply_markup=teclado_cancelar)
+
+@dp.message(FinanceiroFluxo.menu_principal, F.text == "Remover Último Saque 🗑️")
+async def pedir_remocao_saque(message: types.Message, state: FSMContext):
+    conexao = sqlite3.connect("banco_dados.db")
+    cursor = conexao.cursor()
+    cursor.execute("SELECT id, valor, data_registro FROM financeiro_saques ORDER BY id DESC LIMIT 1")
+    ultimo_saque = cursor.fetchone()
+    conexao.close()
+    
+    if not ultimo_saque:
+        await message.answer("Não há saques registrados para remover.", reply_markup=teclado_cancelar)
+        return
+        
+    id_db, valor, data_reg = ultimo_saque
+    data_br = datetime.strptime(data_reg, "%Y-%m-%d").strftime("%d/%m/%Y")
+    valor_br = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    
+    await state.update_data(id_ultimo_saque=id_db)
+    
+    teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar Exclusão Saque ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
+    await message.answer(f"⚠️ Deseja realmente excluir o último registro de saque?\n\n• <i>{data_br}</i> - <b>R$ {valor_br}</b>", reply_markup=teclado_conf, parse_mode="HTML")
+    await state.set_state(FinanceiroFluxo.aguardando_exclusao_saque)
+
+@dp.message(FinanceiroFluxo.aguardando_exclusao_saque)
+async def processar_remocao_saque(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar Exclusão Saque ✅":
+        await message.answer("Operação cancelada.")
+        await listar_saques(message, state)
+        return
+        
+    data = await state.get_data()
+    id_db = data.get("id_ultimo_saque")
+    
+    conexao = sqlite3.connect("banco_dados.db")
+    cursor = conexao.cursor()
+    cursor.execute("DELETE FROM financeiro_saques WHERE id = ?", (id_db,))
+    conexao.commit()
+    conexao.close()
+    
+    if EXIBIR_LOGS: logger.info("🗑️ Último registro de saque apagado.")
+    await message.answer("✅ Registro de saque apagado com sucesso!")
+    await listar_saques(message, state)
+
+
+# --- 4. BALANÇO E DRE (INTELIGÊNCIA CONTÁBIL) 📈 ---
+@dp.message(FinanceiroFluxo.menu_principal, F.text == "Balanço e DRE 📈")
+async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
+    msg_status = await message.answer("📈 Calculando DRE e sincronizando faturamento com a Shopee... Aguarde ⏳")
+    if EXIBIR_LOGS: logger.info("📊 Compilando DRE e cruzando dados...")
+    
+    # 1. Puxa os dados da API (Mesma lógica do relatório antigo)
+    conversoes = await buscar_dados_financeiros_shopee(30)
+    historico_limpo = processar_e_salvar_pedidos_api(conversoes)
+    
+    hoje = datetime.now(fuso_horario)
+    mes_atual_str = hoje.strftime("%Y-%m")
+    
+    # Faturamento do MÊS ATUAL
+    aprovado_mes = sum(v["aprovado"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
+    pendente_mes = sum(v["pendente"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
+    
+    faturamento_valido_mes = aprovado_mes + pendente_mes
+    
+    # Faturamento TOTAL HISTÓRICO (Para saber o dinheiro retido na plataforma)
+    total_aprovado_historico = sum(v["aprovado"] for k, v in historico_limpo.items())
+    
+    # 2. Resgata Variáveis do Banco de Dados
+    taxa_imposto = ler_config_bd("imposto_taxa", 6.0)
+    
+    conexao = sqlite3.connect("banco_dados.db")
+    cursor = conexao.cursor()
+    
+    # Custos Operacionais
+    cursor.execute("SELECT SUM(valor) FROM financeiro_despesas")
+    total_custos_db = cursor.fetchone()[0]
+    total_custos = float(total_custos_db) if total_custos_db else 0.0
+    
+    # Dinheiro Sacado (Fluxo de Caixa Real)
+    cursor.execute("SELECT SUM(valor) FROM financeiro_saques")
+    total_sacado_db = cursor.fetchone()[0]
+    total_sacado = float(total_sacado_db) if total_sacado_db else 0.0
+    
+    conexao.close()
+    
+    # 3. Matemática Contábil do Mês Atual (DRE Simples)
+    # Aqui calculamos baseado em tudo que está aprovado e pendente para ter a visão de negócio do mês
+    imposto_calculado = faturamento_valido_mes * (taxa_imposto / 100)
+    lucro_liquido = faturamento_valido_mes - imposto_calculado - total_custos
+    
+    margem_lucro = (lucro_liquido / faturamento_valido_mes * 100) if faturamento_valido_mes > 0 else 0.0
+    
+    # 4. Cálculo de Dinheiro Preso na Plataforma
+    # (Tudo que já foi APROVADO na história) - (Tudo que já foi SACADO)
+    # Adicionamos uma margem de segurança de R$ 1,00 para arredondamentos de API
+    saldo_retido = total_aprovado_historico - total_sacado
+    if saldo_retido < 1.00: 
+        saldo_retido = 0.0
+    
+    # 5. Formatação do Texto (DRE)
+    def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    
+    MESES_PT = {
+        "01": "Janeiro", "02": "Fevereiro", "03": "Março", "04": "Abril",
+        "05": "Maio", "06": "Junho", "07": "Julho", "08": "Agosto",
+        "09": "Setembro", "10": "Outubro", "11": "Novembro", "12": "Dezembro"
+    }
+    nome_mes = MESES_PT.get(hoje.strftime('%m'), "Mês Atual").upper()
+    
+    texto_dre = (
+        f"📊 <b>DRE e Saúde Financeira | {nome_mes}</b>\n\n"
+        f"<b>1. RECEITA BRUTA:</b>\n"
+        f"   🟢 Faturamento: <b>R$ {f_br(faturamento_valido_mes)}</b>\n"
+        f"   <i>(Aprovado + Pendente)</i>\n\n"
+        f"<b>2. DEDUÇÕES:</b>\n"
+        f"   🏛️ Imposto ({taxa_imposto}%): <b>- R$ {f_br(imposto_calculado)}</b>\n"
+        f"   📉 Custos Fixos: <b>- R$ {f_br(total_custos)}</b>\n"
+        f"   <i>(As despesas cadastradas são debitadas integralmente do balanço mensal)</i>\n\n"
+        f"<b>3. RESULTADO (Lucro Real):</b>\n"
+    )
+    
+    if lucro_liquido >= 0:
+        texto_dre += f"   💰 Lucro Líquido: <b>R$ {f_br(lucro_liquido)}</b> 🟢\n"
+    else:
+        texto_dre += f"   🛑 Prejuízo Líquido: <b>R$ {f_br(lucro_liquido)}</b> 🔴\n"
+        
+    texto_dre += f"   📊 Margem de Lucro: <b>{margem_lucro:.1f}%</b>\n\n"
+    
+    texto_dre += "━━━━━━━━━━━━━━━━━━\n"
+    texto_dre += f"🏦 <b>FLUXO DE CAIXA (SITUAÇÃO DO DINHEIRO)</b>\n\n"
+    texto_dre += f"🔒 <b>Preso na Shopee: R$ {f_br(saldo_retido)}</b>\n"
+    texto_dre += f"<i>(Total já validado e aprovado que ainda não foi sacado/transferido para sua conta).</i>\n\n"
+    
+    texto_dre += f"💸 <b>Saldo já sacado: R$ {f_br(total_sacado)}</b>\n"
+    
+    await msg_status.delete()
+    await message.answer(texto_dre, parse_mode="HTML")
+
 teclado_menu_achadinhos = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Nicho ➕"), KeyboardButton(text="Remover Nicho 🗑️")],
@@ -464,15 +811,13 @@ teclado_edicao_nicho = ReplyKeyboardMarkup(
 )
 
 # 🛠️ Função do novo Menu Inicial Raiz
-# 🛠️ Função do novo Menu Inicial Raiz
 def obter_teclado_raiz():
     botoes = [
         [KeyboardButton(text="Canal Afiliados 📺"), KeyboardButton(text="Outros Canais 🗂️")],
-        [KeyboardButton(text="Centro Financeiro 💸")],
         [KeyboardButton(text="Relatório Geral 📊")],
+        [KeyboardButton(text="Centro Financeiro 💸")],
         [KeyboardButton(text="Opções do Servidor ⚙️")]
     ]
-    return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
 def obter_teclado_principal():
