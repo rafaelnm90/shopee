@@ -832,8 +832,13 @@ from aiogram.filters import Command
 async def forcar_importacao_historica(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     
-    msg_status = await message.answer("🔄 <b>Iniciando varredura histórica profunda...</b>\nComo a Shopee limita consultas gigantes, o robô fará 3 viagens no tempo (em fatias de 30 dias) para costurar os últimos 3 meses. Aguarde... ⏳", parse_mode="HTML")
+    msg_status = await message.answer("🔄 <b>Iniciando Reset Financeiro e Varredura Profunda...</b>\nApagando lixo antigo e puxando a carga máxima permitida pela Shopee (Últimos 3 meses). Aguarde... ⏳", parse_mode="HTML")
     
+    # 🛑 FAXINA COMPLETA ANTES DE COMEÇAR: Zera o banco sujo para evitar fantasmas!
+    salvar_banco_pedidos({})
+    salvar_historico_financeiro({})
+    if EXIBIR_LOGS: logger.info("🧹 Banco de pedidos e histórico zerados para receber a carga limpa.")
+
     from datetime import timedelta
     agora = datetime.now(fuso_horario)
     sucessos = 0
@@ -852,7 +857,7 @@ async def forcar_importacao_historica(message: types.Message):
         await asyncio.sleep(2) # Pausa rápida para a Shopee não bloquear o bot
         
     if sucessos > 0:
-        await msg_status.edit_text("✅ <b>Varredura Histórica Concluída!</b>\nO seu banco de dados local foi preenchido com sucesso em lotes.\n\nVocê já pode ir ao <b>Centro Financeiro</b> e puxar o seu DRE atualizado.", parse_mode="HTML")
+        await msg_status.edit_text("✅ <b>Varredura Histórica Concluída!</b>\nO seu banco de dados local foi resetado e preenchido com sucesso em lotes.\n\nVocê já pode ir ao <b>Centro Financeiro</b> e puxar o seu DRE atualizado.", parse_mode="HTML")
     else:
         await msg_status.edit_text("⚠️ A Shopee não retornou dados antigos ou ocorreu uma falha de conexão.")
 
@@ -3028,10 +3033,9 @@ def processar_e_salvar_pedidos_api(conversoes):
     historico = ler_historico_financeiro()
     
     houve_atualizacao = False
-    import random
     from datetime import timezone
     
-    # 1. Alimenta o banco de pedidos (A prova de falhas, pois usa o ID único do pedido)
+    # 1. Alimenta o banco de pedidos (A prova de falhas)
     if conversoes:
         for conv in conversoes:
             orders = conv.get("orders", [])
@@ -3052,10 +3056,11 @@ def processar_e_salvar_pedidos_api(conversoes):
             c_shopee_frac = c_shopee / qtd_itens
             c_extra_frac = c_extra / qtd_itens
 
-            for order in orders:
+            for idx_order, order in enumerate(orders):
                 order_sn = order.get("orderId")
                 if not order_sn: 
-                    order_sn = f"{conv.get('purchaseTime')}_{random.randint(1000,9999)}"
+                    # 🛑 CORREÇÃO ABSOLUTA: Substituímos o gerador aleatório por um ID determinístico baseado no Timestamp exato.
+                    order_sn = f"shopee_vid_{conv.get('purchaseTime')}_{idx_order}"
                     
                 novo_status = order.get("orderStatus", "").upper()
                 
@@ -3087,21 +3092,6 @@ def processar_e_salvar_pedidos_api(conversoes):
         
     # 2. A MÁGICA DA CORREÇÃO: Limpamos a lousa suja e recalculamos a matemática 100% limpa!
     historico_limpo = {}
-    
-    # Zera todas as comissões do histórico velho para destruir as duplicidades (Mantém só os cliques, se houver)
-    for k, v in historico.items():
-        if isinstance(v, dict):
-            v["aprovado"] = 0.0
-            v["pendente"] = 0.0
-            v["cancelado"] = 0.0
-            v["shopee"] = 0.0
-            v["vendedor"] = 0.0
-            v["qtd_aprovado"] = 0
-            v["qtd_pendente"] = 0
-            v["qtd_cancelado"] = 0
-            historico_limpo[k] = v
-        else:
-            historico_limpo[k] = {"aprovado": 0.0, "pendente": 0.0, "cancelado": 0.0, "shopee": 0.0, "vendedor": 0.0, "qtd_aprovado": 0, "qtd_pendente": 0, "qtd_cancelado": 0, "clicks": 0}
             
     # Reconstrói a tabela financeira somando exatamento os pedidos válidos
     for sn, p in pedidos_db.items():
