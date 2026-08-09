@@ -384,7 +384,7 @@ def obter_teclado_outros_canais():
         keyboard=[
             [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
             [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
-            [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Disparador de Notas 🧾")],
+            [KeyboardButton(text="Gerador de Achadinhos 🛍️")],
             [KeyboardButton(text="Voltar ao Início 🔙")]
         ],
         resize_keyboard=True,
@@ -392,6 +392,25 @@ def obter_teclado_outros_canais():
     )
 
 teclado_outros_canais = obter_teclado_outros_canais()
+
+# --- NOVO MENU: CENTRO FINANCEIRO ---
+def obter_teclado_centro_financeiro():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Disparador de Notas 🧾")],
+            # Futuramente você pode adicionar outros botões financeiros aqui
+            [KeyboardButton(text="Voltar ao Início 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
+@dp.message(F.text == "Centro Financeiro 💸", StateFilter("*"))
+async def menu_centro_financeiro(message: types.Message, state: FSMContext):
+    if message.fromuser.id != ADMIN_ID: return
+    await state.clear()
+    if EXIBIR_LOGS: logger.info("💸 Acessando a gaveta do Centro Financeiro.")
+    await message.answer("💸 <b>Centro Financeiro</b>\nSelecione a ferramenta desejada:", reply_markup=obter_teclado_centro_financeiro(), parse_mode="HTML")
 
 teclado_menu_achadinhos = ReplyKeyboardMarkup(
     keyboard=[
@@ -414,12 +433,15 @@ teclado_edicao_nicho = ReplyKeyboardMarkup(
 )
 
 # 🛠️ Função do novo Menu Inicial Raiz
+# 🛠️ Função do novo Menu Inicial Raiz
 def obter_teclado_raiz():
     botoes = [
         [KeyboardButton(text="Canal Afiliados 📺"), KeyboardButton(text="Outros Canais 🗂️")],
+        [KeyboardButton(text="Centro Financeiro 💸")],
         [KeyboardButton(text="Relatório Geral 📊")],
         [KeyboardButton(text="Opções do Servidor ⚙️")]
     ]
+    return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
 def obter_teclado_principal():
