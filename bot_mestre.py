@@ -435,8 +435,8 @@ def obter_teclado_centro_financeiro():
         keyboard=[
             [KeyboardButton(text="Balanço e DRE 📈"), KeyboardButton(text="Gestão de Custos 📉")],
             [KeyboardButton(text="Provisão de Impostos 🏛️"), KeyboardButton(text="Fluxo de Caixa 🏦")],
-            [KeyboardButton(text="Definir Saldo (App) 💰"), KeyboardButton(text="Disparador de Notas 🧾")],
-            [KeyboardButton(text="Voltar ao Início 🔙")]
+            [KeyboardButton(text="Definir Saldo (App) 💰"), KeyboardButton(text="Extrato Rápido 📜")],
+            [KeyboardButton(text="Disparador de Notas 🧾"), KeyboardButton(text="Voltar ao Início 🔙")]
         ],
         resize_keyboard=True,
         is_persistent=True
@@ -785,6 +785,72 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
         
     await msg_status.delete()
     await message.answer(texto_dre, parse_mode="HTML")
+
+# --- 6. EXTRATO RÁPIDO (HISTÓRICO) 📜 ---
+@dp.message(FinanceiroFluxo.menu_principal, F.text == "Extrato Rápido 📜")
+async def gerar_extrato_rapido(message: types.Message, state: FSMContext):
+    msg_status = await message.answer("📜 Compilando seu histórico financeiro... Aguarde ⏳")
+    
+    historico_limpo = ler_historico_financeiro()
+    taxa_imposto = ler_config_bd("imposto_taxa", 6.0)
+    
+    conexao = sqlite3.connect("banco_dados.db")
+    cursor = conexao.cursor()
+    
+    # Pega todos os custos para separar por mês
+    cursor.execute("SELECT valor, tipo, data_registro FROM financeiro_despesas")
+    despesas = cursor.fetchall()
+    conexao.close()
+    
+    custos_fixos_mensais = sum(d[0] for d in despesas if d[1] == "mensal")
+    custos_pontuais = {} # Dicionário para agrupar custos pontuais por mês "YYYY-MM"
+    for d in despesas:
+        if d[1] == "pontual" and d[2]:
+            mes_gasto = d[2][:7] # Extrai YYYY-MM
+            custos_pontuais[mes_gasto] = custos_pontuais.get(mes_gasto, 0.0) + d[0]
+            
+    # Agrupa o faturamento por mês
+    faturamento_mensal = {}
+    for data_str, dados_dia in historico_limpo.items():
+        mes_key = data_str[:7]
+        faturamento_mensal[mes_key] = faturamento_mensal.get(mes_key, 0.0) + dados_dia.get("aprovado", 0.0)
+        
+    if not faturamento_mensal:
+        await msg_status.edit_text("<i>Nenhum histórico financeiro encontrado ainda.</i>", parse_mode="HTML")
+        return
+        
+    # Ordena os meses do mais recente para o mais antigo (Mostra os últimos 6 meses)
+    meses_ordenados = sorted(faturamento_mensal.keys(), reverse=True)[:6]
+    
+    def f_br(valor): return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    
+    texto = "📜 <b>Extrato Rápido (Últimos 6 Meses)</b>\n\n"
+    
+    for mes in meses_ordenados:
+        faturamento = faturamento_mensal[mes]
+        imposto = faturamento * (taxa_imposto / 100)
+        custo_pontual_mes = custos_pontuais.get(mes, 0.0)
+        custo_total_mes = custos_fixos_mensais + custo_pontual_mes
+        
+        lucro = faturamento - imposto - custo_total_mes
+        
+        # Formatação visual amigável do mês
+        ano_str, mes_str = mes.split('-')
+        meses_pt = {"01": "Jan", "02": "Fev", "03": "Mar", "04": "Abr", "05": "Mai", "06": "Jun", "07": "Jul", "08": "Ago", "09": "Set", "10": "Out", "11": "Nov", "12": "Dez"}
+        nome_mes = f"{meses_pt.get(mes_str, mes_str)}/{ano_str}"
+        
+        icone_lucro = "✅" if lucro >= 0 else "🛑"
+        
+        texto += f"📅 <b>{nome_mes}</b>\n"
+        texto += f"   💰 Faturado: R$ {f_br(faturamento)}\n"
+        texto += f"   🏛️ Impostos: - R$ {f_br(imposto)}\n"
+        texto += f"   📉 Custos: - R$ {f_br(custo_total_mes)}\n"
+        texto += f"   {icone_lucro} <b>Líquido: R$ {f_br(lucro)}</b>\n\n"
+        
+    texto += "<i>*Os custos incluem suas despesas fixas + despesas pontuais do respectivo mês.</i>"
+    
+    await msg_status.edit_text(texto, parse_mode="HTML")
+
 teclado_menu_achadinhos = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Nicho ➕"), KeyboardButton(text="Remover Nicho 🗑️")],
