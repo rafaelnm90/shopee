@@ -735,12 +735,11 @@ async def processar_remocao_saque(message: types.Message, state: FSMContext):
 # --- 4. BALANÇO E DRE (INTELIGÊNCIA CONTÁBIL) 📈 ---
 @dp.message(FinanceiroFluxo.menu_principal, F.text == "Balanço e DRE 📈")
 async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
-    msg_status = await message.answer("📈 Calculando DRE e sincronizando faturamento com a Shopee... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("📊 Compilando DRE e cruzando dados...")
+    msg_status = await message.answer("📈 Lendo a base de dados financeira e calculando DRE... Aguarde ⏳")
+    if EXIBIR_LOGS: logger.info("📊 Compilando DRE a partir do banco de dados local...")
     
-    # 1. Puxa os dados da API (Mesma lógica do relatório antigo)
-    conversoes = await buscar_dados_financeiros_shopee(30)
-    historico_limpo = processar_e_salvar_pedidos_api(conversoes)
+    # 1. Puxa os dados direto do banco de dados local (Mais rápido e pega todo o histórico)
+    historico_limpo = ler_historico_financeiro()
     
     hoje = datetime.now(fuso_horario)
     mes_atual_str = hoje.strftime("%Y-%m")
@@ -751,10 +750,10 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     
     faturamento_valido_mes = aprovado_mes + pendente_mes
     
-    # Faturamento TOTAL HISTÓRICO (Para saber o dinheiro retido na plataforma)
+    # Faturamento TOTAL HISTÓRICO VERDADEIRO (Lendo de toda a vida da base de dados)
     total_aprovado_historico = sum(v["aprovado"] for k, v in historico_limpo.items())
     
-    # 2. Resgata Variáveis do Banco de Dados
+    # 2. Resgata Variáveis do Banco de Dados SQLite
     taxa_imposto = ler_config_bd("imposto_taxa", 6.0)
     
     conexao = sqlite3.connect("banco_dados.db")
@@ -773,16 +772,15 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     conexao.close()
     
     # 3. Matemática Contábil do Mês Atual (DRE Simples)
-    # Aqui calculamos baseado em tudo que está aprovado e pendente para ter a visão de negócio do mês
     imposto_calculado = faturamento_valido_mes * (taxa_imposto / 100)
     lucro_liquido = faturamento_valido_mes - imposto_calculado - total_custos
     
     margem_lucro = (lucro_liquido / faturamento_valido_mes * 100) if faturamento_valido_mes > 0 else 0.0
     
     # 4. Cálculo de Dinheiro Preso na Plataforma
-    # (Tudo que já foi APROVADO na história) - (Tudo que já foi SACADO)
-    # Adicionamos uma margem de segurança de R$ 1,00 para arredondamentos de API
     saldo_retido = total_aprovado_historico - total_sacado
+    
+    # Adicionamos uma margem de segurança de 1 dólar/real para arredondamentos flutuantes de API
     if saldo_retido < 1.00: 
         saldo_retido = 0.0
     
