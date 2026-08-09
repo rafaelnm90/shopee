@@ -2376,7 +2376,7 @@ async def voltar_menu_autorais(message: types.Message, state: FSMContext):
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Origem 📥")
 async def pedir_origem_autorais(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("📥 Solicitando nova origem para vídeos autorais...")
-    await message.answer("Envie o <b>ID Numérico</b> ou <b>@username</b> do grupo de ORIGEM de onde o bot vai puxar os vídeos (Ex: -100123456789):", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await message.answer("Envie o <b>ID Numérico, @username ou Link do Telegram Web</b> do grupo de ORIGEM de onde o bot vai puxar os vídeos (Ex: -100123456789 ou https://web.telegram.org/a/#-100...):", parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(AutoraisFluxo.aguardando_origem)
 
 @dp.message(AutoraisFluxo.aguardando_origem)
@@ -2388,44 +2388,28 @@ async def pedir_topico_autorais(message: types.Message, state: FSMContext):
     novo_valor = message.text.strip()
     msg_status = await message.answer("⏳ <b>Validando grupo de origem...</b>", parse_mode="HTML")
     
-    id_real = novo_valor
-    nome_chat = novo_valor
-    sucesso = False
+    # ✅ Usa o Motor Inteligente para processar links do Telegram Web e IDs normais
+    sucesso, id_final, nome_chat = await validar_e_formatar_alvo(bot, novo_valor)
     
-    variacoes = [novo_valor]
-    if novo_valor.lstrip('-').isdigit():
-        so_num = novo_valor.replace("-100", "").replace("-", "")
-        variacoes = [novo_valor, f"-100{so_num}", f"-{so_num}", so_num]
-    elif "t.me/c/" in novo_valor:
-        so_num = novo_valor.split("t.me/c/")[1].split("/")[0]
-        variacoes = [f"-100{so_num}"]
-    elif "t.me/" in novo_valor:
-        username = novo_valor.split("t.me/")[1].split("/")[0]
-        variacoes = [f"@{username}"]
-        
-    for var in variacoes:
-        try:
-            chat_obj = await bot.get_chat(var)
-            nome_chat = chat_obj.title or chat_obj.full_name or var
-            id_real = chat_obj.id
-            sucesso = True
-            break
-        except Exception:
-            continue
-    
+    await msg_status.delete()
+
     if sucesso:
-        await msg_status.delete()
         await message.answer(f"✅ Origem validada e encontrada: <b>{nome_chat}</b>", parse_mode="HTML")
-        salvar_nome_grupo(str(id_real), nome_chat)
+        salvar_nome_grupo(str(id_final), nome_chat)
     else:
-        await msg_status.delete()
+        # Se falhar (ex: bot não está no grupo), limpa o valor inserido para o ID numérico e salva mesmo assim
+        import re
+        id_final = novo_valor
+        if "t.me/c/" in novo_valor:
+            so_num = re.search(r't\.me/c/(\d+)', novo_valor)
+            if so_num: id_final = f"-100{so_num.group(1)}"
+        elif "web.telegram.org" in novo_valor:
+             so_num = re.search(r'-(\d+)', novo_valor)
+             if so_num: id_final = f"-100{so_num.group(1)}"
+             
         await message.answer("⚠️ <b>Aviso de Permissão:</b> O Bot Principal não tem permissão para enxergar este grupo. O ID será salvo, pois a Conta Secundária é quem fará a extração física.", parse_mode="HTML")
-        if novo_valor.lstrip('-').isdigit():
-            so_num = novo_valor.replace("-100", "").replace("-", "")
-            id_real = int(f"-100{so_num}")
-            
-    await state.update_data(nova_origem=id_real)
-    
+
+    await state.update_data(nova_origem=id_final)
     await message.answer("Agora, digite o <b>NÚMERO DO TÓPICO (Subcanal)</b> que ele deve monitorar.\n\n<i>Dica: Se os vídeos caem no chat 'Geral', digite <b>1</b>. Se for um canal sem tópicos, digite <b>0</b> para ler tudo.</i>", parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(AutoraisFluxo.aguardando_topico)
 
@@ -2457,7 +2441,7 @@ async def salvar_origem_autorais(message: types.Message, state: FSMContext):
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Destino 📤")
 async def pedir_destino_autorais(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("📤 Solicitando novo destino para vídeos autorais...")
-    await message.answer("Envie o <b>ID Numérico</b> ou <b>@username</b> do canal de DESTINO para onde o bot vai enviar os vídeos convertidos (Ex: @meu_canal):", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await message.answer("Envie o <b>ID Numérico, @username ou Link do Telegram Web</b> do canal de DESTINO para onde o bot vai enviar os vídeos convertidos (Ex: @meu_canal ou https://web.telegram.org/...):", parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(AutoraisFluxo.aguardando_destino)
 
 @dp.message(AutoraisFluxo.aguardando_destino)
@@ -2469,48 +2453,33 @@ async def salvar_destino_autorais(message: types.Message, state: FSMContext):
     novo_valor = message.text.strip()
     msg_status = await message.answer("⏳ <b>Validando canal de destino...</b>", parse_mode="HTML")
     
-    id_real = novo_valor
-    nome_chat = novo_valor
-    sucesso = False
-    
-    variacoes = [novo_valor]
-    if novo_valor.lstrip('-').isdigit():
-        so_num = novo_valor.replace("-100", "").replace("-", "")
-        variacoes = [novo_valor, f"-100{so_num}", f"-{so_num}", so_num]
-    elif "t.me/c/" in novo_valor:
-        so_num = novo_valor.split("t.me/c/")[1].split("/")[0]
-        variacoes = [f"-100{so_num}"]
-    elif "t.me/" in novo_valor:
-        username = novo_valor.split("t.me/")[1].split("/")[0]
-        variacoes = [f"@{username}"]
-        
-    for var in variacoes:
-        try:
-            chat_obj = await bot.get_chat(var)
-            nome_chat = chat_obj.title or chat_obj.full_name or var
-            id_real = chat_obj.id
-            sucesso = True
-            break
-        except Exception:
-            continue
+    # ✅ Usa o Motor Inteligente para processar links do Telegram Web e IDs normais
+    sucesso, id_final, nome_chat = await validar_e_formatar_alvo(bot, novo_valor)
+
+    await msg_status.delete()
 
     if sucesso:
-        await msg_status.delete()
         await message.answer(f"✅ Destino validado: <b>{nome_chat}</b>", parse_mode="HTML")
-        salvar_nome_grupo(str(id_real), nome_chat)
+        salvar_nome_grupo(str(id_final), nome_chat)
     else:
-        await msg_status.delete()
+        # Tenta extrair o ID de qualquer formato de link, caso não consiga validar diretamente
+        import re
+        id_final = novo_valor
+        if "t.me/c/" in novo_valor:
+            so_num = re.search(r't\.me/c/(\d+)', novo_valor)
+            if so_num: id_final = f"-100{so_num.group(1)}"
+        elif "web.telegram.org" in novo_valor:
+             so_num = re.search(r'-(\d+)', novo_valor)
+             if so_num: id_final = f"-100{so_num.group(1)}"
+             
         await message.answer("⚠️ <b>Aviso:</b> O bot não conseguiu encontrar este destino (verifique se ele é administrador do canal). O ID será salvo mesmo assim.", parse_mode="HTML")
-        if novo_valor.lstrip('-').isdigit():
-            so_num = novo_valor.replace("-100", "").replace("-", "")
-            id_real = int(f"-100{so_num}")
-            
+
     config = ler_autorais_config()
-    config["destino"] = id_real
+    config["destino"] = id_final
     salvar_autorais_config(config)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Destino dos vídeos autorais atualizado para: {id_real}")
-    await message.answer(f"✅ <b>Destino atualizado com sucesso!</b>\nOs vídeos convertidos serão enviados instantaneamente para: <code>{id_real}</code>", parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info(f"✅ Destino dos vídeos autorais atualizado para: {id_final}")
+    await message.answer(f"✅ <b>Destino atualizado com sucesso!</b>\nOs vídeos convertidos serão enviados instantaneamente para: <code>{id_final}</code>", parse_mode="HTML")
     await painel_autorais(message, state)
 
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Dias (Retorno) ⏳")
