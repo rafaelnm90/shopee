@@ -923,6 +923,23 @@ teclado_opcoes_espiao = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
+# ==========================================
+# 🛠️ BOTÃO DE MANUTENÇÃO: AMNÉSIA FINANCEIRA
+# ==========================================
+from aiogram.filters import Command
+
+@dp.message(Command("zerar_financeiro"))
+async def zerar_historico_financeiro_bot(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    
+    # Zera os bancos de memória de pedidos
+    salvar_banco_pedidos({})
+    salvar_historico_financeiro({})
+    salvar_config_bd("ajuste_saldo_inicial", 0.0) # Remove o ajuste invisível
+    
+    if EXIBIR_LOGS: logger.info("🧹 Banco de pedidos e histórico zerados pelo administrador.")
+    await message.answer("✅ <b>Amnésia Concluída!</b>\nO robô esqueceu os 90 dias de histórico e os ajustes ocultos.\nA partir de agora, ele voltará a ler apenas os últimos 30 dias.", parse_mode="HTML")
+
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Analisar Canais Vigiados 🔎")
 async def menu_analise_canais_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
