@@ -270,12 +270,10 @@ class FinanceiroFluxo(StatesGroup):
     menu_principal = State()
     aguardando_nome_despesa = State()
     aguardando_valor_despesa = State()
-    aguardando_tipo_despesa = State() # 🟢 NOVO ESTADO AQUI
+    aguardando_tipo_despesa = State()
     aguardando_exclusao_despesa = State()
     aguardando_valor_imposto = State()
-    aguardando_valor_saque = State()
-    aguardando_exclusao_saque = State()
-    aguardando_saldo_shopee = State() # 🟢 NOME ATUALIZADO AQUI
+    aguardando_saldo_shopee = State()
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
@@ -436,7 +434,7 @@ def obter_teclado_centro_financeiro():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Balanço e DRE 📈"), KeyboardButton(text="Gestão de Custos 📉")],
-            [KeyboardButton(text="Provisão de Impostos 🏛️"), KeyboardButton(text="Fluxo de Caixa (Saques) 🏦")],
+            [KeyboardButton(text="Provisão de Impostos 🏛️"), KeyboardButton(text="Fluxo de Caixa 🏦")],
             [KeyboardButton(text="Definir Saldo (App) 💰"), KeyboardButton(text="Disparador de Notas 🧾")],
             [KeyboardButton(text="Voltar ao Início 🔙")]
         ],
@@ -654,123 +652,17 @@ async def processar_remocao_custo(message: types.Message, state: FSMContext):
     else:
         await message.answer("⚠️ Número não encontrado na lista. Digite um número válido ou clique em Cancelar:", reply_markup=teclado_cancelar)
 
-# --- 3. FLUXO DE CAIXA (SAQUES) 🏦 ---
-@dp.message(FinanceiroFluxo.menu_principal, F.text == "Fluxo de Caixa (Saques) 🏦")
-async def listar_saques(message: types.Message, state: FSMContext):
-    conexao = sqlite3.connect("banco_dados.db")
-    cursor = conexao.cursor()
-    # Busca os últimos 5 saques para exibir um histórico enxuto
-    cursor.execute("SELECT id, valor, data_registro FROM financeiro_saques ORDER BY id DESC LIMIT 5")
-    ultimos_saques = cursor.fetchall()
-    
-    # Soma de todo o dinheiro já retirado
-    cursor.execute("SELECT SUM(valor) FROM financeiro_saques")
-    total_sacado_db = cursor.fetchone()[0]
-    total_sacado = float(total_sacado_db) if total_sacado_db else 0.0
-    conexao.close()
-    
-    texto = "🏦 <b>Fluxo de Caixa (Registros de Saque)</b>\n\n"
-    
-    if ultimos_saques:
-        texto += "<b>Últimas movimentações:</b>\n"
-        for i, (id_db, valor, data_reg) in enumerate(ultimos_saques, 1):
-            data_br = datetime.strptime(data_reg, "%Y-%m-%d").strftime("%d/%m/%Y")
-            valor_br = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            texto += f"• <i>{data_br}</i> - <b>R$ {valor_br}</b>\n"
-            
-        total_br = f"{total_sacado:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        texto += f"\n💵 <b>Total Já Sacado:</b> R$ {total_br}\n\n"
-    else:
-        texto += "<i>Você ainda não registrou nenhum saque no sistema.</i>\n\n"
-        
-    texto += "O que deseja fazer?"
-    
-    teclado_saques = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Registrar Saque 💸"), KeyboardButton(text="Remover Último Saque 🗑️")],
-            [KeyboardButton(text="Voltar ao Centro Financeiro 🔙")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
+# --- 3. FLUXO DE CAIXA (PLANILHA EXTERNA) 🏦 ---
+@dp.message(FinanceiroFluxo.menu_principal, F.text == "Fluxo de Caixa 🏦")
+async def abrir_fluxo_caixa_planilha(message: types.Message, state: FSMContext):
+    if EXIBIR_LOGS: logger.info("🏦 Usuário solicitou acesso ao Fluxo de Caixa externo.")
+    texto = (
+        "🏦 <b>Seu Fluxo de Caixa</b>\n\n"
+        "O controle detalhado de saídas, recebimentos reais e caixa livre agora é feito diretamente na sua planilha oficial do Google Planilhas para maior precisão.\n\n"
+        "Acesse o seu controle financeiro clicando no link abaixo:\n"
+        "👉 <a href='https://docs.google.com/spreadsheets/d/1zKtT_Zl5XLDrG9cQgzhoThyXzw56UyG_0vxOcUZjlZM/edit?usp=sharing'>Abrir Planilha de Fluxo de Caixa</a>"
     )
-    
-    await message.answer(texto, reply_markup=teclado_saques, parse_mode="HTML")
-    await state.set_state(FinanceiroFluxo.menu_principal)
-
-@dp.message(FinanceiroFluxo.menu_principal, F.text == "Registrar Saque 💸")
-async def pedir_valor_saque(message: types.Message, state: FSMContext):
-    await message.answer("Digite o <b>VALOR</b> que foi transferido da Shopee para sua conta bancária (Exemplo: <code>500.00</code> ou <code>1200,50</code>):", reply_markup=teclado_cancelar, parse_mode="HTML")
-    await state.set_state(FinanceiroFluxo.aguardando_valor_saque)
-
-@dp.message(FinanceiroFluxo.aguardando_valor_saque)
-async def salvar_valor_saque(message: types.Message, state: FSMContext):
-    # 🛡️ Trava de Cancelamento
-    if message.text == "Cancelar ❌":
-        await state.clear()
-        await message.answer("Ação cancelada.")
-        await listar_saques(message, state)
-        return
-        
-    texto_valor = message.text.strip().replace("R$", "").replace(" ", "").replace(",", ".")
-    try:
-        valor = float(texto_valor)
-        data_hoje = datetime.now().strftime("%Y-%m-%d")
-        
-        conexao = sqlite3.connect("banco_dados.db")
-        cursor = conexao.cursor()
-        cursor.execute("INSERT INTO financeiro_saques (valor, data_registro) VALUES (?, ?)", (valor, data_hoje))
-        conexao.commit()
-        conexao.close()
-        
-        # 🟢 A MÁGICA: Deduz o saque diretamente do saldo da Shopee do Robô!
-        saldo_atual = float(ler_config_bd("saldo_caixa_shopee", 0.0))
-        novo_saldo = saldo_atual - valor
-        if novo_saldo < 0: novo_saldo = 0.0
-        salvar_config_bd("saldo_caixa_shopee", novo_saldo)
-        
-        if EXIBIR_LOGS: logger.info(f"🏦 Novo saque registrado e deduzido: R$ {valor}")
-        
-        valor_br = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        await message.answer(f"✅ Saque de <b>R$ {valor_br}</b> registrado com sucesso e deduzido do seu saldo preso na Shopee!", parse_mode="HTML")
-        await listar_saques(message, state)
-    except ValueError:
-        await message.answer("⚠️ Valor numérico inválido. Digite apenas números (Ex: 500.00):", reply_markup=teclado_cancelar)
-
-@dp.message(FinanceiroFluxo.aguardando_exclusao_saque)
-async def processar_remocao_saque(message: types.Message, state: FSMContext):
-    # 🛡️ Trava de Cancelamento
-    if message.text == "Cancelar ❌":
-        await state.clear()
-        await message.answer("Ação cancelada.")
-        await listar_saques(message, state)
-        return
-        
-    if message.text != "Aprovar Exclusão Saque ✅":
-        await message.answer("Operação cancelada.")
-        await listar_saques(message, state)
-        return
-        
-    data = await state.get_data()
-    id_db = data.get("id_ultimo_saque")
-    
-    conexao = sqlite3.connect("banco_dados.db")
-    cursor = conexao.cursor()
-    
-    # 🟢 A MÁGICA: Recupera o valor do saque para devolver (estornar) ao saldo da Shopee!
-    cursor.execute("SELECT valor FROM financeiro_saques WHERE id = ?", (id_db,))
-    resultado = cursor.fetchone()
-    if resultado:
-        valor_saque = resultado[0]
-        saldo_atual = float(ler_config_bd("saldo_caixa_shopee", 0.0))
-        salvar_config_bd("saldo_caixa_shopee", saldo_atual + valor_saque)
-        
-    cursor.execute("DELETE FROM financeiro_saques WHERE id = ?", (id_db,))
-    conexao.commit()
-    conexao.close()
-    
-    if EXIBIR_LOGS: logger.info("🗑️ Último registro de saque apagado e estornado pro caixa.")
-    await message.answer("✅ Registro de saque apagado com sucesso! O valor retornou ao saldo da Shopee.")
-    await listar_saques(message, state)
+    await message.answer(texto, parse_mode="HTML", disable_web_page_preview=True)
 
 
 # --- 5. DEFINIR SALDO BASE (LIVRO CAIXA AUTOMÁTICO) ---
@@ -843,14 +735,10 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     conexao = sqlite3.connect("banco_dados.db")
     cursor = conexao.cursor()
     
-    # 🟢 A MÁGICA: Deduz os custos fixos mensais E os custos pontuais apenas se foram criados neste mês
     cursor.execute("SELECT SUM(valor) FROM financeiro_despesas WHERE tipo = 'mensal' OR (tipo = 'pontual' AND data_registro LIKE ?)", (f"{mes_atual_str}%",))
     total_custos_db = cursor.fetchone()[0]
     total_custos = float(total_custos_db) if total_custos_db else 0.0
     
-    cursor.execute("SELECT SUM(valor) FROM financeiro_saques")
-    total_sacado_db = cursor.fetchone()[0]
-    total_sacado = float(total_sacado_db) if total_sacado_db else 0.0
     conexao.close()
     
     if saldo_shopee < 1.00: 
@@ -885,21 +773,18 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
         
         f"   <b>Deduções Imediatas:</b>\n"
         f"   🏛️ Provisão Imposto ({taxa_imposto}%): <b>- R$ {f_br(imposto_real)}</b>\n"
-        f"   📉 Custos Fixos Mensais: <b>- R$ {f_br(total_custos)}</b>\n\n"
+        f"   📉 Custos Fixos Cadastrados: <b>- R$ {f_br(total_custos)}</b>\n\n"
     )
     
     if lucro_livre_real >= 0:
         texto_dre += f"   ✅ <b>LUCRO LIVRE NO CAIXA: R$ {f_br(lucro_livre_real)}</b>\n"
-        texto_dre += f"   <i>(Dinheiro limpo que sobra se você sacar tudo hoje).</i>\n\n"
+        texto_dre += f"   <i>(Dinheiro limpo que sobra se você liquidar o saldo hoje).</i>\n\n"
     else:
         texto_dre += f"   🛑 <b>DÉFICIT NO CAIXA: R$ {f_br(lucro_livre_real)}</b>\n"
         texto_dre += f"   <i>(O saldo atual não cobre as suas despesas fixas).</i>\n\n"
         
-    texto_dre += f"💸 Saldo já sacado: R$ {f_br(total_sacado)}\n"
-    
     await msg_status.delete()
     await message.answer(texto_dre, parse_mode="HTML")
-
 teclado_menu_achadinhos = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Nicho ➕"), KeyboardButton(text="Remover Nicho 🗑️")],
