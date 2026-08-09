@@ -121,7 +121,7 @@ async def enviar_email_brevo(para_email, para_nome, assunto, corpo_html, caminho
             texto_resposta = await resposta.text()
             return resposta.status, texto_resposta
 
-async def processar_fila_envios(chat_id=None, message_id=None):
+async def processar_fila_envios(msg_progresso: types.Message = None):
     global bot_instance
     if EXIBIR_LOGS: logger.info("🚀 Iniciando esteira de disparos de notas fiscais...")
     
@@ -152,13 +152,15 @@ async def processar_fila_envios(chat_id=None, message_id=None):
         
         valor = item["valor"] if "valor" in item.keys() and item["valor"] else "0,00"
         
-        # 🔥 MÁGICA DA CONTAGEM DINÂMICA (Igual ao bot_mestre.py) 🔥
-        if chat_id and message_id and bot_instance:
+        # 🔥 MÁGICA DA CONTAGEM DINÂMICA (Exatamente como no bot_mestre.py) 🔥
+        if msg_progresso:
             try:
-                status_dinamico = f"🚀 <i>Disparando notas fiscais...</i>\n⏳ Enviando nota ({idx}/{total_notas}): <code>{loja}</code>"
-                await bot_instance.edit_message_text(status_dinamico, chat_id=chat_id, message_id=message_id, parse_mode="HTML")
+                loja_segura = str(loja).replace('<', '').replace('>', '') # Blindagem HTML
+                status_dinamico = f"🚀 <i>Disparando notas fiscais...</i>\n⏳ Enviando nota ({idx}/{total_notas}): <code>{loja_segura}</code>"
+                # Usa a edição direta do objeto da mensagem para driblar o bloqueio do Telegram
+                await msg_progresso.edit_text(status_dinamico, parse_mode="HTML")
             except Exception as e:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao atualizar interface do Telegram (Rate Limit): {e}")
+                if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao atualizar interface do Telegram: {e}")
                 pass
 
         if envios_realizados >= LIMITE_DIARIO:
@@ -178,16 +180,15 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             await enviar_email_brevo(EMAIL_ADMIN, "Administrador", assunto_admin, corpo_admin)
             conexao.close()
             
-            if chat_id and message_id and bot_instance:
+            if msg_progresso:
                 try: 
-                    await bot_instance.edit_message_text(f"⏸️ <b>PAUSA DE SEGURANÇA:</b> Limite de {LIMITE_DIARIO} atingido.\nRetomada automática programada para {retomada.strftime('%d/%m às %H:%M')}.", chat_id=chat_id, message_id=message_id, parse_mode="HTML")
+                    await msg_progresso.edit_text(f"⏸️ <b>PAUSA DE SEGURANÇA:</b> Limite de {LIMITE_DIARIO} atingido.\nRetomada automática programada para {retomada.strftime('%d/%m às %H:%M')}.", parse_mode="HTML")
                 except Exception as e: 
                     if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao atualizar mensagem de pausa no Telegram: {e}")
                     pass
             return
 
         assunto = f"Sua Nota Fiscal de Comissão Shopee - {loja}"
-        # 🧹 Limpeza das tags <br> para corrigir o espaçamento duplo do e-mail
         corpo = (
             f"<p>Olá, equipe da <b>{loja}</b>.</p>"
             f"<p>Envio em anexo a Nota Fiscal de prestação de serviços referente às comissões geradas através do programa de afiliados da Shopee, no valor de R$ {valor}. O documento já está processado e pode ser direcionado para o controle contábil e financeiro da empresa.</p>"
@@ -205,7 +206,6 @@ async def processar_fila_envios(chat_id=None, message_id=None):
                 envios_realizados += 1
                 
                 if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Nota enviada para {loja} ({email}).")
-                
                 try: os.remove(pdf)
                 except Exception: pass
             else:
@@ -213,7 +213,6 @@ async def processar_fila_envios(chat_id=None, message_id=None):
                 cursor.execute("UPDATE fila_notas SET status = 'ERRO', motivo_erro = ? WHERE id = ?", (erro_msg, id_registro))
                 erros += 1
                 falhas_etapa.append(f"⚠️ Falha ao processar loja {loja}: {erro_msg}")
-                
                 if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar para {loja}: {erro_msg}")
                 
         except Exception as e:
@@ -221,7 +220,6 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             cursor.execute("UPDATE fila_notas SET status = 'ERRO', motivo_erro = ? WHERE id = ?", (erro_msg, id_registro))
             erros += 1
             falhas_etapa.append(f"⚠️ Erro de rede/crítico na loja {loja}: {e}")
-            
             if EXIBIR_LOGS: logger.error(f"❌ Erro Crítico ao enviar para {loja}: {e}")
             
         conexao.commit()
@@ -234,7 +232,7 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             shutil.rmtree(pasta_extracao)
     except Exception: pass
     
-    if chat_id and message_id and bot_instance:
+    if msg_progresso:
         try:
             texto_conclusao = (
                 f"✅ <b>Operação finalizada!</b>\n"
@@ -243,7 +241,7 @@ async def processar_fila_envios(chat_id=None, message_id=None):
                 f"✅ Sucessos: <b>{envios_realizados}</b>\n"
                 f"❌ Erros: <b>{erros}</b>"
             )
-            await bot_instance.edit_message_text(texto_conclusao, chat_id=chat_id, message_id=message_id, parse_mode="HTML")
+            await msg_progresso.edit_text(texto_conclusao, parse_mode="HTML")
         except Exception as e: 
             if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao postar conclusão no Telegram: {e}")
             pass
@@ -257,7 +255,7 @@ async def processar_fila_envios(chat_id=None, message_id=None):
         
     await enviar_email_brevo(EMAIL_ADMIN, "Administrador", assunto_final, corpo_final)
     
-    if chat_id and message_id and bot_instance:
+    if msg_progresso and bot_instance:
         teclado_outros = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
@@ -269,7 +267,7 @@ async def processar_fila_envios(chat_id=None, message_id=None):
             is_persistent=True
         )
         try:
-            await bot_instance.send_message(chat_id, "O painel principal está liberado.", reply_markup=teclado_outros)
+            await bot_instance.send_message(msg_progresso.chat.id, "O painel principal está liberado.", reply_markup=teclado_outros)
         except Exception: pass
 
 # ==========================================
@@ -854,7 +852,6 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
             return
 
         if len(notas_validadas) == 1:
-            # Se só tem 1 nota na aprovação final, mostra ela direto
             nota = notas_validadas[0]
             caminho_completo = os.path.join(pasta_extracao, nota['pdf'])
             try:
@@ -864,7 +861,6 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
                 await message.answer(f"❌ Erro ao enviar o arquivo: {e}")
             return
         
-        # Se tem mais de 1, pergunta qual quer ver (sem o 'else')
         texto = "🔎 <b>Qual nota você deseja visualizar?</b>\nDigite o <b>NÚMERO</b> correspondente:\n\n"
         for i, nota in enumerate(notas_validadas, 1):
             texto += f"<b>{i}</b> - {nota['pdf']}\n"
@@ -886,13 +882,19 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
     conexao.commit()
     conexao.close()
     
-    # O teclado principal é removido imediatamente
-    msg_dinamica = await message.answer("⏳ <b>Preparando o motor de envios...</b>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    # -------------------------------------------------------------
+    # 🔥 A CORREÇÃO DO BLOQUEIO DE EDIÇÃO (Telegram API Rate Limit)
+    # -------------------------------------------------------------
+    # 1. Apaga o teclado do usuário de forma isolada
+    await message.answer("⏳ <b>Preparando o motor de envios...</b>", parse_mode="HTML", reply_markup=types.ReplyKeyboardRemove())
+    
+    # 2. Cria uma mensagem totalmente LIMPA (sem comandos de teclado) para ser o nosso quadro de animação
+    msg_dinamica = await message.answer("🚀 <i>Sincronizando com a base de dados...</i>", parse_mode="HTML")
     
     if EXIBIR_LOGS: logger.info("⏰ Acionando motor de envio via Brevo.")
     
-    # A tarefa é lançada em segundo plano
-    asyncio.create_task(processar_fila_envios(chat_id=message.chat.id, message_id=msg_dinamica.message_id))
+    # A tarefa é lançada em segundo plano enviando O OBJETO DA MENSAGEM diretamente
+    asyncio.create_task(processar_fila_envios(msg_progresso=msg_dinamica))
     
     # Limpa o estado atual
     await state.clear()
