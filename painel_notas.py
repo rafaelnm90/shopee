@@ -1,5 +1,5 @@
 EXIBIR_LOGS = True
-FILTRO_ANTI_SPAM = True  # Mude para False para ignorar o histórico e enviar notas repetidas
+FILTRO_ANTI_DUPLICIDADE = True  # Mude para False para ignorar o histórico e enviar notas repetidas
 import os
 import zipfile
 import pandas as pd
@@ -58,11 +58,11 @@ class PainelNotasFluxo(StatesGroup):
     enviando_notas = State() # 🛡️ NOVO: Estado de bloqueio total
 
 def obter_teclado_menu_notas():
-    status_filtro = "LIGADO 🟢" if FILTRO_ANTI_SPAM else "DESLIGADO 🔴"
+    status_filtro = "LIGADO 🟢" if FILTRO_ANTI_DUPLICIDADE else "DESLIGADO 🔴"
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Iniciar Envios 🚀")],
-            [KeyboardButton(text=f"Filtro Anti-Spam: {status_filtro}")],
+            [KeyboardButton(text=f"Filtro Anti-Duplicidade: {status_filtro}")],
             [KeyboardButton(text="Informações de Acesso ℹ️")],
             [KeyboardButton(text="Voltar ↩️")]
         ],
@@ -294,6 +294,23 @@ async def iniciar_painel_notas(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=obter_teclado_menu_notas(), parse_mode="HTML")
     await state.set_state(PainelNotasFluxo.menu_principal)
 
+# 🛡️ Função de segurança para reativar o filtro automaticamente
+async def reativar_filtro_automaticamente(chat_id):
+    global FILTRO_ANTI_DUPLICIDADE
+    if not FILTRO_ANTI_DUPLICIDADE:
+        FILTRO_ANTI_DUPLICIDADE = True
+        if EXIBIR_LOGS: logger.info("⏰ Timer de segurança: Filtro Anti-Duplicidade reativado automaticamente após 5 minutos.")
+        try:
+            if bot_instance:
+                # Usa o teclado atualizado para refletir o status correto na tela do usuário
+                await bot_instance.send_message(
+                    chat_id, 
+                    "🛡️ <b>Segurança Ativada:</b> O Filtro Anti-Duplicidade foi reativado automaticamente após 5 minutos de inatividade.", 
+                    parse_mode="HTML",
+                    reply_markup=obter_teclado_menu_notas()
+                )
+        except Exception:
+            pass
 
 @router.message(PainelNotasFluxo.menu_principal)
 async def processar_menu_notas(message: types.Message, state: FSMContext):
@@ -312,14 +329,35 @@ async def processar_menu_notas(message: types.Message, state: FSMContext):
         await message.answer(texto, reply_markup=teclado_notas_cancelar, parse_mode="HTML")
         await state.set_state(PainelNotasFluxo.aguardando_csv)
         
-    elif "Filtro Anti-Spam" in opcao:
-        global FILTRO_ANTI_SPAM
-        FILTRO_ANTI_SPAM = not FILTRO_ANTI_SPAM
+    elif "Filtro Anti-Duplicidade" in opcao:
+        global FILTRO_ANTI_DUPLICIDADE
+        FILTRO_ANTI_DUPLICIDADE = not FILTRO_ANTI_DUPLICIDADE
         
-        estado_texto = "ATIVADO ✅" if FILTRO_ANTI_SPAM else "DESATIVADO ⚠️ (Cuidado com duplicatas)"
-        if EXIBIR_LOGS: logger.info(f"⚙️ Alternância de segurança: O Filtro Anti-Spam foi alterado para {FILTRO_ANTI_SPAM}.")
+        estado_texto = "ATIVADO ✅" if FILTRO_ANTI_DUPLICIDADE else "DESATIVADO ⚠️ (Cuidado com duplicatas)"
+        if EXIBIR_LOGS: logger.info(f"⚙️ Alternância de segurança: O Filtro Anti-Duplicidade foi alterado para {FILTRO_ANTI_DUPLICIDADE}.")
         
-        await message.answer(f"⚙️ O Filtro de Histórico foi <b>{estado_texto}</b>.", reply_markup=obter_teclado_menu_notas(), parse_mode="HTML")
+        await message.answer(f"⚙️ O Filtro Anti-Duplicidade foi <b>{estado_texto}</b>.", reply_markup=obter_teclado_menu_notas(), parse_mode="HTML")
+        
+        # 🛡️ Lógica do Timer de 5 minutos
+        if not FILTRO_ANTI_DUPLICIDADE:
+            # Remove temporizador antigo se existir e cria um novo de 5 minutos
+            if scheduler_instance and scheduler_instance.get_job('reativar_filtro_notas'):
+                scheduler_instance.remove_job('reativar_filtro_notas')
+                
+            tempo_reativacao = datetime.now() + timedelta(minutes=5)
+            if scheduler_instance:
+                scheduler_instance.add_job(
+                    reativar_filtro_automaticamente,
+                    'date',
+                    run_date=tempo_reativacao,
+                    args=[message.chat.id],
+                    id='reativar_filtro_notas',
+                    replace_existing=True
+                )
+        else:
+            # Se o usuário ligar o filtro manualmente, cancelamos a bomba-relógio
+            if scheduler_instance and scheduler_instance.get_job('reativar_filtro_notas'):
+                scheduler_instance.remove_job('reativar_filtro_notas')
         
     elif "Informações" in opcao:
         if EXIBIR_LOGS: logger.info("🔐 Consultando credenciais seguras no .env.")
@@ -364,12 +402,11 @@ async def processar_menu_notas(message: types.Message, state: FSMContext):
     else:
         await message.answer("⚠️ Por favor, escolha uma das opções utilizando os botões do teclado.")
 
-
 # Observe que eu tirei a trava rígida 'F.document' do decorador abaixo.
 # Isso permite que o bot intercepte o seu clique caso você clique em algo errado.
 @router.message(PainelNotasFluxo.aguardando_csv)
 async def receber_csv(message: types.Message, state: FSMContext):
-    # 🛡️ MURALHA DE BLINDAGEM 2: Evita crash caso você digite texto (ex: clicar no botão Anti-Spam sem querer)
+    # 🛡️ MURALHA DE BLINDAGEM 2: Evita crash caso você digite texto (ex: clicar no botão Anti-Duplicidade sem querer)
     if not message.document:
         if message.text and message.text == "Abortar ❌":
             return # Deixa o interceptador de cancelamento agir
@@ -393,6 +430,8 @@ async def receber_csv(message: types.Message, state: FSMContext):
 
 @router.message(PainelNotasFluxo.aguardando_zip)
 async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
+    global FILTRO_ANTI_DUPLICIDADE # Declara a permissão para alterar o estado global
+    
     # 🛡️ MURALHA DE BLINDAGEM 3: Evita crash caso o usuário digite texto em vez do ZIP
     if not message.document:
         if message.text and message.text == "Abortar ❌":
@@ -432,9 +471,8 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
         await msg_status.edit_text(f"❌ Erro ao ler o arquivo CSV: {e}")
         return
 
-    if FILTRO_ANTI_SPAM:
+    if FILTRO_ANTI_DUPLICIDADE:
         await msg_status.edit_text("✅ Extração concluída. Verificando histórico de envios e cruzando dados...")
-# O resto do código da função 'receber_zip_e_cruzar' que você já tem continua daqui para baixo normalmente.
         
         # CONSULTA O HISTÓRICO DE NOTAS JÁ ENVIADAS OU PENDENTES
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -446,10 +484,19 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
         # Extrai apenas os nomes dos arquivos já processados
         pdfs_protegidos = [os.path.basename(row[0]).lower() for row in historico if row[0]]
     else:
-        await msg_status.edit_text("✅ Extração concluída. ⚠️ Filtro Anti-Spam DESATIVADO. Cruzando todos os dados...")
-        if EXIBIR_LOGS: logger.warning("⚠️ Filtro Anti-Spam desligado. O histórico do banco de dados será ignorado.")
+        await msg_status.edit_text("✅ Extração concluída. ⚠️ Filtro Anti-Duplicidade DESATIVADO. Cruzando todos os dados...")
+        if EXIBIR_LOGS: logger.warning("⚠️ Filtro Anti-Duplicidade desligado. O histórico do banco de dados será ignorado.")
         pdfs_protegidos = []
+        
+        # 🛡️ Auto-reativação imediata após a leitura do lote
+        FILTRO_ANTI_DUPLICIDADE = True
+        
+        if scheduler_instance and scheduler_instance.get_job('reativar_filtro_notas'):
+            scheduler_instance.remove_job('reativar_filtro_notas')
+            
+        await message.answer("🛡️ <b>Segurança Reativada:</b> O Filtro Anti-Duplicidade voltou a ser ligado automaticamente após a importação deste lote.", parse_mode="HTML")
 
+    # O resto do código continua normalmente a partir daqui
     arquivos_pdf_pasta_brutos = [f for f in os.listdir(pasta_extracao) if f.lower().endswith('.pdf')]
     arquivos_pdf_pasta = []
     qtd_ignorados = 0
@@ -827,7 +874,7 @@ async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
         resumo_falha = ""
         
         if qtd_ignorados > 0:
-            resumo_falha += f"🛑 <b>Bloqueio Anti-Spam:</b> <b>{qtd_ignorados}</b> arquivo(s) bloqueado(s) pois já constam como ENVIADOS no histórico.\n\n"
+            resumo_falha += f"🛑 <b>Bloqueio Anti-Duplicidade:</b> <b>{qtd_ignorados}</b> arquivo(s) bloqueado(s) pois já constam como ENVIADOS no histórico.\n\n"
             
         resumo_falha += f"⚠️ <b>Nenhuma nota foi combinada com sucesso.</b>\n\n❌ <b>Lojas pendentes ({len(lojas_pendentes)}):</b>\n"
         for loja in lojas_pendentes:
