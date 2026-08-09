@@ -101,6 +101,13 @@ def inicializar_banco_sqlite():
         )
     ''')
     
+    # 🚀 Migração invisível: Adiciona a coluna 'tipo' se ela não existir
+    try:
+        cursor.execute("ALTER TABLE financeiro_despesas ADD COLUMN tipo TEXT DEFAULT 'mensal'")
+        if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'tipo' adicionada à tabela de despesas.")
+    except sqlite3.OperationalError:
+        pass
+    
     # 6. Tabela de Histórico de Saques (Centro Financeiro)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS financeiro_saques (
@@ -263,6 +270,7 @@ class FinanceiroFluxo(StatesGroup):
     menu_principal = State()
     aguardando_nome_despesa = State()
     aguardando_valor_despesa = State()
+    aguardando_tipo_despesa = State() # 🟢 NOVO ESTADO AQUI
     aguardando_exclusao_despesa = State()
     aguardando_valor_imposto = State()
     aguardando_valor_saque = State()
@@ -499,7 +507,11 @@ async def salvar_imposto(message: types.Message, state: FSMContext):
 async def listar_custos(message: types.Message, state: FSMContext):
     conexao = sqlite3.connect("banco_dados.db")
     cursor = conexao.cursor()
-    cursor.execute("SELECT id, nome, valor FROM financeiro_despesas")
+    
+    agora_str = datetime.now(fuso_horario).strftime("%Y-%m")
+    
+    # Busca apenas os fixos mensais e os pontuais deste exato mês
+    cursor.execute("SELECT id, nome, valor, tipo FROM financeiro_despesas WHERE tipo = 'mensal' OR (tipo = 'pontual' AND data_registro LIKE ?)", (f"{agora_str}%",))
     despesas = cursor.fetchall()
     conexao.close()
     
@@ -507,31 +519,31 @@ async def listar_custos(message: types.Message, state: FSMContext):
     total_custos = 0.0
     
     if despesas:
-        for i, (id_db, nome, valor) in enumerate(despesas, 1):
+        for i, (id_db, nome, valor, tipo) in enumerate(despesas, 1):
             valor_br = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-            texto += f"<b>{i}.</b> {nome} - R$ {valor_br}\n"
+            etiqueta = "🔁 Fixo" if tipo == "mensal" else "🎯 Pontual"
+            texto += f"<b>{i}.</b> {nome} <i>({etiqueta})</i>: R$ {valor_br}\n"
             total_custos += valor
             
         total_br = f"{total_custos:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        texto += f"\n💰 <b>Custo Total Fixo:</b> R$ {total_br}"
+        texto += f"\n💰 <b>Custo Total Deduzido no Mês:</b> R$ {total_br}"
         
         # Salva o mapa de IDs na memória para a função de exclusão
-        mapa_exclusao = {str(i): id_db for i, (id_db, nome, valor) in enumerate(despesas, 1)}
+        mapa_exclusao = {str(i): id_db for i, (id_db, nome, valor, tipo) in enumerate(despesas, 1)}
         await state.update_data(mapa_custos=mapa_exclusao)
     else:
-        texto += "<i>Nenhuma despesa cadastrada no momento. Todo o faturamento será considerado lucro bruto.</i>"
+        texto += "<i>Nenhuma despesa ativa cadastrada para este mês. Todo o faturamento será considerado lucro bruto.</i>"
         
     await message.answer(texto, reply_markup=obter_teclado_gestao_custos(), parse_mode="HTML")
     await state.set_state(FinanceiroFluxo.menu_principal)
 
 @dp.message(FinanceiroFluxo.menu_principal, F.text == "Adicionar Custo ➕")
 async def pedir_nome_custo(message: types.Message, state: FSMContext):
-    await message.answer("Digite o <b>NOME</b> da despesa fixa (Ex: Servidor Oracle, Domínio, API, Contador):", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await message.answer("Digite o <b>NOME</b> da despesa (Ex: Servidor Oracle, Domínio, Anúncio Extra):", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(FinanceiroFluxo.aguardando_nome_despesa)
 
 @dp.message(FinanceiroFluxo.aguardando_nome_despesa)
 async def pedir_valor_custo(message: types.Message, state: FSMContext):
-    # 🛡️ Trava de Cancelamento
     if message.text == "Cancelar ❌":
         await state.clear()
         await message.answer("Ação cancelada.")
@@ -540,12 +552,11 @@ async def pedir_valor_custo(message: types.Message, state: FSMContext):
         
     nome_custo = message.text.strip()
     await state.update_data(nome_despesa=nome_custo)
-    await message.answer(f"Custo: <b>{nome_custo}</b>\n\nDigite o <b>VALOR MENSAL</b> dessa despesa (Exemplo: <code>50.00</code> ou <code>120,50</code>):", reply_markup=teclado_cancelar, parse_mode="HTML")
+    await message.answer(f"Custo: <b>{nome_custo}</b>\n\nDigite o <b>VALOR</b> dessa despesa (Exemplo: <code>50.00</code> ou <code>120,50</code>):", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(FinanceiroFluxo.aguardando_valor_despesa)
 
 @dp.message(FinanceiroFluxo.aguardando_valor_despesa)
-async def salvar_valor_custo(message: types.Message, state: FSMContext):
-    # 🛡️ Trava de Cancelamento
+async def pedir_tipo_custo(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await state.clear()
         await message.answer("Ação cancelada.")
@@ -555,25 +566,55 @@ async def salvar_valor_custo(message: types.Message, state: FSMContext):
     texto_valor = message.text.strip().replace("R$", "").replace(" ", "").replace(",", ".")
     try:
         valor = float(texto_valor)
-        data = await state.get_data()
-        nome = data.get("nome_despesa")
-        data_hoje = datetime.now().strftime("%Y-%m-%d")
+        await state.update_data(valor_despesa=valor)
         
-        conexao = sqlite3.connect("banco_dados.db")
-        cursor = conexao.cursor()
-        cursor.execute("INSERT INTO financeiro_despesas (nome, valor, data_registro) VALUES (?, ?, ?)", (nome, valor, data_hoje))
-        conexao.commit()
-        conexao.close()
+        teclado_tipo_custo = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Mensal Fixo 🔁"), KeyboardButton(text="Pontual (Só este mês) 🎯")],
+                [KeyboardButton(text="Cancelar ❌")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
         
-        if EXIBIR_LOGS: logger.info(f"📉 Nova despesa adicionada: {nome} - R$ {valor}")
+        await message.answer("Excelente! Como deseja classificar esta despesa?\n\n<b>Mensal Fixo:</b> Será cobrada todos os meses.\n<b>Pontual:</b> Será deduzida apenas no caixa deste mês.", reply_markup=teclado_tipo_custo, parse_mode="HTML")
+        await state.set_state(FinanceiroFluxo.aguardando_tipo_despesa)
         
-        valor_br = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-        await message.answer(f"✅ Despesa <b>{nome}</b> (R$ {valor_br}) cadastrada com sucesso no seu fluxo de caixa!", parse_mode="HTML")
-        
-        # Volta automaticamente para a lista atualizada
-        await listar_custos(message, state)
     except ValueError:
         await message.answer("⚠️ Valor numérico inválido. Digite apenas números (Ex: 50.00):", reply_markup=teclado_cancelar)
+
+@dp.message(FinanceiroFluxo.aguardando_tipo_despesa)
+async def salvar_tipo_custo(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await listar_custos(message, state)
+        return
+        
+    if message.text not in ["Mensal Fixo 🔁", "Pontual (Só este mês) 🎯"]:
+        await message.answer("Por favor, utilize os botões em tela para escolher o tipo de despesa.")
+        return
+        
+    tipo_escolhido = "mensal" if "Mensal" in message.text else "pontual"
+    
+    data = await state.get_data()
+    nome = data.get("nome_despesa")
+    valor = data.get("valor_despesa")
+    data_hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    
+    conexao = sqlite3.connect("banco_dados.db")
+    cursor = conexao.cursor()
+    cursor.execute("INSERT INTO financeiro_despesas (nome, valor, data_registro, tipo) VALUES (?, ?, ?, ?)", (nome, valor, data_hoje, tipo_escolhido))
+    conexao.commit()
+    conexao.close()
+    
+    if EXIBIR_LOGS: logger.info(f"📉 Nova despesa adicionada: {nome} - R$ {valor} ({tipo_escolhido})")
+    
+    valor_br = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    etiqueta = "fixa mensal" if tipo_escolhido == "mensal" else "pontual"
+    await message.answer(f"✅ Despesa <b>{nome}</b> (R$ {valor_br}) cadastrada como {etiqueta} no seu fluxo de caixa!", parse_mode="HTML")
+    
+    await listar_custos(message, state)
 
 @dp.message(FinanceiroFluxo.menu_principal, F.text == "Remover Custo 🗑️")
 async def pedir_remocao_custo(message: types.Message, state: FSMContext):
@@ -581,7 +622,7 @@ async def pedir_remocao_custo(message: types.Message, state: FSMContext):
     mapa_custos = data.get("mapa_custos", {})
     
     if not mapa_custos:
-        await message.answer("Não há custos cadastrados para remover.", reply_markup=obter_teclado_gestao_custos())
+        await message.answer("Não há custos cadastrados para remover nesta visualização.", reply_markup=obter_teclado_gestao_custos())
         return
         
     await message.answer("Digite o <b>NÚMERO</b> do custo que deseja excluir da lista:", reply_markup=teclado_cancelar, parse_mode="HTML")
@@ -589,7 +630,6 @@ async def pedir_remocao_custo(message: types.Message, state: FSMContext):
 
 @dp.message(FinanceiroFluxo.aguardando_exclusao_despesa)
 async def processar_remocao_custo(message: types.Message, state: FSMContext):
-    # 🛡️ Trava de Cancelamento
     if message.text == "Cancelar ❌":
         await state.clear()
         await message.answer("Ação cancelada.")
@@ -803,7 +843,8 @@ async def gerar_dre_inteligente(message: types.Message, state: FSMContext):
     conexao = sqlite3.connect("banco_dados.db")
     cursor = conexao.cursor()
     
-    cursor.execute("SELECT SUM(valor) FROM financeiro_despesas")
+    # 🟢 A MÁGICA: Deduz os custos fixos mensais E os custos pontuais apenas se foram criados neste mês
+    cursor.execute("SELECT SUM(valor) FROM financeiro_despesas WHERE tipo = 'mensal' OR (tipo = 'pontual' AND data_registro LIKE ?)", (f"{mes_atual_str}%",))
     total_custos_db = cursor.fetchone()[0]
     total_custos = float(total_custos_db) if total_custos_db else 0.0
     
