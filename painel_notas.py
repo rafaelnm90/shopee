@@ -122,6 +122,7 @@ async def enviar_email_brevo(para_email, para_nome, assunto, corpo_html, caminho
             return resposta.status, texto_resposta
 
 async def processar_fila_envios(chat_id=None, message_id=None):
+    global bot_instance # 🛡️ NOVO: Garante o uso do bot_instance global
     if EXIBIR_LOGS: logger.info("🚀 Iniciando esteira de disparos de notas fiscais...")
     
     conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -272,6 +273,7 @@ async def processar_fila_envios(chat_id=None, message_id=None):
              texto_exibicao = log_dinamico
              if len(texto_exibicao) > 4000:
                   texto_exibicao = "...\n" + log_dinamico[-3990:]
+             # Edita a mensagem pela última vez com o resumo final da etapa
              await bot_instance.edit_message_text(texto_exibicao, chat_id=chat_id, message_id=message_id, parse_mode="HTML")
         except Exception: pass
     
@@ -283,12 +285,6 @@ async def processar_fila_envios(chat_id=None, message_id=None):
         corpo_final += "</ul>"
         
     await enviar_email_brevo(EMAIL_ADMIN, "Administrador", assunto_final, corpo_final)
-    
-    if bot_instance and not chat_id:
-        from bot_mestre import ADMIN_ID
-        try:
-            await bot_instance.send_message(ADMIN_ID, f"🎉 <b>Processamento de Notas Finalizado!</b>\nForam processados {envios_realizados} envios. O relatório detalhado foi enviado para o seu e-mail.", parse_mode="HTML")
-        except Exception: pass
 
 # ==========================================
 # FLUXO INTERATIVO (TELEGRAM)
@@ -901,9 +897,10 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
             is_persistent=True
         )
         try:
-            # ✅ CORREÇÃO: Envia a nova mensagem com o teclado, mas também edita a anterior para remover a palavra "Preparando"
-            await bot_instance.send_message(chat_id, "✅ <b>Processos de notas finalizados!</b>\nO painel principal está liberado.", reply_markup=teclado_outros, parse_mode="HTML")
-        except: pass
+            await bot_instance.send_message(chat_id, "✅ <b>Operação finalizada!</b>\nTodos os e-mails foram enviados e a interface foi liberada.", reply_markup=teclado_outros, parse_mode="HTML")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar mensagem de finalização: {e}")
+        
         await state.clear()
 
     # Cria a tarefa em background passando os parâmetros de chat e mensagem
