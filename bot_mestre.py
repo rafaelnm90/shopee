@@ -1513,8 +1513,10 @@ async def disparar_mensagem(tipo, forcar=False):
     if is_viral and dados_rotina.get("pausado_viral", False):
         if EXIBIR_LOGS: logger.info(f"🛑 Disparo abortado ({tipo}): As rotinas do VIRAL estão pausadas no sistema.")
         return
-    elif not is_viral and dados_rotina.get("pausado", False):
-        if EXIBIR_LOGS: logger.info(f"🛑 Disparo abortado ({tipo}): As rotinas do PRINCIPAL estão pausadas no sistema.")
+        
+    # 🛡️ Trava de Pausa Global (O Canal Principal pode estar pausado, mas o Espião é independente!)
+    if dados_rotina.get("pausado", False) and not is_viral:
+        if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): As rotinas do PRINCIPAL estão pausadas no sistema.")
         return
 
     agora_tz = datetime.now(fuso_horario)
