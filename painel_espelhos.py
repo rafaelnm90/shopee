@@ -1040,6 +1040,28 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
             parse_mode="HTML"
         )
         await state.set_state(EspelhadorFluxo.aguardando_nova_origem)
+
+    # ✅ AQUI ESTÁ A TELA DA BLACKLIST COM A PUXADA DE NOMES
+    elif texto == "Lista Negra (Blacklist) ⛔":
+        data = await state.get_data()
+        indice = data.get("indice_edicao")
+        dados = ler_espelhos()
+        rota_atual = dados["rotas"][indice]
+        
+        bl = rota_atual.get("blacklist", [])
+        cache_nomes = ler_cache_nomes_grupos()
+        txt = f"⛔ <b>Lista Negra da Rota '{rota_atual['nome']}'</b>\n"
+        
+        if bl:
+            for i, b in enumerate(bl, 1):
+                nome = cache_nomes.get(str(b), str(b))
+                txt += f"{i}. {nome} (<code>{b}</code>)\n"
+        else: 
+            txt += "<i>Nenhuma restrição cadastrada.</i>\n"
+        
+        tcl = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Rem. da Blacklist")], [KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True)
+        await message.answer(txt, reply_markup=tcl, parse_mode="HTML")
+        await state.set_state(EspelhadorFluxo.aguardando_acao_blacklist)
         
     elif texto == "🗑️ Remover Canal":
         data = await state.get_data()
@@ -1444,25 +1466,21 @@ async def confirmar_edicao_modo(message: types.Message, state: FSMContext):
     msg_simulada = message.model_copy(update={"text": str(indice + 1)})
     await selecionar_acao_edicao(msg_simulada, state)
 
-@router.message(EspelhadorFluxo.aguardando_nova_origem)
+@@router.message(EspelhadorFluxo.aguardando_nova_origem)
 async def confirmar_nova_origem(message: types.Message, state: FSMContext):
     texto = message.text
+    
+    # 🎯 NOVA REDIREÇÃO DA BLACKLIST (Para corrigir o bug do vídeo)
+    if texto == "Lista Negra (Blacklist) ⛔":
+        if EXIBIR_LOGS: logger.info("⏭️ Redirecionamento Inteligente: Usuário clicou em Blacklist.")
+        msg_simulada = message.model_copy(update={"text": "Lista Negra (Blacklist) ⛔"})
+        await processar_acao_origem(msg_simulada, state)
+        return
+
     data = await state.get_data()
     indice = data.get("indice_edicao")
     dados = ler_espelhos()
     rota_atual = dados["rotas"][indice]
-    
-    # 🎯 NOVA REDIREÇÃO DA BLACKLIST
-    if texto == "Lista Negra (Blacklist) ⛔":
-        bl = rota_atual.get("blacklist", [])
-        txt = f"⛔ <b>Lista Negra da Rota '{rota_atual['nome']}'</b>\n"
-        if bl:
-            for i, b in enumerate(bl, 1): txt += f"{i}. <code>{b}</code>\n"
-        else: txt += "<i>Nenhuma restrição cadastrada.</i>\n"
-        tcl = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Rem. da Blacklist")], [KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True)
-        await message.answer(txt, reply_markup=tcl, parse_mode="HTML")
-        await state.set_state(EspelhadorFluxo.aguardando_acao_blacklist)
-        return
         
     origens_atuais = rota_atual.get('origens', [])
     if not origens_atuais and 'origem' in rota_atual: origens_atuais = [rota_atual['origem']]
@@ -1775,10 +1793,13 @@ async def acao_bl_espelhador(message: types.Message, state: FSMContext):
         await message.answer("Envie os IDs para LIBERAR NESTA ROTA (separados por vírgula):", reply_markup=teclado_espelhador_cancelar)
         await state.set_state(EspelhadorFluxo.aguardando_blacklist_remove)
 
-@router.message(EspelhadorFluxo.aguardando_blacklist_add)
+@dp.message(EspelhadorFluxo.aguardando_blacklist_add)
 async def salvar_bl_add_espelhador(message: types.Message, state: FSMContext):
     if message.text == "Cancelar Operação ❌":
-        return # O handler de cancelamento lá em cima já capta este botão
+        # Simula o botão de voltar para redirecionar corretamente
+        msg_simulada = message.model_copy(update={"text": "🔙 Voltar ao Menu de Edição"})
+        await processar_acao_origem(msg_simulada, state)
+        return
 
     import re
     texto = message.text
@@ -1803,8 +1824,11 @@ async def salvar_bl_add_espelhador(message: types.Message, state: FSMContext):
         entrada_limpa = entrada.strip()
         if not entrada_limpa: continue
 
-        sucesso, id_final, _ = await validar_e_formatar_alvo(bot_instance, entrada_limpa)
+        sucesso, id_final, nome = await validar_e_formatar_alvo(bot_instance, entrada_limpa)
         alvo_para_bl = id_final if sucesso else entrada_limpa
+
+        if sucesso:
+             salvar_nome_grupo(id_final, nome)
 
         if alvo_para_bl not in novos_blacklist and alvo_para_bl not in blacklist:
             novos_blacklist.append(alvo_para_bl)
@@ -1818,20 +1842,21 @@ async def salvar_bl_add_espelhador(message: types.Message, state: FSMContext):
 
     if not novos_blacklist:
         await message.answer("Nenhum canal válido detetado ou todos já estavam na Blacklist.")
-        novo_texto = str(idx + 1)
-        msg_simulada = message.model_copy(update={"text": novo_texto})
-        await selecionar_acao_edicao(msg_simulada, state)
+        msg_simulada = message.model_copy(update={"text": "🔙 Voltar ao Menu de Edição"})
+        await processar_acao_origem(msg_simulada, state)
         return
 
     if conflitos:
         await state.update_data(novos_blacklist=novos_blacklist, alvos_para_remover=conflitos)
+        cache_nomes = ler_cache_nomes_grupos()
         texto_aviso = (
             f"⚠️ <b>Atenção: Conflito Detetado!</b>\n\n"
             f"Você está a tentar adicionar canais à Lista Negra que <b>já estão a ser monitorizados</b> nesta rota.\n\n"
             f"Canais que serão <b>AUTOMATICAMENTE REMOVIDOS</b> da escuta:\n"
         )
         for c in conflitos:
-            texto_aviso += f"🗑️ <code>{c}</code>\n"
+             nome_conflito = cache_nomes.get(str(c), str(c))
+             texto_aviso += f"🗑️ {nome_conflito} (<code>{c}</code>)\n"
 
         texto_aviso += "\nDeseja aprovar a adição à Lista Negra e a exclusão destes canais da escuta da rota?"
 
