@@ -4506,9 +4506,9 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     # 🔁 Roteamento Inteligente: Se estiver nas Submissões do Público
     if estado_atual and estado_atual.startswith("SubmissaoAdminFluxo"):
         await state.clear()
-        if EXIBIR_LOGS: logger.info("🔙 Cancelamento do Painel de Submissões.")
+        if EXIBIR_LOGS: logger.info("🔙 Cancelamento do Painel de Submissões. Retornando ao painel do Grupo Público.")
         await message.answer("Ação cancelada.")
-        await menu_outros_canais(message, state)
+        await painel_submissoes(message, state) # ✅ CORREÇÃO: Agora volta para o painel correto
         return
 
     # 🔁 Roteamento Inteligente: Se estiver na Pausa Programada
