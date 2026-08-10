@@ -130,6 +130,7 @@ GRUPO_ID = -1003909405581
 LINK_GRUPO = "https://t.me/shopee_video_afiliado"
 GRUPO_VIRAL_ID = -1003932482573
 LINK_GRUPO_VIRAL = "https://t.me/acervo_viral_shopee"
+LINK_GRUPO_PUBLICO = "https://web.telegram.org/a/#-1003892378604_6"
 SHOPEE_APP_ID = os.getenv('SHOPEE_APP_ID')
 SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
 # As chaves do Gemini e a cascata foram removidas. Agora são geridas com total segurança pelo api_gemini.py
@@ -1508,16 +1509,33 @@ async def disparar_mensagem(tipo, forcar=False):
     if EXIBIR_LOGS: logger.info(f"🔍 Validando status antes de disparar a rotina '{tipo}' (Forçar: {forcar})...")
     
     dados_rotina = ler_config_rotina()
-    is_viral = tipo in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral"]
     
-    # 🚀 PAUSA ABSOLUTA: Se estiver pausado, bloqueia sumariamente (sem exceção para forçar)
+    # 🎯 MAPEAMENTO DE DESTINOS
+    rotinas_virais = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral"]
+    rotinas_publico = ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico"]
+    
+    is_viral = tipo in rotinas_virais
+    is_publico = tipo in rotinas_publico
+    
+    chat_destino = GRUPO_ID
+    if is_viral:
+        chat_destino = GRUPO_VIRAL_ID
+    elif is_publico:
+        config_sub = ler_submissao_config()
+        chat_destino = config_sub.get("grupo_id")
+        if not chat_destino or chat_destino == "Não definido":
+            if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): Grupo Público ainda não configurado.")
+            return
+
+    # 🚀 PAUSAS ABSOLUTAS (Bloqueia sem exceção para forçar)
     if is_viral and dados_rotina.get("pausado_viral", False):
-        if EXIBIR_LOGS: logger.info(f"🛑 Disparo abortado ({tipo}): As rotinas do VIRAL estão pausadas no sistema.")
+        if EXIBIR_LOGS: logger.info(f"🛑 Disparo abortado ({tipo}): Rotinas do VIRAL estão pausadas.")
         return
-        
-    # 🛡️ Trava de Pausa Global (O Canal Principal pode estar pausado, mas o Espião é independente!)
-    if dados_rotina.get("pausado", False) and not is_viral:
-        if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): As rotinas do PRINCIPAL estão pausadas no sistema.")
+    if is_publico and dados_rotina.get("pausado_publico", False):
+        if EXIBIR_LOGS: logger.info(f"🛑 Disparo abortado ({tipo}): Rotinas do PÚBLICO estão pausadas.")
+        return
+    if not is_viral and not is_publico and dados_rotina.get("pausado", False):
+        if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): Rotinas do PRINCIPAL estão pausadas.")
         return
 
     agora_tz = datetime.now(fuso_horario)
@@ -1531,18 +1549,13 @@ async def disparar_mensagem(tipo, forcar=False):
         if EXIBIR_LOGS: logger.warning("🛑 Bloqueio Anti-Acidente: O 'Boa Noite' já foi enviado hoje.")
         return
         
-    # ✅ NOVA TRAVA: Controle absoluto do Expediente e Margem de Respiro
     if tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
-        
-        # 🚀 CORREÇÃO: Se for um disparo forçado (botão manual), ignora as regras de expediente
         if not forcar:
-            # 🟢 A MÁGICA AQUI: Se NÃO for uma rotina viral, exige o Bom Dia principal. 
-            # Se for viral, o canal espião roda livremente sem depender do canal principal!
-            if not is_viral and dados_rotina.get("ultimo_bom_dia") != hoje_str:
-                if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): O expediente ainda não foi aberto pelo 'Bom Dia'.")
+            if not is_viral and not is_publico and dados_rotina.get("ultimo_bom_dia") != hoje_str:
+                if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): Expediente principal fechado.")
                 return
                 
-            if not is_viral:
+            if not is_viral and not is_publico:
                 hora_ultimo_bd = dados_rotina.get("hora_ultimo_bom_dia", "")
                 if hora_ultimo_bd:
                     hora_bd_obj = datetime.strptime(hora_ultimo_bd, "%H:%M").time()
@@ -1550,28 +1563,22 @@ async def disparar_mensagem(tipo, forcar=False):
                     minutos_passados = (agora_tz - momento_bd).total_seconds() / 60
                     
                     if minutos_passados < 10:
-                        if EXIBIR_LOGS: logger.warning(f"🛑 Disparo ({tipo}) adiado: O 'Bom Dia' saiu há apenas {int(minutos_passados)} min. Reagendando para respeitar a margem de segurança.")
                         novo_horario = momento_bd + timedelta(minutes=random.randint(12, 25))
                         job_id = f"job_rotina_{tipo}_reagendado_{int(agora_tz.timestamp())}"
                         scheduler.add_job(disparar_mensagem, 'date', run_date=novo_horario, args=[tipo], id=job_id, replace_existing=True)
                         return
                         
-            if not is_viral and dados_rotina.get("ultimo_boa_noite") == hoje_str:
-                if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): O expediente já foi encerrado pelo 'Boa Noite'.")
+            if not is_viral and not is_publico and dados_rotina.get("ultimo_boa_noite") == hoje_str:
                 return
 
-    # ✅ TRAVA DE CONCORRÊNCIA: Registra o histórico ANTES de chamar a IA. 
-    # Isso impede que o botão "Atualizar Rotinas" cause duplicidade se for clicado enquanto o Gemini processa o texto.
     hora_exata_disparo = agora_tz.strftime("%H:%M")
     
     if tipo == "bom_dia":
         dados_rotina["ultimo_bom_dia"] = hoje_str
         dados_rotina["hora_ultimo_bom_dia"] = hora_exata_disparo
-        if EXIBIR_LOGS: logger.info(f"✅ Bandeira de 'Bom Dia' registada às {hora_exata_disparo}. Fila de vídeos liberada para hoje.")
     elif tipo == "boa_noite":
         dados_rotina["ultimo_boa_noite"] = hoje_str
         dados_rotina["hora_ultimo_boa_noite"] = hora_exata_disparo
-        if EXIBIR_LOGS: logger.info(f"✅ Bandeira de 'Boa Noite' registada às {hora_exata_disparo}. Fila de vídeos suspensa até amanhã.")
         
     if dados_rotina.get("historico_diario", {}).get("data") != hoje_str:
         dados_rotina["historico_diario"] = {"data": hoje_str, "contagem": {}}
@@ -1583,151 +1590,106 @@ async def disparar_mensagem(tipo, forcar=False):
     historico_tipo.append(hora_exata_disparo)
     dados_rotina["historico_diario"]["contagem"][tipo] = historico_tipo
     salvar_config_rotina(dados_rotina)
-    
-    if EXIBIR_LOGS: 
-        qtd_disparos = len(historico_tipo)
-        horarios_str = ", ".join(historico_tipo)
-        logger.info(f"📊 Auditoria de Rotina | {tipo.upper()}: {qtd_disparos}º envio diário efetuado. Horários de hoje: [{horarios_str}]")
 
     contexto_afiliado = (
         "Você é um assistente de suporte para afiliados da Shopee. "
-        "REGRA ABSOLUTA: Sua resposta deve ser extremamente curta e direta, "
+        "REGRA ABSOLUTA: Sua resposta deve ser curta, direta, "
         "contendo NO MÁXIMO 200 CARACTERES no total. "
         "Entregue APENAS o texto da mensagem, sem introduções e sem aspas."
     )
 
+    # 🧠 PROMPTS DA INTELIGÊNCIA ARTIFICIAL
     if tipo == "bom_dia":
-        prompt = (
-            f"{contexto_afiliado} Crie uma mensagem de bom dia motivadora. "
-            "Diga que os vídeos de hoje estão prontos para postagem. Use emojis."
-        )
+        prompt = f"{contexto_afiliado} Crie uma mensagem de bom dia motivadora avisando que os vídeos de hoje estão prontos. Use emojis."
     elif tipo == "boa_noite":
-        prompt = (
-            f"{contexto_afiliado} Crie uma mensagem de boa noite. "
-            "Sugira que organizem os links para amanhã. Use emojis."
-        )
+        prompt = f"{contexto_afiliado} Crie uma mensagem de boa noite. Sugira organizar os links para amanhã. Use emojis."
     elif tipo == "incentivo":
-        prompt = (
-            f"{contexto_afiliado} Crie uma frase de impacto sobre persistência no tráfego orgânico. Use emojis."
-        )
+        prompt = f"{contexto_afiliado} Crie uma frase de impacto sobre persistência no tráfego orgânico. Use emojis."
     elif tipo == "link_grupo":
-        prompt = (
-            f"{contexto_afiliado} Não peça para postar vídeos. Crie um convite rápido e chamativo pedindo aos membros que convidem "
-            "amigos afiliados para o nosso grupo gratuito. "
-            "REGRA: Parta do pressuposto de que o leitor JÁ ESTÁ NO GRUPO. O objetivo é encorajá-lo a trazer novas pessoas. "
-            "Não adicione nenhum link na sua resposta. Use emojis."
-        )
+        prompt = f"{contexto_afiliado} Crie um convite pedindo aos membros para chamarem amigos para nosso grupo. Não use links. Use emojis."
     elif tipo == "link_grupo_viral":
-        prompt = (
-            f"{contexto_afiliado} Crie um convite curto e empolgante pedindo aos membros que convidem "
-            "seus amigos para entrarem neste nosso acervo de vídeos virais. "
-            "REGRA ABSOLUTA: Parta do pressuposto de que o leitor JÁ ESTÁ NO GRUPO. "
-            "O foco é apenas encorajá-los a trazer novas pessoas para o nosso grupo gratuito. Não adicione nenhum link na sua resposta. Use emojis."
-        )
-
+        prompt = f"{contexto_afiliado} Peça aos membros para convidarem amigos para o acervo de virais. Não use links. Use emojis."
     elif tipo.startswith("campanha_"):
         partes = tipo.split("_")
         dias_restantes = int(partes[1])
         data_dupla = partes[2] if len(partes) > 2 else ""
-        
-        if EXIBIR_LOGS: logger.info(f"📅 Extração concluída: Data dupla {data_dupla} (Faltam {dias_restantes} dias).")
-
-        if dias_restantes == 0:
-            aviso = f"É HOJE o evento de data dupla {data_dupla}! Disparem seus links nas redes!"
-        elif dias_restantes == 1:
-            aviso = f"É AMANHÃ o evento de data dupla {data_dupla}! Preparem todos os materiais!"
-        else:
-            aviso = f"Faltam {dias_restantes} dias para o evento de data dupla {data_dupla}. Antecipem a organização!"
-        
-        prompt = (
-            f"Você atua como assistente de afiliados. Crie um alerta baseado no seguinte status: '{aviso}'. "
-            f"REGRA ABSOLUTA: Sua resposta final deve conter NO MÁXIMO 100 CARACTERES. "
-            f"Transmita urgência, use emojis e entregue estritamente o texto pronto, sem aspas."
-        )
-
+        if dias_restantes == 0: aviso = f"É HOJE o evento de data dupla {data_dupla}!"
+        elif dias_restantes == 1: aviso = f"É AMANHÃ o evento de data dupla {data_dupla}!"
+        else: aviso = f"Faltam {dias_restantes} dias para o evento de data dupla {data_dupla}."
+        prompt = f"{contexto_afiliado} Crie um alerta baseado nisto: '{aviso}'. Transmita urgência. Máximo 100 caracteres."
     elif tipo in ["divulgar_gem", "divulgar_gem_viral"]:
-        prompt = (
-            "Você atua como assistente de afiliados. Crie uma mensagem curta (MÁXIMO 200 CARACTERES) "
-            "perguntando se a equipe está com dificuldade para criar legendas e hashtags. "
-            "Convide-os a usar nosso prompt automatizado. Insinue de forma sutil que utilizar a "
-            "versão PRO do Gemini resulta em textos muito melhores. Altere as palavras e a abordagem "
-            "toda vez que gerar esse texto, use emojis e entregue apenas a mensagem pronta, sem aspas. "
-            "REGRA ABSOLUTA E INQUEBRÁVEL: NUNCA inicie o texto com saudações temporais (como 'Bom dia', 'Boa tarde' ou 'Boa noite'). Vá direto ao assunto para não confundir a audiência."
-        )
-
+        prompt = "Você atua como assistente. Convide a equipe a usar nosso prompt automatizado de legendas no Gemini PRO. Vá direto ao assunto, sem saudações. Use emojis. Máximo 150 caracteres."
     elif tipo == "promo_viral":
-        prompt = (
-            "Você é um criador de conteúdo recomendando o canal de um parceiro para a sua comunidade. "
-            "Crie uma recomendação MUITO CURTA E NATURAL (MÁXIMO 150 CARACTERES) chamando a galera para conhecer o trabalho desse parceiro. "
-            "Explique de forma fluida e humana que o dono de lá tem um grupo gratuito focado em vídeos virais estilo 'copia e cola' diretos das tendências. "
-            "REGRA ABSOLUTA: Aja como um humano recomendando o trabalho de outra pessoa. NUNCA use palavras que deem a entender que o grupo é seu (evite 'nosso grupo', 'eu criei', 'estou postando'). "
-            "Refira-se ao grupo na terceira pessoa ('o parceiro posta', 'o canal deles'). "
-            "Use emojis, varie o texto a cada geração e entregue apenas a mensagem pronta, sem aspas e sem links."
-        )
+        prompt = "Recomende o canal de um parceiro (fale na terceira pessoa). Diga que ele tem um Acervo Viral incrível estilo copia-e-cola. Seja natural. Máximo 150 caracteres. Sem links."
     elif tipo == "promo_principal":
-        prompt = (
-            "Você é um criador de conteúdo recomendando o canal de um parceiro para a sua comunidade. "
-            "Crie uma recomendação MUITO CURTA E NATURAL (MÁXIMO 150 CARACTERES) chamando a galera para conhecer o canal parceiro (Acervo Afiliados). "
-            "Explique de forma fluida e humana que o dono de lá libera o acesso a um grupo gratuito com conteúdos premium, editados e selecionados a dedo. "
-            "REGRA ABSOLUTA: Aja como um humano recomendando o trabalho de outra pessoa. NUNCA use palavras que deem a entender que o grupo é seu (evite 'nosso grupo', 'estou liberando', 'nós distribuímos'). "
-            "Refira-se ao grupo na terceira pessoa ('eles liberam', 'o parceiro solta'). "
-            "Use emojis, varie o texto a cada geração e entregue apenas a mensagem pronta, sem aspas e sem links."
-        )
+        prompt = "Recomende um canal parceiro VIP (Acervo Afiliados). Diga que eles liberam conteúdos premium e editados a dedo. Seja humano. Máximo 150 caracteres. Sem links."
+    
+    # ✅ NOVOS PROMPTS DA EXPANSÃO DO PÚBLICO
+    elif tipo in ["promo_publico", "promo_publico_viral"]:
+        prompt = "Recomende o nosso novo Grupo Público de Ofertas. Diga que lá a galera pode postar seus próprios achados livremente para a comunidade após a IA aprovar. Seja empolgante, máximo 150 caracteres, use emojis, sem links."
+    elif tipo == "link_grupo_publico":
+        prompt = "Atue como administrador do grupo público. Peça aos membros para chamarem mais amigos para participar da nossa comunidade onde todos postam ofertas e lucram juntos. Seja direto, máximo 150 caracteres, use emojis, sem links."
+    elif tipo == "promo_principal_publico":
+        prompt = "Atue como moderador do grupo público. Recomende a galera a entrar no nosso Canal VIP Oficial (Acervo Afiliados), onde postamos vídeos premium mastigados. Máximo 150 caracteres, use emojis, sem links."
+    elif tipo == "promo_viral_publico":
+        prompt = "Atue como moderador do grupo público. Recomende nosso Acervo de Vídeos Virais para a galera copiar e colar as tendências do momento. Máximo 150 caracteres, use emojis, sem links."
 
     texto = await gerar_mensagem_gemini(prompt)
     
-    # Roteamento de chat: Define qual grupo receberá qual mensagem
-    chat_destino = GRUPO_VIRAL_ID if tipo in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral"] else GRUPO_ID
-    
-    if EXIBIR_LOGS: logger.info(f"🚀 Enviando rotina ({tipo}) para o chat {chat_destino}: {texto[:20]}...")
+    if EXIBIR_LOGS: logger.info(f"🚀 Enviando rotina ({tipo}) para o chat {chat_destino}.")
     msg_enviada = await bot.send_message(chat_destino, texto)
-    
     registrar_lixeira(msg_enviada.message_id, chat_destino)
     
+    # 🔗 ANEXADORES DE LINKS ISOLADOS
     if tipo == "link_grupo":
-        link_separado = f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}"
-        if EXIBIR_LOGS: logger.info("🔗 Enviando link do grupo em mensagem isolada.")
-        msg_link = await bot.send_message(GRUPO_ID, link_separado, parse_mode="HTML")
-        registrar_lixeira(msg_link.message_id, GRUPO_ID)
+        msg_link = await bot.send_message(chat_destino, f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}", parse_mode="HTML")
+        registrar_lixeira(msg_link.message_id, chat_destino)
     elif tipo == "link_grupo_viral":
-        link_separado = f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO_VIRAL}"
-        if EXIBIR_LOGS: logger.info("🔗 Enviando link do grupo viral em mensagem isolada.")
-        msg_link = await bot.send_message(GRUPO_VIRAL_ID, link_separado, parse_mode="HTML")
-        registrar_lixeira(msg_link.message_id, GRUPO_VIRAL_ID)
+        msg_link = await bot.send_message(chat_destino, f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO_VIRAL}", parse_mode="HTML")
+        registrar_lixeira(msg_link.message_id, chat_destino)
     elif tipo in ["divulgar_gem", "divulgar_gem_viral"]:
-        link_gem = "👇 <b>Acesse o Prompt Automatizado:</b>\nhttps://gemini.google.com/gem/1HtJMuknyMZ76utOu-i6c_xvc3vmQx7bT?usp=sharing"
-        if EXIBIR_LOGS: logger.info("🤖 Enviando link do GEM em mensagem isolada.")
-        msg_gem = await bot.send_message(chat_destino, link_gem, parse_mode="HTML")
+        msg_gem = await bot.send_message(chat_destino, "👇 <b>Acesse o Prompt Automatizado:</b>\nhttps://gemini.google.com/gem/1HtJMuknyMZ76utOu-i6c_xvc3vmQx7bT?usp=sharing", parse_mode="HTML")
         registrar_lixeira(msg_gem.message_id, chat_destino)
-    elif tipo == "promo_viral":
-        link_viral = f"👇 <b>Acesse o Canal Parceiro:</b>\n{LINK_GRUPO_VIRAL}"
-        if EXIBIR_LOGS: logger.info("🔗 Enviando link do Acervo Viral.")
-        msg_viral = await bot.send_message(GRUPO_ID, link_viral, parse_mode="HTML")
-        registrar_lixeira(msg_viral.message_id, GRUPO_ID)
-    elif tipo == "promo_principal":
-        link_princ = f"👇 <b>Acesse o Canal Parceiro:</b>\n{LINK_GRUPO}"
-        if EXIBIR_LOGS: logger.info("🔗 Enviando link do Acervo Afiliados.")
-        msg_princ = await bot.send_message(GRUPO_VIRAL_ID, link_princ, parse_mode="HTML")
-        registrar_lixeira(msg_princ.message_id, GRUPO_VIRAL_ID)
+    elif tipo == "promo_viral" or tipo == "promo_viral_publico":
+        msg_viral = await bot.send_message(chat_destino, f"👇 <b>Acesse o Acervo Viral:</b>\n{LINK_GRUPO_VIRAL}", parse_mode="HTML")
+        registrar_lixeira(msg_viral.message_id, chat_destino)
+    elif tipo == "promo_principal" or tipo == "promo_principal_publico":
+        msg_princ = await bot.send_message(chat_destino, f"👇 <b>Acesse o Acervo Afiliados:</b>\n{LINK_GRUPO}", parse_mode="HTML")
+        registrar_lixeira(msg_princ.message_id, chat_destino)
+    elif tipo in ["promo_publico", "promo_publico_viral", "link_grupo_publico"]:
+        msg_pub = await bot.send_message(chat_destino, f"👇 <b>Acesse a Comunidade Pública:</b>\n{LINK_GRUPO_PUBLICO}", parse_mode="HTML")
+        registrar_lixeira(msg_pub.message_id, chat_destino)
 
 def ler_config_rotina():
     padrao = {
+        # Rotinas do Canal Principal
         "bom_dia": {"inicio": 6, "fim": 9, "frequencia": 1},
         "incentivo": {"inicio": 10, "fim": 20, "frequencia": 2},
         "boa_noite": {"inicio": 21, "fim": 23, "frequencia": 1},
         "link_grupo": {"inicio": 9, "fim": 21, "frequencia": 3},
         "divulgar_gem": {"inicio": 8, "fim": 22, "frequencia": 1},
         "promo_viral": {"inicio": 10, "fim": 20, "frequencia": 1},
+        "promo_publico": {"inicio": 10, "fim": 20, "frequencia": 1}, # ✅ NOVO: Divulga o Público no Principal
+
+        # Rotinas do Canal Viral
         "promo_principal": {"inicio": 10, "fim": 20, "frequencia": 1},
         "divulgar_gem_viral": {"inicio": 8, "fim": 22, "frequencia": 1},
+        "link_grupo_viral": {"inicio": 9, "fim": 21, "frequencia": 2},
+        "promo_publico_viral": {"inicio": 10, "fim": 20, "frequencia": 1}, # ✅ NOVO: Divulga o Público no Viral
+
+        # Rotinas do Grupo Público
+        "link_grupo_publico": {"inicio": 9, "fim": 21, "frequencia": 2}, # ✅ NOVO: Auto-divulgação interna
+        "promo_principal_publico": {"inicio": 10, "fim": 20, "frequencia": 1}, # ✅ NOVO: Divulga o Principal no Público
+        "promo_viral_publico": {"inicio": 10, "fim": 20, "frequencia": 1}, # ✅ NOVO: Divulga o Viral no Público
+
         "pausado": False,
         "pausado_viral": False,
+        "pausado_publico": False, # ✅ NOVO: Trava de pausa independente
         "historico_diario": {"data": "", "contagem": {}}
     }
     
     dados = ler_config_bd("config_rotina", padrao, arquivo_legado="config_rotina.json")
     
-    # Injeta chaves padrão que possam estar faltando em arquivos de versões antigas
     houve_alteracao = False
     for chave, valor in padrao.items():
         if chave not in dados:
@@ -1739,236 +1701,10 @@ def ler_config_rotina():
         
     return dados
 
-def salvar_config_rotina(dados):
-    salvar_config_bd("config_rotina", dados)
-
-def agendar_tarefas_diarias(escopo="todos"):
-    if EXIBIR_LOGS: logger.info(f"🔄 Sorteando horários de rotina (Escopo: {escopo.upper()})...")
-    
-    agora_faxina = datetime.now(fuso_horario)
-    hoje_faxina_str = agora_faxina.strftime("%Y-%m-%d")
-    
-    if escopo == "todos":
-        # --- Limpeza de Madrugada no SQLite ---
-        try:
-            conexao = sqlite3.connect("banco_dados.db")
-            cursor = conexao.cursor()
-            cursor.execute("SELECT caminho_video FROM fila_postagens WHERE status IN ('CONCLUIDO', 'ERRO') AND data_postagem != ?", (hoje_faxina_str,))
-            para_apagar = cursor.fetchall()
-            for item in para_apagar:
-                cam = item[0]
-                if cam and os.path.exists(cam):
-                    cursor.execute("SELECT COUNT(*) FROM fila_postagens WHERE caminho_video = ? AND status = 'PENDENTE'", (cam,))
-                    em_uso = cursor.fetchone()[0]
-                    if em_uso == 0:
-                        try: os.remove(cam)
-                        except: pass
-            cursor.execute("DELETE FROM fila_postagens WHERE status IN ('CONCLUIDO', 'ERRO') AND data_postagem != ?", (hoje_faxina_str,))
-            apagados = cursor.rowcount
-            conexao.commit()
-            conexao.close()
-            if EXIBIR_LOGS and apagados > 0: logger.info(f"🧹 Limpeza da madrugada: {apagados} registos antigos eliminados do SQLite.")
-        except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro na faxina da madrugada (SQLite): {e}")
-    
-    rotinas_virais_lista = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral"]
-
-    # Remove os jobs antigos respeitando estritamente o ESCOPO solicitado
-    for job in scheduler.get_jobs():
-        if job.id.startswith('job_rotina_') or job.id.startswith('job_campanha_'):
-            is_viral = any(rv in job.id for rv in rotinas_virais_lista)
-            if escopo == "principal" and is_viral:
-                continue # Pula os virais, não apaga
-            if escopo == "viral" and not is_viral:
-                continue # Pula os principais, não apaga
-                
-            job.remove()
-            if EXIBIR_LOGS: logger.info(f"🧹 Agendamento antigo apagado da memória: {job.id}")
-
-    dados_rotina = ler_config_rotina()
-    agora = datetime.now(fuso_horario)
-    hoje_str = agora.strftime("%Y-%m-%d")
-    
-    # 1. ABERTURA E FECHAMENTO RÍGIDOS (Apenas se o escopo permitir)
-    if escopo in ["todos", "principal"]:
-        for tipo in ["bom_dia", "boa_noite"]:
-            if tipo not in dados_rotina or type(dados_rotina[tipo]) is not dict: continue
-            ultimo_disparo = dados_rotina.get(f"ultimo_{tipo}", "")
-            if ultimo_disparo == hoje_str: continue
-            
-            config = dados_rotina[tipo]
-            inicio = config.get("inicio", 6 if tipo == "bom_dia" else 21)
-            fim = config.get("fim", 9 if tipo == "bom_dia" else 23)
-            limite_superior = fim - 1 if fim > inicio else fim
-            
-            minuto_absoluto = random.randint(inicio * 60, limite_superior * 60 + 59)
-            hora_sorteada, min_sorteado = divmod(minuto_absoluto, 60)
-            horario_candidato = agora.replace(hour=hora_sorteada, minute=min_sorteado, second=0, microsecond=0)
-            
-            if horario_candidato <= agora:
-                horario_candidato = agora + timedelta(minutes=5)
-                hora_sorteada, min_sorteado = horario_candidato.hour, horario_candidato.minute
-                
-            scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=min_sorteado, timezone=FUSO_STR, args=[tipo], id=f"job_rotina_{tipo}_0", replace_existing=True)
-
-        # 2. DISTRIBUIÇÃO DOS VÍDEOS (Fila do Canal Principal)
-        agendar_fila_postagens()
-    
-    # 3. MAPEAMENTO DAS LACUNAS (Sempre roda para achar as fronteiras de limite)
-    eventos_fixos = []
-    for job in scheduler.get_jobs():
-        if job.id.startswith('job_rotina_bom_dia') or job.id.startswith('job_rotina_boa_noite') or job.id.startswith('job_fila_postagem_'):
-            if getattr(job, 'next_run_time', None):
-                tempo_evento = job.next_run_time.astimezone(fuso_horario)
-                if tempo_evento.date() == agora.date():
-                    eventos_fixos.append(tempo_evento)
-                    
-    ultimo_bd = dados_rotina.get("ultimo_bom_dia", "")
-    job_bd = scheduler.get_job('job_rotina_bom_dia_0')
-    if ultimo_bd == hoje_str: fronteira_inicial = agora
-    elif job_bd and getattr(job_bd, 'next_run_time', None): fronteira_inicial = job_bd.next_run_time.astimezone(fuso_horario)
-    else: fronteira_inicial = max(agora, agora.replace(hour=dados_rotina.get("bom_dia", {}).get("inicio", 6), minute=0, second=0, microsecond=0))
-    eventos_fixos.append(fronteira_inicial)
-    
-    ultimo_bn = dados_rotina.get("ultimo_boa_noite", "")
-    job_bn = scheduler.get_job('job_rotina_boa_noite_0')
-    if ultimo_bn == hoje_str: fronteira_final = agora
-    elif job_bn and getattr(job_bn, 'next_run_time', None): fronteira_final = job_bn.next_run_time.astimezone(fuso_horario)
-    else: fronteira_final = agora.replace(hour=max(0, dados_rotina.get("boa_noite", {}).get("fim", 23) - 1), minute=59, second=59, microsecond=0)
-    eventos_fixos.append(fronteira_final)
-    
-    eventos_fixos.sort()
-    
-    def encontrar_maior_lacuna_e_inserir(duracao_minima=15):
-        maior_gap = timedelta(0)
-        ponto_insercao = None
-        idx_insercao = -1
-        for i in range(len(eventos_fixos) - 1):
-            gap = eventos_fixos[i+1] - eventos_fixos[i]
-            if gap > maior_gap:
-                maior_gap = gap
-                ponto_insercao = eventos_fixos[i] + (gap / 2)
-                idx_insercao = i + 1
-        if maior_gap.total_seconds() / 60 >= duracao_minima:
-            eventos_fixos.insert(idx_insercao, ponto_insercao)
-            return ponto_insercao
-        return None
-
-    # PREPARAÇÃO DINÂMICA
-    tipos_restantes = [t for t in dados_rotina.keys() if t not in ["bom_dia", "boa_noite", "pausado", "pausado_viral", "ultimo_bom_dia", "ultimo_boa_noite", "historico_diario"]]
-    rotinas_principais = [t for t in tipos_restantes if t not in rotinas_virais_lista]
-    rotinas_virais = [t for t in tipos_restantes if t in rotinas_virais_lista]
-    
-    hoje_historico = agora.strftime("%Y-%m-%d")
-    historico = dados_rotina.get("historico_diario", {})
-    contagem_hoje = historico.get("contagem", {}) if historico.get("data") == hoje_historico else {}
-    def obter_qtd_disparos(tipo_rotina):
-        registro = contagem_hoje.get(tipo_rotina, [])
-        return len(registro) if isinstance(registro, list) else registro
-
-    if escopo in ["todos", "principal"]:
-        # 4.1 AGENDAMENTO DA GRADE PRINCIPAL
-        grupos_tarefas = {}
-        for tipo in rotinas_principais:
-            config = dados_rotina[tipo]
-            if type(config) is dict:
-                frequencia_total = config.get("frequencia", 1)
-                disparos_ja_feitos = obter_qtd_disparos(tipo)
-                frequencia_restante = frequencia_total - disparos_ja_feitos
-                if frequencia_restante > 0:
-                    grupos_tarefas[tipo] = [(tipo, i + disparos_ja_feitos) for i in range(frequencia_restante)]
-                    
-        tarefas_para_distribuir = []
-        chaves_grupos = list(grupos_tarefas.keys())
-        while chaves_grupos:
-            random.shuffle(chaves_grupos)
-            chaves_remover = []
-            for chave in chaves_grupos:
-                if grupos_tarefas[chave]: tarefas_para_distribuir.append(grupos_tarefas[chave].pop(0))
-                if not grupos_tarefas[chave]: chaves_remover.append(chave)
-            for chave in chaves_remover: chaves_grupos.remove(chave)
-                
-        ultimo_tipo_agendado = None
-        for tipo, indice in tarefas_para_distribuir:
-            duracao_min_gap = 60 if tipo == ultimo_tipo_agendado else 20
-            horario_ideal = encontrar_maior_lacuna_e_inserir(duracao_minima=duracao_min_gap)
-            if horario_ideal:
-                scheduler.add_job(disparar_mensagem, 'date', run_date=horario_ideal, args=[tipo], id=f"job_rotina_{tipo}_{indice}", replace_existing=True)
-                ultimo_tipo_agendado = tipo
-            else:
-                minutos_offset = random.randint(30, 90) if tipo == ultimo_tipo_agendado else random.randint(15, 60)
-                horario_fallback = agora + timedelta(minutes=minutos_offset)
-                if horario_fallback <= fronteira_inicial: horario_fallback = fronteira_inicial + timedelta(minutes=random.randint(15, 45))
-                if horario_fallback >= fronteira_final:
-                    horario_fallback = fronteira_final - timedelta(minutes=random.randint(5, 30))
-                    if horario_fallback <= agora: horario_fallback = agora + timedelta(minutes=2)
-                scheduler.add_job(disparar_mensagem, 'date', run_date=horario_fallback, args=[tipo], id=f"job_rotina_{tipo}_{indice}", replace_existing=True)
-                ultimo_tipo_agendado = tipo
-
-        # 5. AGENDAMENTO DAS CAMPANHAS ESPECIAIS
-        for i in range(4):
-            data_futura = agora + timedelta(days=i)
-            if data_futura.day == data_futura.month:
-                tipo_alerta = f"campanha_{i}_{data_futura.day:02d}.{data_futura.month:02d}"
-                turnos_pendentes = ["manha", "tarde", "noite"][obter_qtd_disparos(tipo_alerta):]
-                for p in turnos_pendentes:
-                    horario_campanha = encontrar_maior_lacuna_e_inserir(duracao_minima=10)
-                    if not horario_campanha:
-                        if p == "manha": horario_campanha = agora.replace(hour=random.randint(8,11), minute=random.randint(0,59))
-                        elif p == "tarde": horario_campanha = agora.replace(hour=random.randint(14,17), minute=random.randint(0,59))
-                        else: horario_campanha = agora.replace(hour=random.randint(18,21), minute=random.randint(0,59))
-                    if horario_campanha <= agora: horario_campanha = agora + timedelta(minutes=random.randint(3, 10))
-                    scheduler.add_job(disparar_mensagem, 'date', run_date=horario_campanha, args=[tipo_alerta], id=f'job_campanha_{p}', replace_existing=True)
-                break
-
-    if escopo in ["todos", "viral"]:
-        # 4.5. AGENDAMENTO PARALELO PARA O CANAL VIRAL
-        grupos_virais = {}
-        for tipo in rotinas_virais:
-            config = dados_rotina[tipo]
-            if type(config) is dict:
-                frequencia_total = config.get("frequencia", 1)
-                disparos_ja_feitos = obter_qtd_disparos(tipo)
-                frequencia_restante = frequencia_total - disparos_ja_feitos
-                if frequencia_restante > 0:
-                    grupos_virais[tipo] = [(tipo, i + disparos_ja_feitos, config) for i in range(frequencia_restante)]
-                    
-        tarefas_virais = []
-        chaves_virais = list(grupos_virais.keys())
-        while chaves_virais:
-            random.shuffle(chaves_virais)
-            chaves_remover = []
-            for chave in chaves_virais:
-                if grupos_virais[chave]: tarefas_virais.append(grupos_virais[chave].pop(0))
-                if not grupos_virais[chave]: chaves_remover.append(chave)
-            for chave in chaves_remover: chaves_virais.remove(chave)
-                
-        ultimo_tipo_viral = None
-        for tipo, indice, config in tarefas_virais:
-            minuto_absoluto = random.randint(config.get("inicio", 8) * 60, config.get("fim", 22) * 60 + 59)
-            hora_sorteada, min_sorteado = divmod(minuto_absoluto, 60)
-            horario_candidato = agora.replace(hour=hora_sorteada, minute=min_sorteado, second=0, microsecond=0)
-            
-            if tipo == ultimo_tipo_viral: horario_candidato += timedelta(minutes=random.randint(60, 120))
-            if horario_candidato <= fronteira_inicial: horario_candidato = fronteira_inicial + timedelta(minutes=random.randint(5, 60))
-            if horario_candidato >= fronteira_final: horario_candidato = fronteira_final - timedelta(minutes=random.randint(5, 60))
-            if horario_candidato <= agora: horario_candidato = agora + timedelta(minutes=random.randint(2, 10))
-                
-            conflito_geral = False
-            for job_existente in scheduler.get_jobs():
-                if getattr(job_existente, 'next_run_time', None) and any(rv in job_existente.id for rv in rotinas_virais_lista):
-                    if abs((horario_candidato - job_existente.next_run_time.astimezone(fuso_horario)).total_seconds()) < 120:
-                        conflito_geral = True
-                        break
-            if conflito_geral: horario_candidato += timedelta(minutes=random.randint(3, 8))
-                
-            scheduler.add_job(disparar_mensagem, 'date', run_date=horario_candidato, args=[tipo], id=f"job_rotina_{tipo}_{indice}", replace_existing=True)
-            ultimo_tipo_viral = tipo
-
-# --- SISTEMA DE SESSÃO E INATIVIDADE ---
-from aiogram import BaseMiddleware
-from typing import Callable, Dict, Any, Awaitable
-from aiogram.fsm.storage.base import StorageKey
+def ler_config_rotina():
+    padrao = {
+        # Rotinas do Canal Principal
+        "bom_dia": {"inicio": 6, "fim": 9, "frequencia": 1},
 
 async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int = None):
     # 1. Recupera o estado de navegação atual do utilizador de forma remota
@@ -4496,8 +4232,10 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await state.clear()
         if EXIBIR_LOGS: logger.info("🔙 Cancelando configuração de rotina e redirecionando ao menu correto.")
         await message.answer("Ação cancelada.")
-        if menu_orig == "espiao" or tipo_edicao in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral"]:
+        if menu_orig == "espiao" or tipo_edicao in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral"]:
             await gerenciar_rotina_espiao(message, state)
+        elif menu_orig == "publico" or tipo_edicao in ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico"]:
+            await gerenciar_rotina_publico(message, state)
         else:
             await gerenciar_rotina(message, state)
         return
@@ -6629,8 +6367,8 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     teclado = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Editar Convite do Grupo 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖\u200b")],
-            [KeyboardButton(text="Editar Convite Afiliados 🚀"), KeyboardButton(text=texto_botao_pausa)],
-            [KeyboardButton(text="Voltar às Automações 🔙")]
+            [KeyboardButton(text="Editar Convite Afiliados 🚀"), KeyboardButton(text="Editar Promo Público 👥")],
+            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Automações 🔙")]
         ],
         resize_keyboard=True,
         is_persistent=True
@@ -6760,28 +6498,28 @@ async def processar_pausa_rotinas_interno(message: types.Message, state: FSMCont
     if origem == "espiao":
         dados_rotina["pausado_viral"] = novo_status
         salvar_config_rotina(dados_rotina)
-        
-        if novo_status:
-            if EXIBIR_LOGS: logger.info("⏸️ Rotinas do VIRAL pausadas internamente.")
-            await message.answer("⏸️ <b>Rotinas do Canal Viral PAUSADAS.</b>\nAs mensagens automáticas foram suspensas.", parse_mode="HTML")
+        if novo_status: await message.answer("⏸️ <b>Rotinas do Canal Viral PAUSADAS.</b>", parse_mode="HTML")
         else:
-            if EXIBIR_LOGS: logger.info("▶️ Rotinas do VIRAL ativadas. Invocando Motor de Recálculo exclusivo...")
-            await message.answer("▶️ <b>Rotinas do Canal Viral ATIVAS.</b>\nAs mensagens voltarão a ser enviadas.\n🔄 Recalculando grade do Viral...", parse_mode="HTML")
-            agendar_tarefas_diarias(escopo="viral") # Recálculo Exclusivo do Viral
-        
+            await message.answer("▶️ <b>Rotinas do Viral ATIVAS.</b>\n🔄 Recalculando grade...", parse_mode="HTML")
+            agendar_tarefas_diarias(escopo="viral")
         await gerenciar_rotina_espiao(message, state)
+        
+    elif origem == "publico":
+        dados_rotina["pausado_publico"] = novo_status
+        salvar_config_rotina(dados_rotina)
+        if novo_status: await message.answer("⏸️ <b>Rotinas do Público PAUSADAS.</b>", parse_mode="HTML")
+        else:
+            await message.answer("▶️ <b>Rotinas do Público ATIVAS.</b>\n🔄 Recalculando grade...", parse_mode="HTML")
+            agendar_tarefas_diarias(escopo="publico")
+        await gerenciar_rotina_publico(message, state)
+        
     else:
         dados_rotina["pausado"] = novo_status
         salvar_config_rotina(dados_rotina)
-        
-        if novo_status:
-            if EXIBIR_LOGS: logger.info("⏸️ Rotinas do PRINCIPAL pausadas internamente.")
-            await message.answer("⏸️ <b>Mensagens de Rotina PAUSADAS.</b>\nAs mensagens automáticas do grupo principal foram suspensas.", parse_mode="HTML")
+        if novo_status: await message.answer("⏸️ <b>Rotinas Principais PAUSADAS.</b>", parse_mode="HTML")
         else:
-            if EXIBIR_LOGS: logger.info("▶️ Rotinas do PRINCIPAL ativadas. Invocando Motor de Recálculo exclusivo...")
-            await message.answer("▶️ <b>Mensagens de Rotina ATIVAS.</b>\nAs mensagens voltarão a ser enviadas.\n🔄 Recalculando grade do Principal...", parse_mode="HTML")
-            agendar_tarefas_diarias(escopo="principal") # Recálculo Exclusivo do Principal
-            
+            await message.answer("▶️ <b>Rotinas Principais ATIVAS.</b>\n🔄 Recalculando grade...", parse_mode="HTML")
+            agendar_tarefas_diarias(escopo="principal")
         await gerenciar_rotina(message, state)
 
 # ✅ NOVO: Handler específico para corrigir o "Voltar" na pausa programada
@@ -7534,8 +7272,9 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
         keyboard=[
             [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
             [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
-            [KeyboardButton(text="Editar Convite Viral 🚀"), KeyboardButton(text="Editar Boa Noite 🌙")],
-            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Configs 🔙")]
+            [KeyboardButton(text="Editar Convite Viral 🚀"), KeyboardButton(text="Editar Promo Público 🗣️")],
+            [KeyboardButton(text="Editar Boa Noite 🌙"), KeyboardButton(text=texto_botao_pausa)],
+            [KeyboardButton(text="Voltar às Configs 🔙")]
         ],
         resize_keyboard=True,
         is_persistent=True
@@ -7556,9 +7295,14 @@ async def pedir_horario_rotina(message: types.Message, state: FSMContext):
         "Editar Convite 🔗": "link_grupo",
         "Editar Prompt GEM 🤖": "divulgar_gem",
         "Editar Convite Viral 🚀": "promo_viral",
+        "Editar Promo Público 🗣️": "promo_publico",
         "Editar Convite Afiliados 🚀": "promo_principal",
         "Editar Convite do Grupo 🔗": "link_grupo_viral",
-        "Editar Prompt GEM 🤖\u200b": "divulgar_gem_viral"
+        "Editar Prompt GEM 🤖\u200b": "divulgar_gem_viral",
+        "Editar Promo Público 👥": "promo_publico_viral",
+        "Editar Convite Próprio 🔗": "link_grupo_publico",
+        "Editar Promo Principal 🌟": "promo_principal_publico",
+        "Editar Promo Viral 💥": "promo_viral_publico"
     }
     tipo = tipo_map[message.text]
     
@@ -8982,7 +8726,15 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         "Escolha uma opção abaixo:"
     )
     
-    await message.answer(texto, reply_markup=teclado_menu_submissao, parse_mode="HTML")
+    teclado_pub = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Ativar/Desativar Moderação ⏯️")],
+            [KeyboardButton(text="Configurar Grupo e Tópicos 🎯")],
+            [KeyboardButton(text="Rotinas do Grupo Público ⏰")], # ✅ NOVO BOTÃO
+            [KeyboardButton(text="Voltar aos Canais 🔙")]
+        ], resize_keyboard=True, is_persistent=True
+    )
+    await message.answer(texto, reply_markup=teclado_pub, parse_mode="HTML")
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
 
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Ativar/Desativar Submissões ⏯️", "Ativar/Desativar Moderação ⏯️"]))
@@ -9026,6 +8778,36 @@ async def processar_toggle_submissoes(message: types.Message, state: FSMContext)
         status = "DESATIVADA"
         
     await message.answer(f"{icone} A moderação automática foi <b>{status}</b> com sucesso.", parse_mode="HTML")
+    await painel_submissoes(message, state)
+
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Rotinas do Grupo Público ⏰")
+async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
+    dados = ler_config_rotina()
+    texto = "⏰ <b>Rotinas do Grupo Público</b>\n\n"
+    
+    config_pub = dados.get("link_grupo_publico", {"inicio": 9, "fim": 21, "frequencia": 2})
+    config_princ = dados.get("promo_principal_publico", {"inicio": 10, "fim": 20, "frequencia": 1})
+    config_vir = dados.get("promo_viral_publico", {"inicio": 10, "fim": 20, "frequencia": 1})
+    
+    texto += f"🔹 <b>Convite Próprio 🔗</b>\n   Janela: {config_pub['inicio']}h às {config_pub['fim']}h | {config_pub['frequencia']}x/dia\n\n"
+    texto += f"🔹 <b>Promoção VIP Principal 🌟</b>\n   Janela: {config_princ['inicio']}h às {config_princ['fim']}h | {config_princ['frequencia']}x/dia\n\n"
+    texto += f"🔹 <b>Promoção Acervo Viral 💥</b>\n   Janela: {config_vir['inicio']}h às {config_vir['fim']}h | {config_vir['frequencia']}x/dia\n\n"
+    
+    texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado_publico") else "Pausar Rotinas ⏸️"
+    teclado = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Editar Convite Próprio 🔗"), KeyboardButton(text="Editar Promo Principal 🌟")],
+            [KeyboardButton(text="Editar Promo Viral 💥"), KeyboardButton(text=texto_botao_pausa)],
+            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
+        ], resize_keyboard=True, is_persistent=True
+    )
+    await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
+    await state.update_data(menu_origem="publico")
+    await state.set_state(ConfigRotina.menu_principal)
+
+@dp.message(ConfigRotina.menu_principal, F.text == "Voltar ao Painel Público 🔙")
+async def voltar_pub_rotinas(message: types.Message, state: FSMContext):
+    await state.clear()
     await painel_submissoes(message, state)
 
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurar Grupo e Tópicos 🎯")
