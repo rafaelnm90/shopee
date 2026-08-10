@@ -9082,15 +9082,15 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     nome_grupo = cache_nomes.get(grupo_id_str, "Grupo Público")
     display_grupo = f"👥 <b>{nome_grupo}</b> (<code>{grupo_id_str}</code>)" if grupo_id_str else "<i>Grupo não definido</i>"
 
-    # 2. Resgata o nome do Tópico de Escuta
+    # 2. Resgata o nome do Tópico de Escuta e formata o ID longo
     topico_escuta_str = str(topico_escuta) if topico_escuta else ""
-    nome_esc = cache_nomes.get(topico_escuta_str, cache_nomes.get(f"{grupo_id_str}:{topico_escuta_str}", "Tópico de Escuta"))
-    display_escuta = f"{nome_esc} (<code>{topico_escuta_str}</code>)" if topico_escuta_str else "<i>Não definido</i>"
+    nome_t_envio = config.get("nome_topico_envio", "Tópico de Escuta")
+    display_escuta = f"💬 {nome_t_envio} (<code>{grupo_id_str}_{topico_escuta_str}</code>)" if topico_escuta_str else "<i>Não definido</i>"
 
-    # 3. Resgata o nome do Tópico Vitrine
+    # 3. Resgata o nome do Tópico Vitrine e formata o ID longo
     topico_vitrine_str = str(topico_vitrine) if topico_vitrine else ""
-    nome_vit = cache_nomes.get(topico_vitrine_str, cache_nomes.get(f"{grupo_id_str}:{topico_vitrine_str}", "Tópico Vitrine"))
-    display_vitrine = f"{nome_vit} (<code>{topico_vitrine_str}</code>)" if topico_vitrine_str else "<i>Não definido</i>"
+    nome_t_destino = config.get("nome_topico_destino", "Tópico Vitrine")
+    display_vitrine = f"🌟 {nome_t_destino} (<code>{grupo_id_str}_{topico_vitrine_str}</code>)" if topico_vitrine_str else "<i>Não definido</i>"
 
     texto = (
         "📬 <b>Painel do Grupo Público</b>\n\n"
@@ -9109,7 +9109,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         keyboard=[
             [KeyboardButton(text="Ativar/Desativar Moderação ⏯️")],
             [KeyboardButton(text="Configurar Grupo e Tópicos 🎯")],
-            [KeyboardButton(text="Rotinas do Grupo Público ⏰")], # ✅ NOVO BOTÃO
+            [KeyboardButton(text="Rotinas do Grupo Público ⏰")],
             [KeyboardButton(text="Voltar aos Canais 🔙")]
         ], resize_keyboard=True, is_persistent=True
     )
