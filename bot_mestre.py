@@ -9107,7 +9107,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     
     teclado_pub = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Ativar/Desativar Moderação ⏯️")],
+            [KeyboardButton(text="Ativar/Desativar Robô Moderador ⏯️")],
             [KeyboardButton(text="Configurar Grupo e Tópicos 🎯")],
             [KeyboardButton(text="Rotinas do Grupo Público ⏰")],
             [KeyboardButton(text="Voltar aos Canais 🔙")]
@@ -9116,7 +9116,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=teclado_pub, parse_mode="HTML")
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
 
-@dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Ativar/Desativar Submissões ⏯️", "Ativar/Desativar Moderação ⏯️"]))
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Ativar/Desativar Robô Moderador ⏯️"]))
 async def pedir_confirmacao_toggle(message: types.Message, state: FSMContext):
     config = ler_submissao_config()
     if not config.get("grupo_id"):
