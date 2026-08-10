@@ -1466,7 +1466,7 @@ async def confirmar_edicao_modo(message: types.Message, state: FSMContext):
     msg_simulada = message.model_copy(update={"text": str(indice + 1)})
     await selecionar_acao_edicao(msg_simulada, state)
 
-@@router.message(EspelhadorFluxo.aguardando_nova_origem)
+@router.message(EspelhadorFluxo.aguardando_nova_origem)
 async def confirmar_nova_origem(message: types.Message, state: FSMContext):
     texto = message.text
     
