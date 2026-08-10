@@ -4203,6 +4203,7 @@ async def manual_link_grupo(message: types.Message):
     await disparar_mensagem("link_grupo", forcar=True)
     await message.answer("Mensagem de divulgação enviada ao grupo com sucesso! ✅")
 
+# --- Disparos Manuais (Viral) ---
 @dp.message(F.text == "Disparar Convite Viral 🚀", StateFilter("*"))
 async def manual_promo_viral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
@@ -4223,6 +4224,10 @@ async def manual_promo_viral(message: types.Message):
 async def manual_promo_afiliados(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🚀 Comando recebido: Forçando disparo de Convite Afiliados.")
+    dados_rotina = ler_config_rotina()
+    if dados_rotina.get("pausado_viral", False):
+        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Viral em pausa.")
+        return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Viral estão <b>PAUSADAS</b>.", parse_mode="HTML")
     await message.answer("Gerando e enviando divulgação do canal de afiliados... ⏳")
     await disparar_mensagem("promo_principal", forcar=True)
     await message.answer("Propaganda do canal de afiliados enviada ao canal viral com sucesso! ✅")
@@ -4231,6 +4236,10 @@ async def manual_promo_afiliados(message: types.Message):
 async def manual_convite_viral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🚀 Comando recebido: Forçando disparo de Convite do Grupo (Viral).")
+    dados_rotina = ler_config_rotina()
+    if dados_rotina.get("pausado_viral", False):
+        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Viral em pausa.")
+        return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Viral estão <b>PAUSADAS</b>.", parse_mode="HTML")
     await message.answer("Gerando e enviando convite do canal viral... ⏳")
     await disparar_mensagem("link_grupo_viral", forcar=True)
     await message.answer("Convite de recrutamento enviado ao canal viral com sucesso! ✅")
@@ -4239,6 +4248,10 @@ async def manual_convite_viral(message: types.Message):
 async def manual_prompt_gem_viral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🚀 Comando recebido: Forçando disparo de Prompt GEM (Viral).")
+    dados_rotina = ler_config_rotina()
+    if dados_rotina.get("pausado_viral", False):
+        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Viral em pausa.")
+        return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Viral estão <b>PAUSADAS</b>.", parse_mode="HTML")
     await message.answer("Gerando e enviando Prompt GEM para o canal viral... ⏳")
     await disparar_mensagem("divulgar_gem_viral", forcar=True)
     await message.answer("Prompt GEM enviado ao canal viral com sucesso! ✅")
@@ -4247,9 +4260,62 @@ async def manual_prompt_gem_viral(message: types.Message):
 async def manual_promo_publico_viral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🚀 Comando recebido: Forçando disparo de Promo Público (Viral).")
+    dados_rotina = ler_config_rotina()
+    if dados_rotina.get("pausado_viral", False):
+        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Viral em pausa.")
+        return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Viral estão <b>PAUSADAS</b>.", parse_mode="HTML")
     await message.answer("Gerando e enviando divulgação do Grupo Público para o canal viral... ⏳")
     await disparar_mensagem("promo_publico_viral", forcar=True)
     await message.answer("Divulgação enviada ao canal viral com sucesso! ✅")
+
+# --- Disparos Manuais (Grupo Público) ---
+@dp.message(F.text == "Disparar Promo Público 🗣️", StateFilter("*"))
+async def manual_promo_publico(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    dados_rotina = ler_config_rotina()
+    if dados_rotina.get("pausado", False):
+        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema em pausa.")
+        return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Principal estão <b>PAUSADAS</b>.", parse_mode="HTML")
+    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    if dados_rotina.get("ultimo_bom_dia") != hoje_str or dados_rotina.get("ultimo_boa_noite") == hoje_str:
+        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Fora do expediente permitido.")
+        return await message.answer("⚠️ <b>Ação Bloqueada:</b> Dispare esta mensagem apenas durante o expediente.", parse_mode="HTML")
+    await message.answer("Gerando e enviando divulgação do Grupo Público... ⏳")
+    await disparar_mensagem("promo_publico", forcar=True)
+    await message.answer("Mensagem de Promo Público enviada ao grupo com sucesso! ✅")
+
+@dp.message(F.text == "Disparar Convite Próprio 🔗", StateFilter("*"))
+async def manual_convite_proprio_publico(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    dados_rotina = ler_config_rotina()
+    if dados_rotina.get("pausado_publico", False):
+        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Público em pausa.")
+        return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Grupo Público estão <b>PAUSADAS</b>.", parse_mode="HTML")
+    await message.answer("Gerando e enviando convite para o próprio grupo público... ⏳")
+    await disparar_mensagem("link_grupo_publico", forcar=True)
+    await message.answer("Convite de recrutamento enviado ao grupo público com sucesso! ✅")
+
+@dp.message(F.text == "Disparar Promo Principal 🌟", StateFilter("*"))
+async def manual_promo_principal_publico(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    dados_rotina = ler_config_rotina()
+    if dados_rotina.get("pausado_publico", False):
+        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Público em pausa.")
+        return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Grupo Público estão <b>PAUSADAS</b>.", parse_mode="HTML")
+    await message.answer("Gerando e enviando divulgação do canal principal... ⏳")
+    await disparar_mensagem("promo_principal_publico", forcar=True)
+    await message.answer("Propaganda do canal principal enviada ao grupo público com sucesso! ✅")
+
+@dp.message(F.text == "Disparar Promo Viral 💥", StateFilter("*"))
+async def manual_promo_viral_publico(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    dados_rotina = ler_config_rotina()
+    if dados_rotina.get("pausado_publico", False):
+        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Público em pausa.")
+        return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Grupo Público estão <b>PAUSADAS</b>.", parse_mode="HTML")
+    await message.answer("Gerando e enviando divulgação do canal viral... ⏳")
+    await disparar_mensagem("promo_viral_publico", forcar=True)
+    await message.answer("Propaganda do canal viral enviada ao grupo público com sucesso! ✅")
 
 # ❌ NOVO: Handler Global para Cancelar via Botão (Agora 100% à prova de falhas)
 @dp.message(F.text == "Cancelar ❌", StateFilter("*"))
