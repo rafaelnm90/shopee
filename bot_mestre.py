@@ -8951,36 +8951,18 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     config = ler_submissao_config()
     status = "🟢 ATIVADO" if config.get("ativo") else "🔴 DESATIVADO"
     grupo = config.get("grupo_id", "Não definido")
+    
     t_envio = config.get("topico_envio", "?")
+    # Lê direto do JSON (onde o Userbot vai escrever o nome real)
+    nome_t_envio = config.get("nome_topico_envio", "Tópico")
+    
     t_destino = config.get("topico_destino", "?")
+    # Lê direto do JSON (onde o Userbot vai escrever o nome real)
+    nome_t_destino = config.get("nome_topico_destino", "Tópico")
     
     if grupo != "Não definido":
         cache_nomes = ler_cache_nomes_grupos()
         nome_grupo = cache_nomes.get(str(grupo), str(grupo))
-        
-        nome_t_envio = "Desconhecido"
-        if t_envio and str(t_envio) != "0":
-            try:
-                if EXIBIR_LOGS: logger.info(f"🔍 Buscando nome do Tópico de Envio em tempo real (ID: {t_envio})...")
-                topic_e = await bot.get_forum_topic(chat_id=grupo, message_thread_id=t_envio)
-                nome_t_envio = topic_e.title
-            except Exception as e:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao buscar Tópico de Envio: {e}")
-                nome_t_envio = "Tópico"
-        else:
-            nome_t_envio = "Geral"
-                
-        nome_t_destino = "Desconhecido"
-        if t_destino and str(t_destino) != "0":
-            try:
-                if EXIBIR_LOGS: logger.info(f"🔍 Buscando nome do Tópico Vitrine em tempo real (ID: {t_destino})...")
-                topic_d = await bot.get_forum_topic(chat_id=grupo, message_thread_id=t_destino)
-                nome_t_destino = topic_d.title
-            except Exception as e:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao buscar Tópico Vitrine: {e}")
-                nome_t_destino = "Tópico"
-        else:
-            nome_t_destino = "Geral"
         
         t_envio_display = f"{nome_t_envio} (ID: {t_envio})" if str(t_envio) != "?" else "?"
         t_destino_display = f"{nome_t_destino} (ID: {t_destino})" if str(t_destino) != "?" else "?"
