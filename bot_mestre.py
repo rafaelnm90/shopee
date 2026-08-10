@@ -1703,11 +1703,6 @@ def ler_config_rotina():
         
     return dados
 
-def ler_config_rotina():
-    padrao = {
-        # Rotinas do Canal Principal
-        "bom_dia": {"inicio": 6, "fim": 9, "frequencia": 1},
-
 async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int = None):
     # 1. Recupera o estado de navegação atual do utilizador de forma remota
     state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=chat_id, user_id=user_id, thread_id=thread_id))
