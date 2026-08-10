@@ -7511,9 +7511,10 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
     await state.update_data(menu_origem="principal") # ✅ Adicione esta linha exata aqui
     await state.set_state(ConfigRotina.menu_principal)
 
-@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Convite Afiliados 🚀", "Editar Convite do Grupo 🔗", "Editar Prompt GEM 🤖\u200b"]))
+@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Promo Público 🗣️", "Editar Convite Afiliados 🚀", "Editar Convite do Grupo 🔗", "Editar Prompt GEM 🤖\u200b", "Editar Promo Público 👥", "Editar Convite Próprio 🔗", "Editar Promo Principal 🌟", "Editar Promo Viral 💥"]))
 async def pedir_horario_rotina(message: types.Message, state: FSMContext):
-    if EXIBIR_LOGS: logger.info(f"✏️ Iniciando edição da rotina: {message.text}")
+    if EXIBIR_LOGS: logger.info(f"🚀 Iniciando captura do botão de rotina...")
+    if EXIBIR_LOGS: logger.info(f"✏️ Processando edição da rotina selecionada: {message.text}")
     tipo_map = {
         "Editar Bom Dia ☀️": "bom_dia",
         "Editar Boa Noite 🌙": "boa_noite",
@@ -7531,6 +7532,7 @@ async def pedir_horario_rotina(message: types.Message, state: FSMContext):
         "Editar Promo Viral 💥": "promo_viral_publico"
     }
     tipo = tipo_map[message.text]
+    if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Botão mapeado internamente para a chave '{tipo}'.")
     
     # ✅ Lê as configurações atuais para criar os exemplos dinâmicos
     dados_atuais = ler_config_rotina()
