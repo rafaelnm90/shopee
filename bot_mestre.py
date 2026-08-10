@@ -4219,6 +4219,19 @@ async def manual_promo_viral(message: types.Message):
     await disparar_mensagem("promo_viral", forcar=True)
     await message.answer("Mensagem de Promo Viral enviada ao grupo com sucesso! ✅")
 
+@dp.message(F.text == "Disparar Promo Público 🗣️", StateFilter("*"))
+async def manual_promo_publico(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    dados_rotina = ler_config_rotina()
+    if dados_rotina.get("pausado", False):
+        return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Principal estão <b>PAUSADAS</b>.", parse_mode="HTML")
+    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+    if dados_rotina.get("ultimo_bom_dia") != hoje_str or dados_rotina.get("ultimo_boa_noite") == hoje_str:
+        return await message.answer("⚠️ <b>Ação Bloqueada:</b> Dispare esta mensagem apenas durante o expediente.", parse_mode="HTML")
+    await message.answer("Gerando e enviando divulgação do Grupo Público... ⏳")
+    await disparar_mensagem("promo_publico", forcar=True)
+    await message.answer("Mensagem de Promo Público enviada ao grupo com sucesso! ✅")
+
 @dp.message(F.text == "Disparar Convite Afiliados 🚀", StateFilter("*"))
 async def manual_promo_afiliados(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
@@ -6515,7 +6528,8 @@ async def submenu_disparos_manuais(message: types.Message, state: FSMContext):
             keyboard=[
                 [KeyboardButton(text="Disparar Bom Dia ☀️"), KeyboardButton(text="Disparar Incentivo 🔥")],
                 [KeyboardButton(text="Disparar Convite do Grupo 🔗"), KeyboardButton(text="Disparar Convite Viral 🚀")],
-                [KeyboardButton(text="Disparar Boa Noite 🌙"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
+                [KeyboardButton(text="Disparar Promo Público 🗣️"), KeyboardButton(text="Disparar Boa Noite 🌙")],
+                [KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
             ],
             resize_keyboard=True,
             is_persistent=True
@@ -7415,10 +7429,11 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
         "link_grupo": "Convite do Grupo 🔗",
         "divulgar_gem": "Prompt GEM 🤖",
         "promo_viral": "Convite do Grupo Viral 🚀"
+        "promo_publico": "Promo Público 🗣️"
     }
     
     # Ordem de exibição forçada para organizar o painel
-    ordem_exibicao = ["bom_dia", "incentivo", "link_grupo", "divulgar_gem", "promo_viral", "boa_noite"]
+    ordem_exibicao = ["bom_dia", "incentivo", "link_grupo", "divulgar_gem", "promo_viral", "promo_publico", "boa_noite"]
     
     for tipo in ordem_exibicao:
         if tipo in dados:
