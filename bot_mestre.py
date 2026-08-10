@@ -704,8 +704,8 @@ async def salvar_saldo_shopee(message: types.Message, state: FSMContext):
         valor = float(texto_valor)
         msg_status = await message.answer("🔄 Sincronizando e fotografando o passado para evitar duplicações... Aguarde ⏳", reply_markup=teclado_cancelar)
         
-        # Puxa 90 dias e salva o status atual de tudo SEM mexer no saldo
-        conversoes = await buscar_dados_financeiros_shopee(90)
+        # Puxa 180 dias (fatiados de forma inteligente) e salva o status atual de tudo SEM mexer no saldo
+        conversoes = await buscar_dados_financeiros_shopee(180)
         if conversoes:
             processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=True)
             
@@ -2875,63 +2875,77 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
         
     from datetime import timedelta
     agora = datetime.now(fuso_horario)
-    inicio = agora - timedelta(days=dias_retroativos)
+    conversoes_totais = []
     
-    start_ts = int(inicio.replace(hour=0, minute=0, second=0).timestamp())
-    end_ts = int(agora.replace(hour=23, minute=59, second=59).timestamp())
-    
-    endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
-    
-    payload = {
-        "query": """query getConversionReport($purchaseTimeStart: Int64!, $purchaseTimeEnd: Int64!, $limit: Int!) {
-            conversionReport(purchaseTimeStart: $purchaseTimeStart, purchaseTimeEnd: $purchaseTimeEnd, limit: $limit) {
-                nodes {
-                    purchaseTime
-                    shopeeCommissionCapped
-                    sellerCommission
-                    totalCommission
-                    orders {
-                        orderId
-                        orderStatus
+    # ✅ A API da Shopee barra requisições > 31 dias.
+    # O robô agora "fatia" buscas longas em janelas de 30 dias automaticamente!
+    for i in range(0, dias_retroativos, 30):
+        dias_para_puxar = min(30, dias_retroativos - i)
+        
+        fim_chunk = agora - timedelta(days=i)
+        inicio_chunk = fim_chunk - timedelta(days=dias_para_puxar)
+        
+        start_ts = int(inicio_chunk.replace(hour=0, minute=0, second=0).timestamp())
+        end_ts = int(fim_chunk.replace(hour=23, minute=59, second=59).timestamp())
+        
+        endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
+        
+        payload = {
+            "query": """query getConversionReport($purchaseTimeStart: Int64!, $purchaseTimeEnd: Int64!, $limit: Int!) {
+                conversionReport(purchaseTimeStart: $purchaseTimeStart, purchaseTimeEnd: $purchaseTimeEnd, limit: $limit) {
+                    nodes {
+                        purchaseTime
+                        shopeeCommissionCapped
+                        sellerCommission
+                        totalCommission
+                        orders {
+                            orderId
+                            orderStatus
+                        }
                     }
                 }
+            }""",
+            "variables": {
+                "purchaseTimeStart": str(start_ts),
+                "purchaseTimeEnd": str(end_ts),
+                "limit": 5000
             }
-        }""",
-        "variables": {
-            "purchaseTimeStart": str(start_ts),
-            "purchaseTimeEnd": str(end_ts),
-            "limit": 5000
         }
-    }
-    
-    payload_json = json.dumps(payload, separators=(',', ':'))
-    timestamp = int(time.time())
-    
-    fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}{SHOPEE_APP_SECRET}"
-    assinatura = hashlib.sha256(fator_base.encode('utf-8')).hexdigest()
-    
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"SHA256 Credential={SHOPEE_APP_ID}, Timestamp={timestamp}, Signature={assinatura}"
-    }
-    
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(endpoint, headers=headers, data=payload_json) as response:
-                dados_crus = await response.text()
-                if response.status == 200:
-                    dados = json.loads(dados_crus)
-                    erros_shopee = dados.get("errors")
-                    if erros_shopee:
-                        mensagem_erro = erros_shopee[0].get("message", "Erro Desconhecido")
-                        if EXIBIR_LOGS: logger.error(f"❌ A Shopee recusou a consulta: {mensagem_erro}")
-                        return []
-                    return dados.get("data", {}).get("conversionReport", {}).get("nodes", [])
-                else:
-                    if EXIBIR_LOGS: logger.error(f"❌ Erro de Conexão {response.status}: {dados_crus}")
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro crítico no motor financeiro: {e}")
-    return []
+        
+        payload_json = json.dumps(payload, separators=(',', ':'))
+        timestamp = int(time.time())
+        
+        fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}{SHOPEE_APP_SECRET}"
+        assinatura = hashlib.sha256(fator_base.encode('utf-8')).hexdigest()
+        
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"SHA256 Credential={SHOPEE_APP_ID}, Timestamp={timestamp}, Signature={assinatura}"
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(endpoint, headers=headers, data=payload_json) as response:
+                    dados_crus = await response.text()
+                    if response.status == 200:
+                        dados = json.loads(dados_crus)
+                        erros_shopee = dados.get("errors")
+                        if erros_shopee:
+                            mensagem_erro = erros_shopee[0].get("message", "Erro Desconhecido")
+                            if EXIBIR_LOGS: logger.error(f"❌ A Shopee recusou a fatia {i} a {i+dias_para_puxar} dias: {mensagem_erro}")
+                        else:
+                            nodes = dados.get("data", {}).get("conversionReport", {}).get("nodes", [])
+                            if nodes:
+                                conversoes_totais.extend(nodes)
+                                if EXIBIR_LOGS: logger.info(f"✅ Fatiamento financeiro ({i} a {i+dias_para_puxar} dias atrás): {len(nodes)} pedidos extraídos.")
+                    else:
+                        if EXIBIR_LOGS: logger.error(f"❌ Erro de Conexão HTTP {response.status}: {dados_crus}")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro crítico no motor financeiro: {e}")
+            
+        await asyncio.sleep(1) # Pequena pausa anti-ban da Shopee entre os blocos
+        
+    return conversoes_totais
 
 def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
     pedidos_db = ler_banco_pedidos()
@@ -8992,7 +9006,7 @@ async def varredura_retroativa_pendentes():
         return
         
     dias_retroativos = (agora - data_mais_antiga).days + 1
-    if dias_retroativos > 60: dias_retroativos = 60
+    if dias_retroativos > 180: dias_retroativos = 180
     if dias_retroativos < 5: dias_retroativos = 5
     
     if EXIBIR_LOGS: logger.info(f"🔍 [Pente Fino] Pendentes antigos detetados! A requisitar relatório dos últimos {dias_retroativos} dias à Shopee...")
