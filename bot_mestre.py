@@ -231,7 +231,9 @@ class AchadinhosFluxo(StatesGroup):
 class SubmissaoAdminFluxo(StatesGroup):
     menu_principal = State()
     aguardando_link_envio = State()
+    aguardando_nome_topico_envio = State() # ✅ NOVO
     aguardando_link_destino = State()
+    aguardando_nome_topico_destino = State() # ✅ NOVO
 
 class SubmissaoUsuarioInterativa(StatesGroup):
     aguardando_video = State()
@@ -8951,49 +8953,16 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     config = ler_submissao_config()
     status = "🟢 ATIVADO" if config.get("ativo") else "🔴 DESATIVADO"
     grupo = config.get("grupo_id", "Não definido")
+    
     t_envio = config.get("topico_envio", "?")
+    nome_t_envio = config.get("nome_topico_envio", "Tópico")
+    
     t_destino = config.get("topico_destino", "?")
+    nome_t_destino = config.get("nome_topico_destino", "Tópico")
     
     if grupo != "Não definido":
         cache_nomes = ler_cache_nomes_grupos()
         nome_grupo = cache_nomes.get(str(grupo), str(grupo))
-        
-        # --- NOVA LÓGICA DE BUSCA DE TÓPICOS (COM PROTEÇÃO) ---
-        nome_t_envio = "Desconhecido"
-        if t_envio and str(t_envio) != "0":
-            try:
-                if EXIBIR_LOGS: logger.info(f"🔍 [Grupo Público] Tentando resgatar nome do Tópico de Envio (ID: {t_envio})...")
-                # Nota: A API nativa do Aiogram não possui endpoint para ler o nome do tópico.
-                # Utilizamos getattr para evitar crash (AttributeError) e preparar o terreno
-                # caso um client Pyrogram (Userbot) seja acoplado futuramente.
-                metodo_get_topic = getattr(bot, 'get_forum_topic', None)
-                if metodo_get_topic:
-                    topic_e = await metodo_get_topic(chat_id=grupo, message_thread_id=t_envio)
-                    nome_t_envio = topic_e.title
-                else:
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ [Grupo Público] Método de leitura de tópicos indisponível na biblioteca atual. Exibindo formato genérico.")
-                    nome_t_envio = "Tópico"
-            except Exception as e:
-                if EXIBIR_LOGS: logger.error(f"❌ [Grupo Público] Erro ao buscar Tópico de Envio: {e}")
-                nome_t_envio = "Tópico não encontrado"
-        else:
-            nome_t_envio = "Geral"
-                
-        nome_t_destino = "Desconhecido"
-        if t_destino and str(t_destino) != "0":
-            try:
-                if EXIBIR_LOGS: logger.info(f"🔍 [Grupo Público] Tentando resgatar nome do Tópico Vitrine (ID: {t_destino})...")
-                metodo_get_topic = getattr(bot, 'get_forum_topic', None)
-                if metodo_get_topic:
-                    topic_d = await metodo_get_topic(chat_id=grupo, message_thread_id=t_destino)
-                    nome_t_destino = topic_d.title
-                else:
-                    nome_t_destino = "Tópico"
-            except Exception as e:
-                if EXIBIR_LOGS: logger.error(f"❌ [Grupo Público] Erro ao buscar Tópico Vitrine: {e}")
-                nome_t_destino = "Tópico não encontrado"
-        else:
-            nome_t_destino = "Geral"
         
         t_envio_display = f"{nome_t_envio} (ID: {t_envio})" if str(t_envio) != "?" else "?"
         t_destino_display = f"{nome_t_destino} (ID: {t_destino})" if str(t_destino) != "?" else "?"
@@ -9059,19 +9028,28 @@ async def processar_link_envio_submissao(message: types.Message, state: FSMConte
         salvar_nome_grupo(grupo_id, nome)
         await state.update_data(novo_grupo=grupo_id, novo_topico_envio=int(topico_id))
         
-        texto = (
-            f"✅ <b>Grupo:</b> {nome}\n"
-            f"✅ <b>Tópico de Envio:</b> {topico_id}\n\n"
-            "Agora, entre no tópico <b>VITRINE</b> (Onde o robô vai postar os vídeos aprovados), "
-            "copie o link dele da mesma forma e envie aqui:"
-        )
-        await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar)
-        await state.set_state(SubmissaoAdminFluxo.aguardando_link_destino)
+        await message.answer(f"✅ Tópico de Envio capturado (ID: {topico_id}).\n\nQual é o <b>NOME</b> deste tópico? (Ex: Poste seus Vídeos Aqui)", parse_mode="HTML", reply_markup=teclado_cancelar)
+        await state.set_state(SubmissaoAdminFluxo.aguardando_nome_topico_envio)
     else:
         await message.answer("⚠️ Link não reconhecido ou bot sem permissão no grupo. Tente novamente:", reply_markup=teclado_cancelar)
 
+@dp.message(SubmissaoAdminFluxo.aguardando_nome_topico_envio)
+async def receber_nome_topico_envio(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+        
+    await state.update_data(nome_topico_envio=message.text.strip())
+    
+    texto = (
+        "Agora, entre no tópico <b>VITRINE</b> (Onde o robô vai postar os vídeos aprovados), "
+        "copie o link dele da mesma forma e envie aqui:"
+    )
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(SubmissaoAdminFluxo.aguardando_link_destino)
+
 @dp.message(SubmissaoAdminFluxo.aguardando_link_destino)
-async def salvar_config_completa_submissao(message: types.Message, state: FSMContext):
+async def processar_link_destino_submissao(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await cancelar_fluxo_global(message, state)
         return
@@ -9094,16 +9072,32 @@ async def salvar_config_completa_submissao(message: types.Message, state: FSMCon
             await message.answer("⚠️ <b>Atenção:</b> O tópico Vitrine precisa pertencer ao MESMO grupo do tópico de Envio!\n\nPor favor, envie o link do tópico correto:", parse_mode="HTML", reply_markup=teclado_cancelar)
             return
             
-        config = ler_submissao_config()
-        config["grupo_id"] = grupo_id_envio
-        config["topico_envio"] = data.get("novo_topico_envio")
-        config["topico_destino"] = int(topico_id_dest)
-        salvar_submissao_config(config)
+        await state.update_data(novo_topico_destino=int(topico_id_dest))
         
-        await message.answer("✅ <b>Perfeito!</b> Os tópicos foram interligados com sucesso.", parse_mode="HTML")
-        await painel_submissoes(message, state) # Lembra que este painel já teve o nome atualizado lá em cima!
+        await message.answer(f"✅ Tópico Vitrine capturado (ID: {topico_id_dest}).\n\nQual é o <b>NOME</b> deste tópico? (Ex: Vídeos da Comunidade)", parse_mode="HTML", reply_markup=teclado_cancelar)
+        await state.set_state(SubmissaoAdminFluxo.aguardando_nome_topico_destino)
     else:
         await message.answer("⚠️ Link não reconhecido. Tente novamente:", reply_markup=teclado_cancelar)
+
+@dp.message(SubmissaoAdminFluxo.aguardando_nome_topico_destino)
+async def finalizar_config_topicos(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+        
+    nome_destino = message.text.strip()
+    data = await state.get_data()
+    
+    config = ler_submissao_config()
+    config["grupo_id"] = data.get("novo_grupo")
+    config["topico_envio"] = data.get("novo_topico_envio")
+    config["nome_topico_envio"] = data.get("nome_topico_envio")
+    config["topico_destino"] = data.get("novo_topico_destino")
+    config["nome_topico_destino"] = nome_destino
+    salvar_submissao_config(config)
+    
+    await message.answer("✅ <b>Perfeito!</b> Os tópicos e seus nomes foram salvos com sucesso.", parse_mode="HTML")
+    await painel_submissoes(message, state)
 
 # ==========================================
 # GERADOR DO BOTÃO FIXO (Aberto para Todos) 📌
