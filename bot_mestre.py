@@ -255,9 +255,11 @@ class AutoraisFluxo(StatesGroup):
     aguardando_topico = State() 
     aguardando_destino = State()
     aguardando_dias_retorno = State() 
+    aguardando_confirmacao_dias_retorno = State() # ✅ NOVO: Etapa de confirmação
     aguardando_limite_videos = State()
-    aguardando_confirmacao_pausa_repost = State() # ✅ NOVO
-    aguardando_confirmacao_pausa_robo = State() # ✅ NOVO
+    aguardando_confirmacao_limite_videos = State() # ✅ NOVO: Etapa de confirmação
+    aguardando_confirmacao_pausa_repost = State()
+    aguardando_confirmacao_pausa_robo = State()
 
 class RelatoriosFluxo(StatesGroup):
     menu_filas = State()
@@ -2325,18 +2327,8 @@ async def processar_pausa_robo(message: types.Message, state: FSMContext):
     await submenu_status_robo(message, state)
 
 # ----------------------------------------------------
-# ATENÇÃO: SUBSTITUA OS GATILHOS ANTIGOS DE "DIAS" E "LIMITE" PARA RECONHECER O NOVO TEXTO:
+# REGRAS DE ORIGEM E DESTINO
 # ----------------------------------------------------
-@dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Dias ⏳")
-async def pedir_dias_autorais(message: types.Message, state: FSMContext):
-    await message.answer("Por quantos <b>dias</b> o vídeo deve ficar arquivado e oculto até retornar para o grupo de origem? (Ex: 15)", parse_mode="HTML", reply_markup=teclado_cancelar)
-    await state.set_state(AutoraisFluxo.aguardando_dias_retorno)
-
-@dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Limite 📦")
-async def pedir_limite_autorais(message: types.Message, state: FSMContext):
-    await message.answer("Qual será o <b>limite máximo</b> de vídeos arquivados salvos por dia? (Ex: 5)", parse_mode="HTML", reply_markup=teclado_cancelar)
-    await state.set_state(AutoraisFluxo.aguardando_limite_videos)
-
 @dp.message(F.text == "Voltar ao Menu Autorais 🔙", StateFilter("*"))
 async def voltar_menu_autorais(message: types.Message, state: FSMContext):
     await painel_autorais(message, state)
@@ -2356,7 +2348,6 @@ async def pedir_topico_autorais(message: types.Message, state: FSMContext):
     novo_valor = message.text.strip()
     msg_status = await message.answer("⏳ <b>Validando grupo de origem...</b>", parse_mode="HTML")
     
-    # ✅ Usa o Motor Inteligente para processar links do Telegram Web e IDs normais
     sucesso, id_final, nome_chat = await validar_e_formatar_alvo(bot, novo_valor)
     
     await msg_status.delete()
@@ -2365,7 +2356,6 @@ async def pedir_topico_autorais(message: types.Message, state: FSMContext):
         await message.answer(f"✅ Origem validada e encontrada: <b>{nome_chat}</b>", parse_mode="HTML")
         salvar_nome_grupo(str(id_final), nome_chat)
     else:
-        # Se falhar (ex: bot não está no grupo), limpa o valor inserido para o ID numérico e salva mesmo assim
         import re
         id_final = novo_valor
         if "t.me/c/" in novo_valor:
@@ -2421,7 +2411,6 @@ async def salvar_destino_autorais(message: types.Message, state: FSMContext):
     novo_valor = message.text.strip()
     msg_status = await message.answer("⏳ <b>Validando canal de destino...</b>", parse_mode="HTML")
     
-    # ✅ Usa o Motor Inteligente para processar links do Telegram Web e IDs normais
     sucesso, id_final, nome_chat = await validar_e_formatar_alvo(bot, novo_valor)
 
     await msg_status.delete()
@@ -2430,7 +2419,6 @@ async def salvar_destino_autorais(message: types.Message, state: FSMContext):
         await message.answer(f"✅ Destino validado: <b>{nome_chat}</b>", parse_mode="HTML")
         salvar_nome_grupo(str(id_final), nome_chat)
     else:
-        # Tenta extrair o ID de qualquer formato de link, caso não consiga validar diretamente
         import re
         id_final = novo_valor
         if "t.me/c/" in novo_valor:
@@ -2450,13 +2438,16 @@ async def salvar_destino_autorais(message: types.Message, state: FSMContext):
     await message.answer(f"✅ <b>Destino atualizado com sucesso!</b>\nOs vídeos convertidos serão enviados instantaneamente para: <code>{id_final}</code>", parse_mode="HTML")
     await painel_autorais(message, state)
 
-@dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Dias (Retorno) ⏳")
+# ----------------------------------------------------
+# LÓGICA DE CONFIRMAÇÃO PARA EDIÇÃO DE DIAS E LIMITES
+# ----------------------------------------------------
+@dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Dias ⏳")
 async def pedir_dias_autorais(message: types.Message, state: FSMContext):
     await message.answer("Por quantos <b>dias</b> o vídeo deve ficar arquivado e oculto até retornar para o grupo de origem? (Ex: 15)", parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(AutoraisFluxo.aguardando_dias_retorno)
 
 @dp.message(AutoraisFluxo.aguardando_dias_retorno)
-async def salvar_dias_autorais(message: types.Message, state: FSMContext):
+async def confirmar_dias_autorais(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await cancelar_fluxo_global(message, state)
         return
@@ -2466,20 +2457,44 @@ async def salvar_dias_autorais(message: types.Message, state: FSMContext):
         return
         
     novo_valor = int(message.text)
+    await state.update_data(novo_valor_dias=novo_valor)
+    
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer(f"Tem certeza que deseja configurar o retorno para <b>{novo_valor} dias</b>?", parse_mode="HTML", reply_markup=teclado_confirmacao)
+    await state.set_state(AutoraisFluxo.aguardando_confirmacao_dias_retorno)
+
+@dp.message(AutoraisFluxo.aguardando_confirmacao_dias_retorno)
+async def processar_dias_autorais(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await message.answer("Operação cancelada.")
+        await submenu_regras_retorno(message, state)
+        return
+        
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, clique em Aprovar ou Cancelar.")
+        return
+
+    data = await state.get_data()
+    novo_valor = data.get("novo_valor_dias")
+    
     config = ler_autorais_config()
     config["dias_retorno"] = novo_valor
     salvar_autorais_config(config)
     
     await message.answer(f"✅ <b>Tempo de Retorno Atualizado!</b>\nOs vídeos interceptados ficarão arquivados por {novo_valor} dias antes de serem postados novamente.", parse_mode="HTML")
-    await painel_autorais(message, state)
+    await submenu_regras_retorno(message, state)
 
-@dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Limite (Retorno) 📦")
+@dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Limite 📦")
 async def pedir_limite_autorais(message: types.Message, state: FSMContext):
     await message.answer("Qual será o <b>limite máximo</b> de vídeos arquivados salvos por dia? (Ex: 5)", parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(AutoraisFluxo.aguardando_limite_videos)
 
 @dp.message(AutoraisFluxo.aguardando_limite_videos)
-async def salvar_limite_autorais(message: types.Message, state: FSMContext):
+async def confirmar_limite_autorais(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await cancelar_fluxo_global(message, state)
         return
@@ -2489,12 +2504,36 @@ async def salvar_limite_autorais(message: types.Message, state: FSMContext):
         return
         
     novo_valor = int(message.text)
+    await state.update_data(novo_valor_limite=novo_valor)
+    
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer(f"Tem certeza que deseja definir o limite de vídeos diários para <b>{novo_valor}</b>?", parse_mode="HTML", reply_markup=teclado_confirmacao)
+    await state.set_state(AutoraisFluxo.aguardando_confirmacao_limite_videos)
+
+@dp.message(AutoraisFluxo.aguardando_confirmacao_limite_videos)
+async def processar_limite_autorais(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await message.answer("Operação cancelada.")
+        await submenu_regras_retorno(message, state)
+        return
+        
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, clique em Aprovar ou Cancelar.")
+        return
+
+    data = await state.get_data()
+    novo_valor = data.get("novo_valor_limite")
+    
     config = ler_autorais_config()
     config["limite_videos"] = novo_valor
     salvar_autorais_config(config)
     
     await message.answer(f"✅ <b>Cota de Retorno Atualizada!</b>\nO robô arquivará no máximo {novo_valor} vídeos de retorno por dia.", parse_mode="HTML")
-    await painel_autorais(message, state)
+    await submenu_regras_retorno(message, state)
 
 # ----------------------------------
 # NOVO MÓDULO: GERADOR AUTÔNOMO DE ACHADINHOS 🛍️
@@ -4408,7 +4447,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await message.answer("Ação cancelada.")
         
         # Verifica se estava editando Dias ou Limites para voltar ao SUBMENU de Retorno
-        if estado_atual in ["AutoraisFluxo:aguardando_dias_retorno", "AutoraisFluxo:aguardando_limite_videos"]:
+        if estado_atual in ["AutoraisFluxo:aguardando_dias_retorno", "AutoraisFluxo:aguardando_limite_videos", "AutoraisFluxo:aguardando_confirmacao_dias_retorno", "AutoraisFluxo:aguardando_confirmacao_limite_videos"]:
             await submenu_regras_retorno(message, state)
             
         # Verifica se estava confirmando Pausas para voltar ao SUBMENU de Status
