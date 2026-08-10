@@ -1793,7 +1793,7 @@ async def acao_bl_espelhador(message: types.Message, state: FSMContext):
         await message.answer("Envie os IDs para LIBERAR NESTA ROTA (separados por vírgula):", reply_markup=teclado_espelhador_cancelar)
         await state.set_state(EspelhadorFluxo.aguardando_blacklist_remove)
 
-@dp.message(EspelhadorFluxo.aguardando_blacklist_add)
+@router.message(EspelhadorFluxo.aguardando_blacklist_add)
 async def salvar_bl_add_espelhador(message: types.Message, state: FSMContext):
     if message.text == "Cancelar Operação ❌":
         # Simula o botão de voltar para redirecionar corretamente
