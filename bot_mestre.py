@@ -434,13 +434,14 @@ def obter_teclado_outros_canais():
 
 teclado_outros_canais = obter_teclado_outros_canais()
 
-# --- NOVO MENU: CENTRO FINANCEIRO ---
+## --- NOVO MENU: CENTRO FINANCEIRO ---
 def obter_teclado_centro_financeiro():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Extrato Rápido 📜"), KeyboardButton(text="Gestão de Custos 📉")],
-            [KeyboardButton(text="Provisão de Impostos 🏛️"), KeyboardButton(text="Fluxo de Caixa 🏦")],
-            [KeyboardButton(text="Definir Saldo (App) 💰"), KeyboardButton(text="Disparador de Notas 🧾")],
+            [KeyboardButton(text="Extrato Rápido 📜"), KeyboardButton(text="Relatório Financeiro 💰")],
+            [KeyboardButton(text="Gestão de Custos 📉"), KeyboardButton(text="Provisão de Impostos 🏛️")],
+            [KeyboardButton(text="Definir Saldo (App) 💰"), KeyboardButton(text="Fluxo de Caixa 🏦")],
+            [KeyboardButton(text="Disparador de Notas 🧾")],
             [KeyboardButton(text="Voltar ao Início 🔙")]
         ],
         resize_keyboard=True,
@@ -820,8 +821,8 @@ teclado_edicao_nicho = ReplyKeyboardMarkup(
 def obter_teclado_raiz():
     botoes = [
         [KeyboardButton(text="Canal Afiliados 📺"), KeyboardButton(text="Outros Canais 🗂️")],
-        [KeyboardButton(text="Centro Financeiro 💸")],
         [KeyboardButton(text="Relatório Geral 📊")],
+        [KeyboardButton(text="Centro Financeiro 💸")],
         [KeyboardButton(text="Opções do Servidor ⚙️")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
