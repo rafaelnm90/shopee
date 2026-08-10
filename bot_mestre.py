@@ -6725,7 +6725,7 @@ async def submenu_editar_rotinas(message: types.Message, state: FSMContext):
     elif origem == "publico":
         teclado = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="Editar Convite Próprio 🔗"), KeyboardButton(text="Editar Promo Principal 🌟")],
+                [KeyboardButton(text="Editar Convite (Próprio) 🔗"), KeyboardButton(text="Editar Promo Principal 🌟")],
                 [KeyboardButton(text="Editar Promo Viral 💥"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
             ],
             resize_keyboard=True,
@@ -6769,7 +6769,7 @@ async def submenu_disparos_manuais(message: types.Message, state: FSMContext):
     elif origem == "publico":
         teclado = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="Disparar Convite Próprio 🔗"), KeyboardButton(text="Disparar Promo Principal 🌟")],
+                [KeyboardButton(text="Disparar Convite (Próprio) 🔗"), KeyboardButton(text="Disparar Promo Principal 🌟")],
                 [KeyboardButton(text="Disparar Promo Viral 💥"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
             ],
             resize_keyboard=True,
@@ -7711,7 +7711,7 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
     await state.update_data(menu_origem="principal") # ✅ Adicione esta linha exata aqui
     await state.set_state(ConfigRotina.menu_principal)
 
-@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Promo Público 🗣️", "Editar Convite Afiliados 🚀", "Editar Convite do Grupo 🔗", "Editar Prompt GEM 🤖\u200b", "Editar Promo Público 👥", "Editar Convite Próprio 🔗", "Editar Promo Principal 🌟", "Editar Promo Viral 💥"]))
+@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Promo Público 🗣️", "Editar Convite Afiliados 🚀", "Editar Convite do Grupo 🔗", "Editar Prompt GEM 🤖\u200b", "Editar Promo Público 👥", "Editar Convite (Próprio) 🔗", "Editar Promo Principal 🌟", "Editar Promo Viral 💥"]))
 async def pedir_horario_rotina(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info(f"✏️ Iniciando edição da rotina: {message.text}")
     if EXIBIR_LOGS: logger.info(f"✏️ Processando edição da rotina selecionada: {message.text}")
@@ -7727,7 +7727,7 @@ async def pedir_horario_rotina(message: types.Message, state: FSMContext):
         "Editar Convite do Grupo 🔗": "link_grupo_viral",
         "Editar Prompt GEM 🤖\u200b": "divulgar_gem_viral",
         "Editar Promo Público 👥": "promo_publico_viral",
-        "Editar Convite Próprio 🔗": "link_grupo_publico",
+        "Editar Convite (Próprio) 🔗": "link_grupo_publico",
         "Editar Promo Principal 🌟": "promo_principal_publico",
         "Editar Promo Viral 💥": "promo_viral_publico"
     }
@@ -9222,9 +9222,9 @@ async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
     config_princ = dados.get("promo_principal_publico", {"inicio": 10, "fim": 20, "frequencia": 1})
     config_vir = dados.get("promo_viral_publico", {"inicio": 10, "fim": 20, "frequencia": 1})
     
-    texto += f"🔹 <b>Convite Próprio 🔗</b>\n   Janela: {config_pub['inicio']}h às {config_pub['fim']}h | {config_pub['frequencia']}x/dia\n\n"
-    texto += f"🔹 <b>Promoção VIP Principal 🌟</b>\n   Janela: {config_princ['inicio']}h às {config_princ['fim']}h | {config_princ['frequencia']}x/dia\n\n"
-    texto += f"🔹 <b>Promoção Acervo Viral 💥</b>\n   Janela: {config_vir['inicio']}h às {config_vir['fim']}h | {config_vir['frequencia']}x/dia\n\n"
+    texto += f"🔹 <b>Convite (Próprio Grupo) 🔗</b>\n   Janela: {config_pub['inicio']}h às {config_pub['fim']}h | {config_pub['frequencia']}x/dia\n\n"
+    texto += f"🔹 <b>Promo Canal Principal 🌟</b>\n   Janela: {config_princ['inicio']}h às {config_princ['fim']}h | {config_princ['frequencia']}x/dia\n\n"
+    texto += f"🔹 <b>Promo Canal Viral 💥</b>\n   Janela: {config_vir['inicio']}h às {config_vir['fim']}h | {config_vir['frequencia']}x/dia\n\n"
     
     texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado_publico") else "Pausar Rotinas ⏸️"
     teclado = ReplyKeyboardMarkup(
