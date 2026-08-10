@@ -4347,18 +4347,27 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         return
         
     # 🔁 Roteamento Inteligente: Se estiver no Espião (Grupos Vigiados ou Configurando Tempos)
-    # A lista 'estados_espiao_raiz' garante que o cancelamento da Blacklist volte para os Grupos Vigiados
-    estados_espiao_raiz = [
+    if estado_atual == "EspiaoFluxo:aguardando_confirmacao_forcar_clones":
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await menu_espiao_principal(message, state)
+        return
+
+    estados_espiao_vigiados = [
         "EspiaoFluxo:aguardando_novo_alvo",
+        "EspiaoFluxo:aguardando_confirmacao_alvo", # ✅ O estado que falhou no seu vídeo!
         "EspiaoFluxo:aguardando_remocao_alvo",
+        "EspiaoFluxo:aguardando_confirmacao_remocao",
+        "EspiaoFluxo:aguardando_canal_destino",
+        "EspiaoFluxo:aguardando_confirmacao_destino",
         "EspiaoFluxo:aguardando_acao_blacklist",
         "EspiaoFluxo:aguardando_blacklist_add",
         "EspiaoFluxo:aguardando_blacklist_remove",
         "EspiaoFluxo:aguardando_confirmacao_blacklist_conflito",
-        "EspiaoFluxo:aguardando_confirmacao_forcar_clones" # <--- ADICIONAR ESTA LINHA AQUI
+        "EspiaoFluxo:aguardando_acao_analise"
     ]
     
-    if estado_atual and (estado_atual in estados_espiao_raiz or estado_atual.startswith("ConfigRotinaEspiao")):
+    if estado_atual and (estado_atual in estados_espiao_vigiados or estado_atual.startswith("ConfigRotinaEspiao")):
         await state.clear()
         await message.answer("Ação cancelada. Retornando aos Grupos Vigiados.")
         await menu_grupos_vigiados(message, state)
