@@ -4391,6 +4391,89 @@ async def manual_promo_viral_publico(message: types.Message):
     await disparar_mensagem("promo_viral_publico", forcar=True)
     await message.answer("Propaganda do canal viral enviada ao grupo público com sucesso! ✅")
 
+@dp.message(F.text == "Disparar Repost Autoral ♻️", StateFilter("*"))
+async def manual_repost_autoral(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    
+    # 1. Verifica se os alvos estão definidos no Grupo Público
+    config_pub = ler_submissao_config()
+    chat_destino = config_pub.get("grupo_id")
+    topico_vitrine = config_pub.get("topico_destino")
+    
+    if not config_pub.get("ativo") or not chat_destino or not topico_vitrine:
+        await message.answer("⚠️ <b>Ação Bloqueada:</b> A moderação do Grupo Público está desativada ou não configurada.", parse_mode="HTML")
+        return
+        
+    msg_status = await message.answer("♻️ Extraindo um vídeo do Canal Autoral e gerando aprovação...", parse_mode="HTML")
+    
+    # 2. Resgata o histórico do canal de Autorais dos últimos 30 dias (Usaremos o SQLite para isso)
+    try:
+        conexao = sqlite3.connect("banco_dados.db")
+        conexao.row_factory = sqlite3.Row
+        cursor = conexao.cursor()
+        
+        # Puxa os processados (já postados) ordenados do mais recente para o mais antigo (últimos 30)
+        cursor.execute("SELECT * FROM fila_autorais WHERE processado = 1 ORDER BY id_unico DESC LIMIT 30")
+        autorais_recentes = cursor.fetchall()
+        conexao.close()
+    except Exception as e:
+        await msg_status.edit_text(f"❌ Erro ao ler banco de autorais: {e}")
+        return
+        
+    if not autorais_recentes:
+        await msg_status.edit_text("❌ Não há vídeos autorais recentes para fazer repost.")
+        return
+        
+    # 3. Escolhe um aleatório e pega o file_id do telegram
+    video_sorteado = random.choice(autorais_recentes)
+    file_id = video_sorteado["msg_id_destino"] # O ID do vídeo postado lá no canal autorais
+    
+    if not file_id:
+        await msg_status.edit_text("❌ Erro: O vídeo sorteado não tem um File ID válido.")
+        return
+        
+    # 4. Formata a mensagem com o Padrão do Grupo Público
+    # Você me pediu para simular um envio. Então vamos criar um remetente fake!
+    nomes_fakes = ["Rafael", "Membro VIP", "Shopee Afiliado", "Dicas da Comunidade", "Ofertas Top"]
+    user_mention = random.choice(nomes_fakes)
+    
+    legenda_original = video_sorteado["legenda"]
+    import re
+    # Extrai o link limpo e o nome
+    match_link = re.search(r'https://shp\.ee/\S+', legenda_original)
+    link_shopee = match_link.group(0) if match_link else "https://shopee.com.br"
+    
+    match_item = re.search(r'📦\s*Item:\s*([^\n<]+)', legenda_original)
+    nome_produto = match_item.group(1).strip() if match_item else "Produto Exclusivo"
+
+    # Simula o formato exato da aprovação da submissão
+    legenda_final = (
+        f"👤 Dica enviada por: {user_mention}\n\n"
+        f"<b>{nome_produto}</b>\n\n"
+        f"🔗 <b>Link do Produto:</b>\n{link_shopee}\n\n"
+        f"<i>#Recomendado #Shopee</i>"
+    )
+    
+    # 5. Envia direto para a Vitrine do Público
+    try:
+        # Puxa o File_ID do chat de autorais e faz forward/copia para a Vitrine
+        # Como o bot não guarda o file_id nativo do telegram na fila_autorais, a gente copia a mensagem original!
+        config_aut = ler_autorais_config()
+        canal_autorais = config_aut.get("destino")
+        
+        await bot.copy_message(
+            chat_id=chat_destino,
+            from_chat_id=canal_autorais,
+            message_id=int(file_id),
+            caption=legenda_final, # Sobrescreve a legenda com o formato do Grupo
+            parse_mode="HTML",
+            message_thread_id=int(topico_vitrine)
+        )
+        await msg_status.edit_text("✅ <b>Repost Autoral realizado!</b>\nUm vídeo foi puxado e enviado para a Vitrine do Grupo Público.", parse_mode="HTML")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao dar copy_message no repost: {e}")
+        await msg_status.edit_text(f"❌ Erro técnico ao tentar enviar o vídeo para a Vitrine: {e}")
+
 # ❌ NOVO: Handler Global para Cancelar via Botão (Agora 100% à prova de falhas)
 @dp.message(F.text == "Cancelar ❌", StateFilter("*"))
 async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
@@ -6747,7 +6830,8 @@ async def submenu_editar_rotinas(message: types.Message, state: FSMContext):
         teclado = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="Editar Convite (Próprio) 🔗"), KeyboardButton(text="Editar Promo Principal 🌟")],
-                [KeyboardButton(text="Editar Promo Viral 💥"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
+                [KeyboardButton(text="Editar Promo Viral 💥"), KeyboardButton(text="Editar Repost Autoral ♻️")],
+                [KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
             ],
             resize_keyboard=True,
             is_persistent=True
@@ -6791,7 +6875,8 @@ async def submenu_disparos_manuais(message: types.Message, state: FSMContext):
         teclado = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="Disparar Convite (Próprio) 🔗"), KeyboardButton(text="Disparar Promo Principal 🌟")],
-                [KeyboardButton(text="Disparar Promo Viral 💥"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
+                [KeyboardButton(text="Disparar Promo Viral 💥"), KeyboardButton(text="Disparar Repost Autoral ♻️")],
+                [KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
             ],
             resize_keyboard=True,
             is_persistent=True
@@ -7732,7 +7817,7 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
     await state.update_data(menu_origem="principal") # ✅ Adicione esta linha exata aqui
     await state.set_state(ConfigRotina.menu_principal)
 
-@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Promo Público 🗣️", "Editar Convite Afiliados 🚀", "Editar Convite do Grupo 🔗", "Editar Prompt GEM 🤖\u200b", "Editar Promo Público 👥", "Editar Convite (Próprio) 🔗", "Editar Promo Principal 🌟", "Editar Promo Viral 💥"]))
+@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Promo Público 🗣️", "Editar Convite Afiliados 🚀", "Editar Convite do Grupo 🔗", "Editar Prompt GEM 🤖\u200b", "Editar Promo Público 👥", "Editar Convite (Próprio) 🔗", "Editar Promo Principal 🌟", "Editar Promo Viral 💥", "Editar Repost Autoral ♻️"]))
 async def pedir_horario_rotina(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info(f"✏️ Iniciando edição da rotina: {message.text}")
     if EXIBIR_LOGS: logger.info(f"✏️ Processando edição da rotina selecionada: {message.text}")
@@ -7750,7 +7835,8 @@ async def pedir_horario_rotina(message: types.Message, state: FSMContext):
         "Editar Promo Público 👥": "promo_publico_viral",
         "Editar Convite (Próprio) 🔗": "link_grupo_publico",
         "Editar Promo Principal 🌟": "promo_principal_publico",
-        "Editar Promo Viral 💥": "promo_viral_publico"
+        "Editar Promo Viral 💥": "promo_viral_publico",
+        "Editar Repost Autoral ♻️": "repost_fake_publico"
     }
     tipo = tipo_map[message.text]
     if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Botão mapeado internamente para a chave '{tipo}'.")
@@ -9250,10 +9336,12 @@ async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
     config_pub = dados.get("link_grupo_publico", {"inicio": 9, "fim": 21, "frequencia": 2})
     config_princ = dados.get("promo_principal_publico", {"inicio": 10, "fim": 20, "frequencia": 1})
     config_vir = dados.get("promo_viral_publico", {"inicio": 10, "fim": 20, "frequencia": 1})
+    config_repost = dados.get("repost_fake_publico", {"inicio": 10, "fim": 22, "frequencia": 2}) # NOVO
     
     texto += f"🔹 <b>Convite (Próprio Grupo) 🔗</b>\n   Janela: {config_pub['inicio']}h às {config_pub['fim']}h | {config_pub['frequencia']}x/dia\n\n"
     texto += f"🔹 <b>Promo Canal Principal 🌟</b>\n   Janela: {config_princ['inicio']}h às {config_princ['fim']}h | {config_princ['frequencia']}x/dia\n\n"
     texto += f"🔹 <b>Promo Canal Viral 💥</b>\n   Janela: {config_vir['inicio']}h às {config_vir['fim']}h | {config_vir['frequencia']}x/dia\n\n"
+    texto += f"🔹 <b>Repost de Autoral ♻️</b>\n   Janela: {config_repost['inicio']}h às {config_repost['fim']}h | {config_repost['frequencia']}x/dia\n\n"
     
     texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado_publico") else "Pausar Rotinas ⏸️"
     teclado = ReplyKeyboardMarkup(
