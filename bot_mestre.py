@@ -9046,18 +9046,8 @@ async def processar_link_envio_submissao(message: types.Message, state: FSMConte
         salvar_nome_grupo(grupo_id, nome)
         await state.update_data(novo_grupo=grupo_id, novo_topico_envio=int(topico_id))
         
-        nome_topico_display = "Tópico Principal"
-        if str(topico_id) != "0":
-            try:
-                if EXIBIR_LOGS: logger.info(f"🔍 Lendo API do Telegram para resgatar nome do tópico {topico_id}...")
-                topic = await bot.get_forum_topic(chat_id=grupo_id, message_thread_id=int(topico_id))
-                nome_topico_display = topic.title
-                if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Tópico '{nome_topico_display}' identificado.")
-            except Exception as e:
-                nome_topico_display = f"Tópico {topico_id}"
-        
         texto = (
-            f"✅ <b>Tópico capturado:</b> {nome_topico_display} (ID: {topico_id})\n\n"
+            f"✅ <b>Tópico capturado (ID: {topico_id})</b>\n\n"
             "Agora, precisamos do link do tópico de <b>POSTAGEM</b> (o mural onde o robô vai publicar automaticamente os vídeos aprovados. Ex: 'Vídeos da Comunidade').\n\n"
             "👉 Entre nesse tópico, copie o link do navegador da mesma forma e envie aqui:"
         )
@@ -9067,7 +9057,7 @@ async def processar_link_envio_submissao(message: types.Message, state: FSMConte
         await message.answer("⚠️ Link não reconhecido ou bot sem permissão no grupo. Tente novamente:", reply_markup=teclado_cancelar)
 
 @dp.message(SubmissaoAdminFluxo.aguardando_link_destino)
-async def salvar_config_completa_submissao(message: types.Message, state: FSMContext):
+async def processar_link_destino_submissao(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await cancelar_fluxo_global(message, state)
         return
@@ -9093,16 +9083,14 @@ async def salvar_config_completa_submissao(message: types.Message, state: FSMCon
         config = ler_submissao_config()
         config["grupo_id"] = grupo_id_envio
         config["topico_envio"] = data.get("novo_topico_envio")
+        config["nome_topico_envio"] = "⏳ Sincronizando..."
         config["topico_destino"] = int(topico_id_dest)
-        
-        # Limpa qualquer resquício de nomes fixos que tenhamos salvo no teste anterior
-        if "nome_topico_envio" in config: del config["nome_topico_envio"]
-        if "nome_topico_destino" in config: del config["nome_topico_destino"]
+        config["nome_topico_destino"] = "⏳ Sincronizando..."
         
         salvar_submissao_config(config)
         
-        if EXIBIR_LOGS: logger.info("✅ Estrutura de submissões salva. O painel cuidará da renderização automática.")
-        await message.answer("✅ <b>Perfeito!</b> Os tópicos foram interligados e automatizados com sucesso.", parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info("✅ Estrutura de submissões salva. O Userbot irá sincronizar os nomes em background.")
+        await message.answer("✅ <b>Perfeito!</b> Os tópicos foram interligados.\n\n<i>O Userbot já está extraindo os nomes reais em background. O painel será atualizado automaticamente em instantes!</i>", parse_mode="HTML")
         await painel_submissoes(message, state)
     else:
         await message.answer("⚠️ Link não reconhecido. Tente novamente:", reply_markup=teclado_cancelar)
