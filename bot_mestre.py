@@ -1669,22 +1669,22 @@ def ler_config_rotina():
         "link_grupo": {"inicio": 9, "fim": 21, "frequencia": 3},
         "divulgar_gem": {"inicio": 8, "fim": 22, "frequencia": 1},
         "promo_viral": {"inicio": 10, "fim": 20, "frequencia": 1},
-        "promo_publico": {"inicio": 10, "fim": 20, "frequencia": 1}, # ✅ NOVO: Divulga o Público no Principal
+        "promo_publico": {"inicio": 10, "fim": 20, "frequencia": 1},
 
         # Rotinas do Canal Viral
         "promo_principal": {"inicio": 10, "fim": 20, "frequencia": 1},
         "divulgar_gem_viral": {"inicio": 8, "fim": 22, "frequencia": 1},
         "link_grupo_viral": {"inicio": 9, "fim": 21, "frequencia": 2},
-        "promo_publico_viral": {"inicio": 10, "fim": 20, "frequencia": 1}, # ✅ NOVO: Divulga o Público no Viral
+        "promo_publico_viral": {"inicio": 10, "fim": 20, "frequencia": 1},
 
         # Rotinas do Grupo Público
-        "link_grupo_publico": {"inicio": 9, "fim": 21, "frequencia": 2}, # ✅ NOVO: Auto-divulgação interna
-        "promo_principal_publico": {"inicio": 10, "fim": 20, "frequencia": 1}, # ✅ NOVO: Divulga o Principal no Público
-        "promo_viral_publico": {"inicio": 10, "fim": 20, "frequencia": 1}, # ✅ NOVO: Divulga o Viral no Público
+        "link_grupo_publico": {"inicio": 9, "fim": 21, "frequencia": 2},
+        "promo_principal_publico": {"inicio": 10, "fim": 20, "frequencia": 1},
+        "promo_viral_publico": {"inicio": 10, "fim": 20, "frequencia": 1},
 
         "pausado": False,
         "pausado_viral": False,
-        "pausado_publico": False, # ✅ NOVO: Trava de pausa independente
+        "pausado_publico": False,
         "historico_diario": {"data": "", "contagem": {}}
     }
     
