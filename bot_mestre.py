@@ -9080,7 +9080,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     # 1. Resgata o nome do Grupo Principal
     grupo_id_str = str(grupo_id) if grupo_id else ""
     nome_grupo = cache_nomes.get(grupo_id_str, "Grupo Público")
-    display_grupo = f"👥 <b>{nome_grupo}</b> (<code>{grupo_id_str}</code>)" if grupo_id_str else "<i>Grupo não definido</i>"
+    display_grupo = f"👥 <b>Grupo Base:</b> {nome_grupo} (<code>{grupo_id_str}</code>)" if grupo_id_str else "<i>Grupo não definido</i>"
 
     # 2. Resgata o nome do Tópico de Escuta e formata o ID longo
     topico_escuta_str = str(topico_escuta) if topico_escuta else ""
