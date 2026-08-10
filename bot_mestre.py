@@ -8998,11 +8998,11 @@ async def toggle_submissoes(message: types.Message, state: FSMContext):
 
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurar Grupo e Tópicos 🎯")
 async def pedir_link_envio_submissao(message: types.Message, state: FSMContext):
+    if EXIBIR_LOGS: logger.info("⚙️ Iniciando tutorial de configuração de tópicos de submissão.")
     texto = (
-        "💡 <b>Vamos configurar usando os links do Telegram Web/Desktop!</b>\n\n"
-        "1️⃣ Acesse o tópico <b>DE CONVERSA</b> (Onde os usuários vão mandar os vídeos).\n"
-        "2️⃣ Copie a URL do navegador (ou copie o link de qualquer mensagem lá dentro).\n"
-        "3️⃣ Envie o link aqui.\n\n"
+        "💡 <b>Vamos interligar os Tópicos!</b>\n\n"
+        "Primeiro, precisamos do link do tópico de <b>ESCUTA</b> (aquele onde os membros do grupo enviam as ofertas para análise do robô. Ex: 'Poste seus Vídeos Aqui').\n\n"
+        "👉 Pelo Telegram Web ou Desktop, entre nesse tópico, copie o link que aparece na barra superior do seu navegador e envie aqui.\n\n"
         "<i>Exemplo: https://web.telegram.org/a/#-1001234567890_5</i>"
     )
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar)
@@ -9040,10 +9040,12 @@ async def receber_nome_topico_envio(message: types.Message, state: FSMContext):
         return
         
     await state.update_data(nome_topico_envio=message.text.strip())
+    if EXIBIR_LOGS: logger.info("✅ Nome do tópico de escuta salvo com sucesso. Solicitando destino.")
     
     texto = (
-        "Agora, entre no tópico <b>VITRINE</b> (Onde o robô vai postar os vídeos aprovados), "
-        "copie o link dele da mesma forma e envie aqui:"
+        "✅ <b>Nome salvo!</b>\n\n"
+        "Agora, precisamos do link do tópico de <b>POSTAGEM</b> (o mural onde o robô vai publicar automaticamente os vídeos aprovados. Ex: 'Vídeos da Comunidade').\n\n"
+        "👉 Entre nesse tópico, copie o link do navegador da mesma forma e envie aqui:"
     )
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(SubmissaoAdminFluxo.aguardando_link_destino)
