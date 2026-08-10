@@ -9070,34 +9070,38 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     
     config = ler_submissao_config()
     status = "🟢 ATIVADO" if config.get("ativo") else "🔴 DESATIVADO"
-    grupo = config.get("grupo_id", "Não definido")
     
-    t_envio = config.get("topico_envio", "?")
-    # Lê direto do JSON (onde o Userbot vai escrever o nome real)
-    nome_t_envio = config.get("nome_topico_envio", "Tópico")
-    
-    t_destino = config.get("topico_destino", "?")
-    # Lê direto do JSON (onde o Userbot vai escrever o nome real)
-    nome_t_destino = config.get("nome_topico_destino", "Tópico")
-    
-    if grupo != "Não definido":
-        cache_nomes = ler_cache_nomes_grupos()
-        nome_grupo = cache_nomes.get(str(grupo), str(grupo))
-        
-        t_envio_display = f"{nome_t_envio} (ID: {t_envio})" if str(t_envio) != "?" else "?"
-        t_destino_display = f"{nome_t_destino} (ID: {t_destino})" if str(t_destino) != "?" else "?"
-        
-        display_config = f"{nome_grupo}\n📥 Escutando: {t_envio_display}\n📤 Postando: {t_destino_display}"
-    else:
-        display_config = "Nenhuma configuração salva."
+    grupo_id = config.get("grupo_id")
+    topico_escuta = config.get("topico_envio")
+    topico_vitrine = config.get("topico_destino")
+
+    cache_nomes = ler_cache_nomes_grupos()
+
+    # 1. Resgata o nome do Grupo Principal
+    grupo_id_str = str(grupo_id) if grupo_id else ""
+    nome_grupo = cache_nomes.get(grupo_id_str, "Grupo Público")
+    display_grupo = f"👥 <b>{nome_grupo}</b> (<code>{grupo_id_str}</code>)" if grupo_id_str else "<i>Grupo não definido</i>"
+
+    # 2. Resgata o nome do Tópico de Escuta
+    topico_escuta_str = str(topico_escuta) if topico_escuta else ""
+    nome_esc = cache_nomes.get(topico_escuta_str, cache_nomes.get(f"{grupo_id_str}:{topico_escuta_str}", "Tópico de Escuta"))
+    display_escuta = f"{nome_esc} (<code>{topico_escuta_str}</code>)" if topico_escuta_str else "<i>Não definido</i>"
+
+    # 3. Resgata o nome do Tópico Vitrine
+    topico_vitrine_str = str(topico_vitrine) if topico_vitrine else ""
+    nome_vit = cache_nomes.get(topico_vitrine_str, cache_nomes.get(f"{grupo_id_str}:{topico_vitrine_str}", "Tópico Vitrine"))
+    display_vitrine = f"{nome_vit} (<code>{topico_vitrine_str}</code>)" if topico_vitrine_str else "<i>Não definido</i>"
 
     texto = (
         "📬 <b>Painel do Grupo Público</b>\n\n"
         "O robô atuará como moderador dentro do seu Supergrupo.\n"
         "Ele escutará os envios no Tópico de Conversa, analisará com a IA "
         "e postará automaticamente os vídeos aprovados no Tópico Vitrine.\n\n"
-        f"<b>Status Atual:</b> {status}\n"
-        f"<b>Configuração:</b>\n{display_config}\n\n"
+        f"<b>Status Atual:</b> {status}\n\n"
+        "⚙️ <b>Configuração Atual:</b>\n"
+        f"{display_grupo}\n"
+        f"📥 <b>Escutando:</b> {display_escuta}\n"
+        f"📤 <b>Postando:</b> {display_vitrine}\n\n"
         "Escolha uma opção abaixo:"
     )
     
