@@ -9018,8 +9018,14 @@ async def processar_toggle_submissoes(message: types.Message, state: FSMContext)
     config["ativo"] = not config.get("ativo", False)
     salvar_submissao_config(config)
     
-    status = "ATIVADA" if config["ativo"] else "DESATIVADA"
-    await message.answer(f"✅ A moderação automática foi <b>{status}</b> com sucesso.", parse_mode="HTML")
+    if config["ativo"]:
+        icone = "✅"
+        status = "ATIVADA"
+    else:
+        icone = "🔴"
+        status = "DESATIVADA"
+        
+    await message.answer(f"{icone} A moderação automática foi <b>{status}</b> com sucesso.", parse_mode="HTML")
     await painel_submissoes(message, state)
 
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurar Grupo e Tópicos 🎯")
