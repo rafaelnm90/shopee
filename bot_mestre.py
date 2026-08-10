@@ -1627,11 +1627,11 @@ async def disparar_mensagem(tipo, forcar=False):
     elif tipo == "promo_principal":
         prompt = "Recomende um canal parceiro VIP (Acervo Afiliados). Diga que eles liberam conteúdos premium e editados a dedo. Seja humano. Máximo 150 caracteres. Sem links."
     
-    # ✅ NOVOS PROMPTS DA EXPANSÃO DO PÚBLICO
+    ## ✅ NOVOS PROMPTS DA EXPANSÃO DO PÚBLICO
     elif tipo in ["promo_publico", "promo_publico_viral"]:
-        prompt = "Recomende o nosso novo Grupo Público de Ofertas. Diga que lá a galera pode postar seus próprios achados livremente para a comunidade após a IA aprovar. Seja empolgante, máximo 150 caracteres, use emojis, sem links."
+        prompt = "Recomende nosso Grupo Público. Explique que é um espaço aberto onde todos os afiliados podem postar seus vídeos com links para divulgação. Destaque que é uma comunidade de ajuda mútua, garantindo que sempre tenham vídeos disponíveis para todos usarem. Seja empolgante, máximo 200 caracteres, use emojis, sem links."
     elif tipo == "link_grupo_publico":
-        prompt = "Atue como administrador do grupo público. Peça aos membros para chamarem mais amigos para participar da nossa comunidade onde todos postam ofertas e lucram juntos. Seja direto, máximo 150 caracteres, use emojis, sem links."
+        prompt = "Atue como administrador do grupo público. Peça aos membros para convidarem mais amigos para a nossa comunidade aberta. Lembre-os que aqui todos os afiliados se ajudam postando vídeos e links, garantindo material infinito para todos divulgarem. Seja direto, máximo 200 caracteres, use emojis, sem links."
     elif tipo == "promo_principal_publico":
         prompt = "Atue como moderador do grupo público. Recomende a galera a entrar no nosso Canal VIP Oficial (Acervo Afiliados), onde postamos vídeos premium mastigados. Máximo 150 caracteres, use emojis, sem links."
     elif tipo == "promo_viral_publico":
@@ -1660,7 +1660,7 @@ async def disparar_mensagem(tipo, forcar=False):
         msg_princ = await bot.send_message(chat_destino, f"👇 <b>Acesse o Acervo Afiliados:</b>\n{LINK_GRUPO}", parse_mode="HTML")
         registrar_lixeira(msg_princ.message_id, chat_destino)
     elif tipo in ["promo_publico", "promo_publico_viral", "link_grupo_publico"]:
-        msg_pub = await bot.send_message(chat_destino, f"👇 <b>Acesse a Comunidade Pública:</b>\n{LINK_GRUPO_PUBLICO}", parse_mode="HTML")
+        msg_pub = await bot.send_message(chat_destino, f"🔥 <b>Venha participar do nosso Grupo de Ofertas:</b>\n{LINK_GRUPO_PUBLICO}", parse_mode="HTML") # 👈 MUDE O TEXTO FIXO AQUI
         registrar_lixeira(msg_pub.message_id, chat_destino)
 
 def ler_config_rotina():
