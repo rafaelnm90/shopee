@@ -236,7 +236,8 @@ class SubmissaoAdminFluxo(StatesGroup):
     menu_principal = State()
     aguardando_link_envio = State()
     aguardando_link_destino = State()
-    aguardando_confirmacao_toggle = State() # ✅ NOVO ESTADO ADICIONADO
+    aguardando_topicos_rotina = State() # ✅ NOVO ESTADO DE MULTI-TÓPICOS
+    aguardando_confirmacao_toggle = State()
 
 class SubmissaoUsuarioInterativa(StatesGroup):
     aguardando_video = State()
@@ -1641,29 +1642,49 @@ async def disparar_mensagem(tipo, forcar=False):
 
     texto = await gerar_mensagem_gemini(prompt)
     
-    if EXIBIR_LOGS: logger.info(f"🚀 Enviando rotina ({tipo}) para o chat {chat_destino}.")
-    msg_enviada = await bot.send_message(chat_destino, texto)
-    registrar_lixeira(msg_enviada.message_id, chat_destino)
+    if EXIBIR_LOGS: logger.info(f"🚀 Preparando rotina ({tipo}) para o chat {chat_destino}.")
     
-    # 🔗 ANEXADORES DE LINKS ISOLADOS
-    if tipo == "link_grupo":
-        msg_link = await bot.send_message(chat_destino, f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}", parse_mode="HTML")
-        registrar_lixeira(msg_link.message_id, chat_destino)
-    elif tipo == "link_grupo_viral":
-        msg_link = await bot.send_message(chat_destino, f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO_VIRAL}", parse_mode="HTML")
-        registrar_lixeira(msg_link.message_id, chat_destino)
-    elif tipo in ["divulgar_gem", "divulgar_gem_viral"]:
-        msg_gem = await bot.send_message(chat_destino, "👇 <b>Acesse o Prompt Automatizado:</b>\nhttps://gemini.google.com/gem/1HtJMuknyMZ76utOu-i6c_xvc3vmQx7bT?usp=sharing", parse_mode="HTML")
-        registrar_lixeira(msg_gem.message_id, chat_destino)
-    elif tipo == "promo_viral" or tipo == "promo_viral_publico":
-        msg_viral = await bot.send_message(chat_destino, f"👇 <b>Acesse o Acervo Viral:</b>\n{LINK_GRUPO_VIRAL}", parse_mode="HTML")
-        registrar_lixeira(msg_viral.message_id, chat_destino)
-    elif tipo == "promo_principal" or tipo == "promo_principal_publico":
-        msg_princ = await bot.send_message(chat_destino, f"👇 <b>Acesse o Acervo Afiliados:</b>\n{LINK_GRUPO}", parse_mode="HTML")
-        registrar_lixeira(msg_princ.message_id, chat_destino)
-    elif tipo in ["promo_publico", "promo_publico_viral", "link_grupo_publico"]:
-        msg_pub = await bot.send_message(chat_destino, f"🔥 <b>Venha participar do nosso Grupo de Ofertas:</b>\n{LINK_GRUPO_PUBLICO}", parse_mode="HTML") # 👈 MUDE O TEXTO FIXO AQUI
-        registrar_lixeira(msg_pub.message_id, chat_destino)
+    # ✅ NOVO: Lógica de Multi-Tópicos (Multi-Threading)
+    destinos = []
+    if is_publico:
+        config_sub = ler_submissao_config()
+        topicos_rotina = config_sub.get("topicos_rotina", [])
+        if topicos_rotina:
+            for t in topicos_rotina: destinos.append(int(t))
+        else: destinos.append(None)
+    else:
+        destinos.append(None)
+
+    for thread_id in destinos:
+        try:
+            if EXIBIR_LOGS: logger.info(f"📤 Disparando {tipo} para Thread: {thread_id if thread_id else 'Geral'}")
+            msg_enviada = await bot.send_message(chat_destino, texto, message_thread_id=thread_id)
+            registrar_lixeira(msg_enviada.message_id, chat_destino)
+            
+            # 🔗 ANEXADORES DE LINKS ISOLADOS
+            if tipo == "link_grupo":
+                msg_link = await bot.send_message(chat_destino, f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}", parse_mode="HTML", message_thread_id=thread_id)
+                registrar_lixeira(msg_link.message_id, chat_destino)
+            elif tipo == "link_grupo_viral":
+                msg_link = await bot.send_message(chat_destino, f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO_VIRAL}", parse_mode="HTML", message_thread_id=thread_id)
+                registrar_lixeira(msg_link.message_id, chat_destino)
+            elif tipo in ["divulgar_gem", "divulgar_gem_viral"]:
+                msg_gem = await bot.send_message(chat_destino, "👇 <b>Acesse o Prompt Automatizado:</b>\nhttps://gemini.google.com/gem/1HtJMuknyMZ76utOu-i6c_xvc3vmQx7bT?usp=sharing", parse_mode="HTML", message_thread_id=thread_id)
+                registrar_lixeira(msg_gem.message_id, chat_destino)
+            elif tipo == "promo_viral" or tipo == "promo_viral_publico":
+                msg_viral = await bot.send_message(chat_destino, f"👇 <b>Acesse o Acervo Viral:</b>\n{LINK_GRUPO_VIRAL}", parse_mode="HTML", message_thread_id=thread_id)
+                registrar_lixeira(msg_viral.message_id, chat_destino)
+            elif tipo == "promo_principal" or tipo == "promo_principal_publico":
+                msg_princ = await bot.send_message(chat_destino, f"👇 <b>Acesse o Acervo Afiliados:</b>\n{LINK_GRUPO}", parse_mode="HTML", message_thread_id=thread_id)
+                registrar_lixeira(msg_princ.message_id, chat_destino)
+            elif tipo in ["promo_publico", "promo_publico_viral", "link_grupo_publico"]:
+                msg_pub = await bot.send_message(chat_destino, f"🔥 <b>Venha participar do nosso Grupo de Ofertas:</b>\n{LINK_GRUPO_PUBLICO}", parse_mode="HTML", message_thread_id=thread_id) 
+                registrar_lixeira(msg_pub.message_id, chat_destino)
+                
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar rotina {tipo} para thread {thread_id}: {e}")
+            
+        await asyncio.sleep(1) # Intervalo de segurança (anti-ban) entre múltiplos tópicos
 
 def ler_config_rotina():
     if EXIBIR_LOGS: logger.info("🚀 Iniciando leitura e validação das configurações de rotina...")
@@ -9136,15 +9157,22 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     nome_grupo = cache_nomes.get(grupo_id_str, "Grupo Público")
     display_grupo = f"👥 <b>Grupo Base:</b> {nome_grupo} (<code>{grupo_id_str}</code>)" if grupo_id_str else "<i>Grupo não definido</i>"
 
-    # 2. Resgata o nome do Tópico de Escuta e formata o ID longo
+    # 2. Resgata o nome do Tópico de Escuta
     topico_escuta_str = str(topico_escuta) if topico_escuta else ""
     nome_t_envio = config.get("nome_topico_envio", "Tópico de Escuta")
     display_escuta = f"💬 {nome_t_envio} (<code>{grupo_id_str}_{topico_escuta_str}</code>)" if topico_escuta_str else "<i>Não definido</i>"
 
-    # 3. Resgata o nome do Tópico Vitrine e formata o ID longo
+    # 3. Resgata o nome do Tópico Vitrine
     topico_vitrine_str = str(topico_vitrine) if topico_vitrine else ""
     nome_t_destino = config.get("nome_topico_destino", "Tópico Vitrine")
     display_vitrine = f"🌟 {nome_t_destino} (<code>{grupo_id_str}_{topico_vitrine_str}</code>)" if topico_vitrine_str else "<i>Não definido</i>"
+
+    # 4. ✅ NOVO: Resgata os Tópicos de Rotina
+    topicos_rotina = config.get("topicos_rotina", [])
+    if topicos_rotina:
+        display_rotinas = ", ".join([f"<code>{t}</code>" for t in topicos_rotina])
+    else:
+        display_rotinas = "<i>Chat Geral (Padrão)</i>"
 
     texto = (
         "📬 <b>Painel do Grupo Público</b>\n\n"
@@ -9155,7 +9183,8 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         "⚙️ <b>Configuração Atual:</b>\n"
         f"{display_grupo}\n"
         f"📥 <b>Escutando:</b> {display_escuta}\n"
-        f"📤 <b>Postando:</b> {display_vitrine}\n\n"
+        f"📤 <b>Postando:</b> {display_vitrine}\n"
+        f"📢 <b>Alvos das Rotinas:</b> {display_rotinas}\n\n"
         "Escolha uma opção abaixo:"
     )
     
@@ -9308,20 +9337,60 @@ async def processar_link_destino_submissao(message: types.Message, state: FSMCon
             await message.answer("⚠️ <b>Atenção:</b> O tópico Vitrine precisa pertencer ao MESMO grupo do tópico de Envio!\n\nPor favor, envie o link do tópico correto:", parse_mode="HTML", reply_markup=teclado_cancelar)
             return
             
-        config = ler_submissao_config()
-        config["grupo_id"] = grupo_id_envio
-        config["topico_envio"] = data.get("novo_topico_envio")
-        config["nome_topico_envio"] = "⏳ Sincronizando..."
-        config["topico_destino"] = int(topico_id_dest)
-        config["nome_topico_destino"] = "⏳ Sincronizando..."
+        await state.update_data(novo_topico_destino=int(topico_id_dest))
         
-        salvar_submissao_config(config)
-        
-        if EXIBIR_LOGS: logger.info("✅ Estrutura de submissões salva. O Userbot irá sincronizar os nomes em background.")
-        await message.answer("✅ <b>Perfeito!</b> Os tópicos foram interligados.\n\n<i>O Userbot já está extraindo os nomes reais em background. O painel será atualizado automaticamente em instantes!</i>", parse_mode="HTML")
-        await painel_submissoes(message, state)
+        texto = (
+            "✅ <b>Tópico Vitrine capturado!</b>\n\n"
+            "Por fim, em quais tópicos o robô deve disparar as <b>Mensagens de Rotina</b> (Convites e Promoções)?\n\n"
+            "👉 Envie os Links ou IDs numéricos dos tópicos separados por vírgula.\n"
+            "<i>(Ex: https://t.me/c/123/4, https://t.me/c/123/5)</i>\n\n"
+            "Se quiser que o robô envie apenas no chat geral do grupo, digite <b>0</b>."
+        )
+        await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar)
+        await state.set_state(SubmissaoAdminFluxo.aguardando_topicos_rotina)
     else:
         await message.answer("⚠️ Link não reconhecido. Tente novamente:", reply_markup=teclado_cancelar)
+
+@dp.message(SubmissaoAdminFluxo.aguardando_topicos_rotina)
+async def processar_topicos_rotina(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+    
+    entradas = [t.strip() for t in message.text.split(",")]
+    topicos_finais = []
+    
+    if message.text.strip() == "0":
+        topicos_finais = []
+    else:
+        import re
+        for entrada in entradas:
+            if "t.me/" in entrada:
+                partes = entrada.split("/")
+                if len(partes) >= 5: topicos_finais.append(partes[-1])
+            elif "_" in entrada: topicos_finais.append(entrada.split("_")[-1])
+            elif ":" in entrada: topicos_finais.append(entrada.split(":")[-1])
+            elif entrada.isdigit():
+                if entrada != "0": topicos_finais.append(entrada)
+                    
+    data = await state.get_data()
+    grupo_id_envio = data.get("novo_grupo")
+    topico_envio = data.get("novo_topico_envio")
+    topico_destino = data.get("novo_topico_destino")
+
+    config = ler_submissao_config()
+    config["grupo_id"] = grupo_id_envio
+    config["topico_envio"] = topico_envio
+    config["nome_topico_envio"] = "⏳ Sincronizando..."
+    config["topico_destino"] = topico_destino
+    config["nome_topico_destino"] = "⏳ Sincronizando..."
+    config["topicos_rotina"] = topicos_finais
+    
+    salvar_submissao_config(config)
+    
+    if EXIBIR_LOGS: logger.info("✅ Estrutura completa de submissões e rotinas salva.")
+    await message.answer("✅ <b>Perfeito!</b> Os tópicos foram interligados e as rotinas configuradas.\n\n<i>O Userbot irá extrair os nomes reais em background. O painel será atualizado em instantes!</i>", parse_mode="HTML")
+    await painel_submissoes(message, state)
 
 # ==========================================
 # GERADOR DO BOTÃO FIXO (Aberto para Todos) 📌
