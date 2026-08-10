@@ -1833,7 +1833,6 @@ async def salvar_bl_add_espelhador(message: types.Message, state: FSMContext):
         if alvo_para_bl not in novos_blacklist and alvo_para_bl not in blacklist:
             novos_blacklist.append(alvo_para_bl)
 
-        # ✅ NOVA LÓGICA CIRÚRGICA: Só avisa/remove se o ID completo (ID:Tópico) bater
         for alvo_monitorado in origens_atuais:
             if alvo_para_bl == str(alvo_monitorado) and alvo_monitorado not in conflitos:
                 conflitos.append(alvo_monitorado)
@@ -1869,16 +1868,24 @@ async def salvar_bl_add_espelhador(message: types.Message, state: FSMContext):
         dados["rotas"][idx]["blacklist"] = blacklist
         salvar_espelhos(dados)
         
-        teclado_origens = ReplyKeyboardMarkup(
+        # ✅ NOVO: Monta a lista atualizada e mantém o usuário no menu da Blacklist
+        cache_nomes = ler_cache_nomes_grupos()
+        txt_lista = f"⛔ <b>Lista Negra da Rota '{rota_atual['nome']}'</b>\n"
+        for i, b in enumerate(blacklist, 1):
+            nome = cache_nomes.get(str(b), str(b))
+            txt_lista += f"{i}. {nome} (<code>{b}</code>)\n"
+            
+        texto_final = f"✅ <b>{len(novos_blacklist)} canal(is) bloqueado(s) com sucesso!</b>\n\n{txt_lista}"
+        
+        tcl_bl = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
-                [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
-            ],
-            resize_keyboard=True,
-            is_persistent=True
+                [KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Rem. da Blacklist")], 
+                [KeyboardButton(text="Cancelar Operação ❌")]
+            ], 
+            resize_keyboard=True
         )
-        await message.answer(f"✅ <b>{len(novos_blacklist)} canal(is) bloqueado(s) na Lista Negra da rota!</b>", parse_mode="HTML", reply_markup=teclado_origens)
-        await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
+        await message.answer(texto_final, parse_mode="HTML", reply_markup=tcl_bl)
+        await state.set_state(EspelhadorFluxo.aguardando_acao_blacklist)
 
 @router.message(EspelhadorFluxo.aguardando_confirmacao_blacklist_conflito)
 async def confirmar_blacklist_conflito_espelhador(message: types.Message, state: FSMContext):
@@ -1902,7 +1909,6 @@ async def confirmar_blacklist_conflito_espelhador(message: types.Message, state:
     if not origens_atuais and 'origem' in rota_atual: origens_atuais = [rota_atual['origem']]
     blacklist = rota_atual.get("blacklist", [])
 
-    # Remove os conflitos da escuta
     origens_atualizadas = [a for a in origens_atuais if a not in alvos_para_remover]
     dados["rotas"][idx]["origens"] = origens_atualizadas
     if "origem" in dados["rotas"][idx]: del dados["rotas"][idx]["origem"]
@@ -1914,34 +1920,61 @@ async def confirmar_blacklist_conflito_espelhador(message: types.Message, state:
 
     salvar_espelhos(dados)
 
-    teclado_origens = ReplyKeyboardMarkup(
+    # ✅ NOVO: Monta a lista atualizada e mantém o usuário no menu da Blacklist
+    cache_nomes = ler_cache_nomes_grupos()
+    txt_lista = f"\n⛔ <b>Lista Negra Atualizada:</b>\n"
+    for i, b in enumerate(blacklist, 1):
+        nome = cache_nomes.get(str(b), str(b))
+        txt_lista += f"{i}. {nome} (<code>{b}</code>)\n"
+
+    texto_final = f"✅ <b>Sucesso!</b>\n⛔ {len(novos_blacklist)} adicionado(s).\n🗑️ {len(alvos_para_remover)} removido(s) da escuta.\n{txt_lista}"
+
+    tcl_bl = ReplyKeyboardMarkup(
         keyboard=[
-                [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
-                [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
-            ],
-            resize_keyboard=True,
-            is_persistent=True
+            [KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Rem. da Blacklist")], 
+            [KeyboardButton(text="Cancelar Operação ❌")]
+        ], 
+        resize_keyboard=True
     )
-    await message.answer(f"✅ <b>Sucesso!</b>\n⛔ {len(novos_blacklist)} canal(is) adicionado(s) à Lista Negra.\n🗑️ {len(alvos_para_remover)} canal(is) removido(s) da escuta da rota.", parse_mode="HTML", reply_markup=teclado_origens)
-    await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
+    await message.answer(texto_final, parse_mode="HTML", reply_markup=tcl_bl)
+    await state.set_state(EspelhadorFluxo.aguardando_acao_blacklist)
 
 @router.message(EspelhadorFluxo.aguardando_blacklist_remove)
 async def salvar_bl_rem_espelhador(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar Operação ❌":
+        msg_simulada = message.model_copy(update={"text": "🔙 Voltar ao Menu de Edição"})
+        await processar_acao_origem(msg_simulada, state)
+        return
+
     remover = [s.strip() for s in message.text.split(",")]
     data = await state.get_data()
     idx = data.get("indice_edicao")
     dados = ler_espelhos()
-    bl = dados["rotas"][idx].get("blacklist", [])
-    dados["rotas"][idx]["blacklist"] = [b for b in bl if b not in remover]
+    rota_atual = dados["rotas"][idx]
+    bl = rota_atual.get("blacklist", [])
+    
+    nova_blacklist = [b for b in bl if b not in remover]
+    dados["rotas"][idx]["blacklist"] = nova_blacklist
     salvar_espelhos(dados)
     
-    teclado_origens = ReplyKeyboardMarkup(
+    # ✅ NOVO: Monta a lista atualizada e mantém o usuário no menu da Blacklist
+    cache_nomes = ler_cache_nomes_grupos()
+    txt_lista = f"⛔ <b>Lista Negra da Rota '{rota_atual['nome']}'</b>\n"
+    if nova_blacklist:
+        for i, b in enumerate(nova_blacklist, 1):
+            nome = cache_nomes.get(str(b), str(b))
+            txt_lista += f"{i}. {nome} (<code>{b}</code>)\n"
+    else:
+        txt_lista += "<i>Nenhuma restrição cadastrada.</i>\n"
+
+    texto_final = f"✅ <b>Blacklist atualizada com sucesso!</b>\n\n{txt_lista}"
+    
+    tcl_bl = ReplyKeyboardMarkup(
         keyboard=[
-                [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
-                [KeyboardButton(text="🔙 Voltar ao Menu de Edição")]
-            ],
-            resize_keyboard=True,
-            is_persistent=True
+            [KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Rem. da Blacklist")], 
+            [KeyboardButton(text="Cancelar Operação ❌")]
+        ], 
+        resize_keyboard=True
     )
-    await message.answer("✅ Blacklist da rota atualizada!", reply_markup=teclado_origens)
-    await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
+    await message.answer(texto_final, parse_mode="HTML", reply_markup=tcl_bl)
+    await state.set_state(EspelhadorFluxo.aguardando_acao_blacklist)
