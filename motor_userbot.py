@@ -1035,6 +1035,50 @@ async def monitorar_status_espelhos():
         # 5. Dorme exatamente 60 segundos
         await asyncio.sleep(60)
 
+async def monitorar_topicos_submissao():
+    """Varredura em background que resgata o nome real dos tópicos para o Bot Mestre"""
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento para auto-preenchimento de tópicos de submissão...")
+    while True:
+        try:
+            config = ler_config_bd_espiao("submissao_config", padrao={})
+            grupo_id = config.get("grupo_id")
+            
+            if grupo_id:
+                alterou = False
+                
+                for chave_id, chave_nome in [("topico_envio", "nome_topico_envio"), ("topico_destino", "nome_topico_destino")]:
+                    t_id = config.get(chave_id)
+                    n_atual = config.get(chave_nome)
+                    
+                    if n_atual == "⏳ Sincronizando..." and t_id is not None:
+                        if str(t_id) == "0":
+                            config[chave_nome] = "Tópico Geral"
+                            alterou = True
+                        else:
+                            try:
+                                # Na API Telethon, a mensagem raiz (com ID igual ao do tópico) contém o título na 'action'
+                                msg = await client.get_messages(int(grupo_id), ids=int(t_id))
+                                if msg and hasattr(msg, 'action') and hasattr(msg.action, 'title'):
+                                    config[chave_nome] = msg.action.title
+                                    if EXIBIR_LOGS: logger.info(f"✅ [Integração] Nome do Tópico resgatado com sucesso: {msg.action.title}")
+                                else:
+                                    config[chave_nome] = f"Tópico {t_id}"
+                                    if EXIBIR_LOGS: logger.warning(f"⚠️ [Integração] Título não encontrado para o tópico {t_id}.")
+                                alterou = True
+                            except Exception as e:
+                                if EXIBIR_LOGS: logger.error(f"❌ [Integração] Erro de API ao buscar tópico {t_id}: {e}")
+                                config[chave_nome] = f"Tópico {t_id}"
+                                alterou = True
+                                
+                if alterou:
+                    salvar_config_bd_espiao("submissao_config", config)
+                    
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"⚠️ Erro na thread de monitoramento de submissão: {e}")
+            
+        # O Userbot varre isso a cada 15 segundos para dar a sensação de tempo real no painel
+        await asyncio.sleep(15)
+
 async def main():
     if EXIBIR_LOGS: logger.info("🕵️ Iniciando o Módulo Espião de Clonagem...")
     try:
@@ -1057,6 +1101,7 @@ async def main():
     asyncio.create_task(processar_fila_espelhador_loop())
     asyncio.create_task(monitorar_status_alvos())
     asyncio.create_task(monitorar_status_espelhos())
+    asyncio.create_task(monitorar_topicos_submissao()) # ✅ NOVO GATILHO
     
     await client.run_until_disconnected()
 
