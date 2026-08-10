@@ -5588,8 +5588,19 @@ async def menu_espiao_principal(message: types.Message, state: FSMContext):
     qtd_concorrentes = len(concorrentes)
     canal_destino = dados_espiao.get("canal_destino")
     
+    # Lógica Visual do Destino com Autocura (Puxa o nome em vez de só o ID)
     if not canal_destino:
-        canal_destino = "Não definido"
+        display_destino = "<i>Não definido</i>"
+    else:
+        status_destino = dados_espiao.get("status_destino", {})
+        nome_dest = status_destino.get("nome", str(canal_destino))
+        # Se não tiver o nome no status, tenta puxar do cache global
+        if nome_dest == str(canal_destino):
+            cache_nomes = ler_cache_nomes_grupos()
+            nome_dest = cache_nomes.get(str(canal_destino), str(canal_destino))
+        
+        # Formata bonito: "Nome do Canal (ID)"
+        display_destino = f"{nome_dest} (<code>{canal_destino}</code>)" if nome_dest != str(canal_destino) else f"<code>{canal_destino}</code>"
 
     # ✅ NOVO: Resgate das configurações de tempo e distribuição do Espião
     inicio_e = dados_espiao.get("inicio", 10)
@@ -5601,7 +5612,7 @@ async def menu_espiao_principal(message: types.Message, state: FSMContext):
     texto = "🕵️ <b>Painel Principal do Espião</b>\n\n"
     texto += f"📦 <b>Fila de clonagem:</b> {videos_pendentes} vídeos aguardando.\n"
     texto += f"📡 <b>Radar operacional:</b> {qtd_concorrentes} concorrentes vigiados.\n"
-    texto += f"🎯 <b>Canal de destino:</b> <code>{canal_destino}</code>\n"
+    texto += f"🎯 <b>Canal de destino:</b> {display_destino}\n"
     texto += f"🕒 <b>Janela de Postagem:</b> {inicio_e}h às {fim_e}h\n"
     texto += f"📅 <b>Atraso (Defasagem):</b> D+{intervalo_e} (Modo: {modo_e})\n\n"
     texto += "Escolha uma opção para gerenciar:"
