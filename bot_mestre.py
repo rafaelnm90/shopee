@@ -704,8 +704,8 @@ async def salvar_saldo_shopee(message: types.Message, state: FSMContext):
         valor = float(texto_valor)
         msg_status = await message.answer("🔄 Sincronizando e fotografando o passado para evitar duplicações... Aguarde ⏳", reply_markup=teclado_cancelar)
         
-        # Puxa 180 dias (fatiados de forma inteligente) e salva o status atual de tudo SEM mexer no saldo
-        conversoes = await buscar_dados_financeiros_shopee(180)
+        # Puxa 90 dias (limite físico máximo da API) e salva o status atual SEM mexer no saldo
+        conversoes = await buscar_dados_financeiros_shopee(90)
         if conversoes:
             processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=True)
             
@@ -8887,9 +8887,9 @@ async def processar_fila_espiao(forcar=False):
             
             for p in pendentes:
                 try:
-                    h_atual = datetime.strptime(p.get("horario_disparo", "2000-01-01 00:00:00"), "%Y-%m-%d %H:%M:%S")
+                    h_atual = datetime.strptime(p.get("horario_disparo", "2000-01-01 00:00:00"), "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
                 except:
-                    h_atual = datetime.min
+                    h_atual = datetime.now(fuso_horario) - timedelta(days=1000)
                     
                 # Se o vídeo está marcado para um horário dentro do bloqueio (ou antes), empurramos ele
                 if h_atual < tempo_acumulado:
@@ -9006,7 +9006,8 @@ async def varredura_retroativa_pendentes():
         return
         
     dias_retroativos = (agora - data_mais_antiga).days + 1
-    if dias_retroativos > 180: dias_retroativos = 180
+    # Trava em 90 dias absolutos para respeitar a barreira da API "last 3 months"
+    if dias_retroativos > 90: dias_retroativos = 90
     if dias_retroativos < 5: dias_retroativos = 5
     
     if EXIBIR_LOGS: logger.info(f"🔍 [Pente Fino] Pendentes antigos detetados! A requisitar relatório dos últimos {dias_retroativos} dias à Shopee...")
