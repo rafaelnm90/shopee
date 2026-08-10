@@ -232,6 +232,7 @@ class SubmissaoAdminFluxo(StatesGroup):
     menu_principal = State()
     aguardando_link_envio = State()
     aguardando_link_destino = State()
+    aguardando_confirmacao_toggle = State() # ✅ NOVO ESTADO ADICIONADO
 
 class SubmissaoUsuarioInterativa(StatesGroup):
     aguardando_video = State()
@@ -8935,7 +8936,7 @@ async def forcar_clones_fila(callback: types.CallbackQuery):
 # ==========================================
 teclado_menu_submissao = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="Ativar/Desativar Submissões ⏯️")],
+        [KeyboardButton(text="Ativar/Desativar Moderação ⏯️")], # ✅ NOME ALTERADO AQUI
         [KeyboardButton(text="Configurar Grupo e Tópicos 🎯")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
@@ -8984,16 +8985,41 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=teclado_menu_submissao, parse_mode="HTML")
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
 
-@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Ativar/Desativar Submissões ⏯️")
-async def toggle_submissoes(message: types.Message, state: FSMContext):
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Ativar/Desativar Submissões ⏯️", "Ativar/Desativar Moderação ⏯️"]))
+async def pedir_confirmacao_toggle(message: types.Message, state: FSMContext):
     config = ler_submissao_config()
     if not config.get("grupo_id"):
         return await message.answer("⚠️ Você precisa configurar o Grupo e os Tópicos primeiro.")
         
+    acao = "DESATIVAR" if config.get("ativo") else "ATIVAR"
+    
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=f"Aprovar {acao} ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    texto = (
+        f"⚠️ Tem certeza de que deseja <b>{acao}</b> a moderação automática de vídeos neste grupo?\n\n"
+        "<i>(Quando ativada, a IA passará a analisar e aprovar automaticamente os vídeos enviados pelos membros no tópico de escuta)</i>"
+    )
+    
+    await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(SubmissaoAdminFluxo.aguardando_confirmacao_toggle)
+
+@dp.message(SubmissaoAdminFluxo.aguardando_confirmacao_toggle)
+async def processar_toggle_submissoes(message: types.Message, state: FSMContext):
+    if "Aprovar" not in message.text:
+        await message.answer("Operação cancelada.")
+        await painel_submissoes(message, state)
+        return
+        
+    config = ler_submissao_config()
     config["ativo"] = not config.get("ativo", False)
     salvar_submissao_config(config)
-    status = "ATIVADAS" if config["ativo"] else "DESATIVADAS"
-    await message.answer(f"✅ As submissões públicas foram <b>{status}</b>.", parse_mode="HTML")
+    
+    status = "ATIVADA" if config["ativo"] else "DESATIVADA"
+    await message.answer(f"✅ A moderação automática foi <b>{status}</b> com sucesso.", parse_mode="HTML")
     await painel_submissoes(message, state)
 
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurar Grupo e Tópicos 🎯")
