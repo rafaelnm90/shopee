@@ -18,6 +18,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.filters import Command, StateFilter
+from aiogram import BaseMiddleware
+from typing import Callable, Dict, Any, Awaitable
+from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 import subprocess
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
