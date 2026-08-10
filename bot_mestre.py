@@ -8957,7 +8957,48 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     if grupo != "Não definido":
         cache_nomes = ler_cache_nomes_grupos()
         nome_grupo = cache_nomes.get(str(grupo), str(grupo))
-        display_config = f"{nome_grupo}\n📥 Escutando no Tópico: {t_envio}\n📤 Postando no Tópico: {t_destino}"
+        
+        # --- NOVA LÓGICA DE BUSCA DE TÓPICOS (COM PROTEÇÃO) ---
+        nome_t_envio = "Desconhecido"
+        if t_envio and str(t_envio) != "0":
+            try:
+                if EXIBIR_LOGS: logger.info(f"🔍 [Grupo Público] Tentando resgatar nome do Tópico de Envio (ID: {t_envio})...")
+                # Nota: A API nativa do Aiogram não possui endpoint para ler o nome do tópico.
+                # Utilizamos getattr para evitar crash (AttributeError) e preparar o terreno
+                # caso um client Pyrogram (Userbot) seja acoplado futuramente.
+                metodo_get_topic = getattr(bot, 'get_forum_topic', None)
+                if metodo_get_topic:
+                    topic_e = await metodo_get_topic(chat_id=grupo, message_thread_id=t_envio)
+                    nome_t_envio = topic_e.title
+                else:
+                    if EXIBIR_LOGS: logger.warning(f"⚠️ [Grupo Público] Método de leitura de tópicos indisponível na biblioteca atual. Exibindo formato genérico.")
+                    nome_t_envio = "Tópico"
+            except Exception as e:
+                if EXIBIR_LOGS: logger.error(f"❌ [Grupo Público] Erro ao buscar Tópico de Envio: {e}")
+                nome_t_envio = "Tópico não encontrado"
+        else:
+            nome_t_envio = "Geral"
+                
+        nome_t_destino = "Desconhecido"
+        if t_destino and str(t_destino) != "0":
+            try:
+                if EXIBIR_LOGS: logger.info(f"🔍 [Grupo Público] Tentando resgatar nome do Tópico Vitrine (ID: {t_destino})...")
+                metodo_get_topic = getattr(bot, 'get_forum_topic', None)
+                if metodo_get_topic:
+                    topic_d = await metodo_get_topic(chat_id=grupo, message_thread_id=t_destino)
+                    nome_t_destino = topic_d.title
+                else:
+                    nome_t_destino = "Tópico"
+            except Exception as e:
+                if EXIBIR_LOGS: logger.error(f"❌ [Grupo Público] Erro ao buscar Tópico Vitrine: {e}")
+                nome_t_destino = "Tópico não encontrado"
+        else:
+            nome_t_destino = "Geral"
+        
+        t_envio_display = f"{nome_t_envio} (ID: {t_envio})" if str(t_envio) != "?" else "?"
+        t_destino_display = f"{nome_t_destino} (ID: {t_destino})" if str(t_destino) != "?" else "?"
+        
+        display_config = f"{nome_grupo}\n📥 Escutando: {t_envio_display}\n📤 Postando: {t_destino_display}"
     else:
         display_config = "Nenhuma configuração salva."
 
