@@ -1661,6 +1661,7 @@ async def disparar_mensagem(tipo, forcar=False):
         registrar_lixeira(msg_pub.message_id, chat_destino)
 
 def ler_config_rotina():
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando leitura e validação das configurações de rotina...")
     padrao = {
         # Rotinas do Canal Principal
         "bom_dia": {"inicio": 6, "fim": 9, "frequencia": 1},
@@ -1698,6 +1699,7 @@ def ler_config_rotina():
             
     if houve_alteracao:
         salvar_config_bd("config_rotina", dados)
+        if EXIBIR_LOGS: logger.info("✅ Sucesso: Novas chaves de rotina injetadas e salvas no banco.")
         
     return dados
 
