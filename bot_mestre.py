@@ -6476,6 +6476,12 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     texto += f"🔹 <b>Convite do Grupo Afiliados 🛍️ (Para o Canal Afiliados)</b>\n"
     texto += f"   Janela de Sorteio: {config_promo['inicio']}h às {config_promo['fim']}h\n"
     texto += f"   Disparos por Dia: {config_promo['frequencia']}x\n\n"
+
+    # Resgata e exibe a rotina do Grupo Público no Canal Viral
+    config_pub_viral = dados.get("promo_publico_viral", {"inicio": 10, "fim": 20, "frequencia": 1})
+    texto += f"🔹 <b>Promoção do Grupo Público 👥 (Para o Canal Viral)</b>\n"
+    texto += f"   Janela de Sorteio: {config_pub_viral['inicio']}h às {config_pub_viral['fim']}h\n"
+    texto += f"   Disparos por Dia: {config_pub_viral['frequencia']}x\n\n"
     
     texto += "Selecione o que deseja editar abaixo:"
     
