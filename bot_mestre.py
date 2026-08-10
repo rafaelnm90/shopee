@@ -6484,10 +6484,8 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     
     teclado = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Editar Convite do Grupo 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖\u200b")],
-            [KeyboardButton(text="Editar Convite Afiliados 🚀"), KeyboardButton(text="Editar Promo Público 👥")],
-            [KeyboardButton(text="Disparos Manuais 🚀"), KeyboardButton(text=texto_botao_pausa)],
-            [KeyboardButton(text="Voltar às Automações 🔙")]
+            [KeyboardButton(text="Editar Rotinas ✏️"), KeyboardButton(text="Disparos Manuais 🚀")],
+            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Automações 🔙")]
         ],
         resize_keyboard=True,
         is_persistent=True
@@ -6495,6 +6493,49 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
     await state.update_data(menu_origem="espiao") # ✅ Salva a origem para não quebrar a navegação
     await state.set_state(ConfigRotina.menu_principal)
+
+@dp.message(ConfigRotina.menu_principal, F.text == "Editar Rotinas ✏️")
+async def submenu_editar_rotinas(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    
+    data = await state.get_data()
+    origem = data.get("menu_origem")
+    
+    if origem == "espiao":
+        teclado = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Editar Convite do Grupo 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖\u200b")],
+                [KeyboardButton(text="Editar Convite Afiliados 🚀"), KeyboardButton(text="Editar Promo Público 👥")],
+                [KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        texto = "✏️ <b>Editar Rotinas (Canal Viral)</b>\nSelecione qual rotina deseja configurar:"
+    elif origem == "publico":
+        teclado = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Editar Convite Próprio 🔗"), KeyboardButton(text="Editar Promo Principal 🌟")],
+                [KeyboardButton(text="Editar Promo Viral 💥"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        texto = "✏️ <b>Editar Rotinas (Grupo Público)</b>\nSelecione qual rotina deseja configurar:"
+    else:
+        teclado = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
+                [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
+                [KeyboardButton(text="Editar Convite Viral 🚀"), KeyboardButton(text="Editar Promo Público 🗣️")],
+                [KeyboardButton(text="Editar Boa Noite 🌙"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        texto = "✏️ <b>Editar Rotinas (Canal Principal)</b>\nSelecione qual rotina deseja configurar:"
+        
+    await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
 
 @dp.message(ConfigRotina.menu_principal, F.text == "Disparos Manuais 🚀")
 async def submenu_disparos_manuais(message: types.Message, state: FSMContext):
@@ -7446,17 +7487,14 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
     texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado") else "Pausar Rotinas ⏸️"
     teclado_dinamico_rotina = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
-            [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
-            [KeyboardButton(text="Editar Convite Viral 🚀"), KeyboardButton(text="Editar Promo Público 🗣️")],
-            [KeyboardButton(text="Editar Boa Noite 🌙"), KeyboardButton(text="Disparos Manuais 🚀")],
+            [KeyboardButton(text="Editar Rotinas ✏️"), KeyboardButton(text="Disparos Manuais 🚀")],
             [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Configs 🔙")]
         ],
         resize_keyboard=True,
         is_persistent=True
     )
     
-    texto += "Selecione o que deseja editar abaixo:"
+    texto += "Selecione o que deseja gerir abaixo:"
     await message.answer(texto, reply_markup=teclado_dinamico_rotina, parse_mode="HTML")
     await state.update_data(menu_origem="principal") # ✅ Adicione esta linha exata aqui
     await state.set_state(ConfigRotina.menu_principal)
@@ -8974,9 +9012,8 @@ async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
     texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado_publico") else "Pausar Rotinas ⏸️"
     teclado = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Editar Convite Próprio 🔗"), KeyboardButton(text="Editar Promo Principal 🌟")],
-            [KeyboardButton(text="Editar Promo Viral 💥"), KeyboardButton(text=texto_botao_pausa)],
-            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
+            [KeyboardButton(text="Editar Rotinas ✏️"), KeyboardButton(text="Disparos Manuais 🚀")],
+            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar ao Painel Público 🔙")]
         ], resize_keyboard=True, is_persistent=True
     )
     await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
