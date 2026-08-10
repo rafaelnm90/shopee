@@ -4235,18 +4235,21 @@ async def manual_convite_viral(message: types.Message):
     await disparar_mensagem("link_grupo_viral", forcar=True)
     await message.answer("Convite de recrutamento enviado ao canal viral com sucesso! ✅")
 
-@dp.message(F.text == "Disparar Promo Público 🗣️", StateFilter("*"))
-async def manual_promo_publico(message: types.Message):
+@dp.message(F.text == "Disparar Prompt GEM 🤖\u200b", StateFilter("*"))
+async def manual_prompt_gem_viral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    dados_rotina = ler_config_rotina()
-    if dados_rotina.get("pausado", False):
-        return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Principal estão <b>PAUSADAS</b>.", parse_mode="HTML")
-    hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
-    if dados_rotina.get("ultimo_bom_dia") != hoje_str or dados_rotina.get("ultimo_boa_noite") == hoje_str:
-        return await message.answer("⚠️ <b>Ação Bloqueada:</b> Dispare esta mensagem apenas durante o expediente.", parse_mode="HTML")
-    await message.answer("Gerando e enviando divulgação do Grupo Público... ⏳")
-    await disparar_mensagem("promo_publico", forcar=True)
-    await message.answer("Mensagem de Promo Público enviada ao grupo com sucesso! ✅")
+    if EXIBIR_LOGS: logger.info("🚀 Comando recebido: Forçando disparo de Prompt GEM (Viral).")
+    await message.answer("Gerando e enviando Prompt GEM para o canal viral... ⏳")
+    await disparar_mensagem("divulgar_gem_viral", forcar=True)
+    await message.answer("Prompt GEM enviado ao canal viral com sucesso! ✅")
+
+@dp.message(F.text == "Disparar Promo Público 👥", StateFilter("*"))
+async def manual_promo_publico_viral(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🚀 Comando recebido: Forçando disparo de Promo Público (Viral).")
+    await message.answer("Gerando e enviando divulgação do Grupo Público para o canal viral... ⏳")
+    await disparar_mensagem("promo_publico_viral", forcar=True)
+    await message.answer("Divulgação enviada ao canal viral com sucesso! ✅")
 
 # ❌ NOVO: Handler Global para Cancelar via Botão (Agora 100% à prova de falhas)
 @dp.message(F.text == "Cancelar ❌", StateFilter("*"))
@@ -6551,9 +6554,11 @@ async def submenu_disparos_manuais(message: types.Message, state: FSMContext):
     origem = data.get("menu_origem")
     
     if origem == "espiao":
+        if EXIBIR_LOGS: logger.info("✅ Montando teclado manual para o Canal Viral.")
         teclado = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="Disparar Convite Afiliados 🚀"), KeyboardButton(text="Disparar Convite do Grupo 🔗\u200b")],
+                [KeyboardButton(text="Disparar Prompt GEM 🤖\u200b"), KeyboardButton(text="Disparar Promo Público 👥")],
                 [KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
             ],
             resize_keyboard=True,
