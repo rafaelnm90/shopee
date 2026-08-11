@@ -888,18 +888,6 @@ def obter_teclado_opcoes_servidor():
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
-def obter_teclado_configuracoes_gerais():
-    dados_pausa = ler_pausa_programada()
-    texto_botao_pausa = "Retomar Postagens ▶️" if dados_pausa.get("ativa") else "Pausar Postagens 🛑"
-    
-    botoes = [
-        [KeyboardButton(text="Mensagens de Rotina ⏰"), KeyboardButton(text="SPAM em Grupos 📢")],
-        [KeyboardButton(text="Editar Número da Postagem 🔢"), KeyboardButton(text=texto_botao_pausa)],
-        [KeyboardButton(text="🔄 Atualizar Rotinas")],
-        [KeyboardButton(text="Voltar 🔙")]
-    ]
-    return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
-
 # --- SISTEMA DO ESPIÃO (CONFIGURAÇÕES) ---
 def ler_alvos_espiao():
     padrao = {"alvos": [], "canal_destino": None, "status_alvos": {}}
@@ -4431,7 +4419,8 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     if nome_origem != origem_bruta:
                         salvar_nome_grupo(origem_bruta, nome_origem)
                 
-                display_origem = f"{nome_origem[:25]}" if nome_origem != origem_bruta else f"{origem_bruta}"
+                # ✅ CORREÇÃO: sem corte. O nome do canal sai sempre completo.
+                display_origem = str(nome_origem) if nome_origem else str(origem_bruta)
                 
             # --- 5. PREPARAÇÃO DO LINK DE DESTINO (Apenas se postado) ---
             link_destino = None
