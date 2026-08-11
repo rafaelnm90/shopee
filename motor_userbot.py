@@ -1046,6 +1046,7 @@ async def monitorar_topicos_submissao():
             if grupo_id:
                 alterou = False
                 
+                # Sincroniza Escuta e Vitrine
                 for chave_id, chave_nome in [("topico_envio", "nome_topico_envio"), ("topico_destino", "nome_topico_destino")]:
                     t_id = config.get(chave_id)
                     n_atual = config.get(chave_nome)
@@ -1056,27 +1057,42 @@ async def monitorar_topicos_submissao():
                             alterou = True
                         else:
                             try:
-                                # Na API Telethon, a mensagem raiz (com ID igual ao do tópico) contém o título na 'action'
                                 msg = await client.get_messages(int(grupo_id), ids=int(t_id))
                                 if msg and hasattr(msg, 'action') and hasattr(msg.action, 'title'):
                                     config[chave_nome] = msg.action.title
-                                    if EXIBIR_LOGS: logger.info(f"✅ [Integração] Nome do Tópico resgatado com sucesso: {msg.action.title}")
                                 else:
                                     config[chave_nome] = f"Tópico {t_id}"
-                                    if EXIBIR_LOGS: logger.warning(f"⚠️ [Integração] Título não encontrado para o tópico {t_id}.")
                                 alterou = True
-                            except Exception as e:
-                                if EXIBIR_LOGS: logger.error(f"❌ [Integração] Erro de API ao buscar tópico {t_id}: {e}")
+                            except Exception:
                                 config[chave_nome] = f"Tópico {t_id}"
                                 alterou = True
-                                
+                
+                # ✅ NOVO: Sincroniza os Tópicos Múltiplos de Rotina
+                topicos_rotina = config.get("topicos_rotina", [])
+                nomes_rotina = config.get("nomes_topicos_rotina", {})
+                
+                for t_id in topicos_rotina:
+                    n_atual = nomes_rotina.get(str(t_id))
+                    if n_atual == "⏳ Sincronizando...":
+                        try:
+                            msg = await client.get_messages(int(grupo_id), ids=int(t_id))
+                            if msg and hasattr(msg, 'action') and hasattr(msg.action, 'title'):
+                                nomes_rotina[str(t_id)] = msg.action.title
+                            else:
+                                nomes_rotina[str(t_id)] = f"Tópico {t_id}"
+                            alterou = True
+                        except Exception:
+                            nomes_rotina[str(t_id)] = f"Tópico {t_id}"
+                            alterou = True
+                            
                 if alterou:
+                    config["nomes_topicos_rotina"] = nomes_rotina
                     salvar_config_bd_espiao("submissao_config", config)
+                    if EXIBIR_LOGS: logger.info("✅ [Integração] Nomes dos tópicos atualizados com sucesso no banco de dados.")
                     
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"⚠️ Erro na thread de monitoramento de submissão: {e}")
             
-        # O Userbot varre isso a cada 15 segundos para dar a sensação de tempo real no painel
         await asyncio.sleep(15)
 
 async def main():
