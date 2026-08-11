@@ -246,6 +246,11 @@ class SubmissaoAdminFluxo(StatesGroup):
     aguardando_confirmacao_repost_limite = State()
     aguardando_confirmacao_pausa_repost = State()
 
+class SubmissaoUsuarioInterativa(StatesGroup):
+    aguardando_video = State()
+    aguardando_shopee = State()
+    aguardando_tiktok = State()
+
 def ler_submissao_config():
     return ler_config_bd("submissao_config", padrao={
         "ativo": False, 
