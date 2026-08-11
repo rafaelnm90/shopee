@@ -2872,7 +2872,13 @@ async def painel_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Regras de Repostagem ♻️")
 async def submenu_regras_retorno(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
     await message.answer("♻️ <b>Regras de Repostagem</b>\nEscolha o que deseja editar:", reply_markup=teclado_submenu_retorno, parse_mode="HTML")
+    # ✅ CORREÇÃO: reancora o estado no menu principal dos Autorais.
+    # Sem isto, quando chamada de dentro do cancelar_fluxo_global (que dá
+    # state.clear()) ou após Aprovar/Cancelar, o estado fica None e os botões
+    # "Editar Dias ⏳" / "Editar Limite 📦" param de responder.
+    await state.set_state(AutoraisFluxo.menu_principal)
 
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Status do Robô ⏸️")
 async def submenu_status_robo(message: types.Message, state: FSMContext):
