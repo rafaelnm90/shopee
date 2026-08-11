@@ -472,7 +472,6 @@ async def interceptar_e_espelhar(event):
                         "processado": False
                     })
                     salvar_fila_retorno(fila_dados)
-salvar_fila_retorno(fila_dados)
                     if EXIBIR_LOGS: logger.info(f"🎯 [Sorteio] Vídeo nº {total_ofertas} do dia SORTEADO para retorno em {data_alvo}.")
                 else:
                     try:
