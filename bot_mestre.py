@@ -2180,40 +2180,6 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     else:
         display_vitrine = f"    {icone_vitrine} {nome_vitrine} (<code>{chave_vitrine}</code>)"
 
-    # --- 3. Tópicos de Rotina ---
-    topicos_rotina = config.get("topicos_rotina", [])
-    nomes_rotinas_salvos = config.get("nomes_topicos_rotina", {})
-
-    def resolver_nome_topico(numero_topico):
-        t_str = str(numero_topico)
-        for chave in (f"{grupo_id_str}_{t_str}", f"{grupo_id_str}:{t_str}"):
-            if cache_nomes.get(chave):
-                return cache_nomes[chave], "✅"
-
-        nome = nomes_rotinas_salvos.get(t_str)
-        if nome:
-            return nome, "✅"
-
-        if topico_vitrine_str and t_str == topico_vitrine_str:
-            return nome_vitrine, icone_vitrine
-        if topico_escuta_str and t_str == topico_escuta_str:
-            return nome_escuta, icone_escuta
-
-        if t_str == "1":
-            return "Geral", "✅"
-
-        return f"Tópico {t_str}", "⏳"
-
-    if topicos_rotina:
-        lista_exibicao = []
-        for t in topicos_rotina:
-            id_completo_topico = f"{grupo_id_str}_{t}"
-            nome_t, icone_t = resolver_nome_topico(t)
-            lista_exibicao.append(f"    {icone_t} {nome_t} (<code>{id_completo_topico}</code>)")
-        display_rotinas = "\n" + "\n".join(lista_exibicao)
-    else:
-        display_rotinas = "\n    ✅ <i>Chat Geral (Padrão)</i>"
-
     # --- INFORMAÇÕES DO ROBÔ REPOSTADOR ---
     repost_status = "🔴 PAUSADO" if config.get("repost_pausado") else "🟢 ATIVADO"
     dias = config.get("repost_dias", 15)
@@ -2244,8 +2210,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         "e postará automaticamente os vídeos aprovados no Tópico Vitrine.\n\n"
         f"⚙️ <b>Status Robô Moderador:</b> {status}\n"
         f"📥 <b>Escutando:</b>\n{display_escuta}\n"
-        f"📤 <b>Postando:</b>\n{display_vitrine}\n"
-        f"📢 <b>Alvos das Rotinas:</b>{display_rotinas}\n\n"
+        f"📤 <b>Postando:</b>\n{display_vitrine}\n\n"
         f"♻️ <b>Status Robô Repostador:</b> {repost_status}\n"
         f"📥 <b>Escutando:</b>\n{display_repost_origem}\n"
         f"📤 <b>Postando:</b>\n{display_repost_destino}\n"
@@ -9966,7 +9931,64 @@ async def processar_toggle_submissoes(message: types.Message, state: FSMContext)
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Rotinas do Grupo Público ⏰")
 async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
     dados = ler_config_rotina()
+    
+    # --- LÓGICA DE EXIBIÇÃO DOS TÓPICOS DE ROTINA ---
+    config_sub = ler_submissao_config()
+    grupo_id = config_sub.get("grupo_id")
+    grupo_id_str = str(grupo_id) if grupo_id else ""
+    
+    topico_escuta = config_sub.get("topico_envio")
+    topico_escuta_str = str(topico_escuta) if topico_escuta else ""
+    chave_escuta = f"{grupo_id_str}_{topico_escuta_str}"
+    
+    topico_vitrine = config_sub.get("topico_destino")
+    topico_vitrine_str = str(topico_vitrine) if topico_vitrine else ""
+    chave_vitrine = f"{grupo_id_str}_{topico_vitrine_str}"
+    
+    cache_nomes = ler_cache_nomes_grupos()
+    
+    nome_escuta = cache_nomes.get(chave_escuta) or config_sub.get("nome_topico_envio") or "Tópico de Escuta"
+    icone_escuta = "✅" if chave_escuta in cache_nomes else "⏳"
+    
+    nome_vitrine = cache_nomes.get(chave_vitrine) or config_sub.get("nome_topico_destino") or "Tópico Vitrine"
+    icone_vitrine = "✅" if chave_vitrine in cache_nomes else "⏳"
+
+    topicos_rotina = config_sub.get("topicos_rotina", [])
+    nomes_rotinas_salvos = config_sub.get("nomes_topicos_rotina", {})
+
+    def resolver_nome_topico(numero_topico):
+        t_str = str(numero_topico)
+        for chave in (f"{grupo_id_str}_{t_str}", f"{grupo_id_str}:{t_str}"):
+            if cache_nomes.get(chave):
+                return cache_nomes[chave], "✅"
+
+        nome = nomes_rotinas_salvos.get(t_str)
+        if nome:
+            return nome, "✅"
+
+        if topico_vitrine_str and t_str == topico_vitrine_str:
+            return nome_vitrine, icone_vitrine
+        if topico_escuta_str and t_str == topico_escuta_str:
+            return nome_escuta, icone_escuta
+
+        if t_str == "1":
+            return "Geral", "✅"
+
+        return f"Tópico {t_str}", "⏳"
+
+    if topicos_rotina:
+        lista_exibicao = []
+        for t in topicos_rotina:
+            id_completo_topico = f"{grupo_id_str}_{t}"
+            nome_t, icone_t = resolver_nome_topico(t)
+            lista_exibicao.append(f"   {icone_t} {nome_t} (<code>{id_completo_topico}</code>)")
+        display_rotinas = "\n" + "\n".join(lista_exibicao)
+    else:
+        display_rotinas = "\n   ✅ <i>Chat Geral (Padrão)</i>"
+
+    # --- MONTAGEM DO TEXTO ---
     texto = "⏰ <b>Rotinas do Grupo Público</b>\n\n"
+    texto += f"📢 <b>Alvos das Rotinas:</b>{display_rotinas}\n\n"
     
     config_pub = dados.get("link_grupo_publico", {"inicio": 9, "fim": 21, "frequencia": 2})
     config_princ = dados.get("promo_principal_publico", {"inicio": 10, "fim": 20, "frequencia": 1})
