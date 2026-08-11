@@ -104,11 +104,26 @@ def inicializar_banco_sqlite():
         )
     ''')
     
-    # 🚀 Migração invisível: Colunas do Robô Repostador no Público
+    # 🚀 Migração invisível 1: Adiciona a coluna 'tipo' se ela não existir
+    try:
+        cursor.execute("ALTER TABLE financeiro_despesas ADD COLUMN tipo TEXT DEFAULT 'mensal'")
+        if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'tipo' adicionada à tabela de despesas.")
+    except sqlite3.OperationalError:
+        pass
+
+    # 🚀 Migração invisível 2: Colunas do Robô Repostador no Público
     try:
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN repostado_publico INTEGER DEFAULT 0")
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_repost_publico TEXT")
         if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Colunas de Repostagem Pública adicionadas à fila_autorais.")
+    except sqlite3.OperationalError:
+        pass
+        
+    # 🚀 Migração invisível 3: Atualiza a tabela de Logs para suportar o Utils Avançado
+    try:
+        cursor.execute("ALTER TABLE erros_logs ADD COLUMN rastro_codigo TEXT")
+        cursor.execute("ALTER TABLE erros_logs ADD COLUMN contexto TEXT")
+        if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Colunas 'rastro_codigo' e 'contexto' adicionadas à tabela erros_logs.")
     except sqlite3.OperationalError:
         pass
     
