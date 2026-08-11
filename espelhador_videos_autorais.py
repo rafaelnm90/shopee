@@ -247,6 +247,30 @@ async def gerar_legenda_autoral(caminho_video):
 
 from utils import salvar_nome_grupo # Adicione isso caso não esteja no topo do arquivo
 
+def separar_alvo_e_topico(valor):
+    """
+    Recebe "-1003673555953:1", "-1003673555953", "@canal" ou None e devolve
+    uma tupla (alvo_pronto_para_o_telethon, topico_id_ou_None).
+    Resolve o formato composto que o painel do bot_mestre grava.
+    """
+    bruto = str(valor or "").strip()
+    if not bruto or bruto in ["Não definida", "Não definido", "None"]:
+        return None, None
+
+    base = bruto
+    topico = None
+
+    if ":" in bruto:
+        partes = bruto.split(":")
+        base = partes[0].strip()
+        if len(partes) > 1 and partes[1].strip().isdigit():
+            topico = int(partes[1].strip())
+
+    if base.lstrip('-').isdigit():
+        return int(base), topico
+
+    return base, topico
+
 @client.on(events.NewMessage())
 async def interceptar_e_espelhar(event):
     config_atual = carregar_config_autorais()
@@ -262,30 +286,42 @@ async def interceptar_e_espelhar(event):
         salvar_nome_grupo(str(chat.id), chat.title)
     # ------------------------------
     
-    origem_configurada = config_atual.get('origem')
+    origem_configurada, topico_embutido = separar_alvo_e_topico(config_atual.get('origem'))
     topico_configurado = config_atual.get('origem_topico')
-    
-    eh_origem = False  
-    
-    if isinstance(origem_configurada, int) and getattr(event, 'chat_id', None) == origem_configurada:
-        eh_origem = True
+
+    # ✅ O tópico colado no ID pelo painel tem prioridade sobre a chave separada
+    if topico_embutido is not None:
+        topico_configurado = topico_embutido
+    if isinstance(topico_configurado, str) and topico_configurado.strip().isdigit():
+        topico_configurado = int(topico_configurado.strip())
+
+    eh_origem = False
+
+    if isinstance(origem_configurada, int):
+        # ✅ Compara pelo número puro, ignorando prefixo -100 e sinal negativo
+        num_config = str(origem_configurada).replace("-100", "").lstrip("-")
+        num_evento = str(getattr(event, 'chat_id', "") or "").replace("-100", "").lstrip("-")
+        if num_config and num_config == num_evento:
+            eh_origem = True
     elif isinstance(origem_configurada, str):
         username_chat = getattr(chat, 'username', None)
-        if username_chat and f"@{username_chat}".lower() == origem_configurada.lower():
+        if username_chat and username_chat.lower() == origem_configurada.lstrip('@').lower():
             eh_origem = True
 
-    # ✅ VERIFICAÇÃO DE TÓPICO (Subcanal)
+    # ✅ VERIFICAÇÃO DE TÓPICO (Subcanal) - None significa "ler tudo"
     if eh_origem and topico_configurado is not None:
         topic_id = None
-        if event.message.reply_to:
-            topic_id = getattr(event.message.reply_to, 'forum_topic_id', getattr(event.message.reply_to, 'reply_to_msg_id', None))
-        
+        reply_info = getattr(event.message, 'reply_to', None)
+        if reply_info:
+            topic_id = getattr(reply_info, 'reply_to_top_id', None) or getattr(reply_info, 'reply_to_msg_id', None)
+
         # O Tópico "Geral" costuma ser o ID 1 ou vir nulo na API do Telegram
-        if topico_configurado == 1 and topic_id is None:
-            pass 
-        elif topic_id != topico_configurado:
+        t_evento = topic_id if topic_id else 1
+        t_config = topico_configurado if topico_configurado else 1
+
+        if t_evento != t_config:
             eh_origem = False
-            
+
     if not eh_origem:
         return
 
@@ -334,11 +370,21 @@ async def interceptar_e_espelhar(event):
                 else:
                     legenda_final = f"<b>Vídeo do Produto</b> 🛍️\n\n🔗 <b>Link do Produto:</b>\n{link_novo}"
 
+                # ✅ Destino também pode vir no formato composto "-100123:5"
+                destino_final, destino_topico = separar_alvo_e_topico(config_atual.get('destino'))
+                if destino_final is None:
+                    raise ValueError("Destino não configurado no painel de Vídeos Autorais.")
+
+                kwargs_envio = {}
+                if destino_topico and destino_topico > 1:
+                    kwargs_envio['reply_to'] = destino_topico
+
                 msg_enviada = await client.send_file(
-                    config_atual['destino'],
+                    destino_final,
                     file=caminho_video,
                     caption=legenda_final,
-                    parse_mode='html'
+                    parse_mode='html',
+                    **kwargs_envio
                 )
                 if EXIBIR_LOGS: logger.info("🚀 Vídeo publicado no canal de destino com a nova legenda autoral!")
                 
@@ -527,12 +573,14 @@ async def main():
         # ✅ Lógica de Identificação Automática Visual
         config_atual = carregar_config_autorais()
         for chave in ['origem', 'destino']:
-            alvo = config_atual.get(chave)
-            if alvo and str(alvo) not in ["Não definida", "Não definido"]:
+            alvo, _topico_ignorado = separar_alvo_e_topico(config_atual.get(chave))
+            if alvo is not None:
                 try:
                     entidade = await client.get_entity(alvo)
                     nome_alvo = getattr(entidade, 'title', getattr(entidade, 'username', str(alvo)))
+                    # ✅ Grava no cache com a chave crua E com o ID base, para o painel achar
                     salvar_nome_grupo(str(alvo), nome_alvo)
+                    salvar_nome_grupo(str(config_atual.get(chave)), nome_alvo)
                     if EXIBIR_LOGS: logger.info(f"✅ Nome da {chave} ({nome_alvo}) extraído e salvo no cache automaticamente.")
                 except Exception as err:
                     if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível auditar a {chave} na inicialização: {err}")
