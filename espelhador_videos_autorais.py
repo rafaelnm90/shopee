@@ -173,6 +173,40 @@ def salvar_fila_retorno(dados):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar fila_autorais no SQLite: {e}")
 
+def contar_ofertas_dia(data_alvo, incrementar=True):
+    """
+    🎲 Contador do Sorteio (Amostragem de Reservatório)
+    Guarda quantos vídeos a origem já ofereceu para aquela data_alvo.
+    É esse número que garante a chance justa de (limite/total) para cada vídeo do dia.
+    """
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS contador_autorais (
+                data_alvo TEXT PRIMARY KEY,
+                total INTEGER DEFAULT 0
+            )
+        ''')
+
+        if incrementar:
+            cursor.execute("UPDATE contador_autorais SET total = total + 1 WHERE data_alvo = ?", (data_alvo,))
+            if cursor.rowcount == 0:
+                cursor.execute("INSERT INTO contador_autorais (data_alvo, total) VALUES (?, 1)", (data_alvo,))
+
+            # Faxina: contadores de datas já vencidas não servem mais para nada
+            limite_faxina = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
+            cursor.execute("DELETE FROM contador_autorais WHERE data_alvo < ?", (limite_faxina,))
+            conexao.commit()
+
+        cursor.execute("SELECT total FROM contador_autorais WHERE data_alvo = ?", (data_alvo,))
+        linha = cursor.fetchone()
+        conexao.close()
+        return linha[0] if linha else 0
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro no contador de sorteio: {e}")
+        return 0
+
 async def verificar_e_otimizar_video(caminho_video):
     """
     Inspeciona a resolução física do arquivo.
@@ -396,13 +430,36 @@ async def interceptar_e_espelhar(event):
                 data_alvo = (agora + timedelta(days=dias_retorno)).strftime("%Y-%m-%d")
                 
                 fila_dados = ler_fila_retorno()
-                videos_no_dia = len([v for v in fila_dados.get("fila", []) if v.get("data_alvo") == data_alvo and not v.get("processado")])
-                
-                if videos_no_dia < limite_videos:
+                # 🎲 SORTEIO JUSTO (Amostragem de Reservatório)
+                # Todo vídeo do dia tem a mesma chance de ser escolhido, e não só os primeiros.
+                total_ofertas = contar_ofertas_dia(data_alvo)
+                candidatos = [v for v in fila_dados.get("fila", []) if v.get("data_alvo") == data_alvo and not v.get("processado")]
+
+                foi_sorteado = False
+                item_descartado = None
+
+                if len(candidatos) < limite_videos:
+                    # Ainda há vaga aberta: entra direto para começar a encher o reservatório
+                    foi_sorteado = True
+                elif total_ofertas > 0 and random.random() < (limite_videos / total_ofertas):
+                    # Reservatório cheio: este vídeo compra a vaga de um sorteado anterior
+                    foi_sorteado = True
+                    item_descartado = random.choice(candidatos)
+
+                if foi_sorteado:
                     novo_caminho = f"archive/{os.path.basename(caminho_video)}"
                     os.rename(caminho_video, novo_caminho)
                     
                     id_unico = f"autoral_{int(agora.timestamp())}_{random.randint(1000, 9999)}"
+
+                    if item_descartado:
+                        # Devolve a vaga: apaga o arquivo do antigo e tira ele da fila
+                        caminho_antigo = item_descartado.get("caminho_arquivo")
+                        if caminho_antigo and os.path.exists(caminho_antigo):
+                            try: os.remove(caminho_antigo)
+                            except Exception: pass
+                        fila_dados["fila"] = [v for v in fila_dados.get("fila", []) if v.get("id_unico") != item_descartado.get("id_unico")]
+                        if EXIBIR_LOGS: logger.info(f"🔄 [Sorteio] Vídeo nº {total_ofertas} do dia tomou a vaga de {item_descartado.get('id_unico')}.")
                     
                     fila_dados.setdefault("fila", []).append({
                         "id_unico": id_unico,
@@ -415,11 +472,12 @@ async def interceptar_e_espelhar(event):
                         "processado": False
                     })
                     salvar_fila_retorno(fila_dados)
-                    if EXIBIR_LOGS: logger.info(f"📅 Vídeo arquivado em 'archive/' para retorno no dia {data_alvo}.")
+salvar_fila_retorno(fila_dados)
+                    if EXIBIR_LOGS: logger.info(f"🎯 [Sorteio] Vídeo nº {total_ofertas} do dia SORTEADO para retorno em {data_alvo}.")
                 else:
                     try:
                         os.remove(caminho_video)
-                        if EXIBIR_LOGS: logger.info(f"⏭️ A cota para {data_alvo} já está cheia. Vídeo removido do disco.")
+                        if EXIBIR_LOGS: logger.info(f"🎲 [Sorteio] Vídeo nº {total_ofertas} do dia não sorteado (chance era {limite_videos}/{total_ofertas}). Removido do disco.")
                     except Exception:
                         pass
 
@@ -496,12 +554,12 @@ async def processar_fila_autorais_loop():
                 fila = fila_dados.get("fila", [])
                     
             if itens_desagendados:
-                # Regras fixas de negócio para os Autorais
+                # ⏰ Janela lida do painel (Regras de Repostagem > Janela de Horário)
                 config_fila = {
-                    "inicio": 10,
-                    "fim": 20,
+                    "inicio": int(config_atual.get("inicio", 10)),
+                    "fim": int(config_atual.get("fim", 20)),
                     "modo": "aleatorio", # Vídeos de retorno misturam-se naturalmente
-                    "intervalo_dias": 0  # 0 pois a data_alvo já confere o atraso de meses
+                    "intervalo_dias": 1  # 1 = usa o ramo diluído (a data_alvo já cuidou do atraso)
                 }
                 
                 if EXIBIR_LOGS: logger.info(f"⚙️ [Motor Autorais] Acionando Motor Central para {len(itens_desagendados)} vídeos de retorno...")
