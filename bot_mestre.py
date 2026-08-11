@@ -2203,14 +2203,23 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     # Destino do Repostador (É sempre o Tópico Vitrine)
     display_repost_destino = display_vitrine
 
+    # --- STATUS DAS ROTINAS DO PÚBLICO ---
+    dados_rotina = ler_config_rotina()
+    status_rotinas = "🔴 PAUSADAS" if dados_rotina.get("pausado_publico") else "🟢 ATIVAS"
+
     texto = (
         "📬 <b>Painel do Grupo Público</b>\n\n"
         "O robô atuará como moderador dentro do seu Supergrupo.\n"
         "Ele escutará os envios no Tópico de Conversa, analisará com a IA "
         "e postará automaticamente os vídeos aprovados no Tópico Vitrine.\n\n"
+        
         f"⚙️ <b>Status Robô Moderador:</b> {status}\n"
         f"📥 <b>Escutando:</b>\n{display_escuta}\n"
         f"📤 <b>Postando:</b>\n{display_vitrine}\n\n"
+        
+        f"⏰ <b>Status Rotinas do Grupo:</b> {status_rotinas}\n"
+        f"📢 <b>Postando nos Alvos:</b>{display_rotinas}\n\n"
+        
         f"♻️ <b>Status Robô Repostador:</b> {repost_status}\n"
         f"📥 <b>Escutando:</b>\n{display_repost_origem}\n"
         f"📤 <b>Postando:</b>\n{display_repost_destino}\n"
