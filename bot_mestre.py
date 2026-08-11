@@ -1699,6 +1699,8 @@ async def disparar_mensagem(tipo, forcar=False):
             msg_enviada = await bot.send_message(chat_destino, texto, message_thread_id=thread_id)
             registrar_lixeira(msg_enviada.message_id, chat_destino)
             
+            await asyncio.sleep(0.5) # Pausa para o Telegram não bloquear o link subsequente
+            
             # 🔗 ANEXADORES DE LINKS ISOLADOS
             if tipo == "link_grupo":
                 msg_link = await bot.send_message(chat_destino, f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}", parse_mode="HTML", message_thread_id=thread_id)
@@ -1722,7 +1724,7 @@ async def disparar_mensagem(tipo, forcar=False):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar rotina {tipo} para thread {thread_id}: {e}")
             
-        await asyncio.sleep(1) # Intervalo de segurança (anti-ban) entre múltiplos tópicos
+        await asyncio.sleep(4.5) # ✅ CORREÇÃO: Pausa LONGA de segurança para não tomar ban por flood no grupo!
 
 def ler_config_rotina():
     if EXIBIR_LOGS: logger.info("🚀 Iniciando leitura e validação das configurações de rotina...")
@@ -9889,23 +9891,43 @@ async def confirmar_salvamento_grupo(message: types.Message, state: FSMContext):
     if campo == "escuta":
         config["grupo_id"] = data.get("novo_grupo_id")
         config["topico_envio"] = data.get("novo_topico_id")
-        config["nome_topico_envio"] = "⏳ Sincronizando..."
+        
+        # O Userbot cuidará do nome do tópico, mas aqui colocaremos o ID para caso de demora
+        t_id = data.get("novo_topico_id")
+        if str(t_id) == "0":
+            config["nome_topico_envio"] = "Tópico Geral"
+        else:
+            config["nome_topico_envio"] = f"Tópico {t_id}"
+
     elif campo == "vitrine":
         config["grupo_id"] = data.get("novo_grupo_id")
         config["topico_destino"] = data.get("novo_topico_id")
-        config["nome_topico_destino"] = "⏳ Sincronizando..."
+        
+        t_id = data.get("novo_topico_id")
+        if str(t_id) == "0":
+            config["nome_topico_destino"] = "Tópico Geral"
+        else:
+            config["nome_topico_destino"] = f"Tópico {t_id}"
+
     elif campo == "rotina":
         topicos = data.get("novos_topicos_rotina")
         config["topicos_rotina"] = topicos
-        # ✅ NOVO: Cria o dicionário de sincronização no banco de dados para o Userbot!
-        config["nomes_topicos_rotina"] = {str(t): "⏳ Sincronizando..." for t in topicos}
+        
+        # Cria a base com o nome "Tópico X" e o Userbot depois substitui com o nome real
+        nomes_base = {}
+        for t in topicos:
+            if str(t) == "0":
+                nomes_base[str(t)] = "Tópico Geral"
+            else:
+                nomes_base[str(t)] = f"Tópico {t}"
+                
+        config["nomes_topicos_rotina"] = nomes_base
         
     salvar_submissao_config(config)
     
     if EXIBIR_LOGS: logger.info(f"✅ Painel Público: Configuração '{campo}' atualizada com sucesso.")
     await message.answer("✅ <b>Configuração atualizada com sucesso!</b>", parse_mode="HTML")
     
-    # Volta para o painel principal do público para ver as mudanças refletidas
     await painel_submissoes(message, state)
 
 # ==========================================
