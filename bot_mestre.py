@@ -1690,17 +1690,6 @@ async def disparar_mensagem(tipo, forcar=False):
         config_sub = ler_submissao_config()
         topicos_rotina = config_sub.get("topicos_rotina", [])
         if topicos_rotina:
-            for t in topicos_rotina: destinos.append(int(t))
-        else: destinos.append(None)
-    else:
-        destinos.append(None)
-
-    # Configura os tópicos
-    destinos = []
-    if is_publico:
-        config_sub = ler_submissao_config()
-        topicos_rotina = config_sub.get("topicos_rotina", [])
-        if topicos_rotina:
             # Transforma os IDs em inteiros e inclui os tópicos de escuta/vitrine se necessário
             for t in topicos_rotina:
                 try: destinos.append(int(t))
@@ -1710,10 +1699,20 @@ async def disparar_mensagem(tipo, forcar=False):
     else:
         destinos.append(None)
 
+    # ✅ Segurança: se a lista ficou vazia (ex: todos os IDs inválidos),
+    # cai para o Geral em vez de não enviar nada.
+    if not destinos:
+        destinos.append(None)
+
     for thread_id in destinos:
         try:
-            # ✅ CORREÇÃO: Converte o ID rigorosamente para número inteiro
+            # ✅ CORREÇÃO: Converte o ID rigorosamente para número inteiro.
+            # O tópico 1 é o "Geral" do fórum e a Bot API do Telegram REJEITA
+            # message_thread_id=1 ("message thread not found"). Para postar no
+            # Geral é obrigatório OMITIR o parâmetro, ou seja, enviar None.
             thread_param = int(thread_id) if thread_id is not None else None
+            if thread_param == 1:
+                thread_param = None
             
             if EXIBIR_LOGS: logger.info(f"📤 Disparando {tipo} para Thread: {thread_param if thread_param else 'Geral'}")
             msg_enviada = await bot.send_message(chat_destino, texto, message_thread_id=thread_param)
