@@ -2163,14 +2163,16 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     nome_t_destino = config.get("nome_topico_destino", "Tópico Vitrine")
     display_vitrine = f"🌟 {nome_t_destino} (<code>{grupo_id_str}_{topico_vitrine_str}</code>)" if topico_vitrine_str else "<i>Não definido</i>"
 
-    # 4. ✅ NOVO: Resgata os Tópicos de Rotina COM NOMES
+    # 4. ✅ NOVO: Resgata os Tópicos de Rotina COM NOMES E IDS COMPLETOS
     topicos_rotina = config.get("topicos_rotina", [])
     nomes_topicos_rotina = config.get("nomes_topicos_rotina", {})
     if topicos_rotina:
         lista_exibicao = []
         for t in topicos_rotina:
             nome_t = nomes_topicos_rotina.get(str(t), f"Tópico {t}")
-            lista_exibicao.append(f"{nome_t} (<code>{t}</code>)")
+            # Formata o ID do tópico anexado ao ID do grupo
+            id_completo_topico = f"{grupo_id_str}_{t}"
+            lista_exibicao.append(f"{nome_t} (<code>{id_completo_topico}</code>)")
         display_rotinas = ", ".join(lista_exibicao)
     else:
         display_rotinas = "<i>Chat Geral (Padrão)</i>"
