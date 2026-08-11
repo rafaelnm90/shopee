@@ -301,6 +301,68 @@ def extrair_link_shopee(event):
                     return entity.url
     return None
 
+async def monitorar_topicos_submissao():
+    """Varredura em background que resgata o nome real dos tópicos para o Bot Mestre"""
+    if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento para auto-preenchimento de tópicos de submissão...")
+    while True:
+        try:
+            config = ler_config_bd_espiao("submissao_config", padrao={})
+            grupo_id = config.get("grupo_id")
+            
+            if grupo_id:
+                alterou = False
+                
+                # Sincroniza Escuta e Vitrine
+                for chave_id, chave_nome in [("topico_envio", "nome_topico_envio"), ("topico_destino", "nome_topico_destino")]:
+                    t_id = config.get(chave_id)
+                    n_atual = config.get(chave_nome)
+                    
+                    if n_atual == "⏳ Sincronizando..." and t_id is not None:
+                        if str(t_id) == "0":
+                            config[chave_nome] = "Tópico Geral"
+                            alterou = True
+                        else:
+                            try:
+                                msg = await client.get_messages(int(grupo_id), ids=int(t_id))
+                                if msg and hasattr(msg, 'action') and hasattr(msg.action, 'title'):
+                                    config[chave_nome] = msg.action.title
+                                else:
+                                    config[chave_nome] = f"Tópico {t_id}"
+                                alterou = True
+                            except Exception:
+                                config[chave_nome] = f"Tópico {t_id}"
+                                alterou = True
+                
+                # ✅ NOVO: Sincroniza os Tópicos Múltiplos de Rotina
+                topicos_rotina = config.get("topicos_rotina", [])
+                nomes_rotina = config.get("nomes_topicos_rotina", {})
+                
+                for t_id in topicos_rotina:
+                    n_atual = nomes_rotina.get(str(t_id))
+                    if n_atual == "⏳ Sincronizando...":
+                        try:
+                            msg = await client.get_messages(int(grupo_id), ids=int(t_id))
+                            if msg and hasattr(msg, 'action') and hasattr(msg.action, 'title'):
+                                nomes_rotina[str(t_id)] = msg.action.title
+                            else:
+                                nomes_rotina[str(t_id)] = f"Tópico {t_id}"
+                            alterou = True
+                        except Exception:
+                            nomes_rotina[str(t_id)] = f"Tópico {t_id}"
+                            alterou = True
+                            
+                if alterou:
+                    config["nomes_topicos_rotina"] = nomes_rotina
+                    salvar_config_bd_espiao("submissao_config", config)
+                    if EXIBIR_LOGS: logger.info("✅ [Integração] Nomes dos tópicos atualizados com sucesso no banco de dados.")
+                    
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"⚠️ Erro na thread de monitoramento de submissão: {e}")
+            
+        await asyncio.sleep(15)
+
+async def main():
+
 @client.on(events.NewMessage)
 async def interceptar_mensagem(event):
     alvos = carregar_alvos()
