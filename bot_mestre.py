@@ -2158,15 +2158,17 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     # 2. Tópico de Escuta com Nome do Cache
     topico_escuta_str = str(topico_escuta) if topico_escuta else ""
     # Pega o nome customizado salvo ou usa o nome do grupo base como referência
-    nome_escuta = (config.get("nome_topico_envio")
-                   or cache_nomes.get(f"{grupo_id_str}_{topico_escuta_str}")
+    # ✅ O nome REAL vindo do cache (sincronizado pelo Userbot) tem prioridade
+    # sobre o valor gravado em config, que não acompanha renomeações no Telegram.
+    nome_escuta = (cache_nomes.get(f"{grupo_id_str}_{topico_escuta_str}")
+                   or config.get("nome_topico_envio")
                    or "Tópico de Escuta")
     display_escuta = f"{nome_escuta} (<code>{grupo_id_str}_{topico_escuta_str}</code>)" if topico_escuta_str else "<i>Não definido</i>"
 
     # 3. Tópico Vitrine com Nome do Cache
     topico_vitrine_str = str(topico_vitrine) if topico_vitrine else ""
-    nome_vitrine = (config.get("nome_topico_destino")
-                    or cache_nomes.get(f"{grupo_id_str}_{topico_vitrine_str}")
+    nome_vitrine = (cache_nomes.get(f"{grupo_id_str}_{topico_vitrine_str}")
+                    or config.get("nome_topico_destino")
                     or "Tópico Vitrine")
     display_vitrine = f"{nome_vitrine} (<code>{grupo_id_str}_{topico_vitrine_str}</code>)" if topico_vitrine_str else "<i>Não definido</i>"
 
@@ -2180,6 +2182,10 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         (vitrine/escuta) -> cache pela chave composta -> Geral -> fallback."""
         t_str = str(numero_topico)
 
+        for chave in (f"{grupo_id_str}_{t_str}", f"{grupo_id_str}:{t_str}"):
+            if cache_nomes.get(chave):
+                return cache_nomes[chave]
+
         nome = nomes_rotinas_salvos.get(t_str)
         if nome:
             return nome
@@ -2188,10 +2194,6 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
             return nome_vitrine
         if topico_escuta_str and t_str == topico_escuta_str:
             return nome_escuta
-
-        for chave in (f"{grupo_id_str}_{t_str}", f"{grupo_id_str}:{t_str}"):
-            if chave in cache_nomes:
-                return cache_nomes[chave]
 
         # No Telegram, o tópico 1 é sempre o chat "Geral" do fórum
         if t_str == "1":
