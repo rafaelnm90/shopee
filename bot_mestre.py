@@ -259,6 +259,7 @@ class SubmissaoAdminFluxo(StatesGroup):
     aguardando_confirmacao_repost_limite = State()
     aguardando_confirmacao_pausa_repost = State()
     aguardando_repost_origem = State()
+    aguardando_repost_destino = State() # ✅ NOVO ESTADO AQUI
     
     # ✅ NOVOS ESTADOS: Edição Modular do Grupo e Tópicos
     aguardando_selecao_edicao_grupo = State()
@@ -2200,8 +2201,15 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         icone_rep_orig = "✅" if dest_aut_base in cache_nomes else "⏳"
         display_repost_origem = f"    {icone_rep_orig} {nome_aut} (<code>{str(dest_aut).replace(':', '_')}</code>) [Padrão]"
 
-    # Destino do Repostador (É sempre o Tópico Vitrine)
-    display_repost_destino = display_vitrine
+    # Destino do Repostador (Flexível)
+    repost_destino = config.get("repost_destino")
+    if repost_destino:
+        repost_dest_base = str(repost_destino).split(":")[0].strip()
+        nome_repost_dest = cache_nomes.get(repost_dest_base, str(repost_dest_base))
+        icone_rep_dest = "✅" if repost_dest_base in cache_nomes else "⏳"
+        display_repost_destino = f"    {icone_rep_dest} {nome_repost_dest} (<code>{str(repost_destino).replace(':', '_')}</code>)"
+    else:
+        display_repost_destino = f"{display_vitrine} [Padrão]"
 
     # --- STATUS DAS ROTINAS DO PÚBLICO ---
     dados_rotina = ler_config_rotina()
@@ -2252,7 +2260,7 @@ async def submenu_regras_repost_publico(message: types.Message, state: FSMContex
     if EXIBIR_LOGS: logger.info("♻️ Acessando submenu de Regras de Repostagem do Grupo Público...")
     teclado = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Editar Escutando (Público) 📥")],
+            [KeyboardButton(text="Editar Escutando (Público) 📥"), KeyboardButton(text="Editar Postando (Público) 📤")],
             [KeyboardButton(text="Editar Dias (Público) ⏳"), KeyboardButton(text="Editar Limite (Público) 📦")],
             [KeyboardButton(text="Voltar ao Painel Público 🔙")]
         ],
@@ -2261,6 +2269,52 @@ async def submenu_regras_repost_publico(message: types.Message, state: FSMContex
     )
     await message.answer("♻️ <b>Regras de Repostagem (Grupo Público)</b>\nEscolha o que deseja editar:", reply_markup=teclado, parse_mode="HTML")
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
+
+# ✅ NOVO: Handlers para Editar o Destino do Repost Público
+@dp.message(F.text == "Editar Postando (Público) 📤", StateFilter("*"))
+async def pedir_destino_repost_publico(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await message.answer(
+        "Envie o <b>ID Numérico, @username ou Link do Telegram Web</b> do canal/tópico de DESTINO para onde o robô vai enviar as repostagens:\n"
+        "<i>(Se você não definir, ele continuará postando no Tópico Vitrine por padrão)</i>", 
+        parse_mode="HTML", 
+        reply_markup=teclado_cancelar
+    )
+    await state.set_state(SubmissaoAdminFluxo.aguardando_repost_destino)
+
+@dp.message(SubmissaoAdminFluxo.aguardando_repost_destino)
+async def salvar_destino_repost_publico(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await message.answer("Operação cancelada.")
+        await submenu_regras_repost_publico(message, state)
+        return
+        
+    novo_valor = message.text.strip()
+    msg_status = await message.answer("⏳ <b>Validando canal de destino...</b>", parse_mode="HTML")
+    
+    sucesso, id_final, nome_chat = await validar_e_formatar_alvo(bot, novo_valor)
+    await msg_status.delete()
+
+    if sucesso:
+        await message.answer(f"✅ Destino validado e encontrado: <b>{nome_chat}</b>", parse_mode="HTML")
+        salvar_nome_grupo(str(id_final).split(":")[0], nome_chat)
+    else:
+        import re
+        id_final = novo_valor
+        if "t.me/c/" in novo_valor:
+            so_num = re.search(r't\.me/c/(\d+)', novo_valor)
+            if so_num: id_final = f"-100{so_num.group(1)}"
+        elif "web.telegram.org" in novo_valor:
+             so_num = re.search(r'-(\d+)', novo_valor)
+             if so_num: id_final = f"-100{so_num.group(1)}"
+        await message.answer("⚠️ <b>Aviso:</b> O bot não conseguiu encontrar este canal na base de dados. O ID será salvo mesmo assim.", parse_mode="HTML")
+
+    config = ler_submissao_config()
+    config["repost_destino"] = id_final
+    salvar_submissao_config(config)
+    
+    await message.answer(f"✅ <b>Destino do Repost atualizado com sucesso!</b>\nOs vídeos serão postados em: <code>{id_final}</code>", parse_mode="HTML")
+    await submenu_regras_repost_publico(message, state)
 
 # ✅ NOVO: Handlers para Editar a Origem do Repost Público
 @dp.message(F.text == "Editar Escutando (Público) 📥", StateFilter("*"))
@@ -2465,9 +2519,23 @@ async def motor_repost_publico_step():
         if not config.get("ativo") or config.get("repost_pausado", False):
             return
             
-        grupo_id = config.get("grupo_id")
-        topico_destino = config.get("topico_destino")
-        if not grupo_id or not topico_destino:
+        # ✅ Puxa a flexibilidade de roteamento
+        grupo_id_base = config.get("grupo_id")
+        topico_destino_base = config.get("topico_destino")
+        repost_destino = config.get("repost_destino")
+        
+        if repost_destino:
+            if ":" in str(repost_destino):
+                grupo_id = str(repost_destino).split(":")[0]
+                topico_destino = int(str(repost_destino).split(":")[1])
+            else:
+                grupo_id = str(repost_destino)
+                topico_destino = None
+        else:
+            grupo_id = grupo_id_base
+            topico_destino = topico_destino_base
+            
+        if not grupo_id:
             return
 
         limite_diario = config.get("repost_limite", 6)
@@ -5059,11 +5127,25 @@ async def manual_repost_autoral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     
     config_pub = ler_submissao_config()
-    chat_destino = config_pub.get("grupo_id")
-    topico_vitrine = config_pub.get("topico_destino")
     
-    if not config_pub.get("ativo") or not chat_destino or not topico_vitrine:
-        await message.answer("⚠️ <b>Ação Bloqueada:</b> O Painel do Grupo Público está desativado ou não configurado.", parse_mode="HTML")
+    # ✅ Puxa a flexibilidade de roteamento
+    grupo_id_base = config_pub.get("grupo_id")
+    topico_destino_base = config_pub.get("topico_destino")
+    repost_destino = config_pub.get("repost_destino")
+    
+    if repost_destino:
+        if ":" in str(repost_destino):
+            chat_destino = str(repost_destino).split(":")[0]
+            topico_vitrine = int(str(repost_destino).split(":")[1])
+        else:
+            chat_destino = str(repost_destino)
+            topico_vitrine = None
+    else:
+        chat_destino = grupo_id_base
+        topico_vitrine = topico_destino_base
+    
+    if not config_pub.get("ativo") or not chat_destino:
+        await message.answer("⚠️ <b>Ação Bloqueada:</b> O Painel do Grupo Público está desativado ou não possui um destino configurado.", parse_mode="HTML")
         return
         
     msg_status = await message.answer("♻️ Extraindo um vídeo legível do Canal Autoral...", parse_mode="HTML")
@@ -5114,22 +5196,25 @@ async def manual_repost_autoral(message: types.Message):
     )
     
     try:
-        # ✅ NOVO: Tenta usar a origem personalizada. Se não tiver, usa a dos Autorais.
-        canal_autorais = config_pub.get("repost_origem")
-        if not canal_autorais:
-            config_aut = ler_config_bd("autorais_config", {})
-            canal_autorais = config_aut.get("destino")
-        
-        await bot.copy_message(
-            chat_id=chat_destino,
-            from_chat_id=canal_autorais,
-            message_id=int(file_id),
-            caption=legenda_final,
-            parse_mode="HTML",
-            message_thread_id=int(topico_vitrine)
-        )
-        
-        # Marca como repostado para garantir a integridade da fila autônoma
+            # ✅ NOVO: Tenta usar a origem personalizada. Se não tiver, usa a dos Autorais.
+            canal_autorais = config_pub.get("repost_origem")
+            if not canal_autorais:
+                config_aut = ler_config_bd("autorais_config", {})
+                canal_autorais = config_aut.get("destino")
+            
+            kwargs = {}
+            if topico_vitrine: kwargs["message_thread_id"] = int(topico_vitrine)
+            
+            await bot.copy_message(
+                chat_id=chat_destino,
+                from_chat_id=canal_autorais,
+                message_id=int(file_id),
+                caption=legenda_final,
+                parse_mode="HTML",
+                **kwargs
+            )
+            
+            # Marca como repostado para garantir a integridade da fila autônoma
         agora_str = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute("UPDATE fila_autorais SET repostado_publico = 1, data_repost_publico = ? WHERE id_unico = ?", (agora_str, id_unico))
         conexao.commit()
