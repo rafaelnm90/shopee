@@ -91,7 +91,9 @@ def inicializar_banco():
             data_captura TEXT,
             data_alvo TEXT,
             horario_disparo TEXT,
-            processado INTEGER DEFAULT 0
+            processado INTEGER DEFAULT 0,
+            repostado_publico INTEGER DEFAULT 0,
+            data_repost_publico TEXT
         )
     ''')
 
