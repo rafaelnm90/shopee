@@ -2271,9 +2271,10 @@ async def voltar_painel_publico_repost(message: types.Message, state: FSMContext
     await state.clear()
     await painel_submissoes(message, state)
     
-@dp.message(F.text == "Regras de Repostagem ♻️", StateFilter("*"))
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Regras de Repostagem ♻️")
 async def submenu_regras_repost_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("♻️ Acessando submenu de Regras de Repostagem do Grupo Público...")
     teclado = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Editar Escutando (Público) 📥")],
@@ -2332,9 +2333,10 @@ async def salvar_origem_repost_publico(message: types.Message, state: FSMContext
     await message.answer(f"✅ <b>Origem do Repost atualizada com sucesso!</b>\nOs vídeos serão puxados de: <code>{id_final}</code>", parse_mode="HTML")
     await submenu_regras_repost_publico(message, state)
 
-@dp.message(F.text == "Status do Robô ⏸️", StateFilter("*"))
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Status do Robô ⏸️")
 async def submenu_status_robo_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("⏸️ Acessando submenu de Status do Robô do Grupo Público...")
     config = ler_submissao_config()
     texto_repostagem = "Retomar Repostagem ▶️" if config.get("repost_pausado") else "Pausar Repostagem ⏸️"
 
