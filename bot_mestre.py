@@ -250,17 +250,20 @@ class AchadinhosFluxo(StatesGroup):
 
 class SubmissaoAdminFluxo(StatesGroup):
     menu_principal = State()
-    aguardando_link_envio = State()
-    aguardando_link_destino = State()
-    aguardando_topicos_rotina = State() # ✅ NOVO ESTADO DE MULTI-TÓPICOS
     aguardando_confirmacao_toggle = State()
-    # ✅ Novos estados para Regras de Repostagem no Grupo Público
+    
+    # Estados para Regras de Repostagem
     aguardando_repost_dias = State()
     aguardando_repost_limite = State()
     aguardando_confirmacao_repost_dias = State()
     aguardando_confirmacao_repost_limite = State()
     aguardando_confirmacao_pausa_repost = State()
-    aguardando_repost_origem = State() # ✅ NOVO: Estado para a origem
+    aguardando_repost_origem = State()
+    
+    # ✅ NOVOS ESTADOS: Edição Modular do Grupo e Tópicos
+    aguardando_selecao_edicao_grupo = State()
+    aguardando_novo_valor_grupo = State()
+    aguardando_confirmacao_grupo = State()
 
 class SubmissaoUsuarioInterativa(StatesGroup):
     aguardando_video = State()
@@ -9752,124 +9755,149 @@ async def voltar_pub_rotinas(message: types.Message, state: FSMContext):
     await painel_submissoes(message, state)
 
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurar Grupo e Tópicos 🏷️")
-async def pedir_link_envio_submissao(message: types.Message, state: FSMContext):
-    if EXIBIR_LOGS: logger.info("⚙️ Iniciando tutorial de configuração de tópicos de submissão.")
-    texto = (
-        "💡 <b>Vamos interligar os Tópicos!</b>\n\n"
-        "Primeiro, precisamos do link do tópico de <b>ESCUTA</b> (aquele onde os membros do grupo enviam as ofertas para análise do robô. Ex: 'Poste seus Vídeos Aqui').\n\n"
-        "👉 Pelo Telegram Web ou Desktop, entre nesse tópico, copie o link que aparece na barra superior do seu navegador e envie aqui.\n\n"
-        "<i>Exemplo: https://web.telegram.org/a/#-1001234567890_5</i>"
+async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
+    if EXIBIR_LOGS: logger.info("⚙️ Acessando submenu modular de configuração de tópicos.")
+    
+    teclado = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Editar Tópico de Escuta 💬"), KeyboardButton(text="Editar Tópico Vitrine 🌟")],
+            [KeyboardButton(text="Editar Tópicos de Rotina 📢")],
+            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
+        ], resize_keyboard=True, is_persistent=True
     )
-    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar)
-    await state.set_state(SubmissaoAdminFluxo.aguardando_link_envio)
+    
+    texto = (
+        "🏷️ <b>Configuração de Grupo e Tópicos</b>\n\n"
+        "Selecione qual módulo do Grupo Público você deseja alterar:"
+    )
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
+    await state.set_state(SubmissaoAdminFluxo.aguardando_selecao_edicao_grupo)
 
-@dp.message(SubmissaoAdminFluxo.aguardando_link_envio)
-async def processar_link_envio_submissao(message: types.Message, state: FSMContext):
-    if message.text == "Cancelar ❌":
-        await cancelar_fluxo_global(message, state)
+@dp.message(SubmissaoAdminFluxo.aguardando_selecao_edicao_grupo)
+async def selecionar_campo_grupo_publico(message: types.Message, state: FSMContext):
+    if message.text == "Voltar ao Painel Público 🔙":
+        await voltar_painel_publico_repost(message, state)
+        return
+
+    opcoes = {
+        "Editar Tópico de Escuta 💬": ("escuta", "Envie o Link ou ID Numérico do tópico onde os membros enviam os vídeos (<b>Tópico de Escuta</b>):"),
+        "Editar Tópico Vitrine 🌟": ("vitrine", "Envie o Link ou ID Numérico do tópico onde o robô irá postar os vídeos aprovados (<b>Tópico Vitrine</b>):"),
+        "Editar Tópicos de Rotina 📢": ("rotina", "Envie os Links ou IDs dos tópicos onde o robô enviará os convites de rotina (separados por vírgula). Se for no chat geral, digite <b>0</b>:")
+    }
+    
+    selecao = opcoes.get(message.text)
+    if not selecao:
+        await message.answer("⚠️ Use os botões abaixo para escolher o que editar.")
         return
         
-    msg_status = await message.answer("⏳ Extraindo IDs e validando o Tópico de Envio...")
-    sucesso, id_final, nome = await validar_e_formatar_alvo(bot, message.text)
-    await msg_status.delete()
+    campo, pergunta = selecao
+    await state.update_data(campo_edicao_grupo=campo, nome_campo_visual=message.text)
     
-    if sucesso:
-        if ":" in id_final:
-            grupo_id, topico_id = id_final.split(":")
-        else:
-            grupo_id = id_final
-            topico_id = "0"
-            
-        salvar_nome_grupo(grupo_id, nome)
-        await state.update_data(novo_grupo=grupo_id, novo_topico_envio=int(topico_id))
-        
-        texto = (
-            f"✅ <b>Tópico capturado (ID: {topico_id})</b>\n\n"
-            "Agora, precisamos do link do tópico de <b>POSTAGEM</b> (o mural onde o robô vai publicar automaticamente os vídeos aprovados. Ex: 'Vídeos da Comunidade').\n\n"
-            "👉 Entre nesse tópico, copie o link do navegador da mesma forma e envie aqui:"
-        )
-        await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar)
-        await state.set_state(SubmissaoAdminFluxo.aguardando_link_destino)
-    else:
-        await message.answer("⚠️ Link não reconhecido ou bot sem permissão no grupo. Tente novamente:", reply_markup=teclado_cancelar)
+    await message.answer(pergunta, parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(SubmissaoAdminFluxo.aguardando_novo_valor_grupo)
 
-@dp.message(SubmissaoAdminFluxo.aguardando_link_destino)
-async def processar_link_destino_submissao(message: types.Message, state: FSMContext):
+@dp.message(SubmissaoAdminFluxo.aguardando_novo_valor_grupo)
+async def receber_novo_valor_grupo(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
-        await cancelar_fluxo_global(message, state)
+        await message.answer("Operação cancelada.")
+        await menu_edicao_grupo_publico(message, state)
         return
-        
-    msg_status = await message.answer("⏳ Validando o Tópico Vitrine...")
-    sucesso, id_final, nome = await validar_e_formatar_alvo(bot, message.text)
-    await msg_status.delete()
-    
-    if sucesso:
-        if ":" in id_final:
-            grupo_id_dest, topico_id_dest = id_final.split(":")
-        else:
-            grupo_id_dest = id_final
-            topico_id_dest = "0"
-            
-        data = await state.get_data()
-        grupo_id_envio = data.get("novo_grupo")
-        
-        if grupo_id_dest != grupo_id_envio:
-            await message.answer("⚠️ <b>Atenção:</b> O tópico Vitrine precisa pertencer ao MESMO grupo do tópico de Envio!\n\nPor favor, envie o link do tópico correto:", parse_mode="HTML", reply_markup=teclado_cancelar)
-            return
-            
-        await state.update_data(novo_topico_destino=int(topico_id_dest))
-        
-        texto = (
-            "✅ <b>Tópico Vitrine capturado!</b>\n\n"
-            "Por fim, em quais tópicos o robô deve disparar as <b>Mensagens de Rotina</b> (Convites e Promoções)?\n\n"
-            "👉 Envie os Links ou IDs numéricos dos tópicos separados por vírgula.\n"
-            "<i>(Ex: https://t.me/c/123/4, https://t.me/c/123/5)</i>\n\n"
-            "Se quiser que o robô envie apenas no chat geral do grupo, digite <b>0</b>."
-        )
-        await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar)
-        await state.set_state(SubmissaoAdminFluxo.aguardando_topicos_rotina)
-    else:
-        await message.answer("⚠️ Link não reconhecido. Tente novamente:", reply_markup=teclado_cancelar)
 
-@dp.message(SubmissaoAdminFluxo.aguardando_topicos_rotina)
-async def processar_topicos_rotina(message: types.Message, state: FSMContext):
-    if message.text == "Cancelar ❌":
-        await cancelar_fluxo_global(message, state)
-        return
-    
-    entradas = [t.strip() for t in message.text.split(",")]
-    topicos_finais = []
-    
-    if message.text.strip() == "0":
-        topicos_finais = []
-    else:
-        import re
-        for entrada in entradas:
-            if "t.me/" in entrada:
-                partes = entrada.split("/")
-                if len(partes) >= 5: topicos_finais.append(partes[-1])
-            elif "_" in entrada: topicos_finais.append(entrada.split("_")[-1])
-            elif ":" in entrada: topicos_finais.append(entrada.split(":")[-1])
-            elif entrada.isdigit():
-                if entrada != "0": topicos_finais.append(entrada)
-                    
     data = await state.get_data()
-    grupo_id_envio = data.get("novo_grupo")
-    topico_envio = data.get("novo_topico_envio")
-    topico_destino = data.get("novo_topico_destino")
-
-    config = ler_submissao_config()
-    config["grupo_id"] = grupo_id_envio
-    config["topico_envio"] = topico_envio
-    config["nome_topico_envio"] = "⏳ Sincronizando..."
-    config["topico_destino"] = topico_destino
-    config["nome_topico_destino"] = "⏳ Sincronizando..."
-    config["topicos_rotina"] = topicos_finais
+    campo = data.get("campo_edicao_grupo")
+    texto_usuario = message.text.strip()
     
+    msg_status = await message.answer("⏳ Validando entrada...", reply_markup=teclado_cancelar)
+
+    if campo in ["escuta", "vitrine"]:
+        sucesso, id_final, nome = await validar_e_formatar_alvo(bot, texto_usuario)
+        await msg_status.delete()
+        
+        if sucesso:
+            if ":" in id_final:
+                grupo_id, topico_id = id_final.split(":")
+            else:
+                grupo_id = id_final
+                topico_id = "0"
+            
+            salvar_nome_grupo(grupo_id, nome)
+            await state.update_data(novo_grupo_id=grupo_id, novo_topico_id=int(topico_id))
+            texto_conf = f"✅ Canal/Tópico encontrado: <b>{nome}</b> (ID: <code>{topico_id}</code>)\n\nDeseja confirmar e salvar esta alteração?"
+        else:
+            import re
+            if "t.me/c/" in texto_usuario:
+                so_num = re.search(r't\.me/c/(\d+)', texto_usuario)
+                grupo_id = f"-100{so_num.group(1)}" if so_num else texto_usuario
+                topico_id = texto_usuario.split("/")[-1] if "/" in texto_usuario else "0"
+            else:
+                grupo_id = texto_usuario
+                topico_id = "0"
+                
+            await state.update_data(novo_grupo_id=grupo_id, novo_topico_id=int(topico_id))
+            texto_conf = f"⚠️ O bot não encontrou este chat na base. Os IDs extraídos foram:\nGrupo: <code>{grupo_id}</code>\nTópico: <code>{topico_id}</code>\n\nDeseja forçar o salvamento mesmo assim?"
+
+    elif campo == "rotina":
+        await msg_status.delete()
+        if texto_usuario == "0":
+            topicos_finais = []
+            texto_conf = "✅ Você definiu que as rotinas irão para o <b>Chat Geral (Padrão)</b>.\n\nDeseja confirmar esta alteração?"
+        else:
+            entradas = [t.strip() for t in texto_usuario.split(",")]
+            topicos_finais = []
+            import re
+            for entrada in entradas:
+                if "t.me/" in entrada:
+                    partes = entrada.split("/")
+                    if len(partes) >= 5: topicos_finais.append(partes[-1])
+                elif "_" in entrada: topicos_finais.append(entrada.split("_")[-1])
+                elif ":" in entrada: topicos_finais.append(entrada.split(":")[-1])
+                elif entrada.isdigit():
+                    if entrada != "0": topicos_finais.append(entrada)
+            
+            texto_conf = f"✅ Tópicos de rotina extraídos: <code>{', '.join(topicos_finais)}</code>\n\nDeseja confirmar esta alteração?"
+            
+        await state.update_data(novos_topicos_rotina=topicos_finais)
+
+    teclado_conf = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True, is_persistent=True
+    )
+    await message.answer(texto_conf, parse_mode="HTML", reply_markup=teclado_conf)
+    await state.set_state(SubmissaoAdminFluxo.aguardando_confirmacao_grupo)
+
+@dp.message(SubmissaoAdminFluxo.aguardando_confirmacao_grupo)
+async def confirmar_salvamento_grupo(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await message.answer("Operação cancelada.")
+        await menu_edicao_grupo_publico(message, state)
+        return
+        
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, clique em Aprovar ou Cancelar.")
+        return
+
+    data = await state.get_data()
+    campo = data.get("campo_edicao_grupo")
+    
+    config = ler_submissao_config()
+    
+    if campo == "escuta":
+        config["grupo_id"] = data.get("novo_grupo_id")
+        config["topico_envio"] = data.get("novo_topico_id")
+        config["nome_topico_envio"] = "⏳ Sincronizando..."
+    elif campo == "vitrine":
+        config["grupo_id"] = data.get("novo_grupo_id")
+        config["topico_destino"] = data.get("novo_topico_id")
+        config["nome_topico_destino"] = "⏳ Sincronizando..."
+    elif campo == "rotina":
+        config["topicos_rotina"] = data.get("novos_topicos_rotina")
+        
     salvar_submissao_config(config)
     
-    if EXIBIR_LOGS: logger.info("✅ Estrutura completa de submissões e rotinas salva.")
-    await message.answer("✅ <b>Perfeito!</b> Os tópicos foram interligados e as rotinas configuradas.\n\n<i>O Userbot irá extrair os nomes reais em background. O painel será atualizado em instantes!</i>", parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info(f"✅ Painel Público: Configuração '{campo}' atualizada com sucesso.")
+    await message.answer("✅ <b>Configuração atualizada com sucesso!</b>", parse_mode="HTML")
+    
+    # Volta para o painel principal do público para ver as mudanças refletidas
     await painel_submissoes(message, state)
 
 # ==========================================
