@@ -142,6 +142,13 @@ async def validar_e_formatar_alvo(bot_instance, entrada):
             if partes_web[1].isdigit(): topico_id = partes_web[1]
         else:
             chat_base = parte_web
+    elif "_" in entrada and not "http" in entrada:
+        # ✅ NOVO: aceita o formato exibido no painel ("-1003673555953_1").
+        # rsplit + checagem dupla evita quebrar @usernames com underline (@meu_canal).
+        partes = entrada.rsplit("_", 1)
+        if len(partes) == 2 and partes[1].strip().isdigit() and partes[0].strip().lstrip('-').isdigit():
+            chat_base = partes[0].strip()
+            topico_id = partes[1].strip()
     elif ":" in entrada and not "http" in entrada:
         partes = entrada.split(":")
         chat_base = partes[0]
