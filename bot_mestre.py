@@ -2116,13 +2116,40 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     config = ler_submissao_config()
     status = "🟢 ATIVADO" if config.get("ativo") else "🔴 DESATIVADO"
     
+    grupo_id = config.get("grupo_id")
+    topico_escuta = config.get("topico_envio")
+    topico_vitrine = config.get("topico_destino")
+
+    cache_nomes = ler_cache_nomes_grupos()
+
+    # 1. Resgata o nome do Grupo Principal
+    grupo_id_str = str(grupo_id) if grupo_id else ""
+    nome_grupo = cache_nomes.get(grupo_id_str, "Grupo Público")
+    display_grupo = f"👥 <b>Grupo Base:</b> {nome_grupo} (<code>{grupo_id_str}</code>)" if grupo_id_str else "<i>Grupo não definido</i>"
+
+    # 2. Resgata o nome do Tópico de Escuta (Bot Moderador)
+    topico_escuta_str = str(topico_escuta) if topico_escuta else ""
+    nome_t_envio = config.get("nome_topico_envio", "Tópico de Escuta")
+    display_escuta = f"💬 {nome_t_envio} (<code>{grupo_id_str}_{topico_escuta_str}</code>)" if topico_escuta_str else "<i>Não definido</i>"
+
+    # 3. Resgata o nome do Tópico Vitrine (Bot Moderador)
+    topico_vitrine_str = str(topico_vitrine) if topico_vitrine else ""
+    nome_t_destino = config.get("nome_topico_destino", "Tópico Vitrine")
+    display_vitrine = f"🌟 {nome_t_destino} (<code>{grupo_id_str}_{topico_vitrine_str}</code>)" if topico_vitrine_str else "<i>Não definido</i>"
+
+    # 4. Resgata os Tópicos de Rotina
+    topicos_rotina = config.get("topicos_rotina", [])
+    if topicos_rotina:
+        display_rotinas = ", ".join([f"<code>{t}</code>" for t in topicos_rotina])
+    else:
+        display_rotinas = "<i>Chat Geral (Padrão)</i>"
+
+    # --- INFORMAÇÕES DO ROBÔ REPOSTADOR ---
     repost_status = "🔴 Pausado" if config.get("repost_pausado") else "🟢 Ativo"
     dias = config.get("repost_dias", 15)
     limite = config.get("repost_limite", 6)
     
-    cache_nomes = ler_cache_nomes_grupos()
-    
-    # ✅ NOVO: Puxa o nome da origem do Repost
+    # Origem do Repostador
     repost_origem = config.get("repost_origem")
     if repost_origem:
         nome_repost_origem = cache_nomes.get(str(repost_origem), str(repost_origem))
@@ -2133,31 +2160,39 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         dest_aut = config_aut.get("destino", "Não definido")
         nome_aut = cache_nomes.get(str(dest_aut), str(dest_aut))
         display_repost_origem = f"{nome_aut} (<code>{dest_aut}</code>) [Padrão]"
-    
+
+    # Destino do Repostador (É sempre o Tópico Vitrine do Grupo Público)
+    display_repost_destino = display_vitrine
+
     texto = (
         "📬 <b>Painel do Grupo Público</b>\n\n"
-        f"O robô atuará como moderador dentro do seu Supergrupo.\n"
-        f"Ele escutará os envios no Tópico de Conversa, analisará com a IA e postará automaticamente os vídeos aprovados no Tópico Vitrine.\n\n"
+        "O robô atuará como moderador dentro do seu Supergrupo.\n"
+        "Ele escutará os envios no Tópico de Conversa, analisará com a IA "
+        "e postará automaticamente os vídeos aprovados no Tópico Vitrine.\n\n"
         f"<b>Status Atual:</b> {status}\n\n"
-        f"♻️ <b>Robô Repostador para o Público:</b> {repost_status}\n"
-        f"📥 Origem: <b>{display_repost_origem}</b>\n"
+        "⚙️ <b>Configuração Atual:</b>\n"
+        f"{display_grupo}\n"
+        f"📥 <b>Escutando:</b> {display_escuta}\n"
+        f"📤 <b>Postando:</b> {display_vitrine}\n"
+        f"📢 <b>Alvos das Rotinas:</b> {display_rotinas}\n\n"
+        f"♻️ <b>Robô Repostador Autoral:</b> {repost_status}\n"
+        f"📥 <b>Escutando:</b> {display_repost_origem}\n"
+        f"📤 <b>Postando:</b> {display_repost_destino}\n"
         f"⏳ Oculto por: <b>{dias} dias</b>\n"
         f"📦 Cota Diária: <b>{limite} vídeos/dia</b>\n\n"
-        f"Escolha a ação desejada:"
+        "Escolha a ação desejada:"
     )
     
-    teclado = ReplyKeyboardMarkup(
+    teclado_pub = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Ativar/Desativar Robô Moderador ⚙️")],
             [KeyboardButton(text="Configurar Grupo e Tópicos 🏷️")],
             [KeyboardButton(text="Rotinas do Grupo Público ⏰")],
             [KeyboardButton(text="Regras de Repostagem ♻️"), KeyboardButton(text="Status do Robô ⏸️")],
             [KeyboardButton(text="Voltar aos Canais 🔙")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
+        ], resize_keyboard=True, is_persistent=True
     )
-    await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
+    await message.answer(texto, reply_markup=teclado_pub, parse_mode="HTML")
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
 
 @dp.message(F.text == "Voltar ao Painel Público 🔙", StateFilter("*"))
