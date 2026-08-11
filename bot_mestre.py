@@ -2642,8 +2642,19 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     
     origem = config.get("origem", "Não definida")
     topico = config.get("origem_topico")
+
+    # ✅ CORREÇÃO: o ID pode ter chegado no formato composto "-100123:1".
+    # Separamos aqui para o painel não imprimir ":1:1" e para o cache achar o nome.
+    if isinstance(origem, str) and ":" in origem:
+        _partes_origem = origem.split(":")
+        origem = _partes_origem[0].strip()
+        if len(_partes_origem) > 1 and _partes_origem[1].strip().isdigit() and not topico:
+            topico = int(_partes_origem[1].strip())
+
     topico_str = f":{topico}" if topico else ""
     destino = config.get("destino", "Não definido")
+    if isinstance(destino, str) and ":" in destino:
+        destino = destino.split(":")[0].strip()
     dias_retorno = config.get("dias_retorno", 15)
     limite_videos = config.get("limite_videos", 5)
     
@@ -2907,6 +2918,10 @@ async def salvar_origem_autorais(message: types.Message, state: FSMContext):
     
     data = await state.get_data()
     nova_origem = data.get("nova_origem")
+    
+    # ✅ CORREÇÃO: validar_e_formatar_alvo devolve "ID:topico". Como o tópico é
+    # perguntado separadamente, removemos o sufixo para não duplicar (":1:1").
+    nova_origem = str(nova_origem).split(":")[0].strip()
     
     config = ler_autorais_config()
     config["origem"] = nova_origem
