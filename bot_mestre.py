@@ -2145,7 +2145,8 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         display_rotinas = "<i>Chat Geral (Padrão)</i>"
 
     # --- INFORMAÇÕES DO ROBÔ REPOSTADOR ---
-    repost_status = "🔴 Pausado" if config.get("repost_pausado") else "🟢 Ativo"
+    # ✅ CORREÇÃO: Status agora está padronizado em MAIÚSCULAS
+    repost_status = "🔴 PAUSADO" if config.get("repost_pausado") else "🟢 ATIVADO"
     dias = config.get("repost_dias", 15)
     limite = config.get("repost_limite", 6)
     
