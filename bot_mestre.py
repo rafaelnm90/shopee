@@ -2181,6 +2181,40 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     else:
         display_vitrine = f"    {icone_vitrine} {nome_vitrine} (<code>{chave_vitrine}</code>)"
 
+    # --- 3. Tópicos de Rotina ---
+    topicos_rotina = config.get("topicos_rotina", [])
+    nomes_rotinas_salvos = config.get("nomes_topicos_rotina", {})
+
+    def resolver_nome_topico(numero_topico):
+        t_str = str(numero_topico)
+        for chave in (f"{grupo_id_str}_{t_str}", f"{grupo_id_str}:{t_str}"):
+            if cache_nomes.get(chave):
+                return cache_nomes[chave], "✅"
+
+        nome = nomes_rotinas_salvos.get(t_str)
+        if nome:
+            return nome, "✅"
+
+        if topico_vitrine_str and t_str == topico_vitrine_str:
+            return nome_vitrine, icone_vitrine
+        if topico_escuta_str and t_str == topico_escuta_str:
+            return nome_escuta, icone_escuta
+
+        if t_str == "1":
+            return "Geral", "✅"
+
+        return f"Tópico {t_str}", "⏳"
+
+    if topicos_rotina:
+        lista_exibicao = []
+        for t in topicos_rotina:
+            id_completo_topico = f"{grupo_id_str}_{t}"
+            nome_t, icone_t = resolver_nome_topico(t)
+            lista_exibicao.append(f"    {icone_t} {nome_t} (<code>{id_completo_topico}</code>)")
+        display_rotinas = "\n" + "\n".join(lista_exibicao)
+    else:
+        display_rotinas = "\n    ✅ <i>Chat Geral (Padrão)</i>"
+
     # --- INFORMAÇÕES DO ROBÔ REPOSTADOR ---
     repost_status = "🔴 PAUSADO" if config.get("repost_pausado") else "🟢 ATIVADO"
     dias = config.get("repost_dias", 15)
@@ -2207,9 +2241,9 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         repost_dest_base = str(repost_destino).split(":")[0].strip()
         nome_repost_dest = cache_nomes.get(repost_dest_base, str(repost_dest_base))
         icone_rep_dest = "✅" if repost_dest_base in cache_nomes else "⏳"
-        display_repost_destino = f"    {icone_rep_dest} {nome_repost_dest} (<code>{str(repost_destino).replace(':', '_')}</code>)"
+        display_repost_destino = f"\n    {icone_rep_dest} {nome_repost_dest} (<code>{str(repost_destino).replace(':', '_')}</code>)"
     else:
-        display_repost_destino = f"{display_vitrine} [Padrão]"
+        display_repost_destino = f"\n{display_vitrine} [Padrão]"
 
     # --- STATUS DAS ROTINAS DO PÚBLICO ---
     dados_rotina = ler_config_rotina()
@@ -2230,7 +2264,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         
         f"♻️ <b>Status Robô Repostador:</b> {repost_status}\n"
         f"📥 <b>Escutando:</b>\n{display_repost_origem}\n"
-        f"📤 <b>Postando:</b>\n{display_repost_destino}\n"
+        f"📤 <b>Postando:</b>{display_repost_destino}\n"
         f"⏳ Oculto por: <b>{dias} dias</b>\n"
         f"📦 Cota Diária: <b>{limite} vídeos/dia</b>\n\n"
         "Escolha a ação desejada:"
