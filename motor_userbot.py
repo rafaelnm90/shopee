@@ -1035,6 +1035,60 @@ async def monitorar_status_espelhos():
         # 5. Dorme exatamente 60 segundos
         await asyncio.sleep(60)
 
+async def monitorar_topicos_submissao():
+    """✅ Sincroniza os nomes REAIS dos tópicos do Grupo Público com o cache.
+    A Bot API não consegue listar tópicos de fórum, então quem faz isso é o
+    Userbot (Telethon) via GetForumTopicsRequest. Os nomes ficam gravados no
+    cache com a chave composta "{grupo_id}_{topico_id}", que é a chave que o
+    painel do bot_mestre consulta."""
+    # A classe mudou de módulo entre versões do Telethon (channels -> messages)
+    try:
+        from telethon.tl.functions.messages import GetForumTopicsRequest
+        _param_peer = "peer"
+    except ImportError:
+        from telethon.tl.functions.channels import GetForumTopicsRequest
+        _param_peer = "channel"
+    from utils import salvar_nome_grupo
+
+    await asyncio.sleep(15)  # Deixa o get_dialogs terminar antes
+
+    while True:
+        try:
+            config = ler_config_bd_espiao("submissao_config", padrao={})
+            grupo_id = config.get("grupo_id")
+
+            if not grupo_id:
+                await asyncio.sleep(600)
+                continue
+
+            entidade = await client.get_entity(int(grupo_id))
+
+            argumentos = {
+                _param_peer: entidade,
+                "offset_date": None,
+                "offset_id": 0,
+                "offset_topic": 0,
+                "limit": 100,
+            }
+            resultado = await client(GetForumTopicsRequest(**argumentos))
+
+            total = 0
+            for topico in getattr(resultado, 'topics', []):
+                topico_id = getattr(topico, 'id', None)
+                titulo = getattr(topico, 'title', None)
+                if topico_id is None or not titulo:
+                    continue
+                salvar_nome_grupo(f"{grupo_id}_{topico_id}", titulo)
+                total += 1
+
+            if EXIBIR_LOGS and total:
+                logger.info(f"🏷️ [Tópicos] {total} nomes de tópicos sincronizados do grupo {grupo_id}.")
+
+        except Exception as e:
+            if EXIBIR_LOGS: logger.warning(f"⚠️ [Tópicos] Falha ao sincronizar nomes dos tópicos: {e}")
+
+        await asyncio.sleep(600)  # Revalida a cada 10 minutos
+
 async def main():
     if EXIBIR_LOGS: logger.info("🕵️ Iniciando o Módulo Espião de Clonagem...")
     try:
