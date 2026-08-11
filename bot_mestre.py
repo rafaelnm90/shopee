@@ -300,6 +300,8 @@ class AutoraisFluxo(StatesGroup):
     aguardando_confirmacao_dias_retorno = State() # ✅ NOVO: Etapa de confirmação
     aguardando_limite_videos = State()
     aguardando_confirmacao_limite_videos = State() # ✅ NOVO: Etapa de confirmação
+    aguardando_janela_autorais = State()           # 🕐 NOVO: Janela de horário do retorno
+    aguardando_confirmacao_janela_autorais = State()
     aguardando_confirmacao_pausa_repost = State()
     aguardando_confirmacao_pausa_robo = State()
 
@@ -2681,6 +2683,8 @@ def ler_autorais_config():
         "destino": "@videos_autorais", 
         "dias_retorno": 15, 
         "limite_videos": 5,
+        "inicio": 10,   # 🕐 Janela de postagem: hora de abertura
+        "fim": 20,      # 🕐 Janela de postagem: hora de fechamento
         "pausar_repostagem": False,
         "pausar_robo_completo": False
     }
@@ -2702,6 +2706,7 @@ teclado_menu_autorais = ReplyKeyboardMarkup(
 teclado_submenu_retorno = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Editar Dias ⏳"), KeyboardButton(text="Editar Limite 📦")],
+        [KeyboardButton(text="Janela de Horário ⏰")],
         [KeyboardButton(text="Voltar ao Menu Autorais 🔙")]
     ],
     resize_keyboard=True,
@@ -2764,6 +2769,8 @@ async def painel_autorais(message: types.Message, state: FSMContext):
             destino_topico_str = f"_{_partes_destino[1].strip()}"
     dias_retorno = config.get("dias_retorno", 15)
     limite_videos = config.get("limite_videos", 5)
+    janela_inicio = config.get("inicio", 10)
+    janela_fim = config.get("fim", 20)
     
     # Verifica os status de pausa
     pausar_repost = config.get("pausar_repostagem", False)
@@ -2847,6 +2854,7 @@ async def painel_autorais(message: types.Message, state: FSMContext):
         f"♻️ <b>Regras de Repostagem:</b>\n"
         f"⏳ Oculto por: <b>{dias_retorno} dias</b>\n"
         f"📦 Cota Diária: <b>{limite_videos} vídeos/dia</b>\n"
+        f"⏰ Janela de Postagem: <b>{janela_inicio}h às {janela_fim}h</b>\n"
         f"{texto_contagem}\n"
         "O robô Espelhador Isolado fará a escuta e o envio em tempo real baseando-se estritamente nestes valores.\n\n"
         "Escolha o que deseja alterar:"
@@ -3313,6 +3321,108 @@ async def processar_limite_autorais(message: types.Message, state: FSMContext):
     salvar_autorais_config(config)
     
     await message.answer(f"✅ <b>Cota de Retorno Atualizada!</b>\nO robô arquivará no máximo {novo_valor} vídeos de retorno por dia.", parse_mode="HTML")
+    await submenu_regras_retorno(message, state)
+
+# ----------------------------------------------------
+# 🕐 JANELA DE HORÁRIO DOS VÍDEOS AUTORAIS
+# ----------------------------------------------------
+teclado_janela_autorais = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Dia Todo (24h) 🕛")],
+        [KeyboardButton(text="Cancelar ❌")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+@dp.message(AutoraisFluxo.menu_principal, F.text == "Janela de Horário ⏰")
+async def pedir_janela_autorais(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+
+    config = ler_autorais_config()
+    inicio = config.get("inicio", 10)
+    fim = config.get("fim", 20)
+
+    await message.answer(
+        f"Defina a <b>Janela de Horário</b> em que os vídeos de retorno podem ser postados.\n\n"
+        f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>8-22</code>) ou clique no botão para rodar 24h.\n"
+        f"<i>Janela atual: {inicio}h às {fim}h</i>",
+        parse_mode="HTML",
+        reply_markup=teclado_janela_autorais
+    )
+    await state.set_state(AutoraisFluxo.aguardando_janela_autorais)
+
+@dp.message(AutoraisFluxo.aguardando_janela_autorais)
+async def confirmar_janela_autorais(message: types.Message, state: FSMContext):
+    import re
+
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+
+    texto = message.text.strip()
+
+    if texto == "Dia Todo (24h) 🕛" or texto.lower() == "dia todo":
+        inicio, fim = 0, 24
+    else:
+        match = re.match(r"^(\d{1,2})\s*-\s*(\d{1,2})$", texto)
+        if not match:
+            await message.answer("⚠️ Formato inválido! Use exatamente como no exemplo: <code>8-22</code>.", parse_mode="HTML", reply_markup=teclado_janela_autorais)
+            return
+        inicio, fim = map(int, match.groups())
+        if inicio >= fim or inicio < 0 or fim > 24:
+            await message.answer("⚠️ Valores inválidos! A hora de início precisa ser menor que a do fim (0 a 24).", reply_markup=teclado_janela_autorais)
+            return
+
+    limite = ler_autorais_config().get("limite_videos", 5)
+    minutos_janela = (fim - inicio) * 60
+    espaco = int(minutos_janela / limite) if limite else 0
+
+    await state.update_data(janela_inicio=inicio, janela_fim=fim)
+
+    texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"entre {inicio}h e {fim}h"
+    teclado_conf = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer(
+        f"Confirmar a janela de postagem <b>{texto_exibicao}</b>?\n\n"
+        f"<i>Com {limite} vídeos/dia, dará cerca de {espaco} minutos entre um vídeo e outro.</i>",
+        parse_mode="HTML",
+        reply_markup=teclado_conf
+    )
+    await state.set_state(AutoraisFluxo.aguardando_confirmacao_janela_autorais)
+
+@dp.message(AutoraisFluxo.aguardando_confirmacao_janela_autorais)
+async def processar_janela_autorais(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await message.answer("Operação cancelada. A janela <b>não</b> foi alterada.", parse_mode="HTML")
+        await submenu_regras_retorno(message, state)
+        return
+
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, clique em Aprovar ✅ ou Cancelar ❌.")
+        return
+
+    data = await state.get_data()
+    inicio = data.get("janela_inicio")
+    fim = data.get("janela_fim")
+
+    config = ler_autorais_config()
+    config["inicio"] = inicio
+    config["fim"] = fim
+    salvar_autorais_config(config)
+
+    if EXIBIR_LOGS: logger.info(f"✅ Janela de postagem dos Autorais atualizada para {inicio}h-{fim}h.")
+
+    texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"entre as {inicio}h e as {fim}h"
+    await message.answer(
+        f"✅ <b>Janela de Postagem Salva!</b>\n"
+        f"Os vídeos de retorno serão distribuídos {texto_exibicao}.\n\n"
+        f"<i>Vale a partir do próximo agendamento. Vídeos que já têm horário cravado mantêm o horário antigo.</i>",
+        parse_mode="HTML"
+    )
     await submenu_regras_retorno(message, state)
 
 # ----------------------------------
@@ -5347,8 +5457,8 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await state.clear()
         await message.answer("Ação cancelada.")
         
-        # Verifica se estava editando Dias ou Limites para voltar ao SUBMENU de Retorno
-        if estado_atual in ["AutoraisFluxo:aguardando_dias_retorno", "AutoraisFluxo:aguardando_limite_videos", "AutoraisFluxo:aguardando_confirmacao_dias_retorno", "AutoraisFluxo:aguardando_confirmacao_limite_videos"]:
+        # Verifica se estava editando Dias, Limites ou Janela para voltar ao SUBMENU de Retorno
+        if estado_atual in ["AutoraisFluxo:aguardando_dias_retorno", "AutoraisFluxo:aguardando_limite_videos", "AutoraisFluxo:aguardando_confirmacao_dias_retorno", "AutoraisFluxo:aguardando_confirmacao_limite_videos", "AutoraisFluxo:aguardando_janela_autorais", "AutoraisFluxo:aguardando_confirmacao_janela_autorais"]:
             await submenu_regras_retorno(message, state)
             
         # Verifica se estava confirmando Pausas para voltar ao SUBMENU de Status
