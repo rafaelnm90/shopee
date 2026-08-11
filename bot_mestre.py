@@ -7586,10 +7586,18 @@ async def submenu_disparos_manuais(message: types.Message, state: FSMContext):
         
     await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
 
-@dp.message(ConfigRotina.menu_principal, F.text == "🔙 Voltar ao Menu Rotinas")
+@dp.message(F.text == "🔙 Voltar ao Menu Rotinas", StateFilter("*"))
 async def voltar_menu_rotinas_dinamico(message: types.Message, state: FSMContext):
+    # ✅ CORREÇÃO: antes este handler exigia o estado ConfigRotina.menu_principal.
+    # Como o FSM vive em memória, qualquer restart do serviço ou expiração por
+    # inatividade apagava o estado e o botão virava um beco sem saída silencioso
+    # (log "Update is not handled"). Agora responde em qualquer estado, igual aos
+    # botões "Disparar ..." do mesmo teclado, que já usavam StateFilter("*").
+    if message.from_user.id != ADMIN_ID: return
+
     data = await state.get_data()
     origem = data.get("menu_origem")
+
     if origem == "espiao":
         await gerenciar_rotina_espiao(message, state)
     elif origem == "publico":
@@ -7597,8 +7605,18 @@ async def voltar_menu_rotinas_dinamico(message: types.Message, state: FSMContext
             await gerenciar_rotina_publico(message, state)
         except NameError:
             await message.answer("Retornando...", reply_markup=obter_teclado_configuracoes_gerais())
-    else:
+    elif origem:
         await gerenciar_rotina(message, state)
+    else:
+        # ✅ Sem "menu_origem" o estado foi perdido (restart/inatividade).
+        # Em vez de ignorar o clique, devolve o usuário para a raiz.
+        await state.clear()
+        await state.update_data(painel_atual="raiz")
+        await message.answer(
+            "⚠️ A sessão anterior expirou (o bot foi reiniciado ou ficou ocioso).\n"
+            "🏠 Voltando ao Painel Inicial.",
+            reply_markup=obter_teclado_raiz()
+        )
 
 # ✅ NOVOS INTERRUPTORES INTERNOS DE PAUSA (COM CONFIRMAÇÃO)
 
