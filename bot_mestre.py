@@ -104,10 +104,11 @@ def inicializar_banco_sqlite():
         )
     ''')
     
-    # 🚀 Migração invisível: Adiciona a coluna 'tipo' se ela não existir
+    # 🚀 Migração invisível: Colunas do Robô Repostador no Público
     try:
-        cursor.execute("ALTER TABLE financeiro_despesas ADD COLUMN tipo TEXT DEFAULT 'mensal'")
-        if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'tipo' adicionada à tabela de despesas.")
+        cursor.execute("ALTER TABLE fila_autorais ADD COLUMN repostado_publico INTEGER DEFAULT 0")
+        cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_repost_publico TEXT")
+        if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Colunas de Repostagem Pública adicionadas à fila_autorais.")
     except sqlite3.OperationalError:
         pass
     
@@ -238,14 +239,26 @@ class SubmissaoAdminFluxo(StatesGroup):
     aguardando_link_destino = State()
     aguardando_topicos_rotina = State() # ✅ NOVO ESTADO DE MULTI-TÓPICOS
     aguardando_confirmacao_toggle = State()
-
-class SubmissaoUsuarioInterativa(StatesGroup):
-    aguardando_video = State()
-    aguardando_shopee = State()
-    aguardando_tiktok = State()
+    # ✅ Novos estados para Regras de Repostagem no Grupo Público
+    aguardando_repost_dias = State()
+    aguardando_repost_limite = State()
+    aguardando_confirmacao_repost_dias = State()
+    aguardando_confirmacao_repost_limite = State()
+    aguardando_confirmacao_pausa_repost = State()
 
 def ler_submissao_config():
-    return ler_config_bd("submissao_config", padrao={"ativo": False, "grupo_id": None, "topico_envio": None, "topico_destino": None})
+    return ler_config_bd("submissao_config", padrao={
+        "ativo": False, 
+        "grupo_id": None, 
+        "topico_envio": None, 
+        "topico_destino": None,
+        "repost_dias": 15,
+        "repost_limite": 6,
+        "repost_pausado": False,
+        "repost_data_atual": "",
+        "repost_qtd_hoje": 0,
+        "repost_ultimo_horario": ""
+    })
 
 def salvar_submissao_config(dados):
     salvar_config_bd("submissao_config", dados)
@@ -2067,6 +2080,337 @@ class BloqueioAdminMiddleware(BaseMiddleware):
 dp.message.middleware(BloqueioAdminMiddleware())
 dp.callback_query.middleware(BloqueioAdminMiddleware())
 dp.message.middleware(InatividadeMiddleware())
+
+# ==========================================
+# PAINEL DO GRUPO PÚBLICO & MOTOR REPOSTADOR
+# ==========================================
+
+@dp.message(F.text == "Grupo Público 📬", StateFilter("*"))
+async def painel_submissoes(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    
+    if EXIBIR_LOGS: logger.info("👥 Acessando Painel do Grupo Público e Repostador.")
+    config = ler_submissao_config()
+    status = "🟢 ATIVADO" if config.get("ativo") else "🔴 DESATIVADO"
+    
+    repost_status = "🔴 Pausado" if config.get("repost_pausado") else "🟢 Ativo"
+    dias = config.get("repost_dias", 15)
+    limite = config.get("repost_limite", 6)
+    
+    texto = (
+        "📬 <b>Painel do Grupo Público</b>\n\n"
+        f"O robô atuará como moderador dentro do seu Supergrupo.\n"
+        f"Ele escutará os envios no Tópico de Conversa, analisará com a IA e postará automaticamente os vídeos aprovados no Tópico Vitrine.\n\n"
+        f"<b>Status Atual:</b> {status}\n\n"
+        f"♻️ <b>Robô Repostador Autoral:</b> {repost_status}\n"
+        f"⏳ Oculto por: <b>{dias} dias</b>\n"
+        f"📦 Cota Diária: <b>{limite} vídeos/dia</b>\n\n"
+        f"Escolha a ação desejada:"
+    )
+    
+    teclado = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Ativar/Desativar Robô Moderador ⚙️")],
+            [KeyboardButton(text="Configurar Grupo e Tópicos 🏷️")],
+            [KeyboardButton(text="Rotinas do Grupo Público ⏰")],
+            [KeyboardButton(text="Regras de Repostagem ♻️"), KeyboardButton(text="Status do Robô ⏸️")],
+            [KeyboardButton(text="Voltar aos Canais 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
+    await state.set_state(SubmissaoAdminFluxo.menu_principal)
+
+@dp.message(F.text == "Voltar ao Painel Público 🔙", StateFilter("*"))
+async def voltar_painel_publico_repost(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    await painel_submissoes(message, state)
+    
+@dp.message(F.text == "Regras de Repostagem ♻️", StateFilter("*"))
+async def submenu_regras_repost_publico(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    teclado = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Editar Dias (Público) ⏳"), KeyboardButton(text="Editar Limite (Público) 📦")],
+            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer("♻️ <b>Regras de Repostagem (Grupo Público)</b>\nEscolha o que deseja editar:", reply_markup=teclado, parse_mode="HTML")
+    await state.set_state(SubmissaoAdminFluxo.menu_principal)
+
+@dp.message(F.text == "Status do Robô ⏸️", StateFilter("*"))
+async def submenu_status_robo_publico(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    config = ler_submissao_config()
+    texto_repostagem = "Retomar Repostagem ▶️" if config.get("repost_pausado") else "Pausar Repostagem ⏸️"
+
+    teclado_submenu_pausa = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=texto_repostagem)],
+            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer("⏸️ <b>Controle de Pausa do Repostador</b>\nSelecione a ação:", reply_markup=teclado_submenu_pausa, parse_mode="HTML")
+    await state.set_state(SubmissaoAdminFluxo.menu_principal)
+
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Pausar Repostagem ⏸️", "Retomar Repostagem ▶️"]))
+async def pedir_confirmacao_repostagem_publico(message: types.Message, state: FSMContext):
+    acao = "pausar" if "Pausar" in message.text else "retomar"
+    await state.update_data(acao_repost_pub=acao)
+
+    texto_botao = "Confirmar Pausa ✅" if acao == "pausar" else "Confirmar Retomada ✅"
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text=texto_botao), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
+    texto = f"⚠️ Tem certeza de que deseja <b>{'PAUSAR' if acao == 'pausar' else 'RETOMAR'}</b> a repostagem automática para o Grupo Público?"
+    await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(SubmissaoAdminFluxo.aguardando_confirmacao_pausa_repost)
+
+@dp.message(SubmissaoAdminFluxo.aguardando_confirmacao_pausa_repost)
+async def processar_pausa_repostagem_publico(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await message.answer("Ação cancelada.")
+        await submenu_status_robo_publico(message, state) 
+        return
+    if "Confirmar" not in message.text:
+        await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
+        return
+
+    config = ler_submissao_config()
+    data = await state.get_data()
+    acao = data.get("acao_repost_pub")
+    
+    config["repost_pausado"] = (acao == "pausar")
+    salvar_submissao_config(config)
+
+    status = "PAUSADA 🔴" if config["repost_pausado"] else "RETOMADA 🟢"
+    if EXIBIR_LOGS: logger.info(f"⚙️ Status da repostagem pública alterado para: {status}")
+    await message.answer(f"✅ A repostagem automática para o Público foi <b>{status}</b>.", parse_mode="HTML")
+    await submenu_status_robo_publico(message, state)
+
+@dp.message(F.text == "Editar Dias (Público) ⏳", StateFilter("*"))
+async def pedir_dias_repost_publico(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await message.answer("Por quantos <b>dias</b> o vídeo deve ficar arquivado antes de ir para o Grupo Público? (Ex: 15)", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(SubmissaoAdminFluxo.aguardando_repost_dias)
+
+@dp.message(SubmissaoAdminFluxo.aguardando_repost_dias)
+async def confirmar_dias_repost_publico(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await message.answer("Operação cancelada.")
+        await submenu_regras_repost_publico(message, state)
+        return
+    if not message.text.isdigit():
+        await message.answer("⚠️ Envie apenas números inteiros.", reply_markup=teclado_cancelar)
+        return
+    novo_valor = int(message.text)
+    await state.update_data(novo_valor_dias_pub=novo_valor)
+    
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer(f"Tem certeza que deseja configurar o atraso para <b>{novo_valor} dias</b>?", parse_mode="HTML", reply_markup=teclado_confirmacao)
+    await state.set_state(SubmissaoAdminFluxo.aguardando_confirmacao_repost_dias)
+
+@dp.message(SubmissaoAdminFluxo.aguardando_confirmacao_repost_dias)
+async def processar_dias_repost_publico(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await message.answer("Operação cancelada.")
+        await submenu_regras_repost_publico(message, state)
+        return
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, clique em Aprovar ou Cancelar.")
+        return
+
+    data = await state.get_data()
+    novo_valor = data.get("novo_valor_dias_pub")
+    
+    config = ler_submissao_config()
+    config["repost_dias"] = novo_valor
+    salvar_submissao_config(config)
+    
+    if EXIBIR_LOGS: logger.info(f"✅ Dias de atraso do repost público atualizados para: {novo_valor}")
+    await message.answer(f"✅ <b>Tempo de Atraso Atualizado!</b>\nOs vídeos irão para o Grupo Público após {novo_valor} dias da captura original.", parse_mode="HTML")
+    await submenu_regras_repost_publico(message, state)
+
+@dp.message(F.text == "Editar Limite (Público) 📦", StateFilter("*"))
+async def pedir_limite_repost_publico(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await message.answer("Qual será o <b>limite máximo</b> de vídeos repostados por dia no Grupo Público? (Ex: 6)", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(SubmissaoAdminFluxo.aguardando_repost_limite)
+
+@dp.message(SubmissaoAdminFluxo.aguardando_repost_limite)
+async def confirmar_limite_repost_publico(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await message.answer("Operação cancelada.")
+        await submenu_regras_repost_publico(message, state)
+        return
+    if not message.text.isdigit():
+        await message.answer("⚠️ Envie apenas números inteiros.", reply_markup=teclado_cancelar)
+        return
+        
+    novo_valor = int(message.text)
+    await state.update_data(novo_valor_limite_pub=novo_valor)
+    
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer(f"Tem certeza que deseja definir a cota diária para <b>{novo_valor} vídeos</b>?", parse_mode="HTML", reply_markup=teclado_confirmacao)
+    await state.set_state(SubmissaoAdminFluxo.aguardando_confirmacao_repost_limite)
+
+@dp.message(SubmissaoAdminFluxo.aguardando_confirmacao_repost_limite)
+async def processar_limite_repost_publico(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await message.answer("Operação cancelada.")
+        await submenu_regras_repost_publico(message, state)
+        return
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, clique em Aprovar ou Cancelar.")
+        return
+
+    data = await state.get_data()
+    novo_valor = data.get("novo_valor_limite_pub")
+    
+    config = ler_submissao_config()
+    config["repost_limite"] = novo_valor
+    salvar_submissao_config(config)
+    
+    if EXIBIR_LOGS: logger.info(f"✅ Limite diário do repost público atualizado para: {novo_valor}")
+    await message.answer(f"✅ <b>Cota Diária Atualizada!</b>\nO robô enviará no máximo {novo_valor} vídeos por dia ao Grupo Público.", parse_mode="HTML")
+    await submenu_regras_repost_publico(message, state)
+
+async def motor_repost_publico_step():
+    try:
+        config = ler_submissao_config()
+        if not config.get("ativo") or config.get("repost_pausado", False):
+            return
+            
+        grupo_id = config.get("grupo_id")
+        topico_destino = config.get("topico_destino")
+        if not grupo_id or not topico_destino:
+            return
+
+        limite_diario = config.get("repost_limite", 6)
+        dias_atraso = config.get("repost_dias", 15)
+        
+        agora = datetime.now(fuso_horario)
+        hoje_str = agora.strftime("%Y-%m-%d")
+        
+        # 🔄 Virada do dia: reseta o banco de dados interno
+        if config.get("repost_data_atual") != hoje_str:
+            config["repost_data_atual"] = hoje_str
+            config["repost_qtd_hoje"] = 0
+            salvar_submissao_config(config)
+            
+        qtd_hoje = config.get("repost_qtd_hoje", 0)
+        
+        # Expediente Fixo: 10h às 20h
+        if agora.hour < 10 or agora.hour >= 20:
+            return
+            
+        if qtd_hoje >= limite_diario:
+            return
+            
+        minutos_expediente = 600
+        espacamento = minutos_expediente / limite_diario if limite_diario > 0 else 600
+        
+        hora_ultimo = config.get("repost_ultimo_horario")
+        if hora_ultimo:
+            try:
+                ultimo_obj = datetime.strptime(hora_ultimo, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                minutos_passados = (agora - ultimo_obj).total_seconds() / 60
+                if minutos_passados < espacamento:
+                    return # Catraca de espaçamento ativa
+            except: pass
+        
+        data_corte_str = (agora - timedelta(days=dias_atraso)).strftime("%Y-%m-%d %H:%M:%S")
+        
+        conexao = sqlite3.connect("banco_dados.db")
+        conexao.row_factory = sqlite3.Row
+        cursor = conexao.cursor()
+        
+        # Puxa o primeiro vídeo que já foi postado no canal de autorais (processado=1) 
+        # mas ainda NÃO foi repostado no Público, respeitando os dias ocultos
+        cursor.execute('''
+            SELECT * FROM fila_autorais 
+            WHERE processado = 1 
+            AND repostado_publico = 0 
+            AND data_captura <= ? 
+            ORDER BY data_captura ASC LIMIT 1
+        ''', (data_corte_str,))
+        
+        video_alvo = cursor.fetchone()
+        
+        if video_alvo:
+            if EXIBIR_LOGS: logger.info("🚀 [Motor Público] Vídeo elegível detetado. A iniciar a transferência de repostagem...")
+            file_id = video_alvo["msg_id_destino"]
+            id_unico = video_alvo["id_unico"]
+            legenda_original = video_alvo["legenda"]
+            
+            config_aut = ler_config_bd("autorais_config", {})
+            canal_autorais = config_aut.get("destino")
+            
+            if file_id and canal_autorais:
+                import re
+                import random
+                
+                match_link = re.search(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s<]+', legenda_original, re.IGNORECASE)
+                link_shopee = match_link.group(0) if match_link else "https://shopee.com.br"
+                
+                match_item = re.search(r'📦\s*Item:\s*([^\n<]+)', legenda_original)
+                nome_produto = match_item.group(1).strip() if match_item else "Produto Exclusivo"
+
+                nomes_fakes = ["Rafael", "Membro VIP", "Shopee Afiliado", "Dicas da Comunidade", "Ofertas Top", "Guia de Ofertas"]
+                user_mention = random.choice(nomes_fakes)
+
+                legenda_final = (
+                    f"👤 Dica enviada por: {user_mention}\n\n"
+                    f"<b>{nome_produto}</b>\n\n"
+                    f"🔗 <b>Link do Produto:</b>\n{link_shopee}\n\n"
+                    f"<i>#Recomendado #Shopee</i>"
+                )
+                
+                try:
+                    await bot.copy_message(
+                        chat_id=grupo_id,
+                        from_chat_id=canal_autorais,
+                        message_id=int(file_id),
+                        caption=legenda_final,
+                        parse_mode="HTML",
+                        message_thread_id=int(topico_destino)
+                    )
+                    if EXIBIR_LOGS: logger.info(f"✅ [Motor Público] Vídeo '{nome_produto}' encaminhado para a Vitrine do Público com sucesso!")
+                    
+                    cursor.execute("UPDATE fila_autorais SET repostado_publico = 1, data_repost_publico = ? WHERE id_unico = ?", (agora.strftime("%Y-%m-%d %H:%M:%S"), id_unico))
+                    conexao.commit()
+                    
+                    config["repost_qtd_hoje"] = qtd_hoje + 1
+                    config["repost_ultimo_horario"] = agora.strftime("%Y-%m-%d %H:%M:%S")
+                    salvar_submissao_config(config)
+                    
+                except Exception as e:
+                    if EXIBIR_LOGS: logger.error(f"❌ [Motor Público] Falha ao tentar executar copy_message: {e}")
+        
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Motor Público] Erro estrutural crítico: {e}")
+
+# Inicia o motor autônomo agendado no APScheduler a cada 2 minutos
+scheduler.add_job(motor_repost_publico_step, 'interval', minutes=2, id='motor_repost_publico_loop', replace_existing=True)
 
 # ----------------------------------
 # NOVO MÓDULO: VÍDEOS AUTORAIS 🎥
@@ -4395,58 +4739,54 @@ async def manual_promo_viral_publico(message: types.Message):
 async def manual_repost_autoral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     
-    # 1. Verifica se os alvos estão definidos no Grupo Público
     config_pub = ler_submissao_config()
     chat_destino = config_pub.get("grupo_id")
     topico_vitrine = config_pub.get("topico_destino")
     
     if not config_pub.get("ativo") or not chat_destino or not topico_vitrine:
-        await message.answer("⚠️ <b>Ação Bloqueada:</b> A moderação do Grupo Público está desativada ou não configurada.", parse_mode="HTML")
+        await message.answer("⚠️ <b>Ação Bloqueada:</b> O Painel do Grupo Público está desativado ou não configurado.", parse_mode="HTML")
         return
         
-    msg_status = await message.answer("♻️ Extraindo um vídeo do Canal Autoral e gerando aprovação...", parse_mode="HTML")
+    msg_status = await message.answer("♻️ Extraindo um vídeo legível do Canal Autoral...", parse_mode="HTML")
     
-    # 2. Resgata o histórico do canal de Autorais dos últimos 30 dias (Usaremos o SQLite para isso)
     try:
         conexao = sqlite3.connect("banco_dados.db")
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         
-        # Puxa os processados (já postados) ordenados do mais recente para o mais antigo (últimos 30)
-        cursor.execute("SELECT * FROM fila_autorais WHERE processado = 1 ORDER BY id_unico DESC LIMIT 30")
+        # ✅ CORREÇÃO: Garante que ele não reposte manualmente algo que já foi pelo automático
+        cursor.execute("SELECT * FROM fila_autorais WHERE processado = 1 AND repostado_publico = 0 ORDER BY id_unico DESC LIMIT 30")
         autorais_recentes = cursor.fetchall()
-        conexao.close()
     except Exception as e:
         await msg_status.edit_text(f"❌ Erro ao ler banco de autorais: {e}")
         return
         
     if not autorais_recentes:
-        await msg_status.edit_text("❌ Não há vídeos autorais recentes para fazer repost.")
+        await msg_status.edit_text("❌ Não há vídeos recentes ou disponíveis que ainda não tenham sido postados no Público.")
+        conexao.close()
         return
         
-    # 3. Escolhe um aleatório e pega o file_id do telegram
+    import random
     video_sorteado = random.choice(autorais_recentes)
-    file_id = video_sorteado["msg_id_destino"] # O ID do vídeo postado lá no canal autorais
+    file_id = video_sorteado["msg_id_destino"] 
+    id_unico = video_sorteado["id_unico"]
     
     if not file_id:
-        await msg_status.edit_text("❌ Erro: O vídeo sorteado não tem um File ID válido.")
+        await msg_status.edit_text("❌ Erro: O vídeo sorteado não tem um File ID válido na nuvem.")
+        conexao.close()
         return
         
-    # 4. Formata a mensagem com o Padrão do Grupo Público
-    # Você me pediu para simular um envio. Então vamos criar um remetente fake!
     nomes_fakes = ["Rafael", "Membro VIP", "Shopee Afiliado", "Dicas da Comunidade", "Ofertas Top"]
     user_mention = random.choice(nomes_fakes)
     
     legenda_original = video_sorteado["legenda"]
     import re
-    # Extrai o link limpo e o nome
-    match_link = re.search(r'https://shp\.ee/\S+', legenda_original)
+    match_link = re.search(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s<]+', legenda_original, re.IGNORECASE)
     link_shopee = match_link.group(0) if match_link else "https://shopee.com.br"
     
     match_item = re.search(r'📦\s*Item:\s*([^\n<]+)', legenda_original)
     nome_produto = match_item.group(1).strip() if match_item else "Produto Exclusivo"
 
-    # Simula o formato exato da aprovação da submissão
     legenda_final = (
         f"👤 Dica enviada por: {user_mention}\n\n"
         f"<b>{nome_produto}</b>\n\n"
@@ -4454,25 +4794,31 @@ async def manual_repost_autoral(message: types.Message):
         f"<i>#Recomendado #Shopee</i>"
     )
     
-    # 5. Envia direto para a Vitrine do Público
     try:
-        # Puxa o File_ID do chat de autorais e faz forward/copia para a Vitrine
-        # Como o bot não guarda o file_id nativo do telegram na fila_autorais, a gente copia a mensagem original!
-        config_aut = ler_autorais_config()
+        config_aut = ler_config_bd("autorais_config", {})
         canal_autorais = config_aut.get("destino")
         
         await bot.copy_message(
             chat_id=chat_destino,
             from_chat_id=canal_autorais,
             message_id=int(file_id),
-            caption=legenda_final, # Sobrescreve a legenda com o formato do Grupo
+            caption=legenda_final,
             parse_mode="HTML",
             message_thread_id=int(topico_vitrine)
         )
-        await msg_status.edit_text("✅ <b>Repost Autoral realizado!</b>\nUm vídeo foi puxado e enviado para a Vitrine do Grupo Público.", parse_mode="HTML")
+        
+        # Marca como repostado para garantir a integridade da fila autônoma
+        agora_str = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute("UPDATE fila_autorais SET repostado_publico = 1, data_repost_publico = ? WHERE id_unico = ?", (agora_str, id_unico))
+        conexao.commit()
+        
+        await msg_status.edit_text("✅ <b>Repost Autoral realizado!</b>\nUm vídeo foi puxado e enviado formatado para a Vitrine do Grupo Público.", parse_mode="HTML")
+        if EXIBIR_LOGS: logger.info(f"✅ Disparo de repost manual executado com sucesso: {nome_produto}")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao dar copy_message no repost: {e}")
-        await msg_status.edit_text(f"❌ Erro técnico ao tentar enviar o vídeo para a Vitrine: {e}")
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao dar copy_message no repost manual: {e}")
+        await msg_status.edit_text(f"❌ Erro técnico ao tentar enviar o vídeo: {e}")
+        
+    conexao.close()
 
 # ❌ NOVO: Handler Global para Cancelar via Botão (Agora 100% à prova de falhas)
 @dp.message(F.text == "Cancelar ❌", StateFilter("*"))
