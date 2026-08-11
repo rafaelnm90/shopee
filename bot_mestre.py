@@ -2206,10 +2206,11 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         for t in topicos_rotina:
             id_completo_topico = f"{grupo_id_str}_{t}"
             nome_t = resolver_nome_topico(t)
-            lista_exibicao.append(f"{nome_t} (<code>{id_completo_topico}</code>)")
-        display_rotinas = ", ".join(lista_exibicao)
+            lista_exibicao.append(f"    - {nome_t} (<code>{id_completo_topico}</code>)")
+        # ✅ Lista vertical: em linha única a quebra de texto ficava confusa
+        display_rotinas = "\n" + "\n".join(lista_exibicao)
     else:
-        display_rotinas = "<i>Chat Geral (Padrão)</i>"
+        display_rotinas = " <i>Chat Geral (Padrão)</i>"
 
     # --- INFORMAÇÕES DO ROBÔ REPOSTADOR ---
     # ✅ CORREÇÃO: Status agora está padronizado em MAIÚSCULAS
@@ -2244,7 +2245,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         f"{display_grupo}\n"
         f"📥 <b>Escutando:</b> {display_escuta}\n"
         f"📤 <b>Postando:</b> {display_vitrine}\n"
-        f"📢 <b>Alvos das Rotinas:</b> {display_rotinas}\n\n"
+        f"📢 <b>Alvos das Rotinas:</b>{display_rotinas}\n\n"
         f"♻️ <b>Status Robô Repostador:</b> {repost_status}\n"
         f"📥 <b>Escutando:</b> {display_repost_origem}\n"
         f"📤 <b>Postando:</b> {display_repost_destino}\n"
