@@ -2143,16 +2143,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     # Extrai o ID do grupo para montar as chaves compostas dos tópicos
     grupo_id_str = str(grupo_id) if grupo_id else ""
 
-    # --- 1. Grupo Base ---
-    nome_grupo = cache_nomes.get(grupo_id_str, "Grupo Público")
-    icone_grupo = "✅" if grupo_id_str in cache_nomes else "⏳"
-    
-    if not grupo_id_str:
-        display_grupo = "    ❌ <i>Grupo não definido</i>"
-    else:
-        display_grupo = f"    {icone_grupo} {nome_grupo} (<code>{grupo_id_str}</code>)"
-
-    # --- 2. Tópico de Escuta ---
+    # --- 1. Tópico de Escuta ---
     topico_escuta_str = str(topico_escuta) if topico_escuta else ""
     chave_escuta = f"{grupo_id_str}_{topico_escuta_str}"
     
@@ -2166,7 +2157,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     else:
         display_escuta = f"    {icone_escuta} {nome_escuta} (<code>{chave_escuta}</code>)"
 
-    # --- 3. Tópico Vitrine (Postando) ---
+    # --- 2. Tópico Vitrine (Postando) ---
     topico_vitrine_str = str(topico_vitrine) if topico_vitrine else ""
     chave_vitrine = f"{grupo_id_str}_{topico_vitrine_str}"
     
@@ -2180,7 +2171,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     else:
         display_vitrine = f"    {icone_vitrine} {nome_vitrine} (<code>{chave_vitrine}</code>)"
 
-    # --- 4. Tópicos de Rotina ---
+    # --- 3. Tópicos de Rotina ---
     topicos_rotina = config.get("topicos_rotina", [])
     nomes_rotinas_salvos = config.get("nomes_topicos_rotina", {})
 
@@ -2244,6 +2235,10 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     else:
         display_repost_destino = f"\n{display_vitrine} [Padrão]"
 
+    # --- STATUS DAS ROTINAS DO PÚBLICO ---
+    dados_rotina = ler_config_rotina()
+    status_rotinas = "🔴 PAUSADAS" if dados_rotina.get("pausado_publico") else "🟢 ATIVAS"
+
     texto = (
         "📬 <b>Painel do Grupo Público</b>\n\n"
         "O robô atuará como moderador dentro do seu Supergrupo.\n"
@@ -2251,10 +2246,11 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         "e postará automaticamente os vídeos aprovados no Tópico Vitrine.\n\n"
         
         f"⚙️ <b>Status Robô Moderador:</b> {status}\n"
-        f"👥 <b>Grupo Base:</b>\n{display_grupo}\n"
         f"📥 <b>Escutando:</b>\n{display_escuta}\n"
-        f"📤 <b>Postando:</b>\n{display_vitrine}\n"
-        f"📢 <b>Alvos das Rotinas:</b>{display_rotinas}\n\n"
+        f"📤 <b>Postando:</b>\n{display_vitrine}\n\n"
+        
+        f"⏰ <b>Status Rotinas do Grupo:</b> {status_rotinas}\n"
+        f"📢 <b>Postando nos Alvos:</b>{display_rotinas}\n\n"
         
         f"♻️ <b>Status Robô Repostador:</b> {repost_status}\n"
         f"📥 <b>Escutando:</b>\n{display_repost_origem}\n"
@@ -2266,7 +2262,8 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     
     teclado_pub = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Configurar Robô Moderador ⚙️")],
+            [KeyboardButton(text="Ativar/Desativar Robô Moderador ⚙️")],
+            [KeyboardButton(text="Configurar Grupo e Tópicos 🏷️")],
             [KeyboardButton(text="Rotinas do Grupo Público ⏰")],
             [KeyboardButton(text="Regras de Repostagem ♻️"), KeyboardButton(text="Status do Robô ⏸️")],
             [KeyboardButton(text="Voltar aos Canais 🔙")]
