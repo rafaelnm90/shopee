@@ -9559,7 +9559,7 @@ async def forcar_clones_fila(callback: types.CallbackQuery):
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila de clonagem: {e}")
         await callback.answer("Erro ao acessar a fila de clonagem.", show_alert=True)
 
-@dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Ativar/Desativar Robô Moderador ⏯️"]))
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Ativar/Desativar Robô Moderador ⚙️"]))
 async def pedir_confirmacao_toggle(message: types.Message, state: FSMContext):
     config = ler_submissao_config()
     if not config.get("grupo_id"):
@@ -9631,7 +9631,7 @@ async def voltar_pub_rotinas(message: types.Message, state: FSMContext):
     await state.clear()
     await painel_submissoes(message, state)
 
-@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurar Grupo e Tópicos 🎯")
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurar Grupo e Tópicos 🏷️")
 async def pedir_link_envio_submissao(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("⚙️ Iniciando tutorial de configuração de tópicos de submissão.")
     texto = (
