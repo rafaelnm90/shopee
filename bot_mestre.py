@@ -2149,70 +2149,79 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
 
     cache_nomes = ler_cache_nomes_grupos()
 
-    # 1. Resgata o nome do Grupo Principal
+    # --- 1. Grupo Base ---
     grupo_id_str = str(grupo_id) if grupo_id else ""
     nome_grupo = cache_nomes.get(grupo_id_str, "Grupo Público")
-    display_grupo = f"👥 <b>Grupo Base:</b> {nome_grupo} (<code>{grupo_id_str}</code>)" if grupo_id_str else "<i>Grupo não definido</i>"
+    icone_grupo = "✅" if grupo_id_str in cache_nomes else "⏳"
+    
+    if not grupo_id_str:
+        display_grupo = "    ❌ <i>Grupo não definido</i>"
+    else:
+        display_grupo = f"    {icone_grupo} {nome_grupo} (<code>{grupo_id_str}</code>)"
 
-    # 2. Tópico de Escuta com Nome do Cache
+    # --- 2. Tópico de Escuta ---
     topico_escuta_str = str(topico_escuta) if topico_escuta else ""
-    # Pega o nome customizado salvo ou usa o nome do grupo base como referência
-    # ✅ O nome REAL vindo do cache (sincronizado pelo Userbot) tem prioridade
-    # sobre o valor gravado em config, que não acompanha renomeações no Telegram.
-    nome_escuta = (cache_nomes.get(f"{grupo_id_str}_{topico_escuta_str}")
+    chave_escuta = f"{grupo_id_str}_{topico_escuta_str}"
+    
+    nome_escuta = (cache_nomes.get(chave_escuta)
                    or config.get("nome_topico_envio")
                    or "Tópico de Escuta")
-    display_escuta = f"{nome_escuta} (<code>{grupo_id_str}_{topico_escuta_str}</code>)" if topico_escuta_str else "<i>Não definido</i>"
+    icone_escuta = "✅" if chave_escuta in cache_nomes else "⏳"
+    
+    if not topico_escuta_str:
+        display_escuta = "    ❌ <i>Não definido</i>"
+    else:
+        display_escuta = f"    {icone_escuta} {nome_escuta} (<code>{chave_escuta}</code>)"
 
-    # 3. Tópico Vitrine com Nome do Cache
+    # --- 3. Tópico Vitrine (Postando) ---
     topico_vitrine_str = str(topico_vitrine) if topico_vitrine else ""
-    nome_vitrine = (cache_nomes.get(f"{grupo_id_str}_{topico_vitrine_str}")
+    chave_vitrine = f"{grupo_id_str}_{topico_vitrine_str}"
+    
+    nome_vitrine = (cache_nomes.get(chave_vitrine)
                     or config.get("nome_topico_destino")
                     or "Tópico Vitrine")
-    display_vitrine = f"{nome_vitrine} (<code>{grupo_id_str}_{topico_vitrine_str}</code>)" if topico_vitrine_str else "<i>Não definido</i>"
+    icone_vitrine = "✅" if chave_vitrine in cache_nomes else "⏳"
+    
+    if not topico_vitrine_str:
+        display_vitrine = "    ❌ <i>Não definido</i>"
+    else:
+        display_vitrine = f"    {icone_vitrine} {nome_vitrine} (<code>{chave_vitrine}</code>)"
 
-    # 4. Tópicos de Rotina com Nomes do Cache
+    # --- 4. Tópicos de Rotina ---
     topicos_rotina = config.get("topicos_rotina", [])
     nomes_rotinas_salvos = config.get("nomes_topicos_rotina", {})
 
     def resolver_nome_topico(numero_topico):
-        """✅ CORREÇÃO: o cache é indexado por chat_id, nunca pelo número solto do
-        tópico. Resolvemos na ordem: nome salvo -> tópicos já conhecidos
-        (vitrine/escuta) -> cache pela chave composta -> Geral -> fallback."""
         t_str = str(numero_topico)
-
         for chave in (f"{grupo_id_str}_{t_str}", f"{grupo_id_str}:{t_str}"):
             if cache_nomes.get(chave):
-                return cache_nomes[chave]
+                return cache_nomes[chave], "✅"
 
         nome = nomes_rotinas_salvos.get(t_str)
         if nome:
-            return nome
+            return nome, "✅"
 
         if topico_vitrine_str and t_str == topico_vitrine_str:
-            return nome_vitrine
+            return nome_vitrine, icone_vitrine
         if topico_escuta_str and t_str == topico_escuta_str:
-            return nome_escuta
+            return nome_escuta, icone_escuta
 
-        # No Telegram, o tópico 1 é sempre o chat "Geral" do fórum
         if t_str == "1":
-            return "Geral"
+            return "Geral", "✅"
 
-        return f"Tópico {t_str}"
+        return f"Tópico {t_str}", "⏳"
 
     if topicos_rotina:
         lista_exibicao = []
         for t in topicos_rotina:
             id_completo_topico = f"{grupo_id_str}_{t}"
-            nome_t = resolver_nome_topico(t)
-            lista_exibicao.append(f"    - {nome_t} (<code>{id_completo_topico}</code>)")
-        # ✅ Lista vertical: em linha única a quebra de texto ficava confusa
+            nome_t, icone_t = resolver_nome_topico(t)
+            lista_exibicao.append(f"    {icone_t} {nome_t} (<code>{id_completo_topico}</code>)")
         display_rotinas = "\n" + "\n".join(lista_exibicao)
     else:
-        display_rotinas = " <i>Chat Geral (Padrão)</i>"
+        display_rotinas = "\n    ✅ <i>Chat Geral (Padrão)</i>"
 
     # --- INFORMAÇÕES DO ROBÔ REPOSTADOR ---
-    # ✅ CORREÇÃO: Status agora está padronizado em MAIÚSCULAS
     repost_status = "🔴 PAUSADO" if config.get("repost_pausado") else "🟢 ATIVADO"
     dias = config.get("repost_dias", 15)
     limite = config.get("repost_limite", 6)
@@ -2220,19 +2229,19 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     # Origem do Repostador
     repost_origem = config.get("repost_origem")
     if repost_origem:
-        # ✅ Padroniza a exibição no formato "_" e busca o nome pelo ID base
         repost_origem_base = str(repost_origem).split(":")[0].strip()
         nome_repost_origem = cache_nomes.get(repost_origem_base, str(repost_origem_base))
-        display_repost_origem = f"{nome_repost_origem} (<code>{str(repost_origem).replace(':', '_')}</code>)"
+        icone_rep_orig = "✅" if repost_origem_base in cache_nomes else "⏳"
+        display_repost_origem = f"    {icone_rep_orig} {nome_repost_origem} (<code>{str(repost_origem).replace(':', '_')}</code>)"
     else:
-        # Fallback para o destino dos Vídeos Autorais
         config_aut = ler_config_bd("autorais_config", {})
         dest_aut = config_aut.get("destino", "Não definido")
         dest_aut_base = str(dest_aut).split(":")[0].strip()
         nome_aut = cache_nomes.get(dest_aut_base, str(dest_aut_base))
-        display_repost_origem = f"{nome_aut} (<code>{str(dest_aut).replace(':', '_')}</code>) [Padrão]"
+        icone_rep_orig = "✅" if dest_aut_base in cache_nomes else "⏳"
+        display_repost_origem = f"    {icone_rep_orig} {nome_aut} (<code>{str(dest_aut).replace(':', '_')}</code>) [Padrão]"
 
-    # Destino do Repostador (É sempre o Tópico Vitrine do Grupo Público)
+    # Destino do Repostador (É sempre o Tópico Vitrine)
     display_repost_destino = display_vitrine
 
     texto = (
@@ -2241,13 +2250,13 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         "Ele escutará os envios no Tópico de Conversa, analisará com a IA "
         "e postará automaticamente os vídeos aprovados no Tópico Vitrine.\n\n"
         f"⚙️ <b>Status Robô Moderador:</b> {status}\n"
-        f"{display_grupo}\n"
-        f"📥 <b>Escutando:</b> {display_escuta}\n"
-        f"📤 <b>Postando:</b> {display_vitrine}\n"
+        f"👥 <b>Grupo Base:</b>\n{display_grupo}\n"
+        f"📥 <b>Escutando:</b>\n{display_escuta}\n"
+        f"📤 <b>Postando:</b>\n{display_vitrine}\n"
         f"📢 <b>Alvos das Rotinas:</b>{display_rotinas}\n\n"
         f"♻️ <b>Status Robô Repostador:</b> {repost_status}\n"
-        f"📥 <b>Escutando:</b> {display_repost_origem}\n"
-        f"📤 <b>Postando:</b> {display_repost_destino}\n"
+        f"📥 <b>Escutando:</b>\n{display_repost_origem}\n"
+        f"📤 <b>Postando:</b>\n{display_repost_destino}\n"
         f"⏳ Oculto por: <b>{dias} dias</b>\n"
         f"📦 Cota Diária: <b>{limite} vídeos/dia</b>\n\n"
         "Escolha a ação desejada:"
