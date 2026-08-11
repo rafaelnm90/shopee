@@ -2153,21 +2153,27 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     nome_grupo = cache_nomes.get(grupo_id_str, "Grupo Público")
     display_grupo = f"👥 <b>Grupo Base:</b> {nome_grupo} (<code>{grupo_id_str}</code>)" if grupo_id_str else "<i>Grupo não definido</i>"
 
-    # 2. Exibição Simples do Tópico de Escuta (Bot Moderador)
+    # 2. Tópico de Escuta com Nome do Cache
     topico_escuta_str = str(topico_escuta) if topico_escuta else ""
-    display_escuta = f"<code>{grupo_id_str}_{topico_escuta_str}</code>" if topico_escuta_str else "<i>Não definido</i>"
+    # Pega o nome customizado salvo ou usa o nome do grupo base como referência
+    nome_escuta = config.get("nome_topico_envio") or cache_nomes.get(topico_escuta_str, "Tópico de Escuta")
+    display_escuta = f"{nome_escuta} (<code>{grupo_id_str}_{topico_escuta_str}</code>)" if topico_escuta_str else "<i>Não definido</i>"
 
-    # 3. Exibição Simples do Tópico Vitrine (Bot Moderador)
+    # 3. Tópico Vitrine com Nome do Cache
     topico_vitrine_str = str(topico_vitrine) if topico_vitrine else ""
-    display_vitrine = f"<code>{grupo_id_str}_{topico_vitrine_str}</code>" if topico_vitrine_str else "<i>Não definido</i>"
+    nome_vitrine = config.get("nome_topico_destino") or cache_nomes.get(topico_vitrine_str, "Tópico Vitrine")
+    display_vitrine = f"{nome_vitrine} (<code>{grupo_id_str}_{topico_vitrine_str}</code>)" if topico_vitrine_str else "<i>Não definido</i>"
 
-    # 4. Exibição Simples dos Tópicos de Rotina
+    # 4. Tópicos de Rotina com Nomes do Cache
     topicos_rotina = config.get("topicos_rotina", [])
+    nomes_rotinas_salvos = config.get("nomes_topicos_rotina", {})
     if topicos_rotina:
         lista_exibicao = []
         for t in topicos_rotina:
             id_completo_topico = f"{grupo_id_str}_{t}"
-            lista_exibicao.append(f"<code>{id_completo_topico}</code>")
+            # Tenta pegar o nome salvo ou do cache
+            nome_t = nomes_rotinas_salvos.get(str(t)) or cache_nomes.get(str(t), f"Tópico {t}")
+            lista_exibicao.append(f"{nome_t} (<code>{id_completo_topico}</code>)")
         display_rotinas = ", ".join(lista_exibicao)
     else:
         display_rotinas = "<i>Chat Geral (Padrão)</i>"
