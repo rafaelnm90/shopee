@@ -245,6 +245,7 @@ class SubmissaoAdminFluxo(StatesGroup):
     aguardando_confirmacao_repost_dias = State()
     aguardando_confirmacao_repost_limite = State()
     aguardando_confirmacao_pausa_repost = State()
+    aguardando_repost_origem = State() # ✅ NOVO: Estado para a origem
 
 class SubmissaoUsuarioInterativa(StatesGroup):
     aguardando_video = State()
@@ -257,6 +258,7 @@ def ler_submissao_config():
         "grupo_id": None, 
         "topico_envio": None, 
         "topico_destino": None,
+        "repost_origem": None, # ✅ NOVO: Chave para a origem
         "repost_dias": 15,
         "repost_limite": 6,
         "repost_pausado": False,
@@ -2103,12 +2105,27 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     dias = config.get("repost_dias", 15)
     limite = config.get("repost_limite", 6)
     
+    cache_nomes = ler_cache_nomes_grupos()
+    
+    # ✅ NOVO: Puxa o nome da origem do Repost
+    repost_origem = config.get("repost_origem")
+    if repost_origem:
+        nome_repost_origem = cache_nomes.get(str(repost_origem), str(repost_origem))
+        display_repost_origem = f"{nome_repost_origem} (<code>{repost_origem}</code>)"
+    else:
+        # Fallback para o destino dos Vídeos Autorais
+        config_aut = ler_config_bd("autorais_config", {})
+        dest_aut = config_aut.get("destino", "Não definido")
+        nome_aut = cache_nomes.get(str(dest_aut), str(dest_aut))
+        display_repost_origem = f"{nome_aut} (<code>{dest_aut}</code>) [Padrão]"
+    
     texto = (
         "📬 <b>Painel do Grupo Público</b>\n\n"
         f"O robô atuará como moderador dentro do seu Supergrupo.\n"
         f"Ele escutará os envios no Tópico de Conversa, analisará com a IA e postará automaticamente os vídeos aprovados no Tópico Vitrine.\n\n"
         f"<b>Status Atual:</b> {status}\n\n"
-        f"♻️ <b>Robô Repostador Autoral:</b> {repost_status}\n"
+        f"♻️ <b>Robô Repostador para o Público:</b> {repost_status}\n"
+        f"📥 Origem: <b>{display_repost_origem}</b>\n"
         f"⏳ Oculto por: <b>{dias} dias</b>\n"
         f"📦 Cota Diária: <b>{limite} vídeos/dia</b>\n\n"
         f"Escolha a ação desejada:"
@@ -2139,6 +2156,7 @@ async def submenu_regras_repost_publico(message: types.Message, state: FSMContex
     if message.from_user.id != ADMIN_ID: return
     teclado = ReplyKeyboardMarkup(
         keyboard=[
+            [KeyboardButton(text="Editar Origem (Público) 📥")],
             [KeyboardButton(text="Editar Dias (Público) ⏳"), KeyboardButton(text="Editar Limite (Público) 📦")],
             [KeyboardButton(text="Voltar ao Painel Público 🔙")]
         ],
@@ -2147,6 +2165,52 @@ async def submenu_regras_repost_publico(message: types.Message, state: FSMContex
     )
     await message.answer("♻️ <b>Regras de Repostagem (Grupo Público)</b>\nEscolha o que deseja editar:", reply_markup=teclado, parse_mode="HTML")
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
+
+# ✅ NOVO: Handlers para Editar a Origem do Repost Público
+@dp.message(F.text == "Editar Origem (Público) 📥", StateFilter("*"))
+async def pedir_origem_repost_publico(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await message.answer(
+        "Envie o <b>ID Numérico, @username ou Link do Telegram Web</b> do canal de ORIGEM de onde o robô vai puxar os vídeos para postar no Grupo Público:\n"
+        "<i>(Se você não definir, ele continuará pegando do destino dos Vídeos Autorais)</i>", 
+        parse_mode="HTML", 
+        reply_markup=teclado_cancelar
+    )
+    await state.set_state(SubmissaoAdminFluxo.aguardando_repost_origem)
+
+@dp.message(SubmissaoAdminFluxo.aguardando_repost_origem)
+async def salvar_origem_repost_publico(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await message.answer("Operação cancelada.")
+        await submenu_regras_repost_publico(message, state)
+        return
+        
+    novo_valor = message.text.strip()
+    msg_status = await message.answer("⏳ <b>Validando canal de origem...</b>", parse_mode="HTML")
+    
+    sucesso, id_final, nome_chat = await validar_e_formatar_alvo(bot, novo_valor)
+    await msg_status.delete()
+
+    if sucesso:
+        await message.answer(f"✅ Origem validada e encontrada: <b>{nome_chat}</b>", parse_mode="HTML")
+        salvar_nome_grupo(str(id_final), nome_chat)
+    else:
+        import re
+        id_final = novo_valor
+        if "t.me/c/" in novo_valor:
+            so_num = re.search(r't\.me/c/(\d+)', novo_valor)
+            if so_num: id_final = f"-100{so_num.group(1)}"
+        elif "web.telegram.org" in novo_valor:
+             so_num = re.search(r'-(\d+)', novo_valor)
+             if so_num: id_final = f"-100{so_num.group(1)}"
+        await message.answer("⚠️ <b>Aviso:</b> O bot não conseguiu encontrar este canal na base de dados. O ID será salvo mesmo assim.", parse_mode="HTML")
+
+    config = ler_submissao_config()
+    config["repost_origem"] = id_final
+    salvar_submissao_config(config)
+    
+    await message.answer(f"✅ <b>Origem do Repost atualizada com sucesso!</b>\nOs vídeos serão puxados de: <code>{id_final}</code>", parse_mode="HTML")
+    await submenu_regras_repost_publico(message, state)
 
 @dp.message(F.text == "Status do Robô ⏸️", StateFilter("*"))
 async def submenu_status_robo_publico(message: types.Message, state: FSMContext):
@@ -2366,8 +2430,11 @@ async def motor_repost_publico_step():
             id_unico = video_alvo["id_unico"]
             legenda_original = video_alvo["legenda"]
             
-            config_aut = ler_config_bd("autorais_config", {})
-            canal_autorais = config_aut.get("destino")
+            # ✅ NOVO: Tenta usar a origem personalizada. Se não tiver, usa a dos Autorais.
+            canal_autorais = config.get("repost_origem")
+            if not canal_autorais:
+                config_aut = ler_config_bd("autorais_config", {})
+                canal_autorais = config_aut.get("destino")
             
             if file_id and canal_autorais:
                 import re
@@ -4800,8 +4867,12 @@ async def manual_repost_autoral(message: types.Message):
     )
     
     try:
-        config_aut = ler_config_bd("autorais_config", {})
-        canal_autorais = config_aut.get("destino")
+        try:
+        # ✅ NOVO: Tenta usar a origem personalizada. Se não tiver, usa a dos Autorais.
+        canal_autorais = config_pub.get("repost_origem")
+        if not canal_autorais:
+            config_aut = ler_config_bd("autorais_config", {})
+            canal_autorais = config_aut.get("destino")
         
         await bot.copy_message(
             chat_id=chat_destino,
