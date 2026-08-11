@@ -2653,10 +2653,14 @@ async def painel_autorais(message: types.Message, state: FSMContext):
         if len(_partes_origem) > 1 and _partes_origem[1].strip().isdigit() and not topico:
             topico = int(_partes_origem[1].strip())
 
-    topico_str = f":{topico}" if topico else ""
+    topico_str = f"_{topico}" if topico else ""
     destino = config.get("destino", "Não definido")
+    destino_topico_str = ""
     if isinstance(destino, str) and ":" in destino:
-        destino = destino.split(":")[0].strip()
+        _partes_destino = destino.split(":")
+        destino = _partes_destino[0].strip()
+        if len(_partes_destino) > 1 and _partes_destino[1].strip().isdigit():
+            destino_topico_str = f"_{_partes_destino[1].strip()}"
     dias_retorno = config.get("dias_retorno", 15)
     limite_videos = config.get("limite_videos", 5)
     
@@ -2716,17 +2720,17 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     icone_destino = "⏳"
     if str(destino) != "Não definido":
         if str(destino) in cache_nomes:
-            nome_destino = f"{cache_nomes[str(destino)]} (<code>{destino}</code>)"
+            nome_destino = f"{cache_nomes[str(destino)]} (<code>{destino}{destino_topico_str}</code>)"
             icone_destino = "✅"
         else:
             try:
                 chat_obj = await bot.get_chat(destino)
                 nome = chat_obj.title or chat_obj.full_name
-                nome_destino = f"{nome} (<code>{destino}</code>)"
+                nome_destino = f"{nome} (<code>{destino}{destino_topico_str}</code>)"
                 salvar_nome_grupo(str(destino), nome)
                 icone_destino = "✅"
             except Exception:
-                nome_destino = f"<code>{destino}</code> - <i>Acesso Negado</i>"
+                nome_destino = f"<code>{destino}{destino_topico_str}</code> - <i>Acesso Negado</i>"
                 icone_destino = "❌"
     
     # --- MONTAGEM DO TEXTO ---
@@ -2937,6 +2941,8 @@ async def confirmar_origem_autorais(message, state, nova_origem, topico_final, n
     topico_antigo = config.get("origem_topico")
     
     nome_novo = nome_novo or nova_origem
+    sufixo_novo = f"_{topico_final}" if topico_final else ""
+    sufixo_antigo = f"_{topico_antigo}" if topico_antigo else ""
     texto_topico_novo = f"Tópico {topico_final}" if topico_final else "Todos os tópicos"
     texto_topico_antigo = f"Tópico {topico_antigo}" if topico_antigo else "Todos os tópicos"
     
@@ -2948,9 +2954,9 @@ async def confirmar_origem_autorais(message, state, nova_origem, topico_final, n
     
     texto = (
         "⚠️ <b>Confirme a alteração da ORIGEM</b>\n\n"
-        f"<b>De:</b> <code>{origem_antiga}</code> ({texto_topico_antigo})\n"
+        f"<b>De:</b> <code>{origem_antiga}{sufixo_antigo}</code> ({texto_topico_antigo})\n"
         f"<b>Para:</b> {nome_novo}\n"
-        f"<code>{nova_origem}</code> ({texto_topico_novo})\n\n"
+        f"<code>{nova_origem}{sufixo_novo}</code> ({texto_topico_novo})\n\n"
         "O robô passará a escutar exclusivamente este grupo/tópico. Deseja aprovar?"
     )
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado_confirmacao)
@@ -3053,6 +3059,9 @@ async def salvar_destino_autorais(message: types.Message, state: FSMContext):
     await state.update_data(destino_pendente=id_final, nome_destino_validado=nome_chat)
     
     nome_novo = nome_chat or id_final
+    # ✅ Exibição no mesmo formato do link do Telegram Web ("-100123_1")
+    id_final_exibicao = str(id_final).replace(":", "_")
+    destino_antigo_exibicao = str(destino_antigo).replace(":", "_")
     origem_atual = str(config.get("origem", "")).split(":")[0].strip()
     
     aviso_loop = ""
@@ -3071,9 +3080,9 @@ async def salvar_destino_autorais(message: types.Message, state: FSMContext):
     
     texto = (
         "⚠️ <b>Confirme a alteração do DESTINO</b>\n\n"
-        f"<b>De:</b> <code>{destino_antigo}</code>\n"
+        f"<b>De:</b> <code>{destino_antigo_exibicao}</code>\n"
         f"<b>Para:</b> {nome_novo}\n"
-        f"<code>{id_final}</code>\n\n"
+        f"<code>{id_final_exibicao}</code>\n\n"
         "Todos os vídeos convertidos passarão a ser publicados aqui. Deseja aprovar?"
         f"{aviso_loop}"
     )
@@ -3099,7 +3108,7 @@ async def processar_destino_autorais(message: types.Message, state: FSMContext):
     salvar_autorais_config(config)
     
     if EXIBIR_LOGS: logger.info(f"✅ Destino dos vídeos autorais atualizado para: {id_final}")
-    await message.answer(f"✅ <b>Destino atualizado com sucesso!</b>\nOs vídeos convertidos serão enviados instantaneamente para: <code>{id_final}</code>", parse_mode="HTML")
+    await message.answer(f"✅ <b>Destino atualizado com sucesso!</b>\nOs vídeos convertidos serão enviados instantaneamente para: <code>{str(id_final).replace(':', '_')}</code>", parse_mode="HTML")
     await painel_autorais(message, state)
 
 # ----------------------------------------------------
