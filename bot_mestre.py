@@ -9810,7 +9810,7 @@ async def selecionar_campo_grupo_publico(message: types.Message, state: FSMConte
     opcoes = {
         "Editar Tópico de Escuta 💬": ("escuta", "Envie o Link ou ID Numérico do tópico onde os membros enviam os vídeos (<b>Tópico de Escuta</b>):"),
         "Editar Tópico Vitrine 🌟": ("vitrine", "Envie o Link ou ID Numérico do tópico onde o robô irá postar os vídeos aprovados (<b>Tópico Vitrine</b>):"),
-        "Editar Tópicos de Rotina 📢": ("rotina", "Envie os Links ou IDs dos tópicos onde o robô enviará os convites de rotina (separados por vírgula). Se for no chat geral, digite <b>0</b>:")
+        "Editar Tópicos de Rotina 📢": ("rotina", "Envie o Link ou ID numérico do tópico onde o robô enviará as rotinas.\n\n⚠️ <b>Atenção:</b> Você pode enviar <b>apenas 1 tópico</b> ou <b>vários tópicos</b> de uma vez.\nSe for enviar vários, separe-os por vírgula (Ex: ID1, ID2, ID3).\n\nSe quiser que o robô poste no chat geral (sem tópico), digite <b>0</b>.")
     }
     
     selecao = opcoes.get(message.text)
