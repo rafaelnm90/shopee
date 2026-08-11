@@ -2206,7 +2206,7 @@ async def submenu_regras_repost_publico(message: types.Message, state: FSMContex
     if message.from_user.id != ADMIN_ID: return
     teclado = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Editar Origem (Público) 📥")],
+            [KeyboardButton(text="Editar Escutando (Público) 📥")],
             [KeyboardButton(text="Editar Dias (Público) ⏳"), KeyboardButton(text="Editar Limite (Público) 📦")],
             [KeyboardButton(text="Voltar ao Painel Público 🔙")]
         ],
@@ -2217,7 +2217,7 @@ async def submenu_regras_repost_publico(message: types.Message, state: FSMContex
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
 
 # ✅ NOVO: Handlers para Editar a Origem do Repost Público
-@dp.message(F.text == "Editar Origem (Público) 📥", StateFilter("*"))
+@dp.message(F.text == "Editar Escutando (Público) 📥", StateFilter("*"))
 async def pedir_origem_repost_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await message.answer(
