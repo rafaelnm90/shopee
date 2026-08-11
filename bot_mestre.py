@@ -1693,38 +1693,59 @@ async def disparar_mensagem(tipo, forcar=False):
     else:
         destinos.append(None)
 
+    # Configura os tópicos
+    destinos = []
+    if is_publico:
+        config_sub = ler_submissao_config()
+        topicos_rotina = config_sub.get("topicos_rotina", [])
+        if topicos_rotina:
+            # Transforma os IDs em inteiros e inclui os tópicos de escuta/vitrine se necessário
+            for t in topicos_rotina:
+                try: destinos.append(int(t))
+                except: pass
+        else:
+            destinos.append(None)
+    else:
+        destinos.append(None)
+
     for thread_id in destinos:
         try:
-            if EXIBIR_LOGS: logger.info(f"📤 Disparando {tipo} para Thread: {thread_id if thread_id else 'Geral'}")
-            msg_enviada = await bot.send_message(chat_destino, texto, message_thread_id=thread_id)
+            # ✅ CORREÇÃO: Converte o ID rigorosamente para número inteiro
+            thread_param = int(thread_id) if thread_id is not None else None
+            
+            if EXIBIR_LOGS: logger.info(f"📤 Disparando {tipo} para Thread: {thread_param if thread_param else 'Geral'}")
+            msg_enviada = await bot.send_message(chat_destino, texto, message_thread_id=thread_param)
             registrar_lixeira(msg_enviada.message_id, chat_destino)
             
-            await asyncio.sleep(0.5) # Pausa para o Telegram não bloquear o link subsequente
+            await asyncio.sleep(1) # Pausa de respiro para anexos
             
             # 🔗 ANEXADORES DE LINKS ISOLADOS
             if tipo == "link_grupo":
-                msg_link = await bot.send_message(chat_destino, f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}", parse_mode="HTML", message_thread_id=thread_id)
+                msg_link = await bot.send_message(chat_destino, f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}", parse_mode="HTML", message_thread_id=thread_param)
                 registrar_lixeira(msg_link.message_id, chat_destino)
             elif tipo == "link_grupo_viral":
-                msg_link = await bot.send_message(chat_destino, f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO_VIRAL}", parse_mode="HTML", message_thread_id=thread_id)
+                msg_link = await bot.send_message(chat_destino, f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO_VIRAL}", parse_mode="HTML", message_thread_id=thread_param)
                 registrar_lixeira(msg_link.message_id, chat_destino)
             elif tipo in ["divulgar_gem", "divulgar_gem_viral"]:
-                msg_gem = await bot.send_message(chat_destino, "👇 <b>Acesse o Prompt Automatizado:</b>\nhttps://gemini.google.com/gem/1HtJMuknyMZ76utOu-i6c_xvc3vmQx7bT?usp=sharing", parse_mode="HTML", message_thread_id=thread_id)
+                msg_gem = await bot.send_message(chat_destino, "👇 <b>Acesse o Prompt Automatizado:</b>\nhttps://gemini.google.com/gem/1HtJMuknyMZ76utOu-i6c_xvc3vmQx7bT?usp=sharing", parse_mode="HTML", message_thread_id=thread_param)
                 registrar_lixeira(msg_gem.message_id, chat_destino)
             elif tipo == "promo_viral" or tipo == "promo_viral_publico":
-                msg_viral = await bot.send_message(chat_destino, f"👇 <b>Acesse o Acervo Viral:</b>\n{LINK_GRUPO_VIRAL}", parse_mode="HTML", message_thread_id=thread_id)
+                msg_viral = await bot.send_message(chat_destino, f"👇 <b>Acesse o Acervo Viral:</b>\n{LINK_GRUPO_VIRAL}", parse_mode="HTML", message_thread_id=thread_param)
                 registrar_lixeira(msg_viral.message_id, chat_destino)
             elif tipo == "promo_principal" or tipo == "promo_principal_publico":
-                msg_princ = await bot.send_message(chat_destino, f"👇 <b>Acesse o Acervo Afiliados:</b>\n{LINK_GRUPO}", parse_mode="HTML", message_thread_id=thread_id)
+                msg_princ = await bot.send_message(chat_destino, f"👇 <b>Acesse o Acervo Afiliados:</b>\n{LINK_GRUPO}", parse_mode="HTML", message_thread_id=thread_param)
                 registrar_lixeira(msg_princ.message_id, chat_destino)
             elif tipo in ["promo_publico", "promo_publico_viral", "link_grupo_publico"]:
-                msg_pub = await bot.send_message(chat_destino, f"🔥 <b>Venha participar do nosso Grupo de Ofertas:</b>\n{LINK_GRUPO_PUBLICO}", parse_mode="HTML", message_thread_id=thread_id) 
+                msg_pub = await bot.send_message(chat_destino, f"🔥 <b>Venha participar do nosso Grupo de Ofertas:</b>\n{LINK_GRUPO_PUBLICO}", parse_mode="HTML", message_thread_id=thread_param) 
                 registrar_lixeira(msg_pub.message_id, chat_destino)
                 
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar rotina {tipo} para thread {thread_id}: {e}")
+            if "message thread not found" in str(e).lower() or "wrong_id" in str(e).lower():
+                if EXIBIR_LOGS: logger.error(f"❌ O tópico {thread_id} não existe mais no grupo ou o ID '{thread_id}' é inválido.")
+            else:
+                if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar rotina {tipo} para thread {thread_id}: {e}")
             
-        await asyncio.sleep(4.5) # ✅ CORREÇÃO: Pausa LONGA de segurança para não tomar ban por flood no grupo!
+        await asyncio.sleep(4) # ✅ CORREÇÃO: Pausa LONGA (4 seg) para não tomar punição de flood do Telegram entre um tópico e outro!
 
 def ler_config_rotina():
     if EXIBIR_LOGS: logger.info("🚀 Iniciando leitura e validação das configurações de rotina...")
@@ -4834,7 +4855,7 @@ async def manual_promo_publico(message: types.Message):
     await disparar_mensagem("promo_publico", forcar=True)
     await message.answer("Mensagem de Promo Público enviada ao grupo com sucesso! ✅")
 
-@dp.message(F.text == "Disparar Convite Próprio 🔗", StateFilter("*"))
+@dp.message(F.text == "Disparar Convite (Próprio) 🔗", StateFilter("*"))
 async def manual_convite_proprio_publico(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     dados_rotina = ler_config_rotina()
@@ -9724,12 +9745,12 @@ async def processar_toggle_submissoes(message: types.Message, state: FSMContext)
     
     if config["ativo"]:
         icone = "✅"
-        status = "ATIVADA"
+        status = "ATIVADO"
     else:
         icone = "🔴"
-        status = "DESATIVADA"
+        status = "DESATIVADO"
         
-    await message.answer(f"{icone} A moderação automática foi <b>{status}</b> com sucesso.", parse_mode="HTML")
+    await message.answer(f"{icone} O Robô Moderador foi <b>{status}</b> com sucesso.", parse_mode="HTML")
     await painel_submissoes(message, state)
 
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Rotinas do Grupo Público ⏰")
