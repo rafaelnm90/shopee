@@ -2133,6 +2133,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("👥 Acessando Painel do Grupo Público e Repostador.")
     config = ler_submissao_config()
     status = "🟢 ATIVADO" if config.get("ativo") else "🔴 DESATIVADO"
+    texto_botao_moderador = "Desativar Robô Moderador 🛑" if config.get("ativo") else "Ativar Robô Moderador ⚙️"
     
     grupo_id = config.get("grupo_id")
     topico_escuta = config.get("topico_envio")
@@ -2262,7 +2263,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     
     teclado_pub = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Ativar/Desativar Robô Moderador ⚙️")],
+            [KeyboardButton(text=texto_botao_moderador)],
             [KeyboardButton(text="Configurar Grupo e Tópicos 🏷️")],
             [KeyboardButton(text="Rotinas do Grupo Público ⏰")],
             [KeyboardButton(text="Regras de Repostagem ♻️"), KeyboardButton(text="Status do Robô ⏸️")],
@@ -7953,7 +7954,7 @@ async def processar_pausa_rotinas_interno(message: types.Message, state: FSMCont
         if novo_status: await message.answer("⏸️ <b>Rotinas do Público PAUSADAS.</b>", parse_mode="HTML")
         else:
             await message.answer("▶️ <b>Rotinas do Público ATIVAS.</b>\n🔄 Recalculando grade...", parse_mode="HTML")
-            agendar_tarefas_diarias(escopo="publico")
+            agendar_tarefas_diarias(escopo="principal")
         await gerenciar_rotina_publico(message, state)
         
     else:
@@ -10119,7 +10120,7 @@ async def forcar_clones_fila(callback: types.CallbackQuery):
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila de clonagem: {e}")
         await callback.answer("Erro ao acessar a fila de clonagem.", show_alert=True)
 
-@dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Ativar/Desativar Robô Moderador ⚙️"]))
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Ativar Robô Moderador ⚙️", "Desativar Robô Moderador 🛑", "Ativar/Desativar Robô Moderador ⚙️"]))
 async def pedir_confirmacao_toggle(message: types.Message, state: FSMContext):
     config = ler_submissao_config()
     if not config.get("grupo_id"):
@@ -10236,7 +10237,8 @@ async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
     teclado = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Editar Rotinas ✏️"), KeyboardButton(text="Disparos Manuais 🚀")],
-            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar ao Painel Público 🔙")]
+            [KeyboardButton(text=texto_botao_pausa)],
+            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
         ], resize_keyboard=True, is_persistent=True
     )
     await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
