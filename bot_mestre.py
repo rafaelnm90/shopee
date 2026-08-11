@@ -7181,8 +7181,7 @@ async def submenu_editar_rotinas(message: types.Message, state: FSMContext):
         teclado = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="Editar Convite (Próprio) 🔗"), KeyboardButton(text="Editar Promo Principal 🌟")],
-                [KeyboardButton(text="Editar Promo Viral 💥"), KeyboardButton(text="Editar Repost Autoral ♻️")],
-                [KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
+                [KeyboardButton(text="Editar Promo Viral 💥"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
             ],
             resize_keyboard=True,
             is_persistent=True
@@ -7226,8 +7225,7 @@ async def submenu_disparos_manuais(message: types.Message, state: FSMContext):
         teclado = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="Disparar Convite (Próprio) 🔗"), KeyboardButton(text="Disparar Promo Principal 🌟")],
-                [KeyboardButton(text="Disparar Promo Viral 💥"), KeyboardButton(text="Disparar Repost Autoral ♻️")],
-                [KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
+                [KeyboardButton(text="Disparar Promo Viral 💥"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
             ],
             resize_keyboard=True,
             is_persistent=True
@@ -8168,7 +8166,7 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
     await state.update_data(menu_origem="principal") # ✅ Adicione esta linha exata aqui
     await state.set_state(ConfigRotina.menu_principal)
 
-@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Promo Público 🗣️", "Editar Convite Afiliados 🚀", "Editar Convite do Grupo 🔗", "Editar Prompt GEM 🤖\u200b", "Editar Promo Público 👥", "Editar Convite (Próprio) 🔗", "Editar Promo Principal 🌟", "Editar Promo Viral 💥", "Editar Repost Autoral ♻️"]))
+@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Promo Público 🗣️", "Editar Convite Afiliados 🚀", "Editar Convite do Grupo 🔗", "Editar Prompt GEM 🤖\u200b", "Editar Promo Público 👥", "Editar Convite (Próprio) 🔗", "Editar Promo Principal 🌟", "Editar Promo Viral 💥"]))
 async def pedir_horario_rotina(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info(f"✏️ Iniciando edição da rotina: {message.text}")
     if EXIBIR_LOGS: logger.info(f"✏️ Processando edição da rotina selecionada: {message.text}")
@@ -8186,8 +8184,7 @@ async def pedir_horario_rotina(message: types.Message, state: FSMContext):
         "Editar Promo Público 👥": "promo_publico_viral",
         "Editar Convite (Próprio) 🔗": "link_grupo_publico",
         "Editar Promo Principal 🌟": "promo_principal_publico",
-        "Editar Promo Viral 💥": "promo_viral_publico",
-        "Editar Repost Autoral ♻️": "repost_fake_publico"
+        "Editar Promo Viral 💥": "promo_viral_publico"
     }
     tipo = tipo_map[message.text]
     if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Botão mapeado internamente para a chave '{tipo}'.")
@@ -9613,12 +9610,10 @@ async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
     config_pub = dados.get("link_grupo_publico", {"inicio": 9, "fim": 21, "frequencia": 2})
     config_princ = dados.get("promo_principal_publico", {"inicio": 10, "fim": 20, "frequencia": 1})
     config_vir = dados.get("promo_viral_publico", {"inicio": 10, "fim": 20, "frequencia": 1})
-    config_repost = dados.get("repost_fake_publico", {"inicio": 10, "fim": 22, "frequencia": 2}) # NOVO
     
     texto += f"🔹 <b>Convite (Próprio Grupo) 🔗</b>\n   Janela: {config_pub['inicio']}h às {config_pub['fim']}h | {config_pub['frequencia']}x/dia\n\n"
     texto += f"🔹 <b>Promo Canal Principal 🌟</b>\n   Janela: {config_princ['inicio']}h às {config_princ['fim']}h | {config_princ['frequencia']}x/dia\n\n"
     texto += f"🔹 <b>Promo Canal Viral 💥</b>\n   Janela: {config_vir['inicio']}h às {config_vir['fim']}h | {config_vir['frequencia']}x/dia\n\n"
-    texto += f"🔹 <b>Repost de Autoral ♻️</b>\n   Janela: {config_repost['inicio']}h às {config_repost['fim']}h | {config_repost['frequencia']}x/dia\n\n"
     
     texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado_publico") else "Pausar Rotinas ⏸️"
     teclado = ReplyKeyboardMarkup(
