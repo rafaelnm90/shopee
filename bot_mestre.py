@@ -2133,6 +2133,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("👥 Acessando Painel do Grupo Público e Repostador.")
     config = ler_submissao_config()
     status = "🟢 ATIVADO" if config.get("ativo") else "🔴 DESATIVADO"
+    texto_botao_moderador = "Desativar Robô Moderador 🛑" if config.get("ativo") else "Ativar Robô Moderador ⚙️"
     
     grupo_id = config.get("grupo_id")
     topico_escuta = config.get("topico_envio")
@@ -2262,7 +2263,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     
     teclado_pub = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Ativar/Desativar Robô Moderador ⚙️")],
+            [KeyboardButton(text=texto_botao_moderador)],
             [KeyboardButton(text="Configurar Grupo e Tópicos 🏷️")],
             [KeyboardButton(text="Rotinas do Grupo Público ⏰")],
             [KeyboardButton(text="Regras de Repostagem ♻️"), KeyboardButton(text="Status do Robô ⏸️")],
@@ -2271,27 +2272,6 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     )
     await message.answer(texto, reply_markup=teclado_pub, parse_mode="HTML")
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
-
-@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurar Robô Moderador ⚙️")
-async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
-    if EXIBIR_LOGS: logger.info("⚙️ Acessando submenu modular de configuração de tópicos e ativação do robô moderador.")
-    
-    config = ler_submissao_config()
-    texto_botao_moderador = "Desativar Robô Moderador 🛑" if config.get("ativo") else "Ativar Robô Moderador ⚙️"
-
-    teclado = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=texto_botao_moderador)],
-            [KeyboardButton(text="Configurar Grupo e Tópicos 🏷️")],
-            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
-        ], resize_keyboard=True, is_persistent=True
-    )
-    
-    texto = (
-        "⚙️ <b>Configurar Robô Moderador</b>\n\n"
-        "Selecione o que deseja configurar abaixo:"
-    )
-    await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
 
 @dp.message(F.text == "Voltar ao Painel Público 🔙", StateFilter("*"))
 async def voltar_painel_publico_repost(message: types.Message, state: FSMContext):
@@ -10140,33 +10120,7 @@ async def forcar_clones_fila(callback: types.CallbackQuery):
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila de clonagem: {e}")
         await callback.answer("Erro ao acessar a fila de clonagem.", show_alert=True)
 
-# ✅ NOVO: Submenu do Robô Moderador
-@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurar Robô Moderador ⚙️")
-async def submenu_robo_moderador(message: types.Message, state: FSMContext):
-    if EXIBIR_LOGS: logger.info("⚙️ Acessando submenu modular do robô moderador.")
-    
-    config = ler_submissao_config()
-    
-    # Cores dinâmicas nos botões de acordo com o status
-    texto_botao_moderador = "Desativar Robô Moderador 🔴" if config.get("ativo") else "Ativar Robô Moderador 🟢"
-
-    teclado = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=texto_botao_moderador)],
-            [KeyboardButton(text="Configurar Grupo e Tópicos 🏷️")],
-            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
-        ], resize_keyboard=True, is_persistent=True
-    )
-    
-    texto = (
-        "⚙️ <b>Configurar Robô Moderador</b>\n\n"
-        "Selecione o que deseja configurar abaixo:"
-    )
-    await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
-    await state.set_state(SubmissaoAdminFluxo.menu_principal)
-
-# ✅ MUDANÇA: O filtro F.text agora escuta as duas variações novas do botão
-@dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Ativar Robô Moderador 🟢", "Desativar Robô Moderador 🔴"]))
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Ativar Robô Moderador ⚙️", "Desativar Robô Moderador 🛑", "Ativar/Desativar Robô Moderador ⚙️"]))
 async def pedir_confirmacao_toggle(message: types.Message, state: FSMContext):
     config = ler_submissao_config()
     if not config.get("grupo_id"):
@@ -10192,8 +10146,7 @@ async def pedir_confirmacao_toggle(message: types.Message, state: FSMContext):
 async def processar_toggle_submissoes(message: types.Message, state: FSMContext):
     if "Aprovar" not in message.text:
         await message.answer("Operação cancelada.")
-        # ✅ MUDANÇA: Retorna para o submenu em vez do painel principal
-        await submenu_robo_moderador(message, state)
+        await painel_submissoes(message, state)
         return
         
     config = ler_submissao_config()
@@ -10208,8 +10161,7 @@ async def processar_toggle_submissoes(message: types.Message, state: FSMContext)
         status = "DESATIVADO"
         
     await message.answer(f"{icone} O Robô Moderador foi <b>{status}</b> com sucesso.", parse_mode="HTML")
-    # ✅ MUDANÇA: Retorna para o submenu após aprovar
-    await submenu_robo_moderador(message, state)
+    await painel_submissoes(message, state)
 
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Rotinas do Grupo Público ⏰")
 async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
