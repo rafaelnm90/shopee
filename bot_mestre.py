@@ -292,8 +292,10 @@ class AutoraisFluxo(StatesGroup):
     menu_principal = State()
     aguardando_origem = State()
     aguardando_topico = State() 
+    aguardando_confirmacao_origem = State() # ✅ NOVO: Etapa de confirmação
     aguardando_destino = State()
-    aguardando_dias_retorno = State() 
+    aguardando_confirmacao_destino = State() # ✅ NOVO: Etapa de confirmação
+    aguardando_dias_retorno = State()
     aguardando_confirmacao_dias_retorno = State() # ✅ NOVO: Etapa de confirmação
     aguardando_limite_videos = State()
     aguardando_confirmacao_limite_videos = State() # ✅ NOVO: Etapa de confirmação
@@ -2899,7 +2901,7 @@ async def pedir_topico_autorais(message: types.Message, state: FSMContext):
              
         await message.answer("⚠️ <b>Aviso de Permissão:</b> O Bot Principal não tem permissão para enxergar este grupo. O ID será salvo, pois a Conta Secundária é quem fará a extração física.", parse_mode="HTML")
 
-    await state.update_data(nova_origem=id_final)
+    await state.update_data(nova_origem=id_final, nome_origem_validado=nome_chat)
     await message.answer("Agora, digite o <b>NÚMERO DO TÓPICO (Subcanal)</b> que ele deve monitorar.\n\n<i>Dica: Se os vídeos caem no chat 'Geral', digite <b>1</b>. Se for um canal sem tópicos, digite <b>0</b> para ler tudo.</i>", parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(AutoraisFluxo.aguardando_topico)
 
@@ -2922,6 +2924,48 @@ async def salvar_origem_autorais(message: types.Message, state: FSMContext):
     # ✅ CORREÇÃO: validar_e_formatar_alvo devolve "ID:topico". Como o tópico é
     # perguntado separadamente, removemos o sufixo para não duplicar (":1:1").
     nova_origem = str(nova_origem).split(":")[0].strip()
+    
+    # ✅ NOVO: guarda os valores e pede aprovação antes de gravar
+    await state.update_data(origem_pendente=nova_origem, topico_pendente=topico_final)
+    
+    config = ler_autorais_config()
+    origem_antiga = str(config.get("origem", "Não definida")).split(":")[0].strip()
+    topico_antigo = config.get("origem_topico")
+    
+    nome_novo = data.get("nome_origem_validado") or nova_origem
+    texto_topico_novo = f"Tópico {topico_final}" if topico_final else "Todos os tópicos"
+    texto_topico_antigo = f"Tópico {topico_antigo}" if topico_antigo else "Todos os tópicos"
+    
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    texto = (
+        "⚠️ <b>Confirme a alteração da ORIGEM</b>\n\n"
+        f"<b>De:</b> <code>{origem_antiga}</code> ({texto_topico_antigo})\n"
+        f"<b>Para:</b> {nome_novo}\n"
+        f"<code>{nova_origem}</code> ({texto_topico_novo})\n\n"
+        "O robô passará a escutar exclusivamente este grupo/tópico. Deseja aprovar?"
+    )
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_confirmacao)
+    await state.set_state(AutoraisFluxo.aguardando_confirmacao_origem)
+
+@dp.message(AutoraisFluxo.aguardando_confirmacao_origem)
+async def processar_origem_autorais(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await message.answer("❌ Operação cancelada. A origem <b>não</b> foi alterada.", parse_mode="HTML")
+        await painel_autorais(message, state)
+        return
+        
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, clique em Aprovar ✅ ou Cancelar ❌.")
+        return
+    
+    data = await state.get_data()
+    nova_origem = data.get("origem_pendente")
+    topico_final = data.get("topico_pendente")
     
     config = ler_autorais_config()
     config["origem"] = nova_origem
@@ -2966,6 +3010,54 @@ async def salvar_destino_autorais(message: types.Message, state: FSMContext):
              
         await message.answer("⚠️ <b>Aviso:</b> O bot não conseguiu encontrar este destino (verifique se ele é administrador do canal). O ID será salvo mesmo assim.", parse_mode="HTML")
 
+    config = ler_autorais_config()
+    destino_antigo = config.get("destino", "Não definido")
+    
+    # ✅ NOVO: guarda o valor e pede aprovação antes de gravar
+    await state.update_data(destino_pendente=id_final, nome_destino_validado=nome_chat)
+    
+    nome_novo = nome_chat or id_final
+    origem_atual = str(config.get("origem", "")).split(":")[0].strip()
+    
+    aviso_loop = ""
+    if origem_atual and str(id_final).split(":")[0].strip() == origem_atual:
+        aviso_loop = (
+            "\n\n🚨 <b>ATENÇÃO:</b> este destino é o <b>mesmo grupo da origem</b>. "
+            "Isso cria um <b>loop infinito</b> (o robô reposta o que ele mesmo publicou). "
+            "Só aprove se souber o que está fazendo."
+        )
+    
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    
+    texto = (
+        "⚠️ <b>Confirme a alteração do DESTINO</b>\n\n"
+        f"<b>De:</b> <code>{destino_antigo}</code>\n"
+        f"<b>Para:</b> {nome_novo}\n"
+        f"<code>{id_final}</code>\n\n"
+        "Todos os vídeos convertidos passarão a ser publicados aqui. Deseja aprovar?"
+        f"{aviso_loop}"
+    )
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_confirmacao)
+    await state.set_state(AutoraisFluxo.aguardando_confirmacao_destino)
+
+@dp.message(AutoraisFluxo.aguardando_confirmacao_destino)
+async def processar_destino_autorais(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await message.answer("❌ Operação cancelada. O destino <b>não</b> foi alterado.", parse_mode="HTML")
+        await painel_autorais(message, state)
+        return
+        
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, clique em Aprovar ✅ ou Cancelar ❌.")
+        return
+    
+    data = await state.get_data()
+    id_final = data.get("destino_pendente")
+    
     config = ler_autorais_config()
     config["destino"] = id_final
     salvar_autorais_config(config)
