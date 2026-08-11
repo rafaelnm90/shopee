@@ -2140,10 +2140,15 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     nome_t_destino = config.get("nome_topico_destino", "Tópico Vitrine")
     display_vitrine = f"🌟 {nome_t_destino} (<code>{grupo_id_str}_{topico_vitrine_str}</code>)" if topico_vitrine_str else "<i>Não definido</i>"
 
-    # 4. Resgata os Tópicos de Rotina
+    # 4. ✅ NOVO: Resgata os Tópicos de Rotina COM NOMES
     topicos_rotina = config.get("topicos_rotina", [])
+    nomes_topicos_rotina = config.get("nomes_topicos_rotina", {})
     if topicos_rotina:
-        display_rotinas = ", ".join([f"<code>{t}</code>" for t in topicos_rotina])
+        lista_exibicao = []
+        for t in topicos_rotina:
+            nome_t = nomes_topicos_rotina.get(str(t), f"Tópico {t}")
+            lista_exibicao.append(f"{nome_t} (<code>{t}</code>)")
+        display_rotinas = ", ".join(lista_exibicao)
     else:
         display_rotinas = "<i>Chat Geral (Padrão)</i>"
 
@@ -9854,7 +9859,7 @@ async def receber_novo_valor_grupo(message: types.Message, state: FSMContext):
                 elif entrada.isdigit():
                     if entrada != "0": topicos_finais.append(entrada)
             
-            texto_conf = f"✅ Tópicos de rotina extraídos: <code>{', '.join(topicos_finais)}</code>\n\nDeseja confirmar esta alteração?"
+            texto_conf = f"✅ Tópicos de rotina extraídos: <code>{', '.join(topicos_finais)}</code>\n<i>(Os nomes reais serão sincronizados em background pelo Userbot)</i>\n\nDeseja confirmar esta alteração?"
             
         await state.update_data(novos_topicos_rotina=topicos_finais)
 
@@ -9890,7 +9895,10 @@ async def confirmar_salvamento_grupo(message: types.Message, state: FSMContext):
         config["topico_destino"] = data.get("novo_topico_id")
         config["nome_topico_destino"] = "⏳ Sincronizando..."
     elif campo == "rotina":
-        config["topicos_rotina"] = data.get("novos_topicos_rotina")
+        topicos = data.get("novos_topicos_rotina")
+        config["topicos_rotina"] = topicos
+        # ✅ NOVO: Cria o dicionário de sincronização no banco de dados para o Userbot!
+        config["nomes_topicos_rotina"] = {str(t): "⏳ Sincronizando..." for t in topicos}
         
     salvar_submissao_config(config)
     
