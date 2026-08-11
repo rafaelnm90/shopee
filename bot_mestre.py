@@ -2158,23 +2158,52 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     # 2. Tópico de Escuta com Nome do Cache
     topico_escuta_str = str(topico_escuta) if topico_escuta else ""
     # Pega o nome customizado salvo ou usa o nome do grupo base como referência
-    nome_escuta = config.get("nome_topico_envio") or cache_nomes.get(topico_escuta_str, "Tópico de Escuta")
+    nome_escuta = (config.get("nome_topico_envio")
+                   or cache_nomes.get(f"{grupo_id_str}_{topico_escuta_str}")
+                   or "Tópico de Escuta")
     display_escuta = f"{nome_escuta} (<code>{grupo_id_str}_{topico_escuta_str}</code>)" if topico_escuta_str else "<i>Não definido</i>"
 
     # 3. Tópico Vitrine com Nome do Cache
     topico_vitrine_str = str(topico_vitrine) if topico_vitrine else ""
-    nome_vitrine = config.get("nome_topico_destino") or cache_nomes.get(topico_vitrine_str, "Tópico Vitrine")
+    nome_vitrine = (config.get("nome_topico_destino")
+                    or cache_nomes.get(f"{grupo_id_str}_{topico_vitrine_str}")
+                    or "Tópico Vitrine")
     display_vitrine = f"{nome_vitrine} (<code>{grupo_id_str}_{topico_vitrine_str}</code>)" if topico_vitrine_str else "<i>Não definido</i>"
 
     # 4. Tópicos de Rotina com Nomes do Cache
     topicos_rotina = config.get("topicos_rotina", [])
     nomes_rotinas_salvos = config.get("nomes_topicos_rotina", {})
+
+    def resolver_nome_topico(numero_topico):
+        """✅ CORREÇÃO: o cache é indexado por chat_id, nunca pelo número solto do
+        tópico. Resolvemos na ordem: nome salvo -> tópicos já conhecidos
+        (vitrine/escuta) -> cache pela chave composta -> Geral -> fallback."""
+        t_str = str(numero_topico)
+
+        nome = nomes_rotinas_salvos.get(t_str)
+        if nome:
+            return nome
+
+        if topico_vitrine_str and t_str == topico_vitrine_str:
+            return nome_vitrine
+        if topico_escuta_str and t_str == topico_escuta_str:
+            return nome_escuta
+
+        for chave in (f"{grupo_id_str}_{t_str}", f"{grupo_id_str}:{t_str}"):
+            if chave in cache_nomes:
+                return cache_nomes[chave]
+
+        # No Telegram, o tópico 1 é sempre o chat "Geral" do fórum
+        if t_str == "1":
+            return "Geral"
+
+        return f"Tópico {t_str}"
+
     if topicos_rotina:
         lista_exibicao = []
         for t in topicos_rotina:
             id_completo_topico = f"{grupo_id_str}_{t}"
-            # Tenta pegar o nome salvo ou do cache
-            nome_t = nomes_rotinas_salvos.get(str(t)) or cache_nomes.get(str(t), f"Tópico {t}")
+            nome_t = resolver_nome_topico(t)
             lista_exibicao.append(f"{nome_t} (<code>{id_completo_topico}</code>)")
         display_rotinas = ", ".join(lista_exibicao)
     else:
@@ -2189,14 +2218,17 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     # Origem do Repostador
     repost_origem = config.get("repost_origem")
     if repost_origem:
-        nome_repost_origem = cache_nomes.get(str(repost_origem), str(repost_origem))
-        display_repost_origem = f"{nome_repost_origem} (<code>{repost_origem}</code>)"
+        # ✅ Padroniza a exibição no formato "_" e busca o nome pelo ID base
+        repost_origem_base = str(repost_origem).split(":")[0].strip()
+        nome_repost_origem = cache_nomes.get(repost_origem_base, str(repost_origem_base))
+        display_repost_origem = f"{nome_repost_origem} (<code>{str(repost_origem).replace(':', '_')}</code>)"
     else:
         # Fallback para o destino dos Vídeos Autorais
         config_aut = ler_config_bd("autorais_config", {})
         dest_aut = config_aut.get("destino", "Não definido")
-        nome_aut = cache_nomes.get(str(dest_aut), str(dest_aut))
-        display_repost_origem = f"{nome_aut} (<code>{dest_aut}</code>) [Padrão]"
+        dest_aut_base = str(dest_aut).split(":")[0].strip()
+        nome_aut = cache_nomes.get(dest_aut_base, str(dest_aut_base))
+        display_repost_origem = f"{nome_aut} (<code>{str(dest_aut).replace(':', '_')}</code>) [Padrão]"
 
     # Destino do Repostador (É sempre o Tópico Vitrine do Grupo Público)
     display_repost_destino = display_vitrine
