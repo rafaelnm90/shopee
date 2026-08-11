@@ -2887,8 +2887,14 @@ async def pedir_topico_autorais(message: types.Message, state: FSMContext):
     await msg_status.delete()
 
     if sucesso:
+        # ✅ Se o bot não enxerga o grupo, a função devolve o próprio ID no lugar
+        # do nome. Nesse caso buscamos o nome real que o Userbot já cacheou.
+        id_base_exibicao = str(id_final).split(":")[0].strip()
+        if str(nome_chat).strip() == id_base_exibicao:
+            cache_nomes = ler_cache_nomes_grupos()
+            nome_chat = cache_nomes.get(id_base_exibicao, nome_chat)
         await message.answer(f"✅ Origem validada e encontrada: <b>{nome_chat}</b>", parse_mode="HTML")
-        salvar_nome_grupo(str(id_final), nome_chat)
+        salvar_nome_grupo(id_base_exibicao, nome_chat)
     else:
         import re
         id_final = novo_valor
@@ -2901,38 +2907,36 @@ async def pedir_topico_autorais(message: types.Message, state: FSMContext):
              
         await message.answer("⚠️ <b>Aviso de Permissão:</b> O Bot Principal não tem permissão para enxergar este grupo. O ID será salvo, pois a Conta Secundária é quem fará a extração física.", parse_mode="HTML")
 
-    await state.update_data(nova_origem=id_final, nome_origem_validado=nome_chat)
+    # ✅ NOVO: o link já pode trazer o tópico embutido ("-100123:1" vindo do "_1").
+    # Se veio, não faz sentido perguntar de novo - pulamos direto para a confirmação.
+    partes_id = str(id_final).split(":")
+    origem_base = partes_id[0].strip()
+    topico_detectado = int(partes_id[1].strip()) if len(partes_id) > 1 and partes_id[1].strip().isdigit() else None
+    
+    await state.update_data(nova_origem=origem_base, nome_origem_validado=nome_chat)
+    
+    if topico_detectado is not None:
+        await message.answer(
+            f"🔎 <b>Tópico detectado automaticamente pelo link:</b> <code>{topico_detectado}</code>\n"
+            "<i>Não precisa digitar nada.</i>",
+            parse_mode="HTML"
+        )
+        await confirmar_origem_autorais(message, state, origem_base, topico_detectado, nome_chat)
+        return
+    
     await message.answer("Agora, digite o <b>NÚMERO DO TÓPICO (Subcanal)</b> que ele deve monitorar.\n\n<i>Dica: Se os vídeos caem no chat 'Geral', digite <b>1</b>. Se for um canal sem tópicos, digite <b>0</b> para ler tudo.</i>", parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(AutoraisFluxo.aguardando_topico)
 
-@dp.message(AutoraisFluxo.aguardando_topico)
-async def salvar_origem_autorais(message: types.Message, state: FSMContext):
-    if message.text == "Cancelar ❌":
-        await cancelar_fluxo_global(message, state)
-        return
-        
-    if not message.text.isdigit():
-        await message.answer("⚠️ Formato inválido! Envie apenas o número do tópico (Ex: 1 ou 0).", reply_markup=teclado_cancelar)
-        return
-        
-    topico = int(message.text)
-    topico_final = topico if topico > 0 else None
-    
-    data = await state.get_data()
-    nova_origem = data.get("nova_origem")
-    
-    # ✅ CORREÇÃO: validar_e_formatar_alvo devolve "ID:topico". Como o tópico é
-    # perguntado separadamente, removemos o sufixo para não duplicar (":1:1").
-    nova_origem = str(nova_origem).split(":")[0].strip()
-    
-    # ✅ NOVO: guarda os valores e pede aprovação antes de gravar
+async def confirmar_origem_autorais(message, state, nova_origem, topico_final, nome_novo=None):
+    """Monta a tela de aprovação da ORIGEM. Usada tanto pelo caminho automático
+    (tópico vindo do link) quanto pelo manual (tópico digitado)."""
     await state.update_data(origem_pendente=nova_origem, topico_pendente=topico_final)
     
     config = ler_autorais_config()
     origem_antiga = str(config.get("origem", "Não definida")).split(":")[0].strip()
     topico_antigo = config.get("origem_topico")
     
-    nome_novo = data.get("nome_origem_validado") or nova_origem
+    nome_novo = nome_novo or nova_origem
     texto_topico_novo = f"Tópico {topico_final}" if topico_final else "Todos os tópicos"
     texto_topico_antigo = f"Tópico {topico_antigo}" if topico_antigo else "Todos os tópicos"
     
@@ -2951,6 +2955,32 @@ async def salvar_origem_autorais(message: types.Message, state: FSMContext):
     )
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado_confirmacao)
     await state.set_state(AutoraisFluxo.aguardando_confirmacao_origem)
+
+@dp.message(AutoraisFluxo.aguardando_topico)
+async def salvar_origem_autorais(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+    
+    entrada_topico = message.text.strip()
+    
+    # ✅ Tolerante: se colarem o link ou "ID_1" de novo, extraímos só o tópico
+    if not entrada_topico.isdigit():
+        import re
+        achado = re.search(r'[_:/](\d+)\s*$', entrada_topico)
+        if achado:
+            entrada_topico = achado.group(1)
+        else:
+            await message.answer("⚠️ Formato inválido! Envie apenas o número do tópico (Ex: 1 ou 0).", reply_markup=teclado_cancelar)
+            return
+        
+    topico = int(entrada_topico)
+    topico_final = topico if topico > 0 else None
+    
+    data = await state.get_data()
+    nova_origem = str(data.get("nova_origem")).split(":")[0].strip()
+    
+    await confirmar_origem_autorais(message, state, nova_origem, topico_final, data.get("nome_origem_validado"))
 
 @dp.message(AutoraisFluxo.aguardando_confirmacao_origem)
 async def processar_origem_autorais(message: types.Message, state: FSMContext):
@@ -2996,8 +3026,14 @@ async def salvar_destino_autorais(message: types.Message, state: FSMContext):
     await msg_status.delete()
 
     if sucesso:
+        # ✅ Mesmo tratamento da origem: usa o nome real do cache se a função
+        # tiver devolvido o próprio ID (Modo Trust).
+        id_base_exibicao = str(id_final).split(":")[0].strip()
+        if str(nome_chat).strip() == id_base_exibicao:
+            cache_nomes = ler_cache_nomes_grupos()
+            nome_chat = cache_nomes.get(id_base_exibicao, nome_chat)
         await message.answer(f"✅ Destino validado: <b>{nome_chat}</b>", parse_mode="HTML")
-        salvar_nome_grupo(str(id_final), nome_chat)
+        salvar_nome_grupo(id_base_exibicao, nome_chat)
     else:
         import re
         id_final = novo_valor
