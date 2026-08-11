@@ -5203,7 +5203,8 @@ async def manual_repost_autoral(message: types.Message):
             canal_autorais = config_aut.get("destino")
         
         kwargs = {}
-        if topico_vitrine: kwargs["message_thread_id"] = int(topico_vitrine)
+        if topico_vitrine: 
+            kwargs["message_thread_id"] = int(topico_vitrine)
         
         await bot.copy_message(
             chat_id=chat_destino,
