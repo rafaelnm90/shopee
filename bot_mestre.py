@@ -2153,26 +2153,21 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     nome_grupo = cache_nomes.get(grupo_id_str, "Grupo Público")
     display_grupo = f"👥 <b>Grupo Base:</b> {nome_grupo} (<code>{grupo_id_str}</code>)" if grupo_id_str else "<i>Grupo não definido</i>"
 
-    # 2. Resgata o nome do Tópico de Escuta (Bot Moderador)
+    # 2. Exibição Simples do Tópico de Escuta (Bot Moderador)
     topico_escuta_str = str(topico_escuta) if topico_escuta else ""
-    nome_t_envio = config.get("nome_topico_envio", "Tópico de Escuta")
-    display_escuta = f"💬 {nome_t_envio} (<code>{grupo_id_str}_{topico_escuta_str}</code>)" if topico_escuta_str else "<i>Não definido</i>"
+    display_escuta = f"<code>{grupo_id_str}_{topico_escuta_str}</code>" if topico_escuta_str else "<i>Não definido</i>"
 
-    # 3. Resgata o nome do Tópico Vitrine (Bot Moderador)
+    # 3. Exibição Simples do Tópico Vitrine (Bot Moderador)
     topico_vitrine_str = str(topico_vitrine) if topico_vitrine else ""
-    nome_t_destino = config.get("nome_topico_destino", "Tópico Vitrine")
-    display_vitrine = f"🌟 {nome_t_destino} (<code>{grupo_id_str}_{topico_vitrine_str}</code>)" if topico_vitrine_str else "<i>Não definido</i>"
+    display_vitrine = f"<code>{grupo_id_str}_{topico_vitrine_str}</code>" if topico_vitrine_str else "<i>Não definido</i>"
 
-    # 4. ✅ NOVO: Resgata os Tópicos de Rotina COM NOMES E IDS COMPLETOS
+    # 4. Exibição Simples dos Tópicos de Rotina
     topicos_rotina = config.get("topicos_rotina", [])
-    nomes_topicos_rotina = config.get("nomes_topicos_rotina", {})
     if topicos_rotina:
         lista_exibicao = []
         for t in topicos_rotina:
-            nome_t = nomes_topicos_rotina.get(str(t), f"Tópico {t}")
-            # Formata o ID do tópico anexado ao ID do grupo
             id_completo_topico = f"{grupo_id_str}_{t}"
-            lista_exibicao.append(f"{nome_t} (<code>{id_completo_topico}</code>)")
+            lista_exibicao.append(f"<code>{id_completo_topico}</code>")
         display_rotinas = ", ".join(lista_exibicao)
     else:
         display_rotinas = "<i>Chat Geral (Padrão)</i>"
@@ -9914,37 +9909,11 @@ async def confirmar_salvamento_grupo(message: types.Message, state: FSMContext):
     if campo == "escuta":
         config["grupo_id"] = data.get("novo_grupo_id")
         config["topico_envio"] = data.get("novo_topico_id")
-        
-        # O Userbot cuidará do nome do tópico, mas aqui colocaremos o ID para caso de demora
-        t_id = data.get("novo_topico_id")
-        if str(t_id) == "0":
-            config["nome_topico_envio"] = "Tópico Geral"
-        else:
-            config["nome_topico_envio"] = f"Tópico {t_id}"
-
     elif campo == "vitrine":
         config["grupo_id"] = data.get("novo_grupo_id")
         config["topico_destino"] = data.get("novo_topico_id")
-        
-        t_id = data.get("novo_topico_id")
-        if str(t_id) == "0":
-            config["nome_topico_destino"] = "Tópico Geral"
-        else:
-            config["nome_topico_destino"] = f"Tópico {t_id}"
-
     elif campo == "rotina":
-        topicos = data.get("novos_topicos_rotina")
-        config["topicos_rotina"] = topicos
-        
-        # Cria a base com o nome "Tópico X" e o Userbot depois substitui com o nome real
-        nomes_base = {}
-        for t in topicos:
-            if str(t) == "0":
-                nomes_base[str(t)] = "Tópico Geral"
-            else:
-                nomes_base[str(t)] = f"Tópico {t}"
-                
-        config["nomes_topicos_rotina"] = nomes_base
+        config["topicos_rotina"] = data.get("novos_topicos_rotina")
         
     salvar_submissao_config(config)
     
