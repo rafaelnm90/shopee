@@ -4882,7 +4882,6 @@ async def manual_repost_autoral(message: types.Message):
     )
     
     try:
-        try:
         # ✅ NOVO: Tenta usar a origem personalizada. Se não tiver, usa a dos Autorais.
         canal_autorais = config_pub.get("repost_origem")
         if not canal_autorais:
