@@ -149,7 +149,7 @@ GRUPO_ID = -1003909405581
 LINK_GRUPO = "https://t.me/shopee_video_afiliado"
 GRUPO_VIRAL_ID = -1003932482573
 LINK_GRUPO_VIRAL = "https://t.me/acervo_viral_shopee"
-LINK_GRUPO_PUBLICO = "https://web.telegram.org/a/#-1003892378604_6"
+LINK_GRUPO_PUBLICO = "https://t.me/GrupoPublicoAfiliados"
 SHOPEE_APP_ID = os.getenv('SHOPEE_APP_ID')
 SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
 # As chaves do Gemini e a cascata foram removidas. Agora são geridas com total segurança pelo api_gemini.py
