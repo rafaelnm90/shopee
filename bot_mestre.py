@@ -2275,6 +2275,27 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=teclado_pub, parse_mode="HTML")
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
 
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurar Robô Moderador ⚙️")
+async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
+    if EXIBIR_LOGS: logger.info("⚙️ Acessando submenu modular de configuração de tópicos e ativação do robô moderador.")
+    
+    config = ler_submissao_config()
+    texto_botao_moderador = "Desativar Robô Moderador 🛑" if config.get("ativo") else "Ativar Robô Moderador ⚙️"
+
+    teclado = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=texto_botao_moderador)],
+            [KeyboardButton(text="Configurar Grupo e Tópicos 🏷️")],
+            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
+        ], resize_keyboard=True, is_persistent=True
+    )
+    
+    texto = (
+        "⚙️ <b>Configurar Robô Moderador</b>\n\n"
+        "Selecione o que deseja configurar abaixo:"
+    )
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
+
 @dp.message(F.text == "Voltar ao Painel Público 🔙", StateFilter("*"))
 async def voltar_painel_publico_repost(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
