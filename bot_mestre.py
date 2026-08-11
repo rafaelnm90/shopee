@@ -5196,25 +5196,25 @@ async def manual_repost_autoral(message: types.Message):
     )
     
     try:
-            # ✅ NOVO: Tenta usar a origem personalizada. Se não tiver, usa a dos Autorais.
-            canal_autorais = config_pub.get("repost_origem")
-            if not canal_autorais:
-                config_aut = ler_config_bd("autorais_config", {})
-                canal_autorais = config_aut.get("destino")
-            
-            kwargs = {}
-            if topico_vitrine: kwargs["message_thread_id"] = int(topico_vitrine)
-            
-            await bot.copy_message(
-                chat_id=chat_destino,
-                from_chat_id=canal_autorais,
-                message_id=int(file_id),
-                caption=legenda_final,
-                parse_mode="HTML",
-                **kwargs
-            )
-            
-            # Marca como repostado para garantir a integridade da fila autônoma
+        # ✅ NOVO: Tenta usar a origem personalizada. Se não tiver, usa a dos Autorais.
+        canal_autorais = config_pub.get("repost_origem")
+        if not canal_autorais:
+            config_aut = ler_config_bd("autorais_config", {})
+            canal_autorais = config_aut.get("destino")
+        
+        kwargs = {}
+        if topico_vitrine: kwargs["message_thread_id"] = int(topico_vitrine)
+        
+        await bot.copy_message(
+            chat_id=chat_destino,
+            from_chat_id=canal_autorais,
+            message_id=int(file_id),
+            caption=legenda_final,
+            parse_mode="HTML",
+            **kwargs
+        )
+        
+        # Marca como repostado para garantir a integridade da fila autônoma
         agora_str = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute("UPDATE fila_autorais SET repostado_publico = 1, data_repost_publico = ? WHERE id_unico = ?", (agora_str, id_unico))
         conexao.commit()
