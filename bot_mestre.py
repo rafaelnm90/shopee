@@ -10659,30 +10659,68 @@ async def confirmar_salvamento_grupo(message: types.Message, state: FSMContext):
 # ==========================================
 from aiogram.filters import Command
 
+TEXTO_BOTAO_OFERTAS = (
+    "👋 <b>Bem-vindo ao canal de submissões!</b>\n\n"
+    "Quer divulgar a sua oferta da Shopee na nossa comunidade e faturar junto com a gente?\n\n"
+    "Clique no botão abaixo e o nosso robô vai te guiar passo a passo para enviar o vídeo e os seus links!\n\n"
+    "<i>(As ofertas aprovadas pela nossa IA serão postadas automaticamente no mural público com os seus créditos!)</i>"
+)
+
+# ✅ NOVO: mantém o painel de submissão SEMPRE como a última mensagem do tópico.
+# Ele é apagado e recriado embaixo, então nunca sobe na tela nem some.
+_lock_botao_ofertas = asyncio.Lock()
+
+async def reenviar_botao_ofertas():
+    async with _lock_botao_ofertas:
+        config = ler_submissao_config()
+        grupo_id = config.get("grupo_id")
+        topico_envio = config.get("topico_envio")
+
+        if not grupo_id or topico_envio is None:
+            if EXIBIR_LOGS: logger.warning("⚠️ [Painel Fixo] Grupo ou Tópico de Escuta não configurado. Reenvio abortado.")
+            return
+
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+        teclado_iniciar = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🎬 Iniciar Postagem de Oferta", callback_data="iniciar_wizard_oferta")]
+        ])
+
+        thread_param = int(topico_envio) if int(topico_envio) not in (0, 1) else None
+
+        try:
+            msg = await bot.send_message(
+                chat_id=grupo_id,
+                text=TEXTO_BOTAO_OFERTAS,
+                reply_markup=teclado_iniciar,
+                parse_mode="HTML",
+                message_thread_id=thread_param,
+                disable_notification=True
+            )
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Painel Fixo] Falha ao reenviar o painel de submissão: {e}")
+            return
+
+        # Só apaga o painel anterior DEPOIS que o novo já está no ar (evita ficar sem painel)
+        msg_antiga = config.get("msg_botao_ofertas")
+        if msg_antiga and msg_antiga != msg.message_id:
+            try: await bot.delete_message(chat_id=grupo_id, message_id=int(msg_antiga))
+            except Exception: pass
+
+        config["msg_botao_ofertas"] = msg.message_id
+        salvar_submissao_config(config)
+
+        try:
+            await bot.pin_chat_message(chat_id=grupo_id, message_id=msg.message_id, disable_notification=True)
+        except Exception: pass
+
+        if EXIBIR_LOGS: logger.info(f"📌 [Painel Fixo] Painel de submissão recriado no fim do tópico (ID {msg.message_id}).")
+
 @dp.message(Command("botao_ofertas"))
 async def gerar_botao_permanente(message: types.Message):
     if EXIBIR_LOGS: 
         logger.info(f"📥 Solicitada criação do botão público no tópico. Usuário: {message.from_user.id}")
     
-    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-    teclado_iniciar = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎬 Iniciar Postagem de Oferta", callback_data="iniciar_wizard_oferta")]
-    ])
-    
-    try:
-        await message.answer(
-            "👋 <b>Bem-vindo ao canal de submissões!</b>\n\n"
-            "Quer divulgar a sua oferta da Shopee na nossa comunidade e faturar junto com a gente?\n\n"
-            "Clique no botão abaixo e o nosso robô vai te guiar passo a passo para enviar o vídeo e os seus links!\n\n"
-            "<i>(As ofertas aprovadas pela nossa IA serão postadas automaticamente no mural público com os seus créditos!)</i>",
-            reply_markup=teclado_iniciar,
-            parse_mode="HTML"
-        )
-        if EXIBIR_LOGS: 
-            logger.info("✅ Mensagem com o botão de submissão criada no tópico.")
-    except Exception as e:
-        if EXIBIR_LOGS: 
-            logger.error(f"❌ Erro ao enviar a mensagem com botão: {e}")
+    await reenviar_botao_ofertas()
             
     # Remove a mensagem de comando para manter o tópico limpo
     try: 
@@ -10761,6 +10799,9 @@ async def interceptar_envio_livre(message: types.Message, state: FSMContext):
         await aviso.delete()
     except Exception: 
         pass
+
+    # ✅ Devolve o painel para o fim do tópico
+    await reenviar_botao_ofertas()
 
 # 2. PASSO 1: Clicou no botão -> Pede o Vídeo (Cria o Painel Deslizante)
 @dp.callback_query(F.data == "iniciar_wizard_oferta")
@@ -10986,6 +11027,9 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
     try: await bot.delete_message(message.chat.id, msg_wizard_id)
     except: pass
 
+    # ✅ Devolve o painel para o fim do tópico
+    await reenviar_botao_ofertas()
+
 # Cancelamento manual do usuário (Limpa tudo instantaneamente)
 @dp.callback_query(F.data == "cancelar_wizard", StateFilter("*"))
 async def wizard_cancelar(callback: types.CallbackQuery, state: FSMContext):
@@ -11004,6 +11048,9 @@ async def wizard_cancelar(callback: types.CallbackQuery, state: FSMContext):
     else:
         try: await callback.message.delete()
         except: pass
+
+    # ✅ Devolve o painel para o fim do tópico
+    await reenviar_botao_ofertas()
 
 # ==========================================
 # LIMPADOR DE TECLADO FANTASMA 🧹
