@@ -10709,9 +10709,9 @@ async def reenviar_botao_ofertas():
         config["msg_botao_ofertas"] = msg.message_id
         salvar_submissao_config(config)
 
-        try:
-            await bot.pin_chat_message(chat_id=grupo_id, message_id=msg.message_id, disable_notification=True)
-        except Exception: pass
+        # ⚠️ NÃO fixar: cada pin_chat_message gera uma mensagem de serviço
+        # ("Fulano fixou uma mensagem") que se acumula no tópico. Como o painel
+        # já é sempre a última mensagem, fixar deixou de ser necessário.
 
         if EXIBIR_LOGS: logger.info(f"📌 [Painel Fixo] Painel de submissão recriado no fim do tópico (ID {msg.message_id}).")
 
