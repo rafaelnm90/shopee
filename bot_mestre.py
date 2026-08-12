@@ -10206,6 +10206,8 @@ async def processar_toggle_submissoes(message: types.Message, state: FSMContext)
     if EXIBIR_LOGS: logger.info(f"⚙️ Status do Robô Moderador alterado para: {status}")
     await message.answer(f"{icone} O Robô Moderador foi <b>{status}</b> com sucesso.", parse_mode="HTML")
     await submenu_robo_moderador(message, state)
+
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Rotinas do Grupo Público ⏰")
 async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
     dados = ler_config_rotina()
     
@@ -10299,13 +10301,16 @@ async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
     teclado = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Editar Tópico de Escuta 💬"), KeyboardButton(text="Editar Tópico Vitrine 🌟")],
-            [KeyboardButton(text="Editar Tópicos de Rotina 📢")],
+            [KeyboardButton(text="Onde Postar as Rotinas 📢")],
             [KeyboardButton(text="Voltar ao Painel Público 🔙")]
         ], resize_keyboard=True, is_persistent=True
     )
     
     texto = (
         "🏷️ <b>Configuração de Grupo e Tópicos</b>\n\n"
+        "💬 <b>Tópico de Escuta:</b> onde os membros enviam os vídeos.\n"
+        "🌟 <b>Tópico Vitrine:</b> onde o robô posta os vídeos aprovados.\n"
+        "📢 <b>Rotinas:</b> onde caem as mensagens automáticas de divulgação.\n\n"
         "Selecione qual módulo do Grupo Público você deseja alterar:"
     )
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
@@ -10319,8 +10324,7 @@ async def selecionar_campo_grupo_publico(message: types.Message, state: FSMConte
 
     opcoes = {
         "Editar Tópico de Escuta 💬": ("escuta", "Envie o Link ou ID Numérico do tópico onde os membros enviam os vídeos (<b>Tópico de Escuta</b>):"),
-        "Editar Tópico Vitrine 🌟": ("vitrine", "Envie o Link ou ID Numérico do tópico onde o robô irá postar os vídeos aprovados (<b>Tópico Vitrine</b>):"),
-        "Editar Tópicos de Rotina 📢": ("rotina", "Envie o Link ou ID numérico do tópico onde o robô enviará as rotinas.\n\n⚠️ <b>Atenção:</b> Você pode enviar <b>apenas 1 tópico</b> ou <b>vários tópicos</b> de uma vez.\nSe for enviar vários, separe-os por vírgula (Ex: ID1, ID2, ID3).\n\nSe quiser que o robô poste no chat geral (sem tópico), digite <b>0</b>.")
+        "Editar Tópico Vitrine 🌟": ("vitrine", "Envie o Link ou ID Numérico do tópico onde o robô irá postar os vídeos aprovados (<b>Tópico Vitrine</b>):")
     }
     
     selecao = opcoes.get(message.text)
@@ -10346,6 +10350,12 @@ async def receber_novo_valor_grupo(message: types.Message, state: FSMContext):
     texto_usuario = message.text.strip()
     
     msg_status = await message.answer("⏳ Validando entrada...", reply_markup=teclado_cancelar)
+
+    if campo not in ("escuta", "vitrine"):
+        await msg_status.delete()
+        await message.answer("⚠️ Sessão de edição expirada. Selecione novamente o que deseja editar.")
+        await menu_edicao_grupo_publico(message, state)
+        return
 
     if campo in ["escuta", "vitrine"]:
         sucesso, id_final, nome = await validar_e_formatar_alvo(bot, texto_usuario)
@@ -10373,28 +10383,6 @@ async def receber_novo_valor_grupo(message: types.Message, state: FSMContext):
                 
             await state.update_data(novo_grupo_id=grupo_id, novo_topico_id=int(topico_id))
             texto_conf = f"⚠️ O bot não encontrou este chat na base. Os IDs extraídos foram:\nGrupo: <code>{grupo_id}</code>\nTópico: <code>{topico_id}</code>\n\nDeseja forçar o salvamento mesmo assim?"
-
-    elif campo == "rotina":
-        await msg_status.delete()
-        if texto_usuario == "0":
-            topicos_finais = []
-            texto_conf = "✅ Você definiu que as rotinas irão para o <b>Chat Geral (Padrão)</b>.\n\nDeseja confirmar esta alteração?"
-        else:
-            entradas = [t.strip() for t in texto_usuario.split(",")]
-            topicos_finais = []
-            import re
-            for entrada in entradas:
-                if "t.me/" in entrada:
-                    partes = entrada.split("/")
-                    if len(partes) >= 5: topicos_finais.append(partes[-1])
-                elif "_" in entrada: topicos_finais.append(entrada.split("_")[-1])
-                elif ":" in entrada: topicos_finais.append(entrada.split(":")[-1])
-                elif entrada.isdigit():
-                    if entrada != "0": topicos_finais.append(entrada)
-            
-            texto_conf = f"✅ Tópicos de rotina extraídos: <code>{', '.join(topicos_finais)}</code>\n<i>(Os nomes reais serão sincronizados em background pelo Userbot)</i>\n\nDeseja confirmar esta alteração?"
-            
-        await state.update_data(novos_topicos_rotina=topicos_finais)
 
     teclado_conf = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
@@ -10425,9 +10413,7 @@ async def confirmar_salvamento_grupo(message: types.Message, state: FSMContext):
     elif campo == "vitrine":
         config["grupo_id"] = data.get("novo_grupo_id")
         config["topico_destino"] = data.get("novo_topico_id")
-    elif campo == "rotina":
-        config["topicos_rotina"] = data.get("novos_topicos_rotina")
-        
+
     salvar_submissao_config(config)
     
     if EXIBIR_LOGS: logger.info(f"✅ Painel Público: Configuração '{campo}' atualizada com sucesso.")
