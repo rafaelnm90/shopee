@@ -2267,8 +2267,8 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     teclado_pub = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Configurações do Robô Moderador ⚙️")],
-            [KeyboardButton(text="Rotinas do Grupo Público ⏰")],
-            [KeyboardButton(text="Regras de Repostagem ♻️"), KeyboardButton(text="Status do Robô ⏸️")],
+            [KeyboardButton(text="Configurações do Robô de Rotina ⏰")],
+            [KeyboardButton(text="Configurações do Robô Repostador ♻️")],
             [KeyboardButton(text="Voltar aos Canais 🔙")]
         ], resize_keyboard=True, is_persistent=True
     )
@@ -2309,20 +2309,36 @@ async def submenu_robo_moderador(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=teclado_mod, parse_mode="HTML")
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
 
-@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Regras de Repostagem ♻️")
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurações do Robô Repostador ♻️")
 async def submenu_regras_repost_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("♻️ Acessando submenu de Regras de Repostagem do Grupo Público...")
+    if EXIBIR_LOGS: logger.info("♻️ Acessando submenu do Robô Repostador do Grupo Público...")
+
+    config = ler_submissao_config()
+    status = "🔴 PAUSADO" if config.get("repost_pausado") else "🟢 ATIVADO"
+    texto_repostagem = "Retomar Repostagem ▶️" if config.get("repost_pausado") else "Pausar Repostagem ⏸️"
+
     teclado = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Editar Escutando (Público) 📥"), KeyboardButton(text="Editar Postando (Público) 📤")],
             [KeyboardButton(text="Editar Dias (Público) ⏳"), KeyboardButton(text="Editar Limite (Público) 📦")],
+            [KeyboardButton(text=texto_repostagem)],
             [KeyboardButton(text="Voltar ao Painel Público 🔙")]
         ],
         resize_keyboard=True,
         is_persistent=True
     )
-    await message.answer("♻️ <b>Regras de Repostagem (Grupo Público)</b>\nEscolha o que deseja editar:", reply_markup=teclado, parse_mode="HTML")
+
+    texto = (
+        "♻️ <b>Configurações do Robô Repostador</b>\n\n"
+        f"📊 <b>Status Atual:</b> {status}\n"
+        f"⏳ Oculto por: <b>{config.get('repost_dias', 15)} dias</b>\n"
+        f"📦 Cota Diária: <b>{config.get('repost_limite', 6)} vídeos/dia</b>\n\n"
+        "Aqui você define de onde os vídeos são puxados, para onde vão, as regras de tempo "
+        "e o cota diária — além de pausar ou retomar o robô.\n\n"
+        "Escolha a ação desejada:"
+    )
+    await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
 
 # ✅ NOVO: Handlers para Editar o Destino do Repost Público
@@ -2455,7 +2471,7 @@ async def pedir_confirmacao_repostagem_publico(message: types.Message, state: FS
 async def processar_pausa_repostagem_publico(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await message.answer("Ação cancelada.")
-        await submenu_status_robo_publico(message, state) 
+        await submenu_regras_repost_publico(message, state) 
         return
     if "Confirmar" not in message.text:
         await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
@@ -2471,7 +2487,7 @@ async def processar_pausa_repostagem_publico(message: types.Message, state: FSMC
     status = "PAUSADA 🔴" if config["repost_pausado"] else "RETOMADA 🟢"
     if EXIBIR_LOGS: logger.info(f"⚙️ Status da repostagem pública alterado para: {status}")
     await message.answer(f"✅ A repostagem automática para o Público foi <b>{status}</b>.", parse_mode="HTML")
-    await submenu_status_robo_publico(message, state)
+    await submenu_regras_repost_publico(message, state)
 
 @dp.message(F.text == "Editar Dias (Público) ⏳", StateFilter("*"))
 async def pedir_dias_repost_publico(message: types.Message, state: FSMContext):
@@ -10376,7 +10392,7 @@ async def processar_toggle_submissoes(message: types.Message, state: FSMContext)
     await message.answer(f"{icone} O Robô Moderador foi <b>{status}</b> com sucesso.", parse_mode="HTML")
     await submenu_robo_moderador(message, state)
 
-@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Rotinas do Grupo Público ⏰")
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurações do Robô de Rotina ⏰")
 async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
     dados = ler_config_rotina()
     
