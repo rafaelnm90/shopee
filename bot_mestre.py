@@ -2292,7 +2292,7 @@ async def submenu_robo_moderador(message: types.Message, state: FSMContext):
 
     teclado_mod = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Configurar Grupo e Tópicos 🏷️")],
+            [KeyboardButton(text="Definir Tópicos de Moderação 💬")],
             [KeyboardButton(text=texto_botao_moderador)],
             [KeyboardButton(text="Voltar ao Painel Público 🔙")]
         ], resize_keyboard=True, is_persistent=True
@@ -2302,7 +2302,7 @@ async def submenu_robo_moderador(message: types.Message, state: FSMContext):
         "⚙️ <b>Configurações do Robô Moderador</b>\n\n"
         f"📊 <b>Status Atual:</b> {status}\n\n"
         "Aqui você liga ou desliga a moderação automática de vídeos e define "
-        "o Grupo e os Tópicos que o robô deve escutar e usar para postar.\n\n"
+        "os Tópicos que o robô deve escutar e usar para publicar.\n\n"
         "Escolha a ação desejada:"
     )
 
@@ -10457,31 +10457,35 @@ async def voltar_pub_rotinas(message: types.Message, state: FSMContext):
     await state.clear()
     await painel_submissoes(message, state)
 
-@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurar Grupo e Tópicos 🏷️")
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Definir Tópicos de Moderação 💬")
 async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("⚙️ Acessando submenu modular de configuração de tópicos.")
     
     teclado = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Editar Tópico de Escuta 💬"), KeyboardButton(text="Editar Tópico Vitrine 🌟")],
-            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
+            [KeyboardButton(text="Voltar às Configurações 🔙")]
         ], resize_keyboard=True, is_persistent=True
     )
     
     texto = (
-        "🏷️ <b>Configuração de Grupo e Tópicos</b>\n\n"
-        "💬 <b>Tópico de Escuta:</b> onde os membros enviam os vídeos.\n"
-        "🌟 <b>Tópico Vitrine:</b> onde o robô posta os vídeos aprovados.\n\n"
-        "<i>(Os alvos das mensagens automáticas ficam em Rotinas do Grupo Público ⏰)</i>\n\n"
-        "Selecione qual módulo do Grupo Público você deseja alterar:"
+        "💬 <b>Tópicos de Moderação</b>\n\n"
+        "Defina os dois tópicos do Grupo Público em que o Robô Moderador atua:\n\n"
+        "📥 <b>Tópico de Escuta:</b> o tópico que o robô fica vigiando. É onde os membros "
+        "enviam os vídeos para serem analisados pela IA.\n\n"
+        "📤 <b>Tópico Vitrine:</b> o tópico onde o robô publica automaticamente os vídeos "
+        "que foram aprovados na análise.\n\n"
+        "<i>(Os alvos das mensagens automáticas de divulgação ficam em Rotinas do Grupo Público ⏰)</i>\n\n"
+        "Selecione qual tópico deseja alterar:"
     )
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
     await state.set_state(SubmissaoAdminFluxo.aguardando_selecao_edicao_grupo)
 
 @dp.message(SubmissaoAdminFluxo.aguardando_selecao_edicao_grupo)
 async def selecionar_campo_grupo_publico(message: types.Message, state: FSMContext):
-    if message.text == "Voltar ao Painel Público 🔙":
-        await voltar_painel_publico_repost(message, state)
+    if message.text == "Voltar às Configurações 🔙":
+        await state.set_state(SubmissaoAdminFluxo.menu_principal)
+        await submenu_robo_moderador(message, state)
         return
 
     opcoes = {
