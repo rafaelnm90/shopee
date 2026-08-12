@@ -211,6 +211,8 @@ class ConfigRotina(StatesGroup):
     aguardando_novo_horario = State()
     aguardando_confirmacao_pausa = State() # ✅ NOVO: Estado para confirmar a pausa
     aguardando_confirmacao_disparo = State() # ✅ NOVO: Confirmação dos disparos manuais do Público
+    aguardando_alvos_rotina = State() # ✅ NOVO: Seleção dos tópicos que recebem as rotinas
+    aguardando_confirmacao_alvos_rotina = State() # ✅ NOVO: Confirmação dos alvos de postagem
 
 class ConfigPausa(StatesGroup):
     menu_principal = State()
@@ -2290,8 +2292,8 @@ async def submenu_robo_moderador(message: types.Message, state: FSMContext):
 
     teclado_mod = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=texto_botao_moderador)],
             [KeyboardButton(text="Configurar Grupo e Tópicos 🏷️")],
+            [KeyboardButton(text=texto_botao_moderador)],
             [KeyboardButton(text="Voltar ao Painel Público 🔙")]
         ], resize_keyboard=True, is_persistent=True
     )
@@ -5326,7 +5328,113 @@ async def processar_disparo_publico(message: types.Message, state: FSMContext):
     await state.set_state(ConfigRotina.menu_principal)
     await submenu_disparos_manuais(message, state)
 
+@dp.message(F.text == "Disparar Repost Autoral ♻️", StateFilter("*"))# ✅ NOVO: Gestão dos alvos (tópicos) que recebem as rotinas do Grupo Público
+@dp.message(ConfigRotina.menu_principal, F.text == "Gerenciar Alvos de Postagem 🎯")
+async def pedir_alvos_rotina_publico(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🎯 Acessando gestão de alvos das rotinas do Grupo Público...")
+
+    config_sub = ler_submissao_config()
+    grupo_id_str = str(config_sub.get("grupo_id") or "")
+    topicos_rotina = config_sub.get("topicos_rotina", [])
+    cache_nomes = ler_cache_nomes_grupos()
+
+    if topicos_rotina:
+        linhas = []
+        for t in topicos_rotina:
+            chave = f"{grupo_id_str}_{t}"
+            nome = cache_nomes.get(chave) or ("Geral" if str(t) == "1" else f"Tópico {t}")
+            linhas.append(f"   ✅ {nome} (<code>{chave}</code>)")
+        atual = "\n".join(linhas)
+    else:
+        atual = "   ✅ <i>Chat Geral (Padrão)</i>"
+
+    texto = (
+        "🎯 <b>Gerenciar Alvos de Postagem</b>\n\n"
+        "Aqui você define <b>em quais tópicos do Grupo Público</b> as mensagens automáticas de divulgação "
+        "serão publicadas (Convite ao Grupo, Promo Canal Principal e Promo Canal Viral).\n\n"
+        f"📢 <b>Ativos hoje:</b>\n{atual}\n\n"
+        "Envie a <b>nova lista</b> de tópicos ativos (ela substitui a atual):\n"
+        "• Apenas um: <code>6</code>\n"
+        "• Vários: <code>1, 6</code>\n"
+        "• O link do tópico no Telegram também funciona\n\n"
+        "Para desativar todos e publicar somente no Chat Geral, digite <b>0</b>."
+    )
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.update_data(menu_origem="publico")
+    await state.set_state(ConfigRotina.aguardando_alvos_rotina)
+
+@dp.message(ConfigRotina.aguardando_alvos_rotina)
+async def confirmar_alvos_rotina_publico(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+
+    if message.text == "Cancelar ❌":
+        if EXIBIR_LOGS: logger.info("❌ Edição dos alvos de postagem cancelada.")
+        await message.answer("Ação cancelada. Nenhum alvo foi alterado.")
+        await gerenciar_rotina_publico(message, state)
+        return
+
+    texto_usuario = (message.text or "").strip()
+
+    if texto_usuario == "0":
+        topicos_finais = []
+    else:
+        topicos_finais = []
+        for entrada in [t.strip() for t in texto_usuario.split(",")]:
+            if not entrada: continue
+            if "t.me/" in entrada:
+                partes = entrada.split("/")
+                if len(partes) >= 5: topicos_finais.append(partes[-1])
+            elif "_" in entrada: topicos_finais.append(entrada.split("_")[-1])
+            elif ":" in entrada: topicos_finais.append(entrada.split(":")[-1])
+            elif entrada.isdigit():
+                if entrada != "0": topicos_finais.append(entrada)
+
+        if not topicos_finais:
+            await message.answer("⚠️ Não identifiquei nenhum tópico válido. Envie os números separados por vírgula (Ex: <code>1, 6</code>) ou <b>0</b> para o Chat Geral.", parse_mode="HTML", reply_markup=teclado_cancelar)
+            return
+
+    await state.update_data(novos_alvos_rotina=topicos_finais)
+    resumo = ", ".join(topicos_finais) if topicos_finais else "Chat Geral (Padrão)"
+
+    teclado_conf = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True, is_persistent=True
+    )
+    await message.answer(
+        f"🎯 As rotinas do Grupo Público passarão a ser publicadas em: <code>{resumo}</code>\n\n"
+        "<i>(Os nomes reais dos tópicos serão sincronizados em background pelo Userbot)</i>\n\n"
+        "Deseja confirmar esta alteração?",
+        parse_mode="HTML", reply_markup=teclado_conf
+    )
+    await state.set_state(ConfigRotina.aguardando_confirmacao_alvos_rotina)
+
+@dp.message(ConfigRotina.aguardando_confirmacao_alvos_rotina)
+async def salvar_alvos_rotina_publico(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+
+    if message.text == "Cancelar ❌":
+        await message.answer("Ação cancelada. Nenhum alvo foi alterado.")
+        await gerenciar_rotina_publico(message, state)
+        return
+
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, clique em Aprovar ✅ ou Cancelar ❌.")
+        return
+
+    dados_state = await state.get_data()
+    novos_alvos = dados_state.get("novos_alvos_rotina", [])
+
+    config = ler_submissao_config()
+    config["topicos_rotina"] = novos_alvos
+    salvar_submissao_config(config)
+
+    if EXIBIR_LOGS: logger.info(f"🎯 Alvos das rotinas do Público atualizados para: {novos_alvos or 'Chat Geral'}")
+    await message.answer("✅ <b>Alvos de postagem atualizados com sucesso!</b>", parse_mode="HTML")
+    await gerenciar_rotina_publico(message, state)
+
 @dp.message(F.text == "Disparar Repost Autoral ♻️", StateFilter("*"))
+
 async def manual_repost_autoral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     
@@ -10320,7 +10428,8 @@ async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
 
     # --- MONTAGEM DO TEXTO ---
     texto = "⏰ <b>Rotinas do Grupo Público</b>\n\n"
-    texto += f"📢 <b>Alvos das Rotinas:</b>{display_rotinas}\n\n"
+    texto += f"📢 <b>Alvos das Rotinas:</b>{display_rotinas}\n"
+    texto += "<i>(Use o botão \"Gerenciar Alvos de Postagem 🎯\" para ativar ou desativar estes locais)</i>\n\n"
     
     config_pub = dados.get("link_grupo_publico", {"inicio": 9, "fim": 21, "frequencia": 2})
     config_princ = dados.get("promo_principal_publico", {"inicio": 10, "fim": 20, "frequencia": 1})
@@ -10334,6 +10443,7 @@ async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
     teclado = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Editar Rotinas ✏️"), KeyboardButton(text="Disparos Manuais 🚀")],
+            [KeyboardButton(text="Gerenciar Alvos de Postagem 🎯")],
             [KeyboardButton(text=texto_botao_pausa)],
             [KeyboardButton(text="Voltar ao Painel Público 🔙")]
         ], resize_keyboard=True, is_persistent=True
@@ -10354,7 +10464,6 @@ async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
     teclado = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Editar Tópico de Escuta 💬"), KeyboardButton(text="Editar Tópico Vitrine 🌟")],
-            [KeyboardButton(text="Onde Postar as Rotinas 📢")],
             [KeyboardButton(text="Voltar ao Painel Público 🔙")]
         ], resize_keyboard=True, is_persistent=True
     )
@@ -10362,8 +10471,8 @@ async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
     texto = (
         "🏷️ <b>Configuração de Grupo e Tópicos</b>\n\n"
         "💬 <b>Tópico de Escuta:</b> onde os membros enviam os vídeos.\n"
-        "🌟 <b>Tópico Vitrine:</b> onde o robô posta os vídeos aprovados.\n"
-        "📢 <b>Rotinas:</b> onde caem as mensagens automáticas de divulgação.\n\n"
+        "🌟 <b>Tópico Vitrine:</b> onde o robô posta os vídeos aprovados.\n\n"
+        "<i>(Os alvos das mensagens automáticas ficam em Rotinas do Grupo Público ⏰)</i>\n\n"
         "Selecione qual módulo do Grupo Público você deseja alterar:"
     )
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
@@ -10377,8 +10486,7 @@ async def selecionar_campo_grupo_publico(message: types.Message, state: FSMConte
 
     opcoes = {
         "Editar Tópico de Escuta 💬": ("escuta", "Envie o Link ou ID Numérico do tópico onde os membros enviam os vídeos (<b>Tópico de Escuta</b>):"),
-        "Editar Tópico Vitrine 🌟": ("vitrine", "Envie o Link ou ID Numérico do tópico onde o robô irá postar os vídeos aprovados (<b>Tópico Vitrine</b>):"),
-        "Onde Postar as Rotinas 📢": ("rotina", "📢 <b>Destino das Rotinas</b>\n\nEstes são os tópicos que recebem as <b>mensagens automáticas de divulgação</b> (Convite ao Grupo, Promo Canal Principal e Promo Canal Viral).\n\nEnvie o Link ou ID numérico do tópico.\n\n⚠️ <b>Atenção:</b> Você pode enviar <b>apenas 1 tópico</b> ou <b>vários tópicos</b> de uma vez.\nSe for enviar vários, separe-os por vírgula (Ex: ID1, ID2, ID3).\n\nSe quiser que o robô poste no chat geral (sem tópico), digite <b>0</b>.")
+        "Editar Tópico Vitrine 🌟": ("vitrine", "Envie o Link ou ID Numérico do tópico onde o robô irá postar os vídeos aprovados (<b>Tópico Vitrine</b>):")
     }
     
     selecao = opcoes.get(message.text)
