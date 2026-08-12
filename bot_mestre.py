@@ -5543,6 +5543,22 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await state.clear()
         if EXIBIR_LOGS: logger.info("🔙 Cancelando configuração de rotina e redirecionando ao menu correto.")
         await message.answer("Ação cancelada.")
+
+        # ✅ NOVO: cancelar a edição de uma rotina devolve ao submenu "Editar Rotinas",
+        # e não ao menu raiz, preservando o contexto de edição.
+        if estado_atual == "ConfigRotina:aguardando_novo_horario":
+            if not menu_orig:
+                if tipo_edicao in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral"]:
+                    menu_orig = "espiao"
+                elif tipo_edicao in ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico"]:
+                    menu_orig = "publico"
+                else:
+                    menu_orig = "principal"
+            await state.update_data(menu_origem=menu_orig)
+            await state.set_state(ConfigRotina.menu_principal)
+            await submenu_editar_rotinas(message, state)
+            return
+
         if menu_orig == "espiao" or tipo_edicao in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral"]:
             await gerenciar_rotina_espiao(message, state)
         elif menu_orig == "publico" or tipo_edicao in ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico"]:
