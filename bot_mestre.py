@@ -210,6 +210,7 @@ class ConfigRotina(StatesGroup):
     menu_principal = State()
     aguardando_novo_horario = State()
     aguardando_confirmacao_pausa = State() # ✅ NOVO: Estado para confirmar a pausa
+    aguardando_confirmacao_disparo = State() # ✅ NOVO: Confirmação dos disparos manuais do Público
 
 class ConfigPausa(StatesGroup):
     menu_principal = State()
@@ -5256,38 +5257,74 @@ async def manual_promo_publico(message: types.Message):
     await disparar_mensagem("promo_publico", forcar=True)
     await message.answer("Mensagem de Promo Público enviada ao grupo com sucesso! ✅")
 
-@dp.message(F.text == "Disparar Convite (Próprio) 🔗", StateFilter("*"))
-async def manual_convite_proprio_publico(message: types.Message):
-    if message.from_user.id != ADMIN_ID: return
-    dados_rotina = ler_config_rotina()
-    if dados_rotina.get("pausado_publico", False):
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Público em pausa.")
-        return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Grupo Público estão <b>PAUSADAS</b>.", parse_mode="HTML")
-    await message.answer("Gerando e enviando convite para o próprio grupo público... ⏳")
-    await disparar_mensagem("link_grupo_publico", forcar=True)
-    await message.answer("Convite de recrutamento enviado ao grupo público com sucesso! ✅")
+# ✅ NOVO: Disparos manuais do Público agora exigem confirmação em duas etapas
+MAPA_DISPAROS_PUBLICO = {
+    "Disparar Convite (Próprio) 🔗": ("link_grupo_publico", "Convite (Próprio Grupo) 🔗", "convite para o próprio Grupo Público"),
+    "Disparar Promo Principal 🌟": ("promo_principal_publico", "Promo Canal Principal 🌟", "divulgação do Canal Principal"),
+    "Disparar Promo Viral 💥": ("promo_viral_publico", "Promo Canal Viral 💥", "divulgação do Canal Viral")
+}
 
-@dp.message(F.text == "Disparar Promo Principal 🌟", StateFilter("*"))
-async def manual_promo_principal_publico(message: types.Message):
+@dp.message(F.text.in_(list(MAPA_DISPAROS_PUBLICO.keys())), StateFilter("*"))
+async def pedir_confirmacao_disparo_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    dados_rotina = ler_config_rotina()
-    if dados_rotina.get("pausado_publico", False):
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Público em pausa.")
-        return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Grupo Público estão <b>PAUSADAS</b>.", parse_mode="HTML")
-    await message.answer("Gerando e enviando divulgação do canal principal... ⏳")
-    await disparar_mensagem("promo_principal_publico", forcar=True)
-    await message.answer("Propaganda do canal principal enviada ao grupo público com sucesso! ✅")
 
-@dp.message(F.text == "Disparar Promo Viral 💥", StateFilter("*"))
-async def manual_promo_viral_publico(message: types.Message):
-    if message.from_user.id != ADMIN_ID: return
     dados_rotina = ler_config_rotina()
     if dados_rotina.get("pausado_publico", False):
         if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Público em pausa.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Grupo Público estão <b>PAUSADAS</b>.", parse_mode="HTML")
-    await message.answer("Gerando e enviando divulgação do canal viral... ⏳")
-    await disparar_mensagem("promo_viral_publico", forcar=True)
-    await message.answer("Propaganda do canal viral enviada ao grupo público com sucesso! ✅")
+
+    tipo, nome_amigavel, descricao = MAPA_DISPAROS_PUBLICO[message.text]
+    await state.update_data(tipo_disparo_publico=tipo, nome_disparo_publico=nome_amigavel, menu_origem="publico")
+
+    teclado_confirmacao = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Confirmar Disparo ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
+    texto = (
+        f"⚠️ Tem certeza de que deseja <b>DISPARAR AGORA</b> a rotina <b>{nome_amigavel}</b>?\n\n"
+        f"<i>(A mensagem de {descricao} será gerada pela IA e enviada imediatamente aos tópicos configurados do Grupo Público)</i>"
+    )
+    if EXIBIR_LOGS: logger.info(f"🛡️ Disparo manual '{tipo}' interceptado. Aguardando confirmação do administrador...")
+    await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
+    await state.set_state(ConfigRotina.aguardando_confirmacao_disparo)
+
+@dp.message(ConfigRotina.aguardando_confirmacao_disparo)
+async def processar_disparo_publico(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+
+    if message.text == "Cancelar ❌":
+        if EXIBIR_LOGS: logger.info("❌ Disparo manual do Público abortado pelo administrador.")
+        await message.answer("Ação cancelada. Nenhuma mensagem foi enviada.")
+        await state.update_data(menu_origem="publico")
+        await state.set_state(ConfigRotina.menu_principal)
+        await submenu_disparos_manuais(message, state)
+        return
+
+    if message.text != "Confirmar Disparo ✅":
+        await message.answer("Por favor, clique em Confirmar Disparo ✅ ou Cancelar ❌.")
+        return
+
+    dados = await state.get_data()
+    tipo = dados.get("tipo_disparo_publico")
+    nome_amigavel = dados.get("nome_disparo_publico", "Rotina")
+
+    if not tipo:
+        await message.answer("⚠️ Sessão expirada. Selecione novamente o disparo desejado.")
+        await state.update_data(menu_origem="publico")
+        await state.set_state(ConfigRotina.menu_principal)
+        await submenu_disparos_manuais(message, state)
+        return
+
+    await message.answer(f"⏳ Gerando e enviando <b>{nome_amigavel}</b>...", parse_mode="HTML")
+    await disparar_mensagem(tipo, forcar=True)
+    if EXIBIR_LOGS: logger.info(f"🚀 Disparo manual confirmado e executado: {tipo}")
+    await message.answer(f"✅ <b>{nome_amigavel}</b> enviada ao Grupo Público com sucesso!", parse_mode="HTML")
+
+    await state.update_data(menu_origem="publico")
+    await state.set_state(ConfigRotina.menu_principal)
+    await submenu_disparos_manuais(message, state)
 
 @dp.message(F.text == "Disparar Repost Autoral ♻️", StateFilter("*"))
 async def manual_repost_autoral(message: types.Message):
