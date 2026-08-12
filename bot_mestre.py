@@ -5683,6 +5683,14 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await submenu_robo_moderador(message, state)
         return
 
+    # 🔁 Roteamento Inteligente: Cancelamento na edição de um tópico volta ao menu de tópicos
+    if estado_atual in ["SubmissaoAdminFluxo:aguardando_novo_valor_grupo", "SubmissaoAdminFluxo:aguardando_confirmacao_grupo"]:
+        await state.clear()
+        if EXIBIR_LOGS: logger.info("🔙 Cancelamento da edição de tópico. Retornando ao menu Definir Tópicos de Moderação.")
+        await message.answer("Ação cancelada.")
+        await menu_edicao_grupo_publico(message, state)
+        return
+
     # 🔁 Roteamento Inteligente: Se estiver nas Submissões do Público
     if estado_atual and estado_atual.startswith("SubmissaoAdminFluxo"):
         await state.clear()
@@ -10488,9 +10496,28 @@ async def selecionar_campo_grupo_publico(message: types.Message, state: FSMConte
         await submenu_robo_moderador(message, state)
         return
 
+    # ✅ NOVO: o exemplo é montado com a configuração atual do próprio usuário
+    config_atual = ler_submissao_config()
+    grupo_id_atual = str(config_atual.get("grupo_id") or "")
+
+    def montar_exemplo(topico_atual):
+        if grupo_id_atual and topico_atual not in (None, ""):
+            return f"<code>{grupo_id_atual}_{topico_atual}</code>"
+        return "<code>-1001234567890_5</code>\n<i>(exemplo genérico: o grupo ainda não foi definido)</i>"
+
     opcoes = {
-        "Editar Tópico de Escuta 💬": ("escuta", "Envie o Link ou ID Numérico do tópico onde os membros enviam os vídeos (<b>Tópico de Escuta</b>):"),
-        "Editar Tópico de Postagem 📤": ("vitrine", "Envie o Link ou ID Numérico do tópico onde o robô irá publicar os vídeos aprovados (<b>Tópico de Postagem</b>):")
+        "Editar Tópico de Escuta 💬": ("escuta",
+            "📥 <b>Tópico de Escuta</b>\n\n"
+            "Envie o Link ou o ID numérico do tópico onde os membros enviam os vídeos.\n\n"
+            "<i>Exemplo atualizado com a sua configuração:</i>\n"
+            f"{montar_exemplo(config_atual.get('topico_envio'))}"
+        ),
+        "Editar Tópico de Postagem 📤": ("vitrine",
+            "📤 <b>Tópico de Postagem</b>\n\n"
+            "Envie o Link ou o ID numérico do tópico onde o robô irá publicar automaticamente os vídeos aprovados.\n\n"
+            "<i>Exemplo atualizado com a sua configuração:</i>\n"
+            f"{montar_exemplo(config_atual.get('topico_destino'))}"
+        )
     }
     
     selecao = opcoes.get(message.text)
