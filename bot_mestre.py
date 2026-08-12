@@ -10408,8 +10408,6 @@ async def receber_novo_valor_grupo(message: types.Message, state: FSMContext):
         await state.update_data(novos_topicos_rotina=topicos_finais)
 
     teclado_conf = ReplyKeyboardMarkup(
-
-    teclado_conf = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
         resize_keyboard=True, is_persistent=True
     )
