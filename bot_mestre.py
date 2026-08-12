@@ -2263,8 +2263,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     
     teclado_pub = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=texto_botao_moderador)],
-            [KeyboardButton(text="Configurar Grupo e Tópicos 🏷️")],
+            [KeyboardButton(text="Configurações do Robô Moderador ⚙️")],
             [KeyboardButton(text="Rotinas do Grupo Público ⏰")],
             [KeyboardButton(text="Regras de Repostagem ♻️"), KeyboardButton(text="Status do Robô ⏸️")],
             [KeyboardButton(text="Voltar aos Canais 🔙")]
@@ -2278,7 +2277,35 @@ async def voltar_painel_publico_repost(message: types.Message, state: FSMContext
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     await painel_submissoes(message, state)
-    
+
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurações do Robô Moderador ⚙️")
+async def submenu_robo_moderador(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("⚙️ Acessando submenu de Configurações do Robô Moderador...")
+
+    config = ler_submissao_config()
+    status = "🟢 ATIVADO" if config.get("ativo") else "🔴 DESATIVADO"
+    texto_botao_moderador = "Desativar Robô Moderador 🛑" if config.get("ativo") else "Ativar Robô Moderador ⚙️"
+
+    teclado_mod = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=texto_botao_moderador)],
+            [KeyboardButton(text="Configurar Grupo e Tópicos 🏷️")],
+            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
+        ], resize_keyboard=True, is_persistent=True
+    )
+
+    texto = (
+        "⚙️ <b>Configurações do Robô Moderador</b>\n\n"
+        f"📊 <b>Status Atual:</b> {status}\n\n"
+        "Aqui você liga ou desliga a moderação automática de vídeos e define "
+        "o Grupo e os Tópicos que o robô deve escutar e usar para postar.\n\n"
+        "Escolha a ação desejada:"
+    )
+
+    await message.answer(texto, reply_markup=teclado_mod, parse_mode="HTML")
+    await state.set_state(SubmissaoAdminFluxo.menu_principal)
+
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Regras de Repostagem ♻️")
 async def submenu_regras_repost_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
