@@ -2161,13 +2161,13 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     else:
         display_escuta = f"    {icone_escuta} {nome_escuta} (<code>{chave_escuta}</code>)"
 
-    # --- 2. Tópico Vitrine (Postando) ---
+# --- 2. Tópico de Postagem (Postando) ---
     topico_vitrine_str = str(topico_vitrine) if topico_vitrine else ""
     chave_vitrine = f"{grupo_id_str}_{topico_vitrine_str}"
     
     nome_vitrine = (cache_nomes.get(chave_vitrine)
                     or config.get("nome_topico_destino")
-                    or "Tópico Vitrine")
+                    or "Tópico de Postagem")
     icone_vitrine = "✅" if chave_vitrine in cache_nomes else "⏳"
     
     if not topico_vitrine_str:
@@ -2247,7 +2247,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         "📬 <b>Painel do Grupo Público</b>\n\n"
         "O robô atuará como moderador dentro do seu Supergrupo.\n"
         "Ele escutará os envios no Tópico de Conversa, analisará com a IA "
-        "e postará automaticamente os vídeos aprovados no Tópico Vitrine.\n\n"
+        "e postará automaticamente os vídeos aprovados no Tópico de Postagem.\n\n"
         
         f"⚙️ <b>Status Robô Moderador:</b> {status}\n"
         f"📥 <b>Escutando:</b>\n{display_escuta}\n"
@@ -2331,7 +2331,7 @@ async def pedir_destino_repost_publico(message: types.Message, state: FSMContext
     if message.from_user.id != ADMIN_ID: return
     await message.answer(
         "Envie o <b>ID Numérico, @username ou Link do Telegram Web</b> do canal/tópico de DESTINO para onde o robô vai enviar as repostagens:\n"
-        "<i>(Se você não definir, ele continuará postando no Tópico Vitrine por padrão)</i>", 
+        "<i>(Se você não definir, ele continuará postando no Tópico de Postagem por padrão)</i>",
         parse_mode="HTML", 
         reply_markup=teclado_cancelar
     )
@@ -2685,7 +2685,7 @@ async def motor_repost_publico_step():
                         parse_mode="HTML",
                         message_thread_id=int(topico_destino)
                     )
-                    if EXIBIR_LOGS: logger.info(f"✅ [Motor Público] Vídeo '{nome_produto}' encaminhado para a Vitrine do Público com sucesso!")
+                    if EXIBIR_LOGS: logger.info(f"✅ [Motor Público] Vídeo '{nome_produto}' encaminhado para o Tópico de Postagem do Público com sucesso!")
                     
                     cursor.execute("UPDATE fila_autorais SET repostado_publico = 1, data_repost_publico = ? WHERE id_unico = ?", (agora.strftime("%Y-%m-%d %H:%M:%S"), id_unico))
                     conexao.commit()
@@ -5532,7 +5532,7 @@ async def manual_repost_autoral(message: types.Message):
         cursor.execute("UPDATE fila_autorais SET repostado_publico = 1, data_repost_publico = ? WHERE id_unico = ?", (agora_str, id_unico))
         conexao.commit()
         
-        await msg_status.edit_text("✅ <b>Repost Autoral realizado!</b>\nUm vídeo foi puxado e enviado formatado para a Vitrine do Grupo Público.", parse_mode="HTML")
+        await msg_status.edit_text("✅ <b>Repost Autoral realizado!</b>\nUm vídeo foi puxado e enviado formatado para o Tópico de Postagem do Grupo Público.", parse_mode="HTML")
         if EXIBIR_LOGS: logger.info(f"✅ Disparo de repost manual executado com sucesso: {nome_produto}")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao dar copy_message no repost manual: {e}")
@@ -10390,7 +10390,7 @@ async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
     nome_escuta = cache_nomes.get(chave_escuta) or config_sub.get("nome_topico_envio") or "Tópico de Escuta"
     icone_escuta = "✅" if chave_escuta in cache_nomes else "⏳"
     
-    nome_vitrine = cache_nomes.get(chave_vitrine) or config_sub.get("nome_topico_destino") or "Tópico Vitrine"
+    nome_vitrine = cache_nomes.get(chave_vitrine) or config_sub.get("nome_topico_destino") or "Tópico de Postagem"
     icone_vitrine = "✅" if chave_vitrine in cache_nomes else "⏳"
 
     topicos_rotina = config_sub.get("topicos_rotina", [])
@@ -10463,7 +10463,7 @@ async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
     
     teclado = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Editar Tópico de Escuta 💬"), KeyboardButton(text="Editar Tópico Vitrine 🌟")],
+            [KeyboardButton(text="Editar Tópico de Escuta 💬"), KeyboardButton(text="Editar Tópico de Postagem 📤")],
             [KeyboardButton(text="Voltar às Configurações 🔙")]
         ], resize_keyboard=True, is_persistent=True
     )
@@ -10473,7 +10473,7 @@ async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
         "Defina os dois tópicos do Grupo Público em que o Robô Moderador atua:\n\n"
         "📥 <b>Tópico de Escuta:</b> o tópico que o robô fica vigiando. É onde os membros "
         "enviam os vídeos para serem analisados pela IA.\n\n"
-        "📤 <b>Tópico Vitrine:</b> o tópico onde o robô publica automaticamente os vídeos "
+        "📤 <b>Tópico de Postagem:</b> o tópico onde o robô publica automaticamente os vídeos "
         "que foram aprovados na análise.\n\n"
         "<i>(Os alvos das mensagens automáticas de divulgação ficam em Rotinas do Grupo Público ⏰)</i>\n\n"
         "Selecione qual tópico deseja alterar:"
@@ -10490,7 +10490,7 @@ async def selecionar_campo_grupo_publico(message: types.Message, state: FSMConte
 
     opcoes = {
         "Editar Tópico de Escuta 💬": ("escuta", "Envie o Link ou ID Numérico do tópico onde os membros enviam os vídeos (<b>Tópico de Escuta</b>):"),
-        "Editar Tópico Vitrine 🌟": ("vitrine", "Envie o Link ou ID Numérico do tópico onde o robô irá postar os vídeos aprovados (<b>Tópico Vitrine</b>):")
+        "Editar Tópico de Postagem 📤": ("vitrine", "Envie o Link ou ID Numérico do tópico onde o robô irá publicar os vídeos aprovados (<b>Tópico de Postagem</b>):")
     }
     
     selecao = opcoes.get(message.text)
