@@ -2284,8 +2284,8 @@ async def submenu_robo_moderador(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("⚙️ Acessando submenu de Configurações do Robô Moderador...")
 
     config = ler_submissao_config()
-    status = "🟢 ATIVADO" if config.get("ativo") else "🔴 DESATIVADO"
-    texto_botao_moderador = "Desativar Robô Moderador 🛑" if config.get("ativo") else "Ativar Robô Moderador ⚙️"
+    status = "🟢 ATIVADO" if config.get("ativo") else "🔴 PAUSADO"
+    texto_botao_moderador = "Pausar Robô Moderador ⏸️" if config.get("ativo") else "Retomar Robô Moderador ▶️"
 
     teclado_mod = ReplyKeyboardMarkup(
         keyboard=[
@@ -5512,6 +5512,14 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
             await gerenciar_rotina_publico(message, state)
         else:
             await gerenciar_rotina(message, state)
+        return
+
+    # 🔁 Roteamento Inteligente: Cancelamento do toggle do Moderador volta ao submenu de origem
+    if estado_atual == "SubmissaoAdminFluxo:aguardando_confirmacao_toggle":
+        await state.clear()
+        if EXIBIR_LOGS: logger.info("🔙 Cancelamento do toggle do Moderador. Retornando ao submenu de Configurações do Robô Moderador.")
+        await message.answer("Ação cancelada.")
+        await submenu_robo_moderador(message, state)
         return
 
     # 🔁 Roteamento Inteligente: Se estiver nas Submissões do Público
@@ -10147,50 +10155,57 @@ async def forcar_clones_fila(callback: types.CallbackQuery):
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila de clonagem: {e}")
         await callback.answer("Erro ao acessar a fila de clonagem.", show_alert=True)
 
-@dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Ativar Robô Moderador ⚙️", "Desativar Robô Moderador 🛑", "Ativar/Desativar Robô Moderador ⚙️"]))
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Pausar Robô Moderador ⏸️", "Retomar Robô Moderador ▶️", "Ativar Robô Moderador ⚙️", "Desativar Robô Moderador 🛑"]))
 async def pedir_confirmacao_toggle(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
     config = ler_submissao_config()
     if not config.get("grupo_id"):
         return await message.answer("⚠️ Você precisa configurar o Grupo e os Tópicos primeiro.")
-        
-    acao = "DESATIVAR" if config.get("ativo") else "ATIVAR"
-    
+
+    acao = "pausar" if config.get("ativo") else "retomar"
+    await state.update_data(acao_moderador_pub=acao)
+
+    texto_botao = "Confirmar Pausa ✅" if acao == "pausar" else "Confirmar Retomada ✅"
     teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=f"Aprovar {acao} ✅"), KeyboardButton(text="Cancelar ❌")]],
+        keyboard=[[KeyboardButton(text=texto_botao), KeyboardButton(text="Cancelar ❌")]],
         resize_keyboard=True,
         is_persistent=True
     )
-    
+
     texto = (
-        f"⚠️ Tem certeza de que deseja <b>{acao}</b> a moderação automática de vídeos neste grupo?\n\n"
-        "<i>(Quando ativada, a IA passará a analisar e aprovar automaticamente os vídeos enviados pelos membros no tópico de escuta)</i>"
+        f"⚠️ Tem certeza de que deseja <b>{'PAUSAR' if acao == 'pausar' else 'RETOMAR'}</b> a moderação automática de vídeos neste grupo?\n\n"
+        "<i>(Quando em execução, a IA analisa e aprova automaticamente os vídeos enviados pelos membros no tópico de escuta)</i>"
     )
-    
+
     await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(SubmissaoAdminFluxo.aguardando_confirmacao_toggle)
 
 @dp.message(SubmissaoAdminFluxo.aguardando_confirmacao_toggle)
 async def processar_toggle_submissoes(message: types.Message, state: FSMContext):
-    if "Aprovar" not in message.text:
-        await message.answer("Operação cancelada.")
-        await painel_submissoes(message, state)
+    if not message.text or "Confirmar" not in message.text:
+        await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
         return
-        
-    config = ler_submissao_config()
-    config["ativo"] = not config.get("ativo", False)
-    salvar_submissao_config(config)
-    
-    if config["ativo"]:
-        icone = "✅"
-        status = "ATIVADO"
-    else:
-        icone = "🔴"
-        status = "DESATIVADO"
-        
-    await message.answer(f"{icone} O Robô Moderador foi <b>{status}</b> com sucesso.", parse_mode="HTML")
-    await painel_submissoes(message, state)
 
-@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Rotinas do Grupo Público ⏰")
+    dados = await state.get_data()
+    acao = dados.get("acao_moderador_pub")
+
+    config = ler_submissao_config()
+    if acao in ("pausar", "retomar"):
+        config["ativo"] = (acao == "retomar")
+    else:
+        config["ativo"] = not config.get("ativo", False)
+    salvar_submissao_config(config)
+
+    if config["ativo"]:
+        icone = "▶️"
+        status = "RETOMADO"
+    else:
+        icone = "⏸️"
+        status = "PAUSADO"
+
+    if EXIBIR_LOGS: logger.info(f"⚙️ Status do Robô Moderador alterado para: {status}")
+    await message.answer(f"{icone} O Robô Moderador foi <b>{status}</b> com sucesso.", parse_mode="HTML")
+    await submenu_robo_moderador(message, state)
 async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
     dados = ler_config_rotina()
     
