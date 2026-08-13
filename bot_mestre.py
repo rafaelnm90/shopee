@@ -4135,6 +4135,8 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info(f"✅ Relatório da Fila do Grupo Público entregue ({len(itens)} itens).")
 
 @dp.message(RelatoriosFluxo.menu_filas, F.text.in_(["Fila do Espelhador 🔄", "Fila do Espião 🕵️", "Fila de Autorais 🎥"]))
+@dp.message(RelatoriosFluxo.aguardando_rota_espelhador)
+async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     
     estado_atual = await state.get_state()
