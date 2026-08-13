@@ -2244,24 +2244,27 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     status_rotinas = "🔴 PAUSADAS" if dados_rotina.get("pausado_publico") else "🟢 ATIVAS"
 
     texto = (
-        "📬 <b>Painel do Grupo Público</b>\n\n"
-        "O robô atuará como moderador dentro do seu Supergrupo.\n"
-        "Ele escutará os envios no Tópico de Conversa, analisará com a IA "
-        "e postará automaticamente os vídeos aprovados no Tópico de Postagem.\n\n"
-        
-        f"⚙️ <b>Status Robô Moderador:</b> {status}\n"
-        f"📥 <b>Escutando:</b>\n{display_escuta}\n"
-        f"📤 <b>Postando:</b>\n{display_vitrine}\n\n"
-        
-        f"♻️ <b>Status Robô Repostador:</b> {repost_status}\n"
-        f"📥 <b>Escutando:</b>\n{display_repost_origem}\n"
-        f"📤 <b>Postando:</b>{display_repost_destino}\n"
-        f"⏳ Oculto por: <b>{dias} dias</b>\n"
-        f"📦 Cota Diária: <b>{limite} vídeos/dia</b>\n\n"
+        "📬 <b>PAINEL DO GRUPO PÚBLICO</b>\n"
+        "<i>Os três robôs que atuam no seu Supergrupo.</i>\n\n"
 
-        f"⏰ <b>Status Rotinas do Grupo:</b> {status_rotinas}\n"
-        f"📢 <b>Postando nos Alvos:</b>{display_rotinas}\n\n"
-        
+        f"⚙️ <b>ROBÔ MODERADOR</b>  ·  {status}\n"
+        "<blockquote>"
+        f"📥 <b>Escuta</b>\n{display_escuta}\n"
+        f"📤 <b>Publica</b>\n{display_vitrine}"
+        "</blockquote>\n"
+
+        f"♻️ <b>ROBÔ REPOSTADOR</b>  ·  {repost_status}\n"
+        "<blockquote>"
+        f"📥 <b>Escuta</b>\n{display_repost_origem}\n"
+        f"📤 <b>Publica</b>{display_repost_destino}\n"
+        f"⏳ Oculto por <b>{dias} dias</b>  ·  📦 <b>{limite} vídeos/dia</b>"
+        "</blockquote>\n"
+
+        f"⏰ <b>ROTINAS DO GRUPO</b>  ·  {status_rotinas}\n"
+        "<blockquote>"
+        f"📢 <b>Publicando nos alvos</b>{display_rotinas}"
+        "</blockquote>\n"
+
         "Escolha a ação desejada:"
     )
     
