@@ -4002,7 +4002,7 @@ def obter_teclado_relatorios():
 def obter_teclado_relatorios_filas():
     botoes = [
         [KeyboardButton(text="Fila do Espião 🕵️"), KeyboardButton(text="Fila do Espelhador 🔄")],
-        [KeyboardButton(text="Fila de Autorais 🎥")],
+        [KeyboardButton(text="Fila de Autorais 🎥"), KeyboardButton(text="Fila do Grupo Público 📬")],
         [KeyboardButton(text="Voltar aos Relatórios 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -4024,9 +4024,117 @@ async def voltar_relatorios_geral(message: types.Message, state: FSMContext):
     await state.clear()
     await menu_relatorio_geral(message, state)
 
+# ✅ NOVO: Fila dedicada do Grupo Público (espelha o layout da Fila de Autorais)
+@dp.message(RelatoriosFluxo.menu_filas, F.text == "Fila do Grupo Público 📬")
+async def relatorio_fila_publico(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("📬 Compilando o relatório da Fila do Grupo Público...")
+
+    config = ler_submissao_config()
+    dias_atraso = config.get("repost_dias", 15)
+    limite = config.get("repost_limite", 6)
+    is_pausado = config.get("repost_pausado", False) or not config.get("ativo", False)
+
+    agora = datetime.now(fuso_horario)
+    hoje_str = agora.strftime("%Y-%m-%d")
+
+    # Origem real de onde os vídeos são puxados para o Público
+    canal_origem = config.get("repost_origem")
+    if not canal_origem:
+        config_aut = ler_config_bd("autorais_config", {})
+        canal_origem = config_aut.get("destino", "")
+    origem_base = str(canal_origem).split(":")[0].strip()
+
+    cache_nomes = ler_cache_nomes_grupos()
+    display_origem = cache_nomes.get(origem_base, origem_base or "Origem não definida")
+
+    try:
+        conexao = sqlite3.connect("banco_dados.db")
+        conexao.row_factory = sqlite3.Row
+        cursor = conexao.cursor()
+        cursor.execute("""
+            SELECT * FROM fila_autorais
+            WHERE processado = 1
+              AND (repostado_publico = 0 OR data_repost_publico LIKE ?)
+            ORDER BY data_captura ASC
+        """, (f"{hoje_str}%",))
+        linhas = cursor.fetchall()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler a fila do Grupo Público: {e}")
+        await message.answer(f"❌ Erro interno ao ler o banco de dados: {e}")
+        return
+
+    if not linhas:
+        await message.answer("📭 A fila do Grupo Público está vazia no momento.", parse_mode="HTML")
+        return
+
+    itens = []
+    for linha in linhas:
+        data_rep = linha["data_repost_publico"] or ""
+        itens.append({
+            "id": str(linha["id_unico"]),
+            "msg_id_destino": linha["msg_id_destino"],
+            "legenda": linha["legenda"],
+            "data_captura": linha["data_captura"],
+            # ✅ Aqui "processado" significa: já foi repostado no Grupo Público
+            "processado": bool(linha["repostado_publico"]),
+            "data_postagem": data_rep.split(" ")[0] if data_rep else "",
+            "horario_postagem": data_rep.split(" ")[1][:5] if " " in data_rep else "",
+            "is_pausado": is_pausado
+        })
+
+    # Postados hoje aparecem primeiro; depois os pendentes em ordem de captura
+    itens.sort(key=lambda x: (0 if x["processado"] else 1, x.get("data_captura") or ""))
+    qtd_pendentes = len([i for i in itens if not i["processado"]])
+
+    from motor_filas import gerar_layout_item_padrao
+
+    status_txt = "🔴 PAUSADO" if is_pausado else "🟢 ATIVO"
+    texto_atual = f"📊 <b>Relatório da Fila Grupo Público (D+{dias_atraso})</b>\n\n"
+    texto_atual += f"📡 <b>Rota: Repostagem Pública</b> ({qtd_pendentes} vídeos agendados)\n"
+    texto_atual += f"🕒 <b>Postagem:</b> D+{dias_atraso}, entre 10h e 20h\n"
+    texto_atual += f"📦 <b>Cota Diária:</b> {limite} vídeos/dia  ·  ⚙️ {status_txt}\n\n"
+
+    mensagens_para_enviar = []
+
+    for i, v in enumerate(itens, 1):
+        link_origem = ""
+        msg_id = v.get("msg_id_destino")
+        if msg_id and origem_base:
+            if origem_base.lstrip("-").isdigit():
+                id_limpo = origem_base.replace("-100", "").replace("-", "")
+                link_origem = f"https://t.me/c/{id_limpo}/{msg_id}"
+            elif origem_base.startswith("@"):
+                link_origem = f"https://t.me/{origem_base.replace('@', '')}/{msg_id}"
+
+        linha_video = gerar_layout_item_padrao(
+            index=i,
+            item=v,
+            tipo_fila="Público",
+            atraso_dias=dias_atraso,
+            agora=agora,
+            fuso_horario=fuso_horario,
+            display_origem=display_origem,
+            link_origem=link_origem,
+            link_destino=None
+        )
+
+        if len(texto_atual) + len(linha_video) > 3800:
+            mensagens_para_enviar.append(texto_atual)
+            texto_atual = "📡 <b>Rota: Repostagem Pública (Continuação)</b>\n\n"
+
+        texto_atual += linha_video
+
+    if texto_atual.strip():
+        mensagens_para_enviar.append(texto_atual)
+
+    for msg in mensagens_para_enviar:
+        await message.answer(msg, parse_mode="HTML", disable_web_page_preview=True)
+
+    if EXIBIR_LOGS: logger.info(f"✅ Relatório da Fila do Grupo Público entregue ({len(itens)} itens).")
+
 @dp.message(RelatoriosFluxo.menu_filas, F.text.in_(["Fila do Espelhador 🔄", "Fila do Espião 🕵️", "Fila de Autorais 🎥"]))
-@dp.message(RelatoriosFluxo.aguardando_rota_espelhador)
-async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     
     estado_atual = await state.get_state()
