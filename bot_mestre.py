@@ -2267,7 +2267,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     teclado_pub = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Configurações do Robô Moderador ⚙️")],
-            [KeyboardButton(text="Configurações do Robô de Rotina ⏰")],
+            [KeyboardButton(text="Configurações do Robô de Rotina do Grupo Público ⏰")],
             [KeyboardButton(text="Configurações do Robô Repostador ♻️")],
             [KeyboardButton(text="Voltar aos Canais 🔙")]
         ], resize_keyboard=True, is_persistent=True
@@ -9033,14 +9033,26 @@ async def salvar_horario_rotina(message: types.Message, state: FSMContext):
     
     # Força o re-sorteio imediato para aplicar as novas regras hoje mesmo
     origem = data.get("menu_origem")
+
+    # ✅ CORREÇÃO: o Grupo Público não tinha ramo próprio e caía no "else",
+    # jogando o usuário no menu do Canal Principal.
     if origem == "espiao":
         agendar_tarefas_diarias(escopo="viral")
-        await message.answer("✅ Configuração salva! Os novos horários do Canal Viral já foram sorteados e agendados para hoje.")
-        await gerenciar_rotina_espiao(message, state)
-    else:
+        texto_ok = "✅ Configuração salva! Os novos horários do Canal Viral já foram sorteados e agendados para hoje."
+    elif origem == "publico":
         agendar_tarefas_diarias(escopo="principal")
-        await message.answer("✅ Configuração salva! Os novos horários do Canal Principal já foram sorteados e agendados para hoje.")
-        await gerenciar_rotina(message, state)
+        texto_ok = "✅ Configuração salva! Os novos horários do Grupo Público já foram sorteados e agendados para hoje."
+    else:
+        origem = "principal"
+        agendar_tarefas_diarias(escopo="principal")
+        texto_ok = "✅ Configuração salva! Os novos horários do Canal Principal já foram sorteados e agendados para hoje."
+
+    await message.answer(texto_ok)
+
+    # ✅ Volta para o submenu "Editar Rotinas", permitindo editar outra rotina em seguida
+    await state.update_data(menu_origem=origem)
+    await state.set_state(ConfigRotina.menu_principal)
+    await submenu_editar_rotinas(message, state)
 
 # --- SISTEMA DE GERENCIAMENTO DE FILA (INTERATIVO) ---
 class GerenciarFilaFluxo(StatesGroup):
@@ -10392,7 +10404,7 @@ async def processar_toggle_submissoes(message: types.Message, state: FSMContext)
     await message.answer(f"{icone} O Robô Moderador foi <b>{status}</b> com sucesso.", parse_mode="HTML")
     await submenu_robo_moderador(message, state)
 
-@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurações do Robô de Rotina ⏰")
+@dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurações do Robô de Rotina do Grupo Público ⏰")
 async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
     dados = ler_config_rotina()
     
@@ -10499,7 +10511,7 @@ async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
         "enviam os vídeos para serem analisados pela IA.\n\n"
         "📤 <b>Tópico de Postagem:</b> o tópico onde o robô publica automaticamente os vídeos "
         "que foram aprovados na análise.\n\n"
-        "<i>(Os alvos das mensagens automáticas de divulgação ficam em Rotinas do Grupo Público ⏰)</i>\n\n"
+        "<i>(Os alvos das mensagens automáticas de divulgação ficam em Configurações do Robô de Rotina do Grupo Público ⏰)</i>\n\n"
         "Selecione qual tópico deseja alterar:"
     )
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
