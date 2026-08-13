@@ -5345,7 +5345,7 @@ async def processar_disparo_publico(message: types.Message, state: FSMContext):
     await state.set_state(ConfigRotina.menu_principal)
     await submenu_disparos_manuais(message, state)
 
-@dp.message(F.text == "Disparar Repost Autoral ♻️", StateFilter("*"))# ✅ NOVO: Gestão dos alvos (tópicos) que recebem as rotinas do Grupo Público
+# ✅ NOVO: Gestão dos alvos (tópicos) que recebem as rotinas do Grupo Público
 @dp.message(ConfigRotina.menu_principal, F.text == "Gerenciar Alvos de Postagem 🎯")
 async def pedir_alvos_rotina_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
@@ -5451,7 +5451,6 @@ async def salvar_alvos_rotina_publico(message: types.Message, state: FSMContext)
     await gerenciar_rotina_publico(message, state)
 
 @dp.message(F.text == "Disparar Repost Autoral ♻️", StateFilter("*"))
-
 async def manual_repost_autoral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     
