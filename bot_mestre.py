@@ -2253,14 +2253,15 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         f"📥 <b>Escutando:</b>\n{display_escuta}\n"
         f"📤 <b>Postando:</b>\n{display_vitrine}\n\n"
         
-        f"⏰ <b>Status Rotinas do Grupo:</b> {status_rotinas}\n"
-        f"📢 <b>Postando nos Alvos:</b>{display_rotinas}\n\n"
-        
         f"♻️ <b>Status Robô Repostador:</b> {repost_status}\n"
         f"📥 <b>Escutando:</b>\n{display_repost_origem}\n"
         f"📤 <b>Postando:</b>{display_repost_destino}\n"
         f"⏳ Oculto por: <b>{dias} dias</b>\n"
         f"📦 Cota Diária: <b>{limite} vídeos/dia</b>\n\n"
+
+        f"⏰ <b>Status Rotinas do Grupo:</b> {status_rotinas}\n"
+        f"📢 <b>Postando nos Alvos:</b>{display_rotinas}\n\n"
+        
         "Escolha a ação desejada:"
     )
     
