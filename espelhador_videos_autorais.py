@@ -173,6 +173,101 @@ def salvar_fila_retorno(dados):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar fila_autorais no SQLite: {e}")
 
+def ler_fila_publico():
+    """Fila própria do Grupo Público. Espelha ler_fila_retorno(), com tabela separada."""
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao.row_factory = sqlite3.Row
+        cursor = conexao.cursor()
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS fila_publico (
+                id_unico TEXT PRIMARY KEY,
+                msg_id_destino INTEGER,
+                legenda TEXT,
+                data_captura TEXT,
+                data_alvo TEXT,
+                horario_disparo TEXT,
+                processado INTEGER DEFAULT 0,
+                data_postagem TEXT
+            )
+        ''')
+        cursor.execute("SELECT * FROM fila_publico")
+        linhas = cursor.fetchall()
+        conexao.close()
+
+        fila = []
+        for linha in linhas:
+            fila.append({
+                "id_unico": linha["id_unico"],
+                "msg_id_destino": linha["msg_id_destino"],
+                "legenda": linha["legenda"],
+                "data_captura": linha["data_captura"],
+                "data_alvo": linha["data_alvo"],
+                "horario_disparo": linha["horario_disparo"],
+                "processado": bool(linha["processado"]),
+                "data_postagem": linha["data_postagem"]
+            })
+        return {"fila": fila}
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila_publico do SQLite: {e}")
+        return {"fila": []}
+
+def salvar_fila_publico(dados):
+    """Espelha salvar_fila_retorno(), gravando na tabela fila_publico."""
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+
+        cursor.execute("DELETE FROM fila_publico")
+        for item in dados.get("fila", []):
+            cursor.execute('''
+                INSERT INTO fila_publico (id_unico, msg_id_destino, legenda, data_captura, data_alvo, horario_disparo, processado, data_postagem)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                item.get("id_unico"),
+                item.get("msg_id_destino"),
+                item.get("legenda"),
+                item.get("data_captura"),
+                item.get("data_alvo"),
+                item.get("horario_disparo", ""),
+                1 if item.get("processado") else 0,
+                item.get("data_postagem", "")
+            ))
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar fila_publico no SQLite: {e}")
+
+def contar_ofertas_dia_publico(data_alvo, incrementar=True):
+    """
+    🎲 Contador do Sorteio do Grupo Público (Amostragem de Reservatório)
+    Espelha contar_ofertas_dia(), com tabela própria e independente.
+    """
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS contador_publico (
+                data_alvo TEXT PRIMARY KEY,
+                total INTEGER DEFAULT 0
+            )
+        ''')
+
+        if incrementar:
+            cursor.execute("UPDATE contador_publico SET total = total + 1 WHERE data_alvo = ?", (data_alvo,))
+            if cursor.rowcount == 0:
+                cursor.execute("INSERT INTO contador_publico (data_alvo, total) VALUES (?, 1)", (data_alvo,))
+
+        cursor.execute("SELECT total FROM contador_publico WHERE data_alvo = ?", (data_alvo,))
+        resultado = cursor.fetchone()
+        conexao.commit()
+        conexao.close()
+        return resultado[0] if resultado else 0
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro no contador de sorteio do Público: {e}")
+        return 0
+
 def contar_ofertas_dia(data_alvo, incrementar=True):
     """
     🎲 Contador do Sorteio (Amostragem de Reservatório)
@@ -459,7 +554,7 @@ async def interceptar_e_espelhar(event):
                             try: os.remove(caminho_antigo)
                             except Exception: pass
                         fila_dados["fila"] = [v for v in fila_dados.get("fila", []) if v.get("id_unico") != item_descartado.get("id_unico")]
-                        if EXIBIR_LOGS: logger.info(f"🔄 [Sorteio] Vídeo nº {total_ofertas} do dia tomou a vaga de {item_descartado.get('id_unico')}.")
+                        if EXIBIR_LOGS: logger.info(f"🔄 [Sorteio Autorais] Vídeo nº {total_ofertas} do dia tomou a vaga de {item_descartado.get('id_unico')}.")
                     
                     fila_dados.setdefault("fila", []).append({
                         "id_unico": id_unico,
@@ -472,13 +567,63 @@ async def interceptar_e_espelhar(event):
                         "processado": False
                     })
                     salvar_fila_retorno(fila_dados)
-                    if EXIBIR_LOGS: logger.info(f"🎯 [Sorteio] Vídeo nº {total_ofertas} do dia SORTEADO para retorno em {data_alvo}.")
+                    if EXIBIR_LOGS: logger.info(f"🎯 [Sorteio Autorais] Vídeo nº {total_ofertas} do dia SORTEADO para retorno em {data_alvo}.")
                 else:
                     try:
                         os.remove(caminho_video)
-                        if EXIBIR_LOGS: logger.info(f"🎲 [Sorteio] Vídeo nº {total_ofertas} do dia não sorteado (chance era {limite_videos}/{total_ofertas}). Removido do disco.")
+                        if EXIBIR_LOGS: logger.info(f"🎲 [Sorteio Autorais] Vídeo nº {total_ofertas} do dia não sorteado (chance era {limite_videos}/{total_ofertas}). Removido do disco.")
                     except Exception:
                         pass
+
+                # 🎲 SORTEIO JUSTO DO GRUPO PÚBLICO (Amostragem de Reservatório)
+                # Loteria INDEPENDENTE, disparada pelo mesmo evento e sobre o mesmo vídeo.
+                # Motor idêntico ao dos Autorais, com contador, fila e regras próprias.
+                try:
+                    config_pub = ler_config_bd_autorais("submissao_config", {})
+                    if config_pub.get("ativo") and not config_pub.get("repost_pausado", False):
+                        dias_publico = config_pub.get("repost_dias", 15)
+                        limite_publico = config_pub.get("repost_limite", 6)
+                        data_alvo_pub = (agora + timedelta(days=dias_publico)).strftime("%Y-%m-%d")
+
+                        fila_pub = ler_fila_publico()
+                        total_ofertas_pub = contar_ofertas_dia_publico(data_alvo_pub)
+                        candidatos_pub = [v for v in fila_pub.get("fila", []) if v.get("data_alvo") == data_alvo_pub and not v.get("processado")]
+
+                        foi_sorteado_pub = False
+                        item_descartado_pub = None
+
+                        if len(candidatos_pub) < limite_publico:
+                            # Ainda há vaga aberta: entra direto para começar a encher o reservatório
+                            foi_sorteado_pub = True
+                        elif total_ofertas_pub > 0 and random.random() < (limite_publico / total_ofertas_pub):
+                            # Reservatório cheio: este vídeo compra a vaga de um sorteado anterior
+                            foi_sorteado_pub = True
+                            item_descartado_pub = random.choice(candidatos_pub)
+
+                        if foi_sorteado_pub:
+                            id_unico_pub = f"publico_{int(agora.timestamp())}_{random.randint(1000, 9999)}"
+
+                            if item_descartado_pub:
+                                # Devolve a vaga: o antigo sai da fila do Público
+                                fila_pub["fila"] = [v for v in fila_pub.get("fila", []) if v.get("id_unico") != item_descartado_pub.get("id_unico")]
+                                if EXIBIR_LOGS: logger.info(f"🔄 [Sorteio Público] Vídeo nº {total_ofertas_pub} do dia tomou a vaga de {item_descartado_pub.get('id_unico')}.")
+
+                            fila_pub.setdefault("fila", []).append({
+                                "id_unico": id_unico_pub,
+                                "msg_id_destino": msg_enviada.id,
+                                "legenda": texto_convertido,
+                                "data_captura": agora.strftime("%Y-%m-%d %H:%M:%S"),
+                                "data_alvo": data_alvo_pub,
+                                "horario_disparo": "",
+                                "processado": False,
+                                "data_postagem": ""
+                            })
+                            salvar_fila_publico(fila_pub)
+                            if EXIBIR_LOGS: logger.info(f"🎯 [Sorteio Público] Vídeo nº {total_ofertas_pub} do dia SORTEADO para o Grupo Público em {data_alvo_pub}.")
+                        else:
+                            if EXIBIR_LOGS: logger.info(f"🎲 [Sorteio Público] Vídeo nº {total_ofertas_pub} do dia não sorteado (chance era {limite_publico}/{total_ofertas_pub}).")
+                except Exception as e:
+                    if EXIBIR_LOGS: logger.error(f"❌ [Sorteio Público] Falha no sorteio: {e}")
 
             except Exception as e:
                 if EXIBIR_LOGS: logger.error(f"❌ Falha ao tentar enviar o vídeo: {e}")
