@@ -2267,8 +2267,8 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     
     teclado_pub = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="Configurações do Robô de Rotina do Grupo Público ⏰")],
             [KeyboardButton(text="Configurações do Robô Moderador ⚙️")],
+            [KeyboardButton(text="Configurações do Robô de Rotina do Grupo Público ⏰")],
             [KeyboardButton(text="Configurações do Robô Repostador ♻️")],
             [KeyboardButton(text="Voltar aos Canais 🔙")]
         ], resize_keyboard=True, is_persistent=True
