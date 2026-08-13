@@ -122,7 +122,15 @@ def inicializar_banco_sqlite():
     # 🚀 Migração invisível 4: Data-alvo própria da fila do Grupo Público
     try:
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_alvo_publico TEXT")
-        if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'data_alvo_publico' adicionada à fila_autorais.")
+        cursor.execute("ALTER TABLE fila_autorais ADD COLUMN status_publico TEXT")
+        if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Colunas 'data_alvo_publico' e 'status_publico' adicionadas à fila_autorais.")
+    except sqlite3.OperationalError:
+        pass
+
+    # 🚀 Migração invisível 5: garante a coluna de status mesmo em bancos que já tinham a data-alvo
+    try:
+        cursor.execute("ALTER TABLE fila_autorais ADD COLUMN status_publico TEXT")
+        if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'status_publico' adicionada à fila_autorais.")
     except sqlite3.OperationalError:
         pass
         
@@ -2659,8 +2667,8 @@ async def motor_repost_publico_step():
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         
-        # ✅ A fila é montada dia a dia por montar_fila_publico_do_dia(), que sorteia os
-        # vídeos e crava a data-alvo. Aqui só publicamos o que já venceu essa data.
+        # ✅ A fila é montada por sortear_ofertas_publico() (Amostragem de Reservatório),
+        # que crava a data-alvo. Aqui só publicamos o que já venceu essa data.
         cursor.execute('''
             SELECT * FROM fila_autorais
             WHERE processado = 1
@@ -2730,58 +2738,113 @@ async def motor_repost_publico_step():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Motor Público] Erro estrutural crítico: {e}")
 
-# ✅ NOVO: Construtor diário da fila do Grupo Público (espelha o sorteio dos Autorais)
-async def montar_fila_publico_do_dia():
-    """Uma vez por dia, sorteia até 'repost_limite' vídeos entre os elegíveis que ainda
-    não têm data e crava a data-alvo em hoje + 'repost_dias'. Nada é descartado: quem
-    não for sorteado hoje volta ao bolo e concorre novamente amanhã."""
+def contar_ofertas_dia_publico(data_alvo, incrementar=True):
+    """
+    🎲 Contador do Sorteio do Grupo Público (Amostragem de Reservatório)
+    Guarda quantos vídeos já foram oferecidos para aquela data_alvo.
+    É esse número que garante a chance justa de (limite/total) para cada vídeo do dia.
+    Espelha contar_ofertas_dia() do módulo de Vídeos Autorais, com tabela própria.
+    """
     try:
-        config = ler_submissao_config()
-        if not config.get("ativo") or config.get("repost_pausado", False):
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS contador_publico (
+                data_alvo TEXT PRIMARY KEY,
+                total INTEGER DEFAULT 0
+            )
+        ''')
+
+        if incrementar:
+            cursor.execute("UPDATE contador_publico SET total = total + 1 WHERE data_alvo = ?", (data_alvo,))
+            if cursor.rowcount == 0:
+                cursor.execute("INSERT INTO contador_publico (data_alvo, total) VALUES (?, 1)", (data_alvo,))
+
+        cursor.execute("SELECT total FROM contador_publico WHERE data_alvo = ?", (data_alvo,))
+        resultado = cursor.fetchone()
+        conexao.commit()
+        conexao.close()
+        return resultado[0] if resultado else 0
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro no contador de sorteio do Público: {e}")
+        return 0
+
+async def sortear_ofertas_publico():
+    """
+    🎲 SORTEIO JUSTO DO GRUPO PÚBLICO (Amostragem de Reservatório)
+    Motor idêntico ao dos Vídeos Autorais, com variáveis e tabela independentes.
+    Cada vídeo recém-liberado é uma "oferta": se há vaga no dia ele entra direto;
+    se o reservatório está cheio, ele compra a vaga de um sorteado anterior com
+    chance de (limite/total_ofertas). Quem não é sorteado sai da disputa.
+    """
+    try:
+        config_atual = ler_submissao_config()
+        if not config_atual.get("ativo") or config_atual.get("repost_pausado", False):
             return
+
+        # ✅ Regra dinâmica de dias e limite lida diretamente do painel do Público
+        dias_retorno = config_atual.get("repost_dias", 15)
+        limite_videos = config_atual.get("repost_limite", 6)
 
         agora = datetime.now(fuso_horario)
-        hoje_str = agora.strftime("%Y-%m-%d")
-
-        # 🔒 Trava: monta a fila apenas uma vez por dia
-        if config.get("repost_fila_montada_em") == hoje_str:
-            return
-
-        limite = config.get("repost_limite", 6)
-        dias = config.get("repost_dias", 15)
-        data_alvo = (agora + timedelta(days=dias)).strftime("%Y-%m-%d")
+        data_alvo = (agora + timedelta(days=dias_retorno)).strftime("%Y-%m-%d")
 
         conexao = sqlite3.connect("banco_dados.db")
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
+
+        # Ofertas = vídeos já liberados pelos Autorais que ainda não passaram pelo sorteio
         cursor.execute('''
             SELECT id_unico FROM fila_autorais
             WHERE processado = 1
             AND repostado_publico = 0
-            AND (data_alvo_publico IS NULL OR data_alvo_publico = '')
+            AND (status_publico IS NULL OR status_publico = '')
+            ORDER BY id_unico ASC
         ''')
-        candidatos = [linha["id_unico"] for linha in cursor.fetchall()]
+        ofertas = [linha["id_unico"] for linha in cursor.fetchall()]
 
-        if candidatos:
-            sorteados = random.sample(candidatos, min(limite, len(candidatos)))
-            for id_unico in sorteados:
-                cursor.execute("UPDATE fila_autorais SET data_alvo_publico = ? WHERE id_unico = ?", (data_alvo, id_unico))
+        for id_oferta in ofertas:
+            total_ofertas = contar_ofertas_dia_publico(data_alvo)
+
+            cursor.execute('''
+                SELECT id_unico FROM fila_autorais
+                WHERE data_alvo_publico = ? AND status_publico = 'SORTEADO' AND repostado_publico = 0
+            ''', (data_alvo,))
+            candidatos = [linha["id_unico"] for linha in cursor.fetchall()]
+
+            foi_sorteado = False
+            item_descartado = None
+
+            if len(candidatos) < limite_videos:
+                # Ainda há vaga aberta: entra direto para começar a encher o reservatório
+                foi_sorteado = True
+            elif total_ofertas > 0 and random.random() < (limite_videos / total_ofertas):
+                # Reservatório cheio: este vídeo compra a vaga de um sorteado anterior
+                foi_sorteado = True
+                item_descartado = random.choice(candidatos)
+
+            if foi_sorteado:
+                if item_descartado:
+                    # Devolve a vaga: o antigo sai da disputa do Público
+                    cursor.execute("UPDATE fila_autorais SET status_publico = 'DESCARTADO', data_alvo_publico = NULL WHERE id_unico = ?", (item_descartado,))
+                    if EXIBIR_LOGS: logger.info(f"🔄 [Sorteio Público] Vídeo nº {total_ofertas} do dia tomou a vaga de {item_descartado}.")
+
+                cursor.execute("UPDATE fila_autorais SET status_publico = 'SORTEADO', data_alvo_publico = ? WHERE id_unico = ?", (data_alvo, id_oferta))
+                if EXIBIR_LOGS: logger.info(f"🎯 [Sorteio Público] Vídeo nº {total_ofertas} do dia SORTEADO para retorno em {data_alvo}.")
+            else:
+                cursor.execute("UPDATE fila_autorais SET status_publico = 'DESCARTADO' WHERE id_unico = ?", (id_oferta,))
+                if EXIBIR_LOGS: logger.info(f"🎲 [Sorteio Público] Vídeo nº {total_ofertas} do dia não sorteado (chance era {limite_videos}/{total_ofertas}).")
+
             conexao.commit()
-            if EXIBIR_LOGS: logger.info(f"🎲 [Fila Pública] {len(sorteados)} de {len(candidatos)} vídeos sorteados para postar em {data_alvo}.")
-        else:
-            if EXIBIR_LOGS: logger.info("📭 [Fila Pública] Nenhum vídeo elegível para montar a fila de hoje.")
 
         conexao.close()
-
-        config["repost_fila_montada_em"] = hoje_str
-        salvar_submissao_config(config)
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Fila Pública] Erro ao montar a fila do dia: {e}")
+        if EXIBIR_LOGS: logger.error(f"❌ [Sorteio Público] Erro ao processar as ofertas: {e}")
 
 # Inicia o motor autônomo agendado no APScheduler a cada 2 minutos
 scheduler.add_job(motor_repost_publico_step, 'interval', minutes=2, id='motor_repost_publico_loop', replace_existing=True)
-# ✅ O construtor roda a cada 10 min, mas a trava interna garante 1 montagem por dia
-scheduler.add_job(montar_fila_publico_do_dia, 'interval', minutes=10, id='montar_fila_publico_loop', replace_existing=True)
+# ✅ O sorteio roda a cada 2 minutos e processa cada oferta nova assim que ela aparece
+scheduler.add_job(sortear_ofertas_publico, 'interval', minutes=2, id='sorteio_publico_loop', replace_existing=True)
 
 # ----------------------------------
 # NOVO MÓDULO: VÍDEOS AUTORAIS 🎥
@@ -4124,8 +4187,7 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
 
         cursor.execute("""
             SELECT COUNT(*) FROM fila_autorais
-            WHERE processado = 1 AND repostado_publico = 0
-              AND (data_alvo_publico IS NULL OR data_alvo_publico = '')
+            WHERE processado = 1 AND repostado_publico = 0 AND status_publico = 'DESCARTADO'
         """)
         aguardando_sorteio = cursor.fetchone()[0]
         conexao.close()
@@ -4137,7 +4199,7 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
     if not linhas:
         aviso = "📭 <b>A fila do Grupo Público está vazia no momento.</b>"
         if aguardando_sorteio:
-            aviso += f"\n\n🎲 <b>{aguardando_sorteio}</b> vídeo(s) no bolo, aguardando o sorteio dos próximos dias."
+            aviso += f"\n\n🎲 <b>{aguardando_sorteio}</b> vídeo(s) não sorteados até agora."
         await message.answer(aviso, parse_mode="HTML")
         return
 
@@ -4170,7 +4232,7 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
     texto_atual += f"📡 <b>Rota: Repostagem Pública</b> ({qtd_pendentes} vídeos agendados)\n"
     texto_atual += f"🕒 <b>Postagem:</b> D+{dias_atraso}, entre 10h e 20h\n"
     texto_atual += f"📦 <b>Cota Diária:</b> {limite} vídeos/dia  ·  ⚙️ {status_txt}\n"
-    texto_atual += f"🎲 <b>No bolo do sorteio:</b> {aguardando_sorteio} vídeo(s)\n\n"
+    texto_atual += f"🎲 <b>Não sorteados:</b> {aguardando_sorteio} vídeo(s)\n\n"
 
     mensagens_para_enviar = []
 
