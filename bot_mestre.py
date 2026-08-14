@@ -1367,6 +1367,36 @@ def salvar_config_bd(chave, dados):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar configuração '{chave}' no SQLite: {e}")
 
+# 👤 CRÉDITO AUTOMÁTICO DO REPOST: pergunta ao Telegram qual é o @ do administrador
+_cache_credito_repost = {"valor": None, "expira": None}
+
+async def obter_credito_repost():
+    """
+    Consulta o Telegram e devolve o @username do administrador, sem precisar digitar nada.
+    Se a conta não tiver @, cai numa menção clicável pelo ID (que funciona sempre).
+    O resultado fica em cache por 24h para não consultar a API a cada postagem.
+    """
+    agora = datetime.now(fuso_horario)
+
+    if _cache_credito_repost["valor"] and _cache_credito_repost["expira"] and agora < _cache_credito_repost["expira"]:
+        return _cache_credito_repost["valor"]
+
+    try:
+        usuario = await bot.get_chat(ADMIN_ID)
+        if getattr(usuario, "username", None):
+            credito = f"@{usuario.username}"
+        else:
+            nome = getattr(usuario, "first_name", None) or "Administrador"
+            credito = f"<a href='tg://user?id={ADMIN_ID}'>{nome}</a>"
+
+        _cache_credito_repost["valor"] = credito
+        _cache_credito_repost["expira"] = agora + timedelta(hours=24)
+        if EXIBIR_LOGS: logger.info(f"👤 Crédito do repost resolvido automaticamente: {credito}")
+        return credito
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível obter o @ do administrador ({e}). Usando menção por ID.")
+        return f"<a href='tg://user?id={ADMIN_ID}'>Administrador</a>"
+
 # --- SISTEMA DE PAUSA PROGRAMADA ---
 def ler_pausa_programada():
     padrao = {"ativa": False, "data_retorno": None, "servicos_pausados": []}
@@ -2062,7 +2092,9 @@ async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int 
         await bot.delete_message(chat_id=chat_id, message_id=msg_aviso.message_id)
         
         # Passo B: Envia a mensagem âncora definitiva COM os botões do menu raiz
-        await bot.send_message(chat_id, "🏠 Painel Inicial restaurado.", reply_markup=obter_teclado_raiz())
+        # 🛡️ Só restaura o painel no chat privado do administrador
+        if str(chat_id) == str(ADMIN_ID):
+            await bot.send_message(chat_id, "🏠 Painel Inicial restaurado.", reply_markup=obter_teclado_raiz())
         
         if EXIBIR_LOGS: logger.info("🧹 Mensagem temporária apagada e botões restaurados com sucesso.")
     except Exception as e:
@@ -2145,6 +2177,23 @@ class BloqueioAdminMiddleware(BaseMiddleware):
                 return 
 
         return await handler(event, data)
+
+# 🛡️ TRAVA GLOBAL DE SAÍDA: nenhum teclado de painel pode sair para fora do privado do admin.
+# Age na resposta do bot (não na entrada), fechando qualquer brecha de exposição em grupos.
+# Botões inline (submissões, wizard) NÃO são afetados — só ReplyKeyboardMarkup.
+class BloqueioTecladoForaDoPrivadoMiddleware:
+    async def __call__(self, make_request, bot, method):
+        try:
+            markup = getattr(method, "reply_markup", None)
+            destino = getattr(method, "chat_id", None)
+            if isinstance(markup, types.ReplyKeyboardMarkup) and str(destino) != str(ADMIN_ID):
+                method.reply_markup = None
+                if EXIBIR_LOGS: logger.warning(f"🛡️ [Trava de Teclado] Painel bloqueado fora do privado (chat {destino}).")
+        except Exception:
+            pass
+        return await make_request(bot, method)
+
+bot.session.middleware(BloqueioTecladoForaDoPrivadoMiddleware())
 
 # Acopla os interceptadores de segurança e inatividade ao núcleo do robô para vigiar todas as mensagens
 dp.message.middleware(BloqueioAdminMiddleware())
@@ -2729,8 +2778,7 @@ async def motor_repost_publico_step():
                 match_item = re.search(r'📦\s*Item:\s*([^\n<]+)', legenda_original)
                 nome_produto = match_item.group(1).strip() if match_item else "Produto Exclusivo"
 
-                nomes_fakes = ["Rafael", "Membro VIP", "Shopee Afiliado", "Dicas da Comunidade", "Ofertas Top", "Guia de Ofertas"]
-                user_mention = random.choice(nomes_fakes)
+                user_mention = await obter_credito_repost()
 
                 legenda_final = (
                     f"👤 Dica enviada por: {user_mention}\n\n"
@@ -5663,8 +5711,7 @@ async def manual_repost_autoral(message: types.Message):
         conexao.close()
         return
         
-    nomes_fakes = ["Rafael", "Membro VIP", "Shopee Afiliado", "Dicas da Comunidade", "Ofertas Top"]
-    user_mention = random.choice(nomes_fakes)
+    user_mention = await obter_credito_repost()
     
     legenda_original = video_sorteado["legenda"]
     import re
