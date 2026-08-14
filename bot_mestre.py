@@ -4099,8 +4099,8 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
             "legenda": linha["legenda"],
             "data_captura": linha["data_captura"],
             "processado": bool(linha["processado"]),
-            # ✅ Data-alvo sorteada: é ela que manda na previsão exibida
-            "data_publicacao": f"{data_alvo} 10:00:00" if data_alvo else "",
+            # ✅ Se o motor já cravou o horário exato, usa ele; senão mostra só a data
+            "data_publicacao": (linha["horario_disparo"] or data_alvo),
             "data_postagem": data_post.split(" ")[0] if data_post else "",
             "horario_postagem": data_post.split(" ")[1][:5] if " " in data_post else "",
             "is_pausado": is_pausado
