@@ -2640,55 +2640,70 @@ async def motor_repost_publico_step():
         if not grupo_id:
             return
 
-        limite_diario = config.get("repost_limite", 6)
-        dias_atraso = config.get("repost_dias", 15)
-        
+        # ⏰ Janela de postagem (mesma lógica do painel de Autorais)
+        janela_inicio = int(config.get("repost_inicio", 10))
+        janela_fim = int(config.get("repost_fim", 20))
+
         agora = datetime.now(fuso_horario)
         hoje_str = agora.strftime("%Y-%m-%d")
-        
-        # 🔄 Virada do dia: reseta o banco de dados interno
-        if config.get("repost_data_atual") != hoje_str:
-            config["repost_data_atual"] = hoje_str
-            config["repost_qtd_hoje"] = 0
-            salvar_submissao_config(config)
-            
-        qtd_hoje = config.get("repost_qtd_hoje", 0)
-        
-        # Expediente Fixo: 10h às 20h
-        if agora.hour < 10 or agora.hour >= 20:
-            return
-            
-        if qtd_hoje >= limite_diario:
-            return
-            
-        minutos_expediente = 600
-        espacamento = minutos_expediente / limite_diario if limite_diario > 0 else 600
-        
-        hora_ultimo = config.get("repost_ultimo_horario")
-        if hora_ultimo:
-            try:
-                ultimo_obj = datetime.strptime(hora_ultimo, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
-                minutos_passados = (agora - ultimo_obj).total_seconds() / 60
-                if minutos_passados < espacamento:
-                    return # Catraca de espaçamento ativa
-            except: pass
-        
-        data_corte_str = (agora - timedelta(days=dias_atraso)).strftime("%Y-%m-%d %H:%M:%S")
-        
+
         conexao = sqlite3.connect("banco_dados.db")
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
-        
-        # ✅ A fila é construída pelo sorteio do espelhador, na tabela fila_publico.
-        # Aqui só publicamos o que já venceu a data-alvo sorteada.
+
+        # --- 1. MOTOR MATEMÁTICO E FAXINA DE ATRASADOS (idêntico ao dos Autorais) ---
+        cursor.execute("SELECT * FROM fila_publico WHERE processado = 0")
+        pendentes = [dict(linha) for linha in cursor.fetchall()]
+
+        itens_desagendados = []
+        houve_limpeza = False
+
+        for item in pendentes:
+            if item.get("horario_disparo"):
+                continue
+
+            data_alvo = item.get("data_alvo") or ""
+
+            # ✅ TRAVA DE SEGURANÇA: data no passado significa que o robô ficou fora do ar.
+            # O vídeo perde a validade e sai da fila, evitando avalanche de posts atrasados.
+            if data_alvo and data_alvo < hoje_str:
+                cursor.execute("DELETE FROM fila_publico WHERE id_unico = ?", (item["id_unico"],))
+                houve_limpeza = True
+                if EXIBIR_LOGS: logger.info(f"🧹 [Auto-Limpeza] Vídeo do Público vencido ({data_alvo}) removido da fila.")
+                continue
+
+            # Se for exatamente hoje, entra no sorteio de horários
+            if data_alvo == hoje_str:
+                itens_desagendados.append(item)
+
+        if houve_limpeza:
+            conexao.commit()
+
+        if itens_desagendados:
+            config_fila = {
+                "inicio": janela_inicio,
+                "fim": janela_fim,
+                "modo": "aleatorio",   # Vídeos do Público misturam-se naturalmente
+                "intervalo_dias": 1    # 1 = ramo diluído (a data_alvo já cuidou do atraso)
+            }
+
+            if EXIBIR_LOGS: logger.info(f"⚙️ [Motor Público] Acionando Motor Central para {len(itens_desagendados)} vídeos de hoje...")
+            calcular_horarios_distribuicao(itens_desagendados, config_fila, forcar=False)
+
+            for item in itens_desagendados:
+                cursor.execute("UPDATE fila_publico SET horario_disparo = ? WHERE id_unico = ?",
+                               (item.get("horario_disparo", ""), item["id_unico"]))
+            conexao.commit()
+
+        # --- 2. EXECUÇÃO DOS DISPAROS (respeita o horário sorteado) ---
         cursor.execute('''
             SELECT * FROM fila_publico
             WHERE processado = 0
-            AND data_alvo IS NOT NULL
-            AND data_alvo != ''
-            AND data_alvo <= ?
-            ORDER BY data_alvo ASC, id_unico ASC LIMIT 1
-        ''', (hoje_str,))
+            AND horario_disparo IS NOT NULL
+            AND horario_disparo != ''
+            AND horario_disparo <= ?
+            ORDER BY horario_disparo ASC LIMIT 1
+        ''', (agora.strftime("%Y-%m-%d %H:%M:%S"),))
         
         video_alvo = cursor.fetchone()
         
@@ -2737,10 +2752,6 @@ async def motor_repost_publico_step():
                     
                     cursor.execute("UPDATE fila_publico SET processado = 1, data_postagem = ?, horario_disparo = ? WHERE id_unico = ?", (agora.strftime("%Y-%m-%d %H:%M:%S"), agora.strftime("%Y-%m-%d %H:%M:%S"), id_unico))
                     conexao.commit()
-                    
-                    config["repost_qtd_hoje"] = qtd_hoje + 1
-                    config["repost_ultimo_horario"] = agora.strftime("%Y-%m-%d %H:%M:%S")
-                    salvar_submissao_config(config)
                     
                 except Exception as e:
                     if EXIBIR_LOGS: logger.error(f"❌ [Motor Público] Falha ao tentar executar copy_message: {e}")
