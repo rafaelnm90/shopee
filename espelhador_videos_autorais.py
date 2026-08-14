@@ -603,6 +603,11 @@ async def interceptar_e_espelhar(event):
                         if foi_sorteado_pub:
                             id_unico_pub = f"publico_{int(agora.timestamp())}_{random.randint(1000, 9999)}"
 
+                            # ✅ Grava o nome real do produto na legenda, no formato que o
+                            # painel e o motor de repostagem sabem ler ("📦 Item:").
+                            nome_produto_pub = texto_ia.split('\n')[0].strip() if texto_ia else "Produto Exclusivo"
+                            legenda_publico = f"📦 Item: {nome_produto_pub}\n\n{legenda_final}"
+
                             if item_descartado_pub:
                                 # Devolve a vaga: o antigo sai da fila do Público
                                 fila_pub["fila"] = [v for v in fila_pub.get("fila", []) if v.get("id_unico") != item_descartado_pub.get("id_unico")]
@@ -611,7 +616,7 @@ async def interceptar_e_espelhar(event):
                             fila_pub.setdefault("fila", []).append({
                                 "id_unico": id_unico_pub,
                                 "msg_id_destino": msg_enviada.id,
-                                "legenda": texto_convertido,
+                                "legenda": legenda_publico,
                                 "data_captura": agora.strftime("%Y-%m-%d %H:%M:%S"),
                                 "data_alvo": data_alvo_pub,
                                 "horario_disparo": "",
