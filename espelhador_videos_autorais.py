@@ -19,6 +19,11 @@ from utils import registrar_erro_json
 
 load_dotenv()
 
+# 🕐 TRAVA DE FUSO: garante horário de Brasília mesmo em servidor configurado em UTC.
+# Viaja junto com o código — trocar de servidor não exige nenhum ajuste manual.
+os.environ['TZ'] = 'America/Sao_Paulo'
+time.tzset()
+
 # ✅ Cria as pastas isoladas na inicialização
 os.makedirs("temp", exist_ok=True)
 os.makedirs("archive", exist_ok=True)
