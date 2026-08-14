@@ -3,6 +3,12 @@ EXIBIR_LOGS = True
 import os
 from dotenv import load_dotenv
 load_dotenv()
+
+# 🕐 TRAVA DE FUSO: garante horário de Brasília mesmo em servidor configurado em UTC.
+# Viaja junto com o código — trocar de servidor não exige nenhum ajuste manual.
+import time as _time_tz
+os.environ['TZ'] = 'America/Sao_Paulo'
+_time_tz.tzset()
 import logging
 import json
 import asyncio
