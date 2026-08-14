@@ -24,6 +24,13 @@ load_dotenv()
 os.environ['TZ'] = 'America/Sao_Paulo'
 time.tzset()
 
+load_dotenv()
+
+# FORÇA O FUSO HORÁRIO DO BRASIL NA MEMÓRIA DO SCRIPT
+os.environ['TZ'] = 'America/Sao_Paulo'
+time.tzset()
+if EXIBIR_LOGS: print("⏰ Fuso horário ajustado internamente para America/Sao_Paulo")
+
 # ✅ Cria as pastas isoladas na inicialização
 os.makedirs("temp", exist_ok=True)
 os.makedirs("archive", exist_ok=True)
