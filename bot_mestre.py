@@ -297,9 +297,7 @@ class SubmissaoAdminFluxo(StatesGroup):
     aguardando_confirmacao_grupo = State()
 
 class SubmissaoUsuarioInterativa(StatesGroup):
-    aguardando_video = State()
-    aguardando_shopee = State()
-    aguardando_tiktok = State()
+    painel = State()   # ✅ Painel único: vídeo e links entram em qualquer ordem
 
 def ler_submissao_config():
     return ler_config_bd("submissao_config", padrao={
@@ -11106,10 +11104,11 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
     except Exception:
         pass
 
+    mencao = data.get("mencao_wizard") or "membro"
     try:
         aviso = await bot.send_message(
             chat_id,
-            "⌛ <b>Tempo esgotado!</b>\n\nA sua submissão foi cancelada por inatividade. "
+            f"⌛ <b>Tempo esgotado, {mencao}!</b>\n\nA sua submissão foi cancelada por inatividade. "
             "É só tocar em <b>🎬 Iniciar Postagem de Oferta</b> no painel abaixo para começar de novo.",
             parse_mode="HTML",
             message_thread_id=thread_id
@@ -11186,165 +11185,196 @@ async def bloquear_intruso_wizard(callback: types.CallbackQuery):
         return True
     return False
 
-# 2. PASSO 1: Clicou no botão -> Pede o Vídeo (Cria o Painel Deslizante)
+# 2. PAINEL DINÂMICO DE SUBMISSÃO (dashboard com checkboxes)
+def montar_mencao_usuario(user):
+    """Menção clicável: usa o @ quando existe, senão um link pelo ID."""
+    if getattr(user, "username", None):
+        return f"@{user.username}"
+    nome = getattr(user, "first_name", None) or "Membro"
+    return f"<a href='tg://user?id={user.id}'>{nome}</a>"
+
+def montar_texto_painel(data):
+    """Monta o texto do painel a partir do que já foi enviado."""
+    tem_video = bool(data.get("video_file_id"))
+    tem_shopee = bool(data.get("link_shopee"))
+    tem_tiktok = bool(data.get("link_tiktok"))
+    pronto = tem_video and tem_shopee
+
+    texto = "📋 <b>Painel de Submissão de Oferta</b>\n"
+    mencao = data.get("mencao_wizard")
+    if mencao:
+        texto += f"👤 <b>Painel de:</b> {mencao}\n"
+    texto += "\n"
+    texto += "🎉 <b>Você já pode concluir a sua postagem!</b>\n\n" if pronto else "Complete os requisitos abaixo:\n\n"
+    texto += f"{'✅' if tem_video else '❌'} Envio do Vídeo\n"
+    texto += f"{'✅' if tem_shopee else '❌'} Envio do Link (Shopee)\n"
+    texto += f"{'✅' if tem_tiktok else '🔘'} Envio do Link (TikTok — Opcional)\n\n"
+
+    aguardando = data.get("aguardando_wizard")
+    if aguardando == "video":
+        texto += "👉 <b>Envie agora o vídeo do produto.</b>\n\n"
+    elif aguardando == "shopee":
+        texto += "👉 <b>Cole agora o seu link de afiliado da Shopee.</b>\n\n"
+    elif aguardando == "tiktok":
+        texto += "👉 <b>Cole agora o seu link do TikTok.</b>\n\n"
+
+    texto += "<i>Mande o vídeo e os links aqui no chat, na ordem que preferir. O painel se atualiza sozinho.</i>"
+    return texto, pronto
+
+def montar_teclado_painel(dono_id, data):
+    """Teclado dinâmico: só mostra o que ainda falta, e libera Concluir quando der."""
+    tem_video = bool(data.get("video_file_id"))
+    tem_shopee = bool(data.get("link_shopee"))
+    pronto = tem_video and tem_shopee
+
+    linhas = []
+    principais = []
+    if not tem_video:
+        principais.append(InlineKeyboardButton(text="Enviar Vídeo 🎥", callback_data=f"wz_video:{dono_id}"))
+    if not tem_shopee:
+        principais.append(InlineKeyboardButton(text="Enviar Link Shopee 🔗", callback_data=f"wz_shopee:{dono_id}"))
+    if principais:
+        linhas.append(principais)
+
+    linhas.append([
+        InlineKeyboardButton(text="Enviar Link TikTok 🎵", callback_data=f"wz_tiktok:{dono_id}"),
+        InlineKeyboardButton(text="Cancelar ❌", callback_data=f"cancelar_wizard:{dono_id}")
+    ])
+
+    if pronto:
+        linhas.append([InlineKeyboardButton(text="Concluir Oferta ✅", callback_data=f"wz_concluir:{dono_id}")])
+
+    return InlineKeyboardMarkup(inline_keyboard=linhas)
+
+async def renderizar_painel(chat_id, thread_id, state: FSMContext):
+    """Reescreve o painel e rearma o cronômetro do passo."""
+    data = await state.get_data()
+    msg_id = data.get("msg_wizard_id")
+    dono_id = data.get("dono_wizard")
+    if not msg_id or not dono_id:
+        return
+
+    texto, _ = montar_texto_painel(data)
+    teclado = montar_teclado_painel(dono_id, data)
+
+    try:
+        await bot.edit_message_text(
+            chat_id=chat_id, message_id=msg_id,
+            text=texto_com_cronometro(texto), parse_mode="HTML", reply_markup=teclado
+        )
+    except Exception:
+        pass
+
+    await armar_cronometro_wizard(chat_id, msg_id, thread_id, state, texto, teclado)
+
 @dp.callback_query(F.data == "iniciar_wizard_oferta")
-async def wizard_pedir_video(callback: types.CallbackQuery, state: FSMContext):
-    teclado_cancelar_inline = teclado_wizard_cancelar(callback.from_user.id)
-    
-    texto_passo1 = (
-        "📍 <b>PASSO 1 de 3:</b>\n\n"
-        "Por favor, envie aqui o <b>VÍDEO</b> do produto que você deseja divulgar."
+async def wizard_abrir_painel(callback: types.CallbackQuery, state: FSMContext):
+    dono_id = callback.from_user.id
+    mencao = montar_mencao_usuario(callback.from_user)
+    dados_iniciais = {"dono_wizard": dono_id, "mencao_wizard": mencao}
+    texto, _ = montar_texto_painel(dados_iniciais)
+    teclado = montar_teclado_painel(dono_id, dados_iniciais)
+
+    msg_painel = await callback.message.answer(
+        texto_com_cronometro(texto), parse_mode="HTML", reply_markup=teclado
     )
 
-    msg_passo = await callback.message.answer(
-        texto_com_cronometro(texto_passo1),
-        parse_mode="HTML",
-        reply_markup=teclado_cancelar_inline
-    )
-    await state.set_state(SubmissaoUsuarioInterativa.aguardando_video)
+    await state.set_state(SubmissaoUsuarioInterativa.painel)
+    await state.update_data(dono_wizard=dono_id, mencao_wizard=mencao, video_file_id=None, link_shopee=None, link_tiktok=None, aguardando_wizard=None)
     await callback.answer()
 
-    # ⏱️ Arma a contagem regressiva deste passo
     await armar_cronometro_wizard(
-        callback.message.chat.id, msg_passo.message_id,
-        callback.message.message_thread_id, state, texto_passo1, teclado_cancelar_inline
+        callback.message.chat.id, msg_painel.message_id,
+        callback.message.message_thread_id, state, texto, teclado
     )
-    
-    # Inicia o timer de autodestruição caso o usuário abandone o menu
-    asyncio.create_task(auto_limpar_sessao(callback.message.chat.id, msg_passo.message_id, state, 180))
 
-# 3. PASSO 2: Recebe o Vídeo -> Edita o Painel pedindo a Shopee
-@dp.message(SubmissaoUsuarioInterativa.aguardando_video)
-async def wizard_receber_video(message: types.Message, state: FSMContext):
+@dp.callback_query(F.data.startswith("wz_"), StateFilter("*"))
+async def wizard_acao_painel(callback: types.CallbackQuery, state: FSMContext):
+    if await bloquear_intruso_wizard(callback):
+        return
+
+    acao = (callback.data or "").split(":")[0]
+
+    if acao == "wz_concluir":
+        await callback.answer()
+        await wizard_publicar_oferta(callback, state)
+        return
+
+    mapa = {"wz_video": "video", "wz_shopee": "shopee", "wz_tiktok": "tiktok"}
+    await state.update_data(aguardando_wizard=mapa.get(acao))
+    await callback.answer()
+    await renderizar_painel(callback.message.chat.id, callback.message.message_thread_id, state)
+
+@dp.message(SubmissaoUsuarioInterativa.painel)
+async def wizard_receber_item(message: types.Message, state: FSMContext):
     permitido, config = checar_permissao_topico(message)
     if not permitido: return
-    try: await message.delete() # Limpa o vídeo do usuário
-    except: pass
+
+    try: await message.delete()
+    except Exception: pass
 
     data = await state.get_data()
-    msg_wizard_id = data.get("msg_wizard_id")
-
-    if not message.video:
-        aviso = await message.answer("⚠️ Por favor, envie um arquivo de <b>VÍDEO</b>.", parse_mode="HTML")
-        await asyncio.sleep(4)
-        try: await aviso.delete()
-        except: pass
+    dono_id = data.get("dono_wizard")
+    if dono_id and message.from_user.id != dono_id:
         return
 
-    await state.update_data(video_file_id=message.video.file_id)
-    teclado_cancelar_inline = teclado_wizard_cancelar(message.from_user.id)
-    
-    texto_passo2 = "📍 <b>PASSO 2 de 3:</b>\n\nÓtimo! Vídeo recebido. 🎬\n\nAgora, cole aqui o seu <b>Link de Afiliado da SHOPEE</b> 🛒 referente a este produto:"
+    reconhecido = False
 
-    try:
-        await bot.edit_message_text(
-            chat_id=message.chat.id,
-            message_id=msg_wizard_id,
-            text=texto_com_cronometro(texto_passo2),
-            parse_mode="HTML",
-            reply_markup=teclado_cancelar_inline
-        )
-    except: pass
-    await state.set_state(SubmissaoUsuarioInterativa.aguardando_shopee)
+    if message.video:
+        await state.update_data(video_file_id=message.video.file_id, aguardando_wizard=None)
+        reconhecido = True
+    elif message.text:
+        texto_recebido = message.text.strip()
+        alvo = texto_recebido.lower()
+        if "shopee" in alvo or "shp.ee" in alvo or "shope.ee" in alvo:
+            await state.update_data(link_shopee=texto_recebido, aguardando_wizard=None)
+            reconhecido = True
+        elif "tiktok" in alvo:
+            await state.update_data(link_tiktok=texto_recebido, aguardando_wizard=None)
+            reconhecido = True
 
-    # ⏱️ Reinicia a contagem para este novo passo
-    await armar_cronometro_wizard(
-        message.chat.id, msg_wizard_id, message.message_thread_id,
-        state, texto_passo2, teclado_cancelar_inline
-    )
-
-# 4. PASSO 3: Recebe Shopee -> Edita o Painel pedindo TikTok (Opcional)
-@dp.message(SubmissaoUsuarioInterativa.aguardando_shopee)
-async def wizard_receber_shopee(message: types.Message, state: FSMContext):
-    permitido, config = checar_permissao_topico(message)
-    if not permitido: return
-    try: await message.delete() # Limpa o link do usuário
-    except: pass
-
-    data = await state.get_data()
-    msg_wizard_id = data.get("msg_wizard_id")
-    link = message.text
-
-    if not link or ("shopee" not in link.lower() and "shp.ee" not in link.lower()):
-        aviso = await message.answer("⚠️ O link precisa ser da Shopee. Tente novamente colando o link correto:", parse_mode="HTML")
-        await asyncio.sleep(4)
-        try: await aviso.delete()
-        except: pass
-        return
-
-    await state.update_data(link_shopee=link)
-    teclado_tiktok = teclado_wizard_tiktok(message.from_user.id)
-    
-    texto_passo3 = "📍 <b>PASSO 3 de 3 (Opcional):</b>\n\nVocê também tem o <b>Link de Afiliado do TIKTOK</b> 🎵 para este produto?\n\nSe sim, cole o link aqui. Se não tiver, basta clicar no botão <b>Pular</b> abaixo."
-
-    try:
-        await bot.edit_message_text(
-            chat_id=message.chat.id,
-            message_id=msg_wizard_id,
-            text=texto_com_cronometro(texto_passo3),
-            parse_mode="HTML",
-            reply_markup=teclado_tiktok
-        )
-    except: pass
-    await state.set_state(SubmissaoUsuarioInterativa.aguardando_tiktok)
-
-    # ⏱️ Reinicia a contagem para este novo passo
-    await armar_cronometro_wizard(
-        message.chat.id, msg_wizard_id, message.message_thread_id,
-        state, texto_passo3, teclado_tiktok
-    )
-
-# 5. PASSO FINAL: IA Processa e Posta (Edita o Painel para o Veredito)
-@dp.message(SubmissaoUsuarioInterativa.aguardando_tiktok)
-@dp.callback_query(F.data.startswith("pular_tiktok"), StateFilter("*"))
-async def wizard_finalizar_processamento(event, state: FSMContext):
-    is_callback = isinstance(event, types.CallbackQuery)
-
-    # 🔒 Só o dono da sessão pode pular o TikTok
-    if is_callback and await bloquear_intruso_wizard(event):
-        return
-
-    message = event.message if is_callback else event
-    
-    if not is_callback:
-        permitido, config = checar_permissao_topico(message)
-        if not permitido: return
-        try: await event.delete() # Limpa o link do tiktok
-        except: pass
-        
-        link_tiktok = event.text
-        if "tiktok" not in link_tiktok.lower():
-            aviso = await message.answer("⚠️ Link inválido. Envie um link do TikTok ou clique em Pular.", parse_mode="HTML")
-            await asyncio.sleep(4)
-            try: await aviso.delete()
-            except: pass
-            return
+    if reconhecido:
+        await renderizar_painel(message.chat.id, message.message_thread_id, state)
     else:
-        config = ler_submissao_config()
-        link_tiktok = None
+        mencao = data.get("mencao_wizard") or "membro"
+        aviso = await message.answer(
+            f"⚠️ {mencao}, não reconheci o envio. Mande um <b>vídeo</b>, um <b>link da Shopee</b> ou um <b>link do TikTok</b>.",
+            parse_mode="HTML"
+        )
+        await asyncio.sleep(6)
+        try: await aviso.delete()
+        except Exception: pass
+
+# 3. CONCLUSÃO: IA avalia e publica no mural
+async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContext):
+    message = callback.message
+    config = ler_submissao_config()
 
     data = await state.get_data()
     msg_wizard_id = data.get("msg_wizard_id")
-    
+    video_id = data.get("video_file_id")
+    link_shopee = data.get("link_shopee")
+    link_tiktok = data.get("link_tiktok")
+
+    if not video_id or not link_shopee:
+        await callback.answer("⚠️ Faltam itens obrigatórios: vídeo e link da Shopee.", show_alert=True)
+        return
+
     try:
         await bot.edit_message_text(
-            chat_id=message.chat.id,
-            message_id=msg_wizard_id,
+            chat_id=message.chat.id, message_id=msg_wizard_id,
             text="⏳ <b>Avaliando Oferta...</b>\n\nA IA está analisando o seu vídeo para garantir que ele segue as regras da comunidade.",
             parse_mode="HTML"
         )
     except: pass
-    
-    await state.clear() # Libera a memória instantaneamente para novos envios
+
+    await state.clear()   # Libera a memória e encerra o cronômetro
 
     try:
-        video_id = data.get("video_file_id")
-        link_shopee = data.get("link_shopee")
-        
         file_info = await bot.get_file(video_id)
         video_path = f"temp/submissao_{video_id}.mp4"
         await bot.download_file(file_info.file_path, destination=video_path)
-        
+
         prompt = (
             "Você atua como moderador de segurança de um grupo de e-commerce. Assista ao vídeo INTEIRO. "
             "REGRAS DE APROVAÇÃO: O vídeo DEVE ser a demonstração de um produto físico para venda. "
@@ -11361,83 +11391,71 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
             "#ComputadoresEAcessorios #Saude #ViagensEBagagens #JogosEConsoles #Audio. "
             "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags ou adicionar mensagens extras."
         )
-        
+
         analise_ia = await analisar_video_gemini(video_path, prompt, EXIBIR_LOGS)
-        os.remove(video_path)
-        
+        try: os.remove(video_path)
+        except: pass
+
         if not analise_ia:
             try: await bot.edit_message_text(chat_id=message.chat.id, message_id=msg_wizard_id, text="❌ Falha temporária na IA. Tente submeter novamente.")
             except: pass
             return
-            
+
         linhas = analise_ia.split('\n')
         veredicto = linhas[0].strip().upper()
-        
-        user_obj = event.from_user
-        
-        # Cria menção clicável: usa o @username ou força um link interno no nome da pessoa
+
+        user_obj = callback.from_user
         if user_obj.username:
             user_mention = f"@{user_obj.username}"
         else:
             user_mention = f"<a href='tg://user?id={user_obj.id}'>{user_obj.first_name}</a>"
-        
+
         if "[APROVADO]" in veredicto:
             nome_produto = linhas[1].strip() if len(linhas) > 1 else "Oferta Exclusiva 🛍️"
             hashtags_ia = linhas[2].strip() if len(linhas) > 2 else ""
-            
-            # Montagem estruturada invertendo a ordem (Remetente primeiro, Nome depois)
+
             legenda_final = (
                 f"👤 Dica enviada por: {user_mention}\n\n"
                 f"<b>{nome_produto}</b>\n\n"
                 f"🔗 <b>Link do Produto:</b>\n{link_shopee}"
             )
-            
             if link_tiktok:
                 legenda_final += f"\n\n🎵 <b>Link do TikTok:</b>\n{link_tiktok}"
-            
             if hashtags_ia:
                 legenda_final += f"\n\n<i>{hashtags_ia}</i>"
-            
-            # Posta na Vitrine
+
             await bot.send_video(
-                chat_id=message.chat.id, 
-                video=video_id, 
-                caption=legenda_final, 
-                parse_mode="HTML",
-                message_thread_id=config.get("topico_destino")
+                chat_id=message.chat.id, video=video_id, caption=legenda_final,
+                parse_mode="HTML", message_thread_id=config.get("topico_destino")
             )
-            
+            registrar_ultimo_post(message.chat.id, "video")   # 🚦 Intercalação
+
             try:
                 await bot.edit_message_text(
-                    chat_id=message.chat.id, 
-                    message_id=msg_wizard_id, 
-                    text=f"🎉 <b>Aprovado!</b> A dica de {user_mention} já está brilhando no mural!", 
+                    chat_id=message.chat.id, message_id=msg_wizard_id,
+                    text=f"🎉 <b>Aprovado!</b> A dica de {user_mention} já está brilhando no mural!",
                     parse_mode="HTML"
                 )
             except: pass
-            
         else:
             motivo = linhas[1].strip() if len(linhas) > 1 else "Conteúdo inadequado para e-commerce."
             try:
                 await bot.edit_message_text(
-                    chat_id=message.chat.id, 
-                    message_id=msg_wizard_id, 
-                    text=f"🛑 <b>Oferta Rejeitada.</b>\n👤 Usuário: {user_mention}\n<b>Motivo:</b> {motivo}", 
+                    chat_id=message.chat.id, message_id=msg_wizard_id,
+                    text=f"🛑 <b>Oferta Rejeitada.</b>\n👤 Usuário: {user_mention}\n<b>Motivo:</b> {motivo}",
                     parse_mode="HTML"
                 )
             except: pass
-            
+
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro na submissão guiada: {e}")
         try: await bot.edit_message_text(chat_id=message.chat.id, message_id=msg_wizard_id, text="❌ Ocorreu um erro interno ao processar o arquivo.")
         except: pass
-        
-    # Limpa a mensagem final da tela após 15 segundos para zerar a conversa
+
     await asyncio.sleep(15)
     try: await bot.delete_message(message.chat.id, msg_wizard_id)
     except: pass
 
-    # ✅ Devolve o painel para o fim do tópico
     await reenviar_botao_ofertas()
 
 # Cancelamento manual do usuário (Limpa tudo instantaneamente)
@@ -11450,11 +11468,11 @@ async def wizard_cancelar(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     msg_wizard_id = data.get("msg_wizard_id")
     await state.clear()
-    
+
     try:
         await callback.message.edit_text("❌ Envio de oferta cancelado.")
     except: pass
-    
+
     await asyncio.sleep(3)
     if msg_wizard_id:
         try: await bot.delete_message(callback.message.chat.id, msg_wizard_id)
@@ -11463,11 +11481,7 @@ async def wizard_cancelar(callback: types.CallbackQuery, state: FSMContext):
         try: await callback.message.delete()
         except: pass
 
-    # ✅ Devolve o painel para o fim do tópico
     await reenviar_botao_ofertas()
-
-# ==========================================
-# LIMPADOR DE TECLADO FANTASMA 🧹
 # ==========================================
 from aiogram.types import ReplyKeyboardRemove
 
