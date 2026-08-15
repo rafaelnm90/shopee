@@ -11154,10 +11154,42 @@ async def interceptar_envio_livre(message: types.Message, state: FSMContext):
     # ✅ Devolve o painel para o fim do tópico
     await reenviar_botao_ofertas()
 
+# 🔒 TRAVA DE AUTORIA: os botões carregam o ID de quem abriu a sessão
+def teclado_wizard_cancelar(dono_id):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Cancelar", callback_data=f"cancelar_wizard:{dono_id}")]
+    ])
+
+def teclado_wizard_tiktok(dono_id):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Pular TikTok ⏭️", callback_data=f"pular_tiktok:{dono_id}")],
+        [InlineKeyboardButton(text="❌ Cancelar Tudo", callback_data=f"cancelar_wizard:{dono_id}")]
+    ])
+
+def dono_do_callback(callback: types.CallbackQuery):
+    """Extrai o ID do dono embutido no callback_data. None = botão antigo, sem dono."""
+    partes = (callback.data or "").split(":")
+    if len(partes) > 1 and partes[1].lstrip("-").isdigit():
+        return int(partes[1])
+    return None
+
+async def bloquear_intruso_wizard(callback: types.CallbackQuery):
+    """Devolve True se quem clicou NÃO é o dono da sessão."""
+    dono = dono_do_callback(callback)
+    if dono is not None and callback.from_user.id != dono:
+        await callback.answer(
+            "⛔ Esta submissão pertence a outro membro.\n\n"
+            "Toque em 🎬 Iniciar Postagem de Oferta no painel para abrir a sua.",
+            show_alert=True
+        )
+        if EXIBIR_LOGS: logger.info(f"🔒 [Trava de Autoria] Usuário {callback.from_user.id} tentou mexer na sessão de {dono}.")
+        return True
+    return False
+
 # 2. PASSO 1: Clicou no botão -> Pede o Vídeo (Cria o Painel Deslizante)
 @dp.callback_query(F.data == "iniciar_wizard_oferta")
 async def wizard_pedir_video(callback: types.CallbackQuery, state: FSMContext):
-    teclado_cancelar_inline = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Cancelar", callback_data="cancelar_wizard")]])
+    teclado_cancelar_inline = teclado_wizard_cancelar(callback.from_user.id)
     
     texto_passo1 = (
         "📍 <b>PASSO 1 de 3:</b>\n\n"
@@ -11200,7 +11232,7 @@ async def wizard_receber_video(message: types.Message, state: FSMContext):
         return
 
     await state.update_data(video_file_id=message.video.file_id)
-    teclado_cancelar_inline = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Cancelar", callback_data="cancelar_wizard")]])
+    teclado_cancelar_inline = teclado_wizard_cancelar(message.from_user.id)
     
     texto_passo2 = "📍 <b>PASSO 2 de 3:</b>\n\nÓtimo! Vídeo recebido. 🎬\n\nAgora, cole aqui o seu <b>Link de Afiliado da SHOPEE</b> 🛒 referente a este produto:"
 
@@ -11241,10 +11273,7 @@ async def wizard_receber_shopee(message: types.Message, state: FSMContext):
         return
 
     await state.update_data(link_shopee=link)
-    teclado_tiktok = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Pular TikTok ⏭️", callback_data="pular_tiktok")],
-        [InlineKeyboardButton(text="❌ Cancelar Tudo", callback_data="cancelar_wizard")]
-    ])
+    teclado_tiktok = teclado_wizard_tiktok(message.from_user.id)
     
     texto_passo3 = "📍 <b>PASSO 3 de 3 (Opcional):</b>\n\nVocê também tem o <b>Link de Afiliado do TIKTOK</b> 🎵 para este produto?\n\nSe sim, cole o link aqui. Se não tiver, basta clicar no botão <b>Pular</b> abaixo."
 
@@ -11267,9 +11296,14 @@ async def wizard_receber_shopee(message: types.Message, state: FSMContext):
 
 # 5. PASSO FINAL: IA Processa e Posta (Edita o Painel para o Veredito)
 @dp.message(SubmissaoUsuarioInterativa.aguardando_tiktok)
-@dp.callback_query(F.data == "pular_tiktok", StateFilter("*"))
+@dp.callback_query(F.data.startswith("pular_tiktok"), StateFilter("*"))
 async def wizard_finalizar_processamento(event, state: FSMContext):
     is_callback = isinstance(event, types.CallbackQuery)
+
+    # 🔒 Só o dono da sessão pode pular o TikTok
+    if is_callback and await bloquear_intruso_wizard(event):
+        return
+
     message = event.message if is_callback else event
     
     if not is_callback:
@@ -11407,8 +11441,12 @@ async def wizard_finalizar_processamento(event, state: FSMContext):
     await reenviar_botao_ofertas()
 
 # Cancelamento manual do usuário (Limpa tudo instantaneamente)
-@dp.callback_query(F.data == "cancelar_wizard", StateFilter("*"))
+@dp.callback_query(F.data.startswith("cancelar_wizard"), StateFilter("*"))
 async def wizard_cancelar(callback: types.CallbackQuery, state: FSMContext):
+    # 🔒 Só o dono da sessão pode cancelá-la
+    if await bloquear_intruso_wizard(callback):
+        return
+
     data = await state.get_data()
     msg_wizard_id = data.get("msg_wizard_id")
     await state.clear()
