@@ -10943,10 +10943,14 @@ async def confirmar_salvamento_grupo(message: types.Message, state: FSMContext):
 from aiogram.filters import Command
 
 TEXTO_BOTAO_OFERTAS = (
-    "👋 <b>Bem-vindo ao canal de submissões!</b>\n\n"
-    "Quer divulgar a sua oferta da Shopee na nossa comunidade e faturar junto com a gente?\n\n"
-    "Clique no botão abaixo e o nosso robô vai te guiar passo a passo para enviar o vídeo e os seus links!\n\n"
-    "<i>(As ofertas aprovadas pela nossa IA serão postadas automaticamente no mural público com os seus créditos!)</i>"
+    "👋 <b>Divulgue a sua oferta aqui!</b>\n\n"
+    "Toque no botão abaixo e um painel só seu vai abrir. É só mandar:\n\n"
+    "🎥 O <b>vídeo</b> do produto\n"
+    "🔗 O seu <b>link de afiliado da Shopee</b>\n"
+    "🎵 O link do <b>TikTok</b> (opcional)\n\n"
+    "Pode enviar na ordem que quiser — o painel marca sozinho o que já chegou.\n\n"
+    "<i>💡 Deixe o link já copiado antes de começar: você tem 3 minutos a cada envio.</i>\n"
+    "<i>✅ As ofertas aprovadas pela nossa IA vão para o mural com os seus créditos!</i>"
 )
 
 # ✅ NOVO: mantém o painel de submissão SEMPRE como a última mensagem do tópico.
@@ -11185,6 +11189,21 @@ async def bloquear_intruso_wizard(callback: types.CallbackQuery):
         return True
     return False
 
+# 🔗 VALIDAÇÃO DE LINKS DO PAINEL (mesmo padrão usado pelo espelhador)
+import re as _re_wizard
+PADRAO_LINK_SHOPEE = _re_wizard.compile(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee|shopee\.com\.br)/[^\s]+', _re_wizard.IGNORECASE)
+PADRAO_LINK_TIKTOK = _re_wizard.compile(r'(?:https?://)?(?:www\.)?(?:vm\.tiktok\.com|vt\.tiktok\.com|tiktok\.com)/[^\s]+', _re_wizard.IGNORECASE)
+
+def extrair_link_wizard(texto, padrao):
+    """Devolve a URL limpa se o texto contiver um link válido daquele domínio."""
+    achado = padrao.search(texto or "")
+    if not achado:
+        return None
+    link = achado.group(0).rstrip(").,;!?")
+    if not link.lower().startswith("http"):
+        link = "https://" + link
+    return link
+
 # 2. PAINEL DINÂMICO DE SUBMISSÃO (dashboard com checkboxes)
 def montar_mencao_usuario(user):
     """Menção clicável: usa o @ quando existe, senão um link pelo ID."""
@@ -11228,21 +11247,13 @@ def montar_teclado_painel(dono_id, data):
     pronto = tem_video and tem_shopee
 
     linhas = []
-    principais = []
-    if not tem_video:
-        principais.append(InlineKeyboardButton(text="Enviar Vídeo 🎥", callback_data=f"wz_video:{dono_id}"))
-    if not tem_shopee:
-        principais.append(InlineKeyboardButton(text="Enviar Link Shopee 🔗", callback_data=f"wz_shopee:{dono_id}"))
-    if principais:
-        linhas.append(principais)
 
-    linhas.append([
-        InlineKeyboardButton(text="Enviar Link TikTok 🎵", callback_data=f"wz_tiktok:{dono_id}"),
-        InlineKeyboardButton(text="Cancelar ❌", callback_data=f"cancelar_wizard:{dono_id}")
-    ])
-
+    # ✅ O painel detecta tudo sozinho, então botão de "enviar" só confundiria:
+    # ele não abre seletor de arquivo nenhum. Ficam apenas as ações reais.
     if pronto:
         linhas.append([InlineKeyboardButton(text="Concluir Oferta ✅", callback_data=f"wz_concluir:{dono_id}")])
+
+    linhas.append([InlineKeyboardButton(text="Cancelar ❌", callback_data=f"cancelar_wizard:{dono_id}")])
 
     return InlineKeyboardMarkup(inline_keyboard=linhas)
 
@@ -11318,30 +11329,42 @@ async def wizard_receber_item(message: types.Message, state: FSMContext):
     if dono_id and message.from_user.id != dono_id:
         return
 
-    reconhecido = False
+    mencao = data.get("mencao_wizard") or "membro"
+    confirmacao = None
 
     if message.video:
+        substituiu = bool(data.get("video_file_id"))
         await state.update_data(video_file_id=message.video.file_id, aguardando_wizard=None)
-        reconhecido = True
+        confirmacao = f"🔄 {mencao}, vídeo <b>substituído</b> pelo novo." if substituiu else f"✅ {mencao}, vídeo recebido!"
     elif message.text:
         texto_recebido = message.text.strip()
-        alvo = texto_recebido.lower()
-        if "shopee" in alvo or "shp.ee" in alvo or "shope.ee" in alvo:
-            await state.update_data(link_shopee=texto_recebido, aguardando_wizard=None)
-            reconhecido = True
-        elif "tiktok" in alvo:
-            await state.update_data(link_tiktok=texto_recebido, aguardando_wizard=None)
-            reconhecido = True
 
-    if reconhecido:
+        link_shopee = extrair_link_wizard(texto_recebido, PADRAO_LINK_SHOPEE)
+        link_tiktok = extrair_link_wizard(texto_recebido, PADRAO_LINK_TIKTOK)
+
+        if link_shopee:
+            substituiu = bool(data.get("link_shopee"))
+            await state.update_data(link_shopee=link_shopee, aguardando_wizard=None)
+            confirmacao = f"🔄 {mencao}, link da Shopee <b>substituído</b>." if substituiu else f"✅ {mencao}, link da Shopee recebido!"
+        elif link_tiktok:
+            substituiu = bool(data.get("link_tiktok"))
+            await state.update_data(link_tiktok=link_tiktok, aguardando_wizard=None)
+            confirmacao = f"🔄 {mencao}, link do TikTok <b>substituído</b>." if substituiu else f"✅ {mencao}, link do TikTok recebido!"
+
+    if confirmacao:
         await renderizar_painel(message.chat.id, message.message_thread_id, state)
+        aviso = await message.answer(confirmacao, parse_mode="HTML")
+        await asyncio.sleep(4)
+        try: await aviso.delete()
+        except Exception: pass
     else:
-        mencao = data.get("mencao_wizard") or "membro"
         aviso = await message.answer(
-            f"⚠️ {mencao}, não reconheci o envio. Mande um <b>vídeo</b>, um <b>link da Shopee</b> ou um <b>link do TikTok</b>.",
+            f"⚠️ {mencao}, não reconheci o envio.\n\n"
+            "Mande um <b>vídeo</b> ou cole um <b>link completo</b> da Shopee ou do TikTok.\n"
+            "<i>Exemplo: https://s.shopee.com.br/AbCdEf123</i>",
             parse_mode="HTML"
         )
-        await asyncio.sleep(6)
+        await asyncio.sleep(8)
         try: await aviso.delete()
         except Exception: pass
 
