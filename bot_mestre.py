@@ -1299,6 +1299,7 @@ async def executar_postagem_fila(item_id):
                 msg = await bot.send_video(chat_id=GRUPO_ID, video=arquivo, caption=legenda, parse_mode="HTML")
                 novo_file_id = msg.video.file_id
                 sucesso = True
+                registrar_ultimo_post(GRUPO_ID, "video")   # 🚦 Intercalação
                 if EXIBIR_LOGS: logger.info("🚀 [Fluxo] Vídeo enviado com sucesso pelo Motor Central.")
                 try: os.remove(caminho_video)
                 except: pass
@@ -1602,6 +1603,58 @@ async def apagar_mensagem_automatica(msg_id, chat_id=GRUPO_ID):
     except Exception as e:
         if EXIBIR_LOGS: logger.info(f"⚠️ Faxina: A mensagem {msg_id} já havia sido apagada manualmente.")
 
+# 🚦 SISTEMA DE INTERCALAÇÃO: vídeos são a espinha dorsal, textos entram no meio
+def registrar_ultimo_post(chat_destino, tipo_conteudo):
+    """Guarda se a última publicação daquele canal foi 'video' ou 'texto'."""
+    try:
+        dados = ler_config_bd("ultimo_post_canais", {})
+        dados[str(chat_destino)] = {
+            "tipo": tipo_conteudo,
+            "hora": datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
+        }
+        salvar_config_bd("ultimo_post_canais", dados)
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao registrar último post: {e}")
+
+def obter_ultimo_post(chat_destino):
+    try:
+        dados = ler_config_bd("ultimo_post_canais", {})
+        return dados.get(str(chat_destino), {}).get("tipo")
+    except Exception:
+        return None
+
+def contar_videos_pendentes(chat_destino):
+    """Estoque de vídeos ainda não publicados naquele canal. 0 = libera textos seguidos."""
+    try:
+        alvo = str(chat_destino)
+
+        # 📺 Canal Principal (fila de postagens do SQLite)
+        if alvo == str(GRUPO_ID):
+            hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+            conexao = sqlite3.connect("banco_dados.db")
+            cursor = conexao.cursor()
+            cursor.execute("SELECT COUNT(*) FROM fila_postagens WHERE status = 'PENDENTE' AND (data_alvo <= ? OR data_alvo = '2000-01-01')", (hoje,))
+            total = cursor.fetchone()[0]
+            conexao.close()
+            return total
+
+        # 🕵️ Canal Viral (fila de clonagem do Espião)
+        dados_espiao = ler_alvos_espiao()
+        if alvo == str(dados_espiao.get("canal_destino")):
+            fila = ler_fila_clonagem().get("fila", [])
+            return len([i for i in fila if i.get("processado") not in [True, 1, "true", "True"]])
+
+        # 📬 Grupo Público (fila própria do repostador)
+        conexao = sqlite3.connect("banco_dados.db")
+        cursor = conexao.cursor()
+        cursor.execute("SELECT COUNT(*) FROM fila_publico WHERE processado = 0")
+        total = cursor.fetchone()[0]
+        conexao.close()
+        return total
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível contar vídeos pendentes: {e}")
+        return 0
+
 async def disparar_mensagem(tipo, forcar=False):
     if EXIBIR_LOGS: logger.info(f"🔍 Validando status antes de disparar a rotina '{tipo}' (Forçar: {forcar})...")
     
@@ -1637,6 +1690,16 @@ async def disparar_mensagem(tipo, forcar=False):
 
     agora_tz = datetime.now(fuso_horario)
     hoje_str = agora_tz.strftime("%Y-%m-%d")
+
+    # 🚦 TRAVA DE INTERCALAÇÃO: não posta dois textos seguidos se ainda houver vídeo na fila
+    if not forcar and tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
+        estoque_videos = contar_videos_pendentes(chat_destino)
+        if obter_ultimo_post(chat_destino) == "texto" and estoque_videos > 0:
+            novo_horario = agora_tz + timedelta(minutes=random.randint(20, 45))
+            job_id = f"job_rotina_{tipo}_intercalado_{int(agora_tz.timestamp())}"
+            scheduler.add_job(disparar_mensagem, 'date', run_date=novo_horario, args=[tipo], id=job_id, replace_existing=True)
+            if EXIBIR_LOGS: logger.info(f"🚦 [Intercalação] '{tipo}' adiado para {novo_horario.strftime('%H:%M')}: o último post foi texto e há {estoque_videos} vídeo(s) na fila.")
+            return
     
     # 🚀 LÓGICA DE TRAVA ABSOLUTA E EXPEDIENTE
     if tipo == "bom_dia" and dados_rotina.get("ultimo_bom_dia") == hoje_str:
@@ -1798,6 +1861,9 @@ async def disparar_mensagem(tipo, forcar=False):
                 if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar rotina {tipo} para thread {thread_id}: {e}")
             
         await asyncio.sleep(4) # ✅ CORREÇÃO: Pausa LONGA (4 seg) para não tomar punição de flood do Telegram entre um tópico e outro!
+
+    # 🚦 Marca que a última publicação deste canal foi um TEXTO
+    registrar_ultimo_post(chat_destino, "texto")
 
 def ler_config_rotina():
     if EXIBIR_LOGS: logger.info("🚀 Iniciando leitura e validação das configurações de rotina...")
@@ -2796,6 +2862,7 @@ async def motor_repost_publico_step():
                         parse_mode="HTML",
                         message_thread_id=int(topico_destino)
                     )
+                    registrar_ultimo_post(grupo_id, "video")   # 🚦 Intercalação
                     if EXIBIR_LOGS: logger.info(f"✅ [Motor Público] Vídeo '{nome_produto}' encaminhado para o Tópico de Postagem do Público com sucesso!")
                     
                     cursor.execute("UPDATE fila_publico SET processado = 1, data_postagem = ?, horario_disparo = ? WHERE id_unico = ?", (agora.strftime("%Y-%m-%d %H:%M:%S"), agora.strftime("%Y-%m-%d %H:%M:%S"), id_unico))
@@ -10409,6 +10476,7 @@ async def processar_fila_espiao(forcar=False):
             item_pendente["msg_postada_id"] = msg_enviada.message_id
             item_pendente["legenda"] = legenda_postagem
             
+            registrar_ultimo_post(canal_destino, "video")   # 🚦 Intercalação
             if EXIBIR_LOGS: logger.info(f"✅ Clone {item_id} publicado com sucesso! ID: {msg_enviada.message_id}")
             try: os.remove(caminho_video)
             except: pass
