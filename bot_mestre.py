@@ -11040,18 +11040,84 @@ def checar_permissao_topico(message: types.Message):
         
     return True, config
 
-async def auto_limpar_sessao(chat_id, message_id, state: FSMContext, tempo=180):
-    """Timer fantasma de 3 minutos. Apaga o painel se o usuário abandonar a submissão no meio."""
-    await asyncio.sleep(tempo)
-    try: 
-        await bot.delete_message(chat_id, message_id)
-    except: 
-        pass
-    
-    # Limpa a memória apenas se o usuário ainda estiver na mesma sessão
+# ⏱️ CRONÔMETRO DO WIZARD
+TEMPO_LIMITE_WIZARD = 180          # segundos por passo (reinicia a cada etapa)
+INTERVALO_CRONOMETRO_WIZARD = 15   # de quanto em quanto a contagem é atualizada na tela
+
+def texto_com_cronometro(texto_base, restante=None):
+    """Anexa a linha do cronômetro ao texto do passo."""
+    if restante is None:
+        restante = TEMPO_LIMITE_WIZARD
+    minutos, segundos = divmod(max(0, int(restante)), 60)
+    return f"{texto_base}\n\n⏱️ <b>Tempo restante para envio:</b> {minutos:02d}:{segundos:02d}"
+
+async def armar_cronometro_wizard(chat_id, message_id, thread_id, state: FSMContext, texto_base, teclado):
+    """
+    Registra o passo atual e dispara a contagem regressiva.
+    Cada passo gera uma sessão nova: o cronômetro antigo detecta a troca e se encerra sozinho,
+    então o tempo reinicia a cada etapa sem sobrepor edições.
+    """
+    sessao_id = f"{message_id}_{int(datetime.now(fuso_horario).timestamp() * 1000)}"
+    await state.update_data(
+        msg_wizard_id=message_id,
+        texto_wizard_base=texto_base,
+        sessao_wizard_id=sessao_id
+    )
+    asyncio.create_task(cronometro_sessao_wizard(chat_id, message_id, thread_id, state, sessao_id, teclado))
+
+async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMContext, sessao_id, teclado):
+    """Edita a mensagem do passo a cada intervalo, descontando o tempo. Ao zerar, cancela a sessão."""
+    restante = TEMPO_LIMITE_WIZARD
+
+    while restante > INTERVALO_CRONOMETRO_WIZARD:
+        await asyncio.sleep(INTERVALO_CRONOMETRO_WIZARD)
+        restante -= INTERVALO_CRONOMETRO_WIZARD
+
+        data = await state.get_data()
+        # O usuário avançou de passo (ou cancelou): este cronômetro morre em silêncio
+        if data.get("sessao_wizard_id") != sessao_id:
+            return
+
+        texto_base = data.get("texto_wizard_base")
+        if not texto_base:
+            return
+
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=message_id,
+                text=texto_com_cronometro(texto_base, restante),
+                parse_mode="HTML",
+                reply_markup=teclado
+            )
+        except Exception:
+            pass  # mensagem idêntica ou apagada: ignora sem poluir o log
+
+    await asyncio.sleep(restante)
+
     data = await state.get_data()
-    if data.get("msg_wizard_id") == message_id:
-        await state.clear()
+    if data.get("sessao_wizard_id") != sessao_id:
+        return
+
+    # ⌛ Expirou: limpa a memória, apaga o painel e avisa (o aviso também se autodestrói)
+    await state.clear()
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except Exception:
+        pass
+
+    try:
+        aviso = await bot.send_message(
+            chat_id,
+            "⌛ <b>Tempo esgotado!</b>\n\nA sua submissão foi cancelada por inatividade. "
+            "É só tocar em <b>🎬 Iniciar Postagem de Oferta</b> no painel abaixo para começar de novo.",
+            parse_mode="HTML",
+            message_thread_id=thread_id
+        )
+        await asyncio.sleep(20)
+        await aviso.delete()
+    except Exception:
+        pass
 
 # 1. GATILHO INICIAL: Qualquer mensagem fora de ordem aciona o botão de Iniciar
 @dp.message(F.chat.type.in_(["supergroup", "group"]), StateFilter(None))
@@ -11093,15 +11159,24 @@ async def interceptar_envio_livre(message: types.Message, state: FSMContext):
 async def wizard_pedir_video(callback: types.CallbackQuery, state: FSMContext):
     teclado_cancelar_inline = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Cancelar", callback_data="cancelar_wizard")]])
     
-    msg_passo = await callback.message.answer(
+    texto_passo1 = (
         "📍 <b>PASSO 1 de 3:</b>\n\n"
-        "Por favor, envie aqui o <b>VÍDEO</b> do produto que você deseja divulgar.",
+        "Por favor, envie aqui o <b>VÍDEO</b> do produto que você deseja divulgar."
+    )
+
+    msg_passo = await callback.message.answer(
+        texto_com_cronometro(texto_passo1),
         parse_mode="HTML",
         reply_markup=teclado_cancelar_inline
     )
     await state.set_state(SubmissaoUsuarioInterativa.aguardando_video)
-    await state.update_data(msg_wizard_id=msg_passo.message_id)
     await callback.answer()
+
+    # ⏱️ Arma a contagem regressiva deste passo
+    await armar_cronometro_wizard(
+        callback.message.chat.id, msg_passo.message_id,
+        callback.message.message_thread_id, state, texto_passo1, teclado_cancelar_inline
+    )
     
     # Inicia o timer de autodestruição caso o usuário abandone o menu
     asyncio.create_task(auto_limpar_sessao(callback.message.chat.id, msg_passo.message_id, state, 180))
@@ -11127,16 +11202,24 @@ async def wizard_receber_video(message: types.Message, state: FSMContext):
     await state.update_data(video_file_id=message.video.file_id)
     teclado_cancelar_inline = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="❌ Cancelar", callback_data="cancelar_wizard")]])
     
+    texto_passo2 = "📍 <b>PASSO 2 de 3:</b>\n\nÓtimo! Vídeo recebido. 🎬\n\nAgora, cole aqui o seu <b>Link de Afiliado da SHOPEE</b> 🛒 referente a este produto:"
+
     try:
         await bot.edit_message_text(
             chat_id=message.chat.id,
             message_id=msg_wizard_id,
-            text="📍 <b>PASSO 2 de 3:</b>\n\nÓtimo! Vídeo recebido. 🎬\n\nAgora, cole aqui o seu <b>Link de Afiliado da SHOPEE</b> 🛒 referente a este produto:",
+            text=texto_com_cronometro(texto_passo2),
             parse_mode="HTML",
             reply_markup=teclado_cancelar_inline
         )
     except: pass
     await state.set_state(SubmissaoUsuarioInterativa.aguardando_shopee)
+
+    # ⏱️ Reinicia a contagem para este novo passo
+    await armar_cronometro_wizard(
+        message.chat.id, msg_wizard_id, message.message_thread_id,
+        state, texto_passo2, teclado_cancelar_inline
+    )
 
 # 4. PASSO 3: Recebe Shopee -> Edita o Painel pedindo TikTok (Opcional)
 @dp.message(SubmissaoUsuarioInterativa.aguardando_shopee)
@@ -11163,16 +11246,24 @@ async def wizard_receber_shopee(message: types.Message, state: FSMContext):
         [InlineKeyboardButton(text="❌ Cancelar Tudo", callback_data="cancelar_wizard")]
     ])
     
+    texto_passo3 = "📍 <b>PASSO 3 de 3 (Opcional):</b>\n\nVocê também tem o <b>Link de Afiliado do TIKTOK</b> 🎵 para este produto?\n\nSe sim, cole o link aqui. Se não tiver, basta clicar no botão <b>Pular</b> abaixo."
+
     try:
         await bot.edit_message_text(
             chat_id=message.chat.id,
             message_id=msg_wizard_id,
-            text="📍 <b>PASSO 3 de 3 (Opcional):</b>\n\nVocê também tem o <b>Link de Afiliado do TIKTOK</b> 🎵 para este produto?\n\nSe sim, cole o link aqui. Se não tiver, basta clicar no botão <b>Pular</b> abaixo.",
+            text=texto_com_cronometro(texto_passo3),
             parse_mode="HTML",
             reply_markup=teclado_tiktok
         )
     except: pass
     await state.set_state(SubmissaoUsuarioInterativa.aguardando_tiktok)
+
+    # ⏱️ Reinicia a contagem para este novo passo
+    await armar_cronometro_wizard(
+        message.chat.id, msg_wizard_id, message.message_thread_id,
+        state, texto_passo3, teclado_tiktok
+    )
 
 # 5. PASSO FINAL: IA Processa e Posta (Edita o Painel para o Veredito)
 @dp.message(SubmissaoUsuarioInterativa.aguardando_tiktok)
