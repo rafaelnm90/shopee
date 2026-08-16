@@ -11310,6 +11310,41 @@ async def renderizar_painel(chat_id, thread_id, state: FSMContext):
 
     await armar_cronometro_wizard(chat_id, msg_id, thread_id, state, texto, teclado)
 
+# 🛡️ ANTI-ÓRFÃO: o cronômetro e o estado FSM vivem na memória do processo.
+# Todo restart mata as sessões, mas as mensagens de painel ficam no grupo para sempre.
+# Por isso registramos cada painel aberto no banco e varremos na inicialização.
+def registrar_painel_aberto(chat_id, message_id):
+    try:
+        abertos = ler_config_bd("paineis_wizard_abertos", [])
+        abertos.append({"chat_id": chat_id, "message_id": message_id})
+        salvar_config_bd("paineis_wizard_abertos", abertos[-50:])
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao registrar painel aberto: {e}")
+
+async def limpar_paineis_orfaos():
+    """
+    Apaga na subida todo painel de submissão registrado.
+    É sempre seguro: como o FSM é MemoryStorage, nenhuma sessão sobrevive ao restart,
+    então qualquer painel registrado já está morto de qualquer forma.
+    """
+    try:
+        abertos = ler_config_bd("paineis_wizard_abertos", [])
+        if not abertos:
+            return
+
+        removidos = 0
+        for painel in abertos:
+            try:
+                await bot.delete_message(painel.get("chat_id"), painel.get("message_id"))
+                removidos += 1
+            except Exception:
+                pass  # já apagado ou antigo demais: segue o baile
+
+        salvar_config_bd("paineis_wizard_abertos", [])
+        if EXIBIR_LOGS: logger.info(f"🧹 [Anti-Órfão] {removidos} de {len(abertos)} painel(is) de submissão removido(s) na inicialização.")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Anti-Órfão] Erro na varredura de painéis: {e}")
+
 async def criar_painel_submissao(chat_id, thread_id, user, state: FSMContext, video_id=None, link_shopee=None, link_tiktok=None):
     """
     Cria o painel do zero, já podendo vir pré-preenchido.
@@ -11331,6 +11366,8 @@ async def criar_painel_submissao(chat_id, thread_id, user, state: FSMContext, vi
         chat_id, texto_com_cronometro(texto), parse_mode="HTML",
         reply_markup=teclado, message_thread_id=thread_param
     )
+
+    registrar_painel_aberto(chat_id, msg_painel.message_id)   # 🛡️ Anti-órfão
 
     await state.set_state(SubmissaoUsuarioInterativa.painel)
     await state.update_data(
@@ -11623,6 +11660,10 @@ async def main():
         dados_rotina["pausado"] = True
         salvar_config_rotina(dados_rotina)
         if EXIBIR_LOGS: logger.info("⏸️ Rotinas estavam em pausa programada. Marcado como pausado no JSON com sucesso.")
+    # 🛡️ Remove painéis de submissão que ficaram órfãos por causa do restart
+    await limpar_paineis_orfaos()
+    await reenviar_botao_ofertas()
+
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
