@@ -11128,21 +11128,53 @@ async def interceptar_envio_livre(message: types.Message, state: FSMContext):
     permitido, config = checar_permissao_topico(message)
     if not permitido: 
         return
-    
+
+    # ✅ Detecta se o envio já é aproveitável ANTES de apagar a mensagem
+    video_id = message.video.file_id if message.video else None
+    link_shopee = extrair_link_wizard(message.text, PADRAO_LINK_SHOPEE) if message.text else None
+    link_tiktok = extrair_link_wizard(message.text, PADRAO_LINK_TIKTOK) if message.text else None
+
     # Remove o envio avulso para evitar poluição visual
     try: 
         await message.delete()
     except Exception: 
         pass
-    
+
+    mencao = montar_mencao_usuario(message.from_user)
+
+    # 🚀 ABERTURA AUTOMÁTICA: o membro mandou algo válido sem clicar no botão.
+    # Em vez de perder o envio, o painel abre já com o item marcado.
+    if video_id or link_shopee or link_tiktok:
+        if EXIBIR_LOGS: logger.info(f"🚀 [Painel Automático] Envio válido detectado de {message.from_user.id}. Abrindo painel.")
+        await criar_painel_submissao(
+            message.chat.id, message.message_thread_id, message.from_user, state,
+            video_id=video_id, link_shopee=link_shopee, link_tiktok=link_tiktok
+        )
+
+        if video_id:
+            item = "o seu <b>vídeo</b>"
+        elif link_shopee:
+            item = "o seu <b>link da Shopee</b>"
+        else:
+            item = "o seu <b>link do TikTok</b>"
+
+        aviso_auto = await message.answer(
+            f"🚀 {mencao}, recebi {item} e já abri o seu painel logo acima. Continue por lá!",
+            parse_mode="HTML"
+        )
+        await asyncio.sleep(8)
+        try: await aviso_auto.delete()
+        except Exception: pass
+        return
+
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     teclado_iniciar = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🎬 Iniciar Postagem de Oferta", callback_data="iniciar_wizard_oferta")]
     ])
-    
-    user_mention = f"@{message.from_user.username}" if message.from_user.username else message.from_user.first_name
+
     aviso = await message.answer(
-        f"👋 Olá, {user_mention}! Para submeter uma oferta, por favor utilize o painel interativo abaixo:",
+        f"👋 Olá, {mencao}! Para submeter uma oferta, envie o <b>vídeo</b> ou o seu "
+        f"<b>link da Shopee</b> aqui — ou toque no botão abaixo para abrir o seu painel:",
         reply_markup=teclado_iniciar,
         parse_mode="HTML"
     )
@@ -11279,25 +11311,44 @@ async def renderizar_painel(chat_id, thread_id, state: FSMContext):
     await armar_cronometro_wizard(chat_id, msg_id, thread_id, state, texto, teclado)
 
 @dp.callback_query(F.data == "iniciar_wizard_oferta")
-async def wizard_abrir_painel(callback: types.CallbackQuery, state: FSMContext):
-    dono_id = callback.from_user.id
-    mencao = montar_mencao_usuario(callback.from_user)
-    dados_iniciais = {"dono_wizard": dono_id, "mencao_wizard": mencao}
-    texto, _ = montar_texto_painel(dados_iniciais)
-    teclado = montar_teclado_painel(dono_id, dados_iniciais)
+async def criar_painel_submissao(chat_id, thread_id, user, state: FSMContext, video_id=None, link_shopee=None, link_tiktok=None):
+    """
+    Cria o painel do zero, já podendo vir pré-preenchido.
+    Usada tanto pelo botão quanto pela abertura automática (quando o membro
+    manda o vídeo ou o link sem clicar em nada).
+    """
+    dono_id = user.id
+    mencao = montar_mencao_usuario(user)
+    dados = {
+        "dono_wizard": dono_id, "mencao_wizard": mencao,
+        "video_file_id": video_id, "link_shopee": link_shopee, "link_tiktok": link_tiktok
+    }
+    texto, _ = montar_texto_painel(dados)
+    teclado = montar_teclado_painel(dono_id, dados)
 
-    msg_painel = await callback.message.answer(
-        texto_com_cronometro(texto), parse_mode="HTML", reply_markup=teclado
+    thread_param = int(thread_id) if thread_id and int(thread_id) not in (0, 1) else None
+
+    msg_painel = await bot.send_message(
+        chat_id, texto_com_cronometro(texto), parse_mode="HTML",
+        reply_markup=teclado, message_thread_id=thread_param
     )
 
     await state.set_state(SubmissaoUsuarioInterativa.painel)
-    await state.update_data(dono_wizard=dono_id, mencao_wizard=mencao, video_file_id=None, link_shopee=None, link_tiktok=None, aguardando_wizard=None)
-    await callback.answer()
-
-    await armar_cronometro_wizard(
-        callback.message.chat.id, msg_painel.message_id,
-        callback.message.message_thread_id, state, texto, teclado
+    await state.update_data(
+        dono_wizard=dono_id, mencao_wizard=mencao,
+        video_file_id=video_id, link_shopee=link_shopee, link_tiktok=link_tiktok,
+        aguardando_wizard=None
     )
+
+    await armar_cronometro_wizard(chat_id, msg_painel.message_id, thread_id, state, texto, teclado)
+    return msg_painel
+
+async def wizard_abrir_painel(callback: types.CallbackQuery, state: FSMContext):
+    await criar_painel_submissao(
+        callback.message.chat.id, callback.message.message_thread_id,
+        callback.from_user, state
+    )
+    await callback.answer()
 
 @dp.callback_query(F.data.startswith("wz_"), StateFilter("*"))
 async def wizard_acao_painel(callback: types.CallbackQuery, state: FSMContext):
