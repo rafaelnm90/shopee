@@ -10,9 +10,23 @@ import ast, sys, os
 from collections import Counter
 
 ERROS, AVISOS = [], []
+FONTES = {}   # guarda o conteúdo dos arquivos para mostrar o trecho do erro
 
-def erro(arq, linha, msg): ERROS.append(f"  ❌ {arq}:{linha} — {msg}")
-def aviso(arq, linha, msg): AVISOS.append(f"  ⚠️  {arq}:{linha} — {msg}")
+def erro(arq, linha, msg): ERROS.append((arq, linha, msg))
+def aviso(arq, linha, msg): AVISOS.append((arq, linha, msg))
+
+def mostrar_trecho(arq, linha, margem=4):
+    """Imprime o código em volta do erro, já numerado e com a linha marcada."""
+    linhas = FONTES.get(arq, [])
+    if not linhas or not linha:
+        return ""
+    ini = max(0, linha - margem - 1)
+    fim = min(len(linhas), linha + margem)
+    saida = []
+    for i in range(ini, fim):
+        marca = ">>>" if (i + 1) == linha else "   "
+        saida.append(f"     {marca} {i+1:>6} | {linhas[i]}")
+    return "\n".join(saida)
 
 PRIMEIRO_PARAM_OK = {"message", "callback", "event", "query", "msg", "callback_query"}
 
@@ -24,6 +38,7 @@ def eh_decorator_handler(dec):
 def validar(caminho):
     fonte = open(caminho, encoding="utf-8").read()
     arq = os.path.basename(caminho)
+    FONTES[arq] = fonte.split("\n")
 
     # 1) SINTAXE
     try:
@@ -103,10 +118,26 @@ if __name__ == "__main__":
     for a in alvos:
         validar(a)
     if AVISOS:
-        print("AVISOS (não bloqueiam):"); print("\n".join(AVISOS)); print()
+        print("─" * 70)
+        print("AVISOS (não bloqueiam o deploy):")
+        for arq, linha, msg in AVISOS:
+            print(f"  ⚠️  {arq}:{linha} — {msg}")
+        print()
+
     if ERROS:
-        print("ERROS ENCONTRADOS:"); print("\n".join(ERROS))
-        print(f"\n🛑 {len(ERROS)} problema(s). NÃO reinicie os serviços.")
+        print("=" * 70)
+        print(f"🛑 {len(ERROS)} ERRO(S) ENCONTRADO(S) — NÃO reinicie os serviços")
+        print("=" * 70)
+        for i, (arq, linha, msg) in enumerate(ERROS, 1):
+            print(f"\n[ERRO {i}/{len(ERROS)}]  {arq}  linha {linha}")
+            print(f"  ❌ {msg}")
+            trecho = mostrar_trecho(arq, linha)
+            if trecho:
+                print("\n     ── código nessa região ──")
+                print(trecho)
+        print("\n" + "=" * 70)
+        print("👉 Copie TUDO acima e envie para análise.")
+        print("=" * 70)
         sys.exit(1)
     print("✅ Tudo certo. Liberado para reiniciar.")
     sys.exit(0)
