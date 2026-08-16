@@ -145,6 +145,16 @@ def inicializar_banco_sqlite():
         if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'status_publico' adicionada à fila_autorais.")
     except sqlite3.OperationalError:
         pass
+
+    # 7. Histórico de Métricas (prova social das rotinas)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS historico_metricas (
+            data TEXT,
+            chave TEXT,
+            valor INTEGER,
+            PRIMARY KEY (data, chave)
+        )
+    ''')
         
     # 🚀 Migração invisível 3: Atualiza a tabela de Logs para suportar o Utils Avançado
     try:
@@ -1600,6 +1610,140 @@ async def apagar_mensagem_automatica(msg_id, chat_id=GRUPO_ID):
         if EXIBIR_LOGS: logger.info(f"🧹 Faxina concluída: Mensagem {msg_id} apagada do chat {chat_id}.")
     except Exception as e:
         if EXIBIR_LOGS: logger.info(f"⚠️ Faxina: A mensagem {msg_id} já havia sido apagada manualmente.")
+
+# ==========================================
+# 📊 HISTÓRICO DE MÉTRICAS (prova social)
+# Grava um retrato diário de cada canal no SQLite. Sobrevive a restart,
+# deploy e troca de servidor, porque mora no mesmo banco_dados.db.
+# ==========================================
+def salvar_metrica(dia, chave, valor):
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("INSERT OR REPLACE INTO historico_metricas (data, chave, valor) VALUES (?, ?, ?)", (dia, chave, int(valor)))
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Métricas] Erro ao salvar {chave}: {e}")
+
+def ler_metrica(chave, dias_atras=0):
+    """Valor da métrica em um dia específico. None se não houver registro."""
+    try:
+        dia = (datetime.now(fuso_horario) - timedelta(days=dias_atras)).strftime("%Y-%m-%d")
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("SELECT valor FROM historico_metricas WHERE data = ? AND chave = ?", (dia, chave))
+        r = cursor.fetchone()
+        conexao.close()
+        return r[0] if r else None
+    except Exception:
+        return None
+
+def crescimento_metrica(chave, dias):
+    """Diferença entre hoje e X dias atrás."""
+    atual, antigo = ler_metrica(chave, 0), ler_metrica(chave, dias)
+    if atual is None or antigo is None:
+        return None
+    return atual - antigo
+
+def soma_metrica_periodo(chave, dias):
+    """Soma dos valores diários no período (para volume, não para saldo)."""
+    try:
+        ini = (datetime.now(fuso_horario) - timedelta(days=dias)).strftime("%Y-%m-%d")
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("SELECT SUM(valor) FROM historico_metricas WHERE chave = ? AND data > ?", (chave, ini))
+        r = cursor.fetchone()
+        conexao.close()
+        return r[0] if r and r[0] else None
+    except Exception:
+        return None
+
+def recorde_metrica(chave):
+    """Maior valor já registrado para aquela métrica."""
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("SELECT MAX(valor) FROM historico_metricas WHERE chave = ?", (chave,))
+        r = cursor.fetchone()
+        conexao.close()
+        return r[0] if r and r[0] else None
+    except Exception:
+        return None
+
+def marco_cruzado(atual, anterior):
+    """Devolve o marco redondo atingido hoje, ou None. Denso no começo, aberto depois."""
+    if atual is None or anterior is None or atual <= anterior:
+        return None
+    marcos = [10, 25, 50, 75, 100]
+    marcos += list(range(150, 501, 50))
+    marcos += list(range(600, 2001, 100))
+    marcos += list(range(2500, 100001, 500))
+    cruzados = [m for m in marcos if anterior < m <= atual]
+    return max(cruzados) if cruzados else None
+
+async def coletar_metricas_diarias():
+    """Roda às 23:50 e fotografa o dia de cada canal."""
+    try:
+        agora = datetime.now(fuso_horario)
+        hoje_str = agora.strftime("%Y-%m-%d")
+        ontem_str = (agora - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        config_sub = ler_submissao_config()
+        grupo_publico = config_sub.get("grupo_id")
+
+        canais = {
+            "principal": GRUPO_ID,
+            "viral": GRUPO_VIRAL_ID,
+            "publico": grupo_publico
+        }
+
+        # --- 1. Membros / inscritos ---
+        for nome, chat_id in canais.items():
+            if not chat_id:
+                continue
+            try:
+                total = await bot.get_chat_member_count(chat_id)
+                salvar_metrica(hoje_str, f"membros_{nome}", total)
+            except Exception as e:
+                if EXIBIR_LOGS: logger.warning(f"⚠️ [Métricas] Não consegui contar membros de {nome}: {e}")
+
+        # --- 2. Vídeos publicados hoje ---
+        posts = {"principal": 0, "viral": 0, "publico": 0}
+        try:
+            conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+            cursor = conexao.cursor()
+
+            cursor.execute("SELECT COUNT(*) FROM fila_postagens WHERE status = 'CONCLUIDO' AND data_postagem = ?", (hoje_str,))
+            posts["principal"] = cursor.fetchone()[0] or 0
+
+            try:
+                cursor.execute("SELECT COUNT(*) FROM fila_publico WHERE processado = 1 AND data_postagem LIKE ?", (f"{hoje_str}%",))
+                posts["publico"] = cursor.fetchone()[0] or 0
+            except Exception:
+                pass
+
+            conexao.close()
+        except Exception as e:
+            if EXIBIR_LOGS: logger.warning(f"⚠️ [Métricas] Erro ao contar vídeos: {e}")
+
+        try:
+            fila_esp = ler_fila_clonagem().get("fila", [])
+            posts["viral"] = len([i for i in fila_esp if i.get("processado") and str(i.get("data_postagem")) == hoje_str])
+        except Exception:
+            pass
+
+        # --- 3. Grava o dia e atualiza o acervo acumulado ---
+        for nome, qtd in posts.items():
+            salvar_metrica(hoje_str, f"posts_dia_{nome}", qtd)
+            acumulado_ontem = ler_metrica(f"posts_total_{nome}", 1) or 0
+            salvar_metrica(hoje_str, f"posts_total_{nome}", acumulado_ontem + qtd)
+
+        if EXIBIR_LOGS:
+            logger.info(f"📊 [Métricas] Retrato do dia salvo: "
+                        f"Principal {posts['principal']} vídeos | Viral {posts['viral']} | Público {posts['publico']}")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Métricas] Falha na coleta diária: {e}")
 
 # 🚦 SISTEMA DE INTERCALAÇÃO: vídeos são a espinha dorsal, textos entram no meio
 def registrar_ultimo_post(chat_destino, tipo_conteudo):
@@ -11623,6 +11767,9 @@ async def main():
     
     # ✅ Agendador da lixeira persistente (roda todos os dias pontualmente às 03:00)
     scheduler.add_job(varredor_de_lixeira, 'cron', hour=3, minute=0, timezone=FUSO_STR)
+
+    # 📊 Retrato diário das métricas (prova social das rotinas)
+    scheduler.add_job(coletar_metricas_diarias, 'cron', hour=23, minute=50, timezone=FUSO_STR, id='coleta_metricas_diarias', replace_existing=True)
     
     # ✅ Novo: Despertador e aviso da Pausa Programada (roda às 09:00)
     scheduler.add_job(verificar_pausa_diaria, 'cron', hour=9, minute=0, timezone=FUSO_STR)
