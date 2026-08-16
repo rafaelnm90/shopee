@@ -11310,7 +11310,6 @@ async def renderizar_painel(chat_id, thread_id, state: FSMContext):
 
     await armar_cronometro_wizard(chat_id, msg_id, thread_id, state, texto, teclado)
 
-@dp.callback_query(F.data == "iniciar_wizard_oferta")
 async def criar_painel_submissao(chat_id, thread_id, user, state: FSMContext, video_id=None, link_shopee=None, link_tiktok=None):
     """
     Cria o painel do zero, já podendo vir pré-preenchido.
@@ -11343,6 +11342,7 @@ async def criar_painel_submissao(chat_id, thread_id, user, state: FSMContext, vi
     await armar_cronometro_wizard(chat_id, msg_painel.message_id, thread_id, state, texto, teclado)
     return msg_painel
 
+@dp.callback_query(F.data == "iniciar_wizard_oferta")
 async def wizard_abrir_painel(callback: types.CallbackQuery, state: FSMContext):
     await criar_painel_submissao(
         callback.message.chat.id, callback.message.message_thread_id,
