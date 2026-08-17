@@ -1745,6 +1745,74 @@ async def coletar_metricas_diarias():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Métricas] Falha na coleta diária: {e}")
 
+# 📊 MODO PROVA: quais rotinas divulgam qual canal, e como nomeá-lo
+MAPA_PROVA_ROTINAS = {
+    "promo_publico": "publico",
+    "promo_publico_viral": "publico",
+    "promo_principal": "principal",
+    "promo_principal_publico": "principal",
+    "promo_viral": "viral",
+    "promo_viral_publico": "viral",
+}
+NOMES_CANAIS_PROVA = {
+    "publico": "Grupo Público de Afiliados",
+    "principal": "Canal Acervo Afiliados",
+    "viral": "Canal Acervo Viral",
+}
+CHANCE_MODO_PROVA = 0.40   # 40% prova / 60% pedir
+
+def gerar_fato_prova(canal):
+    """
+    Desce a escada de fatos e devolve o mais forte que houver.
+    None significa 'nenhum número digno' — a rotina volta ao modo PEDIR.
+    """
+    try:
+        chave_membros = f"membros_{canal}"
+        chave_posts_dia = f"posts_dia_{canal}"
+        chave_posts_total = f"posts_total_{canal}"
+        total_membros = ler_metrica(chave_membros, 0)
+
+        # 1. Marco redondo atingido hoje
+        marco = marco_cruzado(total_membros, ler_metrica(chave_membros, 1))
+        if marco:
+            return f"o canal acabou de ultrapassar {marco} membros"
+
+        # 2. Recorde de vídeos num único dia
+        hoje_posts = ler_metrica(chave_posts_dia, 0)
+        recorde = recorde_metrica(chave_posts_dia)
+        if hoje_posts and recorde and hoje_posts >= recorde and hoje_posts >= 5:
+            return f"recorde batido: {hoje_posts} vídeos publicados num único dia"
+
+        # 3. Crescimento mensal
+        x = crescimento_metrica(chave_membros, 30)
+        if x and x >= 10:
+            return f"{x} novos membros no último mês, somando {total_membros} no total"
+
+        # 4. Crescimento semanal
+        x = crescimento_metrica(chave_membros, 7)
+        if x and x >= 5:
+            return f"{x} novos membros nos últimos 7 dias, somando {total_membros} no total"
+
+        # 5. Crescimento diário
+        x = crescimento_metrica(chave_membros, 1)
+        if x and x >= 3:
+            return f"{x} novos membros só nas últimas 24 horas, somando {total_membros} no total"
+
+        # 6. Volume da semana
+        x = soma_metrica_periodo(chave_posts_dia, 7)
+        if x and x >= 15:
+            return f"{x} vídeos publicados nos últimos 7 dias"
+
+        # 7. Acervo acumulado
+        x = ler_metrica(chave_posts_total, 0)
+        if x and x >= 30:
+            return f"{x} vídeos já disponíveis no acervo"
+
+        return None
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Modo Prova] Erro ao gerar fato: {e}")
+        return None
+
 # 🚦 SISTEMA DE INTERCALAÇÃO: vídeos são a espinha dorsal, textos entram no meio
 def registrar_ultimo_post(chat_destino, tipo_conteudo):
     """Guarda se a última publicação daquele canal foi 'video' ou 'texto'."""
@@ -1935,6 +2003,24 @@ async def disparar_mensagem(tipo, forcar=False):
         prompt = "Atue como moderador do grupo público. Recomende a galera a entrar no nosso Canal VIP Oficial (Acervo Afiliados), onde postamos vídeos premium mastigados. Máximo 150 caracteres, use emojis, sem links."
     elif tipo == "promo_viral_publico":
         prompt = "Atue como moderador do grupo público. Recomende nosso Acervo de Vídeos Virais para a galera copiar e colar as tendências do momento. Máximo 150 caracteres, use emojis, sem links."
+
+    # 📊 MODO PROVA: em 40% dos disparos, troca o convite por um dado real.
+    # Se não houver número digno, mantém o convite (modo PEDIR) sem alarde.
+    canal_prova = MAPA_PROVA_ROTINAS.get(tipo)
+    if canal_prova and random.random() < CHANCE_MODO_PROVA:
+        fato = gerar_fato_prova(canal_prova)
+        if fato:
+            nome_canal = NOMES_CANAIS_PROVA.get(canal_prova, "nosso canal")
+            prompt = (
+                f"Você é moderador de uma comunidade de afiliados. Escreva um aviso curto e "
+                f"empolgante sobre o {nome_canal}, usando EXATAMENTE este dado real: \"{fato}\". "
+                f"REGRA ABSOLUTA: não invente nenhum outro número, não arredonde e não altere o dado informado. "
+                f"Não convide diretamente nem peça para a pessoa entrar: apenas noticie o fato de forma "
+                f"que desperte curiosidade. Máximo 200 caracteres, use emojis e entregue APENAS o texto final."
+            )
+            if EXIBIR_LOGS: logger.info(f"📊 [Modo Prova] '{tipo}' usará o fato: {fato}")
+        elif EXIBIR_LOGS:
+            logger.info(f"📊 [Modo Prova] Sorteado para '{tipo}', mas sem número digno. Mantendo o convite.")
 
     texto = await gerar_mensagem_gemini(prompt)
     
