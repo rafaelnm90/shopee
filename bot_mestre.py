@@ -11327,8 +11327,14 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
 
     await asyncio.sleep(restante)
 
-    data = await state.get_data()
+        data = await state.get_data()
     if data.get("sessao_wizard_id") != sessao_id:
+        return
+
+    # 🛟 RESGATE: com vídeo + pelo menos 1 link válido (Shopee ou TikTok), o trabalho
+    # do membro NÃO vai para o lixo. Abrimos uma pergunta extra de 1 minuto antes.
+    if data.get("video_file_id") and (data.get("link_shopee") or data.get("link_tiktok")):
+        await abrir_confirmacao_expiracao(chat_id, message_id, thread_id, state)
         return
 
     # ⌛ Expirou: limpa a memória, apaga o painel e avisa (o aviso também se autodestrói)
@@ -11347,10 +11353,140 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
             parse_mode="HTML",
             message_thread_id=thread_id
         )
+                await asyncio.sleep(20)
+        await aviso.delete()
+    except Exception:
+        pass
+
+# ==========================================
+# 🛟 RESGATE PÓS-EXPIRAÇÃO (pergunta extra de 1 minuto)
+# ==========================================
+TEMPO_CONFIRMACAO_EXPIRACAO = 60        # segundos para o membro decidir
+INTERVALO_CRONOMETRO_CONFIRMACAO = 10   # de quanto em quanto a contagem é atualizada
+
+def texto_confirmacao_expiracao(data, restante=None):
+    """Texto da pergunta de resgate, já com a contagem regressiva."""
+    if restante is None:
+        restante = TEMPO_CONFIRMACAO_EXPIRACAO
+    minutos, segundos = divmod(max(0, int(restante)), 60)
+
+        mencao = data.get("mencao_wizard") or "membro"
+    tem_shopee = bool(data.get("link_shopee"))
+    tem_tiktok = bool(data.get("link_tiktok"))
+
+    # Sem o link da Shopee não existe oferta publicável: o aviso final muda de tom.
+    if tem_shopee:
+        rodape = "⚠️ <i>Se você não responder, eu publico a sua oferta automaticamente.</i>"
+    else:
+        rodape = (
+            "⚠️ <b>Falta o link da Shopee</b> — sem ele eu não consigo publicar.\n"
+            "<i>Cole o link aqui no chat agora que o seu painel volta na hora, com o tempo renovado. "
+            "Se você não responder nada, a submissão será cancelada.</i>"
+        )
+
+    return (
+        f"⌛ <b>O seu tempo acabou, {mencao}!</b>\n\n"
+        "Mas calma: eu guardei tudo o que você já enviou 👇\n\n"
+        "✅ Vídeo\n"
+        f"{'✅' if tem_shopee else '❌'} Link da Shopee\n"
+        f"{'✅' if tem_tiktok else '🔘'} Link do TikTok (opcional)\n\n"
+        "<b>Quer mesmo cancelar esta submissão?</b>\n"
+        "• <b>Não</b> → volto para o seu painel exatamente de onde você parou e o cronômetro reinicia.\n"
+        "• <b>Sim</b> → apago tudo e você começa do zero depois.\n\n"
+        f"{rodape}\n\n"
+        f"⏱️ <b>Tempo para responder:</b> {minutos:02d}:{segundos:02d}"
+    )
+
+def teclado_confirmacao_expiracao(dono_id):
+    """O 'Sim' reaproveita o cancelamento normal; o 'Não' devolve o painel."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="↩️ Não, quero continuar", callback_data=f"wz_continuar:{dono_id}")],
+        [InlineKeyboardButton(text="🗑️ Sim, cancelar tudo", callback_data=f"cancelar_wizard:{dono_id}")]
+    ])
+
+async def abrir_confirmacao_expiracao(chat_id, message_id, thread_id, state: FSMContext):
+    """Transforma o painel expirado na pergunta de resgate e arma o prazo de 1 minuto."""
+    data = await state.get_data()
+    dono_id = data.get("dono_wizard")
+    if not dono_id:
+        return
+
+    # A confirmação vira a sessão ativa: cronômetros antigos morrem sozinhos e,
+    # se o membro voltar a mexer no painel, esta contagem também morre sozinha.
+    sessao_conf = f"conf_{message_id}_{int(datetime.now(fuso_horario).timestamp() * 1000)}"
+    await state.update_data(sessao_wizard_id=sessao_conf)
+
+    teclado = teclado_confirmacao_expiracao(dono_id)
+    try:
+        await bot.edit_message_text(
+            chat_id=chat_id, message_id=message_id,
+            text=texto_confirmacao_expiracao(data),
+            parse_mode="HTML", reply_markup=teclado
+        )
+    except Exception:
+        pass
+
+    if EXIBIR_LOGS: logger.info(f"🛟 [Wizard] Prazo esgotado com material completo. Pergunta de resgate aberta para o dono {dono_id}.")
+    asyncio.create_task(cronometro_confirmacao_expiracao(chat_id, message_id, thread_id, state, sessao_conf, teclado))
+
+async def cronometro_confirmacao_expiracao(chat_id, message_id, thread_id, state: FSMContext, sessao_conf, teclado):
+    """1 minuto para decidir. Silêncio absoluto = publicação automática da oferta."""
+    restante = TEMPO_CONFIRMACAO_EXPIRACAO
+
+    while restante > INTERVALO_CRONOMETRO_CONFIRMACAO:
+        await asyncio.sleep(INTERVALO_CRONOMETRO_CONFIRMACAO)
+        restante -= INTERVALO_CRONOMETRO_CONFIRMACAO
+
+        data = await state.get_data()
+        # Respondeu, cancelou ou mandou item novo: esta contagem morre em silêncio
+        if data.get("sessao_wizard_id") != sessao_conf:
+            return
+
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id, message_id=message_id,
+                text=texto_confirmacao_expiracao(data, restante),
+                parse_mode="HTML", reply_markup=teclado
+            )
+        except Exception:
+            pass
+
+    await asyncio.sleep(restante)
+
+    data = await state.get_data()
+    if data.get("sessao_wizard_id") != sessao_conf:
+        return
+
+        # ⌛ Nem respondeu: se a oferta é publicável, vai para o ar em vez de virar lixo.
+    if data.get("link_shopee"):
+        if EXIBIR_LOGS: logger.info(f"🚀 [Wizard] Prazo de resgate esgotado. Publicando automaticamente a oferta de {data.get('dono_wizard')}.")
+        await wizard_publicar_oferta(None, state, chat_forcado=chat_id, mencao_forcada=data.get("mencao_wizard"))
+        return
+
+    # Só tem TikTok: sem o link da Shopee não há o que postar, então encerramos de vez.
+    if EXIBIR_LOGS: logger.info(f"🗑️ [Wizard] Resgate expirado sem link da Shopee. Cancelando a submissão de {data.get('dono_wizard')}.")
+    await state.clear()
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except Exception:
+        pass
+
+    mencao = data.get("mencao_wizard") or "membro"
+    thread_param = int(thread_id) if thread_id and int(thread_id) not in (0, 1) else None
+    try:
+        aviso = await bot.send_message(
+            chat_id,
+            f"⌛ <b>Tempo esgotado, {mencao}!</b>\n\nComo faltou o <b>link da Shopee</b>, não deu para publicar "
+            "e a submissão foi cancelada. É só tocar em <b>🎬 Iniciar Postagem de Oferta</b> para começar de novo.",
+            parse_mode="HTML",
+            message_thread_id=thread_param
+        )
         await asyncio.sleep(20)
         await aviso.delete()
     except Exception:
         pass
+
+    await reenviar_botao_ofertas()
 
 # 1. GATILHO INICIAL: Qualquer mensagem fora de ordem aciona o botão de Iniciar
 @dp.message(F.chat.type.in_(["supergroup", "group"]), StateFilter(None))
@@ -11624,9 +11760,20 @@ async def wizard_acao_painel(callback: types.CallbackQuery, state: FSMContext):
 
     acao = (callback.data or "").split(":")[0]
 
-    if acao == "wz_concluir":
+        if acao == "wz_concluir":
         await callback.answer()
         await wizard_publicar_oferta(callback, state)
+        return
+
+    # 🛟 "Não, quero continuar": devolve o painel de onde parou e reinicia os 3 minutos
+    if acao == "wz_continuar":
+        data = await state.get_data()
+        if not data.get("dono_wizard"):
+            await callback.answer("⚠️ Esta submissão já foi encerrada. Toque em 🎬 Iniciar Postagem de Oferta.", show_alert=True)
+            return
+        await callback.answer("👍 Tempo renovado! Continue de onde parou.")
+        await state.update_data(aguardando_wizard=None)
+        await renderizar_painel(callback.message.chat.id, callback.message.message_thread_id, state)
         return
 
     mapa = {"wz_video": "video", "wz_shopee": "shopee", "wz_tiktok": "tiktok"}
@@ -11687,8 +11834,14 @@ async def wizard_receber_item(message: types.Message, state: FSMContext):
         except Exception: pass
 
 # 3. CONCLUSÃO: IA avalia e publica no mural
-async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContext):
-    message = callback.message
+async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContext, chat_forcado=None, mencao_forcada=None):
+    # 🤖 Duas portas de entrada: o clique em "Concluir Oferta" ou a publicação automática
+    # disparada quando o prazo extra de 1 minuto também expira (aí não existe callback).
+    if callback:
+        message = callback.message
+    else:
+        from types import SimpleNamespace   # stdlib: portador mínimo só para o chat_id do painel
+        message = SimpleNamespace(chat=SimpleNamespace(id=chat_forcado))
     config = ler_submissao_config()
 
     data = await state.get_data()
@@ -11697,8 +11850,9 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
     link_shopee = data.get("link_shopee")
     link_tiktok = data.get("link_tiktok")
 
-    if not video_id or not link_shopee:
-        await callback.answer("⚠️ Faltam itens obrigatórios: vídeo e link da Shopee.", show_alert=True)
+        if not video_id or not link_shopee:
+        if callback:
+            await callback.answer("⚠️ Faltam itens obrigatórios: vídeo e link da Shopee.", show_alert=True)
         return
 
     try:
@@ -11745,11 +11899,15 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
         linhas = analise_ia.split('\n')
         veredicto = linhas[0].strip().upper()
 
-        user_obj = callback.from_user
-        if user_obj.username:
+                user_obj = callback.from_user if callback else None
+        if mencao_forcada:
+            user_mention = mencao_forcada
+        elif user_obj and user_obj.username:
             user_mention = f"@{user_obj.username}"
-        else:
+        elif user_obj:
             user_mention = f"<a href='tg://user?id={user_obj.id}'>{user_obj.first_name}</a>"
+        else:
+            user_mention = "um membro"
 
         if "[APROVADO]" in veredicto:
             nome_produto = linhas[1].strip() if len(linhas) > 1 else "Oferta Exclusiva 🛍️"
