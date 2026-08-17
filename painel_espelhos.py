@@ -1700,7 +1700,7 @@ async def processar_remocao_origem(message: types.Message, state: FSMContext):
     msg_simulada = message.model_copy(update={"text": novo_texto})
     await selecionar_acao_edicao(msg_simulada, state)
 
-@router.message(EspelhadorFluxo.menu_principal, F.text == "Forçar Espelhos 🚀") # <--- Alterado aqui
+@router.message(EspelhadorFluxo.menu_principal, F.text == "Forçar Espelhos 🚀")
 async def iniciar_esvaziar_fila(message: types.Message, state: FSMContext):
     dados = ler_espelhos()
     rotas = dados.get("rotas", [])
