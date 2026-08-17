@@ -11176,8 +11176,9 @@ TEXTO_BOTAO_OFERTAS = (
     "👋 <b>Divulgue a sua oferta aqui!</b>\n\n"
     "Toque no botão abaixo e um painel só seu vai abrir. É só mandar:\n\n"
     "🎥 O <b>vídeo</b> do produto\n"
-    "🔗 O seu <b>link de afiliado da Shopee</b>\n"
-    "🎵 O link do <b>TikTok</b> (opcional)\n\n"
+    "🔶 O seu <b>link da Shopee</b>\n"
+    "⬛ O seu <b>link do TikTok</b>\n\n"
+    "<i>Os dois links são bem-vindos, mas basta um deles para publicar.</i>\n\n"
     "Pode enviar na ordem que quiser — o painel marca sozinho o que já chegou.\n\n"
     "<i>💡 Deixe o link já copiado antes de começar: você tem 3 minutos a cada envio.</i>\n"
     "<i>✅ As ofertas aprovadas pela nossa IA vão para o mural com os seus créditos!</i>"
@@ -11374,14 +11375,12 @@ def texto_confirmacao_expiracao(data, restante=None):
     tem_shopee = bool(data.get("link_shopee"))
     tem_tiktok = bool(data.get("link_tiktok"))
 
-    # Sem o link da Shopee não existe oferta publicável: o aviso final muda de tom.
-    if tem_shopee:
-        rodape = "⚠️ <i>Se você não responder, eu publico a sua oferta automaticamente.</i>"
-    else:
-        rodape = (
-            "⚠️ <b>Falta o link da Shopee</b> — sem ele eu não consigo publicar.\n"
-            "<i>Cole o link aqui no chat agora que o seu painel volta na hora, com o tempo renovado. "
-            "Se você não responder nada, a submissão será cancelada.</i>"
+        # O silêncio sempre publica. Só o convite muda quando falta o link da Shopee.
+    rodape = "⚠️ <i>Se você não responder, eu publico a sua oferta automaticamente, do jeito que ela está.</i>"
+    if not tem_shopee:
+        rodape += (
+            "\n💡 <i>Quer incluir o link da Shopee? Cole aqui no chat agora: "
+            "o painel volta na hora e o seu tempo é renovado.</i>"
         )
 
     return (
@@ -11457,36 +11456,9 @@ async def cronometro_confirmacao_expiracao(chat_id, message_id, thread_id, state
     if data.get("sessao_wizard_id") != sessao_conf:
         return
 
-        # ⌛ Nem respondeu: se a oferta é publicável, vai para o ar em vez de virar lixo.
-    if data.get("link_shopee"):
-        if EXIBIR_LOGS: logger.info(f"🚀 [Wizard] Prazo de resgate esgotado. Publicando automaticamente a oferta de {data.get('dono_wizard')}.")
-        await wizard_publicar_oferta(None, state, chat_forcado=chat_id, mencao_forcada=data.get("mencao_wizard"))
-        return
-
-    # Só tem TikTok: sem o link da Shopee não há o que postar, então encerramos de vez.
-    if EXIBIR_LOGS: logger.info(f"🗑️ [Wizard] Resgate expirado sem link da Shopee. Cancelando a submissão de {data.get('dono_wizard')}.")
-    await state.clear()
-    try:
-        await bot.delete_message(chat_id, message_id)
-    except Exception:
-        pass
-
-    mencao = data.get("mencao_wizard") or "membro"
-    thread_param = int(thread_id) if thread_id and int(thread_id) not in (0, 1) else None
-    try:
-        aviso = await bot.send_message(
-            chat_id,
-            f"⌛ <b>Tempo esgotado, {mencao}!</b>\n\nComo faltou o <b>link da Shopee</b>, não deu para publicar "
-            "e a submissão foi cancelada. É só tocar em <b>🎬 Iniciar Postagem de Oferta</b> para começar de novo.",
-            parse_mode="HTML",
-            message_thread_id=thread_param
-        )
-        await asyncio.sleep(20)
-        await aviso.delete()
-    except Exception:
-        pass
-
-    await reenviar_botao_ofertas()
+            # ⌛ Nem respondeu: em vez de jogar fora uma oferta pronta, publicamos direto.
+    if EXIBIR_LOGS: logger.info(f"🚀 [Wizard] Prazo de resgate esgotado. Publicando automaticamente a oferta de {data.get('dono_wizard')}.")
+    await wizard_publicar_oferta(None, state, chat_forcado=chat_id, mencao_forcada=data.get("mencao_wizard"))
 
 # 1. GATILHO INICIAL: Qualquer mensagem fora de ordem aciona o botão de Iniciar
 @dp.message(F.chat.type.in_(["supergroup", "group"]), StateFilter(None))
@@ -11614,8 +11586,9 @@ def montar_texto_painel(data):
     """Monta o texto do painel a partir do que já foi enviado."""
     tem_video = bool(data.get("video_file_id"))
     tem_shopee = bool(data.get("link_shopee"))
-    tem_tiktok = bool(data.get("link_tiktok"))
-    pronto = tem_video and tem_shopee
+        tem_tiktok = bool(data.get("link_tiktok"))
+    # ✅ Publicável com o vídeo + pelo menos 1 link (Shopee OU TikTok)
+    pronto = tem_video and (tem_shopee or tem_tiktok)
 
     texto = "📋 <b>Painel de Submissão de Oferta</b>\n"
     mencao = data.get("mencao_wizard")
@@ -11623,9 +11596,11 @@ def montar_texto_painel(data):
         texto += f"👤 <b>Painel de:</b> {mencao}\n"
     texto += "\n"
     texto += "🎉 <b>Você já pode concluir a sua postagem!</b>\n\n" if pronto else "Complete os requisitos abaixo:\n\n"
-    texto += f"{'✅' if tem_video else '❌'} Envio do Vídeo\n"
-    texto += f"{'✅' if tem_shopee else '❌'} Envio do Link (Shopee)\n"
-    texto += f"{'✅' if tem_tiktok else '🔘'} Envio do Link (TikTok — Opcional)\n\n"
+        texto += f"{'✅' if tem_video else '❌'} Envio do Vídeo\n"
+    texto += f"{'✅' if tem_shopee else '🔘'} 🔶 Link da <b>Shopee</b>\n"
+    texto += f"{'✅' if tem_tiktok else '⬛'} ⬛ Link do <b>TikTok</b>\n\n"
+    if not pronto:
+        texto += "<i>Obrigatório: o vídeo + pelo menos um dos dois links.</i>\n\n"
 
     aguardando = data.get("aguardando_wizard")
     if aguardando == "video":
@@ -11640,9 +11615,10 @@ def montar_texto_painel(data):
 
 def montar_teclado_painel(dono_id, data):
     """Teclado dinâmico: só mostra o que ainda falta, e libera Concluir quando der."""
-    tem_video = bool(data.get("video_file_id"))
+        tem_video = bool(data.get("video_file_id"))
     tem_shopee = bool(data.get("link_shopee"))
-    pronto = tem_video and tem_shopee
+    tem_tiktok = bool(data.get("link_tiktok"))
+    pronto = tem_video and (tem_shopee or tem_tiktok)
 
     linhas = []
 
@@ -11850,9 +11826,10 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
     link_shopee = data.get("link_shopee")
     link_tiktok = data.get("link_tiktok")
 
-        if not video_id or not link_shopee:
+            # 🔗 Publicável = vídeo + pelo menos 1 link válido (Shopee ou TikTok)
+    if not video_id or not (link_shopee or link_tiktok):
         if callback:
-            await callback.answer("⚠️ Faltam itens obrigatórios: vídeo e link da Shopee.", show_alert=True)
+            await callback.answer("⚠️ Faltam itens obrigatórios: vídeo e pelo menos um link.", show_alert=True)
         return
 
     try:
@@ -11913,15 +11890,28 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
             nome_produto = linhas[1].strip() if len(linhas) > 1 else "Oferta Exclusiva 🛍️"
             hashtags_ia = linhas[2].strip() if len(linhas) > 2 else ""
 
+                        # 🎨 Mesma identidade visual do grupo principal: cada plataforma no seu bloco
+            linha_divisoria = "━━━━━━━━━━━━━━━"
+
             legenda_final = (
                 f"👤 Dica enviada por: {user_mention}\n\n"
                 f"<b>{nome_produto}</b>\n\n"
-                f"🔗 <b>Link do Produto:</b>\n{link_shopee}"
+                f"{linha_divisoria}\n\n"
             )
+            if link_shopee:
+                legenda_final += (
+                    "🔶 <b>SHOPEE</b> 🔶\n"
+                    f"🔗 Link do Produto:\n{link_shopee}\n\n"
+                )
+                if link_tiktok:
+                    legenda_final += f"{linha_divisoria}\n\n"
             if link_tiktok:
-                legenda_final += f"\n\n🎵 <b>Link do TikTok:</b>\n{link_tiktok}"
+                legenda_final += (
+                    "⬛ <b>TIKTOK</b> ⬛\n"
+                    f"🎬 Link do Vídeo:\n{link_tiktok}\n\n"
+                )
             if hashtags_ia:
-                legenda_final += f"\n\n<i>{hashtags_ia}</i>"
+                legenda_final += f"<i>{hashtags_ia}</i>"
 
             await bot.send_video(
                 chat_id=message.chat.id, video=video_id, caption=legenda_final,
