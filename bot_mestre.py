@@ -11689,7 +11689,7 @@ def montar_texto_painel(data):
 
 def montar_teclado_painel(dono_id, data):
     """Teclado dinâmico: só mostra o que ainda falta, e libera Concluir quando der."""
-        tem_video = bool(data.get("video_file_id"))
+    tem_video = bool(data.get("video_file_id"))
     tem_shopee = bool(data.get("link_shopee"))
     tem_tiktok = bool(data.get("link_tiktok"))
     pronto = tem_video and (tem_shopee or tem_tiktok)
@@ -11810,7 +11810,7 @@ async def wizard_acao_painel(callback: types.CallbackQuery, state: FSMContext):
 
     acao = (callback.data or "").split(":")[0]
 
-        if acao == "wz_concluir":
+    if acao == "wz_concluir":
         await callback.answer()
         await wizard_publicar_oferta(callback, state)
         return
@@ -11950,7 +11950,7 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
         linhas = analise_ia.split('\n')
         veredicto = linhas[0].strip().upper()
 
-                user_obj = callback.from_user if callback else None
+        user_obj = callback.from_user if callback else None
         if mencao_forcada:
             user_mention = mencao_forcada
         elif user_obj and user_obj.username:
