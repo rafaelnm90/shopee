@@ -146,6 +146,31 @@ def inicializar_banco_sqlite():
     except sqlite3.OperationalError:
         pass
 
+    # 8. Achadinhos já enviados — memória PERMANENTE (antes era lista de 500, que reciclava)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS achadinhos_enviados (
+            item_id TEXT PRIMARY KEY,
+            data_envio TEXT,
+            nicho TEXT
+        )
+    ''')
+
+    # 🚀 Migração única: leva a lista antiga (JSON de 500) para a tabela definitiva
+    try:
+        cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'achadinhos_enviados'")
+        antigo = cursor.fetchone()
+        if antigo:
+            lista_antiga = json.loads(antigo[0])
+            if isinstance(lista_antiga, list) and lista_antiga:
+                agora_mig = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                for item_id in lista_antiga:
+                    cursor.execute("INSERT OR IGNORE INTO achadinhos_enviados (item_id, data_envio, nicho) VALUES (?, ?, ?)",
+                                   (str(item_id), agora_mig, "migrado"))
+                if EXIBIR_LOGS: logger.info(f"📦 Migração: {len(lista_antiga)} achadinhos antigos movidos para a memória permanente.")
+            cursor.execute("DELETE FROM configuracoes WHERE chave = 'achadinhos_enviados'")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível migrar a lista antiga de achadinhos: {e}")
+
     # 7. Histórico de Métricas (prova social das rotinas)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS historico_metricas (
@@ -3867,13 +3892,43 @@ def ler_achadinhos_config():
 def salvar_achadinhos_config(dados):
     salvar_config_bd("achadinhos_config", dados)
 
-def ler_achadinhos_enviados():
-    return ler_config_bd("achadinhos_enviados", [], arquivo_legado="achadinhos_enviados.json")
+def achadinho_ja_enviado(item_id):
+    """
+    Memória PERMANENTE de produtos já publicados.
+    A PRIMARY KEY da tabela garante que nada se repita, sem limite de tamanho.
+    """
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("SELECT 1 FROM achadinhos_enviados WHERE item_id = ?", (str(item_id),))
+        achou = cursor.fetchone() is not None
+        conexao.close()
+        return achou
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Erro ao consultar histórico: {e}")
+        return True   # Na dúvida, considera já enviado: melhor pular do que repetir
 
-def salvar_achadinhos_enviados(lista):
-    if len(lista) > 500:
-        lista = lista[-500:]
-    salvar_config_bd("achadinhos_enviados", lista)
+def registrar_achadinho_enviado(item_id, nicho=""):
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("INSERT OR IGNORE INTO achadinhos_enviados (item_id, data_envio, nicho) VALUES (?, ?, ?)",
+                       (str(item_id), datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S"), nicho))
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Erro ao registrar envio: {e}")
+
+def total_achadinhos_enviados():
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("SELECT COUNT(*) FROM achadinhos_enviados")
+        total = cursor.fetchone()[0]
+        conexao.close()
+        return total
+    except Exception:
+        return 0
 
 async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_loja):
     if EXIBIR_LOGS: logger.info(f"🧠 [Achadinhos] Estruturando estratégia de Copywriting para o produto...")
@@ -3906,7 +3961,7 @@ async def processar_garimpo_automatico():
         if EXIBIR_LOGS: logger.warning("⚠️ [Achadinhos] O radar está vazio. Adicione nichos ao arquivo achadinhos_config.json.")
         return
         
-    enviados = ler_achadinhos_enviados()
+    if EXIBIR_LOGS: logger.info(f"🧠 [Achadinhos] Memória permanente com {total_achadinhos_enviados()} produtos já publicados.")
     
     for nicho in nichos:
         nome_nicho = nicho.get("nome")
@@ -3932,7 +3987,7 @@ async def processar_garimpo_automatico():
             taxa_desconto = int(oferta.get("priceDiscountRate") or 0)
             
             # 🛡️ Trava de Qualidade: Só aprova se for inédito E o desconto for de no mínimo 15%
-            if item_id not in enviados and taxa_desconto >= 15:
+            if not achadinho_ja_enviado(item_id) and taxa_desconto >= 15:
                 item_escolhido = oferta
                 break
                 
@@ -3974,8 +4029,7 @@ async def processar_garimpo_automatico():
                     
                 await bot.send_photo(chat_id=destino, photo=arquivo_img, caption=legenda_final, parse_mode="HTML", message_thread_id=thread_param)
                 
-                enviados.append(item_id)
-                salvar_achadinhos_enviados(enviados)
+                registrar_achadinho_enviado(item_id, nome_nicho)
                 
                 os.remove(temp_img)
                 if EXIBIR_LOGS: logger.info(f"✅ [Achadinhos] Operação concluída. Oferta fresca entregue ao canal {destino}!")
