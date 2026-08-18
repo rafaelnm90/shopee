@@ -10615,6 +10615,51 @@ async def processar_fila_espiao(forcar=False):
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
 
+    # --- 0. FAXINA E RESGATE DE ATRASADOS (anti-avalanche) ---
+    # Se o robô ficar fora do ar, os horários vencem sem ninguém publicar. Ao voltar,
+    # em vez de despejar tudo de uma vez, descartamos o que é velho demais e
+    # REAGENDAMOS o resto ao longo do que ainda resta do dia.
+    LIMITE_DIAS_DESCARTE = 5
+    corte_descarte = agora - timedelta(days=LIMITE_DIAS_DESCARTE)
+    descartados = 0
+    resgatados = 0
+
+    fila_sobrevivente = []
+    for item in fila:
+        if item.get("processado") or not item.get("horario_disparo"):
+            fila_sobrevivente.append(item)
+            continue
+
+        try:
+            hd_obj = datetime.strptime(item["horario_disparo"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+        except Exception:
+            fila_sobrevivente.append(item)
+            continue
+
+        # Já venceu?
+        if hd_obj <= agora:
+            if hd_obj < corte_descarte:
+                # 🗑️ Passou de 5 dias: perdeu a validade, sai da fila
+                caminho = item.get("caminho_video")
+                if caminho and os.path.exists(caminho):
+                    try: os.remove(caminho)
+                    except Exception: pass
+                descartados += 1
+                continue
+            # ♻️ Venceu, mas ainda vale: zera o horário para ser redistribuído hoje
+            item["horario_disparo"] = ""
+            resgatados += 1
+
+        fila_sobrevivente.append(item)
+
+    if descartados or resgatados:
+        fila_data["fila"] = fila_sobrevivente
+        fila = fila_sobrevivente
+        salvar_fila_clonagem(fila_data)
+        if EXIBIR_LOGS:
+            logger.info(f"🛟 [Espião] Anti-avalanche: {resgatados} clone(s) atrasado(s) reagendado(s) e "
+                        f"{descartados} descartado(s) por passar de {LIMITE_DIAS_DESCARTE} dias.")
+
     # --- 1. MOTOR MATEMÁTICO DE DISTRIBUIÇÃO ---
     itens_para_agendar = []
     
@@ -10663,7 +10708,14 @@ async def processar_fila_espiao(forcar=False):
                 if hd_obj <= agora:
                     itens_para_disparar.append(item)
             except Exception: pass
-                
+
+    # 🚦 RATE LIMIT: no máximo UM disparo por ciclo (o job roda a cada 1 minuto).
+    # Mesmo que 50 vídeos vençam juntos, sai um por minuto — nunca em rajada.
+    if len(itens_para_disparar) > 1:
+        itens_para_disparar.sort(key=lambda i: i.get("horario_disparo", ""))
+        if EXIBIR_LOGS: logger.info(f"🚦 [Espião] {len(itens_para_disparar)} clones vencidos. Publicando 1 por ciclo.")
+        itens_para_disparar = itens_para_disparar[:1]
+
     if not itens_para_disparar:
         hoje_faxina = agora.strftime("%Y-%m-%d")
         fila_limpa = [i for i in fila if not i.get("processado") or i.get("data_postagem") == hoje_faxina]
