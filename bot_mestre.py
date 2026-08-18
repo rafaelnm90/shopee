@@ -2429,27 +2429,43 @@ class InatividadeMiddleware(BaseMiddleware):
         event: types.Message,
         data: Dict[str, Any]
     ) -> Any:
-        # O filtro garante que o cronómetro só é aplicado a si (Administrador)
-        if event.from_user and event.from_user.id == ADMIN_ID:
+                # ✅ Aceita tanto mensagem quanto clique em botão inline.
+        # Sem isso, painéis que só têm botões inline nunca rearmavam a contagem.
+        mensagem_base = getattr(event, "message", None) if hasattr(event, "data") else event
+        chat = getattr(mensagem_base, "chat", None)
+
+        # 🛡️ O cronômetro vale SOMENTE no painel administrativo (chat privado do admin).
+        # Em grupos e canais ele não deve existir: lá o wizard tem o próprio cronômetro,
+        # e limpar o estado atrapalharia quem está no meio de uma submissão.
+        eh_painel_admin = (
+            event.from_user
+            and event.from_user.id == ADMIN_ID
+            and chat is not None
+            and chat.type == "private"
+        )
+
+        if eh_painel_admin:
             job_id = f"job_inatividade_{event.from_user.id}"
-            
+
             # 1. Inicia uma nova contagem limpa de 15 minutos
             from datetime import datetime, timedelta
             novo_limite = datetime.now(fuso_horario) + timedelta(minutes=15)
-            
-            # Captura o thread_id para manter a compatibilidade da chave de memória
-            thread_id = getattr(event, 'message_thread_id', None)
-            if EXIBIR_LOGS: logger.info(f"⏰ Registrando nova contagem de inatividade. Thread ID: {thread_id}")
-            
+
+            thread_id = getattr(mensagem_base, 'message_thread_id', None)
+            origem = "clique" if hasattr(event, "data") else "mensagem"
+            if EXIBIR_LOGS: logger.info(f"⏰ Contagem de inatividade rearmada por {origem} no painel admin.")
+
             # 2. Adiciona ou sobrepõe o cronômetro antigo de forma limpa e unificada
             scheduler.add_job(
                 resetar_sessao_inatividade, 
                 'date', 
                 run_date=novo_limite, 
-                args=[event.chat.id, event.from_user.id, thread_id], 
+                args=[chat.id, event.from_user.id, thread_id], 
                 id=job_id,
                 replace_existing=True
             )
+            
+        return await handler(event, data)
             
         return await handler(event, data)
 
@@ -2521,6 +2537,7 @@ bot.session.middleware(BloqueioTecladoForaDoPrivadoMiddleware())
 dp.message.middleware(BloqueioAdminMiddleware())
 dp.callback_query.middleware(BloqueioAdminMiddleware())
 dp.message.middleware(InatividadeMiddleware())
+dp.callback_query.middleware(InatividadeMiddleware())   # ⏰ cliques também contam como atividade
 
 # ==========================================
 # PAINEL DO GRUPO PÚBLICO & MOTOR REPOSTADOR
@@ -10636,8 +10653,11 @@ async def processar_fila_espiao(forcar=False):
             fila_sobrevivente.append(item)
             continue
 
-        # Já venceu?
-        if hd_obj <= agora:
+        # ⏳ Tolerância: vencer agora é normal e vira publicação no bloco 2.
+        # Só é "atraso real" quem passou de 30 minutos sem ninguém publicar
+        # (sinal de que o robô esteve fora do ar).
+        TOLERANCIA_ATRASO_MIN = 30
+        if hd_obj <= (agora - timedelta(minutes=TOLERANCIA_ATRASO_MIN)):
             if hd_obj < corte_descarte:
                 # 🗑️ Passou de 5 dias: perdeu a validade, sai da fila
                 caminho = item.get("caminho_video")
