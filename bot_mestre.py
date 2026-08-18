@@ -11405,7 +11405,6 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
 
     data = await state.get_data()
     if data.get("sessao_wizard_id") != sessao_id:
-        return
 
     # 🛟 RESGATE: com vídeo + pelo menos 1 link válido (Shopee ou TikTok), o trabalho
     # do membro NÃO vai para o lixo. Abrimos uma pergunta extra de 1 minuto antes.
@@ -11429,7 +11428,7 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
             parse_mode="HTML",
             message_thread_id=thread_id
         )
-                await asyncio.sleep(20)
+        await asyncio.sleep(20)
         await aviso.delete()
     except Exception:
         pass
