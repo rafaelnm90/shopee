@@ -11403,7 +11403,7 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
 
     await asyncio.sleep(restante)
 
-        data = await state.get_data()
+    data = await state.get_data()
     if data.get("sessao_wizard_id") != sessao_id:
         return
 
