@@ -1,0 +1,35 @@
+name: Validar código
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validar:
+    runs-on: ubuntu-latest
+    name: Checagem antes do deploy
+
+    steps:
+      - name: Baixar o código
+        uses: actions/checkout@v4
+
+      - name: Preparar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Rodar o validador de deploy
+        run: |
+          python3 validar_deploy.py \
+            bot_mestre.py \
+            espelhador_videos_autorais.py \
+            motor_filas.py \
+            painel_espelhos.py \
+            painel_notas.py \
+            utils.py \
+            motor_userbot.py \
+            divulgacao_canal.py \
+            api_gemini.py \
+            api_shopee.py
