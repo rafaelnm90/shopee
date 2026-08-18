@@ -1626,6 +1626,9 @@ async def varredor_de_lixeira():
         conexao.commit()
         conexao.close()
         if EXIBIR_LOGS: logger.info("✅ Lixeira persistente (SQLite) esvaziada com sucesso.")
+
+        # ⏳ Aproveita a faxina para podar a memória antiga dos achadinhos
+        limpar_achadinhos_antigos()
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro na varredura da lixeira: {e}")
 
@@ -3918,6 +3921,24 @@ def registrar_achadinho_enviado(item_id, nicho=""):
         conexao.close()
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Erro ao registrar envio: {e}")
+
+# ⏳ Retenção: a memória guarda 5 anos. Produto mais antigo que isso já mudou
+# de preço ou saiu de linha — se reaparecer, vale como oferta nova.
+ANOS_RETENCAO_ACHADINHOS = 5
+
+def limpar_achadinhos_antigos():
+    try:
+        corte = (datetime.now(fuso_horario) - timedelta(days=ANOS_RETENCAO_ACHADINHOS * 365)).strftime("%Y-%m-%d %H:%M:%S")
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("DELETE FROM achadinhos_enviados WHERE data_envio < ?", (corte,))
+        removidos = cursor.rowcount
+        conexao.commit()
+        conexao.close()
+        if removidos > 0 and EXIBIR_LOGS:
+            logger.info(f"🧹 [Achadinhos] {removidos} produto(s) com mais de {ANOS_RETENCAO_ACHADINHOS} anos removidos da memória.")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Erro na limpeza por idade: {e}")
 
 def total_achadinhos_enviados():
     try:
