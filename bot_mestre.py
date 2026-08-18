@@ -11722,10 +11722,9 @@ def montar_texto_painel(data):
         texto += f"👤 <b>Painel de:</b> {mencao}\n"
     texto += "\n"
     texto += "🎉 <b>Você já pode concluir a sua postagem!</b>\n\n" if pronto else "Complete os requisitos abaixo:\n\n"
-    texto += f"{'✅' if tem_video else '❌'} <b>Vídeo do produto</b>\n\n"
-    texto += "Agora envie <b>pelo menos um</b> destes links:\n"
-    texto += f"{'✅' if tem_shopee else '⬜'} Link da <b>Shopee</b>\n"
-    texto += f"{'✅' if tem_tiktok else '⬜'} Link do <b>TikTok</b>\n\n"
+    texto += f"{'✅' if tem_video else '🎬'} Vídeo do produto\n"
+    texto += f"{'✅' if tem_shopee else '🔶'} Link da <b>Shopee</b>\n"
+    texto += f"{'✅' if tem_tiktok else '⬛'} Link do <b>TikTok</b>\n\n"
     if not pronto:
         texto += "<i>Obrigatório: o vídeo + pelo menos um dos dois links.</i>\n\n"
 
