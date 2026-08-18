@@ -11446,15 +11446,15 @@ def texto_confirmacao_expiracao(data, restante=None):
         restante = TEMPO_CONFIRMACAO_EXPIRACAO
     minutos, segundos = divmod(max(0, int(restante)), 60)
 
-        mencao = data.get("mencao_wizard") or "membro"
+    mencao = data.get("mencao_wizard") or "membro"
     tem_shopee = bool(data.get("link_shopee"))
     tem_tiktok = bool(data.get("link_tiktok"))
 
-        # O silêncio sempre publica. Só o convite muda quando falta o link da Shopee.
-    rodape = "⚠️ <i>Se você não responder, eu publico a sua oferta automaticamente, do jeito que ela está.</i>"
+    # O silêncio sempre publica. Só o convite muda quando falta o link da Shopee.
+    rodape = "⚠️ <i>Se você não responder, eu publico a sua oferta assim mesmo.</i>"
     if not tem_shopee:
         rodape += (
-            "\n💡 <i>Quer incluir o link da Shopee? Cole aqui no chat agora: "
+            "\n💡 <i>Quer incluir o link da Shopee? Cole aqui no chat agora — "
             "o painel volta na hora e o seu tempo é renovado.</i>"
         )
 
@@ -11465,13 +11465,11 @@ def texto_confirmacao_expiracao(data, restante=None):
         f"{'✅' if tem_shopee else '❌'} Link da Shopee\n"
         f"{'✅' if tem_tiktok else '🔘'} Link do TikTok (opcional)\n\n"
         "<b>Quer mesmo cancelar esta submissão?</b>\n"
-        "• <b>Não</b> → volto para o seu painel exatamente de onde você parou e o cronômetro reinicia.\n"
+        "• <b>Não</b> → volto para o seu painel exatamente de onde você parou.\n"
         "• <b>Sim</b> → apago tudo e você começa do zero depois.\n\n"
         f"{rodape}\n\n"
         f"⏱️ <b>Tempo para responder:</b> {minutos:02d}:{segundos:02d}"
     )
-
-def teclado_confirmacao_expiracao(dono_id):
     """O 'Sim' reaproveita o cancelamento normal; o 'Não' devolve o painel."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="↩️ Não, quero continuar", callback_data=f"wz_continuar:{dono_id}")],
