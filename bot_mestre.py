@@ -10745,61 +10745,28 @@ async def processar_fila_espiao(forcar=False):
         return
 
     for item_pendente in itens_para_disparar:
-        # TRAVA DE SILÊNCIO (VIRAL)
-        rotinas_virais = ["job_rotina_promo_principal", "job_rotina_link_grupo_viral", "job_rotina_divulgar_gem_viral"]
+                # 🤫 TRAVA DE SILÊNCIO (VIRAL) — versão não destrutiva
+        # ANTES: qualquer rotina a ±15 min empurrava a FILA INTEIRA para frente.
+        # Como há ~29 rotinas/dia (uma a cada 29 min), as zonas de 30 min se encostavam
+        # e formavam uma parede contínua: a fila era empurrada eternamente e nada saía.
+        # AGORA: a janela é curta e o vídeo NÃO é reagendado — só espera o próximo ciclo.
+        JANELA_SILENCIO_MIN = 2
+
         conflito_silencio = False
-        tempo_conflito = None
-        
+        rotinas_virais = ["job_rotina_promo_principal", "job_rotina_link_grupo_viral", "job_rotina_divulgar_gem_viral"]
+
         for job in scheduler.get_jobs():
             if any(rv in job.id for rv in rotinas_virais) and getattr(job, 'next_run_time', None):
                 tempo_rotina = job.next_run_time.astimezone(fuso_horario)
-                # Mantemos a sua regra rigorosa de proteção de 15 minutos
-                if abs((agora - tempo_rotina).total_seconds() / 60) <= 15:
+                if abs((agora - tempo_rotina).total_seconds() / 60) <= JANELA_SILENCIO_MIN:
                     conflito_silencio = True
-                    tempo_conflito = tempo_rotina
                     break
-                    
+
         if conflito_silencio:
-            # ✅ REAGENDAMENTO EM CASCATA (EFEITO DOMINÓ)
-            if tempo_conflito:
-                novo_horario_seguro = tempo_conflito + timedelta(minutes=16)
-                if novo_horario_seguro <= agora:
-                    novo_horario_seguro = agora + timedelta(minutes=2)
-            else:
-                novo_horario_seguro = agora + timedelta(minutes=16)
-                
-            # Em vez de colocar todos no mesmo minuto, recriamos a fila mantendo espaçamento orgânico
-            pendentes = [i for i in fila if not i.get("processado")]
-            
-            # Ordena pela previsão atual para manter o FIFO
-            def sort_by_date(x):
-                try: return datetime.strptime(x.get("horario_disparo", "2099-01-01 00:00:00"), "%Y-%m-%d %H:%M:%S")
-                except: return datetime.max
-            pendentes.sort(key=sort_by_date)
-            
-            tempo_acumulado = novo_horario_seguro
-            houve_alteracao = False
-            
-            for p in pendentes:
-                try:
-                    h_atual = datetime.strptime(p.get("horario_disparo", "2000-01-01 00:00:00"), "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
-                except:
-                    h_atual = datetime.now(fuso_horario) - timedelta(days=1000)
-                    
-                # Se o vídeo está marcado para um horário dentro do bloqueio (ou antes), empurramos ele
-                if h_atual < tempo_acumulado:
-                    p["horario_disparo"] = tempo_acumulado.strftime("%Y-%m-%d %H:%M:%S")
-                    tempo_acumulado += timedelta(seconds=20) # Espaçamento de segurança
-                    houve_alteracao = True
-                else:
-                    # Se o vídeo já está seguro no futuro, a catraca pula para logo depois dele
-                    tempo_acumulado = h_atual + timedelta(seconds=20)
-                    
-            if houve_alteracao:
-                salvar_fila_clonagem(fila_data)
-                if EXIBIR_LOGS: logger.info(f"🤫 [Espião] Trava ativada! Fila indiana empurrada com sucesso a partir de {novo_horario_seguro.strftime('%H:%M:%S')}.")
-                
-            break # Volta no próximo minuto
+            # Só adia ESTE ciclo. O horário do vídeo continua intacto e ele sai
+            # no próximo minuto, assim que a rotina passar.
+            if EXIBIR_LOGS: logger.info(f"🤫 [Espião] Rotina do Viral a menos de {JANELA_SILENCIO_MIN} min. Aguardando o próximo ciclo.")
+            return
             
         caminho_video = item_pendente["caminho_video"]
         link_original = item_pendente["link_original"]
