@@ -11659,7 +11659,8 @@ def montar_texto_painel(data):
     """Monta o texto do painel a partir do que já foi enviado."""
     tem_video = bool(data.get("video_file_id"))
     tem_shopee = bool(data.get("link_shopee"))
-        tem_tiktok = bool(data.get("link_tiktok"))
+    tem_tiktok = bool(data.get("link_tiktok"))
+
     # ✅ Publicável com o vídeo + pelo menos 1 link (Shopee OU TikTok)
     pronto = tem_video and (tem_shopee or tem_tiktok)
 
