@@ -10710,12 +10710,29 @@ async def processar_fila_espiao(forcar=False):
             "inicio": inicio_janela,
             "fim": fim_janela,
             "modo": modo,
-            "intervalo_dias": intervalo_dias
+            "intervalo_dias": intervalo_dias,
+            # ⏱️ Espaçamento orgânico: 10 min ± 5 (de 5 a 15 min entre vídeos)
+            "espacamento_base_min": 10,
+            "espacamento_variacao_min": 5,
+            # 🗓️ O que não couber transborda para o dia seguinte; passando disso, descarta
+            "limite_dias_descarte": 5
         }
         
         # O Motor Central aplica a regra de D+X, catraca anti-ban e espaçamento orgânico
         calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar)
         
+                # 🗑️ Remove da fila o que o motor marcou como velho demais
+        marcados = [i for i in fila_data.get("fila", []) if i.get("descartar_por_idade")]
+        if marcados:
+            for m in marcados:
+                caminho = m.get("caminho_video")
+                if caminho and os.path.exists(caminho):
+                    try: os.remove(caminho)
+                    except Exception: pass
+            fila_data["fila"] = [i for i in fila_data.get("fila", []) if not i.get("descartar_por_idade")]
+            fila = fila_data["fila"]
+            if EXIBIR_LOGS: logger.info(f"🗑️ [Espião] {len(marcados)} clone(s) descartado(s): passariam de 5 dias desde a captura.")
+
         salvar_fila_clonagem(fila_data)
         if EXIBIR_LOGS: logger.info(f"📅 [Espião] Motor Central acionado! {len(itens_para_agendar)} clones organizados com sucesso.")
 
