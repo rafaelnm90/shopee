@@ -10867,16 +10867,42 @@ async def processar_fila_espiao(forcar=False):
             )
             texto_ia = await analisar_video_gemini(caminho_video, prompt_espiao, EXIBIR_LOGS)
             if not texto_ia: raise Exception("IA não retornou dados.")
-        except Exception as e:
+                except Exception as e:
             registrar_erro_json(f"processar_fila_espiao IA: {e}", origem="espiao.py")
-            texto_ia = "Vídeo do Produto 🛍️\n#Oferta"
-            
-        linhas_ia = texto_ia.split('\n')
-        nome_produto = linhas_ia[0].strip()
-        hashtags = '\n'.join(linhas_ia[1:]).strip() if len(linhas_ia) > 1 else ""
-        
-        legenda_postagem = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_final}"
-        if hashtags: legenda_postagem += f"\n\n<i>{hashtags}</i>"
+            texto_ia = None
+
+        # 🧠 RETENTATIVA DA IA: 429/503 costumam ser passageiros. Em vez de publicar
+        # um texto genérico na primeira falha, o clone volta para a fila e tenta de novo.
+        MAX_TENTATIVAS_IA = 3
+        INTERVALO_RETENTATIVA_MIN = 30
+
+        if not texto_ia:
+            tentativas = int(item_pendente.get("tentativas_ia", 0)) + 1
+            if tentativas < MAX_TENTATIVAS_IA:
+                novo_horario = (agora + timedelta(minutes=INTERVALO_RETENTATIVA_MIN)).strftime("%Y-%m-%d %H:%M:%S")
+                for f_item in fila_data.get("fila", []):
+                    if f_item.get("id_unico") == item_pendente.get("id_unico"):
+                        f_item["tentativas_ia"] = tentativas
+                        f_item["horario_disparo"] = novo_horario
+                        break
+                salvar_fila_clonagem(fila_data)
+                if EXIBIR_LOGS:
+                    logger.warning(f"🧠 [Espião] IA indisponível (tentativa {tentativas}/{MAX_TENTATIVAS_IA}). "
+                                   f"Clone adiado para {novo_horario[11:16]}.")
+                continue
+            if EXIBIR_LOGS:
+                logger.warning(f"🧠 [Espião] IA falhou {MAX_TENTATIVAS_IA}x. Publicando somente com o link de afiliado.")
+
+        if texto_ia:
+            linhas_ia = texto_ia.split('\n')
+            nome_produto = linhas_ia[0].strip()
+            hashtags = '\n'.join(linhas_ia[1:]).strip() if len(linhas_ia) > 1 else ""
+
+            legenda_postagem = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_final}"
+            if hashtags: legenda_postagem += f"\n\n<i>{hashtags}</i>"
+        else:
+            # 🔗 Reserva: sem texto nenhum, apenas o link já convertido para afiliado
+            legenda_postagem = link_final
         
         try:
             if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
