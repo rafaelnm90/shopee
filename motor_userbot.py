@@ -486,7 +486,7 @@ async def processar_fila_espelhador_loop():
                 rota_config = rotas.get(nome_rota)
                 if not rota_config: continue
                 
-                                config_fila = {
+                config_fila = {
                     "inicio": int(rota_config.get("inicio", 10)),
                     "fim": int(rota_config.get("fim", 22)),
                     "modo": rota_config.get("modo", "ordem"),
