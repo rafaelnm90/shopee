@@ -79,16 +79,36 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
                 # ⏱️ ESPAÇAMENTO MÍNIMO COM VARIAÇÃO ORGÂNICA (opcional, por fila)
         # Quando a fila define 'espacamento_base_min', o intervalo deixa de ser fixo:
         # cada publicação sorteia um valor entre (base - variacao) e (base + variacao).
-        base_min = config_fila.get("espacamento_base_min")
+                base_min = config_fila.get("espacamento_base_min")
         var_min = config_fila.get("espacamento_variacao_min", 0)
         usar_espaco_organico = bool(base_min) and not forcar
 
+        # 🔗 ESTEIRA CONTÍNUA: se já existem itens agendados na fila, o lote novo
+        # começa DEPOIS do último deles. Sem isso, dois lotes calculados em momentos
+        # diferentes se sobrepõem e o espaçamento real cai pela metade.
+        if usar_espaco_organico:
+            ocupados = config_fila.get("horarios_ocupados") or []
+            ultimo_ocupado = None
+            for oc in ocupados:
+                try:
+                    oc_obj = datetime.strptime(oc, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario) if isinstance(oc, str) else oc
+                    if oc_obj > minuto_atual_busca and (ultimo_ocupado is None or oc_obj > ultimo_ocupado):
+                        ultimo_ocupado = oc_obj
+                except Exception:
+                    pass
+            if ultimo_ocupado:
+                passo_ini = random.randint(max(60, (base_min - var_min) * 60), (base_min + var_min) * 60)
+                minuto_atual_busca = ultimo_ocupado + timedelta(seconds=passo_ini)
+                if EXIBIR_LOGS:
+                    logger.info(f"🔗 [Motor Filas] {len(ocupados)} item(ns) já agendados. Novo lote começa em {minuto_atual_busca.strftime('%d/%m %H:%M')}.")
+
         # 🗓️ TRANSBORDO: o que não couber no dia vai para o dia seguinte, e assim por diante.
-        limite_dias = config_fila.get("limite_dias_descarte", 5)
+                limite_dias = config_fila.get("limite_dias_descarte", 5)
+        descartados_idade = []
+
         fim_do_dia = minuto_atual_busca.replace(hour=0, minute=0, second=0) + timedelta(days=1)
         if fim_janela < 24:
             fim_do_dia = minuto_atual_busca.replace(hour=fim_janela, minute=0, second=0)
-        descartados_idade = []
 
         for item in itens_para_agendar:
             if usar_espaco_organico:
