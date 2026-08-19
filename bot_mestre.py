@@ -2369,10 +2369,57 @@ def agendar_tarefas_diarias(escopo="todos"):
             for chave in chaves_remover: chaves_virais.remove(chave)
                 
         ultimo_tipo_viral = None
+                # 🎬 OS VÍDEOS SÃO A ESPINHA DORSAL DO CANAL VIRAL.
+        # As rotinas deixam de sortear horário no escuro e passam a se ENCAIXAR
+        # nas maiores lacunas entre os clones já agendados pelo Espião.
+        horarios_ocupados_viral = []
+        try:
+            for it in ler_fila_clonagem().get("fila", []):
+                if it.get("processado") or not it.get("horario_disparo"):
+                    continue
+                try:
+                    h_v = datetime.strptime(it["horario_disparo"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                    if h_v.date() == agora.date() and h_v > agora:
+                        horarios_ocupados_viral.append(h_v)
+                except Exception:
+                    pass
+            horarios_ocupados_viral.sort()
+            if EXIBIR_LOGS: logger.info(f"🎬 [Rotinas Viral] {len(horarios_ocupados_viral)} vídeo(s) do Espião servirão de âncora para hoje.")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.warning(f"⚠️ [Rotinas Viral] Não consegui ler a fila do Espião: {e}")
+
+        def encaixar_na_maior_lacuna(ini_h, fim_h, folga_min=4):
+            """Devolve o meio da maior janela livre entre os vídeos, ou None se não couber."""
+            limite_ini = agora.replace(hour=int(ini_h), minute=0, second=0, microsecond=0)
+            if int(fim_h) >= 24:
+                limite_fim = agora.replace(hour=23, minute=50, second=0, microsecond=0)
+            else:
+                limite_fim = agora.replace(hour=int(fim_h), minute=0, second=0, microsecond=0)
+
+            base = max(agora + timedelta(minutes=5), limite_ini)
+            if base >= limite_fim:
+                return None
+
+            pontos = [base] + [h for h in horarios_ocupados_viral if base < h < limite_fim] + [limite_fim]
+            melhor, maior = None, timedelta(0)
+            for i in range(len(pontos) - 1):
+                gap = pontos[i + 1] - pontos[i]
+                if gap > maior:
+                    maior, melhor = gap, pontos[i] + gap / 2
+            if melhor and maior >= timedelta(minutes=folga_min * 2):
+                return melhor.replace(second=0, microsecond=0)
+            return None
+
         for tipo, indice, config in tarefas_virais:
-            minuto_absoluto = random.randint(config.get("inicio", 8) * 60, config.get("fim", 22) * 60 + 59)
-            hora_sorteada, min_sorteado = divmod(minuto_absoluto, 60)
-            horario_candidato = agora.replace(hour=hora_sorteada, minute=min_sorteado, second=0, microsecond=0)
+            encaixe = encaixar_na_maior_lacuna(config.get("inicio", 8), config.get("fim", 22))
+            if encaixe:
+                horario_candidato = encaixe
+                horarios_ocupados_viral.append(encaixe)   # ocupa a lacuna para a próxima rotina
+                horarios_ocupados_viral.sort()
+            else:
+                minuto_absoluto = random.randint(config.get("inicio", 8) * 60, config.get("fim", 22) * 60 + 59)
+                hora_sorteada, min_sorteado = divmod(minuto_absoluto, 60)
+                horario_candidato = agora.replace(hour=hora_sorteada, minute=min_sorteado, second=0, microsecond=0)
             
             if tipo == ultimo_tipo_viral: horario_candidato += timedelta(minutes=random.randint(60, 120))
             if horario_candidato <= fronteira_inicial: horario_candidato = fronteira_inicial + timedelta(minutes=random.randint(5, 60))
