@@ -76,13 +76,58 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
             # Calcula o espaço entre cada postagem, garantindo no mínimo 15 segundos
             espacamento_segundos = max(15, int((minutos_disponiveis * 60) / qtd))
         
+                # ⏱️ ESPAÇAMENTO MÍNIMO COM VARIAÇÃO ORGÂNICA (opcional, por fila)
+        # Quando a fila define 'espacamento_base_min', o intervalo deixa de ser fixo:
+        # cada publicação sorteia um valor entre (base - variacao) e (base + variacao).
+        base_min = config_fila.get("espacamento_base_min")
+        var_min = config_fila.get("espacamento_variacao_min", 0)
+        usar_espaco_organico = bool(base_min) and not forcar
+
+        # 🗓️ TRANSBORDO: o que não couber no dia vai para o dia seguinte, e assim por diante.
+        limite_dias = config_fila.get("limite_dias_descarte", 5)
+        fim_do_dia = minuto_atual_busca.replace(hour=0, minute=0, second=0) + timedelta(days=1)
+        if fim_janela < 24:
+            fim_do_dia = minuto_atual_busca.replace(hour=fim_janela, minute=0, second=0)
+        descartados_idade = []
+
         for item in itens_para_agendar:
-            # Adiciona uma leve variação nos minutos para parecer humano (apenas se houver espaço e não for descarga forçada)
+            if usar_espaco_organico:
+                # 🗓️ Não cabe mais hoje? Abre o próximo dia na hora de início da janela.
+                if minuto_atual_busca >= fim_do_dia:
+                    proximo = minuto_atual_busca + timedelta(days=1) if fim_janela < 24 else minuto_atual_busca
+                    minuto_atual_busca = proximo.replace(hour=inicio_janela, minute=random.randint(0, 5), second=0)
+                    if fim_janela < 24:
+                        fim_do_dia = minuto_atual_busca.replace(hour=fim_janela, minute=0, second=0)
+                    else:
+                        fim_do_dia = minuto_atual_busca.replace(hour=0, minute=0, second=0) + timedelta(days=1)
+
+                # 🗑️ Empurrado demais: se passar do limite desde a captura, sai da fila.
+                cap = item.get("data_captura", "")
+                if cap:
+                    try:
+                        cap_obj = datetime.strptime(cap, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                        if (minuto_atual_busca - cap_obj).days > limite_dias:
+                            item["horario_disparo"] = ""
+                            item["descartar_por_idade"] = True
+                            descartados_idade.append(item)
+                            continue
+                    except Exception:
+                        pass
+
+                item["horario_disparo"] = minuto_atual_busca.strftime("%Y-%m-%d %H:%M:%S")
+                passo = random.randint(max(60, (base_min - var_min) * 60), (base_min + var_min) * 60)
+                minuto_atual_busca += timedelta(seconds=passo)
+                continue
+
+            # Comportamento original (demais filas)
             variacao = random.randint(0, espacamento_segundos // 4) if espacamento_segundos > 60 and not forcar else 0
             horario_agendado = minuto_atual_busca + timedelta(seconds=variacao)
             
             item["horario_disparo"] = horario_agendado.strftime("%Y-%m-%d %H:%M:%S")
             minuto_atual_busca += timedelta(seconds=espacamento_segundos)
+
+        if descartados_idade and EXIBIR_LOGS:
+            logger.info(f"🗑️ [Motor Filas] {len(descartados_idade)} item(ns) marcados para descarte: passariam de {limite_dias} dias desde a captura.")
 
     if EXIBIR_LOGS:
         logger.info(f"✅ [Motor Filas] Distribuição concluída. (Modo: {modo}, Atraso: D+{intervalo_dias}, Forçado: {forcar})")
