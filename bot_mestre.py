@@ -10865,9 +10865,9 @@ async def processar_fila_espiao(forcar=False):
                 "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
                 "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
             )
-            texto_ia = await analisar_video_gemini(caminho_video, prompt_espiao, EXIBIR_LOGS)
+                        texto_ia = await analisar_video_gemini(caminho_video, prompt_espiao, EXIBIR_LOGS)
             if not texto_ia: raise Exception("IA não retornou dados.")
-                except Exception as e:
+        except Exception as e:
             registrar_erro_json(f"processar_fila_espiao IA: {e}", origem="espiao.py")
             texto_ia = None
 
