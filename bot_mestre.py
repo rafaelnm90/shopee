@@ -11578,12 +11578,12 @@ INTERVALO_CRONOMETRO_CONFIRMACAO = 10   # de quanto em quanto a contagem é atua
 def teclado_confirmacao_expiracao(dono_id):
     """Botões da pergunta de resgate. Só o dono da sessão pode responder."""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Não, quero continuar ↩️", callback_data=f"wz_continuar:{dono_id}")],
-        [InlineKeyboardButton(text="Sim, cancelar tudo ❌", callback_data=f"cancelar_wizard:{dono_id}")]
+        [InlineKeyboardButton(text="Publicar agora 🚀", callback_data=f"wz_concluir:{dono_id}")],
+        [InlineKeyboardButton(text="Cancelar ❌", callback_data=f"cancelar_wizard:{dono_id}")]
     ])
 
 def texto_confirmacao_expiracao(data, restante=None):
-    """Texto da pergunta de resgate, já com a contagem regressiva."""
+    """Aviso de prazo esgotado. Não pergunta se quer cancelar: anuncia a publicação."""
     if restante is None:
         restante = TEMPO_CONFIRMACAO_EXPIRACAO
     minutos, segundos = divmod(max(0, int(restante)), 60)
@@ -11592,31 +11592,15 @@ def texto_confirmacao_expiracao(data, restante=None):
     tem_shopee = bool(data.get("link_shopee"))
     tem_tiktok = bool(data.get("link_tiktok"))
 
-    # O silêncio sempre publica. Só o convite muda quando falta o link da Shopee.
-    rodape = "⚠️ <i>Se você não responder, eu publico a sua oferta assim mesmo.</i>"
-    if not tem_shopee:
-        rodape += (
-            "\n💡 <i>Quer incluir o link da Shopee? Cole aqui no chat agora — "
-            "o painel volta na hora e o seu tempo é renovado.</i>"
-        )
-
     return (
-        f"⌛ <b>O seu tempo acabou, {mencao}!</b>\n\n"
-        "Mas calma: eu guardei tudo o que você já enviou 👇\n\n"
+        f"⏱️ <b>{mencao}, o seu tempo de envio terminou!</b>\n\n"
+        "Mas relaxa — está tudo salvo:\n\n"
         "✅ Vídeo\n"
-        f"{'✅' if tem_shopee else '❌'} Link da Shopee\n"
-        f"{'✅' if tem_tiktok else '🔘'} Link do TikTok (opcional)\n\n"
-        "<b>Quer mesmo cancelar esta submissão?</b>\n"
-        "• <b>Não</b> → volto para o seu painel exatamente de onde você parou.\n"
-        "• <b>Sim</b> → apago tudo e você começa do zero depois.\n\n"
-        f"{rodape}\n\n"
-        f"⏱️ <b>Tempo para responder:</b> {minutos:02d}:{segundos:02d}"
+        f"{'✅' if tem_shopee else '🔶'} Link da <b>Shopee</b>\n"
+        f"{'✅' if tem_tiktok else '⬛'} Link do <b>TikTok</b>\n\n"
+        f"🚀 <b>Vou publicar a sua oferta em {minutos:02d}:{segundos:02d}.</b>\n\n"
+        "💡 <i>Quer incluir mais um link antes? Cole aqui no chat que eu espero.</i>"
     )
-    """O 'Sim' reaproveita o cancelamento normal; o 'Não' devolve o painel."""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="↩️ Não, quero continuar", callback_data=f"wz_continuar:{dono_id}")],
-        [InlineKeyboardButton(text="🗑️ Sim, cancelar tudo", callback_data=f"cancelar_wizard:{dono_id}")]
-    ])
 
 async def abrir_confirmacao_expiracao(chat_id, message_id, thread_id, state: FSMContext):
     """Transforma o painel expirado na pergunta de resgate e arma o prazo de 1 minuto."""
