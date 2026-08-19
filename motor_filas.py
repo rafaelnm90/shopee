@@ -76,10 +76,10 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
             # Calcula o espaço entre cada postagem, garantindo no mínimo 15 segundos
             espacamento_segundos = max(15, int((minutos_disponiveis * 60) / qtd))
         
-                # ⏱️ ESPAÇAMENTO MÍNIMO COM VARIAÇÃO ORGÂNICA (opcional, por fila)
+        # ⏱️ ESPAÇAMENTO MÍNIMO COM VARIAÇÃO ORGÂNICA (opcional, por fila)
         # Quando a fila define 'espacamento_base_min', o intervalo deixa de ser fixo:
         # cada publicação sorteia um valor entre (base - variacao) e (base + variacao).
-                base_min = config_fila.get("espacamento_base_min")
+        base_min = config_fila.get("espacamento_base_min")
         var_min = config_fila.get("espacamento_variacao_min", 0)
         usar_espaco_organico = bool(base_min) and not forcar
 
