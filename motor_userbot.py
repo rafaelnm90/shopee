@@ -486,11 +486,17 @@ async def processar_fila_espelhador_loop():
                 rota_config = rotas.get(nome_rota)
                 if not rota_config: continue
                 
-                config_fila = {
+                                config_fila = {
                     "inicio": int(rota_config.get("inicio", 10)),
                     "fim": int(rota_config.get("fim", 22)),
                     "modo": rota_config.get("modo", "ordem"),
-                    "intervalo_dias": int(rota_config.get("intervalo_dias", 1))
+                    "intervalo_dias": int(rota_config.get("intervalo_dias", 1)),
+                    # ⏱️ Espaçamento orgânico: 20 min ± 8 (de 12 a 28 min entre vídeos).
+                    # Impede a compressão para 15 segundos quando a rota acumula volume.
+                    "espacamento_base_min": int(rota_config.get("espacamento_min", 20)),
+                    "espacamento_variacao_min": int(rota_config.get("espacamento_var", 8)),
+                    # 🗓️ O que não couber transborda para o dia seguinte; passando disso, descarta
+                    "limite_dias_descarte": 5
                 }
                 
                 forcar_rota = rota_config.get("esvaziar_agora", False)
