@@ -11575,6 +11575,13 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
 TEMPO_CONFIRMACAO_EXPIRACAO = 60        # segundos para o membro decidir
 INTERVALO_CRONOMETRO_CONFIRMACAO = 10   # de quanto em quanto a contagem é atualizada
 
+def teclado_confirmacao_expiracao(dono_id):
+    """Botões da pergunta de resgate. Só o dono da sessão pode responder."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Não, quero continuar ↩️", callback_data=f"wz_continuar:{dono_id}")],
+        [InlineKeyboardButton(text="Sim, cancelar tudo ❌", callback_data=f"cancelar_wizard:{dono_id}")]
+    ])
+
 def texto_confirmacao_expiracao(data, restante=None):
     """Texto da pergunta de resgate, já com a contagem regressiva."""
     if restante is None:
