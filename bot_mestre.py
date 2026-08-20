@@ -2916,6 +2916,150 @@ async def painel_parceiros(message: types.Message, state: FSMContext):
 
     await message.answer(texto, reply_markup=ReplyKeyboardMarkup(keyboard=linhas, resize_keyboard=True, is_persistent=True), parse_mode="HTML")
 
+# ==========================================
+# 🚀 MOTOR DE PUBLICAÇÃO DOS PARCEIROS
+# Roda a cada 2 min, em paralelo ao seu. Cada parceiro tem credenciais,
+# canal, atraso e cota próprios. Um disparo por ciclo, nunca em lote.
+# ==========================================
+def ler_fila_parceiro_pendente(parceiro_id):
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao.row_factory = sqlite3.Row
+        cursor = conexao.cursor()
+        cursor.execute("SELECT * FROM fila_parceiros WHERE parceiro_id = ? AND processado = 0 ORDER BY data_alvo ASC",
+                       (int(parceiro_id),))
+        dados = [dict(l) for l in cursor.fetchall()]
+        conexao.close()
+        return dados
+    except Exception:
+        return []
+
+def atualizar_item_fila_parceiro(id_unico, campo, valor):
+    if campo not in ("horario_disparo", "processado", "data_postagem"):
+        return
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute(f"UPDATE fila_parceiros SET {campo} = ? WHERE id_unico = ?", (valor, id_unico))
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao atualizar a fila: {e}")
+
+def remover_item_fila_parceiro(id_unico, caminho=None):
+    """Apaga o registro e o arquivo: espaço em disco é recurso escasso aqui."""
+    if caminho and os.path.exists(caminho):
+        try: os.remove(caminho)
+        except Exception: pass
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("DELETE FROM fila_parceiros WHERE id_unico = ?", (id_unico,))
+        conexao.commit()
+        conexao.close()
+    except Exception:
+        pass
+
+async def motor_parceiros_step():
+    """Um disparo por ciclo, percorrendo os parceiros ativos."""
+    try:
+        agora = datetime.now(fuso_horario)
+        hoje_str = agora.strftime("%Y-%m-%d")
+
+        for p in ler_parceiros(apenas_ativos=True):
+            pendentes = ler_fila_parceiro_pendente(p.get("id"))
+            if not pendentes:
+                continue
+
+            # --- 1. Faxina e agendamento do dia ---
+            desagendados = []
+            for item in pendentes:
+                if item.get("horario_disparo"):
+                    continue
+                alvo = item.get("data_alvo") or ""
+                if alvo and alvo < (agora - timedelta(days=5)).strftime("%Y-%m-%d"):
+                    remover_item_fila_parceiro(item["id_unico"], item.get("caminho_video"))
+                    if EXIBIR_LOGS: logger.info(f"🗑️ [Parceiro {p.get('nome')}] Vídeo vencido há mais de 5 dias, descartado.")
+                    continue
+                if alvo and alvo <= hoje_str:
+                    desagendados.append(item)
+
+            if desagendados:
+                ocupados = [i.get("horario_disparo") for i in pendentes if i.get("horario_disparo")]
+                calcular_horarios_distribuicao(desagendados, {
+                    "inicio": 0, "fim": 24, "modo": "aleatorio", "intervalo_dias": 1,
+                    "espacamento_base_min": 10, "espacamento_variacao_min": 5,
+                    "limite_dias_descarte": 5, "horarios_ocupados": ocupados
+                }, forcar=False)
+                for item in desagendados:
+                    atualizar_item_fila_parceiro(item["id_unico"], "horario_disparo", item.get("horario_disparo", ""))
+
+            # --- 2. Publicação (o primeiro vencido, um por ciclo) ---
+            agora_txt = agora.strftime("%Y-%m-%d %H:%M:%S")
+            vencidos = [i for i in ler_fila_parceiro_pendente(p.get("id"))
+                        if i.get("horario_disparo") and i["horario_disparo"] <= agora_txt]
+            if not vencidos:
+                continue
+
+            item = sorted(vencidos, key=lambda i: i["horario_disparo"])[0]
+            caminho = item.get("caminho_video")
+
+            if not caminho or not os.path.exists(caminho):
+                remover_item_fila_parceiro(item["id_unico"])
+                if EXIBIR_LOGS: logger.warning(f"⚠️ [Parceiro {p.get('nome')}] Arquivo sumiu do disco. Item removido.")
+                continue
+
+            # 🔑 Link convertido com as credenciais DO PARCEIRO: a comissão é dele
+            link_final = await converter_link_shopee(
+                item.get("link_original"), "parceiro", EXIBIR_LOGS,
+                app_id=p.get("app_id"), app_secret=p.get("app_secret")
+            )
+
+            prompt = (
+                "Assista ao vídeo e identifique qual é o produto demonstrado. "
+                "Responda em DUAS linhas.\n"
+                "Linha 1: APENAS o nome do produto com um emoji no final.\n"
+                "Linha 2: hashtags da lista, separadas por espaço. "
+                "SÓ estas: #RoupasFemininas #SapatosFemininos #CelularesEDispositivos #AcessoriosParaVeiculos "
+                "#Relogios #AlimentosEBebidas #CasaEDecoracao #SapatosMasculinos #EsportesELazer #BolsasMasculinas "
+                "#BolsasFemininas #RoupasPlusSize #ModaInfantil #Eletrodomesticos #Motocicletas #AnimaisDomesticos "
+                "#CamerasEDrones #Beleza #AcessoriosDeModa #BrinquedosEHobbies #Papelaria #LivrosERevistas "
+                "#RoupasMasculinas #Automoveis #MaeEBebe #ComputadoresEAcessorios #Saude #ViagensEBagagens "
+                "#JogosEConsoles #Audio."
+            )
+            texto_ia = await analisar_video_gemini(caminho, prompt, EXIBIR_LOGS)
+
+            if texto_ia:
+                linhas_ia = texto_ia.split("\n")
+                nome_produto = linhas_ia[0].strip()
+                hashtags = "\n".join(linhas_ia[1:]).strip() if len(linhas_ia) > 1 else ""
+                legenda = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_final}"
+                if hashtags:
+                    legenda += f"\n\n<i>{hashtags}</i>"
+            else:
+                legenda = link_final   # reserva: só o link de afiliado do parceiro
+
+            destino_raw = str(p.get("canal_destino") or "")
+            chat_destino = destino_raw.split(":")[0].strip()
+            thread = destino_raw.split(":")[1].strip() if ":" in destino_raw else None
+
+            try:
+                await bot.send_video(
+                    chat_id=chat_destino, video=FSInputFile(caminho), caption=legenda,
+                    parse_mode="HTML", message_thread_id=int(thread) if thread else None
+                )
+                if EXIBIR_LOGS: logger.info(f"✅ [Parceiro {p.get('nome')}] Vídeo publicado em {chat_destino}.")
+                remover_item_fila_parceiro(item["id_unico"], caminho)
+            except Exception as e:
+                if EXIBIR_LOGS: logger.error(f"❌ [Parceiro {p.get('nome')}] Falha ao publicar: {e}")
+                atualizar_item_fila_parceiro(
+                    item["id_unico"], "horario_disparo",
+                    (agora + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
+                )
+
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Falha no motor de publicação: {e}")
+
 # --- GESTÃO: selecionar, editar, pausar e excluir ---
 def teclado_gerenciar_parceiro(p):
     acao = "Pausar Parceiro ⏸️" if p.get("ativo") else "Ativar Parceiro ▶️"
@@ -12886,6 +13030,9 @@ async def main():
     
     # ✅ Agendador da lixeira persistente (roda todos os dias pontualmente às 03:00)
     scheduler.add_job(varredor_de_lixeira, 'cron', hour=3, minute=0, timezone=FUSO_STR)
+
+    # 👥 Motor de publicação dos parceiros
+    scheduler.add_job(motor_parceiros_step, 'interval', minutes=2, id='motor_parceiros_loop', replace_existing=True)
 
     # 📊 Retrato diário das métricas (prova social das rotinas)
     scheduler.add_job(coletar_metricas_diarias, 'cron', hour=23, minute=50, timezone=FUSO_STR, id='coleta_metricas_diarias', replace_existing=True)
