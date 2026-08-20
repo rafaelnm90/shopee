@@ -103,7 +103,7 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
                     logger.info(f"🔗 [Motor Filas] {len(ocupados)} item(ns) já agendados. Novo lote começa em {minuto_atual_busca.strftime('%d/%m %H:%M')}.")
 
         # 🗓️ TRANSBORDO: o que não couber no dia vai para o dia seguinte, e assim por diante.
-                limite_dias = config_fila.get("limite_dias_descarte", 5)
+        limite_dias = config_fila.get("limite_dias_descarte", 5)
         descartados_idade = []
 
         fim_do_dia = minuto_atual_busca.replace(hour=0, minute=0, second=0) + timedelta(days=1)
