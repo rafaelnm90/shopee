@@ -3,6 +3,7 @@ import os
 import json
 from datetime import datetime
 import logging
+from zoneinfo import ZoneInfo
 import traceback
 import sqlite3
 
@@ -28,7 +29,9 @@ def registrar_erro_json(mensagem_erro, origem="Geral", contexto_extra=None):
         if rastro == "NoneType: None\n":
             rastro = "Sem rastro de código associado (Possível erro lógico ou manual)."
 
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # 🕐 Fuso explícito: o log de erro é lido por humano, então a hora precisa
+        # estar certa mesmo se esta função for chamada fora dos serviços principais.
+        timestamp = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d %H:%M:%S")
         contexto_str = json.dumps(contexto_extra) if contexto_extra else "{}"
 
         conexao = obter_conexao_utils()
