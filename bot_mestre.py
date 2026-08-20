@@ -146,6 +146,33 @@ def inicializar_banco_sqlite():
     except sqlite3.OperationalError:
         pass
 
+        # 9. PARCEIROS: afiliados terceiros que repostam com as próprias credenciais.
+    # Cada um tem canais, atraso e cota próprios — nada é compartilhado com o dono.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS parceiros (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT,
+            app_id TEXT,
+            app_secret TEXT,
+            canal_origem TEXT,
+            canal_destino TEXT,
+            dias_atraso INTEGER DEFAULT 30,
+            limite_diario INTEGER DEFAULT 6,
+            ativo INTEGER DEFAULT 1,
+            data_cadastro TEXT
+        )
+    ''')
+
+    # 10. RESERVA GLOBAL: garante que um vídeo nunca saia em dois canais.
+    # O dono reserva primeiro (prioridade); os parceiros pulam o que já está aqui.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS videos_reservados (
+            video_id TEXT PRIMARY KEY,
+            parceiro_id INTEGER,
+            data_reserva TEXT
+        )
+    ''')
+
     # 8. Achadinhos já enviados — memória PERMANENTE (antes era lista de 500, que reciclava)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS achadinhos_enviados (
@@ -326,6 +353,16 @@ class SubmissaoAdminFluxo(StatesGroup):
     aguardando_repost_origem = State()
     aguardando_repost_destino = State() # ✅ NOVO ESTADO AQUI
     aguardando_confirmacao_destino = State()   # ✅ Confirma troca de origem/destino
+
+    # 👥 Cadastro de parceiros (7 passos + confirmação)
+    parceiro_nome = State()
+    parceiro_app_id = State()
+    parceiro_app_secret = State()
+    parceiro_origem = State()
+    parceiro_destino = State()
+    parceiro_dias = State()
+    parceiro_limite = State()
+    parceiro_confirmar = State()
     
     # ✅ NOVOS ESTADOS: Edição Modular do Grupo e Tópicos
     aguardando_selecao_edicao_grupo = State()
@@ -2736,11 +2773,254 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
             [KeyboardButton(text="Configurações do Robô Moderador ⚙️")],
             [KeyboardButton(text="Configurações do Robô Repostador ♻️")],
             [KeyboardButton(text="Configurações do Robô de Rotina do Grupo Público ⏰")],
+            [KeyboardButton(text="Parceiros Afiliados 👥")],
             [KeyboardButton(text="Voltar aos Canais 🔙")]
         ], resize_keyboard=True, is_persistent=True
     )
     await message.answer(texto, reply_markup=teclado_pub, parse_mode="HTML")
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
+
+# ==========================================
+# 👥 PARCEIROS AFILIADOS (multiusuário do Grupo Público)
+# Cada parceiro reposta com as PRÓPRIAS credenciais, nos PRÓPRIOS canais.
+# O repostador do dono continua intacto e tem prioridade no sorteio.
+# ==========================================
+def ler_parceiros(apenas_ativos=False):
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao.row_factory = sqlite3.Row
+        cursor = conexao.cursor()
+        sql = "SELECT * FROM parceiros"
+        if apenas_ativos:
+            sql += " WHERE ativo = 1"
+        cursor.execute(sql + " ORDER BY id ASC")
+        dados = [dict(l) for l in cursor.fetchall()]
+        conexao.close()
+        return dados
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao ler: {e}")
+        return []
+
+def salvar_parceiro(dados):
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute('''
+            INSERT INTO parceiros (nome, app_id, app_secret, canal_origem, canal_destino,
+                                   dias_atraso, limite_diario, ativo, data_cadastro)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?)
+        ''', (
+            dados.get("nome"), dados.get("app_id"), dados.get("app_secret"),
+            dados.get("canal_origem"), dados.get("canal_destino"),
+            int(dados.get("dias_atraso", 30)), int(dados.get("limite_diario", 6)),
+            datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
+        ))
+        conexao.commit()
+        novo_id = cursor.lastrowid
+        conexao.close()
+        return novo_id
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao salvar: {e}")
+        return None
+
+def mascarar_segredo(valor):
+    """Mostra só o começo e o fim da chave — nunca o segredo inteiro na tela."""
+    v = str(valor or "")
+    return f"{v[:4]}••••{v[-4:]}" if len(v) > 10 else "••••"
+
+@dp.message(F.text == "Parceiros Afiliados 👥", StateFilter("*"))
+async def painel_parceiros(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+
+    parceiros = ler_parceiros()
+    texto = "👥 <b>PARCEIROS AFILIADOS</b>\n<i>Afiliados que repostam com as próprias credenciais.</i>\n\n"
+
+    if not parceiros:
+        texto += "<i>Nenhum parceiro cadastrado ainda.</i>\n\n"
+    else:
+        for p in parceiros:
+            status = "🟢" if p.get("ativo") else "⏸️"
+            texto += (
+                f"{status} <b>{p.get('nome')}</b>  ·  <code>#{p.get('id')}</code>\n"
+                "<blockquote>"
+                f"🔑 App ID: <code>{mascarar_segredo(p.get('app_id'))}</code>\n"
+                f"📥 Origem: {rotulo_alvo(p.get('canal_origem'))}\n"
+                f"📤 Destino: {rotulo_alvo(p.get('canal_destino'))}\n"
+                f"⏳ D+{p.get('dias_atraso')}  ·  📦 {p.get('limite_diario')} vídeos/dia"
+                "</blockquote>\n\n"
+            )
+
+    texto += "Escolha a ação desejada:"
+
+    teclado = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Cadastrar Parceiro ➕")],
+            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
+        ], resize_keyboard=True, is_persistent=True
+    )
+    await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
+
+# --- WIZARD DE CADASTRO: 7 passos + confirmação ---
+@dp.message(F.text == "Cadastrar Parceiro ➕", StateFilter("*"))
+async def parceiro_passo_nome(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    await message.answer(
+        "👤 <b>PASSO 1 de 7 — Nome do parceiro</b>\n\n"
+        "Como você quer identificar este afiliado? (ex: <i>João Silva</i>)",
+        parse_mode="HTML", reply_markup=teclado_cancelar
+    )
+    await state.set_state(SubmissaoAdminFluxo.parceiro_nome)
+
+@dp.message(SubmissaoAdminFluxo.parceiro_nome)
+async def parceiro_receber_nome(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await painel_parceiros(message, state); return
+    await state.update_data(nome=message.text.strip())
+    await message.answer(
+        "🔑 <b>PASSO 2 de 7 — App ID da Shopee</b>\n\n"
+        "Cole o <b>App ID</b> da conta de afiliado deste parceiro.",
+        parse_mode="HTML", reply_markup=teclado_cancelar
+    )
+    await state.set_state(SubmissaoAdminFluxo.parceiro_app_id)
+
+@dp.message(SubmissaoAdminFluxo.parceiro_app_id)
+async def parceiro_receber_app_id(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await painel_parceiros(message, state); return
+    await state.update_data(app_id=message.text.strip())
+    await message.answer(
+        "🔐 <b>PASSO 3 de 7 — App Secret</b>\n\n"
+        "Cole o <b>App Secret</b> deste parceiro.\n"
+        "<i>⚠️ Dado sensível: apague a mensagem do chat depois de enviar.</i>",
+        parse_mode="HTML", reply_markup=teclado_cancelar
+    )
+    await state.set_state(SubmissaoAdminFluxo.parceiro_app_secret)
+
+@dp.message(SubmissaoAdminFluxo.parceiro_app_secret)
+async def parceiro_receber_secret(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await painel_parceiros(message, state); return
+    await state.update_data(app_secret=message.text.strip())
+    await message.answer(
+        "📥 <b>PASSO 4 de 7 — Canal de ORIGEM</b>\n\n"
+        "De onde este parceiro vai pegar os vídeos?\n"
+        "Envie o <b>ID, @username ou link</b> do canal.",
+        parse_mode="HTML", reply_markup=teclado_cancelar
+    )
+    await state.set_state(SubmissaoAdminFluxo.parceiro_origem)
+
+@dp.message(SubmissaoAdminFluxo.parceiro_origem)
+async def parceiro_receber_origem(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await painel_parceiros(message, state); return
+
+    msg = await message.answer("⏳ <b>Validando canal de origem...</b>", parse_mode="HTML")
+    sucesso, id_final, nome_chat = await validar_e_formatar_alvo(bot, message.text.strip())
+    try: await msg.delete()
+    except Exception: pass
+
+    if sucesso:
+        salvar_nome_grupo(str(id_final).split(":")[0], nome_chat)
+        await message.answer(f"✅ Origem validada: <b>{nome_chat}</b>", parse_mode="HTML")
+    else:
+        id_final = message.text.strip()
+        await message.answer("⚠️ <b>Aviso:</b> canal não encontrado. O valor será salvo mesmo assim.", parse_mode="HTML")
+
+    await state.update_data(canal_origem=id_final)
+    await message.answer(
+        "📤 <b>PASSO 5 de 7 — Canal de DESTINO</b>\n\n"
+        "Onde este parceiro vai publicar os vídeos?",
+        parse_mode="HTML", reply_markup=teclado_cancelar
+    )
+    await state.set_state(SubmissaoAdminFluxo.parceiro_destino)
+
+@dp.message(SubmissaoAdminFluxo.parceiro_destino)
+async def parceiro_receber_destino(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await painel_parceiros(message, state); return
+
+    msg = await message.answer("⏳ <b>Validando canal de destino...</b>", parse_mode="HTML")
+    sucesso, id_final, nome_chat = await validar_e_formatar_alvo(bot, message.text.strip())
+    try: await msg.delete()
+    except Exception: pass
+
+    if sucesso:
+        salvar_nome_grupo(str(id_final).split(":")[0], nome_chat)
+        await message.answer(f"✅ Destino validado: <b>{nome_chat}</b>", parse_mode="HTML")
+    else:
+        id_final = message.text.strip()
+        await message.answer("⚠️ <b>Aviso:</b> canal não encontrado. O valor será salvo mesmo assim.", parse_mode="HTML")
+
+    await state.update_data(canal_destino=id_final)
+    await message.answer(
+        "⏳ <b>PASSO 6 de 7 — Dias de atraso (D+X)</b>\n\n"
+        "Quantos dias o vídeo fica guardado antes de ser repostado?\n"
+        "<i>Envie apenas o número. Exemplo: 30</i>",
+        parse_mode="HTML", reply_markup=teclado_cancelar
+    )
+    await state.set_state(SubmissaoAdminFluxo.parceiro_dias)
+
+@dp.message(SubmissaoAdminFluxo.parceiro_dias)
+async def parceiro_receber_dias(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await painel_parceiros(message, state); return
+    if not message.text.strip().isdigit():
+        await message.answer("⚠️ Envie apenas números. Exemplo: <b>30</b>", parse_mode="HTML"); return
+
+    await state.update_data(dias_atraso=int(message.text.strip()))
+    await message.answer(
+        "📦 <b>PASSO 7 de 7 — Cota diária</b>\n\n"
+        "Quantos vídeos por dia este parceiro pode publicar?\n"
+        "<i>Envie apenas o número. Exemplo: 6</i>",
+        parse_mode="HTML", reply_markup=teclado_cancelar
+    )
+    await state.set_state(SubmissaoAdminFluxo.parceiro_limite)
+
+@dp.message(SubmissaoAdminFluxo.parceiro_limite)
+async def parceiro_receber_limite(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await painel_parceiros(message, state); return
+    if not message.text.strip().isdigit():
+        await message.answer("⚠️ Envie apenas números. Exemplo: <b>6</b>", parse_mode="HTML"); return
+
+    await state.update_data(limite_diario=int(message.text.strip()))
+    d = await state.get_data()
+
+    await message.answer(
+        "📋 <b>CONFIRA O CADASTRO</b>\n\n"
+        f"👤 <b>Nome:</b> {d.get('nome')}\n"
+        f"🔑 <b>App ID:</b> <code>{mascarar_segredo(d.get('app_id'))}</code>\n"
+        f"🔐 <b>Secret:</b> <code>{mascarar_segredo(d.get('app_secret'))}</code>\n"
+        f"📥 <b>Origem:</b> {rotulo_alvo(d.get('canal_origem'))}\n"
+        f"📤 <b>Destino:</b> {rotulo_alvo(d.get('canal_destino'))}\n"
+        f"⏳ <b>Atraso:</b> D+{d.get('dias_atraso')}\n"
+        f"📦 <b>Cota:</b> {d.get('limite_diario')} vídeos/dia\n\n"
+        "<i>O parceiro nasce ativo, mas a publicação automática só entra numa próxima etapa.</i>",
+        parse_mode="HTML", reply_markup=teclado_confirmacao
+    )
+    await state.set_state(SubmissaoAdminFluxo.parceiro_confirmar)
+
+@dp.message(SubmissaoAdminFluxo.parceiro_confirmar)
+async def parceiro_confirmar_cadastro(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await message.answer("❌ Cadastro cancelado. Nada foi salvo.")
+        await painel_parceiros(message, state); return
+
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, clique em <b>Aprovar ✅</b> ou <b>Cancelar ❌</b>.", parse_mode="HTML"); return
+
+    d = await state.get_data()
+    novo_id = salvar_parceiro(d)
+
+    if novo_id:
+        if EXIBIR_LOGS: logger.info(f"👥 [Parceiros] '{d.get('nome')}' cadastrado com o ID {novo_id}.")
+        await message.answer(f"✅ <b>Parceiro cadastrado!</b>\n{d.get('nome')} recebeu o ID <code>#{novo_id}</code>.", parse_mode="HTML")
+    else:
+        await message.answer("❌ Não foi possível salvar. Verifique o log.")
+
+    await painel_parceiros(message, state)
 
 @dp.message(F.text == "Voltar ao Painel Público 🔙", StateFilter("*"))
 async def voltar_painel_publico_repost(message: types.Message, state: FSMContext):
