@@ -1070,11 +1070,16 @@ async def processar_fila_autorais_loop():
             if itens_desagendados:
                 # ⏰ Janela lida do painel (Regras de Repostagem > Janela de Horário)
                 config_fila = {
-                    "inicio": int(config_atual.get("inicio", 10)),
-                    "fim": int(config_atual.get("fim", 20)),
-                    "modo": "aleatorio", # Vídeos de retorno misturam-se naturalmente
-                    "intervalo_dias": 1  # 1 = usa o ramo diluído (a data_alvo já cuidou do atraso)
-                }
+                "inicio": inicio_janela,
+                "fim": fim_janela,
+                "modo": modo,
+                "intervalo_dias": intervalo_dias,
+                # ⏱️ PISO de segurança, não intervalo padrão: com poucos vídeos o motor
+                # divide a janela e espalha pelo dia. O piso só age em volume alto.
+                "espacamento_base_min": 15,
+                "espacamento_variacao_min": 6,
+                "limite_dias_descarte": 5
+            }
                 
                 if EXIBIR_LOGS: logger.info(f"⚙️ [Motor Autorais] Acionando Motor Central para {len(itens_desagendados)} vídeos de retorno...")
                 calcular_horarios_distribuicao(itens_desagendados, config_fila, forcar=False)
