@@ -226,11 +226,33 @@ async def processar_fila_envios(msg_progresso: types.Message = None):
         await asyncio.sleep(1)
 
     conexao.close()
-    
+
+    # 🧹 Limpa a pasta de extração SEMPRE, inclusive quando houve erro de envio.
+    # Antes só apagava no caminho de sucesso, e os PDFs de falhas iam se acumulando.
     try:
         if pasta_extracao and os.path.exists(pasta_extracao) and "extraido_" in pasta_extracao:
             shutil.rmtree(pasta_extracao)
-    except Exception: pass
+            if EXIBIR_LOGS: logger.info(f"🧹 [Notas] Pasta de extração removida: {pasta_extracao}")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ [Notas] Não consegui remover {pasta_extracao}: {e}")
+
+    # 🧹 Varre pastas de execuções antigas que ficaram para trás por erro ou queda
+    try:
+        removidas = 0
+        if os.path.exists(PASTA_TEMP):
+            limite = time.time() - 86400   # poupa as últimas 24h
+            for nome in os.listdir(PASTA_TEMP):
+                caminho = os.path.join(PASTA_TEMP, nome)
+                if not nome.startswith("extraido_") or not os.path.isdir(caminho):
+                    continue
+                if os.path.getmtime(caminho) > limite:
+                    continue
+                shutil.rmtree(caminho, ignore_errors=True)
+                removidas += 1
+        if removidas and EXIBIR_LOGS:
+            logger.info(f"🧹 [Notas] {removidas} pasta(s) de extração antiga(s) removida(s).")
+    except Exception:
+        pass
     
     if msg_progresso:
         try:
