@@ -363,6 +363,10 @@ class SubmissaoAdminFluxo(StatesGroup):
     parceiro_dias = State()
     parceiro_limite = State()
     parceiro_confirmar = State()
+    parceiro_selecionar = State()
+    parceiro_editar_valor = State()
+    parceiro_confirmar_exclusao = State()
+    parceiro_confirmar_exclusao_total = State()
     
     # ✅ NOVOS ESTADOS: Edição Modular do Grupo e Tópicos
     aguardando_selecao_edicao_grupo = State()
@@ -2823,6 +2827,47 @@ def salvar_parceiro(dados):
         if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao salvar: {e}")
         return None
 
+def atualizar_parceiro(parceiro_id, campo, valor):
+    """Atualiza UM campo. A lista branca impede injeção pelo nome da coluna."""
+    if campo not in ("canal_origem", "canal_destino", "dias_atraso", "limite_diario", "ativo"):
+        return False
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute(f"UPDATE parceiros SET {campo} = ? WHERE id = ?", (valor, int(parceiro_id)))
+        conexao.commit()
+        conexao.close()
+        return True
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao atualizar {campo}: {e}")
+        return False
+
+def excluir_parceiro(parceiro_id):
+    """
+    Remove o parceiro e a fila dele. As RESERVAS são mantidas de propósito:
+    vídeo já entregue a alguém nunca volta ao poço.
+    """
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("DELETE FROM parceiros WHERE id = ?", (int(parceiro_id),))
+        try:
+            cursor.execute("DELETE FROM fila_parceiros WHERE parceiro_id = ?", (int(parceiro_id),))
+        except sqlite3.OperationalError:
+            pass   # a fila só passa a existir na Fase 3
+        conexao.commit()
+        conexao.close()
+        return True
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao excluir: {e}")
+        return False
+
+def buscar_parceiro(parceiro_id):
+    for p in ler_parceiros():
+        if str(p.get("id")) == str(parceiro_id):
+            return p
+    return None
+
 def mascarar_segredo(valor):
     """Mostra só o começo e o fim da chave — nunca o segredo inteiro na tela."""
     v = str(valor or "")
@@ -2853,13 +2898,218 @@ async def painel_parceiros(message: types.Message, state: FSMContext):
 
     texto += "Escolha a ação desejada:"
 
-    teclado = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Cadastrar Parceiro ➕")],
-            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
-        ], resize_keyboard=True, is_persistent=True
+    linhas = [[KeyboardButton(text="Cadastrar Parceiro ➕")]]
+    if parceiros:
+        linhas.append([KeyboardButton(text="Gerenciar Parceiro 🔧")])
+        linhas.append([KeyboardButton(text="Pausar Todos ⏸️"), KeyboardButton(text="Ativar Todos ▶️")])
+        linhas.append([KeyboardButton(text="Excluir Todos 🗑️")])
+    linhas.append([KeyboardButton(text="Voltar ao Painel Público 🔙")])
+
+    await message.answer(texto, reply_markup=ReplyKeyboardMarkup(keyboard=linhas, resize_keyboard=True, is_persistent=True), parse_mode="HTML")
+
+# --- GESTÃO: selecionar, editar, pausar e excluir ---
+def teclado_gerenciar_parceiro(p):
+    acao = "Pausar Parceiro ⏸️" if p.get("ativo") else "Ativar Parceiro ▶️"
+    return ReplyKeyboardMarkup(keyboard=[
+        [KeyboardButton(text=acao)],
+        [KeyboardButton(text="Editar Origem 📥"), KeyboardButton(text="Editar Destino 📤")],
+        [KeyboardButton(text="Editar Dias ⏳"), KeyboardButton(text="Editar Cota 📦")],
+        [KeyboardButton(text="Excluir Parceiro 🗑️")],
+        [KeyboardButton(text="Voltar aos Parceiros 🔙")]
+    ], resize_keyboard=True, is_persistent=True)
+
+async def mostrar_parceiro(message, state: FSMContext, parceiro_id):
+    p = buscar_parceiro(parceiro_id)
+    if not p:
+        await message.answer("⚠️ Parceiro não encontrado.")
+        await painel_parceiros(message, state)
+        return
+
+    await state.update_data(parceiro_id=p.get("id"))
+    await state.set_state(SubmissaoAdminFluxo.parceiro_selecionar)
+
+    status = "🟢 ATIVO" if p.get("ativo") else "⏸️ PAUSADO"
+    await message.answer(
+        f"🔧 <b>{p.get('nome')}</b>  ·  <code>#{p.get('id')}</code>  ·  {status}\n\n"
+        "<blockquote>"
+        f"🔑 App ID: <code>{mascarar_segredo(p.get('app_id'))}</code>\n"
+        f"📥 Origem: {rotulo_alvo(p.get('canal_origem'))}\n"
+        f"📤 Destino: {rotulo_alvo(p.get('canal_destino'))}\n"
+        f"⏳ D+{p.get('dias_atraso')}  ·  📦 {p.get('limite_diario')} vídeos/dia"
+        "</blockquote>\n\n"
+        "Escolha a ação desejada:",
+        parse_mode="HTML", reply_markup=teclado_gerenciar_parceiro(p)
     )
-    await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
+
+@dp.message(F.text == "Gerenciar Parceiro 🔧", StateFilter("*"))
+async def pedir_id_parceiro(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    parceiros = ler_parceiros()
+    if not parceiros:
+        await painel_parceiros(message, state); return
+
+    lista = "\n".join(
+        f"<b>{p.get('id')}</b> — {p.get('nome')} {'🟢' if p.get('ativo') else '⏸️'}"
+        for p in parceiros
+    )
+    await message.answer(
+        f"🔧 <b>Qual parceiro você quer gerenciar?</b>\n\n{lista}\n\n"
+        "<i>Envie apenas o número correspondente.</i>",
+        parse_mode="HTML", reply_markup=teclado_cancelar
+    )
+    await state.set_state(SubmissaoAdminFluxo.parceiro_selecionar)
+    await state.update_data(parceiro_id=None)
+
+@dp.message(SubmissaoAdminFluxo.parceiro_selecionar)
+async def acoes_parceiro(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    texto = (message.text or "").strip()
+
+    if texto in ("Cancelar ❌", "Voltar aos Parceiros 🔙"):
+        await painel_parceiros(message, state); return
+
+    data = await state.get_data()
+    pid = data.get("parceiro_id")
+
+    # Ainda escolhendo pelo número
+    if not pid:
+        if not texto.isdigit():
+            await message.answer("⚠️ Envie apenas o <b>número</b> do parceiro.", parse_mode="HTML"); return
+        await mostrar_parceiro(message, state, texto); return
+
+    p = buscar_parceiro(pid)
+    if not p:
+        await painel_parceiros(message, state); return
+
+    if texto in ("Pausar Parceiro ⏸️", "Ativar Parceiro ▶️"):
+        novo = 0 if p.get("ativo") else 1
+        atualizar_parceiro(pid, "ativo", novo)
+        estado = "ativado" if novo else "pausado"
+        aviso = "A fila dele fica intacta: nada é publicado nem capturado." if not novo else "Voltou a capturar e publicar normalmente."
+        await message.answer(f"✅ <b>{p.get('nome')}</b> foi <b>{estado}</b>.\n<i>{aviso}</i>", parse_mode="HTML")
+        await mostrar_parceiro(message, state, pid); return
+
+    mapa = {
+        "Editar Origem 📥":  ("canal_origem",  "canal de ORIGEM (de onde pega os vídeos)"),
+        "Editar Destino 📤": ("canal_destino", "canal de DESTINO (onde publica)"),
+        "Editar Dias ⏳":     ("dias_atraso",   "número de dias de atraso (D+X)"),
+        "Editar Cota 📦":    ("limite_diario", "quantidade de vídeos por dia"),
+    }
+    if texto in mapa:
+        campo, descricao = mapa[texto]
+        await state.update_data(campo_edicao=campo)
+        await state.set_state(SubmissaoAdminFluxo.parceiro_editar_valor)
+        await message.answer(f"✏️ Envie o novo <b>{descricao}</b>:", parse_mode="HTML", reply_markup=teclado_cancelar)
+        return
+
+    if texto == "Excluir Parceiro 🗑️":
+        await state.set_state(SubmissaoAdminFluxo.parceiro_confirmar_exclusao)
+        await message.answer(
+            f"🗑️ <b>Excluir {p.get('nome')} (#{p.get('id')})?</b>\n\n"
+            "• O cadastro e as credenciais serão apagados\n"
+            "• A fila de vídeos dele será apagada\n"
+            "• Os vídeos já reservados <b>não voltam</b> ao acervo\n\n"
+            "<i>Esta ação não pode ser desfeita.</i>",
+            parse_mode="HTML", reply_markup=teclado_confirmacao
+        )
+        return
+
+    await message.answer("Use os botões abaixo para escolher a ação.")
+
+@dp.message(SubmissaoAdminFluxo.parceiro_editar_valor)
+async def salvar_edicao_parceiro(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if message.text == "Cancelar ❌":
+        data = await state.get_data()
+        await mostrar_parceiro(message, state, data.get("parceiro_id")); return
+
+    data = await state.get_data()
+    pid, campo = data.get("parceiro_id"), data.get("campo_edicao")
+    valor = (message.text or "").strip()
+
+    if campo in ("dias_atraso", "limite_diario"):
+        if not valor.isdigit():
+            await message.answer("⚠️ Envie apenas números.", parse_mode="HTML"); return
+        valor = int(valor)
+    else:
+        msg = await message.answer("⏳ <b>Validando canal...</b>", parse_mode="HTML")
+        sucesso, id_final, nome_chat = await validar_e_formatar_alvo(bot, valor)
+        try: await msg.delete()
+        except Exception: pass
+        if sucesso:
+            salvar_nome_grupo(str(id_final).split(":")[0], nome_chat)
+            await message.answer(f"✅ Canal validado: <b>{nome_chat}</b>", parse_mode="HTML")
+        else:
+            id_final = valor
+            await message.answer("⚠️ Canal não encontrado. O valor será salvo mesmo assim.", parse_mode="HTML")
+        valor = id_final
+
+    if atualizar_parceiro(pid, campo, valor):
+        if EXIBIR_LOGS: logger.info(f"👥 [Parceiros] #{pid}: '{campo}' alterado para {valor}.")
+        await message.answer("✅ <b>Atualizado com sucesso!</b>", parse_mode="HTML")
+    else:
+        await message.answer("❌ Não foi possível atualizar.")
+
+    await mostrar_parceiro(message, state, pid)
+
+@dp.message(SubmissaoAdminFluxo.parceiro_confirmar_exclusao)
+async def confirmar_exclusao_parceiro(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    data = await state.get_data()
+    pid = data.get("parceiro_id")
+
+    if message.text != "Aprovar ✅":
+        await message.answer("❌ Exclusão cancelada.")
+        await mostrar_parceiro(message, state, pid); return
+
+    p = buscar_parceiro(pid)
+    nome = p.get("nome") if p else pid
+    if excluir_parceiro(pid):
+        if EXIBIR_LOGS: logger.info(f"🗑️ [Parceiros] '{nome}' (#{pid}) excluído. Reservas mantidas.")
+        await message.answer(f"🗑️ <b>{nome}</b> foi excluído.\n<i>As reservas dele seguem queimadas.</i>", parse_mode="HTML")
+    else:
+        await message.answer("❌ Não foi possível excluir.")
+
+    await painel_parceiros(message, state)
+
+@dp.message(F.text.in_(["Pausar Todos ⏸️", "Ativar Todos ▶️"]), StateFilter("*"))
+async def alternar_todos_parceiros(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    novo = 0 if "Pausar" in message.text else 1
+    for p in ler_parceiros():
+        atualizar_parceiro(p.get("id"), "ativo", novo)
+    estado = "pausados" if not novo else "ativados"
+    await message.answer(f"✅ Todos os parceiros foram <b>{estado}</b>.", parse_mode="HTML")
+    await painel_parceiros(message, state)
+
+@dp.message(F.text == "Excluir Todos 🗑️", StateFilter("*"))
+async def pedir_exclusao_total(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    total = len(ler_parceiros())
+    if not total:
+        await painel_parceiros(message, state); return
+    await state.set_state(SubmissaoAdminFluxo.parceiro_confirmar_exclusao_total)
+    await message.answer(
+        f"🗑️ <b>Excluir TODOS os {total} parceiros?</b>\n\n"
+        "Cadastros, credenciais e filas serão apagados.\n"
+        "As reservas de vídeo <b>não voltam</b> ao acervo.\n\n"
+        "<i>Esta ação não pode ser desfeita.</i>",
+        parse_mode="HTML", reply_markup=teclado_confirmacao
+    )
+
+@dp.message(SubmissaoAdminFluxo.parceiro_confirmar_exclusao_total)
+async def confirmar_exclusao_total(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if message.text != "Aprovar ✅":
+        await message.answer("❌ Exclusão cancelada.")
+        await painel_parceiros(message, state); return
+
+    total = 0
+    for p in ler_parceiros():
+        if excluir_parceiro(p.get("id")): total += 1
+    if EXIBIR_LOGS: logger.warning(f"🗑️ [Parceiros] {total} parceiro(s) excluído(s) em massa.")
+    await message.answer(f"🗑️ <b>{total} parceiro(s) excluído(s).</b>", parse_mode="HTML")
+    await painel_parceiros(message, state)
 
 # --- WIZARD DE CADASTRO: 7 passos + confirmação ---
 @dp.message(F.text == "Cadastrar Parceiro ➕", StateFilter("*"))
