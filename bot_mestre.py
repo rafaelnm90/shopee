@@ -3953,12 +3953,16 @@ async def motor_repost_publico_step():
         if houve_limpeza:
             conexao.commit()
 
-        if itens_desagendados:
             config_fila = {
                 "inicio": janela_inicio,
                 "fim": janela_fim,
                 "modo": "aleatorio",   # Vídeos do Público misturam-se naturalmente
-                "intervalo_dias": 1    # 1 = ramo diluído (a data_alvo já cuidou do atraso)
+                "intervalo_dias": 1,   # 1 = ramo diluído (a data_alvo já cuidou do atraso)
+                # ⏱️ PISO de segurança, não intervalo padrão: com poucos vídeos o motor
+                # divide a janela e espalha pelo dia. O piso só age em volume alto.
+                "espacamento_base_min": 15,
+                "espacamento_variacao_min": 6,
+                "limite_dias_descarte": 5
             }
 
             if EXIBIR_LOGS: logger.info(f"⚙️ [Motor Público] Acionando Motor Central para {len(itens_desagendados)} vídeos de hoje...")
