@@ -3112,119 +3112,192 @@ async def confirmar_exclusao_total(message: types.Message, state: FSMContext):
     await painel_parceiros(message, state)
 
 # --- WIZARD DE CADASTRO: 7 passos + confirmação ---
+teclado_wizard_nav = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="Voltar ⬅️"), KeyboardButton(text="Cancelar ❌")]],
+    resize_keyboard=True
+)
+
+# Link real usado só para provar que as credenciais funcionam
+LINK_TESTE_SHOPEE = "https://shopee.com.br/product/366207309/22648772967"
+
+async def testar_credenciais_shopee(app_id, app_secret):
+    """
+    Prova de verdade: tenta gerar um link de afiliado com as chaves do parceiro.
+    Regex não serve aqui — um ID inventado passaria. Só a API sabe se é válido.
+    """
+    try:
+        resultado = await converter_link_shopee(
+            LINK_TESTE_SHOPEE, "teste_cadastro", False,
+            app_id=app_id, app_secret=app_secret
+        )
+        return bool(resultado) and resultado != LINK_TESTE_SHOPEE
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao testar credenciais: {e}")
+        return False
+
+async def voltar_passo_parceiro(message, state: FSMContext, destino):
+    """Reenvia a pergunta do passo anterior sem derrubar o que já foi digitado."""
+    passos = {
+        "nome":       ("👤 <b>PASSO 1 de 7 — Nome do parceiro</b>\n\nComo você quer identificar este afiliado? (ex: <i>João Silva</i>)", SubmissaoAdminFluxo.parceiro_nome),
+        "app_id":     ("🔑 <b>PASSO 2 de 7 — App ID da Shopee</b>\n\nCole o <b>App ID</b> da conta de afiliado deste parceiro.", SubmissaoAdminFluxo.parceiro_app_id),
+        "app_secret": ("🔐 <b>PASSO 3 de 7 — App Secret</b>\n\nCole o <b>App Secret</b> deste parceiro.\n<i>⚠️ Dado sensível: apague a mensagem do chat depois de enviar.</i>", SubmissaoAdminFluxo.parceiro_app_secret),
+        "origem":     ("📥 <b>PASSO 4 de 7 — Canal de ORIGEM</b>\n\nDe onde este parceiro vai pegar os vídeos?\nEnvie o <b>ID, @username ou link</b> do canal.", SubmissaoAdminFluxo.parceiro_origem),
+        "destino":    ("📤 <b>PASSO 5 de 7 — Canal de DESTINO</b>\n\nOnde este parceiro vai publicar os vídeos?", SubmissaoAdminFluxo.parceiro_destino),
+        "dias":       ("⏳ <b>PASSO 6 de 7 — Dias de atraso (D+X)</b>\n\nQuantos dias o vídeo fica guardado antes de ser repostado?\n<i>Envie apenas o número. Exemplo: 30</i>", SubmissaoAdminFluxo.parceiro_dias),
+    }
+    texto, novo_estado = passos[destino]
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_wizard_nav)
+    await state.set_state(novo_estado)
 @dp.message(F.text == "Cadastrar Parceiro ➕", StateFilter("*"))
 async def parceiro_passo_nome(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    await message.answer(
-        "👤 <b>PASSO 1 de 7 — Nome do parceiro</b>\n\n"
-        "Como você quer identificar este afiliado? (ex: <i>João Silva</i>)",
-        parse_mode="HTML", reply_markup=teclado_cancelar
-    )
-    await state.set_state(SubmissaoAdminFluxo.parceiro_nome)
+    await voltar_passo_parceiro(message, state, "nome")
 
 @dp.message(SubmissaoAdminFluxo.parceiro_nome)
 async def parceiro_receber_nome(message: types.Message, state: FSMContext):
-    if message.text == "Cancelar ❌":
+    if message.text in ("Cancelar ❌", "Voltar ⬅️"):
         await painel_parceiros(message, state); return
-    await state.update_data(nome=message.text.strip())
-    await message.answer(
-        "🔑 <b>PASSO 2 de 7 — App ID da Shopee</b>\n\n"
-        "Cole o <b>App ID</b> da conta de afiliado deste parceiro.",
-        parse_mode="HTML", reply_markup=teclado_cancelar
-    )
-    await state.set_state(SubmissaoAdminFluxo.parceiro_app_id)
+
+    nome = (message.text or "").strip()
+    if len(nome) < 2:
+        await message.answer("⚠️ O nome precisa ter pelo menos 2 caracteres. Tente de novo:", parse_mode="HTML"); return
+
+    await state.update_data(nome=nome)
+    await voltar_passo_parceiro(message, state, "app_id")
 
 @dp.message(SubmissaoAdminFluxo.parceiro_app_id)
 async def parceiro_receber_app_id(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await painel_parceiros(message, state); return
-    await state.update_data(app_id=message.text.strip())
-    await message.answer(
-        "🔐 <b>PASSO 3 de 7 — App Secret</b>\n\n"
-        "Cole o <b>App Secret</b> deste parceiro.\n"
-        "<i>⚠️ Dado sensível: apague a mensagem do chat depois de enviar.</i>",
-        parse_mode="HTML", reply_markup=teclado_cancelar
-    )
-    await state.set_state(SubmissaoAdminFluxo.parceiro_app_secret)
+    if message.text == "Voltar ⬅️":
+        await voltar_passo_parceiro(message, state, "nome"); return
+
+    app_id = (message.text or "").strip()
+    # Checagem barata de formato. A prova real vem no passo seguinte, contra a API.
+    if not app_id.isdigit() or len(app_id) < 6:
+        await message.answer(
+            "❌ <b>App ID inválido.</b>\n\n"
+            "O App ID da Shopee é <b>só números</b> e tem pelo menos 6 dígitos.\n"
+            "<i>Confira no painel de afiliado e envie de novo:</i>",
+            parse_mode="HTML", reply_markup=teclado_wizard_nav
+        )
+        return
+
+    await state.update_data(app_id=app_id)
+    await voltar_passo_parceiro(message, state, "app_secret")
 
 @dp.message(SubmissaoAdminFluxo.parceiro_app_secret)
 async def parceiro_receber_secret(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await painel_parceiros(message, state); return
-    await state.update_data(app_secret=message.text.strip())
-    await message.answer(
-        "📥 <b>PASSO 4 de 7 — Canal de ORIGEM</b>\n\n"
-        "De onde este parceiro vai pegar os vídeos?\n"
-        "Envie o <b>ID, @username ou link</b> do canal.",
-        parse_mode="HTML", reply_markup=teclado_cancelar
-    )
-    await state.set_state(SubmissaoAdminFluxo.parceiro_origem)
+    if message.text == "Voltar ⬅️":
+        await voltar_passo_parceiro(message, state, "app_id"); return
+
+    app_secret = (message.text or "").strip()
+    if len(app_secret) < 16 or " " in app_secret:
+        await message.answer(
+            "❌ <b>App Secret inválido.</b>\n\n"
+            "O Secret é uma sequência longa, sem espaços.\n"
+            "<i>Confira e envie de novo:</i>",
+            parse_mode="HTML", reply_markup=teclado_wizard_nav
+        )
+        return
+
+    data = await state.get_data()
+    msg = await message.answer("🔍 <b>Testando as credenciais na API da Shopee...</b>", parse_mode="HTML")
+    valido = await testar_credenciais_shopee(data.get("app_id"), app_secret)
+    try: await msg.delete()
+    except Exception: pass
+
+    if not valido:
+        await message.answer(
+            "❌ <b>As credenciais foram recusadas pela Shopee.</b>\n\n"
+            "O par App ID + Secret não conseguiu gerar um link de afiliado.\n\n"
+            "• Confira se o Secret está completo e sem espaços\n"
+            "• Confira se o App ID pertence a esta mesma conta\n"
+            "• Se as chaves estiverem certas, a API pode estar fora do ar — tente em alguns minutos\n\n"
+            "<i>Envie o Secret novamente ou toque em Voltar ⬅️ para corrigir o App ID:</i>",
+            parse_mode="HTML", reply_markup=teclado_wizard_nav
+        )
+        return
+
+    await message.answer("✅ <b>Credenciais válidas!</b> Link de teste gerado com sucesso.", parse_mode="HTML")
+    await state.update_data(app_secret=app_secret)
+    await voltar_passo_parceiro(message, state, "origem")
 
 @dp.message(SubmissaoAdminFluxo.parceiro_origem)
 async def parceiro_receber_origem(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await painel_parceiros(message, state); return
+    if message.text == "Voltar ⬅️":
+        await voltar_passo_parceiro(message, state, "app_secret"); return
 
     msg = await message.answer("⏳ <b>Validando canal de origem...</b>", parse_mode="HTML")
-    sucesso, id_final, nome_chat = await validar_e_formatar_alvo(bot, message.text.strip())
+    sucesso, id_final, nome_chat = await validar_e_formatar_alvo(bot, (message.text or "").strip())
     try: await msg.delete()
     except Exception: pass
 
-    if sucesso:
-        salvar_nome_grupo(str(id_final).split(":")[0], nome_chat)
-        await message.answer(f"✅ Origem validada: <b>{nome_chat}</b>", parse_mode="HTML")
-    else:
-        id_final = message.text.strip()
-        await message.answer("⚠️ <b>Aviso:</b> canal não encontrado. O valor será salvo mesmo assim.", parse_mode="HTML")
+    # 🚫 Sem canal real, sem avanço: gravar um ID inexistente quebraria o robô do parceiro
+    if not sucesso:
+        await message.answer(
+            "❌ <b>Canal não encontrado.</b>\n\n"
+            "O bot precisa <b>ser membro</b> do canal para conseguir ler os vídeos.\n\n"
+            "• Adicione o bot ao canal e tente de novo\n"
+            "• Ou envie outro <b>@username, ID ou link</b>",
+            parse_mode="HTML", reply_markup=teclado_wizard_nav
+        )
+        return
 
+    salvar_nome_grupo(str(id_final).split(":")[0], nome_chat)
+    await message.answer(f"✅ Origem validada: <b>{nome_chat}</b>", parse_mode="HTML")
     await state.update_data(canal_origem=id_final)
-    await message.answer(
-        "📤 <b>PASSO 5 de 7 — Canal de DESTINO</b>\n\n"
-        "Onde este parceiro vai publicar os vídeos?",
-        parse_mode="HTML", reply_markup=teclado_cancelar
-    )
-    await state.set_state(SubmissaoAdminFluxo.parceiro_destino)
+    await voltar_passo_parceiro(message, state, "destino")
 
 @dp.message(SubmissaoAdminFluxo.parceiro_destino)
 async def parceiro_receber_destino(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await painel_parceiros(message, state); return
+    if message.text == "Voltar ⬅️":
+        await voltar_passo_parceiro(message, state, "origem"); return
 
     msg = await message.answer("⏳ <b>Validando canal de destino...</b>", parse_mode="HTML")
-    sucesso, id_final, nome_chat = await validar_e_formatar_alvo(bot, message.text.strip())
+    sucesso, id_final, nome_chat = await validar_e_formatar_alvo(bot, (message.text or "").strip())
     try: await msg.delete()
     except Exception: pass
 
-    if sucesso:
-        salvar_nome_grupo(str(id_final).split(":")[0], nome_chat)
-        await message.answer(f"✅ Destino validado: <b>{nome_chat}</b>", parse_mode="HTML")
-    else:
-        id_final = message.text.strip()
-        await message.answer("⚠️ <b>Aviso:</b> canal não encontrado. O valor será salvo mesmo assim.", parse_mode="HTML")
+    if not sucesso:
+        await message.answer(
+            "❌ <b>Canal não encontrado.</b>\n\n"
+            "O bot precisa <b>ser administrador</b> do canal para publicar nele.\n\n"
+            "• Adicione o bot como admin e tente de novo\n"
+            "• Ou envie outro <b>@username, ID ou link</b>",
+            parse_mode="HTML", reply_markup=teclado_wizard_nav
+        )
+        return
 
+    salvar_nome_grupo(str(id_final).split(":")[0], nome_chat)
+    await message.answer(f"✅ Destino validado: <b>{nome_chat}</b>", parse_mode="HTML")
     await state.update_data(canal_destino=id_final)
-    await message.answer(
-        "⏳ <b>PASSO 6 de 7 — Dias de atraso (D+X)</b>\n\n"
-        "Quantos dias o vídeo fica guardado antes de ser repostado?\n"
-        "<i>Envie apenas o número. Exemplo: 30</i>",
-        parse_mode="HTML", reply_markup=teclado_cancelar
-    )
-    await state.set_state(SubmissaoAdminFluxo.parceiro_dias)
+    await voltar_passo_parceiro(message, state, "dias")
 
 @dp.message(SubmissaoAdminFluxo.parceiro_dias)
 async def parceiro_receber_dias(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await painel_parceiros(message, state); return
-    if not message.text.strip().isdigit():
-        await message.answer("⚠️ Envie apenas números. Exemplo: <b>30</b>", parse_mode="HTML"); return
+    if message.text == "Voltar ⬅️":
+        await voltar_passo_parceiro(message, state, "destino"); return
 
-    await state.update_data(dias_atraso=int(message.text.strip()))
+    valor = (message.text or "").strip()
+    if not valor.isdigit() or not (0 <= int(valor) <= 365):
+        await message.answer("⚠️ Envie um número entre <b>0 e 365</b>. Exemplo: <b>30</b>", parse_mode="HTML", reply_markup=teclado_wizard_nav); return
+
+    await state.update_data(dias_atraso=int(valor))
     await message.answer(
         "📦 <b>PASSO 7 de 7 — Cota diária</b>\n\n"
         "Quantos vídeos por dia este parceiro pode publicar?\n"
         "<i>Envie apenas o número. Exemplo: 6</i>",
-        parse_mode="HTML", reply_markup=teclado_cancelar
+        parse_mode="HTML", reply_markup=teclado_wizard_nav
     )
     await state.set_state(SubmissaoAdminFluxo.parceiro_limite)
 
@@ -3232,17 +3305,21 @@ async def parceiro_receber_dias(message: types.Message, state: FSMContext):
 async def parceiro_receber_limite(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await painel_parceiros(message, state); return
-    if not message.text.strip().isdigit():
-        await message.answer("⚠️ Envie apenas números. Exemplo: <b>6</b>", parse_mode="HTML"); return
+    if message.text == "Voltar ⬅️":
+        await voltar_passo_parceiro(message, state, "dias"); return
 
-    await state.update_data(limite_diario=int(message.text.strip()))
+    valor = (message.text or "").strip()
+    if not valor.isdigit() or not (1 <= int(valor) <= 100):
+        await message.answer("⚠️ Envie um número entre <b>1 e 100</b>. Exemplo: <b>6</b>", parse_mode="HTML", reply_markup=teclado_wizard_nav); return
+
+    await state.update_data(limite_diario=int(valor))
     d = await state.get_data()
 
     await message.answer(
         "📋 <b>CONFIRA O CADASTRO</b>\n\n"
         f"👤 <b>Nome:</b> {d.get('nome')}\n"
-        f"🔑 <b>App ID:</b> <code>{mascarar_segredo(d.get('app_id'))}</code>\n"
-        f"🔐 <b>Secret:</b> <code>{mascarar_segredo(d.get('app_secret'))}</code>\n"
+        f"🔑 <b>App ID:</b> <code>{mascarar_segredo(d.get('app_id'))}</code>  ✅ testado\n"
+        f"🔐 <b>Secret:</b> <code>{mascarar_segredo(d.get('app_secret'))}</code>  ✅ testado\n"
         f"📥 <b>Origem:</b> {rotulo_alvo(d.get('canal_origem'))}\n"
         f"📤 <b>Destino:</b> {rotulo_alvo(d.get('canal_destino'))}\n"
         f"⏳ <b>Atraso:</b> D+{d.get('dias_atraso')}\n"
@@ -3251,8 +3328,6 @@ async def parceiro_receber_limite(message: types.Message, state: FSMContext):
         parse_mode="HTML", reply_markup=teclado_confirmacao
     )
     await state.set_state(SubmissaoAdminFluxo.parceiro_confirmar)
-
-@dp.message(SubmissaoAdminFluxo.parceiro_confirmar)
 async def parceiro_confirmar_cadastro(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await message.answer("❌ Cadastro cancelado. Nada foi salvo.")
