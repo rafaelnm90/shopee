@@ -225,6 +225,34 @@ def ler_fila_publico():
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila_publico do SQLite: {e}")
         return {"fila": []}
 
+def reservar_video(msg_id, parceiro_id=0):
+    """
+    🔒 RESERVA GLOBAL — garante que um vídeo nunca saia em dois canais.
+    parceiro_id = 0 significa "reservado pelo dono", que sorteia primeiro.
+    A PRIMARY KEY faz o trabalho: quem chegar depois recebe False e pega outro.
+    """
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS videos_reservados (
+                video_id TEXT PRIMARY KEY,
+                parceiro_id INTEGER,
+                data_reserva TEXT
+            )
+        ''')
+        cursor.execute(
+            "INSERT OR IGNORE INTO videos_reservados (video_id, parceiro_id, data_reserva) VALUES (?, ?, ?)",
+            (str(msg_id), int(parceiro_id), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        )
+        reservou = cursor.rowcount > 0
+        conexao.commit()
+        conexao.close()
+        return reservou
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Reserva] Erro ao reservar o vídeo {msg_id}: {e}")
+        return False
+
 def salvar_fila_publico(dados):
     """Espelha salvar_fila_retorno(), gravando na tabela fila_publico."""
     try:
@@ -636,6 +664,11 @@ async def interceptar_e_espelhar(event):
                                 "data_postagem": ""
                             })
                             salvar_fila_publico(fila_pub)
+
+                            # 🔒 Marca o vídeo como do DONO. Parceiros consultam esta tabela
+                            # antes de sortear, então nunca pegam o que já é seu.
+                            reservar_video(msg_enviada.id, parceiro_id=0)
+
                             if EXIBIR_LOGS: logger.info(f"🎯 [Sorteio Público] Vídeo nº {total_ofertas_pub} do dia SORTEADO para o Grupo Público em {data_alvo_pub}.")
                         else:
                             if EXIBIR_LOGS: logger.info(f"🎲 [Sorteio Público] Vídeo nº {total_ofertas_pub} do dia não sorteado (chance era {limite_publico}/{total_ofertas_pub}).")
