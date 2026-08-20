@@ -2921,6 +2921,8 @@ async def painel_parceiros(message: types.Message, state: FSMContext):
 # Roda a cada 2 min, em paralelo ao seu. Cada parceiro tem credenciais,
 # canal, atraso e cota próprios. Um disparo por ciclo, nunca em lote.
 # ==========================================
+TETO_DISCO_PARCEIROS_GB_PAINEL = 10   # espelha o teto definido no espelhador
+
 def ler_fila_parceiro_pendente(parceiro_id):
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -5352,10 +5354,96 @@ def obter_teclado_relatorios():
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
+@dp.message(F.text == "Filas dos Parceiros 👥", StateFilter("*"))
+async def relatorio_filas_parceiros(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("📋 Gerando relatório das filas dos parceiros...")
+
+    parceiros = ler_parceiros()
+    if not parceiros:
+        await message.answer("👥 <b>Nenhum parceiro cadastrado.</b>", parse_mode="HTML",
+                             reply_markup=obter_teclado_relatorios_filas())
+        return
+
+    agora = datetime.now(fuso_horario)
+    hoje_str = agora.strftime("%Y-%m-%d")
+
+    total_geral = 0
+    disco_total = 0
+    blocos = []
+
+    for p in parceiros:
+        itens = ler_fila_parceiro_pendente(p.get("id"))
+        total_geral += len(itens)
+
+        ocupado = 0
+        for i in itens:
+            caminho = i.get("caminho_video")
+            if caminho and os.path.exists(caminho):
+                try: ocupado += os.path.getsize(caminho)
+                except OSError: pass
+        disco_total += ocupado
+
+        status = "🟢" if p.get("ativo") else "⏸️"
+        acesso = "✅" if p.get("origem_ok") else "⏳"
+
+        # Agrupa por dia para dar noção do cronograma
+        por_dia = {}
+        for i in itens:
+            por_dia[i.get("data_alvo") or "?"] = por_dia.get(i.get("data_alvo") or "?", 0) + 1
+
+        bloco = (
+            f"{status} <b>{p.get('nome')}</b>  ·  <code>#{p.get('id')}</code>\n"
+            "<blockquote>"
+            f"📦 Na fila: <b>{len(itens)}</b> vídeo(s)  ·  💾 {ocupado / (1024**2):.0f} MB\n"
+            f"⏳ D+{p.get('dias_atraso')}  ·  📅 {p.get('limite_diario')}/dia  ·  🤖 Acesso {acesso}\n"
+        )
+
+        if por_dia:
+            proximos = sorted(por_dia.items())[:4]
+            linhas_dias = []
+            for dia, qtd in proximos:
+                marca = "🔵" if dia > hoje_str else "🟢"
+                try:
+                    dia_fmt = datetime.strptime(dia, "%Y-%m-%d").strftime("%d/%m")
+                except Exception:
+                    dia_fmt = dia
+                linhas_dias.append(f"{marca} {dia_fmt}: {qtd}")
+            bloco += "🗓️ " + "  ·  ".join(linhas_dias)
+            if len(por_dia) > 4:
+                bloco += f"  <i>(+{len(por_dia) - 4} dias)</i>"
+        else:
+            bloco += "<i>Fila vazia — aguardando novas capturas.</i>"
+
+        # Próxima publicação já agendada
+        agendados = sorted([i["horario_disparo"] for i in itens if i.get("horario_disparo")])
+        if agendados:
+            try:
+                prox = datetime.strptime(agendados[0], "%Y-%m-%d %H:%M:%S").strftime("%d/%m às %H:%M")
+                bloco += f"\n🚀 Próxima: <b>{prox}</b>"
+            except Exception:
+                pass
+
+        bloco += "</blockquote>\n"
+        blocos.append(bloco)
+
+    cabecalho = (
+        "👥 <b>FILAS DOS PARCEIROS</b>\n"
+        f"<i>{len(parceiros)} parceiro(s)  ·  {total_geral} vídeo(s) aguardando  ·  "
+        f"{disco_total / (1024**3):.2f} GB de {TETO_DISCO_PARCEIROS_GB_PAINEL} GB</i>\n\n"
+    )
+
+    texto = cabecalho + "\n".join(blocos)
+    if len(texto) > 4000:
+        texto = texto[:3900] + "\n\n<i>...relatório truncado.</i>"
+
+    await message.answer(texto, parse_mode="HTML", reply_markup=obter_teclado_relatorios_filas())
+
 def obter_teclado_relatorios_filas():
     botoes = [
         [KeyboardButton(text="Fila do Espião 🕵️"), KeyboardButton(text="Fila do Espelhador 🔄")],
         [KeyboardButton(text="Fila de Autorais 🎥"), KeyboardButton(text="Fila do Grupo Público 📬")],
+        [KeyboardButton(text="Filas dos Parceiros 👥")],
         [KeyboardButton(text="Voltar aos Relatórios 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
