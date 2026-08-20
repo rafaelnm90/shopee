@@ -163,6 +163,13 @@ def inicializar_banco_sqlite():
         )
     ''')
 
+    # Migração: status de acesso do userbot ao canal de origem do parceiro
+    for coluna, tipo in [("origem_ok", "INTEGER DEFAULT 0"), ("origem_erro", "TEXT")]:
+        try:
+            cursor.execute(f"ALTER TABLE parceiros ADD COLUMN {coluna} {tipo}")
+        except sqlite3.OperationalError:
+            pass
+
     # 10. RESERVA GLOBAL: garante que um vídeo nunca saia em dois canais.
     # O dono reserva primeiro (prioridade); os parceiros pulam o que já está aqui.
     cursor.execute('''
@@ -2892,8 +2899,10 @@ async def painel_parceiros(message: types.Message, state: FSMContext):
                 f"🔑 App ID: <code>{mascarar_segredo(p.get('app_id'))}</code>\n"
                 f"📥 Origem: {rotulo_alvo(p.get('canal_origem'))}\n"
                 f"📤 Destino: {rotulo_alvo(p.get('canal_destino'))}\n"
-                f"⏳ D+{p.get('dias_atraso')}  ·  📦 {p.get('limite_diario')} vídeos/dia"
-                "</blockquote>\n\n"
+                f"⏳ D+{p.get('dias_atraso')}  ·  📦 {p.get('limite_diario')} vídeos/dia\n"
+                f"🤖 Acesso à origem: {'✅ conectado' if p.get('origem_ok') else '⏳ aguardando entrada'}"
+                + (f"\n<i>{p.get('origem_erro')}</i>" if p.get('origem_erro') and not p.get('origem_ok') else "")
+                + "</blockquote>\n\n"
             )
 
     texto += "Escolha a ação desejada:"
@@ -3238,20 +3247,33 @@ async def parceiro_receber_origem(message: types.Message, state: FSMContext):
     try: await msg.delete()
     except Exception: pass
 
-    # 🚫 Sem canal real, sem avanço: gravar um ID inexistente quebraria o robô do parceiro
+    entrada = (message.text or "").strip()
+
+    # 🚫 A origem precisa de @username ou link de convite: o Telegram NÃO permite
+    # que o userbot entre num canal só com o ID numérico.
+    if not (entrada.startswith("@") or "t.me/" in entrada):
+        await message.answer(
+            "❌ <b>Formato não aceito para a origem.</b>\n\n"
+            "Para o robô conseguir entrar sozinho no canal, envie:\n"
+            "• <b>@usuariodocanal</b> — se for público\n"
+            "• <b>t.me/+AbCdEf...</b> — link de convite, se for privado\n\n"
+            "<i>ID numérico não funciona aqui: é limitação do próprio Telegram.</i>",
+            parse_mode="HTML", reply_markup=teclado_wizard_nav
+        )
+        return
+
     if not sucesso:
         await message.answer(
             "❌ <b>Canal não encontrado.</b>\n\n"
-            "O bot precisa <b>ser membro</b> do canal para conseguir ler os vídeos.\n\n"
-            "• Adicione o bot ao canal e tente de novo\n"
-            "• Ou envie outro <b>@username, ID ou link</b>",
+            "Confira se o <b>@username</b> ou o <b>link de convite</b> estão corretos e tente de novo.",
             parse_mode="HTML", reply_markup=teclado_wizard_nav
         )
         return
 
     salvar_nome_grupo(str(id_final).split(":")[0], nome_chat)
     await message.answer(f"✅ Origem validada: <b>{nome_chat}</b>", parse_mode="HTML")
-    await state.update_data(canal_origem=id_final)
+    # Guarda o formato ORIGINAL: é ele que o userbot usa para entrar no canal
+    await state.update_data(canal_origem=entrada)
     await voltar_passo_parceiro(message, state, "destino")
 
 @dp.message(SubmissaoAdminFluxo.parceiro_destino)
