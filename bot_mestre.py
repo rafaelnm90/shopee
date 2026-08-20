@@ -1651,6 +1651,118 @@ def registrar_lixeira(msg_id, chat_id=GRUPO_ID):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao registrar lixeira no banco: {e}")
 
+
+# ==========================================
+# 🧹 FAXINA DE ARQUIVOS ÓRFÃOS
+# A pasta temp/ é área de passagem, mas downloads interrompidos ficam para trás.
+# Regra de ouro: NUNCA apagar por idade sozinha — sempre cruzar com as filas,
+# senão os vídeos agendados do Espião somem e a fila inteira se perde.
+# ==========================================
+HORAS_PROTEGIDAS_TEMP = 24        # arquivos recentes podem estar sendo processados
+DIAS_RETENCAO_ARCHIVE = 30        # vídeos dos Autorais já publicados
+
+def _caminhos_protegidos():
+    """Todo arquivo referenciado por alguma fila pendente. Estes são intocáveis."""
+    protegidos = set()
+
+    # 🕵️ Fila do Espião
+    try:
+        for item in ler_fila_clonagem().get("fila", []):
+            if not item.get("processado") and item.get("caminho_video"):
+                protegidos.add(os.path.abspath(item["caminho_video"]))
+    except Exception:
+        pass
+
+    # 🔄 Fila do Espelhador
+    try:
+        dados = ler_config_bd("fila_espelhador", {}, arquivo_legado="fila_espelhador.json")
+        for item in (dados.get("fila", dados) if isinstance(dados, dict) else dados) or []:
+            if isinstance(item, dict) and not item.get("processado"):
+                for chave in ("caminho_video", "caminho", "caminho_arquivo"):
+                    if item.get(chave):
+                        protegidos.add(os.path.abspath(item[chave]))
+    except Exception:
+        pass
+
+    # 👥 Fila dos parceiros
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("SELECT caminho_video FROM fila_parceiros WHERE processado = 0")
+        for (c,) in cursor.fetchall():
+            if c: protegidos.add(os.path.abspath(c))
+        conexao.close()
+    except Exception:
+        pass
+
+    return protegidos
+
+def limpar_arquivos_orfaos():
+    """Apaga o que não está em fila nenhuma e já passou do prazo de proteção."""
+    try:
+        protegidos = _caminhos_protegidos()
+        limite = time.time() - (HORAS_PROTEGIDAS_TEMP * 3600)
+        removidos, bytes_liberados = 0, 0
+
+        for raiz, _dirs, arquivos in os.walk("temp"):
+            for nome in arquivos:
+                caminho = os.path.join(raiz, nome)
+                try:
+                    if os.path.abspath(caminho) in protegidos:
+                        continue
+                    if os.path.getmtime(caminho) > limite:
+                        continue
+                    tamanho = os.path.getsize(caminho)
+                    os.remove(caminho)
+                    removidos += 1
+                    bytes_liberados += tamanho
+                except Exception:
+                    pass
+
+        # 📦 archive/: vídeos já publicados, retenção por idade
+        limite_archive = time.time() - (DIAS_RETENCAO_ARCHIVE * 86400)
+        for raiz, _dirs, arquivos in os.walk("archive"):
+            for nome in arquivos:
+                caminho = os.path.join(raiz, nome)
+                try:
+                    if os.path.abspath(caminho) in protegidos:
+                        continue
+                    if os.path.getmtime(caminho) > limite_archive:
+                        continue
+                    tamanho = os.path.getsize(caminho)
+                    os.remove(caminho)
+                    removidos += 1
+                    bytes_liberados += tamanho
+                except Exception:
+                    pass
+
+        if EXIBIR_LOGS:
+            if removidos:
+                logger.info(f"🧹 [Faxina] {removidos} arquivo(s) órfão(s) removido(s) — "
+                            f"{bytes_liberados / (1024**2):.0f} MB liberados. "
+                            f"{len(protegidos)} arquivo(s) preservado(s) por estarem em fila.")
+            else:
+                logger.info(f"🧹 [Faxina] Nada a remover. {len(protegidos)} arquivo(s) em fila protegidos.")
+        return removidos, bytes_liberados
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Faxina] Falha ao limpar órfãos: {e}")
+        return 0, 0
+
+def relatorio_disco():
+    """Resumo do espaço ocupado pelas pastas do projeto."""
+    linhas = []
+    for pasta in ("temp", "archive", "parceiros"):
+        total, qtd = 0, 0
+        for raiz, _dirs, arquivos in os.walk(pasta):
+            for nome in arquivos:
+                try:
+                    total += os.path.getsize(os.path.join(raiz, nome))
+                    qtd += 1
+                except Exception:
+                    pass
+        linhas.append(f"{pasta}/: {qtd} arq · {total / (1024**2):.0f} MB")
+    return "  |  ".join(linhas)
+
 async def varredor_de_lixeira():
     if EXIBIR_LOGS: logger.info("🧹 Iniciando varredura diária da lixeira persistente (03h00)...")
     try:
@@ -1676,8 +1788,12 @@ async def varredor_de_lixeira():
         conexao.close()
         if EXIBIR_LOGS: logger.info("✅ Lixeira persistente (SQLite) esvaziada com sucesso.")
 
-        # ⏳ Aproveita a faxina para podar a memória antiga dos achadinhos
+                # ⏳ Aproveita a faxina para podar a memória antiga dos achadinhos
         limpar_achadinhos_antigos()
+
+        # 🧹 Remove arquivos órfãos, cruzando com TODAS as filas antes de apagar
+        limpar_arquivos_orfaos()
+        if EXIBIR_LOGS: logger.info(f"💾 [Disco] {relatorio_disco()}")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro na varredura da lixeira: {e}")
 
