@@ -2456,7 +2456,12 @@ def agendar_tarefas_diarias(escopo="todos"):
                 if gap > maior:
                     maior, melhor = gap, pontos[i] + gap / 2
             if melhor and maior >= timedelta(minutes=folga_min * 2):
-                return melhor.replace(second=0, microsecond=0)
+                encaixe = melhor.replace(second=0, microsecond=0)
+                # 🛡️ Trava final: o ponto médio da lacuna pode cair FORA da janela
+                # configurada quando há poucos vídeos. A janela manda sempre.
+                if encaixe < limite_ini or encaixe > limite_fim:
+                    return None
+                return encaixe
             return None
 
         for tipo, indice, config in tarefas_virais:
