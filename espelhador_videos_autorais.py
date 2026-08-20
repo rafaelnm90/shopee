@@ -905,10 +905,16 @@ async def interceptar_e_espelhar(event):
                         fila_dados["fila"] = [v for v in fila_dados.get("fila", []) if v.get("id_unico") != item_descartado.get("id_unico")]
                         if EXIBIR_LOGS: logger.info(f"🔄 [Sorteio Autorais] Vídeo nº {total_ofertas} do dia tomou a vaga de {item_descartado.get('id_unico')}.")
                     
+                    # ✅ Grava o nome que a IA já produziu, no formato que o painel lê.
+                    # Antes salvava o texto do concorrente, e o relatório caía no
+                    # placeholder "Aguardando análise da IA".
+                    nome_produto_autoral = texto_ia.split('\n')[0].strip() if texto_ia else "Produto Exclusivo"
+                    legenda_autoral = f"📦 Item: {nome_produto_autoral}\n\n{legenda_final}"
+
                     fila_dados.setdefault("fila", []).append({
                         "id_unico": id_unico,
                         "msg_id_destino": msg_enviada.id,
-                        "legenda": texto_convertido,
+                        "legenda": legenda_autoral,
                         "caminho_arquivo": novo_caminho,
                         "data_captura": agora.strftime("%Y-%m-%d %H:%M:%S"),
                         "data_alvo": data_alvo,
