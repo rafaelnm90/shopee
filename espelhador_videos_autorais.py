@@ -11,8 +11,9 @@ import hashlib
 import aiohttp
 import re
 from datetime import datetime, timedelta
-from telethon import TelegramClient, events
+from telethon import TelegramClient, events, functions
 from telethon.tl.types import MessageMediaDocument
+from telethon.errors import FloodWaitError, UserAlreadyParticipantError, InviteHashExpiredError
 from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from utils import registrar_erro_json
@@ -224,6 +225,97 @@ def ler_fila_publico():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila_publico do SQLite: {e}")
         return {"fila": []}
+
+# ==========================================
+# 👥 ENTRADA AUTOMÁTICA NOS CANAIS DOS PARCEIROS
+# Uma por ciclo, com intervalo longo: entrar em vários canais seguidos é o
+# padrão que o Telegram pune. A conta do userbot é a peça mais crítica do sistema.
+# ==========================================
+INTERVALO_ENTRADA_PARCEIROS = 900   # 15 min entre uma entrada e outra
+
+def ler_parceiros_pendentes():
+    """Parceiros ativos cujo canal de origem o userbot ainda não acessa."""
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao.row_factory = sqlite3.Row
+        cursor = conexao.cursor()
+        try:
+            cursor.execute("SELECT * FROM parceiros WHERE ativo = 1 AND (origem_ok IS NULL OR origem_ok = 0)")
+            dados = [dict(l) for l in cursor.fetchall()]
+        except sqlite3.OperationalError:
+            dados = []   # coluna/tabela ainda não existe
+        conexao.close()
+        return dados
+    except Exception:
+        return []
+
+def marcar_origem_parceiro(parceiro_id, status, motivo=""):
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("UPDATE parceiros SET origem_ok = ?, origem_erro = ? WHERE id = ?",
+                       (int(status), str(motivo)[:200], int(parceiro_id)))
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao marcar origem: {e}")
+
+async def entrar_no_canal_parceiro(alvo):
+    """
+    Devolve (sucesso, motivo). O Telegram só permite entrar via @username ou
+    link de convite — ID numérico não serve, por limitação da própria API.
+    """
+    alvo = str(alvo or "").strip()
+    if not alvo:
+        return False, "origem vazia"
+
+    try:
+        # Já temos acesso? Então não há o que fazer.
+        try:
+            await client.get_entity(alvo)
+            return True, "já acessível"
+        except Exception:
+            pass
+
+        if "+" in alvo or "joinchat" in alvo:
+            hash_convite = alvo.split("+")[-1].split("/")[-1]
+            await client(functions.messages.ImportChatInviteRequest(hash_convite))
+            return True, "entrou pelo link de convite"
+
+        if alvo.startswith("@") or ("t.me/" in alvo and "+" not in alvo):
+            usuario = alvo.split("t.me/")[-1].replace("@", "").strip("/")
+            await client(functions.channels.JoinChannelRequest(usuario))
+            return True, "entrou pelo @username"
+
+        return False, "ID numérico não permite entrada automática: use @username ou link de convite"
+
+    except UserAlreadyParticipantError:
+        return True, "já era membro"
+    except InviteHashExpiredError:
+        return False, "link de convite expirado"
+    except FloodWaitError as e:
+        return False, f"Telegram pediu espera de {e.seconds}s (limite anti-spam)"
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+async def loop_entrada_parceiros():
+    """Entra em UM canal por ciclo. Nunca em lote."""
+    await asyncio.sleep(60)
+    while True:
+        try:
+            pendentes = ler_parceiros_pendentes()
+            if pendentes:
+                p = pendentes[0]
+                if EXIBIR_LOGS: logger.info(f"👥 [Parceiros] Tentando acessar a origem de '{p.get('nome')}'...")
+                ok, motivo = await entrar_no_canal_parceiro(p.get("canal_origem"))
+                marcar_origem_parceiro(p.get("id"), 1 if ok else 0, motivo)
+                if EXIBIR_LOGS:
+                    icone = "✅" if ok else "⚠️"
+                    logger.info(f"{icone} [Parceiros] '{p.get('nome')}': {motivo}")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Falha no loop de entrada: {e}")
+
+        await asyncio.sleep(INTERVALO_ENTRADA_PARCEIROS)
 
 def reservar_video(msg_id, parceiro_id=0):
     """
@@ -843,6 +935,7 @@ async def main():
 
     # Aciona o Loop do motor em Background
     asyncio.create_task(processar_fila_autorais_loop())
+    asyncio.create_task(loop_entrada_parceiros())   # 👥 entrada nos canais dos parceiros
     
     if EXIBIR_LOGS: logger.info("🤖 Sistema a rodar. A escutar o grupo de origem continuamente...")
     await client.run_until_disconnected()
