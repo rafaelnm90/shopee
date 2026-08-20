@@ -3167,7 +3167,7 @@ async def motor_repost_publico_step():
                 user_mention = await obter_credito_repost()
 
                 legenda_final = (
-                    f"👤 Dica enviada por: {user_mention}\n\n"
+                    f"👤 Vídeo enviado por: {user_mention}\n\n"
                     f"<b>{nome_produto}</b>\n\n"
                     f"🔗 <b>Link do Produto:</b>\n{link_shopee}\n\n"
                     f"<i>#Recomendado #Shopee</i>"
@@ -6156,7 +6156,7 @@ async def manual_repost_autoral(message: types.Message):
     nome_produto = match_item.group(1).strip() if match_item else "Produto Exclusivo"
 
     legenda_final = (
-        f"👤 Dica enviada por: {user_mention}\n\n"
+        f"👤 Vídeo enviado por: {user_mention}\n\n"
         f"<b>{nome_produto}</b>\n\n"
         f"🔗 <b>Link do Produto:</b>\n{link_shopee}\n\n"
         f"<i>#Recomendado #Shopee</i>"
@@ -12091,24 +12091,21 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
             hashtags_ia = linhas[2].strip() if len(linhas) > 2 else ""
 
                         # 🎨 Mesma identidade visual do grupo principal: cada plataforma no seu bloco
-            linha_divisoria = "━━━━━━━━━━━━━━━"
-
+            # 📱 Sem linha divisória: caractere repetido quebra o layout no celular.
+            # A separação vem das quebras de linha e do emoji que encabeça cada bloco.
             legenda_final = (
-                f"👤 Dica enviada por: {user_mention}\n\n"
+                f"👤 Vídeo enviado por: {user_mention}\n\n"
                 f"<b>{nome_produto}</b>\n\n"
-                f"{linha_divisoria}\n\n"
             )
             if link_shopee:
                 legenda_final += (
                     "🔶 <b>SHOPEE</b> 🔶\n"
                     f"🔗 Link do Produto:\n{link_shopee}\n\n"
                 )
-                if link_tiktok:
-                    legenda_final += f"{linha_divisoria}\n\n"
             if link_tiktok:
                 legenda_final += (
                     "⬛ <b>TIKTOK</b> ⬛\n"
-                    f"🎬 Link do Vídeo:\n{link_tiktok}\n\n"
+                    f"🔗 Link do Produto:\n{link_tiktok}\n\n"
                 )
             if hashtags_ia:
                 legenda_final += f"<i>{hashtags_ia}</i>"
