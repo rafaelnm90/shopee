@@ -438,6 +438,78 @@ def salvar_fila_espelhador(dados):
     with open("fila_espelhador.json", "w") as f:
         json.dump(dados, f, indent=4)
 
+# ==========================================
+# 🧠 ANÁLISE ANTECIPADA DA IA (Fila do Espião)
+# Roda em segundo plano, UM vídeo por vez. Antecipar na captura causaria rajada
+# de chamadas quando vários canais postam juntos — e é assim que vem o 429.
+# Com o nome já salvo, a publicação não precisa mais chamar a IA.
+# ==========================================
+INTERVALO_ANALISE_ANTECIPADA = 45   # segundos entre uma análise e outra
+
+PROMPT_NOME_PRODUTO = (
+    "Assista ao vídeo INTEIRO e identifique qual é o produto demonstrado. "
+    "Sua resposta deve conter EXATAMENTE duas linhas.\n"
+    "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no final "
+    "(Exemplo: Tênis Casual Feminino 👟).\n"
+    "Na segunda linha, inclua as hashtags correspondentes aos setores do produto, separadas APENAS por espaços. "
+    "REGRA DE CONTEXTO: Categorize pela utilidade prática e ambiente de uso, nunca por associação literal de palavras.\n"
+    "REGRA ABSOLUTA: Você só pode escolher hashtags desta lista exata, podendo combinar mais de uma: "
+    "#RoupasFemininas #SapatosFemininos #CelularesEDispositivos #AcessoriosParaVeiculos #Relogios "
+    "#AlimentosEBebidas #CasaEDecoracao #SapatosMasculinos #EsportesELazer #BolsasMasculinas #BolsasFemininas "
+    "#RoupasPlusSize #ModaInfantil #Eletrodomesticos #Motocicletas #AnimaisDomesticos #CamerasEDrones #Beleza "
+    "#AcessoriosDeModa #BrinquedosEHobbies #Papelaria #LivrosERevistas #RoupasMasculinas #Automoveis #MaeEBebe "
+    "#ComputadoresEAcessorios #Saude #ViagensEBagagens #JogosEConsoles #Audio.\n"
+    "É proibido criar textos de venda, descrições, inventar hashtags ou adicionar frases de encerramento."
+)
+
+async def analisar_fila_espiao_loop():
+    """Preenche o nome do produto dos clones que ainda não têm, um de cada vez."""
+    await asyncio.sleep(120)
+    while True:
+        try:
+            dados = ler_fila_clonagem()
+            fila = dados.get("fila", [])
+
+            pendente = None
+            for item in fila:
+                if item.get("processado"):
+                    continue
+                if item.get("legenda_ia"):
+                    continue
+                if int(item.get("tentativas_ia_captura", 0)) >= 3:
+                    continue
+                caminho = item.get("caminho_video")
+                if caminho and os.path.exists(caminho):
+                    pendente = item
+                    break
+
+            if pendente:
+                if EXIBIR_LOGS: logger.info(f"🧠 [Análise Antecipada] Processando {pendente.get('id')}...")
+                texto_ia = await analisar_video_gemini(pendente.get("caminho_video"), PROMPT_NOME_PRODUTO, EXIBIR_LOGS)
+
+                dados = ler_fila_clonagem()
+                for item in dados.get("fila", []):
+                    if item.get("id") != pendente.get("id"):
+                        continue
+                    if texto_ia:
+                        linhas = texto_ia.split("\n")
+                        nome = linhas[0].strip()
+                        tags = "\n".join(linhas[1:]).strip() if len(linhas) > 1 else ""
+                        item["legenda_ia"] = texto_ia
+                        # 📦 Formato que o painel de filas sabe ler
+                        item["legenda"] = f"📦 Item: {nome}" + (f"\n\n{tags}" if tags else "")
+                        if EXIBIR_LOGS: logger.info(f"✅ [Análise Antecipada] {pendente.get('id')} → {nome}")
+                    else:
+                        item["tentativas_ia_captura"] = int(item.get("tentativas_ia_captura", 0)) + 1
+                        if EXIBIR_LOGS: logger.warning(f"⚠️ [Análise Antecipada] IA falhou ({item['tentativas_ia_captura']}/3) em {pendente.get('id')}.")
+                    break
+                salvar_fila_clonagem(dados)
+
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Análise Antecipada] Falha no loop: {e}")
+
+        await asyncio.sleep(INTERVALO_ANALISE_ANTECIPADA)
+
 async def processar_fila_espelhador_loop():
     from datetime import timedelta
     import random
@@ -1115,6 +1187,7 @@ async def main():
     if EXIBIR_LOGS: logger.info(f"📡 Radar ativo para {len(alvos)} concorrentes.")
     
     asyncio.create_task(processar_fila_espelhador_loop())
+    asyncio.create_task(analisar_fila_espiao_loop())   # 🧠 nome do produto antecipado
     asyncio.create_task(monitorar_status_alvos())
     asyncio.create_task(monitorar_status_espelhos())
     asyncio.create_task(monitorar_topicos_submissao()) # ✅ NOVO GATILHO
