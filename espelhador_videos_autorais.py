@@ -298,6 +298,131 @@ async def entrar_no_canal_parceiro(alvo):
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
 
+# ==========================================
+# 🎣 CAPTURA POR PARCEIRO
+# Roda no MESMO evento do userbot, depois do sorteio do dono — que já reservou
+# o que era dele. Aqui cada parceiro sorteia a própria cota do que sobrou.
+# ==========================================
+def ler_parceiros_ativos_com_acesso():
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao.row_factory = sqlite3.Row
+        cursor = conexao.cursor()
+        try:
+            cursor.execute("SELECT * FROM parceiros WHERE ativo = 1 AND origem_ok = 1")
+            dados = [dict(l) for l in cursor.fetchall()]
+        except sqlite3.OperationalError:
+            dados = []
+        conexao.close()
+        return dados
+    except Exception:
+        return []
+
+def _garantir_fila_parceiros(cursor):
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS fila_parceiros (
+            id_unico TEXT PRIMARY KEY,
+            parceiro_id INTEGER,
+            caminho_video TEXT,
+            link_original TEXT,
+            data_captura TEXT,
+            data_alvo TEXT,
+            horario_disparo TEXT DEFAULT '',
+            processado INTEGER DEFAULT 0,
+            data_postagem TEXT DEFAULT ''
+        )
+    ''')
+
+def contar_fila_parceiro(parceiro_id, data_alvo):
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_fila_parceiros(cursor)
+        cursor.execute("SELECT COUNT(*) FROM fila_parceiros WHERE parceiro_id = ? AND data_alvo = ? AND processado = 0",
+                       (int(parceiro_id), data_alvo))
+        total = cursor.fetchone()[0]
+        conexao.close()
+        return total
+    except Exception:
+        return 0
+
+def inserir_fila_parceiro(parceiro_id, caminho, link, data_alvo):
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_fila_parceiros(cursor)
+        id_unico = f"p{parceiro_id}_{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}"
+        cursor.execute(
+            "INSERT INTO fila_parceiros (id_unico, parceiro_id, caminho_video, link_original, data_captura, data_alvo) VALUES (?, ?, ?, ?, ?, ?)",
+            (id_unico, int(parceiro_id), caminho, link, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), data_alvo)
+        )
+        conexao.commit()
+        conexao.close()
+        return id_unico
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao inserir na fila: {e}")
+        return None
+
+async def capturar_para_parceiros(event, chat_id, link_capturado):
+    """
+    Chamada em TODA mensagem com vídeo + link Shopee. Para cada parceiro cujo
+    canal de origem seja este chat, roda o sorteio dele sobre o que o dono não levou.
+    """
+    parceiros = ler_parceiros_ativos_com_acesso()
+    if not parceiros:
+        return
+
+    try:
+        doc_id = event.media.document.id
+    except Exception:
+        doc_id = None
+    chaves = [f"doc_{doc_id}" if doc_id else None, chave_produto(link_capturado)]
+
+    # 🔒 O dono já reservou? Então este vídeo não é de ninguém mais.
+    if video_ja_reservado(chaves):
+        return
+
+    for p in parceiros:
+        try:
+            origem = str(p.get("canal_origem") or "")
+            try:
+                entidade = await client.get_entity(origem)
+                if int(getattr(entidade, "id", 0)) != int(str(chat_id).replace("-100", "")):
+                    continue
+            except Exception:
+                continue
+
+            if not ha_espaco_para_parceiros():
+                return
+
+            dias = int(p.get("dias_atraso", 30))
+            limite = int(p.get("limite_diario", 6))
+            data_alvo = (datetime.now() + timedelta(days=dias)).strftime("%Y-%m-%d")
+
+            if contar_fila_parceiro(p.get("id"), data_alvo) >= limite:
+                if EXIBIR_LOGS: logger.info(f"📦 [Parceiro {p.get('nome')}] Cota de {data_alvo} já cheia. Ignorando.")
+                continue
+
+            # 🔒 Reserva ANTES de baixar: se outro parceiro pegou no mesmo instante, para aqui
+            if not reservar_video(chaves, parceiro_id=p.get("id")):
+                continue
+
+            destino = os.path.join(pasta_do_parceiro(p.get("id")), f"{int(datetime.now().timestamp())}_{random.randint(1000,9999)}.mp4")
+            await client.download_media(event.media, file=destino)
+
+            if not os.path.exists(destino):
+                if EXIBIR_LOGS: logger.warning(f"⚠️ [Parceiro {p.get('nome')}] Download falhou.")
+                continue
+
+            inserir_fila_parceiro(p.get("id"), destino, link_capturado, data_alvo)
+            if EXIBIR_LOGS:
+                logger.info(f"🎯 [Parceiro {p.get('nome')}] Vídeo capturado e agendado para {data_alvo}. "
+                            f"Disco: {espaco_usado_parceiros_gb():.2f} GB de {TETO_DISCO_PARCEIROS_GB} GB.")
+            break   # um vídeo pertence a UM parceiro só
+
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Falha ao capturar para '{p.get('nome')}': {e}")
+
 async def loop_entrada_parceiros():
     """Entra em UM canal por ciclo. Nunca em lote."""
     await asyncio.sleep(60)
@@ -317,32 +442,117 @@ async def loop_entrada_parceiros():
 
         await asyncio.sleep(INTERVALO_ENTRADA_PARCEIROS)
 
-def reservar_video(msg_id, parceiro_id=0):
+# ==========================================
+# 💾 ARMAZENAMENTO DOS VÍDEOS DOS PARCEIROS
+# Os arquivos ficam em disco até a data de publicação (D+X do parceiro).
+# Teto rígido: se estourar, novas capturas são RECUSADAS em vez de encher o disco
+# e derrubar todo o sistema (Espião, Autorais e o SQLite junto).
+# ==========================================
+PASTA_PARCEIROS = "parceiros"
+TETO_DISCO_PARCEIROS_GB = 10
+
+def espaco_usado_parceiros_gb():
+    total = 0
+    try:
+        for raiz, _dirs, arquivos in os.walk(PASTA_PARCEIROS):
+            for nome in arquivos:
+                try:
+                    total += os.path.getsize(os.path.join(raiz, nome))
+                except OSError:
+                    pass
+    except Exception:
+        pass
+    return total / (1024 ** 3)
+
+def ha_espaco_para_parceiros():
+    usado = espaco_usado_parceiros_gb()
+    if usado >= TETO_DISCO_PARCEIROS_GB:
+        if EXIBIR_LOGS:
+            logger.warning(f"🛑 [Parceiros] Teto de disco atingido ({usado:.1f} GB de {TETO_DISCO_PARCEIROS_GB} GB). "
+                           "Novas capturas recusadas até liberar espaço.")
+        return False
+    return True
+
+def pasta_do_parceiro(parceiro_id):
+    caminho = os.path.join(PASTA_PARCEIROS, str(parceiro_id))
+    os.makedirs(caminho, exist_ok=True)
+    return caminho
+
+def chave_produto(link):
     """
-    🔒 RESERVA GLOBAL — garante que um vídeo nunca saia em dois canais.
-    parceiro_id = 0 significa "reservado pelo dono", que sorteia primeiro.
-    A PRIMARY KEY faz o trabalho: quem chegar depois recebe False e pega outro.
+    Normaliza o link da Shopee para identificar o PRODUTO, não a URL.
+    O mesmo item com dois links curtos diferentes gera a mesma chave.
     """
+    import re
+    if not link:
+        return None
+    alvo = str(link).split("?")[0].strip().lower()
+    # Formato longo: /product/<loja>/<item> ou /<nome>-i.<loja>.<item>
+    m = re.search(r'/product/(\d+)/(\d+)', alvo) or re.search(r'-i\.(\d+)\.(\d+)', alvo)
+    if m:
+        return f"prod_{m.group(1)}_{m.group(2)}"
+    # Link curto: usa o código dele como identidade
+    m = re.search(r'(?:s\.shopee\.com\.br|shp\.ee|shope\.ee|br\.shp\.ee)/([A-Za-z0-9]+)', alvo)
+    if m:
+        return f"curto_{m.group(1)}"
+    return None
+
+def _garantir_tabela_reservas(cursor):
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS videos_reservados (
+            video_id TEXT PRIMARY KEY,
+            parceiro_id INTEGER,
+            data_reserva TEXT
+        )
+    ''')
+
+def video_ja_reservado(chaves):
+    """True se QUALQUER uma das chaves já pertence a alguém."""
+    chaves = [str(c) for c in chaves if c]
+    if not chaves:
+        return False
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS videos_reservados (
-                video_id TEXT PRIMARY KEY,
-                parceiro_id INTEGER,
-                data_reserva TEXT
+        _garantir_tabela_reservas(cursor)
+        marcadores = ",".join("?" * len(chaves))
+        cursor.execute(f"SELECT 1 FROM videos_reservados WHERE video_id IN ({marcadores}) LIMIT 1", chaves)
+        achou = cursor.fetchone() is not None
+        conexao.close()
+        return achou
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Reserva] Erro ao consultar: {e}")
+        return True   # na dúvida, não arrisca duplicar
+
+def reservar_video(chaves, parceiro_id=0):
+    """
+    🔒 RESERVA GLOBAL DUPLA — bloqueia por ARQUIVO e por PRODUTO.
+    Assim o mesmo item não sai duas vezes nem quando os vídeos são diferentes.
+    parceiro_id = 0 significa "reservado pelo dono", que sorteia primeiro.
+    """
+    if not isinstance(chaves, (list, tuple)):
+        chaves = [chaves]
+    chaves = [str(c) for c in chaves if c]
+    if not chaves:
+        return False
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_tabela_reservas(cursor)
+        agora_txt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        reservou = False
+        for c in chaves:
+            cursor.execute(
+                "INSERT OR IGNORE INTO videos_reservados (video_id, parceiro_id, data_reserva) VALUES (?, ?, ?)",
+                (c, int(parceiro_id), agora_txt)
             )
-        ''')
-        cursor.execute(
-            "INSERT OR IGNORE INTO videos_reservados (video_id, parceiro_id, data_reserva) VALUES (?, ?, ?)",
-            (str(msg_id), int(parceiro_id), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-        )
-        reservou = cursor.rowcount > 0
+            if cursor.rowcount > 0:
+                reservou = True
         conexao.commit()
         conexao.close()
         return reservou
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Reserva] Erro ao reservar o vídeo {msg_id}: {e}")
+        if EXIBIR_LOGS: logger.error(f"❌ [Reserva] Erro ao reservar {chaves}: {e}")
         return False
 
 def salvar_fila_publico(dados):
@@ -599,6 +809,13 @@ async def interceptar_e_espelhar(event):
             if EXIBIR_LOGS: logger.info("⏭️ Postagem ignorada: Não contém link da Shopee (nem embutido).")
             return
 
+        # 👥 Oferece o vídeo aos PARCEIROS. Roda antes do fluxo do dono porque
+        # a função consulta a reserva: se o vídeo já for seu, ela sai na hora.
+        try:
+            await capturar_para_parceiros(event, getattr(chat, 'id', None), link_capturado)
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro na captura paralela: {e}")
+
         if EXIBIR_LOGS: logger.info("🔗 A converter o link da Shopee para o seu ID de afiliado via API Central...")
         link_novo = await converter_link_shopee(link_capturado, "geral", EXIBIR_LOGS)
         
@@ -757,9 +974,14 @@ async def interceptar_e_espelhar(event):
                             })
                             salvar_fila_publico(fila_pub)
 
-                            # 🔒 Marca o vídeo como do DONO. Parceiros consultam esta tabela
-                            # antes de sortear, então nunca pegam o que já é seu.
-                            reservar_video(msg_enviada.id, parceiro_id=0)
+                            # 🔒 Marca o vídeo como do DONO, por ARQUIVO e por PRODUTO.
+                            # Parceiros consultam esta tabela antes de sortear.
+                            try:
+                                doc_id = event.media.document.id
+                            except Exception:
+                                doc_id = None
+                            reservar_video([f"doc_{doc_id}" if doc_id else None,
+                                            chave_produto(link_capturado)], parceiro_id=0)
 
                             if EXIBIR_LOGS: logger.info(f"🎯 [Sorteio Público] Vídeo nº {total_ofertas_pub} do dia SORTEADO para o Grupo Público em {data_alvo_pub}.")
                         else:
