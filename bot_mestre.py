@@ -11910,7 +11910,14 @@ async def processar_fila_espiao(forcar=False):
                 "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
                 "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
             )
-            texto_ia = await analisar_video_gemini(caminho_video, prompt_espiao, EXIBIR_LOGS)
+            # ♻️ REAPROVEITA a análise já feita na captura (loop do motor_userbot).
+            # Sem isto o mesmo vídeo seria analisado DUAS vezes: uma para preencher
+            # o nome na fila e outra aqui, dobrando o consumo de cota do Gemini.
+            texto_ia = item_pendente.get("legenda_ia")
+            if texto_ia:
+                if EXIBIR_LOGS: logger.info(f"♻️ [Espião] Nome reaproveitado da análise antecipada ({item_id}).")
+            else:
+                texto_ia = await analisar_video_gemini(caminho_video, prompt_espiao, EXIBIR_LOGS)
             if not texto_ia: raise Exception("IA não retornou dados.")
         except Exception as e:
             registrar_erro_json(f"processar_fila_espiao IA: {e}", origem="espiao.py")
