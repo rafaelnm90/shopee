@@ -110,6 +110,21 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
         if fim_janela < 24:
             fim_do_dia = minuto_atual_busca.replace(hour=fim_janela, minute=0, second=0)
 
+        # 📐 ESPAÇAMENTO DINÂMICO: divide a janela restante pela quantidade de itens.
+        # O valor configurado vira PISO, nunca teto — senão poucos vídeos se amontoam
+        # nas primeiras horas e o resto do dia fica vazio.
+        passo_base_min = base_min or 10
+        variacao_efetiva = var_min
+        if usar_espaco_organico:
+            minutos_restantes = max(1, int((fim_do_dia - minuto_atual_busca).total_seconds() / 60))
+            alvo = minutos_restantes // max(1, len(itens_para_agendar))
+            passo_base_min = max(base_min, alvo)
+            # Variação proporcional: quanto maior o intervalo, mais folga para parecer humano
+            variacao_efetiva = max(var_min, int(passo_base_min * 0.25))
+            if EXIBIR_LOGS:
+                logger.info(f"📐 [Motor Filas] {len(itens_para_agendar)} item(ns) em {minutos_restantes} min "
+                            f"→ espaçamento de {passo_base_min} ± {variacao_efetiva} min.")
+
         for item in itens_para_agendar:
             if usar_espaco_organico:
                 # 🗓️ Não cabe mais hoje? Abre o próximo dia na hora de início da janela.
@@ -135,7 +150,8 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
                         pass
 
                 item["horario_disparo"] = minuto_atual_busca.strftime("%Y-%m-%d %H:%M:%S")
-                passo = random.randint(max(60, (base_min - var_min) * 60), (base_min + var_min) * 60)
+                passo = random.randint(max(60, (passo_base_min - variacao_efetiva) * 60),
+                                       (passo_base_min + variacao_efetiva) * 60)
                 minuto_atual_busca += timedelta(seconds=passo)
                 continue
 
