@@ -325,6 +325,7 @@ class SubmissaoAdminFluxo(StatesGroup):
     aguardando_confirmacao_pausa_repost = State()
     aguardando_repost_origem = State()
     aguardando_repost_destino = State() # ✅ NOVO ESTADO AQUI
+    aguardando_confirmacao_destino = State()   # ✅ Confirma troca de origem/destino
     
     # ✅ NOVOS ESTADOS: Edição Modular do Grupo e Tópicos
     aguardando_selecao_edicao_grupo = State()
@@ -2705,7 +2706,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     dados_rotina = ler_config_rotina()
     status_rotinas = "🔴 PAUSADAS" if dados_rotina.get("pausado_publico") else "🟢 ATIVAS"
 
-    texto = (
+        texto = (
         "📬 <b>PAINEL DO GRUPO PÚBLICO</b>\n"
         "<i>Os três robôs que atuam no seu Supergrupo.</i>\n\n"
 
@@ -2713,19 +2714,19 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         "<blockquote>"
         f"📥 <b>Escuta</b>\n{display_escuta}\n"
         f"📤 <b>Publica</b>\n{display_vitrine}"
-        "</blockquote>\n"
+        "</blockquote>\n\n"
 
         f"♻️ <b>ROBÔ REPOSTADOR</b>  ·  {repost_status}\n"
         "<blockquote>"
         f"📥 <b>Escuta</b>\n{display_repost_origem}\n"
         f"📤 <b>Publica</b>{display_repost_destino}\n"
         f"⏳ Oculto por <b>{dias} dias</b>  ·  📦 <b>{limite} vídeos/dia</b>"
-        "</blockquote>\n"
+        "</blockquote>\n\n"
 
         f"⏰ <b>ROTINAS DO GRUPO</b>  ·  {status_rotinas}\n"
         "<blockquote>"
         f"📢 <b>Publicando nos alvos</b>{display_rotinas}"
-        "</blockquote>\n"
+        "</blockquote>\n\n"
 
         "Escolha a ação desejada:"
     )
@@ -2846,11 +2847,76 @@ async def salvar_destino_repost_publico(message: types.Message, state: FSMContex
              if so_num: id_final = f"-100{so_num.group(1)}"
         await message.answer("⚠️ <b>Aviso:</b> O bot não conseguiu encontrar este canal na base de dados. O ID será salvo mesmo assim.", parse_mode="HTML")
 
+    await pedir_confirmacao_destino(message, state, "repost_destino", "Destino do Repost", id_final, nome_chat if sucesso else None)
+
+# ✅ CONFIRMAÇÃO DE TROCA DE DESTINO/ORIGEM
+# Campos que mudam PARA ONDE o conteúdo vai nunca são salvos direto:
+# o admin vê o "de → para" e precisa aprovar.
+def rotulo_alvo(valor):
+    """Transforma o ID salvo no nome amigável do canal, quando conhecido."""
+    if not valor:
+        return "<i>não definido (usando o padrão)</i>"
+    base = str(valor).split(":")[0].strip()
+    nome = ler_cache_nomes_grupos().get(base)
+    return f"<b>{nome}</b> (<code>{str(valor).replace(':', '_')}</code>)" if nome else f"<code>{str(valor).replace(':', '_')}</code>"
+
+async def pedir_confirmacao_destino(message, state: FSMContext, chave, rotulo, id_novo, nome_novo=None):
     config = ler_submissao_config()
-    config["repost_destino"] = id_final
+    valor_atual = config.get(chave)
+
+    if str(valor_atual) == str(id_novo):
+        await message.answer(f"ℹ️ <b>{rotulo}</b> já estava definido com esse valor. Nada foi alterado.", parse_mode="HTML")
+        await submenu_regras_repost_publico(message, state)
+        return
+
+    if nome_novo:
+        salvar_nome_grupo(str(id_novo).split(":")[0], nome_novo)
+
+    await state.update_data(destino_chave=chave, destino_rotulo=rotulo, destino_id_novo=id_novo)
+    await state.set_state(SubmissaoAdminFluxo.aguardando_confirmacao_destino)
+
+    await message.answer(
+        f"⚠️ <b>Confirmar alteração do {rotulo}?</b>\n\n"
+        f"📍 <b>Antes:</b> {rotulo_alvo(valor_atual)}\n"
+        f"📍 <b>Depois:</b> {rotulo_alvo(id_novo)}\n\n"
+        "<i>Isto muda para onde o conteúdo é enviado. Confirme para aplicar.</i>",
+        parse_mode="HTML",
+        reply_markup=teclado_confirmacao
+    )
+
+@dp.message(SubmissaoAdminFluxo.aguardando_confirmacao_destino)
+async def confirmar_troca_destino(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+
+    if message.text == "Cancelar ❌":
+        await message.answer("❌ Alteração cancelada. Nada foi modificado.")
+        await state.set_state(SubmissaoAdminFluxo.menu_principal)
+        await submenu_regras_repost_publico(message, state)
+        return
+
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, clique em <b>Aprovar ✅</b> ou <b>Cancelar ❌</b>.", parse_mode="HTML")
+        return
+
+    data = await state.get_data()
+    chave = data.get("destino_chave")
+    rotulo = data.get("destino_rotulo", "Destino")
+    id_novo = data.get("destino_id_novo")
+
+    config = ler_submissao_config()
+    valor_antigo = config.get(chave)
+    config[chave] = id_novo
     salvar_submissao_config(config)
-    
-    await message.answer(f"✅ <b>Destino do Repost atualizado com sucesso!</b>\nOs vídeos serão postados em: <code>{id_final}</code>", parse_mode="HTML")
+
+    if EXIBIR_LOGS: logger.info(f"✅ Painel Público: '{chave}' alterado de {valor_antigo} para {id_novo}.")
+
+    await message.answer(
+        f"✅ <b>{rotulo} atualizado com sucesso!</b>\n\n"
+        f"📍 <b>Antes:</b> {rotulo_alvo(valor_antigo)}\n"
+        f"📍 <b>Agora:</b> {rotulo_alvo(id_novo)}",
+        parse_mode="HTML"
+    )
+    await state.set_state(SubmissaoAdminFluxo.menu_principal)
     await submenu_regras_repost_publico(message, state)
 
 # ✅ NOVO: Handlers para Editar a Origem do Repost Público
@@ -2892,12 +2958,7 @@ async def salvar_origem_repost_publico(message: types.Message, state: FSMContext
              if so_num: id_final = f"-100{so_num.group(1)}"
         await message.answer("⚠️ <b>Aviso:</b> O bot não conseguiu encontrar este canal na base de dados. O ID será salvo mesmo assim.", parse_mode="HTML")
 
-    config = ler_submissao_config()
-    config["repost_origem"] = id_final
-    salvar_submissao_config(config)
-    
-    await message.answer(f"✅ <b>Origem do Repost atualizada com sucesso!</b>\nOs vídeos serão puxados de: <code>{id_final}</code>", parse_mode="HTML")
-    await submenu_regras_repost_publico(message, state)
+    await pedir_confirmacao_destino(message, state, "repost_origem", "Origem do Repost", id_final, nome_chat if sucesso else None)
 
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Status do Robô ⏸️")
 async def submenu_status_robo_publico(message: types.Message, state: FSMContext):
