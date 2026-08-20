@@ -13,24 +13,37 @@ SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
 
 logger = logging.getLogger("API_Shopee")
 
-def gerar_headers_e_payload(payload_dict):
-    """Gera a assinatura criptografada e os headers exigidos pela API da Shopee."""
+def gerar_headers_e_payload(payload_dict, app_id=None, app_secret=None):
+    """
+    Gera a assinatura criptografada e os headers exigidos pela API da Shopee.
+    Sem app_id/app_secret usa as chaves do .env (comportamento de sempre).
+    Com eles, assina em nome de outro afiliado — base do modo multiparceiro.
+    """
+    app_id = app_id or SHOPEE_APP_ID
+    app_secret = app_secret or SHOPEE_APP_SECRET
+
     timestamp = int(time.time())
     payload_json = json.dumps(payload_dict, separators=(',', ':'))
     
-    fator_base = f"{SHOPEE_APP_ID}{timestamp}{payload_json}{SHOPEE_APP_SECRET}"
+    fator_base = f"{app_id}{timestamp}{payload_json}{app_secret}"
     assinatura = hashlib.sha256(fator_base.encode('utf-8')).hexdigest()
     
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"SHA256 Credential={SHOPEE_APP_ID}, Timestamp={timestamp}, Signature={assinatura}"
+        "Authorization": f"SHA256 Credential={app_id}, Timestamp={timestamp}, Signature={assinatura}"
     }
     return headers, payload_json
 
-async def converter_link_shopee(link_original, sub_id_nicho="geral", exibir_logs=True):
-    """Encurta o link da Shopee gerando a sua URL de afiliado com rastreio."""
-    if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
-        if exibir_logs: logger.warning("⏳ [API Shopee] Chaves ausentes no .env. Ignorando conversão.")
+async def converter_link_shopee(link_original, sub_id_nicho="geral", exibir_logs=True, app_id=None, app_secret=None):
+    """
+    Encurta o link da Shopee gerando a URL de afiliado com rastreio.
+    app_id/app_secret opcionais: quando informados, o link sai no nome do parceiro.
+    """
+    cred_id = app_id or SHOPEE_APP_ID
+    cred_secret = app_secret or SHOPEE_APP_SECRET
+
+    if not cred_id or not cred_secret:
+        if exibir_logs: logger.warning("⏳ [API Shopee] Chaves ausentes. Ignorando conversão.")
         return link_original
 
     link_processar = link_original
@@ -57,7 +70,7 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", exibir_logs
         }
     }
 
-    headers, payload_json = gerar_headers_e_payload(payload)
+    headers, payload_json = gerar_headers_e_payload(payload, app_id, app_secret)
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -73,10 +86,13 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", exibir_logs
         
     return link_original
 
-async def buscar_ofertas_shopee(keyword, limite=10, exibir_logs=True):
+async def buscar_ofertas_shopee(keyword, limite=10, exibir_logs=True, app_id=None, app_secret=None):
     """Rastreia ofertas e produtos baseados em palavras-chave na Shopee."""
-    if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
-        if exibir_logs: logger.warning("⏳ [API Shopee] Chaves financeiras ausentes no .env.")
+    cred_id = app_id or SHOPEE_APP_ID
+    cred_secret = app_secret or SHOPEE_APP_SECRET
+
+    if not cred_id or not cred_secret:
+        if exibir_logs: logger.warning("⏳ [API Shopee] Chaves financeiras ausentes.")
         return []
 
     endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
@@ -101,7 +117,7 @@ async def buscar_ofertas_shopee(keyword, limite=10, exibir_logs=True):
         }
     }
 
-    headers, payload_json = gerar_headers_e_payload(payload)
+    headers, payload_json = gerar_headers_e_payload(payload, app_id, app_secret)
 
     try:
         async with aiohttp.ClientSession() as session:
