@@ -3,3 +3,8 @@ venv/
 __pycache__/
 
 *.json
+*.db
+*.session
+*.session-journal
+temp/
+archive/
