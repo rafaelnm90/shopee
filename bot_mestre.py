@@ -2706,7 +2706,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     dados_rotina = ler_config_rotina()
     status_rotinas = "🔴 PAUSADAS" if dados_rotina.get("pausado_publico") else "🟢 ATIVAS"
 
-        texto = (
+    texto = (
         "📬 <b>PAINEL DO GRUPO PÚBLICO</b>\n"
         "<i>Os três robôs que atuam no seu Supergrupo.</i>\n\n"
 
