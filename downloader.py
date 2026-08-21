@@ -79,6 +79,14 @@ def teclado_entrar(faltando):
         [InlineKeyboardButton(text=f"➕ Entrar no {nome}", url=link)] for nome, link in faltando
     ])
 
+@router.message()
+async def espiar_tudo(message: types.Message):
+    """TEMPORÁRIO — mostra o que o Telegram manda, para calibrar o filtro."""
+    if EXIBIR_LOGS:
+        logger.info(f"🔬 [Downloader] chat={message.chat.id} ({type(message.chat.id).__name__}) "
+                    f"| thread={message.message_thread_id} ({type(message.message_thread_id).__name__}) "
+                    f"| texto={(message.text or '')[:40]}")
+
 @router.message(F.chat.id == GRUPO_DOWNLOADER, F.message_thread_id == TOPICO_DOWNLOADER)
 async def receber_link(message: types.Message, state: FSMContext):
     if message.from_user.is_bot:
