@@ -117,6 +117,16 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
         variacao_efetiva = var_min
         if usar_espaco_organico:
             minutos_restantes = max(1, int((fim_do_dia - minuto_atual_busca).total_seconds() / 60))
+
+            # 🗓️ Se não cabe no que resta do dia, o horizonte NÃO é a meia-noite:
+            # os itens vão transbordar. Considerar só o resto do dia comprimiria
+            # tudo no piso e o dia seguinte sairia amontoado no início.
+            janela_dia = 1440 if fim_janela >= 24 else max(1, (fim_janela - inicio_janela) * 60)
+            cabe_hoje = minutos_restantes // max(1, base_min)
+            if len(itens_para_agendar) > cabe_hoje:
+                dias_necessarios = 1 + ((len(itens_para_agendar) - cabe_hoje) // max(1, janela_dia // max(1, base_min)))
+                minutos_restantes += janela_dia * dias_necessarios
+
             alvo = minutos_restantes // max(1, len(itens_para_agendar))
             passo_base_min = max(base_min, alvo)
             # Variação proporcional: quanto maior o intervalo, mais folga para parecer humano
