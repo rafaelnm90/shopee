@@ -93,7 +93,50 @@ def validar(caminho):
             resumo = chave if len(chave) < 90 else chave[:87] + "..."
             erro(arq, posicao[chave], f"decorator idêntico registrado {qtd}x — só o primeiro responde:\n       {resumo}")
 
-    # 6) CHAMADAS COM ARGUMENTOS DE MENOS
+    # 6) FUNÇÃO CHAMADA MAS NUNCA DEFINIDA
+    # Foi assim que 'teclado_confirmacao_expiracao' travou o painel: dentro de uma
+    # task assíncrona o NameError some sem log, e o bot congela em silêncio.
+    definidas = {n.name for n in ast.walk(arvore) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    definidas |= {n.name for n in ast.walk(arvore) if isinstance(n, ast.ClassDef)}
+    for n in ast.walk(arvore):
+        if isinstance(n, (ast.Import, ast.ImportFrom)):
+            for a in n.names:
+                definidas.add(a.asname or a.name.split(".")[0])
+        elif isinstance(n, ast.Assign):
+            for alvo in n.targets:
+                if isinstance(alvo, ast.Name):
+                    definidas.add(alvo.id)
+        elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for a in n.args.args + n.args.kwonlyargs:
+                definidas.add(a.arg)
+            if n.args.vararg: definidas.add(n.args.vararg.arg)
+            if n.args.kwarg: definidas.add(n.args.kwarg.arg)
+        elif isinstance(n, ast.For) and isinstance(n.target, ast.Name):
+            definidas.add(n.target.id)
+        elif isinstance(n, (ast.With, ast.AsyncWith)):
+            for it in n.items:
+                if isinstance(it.optional_vars, ast.Name):
+                    definidas.add(it.optional_vars.id)
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            definidas.add(n.name)
+        elif isinstance(n, ast.comprehension) and isinstance(n.target, ast.Name):
+            definidas.add(n.target.id)
+        elif isinstance(n, ast.Global):
+            definidas.update(n.names)
+
+    import builtins
+    conhecidas = definidas | set(dir(builtins))
+    ja_avisadas = set()
+    for n in ast.walk(arvore):
+        if not isinstance(n, ast.Call) or not isinstance(n.func, ast.Name):
+            continue
+        nome = n.func.id
+        if nome in conhecidas or nome in ja_avisadas:
+            continue
+        ja_avisadas.add(nome)
+        erro(arq, n.lineno, f"'{nome}()' é chamada mas não foi definida nem importada neste arquivo")
+
+    # 7) CHAMADAS COM ARGUMENTOS DE MENOS
     assinaturas = {}
     for n in ast.walk(arvore):
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
