@@ -71,6 +71,96 @@ def registrar_erro_json(mensagem_erro, origem="Geral", contexto_extra=None):
 
 # --- CACHE PERSISTENTE DE NOMES DE GRUPOS/CANAIS ---
 
+# ==========================================
+# 🧠 CACHE DE ANÁLISES DA IA
+# Vários robôs capturam dos MESMOS canais (Espião e as rotas do Espelhador).
+# Sem cache, o mesmo vídeo é enviado à IA uma vez por robô — triplicando a cota.
+# A chave é a mensagem de origem: chat + msg_id identificam o post exato.
+# ==========================================
+def _garantir_cache_ia(cursor):
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS cache_analises_ia (
+            chave TEXT PRIMARY KEY,
+            resultado TEXT,
+            data_analise TEXT,
+            usos INTEGER DEFAULT 1
+        )
+    ''')
+
+def chave_cache_ia(chat_origem, msg_id):
+    """Identidade do post de origem. None quando não há dados suficientes."""
+    if not chat_origem or not msg_id:
+        return None
+    return f"{str(chat_origem).split(':')[0].strip()}_{msg_id}"
+
+def consultar_cache_ia(chave):
+    """Devolve a análise já feita por outro robô, ou None."""
+    if not chave:
+        return None
+    try:
+        conexao = obter_conexao_utils()
+        cursor = conexao.cursor()
+        _garantir_cache_ia(cursor)
+        cursor.execute("SELECT resultado FROM cache_analises_ia WHERE chave = ?", (str(chave),))
+        linha = cursor.fetchone()
+        if linha:
+            cursor.execute("UPDATE cache_analises_ia SET usos = usos + 1 WHERE chave = ?", (str(chave),))
+            conexao.commit()
+        conexao.close()
+        return linha[0] if linha else None
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Cache IA] Erro ao consultar: {e}")
+        return None
+
+def gravar_cache_ia(chave, resultado):
+    if not chave or not resultado:
+        return False
+    try:
+        conexao = obter_conexao_utils()
+        cursor = conexao.cursor()
+        _garantir_cache_ia(cursor)
+        cursor.execute(
+            "INSERT OR IGNORE INTO cache_analises_ia (chave, resultado, data_analise, usos) VALUES (?, ?, ?, 1)",
+            (str(chave), str(resultado), datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d %H:%M:%S"))
+        )
+        conexao.commit()
+        conexao.close()
+        return True
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Cache IA] Erro ao gravar: {e}")
+        return False
+
+def estatisticas_cache_ia():
+    """(entradas, reaproveitamentos) — mostra quanto o cache economizou."""
+    try:
+        conexao = obter_conexao_utils()
+        cursor = conexao.cursor()
+        _garantir_cache_ia(cursor)
+        cursor.execute("SELECT COUNT(*), COALESCE(SUM(usos - 1), 0) FROM cache_analises_ia")
+        total, economizadas = cursor.fetchone()
+        conexao.close()
+        return total or 0, economizadas or 0
+    except Exception:
+        return 0, 0
+
+def limpar_cache_ia_antigo(dias=30):
+    """O vídeo já foi publicado por todos muito antes disso."""
+    try:
+        from datetime import timedelta
+        corte = (datetime.now(ZoneInfo("America/Sao_Paulo")) - timedelta(days=dias)).strftime("%Y-%m-%d %H:%M:%S")
+        conexao = obter_conexao_utils()
+        cursor = conexao.cursor()
+        _garantir_cache_ia(cursor)
+        cursor.execute("DELETE FROM cache_analises_ia WHERE data_analise < ?", (corte,))
+        removidos = cursor.rowcount
+        conexao.commit()
+        conexao.close()
+        if removidos and EXIBIR_LOGS:
+            logger.info(f"🧹 [Cache IA] {removidos} análise(s) com mais de {dias} dias removida(s).")
+        return removidos
+    except Exception:
+        return 0
+
 def ler_cache_nomes_grupos():
     try:
         conexao = obter_conexao_utils()
