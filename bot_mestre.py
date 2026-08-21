@@ -13381,8 +13381,6 @@ async def monitor_saude():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Saúde] Falha no monitor: {e}")
 
-async def main():
-
 # =========================================================
 # O MAIN() E O INICIADOR FICAM SEMPRE NO FINAL ABSOLUTO
 # =========================================================
