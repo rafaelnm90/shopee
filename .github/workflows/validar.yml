@@ -33,3 +33,9 @@ jobs:
             divulgacao_canal.py \
             api_gemini.py \
             api_shopee.py
+
+      - name: Instalar pytest
+        run: pip install pytest
+
+      - name: Rodar testes do motor de filas
+        run: python3 -m pytest test_motor_filas.py -v            
