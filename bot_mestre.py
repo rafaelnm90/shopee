@@ -13250,6 +13250,23 @@ async def limpar_teclado_fantasma(message: types.Message):
         await aviso.delete()
     except: pass
 
+# 🚨 CAPTURADOR DE FALHAS SILENCIOSAS
+# Quando um asyncio.create_task falha, a exceção some sem passar por except nenhum.
+# Foi assim que o painel de submissão travou: a task morreu calada e o cronômetro
+# ficou parado em 00:00 sem uma linha no log. Isto torna essas falhas visíveis.
+def capturar_falha_task(loop, contexto):
+    excecao = contexto.get("exception")
+    try:
+        if excecao:
+            logger.error(f"🚨 [Task Órfã] {type(excecao).__name__}: {excecao}")
+            registrar_erro_json(f"Task assíncrona: {type(excecao).__name__}: {excecao}", origem="asyncio")
+        else:
+            logger.error(f"🚨 [Task Órfã] {contexto.get('message', 'erro sem descrição')}")
+    except Exception:
+        pass   # o capturador nunca pode ser a causa de um novo erro
+
+async def main():
+
 # =========================================================
 # O MAIN() E O INICIADOR FICAM SEMPRE NO FINAL ABSOLUTO
 # =========================================================
@@ -13302,6 +13319,9 @@ async def main():
         dados_rotina["pausado"] = True
         salvar_config_rotina(dados_rotina)
         if EXIBIR_LOGS: logger.info("⏸️ Rotinas estavam em pausa programada. Marcado como pausado no JSON com sucesso.")
+    # 🚨 Ativa o capturador de falhas em tasks assíncronas
+    asyncio.get_running_loop().set_exception_handler(capturar_falha_task)
+
     # 🛡️ Remove painéis de submissão que ficaram órfãos por causa do restart
     await limpar_paineis_orfaos()
     await reenviar_botao_ofertas()
