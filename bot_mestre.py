@@ -459,6 +459,9 @@ scheduler = AsyncIOScheduler(timezone=FUSO_STR)
 
 if EXIBIR_LOGS: logger.info("🔄 Acoplando o módulo externo Espelhador ao fluxo principal...")
 dp.include_router(painel_espelhos.router)
+
+import downloader
+dp.include_router(downloader.router)
 painel_espelhos.configurar_dependencias(bot, scheduler)
 if EXIBIR_LOGS: logger.info("✅ Módulo Espelhador montado com segurança.")
 
