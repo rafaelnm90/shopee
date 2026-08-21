@@ -11,7 +11,7 @@ from telethon import utils
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageMediaDocument
 from dotenv import load_dotenv
-from utils import registrar_erro_json
+from utils import registrar_erro_json, chave_cache_ia, consultar_cache_ia, gravar_cache_ia
 from motor_filas import calcular_horarios_distribuicao # ⚙️ Novo Motor Centralizado
 from zoneinfo import ZoneInfo
 
@@ -485,7 +485,14 @@ async def analisar_fila_espiao_loop():
 
             if pendente:
                 if EXIBIR_LOGS: logger.info(f"🧠 [Análise Antecipada] Processando {pendente.get('id')}...")
-                texto_ia = await analisar_video_gemini(pendente.get("caminho_video"), PROMPT_NOME_PRODUTO, EXIBIR_LOGS)
+                # 🧠 Reaproveita a análise se o Espelhador já processou este mesmo post
+                _chave_ia = chave_cache_ia(pendente.get("chat_origem"), pendente.get("msg_id"))
+                texto_ia = consultar_cache_ia(_chave_ia)
+                if texto_ia:
+                    if EXIBIR_LOGS: logger.info(f"♻️ [Cache IA] Espião reaproveitou a análise de {_chave_ia}.")
+                else:
+                    texto_ia = await analisar_video_gemini(pendente.get("caminho_video"), PROMPT_NOME_PRODUTO, EXIBIR_LOGS)
+                    gravar_cache_ia(_chave_ia, texto_ia)
 
                 dados = ler_fila_clonagem()
                 for item in dados.get("fila", []):
@@ -763,7 +770,15 @@ async def motor_espelhador_userbot(event):
             if chat_id_completo != chat_id_str:
                 verificar_e_registrar_hash(hash_arquivo, contexto=chat_id_completo)
                 
-        titulo_ia = await gerar_legenda_com_ia_espelhador(caminho_video_temp)
+        # 🧠 O Espião e as rotas de espelho leem os MESMOS canais. Se outro robô já
+        # analisou este post, reaproveita em vez de gastar cota de novo.
+        _chave_ia = chave_cache_ia(getattr(event, 'chat_id', None), getattr(event, 'id', None))
+        titulo_ia = consultar_cache_ia(_chave_ia)
+        if titulo_ia:
+            if EXIBIR_LOGS: logger.info(f"♻️ [Cache IA] Espelhador reaproveitou a análise de {_chave_ia}.")
+        else:
+            titulo_ia = await gerar_legenda_com_ia_espelhador(caminho_video_temp)
+            gravar_cache_ia(_chave_ia, titulo_ia)
         
         try:
             os.remove(caminho_video_temp)
