@@ -13265,6 +13265,122 @@ def capturar_falha_task(loop, contexto):
     except Exception:
         pass   # o capturador nunca pode ser a causa de um novo erro
 
+# ==========================================
+# 🩺 MONITOR DE SAÚDE
+# Checa a cada hora e só fala quando há problema. Alerta repetido é alerta
+# ignorado, então cada tipo só avisa uma vez a cada 6 horas.
+# ==========================================
+LIMITE_DISCO_PCT = 80          # % de uso da partição
+LIMITE_TEMP_GB = 3             # pasta temp/
+LIMITE_FILA_PARADA_H = 4       # horas sem publicar com fila vencida
+INTERVALO_REALERTA_H = 6       # não repete o mesmo alerta antes disso
+
+def _ja_alertou(chave):
+    """Evita spam: o mesmo alerta só volta depois do intervalo."""
+    try:
+        registro = ler_config_bd("alertas_saude", {})
+        ultimo = registro.get(chave)
+        if ultimo:
+            quando = datetime.strptime(ultimo, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+            if (datetime.now(fuso_horario) - quando).total_seconds() < INTERVALO_REALERTA_H * 3600:
+                return True
+        registro[chave] = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
+        salvar_config_bd("alertas_saude", registro)
+        return False
+    except Exception:
+        return False
+
+def _tamanho_pasta_gb(pasta):
+    total = 0
+    try:
+        for raiz, _d, arquivos in os.walk(pasta):
+            for nome in arquivos:
+                try: total += os.path.getsize(os.path.join(raiz, nome))
+                except OSError: pass
+    except Exception:
+        pass
+    return total / (1024 ** 3)
+
+async def monitor_saude():
+    """Roda de hora em hora. Silencioso quando está tudo bem."""
+    alertas = []
+    try:
+        # 1️⃣ Disco da partição
+        try:
+            import shutil
+            uso = shutil.disk_usage("/")
+            pct = uso.used / uso.total * 100
+            if pct >= LIMITE_DISCO_PCT and not _ja_alertou("disco"):
+                alertas.append(f"💾 <b>Disco em {pct:.0f}%</b>\nRestam {uso.free / (1024**3):.1f} GB livres.")
+        except Exception:
+            pass
+
+        # 2️⃣ Pasta temp/ inchada
+        temp_gb = _tamanho_pasta_gb("temp")
+        if temp_gb >= LIMITE_TEMP_GB and not _ja_alertou("temp"):
+            alertas.append(f"🗂️ <b>Pasta temp/ com {temp_gb:.1f} GB</b>\nA faxina das 03h pode não estar dando conta.")
+
+        # 3️⃣ Fila do Espião vencida sem publicar
+        try:
+            agora = datetime.now(fuso_horario)
+            fila = ler_fila_clonagem().get("fila", [])
+            vencidos = 0
+            mais_antigo = None
+            for item in fila:
+                if item.get("processado") or not item.get("horario_disparo"):
+                    continue
+                try:
+                    hd = datetime.strptime(item["horario_disparo"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                except Exception:
+                    continue
+                if hd <= agora:
+                    vencidos += 1
+                    if mais_antigo is None or hd < mais_antigo:
+                        mais_antigo = hd
+            if mais_antigo:
+                atraso_h = (agora - mais_antigo).total_seconds() / 3600
+                if atraso_h >= LIMITE_FILA_PARADA_H and not _ja_alertou("fila_espiao"):
+                    alertas.append(f"⏸️ <b>Fila do Espião travada</b>\n{vencidos} vídeo(s) vencido(s), "
+                                   f"o mais antigo há {atraso_h:.0f}h.")
+        except Exception:
+            pass
+
+        # 4️⃣ Erros recentes se acumulando
+        try:
+            erros = ler_config_bd("erros_logs", [], arquivo_legado="erros_logs.json")
+            recentes = 0
+            corte = datetime.now(fuso_horario) - timedelta(hours=1)
+            for e in (erros or []):
+                try:
+                    q = datetime.strptime(e.get("timestamp", ""), "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                    if q >= corte: recentes += 1
+                except Exception:
+                    continue
+            if recentes >= 10 and not _ja_alertou("erros"):
+                alertas.append(f"🐛 <b>{recentes} erros na última hora</b>\nConfira o painel de erros.")
+        except Exception:
+            pass
+
+        # 5️⃣ Nada publicado no dia (com fila cheia)
+        try:
+            hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+            fila = ler_fila_clonagem().get("fila", [])
+            postados_hoje = len([i for i in fila if i.get("processado") and str(i.get("data_postagem", "")).startswith(hoje)])
+            pendentes = len([i for i in fila if not i.get("processado")])
+            hora = datetime.now(fuso_horario).hour
+            if hora >= 12 and postados_hoje == 0 and pendentes > 5 and not _ja_alertou("sem_postagem"):
+                alertas.append(f"🔇 <b>Nenhuma publicação hoje</b>\n{pendentes} vídeo(s) na fila e nada saiu até as {hora}h.")
+        except Exception:
+            pass
+
+        if alertas:
+            texto = "🩺 <b>ALERTA DE SAÚDE DO SISTEMA</b>\n\n" + "\n\n".join(alertas)
+            await bot.send_message(ADMIN_ID, texto, parse_mode="HTML")
+            if EXIBIR_LOGS: logger.warning(f"🩺 [Saúde] {len(alertas)} alerta(s) enviado(s) ao admin.")
+
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Saúde] Falha no monitor: {e}")
+
 async def main():
 
 # =========================================================
@@ -13276,6 +13392,9 @@ async def main():
     
     # ✅ Agendador da lixeira persistente (roda todos os dias pontualmente às 03:00)
     scheduler.add_job(varredor_de_lixeira, 'cron', hour=3, minute=0, timezone=FUSO_STR)
+
+    # 🩺 Monitor de saúde: avisa no privado quando algo sai do normal
+    scheduler.add_job(monitor_saude, 'interval', hours=1, id='monitor_saude_loop', replace_existing=True)
 
     # 👥 Motor de publicação dos parceiros
     scheduler.add_job(motor_parceiros_step, 'interval', minutes=2, id='motor_parceiros_loop', replace_existing=True)
