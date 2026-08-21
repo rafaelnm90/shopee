@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from aiogram import Router, Bot, types, F
 from aiogram.fsm.context import FSMContext
+from motor_userbot import ler_fila_espelhador, salvar_fila_espelhador
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import StateFilter
@@ -294,7 +295,7 @@ async def voltar_de_analise_para_edicao(message: types.Message, state: FSMContex
         if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu de edição a partir da análise.")
         await selecionar_acao_edicao(msg_simulada, state)
     else:
-        await painel_espelhos(message, state)
+        await painel_espelhador(message, state)
 
 @router.message(F.text == "Espelhador de Canais 🔄", StateFilter("*"))
 async def painel_espelhador(message: types.Message, state: FSMContext):
