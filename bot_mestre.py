@@ -1793,6 +1793,15 @@ async def varredor_de_lixeira():
 
         # 🧹 Remove arquivos órfãos, cruzando com TODAS as filas antes de apagar
         limpar_arquivos_orfaos()
+
+        # 🧠 Poda o cache de análises: 30 dias já passou de qualquer publicação
+        try:
+            from utils import limpar_cache_ia_antigo, estatisticas_cache_ia
+            limpar_cache_ia_antigo(30)
+            _tot, _eco = estatisticas_cache_ia()
+            if EXIBIR_LOGS: logger.info(f"🧠 [Cache IA] {_tot} análise(s) guardada(s) · {_eco} chamada(s) economizada(s).")
+        except Exception:
+            pass
         if EXIBIR_LOGS: logger.info(f"💾 [Disco] {relatorio_disco()}")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro na varredura da lixeira: {e}")
