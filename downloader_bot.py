@@ -159,6 +159,71 @@ async def expandir_encurtador(url):
         if EXIBIR_LOGS: logger.warning(f"⚠️ Não consegui expandir o pin.it: {e}")
     return url
 
+# 🛒 A Shopee não é suportada pelo yt-dlp, mas a URL do MP4 vem embutida
+# no HTML da página. O CDN alterna entre hosts (down-ws, down-tx, down-bs),
+# por isso o padrão aceita qualquer um deles.
+CABECALHO_NAVEGADOR = {
+    "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
+                  "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
+}
+
+PADROES_VIDEO_SHOPEE = [
+    r'"watermarkVideoUrl"\s*:\s*"([^"]+)"',
+    r'"videoUrl"\s*:\s*"([^"]+)"',
+    r'"video_url"\s*:\s*"([^"]+)"',
+    r'(https://down-[a-z]{2,4}-[a-z]{2}\.vod\.susercontent\.com/[^"\\\s]+\.mp4)',
+]
+
+async def baixar_video_shopee(url, pasta):
+    """Busca a URL do MP4 no HTML e baixa direto do CDN. Devolve (caminho, erro)."""
+    try:
+        import aiohttp
+        async with aiohttp.ClientSession(headers=CABECALHO_NAVEGADOR) as sessao:
+            # 1. Abre a página (o link curto redireciona sozinho)
+            async with sessao.get(url, allow_redirects=True, timeout=25) as resposta:
+                if resposta.status != 200:
+                    return None, "não consegui abrir a página da Shopee"
+                html = await resposta.text()
+
+            # 2. Procura o MP4 embutido
+            link_mp4 = None
+            for padrao in PADROES_VIDEO_SHOPEE:
+                achado = re.search(padrao, html)
+                if achado:
+                    link_mp4 = achado.group(1).replace("\\u002F", "/").replace("\\/", "/")
+                    if link_mp4.startswith("http"):
+                        break
+                    link_mp4 = None
+
+            if not link_mp4:
+                return None, "esse link da Shopee não tem vídeo"
+
+            if EXIBIR_LOGS: logger.info(f"🛒 MP4 da Shopee localizado: {link_mp4[:70]}...")
+
+            # 3. Baixa o arquivo, respeitando o teto do Telegram
+            destino = os.path.join(pasta, "video.mp4")
+            async with sessao.get(link_mp4, timeout=TIMEOUT_DOWNLOAD_SEG) as fluxo:
+                if fluxo.status != 200:
+                    return None, "o vídeo não está mais disponível"
+                total = 0
+                limite = LIMITE_TELEGRAM_MB * 1024 * 1024
+                with open(destino, "wb") as arquivo:
+                    async for pedaco in fluxo.content.iter_chunked(65536):
+                        total += len(pedaco)
+                        if total > limite:
+                            return None, f"o vídeo passa de {LIMITE_TELEGRAM_MB} MB"
+                        arquivo.write(pedaco)
+
+            if os.path.getsize(destino) > 0:
+                return destino, None
+            return None, "o download veio vazio"
+
+    except asyncio.TimeoutError:
+        return None, "a Shopee demorou demais para responder"
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro no download da Shopee: {e}")
+        return None, "erro ao baixar da Shopee"
+
 async def baixar_video(url, pasta):
     """
     Roda o yt-dlp em SUBPROCESSO. Chamar direto travaria o bot inteiro,
@@ -310,7 +375,10 @@ async def receber_link(message: types.Message):
         pasta = tempfile.mkdtemp(dir=PASTA_TEMP_DOWNLOAD)
 
         try:
-            caminho, erro = await baixar_video(url, pasta)
+            if plataforma == "Shopee":
+                caminho, erro = await baixar_video_shopee(url, pasta)
+            else:
+                caminho, erro = await baixar_video(url, pasta)
 
             if erro:
                 await status.edit_text(
