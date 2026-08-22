@@ -15,6 +15,7 @@ import logging
 import shutil
 import tempfile
 import sqlite3
+import hashlib
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
@@ -137,6 +138,89 @@ async def faxina_diaria_loop():
     while True:
         await asyncio.sleep(86400)
         limpar_downloads_antigos()
+
+# ♻️ CACHE DE VÍDEOS
+# O file_id é só uma string (~80 bytes) — o vídeo fica nos servidores do Telegram.
+# Reenviar o mesmo id custa zero download, zero banda e zero disco.
+DIAS_CACHE_VIDEO = 30
+
+def chave_cache_video(url):
+    """Ignora rastreadores (?fromSource=, ?_t=) para o mesmo vídeo gerar a mesma chave."""
+    limpo = str(url or "").strip().lower().split("?")[0].rstrip("/")
+    return hashlib.md5(limpo.encode()).hexdigest()[:20]
+
+def _garantir_cache_videos(cursor):
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS cache_videos (
+            chave TEXT PRIMARY KEY,
+            file_id TEXT,
+            plataforma TEXT,
+            data_cache TEXT,
+            usos INTEGER DEFAULT 1
+        )
+    ''')
+
+def buscar_cache_video(url):
+    """Devolve o file_id já guardado, ou None."""
+    try:
+        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_cache_videos(cursor)
+        chave = chave_cache_video(url)
+        cursor.execute("SELECT file_id FROM cache_videos WHERE chave = ?", (chave,))
+        linha = cursor.fetchone()
+        if linha:
+            cursor.execute("UPDATE cache_videos SET usos = usos + 1 WHERE chave = ?", (chave,))
+            conexao.commit()
+        conexao.close()
+        return linha[0] if linha else None
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao consultar o cache: {e}")
+        return None
+
+def guardar_cache_video(url, file_id, plataforma):
+    try:
+        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_cache_videos(cursor)
+        cursor.execute(
+            "INSERT OR IGNORE INTO cache_videos (chave, file_id, plataforma, data_cache, usos) VALUES (?, ?, ?, ?, 1)",
+            (chave_cache_video(url), file_id, plataforma, datetime.now(FUSO).strftime("%Y-%m-%d %H:%M:%S"))
+        )
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao guardar no cache: {e}")
+
+def limpar_cache_videos_antigos(dias=DIAS_CACHE_VIDEO):
+    """file_id antigo pode expirar no Telegram — melhor rebaixar do que entregar quebrado."""
+    try:
+        corte = (datetime.now(FUSO) - timedelta(days=dias)).strftime("%Y-%m-%d %H:%M:%S")
+        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_cache_videos(cursor)
+        cursor.execute("DELETE FROM cache_videos WHERE data_cache < ?", (corte,))
+        removidos = cursor.rowcount
+        cursor.execute("SELECT COUNT(*), COALESCE(SUM(usos - 1), 0) FROM cache_videos")
+        total, economizados = cursor.fetchone()
+        conexao.commit()
+        conexao.close()
+        if EXIBIR_LOGS:
+            logger.info(f"♻️ [Cache] {total} vídeo(s) guardado(s) · {economizados} download(s) economizado(s)"
+                        + (f" · {removidos} expirado(s) removido(s)" if removidos else ""))
+    except Exception:
+        pass
+
+def remover_cache_video(url):
+    """Chamado quando o file_id guardado não funciona mais."""
+    try:
+        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("DELETE FROM cache_videos WHERE chave = ?", (chave_cache_video(url),))
+        conexao.commit()
+        conexao.close()
+    except Exception:
+        pass
 
 async def expandir_encurtador(url):
     """
@@ -377,6 +461,23 @@ async def receber_link(message: types.Message):
     else:
         aguarde = None
 
+    # ♻️ Alguém já pediu este vídeo? Entrega na hora, sem baixar de novo.
+    file_id_guardado = buscar_cache_video(url)
+    if file_id_guardado:
+        try:
+            await message.answer_video(
+                video=file_id_guardado,
+                caption=f"📥 Vídeo solicitado por: {mencao}\n\n🔗 <b>Link:</b>\n{url}",
+                parse_mode="HTML"
+            )
+            registrar_download(message.from_user.id)
+            if EXIBIR_LOGS: logger.info(f"♻️ Entregue do cache para {message.from_user.id} ({plataforma}).")
+            return
+        except Exception as e:
+            # file_id expirou ou foi invalidado: apaga do cache e baixa normalmente
+            if EXIBIR_LOGS: logger.warning(f"⚠️ file_id do cache falhou ({e}). Rebaixando.")
+            remover_cache_video(url)
+
     async with semaforo_download:
         if aguarde:
             try: await aguarde.delete()
@@ -405,11 +506,15 @@ async def receber_link(message: types.Message):
                 f"📥 Vídeo solicitado por: {mencao}\n\n"
                 f"🔗 <b>Link:</b>\n{url_pedido}"
             )
-            await message.answer_video(
+            enviado = await message.answer_video(
                 video=FSInputFile(caminho),
                 caption=legenda,
                 parse_mode="HTML"
             )
+            # ♻️ Guarda o id para quem pedir o mesmo link depois
+            if enviado and enviado.video:
+                guardar_cache_video(url_pedido, enviado.video.file_id, plataforma)
+
             try: await status.delete()
             except Exception: pass
 
