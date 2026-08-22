@@ -80,7 +80,7 @@ async def baixar_video(url, pasta):
     """
     modelo = os.path.join(pasta, "video.%(ext)s")
     comando = [
-        "yt-dlp",
+        "/home/ubuntu/shopee/venv/bin/yt-dlp",
         "-f", f"best[height<={ALTURA_MAXIMA}][ext=mp4]/best[height<={ALTURA_MAXIMA}]/best",
         "--no-playlist",              # link de perfil não vira 200 downloads
         "--no-warnings",
