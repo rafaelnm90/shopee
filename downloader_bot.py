@@ -383,7 +383,8 @@ async def receber_link(message: types.Message):
             except Exception: pass
 
         status = await message.answer(f"⏬ {mencao}, baixando o seu vídeo do <b>{plataforma}</b>...", parse_mode="HTML")
-        url = await expandir_encurtador(url)
+        url_pedido = url                      # o que o usuário colou, para mostrar na legenda
+        url = await expandir_encurtador(url)  # o que o downloader vai usar
         pasta = tempfile.mkdtemp(dir=PASTA_TEMP_DOWNLOAD)
 
         try:
