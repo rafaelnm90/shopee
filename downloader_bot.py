@@ -72,6 +72,27 @@ os.makedirs(PASTA_TEMP_DOWNLOAD, exist_ok=True)
 # 🚦 Fila: um download por vez. Em paralelo, o ffmpeg derruba a CPU do ARM.
 semaforo_download = asyncio.Semaphore(1)
 
+async def expandir_encurtador(url):
+    """
+    O pin.it redireciona para a home do Pinterest quando não parece um navegador.
+    Sem os cabeçalhos certos, o yt-dlp recebe a página inicial e não acha vídeo.
+    """
+    if "pin.it" not in url.lower():
+        return url
+    try:
+        import aiohttp
+        cabecalhos = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"}
+        async with aiohttp.ClientSession(headers=cabecalhos) as sessao:
+            async with sessao.get(url, allow_redirects=True, timeout=15) as resposta:
+                final = str(resposta.url)
+                if "/pin/" in final:
+                    if EXIBIR_LOGS: logger.info(f"🔗 pin.it expandido para {final}")
+                    return final
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Não consegui expandir o pin.it: {e}")
+    return url
+
 async def baixar_video(url, pasta):
     """
     Roda o yt-dlp em SUBPROCESSO. Chamar direto travaria o bot inteiro,
@@ -207,6 +228,7 @@ async def receber_link(message: types.Message):
             except Exception: pass
 
         status = await message.answer(f"⏬ {mencao}, baixando o seu vídeo do <b>{plataforma}</b>...", parse_mode="HTML")
+        url = await expandir_encurtador(url)
         pasta = tempfile.mkdtemp(dir=PASTA_TEMP_DOWNLOAD)
 
         try:
