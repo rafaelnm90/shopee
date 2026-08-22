@@ -8691,7 +8691,17 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
         for i, alvo in enumerate(alvos, 1):
             info = status_alvos.get(alvo, {})
             status_ico = "⏳"
-            nome_cache = cache_nomes_vigiados.get(str(alvo))
+            # 🧵 Alvo com tópico (-100xxx:1054) precisa mostrar o nome do TÓPICO,
+            # não o do grupo — senão vários alvos do mesmo grupo ficam idênticos.
+            alvo_str = str(alvo)
+            if ":" in alvo_str:
+                base, topico = alvo_str.split(":", 1)
+                nome_grupo = cache_nomes_vigiados.get(base, base)
+                nome_topico = await resolver_nome_topico(base, topico)
+                nome_cache = f"{nome_grupo} › {nome_topico}" if nome_topico else f"{nome_grupo} › tópico {topico}"
+            else:
+                nome_cache = cache_nomes_vigiados.get(alvo_str)
+
             detalhe = f"{nome_cache} <code>({alvo})</code>" if nome_cache else alvo
             
             if info.get("status") == "ok":
