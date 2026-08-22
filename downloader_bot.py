@@ -292,7 +292,9 @@ async def baixar_video_shopee(url, pasta):
                     link_mp4 = None
 
             if not link_mp4:
-                return None, "esse link da Shopee não tem vídeo"
+                return None, ("essa página de produto não tem vídeo. "
+                              "Use um link de <b>vídeo do feed</b> da Shopee "
+                              "(o que começa com br.shp.ee)")
 
             if EXIBIR_LOGS: logger.info(f"🛒 MP4 da Shopee localizado: {link_mp4[:70]}...")
 
