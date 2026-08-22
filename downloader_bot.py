@@ -12,6 +12,8 @@ import os
 import re
 import asyncio
 import logging
+import shutil
+import tempfile
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
@@ -24,7 +26,7 @@ import time
 time.tzset()
 
 from aiogram import Bot, Dispatcher, Router, types, F
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.fsm.storage.memory import MemoryStorage
 
 if EXIBIR_LOGS:
@@ -59,6 +61,67 @@ PADROES_SUPORTADOS = {
     "Pinterest": r'(?:pin\.it|pinterest\.[a-z.]+)/\S+',
     "Shopee":    r'(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee|shopee\.com\.br)/\S+',
 }
+
+PASTA_TEMP_DOWNLOAD = "temp_downloads"
+LIMITE_TELEGRAM_MB = 48          # o teto real é 50; margem para a legenda
+TIMEOUT_DOWNLOAD_SEG = 180       # 3 min por vídeo
+ALTURA_MAXIMA = 720              # 1080p estoura o limite do Telegram com facilidade
+
+os.makedirs(PASTA_TEMP_DOWNLOAD, exist_ok=True)
+
+# 🚦 Fila: um download por vez. Em paralelo, o ffmpeg derruba a CPU do ARM.
+semaforo_download = asyncio.Semaphore(1)
+
+async def baixar_video(url, pasta):
+    """
+    Roda o yt-dlp em SUBPROCESSO. Chamar direto travaria o bot inteiro,
+    porque a biblioteca é síncrona e o download demora.
+    Devolve (caminho, erro).
+    """
+    modelo = os.path.join(pasta, "video.%(ext)s")
+    comando = [
+        "yt-dlp",
+        "-f", f"best[height<={ALTURA_MAXIMA}][ext=mp4]/best[height<={ALTURA_MAXIMA}]/best",
+        "--no-playlist",              # link de perfil não vira 200 downloads
+        "--no-warnings",
+        "--socket-timeout", "30",
+        "--max-filesize", f"{LIMITE_TELEGRAM_MB}M",
+        "-o", modelo,
+        url,
+    ]
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *comando,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            _saida, erro = await asyncio.wait_for(proc.communicate(), timeout=TIMEOUT_DOWNLOAD_SEG)
+        except asyncio.TimeoutError:
+            proc.kill()
+            return None, "o download passou de 3 minutos"
+
+        if proc.returncode != 0:
+            msg = (erro or b"").decode(errors="ignore")
+            if "max-filesize" in msg or "larger than" in msg:
+                return None, f"o vídeo passa de {LIMITE_TELEGRAM_MB} MB"
+            if "Private" in msg or "login" in msg.lower():
+                return None, "o vídeo é privado ou exige login"
+            if "Unsupported URL" in msg:
+                return None, "este link não é suportado"
+            return None, "não consegui acessar esse vídeo"
+
+        for nome in os.listdir(pasta):
+            caminho = os.path.join(pasta, nome)
+            if os.path.isfile(caminho) and os.path.getsize(caminho) > 0:
+                return caminho, None
+        return None, "o download não gerou arquivo"
+
+    except FileNotFoundError:
+        return None, "o yt-dlp não está instalado no servidor"
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro inesperado no download: {e}")
+        return None, "erro inesperado ao baixar"
 
 def detectar_plataforma(texto):
     """Devolve (plataforma, url) do primeiro link reconhecido, ou (None, None)."""
@@ -130,15 +193,55 @@ async def receber_link(message: types.Message):
         if EXIBIR_LOGS: logger.info(f"🔒 {message.from_user.id} bloqueado: falta {len(faltando)} canal(is).")
         return
 
-    # 3️⃣ Liberado — o download entra na Fase 1
+    # 3️⃣ Liberado — baixa e entrega
     if EXIBIR_LOGS: logger.info(f"✅ {message.from_user.id} liberado. {plataforma}: {url}")
-    await message.answer(
-        f"✅ {mencao}, acesso liberado!\n\n"
-        f"🔗 Plataforma detectada: <b>{plataforma}</b>\n"
-        f"📦 Seu limite: <b>{LIMITE_DIARIO_DOWNLOADS} vídeos por dia</b>\n\n"
-        "<i>⚙️ O download ainda está sendo montado. Em breve o vídeo chega aqui.</i>",
-        parse_mode="HTML"
-    )
+
+    if semaforo_download.locked():
+        aguarde = await message.answer(f"⏳ {mencao}, tem outro vídeo baixando. Você é o próximo!")
+    else:
+        aguarde = None
+
+    async with semaforo_download:
+        if aguarde:
+            try: await aguarde.delete()
+            except Exception: pass
+
+        status = await message.answer(f"⏬ {mencao}, baixando o seu vídeo do <b>{plataforma}</b>...", parse_mode="HTML")
+        pasta = tempfile.mkdtemp(dir=PASTA_TEMP_DOWNLOAD)
+
+        try:
+            caminho, erro = await baixar_video(url, pasta)
+
+            if erro:
+                await status.edit_text(
+                    f"❌ {mencao}, não deu certo: <b>{erro}</b>.\n\n"
+                    "<i>Confira se o link está certo e se o vídeo é público.</i>",
+                    parse_mode="HTML"
+                )
+                return
+
+            legenda = (
+                f"📥 Vídeo de {mencao}\n\n"
+                f"🔗 <b>Link original:</b>\n{url}"
+            )
+            await message.answer_video(
+                video=FSInputFile(caminho),
+                caption=legenda,
+                parse_mode="HTML",
+                message_thread_id=TOPICO_DOWNLOADER
+            )
+            try: await status.delete()
+            except Exception: pass
+            if EXIBIR_LOGS: logger.info(f"📤 Vídeo entregue para {message.from_user.id} ({plataforma}).")
+
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Falha ao entregar: {e}")
+            try:
+                await status.edit_text(f"❌ {mencao}, algo deu errado no envio. Tente de novo.")
+            except Exception: pass
+        finally:
+            # 🧹 Nada fica no servidor: apaga a pasta inteira, dê certo ou não.
+            shutil.rmtree(pasta, ignore_errors=True)
 
 async def main():
     if not TOKEN:
