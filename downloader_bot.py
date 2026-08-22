@@ -14,7 +14,8 @@ import asyncio
 import logging
 import shutil
 import tempfile
-from datetime import datetime
+import sqlite3
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
@@ -71,6 +72,71 @@ os.makedirs(PASTA_TEMP_DOWNLOAD, exist_ok=True)
 
 # 🚦 Fila: um download por vez. Em paralelo, o ffmpeg derruba a CPU do ARM.
 semaforo_download = asyncio.Semaphore(1)
+
+BANCO_DOWNLOADER = "banco_dados.db"
+
+def _garantir_tabela_downloads(cursor):
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS downloads_usuarios (
+            user_id INTEGER,
+            data TEXT,
+            quantidade INTEGER DEFAULT 0,
+            PRIMARY KEY (user_id, data)
+        )
+    ''')
+
+def downloads_hoje(user_id):
+    """Quantos já usou hoje. Persistente: reiniciar o bot não zera o contador."""
+    try:
+        hoje = datetime.now(FUSO).strftime("%Y-%m-%d")
+        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_tabela_downloads(cursor)
+        cursor.execute("SELECT quantidade FROM downloads_usuarios WHERE user_id = ? AND data = ?", (user_id, hoje))
+        linha = cursor.fetchone()
+        conexao.close()
+        return linha[0] if linha else 0
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao contar downloads: {e}")
+        return 0
+
+def registrar_download(user_id):
+    """Conta APÓS a entrega: tentativa que falhou não gasta a cota do usuário."""
+    try:
+        hoje = datetime.now(FUSO).strftime("%Y-%m-%d")
+        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_tabela_downloads(cursor)
+        cursor.execute('''
+            INSERT INTO downloads_usuarios (user_id, data, quantidade) VALUES (?, ?, 1)
+            ON CONFLICT(user_id, data) DO UPDATE SET quantidade = quantidade + 1
+        ''', (user_id, hoje))
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao registrar download: {e}")
+
+def limpar_downloads_antigos(dias=7):
+    """A contagem só importa no dia. Guardar uma semana já é folga."""
+    try:
+        corte = (datetime.now(FUSO) - timedelta(days=dias)).strftime("%Y-%m-%d")
+        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_tabela_downloads(cursor)
+        cursor.execute("DELETE FROM downloads_usuarios WHERE data < ?", (corte,))
+        removidos = cursor.rowcount
+        conexao.commit()
+        conexao.close()
+        if removidos and EXIBIR_LOGS:
+            logger.info(f"🧹 {removidos} registro(s) de download antigos removidos.")
+    except Exception:
+        pass
+
+async def faxina_diaria_loop():
+    """Uma vez por dia, poda a tabela de contagem."""
+    while True:
+        await asyncio.sleep(86400)
+        limpar_downloads_antigos()
 
 async def expandir_encurtador(url):
     """
@@ -214,8 +280,20 @@ async def receber_link(message: types.Message):
         if EXIBIR_LOGS: logger.info(f"🔒 {message.from_user.id} bloqueado: falta {len(faltando)} canal(is).")
         return
 
-    # 3️⃣ Liberado — baixa e entrega
-    if EXIBIR_LOGS: logger.info(f"✅ {message.from_user.id} liberado. {plataforma}: {url}")
+    # 3️⃣ Limite diário
+    usados = downloads_hoje(message.from_user.id)
+    if usados >= LIMITE_DIARIO_DOWNLOADS:
+        await message.answer(
+            f"📦 {mencao}, você já baixou <b>{usados} vídeos hoje</b> e atingiu o limite diário.\n\n"
+            f"<b>Cada membro pode baixar até {LIMITE_DIARIO_DOWNLOADS} vídeos por dia.</b>\n"
+            "<i>Sua cota volta a zerar à meia-noite. Até lá!</i>",
+            parse_mode="HTML"
+        )
+        if EXIBIR_LOGS: logger.info(f"📦 {message.from_user.id} atingiu o limite ({usados}).")
+        return
+
+    # 4️⃣ Liberado — baixa e entrega
+    if EXIBIR_LOGS: logger.info(f"✅ {message.from_user.id} liberado ({usados}/{LIMITE_DIARIO_DOWNLOADS}). {plataforma}: {url}")
 
     if semaforo_download.locked():
         aguarde = await message.answer(f"⏳ {mencao}, tem outro vídeo baixando. Você é o próximo!")
@@ -253,6 +331,20 @@ async def receber_link(message: types.Message):
             )
             try: await status.delete()
             except Exception: pass
+
+            # ✅ Só conta o que foi entregue: falha não gasta a cota de ninguém
+            registrar_download(message.from_user.id)
+            restantes = LIMITE_DIARIO_DOWNLOADS - downloads_hoje(message.from_user.id)
+            if restantes <= 3:
+                aviso_cota = await message.answer(
+                    f"📦 {mencao}, restam <b>{restantes}</b> download(s) hoje "
+                    f"(limite de {LIMITE_DIARIO_DOWNLOADS} por dia).",
+                    parse_mode="HTML"
+                )
+                await asyncio.sleep(30)
+                try: await aviso_cota.delete()
+                except Exception: pass
+
             if EXIBIR_LOGS: logger.info(f"📤 Vídeo entregue para {message.from_user.id} ({plataforma}).")
 
         except Exception as e:
