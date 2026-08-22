@@ -179,11 +179,23 @@ async def baixar_video_shopee(url, pasta):
     try:
         import aiohttp
         async with aiohttp.ClientSession(headers=CABECALHO_NAVEGADOR) as sessao:
-            # 1. Abre a página (o link curto redireciona sozinho)
+            # 1. Abre a página. A Shopee às vezes para numa tela "universal-link"
+            # que tenta abrir o app — o endereço real vem no parâmetro redir=.
             async with sessao.get(url, allow_redirects=True, timeout=25) as resposta:
                 if resposta.status != 200:
                     return None, "não consegui abrir a página da Shopee"
                 html = await resposta.text()
+                url_final = str(resposta.url)
+
+            if "universal-link" in url_final and "redir=" in url_final:
+                from urllib.parse import unquote, urlparse, parse_qs
+                destino_real = parse_qs(urlparse(url_final).query).get("redir", [None])[0]
+                if destino_real:
+                    destino_real = unquote(destino_real)
+                    if EXIBIR_LOGS: logger.info(f"🛒 Universal-link contornado: {destino_real[:70]}...")
+                    async with sessao.get(destino_real, allow_redirects=True, timeout=25) as r2:
+                        if r2.status == 200:
+                            html = await r2.text()
 
             # 2. Procura o MP4 embutido
             link_mp4 = None
