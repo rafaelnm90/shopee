@@ -401,8 +401,8 @@ async def receber_link(message: types.Message):
                 return
 
             legenda = (
-                f"📥 Vídeo de {mencao}\n\n"
-                f"🔗 <b>Link original:</b>\n{url}"
+                f"📥 Vídeo solicitado por: {mencao}\n\n"
+                f"🔗 <b>Link:</b>\n{url_pedido}"
             )
             await message.answer_video(
                 video=FSInputFile(caminho),
