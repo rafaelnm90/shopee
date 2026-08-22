@@ -227,8 +227,7 @@ async def receber_link(message: types.Message):
             await message.answer_video(
                 video=FSInputFile(caminho),
                 caption=legenda,
-                parse_mode="HTML",
-                message_thread_id=TOPICO_DOWNLOADER
+                parse_mode="HTML"
             )
             try: await status.delete()
             except Exception: pass
