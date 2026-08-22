@@ -262,6 +262,24 @@ def salvar_contador(numero):
     with open("contador.txt", "w") as f:
         f.write(str(numero))
 
+async def resolver_nome_topico(base, topico):
+    if EXIBIR_LOGS: logger.info(f"🔍 Iniciando resolução de nome para o tópico {topico} na base {base}...")
+    if not topico or str(topico) == "1":
+        if EXIBIR_LOGS: logger.info("✅ Sucesso: Tópico principal identificado como Geral.")
+        return "Geral"
+    
+    cache_nomes = ler_cache_nomes_grupos()
+    base_str = str(base).strip()
+    topico_str = str(topico).strip()
+    
+    for chave in (f"{base_str}_{topico_str}", f"{base_str}:{topico_str}"):
+        if chave in cache_nomes:
+            if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Nome de tópico encontrado no cache ({cache_nomes[chave]}).")
+            return cache_nomes[chave]
+    
+    if EXIBIR_LOGS: logger.info(f"⚠️ Aviso: Nome não encontrado no cache. Adotando padrão Tópico {topico_str}.")
+    return f"Tópico {topico_str}"
+
 # 3. MÁQUINA DE ESTADOS (FSM) PARA O FLUXO DE POSTAGEM
 class PostagemFluxo(StatesGroup):
     aguardando_video = State()             
