@@ -280,6 +280,21 @@ async def resolver_nome_topico(base, topico):
     if EXIBIR_LOGS: logger.info(f"⚠️ Aviso: Nome não encontrado no cache. Adotando padrão Tópico {topico_str}.")
     return f"Tópico {topico_str}"
 
+def formatar_nome_alvo(alvo, cache_nomes, nome_status=None):
+    """🧵 Monta 'Grupo › Tópico' para alvos de fórum (-100xxx:281).
+    Sem isso, dezenas de alvos do mesmo grupo aparecem com nome idêntico.
+    nome_status = nome vindo do status_alvos (é sempre o nome do GRUPO)."""
+    alvo_str = str(alvo)
+    if ":" not in alvo_str:
+        return nome_status or cache_nomes.get(alvo_str) or alvo_str
+
+    base, topico = alvo_str.split(":", 1)
+    nome_grupo = nome_status or cache_nomes.get(base) or base
+    nome_topico = cache_nomes.get(f"{base}_{topico}") or cache_nomes.get(f"{base}:{topico}")
+    if not nome_topico:
+        nome_topico = "Geral" if topico.strip() == "1" else f"Tópico {topico}"
+    return f"{nome_grupo} › {nome_topico}"
+
 # 3. MÁQUINA DE ESTADOS (FSM) PARA O FLUXO DE POSTAGEM
 class PostagemFluxo(StatesGroup):
     aguardando_video = State()             
@@ -1094,7 +1109,7 @@ async def listar_erros_espiao(message: types.Message, state: FSMContext):
     for i, alvo in enumerate(alvos, 1):
         info = status_alvos.get(str(alvo), {})
         if info.get("status") == "erro":
-            nome = info.get("nome") or cache_nomes.get(str(alvo), str(alvo))
+            nome = formatar_nome_alvo(alvo, cache_nomes, info.get("nome"))
             canais_com_erro.append(str(alvo))
             texto += f"<b>{i}.</b> ❌ {nome} (<code>{alvo}</code>)\n"
             
@@ -8709,22 +8724,15 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
         for i, alvo in enumerate(alvos, 1):
             info = status_alvos.get(alvo, {})
             status_ico = "⏳"
-            # 🧵 Alvo com tópico (-100xxx:1054) precisa mostrar o nome do TÓPICO,
-            # não o do grupo — senão vários alvos do mesmo grupo ficam idênticos.
-            alvo_str = str(alvo)
-            if ":" in alvo_str:
-                base, topico = alvo_str.split(":", 1)
-                nome_grupo = cache_nomes_vigiados.get(base, base)
-                nome_topico = await resolver_nome_topico(base, topico)
-                nome_cache = f"{nome_grupo} › {nome_topico}" if nome_topico else f"{nome_grupo} › tópico {topico}"
-            else:
-                nome_cache = cache_nomes_vigiados.get(alvo_str)
-
+            # 🧵 Alvo com tópico precisa mostrar "Grupo › Tópico".
+            nome_cache = formatar_nome_alvo(alvo, cache_nomes_vigiados)
             detalhe = f"{nome_cache} <code>({alvo})</code>" if nome_cache else alvo
             
             if info.get("status") == "ok":
                 status_ico = "✅"
-                detalhe = f"{info.get('nome')} <code>({alvo})</code>"
+                # ⚠️ info['nome'] traz só o nome do GRUPO: recompõe com o tópico.
+                nome_ok = formatar_nome_alvo(alvo, cache_nomes_vigiados, info.get("nome"))
+                detalhe = f"{nome_ok} <code>({alvo})</code>"
             elif info.get("status") == "erro":
                 status_ico = "❌"
                 detalhe = f"<code>{alvo}</code> - <i>Acesso negado/Link inválido</i>"
@@ -8803,7 +8811,7 @@ async def listar_todos_espiao(message: types.Message, state: FSMContext):
         # Puxa o status para definir o ícone (✅ ou ❌)
         status_ico = "❌" if info.get("status") == "erro" else "✅"
         
-        nome = info.get("nome") or cache_nomes.get(str(alvo), str(alvo))
+        nome = formatar_nome_alvo(alvo, cache_nomes, info.get("nome"))
         linha = f"<b>{i}.</b> {status_ico} {nome} (<code>{alvo}</code>)\n"
         
         # Quebra a mensagem se ficar muito grande para o limite do Telegram
@@ -8834,7 +8842,7 @@ async def verificar_duplicados_espiao(message: types.Message, state: FSMContext)
     for index, alvo in enumerate(alvos, 1):
         alvo_str = str(alvo)
         info = status_alvos.get(alvo_str, {})
-        nome = info.get("nome") or cache_nomes.get(alvo_str, alvo_str)
+        nome = formatar_nome_alvo(alvo_str, cache_nomes, info.get("nome"))
         status_ico = "❌" if info.get("status") == "erro" else "✅"
         is_num = alvo_str.lstrip("-").replace(":", "").isdigit()
         base_id = alvo_str.split(":")[0].replace("-100", "").replace("-", "") if is_num else alvo_str.split(":")[0]
@@ -8891,7 +8899,7 @@ async def remover_duplicados_espiao_callback(callback: types.CallbackQuery, stat
     for index, alvo in enumerate(alvos, 1):
         alvo_str = str(alvo)
         info = status_alvos.get(alvo_str, {})
-        nome = info.get("nome") or cache_nomes.get(alvo_str, alvo_str)
+        nome = formatar_nome_alvo(alvo_str, cache_nomes, info.get("nome"))
         is_num = alvo_str.lstrip("-").replace(":", "").isdigit()
         base_id = alvo_str.split(":")[0].replace("-100", "").replace("-", "") if is_num else alvo_str.split(":")[0]
         topic = alvo_str.split(":")[1] if ":" in alvo_str else "0"
