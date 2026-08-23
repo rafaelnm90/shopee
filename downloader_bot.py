@@ -273,10 +273,13 @@ CABECALHO_NAVEGADOR = {
 }
 
 PADROES_VIDEO_SHOPEE = [
+    r'"playUrl"\s*:\s*"([^"]+)"',
+    r'"play_url"\s*:\s*"([^"]+)"',
+    r'"defaultVideoUrl"\s*:\s*"([^"]+)"',
     r'"videoUrl"\s*:\s*"([^"]+)"',
     r'"video_url"\s*:\s*"([^"]+)"',
-    r'(https://down-[a-z]{2,4}-[a-z]{2}\.vod\.susercontent\.com/[^"\\\s]+\.mp4)',
     r'"watermarkVideoUrl"\s*:\s*"([^"]+)"',
+    r'(https://down-[a-z]{2,4}-[a-z]{2}\.vod\.susercontent\.com/[^"\\\s]+\.mp4)',
 ]
 
 async def baixar_video_shopee(url, pasta):
