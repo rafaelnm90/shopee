@@ -415,65 +415,77 @@ async def baixar_video_shopee(url, pasta):
                         if r2.status == 200:
                             html = await r2.text()
 
-            # 3. Engenharia Reversa: Captura o JSON de estado interno do App (matriz)
-            link_mp4 = None
+            # 3. Junta TODOS os candidatos a vídeo que a página expuser.
+            # Antes o código parava no primeiro que não tivesse "watermark" no
+            # nome e desistia se não achasse nenhum. Agora coleta tudo, prefere
+            # o limpo e, se só houver o marcado, entrega ele para o ffmpeg limpar.
+            candidatos = []
+
+            def _normalizar(u):
+                return u.replace("\\u002F", "/").replace("\\/", "/") if isinstance(u, str) else ""
+
+            def guardar(u):
+                u = _normalizar(u)
+                if u.startswith("http") and ".mp4" in u.lower() and u not in candidatos:
+                    candidatos.append(u)
+
+            CHAVES_VIDEO = {"defaultvideourl", "playurl", "videourl", "playaddr", "downloadurl"}
+
             match_json = re.search(r'window\.__INITIAL_STATE__\s*=\s*({.*?});\s*</script>', html, re.DOTALL)
-            
             if match_json:
                 try:
                     estado_interno = json.loads(match_json.group(1))
-                    
-                    # Função recursiva para varrer o JSON e isolar apenas URLs limpas
-                    def buscar_video_limpo(dados):
+
+                    def varrer(dados):
                         if isinstance(dados, dict):
-                            # Procura por chaves de vídeo conhecidas
-                            chaves_limpas = ["playUrl", "play_url", "defaultVideoUrl", "videoUrl", "video_url", "url"]
-                            for chave in chaves_limpas:
-                                if chave in dados and isinstance(dados[chave], str) and dados[chave].startswith("http"):
-                                    # 🛡️ TRAVA: A URL jamais pode conter a palavra watermark
-                                    if "watermark" not in dados[chave].lower():
-                                        return dados[chave]
-                                        
-                            # Continua a escavação nos sub-níveis
-                            for k, v in dados.items():
-                                if "watermark" in k.lower():
-                                    continue # Isola e abandona nós contaminados
-                                resultado = buscar_video_limpo(v)
-                                if resultado: return resultado
+                            for chave, valor in dados.items():
+                                if isinstance(valor, str):
+                                    guardar(valor)
+                                    # Chave de vídeo sem ".mp4" na URL ainda vale.
+                                    if str(chave).lower().replace("_", "") in CHAVES_VIDEO:
+                                        limpa = _normalizar(valor)
+                                        if limpa.startswith("http") and limpa not in candidatos:
+                                            candidatos.append(limpa)
+                                else:
+                                    varrer(valor)
                         elif isinstance(dados, list):
                             for item in dados:
-                                resultado = buscar_video_limpo(item)
-                                if resultado: return resultado
-                        return None
+                                varrer(item)
 
-                    link_mp4 = buscar_video_limpo(estado_interno)
-                    if EXIBIR_LOGS and link_mp4: logger.info("🧠 Vídeo Matriz limpo extraído via JSON interno!")
-
+                    varrer(estado_interno)
                 except Exception as e:
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao decodificar a matriz interna da Shopee: {e}")
+                    if EXIBIR_LOGS: logger.warning(f"⚠️ JSON interno da Shopee ilegível: {e}")
 
-            # 4. Fallback de Segurança (Se o JSON estiver criptografado)
-            if not link_mp4:
-                PADROES_LIMPOS = [
-                    r'"defaultVideoUrl"\s*:\s*"([^"]+)"',
-                    r'"playUrl"\s*:\s*"([^"]+)"',
-                    r'"play_url"\s*:\s*"([^"]+)"',
-                    r'"videoUrl"\s*:\s*"([^"]+)"',
-                    r'"video_url"\s*:\s*"([^"]+)"',
-                ]
-                for padrao in PADROES_LIMPOS:
-                    achado = re.search(padrao, html)
-                    if achado:
-                        url_encontrada = achado.group(1).replace("\\u002F", "/").replace("\\/", "/")
-                        # Trava dupla na Regex para garantir a rejeição do watermark
-                        if url_encontrada.startswith("http") and "watermark" not in url_encontrada.lower():
-                            link_mp4 = url_encontrada
-                            if EXIBIR_LOGS: logger.info("🔍 Matriz limpa encontrada via varredura profunda (Regex)!")
-                            break
+            # Varredura bruta: pega o que o JSON não entregou (ou não decodificou).
+            for achado in re.findall(r'https?:[^"\'\\\s<>]+\.mp4[^"\'\\\s<>]*', html):
+                guardar(achado)
+            for achado in re.findall(
+                r'"(?:defaultVideoUrl|playUrl|play_url|videoUrl|video_url|playAddr|play_addr|downloadUrl|download_url)"\s*:\s*"([^"]+)"',
+                html):
+                limpa = _normalizar(achado)
+                if limpa.startswith("http") and limpa not in candidatos:
+                    candidatos.append(limpa)
+
+            if EXIBIR_LOGS:
+                logger.info(f"🛒 {len(candidatos)} candidato(s) de vídeo encontrados na página.")
+                for c in candidatos[:6]:
+                    logger.info(f"   • {c[:130]}")
+
+            limpos = [c for c in candidatos if "watermark" not in c.lower()]
+            marcados = [c for c in candidatos if "watermark" in c.lower()]
+
+            link_mp4 = None
+            if limpos:
+                link_mp4 = limpos[0]
+                if EXIBIR_LOGS: logger.info("🧠 Matriz limpa encontrada.")
+            elif marcados:
+                # 🧼 Antes isso virava erro e o usuário ficava sem nada.
+                link_mp4 = marcados[0]
+                if EXIBIR_LOGS: logger.warning("⚠️ Só existe a versão com marca: o ffmpeg limpa depois.")
 
             if not link_mp4:
-                return None, ("não consegui extrair o vídeo limpo. "
-                              "A Shopee ocultou o arquivo matriz original nesta página.")
+                return None, ("não achei nenhum arquivo de vídeo nesta página da Shopee. "
+                              "Talvez o link seja de produto, e não de vídeo")
 
             if EXIBIR_LOGS: logger.info(f"🛒 MP4 Limpo pronto para download: {link_mp4[:70]}...")
 
