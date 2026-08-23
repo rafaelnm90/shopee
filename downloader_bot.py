@@ -55,6 +55,10 @@ CANAIS_OBRIGATORIOS = [
 
 LIMITE_DIARIO_DOWNLOADS = 10
 
+# ♾️ Quem está aqui não tem limite diário. Usado para testar o bot sem
+# queimar cota e para atender pedidos manuais.
+IDS_SEM_LIMITE = {1226920464}   # Rafael (admin)
+
 # Piloto: YouTube fica de fora — é a plataforma que mais quebra o yt-dlp
 # e a que gera arquivos acima do limite de 50 MB do Telegram.
 PADROES_SUPORTADOS = {
@@ -446,9 +450,9 @@ async def _baixar_video_uma_vez(url, pasta):
         if EXIBIR_LOGS: logger.error(f"❌ Erro inesperado no download: {e}")
         return None, "erro inesperado ao baixar"
 
-# 🔁 O TikTok/Instagram derruba pedidos vindos de servidor de forma aleatória:
-# o MESMO link falha agora e funciona 5s depois. Sem retentativa, o usuário
-# leva um "não deu certo" que não é culpa dele nem do link.
+# 🔁 O TikTok derruba pedidos vindos de servidor de forma aleatória: o MESMO
+# link falha agora e funciona 5s depois. Sem retentativa, o usuário leva um
+# "não deu certo" que não é culpa dele nem do link.
 ERROS_QUE_MERECEM_NOVA_TENTATIVA = (
     "não consegui acessar esse vídeo",
     "o download não gerou arquivo",
@@ -466,13 +470,15 @@ async def baixar_video(url, pasta, tentativas=3):
             return caminho, None
 
         ultimo_erro = erro
-        # Vídeo privado, grande demais ou link não suportado: repetir não resolve.
         if erro not in ERROS_QUE_MERECEM_NOVA_TENTATIVA:
             return None, erro
 
         if n < tentativas:
             if EXIBIR_LOGS:
                 logger.warning(f"🔁 Tentativa {n}/{tentativas} falhou ({erro}). Repetindo em {3 * n}s...")
+            for lixo in os.listdir(pasta):
+                try: os.remove(os.path.join(pasta, lixo))
+                except Exception: pass
             await asyncio.sleep(3 * n)
 
     return None, ultimo_erro
@@ -549,7 +555,7 @@ async def receber_link(message: types.Message):
 
     # 3️⃣ Limite diário
     usados = downloads_hoje(message.from_user.id)
-    if usados >= LIMITE_DIARIO_DOWNLOADS:
+    if usados >= LIMITE_DIARIO_DOWNLOADS and message.from_user.id not in IDS_SEM_LIMITE:
         await message.answer(
             f"📦 {mencao}, você já baixou <b>{usados} vídeos hoje</b> e atingiu o limite diário.\n\n"
             f"<b>Cada membro pode baixar até {LIMITE_DIARIO_DOWNLOADS} vídeos por dia.</b>\n"
@@ -627,7 +633,7 @@ async def receber_link(message: types.Message):
             # ✅ Só conta o que foi entregue: falha não gasta a cota de ninguém
             registrar_download(message.from_user.id)
             restantes = LIMITE_DIARIO_DOWNLOADS - downloads_hoje(message.from_user.id)
-            if restantes <= 3:
+            if restantes <= 3 and message.from_user.id not in IDS_SEM_LIMITE:
                 aviso_cota = await message.answer(
                     f"📦 {mencao}, restam <b>{restantes}</b> download(s) hoje "
                     f"(limite de {LIMITE_DIARIO_DOWNLOADS} por dia).",
