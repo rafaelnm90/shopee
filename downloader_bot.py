@@ -355,8 +355,10 @@ async def limpar_video_shopee(caminho, pasta):
     """Devolve o caminho do vídeo limpo. Se algo falhar, devolve o original:
     entregar com marca é melhor do que não entregar nada."""
     filtros = []
+    # 🧼 Só borra se o download veio da versão marcada (ver baixar_video_shopee).
+    tem_marca = os.path.exists(os.path.join(pasta, "COM_MARCA"))
     largura, altura = await _dimensoes_video(caminho)
-    if largura and altura:
+    if tem_marca and largura and altura:
         px, py, pw, ph = MARCA_SHOPEE_PROPORCAO
         x, y = max(1, int(largura * px)), max(1, int(altura * py))
         w, h = int(largura * pw), int(altura * ph)
@@ -415,73 +417,82 @@ async def baixar_video_shopee(url, pasta):
                         if r2.status == 200:
                             html = await r2.text()
 
-            # 3. Junta TODOS os candidatos a vídeo que a página expuser.
-            # Antes o código parava no primeiro que não tivesse "watermark" no
-            # nome e desistia se não achasse nenhum. Agora coleta tudo, prefere
-            # o limpo e, se só houver o marcado, entrega ele para o ffmpeg limpar.
-            candidatos = []
+            # 3. Coleta candidatos a vídeo. A Shopee serve DUAS gerações de página:
+            # a antiga com window.__INITIAL_STATE__ e a nova em Next.js com
+            # <script id="__NEXT_DATA__">. Hoje o link de compartilhamento só
+            # expõe "watermarkVideoUrl" — não existe matriz limpa aqui.
+            candidatos = []   # lista de (chave, url)
 
             def _normalizar(u):
                 return u.replace("\\u002F", "/").replace("\\/", "/") if isinstance(u, str) else ""
 
-            def guardar(u):
-                u = _normalizar(u)
-                if u.startswith("http") and ".mp4" in u.lower() and u not in candidatos:
-                    candidatos.append(u)
+            def guardar(chave, valor):
+                u = _normalizar(valor)
+                if not u.startswith("http"):
+                    return
+                if any(u.lower().split("?")[0].endswith(e) for e in (".jpg", ".jpeg", ".png", ".webp")):
+                    return
+                chave_l = str(chave).lower()
+                if ".mp4" not in u.lower() and "video" not in chave_l:
+                    return
+                # Dedupe por URL: a mesma URL achada 2x não pode trocar de classificação.
+                if any(u == existente for _, existente in candidatos):
+                    return
+                candidatos.append((str(chave), u))
 
-            CHAVES_VIDEO = {"defaultvideourl", "playurl", "videourl", "playaddr", "downloadurl"}
+            def varrer(dados):
+                if isinstance(dados, dict):
+                    for k, v in dados.items():
+                        if isinstance(v, str):
+                            guardar(k, v)
+                        else:
+                            varrer(v)
+                elif isinstance(dados, list):
+                    for item in dados:
+                        varrer(item)
 
-            match_json = re.search(r'window\.__INITIAL_STATE__\s*=\s*({.*?});\s*</script>', html, re.DOTALL)
-            if match_json:
+            blocos = []
+            achado = re.search(r'window\.__INITIAL_STATE__\s*=\s*({.*?});\s*</script>', html, re.DOTALL)
+            if achado:
+                blocos.append(achado.group(1))
+            achado = re.search(r'<script[^>]+id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
+            if achado:
+                blocos.append(achado.group(1))
+
+            for bruto in blocos:
                 try:
-                    estado_interno = json.loads(match_json.group(1))
-
-                    def varrer(dados):
-                        if isinstance(dados, dict):
-                            for chave, valor in dados.items():
-                                if isinstance(valor, str):
-                                    guardar(valor)
-                                    # Chave de vídeo sem ".mp4" na URL ainda vale.
-                                    if str(chave).lower().replace("_", "") in CHAVES_VIDEO:
-                                        limpa = _normalizar(valor)
-                                        if limpa.startswith("http") and limpa not in candidatos:
-                                            candidatos.append(limpa)
-                                else:
-                                    varrer(valor)
-                        elif isinstance(dados, list):
-                            for item in dados:
-                                varrer(item)
-
-                    varrer(estado_interno)
+                    varrer(json.loads(bruto))
                 except Exception as e:
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ JSON interno da Shopee ilegível: {e}")
+                    if EXIBIR_LOGS: logger.warning(f"⚠️ JSON da página não decodificou: {e}")
 
-            # Varredura bruta: pega o que o JSON não entregou (ou não decodificou).
-            for achado in re.findall(r'https?:[^"\'\\\s<>]+\.mp4[^"\'\\\s<>]*', html):
-                guardar(achado)
-            for achado in re.findall(
-                r'"(?:defaultVideoUrl|playUrl|play_url|videoUrl|video_url|playAddr|play_addr|downloadUrl|download_url)"\s*:\s*"([^"]+)"',
-                html):
-                limpa = _normalizar(achado)
-                if limpa.startswith("http") and limpa not in candidatos:
-                    candidatos.append(limpa)
+            # Rede de segurança, por último: qualquer .mp4 solto no HTML.
+            for solto in re.findall(r'https?:[^"\'\\\s<>]+\.mp4[^"\'\\\s<>]*', html):
+                guardar("html", solto)
 
             if EXIBIR_LOGS:
-                logger.info(f"🛒 {len(candidatos)} candidato(s) de vídeo encontrados na página.")
-                for c in candidatos[:6]:
-                    logger.info(f"   • {c[:130]}")
+                logger.info(f"🛒 {len(candidatos)} candidato(s): "
+                            + ", ".join(k for k, _ in candidatos[:6]))
 
-            limpos = [c for c in candidatos if "watermark" not in c.lower()]
-            marcados = [c for c in candidatos if "watermark" in c.lower()]
+            # ⚠️ É a CHAVE que denuncia a marca: a URL de watermarkVideoUrl
+            # não contém a palavra "watermark" em lugar nenhum.
+            def tem_marca(chave, url):
+                return "watermark" in chave.lower() or "watermark" in url.lower()
+
+            limpos = [u for k, u in candidatos if not tem_marca(k, u)]
+            marcados = [u for k, u in candidatos if tem_marca(k, u)]
 
             link_mp4 = None
             if limpos:
                 link_mp4 = limpos[0]
                 if EXIBIR_LOGS: logger.info("🧠 Matriz limpa encontrada.")
             elif marcados:
-                # 🧼 Antes isso virava erro e o usuário ficava sem nada.
                 link_mp4 = marcados[0]
-                if EXIBIR_LOGS: logger.warning("⚠️ Só existe a versão com marca: o ffmpeg limpa depois.")
+                # 🧼 Sinaliza para a limpeza que este arquivo tem marca queimada.
+                try:
+                    open(os.path.join(pasta, "COM_MARCA"), "w").close()
+                except Exception:
+                    pass
+                if EXIBIR_LOGS: logger.warning("⚠️ Só há a versão com marca: o ffmpeg limpa depois.")
 
             if not link_mp4:
                 return None, ("não achei nenhum arquivo de vídeo nesta página da Shopee. "
