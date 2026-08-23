@@ -389,11 +389,11 @@ async def baixar_video_shopee(url, pasta):
         if EXIBIR_LOGS: logger.error(f"❌ Erro crítico na comunicação com a API de extração: {e}")
         return None, "erro interno ao processar a extração via API"
 
-async def baixar_video(url, pasta):
+async def _baixar_video_uma_vez(url, pasta):
     """
     Roda o yt-dlp em SUBPROCESSO. Chamar direto travaria o bot inteiro,
     porque a biblioteca é síncrona e o download demora.
-    Devolve (caminho, erro).
+    Devolve (caminho, erro). Não chame direto: use baixar_video().
     """
     modelo = os.path.join(pasta, "video.%(ext)s")
     comando = [
@@ -426,9 +426,15 @@ async def baixar_video(url, pasta):
                 return None, "o vídeo é privado ou exige login"
             if "Unsupported URL" in msg:
                 return None, "este link não é suportado"
+            # 🔍 Sem isso o motivo real some e não dá para investigar depois.
+            if EXIBIR_LOGS:
+                logger.error(f"❌ yt-dlp saiu com código {proc.returncode} em {url}\n{msg.strip()[-600:]}")
             return None, "não consegui acessar esse vídeo"
 
-        for nome in os.listdir(pasta):
+        for nome in sorted(os.listdir(pasta)):
+            # ⚠️ Sobra de tentativa anterior: enviar isso entrega vídeo corrompido.
+            if nome.endswith((".part", ".ytdl", ".temp")):
+                continue
             caminho = os.path.join(pasta, nome)
             if os.path.isfile(caminho) and os.path.getsize(caminho) > 0:
                 return caminho, None
@@ -439,6 +445,37 @@ async def baixar_video(url, pasta):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro inesperado no download: {e}")
         return None, "erro inesperado ao baixar"
+
+# 🔁 O TikTok/Instagram derruba pedidos vindos de servidor de forma aleatória:
+# o MESMO link falha agora e funciona 5s depois. Sem retentativa, o usuário
+# leva um "não deu certo" que não é culpa dele nem do link.
+ERROS_QUE_MERECEM_NOVA_TENTATIVA = (
+    "não consegui acessar esse vídeo",
+    "o download não gerou arquivo",
+    "erro inesperado ao baixar",
+)
+
+async def baixar_video(url, pasta, tentativas=3):
+    """Tenta até 3 vezes com espera crescente. Erro definitivo sai na hora."""
+    ultimo_erro = None
+    for n in range(1, tentativas + 1):
+        caminho, erro = await _baixar_video_uma_vez(url, pasta)
+        if not erro:
+            if n > 1 and EXIBIR_LOGS:
+                logger.info(f"✅ Deu certo na tentativa {n}/{tentativas}: {url}")
+            return caminho, None
+
+        ultimo_erro = erro
+        # Vídeo privado, grande demais ou link não suportado: repetir não resolve.
+        if erro not in ERROS_QUE_MERECEM_NOVA_TENTATIVA:
+            return None, erro
+
+        if n < tentativas:
+            if EXIBIR_LOGS:
+                logger.warning(f"🔁 Tentativa {n}/{tentativas} falhou ({erro}). Repetindo em {3 * n}s...")
+            await asyncio.sleep(3 * n)
+
+    return None, ultimo_erro
 
 def detectar_plataforma(texto):
     """Devolve (plataforma, url) do primeiro link reconhecido, ou (None, None)."""
