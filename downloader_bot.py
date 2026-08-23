@@ -272,60 +272,98 @@ CABECALHO_NAVEGADOR = {
                   "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 }
 
-PADROES_VIDEO_SHOPEE = [
-    r'"playUrl"\s*:\s*"([^"]+)"',
-    r'"play_url"\s*:\s*"([^"]+)"',
-    r'"defaultVideoUrl"\s*:\s*"([^"]+)"',
-    r'"videoUrl"\s*:\s*"([^"]+)"',
-    r'"video_url"\s*:\s*"([^"]+)"',
-    r'(https://down-[a-z]{2,4}-[a-z]{2}\.vod\.susercontent\.com/[^"\\\s]+\.mp4)',
-]
-
 async def baixar_video_shopee(url, pasta):
-    """Busca a URL do MP4 no HTML e baixa direto do CDN. Devolve (caminho, erro)."""
+    """Busca o vídeo matriz limpo via Engenharia Reversa do estado (JSON) interno da Shopee."""
     try:
         import aiohttp
+        import json
+        import urllib.parse
+
         async with aiohttp.ClientSession(headers=CABECALHO_NAVEGADOR) as sessao:
-            # 1. Abre a página. A Shopee às vezes para numa tela "universal-link"
-            # que tenta abrir o app — o endereço real vem no parâmetro redir=.
+            # 1. Resolve o link encurtado (br.shp.ee)
             async with sessao.get(url, allow_redirects=True, timeout=25) as resposta:
                 if resposta.status != 200:
                     return None, "não consegui abrir a página da Shopee"
                 html = await resposta.text()
                 url_final = str(resposta.url)
 
+            # 2. Desvenda o redirecionamento universal-link oculto
             if "universal-link" in url_final and "redir=" in url_final:
-                from urllib.parse import unquote, urlparse, parse_qs
-                destino_real = parse_qs(urlparse(url_final).query).get("redir", [None])[0]
+                destino_real = urllib.parse.parse_qs(urllib.parse.urlparse(url_final).query).get("redir", [None])[0]
                 if destino_real:
-                    destino_real = unquote(destino_real)
-                    if EXIBIR_LOGS: logger.info(f"🛒 Universal-link contornado: {destino_real[:70]}...")
+                    destino_real = urllib.parse.unquote(destino_real)
+                    if EXIBIR_LOGS: logger.info(f"🛒 Link real localizado: {destino_real[:70]}...")
                     async with sessao.get(destino_real, allow_redirects=True, timeout=25) as r2:
                         if r2.status == 200:
                             html = await r2.text()
 
-            # 2. Procura o MP4 embutido
+            # 3. Engenharia Reversa: Captura o JSON de estado interno do App (matriz)
             link_mp4 = None
-            for padrao in PADROES_VIDEO_SHOPEE:
-                achado = re.search(padrao, html)
-                if achado:
-                    link_mp4 = achado.group(1).replace("\\u002F", "/").replace("\\/", "/")
-                    if link_mp4.startswith("http"):
-                        break
-                    link_mp4 = None
+            match_json = re.search(r'window\.__INITIAL_STATE__\s*=\s*({.*?});\s*</script>', html, re.DOTALL)
+            
+            if match_json:
+                try:
+                    estado_interno = json.loads(match_json.group(1))
+                    
+                    # Função recursiva para varrer o JSON e isolar apenas URLs limpas
+                    def buscar_video_limpo(dados):
+                        if isinstance(dados, dict):
+                            # Procura por chaves de vídeo conhecidas
+                            chaves_limpas = ["playUrl", "play_url", "defaultVideoUrl", "videoUrl", "video_url", "url"]
+                            for chave in chaves_limpas:
+                                if chave in dados and isinstance(dados[chave], str) and dados[chave].startswith("http"):
+                                    # 🛡️ TRAVA: A URL jamais pode conter a palavra watermark
+                                    if "watermark" not in dados[chave].lower():
+                                        return dados[chave]
+                                        
+                            # Continua a escavação nos sub-níveis
+                            for k, v in dados.items():
+                                if "watermark" in k.lower():
+                                    continue # Isola e abandona nós contaminados
+                                resultado = buscar_video_limpo(v)
+                                if resultado: return resultado
+                        elif isinstance(dados, list):
+                            for item in dados:
+                                resultado = buscar_video_limpo(item)
+                                if resultado: return resultado
+                        return None
+
+                    link_mp4 = buscar_video_limpo(estado_interno)
+                    if EXIBIR_LOGS and link_mp4: logger.info("🧠 Vídeo Matriz limpo extraído via JSON interno!")
+
+                except Exception as e:
+                    if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao decodificar a matriz interna da Shopee: {e}")
+
+            # 4. Fallback de Segurança (Se o JSON estiver criptografado)
+            if not link_mp4:
+                PADROES_LIMPOS = [
+                    r'"defaultVideoUrl"\s*:\s*"([^"]+)"',
+                    r'"playUrl"\s*:\s*"([^"]+)"',
+                    r'"play_url"\s*:\s*"([^"]+)"',
+                    r'"videoUrl"\s*:\s*"([^"]+)"',
+                    r'"video_url"\s*:\s*"([^"]+)"',
+                ]
+                for padrao in PADROES_LIMPOS:
+                    achado = re.search(padrao, html)
+                    if achado:
+                        url_encontrada = achado.group(1).replace("\\u002F", "/").replace("\\/", "/")
+                        # Trava dupla na Regex para garantir a rejeição do watermark
+                        if url_encontrada.startswith("http") and "watermark" not in url_encontrada.lower():
+                            link_mp4 = url_encontrada
+                            if EXIBIR_LOGS: logger.info("🔍 Matriz limpa encontrada via varredura profunda (Regex)!")
+                            break
 
             if not link_mp4:
-                return None, ("essa página de produto não tem vídeo. "
-                              "Use um link de <b>vídeo do feed</b> da Shopee "
-                              "(o que começa com br.shp.ee)")
+                return None, ("não consegui extrair o vídeo limpo. "
+                              "A Shopee ocultou o arquivo matriz original nesta página.")
 
-            if EXIBIR_LOGS: logger.info(f"🛒 MP4 da Shopee localizado: {link_mp4[:70]}...")
+            if EXIBIR_LOGS: logger.info(f"🛒 MP4 Limpo pronto para download: {link_mp4[:70]}...")
 
-            # 3. Baixa o arquivo, respeitando o teto do Telegram
+            # 5. Baixa o arquivo direto do CDN
             destino = os.path.join(pasta, "video.mp4")
             async with sessao.get(link_mp4, timeout=TIMEOUT_DOWNLOAD_SEG) as fluxo:
                 if fluxo.status != 200:
-                    return None, "o vídeo não está mais disponível"
+                    return None, "o vídeo matriz não está mais disponível no servidor da Shopee"
                 total = 0
                 limite = LIMITE_TELEGRAM_MB * 1024 * 1024
                 with open(destino, "wb") as arquivo:
@@ -337,13 +375,13 @@ async def baixar_video_shopee(url, pasta):
 
             if os.path.getsize(destino) > 0:
                 return destino, None
-            return None, "o download veio vazio"
+            return None, "o download da matriz veio vazio"
 
     except asyncio.TimeoutError:
         return None, "a Shopee demorou demais para responder"
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro no download da Shopee: {e}")
-        return None, "erro ao baixar da Shopee"
+        if EXIBIR_LOGS: logger.error(f"❌ Erro crítico na extração da matriz da Shopee: {e}")
+        return None, "erro interno ao extrair matriz da Shopee"
 
 async def baixar_video(url, pasta):
     """
