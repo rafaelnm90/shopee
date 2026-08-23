@@ -462,60 +462,6 @@ PROMPT_NOME_PRODUTO = (
     "É proibido criar textos de venda, descrições, inventar hashtags ou adicionar frases de encerramento."
 )
 
-# ==========================================
-# 🧵 NOMES DOS TÓPICOS
-# Os painéis mostram só o nome do GRUPO quando o alvo é um tópico, porque
-# ninguém grava o nome do tópico. O userbot consegue listar os tópicos de um
-# fórum, então este loop alimenta o cache uma vez por dia.
-# ==========================================
-async def mapear_topicos_dos_alvos():
-    """Busca o nome de cada tópico vigiado e grava no cache de nomes."""
-    try:
-        alvos = carregar_alvos()
-        # Junta os tópicos por grupo: uma consulta por fórum, não por tópico
-        grupos = {}
-        for alvo in alvos:
-            texto = str(alvo)
-            if ":" not in texto:
-                continue
-            base, topico = texto.split(":", 1)
-            grupos.setdefault(base.strip(), set()).add(topico.strip())
-
-        if not grupos:
-            return
-
-        gravados = 0
-        for base, topicos in grupos.items():
-            try:
-                entidade = await client.get_entity(int(base))
-                resultado = await client(functions.channels.GetForumTopicsRequest(
-                    channel=entidade, offset_date=0, offset_id=0,
-                    offset_topic=0, limit=100
-                ))
-                for t in getattr(resultado, "topics", []):
-                    tid = str(getattr(t, "id", ""))
-                    titulo = getattr(t, "title", None)
-                    if tid in topicos and titulo:
-                        # Grava nos dois formatos que o resolver procura
-                        salvar_nome_grupo(f"{base}_{tid}", titulo)
-                        salvar_nome_grupo(f"{base}:{tid}", titulo)
-                        gravados += 1
-                await asyncio.sleep(3)   # respiro entre fóruns, evita flood
-            except Exception as e:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ [Tópicos] Não consegui listar {base}: {e}")
-
-        if EXIBIR_LOGS:
-            logger.info(f"🧵 [Tópicos] {gravados} nome(s) de tópico gravado(s) no cache.")
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Tópicos] Falha ao mapear: {e}")
-
-async def mapear_topicos_loop():
-    """Uma vez por dia. Nome de tópico muda pouco."""
-    await asyncio.sleep(180)
-    while True:
-        await mapear_topicos_dos_alvos()
-        await asyncio.sleep(86400)
-
 async def analisar_fila_espiao_loop():
     """Preenche o nome do produto dos clones que ainda não têm, um de cada vez."""
     await asyncio.sleep(120)
@@ -1202,13 +1148,28 @@ async def monitorar_topicos_submissao():
     while True:
         try:
             config = ler_config_bd_espiao("submissao_config", padrao={})
-            grupo_id = config.get("grupo_id")
 
-            if not grupo_id:
+            # 🧵 Além do grupo de submissão, cobre TODOS os alvos vigiados que
+            # apontam para um tópico — senão o painel do Espião mostra só o
+            # nome do grupo, e 45 alvos do mesmo fórum ficam idênticos.
+            grupos_alvo = []
+            if config.get("grupo_id"):
+                grupos_alvo.append(str(config.get("grupo_id")))
+            try:
+                for alvo in carregar_alvos():
+                    if ":" in str(alvo):
+                        base = str(alvo).split(":", 1)[0].strip()
+                        if base not in grupos_alvo:
+                            grupos_alvo.append(base)
+            except Exception:
+                pass
+
+            if not grupos_alvo:
                 await asyncio.sleep(600)
                 continue
 
-            entidade = await client.get_entity(int(grupo_id))
+            for grupo_id in grupos_alvo:
+                entidade = await client.get_entity(int(grupo_id))
 
             argumentos = {
                 _param_peer: entidade,
@@ -1228,8 +1189,10 @@ async def monitorar_topicos_submissao():
                 salvar_nome_grupo(f"{grupo_id}_{topico_id}", titulo)
                 total += 1
 
-            if EXIBIR_LOGS and total:
-                logger.info(f"🏷️ [Tópicos] {total} nomes de tópicos sincronizados do grupo {grupo_id}.")
+                if EXIBIR_LOGS and total:
+                    logger.info(f"🏷️ [Tópicos] {total} nomes sincronizados do grupo {grupo_id}.")
+
+                await asyncio.sleep(3)   # respiro entre fóruns
 
         except Exception as e:
             if EXIBIR_LOGS: logger.warning(f"⚠️ [Tópicos] Falha ao sincronizar nomes dos tópicos: {e}")
@@ -1257,7 +1220,6 @@ async def main():
     
     asyncio.create_task(processar_fila_espelhador_loop())
     asyncio.create_task(analisar_fila_espiao_loop())
-    asyncio.create_task(mapear_topicos_loop())   # 🧵 nomes dos tópicos vigiados
     asyncio.create_task(monitorar_status_alvos())
     asyncio.create_task(monitorar_status_espelhos())
     asyncio.create_task(monitorar_topicos_submissao()) # ✅ NOVO GATILHO
