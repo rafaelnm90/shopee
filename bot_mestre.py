@@ -8977,7 +8977,7 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
         
         if blacklist:
             for i, b in enumerate(blacklist, 1): 
-                nome = cache_nomes.get(str(b), str(b))
+                nome = formatar_nome_alvo(b, cache_nomes)
                 texto_bl += f"{i}. {nome} (<code>{b}</code>)\n"
         else: 
             texto_bl += "<i>A lista negra está vazia.</i>\n"
@@ -9197,7 +9197,7 @@ async def processar_add_blacklist_espiao(message: types.Message, state: FSMConte
             f"Canais que serão <b>AUTOMATICAMENTE REMOVIDOS</b> da escuta:\n"
         )
         for c in conflitos:
-            nome_conflito = cache_nomes.get(str(c), str(c))
+            nome_conflito = formatar_nome_alvo(c, cache_nomes)
             texto_aviso += f"🗑️ {nome_conflito} (<code>{c}</code>)\n"
 
         texto_aviso += "\nDeseja aprovar a adição à Lista Negra e a exclusão destes canais da escuta simultaneamente?"
@@ -9214,7 +9214,7 @@ async def processar_add_blacklist_espiao(message: types.Message, state: FSMConte
         cache_nomes = ler_cache_nomes_grupos()
         txt_lista = "⛔ <b>Lista Negra do Espião</b>\n"
         for i, b in enumerate(blacklist, 1):
-            nome = cache_nomes.get(str(b), str(b))
+            nome = formatar_nome_alvo(b, cache_nomes)
             txt_lista += f"{i}. {nome} (<code>{b}</code>)\n"
             
         texto_final = f"✅ <b>{len(novos_blacklist)} canal(is) bloqueado(s) com sucesso!</b>\n\n{txt_lista}"
@@ -9258,7 +9258,7 @@ async def confirmar_blacklist_conflito_espiao(message: types.Message, state: FSM
     cache_nomes = ler_cache_nomes_grupos()
     txt_lista = "\n⛔ <b>Lista Negra Atualizada:</b>\n"
     for i, b in enumerate(blacklist, 1):
-        nome = cache_nomes.get(str(b), str(b))
+        nome = formatar_nome_alvo(b, cache_nomes)
         txt_lista += f"{i}. {nome} (<code>{b}</code>)\n"
 
     texto_final = f"✅ <b>Sucesso!</b>\n⛔ {len(novos_blacklist)} adicionado(s).\n🗑️ {len(alvos_para_remover)} removido(s) da escuta.\n{txt_lista}"
@@ -9291,7 +9291,7 @@ async def processar_rem_blacklist_espiao(message: types.Message, state: FSMConte
     txt_lista = "⛔ <b>Lista Negra do Espião</b>\n"
     if nova_blacklist:
         for i, b in enumerate(nova_blacklist, 1):
-            nome = cache_nomes.get(str(b), str(b))
+            nome = formatar_nome_alvo(b, cache_nomes)
             txt_lista += f"{i}. {nome} (<code>{b}</code>)\n"
     else:
         txt_lista += "<i>Nenhuma restrição cadastrada.</i>\n"
