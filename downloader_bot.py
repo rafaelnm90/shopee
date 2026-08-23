@@ -276,6 +276,120 @@ CABECALHO_NAVEGADOR = {
                   "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 }
 
+# ==========================================================
+# 🧼 LIMPEZA DO RENDER DA SHOPEE
+# Quando a matriz limpa não está exposta na página, o que sobra é o render
+# do app: marca "Shopee Video / @usuario" queimada no pixel e uma cartela
+# laranja no fim. O ffmpeg resolve os dois localmente, sem API de terceiro.
+# ==========================================================
+LIMPAR_VIDEO_SHOPEE = True
+FFMPEG = "ffmpeg"
+FFPROBE = "ffprobe"
+COR_CARTELA_SHOPEE = (238, 77, 45)
+TOLERANCIA_CARTELA = 60
+# Caixa da marca em PROPORÇÃO do quadro (x, y, largura, altura):
+# o arquivo vem 480x854 ou 720x1280 dependendo do vídeo.
+MARCA_SHOPEE_PROPORCAO = (0.010, 0.440, 0.385, 0.100)
+TIMEOUT_LIMPEZA_SEG = 120
+
+async def _executar(comando, timeout, capturar=True):
+    """Roda um processo externo sem travar o bot. Devolve (saida, erro, falha)."""
+    proc = await asyncio.create_subprocess_exec(
+        *comando,
+        stdout=asyncio.subprocess.PIPE if capturar else asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        saida, erro = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return None, None, "tempo esgotado"
+    if proc.returncode != 0:
+        return None, None, (erro or b"").decode(errors="ignore")[-300:]
+    return saida, erro, None
+
+async def _dimensoes_video(caminho):
+    comando = [FFPROBE, "-v", "error", "-select_streams", "v:0",
+               "-show_entries", "stream=width,height", "-of", "csv=p=0", caminho]
+    saida, _, falha = await _executar(comando, 30)
+    if falha or not saida:
+        return None, None
+    try:
+        largura, altura = saida.decode().strip().split(",")[:2]
+        return int(largura), int(altura)
+    except Exception:
+        return None, None
+
+async def _inicio_cartela_shopee(caminho):
+    """Reduz cada quadro a 1 pixel e acha onde começa o bloco laranja FINAL.
+    Devolve o segundo do corte, ou None se não houver cartela."""
+    comando = [FFMPEG, "-v", "error", "-i", caminho,
+               "-vf", "fps=10,scale=1:1", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"]
+    bruto, _, falha = await _executar(comando, 60)
+    if falha or not bruto:
+        return None
+
+    cores = [bruto[i:i + 3] for i in range(0, len(bruto) - 2, 3)]
+    if not cores:
+        return None
+
+    def e_laranja(c):
+        return all(abs(c[i] - COR_CARTELA_SHOPEE[i]) <= TOLERANCIA_CARTELA for i in range(3))
+
+    # Só corta se o vídeo TERMINA em laranja: senão é cor de cena, não cartela.
+    if not e_laranja(cores[-1]):
+        return None
+
+    i = len(cores) - 1
+    while i >= 0 and e_laranja(cores[i]):
+        i -= 1
+
+    inicio = (i + 1) / 10.0
+    duracao = len(cores) / 10.0
+    # 🛡️ Trava: nunca engolir metade do vídeo por causa de uma cena laranja.
+    if inicio < 1.0 or inicio < duracao * 0.5:
+        return None
+    return inicio
+
+async def limpar_video_shopee(caminho, pasta):
+    """Devolve o caminho do vídeo limpo. Se algo falhar, devolve o original:
+    entregar com marca é melhor do que não entregar nada."""
+    filtros = []
+    largura, altura = await _dimensoes_video(caminho)
+    if largura and altura:
+        px, py, pw, ph = MARCA_SHOPEE_PROPORCAO
+        x, y = max(1, int(largura * px)), max(1, int(altura * py))
+        w, h = int(largura * pw), int(altura * ph)
+        if x + w < largura - 1 and y + h < altura - 1:
+            filtros.append(f"delogo=x={x}:y={y}:w={w}:h={h}")
+
+    corte = await _inicio_cartela_shopee(caminho)
+
+    if not filtros and not corte:
+        if EXIBIR_LOGS: logger.info("🧼 Nada a limpar neste vídeo da Shopee.")
+        return caminho
+
+    destino = os.path.join(pasta, "limpo.mp4")
+    comando = [FFMPEG, "-v", "error", "-y", "-i", caminho]
+    if corte:
+        comando += ["-t", f"{corte:.2f}"]
+    if filtros:
+        comando += ["-vf", ",".join(filtros)]
+        comando += ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23"]
+    else:
+        comando += ["-c:v", "copy"]
+    comando += ["-c:a", "copy", "-movflags", "+faststart", destino]
+
+    _, _, falha = await _executar(comando, TIMEOUT_LIMPEZA_SEG, capturar=False)
+    if falha or not os.path.exists(destino) or os.path.getsize(destino) == 0:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Limpeza falhou, entregando o original: {falha}")
+        return caminho
+
+    if EXIBIR_LOGS:
+        logger.info(f"🧼 Limpo (marca: {'sim' if filtros else 'nao'} | "
+                    f"cartela cortada em {corte or 'nenhuma'}s).")
+    return destino
+
 async def baixar_video_shopee(url, pasta):
     """Busca o vídeo matriz limpo via Engenharia Reversa do estado (JSON) interno da Shopee."""
     try:
@@ -605,6 +719,10 @@ async def receber_link(message: types.Message):
                 caminho, erro = await baixar_video_shopee(url, pasta)
             else:
                 caminho, erro = await baixar_video(url, pasta)
+
+            # 🧼 Tira a marca queimada e a cartela final do render da Shopee.
+            if not erro and caminho and plataforma == "Shopee" and LIMPAR_VIDEO_SHOPEE:
+                caminho = await limpar_video_shopee(caminho, pasta)
 
             if erro:
                 await status.edit_text(
