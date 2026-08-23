@@ -133,10 +133,31 @@ def limpar_downloads_antigos(dias=7):
     except Exception:
         pass
 
+async def atualizar_yt_dlp():
+    """Atualiza o yt-dlp silenciosamente via subprocesso no servidor."""
+    if EXIBIR_LOGS: logger.info("🔄 Iniciando verificação automática de atualização do pacote yt-dlp...")
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "/home/ubuntu/shopee/venv/bin/python3", "-m", "pip", "install", "-U", "yt-dlp",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode == 0:
+            if EXIBIR_LOGS: logger.info("✅ Sucesso: pacote yt-dlp está atualizado com a versão mais recente.")
+        else:
+            if EXIBIR_LOGS: logger.error(f"❌ Falha na execução do pip update: {stderr.decode(errors='ignore').strip()}")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro sistêmico ao tentar rodar a atualização: {e}")
+
 async def faxina_diaria_loop():
-    """Uma vez por dia, poda a tabela de contagem."""
+    """Uma vez por dia, poda a tabela de contagem e atualiza os motores de extração."""
+    if EXIBIR_LOGS: logger.info("🚀 Loop de manutenção diária (Faxina e Updates) iniciado em background.")
+    # Executa a primeira atualização imediatamente ao ligar o bot
+    await atualizar_yt_dlp()
     while True:
-        await asyncio.sleep(86400)
+        await asyncio.sleep(86400) # Pausa de 24 horas
+        await atualizar_yt_dlp()
         limpar_downloads_antigos()
 
 # ♻️ CACHE DE VÍDEOS
@@ -252,10 +273,10 @@ CABECALHO_NAVEGADOR = {
 }
 
 PADROES_VIDEO_SHOPEE = [
-    r'"watermarkVideoUrl"\s*:\s*"([^"]+)"',
     r'"videoUrl"\s*:\s*"([^"]+)"',
     r'"video_url"\s*:\s*"([^"]+)"',
     r'(https://down-[a-z]{2,4}-[a-z]{2}\.vod\.susercontent\.com/[^"\\\s]+\.mp4)',
+    r'"watermarkVideoUrl"\s*:\s*"([^"]+)"',
 ]
 
 async def baixar_video_shopee(url, pasta):
@@ -552,6 +573,9 @@ async def main():
     me = await bot.get_me()
     logger.info(f"📥 Downloader no ar como @{me.username} "
                 f"(privacy {'desligado ✅' if me.can_read_all_group_messages else 'LIGADO ⚠️'})")
+# Inicia a rotina autônoma de manutenção (Limpeza de BD e Update do yt-dlp)
+    asyncio.create_task(faxina_diaria_loop())
+    
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
