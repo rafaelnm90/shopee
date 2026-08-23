@@ -7,7 +7,7 @@ from datetime import datetime
 import time
 import hashlib
 import aiohttp
-from telethon import utils
+from telethon import utils, functions
 from telethon import TelegramClient, events
 from telethon.tl.types import MessageMediaDocument
 from dotenv import load_dotenv
@@ -461,6 +461,60 @@ PROMPT_NOME_PRODUTO = (
     "#ComputadoresEAcessorios #Saude #ViagensEBagagens #JogosEConsoles #Audio.\n"
     "É proibido criar textos de venda, descrições, inventar hashtags ou adicionar frases de encerramento."
 )
+
+# ==========================================
+# 🧵 NOMES DOS TÓPICOS
+# Os painéis mostram só o nome do GRUPO quando o alvo é um tópico, porque
+# ninguém grava o nome do tópico. O userbot consegue listar os tópicos de um
+# fórum, então este loop alimenta o cache uma vez por dia.
+# ==========================================
+async def mapear_topicos_dos_alvos():
+    """Busca o nome de cada tópico vigiado e grava no cache de nomes."""
+    try:
+        alvos = carregar_alvos()
+        # Junta os tópicos por grupo: uma consulta por fórum, não por tópico
+        grupos = {}
+        for alvo in alvos:
+            texto = str(alvo)
+            if ":" not in texto:
+                continue
+            base, topico = texto.split(":", 1)
+            grupos.setdefault(base.strip(), set()).add(topico.strip())
+
+        if not grupos:
+            return
+
+        gravados = 0
+        for base, topicos in grupos.items():
+            try:
+                entidade = await client.get_entity(int(base))
+                resultado = await client(functions.channels.GetForumTopicsRequest(
+                    channel=entidade, offset_date=0, offset_id=0,
+                    offset_topic=0, limit=100
+                ))
+                for t in getattr(resultado, "topics", []):
+                    tid = str(getattr(t, "id", ""))
+                    titulo = getattr(t, "title", None)
+                    if tid in topicos and titulo:
+                        # Grava nos dois formatos que o resolver procura
+                        salvar_nome_grupo(f"{base}_{tid}", titulo)
+                        salvar_nome_grupo(f"{base}:{tid}", titulo)
+                        gravados += 1
+                await asyncio.sleep(3)   # respiro entre fóruns, evita flood
+            except Exception as e:
+                if EXIBIR_LOGS: logger.warning(f"⚠️ [Tópicos] Não consegui listar {base}: {e}")
+
+        if EXIBIR_LOGS:
+            logger.info(f"🧵 [Tópicos] {gravados} nome(s) de tópico gravado(s) no cache.")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Tópicos] Falha ao mapear: {e}")
+
+async def mapear_topicos_loop():
+    """Uma vez por dia. Nome de tópico muda pouco."""
+    await asyncio.sleep(180)
+    while True:
+        await mapear_topicos_dos_alvos()
+        await asyncio.sleep(86400)
 
 async def analisar_fila_espiao_loop():
     """Preenche o nome do produto dos clones que ainda não têm, um de cada vez."""
@@ -1202,7 +1256,8 @@ async def main():
     if EXIBIR_LOGS: logger.info(f"📡 Radar ativo para {len(alvos)} concorrentes.")
     
     asyncio.create_task(processar_fila_espelhador_loop())
-    asyncio.create_task(analisar_fila_espiao_loop())   # 🧠 nome do produto antecipado
+    asyncio.create_task(analisar_fila_espiao_loop())
+    asyncio.create_task(mapear_topicos_loop())   # 🧵 nomes dos tópicos vigiados
     asyncio.create_task(monitorar_status_alvos())
     asyncio.create_task(monitorar_status_espelhos())
     asyncio.create_task(monitorar_topicos_submissao()) # ✅ NOVO GATILHO
