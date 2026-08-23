@@ -278,7 +278,6 @@ PADROES_VIDEO_SHOPEE = [
     r'"defaultVideoUrl"\s*:\s*"([^"]+)"',
     r'"videoUrl"\s*:\s*"([^"]+)"',
     r'"video_url"\s*:\s*"([^"]+)"',
-    r'"watermarkVideoUrl"\s*:\s*"([^"]+)"',
     r'(https://down-[a-z]{2,4}-[a-z]{2}\.vod\.susercontent\.com/[^"\\\s]+\.mp4)',
 ]
 
