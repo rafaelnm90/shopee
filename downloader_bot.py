@@ -479,7 +479,7 @@ async def baixar_video_shopee(url, pasta):
                 return "watermark" in chave.lower() or "watermark" in url.lower()
 
             limpos = [u for k, u in candidatos if not tem_marca(k, u)]
-                        marcados = [u for k, u in candidatos if tem_marca(k, u)]
+            marcados = [u for k, u in candidatos if tem_marca(k, u)]
 
             link_mp4 = None
             if limpos:
