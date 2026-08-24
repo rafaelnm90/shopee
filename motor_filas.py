@@ -83,6 +83,12 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
         var_min = config_fila.get("espacamento_variacao_min", 0)
         usar_espaco_organico = bool(base_min) and not forcar
 
+        # 🎲 DESLOCAMENTO INICIAL: sem isto o primeiro vídeo cai sempre no minuto
+        # exato de abertura da janela (08:00:00 todo santo dia), o que vira um carimbo
+        # fácil de detectar. O sorteio empurra o lote INTEIRO junto, então os intervalos
+        # entre um vídeo e outro continuam exatamente os mesmos de antes.
+        deslocamento_inicial_seg = 0
+
         # 🔗 ESTEIRA CONTÍNUA: se já existem itens agendados na fila, o lote novo
         # começa DEPOIS do último deles. Sem isso, dois lotes calculados em momentos
         # diferentes se sobrepõem e o espaçamento real cai pela metade.
@@ -131,9 +137,18 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
             passo_base_min = max(base_min, alvo)
             # Variação proporcional: quanto maior o intervalo, mais folga para parecer humano
             variacao_efetiva = max(var_min, int(passo_base_min * 0.25))
+
+            # 🎲 Sorteia o atraso da largada: de zero até um TERÇO do passo. Um terço,
+            # e não um passo inteiro, para o último vídeo do lote não esbarrar no fim da
+            # janela e transbordar para o dia seguinte.
+            if not ultimo_ocupado:
+                deslocamento_inicial_seg = random.randint(0, max(0, (passo_base_min * 60) // 3))
+                minuto_atual_busca += timedelta(seconds=deslocamento_inicial_seg)
+
             if EXIBIR_LOGS:
                 logger.info(f"📐 [Motor Filas] {len(itens_para_agendar)} item(ns) em {minutos_restantes} min "
-                            f"→ espaçamento de {passo_base_min} ± {variacao_efetiva} min.")
+                            f"→ espaçamento de {passo_base_min} ± {variacao_efetiva} min "
+                            f"(largada +{deslocamento_inicial_seg // 60} min).")
 
         for item in itens_para_agendar:
             if usar_espaco_organico:
