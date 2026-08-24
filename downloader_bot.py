@@ -90,6 +90,63 @@ def _garantir_tabela_downloads(cursor):
         )
     ''')
 
+# 📌 Painel fixo do tópico: explica para que serve e o que dá para baixar.
+TEXTO_PAINEL_DOWNLOADER = (
+    "📥 <b>BAIXADOR DE VÍDEOS</b>\n\n"
+    "Cole aqui o <b>link</b> do vídeo e eu devolvo o arquivo, "
+    "<b>sem marca d'água</b>, pronto para postar.\n\n"
+    "<b>Plataformas que funcionam:</b>\n"
+    "🎵 <b>TikTok</b>\n"
+    "📸 <b>Instagram</b> — posts, reels e IGTV\n"
+    "📌 <b>Pinterest</b>\n"
+    "🔶 <b>Shopee</b> — vídeos de produto e de afiliado\n\n"
+    "<i>▪️ O YouTube ainda não está liberado.</i>\n\n"
+    "<b>Como usar:</b>\n"
+    "1️⃣ Copie o link do vídeo no aplicativo de origem\n"
+    "2️⃣ Cole aqui neste tópico, sozinho, sem texto junto\n"
+    "3️⃣ Aguarde — um vídeo por vez, costuma levar menos de 1 minuto\n\n"
+    f"<i>💡 Cada membro pode baixar até {LIMITE_DIARIO_DOWNLOADS} vídeos por dia. "
+    "A cota zera à meia-noite e só conta o que for entregue: se der erro, não desconta.</i>"
+)
+
+
+def _garantir_tabela_painel(cursor):
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS painel_downloader (
+            chave TEXT PRIMARY KEY,
+            valor TEXT
+        )
+    ''')
+
+
+def ler_msg_painel():
+    """ID da última mensagem do painel. Sobrevive a reinício do serviço."""
+    try:
+        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_tabela_painel(cursor)
+        cursor.execute("SELECT valor FROM painel_downloader WHERE chave = 'msg_id'")
+        linha = cursor.fetchone()
+        conexao.close()
+        return int(linha[0]) if linha and linha[0] else None
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler o painel: {e}")
+        return None
+
+
+def salvar_msg_painel(msg_id):
+    try:
+        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_tabela_painel(cursor)
+        cursor.execute("INSERT OR REPLACE INTO painel_downloader (chave, valor) VALUES ('msg_id', ?)",
+                       (str(msg_id),))
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar o painel: {e}")
+
+
 def downloads_hoje(user_id):
     """Quantos já usou hoje. Persistente: reiniciar o bot não zera o contador."""
     try:
@@ -813,6 +870,9 @@ async def receber_link(message: types.Message):
 
             if EXIBIR_LOGS: logger.info(f"📤 Vídeo entregue para {message.from_user.id} ({plataforma}).")
 
+            # 📌 Empurra o painel de volta para o fim do tópico após a entrega.
+            await reenviar_painel_downloader()
+
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Falha ao entregar: {e}")
             try:
@@ -821,6 +881,46 @@ async def receber_link(message: types.Message):
         finally:
             # 🧹 Nada fica no servidor: apaga a pasta inteira, dê certo ou não.
             shutil.rmtree(pasta, ignore_errors=True)
+
+# 📌 Mantém o painel SEMPRE como a última mensagem do tópico. Envia o novo
+# primeiro e só então apaga o antigo, para o tópico nunca ficar sem painel.
+# Não usa pin_chat_message de propósito: cada fixação gera uma mensagem de
+# serviço ("Fulano fixou...") que se acumula no tópico.
+_lock_painel = asyncio.Lock()
+
+
+async def reenviar_painel_downloader():
+    async with _lock_painel:
+        try:
+            nova = await bot.send_message(
+                chat_id=GRUPO_DOWNLOADER,
+                text=TEXTO_PAINEL_DOWNLOADER,
+                parse_mode="HTML",
+                message_thread_id=TOPICO_DOWNLOADER,
+                disable_notification=True,
+                disable_web_page_preview=True
+            )
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Painel] Falha ao enviar o painel: {e}")
+            return
+
+        antiga = ler_msg_painel()
+        if antiga and antiga != nova.message_id:
+            try: await bot.delete_message(chat_id=GRUPO_DOWNLOADER, message_id=antiga)
+            except Exception: pass
+
+        salvar_msg_painel(nova.message_id)
+        if EXIBIR_LOGS: logger.info(f"📌 [Painel] Painel recriado no fim do tópico (ID {nova.message_id}).")
+
+
+@router.message(Command("painel_downloader"))
+async def comando_painel_downloader(message: types.Message):
+    if message.from_user.id not in IDS_SEM_LIMITE:
+        return
+    await reenviar_painel_downloader()
+    try: await message.delete()
+    except Exception: pass
+
 
 async def main():
     if not TOKEN:
@@ -832,7 +932,10 @@ async def main():
                 f"(privacy {'desligado ✅' if me.can_read_all_group_messages else 'LIGADO ⚠️'})")
 # Inicia a rotina autônoma de manutenção (Limpeza de BD e Update do yt-dlp)
     asyncio.create_task(faxina_diaria_loop())
-    
+
+    # 📌 Garante que o painel exista no tópico assim que o serviço sobe.
+    asyncio.create_task(reenviar_painel_downloader())
+
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
