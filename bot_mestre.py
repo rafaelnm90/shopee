@@ -3152,12 +3152,18 @@ async def motor_parceiros_step():
 
             if desagendados:
                 ocupados = [i.get("horario_disparo") for i in pendentes if i.get("horario_disparo")]
+                # ✅ CORREÇÃO: o descarte por idade precisa acompanhar o dias_atraso do
+                # parceiro. Com 5 fixo e dias_atraso=30, o motor descartava tudo.
+                dias_atraso_p = int(p.get("dias_atraso", 30))
                 calcular_horarios_distribuicao(desagendados, {
                     "inicio": 0, "fim": 24, "modo": "aleatorio", "intervalo_dias": 1,
                     "espacamento_base_min": 10, "espacamento_variacao_min": 5,
-                    "limite_dias_descarte": 5, "horarios_ocupados": ocupados
+                    "limite_dias_descarte": dias_atraso_p + 5, "horarios_ocupados": ocupados
                 }, forcar=False)
                 for item in desagendados:
+                    if item.get("descartar_por_idade"):
+                        remover_item_fila_parceiro(item["id_unico"], item.get("caminho_video"))
+                        continue
                     atualizar_item_fila_parceiro(item["id_unico"], "horario_disparo", item.get("horario_disparo", ""))
 
             # --- 2. Publicação (o primeiro vencido, um por ciclo) ---
@@ -4112,6 +4118,11 @@ async def motor_repost_publico_step():
         if houve_limpeza:
             conexao.commit()
 
+        # ✅ CORREÇÃO: este bloco vivia dentro do "if houve_limpeza". A fila do Público
+        # só era agendada nos ciclos em que algum vídeo vencido tinha sido apagado.
+        if itens_desagendados:
+            dias_publico = int(config.get("repost_dias", 15))
+
             config_fila = {
                 "inicio": janela_inicio,
                 "fim": janela_fim,
@@ -4121,13 +4132,18 @@ async def motor_repost_publico_step():
                 # divide a janela e espalha pelo dia. O piso só age em volume alto.
                 "espacamento_base_min": 15,
                 "espacamento_variacao_min": 6,
-                "limite_dias_descarte": 5
+                # ✅ CORREÇÃO: com 5 fixo e repost_dias=15, todo vídeo chegava vencido
+                # no dia do agendamento e o motor devolvia horário vazio.
+                "limite_dias_descarte": dias_publico + 5
             }
 
             if EXIBIR_LOGS: logger.info(f"⚙️ [Motor Público] Acionando Motor Central para {len(itens_desagendados)} vídeos de hoje...")
             calcular_horarios_distribuicao(itens_desagendados, config_fila, forcar=False)
 
             for item in itens_desagendados:
+                if item.get("descartar_por_idade"):
+                    cursor.execute("DELETE FROM fila_publico WHERE id_unico = ?", (item["id_unico"],))
+                    continue
                 cursor.execute("UPDATE fila_publico SET horario_disparo = ? WHERE id_unico = ?",
                                (item.get("horario_disparo", ""), item["id_unico"]))
             conexao.commit()
