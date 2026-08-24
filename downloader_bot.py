@@ -479,7 +479,33 @@ async def baixar_video_shopee(url, pasta):
                 return "watermark" in chave.lower() or "watermark" in url.lower()
 
             limpos = [u for k, u in candidatos if not tem_marca(k, u)]
-            marcados = [u for k, u in candidatos if tem_marca(k, u)]
+
+            # 🎯 A URL marcada termina em <arquivo>.<idVideo>.<perfil>.mp4.
+            # Esses dois campos finais são o carimbo do render de compartilhamento,
+            # que é onde a marca e a cartela de 3s são queimadas. Sem eles sobra o
+            # arquivo ORIGINAL do criador: medido 3,03 MB em 720x1280 contra
+            # 0,94 MB em 480x854, e a duração bate ao ms com o metadado da página.
+            def _derivar_matriz(u):
+                base, arquivo = u.rsplit("/", 1)
+                partes = arquivo.split(".")
+                if len(partes) >= 4 and partes[-1] == "mp4":
+                    return f"{base}/{'.'.join(partes[:-3])}.mp4"
+                return None
+
+            for marcada in list(marcados):
+                matriz = _derivar_matriz(marcada)
+                if not matriz:
+                    continue
+                try:
+                    # Pede 1 byte só: confirma que existe sem baixar o arquivo.
+                    async with sessao.get(matriz, headers={"Range": "bytes=0-0"},
+                                          timeout=15) as teste:
+                        if teste.status in (200, 206):
+                            limpos.insert(0, matriz)
+                            if EXIBIR_LOGS: logger.info("🎯 Matriz original localizada!")
+                            break
+                except Exception as e:
+                    if EXIBIR_LOGS: logger.warning(f"⚠️ Matriz não respondeu: {e}")
 
             link_mp4 = None
             if limpos:
