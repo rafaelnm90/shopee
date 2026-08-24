@@ -574,8 +574,10 @@ async def processar_fila_espelhador_loop():
                     # Impede a compressão para 15 segundos quando a rota acumula volume.
                     "espacamento_base_min": int(rota_config.get("espacamento_min", 20)),
                     "espacamento_variacao_min": int(rota_config.get("espacamento_var", 8)),
-                    # 🗓️ O que não couber transborda para o dia seguinte; passando disso, descarta
-                    "limite_dias_descarte": 5
+                    # 🗓️ O que não couber transborda para o dia seguinte; passando disso, descarta.
+                    # ✅ CORREÇÃO: a margem acompanha o D+X da rota. Com 5 fixo, uma rota
+                    # configurada com atraso maior que 5 dias tinha tudo descartado.
+                    "limite_dias_descarte": max(5, int(rota_config.get("intervalo_dias", 1)) + 5)
                 }
                 
                 forcar_rota = rota_config.get("esvaziar_agora", False)
