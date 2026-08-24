@@ -1,10 +1,18 @@
 venv/
 .env
 __pycache__/
-
 *.json
 *.db
 *.session
 *.session-journal
 temp/
 archive/
+
+# Restos de trabalho e artefatos locais
+*.bkp
+*.tar.gz
+*.png
+*.html
+contador.txt
+log_divulgacao.txt
+variantes/
