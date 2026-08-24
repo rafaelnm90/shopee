@@ -28,6 +28,7 @@ import time
 time.tzset()
 
 from aiogram import Bot, Dispatcher, Router, types, F
+from aiogram.filters import Command
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.fsm.storage.memory import MemoryStorage
 
@@ -145,6 +146,64 @@ def salvar_msg_painel(msg_id):
         conexao.close()
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar o painel: {e}")
+
+# 🧹 Auto-limpeza: o tópico guarda mensagens por este tanto de dias.
+DIAS_RETENCAO_TOPICO = 3
+
+
+def _garantir_tabela_mensagens(cursor):
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS mensagens_topico (
+            message_id INTEGER PRIMARY KEY,
+            criado_em TEXT
+        )
+    ''')
+
+
+def registrar_mensagem(message_id):
+    """Anota o ID para a faxina achar depois. A API de bots não lê histórico,
+    então o que não for anotado aqui nunca será apagado."""
+    try:
+        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_tabela_mensagens(cursor)
+        cursor.execute(
+            "INSERT OR IGNORE INTO mensagens_topico (message_id, criado_em) VALUES (?, ?)",
+            (int(message_id), datetime.now(FUSO).strftime("%Y-%m-%d %H:%M:%S"))
+        )
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao registrar mensagem: {e}")
+
+
+def mensagens_vencidas():
+    try:
+        corte = (datetime.now(FUSO) - timedelta(days=DIAS_RETENCAO_TOPICO)).strftime("%Y-%m-%d %H:%M:%S")
+        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_tabela_mensagens(cursor)
+        cursor.execute("SELECT message_id FROM mensagens_topico WHERE criado_em < ?", (corte,))
+        ids = [linha[0] for linha in cursor.fetchall()]
+        conexao.close()
+        return ids
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao listar vencidas: {e}")
+        return []
+
+
+def esquecer_mensagens(ids):
+    if not ids:
+        return
+    try:
+        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_tabela_mensagens(cursor)
+        cursor.executemany("DELETE FROM mensagens_topico WHERE message_id = ?", [(i,) for i in ids])
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao limpar registro: {e}")
 
 
 def downloads_hoje(user_id):
@@ -742,6 +801,10 @@ def teclado_entrar(faltando):
 
 @router.message(F.chat.id == GRUPO_DOWNLOADER, F.message_thread_id == TOPICO_DOWNLOADER)
 async def receber_link(message: types.Message):
+    # 🧹 Anota TODA mensagem que entra no tópico, inclusive as que serão
+    # ignoradas logo abaixo. O que não for anotado aqui a faxina nunca acha.
+    registrar_mensagem(message.message_id)
+
     if message.from_user.is_bot:
         return
 
@@ -921,6 +984,58 @@ async def comando_painel_downloader(message: types.Message):
     try: await message.delete()
     except Exception: pass
 
+# 🧹 Um único gancho para TUDO que o bot envia. Sem isto eu teria que
+# lembrar de anotar o ID em cada send_message/answer_video espalhado no arquivo.
+@bot.session.middleware()
+async def registrar_saidas(make_request, bot_, method, *args, **kwargs):
+    resultado = await make_request(bot_, method, *args, **kwargs)
+    try:
+        if (isinstance(resultado, types.Message)
+                and resultado.chat.id == GRUPO_DOWNLOADER
+                and resultado.message_thread_id == TOPICO_DOWNLOADER):
+            registrar_mensagem(resultado.message_id)
+    except Exception:
+        pass
+    return resultado
+
+
+async def faxina_topico_loop():
+    """De hora em hora, apaga o que passou de DIAS_RETENCAO_TOPICO dias."""
+    await asyncio.sleep(120)   # deixa o bot terminar de subir
+    while True:
+        try:
+            vencidas = mensagens_vencidas()
+            if vencidas:
+                painel_atual = ler_msg_painel()
+                apagou_painel = False
+                sucesso = 0
+                falhou = 0
+
+                for msg_id in vencidas:
+                    try:
+                        await bot.delete_message(chat_id=GRUPO_DOWNLOADER, message_id=msg_id)
+                        sucesso += 1
+                        if painel_atual and msg_id == painel_atual:
+                            apagou_painel = True
+                    except Exception:
+                        # Já apagada, ou a API recusou por idade. De qualquer forma
+                        # sai do registro: insistir todo ciclo só gastaria chamada.
+                        falhou += 1
+                    await asyncio.sleep(0.4)   # folga para não levar flood wait
+
+                esquecer_mensagens(vencidas)
+                if EXIBIR_LOGS:
+                    logger.info(f"🧹 [Faxina Tópico] {sucesso} apagada(s), {falhou} recusada(s) pela API.")
+
+                # O painel foi junto? Recria, senão o tópico fica sem orientação.
+                if apagou_painel:
+                    await reenviar_painel_downloader()
+
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ Erro na faxina do tópico: {e}")
+
+        await asyncio.sleep(3600)
+
 
 async def main():
     if not TOKEN:
@@ -932,6 +1047,9 @@ async def main():
                 f"(privacy {'desligado ✅' if me.can_read_all_group_messages else 'LIGADO ⚠️'})")
 # Inicia a rotina autônoma de manutenção (Limpeza de BD e Update do yt-dlp)
     asyncio.create_task(faxina_diaria_loop())
+
+    # 🧹 Faxina do tópico: apaga mensagens com mais de 3 dias.
+    asyncio.create_task(faxina_topico_loop())
 
     # 📌 Garante que o painel exista no tópico assim que o serviço sobe.
     asyncio.create_task(reenviar_painel_downloader())
