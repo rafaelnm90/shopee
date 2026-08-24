@@ -479,6 +479,7 @@ async def baixar_video_shopee(url, pasta):
                 return "watermark" in chave.lower() or "watermark" in url.lower()
 
             limpos = [u for k, u in candidatos if not tem_marca(k, u)]
+            marcados = [u for k, u in candidatos if tem_marca(k, u)]            
 
             # 🎯 A URL marcada termina em <arquivo>.<idVideo>.<perfil>.mp4.
             # Esses dois campos finais são o carimbo do render de compartilhamento,
