@@ -1068,21 +1068,49 @@ async def processar_fila_autorais_loop():
                 fila = fila_dados.get("fila", [])
                     
             if itens_desagendados:
-                # ⏰ Janela lida do painel (Regras de Repostagem > Janela de Horário)
+                # ⏰ Janela e regras lidas do painel (Regras de Repostagem > Janela de Horário).
+                # ✅ CORREÇÃO: estas quatro variáveis não existiam no arquivo e o bloco
+                # inteiro quebrava com NameError a cada ciclo do loop.
+                inicio_janela = int(config_atual.get("inicio", 10))
+                fim_janela = int(config_atual.get("fim", 20))
+                modo = config_atual.get("modo", "aleatorio")
+                dias_retorno_cfg = int(config_atual.get("dias_retorno", 15))
+                # A data_alvo já aplicou o atraso D+X lá na captura. Aqui basta cair
+                # no ramo diluído do motor, que é quem espalha os vídeos pela janela.
+                intervalo_dias = 1
+
                 config_fila = {
-                "inicio": inicio_janela,
-                "fim": fim_janela,
-                "modo": modo,
-                "intervalo_dias": intervalo_dias,
-                # ⏱️ PISO de segurança, não intervalo padrão: com poucos vídeos o motor
-                # divide a janela e espalha pelo dia. O piso só age em volume alto.
-                "espacamento_base_min": 15,
-                "espacamento_variacao_min": 6,
-                "limite_dias_descarte": 5
-            }
+                    "inicio": inicio_janela,
+                    "fim": fim_janela,
+                    "modo": modo,
+                    "intervalo_dias": intervalo_dias,
+                    # ⏱️ PISO de segurança, não intervalo padrão: com poucos vídeos o motor
+                    # divide a janela e espalha pelo dia. O piso só age em volume alto.
+                    "espacamento_base_min": 15,
+                    "espacamento_variacao_min": 6,
+                    # ✅ CORREÇÃO: o descarte por idade precisa acompanhar o D+X da fila.
+                    # Com 5 fixo e dias_retorno=15, todo vídeo nascia vencido e voltava
+                    # do motor sem horário nenhum.
+                    "limite_dias_descarte": dias_retorno_cfg + 5
+                }
                 
                 if EXIBIR_LOGS: logger.info(f"⚙️ [Motor Autorais] Acionando Motor Central para {len(itens_desagendados)} vídeos de retorno...")
                 calcular_horarios_distribuicao(itens_desagendados, config_fila, forcar=False)
+
+                # 🗑️ O motor marcou algum item como velho demais? Sai da fila e do disco,
+                # senão ele fica sem horário e volta a ser reprocessado a cada 60s.
+                marcados = [i for i in itens_desagendados if i.get("descartar_por_idade")]
+                if marcados:
+                    ids_marcados = {i.get("id_unico") for i in marcados}
+                    for velho in marcados:
+                        caminho_velho = velho.get("caminho_arquivo")
+                        if caminho_velho and os.path.exists(caminho_velho):
+                            try: os.remove(caminho_velho)
+                            except Exception: pass
+                    fila_dados["fila"] = [i for i in fila_dados.get("fila", []) if i.get("id_unico") not in ids_marcados]
+                    fila = fila_dados.get("fila", [])
+                    if EXIBIR_LOGS: logger.info(f"🗑️ [Motor Autorais] {len(marcados)} vídeo(s) descartado(s) por idade.")
+
                 salvar_fila_retorno(fila_dados)
 
             # --- 2. EXECUÇÃO DOS DISPAROS (Catraca do Motor) ---
