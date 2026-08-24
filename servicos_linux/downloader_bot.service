@@ -1,0 +1,12 @@
+[Unit]
+Description=Shopee Downloader de Videos
+After=network.target
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/shopee
+ExecStart=/home/ubuntu/shopee/venv/bin/python3 /home/ubuntu/shopee/downloader_bot.py
+Restart=on-failure
+RestartSec=30
+[Install]
+WantedBy=multi-user.target
