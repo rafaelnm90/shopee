@@ -11868,8 +11868,10 @@ async def processar_fila_espiao(forcar=False):
             # ⏱️ Espaçamento orgânico: 10 min ± 5 (de 5 a 15 min entre vídeos)
             "espacamento_base_min": 10,
             "espacamento_variacao_min": 5,
-                        # 🗓️ O que não couber transborda para o dia seguinte; passando disso, descarta
-            "limite_dias_descarte": 5,
+            # 🗓️ O que não couber transborda para o dia seguinte; passando disso, descarta.
+            # ✅ CORREÇÃO: a margem precisa acompanhar o D+X da fila. Com 5 fixo, qualquer
+            # intervalo_dias maior que 5 fazia o vídeo nascer vencido e voltar sem horário.
+            "limite_dias_descarte": max(5, int(intervalo_dias) + 5),
             # 🔗 Horários já ocupados: o lote novo entra DEPOIS do último agendado,
             # em vez de recomeçar do zero e se sobrepor ao que já existe.
             "horarios_ocupados": [
