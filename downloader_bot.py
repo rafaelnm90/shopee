@@ -794,10 +794,26 @@ async def canais_faltantes(user_id):
             if EXIBIR_LOGS: logger.warning(f"⚠️ Não consegui verificar {nome}: {e}")
     return faltando
 
-def teclado_entrar(faltando):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"➕ Entrar no {nome}", url=link)] for nome, link in faltando
-    ])
+# 🔗 Guarda o link que a pessoa mandou enquanto ela cumpre as etapas, para
+# que o download comece sozinho depois. Some se o serviço reiniciar — nesse
+# caso ela só manda o link de novo.
+LINKS_PENDENTES = {}
+
+
+def teclado_entrar(faltando, user_id):
+    """Cumpridos viram ✅ e param de ser clicáveis; os que faltam seguem com o link."""
+    nomes_faltando = {nome for nome, _ in faltando}
+    linhas = []
+
+    for _, nome, link in CANAIS_OBRIGATORIOS:
+        if nome in nomes_faltando:
+            linhas.append([InlineKeyboardButton(text=f"➕ Entrar no {nome}", url=link)])
+        else:
+            linhas.append([InlineKeyboardButton(text=f"✅ {nome}", callback_data="canal_ok")])
+
+    linhas.append([InlineKeyboardButton(text="🔄 Já entrei — verificar",
+                                        callback_data=f"verificar:{user_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=linhas)
 
 @router.message(F.chat.id == GRUPO_DOWNLOADER, F.message_thread_id == TOPICO_DOWNLOADER)
 async def receber_link(message: types.Message):
@@ -828,11 +844,14 @@ async def receber_link(message: types.Message):
     faltando = await canais_faltantes(message.from_user.id)
     if faltando:
         lista = "\n".join(f"• {nome}" for nome, _ in faltando)
+        # Segura o link: quando ela clicar em verificar, o download sai sozinho.
+        LINKS_PENDENTES[message.from_user.id] = message
         await message.answer(
             f"🔒 {mencao}, para baixar vídeos você precisa estar nos nossos canais.\n\n"
             f"<b>Falta entrar em:</b>\n{lista}\n\n"
-            "<i>Entre pelos botões abaixo e mande o link de novo. É de graça.</i>",
-            parse_mode="HTML", reply_markup=teclado_entrar(faltando)
+            "<i>Entre pelos botões abaixo e depois toque em «Já entrei». "
+            "Seu link fica guardado. É de graça.</i>",
+            parse_mode="HTML", reply_markup=teclado_entrar(faltando, message.from_user.id)
         )
         if EXIBIR_LOGS: logger.info(f"🔒 {message.from_user.id} bloqueado: falta {len(faltando)} canal(is).")
         return
@@ -950,6 +969,43 @@ async def receber_link(message: types.Message):
 # Não usa pin_chat_message de propósito: cada fixação gera uma mensagem de
 # serviço ("Fulano fixou...") que se acumula no tópico.
 _lock_painel = asyncio.Lock()
+
+@router.callback_query(F.data == "canal_ok")
+async def canal_ja_cumprido(callback: types.CallbackQuery):
+    await callback.answer("Esse já está cumprido ✅")
+
+
+@router.callback_query(F.data.startswith("verificar:"))
+async def verificar_canais(callback: types.CallbackQuery):
+    # 🔒 Só o dono do aviso mexe no próprio aviso.
+    dono_id = int(callback.data.split(":")[1])
+    if callback.from_user.id != dono_id:
+        await callback.answer("Este aviso é de outra pessoa.", show_alert=True)
+        return
+
+    faltando = await canais_faltantes(dono_id)
+
+    if faltando:
+        nomes = ", ".join(nome for nome, _ in faltando)
+        await callback.answer(f"Ainda falta: {nomes}", show_alert=True)
+        # Repinta o teclado: o que já foi cumprido vira ✅.
+        try:
+            await callback.message.edit_reply_markup(
+                reply_markup=teclado_entrar(faltando, dono_id)
+            )
+        except Exception:
+            pass   # Nada mudou desde a última vez; o Telegram recusa edição igual
+        return
+
+    # ✅ Cumpriu tudo: o aviso perde a razão de existir.
+    await callback.answer("Liberado! Baixando seu vídeo…")
+    try: await callback.message.delete()
+    except Exception: pass
+
+    original = LINKS_PENDENTES.pop(dono_id, None)
+    if original:
+        # Reaproveita o fluxo normal: a trava agora passa e o download segue.
+        await receber_link(original)
 
 
 async def reenviar_painel_downloader():
