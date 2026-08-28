@@ -380,6 +380,7 @@ class AchadinhosFluxo(StatesGroup):
     aguardando_selecao_edicao = State()
     aguardando_campo_edicao = State()
     aguardando_novo_valor_edicao = State()
+    aguardando_confirmacao_edicao = State()
 
 class SubmissaoAdminFluxo(StatesGroup):
     menu_principal = State()
@@ -8562,7 +8563,7 @@ async def pedir_novo_valor_edicao(message: types.Message, state: FSMContext):
         "Editar Nome 📝": ("nome", "Digite o novo <b>Nome</b> para este nicho:"),
         "Editar Destino 🎯": ("destino", "Digite o novo <b>ID do Canal/Grupo</b> de destino:"),
         "Editar Tópico 💬": ("thread_id", "Digite o novo <b>ID do Tópico (Thread)</b> (ou 0 para geral):"),
-        "Editar Palavras-chave 🔑": ("keywords", "Digite a nova lista de <b>Palavras-chave</b> separadas por vírgula:")
+        "Editar Palavras-chave 🔑": ("keywords", "Digite a nova lista de <b>Palavras-chave</b> separadas por vírgula.\n\n<i>⚠️ A lista atual será substituída por inteiro, não somada. Você verá o antes e o depois antes de confirmar.</i>")
     }
     
     selecao = opcoes.get(message.text)
@@ -8575,26 +8576,77 @@ async def pedir_novo_valor_edicao(message: types.Message, state: FSMContext):
     await message.answer(pergunta, parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(AchadinhosFluxo.aguardando_novo_valor_edicao)
 
+def _mostrar_valor_campo(valor):
+    """Lista vira texto legível; o resto sai como está."""
+    if isinstance(valor, list):
+        return ", ".join(valor) if valor else "(vazio)"
+    return str(valor) if valor not in (None, "") else "(vazio)"
+
+
 @dp.message(AchadinhosFluxo.aguardando_novo_valor_edicao)
-async def salvar_edicao_nicho(message: types.Message, state: FSMContext):
+async def revisar_edicao_nicho(message: types.Message, state: FSMContext):
+    # ⚠️ Edição é destrutiva: a lista antiga some sem deixar rastro. Mostra o
+    # antes e o depois e espera confirmação antes de gravar.
     data = await state.get_data()
     indice = data.get("indice_nicho_edicao")
     campo = data.get("campo_edicao")
     novo_valor = message.text.strip()
-    
+
     config = ler_achadinhos_config()
     nichos = config.get("nichos", [])
-    
+
+    if not (0 <= indice < len(nichos)):
+        await message.answer("❌ Nicho não encontrado. A lista pode ter mudado.")
+        await painel_achadinhos(message, state)
+        return
+
+    if campo == "keywords":
+        novo_valor = [k.strip() for k in novo_valor.split(",") if k.strip()]
+        if not novo_valor:
+            await message.answer("Nenhuma palavra-chave detectada. Separe por vírgulas e tente de novo:",
+                                 reply_markup=teclado_cancelar)
+            return
+
+    valor_antigo = nichos[indice].get(campo, "")
+    await state.update_data(valor_pendente=novo_valor)
+
+    quantia = f" ({len(novo_valor)} palavras)" if campo == "keywords" else ""
+    await message.answer(
+        f"📋 <b>Confira antes de salvar</b>\n"
+        f"Nicho: <b>{nichos[indice].get('nome')}</b> · Campo: <code>{campo}</code>\n\n"
+        f"<b>Como está:</b>\n<i>{_mostrar_valor_campo(valor_antigo)}</i>\n\n"
+        f"<b>Como vai ficar{quantia}:</b>\n{_mostrar_valor_campo(novo_valor)}\n\n"
+        "Confirma a troca?",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Confirmar ✅")], [KeyboardButton(text="Cancelar ❌")]],
+            resize_keyboard=True
+        )
+    )
+    await state.set_state(AchadinhosFluxo.aguardando_confirmacao_edicao)
+
+
+@dp.message(AchadinhosFluxo.aguardando_confirmacao_edicao)
+async def salvar_edicao_nicho(message: types.Message, state: FSMContext):
+    if message.text != "Confirmar ✅":
+        await message.answer("Use <b>Confirmar ✅</b> para salvar ou <b>Cancelar ❌</b> para desistir.",
+                             parse_mode="HTML")
+        return
+
+    data = await state.get_data()
+    indice = data.get("indice_nicho_edicao")
+    campo = data.get("campo_edicao")
+    novo_valor = data.get("valor_pendente")
+
+    config = ler_achadinhos_config()
+    nichos = config.get("nichos", [])
+
     if 0 <= indice < len(nichos):
-        if campo == "keywords":
-            novo_valor = [k.strip() for k in novo_valor.split(",") if k.strip()]
-            
         nichos[indice][campo] = novo_valor
         salvar_achadinhos_config(config)
-            
         if EXIBIR_LOGS: logger.info(f"✏️ Nicho {indice+1} atualizado. Campo '{campo}' alterado.")
         await message.answer("✅ Nicho atualizado com sucesso!")
-    
+
     await painel_achadinhos(message, state)
 
 @dp.message(F.text == "Voltar ao Menu Espião 🔙", StateFilter("*"))
