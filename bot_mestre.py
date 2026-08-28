@@ -12890,11 +12890,25 @@ async def reenviar_botao_ofertas():
         config["msg_botao_ofertas"] = msg.message_id
         salvar_submissao_config(config)
 
-        # ⚠️ NÃO fixar: cada pin_chat_message gera uma mensagem de serviço
-        # ("Fulano fixou uma mensagem") que se acumula no tópico. Como o painel
-        # já é sempre a última mensagem, fixar deixou de ser necessário.
+        # 📌 Fixa no topo do tópico, sem notificação. O pin do painel anterior cai
+        # sozinho quando aquela mensagem é apagada logo acima.
+        try:
+            await bot.pin_chat_message(
+                chat_id=grupo_id,
+                message_id=msg.message_id,
+                disable_notification=True
+            )
+        except Exception as e:
+            if EXIBIR_LOGS: logger.warning(f"⚠️ [Painel Fixo] Não consegui fixar: {e}")
 
         if EXIBIR_LOGS: logger.info(f"📌 [Painel Fixo] Painel de submissão recriado no fim do tópico (ID {msg.message_id}).")
+
+@dp.message(F.pinned_message)
+async def limpar_aviso_fixacao(message: types.Message):
+    # 📌 "Fulano fixou uma mensagem" não interessa a ninguém e vai se acumulando
+    # no tópico a cada recriação do painel. Some assim que chega.
+    try: await message.delete()
+    except Exception: pass
 
 @dp.message(Command("botao_ofertas"))
 async def gerar_botao_permanente(message: types.Message):
