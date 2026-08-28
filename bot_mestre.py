@@ -2419,12 +2419,21 @@ def agendar_tarefas_diarias(escopo="todos"):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro na faxina da madrugada (SQLite): {e}")
     
-    rotinas_virais_lista = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral"]
+    rotinas_virais_lista = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral"]
+
+    def _tipo_do_job(job_id):
+        """Extrai o 'tipo' EXATO da rotina a partir do ID do job."""
+        m = re.match(r'^job_rotina_(.+?)_(?:intercalado|reagendado)_\d+$', job_id)
+        if m: return m.group(1)
+        m = re.match(r'^job_rotina_(.+)_\d+$', job_id)
+        if m: return m.group(1)
+        return None
 
     # Remove os jobs antigos respeitando estritamente o ESCOPO solicitado
     for job in scheduler.get_jobs():
         if job.id.startswith('job_rotina_') or job.id.startswith('job_campanha_'):
-            is_viral = any(rv in job.id for rv in rotinas_virais_lista)
+            tipo_do_job = _tipo_do_job(job.id)
+            is_viral = (tipo_do_job in rotinas_virais_lista) if tipo_do_job else False
             if escopo == "principal" and is_viral:
                 continue # Pula os virais, não apaga
             if escopo == "viral" and not is_viral:
@@ -8219,7 +8228,7 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
         
     texto += "✅ <b>Tudo pronto para rodar!</b>"
 
-    await message.answer(texto, parse_mode="HTML", reply_markup=obter_teclado_principal())
+    await message.answer(texto, parse_mode="HTML", reply_markup=obter_teclado_configuracoes_gerais())
     await state.clear()
 
 @dp.message(F.text == "Zerar Filas e Tarefas 🧹", StateFilter("*"))
