@@ -154,8 +154,18 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
             if usar_espaco_organico:
                 # 🗓️ Não cabe mais hoje? Abre o próximo dia na hora de início da janela.
                 if minuto_atual_busca >= fim_do_dia:
+                    # ⏸️ Guarda onde o item CAIRIA se não houvesse virada de dia. A abertura
+                    # da janela não pode atropelar isso: sem esta checagem, um item às 23:57
+                    # e outro às 00:01 ficam a 3 min um do outro e viram rajada.
+                    minimo_permitido = minuto_atual_busca
+
                     proximo = minuto_atual_busca + timedelta(days=1) if fim_janela < 24 else minuto_atual_busca
                     minuto_atual_busca = proximo.replace(hour=inicio_janela, minute=random.randint(0, 5), second=0)
+
+                    # ✅ A abertura da janela vale só se já respeitar o piso de espaçamento.
+                    if minuto_atual_busca < minimo_permitido:
+                        minuto_atual_busca = minimo_permitido
+
                     if fim_janela < 24:
                         fim_do_dia = minuto_atual_busca.replace(hour=fim_janela, minute=0, second=0)
                     else:
