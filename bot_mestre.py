@@ -8275,7 +8275,6 @@ async def confirmar_atualizar_rotinas(message: types.Message, state: FSMContext)
 
     rotinas_afetadas = []
     videos_afetados = 0
-    intocados = {"viral": 0, "publico": 0}
 
     for job in scheduler.get_jobs():
         if not getattr(job, 'next_run_time', None):
@@ -8285,10 +8284,7 @@ async def confirmar_atualizar_rotinas(message: types.Message, state: FSMContext)
             continue
         if not (job.id.startswith('job_rotina_') or job.id.startswith('job_campanha_')):
             continue
-
-        dono = descobrir_escopo_job(job.id)
-        if dono != "principal":
-            intocados[dono] += 1
+        if descobrir_escopo_job(job.id) != "principal":
             continue
 
         hora = job.next_run_time.astimezone(fuso_horario).strftime("%H:%M")
@@ -8303,19 +8299,16 @@ async def confirmar_atualizar_rotinas(message: types.Message, state: FSMContext)
     rotinas_afetadas.sort(key=lambda x: x[0])
 
     texto = "⚠️ <b>Confirmar Recálculo da Grade</b>\n\n"
-    texto += "Os horários abaixo serão <b>apagados e sorteados de novo</b>. Só o Canal Afiliados é afetado.\n\n"
+    texto += "Os horários abaixo serão apagados e sorteados de novo:\n\n"
 
     if rotinas_afetadas:
-        texto += f"🎯 <b>Rotinas que serão remexidas ({len(rotinas_afetadas)}):</b>\n"
         texto += "\n".join([i[1] for i in rotinas_afetadas]) + "\n\n"
     else:
-        texto += "<i>Nenhuma rotina do Canal Afiliados está agendada no momento.</i>\n\n"
+        texto += "<i>Nenhuma rotina agendada no momento.</i>\n\n"
 
     if videos_afetados:
         texto += f"🎬 <b>Fila de vídeos:</b> {videos_afetados} vídeo(s) serão redistribuídos.\n\n"
 
-    texto += (f"🛡️ <b>Ficam intactos:</b> {intocados['viral']} do Canal Viral e "
-              f"{intocados['publico']} do Grupo Público.\n\n")
     texto += "Deseja continuar?"
 
     if EXIBIR_LOGS: logger.info(f"🔄 Aguardando aprovação do recálculo ({len(rotinas_afetadas)} rotina(s), {videos_afetados} vídeo(s)).")
