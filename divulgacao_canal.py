@@ -6,6 +6,7 @@ import logging
 import asyncio
 import random
 from datetime import datetime, timedelta
+import re
 from telethon import TelegramClient
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
@@ -56,6 +57,16 @@ def limpar_travas_fantasma(nome_sessao):
 limpar_travas_fantasma('sessao_divulgacao')
 
 # O nome da sessão é mantido independente
+def normalizar_alvo(alvo):
+    """🔢 O get_entity só resolve ID numérico quando recebe int. Com string ele
+    tenta interpretar como @usuario, não acha e falha — mesmo a conta estando
+    no canal. Links e @usuarios seguem como texto."""
+    texto = str(alvo).strip()
+    if re.fullmatch(r"-?\d+", texto):
+        return int(texto)
+    return texto
+
+
 client = TelegramClient('sessao_divulgacao', API_ID, API_HASH)
 scheduler = AsyncIOScheduler()
 
