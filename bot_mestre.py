@@ -10815,11 +10815,34 @@ async def pedir_alvo_viral(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigDivulgacaoViral.aguardando_alvos)
 async def salvar_alvo_viral(message: types.Message, state: FSMContext):
-    novos_alvos = [alvo.strip() for alvo in message.text.split(",") if alvo.strip()]
-    if not novos_alvos:
+    entradas = [alvo.strip() for alvo in message.text.split(",") if alvo.strip()]
+    if not entradas:
         await message.answer("Nenhum alvo detectado. Tente novamente:", reply_markup=teclado_cancelar)
         return
-        
+
+    # ✅ CORREÇÃO: o alvo era gravado cru. Link do Telegram Web ia parar no banco
+    # como URL e o Telethon não resolve isso — o disparo falhava sem explicação.
+    novos_alvos = []
+    recusados = []
+    for entrada in entradas:
+        ok, alvo_formatado, nome = await validar_e_formatar_alvo(bot, entrada)
+        if ok:
+            novos_alvos.append(alvo_formatado)
+        else:
+            recusados.append(entrada)
+
+    if recusados:
+        await message.answer(
+            "⚠️ Não consegui validar:\n" + "\n".join(f"• <code>{r}</code>" for r in recusados) +
+            "\n\n<i>Use o ID numérico, o link t.me ou a URL do Telegram Web. "
+            "Para grupos privados, a conta do userbot precisa estar dentro.</i>",
+            parse_mode="HTML"
+        )
+
+    if not novos_alvos:
+        await message.answer("Nenhum alvo válido. Tente novamente:", reply_markup=teclado_cancelar)
+        return
+
     dados = ler_alvos_divulgacao_viral()
     dados["alvos"].extend(novos_alvos)
     dados["alvos"] = list(dict.fromkeys(dados["alvos"]))
