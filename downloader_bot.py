@@ -1031,10 +1031,14 @@ async def entrou_em_canal(evento: types.ChatMemberUpdated):
         return
 
     user_id = evento.new_chat_member.user.id
-    if user_id not in GATES_ABERTOS:
+    tem_gate = user_id in GATES_ABERTOS
+    if EXIBIR_LOGS:
+        logger.info(f"🔔 {user_id} entrou em {evento.chat.title} "
+                    f"(aviso aberto: {'sim' if tem_gate else 'não'}).")
+
+    if not tem_gate:
         return
 
-    if EXIBIR_LOGS: logger.info(f"🔔 {user_id} entrou em {evento.chat.title}. Revalidando a trava.")
     await concluir_liberacao(user_id)
 
 
