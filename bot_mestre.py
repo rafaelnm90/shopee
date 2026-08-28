@@ -383,6 +383,7 @@ class AchadinhosFluxo(StatesGroup):
     aguardando_confirmacao_edicao = State()
     aguardando_janela = State()
     aguardando_confirmacao_janela = State()
+    aguardando_nichos_ciclo = State()
 
 class SubmissaoAdminFluxo(StatesGroup):
     menu_principal = State()
@@ -997,7 +998,7 @@ teclado_menu_achadinhos = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Nicho ➕"), KeyboardButton(text="Remover Nicho 🗑️")],
         [KeyboardButton(text="Editar Nicho ✏️"), KeyboardButton(text="Forçar Garimpo 🚀")],
-        [KeyboardButton(text="Janela de Horário ⏰")],
+        [KeyboardButton(text="Janela de Horário ⏰"), KeyboardButton(text="Nichos por Ciclo 🔄")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -5158,17 +5159,30 @@ async def processar_garimpo_automatico(forcado=False):
                         f"Agora são {agora.strftime('%H:%M')}. Garimpo adiado.")
         return
 
-    if EXIBIR_LOGS: logger.info("🕵️‍♂️ [Achadinhos] Iniciando operação de garimpo varrendo todos os nichos mapeados...")
+    if EXIBIR_LOGS: logger.info("🕵️‍♂️ [Achadinhos] Iniciando operação de garimpo...")
     config = ler_achadinhos_config()
     nichos = config.get("nichos", [])
     
     if not nichos:
         if EXIBIR_LOGS: logger.warning("⚠️ [Achadinhos] O radar está vazio. Adicione nichos ao arquivo achadinhos_config.json.")
         return
-        
-    if EXIBIR_LOGS: logger.info(f"🧠 [Achadinhos] Memória permanente com {total_achadinhos_enviados()} produtos já publicados.")
-    
-    for nicho in nichos:
+
+    # 🔄 RODÍZIO: publicar em todos os nichos a cada ciclo despeja tudo de uma vez
+    # no grupo. Aqui só uma fatia é atendida por vez, e a posição fica salva para
+    # o próximo ciclo continuar de onde parou — inclusive depois de um restart.
+    por_ciclo = max(1, min(int(config.get("nichos_por_ciclo", 2)), len(nichos)))
+    posicao = int(config.get("posicao_rodizio", 0)) % len(nichos)
+    nichos_da_vez = [nichos[(posicao + i) % len(nichos)] for i in range(por_ciclo)]
+
+    config["posicao_rodizio"] = (posicao + por_ciclo) % len(nichos)
+    salvar_achadinhos_config(config)
+
+    if EXIBIR_LOGS:
+        nomes = ", ".join(n.get("nome", "?") for n in nichos_da_vez)
+        logger.info(f"🔄 [Achadinhos] Rodízio: atendendo {por_ciclo} de {len(nichos)} nicho(s) → {nomes}")
+        logger.info(f"🧠 [Achadinhos] Memória permanente com {total_achadinhos_enviados()} produtos já publicados.")
+
+    for nicho in nichos_da_vez:
         nome_nicho = nicho.get("nome")
         destino = nicho.get("destino")
         thread_id_nicho = nicho.get("thread_id", "0")
@@ -8449,6 +8463,7 @@ async def painel_achadinhos(message: types.Message, state: FSMContext):
     janela_txt = "24h" if config.get("inicio", 8) == 0 and config.get("fim", 22) == 24 \
                  else f"{config.get('inicio', 8)}h às {config.get('fim', 22)}h"
     texto += f"\n\n⏰ <b>Janela de postagem:</b> {janela_txt}"
+    texto += f"\n🔄 <b>Nichos por ciclo:</b> {config.get('nichos_por_ciclo', 2)}"
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado_menu_achadinhos)
     await state.set_state(AchadinhosFluxo.menu_principal)
 
@@ -8804,6 +8819,56 @@ async def salvar_janela_achadinhos(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS:
         logger.info(f"⏰ [Achadinhos] Janela alterada para {config['inicio']}h–{config['fim']}h.")
     await message.answer(f"✅ Janela salva: <b>{config['inicio']}h às {config['fim']}h</b>.", parse_mode="HTML")
+    await painel_achadinhos(message, state)
+
+@dp.message(AchadinhosFluxo.menu_principal, F.text == "Nichos por Ciclo 🔄")
+async def pedir_nichos_ciclo(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+
+    config = ler_achadinhos_config()
+    total = len(config.get("nichos", []))
+    atual = config.get("nichos_por_ciclo", 2)
+
+    await message.answer(
+        f"Quantos nichos o garimpo atende <b>por ciclo</b>?\n\n"
+        f"<i>Ele roda a cada 2h e vai alternando entre os nichos, então nem todos "
+        f"publicam na mesma rodada. Quanto menor o número, menos posts por vez no grupo.</i>\n\n"
+        f"Digite um número de <b>1</b> a <b>{max(1, total)}</b>.\n"
+        f"<i>Atualmente: {atual} de {total} nicho(s) por ciclo.</i>",
+        parse_mode="HTML", reply_markup=teclado_cancelar
+    )
+    await state.set_state(AchadinhosFluxo.aguardando_nichos_ciclo)
+
+
+@dp.message(AchadinhosFluxo.aguardando_nichos_ciclo)
+async def salvar_nichos_ciclo(message: types.Message, state: FSMContext):
+    config = ler_achadinhos_config()
+    total = max(1, len(config.get("nichos", [])))
+
+    try:
+        valor = int(message.text.strip())
+    except (TypeError, ValueError):
+        await message.answer(f"⚠️ Digite apenas um número de 1 a {total}.", reply_markup=teclado_cancelar)
+        return
+
+    if not (1 <= valor <= total):
+        await message.answer(f"⚠️ O número precisa ficar entre 1 e {total}.", reply_markup=teclado_cancelar)
+        return
+
+    config["nichos_por_ciclo"] = valor
+    salvar_achadinhos_config(config)
+
+    inicio = int(config.get("inicio", 8))
+    fim = int(config.get("fim", 22))
+    ciclos = max(1, (fim - inicio) // 2)
+
+    if EXIBIR_LOGS: logger.info(f"🔄 [Achadinhos] Rodízio ajustado para {valor} nicho(s) por ciclo.")
+    await message.answer(
+        f"✅ Salvo: <b>{valor}</b> nicho(s) por ciclo.\n\n"
+        f"<i>Com {ciclos} ciclo(s) por dia, dará cerca de {ciclos * valor} publicações "
+        f"diárias no grupo, e cada nicho será atendido a cada {max(1, total // valor)} ciclo(s).</i>",
+        parse_mode="HTML"
+    )
     await painel_achadinhos(message, state)
 
 @dp.message(F.text == "Voltar ao Menu Espião 🔙", StateFilter("*"))
