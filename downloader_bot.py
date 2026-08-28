@@ -977,6 +977,11 @@ async def receber_link(message: types.Message):
             )
             registrar_download(message.from_user.id)
             somar_download_total(message.from_user.id)
+
+            # 🧹 Mesmo raciocínio da entrega normal: o link original vira ruído.
+            try: await message.delete()
+            except Exception: pass
+
             if EXIBIR_LOGS: logger.info(f"♻️ Entregue do cache para {message.from_user.id} ({plataforma}).")
 
             # 📌 O painel também desce quando a entrega vem do cache. Sem isto ele
@@ -1035,6 +1040,13 @@ async def receber_link(message: types.Message):
             # ✅ Só conta o que foi entregue: falha não gasta a cota de ninguém
             registrar_download(message.from_user.id)
             somar_download_total(message.from_user.id)
+
+            # 🧹 O link que a pessoa colou já cumpriu o papel: a legenda do vídeo
+            # traz ele de volta, bem mais organizado. Só apaga DEPOIS da entrega,
+            # senão uma falha no download deixaria ela sem o link.
+            try: await message.delete()
+            except Exception: pass
+
             restantes = LIMITE_DIARIO_DOWNLOADS - downloads_hoje(message.from_user.id)
             if restantes <= 3 and message.from_user.id not in IDS_SEM_LIMITE:
                 aviso_cota = await message.answer(
