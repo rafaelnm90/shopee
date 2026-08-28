@@ -883,6 +883,16 @@ async def expirar_aviso_trava(user_id, msg_id):
     except Exception: pass
     if EXIBIR_LOGS: logger.info(f"⏳ Aviso de trava de {user_id} expirou e foi removido.")
 
+# ⏳ Respiro antes de apagar o link original. Sumir no mesmo instante da entrega
+# dá a impressão de que algo deu errado.
+ATRASO_APAGAR_LINK_SEG = 3
+
+
+async def apagar_link_original(message):
+    await asyncio.sleep(ATRASO_APAGAR_LINK_SEG)
+    try: await message.delete()
+    except Exception: pass
+
 @router.message(F.chat.id == GRUPO_DOWNLOADER, F.message_thread_id == TOPICO_DOWNLOADER)
 async def receber_link(message: types.Message):
     # 🧹 Anota TODA mensagem que entra no tópico, inclusive as que serão
@@ -979,8 +989,7 @@ async def receber_link(message: types.Message):
             somar_download_total(message.from_user.id)
 
             # 🧹 Mesmo raciocínio da entrega normal: o link original vira ruído.
-            try: await message.delete()
-            except Exception: pass
+            asyncio.create_task(apagar_link_original(message))
 
             if EXIBIR_LOGS: logger.info(f"♻️ Entregue do cache para {message.from_user.id} ({plataforma}).")
 
@@ -1043,9 +1052,9 @@ async def receber_link(message: types.Message):
 
             # 🧹 O link que a pessoa colou já cumpriu o papel: a legenda do vídeo
             # traz ele de volta, bem mais organizado. Só apaga DEPOIS da entrega,
-            # senão uma falha no download deixaria ela sem o link.
-            try: await message.delete()
-            except Exception: pass
+            # senão uma falha no download deixaria ela sem o link. O atraso evita
+            # o susto de ver a própria mensagem sumir no mesmo instante.
+            asyncio.create_task(apagar_link_original(message))
 
             restantes = LIMITE_DIARIO_DOWNLOADS - downloads_hoje(message.from_user.id)
             if restantes <= 3 and message.from_user.id not in IDS_SEM_LIMITE:
