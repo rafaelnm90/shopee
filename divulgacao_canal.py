@@ -155,7 +155,7 @@ async def enviar_mensagem(alvo):
                 await client.connect()
                 
             if EXIBIR_LOGS: logger.info(f"🟢 Sinal verde! Acessando o Telegram para {alvo}...")
-            entidade = await client.get_entity(alvo)
+            entidade = await client.get_entity(normalizar_alvo(alvo))
             
             if EXIBIR_LOGS: logger.info(f"📤 Iniciando disparo em rajada de {replicas} mensagens para {alvo}...")
             
@@ -224,7 +224,7 @@ async def enviar_mensagem_viral(alvo):
                 await client.connect()
                 
             if EXIBIR_LOGS: logger.info(f"🟢 [VIRAL] Sinal verde! Acessando o Telegram para {alvo}...")
-            entidade = await client.get_entity(alvo)
+            entidade = await client.get_entity(normalizar_alvo(alvo))
             
             if EXIBIR_LOGS: logger.info(f"📤 [VIRAL] Iniciando disparo em rajada de {replicas} mensagens para {alvo}...")
             
