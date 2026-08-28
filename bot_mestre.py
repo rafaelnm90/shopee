@@ -2786,7 +2786,7 @@ def agendar_tarefas_diarias(escopo="todos"):
             scheduler.add_job(disparar_mensagem, 'date', run_date=horario_candidato, args=[tipo], id=f"job_rotina_{tipo}_{indice}", replace_existing=True)
             ultimo_tipo_publico = tipo
 
-async def resetar_sessao_inatividade
+async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int = None):
     # 1. Recupera o estado de navegação atual do utilizador de forma remota
     state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=chat_id, user_id=user_id, thread_id=thread_id))
     estado_atual = await state.get_state()
