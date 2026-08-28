@@ -865,6 +865,24 @@ def teclado_entrar(faltando, user_id):
                                         callback_data=f"verificar:{user_id}")])
     return InlineKeyboardMarkup(inline_keyboard=linhas)
 
+# ⏳ Quanto tempo o aviso de trava fica no tópico antes de sumir sozinho.
+EXPIRACAO_AVISO_TRAVA_SEG = 180
+
+
+async def expirar_aviso_trava(user_id, msg_id):
+    await asyncio.sleep(EXPIRACAO_AVISO_TRAVA_SEG)
+
+    # Já foi resolvido ou substituído por outro aviso? Não mexe.
+    aviso = GATES_ABERTOS.get(user_id)
+    if not aviso or aviso.message_id != msg_id:
+        return
+
+    GATES_ABERTOS.pop(user_id, None)
+    LINKS_PENDENTES.pop(user_id, None)
+    try: await aviso.delete()
+    except Exception: pass
+    if EXIBIR_LOGS: logger.info(f"⏳ Aviso de trava de {user_id} expirou e foi removido.")
+
 @router.message(F.chat.id == GRUPO_DOWNLOADER, F.message_thread_id == TOPICO_DOWNLOADER)
 async def receber_link(message: types.Message):
     # 🧹 Anota TODA mensagem que entra no tópico, inclusive as que serão
@@ -916,6 +934,11 @@ async def receber_link(message: types.Message):
         )
         GATES_ABERTOS[message.from_user.id] = aviso_trava
         if EXIBIR_LOGS: logger.info(f"🔒 {message.from_user.id} bloqueado: falta {len(faltando)} canal(is).")
+
+        # ⏳ Desistiu? O aviso não fica encalhado no tópico. Se ela entrar nos canais
+        # nesse meio-tempo, o fluxo normal já terá apagado e o GATES_ABERTOS estará
+        # limpo — por isso a conferência antes de remover.
+        asyncio.create_task(expirar_aviso_trava(message.from_user.id, aviso_trava.message_id))
         return
 
     # 3️⃣ Limite diário
