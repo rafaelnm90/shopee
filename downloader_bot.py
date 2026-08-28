@@ -907,7 +907,7 @@ async def receber_link(message: types.Message):
 
             # 📌 O painel também desce quando a entrega vem do cache. Sem isto ele
             # só acompanha os downloads reais e fica para trás nas repetições.
-            await reenviar_painel_downloader()
+            agendar_painel()
             return
         except Exception as e:
             # file_id expirou ou foi invalidado: apaga do cache e baixa normalmente
@@ -973,8 +973,8 @@ async def receber_link(message: types.Message):
 
             if EXIBIR_LOGS: logger.info(f"📤 Vídeo entregue para {message.from_user.id} ({plataforma}).")
 
-            # 📌 Empurra o painel de volta para o fim do tópico após a entrega.
-            await reenviar_painel_downloader()
+            # 📌 Marca o painel para descer daqui a 3 min, não na hora.
+            agendar_painel()
 
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Falha ao entregar: {e}")
@@ -1091,6 +1091,33 @@ async def reenviar_painel_downloader():
 
         salvar_msg_painel(nova.message_id)
         if EXIBIR_LOGS: logger.info(f"📌 [Painel] Painel recriado no fim do tópico (ID {nova.message_id}).")
+
+# ⏳ Prazo antes do painel descer. Numa rajada de downloads ele desce UMA vez,
+# no fim do prazo, em vez de pular de lugar a cada vídeo entregue.
+ATRASO_PAINEL_SEG = 180
+
+_painel_agendado = None
+
+
+async def _painel_depois_do_prazo():
+    try:
+        await asyncio.sleep(ATRASO_PAINEL_SEG)
+        await reenviar_painel_downloader()
+    except asyncio.CancelledError:
+        pass
+    finally:
+        global _painel_agendado
+        _painel_agendado = None
+
+
+def agendar_painel():
+    """Marca o painel para descer daqui a 3 min. Se já houver um agendamento em
+    curso, não reinicia a contagem — senão, com entregas seguidas a cada 2 min,
+    o prazo se renovaria para sempre e o painel nunca desceria."""
+    global _painel_agendado
+    if _painel_agendado and not _painel_agendado.done():
+        return
+    _painel_agendado = asyncio.create_task(_painel_depois_do_prazo())
 
 
 @router.message(Command("painel_downloader"))
