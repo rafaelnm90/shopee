@@ -389,7 +389,17 @@ async def monitorar_comandos():
 async def main():
     if EXIBIR_LOGS: logger.info("⏳ Iniciando o Userbot de Divulgação...")
     await client.start()
-    
+
+    # 🗂️ Popula o cache de entidades da sessão. Sem isto, get_entity() falha com
+    # "Cannot find any entity" ao receber ID numérico puro, mesmo a conta
+    # participando do canal — o Telethon precisa do access_hash em cache, e ele
+    # só aparece depois de listar os diálogos ao menos uma vez.
+    try:
+        await client.get_dialogs()
+        if EXIBIR_LOGS: logger.info("🗂️ Cache de entidades da sessão preenchido.")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ Não consegui preencher o cache de entidades: {e}")
+
     # Inicia a tarefa paralela que vigia o arquivo JSON a cada 5 segundos
     asyncio.create_task(monitorar_comandos())
     
