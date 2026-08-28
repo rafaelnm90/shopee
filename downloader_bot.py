@@ -168,21 +168,6 @@ def _garantir_tabela_painel(cursor):
             valor TEXT
         )
     ''')
-            # 🎁 Avisa quando a cortesia está no fim, para a exigência não pegar de surpresa.
-            usados_cortesia = downloads_totais(message.from_user.id)
-            if usados_cortesia in (DOWNLOADS_CORTESIA - 1, DOWNLOADS_CORTESIA):
-                falta_canal = await canais_faltantes(message.from_user.id)
-                if falta_canal:
-                    sobra = DOWNLOADS_CORTESIA - usados_cortesia
-                    recado = (f"resta <b>{sobra}</b> download de cortesia" if sobra > 0
-                              else "foi seu <b>último download de cortesia</b>")
-                    aviso_fim = await message.answer(
-                        f"🎁 {mencao}, {recado}.\n\n"
-                        "Entre nos nossos canais e continue baixando <b>de graça, para sempre</b>.",
-                        parse_mode="HTML", reply_markup=teclado_entrar(falta_canal, message.from_user.id)
-                    )
-                    LINKS_PENDENTES.setdefault(message.from_user.id, message)
-                    GATES_ABERTOS[message.from_user.id] = aviso_fim
 
 def ler_msg_painel():
     """ID da última mensagem do painel. Sobrevive a reinício do serviço."""
@@ -1030,6 +1015,23 @@ async def receber_link(message: types.Message):
             # ✅ Só conta o que foi entregue: falha não gasta a cota de ninguém
             registrar_download(message.from_user.id)
             somar_download_total(message.from_user.id)
+
+            # 🎁 Avisa quando a cortesia está no fim, para a exigência não pegar de surpresa.
+            usados_cortesia = downloads_totais(message.from_user.id)
+            if usados_cortesia in (DOWNLOADS_CORTESIA - 1, DOWNLOADS_CORTESIA):
+                falta_canal = await canais_faltantes(message.from_user.id)
+                if falta_canal:
+                    sobra = DOWNLOADS_CORTESIA - usados_cortesia
+                    recado = (f"resta <b>{sobra}</b> download de cortesia" if sobra > 0
+                              else "foi seu <b>último download de cortesia</b>")
+                    aviso_fim = await message.answer(
+                        f"🎁 {mencao}, {recado}.\n\n"
+                        "Entre nos nossos canais e continue baixando <b>de graça, para sempre</b>.",
+                        parse_mode="HTML", reply_markup=teclado_entrar(falta_canal, message.from_user.id)
+                    )
+                    LINKS_PENDENTES.setdefault(message.from_user.id, message)
+                    GATES_ABERTOS[message.from_user.id] = aviso_fim
+
             restantes = LIMITE_DIARIO_DOWNLOADS - downloads_hoje(message.from_user.id)
             if restantes <= 3 and message.from_user.id not in IDS_SEM_LIMITE:
                 aviso_cota = await message.answer(
