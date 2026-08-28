@@ -825,6 +825,13 @@ async def receber_link(message: types.Message):
     # ignoradas logo abaixo. O que não for anotado aqui a faxina nunca acha.
     registrar_mensagem(message.message_id)
 
+    # 📌 Aviso de serviço "fixou uma mensagem": não interessa a ninguém, some.
+    # Precisa vir ANTES do teste de is_bot, senão o return abaixo o deixa passar.
+    if message.pinned_message:
+        try: await message.delete()
+        except Exception: pass
+        return
+
     if message.from_user.is_bot:
         return
 
@@ -1061,6 +1068,17 @@ async def reenviar_painel_downloader():
         if antiga and antiga != nova.message_id:
             try: await bot.delete_message(chat_id=GRUPO_DOWNLOADER, message_id=antiga)
             except Exception: pass
+
+        # 📌 Fixa no topo do tópico. Sem notificação, para não tocar sino em ninguém.
+        # O pin antigo cai sozinho quando a mensagem anterior é apagada acima.
+        try:
+            await bot.pin_chat_message(
+                chat_id=GRUPO_DOWNLOADER,
+                message_id=nova.message_id,
+                disable_notification=True
+            )
+        except Exception as e:
+            if EXIBIR_LOGS: logger.warning(f"⚠️ [Painel] Não consegui fixar: {e}")
 
         salvar_msg_painel(nova.message_id)
         if EXIBIR_LOGS: logger.info(f"📌 [Painel] Painel recriado no fim do tópico (ID {nova.message_id}).")
