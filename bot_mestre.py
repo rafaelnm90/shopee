@@ -4968,6 +4968,33 @@ async def processar_janela_autorais(message: types.Message, state: FSMContext):
     )
     await submenu_regras_retorno(message, state)
 
+def extrair_destino_e_topico(texto):
+    """🔗 Aceita link do Telegram Web, link t.me/c/ ou o ID cru, e devolve
+    (destino, thread_id). Poupa o operador de garimpar dois números na URL.
+    Devolve (None, None) quando não reconhece — inclusive no link público
+    t.me/nomedogrupo, que não carrega o ID numérico."""
+    texto = (texto or "").strip()
+
+    # web.telegram.org/a/#-1004460669033_195  (o _195 é opcional)
+    m = re.search(r"#(-100\d+)(?:_(\d+))?", texto)
+    if m:
+        return m.group(1), m.group(2) or "0"
+
+    # t.me/c/4460669033/195 — neste formato o -100 vem omitido
+    m = re.search(r"t\.me/c/(\d+)(?:/(\d+))?", texto)
+    if m:
+        return f"-100{m.group(1)}", m.group(2) or "0"
+
+    # ID cru: -1004460669033, -1004460669033_195 ou -1004460669033:195
+    m = re.fullmatch(r"(-?\d{6,})(?:[_:](\d+))?", texto)
+    if m:
+        destino = m.group(1)
+        if not destino.startswith("-"):
+            destino = f"-100{destino}"
+        return destino, m.group(2) or "0"
+
+    return None, None
+
 # ----------------------------------
 # NOVO MÓDULO: GERADOR AUTÔNOMO DE ACHADINHOS 🛍️
 # ----------------------------------
@@ -8355,15 +8382,41 @@ async def pedir_destino_nicho(message: types.Message, state: FSMContext):
     nome_nicho = message.text.strip()
     await state.update_data(novo_nome_nicho=nome_nicho)
     if EXIBIR_LOGS: logger.info(f"🛍️ Criando novo nicho: {nome_nicho}")
-    await message.answer(f"Nome salvo: <b>{nome_nicho}</b>\n\nAgora, envie o <b>ID Numérico</b> do canal no Telegram onde o robô irá postar estas ofertas (Ex: -100123456789):", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await message.answer(
+        f"Nome salvo: <b>{nome_nicho}</b>\n\n"
+        "Agora cole o <b>link do tópico</b> onde as ofertas serão postadas.\n\n"
+        "<i>Abra o tópico no Telegram Web e copie a URL da barra de endereço. "
+        "Também aceito o link t.me/c/... ou o ID cru.</i>\n\n"
+        "<code>https://web.telegram.org/a/#-1004460669033_195</code>",
+        parse_mode="HTML", reply_markup=teclado_cancelar
+    )
     await state.set_state(AchadinhosFluxo.aguardando_destino)
 
 @dp.message(AchadinhosFluxo.aguardando_destino)
 async def pedir_thread_nicho(message: types.Message, state: FSMContext):
-    destino_nicho = message.text.strip()
-    await state.update_data(novo_destino_nicho=destino_nicho)
-    await message.answer(f"Grupo salvo: <code>{destino_nicho}</code>\n\nAgora, informe o <b>ID do Tópico (Thread)</b> específico para este nicho.\n<i>(Se não houver tópicos ou for um canal normal, digite apenas <b>0</b>)</i>:", parse_mode="HTML", reply_markup=teclado_cancelar)
-    await state.set_state(AchadinhosFluxo.aguardando_thread_id)
+    # 🔗 Um campo só: o link já carrega grupo e tópico.
+    destino_nicho, thread_id = extrair_destino_e_topico(message.text)
+
+    if not destino_nicho:
+        await message.answer(
+            "❌ Não consegui achar o ID nesse link.\n\n"
+            "<i>O link público (t.me/nomedogrupo) não serve — ele não tem o número. "
+            "Abra o tópico no Telegram Web e copie a URL, ou mande o ID direto.</i>",
+            parse_mode="HTML", reply_markup=teclado_cancelar
+        )
+        return
+
+    await state.update_data(novo_destino_nicho=destino_nicho, novo_thread_id=thread_id)
+
+    onde = f"tópico <code>{thread_id}</code>" if thread_id != "0" else "chat principal"
+    await message.answer(
+        f"✅ Grupo: <code>{destino_nicho}</code> · {onde}\n\n"
+        "Por fim, digite as <b>Palavras-chave</b> que o motor usará para rastrear "
+        "produtos na Shopee. Separe-as por vírgula.\n"
+        "Exemplo: <code>smartwatch, fone bluetooth, gamer</code>",
+        parse_mode="HTML", reply_markup=teclado_cancelar
+    )
+    await state.set_state(AchadinhosFluxo.aguardando_keywords)
 
 @dp.message(AchadinhosFluxo.aguardando_thread_id)
 async def pedir_keywords_nicho(message: types.Message, state: FSMContext):
