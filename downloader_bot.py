@@ -28,7 +28,7 @@ import time
 time.tzset()
 
 from aiogram import Bot, Dispatcher, Router, types, F
-from aiogram.filters import Command
+from aiogram.filters import Command, ChatMemberUpdatedFilter, IS_NOT_MEMBER, IS_MEMBER
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.fsm.storage.memory import MemoryStorage
 
@@ -799,6 +799,10 @@ async def canais_faltantes(user_id):
 # caso ela só manda o link de novo.
 LINKS_PENDENTES = {}
 
+# 🔔 Aviso de trava aberto no momento, por usuário. Sem isto o evento de entrada
+# no canal chega mas o bot não sabe qual mensagem repintar.
+GATES_ABERTOS = {}
+
 
 def teclado_entrar(faltando, user_id):
     """Cumpridos viram ✅ e param de ser clicáveis; os que faltam seguem com o link."""
@@ -846,13 +850,14 @@ async def receber_link(message: types.Message):
         lista = "\n".join(f"• {nome}" for nome, _ in faltando)
         # Segura o link: quando ela clicar em verificar, o download sai sozinho.
         LINKS_PENDENTES[message.from_user.id] = message
-        await message.answer(
+        aviso_trava = await message.answer(
             f"🔒 {mencao}, para baixar vídeos você precisa estar nos nossos canais.\n\n"
             f"<b>Falta entrar em:</b>\n{lista}\n\n"
             "<i>Entre pelos botões abaixo e depois toque em «Já entrei». "
             "Seu link fica guardado. É de graça.</i>",
             parse_mode="HTML", reply_markup=teclado_entrar(faltando, message.from_user.id)
         )
+        GATES_ABERTOS[message.from_user.id] = aviso_trava
         if EXIBIR_LOGS: logger.info(f"🔒 {message.from_user.id} bloqueado: falta {len(faltando)} canal(is).")
         return
 
@@ -984,28 +989,53 @@ async def verificar_canais(callback: types.CallbackQuery):
         return
 
     faltando = await canais_faltantes(dono_id)
-
     if faltando:
         nomes = ", ".join(nome for nome, _ in faltando)
         await callback.answer(f"Ainda falta: {nomes}", show_alert=True)
-        # Repinta o teclado: o que já foi cumprido vira ✅.
-        try:
-            await callback.message.edit_reply_markup(
-                reply_markup=teclado_entrar(faltando, dono_id)
-            )
-        except Exception:
-            pass   # Nada mudou desde a última vez; o Telegram recusa edição igual
+    else:
+        await callback.answer("Liberado! Baixando seu vídeo…")
+
+    # O botão vira rede de segurança: faz o mesmo que o evento automático,
+    # para quando o bot não é admin do canal ou o evento se perde.
+    GATES_ABERTOS.setdefault(dono_id, callback.message)
+    await concluir_liberacao(dono_id)
+
+async def concluir_liberacao(user_id):
+    """Repinta o aviso ou, se tudo foi cumprido, apaga e solta o download."""
+    aviso = GATES_ABERTOS.get(user_id)
+    if not aviso:
         return
 
-    # ✅ Cumpriu tudo: o aviso perde a razão de existir.
-    await callback.answer("Liberado! Baixando seu vídeo…")
-    try: await callback.message.delete()
+    faltando = await canais_faltantes(user_id)
+
+    if faltando:
+        try:
+            await aviso.edit_reply_markup(reply_markup=teclado_entrar(faltando, user_id))
+        except Exception:
+            pass   # Teclado idêntico ao anterior; o Telegram recusa a edição
+        return
+
+    GATES_ABERTOS.pop(user_id, None)
+    try: await aviso.delete()
     except Exception: pass
 
-    original = LINKS_PENDENTES.pop(dono_id, None)
+    original = LINKS_PENDENTES.pop(user_id, None)
     if original:
-        # Reaproveita o fluxo normal: a trava agora passa e o download segue.
         await receber_link(original)
+
+
+@router.chat_member(ChatMemberUpdatedFilter(member_status_changed=IS_NOT_MEMBER >> IS_MEMBER))
+async def entrou_em_canal(evento: types.ChatMemberUpdated):
+    # 🔔 Só interessa entrada nos canais da trava, e só de quem tem aviso aberto.
+    if evento.chat.id not in {cid for cid, _, _ in CANAIS_OBRIGATORIOS}:
+        return
+
+    user_id = evento.new_chat_member.user.id
+    if user_id not in GATES_ABERTOS:
+        return
+
+    if EXIBIR_LOGS: logger.info(f"🔔 {user_id} entrou em {evento.chat.title}. Revalidando a trava.")
+    await concluir_liberacao(user_id)
 
 
 async def reenviar_painel_downloader():
