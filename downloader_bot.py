@@ -891,6 +891,11 @@ async def receber_link(message: types.Message):
     # ♻️ Alguém já pediu este vídeo? Entrega na hora, sem baixar de novo.
     file_id_guardado = buscar_cache_video(url)
     if file_id_guardado:
+        # Veio do cache: não há fila para esperar, o aviso perde o sentido.
+        if aguarde:
+            try: await aguarde.delete()
+            except Exception: pass
+            aguarde = None
         try:
             await message.answer_video(
                 video=file_id_guardado,
@@ -899,6 +904,10 @@ async def receber_link(message: types.Message):
             )
             registrar_download(message.from_user.id)
             if EXIBIR_LOGS: logger.info(f"♻️ Entregue do cache para {message.from_user.id} ({plataforma}).")
+
+            # 📌 O painel também desce quando a entrega vem do cache. Sem isto ele
+            # só acompanha os downloads reais e fica para trás nas repetições.
+            await reenviar_painel_downloader()
             return
         except Exception as e:
             # file_id expirou ou foi invalidado: apaga do cache e baixa normalmente
