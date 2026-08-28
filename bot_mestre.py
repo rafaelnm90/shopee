@@ -5132,7 +5132,21 @@ async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_l
     return random.choice(ABERTURAS_ACHADINHO)
 
 
-async def processar_garimpo_automatico():
+# ⏰ Fora desta faixa o garimpo não publica. Post de madrugada some no feed
+# quando o pessoal acorda e ainda queima um produto inédito da memória
+# permanente, que não volta mais.
+ACHADINHOS_HORA_INICIO = 8
+ACHADINHOS_HORA_FIM = 22
+
+
+async def processar_garimpo_automatico(forcado=False):
+    agora = datetime.now(fuso_horario)
+    if not forcado and not (ACHADINHOS_HORA_INICIO <= agora.hour < ACHADINHOS_HORA_FIM):
+        if EXIBIR_LOGS:
+            logger.info(f"🌙 [Achadinhos] Fora da janela ({ACHADINHOS_HORA_INICIO}h–{ACHADINHOS_HORA_FIM}h). "
+                        f"Agora são {agora.strftime('%H:%M')}. Garimpo adiado.")
+        return
+
     if EXIBIR_LOGS: logger.info("🕵️‍♂️ [Achadinhos] Iniciando operação de garimpo varrendo todos os nichos mapeados...")
     config = ler_achadinhos_config()
     nichos = config.get("nichos", [])
@@ -8428,7 +8442,7 @@ async def painel_achadinhos(message: types.Message, state: FSMContext):
 async def forcar_garimpo_achadinhos(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("🚀 <b>Motor Acionado!</b> O garimpo extrairá as melhores ofertas nos nichos mapeados de forma silenciosa no servidor. Em instantes elas cairão nos canais.", parse_mode="HTML")
-    asyncio.create_task(processar_garimpo_automatico())
+    asyncio.create_task(processar_garimpo_automatico(forcado=True))
 
 # --- FLUXO: ADICIONAR NICHO ---
 @dp.message(AchadinhosFluxo.menu_principal, F.text == "Adicionar Nicho ➕")
