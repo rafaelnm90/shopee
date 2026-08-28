@@ -5110,7 +5110,7 @@ def montar_legenda_achadinho(nome, preco, taxa, nota, link, gancho=None):
 async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_loja):
     if EXIBIR_LOGS: logger.info(f"🧠 [Achadinhos] Estruturando estratégia de Copywriting para o produto...")
     
-        prompt = (
+    prompt = (
         f"Escreva UMA única linha curta (no máximo 8 palavras) para chamar atenção "
         f"num canal de ofertas do Telegram, sobre este produto: {nome_produto}.\n\n"
         f"Comece com um emoji que combine com o produto. Foque no benefício ou no "
@@ -5130,6 +5130,8 @@ async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_l
 
     # 🎲 Sem IA, sorteia entre oito aberturas: repete menos que um texto fixo.
     return random.choice(ABERTURAS_ACHADINHO)
+
+
 async def processar_garimpo_automatico():
     if EXIBIR_LOGS: logger.info("🕵️‍♂️ [Achadinhos] Iniciando operação de garimpo varrendo todos os nichos mapeados...")
     config = ler_achadinhos_config()
