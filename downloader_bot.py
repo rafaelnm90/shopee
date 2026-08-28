@@ -49,9 +49,10 @@ TOPICO_DOWNLOADER = 1054               # tópico "Downloader Videos"
 
 # --- CANAIS OBRIGATÓRIOS (a ordem é a que o usuário vê) ---
 CANAIS_OBRIGATORIOS = [
-    (-1003909405581, "Acervo Afiliados Shopee", "https://t.me/shopee_video_afiliado"),
-    (-1003932482573, "Acervo Viral Shopee",     "https://t.me/acervo_viral_shopee"),
-    (-1003892378604, "Grupo Público",           "https://t.me/GrupoPublicoAfiliados"),
+    (-1003909405581, "Acervo Afiliados Shopee",   "https://t.me/shopee_video_afiliado"),
+    (-1003932482573, "Acervo Viral Shopee",       "https://t.me/acervo_viral_shopee"),
+    (-1003892378604, "Grupo Público",             "https://t.me/GrupoPublicoAfiliados"),
+    (-1004460669033, "Central de Achadinhos VIP", "https://t.me/centraldeachadinhosvip"),
 ]
 
 LIMITE_DIARIO_DOWNLOADS = 10
@@ -106,9 +107,58 @@ TEXTO_PAINEL_DOWNLOADER = (
     "1️⃣ Copie o link do vídeo no aplicativo de origem\n"
     "2️⃣ Cole aqui neste tópico, sozinho, sem texto junto\n"
     "3️⃣ Aguarde — um vídeo por vez, costuma levar menos de 1 minuto\n\n"
-    f"<i>💡 Cada membro pode baixar até {LIMITE_DIARIO_DOWNLOADS} vídeos por dia. "
+    f"<i>🎁 Os {DOWNLOADS_CORTESIA} primeiros downloads são livres. Depois, basta estar "
+    f"nos nossos canais para continuar baixando de graça, para sempre.\n\n"
+    f"💡 Cada membro pode baixar até {LIMITE_DIARIO_DOWNLOADS} vídeos por dia. "
     "A cota zera à meia-noite e só conta o que for entregue: se der erro, não desconta.</i>"
 )
+
+# 🎁 CORTESIA: os primeiros downloads saem sem exigir os canais. Contador
+# separado de propósito — a tabela downloads_usuarios é podada a cada 7 dias,
+# e usá-la daria cortesia nova a quem sumisse por uma semana.
+DOWNLOADS_CORTESIA = 5
+
+
+def _garantir_tabela_cortesia(cursor):
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS downloads_totais (
+            user_id INTEGER PRIMARY KEY,
+            total INTEGER DEFAULT 0
+        )
+    ''')
+
+
+def downloads_totais(user_id):
+    """Quantos a pessoa já baixou desde sempre. Nunca é zerado."""
+    try:
+        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_tabela_cortesia(cursor)
+        cursor.execute("SELECT total FROM downloads_totais WHERE user_id = ?", (user_id,))
+        linha = cursor.fetchone()
+        conexao.close()
+        return linha[0] if linha else 0
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler o total: {e}")
+        # Na dúvida, considera cortesia esgotada: melhor exigir a mais do que liberar de graça.
+        return DOWNLOADS_CORTESIA
+
+
+def somar_download_total(user_id):
+    try:
+        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_tabela_cortesia(cursor)
+        cursor.execute("""
+            INSERT INTO downloads_totais (user_id, total) VALUES (?, 1)
+            ON CONFLICT(user_id) DO UPDATE SET total = total + 1
+        """, (user_id,))
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao somar o total: {e}")
+
+
 
 
 def _garantir_tabela_painel(cursor):
@@ -118,7 +168,21 @@ def _garantir_tabela_painel(cursor):
             valor TEXT
         )
     ''')
-
+            # 🎁 Avisa quando a cortesia está no fim, para a exigência não pegar de surpresa.
+            usados_cortesia = downloads_totais(message.from_user.id)
+            if usados_cortesia in (DOWNLOADS_CORTESIA - 1, DOWNLOADS_CORTESIA):
+                falta_canal = await canais_faltantes(message.from_user.id)
+                if falta_canal:
+                    sobra = DOWNLOADS_CORTESIA - usados_cortesia
+                    recado = (f"resta <b>{sobra}</b> download de cortesia" if sobra > 0
+                              else "foi seu <b>último download de cortesia</b>")
+                    aviso_fim = await message.answer(
+                        f"🎁 {mencao}, {recado}.\n\n"
+                        "Entre nos nossos canais e continue baixando <b>de graça, para sempre</b>.",
+                        parse_mode="HTML", reply_markup=teclado_entrar(falta_canal, message.from_user.id)
+                    )
+                    LINKS_PENDENTES.setdefault(message.from_user.id, message)
+                    GATES_ABERTOS[message.from_user.id] = aviso_fim
 
 def ler_msg_painel():
     """ID da última mensagem do painel. Sobrevive a reinício do serviço."""
@@ -852,16 +916,20 @@ async def receber_link(message: types.Message):
         return
 
     # 2️⃣ Trava de acesso
-    faltando = await canais_faltantes(message.from_user.id)
+    # 🎁 Cortesia: os primeiros downloads saem livres, sem pedir nada.
+    ja_baixou = downloads_totais(message.from_user.id)
+    faltando = await canais_faltantes(message.from_user.id) if ja_baixou >= DOWNLOADS_CORTESIA else []
+
     if faltando:
         lista = "\n".join(f"• {nome}" for nome, _ in faltando)
         # Segura o link: quando ela clicar em verificar, o download sai sozinho.
         LINKS_PENDENTES[message.from_user.id] = message
         aviso_trava = await message.answer(
-            f"🔒 {mencao}, para baixar vídeos você precisa estar nos nossos canais.\n\n"
-            f"<b>Falta entrar em:</b>\n{lista}\n\n"
-            "<i>Entre pelos botões abaixo e depois toque em «Já entrei». "
-            "Seu link fica guardado. É de graça.</i>",
+            f"🎁 {mencao}, seus <b>{DOWNLOADS_CORTESIA} downloads de cortesia</b> acabaram.\n\n"
+            f"Para continuar baixando, entre nos nossos canais:\n{lista}\n\n"
+            "<b>Depois disso é liberado para sempre</b> — sem pagar nada, sem assinatura, "
+            "sem limite de tempo.\n\n"
+            "<i>Entre pelos botões abaixo e toque em «Já entrei». Seu link fica guardado.</i>",
             parse_mode="HTML", reply_markup=teclado_entrar(faltando, message.from_user.id)
         )
         GATES_ABERTOS[message.from_user.id] = aviso_trava
@@ -903,6 +971,7 @@ async def receber_link(message: types.Message):
                 parse_mode="HTML"
             )
             registrar_download(message.from_user.id)
+            somar_download_total(message.from_user.id)
             if EXIBIR_LOGS: logger.info(f"♻️ Entregue do cache para {message.from_user.id} ({plataforma}).")
 
             # 📌 O painel também desce quando a entrega vem do cache. Sem isto ele
@@ -960,6 +1029,7 @@ async def receber_link(message: types.Message):
 
             # ✅ Só conta o que foi entregue: falha não gasta a cota de ninguém
             registrar_download(message.from_user.id)
+            somar_download_total(message.from_user.id)
             restantes = LIMITE_DIARIO_DOWNLOADS - downloads_hoje(message.from_user.id)
             if restantes <= 3 and message.from_user.id not in IDS_SEM_LIMITE:
                 aviso_cota = await message.answer(
