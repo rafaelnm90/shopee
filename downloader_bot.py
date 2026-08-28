@@ -57,6 +57,10 @@ CANAIS_OBRIGATORIOS = [
 
 LIMITE_DIARIO_DOWNLOADS = 10
 
+# 🎁 CORTESIA: os primeiros downloads saem sem exigir os canais. Precisa ficar
+# aqui em cima porque o texto do painel usa este valor antes das funções.
+DOWNLOADS_CORTESIA = 5
+
 # ♾️ Quem está aqui não tem limite diário. Usado para testar o bot sem
 # queimar cota e para atender pedidos manuais.
 IDS_SEM_LIMITE = {1226920464}   # Rafael (admin)
@@ -112,11 +116,6 @@ TEXTO_PAINEL_DOWNLOADER = (
     f"💡 Cada membro pode baixar até {LIMITE_DIARIO_DOWNLOADS} vídeos por dia. "
     "A cota zera à meia-noite e só conta o que for entregue: se der erro, não desconta.</i>"
 )
-
-# 🎁 CORTESIA: os primeiros downloads saem sem exigir os canais. Contador
-# separado de propósito — a tabela downloads_usuarios é podada a cada 7 dias,
-# e usá-la daria cortesia nova a quem sumisse por uma semana.
-DOWNLOADS_CORTESIA = 5
 
 
 def _garantir_tabela_cortesia(cursor):
