@@ -2419,7 +2419,24 @@ def agendar_tarefas_diarias(escopo="todos"):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro na faxina da madrugada (SQLite): {e}")
     
+        # 🎯 CADA ROBÔ TEM A SUA PRÓPRIA LISTA. Nada de misturar.
     rotinas_virais_lista = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral"]
+    rotinas_publico_lista = ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico"]
+
+    def _escopo_do_job(job_id):
+        """Descobre a QUAL robô o job pertence, comparando o tipo por igualdade exata."""
+        if job_id.startswith('job_campanha_'):
+            return "principal"
+        tipo = None
+        m = re.match(r'^job_rotina_(.+?)_(?:intercalado|reagendado)_\d+$', job_id)
+        if m:
+            tipo = m.group(1)
+        else:
+            m = re.match(r'^job_rotina_(.+)_\d+$', job_id)
+            if m: tipo = m.group(1)
+        if tipo in rotinas_virais_lista: return "viral"
+        if tipo in rotinas_publico_lista: return "publico"
+        return "principal"
 
     def _tipo_do_job(job_id):
         """Extrai o 'tipo' EXATO da rotina a partir do ID do job."""
@@ -2433,14 +2450,12 @@ def agendar_tarefas_diarias(escopo="todos"):
     for job in scheduler.get_jobs():
         if job.id.startswith('job_rotina_') or job.id.startswith('job_campanha_'):
             tipo_do_job = _tipo_do_job(job.id)
-            is_viral = (tipo_do_job in rotinas_virais_lista) if tipo_do_job else False
-            if escopo == "principal" and is_viral:
-                continue # Pula os virais, não apaga
-            if escopo == "viral" and not is_viral:
-                continue # Pula os principais, não apaga
-                
+            escopo_job = _escopo_do_job(job.id)
+            if escopo != "todos" and escopo_job != escopo:
+                continue # Pertence a outro robô: não encosta
+
             job.remove()
-            if EXIBIR_LOGS: logger.info(f"🧹 Agendamento antigo apagado da memória: {job.id}")
+            if EXIBIR_LOGS: logger.info(f"🧹 Agendamento antigo apagado da memória [{escopo_job}]: {job.id}")
 
     dados_rotina = ler_config_rotina()
     agora = datetime.now(fuso_horario)
@@ -2512,9 +2527,10 @@ def agendar_tarefas_diarias(escopo="todos"):
         return None
 
     # PREPARAÇÃO DINÂMICA
-    tipos_restantes = [t for t in dados_rotina.keys() if t not in ["bom_dia", "boa_noite", "pausado", "pausado_viral", "ultimo_bom_dia", "ultimo_boa_noite", "historico_diario"]]
-    rotinas_principais = [t for t in tipos_restantes if t not in rotinas_virais_lista]
+    tipos_restantes = [t for t in dados_rotina.keys() if t not in ["bom_dia", "boa_noite", "pausado", "pausado_viral", "pausado_publico", "ultimo_bom_dia", "ultimo_boa_noite", "historico_diario"]]
     rotinas_virais = [t for t in tipos_restantes if t in rotinas_virais_lista]
+    rotinas_publico = [t for t in tipos_restantes if t in rotinas_publico_lista]
+    rotinas_principais = [t for t in tipos_restantes if t not in rotinas_virais_lista and t not in rotinas_publico_lista]
     
     hoje_historico = agora.strftime("%Y-%m-%d")
     historico = dados_rotina.get("historico_diario", {})
@@ -2665,7 +2681,7 @@ def agendar_tarefas_diarias(escopo="todos"):
                 
             conflito_geral = False
             for job_existente in scheduler.get_jobs():
-                if getattr(job_existente, 'next_run_time', None) and any(rv in job_existente.id for rv in rotinas_virais_lista):
+                if getattr(job_existente, 'next_run_time', None) and _escopo_do_job(job_existente.id) == "viral":
                     if abs((horario_candidato - job_existente.next_run_time.astimezone(fuso_horario)).total_seconds()) < 120:
                         conflito_geral = True
                         break
@@ -2674,7 +2690,103 @@ def agendar_tarefas_diarias(escopo="todos"):
             scheduler.add_job(disparar_mensagem, 'date', run_date=horario_candidato, args=[tipo], id=f"job_rotina_{tipo}_{indice}", replace_existing=True)
             ultimo_tipo_viral = tipo
 
-async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int = None):
+    if escopo in ["todos", "publico"]:
+        # 4.6. AGENDAMENTO INDEPENDENTE DO GRUPO PÚBLICO
+        # Mesma filosofia do Viral: as rotinas se encaixam nas lacunas entre os
+        # vídeos já agendados na fila_publico, sem depender do Canal Afiliados.
+        grupos_publico = {}
+        for tipo in rotinas_publico:
+            config = dados_rotina.get(tipo)
+            if type(config) is dict:
+                frequencia_total = config.get("frequencia", 1)
+                disparos_ja_feitos = obter_qtd_disparos(tipo)
+                frequencia_restante = frequencia_total - disparos_ja_feitos
+                if frequencia_restante > 0:
+                    grupos_publico[tipo] = [(tipo, i + disparos_ja_feitos, config) for i in range(frequencia_restante)]
+
+        tarefas_publico = []
+        chaves_publico = list(grupos_publico.keys())
+        while chaves_publico:
+            random.shuffle(chaves_publico)
+            chaves_remover = []
+            for chave in chaves_publico:
+                if grupos_publico[chave]: tarefas_publico.append(grupos_publico[chave].pop(0))
+                if not grupos_publico[chave]: chaves_remover.append(chave)
+            for chave in chaves_remover: chaves_publico.remove(chave)
+
+        horarios_ocupados_publico = []
+        try:
+            conexao_pub = sqlite3.connect("banco_dados.db")
+            cursor_pub = conexao_pub.cursor()
+            cursor_pub.execute("SELECT horario_disparo FROM fila_publico WHERE processado = 0 AND horario_disparo IS NOT NULL AND horario_disparo != ''")
+            for linha_pub in cursor_pub.fetchall():
+                try:
+                    h_p = datetime.strptime(linha_pub[0], "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                    if h_p.date() == agora.date() and h_p > agora:
+                        horarios_ocupados_publico.append(h_p)
+                except Exception:
+                    pass
+            conexao_pub.close()
+            horarios_ocupados_publico.sort()
+            if EXIBIR_LOGS: logger.info(f"📬 [Rotinas Público] {len(horarios_ocupados_publico)} vídeo(s) servirão de âncora hoje.")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.warning(f"⚠️ [Rotinas Público] Não consegui ler a fila_publico: {e}")
+
+        def encaixar_lacuna_publico(ini_h, fim_h, folga_min=4):
+            """Devolve o meio da maior janela livre entre os vídeos do Público, ou None."""
+            limite_ini = agora.replace(hour=int(ini_h), minute=0, second=0, microsecond=0)
+            if int(fim_h) >= 24:
+                limite_fim = agora.replace(hour=23, minute=50, second=0, microsecond=0)
+            else:
+                limite_fim = agora.replace(hour=int(fim_h), minute=0, second=0, microsecond=0)
+
+            base = max(agora + timedelta(minutes=5), limite_ini)
+            if base >= limite_fim:
+                return None
+
+            pontos = [base] + [h for h in horarios_ocupados_publico if base < h < limite_fim] + [limite_fim]
+            melhor, maior = None, timedelta(0)
+            for i in range(len(pontos) - 1):
+                gap = pontos[i + 1] - pontos[i]
+                if gap > maior:
+                    maior, melhor = gap, pontos[i] + gap / 2
+            if melhor and maior >= timedelta(minutes=folga_min * 2):
+                encaixe = melhor.replace(second=0, microsecond=0)
+                if encaixe < limite_ini or encaixe > limite_fim:
+                    return None
+                return encaixe
+            return None
+
+        ultimo_tipo_publico = None
+        for tipo, indice, config in tarefas_publico:
+            ini_cfg = int(config.get("inicio", 9))
+            fim_cfg = int(config.get("fim", 21))
+            encaixe = encaixar_lacuna_publico(ini_cfg, fim_cfg)
+            if encaixe:
+                horario_candidato = encaixe
+                horarios_ocupados_publico.append(encaixe)
+                horarios_ocupados_publico.sort()
+            else:
+                minuto_absoluto = random.randint(ini_cfg * 60, min(fim_cfg, 23) * 60 + 59)
+                hora_sorteada, min_sorteado = divmod(minuto_absoluto, 60)
+                horario_candidato = agora.replace(hour=min(hora_sorteada, 23), minute=min_sorteado, second=0, microsecond=0)
+
+            if tipo == ultimo_tipo_publico:
+                horario_candidato += timedelta(minutes=random.randint(60, 120))
+            if horario_candidato <= agora:
+                horario_candidato = agora + timedelta(minutes=random.randint(3, 12))
+
+            # 🛡️ Anti-colisão SOMENTE contra outras rotinas do próprio Público
+            for job_existente in scheduler.get_jobs():
+                if getattr(job_existente, 'next_run_time', None) and _escopo_do_job(job_existente.id) == "publico":
+                    if abs((horario_candidato - job_existente.next_run_time.astimezone(fuso_horario)).total_seconds()) < 120:
+                        horario_candidato += timedelta(minutes=random.randint(3, 8))
+                        break
+
+            scheduler.add_job(disparar_mensagem, 'date', run_date=horario_candidato, args=[tipo], id=f"job_rotina_{tipo}_{indice}", replace_existing=True)
+            ultimo_tipo_publico = tipo
+
+async def resetar_sessao_inatividade
     # 1. Recupera o estado de navegação atual do utilizador de forma remota
     state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=chat_id, user_id=user_id, thread_id=thread_id))
     estado_atual = await state.get_state()
@@ -10266,7 +10378,7 @@ async def processar_pausa_rotinas_interno(message: types.Message, state: FSMCont
         if novo_status: await message.answer("⏸️ <b>Rotinas do Público PAUSADAS.</b>", parse_mode="HTML")
         else:
             await message.answer("▶️ <b>Rotinas do Público ATIVAS.</b>\n🔄 Recalculando grade...", parse_mode="HTML")
-            agendar_tarefas_diarias(escopo="principal")
+            agendar_tarefas_diarias(escopo="publico")
         await gerenciar_rotina_publico(message, state)
         
     else:
@@ -11155,7 +11267,7 @@ async def salvar_horario_rotina(message: types.Message, state: FSMContext):
         agendar_tarefas_diarias(escopo="viral")
         texto_ok = "✅ Configuração salva! Os novos horários do Canal Viral já foram sorteados e agendados para hoje."
     elif origem == "publico":
-        agendar_tarefas_diarias(escopo="principal")
+        agendar_tarefas_diarias(escopo="publico")
         texto_ok = "✅ Configuração salva! Os novos horários do Grupo Público já foram sorteados e agendados para hoje."
     else:
         origem = "principal"
