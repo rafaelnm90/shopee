@@ -381,6 +381,8 @@ class AchadinhosFluxo(StatesGroup):
     aguardando_campo_edicao = State()
     aguardando_novo_valor_edicao = State()
     aguardando_confirmacao_edicao = State()
+    aguardando_janela = State()
+    aguardando_confirmacao_janela = State()
 
 class SubmissaoAdminFluxo(StatesGroup):
     menu_principal = State()
@@ -995,7 +997,17 @@ teclado_menu_achadinhos = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Nicho ➕"), KeyboardButton(text="Remover Nicho 🗑️")],
         [KeyboardButton(text="Editar Nicho ✏️"), KeyboardButton(text="Forçar Garimpo 🚀")],
+        [KeyboardButton(text="Janela de Horário ⏰")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+teclado_janela_achadinhos = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Dia Todo (24h) 🕛")],
+        [KeyboardButton(text="Cancelar ❌")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -5132,18 +5144,17 @@ async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_l
     return random.choice(ABERTURAS_ACHADINHO)
 
 
-# ⏰ Fora desta faixa o garimpo não publica. Post de madrugada some no feed
-# quando o pessoal acorda e ainda queima um produto inédito da memória
-# permanente, que não volta mais.
-ACHADINHOS_HORA_INICIO = 8
-ACHADINHOS_HORA_FIM = 22
-
-
 async def processar_garimpo_automatico(forcado=False):
+    # ⏰ Janela lida do painel. Post de madrugada some no feed quando o pessoal
+    # acorda e ainda queima um produto inédito da memória permanente.
+    cfg_janela = ler_achadinhos_config()
+    hora_inicio = int(cfg_janela.get("inicio", 8))
+    hora_fim = int(cfg_janela.get("fim", 22))
+
     agora = datetime.now(fuso_horario)
-    if not forcado and not (ACHADINHOS_HORA_INICIO <= agora.hour < ACHADINHOS_HORA_FIM):
+    if not forcado and not (hora_inicio <= agora.hour < hora_fim):
         if EXIBIR_LOGS:
-            logger.info(f"🌙 [Achadinhos] Fora da janela ({ACHADINHOS_HORA_INICIO}h–{ACHADINHOS_HORA_FIM}h). "
+            logger.info(f"🌙 [Achadinhos] Fora da janela ({hora_inicio}h–{hora_fim}h). "
                         f"Agora são {agora.strftime('%H:%M')}. Garimpo adiado.")
         return
 
@@ -8435,6 +8446,9 @@ async def painel_achadinhos(message: types.Message, state: FSMContext):
             texto += f"   └ Canal Alvo: <code>{nicho.get('destino')}</code>\n"
             texto += f"   └ Termos Rastreados: {', '.join(nicho.get('keywords', []))}\n"
             
+    janela_txt = "24h" if config.get("inicio", 8) == 0 and config.get("fim", 22) == 24 \
+                 else f"{config.get('inicio', 8)}h às {config.get('fim', 22)}h"
+    texto += f"\n\n⏰ <b>Janela de postagem:</b> {janela_txt}"
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado_menu_achadinhos)
     await state.set_state(AchadinhosFluxo.menu_principal)
 
@@ -8709,6 +8723,87 @@ async def salvar_edicao_nicho(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.info(f"✏️ Nicho {indice+1} atualizado. Campo '{campo}' alterado.")
         await message.answer("✅ Nicho atualizado com sucesso!")
 
+    await painel_achadinhos(message, state)
+
+@dp.message(AchadinhosFluxo.menu_principal, F.text == "Janela de Horário ⏰")
+async def pedir_janela_achadinhos(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+
+    config = ler_achadinhos_config()
+    inicio = config.get("inicio", 8)
+    fim = config.get("fim", 22)
+
+    await message.answer(
+        f"Defina a <b>Janela de Horário</b> em que o garimpo pode publicar ofertas.\n\n"
+        f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>8-22</code>) ou clique no botão para rodar 24h.\n"
+        f"<i>Janela atual: {inicio}h às {fim}h</i>",
+        parse_mode="HTML",
+        reply_markup=teclado_janela_achadinhos
+    )
+    await state.set_state(AchadinhosFluxo.aguardando_janela)
+
+
+@dp.message(AchadinhosFluxo.aguardando_janela)
+async def confirmar_janela_achadinhos(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+
+    texto = message.text.strip()
+
+    if texto == "Dia Todo (24h) 🕛" or texto.lower() == "dia todo":
+        inicio, fim = 0, 24
+    else:
+        match = re.match(r"^(\d{1,2})\s*-\s*(\d{1,2})$", texto)
+        if not match:
+            await message.answer("⚠️ Formato inválido! Use exatamente como no exemplo: <code>8-22</code>.",
+                                 parse_mode="HTML", reply_markup=teclado_janela_achadinhos)
+            return
+        inicio, fim = map(int, match.groups())
+        if inicio >= fim or inicio < 0 or fim > 24:
+            await message.answer("⚠️ Valores inválidos! A hora de início precisa ser menor que a do fim (0 a 24).",
+                                 reply_markup=teclado_janela_achadinhos)
+            return
+
+    # 📊 O garimpo roda a cada 2h, então a janela define quantos ciclos cabem no dia.
+    ciclos = max(1, (fim - inicio) // 2)
+    qtd_nichos = len(ler_achadinhos_config().get("nichos", []))
+    total_dia = ciclos * qtd_nichos
+
+    await state.update_data(janela_inicio=inicio, janela_fim=fim)
+
+    texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"entre {inicio}h e {fim}h"
+    teclado_conf = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer(
+        f"Confirmar a janela de garimpo <b>{texto_exibicao}</b>?\n\n"
+        f"<i>Dará cerca de {ciclos} ciclo(s) por dia. Com {qtd_nichos} nicho(s) "
+        f"cadastrado(s), são aproximadamente {total_dia} publicações diárias no grupo.</i>",
+        parse_mode="HTML",
+        reply_markup=teclado_conf
+    )
+    await state.set_state(AchadinhosFluxo.aguardando_confirmacao_janela)
+
+
+@dp.message(AchadinhosFluxo.aguardando_confirmacao_janela)
+async def salvar_janela_achadinhos(message: types.Message, state: FSMContext):
+    if message.text != "Aprovar ✅":
+        await message.answer("Use <b>Aprovar ✅</b> para salvar ou <b>Cancelar ❌</b> para desistir.",
+                             parse_mode="HTML")
+        return
+
+    data = await state.get_data()
+    config = ler_achadinhos_config()
+    config["inicio"] = data.get("janela_inicio", 8)
+    config["fim"] = data.get("janela_fim", 22)
+    salvar_achadinhos_config(config)
+
+    if EXIBIR_LOGS:
+        logger.info(f"⏰ [Achadinhos] Janela alterada para {config['inicio']}h–{config['fim']}h.")
+    await message.answer(f"✅ Janela salva: <b>{config['inicio']}h às {config['fim']}h</b>.", parse_mode="HTML")
     await painel_achadinhos(message, state)
 
 @dp.message(F.text == "Voltar ao Menu Espião 🔙", StateFilter("*"))
