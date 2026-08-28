@@ -317,6 +317,7 @@ class ConfigFluxo(StatesGroup):
     aguardando_selecao_limpeza = State() # ✅ NOVO: Passo 1 (Escolher o que limpar)
     aguardando_acao_limpeza = State()    # ✅ NOVO: Passo 2 (Confirmar a limpeza)
     aguardando_confirmacao_reiniciar = State()
+    aguardando_confirmacao_rotinas = State() # ✅ NOVO: Aprovar antes de recalcular a grade
 
 class ConfigDivulgacao(StatesGroup):
     menu_principal = State()
@@ -2390,6 +2391,31 @@ def ler_config_rotina():
 def salvar_config_rotina(dados):
     salvar_config_bd("config_rotina", dados)
 
+# 🎯 CADA ROBÔ TEM A SUA PRÓPRIA LISTA. Nada de misturar.
+ROTINAS_VIRAIS = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral"]
+ROTINAS_PUBLICO = ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico"]
+
+def descobrir_escopo_job(job_id):
+    """Descobre a QUAL robô o job pertence, comparando o tipo por igualdade exata."""
+    if job_id.startswith('job_campanha_'):
+        return "principal"
+    tipo = None
+    m = re.match(r'^job_rotina_(.+?)_(?:intercalado|reagendado)_\d+$', job_id)
+    if m:
+        tipo = m.group(1)
+    else:
+        m = re.match(r'^job_rotina_(.+)_\d+$', job_id)
+        if m: tipo = m.group(1)
+    if tipo in ROTINAS_VIRAIS: return "viral"
+    if tipo in ROTINAS_PUBLICO: return "publico"
+    return "principal"
+
+NOMES_AMIGAVEIS_ROTINA = {
+    "bom_dia": "Bom Dia", "boa_noite": "Boa Noite", "incentivo": "Incentivo",
+    "link_grupo": "Convite do Grupo", "divulgar_gem": "Divulgar Gem",
+    "promo_viral": "Promo Canal Viral", "promo_publico": "Promo Grupo Público",
+}
+
 def agendar_tarefas_diarias(escopo="todos"):
     if EXIBIR_LOGS: logger.info(f"🔄 Sorteando horários de rotina (Escopo: {escopo.upper()})...")
     
@@ -2419,24 +2445,11 @@ def agendar_tarefas_diarias(escopo="todos"):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro na faxina da madrugada (SQLite): {e}")
     
-        # 🎯 CADA ROBÔ TEM A SUA PRÓPRIA LISTA. Nada de misturar.
-    rotinas_virais_lista = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral"]
-    rotinas_publico_lista = ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico"]
-
-    def _escopo_do_job(job_id):
-        """Descobre a QUAL robô o job pertence, comparando o tipo por igualdade exata."""
-        if job_id.startswith('job_campanha_'):
-            return "principal"
-        tipo = None
-        m = re.match(r'^job_rotina_(.+?)_(?:intercalado|reagendado)_\d+$', job_id)
-        if m:
-            tipo = m.group(1)
-        else:
-            m = re.match(r'^job_rotina_(.+)_\d+$', job_id)
-            if m: tipo = m.group(1)
-        if tipo in rotinas_virais_lista: return "viral"
-        if tipo in rotinas_publico_lista: return "publico"
-        return "principal"
+        # 🎯 As listas e o identificador de dono agora vivem no topo do arquivo,
+    # para que o painel de confirmação também consiga usá-los.
+    rotinas_virais_lista = ROTINAS_VIRAIS
+    rotinas_publico_lista = ROTINAS_PUBLICO
+    _escopo_do_job = descobrir_escopo_job
 
     def _tipo_do_job(job_id):
         """Extrai o 'tipo' EXATO da rotina a partir do ID do job."""
@@ -7547,6 +7560,14 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     data = await state.get_data()
 
     # 🔁 Roteamento Inteligente: Se estiver na CONFIRMAÇÃO de Limpeza, volta para a SELEÇÃO de Limpeza
+    # 🔁 Roteamento Inteligente: cancelou o recálculo da grade? Nada foi alterado.
+    if estado_atual == "ConfigFluxo:aguardando_confirmacao_rotinas":
+        await state.clear()
+        if EXIBIR_LOGS: logger.info("🔙 Recálculo da grade CANCELADO. Nenhum horário foi alterado.")
+        await message.answer("❌ Recálculo cancelado. Nenhum horário foi alterado.")
+        await menu_configuracoes(message, state)
+        return
+
     if estado_atual == "ConfigFluxo:aguardando_acao_limpeza":
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando à seleção de limpeza de filas.")
         await message.answer("Ação cancelada. Retornando ao menu de limpeza...")
@@ -8248,10 +8269,68 @@ async def menu_configuracoes(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=obter_teclado_configuracoes_gerais(), parse_mode="HTML")
 
 @dp.message(F.text == "🔄 Atualizar Rotinas", StateFilter("*"))
+async def confirmar_atualizar_rotinas(message: types.Message, state: FSMContext):
+    """Mostra o que será remexido e espera Aprovar/Cancelar antes de recalcular."""
+    if message.from_user.id != ADMIN_ID: return
+
+    rotinas_afetadas = []
+    videos_afetados = 0
+    intocados = {"viral": 0, "publico": 0}
+
+    for job in scheduler.get_jobs():
+        if not getattr(job, 'next_run_time', None):
+            continue
+        if job.id.startswith('job_fila_postagem_'):
+            videos_afetados += 1
+            continue
+        if not (job.id.startswith('job_rotina_') or job.id.startswith('job_campanha_')):
+            continue
+
+        dono = descobrir_escopo_job(job.id)
+        if dono != "principal":
+            intocados[dono] += 1
+            continue
+
+        hora = job.next_run_time.astimezone(fuso_horario).strftime("%H:%M")
+        bruto = job.id.replace("job_rotina_", "").replace("job_campanha_", "")
+        if job.id.startswith('job_campanha_'):
+            nome = f"Aviso de Campanha ({bruto.title()})"
+        else:
+            base = re.sub(r'_(?:\d+|(?:intercalado|reagendado)_\d+)$', '', bruto)
+            nome = NOMES_AMIGAVEIS_ROTINA.get(base, base.replace("_", " ").title())
+        rotinas_afetadas.append((hora, f"🔹 <b>{nome}:</b> {hora}"))
+
+    rotinas_afetadas.sort(key=lambda x: x[0])
+
+    texto = "⚠️ <b>Confirmar Recálculo da Grade</b>\n\n"
+    texto += "Os horários abaixo serão <b>apagados e sorteados de novo</b>. Só o Canal Afiliados é afetado.\n\n"
+
+    if rotinas_afetadas:
+        texto += f"🎯 <b>Rotinas que serão remexidas ({len(rotinas_afetadas)}):</b>\n"
+        texto += "\n".join([i[1] for i in rotinas_afetadas]) + "\n\n"
+    else:
+        texto += "<i>Nenhuma rotina do Canal Afiliados está agendada no momento.</i>\n\n"
+
+    if videos_afetados:
+        texto += f"🎬 <b>Fila de vídeos:</b> {videos_afetados} vídeo(s) serão redistribuídos.\n\n"
+
+    texto += (f"🛡️ <b>Ficam intactos:</b> {intocados['viral']} do Canal Viral e "
+              f"{intocados['publico']} do Grupo Público.\n\n")
+    texto += "Deseja continuar?"
+
+    if EXIBIR_LOGS: logger.info(f"🔄 Aguardando aprovação do recálculo ({len(rotinas_afetadas)} rotina(s), {videos_afetados} vídeo(s)).")
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_confirmar_zerar)
+    await state.set_state(ConfigFluxo.aguardando_confirmacao_rotinas)
+
+@dp.message(ConfigFluxo.aguardando_confirmacao_rotinas)
 async def resetar_expediente(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    
-    if EXIBIR_LOGS: logger.info("🔄 Acionado o Recálculo Inteligente de Rotinas...")
+
+    if message.text != "Aprovar ✅":
+        await message.answer("Por favor, clique em <b>Aprovar ✅</b> ou <b>Cancelar ❌</b>.", parse_mode="HTML")
+        return
+
+    if EXIBIR_LOGS: logger.info("🔄 Recálculo APROVADO pelo admin. Executando...")
     msg_status = await message.answer("🔄 Analisando o histórico de hoje e recalculando a grade restante. Aguarde...", reply_markup=teclado_cancelar)
     
     # --- 1. FOTO DO ANTES (Captura o estado atual da memória) ---
