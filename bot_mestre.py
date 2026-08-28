@@ -7344,10 +7344,19 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await menu_zerar_filas_tarefas(message, state)
         return
         
-    # 🔁 Roteamento Inteligente: Se cancelar da seleção de limpeza ou do reinício, volta pro painel de Servidor
+    # 🔀 Roteamento Inteligente: Se cancelar da seleção de limpeza ou do reinício, volta pro painel de Servidor
     if estado_atual in ["ConfigFluxo:aguardando_selecao_limpeza", "ConfigFluxo:aguardando_confirmacao_reiniciar"]:
         await state.clear()
         await message.answer("Ação cancelada. Nenhuma alteração foi feita no servidor.", reply_markup=obter_teclado_opcoes_servidor())
+        return
+
+    # 🔀 Roteamento Inteligente: cancelou dentro do fluxo de Achadinhos? Volta para
+    # o painel dele. O prefixo cobre os dez estados de uma vez (cadastro, edição,
+    # remoção), sem precisar listar um por um.
+    if estado_atual and estado_atual.startswith("AchadinhosFluxo:"):
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await painel_achadinhos(message, state)
         return
         
     # 🔁 Roteamento Inteligente: Se estiver no Gerenciador de Fila
