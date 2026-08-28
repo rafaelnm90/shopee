@@ -5062,28 +5062,74 @@ def total_achadinhos_enviados():
     except Exception:
         return 0
 
+# 🏷️ Formatação de preço e cálculo do "de/por". A API só devolve o preço ATUAL
+# e a taxa de desconto — o valor antigo precisa ser deduzido daí.
+ABERTURAS_ACHADINHO = [
+    "😍 Olha esse preço!", "🔥 Achadinho do dia!", "🚨 Baixou de novo!",
+    "💥 Corre que acaba!", "🤩 Achei e trouxe pra você!", "⚡ Oferta relâmpago!",
+    "👀 Essa passou batido, olha só!", "💰 Economia de verdade aqui!",
+]
+
+
+def formatar_brl(valor):
+    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+
+def preco_de_por(preco, taxa):
+    """Devolve (preco_antigo, preco_atual, taxa). O antigo vem None quando a
+    taxa não permite deduzir com segurança."""
+    try:
+        atual = float(str(preco).replace(",", "."))
+        taxa = int(taxa or 0)
+    except (TypeError, ValueError):
+        return None, None, 0
+    if taxa <= 0 or taxa >= 100:
+        return None, atual, 0
+    return atual / (1 - taxa / 100), atual, taxa
+
+
+def montar_legenda_achadinho(nome, preco, taxa, nota, link, gancho=None):
+    """🎨 O bloco de preço é montado por código, nunca pela IA. Assim o número
+    é sempre exato e o layout não quebra quando a IA falha."""
+    original, atual, taxa = preco_de_por(preco, taxa)
+    if atual is None:
+        return f"{gancho or random.choice(ABERTURAS_ACHADINHO)}\n\n📦 <b>{nome}</b>\n\n🔗 <b>Confira a oferta aqui</b> 👇\n{link}"
+
+    linhas = [gancho or random.choice(ABERTURAS_ACHADINHO), "", f"📦 <b>{nome}</b>", ""]
+    if original and taxa >= 5:
+        linhas.append(f"💸 De <s>{formatar_brl(original)}</s> por apenas")
+        linhas.append(f"🏷️ <b>{formatar_brl(atual)}</b>  ·  🔥 <b>-{taxa}% OFF</b>")
+    else:
+        linhas.append(f"🏷️ <b>{formatar_brl(atual)}</b>")
+    linhas.append("")
+    if nota:
+        linhas.append(f"⭐ Loja avaliada em {nota}/5")
+    linhas += ["", "🔗 <b>Confira a oferta aqui</b> 👇", link]
+    return "\n".join(linhas)
+
 async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_loja):
     if EXIBIR_LOGS: logger.info(f"🧠 [Achadinhos] Estruturando estratégia de Copywriting para o produto...")
     
-    prompt = (
-        f"Você é um copywriter especialista em e-commerce alimentando um canal de achadinhos. "
-        f"Crie um texto de venda MUITO CURTO para este produto: '{nome_produto}'. "
-        f"A loja possui uma excelente avaliação de ⭐ {nota_loja}/5 estrelas. "
-        f"O preço original era R$ {preco_original} e agora a loja aplicou {desconto} de desconto. "
-        f"REGRA ABSOLUTA: Comece com uma frase extremamente chamativa focada em resolver um problema ou gerar desejo. "
-        f"Apresente a queda de preço focando na urgência de levar agora. "
-        f"Não ultrapasse 4 linhas. Não use palavras complexas, seja direto e use emojis atraentes. "
-        f"Finalize o texto estritamente com: '🔗 Confira a oferta no link abaixo: 👇'\n\n"
-        f"REGRA ABSOLUTA DE INTEGRIDADE NUMÉRICA:\n"
-        f"Você está estritamente proibido de calcular, deduzir, arredondar ou inventar qualquer valor financeiro. O preço fornecido nos dados brutos é um fato imutável e intocável. Utilize EXATAMENTE os números informados na sua redação. Se o valor final com desconto não estiver matematicamente explícito na entrada de dados, não tente adivinhá-lo sob nenhuma circunstância. Concentre a persuasão do texto exclusivamente nos benefícios físicos do produto e no gatilho de escassez, preservando a integridade absoluta da etiqueta de preço."
+        prompt = (
+        f"Escreva UMA única linha curta (no máximo 8 palavras) para chamar atenção "
+        f"num canal de ofertas do Telegram, sobre este produto: {nome_produto}.\n\n"
+        f"Comece com um emoji que combine com o produto. Foque no benefício ou no "
+        f"desejo que ele desperta, não no preço. Fale como gente, sem palavra difícil.\n\n"
+        f"PROIBIDO: citar qualquer valor, porcentagem ou desconto. PROIBIDO usar aspas. "
+        f"PROIBIDO escrever mais de uma linha. Responda apenas a linha, nada mais.\n\n"
+        f"Exemplos do tom: '🔊 Som de festa na palma da mão' / "
+        f"'👟 Leveza que segura o treino inteiro'"
     )
-    
+
     texto_gerado = await gerar_texto_gemini(prompt, EXIBIR_LOGS)
     if texto_gerado:
-        return texto_gerado
-        
-    return f"🔥 Achadinho Imperdível!\n📦 {nome_produto}\nDe R$ {preco_original} com {desconto} de desconto!\n\n🔗 Confira a oferta no link abaixo: 👇"
+        # A IA às vezes devolve parágrafo; fica só a primeira linha.
+        gancho = texto_gerado.strip().split("\n")[0].strip().strip('"')
+        if 0 < len(gancho) <= 60:
+            return gancho
 
+    # 🎲 Sem IA, sorteia entre oito aberturas: repete menos que um texto fixo.
+    return random.choice(ABERTURAS_ACHADINHO)
 async def processar_garimpo_automatico():
     if EXIBIR_LOGS: logger.info("🕵️‍♂️ [Achadinhos] Iniciando operação de garimpo varrendo todos os nichos mapeados...")
     config = ler_achadinhos_config()
@@ -5139,9 +5185,9 @@ async def processar_garimpo_automatico():
         img_url = item_escolhido.get("imageUrl")
         link_original = item_escolhido.get("productLink")
         
-        texto_ia = await gerar_copy_achadinho_ia(nome, preco, desconto, nota_loja)
+        gancho = await gerar_copy_achadinho_ia(nome, preco, desconto, nota_loja)
         link_curto = await converter_link_shopee(link_original, nome_nicho, EXIBIR_LOGS)
-        legenda_final = f"{texto_ia}\n{link_curto}"
+        legenda_final = montar_legenda_achadinho(nome, preco, taxa_desconto, nota_loja, link_curto, gancho)
         
         try:
             temp_img = f"temp/temp_achado_{item_id}.jpg"
