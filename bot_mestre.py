@@ -5371,10 +5371,23 @@ def agendar_proximo_garimpo(primeiro=False):
         hora_inicio = int(cfg.get("inicio", 8))
         hora_fim = int(cfg.get("fim", 22))
         agora = datetime.now(fuso_horario)
-
         if primeiro:
-            # Na subida do bot não dispara na hora cheia: espera de 3 a 25 min.
-            perfil, minutos = "boot", random.randint(3, 25)
+            # 🔁 Restart NÃO pode virar gatilho de postagem. Se já havia um horário
+            # sorteado no ar e ele ainda está no futuro, ele é restaurado tal e qual.
+            # Sem isto, cada 'deploybot' enfia um ciclo extra 3-25 min depois.
+            salvo = cfg.get("proximo_garimpo", "")
+            alvo_salvo = None
+            if salvo:
+                try:
+                    alvo_salvo = datetime.strptime(salvo, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                except Exception:
+                    alvo_salvo = None
+            if alvo_salvo and agora < alvo_salvo <= agora + timedelta(hours=8):
+                perfil = "retomada"
+                minutos = int((alvo_salvo - agora).total_seconds() // 60)
+            else:
+                # Primeira subida (ou horário salvo vencido): espera de 3 a 25 min.
+                perfil, minutos = "boot", random.randint(3, 25)
         else:
             perfil, minutos = sortear_intervalo_garimpo()
 
@@ -5393,6 +5406,10 @@ def agendar_proximo_garimpo(primeiro=False):
 
         scheduler.add_job(ciclo_garimpo_automatico, 'date', run_date=alvo,
                           id='job_garimpo_achadinhos', replace_existing=True)
+
+        # 💾 Guarda o horário para sobreviver a restart (ver bloco 'retomada' acima).
+        cfg["proximo_garimpo"] = alvo.strftime("%Y-%m-%d %H:%M:%S")
+        salvar_achadinhos_config(cfg)
 
         if EXIBIR_LOGS:
             logger.info(f"🎲 [Achadinhos] Perfil '{perfil}': próximo garimpo em "
