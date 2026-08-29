@@ -409,13 +409,32 @@ def remover_cache_video(url):
     except Exception:
         pass
 
+def normalizar_pinterest(url):
+    """
+    🧭 Reduz qualquer URL do Pinterest à forma canônica do pin.
+
+    O botão Compartilhar gera /pin/<id>/sent/?invite_code=...&sender=...&sfo=1,
+    que é a página de CONVITE. O yt-dlp lê o id certo a partir dela, mas volta
+    sem nenhum formato de vídeo — o famoso 'Requested format is not available'.
+    Links de outras plataformas passam intactos.
+    """
+    achado = re.search(r'(https?://[a-z0-9.]*pinterest\.[a-z.]+/pin/\d+)', url, re.IGNORECASE)
+    if achado:
+        limpa = achado.group(1) + "/"
+        if limpa != url and EXIBIR_LOGS:
+            logger.info(f"🧭 URL do Pinterest normalizada para {limpa}")
+        return limpa
+    return url
+
+
 async def expandir_encurtador(url):
     """
     O pin.it redireciona para a home do Pinterest quando não parece um navegador.
     Sem os cabeçalhos certos, o yt-dlp recebe a página inicial e não acha vídeo.
     """
     if "pin.it" not in url.lower():
-        return url
+        # 🧭 Link do Pinterest colado direto também pode vir com /sent/ e query.
+        return normalizar_pinterest(url)
     try:
         import aiohttp
         cabecalhos = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -425,7 +444,7 @@ async def expandir_encurtador(url):
                 final = str(resposta.url)
                 if "/pin/" in final:
                     if EXIBIR_LOGS: logger.info(f"🔗 pin.it expandido para {final}")
-                    return final
+                    return normalizar_pinterest(final)
 
                 # 🔍 O Pinterest às vezes devolve uma página intersticial em JS em
                 # vez de um redirect 30x. Nesse caso resposta.url continua sendo o
@@ -440,7 +459,7 @@ async def expandir_encurtador(url):
                 achado = re.search(r'https?://[a-z0-9.]*pinterest\.[a-z.]+/pin/\d+', corpo, re.IGNORECASE)
                 if achado:
                     if EXIBIR_LOGS: logger.info(f"🔗 pin.it expandido pelo HTML para {achado.group(0)}")
-                    return achado.group(0)
+                    return normalizar_pinterest(achado.group(0))
 
                 if EXIBIR_LOGS:
                     logger.warning(f"⚠️ pin.it NÃO expandiu: parou em {final} "
@@ -748,7 +767,13 @@ async def _baixar_video_uma_vez(url, pasta):
     modelo = os.path.join(pasta, "video.%(ext)s")
     comando = [
         "/home/ubuntu/shopee/venv/bin/yt-dlp",
-        "-f", f"best[height<={ALTURA_MAXIMA}][ext=mp4]/best[height<={ALTURA_MAXIMA}]/best",
+        # 🎬 'best' sozinho exige vídeo E áudio no MESMO arquivo. Quando o site
+        # serve streams separados (HLS), os três fallbacks antigos falhavam em
+        # cascata -> 'Requested format is not available'. As entradas com bv*+ba
+        # cobrem esse caso juntando os dois com ffmpeg.
+        "-f", (f"b[height<={ALTURA_MAXIMA}][ext=mp4]/b[height<={ALTURA_MAXIMA}]/"
+               f"bv*[height<={ALTURA_MAXIMA}]+ba/b/bv*+ba/bv*"),
+        "--merge-output-format", "mp4",
         "--no-playlist",              # link de perfil não vira 200 downloads
         "--no-warnings",
         "--socket-timeout", "30",
@@ -776,6 +801,12 @@ async def _baixar_video_uma_vez(url, pasta):
                 return None, "o vídeo é privado ou exige login"
             if "Unsupported URL" in msg:
                 return None, "este link não é suportado"
+            # 🎬 Formato indisponível não muda com retentativa: 3 tentativas só
+            # fazem a pessoa esperar 15s para receber o mesmo erro.
+            if "Requested format is not available" in msg:
+                if EXIBIR_LOGS:
+                    logger.error(f"🎬 Sem formato de vídeo utilizável em {url}\n{msg.strip()[-400:]}")
+                return None, "esse link não tem vídeo, só imagem"
             # 🚦 Limite de requisições: é temporário, mas 3s de espera não resolve.
             if any(t in msg.lower() for t in ("http error 429", "too many requests",
                                               "rate-limit", "rate limit")):
