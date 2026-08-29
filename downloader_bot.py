@@ -893,6 +893,21 @@ async def apagar_link_original(message):
     try: await message.delete()
     except Exception: pass
 
+# ⏳ O aviso de cota estourada não fica exposto no tópico: quanto menos gente
+# souber que existe limite, menos gente tenta contornar.
+EXPIRACAO_AVISO_LIMITE_SEG = 180
+
+
+async def expirar_aviso_limite(aviso, link_original=None):
+    await asyncio.sleep(EXPIRACAO_AVISO_LIMITE_SEG)
+    try: await aviso.delete()
+    except Exception: pass
+    # Sem o aviso, o link solto vira lixo no tópico. Vai junto.
+    if link_original is not None:
+        try: await link_original.delete()
+        except Exception: pass
+    if EXIBIR_LOGS: logger.info("⏳ Aviso de limite diário expirou e foi removido do tópico.")
+
 @router.message(F.chat.id == GRUPO_DOWNLOADER, F.message_thread_id == TOPICO_DOWNLOADER)
 async def receber_link(message: types.Message):
     # 🧹 Anota TODA mensagem que entra no tópico, inclusive as que serão
@@ -954,13 +969,14 @@ async def receber_link(message: types.Message):
     # 3️⃣ Limite diário
     usados = downloads_hoje(message.from_user.id)
     if usados >= LIMITE_DIARIO_DOWNLOADS and message.from_user.id not in IDS_SEM_LIMITE:
-        await message.answer(
+        aviso_limite = await message.answer(
             f"📦 {mencao}, você já baixou <b>{usados} vídeos hoje</b> e atingiu o limite diário.\n\n"
             f"<b>Cada membro pode baixar até {LIMITE_DIARIO_DOWNLOADS} vídeos por dia.</b>\n"
             "<i>Sua cota volta a zerar à meia-noite. Até lá!</i>",
             parse_mode="HTML"
         )
         if EXIBIR_LOGS: logger.info(f"📦 {message.from_user.id} atingiu o limite ({usados}).")
+        asyncio.create_task(expirar_aviso_limite(aviso_limite, message))
         return
 
     # 4️⃣ Liberado — baixa e entrega
