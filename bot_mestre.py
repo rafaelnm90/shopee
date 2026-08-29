@@ -13316,7 +13316,10 @@ async def receber_novo_valor_grupo(message: types.Message, state: FSMContext):
             if "t.me/c/" in texto_usuario:
                 so_num = re.search(r't\.me/c/(\d+)', texto_usuario)
                 grupo_id = f"-100{so_num.group(1)}" if so_num else texto_usuario
-                topico_id = texto_usuario.split("/")[-1] if "/" in texto_usuario else "0"
+                # 🔗 Mesmo bug: em link de MENSAGEM (.../<topico>/<mensagem>) o
+                # último segmento é a mensagem, não o tópico.
+                m_link = re.search(r't\.me/c/(\d+)/(\d+)(?:/(\d+))?', texto_usuario)
+                topico_id = m_link.group(2) if m_link else "0"
             else:
                 grupo_id = texto_usuario
                 topico_id = "0"
@@ -13330,17 +13333,28 @@ async def receber_novo_valor_grupo(message: types.Message, state: FSMContext):
             topicos_finais = []
             texto_conf = "✅ Você definiu que as rotinas irão para o <b>Chat Geral (Padrão)</b>.\n\nDeseja confirmar esta alteração?"
         else:
-            entradas = [t.strip() for t in texto_usuario.split(",")]
+            # 🔗 Segunda porta para a MESMA config 'topicos_rotina'. Usa o mesmo
+            # extrair_id_topico do "Gerenciar Alvos" para os dois caminhos não
+            # divergirem de novo.
+            grupo_id_rot = str(ler_submissao_config().get("grupo_id") or "")
             topicos_finais = []
-            import re
-            for entrada in entradas:
-                if "t.me/" in entrada:
-                    partes = entrada.split("/")
-                    if len(partes) >= 5: topicos_finais.append(partes[-1])
-                elif "_" in entrada: topicos_finais.append(entrada.split("_")[-1])
-                elif ":" in entrada: topicos_finais.append(entrada.split(":")[-1])
-                elif entrada.isdigit():
-                    if entrada != "0": topicos_finais.append(entrada)
+            problemas = []
+            for entrada in texto_usuario.split(","):
+                topico, erro = extrair_id_topico(entrada, grupo_id_rot)
+                if erro:
+                    problemas.append(erro)
+                elif topico and topico != "0" and topico not in topicos_finais:
+                    topicos_finais.append(topico)
+
+            if problemas or not topicos_finais:
+                detalhe = ("\n• " + "\n• ".join(problemas)) if problemas else ""
+                await message.answer(
+                    "⚠️ <b>Não consegui ler os alvos.</b>" + detalhe +
+                    "\n\nCole o <b>link do tópico</b> (toque no nome do tópico → Copiar Link), "
+                    "separando por vírgula se forem vários, ou envie <b>0</b> para o Chat Geral.",
+                    parse_mode="HTML", reply_markup=teclado_cancelar
+                )
+                return
 
             texto_conf = f"✅ Tópicos de rotina extraídos: <code>{', '.join(topicos_finais)}</code>\n<i>(Os nomes reais serão sincronizados em background pelo Userbot)</i>\n\nDeseja confirmar esta alteração?"
 
