@@ -2248,7 +2248,7 @@ async def disparar_mensagem(tipo, forcar=False):
         prompt = "Recomende um canal parceiro VIP (Acervo Afiliados). Diga que eles liberam conteúdos premium e editados a dedo. Seja humano. Máximo 150 caracteres. Sem links."
     
     elif tipo in ["promo_achadinhos", "promo_achadinhos_viral"]:
-        prompt = "Recomende nosso canal Central de Achadinhos VIP.
+        prompt = "Recomende nosso canal Central de Achadinhos VIP. Diga que lá saem ofertas e promoções de produtos garimpados todos os dias, com o link pronto para comprar. Fale como quem indica um achado, não como anúncio. Máximo 200 caracteres, use emojis, sem links."
 
     ## ✅ NOVOS PROMPTS DA EXPANSÃO DO PÚBLICO
     elif tipo in ["promo_publico", "promo_publico_viral"]:
@@ -11286,7 +11286,7 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
     await state.update_data(menu_origem="principal") # ✅ Adicione esta linha exata aqui
     await state.set_state(ConfigRotina.menu_principal)
 
-@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Promo Público 🗣️", "Editar Convite Afiliados 🚀", "Editar Convite do Grupo 🔗", "Editar Prompt GEM 🤖\u200b", "Editar Promo Público 👥", "Editar Convite (Próprio) 🔗", "Editar Promo Principal 🌟", "Editar Promo Viral 💥", "Editar Achadinhos 🛍️"]))
+@dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Promo Público 🗣️", "Editar Convite Afiliados 🚀", "Editar Convite do Grupo 🔗", "Editar Prompt GEM 🤖\u200b", "Editar Promo Público 👥", "Editar Convite (Próprio) 🔗", "Editar Promo Principal 🌟", "Editar Promo Viral 💥", "Editar Achadinhos 🛍️", "Editar Achadinhos 🛒"]))
 async def pedir_horario_rotina(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info(f"✏️ Iniciando edição da rotina: {message.text}")
     if EXIBIR_LOGS: logger.info(f"✏️ Processando edição da rotina selecionada: {message.text}")
@@ -11305,7 +11305,8 @@ async def pedir_horario_rotina(message: types.Message, state: FSMContext):
         "Editar Convite (Próprio) 🔗": "link_grupo_publico",
         "Editar Promo Principal 🌟": "promo_principal_publico",
         "Editar Promo Viral 💥": "promo_viral_publico",
-        "Editar Achadinhos 🛍️": "promo_achadinhos"
+        "Editar Achadinhos 🛍️": "promo_achadinhos",
+        "Editar Achadinhos 🛒": "promo_achadinhos_viral"
     }
     tipo = tipo_map[message.text]
     if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Botão mapeado internamente para a chave '{tipo}'.")
