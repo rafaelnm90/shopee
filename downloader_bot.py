@@ -202,7 +202,8 @@ async def convidar_para_comunidade(message, mencao, total_downloads):
             f"💡 {mencao}, você também pode <b>publicar os seus vídeos</b> aqui no grupo.\n\n"
             f"Seu nome aparece na legenda para todo mundo ver, e a galera aproveita "
             f"o achado que você trouxe.\n\n"
-            f"👉 <a href='{link}'>Poste seus Vídeos Aqui</a>",
+            f"👉 <b><a href='{link}'>Toque aqui para enviar o seu vídeo</a></b>\n"
+            f"<i>Abre o tópico «Poste seus Vídeos Aqui», aqui mesmo no grupo.</i>",
             parse_mode="HTML", disable_web_page_preview=True
         )
         registrar_mensagem(convite.message_id)
