@@ -2124,7 +2124,7 @@ async def disparar_mensagem(tipo, forcar=False):
     dados_rotina = ler_config_rotina()
     
     # 🎯 MAPEAMENTO DE DESTINOS
-    rotinas_virais = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral"]
+    rotinas_virais = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral", "promo_achadinhos_viral"]
     rotinas_publico = ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico"]
     
     is_viral = tipo in rotinas_virais
@@ -2247,8 +2247,8 @@ async def disparar_mensagem(tipo, forcar=False):
     elif tipo == "promo_principal":
         prompt = "Recomende um canal parceiro VIP (Acervo Afiliados). Diga que eles liberam conteúdos premium e editados a dedo. Seja humano. Máximo 150 caracteres. Sem links."
     
-    elif tipo == "promo_achadinhos":
-        prompt = "Recomende nosso canal Central de Achadinhos VIP. Diga que lá saem ofertas e promoções de produtos garimpados todos os dias, com o link pronto para comprar. Fale como quem indica um achado, não como anúncio. Máximo 200 caracteres, use emojis, sem links."
+    elif tipo in ["promo_achadinhos", "promo_achadinhos_viral"]:
+        prompt = "Recomende nosso canal Central de Achadinhos VIP.
 
     ## ✅ NOVOS PROMPTS DA EXPANSÃO DO PÚBLICO
     elif tipo in ["promo_publico", "promo_publico_viral"]:
@@ -2337,7 +2337,7 @@ async def disparar_mensagem(tipo, forcar=False):
             elif tipo in ["promo_publico", "promo_publico_viral", "link_grupo_publico"]:
                 msg_pub = await bot.send_message(chat_destino, f"🔥 <b>Venha participar do nosso Grupo de Ofertas:</b>\n{LINK_GRUPO_PUBLICO}", parse_mode="HTML", message_thread_id=thread_param) 
                 registrar_lixeira(msg_pub.message_id, chat_destino)
-            elif tipo == "promo_achadinhos":
+            elif tipo in ["promo_achadinhos", "promo_achadinhos_viral"]:
                 msg_ach = await bot.send_message(chat_destino, f"🛍️ <b>Acesse a Central de Achadinhos VIP:</b>\n{LINK_CANAL_ACHADINHOS}", parse_mode="HTML", message_thread_id=thread_param)
                 registrar_lixeira(msg_ach.message_id, chat_destino)
                 
@@ -2370,6 +2370,7 @@ def ler_config_rotina():
         "divulgar_gem_viral": {"inicio": 8, "fim": 22, "frequencia": 1},
         "link_grupo_viral": {"inicio": 9, "fim": 21, "frequencia": 2},
         "promo_publico_viral": {"inicio": 10, "fim": 20, "frequencia": 1},
+        "promo_achadinhos_viral": {"inicio": 10, "fim": 20, "frequencia": 1},
 
         # Rotinas do Grupo Público
         "link_grupo_publico": {"inicio": 9, "fim": 21, "frequencia": 2},
@@ -2400,7 +2401,7 @@ def salvar_config_rotina(dados):
     salvar_config_bd("config_rotina", dados)
 
 # 🎯 CADA ROBÔ TEM A SUA PRÓPRIA LISTA. Nada de misturar.
-ROTINAS_VIRAIS = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral"]
+ROTINAS_VIRAIS = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral", "promo_achadinhos_viral"]
 ROTINAS_PUBLICO = ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico"]
 
 def descobrir_escopo_job(job_id):
@@ -7263,6 +7264,18 @@ async def manual_promo_publico_viral(message: types.Message):
     await disparar_mensagem("promo_publico_viral", forcar=True)
     await message.answer("Divulgação enviada ao canal viral com sucesso! ✅")
 
+@dp.message(F.text == "Disparar Achadinhos 🛒", StateFilter("*"))
+async def manual_promo_achadinhos_viral(message: types.Message):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🛒 Comando recebido: Forçando disparo de Achadinhos (Viral).")
+    dados_rotina = ler_config_rotina()
+    if dados_rotina.get("pausado_viral", False):
+        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Viral em pausa.")
+        return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Viral estão <b>PAUSADAS</b>.", parse_mode="HTML")
+    await message.answer("Gerando e enviando divulgação da Central de Achadinhos para o canal viral... ⏳")
+    await disparar_mensagem("promo_achadinhos_viral", forcar=True)
+    await message.answer("Divulgação enviada ao canal viral com sucesso! ✅")
+
 # --- Disparos Manuais (Grupo Público) ---
 @dp.message(F.text == "Disparar Promo Público 🗣️", StateFilter("*"))
 async def manual_promo_publico(message: types.Message):
@@ -7707,7 +7720,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         # e não ao menu raiz, preservando o contexto de edição.
         if estado_atual == "ConfigRotina:aguardando_novo_horario":
             if not menu_orig:
-                if tipo_edicao in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral"]:
+                if tipo_edicao in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral", "promo_achadinhos_viral"]:
                     menu_orig = "espiao"
                 elif tipo_edicao in ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico"]:
                     menu_orig = "publico"
@@ -7718,7 +7731,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
             await submenu_editar_rotinas(message, state)
             return
 
-        if menu_orig == "espiao" or tipo_edicao in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral"]:
+        if menu_orig == "espiao" or tipo_edicao in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral", "promo_achadinhos_viral"]:
             await gerenciar_rotina_espiao(message, state)
         elif menu_orig == "publico" or tipo_edicao in ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico"]:
             await gerenciar_rotina_publico(message, state)
@@ -10186,25 +10199,25 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     config_promo = dados.get("promo_principal", {"inicio": 10, "fim": 20, "frequencia": 1})
     
     if EXIBIR_LOGS: logger.info("⚙️ Acessando painel de Rotinas do Espião...")
-    texto = "⏰ <b>Rotina do Espião (Canal Viral)</b>\n\n"
-    
-    texto += f"🔹 <b>Convite do Grupo 🔗 (Para o próprio grupo)</b>\n"
-    texto += f"   Janela de Sorteio: {config_convite['inicio']}h às {config_convite['fim']}h\n"
-    texto += f"   Disparos por Dia: {config_convite['frequencia']}x\n\n"
-
-    texto += f"🔹 <b>Prompt GEM 🤖 (Para o próprio grupo)</b>\n"
-    texto += f"   Janela de Sorteio: {config_gem['inicio']}h às {config_gem['fim']}h\n"
-    texto += f"   Disparos por Dia: {config_gem['frequencia']}x\n\n"
-    
-    texto += f"🔹 <b>Convite do Grupo Afiliados 🛍️ (Para o Canal Afiliados)</b>\n"
-    texto += f"   Janela de Sorteio: {config_promo['inicio']}h às {config_promo['fim']}h\n"
-    texto += f"   Disparos por Dia: {config_promo['frequencia']}x\n\n"
-
-    # Resgata e exibe a rotina do Grupo Público no Canal Viral
     config_pub_viral = dados.get("promo_publico_viral", {"inicio": 10, "fim": 20, "frequencia": 1})
-    texto += f"🔹 <b>Promoção do Grupo Público 👥 (Para o Canal Viral)</b>\n"
-    texto += f"   Janela de Sorteio: {config_pub_viral['inicio']}h às {config_pub_viral['fim']}h\n"
-    texto += f"   Disparos por Dia: {config_pub_viral['frequencia']}x\n\n"
+    config_ach_viral = dados.get("promo_achadinhos_viral", {"inicio": 10, "fim": 20, "frequencia": 1})
+
+    texto = "⏰ <b>Rotina do Espião (Canal Viral)</b>\n\n"
+    texto += "<i>Todas as mensagens abaixo são publicadas NO Canal Viral. O que muda é o que cada uma divulga.</i>\n\n"
+
+    linhas_rotinas = [
+        ("Convite do Grupo 🔗", "o próprio Canal Viral", config_convite),
+        ("Prompt GEM 🤖", "o prompt do Gemini", config_gem),
+        ("Convite do Grupo Afiliados 🛍️", "o Canal Afiliados", config_promo),
+        ("Promoção do Grupo Público 👥", "o Grupo Público", config_pub_viral),
+        ("Achadinhos VIP 🛒", "a Central de Achadinhos", config_ach_viral),
+    ]
+
+    for nome_rotina, o_que_divulga, cfg in linhas_rotinas:
+        texto += f"🔹 <b>{nome_rotina}</b>\n"
+        texto += f"   Divulga: {o_que_divulga}\n"
+        texto += f"   Janela de Sorteio: {cfg['inicio']}h às {cfg['fim']}h\n"
+        texto += f"   Disparos por Dia: {cfg['frequencia']}x\n\n"
     
     texto += "Selecione o que deseja editar abaixo:"
     
@@ -10235,7 +10248,7 @@ async def submenu_editar_rotinas(message: types.Message, state: FSMContext):
             keyboard=[
                 [KeyboardButton(text="Editar Convite do Grupo 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖\u200b")],
                 [KeyboardButton(text="Editar Convite Afiliados 🚀"), KeyboardButton(text="Editar Promo Público 👥")],
-                [KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
+                [KeyboardButton(text="Editar Achadinhos 🛒"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
             ],
             resize_keyboard=True,
             is_persistent=True
@@ -10280,7 +10293,7 @@ async def submenu_disparos_manuais(message: types.Message, state: FSMContext):
             keyboard=[
                 [KeyboardButton(text="Disparar Convite Afiliados 🚀"), KeyboardButton(text="Disparar Convite do Grupo 🔗\u200b")],
                 [KeyboardButton(text="Disparar Prompt GEM 🤖\u200b"), KeyboardButton(text="Disparar Promo Público 👥")],
-                [KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
+                [KeyboardButton(text="Disparar Achadinhos 🛒"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
             ],
             resize_keyboard=True,
             is_persistent=True
