@@ -5289,6 +5289,139 @@ async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_l
     return random.choice(ABERTURAS_ACHADINHO)
 
 
+def sortear_nichos_organico(nichos, config):
+    """
+    🎲 Escolhe quais nichos entram no ciclo SEM rodízio de posição fixa.
+
+    Cada nicho ganha um peso. Quem publicou há pouco tem o peso reduzido, mas
+    NUNCA zerado: repetir o mesmo tópico duas vezes seguidas é justamente o que
+    uma pessoa faz. A memória dos últimos sorteados fica salva no config, então
+    o comportamento sobrevive a restart do serviço.
+
+    O 'nichos_por_ciclo' do painel continua valendo — mas como MÉDIA, não como
+    número cravado: a quantidade oscila em torno dele.
+    """
+    memoria = [str(n) for n in (config.get("memoria_nichos") or [])]
+    base = max(1, min(int(config.get("nichos_por_ciclo", 2)), len(nichos)))
+
+    # Quantidade do ciclo: oscila entre base-1, base e base+1.
+    opcoes_qtd, pesos_qtd = [], []
+    for cand, peso in ((base - 1, 0.30), (base, 0.50), (base + 1, 0.20)):
+        if 1 <= cand <= len(nichos) + 2:
+            opcoes_qtd.append(cand)
+            pesos_qtd.append(peso)
+    quantidade = random.choices(opcoes_qtd, weights=pesos_qtd, k=1)[0] if opcoes_qtd else base
+
+    escolhidos = []
+    for _ in range(quantidade):
+        ultimas = {}
+        for i, m in enumerate(memoria):
+            ultimas[m] = i          # guarda a posição MAIS RECENTE de cada nome
+
+        pesos = []
+        for n in nichos:
+            nome = str(n.get("nome", "?"))
+            pos = ultimas.get(nome)
+            distancia = 99 if pos is None else (len(memoria) - pos)
+            # Acabou de sair -> peso 2.5 | faz tempo -> peso 10 (teto)
+            pesos.append(max(1.0, min(10.0, float(distancia) * 2.5)))
+
+        sorteado = random.choices(nichos, weights=pesos, k=1)[0]
+        escolhidos.append(sorteado)
+        memoria.append(str(sorteado.get("nome", "?")))
+
+    config["memoria_nichos"] = memoria[-6:]     # memória curta: 6 últimos
+    config.pop("posicao_rodizio", None)         # aposenta o contador do rodízio
+    salvar_achadinhos_config(config)
+    return escolhidos
+
+
+def sortear_intervalo_garimpo():
+    """
+    ⏱️ Sorteia quantos minutos faltam para o próximo garimpo.
+
+    Três perfis com peso — é isso que quebra a cadência de relógio:
+      • rajada (30%): 12-40 min    -> duas ofertas quase juntas
+      • normal (45%): 55-160 min   -> ritmo de quem vai olhando ao longo do dia
+      • sumiço (25%): 190-420 min  -> ninguém fica postando o dia inteiro
+
+    A média cai perto das 2h de hoje, então o volume diário não dispara.
+    """
+    perfil = random.choices(("rajada", "normal", "sumico"),
+                            weights=(0.30, 0.45, 0.25), k=1)[0]
+    if perfil == "rajada":
+        return perfil, random.randint(12, 40)
+    if perfil == "normal":
+        return perfil, random.randint(55, 160)
+    return perfil, random.randint(190, 420)
+
+
+def agendar_proximo_garimpo(primeiro=False):
+    """
+    📌 Marca o PRÓXIMO garimpo como job 'date' único e descartável.
+    Cada execução chama esta função de novo — é o que substitui o
+    'interval, hours=2', que cravava o mesmo minuto o dia inteiro.
+
+    Se o horário sorteado cair fora da janela do painel, ele NÃO é empurrado
+    para o minuto exato da abertura (isso viraria outro carimbo diário):
+    cai em algum ponto da primeira hora e meia depois que a janela abre.
+    """
+    try:
+        cfg = ler_achadinhos_config()
+        hora_inicio = int(cfg.get("inicio", 8))
+        hora_fim = int(cfg.get("fim", 22))
+        agora = datetime.now(fuso_horario)
+
+        if primeiro:
+            # Na subida do bot não dispara na hora cheia: espera de 3 a 25 min.
+            perfil, minutos = "boot", random.randint(3, 25)
+        else:
+            perfil, minutos = sortear_intervalo_garimpo()
+
+        alvo = agora + timedelta(minutes=minutos)
+
+        # Caiu fora da janela? Reabre no próximo expediente, em ponto aleatório.
+        if hora_fim > hora_inicio and not (hora_inicio <= alvo.hour < hora_fim):
+            base = alvo if alvo.hour < hora_inicio else (alvo + timedelta(days=1))
+            alvo = base.replace(hour=hora_inicio, minute=0, second=0, microsecond=0) \
+                   + timedelta(minutes=random.randint(0, 90))
+
+        if alvo <= agora:
+            alvo = agora + timedelta(minutes=random.randint(3, 12))
+
+        alvo = alvo.replace(second=random.randint(0, 59), microsecond=0)
+
+        scheduler.add_job(ciclo_garimpo_automatico, 'date', run_date=alvo,
+                          id='job_garimpo_achadinhos', replace_existing=True)
+
+        if EXIBIR_LOGS:
+            logger.info(f"🎲 [Achadinhos] Perfil '{perfil}': próximo garimpo em "
+                        f"{alvo.strftime('%d/%m às %H:%M:%S')} (daqui a {minutos} min).")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Falha ao reagendar o garimpo: {e}")
+        # 🛡️ Rede de segurança: sem isto um erro aqui MATA o motor para sempre.
+        try:
+            resgate = datetime.now(fuso_horario) + timedelta(minutes=random.randint(45, 120))
+            scheduler.add_job(ciclo_garimpo_automatico, 'date', run_date=resgate,
+                              id='job_garimpo_achadinhos', replace_existing=True)
+        except Exception:
+            pass
+
+
+async def ciclo_garimpo_automatico():
+    """
+    🔁 Casca que o agendador chama. Roda o garimpo e, aconteça o que acontecer,
+    marca o próximo. O 'finally' é obrigatório: se o ciclo estourar no meio e
+    ninguém reagendar, o motor morre calado até o próximo restart.
+    """
+    try:
+        await processar_garimpo_automatico()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Ciclo falhou: {e}")
+    finally:
+        agendar_proximo_garimpo()
+
+
 async def processar_garimpo_automatico(forcado=False):
     # ⏰ Janela lida do painel. Post de madrugada some no feed quando o pessoal
     # acorda e ainda queima um produto inédito da memória permanente.
@@ -5311,19 +5444,14 @@ async def processar_garimpo_automatico(forcado=False):
         if EXIBIR_LOGS: logger.warning("⚠️ [Achadinhos] O radar está vazio. Adicione nichos ao arquivo achadinhos_config.json.")
         return
 
-    # 🔄 RODÍZIO: publicar em todos os nichos a cada ciclo despeja tudo de uma vez
-    # no grupo. Aqui só uma fatia é atendida por vez, e a posição fica salva para
-    # o próximo ciclo continuar de onde parou — inclusive depois de um restart.
-    por_ciclo = max(1, min(int(config.get("nichos_por_ciclo", 2)), len(nichos)))
-    posicao = int(config.get("posicao_rodizio", 0)) % len(nichos)
-    nichos_da_vez = [nichos[(posicao + i) % len(nichos)] for i in range(por_ciclo)]
-
-    config["posicao_rodizio"] = (posicao + por_ciclo) % len(nichos)
-    salvar_achadinhos_config(config)
+    # 🎲 SORTEIO ORGÂNICO: o rodízio de posição fixa saiu. Agora cada ciclo sorteia
+    # quais nichos entram, com peso — dá para repetir o mesmo tópico duas vezes
+    # seguidas, exatamente como faz quem acha duas ofertas boas da mesma categoria.
+    nichos_da_vez = sortear_nichos_organico(nichos, config)
 
     if EXIBIR_LOGS:
         nomes = ", ".join(n.get("nome", "?") for n in nichos_da_vez)
-        logger.info(f"🔄 [Achadinhos] Rodízio: atendendo {por_ciclo} de {len(nichos)} nicho(s) → {nomes}")
+        logger.info(f"🎲 [Achadinhos] Sorteio: {len(nichos_da_vez)} de {len(nichos)} nicho(s) → {nomes}")
         logger.info(f"🧠 [Achadinhos] Memória permanente com {total_achadinhos_enviados()} produtos já publicados.")
 
     for nicho in nichos_da_vez:
@@ -5400,8 +5528,14 @@ async def processar_garimpo_automatico(forcado=False):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Falha estrutural ao tratar mídia física do produto: {e}")
             
-        # 🛡️ Trava de Segurança para Escala (Previne banimento do Telegram e limite do Gemini)
-        tempo_espera = random.randint(15, 35)
+        # 🎲 Espaço entre uma oferta e a seguinte DENTRO do mesmo ciclo.
+        # Fixo em 15-35s todo santo dia é assinatura de script: as duas postagens
+        # sempre caíam no mesmo minuto. Agora às vezes emendam (achou duas boas),
+        # às vezes há uma pausa de minutos no meio.
+        if random.random() < 0.45:
+            tempo_espera = random.randint(25, 90)      # emendou as duas
+        else:
+            tempo_espera = random.randint(150, 600)    # deu uma sumida no meio
         if EXIBIR_LOGS: logger.info(f"⏳ Diluição de Tráfego: Aguardando {tempo_espera}s antes de processar o próximo nicho...")
         await asyncio.sleep(tempo_espera)
 
@@ -9011,7 +9145,8 @@ async def confirmar_janela_achadinhos(message: types.Message, state: FSMContext)
                                  reply_markup=teclado_janela_achadinhos)
             return
 
-    # 📊 O garimpo roda a cada 2h, então a janela define quantos ciclos cabem no dia.
+    # 📊 O intervalo agora é sorteado (rajada/normal/sumiço) e fica em ~2h na média,
+    # então a conta vira uma FAIXA, não um número exato.
     ciclos = max(1, (fim - inicio) // 2)
     qtd_nichos = len(ler_achadinhos_config().get("nichos", []))
     total_dia = ciclos * qtd_nichos
@@ -9026,8 +9161,9 @@ async def confirmar_janela_achadinhos(message: types.Message, state: FSMContext)
     )
     await message.answer(
         f"Confirmar a janela de garimpo <b>{texto_exibicao}</b>?\n\n"
-        f"<i>Dará cerca de {ciclos} ciclo(s) por dia. Com {qtd_nichos} nicho(s) "
-        f"cadastrado(s), são aproximadamente {total_dia} publicações diárias no grupo.</i>",
+        f"<i>Dará algo entre {max(1, ciclos - 2)} e {ciclos + 2} ciclo(s) por dia — o "
+        f"intervalo é sorteado, não é fixo. Com {qtd_nichos} nicho(s) cadastrado(s), "
+        f"fica em torno de {total_dia} publicações diárias no grupo.</i>",
         parse_mode="HTML",
         reply_markup=teclado_conf
     )
@@ -9062,8 +9198,9 @@ async def pedir_nichos_ciclo(message: types.Message, state: FSMContext):
 
     await message.answer(
         f"Quantos nichos o garimpo atende <b>por ciclo</b>?\n\n"
-        f"<i>Ele roda a cada 2h e vai alternando entre os nichos, então nem todos "
-        f"publicam na mesma rodada. Quanto menor o número, menos posts por vez no grupo.</i>\n\n"
+        f"<i>Este valor é a MÉDIA: cada rodada sorteia um pouco mais ou um pouco "
+        f"menos, e o nicho é escolhido por sorteio (pode repetir). Quanto menor o "
+        f"número, menos posts por vez no grupo.</i>\n\n"
         f"Digite um número de <b>1</b> a <b>{max(1, total)}</b>.\n"
         f"<i>Atualmente: {atual} de {total} nicho(s) por ciclo.</i>",
         parse_mode="HTML", reply_markup=teclado_cancelar
@@ -14083,8 +14220,10 @@ async def main():
     # ✅ Novo: Check-up diário de permissões em grupos roda todos os dias às 11:00
     scheduler.add_job(checkup_diario_grupos, 'cron', hour=11, minute=0, timezone=FUSO_STR)
 
-    # ✅ Novo: Motor Autônomo de Garimpo de Achadinhos (Gatilho de 2 em 2 horas)
-    scheduler.add_job(processar_garimpo_automatico, 'interval', hours=2, timezone=FUSO_STR)
+    # 🎲 Motor Autônomo de Garimpo: o gatilho fixo de 2 em 2 horas saiu de cena.
+    # Cada ciclo agenda o seguinte com intervalo sorteado (rajada/normal/sumiço),
+    # então não existe mais um minuto cravado se repetindo o dia inteiro.
+    agendar_proximo_garimpo(primeiro=True)
     
     # ✅ WATCHDOG: O Fiscal Híbrido bate a cada 1 minuto apenas para auditar a memória
     scheduler.add_job(motor_fila_minuto, 'interval', minutes=1, timezone=FUSO_STR)
