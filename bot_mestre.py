@@ -7575,6 +7575,58 @@ async def processar_disparo_publico(message: types.Message, state: FSMContext):
     await submenu_disparos_manuais(message, state)
 
 # ✅ NOVO: Gestão dos alvos (tópicos) que recebem as rotinas do Grupo Público
+def extrair_id_topico(entrada, grupo_id_str=""):
+    """
+    🔗 Converte uma entrada do admin no ID numérico do tópico.
+
+    Aceita:
+      • https://t.me/c/1234567890/6        -> "6"  (link do tópico, grupo privado)
+      • https://t.me/c/1234567890/6/987    -> "6"  (link de MENSAGEM dentro do tópico)
+      • https://t.me/meugrupo/6            -> "6"  (grupo público)
+      • t.me/c/1234567890/6                -> "6"  (sem https)
+      • -1001234567890_6                   -> "6"  (formato exibido no painel)
+      • 6                                  -> "6"  (ID cru, retrocompatibilidade)
+
+    Devolve (topico, erro): só um dos dois vem preenchido.
+    """
+    bruto = str(entrada or "").strip()
+    if not bruto:
+        return None, None
+
+    if "t.me/" in bruto.lower():
+        # 🎯 Forma /c/<id_interno>/<topico>[/<mensagem>]. O terceiro número, quando
+        # existe, é o ID da MENSAGEM — pegar o último segmento (o que o código
+        # antigo fazia) gravava o alvo errado sem avisar ninguém.
+        m = re.search(r"t\.me/c/(\d+)/(\d+)(?:/(\d+))?", bruto, re.IGNORECASE)
+        if m:
+            interno, topico = m.group(1), m.group(2)
+            esperado = str(grupo_id_str or "").strip().lstrip("-")
+            if esperado.startswith("100"):
+                esperado = esperado[3:]
+            if esperado and esperado.isdigit() and interno != esperado:
+                return None, f"<code>{bruto}</code> é de outro grupo (id {interno})"
+            return topico, None
+
+        # 🎯 Forma /<usuario_do_grupo>/<topico>[/<mensagem>], para grupo público.
+        m = re.search(r"t\.me/([A-Za-z0-9_]+)/(\d+)(?:/(\d+))?", bruto, re.IGNORECASE)
+        if m and m.group(1).lower() != "c":
+            return m.group(2), None
+
+        return None, f"não achei o número do tópico em <code>{bruto}</code>"
+
+    # 🔢 Entradas sem link continuam funcionando (painel usa 'grupo_topico').
+    if "_" in bruto:
+        cauda = bruto.split("_")[-1]
+        return (cauda, None) if cauda.isdigit() else (None, f"<code>{bruto}</code> não terminou em número")
+    if ":" in bruto:
+        cauda = bruto.split(":")[-1]
+        return (cauda, None) if cauda.isdigit() else (None, f"<code>{bruto}</code> não terminou em número")
+    if bruto.isdigit():
+        return bruto, None
+
+    return None, f"<code>{bruto}</code> não é um link nem um número"
+
+
 @dp.message(ConfigRotina.menu_principal, F.text == "Gerenciar Alvos de Postagem 🎯")
 async def pedir_alvos_rotina_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
@@ -7595,15 +7647,28 @@ async def pedir_alvos_rotina_publico(message: types.Message, state: FSMContext):
     else:
         atual = "   ✅ <i>Chat Geral (Padrão)</i>"
 
+    # 🔗 Monta os exemplos com o ID interno do PRÓPRIO grupo, para o admin poder
+    # copiar e só trocar o número do tópico no fim.
+    interno_ex = grupo_id_str.lstrip("-")
+    if interno_ex.startswith("100"):
+        interno_ex = interno_ex[3:]
+    if not interno_ex.isdigit():
+        interno_ex = "1234567890"
+    link_ex_um = f"https://t.me/c/{interno_ex}/6"
+    link_ex_dois = f"https://t.me/c/{interno_ex}/1"
+
     texto = (
         "🎯 <b>Gerenciar Alvos de Postagem</b>\n\n"
         "Aqui você define <b>em quais tópicos do Grupo Público</b> as mensagens automáticas de divulgação "
         "serão publicadas (Convite ao Grupo, Promo Canal Principal e Promo Canal Viral).\n\n"
         f"📢 <b>Ativos hoje:</b>\n{atual}\n\n"
-        "Envie a <b>nova lista</b> de tópicos ativos (ela substitui a atual):\n"
-        "• Apenas um: <code>6</code>\n"
-        "• Vários: <code>1, 6</code>\n"
-        "• O link do tópico no Telegram também funciona\n\n"
+        "Envie a <b>nova lista</b> de alvos (ela substitui a atual).\n"
+        "Abra o tópico no Telegram, toque no nome dele e escolha <b>Copiar Link</b>:\n\n"
+        "• <b>Um alvo:</b>\n"
+        f"<code>{link_ex_um}</code>\n\n"
+        "• <b>Vários alvos</b> — separe por vírgula:\n"
+        f"<code>{link_ex_um}, {link_ex_dois}</code>\n\n"
+        "<i>Link de mensagem dentro do tópico também serve: o bot descarta o número da mensagem sozinho.</i>\n\n"
         "Para desativar todos e publicar somente no Chat Geral, digite <b>0</b>."
     )
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar)
@@ -7621,23 +7686,37 @@ async def confirmar_alvos_rotina_publico(message: types.Message, state: FSMConte
         return
 
     texto_usuario = (message.text or "").strip()
+    grupo_id_str = str(ler_submissao_config().get("grupo_id") or "")
 
     if texto_usuario == "0":
         topicos_finais = []
     else:
         topicos_finais = []
-        for entrada in [t.strip() for t in texto_usuario.split(",")]:
-            if not entrada: continue
-            if "t.me/" in entrada:
-                partes = entrada.split("/")
-                if len(partes) >= 5: topicos_finais.append(partes[-1])
-            elif "_" in entrada: topicos_finais.append(entrada.split("_")[-1])
-            elif ":" in entrada: topicos_finais.append(entrada.split(":")[-1])
-            elif entrada.isdigit():
-                if entrada != "0": topicos_finais.append(entrada)
+        problemas = []
+        for entrada in texto_usuario.split(","):
+            topico, erro = extrair_id_topico(entrada, grupo_id_str)
+            if erro:
+                problemas.append(erro)
+            elif topico and topico != "0" and topico not in topicos_finais:
+                # 🔁 Duplicata silenciosa fazia a rotina postar duas vezes no mesmo tópico.
+                topicos_finais.append(topico)
+
+        if problemas:
+            await message.answer(
+                "⚠️ <b>Não consegui ler alguns alvos:</b>\n• " + "\n• ".join(problemas) +
+                "\n\nCorrija e envie a lista de novo, ou clique em Cancelar ❌.",
+                parse_mode="HTML", reply_markup=teclado_cancelar
+            )
+            return
 
         if not topicos_finais:
-            await message.answer("⚠️ Não identifiquei nenhum tópico válido. Envie os números separados por vírgula (Ex: <code>1, 6</code>) ou <b>0</b> para o Chat Geral.", parse_mode="HTML", reply_markup=teclado_cancelar)
+            await message.answer(
+                "⚠️ Não identifiquei nenhum tópico válido.\n\n"
+                "Cole o <b>link do tópico</b> (toque no nome do tópico → Copiar Link), "
+                "separando por vírgula se forem vários, ou envie <b>0</b> para publicar "
+                "somente no Chat Geral.",
+                parse_mode="HTML", reply_markup=teclado_cancelar
+            )
             return
 
     await state.update_data(novos_alvos_rotina=topicos_finais)
@@ -11596,7 +11675,20 @@ async def salvar_horario_rotina(message: types.Message, state: FSMContext):
     # ✅ Volta para o submenu "Editar Rotinas", permitindo editar outra rotina em seguida
     await state.update_data(menu_origem=origem)
     await state.set_state(ConfigRotina.menu_principal)
-    await submenu_editar_rotinas(message, state)
+
+    # 📋 GRUPO PÚBLICO: em vez do submenu de edição, sobe o painel COMPLETO de
+    # rotinas logo abaixo da confirmação. O gerenciar_rotina_publico relê o
+    # ler_config_rotina() do zero, então o quadro já sai com o valor recém-salvo.
+    # Mesma ação do botão "Voltar ao Menu Rotinas", só que automática.
+    if origem == "publico":
+        try:
+            await gerenciar_rotina_publico(message, state)
+        except NameError:
+            # 🛡️ Rede de segurança idêntica à do voltar_menu_rotinas_dinamico:
+            # se a função sumir num refactor, o fluxo antigo assume no lugar.
+            await submenu_editar_rotinas(message, state)
+    else:
+        await submenu_editar_rotinas(message, state)
 
 # --- SISTEMA DE GERENCIAMENTO DE FILA (INTERATIVO) ---
 class GerenciarFilaFluxo(StatesGroup):
