@@ -426,6 +426,26 @@ async def expandir_encurtador(url):
                 if "/pin/" in final:
                     if EXIBIR_LOGS: logger.info(f"🔗 pin.it expandido para {final}")
                     return final
+
+                # 🔍 O Pinterest às vezes devolve uma página intersticial em JS em
+                # vez de um redirect 30x. Nesse caso resposta.url continua sendo o
+                # pin.it, mas o link real está no <link rel="canonical"> do corpo.
+                # Antes esta função caía no 'return url' SEM logar nada, e o yt-dlp
+                # recebia o link curto e morria sem ninguém saber o porquê.
+                try:
+                    corpo = await resposta.text()
+                except Exception:
+                    corpo = ""
+
+                achado = re.search(r'https?://[a-z0-9.]*pinterest\.[a-z.]+/pin/\d+', corpo, re.IGNORECASE)
+                if achado:
+                    if EXIBIR_LOGS: logger.info(f"🔗 pin.it expandido pelo HTML para {achado.group(0)}")
+                    return achado.group(0)
+
+                if EXIBIR_LOGS:
+                    logger.warning(f"⚠️ pin.it NÃO expandiu: parou em {final} "
+                                   f"(HTTP {resposta.status}, corpo com {len(corpo)} bytes). "
+                                   f"Provável bloqueio por IP ou limite de requisições.")
     except Exception as e:
         if EXIBIR_LOGS: logger.warning(f"⚠️ Não consegui expandir o pin.it: {e}")
     return url
@@ -756,6 +776,10 @@ async def _baixar_video_uma_vez(url, pasta):
                 return None, "o vídeo é privado ou exige login"
             if "Unsupported URL" in msg:
                 return None, "este link não é suportado"
+            # 🚦 Limite de requisições: é temporário, mas 3s de espera não resolve.
+            if any(t in msg.lower() for t in ("http error 429", "too many requests",
+                                              "rate-limit", "rate limit")):
+                return None, "o site limitou os pedidos por excesso de acessos"
             # 🔍 Sem isso o motivo real some e não dá para investigar depois.
             if EXIBIR_LOGS:
                 logger.error(f"❌ yt-dlp saiu com código {proc.returncode} em {url}\n{msg.strip()[-600:]}")
@@ -783,6 +807,7 @@ ERROS_QUE_MERECEM_NOVA_TENTATIVA = (
     "não consegui acessar esse vídeo",
     "o download não gerou arquivo",
     "erro inesperado ao baixar",
+    "o site limitou os pedidos por excesso de acessos",
 )
 
 async def baixar_video(url, pasta, tentativas=3):
@@ -800,12 +825,14 @@ async def baixar_video(url, pasta, tentativas=3):
             return None, erro
 
         if n < tentativas:
+            # 🚦 Bloqueio por excesso de acesso não passa em 3s. Espera bem mais.
+            espera = (30 * n) if "limitou os pedidos" in erro else (3 * n)
             if EXIBIR_LOGS:
-                logger.warning(f"🔁 Tentativa {n}/{tentativas} falhou ({erro}). Repetindo em {3 * n}s...")
+                logger.warning(f"🔁 Tentativa {n}/{tentativas} falhou ({erro}). Repetindo em {espera}s...")
             for lixo in os.listdir(pasta):
                 try: os.remove(os.path.join(pasta, lixo))
                 except Exception: pass
-            await asyncio.sleep(3 * n)
+            await asyncio.sleep(espera)
 
     return None, ultimo_erro
 
@@ -929,13 +956,40 @@ async def receber_link(message: types.Message):
 
     # 1️⃣ Não é link reconhecido: orienta e some
     if not url:
-        aviso = await message.answer(
-            f"👋 {mencao}, cole aqui o <b>link do vídeo</b> que você quer baixar.\n\n"
-            "Aceito por enquanto:\n"
-            "🎵 TikTok  ·  📸 Instagram  ·  📌 Pinterest  ·  🛒 Shopee",
-            parse_mode="HTML"
-        )
-        await asyncio.sleep(20)
+        # 📎 Arquivo no lugar do link é um caso diferente de recado solto: a pessoa
+        # acha que mandou "o vídeo" e não entende por que o bot pediu link de novo.
+        tem_midia = bool(message.video or message.photo or message.document
+                         or message.animation or message.video_note or message.sticker)
+
+        if tem_midia:
+            texto_aviso = (
+                f"📎 {mencao}, não consigo trabalhar com o <b>arquivo</b> — preciso do "
+                "<b>link</b> de onde o vídeo está publicado.\n\n"
+                "No app: abra o vídeo → <b>Compartilhar</b> → <b>Copiar link</b> → cole aqui."
+            )
+            segundos = 25
+        else:
+            texto_aviso = (
+                f"👋 {mencao}, cole aqui o <b>link do vídeo</b> que você quer baixar.\n\n"
+                "Aceito por enquanto:\n"
+                "🎵 TikTok  ·  📸 Instagram  ·  📌 Pinterest  ·  🛒 Shopee"
+            )
+            segundos = 20
+
+        aviso = await message.answer(texto_aviso, parse_mode="HTML")
+
+        # 🧹 A mensagem que não é link sai NA HORA. Antes só o aviso do bot sumia e
+        # o arquivo ficava até a faxina de DIAS_RETENCAO_TOPICO passar, empurrando
+        # o painel para cima o tempo todo.
+        try:
+            await message.delete()
+        except Exception as e:
+            if EXIBIR_LOGS:
+                logger.warning(f"⚠️ Não apaguei a mensagem sem link de {message.from_user.id}: {e}. "
+                               f"Confira se o bot tem a permissão 'Apagar mensagens' no grupo.")
+
+        # O aviso fica um pouco mais para a pessoa ler, depois some também.
+        await asyncio.sleep(segundos)
         try: await aviso.delete()
         except Exception: pass
         return
