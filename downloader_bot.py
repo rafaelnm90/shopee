@@ -16,6 +16,7 @@ import shutil
 import tempfile
 import sqlite3
 import hashlib
+import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
@@ -56,6 +57,14 @@ CANAIS_OBRIGATORIOS = [
 ]
 
 LIMITE_DIARIO_DOWNLOADS = 10
+
+# 💡 EMPURRÃOZINHO PARA A COMUNIDADE
+# O tópico do baixador fica DENTRO do Grupo Público, então quem baixa já é
+# membro: basta apontar para o tópico ao lado. O convite sai de vez em quando,
+# logo depois de a pessoa RECEBER um vídeo — o pico de boa vontade dela.
+CONVITE_COMUNIDADE_ATIVO = True
+CONVITE_A_CADA = 5               # a cada N downloads da pessoa. 0 desliga.
+CONVITE_SEGUNDOS_NA_TELA = 40    # depois some sozinho
 
 # 🎁 CORTESIA: os primeiros downloads saem sem exigir os canais. Precisa ficar
 # aqui em cima porque o texto do painel usa este valor antes das funções.
@@ -139,6 +148,72 @@ def downloads_totais(user_id):
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler o total: {e}")
         # Na dúvida, considera cortesia esgotada: melhor exigir a mais do que liberar de graça.
         return DOWNLOADS_CORTESIA
+
+
+def topico_submissao():
+    """
+    💡 Lê o tópico "Poste seus Vídeos Aqui" da config do bot_mestre.
+
+    Os dois bots usam o mesmo banco_dados.db, então não precisa hardcodear o
+    número: se você trocar o tópico no painel, o convite acompanha sozinho.
+    Devolve None quando não achar — e aí o convite simplesmente não sai.
+    """
+    try:
+        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'submissao_config'")
+        linha = cursor.fetchone()
+        conexao.close()
+        if not linha:
+            return None
+        topico = (json.loads(linha[0]) or {}).get("topico_envio")
+        return int(topico) if topico else None
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Não consegui ler o tópico de submissão: {e}")
+        return None
+
+
+async def convidar_para_comunidade(message, mencao, total_downloads):
+    """
+    💡 Convite ocasional para publicar no Vídeos da Comunidade.
+
+    Dispara no melhor instante possível: a pessoa acabou de receber um vídeo de
+    graça. Nunca aparece na primeira entrega — deixa ela usar antes de pedir algo.
+    Some sozinho e é registrado na faxina para não sobrar lixo no tópico.
+    """
+    if not CONVITE_COMUNIDADE_ATIVO or CONVITE_A_CADA <= 0:
+        return
+    if total_downloads < CONVITE_A_CADA or total_downloads % CONVITE_A_CADA != 0:
+        return
+
+    topico = topico_submissao()
+    if not topico:
+        return
+
+    # 🔗 Link direto do tópico. Funciona porque o baixador vive DENTRO do grupo:
+    # quem está lendo isto já é membro e o Telegram abre o tópico na hora.
+    interno = str(GRUPO_DOWNLOADER).lstrip("-")
+    if interno.startswith("100"):
+        interno = interno[3:]
+    link = f"https://t.me/c/{interno}/{topico}"
+
+    try:
+        convite = await message.answer(
+            f"💡 {mencao}, você também pode <b>publicar os seus vídeos</b> aqui no grupo.\n\n"
+            f"Seu nome aparece na legenda para todo mundo ver, e a galera aproveita "
+            f"o achado que você trouxe.\n\n"
+            f"👉 <a href='{link}'>Poste seus Vídeos Aqui</a>",
+            parse_mode="HTML", disable_web_page_preview=True
+        )
+        registrar_mensagem(convite.message_id)
+        if EXIBIR_LOGS:
+            logger.info(f"💡 [Convite Comunidade] Enviado para {message.from_user.id} "
+                        f"(download nº {total_downloads}).")
+        await asyncio.sleep(CONVITE_SEGUNDOS_NA_TELA)
+        try: await convite.delete()
+        except Exception: pass
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Falha ao enviar o convite da comunidade: {e}")
 
 
 def somar_download_total(user_id):
@@ -1089,6 +1164,10 @@ async def receber_link(message: types.Message):
             registrar_download(message.from_user.id)
             somar_download_total(message.from_user.id)
 
+            # 💡 Momento de maior boa vontade: acabou de receber o vídeo.
+            asyncio.create_task(convidar_para_comunidade(
+                message, mencao, downloads_totais(message.from_user.id)))
+
             # 🧹 Mesmo raciocínio da entrega normal: o link original vira ruído.
             asyncio.create_task(apagar_link_original(message))
 
@@ -1150,6 +1229,10 @@ async def receber_link(message: types.Message):
             # ✅ Só conta o que foi entregue: falha não gasta a cota de ninguém
             registrar_download(message.from_user.id)
             somar_download_total(message.from_user.id)
+
+            # 💡 Momento de maior boa vontade: acabou de receber o vídeo.
+            asyncio.create_task(convidar_para_comunidade(
+                message, mencao, downloads_totais(message.from_user.id)))
 
             # 🧹 O link que a pessoa colou já cumpriu o papel: a legenda do vídeo
             # traz ele de volta, bem mais organizado. Só apaga DEPOIS da entrega,
