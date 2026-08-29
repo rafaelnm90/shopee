@@ -2128,7 +2128,7 @@ async def disparar_mensagem(tipo, forcar=False):
     rotinas_publico = ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico", "promo_achadinhos_publico"]
     
     is_viral = tipo in rotinas_virais
-    is_publico = tipo in rotinas_publico
+    is_publico = tipo in rotinas_publico or tipo.startswith("campanha_pub_")
     
     chat_destino = GRUPO_ID
     if is_viral:
@@ -2233,7 +2233,9 @@ async def disparar_mensagem(tipo, forcar=False):
     elif tipo == "link_grupo_viral":
         prompt = f"{contexto_afiliado} Peça aos membros para convidarem amigos para o acervo de virais. Não use links. Use emojis."
     elif tipo.startswith("campanha_"):
-        partes = tipo.split("_")
+        # 🧩 'campanha_pub_0_08.08' vira 'campanha_0_08.08' antes de fatiar:
+        # sem isto o int(partes[1]) recebe a string "pub" e estoura.
+        partes = tipo.replace("campanha_pub_", "campanha_").split("_")
         dias_restantes = int(partes[1])
         data_dupla = partes[2] if len(partes) > 2 else ""
         if dias_restantes == 0: aviso = f"É HOJE o evento de data dupla {data_dupla}!"
@@ -2409,6 +2411,8 @@ ROTINAS_PUBLICO = ["link_grupo_publico", "promo_principal_publico", "promo_viral
 
 def descobrir_escopo_job(job_id):
     """Descobre a QUAL robô o job pertence, comparando o tipo por igualdade exata."""
+    if job_id.startswith('job_campanha_pub_'):
+        return "publico"
     if job_id.startswith('job_campanha_'):
         return "principal"
     tipo = None
@@ -2811,6 +2815,44 @@ def agendar_tarefas_diarias(escopo="todos"):
 
             scheduler.add_job(disparar_mensagem, 'date', run_date=horario_candidato, args=[tipo], id=f"job_rotina_{tipo}_{indice}", replace_existing=True)
             ultimo_tipo_publico = tipo
+
+        # 5.1 CAMPANHAS DE DATA DUPLA DO GRUPO PÚBLICO
+        # Espelha o Canal Principal (3 turnos no dia do evento), mas com namespace
+        # 'job_campanha_pub_' próprio para o escopo não colidir na hora da limpeza.
+        # O roteamento para "Bate Papo Geral" e "Vídeos da Comunidade" é automático:
+        # o disparar_mensagem espalha para todos os topicos_rotina quando is_publico.
+        for i in range(4):
+            data_futura = agora + timedelta(days=i)
+            if data_futura.day == data_futura.month:
+                tipo_alerta_pub = f"campanha_pub_{i}_{data_futura.day:02d}.{data_futura.month:02d}"
+                turnos_pendentes = ["manha", "tarde", "noite"][obter_qtd_disparos(tipo_alerta_pub):]
+                for p in turnos_pendentes:
+                    if p == "manha":
+                        faixa_ini, faixa_fim = 8, 11
+                    elif p == "tarde":
+                        faixa_ini, faixa_fim = 14, 17
+                    else:
+                        faixa_ini, faixa_fim = 18, 21
+
+                    # Tenta encaixar na maior lacuna do turno; se não couber, sorteia.
+                    horario_campanha = encaixar_lacuna_publico(faixa_ini, faixa_fim, folga_min=3)
+                    if not horario_campanha:
+                        horario_campanha = agora.replace(hour=random.randint(faixa_ini, faixa_fim),
+                                                         minute=random.randint(0, 59),
+                                                         second=0, microsecond=0)
+                    if horario_campanha <= agora:
+                        horario_campanha = agora + timedelta(minutes=random.randint(3, 10))
+
+                    horarios_ocupados_publico.append(horario_campanha)
+                    horarios_ocupados_publico.sort()
+
+                    scheduler.add_job(disparar_mensagem, 'date', run_date=horario_campanha,
+                                      args=[tipo_alerta_pub], id=f'job_campanha_pub_{p}',
+                                      replace_existing=True)
+                    if EXIBIR_LOGS:
+                        logger.info(f"🗓️ [Data Dupla Público] Turno '{p}' marcado para "
+                                    f"{horario_campanha.strftime('%d/%m às %H:%M')}.")
+                break
 
 async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int = None):
     # 1. Recupera o estado de navegação atual do utilizador de forma remota
