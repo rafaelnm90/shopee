@@ -527,6 +527,15 @@ teclado_cancelar = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
+# 🔙 Cancelar EXCLUSIVO da tela de alvos do Grupo Público. O texto é próprio
+# de propósito: assim o handler pode usar StateFilter("*") e continuar funcionando
+# mesmo depois de um restart, quando o MemoryStorage do aiogram já zerou o FSM.
+teclado_cancelar_alvos_publico = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="❌ Cancelar e Voltar às Rotinas")]],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
 # 🛠️ Teclado para erro na IA (NOVO)
 teclado_erro_ia = ReplyKeyboardMarkup(
     keyboard=[
@@ -7671,9 +7680,29 @@ async def pedir_alvos_rotina_publico(message: types.Message, state: FSMContext):
         "<i>Link de mensagem dentro do tópico também serve: o bot descarta o número da mensagem sozinho.</i>\n\n"
         "Para desativar todos e publicar somente no Chat Geral, digite <b>0</b>."
     )
-    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar)
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar_alvos_publico)
     await state.update_data(menu_origem="publico")
     await state.set_state(ConfigRotina.aguardando_alvos_rotina)
+
+@dp.message(F.text == "❌ Cancelar e Voltar às Rotinas", StateFilter("*"))
+async def cancelar_alvos_rotina_publico(message: types.Message, state: FSMContext):
+    """
+    🔙 Sai da tela de alvos SEM depender do FSM.
+
+    O handler antigo era @dp.message(ConfigRotina.aguardando_alvos_rotina): só
+    respondia com o estado vivo. Depois de um 'deploybot' (ou dos 15 min de
+    inatividade) o estado sumia, o clique escorregava até o cancelar_fluxo_global
+    e o admin caía no menu do Canal Afiliados. Com StateFilter("*") o botão
+    funciona nos dois casos.
+    """
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("❌ Edição dos alvos cancelada. Voltando às Rotinas do Público.")
+
+    await state.clear()
+    await state.update_data(menu_origem="publico")
+    await message.answer("Ação cancelada. Nenhum alvo foi alterado.")
+    await gerenciar_rotina_publico(message, state)
+
 
 @dp.message(ConfigRotina.aguardando_alvos_rotina)
 async def confirmar_alvos_rotina_publico(message: types.Message, state: FSMContext):
@@ -7704,8 +7733,8 @@ async def confirmar_alvos_rotina_publico(message: types.Message, state: FSMConte
         if problemas:
             await message.answer(
                 "⚠️ <b>Não consegui ler alguns alvos:</b>\n• " + "\n• ".join(problemas) +
-                "\n\nCorrija e envie a lista de novo, ou clique em Cancelar ❌.",
-                parse_mode="HTML", reply_markup=teclado_cancelar
+                "\n\nCorrija e envie a lista de novo, ou use o botão de cancelar.",
+                parse_mode="HTML", reply_markup=teclado_cancelar_alvos_publico
             )
             return
 
@@ -7715,7 +7744,7 @@ async def confirmar_alvos_rotina_publico(message: types.Message, state: FSMConte
                 "Cole o <b>link do tópico</b> (toque no nome do tópico → Copiar Link), "
                 "separando por vírgula se forem vários, ou envie <b>0</b> para publicar "
                 "somente no Chat Geral.",
-                parse_mode="HTML", reply_markup=teclado_cancelar
+                parse_mode="HTML", reply_markup=teclado_cancelar_alvos_publico
             )
             return
 
