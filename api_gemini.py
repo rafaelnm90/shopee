@@ -26,6 +26,27 @@ MODELOS_CASCATA_GEMINI = [
 
 logger = logging.getLogger("API_Gemini")
 
+# 🔎 Guarda o motivo REAL da última falha da IA para o bot exibir na tela.
+ULTIMO_ERRO_IA = None
+
+def _motivo_resposta_vazia(response):
+    """Traduz uma resposta sem texto no motivo real (bloqueio de segurança, corte, filtro)."""
+    try:
+        pedacos = []
+        feedback = getattr(response, "prompt_feedback", None)
+        if feedback:
+            pedacos.append(f"prompt_feedback={feedback}")
+        for cand in (getattr(response, "candidates", None) or []):
+            razao = getattr(cand, "finish_reason", None)
+            if razao:
+                pedacos.append(f"finish_reason={razao}")
+            seguranca = getattr(cand, "safety_ratings", None)
+            if seguranca:
+                pedacos.append(f"safety={seguranca}")
+        return " ; ".join(str(p) for p in pedacos) or "resposta sem candidatos"
+    except Exception as e:
+        return f"motivo ilegível ({e})"
+
 async def gerar_texto_gemini(prompt, exibir_logs=True):
     """Tenta gerar texto iterando pelos modelos da cascata até obter sucesso."""
     for modelo_nome in MODELOS_CASCATA_GEMINI:
@@ -81,21 +102,40 @@ async def analisar_video_gemini(caminho_video, prompt, exibir_logs=True):
                 
             if exibir_logs: logger.info("✅ [IA] Vídeo pronto! Gerando a copy...")
 
+            falhas = []   # 🔎 registra por que CADA modelo recusou, para o log contar a história
             for modelo_nome in MODELOS_CASCATA_GEMINI:
                 try:
                     response = client_genai.models.generate_content(
                         model=modelo_nome,
                         contents=[video_gemini, prompt]
                     )
-                    if response and response.text:
+
+                    texto = None
+                    try:
+                        texto = response.text
+                    except Exception as erro_texto:
+                        falhas.append(f"{modelo_nome}: .text falhou ({erro_texto})")
+
+                    if texto:
                         if exibir_logs: logger.info(f"✅ [IA] Sucesso com o modelo {modelo_nome}!")
-                        return response.text.strip()
+                        return texto.strip()
+
+                    # 🚫 Respondeu, mas veio vazio: quase sempre é bloqueio de segurança do Google.
+                    motivo = _motivo_resposta_vazia(response)
+                    falhas.append(f"{modelo_nome}: VAZIO ({motivo})")
+                    if exibir_logs: logger.warning(f"⚠️ [IA] {modelo_nome} devolveu resposta vazia → {motivo}")
+
                 except Exception as erro_modelo:
-                    if "429" in str(erro_modelo):
-                        if exibir_logs: logger.warning(f"⚠️ [IA] Limite atingido em {modelo_nome}. Tentando o próximo...")
+                    erro_txt = str(erro_modelo)
+                    falhas.append(f"{modelo_nome}: {type(erro_modelo).__name__} {erro_txt[:150]}")
+                    if "429" in erro_txt or "RESOURCE_EXHAUSTED" in erro_txt.upper():
+                        if exibir_logs: logger.warning(f"⚠️ [IA] Cota estourada em {modelo_nome}. Tentando o próximo...")
                         time.sleep(3)
+                    else:
+                        if exibir_logs: logger.warning(f"⚠️ [IA] Erro em {modelo_nome}: {type(erro_modelo).__name__} → {erro_txt[:200]}")
                     continue
-            raise Exception("Todos os modelos da cascata falharam.")
+
+            raise Exception("Todos os modelos da cascata falharam → " + " | ".join(falhas))
         finally:
             if video_gemini:
                 try:
@@ -108,5 +148,7 @@ async def analisar_video_gemini(caminho_video, prompt, exibir_logs=True):
         resultado = await asyncio.to_thread(processar_ia)
         return resultado
     except Exception as e:
+        global ULTIMO_ERRO_IA
+        ULTIMO_ERRO_IA = str(e)[:400]
         if exibir_logs: logger.error(f"❌ [IA] Falha crítica na análise do vídeo: {e}")
         return None
