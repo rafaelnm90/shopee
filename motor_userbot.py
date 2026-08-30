@@ -40,8 +40,7 @@ from api_shopee import converter_link_shopee
 LIMITE_REGISTROS_HASH = 1000
 
 if EXIBIR_LOGS:
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-    logger = logging.getLogger(__name__)
+    logger = configurar_logs(__name__)
 
 # ✅ SISTEMA DE AUTOLIMPEZA E AUTO-CURA
 def limpar_travas_fantasma(nome_sessao):
