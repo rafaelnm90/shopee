@@ -16,11 +16,8 @@ from utils import registrar_erro_json
 # ✅ Importando o nosso Cérebro Central
 from api_gemini import gerar_texto_gemini
 
-# FORÇA O FUSO HORÁRIO DO BRASIL NA MEMÓRIA DO SCRIPT
-import time
-os.environ['TZ'] = 'America/Sao_Paulo'
-time.tzset()
-if EXIBIR_LOGS: print("⏰ Fuso horário ajustado internamente para America/Sao_Paulo")
+# 🕐 Trava de fuso centralizada: importar o modulo ja aplica America/Sao_Paulo.
+from fuso import FUSO_STR, fuso_horario, configurar_logs
 
 # 1. CREDENCIAIS DA CONTA
 API_ID = int(os.getenv('API_ID'))
