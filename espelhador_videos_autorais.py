@@ -20,17 +20,10 @@ from utils import registrar_erro_json
 
 load_dotenv()
 
-# 🕐 TRAVA DE FUSO: garante horário de Brasília mesmo em servidor configurado em UTC.
-# Viaja junto com o código — trocar de servidor não exige nenhum ajuste manual.
-os.environ['TZ'] = 'America/Sao_Paulo'
-time.tzset()
+# 🕐 Trava de fuso centralizada: importar o modulo ja aplica America/Sao_Paulo.
+from fuso import FUSO_STR, fuso_horario, configurar_logs
 
 load_dotenv()
-
-# FORÇA O FUSO HORÁRIO DO BRASIL NA MEMÓRIA DO SCRIPT
-os.environ['TZ'] = 'America/Sao_Paulo'
-time.tzset()
-if EXIBIR_LOGS: print("⏰ Fuso horário ajustado internamente para America/Sao_Paulo")
 
 # ✅ Cria as pastas isoladas na inicialização
 os.makedirs("temp", exist_ok=True)
