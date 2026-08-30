@@ -47,6 +47,27 @@ def _motivo_resposta_vazia(response):
     except Exception as e:
         return f"motivo ilegível ({e})"
 
+# 🔎 Guarda o motivo REAL da última falha da IA para o bot exibir na tela.
+ULTIMO_ERRO_IA = None
+
+def _motivo_resposta_vazia(response):
+    """Traduz uma resposta sem texto no motivo real (bloqueio de segurança, corte, filtro)."""
+    try:
+        pedacos = []
+        feedback = getattr(response, "prompt_feedback", None)
+        if feedback:
+            pedacos.append(f"prompt_feedback={feedback}")
+        for cand in (getattr(response, "candidates", None) or []):
+            razao = getattr(cand, "finish_reason", None)
+            if razao:
+                pedacos.append(f"finish_reason={razao}")
+            seguranca = getattr(cand, "safety_ratings", None)
+            if seguranca:
+                pedacos.append(f"safety={seguranca}")
+        return " ; ".join(str(p) for p in pedacos) or "resposta sem candidatos"
+    except Exception as e:
+        return f"motivo ilegível ({e})"
+
 async def gerar_texto_gemini(prompt, exibir_logs=True):
     """Tenta gerar texto iterando pelos modelos da cascata até obter sucesso."""
     for modelo_nome in MODELOS_CASCATA_GEMINI:
