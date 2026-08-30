@@ -46,8 +46,7 @@ EXIBIR_LOGS = True
 
 # 2. CONFIGURAÇÃO DE LOGS 🚀
 if EXIBIR_LOGS:
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-    logger = logging.getLogger(__name__)
+    logger = configurar_logs(__name__)
 
 # ✅ Cria a pasta temp isolada na inicialização
 os.makedirs("temp", exist_ok=True)
