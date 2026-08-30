@@ -64,8 +64,7 @@ from motor_filas import calcular_horarios_distribuicao # ⚙️ Motor Central Im
 scheduler = AsyncIOScheduler(timezone="America/Sao_Paulo")
 
 if EXIBIR_LOGS:
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(message)s')
-    logger = logging.getLogger(__name__)
+    logger = configurar_logs(__name__)
 
 # 1. CREDENCIAIS E CONFIGURAÇÕES
 API_ID = int(os.getenv('API_ID', 0)) 
