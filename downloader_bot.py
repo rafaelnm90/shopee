@@ -116,9 +116,7 @@ TEXTO_PAINEL_DOWNLOADER = (
     "<b>Como usar:</b>\n"
     "1️⃣ Copie o link do vídeo no aplicativo de origem\n"
     "2️⃣ Cole aqui neste tópico, sozinho, sem texto junto\n"
-    "3️⃣ Aguarde — um vídeo por vez, costuma levar menos de 1 minuto\n\n"
-    f"<i>💡 Cada membro pode baixar até {LIMITE_DIARIO_DOWNLOADS} vídeos por dia. "
-    "A cota zera à meia-noite e só conta o que for entregue: se der erro, não desconta.</i>"
+    "3️⃣ Aguarde — um vídeo por vez, costuma levar menos de 1 minuto"
 )
 
 
