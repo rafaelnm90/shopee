@@ -108,11 +108,11 @@ TEXTO_PAINEL_DOWNLOADER = (
     "Cole aqui o <b>link</b> do vídeo e eu devolvo o arquivo, "
     "<b>sem marca d'água</b>, pronto para postar.\n\n"
     "<b>Plataformas que funcionam:</b>\n"
-    "🎵 <b>TikTok</b>\n"
-    "📸 <b>Instagram</b> — posts, reels e IGTV\n"
+    "🔶 <b>Shopee</b> — vídeos de produto e de afiliado\n"
+    "⬛ <b>TikTok</b>\n"
     "📌 <b>Pinterest</b>\n"
-    "🔶 <b>Shopee</b> — vídeos de produto e de afiliado\n\n"
-    "<i>▪️ O YouTube ainda não está liberado.</i>\n\n"
+    "📸 <b>Instagram</b> — posts, reels e IGTV\n\n"
+    "<i>🔴 O YouTube está sendo trabalhado.</i>\n\n"
     "<b>Como usar:</b>\n"
     "1️⃣ Copie o link do vídeo no aplicativo de origem\n"
     "2️⃣ Cole aqui neste tópico, sozinho, sem texto junto\n"
@@ -1074,7 +1074,7 @@ async def receber_link(message: types.Message):
             texto_aviso = (
                 f"👋 {mencao}, cole aqui o <b>link do vídeo</b> que você quer baixar.\n\n"
                 "Aceito por enquanto:\n"
-                "🎵 TikTok  ·  📸 Instagram  ·  📌 Pinterest  ·  🛒 Shopee"
+                "🔶 Shopee  ·  ⬛ TikTok  ·  📌 Pinterest  ·  📸 Instagram"
             )
             segundos = 20
 
