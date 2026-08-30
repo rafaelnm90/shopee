@@ -26,8 +26,7 @@ API_HASH = os.getenv('API_HASH')
 
 # 2. CONFIGURAÇÃO DE LOGS 🚀
 if EXIBIR_LOGS:
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-    logger = logging.getLogger(__name__)
+    logger = configurar_logs(__name__)
 
 # 3. SISTEMA DE AUTOLIMPEZA E INICIALIZAÇÃO
 def limpar_travas_fantasma(nome_sessao):
