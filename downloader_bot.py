@@ -32,8 +32,7 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFil
 from aiogram.fsm.storage.memory import MemoryStorage
 
 if EXIBIR_LOGS:
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-    logger = logging.getLogger(__name__)
+    logger = configurar_logs(__name__)
 
 FUSO = ZoneInfo("America/Sao_Paulo")
 
