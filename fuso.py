@@ -26,6 +26,12 @@ fuso_horario = ZoneInfo(FUSO_STR)
 FORMATO_LOG = "%(asctime)s.%(msecs)03d " + time.strftime("%z") + " - %(message)s"
 FORMATO_DATA = "%Y-%m-%d %H:%M:%S"
 
+# 🔒 Trava de reentrada: o motor_userbot e um robo proprio E um modulo importado
+# (bot_mestre -> painel_espelhos -> motor_userbot), entao configurar_logs seria
+# chamado duas vezes no mesmo processo. Quem chega primeiro configura; os demais
+# so recebem o logger, sem remontar o handler nem repetir a linha de boot.
+_LOGS_CONFIGURADOS = False
+
 
 def fuso_do_servidor():
     """
@@ -59,13 +65,18 @@ def configurar_logs(nome=None, nivel=logging.INFO):
     force=True vence qualquer configuração de log feita por módulo importado
     antes (motor_filas e utils configuram o root logger ao serem importados).
     """
+    global _LOGS_CONFIGURADOS
+    logger = logging.getLogger(nome or "fuso")
+    if _LOGS_CONFIGURADOS:
+        return logger
+    _LOGS_CONFIGURADOS = True
+
     logging.basicConfig(
         level=nivel,
         format=FORMATO_LOG,
         datefmt=FORMATO_DATA,
         force=True,
     )
-    logger = logging.getLogger(nome or "fuso")
 
     servidor = fuso_do_servidor()
     logger.info(
