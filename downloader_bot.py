@@ -23,10 +23,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# 🕐 Fuso travado no processo: o servidor roda em UTC.
-os.environ['TZ'] = 'America/Sao_Paulo'
-import time
-time.tzset()
+# 🕐 Trava de fuso centralizada: importar o modulo ja aplica America/Sao_Paulo.
+from fuso import FUSO_STR, fuso_horario, configurar_logs
 
 from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.filters import Command, ChatMemberUpdatedFilter, IS_NOT_MEMBER, IS_MEMBER
