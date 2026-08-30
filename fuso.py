@@ -28,7 +28,20 @@ FORMATO_DATA = "%Y-%m-%d %H:%M:%S"
 
 
 def fuso_do_servidor():
-    """Descobre o fuso do sistema operacional. Só para registrar no log."""
+    """
+    Descobre o fuso do sistema operacional. Só para registrar no log.
+
+    O symlink /etc/localtime vem PRIMEIRO porque é o que o systemd — e portanto
+    o journalctl — realmente usa. O /etc/timezone é legado do Debian e o
+    timedatectl não o atualiza: ele continua dizendo "Etc/UTC" para sempre.
+    """
+    try:
+        caminho = os.path.realpath("/etc/localtime")
+        partes = caminho.split("/zoneinfo/")
+        if len(partes) > 1:
+            return partes[1]
+    except Exception:
+        pass
     try:
         with open("/etc/timezone", encoding="utf-8") as arquivo:
             valor = arquivo.read().strip()
@@ -36,12 +49,7 @@ def fuso_do_servidor():
                 return valor
     except Exception:
         pass
-    try:
-        caminho = os.path.realpath("/etc/localtime")
-        partes = caminho.split("/zoneinfo/")
-        return partes[1] if len(partes) > 1 else os.path.basename(caminho)
-    except Exception:
-        return "desconhecido"
+    return "desconhecido"
 
 
 def configurar_logs(nome=None, nivel=logging.INFO):
