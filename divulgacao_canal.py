@@ -490,8 +490,10 @@ async def main():
     # Agenda a função para rodar toda vez que o relógio virar a hora (minuto 0)
     scheduler.add_job(programar_envios_da_hora, 'cron', minute=0)
 
-    # 🧵 Nomes de grupo e tópico para o cache compartilhado, de hora em hora.
-    scheduler.add_job(sincronizar_nomes_topicos, 'cron', minute=7)
+    # 🧵 Nomes de grupo e tópico para o cache compartilhado, uma vez por dia.
+    # 00:07 e não 00:00: a virada do dia já tem o programar_envios_da_hora e a
+    # coleta de métricas: separar evita os três disputando o mesmo instante.
+    scheduler.add_job(sincronizar_nomes_topicos, 'cron', hour=0, minute=7)
     asyncio.create_task(sincronizar_nomes_topicos())  # primeira carga na subida
     
     scheduler.start()
