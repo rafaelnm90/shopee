@@ -1,5 +1,8 @@
 """
-Descobre qual sessão Telethon consegue ler os tópicos do grupo.
+Varre TODOS os grupos de fórum que cada sessão Telethon enxerga e lista os
+tópicos de cada um. É o levantamento que decide qual sessão usar e mostra
+quantos nomes o cache vai ganhar.
+
 Uso:  ~/shopee/venv/bin/python3 checar_topicos.py
 
 Não altera nada. Só conecta, pergunta e desconecta.
@@ -14,14 +17,13 @@ load_dotenv()
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 
-GRUPO = -1004460669033
 SESSOES = ["sessao_espiao", "sessao_divulgacao"]
 
 
 async def testar(nome_sessao):
-    print(f"\n{'='*58}")
+    print(f"\n{'=' * 62}")
     print(f"SESSÃO: {nome_sessao}")
-    print("=" * 58)
+    print("=" * 62)
 
     client = TelegramClient(nome_sessao, API_ID, API_HASH)
     try:
@@ -32,29 +34,43 @@ async def testar(nome_sessao):
             return
 
         eu = await client.get_me()
-        print(f"  👤 Conta: {eu.first_name} (@{eu.username or 'sem username'}) · id {eu.id}")
+        print(f"  👤 Conta: {eu.first_name} (@{eu.username or 'sem username'}) · id {eu.id}\n")
 
-        try:
-            entidade = await client.get_entity(GRUPO)
-            print(f"  ✅ Enxerga o grupo: {entidade.title}")
-        except Exception as e:
-            print(f"  ❌ NÃO está no grupo: {type(e).__name__}: {e}")
+        foruns = []
+        async for dialogo in client.iter_dialogs():
+            entidade = dialogo.entity
+            if getattr(entidade, "forum", False):
+                foruns.append(entidade)
+
+        if not foruns:
+            print("  ⚠️ Esta conta não está em nenhum grupo com tópicos ativados.")
             return
 
-        resposta = await client(GetForumTopicsRequest(
-            peer=entidade,
-            offset_date=0,
-            offset_id=0,
-            offset_topic=0,
-            limit=100,
-        ))
+        print(f"  🗂️ {len(foruns)} grupo(s) de fórum encontrados:\n")
 
-        print(f"  🧵 {len(resposta.topics)} tópico(s) encontrados:\n")
-        for t in resposta.topics:
-            titulo = getattr(t, "title", "(sem título)")
-            print(f"     {t.id:>6}  {titulo}")
+        total_topicos = 0
+        for entidade in foruns:
+            chat_id = f"-100{entidade.id}"
+            print(f"  ┌─ {entidade.title}")
+            print(f"  │  {chat_id}")
+            try:
+                resposta = await client(GetForumTopicsRequest(
+                    peer=entidade,
+                    offset_date=0,
+                    offset_id=0,
+                    offset_topic=0,
+                    limit=100,
+                ))
+                for t in resposta.topics:
+                    titulo = getattr(t, "title", "(sem título)")
+                    print(f"  │     {t.id:>6}  {titulo}")
+                    total_topicos += 1
+            except Exception as e:
+                print(f"  │     ❌ {type(e).__name__}: {e}")
+            print("  └─")
 
-        print(f"\n  ✅ ESTA SESSÃO SERVE.")
+        print(f"\n  ✅ Total: {len(foruns)} grupo(s), {total_topicos} tópico(s).")
+        print(f"     São {total_topicos} nomes que o cache passaria a ter.")
 
     except Exception as e:
         print(f"  ❌ Falha: {type(e).__name__}: {e}")
@@ -68,9 +84,9 @@ async def testar(nome_sessao):
 async def main():
     for s in SESSOES:
         await testar(s)
-    print(f"\n{'='*58}")
+    print(f"\n{'=' * 62}")
     print("Me mande a saída acima.")
-    print("=" * 58)
+    print("=" * 62)
 
 
 if __name__ == "__main__":
