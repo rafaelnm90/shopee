@@ -9116,6 +9116,7 @@ async def painel_achadinhos(message: types.Message, state: FSMContext):
     
     config = ler_achadinhos_config()
     nichos = config.get("nichos", [])
+    cache_nomes = ler_cache_nomes_grupos()
     
     texto = "🛍️ <b>Painel do Gerador de Achadinhos</b>\n\n"
     texto += f"O motor autônomo está configurado para inspecionar <b>{len(nichos)} nicho(s) de mercado</b> em ciclo.\n"
@@ -9124,8 +9125,17 @@ async def painel_achadinhos(message: types.Message, state: FSMContext):
         texto += "\n<i>Nenhum nicho configurado. Clique em 'Adicionar Nicho ➕' para começar.</i>"
     else:
         for i, nicho in enumerate(nichos, 1):
+            # 🧵 Usa o mesmo formatar_nome_alvo dos outros painéis: sem o tópico,
+            # oito nichos do mesmo grupo apareciam com destino idêntico e não dava
+            # para conferir se cada um estava na gaveta certa.
+            destino = nicho.get("destino")
+            thread_id = str(nicho.get("thread_id", "0") or "0")
+            alvo = f"{destino}:{thread_id}" if thread_id != "0" else str(destino)
+            nome_alvo = formatar_nome_alvo(alvo, cache_nomes)
+
             texto += f"\n🎯 <b>{i}. {nicho.get('nome')}</b>\n"
-            texto += f"   └ Canal Alvo: <code>{nicho.get('destino')}</code>\n"
+            texto += f"   └ Publica em: {nome_alvo}\n"
+            texto += f"   └ ID: <code>{alvo}</code>\n"
             texto += f"   └ Termos Rastreados: {', '.join(nicho.get('keywords', []))}\n"
             
     janela_txt = "24h" if config.get("inicio", 8) == 0 and config.get("fim", 22) == 24 \
