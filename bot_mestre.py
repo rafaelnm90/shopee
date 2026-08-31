@@ -5260,6 +5260,46 @@ async def processar_janela_autorais(message: types.Message, state: FSMContext):
     )
     await submenu_regras_retorno(message, state)
 
+# 🪞 FEED CENTRAL DOS ACHADINHOS
+# Todo achadinho cai no tópico do seu nicho E também aqui. Os tópicos por
+# categoria continuam servindo quem quer só uma delas; este feed é a vitrine
+# cheia para quem acabou de entrar e não sabe o que procurar.
+# Deixe ESPELHO_ACHADINHOS_DESTINO como None para desligar o espelho.
+ESPELHO_ACHADINHOS_DESTINO = "-1004460669033"
+ESPELHO_ACHADINHOS_TOPICO = "247"
+
+
+async def espelhar_no_feed_central(msg_original, legenda, destino_original, thread_original):
+    """Republica a mesma foto no feed central reaproveitando o file_id do primeiro
+    envio: nada é baixado nem enviado de novo, só referenciado. Falha aqui nunca
+    derruba a postagem principal, que a essa altura já foi entregue."""
+    if not ESPELHO_ACHADINHOS_DESTINO:
+        return
+
+    thread_espelho = None
+    if ESPELHO_ACHADINHOS_TOPICO and str(ESPELHO_ACHADINHOS_TOPICO) != "0":
+        thread_espelho = int(ESPELHO_ACHADINHOS_TOPICO)
+
+    # O nicho já posta no próprio feed central: não duplica.
+    if str(destino_original) == str(ESPELHO_ACHADINHOS_DESTINO) and thread_original == thread_espelho:
+        if EXIBIR_LOGS: logger.info("🪞 [Achadinhos] Nicho já aponta para o feed central. Espelho dispensado.")
+        return
+
+    try:
+        file_id = msg_original.photo[-1].file_id
+        await asyncio.sleep(random.randint(2, 5))
+        await bot.send_photo(
+            chat_id=ESPELHO_ACHADINHOS_DESTINO,
+            photo=file_id,
+            caption=legenda,
+            parse_mode="HTML",
+            message_thread_id=thread_espelho
+        )
+        if EXIBIR_LOGS: logger.info(f"🪞 [Achadinhos] Espelhado no feed central (tópico {ESPELHO_ACHADINHOS_TOPICO}).")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ [Achadinhos] Falha ao espelhar no feed central: {e}. A postagem principal foi entregue normalmente.")
+
+
 def extrair_destino_e_topico(texto):
     """🔗 Aceita link do Telegram Web, link t.me/c/ ou o ID cru, e devolve
     (destino, thread_id). Poupa o operador de garimpar dois números na URL.
@@ -5668,9 +5708,12 @@ async def processar_garimpo_automatico(forcado=False):
                 if thread_id_nicho and str(thread_id_nicho) != "0":
                     thread_param = int(thread_id_nicho)
                     
-                await bot.send_photo(chat_id=destino, photo=arquivo_img, caption=legenda_final, parse_mode="HTML", message_thread_id=thread_param)
+                msg_original = await bot.send_photo(chat_id=destino, photo=arquivo_img, caption=legenda_final, parse_mode="HTML", message_thread_id=thread_param)
                 
                 registrar_achadinho_enviado(item_id, nome_nicho)
+
+                # 🪞 Além do tópico do nicho, a oferta cai também no feed central.
+                await espelhar_no_feed_central(msg_original, legenda_final, destino, thread_param)
                 
                 os.remove(temp_img)
                 if EXIBIR_LOGS: logger.info(f"✅ [Achadinhos] Operação concluída. Oferta fresca entregue ao canal {destino}!")
