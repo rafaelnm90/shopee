@@ -141,15 +141,28 @@ ESCOPOS = {
         "chave": "alvos_divulgacao_publico",
         "rotulo_link": "ENTRE NO GRUPO:",
         "link": "https://t.me/GrupoPublicoAfiliados",
-        "prompt": (
+        # Lista = rodízio. Um ângulo é sorteado a cada disparo.
+        # Para criar um terceiro, acrescente uma string aqui.
+        "prompt": [
+            # Ângulo 1 — comunidade
             "Você é um copywriter que divulga uma comunidade do Telegram para afiliados da Shopee. "
             "Escreva UMA ÚNICA FRASE curta e convidativa, diferente das anteriores, variando estrutura e tom a cada execução. "
             "Destaque que é uma comunidade ativa onde os membros trocam vídeos, achados e experiências, e que a entrada é GRÁTIS (exatamente assim, em maiúsculas). "
             "Use no máximo 3 emojis no total, distribuídos naturalmente pelo texto. "
             "Tom cordial e direto, como quem convida um colega — nada de urgência artificial ou alarmismo. "
-            "Entregue APENAS a frase final, sem aspas."
-        ),
-        "fallback": "📬 Comunidade de afiliados Shopee: vídeos, achados e troca de experiências entre quem vende de verdade. Entrada GRÁTIS.",
+            "Entregue APENAS a frase final, sem aspas.",
+
+            # Ângulo 2 — o baixador de vídeos (fatos vindos do downloader_bot.py)
+            "Você é um copywriter que divulga uma comunidade do Telegram para afiliados da Shopee. "
+            "Escreva UMA ÚNICA FRASE curta e convidativa, diferente das anteriores, variando estrutura e tom a cada execução. "
+            "Destaque que dentro do grupo tem um robô que baixa vídeos SEM MARCA D'ÁGUA de Shopee, TikTok, Pinterest e Instagram: "
+            "o afiliado cola o link e recebe o arquivo pronto para postar. NÃO cite YouTube, que ainda não funciona. "
+            "Mencione que a entrada é GRÁTIS (exatamente assim, em maiúsculas). "
+            "Use no máximo 3 emojis no total, distribuídos naturalmente pelo texto. "
+            "Tom cordial e direto, como quem indica uma ferramenta útil — nada de urgência artificial ou alarmismo. "
+            "Entregue APENAS a frase final, sem aspas.",
+        ],
+        "fallback": "📬 Comunidade de afiliados Shopee: vídeos, achados e um robô que baixa vídeos sem marca d'água. Entrada GRÁTIS.",
     },
     "achadinhos": {
         "rotulo": "ACHADINHOS",
@@ -202,7 +215,13 @@ async def gerar_texto(escopo, repeticoes=1):
     conf = ESCOPOS[escopo]
     if EXIBIR_LOGS: logger.info(f"🚀 [{conf['rotulo']}] Montando texto de divulgação ({repeticoes}x)...")
 
-    frase_ia = await gerar_texto_gemini(conf["prompt"], EXIBIR_LOGS)
+    # "prompt" aceita uma string (um ângulo só) ou uma lista de strings.
+    # Sendo lista, sorteia um ângulo por disparo. Para dar rodízio a qualquer
+    # escopo, basta transformar a string dele numa lista.
+    p = conf["prompt"]
+    prompt_escolhido = random.choice(p) if isinstance(p, list) else p
+
+    frase_ia = await gerar_texto_gemini(prompt_escolhido, EXIBIR_LOGS)
     if not frase_ia:
         if EXIBIR_LOGS: logger.error(f"❌ [{conf['rotulo']}] Todos os modelos falharam. Usando frase padrão de segurança.")
         frase_ia = conf["fallback"]
