@@ -7282,7 +7282,9 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             
             q_aprov = dados_por_mes.get(m, {}).get("qtd_aprovado", 0)
             q_pend = dados_por_mes.get(m, {}).get("qtd_pendente", 0)
-            valores_pedidos.append(q_aprov + q_pend)
+            # Mês futuro é NaN, não zero. Com zero a linha verde descia até o
+            # eixo e parecia queda de vendas, quando era só mês que não chegou.
+            valores_pedidos.append(float('nan') if m > mes_atual_grafico else (q_aprov + q_pend))
             
             if m == mes_atual_grafico:
                 valores_estimativa.append(estimativa_mensal)
@@ -7310,10 +7312,25 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         
         offset_y = max([v for v in valores_comissao + valores_estimativa if v == v]) * 0.02 if any(v == v for v in valores_comissao + valores_estimativa) else 0
 
+        # 📏 Folga no topo para o rótulo do maior mês não encostar no título,
+        # e piso em zero nos dois eixos para a leitura não distorcer.
+        validos_esq = [v for v in valores_comissao + valores_estimativa if v == v]
+        if validos_esq:
+            ax1.set_ylim(bottom=0, top=max(validos_esq) * 1.22)
+        validos_dir = [v for v in valores_pedidos if v == v]
+        if validos_dir:
+            ax2.set_ylim(bottom=0, top=max(validos_dir) * 1.22)
+
         for bar in bars:
             yval = bar.get_height()
-            if yval > 0:
-                ax1.text(bar.get_x() + bar.get_width()/2, yval + offset_y, f'R${yval:.0f}', ha='center', va='bottom', fontsize=8, fontweight='bold', color='#333333')
+            if yval == yval and yval > 0:
+                # Caixa branca atrás do texto: sem ela as linhas cortam o número.
+                ax1.text(
+                    bar.get_x() + bar.get_width()/2, yval + offset_y, f'R${yval:.0f}',
+                    ha='center', va='bottom', fontsize=8, fontweight='bold', color='#333333',
+                    zorder=10,
+                    bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='#cccccc', alpha=0.9)
+                )
 
         # ✅ ORDEM DA LEGENDA CORRIGIDA EXATAMENTE PARA: 1º Pedidos, 2º Projeção, 3º Comissão.
         lines_1, labels_1 = ax1.get_legend_handles_labels() 
@@ -9131,10 +9148,21 @@ async def painel_achadinhos(message: types.Message, state: FSMContext):
             destino = nicho.get("destino")
             thread_id = str(nicho.get("thread_id", "0") or "0")
             alvo = f"{destino}:{thread_id}" if thread_id != "0" else str(destino)
-            nome_alvo = formatar_nome_alvo(alvo, cache_nomes)
+
+            # O helper devolve "Grupo › Tópico" numa linha só, o que embola no
+            # celular. Aqui a gente separa em duas linhas sem perder nada. Se o
+            # formato do helper mudar, o split falha de forma limpa e o nome
+            # inteiro volta para a linha do grupo.
+            nome_completo = formatar_nome_alvo(alvo, cache_nomes)
+            if " › " in nome_completo:
+                nome_grupo, nome_topico = nome_completo.split(" › ", 1)
+            else:
+                nome_grupo, nome_topico = nome_completo, None
 
             texto += f"\n🎯 <b>{i}. {nicho.get('nome')}</b>\n"
-            texto += f"   └ Publica em: {nome_alvo}\n"
+            texto += f"   └ Publica em: {nome_grupo}\n"
+            if nome_topico:
+                texto += f"   └ Tópico: {nome_topico}\n"
             texto += f"   └ ID: <code>{alvo}</code>\n"
             texto += f"   └ Termos Rastreados: {', '.join(nicho.get('keywords', []))}\n"
             
