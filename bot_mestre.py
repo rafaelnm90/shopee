@@ -14118,8 +14118,14 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
                 parse_mode="HTML",
                 reply_markup=teclado
             )
-        except Exception:
-            pass  # mensagem idêntica ou apagada: ignora sem poluir o log
+        except Exception as e:
+            # ⚠️ Antes era 'pass' mudo. Se a edição falha sempre, a task continua
+            # viva e girando, mas o painel congela na tela — indistinguível de
+            # task morta. "message is not modified" é normal e segue silencioso;
+            # qualquer outra falha vira log.
+            if "not modified" not in str(e).lower():
+                if EXIBIR_LOGS:
+                    logger.warning(f"⚠️ [Cronômetro] Falha ao editar painel {message_id} ({restante}s restantes): {type(e).__name__}: {e}")
 
     await asyncio.sleep(restante)
 
