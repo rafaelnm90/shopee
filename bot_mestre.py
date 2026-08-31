@@ -331,6 +331,16 @@ class ConfigDivulgacaoViral(StatesGroup):
     aguardando_valores_unificados = State()
     aguardando_confirmacao_pausa = State() # ✅ NOVO
 
+class ConfigDivulgacaoEscopo(StatesGroup):
+    """Estados compartilhados pelos painéis de SPAM por escopo (Público e
+    Achadinhos). Qual painel está aberto fica no FSM em `escopo_div`."""
+    menu_principal = State()
+    aguardando_alvos = State()
+    aguardando_exclusao_alvo = State()
+    aguardando_tipo_edicao = State()
+    aguardando_selecao_alvo = State()
+    aguardando_valores_unificados = State()
+
 class ConfigRotina(StatesGroup):
     menu_principal = State()
     aguardando_novo_horario = State()
@@ -1003,6 +1013,7 @@ teclado_menu_achadinhos = ReplyKeyboardMarkup(
         [KeyboardButton(text="Adicionar Nicho ➕"), KeyboardButton(text="Remover Nicho 🗑️")],
         [KeyboardButton(text="Editar Nicho ✏️"), KeyboardButton(text="Forçar Garimpo 🚀")],
         [KeyboardButton(text="Janela de Horário ⏰"), KeyboardButton(text="Nichos por Ciclo 🔄")],
+        [KeyboardButton(text="SPAM do Achadinhos 📢")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -1078,6 +1089,15 @@ teclado_automacoes_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Rotinas do Espião ⏰"), KeyboardButton(text="SPAM do Espião 📢")],
         [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
+    ],
+    resize_keyboard=True,
+    is_persistent=True
+)
+
+teclado_automacoes_publico = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="Rotinas do Público ⏰"), KeyboardButton(text="SPAM do Público 📢")],
+        [KeyboardButton(text="Voltar ao Painel Público 🔙")]
     ],
     resize_keyboard=True,
     is_persistent=True
@@ -3153,7 +3173,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         keyboard=[
             [KeyboardButton(text="Configurações do Robô Moderador ⚙️")],
             [KeyboardButton(text="Configurações do Robô Repostador ♻️")],
-            [KeyboardButton(text="Configurações do Robô de Rotina do Grupo Público ⏰")],
+            [KeyboardButton(text="⚙️ Automações do Grupo Público\u200b")],
             [KeyboardButton(text="Parceiros Afiliados 👥")],
             [KeyboardButton(text="Voltar aos Canais 🔙")]
         ], resize_keyboard=True, is_persistent=True
@@ -7972,6 +7992,16 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await message.answer("Ação cancelada.")
         await gerenciar_divulgacao_viral(message, state)
         return
+
+    # 🔁 Roteamento Inteligente: SPAM por escopo (Público / Achadinhos).
+    # Lê o escopo ANTES do clear, senão volta sempre para o painel errado.
+    if estado_atual and estado_atual.startswith("ConfigDivulgacaoEscopo"):
+        _info = await state.get_data()
+        _escopo = _info.get("escopo_div", "publico")
+        await state.clear()
+        await message.answer("Ação cancelada.")
+        await renderizar_painel_divulgacao(message, state, _escopo)
+        return
         
    # 🔁 Roteamento Inteligente: Se estiver no Gerador de Achadinhos
     if estado_atual and estado_atual.startswith("AchadinhosFluxo"):
@@ -11545,6 +11575,377 @@ async def acionar_disparo_imediato_viral(message: types.Message):
     if EXIBIR_LOGS: logger.info("🚀 Comando de disparo forçado enviado para o JSON do Viral.")
     await message.answer("🚀 <b>Disparo Imediato Viral Acionado!</b>\nO Userbot detectará o comando e enviará a rajada de convites.", parse_mode="HTML")
 
+# ==========================================================
+# --- SPAM POR ESCOPO (Grupo Público e Central de Achadinhos) ---
+# Um único conjunto de handlers atende os dois. O escopo ativo fica
+# guardado no FSM (`escopo_div`), então adicionar um terceiro painel
+# no futuro é só somar uma entrada neste dicionário.
+#
+# Defaults conservadores: 1 mensagem, 1 repetição, 1x/hora, nascendo
+# pausado. Os controles ficam todos no painel para calibrar.
+# ==========================================================
+ESCOPOS_DIVULGACAO_PAINEL = {
+    "publico": {
+        "rotulo": "Grupo Público",
+        "chave": "alvos_divulgacao_publico",
+        "link": LINK_GRUPO_PUBLICO,
+        "voltar": "Voltar às Automações do Público 🔙",
+    },
+    "achadinhos": {
+        "rotulo": "Central de Achadinhos",
+        "chave": "alvos_divulgacao_achadinhos",
+        "link": LINK_CANAL_ACHADINHOS,
+        "voltar": "Voltar ao Gerador de Achadinhos 🔙",
+    },
+}
+
+def ler_alvos_divulgacao_escopo(escopo):
+    conf = ESCOPOS_DIVULGACAO_PAINEL[escopo]
+    padrao = {"alvos": [], "frequencia_por_hora": 1, "pausado": True,
+              "forcar_disparo": False, "repeticoes_internas": 1, "replicas_mensagem": 1}
+    dados = ler_config_bd(conf["chave"], padrao)
+
+    houve_alteracao = False
+    for chave, valor in padrao.items():
+        if chave not in dados:
+            dados[chave] = valor
+            houve_alteracao = True
+    if houve_alteracao:
+        salvar_config_bd(conf["chave"], dados)
+    return dados
+
+def salvar_alvos_divulgacao_escopo(escopo, dados):
+    salvar_config_bd(ESCOPOS_DIVULGACAO_PAINEL[escopo]["chave"], dados)
+
+async def _escopo_div_atual(state: FSMContext):
+    """Lê do FSM qual painel está aberto. Cai no público se algo se perder."""
+    dados = await state.get_data()
+    escopo = dados.get("escopo_div")
+    return escopo if escopo in ESCOPOS_DIVULGACAO_PAINEL else "publico"
+
+async def renderizar_painel_divulgacao(message: types.Message, state: FSMContext, escopo: str):
+    conf = ESCOPOS_DIVULGACAO_PAINEL[escopo]
+    dados = ler_alvos_divulgacao_escopo(escopo)
+    alvos = dados.get("alvos", [])
+    freq_g = dados.get("frequencia_por_hora", 1)
+    rep_int_g = dados.get("repeticoes_internas", 1)
+    rep_msg_g = dados.get("replicas_mensagem", 1)
+    status_pausa = "⏸️ Pausado" if dados.get("pausado") else "▶️ Rodando"
+    config_alvos = dados.get("config_alvos", {})
+
+    # Volume por disparo = réplicas x repetições internas. Explícito na tela
+    # para o número não surpreender depois.
+    volume = rep_msg_g * rep_int_g
+
+    texto = f"📢 <b>SPAM · {conf['rotulo']}</b> [{status_pausa}]\n\n"
+    texto += f"🔗 Divulga: <code>{conf['link']}</code>\n\n"
+    texto += "🌍 <b>Padrão Global:</b>\n"
+    texto += f"Frequência: {freq_g}x/hora\nRepetições no Texto: {rep_int_g}x\nRéplicas por Disparo: {rep_msg_g}x\n"
+    texto += f"📊 <b>Volume:</b> {volume} anúncio(s) por disparo · {volume * freq_g}/hora por grupo\n\n"
+    texto += "🎯 <b>Alvos Ativos:</b>\n"
+
+    if alvos:
+        for i, alvo in enumerate(alvos, 1):
+            c = config_alvos.get(alvo, {})
+            f_a = c.get("frequencia", freq_g)
+            ri_a = c.get("repeticoes", rep_int_g)
+            rm_a = c.get("replicas", rep_msg_g)
+            marcador = " (Personalizado)" if c else ""
+            texto += f"{i}. {alvo}{marcador}\n"
+            texto += f"   └ Freq: {f_a}/h | Rep: {ri_a}x | Rép: {rm_a}x\n"
+    else:
+        texto += "Nenhum alvo cadastrado no momento.\n"
+
+    texto_botao_pausa = "Retomar Divulgação ▶️" if dados.get("pausado") else "Pausar Divulgação ⏸️"
+    teclado = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Adicionar Alvo SPAM ➕"), KeyboardButton(text="Excluir Alvo SPAM 🗑️")],
+            [KeyboardButton(text="Editar Configs SPAM ⚙️"), KeyboardButton(text="Forçar Disparo SPAM 🚀")],
+            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text=conf["voltar"])]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
+    await state.set_state(ConfigDivulgacaoEscopo.menu_principal)
+    await state.update_data(escopo_div=escopo)
+
+# --- ENTRADAS: um handler curto por escopo ---
+@dp.message(F.text == "SPAM do Público 📢", StateFilter("*"))
+async def abrir_spam_publico(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("📢 Acessando SPAM do Grupo Público.")
+    await state.clear()
+    await renderizar_painel_divulgacao(message, state, "publico")
+
+@dp.message(F.text == "SPAM do Achadinhos 📢", StateFilter("*"))
+async def abrir_spam_achadinhos(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("📢 Acessando SPAM da Central de Achadinhos.")
+    await state.clear()
+    await renderizar_painel_divulgacao(message, state, "achadinhos")
+
+# --- ADICIONAR ALVO ---
+@dp.message(ConfigDivulgacaoEscopo.menu_principal, F.text == "Adicionar Alvo SPAM ➕")
+async def pedir_alvo_div(message: types.Message, state: FSMContext):
+    await message.answer(
+        "Envie os links ou IDs dos grupos separados por vírgula.\n"
+        "Exemplo: <code>https://t.me/grupo1, -1009999999</code>",
+        reply_markup=teclado_cancelar, parse_mode="HTML"
+    )
+    await state.set_state(ConfigDivulgacaoEscopo.aguardando_alvos)
+
+@dp.message(ConfigDivulgacaoEscopo.aguardando_alvos)
+async def salvar_alvo_div(message: types.Message, state: FSMContext):
+    escopo = await _escopo_div_atual(state)
+    entradas = [a.strip() for a in message.text.split(",") if a.strip()]
+    if not entradas:
+        await message.answer("Nenhum alvo detectado. Tente novamente:", reply_markup=teclado_cancelar)
+        return
+
+    # ✅ Validação que hoje só existe no Viral. Sem ela o alvo entra cru no
+    # banco e o Telethon falha lá na frente sem dizer o motivo.
+    novos_alvos, recusados = [], []
+    for entrada in entradas:
+        ok, alvo_formatado, nome = await validar_e_formatar_alvo(bot, entrada)
+        if ok:
+            novos_alvos.append(alvo_formatado)
+        else:
+            recusados.append(entrada)
+
+    if recusados:
+        await message.answer(
+            "⚠️ Não consegui validar:\n" + "\n".join(f"• <code>{r}</code>" for r in recusados) +
+            "\n\n<i>Use o ID numérico, o link t.me ou a URL do Telegram Web. "
+            "Para grupos privados, a conta do userbot precisa estar dentro.</i>",
+            parse_mode="HTML"
+        )
+
+    if not novos_alvos:
+        await message.answer("Nenhum alvo válido. Tente novamente:", reply_markup=teclado_cancelar)
+        return
+
+    dados = ler_alvos_divulgacao_escopo(escopo)
+    dados["alvos"].extend(novos_alvos)
+    dados["alvos"] = list(dict.fromkeys(dados["alvos"]))
+    salvar_alvos_divulgacao_escopo(escopo, dados)
+
+    if EXIBIR_LOGS: logger.info(f"✅ [SPAM/{escopo}] Novos alvos: {novos_alvos}")
+    await message.answer("Alvos adicionados com sucesso!")
+    await renderizar_painel_divulgacao(message, state, escopo)
+
+# --- EXCLUIR ALVO ---
+@dp.message(ConfigDivulgacaoEscopo.menu_principal, F.text == "Excluir Alvo SPAM 🗑️")
+async def pedir_exclusao_div(message: types.Message, state: FSMContext):
+    escopo = await _escopo_div_atual(state)
+    alvos = ler_alvos_divulgacao_escopo(escopo).get("alvos", [])
+    if not alvos:
+        await message.answer("Não há alvos cadastrados para excluir.")
+        await renderizar_painel_divulgacao(message, state, escopo)
+        return
+
+    texto = "Qual alvo deseja excluir? Digite o <b>NÚMERO</b> correspondente:\n\n"
+    for i, alvo in enumerate(alvos, 1):
+        texto += f"{i}. {alvo}\n"
+    await message.answer(texto, reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(ConfigDivulgacaoEscopo.aguardando_exclusao_alvo)
+
+@dp.message(ConfigDivulgacaoEscopo.aguardando_exclusao_alvo)
+async def processar_exclusao_div(message: types.Message, state: FSMContext):
+    escopo = await _escopo_div_atual(state)
+    if not message.text.isdigit():
+        await message.answer("Por favor, digite apenas o NÚMERO do alvo.", reply_markup=teclado_cancelar)
+        return
+
+    indice = int(message.text) - 1
+    dados = ler_alvos_divulgacao_escopo(escopo)
+    alvos = dados.get("alvos", [])
+
+    if 0 <= indice < len(alvos):
+        removido = alvos.pop(indice)
+        dados["alvos"] = alvos
+        dados.get("config_alvos", {}).pop(removido, None)
+        salvar_alvos_divulgacao_escopo(escopo, dados)
+        if EXIBIR_LOGS: logger.info(f"🗑️ [SPAM/{escopo}] Alvo removido: {removido}")
+        await message.answer(f"Alvo '{removido}' excluído com sucesso!")
+        await renderizar_painel_divulgacao(message, state, escopo)
+    else:
+        await message.answer("Número inválido. Tente novamente:", reply_markup=teclado_cancelar)
+
+# --- EDITAR CONFIGURAÇÕES ---
+@dp.message(ConfigDivulgacaoEscopo.menu_principal, F.text == "Editar Configs SPAM ⚙️")
+async def iniciar_edicao_div(message: types.Message, state: FSMContext):
+    await message.answer("Deseja editar o Padrão Global ou configurar um Alvo Específico?", reply_markup=teclado_tipo_edicao)
+    await state.set_state(ConfigDivulgacaoEscopo.aguardando_tipo_edicao)
+
+@dp.message(ConfigDivulgacaoEscopo.aguardando_tipo_edicao, F.text.in_(["Global 🌍", "Por Alvo 🎯"]))
+async def selecionar_tipo_edicao_div(message: types.Message, state: FSMContext):
+    escopo = await _escopo_div_atual(state)
+    is_global = message.text == "Global 🌍"
+    await state.update_data(edicao_global=is_global)
+
+    if is_global:
+        await message.answer(
+            "Envie os três números separados por vírgula:\n"
+            "<b>Frequência/hora, Repetições no texto, Réplicas por disparo</b>\n\n"
+            "<i>Exemplo: 1, 1, 1 — um anúncio por hora em cada grupo.</i>",
+            reply_markup=teclado_cancelar, parse_mode="HTML"
+        )
+        await state.set_state(ConfigDivulgacaoEscopo.aguardando_valores_unificados)
+        return
+
+    alvos = ler_alvos_divulgacao_escopo(escopo).get("alvos", [])
+    if not alvos:
+        await message.answer("Não há alvos cadastrados ainda.")
+        await renderizar_painel_divulgacao(message, state, escopo)
+        return
+
+    texto = "Qual alvo deseja configurar? Digite o <b>NÚMERO</b>:\n\n"
+    for i, alvo in enumerate(alvos, 1):
+        texto += f"{i}. {alvo}\n"
+    await message.answer(texto, reply_markup=teclado_cancelar, parse_mode="HTML")
+    await state.set_state(ConfigDivulgacaoEscopo.aguardando_selecao_alvo)
+
+@dp.message(ConfigDivulgacaoEscopo.aguardando_selecao_alvo)
+async def selecionar_alvo_edicao_div(message: types.Message, state: FSMContext):
+    escopo = await _escopo_div_atual(state)
+    if not message.text.isdigit():
+        await message.answer("Digite apenas o NÚMERO do alvo.", reply_markup=teclado_cancelar)
+        return
+
+    indice = int(message.text) - 1
+    alvos = ler_alvos_divulgacao_escopo(escopo).get("alvos", [])
+    if not (0 <= indice < len(alvos)):
+        await message.answer("Número inválido. Tente novamente:", reply_markup=teclado_cancelar)
+        return
+
+    await state.update_data(alvo_em_edicao=alvos[indice])
+    await message.answer(
+        f"Configurando <code>{alvos[indice]}</code>.\n\n"
+        "Envie os três números separados por vírgula:\n"
+        "<b>Frequência/hora, Repetições no texto, Réplicas por disparo</b>",
+        reply_markup=teclado_cancelar, parse_mode="HTML"
+    )
+    await state.set_state(ConfigDivulgacaoEscopo.aguardando_valores_unificados)
+
+@dp.message(ConfigDivulgacaoEscopo.aguardando_valores_unificados)
+async def salvar_valores_div(message: types.Message, state: FSMContext):
+    escopo = await _escopo_div_atual(state)
+    match = re.match(r"^(\d+)\s*,\s*(\d+)\s*,\s*(\d+)$", message.text.strip())
+    if not match:
+        await message.answer("Formato inválido. Envie os três números isolados por vírgula (Exemplo: 1, 1, 1).", reply_markup=teclado_cancelar)
+        return
+
+    freq, rep, repl = map(int, match.groups())
+    info = await state.get_data()
+    is_global = info.get("edicao_global")
+    alvo = info.get("alvo_em_edicao")
+    rotulo = ESCOPOS_DIVULGACAO_PAINEL[escopo]["rotulo"]
+
+    dados = ler_alvos_divulgacao_escopo(escopo)
+    if "config_alvos" not in dados:
+        dados["config_alvos"] = {}
+
+    if is_global:
+        dados["frequencia_por_hora"] = freq
+        dados["repeticoes_internas"] = rep
+        dados["replicas_mensagem"] = repl
+        msg_final = f"✅ <b>Padrão Global ({rotulo}) atualizado!</b>\nFrequência: {freq}x/h | Repetições: {rep}x | Réplicas: {repl}x"
+    else:
+        dados["config_alvos"].setdefault(alvo, {})
+        dados["config_alvos"][alvo]["frequencia"] = freq
+        dados["config_alvos"][alvo]["repeticoes"] = rep
+        dados["config_alvos"][alvo]["replicas"] = repl
+        msg_final = f"✅ <b>Alvo personalizado ({rotulo}) atualizado!</b>\nAlvo: {alvo}\nFrequência: {freq}x/h | Repetições: {rep}x | Réplicas: {repl}x"
+
+    volume = repl * rep
+    if volume > 6:
+        msg_final += (f"\n\n⚠️ <b>Atenção:</b> isso são <b>{volume} anúncios por disparo</b> "
+                      f"({volume * freq}/hora por grupo). Volume alto é o gatilho clássico "
+                      f"de PeerFloodError na sessão do userbot.")
+
+    salvar_alvos_divulgacao_escopo(escopo, dados)
+    if EXIBIR_LOGS: logger.info(f"⚙️ [SPAM/{escopo}] Config salva. Global: {is_global} | {freq},{rep},{repl}")
+
+    await message.answer(msg_final, parse_mode="HTML")
+    await renderizar_painel_divulgacao(message, state, escopo)
+
+# --- PAUSAR / RETOMAR ---
+@dp.message(ConfigDivulgacaoEscopo.menu_principal, F.text.in_(["Pausar Divulgação ⏸️", "Retomar Divulgação ▶️"]))
+async def alternar_pausa_div(message: types.Message, state: FSMContext):
+    escopo = await _escopo_div_atual(state)
+    dados = ler_alvos_divulgacao_escopo(escopo)
+    dados["pausado"] = not dados.get("pausado", False)
+    salvar_alvos_divulgacao_escopo(escopo, dados)
+    estado_txt = "PAUSADA" if dados["pausado"] else "RETOMADA"
+    if EXIBIR_LOGS: logger.info(f"⏯️ [SPAM/{escopo}] Divulgação {estado_txt}.")
+    await message.answer(f"✅ Divulgação <b>{estado_txt}</b>.", parse_mode="HTML")
+    await renderizar_painel_divulgacao(message, state, escopo)
+
+# --- DISPARO MANUAL ---
+@dp.message(ConfigDivulgacaoEscopo.menu_principal, F.text == "Forçar Disparo SPAM 🚀")
+async def acionar_disparo_div(message: types.Message, state: FSMContext):
+    escopo = await _escopo_div_atual(state)
+    dados = ler_alvos_divulgacao_escopo(escopo)
+    if dados.get("pausado", False):
+        await message.answer("⚠️ <b>Ação Bloqueada:</b> esta divulgação está <b>PAUSADA</b>. Retome-a antes de disparos manuais.", parse_mode="HTML")
+        return
+    if not dados.get("alvos"):
+        await message.answer("⚠️ Nenhum alvo cadastrado. Adicione ao menos um grupo antes.")
+        return
+
+    dados["forcar_disparo"] = True
+    salvar_alvos_divulgacao_escopo(escopo, dados)
+    if EXIBIR_LOGS: logger.info(f"🚀 [SPAM/{escopo}] Disparo forçado gravado no banco.")
+    await message.answer("🚀 <b>Disparo Imediato Acionado!</b>\nO Userbot detecta o comando em até 5 segundos.", parse_mode="HTML")
+
+# ==========================================================
+# --- CENTRAL DE AUTOMAÇÕES DO GRUPO PÚBLICO ---
+# Espelho da Central do Espião: hub com o status dos dois módulos
+# (SPAM externo + Rotinas internas) e um botão para cada.
+# ==========================================================
+@dp.message(F.text == "⚙️ Automações do Grupo Público\u200b", StateFilter("*"))
+async def menu_automacoes_publico(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await state.clear()
+    if EXIBIR_LOGS: logger.info("⚙️ Acessando Central de Automações do Grupo Público.")
+
+    status_spam = "🔴 PAUSADO" if ler_alvos_divulgacao_escopo("publico").get("pausado", False) else "🟢 ATIVO"
+    status_rotina = "🔴 PAUSADAS" if ler_config_rotina().get("pausado_publico", False) else "🟢 ATIVAS"
+
+    texto = (
+        "⚙️ <b>Central de Automações do Grupo Público</b>\n\n"
+        "📊 <b>Status Atual das Automações:</b>\n"
+        f"📢 SPAM do Público: {status_spam}\n"
+        f"⏰ Rotinas do Público: {status_rotina}\n\n"
+        "<i>SPAM divulga o grupo em OUTROS grupos. Rotinas postam DENTRO do grupo.</i>\n\n"
+        "Escolha o módulo que deseja configurar abaixo:"
+    )
+    await message.answer(texto, reply_markup=teclado_automacoes_publico, parse_mode="HTML")
+
+@dp.message(F.text == "Rotinas do Público ⏰", StateFilter("*"))
+async def abrir_rotinas_publico(message: types.Message, state: FSMContext):
+    """Atalho curto para o painel de rotinas que já existe, agora acessado
+    pela Central em vez do botão comprido no painel raiz."""
+    if message.from_user.id != ADMIN_ID: return
+    await gerenciar_rotina_publico(message, state)
+
+@dp.message(F.text == "Voltar às Automações do Público 🔙", StateFilter("*"))
+async def voltar_para_automacoes_publico(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🔙 Retornando à Central de Automações do Grupo Público.")
+    await state.clear()
+    await menu_automacoes_publico(message, state)
+
+@dp.message(F.text == "Voltar ao Gerador de Achadinhos 🔙", StateFilter("*"))
+async def voltar_para_painel_achadinhos(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🔙 Retornando ao Painel do Gerador de Achadinhos.")
+    await state.clear()
+    await painel_achadinhos(message, state)
+
+
 # --- LÓGICA DE MENSAGENS DE ROTINA ---
 @dp.message(F.text == "Mensagens de Rotina ⏰")
 async def gerenciar_rotina(message: types.Message, state: FSMContext):
@@ -13222,7 +13623,7 @@ async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
             [KeyboardButton(text="Editar Rotinas ✏️"), KeyboardButton(text="Disparos Manuais 🚀")],
             [KeyboardButton(text="Gerenciar Alvos de Postagem 🎯")],
             [KeyboardButton(text=texto_botao_pausa)],
-            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
+            [KeyboardButton(text="Voltar às Automações do Público 🔙")]
         ], resize_keyboard=True, is_persistent=True
     )
     await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
@@ -13252,7 +13653,7 @@ async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
         "enviam os vídeos para serem analisados pela IA.\n\n"
         "📤 <b>Tópico de Postagem:</b> o tópico onde o robô publica automaticamente os vídeos "
         "que foram aprovados na análise.\n\n"
-        "<i>(Os alvos das mensagens automáticas de divulgação ficam em Configurações do Robô de Rotina do Grupo Público ⏰)</i>\n\n"
+        "<i>(Os alvos das mensagens automáticas de divulgação ficam em ⚙️ Automações do Grupo Público › Rotinas do Público ⏰)</i>\n\n"
         "Selecione qual tópico deseja alterar:"
     )
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
