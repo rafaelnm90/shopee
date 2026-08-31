@@ -9096,7 +9096,7 @@ async def painel_achadinhos(message: types.Message, state: FSMContext):
 async def forcar_garimpo_achadinhos(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     await message.answer("🚀 <b>Motor Acionado!</b> O garimpo extrairá as melhores ofertas nos nichos mapeados de forma silenciosa no servidor. Em instantes elas cairão nos canais.", parse_mode="HTML")
-    asyncio.create_task(processar_garimpo_automatico(forcado=True))
+    criar_task(processar_garimpo_automatico(forcado=True))
 
 # --- FLUXO: ADICIONAR NICHO ---
 @dp.message(AchadinhosFluxo.menu_principal, F.text == "Adicionar Nicho ➕")
@@ -9635,7 +9635,7 @@ async def processar_esvaziar_clones(message: types.Message, state: FSMContext):
     await state.clear()
     
     # Chama o processo de forma assíncrona para não travar a interface do Telegram
-    asyncio.create_task(esvaziar_fila_espiao_background(message.chat.id))
+    criar_task(esvaziar_fila_espiao_background(message.chat.id))
 
 async def esvaziar_fila_espiao_background(chat_id):
     if EXIBIR_LOGS: logger.info("🚀 [Espião] Iniciando rajada forçada em background...")
@@ -14031,7 +14031,7 @@ async def armar_cronometro_wizard(chat_id, message_id, thread_id, state: FSMCont
         texto_wizard_base=texto_base,
         sessao_wizard_id=sessao_id
     )
-    asyncio.create_task(cronometro_sessao_wizard(chat_id, message_id, thread_id, state, sessao_id, teclado))
+    criar_task(cronometro_sessao_wizard(chat_id, message_id, thread_id, state, sessao_id, teclado))
 
 async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMContext, sessao_id, teclado):
     """Edita a mensagem do passo a cada intervalo, descontando o tempo. Ao zerar, cancela a sessão."""
@@ -14157,7 +14157,7 @@ async def abrir_confirmacao_expiracao(chat_id, message_id, thread_id, state: FSM
         pass
 
     if EXIBIR_LOGS: logger.info(f"🛟 [Wizard] Prazo esgotado com material completo. Pergunta de resgate aberta para o dono {dono_id}.")
-    asyncio.create_task(cronometro_confirmacao_expiracao(chat_id, message_id, thread_id, state, sessao_conf, teclado))
+    criar_task(cronometro_confirmacao_expiracao(chat_id, message_id, thread_id, state, sessao_conf, teclado))
 
 async def cronometro_confirmacao_expiracao(chat_id, message_id, thread_id, state: FSMContext, sessao_conf, teclado):
     """1 minuto para decidir. Silêncio absoluto = publicação automática da oferta."""
