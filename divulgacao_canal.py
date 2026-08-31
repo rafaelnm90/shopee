@@ -8,6 +8,7 @@ import random
 from datetime import datetime, timedelta
 import re
 from telethon import TelegramClient
+from telethon.errors import FloodWaitError, PeerFloodError, ChatWriteForbiddenError, UserBannedInChannelError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
 load_dotenv()
@@ -98,298 +99,280 @@ def salvar_config_bd_divulgacao(chave, dados):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar '{chave}' no SQLite: {e}")
 
-# 4. FUNÇÕES DE IA E AGENDAMENTO
-def carregar_configuracoes():
-    dados = ler_config_bd_divulgacao("alvos_divulgacao", padrao=None)
+# 4. MOTOR UNIFICADO DE DIVULGAÇÃO
+# ✅ Consolidação: Principal, Viral e Público usam o MESMO motor. Antes eram
+# blocos clonados e toda correção precisava ser aplicada N vezes — na prática
+# nunca era (a validação de alvo só existia no Viral). Para criar um escopo
+# novo agora basta acrescentar uma entrada neste dicionário.
+ESCOPOS = {
+    "principal": {
+        "rotulo": "PRINCIPAL",
+        "chave": "alvos_divulgacao",
+        "rotulo_link": "LINK PARA O GRUPO:",
+        "link": "https://t.me/shopee_video_afiliado",
+        "prompt": (
+            "Você atua como um copywriter persuasivo e focado em conversão, divulgando um grupo do Telegram exclusivo para afiliados da Shopee. "
+            "Crie UMA ÚNICA FRASE curta, altamente chamativa, convidativa e diferente de todas as anteriores. A cada nova solicitação, varie completamente a estrutura, o tom e a estratégia de persuasão para garantir originalidade."
+            "Foque em atrair o usuário oferecendo acesso imediato a um acervo de ouro com vídeos prontos e validados que aumentam as comissões e visualizações na plataforma. "
+            "É OBRIGATÓRIO informar organicamente na frase que o acesso ao grupo é GRÁTIS (exatamente assim, em letras maiúsculas). "
+            "OBRIGATÓRIO: Inicie a sua resposta com uma sequência de 10 a 15 emojis repetidos de impacto (como 🚨, 🚀, ⚠️, 🔥 ou 💰) para criar uma forte barreira visual na tela, trocando a combinação a cada execução. "
+            "Use um tom entusiasmado, adicione outros emojis variados ao longo do texto para despertar interesse orgânico, mas sem parecer apelativo ou alarmista. "
+            "Entregue APENAS a frase final, sem aspas."
+        ),
+        "fallback": "🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨\nQuer turbinar suas vendas hoje? Acesse nosso acervo de ouro com vídeos validados e prontos para viralizar na Shopee!",
+    },
+    "viral": {
+        "rotulo": "VIRAL",
+        "chave": "alvos_divulgacao_viral",
+        "rotulo_link": "LINK PARA O GRUPO VIRAL:",
+        "link": "https://t.me/acervo_viral_shopee",
+        "prompt": (
+            "Você atua como um copywriter persuasivo e focado em conversão, divulgando um grupo do Telegram exclusivo para afiliados da Shopee chamado 'Acervo Viral Shopee'. "
+            "Crie UMA ÚNICA FRASE curta, altamente chamativa, convidativa e diferente de todas as anteriores. "
+            "Foque em atrair os afiliados oferecendo acesso imediato aos vídeos mais virais, achados do TikTok e tendências do momento, mantendo a mesma pegada agressiva de aumentar comissões e faturamento em alta. "
+            "É OBRIGATÓRIO informar organicamente na frase que o acesso ao grupo é GRÁTIS (exatamente assim, em letras maiúsculas). "
+            "OBRIGATÓRIO: Inicie a sua resposta com uma sequência de 10 a 15 emojis repetidos de impacto (como 🚨, 🚀, ⚠️, 🔥 ou 💰) para criar uma forte barreira visual na tela. "
+            "Use um tom entusiasmado e adicione outros emojis variados. Entregue APENAS a frase final, sem aspas."
+        ),
+        "fallback": "🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨\nAfiliado, venha pegar os produtos mais virais e bombados do momento no nosso acervo 100% GRÁTIS!",
+    },
+    "publico": {
+        "rotulo": "PÚBLICO",
+        "chave": "alvos_divulgacao_publico",
+        "rotulo_link": "ENTRE NO GRUPO:",
+        "link": "https://t.me/GrupoPublicoAfiliados",
+        "prompt": (
+            "Você é um copywriter que divulga uma comunidade do Telegram para afiliados da Shopee. "
+            "Escreva UMA ÚNICA FRASE curta e convidativa, diferente das anteriores, variando estrutura e tom a cada execução. "
+            "Destaque que é uma comunidade ativa onde os membros trocam vídeos, achados e experiências, e que a entrada é GRÁTIS (exatamente assim, em maiúsculas). "
+            "Use no máximo 3 emojis no total, distribuídos naturalmente pelo texto. "
+            "Tom cordial e direto, como quem convida um colega — nada de urgência artificial ou alarmismo. "
+            "Entregue APENAS a frase final, sem aspas."
+        ),
+        "fallback": "📬 Comunidade de afiliados Shopee: vídeos, achados e troca de experiências entre quem vende de verdade. Entrada GRÁTIS.",
+    },
+    "achadinhos": {
+        "rotulo": "ACHADINHOS",
+        "chave": "alvos_divulgacao_achadinhos",
+        "rotulo_link": "ENTRE NO CANAL:",
+        "link": "https://t.me/centraldeachadinhosvip",
+        "prompt": (
+            "Você é um copywriter que divulga um canal do Telegram de achadinhos e ofertas da Shopee. "
+            "Escreva UMA ÚNICA FRASE curta e convidativa, diferente das anteriores, variando estrutura e tom a cada execução. "
+            "Destaque que o canal garimpa ofertas e cupons de forma automática, o dia inteiro, e que a entrada é GRÁTIS (exatamente assim, em maiúsculas). "
+            "Use no máximo 3 emojis no total, distribuídos naturalmente pelo texto. "
+            "Tom cordial e direto, como quem indica um achado para um amigo — nada de urgência artificial ou alarmismo. "
+            "Entregue APENAS a frase final, sem aspas."
+        ),
+        "fallback": "🛍️ Central de Achadinhos: ofertas e cupons da Shopee garimpados automaticamente, o dia todo. Entrada GRÁTIS.",
+    },
+}
+
+# 🛡️ Cooldown global de flood. Quando o Telegram devolve FloodWait/PeerFlood,
+# TODOS os escopos param até a punição expirar. Sem isto os jobs já agendados
+# seguiam batendo na porta durante o castigo — que é o caminho de uma limitação
+# temporária virar permanente.
+bloqueio_flood_ate = None
+
+
+def carregar_config_escopo(escopo):
+    conf = ESCOPOS[escopo]
+    dados = ler_config_bd_divulgacao(conf["chave"], padrao=None)
     if not dados and EXIBIR_LOGS:
-        logger.warning("⚠️ Configuração 'alvos_divulgacao' não encontrada no banco. Aguardando o bot principal criá-la.")
+        logger.warning(f"⚠️ [{conf['rotulo']}] Configuração '{conf['chave']}' não encontrada no banco. Aguardando o bot principal criá-la.")
     return dados
 
-def carregar_configuracoes_viral():
-    dados = ler_config_bd_divulgacao("alvos_divulgacao_viral", padrao=None)
-    if not dados and EXIBIR_LOGS:
-        logger.warning("⚠️ Configuração 'alvos_divulgacao_viral' não encontrada no banco. Aguardando o bot principal criá-la.")
-    return dados
 
-async def gerar_texto_divulgacao(repeticoes=6):
-    if EXIBIR_LOGS: print(f"✅ Função iniciada com {repeticoes} repetições.")
-    if EXIBIR_LOGS: logger.info("🚀 Montando prompt persuasivo focado em engajamento e conversão...")
-    prompt = (
-        "Você atua como um copywriter persuasivo e focado em conversão, divulgando um grupo do Telegram exclusivo para afiliados da Shopee. "
-        "Crie UMA ÚNICA FRASE curta, altamente chamativa, convidativa e diferente de todas as anteriores. A cada nova solicitação, varie completamente a estrutura, o tom e a estratégia de persuasão para garantir originalidade."
-        "Foque em atrair o usuário oferecendo acesso imediato a um acervo de ouro com vídeos prontos e validados que aumentam as comissões e visualizações na plataforma. "
-        "É OBRIGATÓRIO informar organicamente na frase que o acesso ao grupo é GRÁTIS (exatamente assim, em letras maiúsculas). "
-        "OBRIGATÓRIO: Inicie a sua resposta com uma sequência de 10 a 15 emojis repetidos de impacto (como 🚨, 🚀, ⚠️, 🔥 ou 💰) para criar uma forte barreira visual na tela, trocando a combinação a cada execução. "
-        "Use um tom entusiasmado, adicione outros emojis variados ao longo do texto para despertar interesse orgânico, mas sem parecer apelativo ou alarmista. "
-        "Entregue APENAS a frase final, sem aspas."
-    )
-    
-    frase_ia = await gerar_texto_gemini(prompt, EXIBIR_LOGS)
+async def gerar_texto(escopo, repeticoes=1):
+    conf = ESCOPOS[escopo]
+    if EXIBIR_LOGS: logger.info(f"🚀 [{conf['rotulo']}] Montando texto de divulgação ({repeticoes}x)...")
 
+    frase_ia = await gerar_texto_gemini(conf["prompt"], EXIBIR_LOGS)
     if not frase_ia:
-        if EXIBIR_LOGS: logger.error("❌ Todos os modelos falharam. A utilizar frase padrão de segurança.")
-        frase_ia = "🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨\nQuer turbinar suas vendas hoje? Acesse nosso acervo de ouro com vídeos validados e prontos para viralizar na Shopee!"
+        if EXIBIR_LOGS: logger.error(f"❌ [{conf['rotulo']}] Todos os modelos falharam. Usando frase padrão de segurança.")
+        frase_ia = conf["fallback"]
 
-    # Monta o bloco curto com o link obrigatório e a quebra de linha em branco
-    bloco_unico = f"{frase_ia}\n\nLINK PARA O GRUPO:👇\nhttps://t.me/shopee_video_afiliado"
-    
-    if EXIBIR_LOGS: logger.info(f"🔄 Multiplicando bloco de texto {repeticoes} vezes na mesma mensagem.")
-    
-    texto_multiplicado = "\n\n\n".join([bloco_unico] * repeticoes)
-    
-    return texto_multiplicado
+    bloco_unico = f"{frase_ia}\n\n{conf['rotulo_link']}👇\n{conf['link']}"
 
-async def enviar_mensagem(alvo):
-    if EXIBIR_LOGS: logger.info(f"🔍 Validando status de pausa antes do disparo para {alvo}...")
-    config = carregar_configuracoes()
-    if config and config.get("pausado", False):
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo cancelado: O sistema de SPAM está pausado no momento.")
+    if repeticoes <= 1:
+        return bloco_unico
+    return "\n\n\n".join([bloco_unico] * repeticoes)
+
+
+async def enviar_mensagem(escopo, alvo):
+    global bloqueio_flood_ate
+    conf = ESCOPOS[escopo]
+    rotulo = conf["rotulo"]
+
+    # 🛡️ Respeita castigo de flood vigente, tenha ele vindo de qualquer escopo.
+    if bloqueio_flood_ate and datetime.now() < bloqueio_flood_ate:
+        restante = int((bloqueio_flood_ate - datetime.now()).total_seconds())
+        if EXIBIR_LOGS: logger.warning(f"🛑 [{rotulo}] Disparo abortado: cooldown de flood ativo por mais {restante}s.")
         return
-        
+
+    config = carregar_config_escopo(escopo)
+    if config and config.get("pausado", False):
+        if EXIBIR_LOGS: logger.warning(f"🛑 [{rotulo}] Disparo cancelado: escopo pausado no momento.")
+        return
+
     config_alvos = config.get("config_alvos", {}) if config else {}
     conf_alvo = config_alvos.get(alvo, {})
-    
-    replicas = conf_alvo.get("replicas", config.get("replicas_mensagem", 5) if config else 5)
-    repeticoes = conf_alvo.get("repeticoes", config.get("repeticoes_internas", 6) if config else 6)
-    
-    texto = await gerar_texto_divulgacao(repeticoes)
+
+    replicas = conf_alvo.get("replicas", config.get("replicas_mensagem", 1) if config else 1)
+    repeticoes = conf_alvo.get("repeticoes", config.get("repeticoes_internas", 1) if config else 1)
+
+    texto = await gerar_texto(escopo, repeticoes)
     try:
-        if EXIBIR_LOGS: logger.info(f"🚦 Aguardando sinal verde do banco de dados para {alvo}...")
+        if EXIBIR_LOGS: logger.info(f"🚦 [{rotulo}] Aguardando sinal verde para {alvo}...")
         async with telegram_lock:
-            # ✅ Proteção ativa: Reconecta caso o socket tenha caído em background
+            # ✅ Proteção ativa: reconecta caso o socket tenha caído em background
             if not client.is_connected():
-                if EXIBIR_LOGS: logger.info("🔄 [Auto-cura] Conexão perdida detectada. Forçando reconexão com o Telegram...")
+                if EXIBIR_LOGS: logger.info(f"🔄 [{rotulo}] [Auto-cura] Conexão perdida. Forçando reconexão...")
                 await client.connect()
-                
-            if EXIBIR_LOGS: logger.info(f"🟢 Sinal verde! Acessando o Telegram para {alvo}...")
+
             entidade = await client.get_entity(normalizar_alvo(alvo))
-            
-            if EXIBIR_LOGS: logger.info(f"📤 Iniciando disparo em rajada de {replicas} mensagens para {alvo}...")
-            
+            if EXIBIR_LOGS: logger.info(f"📤 [{rotulo}] Enviando {replicas} mensagem(ns) para {alvo}...")
+
             for i in range(replicas):
                 await client.send_message(entidade, texto)
-                if EXIBIR_LOGS: logger.info(f"📩 Mensagem {i+1}/{replicas} enviada.")
-                if i < replicas - 1: # Pausa apenas se houver uma próxima mensagem
-                    await asyncio.sleep(1.5) # Pausa de segurança obrigatória contra bloqueio de flood
-            
-            if EXIBIR_LOGS: logger.info(f"✅ Rajada de {replicas} mensagens concluída com sucesso para {alvo}!")
-    except Exception as e:
-        erro_str = str(e).lower()
-        if "chat is restricted" in erro_str or "forbidden" in erro_str:
-            if EXIBIR_LOGS: logger.warning(f"🚫 Omitido: O chat {alvo} é restrito ou o bot foi silenciado neste grupo.")
-        elif "database is locked" in erro_str:
-            if EXIBIR_LOGS: logger.error(f"🔒 Bloqueio de concorrência no SQLite ao acessar {alvo}. Tentando recuperar na próxima rodada.")
-        else:
-            if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao enviar rajada para {alvo}: {e}")
-            registrar_erro_json(f"enviar_mensagem ({alvo}): {e}", origem="divulgacao_canal.py")
-
-async def gerar_texto_divulgacao_viral(repeticoes=6):
-    if EXIBIR_LOGS: logger.info(f"🚀 [VIRAL] Montando prompt persuasivo para o Acervo Viral...")
-    prompt = (
-        "Você atua como um copywriter persuasivo e focado em conversão, divulgando um grupo do Telegram exclusivo para afiliados da Shopee chamado 'Acervo Viral Shopee'. "
-        "Crie UMA ÚNICA FRASE curta, altamente chamativa, convidativa e diferente de todas as anteriores. "
-        "Foque em atrair os afiliados oferecendo acesso imediato aos vídeos mais virais, achados do TikTok e tendências do momento, mantendo a mesma pegada agressiva de aumentar comissões e faturamento em alta. "
-        "É OBRIGATÓRIO informar organicamente na frase que o acesso ao grupo é GRÁTIS (exatamente assim, em letras maiúsculas). "
-        "OBRIGATÓRIO: Inicie a sua resposta com uma sequência de 10 a 15 emojis repetidos de impacto (como 🚨, 🚀, ⚠️, 🔥 ou 💰) para criar uma forte barreira visual na tela. "
-        "Use um tom entusiasmado e adicione outros emojis variados. Entregue APENAS a frase final, sem aspas."
-    )
-    
-    frase_ia = await gerar_texto_gemini(prompt, EXIBIR_LOGS)
-
-    if not frase_ia:
-        if EXIBIR_LOGS: logger.error("❌ [VIRAL] Todos os modelos falharam. A utilizar frase padrão de segurança.")
-        frase_ia = "🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨🚨\nAfiliado, venha pegar os produtos mais virais e bombados do momento no nosso acervo 100% GRÁTIS!"
-
-    bloco_unico = f"{frase_ia}\n\nLINK PARA O GRUPO VIRAL:👇\nhttps://t.me/acervo_viral_shopee"
-    
-    if EXIBIR_LOGS: logger.info(f"🔄 [VIRAL] Multiplicando bloco de texto {repeticoes} vezes na mesma mensagem.")
-    
-    texto_multiplicado = "\n\n\n".join([bloco_unico] * repeticoes)
-    
-    return texto_multiplicado
-
-async def enviar_mensagem_viral(alvo):
-    if EXIBIR_LOGS: logger.info(f"🔍 [VIRAL] Validando status de pausa antes do disparo para {alvo}...")
-    config = carregar_configuracoes_viral()
-    if config and config.get("pausado", False):
-        if EXIBIR_LOGS: logger.warning("🛑 [VIRAL] Disparo cancelado: O sistema de SPAM Viral está pausado no momento.")
-        return
-        
-    config_alvos = config.get("config_alvos", {}) if config else {}
-    conf_alvo = config_alvos.get(alvo, {})
-    
-    replicas = conf_alvo.get("replicas", config.get("replicas_mensagem", 5) if config else 5)
-    repeticoes = conf_alvo.get("repeticoes", config.get("repeticoes_internas", 6) if config else 6)
-    
-    texto = await gerar_texto_divulgacao_viral(repeticoes)
-    try:
-        if EXIBIR_LOGS: logger.info(f"🚦 [VIRAL] Aguardando sinal verde do banco de dados para {alvo}...")
-        async with telegram_lock:
-            # ✅ Proteção ativa: Reconecta caso o socket tenha caído em background
-            if not client.is_connected():
-                if EXIBIR_LOGS: logger.info("🔄 [Auto-cura] Conexão perdida detectada no módulo Viral. Forçando reconexão...")
-                await client.connect()
-                
-            if EXIBIR_LOGS: logger.info(f"🟢 [VIRAL] Sinal verde! Acessando o Telegram para {alvo}...")
-            entidade = await client.get_entity(normalizar_alvo(alvo))
-            
-            if EXIBIR_LOGS: logger.info(f"📤 [VIRAL] Iniciando disparo em rajada de {replicas} mensagens para {alvo}...")
-            
-            for i in range(replicas):
-                await client.send_message(entidade, texto)
-                if EXIBIR_LOGS: logger.info(f"📩 [VIRAL] Mensagem {i+1}/{replicas} enviada.")
+                if EXIBIR_LOGS: logger.info(f"📩 [{rotulo}] Mensagem {i+1}/{replicas} enviada.")
                 if i < replicas - 1:
                     await asyncio.sleep(1.5)
-            
-            if EXIBIR_LOGS: logger.info(f"✅ [VIRAL] Rajada de {replicas} mensagens concluída com sucesso para {alvo}!")
+
+            if EXIBIR_LOGS: logger.info(f"✅ [{rotulo}] Envio concluído para {alvo}.")
+
+    except FloodWaitError as e:
+        # ✅ Antes caía no except genérico e o agendador continuava disparando
+        # DENTRO da janela de punição. Agora todo o motor congela.
+        espera = int(getattr(e, "seconds", 60) or 60)
+        bloqueio_flood_ate = datetime.now() + timedelta(seconds=espera + 30)
+        if EXIBIR_LOGS: logger.error(f"⏳ [{rotulo}] FloodWait de {espera}s em {alvo}. Motor congelado até {bloqueio_flood_ate.strftime('%H:%M:%S')}.")
+        registrar_erro_json(f"FloodWait {espera}s ({escopo}/{alvo})", origem="divulgacao_canal.py")
+
+    except PeerFloodError:
+        # 🚨 Sinal de conta marcada como spam. 1h de silêncio total.
+        bloqueio_flood_ate = datetime.now() + timedelta(hours=1)
+        if EXIBIR_LOGS: logger.critical(f"🚨 [{rotulo}] PeerFloodError em {alvo}: a CONTA foi sinalizada como spam. Motor congelado por 1 hora. Reduza frequência e réplicas antes de retomar.")
+        registrar_erro_json(f"PeerFloodError ({escopo}/{alvo}) - conta sinalizada", origem="divulgacao_canal.py")
+
+    except (ChatWriteForbiddenError, UserBannedInChannelError):
+        if EXIBIR_LOGS: logger.warning(f"🚫 [{rotulo}] Sem permissão de escrita em {alvo} (restrito, silenciado ou banido). Omitindo.")
+
     except Exception as e:
         erro_str = str(e).lower()
         if "chat is restricted" in erro_str or "forbidden" in erro_str:
-            if EXIBIR_LOGS: logger.warning(f"🚫 [VIRAL] Omitido: Permissão negada no chat {alvo}.")
+            if EXIBIR_LOGS: logger.warning(f"🚫 [{rotulo}] Omitido: o chat {alvo} é restrito ou a conta foi silenciada.")
         elif "database is locked" in erro_str:
-            if EXIBIR_LOGS: logger.error(f"🔒 [VIRAL] Bloqueio de concorrência no SQLite ao acessar {alvo}.")
+            if EXIBIR_LOGS: logger.error(f"🔒 [{rotulo}] Bloqueio de concorrência no SQLite ao acessar {alvo}.")
         else:
-            if EXIBIR_LOGS: logger.error(f"❌ [VIRAL] Falha ao enviar rajada para {alvo}: {e}")
-            registrar_erro_json(f"enviar_mensagem_viral ({alvo}): {e}", origem="divulgacao_canal.py")
+            if EXIBIR_LOGS: logger.error(f"❌ [{rotulo}] Falha ao enviar para {alvo}: {e}")
+            registrar_erro_json(f"enviar_mensagem ({escopo}/{alvo}): {e}", origem="divulgacao_canal.py")
 
-# Novo dicionário global para rastrear os agendamentos cruzando a virada das horas
+
+# Agendamentos já sorteados na hora corrente, por alvo. COMPARTILHADO entre
+# TODOS os escopos: se o mesmo grupo estiver em duas listas, a trava de 15
+# minutos continua valendo entre elas.
+#
+# ⚠️ Guarda uma LISTA, não um datetime. A versão anterior sobrescrevia o valor
+# e só comparava contra o ÚLTIMO horário sorteado — bastava intercalar escopos
+# para furar a trava (14:15 e 14:18 conviviam porque a memória, naquele
+# instante, guardava 14:57). Com 4 escopos o furo apareceria com mais força.
 ultimos_agendamentos_por_alvo = {}
+
 
 def programar_envios_da_hora():
     global ultimos_agendamentos_por_alvo
     agora = datetime.now()
-    INTERVALO_MINIMO = 15 # Distanciamento rigoroso de 15 minutos
-    
-    # --- PARTE 1: AGENDAMENTO DO SPAM PRINCIPAL ---
-    config_princ = carregar_configuracoes()
-    if config_princ and config_princ.get("alvos") and not config_princ.get("pausado", False):
-        alvos_princ = config_princ["alvos"]
-        freq_global_princ = config_princ.get("frequencia_por_hora", 0)
-        config_alvos_princ = config_princ.get("config_alvos", {})
-        
-        for alvo in alvos_princ:
-            conf_alvo = config_alvos_princ.get(alvo, {})
-            freq_alvo = conf_alvo.get("frequencia", freq_global_princ)
-            
-            if freq_alvo <= 0: continue
-            if EXIBIR_LOGS: logger.info(f"🔄 Sorteando {freq_alvo} envios PRINCIPAIS para {alvo} na hora atual ({agora.hour}h)...")
+    INTERVALO_MINIMO = 15  # Distanciamento rigoroso entre disparos no mesmo alvo
+
+    # Descarta o que já passou da janela para o dicionário não crescer sem fim.
+    corte = agora - timedelta(hours=1)
+    for _alvo in list(ultimos_agendamentos_por_alvo):
+        restantes = [h for h in ultimos_agendamentos_por_alvo[_alvo] if h > corte]
+        if restantes:
+            ultimos_agendamentos_por_alvo[_alvo] = restantes
+        else:
+            del ultimos_agendamentos_por_alvo[_alvo]
+
+    for escopo, conf in ESCOPOS.items():
+        rotulo = conf["rotulo"]
+        config = carregar_config_escopo(escopo)
+
+        if not config or not config.get("alvos") or config.get("pausado", False):
+            continue
+
+        alvos = config["alvos"]
+        freq_global = config.get("frequencia_por_hora", 0)
+        config_alvos = config.get("config_alvos", {})
+
+        for alvo in alvos:
+            conf_alvo = config_alvos.get(alvo, {})
+            freq_alvo = conf_alvo.get("frequencia", freq_global)
+
+            if freq_alvo <= 0:
+                continue
+
+            if EXIBIR_LOGS: logger.info(f"🔄 [{rotulo}] Sorteando {freq_alvo} envio(s) para {alvo} na hora atual ({agora.hour}h)...")
             espacamento_ideal = 58 // freq_alvo if freq_alvo > 0 else 58
 
             for i in range(freq_alvo):
                 sucesso = False
                 min_inicio_busca = (i * espacamento_ideal) + 1
                 min_fim_busca = min(((i + 1) * espacamento_ideal), 59)
-                if min_fim_busca <= min_inicio_busca: min_fim_busca = 59
-                    
+                if min_fim_busca <= min_inicio_busca:
+                    min_fim_busca = 59
+
                 for tentativa in range(100):
                     minuto_sorteado = random.randint(min_inicio_busca, min_fim_busca)
                     horario_disparo = agora.replace(minute=minuto_sorteado, second=random.randint(0, 59))
-                    
-                    ultimo_envio = ultimos_agendamentos_por_alvo.get(alvo)
-                    colisao = False
-                    
-                    if ultimo_envio and abs((horario_disparo - ultimo_envio).total_seconds() / 60) < INTERVALO_MINIMO:
-                        colisao = True
+
+                    # ✅ Compara contra TODOS os horários já sorteados para este
+                    # alvo nesta hora, não só contra o último.
+                    agendados = ultimos_agendamentos_por_alvo.get(alvo, [])
+                    colisao = any(
+                        abs((horario_disparo - h).total_seconds() / 60) < INTERVALO_MINIMO
+                        for h in agendados
+                    )
                     if horario_disparo < agora:
                         colisao = True
-                        
+
                     if not colisao:
-                        ultimos_agendamentos_por_alvo[alvo] = horario_disparo
-                        scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo, args=[alvo])
-                        if EXIBIR_LOGS: logger.info(f"✅ Disparo PRINCIPAL {i+1}/{freq_alvo} para {alvo} agendado às {horario_disparo.strftime('%H:%M:%S')}")
+                        ultimos_agendamentos_por_alvo.setdefault(alvo, []).append(horario_disparo)
+                        scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo, args=[escopo, alvo])
+                        if EXIBIR_LOGS: logger.info(f"✅ [{rotulo}] Disparo {i+1}/{freq_alvo} para {alvo} agendado às {horario_disparo.strftime('%H:%M:%S')}")
                         sucesso = True
                         break
-                        
-                if not sucesso:
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ {alvo} [{i+1}/{freq_alvo}]: Acionando fallback forçado PRINCIPAL.")
-                    ultimo_conhecido = ultimos_agendamentos_por_alvo.get(alvo, agora)
-                    horario_disparo_fallback = ultimo_conhecido + timedelta(minutes=INTERVALO_MINIMO + random.randint(1, 3))
-                    ultimos_agendamentos_por_alvo[alvo] = horario_disparo_fallback
-                    scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo_fallback, args=[alvo])
-                    if EXIBIR_LOGS: logger.info(f"🛡️ Fallback: Disparo {i+1} empurrado para {horario_disparo_fallback.strftime('%H:%M:%S')}")
 
-    # --- PARTE 2: AGENDAMENTO DO SPAM VIRAL ---
-    config_viral = carregar_configuracoes_viral()
-    if config_viral and config_viral.get("alvos") and not config_viral.get("pausado", False):
-        alvos_viral = config_viral["alvos"]
-        freq_global_viral = config_viral.get("frequencia_por_hora", 0)
-        config_alvos_viral = config_viral.get("config_alvos", {})
-        
-        for alvo in alvos_viral:
-            conf_alvo = config_alvos_viral.get(alvo, {})
-            freq_alvo = conf_alvo.get("frequencia", freq_global_viral)
-            
-            if freq_alvo <= 0: continue
-            if EXIBIR_LOGS: logger.info(f"🔄 [VIRAL] Sorteando {freq_alvo} envios para {alvo} na hora atual ({agora.hour}h)...")
-            espacamento_ideal = 58 // freq_alvo if freq_alvo > 0 else 58
-
-            for i in range(freq_alvo):
-                sucesso = False
-                min_inicio_busca = (i * espacamento_ideal) + 1
-                min_fim_busca = min(((i + 1) * espacamento_ideal), 59)
-                if min_fim_busca <= min_inicio_busca: min_fim_busca = 59
-                    
-                for tentativa in range(100):
-                    minuto_sorteado = random.randint(min_inicio_busca, min_fim_busca)
-                    horario_disparo = agora.replace(minute=minuto_sorteado, second=random.randint(0, 59))
-                    
-                    # A mágica do cruzamento: Ele checa o mesmo dicionário de histórico do alvo, evitando colisões com o Principal
-                    ultimo_envio = ultimos_agendamentos_por_alvo.get(alvo)
-                    colisao = False
-                    
-                    if ultimo_envio and abs((horario_disparo - ultimo_envio).total_seconds() / 60) < INTERVALO_MINIMO:
-                        colisao = True
-                    if horario_disparo < agora:
-                        colisao = True
-                        
-                    if not colisao:
-                        ultimos_agendamentos_por_alvo[alvo] = horario_disparo
-                        scheduler.add_job(enviar_mensagem_viral, 'date', run_date=horario_disparo, args=[alvo])
-                        if EXIBIR_LOGS: logger.info(f"✅ [VIRAL] Disparo {i+1}/{freq_alvo} para {alvo} agendado às {horario_disparo.strftime('%H:%M:%S')}")
-                        sucesso = True
-                        break
-                        
                 if not sucesso:
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ [VIRAL] {alvo} [{i+1}/{freq_alvo}]: Acionando fallback forçado.")
-                    ultimo_conhecido = ultimos_agendamentos_por_alvo.get(alvo, agora)
+                    if EXIBIR_LOGS: logger.warning(f"⚠️ [{rotulo}] {alvo} [{i+1}/{freq_alvo}]: acionando fallback forçado.")
+                    agendados = ultimos_agendamentos_por_alvo.get(alvo, [])
+                    ultimo_conhecido = max(agendados) if agendados else agora
                     horario_disparo_fallback = ultimo_conhecido + timedelta(minutes=INTERVALO_MINIMO + random.randint(1, 3))
-                    ultimos_agendamentos_por_alvo[alvo] = horario_disparo_fallback
-                    scheduler.add_job(enviar_mensagem_viral, 'date', run_date=horario_disparo_fallback, args=[alvo])
-                    if EXIBIR_LOGS: logger.info(f"🛡️ [VIRAL] Fallback: Disparo {i+1} empurrado para {horario_disparo_fallback.strftime('%H:%M:%S')}")
+                    ultimos_agendamentos_por_alvo.setdefault(alvo, []).append(horario_disparo_fallback)
+                    scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo_fallback, args=[escopo, alvo])
+                    if EXIBIR_LOGS: logger.info(f"🛡️ [{rotulo}] Fallback: disparo {i+1} empurrado para {horario_disparo_fallback.strftime('%H:%M:%S')}")
+
 
 async def monitorar_comandos():
     while True:
-        # 1. Verifica Comandos do SPAM Principal
-        config_princ = carregar_configuracoes()
-        if config_princ and config_princ.get("forcar_disparo"):
-            if config_princ.get("pausado", False):
-                if EXIBIR_LOGS: logger.warning("🛑 Comando forçado ignorado: O sistema de SPAM Principal está pausado.")
-                config_princ["forcar_disparo"] = False
-                salvar_config_bd_divulgacao("alvos_divulgacao", config_princ)
-            else:
-                if EXIBIR_LOGS: logger.info("🚀 Comando de DISPARO FORÇADO PRINCIPAL detectado! Iniciando rajada...")
-                config_princ["forcar_disparo"] = False
-                salvar_config_bd_divulgacao("alvos_divulgacao", config_princ)
-                
-                alvos_princ = config_princ.get("alvos", [])
-                for alvo in alvos_princ:
-                    await enviar_mensagem(alvo)
+        for escopo, conf in ESCOPOS.items():
+            rotulo = conf["rotulo"]
+            config = carregar_config_escopo(escopo)
 
-        # 2. Verifica Comandos do SPAM Viral
-        config_viral = carregar_configuracoes_viral()
-        if config_viral and config_viral.get("forcar_disparo"):
-            if config_viral.get("pausado", False):
-                if EXIBIR_LOGS: logger.warning("🛑 [VIRAL] Comando forçado ignorado: O sistema de SPAM Viral está pausado.")
-                config_viral["forcar_disparo"] = False
-                salvar_config_bd_divulgacao("alvos_divulgacao_viral", config_viral)
-            else:
-                if EXIBIR_LOGS: logger.info("🚀 [VIRAL] Comando de DISPARO FORÇADO VIRAL detectado! Iniciando rajada...")
-                config_viral["forcar_disparo"] = False
-                salvar_config_bd_divulgacao("alvos_divulgacao_viral", config_viral)
-                
-                alvos_viral = config_viral.get("alvos", [])
-                for alvo in alvos_viral:
-                    await enviar_mensagem_viral(alvo)
+            if not config or not config.get("forcar_disparo"):
+                continue
+
+            # Baixa a bandeira ANTES de disparar, para não repetir se algo travar.
+            config["forcar_disparo"] = False
+            salvar_config_bd_divulgacao(conf["chave"], config)
+
+            if config.get("pausado", False):
+                if EXIBIR_LOGS: logger.warning(f"🛑 [{rotulo}] Comando forçado ignorado: escopo pausado.")
+                continue
+
+            if EXIBIR_LOGS: logger.info(f"🚀 [{rotulo}] Comando de DISPARO FORÇADO detectado!")
+            for alvo in config.get("alvos", []):
+                await enviar_mensagem(escopo, alvo)
 
         await asyncio.sleep(5)
 
