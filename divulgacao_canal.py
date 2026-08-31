@@ -175,11 +175,26 @@ ESCOPOS = {
 bloqueio_flood_ate = None
 
 
+# Escopos que já avisaram "config ausente". Sem isto o monitorar_comandos(),
+# que roda de 5 em 5 segundos, repetiria o mesmo aviso ~17 mil vezes por dia
+# por escopo. Avisa uma vez e rearma se a configuração aparecer depois.
+_avisos_config_ausente = set()
+
+
 def carregar_config_escopo(escopo):
     conf = ESCOPOS[escopo]
     dados = ler_config_bd_divulgacao(conf["chave"], padrao=None)
-    if not dados and EXIBIR_LOGS:
-        logger.warning(f"⚠️ [{conf['rotulo']}] Configuração '{conf['chave']}' não encontrada no banco. Aguardando o bot principal criá-la.")
+
+    if not dados:
+        if escopo not in _avisos_config_ausente:
+            _avisos_config_ausente.add(escopo)
+            if EXIBIR_LOGS:
+                logger.warning(f"⚠️ [{conf['rotulo']}] Configuração '{conf['chave']}' ainda não existe no banco. Ela é criada quando você abre o painel no bot principal. Este aviso não se repete.")
+    elif escopo in _avisos_config_ausente:
+        _avisos_config_ausente.discard(escopo)
+        if EXIBIR_LOGS:
+            logger.info(f"✅ [{conf['rotulo']}] Configuração '{conf['chave']}' encontrada no banco.")
+
     return dados
 
 
