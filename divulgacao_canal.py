@@ -387,64 +387,6 @@ def programar_envios_da_hora():
                     scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo_fallback, args=[escopo, alvo])
                     if EXIBIR_LOGS: logger.info(f"🛡️ [{rotulo}] Fallback: disparo {i+1} empurrado para {horario_disparo_fallback.strftime('%H:%M:%S')}")
 
-
-async def sincronizar_nomes_topicos():
-    """🧵 Varre TODOS os grupos de fórum desta conta e grava, no cache
-    compartilhado, o nome do grupo e o nome de cada tópico.
-
-    Por que vive aqui e não no bot_mestre: a API de bot NÃO consegue ler nome
-    de tópico — só devolve o message_thread_id. Só o MTProto (conta de usuário)
-    tem o GetForumTopics. Como o cache fica no banco_dados.db compartilhado,
-    todos os painéis passam a exibir 'Grupo › Tópico' de uma vez.
-
-    Renomeou um tópico no Telegram? A próxima passagem atualiza sozinha.
-    """
-    grupos = topicos = 0
-    try:
-        if not client.is_connected():
-            await client.connect()
-
-        foruns = []
-        async for dialogo in client.iter_dialogs():
-            if getattr(dialogo.entity, "forum", False):
-                foruns.append(dialogo.entity)
-
-        for entidade in foruns:
-            chat_id = f"-100{entidade.id}"
-            salvar_nome_grupo(chat_id, entidade.title)
-            grupos += 1
-
-            try:
-                # O lock é pego por chamada, não pela varredura inteira: segurar
-                # por 30s atrasaria os disparos de divulgação sem necessidade.
-                async with telegram_lock:
-                    resposta = await client(GetForumTopicsRequest(
-                        peer=entidade, offset_date=0, offset_id=0,
-                        offset_topic=0, limit=100,
-                    ))
-                for t in resposta.topics:
-                    titulo = getattr(t, "title", None)
-                    if titulo:
-                        # Chave no formato que o formatar_nome_alvo procura.
-                        salvar_nome_grupo(f"{chat_id}_{t.id}", titulo)
-                        topicos += 1
-            except FloodWaitError as e:
-                espera = int(getattr(e, "seconds", 60) or 60)
-                if EXIBIR_LOGS: logger.warning(f"⏳ [Cache] FloodWait de {espera}s ao ler tópicos de {entidade.title}. Interrompendo a varredura.")
-                break
-            except Exception as e:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ [Cache] Não consegui ler os tópicos de {entidade.title}: {type(e).__name__}")
-
-            await asyncio.sleep(1)  # respiro entre grupos
-
-        if EXIBIR_LOGS:
-            logger.info(f"🧵 [Cache] Sincronizado: {grupos} grupo(s) de fórum, {topicos} tópico(s) nomeados.")
-
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Cache] Falha ao sincronizar nomes de tópicos: {e}")
-        registrar_erro_json(f"sincronizar_nomes_topicos: {e}", origem="divulgacao_canal.py")
-
-
 async def sincronizar_nomes_topicos():
     """🧵 Varre TODOS os grupos de fórum desta conta e grava, no cache
     compartilhado, o nome do grupo e o nome de cada tópico.
