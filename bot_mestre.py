@@ -14042,12 +14042,19 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
         restante -= INTERVALO_CRONOMETRO_WIZARD
 
         data = await state.get_data()
-        # O usuário avançou de passo (ou cancelou): este cronômetro morre em silêncio
-        if data.get("sessao_wizard_id") != sessao_id:
+        # O usuário avançou de passo (ou cancelou): este cronômetro se encerra.
+        # Logado porque uma saída muda aqui é indistinguível de uma task morta.
+        sessao_atual = data.get("sessao_wizard_id")
+        if sessao_atual != sessao_id:
+            if EXIBIR_LOGS:
+                motivo = "sessão trocada" if sessao_atual else "FSM limpo (state.clear)"
+                logger.info(f"⏹️ [Cronômetro] Encerrando sessão {sessao_id}: {motivo}. Restavam {restante}s.")
             return
 
         texto_base = data.get("texto_wizard_base")
         if not texto_base:
+            if EXIBIR_LOGS:
+                logger.warning(f"⚠️ [Cronômetro] Sessão {sessao_id} sem texto_wizard_base. Encerrando.")
             return
 
         try:
@@ -14713,6 +14720,20 @@ async def limpar_teclado_fantasma(message: types.Message):
         await message.delete()
         await aviso.delete()
     except: pass
+
+# 🧵 TASKS COM REFERÊNCIA FORTE
+# asyncio.create_task devolve uma task que o event loop só referencia de forma
+# FRACA — a documentação do Python avisa que ela pode ser coletada no meio da
+# execução. Task coletada morre sem exceção e sem log, que é exatamente o
+# sintoma do cronômetro travado em 03:00. Este conjunto segura a referência
+# até a task terminar sozinha.
+_tarefas_vivas = set()
+
+def criar_task(coro):
+    tarefa = asyncio.create_task(coro)
+    _tarefas_vivas.add(tarefa)
+    tarefa.add_done_callback(_tarefas_vivas.discard)
+    return tarefa
 
 # 🚨 CAPTURADOR DE FALHAS SILENCIOSAS
 # Quando um asyncio.create_task falha, a exceção some sem passar por except nenhum.
