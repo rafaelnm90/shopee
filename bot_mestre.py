@@ -2014,9 +2014,27 @@ async def coletar_metricas_diarias():
             acumulado_ontem = ler_metrica(f"posts_total_{nome}", 1) or 0
             salvar_metrica(hoje_str, f"posts_total_{nome}", acumulado_ontem + qtd)
 
+        # --- 4. Downloader: total acumulado e quantos afiliados já usaram ---
+        # A tabela downloads_totais nunca é zerada, então o total já é o número
+        # real desde sempre. O retrato diário é o que passa a existir a partir
+        # de agora — é ele que habilita os fatos de marco e de crescimento.
+        dl_total = dl_usuarios = 0
+        try:
+            conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+            cursor = conexao.cursor()
+            cursor.execute("SELECT COALESCE(SUM(total), 0), COUNT(*) FROM downloads_totais")
+            dl_total, dl_usuarios = cursor.fetchone()
+            conexao.close()
+            salvar_metrica(hoje_str, "downloads_total", dl_total or 0)
+            salvar_metrica(hoje_str, "downloads_usuarios", dl_usuarios or 0)
+        except Exception:
+            # A tabela só existe depois do primeiro download. Silêncio proposital.
+            pass
+
         if EXIBIR_LOGS:
             logger.info(f"📊 [Métricas] Retrato do dia salvo: "
-                        f"Principal {posts['principal']} vídeos | Viral {posts['viral']} | Público {posts['publico']}")
+                        f"Principal {posts['principal']} vídeos | Viral {posts['viral']} | Público {posts['publico']} "
+                        f"| Downloads {dl_total} ({dl_usuarios} afiliados)")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Métricas] Falha na coleta diária: {e}")
 
@@ -2036,12 +2054,60 @@ NOMES_CANAIS_PROVA = {
 }
 CHANCE_MODO_PROVA = 0.40   # 40% prova / 60% pedir
 
+# Pisos do downloader. Abaixo disso o número não impressiona e a escada segue
+# para os fatos de canal. Suba conforme o bot for crescendo.
+PISO_DOWNLOADS_TOTAL = 100
+PISO_DOWNLOADS_USUARIOS = 15
+PISO_DOWNLOADS_SEMANA = 20
+
+
+def _fato_downloader():
+    """Fatos de USO do baixador de vídeos. None se ainda não houver número digno.
+    Prova de uso vale mais que métrica de vaidade: membro entra e some, download
+    é alguém apertando o botão. Por isso entra no topo da escada do Público."""
+    total = ler_metrica("downloads_total", 0)
+    if total is None:
+        return None
+    usuarios = ler_metrica("downloads_usuarios", 0) or 0
+
+    # 1. Marco redondo cruzado hoje. O filtro pelo piso é essencial: a lista de
+    #    marcos foi feita para MEMBROS e começa em 10 — anunciar "passou de 10
+    #    vídeos" seria confessar que ninguém usa.
+    marco = marco_cruzado(total, ler_metrica("downloads_total", 1))
+    if marco and marco >= PISO_DOWNLOADS_TOTAL:
+        return f"o baixador de vídeos do grupo acabou de passar de {marco} vídeos entregues"
+
+    # 2. Total acumulado com quantas pessoas usaram. Vem antes do volume semanal
+    #    de propósito: o total sobe todo dia, então o número nunca empaca. O
+    #    semanal, sob crescimento estável, repetiria o mesmo valor por semanas.
+    if total >= PISO_DOWNLOADS_TOTAL and usuarios >= PISO_DOWNLOADS_USUARIOS:
+        return f"{total} vídeos já baixados no grupo por {usuarios} afiliados"
+
+    # 3. Só o total, quando ainda há poucos usuários distintos
+    if total >= PISO_DOWNLOADS_TOTAL:
+        return f"{total} vídeos já baixados pelo robô do grupo"
+
+    # 4. Volume da semana — socorre a fase inicial, antes do total cruzar o piso
+    semana = crescimento_metrica("downloads_total", 7)
+    if semana and semana >= PISO_DOWNLOADS_SEMANA:
+        return f"{semana} vídeos baixados no grupo nos últimos 7 dias"
+
+    return None
+
+
 def gerar_fato_prova(canal):
     """
     Desce a escada de fatos e devolve o mais forte que houver.
     None significa 'nenhum número digno' — a rotina volta ao modo PEDIR.
     """
     try:
+        # 0. Downloader — exclusivo do Grupo Público e mais forte que qualquer
+        #    métrica de canal, então é consultado antes de tudo.
+        if canal == "publico":
+            fato_dl = _fato_downloader()
+            if fato_dl:
+                return fato_dl
+
         chave_membros = f"membros_{canal}"
         chave_posts_dia = f"posts_dia_{canal}"
         chave_posts_total = f"posts_total_{canal}"
