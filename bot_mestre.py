@@ -14858,7 +14858,7 @@ async def wizard_acao_painel(callback: types.CallbackQuery, state: FSMContext):
     await renderizar_painel(callback.message.chat.id, callback.message.message_thread_id, state)
 
 @dp.message(SubmissaoUsuarioInterativa.painel)
-async def interceptar_envio_livre(message: types.Message, state: FSMContext):
+async def wizard_receber_item(message: types.Message, state: FSMContext):
     # 🔍 DIAGNÓSTICO TEMPORÁRIO — remover depois que o buscador estiver ok.
     # Este handler captura QUALQUER mensagem de grupo, então é o lugar certo
     # para ver o que chega quando o filtro do buscador não casa.
