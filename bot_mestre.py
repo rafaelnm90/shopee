@@ -14858,7 +14858,24 @@ async def wizard_acao_painel(callback: types.CallbackQuery, state: FSMContext):
     await renderizar_painel(callback.message.chat.id, callback.message.message_thread_id, state)
 
 @dp.message(SubmissaoUsuarioInterativa.painel)
-async def wizard_receber_item(message: types.Message, state: FSMContext):
+async def interceptar_envio_livre(message: types.Message, state: FSMContext):
+    # 🔍 DIAGNÓSTICO TEMPORÁRIO — remover depois que o buscador estiver ok.
+    # Este handler captura QUALQUER mensagem de grupo, então é o lugar certo
+    # para ver o que chega quando o filtro do buscador não casa.
+    if message.chat.id == BUSCA_GRUPO_ID:
+        try:
+            _estado = await state.get_state()
+        except Exception:
+            _estado = "<erro ao ler>"
+        logger.warning(
+            f"🔍 [Diag] chat={message.chat.id} thread={message.message_thread_id!r} "
+            f"is_topic={getattr(message, 'is_topic_message', None)!r} "
+            f"casaria_topico={(message.message_thread_id or 1) == BUSCA_TOPICO_ID} "
+            f"estado_fsm={_estado!r} "
+            f"tem_texto={bool(message.text)} "
+            f"texto={(message.text or '')[:40]!r}"
+        )
+
     permitido, config = checar_permissao_topico(message)
     if not permitido: return
 
