@@ -14279,6 +14279,275 @@ async def cronometro_confirmacao_expiracao(chat_id, message_id, thread_id, state
     await wizard_publicar_oferta(None, state, chat_forcado=chat_id, mencao_forcada=data.get("mencao_wizard"))
 
 # 1. GATILHO INICIAL: Qualquer mensagem fora de ordem aciona o botão de Iniciar
+# ==========================================================
+# --- 🔎 BUSCADOR DE PRODUTOS ---
+# O membro escreve o que procura no tópico e o robô devolve três opções
+# da Shopee com o link de afiliado.
+#
+# Por que TRÊS e não "o menor preço": a API varre só a Shopee e faz busca
+# por palavra-chave, não casamento de produto. Não dá para afirmar que algo
+# é o menor preço do mercado nem que dois resultados são o mesmo item.
+# Mostrar a faixa e deixar o membro escolher é honesto e mais útil.
+# ==========================================================
+BUSCA_GRUPO_ID = -1004460669033
+BUSCA_TOPICO_ID = 1          # 1 = General. Use 0 para desligar o buscador.
+BUSCA_LIMPAR_AVISOS = True   # apaga "Fulano entrou no grupo" do General
+BUSCA_LIMITE_DIARIO = 10     # por membro
+BUSCA_MIN_CARACTERES = 3
+BUSCA_NOTA_MINIMA = 4.0      # descarta vitrine podre
+BUSCA_RESULTADOS_API = 40
+
+
+def _iniciar_tabela_buscas():
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao.execute("""
+            CREATE TABLE IF NOT EXISTS buscas_diarias (
+                user_id INTEGER,
+                data TEXT,
+                total INTEGER DEFAULT 0,
+                PRIMARY KEY (user_id, data)
+            )
+        """)
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Busca] Falha ao criar tabela: {e}")
+
+
+def contar_buscas_hoje(user_id):
+    try:
+        hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("SELECT total FROM buscas_diarias WHERE user_id = ? AND data = ?", (user_id, hoje))
+        r = cursor.fetchone()
+        conexao.close()
+        return r[0] if r else 0
+    except Exception:
+        return 0
+
+
+def registrar_busca(user_id):
+    try:
+        hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao.execute("""
+            INSERT INTO buscas_diarias (user_id, data, total) VALUES (?, ?, 1)
+            ON CONFLICT(user_id, data) DO UPDATE SET total = total + 1
+        """, (user_id, hoje))
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Busca] Falha ao registrar: {e}")
+
+
+def _preco_num(oferta):
+    try:
+        v = float(str(oferta.get("price")).replace(",", "."))
+        return v if v > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def escolher_destaques(ofertas):
+    """Devolve (lista de (rótulo, oferta), menor_preco, maior_preco).
+
+    Três ângulos cobrem intenções de compra diferentes: quem quer gastar pouco,
+    quem quer segurança e quem quer pechincha. Sem repetir o mesmo item.
+    """
+    validos = []
+    for o in ofertas:
+        if _preco_num(o) is None:
+            continue
+        try:
+            nota = float(o.get("ratingStar") or 0)
+        except (TypeError, ValueError):
+            nota = 0
+        # Nota 0 costuma ser produto novo sem avaliação: passa. Nota baixa, não.
+        if nota and nota < BUSCA_NOTA_MINIMA:
+            continue
+        validos.append(o)
+
+    if not validos:
+        return [], None, None
+
+    escolhas, usados = [], set()
+
+    def pegar(rotulo, chave, reverso=True):
+        candidatos = [o for o in validos if str(o.get("itemId")) not in usados]
+        if not candidatos:
+            return
+        melhor = sorted(candidatos, key=chave, reverse=reverso)[0]
+        usados.add(str(melhor.get("itemId")))
+        escolhas.append((rotulo, melhor))
+
+    pegar("💰 <b>MAIS BARATO</b>", lambda o: _preco_num(o), reverso=False)
+    # 'sales' só existe se a query do api_shopee.py pedir. Sem ele o critério
+    # continua funcionando, só perde o desempate por volume de vendas.
+    pegar("⭐ <b>MELHOR AVALIADO</b>", lambda o: (float(o.get("ratingStar") or 0), int(o.get("sales") or 0)))
+    pegar("🔥 <b>MAIOR DESCONTO</b>", lambda o: int(o.get("priceDiscountRate") or 0))
+
+    precos = [_preco_num(o) for o in validos]
+    return escolhas, min(precos), max(precos)
+
+
+async def montar_resposta_busca(termo, ofertas, total_bruto):
+    escolhas, menor, maior = escolher_destaques(ofertas)
+    if not escolhas:
+        return None
+
+    linhas = [f"🔎 Busquei <b>{termo}</b> · {total_bruto} resultado(s)\n"]
+
+    for rotulo, oferta in escolhas:
+        nome = oferta.get("productName", "Produto")
+        _, atual, taxa = preco_de_por(oferta.get("price"), oferta.get("priceDiscountRate"))
+        try:
+            nota = float(oferta.get("ratingStar") or 0)
+        except (TypeError, ValueError):
+            nota = 0
+
+        link = await converter_link_shopee(oferta.get("productLink"), "busca", EXIBIR_LOGS)
+
+        detalhes = [formatar_brl(atual)] if atual else []
+        if nota:
+            detalhes.append(f"⭐ {nota:.1f}")
+        if taxa and taxa >= 5:
+            detalhes.append(f"-{taxa}%")
+
+        linhas.append(rotulo)
+        linhas.append(f"<a href='{link}'>{nome[:90]}</a>")
+        linhas.append("  ·  ".join(detalhes))
+        linhas.append("")
+
+    if menor and maior and maior > menor:
+        linhas.append(f"<i>Nesta busca os preços vão de {formatar_brl(menor)} a {formatar_brl(maior)}.</i>")
+
+    return "\n".join(linhas)
+
+
+def eh_topico_da_busca(message: types.Message) -> bool:
+    """⚠️ Mensagem no General NÃO traz message_thread_id: vem None. Um filtro
+    '== 1' nunca dispararia lá. O 'or 1' normaliza None para 1."""
+    if not BUSCA_TOPICO_ID:
+        return False
+    return (message.message_thread_id or 1) == BUSCA_TOPICO_ID
+
+
+@dp.message(
+    F.chat.id == BUSCA_GRUPO_ID,
+    eh_topico_da_busca,
+    F.text,
+    StateFilter(None),
+)
+async def buscador_produtos(message: types.Message):
+    """⚠️ Os filtros ficam TODOS no decorator de propósito. Se o handler casasse
+    qualquer mensagem de grupo e filtrasse no corpo, ele consumiria o update e
+    o interceptar_envio_livre do Grupo Público nunca rodaria."""
+    termo = (message.text or "").strip()
+
+    if termo.startswith("/"):
+        return
+
+    if len(termo) < BUSCA_MIN_CARACTERES:
+        aviso = await message.reply("🔎 Escreva com um pouco mais de detalhe o que você procura.")
+        await asyncio.sleep(20)
+        try: await aviso.delete()
+        except Exception: pass
+        return
+
+    user_id = message.from_user.id
+    if user_id != ADMIN_ID:
+        usadas = contar_buscas_hoje(user_id)
+        if usadas >= BUSCA_LIMITE_DIARIO:
+            aviso = await message.reply(
+                f"⏳ Você já fez suas <b>{BUSCA_LIMITE_DIARIO}</b> buscas de hoje.\n"
+                "O contador zera à meia-noite.", parse_mode="HTML"
+            )
+            await asyncio.sleep(30)
+            try: await aviso.delete()
+            except Exception: pass
+            return
+
+    if EXIBIR_LOGS: logger.info(f"🔎 [Busca] {user_id} procurando: '{termo}'")
+    procurando = await message.reply("🔎 Procurando na Shopee...")
+
+    try:
+        ofertas = await buscar_ofertas_shopee(termo, limite=BUSCA_RESULTADOS_API)
+        texto = await montar_resposta_busca(termo, ofertas, len(ofertas))
+
+        if not texto:
+            await procurando.edit_text(
+                f"😕 Não achei nada confiável para <b>{termo}</b>.\n\n"
+                "<i>Tente outras palavras ou seja mais específico.</i>",
+                parse_mode="HTML"
+            )
+            return
+
+        if user_id != ADMIN_ID:
+            registrar_busca(user_id)
+
+        await procurando.edit_text(texto, parse_mode="HTML", disable_web_page_preview=True)
+        if EXIBIR_LOGS: logger.info(f"✅ [Busca] Resposta entregue para '{termo}'.")
+
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Busca] Falha ao buscar '{termo}': {e}")
+        registrar_erro_json(f"buscador_produtos ({termo}): {e}", origem="bot_mestre.py")
+        try:
+            await procurando.edit_text("⚠️ Deu problema na busca. Tente de novo em alguns instantes.")
+        except Exception:
+            pass
+
+
+@dp.message(F.chat.id == BUSCA_GRUPO_ID, F.new_chat_members | F.left_chat_member)
+async def limpar_avisos_entrada(message: types.Message):
+    """Remove 'Fulano entrou no grupo' do General. São mensagens de serviço,
+    sem .text, então nunca chegam ao buscador — mas sujam a tela."""
+    if not BUSCA_LIMPAR_AVISOS:
+        return
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+
+@dp.message(Command("painelbusca"), StateFilter("*"))
+async def publicar_painel_busca(message: types.Message):
+    """Publica e fixa o texto de orientação no tópico do buscador."""
+    if message.from_user.id != ADMIN_ID: return
+
+    if not BUSCA_TOPICO_ID:
+        await message.answer("⚠️ Defina o <code>BUSCA_TOPICO_ID</code> no código antes.", parse_mode="HTML")
+        return
+
+    texto = (
+        "🔎 <b>Buscador de Produtos</b>\n\n"
+        "Escreva aqui o que você está procurando e eu vasculho a Shopee para você.\n\n"
+        "<b>Como funciona</b>\n"
+        "Mande só o nome do produto. Quanto mais específico, melhor o resultado:\n"
+        "• <code>fone bluetooth</code> → genérico demais\n"
+        "• <code>fone bluetooth com cancelamento de ruido</code> → bem melhor\n\n"
+        "<b>O que você recebe</b>\n"
+        "Três opções, porque nem todo mundo quer a mesma coisa:\n"
+        "💰 <b>Mais barato</b> — para gastar pouco\n"
+        "⭐ <b>Melhor avaliado</b> — para não errar\n"
+        "🔥 <b>Maior desconto</b> — a pechincha da busca\n\n"
+        "Mostro também a faixa de preço da busca inteira, para você ter noção do que é caro e do que é barato.\n\n"
+        f"<b>Limite:</b> {BUSCA_LIMITE_DIARIO} buscas por dia, por pessoa. Zera à meia-noite.\n\n"
+        "<i>Busco no catálogo da Shopee. Não é comparação com outras lojas — "
+        "é a melhor seleção dentro do que a Shopee tem para o seu termo.</i>"
+    )
+
+    alvo_topico = None if BUSCA_TOPICO_ID == 1 else BUSCA_TOPICO_ID
+    msg = await bot.send_message(BUSCA_GRUPO_ID, texto, parse_mode="HTML",
+                                 message_thread_id=alvo_topico, disable_web_page_preview=True)
+    try:
+        await bot.pin_chat_message(BUSCA_GRUPO_ID, msg.message_id, disable_notification=True)
+        await message.answer("✅ Painel do buscador publicado e fixado.")
+    except Exception as e:
+        await message.answer(f"⚠️ Publiquei, mas não consegui fixar: {e}")
+
+
 @dp.message(F.chat.type.in_(["supergroup", "group"]), StateFilter(None))
 async def interceptar_envio_livre(message: types.Message, state: FSMContext):
     permitido, config = checar_permissao_topico(message)
@@ -14961,6 +15230,7 @@ async def main():
     scheduler.add_job(agendar_tarefas_diarias, 'cron', hour=0, minute=1, timezone=FUSO_STR)
     
     # ✅ Agendador da lixeira persistente (roda todos os dias pontualmente às 03:00)
+    _iniciar_tabela_buscas()
     scheduler.add_job(varredor_de_lixeira, 'cron', hour=3, minute=0, timezone=FUSO_STR)
 
     # 🩺 Monitor de saúde: avisa no privado quando algo sai do normal
