@@ -3055,10 +3055,19 @@ class BloqueioAdminMiddleware(BaseMiddleware):
             except Exception:
                 pass
 
+        # 1b. VIA VERDE DO BUSCADOR: o tópico de busca é feito para o membro
+        # escrever livremente. Sem esta exceção o middleware barra tudo antes
+        # de qualquer handler — inclusive as suas próprias buscas.
+        # Escopo mínimo de propósito: só este grupo, só este tópico, só texto.
+        if chat and BUSCA_TOPICO_ID and not is_callback:
+            thread_busca = getattr(mensagem_base, "message_thread_id", None)
+            if chat.id == BUSCA_GRUPO_ID and (thread_busca or 1) == BUSCA_TOPICO_ID:
+                is_submissao = True
+
         # 2. Bloqueia quem não for ADMIN, EXCETO se estiver na Via Verde
         if usuario and getattr(usuario, "id", None) != ADMIN_ID:
             if not is_submissao:
-                return 
+                return
                 
         # 3. Bloqueia o próprio ADMIN se usar o bot em grupo (evita expor botões)
         if usuario and getattr(usuario, "id", None) == ADMIN_ID:
