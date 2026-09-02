@@ -14308,8 +14308,9 @@ BUSCA_RESULTADOS_API = 30
 # ⚠️ Só os N primeiros da ordem de RELEVÂNCIA entram no sorteio dos 3 ângulos.
 # Sem esta janela o "mais barato" alcança a cauda e devolve acessório: buscando
 # "fone bluetooth" por preço crescente, o topo é capinha de fone a R$ 2,90.
-BUSCA_JANELA_RELEVANCIA = 15
+BUSCA_JANELA_RELEVANCIA = 25
 BUSCA_VENDAS_MINIMAS = 20    # corta anúncio novo sem histórico
+BUSCA_DEBOUNCE_PAINEL = 5    # minutos de silêncio antes de recriar o painel
 
 
 def _iniciar_tabela_buscas():
@@ -14462,9 +14463,87 @@ async def montar_resposta_busca(termo, ofertas, total_bruto):
         linhas.append("")
 
     if menor and maior and maior > menor:
-        linhas.append(f"<i>Nesta busca os preços vão de {formatar_brl(menor)} a {formatar_brl(maior)}.</i>")
+        # "entre as opções que separei" e não "nesta busca": o intervalo é dos
+        # itens que passaram no filtro, não dos 30 que a API devolveu. Dizer
+        # "nesta busca" seria impreciso.
+        linhas.append(f"<i>Entre as opções que separei, os preços vão de {formatar_brl(menor)} a {formatar_brl(maior)}.</i>")
 
     return "\n".join(linhas)
+
+
+TEXTO_PAINEL_BUSCA = (
+    "🔎 <b>Escreva aqui o que você procura</b>\n\n"
+    "Mande o nome do produto neste tópico e eu vasculho a Shopee para você.\n\n"
+    "<b>Quanto mais específico, melhor</b>\n"
+    "• <code>fone bluetooth</code> → genérico demais\n"
+    "• <code>fone bluetooth com cancelamento de ruido</code> → bem melhor\n\n"
+    "<b>Você recebe três opções</b>\n"
+    "💰 <b>Mais barato</b> — para gastar pouco\n"
+    "⭐ <b>Melhor avaliado</b> — para não errar\n"
+    "🔥 <b>Maior desconto</b> — a pechincha da busca\n\n"
+    "Mostro preço, nota, quantidade vendida e a faixa de preço da busca inteira.\n"
+    "Quando o produto tem variação, aparece a faixa (ex: R$ 18,98 a R$ 23,98) — "
+    "assim você não se surpreende ao abrir o link.\n\n"
+    f"<b>Limite:</b> {BUSCA_LIMITE_DIARIO} buscas por dia, por pessoa. Zera à meia-noite.\n\n"
+    "<i>Busco no catálogo da Shopee. Não é comparação com outras lojas — "
+    "é a melhor seleção dentro do que a Shopee tem para o seu termo.</i>"
+)
+
+# 📌 Mantém o painel do buscador SEMPRE como a última mensagem do tópico.
+# Mesmo padrão do painel de submissão: cria embaixo, só então apaga o antigo.
+_lock_painel_busca = asyncio.Lock()
+_task_debounce_busca = None
+
+
+async def reenviar_painel_busca():
+    async with _lock_painel_busca:
+        if not BUSCA_TOPICO_ID:
+            return
+        thread_param = None if BUSCA_TOPICO_ID == 1 else BUSCA_TOPICO_ID
+
+        try:
+            msg = await bot.send_message(
+                chat_id=BUSCA_GRUPO_ID, text=TEXTO_PAINEL_BUSCA, parse_mode="HTML",
+                message_thread_id=thread_param, disable_web_page_preview=True,
+                disable_notification=True
+            )
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Painel Busca] Falha ao reenviar: {e}")
+            return
+
+        # Só apaga o anterior DEPOIS que o novo está no ar: nunca fica sem painel.
+        registro = ler_config_bd("painel_busca_msg", {})
+        antiga = registro.get("id")
+        if antiga and antiga != msg.message_id:
+            try: await bot.delete_message(chat_id=BUSCA_GRUPO_ID, message_id=int(antiga))
+            except Exception: pass
+
+        salvar_config_bd("painel_busca_msg", {"id": msg.message_id})
+
+        try:
+            await bot.pin_chat_message(chat_id=BUSCA_GRUPO_ID, message_id=msg.message_id,
+                                       disable_notification=True)
+        except Exception as e:
+            if EXIBIR_LOGS: logger.warning(f"⚠️ [Painel Busca] Não consegui fixar: {e}")
+
+        if EXIBIR_LOGS: logger.info(f"📌 [Painel Busca] Painel recriado no fim do tópico (ID {msg.message_id}).")
+
+
+async def _esperar_e_reenviar_busca(segundos):
+    try:
+        await asyncio.sleep(segundos)
+    except asyncio.CancelledError:
+        return
+    await reenviar_painel_busca()
+
+
+def agendar_painel_busca(minutos=BUSCA_DEBOUNCE_PAINEL):
+    """Debounce: cada busca nova reinicia a contagem. O painel só desce quando
+    a conversa esfria, em vez de piscar a cada mensagem."""
+    global _task_debounce_busca
+    if _task_debounce_busca and not _task_debounce_busca.done():
+        _task_debounce_busca.cancel()
+    _task_debounce_busca = criar_task(_esperar_e_reenviar_busca(minutos * 60))
 
 
 def eh_topico_da_busca(message: types.Message) -> bool:
@@ -14532,6 +14611,9 @@ async def buscador_produtos(message: types.Message):
 
         await procurando.edit_text(texto, parse_mode="HTML", disable_web_page_preview=True)
         if EXIBIR_LOGS: logger.info(f"✅ [Busca] Resposta entregue para '{termo}'.")
+
+        # 📌 O painel volta para o fim do tópico quando a conversa esfriar.
+        agendar_painel_busca()
 
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Busca] Falha ao buscar '{termo}': {e}")
