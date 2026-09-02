@@ -315,10 +315,48 @@ async def enviar_mensagem(escopo, alvo):
 ultimos_agendamentos_por_alvo = {}
 
 
+def _carregar_agendamentos():
+    """Recupera do banco o histórico de horários já sorteados.
+
+    Sem isto a trava de 15 minutos zerava a cada restart — e zerava justamente
+    no pior momento, porque o main() reagenda a hora inteira ao subir. Um deploy
+    no minuto 55 refazia a hora sem lembrar do que já tinha saído nela.
+    """
+    global ultimos_agendamentos_por_alvo
+    try:
+        bruto = ler_config_bd_divulgacao("agendamentos_divulgacao", {}) or {}
+        recuperado = {}
+        for alvo, horarios in bruto.items():
+            lista = []
+            for h in horarios or []:
+                try:
+                    lista.append(datetime.fromisoformat(h))
+                except (TypeError, ValueError):
+                    continue
+            if lista:
+                recuperado[alvo] = lista
+        ultimos_agendamentos_por_alvo = recuperado
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ [Agenda] Não recuperei o histórico de horários: {e}")
+
+
+def _salvar_agendamentos():
+    try:
+        salvar_config_bd_divulgacao("agendamentos_divulgacao", {
+            alvo: [h.isoformat() for h in horarios]
+            for alvo, horarios in ultimos_agendamentos_por_alvo.items()
+        })
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ [Agenda] Não salvei o histórico de horários: {e}")
+
+
 def programar_envios_da_hora():
     global ultimos_agendamentos_por_alvo
     agora = datetime.now()
     INTERVALO_MINIMO = 15  # Distanciamento rigoroso entre disparos no mesmo alvo
+
+    # 💾 Recupera o que foi sorteado antes de um eventual restart.
+    _carregar_agendamentos()
 
     # Descarta o que já passou da janela para o dicionário não crescer sem fim.
     corte = agora - timedelta(hours=1)
@@ -442,6 +480,12 @@ async def sincronizar_nomes_topicos():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Cache] Falha ao sincronizar nomes de tópicos: {e}")
         registrar_erro_json(f"sincronizar_nomes_topicos: {e}", origem="divulgacao_canal.py")
+
+
+                    if EXIBIR_LOGS: logger.info(f"🛡️ [{rotulo}] Fallback: disparo {i+1} empurrado para {horario_disparo_fallback.strftime('%H:%M:%S')}")
+
+    # 💾 Grava o que foi sorteado nesta hora, para sobreviver a restart.
+    _salvar_agendamentos()
 
 
 async def monitorar_comandos():
