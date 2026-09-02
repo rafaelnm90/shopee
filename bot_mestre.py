@@ -2,6 +2,7 @@
 EXIBIR_LOGS = True
 import os
 import re
+import unicodedata
 import time
 from dotenv import load_dotenv
 load_dotenv()
@@ -14358,6 +14359,40 @@ def registrar_busca(user_id):
         if EXIBIR_LOGS: logger.error(f"❌ [Busca] Falha ao registrar: {e}")
 
 
+# Conectivos não entram na deduplicação: sem isso "De Ouvido ... De Longa
+# Duração" perde o segundo "De" e a frase quebra.
+_CONECTIVOS_TITULO = {"de","da","do","das","dos","com","para","por","e","em",
+                      "no","na","a","o","as","os","um","uma","sem","ao","aos"}
+
+
+def limpar_nome_produto(nome, limite=52):
+    """Vendedor da Shopee empilha palavra-chave no título: 'Chinelo Bebê Chinelo
+    Infantil Baby Chinelo Baby Chinelo Bebe'. Remove a repetição (ignorando
+    acento e caixa) e corta em fronteira de palavra, nunca no meio."""
+    palavras = re.sub(r"\s+", " ", str(nome or "")).strip().split()
+    vistas, saida = set(), []
+    for p in palavras:
+        chave = unicodedata.normalize("NFKD", p.lower()).encode("ascii", "ignore").decode()
+        chave = re.sub(r"[^a-z0-9]", "", chave)
+        if chave and chave not in _CONECTIVOS_TITULO:
+            if chave in vistas:
+                continue
+            vistas.add(chave)
+        saida.append(p)
+
+    texto = " ".join(saida)
+    if len(texto) > limite:
+        texto = texto[:limite].rsplit(" ", 1)[0]
+
+    # Tira conectivo pendurado no fim ("... Bluetooth De…")
+    partes = texto.split()
+    while partes and re.sub(r"[^a-z0-9]", "", partes[-1].lower()) in _CONECTIVOS_TITULO:
+        partes.pop()
+    texto = " ".join(partes)
+
+    return texto + "…" if len(" ".join(saida)) > limite else texto
+
+
 def _preco_num(oferta, campo="priceMin"):
     """priceMin por padrão: é o preço de entrada do produto. O campo 'price'
     sozinho engana quando há variação — o membro vê R$ 18,98 e na variante que
@@ -14433,7 +14468,7 @@ async def montar_resposta_busca(termo, ofertas, total_bruto):
     if not escolhas:
         return None
 
-    linhas = [f"🔎 Busquei <b>{termo}</b> · {total_bruto} resultado(s)\n"]
+    linhas = [f"🔎 <b>{termo}</b> · {total_bruto} resultados\n"]
 
     for rotulo, oferta in escolhas:
         nome = oferta.get("productName", "Produto")
@@ -14459,7 +14494,7 @@ async def montar_resposta_busca(termo, ofertas, total_bruto):
             detalhes.append(f"-{taxa}%")
 
         linhas.append(rotulo)
-        linhas.append(f"<a href='{link}'>{nome[:90]}</a>")
+        linhas.append(f"<a href='{link}'>{limpar_nome_produto(nome)}</a>")
         linhas.append("  ·  ".join(detalhes))
         linhas.append("")
 
