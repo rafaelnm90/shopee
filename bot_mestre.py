@@ -14304,7 +14304,12 @@ BUSCA_LIMPAR_AVISOS = True   # apaga "Fulano entrou no grupo" do General
 BUSCA_LIMITE_DIARIO = 10     # por membro
 BUSCA_MIN_CARACTERES = 3
 BUSCA_NOTA_MINIMA = 4.0      # descarta vitrine podre
-BUSCA_RESULTADOS_API = 40
+BUSCA_RESULTADOS_API = 30
+# ⚠️ Só os N primeiros da ordem de RELEVÂNCIA entram no sorteio dos 3 ângulos.
+# Sem esta janela o "mais barato" alcança a cauda e devolve acessório: buscando
+# "fone bluetooth" por preço crescente, o topo é capinha de fone a R$ 2,90.
+BUSCA_JANELA_RELEVANCIA = 15
+BUSCA_VENDAS_MINIMAS = 20    # corta anúncio novo sem histórico
 
 
 def _iniciar_tabela_buscas():
@@ -14351,12 +14356,26 @@ def registrar_busca(user_id):
         if EXIBIR_LOGS: logger.error(f"❌ [Busca] Falha ao registrar: {e}")
 
 
-def _preco_num(oferta):
+def _preco_num(oferta, campo="priceMin"):
+    """priceMin por padrão: é o preço de entrada do produto. O campo 'price'
+    sozinho engana quando há variação — o membro vê R$ 18,98 e na variante que
+    ele quer custa R$ 23,98."""
     try:
-        v = float(str(oferta.get("price")).replace(",", "."))
+        v = float(str(oferta.get(campo) or oferta.get("price")).replace(",", "."))
         return v if v > 0 else None
     except (TypeError, ValueError):
         return None
+
+
+def _faixa_preco(oferta):
+    """Devolve 'R$ 18,98' ou 'R$ 18,98 a R$ 23,98' quando o produto tem variação."""
+    minimo = _preco_num(oferta, "priceMin")
+    maximo = _preco_num(oferta, "priceMax")
+    if minimo is None:
+        return None
+    if maximo is None or abs(maximo - minimo) < 0.01:
+        return formatar_brl(minimo)
+    return f"{formatar_brl(minimo)} a {formatar_brl(maximo)}"
 
 
 def escolher_destaques(ofertas):
@@ -14365,8 +14384,12 @@ def escolher_destaques(ofertas):
     Três ângulos cobrem intenções de compra diferentes: quem quer gastar pouco,
     quem quer segurança e quem quer pechincha. Sem repetir o mesmo item.
     """
+    # A API já devolve em ordem de relevância (sortType=1). Cortar a cauda aqui
+    # é o que impede o "mais barato" de puxar item que nada tem a ver.
+    pool = ofertas[:BUSCA_JANELA_RELEVANCIA]
+
     validos = []
-    for o in ofertas:
+    for o in pool:
         if _preco_num(o) is None:
             continue
         try:
@@ -14375,6 +14398,8 @@ def escolher_destaques(ofertas):
             nota = 0
         # Nota 0 costuma ser produto novo sem avaliação: passa. Nota baixa, não.
         if nota and nota < BUSCA_NOTA_MINIMA:
+            continue
+        if int(o.get("sales") or 0) < BUSCA_VENDAS_MINIMAS:
             continue
         validos.append(o)
 
@@ -14410,17 +14435,24 @@ async def montar_resposta_busca(termo, ofertas, total_bruto):
 
     for rotulo, oferta in escolhas:
         nome = oferta.get("productName", "Produto")
-        _, atual, taxa = preco_de_por(oferta.get("price"), oferta.get("priceDiscountRate"))
+        try:
+            taxa = int(oferta.get("priceDiscountRate") or 0)
+        except (TypeError, ValueError):
+            taxa = 0
         try:
             nota = float(oferta.get("ratingStar") or 0)
         except (TypeError, ValueError):
             nota = 0
+        vendas = int(oferta.get("sales") or 0)
 
         link = await converter_link_shopee(oferta.get("productLink"), "busca", EXIBIR_LOGS)
 
-        detalhes = [formatar_brl(atual)] if atual else []
+        faixa = _faixa_preco(oferta)
+        detalhes = [faixa] if faixa else []
         if nota:
             detalhes.append(f"⭐ {nota:.1f}")
+        if vendas:
+            detalhes.append(f"{vendas:,} vendidos".replace(",", "."))
         if taxa and taxa >= 5:
             detalhes.append(f"-{taxa}%")
 
@@ -14482,8 +14514,9 @@ async def buscador_produtos(message: types.Message):
     procurando = await message.reply("🔎 Procurando na Shopee...")
 
     try:
-        ofertas = await buscar_ofertas_shopee(termo, limite=BUSCA_RESULTADOS_API)
-        texto = await montar_resposta_busca(termo, ofertas, len(ofertas))
+        ofertas = await buscar_ofertas_shopee(termo, limite=BUSCA_RESULTADOS_API)        # sort_type=1 = relevância. Com o default (2, mais vendidos) a busca
+        # devolvia campeões de venda que só encostavam no termo.
+        ofertas = await buscar_ofertas_shopee(termo, limite=BUSCA_RESULTADOS_API, sort_type=1)        texto = await montar_resposta_busca(termo, ofertas, len(ofertas))
 
         if not texto:
             await procurando.edit_text(
