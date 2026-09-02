@@ -14365,7 +14365,7 @@ _CONECTIVOS_TITULO = {"de","da","do","das","dos","com","para","por","e","em",
                       "no","na","a","o","as","os","um","uma","sem","ao","aos"}
 
 
-def limpar_nome_produto(nome, limite=70):
+def limpar_nome_produto(nome, limite=999):
     """Vendedor da Shopee empilha palavra-chave no título: 'Chinelo Bebê Chinelo
     Infantil Baby Chinelo Baby Chinelo Bebe'. Remove a repetição (ignorando
     acento e caixa) e corta em fronteira de palavra, nunca no meio."""
