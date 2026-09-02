@@ -86,8 +86,13 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", exibir_logs
         
     return link_original
 
-async def buscar_ofertas_shopee(keyword, limite=10, exibir_logs=True, app_id=None, app_secret=None):
-    """Rastreia ofertas e produtos baseados em palavras-chave na Shopee."""
+async def buscar_ofertas_shopee(keyword, limite=10, exibir_logs=True, app_id=None, app_secret=None, sort_type=2):
+    """Rastreia ofertas e produtos baseados em palavras-chave na Shopee.
+
+    sort_type: 1=relevância · 2=mais vendidos · 3=preço↓ · 4=preço↑ · 5=comissão↓
+    O default 2 preserva o comportamento do garimpo. O buscador usa 1, porque
+    ordenar por preço num conjunto não-relevante devolve acessório barato em
+    vez do produto (o sortType=4 traz capinha de fone, não fone)."""
     cred_id = app_id or SHOPEE_APP_ID
     cred_secret = app_secret or SHOPEE_APP_SECRET
 
@@ -103,8 +108,12 @@ async def buscar_ofertas_shopee(keyword, limite=10, exibir_logs=True, app_id=Non
                     itemId
                     productName
                     price
+                    priceMin
+                    priceMax
                     priceDiscountRate
                     ratingStar
+                    sales
+                    shopName
                     imageUrl
                     productLink
                 }
@@ -113,7 +122,7 @@ async def buscar_ofertas_shopee(keyword, limite=10, exibir_logs=True, app_id=Non
         "variables": {
             "keyword": keyword,
             "limit": limite,
-            "sortType": 2
+            "sortType": sort_type
         }
     }
 
