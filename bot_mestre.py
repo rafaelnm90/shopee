@@ -14737,9 +14737,6 @@ async def publicar_painel_busca(message: types.Message):
 
 @dp.message(F.chat.type.in_(["supergroup", "group"]), StateFilter(None))
 async def interceptar_envio_livre(message: types.Message, state: FSMContext):
-    # 🔍 DIAGNÓSTICO TEMPORÁRIO — remover depois que o buscador estiver ok.
-    # Este handler captura QUALQUER mensagem de grupo, então é o lugar certo
-    # para ver o que realmente chega quando o filtro do buscador não casa.
     if message.chat.id == BUSCA_GRUPO_ID:
         logger.warning(
             f"🔍 [Diag] chat={message.chat.id} thread={message.message_thread_id!r} "
@@ -15046,9 +15043,6 @@ async def wizard_acao_painel(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.message(SubmissaoUsuarioInterativa.painel)
 async def wizard_receber_item(message: types.Message, state: FSMContext):
-    # 🔍 DIAGNÓSTICO TEMPORÁRIO — remover depois que o buscador estiver ok.
-    # Este handler captura QUALQUER mensagem de grupo, então é o lugar certo
-    # para ver o que chega quando o filtro do buscador não casa.
     if message.chat.id == BUSCA_GRUPO_ID:
         try:
             _estado = await state.get_state()
