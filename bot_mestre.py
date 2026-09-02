@@ -2199,7 +2199,15 @@ def contar_videos_pendentes(chat_destino):
         # 📬 Grupo Público (fila própria do repostador)
         conexao = sqlite3.connect("banco_dados.db")
         cursor = conexao.cursor()
-        cursor.execute("SELECT COUNT(*) FROM fila_publico WHERE processado = 0")
+        # ⚠️ Só conta vídeo ELEGÍVEL hoje, como já faz o Principal na linha acima.
+        # Contando a fila inteira, os agendados para semanas à frente entravam
+        # na conta: a intercalação adiava o texto para dar passagem a um vídeo
+        # que só sai daqui a 11 dias, e nenhum dos dois publicava.
+        hoje_pub = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+        cursor.execute(
+            "SELECT COUNT(*) FROM fila_publico WHERE processado = 0 AND data_alvo <= ?",
+            (hoje_pub,)
+        )
         total = cursor.fetchone()[0]
         conexao.close()
         return total
