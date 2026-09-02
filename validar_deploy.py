@@ -62,7 +62,17 @@ def validar(caminho):
             nomes[n.name] += 1
     for nome, qtd in nomes.items():
         if qtd > 1:
-            aviso(arq, 0, f"função '{nome}' definida {qtd}x — a última sobrescreve as anteriores")
+            # ⛔ ERRO, não aviso. Função duplicada quase sempre significa colagem
+            # que não apagou a âncora — e quando o nome coincide com outra
+            # função, uma delas some do arquivo sem deixar rastro. Já derrubou
+            # o wizard de submissão uma vez, com o aviso na tela e o deploy
+            # liberado assim mesmo.
+            linha_dup = next(
+                (n.lineno for n in arvore.body
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == nome),
+                0
+            )
+            erro(arq, linha_dup, f"função '{nome}' definida {qtd}x — provável colagem sem apagar o original")
 
     # 4) HANDLER COM ASSINATURA ERRADA  (bug do 'criar_painel_submissao')
     for n in ast.walk(arvore):
