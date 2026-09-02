@@ -14311,6 +14311,7 @@ BUSCA_RESULTADOS_API = 30
 BUSCA_JANELA_RELEVANCIA = 25
 BUSCA_VENDAS_MINIMAS = 20    # corta anúncio novo sem histórico
 BUSCA_DEBOUNCE_PAINEL = 5    # minutos de silêncio antes de recriar o painel
+BUSCA_MINUTOS_APAGAR_FALHA = 3  # busca que não deu em nada some junto com a pergunta
 
 
 def _iniciar_tabela_buscas():
@@ -14546,6 +14547,25 @@ def agendar_painel_busca(minutos=BUSCA_DEBOUNCE_PAINEL):
     _task_debounce_busca = criar_task(_esperar_e_reenviar_busca(minutos * 60))
 
 
+async def _apagar_busca_falha(chat_id, ids, minutos=BUSCA_MINUTOS_APAGAR_FALHA):
+    """Apaga a resposta de falha E a pergunta que a gerou.
+
+    Só a resposta não basta: some o "não achei nada" e fica a pergunta órfã,
+    parecendo que o robô ignorou o membro. Busca bem-sucedida NUNCA é apagada —
+    é ela que dá vida ao tópico e ensina pelo exemplo o que dá para pedir.
+    """
+    try:
+        await asyncio.sleep(minutos * 60)
+    except asyncio.CancelledError:
+        return
+    for msg_id in ids:
+        try:
+            await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+        except Exception:
+            pass
+    if EXIBIR_LOGS: logger.info(f"🧹 [Busca] Tentativa sem resultado removida do tópico.")
+
+
 def eh_topico_da_busca(message: types.Message) -> bool:
     """⚠️ Mensagem no General NÃO traz message_thread_id: vem None. Um filtro
     '== 1' nunca dispararia lá. O 'or 1' normaliza None para 1."""
@@ -14601,9 +14621,11 @@ async def buscador_produtos(message: types.Message):
         if not texto:
             await procurando.edit_text(
                 f"😕 Não achei nada confiável para <b>{termo}</b>.\n\n"
-                "<i>Tente outras palavras ou seja mais específico.</i>",
+                f"<i>Tente outras palavras ou seja mais específico. "
+                f"Esta tentativa some em {BUSCA_MINUTOS_APAGAR_FALHA} minutos.</i>",
                 parse_mode="HTML"
             )
+            criar_task(_apagar_busca_falha(message.chat.id, [procurando.message_id, message.message_id]))
             return
 
         if user_id != ADMIN_ID:
@@ -14619,7 +14641,12 @@ async def buscador_produtos(message: types.Message):
         if EXIBIR_LOGS: logger.error(f"❌ [Busca] Falha ao buscar '{termo}': {e}")
         registrar_erro_json(f"buscador_produtos ({termo}): {e}", origem="bot_mestre.py")
         try:
-            await procurando.edit_text("⚠️ Deu problema na busca. Tente de novo em alguns instantes.")
+            await procurando.edit_text(
+                f"⚠️ Deu problema na busca. Tente de novo em alguns instantes.\n\n"
+                f"<i>Esta tentativa some em {BUSCA_MINUTOS_APAGAR_FALHA} minutos.</i>",
+                parse_mode="HTML"
+            )
+            criar_task(_apagar_busca_falha(message.chat.id, [procurando.message_id, message.message_id]))
         except Exception:
             pass
 
