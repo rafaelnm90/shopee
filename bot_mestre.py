@@ -14514,7 +14514,6 @@ async def buscador_produtos(message: types.Message):
     procurando = await message.reply("🔎 Procurando na Shopee...")
 
     try:
-        ofertas = await buscar_ofertas_shopee(termo, limite=BUSCA_RESULTADOS_API)
         # sort_type=1 = relevância. Com o default (2, mais vendidos) a busca
         # devolvia campeões de venda que só encostavam no termo.
         ofertas = await buscar_ofertas_shopee(termo, limite=BUSCA_RESULTADOS_API, sort_type=1)
