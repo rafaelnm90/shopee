@@ -425,6 +425,9 @@ def programar_envios_da_hora():
                     scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo_fallback, args=[escopo, alvo])
                     if EXIBIR_LOGS: logger.info(f"🛡️ [{rotulo}] Fallback: disparo {i+1} empurrado para {horario_disparo_fallback.strftime('%H:%M:%S')}")
 
+    # 💾 Grava o que foi sorteado nesta hora, para sobreviver a restart.
+    _salvar_agendamentos()
+
 async def sincronizar_nomes_topicos():
     """🧵 Varre TODOS os grupos de fórum desta conta e grava, no cache
     compartilhado, o nome do grupo e o nome de cada tópico.
@@ -480,13 +483,6 @@ async def sincronizar_nomes_topicos():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Cache] Falha ao sincronizar nomes de tópicos: {e}")
         registrar_erro_json(f"sincronizar_nomes_topicos: {e}", origem="divulgacao_canal.py")
-
-
-                    if EXIBIR_LOGS: logger.info(f"🛡️ [{rotulo}] Fallback: disparo {i+1} empurrado para {horario_disparo_fallback.strftime('%H:%M:%S')}")
-
-    # 💾 Grava o que foi sorteado nesta hora, para sobreviver a restart.
-    _salvar_agendamentos()
-
 
 async def monitorar_comandos():
     while True:
