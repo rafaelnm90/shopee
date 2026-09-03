@@ -65,7 +65,7 @@ def obter_teclado_menu_notas():
             [KeyboardButton(text="Iniciar Envios 🚀")],
             [KeyboardButton(text=f"Filtro Anti-Duplicidade: {status_filtro}")],
             [KeyboardButton(text="Informações de Acesso ℹ️")],
-            [KeyboardButton(text="Voltar ao Centro Financeiro 🔙")]
+            [KeyboardButton(text="Voltar aos Relatórios 🔙")]
         ],
         resize_keyboard=True,
         is_persistent=True
@@ -281,9 +281,9 @@ async def processar_fila_envios(msg_progresso: types.Message = None):
     if msg_progresso and bot_instance:
         teclado_outros = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
-                [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
-                [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Disparador de Notas 🧾")],
+                [KeyboardButton(text="Relatório Financeiro 💰"), KeyboardButton(text="Diagnóstico de IA 🧠")],
+                [KeyboardButton(text="Relatórios de Filas 📋"), KeyboardButton(text="Logs de Erros ⚠️")],
+                [KeyboardButton(text="Disparador de Notas 🧾")],
                 [KeyboardButton(text="Voltar ao Início 🔙")]
             ],
             resize_keyboard=True,
@@ -408,10 +408,10 @@ async def processar_menu_notas(message: types.Message, state: FSMContext):
         await message.answer(texto, parse_mode="HTML")
         
     elif "Voltar" in opcao:
-        if EXIBIR_LOGS: logger.info("🔙 Retornando à gaveta do Centro Financeiro de forma isolada.")
+        if EXIBIR_LOGS: logger.info("🔙 Retornando à gaveta de Relatórios de forma isolada.")
         
-        # O teclado agora reflete o novo menu "Centro Financeiro"
-        teclado_financeiro = ReplyKeyboardMarkup(
+        # O teclado agora reflete o menu "Relatório Geral"
+        teclado_relatorios = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="Disparador de Notas 🧾")],
                 [KeyboardButton(text="Voltar ao Início 🔙")]
@@ -419,7 +419,7 @@ async def processar_menu_notas(message: types.Message, state: FSMContext):
             resize_keyboard=True,
             is_persistent=True
         )
-        await message.answer("Retornando ao Centro Financeiro...", reply_markup=teclado_financeiro)
+        await message.answer("Retornando aos Relatórios...", reply_markup=teclado_relatorios)
         await state.clear()
         
     else:
