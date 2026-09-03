@@ -7390,8 +7390,12 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             yval = bar.get_height()
             if yval == yval and yval > 0:
                 # Caixa branca atrás do texto: sem ela as linhas cortam o número.
-                ax1.text(
+                # O rótulo vai no ax2 (eixo desenhado por último) com as coordenadas
+                # do ax1. Se ficasse no ax1, a linha verde de Pedidos passaria por
+                # cima do número, porque zorder só ordena dentro do mesmo eixo.
+                ax2.text(
                     bar.get_x() + bar.get_width()/2, yval + offset_y, f'R${yval:.0f}',
+                    transform=ax1.transData,
                     ha='center', va='bottom', fontsize=8, fontweight='bold', color='#333333',
                     zorder=10,
                     bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='#cccccc', alpha=0.9)
