@@ -3487,38 +3487,43 @@ async def parceiro_receber_origem(message: types.Message, state: FSMContext):
     if message.text == "Voltar ⬅️":
         await voltar_passo_parceiro(message, state, "app_secret"); return
 
-    msg = await message.answer("⏳ <b>Validando canal de origem...</b>", parse_mode="HTML")
-    sucesso, id_final, nome_chat = await validar_e_formatar_alvo(bot, (message.text or "").strip())
-    try: await msg.delete()
-    except Exception: pass
-
     entrada = (message.text or "").strip()
 
-    # 🚫 A origem precisa de @username ou link de convite: o Telegram NÃO permite
-    # que o userbot entre num canal só com o ID numérico.
-    if not (entrada.startswith("@") or "t.me/" in entrada):
-        await message.answer(
-            "❌ <b>Formato não aceito para a origem.</b>\n\n"
-            "Para o robô conseguir entrar sozinho no canal, envie:\n"
-            "• <b>@usuariodocanal</b> — se for público\n"
-            "• <b>t.me/+AbCdEf...</b> — link de convite, se for privado\n\n"
-            "<i>ID numérico não funciona aqui: é limitação do próprio Telegram.</i>",
-            parse_mode="HTML", reply_markup=teclado_wizard_nav
-        )
-        return
+    msg = await message.answer("⏳ <b>Validando canal de origem...</b>", parse_mode="HTML")
+    sucesso, id_final, nome_chat = await validar_e_formatar_alvo(bot, entrada)
+    try: await msg.delete()
+    except Exception: pass
 
     if not sucesso:
         await message.answer(
             "❌ <b>Canal não encontrado.</b>\n\n"
-            "Confira se o <b>@username</b> ou o <b>link de convite</b> estão corretos e tente de novo.",
+            "Aceito qualquer um destes formatos:\n"
+            "• <b>@usuariodocanal</b>\n"
+            "• <b>t.me/+AbCdEf...</b> — link de convite\n"
+            "• <b>link do Telegram Web</b>\n"
+            "• <b>ID numérico</b> — ex: <code>-1001234567890</code>\n\n"
+            "<i>Confira o endereço e tente de novo:</i>",
             parse_mode="HTML", reply_markup=teclado_wizard_nav
         )
         return
 
     salvar_nome_grupo(str(id_final).split(":")[0], nome_chat)
-    await message.answer(f"✅ Origem validada: <b>{nome_chat}</b>", parse_mode="HTML")
-    # Guarda o formato ORIGINAL: é ele que o userbot usa para entrar no canal
-    await state.update_data(canal_origem=entrada)
+
+    # O userbot só entra sozinho por @username ou link de convite. Com ID
+    # numérico ele depende de já ser membro do canal. Em vez de bloquear,
+    # guardamos o ID normalizado e avisamos o que falta — o painel mostra
+    # "aguardando entrada" se o acesso não existir de fato.
+    entra_sozinho = entrada.startswith("@") or "t.me/" in entrada
+    valor_salvo = entrada if entra_sozinho else str(id_final).split(":")[0]
+
+    aviso = "" if entra_sozinho else (
+        "\n\n⚠️ <i>Esse formato não permite entrada automática. O userbot precisa "
+        "já estar no canal. Se não estiver, adicione ele na mão — ou refaça este "
+        "passo com o @username ou o link de convite.</i>"
+    )
+
+    await message.answer(f"✅ Origem validada: <b>{nome_chat}</b>{aviso}", parse_mode="HTML")
+    await state.update_data(canal_origem=valor_salvo)
     await voltar_passo_parceiro(message, state, "destino")
 
 @dp.message(SubmissaoAdminFluxo.parceiro_destino)
@@ -3595,6 +3600,8 @@ async def parceiro_receber_limite(message: types.Message, state: FSMContext):
         parse_mode="HTML", reply_markup=teclado_confirmacao
     )
     await state.set_state(SubmissaoAdminFluxo.parceiro_confirmar)
+
+@dp.message(SubmissaoAdminFluxo.parceiro_confirmar)
 async def parceiro_confirmar_cadastro(message: types.Message, state: FSMContext):
     if message.text == "Cancelar ❌":
         await message.answer("❌ Cadastro cancelado. Nada foi salvo.")
