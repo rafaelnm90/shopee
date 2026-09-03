@@ -5519,6 +5519,32 @@ async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao tentar coletar métricas no terminal do Linux: {e}")
         await msg_status.edit_text(f"❌ <b>Erro interno ao ler sensores:</b>\n<code>{e}</code>", parse_mode="HTML")
 
+# 🤖 Nomes bonitos para exibir no painel. Serviço que não estiver aqui
+# aparece com o nome técnico mesmo, sem quebrar nada.
+NOMES_AMIGAVEIS_SERVICOS = {
+    "bot_mestre_bot": "Bot Mestre (Painel Principal)",
+    "motor_userbot_bot": "Motor Espião (Userbot)",
+    "espelhador_videos_autorais_bot": "Espelhador (Vídeos Autorais)",
+    "divulgacao_canal_bot": "Divulgação de Canais (Spam)",
+    "downloader_bot": "Downloader (TikTok/Insta/Pinterest)",
+}
+
+def listar_servicos_do_projeto():
+    """Lê os .service da pasta versionada servicos_linux/.
+    Robô novo entra sozinho na lista: basta o .service estar no repositório.
+    Nenhuma lista precisa ser editada na mão nunca mais."""
+    pasta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "servicos_linux")
+    try:
+        nomes = sorted(f[:-len(".service")] for f in os.listdir(pasta) if f.endswith(".service"))
+    except OSError as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Não consegui ler {pasta}: {e}")
+        nomes = []
+    if not nomes:
+        # Rede de segurança: se a pasta sumir, pelo menos o painel volta sozinho.
+        if EXIBIR_LOGS: logger.warning("⚠️ Nenhum .service encontrado. Usando só o bot_mestre_bot.")
+        return ["bot_mestre_bot"]
+    return nomes
+
 @dp.message(F.text == "Reiniciar Robôs 🔄", StateFilter("*"))
 async def confirmar_reiniciar_robos(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
@@ -5530,13 +5556,13 @@ async def confirmar_reiniciar_robos(message: types.Message, state: FSMContext):
         is_persistent=True
     )
     
+    servicos = listar_servicos_do_projeto()
+    lista_txt = "\n".join(f"🔹 {NOMES_AMIGAVEIS_SERVICOS.get(s, s)}" for s in servicos)
+    
     texto = (
         "⚠️ <b>ATENÇÃO!</b>\n\n"
-        "Você está prestes a reiniciar <b>TODOS</b> os robôs simultaneamente no servidor Linux:\n\n"
-        "🔹 Motor Espião (Userbot)\n"
-        "🔹 Espelhador (Vídeos Autorais)\n"
-        "🔹 Divulgação de Canais (Spam)\n"
-        "🔹 Bot Mestre (Painel Principal)\n\n"
+        f"Você está prestes a reiniciar <b>TODOS</b> os {len(servicos)} robôs simultaneamente no servidor Linux:\n\n"
+        f"{lista_txt}\n\n"
         "<i>Isso causará uma breve interrupção. O painel ficará mudo por alguns segundos até que o sistema inteiro acorde e se reconecte ao Telegram.</i>\n\n"
         "Confirma o reinício de todos os sistemas?"
     )
@@ -5556,18 +5582,14 @@ async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
     
     if EXIBIR_LOGS: logger.info("🔄 Comando de reinício global acionado pelo administrador.")
     
-    # Baseado na sua pasta services_linux do Github
-    servicos_background = [
-        "motor_userbot_bot.service",
-        "espelhador_videos_autorais_bot.service",
-        "divulgacao_canal_bot.service"
-    ]
+    # 🔎 A lista vem dos .service da pasta versionada, não de código fixo.
+    servicos = listar_servicos_do_projeto()
+    servicos_background = [s for s in servicos if s != "bot_mestre_bot"]
 
-    import subprocess
-    # 2. Reinicia os serviços secundários em background
+    # 1. Reinicia os serviços secundários em background
     for servico in servicos_background:
         try:
-            subprocess.Popen(["sudo", "systemctl", "restart", servico])
+            subprocess.Popen(["sudo", "systemctl", "restart", f"{servico}.service"])
             if EXIBIR_LOGS: logger.info(f"✅ Disparado reinício para: {servico}")
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro ao reiniciar {servico}: {e}")
@@ -5575,11 +5597,15 @@ async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
     # Dá tempo para as threads do Linux processarem os outros robôs
     await asyncio.sleep(2)
 
-    # 3. Apaga a mensagem temporária e envia a nova mensagem de Sucesso COM o teclado
+    # 2. Apaga a mensagem temporária e envia a nova mensagem de Sucesso COM o teclado
     await msg_status.delete()
-    await message.answer("✅ <b>Sistemas Secundários Reiniciados!</b>\n🔄 Reiniciando o Bot Principal agora. O Painel voltará online em 5 segundos!", parse_mode="HTML", reply_markup=obter_teclado_opcoes_servidor())
+    await message.answer(
+        f"✅ <b>{len(servicos_background)} Sistemas Secundários Reiniciados!</b>\n"
+        "🔄 Reiniciando o Bot Principal agora. O Painel voltará online em 5 segundos!",
+        parse_mode="HTML", reply_markup=obter_teclado_opcoes_servidor()
+    )
     
-    # 4. Reinicia a si mesmo (Este comando vai forçar a interrupção imediata do bot mestre)
+    # 3. Reinicia a si mesmo por último (esse comando interrompe o bot mestre na hora)
     try:
         if EXIBIR_LOGS: logger.info("🔄 Reiniciando o próprio serviço (bot_mestre_bot.service). O script será interrompido agora!")
         subprocess.Popen(["sudo", "systemctl", "restart", "bot_mestre_bot.service"])
