@@ -155,7 +155,10 @@ async def testar_chaves_afiliado(link_teste, app_id, app_secret, exibir_logs=Tru
     endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
     payload = {
         "query": "mutation generateShortLink($originUrl: String!, $subIds: [String!]) { generateShortLink(input: {originUrl: $originUrl, subIds: $subIds}) { shortLink } }",
-        "variables": {"originUrl": link_teste, "subIds": ["teste_cadastro"]}
+        # subId curto e só com letras: "teste_cadastro" era recusado com
+        # 11001 (invalid sub id). Os que rodam em produção sem falhar são
+        # todos assim — "geral", "busca".
+        "variables": {"originUrl": link_teste, "subIds": ["teste"]}
     }
     headers, payload_json = gerar_headers_e_payload(payload, app_id, app_secret)
 
