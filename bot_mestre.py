@@ -34,7 +34,7 @@ import subprocess
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 # ✅ Importação dos nossos novos módulos blindados (Fase 2)
 from api_gemini import gerar_texto_gemini, analisar_video_gemini, MODELOS_CASCATA_GEMINI, client_genai
-from api_shopee import converter_link_shopee, buscar_ofertas_shopee
+from api_shopee import converter_link_shopee, buscar_ofertas_shopee, testar_chaves_afiliado
 from motor_filas import calcular_horarios_distribuicao # ⚙️ Novo Motor Centralizado
 
 import matplotlib.pyplot as plt
@@ -3361,14 +3361,12 @@ async def testar_credenciais_shopee(app_id, app_secret):
     Regex não serve aqui — um ID inventado passaria. Só a API sabe se é válido.
     """
     try:
-        resultado = await converter_link_shopee(
-            LINK_TESTE_SHOPEE, "teste_cadastro", True,
-            app_id=app_id, app_secret=app_secret
+        return await testar_chaves_afiliado(
+            LINK_TESTE_SHOPEE, app_id, app_secret, EXIBIR_LOGS
         )
-        return bool(resultado) and resultado != LINK_TESTE_SHOPEE
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao testar credenciais: {e}")
-        return False
+        return False, str(e)
 
 async def voltar_passo_parceiro(message, state: FSMContext, destino):
     """Reenvia a pergunta do passo anterior sem derrubar o que já foi digitado."""
@@ -3439,19 +3437,40 @@ async def parceiro_receber_secret(message: types.Message, state: FSMContext):
         )
         return
 
+    # Caractere invisível derruba o SHA256 sem dar nenhuma pista. Copiar de
+    # print ou de painel web traz espaço não-quebrável e afins. Barra aqui.
+    if not app_secret.isascii() or not app_secret.isalnum():
+        estranhos = [c for c in app_secret if not c.isascii() or not c.isalnum()]
+        await message.answer(
+            "❌ <b>O Secret veio com caractere estranho.</b>\n\n"
+            f"Encontrei: <code>{' '.join(f'U+{ord(c):04X}' for c in estranhos[:5])}</code>\n\n"
+            "Isso costuma acontecer quando o Secret é copiado de uma imagem ou "
+            "de um painel que insere espaço invisível.\n"
+            "<i>Copie de novo pelo botão de cópia do painel da Shopee e cole aqui:</i>",
+            parse_mode="HTML", reply_markup=teclado_wizard_nav
+        )
+        return
+
     data = await state.get_data()
     msg = await message.answer("🔍 <b>Testando as credenciais na API da Shopee...</b>", parse_mode="HTML")
-    valido = await testar_credenciais_shopee(data.get("app_id"), app_secret)
+    valido, motivo = await testar_credenciais_shopee(data.get("app_id"), app_secret)
     try: await msg.delete()
     except Exception: pass
 
     if not valido:
+        dica = ""
+        if "signature" in motivo.lower():
+            dica = (
+                "\n<b>O que isso significa:</b> a Shopee recalculou a assinatura "
+                "com o Secret que ela tem guardado para esse App ID e deu diferente.\n"
+                "• O par não é da mesma conta, ou\n"
+                "• Falta ou sobra um caractere no Secret\n"
+                "<i>Confira o 0 (zero) contra o O (letra) — é onde o erro mora.</i>\n"
+            )
         await message.answer(
             "❌ <b>As credenciais foram recusadas pela Shopee.</b>\n\n"
-            "O par App ID + Secret não conseguiu gerar um link de afiliado.\n\n"
-            "• Confira se o Secret está completo e sem espaços\n"
-            "• Confira se o App ID pertence a esta mesma conta\n"
-            "• Se as chaves estiverem certas, a API pode estar fora do ar — tente em alguns minutos\n\n"
+            f"<b>Resposta da API:</b> <code>{motivo}</code>\n"
+            f"{dica}\n"
             "<i>Envie o Secret novamente ou toque em Voltar ⬅️ para corrigir o App ID:</i>",
             parse_mode="HTML", reply_markup=teclado_wizard_nav
         )
