@@ -3362,7 +3362,7 @@ async def testar_credenciais_shopee(app_id, app_secret):
     """
     try:
         resultado = await converter_link_shopee(
-            LINK_TESTE_SHOPEE, "teste_cadastro", False,
+            LINK_TESTE_SHOPEE, "teste_cadastro", True,
             app_id=app_id, app_secret=app_secret
         )
         return bool(resultado) and resultado != LINK_TESTE_SHOPEE
