@@ -653,7 +653,6 @@ def obter_teclado_centro_financeiro():
             [KeyboardButton(text="Extrato Rápido 📜"), KeyboardButton(text="Relatório Financeiro 💰")],
             [KeyboardButton(text="Gestão de Custos 📉"), KeyboardButton(text="Provisão de Impostos 🏛️")],
             [KeyboardButton(text="Definir Saldo (App) 💰"), KeyboardButton(text="Fluxo de Caixa 🏦")],
-            [KeyboardButton(text="Disparador de Notas 🧾")],
             [KeyboardButton(text="Voltar ao Início 🔙")]
         ],
         resize_keyboard=True,
@@ -6186,6 +6185,7 @@ def obter_teclado_relatorios():
     botoes = [
         [KeyboardButton(text="Relatório Financeiro 💰"), KeyboardButton(text="Diagnóstico de IA 🧠")],
         [KeyboardButton(text="Relatórios de Filas 📋"), KeyboardButton(text="Logs de Erros ⚠️")],
+        [KeyboardButton(text="Disparador de Notas 🧾")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
