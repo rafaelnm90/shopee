@@ -8,13 +8,21 @@ set -euo pipefail
 PASTA_SCRIPT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PASTA_PROJETO="$(dirname "$PASTA_SCRIPT")"
 
-SERVICOS=(
-  bot_mestre_bot
-  espelhador_videos_autorais_bot
-  motor_userbot_bot
-  divulgacao_canal_bot
-  downloader_bot
+# 🔧 Autocura de permissão: o GitHub Web Editor não marca arquivo como
+# executável, então todo 'git pull' devolve o modo 644. Aqui volta sozinho.
+chmod +x "$PASTA_SCRIPT"/*.sh "$PASTA_PROJETO"/*.sh 2>/dev/null || true
+
+# 🔎 A lista sai dos .service da própria pasta. Robô novo entra sozinho:
+# basta o .service estar no repositório. Nada de lista fixa aqui.
+mapfile -t SERVICOS < <(
+  find "$PASTA_SCRIPT" -maxdepth 1 -name '*.service' -printf '%f\n' \
+    | sed 's/\.service$//' | sort
 )
+
+if [ ${#SERVICOS[@]} -eq 0 ]; then
+  echo "❌ Nenhum .service encontrado em $PASTA_SCRIPT. Abortando."
+  exit 1
+fi
 
 validar() {
   echo "🛡️  Validando o código antes de mexer nos serviços..."
