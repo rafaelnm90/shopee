@@ -141,3 +141,40 @@ async def buscar_ofertas_shopee(keyword, limite=10, exibir_logs=True, app_id=Non
     except Exception as e:
         if exibir_logs: logger.error(f"❌ [API Shopee] Erro crítico na prospecção de ofertas: {e}")
     return []
+
+async def testar_chaves_afiliado(link_teste, app_id, app_secret, exibir_logs=True):
+    """Testa um par App ID + Secret e devolve (ok, motivo).
+
+    Existe separada de converter_link_shopee porque aquela devolve o link
+    original em qualquer falha — ótimo pro fluxo normal, inútil pra
+    diagnóstico. Aqui o motivo da recusa sobe até quem chamou.
+    """
+    if not app_id or not app_secret:
+        return False, "Chaves ausentes."
+
+    endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
+    payload = {
+        "query": "mutation generateShortLink($originUrl: String!, $subIds: [String!]) { generateShortLink(input: {originUrl: $originUrl, subIds: $subIds}) { shortLink } }",
+        "variables": {"originUrl": link_teste, "subIds": ["teste_cadastro"]}
+    }
+    headers, payload_json = gerar_headers_e_payload(payload, app_id, app_secret)
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(endpoint, headers=headers, data=payload_json) as response:
+                dados = await response.json()
+
+                if response.status == 200 and dados.get("data", {}).get("generateShortLink"):
+                    return True, "OK"
+
+                erros = dados.get("errors") or []
+                if erros:
+                    motivo = erros[0].get("message", "Erro sem descrição.")
+                    if exibir_logs: logger.error(f"❌ [API Shopee] Teste de chaves recusado: {motivo}")
+                    return False, motivo
+
+                if exibir_logs: logger.error(f"❌ [API Shopee] Resposta inesperada no teste: {dados}")
+                return False, f"Resposta inesperada (HTTP {response.status})."
+    except Exception as e:
+        if exibir_logs: logger.error(f"❌ [API Shopee] Erro de rede no teste de chaves: {e}")
+        return False, f"Não consegui falar com a Shopee: {e}"
