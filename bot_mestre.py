@@ -5318,6 +5318,48 @@ async def espelhar_no_feed_central(msg_original, legenda, destino_original, thre
         if EXIBIR_LOGS: logger.warning(f"⚠️ [Achadinhos] Falha ao espelhar no feed central: {e}. A postagem principal foi entregue normalmente.")
 
 
+# 🔥 ACHADOS DO DIA — só o que passa do piso de desconto.
+# Não custa chamada extra à API: o garimpo já ordena por desconto decrescente,
+# então o item escolhido JÁ é o de maior desconto daquela busca. Aqui a gente
+# só verifica se ele passa da régua e espelha num tópico próprio.
+ACHADOS_DESTINO = "-1004460669033"
+ACHADOS_TOPICO = "393"          # ⚠️ Coloque o ID do tópico "🔥 Achados do Dia". Em 0 fica desligado.
+ACHADOS_PISO_DESCONTO = 60    # % mínimo para virar "achado"
+ACHADOS_PULA_FEED_CENTRAL = False  # True = achado NÃO vai também para Ofertas do Dia
+
+
+async def espelhar_achado_do_dia(msg_original, legenda, taxa_desconto, destino_original, thread_original):
+    """Republica no tópico de achados quando o desconto passa do piso.
+    Reaproveita o file_id: nada é baixado nem enviado de novo."""
+    if not ACHADOS_TOPICO or str(ACHADOS_TOPICO) == "0":
+        return
+
+    try:
+        taxa = int(taxa_desconto or 0)
+    except (TypeError, ValueError):
+        return
+    if taxa < ACHADOS_PISO_DESCONTO:
+        return
+
+    thread_alvo = int(ACHADOS_TOPICO)
+    if str(destino_original) == str(ACHADOS_DESTINO) and thread_original == thread_alvo:
+        return  # o nicho já publica aqui, não duplica
+
+    try:
+        file_id = msg_original.photo[-1].file_id
+        await asyncio.sleep(random.randint(2, 5))
+        await bot.send_photo(
+            chat_id=ACHADOS_DESTINO,
+            photo=file_id,
+            caption=f"🔥 <b>ACHADO DO DIA · -{taxa}% OFF</b>\n\n{legenda}",
+            parse_mode="HTML",
+            message_thread_id=thread_alvo
+        )
+        if EXIBIR_LOGS: logger.info(f"🔥 [Achados] Oferta de -{taxa}% espelhada no tópico de achados.")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ [Achados] Falha ao espelhar: {e}. A postagem principal foi entregue.")
+
+
 def extrair_destino_e_topico(texto):
     """🔗 Aceita link do Telegram Web, link t.me/c/ ou o ID cru, e devolve
     (destino, thread_id). Poupa o operador de garimpar dois números na URL.
@@ -5730,8 +5772,13 @@ async def processar_garimpo_automatico(forcado=False):
                 
                 registrar_achadinho_enviado(item_id, nome_nicho)
 
+                # 🔥 Desconto acima do piso vira "Achado do Dia" num tópico próprio.
+                eh_achado = int(taxa_desconto or 0) >= ACHADOS_PISO_DESCONTO if taxa_desconto else False
+                await espelhar_achado_do_dia(msg_original, legenda_final, taxa_desconto, destino, thread_param)
+
                 # 🪞 Além do tópico do nicho, a oferta cai também no feed central.
-                await espelhar_no_feed_central(msg_original, legenda_final, destino, thread_param)
+                if not (eh_achado and ACHADOS_PULA_FEED_CENTRAL):
+                    await espelhar_no_feed_central(msg_original, legenda_final, destino, thread_param)
                 
                 os.remove(temp_img)
                 if EXIBIR_LOGS: logger.info(f"✅ [Achadinhos] Operação concluída. Oferta fresca entregue ao canal {destino}!")
