@@ -2,6 +2,8 @@ import os
 import json
 import time
 import hashlib
+import re
+import unicodedata
 import aiohttp
 import logging
 from dotenv import load_dotenv
@@ -34,6 +36,19 @@ def gerar_headers_e_payload(payload_dict, app_id=None, app_secret=None):
     }
     return headers, payload_json
 
+def limpar_sub_id(valor, padrao="geral"):
+    """Deixa o subId só com letra e número.
+
+    A Shopee recusa subId com underscore (erro 11001 - invalid sub id).
+    A limpeza antiga trocava caractere inválido POR underscore, então todo
+    nicho com espaço ou acento no nome virava subId inválido — e a conversão
+    falhava calada, devolvendo o link SEM rastreio de afiliado.
+    """
+    texto = unicodedata.normalize("NFKD", str(valor).strip())
+    texto = texto.encode("ascii", "ignore").decode("ascii")
+    limpo = re.sub(r"[^a-zA-Z0-9]", "", texto)[:40]
+    return limpo or padrao
+
 async def converter_link_shopee(link_original, sub_id_nicho="geral", exibir_logs=True, app_id=None, app_secret=None):
     """
     Encurta o link da Shopee gerando a URL de afiliado com rastreio.
@@ -59,8 +74,7 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", exibir_logs
             if exibir_logs: logger.error(f"❌ [API Shopee] Erro ao expandir URL: {e}")
 
     endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
-    import re
-    sub_id_limpo = re.sub(r'[^a-zA-Z0-9_]', '_', str(sub_id_nicho).strip())[:40]
+    sub_id_limpo = limpar_sub_id(sub_id_nicho)
 
     payload = {
         "query": "mutation generateShortLink($originUrl: String!, $subIds: [String!]) { generateShortLink(input: {originUrl: $originUrl, subIds: $subIds}) { shortLink } }",
@@ -158,7 +172,7 @@ async def testar_chaves_afiliado(link_teste, app_id, app_secret, exibir_logs=Tru
         # subId curto e só com letras: "teste_cadastro" era recusado com
         # 11001 (invalid sub id). Os que rodam em produção sem falhar são
         # todos assim — "geral", "busca".
-        "variables": {"originUrl": link_teste, "subIds": ["teste"]}
+        "variables": {"originUrl": link_teste, "subIds": [limpar_sub_id("teste cadastro")]}
     }
     headers, payload_json = gerar_headers_e_payload(payload, app_id, app_secret)
 
