@@ -8428,18 +8428,54 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     
     async with _lock_contador:
         proximo_numero = ler_contador()
-        
+
     # ✅ CORREÇÃO: O recálculo só acontece se o vídeo for para HOJE.
     # Vídeos do futuro entram na fila sem afetar os horários já definidos para hoje.
     if data_agendamento_base == "2000-01-01" or data_agendamento_base <= hoje_str:
         if EXIBIR_LOGS: logger.info("🔄 O novo vídeo é para hoje. A recalcular a grelha de publicações em tempo real...")
         agendar_fila_postagens()
-        texto_data = "hoje! 🟢"
     else:
         if EXIBIR_LOGS: logger.info(f"⏭️ O novo vídeo é para o futuro ({data_agendamento_base}). A grelha de hoje não será afetada.")
-        texto_data = "o futuro! 📅✅"
-    
-    await message.answer(f"Publicação processada e agendada para {texto_data}\nO sistema distribuirá os vídeos de forma orgânica. O próximo vídeo assumirá o número {proximo_numero}.", reply_markup=obter_teclado_principal())
+
+    # 🧾 Recibo do que acabou de entrar na fila. O contador aponta para o PRÓXIMO,
+    # então o vídeo recém-criado é o anterior — mostrar o 237 aqui confundia.
+    numero_criado = max(1, proximo_numero - 1)
+    qtd_posts = 2 if nivel_4_ativado else 1
+    detalhe_posts = "2 posts · Shopee + TikTok" if nivel_4_ativado else "1 post"
+
+    amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
+    DIAS_PT = ["segunda", "terça", "quarta", "quinta", "sexta", "sábado", "domingo"]
+    if data_agendamento_base == "2000-01-01" or data_agendamento_base <= hoje_str:
+        quando = f"🟢 <b>hoje</b> — {agora.strftime('%d/%m')}"
+    else:
+        try:
+            d = datetime.strptime(data_agendamento_base, "%Y-%m-%d")
+            rotulo = "amanhã" if data_agendamento_base == amanha_str else DIAS_PT[d.weekday()]
+            cor = "🟡" if data_agendamento_base == amanha_str else "🔵"
+            quando = f"{cor} <b>{rotulo}</b> — {d.strftime('%d/%m')}"
+        except Exception:
+            quando = f"🔵 {data_agendamento_base}"
+
+    # Quantos já disputam esse mesmo dia (inclui os que acabaram de entrar).
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("SELECT COUNT(*) FROM fila_postagens WHERE data_alvo = ?", (data_agendamento_base,))
+        na_fila_do_dia = int(cursor.fetchone()[0] or 0)
+        conexao.close()
+    except Exception:
+        na_fila_do_dia = 0
+
+    linha_fila = f"\n📋 {na_fila_do_dia} na fila desse dia" if na_fila_do_dia else ""
+
+    await message.answer(
+        f"✅ <b>Vídeo #{numero_criado} entrou na fila</b>\n\n"
+        f"<blockquote>📦 {detalhe_posts}\n"
+        f"📅 Publica {quando}"
+        f"{linha_fila}</blockquote>\n"
+        f"<i>O horário exato é sorteado dentro da janela do dia. Próximo vídeo: #{proximo_numero}.</i>",
+        parse_mode="HTML", reply_markup=obter_teclado_principal()
+    )
     await state.clear()
 
 # ✅ Handlers para Gerenciar a Numeração
