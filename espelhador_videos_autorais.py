@@ -252,10 +252,77 @@ def marcar_origem_parceiro(parceiro_id, status, motivo=""):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao marcar origem: {e}")
 
+_cache_id_origem = {}
+
+def _id_curto(valor):
+    """Converte qualquer forma de chat_id no ID interno do Telethon.
+
+    A API de bots usa -100XXXXXXXXXX; o Telethon usa só o XXXXXXXXXX. Os dois
+    lados da comparação passam por aqui, senão a captura nunca casa.
+    """
+    texto = str(valor or "").strip().lstrip("-")
+    if texto.startswith("100") and len(texto) > 10:
+        texto = texto[3:]
+    return int(texto) if texto.isdigit() else None
+
+async def resolver_entidade(alvo):
+    """Resolve @username, link t.me ou ID numérico numa entidade do Telethon.
+
+    get_entity() sozinho falha com ID numérico quando a entidade não está no
+    cache da sessão — mesmo com a conta sendo membro do canal. Varrer os
+    diálogos popula esse cache. É o mesmo caminho que o divulgacao_canal.py
+    já usa para achar os fóruns.
+    """
+    alvo = str(alvo or "").strip()
+    if not alvo:
+        return None
+
+    try:
+        return await client.get_entity(alvo)
+    except Exception:
+        pass
+
+    # Varrer diálogos só faz sentido para ID numérico.
+    alvo_id = _id_curto(alvo)
+    if alvo_id is None:
+        return None
+
+    try:
+        async for dialogo in client.iter_dialogs():
+            if int(getattr(dialogo.entity, "id", 0)) == alvo_id:
+                return dialogo.entity
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Falha ao varrer diálogos: {e}")
+
+    return None
+
+async def id_do_canal_origem(alvo):
+    """ID numérico do canal de origem, com cache.
+
+    Evita um get_entity por mensagem por parceiro no caminho quente da captura.
+    """
+    chave = str(alvo or "").strip()
+    if not chave:
+        return None
+    if chave in _cache_id_origem:
+        return _cache_id_origem[chave]
+
+    direto = _id_curto(chave)
+    if direto is not None:
+        _cache_id_origem[chave] = direto
+        return direto
+
+    entidade = await resolver_entidade(chave)
+    if entidade:
+        _cache_id_origem[chave] = int(getattr(entidade, "id", 0))
+        return _cache_id_origem[chave]
+    return None
+
 async def entrar_no_canal_parceiro(alvo):
     """
-    Devolve (sucesso, motivo). O Telegram só permite entrar via @username ou
-    link de convite — ID numérico não serve, por limitação da própria API.
+    Devolve (sucesso, motivo). Se o userbot já enxerga o canal, qualquer
+    formato serve — inclusive ID numérico. Só quando ele NÃO é membro é que
+    o Telegram exige @username ou link de convite para a entrada automática.
     """
     alvo = str(alvo or "").strip()
     if not alvo:
@@ -263,11 +330,8 @@ async def entrar_no_canal_parceiro(alvo):
 
     try:
         # Já temos acesso? Então não há o que fazer.
-        try:
-            await client.get_entity(alvo)
+        if await resolver_entidade(alvo):
             return True, "já acessível"
-        except Exception:
-            pass
 
         if "+" in alvo or "joinchat" in alvo:
             hash_convite = alvo.split("+")[-1].split("/")[-1]
@@ -279,7 +343,8 @@ async def entrar_no_canal_parceiro(alvo):
             await client(functions.channels.JoinChannelRequest(usuario))
             return True, "entrou pelo @username"
 
-        return False, "ID numérico não permite entrada automática: use @username ou link de convite"
+        return False, ("userbot não é membro e ID numérico não permite entrada "
+                       "automática: adicione a conta no canal ou use @username / link de convite")
 
     except UserAlreadyParticipantError:
         return True, "já era membro"
@@ -377,11 +442,8 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
     for p in parceiros:
         try:
             origem = str(p.get("canal_origem") or "")
-            try:
-                entidade = await client.get_entity(origem)
-                if int(getattr(entidade, "id", 0)) != int(str(chat_id).replace("-100", "")):
-                    continue
-            except Exception:
+            id_origem = await id_do_canal_origem(origem)
+            if not id_origem or id_origem != _id_curto(chat_id):
                 continue
 
             if not ha_espaco_para_parceiros():
