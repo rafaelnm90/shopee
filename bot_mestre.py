@@ -5597,6 +5597,15 @@ async def confirmar_reiniciar_robos(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigFluxo.aguardando_confirmacao_reiniciar)
 async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await state.clear()
+        if EXIBIR_LOGS: logger.info("❌ Reinício global cancelado pelo administrador.")
+        await message.answer(
+            "❌ <b>Reinício cancelado.</b>\n<i>Nenhum robô foi tocado.</i>",
+            parse_mode="HTML", reply_markup=obter_teclado_opcoes_servidor()
+        )
+        return
+
     if message.text != "Aprovar Reinício ✅":
         await message.answer("Por favor, clique em Aprovar Reinício ✅ ou Cancelar ❌.")
         return
