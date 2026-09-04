@@ -2910,7 +2910,8 @@ def salvar_parceiro(dados):
 
 def atualizar_parceiro(parceiro_id, campo, valor):
     """Atualiza UM campo. A lista branca impede injeção pelo nome da coluna."""
-    if campo not in ("canal_origem", "canal_destino", "dias_atraso", "limite_diario", "ativo"):
+    if campo not in ("canal_origem", "canal_destino", "dias_atraso", "limite_diario", "ativo",
+                     "origem_ok", "origem_erro"):
         return False
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -3277,7 +3278,27 @@ async def salvar_edicao_parceiro(message: types.Message, state: FSMContext):
         else:
             id_final = valor
             await message.answer("⚠️ Canal não encontrado. O valor será salvo mesmo assim.", parse_mode="HTML")
-        valor = id_final
+
+        if campo == "canal_origem":
+            # A ORIGEM é lida pelo userbot, que só entra por @username ou link
+            # de convite. Salvar o ID normalizado aqui mataria a entrada
+            # automática — por isso o formato digitado é preservado.
+            # O DESTINO segue normalizado: lá quem publica é o bot, via ID.
+            entra_sozinho = valor.startswith("@") or "t.me/" in valor
+            valor = valor if entra_sozinho else str(id_final).split(":")[0]
+
+            # Origem trocada: zera o status para o userbot testar o acesso de novo.
+            atualizar_parceiro(pid, "origem_ok", 0)
+            atualizar_parceiro(pid, "origem_erro", "")
+
+            if not entra_sozinho:
+                await message.answer(
+                    "⚠️ <i>Esse formato não permite entrada automática. O userbot "
+                    "precisa já estar no canal, senão o acesso trava em ⏳.</i>",
+                    parse_mode="HTML"
+                )
+        else:
+            valor = id_final
 
     if atualizar_parceiro(pid, campo, valor):
         if EXIBIR_LOGS: logger.info(f"👥 [Parceiros] #{pid}: '{campo}' alterado para {valor}.")
