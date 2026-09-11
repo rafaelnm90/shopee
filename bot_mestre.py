@@ -3182,6 +3182,16 @@ def ler_fila_parceiro_por_dia_captura(parceiro_id):
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
+
+        # A tabela nasce no espelhador, na PRIMEIRA captura de parceiro que
+        # acontecer. Enquanto nenhuma tiver acontecido ela simplesmente não
+        # existe, e isso é estado normal — não erro que mereça encher o log de
+        # 2 em 2 minutos. Qualquer outra falha continua sendo registrada.
+        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='fila_parceiros'")
+        if not cursor.fetchone():
+            conexao.close()
+            return grupos
+
         cursor.execute(
             "SELECT * FROM fila_parceiros WHERE parceiro_id = ? AND processado = 0 "
             "AND (horario_disparo IS NULL OR horario_disparo = '')",
