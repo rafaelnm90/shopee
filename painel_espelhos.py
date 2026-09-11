@@ -17,7 +17,7 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import StateFilter
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
-from motor_filas import calcular_horarios_distribuicao # ⚙️ Novo Motor Centralizado
+from motor_filas import calcular_horarios_distribuicao, ler_faixa_limite, sortear_teto_do_dia # ⚙️ Novo Motor Centralizado
 EXIBIR_LOGS = True
 
 if EXIBIR_LOGS:
@@ -54,6 +54,8 @@ class EspelhadorFluxo(StatesGroup):
     aguardando_edicao_novo_nome = State()
     aguardando_edicao_novo_destino = State() # ✅ NOVO ESTADO ADICIONADO AQUI
     aguardando_edicao_nova_janela = State()
+    aguardando_edicao_limite_diario = State()      # ✅ NOVO: teto de posts por dia
+    aguardando_confirmacao_edicao_limite = State() # ✅ NOVO: dupla confirmação do teto
     aguardando_edicao_intervalo_dias = State() # ✅ ESTADO QUE HAVIA SUMIDO
     aguardando_edicao_novo_modo = State()
     aguardando_acao_origem = State() # ✅ ESTADO ADICIONADO PARA O SUBMENU
@@ -194,6 +196,8 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         "EspelhadorFluxo:aguardando_edicao_novo_nome",
         "EspelhadorFluxo:aguardando_edicao_novo_destino",
         "EspelhadorFluxo:aguardando_edicao_nova_janela",
+        "EspelhadorFluxo:aguardando_edicao_limite_diario",      # ✅ ADICIONADO
+        "EspelhadorFluxo:aguardando_confirmacao_edicao_limite", # ✅ ADICIONADO
         "EspelhadorFluxo:aguardando_edicao_intervalo_dias",
         "EspelhadorFluxo:aguardando_edicao_novo_modo",
         "EspelhadorFluxo:aguardando_confirmacao_edicao_janela", # ✅ ADICIONADO
@@ -708,7 +712,11 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
         "inicio": inicio,
         "fim": fim,
         "intervalo_dias": intervalo_dias,
-        "modo": modo
+        "modo": modo,
+        # Faixa de posts por dia. 0 = sem teto (publica tudo).
+        # Ajustável depois em "📊 Limite Diário".
+        "limite_min": 0,
+        "limite_max": 0
     }
     
     dados.setdefault("rotas", []).append(nova_rota)
@@ -848,6 +856,17 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         intervalo_atual = rota_alvo.get('intervalo_dias', 1)
         texto += f"📅 Intervalo de Dias: D+{intervalo_atual}\n"
         texto += f"🔀 Modo atual: {rota_alvo.get('modo', 'ordem').title()}\n"
+
+        piso_atual, topo_atual = ler_faixa_limite(rota_alvo)
+        if not piso_atual:
+            texto_teto = "Todos os vídeos"
+        elif topo_atual > piso_atual:
+            hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+            sorteado = sortear_teto_do_dia(f"espelho:{rota_alvo.get('nome')}", hoje_str, piso_atual, topo_atual)
+            texto_teto = f"{piso_atual} a {topo_atual}/dia · hoje sorteou <b>{sorteado}</b>"
+        else:
+            texto_teto = f"{piso_atual}/dia (fixo)"
+        texto += f"📊 Limite diário: {texto_teto}\n"
         
         from utils import ler_cache_nomes_grupos
         cache_nomes = ler_cache_nomes_grupos()
@@ -922,6 +941,7 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
                 [KeyboardButton(text="📝 Editar Nome"), KeyboardButton(text="🔀 Modificar Modo")],
                 [KeyboardButton(text="🎯 Editar Destino"), KeyboardButton(text="📥 Editar Canais")],
                 [KeyboardButton(text="🕒 Modificar Janela"), KeyboardButton(text="📅 Modificar Dias")],
+                [KeyboardButton(text="📊 Limite Diário")],
                 [KeyboardButton(text="Analisar Canais Vigiados 🔎")],
                 [KeyboardButton(text="Voltar ao Menu Espelho 🔙")]
             ],
@@ -970,6 +990,25 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
             parse_mode="HTML"
         )
         await state.set_state(EspelhadorFluxo.aguardando_edicao_nova_janela)
+    elif texto == "📊 Limite Diário":
+        teclado_teto = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="Todos os Vídeos ♾️")],
+                [KeyboardButton(text="Cancelar Operação ❌")]
+            ],
+            resize_keyboard=True,
+            is_persistent=True
+        )
+        await message.answer(
+            "Quantos vídeos esta rota pode publicar <b>por dia</b>?\n\n"
+            "• Faixa: <code>6-10</code> — cada dia sorteia um número entre 6 e 10\n"
+            "• Fixo: <code>6</code> — sempre 6 por dia\n\n"
+            "<i>A captura continua pegando tudo; o que passar do teto do dia é "
+            "descartado, não fica para o dia seguinte.</i>",
+            reply_markup=teclado_teto,
+            parse_mode="HTML"
+        )
+        await state.set_state(EspelhadorFluxo.aguardando_edicao_limite_diario)
     elif texto == "📅 Modificar Dias":
         teclado_dias = ReplyKeyboardMarkup(
             keyboard=[
@@ -1358,6 +1397,73 @@ async def salvar_edicao_janela(message: types.Message, state: FSMContext):
     teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True, is_persistent=True)
     await message.answer(f"Deseja confirmar a janela de postagem <b>{texto_exibicao}</b>?", parse_mode="HTML", reply_markup=teclado_conf)
     await state.set_state(EspelhadorFluxo.aguardando_confirmacao_edicao_janela)
+
+@router.message(EspelhadorFluxo.aguardando_edicao_limite_diario)
+async def salvar_edicao_limite_diario(message: types.Message, state: FSMContext):
+    texto = (message.text or "").strip()
+
+    if texto == "Todos os Vídeos ♾️":
+        piso = topo = 0
+    else:
+        casou = re.match(r"^(\d{1,3})(?:\s*-\s*(\d{1,3}))?$", texto)
+        if not casou:
+            return await message.answer(
+                "Envie um número (<code>6</code>) ou uma faixa (<code>6-10</code>), "
+                "ou use o botão <b>Todos os Vídeos ♾️</b>.",
+                parse_mode="HTML"
+            )
+        piso = int(casou.group(1))
+        topo = int(casou.group(2)) if casou.group(2) else piso
+        if piso < 1:
+            return await message.answer(
+                "O piso precisa ser 1 ou mais. Para publicar tudo, use o botão <b>Todos os Vídeos ♾️</b>.",
+                parse_mode="HTML"
+            )
+        if topo < piso:
+            return await message.answer(
+                "O segundo número precisa ser maior que o primeiro. Exemplo: <code>6-10</code>.",
+                parse_mode="HTML"
+            )
+
+    await state.update_data(limite_min=piso, limite_max=topo)
+    if piso == 0:
+        texto_exibicao = "todos os vídeos capturados"
+    elif topo > piso:
+        texto_exibicao = f"entre {piso} e {topo} vídeos por dia, sorteados a cada dia"
+    else:
+        texto_exibicao = f"exatamente {piso} vídeo(s) por dia"
+    aviso = "" if piso == 0 else "\n\n⚠️ O excedente do dia é <b>descartado</b>, não transborda para amanhã."
+    teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True, is_persistent=True)
+    await message.answer(f"Deseja confirmar a publicação de <b>{texto_exibicao}</b>?{aviso}", parse_mode="HTML", reply_markup=teclado_conf)
+    await state.set_state(EspelhadorFluxo.aguardando_confirmacao_edicao_limite)
+
+@router.message(EspelhadorFluxo.aguardando_confirmacao_edicao_limite)
+async def confirmar_edicao_limite_diario(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    indice = data.get("indice_edicao")
+
+    if message.text != "Aprovar ✅":
+        msg_simulada = message.model_copy(update={"text": str(indice + 1)})
+        return await selecionar_acao_edicao(msg_simulada, state)
+
+    piso = data.get("limite_min", 0)
+    topo = data.get("limite_max", 0)
+    dados = ler_espelhos()
+    dados["rotas"][indice]["limite_min"] = piso
+    dados["rotas"][indice]["limite_max"] = topo
+    salvar_espelhos(dados)
+
+    if piso == 0:
+        texto_exibicao = "todos os vídeos capturados"
+    elif topo > piso:
+        texto_exibicao = f"entre {piso} e {topo} vídeos por dia"
+    else:
+        texto_exibicao = f"exatamente {piso} vídeo(s) por dia"
+    if EXIBIR_LOGS: logger.info(f"📊 Faixa diária da rota '{dados['rotas'][indice].get('nome')}' definida: {piso}-{topo or piso}.")
+    await message.answer(f"✅ Esta rota passa a publicar <b>{texto_exibicao}</b>.", parse_mode="HTML")
+
+    msg_simulada = message.model_copy(update={"text": str(indice + 1)})
+    await selecionar_acao_edicao(msg_simulada, state)
 
 @router.message(EspelhadorFluxo.aguardando_edicao_intervalo_dias)
 async def salvar_edicao_intervalo_dias(message: types.Message, state: FSMContext):
