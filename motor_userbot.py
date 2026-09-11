@@ -614,8 +614,13 @@ async def processar_fila_espelhador_loop():
                 nome_rota = item.get("nome_rota")
                 rota_config = rotas.get(nome_rota)
                 
+                
                 if not rota_config:
                     itens_restantes.append(item)
+                    continue
+
+                # ✂️ Excedente do teto diário: sai da fila sem ser postado.
+                if item.get("descartar_por_limite") and not item.get("processado"):
                     continue
                     
                 horario_disparo_str = item.get("horario_disparo")
@@ -642,13 +647,65 @@ async def processar_fila_espelhador_loop():
                             if getattr(mensagem_original, 'video', None) is None:
                                 if EXIBIR_LOGS: logger.warning(f"🚫 [Segurança] Espelhador abortou o envio! A mensagem {msg_id} perdeu o formato de vídeo.")
                             else:
+                                # 📥 Um download só serve para tudo o que falta: a análise
+                                # da IA e o re-encode. Só chega aqui o vídeo que sobreviveu
+                                # ao teto do dia, então nada disto é desperdício.
+                                caminho_disparo = None
+                                houve_upscale = False
+                                try:
+                                    caminho_disparo = await mensagem_original.download_media(file="temp/temp_disparo_espelho_")
+                                except Exception as e:
+                                    if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Download falhou no disparo: {e}")
+
+                                # 🛠️ O re-encode substitui o ficheiro no mesmo caminho, por
+                                # isso a resposta vem pelo dict e não pelo retorno.
+                                if caminho_disparo:
+                                    relatorio_upscale = {}
+                                    caminho_disparo = await verificar_e_otimizar_video(caminho_disparo, relatorio_upscale)
+                                    houve_upscale = bool(relatorio_upscale.get("upscaled"))
+
+                                # 🧠 IA sob demanda: só agora, no vídeo que de facto vai ao ar.
+                                if item.get("legenda_ia_pendente"):
+                                    texto = await montar_legenda_no_disparo(
+                                        caminho_disparo, chat_origem, msg_id, item
+                                    )
+
                                 try:
                                     entidade_destino = await client.get_entity(destino)
                                 except ValueError:
                                     id_teste = int(destino) if str(destino).lstrip('-').isdigit() else destino
                                     entidade_destino = await client.get_entity(id_teste)
 
-                                msg_enviada = await client.send_message(entidade_destino, texto, file=mensagem_original.media, parse_mode="html")
+                                try:
+                                    if houve_upscale and caminho_disparo and os.path.exists(caminho_disparo):
+                                        # Sobe o ficheiro tratado. supports_streaming mantém o post
+                                        # como vídeo reproduzível, e não como documento anexado.
+                                        if EXIBIR_LOGS: logger.info("⬆️ [Espelhador] Enviando o vídeo re-encodado para 720p.")
+                                        msg_enviada = await client.send_message(entidade_destino, texto, file=caminho_disparo, parse_mode="html", supports_streaming=True)
+
+                                        # 🧬 O re-encode produz um ficheiro NOVO, de hash diferente do
+                                        # original que a captura registou. Sem esta linha, aquilo que
+                                        # está publicado no destino não consta na memória do destino:
+                                        # se o vídeo voltar por um canal vigiado, o anti-loop por hash
+                                        # não o reconhece. Vem depois do envio de propósito — só se
+                                        # regista o que de facto foi ao ar.
+                                        hash_publicado = calcular_hash_video(caminho_disparo)
+                                        if hash_publicado:
+                                            verificar_e_registrar_hash(hash_publicado, contexto=str(destino))
+                                            if EXIBIR_LOGS: logger.info(f"🧬 [Espelhador] Hash do vídeo publicado registado no destino {destino}.")
+                                    else:
+                                        # Sem re-encode não há nada para subir: a mídia original é
+                                        # reaproveitada por referência pelo Telegram, e o hash dela já
+                                        # ficou registado neste destino lá na captura.
+                                        msg_enviada = await client.send_message(entidade_destino, texto, file=mensagem_original.media, parse_mode="html")
+                                finally:
+                                    # 🧹 O temporário sai daqui apagado mesmo que o envio rebente no
+                                    # meio — senão a pasta temp/ acumula até à faxina das 03h.
+                                    if caminho_disparo and os.path.exists(caminho_disparo):
+                                        try:
+                                            os.remove(caminho_disparo)
+                                        except Exception as e:
+                                            if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Erro ao remover temporário do disparo: {e}")
                                 
                                 item["msg_postada_id"] = msg_enviada.id # Grava o ID para o painel mostrar o link de destino
                                 if EXIBIR_LOGS: logger.info(f"✅ [Espelhador] Disparo concluído na rota '{nome_rota}' para {destino}.")
@@ -777,11 +834,15 @@ async def motor_espelhador_userbot(event):
     link_final_convertido = await converter_link_shopee(link_capturado, "geral", EXIBIR_LOGS)
     if EXIBIR_LOGS: logger.info("✅ [Espelhador] Sucesso: Link convertido utilizando a função nativa correta.")
 
-    if EXIBIR_LOGS: logger.info("📥 [Espelhador] Descarregando vídeo temporário para análise da IA e verificação de duplicidade...")
+    if EXIBIR_LOGS: logger.info("📥 [Espelhador] Descarregando vídeo temporário para verificação de duplicidade...")
     caminho_video_temp = await event.download_media(file="temp/temp_analise_espelho_")
 
-    # ✅ NOVA TRAVA DE QUALIDADE E UPSCALING
-    caminho_video_temp = await verificar_e_otimizar_video(caminho_video_temp)
+    # ⚠️ O upscaling NÃO acontece mais aqui. Ele foi para o disparo, junto com o
+    # ficheiro que de facto vai ao ar. Re-encodar na captura gastava ffmpeg em ARM
+    # nos 100 vídeos do dia para produzir um ficheiro que era apagado a seguir e
+    # nunca chegava a ser enviado — o disparo mandava a mídia original do Telegram.
+    # O hash daqui passa a ser o do vídeo COMO ELE VEIO, que é o critério certo
+    # para reconhecer o mesmo vídeo aparecendo de novo numa origem vigiada.
     
     hash_arquivo = None
     if caminho_video_temp:
@@ -795,15 +856,16 @@ async def motor_espelhador_userbot(event):
             if chat_id_completo != chat_id_str:
                 verificar_e_registrar_hash(hash_arquivo, contexto=chat_id_completo)
                 
-        # 🧠 O Espião e as rotas de espelho leem os MESMOS canais. Se outro robô já
-        # analisou este post, reaproveita em vez de gastar cota de novo.
+        # 🧠 O Espião e as rotas de espelho leem os MESMOS canais, então aqui só se
+        # APROVEITA o que já existe no cache partilhado — a chamada nova ao
+        # Gemini foi adiada para o disparo. Numa rota que captura 100 e publica 7,
+        # analisar na captura queima 93 chamadas de cota por dia em vídeos que o
+        # teto diário vai descartar sem nunca postar. O download continua, porque
+        # o hash do anti-loop depende dele; só a IA é que espera.
         _chave_ia = chave_cache_ia(getattr(event, 'chat_id', None), getattr(event, 'id', None))
         titulo_ia = consultar_cache_ia(_chave_ia)
         if titulo_ia:
             if EXIBIR_LOGS: logger.info(f"♻️ [Cache IA] Espelhador reaproveitou a análise de {_chave_ia}.")
-        else:
-            titulo_ia = await gerar_legenda_com_ia_espelhador(caminho_video_temp)
-            gravar_cache_ia(_chave_ia, titulo_ia)
         
         try:
             os.remove(caminho_video_temp)
@@ -825,7 +887,10 @@ async def motor_espelhador_userbot(event):
         if EXIBIR_LOGS: logger.info("✅ [Espelhador] Legenda inteligente construída com sucesso (Título -> Link -> Hashtags).")
     else:
         texto_processado = f"🔗 <b>Link do Produto:</b>\n{link_final_convertido}"
-        if EXIBIR_LOGS: logger.warning("⚠️ [Espelhador] Fallback de segurança ativado: Legenda base apenas com o link.")
+        if EXIBIR_LOGS: logger.info("🕓 [Espelhador] Análise da IA adiada para o disparo. Legenda base gravada como fallback.")
+
+    # Sem título vindo do cache, a legenda definitiva é montada na hora de postar.
+    legenda_ia_pendente = not bool(titulo_ia)
 
     forward_origem_id = None
     if getattr(event, 'fwd_from', None) and getattr(event.fwd_from, 'from_id', None):
@@ -862,11 +927,68 @@ async def motor_espelhador_userbot(event):
             "destino": destino,
             "nome_rota": nome_rota,
             "texto_processado": texto_processado,
+            # O link convertido fica guardado à parte para o disparo remontar a
+            # legenda sem ter de converter de novo na API da Shopee.
+            "link_convertido": link_final_convertido,
+            "legenda_ia_pendente": legenda_ia_pendente,
             "data_captura": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         fila_dados["fila"].append(item)
         salvar_fila_espelhador(fila_dados)
         if EXIBIR_LOGS: logger.info(f"📦 [Espelhador] Vídeo enfileirado dinamicamente na rota '{nome_rota}'.")
+
+async def montar_legenda_no_disparo(caminho_video, chat_origem, msg_id, item):
+    """
+    🧠 Monta a legenda definitiva no momento do disparo, não na captura.
+
+    Só chega aqui o vídeo que sobreviveu ao teto diário e vai mesmo ao ar, então
+    cada chamada ao Gemini vira um post — em vez das ~93 por dia que a captura
+    gastava em material destinado ao descarte.
+
+    Reaproveita o download que o disparo já faz: a mídia vem do objeto de
+    mensagem que acabou de ser buscado, sem ida extra à API. O cache partilhado
+    com o Espião continua a valer, consultado antes de qualquer chamada nova.
+
+    Qualquer falha devolve a legenda base (só o link), que é exatamente o
+    fallback que já existia quando a IA falhava na captura.
+    """
+    link = item.get("link_convertido") or ""
+    texto_base = item.get("texto_processado") or (f"🔗 <b>Link do Produto:</b>\n{link}" if link else "")
+
+    try:
+        chave = chave_cache_ia(chat_origem, msg_id)
+        titulo_ia = consultar_cache_ia(chave)
+
+        if titulo_ia:
+            if EXIBIR_LOGS: logger.info(f"♻️ [Cache IA] Disparo reaproveitou a análise de {chave}.")
+        elif not caminho_video:
+            if EXIBIR_LOGS: logger.warning("⚠️ [Espelhador] Sem ficheiro para analisar. A postar com a legenda base.")
+            return texto_base
+        else:
+            titulo_ia = await gerar_legenda_com_ia_espelhador(caminho_video)
+            gravar_cache_ia(chave, titulo_ia)
+
+        if not titulo_ia:
+            if EXIBIR_LOGS: logger.warning("⚠️ [Espelhador] IA não devolveu título. A postar com a legenda base.")
+            return texto_base
+
+        linhas_ia = titulo_ia.split('\n')
+        nome_produto = linhas_ia[0].strip()
+        hashtags = '\n'.join(linhas_ia[1:]).strip() if len(linhas_ia) > 1 else ""
+
+        texto = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link}"
+        if hashtags:
+            texto += f"\n\n<i>{hashtags}</i>"
+
+        # Grava no item para o painel e o histórico mostrarem a legenda real.
+        item["texto_processado"] = texto
+        item["legenda_ia_pendente"] = False
+        if EXIBIR_LOGS: logger.info("✅ [Espelhador] Legenda inteligente montada no disparo.")
+        return texto
+
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Falha ao montar a legenda no disparo: {e}")
+        return texto_base
 
 async def validar_e_obter_entidade(client, alvo):
     alvo_str = str(alvo).strip()
