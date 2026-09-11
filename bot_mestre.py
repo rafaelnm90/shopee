@@ -35,7 +35,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 # ✅ Importação dos nossos novos módulos blindados (Fase 2)
 from api_gemini import gerar_texto_gemini, analisar_video_gemini, MODELOS_CASCATA_GEMINI, client_genai
 from api_shopee import converter_link_shopee, buscar_ofertas_shopee, testar_chaves_afiliado
-from motor_filas import calcular_horarios_distribuicao # ⚙️ Novo Motor Centralizado
+from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite, sortear_teto_do_dia # ⚙️ Novo Motor Centralizado
 
 import matplotlib.pyplot as plt
 import io
@@ -142,7 +142,10 @@ def inicializar_banco_sqlite():
     ''')
 
     # Migração: status de acesso do userbot ao canal de origem do parceiro
-    for coluna, tipo in [("origem_ok", "INTEGER DEFAULT 0"), ("origem_erro", "TEXT")]:
+    # + janela de horário de publicação própria de cada parceiro (0 a 24 = dia todo)
+    for coluna, tipo in [("origem_ok", "INTEGER DEFAULT 0"), ("origem_erro", "TEXT"),
+                         ("janela_inicio", "INTEGER DEFAULT 0"), ("janela_fim", "INTEGER DEFAULT 24"),
+                         ("limite_min", "INTEGER DEFAULT 0"), ("limite_max", "INTEGER DEFAULT 0")]:
         try:
             cursor.execute(f"ALTER TABLE parceiros ADD COLUMN {coluna} {tipo}")
         except sqlite3.OperationalError:
@@ -1369,7 +1372,57 @@ def _caminhos_protegidos():
     except Exception:
         pass
 
+
     return protegidos
+
+def diagnostico_temp():
+    """
+    📊 Reparte o peso de temp/ entre o que está preso a alguma fila e o que é lixo.
+
+    Sem essa separação o alerta não diz nada útil: 3 GB de fila pendente é o
+    sistema a funcionar normalmente, 3 GB de órfão é a faxina a falhar, e o
+    aviso saía igual nos dois casos.
+
+    Devolve (bytes presos em fila, bytes órfãos, nº de órfãos já fora do prazo).
+    """
+    try:
+        protegidos = _caminhos_protegidos()
+        limite = time.time() - (HORAS_PROTEGIDAS_TEMP * 3600)
+        bytes_presos = bytes_orfaos = vencidos = 0
+
+        for raiz, _dirs, arquivos in os.walk("temp"):
+            for nome in arquivos:
+                caminho = os.path.join(raiz, nome)
+                try:
+                    tamanho = os.path.getsize(caminho)
+                    if os.path.abspath(caminho) in protegidos:
+                        bytes_presos += tamanho
+                    else:
+                        bytes_orfaos += tamanho
+                        if os.path.getmtime(caminho) <= limite:
+                            vencidos += 1
+                except Exception:
+                    pass
+
+        return bytes_presos, bytes_orfaos, vencidos
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Faxina] Falha ao diagnosticar temp/: {e}")
+        return 0, 0, 0
+
+async def faxina_disco_periodica():
+    """
+    🧹 A faxina de disco com agenda PRÓPRIA, a cada 6 horas.
+
+    Antes ela vivia dentro do varredor_de_lixeira das 03h, no meio do mesmo
+    try: se o commit do SQLite falhasse (banco ocupado é rotina aqui, são vários
+    serviços no mesmo ficheiro) ou se limpar_achadinhos_antigos() rebentasse, a
+    limpeza do disco era saltada em silêncio e só tinha nova hipótese 24h depois.
+    Uma tarefa de disco não devia depender de uma rotina de mensagens do Telegram.
+
+    Corre em thread separada porque percorre o sistema de ficheiros e não pode
+    prender o event loop dos bots.
+    """
+    await asyncio.to_thread(limpar_arquivos_orfaos)
 
 def limpar_arquivos_orfaos():
     """Apaga o que não está em fila nenhuma e já passou do prazo de proteção."""
@@ -1815,6 +1868,53 @@ def contar_videos_pendentes(chat_destino):
         if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível contar vídeos pendentes: {e}")
         return 0
 
+# 🗓️ Cada turno de data dupla vive na SUA faixa de horas. As faixas garantem
+# pelo menos 2h entre um aviso e o seguinte, mesmo no pior encaixe possível.
+# As faixas são propositadamente NÃO adjacentes: com "tarde" a acabar às 17h59 e
+# "noite" a começar às 18h00, um par podia sair com 14 minutos de intervalo. Assim
+# o menor intervalo possível entre dois turnos é de 2h01, acima do piso abaixo.
+FAIXAS_TURNO_CAMPANHA = {"manha": (8, 11), "tarde": (14, 16), "noite": (19, 21)}
+
+# Piso absoluto entre dois avisos da MESMA campanha, conferido na hora de disparar.
+# É a rede: mesmo que o agendamento se atrapalhe depois de um reinício ou de um
+# "Atualizar Rotinas" no meio do dia, o segundo aviso morre aqui.
+# 110 e não um número redondo qualquer: as faixas acima garantem no mínimo 121
+# minutos entre turnos, então o piso fica logo abaixo disso. Assim um agendamento
+# legítimo nunca é barrado, e qualquer coisa mais junta é acidente por definição.
+MINUTOS_MINIMOS_CAMPANHA = 110
+
+def horario_dentro_do_turno(agora, turno, horario_sugerido=None):
+    """
+    ⏰ Devolve um horário válido DENTRO da faixa do turno, ou None se o turno já
+    passou por hoje.
+
+    Existe porque o encaixe anterior tratava "manhã", "tarde" e "noite" como
+    meros rótulos: os três horários saíam da mesma busca por lacuna livre e
+    podiam cair colados. Foi assim que o alerta do 09.09 saiu às 13h19, 14h10 e
+    15h01 — três vezes em duas horas, no lugar de um por turno.
+    """
+    faixa = FAIXAS_TURNO_CAMPANHA.get(turno)
+    if not faixa:
+        return None
+    faixa_ini, faixa_fim = faixa
+
+    limite_turno = agora.replace(hour=faixa_fim, minute=59, second=0, microsecond=0)
+    if agora > limite_turno:
+        return None   # o turno terminou: fica para amanhã, não vira apêndice de outro
+
+    if horario_sugerido and faixa_ini <= horario_sugerido.hour <= faixa_fim and horario_sugerido > agora:
+        return horario_sugerido
+
+    escolhido = agora.replace(hour=random.randint(faixa_ini, faixa_fim),
+                              minute=random.randint(0, 59), second=0, microsecond=0)
+    if escolhido > agora:
+        return escolhido
+
+    # Turno em curso: entra daqui a pouco, mas sem passar do fim da própria faixa.
+    from datetime import timedelta as _td
+    candidato = agora + _td(minutes=random.randint(3, 10))
+    return candidato if candidato <= limite_turno else None
+
 async def disparar_mensagem(tipo, forcar=False):
     if EXIBIR_LOGS: logger.info(f"🔍 Validando status antes de disparar a rotina '{tipo}' (Forçar: {forcar})...")
     
@@ -1848,8 +1948,31 @@ async def disparar_mensagem(tipo, forcar=False):
         if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): Rotinas do PRINCIPAL estão pausadas.")
         return
 
+
     agora_tz = datetime.now(fuso_horario)
     hoje_str = agora_tz.strftime("%Y-%m-%d")
+
+    # 🚦 ESPAÇAMENTO MÍNIMO ENTRE AVISOS DA MESMA CAMPANHA
+    # Os três turnos da data dupla partilham o MESMO 'tipo', e campanhas estão
+    # isentas de todas as outras travas daqui para baixo. Esta é a única que as
+    # segura: se o aviso anterior saiu há menos de MINUTOS_MINIMOS_CAMPANHA, este
+    # é descartado em vez de reagendado — o dia já foi avisado, repetir só irrita.
+    if tipo.startswith("campanha_") and not forcar:
+        historico_dia = dados_rotina.get("historico_diario", {})
+        if historico_dia.get("data") == hoje_str:
+            marcas = historico_dia.get("contagem", {}).get(tipo, [])
+            if isinstance(marcas, list) and marcas:
+                try:
+                    ultima = datetime.strptime(marcas[-1], "%H:%M").time()
+                    momento = datetime.combine(agora_tz.date(), ultima).replace(tzinfo=fuso_horario)
+                    minutos = (agora_tz - momento).total_seconds() / 60
+                    if 0 <= minutos < MINUTOS_MINIMOS_CAMPANHA:
+                        if EXIBIR_LOGS:
+                            logger.warning(f"🛑 [Campanha] '{tipo}' descartado: o aviso anterior saiu há "
+                                           f"{minutos:.0f} min, abaixo do piso de {MINUTOS_MINIMOS_CAMPANHA} min.")
+                        return
+                except Exception:
+                    pass
 
     # 🚦 TRAVA DE INTERCALAÇÃO: não posta dois textos seguidos se ainda houver vídeo na fila
     if not forcar and tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
@@ -2312,13 +2435,18 @@ def agendar_tarefas_diarias(escopo="todos"):
                 tipo_alerta = f"campanha_{i}_{data_futura.day:02d}.{data_futura.month:02d}"
                 turnos_pendentes = ["manha", "tarde", "noite"][obter_qtd_disparos(tipo_alerta):]
                 for p in turnos_pendentes:
-                    horario_campanha = encontrar_maior_lacuna_e_inserir(duracao_minima=10)
+                    # A lacuna livre continua sendo a preferência, mas agora só vale
+                    # se cair dentro do turno. Fora dele, sorteia-se na faixa certa.
+                    sugestao = encontrar_maior_lacuna_e_inserir(duracao_minima=10)
+                    horario_campanha = horario_dentro_do_turno(agora, p, sugestao)
                     if not horario_campanha:
-                        if p == "manha": horario_campanha = agora.replace(hour=random.randint(8,11), minute=random.randint(0,59))
-                        elif p == "tarde": horario_campanha = agora.replace(hour=random.randint(14,17), minute=random.randint(0,59))
-                        else: horario_campanha = agora.replace(hour=random.randint(18,21), minute=random.randint(0,59))
-                    if horario_campanha <= agora: horario_campanha = agora + timedelta(minutes=random.randint(3, 10))
+                        if EXIBIR_LOGS:
+                            logger.info(f"⏰ [Data Dupla] Turno '{p}' de {tipo_alerta} já passou. Ignorado hoje.")
+                        continue
                     scheduler.add_job(disparar_mensagem, 'date', run_date=horario_campanha, args=[tipo_alerta], id=f'job_campanha_{p}', replace_existing=True)
+                    if EXIBIR_LOGS:
+                        logger.info(f"🗓️ [Data Dupla] Turno '{p}' marcado para "
+                                    f"{horario_campanha.strftime('%d/%m às %H:%M')}.")
                 break
 
     if escopo in ["todos", "viral"]:
@@ -2532,13 +2660,16 @@ def agendar_tarefas_diarias(escopo="todos"):
                         faixa_ini, faixa_fim = 18, 21
 
                     # Tenta encaixar na maior lacuna do turno; se não couber, sorteia.
-                    horario_campanha = encaixar_lacuna_publico(faixa_ini, faixa_fim, folga_min=3)
+                    horario_campanha = horario_dentro_do_turno(
+                        agora, p, encaixar_lacuna_publico(faixa_ini, faixa_fim, folga_min=3)
+                    )
+                    # ⚠️ O "+3 a 10 minutos" que estava aqui empurrava um turno vencido
+                    # para logo depois de agora. Rodando "Atualizar Rotinas" às 19h, os
+                    # três turnos caíam juntos. Turno vencido agora fica para amanhã.
                     if not horario_campanha:
-                        horario_campanha = agora.replace(hour=random.randint(faixa_ini, faixa_fim),
-                                                         minute=random.randint(0, 59),
-                                                         second=0, microsecond=0)
-                    if horario_campanha <= agora:
-                        horario_campanha = agora + timedelta(minutes=random.randint(3, 10))
+                        if EXIBIR_LOGS:
+                            logger.info(f"⏰ [Data Dupla Público] Turno '{p}' já passou. Ignorado hoje.")
+                        continue
 
                     horarios_ocupados_publico.append(horario_campanha)
                     horarios_ocupados_publico.sort()
@@ -2911,7 +3042,8 @@ def salvar_parceiro(dados):
 def atualizar_parceiro(parceiro_id, campo, valor):
     """Atualiza UM campo. A lista branca impede injeção pelo nome da coluna."""
     if campo not in ("canal_origem", "canal_destino", "dias_atraso", "limite_diario", "ativo",
-                     "origem_ok", "origem_erro"):
+                     "origem_ok", "origem_erro", "janela_inicio", "janela_fim",
+                     "limite_min", "limite_max"):
         return False
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -3037,8 +3169,99 @@ def remover_item_fila_parceiro(id_unico, caminho=None):
     except Exception:
         pass
 
+def ler_fila_parceiro_por_dia_captura(parceiro_id):
+    """
+    Itens ainda SEM horário definido, agrupados por (dia de captura, data_alvo).
+
+    A chave leva as duas datas porque o `dias_atraso` pode ter sido editado no
+    meio do caminho: aí o mesmo dia de captura gera alvos diferentes, e cada
+    alvo tem de ter a própria cota.
+    """
+    grupos = {}
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao.row_factory = sqlite3.Row
+        cursor = conexao.cursor()
+        cursor.execute(
+            "SELECT * FROM fila_parceiros WHERE parceiro_id = ? AND processado = 0 "
+            "AND (horario_disparo IS NULL OR horario_disparo = '')",
+            (int(parceiro_id),)
+        )
+        for linha in cursor.fetchall():
+            item = dict(linha)
+            dia_captura = (item.get("data_captura") or "")[:10]
+            if not dia_captura:
+                continue
+            grupos.setdefault((dia_captura, item.get("data_alvo") or ""), []).append(item)
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao agrupar a fila por dia de captura: {e}")
+    return grupos
+
+async def fechar_dia_captura_parceiros(incluir_hoje=False):
+    """
+    🌙 FECHAMENTO DO DIA DE CAPTURA.
+
+    O sorteio da cota acontece AQUI, no fim do dia em que os vídeos entraram, e
+    o excedente é apagado do disco na hora — em vez de esperar os 30 dias do
+    D+X. Sem isto, um parceiro que captura 100 por dia com D+30 acumula 3.000
+    ficheiros antes da primeira publicação e estoura o TETO_DISCO_PARCEIROS_GB
+    muito antes de chegar lá; quando o teto de disco bate, a captura para para
+    TODOS os parceiros de uma vez.
+
+    Idempotente de propósito. O sorteio da cota é determinístico e o sorteio de
+    QUAIS ficam também: rodar de novo no mesmo dia encontra a quantidade já
+    cortada e não apaga mais nada. É isso que permite chamar como recuperação a
+    cada 2 minutos sem risco.
+
+    incluir_hoje=False  → fecha só os dias já vencidos (recuperação)
+    incluir_hoje=True   → fecha também o dia corrente (chamada do cron das 23:55)
+    """
+    try:
+        hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+
+        # Fecha a fila de TODOS os parceiros, inclusive os pausados: quem está
+        # pausado não captura mais, mas o que já entrou continua ocupando disco.
+        for p in ler_parceiros():
+            piso, topo = ler_faixa_limite(p)
+            if piso <= 0:
+                continue   # sem teto configurado: não há o que cortar
+
+            grupos = ler_fila_parceiro_por_dia_captura(p.get("id"))
+            for (dia_captura, data_alvo), itens in sorted(grupos.items()):
+                if dia_captura > hoje_str:
+                    continue
+                if dia_captura == hoje_str and not incluir_hoje:
+                    continue   # o dia ainda está a correr: só fecha às 23:55
+
+                # A cota é do DIA DA PUBLICAÇÃO, sorteada já aqui no fecho.
+                cota = sortear_teto_do_dia(f"parceiro:{p.get('id')}",
+                                           data_alvo or dia_captura, piso, topo)
+                if cota <= 0 or len(itens) <= cota:
+                    continue
+
+                # 🎲 Quais ficam é sorteio reprodutível: uma segunda passagem
+                # escolheria os mesmos, então nada se perde por engano.
+                random.Random(f"parceiro:{p.get('id')}|{dia_captura}|selecao").shuffle(itens)
+                excedente = itens[cota:]
+                for item in excedente:
+                    remover_item_fila_parceiro(item["id_unico"], item.get("caminho_video"))
+
+                if EXIBIR_LOGS:
+                    logger.info(f"🌙 [Parceiro {p.get('nome')}] Dia {dia_captura} fechado: "
+                                f"{cota} de {len(itens)} vídeo(s) mantidos para {data_alvo}, "
+                                f"{len(excedente)} apagado(s) do disco.")
+
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Falha no fechamento do dia de captura: {e}")
+        registrar_erro_json(f"fechar_dia_captura_parceiros: {e}", origem="bot_mestre.py")
+
 async def motor_parceiros_step():
     """Um disparo por ciclo, percorrendo os parceiros ativos."""
+    # 🌙 Recuperação: se o serviço estava fora às 23:55, o dia vencido é fechado
+    # aqui. Só mexe em dias já encerrados, nunca no que ainda está a correr.
+    await fechar_dia_captura_parceiros(incluir_hoje=False)
+
     try:
         agora = datetime.now(fuso_horario)
         hoje_str = agora.strftime("%Y-%m-%d")
@@ -3066,8 +3289,13 @@ async def motor_parceiros_step():
                 # ✅ CORREÇÃO: o descarte por idade precisa acompanhar o dias_atraso do
                 # parceiro. Com 5 fixo e dias_atraso=30, o motor descartava tudo.
                 dias_atraso_p = int(p.get("dias_atraso", 30))
+                # 🕒 Janela de publicação própria do parceiro (0 a 24 = dia todo)
+                janela_ini = int(p.get("janela_inicio", 0) or 0)
+                janela_fim = int(p.get("janela_fim", 24) or 24)
+                if janela_ini >= janela_fim:
+                    janela_ini, janela_fim = 0, 24
                 calcular_horarios_distribuicao(desagendados, {
-                    "inicio": 0, "fim": 24, "modo": "aleatorio", "intervalo_dias": 1,
+                    "inicio": janela_ini, "fim": janela_fim, "modo": "aleatorio", "intervalo_dias": 1,
                     "espacamento_base_min": 10, "espacamento_variacao_min": 5,
                     "limite_dias_descarte": dias_atraso_p + 5, "horarios_ocupados": ocupados
                 }, forcar=False)
@@ -3076,6 +3304,20 @@ async def motor_parceiros_step():
                         remover_item_fila_parceiro(item["id_unico"], item.get("caminho_video"))
                         continue
                     atualizar_item_fila_parceiro(item["id_unico"], "horario_disparo", item.get("horario_disparo", ""))
+
+            # --- 1.5. TETO DIÁRIO: o corte agora é na PUBLICAÇÃO, não na captura.
+            # Captura-se tudo; aqui escolhe-se quantos vão ao ar por dia e o excedente
+            # é apagado do disco junto com o registo da fila.
+            piso_p, topo_p = ler_faixa_limite(p)
+            if piso_p > 0:
+                agendados_p = [i for i in ler_fila_parceiro_pendente(p.get("id")) if i.get("horario_disparo")]
+                # 🎲 Semente com o ID do parceiro: cada um sorteia o seu número do dia.
+                for item in aplicar_limite_diario_fila(agendados_p, piso_p, topo_p,
+                                                       semente=f"parceiro:{p.get('id')}"):
+                    remover_item_fila_parceiro(item["id_unico"], item.get("caminho_video"))
+                    if EXIBIR_LOGS:
+                        logger.info(f"✂️ [Parceiro {p.get('nome')}] Vídeo acima da faixa "
+                                    f"{piso_p}-{topo_p}/dia descartado.")
 
             # --- 2. Publicação (o primeiro vencido, um por ciclo) ---
             agora_txt = agora.strftime("%Y-%m-%d %H:%M:%S")
@@ -3144,12 +3386,24 @@ async def motor_parceiros_step():
         if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Falha no motor de publicação: {e}")
 
 # --- GESTÃO: selecionar, editar, pausar e excluir ---
+def rotulo_cota_parceiro(p):
+    """📦 Como a cota do parceiro aparece no painel: faixa, número fixo ou sem teto."""
+    piso, topo = ler_faixa_limite(p)
+    if not piso:
+        return "sem teto (publica tudo)"
+    if topo > piso:
+        hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
+        sorteado = sortear_teto_do_dia(f"parceiro:{p.get('id')}", hoje_str, piso, topo)
+        return f"{piso} a {topo} vídeos/dia · hoje {sorteado}"
+    return f"{piso} vídeos/dia (fixo)"
+
 def teclado_gerenciar_parceiro(p):
     acao = "Pausar Parceiro ⏸️" if p.get("ativo") else "Ativar Parceiro ▶️"
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text=acao)],
         [KeyboardButton(text="Editar Origem 📥"), KeyboardButton(text="Editar Destino 📤")],
         [KeyboardButton(text="Editar Dias ⏳"), KeyboardButton(text="Editar Cota 📦")],
+        [KeyboardButton(text="Editar Janela 🕒")],
         [KeyboardButton(text="Excluir Parceiro 🗑️")],
         [KeyboardButton(text="Voltar aos Parceiros 🔙")]
     ], resize_keyboard=True, is_persistent=True)
@@ -3171,7 +3425,8 @@ async def mostrar_parceiro(message, state: FSMContext, parceiro_id):
         f"🔑 App ID: <code>{mascarar_segredo(p.get('app_id'))}</code>\n"
         f"📥 Origem: {rotulo_alvo(p.get('canal_origem'))}\n"
         f"📤 Destino: {rotulo_alvo(p.get('canal_destino'))}\n"
-        f"⏳ D+{p.get('dias_atraso')}  ·  📦 {p.get('limite_diario')} vídeos/dia"
+        f"⏳ D+{p.get('dias_atraso')}  ·  📦 {rotulo_cota_parceiro(p)}\n"
+        f"🕒 Janela: {p.get('janela_inicio', 0) or 0}h às {p.get('janela_fim', 24) or 24}h"
         "</blockquote>\n\n"
         "Escolha a ação desejada:",
         parse_mode="HTML", reply_markup=teclado_gerenciar_parceiro(p)
@@ -3229,7 +3484,8 @@ async def acoes_parceiro(message: types.Message, state: FSMContext):
         "Editar Origem 📥":  ("canal_origem",  "canal de ORIGEM (de onde pega os vídeos)"),
         "Editar Destino 📤": ("canal_destino", "canal de DESTINO (onde publica)"),
         "Editar Dias ⏳":     ("dias_atraso",   "número de dias de atraso (D+X)"),
-        "Editar Cota 📦":    ("limite_diario", "quantidade de vídeos por dia"),
+        "Editar Cota 📦":    ("cota", "cota por dia — faixa (Exemplo: 6-10) ou número fixo (Exemplo: 6)"),
+        "Editar Janela 🕒":  ("janela", "janela de horário no formato Inicio-Fim (Exemplo: 8-23)"),
     }
     if texto in mapa:
         campo, descricao = mapa[texto]
@@ -3262,6 +3518,42 @@ async def salvar_edicao_parceiro(message: types.Message, state: FSMContext):
     data = await state.get_data()
     pid, campo = data.get("parceiro_id"), data.get("campo_edicao")
     valor = (message.text or "").strip()
+
+    if campo == "cota":
+        # 📦 Uma pergunta, duas colunas: aceita faixa "6-10" ou número fixo "6".
+        casou = re.match(r"^(\d{1,3})(?:\s*-\s*(\d{1,3}))?$", valor)
+        if not casou:
+            await message.answer("⚠️ Envie um número (<code>6</code>) ou uma faixa (<code>6-10</code>).", parse_mode="HTML"); return
+        piso = int(casou.group(1))
+        topo = int(casou.group(2)) if casou.group(2) else piso
+        if topo < piso:
+            await message.answer("⚠️ O segundo número precisa ser maior que o primeiro.", parse_mode="HTML"); return
+        if atualizar_parceiro(pid, "limite_min", piso) and atualizar_parceiro(pid, "limite_max", topo):
+            # Zera o campo antigo para não sobrar duas fontes de verdade na mesma linha.
+            atualizar_parceiro(pid, "limite_diario", 0)
+            if EXIBIR_LOGS: logger.info(f"👥 [Parceiros] #{pid}: cota diária definida para {piso}-{topo}.")
+            rotulo = f"{piso} a {topo} vídeos/dia" if topo > piso else f"{piso} vídeos/dia"
+            await message.answer(f"✅ <b>Cota atualizada:</b> {rotulo}.", parse_mode="HTML")
+        else:
+            await message.answer("❌ Não foi possível atualizar.")
+        await mostrar_parceiro(message, state, pid)
+        return
+
+    if campo == "janela":
+        # 🕒 Uma pergunta, duas colunas: grava janela_inicio e janela_fim de uma vez.
+        casou = re.match(r"^(\d{1,2})\s*-\s*(\d{1,2})$", valor)
+        if not casou:
+            await message.answer("⚠️ Use o formato <code>Inicio-Fim</code>. Exemplo: <code>8-23</code>.", parse_mode="HTML"); return
+        ini, fim = map(int, casou.groups())
+        if ini >= fim or ini < 0 or fim > 24:
+            await message.answer("⚠️ O início precisa ser menor que o fim, dentro de 0 a 24.", parse_mode="HTML"); return
+        if atualizar_parceiro(pid, "janela_inicio", ini) and atualizar_parceiro(pid, "janela_fim", fim):
+            if EXIBIR_LOGS: logger.info(f"👥 [Parceiros] #{pid}: janela de publicação definida para {ini}h-{fim}h.")
+            await message.answer(f"✅ <b>Janela atualizada:</b> {ini}h às {fim}h.", parse_mode="HTML")
+        else:
+            await message.answer("❌ Não foi possível atualizar.")
+        await mostrar_parceiro(message, state, pid)
+        return
 
     if campo in ("dias_atraso", "limite_diario"):
         if not valor.isdigit():
@@ -15126,7 +15418,25 @@ async def monitor_saude():
         # 2️⃣ Pasta temp/ inchada
         temp_gb = _tamanho_pasta_gb("temp")
         if temp_gb >= LIMITE_TEMP_GB and not _ja_alertou("temp"):
-            alertas.append(f"🗂️ <b>Pasta temp/ com {temp_gb:.1f} GB</b>\nA faxina das 03h pode não estar dando conta.")
+            # Antes de acusar a faxina, roda a faxina. Avisar sem agir deixava a
+            # pasta crescer até às 03h seguintes com o aviso a repetir-se à toa.
+            removidos, liberados = await asyncio.to_thread(limpar_arquivos_orfaos)
+            presos, orfaos, vencidos = await asyncio.to_thread(diagnostico_temp)
+            temp_gb = _tamanho_pasta_gb("temp")
+
+            partes = [f"🗂️ <b>Pasta temp/ com {temp_gb:.1f} GB</b>"]
+            if removidos:
+                partes.append(f"🧹 Faxina automática liberou {liberados / (1024**2):.0f} MB agora "
+                              f"({removidos} arquivo(s)).")
+            if presos >= orfaos:
+                partes.append(f"📦 {presos / (1024**3):.1f} GB estão presos a filas pendentes e a faxina "
+                              f"não pode tocar. É volume de fila, não lixo — reduza os prazos das rotas "
+                              f"ou o teto diário se quiser encolher.")
+            else:
+                partes.append(f"🗑️ {orfaos / (1024**3):.1f} GB são órfãos, dos quais {vencidos} arquivo(s) "
+                              f"já passaram das {HORAS_PROTEGIDAS_TEMP}h de proteção. Se este número não "
+                              f"cair no próximo ciclo, algo está a escrever em temp/ sem apagar.")
+            alertas.append("\n".join(partes))
 
         # 3️⃣ Fila do Espião vencida sem publicar
         try:
@@ -15200,11 +15510,23 @@ async def main():
     _iniciar_tabela_buscas()
     scheduler.add_job(varredor_de_lixeira, 'cron', hour=3, minute=0, timezone=FUSO_STR)
 
+    # 🧹 Faxina de disco de 6 em 6 horas, independente do varredor das 03h.
+    # Com prazo de proteção de 24h e uma só passagem por dia, um órfão criado
+    # logo depois das 03h esperava quase 48h para ser apagado.
+    scheduler.add_job(faxina_disco_periodica, 'interval', hours=6,
+                      id='faxina_disco_loop', replace_existing=True)
+
     # 🩺 Monitor de saúde: avisa no privado quando algo sai do normal
     scheduler.add_job(monitor_saude, 'interval', hours=1, id='monitor_saude_loop', replace_existing=True)
 
     # 👥 Motor de publicação dos parceiros
     scheduler.add_job(motor_parceiros_step, 'interval', minutes=2, id='motor_parceiros_loop', replace_existing=True)
+
+    # 🌙 Fechamento do dia de captura dos parceiros: sorteia a cota e apaga o
+    # excedente do disco no mesmo dia, sem esperar os 30 dias do D+X.
+    scheduler.add_job(fechar_dia_captura_parceiros, 'cron', hour=23, minute=55,
+                      timezone=FUSO_STR, kwargs={"incluir_hoje": True},
+                      id='fechamento_dia_parceiros', replace_existing=True)
 
     # 📊 Retrato diário das métricas (prova social das rotinas)
     scheduler.add_job(coletar_metricas_diarias, 'cron', hour=23, minute=50, timezone=FUSO_STR, id='coleta_metricas_diarias', replace_existing=True)
