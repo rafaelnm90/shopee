@@ -15001,11 +15001,24 @@ async def renderizar_painel(chat_id, thread_id, state: FSMContext):
 # 🛡️ ANTI-ÓRFÃO: o cronômetro e o estado FSM vivem na memória do processo.
 # Todo restart mata as sessões, mas as mensagens de painel ficam no grupo para sempre.
 # Por isso registramos cada painel aberto no banco e varremos na inicialização.
+LIMITE_REGISTRO_PAINEIS = 200   # era 50, e num grupo movimentado isso enchia entre reinícios
+
 def registrar_painel_aberto(chat_id, message_id):
     try:
         abertos = ler_config_bd("paineis_wizard_abertos", [])
         abertos.append({"chat_id": chat_id, "message_id": message_id})
-        salvar_config_bd("paineis_wizard_abertos", abertos[-50:])
+
+        # O corte da lista é o que transforma painel em órfão permanente: tudo o
+        # que cai fora daqui nunca mais é varrido, porque ninguém sabe que existe.
+        # Por isso o teto subiu e o descarte passou a gritar em vez de sumir calado.
+        if len(abertos) > LIMITE_REGISTRO_PAINEIS:
+            perdidos = len(abertos) - LIMITE_REGISTRO_PAINEIS
+            if EXIBIR_LOGS:
+                logger.warning(f"⚠️ [Anti-Órfão] {perdidos} painel(is) saíram do registro sem "
+                               f"terem sido varridos e ficarão no grupo para sempre.")
+            abertos = abertos[-LIMITE_REGISTRO_PAINEIS:]
+
+        salvar_config_bd("paineis_wizard_abertos", abertos)
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao registrar painel aberto: {e}")
 
@@ -15020,16 +15033,55 @@ async def limpar_paineis_orfaos():
         if not abertos:
             return
 
-        removidos = 0
-        for painel in abertos:
-            try:
-                await bot.delete_message(painel.get("chat_id"), painel.get("message_id"))
-                removidos += 1
-            except Exception:
-                pass  # já apagado ou antigo demais: segue o baile
+        removidos = neutralizados = 0
+        pendentes = []
 
-        salvar_config_bd("paineis_wizard_abertos", [])
-        if EXIBIR_LOGS: logger.info(f"🧹 [Anti-Órfão] {removidos} de {len(abertos)} painel(is) de submissão removido(s) na inicialização.")
+        for painel in abertos:
+            chat_id = painel.get("chat_id")
+            message_id = painel.get("message_id")
+            tentativas = int(painel.get("tentativas", 0) or 0)
+
+            try:
+                await bot.delete_message(chat_id, message_id)
+                removidos += 1
+                continue
+            except Exception as e:
+                motivo = str(e)
+
+            # Apagar falhou. A causa quase certa é o limite do Telegram: um bot só
+            # remove a própria mensagem em grupo dentro de 48h, a não ser que seja
+            # admin com "can_delete_messages". Editar NÃO tem esse limite — então
+            # pelo menos o painel deixa de parecer vivo: perde os botões e o
+            # cronômetro, e passa a dizer que a sessão acabou.
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id, message_id=message_id,
+                    text=("⏱️ <b>Sessão encerrada.</b>\n"
+                          "Este painel expirou. Use o painel fixo do tópico para abrir um novo."),
+                    parse_mode="HTML", reply_markup=None
+                )
+                neutralizados += 1
+                continue
+            except Exception:
+                pass
+
+            # Nem apagou nem editou. Guarda para a próxima subida em vez de
+            # esquecer — era isso que dava a um painel teimoso o direito de ficar
+            # no grupo para sempre. O teto de tentativas evita insistir à toa.
+            if tentativas < 3:
+                painel["tentativas"] = tentativas + 1
+                pendentes.append(painel)
+                if EXIBIR_LOGS:
+                    logger.warning(f"⚠️ [Anti-Órfão] Painel {message_id} resistiu "
+                                   f"(tentativa {tentativas + 1}/3): {motivo}")
+            elif EXIBIR_LOGS:
+                logger.error(f"❌ [Anti-Órfão] Painel {message_id} desistido após 3 tentativas. "
+                             f"Confira se o bot é admin com permissão de apagar mensagens. Último erro: {motivo}")
+
+        salvar_config_bd("paineis_wizard_abertos", pendentes)
+        if EXIBIR_LOGS:
+            logger.info(f"🧹 [Anti-Órfão] {removidos} painel(is) apagado(s), {neutralizados} "
+                        f"neutralizado(s) por edição, {len(pendentes)} guardado(s) para a próxima subida.")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Anti-Órfão] Erro na varredura de painéis: {e}")
 
