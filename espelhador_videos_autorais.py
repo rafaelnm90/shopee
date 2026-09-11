@@ -449,17 +449,17 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
             if not ha_espaco_para_parceiros():
                 return
 
+                return
+
             dias = int(p.get("dias_atraso", 30))
-            limite = int(p.get("limite_diario", 6))
             data_alvo = (datetime.now() + timedelta(days=dias)).strftime("%Y-%m-%d")
 
-            if contar_fila_parceiro(p.get("id"), data_alvo) >= limite:
-                if EXIBIR_LOGS: logger.info(f"📦 [Parceiro {p.get('nome')}] Cota de {data_alvo} já cheia. Ignorando.")
-                continue
+            # 📦 O 'limite_diario' NÃO corta mais aqui: captura-se tudo e a escolha de
+            # quais vídeos vão ao ar passou para o motor de publicação (bot_mestre).
+            # O único freio na captura passa a ser o teto de disco, checado acima.
 
             # 🔒 Reserva ANTES de baixar: se outro parceiro pegou no mesmo instante, para aqui
             if not reservar_video(chaves, parceiro_id=p.get("id")):
-                continue
 
             destino = os.path.join(pasta_do_parceiro(p.get("id")), f"{int(datetime.now().timestamp())}_{random.randint(1000,9999)}.mp4")
             await client.download_media(event.media, file=destino)
@@ -847,6 +847,17 @@ async def interceptar_e_espelhar(event):
         if t_evento != t_config:
             eh_origem = False
 
+    # 👥 PARCEIROS: cada parceiro vigia o PRÓPRIO canal de origem, que quase nunca
+    # é o mesmo canal do dono. Por isso esta chamada precisa vir ANTES do corte do
+    # "eh_origem" — abaixo dele o evento já foi descartado e o parceiro nunca vê nada.
+    if isinstance(getattr(event, 'media', None), MessageMediaDocument):
+        link_parceiro = extrair_link_shopee(event)
+        if link_parceiro:
+            try:
+                await capturar_para_parceiros(event, getattr(chat, 'id', None), link_parceiro)
+            except Exception as e:
+                if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro na captura paralela: {e}")
+
     if not eh_origem:
         return
 
@@ -862,13 +873,6 @@ async def interceptar_e_espelhar(event):
         if not link_capturado:
             if EXIBIR_LOGS: logger.info("⏭️ Postagem ignorada: Não contém link da Shopee (nem embutido).")
             return
-
-        # 👥 Oferece o vídeo aos PARCEIROS. Roda antes do fluxo do dono porque
-        # a função consulta a reserva: se o vídeo já for seu, ela sai na hora.
-        try:
-            await capturar_para_parceiros(event, getattr(chat, 'id', None), link_capturado)
-        except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro na captura paralela: {e}")
 
         if EXIBIR_LOGS: logger.info("🔗 A converter o link da Shopee para o seu ID de afiliado via API Central...")
         link_novo = await converter_link_shopee(link_capturado, "geral", EXIBIR_LOGS)
