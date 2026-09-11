@@ -203,7 +203,126 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
     if EXIBIR_LOGS:
         logger.info(f"✅ [Motor Filas] Distribuição concluída. (Modo: {modo}, Atraso: D+{intervalo_dias}, Forçado: {forcar})")
 
+
     return itens_para_agendar
+
+def ler_faixa_limite(config):
+    """
+    📊 Extrai o par (piso, topo) de posts por dia de qualquer configuração:
+    rota do espelhador (dict do JSON) ou parceiro (linha do SQLite).
+
+    Aceita o antigo `limite_diario` como piso, para não quebrar o que já estava
+    configurado antes de a faixa existir. Piso 0 significa sem teto nenhum, e
+    topo menor ou igual ao piso significa número fixo, sem variação.
+    """
+    piso = config.get("limite_min")
+    if piso in (None, "", 0):
+        piso = config.get("limite_diario") or 0
+    try:
+        piso = int(piso or 0)
+    except (TypeError, ValueError):
+        piso = 0
+
+    try:
+        topo = int(config.get("limite_max") or 0)
+    except (TypeError, ValueError):
+        topo = 0
+
+    if topo < piso:
+        topo = piso
+    return piso, topo
+
+def sortear_teto_do_dia(semente, dia, piso, topo):
+    """
+    🎲 Quantos posts este dia aceita, sorteado dentro da faixa [piso, topo].
+
+    O sorteio é DETERMINÍSTICO de propósito: a mesma semente com o mesmo dia
+    devolve sempre o mesmo número. Isso é obrigatório aqui — o motor reavalia
+    a fila a cada 60 segundos e o descarte é irreversível. Com random() puro,
+    um vídeo aprovado às 10h00 seria apagado às 10h01 quando o dado caísse
+    mais baixo. Sendo determinístico, o número do dia também sobrevive a
+    reinício de serviço e pode ser exibido no painel sem gravar nada.
+
+    Usa random.Random(str), que semeia por SHA-512 da string e é estável entre
+    processos — ao contrário de hash(), randomizado por PYTHONHASHSEED.
+    """
+    try:
+        piso = int(piso or 0)
+        topo = int(topo or 0)
+    except (TypeError, ValueError):
+        return 0
+
+    if piso <= 0:
+        return 0
+    if topo < piso:
+        piso, topo = topo, piso
+    if topo == piso:
+        return piso
+
+    return random.Random(f"{semente}|{dia}").randint(piso, topo)
+
+def aplicar_limite_diario_fila(itens, piso, topo=None, semente="", chave_horario="horario_disparo"):
+    """
+    ✂️ Teto de publicações por dia, comum a todas as filas.
+
+    Captura-se tudo; aqui decide-se o que de facto vai ao ar. Cada dia sorteia
+    o próprio número dentro da faixa [piso, topo] — é o que dá cara orgânica à
+    rota, em vez do mesmo carimbo de N posts todo santo dia. Com `topo` ausente
+    ou igual ao piso, o número é fixo.
+
+    Os itens já agendados são ordenados por horário e os primeiros de cada dia
+    ficam — como o motor já embaralhou (modo aleatório) ou ordenou por captura
+    (modo ordem) antes de carimbar os horários, essa ordem JÁ é a priorização.
+
+    O excedente recebe `descartar_por_limite = True`; quem chamou é que remove
+    da fila e apaga o ficheiro. Itens já publicados ocupam vaga mas nunca são
+    marcados. Um `piso` igual a 0 ou ausente significa sem teto.
+
+    Devolve a lista dos itens marcados para descarte.
+    """
+    try:
+        piso = int(piso or 0)
+    except (TypeError, ValueError):
+        piso = 0
+
+    if piso <= 0:
+        return []
+
+    por_dia = {}
+    for item in itens:
+        horario = item.get(chave_horario) or ""
+        if not horario:
+            continue
+        por_dia.setdefault(horario[:10], []).append(item)
+
+    descartados = []
+    for dia, itens_do_dia in sorted(por_dia.items()):
+        limite = sortear_teto_do_dia(semente, dia, piso, topo)
+        if limite <= 0:
+            continue
+
+        itens_do_dia.sort(key=lambda i: i.get(chave_horario) or "")
+        vagas = limite
+        excedente = []
+
+        for item in itens_do_dia:
+            if item.get("processado"):
+                vagas -= 1          # já foi ao ar: ocupa vaga e é intocável
+                continue
+            if vagas > 0:
+                vagas -= 1
+            else:
+                excedente.append(item)
+
+        for item in excedente:
+            item["descartar_por_limite"] = True
+            descartados.append(item)
+
+        if excedente and EXIBIR_LOGS:
+            logger.info(f"✂️ [Motor Filas] Dia {dia} sorteou teto de {limite} "
+                        f"(faixa {piso}-{topo or piso}): {len(excedente)} item(ns) descartado(s).")
+
+    return descartados
 
 def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_horario, display_origem, link_origem, link_destino=None, detalhes_extras=None):
     """
