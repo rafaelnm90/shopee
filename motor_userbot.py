@@ -12,7 +12,7 @@ from telethon import TelegramClient, events
 from telethon.tl.types import MessageMediaDocument
 from dotenv import load_dotenv
 from utils import registrar_erro_json, chave_cache_ia, consultar_cache_ia, gravar_cache_ia
-from motor_filas import calcular_horarios_distribuicao # ⚙️ Novo Motor Centralizado
+from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite # ⚙️ Novo Motor Centralizado
 from zoneinfo import ZoneInfo
 
 load_dotenv()
@@ -169,10 +169,15 @@ def ler_fila_clonagem():
 def salvar_fila_clonagem(dados):
     salvar_config_bd_espiao("fila_clonagem", dados)
 
-async def verificar_e_otimizar_video(caminho_video):
+async def verificar_e_otimizar_video(caminho_video, relatorio=None):
     """
     Inspeciona a resolução física do arquivo.
     Se for inferior a 720p, realiza o upscaling com FFmpeg em background.
+
+    O ficheiro é substituído NO MESMO CAMINHO (os.replace), por isso o retorno
+    nunca muda e não serve para saber se houve trabalho. Quem precisa saber
+    passa um dict em `relatorio` e recebe relatorio["upscaled"] = True quando o
+    re-encode aconteceu de facto. Chamar sem o dict mantém o comportamento antigo.
     """
     if not caminho_video or not os.path.exists(caminho_video): return caminho_video
     
@@ -210,12 +215,14 @@ async def verificar_e_otimizar_video(caminho_video):
         )
         await comando_ffmpeg.communicate()
         
+        
         if comando_ffmpeg.returncode == 0 and os.path.exists(caminho_temp):
             os.replace(caminho_temp, caminho_video)
+            if relatorio is not None:
+                relatorio["upscaled"] = True
             if EXIBIR_LOGS: logger.info(f"✨ [Upscaling] Sucesso! Vídeo re-renderizado para 720x1280 e substituído.")
         else:
             if EXIBIR_LOGS: logger.error("❌ [Upscaling] Falha na renderização do FFmpeg. Mantendo arquivo original.")
-            if os.path.exists(caminho_temp): os.remove(caminho_temp)
             
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Upscaling] Erro na função de otimização: {e}")
@@ -582,7 +589,26 @@ async def processar_fila_espelhador_loop():
                 if EXIBIR_LOGS: logger.info(f"📅 [Espelhador] Motor Central acionado para {len(itens)} vídeos na rota '{nome_rota}' (Forçar: {forcar_rota})...")
                 calcular_horarios_distribuicao(itens, config_fila, forcar=forcar_rota)
                 houve_agendamento = True
-            
+
+            # --- 1.5. TETO DIÁRIO POR ROTA ---
+            # A captura continua pegando o dia inteiro; aqui a fila é cortada para o
+            # número de posts que a rota aceita por dia. Como o excedente é DESCARTADO
+            # (não transborda), a conta inclui o que já estava agendado em ciclos
+            # anteriores e o que já foi postado — senão o teto seria furado a cada volta.
+            for nome_rota_teto, rota_cfg_teto in rotas.items():
+                piso_rota, topo_rota = ler_faixa_limite(rota_cfg_teto)
+                if not piso_rota:
+                    continue
+                itens_da_rota = [i for i in fila if i.get("nome_rota") == nome_rota_teto]
+                # 🎲 A semente leva o nome da rota: duas rotas no mesmo dia sorteiam
+                # números diferentes, e cada uma repete o seu a cada ciclo de 60s.
+                descartados_teto = aplicar_limite_diario_fila(
+                    itens_da_rota, piso_rota, topo_rota, semente=f"espelho:{nome_rota_teto}"
+                )
+                if descartados_teto and EXIBIR_LOGS:
+                    logger.info(f"✂️ [Espelhador] Rota '{nome_rota_teto}': {len(descartados_teto)} "
+                                f"vídeo(s) acima da faixa de {piso_rota}-{topo_rota}/dia serão descartados.")
+
             # --- 2. EXECUÇÃO DOS DISPAROS (Confiando 100% no Motor) ---
             for item in fila:
                 nome_rota = item.get("nome_rota")
