@@ -449,8 +449,6 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
             if not ha_espaco_para_parceiros():
                 return
 
-                return
-
             dias = int(p.get("dias_atraso", 30))
             data_alvo = (datetime.now() + timedelta(days=dias)).strftime("%Y-%m-%d")
 
@@ -460,6 +458,7 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
 
             # 🔒 Reserva ANTES de baixar: se outro parceiro pegou no mesmo instante, para aqui
             if not reservar_video(chaves, parceiro_id=p.get("id")):
+                continue
 
             destino = os.path.join(pasta_do_parceiro(p.get("id")), f"{int(datetime.now().timestamp())}_{random.randint(1000,9999)}.mp4")
             await client.download_media(event.media, file=destino)
