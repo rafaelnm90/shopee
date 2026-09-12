@@ -425,8 +425,12 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
     Chamada em TODA mensagem com vídeo + link Shopee. Para cada parceiro cujo
     canal de origem seja este chat, roda o sorteio dele sobre o que o dono não levou.
     """
+    # 🔎 DIAGNÓSTICO: cada saída antecipada daqui era silenciosa, então uma fila
+    # parada em zero não dizia NADA sobre onde o fluxo tinha morrido. Agora cada
+    # porta fechada se anuncia, com o dado que permite conferir a configuração.
     parceiros = ler_parceiros_ativos_com_acesso()
     if not parceiros:
+        if EXIBIR_LOGS: logger.info("👥 [Parceiros] Vídeo visto, mas nenhum parceiro ativo com acesso liberado.")
         return
 
     try:
@@ -437,14 +441,24 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
 
     # 🔒 O dono já reservou? Então este vídeo não é de ninguém mais.
     if video_ja_reservado(chaves):
+        if EXIBIR_LOGS: logger.info(f"👥 [Parceiros] Vídeo já reservado por outro. Chat {chat_id}.")
         return
+
+    if EXIBIR_LOGS:
+        logger.info(f"👥 [Parceiros] Vídeo com link no chat {_id_curto(chat_id)} — "
+                    f"conferindo {len(parceiros)} parceiro(s) com acesso.")
 
     for p in parceiros:
         try:
             origem = str(p.get("canal_origem") or "")
             id_origem = await id_do_canal_origem(origem)
             if not id_origem or id_origem != _id_curto(chat_id):
+                if EXIBIR_LOGS:
+                    logger.info(f"👥 [Parceiro {p.get('nome')}] Origem '{origem}' resolve para "
+                                f"{id_origem or 'NADA'}, e o vídeo veio de {_id_curto(chat_id)}. Ignorado.")
                 continue
+
+            if EXIBIR_LOGS: logger.info(f"👥 [Parceiro {p.get('nome')}] Origem bateu. Capturando...")
 
             if not ha_espaco_para_parceiros():
                 return
