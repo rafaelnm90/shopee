@@ -232,6 +232,22 @@ def ler_faixa_limite(config):
         topo = piso
     return piso, topo
 
+def faixa_de_config(config, chave_min, chave_max, chave_legado=None):
+    """
+    📊 Lê uma faixa de posts por dia de QUAISQUER nomes de chave.
+
+    Cada fluxo batizou a sua cota de um jeito — `limite_diario` nos parceiros,
+    `limite_videos` nos autorais, `repost_limite` no público. Em vez de espalhar
+    três leitores quase iguais, este adaptador normaliza os nomes e entrega tudo
+    ao ler_faixa_limite, que já sabe cair no número antigo quando a faixa ainda
+    não foi configurada.
+    """
+    return ler_faixa_limite({
+        "limite_min": config.get(chave_min),
+        "limite_max": config.get(chave_max),
+        "limite_diario": config.get(chave_legado) if chave_legado else None,
+    })
+
 def sortear_teto_do_dia(semente, dia, piso, topo):
     """
     🎲 Quantos posts este dia aceita, sorteado dentro da faixa [piso, topo].
