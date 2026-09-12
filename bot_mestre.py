@@ -441,6 +441,7 @@ class AutoraisFluxo(StatesGroup):
 class RelatoriosFluxo(StatesGroup):
     menu_filas = State()
     aguardando_rota_espelhador = State() # ✅ NOVO: Estado para selecionar qual rota visualizar
+    aguardando_parceiro_detalhe = State() # ✅ NOVO: qual parceiro detalhar a fila
 
 class ConfigRotinaEspiao(StatesGroup):
     aguardando_janela = State()
@@ -3106,7 +3107,9 @@ async def painel_parceiros(message: types.Message, state: FSMContext):
                 f"🔑 App ID: <code>{mascarar_segredo(p.get('app_id'))}</code>\n"
                 f"📥 Origem: {rotulo_alvo(p.get('canal_origem'))}\n"
                 f"📤 Destino: {rotulo_alvo(p.get('canal_destino'))}\n"
-                f"⏳ D+{p.get('dias_atraso')}  ·  📦 {p.get('limite_diario')} vídeos/dia\n"
+                f"⏳ Oculto por: <b>{p.get('dias_atraso')} dias</b>\n"
+                f"📦 Cota Diária: <b>{rotulo_cota_parceiro(p)}</b>\n"
+                f"🕒 Janela de Postagem: <b>{p.get('janela_inicio', 0) or 0}h às {p.get('janela_fim', 24) or 24}h</b>\n"
                 f"🤖 Acesso à origem: {'✅ conectado' if p.get('origem_ok') else '⏳ aguardando entrada'}"
                 + (f"\n<i>{p.get('origem_erro')}</i>" if p.get('origem_erro') and not p.get('origem_ok') else "")
                 + "</blockquote>\n\n"
@@ -3116,7 +3119,7 @@ async def painel_parceiros(message: types.Message, state: FSMContext):
 
     linhas = [[KeyboardButton(text="Cadastrar Parceiro ➕")]]
     if parceiros:
-        linhas.append([KeyboardButton(text="Gerenciar Parceiro 🔧")])
+        linhas.append([KeyboardButton(text="Gerenciar Parceiro 🔧"), KeyboardButton(text="Remover Parceiro 🗑️")])
         linhas.append([KeyboardButton(text="Pausar Todos ⏸️"), KeyboardButton(text="Ativar Todos ▶️")])
         linhas.append([KeyboardButton(text="Excluir Todos 🗑️")])
     linhas.append([KeyboardButton(text="Voltar ao Painel Público 🔙")])
@@ -3460,12 +3463,40 @@ async def mostrar_parceiro(message, state: FSMContext, parceiro_id):
         f"🔑 App ID: <code>{mascarar_segredo(p.get('app_id'))}</code>\n"
         f"📥 Origem: {rotulo_alvo(p.get('canal_origem'))}\n"
         f"📤 Destino: {rotulo_alvo(p.get('canal_destino'))}\n"
-        f"⏳ D+{p.get('dias_atraso')}  ·  📦 {rotulo_cota_parceiro(p)}\n"
-        f"🕒 Janela: {p.get('janela_inicio', 0) or 0}h às {p.get('janela_fim', 24) or 24}h"
+        f"⏳ Oculto por: <b>{p.get('dias_atraso')} dias</b>\n"
+        f"📦 Cota Diária: <b>{rotulo_cota_parceiro(p)}</b>\n"
+        f"🕒 Janela de Postagem: <b>{p.get('janela_inicio', 0) or 0}h às {p.get('janela_fim', 24) or 24}h</b>\n"
+        f"🤖 Acesso à origem: {'✅ conectado' if p.get('origem_ok') else '⏳ aguardando entrada'}"
         "</blockquote>\n\n"
         "Escolha a ação desejada:",
         parse_mode="HTML", reply_markup=teclado_gerenciar_parceiro(p)
     )
+
+@dp.message(F.text == "Remover Parceiro 🗑️", StateFilter("*"))
+async def pedir_id_remover_parceiro(message: types.Message, state: FSMContext):
+    """
+    Atalho do painel: escolher e excluir sem passar por Gerenciar.
+
+    Reaproveita a mesma seleção por número e a MESMA tela de confirmação da
+    exclusão que já existia lá dentro — só marca 'remover_direto' para saber
+    que, assim que o número chegar, o destino é a confirmação e não o menu.
+    """
+    if message.from_user.id != ADMIN_ID: return
+    parceiros = ler_parceiros()
+    if not parceiros:
+        await painel_parceiros(message, state); return
+
+    lista = "\n".join(
+        f"<b>{p.get('id')}</b> — {p.get('nome')} {'🟢' if p.get('ativo') else '⏸️'}"
+        for p in parceiros
+    )
+    await message.answer(
+        f"🗑️ <b>Qual parceiro você quer remover?</b>\n\n{lista}\n\n"
+        "<i>Envie apenas o número correspondente. Ainda haverá uma confirmação.</i>",
+        parse_mode="HTML", reply_markup=teclado_cancelar
+    )
+    await state.set_state(SubmissaoAdminFluxo.parceiro_selecionar)
+    await state.update_data(parceiro_id=None, remover_direto=True)
 
 @dp.message(F.text == "Gerenciar Parceiro 🔧", StateFilter("*"))
 async def pedir_id_parceiro(message: types.Message, state: FSMContext):
@@ -3501,6 +3532,25 @@ async def acoes_parceiro(message: types.Message, state: FSMContext):
     if not pid:
         if not texto.isdigit():
             await message.answer("⚠️ Envie apenas o <b>número</b> do parceiro.", parse_mode="HTML"); return
+
+        # Veio pelo atalho "Remover Parceiro 🗑️": pula o menu e vai direto à
+        # confirmação, que é a mesma tela usada por dentro de Gerenciar.
+        if data.get("remover_direto"):
+            alvo = buscar_parceiro(texto)
+            if not alvo:
+                await message.answer("⚠️ Parceiro não encontrado."); return
+            await state.update_data(parceiro_id=alvo.get("id"), remover_direto=False)
+            await state.set_state(SubmissaoAdminFluxo.parceiro_confirmar_exclusao)
+            await message.answer(
+                f"🗑️ <b>Excluir {alvo.get('nome')} (#{alvo.get('id')})?</b>\n\n"
+                "• O cadastro e as credenciais serão apagados\n"
+                "• A fila de vídeos dele será apagada\n"
+                "• Os vídeos já reservados <b>não voltam</b> ao acervo\n\n"
+                "<i>Esta ação não pode ser desfeita.</i>",
+                parse_mode="HTML", reply_markup=teclado_confirmacao
+            )
+            return
+
         await mostrar_parceiro(message, state, texto); return
 
     p = buscar_parceiro(pid)
@@ -3515,18 +3565,34 @@ async def acoes_parceiro(message: types.Message, state: FSMContext):
         await message.answer(f"✅ <b>{p.get('nome')}</b> foi <b>{estado}</b>.\n<i>{aviso}</i>", parse_mode="HTML")
         await mostrar_parceiro(message, state, pid); return
 
+    # Cada campo traz a pergunta INTEIRA, e não um pedaço encaixado numa frase
+    # genérica. Cota e janela precisam explicar o formato aceito, e isso não cabe
+    # em "Envie o novo <descrição>" — era o que deixava a pergunta dos parceiros
+    # pior que a dos autorais, que já perguntava direito.
     mapa = {
-        "Editar Origem 📥":  ("canal_origem",  "canal de ORIGEM (de onde pega os vídeos)"),
-        "Editar Destino 📤": ("canal_destino", "canal de DESTINO (onde publica)"),
-        "Editar Dias ⏳":     ("dias_atraso",   "número de dias de atraso (D+X)"),
-        "Editar Cota 📦":    ("cota", "cota por dia — faixa (Exemplo: 6-10) ou número fixo (Exemplo: 6)"),
-        "Editar Janela 🕒":  ("janela", "janela de horário no formato Inicio-Fim (Exemplo: 8-23)"),
+        "Editar Origem 📥":  ("canal_origem",
+            "✏️ Envie o novo <b>canal de ORIGEM</b> (de onde os vídeos são pegos):"),
+        "Editar Destino 📤": ("canal_destino",
+            "✏️ Envie o novo <b>canal de DESTINO</b> (onde o parceiro publica):"),
+        "Editar Dias ⏳":     ("dias_atraso",
+            "✏️ Envie o novo <b>número de dias de atraso</b> (D+X).\n\n"
+            "<i>É quanto tempo o vídeo fica guardado antes de ser publicado.</i>"),
+        "Editar Cota 📦":    ("cota",
+            "Quantos vídeos por dia este parceiro pode publicar?\n\n"
+            "• Faixa: <code>4-8</code> — cada dia sorteia um número entre 4 e 8 (média 6)\n"
+            "• Fixo: <code>6</code> — sempre 6 por dia\n\n"
+            "<i>A faixa existe para a quantidade não ser sempre igual, que é o que denuncia robô.</i>"),
+        "Editar Janela 🕒":  ("janela",
+            "Em que horário este parceiro pode publicar?\n\n"
+            "• Formato <code>Inicio-Fim</code> — Exemplo: <code>8-23</code>\n"
+            "• <code>0-24</code> libera o dia inteiro\n\n"
+            "<i>A captura continua 24h; só a publicação respeita a janela.</i>"),
     }
     if texto in mapa:
-        campo, descricao = mapa[texto]
+        campo, pergunta = mapa[texto]
         await state.update_data(campo_edicao=campo)
         await state.set_state(SubmissaoAdminFluxo.parceiro_editar_valor)
-        await message.answer(f"✏️ Envie o novo <b>{descricao}</b>:", parse_mode="HTML", reply_markup=teclado_cancelar)
+        await message.answer(pergunta, parse_mode="HTML", reply_markup=teclado_cancelar)
         return
 
     if texto == "Excluir Parceiro 🗑️":
@@ -6258,14 +6324,21 @@ async def relatorio_filas_parceiros(message: types.Message, state: FSMContext):
         for i in itens:
             por_dia[i.get("data_alvo") or "?"] = por_dia.get(i.get("data_alvo") or "?", 0) + 1
 
+        piso_p, topo_p = ler_faixa_limite(p)
+
         bloco = (
             f"{status} <b>{p.get('nome')}</b>  ·  <code>#{p.get('id')}</code>\n"
             "<blockquote>"
             f"📦 Na fila: <b>{len(itens)}</b> vídeo(s)  ·  💾 {ocupado / (1024**2):.0f} MB\n"
-            f"⏳ D+{p.get('dias_atraso')}  ·  📅 {p.get('limite_diario')}/dia  ·  🤖 Acesso {acesso}\n"
+            f"⏳ Oculto por: <b>{p.get('dias_atraso')} dias</b>\n"
+            f"📅 Cota Diária: <b>{rotulo_cota_parceiro(p)}</b>\n"
+            f"🤖 Acesso à origem: {acesso}\n"
         )
 
         if por_dia:
+            # 🎲 Prévia do fechamento das 23:55: mostra a cota já sorteada para
+            # cada dia e quantos serão descartados. Sem isto o painel só dizia
+            # "3 vídeos" e não dava para saber o que aconteceria à noite.
             proximos = sorted(por_dia.items())[:4]
             linhas_dias = []
             for dia, qtd in proximos:
@@ -6274,10 +6347,19 @@ async def relatorio_filas_parceiros(message: types.Message, state: FSMContext):
                     dia_fmt = datetime.strptime(dia, "%Y-%m-%d").strftime("%d/%m")
                 except Exception:
                     dia_fmt = dia
-                linhas_dias.append(f"{marca} {dia_fmt}: {qtd}")
-            bloco += "🗓️ " + "  ·  ".join(linhas_dias)
+
+                if piso_p:
+                    cota_dia = sortear_teto_do_dia(f"parceiro:{p.get('id')}", dia, piso_p, topo_p)
+                    if qtd > cota_dia:
+                        linhas_dias.append(f"{marca} {dia_fmt}: {qtd} → sorteia {cota_dia}, descarta {qtd - cota_dia}")
+                    else:
+                        linhas_dias.append(f"{marca} {dia_fmt}: {qtd} (cabe na cota de {cota_dia})")
+                else:
+                    linhas_dias.append(f"{marca} {dia_fmt}: {qtd} (sem cota, publica tudo)")
+
+            bloco += "🗓️ " + "\n🗓️ ".join(linhas_dias)
             if len(por_dia) > 4:
-                bloco += f"  <i>(+{len(por_dia) - 4} dias)</i>"
+                bloco += f"\n<i>(+{len(por_dia) - 4} dias)</i>"
         else:
             bloco += "<i>Fila vazia — aguardando novas capturas.</i>"
 
@@ -6305,11 +6387,102 @@ async def relatorio_filas_parceiros(message: types.Message, state: FSMContext):
 
     await message.answer(texto, parse_mode="HTML", reply_markup=obter_teclado_relatorios_filas())
 
+@dp.message(F.text == "Detalhar Parceiro 🔍", StateFilter("*"))
+async def pedir_parceiro_detalhe(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    parceiros = ler_parceiros()
+    if not parceiros:
+        await message.answer("⚠️ Nenhum parceiro cadastrado ainda."); return
+
+    lista = "\n".join(
+        f"<b>{p.get('id')}</b> — {p.get('nome')} {'🟢' if p.get('ativo') else '⏸️'}"
+        for p in parceiros
+    )
+    await message.answer(
+        f"🔍 <b>Qual fila você quer abrir?</b>\n\n{lista}\n\n"
+        "<i>Envie apenas o número correspondente.</i>",
+        parse_mode="HTML", reply_markup=teclado_cancelar
+    )
+    await state.set_state(RelatoriosFluxo.aguardando_parceiro_detalhe)
+
+@dp.message(RelatoriosFluxo.aguardando_parceiro_detalhe)
+async def detalhar_fila_parceiro(message: types.Message, state: FSMContext):
+    """
+    📋 A fila do parceiro vídeo a vídeo.
+
+    O painel de filas só dava o número, e número não diz o que está lá dentro.
+    Aqui sai cada item com a data de captura, o dia em que sai, o horário já
+    sorteado (quando existe) e o link do produto para conferir na hora.
+    """
+    if message.from_user.id != ADMIN_ID: return
+    texto = (message.text or "").strip()
+    if texto in ("Cancelar ❌", "Voltar aos Relatórios 🔙"):
+        await menu_relatorios_filas(message, state); return
+    if not texto.isdigit():
+        await message.answer("⚠️ Envie apenas o <b>número</b> do parceiro.", parse_mode="HTML"); return
+
+    p = buscar_parceiro(texto)
+    if not p:
+        await message.answer("⚠️ Parceiro não encontrado."); return
+
+    itens = ler_fila_parceiro_pendente(p.get("id"))
+    if not itens:
+        await message.answer(
+            f"📋 <b>{p.get('nome')}</b>\n\n<i>Fila vazia — nada capturado ainda.</i>",
+            parse_mode="HTML", reply_markup=obter_teclado_relatorios_filas()
+        )
+        await state.set_state(RelatoriosFluxo.menu_filas)
+        return
+
+    itens.sort(key=lambda i: (i.get("data_alvo") or "", i.get("horario_disparo") or ""))
+    linhas = []
+    for n, item in enumerate(itens[:25], 1):
+        try:
+            captura = datetime.strptime((item.get("data_captura") or "")[:10], "%Y-%m-%d").strftime("%d/%m")
+        except Exception:
+            captura = "?"
+        try:
+            alvo = datetime.strptime(item.get("data_alvo") or "", "%Y-%m-%d").strftime("%d/%m")
+        except Exception:
+            alvo = "?"
+
+        horario = item.get("horario_disparo") or ""
+        if horario:
+            marca = "🚀"
+            quando = f"sai {alvo} às {horario[11:16]}"
+        else:
+            marca = "🕓"
+            quando = f"previsto {alvo}, horário ainda não sorteado"
+
+        tamanho = ""
+        caminho = item.get("caminho_video")
+        if caminho and os.path.exists(caminho):
+            tamanho = f"  ·  {os.path.getsize(caminho) / (1024**2):.1f} MB"
+
+        linhas.append(
+            f"{marca} <b>{n}.</b> capturado {captura}  ·  {quando}{tamanho}\n"
+            f"     <a href=\"{item.get('link_original')}\">🔗 ver produto</a>"
+        )
+
+    cabecalho = (
+        f"📋 <b>FILA DE {p.get('nome').upper()}</b>\n"
+        f"<i>{len(itens)} vídeo(s) na fila  ·  cota {rotulo_cota_parceiro(p)}</i>\n\n"
+        "🚀 = horário já sorteado  ·  🕓 = ainda aguardando o fechamento\n\n"
+    )
+    rodape = f"\n\n<i>...e mais {len(itens) - 25} vídeo(s).</i>" if len(itens) > 25 else ""
+
+    await message.answer(
+        cabecalho + "\n".join(linhas) + rodape,
+        parse_mode="HTML", disable_web_page_preview=True,
+        reply_markup=obter_teclado_relatorios_filas()
+    )
+    await state.set_state(RelatoriosFluxo.menu_filas)
+
 def obter_teclado_relatorios_filas():
     botoes = [
         [KeyboardButton(text="Fila do Espião 🕵️"), KeyboardButton(text="Fila do Espelhador 🔄")],
         [KeyboardButton(text="Fila de Autorais 🎥"), KeyboardButton(text="Fila do Grupo Público 📬")],
-        [KeyboardButton(text="Filas dos Parceiros 👥")],
+        [KeyboardButton(text="Filas dos Parceiros 👥"), KeyboardButton(text="Detalhar Parceiro 🔍")],
         [KeyboardButton(text="Voltar aos Relatórios 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
