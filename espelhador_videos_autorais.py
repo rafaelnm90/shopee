@@ -56,7 +56,7 @@ def extrair_link_shopee(event):
 ## ✅ Importando os Módulos Centrais de IA e Shopee
 from api_gemini import analisar_video_gemini
 from api_shopee import converter_link_shopee
-from motor_filas import calcular_horarios_distribuicao # ⚙️ Motor Central Importado
+from motor_filas import calcular_horarios_distribuicao, faixa_de_config, sortear_teto_do_dia # ⚙️ Motor Central Importado
 
 # As chaves da Shopee e do Gemini foram movidas para os módulos centrais.
 
@@ -939,10 +939,17 @@ async def interceptar_e_espelhar(event):
                 
                 # ✅ Regra dinâmica de dias e limite de vídeos lida diretamente do painel
                 dias_retorno = config_atual.get('dias_retorno', 15)
-                limite_videos = config_atual.get('limite_videos', 5)
-                
+
                 agora = datetime.now()
                 data_alvo = (agora + timedelta(days=dias_retorno)).strftime("%Y-%m-%d")
+
+                # 🎲 A cota do dia sai de um sorteio dentro da faixa, e não mais de um
+                # número fixo. Reservatório do mesmo tamanho todo santo dia é assinatura
+                # de robô; variando, a quantidade publicada parece decisão de gente. O
+                # sorteio é determinístico pela DATA-ALVO, então o reservatório não muda
+                # de tamanho no meio do próprio dia nem depois de um reinício.
+                piso_aut, topo_aut = faixa_de_config(config_atual, "limite_min", "limite_max", "limite_videos")
+                limite_videos = sortear_teto_do_dia("autorais", data_alvo, piso_aut, topo_aut) or piso_aut or 5
                 
                 fila_dados = ler_fila_retorno()
                 # 🎲 SORTEIO JUSTO (Amostragem de Reservatório)
@@ -1008,8 +1015,13 @@ async def interceptar_e_espelhar(event):
                     config_pub = ler_config_bd_autorais("submissao_config", {})
                     if config_pub.get("ativo") and not config_pub.get("repost_pausado", False):
                         dias_publico = config_pub.get("repost_dias", 15)
-                        limite_publico = config_pub.get("repost_limite", 6)
                         data_alvo_pub = (agora + timedelta(days=dias_publico)).strftime("%Y-%m-%d")
+
+                        # 🎲 Mesma ideia dos autorais: o tamanho do reservatório do Grupo
+                        # Público varia por dia, com semente própria para não sortear o
+                        # mesmo número que os autorais na mesma data.
+                        piso_pub, topo_pub = faixa_de_config(config_pub, "repost_limite_min", "repost_limite_max", "repost_limite")
+                        limite_publico = sortear_teto_do_dia("publico", data_alvo_pub, piso_pub, topo_pub) or piso_pub or 6
 
                         fila_pub = ler_fila_publico()
                         total_ofertas_pub = contar_ofertas_dia_publico(data_alvo_pub)
