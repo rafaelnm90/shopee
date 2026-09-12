@@ -35,7 +35,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 # ✅ Importação dos nossos novos módulos blindados (Fase 2)
 from api_gemini import gerar_texto_gemini, analisar_video_gemini, MODELOS_CASCATA_GEMINI, client_genai
 from api_shopee import converter_link_shopee, buscar_ofertas_shopee, testar_chaves_afiliado
-from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite, sortear_teto_do_dia, faixa_de_config # ⚙️ Novo Motor Centralizado
+from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite, sortear_teto_do_dia, faixa_de_config, recompactar_horarios # ⚙️ Novo Motor Centralizado
 
 import matplotlib.pyplot as plt
 import io
@@ -13694,6 +13694,24 @@ async def processar_fila_espiao(forcar=False):
 
         salvar_fila_clonagem(fila_data)
         if EXIBIR_LOGS: logger.info(f"📅 [Espião] Motor Central acionado! {len(itens_para_agendar)} clones organizados com sucesso.")
+
+    # --- 1.5. RECOMPACTAÇÃO DA GRADE ---
+    # Vídeo publicado, descartado ou removido na mão deixa um buraco que a
+    # esteira contínua nunca reaproveita. Aqui o que transbordou para a semana
+    # seguinte volta para os dias que ficaram com vaga. Só grava quando algo
+    # realmente andou, então rodar a cada ciclo não custa escrita à toa.
+    movidos_recompactacao = recompactar_horarios(fila, {
+        "inicio": inicio_janela,
+        "fim": fim_janela,
+        "intervalo_dias": intervalo_dias,
+        "espacamento_base_min": 10,
+        "espacamento_variacao_min": 5
+    }, agora)
+    if movidos_recompactacao:
+        salvar_fila_clonagem(fila_data)
+        if EXIBIR_LOGS:
+            logger.info(f"🧲 [Espião] {len(movidos_recompactacao)} vídeo(s) antecipado(s) "
+                        f"para dias que tinham vaga.")
 
     # --- 2. MOTOR DE EXECUÇÃO (A Catraca Anti-Ban) ---
     itens_para_disparar = []
