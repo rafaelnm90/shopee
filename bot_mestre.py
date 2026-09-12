@@ -6947,19 +6947,48 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         rotas_agrupadas["Radar Global"] = pendentes
 
     # ✅ ORDENAÇÃO UNIVERSAL E INTELIGENTE (ESPIÃO E ESPELHADOR)
-    def chave_ordenacao_universal(item):
-        if item.get("processado", False) or item.get("processado") == 1:
-            return (0, str(item.get("horario_postagem", "00:00")))
-        elif item.get("horario_disparo"):
-            return (1, str(item.get("horario_disparo")))
-        elif item.get("data_alvo"): # Específico para a Fila de Autorais
-            # 🛡️ TRAVA: Garante que data_alvo é uma string válida antes de concatenar
-            return (1, str(item.get("data_alvo")) + " 10:00:00")
-        else:
-            return (2, str(item.get("data_captura", "2099-01-01 00:00:00")))
+    def chave_ordenacao_universal(item, atraso_da_rota):
+        """
+        Ordena pelo DIA EM QUE O VÍDEO VAI AO AR, e não por já ter ou não um
+        horário sorteado.
+
+        O critério anterior separava a fila em dois blocos: primeiro tudo o que
+        tinha horario_disparo, depois o resto pela data de captura. O efeito na
+        tela era um vídeo marcado para 18/09 aparecendo ACIMA de um que sai
+        amanhã, só porque o de amanhã ainda não passou pelo sorteio de horário.
+
+        A previsão exibida no card é calculada como data_captura + D+X. A ordem
+        precisa usar EXATAMENTE a mesma conta, senão tela e ordenação discordam.
+        """
+        # 1. Já publicados encabeçam a lista, do mais cedo para o mais tarde
+        if item.get("processado") in [True, 1, "true", "True"]:
+            return (0, str(item.get("data_postagem") or ""),
+                       str(item.get("horario_postagem") or "00:00"))
+
+        # 2. Horário já sorteado: é a informação mais precisa que existe
+        horario = item.get("horario_disparo") or item.get("data_publicacao") or ""
+        if horario:
+            return (1, str(horario)[:19], "")
+
+        # 3. Data-alvo sem hora (filas de Autorais e Público). O sufixo alto joga
+        #    o item para o fim do próprio dia, atrás dos que já têm hora cravada.
+        alvo = item.get("data_alvo")
+        if alvo:
+            return (1, f"{str(alvo)[:10]} 99:99:99", "")
+
+        # 4. Nada agendado ainda: repete a conta do card (captura + D+X)
+        captura = str(item.get("data_captura") or "")
+        try:
+            formato = "%Y-%m-%d %H:%M:%S" if len(captura) > 10 else "%Y-%m-%d"
+            prevista = datetime.strptime(captura, formato) + timedelta(days=int(atraso_da_rota or 0))
+            return (1, prevista.strftime("%Y-%m-%d") + " 99:99:99", "")
+        except Exception:
+            return (2, "9999-12-31", "")
 
     for nome_rota in rotas_agrupadas:
-        rotas_agrupadas[nome_rota].sort(key=chave_ordenacao_universal)
+        # Cada rota do Espelhador tem o próprio D+X; Espião e Autorais caem no global.
+        atraso_da_rota = int(mapa_rotas.get(nome_rota, {}).get("intervalo_dias", atraso_dias) or 0)
+        rotas_agrupadas[nome_rota].sort(key=lambda i: chave_ordenacao_universal(i, atraso_da_rota))
          
     titulo_atraso = f" (D+{atraso_dias})" if tipo_fila in ["Espião", "Autorais"] else ""
 
