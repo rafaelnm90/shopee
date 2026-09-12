@@ -568,50 +568,74 @@ def chave_produto(link):
         return f"curto_{m.group(1)}"
     return None
 
+# 🗓️ Prazo de validade do cache de encurtadores. O par código → produto em si
+# nunca muda, mas guardar para sempre acumula lixo de campanha velha sem
+# proveito: link de um ano atrás dificilmente volta a aparecer.
+DIAS_VALIDADE_CACHE_LINKS = 365
+
 def _garantir_tabela_links(cursor):
+    # A versão anterior guardava a URL inteira na coluna 'url_final'. Como isto
+    # é só cache, o mais limpo na migração é derrubar a tabela velha e deixar
+    # reconstruir-se sozinha: nada de valor se perde, apenas se resolve de novo
+    # na primeira vez que cada link voltar a aparecer.
+    try:
+        colunas = [c[1] for c in cursor.execute("PRAGMA table_info(links_resolvidos)").fetchall()]
+        if colunas and "chave_final" not in colunas:
+            cursor.execute("DROP TABLE links_resolvidos")
+    except Exception:
+        pass
+
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS links_resolvidos (
             codigo_curto TEXT PRIMARY KEY,
-            url_final TEXT,
+            chave_final TEXT,
             data_resolucao TEXT
         )
     ''')
 
-async def resolver_link_curto(link):
+async def resolver_chave_curta(link):
     """
-    🔗 Descobre para onde um link curto da Shopee aponta de verdade.
+    🔗 Descobre qual PRODUTO está por trás de um link curto da Shopee.
 
     Existe por causa de uma brecha na trava anti-duplicata: dois afiliados que
-    divulgam o MESMO produto geram encurtadores diferentes, e a chave saía
-    `curto_AbCd123` contra `curto_XyZw789` — chaves distintas para um item só.
-    Resolvido o destino, os dois viram o mesmo `prod_loja_item` e a trava pega.
+    divulgam o MESMO item geram encurtadores diferentes, e a chave saía
+    `curto_AbCd123` contra `curto_XyZw789` — duas identidades para um produto
+    só, e o item aparecia duas vezes no grupo. Resolvido o destino, os dois
+    viram o mesmo `prod_loja_item` e a trava pega.
 
-    O par código → destino nunca muda, então fica gravado para sempre. Na
-    prática a rede só é consultada uma vez por encurtador, e nunca mais.
+    Guarda só a CHAVE, não a URL inteira: é o único dado usado, ocupa bem menos
+    e dispensa reprocessar a URL a cada leitura.
 
-    Devolve a URL final, ou None quando não deu — e aí quem chamou continua com
-    o comportamento antigo, sem quebrar nada.
+    O cache vale DIAS_VALIDADE_CACHE_LINKS dias. Passado o prazo a linha é
+    ignorada e some na próxima gravação, então a tabela se recicla sozinha sem
+    precisar de tarefa agendada só para isso.
+
+    Guarda também o resultado VAZIO de um link que abriu mas não tinha produto,
+    senão a rede seria consultada de novo por algo que nunca vai resolver. Falha
+    de rede NÃO é gravada, para poder tentar outra vez mais tarde.
     """
-    codigo = None
     achado = re.search(r'(?:s\.shopee\.com\.br|shp\.ee|shope\.ee|br\.shp\.ee)/([A-Za-z0-9]+)', str(link or "").lower())
-    if achado:
-        codigo = achado.group(1)
-    if not codigo:
+    if not achado:
         return None
+    codigo = achado.group(1)
+    limite_validade = (datetime.now() - timedelta(days=DIAS_VALIDADE_CACHE_LINKS)).strftime("%Y-%m-%d %H:%M:%S")
 
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
         _garantir_tabela_links(cursor)
-        cursor.execute("SELECT url_final FROM links_resolvidos WHERE codigo_curto = ?", (codigo,))
+        conexao.commit()
+        cursor.execute(
+            "SELECT chave_final FROM links_resolvidos WHERE codigo_curto = ? AND data_resolucao >= ?",
+            (codigo, limite_validade)
+        )
         linha = cursor.fetchone()
         conexao.close()
-        if linha and linha[0]:
-            return linha[0]
+        if linha is not None:
+            return linha[0] or None   # vazio = já tentámos e não havia produto
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Link Curto] Erro ao ler o cache: {e}")
 
-    url_final = None
     try:
         tempo = aiohttp.ClientTimeout(total=8)
         cabecalhos = {"User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile"}
@@ -619,46 +643,49 @@ async def resolver_link_curto(link):
             async with sessao.get(str(link), allow_redirects=True) as resposta:
                 url_final = str(resposta.url)
     except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ [Link Curto] Não resolveu {codigo}: {e}")
+        if EXIBIR_LOGS: logger.warning(f"⚠️ [Link Curto] Não resolveu {codigo}, tentará de novo depois: {e}")
         return None
 
-    if not url_final:
-        return None
+    chave_final = chave_produto(url_final) or ""
+    if chave_final.startswith("curto_"):
+        chave_final = ""   # o destino também era curto: não serve de identidade
 
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
         _garantir_tabela_links(cursor)
         cursor.execute(
-            "INSERT OR REPLACE INTO links_resolvidos (codigo_curto, url_final, data_resolucao) VALUES (?, ?, ?)",
-            (codigo, url_final, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            "INSERT OR REPLACE INTO links_resolvidos (codigo_curto, chave_final, data_resolucao) VALUES (?, ?, ?)",
+            (codigo, chave_final, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         )
+        # 🧹 Faxina de carona: aproveita a gravação para varrer o que venceu. Só
+        # corre quando aparece um encurtador novo, que é raro, e a tabela é
+        # pequena — não justifica uma tarefa agendada própria.
+        cursor.execute("DELETE FROM links_resolvidos WHERE data_resolucao < ?", (limite_validade,))
+        vencidos = cursor.rowcount
         conexao.commit()
         conexao.close()
+        if vencidos and EXIBIR_LOGS:
+            logger.info(f"🧹 [Link Curto] {vencidos} link(s) fora do prazo de {DIAS_VALIDADE_CACHE_LINKS} dias removido(s).")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Link Curto] Erro ao gravar o cache: {e}")
 
-    if EXIBIR_LOGS: logger.info(f"🔗 [Link Curto] {codigo} resolvido e guardado em cache.")
-    return url_final
+    if EXIBIR_LOGS:
+        logger.info(f"🔗 [Link Curto] {codigo} -> {chave_final or 'sem produto'}, guardado em cache.")
+    return chave_final or None
 
 async def chave_produto_resolvida(link):
     """
-    A chave do produto, tentando primeiro abrir o encurtador.
+    A chave do produto, abrindo o encurtador quando preciso.
 
     Só vai à rede quando a chave direta sai como `curto_`, ou seja, quando o
-    link não trazia o ID do produto. Link longo nem toca no cache.
+    link não trazia o ID do produto. Link longo nem consulta o cache.
     """
     chave = chave_produto(link)
     if chave and not chave.startswith("curto_"):
         return chave
 
-    url_final = await resolver_link_curto(link)
-    if url_final:
-        chave_final = chave_produto(url_final)
-        if chave_final and not chave_final.startswith("curto_"):
-            return chave_final
-
-    return chave   # não resolveu: segue com a chave antiga, melhor que nada
+    return await resolver_chave_curta(link) or chave
 
 def _garantir_tabela_reservas(cursor):
     cursor.execute('''
