@@ -437,7 +437,7 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
         doc_id = event.media.document.id
     except Exception:
         doc_id = None
-    chaves = [f"doc_{doc_id}" if doc_id else None, chave_produto(link_capturado)]
+    chaves = [f"doc_{doc_id}" if doc_id else None, await chave_produto_resolvida(link_capturado)]
 
     # 🔒 O dono já reservou? Então este vídeo não é de ninguém mais.
     if video_ja_reservado(chaves):
@@ -548,7 +548,11 @@ def pasta_do_parceiro(parceiro_id):
 def chave_produto(link):
     """
     Normaliza o link da Shopee para identificar o PRODUTO, não a URL.
-    O mesmo item com dois links curtos diferentes gera a mesma chave.
+
+    ATENÇÃO: sozinha, esta função NÃO reconhece o mesmo item por trás de dois
+    encurtadores diferentes — para link curto ela usa o código do encurtador
+    como identidade. Quem precisa dessa garantia chama chave_produto_resolvida,
+    que abre o link antes e assim chega ao ID real do produto.
     """
     import re
     if not link:
@@ -563,6 +567,98 @@ def chave_produto(link):
     if m:
         return f"curto_{m.group(1)}"
     return None
+
+def _garantir_tabela_links(cursor):
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS links_resolvidos (
+            codigo_curto TEXT PRIMARY KEY,
+            url_final TEXT,
+            data_resolucao TEXT
+        )
+    ''')
+
+async def resolver_link_curto(link):
+    """
+    🔗 Descobre para onde um link curto da Shopee aponta de verdade.
+
+    Existe por causa de uma brecha na trava anti-duplicata: dois afiliados que
+    divulgam o MESMO produto geram encurtadores diferentes, e a chave saía
+    `curto_AbCd123` contra `curto_XyZw789` — chaves distintas para um item só.
+    Resolvido o destino, os dois viram o mesmo `prod_loja_item` e a trava pega.
+
+    O par código → destino nunca muda, então fica gravado para sempre. Na
+    prática a rede só é consultada uma vez por encurtador, e nunca mais.
+
+    Devolve a URL final, ou None quando não deu — e aí quem chamou continua com
+    o comportamento antigo, sem quebrar nada.
+    """
+    codigo = None
+    achado = re.search(r'(?:s\.shopee\.com\.br|shp\.ee|shope\.ee|br\.shp\.ee)/([A-Za-z0-9]+)', str(link or "").lower())
+    if achado:
+        codigo = achado.group(1)
+    if not codigo:
+        return None
+
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_tabela_links(cursor)
+        cursor.execute("SELECT url_final FROM links_resolvidos WHERE codigo_curto = ?", (codigo,))
+        linha = cursor.fetchone()
+        conexao.close()
+        if linha and linha[0]:
+            return linha[0]
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Link Curto] Erro ao ler o cache: {e}")
+
+    url_final = None
+    try:
+        tempo = aiohttp.ClientTimeout(total=8)
+        cabecalhos = {"User-Agent": "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120 Mobile"}
+        async with aiohttp.ClientSession(timeout=tempo, headers=cabecalhos) as sessao:
+            async with sessao.get(str(link), allow_redirects=True) as resposta:
+                url_final = str(resposta.url)
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ [Link Curto] Não resolveu {codigo}: {e}")
+        return None
+
+    if not url_final:
+        return None
+
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        _garantir_tabela_links(cursor)
+        cursor.execute(
+            "INSERT OR REPLACE INTO links_resolvidos (codigo_curto, url_final, data_resolucao) VALUES (?, ?, ?)",
+            (codigo, url_final, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        )
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Link Curto] Erro ao gravar o cache: {e}")
+
+    if EXIBIR_LOGS: logger.info(f"🔗 [Link Curto] {codigo} resolvido e guardado em cache.")
+    return url_final
+
+async def chave_produto_resolvida(link):
+    """
+    A chave do produto, tentando primeiro abrir o encurtador.
+
+    Só vai à rede quando a chave direta sai como `curto_`, ou seja, quando o
+    link não trazia o ID do produto. Link longo nem toca no cache.
+    """
+    chave = chave_produto(link)
+    if chave and not chave.startswith("curto_"):
+        return chave
+
+    url_final = await resolver_link_curto(link)
+    if url_final:
+        chave_final = chave_produto(url_final)
+        if chave_final and not chave_final.startswith("curto_"):
+            return chave_final
+
+    return chave   # não resolveu: segue com a chave antiga, melhor que nada
 
 def _garantir_tabela_reservas(cursor):
     cursor.execute('''
@@ -1070,7 +1166,7 @@ async def interceptar_e_espelhar(event):
                             except Exception:
                                 doc_id = None
                             reservar_video([f"doc_{doc_id}" if doc_id else None,
-                                            chave_produto(link_capturado)], parceiro_id=0)
+                                            await chave_produto_resolvida(link_capturado)], parceiro_id=0)
 
                             if EXIBIR_LOGS: logger.info(f"🎯 [Sorteio Público] Vídeo nº {total_ofertas_pub} do dia SORTEADO para o Grupo Público em {data_alvo_pub}.")
                         else:
