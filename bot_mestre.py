@@ -35,7 +35,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 # ✅ Importação dos nossos novos módulos blindados (Fase 2)
 from api_gemini import gerar_texto_gemini, analisar_video_gemini, MODELOS_CASCATA_GEMINI, client_genai
 from api_shopee import converter_link_shopee, buscar_ofertas_shopee, testar_chaves_afiliado
-from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite, sortear_teto_do_dia # ⚙️ Novo Motor Centralizado
+from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite, sortear_teto_do_dia, faixa_de_config # ⚙️ Novo Motor Centralizado
 
 import matplotlib.pyplot as plt
 import io
@@ -2928,7 +2928,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     # --- INFORMAÇÕES DO ROBÔ REPOSTADOR ---
     repost_status = "🔴 PAUSADO" if config.get("repost_pausado") else "🟢 ATIVADO"
     dias = config.get("repost_dias", 15)
-    limite = config.get("repost_limite", 6)
+    limite = rotulo_cota_de_config(config, "repost_limite_min", "repost_limite_max", "repost_limite")
     
     # Origem do Repostador
     repost_origem = config.get("repost_origem")
@@ -3396,6 +3396,31 @@ async def motor_parceiros_step():
         if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Falha no motor de publicação: {e}")
 
 # --- GESTÃO: selecionar, editar, pausar e excluir ---
+def interpretar_faixa_cota(texto):
+    """
+    Aceita "6" (número fixo) ou "4-8" (faixa). Devolve (piso, topo), ou None
+    quando o texto não serve — quem chamou decide o que dizer ao usuário.
+    """
+    casou = re.match(r"^(\d{1,3})(?:\s*-\s*(\d{1,3}))?$", (texto or "").strip())
+    if not casou:
+        return None
+    piso = int(casou.group(1))
+    topo = int(casou.group(2)) if casou.group(2) else piso
+    if piso < 1 or topo < piso:
+        return None
+    return piso, topo
+
+def rotulo_cota(piso, topo):
+    """Como uma cota aparece no painel: faixa com a média à vista, ou número fixo."""
+    if topo > piso:
+        return f"{piso} a {topo}/dia · média {round((piso + topo) / 2)}"
+    return f"{piso}/dia (fixo)"
+
+def rotulo_cota_de_config(config, chave_min, chave_max, chave_legado=None):
+    """O rótulo pronto a partir da config, sem desempacotar tupla no meio da linha."""
+    piso, topo = faixa_de_config(config, chave_min, chave_max, chave_legado)
+    return rotulo_cota(piso, topo) if piso else "sem cota"
+
 def rotulo_cota_parceiro(p):
     """📦 Como a cota do parceiro aparece no painel: faixa, número fixo ou sem teto."""
     piso, topo = ler_faixa_limite(p)
@@ -4002,7 +4027,7 @@ async def submenu_regras_repost_publico(message: types.Message, state: FSMContex
         "♻️ <b>Configurações do Robô Repostador</b>\n\n"
         f"📊 <b>Status Atual:</b> {status}\n"
         f"⏳ Oculto por: <b>{config.get('repost_dias', 15)} dias</b>\n"
-        f"📦 Cota Diária: <b>{config.get('repost_limite', 6)} vídeos/dia</b>\n\n"
+        f"📦 Cota Diária: <b>{rotulo_cota_de_config(config, 'repost_limite_min', 'repost_limite_max', 'repost_limite')}</b>\n\n"
         "Aqui você define de onde os vídeos são puxados, para onde vão, as regras de tempo "
         "e o cota diária — além de pausar ou retomar o robô.\n\n"
         "Escolha a ação desejada:"
@@ -4268,7 +4293,12 @@ async def processar_dias_repost_publico(message: types.Message, state: FSMContex
 @dp.message(F.text == "Editar Limite (Público) 📦", StateFilter("*"))
 async def pedir_limite_repost_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    await message.answer("Qual será o <b>limite máximo</b> de vídeos repostados por dia no Grupo Público? (Ex: 6)", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await message.answer(
+        "Quantos vídeos por dia no Grupo Público?\n\n"
+        "• Faixa: <code>4-8</code> — cada dia sorteia um número entre 4 e 8 (média 6)\n"
+        "• Fixo: <code>6</code> — sempre 6 por dia\n\n"
+        "<i>A faixa existe para a quantidade não ser sempre igual, que é o que denuncia robô.</i>",
+        parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(SubmissaoAdminFluxo.aguardando_repost_limite)
 
 @dp.message(SubmissaoAdminFluxo.aguardando_repost_limite)
@@ -4277,19 +4307,20 @@ async def confirmar_limite_repost_publico(message: types.Message, state: FSMCont
         await message.answer("Operação cancelada.")
         await submenu_regras_repost_publico(message, state)
         return
-    if not message.text.isdigit():
-        await message.answer("⚠️ Envie apenas números inteiros.", reply_markup=teclado_cancelar)
+    faixa = interpretar_faixa_cota(message.text)
+    if not faixa:
+        await message.answer("⚠️ Envie um número (<code>6</code>) ou uma faixa (<code>4-8</code>).", parse_mode="HTML", reply_markup=teclado_cancelar)
         return
-        
-    novo_valor = int(message.text)
-    await state.update_data(novo_valor_limite_pub=novo_valor)
+
+    piso, topo = faixa
+    await state.update_data(novo_valor_limite_pub=piso, novo_valor_limite_pub_max=topo)
     
     teclado_confirmacao = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
         resize_keyboard=True,
         is_persistent=True
     )
-    await message.answer(f"Tem certeza que deseja definir a cota diária para <b>{novo_valor} vídeos</b>?", parse_mode="HTML", reply_markup=teclado_confirmacao)
+    await message.answer(f"Tem certeza que deseja definir a cota diária para <b>{rotulo_cota(piso, topo)}</b>?", parse_mode="HTML", reply_markup=teclado_confirmacao)
     await state.set_state(SubmissaoAdminFluxo.aguardando_confirmacao_repost_limite)
 
 @dp.message(SubmissaoAdminFluxo.aguardando_confirmacao_repost_limite)
@@ -4303,14 +4334,18 @@ async def processar_limite_repost_publico(message: types.Message, state: FSMCont
         return
 
     data = await state.get_data()
-    novo_valor = data.get("novo_valor_limite_pub")
+    piso = data.get("novo_valor_limite_pub")
+    topo = data.get("novo_valor_limite_pub_max", piso)
     
     config = ler_submissao_config()
-    config["repost_limite"] = novo_valor
+    config["repost_limite_min"] = piso
+    config["repost_limite_max"] = topo
+    # Mantém o campo antigo alinhado, para qualquer leitor que ainda o consulte.
+    config["repost_limite"] = piso
     salvar_submissao_config(config)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Limite diário do repost público atualizado para: {novo_valor}")
-    await message.answer(f"✅ <b>Cota Diária Atualizada!</b>\nO robô enviará no máximo {novo_valor} vídeos por dia ao Grupo Público.", parse_mode="HTML")
+    if EXIBIR_LOGS: logger.info(f"✅ Cota do repost público atualizada para: {piso}-{topo}")
+    await message.answer(f"✅ <b>Cota Diária Atualizada!</b>\nO robô enviará <b>{rotulo_cota(piso, topo)}</b> ao Grupo Público.", parse_mode="HTML")
     await submenu_regras_repost_publico(message, state)
 
 async def motor_repost_publico_step():
@@ -4570,7 +4605,7 @@ async def painel_autorais(message: types.Message, state: FSMContext):
         if len(_partes_destino) > 1 and _partes_destino[1].strip().isdigit():
             destino_topico_str = f"_{_partes_destino[1].strip()}"
     dias_retorno = config.get("dias_retorno", 15)
-    limite_videos = config.get("limite_videos", 5)
+    limite_videos = rotulo_cota_de_config(config, "limite_min", "limite_max", "limite_videos")
     janela_inicio = config.get("inicio", 10)
     janela_fim = config.get("fim", 20)
     
@@ -4655,7 +4690,7 @@ async def painel_autorais(message: types.Message, state: FSMContext):
         f"    {icone_destino} {nome_destino}\n\n"
         f"♻️ <b>Regras de Repostagem:</b>\n"
         f"⏳ Oculto por: <b>{dias_retorno} dias</b>\n"
-        f"📦 Cota Diária: <b>{limite_videos} vídeos/dia</b>\n"
+        f"📦 Cota Diária: <b>{limite_videos}</b>\n"
         f"⏰ Janela de Postagem: <b>{janela_inicio}h às {janela_fim}h</b>\n"
         f"{texto_contagem}\n"
         "O robô Espelhador Isolado fará a escuta e o envio em tempo real baseando-se estritamente nestes valores.\n\n"
@@ -5080,7 +5115,12 @@ async def processar_dias_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Limite 📦")
 async def pedir_limite_autorais(message: types.Message, state: FSMContext):
-    await message.answer("Qual será o <b>limite máximo</b> de vídeos arquivados salvos por dia? (Ex: 5)", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await message.answer(
+        "Quantos vídeos por dia?\n\n"
+        "• Faixa: <code>4-8</code> — cada dia sorteia um número entre 4 e 8 (média 6)\n"
+        "• Fixo: <code>6</code> — sempre 6 por dia\n\n"
+        "<i>A faixa existe para a quantidade não ser sempre igual, que é o que denuncia robô.</i>",
+        parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(AutoraisFluxo.aguardando_limite_videos)
 
 @dp.message(AutoraisFluxo.aguardando_limite_videos)
@@ -5089,19 +5129,20 @@ async def confirmar_limite_autorais(message: types.Message, state: FSMContext):
         await cancelar_fluxo_global(message, state)
         return
         
-    if not message.text.isdigit():
-        await message.answer("⚠️ Envie apenas números inteiros.", reply_markup=teclado_cancelar)
+    faixa = interpretar_faixa_cota(message.text)
+    if not faixa:
+        await message.answer("⚠️ Envie um número (<code>6</code>) ou uma faixa (<code>4-8</code>).", parse_mode="HTML", reply_markup=teclado_cancelar)
         return
-        
-    novo_valor = int(message.text)
-    await state.update_data(novo_valor_limite=novo_valor)
+
+    piso, topo = faixa
+    await state.update_data(novo_valor_limite=piso, novo_valor_limite_max=topo)
     
     teclado_confirmacao = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
         resize_keyboard=True,
         is_persistent=True
     )
-    await message.answer(f"Tem certeza que deseja definir o limite de vídeos diários para <b>{novo_valor}</b>?", parse_mode="HTML", reply_markup=teclado_confirmacao)
+    await message.answer(f"Tem certeza que deseja definir a cota diária para <b>{rotulo_cota(piso, topo)}</b>?", parse_mode="HTML", reply_markup=teclado_confirmacao)
     await state.set_state(AutoraisFluxo.aguardando_confirmacao_limite_videos)
 
 @dp.message(AutoraisFluxo.aguardando_confirmacao_limite_videos)
@@ -5116,13 +5157,17 @@ async def processar_limite_autorais(message: types.Message, state: FSMContext):
         return
 
     data = await state.get_data()
-    novo_valor = data.get("novo_valor_limite")
+    piso = data.get("novo_valor_limite")
+    topo = data.get("novo_valor_limite_max", piso)
     
     config = ler_autorais_config()
-    config["limite_videos"] = novo_valor
+    config["limite_min"] = piso
+    config["limite_max"] = topo
+    # Mantém o campo antigo alinhado, para qualquer leitor que ainda o consulte.
+    config["limite_videos"] = piso
     salvar_autorais_config(config)
     
-    await message.answer(f"✅ <b>Cota de Retorno Atualizada!</b>\nO robô arquivará no máximo {novo_valor} vídeos de retorno por dia.", parse_mode="HTML")
+    await message.answer(f"✅ <b>Cota de Retorno Atualizada!</b>\nO robô arquivará <b>{rotulo_cota(piso, topo)}</b>.", parse_mode="HTML")
     await submenu_regras_retorno(message, state)
 
 # ----------------------------------------------------
