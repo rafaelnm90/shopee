@@ -206,6 +206,135 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
 
     return itens_para_agendar
 
+def recompactar_horarios(itens, config_fila, agora, margem_min=20):
+    """
+    🧲 Puxa para frente o que transbordou, quando abre vaga num dia anterior.
+
+    O motor de distribuição agenda todo lote NOVO depois do último item já
+    marcado — a "esteira contínua". Isso evita que dois lotes calculados em
+    momentos diferentes se sobreponham, mas tem um efeito colateral: a fila só
+    cresce para a direita. Vídeo publicado, descartado por idade ou removido na
+    mão deixa um buraco que ninguém mais ocupa, e o que estava em 18/09 segue em
+    18/09 mesmo com o dia 13 pela metade.
+
+    Aqui a compactação é por DIA, nunca por horário. Um item só se move se
+    existir dia ANTERIOR com vaga; quem já está no dia certo não tem o horário
+    mexido. Isso é proposital: o espalhamento dentro do dia é o que faz a fila
+    parecer humana, e reescrevê-lo amontoaria tudo no começo do expediente.
+
+    Duas travas que nunca são violadas:
+      • o D+X é respeitado — nada publica antes de captura + intervalo_dias;
+      • nada é agendado para o passado nem para os próximos `margem_min`.
+
+    Devolve a lista dos itens movidos. Vazia significa que a fila já está
+    compacta e não há nada para gravar.
+    """
+    inicio_janela = int(config_fila.get("inicio", 0) or 0)
+    fim_janela = int(config_fila.get("fim", 24) or 24)
+    base_min = max(1, int(config_fila.get("espacamento_base_min") or 10))
+    var_min = int(config_fila.get("espacamento_variacao_min") or 0)
+    intervalo_dias = int(config_fila.get("intervalo_dias", 0) or 0)
+
+    minutos_janela = 1440 if fim_janela >= 24 else max(1, (fim_janela - inicio_janela) * 60)
+    capacidade_dia = max(1, minutos_janela // base_min)
+
+    hoje = agora.date()
+    piso_absoluto = agora + timedelta(minutes=margem_min)
+
+    # Agrupa os agendados por dia, guardando o piso de cada item (o D+X dele)
+    por_dia = {}
+    for item in itens:
+        if item.get("processado") in [True, 1, "true", "True"]:
+            continue
+        bruto = item.get("horario_disparo") or ""
+        if not bruto:
+            continue   # sem horário ainda: quem distribui é o motor, não esta rotina
+        try:
+            atual = datetime.strptime(str(bruto), "%Y-%m-%d %H:%M:%S").replace(tzinfo=agora.tzinfo)
+        except Exception:
+            continue
+
+        dia_minimo = hoje
+        captura = str(item.get("data_captura") or "")
+        if captura:
+            try:
+                formato = "%Y-%m-%d %H:%M:%S" if len(captura) > 10 else "%Y-%m-%d"
+                alvo = datetime.strptime(captura, formato).date() + timedelta(days=intervalo_dias)
+                dia_minimo = max(hoje, alvo)
+            except Exception:
+                pass
+
+        por_dia.setdefault(atual.date(), []).append({"item": item, "quando": atual, "piso": dia_minimo})
+
+    if len(por_dia) < 2:
+        return []   # tudo num dia só: não há transbordo para puxar
+
+    movidos = []
+    dias = sorted(por_dia)
+
+    for dia in dias:
+        # O dia pode ter sido esvaziado e removido numa volta anterior: a lista
+        # 'dias' é uma foto tirada antes do laço, não acompanha as remoções.
+        if dia < hoje or dia not in por_dia:
+            continue
+        vagas = capacidade_dia - len(por_dia[dia])
+
+        while vagas > 0:
+            # Candidato: o primeiro item de um dia POSTERIOR que já pode sair neste dia
+            escolhido = None
+            for dia_futuro in [d for d in sorted(por_dia) if d > dia]:
+                for registro in sorted(por_dia[dia_futuro], key=lambda r: r["quando"]):
+                    if registro["piso"] <= dia:
+                        escolhido = (dia_futuro, registro)
+                        break
+                if escolhido:
+                    break
+
+            if not escolhido:
+                break   # nada elegível: este dia fica como está
+
+            dia_futuro, registro = escolhido
+
+            # Horário novo: logo depois do último já marcado neste dia, com o
+            # mesmo passo orgânico. Como o dia tem vaga, sobra janela no fim.
+            passo = random.randint(max(60, (base_min - var_min) * 60),
+                                   max(60, (base_min + var_min) * 60))
+            if por_dia[dia]:
+                ultimo = max(r["quando"] for r in por_dia[dia])
+                novo = ultimo + timedelta(seconds=passo)
+            else:
+                abertura = datetime.combine(dia, datetime.min.time()).replace(
+                    hour=inicio_janela, tzinfo=agora.tzinfo)
+                novo = abertura + timedelta(seconds=random.randint(0, passo))
+
+            if novo < piso_absoluto:
+                novo = piso_absoluto + timedelta(seconds=random.randint(0, passo))
+
+            # Não pode estourar a janela do dia nem virar para o dia seguinte
+            if fim_janela < 24:
+                fechamento = datetime.combine(dia, datetime.min.time()).replace(
+                    hour=fim_janela, tzinfo=agora.tzinfo)
+                if novo >= fechamento:
+                    break
+            if novo.date() != dia:
+                break
+
+            registro["item"]["horario_disparo"] = novo.strftime("%Y-%m-%d %H:%M:%S")
+            registro["quando"] = novo
+            por_dia[dia_futuro].remove(registro)
+            por_dia[dia].append(registro)
+            if not por_dia[dia_futuro]:
+                del por_dia[dia_futuro]
+            movidos.append(registro["item"])
+            vagas -= 1
+
+    if movidos and EXIBIR_LOGS:
+        ultimo_dia = max(por_dia) if por_dia else hoje
+        logger.info(f"🧲 [Motor Filas] {len(movidos)} item(ns) antecipado(s) para dias com vaga. "
+                    f"A fila agora termina em {ultimo_dia.strftime('%d/%m')}.")
+
+    return movidos
+
 def ler_faixa_limite(config):
     """
     📊 Extrai o par (piso, topo) de posts por dia de qualquer configuração:
