@@ -124,6 +124,15 @@ def inicializar_banco_sqlite():
     except sqlite3.OperationalError:
         pass
 
+    # 🚀 Migração invisível 6: horário REAL da publicação do retorno autoral.
+    # Sem esta coluna o relatório só tinha o horário previsto e imprimia
+    # "Prev: Hoje às" com o horário em branco nos itens já postados.
+    try:
+        cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_postagem TEXT")
+        if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'data_postagem' adicionada à fila_autorais.")
+    except sqlite3.OperationalError:
+        pass
+
         # 9. PARCEIROS: afiliados terceiros que repostam com as próprias credenciais.
     # Cada um tem canais, atraso e cota próprios — nada é compartilhado com o dono.
     cursor.execute('''
@@ -4531,6 +4540,14 @@ async def motor_repost_publico_step():
             if not canal_autorais:
                 config_aut = ler_config_bd("autorais_config", {})
                 canal_autorais = config_aut.get("destino")
+
+            # 🧹 A origem pode estar gravada no formato composto "-100123:5" — é assim que
+            # o validar_e_formatar_alvo grava quando o link tem tópico. O from_chat_id do
+            # Telegram só aceita o ID puro ou o @username: mandar "-100123:5" devolve
+            # exatamente "Bad Request: chat not found". O relatório da fila já fazia este
+            # split (origem_base); o motor de disparo não fazia.
+            if canal_autorais:
+                canal_autorais = str(canal_autorais).split(":")[0].strip()
             
             if not file_id or not canal_autorais:
                 # 🚦 Este caso caía num "if" sem else: nada acontecia, nada era registado,
@@ -4585,7 +4602,14 @@ async def motor_repost_publico_step():
                     conexao.commit()
                     
                 except Exception as e:
-                    if EXIBIR_LOGS: logger.error(f"❌ [Motor Público] Falha ao tentar executar copy_message: {e}")
+                    if EXIBIR_LOGS:
+                        # 🔎 "chat not found" sozinho não diz QUAL dos dois chats falhou.
+                        # Os IDs realmente usados vão junto na linha do log.
+                        logger.error(
+                            f"❌ [Motor Público] Falha ao tentar executar copy_message: {e} "
+                            f"| destino={grupo_id!r} topico={topico_destino!r} "
+                            f"origem={canal_autorais!r} msg_id={file_id!r}"
+                        )
                     # 🚦 ANTI-TRAVA: adia 30 min em vez de deixar o item parado no topo da
                     # fila. Mesma solução que o motor dos Parceiros já usa.
                     cursor.execute(
@@ -6721,7 +6745,12 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     "data_captura": linha["data_captura"],
                     "data_alvo": linha["data_alvo"],
                     "horario_disparo": linha["horario_disparo"],
-                    "processado": bool(linha["processado"])
+                    "processado": bool(linha["processado"]),
+                    # ⏱️ Horário real da publicação. Item antigo não tem a coluna
+                    # preenchida: aí cai no horário sorteado, que é o valor mais
+                    # próximo que existe, em vez de sair em branco na tela.
+                    "data_postagem": (dict(linha).get("data_postagem") or linha["horario_disparo"] or "").split(" ")[0],
+                    "horario_postagem": ((dict(linha).get("data_postagem") or linha["horario_disparo"] or "") + " ").split(" ")[1][:5]
                 })
         except Exception as e:
             fila = []
@@ -8330,6 +8359,10 @@ async def manual_repost_autoral(message: types.Message):
         if not canal_autorais:
             config_aut = ler_config_bd("autorais_config", {})
             canal_autorais = config_aut.get("destino")
+
+        # 🧹 Mesmo tratamento do motor automático: o from_chat_id não aceita "-100123:5".
+        if canal_autorais:
+            canal_autorais = str(canal_autorais).split(":")[0].strip()
         
         kwargs = {}
         if topico_vitrine: 
