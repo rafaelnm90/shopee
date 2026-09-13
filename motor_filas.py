@@ -133,10 +133,20 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
                 dias_necessarios = 1 + ((len(itens_para_agendar) - cabe_hoje) // max(1, janela_dia // max(1, base_min)))
                 minutos_restantes += janela_dia * dias_necessarios
 
-            alvo = minutos_restantes // max(1, len(itens_para_agendar))
-            passo_base_min = max(base_min, alvo)
-            # Variação proporcional: quanto maior o intervalo, mais folga para parecer humano
-            variacao_efetiva = max(var_min, int(passo_base_min * 0.25))
+            # 🔗 Com a ESTEIRA ligada o espaçamento dinâmico NÃO se aplica. O lote novo já
+            # começa depois de tudo que está agendado, então dividir "o que resta do dia"
+            # por um lote de 3 ou 4 itens espalhava esses poucos itens por um dia inteiro.
+            # Cada lote passava a comer um dia do calendário, e como os lotes chegam de
+            # minuto em minuto, o horizonte fugia dias à frente da data-alvo: vídeo
+            # capturado dia 10 acabava agendado para o dia 16. Aqui vale o piso configurado.
+            if ultimo_ocupado:
+                passo_base_min = base_min
+                variacao_efetiva = var_min
+            else:
+                alvo = minutos_restantes // max(1, len(itens_para_agendar))
+                passo_base_min = max(base_min, alvo)
+                # Variação proporcional: quanto maior o intervalo, mais folga para parecer humano
+                variacao_efetiva = max(var_min, int(passo_base_min * 0.25))
 
             # 🎲 Sorteia o atraso da largada: de zero até um TERÇO do passo. Um terço,
             # e não um passo inteiro, para o último vídeo do lote não esbarrar no fim da
