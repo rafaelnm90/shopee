@@ -1437,6 +1437,11 @@ async def processar_fila_autorais_loop():
 # ==========================================
 HORAS_ANTECEDENCIA_PUBLICO = 3   # baixa o vídeo com esta folga antes do horário dele
 
+# 📏 Teto de UPLOAD da Bot API. Quem publica é o bot, e acima disso o send_video dele é
+# recusado. Como o item nunca conseguiria sair, não vale nem gastar banda baixando: ele
+# é descartado aqui, antes do download.
+LIMITE_UPLOAD_BOT_MB = 50
+
 
 async def processar_fila_publico_loop():
     if EXIBIR_LOGS: logger.info("📬 [Correio Público] Loop de preparo dos vídeos do Grupo Público iniciado.")
@@ -1509,6 +1514,20 @@ async def processar_fila_publico_loop():
                     conexao.commit()
                     conexao.close()
                     if EXIBIR_LOGS: logger.warning(f"🧹 [Correio Público] Mensagem {msg_id} sumiu da origem. Item {id_unico} removido da fila.")
+                    await asyncio.sleep(30)
+                    continue
+
+                # 🚫 Grande demais para o bot publicar? Sai da fila agora. Sem isto ele
+                # seria baixado, recusado no envio, adiado 30 min e tentado para sempre.
+                tamanho_origem = getattr(getattr(msg_origem, "file", None), "size", 0) or 0
+                if tamanho_origem > LIMITE_UPLOAD_BOT_MB * 1024 * 1024:
+                    cursor.execute("DELETE FROM fila_publico WHERE id_unico = ?", (id_unico,))
+                    conexao.commit()
+                    conexao.close()
+                    if EXIBIR_LOGS:
+                        logger.warning(f"🚫 [Correio Público] Vídeo {id_unico} tem "
+                                       f"{tamanho_origem / (1024**2):.1f} MB, acima do teto de "
+                                       f"{LIMITE_UPLOAD_BOT_MB} MB que o bot consegue enviar. Descartado.")
                     await asyncio.sleep(30)
                     continue
 
