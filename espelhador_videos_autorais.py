@@ -132,6 +132,15 @@ def ler_fila_retorno():
                 processado INTEGER DEFAULT 0
             )
         ''')
+        # 🚀 Migração local: o bot_mestre também cria esta coluna, mas os dois serviços
+        # sobem em ordem imprevisível. Garantir aqui evita que o salvar_fila_retorno()
+        # estoure "no such column" e perca a fila inteira num deploy.
+        try:
+            cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_postagem TEXT")
+            conexao.commit()
+        except sqlite3.OperationalError:
+            pass
+
         cursor.execute("SELECT * FROM fila_autorais")
         linhas = cursor.fetchall()
         conexao.close()
@@ -146,7 +155,8 @@ def ler_fila_retorno():
                 "data_captura": linha["data_captura"],
                 "data_alvo": linha["data_alvo"],
                 "horario_disparo": linha["horario_disparo"],
-                "processado": bool(linha["processado"])
+                "processado": bool(linha["processado"]),
+                "data_postagem": dict(linha).get("data_postagem") or ""
             })
         return {"fila": fila}
     except Exception as e:
@@ -161,8 +171,8 @@ def salvar_fila_retorno(dados):
         cursor.execute("DELETE FROM fila_autorais")
         for item in dados.get("fila", []):
             cursor.execute('''
-                INSERT INTO fila_autorais (id_unico, msg_id_destino, legenda, caminho_arquivo, data_captura, data_alvo, horario_disparo, processado)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO fila_autorais (id_unico, msg_id_destino, legenda, caminho_arquivo, data_captura, data_alvo, horario_disparo, processado, data_postagem)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 item.get("id_unico"), 
                 item.get("msg_id_destino"), 
@@ -171,7 +181,8 @@ def salvar_fila_retorno(dados):
                 item.get("data_captura"), 
                 item.get("data_alvo"), 
                 item.get("horario_disparo", ""), 
-                1 if item.get("processado") else 0
+                1 if item.get("processado") else 0,
+                item.get("data_postagem", "")
             ))
         conexao.commit()
         conexao.close()
@@ -1364,6 +1375,9 @@ async def processar_fila_autorais_loop():
                                     **kwargs_retorno
                                 )
                                 encerrar_item = True
+                                # ⏱️ Carimba a hora REAL da publicação — é o que o relatório
+                                # precisa mostrar nos itens já postados.
+                                item["data_postagem"] = agora.strftime("%Y-%m-%d %H:%M:%S")
                                 if EXIBIR_LOGS: logger.info(f"✅ [Motor Autorais] Vídeo de retorno {item.get('id_unico')} publicado com sucesso!")
                                 
                                 os.remove(caminho_arquivo)
