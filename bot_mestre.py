@@ -4487,11 +4487,25 @@ async def motor_repost_publico_step():
         itens_desagendados = []
         houve_limpeza = False
 
+        # 🗓️ Folga antes de desistir de um item que JÁ tem horário sorteado. O anti-trava
+        # adia 30 min a cada falha, então sem um teto o vídeo ficaria em retry eterno.
+        # Dois dias é tempo de sobra para uma falha passageira se resolver sozinha.
+        DIAS_TOLERANCIA_PUBLICO = 2
+        limite_encalhe = (agora - timedelta(days=DIAS_TOLERANCIA_PUBLICO)).strftime("%Y-%m-%d")
+
         for item in pendentes:
-            if item.get("horario_disparo"):
+            data_alvo = item.get("data_alvo") or ""
+
+            # 🧹 TRAVA CONTRA RETRY ETERNO: vale para item COM horário sorteado também.
+            # Passou da tolerância desde a data-alvo, perdeu a validade e sai da fila.
+            if data_alvo and data_alvo < limite_encalhe:
+                cursor.execute("DELETE FROM fila_publico WHERE id_unico = ?", (item["id_unico"],))
+                houve_limpeza = True
+                if EXIBIR_LOGS: logger.info(f"🧹 [Auto-Limpeza] Vídeo do Público encalhado desde {data_alvo} removido da fila.")
                 continue
 
-            data_alvo = item.get("data_alvo") or ""
+            if item.get("horario_disparo"):
+                continue
 
             # ✅ TRAVA DE SEGURANÇA: data no passado significa que o robô ficou fora do ar.
             # O vídeo perde a validade e sai da fila, evitando avalanche de posts atrasados.
@@ -4580,6 +4594,17 @@ async def motor_repost_publico_step():
                     ((agora + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S"), id_unico)
                 )
                 conexao.commit()
+            elif os.path.getsize(caminho) > LIMITE_UPLOAD_BOT_MB * 1024 * 1024:
+                # 🚫 Rede de segurança: o Correio já barra o arquivo grande antes de baixar,
+                # mas se um escapar, aqui ele sai da fila em vez de ser recusado para sempre.
+                if EXIBIR_LOGS:
+                    logger.warning(f"🚫 [Motor Público] Vídeo {id_unico} tem "
+                                   f"{os.path.getsize(caminho) / (1024**2):.1f} MB, acima do teto de "
+                                   f"{LIMITE_UPLOAD_BOT_MB} MB da Bot API. Item descartado.")
+                cursor.execute("DELETE FROM fila_publico WHERE id_unico = ?", (id_unico,))
+                conexao.commit()
+                try: os.remove(caminho)
+                except Exception: pass
             else:
                 if EXIBIR_LOGS: logger.info("🚀 [Motor Público] Vídeo elegível detetado. A iniciar a repostagem...")
                 import re
@@ -15501,6 +15526,11 @@ async def wizard_acao_painel(callback: types.CallbackQuery, state: FSMContext):
 # 📏 Teto de download da Bot API. O bot não consegue BAIXAR arquivo maior que isto:
 # get_file() devolve "Bad Request: file is too big" e a submissão morre no fim do fluxo.
 LIMITE_DOWNLOAD_BOT_MB = 20
+
+# 📏 Teto de UPLOAD da Bot API. Acima disso o send_video é recusado, e um vídeo que o bot
+# não consegue enviar nunca sai da fila — vira retry eterno. O Correio Público já barra na
+# origem; esta constante é o mesmo limite do lado de cá.
+LIMITE_UPLOAD_BOT_MB = 50
 
 @dp.message(SubmissaoUsuarioInterativa.painel)
 async def wizard_receber_item(message: types.Message, state: FSMContext):
