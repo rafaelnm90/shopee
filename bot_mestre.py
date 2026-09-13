@@ -6531,7 +6531,7 @@ def obter_teclado_relatorios_filas():
     botoes = [
         [KeyboardButton(text="Fila do Espião 🕵️"), KeyboardButton(text="Fila do Espelhador 🔄")],
         [KeyboardButton(text="Fila de Autorais 🎥"), KeyboardButton(text="Fila do Grupo Público 📬")],
-        [KeyboardButton(text="Filas dos Parceiros 👥"), KeyboardButton(text="Detalhar Parceiro 🔍")],
+        [KeyboardButton(text="Filas dos Parceiros 👥"), KeyboardButton(text="Fila dos Parceiros 🔍")],
         [KeyboardButton(text="Voltar aos Relatórios 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -15488,6 +15488,10 @@ async def wizard_acao_painel(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
     await renderizar_painel(callback.message.chat.id, callback.message.message_thread_id, state)
 
+# 📏 Teto de download da Bot API. O bot não consegue BAIXAR arquivo maior que isto:
+# get_file() devolve "Bad Request: file is too big" e a submissão morre no fim do fluxo.
+LIMITE_DOWNLOAD_BOT_MB = 20
+
 @dp.message(SubmissaoUsuarioInterativa.painel)
 async def wizard_receber_item(message: types.Message, state: FSMContext):
 
@@ -15506,6 +15510,23 @@ async def wizard_receber_item(message: types.Message, state: FSMContext):
     confirmacao = None
 
     if message.video:
+        # 📏 Barra o arquivo grande AQUI, e não lá no fim. Antes o membro preenchia
+        # vídeo + links, clicava em concluir e só então tomava "erro interno" — o
+        # download de 20 MB+ falhava dentro do wizard_publicar_oferta.
+        tamanho_video = message.video.file_size or 0
+        if tamanho_video > LIMITE_DOWNLOAD_BOT_MB * 1024 * 1024:
+            aviso = await message.answer(
+                f"⚠️ {mencao}, este vídeo tem <b>{tamanho_video / (1024**2):.1f} MB</b> e o robô "
+                f"só consegue analisar até <b>{LIMITE_DOWNLOAD_BOT_MB} MB</b>.\n\n"
+                "Mande uma versão mais leve (corte alguns segundos ou reduza a qualidade). "
+                "O painel continua aberto de onde parou.",
+                parse_mode="HTML"
+            )
+            await asyncio.sleep(12)
+            try: await aviso.delete()
+            except Exception: pass
+            return
+
         substituiu = bool(data.get("video_file_id"))
         await state.update_data(video_file_id=message.video.file_id, aguardando_wizard=None)
         confirmacao = f"🔄 {mencao}, vídeo <b>substituído</b> pelo novo." if substituiu else f"✅ {mencao}, vídeo recebido!"
@@ -15677,7 +15698,17 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
 
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro na submissão guiada: {e}")
-        try: await bot.edit_message_text(chat_id=message.chat.id, message_id=msg_wizard_id, text="❌ Ocorreu um erro interno ao processar o arquivo.")
+        # 🔎 "erro interno" não diz nada a quem mandou o vídeo. A causa mais comum é o
+        # teto de download da Bot API — vale nomear em vez de deixar o membro tentar
+        # o mesmo arquivo três vezes.
+        if "too big" in str(e).lower():
+            texto_erro = (
+                "❌ <b>Vídeo grande demais.</b>\n\nO robô só consegue baixar arquivos de até "
+                f"<b>{LIMITE_DOWNLOAD_BOT_MB} MB</b> para a análise da IA. Mande uma versão mais leve."
+            )
+        else:
+            texto_erro = "❌ Ocorreu um erro interno ao processar o arquivo."
+        try: await bot.edit_message_text(chat_id=message.chat.id, message_id=msg_wizard_id, text=texto_erro, parse_mode="HTML")
         except: pass
 
     await asyncio.sleep(15)
