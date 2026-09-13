@@ -4624,7 +4624,6 @@ async def motor_repost_publico_step():
                     f"<i>#Recomendado #Shopee</i>"
                 )
 
-                try:
                 # ⏸️ ÚLTIMA PORTA: o config lido no topo desta função pode ter até 2
                 # minutos, e o upload ainda leva alguns segundos. Reler aqui é barato e
                 # é o que faz o botão de pausa valer no instante em que é clicado.
