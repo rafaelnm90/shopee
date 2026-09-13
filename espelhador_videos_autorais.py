@@ -1598,23 +1598,41 @@ async def processar_fila_autorais_loop():
                     # ciclo — ou seja, antes do await do envio acima. Tudo que foi gravado
                     # nesse meio-tempo era desfeito, inclusive este "processado": o vídeo
                     # voltava a pendente e era publicado de novo, e de novo.
-                    try:
-                        conexao_st = sqlite3.connect("banco_dados.db", timeout=20.0)
-                        cursor_st = conexao_st.cursor()
-                        if encerrar_item:
-                            cursor_st.execute(
-                                "UPDATE fila_autorais SET processado = 1, data_postagem = ? WHERE id_unico = ?",
-                                (item.get("data_postagem", ""), item.get("id_unico"))
-                            )
-                        else:
-                            cursor_st.execute(
-                                "UPDATE fila_autorais SET horario_disparo = ? WHERE id_unico = ?",
-                                (item.get("horario_disparo", ""), item.get("id_unico"))
-                            )
-                        conexao_st.commit()
-                        conexao_st.close()
-                    except Exception as e:
-                        if EXIBIR_LOGS: logger.error(f"❌ [Motor Autorais] Falha ao gravar o status do item: {e}")
+                    # ⚠️ O VÍDEO JÁ FOI PARA O GRUPO. Se o "processado = 1" não entrar, o
+                    # ciclo seguinte republica o mesmo vídeo — e foi isso que aconteceu com
+                    # o autoral_1786711348_6535, publicado quatro vezes enquanto o UPDATE
+                    # batia em "database is locked". Insiste até gravar.
+                    marcou = False
+                    for tentativa in range(1, 7):
+                        try:
+                            conexao_st = sqlite3.connect("banco_dados.db", timeout=20.0)
+                            cursor_st = conexao_st.cursor()
+                            if encerrar_item:
+                                cursor_st.execute(
+                                    "UPDATE fila_autorais SET processado = 1, data_postagem = ? WHERE id_unico = ?",
+                                    (item.get("data_postagem", ""), item.get("id_unico"))
+                                )
+                            else:
+                                cursor_st.execute(
+                                    "UPDATE fila_autorais SET horario_disparo = ? WHERE id_unico = ?",
+                                    (item.get("horario_disparo", ""), item.get("id_unico"))
+                                )
+                            conexao_st.commit()
+                            conexao_st.close()
+                            marcou = True
+                            break
+                        except Exception as e:
+                            if EXIBIR_LOGS:
+                                logger.warning(f"⏳ [Motor Autorais] Tentativa {tentativa}/6 de gravar o status "
+                                               f"de {item.get('id_unico')} falhou: {e}")
+                            await asyncio.sleep(2 * tentativa)
+
+                    if not marcou and encerrar_item:
+                        # 🛑 Publicado e não registrado. Dormir é mais seguro que repetir.
+                        if EXIBIR_LOGS:
+                            logger.error(f"🛑 [Motor Autorais] {item.get('id_unico')} foi PUBLICADO mas não foi "
+                                         "possível marcar no banco. Loop pausado 10 min para não republicar.")
+                        await asyncio.sleep(600)
 
                     # 🚦 UM vídeo por ciclo. Antes este "for" varria a fila inteira e
                     # disparava todos os vencidos em rajada, sem deixar a pausa entrar no
