@@ -4532,7 +4532,17 @@ async def motor_repost_publico_step():
                 config_aut = ler_config_bd("autorais_config", {})
                 canal_autorais = config_aut.get("destino")
             
-            if file_id and canal_autorais:
+            if not file_id or not canal_autorais:
+                # 🚦 Este caso caía num "if" sem else: nada acontecia, nada era registado,
+                # e o item voltava a ser o escolhido a cada 2 min, travando a fila.
+                if EXIBIR_LOGS:
+                    logger.error(f"❌ [Motor Público] Item {id_unico} sem file_id ({file_id}) ou sem origem ({canal_autorais}). Adiado 30 min.")
+                cursor.execute(
+                    "UPDATE fila_publico SET horario_disparo = ? WHERE id_unico = ?",
+                    ((agora + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S"), id_unico)
+                )
+                conexao.commit()
+            else:
                 import re
                 import random
                 
@@ -4551,6 +4561,14 @@ async def motor_repost_publico_step():
                     f"<i>#Recomendado #Shopee</i>"
                 )
                 
+                # 🧵 O tópico é OPCIONAL. Destino gravado sem ":N" (ou grupo que não é
+                # fórum) devolve None aqui, e int(None) estourava TypeError a CADA ciclo:
+                # o vídeo nunca era marcado e, como o SELECT pega sempre o horário mais
+                # antigo, ele era reescolhido para sempre e travava a fila inteira atrás.
+                kwargs_envio = {}
+                if topico_destino:
+                    kwargs_envio["message_thread_id"] = int(topico_destino)
+
                 try:
                     await bot.copy_message(
                         chat_id=grupo_id,
@@ -4558,7 +4576,7 @@ async def motor_repost_publico_step():
                         message_id=int(file_id),
                         caption=legenda_final,
                         parse_mode="HTML",
-                        message_thread_id=int(topico_destino)
+                        **kwargs_envio
                     )
                     registrar_ultimo_post(grupo_id, "video")   # 🚦 Intercalação
                     if EXIBIR_LOGS: logger.info(f"✅ [Motor Público] Vídeo '{nome_produto}' encaminhado para o Tópico de Postagem do Público com sucesso!")
@@ -4568,6 +4586,13 @@ async def motor_repost_publico_step():
                     
                 except Exception as e:
                     if EXIBIR_LOGS: logger.error(f"❌ [Motor Público] Falha ao tentar executar copy_message: {e}")
+                    # 🚦 ANTI-TRAVA: adia 30 min em vez de deixar o item parado no topo da
+                    # fila. Mesma solução que o motor dos Parceiros já usa.
+                    cursor.execute(
+                        "UPDATE fila_publico SET horario_disparo = ? WHERE id_unico = ?",
+                        ((agora + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S"), id_unico)
+                    )
+                    conexao.commit()
         
         conexao.close()
     except Exception as e:
@@ -6387,7 +6412,7 @@ async def relatorio_filas_parceiros(message: types.Message, state: FSMContext):
 
     await message.answer(texto, parse_mode="HTML", reply_markup=obter_teclado_relatorios_filas())
 
-@dp.message(F.text == "Detalhar Parceiro 🔍", StateFilter("*"))
+@dp.message(F.text == "Fila dos Parceiros 🔍", StateFilter("*"))
 async def pedir_parceiro_detalhe(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     parceiros = ler_parceiros()
@@ -15543,7 +15568,17 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
         except: pass
 
         if not analise_ia:
-            try: await bot.edit_message_text(chat_id=message.chat.id, message_id=msg_wizard_id, text="❌ Falha temporária na IA. Tente submeter novamente.")
+            # 🔎 O api_gemini já guardava o motivo real em ULTIMO_ERRO_IA, mas ninguém lia:
+            # a tela dizia sempre "falha temporária" e o porquê ficava só no journalctl.
+            import api_gemini
+            motivo_ia = (api_gemini.ULTIMO_ERRO_IA or "motivo não registrado")[:200]
+            if EXIBIR_LOGS: logger.error(f"❌ [Submissão] A IA não respondeu → {motivo_ia}")
+            try:
+                await bot.edit_message_text(
+                    chat_id=message.chat.id, message_id=msg_wizard_id,
+                    text=f"❌ <b>Falha temporária na IA.</b> Tente submeter novamente.\n\n<code>{motivo_ia}</code>",
+                    parse_mode="HTML"
+                )
             except: pass
             return
 
