@@ -1438,6 +1438,25 @@ async def processar_fila_autorais_loop():
                 salvar_fila_retorno(fila_dados)
 
             # --- 2. EXECUÇÃO DOS DISPAROS (Catraca do Motor) ---
+            # 🚦 TETO DIÁRIO. O sorteio da captura limita quantos vídeos ENTRAM por dia,
+            # mas nada limitava quantos SAEM: uma fila com atraso acumulado despejava
+            # tudo de uma vez no grupo dos outros. Agora o dia tem um limite duro.
+            limite_dia = int(config_atual.get("limite_videos", 5))
+            try:
+                conexao_ct = sqlite3.connect("banco_dados.db", timeout=20.0)
+                ja_saiu = conexao_ct.execute(
+                    "SELECT COUNT(*) FROM fila_autorais WHERE processado = 1 AND data_postagem LIKE ?",
+                    (hoje_str + "%",)
+                ).fetchone()[0]
+                conexao_ct.close()
+            except Exception:
+                ja_saiu = 0
+
+            if ja_saiu >= limite_dia:
+                if EXIBIR_LOGS: logger.info(f"🚦 [Motor Autorais] Teto diário atingido ({ja_saiu}/{limite_dia}). Nada mais sai hoje.")
+                await asyncio.sleep(60)
+                continue
+
             houve_disparo = False
             itens_restantes = []
             
@@ -1460,6 +1479,44 @@ async def processar_fila_autorais_loop():
                     # ⏸️ Reconfere a pausa a cada item, não só no topo do ciclo.
                     if pausa_ativa("autorais"):
                         if EXIBIR_LOGS: logger.info("⏸️ [Motor Autorais] Pausa detetada. Nenhum vídeo será publicado neste ciclo.")
+                        break
+
+                    # 🛡️ TRAVA DE IDADE. A data_alvo foi calculada lá na captura e pode
+                    # estar errada: configuração mudada no meio do caminho, item
+                    # recapturado, fila migrada. Esta checagem ignora a data_alvo e olha
+                    # a idade REAL do vídeo. Nada capturado há menos de dias_retorno volta
+                    # para o grupo — é o que impede o robô de devolver ao autor um vídeo
+                    # que ele publicou esta semana.
+                    dias_min = int(config_atual.get("dias_retorno", 15))
+                    cap_str = item.get("data_captura", "")
+                    idade_dias = None
+                    cap_obj = None
+                    if cap_str:
+                        try:
+                            cap_obj = datetime.strptime(cap_str, "%Y-%m-%d %H:%M:%S")
+                        except ValueError:
+                            try:
+                                cap_obj = datetime.strptime(cap_str.split(" ")[0], "%Y-%m-%d")
+                            except Exception:
+                                cap_obj = None
+                        if cap_obj:
+                            idade_dias = (agora - cap_obj).days
+
+                    if idade_dias is not None and idade_dias < dias_min:
+                        nova_alvo = (cap_obj + timedelta(days=dias_min)).strftime("%Y-%m-%d")
+                        if EXIBIR_LOGS:
+                            logger.warning(f"🛡️ [Motor Autorais] Vídeo {item.get('id_unico')} tem só {idade_dias} "
+                                           f"dia(s) (mínimo {dias_min}). NÃO publicado. Reagendado para {nova_alvo}.")
+                        try:
+                            conexao_ag = sqlite3.connect("banco_dados.db", timeout=20.0)
+                            conexao_ag.execute(
+                                "UPDATE fila_autorais SET data_alvo = ?, horario_disparo = '' WHERE id_unico = ?",
+                                (nova_alvo, item.get("id_unico"))
+                            )
+                            conexao_ag.commit()
+                            conexao_ag.close()
+                        except Exception as e:
+                            if EXIBIR_LOGS: logger.error(f"❌ [Motor Autorais] Falha ao reagendar o vídeo novo demais: {e}")
                         break
 
                     caminho_arquivo = item.get("caminho_arquivo")
