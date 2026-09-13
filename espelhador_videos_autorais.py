@@ -197,22 +197,43 @@ def salvar_fila_retorno(dados):
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
         
+        # 🛡️ O loop de retorno grava processado / data_postagem nas MESMAS linhas, com
+        # UPDATE pontual, logo depois de publicar. Reescrever a tabela a partir de um
+        # retrato em memória desfazia isso: o vídeo voltava a "pendente" e era publicado
+        # outra vez. Aqui o status de quem já está no banco é relido no último instante.
+        status_atual = {}
+        try:
+            cursor.execute("SELECT id_unico, horario_disparo, processado, data_postagem FROM fila_autorais")
+            for linha in cursor.fetchall():
+                status_atual[linha[0]] = linha[1:]
+        except Exception:
+            pass
+
         cursor.execute("DELETE FROM fila_autorais")
         for item in dados.get("fila", []):
+            gravado = status_atual.get(item.get("id_unico"))
+            if gravado:
+                horario_bd, processado_final, postagem_final = gravado
+            else:
+                horario_bd, processado_final, postagem_final = "", (1 if item.get("processado") else 0), item.get("data_postagem", "")
+
+            # ⏰ O horário vem do retrato quando existe: é este arquivo que sorteia os
+            # horários da fila autoral. Só cai para o banco quando o retrato não tem nada.
+            horario_final = item.get("horario_disparo") or horario_bd or ""
+
             cursor.execute('''
                 INSERT INTO fila_autorais (id_unico, msg_id_destino, legenda, caminho_arquivo, data_captura, data_alvo, horario_disparo, processado, data_postagem)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
-                item.get("id_unico"), 
-                item.get("msg_id_destino"), 
-                item.get("legenda"), 
-                item.get("caminho_arquivo"), 
-                item.get("data_captura"), 
-                item.get("data_alvo"), 
-                item.get("horario_disparo", ""), 
-                1 if item.get("processado") else 0,
-                item.get("data_postagem", ""),
-                item.get("caminho_arquivo", "")
+                item.get("id_unico"),
+                item.get("msg_id_destino"),
+                item.get("legenda"),
+                item.get("caminho_arquivo"),
+                item.get("data_captura"),
+                item.get("data_alvo"),
+                horario_final,
+                processado_final,
+                postagem_final
             ))
         conexao.commit()
         conexao.close()
