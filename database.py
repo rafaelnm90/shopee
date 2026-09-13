@@ -93,7 +93,8 @@ def inicializar_banco():
             horario_disparo TEXT,
             processado INTEGER DEFAULT 0,
             repostado_publico INTEGER DEFAULT 0,
-            data_repost_publico TEXT
+            data_repost_publico TEXT,
+            data_postagem TEXT
         )
     ''')
 
