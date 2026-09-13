@@ -108,6 +108,35 @@ def carregar_config_autorais():
 def salvar_config_autorais(config):
     salvar_config_bd_autorais("autorais_config", config)
 
+
+def pausa_ativa(escopo="autorais"):
+    """⏸️ Lê a pausa direto do banco, NA HORA.
+
+    A checagem feita no topo de um ciclo já está velha quando o envio acontece: entre
+    uma coisa e outra passam 60 segundos de loop, ou dezenas de segundos de download,
+    ffmpeg e IA. Clicar em pausar no painel no meio disso não interrompia nada. Esta
+    função existe para ser chamada logo ANTES de cada publicação.
+
+    escopo "captura"  → só a pausa geral do robô autoral
+    escopo "autorais" → pausa geral OU pausa da repostagem de retorno
+    escopo "publico"  → módulo de submissão desligado OU repostagem pública pausada
+    """
+    try:
+        if escopo == "publico":
+            cfg = ler_config_bd_autorais("submissao_config", {})
+            return (not cfg.get("ativo", False)) or bool(cfg.get("repost_pausado", False))
+
+        cfg = ler_config_bd_autorais("autorais_config", {})
+        if bool(cfg.get("pausar_robo_completo", False)):
+            return True
+        if escopo == "captura":
+            return False
+        return bool(cfg.get("pausar_repostagem", False))
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Falha ao consultar a pausa ({escopo}): {e}")
+        return False
+
+
 config_atual = carregar_config_autorais()
 
 NOME_SESSAO = 'sessao_espelhador_isolado'
@@ -1102,6 +1131,16 @@ async def interceptar_e_espelhar(event):
                 if destino_topico and destino_topico > 1:
                     kwargs_envio['reply_to'] = destino_topico
 
+                # ⏸️ ÚLTIMA PORTA ANTES DE PUBLICAR. A pausa pode ter sido pedida DEPOIS
+                # que este vídeo entrou em processamento — download, otimização e IA
+                # levam dezenas de segundos. A checagem lá do topo do handler já não
+                # vale nada aqui; esta é a que conta.
+                if pausa_ativa("captura"):
+                    if EXIBIR_LOGS: logger.info("⏸️ [Captura] Pausa pedida durante o processamento. Vídeo descartado sem publicar.")
+                    try: os.remove(caminho_video)
+                    except Exception: pass
+                    return
+
                 msg_enviada = await client.send_file(
                     destino_final,
                     file=caminho_video,
@@ -1390,6 +1429,11 @@ async def processar_fila_autorais_loop():
                     except: pass
                     
                 if deve_disparar:
+                    # ⏸️ Reconfere a pausa a cada item, não só no topo do ciclo.
+                    if pausa_ativa("autorais"):
+                        if EXIBIR_LOGS: logger.info("⏸️ [Motor Autorais] Pausa detetada. Nenhum vídeo será publicado neste ciclo.")
+                        break
+
                     caminho_arquivo = item.get("caminho_arquivo")
                     legenda = item.get("legenda")
                     
@@ -1461,7 +1505,12 @@ async def processar_fila_autorais_loop():
                         conexao_st.close()
                     except Exception as e:
                         if EXIBIR_LOGS: logger.error(f"❌ [Motor Autorais] Falha ao gravar o status do item: {e}")
-                    
+
+                    # 🚦 UM vídeo por ciclo. Antes este "for" varria a fila inteira e
+                    # disparava todos os vencidos em rajada, sem deixar a pausa entrar no
+                    # meio — e sem respeitar espaçamento nenhum entre um post e outro.
+                    break
+
                 itens_restantes.append(item)
                 
             # 🛡️ Nada de salvar a fila inteira no fim do ciclo: o status de cada vídeo já
@@ -1579,6 +1628,14 @@ async def processar_fila_publico_loop():
                                        f"{tamanho_origem / (1024**2):.1f} MB, acima do teto de "
                                        f"{LIMITE_UPLOAD_BOT_MB} MB que o bot consegue enviar. Descartado.")
                     await asyncio.sleep(30)
+                    continue
+
+                # ⏸️ Reconfere antes de gastar banda: a pausa pode ter chegado durante
+                # o minuto de espera do ciclo.
+                if pausa_ativa("publico"):
+                    conexao.close()
+                    if EXIBIR_LOGS: logger.info("⏸️ [Correio Público] Pausa detetada. Nenhum download será feito.")
+                    await asyncio.sleep(60)
                     continue
 
                 destino_arquivo = os.path.join("temp", f"publico_{id_unico}.mp4")
