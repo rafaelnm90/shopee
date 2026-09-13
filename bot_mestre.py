@@ -124,6 +124,15 @@ def inicializar_banco_sqlite():
     except sqlite3.OperationalError:
         pass
 
+    # 🚀 Migração invisível 7: caminho do arquivo que o Correio Público (userbot) baixa
+    # para o bot publicar. O canal de origem não é nosso, então o bot nunca consegue
+    # copiar de lá — ele publica a partir do disco, como faz com os parceiros.
+    try:
+        cursor.execute("ALTER TABLE fila_publico ADD COLUMN caminho_arquivo TEXT")
+        if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'caminho_arquivo' adicionada à fila_publico.")
+    except sqlite3.OperationalError:
+        pass
+
     # 🚀 Migração invisível 6: horário REAL da publicação do retorno autoral.
     # Sem esta coluna o relatório só tinha o horário previsto e imprimia
     # "Prev: Hoje às" com o horário em branco nos itens já postados.
@@ -1376,6 +1385,18 @@ def _caminhos_protegidos():
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
         cursor.execute("SELECT caminho_video FROM fila_parceiros WHERE processado = 0")
+        for (c,) in cursor.fetchall():
+            if c: protegidos.add(os.path.abspath(c))
+        conexao.close()
+    except Exception:
+        pass
+
+    # 📬 Fila do Grupo Público: o arquivo que o Correio já baixou e o bot ainda não
+    # publicou. Sem isto a faxina o apagaria se o item passasse das 24h protegidas.
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("SELECT caminho_arquivo FROM fila_publico WHERE processado = 0")
         for (c,) in cursor.fetchall():
             if c: protegidos.add(os.path.abspath(c))
         conexao.close()
@@ -4518,13 +4539,94 @@ async def motor_repost_publico_step():
             conexao.commit()
 
         # --- 2. EXECUÇÃO DOS DISPAROS (respeita o horário sorteado) ---
-        # 🚚 O ENVIO pode sair daqui (bot) ou do userbot do espelhador. Quando o canal de
-        # origem não é nosso, o bot não pode ser adicionado nele e o copy_message devolve
-        # "chat not found" para sempre — só a conta de usuário consegue ler aquele
-        # histórico. Padrão: userbot. Se um dia o bot virar membro da origem, é só gravar
-        # repost_via_userbot = False na submissao_config que o caminho abaixo volta a valer.
-        # A fila, a faxina e o sorteio de horários continuam sendo feitos aqui, sempre.
-        if config.get("repost_via_userbot", True):
+        # 🚚 Trava de compatibilidade: se um dia o envio voltar para o userbot, basta
+        # gravar repost_via_userbot = True na submissao_config. O padrão é o bot publicar
+        # daqui, com o perfil apenas creditado na legenda.
+        if config.get("repost_via_userbot", False):
+            conexao.close()
+            return
+
+        # ⏰ Janela de postagem. Item atrasado de ontem não pode sair de madrugada — é o
+        # oposto do que a fila passa o dia inteiro tentando parecer.
+        if not (janela_inicio <= agora.hour < janela_fim):
+            conexao.close()
+            return
+
+        cursor.execute('''
+            SELECT * FROM fila_publico
+            WHERE processado = 0
+            AND horario_disparo IS NOT NULL
+            AND horario_disparo != ''
+            AND horario_disparo <= ?
+            ORDER BY horario_disparo ASC LIMIT 1
+        ''', (agora.strftime("%Y-%m-%d %H:%M:%S"),))
+
+        video_alvo = cursor.fetchone()
+
+        if video_alvo:
+            id_unico = video_alvo["id_unico"]
+            legenda_original = video_alvo["legenda"] or ""
+            caminho = dict(video_alvo).get("caminho_arquivo") or ""
+
+            # 📥 Quem baixa o arquivo é o userbot (Correio Público, no espelhador): o canal
+            # de origem não é nosso e o bot não consegue lê-lo. Aqui o bot só publica a
+            # partir do disco, igual ao motor dos Parceiros.
+            if not caminho or not os.path.exists(caminho):
+                if EXIBIR_LOGS:
+                    logger.warning(f"⏳ [Motor Público] Vídeo {id_unico} ainda sem arquivo no disco. "
+                                   "O correio do userbot não baixou. Nova tentativa em 10 min.")
+                cursor.execute(
+                    "UPDATE fila_publico SET horario_disparo = ? WHERE id_unico = ?",
+                    ((agora + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S"), id_unico)
+                )
+                conexao.commit()
+            else:
+                if EXIBIR_LOGS: logger.info("🚀 [Motor Público] Vídeo elegível detetado. A iniciar a repostagem...")
+                import re
+
+                match_link = re.search(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s<]+', legenda_original, re.IGNORECASE)
+                link_shopee = match_link.group(0) if match_link else "https://shopee.com.br"
+
+                match_item = re.search(r'📦\s*Item:\s*([^\n<]+)', legenda_original)
+                nome_produto = match_item.group(1).strip() if match_item else "Produto Exclusivo"
+
+                user_mention = await obter_credito_repost()
+
+                legenda_final = (
+                    f"👤 Vídeo enviado por: {user_mention}\n\n"
+                    f"<b>{nome_produto}</b>\n\n"
+                    f"🔗 <b>Link do Produto:</b>\n{link_shopee}\n\n"
+                    f"<i>#Recomendado #Shopee</i>"
+                )
+
+                try:
+                    await bot.send_video(
+                        chat_id=grupo_id,
+                        video=FSInputFile(caminho),
+                        caption=legenda_final,
+                        parse_mode="HTML",
+                        message_thread_id=int(topico_destino) if topico_destino else None
+                    )
+                    registrar_ultimo_post(grupo_id, "video")   # 🚦 Intercalação
+                    if EXIBIR_LOGS: logger.info(f"✅ [Motor Público] Vídeo '{nome_produto}' publicado no Grupo Público.")
+
+                    cursor.execute("UPDATE fila_publico SET processado = 1, data_postagem = ?, horario_disparo = ? WHERE id_unico = ?", (agora.strftime("%Y-%m-%d %H:%M:%S"), agora.strftime("%Y-%m-%d %H:%M:%S"), id_unico))
+                    conexao.commit()
+
+                    # 🧹 O arquivo já cumpriu o papel. Sai do disco na hora.
+                    try: os.remove(caminho)
+                    except Exception: pass
+
+                except Exception as e:
+                    if EXIBIR_LOGS:
+                        logger.error(f"❌ [Motor Público] Falha ao publicar: {e} "
+                                     f"| destino={grupo_id!r} topico={topico_destino!r} arquivo={caminho!r}")
+                    # 🚦 ANTI-TRAVA: adia 30 min em vez de deixar o item parado no topo da fila.
+                    cursor.execute(
+                        "UPDATE fila_publico SET horario_disparo = ? WHERE id_unico = ?",
+                        ((agora + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S"), id_unico)
+                    )
+                    conexao.commit()
             conexao.close()
             return
 
