@@ -773,8 +773,29 @@ def salvar_fila_publico(dados):
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
 
+        # 🛡️ O bot_mestre e o Correio escrevem processado / data_postagem / horario_disparo
+        # / caminho_arquivo NAS MESMAS LINHAS, de outro processo. Reescrever a tabela a
+        # partir de um retrato em memória desfazia essas gravações: um vídeo já publicado
+        # voltava a "pendente" e era publicado outra vez. Aqui as colunas de status de
+        # quem já está no banco são relidas no último instante e mantidas.
+        status_atual = {}
+        try:
+            cursor.execute("SELECT id_unico, horario_disparo, processado, data_postagem, caminho_arquivo FROM fila_publico")
+            for linha in cursor.fetchall():
+                status_atual[linha[0]] = linha[1:]
+        except Exception:
+            pass
+
         cursor.execute("DELETE FROM fila_publico")
         for item in dados.get("fila", []):
+            gravado = status_atual.get(item.get("id_unico"))
+            if gravado:
+                horario_final, processado_final, postagem_final, caminho_final = gravado
+            else:
+                horario_final = item.get("horario_disparo", "")
+                processado_final = 1 if item.get("processado") else 0
+                postagem_final = item.get("data_postagem", "")
+                caminho_final = item.get("caminho_arquivo", "")
             cursor.execute('''
                 INSERT INTO fila_publico (id_unico, msg_id_destino, legenda, data_captura, data_alvo, horario_disparo, processado, data_postagem, caminho_arquivo)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -784,10 +805,10 @@ def salvar_fila_publico(dados):
                 item.get("legenda"),
                 item.get("data_captura"),
                 item.get("data_alvo"),
-                item.get("horario_disparo", ""),
-                1 if item.get("processado") else 0,
-                item.get("data_postagem", ""),
-                item.get("caminho_arquivo", "")
+                horario_final,
+                processado_final,
+                postagem_final,
+                caminho_final
             ))
         conexao.commit()
         conexao.close()
@@ -955,8 +976,15 @@ def separar_alvo_e_topico(valor):
 
     return base, topico
 
-@client.on(events.NewMessage())
+# 🔁 incoming=True é o que impede o ciclo vicioso: sem ele, o Telethon entrega a este
+# handler TAMBÉM as mensagens que esta própria conta envia. Como o retorno autoral
+# publica dentro do grupo de ORIGEM, cada retorno era recapturado, republicado no canal
+# e reentrava nas filas — um vídeo recém-postado virava um novo vídeo "novo".
+@client.on(events.NewMessage(incoming=True))
 async def interceptar_e_espelhar(event):
+    # 🛡️ Cinto e suspensório: se algum evento próprio escapar do filtro acima, morre aqui.
+    if getattr(event, "out", False):
+        return
     config_atual = carregar_config_autorais()
     
     # ✅ VERIFICAÇÃO DE PAUSA GLOBAL DO ROBÔ AUTORAL
@@ -1410,13 +1438,35 @@ async def processar_fila_autorais_loop():
                     else:
                         # 🚦 ANTI-TRAVA: adia 30 min e tenta de novo, sem segurar os seguintes.
                         item["horario_disparo"] = (agora + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
-                    houve_disparo = True
+
+                    # 🎯 UPDATE pontual, e NUNCA salvar_fila_retorno() aqui. Aquela função
+                    # apaga a tabela e reescreve a partir do retrato lido no INÍCIO do
+                    # ciclo — ou seja, antes do await do envio acima. Tudo que foi gravado
+                    # nesse meio-tempo era desfeito, inclusive este "processado": o vídeo
+                    # voltava a pendente e era publicado de novo, e de novo.
+                    try:
+                        conexao_st = sqlite3.connect("banco_dados.db", timeout=20.0)
+                        cursor_st = conexao_st.cursor()
+                        if encerrar_item:
+                            cursor_st.execute(
+                                "UPDATE fila_autorais SET processado = 1, data_postagem = ? WHERE id_unico = ?",
+                                (item.get("data_postagem", ""), item.get("id_unico"))
+                            )
+                        else:
+                            cursor_st.execute(
+                                "UPDATE fila_autorais SET horario_disparo = ? WHERE id_unico = ?",
+                                (item.get("horario_disparo", ""), item.get("id_unico"))
+                            )
+                        conexao_st.commit()
+                        conexao_st.close()
+                    except Exception as e:
+                        if EXIBIR_LOGS: logger.error(f"❌ [Motor Autorais] Falha ao gravar o status do item: {e}")
                     
                 itens_restantes.append(item)
                 
-            if houve_disparo:
-                fila_dados["fila"] = itens_restantes
-                salvar_fila_retorno(fila_dados)
+            # 🛡️ Nada de salvar a fila inteira no fim do ciclo: o status de cada vídeo já
+            # foi gravado com UPDATE pontual logo depois do envio. Reescrever a tabela a
+            # partir do retrato antigo era exatamente o que ressuscitava vídeos postados.
 
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro no loop de postagem de autorais: {e}")
