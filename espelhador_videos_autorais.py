@@ -165,6 +165,11 @@ def ler_fila_retorno():
         # sobem em ordem imprevisível. Garantir aqui evita que o salvar_fila_retorno()
         # estoure "no such column" e perca a fila inteira num deploy.
         try:
+            cursor.execute("ALTER TABLE fila_autorais ADD COLUMN msg_postada_id INTEGER")
+            conexao.commit()
+        except sqlite3.OperationalError:
+            pass
+        try:
             cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_postagem TEXT")
             conexao.commit()
         except sqlite3.OperationalError:
@@ -185,7 +190,8 @@ def ler_fila_retorno():
                 "data_alvo": linha["data_alvo"],
                 "horario_disparo": linha["horario_disparo"],
                 "processado": bool(linha["processado"]),
-                "data_postagem": dict(linha).get("data_postagem") or ""
+                "data_postagem": dict(linha).get("data_postagem") or "",
+                "msg_postada_id": dict(linha).get("msg_postada_id")
             })
         return {"fila": fila}
     except Exception as e:
@@ -203,7 +209,7 @@ def salvar_fila_retorno(dados):
         # outra vez. Aqui o status de quem já está no banco é relido no último instante.
         status_atual = {}
         try:
-            cursor.execute("SELECT id_unico, horario_disparo, processado, data_postagem FROM fila_autorais")
+            cursor.execute("SELECT id_unico, horario_disparo, processado, data_postagem, msg_postada_id FROM fila_autorais")
             for linha in cursor.fetchall():
                 status_atual[linha[0]] = linha[1:]
         except Exception:
@@ -213,17 +219,18 @@ def salvar_fila_retorno(dados):
         for item in dados.get("fila", []):
             gravado = status_atual.get(item.get("id_unico"))
             if gravado:
-                horario_bd, processado_final, postagem_final = gravado
+                horario_bd, processado_final, postagem_final, msg_post_final = gravado
             else:
                 horario_bd, processado_final, postagem_final = "", (1 if item.get("processado") else 0), item.get("data_postagem", "")
+                msg_post_final = item.get("msg_postada_id")
 
             # ⏰ O horário vem do retrato quando existe: é este arquivo que sorteia os
             # horários da fila autoral. Só cai para o banco quando o retrato não tem nada.
             horario_final = item.get("horario_disparo") or horario_bd or ""
 
             cursor.execute('''
-                INSERT INTO fila_autorais (id_unico, msg_id_destino, legenda, caminho_arquivo, data_captura, data_alvo, horario_disparo, processado, data_postagem)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO fila_autorais (id_unico, msg_id_destino, legenda, caminho_arquivo, data_captura, data_alvo, horario_disparo, processado, data_postagem, msg_postada_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 item.get("id_unico"),
                 item.get("msg_id_destino"),
@@ -263,6 +270,11 @@ def ler_fila_publico():
         # O bot_mestre também a cria, mas os serviços sobem em ordem imprevisível —
         # garantir aqui evita um "no such column" no meio de um deploy.
         try:
+            cursor.execute("ALTER TABLE fila_publico ADD COLUMN msg_postada_id INTEGER")
+            conexao.commit()
+        except sqlite3.OperationalError:
+            pass
+        try:
             cursor.execute("ALTER TABLE fila_publico ADD COLUMN caminho_arquivo TEXT")
             conexao.commit()
         except sqlite3.OperationalError:
@@ -283,7 +295,8 @@ def ler_fila_publico():
                 "horario_disparo": linha["horario_disparo"],
                 "processado": bool(linha["processado"]),
                 "data_postagem": linha["data_postagem"],
-                "caminho_arquivo": dict(linha).get("caminho_arquivo") or ""
+                "caminho_arquivo": dict(linha).get("caminho_arquivo") or "",
+                "msg_postada_id": dict(linha).get("msg_postada_id")
             })
         return {"fila": fila}
     except Exception as e:
@@ -830,7 +843,7 @@ def salvar_fila_publico(dados):
         # quem já está no banco são relidas no último instante e mantidas.
         status_atual = {}
         try:
-            cursor.execute("SELECT id_unico, horario_disparo, processado, data_postagem, caminho_arquivo FROM fila_publico")
+            cursor.execute("SELECT id_unico, horario_disparo, processado, data_postagem, caminho_arquivo, msg_postada_id FROM fila_publico")
             for linha in cursor.fetchall():
                 status_atual[linha[0]] = linha[1:]
         except Exception:
@@ -840,15 +853,16 @@ def salvar_fila_publico(dados):
         for item in dados.get("fila", []):
             gravado = status_atual.get(item.get("id_unico"))
             if gravado:
-                horario_final, processado_final, postagem_final, caminho_final = gravado
+                horario_final, processado_final, postagem_final, caminho_final, msg_post_final = gravado
             else:
                 horario_final = item.get("horario_disparo", "")
                 processado_final = 1 if item.get("processado") else 0
                 postagem_final = item.get("data_postagem", "")
+                msg_post_final = item.get("msg_postada_id")
                 caminho_final = item.get("caminho_arquivo", "")
             cursor.execute('''
-                INSERT INTO fila_publico (id_unico, msg_id_destino, legenda, data_captura, data_alvo, horario_disparo, processado, data_postagem, caminho_arquivo)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO fila_publico (id_unico, msg_id_destino, legenda, data_captura, data_alvo, horario_disparo, processado, data_postagem, caminho_arquivo, msg_postada_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 item.get("id_unico"),
                 item.get("msg_id_destino"),
@@ -856,9 +870,11 @@ def salvar_fila_publico(dados):
                 item.get("data_captura"),
                 item.get("data_alvo"),
                 horario_final,
+                horario_final,
                 processado_final,
                 postagem_final,
-                caminho_final
+                caminho_final,
+                msg_post_final
             ))
         conexao.commit()
         conexao.close()
@@ -1561,7 +1577,9 @@ async def processar_fila_autorais_loop():
                     else:
                         try:
                             if os.path.exists(caminho_arquivo):
-                                await client.send_file(
+                                # 📌 O Telethon devolve a mensagem criada. O id dela é o que
+                                # monta o link "(Destino)" no relatório — antes ia para o lixo.
+                                msg_publicada = await client.send_file(
                                     origem_final,
                                     file=caminho_arquivo,
                                     caption=legenda,
@@ -1569,6 +1587,7 @@ async def processar_fila_autorais_loop():
                                     **kwargs_retorno
                                 )
                                 encerrar_item = True
+                                item["msg_postada_id"] = getattr(msg_publicada, "id", None)
                                 # ⏱️ Carimba a hora REAL da publicação — é o que o relatório
                                 # precisa mostrar nos itens já postados.
                                 item["data_postagem"] = agora.strftime("%Y-%m-%d %H:%M:%S")
@@ -1609,8 +1628,8 @@ async def processar_fila_autorais_loop():
                             cursor_st = conexao_st.cursor()
                             if encerrar_item:
                                 cursor_st.execute(
-                                    "UPDATE fila_autorais SET processado = 1, data_postagem = ? WHERE id_unico = ?",
-                                    (item.get("data_postagem", ""), item.get("id_unico"))
+                                    "UPDATE fila_autorais SET processado = 1, data_postagem = ?, msg_postada_id = ? WHERE id_unico = ?",
+                                    (item.get("data_postagem", ""), item.get("msg_postada_id"), item.get("id_unico"))
                                 )
                             else:
                                 cursor_st.execute(
