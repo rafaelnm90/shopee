@@ -4518,6 +4518,16 @@ async def motor_repost_publico_step():
             conexao.commit()
 
         # --- 2. EXECUÇÃO DOS DISPAROS (respeita o horário sorteado) ---
+        # 🚚 O ENVIO pode sair daqui (bot) ou do userbot do espelhador. Quando o canal de
+        # origem não é nosso, o bot não pode ser adicionado nele e o copy_message devolve
+        # "chat not found" para sempre — só a conta de usuário consegue ler aquele
+        # histórico. Padrão: userbot. Se um dia o bot virar membro da origem, é só gravar
+        # repost_via_userbot = False na submissao_config que o caminho abaixo volta a valer.
+        # A fila, a faxina e o sorteio de horários continuam sendo feitos aqui, sempre.
+        if config.get("repost_via_userbot", True):
+            conexao.close()
+            return
+
         cursor.execute('''
             SELECT * FROM fila_publico
             WHERE processado = 0
