@@ -15,6 +15,10 @@ import logging
 import shutil
 import tempfile
 import sqlite3
+# 🔒 Importar o utils aplica a blindagem global do SQLite neste processo: toda conexão
+# passa a nascer com 30s de paciência em vez dos 20s de cada chamada. O downloader roda
+# em processo próprio, então precisa do import explícito — o bot_mestre não alcança aqui.
+import utils  # noqa: F401
 import hashlib
 import json
 from datetime import datetime, timedelta
