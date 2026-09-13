@@ -1342,24 +1342,48 @@ async def processar_fila_autorais_loop():
                     caminho_arquivo = item.get("caminho_arquivo")
                     legenda = item.get("legenda")
                     
-                    try:
-                        if os.path.exists(caminho_arquivo):
-                            await client.send_file(
-                                config_atual['origem'],
-                                file=caminho_arquivo,
-                                caption=legenda,
-                                parse_mode='md'
-                            )
-                            if EXIBIR_LOGS: logger.info(f"✅ [Motor Autorais] Vídeo de retorno {item.get('id_unico')} publicado com sucesso!")
-                            
-                            os.remove(caminho_arquivo)
-                            if EXIBIR_LOGS: logger.info("🧹 Ficheiro arquivado removido após postagem final.")
-                        else:
-                            if EXIBIR_LOGS: logger.warning(f"⚠️ Ficheiro arquivado não encontrado em {caminho_arquivo}.")
-                    except Exception as e:
-                        if EXIBIR_LOGS: logger.error(f"❌ Falha no disparo de retorno: {e}")
-                        
-                    item["processado"] = True
+                    # 🎯 A origem pode estar gravada no formato composto "-100123:5".
+                    # Este era o ÚNICO ponto do arquivo que usava o valor cru: o Telethon
+                    # não resolve "-100123:5" como entidade e o envio morria aqui.
+                    origem_final, origem_topico = separar_alvo_e_topico(config_atual.get('origem'))
+                    kwargs_retorno = {}
+                    if origem_topico and origem_topico > 1:
+                        kwargs_retorno['reply_to'] = origem_topico
+
+                    encerrar_item = False
+                    if origem_final is None:
+                        if EXIBIR_LOGS: logger.error("❌ [Motor Autorais] Origem não configurada no painel. Vídeo mantido na fila.")
+                    else:
+                        try:
+                            if os.path.exists(caminho_arquivo):
+                                await client.send_file(
+                                    origem_final,
+                                    file=caminho_arquivo,
+                                    caption=legenda,
+                                    parse_mode='md',
+                                    **kwargs_retorno
+                                )
+                                encerrar_item = True
+                                if EXIBIR_LOGS: logger.info(f"✅ [Motor Autorais] Vídeo de retorno {item.get('id_unico')} publicado com sucesso!")
+                                
+                                os.remove(caminho_arquivo)
+                                if EXIBIR_LOGS: logger.info("🧹 Ficheiro arquivado removido após postagem final.")
+                            else:
+                                # Arquivo sumiu do disco: não há o que reenviar. Sai da fila,
+                                # senão fica a ser tentado de 60 em 60 segundos para sempre.
+                                encerrar_item = True
+                                if EXIBIR_LOGS: logger.warning(f"⚠️ Ficheiro arquivado não encontrado em {caminho_arquivo}. Item encerrado.")
+                        except Exception as e:
+                            if EXIBIR_LOGS: logger.error(f"❌ Falha no disparo de retorno: {e}")
+
+                    if encerrar_item:
+                        # ✅ Só sai da fila quando REALMENTE saiu. Antes esta linha vivia fora
+                        # do try e marcava "processado" mesmo depois de exceção: o relatório
+                        # mostrava "✅ Postado" e o vídeo nunca tinha ido ao ar.
+                        item["processado"] = True
+                    else:
+                        # 🚦 ANTI-TRAVA: adia 30 min e tenta de novo, sem segurar os seguintes.
+                        item["horario_disparo"] = (agora + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
                     houve_disparo = True
                     
                 itens_restantes.append(item)
