@@ -4641,11 +4641,40 @@ async def motor_repost_publico_step():
                         parse_mode="HTML",
                         message_thread_id=int(topico_destino) if topico_destino else None
                     )
-                    registrar_ultimo_post(grupo_id, "video")   # 🚦 Intercalação
                     if EXIBIR_LOGS: logger.info(f"✅ [Motor Público] Vídeo '{nome_produto}' publicado no Grupo Público.")
 
-                    cursor.execute("UPDATE fila_publico SET processado = 1, data_postagem = ?, horario_disparo = ? WHERE id_unico = ?", (agora.strftime("%Y-%m-%d %H:%M:%S"), agora.strftime("%Y-%m-%d %H:%M:%S"), id_unico))
-                    conexao.commit()
+                    # ⚠️ O VÍDEO JÁ ESTÁ NO GRUPO. Daqui para frente nada pode falhar em
+                    # silêncio: se o "processado = 1" não for gravado, o ciclo seguinte
+                    # escolhe o MESMO item e publica de novo. Foi assim que o grupo levou
+                    # o mesmo vídeo de 2 em 2 minutos durante uma hora — o envio dava
+                    # certo e o UPDATE morria com "database is locked".
+                    marcou = False
+                    for tentativa in range(1, 7):
+                        try:
+                            cursor.execute(
+                                "UPDATE fila_publico SET processado = 1, data_postagem = ?, horario_disparo = ? WHERE id_unico = ?",
+                                (agora.strftime("%Y-%m-%d %H:%M:%S"), agora.strftime("%Y-%m-%d %H:%M:%S"), id_unico)
+                            )
+                            conexao.commit()
+                            marcou = True
+                            break
+                        except Exception as erro_marca:
+                            if EXIBIR_LOGS:
+                                logger.warning(f"⏳ [Motor Público] Tentativa {tentativa}/6 de marcar {id_unico} "
+                                               f"como postado falhou: {erro_marca}")
+                            await asyncio.sleep(2 * tentativa)
+
+                    if not marcou:
+                        # 🛑 Não conseguimos registrar. O arquivo FICA no disco de propósito:
+                        # a trava "sem arquivo no disco" segura o item até alguém olhar,
+                        # e é muito melhor um vídeo preso do que vinte cópias no grupo.
+                        if EXIBIR_LOGS:
+                            logger.error(f"🛑 [Motor Público] {id_unico} foi PUBLICADO mas não foi possível marcar "
+                                         "no banco. Motor parado para não republicar. Verifique o SQLite.")
+                        conexao.close()
+                        return
+
+                    registrar_ultimo_post(grupo_id, "video")   # 🚦 Intercalação
 
                     # 🧹 O arquivo já cumpriu o papel. Sai do disco na hora.
                     try: os.remove(caminho)
