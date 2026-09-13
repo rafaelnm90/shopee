@@ -199,6 +199,10 @@ def ler_fila_retorno():
         return {"fila": []}
 
 def salvar_fila_retorno(dados):
+    # 🔒 Esta função faz DELETE + N INSERTs: é a transação de escrita mais longa do
+    # sistema. Se estourar no meio (foi o que aconteceu hoje), a conexão precisa fechar
+    # de qualquer jeito — senão o lock de escrita fica preso com o DELETE em aberto.
+    conexao = None
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -246,6 +250,10 @@ def salvar_fila_retorno(dados):
         conexao.close()
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar fila_autorais no SQLite: {e}")
+    finally:
+        if conexao is not None:
+            try: conexao.close()
+            except Exception: pass
 
 def ler_fila_publico():
     """Fila própria do Grupo Público. Espelha ler_fila_retorno(), com tabela separada."""
@@ -832,6 +840,8 @@ def reservar_video(chaves, parceiro_id=0):
 
 def salvar_fila_publico(dados):
     """Espelha salvar_fila_retorno(), gravando na tabela fila_publico."""
+    # 🔒 Mesmo caso da irmã acima: DELETE + N INSERTs. Fechar sempre, dê no que der.
+    conexao = None
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -880,6 +890,10 @@ def salvar_fila_publico(dados):
         conexao.close()
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar fila_publico no SQLite: {e}")
+    finally:
+        if conexao is not None:
+            try: conexao.close()
+            except Exception: pass
 
 def contar_ofertas_dia_publico(data_alvo, incrementar=True):
     """
