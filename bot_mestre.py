@@ -4625,6 +4625,16 @@ async def motor_repost_publico_step():
                 )
 
                 try:
+                # ⏸️ ÚLTIMA PORTA: o config lido no topo desta função pode ter até 2
+                # minutos, e o upload ainda leva alguns segundos. Reler aqui é barato e
+                # é o que faz o botão de pausa valer no instante em que é clicado.
+                config_agora = ler_submissao_config()
+                if not config_agora.get("ativo") or config_agora.get("repost_pausado", False):
+                    if EXIBIR_LOGS: logger.info("⏸️ [Motor Público] Pausa detetada. Publicação abortada.")
+                    conexao.close()
+                    return
+
+                try:
                     await bot.send_video(
                         chat_id=grupo_id,
                         video=FSInputFile(caminho),
