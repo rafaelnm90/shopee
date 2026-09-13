@@ -182,7 +182,8 @@ def salvar_fila_retorno(dados):
                 item.get("data_alvo"), 
                 item.get("horario_disparo", ""), 
                 1 if item.get("processado") else 0,
-                item.get("data_postagem", "")
+                item.get("data_postagem", ""),
+                item.get("caminho_arquivo", "")
             ))
         conexao.commit()
         conexao.close()
@@ -208,6 +209,15 @@ def ler_fila_publico():
                 data_postagem TEXT
             )
         ''')
+        # 🚀 Migração local: o arquivo baixado pelo Correio Público mora nesta coluna.
+        # O bot_mestre também a cria, mas os serviços sobem em ordem imprevisível —
+        # garantir aqui evita um "no such column" no meio de um deploy.
+        try:
+            cursor.execute("ALTER TABLE fila_publico ADD COLUMN caminho_arquivo TEXT")
+            conexao.commit()
+        except sqlite3.OperationalError:
+            pass
+
         cursor.execute("SELECT * FROM fila_publico")
         linhas = cursor.fetchall()
         conexao.close()
@@ -222,7 +232,8 @@ def ler_fila_publico():
                 "data_alvo": linha["data_alvo"],
                 "horario_disparo": linha["horario_disparo"],
                 "processado": bool(linha["processado"]),
-                "data_postagem": linha["data_postagem"]
+                "data_postagem": linha["data_postagem"],
+                "caminho_arquivo": dict(linha).get("caminho_arquivo") or ""
             })
         return {"fila": fila}
     except Exception as e:
@@ -765,8 +776,8 @@ def salvar_fila_publico(dados):
         cursor.execute("DELETE FROM fila_publico")
         for item in dados.get("fila", []):
             cursor.execute('''
-                INSERT INTO fila_publico (id_unico, msg_id_destino, legenda, data_captura, data_alvo, horario_disparo, processado, data_postagem)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO fila_publico (id_unico, msg_id_destino, legenda, data_captura, data_alvo, horario_disparo, processado, data_postagem, caminho_arquivo)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 item.get("id_unico"),
                 item.get("msg_id_destino"),
@@ -775,7 +786,8 @@ def salvar_fila_publico(dados):
                 item.get("data_alvo"),
                 item.get("horario_disparo", ""),
                 1 if item.get("processado") else 0,
-                item.get("data_postagem", "")
+                item.get("data_postagem", ""),
+                item.get("caminho_arquivo", "")
             ))
         conexao.commit()
         conexao.close()
@@ -1412,17 +1424,134 @@ async def processar_fila_autorais_loop():
         await asyncio.sleep(60) # Respira 1 minuto e volta a procurar
 
 # ==========================================
-# 📬 MOTOR DO GRUPO PÚBLICO — o disparo mora aqui, não no bot_mestre
+# 📬 CORREIO DO GRUPO PÚBLICO — o userbot baixa, quem publica é o bot
 #
-# O canal onde os autorais são publicados não é nosso: o bot do aiogram não pode ser
-# adicionado lá e, sem ser membro, o copy_message dele devolve "chat not found" em todo
-# ciclo. Esta conta tem acesso — é ela que publica no canal todos os dias. Por isso o
-# ENVIO vive aqui. O bot_mestre continua dono da fila, da faxina e do sorteio de
-# horários; lá a trava 'repost_via_userbot' desliga só a parte do envio.
+# O canal onde os autorais são publicados não é nosso: o bot não pode entrar lá e o
+# copy_message dele devolve "chat not found". Esta conta tem acesso, mas publicar
+# direto no grupo assinaria o post com um perfil pessoal — e o tópico do mural é
+# fechado, o que ainda exigiria dar admin à conta.
+#
+# Então o userbot não publica nada: ele só faz a ponte. Baixa o arquivo para o disco e
+# anota o caminho na fila. O bot_mestre publica a partir do arquivo e credita o perfil
+# na legenda — exatamente como já faz com os vídeos dos parceiros.
 # ==========================================
-ADMIN_ID_CREDITO = 1226920464   # mesmo ADMIN_ID do bot_mestre, só para assinar o post
-_cache_credito_publico = {"valor": None, "expira": None}
+HORAS_ANTECEDENCIA_PUBLICO = 3   # baixa o vídeo com esta folga antes do horário dele
 
+
+async def processar_fila_publico_loop():
+    if EXIBIR_LOGS: logger.info("📬 [Correio Público] Loop de preparo dos vídeos do Grupo Público iniciado.")
+    ja_auditou = False
+
+    while True:
+        try:
+            config = ler_config_bd_autorais("submissao_config", {})
+
+            if not config.get("ativo") or config.get("repost_pausado", False):
+                await asyncio.sleep(120)
+                continue
+
+            # 📥 Origem: o canal onde o vídeo autoral foi publicado
+            origem_final, _ = separar_alvo_e_topico(
+                config.get("repost_origem") or carregar_config_autorais().get("destino")
+            )
+            if origem_final is None:
+                await asyncio.sleep(120)
+                continue
+
+            # 🔎 Auditoria única por execução: sem acesso à origem nada é baixado, e é
+            # melhor dizer isso uma vez no log do que falhar em silêncio para sempre.
+            if not ja_auditou:
+                ja_auditou = True
+                try:
+                    entidade = await client.get_entity(origem_final)
+                    if EXIBIR_LOGS: logger.info(f"✅ [Correio Público] Acesso à origem OK: {getattr(entidade, 'title', origem_final)}")
+                except Exception as err:
+                    if EXIBIR_LOGS: logger.error(f"❌ [Correio Público] SEM acesso à origem ({origem_final}): {err}")
+
+            agora = datetime.now()
+            # ⏰ Sem janela de horário aqui: baixar de madrugada não incomoda ninguém, e
+            # quanto antes o arquivo estiver no disco, mais certo o bot publica no horário.
+            limite = (agora + timedelta(hours=HORAS_ANTECEDENCIA_PUBLICO)).strftime("%Y-%m-%d %H:%M:%S")
+
+            # 🎯 UPDATE pontual, nunca salvar_fila_publico(): aquela função apaga a tabela
+            # e reinsere tudo, e o bot_mestre escreve os horários na MESMA fila.
+            conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+            conexao.row_factory = sqlite3.Row
+            cursor = conexao.cursor()
+            cursor.execute('''
+                SELECT * FROM fila_publico
+                WHERE processado = 0
+                AND horario_disparo IS NOT NULL
+                AND horario_disparo != ''
+                AND horario_disparo <= ?
+                AND (caminho_arquivo IS NULL OR caminho_arquivo = '')
+                ORDER BY horario_disparo ASC LIMIT 1
+            ''', (limite,))
+            alvo = cursor.fetchone()
+
+            if not alvo:
+                conexao.close()
+                await asyncio.sleep(60)
+                continue
+
+            id_unico = alvo["id_unico"]
+            msg_id = alvo["msg_id_destino"]
+
+            try:
+                if not msg_id:
+                    raise ValueError("item sem msg_id_destino")
+
+                msg_origem = await client.get_messages(origem_final, ids=int(msg_id))
+                if not msg_origem or not getattr(msg_origem, "media", None):
+                    # Mensagem apagada na origem: não há o que baixar e nunca mais vai
+                    # haver. Sai da fila, senão fica a ser tentada para sempre.
+                    cursor.execute("DELETE FROM fila_publico WHERE id_unico = ?", (id_unico,))
+                    conexao.commit()
+                    conexao.close()
+                    if EXIBIR_LOGS: logger.warning(f"🧹 [Correio Público] Mensagem {msg_id} sumiu da origem. Item {id_unico} removido da fila.")
+                    await asyncio.sleep(30)
+                    continue
+
+                destino_arquivo = os.path.join("temp", f"publico_{id_unico}.mp4")
+                caminho = await client.download_media(msg_origem, file=destino_arquivo)
+                if not caminho or not os.path.exists(caminho):
+                    raise ValueError("o download não gerou arquivo")
+
+                cursor.execute(
+                    "UPDATE fila_publico SET caminho_arquivo = ? WHERE id_unico = ?",
+                    (caminho, id_unico)
+                )
+                conexao.commit()
+                if EXIBIR_LOGS:
+                    logger.info(f"📥 [Correio Público] Vídeo {id_unico} baixado "
+                                f"({os.path.getsize(caminho) / (1024**2):.1f} MB). O bot publica no horário.")
+
+            except FloodWaitError as e:
+                # Telegram mandou esperar. Respeitar não é opcional: esta conta é a peça
+                # mais frágil do sistema e uma rajada teimosa derruba ela.
+                espera = int(getattr(e, "seconds", 60))
+                if EXIBIR_LOGS: logger.warning(f"⏳ [Correio Público] FloodWait de {espera}s.")
+                conexao.close()
+                await asyncio.sleep(espera + 5)
+                continue
+
+            except Exception as e:
+                if EXIBIR_LOGS:
+                    logger.error(f"❌ [Correio Público] Falha ao baixar o vídeo {id_unico}: {e} "
+                                 f"| origem={origem_final!r} msg_id={msg_id!r}")
+                # 🚦 ANTI-TRAVA: adia 30 min, senão este item segura o preparo dos seguintes.
+                cursor.execute(
+                    "UPDATE fila_publico SET horario_disparo = ? WHERE id_unico = ?",
+                    ((agora + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S"), id_unico)
+                )
+                conexao.commit()
+
+            conexao.close()
+
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Correio Público] Erro estrutural no loop: {e}")
+
+        await asyncio.sleep(60)
 
 async def obter_credito_repost_userbot():
     """@ do administrador para assinar a repostagem, com cache de 24h."""
