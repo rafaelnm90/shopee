@@ -14,6 +14,70 @@ if EXIBIR_LOGS:
 MAX_ERRORS = 50
 DB_NAME = "banco_dados.db"
 
+# ==========================================================================
+# 🔒 BLINDAGEM GLOBAL DO SQLITE
+#
+# Dezenas de chamadas espalhadas pelo sistema abrem o banco sem passar "timeout=",
+# e o padrão do Python é 5 segundos: passou disso, o SQLite devolve "database is
+# locked" e a operação se perde. Com quatro processos escrevendo no mesmo arquivo,
+# 5s é pouco — foi o que encheu o log de erro, e o pior caso foi o UPDATE que marca
+# vídeo como postado: ele falhava, o item continuava pendente, e o mesmo vídeo era
+# republicado no grupo a cada ciclo.
+#
+# Em vez de tocar em 81 chamadas uma a uma, a fábrica de conexões é trocada UMA vez,
+# aqui. Como o módulo sqlite3 é único por processo e todo serviço importa o utils,
+# isto vale para o sistema inteiro: toda conexão nasce com 30s de paciência, no
+# Python e no próprio SQLite.
+#
+# O que isto NÃO faz: não fecha conexão vazada. Para as funções que rodam em loop e
+# seguram transação longa, use o conexao_db() abaixo, que garante o fechamento.
+# ==========================================================================
+_sqlite_connect_original = sqlite3.connect
+
+
+def _conectar_blindado(*args, **kwargs):
+    kwargs.setdefault("timeout", 30.0)
+    conexao = _sqlite_connect_original(*args, **kwargs)
+    try:
+        conexao.execute("PRAGMA busy_timeout = 30000")
+    except Exception:
+        pass
+    return conexao
+
+
+sqlite3.connect = _conectar_blindado
+
+
+from contextlib import contextmanager
+
+
+@contextmanager
+def conexao_db(db=DB_NAME, row_factory=False):
+    """Conexão que SEMPRE fecha, com ou sem exceção.
+
+    O padrão antigo (abrir, trabalhar, fechar no fim do try) deixa a conexão aberta
+    quando algo estoura no meio — e se já havia um DELETE ou INSERT, o lock de escrita
+    fica preso até o coletor de lixo passar. Use isto nas funções que rodam em loop:
+
+        with conexao_db(row_factory=True) as conexao:
+            cursor = conexao.cursor()
+            ...
+            conexao.commit()
+    """
+    conexao = sqlite3.connect(db, timeout=30.0)
+    if row_factory:
+        conexao.row_factory = sqlite3.Row
+    try:
+        yield conexao
+    except Exception:
+        try: conexao.rollback()
+        except Exception: pass
+        raise
+    finally:
+        try: conexao.close()
+        except Exception: pass
+
+
 def obter_conexao_utils():
     """Conexão local para o utils não depender de importações cruzadas."""
     return sqlite3.connect(DB_NAME, timeout=20.0)
