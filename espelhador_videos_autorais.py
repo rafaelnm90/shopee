@@ -1203,10 +1203,17 @@ async def interceptar_e_espelhar(event):
                     item_descartado = random.choice(candidatos)
 
                 if foi_sorteado:
-                    novo_caminho = f"archive/{os.path.basename(caminho_video)}"
-                    os.rename(caminho_video, novo_caminho)
-                    
                     id_unico = f"autoral_{int(agora.timestamp())}_{random.randint(1000, 9999)}"
+
+                    # 🏷️ NOME ÚNICO NO ARQUIVO. Antes o arquivado herdava o nome do temp
+                    # ("temp_espelho_isolado_ (4).mp4"), e o Telethon só evita colisão
+                    # DENTRO de temp/. Assim que o arquivo saía de lá o nome ficava livre,
+                    # o download seguinte o reusava, e o os.rename sobrescrevia o destino
+                    # em silêncio. Resultado: um item de 30 dias atrás passava a apontar
+                    # para o vídeo baixado hoje — e era ELE que voltava para o grupo.
+                    extensao = os.path.splitext(caminho_video)[1] or ".mp4"
+                    novo_caminho = f"archive/{id_unico}{extensao}"
+                    os.rename(caminho_video, novo_caminho)
 
                     if item_descartado:
                         # Devolve a vaga: apaga o arquivo do antigo e tira ele da fila
@@ -1457,6 +1464,31 @@ async def processar_fila_autorais_loop():
 
                     caminho_arquivo = item.get("caminho_arquivo")
                     legenda = item.get("legenda")
+
+                    # 🛡️ ESTE ARQUIVO É MESMO O DAQUELE DIA? O nome do arquivado era
+                    # reciclado e o os.rename sobrescrevia sem avisar, então um item
+                    # antigo podia estar apontando para um vídeo baixado esta semana.
+                    # A data de modificação do arquivo denuncia: se ele é muito mais novo
+                    # que a captura, o original foi perdido. Publicar seria devolver ao
+                    # grupo um vídeo recente — o pior erro possível aqui.
+                    if caminho_arquivo and os.path.exists(caminho_arquivo):
+                        try:
+                            cap_txt = (item.get("data_captura") or "")[:10]
+                            cap_dia = datetime.strptime(cap_txt, "%Y-%m-%d") if cap_txt else None
+                            mtime = datetime.fromtimestamp(os.path.getmtime(caminho_arquivo))
+                            if cap_dia and (mtime - cap_dia).days >= 1:
+                                if EXIBIR_LOGS:
+                                    logger.error(f"🛡️ [Motor Autorais] Vídeo {item.get('id_unico')} "
+                                                 f"capturado em {cap_txt}, mas o arquivo é de "
+                                                 f"{mtime.strftime('%d/%m')}. Nome reciclado: o original "
+                                                 "foi sobrescrito. Item descartado sem publicar.")
+                                conexao_bd = sqlite3.connect("banco_dados.db", timeout=20.0)
+                                conexao_bd.execute("DELETE FROM fila_autorais WHERE id_unico = ?", (item.get("id_unico"),))
+                                conexao_bd.commit()
+                                conexao_bd.close()
+                                break
+                        except Exception as e:
+                            if EXIBIR_LOGS: logger.error(f"❌ [Motor Autorais] Falha ao auditar a idade do arquivo: {e}")
                     
                     # 🎯 A origem pode estar gravada no formato composto "-100123:5".
                     # Este era o ÚNICO ponto do arquivo que usava o valor cru: o Telethon
