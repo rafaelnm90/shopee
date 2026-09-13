@@ -51,7 +51,10 @@ jobs:
             
             # Sincroniza o código com o GitHub forçando a cópia exata
             git fetch --all
-            git reset --hard origin/main
+            # 📌 Sobe EXATAMENTE o commit que o job 'validar' aprovou. Com origin/main,
+            # um deploy aprovado podia puxar um commit mais novo que chegou enquanto ele
+            # estava na fila do Actions — foi assim que código quebrado passou pelo portão.
+            git reset --hard ${{ github.sha }}
             
             # Atualiza as bibliotecas se houver mudanças
             source venv/bin/activate
