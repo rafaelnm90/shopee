@@ -1145,13 +1145,15 @@ def ler_config_bd(chave, padrao=None, arquivo_legado=None):
         return padrao
 
 def salvar_config_bd(chave, dados):
+    # 🔒 É a gravação mais frequente do sistema — todo painel, todo motor, toda rotina
+    # passa por aqui. O conexao_db() fecha com ou sem exceção.
+    from utils import conexao_db
     try:
-        conexao = sqlite3.connect("banco_dados.db")
-        cursor = conexao.cursor()
-        dados_str = json.dumps(dados, ensure_ascii=False)
-        cursor.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)", (chave, dados_str))
-        conexao.commit()
-        conexao.close()
+        with conexao_db() as conexao:
+            cursor = conexao.cursor()
+            dados_str = json.dumps(dados, ensure_ascii=False)
+            cursor.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)", (chave, dados_str))
+            conexao.commit()
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar configuração '{chave}' no SQLite: {e}")
 
