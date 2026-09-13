@@ -1501,6 +1501,16 @@ async def processar_fila_publico_loop():
             agora = datetime.now()
             agora_txt = agora.strftime("%Y-%m-%d %H:%M:%S")
 
+            # ⏰ Janela de postagem. O disparo antigo (no bot_mestre) só olhava o
+            # horario_disparo, então item atrasado de ontem saía de madrugada — o oposto
+            # do que a fila tenta parecer. Fora da janela, espera; nada é perdido, os
+            # itens continuam na fila esperando a abertura.
+            janela_inicio = int(config.get("repost_inicio", 10))
+            janela_fim = int(config.get("repost_fim", 20))
+            if not (janela_inicio <= agora.hour < janela_fim):
+                await asyncio.sleep(300)
+                continue
+
             # 🎯 UPDATE pontual, nunca salvar_fila_publico(): aquela função apaga a tabela
             # e reinsere tudo, e o bot_mestre escreve os horários na MESMA fila. Um save
             # daqui apagaria o que ele acabou de sortear.
