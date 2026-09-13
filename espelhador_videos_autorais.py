@@ -1411,6 +1411,206 @@ async def processar_fila_autorais_loop():
             
         await asyncio.sleep(60) # Respira 1 minuto e volta a procurar
 
+# ==========================================
+# 📬 MOTOR DO GRUPO PÚBLICO — o disparo mora aqui, não no bot_mestre
+#
+# O canal onde os autorais são publicados não é nosso: o bot do aiogram não pode ser
+# adicionado lá e, sem ser membro, o copy_message dele devolve "chat not found" em todo
+# ciclo. Esta conta tem acesso — é ela que publica no canal todos os dias. Por isso o
+# ENVIO vive aqui. O bot_mestre continua dono da fila, da faxina e do sorteio de
+# horários; lá a trava 'repost_via_userbot' desliga só a parte do envio.
+# ==========================================
+ADMIN_ID_CREDITO = 1226920464   # mesmo ADMIN_ID do bot_mestre, só para assinar o post
+_cache_credito_publico = {"valor": None, "expira": None}
+
+
+async def obter_credito_repost_userbot():
+    """@ do administrador para assinar a repostagem, com cache de 24h."""
+    agora = datetime.now()
+    if _cache_credito_publico["valor"] and _cache_credito_publico["expira"] and agora < _cache_credito_publico["expira"]:
+        return _cache_credito_publico["valor"]
+    try:
+        usuario = await client.get_entity(ADMIN_ID_CREDITO)
+        if getattr(usuario, "username", None):
+            credito = f"@{usuario.username}"
+        else:
+            nome = getattr(usuario, "first_name", None) or "Administrador"
+            credito = f"<a href='tg://user?id={ADMIN_ID_CREDITO}'>{nome}</a>"
+        _cache_credito_publico["valor"] = credito
+        _cache_credito_publico["expira"] = agora + timedelta(hours=24)
+        return credito
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ [Motor Público] Não consegui resolver o @ do admin ({e}).")
+        return "um membro"
+
+
+def registrar_ultimo_post_userbot(chat_destino, tipo_conteudo):
+    """Alimenta a intercalação: o bot_mestre lê exatamente esta chave no SQLite."""
+    try:
+        dados = ler_config_bd_autorais("ultimo_post_canais", {})
+        dados[str(chat_destino)] = {
+            "tipo": tipo_conteudo,
+            "hora": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        }
+        salvar_config_bd_autorais("ultimo_post_canais", dados)
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Motor Público] Erro ao registrar último post: {e}")
+
+
+async def processar_fila_publico_loop():
+    if EXIBIR_LOGS: logger.info("📬 [Motor Público] Loop de repostagem no Grupo Público iniciado.")
+    ja_auditou = False
+
+    while True:
+        try:
+            config = ler_config_bd_autorais("submissao_config", {})
+
+            if not config.get("repost_via_userbot", True):
+                await asyncio.sleep(120)
+                continue
+            if not config.get("ativo") or config.get("repost_pausado", False):
+                await asyncio.sleep(60)
+                continue
+
+            # 📤 Destino: "repost_destino" no formato "-100123:6"; senão grupo + tópico padrão
+            destino_final, destino_topico = separar_alvo_e_topico(config.get("repost_destino"))
+            if destino_final is None:
+                destino_final, _ = separar_alvo_e_topico(config.get("grupo_id"))
+                destino_topico = config.get("topico_destino")
+
+            # 📥 Origem: o canal onde o vídeo autoral foi publicado
+            origem_final, _ = separar_alvo_e_topico(
+                config.get("repost_origem") or carregar_config_autorais().get("destino")
+            )
+
+            if destino_final is None or origem_final is None:
+                await asyncio.sleep(60)
+                continue
+
+            # 🔎 Auditoria única por execução. Sem acesso aos dois lados nada sai daqui, e
+            # é melhor dizer isso uma vez no log do que falhar em silêncio para sempre.
+            if not ja_auditou:
+                ja_auditou = True
+                for rotulo, alvo_audit in (("origem", origem_final), ("destino", destino_final)):
+                    try:
+                        entidade = await client.get_entity(alvo_audit)
+                        if EXIBIR_LOGS: logger.info(f"✅ [Motor Público] Acesso à {rotulo} OK: {getattr(entidade, 'title', alvo_audit)}")
+                    except Exception as err:
+                        if EXIBIR_LOGS: logger.error(f"❌ [Motor Público] SEM acesso à {rotulo} ({alvo_audit}): {err}")
+
+            agora = datetime.now()
+            agora_txt = agora.strftime("%Y-%m-%d %H:%M:%S")
+
+            # 🎯 UPDATE pontual, nunca salvar_fila_publico(): aquela função apaga a tabela
+            # e reinsere tudo, e o bot_mestre escreve os horários na MESMA fila. Um save
+            # daqui apagaria o que ele acabou de sortear.
+            conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+            conexao.row_factory = sqlite3.Row
+            cursor = conexao.cursor()
+            cursor.execute('''
+                SELECT * FROM fila_publico
+                WHERE processado = 0
+                AND horario_disparo IS NOT NULL
+                AND horario_disparo != ''
+                AND horario_disparo <= ?
+                ORDER BY horario_disparo ASC LIMIT 1
+            ''', (agora_txt,))
+            alvo = cursor.fetchone()
+
+            if not alvo:
+                conexao.close()
+                await asyncio.sleep(60)
+                continue
+
+            id_unico = alvo["id_unico"]
+            msg_id = alvo["msg_id_destino"]
+            legenda_original = alvo["legenda"] or ""
+
+            try:
+                match_link = re.search(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s<]+', legenda_original, re.IGNORECASE)
+                link_shopee = match_link.group(0) if match_link else "https://shopee.com.br"
+
+                match_item = re.search(r'📦\s*Item:\s*([^\n<]+)', legenda_original)
+                nome_produto = match_item.group(1).strip() if match_item else "Produto Exclusivo"
+
+                credito = await obter_credito_repost_userbot()
+                legenda_final = (
+                    f"👤 Vídeo enviado por: {credito}\n\n"
+                    f"<b>{nome_produto}</b>\n\n"
+                    f"🔗 <b>Link do Produto:</b>\n{link_shopee}\n\n"
+                    f"<i>#Recomendado #Shopee</i>"
+                )
+
+                if not msg_id:
+                    raise ValueError("item sem msg_id_destino")
+
+                msg_origem = await client.get_messages(origem_final, ids=int(msg_id))
+                if not msg_origem or not getattr(msg_origem, "media", None):
+                    # Mensagem apagada na origem: não há o que repostar e nunca mais vai
+                    # haver. Sai da fila, senão fica a ser tentada para sempre.
+                    cursor.execute("DELETE FROM fila_publico WHERE id_unico = ?", (id_unico,))
+                    conexao.commit()
+                    conexao.close()
+                    if EXIBIR_LOGS: logger.warning(f"🧹 [Motor Público] Mensagem {msg_id} sumiu da origem. Item {id_unico} removido da fila.")
+                    await asyncio.sleep(60)
+                    continue
+
+                kwargs_envio = {}
+                if destino_topico and int(destino_topico) > 1:
+                    kwargs_envio['reply_to'] = int(destino_topico)
+
+                # 📎 file=msg.media reaproveita o arquivo que já está no servidor do
+                # Telegram. Não baixa, não reenvia bytes, não gasta disco.
+                await client.send_file(
+                    destino_final,
+                    file=msg_origem.media,
+                    caption=legenda_final,
+                    parse_mode='html',
+                    **kwargs_envio
+                )
+
+                registrar_ultimo_post_userbot(destino_final, "video")   # 🚦 Intercalação
+                cursor.execute(
+                    "UPDATE fila_publico SET processado = 1, data_postagem = ?, horario_disparo = ? WHERE id_unico = ?",
+                    (agora_txt, agora_txt, id_unico)
+                )
+                conexao.commit()
+                if EXIBIR_LOGS: logger.info(f"✅ [Motor Público] '{nome_produto}' publicado no Grupo Público.")
+
+            except FloodWaitError as e:
+                # Telegram mandou esperar. Respeitar não é opcional: esta conta é a peça
+                # mais frágil do sistema e uma rajada teimosa derruba ela.
+                espera = int(getattr(e, "seconds", 60))
+                if EXIBIR_LOGS: logger.warning(f"⏳ [Motor Público] FloodWait de {espera}s. Item adiado.")
+                cursor.execute(
+                    "UPDATE fila_publico SET horario_disparo = ? WHERE id_unico = ?",
+                    ((agora + timedelta(seconds=espera + 60)).strftime("%Y-%m-%d %H:%M:%S"), id_unico)
+                )
+                conexao.commit()
+                conexao.close()
+                await asyncio.sleep(espera + 5)
+                continue
+
+            except Exception as e:
+                if EXIBIR_LOGS:
+                    logger.error(f"❌ [Motor Público] Falha ao publicar: {e} "
+                                 f"| origem={origem_final!r} destino={destino_final!r} "
+                                 f"topico={destino_topico!r} msg_id={msg_id!r}")
+                # 🚦 ANTI-TRAVA: adia 30 min, senão este item segura a fila inteira atrás.
+                cursor.execute(
+                    "UPDATE fila_publico SET horario_disparo = ? WHERE id_unico = ?",
+                    ((agora + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S"), id_unico)
+                )
+                conexao.commit()
+
+            conexao.close()
+
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Motor Público] Erro estrutural no loop: {e}")
+
+        await asyncio.sleep(60)
+
+
 async def main():
     if EXIBIR_LOGS: logger.info("⏳ Iniciando o robô Espelhador Isolado...")
     await client.start()
@@ -1440,6 +1640,7 @@ async def main():
 
     # Aciona o Loop do motor em Background
     asyncio.create_task(processar_fila_autorais_loop())
+    asyncio.create_task(processar_fila_publico_loop())   # 📬 repostagem no Grupo Público
     asyncio.create_task(loop_entrada_parceiros())   # 👥 entrada nos canais dos parceiros
     
     if EXIBIR_LOGS: logger.info("🤖 Sistema a rodar. A escutar o grupo de origem continuamente...")
