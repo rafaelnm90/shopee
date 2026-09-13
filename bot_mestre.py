@@ -123,6 +123,15 @@ def inicializar_banco_sqlite():
         if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'status_publico' adicionada à fila_autorais.")
     except sqlite3.OperationalError:
         pass
+        
+    # 🚀 Migração invisível 8: id da mensagem que foi realmente publicada. Sem ela o
+    # relatório sabe QUE postou mas não ONDE, e o link "(Destino)" saía indisponível.
+    for _tabela_msg in ("fila_autorais", "fila_publico"):
+        try:
+            cursor.execute(f"ALTER TABLE {_tabela_msg} ADD COLUMN msg_postada_id INTEGER")
+            if EXIBIR_LOGS: logger.info(f"📦 Banco de dados atualizado: Coluna 'msg_postada_id' adicionada à {_tabela_msg}.")
+        except sqlite3.OperationalError:
+            pass
 
     # 🚀 Migração invisível 7: caminho do arquivo que o Correio Público (userbot) baixa
     # para o bot publicar. O canal de origem não é nosso, então o bot nunca consegue
@@ -4634,7 +4643,9 @@ async def motor_repost_publico_step():
                     return
 
                 try:
-                    await bot.send_video(
+                    # 📌 O retorno traz o message_id da mensagem criada. É ele que vira o
+                    # link "(Destino)" no relatório — antes era jogado fora.
+                    msg_publicada = await bot.send_video(
                         chat_id=grupo_id,
                         video=FSInputFile(caminho),
                         caption=legenda_final,
@@ -4652,8 +4663,9 @@ async def motor_repost_publico_step():
                     for tentativa in range(1, 7):
                         try:
                             cursor.execute(
-                                "UPDATE fila_publico SET processado = 1, data_postagem = ?, horario_disparo = ? WHERE id_unico = ?",
-                                (agora.strftime("%Y-%m-%d %H:%M:%S"), agora.strftime("%Y-%m-%d %H:%M:%S"), id_unico)
+                                "UPDATE fila_publico SET processado = 1, data_postagem = ?, horario_disparo = ?, msg_postada_id = ? WHERE id_unico = ?",
+                                (agora.strftime("%Y-%m-%d %H:%M:%S"), agora.strftime("%Y-%m-%d %H:%M:%S"),
+                                 getattr(msg_publicada, "message_id", None), id_unico)
                             )
                             conexao.commit()
                             marcou = True
@@ -6647,6 +6659,10 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
         canal_origem = config_aut.get("destino", "")
     origem_base = str(canal_origem).split(":")[0].strip()
 
+    # Destino real: o grupo (e tópico) onde o vídeo foi publicado
+    destino_bruto = config.get("repost_destino") or config.get("grupo_id") or ""
+    destino_base = str(destino_bruto).split(":")[0].strip()
+
     cache_nomes = ler_cache_nomes_grupos()
     display_origem = cache_nomes.get(origem_base, origem_base or "Origem não definida")
 
@@ -6689,6 +6705,7 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
             "data_publicacao": (linha["horario_disparo"] or data_alvo),
             "data_postagem": data_post.split(" ")[0] if data_post else "",
             "horario_postagem": data_post.split(" ")[1][:5] if " " in data_post else "",
+            "msg_postada_id": dict(linha).get("msg_postada_id"),
             "is_pausado": is_pausado
         })
 
@@ -6716,6 +6733,17 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
             elif origem_base.startswith("@"):
                 link_origem = f"https://t.me/{origem_base.replace('@', '')}/{msg_id}"
 
+        # 🔗 Link do post no destino. Só existe para item já publicado e com o id da
+        # mensagem gravado; os antigos continuam sem, porque ninguém guardou na época.
+        link_destino = None
+        msg_postada = v.get("msg_postada_id")
+        if v.get("processado") and msg_postada and destino_base:
+            if destino_base.lstrip("-").isdigit():
+                id_dest_limpo = destino_base.replace("-100", "").replace("-", "")
+                link_destino = f"https://t.me/c/{id_dest_limpo}/{msg_postada}"
+            elif destino_base.startswith("@"):
+                link_destino = f"https://t.me/{destino_base.replace('@', '')}/{msg_postada}"
+
         linha_video = gerar_layout_item_padrao(
             index=i,
             item=v,
@@ -6725,7 +6753,7 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
             fuso_horario=fuso_horario,
             display_origem=display_origem,
             link_origem=link_origem,
-            link_destino=None
+            link_destino=link_destino
         )
 
         if len(texto_atual) + len(linha_video) > 3800:
@@ -6803,7 +6831,11 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         try:
             conexao = sqlite3.connect("banco_dados.db")
             conexao.row_factory = sqlite3.Row
-            cursor = conexao.cursor()
+            cursor = conexao.cursor()            # 🎯 O retorno autoral é publicado no grupo de ORIGEM, então é ele o destino
+            # do link do relatório.
+            _cfg_aut = ler_config_bd("autorais_config", {})
+            _destino_retorno = str(_cfg_aut.get("origem") or "").split(":")[0].strip()
+
             cursor.execute("SELECT * FROM fila_autorais ORDER BY data_alvo ASC, horario_disparo ASC")
             linhas = cursor.fetchall()
             conexao.close()
@@ -6823,7 +6855,9 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     # preenchida: aí cai no horário sorteado, que é o valor mais
                     # próximo que existe, em vez de sair em branco na tela.
                     "data_postagem": (dict(linha).get("data_postagem") or linha["horario_disparo"] or "").split(" ")[0],
-                    "horario_postagem": ((dict(linha).get("data_postagem") or linha["horario_disparo"] or "") + " ").split(" ")[1][:5]
+                    "horario_postagem": ((dict(linha).get("data_postagem") or linha["horario_disparo"] or "") + " ").split(" ")[1][:5],
+                    "chat_destino": _destino_retorno,
+                    "msg_postada_id": dict(linha).get("msg_postada_id")
                 })
         except Exception as e:
             fila = []
