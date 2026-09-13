@@ -1624,7 +1624,19 @@ async def processar_fila_publico_loop():
 async def main():
     if EXIBIR_LOGS: logger.info("⏳ Iniciando o robô Espelhador Isolado...")
     await client.start()
-    
+
+    # 👤 Qual conta está nesta sessão? É ela que assina TUDO que o userbot publica, e é
+    # ela que precisa ter permissão nos destinos. Sem esta linha, descobrir isso exigia
+    # abrir o Telegram e adivinhar.
+    try:
+        eu = await client.get_me()
+        if EXIBIR_LOGS:
+            logger.info(f"👤 [Userbot] Sessão '{NOME_SESSAO}' logada como: "
+                        f"{getattr(eu, 'first_name', '')} (@{getattr(eu, 'username', None) or 'sem @'}) "
+                        f"· id {getattr(eu, 'id', '?')}")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ [Userbot] Não consegui identificar a conta da sessão: {e}")
+
     if EXIBIR_LOGS: logger.info("🔄 Sincronizando banco de dados de grupos...")
     try:
         await client.get_dialogs()
