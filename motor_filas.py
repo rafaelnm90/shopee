@@ -143,7 +143,13 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
                 passo_base_min = base_min
                 variacao_efetiva = var_min
             else:
-                alvo = minutos_restantes // max(1, len(itens_para_agendar))
+                # 📅 O espaçamento vem da JANELA CHEIA dividida pelo lote, e NÃO do que
+                # sobrou do dia. Com "o que sobrou", um sorteio rodando às 20h espremia
+                # 6 vídeos nos 120 minutos finais — 12 min entre um e outro, que foi
+                # exatamente o que apareceu no grupo. Com a janela cheia, o passo é o
+                # mesmo às 00h ou às 20h; o que não couber hoje transborda para amanhã
+                # pela lógica de virada de dia logo abaixo, que é o comportamento certo.
+                alvo = janela_dia // max(1, len(itens_para_agendar))
                 passo_base_min = max(base_min, alvo)
                 # Variação proporcional: quanto maior o intervalo, mais folga para parecer humano
                 variacao_efetiva = max(var_min, int(passo_base_min * 0.25))
