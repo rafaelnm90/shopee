@@ -1445,7 +1445,10 @@ async def processar_fila_autorais_loop():
                     # ✅ CORREÇÃO: o descarte por idade precisa acompanhar o D+X da fila.
                     # Com 5 fixo e dias_retorno=15, todo vídeo nascia vencido e voltava
                     # do motor sem horário nenhum.
-                    "limite_dias_descarte": dias_retorno_cfg + 5
+                    # 🗓️ Folga de 7 dias DEPOIS da data-alvo. O descarte conta a partir da
+                    # captura, então "atraso + 7" é exatamente isso: vídeo empurrado mais de
+                    # uma semana além do dia em que deveria sair perde a validade.
+                    "limite_dias_descarte": dias_retorno_cfg + 7
                 }
                 
                 if EXIBIR_LOGS: logger.info(f"⚙️ [Motor Autorais] Acionando Motor Central para {len(itens_desagendados)} vídeos de retorno...")
