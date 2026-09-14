@@ -1487,6 +1487,19 @@ async def processar_fila_autorais_loop():
                 await asyncio.sleep(60)
                 continue
 
+            # ⏰ JANELA DE HORÁRIO. O sorteio calcula os horários dentro da janela, mas o
+            # disparo só olhava "horario_disparo <= agora" — então item atrasado de ontem,
+            # ou item cuja janela mudou depois do sorteio, saía fora do horário permitido.
+            # Aqui o motor simplesmente não publica fora da janela configurada.
+            janela_ini = int(config_atual.get("inicio", 0))
+            janela_fim = int(config_atual.get("fim", 24))
+            if not (janela_ini <= agora.hour < janela_fim):
+                if EXIBIR_LOGS:
+                    logger.info(f"⏰ [Motor Autorais] Fora da janela ({janela_ini}h-{janela_fim}h). "
+                                f"São {agora.hour}h. Nada será publicado agora.")
+                await asyncio.sleep(300)
+                continue
+
             houve_disparo = False
             itens_restantes = []
             
