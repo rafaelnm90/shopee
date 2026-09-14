@@ -662,8 +662,17 @@ async def receber_modo_rota(message: types.Message, state: FSMContext):
         f"⚠️ <b>Confirmação de Criação de Rota (D+{intervalo_dias})</b>\n\n"
         f"<b>Canais Vigiados ({len(origens)}):</b>\n"
     )
-    for o in origens:
+    # 📏 O Telegram recusa mensagem acima de 4096 caracteres. Com o banco global
+    # importado (101 canais no teste), a lista sozinha passava disso e o envio
+    # estourava com "message is too long" — era esse o erro que matava o cadastro,
+    # tanto pelo atalho do D+0 quanto pela pergunta de Aleatório/Ordem. Mostra os
+    # primeiros e resume o resto.
+    LIMITE_LISTA_CONFIRMACAO = 15
+    for o in origens[:LIMITE_LISTA_CONFIRMACAO]:
         texto_confirmacao += f"└ <code>{o}</code>\n"
+    if len(origens) > LIMITE_LISTA_CONFIRMACAO:
+        restantes = len(origens) - LIMITE_LISTA_CONFIRMACAO
+        texto_confirmacao += f"└ <i>... e mais {restantes} canal(is) importado(s)</i>\n"
         
     texto_confirmacao += (
         f"\n<b>Destino:</b> <code>{destino}</code>\n"
