@@ -582,7 +582,7 @@ async def processar_fila_espelhador_loop():
                     # 🗓️ O que não couber transborda para o dia seguinte; passando disso, descarta.
                     # ✅ CORREÇÃO: a margem acompanha o D+X da rota. Com 5 fixo, uma rota
                     # configurada com atraso maior que 5 dias tinha tudo descartado.
-                    "limite_dias_descarte": max(5, int(rota_config.get("intervalo_dias", 1)) + 5)
+                    "limite_dias_descarte": max(7, int(rota_config.get("intervalo_dias", 1)) + 7)   # 🗓️ 7 dias de folga após a data-alvo
                 }
                 
                 forcar_rota = rota_config.get("esvaziar_agora", False)
