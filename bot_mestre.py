@@ -2876,6 +2876,51 @@ class BloqueioTecladoForaDoPrivadoMiddleware:
 
 bot.session.middleware(BloqueioTecladoForaDoPrivadoMiddleware())
 
+
+# 📏 TRAVA GLOBAL DE TAMANHO
+# O Telegram recusa texto acima de 4096 caracteres (1024 em legenda de mídia), e a
+# recusa derruba o handler inteiro — foi o que travou o cadastro de espelho, que
+# listava 101 canais numa mensagem só. Existem ~26 laços parecidos espalhados pelos
+# painéis, então em vez de limitar cada um, a mensagem é cortada aqui, no único ponto
+# por onde passa toda chamada à API. Vale para os laços de hoje e para os de amanhã.
+LIMITE_TEXTO_TELEGRAM = 4096
+LIMITE_LEGENDA_TELEGRAM = 1024
+AVISO_CORTE_TELEGRAM = "\n\n<i>… lista cortada: a mensagem passou do limite do Telegram.</i>"
+
+
+def _cortar_para_telegram(conteudo, teto):
+    """Corta preferindo o fim de uma linha, para não partir uma tag HTML ao meio.
+
+    Cortar no meio de um <code> deixaria a tag aberta e o Telegram devolveria
+    "can't parse entities" — trocaríamos um erro por outro. Como essas mensagens são
+    listas linha a linha, recuar até a última quebra resolve. Se a quebra estiver
+    cedo demais (jogaria fora mais da metade), corta no seco mesmo.
+    """
+    espaco = teto - len(AVISO_CORTE_TELEGRAM)
+    pedaco = conteudo[:espaco]
+    quebra = pedaco.rfind("\n")
+    if quebra > espaco * 0.5:
+        pedaco = pedaco[:quebra]
+    return pedaco + AVISO_CORTE_TELEGRAM
+
+
+class TruncarMensagemLongaMiddleware:
+    async def __call__(self, make_request, bot, method):
+        try:
+            for campo, teto in (("text", LIMITE_TEXTO_TELEGRAM), ("caption", LIMITE_LEGENDA_TELEGRAM)):
+                conteudo = getattr(method, campo, None)
+                if isinstance(conteudo, str) and len(conteudo) > teto:
+                    if EXIBIR_LOGS:
+                        logger.warning(f"📏 [Trava de Tamanho] {type(method).__name__}.{campo} tinha "
+                                       f"{len(conteudo)} caracteres (teto {teto}). Cortado antes do envio.")
+                    setattr(method, campo, _cortar_para_telegram(conteudo, teto))
+        except Exception:
+            pass
+        return await make_request(bot, method)
+
+
+bot.session.middleware(TruncarMensagemLongaMiddleware())
+
 # Acopla os interceptadores de segurança e inatividade ao núcleo do robô para vigiar todas as mensagens
 dp.message.middleware(BloqueioAdminMiddleware())
 dp.callback_query.middleware(BloqueioAdminMiddleware())
