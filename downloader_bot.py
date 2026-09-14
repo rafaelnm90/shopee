@@ -15,18 +15,7 @@ import logging
 import shutil
 import tempfile
 import sqlite3
-# 🔒 Importar o utils aplica a blindagem global do SQLite neste processo: toda conexão
-# passa a nascer com 30s de paciência em vez dos 20s de cada chamada. O downloader roda
-# em processo próprio, então precisa do import explícito — o bot_mestre não alcança aqui.
-import utils  # noqa: F401
 import hashlib
-
-# 🔒 BLINDAGEM DO SQLITE NESTE PROCESSO
-# O downloader roda em serviço próprio, mas no MESMO banco_dados.db dos outros robôs.
-# As 15 conexões daqui já passam timeout=20.0; isto só uniformiza em 30s e acrescenta
-# o busy_timeout dentro do próprio SQLite, que é quem de fato segura a espera quando
-# outro processo está escrevendo. Feito local de propósito: importar o utils traria
-# junto um logging.basicConfig que não tem nada a ver com o assunto.
 _sqlite_connect_original = sqlite3.connect
 
 
