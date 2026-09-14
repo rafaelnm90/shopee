@@ -9420,7 +9420,7 @@ async def menu_zerar_filas_tarefas(message: types.Message, state: FSMContext):
         keyboard=[
             [KeyboardButton(text="Limpar Tudo (Geral) 💥")],
             [KeyboardButton(text="Limpar Fila do Espião 🕵️"), KeyboardButton(text="Limpar Fila Espelhador 🔄")],
-            [KeyboardButton(text="Limpar Fila Autorais 🎥"), KeyboardButton(text="Cancelar ❌")]
+            [KeyboardButton(text="Limpar Fila Autorais 🎥"), KeyboardButton(text="Voltar ao Menu Anterior 🔙")]
         ],
         resize_keyboard=True,
         is_persistent=True
@@ -9444,10 +9444,12 @@ async def pedir_confirmacao_acao_limpeza(message: types.Message, state: FSMConte
         "Limpar Tudo (Geral) 💥", "Limpar Fila do Espião 🕵️", "Limpar Fila Espelhador 🔄", "Limpar Fila Autorais 🎥"
     ]
 
-    if message.text == "Cancelar ❌":
-        await cancelar_fluxo_global(message, state)
+    # 🔙 "Voltar" é diferente de "Cancelar": em vez de largar o usuário no menu
+    # principal, devolve para Opções do Servidor, que é de onde ele veio.
+    if message.text in ("Voltar ao Menu Anterior 🔙", "Cancelar ❌"):
+        await menu_opcoes_servidor_handler(message, state)
         return
-        
+
     if message.text not in opcoes_validas:
         await message.answer("Por favor, utilize os botões abaixo para escolher a limpeza.")
         return
@@ -9455,7 +9457,7 @@ async def pedir_confirmacao_acao_limpeza(message: types.Message, state: FSMConte
     await state.update_data(tipo_limpeza=message.text)
 
     teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar Exclusão ✅"), KeyboardButton(text="Cancelar ❌")]],
+        keyboard=[[KeyboardButton(text="Aprovar Exclusão ✅"), KeyboardButton(text="Voltar ao Menu Anterior 🔙")]],
         resize_keyboard=True,
         is_persistent=True
     )
@@ -9469,6 +9471,11 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
         await cancelar_fluxo_global(message, state)
         return
         
+    # 🔙 Aqui o passo anterior é a própria lista de limpezas, não o menu do servidor.
+    if message.text in ("Voltar ao Menu Anterior 🔙", "Cancelar ❌"):
+        await menu_zerar_filas_tarefas(message, state)
+        return
+
     if message.text != "Aprovar Exclusão ✅":
         await message.answer("Por favor, utilize os botões para aprovar ou cancelar a exclusão.")
         return
