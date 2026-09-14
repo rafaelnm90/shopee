@@ -3396,7 +3396,7 @@ async def motor_parceiros_step():
                 calcular_horarios_distribuicao(desagendados, {
                     "inicio": janela_ini, "fim": janela_fim, "modo": "aleatorio", "intervalo_dias": 1,
                     "espacamento_base_min": 10, "espacamento_variacao_min": 5,
-                    "limite_dias_descarte": dias_atraso_p + 5, "horarios_ocupados": ocupados
+                    "limite_dias_descarte": dias_atraso_p + 7, "horarios_ocupados": ocupados   # 🗓️ 7 dias de folga após a data-alvo
                 }, forcar=False)
                 for item in desagendados:
                     if item.get("descartar_por_idade"):
@@ -4594,7 +4594,7 @@ async def motor_repost_publico_step():
                 "espacamento_variacao_min": 6,
                 # ✅ CORREÇÃO: com 5 fixo e repost_dias=15, todo vídeo chegava vencido
                 # no dia do agendamento e o motor devolvia horário vazio.
-                "limite_dias_descarte": dias_publico + 5
+                "limite_dias_descarte": dias_publico + 7   # 🗓️ 7 dias de folga após a data-alvo
             }
 
             if EXIBIR_LOGS: logger.info(f"⚙️ [Motor Público] Acionando Motor Central para {len(itens_desagendados)} vídeos de hoje...")
@@ -13887,7 +13887,7 @@ async def processar_fila_espiao(forcar=False):
             # 🗓️ O que não couber transborda para o dia seguinte; passando disso, descarta.
             # ✅ CORREÇÃO: a margem precisa acompanhar o D+X da fila. Com 5 fixo, qualquer
             # intervalo_dias maior que 5 fazia o vídeo nascer vencido e voltar sem horário.
-            "limite_dias_descarte": max(5, int(intervalo_dias) + 5),
+            "limite_dias_descarte": max(7, int(intervalo_dias) + 7),   # 🗓️ 7 dias de folga após a data-alvo
             # 🔗 Horários já ocupados: o lote novo entra DEPOIS do último agendado,
             # em vez de recomeçar do zero e se sobrepor ao que já existe.
             "horarios_ocupados": [
