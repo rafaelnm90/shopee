@@ -2071,6 +2071,17 @@ async def main():
     if EXIBIR_LOGS: logger.info("⏳ Iniciando o robô Espelhador Isolado...")
     await client.start()
 
+    # 🚫 Garante que TODAS as contas do pool estão na lista negra antes de o robô
+    # começar a escutar — inclusive as que você cadastrar no futuro. Roda a cada
+    # start, então basta reiniciar o serviço depois de cadastrar uma conta.
+    try:
+        _bl_add, _bl_rem = blacklist_captura.sincronizar_contas_do_pool()
+        if EXIBIR_LOGS:
+            logger.info(f"🚫 [Lista Negra] Contas próprias protegidas "
+                        f"(+{_bl_add} / -{_bl_rem}).")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Falha ao sincronizar no start: {e}")
+
     # 👤 Qual conta está nesta sessão? É ela que assina TUDO que o userbot publica, e é
     # ela que precisa ter permissão nos destinos. Sem esta linha, descobrir isso exigia
     # abrir o Telegram e adivinhar.
