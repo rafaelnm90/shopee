@@ -57,6 +57,7 @@ def extrair_link_shopee(event):
 from api_gemini import analisar_video_gemini
 from api_shopee import converter_link_shopee
 from motor_filas import calcular_horarios_distribuicao, faixa_de_config, sortear_teto_do_dia # ⚙️ Motor Central Importado
+import blacklist_captura  # 🚫 Lista negra: de quem este robô NUNCA pode capturar
 
 # As chaves da Shopee e do Gemini foram movidas para os módulos centrais.
 
@@ -185,10 +186,21 @@ def ler_fila_retorno():
         except sqlite3.OperationalError:
             pass
         try:
+        try:
             cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_postagem TEXT")
             conexao.commit()
         except sqlite3.OperationalError:
             pass
+        # 🚫 Quem postou o vídeo original. Guardado na captura para que a lista
+        # negra possa ser reconferida na hora de repostar — é o que resolve o
+        # caso "bloqueei o cara depois que o vídeo dele já estava na fila".
+        # Itens antigos ficam com NULL e são tratados como "autor desconhecido".
+        for _coluna, _tipo in (("autor_id", "INTEGER"), ("autor_username", "TEXT")):
+            try:
+                cursor.execute(f"ALTER TABLE fila_autorais ADD COLUMN {_coluna} {_tipo}")
+                conexao.commit()
+            except sqlite3.OperationalError:
+                pass
 
         cursor.execute("SELECT * FROM fila_autorais")
         linhas = cursor.fetchall()
@@ -206,7 +218,9 @@ def ler_fila_retorno():
                 "horario_disparo": linha["horario_disparo"],
                 "processado": bool(linha["processado"]),
                 "data_postagem": dict(linha).get("data_postagem") or "",
-                "msg_postada_id": dict(linha).get("msg_postada_id")
+                "msg_postada_id": dict(linha).get("msg_postada_id"),
+                "autor_id": dict(linha).get("autor_id"),
+                "autor_username": dict(linha).get("autor_username") or ""
             })
         return {"fila": fila}
     except Exception as e:
@@ -248,8 +262,8 @@ def salvar_fila_retorno(dados):
             horario_final = item.get("horario_disparo") or horario_bd or ""
 
             cursor.execute('''
-                INSERT INTO fila_autorais (id_unico, msg_id_destino, legenda, caminho_arquivo, data_captura, data_alvo, horario_disparo, processado, data_postagem, msg_postada_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO fila_autorais (id_unico, msg_id_destino, legenda, caminho_arquivo, data_captura, data_alvo, horario_disparo, processado, data_postagem, msg_postada_id, autor_id, autor_username)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 item.get("id_unico"),
                 item.get("msg_id_destino"),
@@ -260,7 +274,9 @@ def salvar_fila_retorno(dados):
                 horario_final,
                 processado_final,
                 postagem_final,
-                msg_post_final
+                msg_post_final,
+                item.get("autor_id"),
+                item.get("autor_username") or ""
             ))
         conexao.commit()
         conexao.close()
@@ -1092,6 +1108,19 @@ async def interceptar_e_espelhar(event):
     # 🛡️ Cinto e suspensório: se algum evento próprio escapar do filtro acima, morre aqui.
     if getattr(event, "out", False):
         return
+
+    # 🚫 LISTA NEGRA — CORTE GLOBAL
+    # O 'out' acima só protege contra a conta que roda ESTA sessão. Com o pool de
+    # contas, o espelho e a repostagem podem ser contas diferentes: quando a conta
+    # da repostagem devolve o vídeo ao grupo, para a conta do espelho essa mensagem
+    # é INCOMING (out=False) e seria recapturada — laço infinito. Morre aqui.
+    if blacklist_captura.deve_ignorar(getattr(event, "sender_id", None),
+                                      contexto=blacklist_captura.ESCOPO_GLOBAL):
+        if EXIBIR_LOGS:
+            logger.info(f"🚫 [Lista Negra] Ignorado: autor {getattr(event, 'sender_id', '?')} "
+                        f"é uma conta própria ou está bloqueado globalmente.")
+        return
+
     config_atual = carregar_config_autorais()
     
     # ✅ VERIFICAÇÃO DE PAUSA GLOBAL DO ROBÔ AUTORAL
@@ -1153,6 +1182,28 @@ async def interceptar_e_espelhar(event):
                 if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro na captura paralela: {e}")
 
     if not eh_origem:
+        return
+
+    # 🚫 LISTA NEGRA — CORTE DO GRUPO DOS AUTORAIS
+    # ⚠️ A POSIÇÃO DESTE BLOCO É PROPOSITAL. Ele fica ANTES do sorteio (o
+    # 'random.random() < limite/total' mais abaixo). É isso que faz um vídeo de
+    # autor bloqueado nem DISPUTAR vaga no aleatório: se ele disputasse, além de
+    # poder ser escolhido, poderia derrubar um vídeo bom que já estava na fila
+    # (o 'item_descartado'). Não mova para depois do sorteio.
+    #
+    # Também é aqui que o autor é identificado e guardado em autor_evento, para
+    # ser gravado junto com o item da fila mais adiante.
+    try:
+        autor_evento = await event.get_sender()
+    except Exception:
+        autor_evento = None
+    autor_id_evento = getattr(autor_evento, "id", None) or getattr(event, "sender_id", None)
+    autor_user_evento = getattr(autor_evento, "username", None)
+
+    if blacklist_captura.deve_ignorar(autor_id_evento, autor_user_evento):
+        if EXIBIR_LOGS:
+            logger.info(f"🚫 [Lista Negra] Fora do sorteio: autor "
+                        f"@{autor_user_evento or '?'} (id {autor_id_evento or '?'}) está na lista negra.")
         return
 
     if EXIBIR_LOGS: logger.info("🔍 Nova postagem detetada no grupo/tópico de origem configurado.")
@@ -1295,7 +1346,11 @@ async def interceptar_e_espelhar(event):
                         "data_captura": agora.strftime("%Y-%m-%d %H:%M:%S"),
                         "data_alvo": data_alvo,
                         "horario_disparo": "",
-                        "processado": False
+                        "processado": False,
+                        # 🚫 Carimbo do autor original, para a reconferência da
+                        # lista negra na hora de repostar.
+                        "autor_id": autor_id_evento,
+                        "autor_username": autor_user_evento or ""
                     })
                     salvar_fila_retorno(fila_dados)
                     if EXIBIR_LOGS: logger.info(f"🎯 [Sorteio Autorais] Vídeo nº {total_ofertas} do dia SORTEADO para retorno em {data_alvo}.")
@@ -1595,7 +1650,33 @@ async def processar_fila_autorais_loop():
                     caminho_arquivo = item.get("caminho_arquivo")
                     legenda = item.get("legenda")
 
-                    # 🛡️ ESTE ARQUIVO É MESMO O DAQUELE DIA? O nome do arquivado era
+                    # 🚫 RECONFERÊNCIA DA LISTA NEGRA
+                    # O corte da captura só vale para o que ainda não foi pego. Este
+                    # aqui pega o outro caso: o vídeo entrou na fila e SÓ DEPOIS você
+                    # bloqueou o autor. Sem isto, ele seria devolvido ao grupo assim
+                    # mesmo no D+X. Item de fila antiga vem com autor_id nulo e passa
+                    # (não dá para adivinhar quem postou).
+                    if item.get("autor_id") or item.get("autor_username"):
+                        if blacklist_captura.deve_ignorar(item.get("autor_id"),
+                                                          item.get("autor_username")):
+                            if EXIBIR_LOGS:
+                                logger.info(f"🚫 [Lista Negra] Item {item.get('id_unico')} descartado "
+                                            f"sem publicar: autor @{item.get('autor_username') or '?'} "
+                                            f"entrou na lista negra depois da captura.")
+                            try:
+                                if caminho_arquivo and os.path.exists(caminho_arquivo):
+                                    os.remove(caminho_arquivo)
+                            except Exception:
+                                pass
+                            conexao_bl = sqlite3.connect("banco_dados.db", timeout=20.0)
+                            conexao_bl.execute("DELETE FROM fila_autorais WHERE id_unico = ?",
+                                               (item.get("id_unico"),))
+                            conexao_bl.commit()
+                            conexao_bl.close()
+                            break
+
+                    # 🛡️ ESTE ARQUIVO É MESMO O DAQUELE DIA?
+                    #O nome do arquivado era
                     # reciclado e o os.rename sobrescrevia sem avisar, então um item
                     # antigo podia estar apontando para um vídeo baixado esta semana.
                     # A data de modificação do arquivo denuncia: se ele é muito mais novo
