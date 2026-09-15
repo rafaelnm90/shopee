@@ -42,6 +42,8 @@ import io
 import sqlite3
 import painel_espelhos
 import painel_notas
+import pool_contas        # 👥 Pool de contas: quem espelha e quem reposta nos Autorais
+import blacklist_captura  # 🚫 Lista negra: de quem o espelhador NUNCA pode capturar
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
 EXIBIR_LOGS = True
 
@@ -481,6 +483,7 @@ class AutoraisFluxo(StatesGroup):
     aguardando_confirmacao_janela_autorais = State()
     aguardando_confirmacao_pausa_repost = State()
     aguardando_confirmacao_pausa_robo = State()
+    aguardando_bloqueio = State()  # 🚫 espera o @ que vai para a lista negra
 
 class RelatoriosFluxo(StatesGroup):
     menu_filas = State()
@@ -4798,6 +4801,7 @@ teclado_menu_autorais = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Editar Origem 📥"), KeyboardButton(text="Editar Destino 📤")],
         [KeyboardButton(text="Regras de Repostagem ♻️"), KeyboardButton(text="Status do Robô ⏸️")],
+        [KeyboardButton(text="Contas e Postos 👥"), KeyboardButton(text="Lista Negra 🚫")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -4942,6 +4946,23 @@ async def painel_autorais(message: types.Message, state: FSMContext):
                 nome_destino = f"<code>{destino}{destino_topico_str}</code> - <i>Acesso Negado</i>"
                 icone_destino = "❌"
     
+    # --- 👥 QUEM ESTÁ DE PLANTÃO (lido do pool_contas) ---
+    # Resumo de uma linha por posto. Se o pool ainda não tiver conta nenhuma,
+    # o painel não quebra: mostra o aviso e segue normal.
+    try:
+        _espelho = pool_contas.obter_conta_da_funcao(pool_contas.FUNCAO_ESPELHO)
+        _repost = pool_contas.obter_conta_da_funcao(pool_contas.FUNCAO_REPOSTAGEM)
+        texto_plantao = (
+            f"<b>- Contas de plantão:</b>\n"
+            f"    🪞 Espelho: <b>{_espelho['apelido'] if _espelho else '⚠️ VAGO'}</b>\n"
+            f"    ♻️ Repostagem: <b>{_repost['apelido'] if _repost else '⚠️ VAGO'}</b>\n\n"
+        )
+    except Exception as e_pool:
+        if EXIBIR_LOGS: logger.error(f"❌ Não consegui ler o pool de contas: {e_pool}")
+        texto_plantao = "<b>- Contas de plantão:</b>\n    ⚠️ <i>pool indisponível</i>\n\n"
+
+    # --- MONTAGEM DO TEXTO ---
+    
     # --- MONTAGEM DO TEXTO ---
     texto = (
         "🎥 <b>Painel do Bot Vídeos Autorais</b>\n\n"
@@ -4952,6 +4973,7 @@ async def painel_autorais(message: types.Message, state: FSMContext):
         f"    {icone_origem} {nome_origem}\n\n"
         f"<b>- Destino atual:</b>\n"
         f"    {icone_destino} {nome_destino}\n\n"
+        f"{texto_plantao}"
         f"♻️ <b>Regras de Repostagem:</b>\n"
         f"⏳ Oculto por: <b>{dias_retorno} dias</b>\n"
         f"📦 Cota Diária: <b>{limite_videos}</b>\n"
@@ -4962,6 +4984,395 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     )
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado_menu_autorais)
     await state.set_state(AutoraisFluxo.menu_principal)
+
+# ==========================================================================
+# 👥 PAINEL DE CONTAS E POSTOS  (dentro de Vídeos Autorais)
+# --------------------------------------------------------------------------
+# Tela para ver quem está espelhando, quem está repostando, e mexer nisso sem
+# abrir o terminal. Toda a REGRA mora no pool_contas.py; aqui é só tela.
+#
+# Duas ações diferentes, que é onde costuma dar confusão:
+#
+#   🔓/🔒 PERMITIR   → muda o que a conta PODE fazer. É a ação durável. Tirar a
+#                      permissão tira do posto e impede o revezamento de
+#                      recolocar a mesma conta na próxima sincronização.
+#   ⚡ ASSUMIR       → troca o plantonista AGORA, sem mexer em permissão. Dura
+#                      enquanto a conta continuar apta (o motor nunca derruba
+#                      quem está no posto e está saudável).
+#
+# Callbacks (curtos de propósito: o Telegram limita o callback_data a 64 bytes):
+#   pc_painel | pc_sync | pc_ver:<id> | pc_tog:<id>:<e|r> | pc_ass:<id>:<e|r> |
+#   pc_hab:<id>
+# ==========================================================================
+
+def _pc_sigla_para_funcao(sigla):
+    """Traduz a sigla que viaja no callback para o nome real da função."""
+    return pool_contas.FUNCAO_ESPELHO if sigla == "e" else pool_contas.FUNCAO_REPOSTAGEM
+
+
+def _pc_teclado_lista():
+    """Teclado da tela principal: uma linha por conta + sincronizar."""
+    botoes = [[InlineKeyboardButton(text="🔄 Sincronizar com o Telegram", callback_data="pc_sync")]]
+    for c in pool_contas.listar_contas():
+        icone = pool_contas.ICONES_GRUPO.get(c["status_grupo"], "❓")
+        botoes.append([InlineKeyboardButton(
+            text=f"{icone} {c['apelido']}", callback_data=f"pc_ver:{c['id']}"
+        )])
+    return InlineKeyboardMarkup(inline_keyboard=botoes)
+
+
+def _pc_tela_conta(conta):
+    """Monta texto + teclado da tela de uma conta específica."""
+    permitidas = [f.strip() for f in str(conta.get("funcoes_permitidas") or "").split(",") if f.strip()]
+    ocupacao = pool_contas.ler_ocupacao()
+    postos = [f for f, cid in ocupacao.items() if cid == conta["id"]]
+
+    texto = (
+        f"👤 <b>{conta['apelido']}</b>\n\n"
+        f"🆔 <code>{conta['user_id'] or '?'}</code>\n"
+        f"📎 @{conta['username'] or 'sem @'}\n"
+        f"📝 {conta['nome_exibicao'] or '—'}\n"
+        f"📱 {conta['telefone'] or '<i>rode identificar no servidor</i>'}\n\n"
+        f"📍 Grupo: <b>{conta['status_grupo']}</b>\n"
+        f"🔌 Sessão: <b>{conta['status_sessao']}</b>\n"
+        f"🎯 Postos agora: <b>{' + '.join(postos) if postos else 'nenhum'}</b>\n"
+    )
+    if not conta["habilitada"]:
+        texto += "\n⏸️ <i>Conta desabilitada manualmente.</i>\n"
+    if conta["ultimo_erro"]:
+        texto += f"\n⚠️ <i>{conta['ultimo_erro']}</i>\n"
+
+    linhas = []
+    for sigla, funcao, rotulo in (("e", pool_contas.FUNCAO_ESPELHO, "Espelho"),
+                                  ("r", pool_contas.FUNCAO_REPOSTAGEM, "Repostagem")):
+        marca = "🔓" if funcao in permitidas else "🔒"
+        linhas.append([InlineKeyboardButton(
+            text=f"{marca} {rotulo}: {'permitido' if funcao in permitidas else 'bloqueado'}",
+            callback_data=f"pc_tog:{conta['id']}:{sigla}"
+        )])
+    for sigla, funcao, rotulo in (("e", pool_contas.FUNCAO_ESPELHO, "espelho"),
+                                  ("r", pool_contas.FUNCAO_REPOSTAGEM, "repostagem")):
+        if funcao in permitidas and funcao not in postos:
+            linhas.append([InlineKeyboardButton(
+                text=f"⚡ Assumir {rotulo} agora",
+                callback_data=f"pc_ass:{conta['id']}:{sigla}"
+            )])
+    linhas.append([InlineKeyboardButton(
+        text="▶️ Habilitar conta" if not conta["habilitada"] else "⏸️ Desabilitar conta",
+        callback_data=f"pc_hab:{conta['id']}"
+    )])
+    linhas.append([InlineKeyboardButton(text="🔙 Voltar à lista", callback_data="pc_painel")])
+    return texto, InlineKeyboardMarkup(inline_keyboard=linhas)
+
+
+async def _pc_redesenhar(mensagem):
+    """Redesenha a tela principal. Engole o 'message is not modified'."""
+    try:
+        await mensagem.edit_text(
+            pool_contas.montar_relatorio_telegram(),
+            parse_mode="HTML",
+            reply_markup=_pc_teclado_lista()
+        )
+    except Exception as e:
+        if "not modified" not in str(e).lower():
+            if EXIBIR_LOGS: logger.error(f"❌ [Pool] Falha ao redesenhar o painel: {e}")
+
+
+@dp.message(AutoraisFluxo.menu_principal, F.text == "Contas e Postos 👥")
+async def painel_contas_postos(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("👥 Abrindo o painel de Contas e Postos...")
+    try:
+        await message.answer(
+            pool_contas.montar_relatorio_telegram(),
+            parse_mode="HTML",
+            reply_markup=_pc_teclado_lista()
+        )
+    except Exception as e:
+        await message.answer(f"❌ Não consegui abrir o pool de contas.\n<code>{e}</code>",
+                             parse_mode="HTML")
+        if EXIBIR_LOGS: logger.error(f"❌ [Pool] Erro ao abrir o painel: {e}")
+
+
+@dp.callback_query(F.data == "pc_painel", StateFilter("*"))
+async def pool_voltar_lista(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID: return
+    await _pc_redesenhar(callback.message)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "pc_sync", StateFilter("*"))
+async def pool_sincronizar(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID: return
+    # A checagem conecta conta por conta no Telegram: pode levar alguns segundos.
+    await callback.answer("Checando cada conta no Telegram...", show_alert=False)
+    try:
+        mudancas = await pool_contas.sincronizar_pool()
+    except Exception as e:
+        await callback.message.answer(f"❌ Falha ao sincronizar: <code>{e}</code>", parse_mode="HTML")
+        if EXIBIR_LOGS: logger.error(f"❌ [Pool] Erro ao sincronizar pelo painel: {e}")
+        return
+    await _pc_redesenhar(callback.message)
+    if mudancas:
+        resumo = "\n".join(f"• <b>{f}</b>: {m}" for f, _a, _n, m in mudancas)
+        await callback.message.answer(f"🔄 <b>Postos redistribuídos</b>\n{resumo}", parse_mode="HTML")
+
+
+@dp.callback_query(F.data.startswith("pc_ver:"), StateFilter("*"))
+async def pool_ver_conta(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID: return
+    conta = pool_contas.obter_conta(callback.data.split(":")[1])
+    if not conta:
+        await callback.answer("Conta não encontrada.", show_alert=True)
+        return
+    texto, teclado = _pc_tela_conta(conta)
+    try:
+        await callback.message.edit_text(texto, parse_mode="HTML", reply_markup=teclado)
+    except Exception as e:
+        if "not modified" not in str(e).lower():
+            if EXIBIR_LOGS: logger.error(f"❌ [Pool] Falha ao abrir a conta: {e}")
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("pc_tog:"), StateFilter("*"))
+async def pool_alternar_permissao(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID: return
+    _p, id_conta, sigla = callback.data.split(":")
+    conta = pool_contas.obter_conta(id_conta)
+    if not conta:
+        await callback.answer("Conta não encontrada.", show_alert=True)
+        return
+    funcao = _pc_sigla_para_funcao(sigla)
+    ligada, mudancas = pool_contas.alternar_funcao_permitida(conta["apelido"], funcao)
+    await callback.answer(f"{funcao}: {'liberado' if ligada else 'bloqueado'}")
+
+    texto, teclado = _pc_tela_conta(pool_contas.obter_conta(id_conta))
+    try:
+        await callback.message.edit_text(texto, parse_mode="HTML", reply_markup=teclado)
+    except Exception:
+        pass
+    if mudancas:
+        resumo = "\n".join(f"• <b>{f}</b>: {m}" for f, _a, _n, m in mudancas)
+        await callback.message.answer(f"🔄 <b>Postos redistribuídos</b>\n{resumo}", parse_mode="HTML")
+
+
+@dp.callback_query(F.data.startswith("pc_ass:"), StateFilter("*"))
+async def pool_assumir_funcao(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID: return
+    _p, id_conta, sigla = callback.data.split(":")
+    conta = pool_contas.obter_conta(id_conta)
+    if not conta:
+        await callback.answer("Conta não encontrada.", show_alert=True)
+        return
+    funcao = _pc_sigla_para_funcao(sigla)
+    ok, motivo = pool_contas.atribuir_funcao(conta["apelido"], funcao)
+    if not ok:
+        await callback.answer(f"Não deu: {motivo}", show_alert=True)
+        return
+    await callback.answer(f"{conta['apelido']} assumiu {funcao}.")
+    texto, teclado = _pc_tela_conta(pool_contas.obter_conta(id_conta))
+    try:
+        await callback.message.edit_text(texto, parse_mode="HTML", reply_markup=teclado)
+    except Exception:
+        pass
+
+
+@dp.callback_query(F.data.startswith("pc_hab:"), StateFilter("*"))
+async def pool_habilitar_conta(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID: return
+    conta = pool_contas.obter_conta(callback.data.split(":")[1])
+    if not conta:
+        await callback.answer("Conta não encontrada.", show_alert=True)
+        return
+    novo_estado = not bool(conta["habilitada"])
+    pool_contas.definir_habilitada(conta["apelido"], novo_estado)
+    mudancas = pool_contas.aplicar_funcoes()
+    await callback.answer("Conta habilitada." if novo_estado else "Conta desabilitada.")
+
+    texto, teclado = _pc_tela_conta(pool_contas.obter_conta(conta["apelido"]))
+    try:
+        await callback.message.edit_text(texto, parse_mode="HTML", reply_markup=teclado)
+    except Exception:
+        pass
+    if mudancas:
+        resumo = "\n".join(f"• <b>{f}</b>: {m}" for f, _a, _n, m in mudancas)
+        await callback.message.answer(f"🔄 <b>Postos redistribuídos</b>\n{resumo}", parse_mode="HTML")
+
+
+
+
+# ==========================================================================
+# 🚫 PAINEL DA LISTA NEGRA  (dentro de Vídeos Autorais)
+# --------------------------------------------------------------------------
+# Tela para bloquear e desbloquear autores pelo celular, sem abrir o terminal.
+# Toda a REGRA mora no blacklist_captura.py; aqui é só tela.
+#
+# Duas categorias aparecem na tela e se comportam diferente:
+#
+#   🔒 SUAS CONTAS   → entram sozinhas, vindas do pool_contas, com escopo
+#                      global. NÃO têm botão de remover de propósito: tirar uma
+#                      delas recria o laço de recaptura (a conta da repostagem
+#                      devolve o vídeo e a do espelho captura de novo).
+#   ✋ MANUAIS       → os @ que você adiciona. Esses têm botão de remover.
+#
+# Callbacks (curtos: o Telegram limita o callback_data a 64 bytes):
+#   bl_painel | bl_sync | bl_add | bl_del:<id> | bl_esc:<id>
+# ==========================================================================
+
+def _bl_teclado_lista():
+    """Teclado da lista negra: adicionar, uma linha por entrada manual, sincronizar."""
+    linhas = [[InlineKeyboardButton(text="➕ Bloquear um @", callback_data="bl_add")]]
+
+    # Só as manuais ganham botão. As do pool são intocáveis pela tela.
+    manuais = [e for e in blacklist_captura.listar() if e["origem"] != blacklist_captura.ORIGEM_POOL]
+    for entrada in manuais[:20]:
+        alvo = f"@{entrada['username']}" if entrada["username"] else str(entrada["user_id"])
+        marca = "🌐" if entrada["escopo"] == blacklist_captura.ESCOPO_GLOBAL else "🎥"
+        linhas.append([
+            InlineKeyboardButton(text=f"{marca} {alvo}", callback_data=f"bl_esc:{entrada['id']}"),
+            InlineKeyboardButton(text="🗑️", callback_data=f"bl_del:{entrada['id']}")
+        ])
+
+    linhas.append([InlineKeyboardButton(text="🔄 Sincronizar minhas contas", callback_data="bl_sync")])
+    return InlineKeyboardMarkup(inline_keyboard=linhas)
+
+
+async def _bl_redesenhar(mensagem):
+    """Redesenha a tela. Engole o 'message is not modified' do Telegram."""
+    try:
+        await mensagem.edit_text(
+            blacklist_captura.montar_relatorio_telegram(),
+            parse_mode="HTML",
+            reply_markup=_bl_teclado_lista()
+        )
+    except Exception as e:
+        if "not modified" not in str(e).lower():
+            if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Falha ao redesenhar: {e}")
+
+
+@dp.message(AutoraisFluxo.menu_principal, F.text == "Lista Negra 🚫")
+async def painel_lista_negra(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if EXIBIR_LOGS: logger.info("🚫 Abrindo o painel da Lista Negra...")
+    try:
+        blacklist_captura.sincronizar_contas_do_pool()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Falha ao sincronizar ao abrir: {e}")
+    await message.answer(
+        blacklist_captura.montar_relatorio_telegram(),
+        parse_mode="HTML",
+        reply_markup=_bl_teclado_lista()
+    )
+
+
+@dp.callback_query(F.data == "bl_painel", StateFilter("*"))
+async def bl_voltar_painel(callback: types.CallbackQuery):
+    await callback.answer()
+    await _bl_redesenhar(callback.message)
+
+
+@dp.callback_query(F.data == "bl_sync", StateFilter("*"))
+async def bl_sincronizar(callback: types.CallbackQuery):
+    await callback.answer("Sincronizando...")
+    try:
+        adicionadas, removidas = blacklist_captura.sincronizar_contas_do_pool()
+        await callback.answer(f"✅ +{adicionadas} / -{removidas}", show_alert=False)
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Erro ao sincronizar: {e}")
+    await _bl_redesenhar(callback.message)
+
+
+@dp.callback_query(F.data == "bl_add", StateFilter("*"))
+async def bl_pedir_arroba(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await state.set_state(AutoraisFluxo.aguardando_bloqueio)
+    await callback.message.answer(
+        "🚫 Envie o <b>@usuario</b> que o robô deve ignorar.\n\n"
+        "<i>Vale também o ID numérico, se você tiver.</i>\n\n"
+        "Por padrão ele bloqueia <b>só dentro do grupo dos Autorais</b>. "
+        "Para bloquear em todo lugar, mande assim:\n"
+        "<code>@usuario global</code>",
+        parse_mode="HTML",
+        reply_markup=teclado_cancelar
+    )
+
+
+@dp.message(AutoraisFluxo.aguardando_bloqueio)
+async def bl_receber_arroba(message: types.Message, state: FSMContext):
+    if message.text == "Cancelar ❌":
+        await cancelar_fluxo_global(message, state)
+        return
+
+    partes = (message.text or "").strip().split()
+    if not partes:
+        await message.answer("❌ Não entendi. Envie algo como <code>@usuario</code>.", parse_mode="HTML")
+        return
+
+    alvo = partes[0]
+    escopo = (blacklist_captura.ESCOPO_GLOBAL
+              if len(partes) > 1 and partes[1].lower() == "global"
+              else blacklist_captura.ESCOPO_AUTORAIS)
+
+    try:
+        ok, aviso = await blacklist_captura.adicionar_por_arroba(alvo, escopo=escopo,
+                                                                motivo="adicionado pelo painel")
+    except Exception as e:
+        ok, aviso = False, f"erro inesperado: {e}"
+        if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Erro ao adicionar {alvo}: {e}")
+
+    await state.set_state(AutoraisFluxo.menu_principal)
+    await message.answer(("✅ " if ok else "❌ ") + aviso, parse_mode="HTML",
+                         reply_markup=teclado_menu_autorais)
+    await message.answer(blacklist_captura.montar_relatorio_telegram(),
+                         parse_mode="HTML", reply_markup=_bl_teclado_lista())
+
+
+@dp.callback_query(F.data.startswith("bl_del:"), StateFilter("*"))
+async def bl_remover(callback: types.CallbackQuery):
+    entrada_id = callback.data.split(":")[1]
+    alvo = None
+    for entrada in blacklist_captura.listar():
+        if str(entrada["id"]) == entrada_id:
+            alvo = entrada["username"] or str(entrada["user_id"])
+            break
+
+    if alvo is None:
+        await callback.answer("Entrada não encontrada.", show_alert=True)
+        await _bl_redesenhar(callback.message)
+        return
+
+    ok, aviso = blacklist_captura.remover(alvo)
+    await callback.answer(("✅ " if ok else "❌ ") + aviso, show_alert=not ok)
+    await _bl_redesenhar(callback.message)
+
+
+@dp.callback_query(F.data.startswith("bl_esc:"), StateFilter("*"))
+async def bl_alternar_escopo(callback: types.CallbackQuery):
+    """Alterna a entrada entre 'só nos Autorais' e 'em todo lugar'."""
+    entrada_id = callback.data.split(":")[1]
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("SELECT escopo FROM blacklist_captura WHERE id = ?", (entrada_id,))
+        linha = cursor.fetchone()
+        if not linha:
+            conexao.close()
+            await callback.answer("Entrada não encontrada.", show_alert=True)
+            return
+        novo = (blacklist_captura.ESCOPO_AUTORAIS
+                if linha[0] == blacklist_captura.ESCOPO_GLOBAL
+                else blacklist_captura.ESCOPO_GLOBAL)
+        cursor.execute("UPDATE blacklist_captura SET escopo = ? WHERE id = ?", (novo, entrada_id))
+        conexao.commit()
+        conexao.close()
+        blacklist_captura.invalidar_cache()
+        await callback.answer("🌐 em todo lugar" if novo == blacklist_captura.ESCOPO_GLOBAL
+                              else "🎥 só nos Autorais")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Erro ao alternar escopo: {e}")
+        await callback.answer("Erro ao alterar.", show_alert=True)
+    await _bl_redesenhar(callback.message)
+
 
 # ----------------------------------------------------
 # SUBSTITUA OS HANDLERS DOS SUBMENUS POR ESTES:
