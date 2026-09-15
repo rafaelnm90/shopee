@@ -57,6 +57,22 @@ def limpar_travas_fantasma(nome_sessao):
 # Limpa resíduos de base de dados trancada antes de iniciar
 limpar_travas_fantasma('sessao_espiao')
 
+# ==========================================================================
+# 👤 CONTAS QUE OPERAM NESTE ROBÔ
+#
+# Sessão: sessao_espiao
+#   ⚠️ AINDA NÃO CONFIRMADA. Este arquivo ainda não registra a conta no log.
+#   Depois de aplicar o bloco do get_me() no start, rode:
+#     journalctl -u motor_userbot_bot --since "5 min ago" | grep Userbot
+#   e substitua esta nota pelo nome, @ e id que aparecerem.
+#
+# As outras duas sessões do servidor, para referência:
+#   sessao_divulgacao          → Rafaelnm (principal)  · @Rafaelnm · id 1226920464
+#   sessao_espelhador_isolado  → Rafaelnm (secundário) · sem @     · id 8940405855
+#
+# Lembrete: é esta conta que precisa estar DENTRO dos ~99 canais vigiados do
+# Espião. Canal em que ela não está é canal que este robô não enxerga.
+# ==========================================================================
 client = TelegramClient('sessao_espiao', API_ID, API_HASH)
 
 import sqlite3
