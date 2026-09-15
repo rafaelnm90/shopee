@@ -511,6 +511,16 @@ async def main():
     if EXIBIR_LOGS: logger.info("⏳ Iniciando o Userbot de Divulgação...")
     await client.start()
 
+    # 👤 Mesma identificação do espelhador: saber qual conta assina o que este robô faz.
+    try:
+        eu = await client.get_me()
+        if EXIBIR_LOGS:
+            logger.info(f"👤 [Userbot] Sessão de divulgação logada como: "
+                        f"{getattr(eu, 'first_name', '')} (@{getattr(eu, 'username', None) or 'sem @'}) "
+                        f"· id {getattr(eu, 'id', '?')}")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ [Userbot] Não consegui identificar a conta da sessão: {e}")
+
     # 🗂️ Popula o cache de entidades da sessão. Sem isto, get_entity() falha com
     # "Cannot find any entity" ao receber ID numérico puro, mesmo a conta
     # participando do canal — o Telethon precisa do access_hash em cache, e ele
