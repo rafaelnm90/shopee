@@ -186,7 +186,6 @@ def ler_fila_retorno():
         except sqlite3.OperationalError:
             pass
         try:
-        try:
             cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_postagem TEXT")
             conexao.commit()
         except sqlite3.OperationalError:
