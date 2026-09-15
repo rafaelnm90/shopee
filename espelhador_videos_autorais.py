@@ -1868,6 +1868,110 @@ async def processar_fila_publico_loop():
 
         await asyncio.sleep(60)
 
+# ==========================================================================
+# 🔭 VARREDURA DA ORIGEM — captura por busca ativa
+#
+# O events.NewMessage não estava entregando as mensagens do grupo de origem. O log
+# mostrava "Got difference for channel 3673555953" (prova de que houve movimento lá)
+# sem nenhum evento correspondente chegar ao handler: mensagem recuperada por
+# getDifference não passa pelo NewMessage do Telethon.
+#
+# Em vez de depender do evento chegar, aqui o robô PERGUNTA de tempos em tempos o que
+# há de novo. De quebra resolve um buraco que sempre existiu: o que era postado
+# enquanto o serviço estava fora do ar era perdido para sempre; agora é recuperado.
+#
+# O atraso de alguns minutos é irrelevante numa fila que só reposta dias depois.
+# ==========================================================================
+INTERVALO_VARREDURA_MIN = 5
+LIMITE_VARREDURA = 30
+
+
+class EventoSimulado:
+    """Casca fina que faz uma Message parecer um evento do NewMessage.
+
+    O handler usa só seis atributos, e a Message do Telethon tem cinco deles
+    nativamente. O único que conflita é o `.message`: num evento ele aponta para a
+    mensagem, mas numa Message ele é o TEXTO. Daí o redirecionamento explícito.
+    """
+
+    def __init__(self, msg):
+        self._msg = msg
+        self.message = msg
+        self.out = bool(getattr(msg, "out", False))
+
+    def __getattr__(self, nome):
+        return getattr(self._msg, nome)
+
+
+async def varredura_origem_loop():
+    if EXIBIR_LOGS: logger.info("🔭 [Varredura] Loop de captura por busca ativa iniciado.")
+    await asyncio.sleep(30)   # deixa o client assentar antes da primeira consulta
+
+    while True:
+        try:
+            config_atual = carregar_config_autorais()
+
+            if config_atual.get("pausar_robo_completo", False):
+                await asyncio.sleep(120)
+                continue
+
+            origem_final, _ = separar_alvo_e_topico(config_atual.get("origem"))
+            if origem_final is None:
+                await asyncio.sleep(300)
+                continue
+
+            marcadores = ler_config_bd_autorais("ultimo_id_varredura", {}) or {}
+            chave = str(origem_final)
+            ultimo_id = int(marcadores.get(chave, 0) or 0)
+
+            mensagens = await client.get_messages(origem_final, limit=LIMITE_VARREDURA)
+            if not mensagens:
+                await asyncio.sleep(INTERVALO_VARREDURA_MIN * 60)
+                continue
+
+            maior_id = max(m.id for m in mensagens if m)
+
+            # 🥇 Primeira volta: só anota onde a fila está HOJE. Sem isto, o robô
+            # despejaria as 30 últimas mensagens do grupo de uma vez.
+            if ultimo_id == 0:
+                marcadores[chave] = maior_id
+                salvar_config_bd_autorais("ultimo_id_varredura", marcadores)
+                if EXIBIR_LOGS:
+                    logger.info(f"🔭 [Varredura] Marco inicial gravado na origem (id {maior_id}). "
+                                "A captura começa a valer da próxima mensagem.")
+                await asyncio.sleep(INTERVALO_VARREDURA_MIN * 60)
+                continue
+
+            novas = sorted([m for m in mensagens if m and m.id > ultimo_id], key=lambda m: m.id)
+            if novas and EXIBIR_LOGS:
+                logger.info(f"🔭 [Varredura] {len(novas)} mensagem(ns) nova(s) na origem desde o id {ultimo_id}.")
+
+            for msg in novas:
+                if not getattr(msg, "media", None):
+                    continue
+                try:
+                    # 🔁 A dedupe por doc_id do reservar_video() protege contra o mesmo
+                    # vídeo entrar duas vezes, caso o evento também chegue algum dia.
+                    await interceptar_e_espelhar(EventoSimulado(msg))
+                except Exception as e:
+                    if EXIBIR_LOGS: logger.error(f"❌ [Varredura] Falha ao processar a mensagem {msg.id}: {e}")
+                await asyncio.sleep(3)
+
+            if maior_id > ultimo_id:
+                marcadores[chave] = maior_id
+                salvar_config_bd_autorais("ultimo_id_varredura", marcadores)
+
+        except FloodWaitError as e:
+            espera = int(getattr(e, "seconds", 60))
+            if EXIBIR_LOGS: logger.warning(f"⏳ [Varredura] FloodWait de {espera}s.")
+            await asyncio.sleep(espera + 5)
+            continue
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Varredura] Erro estrutural no loop: {e}")
+
+        await asyncio.sleep(INTERVALO_VARREDURA_MIN * 60)
+
+
 async def main():
     if EXIBIR_LOGS: logger.info("⏳ Iniciando o robô Espelhador Isolado...")
     await client.start()
@@ -1911,6 +2015,7 @@ async def main():
     asyncio.create_task(processar_fila_autorais_loop())
     asyncio.create_task(processar_fila_publico_loop())   # 📬 repostagem no Grupo Público
     asyncio.create_task(loop_entrada_parceiros())   # 👥 entrada nos canais dos parceiros
+    asyncio.create_task(varredura_origem_loop())   # 🔭 captura por busca ativa na origem
     
     if EXIBIR_LOGS: logger.info("🤖 Sistema a rodar. A escutar o grupo de origem continuamente...")
     await client.run_until_disconnected()
