@@ -239,6 +239,23 @@ inicializar_banco_sqlite()
 
 # 1. CONSTANTES E TOKENS
 API_TOKEN = os.getenv('TELEGRAM_TOKEN')
+# ==========================================================================
+# 👤 CONTAS QUE OPERAM NESTE ROBÔ
+#
+# Bot oficial (aiogram):
+#   @ShopeeVbot · id 8707808275
+#   → é quem publica no Grupo Público, nos canais dos parceiros e no Acervo Viral
+#   → só enxerga chat em que foi adicionado; em canal, precisa ser administrador
+#
+# Administrador (dono do painel):
+#   Rafaelnm (PRINCIPAL) · @Rafaelnm · id 1226920464  ← o ADMIN_ID abaixo
+#   → é o único id que os handlers do painel aceitam
+#   → é o nome creditado em "👤 Vídeo enviado por" nas repostagens
+#
+# A conta secundária (id 8940405855) NÃO opera aqui — ela vive nos userbots
+# do espelhador. Ver os cabeçalhos de espelhador_videos_autorais.py e
+# motor_userbot.py.
+# ==========================================================================
 ADMIN_ID = 1226920464
 GRUPO_ID = -1003909405581
 LINK_GRUPO = "https://t.me/shopee_video_afiliado"
