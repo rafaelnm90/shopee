@@ -1062,6 +1062,18 @@ def separar_alvo_e_topico(valor):
 # e reentrava nas filas — um vídeo recém-postado virava um novo vídeo "novo".
 @client.on(events.NewMessage(incoming=True))
 async def interceptar_e_espelhar(event):
+    # 🔬 DIAGNÓSTICO TEMPORÁRIO: registra TODO evento que chega, antes de qualquer
+    # filtro. Serve para responder uma pergunta só — o handler é chamado para o grupo
+    # de origem? Sem isto, um evento descartado e um evento que nunca chegou produzem
+    # exatamente o mesmo silêncio no log. Remover depois de identificar a causa.
+    if EXIBIR_LOGS:
+        logger.info(
+            f"🔬 [Evento] chat_id={getattr(event, 'chat_id', '?')} "
+            f"out={getattr(event, 'out', '?')} "
+            f"media={type(getattr(event, 'media', None)).__name__} "
+            f"texto={(event.raw_text or '')[:40]!r}"
+        )
+
     # 🛡️ Cinto e suspensório: se algum evento próprio escapar do filtro acima, morre aqui.
     if getattr(event, "out", False):
         return
