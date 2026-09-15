@@ -244,7 +244,8 @@ def salvar_fila_retorno(dados):
                 item.get("data_alvo"),
                 horario_final,
                 processado_final,
-                postagem_final
+                postagem_final,
+                msg_post_final
             ))
         conexao.commit()
         conexao.close()
@@ -879,7 +880,6 @@ def salvar_fila_publico(dados):
                 item.get("legenda"),
                 item.get("data_captura"),
                 item.get("data_alvo"),
-                horario_final,
                 horario_final,
                 processado_final,
                 postagem_final,
