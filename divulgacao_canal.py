@@ -65,6 +65,16 @@ def normalizar_alvo(alvo):
     return texto
 
 
+# ==========================================================================
+# 👤 CONTAS QUE OPERAM NESTE ROBÔ
+#
+# Sessão: sessao_divulgacao
+#   Rafaelnm (PRINCIPAL) · @Rafaelnm · id 1226920464
+#   → é o mesmo id que o bot_mestre usa como ADMIN_ID
+#   → é a conta que aparece creditada em "👤 Vídeo enviado por" nos reposts
+#
+# Confirmado no log em 15/09/2026 pela linha "👤 [Userbot] Sessão de divulgação".
+# ==========================================================================
 client = TelegramClient('sessao_divulgacao', API_ID, API_HASH)
 scheduler = AsyncIOScheduler()
 
