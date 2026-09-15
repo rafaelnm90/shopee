@@ -658,7 +658,7 @@ async def identificar_contas():
             print(f"✅ {apelido}")
             print(f"     telefone (login): {telefone or 'não exposto por esta sessão'}")
             print(f"     user id:          {eu.id}")
-            print(f"     username:         @{eu.username or 'sem @'}")
+            print(f"     username:         {('@' + eu.username) if eu.username else 'sem @'}")
             print(f"     nome:             {nome or '—'}")
             tem_senha = bool(conta.get("senha_2fa_cifrada"))
             print(f"     senha 2 etapas:   {'guardada ✅' if tem_senha else 'NÃO guardada — use o comando senha'}")
@@ -1196,10 +1196,35 @@ async def checar_conta(conta, grupo_id=None):
             return (fora, SESSAO_OK)
 
         except ValueError:
-            # Telethon não achou a entidade: a conta nunca viu esse grupo.
+            # ⚠️ ARMADILHA: o cache de entidades mora no arquivo .session e NÃO
+            # viaja para a StringSession. Numa conta recém-adotada o cache está
+            # vazio, então get_entity() falha por ID mesmo quando a conta ESTÁ
+            # no grupo — e a checagem concluía "NUNCA_ENTROU" por engano.
+            # get_dialogs() preenche o cache; é o mesmo truque que o espelhador
+            # usa no start. Só depois de tentar de novo é que desistimos.
+            try:
+                if EXIBIR_LOGS:
+                    logger.info(f"🗂️ [Pool] {apelido}: cache vazio, carregando as conversas "
+                                f"para localizar o grupo...")
+                await cliente.get_dialogs()
+                entidade = await cliente.get_entity(grupo_id)
+                permissoes = await cliente.get_permissions(entidade, "me")
+                if getattr(permissoes, "is_banned", False):
+                    atualizar_status(apelido, status_grupo=STATUS_BANIDA_GRUPO,
+                                     status_sessao=SESSAO_OK, erro="restrita no grupo")
+                    return (STATUS_BANIDA_GRUPO, SESSAO_OK)
+                atualizar_status(apelido, status_grupo=STATUS_NO_GRUPO, status_sessao=SESSAO_OK)
+                return (STATUS_NO_GRUPO, SESSAO_OK)
+            except errors.UserNotParticipantError:
+                fora = STATUS_SAIU if conta.get("ja_esteve_no_grupo") else STATUS_NUNCA_ENTROU
+                atualizar_status(apelido, status_grupo=fora, status_sessao=SESSAO_OK)
+                return (fora, SESSAO_OK)
+            except Exception:
+                pass
+
             fora = STATUS_SAIU if conta.get("ja_esteve_no_grupo") else STATUS_NUNCA_ENTROU
             atualizar_status(apelido, status_grupo=fora, status_sessao=SESSAO_OK,
-                             erro="grupo não encontrado no cache desta conta")
+                             erro="grupo não encontrado nem depois de carregar as conversas")
             return (fora, SESSAO_OK)
 
     except errors.FloodWaitError as e:
@@ -1351,8 +1376,10 @@ async def adotar_sessoes_existentes():
     arquivos originais continuam onde estão — nada é apagado, para não correr o
     risco de derrubar os serviços que ainda os usam.
     """
+    import shutil
+    import tempfile
     from telethon import TelegramClient
-    from telethon.sessions import StringSession
+    from telethon.sessions import StringSession, SQLiteSession
 
     inicializar_tabelas()
     sessoes = [
@@ -1366,35 +1393,72 @@ async def adotar_sessoes_existentes():
         if not os.path.exists(f"{nome_arquivo}.session"):
             print(f"⏭️  {nome_arquivo}.session não existe neste servidor.")
             continue
+
+        # ⚠️ NÃO ABRA O .session ORIGINAL. Ele é um banco SQLite que o serviço
+        # correspondente mantém ABERTO E TRAVADO enquanto roda. Tentar abrir
+        # dava "database is locked" e a adoção falhava justamente nas contas dos
+        # serviços que estão no ar. Trabalhamos sempre sobre uma CÓPIA.
+        copia = None
+        cliente = None
         try:
-            cliente = TelegramClient(nome_arquivo, API_ID, API_HASH)
-            await cliente.connect()
-            if not await cliente.is_user_authorized():
-                print(f"⚠️  {nome_arquivo}: existe mas não está autorizada. Pulando.")
-                await cliente.disconnect()
+            copia = os.path.join(tempfile.gettempdir(), f"adocao_{nome_arquivo}.session")
+            shutil.copy2(f"{nome_arquivo}.session", copia)
+
+            # Ler a auth_key da cópia NÃO precisa de rede nem de conexão: o
+            # StringSession se monta só com dc_id, endereço, porta e auth_key.
+            sessao_disco = SQLiteSession(copia)
+            sessao_texto = StringSession.save(sessao_disco)
+            sessao_disco.close()
+
+            if not sessao_texto:
+                print(f"⚠️  {nome_arquivo}: sem chave de autorização. Pulando.")
                 continue
 
-            eu = await cliente.get_me()
-            # Converte a sessão de ARQUIVO para TEXTO reaproveitando a auth_key
-            # que já existe (não refaz login, não gasta SMS, não desloga nada).
-            # StringSession.save() aceita qualquer objeto de sessão do Telethon.
-            sessao_texto = StringSession.save(cliente.session)
-            await cliente.disconnect()
+            # Identidade é um bônus: se der erro (sessão em uso, rede fora), a
+            # conta é adotada assim mesmo e o 'identificar' preenche depois.
+            eu = None
+            try:
+                cliente = TelegramClient(StringSession(sessao_texto), API_ID, API_HASH)
+                await cliente.connect()
+                if await cliente.is_user_authorized():
+                    eu = await cliente.get_me()
+            except Exception as e_id:
+                print(f"⚠️  {nome_arquivo}: adotada, mas não consegui ler a identidade agora "
+                      f"({type(e_id).__name__}). Rode o comando 'identificar' depois.")
+            finally:
+                if cliente is not None:
+                    try:
+                        await cliente.disconnect()
+                    except Exception:
+                        pass
 
-            nome = " ".join(filter(None, [eu.first_name, eu.last_name])).strip()
-            apelido = (eu.username or apelido_padrao).lower()
-            salvar_conta(
-                apelido=apelido,
-                sessao=sessao_texto,
-                user_id=eu.id,
-                username=eu.username or "",
-                nome_exibicao=nome or apelido,
-                telefone=getattr(eu, "phone", None),
-            )
-            print(f"✅ Adotada: {apelido} (id {eu.id}) a partir de {nome_arquivo}.session")
+            if eu is not None:
+                nome = " ".join(filter(None, [eu.first_name, eu.last_name])).strip()
+                apelido = (eu.username or apelido_padrao).lower()
+                salvar_conta(
+                    apelido=apelido,
+                    sessao=sessao_texto,
+                    user_id=eu.id,
+                    username=eu.username or "",
+                    nome_exibicao=nome or apelido,
+                    telefone=getattr(eu, "phone", None),
+                )
+                print(f"✅ Adotada: {apelido} (id {eu.id}) a partir de {nome_arquivo}.session")
+            else:
+                apelido = apelido_padrao.lower()
+                salvar_conta(apelido=apelido, sessao=sessao_texto, nome_exibicao=apelido)
+                print(f"✅ Adotada: {apelido} (identidade pendente) a partir de {nome_arquivo}.session")
             encontradas += 1
+
         except Exception as e:
             print(f"❌ Erro ao adotar {nome_arquivo}: {type(e).__name__}: {e}")
+        finally:
+            # A cópia carrega credencial: não pode ficar largada no /tmp.
+            if copia and os.path.exists(copia):
+                try:
+                    os.remove(copia)
+                except Exception:
+                    pass
 
     if encontradas:
         print("\n🔍 Checando situação de cada uma no grupo...")
@@ -1593,7 +1657,7 @@ def montar_relatorio():
             saude += " ⏸️ desabilitada"
 
         linhas.append(f"{icone} {c['apelido']}  —  {papel}")
-        linhas.append(f"    id {c['user_id'] or '?'} · @{c['username'] or 'sem @'} · "
+        linhas.append(f"    id {c['user_id'] or '?'} · {('@' + c['username']) if c['username'] else 'sem @'} · "
                       f"{c['nome_exibicao'] or '?'}")
         linhas.append(f"    grupo: {c['status_grupo']}{saude}")
         linhas.append(f"    pode: {c['funcoes_permitidas']} · prioridade {c['prioridade']}")
