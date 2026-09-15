@@ -139,6 +139,21 @@ def pausa_ativa(escopo="autorais"):
 
 config_atual = carregar_config_autorais()
 
+# ==========================================================================
+# 👤 CONTAS QUE OPERAM NESTE ROBÔ
+#
+# Sessão: sessao_espelhador_isolado
+#   Rafaelnm (secundário) · sem @ · id 8940405855
+#   → é a conta que está DENTRO do grupo de autorais e faz a captura
+#   → é ela que publica no canal "Vídeos Autorais Afiliados"
+#   → é ela que devolve o vídeo ao grupo de origem na repostagem D+X
+#
+# Lembrete: um userbot só enxerga os grupos em que a CONTA DELE está. Se um
+# grupo novo for adicionado na configuração, esta conta precisa entrar nele —
+# senão o robô fica cego para aquele chat, sem erro nenhum no log.
+#
+# Confirmado no log em 15/09/2026 pela linha "👤 [Userbot] Sessão ... logada como".
+# ==========================================================================
 NOME_SESSAO = 'sessao_espelhador_isolado'
 client = TelegramClient(NOME_SESSAO, API_ID, API_HASH)
 
