@@ -653,6 +653,10 @@ def obter_teclado_outros_canais():
             [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
             [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
             [KeyboardButton(text="Gerador de Achadinhos 🛍️")],
+            # 👥 Fica AQUI, irmão dos robôs, e não dentro do Vídeos Autorais: as
+            # contas do pool e a lista negra valem para mais de um robô, então
+            # pendurá-las embaixo de um deles dava a impressão errada de escopo.
+            [KeyboardButton(text="Contas 👥")],
             [KeyboardButton(text="Voltar ao Início 🔙")]
         ],
         resize_keyboard=True,
@@ -4801,7 +4805,6 @@ teclado_menu_autorais = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Editar Origem 📥"), KeyboardButton(text="Editar Destino 📤")],
         [KeyboardButton(text="Regras de Repostagem ♻️"), KeyboardButton(text="Status do Robô ⏸️")],
-        [KeyboardButton(text="Contas e Postos 👥"), KeyboardButton(text="Lista Negra 🚫")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -5010,9 +5013,29 @@ def _pc_sigla_para_funcao(sigla):
     return pool_contas.FUNCAO_ESPELHO if sigla == "e" else pool_contas.FUNCAO_REPOSTAGEM
 
 
+def _abas(ativa):
+    """
+    Linha de abas do painel de Contas.
+
+    As duas telas (Postos e Lista Negra) vivem na MESMA mensagem: tocar numa aba
+    edita o texto no lugar em vez de mandar mensagem nova. A aba em que você está
+    aparece marcada com •.
+    """
+    return [
+        InlineKeyboardButton(text=("• 🎯 Postos" if ativa == "postos" else "🎯 Postos"),
+                             callback_data="pc_painel"),
+        # ⚠️ NÃO chame isto de "Lista Negra": o Espião já tem uma, e ela bloqueia
+        # CANAIS (para não importar/monitorar). Esta aqui bloqueia PESSOAS (para
+        # não capturar o que elas postam). Dois conceitos, nomes diferentes.
+        InlineKeyboardButton(text=("• 🚫 Autores" if ativa == "negra" else "🚫 Autores"),
+                             callback_data="bl_painel"),
+    ]
+
+
 def _pc_teclado_lista():
-    """Teclado da tela principal: uma linha por conta + sincronizar."""
-    botoes = [[InlineKeyboardButton(text="🔄 Sincronizar com o Telegram", callback_data="pc_sync")]]
+    """Teclado da aba Postos: abas + uma linha por conta + sincronizar."""
+    botoes = [_abas("postos"),
+              [InlineKeyboardButton(text="🔄 Sincronizar com o Telegram", callback_data="pc_sync")]]
     for c in pool_contas.listar_contas():
         icone = pool_contas.ICONES_GRUPO.get(c["status_grupo"], "❓")
         botoes.append([InlineKeyboardButton(
@@ -5030,7 +5053,7 @@ def _pc_tela_conta(conta):
     texto = (
         f"👤 <b>{conta['apelido']}</b>\n\n"
         f"🆔 <code>{conta['user_id'] or '?'}</code>\n"
-        f"📎 @{conta['username'] or 'sem @'}\n"
+        f"📎 {('@' + conta['username']) if conta['username'] else 'sem @'}\n"
         f"📝 {conta['nome_exibicao'] or '—'}\n"
         f"📱 {conta['telefone'] or '<i>rode identificar no servidor</i>'}\n\n"
         f"📍 Grupo: <b>{conta['status_grupo']}</b>\n"
@@ -5078,10 +5101,18 @@ async def _pc_redesenhar(mensagem):
             if EXIBIR_LOGS: logger.error(f"❌ [Pool] Falha ao redesenhar o painel: {e}")
 
 
-@dp.message(AutoraisFluxo.menu_principal, F.text == "Contas e Postos 👥")
+@dp.message(F.text == "Contas 👥", StateFilter("*"))
 async def painel_contas_postos(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("👥 Abrindo o painel de Contas e Postos...")
+    await state.clear()
+    if EXIBIR_LOGS: logger.info("👥 Abrindo o painel de Contas...")
+    # Proteger as suas próprias contas é barato e tem que valer sempre, então
+    # roda em silêncio ao abrir. Era isto que o botão "Sincronizar minhas contas"
+    # fazia; ele saiu porque só criava dúvida sobre quando apertar.
+    try:
+        blacklist_captura.sincronizar_contas_do_pool()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Falha ao sincronizar ao abrir: {e}")
     try:
         await message.answer(
             pool_contas.montar_relatorio_telegram(),
@@ -5202,7 +5233,7 @@ async def pool_habilitar_conta(callback: types.CallbackQuery, state: FSMContext)
 
 
 # ==========================================================================
-# 🚫 PAINEL DA LISTA NEGRA  (dentro de Vídeos Autorais)
+# 🚫 PAINEL DE AUTORES BLOQUEADOS  (aba do painel de Contas)
 # --------------------------------------------------------------------------
 # Tela para bloquear e desbloquear autores pelo celular, sem abrir o terminal.
 # Toda a REGRA mora no blacklist_captura.py; aqui é só tela.
@@ -5216,24 +5247,28 @@ async def pool_habilitar_conta(callback: types.CallbackQuery, state: FSMContext)
 #   ✋ MANUAIS       → os @ que você adiciona. Esses têm botão de remover.
 #
 # Callbacks (curtos: o Telegram limita o callback_data a 64 bytes):
-#   bl_painel | bl_sync | bl_add | bl_del:<id> | bl_esc:<id>
+#   bl_painel | bl_add | bl_del:<id> | bl_esc:<id>
 # ==========================================================================
 
 def _bl_teclado_lista():
-    """Teclado da lista negra: adicionar, uma linha por entrada manual, sincronizar."""
-    linhas = [[InlineKeyboardButton(text="➕ Bloquear um @", callback_data="bl_add")]]
+    """Teclado da aba Lista Negra: abas + bloquear + uma linha por entrada manual."""
+    linhas = [_abas("negra"),
+              [InlineKeyboardButton(text="➕ Bloquear alguém", callback_data="bl_add")]]
 
     # Só as manuais ganham botão. As do pool são intocáveis pela tela.
     manuais = [e for e in blacklist_captura.listar() if e["origem"] != blacklist_captura.ORIGEM_POOL]
     for entrada in manuais[:20]:
-        alvo = f"@{entrada['username']}" if entrada["username"] else str(entrada["user_id"])
-        marca = "🌐" if entrada["escopo"] == blacklist_captura.ESCOPO_GLOBAL else "🎥"
+        alvo = (entrada["nome_exibicao"]
+                or (f"@{entrada['username']}" if entrada["username"] else str(entrada["user_id"])))
+        # O rótulo diz o que o botão FAZ, não só o estado. Antes aparecia só
+        # "🎥 fulano" e não dava para adivinhar que tocar ali troca o alcance.
+        onde = ("🌐 todo lugar" if entrada["escopo"] == blacklist_captura.ESCOPO_GLOBAL
+                else "🎥 só Autorais")
         linhas.append([
-            InlineKeyboardButton(text=f"{marca} {alvo}", callback_data=f"bl_esc:{entrada['id']}"),
+            InlineKeyboardButton(text=f"{onde} · {alvo}"[:58], callback_data=f"bl_esc:{entrada['id']}"),
             InlineKeyboardButton(text="🗑️", callback_data=f"bl_del:{entrada['id']}")
         ])
 
-    linhas.append([InlineKeyboardButton(text="🔄 Sincronizar minhas contas", callback_data="bl_sync")])
     return InlineKeyboardMarkup(inline_keyboard=linhas)
 
 
@@ -5250,35 +5285,10 @@ async def _bl_redesenhar(mensagem):
             if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Falha ao redesenhar: {e}")
 
 
-@dp.message(AutoraisFluxo.menu_principal, F.text == "Lista Negra 🚫")
-async def painel_lista_negra(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🚫 Abrindo o painel da Lista Negra...")
-    try:
-        blacklist_captura.sincronizar_contas_do_pool()
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Falha ao sincronizar ao abrir: {e}")
-    await message.answer(
-        blacklist_captura.montar_relatorio_telegram(),
-        parse_mode="HTML",
-        reply_markup=_bl_teclado_lista()
-    )
-
-
 @dp.callback_query(F.data == "bl_painel", StateFilter("*"))
 async def bl_voltar_painel(callback: types.CallbackQuery):
+    """Aba Lista Negra. Edita a mesma mensagem, então funciona como aba mesmo."""
     await callback.answer()
-    await _bl_redesenhar(callback.message)
-
-
-@dp.callback_query(F.data == "bl_sync", StateFilter("*"))
-async def bl_sincronizar(callback: types.CallbackQuery):
-    await callback.answer("Sincronizando...")
-    try:
-        adicionadas, removidas = blacklist_captura.sincronizar_contas_do_pool()
-        await callback.answer(f"✅ +{adicionadas} / -{removidas}", show_alert=False)
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Erro ao sincronizar: {e}")
     await _bl_redesenhar(callback.message)
 
 
@@ -5294,9 +5304,9 @@ async def bl_pedir_arroba(callback: types.CallbackQuery, state: FSMContext):
         "e cole a barra de endereço inteira\n\n"
         "<i>O link é o mais confiável: ele traz o ID numérico, que a pessoa não "
         "consegue trocar. O @ ela troca quando quiser.</i>\n\n"
-        "Por padrão bloqueia <b>só dentro do grupo dos Autorais</b>. "
-        "Para bloquear em todo lugar, acrescente a palavra global:\n"
-        "<code>@usuario global</code>",
+        "Ele entra valendo <b>só dentro do grupo dos Autorais</b>. Para valer em "
+        "todo lugar, é só tocar na pessoa na lista depois — o botão alterna entre "
+        "<b>🎥 só Autorais</b> e <b>🌐 todo lugar</b>.",
         parse_mode="HTML",
         reply_markup=teclado_cancelar
     )
@@ -5325,9 +5335,9 @@ async def bl_receber_arroba(message: types.Message, state: FSMContext):
         ok, aviso = False, f"erro inesperado: {e}"
         if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Erro ao adicionar {alvo}: {e}")
 
-    await state.set_state(AutoraisFluxo.menu_principal)
+    await state.clear()
     await message.answer(("✅ " if ok else "❌ ") + aviso, parse_mode="HTML",
-                         reply_markup=teclado_menu_autorais)
+                         reply_markup=teclado_outros_canais)
     await message.answer(blacklist_captura.montar_relatorio_telegram(),
                          parse_mode="HTML", reply_markup=_bl_teclado_lista())
 
