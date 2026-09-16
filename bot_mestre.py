@@ -5287,10 +5287,15 @@ async def bl_pedir_arroba(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.set_state(AutoraisFluxo.aguardando_bloqueio)
     await callback.message.answer(
-        "🚫 Envie o <b>@usuario</b> que o robô deve ignorar.\n\n"
-        "<i>Vale também o ID numérico, se você tiver.</i>\n\n"
-        "Por padrão ele bloqueia <b>só dentro do grupo dos Autorais</b>. "
-        "Para bloquear em todo lugar, mande assim:\n"
+        "🚫 Envie quem o robô deve ignorar. Vale qualquer um destes:\n\n"
+        "• <b>@usuario</b>\n"
+        "• <b>ID numérico</b>\n"
+        "• <b>link do perfil</b> — abra a conversa com a pessoa no Telegram Web "
+        "e cole a barra de endereço inteira\n\n"
+        "<i>O link é o mais confiável: ele traz o ID numérico, que a pessoa não "
+        "consegue trocar. O @ ela troca quando quiser.</i>\n\n"
+        "Por padrão bloqueia <b>só dentro do grupo dos Autorais</b>. "
+        "Para bloquear em todo lugar, acrescente a palavra global:\n"
         "<code>@usuario global</code>",
         parse_mode="HTML",
         reply_markup=teclado_cancelar
