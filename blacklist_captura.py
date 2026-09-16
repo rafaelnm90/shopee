@@ -268,13 +268,19 @@ def extrair_alvo(texto):
             "ou cole o link do perfil da pessoa.")
 
 
-async def _cliente_para_consulta():
+async def _buscar_entidade(alvo):
     """
-    Devolve um cliente Telethon de QUALQUER conta saudável do pool.
+    Pergunta "quem é este @ / este ID?" para as contas do pool, UMA DE CADA VEZ,
+    e devolve a primeira resposta que vier.
 
-    Antes isto usava só a conta do posto 'espelho'. O problema: enquanto nenhuma
-    conta está dentro do grupo, o posto fica VAGO e a consulta falhava sem ter
-    por quê — as contas existem e estão logadas, só não estão de plantão.
+    ⚠️ Por que todas e não só uma: cada conta só enxerga quem ELA já cruzou. Você
+    pode estar conversando com a pessoa pela conta principal enquanto a busca
+    tentava só a secundária — e aí voltava sem nome nenhum, que foi o que
+    aconteceu no primeiro bloqueio por link. Vale principalmente para ID
+    numérico, que o Telethon só resolve se aquela conta tiver a pessoa no cache.
+
+    Devolve a entidade do Telethon ou None. Nunca levanta exceção: não achar o
+    nome é chato, não é erro — o bloqueio funciona pelo número do mesmo jeito.
     """
     try:
         import pool_contas
@@ -283,16 +289,37 @@ async def _cliente_para_consulta():
             logger.error(f"❌ [Lista Negra] pool_contas indisponível: {e}")
         return None
 
-    cliente = await pool_contas.criar_cliente_da_funcao(pool_contas.FUNCAO_ESPELHO)
-    if cliente is not None:
-        return cliente
+    try:
+        contas = pool_contas.listar_contas(somente_habilitadas=True)
+    except Exception:
+        return None
 
-    for conta in pool_contas.listar_contas(somente_habilitadas=True):
+    # A conta que está de plantão no espelho vai na frente quando existe: é a
+    # que mais convive com o pessoal do grupo, então acerta mais vezes.
+    try:
+        de_plantao = pool_contas.obter_conta_da_funcao(pool_contas.FUNCAO_ESPELHO)
+        if de_plantao:
+            contas.sort(key=lambda c: 0 if c["id"] == de_plantao["id"] else 1)
+    except Exception:
+        pass
+
+    for conta in contas:
         if conta.get("status_sessao") != pool_contas.SESSAO_OK:
             continue
-        cliente = await pool_contas.criar_cliente(conta)
-        if cliente is not None:
-            return cliente
+        cliente = None
+        try:
+            cliente = await pool_contas.criar_cliente(conta)
+            if cliente is None:
+                continue
+            return await cliente.get_entity(alvo)
+        except Exception:
+            continue
+        finally:
+            if cliente is not None:
+                try:
+                    await cliente.disconnect()
+                except Exception:
+                    pass
     return None
 
 
@@ -592,50 +619,43 @@ async def resolver_pendentes(cliente=None):
     if not pendentes:
         return 0
 
-    proprio = False
-    if cliente is None:
-        try:
-            cliente = await _cliente_para_consulta()
-            proprio = True
-        except Exception as e:
-            if EXIBIR_LOGS:
-                logger.error(f"❌ [Lista Negra] Sem cliente para resolver @: {e}")
-            return 0
-    if cliente is None:
-        if EXIBIR_LOGS:
-            logger.warning("⚠️ [Lista Negra] Nenhuma conta apta para resolver os @ pendentes.")
-        return 0
-
     resolvidas = 0
-    try:
-        for linha in pendentes:
-            arroba = linha["username"]
+    for linha in pendentes:
+        arroba = linha["username"]
+        # Cada @ é perguntado a todas as contas até uma saber responder.
+        entidade = await _buscar_entidade(arroba) if cliente is None else None
+        if entidade is None and cliente is not None:
             try:
                 entidade = await cliente.get_entity(arroba)
-                nome = " ".join(filter(None, [getattr(entidade, "first_name", None),
-                                              getattr(entidade, "last_name", None)])).strip()
-                conexao = _obter_conexao()
-                cursor = conexao.cursor()
-                cursor.execute(
-                    "UPDATE blacklist_captura SET user_id = ?, nome_exibicao = ?, "
-                    "resolvido = 1, atualizada_em = ? WHERE id = ?",
-                    (int(entidade.id), nome or linha.get("nome_exibicao"), _agora(), linha["id"]),
-                )
-                conexao.commit()
-                conexao.close()
-                resolvidas += 1
-                if EXIBIR_LOGS:
-                    logger.info(f"🔎 [Lista Negra] @{arroba} resolvido para o ID {entidade.id}.")
-            except Exception as e:
-                if EXIBIR_LOGS:
-                    logger.info(f"⏭️ [Lista Negra] @{arroba} não resolvido ainda ({type(e).__name__}).")
-            await asyncio.sleep(1)
-    finally:
-        if proprio and cliente is not None:
-            try:
-                await cliente.disconnect()
             except Exception:
-                pass
+                entidade = None
+
+        if entidade is None:
+            if EXIBIR_LOGS:
+                logger.info(f"⏭️ [Lista Negra] @{arroba} não resolvido ainda "
+                            f"(nenhuma das suas contas conhece esse usuário).")
+            await asyncio.sleep(1)
+            continue
+
+        try:
+            nome = " ".join(filter(None, [getattr(entidade, "first_name", None),
+                                          getattr(entidade, "last_name", None)])).strip()
+            conexao = _obter_conexao()
+            cursor = conexao.cursor()
+            cursor.execute(
+                "UPDATE blacklist_captura SET user_id = ?, nome_exibicao = ?, "
+                "resolvido = 1, atualizada_em = ? WHERE id = ?",
+                (int(entidade.id), nome or linha.get("nome_exibicao"), _agora(), linha["id"]),
+            )
+            conexao.commit()
+            conexao.close()
+            resolvidas += 1
+            if EXIBIR_LOGS:
+                logger.info(f"🔎 [Lista Negra] @{arroba} resolvido para o ID {entidade.id}.")
+        except Exception as e:
+            if EXIBIR_LOGS:
+                logger.error(f"❌ [Lista Negra] Falha ao gravar o ID de @{arroba}: {e}")
+        await asyncio.sleep(1)
 
     if resolvidas:
         invalidar_cache()
@@ -661,26 +681,14 @@ async def adicionar_por_arroba(arroba, escopo=ESCOPO_AUTORAIS, motivo=""):
             return (False, msg)
 
         rotulo = f"ID <code>{user_id}</code>"
-        cliente = None
-        try:
-            cliente = await _cliente_para_consulta()
-            if cliente is not None:
-                entidade = await cliente.get_entity(user_id)
-                nome = " ".join(filter(None, [getattr(entidade, "first_name", None),
-                                              getattr(entidade, "last_name", None)])).strip()
-                arroba_real = getattr(entidade, "username", None)
-                adicionar(user_id=user_id, username=arroba_real, nome_exibicao=nome,
-                          escopo=escopo, motivo=motivo)
-                rotulo = nome or (f"@{arroba_real}" if arroba_real else rotulo)
-        except Exception:
-            # Sem nome não tem problema nenhum: o bloqueio é pelo número.
-            pass
-        finally:
-            if cliente is not None:
-                try:
-                    await cliente.disconnect()
-                except Exception:
-                    pass
+        entidade = await _buscar_entidade(user_id)
+        if entidade is not None:
+            nome = " ".join(filter(None, [getattr(entidade, "first_name", None),
+                                          getattr(entidade, "last_name", None)])).strip()
+            arroba_real = getattr(entidade, "username", None)
+            adicionar(user_id=user_id, username=arroba_real, nome_exibicao=nome,
+                      escopo=escopo, motivo=motivo)
+            rotulo = nome or (f"@{arroba_real}" if arroba_real else rotulo)
 
         return (True, f"{rotulo} bloqueado ✅")
 
@@ -707,14 +715,17 @@ def montar_relatorio_telegram():
     """
     entradas = listar()
     if not entradas:
-        return ("🚫 <b>Lista Negra de Captura</b>\n\n"
+        return ("🚫 <b>Autores Bloqueados</b>\n\n"
                 "<i>Vazia.</i> Nem as suas contas estão protegidas — "
                 "rode a sincronização.")
 
     do_pool = [e for e in entradas if e["origem"] == ORIGEM_POOL]
     manuais = [e for e in entradas if e["origem"] != ORIGEM_POOL]
 
-    linhas = ["🚫 <b>Lista Negra de Captura</b>", ""]
+    # "Autores" e não "Lista Negra": o Espião já tem uma lista negra, e a dele é
+    # de CANAIS. Esta é de PESSOAS cujas postagens o espelhador não captura.
+    linhas = ["🚫 <b>Autores Bloqueados</b>",
+              "<i>Ninguém aqui tem o vídeo capturado pelo espelhador.</i>", ""]
 
     linhas.append(f"🔒 <b>Suas contas ({len(do_pool)})</b> — automático, em todo lugar")
     for e in do_pool[:10]:
