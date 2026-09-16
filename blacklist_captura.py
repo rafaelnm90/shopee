@@ -192,6 +192,110 @@ def _limpar_arroba(valor):
     return texto or None
 
 
+def extrair_alvo(texto):
+    """
+    Descobre QUEM é o alvo a partir de qualquer coisa que você colar.
+
+    Aceita, nesta ordem de preferência:
+      https://web.telegram.org/a/?account=2#630077263  → ID 630077263
+      https://web.telegram.org/k/#630077263            → ID 630077263
+      https://web.telegram.org/a/#@fulano              → @fulano
+      tg://user?id=630077263                           → ID 630077263
+      https://t.me/fulano                              → @fulano
+      630077263                                        → ID
+      @fulano  ou  fulano                              → @fulano
+
+    ⚠️ O LINK É O MELHOR CAMINHO. No Telegram Web, o que vem depois do '#' na
+    barra de endereço é o ID numérico da conversa aberta — ou seja, o ID da
+    pessoa. E ID não muda nunca, enquanto o @ a pessoa troca quando quiser. Além
+    disso, bloquear por ID funciona na hora: a checagem compara com o
+    event.sender_id, sem precisar resolver nada no Telegram.
+
+    O '?account=2' do link é só qual das SUAS contas está aberta no navegador.
+    Não tem nada a ver com o alvo e é ignorado de propósito.
+
+    Devolve (user_id, username, erro). Se erro != "", não dá para usar.
+    """
+    import re
+
+    bruto = (texto or "").strip()
+    if not bruto:
+        return (None, None, "Não veio nada para bloquear.")
+
+    # tg://user?id=123456
+    achado = re.search(r"tg://user\?id=(\d+)", bruto, re.I)
+    if achado:
+        return (int(achado.group(1)), None, "")
+
+    # Telegram Web: o alvo é o fragmento depois do '#'
+    if "web.telegram.org" in bruto.lower():
+        fragmento = bruto.split("#", 1)[1].strip() if "#" in bruto else ""
+        if not fragmento:
+            return (None, None,
+                    "Esse link do Telegram Web não tem a parte do <code>#</code>. "
+                    "Abra a conversa com a pessoa e copie a barra de endereço inteira.")
+        if fragmento.lstrip("-").isdigit():
+            numero = int(fragmento)
+            if numero < 0:
+                return (None, None,
+                        "Esse link aponta para um <b>grupo ou canal</b>, não para uma pessoa. "
+                        "Abra a conversa privada com ela e copie de lá.")
+            return (numero, None, "")
+        return (None, _limpar_arroba(fragmento), "")
+
+    # t.me/alguma-coisa
+    achado = re.search(r"(?:https?://)?t\.me/([^/?#\s]+)", bruto, re.I)
+    if achado:
+        parte = achado.group(1)
+        if parte.startswith("+") or parte.lower() in ("joinchat", "c", "s", "proxy", "share", "addstickers"):
+            return (None, None,
+                    "Esse é um link de convite ou de canal, não o perfil de uma pessoa.")
+        return (None, _limpar_arroba(parte), "")
+
+    # ID numérico solto
+    if bruto.lstrip("-").isdigit():
+        numero = int(bruto)
+        if numero < 0:
+            return (None, None, "Isso é ID de grupo/canal, não de pessoa.")
+        return (numero, None, "")
+
+    # @fulano ou fulano
+    limpo = _limpar_arroba(bruto)
+    if limpo and re.fullmatch(r"[a-z0-9_]{3,32}", limpo):
+        return (None, limpo, "")
+    return (None, None,
+            "Não entendi. Mande o <code>@usuario</code>, o ID numérico, "
+            "ou cole o link do perfil da pessoa.")
+
+
+async def _cliente_para_consulta():
+    """
+    Devolve um cliente Telethon de QUALQUER conta saudável do pool.
+
+    Antes isto usava só a conta do posto 'espelho'. O problema: enquanto nenhuma
+    conta está dentro do grupo, o posto fica VAGO e a consulta falhava sem ter
+    por quê — as contas existem e estão logadas, só não estão de plantão.
+    """
+    try:
+        import pool_contas
+    except Exception as e:
+        if EXIBIR_LOGS:
+            logger.error(f"❌ [Lista Negra] pool_contas indisponível: {e}")
+        return None
+
+    cliente = await pool_contas.criar_cliente_da_funcao(pool_contas.FUNCAO_ESPELHO)
+    if cliente is not None:
+        return cliente
+
+    for conta in pool_contas.listar_contas(somente_habilitadas=True):
+        if conta.get("status_sessao") != pool_contas.SESSAO_OK:
+            continue
+        cliente = await pool_contas.criar_cliente(conta)
+        if cliente is not None:
+            return cliente
+    return None
+
+
 def invalidar_cache():
     """Força a próxima checagem a reler do banco."""
     _CACHE["dados"] = None
@@ -491,8 +595,7 @@ async def resolver_pendentes(cliente=None):
     proprio = False
     if cliente is None:
         try:
-            import pool_contas
-            cliente = await pool_contas.criar_cliente_da_funcao(pool_contas.FUNCAO_ESPELHO)
+            cliente = await _cliente_para_consulta()
             proprio = True
         except Exception as e:
             if EXIBIR_LOGS:
@@ -545,21 +648,50 @@ async def adicionar_por_arroba(arroba, escopo=ESCOPO_AUTORAIS, motivo=""):
 
     É esta que o painel do Telegram chama. Devolve (ok, mensagem_para_o_usuario).
     """
-    limpo = _limpar_arroba(arroba)
-    if not limpo:
-        return (False, "Não entendi o @. Envie no formato <code>@usuario</code>.")
-    if limpo.lstrip("-").isdigit():
-        ok, msg = adicionar(user_id=int(limpo), escopo=escopo, motivo=motivo)
-        return (ok, f"ID <code>{limpo}</code>: {msg}.")
+    user_id, username, erro = extrair_alvo(arroba)
+    if erro:
+        return (False, erro)
 
-    ok, msg = adicionar(username=limpo, escopo=escopo, motivo=motivo)
+    # Caminho do ID (é o que vem do link): já está valendo na hora, porque a
+    # checagem compara com o event.sender_id. Buscar o nome é só enfeite.
+    if user_id is not None:
+        ok, msg = adicionar(user_id=user_id, username=username,
+                            escopo=escopo, motivo=motivo)
+        if not ok:
+            return (False, msg)
+
+        rotulo = f"ID <code>{user_id}</code>"
+        cliente = None
+        try:
+            cliente = await _cliente_para_consulta()
+            if cliente is not None:
+                entidade = await cliente.get_entity(user_id)
+                nome = " ".join(filter(None, [getattr(entidade, "first_name", None),
+                                              getattr(entidade, "last_name", None)])).strip()
+                arroba_real = getattr(entidade, "username", None)
+                adicionar(user_id=user_id, username=arroba_real, nome_exibicao=nome,
+                          escopo=escopo, motivo=motivo)
+                rotulo = nome or (f"@{arroba_real}" if arroba_real else rotulo)
+        except Exception:
+            # Sem nome não tem problema nenhum: o bloqueio é pelo número.
+            pass
+        finally:
+            if cliente is not None:
+                try:
+                    await cliente.disconnect()
+                except Exception:
+                    pass
+
+        return (True, f"{rotulo} bloqueado ✅")
+
+    ok, msg = adicionar(username=username, escopo=escopo, motivo=motivo)
     if not ok:
         return (False, msg)
 
     resolvidas = await resolver_pendentes()
     if resolvidas:
-        return (True, f"@{limpo} bloqueado e ID resolvido ✅")
-    return (True, f"@{limpo} bloqueado (ID ainda não resolvido — vale pelo @ mesmo assim)")
+        return (True, f"@{username} bloqueado e ID resolvido ✅")
+    return (True, f"@{username} bloqueado (ID ainda não resolvido — vale pelo @ mesmo assim)")
 
 
 # =============================================================================
@@ -713,7 +845,9 @@ def main():
     resto = argumentos[1:]
 
     if comando in ("ajuda", "-h", "--help"):
-        print("Comandos: listar | add <@user|id> [global] | del <@user|id> |")
+        print("Comandos: listar | add <@user|id|link> [global] | del <@user|id> |")
+        print("  O 'link' pode ser a barra de endereço do Telegram Web na conversa")
+        print("  com a pessoa, ex: https://web.telegram.org/a/?account=2#630077263")
         print("          sincronizar | resolver | testar <id|@user> | autoteste")
         return
 
