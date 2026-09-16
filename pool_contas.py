@@ -734,7 +734,7 @@ def mostrar_credenciais(apelido=None):
         print(f"\n👤 {c['apelido']}")
         print(f"   telefone (login):  {c['telefone'] or '— rode identificar'}")
         print(f"   user id:           {c['user_id'] or '—'}")
-        print(f"   username:          @{c['username'] or 'sem @'}")
+        print(f"   username:          {('@' + c['username']) if c['username'] else 'sem @'}")
         print(f"   nome:              {c['nome_exibicao'] or '—'}")
         print(f"   senha 2 etapas:    {senha if senha else '— não guardada'}")
         if sessao:
@@ -859,7 +859,8 @@ def montar_relatorio_telegram():
         if c["status_sessao"] != SESSAO_OK:
             extra += f" ⚠️{c['status_sessao']}"
         linhas.append(f"{icone} <b>{c['apelido']}</b> · {papel}{extra}")
-        linhas.append(f"   <code>{c['user_id'] or '?'}</code> · @{c['username'] or 'sem @'} "
+        linhas.append(f"   <code>{c['user_id'] or '?'}</code> · "
+                      f"{('@' + c['username']) if c['username'] else 'sem @'} "
                       f"· pode: {c['funcoes_permitidas']}")
 
     linhas.append("")
