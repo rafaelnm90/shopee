@@ -1,3 +1,20 @@
+"""
+Bot mestre (aiogram): o painel do admin no privado e os motores que publicam nos
+canais e grupos.
+
+- Canal principal: fila de vídeos (fila_postagens) distribuída entre o Bom Dia e a
+  Boa Noite, rotinas de texto da IA, pausa programada e Gerenciar Fila.
+- Canal Viral: fila de clonagem do Espião (vídeos capturados pelo motor_userbot,
+  publicados com D+X, nome do produto pela IA e link de afiliado) e suas rotinas.
+- Grupo Público: submissão guiada pelos membros (a IA aprova e publica), repost de
+  vídeos autorais e de parceiros, rotinas e SPAM próprios, buscador de produtos.
+- Achadinhos, financeiro (pedidos e comissões da Shopee), faxinas, monitor de
+  saúde; o Espelhador e o Disparador de Notas entram como routers.
+
+Os dados ficam no banco_dados.db (filas e a tabela configuracoes). Os jobs vivem no
+APScheduler em memória e o FSM no MemoryStorage: um restart refaz a grade do dia
+em main() e encerra as sessões abertas dos painéis.
+"""
 EXIBIR_LOGS = True
 import os
 import re
@@ -1609,7 +1626,7 @@ async def varredor_de_lixeira():
         conexao.close()
         if EXIBIR_LOGS: logger.info("✅ Lixeira persistente (SQLite) esvaziada com sucesso.")
 
-                # Aproveita para podar a memória antiga dos achadinhos.
+        # Aproveita para podar a memória antiga dos achadinhos.
         limpar_achadinhos_antigos()
 
         # Também roda a cada 6 h em faxina_disco_periodica.
@@ -2804,8 +2821,8 @@ class InatividadeMiddleware(BaseMiddleware):
         event: types.Message,
         data: Dict[str, Any]
     ) -> Any:
-                # Vale para mensagem e para clique em botão inline (painéis só com botões inline
-                # também rearmam a contagem).
+        # Vale para mensagem e para clique em botão inline (painéis só com botões inline
+        # também rearmam a contagem).
         mensagem_base = getattr(event, "message", None) if hasattr(event, "data") else event
         chat = getattr(mensagem_base, "chat", None)
 
@@ -14413,7 +14430,7 @@ async def processar_fila_espiao(forcar=False):
         # O motor central aplica o D+X, a janela e o espaçamento
         calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar)
         
-                # Sai da fila (e do disco) o que o motor marcou como velho demais
+        # Sai da fila (e do disco) o que o motor marcou como velho demais
         marcados = [i for i in fila_data.get("fila", []) if i.get("descartar_por_idade")]
         if marcados:
             for m in marcados:
