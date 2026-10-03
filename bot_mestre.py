@@ -6091,19 +6091,17 @@ def extrair_destino_e_topico(texto):
     return None, None
 
 # ----------------------------------
-# NOVO MÓDULO: GERADOR AUTÔNOMO DE ACHADINHOS 🛍️
+# Gerador de Achadinhos: garimpa ofertas na API da Shopee e publica nos nichos
 # ----------------------------------
 def ler_achadinhos_config():
+    """achadinhos_config: nichos (nome, destino, tópico, palavras-chave), janela e sorteio."""
     return ler_config_bd("achadinhos_config", {"nichos": []}, arquivo_legado="achadinhos_config.json")
 
 def salvar_achadinhos_config(dados):
     salvar_config_bd("achadinhos_config", dados)
 
 def achadinho_ja_enviado(item_id):
-    """
-    Memória PERMANENTE de produtos já publicados.
-    A PRIMARY KEY da tabela garante que nada se repita, sem limite de tamanho.
-    """
+    """Se o produto já foi publicado alguma vez (memória permanente, sem limite de tamanho)."""
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -6113,9 +6111,10 @@ def achadinho_ja_enviado(item_id):
         return achou
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Erro ao consultar histórico: {e}")
-        return True   # Na dúvida, considera já enviado: melhor pular do que repetir
+        return True  # na dúvida, considera já enviado: melhor pular do que repetir
 
 def registrar_achadinho_enviado(item_id, nicho=""):
+    """Guarda o produto na memória de publicados."""
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -6126,11 +6125,12 @@ def registrar_achadinho_enviado(item_id, nicho=""):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Erro ao registrar envio: {e}")
 
-# ⏳ Retenção: a memória guarda 5 anos. Produto mais antigo que isso já mudou
-# de preço ou saiu de linha — se reaparecer, vale como oferta nova.
+# Retenção da memória: 5 anos. Produto mais antigo que isso já mudou de preço ou
+# saiu de linha; se reaparecer, vale como oferta nova.
 ANOS_RETENCAO_ACHADINHOS = 5
 
 def limpar_achadinhos_antigos():
+    """Apaga da memória os produtos publicados há mais de ANOS_RETENCAO_ACHADINHOS anos."""
     try:
         corte = (datetime.now(fuso_horario) - timedelta(days=ANOS_RETENCAO_ACHADINHOS * 365)).strftime("%Y-%m-%d %H:%M:%S")
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -6155,8 +6155,8 @@ def total_achadinhos_enviados():
     except Exception:
         return 0
 
-# 🏷️ Formatação de preço e cálculo do "de/por". A API só devolve o preço ATUAL
-# e a taxa de desconto — o valor antigo precisa ser deduzido daí.
+# Preço "de/por": a API só devolve o preço ATUAL e a taxa de desconto; o valor
+# antigo é deduzido daí.
 ABERTURAS_ACHADINHO = [
     "😍 Olha esse preço!", "🔥 Achadinho do dia!", "🚨 Baixou de novo!",
     "💥 Corre que acaba!", "🤩 Achei e trouxe pra você!", "⚡ Oferta relâmpago!",
@@ -6169,8 +6169,10 @@ def formatar_brl(valor):
 
 
 def preco_de_por(preco, taxa):
-    """Devolve (preco_antigo, preco_atual, taxa). O antigo vem None quando a
-    taxa não permite deduzir com segurança."""
+    """
+    Devolve (preco_antigo, preco_atual, taxa). O antigo vem None quando a taxa não
+    permite deduzir com segurança.
+    """
     try:
         atual = float(str(preco).replace(",", "."))
         taxa = int(taxa or 0)
@@ -6182,8 +6184,10 @@ def preco_de_por(preco, taxa):
 
 
 def montar_legenda_achadinho(nome, preco, taxa, nota, link, gancho=None):
-    """🎨 O bloco de preço é montado por código, nunca pela IA. Assim o número
-    é sempre exato e o layout não quebra quando a IA falha."""
+    """
+    O bloco de preço é montado por código, nunca pela IA: o número sai sempre exato
+    e o layout não quebra quando a IA falha.
+    """
     original, atual, taxa = preco_de_por(preco, taxa)
     if atual is None:
         return f"{gancho or random.choice(ABERTURAS_ACHADINHO)}\n\n📦 <b>{nome}</b>\n\n🔗 <b>Confira a oferta aqui</b> 👇\n{link}"
@@ -6201,6 +6205,7 @@ def montar_legenda_achadinho(nome, preco, taxa, nota, link, gancho=None):
     return "\n".join(linhas)
 
 async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_loja):
+    """Uma linha de chamada da IA para o produto, sem preço; sem IA, uma abertura pronta."""
     if EXIBIR_LOGS: logger.info("🧠 [Achadinhos] Estruturando estratégia de Copywriting para o produto...")
     
     prompt = (
@@ -6221,21 +6226,18 @@ async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_l
         if 0 < len(gancho) <= 60:
             return gancho
 
-    # 🎲 Sem IA, sorteia entre oito aberturas: repete menos que um texto fixo.
+    # Sem IA, sorteia entre as aberturas prontas: repete menos que um texto fixo.
     return random.choice(ABERTURAS_ACHADINHO)
 
 
 def sortear_nichos_organico(nichos, config):
     """
-    🎲 Escolhe quais nichos entram no ciclo SEM rodízio de posição fixa.
+    Escolhe quais nichos entram no ciclo, sem rodízio fixo.
 
-    Cada nicho ganha um peso. Quem publicou há pouco tem o peso reduzido, mas
-    NUNCA zerado: repetir o mesmo tópico duas vezes seguidas é justamente o que
-    uma pessoa faz. A memória dos últimos sorteados fica salva no config, então
-    o comportamento sobrevive a restart do serviço.
-
-    O 'nichos_por_ciclo' do painel continua valendo — mas como MÉDIA, não como
-    número cravado: a quantidade oscila em torno dele.
+    Cada nicho ganha um peso: quem publicou há pouco tem o peso reduzido, mas nunca
+    zerado (repetir o mesmo tópico é o que uma pessoa faz). A memória dos últimos
+    sorteados fica no config e sobrevive a restart. O 'nichos_por_ciclo' do painel vale
+    como MÉDIA: a quantidade oscila em torno dele.
     """
     memoria = [str(n) for n in (config.get("memoria_nichos") or [])]
     base = max(1, min(int(config.get("nichos_por_ciclo", 2)), len(nichos)))
@@ -6252,36 +6254,34 @@ def sortear_nichos_organico(nichos, config):
     for _ in range(quantidade):
         ultimas = {}
         for i, m in enumerate(memoria):
-            ultimas[m] = i          # guarda a posição MAIS RECENTE de cada nome
+            ultimas[m] = i  # posição mais recente de cada nome
 
         pesos = []
         for n in nichos:
             nome = str(n.get("nome", "?"))
             pos = ultimas.get(nome)
             distancia = 99 if pos is None else (len(memoria) - pos)
-            # Acabou de sair -> peso 2.5 | faz tempo -> peso 10 (teto)
+            # acabou de sair -> peso 2.5 | faz tempo -> peso 10 (teto)
             pesos.append(max(1.0, min(10.0, float(distancia) * 2.5)))
 
         sorteado = random.choices(nichos, weights=pesos, k=1)[0]
         escolhidos.append(sorteado)
         memoria.append(str(sorteado.get("nome", "?")))
 
-    config["memoria_nichos"] = memoria[-6:]     # memória curta: 6 últimos
-    config.pop("posicao_rodizio", None)         # aposenta o contador do rodízio
+    config["memoria_nichos"] = memoria[-6:]  # memória curta: os 6 últimos
+    config.pop("posicao_rodizio", None)  # chave da versão antiga (rodízio fixo), não usada mais
     salvar_achadinhos_config(config)
     return escolhidos
 
 
 def sortear_intervalo_garimpo():
     """
-    ⏱️ Sorteia quantos minutos faltam para o próximo garimpo.
-
-    Três perfis com peso — é isso que quebra a cadência de relógio:
-      • rajada (30%): 12-40 min    -> duas ofertas quase juntas
-      • normal (45%): 55-160 min   -> ritmo de quem vai olhando ao longo do dia
-      • sumiço (25%): 190-420 min  -> ninguém fica postando o dia inteiro
-
-    A média cai perto das 2h de hoje, então o volume diário não dispara.
+    Quantos minutos até o próximo garimpo. Três perfis com peso, para quebrar a
+    cadência de relógio:
+      rajada (30%): 12-40 min    -> duas ofertas quase juntas
+      normal (45%): 55-160 min   -> ritmo de quem vai olhando ao longo do dia
+      sumiço (25%): 190-420 min  -> ninguém fica postando o dia inteiro
+    A média fica perto de 2 h.
     """
     perfil = random.choices(("rajada", "normal", "sumico"),
                             weights=(0.30, 0.45, 0.25), k=1)[0]
@@ -6294,13 +6294,9 @@ def sortear_intervalo_garimpo():
 
 def agendar_proximo_garimpo(primeiro=False):
     """
-    📌 Marca o PRÓXIMO garimpo como job 'date' único e descartável.
-    Cada execução chama esta função de novo — é o que substitui o
-    'interval, hours=2', que cravava o mesmo minuto o dia inteiro.
-
-    Se o horário sorteado cair fora da janela do painel, ele NÃO é empurrado
-    para o minuto exato da abertura (isso viraria outro carimbo diário):
-    cai em algum ponto da primeira hora e meia depois que a janela abre.
+    Marca o PRÓXIMO garimpo como um job 'date' único; cada ciclo chama esta função de
+    novo (um intervalo fixo cravaria o mesmo minuto o dia todo). Horário fora da janela
+    não vai para o minuto exato da abertura: cai na primeira hora e meia depois dela.
     """
     try:
         cfg = ler_achadinhos_config()
@@ -6308,9 +6304,8 @@ def agendar_proximo_garimpo(primeiro=False):
         hora_fim = int(cfg.get("fim", 22))
         agora = datetime.now(fuso_horario)
         if primeiro:
-            # 🔁 Restart NÃO pode virar gatilho de postagem. Se já havia um horário
-            # sorteado no ar e ele ainda está no futuro, ele é restaurado tal e qual.
-            # Sem isto, cada 'deploybot' enfia um ciclo extra 3-25 min depois.
+            # Restart não pode virar gatilho de postagem: se havia um horário sorteado ainda
+            # no futuro, ele é restaurado tal e qual (senão cada deploy enfiaria um ciclo extra).
             salvo = cfg.get("proximo_garimpo", "")
             alvo_salvo = None
             if salvo:
@@ -6329,7 +6324,7 @@ def agendar_proximo_garimpo(primeiro=False):
 
         alvo = agora + timedelta(minutes=minutos)
 
-        # Caiu fora da janela? Reabre no próximo expediente, em ponto aleatório.
+        # Fora da janela: vai para o próximo expediente, num ponto aleatório.
         if hora_fim > hora_inicio and not (hora_inicio <= alvo.hour < hora_fim):
             base = alvo if alvo.hour < hora_inicio else (alvo + timedelta(days=1))
             alvo = base.replace(hour=hora_inicio, minute=0, second=0, microsecond=0) \
@@ -6343,7 +6338,7 @@ def agendar_proximo_garimpo(primeiro=False):
         scheduler.add_job(ciclo_garimpo_automatico, 'date', run_date=alvo,
                           id='job_garimpo_achadinhos', replace_existing=True)
 
-        # 💾 Guarda o horário para sobreviver a restart (ver bloco 'retomada' acima).
+        # Guarda o horário para sobreviver a restart (ver "retomada" acima).
         cfg["proximo_garimpo"] = alvo.strftime("%Y-%m-%d %H:%M:%S")
         salvar_achadinhos_config(cfg)
 
@@ -6352,7 +6347,7 @@ def agendar_proximo_garimpo(primeiro=False):
                         f"{alvo.strftime('%d/%m às %H:%M:%S')} (daqui a {minutos} min).")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Falha ao reagendar o garimpo: {e}")
-        # 🛡️ Rede de segurança: sem isto um erro aqui MATA o motor para sempre.
+        # Rede de segurança: sem reagendar aqui, um erro mataria o motor até o próximo restart.
         try:
             resgate = datetime.now(fuso_horario) + timedelta(minutes=random.randint(45, 120))
             scheduler.add_job(ciclo_garimpo_automatico, 'date', run_date=resgate,
@@ -6363,9 +6358,8 @@ def agendar_proximo_garimpo(primeiro=False):
 
 async def ciclo_garimpo_automatico():
     """
-    🔁 Casca que o agendador chama. Roda o garimpo e, aconteça o que acontecer,
-    marca o próximo. O 'finally' é obrigatório: se o ciclo estourar no meio e
-    ninguém reagendar, o motor morre calado até o próximo restart.
+    O que o agendador chama: roda o garimpo e, aconteça o que acontecer, marca o
+    próximo (sem o finally, um erro no meio mataria o motor até o próximo restart).
     """
     try:
         await processar_garimpo_automatico()
@@ -6376,8 +6370,14 @@ async def ciclo_garimpo_automatico():
 
 
 async def processar_garimpo_automatico(forcado=False):
-    # ⏰ Janela lida do painel. Post de madrugada some no feed quando o pessoal
-    # acorda e ainda queima um produto inédito da memória permanente.
+    """
+    Um ciclo do garimpo: para cada nicho sorteado, busca ofertas pela palavra-chave,
+    escolhe a de maior desconto ainda inédita (>= 15%) e publica a foto com a legenda
+    no tópico do nicho, no feed central e, se for o caso, nos achados do dia.
+    forcado=True ignora a janela.
+    """
+    # Janela do painel: post de madrugada some no feed até o pessoal acordar, e ainda
+    # queima um produto inédito da memória.
     cfg_janela = ler_achadinhos_config()
     hora_inicio = int(cfg_janela.get("inicio", 8))
     hora_fim = int(cfg_janela.get("fim", 22))
@@ -6397,9 +6397,8 @@ async def processar_garimpo_automatico(forcado=False):
         if EXIBIR_LOGS: logger.warning("⚠️ [Achadinhos] O radar está vazio. Adicione nichos ao arquivo achadinhos_config.json.")
         return
 
-    # 🎲 SORTEIO ORGÂNICO: o rodízio de posição fixa saiu. Agora cada ciclo sorteia
-    # quais nichos entram, com peso — dá para repetir o mesmo tópico duas vezes
-    # seguidas, exatamente como faz quem acha duas ofertas boas da mesma categoria.
+    # Sorteio com peso: dá para repetir o mesmo nicho duas vezes seguidas, como faz
+    # quem acha duas ofertas boas da mesma categoria.
     nichos_da_vez = sortear_nichos_organico(nichos, config)
 
     if EXIBIR_LOGS:
@@ -6419,10 +6418,10 @@ async def processar_garimpo_automatico(forcado=False):
         keyword_sorteada = random.choice(keywords)
         if EXIBIR_LOGS: logger.info(f"🔎 [Achadinhos] Rastreando o setor '{nome_nicho}' buscando por: '{keyword_sorteada}'.")
         
-        # Aumentamos a "pesca" para 40 produtos virais para ter uma amostra rica
+        # 40 produtos por busca, para ter amostra
         ofertas = await buscar_ofertas_shopee(keyword_sorteada, limite=40)
         
-        # 🧠 Curadoria: O robô organiza a lista internamente do maior desconto para o menor
+        # Do maior desconto para o menor.
         ofertas.sort(key=lambda x: int(x.get("priceDiscountRate") or 0), reverse=True)
         
         item_escolhido = None
@@ -6430,7 +6429,7 @@ async def processar_garimpo_automatico(forcado=False):
             item_id = str(oferta.get("itemId"))
             taxa_desconto = int(oferta.get("priceDiscountRate") or 0)
             
-            # 🛡️ Trava de Qualidade: Só aprova se for inédito E o desconto for de no mínimo 15%
+            # Só entra produto inédito com pelo menos 15% de desconto.
             if not achadinho_ja_enviado(item_id) and taxa_desconto >= 15:
                 item_escolhido = oferta
                 break
@@ -6466,7 +6465,7 @@ async def processar_garimpo_automatico(forcado=False):
             if os.path.exists(temp_img):
                 arquivo_img = FSInputFile(temp_img)
                 
-                # 🚀 Roteamento Inteligente: Define se o disparo vai para o chat raiz ou para a gaveta do tópico
+                # Tópico do nicho (0 = chat raiz).
                 thread_param = None
                 if thread_id_nicho and str(thread_id_nicho) != "0":
                     thread_param = int(thread_id_nicho)
@@ -6475,11 +6474,11 @@ async def processar_garimpo_automatico(forcado=False):
                 
                 registrar_achadinho_enviado(item_id, nome_nicho)
 
-                # 🔥 Desconto acima do piso vira "Achado do Dia" num tópico próprio.
+                # Desconto acima do piso vira "Achado do Dia" num tópico próprio.
                 eh_achado = int(taxa_desconto or 0) >= ACHADOS_PISO_DESCONTO if taxa_desconto else False
                 await espelhar_achado_do_dia(msg_original, legenda_final, taxa_desconto, destino, thread_param)
 
-                # 🪞 Além do tópico do nicho, a oferta cai também no feed central.
+                # Além do tópico do nicho, a oferta cai também no feed central.
                 if not (eh_achado and ACHADOS_PULA_FEED_CENTRAL):
                     await espelhar_no_feed_central(msg_original, legenda_final, destino, thread_param)
                 
@@ -6489,20 +6488,18 @@ async def processar_garimpo_automatico(forcado=False):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Falha estrutural ao tratar mídia física do produto: {e}")
             
-        # 🎲 Espaço entre uma oferta e a seguinte DENTRO do mesmo ciclo.
-        # Fixo em 15-35s todo santo dia é assinatura de script: as duas postagens
-        # sempre caíam no mesmo minuto. Agora às vezes emendam (achou duas boas),
-        # às vezes há uma pausa de minutos no meio.
+        # Espaço entre uma oferta e a seguinte no mesmo ciclo: intervalo fixo é assinatura
+        # de script. Às vezes emendam, às vezes há uma pausa de minutos.
         if random.random() < 0.45:
-            tempo_espera = random.randint(25, 90)      # emendou as duas
+            tempo_espera = random.randint(25, 90)  # emendou as duas
         else:
-            tempo_espera = random.randint(150, 600)    # deu uma sumida no meio
+            tempo_espera = random.randint(150, 600)  # deu uma sumida no meio
         if EXIBIR_LOGS: logger.info(f"⏳ Diluição de Tráfego: Aguardando {tempo_espera}s antes de processar o próximo nicho...")
         await asyncio.sleep(tempo_espera)
 
 # ----------------------------------
-
-# 5. HANDLERS DE COMANDO E INTERAÇÃO
+# Handlers de comando e interação do painel
+# ----------------------------------
 
 @dp.message(Command("limpar_teclado"), StateFilter("*"))
 async def limpar_teclado_grupo(message: types.Message):
