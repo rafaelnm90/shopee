@@ -5022,7 +5022,7 @@ async def painel_autorais(message: types.Message, state: FSMContext):
 #
 # Callbacks (curtos de propósito: o Telegram limita o callback_data a 64 bytes):
 #   pc_painel | pc_sync | pc_ver:<id> | pc_tog:<id>:<e|r> | pc_ass:<id>:<e|r> |
-#   pc_hab:<id>
+#   pc_hab:<id> | pc_nova | pc_nova_x | pc_ent:<id> | pc_conv:<id>
 # ==========================================================================
 
 def _pc_sigla_para_funcao(sigla):
@@ -5051,7 +5051,8 @@ def _abas(ativa):
 def _pc_teclado_lista():
     """Teclado da aba Postos: abas + uma linha por conta + sincronizar."""
     botoes = [_abas("postos"),
-              [InlineKeyboardButton(text="🔄 Sincronizar com o Telegram", callback_data="pc_sync")]]
+              [InlineKeyboardButton(text="🔄 Sincronizar com o Telegram", callback_data="pc_sync")],
+              [InlineKeyboardButton(text="➕ Nova conta", callback_data="pc_nova")]]
     for c in pool_contas.listar_contas():
         icone = pool_contas.ICONES_GRUPO.get(c["status_grupo"], "❓")
         botoes.append([InlineKeyboardButton(
@@ -5094,6 +5095,13 @@ def _pc_tela_conta(conta):
             text="⚡ Assumir a captura agora",
             callback_data=f"pc_ass:{conta['id']}:e"
         )])
+    # Fora do grupo de origem: entrar pelo link de convite guardado, ou guardar um.
+    if conta["status_grupo"] != pool_contas.STATUS_NO_GRUPO:
+        if pool_contas.ler_convite():
+            linhas.append([InlineKeyboardButton(text="🚪 Entrar no grupo (link de convite)",
+                                                callback_data=f"pc_ent:{conta['id']}")])
+        linhas.append([InlineKeyboardButton(text="🔗 Guardar link de convite do grupo",
+                                            callback_data=f"pc_conv:{conta['id']}")])
     linhas.append([InlineKeyboardButton(
         text="▶️ Habilitar conta" if not conta["habilitada"] else "⏸️ Desabilitar conta",
         callback_data=f"pc_hab:{conta['id']}"
@@ -5249,6 +5257,302 @@ async def pool_habilitar_conta(callback: types.CallbackQuery, state: FSMContext)
 
 
 
+
+
+
+# --- Nova conta pelo bot ---
+# O mesmo login do terminal (pool_contas.iniciar_login → confirmar_codigo →
+# confirmar_senha → finalizar_cadastro), em etapas no chat privado. O cliente do
+# login fica em memória só enquanto espera a resposta: 5 min sem resposta, ele é
+# desconectado e o cadastro é cancelado.
+
+class NovaContaFluxo(StatesGroup):
+    aguardando_telefone = State()
+    aguardando_codigo = State()
+    aguardando_senha = State()
+    aguardando_convite = State()
+
+MINUTOS_LOGIN_CONTA = 5
+_login_conta = {}   # login em andamento (só o admin usa): cliente, telefone, codigo_hash, prazo
+
+teclado_cancelar_conta = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="❌ Cancelar", callback_data="pc_nova_x")]
+])
+
+
+def _parar_prazo_login():
+    tarefa = _login_conta.pop("prazo", None)
+    if tarefa and not tarefa.done() and tarefa is not asyncio.current_task():
+        tarefa.cancel()
+
+
+async def _encerrar_login_conta():
+    """Desconecta o login em andamento, se houver, e esquece os dados dele."""
+    _parar_prazo_login()
+    cliente = _login_conta.get("cliente")
+    _login_conta.clear()
+    if cliente is not None:
+        await pool_contas.cancelar_login(cliente)
+
+
+async def _prazo_login_conta(chat_id, state):
+    try:
+        await asyncio.sleep(MINUTOS_LOGIN_CONTA * 60)
+    except asyncio.CancelledError:
+        return
+    _login_conta.pop("prazo", None)
+    await _encerrar_login_conta()
+    await state.clear()
+    try:
+        await bot.send_message(chat_id, f"⌛ Cadastro de conta cancelado: {MINUTOS_LOGIN_CONTA} min sem resposta. "
+                                        "Toque em ➕ Nova conta para recomeçar.")
+    except Exception:
+        pass
+
+
+def _rearmar_prazo_login(chat_id, state):
+    """Cada etapa respondida reinicia os 5 minutos."""
+    _parar_prazo_login()
+    _login_conta["prazo"] = criar_task(_prazo_login_conta(chat_id, state))
+
+
+@dp.callback_query(F.data == "pc_nova", StateFilter("*"))
+async def pool_nova_conta(callback: types.CallbackQuery, state: FSMContext):
+    """➕ Nova conta: pede o telefone."""
+    if callback.from_user.id != ADMIN_ID: return
+    await _encerrar_login_conta()
+    await state.set_state(NovaContaFluxo.aguardando_telefone)
+    await callback.message.answer(
+        "➕ <b>Nova conta</b>\n\nMande o <b>telefone</b> da conta, com DDI.\n"
+        "Ex.: <code>+5532999998888</code>",
+        parse_mode="HTML", reply_markup=teclado_cancelar_conta
+    )
+    _rearmar_prazo_login(callback.message.chat.id, state)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "pc_nova_x", StateFilter("*"))
+async def pool_nova_conta_cancelar(callback: types.CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID: return
+    await _encerrar_login_conta()
+    await state.clear()
+    await callback.answer("Cadastro cancelado.")
+    try:
+        await callback.message.edit_text("❌ Cadastro de conta cancelado.")
+    except Exception:
+        pass
+
+
+@dp.message(StateFilter(NovaContaFluxo), F.text == "Cancelar ❌")
+async def pool_nova_conta_cancelar_texto(message: types.Message, state: FSMContext):
+    """Cancelar ❌ do teclado no meio do cadastro (os handlers abaixo o leriam como resposta)."""
+    if message.from_user.id != ADMIN_ID: return
+    await _encerrar_login_conta()
+    await state.clear()
+    await message.answer("❌ Cadastro de conta cancelado.")
+
+
+@dp.message(NovaContaFluxo.aguardando_telefone)
+async def pool_nova_conta_telefone(message: types.Message, state: FSMContext):
+    """Recebe o telefone e pede o código ao Telegram."""
+    if message.from_user.id != ADMIN_ID: return
+    from telethon import errors as tg_errors
+    telefone = "+" + re.sub(r"\D", "", message.text or "")
+    if not 10 <= len(telefone) - 1 <= 15:
+        await message.answer("⚠️ Telefone inválido. Mande com DDI, ex.: <code>+5532999998888</code>",
+                             parse_mode="HTML", reply_markup=teclado_cancelar_conta)
+        return
+
+    aviso = await message.answer("⏳ Pedindo o código ao Telegram...")
+    erro = None
+    try:
+        cliente, codigo_hash = await pool_contas.iniciar_login(telefone)
+    except tg_errors.PhoneNumberInvalidError:
+        erro = "o Telegram não reconhece este número"
+    except tg_errors.PhoneNumberBannedError:
+        erro = "este número está banido no Telegram"
+    except (tg_errors.FloodWaitError, tg_errors.PhoneNumberFloodError) as e:
+        erro = f"o Telegram pediu para esperar {getattr(e, 'seconds', None) or 'um tempo'} s antes de tentar de novo"
+    except Exception as e:
+        erro = f"{type(e).__name__}: {e}"
+    if erro:
+        await _encerrar_login_conta()
+        await state.clear()
+        await aviso.edit_text(f"❌ Não deu para pedir o código: {erro}.")
+        return
+
+    _login_conta.update(cliente=cliente, telefone=telefone, codigo_hash=codigo_hash)
+    await state.set_state(NovaContaFluxo.aguardando_codigo)
+    await aviso.edit_text(
+        "📨 Código enviado para o app do Telegram dessa conta (ou por SMS).\n\n"
+        "Mande o código <b>com espaços entre os números</b>, ex.: <code>1 2 3 4 5</code>.\n"
+        "<i>Sem os espaços, o Telegram percebe o código numa mensagem e o invalida.</i>",
+        parse_mode="HTML", reply_markup=teclado_cancelar_conta
+    )
+    _rearmar_prazo_login(message.chat.id, state)
+
+
+@dp.message(NovaContaFluxo.aguardando_codigo)
+async def pool_nova_conta_codigo(message: types.Message, state: FSMContext):
+    """Recebe o código (com espaços), apaga a mensagem e confirma o login."""
+    if message.from_user.id != ADMIN_ID: return
+    from telethon import errors as tg_errors
+    codigo = re.sub(r"\D", "", message.text or "")
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    if not _login_conta.get("cliente"):
+        await state.clear()
+        await message.answer("⌛ Este cadastro já tinha sido encerrado. Toque em ➕ Nova conta para recomeçar.")
+        return
+    if len(codigo) < 5:
+        await message.answer("⚠️ Código incompleto. Mande de novo, com espaços: <code>1 2 3 4 5</code>",
+                             parse_mode="HTML", reply_markup=teclado_cancelar_conta)
+        return
+
+    try:
+        precisa_senha = await pool_contas.confirmar_codigo(
+            _login_conta["cliente"], _login_conta["telefone"], codigo, _login_conta["codigo_hash"])
+    except tg_errors.PhoneCodeInvalidError:
+        await message.answer("⚠️ Código errado. Confira no app e mande de novo, com espaços.",
+                             reply_markup=teclado_cancelar_conta)
+        _rearmar_prazo_login(message.chat.id, state)
+        return
+    except tg_errors.PhoneCodeExpiredError:
+        await _encerrar_login_conta()
+        await state.clear()
+        await message.answer("❌ O código expirou. Isso costuma acontecer quando ele vai sem espaços. "
+                             "Toque em ➕ Nova conta e mande o próximo código com espaços.")
+        return
+    except Exception as e:
+        await _encerrar_login_conta()
+        await state.clear()
+        await message.answer(f"❌ Falha no login: {type(e).__name__}: {e}")
+        return
+
+    if precisa_senha:
+        await state.set_state(NovaContaFluxo.aguardando_senha)
+        await message.answer("🔐 A conta tem verificação em duas etapas. Mande a senha.\n"
+                             "<i>Apago a sua mensagem assim que ler; a senha fica guardada cifrada.</i>",
+                             parse_mode="HTML", reply_markup=teclado_cancelar_conta)
+        _rearmar_prazo_login(message.chat.id, state)
+        return
+    await _concluir_nova_conta(message, state, None)
+
+
+@dp.message(NovaContaFluxo.aguardando_senha)
+async def pool_nova_conta_senha(message: types.Message, state: FSMContext):
+    """Recebe a senha das duas etapas, apaga a mensagem na hora e conclui o login."""
+    if message.from_user.id != ADMIN_ID: return
+    from telethon import errors as tg_errors
+    senha = message.text or ""
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    if not _login_conta.get("cliente"):
+        await state.clear()
+        await message.answer("⌛ Este cadastro já tinha sido encerrado. Toque em ➕ Nova conta para recomeçar.")
+        return
+    try:
+        await pool_contas.confirmar_senha(_login_conta["cliente"], senha)
+    except tg_errors.PasswordHashInvalidError:
+        await message.answer("⚠️ Senha errada. Mande de novo.", reply_markup=teclado_cancelar_conta)
+        _rearmar_prazo_login(message.chat.id, state)
+        return
+    except Exception as e:
+        await _encerrar_login_conta()
+        await state.clear()
+        await message.answer(f"❌ Falha no login: {type(e).__name__}: {e}")
+        return
+    await _concluir_nova_conta(message, state, senha)
+
+
+async def _concluir_nova_conta(message, state, senha):
+    """Grava a conta no pool, protege na lista negra e abre a tela dela."""
+    _parar_prazo_login()
+    cliente, telefone = _login_conta.get("cliente"), _login_conta.get("telefone")
+    _login_conta.clear()
+    await state.clear()
+    aviso = await message.answer("⏳ Gravando a conta e conferindo o grupo de origem...")
+    try:
+        apelido, status_grupo, _mudancas = await pool_contas.finalizar_cadastro(cliente, telefone, senha)
+    except Exception as e:
+        await pool_contas.cancelar_login(cliente)
+        await aviso.edit_text(f"❌ Login feito, mas não consegui gravar a conta: {type(e).__name__}: {e}")
+        return
+    # Na lista negra já: um vídeo que ela repostar não pode voltar como captura nova.
+    try:
+        blacklist_captura.sincronizar_contas_do_pool()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Falha ao proteger a conta nova: {e}")
+
+    if status_grupo == pool_contas.STATUS_NO_GRUPO:
+        situacao = "✅ Já está no grupo de origem."
+    else:
+        situacao = "⚠️ Ainda não está no grupo de origem: use os botões abaixo ou adicione a conta pelo app."
+    await aviso.edit_text(f"✅ <b>Conta {apelido} cadastrada.</b>\n{situacao}\n\n"
+                          "Escolha abaixo o que ela pode fazer. Em até 10 min o robô dos Autorais "
+                          "começa a usá-la.", parse_mode="HTML")
+    texto, teclado = _pc_tela_conta(pool_contas.obter_conta(apelido))
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
+
+
+@dp.callback_query(F.data.startswith("pc_ent:"), StateFilter("*"))
+async def pool_entrar_grupo(callback: types.CallbackQuery, state: FSMContext):
+    """A conta entra no grupo de origem pelo link de convite guardado."""
+    if callback.from_user.id != ADMIN_ID: return
+    conta = pool_contas.obter_conta(callback.data.split(":")[1])
+    if not conta:
+        await callback.answer("Conta não encontrada.", show_alert=True)
+        return
+    await callback.answer("Entrando no grupo...")
+    _ok, mensagem = await pool_contas.entrar_no_grupo(conta["apelido"])
+    await callback.message.answer(mensagem)
+    texto, teclado = _pc_tela_conta(pool_contas.obter_conta(conta["apelido"]))
+    try:
+        await callback.message.edit_text(texto, parse_mode="HTML", reply_markup=teclado)
+    except Exception:
+        pass
+
+
+@dp.callback_query(F.data.startswith("pc_conv:"), StateFilter("*"))
+async def pool_pedir_convite(callback: types.CallbackQuery, state: FSMContext):
+    """Pede o link de convite do grupo de origem (fica guardado para as próximas contas)."""
+    if callback.from_user.id != ADMIN_ID: return
+    await state.set_state(NovaContaFluxo.aguardando_convite)
+    await state.update_data(conta_convite=callback.data.split(":")[1])
+    await callback.message.answer(
+        "🔗 Mande o <b>link de convite</b> do grupo de origem (ex.: <code>https://t.me/+AbCdEf</code>).\n"
+        "<i>Ele fica guardado para as próximas contas.</i>",
+        parse_mode="HTML", reply_markup=teclado_cancelar_conta
+    )
+    await callback.answer()
+
+
+@dp.message(NovaContaFluxo.aguardando_convite)
+async def pool_salvar_convite(message: types.Message, state: FSMContext):
+    """Guarda o link e já tenta colocar a conta no grupo."""
+    if message.from_user.id != ADMIN_ID: return
+    link = (message.text or "").strip()
+    if "t.me/+" not in link and "joinchat/" not in link:
+        await message.answer("⚠️ Isso não parece um link de convite. Mande algo como "
+                             "<code>https://t.me/+AbCdEf</code>.", parse_mode="HTML",
+                             reply_markup=teclado_cancelar_conta)
+        return
+    dados = await state.get_data()
+    await state.clear()
+    pool_contas.guardar_convite(link)
+    conta = pool_contas.obter_conta(dados.get("conta_convite") or "")
+    if not conta:
+        await message.answer("✅ Link de convite guardado.")
+        return
+    aviso = await message.answer(f"✅ Link guardado. Colocando {conta['apelido']} no grupo...")
+    _ok, mensagem = await pool_contas.entrar_no_grupo(conta["apelido"])
+    await aviso.edit_text(mensagem)
+    texto, teclado = _pc_tela_conta(pool_contas.obter_conta(conta["apelido"]))
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
 
 
 async def verificar_saude_contas():
@@ -9096,6 +9400,13 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info(f"❌ Ação cancelada via botão. Estado anterior: {estado_atual}")
 
     data = await state.get_data()
+
+    # Cadastro de conta: desconecta o login em andamento.
+    if estado_atual and estado_atual.startswith("NovaContaFluxo"):
+        await _encerrar_login_conta()
+        await state.clear()
+        await message.answer("❌ Cadastro de conta cancelado.")
+        return
 
     # Cancelar o recálculo da grade: nada foi alterado.
     if estado_atual == "ConfigFluxo:aguardando_confirmacao_rotinas":

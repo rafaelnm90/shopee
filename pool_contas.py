@@ -120,6 +120,7 @@
 #
 # ─── LINHA DE COMANDO ────────────────────────────────────────────────────────
 #     python3 pool_contas.py login             # loga uma conta nova e cadastra
+#                                              # (ou pelo bot: Contas 👥 › ➕ Nova conta)
 #     python3 pool_contas.py listar            # a tabela de todas as contas
 #     python3 pool_contas.py sincronizar       # checa todo mundo e redistribui
 #     python3 pool_contas.py importar-sessoes  # adota os .session já existentes
@@ -1535,54 +1536,77 @@ async def sincronizar_pool(clientes=None):
 # 8. LOGIN E ADOÇÃO DE SESSÕES EXISTENTES
 # =============================================================================
 
-async def login_interativo(apelido=None):
+async def iniciar_login(telefone):
     """
-    Loga uma conta NOVA pelo terminal e cadastra tudo automaticamente.
-
-    Fluxo: telefone → código do SMS/app → senha de 2FA (se houver) → get_me()
-    → cifra a StringSession → grava → checa o grupo → redistribui os postos.
-
-    É o "na hora que eu logar no servidor com outro usuário, a tabela atualiza
-    sozinha com nome, id e tudo mais".
+    Primeira etapa do login de uma conta nova: pede o código ao Telegram.
+    Devolve (cliente, phone_code_hash). O cliente fica conectado até
+    confirmar_codigo/confirmar_senha/finalizar_cadastro (ou cancelar_login).
     """
     from telethon import TelegramClient
     from telethon.sessions import StringSession
-    from telethon.errors import SessionPasswordNeededError
-
-    inicializar_tabelas()
 
     if not API_ID or not API_HASH:
-        print("❌ API_ID / API_HASH não encontrados no .env.")
-        return None
-
-    telefone = input("📱 Telefone com DDI (ex: +5532999998888): ").strip()
-
+        raise RuntimeError("API_ID / API_HASH não encontrados no .env.")
     cliente = TelegramClient(StringSession(), API_ID, API_HASH)
     await cliente.connect()
-
-    senha_2fa = None
     try:
-        await cliente.send_code_request(telefone)
-        codigo = input("🔑 Código recebido no Telegram: ").strip()
-        try:
-            await cliente.sign_in(telefone, codigo)
-        except SessionPasswordNeededError:
-            # getpass: a senha não aparece na tela nem no histórico do bash.
-            senha_2fa = getpass.getpass("🔐 Senha da verificação em duas etapas: ")
-            await cliente.sign_in(password=senha_2fa)
-    except Exception as e:
-        print(f"❌ Falha no login: {type(e).__name__}: {e}")
+        enviado = await cliente.send_code_request(telefone)
+    except Exception:
         await cliente.disconnect()
-        return None
+        raise
+    return cliente, enviado.phone_code_hash
 
+
+async def confirmar_codigo(cliente, telefone, codigo, phone_code_hash):
+    """Segunda etapa. Devolve True se a conta pede a senha das duas etapas."""
+    from telethon.errors import SessionPasswordNeededError
+    try:
+        await cliente.sign_in(telefone, codigo, phone_code_hash=phone_code_hash)
+        return False
+    except SessionPasswordNeededError:
+        return True
+
+
+async def confirmar_senha(cliente, senha):
+    """Terceira etapa, só para conta com verificação em duas etapas."""
+    await cliente.sign_in(password=senha)
+
+
+async def cancelar_login(cliente):
+    """Desconecta um login que não vai ser concluído."""
+    try:
+        await cliente.disconnect()
+    except Exception:
+        pass
+
+
+def apelido_sugerido(eu):
+    """
+    Apelido para a conta logada: o que ela já tem no pool (novo login da mesma
+    conta só renova a sessão), senão o @ ou "conta<id>"; se o nome estiver com
+    outra conta, ganha o fim do id.
+    """
+    for c in listar_contas():
+        if c.get("user_id") == eu.id:
+            return c["apelido"]
+    base = (eu.username or f"conta{eu.id}").lower()
+    existente = obter_conta(base)
+    if existente and existente.get("user_id") not in (None, eu.id):
+        return f"{base}_{eu.id % 10000}"
+    return base
+
+
+async def finalizar_cadastro(cliente, telefone, senha_2fa=None, apelido=None):
+    """
+    Última etapa: grava a conta logada no pool (sessão cifrada), confere o grupo
+    dos Autorais e redistribui os postos. Desconecta o cliente do login.
+    Devolve (apelido, status_grupo, mudancas).
+    """
     eu = await cliente.get_me()
     sessao = cliente.session.save()
     await cliente.disconnect()
 
-    if not apelido:
-        sugestao = (eu.username or f"conta{eu.id}").lower()
-        apelido = input(f"🏷️  Apelido para esta conta [{sugestao}]: ").strip() or sugestao
-
+    apelido = apelido or apelido_sugerido(eu)
     nome = " ".join(filter(None, [eu.first_name, eu.last_name])).strip()
     salvar_conta(
         apelido=apelido,
@@ -1593,13 +1617,49 @@ async def login_interativo(apelido=None):
         username=eu.username or "",
         nome_exibicao=nome or apelido,
     )
-    print(f"✅ Conta '{apelido}' cadastrada (id {eu.id}). Sessão gravada cifrada.")
+    registrar_evento(apelido, "CADASTRO", f"login da conta id {eu.id}")
 
-    conta = obter_conta(apelido)
-    status = await checar_conta(conta)
-    print(f"📍 Situação no grupo dos Autorais: {status[0]}")
+    status = await checar_conta(obter_conta(apelido))
+    return apelido, status[0], aplicar_funcoes()
 
-    mudancas = aplicar_funcoes()
+
+async def login_interativo(apelido=None):
+    """
+    Loga uma conta NOVA pelo terminal e cadastra tudo automaticamente.
+
+    Fluxo: telefone → código do SMS/app → senha de 2FA (se houver) → get_me()
+    → cifra a StringSession → grava → checa o grupo → redistribui os postos.
+    O bot faz o mesmo pelo painel Contas 👥 (➕ Nova conta), com as mesmas etapas.
+    """
+    inicializar_tabelas()
+
+    telefone = input("📱 Telefone com DDI (ex: +5532999998888): ").strip()
+    try:
+        cliente, codigo_hash = await iniciar_login(telefone)
+    except Exception as e:
+        print(f"❌ Falha ao pedir o código: {type(e).__name__}: {e}")
+        return None
+
+    senha_2fa = None
+    try:
+        codigo = input("🔑 Código recebido no Telegram: ").strip()
+        if await confirmar_codigo(cliente, telefone, codigo, codigo_hash):
+            # getpass: a senha não aparece na tela nem no histórico do bash.
+            senha_2fa = getpass.getpass("🔐 Senha da verificação em duas etapas: ")
+            await confirmar_senha(cliente, senha_2fa)
+    except Exception as e:
+        print(f"❌ Falha no login: {type(e).__name__}: {e}")
+        await cancelar_login(cliente)
+        return None
+
+    if not apelido:
+        eu = await cliente.get_me()
+        sugestao = apelido_sugerido(eu)
+        apelido = input(f"🏷️  Apelido para esta conta [{sugestao}]: ").strip() or sugestao
+
+    apelido, status_grupo, mudancas = await finalizar_cadastro(cliente, telefone, senha_2fa, apelido)
+    print(f"✅ Conta '{apelido}' cadastrada. Sessão gravada cifrada.")
+    print(f"📍 Situação no grupo dos Autorais: {status_grupo}")
     if mudancas:
         print("🔄 Postos redistribuídos:")
         apelidos = {c["id"]: c["apelido"] for c in listar_contas()}
@@ -1607,7 +1667,7 @@ async def login_interativo(apelido=None):
             quem = apelidos.get(novo if novo else antigo, "?")
             print(f"   • {funcao}: {quem} — {motivo}")
     else:
-        print("ℹ️  Nenhum posto mudou (os dois já estavam ocupados e saudáveis).")
+        print("ℹ️  Nenhum posto mudou.")
     return apelido
 
 
@@ -1710,57 +1770,68 @@ async def adotar_sessoes_existentes():
     return encontradas
 
 
-async def entrar_no_grupo(apelido):
-    """
-    Faz a conta entrar no grupo dos Autorais usando um link de convite guardado
-    na configuração. Serve para o caso "acabei de logar a conta 5, coloca ela lá
-    dentro" sem precisar abrir o Telegram no celular.
-
-    Para guardar o link uma vez:
-        python3 pool_contas.py convite https://t.me/+xxxxxxxx
-    """
-    from telethon import functions
-    from telethon.errors import UserAlreadyParticipantError, InviteHashExpiredError
-
+def ler_convite():
+    """O link de convite do grupo dos Autorais guardado, ou None."""
     inicializar_tabelas()
-    conta = obter_conta(apelido)
-    if not conta:
-        print(f"❌ Conta '{apelido}' não encontrada.")
-        return False
-
     conexao = _obter_conexao()
     cursor = conexao.cursor()
     cursor.execute("SELECT valor FROM configuracoes WHERE chave = ?", (CHAVE_CONVITE,))
     linha = cursor.fetchone()
     conexao.close()
     if not linha or not linha["valor"]:
-        print("❌ Nenhum link de convite guardado. Use: python3 pool_contas.py convite <link>")
-        return False
+        return None
+    try:
+        return json.loads(linha["valor"]) or None
+    except ValueError:
+        return None
 
-    link = json.loads(linha["valor"])
+
+async def entrar_no_grupo(apelido):
+    """
+    Faz a conta entrar no grupo dos Autorais usando o link de convite guardado
+    (comando 'convite' ou o painel do bot). Serve para "acabei de logar a conta 5,
+    coloca ela lá dentro" sem abrir o Telegram no celular.
+
+    Devolve (ok, mensagem). A mensagem também sai no terminal.
+    """
+    from telethon import functions
+    from telethon.errors import (UserAlreadyParticipantError, InviteHashExpiredError,
+                                 InviteHashInvalidError, InviteRequestSentError)
+
+    def resultado(ok, mensagem):
+        print(mensagem)
+        return ok, mensagem
+
+    inicializar_tabelas()
+    conta = obter_conta(apelido)
+    if not conta:
+        return resultado(False, f"❌ Conta '{apelido}' não encontrada.")
+    link = ler_convite()
+    if not link:
+        return resultado(False, "❌ Nenhum link de convite guardado. Use: python3 pool_contas.py convite <link>")
     hash_convite = link.rstrip("/").split("/")[-1].lstrip("+")
 
     cliente = await criar_cliente(conta)
     if not cliente:
-        return False
+        return resultado(False, f"❌ Não consegui conectar '{apelido}' (sessão inválida).")
     try:
         await cliente(functions.messages.ImportChatInviteRequest(hash_convite))
-        print(f"✅ {apelido} entrou no grupo.")
         registrar_evento(apelido, "ENTROU_NO_GRUPO", "via link de convite")
+        msg = f"✅ {apelido} entrou no grupo."
     except UserAlreadyParticipantError:
-        print(f"ℹ️  {apelido} já estava no grupo.")
-    except InviteHashExpiredError:
-        print("❌ O link de convite expirou. Gere um novo e regrave com o comando 'convite'.")
-        return False
+        msg = f"ℹ️ {apelido} já estava no grupo."
+    except InviteRequestSentError:
+        return resultado(False, f"⏳ Pedido de entrada de {apelido} enviado: um admin do grupo precisa aprovar.")
+    except (InviteHashExpiredError, InviteHashInvalidError):
+        return resultado(False, "❌ O link de convite expirou ou é inválido. Guarde um link novo.")
     except Exception as e:
-        print(f"❌ Falha ao entrar: {type(e).__name__}: {e}")
-        return False
+        return resultado(False, f"❌ Falha ao entrar: {type(e).__name__}: {e}")
     finally:
         await cliente.disconnect()
 
     await checar_conta(obter_conta(apelido))
     aplicar_funcoes()
-    return True
+    return resultado(True, msg)
 
 
 def guardar_convite(link):
