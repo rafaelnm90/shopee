@@ -14538,10 +14538,11 @@ async def processar_fila_espiao(forcar=False):
         JANELA_SILENCIO_MIN = 2
 
         conflito_silencio = False
-        rotinas_virais = ["job_rotina_promo_principal", "job_rotina_link_grupo_viral", "job_rotina_divulgar_gem_viral"]
 
         for job in scheduler.get_jobs():
-            if any(rv in job.id for rv in rotinas_virais) and getattr(job, 'next_run_time', None):
+            # Todas as rotinas do Viral (ROTINAS_VIRAIS), e só elas.
+            eh_rotina_viral = job.id.startswith("job_rotina_") and descobrir_escopo_job(job.id) == "viral"
+            if eh_rotina_viral and getattr(job, 'next_run_time', None):
                 tempo_rotina = job.next_run_time.astimezone(fuso_horario)
                 if abs((agora - tempo_rotina).total_seconds() / 60) <= JANELA_SILENCIO_MIN:
                     conflito_silencio = True
