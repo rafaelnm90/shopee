@@ -6856,24 +6856,28 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
                 
                 if order_sn in pedidos_db:
                     estado_anterior = pedidos_db[order_sn]["status"]
+                    comissao_anterior = pedidos_db[order_sn].get("comissao_total", 0) or 0
+                    estava_confirmado = estado_anterior == "COMPLETED"
+                    fica_confirmado = novo_status == "COMPLETED"
+
+                    # O saldo é a soma das comissões confirmadas: confirmou agora, entra a
+                    # comissão atual; deixou de estar confirmado, sai o que tinha entrado;
+                    # continua confirmado com outro valor, entra só a diferença.
+                    if not ignorar_ledger:
+                        if not estava_confirmado and fica_confirmado:
+                            saldo_caixa += c_total_frac
+                            if EXIBIR_LOGS: logger.info(f"💰 Transição detectada! Pedido confirmado: + R${c_total_frac:.2f}")
+                        elif estava_confirmado and not fica_confirmado:
+                            saldo_caixa -= comissao_anterior  # estorno
+                        elif estava_confirmado and c_total_frac > 0 and c_total_frac != comissao_anterior:
+                            saldo_caixa += c_total_frac - comissao_anterior
+
                     if estado_anterior != novo_status:
                         pedidos_db[order_sn]["status"] = novo_status
                         houve_atualizacao = True
-                        
-                        # Virou COMPLETED agora: soma no saldo (e o contrário estorna).
-                        if not ignorar_ledger:
-                            if estado_anterior != "COMPLETED" and novo_status == "COMPLETED":
-                                saldo_caixa += c_total_frac
-                                if EXIBIR_LOGS: logger.info(f"💰 Transição detectada! Pedido confirmado: + R${c_total_frac:.2f}")
-                            elif estado_anterior == "COMPLETED" and novo_status != "COMPLETED":
-                                saldo_caixa -= c_total_frac  # estorno
-                                
+
                     # Comissão ajustada pela Shopee
-                    if c_total_frac > 0 and pedidos_db[order_sn].get("comissao_total", 0) != c_total_frac:
-                        if not ignorar_ledger and novo_status == "COMPLETED":
-                            diferenca = c_total_frac - pedidos_db[order_sn]["comissao_total"]
-                            saldo_caixa += diferenca
-                        
+                    if c_total_frac > 0 and comissao_anterior != c_total_frac:
                         pedidos_db[order_sn]["comissao_total"] = c_total_frac
                         pedidos_db[order_sn]["comissao_shopee"] = c_shopee_frac
                         pedidos_db[order_sn]["comissao_vendedor"] = c_extra_frac
