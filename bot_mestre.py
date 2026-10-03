@@ -7150,9 +7150,12 @@ async def voltar_relatorios_geral(message: types.Message, state: FSMContext):
     await state.clear()
     await menu_relatorio_geral(message, state)
 
-# ✅ NOVO: Fila dedicada do Grupo Público (espelha o layout da Fila de Autorais)
 @dp.message(RelatoriosFluxo.menu_filas, F.text == "Fila do Grupo Público 📬")
 async def relatorio_fila_publico(message: types.Message, state: FSMContext):
+    """
+    Relatório da fila do Grupo Público: publicados hoje e agendados, com links de origem
+    e destino.
+    """
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("📬 Compilando o relatório da Fila do Grupo Público...")
 
@@ -7164,14 +7167,14 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
 
-    # Origem real de onde os vídeos são puxados para o Público
+    # Origem de onde os vídeos vêm (repost_origem ou o destino dos Autorais).
     canal_origem = config.get("repost_origem")
     if not canal_origem:
         config_aut = ler_config_bd("autorais_config", {})
         canal_origem = config_aut.get("destino", "")
     origem_base = str(canal_origem).split(":")[0].strip()
 
-    # Destino real: o grupo (e tópico) onde o vídeo foi publicado
+    # Destino: o grupo (e tópico) onde o vídeo é publicado.
     destino_bruto = config.get("repost_destino") or config.get("grupo_id") or ""
     destino_base = str(destino_bruto).split(":")[0].strip()
 
@@ -7213,7 +7216,7 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
             "legenda": linha["legenda"],
             "data_captura": linha["data_captura"],
             "processado": bool(linha["processado"]),
-            # ✅ Se o motor já cravou o horário exato, usa ele; senão mostra só a data
+            # horário sorteado, quando já existe; senão, só a data-alvo
             "data_publicacao": (linha["horario_disparo"] or data_alvo),
             "data_postagem": data_post.split(" ")[0] if data_post else "",
             "horario_postagem": data_post.split(" ")[1][:5] if " " in data_post else "",
@@ -7221,7 +7224,7 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
             "is_pausado": is_pausado
         })
 
-    # Postados hoje aparecem primeiro; depois os agendados por data-alvo
+    # Postados hoje primeiro; depois os agendados, por data.
     itens.sort(key=lambda x: (0 if x["processado"] else 1, x.get("data_publicacao") or ""))
     qtd_pendentes = len([i for i in itens if not i["processado"]])
 
@@ -7245,8 +7248,8 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
             elif origem_base.startswith("@"):
                 link_origem = f"https://t.me/{origem_base.replace('@', '')}/{msg_id}"
 
-        # 🔗 Link do post no destino. Só existe para item já publicado e com o id da
-        # mensagem gravado; os antigos continuam sem, porque ninguém guardou na época.
+        # Link do post no destino: só para item publicado com o id da mensagem gravado
+        # (os mais antigos não têm).
         link_destino = None
         msg_postada = v.get("msg_postada_id")
         if v.get("processado") and msg_postada and destino_base:
@@ -7285,12 +7288,17 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
 @dp.message(RelatoriosFluxo.menu_filas, F.text.in_(["Fila do Espelhador 🔄", "Fila do Espião 🕵️", "Fila de Autorais 🎥"]))
 @dp.message(RelatoriosFluxo.aguardando_rota_espelhador)
 async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
+    """
+    Relatório das filas do Espião, do Espelhador (por rota) e dos Autorais. Faz também
+    o pente fino: tira da fila o que expirou, o que é de rota excluída e o que já foi
+    publicado em outro dia.
+    """
     if message.from_user.id != ADMIN_ID: return
     
     estado_atual = await state.get_state()
     rota_selecionada = None
     
-    # 1. TRATAMENTO DO NOVO MENU DE MÚLTIPLAS ROTAS (ESPELHADOR)
+    # 1. Escolha de rota do Espelhador (quando há mais de uma)
     if estado_atual == RelatoriosFluxo.aguardando_rota_espelhador:
         if message.text == "Voltar aos Relatórios 🔙":
             if EXIBIR_LOGS: logger.info("🔙 Cancelando seleção de rota e retornando.")
@@ -7309,7 +7317,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         else:
             tipo_fila = "Espião"
         
-        # Se for o Espelhador e existirem múltiplas rotas, cria a interrupção visual
+        # Espelhador com várias rotas: pergunta qual mostrar.
         if tipo_fila == "Espelhador":
             import painel_espelhos
             dados_rotas = painel_espelhos.ler_espelhos()
@@ -7319,14 +7327,11 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 if EXIBIR_LOGS: logger.info("🔄 Múltiplas rotas detectadas no Espelhador. Exibindo menu de seleção...")
                 botoes = []
                 
-                # Primeiro botão isolado no topo
                 botoes.append([KeyboardButton(text="Todos os Espelhos 🌐")])
                 
-                # Um botão para cada espelho
                 for r in rotas:
                     botoes.append([KeyboardButton(text=r['nome'])])
                     
-                # Botão de voltar no final
                 botoes.append([KeyboardButton(text="Voltar aos Relatórios 🔙")])
                 
                 teclado = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -7343,8 +7348,8 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         try:
             conexao = sqlite3.connect("banco_dados.db")
             conexao.row_factory = sqlite3.Row
-            cursor = conexao.cursor()            # 🎯 O retorno autoral é publicado no grupo de ORIGEM, então é ele o destino
-            # do link do relatório.
+            cursor = conexao.cursor()
+            # O retorno autoral é publicado no grupo de ORIGEM: é ele o destino do link no relatório.
             _cfg_aut = ler_config_bd("autorais_config", {})
             _destino_retorno = str(_cfg_aut.get("origem") or "").split(":")[0].strip()
 
@@ -7363,9 +7368,8 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     "data_alvo": linha["data_alvo"],
                     "horario_disparo": linha["horario_disparo"],
                     "processado": bool(linha["processado"]),
-                    # ⏱️ Horário real da publicação. Item antigo não tem a coluna
-                    # preenchida: aí cai no horário sorteado, que é o valor mais
-                    # próximo que existe, em vez de sair em branco na tela.
+                    # Hora real da publicação; item antigo sem a coluna cai no horário sorteado, em vez
+                    # de sair em branco.
                     "data_postagem": (dict(linha).get("data_postagem") or linha["horario_disparo"] or "").split(" ")[0],
                     "horario_postagem": ((dict(linha).get("data_postagem") or linha["horario_disparo"] or "") + " ").split(" ")[1][:5],
                     "chat_destino": _destino_retorno,
@@ -7383,7 +7387,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             fila_data = {"fila": []}
             fila = []
 
-    # --- Obter a defasagem temporal real configurada (Precisamos disso cedo para o Espião) ---
+    # D+X configurado (o Espião precisa dele para o pente fino abaixo).
     atraso_dias = 0
     dados_espiao = {}
     if tipo_fila == "Espelhador":
@@ -7403,7 +7407,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro ao resgatar configurações do Espião: {e}")
         
-    # Lógica de filtragem corrigida (Pente Fino ATIVO)
+    # Pente fino: tira da fila o que já não vai sair e mantém na tela o que saiu hoje.
     pendentes = []
     agora = datetime.now(fuso_horario)
     agora_str = agora.strftime("%Y-%m-%d %H:%M:%S")
@@ -7411,12 +7415,11 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     if tipo_fila == "Espião":
         fila_limpa = []
         houve_alteracao = False
-        limite_horas = (atraso_dias * 24) + 24 # Expiração fluida (Ex: D+1 expira em 48h)
+        limite_horas = (atraso_dias * 24) + 24  # expira um dia depois do D+X (D+1 -> 48 h)
         
         hoje_str = agora.strftime("%Y-%m-%d")
         
         for item in fila:
-            # ✅ CORREÇÃO BLINDADA: Aceita qualquer formato de "True" para forçar a permanência
             if item.get("processado") in [True, 1, "true", "True"]:
                 if str(item.get("data_postagem")) == hoje_str:
                     if EXIBIR_LOGS: logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo postado hoje ({item.get('id')}) no visual da fila.")
@@ -7431,7 +7434,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     data_captura = datetime.strptime(data_cap_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
                     horas_na_fila = (agora - data_captura).total_seconds() / 3600
                     
-                    # Elimina os vídeos fantasmas que ficaram presos no estado "Atrasado"
+                    # Clone preso como "atrasado" além do prazo: sai da fila e do disco.
                     if horas_na_fila > limite_horas:
                         if EXIBIR_LOGS: logger.info(f"🧹 Pente Fino (Relatório): Removendo clone expirado ({horas_na_fila:.1f}h).")
                         houve_alteracao = True
@@ -7439,13 +7442,12 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                         if caminho_video and os.path.exists(caminho_video):
                             try: os.remove(caminho_video)
                             except: pass
-                        continue # Pula este item, ele não vai para a fila limpa
+                        continue
                 except ValueError:
                     pass
             
             fila_limpa.append(item)
             
-        # Se encontrou lixo, salva o JSON limpo imediatamente
         if houve_alteracao:
             fila_data["fila"] = fila_limpa
             salvar_fila_clonagem(fila_data)
@@ -7463,20 +7465,18 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             
             for item in fila:
                 if item.get("processado", False) or item.get("processado") == 1:
-                    # O robô autoral usa o horario_disparo para marcar o momento exato da postagem
                     horario_disp = item.get("horario_disparo", "")
                     
-                    # Se foi postado hoje, mantém ele vivo para aparecer no relatório!
+                    # Publicado hoje: fica na tela.
                     if horario_disp and horario_disp.startswith(hoje_str):
                         if EXIBIR_LOGS: logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo autoral postado hoje ({item.get('id')}) no visual da fila.")
                         fila_limpa.append(item)
                     else:
-                        # Se já virou o dia, apaga o registro do banco de dados para não acumular
+                        # Publicado em outro dia: sai do banco, para não acumular.
                         cursor.execute("DELETE FROM fila_autorais WHERE id_unico = ?", (item["id"],))
                         houve_alteracao = True
                     continue
                 
-                # Se for pendente, continua na lista normalmente
                 fila_limpa.append(item)
                 
             if houve_alteracao:
@@ -7497,16 +7497,14 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         hoje_str = agora.strftime("%Y-%m-%d")
         
         for item in fila:
-            # 🚀 AUTO-CORREÇÃO DINÂMICA: Entende cada espelho cruzando a origem, destino OU Nome
+            # Liga cada vídeo à sua rota pela origem (rotas antigas) ou pelo nome.
             nome_antigo = item.get("nome_rota", "")
             origem_item = str(item.get("chat_origem", item.get("origem", "")))
             
-            # ✅ NOVO: Flag para verificar se a rota do vídeo ainda existe
             rota_encontrada = False
             atraso_dias_rota = 1
             
             for r in lista_rotas:
-                # Compara usando a origem OU o nome da rota (para compatibilidade com itens antigos)
                 if (origem_item and str(r.get("origem", "")) == origem_item) or (nome_antigo and r.get("nome", "") == nome_antigo):
                     rota_encontrada = True
                     nome_atualizado = r.get("nome")
@@ -7517,7 +7515,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                         houve_alteracao = True
                     break
 
-            # 🛡️ PENTE FINO: Se a rota não existe mais, deleta o vídeo órfão!
+            # Rota excluída: o vídeo órfão sai da fila e do disco.
             if not rota_encontrada:
                 if EXIBIR_LOGS: logger.info(f"🧹 Pente Fino: Removendo vídeo órfão de uma rota excluída (Rota antiga: {nome_antigo}).")
                 houve_alteracao = True
@@ -7525,9 +7523,9 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 if caminho_video and os.path.exists(caminho_video):
                     try: os.remove(caminho_video)
                     except: pass
-                continue # Pula este item, ele não vai para a fila limpa
+                continue
 
-            # Mantém no visual os que foram postados HOJE no Espelhador.
+            # Publicado hoje: fica na tela.
             if item.get("processado", False):
                 if item.get("data_postagem") == hoje_str:
                     if EXIBIR_LOGS: logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo postado hoje ({item.get('id', 'SemID')}) no visual da fila do Espelhador.")
@@ -7536,15 +7534,14 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     houve_alteracao = True
                 continue
 
-            # ✅ NOVO: PENTE FINO DE VALIDADE (Padronizado com o Espião)
+            # Validade, como no Espião: um dia depois do D+X da rota.
             data_cap_str = item.get("data_captura", "")
             if data_cap_str:
                 try:
                     data_captura = datetime.strptime(data_cap_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
                     horas_na_fila = (agora - data_captura).total_seconds() / 3600
-                    limite_horas = (atraso_dias_rota * 24) + 24 # Expiração baseada no atraso DAQUELA rota
+                    limite_horas = (atraso_dias_rota * 24) + 24
                     
-                    # Elimina os vídeos fantasmas que ficaram presos
                     if horas_na_fila > limite_horas:
                         if EXIBIR_LOGS: logger.info(f"🧹 Pente Fino (Relatório): Removendo clone do Espelhador expirado ({horas_na_fila:.1f}h). Rota: {item.get('nome_rota')}")
                         houve_alteracao = True
@@ -7552,13 +7549,13 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                         if caminho_video and os.path.exists(caminho_video):
                             try: os.remove(caminho_video)
                             except: pass
-                        continue # Pula este item, deletando-o da fila
+                        continue
                 except ValueError:
                     pass
                 
             fila_limpa.append(item)
             
-        # Se encontrou lixo antigo ou atualizou os nomes dos robôs, salva o JSON silenciosamente
+        # Grava a fila limpa (lixo removido, nomes de rota sincronizados).
         if houve_alteracao:
             fila_data["fila"] = fila_limpa
             try:
@@ -7569,7 +7566,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             
         pendentes = fila_limpa
         
-        # ✅ NOVO: Aplica o filtro de listagem caso o usuário tenha clicado em uma rota específica
+        # Rota escolhida no menu: só os vídeos dela.
         if rota_selecionada and rota_selecionada != "Todos os Espelhos 🌐":
             pendentes = [i for i in pendentes if i.get("nome_rota") == rota_selecionada]
     
@@ -7618,37 +7615,30 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         }
         rotas_agrupadas["Radar Global"] = pendentes
 
-    # ✅ ORDENAÇÃO UNIVERSAL E INTELIGENTE (ESPIÃO E ESPELHADOR)
+    # Ordenação pelo dia em que cada vídeo vai ao ar
     def chave_ordenacao_universal(item, atraso_da_rota):
         """
-        Ordena pelo DIA EM QUE O VÍDEO VAI AO AR, e não por já ter ou não um
-        horário sorteado.
-
-        O critério anterior separava a fila em dois blocos: primeiro tudo o que
-        tinha horario_disparo, depois o resto pela data de captura. O efeito na
-        tela era um vídeo marcado para 18/09 aparecendo ACIMA de um que sai
-        amanhã, só porque o de amanhã ainda não passou pelo sorteio de horário.
-
-        A previsão exibida no card é calculada como data_captura + D+X. A ordem
-        precisa usar EXATAMENTE a mesma conta, senão tela e ordenação discordam.
+        Ordena pelo DIA EM QUE O VÍDEO VAI AO AR, não por já ter ou não horário sorteado
+        (senão um vídeo de daqui a dias aparecia acima de um que sai amanhã). A previsão do
+        card é data_captura + D+X; a ordem usa exatamente a mesma conta.
         """
         # 1. Já publicados encabeçam a lista, do mais cedo para o mais tarde
         if item.get("processado") in [True, 1, "true", "True"]:
             return (0, str(item.get("data_postagem") or ""),
                        str(item.get("horario_postagem") or "00:00"))
 
-        # 2. Horário já sorteado: é a informação mais precisa que existe
+        # 2. Horário já sorteado: a informação mais precisa que existe
         horario = item.get("horario_disparo") or item.get("data_publicacao") or ""
         if horario:
             return (1, str(horario)[:19], "")
 
-        # 3. Data-alvo sem hora (filas de Autorais e Público). O sufixo alto joga
-        #    o item para o fim do próprio dia, atrás dos que já têm hora cravada.
+        # 3. Data-alvo sem hora (Autorais e Público): o sufixo alto põe o item no fim do
+        #    próprio dia, depois dos que já têm hora.
         alvo = item.get("data_alvo")
         if alvo:
             return (1, f"{str(alvo)[:10]} 99:99:99", "")
 
-        # 4. Nada agendado ainda: repete a conta do card (captura + D+X)
+        # 4. Nada agendado ainda: a mesma conta do card (captura + D+X)
         captura = str(item.get("data_captura") or "")
         try:
             formato = "%Y-%m-%d %H:%M:%S" if len(captura) > 10 else "%Y-%m-%d"
@@ -7658,7 +7648,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             return (2, "9999-12-31", "")
 
     for nome_rota in rotas_agrupadas:
-        # Cada rota do Espelhador tem o próprio D+X; Espião e Autorais caem no global.
+        # Cada rota do Espelhador tem o próprio D+X; Espião e Autorais usam o global.
         atraso_da_rota = int(mapa_rotas.get(nome_rota, {}).get("intervalo_dias", atraso_dias) or 0)
         rotas_agrupadas[nome_rota].sort(key=lambda i: chave_ordenacao_universal(i, atraso_da_rota))
          
@@ -7668,7 +7658,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     primeira_rota = True
 
     for nome_rota, itens in rotas_agrupadas.items():
-        # ✅ Insere uma mensagem divisória antes de começar a próxima rota
+        # Divisória entre uma rota e a próxima.
         if not primeira_rota:
             mensagens_para_enviar.append("➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n🔄 <i>Próximo Espelho...</i>\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖")
 
@@ -7676,7 +7666,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             texto_atual = f"📊 <b>Relatório da Fila {tipo_fila}{titulo_atraso}</b>\n\n"
             primeira_rota = False
         else:
-            texto_atual = "" # Rota nova = Mensagem limpa nova
+            texto_atual = ""  # rota nova começa numa mensagem nova
 
         rota_info = mapa_rotas.get(nome_rota, {})
         inicio = rota_info.get("inicio", 10)
@@ -7697,7 +7687,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             link_original = v.get("link_original", "")
             msg_id = v.get("mensagem_id") or v.get("msg_id") or v.get("message_id")
             
-            # --- 1. RESGATE ESTRUTURAL (Com suporte exclusivo a Autorais) ---
+            # 1. Origem e link (os Autorais têm tratamento próprio)
             if tipo_fila == "Autorais":
                 origem_bruta = str(config_aut.get("destino", ""))
                 id_destino = str(config_aut.get("origem", ""))
@@ -7714,7 +7704,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 
                 link_final_exibicao = link_telegram
                 
-                # ✅ Extração Inteligente do Nome do Produto
+                # Nome do produto: o "📦 Item:" da legenda ou a primeira linha que não é link.
                 legenda = v.get("legenda", "")
                 import re
                 
@@ -7739,19 +7729,18 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     if not nome_produto:
                         nome_produto = "Produto Autoral (Sem Descrição)"
 
-                # 🔥 O VERDADEIRO PULO DO GATO:
-                # 1. Colocamos o Nome do Canal (com emoji) na chave que o motor usa para o topo
+                # O card do motor_filas mostra nome_origem no topo e o "📦 Item:" da legenda no
+                # '└ Nome:': os dois são preenchidos aqui para o card dos Autorais.
                 nome_origem_canal = cache_nomes.get(origem_bruta, origem_bruta)
                 v["nome_origem"] = f"🎥 {nome_origem_canal[:30]}"
                 
-                # 2. Enganamos o motor injetando "📦 Item: " na legenda para ele exibir no '└ Nome:'
                 v["legenda"] = f"📦 Item: {nome_produto[:45]}\n{legenda}"
                 
                 nome_origem = cache_nomes.get(origem_bruta, origem_bruta)
                 display_origem = f"📦 Acervo: {nome_origem[:20]}"
                 link_destino = None
             else:
-                # O CÓDIGO NORMAL DA ORIGEM DOS OUTROS MÓDULOS COMEÇA AQUI
+                # Outras filas: origem do item ou, sem ela, da rota
                 if not origem_bruta or origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None"]:
                     nome_rota_item = v.get("nome_rota")
                     if tipo_fila == "Espelhador" and nome_rota_item:
@@ -7772,7 +7761,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     try: origem_bruta = "@" + link_original.split("t.me/")[1].split("/")[0]
                     except: pass
 
-            # --- 2. CONSTRUÇÃO PRIORITÁRIA DO LINK DO TELEGRAM ---
+            # 2. Link do post no Telegram
             link_telegram = ""
             if msg_id and origem_bruta not in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 if origem_bruta.lstrip("-").isdigit():
@@ -7782,7 +7771,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     username = origem_bruta.replace("@", "")
                     link_telegram = f"https://t.me/{username}/{msg_id}"
             
-            # --- 3. PREPARAÇÃO DO LINK DE ORIGEM ---
+            # 3. Link de origem exibido
             link_final_exibicao = link_telegram if link_telegram else link_original
             
             if link_final_exibicao:
@@ -7812,7 +7801,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 elif id_destino and not id_destino.lstrip("-").isdigit():
                     link_display += f" | <a href='https://t.me/{id_destino.replace('@', '')}'>📤 Destino</a>"
                 
-            # --- 4. RESOLUÇÃO DE NOMES COM CACHE E BUSCA PROFUNDA ---
+            # 4. Nome da origem: item, cache, status dos alvos, rotas e, por fim, o Telegram
             if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 display_origem = "<code>Pendente de rastreio</code>"
             else:
@@ -7877,10 +7866,10 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     if nome_origem != origem_bruta:
                         salvar_nome_grupo(origem_bruta, nome_origem)
                 
-                # ✅ CORREÇÃO: sem corte. O nome do canal sai sempre completo.
+                # Nome do canal completo, sem corte.
                 display_origem = str(nome_origem) if nome_origem else str(origem_bruta)
                 
-            # --- 5. PREPARAÇÃO DO LINK DE DESTINO (Apenas se postado) ---
+            # 5. Link de destino (só item publicado)
             link_destino = None
             if v.get("processado", False) or v.get("processado") == 1:
                 if tipo_fila == "Espião":
@@ -7900,7 +7889,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 elif id_destino and not id_destino.lstrip("-").isdigit():
                     link_destino = f"https://t.me/{id_destino.replace('@', '')}"
 
-            # --- 6. ACIONANDO O MOTOR CENTRAL PARA O DESIGN DA FILA ---
+            # 6. Card do item (layout do motor_filas)
             from motor_filas import gerar_layout_item_padrao
             
             linha_video = gerar_layout_item_padrao(
@@ -7921,11 +7910,10 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 
             texto_atual += linha_video
             
-        # ✅ Salva a rota atual na lista de mensagens ANTES de ir para a próxima rota
         if texto_atual.strip():
             mensagens_para_enviar.append(texto_atual)
 
-    # Dispara todas as mensagens (Relatórios e Divisórias) separadamente
+    # Envia relatórios e divisórias em mensagens separadas.
     for msg in mensagens_para_enviar:
         await message.answer(msg, parse_mode="HTML", disable_web_page_preview=True)
         
