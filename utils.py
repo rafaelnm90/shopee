@@ -401,9 +401,84 @@ def obter_banco_global_origens():
             dados_espelhos = json.load(f)
             for rota in dados_espelhos.get("rotas", []):
                 for o in rota.get("origens", []):
-                    origens_globais.add(str(o))
+                    origens_globais.add(id_da_origem(o))
                 if "origem" in rota:
                     origens_globais.add(str(rota["origem"]))
     except Exception: pass
     
     return list(origens_globais)
+
+
+def id_da_origem(origem):
+    """
+    Origem de rota do Espelhador como texto ("-100123", "-100123:5" ou "@canal").
+
+    Rotas criadas pelo assistente do painel antes da correção gravavam a origem como
+    {"id": ..., "nome": ...}; o motor compara texto e nunca casava com esse formato.
+    """
+    if isinstance(origem, dict):
+        return str(origem.get("id") or "")
+    return str(origem)
+
+
+def normalizar_origens_rotas(dados):
+    """
+    Converte, em dados (conteúdo do espelhos_config.json), as origens gravadas como
+    {"id", "nome"} para o ID em texto, sem repetir origem. Também tira de
+    status_canais as entradas que o auditor criou para o formato antigo.
+
+    Altera dados no lugar e devolve True se mudou alguma coisa (quem chamou decide
+    se grava).
+    """
+    mudou = False
+    for rota in dados.get("rotas", []):
+        origens = rota.get("origens")
+        if isinstance(origens, list) and any(isinstance(o, dict) for o in origens):
+            novas = []
+            for o in origens:
+                alvo = id_da_origem(o)
+                if alvo and alvo not in novas:
+                    novas.append(alvo)
+            rota["origens"] = novas
+            mudou = True
+
+        status = rota.get("status_canais")
+        if isinstance(status, dict):
+            lixo = [chave for chave in status if str(chave).startswith("{")]
+            for chave in lixo:
+                del status[chave]
+                mudou = True
+    return mudou
+
+
+def salvar_json_atomico(caminho, dados, **opcoes_dump):
+    """
+    Grava dados em JSON sem que outro processo leia o arquivo pela metade.
+
+    espelhos_config.json e fila_espelhador.json são reescritos pelo painel, pelo
+    motor_userbot e pelo bot_mestre. Com open("w") o arquivo fica vazio até o
+    json.dump terminar; quem lê nesse instante recebe JSON inválido, e o painel trata
+    isso como "nenhuma rota" (um salvamento seguinte apagaria todas). Aqui o conteúdo
+    vai para um arquivo temporário na mesma pasta e os.replace troca os dois de uma
+    vez: quem lê vê o arquivo antigo inteiro ou o novo inteiro.
+
+    opcoes_dump vai direto para json.dump (indent, ensure_ascii).
+    """
+    import tempfile
+    pasta = os.path.dirname(os.path.abspath(caminho))
+    descritor, temporario = tempfile.mkstemp(dir=pasta, prefix=".tmp_", suffix=".json")
+    try:
+        with os.fdopen(descritor, "w", encoding="utf-8") as f:
+            json.dump(dados, f, **opcoes_dump)
+        # mkstemp cria com permissão 600; mantém a do arquivo que está sendo trocado.
+        try:
+            os.chmod(temporario, os.stat(caminho).st_mode & 0o777)
+        except FileNotFoundError:
+            os.chmod(temporario, 0o644)
+        os.replace(temporario, caminho)
+    except BaseException:
+        try:
+            os.remove(temporario)
+        except OSError:
+            pass
+        raise

@@ -40,7 +40,7 @@ import painel_espelhos
 import painel_notas
 import pool_contas        # 👥 Pool de contas: quem espelha e quem reposta nos Autorais
 import blacklist_captura  # 🚫 Lista negra: de quem o espelhador NUNCA pode capturar
-from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
+from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo, salvar_json_atomico
 EXIBIR_LOGS = True
 
 # 2. CONFIGURAÇÃO DE LOGS 🚀
@@ -1398,9 +1398,12 @@ def _caminhos_protegidos():
     except Exception:
         pass
 
-    # 🔄 Fila do Espelhador
+    # 🔄 Fila do Espelhador, lida do arquivo onde o motor_userbot grava. Não usar
+    # ler_config_bd aqui: sem a chave no banco ele "migra" o arquivo e o renomeia
+    # para .bkp, e o motor fica com a fila vazia.
     try:
-        dados = ler_config_bd("fila_espelhador", {}, arquivo_legado="fila_espelhador.json")
+        with open("fila_espelhador.json", "r", encoding="utf-8") as f:
+            dados = json.load(f)
         for item in (dados.get("fila", dados) if isinstance(dados, dict) else dados) or []:
             if isinstance(item, dict) and not item.get("processado"):
                 for chave in ("caminho_video", "caminho", "caminho_arquivo"):
@@ -7521,8 +7524,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         if houve_alteracao:
             fila_data["fila"] = fila_limpa
             try:
-                with open("fila_espelhador.json", "w", encoding="utf-8") as f:
-                    json.dump(fila_data, f, indent=4)
+                salvar_json_atomico("fila_espelhador.json", fila_data, indent=4)
                 if EXIBIR_LOGS: logger.info("✅ Auto-correção: Nomes das rotas sincronizados e lixo antigo limpo.")
             except Exception as e:
                 if EXIBIR_LOGS: logger.error(f"❌ Erro ao limpar fila espelhador: {e}")
@@ -9992,8 +9994,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
                     apagar_arquivo(item.get("caminho_video"))
                     relatorio["espelhador"] += 1
             fila_espelhador["fila"] = mantidos_espelhador
-            with open("fila_espelhador.json", "w", encoding="utf-8") as f:
-                json.dump(fila_espelhador, f, indent=4)
+            salvar_json_atomico("fila_espelhador.json", fila_espelhador, indent=4)
         except Exception:
             pass
 

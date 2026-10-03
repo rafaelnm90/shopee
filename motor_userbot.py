@@ -35,7 +35,7 @@ from telethon import utils
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
 from dotenv import load_dotenv
-from utils import registrar_erro_json, chave_cache_ia, consultar_cache_ia, gravar_cache_ia
+from utils import registrar_erro_json, chave_cache_ia, consultar_cache_ia, gravar_cache_ia, normalizar_origens_rotas, salvar_json_atomico
 from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite
 from zoneinfo import ZoneInfo
 
@@ -491,9 +491,11 @@ def ler_espelhos_config():
     """Rotas do Espelhador (espelhos_config.json), editadas pelo painel_espelhos."""
     try:
         with open("espelhos_config.json", "r") as f:
-            return json.load(f)
+            dados = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {"rotas": []}
+    normalizar_origens_rotas(dados)
+    return dados
 
 def ler_fila_espelhador():
     """Fila do Espelhador (fila_espelhador.json): itens agendados e o histórico do que já saiu."""
@@ -504,8 +506,7 @@ def ler_fila_espelhador():
         return {"fila": []}
 
 def salvar_fila_espelhador(dados):
-    with open("fila_espelhador.json", "w") as f:
-        json.dump(dados, f, indent=4)
+    salvar_json_atomico("fila_espelhador.json", dados, indent=4)
 
 # Análise antecipada da fila do Espião: em segundo plano, um vídeo por vez. Fazer na
 # captura causaria rajada de chamadas quando vários canais postam juntos (e é assim
@@ -818,8 +819,7 @@ async def processar_fila_espelhador_loop():
                     houve_alteracao_rota = True
             
             if houve_alteracao_rota:
-                with open("espelhos_config.json", "w", encoding="utf-8") as f:
-                    json.dump(config, f, indent=4, ensure_ascii=False)
+                salvar_json_atomico("espelhos_config.json", config, indent=4, ensure_ascii=False)
                     
             # Grava a fila só se algo mudou (agendamento, publicação ou itens removidos).
             if len(fila) != len(itens_restantes) or houve_agendamento or houve_disparo:
@@ -1282,6 +1282,8 @@ async def monitorar_status_espelhos():
                         dados_espelho = json.load(f)
                 except FileNotFoundError:
                     dados_espelho = {"rotas": []}
+                # Origem no formato antigo {"id", "nome"} vira texto; se mudou, a auditoria grava.
+                origens_normalizadas = normalizar_origens_rotas(dados_espelho)
                 
                 rotas = dados_espelho.get("rotas", [])
                 
@@ -1290,7 +1292,7 @@ async def monitorar_status_espelhos():
                 # Só confere se mudaram as origens ou destinos das rotas.
                 if assinatura_atual != ultima_assinatura_rotas:
                     if EXIBIR_LOGS: logger.info("🔍 [Auditor] Mudança detectada nas rotas do Espelhador. Iniciando validação...")
-                    alterado = False
+                    alterado = origens_normalizadas
                     
                     for rota in rotas:
                         canais_para_verificar = []
@@ -1344,8 +1346,7 @@ async def monitorar_status_espelhos():
                                     alterado = True
                                     
                     if alterado:
-                        with open("espelhos_config.json", "w", encoding="utf-8") as f:
-                            json.dump(dados_espelho, f, indent=4, ensure_ascii=False)
+                        salvar_json_atomico("espelhos_config.json", dados_espelho, indent=4, ensure_ascii=False)
                         if EXIBIR_LOGS: logger.info("✅ Arquivo do Espelhador atualizado e sincronizado após auditoria.")
                         
                     ultima_assinatura_rotas = str([{ "origens": r.get("origens", [r.get("origem")]), "destino": r.get("destino") } for r in rotas])

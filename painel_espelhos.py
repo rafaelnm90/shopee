@@ -11,7 +11,7 @@ from motor_userbot import ler_fila_espelhador, salvar_fila_espelhador
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import StateFilter
-from utils import ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
+from utils import ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo, id_da_origem, normalizar_origens_rotas, salvar_json_atomico
 from motor_filas import ler_faixa_limite, sortear_teto_do_dia # ⚙️ Novo Motor Centralizado
 EXIBIR_LOGS = True
 
@@ -126,9 +126,11 @@ teclado_espelhador_abrangencia = ReplyKeyboardMarkup(
 def ler_espelhos():
     try:
         with open("espelhos_config.json", "r") as f:
-            return json.load(f)
+            dados = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {"rotas": []}
+    normalizar_origens_rotas(dados)
+    return dados
 
 def ler_contador_espelhador(nome_rota):
     try:
@@ -140,8 +142,7 @@ def ler_contador_espelhador(nome_rota):
         return 0
 
 def salvar_espelhos(dados):
-    with open("espelhos_config.json", "w") as f:
-        json.dump(dados, f, indent=4)
+    salvar_json_atomico("espelhos_config.json", dados, indent=4)
 
 def obter_teclado_importacao_espelhador():
     return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Importar Banco Global 🌍")], [KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True, is_persistent=True)
@@ -711,7 +712,7 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
 
     nova_rota = {
         "nome": nome_rota,
-        "origens": origens,
+        "origens": [id_da_origem(o) for o in origens],
         "destino": destino,
         "inicio": inicio,
         "fim": fim,
