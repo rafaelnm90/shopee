@@ -1456,7 +1456,7 @@ def _caminhos_protegidos():
     except Exception:
         pass
 
-    # 🔄 Fila do Espelhador, lida do arquivo onde o motor_userbot grava. Não usar
+    # Fila do Espelhador, lida do arquivo onde o motor_userbot grava. Não usar
     # ler_config_bd aqui: sem a chave no banco ele "migra" o arquivo e o renomeia
     # para .bkp, e o motor fica com a fila vazia.
     try:
@@ -1470,7 +1470,7 @@ def _caminhos_protegidos():
     except Exception:
         pass
 
-    # 👥 Fila dos parceiros
+    # Fila dos parceiros
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -1481,8 +1481,8 @@ def _caminhos_protegidos():
     except Exception:
         pass
 
-    # 📬 Fila do Grupo Público: o arquivo que o Correio já baixou e o bot ainda não
-    # publicou. Sem isto a faxina o apagaria se o item passasse das 24h protegidas.
+    # Grupo Público: o arquivo que o Correio já baixou e o bot ainda não publicou.
+    # Sem isto a faxina o apagaria se o item passasse das 24 h protegidas.
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -1498,11 +1498,10 @@ def _caminhos_protegidos():
 
 def diagnostico_temp():
     """
-    📊 Reparte o peso de temp/ entre o que está preso a alguma fila e o que é lixo.
+    Divide o peso de temp/ entre o que está preso a alguma fila e o que é lixo.
 
-    Sem essa separação o alerta não diz nada útil: 3 GB de fila pendente é o
-    sistema a funcionar normalmente, 3 GB de órfão é a faxina a falhar, e o
-    aviso saía igual nos dois casos.
+    Sem a separação, o alerta não diz nada: 3 GB de fila pendente é o sistema
+    funcionando, 3 GB de órfão é a faxina falhando.
 
     Devolve (bytes presos em fila, bytes órfãos, nº de órfãos já fora do prazo).
     """
@@ -1532,16 +1531,9 @@ def diagnostico_temp():
 
 async def faxina_disco_periodica():
     """
-    🧹 A faxina de disco com agenda PRÓPRIA, a cada 6 horas.
-
-    Antes ela vivia dentro do varredor_de_lixeira das 03h, no meio do mesmo
-    try: se o commit do SQLite falhasse (banco ocupado é rotina aqui, são vários
-    serviços no mesmo ficheiro) ou se limpar_achadinhos_antigos() rebentasse, a
-    limpeza do disco era saltada em silêncio e só tinha nova hipótese 24h depois.
-    Uma tarefa de disco não devia depender de uma rotina de mensagens do Telegram.
-
-    Corre em thread separada porque percorre o sistema de ficheiros e não pode
-    prender o event loop dos bots.
+    Faxina de disco com agenda própria, a cada 6 horas, separada da lixeira das 3h:
+    uma falha no SQLite ou nos achadinhos não pode pular a limpeza do disco. Roda
+    numa thread porque percorre o sistema de arquivos e não pode prender o event loop.
     """
     await asyncio.to_thread(limpar_arquivos_orfaos)
 
@@ -1567,7 +1559,7 @@ def limpar_arquivos_orfaos():
                 except Exception:
                     pass
 
-        # 📦 archive/: vídeos já publicados, retenção por idade
+        # archive/: vídeos dos Autorais, apagados por idade depois de DIAS_RETENCAO_ARCHIVE dias.
         limite_archive = time.time() - (DIAS_RETENCAO_ARCHIVE * 86400)
         for raiz, _dirs, arquivos in os.walk("archive"):
             for nome in arquivos:
@@ -1612,6 +1604,10 @@ def relatorio_disco():
     return "  |  ".join(linhas)
 
 async def varredor_de_lixeira():
+    """
+    Às 3h: apaga as mensagens da lixeira, poda os achadinhos e o cache da IA e limpa
+    os arquivos órfãos.
+    """
     if EXIBIR_LOGS: logger.info("🧹 Iniciando varredura diária da lixeira persistente (03h00)...")
     try:
         conexao = sqlite3.connect("banco_dados.db")
@@ -1627,7 +1623,7 @@ async def varredor_de_lixeira():
                 ids_apagados.append(id_banco)
             except Exception as e:
                 if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao processar item da lixeira: {e}")
-                ids_apagados.append(id_banco) # Remove do banco mesmo com falha para não travar
+                ids_apagados.append(id_banco)  # sai da lista mesmo com falha, para não travar a lixeira
         
         for id_banco in ids_apagados:
             cursor.execute("DELETE FROM lixeira_mensagens WHERE id = ?", (id_banco,))
@@ -1636,13 +1632,13 @@ async def varredor_de_lixeira():
         conexao.close()
         if EXIBIR_LOGS: logger.info("✅ Lixeira persistente (SQLite) esvaziada com sucesso.")
 
-                # ⏳ Aproveita a faxina para podar a memória antiga dos achadinhos
+                # Aproveita para podar a memória antiga dos achadinhos.
         limpar_achadinhos_antigos()
 
-        # 🧹 Remove arquivos órfãos, cruzando com TODAS as filas antes de apagar
+        # Também roda a cada 6 h em faxina_disco_periodica.
         limpar_arquivos_orfaos()
 
-        # 🧠 Poda o cache de análises: 30 dias já passou de qualquer publicação
+        # Cache de análises da IA: 30 dias já passou de qualquer publicação.
         try:
             from utils import limpar_cache_ia_antigo, estatisticas_cache_ia
             limpar_cache_ia_antigo(30)
@@ -1655,6 +1651,7 @@ async def varredor_de_lixeira():
         if EXIBIR_LOGS: logger.error(f"❌ Erro na varredura da lixeira: {e}")
 
 async def apagar_mensagem_automatica(msg_id, chat_id=GRUPO_ID):
+    """Apaga a mensagem; se ela já não existir, só registra no log."""
     try:
         await bot.delete_message(chat_id=chat_id, message_id=msg_id)
         if EXIBIR_LOGS: logger.info(f"🧹 Faxina concluída: Mensagem {msg_id} apagada do chat {chat_id}.")
@@ -1662,11 +1659,11 @@ async def apagar_mensagem_automatica(msg_id, chat_id=GRUPO_ID):
         if EXIBIR_LOGS: logger.info(f"⚠️ Faxina: A mensagem {msg_id} já havia sido apagada manualmente.")
 
 # ==========================================
-# 📊 HISTÓRICO DE MÉTRICAS (prova social)
-# Grava um retrato diário de cada canal no SQLite. Sobrevive a restart,
-# deploy e troca de servidor, porque mora no mesmo banco_dados.db.
+# Histórico de métricas (prova social)
+# Um retrato diário de cada canal no SQLite, que sobrevive a restart e deploy.
 # ==========================================
 def salvar_metrica(dia, chave, valor):
+    """Grava (ou troca) o valor da métrica no dia."""
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -1747,7 +1744,7 @@ async def coletar_metricas_diarias():
             "publico": grupo_publico
         }
 
-        # --- 1. Membros / inscritos ---
+        # Membros / inscritos
         for nome, chat_id in canais.items():
             if not chat_id:
                 continue
@@ -1757,7 +1754,7 @@ async def coletar_metricas_diarias():
             except Exception as e:
                 if EXIBIR_LOGS: logger.warning(f"⚠️ [Métricas] Não consegui contar membros de {nome}: {e}")
 
-        # --- 2. Vídeos publicados hoje ---
+        # Vídeos publicados hoje
         posts = {"principal": 0, "viral": 0, "publico": 0}
         try:
             conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -1782,16 +1779,15 @@ async def coletar_metricas_diarias():
         except Exception:
             pass
 
-        # --- 3. Grava o dia e atualiza o acervo acumulado ---
+        # Grava o dia e atualiza o acervo acumulado
         for nome, qtd in posts.items():
             salvar_metrica(hoje_str, f"posts_dia_{nome}", qtd)
             acumulado_ontem = ler_metrica(f"posts_total_{nome}", 1) or 0
             salvar_metrica(hoje_str, f"posts_total_{nome}", acumulado_ontem + qtd)
 
-        # --- 4. Downloader: total acumulado e quantos afiliados já usaram ---
-        # A tabela downloads_totais nunca é zerada, então o total já é o número
-        # real desde sempre. O retrato diário é o que passa a existir a partir
-        # de agora — é ele que habilita os fatos de marco e de crescimento.
+        # Downloader: total acumulado e quantos afiliados já usaram. A tabela
+        # downloads_totais nunca é zerada, então o total já é o número desde sempre; o
+        # retrato diário habilita os fatos de marco e de crescimento.
         dl_total = dl_usuarios = 0
         try:
             conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -1802,7 +1798,7 @@ async def coletar_metricas_diarias():
             salvar_metrica(hoje_str, "downloads_total", dl_total or 0)
             salvar_metrica(hoje_str, "downloads_usuarios", dl_usuarios or 0)
         except Exception:
-            # A tabela só existe depois do primeiro download. Silêncio proposital.
+            # A tabela só existe depois do primeiro download.
             pass
 
         if EXIBIR_LOGS:
@@ -1812,7 +1808,7 @@ async def coletar_metricas_diarias():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Métricas] Falha na coleta diária: {e}")
 
-# 📊 MODO PROVA: quais rotinas divulgam qual canal, e como nomeá-lo
+# Modo prova: quais rotinas divulgam qual canal, e como nomeá-lo.
 MAPA_PROVA_ROTINAS = {
     "promo_publico": "publico",
     "promo_publico_viral": "publico",
@@ -1826,7 +1822,7 @@ NOMES_CANAIS_PROVA = {
     "principal": "Canal Acervo Afiliados",
     "viral": "Canal Acervo Viral",
 }
-CHANCE_MODO_PROVA = 0.40   # 40% prova / 60% pedir
+CHANCE_MODO_PROVA = 0.40  # 40% prova / 60% pedir
 
 # Pisos do downloader. Abaixo disso o número não impressiona e a escada segue
 # para os fatos de canal. Suba conforme o bot for crescendo.
@@ -1836,24 +1832,26 @@ PISO_DOWNLOADS_SEMANA = 20
 
 
 def _fato_downloader():
-    """Fatos de USO do baixador de vídeos. None se ainda não houver número digno.
-    Prova de uso vale mais que métrica de vaidade: membro entra e some, download
-    é alguém apertando o botão. Por isso entra no topo da escada do Público."""
+    """
+    Fatos de USO do baixador de vídeos; None se ainda não há número digno.
+    Prova de uso vale mais que métrica de vaidade (membro entra e some, download é
+    alguém apertando o botão), por isso vem no topo da escada do Público.
+    """
     total = ler_metrica("downloads_total", 0)
     if total is None:
         return None
     usuarios = ler_metrica("downloads_usuarios", 0) or 0
 
-    # 1. Marco redondo cruzado hoje. O filtro pelo piso é essencial: a lista de
-    #    marcos foi feita para MEMBROS e começa em 10 — anunciar "passou de 10
-    #    vídeos" seria confessar que ninguém usa.
+    # 1. Marco redondo cruzado hoje. O piso é essencial: a lista de marcos foi feita
+    #    para MEMBROS e começa em 10, e "passou de 10 vídeos" seria confessar que
+    #    ninguém usa.
     marco = marco_cruzado(total, ler_metrica("downloads_total", 1))
     if marco and marco >= PISO_DOWNLOADS_TOTAL:
         return f"o baixador de vídeos do grupo acabou de passar de {marco} vídeos entregues"
 
     # 2. Total acumulado com quantas pessoas usaram. Vem antes do volume semanal
-    #    de propósito: o total sobe todo dia, então o número nunca empaca. O
-    #    semanal, sob crescimento estável, repetiria o mesmo valor por semanas.
+    #    de propósito: o total sobe todo dia, então o número nunca empaca; o
+    #    semanal, com crescimento estável, repetiria o mesmo valor por semanas.
     if total >= PISO_DOWNLOADS_TOTAL and usuarios >= PISO_DOWNLOADS_USUARIOS:
         return f"{total} vídeos já baixados no grupo por {usuarios} afiliados"
 
@@ -1861,7 +1859,7 @@ def _fato_downloader():
     if total >= PISO_DOWNLOADS_TOTAL:
         return f"{total} vídeos já baixados pelo robô do grupo"
 
-    # 4. Volume da semana — socorre a fase inicial, antes do total cruzar o piso
+    # 4. Volume da semana: socorre a fase inicial, antes do total cruzar o piso
     semana = crescimento_metrica("downloads_total", 7)
     if semana and semana >= PISO_DOWNLOADS_SEMANA:
         return f"{semana} vídeos baixados no grupo nos últimos 7 dias"
@@ -1875,8 +1873,7 @@ def gerar_fato_prova(canal):
     None significa 'nenhum número digno' — a rotina volta ao modo PEDIR.
     """
     try:
-        # 0. Downloader — exclusivo do Grupo Público e mais forte que qualquer
-        #    métrica de canal, então é consultado antes de tudo.
+        # 0. Downloader: só no Grupo Público, e mais forte que qualquer métrica de canal.
         if canal == "publico":
             fato_dl = _fato_downloader()
             if fato_dl:
@@ -1928,7 +1925,7 @@ def gerar_fato_prova(canal):
         if EXIBIR_LOGS: logger.error(f"❌ [Modo Prova] Erro ao gerar fato: {e}")
         return None
 
-# 🚦 SISTEMA DE INTERCALAÇÃO: vídeos são a espinha dorsal, textos entram no meio
+# Intercalação: os vídeos são a espinha dorsal dos canais; os textos de rotina entram no meio.
 def registrar_ultimo_post(chat_destino, tipo_conteudo):
     """Guarda se a última publicação daquele canal foi 'video' ou 'texto'."""
     try:
@@ -1942,6 +1939,7 @@ def registrar_ultimo_post(chat_destino, tipo_conteudo):
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao registrar último post: {e}")
 
 def obter_ultimo_post(chat_destino):
+    """'video' ou 'texto': a última publicação registrada no canal."""
     try:
         dados = ler_config_bd("ultimo_post_canais", {})
         return dados.get(str(chat_destino), {}).get("tipo")
@@ -1949,11 +1947,11 @@ def obter_ultimo_post(chat_destino):
         return None
 
 def contar_videos_pendentes(chat_destino):
-    """Estoque de vídeos ainda não publicados naquele canal. 0 = libera textos seguidos."""
+    """Vídeos que ainda saem hoje naquele canal, para a intercalação. 0 libera textos seguidos."""
     try:
         alvo = str(chat_destino)
 
-        # 📺 Canal Principal (fila de postagens do SQLite)
+        # Canal principal (fila_postagens)
         if alvo == str(GRUPO_ID):
             # Na pausa programada os vídeos não saem: não há o que intercalar, e contar
             # os pendentes adiaria cada texto de rotina até o fim da pausa.
@@ -1967,19 +1965,17 @@ def contar_videos_pendentes(chat_destino):
             conexao.close()
             return total
 
-        # 🕵️ Canal Viral (fila de clonagem do Espião)
+        # Canal Viral (fila de clonagem do Espião)
         dados_espiao = ler_alvos_espiao()
         if alvo == str(dados_espiao.get("canal_destino")):
             fila = ler_fila_clonagem().get("fila", [])
             return len([i for i in fila if i.get("processado") not in [True, 1, "true", "True"]])
 
-        # 📬 Grupo Público (fila própria do repostador)
+        # Grupo Público (fila_publico)
         conexao = sqlite3.connect("banco_dados.db")
         cursor = conexao.cursor()
-        # ⚠️ Só conta vídeo ELEGÍVEL hoje, como já faz o Principal na linha acima.
-        # Contando a fila inteira, os agendados para semanas à frente entravam
-        # na conta: a intercalação adiava o texto para dar passagem a um vídeo
-        # que só sai daqui a 11 dias, e nenhum dos dois publicava.
+        # Só conta vídeo que pode sair hoje, como no principal: com a fila inteira, um
+        # vídeo agendado para daqui a semanas adiava os textos sem nunca sair.
         hoje_pub = datetime.now(fuso_horario).strftime("%Y-%m-%d")
         cursor.execute(
             "SELECT COUNT(*) FROM fila_publico WHERE processado = 0 AND data_alvo <= ?",
@@ -1992,30 +1988,21 @@ def contar_videos_pendentes(chat_destino):
         if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível contar vídeos pendentes: {e}")
         return 0
 
-# 🗓️ Cada turno de data dupla vive na SUA faixa de horas. As faixas garantem
-# pelo menos 2h entre um aviso e o seguinte, mesmo no pior encaixe possível.
-# As faixas são propositadamente NÃO adjacentes: com "tarde" a acabar às 17h59 e
-# "noite" a começar às 18h00, um par podia sair com 14 minutos de intervalo. Assim
-# o menor intervalo possível entre dois turnos é de 2h01, acima do piso abaixo.
+# Cada turno de data dupla tem a sua faixa de horas. As faixas não são adjacentes
+# de propósito: o menor intervalo possível entre dois turnos é de 2h01, acima do
+# piso abaixo (com faixas coladas, um par podia sair com minutos de diferença).
 FAIXAS_TURNO_CAMPANHA = {"manha": (8, 11), "tarde": (14, 16), "noite": (19, 21)}
 
-# Piso absoluto entre dois avisos da MESMA campanha, conferido na hora de disparar.
-# É a rede: mesmo que o agendamento se atrapalhe depois de um reinício ou de um
-# "Atualizar Rotinas" no meio do dia, o segundo aviso morre aqui.
-# 110 e não um número redondo qualquer: as faixas acima garantem no mínimo 121
-# minutos entre turnos, então o piso fica logo abaixo disso. Assim um agendamento
-# legítimo nunca é barrado, e qualquer coisa mais junta é acidente por definição.
+# Piso entre dois avisos da MESMA campanha, conferido na hora de disparar: mesmo
+# que o agendamento se atrapalhe (reinício, "Atualizar Rotinas" no meio do dia),
+# o segundo aviso morre aqui. Fica logo abaixo dos 121 min garantidos pelas faixas:
+# um agendamento legítimo nunca é barrado.
 MINUTOS_MINIMOS_CAMPANHA = 110
 
 def horario_dentro_do_turno(agora, turno, horario_sugerido=None):
     """
-    ⏰ Devolve um horário válido DENTRO da faixa do turno, ou None se o turno já
-    passou por hoje.
-
-    Existe porque o encaixe anterior tratava "manhã", "tarde" e "noite" como
-    meros rótulos: os três horários saíam da mesma busca por lacuna livre e
-    podiam cair colados. Foi assim que o alerta do 09.09 saiu às 13h19, 14h10 e
-    15h01 — três vezes em duas horas, no lugar de um por turno.
+    Horário válido DENTRO da faixa do turno (manhã, tarde, noite), ou None se o turno
+    já passou hoje. Usa horario_sugerido quando ele cai na faixa e no futuro.
     """
     faixa = FAIXAS_TURNO_CAMPANHA.get(turno)
     if not faixa:
@@ -2024,7 +2011,7 @@ def horario_dentro_do_turno(agora, turno, horario_sugerido=None):
 
     limite_turno = agora.replace(hour=faixa_fim, minute=59, second=0, microsecond=0)
     if agora > limite_turno:
-        return None   # o turno terminou: fica para amanhã, não vira apêndice de outro
+        return None  # o turno terminou: fica para amanhã, não vira apêndice de outro
 
     if horario_sugerido and faixa_ini <= horario_sugerido.hour <= faixa_fim and horario_sugerido > agora:
         return horario_sugerido
@@ -2040,11 +2027,16 @@ def horario_dentro_do_turno(agora, turno, horario_sugerido=None):
     return candidato if candidato <= limite_turno else None
 
 async def disparar_mensagem(tipo, forcar=False):
+    """
+    Dispara uma rotina de texto (gerada pela IA) no canal do tipo: principal, Viral
+    ou Grupo Público. Passa pelas pausas, pelo espaçamento das campanhas, pela
+    intercalação com os vídeos e pelo expediente; forcar=True só respeita as pausas.
+    """
     if EXIBIR_LOGS: logger.info(f"🔍 Validando status antes de disparar a rotina '{tipo}' (Forçar: {forcar})...")
     
     dados_rotina = ler_config_rotina()
     
-    # 🎯 MAPEAMENTO DE DESTINOS
+    # Destino de cada rotina
     rotinas_virais = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral", "promo_achadinhos_viral"]
     rotinas_publico = ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico", "promo_achadinhos_publico"]
     
@@ -2061,7 +2053,7 @@ async def disparar_mensagem(tipo, forcar=False):
             if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): Grupo Público ainda não configurado.")
             return
 
-    # 🚀 PAUSAS ABSOLUTAS (Bloqueia sem exceção para forçar)
+    # Pausas das rotinas: valem até para disparo forçado.
     if is_viral and dados_rotina.get("pausado_viral", False):
         if EXIBIR_LOGS: logger.info(f"🛑 Disparo abortado ({tipo}): Rotinas do VIRAL estão pausadas.")
         return
@@ -2076,11 +2068,10 @@ async def disparar_mensagem(tipo, forcar=False):
     agora_tz = datetime.now(fuso_horario)
     hoje_str = agora_tz.strftime("%Y-%m-%d")
 
-    # 🚦 ESPAÇAMENTO MÍNIMO ENTRE AVISOS DA MESMA CAMPANHA
-    # Os três turnos da data dupla partilham o MESMO 'tipo', e campanhas estão
-    # isentas de todas as outras travas daqui para baixo. Esta é a única que as
-    # segura: se o aviso anterior saiu há menos de MINUTOS_MINIMOS_CAMPANHA, este
-    # é descartado em vez de reagendado — o dia já foi avisado, repetir só irrita.
+    # Espaçamento mínimo entre avisos da mesma campanha. Os três turnos da data dupla
+    # têm o mesmo 'tipo', e campanhas não passam pelas travas abaixo; esta é a única
+    # que as segura. Aviso cedo demais é descartado, não reagendado: o dia já foi
+    # avisado.
     if tipo.startswith("campanha_") and not forcar:
         historico_dia = dados_rotina.get("historico_diario", {})
         if historico_dia.get("data") == hoje_str:
@@ -2098,7 +2089,7 @@ async def disparar_mensagem(tipo, forcar=False):
                 except Exception:
                     pass
 
-    # 🚦 TRAVA DE INTERCALAÇÃO: não posta dois textos seguidos se ainda houver vídeo na fila
+    # Intercalação: não posta dois textos seguidos se ainda há vídeo do dia na fila.
     if not forcar and tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
         estoque_videos = contar_videos_pendentes(chat_destino)
         if obter_ultimo_post(chat_destino) == "texto" and estoque_videos > 0:
@@ -2108,7 +2099,7 @@ async def disparar_mensagem(tipo, forcar=False):
             if EXIBIR_LOGS: logger.info(f"🚦 [Intercalação] '{tipo}' adiado para {novo_horario.strftime('%H:%M')}: o último post foi texto e há {estoque_videos} vídeo(s) na fila.")
             return
     
-    # 🚀 LÓGICA DE TRAVA ABSOLUTA E EXPEDIENTE
+    # Bom Dia e Boa Noite uma vez por dia; as demais rotinas do principal só no expediente.
     if tipo == "bom_dia" and dados_rotina.get("ultimo_bom_dia") == hoje_str:
         if EXIBIR_LOGS: logger.warning("🛑 Bloqueio Anti-Acidente: O 'Bom Dia' já foi enviado hoje.")
         return
@@ -2165,7 +2156,7 @@ async def disparar_mensagem(tipo, forcar=False):
         "Entregue APENAS o texto da mensagem, sem introduções e sem aspas."
     )
 
-    # 🧠 PROMPTS DA INTELIGÊNCIA ARTIFICIAL
+    # Prompts da IA
     if tipo == "bom_dia":
         prompt = f"{contexto_afiliado} Crie uma mensagem de bom dia motivadora avisando que os vídeos de hoje estão prontos. Use emojis."
     elif tipo == "boa_noite":
@@ -2177,8 +2168,8 @@ async def disparar_mensagem(tipo, forcar=False):
     elif tipo == "link_grupo_viral":
         prompt = f"{contexto_afiliado} Peça aos membros para convidarem amigos para o acervo de virais. Não use links. Use emojis."
     elif tipo.startswith("campanha_"):
-        # 🧩 'campanha_pub_0_08.08' vira 'campanha_0_08.08' antes de fatiar:
-        # sem isto o int(partes[1]) recebe a string "pub" e estoura.
+        # 'campanha_pub_0_08.08' vira 'campanha_0_08.08' antes de fatiar; senão
+        # int(partes[1]) receberia "pub".
         partes = tipo.replace("campanha_pub_", "campanha_").split("_")
         dias_restantes = int(partes[1])
         data_dupla = partes[2] if len(partes) > 2 else ""
@@ -2196,7 +2187,6 @@ async def disparar_mensagem(tipo, forcar=False):
     elif tipo in ["promo_achadinhos", "promo_achadinhos_viral"]:
         prompt = "Recomende nosso canal Central de Achadinhos VIP. Diga que lá saem ofertas e promoções de produtos garimpados todos os dias, com o link pronto para comprar. Fale como quem indica um achado, não como anúncio. Máximo 200 caracteres, use emojis, sem links."
 
-    ## ✅ NOVOS PROMPTS DA EXPANSÃO DO PÚBLICO
     elif tipo in ["promo_publico", "promo_publico_viral"]:
         prompt = "Recomende nosso Grupo Público. Explique que é um espaço aberto onde todos os afiliados podem postar seus vídeos com links para divulgação. Destaque que é uma comunidade de ajuda mútua, garantindo que sempre tenham vídeos disponíveis para todos usarem. Seja empolgante, máximo 200 caracteres, use emojis, sem links."
     elif tipo == "link_grupo_publico":
@@ -2208,8 +2198,8 @@ async def disparar_mensagem(tipo, forcar=False):
     elif tipo == "promo_achadinhos_publico":
         prompt = "Atue como moderador do grupo público. Recomende nossa Central de Achadinhos VIP, onde saem ofertas garimpadas todos os dias com o link pronto para comprar. Fale como quem indica um achado, não como anúncio. Máximo 200 caracteres, use emojis, sem links."
 
-    # 📊 MODO PROVA: em 40% dos disparos, troca o convite por um dado real.
-    # Se não houver número digno, mantém o convite (modo PEDIR) sem alarde.
+    # Modo prova: em CHANCE_MODO_PROVA dos disparos, troca o convite por um dado real.
+    # Sem número digno, mantém o convite.
     canal_prova = MAPA_PROVA_ROTINAS.get(tipo)
     if canal_prova and random.random() < CHANCE_MODO_PROVA:
         fato = gerar_fato_prova(canal_prova)
@@ -2230,13 +2220,12 @@ async def disparar_mensagem(tipo, forcar=False):
     
     if EXIBIR_LOGS: logger.info(f"🚀 Preparando rotina ({tipo}) para o chat {chat_destino}.")
     
-    # ✅ NOVO: Lógica de Multi-Tópicos (Multi-Threading)
+    # Grupo Público: a rotina vai para cada tópico em topicos_rotina (sem lista, o Geral).
     destinos = []
     if is_publico:
         config_sub = ler_submissao_config()
         topicos_rotina = config_sub.get("topicos_rotina", [])
         if topicos_rotina:
-            # Transforma os IDs em inteiros e inclui os tópicos de escuta/vitrine se necessário
             for t in topicos_rotina:
                 try: destinos.append(int(t))
                 except: pass
@@ -2245,17 +2234,14 @@ async def disparar_mensagem(tipo, forcar=False):
     else:
         destinos.append(None)
 
-    # ✅ Segurança: se a lista ficou vazia (ex: todos os IDs inválidos),
-    # cai para o Geral em vez de não enviar nada.
+    # Lista vazia (IDs inválidos): manda no Geral em vez de não enviar nada.
     if not destinos:
         destinos.append(None)
 
     for thread_id in destinos:
         try:
-            # ✅ CORREÇÃO: Converte o ID rigorosamente para número inteiro.
-            # O tópico 1 é o "Geral" do fórum e a Bot API do Telegram REJEITA
-            # message_thread_id=1 ("message thread not found"). Para postar no
-            # Geral é obrigatório OMITIR o parâmetro, ou seja, enviar None.
+            # A Bot API recusa message_thread_id=1 (o Geral do fórum, "message thread not
+            # found"): para postar no Geral, o parâmetro vai como None.
             thread_param = int(thread_id) if thread_id is not None else None
             if thread_param == 1:
                 thread_param = None
@@ -2264,9 +2250,9 @@ async def disparar_mensagem(tipo, forcar=False):
             msg_enviada = await bot.send_message(chat_destino, texto, message_thread_id=thread_param)
             registrar_lixeira(msg_enviada.message_id, chat_destino)
             
-            await asyncio.sleep(1) # Pausa de respiro para anexos
+            await asyncio.sleep(1)  # respiro antes do anexo
             
-            # 🔗 ANEXADORES DE LINKS ISOLADOS
+            # Links que acompanham cada tipo de rotina
             if tipo == "link_grupo":
                 msg_link = await bot.send_message(chat_destino, f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}", parse_mode="HTML", message_thread_id=thread_param)
                 registrar_lixeira(msg_link.message_id, chat_destino)
@@ -2295,15 +2281,16 @@ async def disparar_mensagem(tipo, forcar=False):
             else:
                 if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar rotina {tipo} para thread {thread_id}: {e}")
             
-        await asyncio.sleep(4) # ✅ CORREÇÃO: Pausa LONGA (4 seg) para não tomar punição de flood do Telegram entre um tópico e outro!
+        await asyncio.sleep(4)  # pausa entre tópicos, para não tomar flood do Telegram
 
-    # 🚦 Marca que a última publicação deste canal foi um TEXTO
+    # Para a intercalação: a última publicação deste canal foi um texto.
     registrar_ultimo_post(chat_destino, "texto")
 
 def ler_config_rotina():
+    """config_rotina, com as chaves que faltarem preenchidas pelo padrão (e gravadas)."""
     if EXIBIR_LOGS: logger.info("🚀 Iniciando leitura e validação das configurações de rotina...")
     padrao = {
-        # Rotinas do Canal Principal
+        # Canal principal
         "bom_dia": {"inicio": 6, "fim": 9, "frequencia": 1},
         "incentivo": {"inicio": 10, "fim": 20, "frequencia": 2},
         "boa_noite": {"inicio": 21, "fim": 23, "frequencia": 1},
@@ -2313,14 +2300,14 @@ def ler_config_rotina():
         "promo_publico": {"inicio": 10, "fim": 20, "frequencia": 1},
         "promo_achadinhos": {"inicio": 10, "fim": 20, "frequencia": 1},
 
-        # Rotinas do Canal Viral
+        # Canal Viral
         "promo_principal": {"inicio": 10, "fim": 20, "frequencia": 1},
         "divulgar_gem_viral": {"inicio": 8, "fim": 22, "frequencia": 1},
         "link_grupo_viral": {"inicio": 9, "fim": 21, "frequencia": 2},
         "promo_publico_viral": {"inicio": 10, "fim": 20, "frequencia": 1},
         "promo_achadinhos_viral": {"inicio": 10, "fim": 20, "frequencia": 1},
 
-        # Rotinas do Grupo Público
+        # Grupo Público
         "link_grupo_publico": {"inicio": 9, "fim": 21, "frequencia": 2},
         "promo_principal_publico": {"inicio": 10, "fim": 20, "frequencia": 1},
         "promo_viral_publico": {"inicio": 10, "fim": 20, "frequencia": 1},
@@ -2349,12 +2336,12 @@ def ler_config_rotina():
 def salvar_config_rotina(dados):
     salvar_config_bd("config_rotina", dados)
 
-# 🎯 CADA ROBÔ TEM A SUA PRÓPRIA LISTA. Nada de misturar.
+# Rotinas de cada robô; o que não está nestas listas é do canal principal.
 ROTINAS_VIRAIS = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral", "promo_achadinhos_viral"]
 ROTINAS_PUBLICO = ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico", "promo_achadinhos_publico"]
 
 def descobrir_escopo_job(job_id):
-    """Descobre a QUAL robô o job pertence, comparando o tipo por igualdade exata."""
+    """A qual robô o job pertence (principal, viral, publico), pelo tipo da rotina no id."""
     if job_id.startswith('job_campanha_pub_'):
         return "publico"
     if job_id.startswith('job_campanha_'):
@@ -2378,13 +2365,19 @@ NOMES_AMIGAVEIS_ROTINA = {
 }
 
 def agendar_tarefas_diarias(escopo="todos"):
+    """
+    Sorteia os horários de rotina do dia e refaz os jobs do escopo pedido ("todos",
+    "principal", "viral" ou "publico"). Com "todos" (madrugada e ligar o bot), também
+    faz a faxina da fila do canal principal e reagenda os vídeos dele. Rotina que já
+    saiu hoje não é agendada de novo.
+    """
     if EXIBIR_LOGS: logger.info(f"🔄 Sorteando horários de rotina (Escopo: {escopo.upper()})...")
     
     agora_faxina = datetime.now(fuso_horario)
     hoje_faxina_str = agora_faxina.strftime("%Y-%m-%d")
     
     if escopo == "todos":
-        # --- Limpeza de Madrugada no SQLite ---
+        # Faxina da madrugada: itens CONCLUIDO/ERRO de dias anteriores saem da fila e, sem outro uso, do disco.
         try:
             conexao = sqlite3.connect("banco_dados.db")
             cursor = conexao.cursor()
@@ -2406,18 +2399,16 @@ def agendar_tarefas_diarias(escopo="todos"):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro na faxina da madrugada (SQLite): {e}")
     
-        # 🎯 As listas e o identificador de dono agora vivem no topo do arquivo,
-    # para que o painel de confirmação também consiga usá-los.
     rotinas_virais_lista = ROTINAS_VIRAIS
     rotinas_publico_lista = ROTINAS_PUBLICO
     _escopo_do_job = descobrir_escopo_job
 
-    # Remove os jobs antigos respeitando estritamente o ESCOPO solicitado
+    # Remove os jobs antigos, só do escopo pedido.
     for job in scheduler.get_jobs():
         if job.id.startswith('job_rotina_') or job.id.startswith('job_campanha_'):
             escopo_job = _escopo_do_job(job.id)
             if escopo != "todos" and escopo_job != escopo:
-                continue # Pertence a outro robô: não encosta
+                continue  # de outro robô: não mexe
 
             job.remove()
             if EXIBIR_LOGS: logger.info(f"🧹 Agendamento antigo apagado da memória [{escopo_job}]: {job.id}")
@@ -2426,7 +2417,7 @@ def agendar_tarefas_diarias(escopo="todos"):
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
     
-    # 1. ABERTURA E FECHAMENTO RÍGIDOS (Apenas se o escopo permitir)
+    # 1. Bom Dia e Boa Noite (só no escopo principal)
     if escopo in ["todos", "principal"]:
         for tipo in ["bom_dia", "boa_noite"]:
             if tipo not in dados_rotina or type(dados_rotina[tipo]) is not dict: continue
@@ -2448,10 +2439,10 @@ def agendar_tarefas_diarias(escopo="todos"):
                 
             scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=min_sorteado, timezone=FUSO_STR, args=[tipo], id=f"job_rotina_{tipo}_0", replace_existing=True)
 
-        # 2. DISTRIBUIÇÃO DOS VÍDEOS (Fila do Canal Principal)
+        # 2. Vídeos do canal principal
         agendar_fila_postagens()
     
-    # 3. MAPEAMENTO DAS LACUNAS (Sempre roda para achar as fronteiras de limite)
+    # 3. Lacunas do dia: entre Bom Dia, vídeos e Boa Noite
     eventos_fixos = []
     for job in scheduler.get_jobs():
         if job.id.startswith('job_rotina_bom_dia') or job.id.startswith('job_rotina_boa_noite') or job.id.startswith('job_fila_postagem_'):
@@ -2491,7 +2482,6 @@ def agendar_tarefas_diarias(escopo="todos"):
             return ponto_insercao
         return None
 
-    # PREPARAÇÃO DINÂMICA
     tipos_restantes = [t for t in dados_rotina.keys() if t not in ["bom_dia", "boa_noite", "pausado", "pausado_viral", "pausado_publico", "ultimo_bom_dia", "ultimo_boa_noite", "historico_diario"]]
     rotinas_virais = [t for t in tipos_restantes if t in rotinas_virais_lista]
     rotinas_publico = [t for t in tipos_restantes if t in rotinas_publico_lista]
@@ -2505,7 +2495,7 @@ def agendar_tarefas_diarias(escopo="todos"):
         return len(registro) if isinstance(registro, list) else registro
 
     if escopo in ["todos", "principal"]:
-        # 4.1 AGENDAMENTO DA GRADE PRINCIPAL
+        # 4. Rotinas do canal principal, distribuídas nas maiores lacunas, alternando os tipos
         grupos_tarefas = {}
         for tipo in rotinas_principais:
             config = dados_rotina[tipo]
@@ -2543,15 +2533,15 @@ def agendar_tarefas_diarias(escopo="todos"):
                 scheduler.add_job(disparar_mensagem, 'date', run_date=horario_fallback, args=[tipo], id=f"job_rotina_{tipo}_{indice}", replace_existing=True)
                 ultimo_tipo_agendado = tipo
 
-        # 5. AGENDAMENTO DAS CAMPANHAS ESPECIAIS
+        # 5. Datas duplas (dia == mês, ex. 9.9) dos próximos 4 dias: um aviso por turno
         for i in range(4):
             data_futura = agora + timedelta(days=i)
             if data_futura.day == data_futura.month:
                 tipo_alerta = f"campanha_{i}_{data_futura.day:02d}.{data_futura.month:02d}"
                 turnos_pendentes = ["manha", "tarde", "noite"][obter_qtd_disparos(tipo_alerta):]
                 for p in turnos_pendentes:
-                    # A lacuna livre continua sendo a preferência, mas agora só vale
-                    # se cair dentro do turno. Fora dele, sorteia-se na faixa certa.
+                    # A lacuna livre é a preferência, mas só vale dentro do turno; fora dele, sorteia
+                    # na faixa certa.
                     sugestao = encontrar_maior_lacuna_e_inserir(duracao_minima=10)
                     horario_campanha = horario_dentro_do_turno(agora, p, sugestao)
                     if not horario_campanha:
@@ -2565,7 +2555,7 @@ def agendar_tarefas_diarias(escopo="todos"):
                 break
 
     if escopo in ["todos", "viral"]:
-        # 4.5. AGENDAMENTO PARALELO PARA O CANAL VIRAL
+        # 6. Rotinas do Canal Viral
         grupos_virais = {}
         for tipo in rotinas_virais:
             config = dados_rotina[tipo]
@@ -2587,9 +2577,8 @@ def agendar_tarefas_diarias(escopo="todos"):
             for chave in chaves_remover: chaves_virais.remove(chave)
                 
         ultimo_tipo_viral = None
-                # 🎬 OS VÍDEOS SÃO A ESPINHA DORSAL DO CANAL VIRAL.
-        # As rotinas deixam de sortear horário no escuro e passam a se ENCAIXAR
-        # nas maiores lacunas entre os clones já agendados pelo Espião.
+        # Os vídeos são a espinha dorsal do Viral: as rotinas se encaixam nas maiores
+        # lacunas entre os clones já agendados pelo Espião.
         horarios_ocupados_viral = []
         try:
             for it in ler_fila_clonagem().get("fila", []):
@@ -2626,8 +2615,7 @@ def agendar_tarefas_diarias(escopo="todos"):
                     maior, melhor = gap, pontos[i] + gap / 2
             if melhor and maior >= timedelta(minutes=folga_min * 2):
                 encaixe = melhor.replace(second=0, microsecond=0)
-                # 🛡️ Trava final: o ponto médio da lacuna pode cair FORA da janela
-                # configurada quando há poucos vídeos. A janela manda sempre.
+                # Com poucos vídeos, o meio da lacuna pode cair fora da janela; a janela manda.
                 if encaixe < limite_ini or encaixe > limite_fim:
                     return None
                 return encaixe
@@ -2637,7 +2625,7 @@ def agendar_tarefas_diarias(escopo="todos"):
             encaixe = encaixar_na_maior_lacuna(config.get("inicio", 8), config.get("fim", 22))
             if encaixe:
                 horario_candidato = encaixe
-                horarios_ocupados_viral.append(encaixe)   # ocupa a lacuna para a próxima rotina
+                horarios_ocupados_viral.append(encaixe)  # ocupa a lacuna para a próxima rotina
                 horarios_ocupados_viral.sort()
             else:
                 minuto_absoluto = random.randint(config.get("inicio", 8) * 60, config.get("fim", 22) * 60 + 59)
@@ -2661,9 +2649,8 @@ def agendar_tarefas_diarias(escopo="todos"):
             ultimo_tipo_viral = tipo
 
     if escopo in ["todos", "publico"]:
-        # 4.6. AGENDAMENTO INDEPENDENTE DO GRUPO PÚBLICO
-        # Mesma filosofia do Viral: as rotinas se encaixam nas lacunas entre os
-        # vídeos já agendados na fila_publico, sem depender do Canal Afiliados.
+        # 7. Rotinas do Grupo Público: como no Viral, encaixadas entre os vídeos já
+        # agendados na fila_publico.
         grupos_publico = {}
         for tipo in rotinas_publico:
             config = dados_rotina.get(tipo)
@@ -2746,7 +2733,7 @@ def agendar_tarefas_diarias(escopo="todos"):
             if horario_candidato <= agora:
                 horario_candidato = agora + timedelta(minutes=random.randint(3, 12))
 
-            # 🛡️ Anti-colisão SOMENTE contra outras rotinas do próprio Público
+            # Anti-colisão só contra as rotinas do próprio Público.
             for job_existente in scheduler.get_jobs():
                 if getattr(job_existente, 'next_run_time', None) and _escopo_do_job(job_existente.id) == "publico":
                     if abs((horario_candidato - job_existente.next_run_time.astimezone(fuso_horario)).total_seconds()) < 120:
@@ -2756,11 +2743,9 @@ def agendar_tarefas_diarias(escopo="todos"):
             scheduler.add_job(disparar_mensagem, 'date', run_date=horario_candidato, args=[tipo], id=f"job_rotina_{tipo}_{indice}", replace_existing=True)
             ultimo_tipo_publico = tipo
 
-        # 5.1 CAMPANHAS DE DATA DUPLA DO GRUPO PÚBLICO
-        # Espelha o Canal Principal (3 turnos no dia do evento), mas com namespace
-        # 'job_campanha_pub_' próprio para o escopo não colidir na hora da limpeza.
-        # O roteamento para "Bate Papo Geral" e "Vídeos da Comunidade" é automático:
-        # o disparar_mensagem espalha para todos os topicos_rotina quando is_publico.
+        # 8. Datas duplas do Grupo Público: 3 turnos no dia do evento, com o prefixo
+        # 'job_campanha_pub_' para não colidir com o principal na limpeza por escopo. O
+        # disparar_mensagem manda para todos os topicos_rotina.
         for i in range(4):
             data_futura = agora + timedelta(days=i)
             if data_futura.day == data_futura.month:
@@ -2774,13 +2759,12 @@ def agendar_tarefas_diarias(escopo="todos"):
                     else:
                         faixa_ini, faixa_fim = 18, 21
 
-                    # Tenta encaixar na maior lacuna do turno; se não couber, sorteia.
+                    # Tenta a maior lacuna do turno; se não couber, sorteia na faixa.
                     horario_campanha = horario_dentro_do_turno(
                         agora, p, encaixar_lacuna_publico(faixa_ini, faixa_fim, folga_min=3)
                     )
-                    # ⚠️ O "+3 a 10 minutos" que estava aqui empurrava um turno vencido
-                    # para logo depois de agora. Rodando "Atualizar Rotinas" às 19h, os
-                    # três turnos caíam juntos. Turno vencido agora fica para amanhã.
+                    # Turno vencido fica para amanhã (empurrá-lo para "daqui a pouco" juntava os
+                    # três turnos quando "Atualizar Rotinas" rodava à noite).
                     if not horario_campanha:
                         if EXIBIR_LOGS:
                             logger.info(f"⏰ [Data Dupla Público] Turno '{p}' já passou. Ignorado hoje.")
@@ -2798,12 +2782,12 @@ def agendar_tarefas_diarias(escopo="todos"):
                 break
 
 async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int = None):
-    # 1. Recupera o estado de navegação atual do utilizador de forma remota
+    """Fim dos 15 min sem atividade no painel: limpa o estado (FSM) e devolve o menu inicial."""
     state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=chat_id, user_id=user_id, thread_id=thread_id))
     estado_atual = await state.get_state()
     data = await state.get_data()
     
-    # Trava de inteligência: Se já estiver na raiz (estado vazio E flag confirmada), a função morre silenciosamente
+    # Já está na raiz: nada a fazer.
     if not estado_atual and data.get("painel_atual") == "raiz":
         return
         
@@ -2811,17 +2795,15 @@ async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int 
     await state.clear()
     await state.update_data(painel_atual="raiz")
     
-    # 2. Notifica o encerramento, aguarda renderização e limpa o chat
     try:
         if EXIBIR_LOGS: logger.info("✅ Restaurando o menu principal por inatividade e efetuando limpeza...")
         
-        # Passo A: Envia o aviso temporário SEM botões
+        # Aviso temporário, sem botões, apagado em seguida.
         msg_aviso = await bot.send_message(chat_id, "⏳ Sessão expirada por inatividade. Limpando tela...")
         await asyncio.sleep(1.5)
         await bot.delete_message(chat_id=chat_id, message_id=msg_aviso.message_id)
         
-        # Passo B: Envia a mensagem âncora definitiva COM os botões do menu raiz
-        # 🛡️ Só restaura o painel no chat privado do administrador
+        # Volta o menu inicial, só no privado do admin.
         if str(chat_id) == str(ADMIN_ID):
             await bot.send_message(chat_id, "🏠 Painel Inicial restaurado.", reply_markup=obter_teclado_raiz())
         
@@ -2830,20 +2812,20 @@ async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int 
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao atualizar o teclado e limpar chat: {e}")
 
 class InatividadeMiddleware(BaseMiddleware):
+    """Rearma, a cada mensagem ou clique do admin no privado, o cronômetro de 15 min do painel."""
     async def __call__(
         self,
         handler: Callable[[types.Message, Dict[str, Any]], Awaitable[Any]],
         event: types.Message,
         data: Dict[str, Any]
     ) -> Any:
-                # ✅ Aceita tanto mensagem quanto clique em botão inline.
-        # Sem isso, painéis que só têm botões inline nunca rearmavam a contagem.
+                # Vale para mensagem e para clique em botão inline (painéis só com botões inline
+                # também rearmam a contagem).
         mensagem_base = getattr(event, "message", None) if hasattr(event, "data") else event
         chat = getattr(mensagem_base, "chat", None)
 
-        # 🛡️ O cronômetro vale SOMENTE no painel administrativo (chat privado do admin).
-        # Em grupos e canais ele não deve existir: lá o wizard tem o próprio cronômetro,
-        # e limpar o estado atrapalharia quem está no meio de uma submissão.
+        # Só no painel (chat privado do admin). Em grupos, o wizard de submissão tem o
+        # próprio cronômetro, e limpar o estado atrapalharia quem está no meio dele.
         eh_painel_admin = (
             event.from_user
             and event.from_user.id == ADMIN_ID
@@ -2854,7 +2836,6 @@ class InatividadeMiddleware(BaseMiddleware):
         if eh_painel_admin:
             job_id = f"job_inatividade_{event.from_user.id}"
 
-            # 1. Inicia uma nova contagem limpa de 15 minutos
             from datetime import datetime, timedelta
             novo_limite = datetime.now(fuso_horario) + timedelta(minutes=15)
 
@@ -2862,7 +2843,6 @@ class InatividadeMiddleware(BaseMiddleware):
             origem = "clique" if hasattr(event, "data") else "mensagem"
             if EXIBIR_LOGS: logger.info(f"⏰ Contagem de inatividade rearmada por {origem} no painel admin.")
 
-            # 2. Adiciona ou sobrepõe o cronômetro antigo de forma limpa e unificada
             scheduler.add_job(
                 resetar_sessao_inatividade, 
                 'date', 
@@ -2877,6 +2857,9 @@ class InatividadeMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 class BloqueioAdminMiddleware(BaseMiddleware):
+    """
+    Só o admin usa o bot, e só no privado; a exceção são as vias verdes (submissão e buscador).
+    """
     async def __call__(
         self,
         handler: Callable[[Any, Dict[str, Any]], Awaitable[Any]],
@@ -2885,14 +2868,13 @@ class BloqueioAdminMiddleware(BaseMiddleware):
     ) -> Any:
         usuario = getattr(event, "from_user", None)
         
-        # Identifica se é uma mensagem de texto ou um clique num botão (CallbackQuery)
         is_callback = hasattr(event, "data")
         mensagem_base = event.message if is_callback else event
         
         chat = getattr(mensagem_base, "chat", None)
         texto = getattr(event, "text", getattr(event, "data", ""))
         
-        # 1. VIA VERDE: Verifica se a mensagem está no grupo e tópico de submissão
+        # Via verde: mensagem no grupo e tópico de submissão (membros enviam vídeos).
         is_submissao = False
         if chat:
             try:
@@ -2903,28 +2885,25 @@ class BloqueioAdminMiddleware(BaseMiddleware):
                     
                     thread_id = getattr(mensagem_base, "message_thread_id", None)
                     
-                    # Valida se está exatamente no grupo e no tópico configurado
                     if str(chat.id) == str(grupo_alvo) and str(thread_id) == str(topico_alvo):
                         is_submissao = True
                         if is_callback and EXIBIR_LOGS: logger.info("🟢 [Via Verde] Clique de botão autorizado no painel de submissão.")
             except Exception:
                 pass
 
-        # 1b. VIA VERDE DO BUSCADOR: o tópico de busca é feito para o membro
-        # escrever livremente. Sem esta exceção o middleware barra tudo antes
-        # de qualquer handler — inclusive as suas próprias buscas.
-        # Escopo mínimo de propósito: só este grupo, só este tópico, só texto.
+        # Via verde do buscador: no tópico de busca o membro escreve livremente. Escopo
+        # mínimo: só este grupo, só este tópico, só texto.
         if chat and BUSCA_TOPICO_ID and not is_callback:
             thread_busca = getattr(mensagem_base, "message_thread_id", None)
             if chat.id == BUSCA_GRUPO_ID and (thread_busca or 1) == BUSCA_TOPICO_ID:
                 is_submissao = True
 
-        # 2. Bloqueia quem não for ADMIN, EXCETO se estiver na Via Verde
+        # Quem não é o admin só passa pela via verde.
         if usuario and getattr(usuario, "id", None) != ADMIN_ID:
             if not is_submissao:
                 return
                 
-        # 3. Bloqueia o próprio ADMIN se usar o bot em grupo (evita expor botões)
+        # O admin no grupo também é barrado (fora da via verde), para o painel não aparecer lá.
         if usuario and getattr(usuario, "id", None) == ADMIN_ID:
             if chat and chat.type != "private" and texto != "/limpar_teclado" and not is_submissao:
                 if getattr(event, "text", None) and EXIBIR_LOGS: logger.warning("🛡️ [Segurança Global] Comando bloqueado no grupo para evitar exposição visual.")
@@ -2932,9 +2911,8 @@ class BloqueioAdminMiddleware(BaseMiddleware):
 
         return await handler(event, data)
 
-# 🛡️ TRAVA GLOBAL DE SAÍDA: nenhum teclado de painel pode sair para fora do privado do admin.
-# Age na resposta do bot (não na entrada), fechando qualquer brecha de exposição em grupos.
-# Botões inline (submissões, wizard) NÃO são afetados — só ReplyKeyboardMarkup.
+# Nenhum teclado do painel (ReplyKeyboardMarkup) sai para fora do privado do admin.
+# Age no envio, fechando qualquer brecha em grupos. Botões inline não são afetados.
 class BloqueioTecladoForaDoPrivadoMiddleware:
     async def __call__(self, make_request, bot, method):
         try:
@@ -2950,12 +2928,10 @@ class BloqueioTecladoForaDoPrivadoMiddleware:
 bot.session.middleware(BloqueioTecladoForaDoPrivadoMiddleware())
 
 
-# 📏 TRAVA GLOBAL DE TAMANHO
-# O Telegram recusa texto acima de 4096 caracteres (1024 em legenda de mídia), e a
-# recusa derruba o handler inteiro — foi o que travou o cadastro de espelho, que
-# listava 101 canais numa mensagem só. Existem ~26 laços parecidos espalhados pelos
-# painéis, então em vez de limitar cada um, a mensagem é cortada aqui, no único ponto
-# por onde passa toda chamada à API. Vale para os laços de hoje e para os de amanhã.
+# Corte de tamanho: o Telegram recusa texto acima de 4096 caracteres (1024 em
+# legenda), e a recusa derruba o handler inteiro. Há dezenas de listas montadas
+# nos painéis; em vez de limitar cada uma, o corte é feito aqui, por onde passa
+# toda chamada à API.
 LIMITE_TEXTO_TELEGRAM = 4096
 LIMITE_LEGENDA_TELEGRAM = 1024
 AVISO_CORTE_TELEGRAM = "\n\n<i>… lista cortada: a mensagem passou do limite do Telegram.</i>"
@@ -2994,14 +2970,14 @@ class TruncarMensagemLongaMiddleware:
 
 bot.session.middleware(TruncarMensagemLongaMiddleware())
 
-# Acopla os interceptadores de segurança e inatividade ao núcleo do robô para vigiar todas as mensagens
+# Ordem: o bloqueio de quem não é admin roda antes do cronômetro de inatividade.
 dp.message.middleware(BloqueioAdminMiddleware())
 dp.callback_query.middleware(BloqueioAdminMiddleware())
 dp.message.middleware(InatividadeMiddleware())
-dp.callback_query.middleware(InatividadeMiddleware())   # ⏰ cliques também contam como atividade
+dp.callback_query.middleware(InatividadeMiddleware())  # cliques também contam como atividade
 
 # ==========================================
-# PAINEL DO GRUPO PÚBLICO & MOTOR REPOSTADOR
+# Painel do Grupo Público e repostador
 # ==========================================
 
 @dp.message(F.text == "Grupo Público 📬", StateFilter("*"))
