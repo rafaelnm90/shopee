@@ -9211,6 +9211,8 @@ async def salvar_alvos_rotina_publico(message: types.Message, state: FSMContext)
     await message.answer("✅ <b>Alvos de postagem atualizados com sucesso!</b>", parse_mode="HTML")
     await gerenciar_rotina_publico(message, state)
 
+# Sem botão em nenhum teclado, mas fica: só roda digitando o texto exato. Não remover
+# como código morto (decisão do Rafael: DECISOES.md, Código e manutenção).
 @dp.message(F.text == "Disparar Repost Autoral ♻️", StateFilter("*"))
 async def manual_repost_autoral(message: types.Message):
     """Repost manual de um vídeo autoral no Grupo Público (copy_message da origem)."""
