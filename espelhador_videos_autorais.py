@@ -12,7 +12,6 @@ from telethon import TelegramClient, events, functions
 from telethon.tl.types import MessageMediaDocument
 from telethon.errors import FloodWaitError, UserAlreadyParticipantError, InviteHashExpiredError
 from dotenv import load_dotenv
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from utils import registrar_erro_json
 
 load_dotenv()
@@ -57,9 +56,6 @@ from motor_filas import calcular_horarios_distribuicao, faixa_de_config, sortear
 import blacklist_captura  # 🚫 Lista negra: de quem este robô NUNCA pode capturar
 
 # As chaves da Shopee e do Gemini foram movidas para os módulos centrais.
-
-# Inicialização do Agendador
-scheduler = AsyncIOScheduler(timezone="America/Sao_Paulo")
 
 if EXIBIR_LOGS:
     logger = configurar_logs(__name__)
@@ -1239,14 +1235,6 @@ async def interceptar_e_espelhar(event):
 
         if EXIBIR_LOGS: logger.info("🔗 A converter o link da Shopee para o seu ID de afiliado via API Central...")
         link_novo = await converter_link_shopee(link_capturado, "geral", EXIBIR_LOGS)
-        
-        # ✅ Novo motor de substituição: Telethon usa Markdown por padrão na propriedade .text
-        texto_base = event.text or ""
-        texto_convertido = PADRAO_SHOPEE.sub(link_novo, texto_base)
-        
-        # Prevenção extra: Se o concorrente escondeu o link na formatação, injetamos no final em formato Markdown
-        if link_novo not in texto_convertido:
-            texto_convertido += f"\n\n🔗 **Link do Produto:**\n{link_novo}"
 
         if EXIBIR_LOGS: logger.info("📥 Iniciando o download do vídeo...")
         caminho_video = await event.download_media(file="temp/temp_espelho_isolado_")
