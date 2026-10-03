@@ -94,6 +94,7 @@ python3 -m pyflakes *.py tests/
 python3 pool_contas.py autoteste
 python3 blacklist_captura.py autoteste
 python3 -m pytest tests -q        # ~1 min; sem .env e sem rede
+python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
 ```
 
 - `tests/conftest.py` dá a base dos testes:
@@ -102,10 +103,11 @@ python3 -m pytest tests -q        # ~1 min; sem .env e sem rede
   - fakes: `Msg` (mensagem do Telegram) e `Est` (estado do FSM);
   - helpers: `rodar`, `inserir` e `consultar`.
 - Toda correção de bug ganha um teste que falha sem a correção.
-- O teste do fim da pausa só roda entre 10h e 20h (horário de Brasília); fora disso, aparece como pulado.
+- `--relogio HH:MM` põe todos os testes naquela hora de Brasília; `relogio("15:00")` (fixture) fixa a hora de um teste só. Teste que só faz sentido numa certa hora usa `relogio(...)`, nunca `pytest.skip`.
+- `--ordem aleatoria` embaralha os testes. Um teste não pode depender de outro ter rodado antes.
 - CI:
-  - `validar.yml` roda em todo PR para a `main`.
-  - `deploy.yml` roda no merge na `main`. Ele repete a validação e, por SSH, faz `git pull` e `pip install` no servidor e reinicia os 5 serviços. 25 s depois, confere com `systemctl is-active` se todos subiram.
+  - `validar.yml` roda em todo PR para a `main`, com a suíte em 4 horários e ordem aleatória.
+  - `deploy.yml` roda no merge na `main`. Ele repete a validação e, por SSH, faz `git pull` e `pip install` no servidor e reinicia os 5 serviços. Confere se todos subiram aos 25 s e de novo 3 min depois (processo e contador de reinícios).
   - Não há acesso direto ao servidor. Para saber o que está no ar, peça ao Rafael o `/status` do bot: serviços, versão, disco, contas e últimos erros.
 
 ## Como trabalhamos
@@ -117,20 +119,21 @@ python3 -m pytest tests -q        # ~1 min; sem .env e sem rede
   - Sem emoji nos comentários. Nos textos que o bot mostra, pode.
   - Cada módulo começa com uma docstring que diz o que ele é e quem o usa.
 - Um assunto por commit. O título do commit fica em português, no formato `arquivo ou área: o que mudou`.
-- PR, rodadas e merge: merge na `main` é deploy em produção.
+- PR, CI e merge: merge na `main` é deploy em produção.
   - Mudança pronta e validada: abrir o PR, acompanhar e fazer o merge sem perguntar.
-  - Antes do merge, o CI do PR precisa passar 5 vezes seguidas no mesmo commit, rodando de novo o workflow "Validar código".
-  - Entre o fim de uma rodada e o início da próxima, esperar 5 minutos. O Rafael pode mudar esse intervalo para o PR em andamento (ex.: "intervalo de 2 min"); no PR seguinte volta aos 5 minutos.
-  - Todo aviso sobre as rodadas mostra, numa tabela curta:
-    - a posição (ex.: ✅✅✅⏳⬜ rodada 4 de 5);
-    - o horário de Brasília em que a próxima rodada começa;
-    - a previsão do merge e do fim do deploy;
-    - quanto durou a última rodada e o commit testado;
-    - o intervalo atual, lembrando que dá para mudar.
-  - Se uma rodada falhar, investigar e corrigir; a contagem volta a zero.
-  - Depois do merge, acompanhar o deploy até os 5 serviços aparecerem ativos e avisar o Rafael.
+  - Antes do merge, o CI do PR ("Validar código") precisa ficar verde no commit final.
+    - Ele já é a rodada reforçada: a suíte roda 4 vezes, cada uma num horário (00:00:30, 08:00, 12:30, 23:59:30) e numa ordem sorteada.
+    - Não repetir o CI no mesmo commit só para conferir: o resultado seria o mesmo.
+  - Se o CI falhar, investigar e corrigir. "Instável" não é causa: a semente impressa (`--ordem <semente> --relogio <hora>`) repete a falha.
+  - Depois do merge, acompanhar o deploy até ficar verde. O deploy confere os 5 robôs aos 25 s e de novo 3 min depois (robô que caiu e voltou sozinho deixa o deploy vermelho).
+  - Avisos ao Rafael, numa tabela curta, só em três momentos:
+    - ao abrir o PR, com a previsão do merge e do fim do deploy;
+    - se algo falhar, com o que falhou e o que vou fazer;
+    - no fim, com o merge feito e os robôs no ar.
+    - No meio, só se ele pedir o status.
   - Se o Rafael disser para não fazer o merge, não fazer.
-  - Se o Rafael mandar fazer o merge direto, sem as rodadas, obedecer.
+  - Se o Rafael mandar fazer o merge direto, sem esperar o CI, obedecer.
+  - Se o Rafael pedir rodadas extras (ex.: "faz 5 rodadas"), repetir o CI quantas vezes ele pedir, com o intervalo que ele disser (padrão: 5 min), avisando posição e horário da próxima.
 - O repositório é público:
   - nunca commitar credencial, `.env`, sessão ou banco;
   - nos testes, nada com cara de token (o GitGuardian acusa).
