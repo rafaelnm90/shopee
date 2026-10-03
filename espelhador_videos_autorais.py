@@ -21,7 +21,6 @@ robô só baixa o arquivo (processar_fila_publico_loop); quem publica é o bot_m
 Parceiros: vídeos dos canais de origem dos parceiros vão para a fila_parceiros, em
 parceiros/<id>/, e também são publicados pelo bot_mestre.
 """
-EXIBIR_LOGS = True
 
 import os
 import asyncio
@@ -52,23 +51,23 @@ PADRAO_SHOPEE = re.compile(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.s
 
 def extrair_link_shopee(event):
     """Primeiro link da Shopee da mensagem, no texto visível ou escondido num hiperlink. None se não houver."""
-    if EXIBIR_LOGS: logger.info("🔍 Analisando mensagem em busca de links...")
+    logger.info("🔍 Analisando mensagem em busca de links...")
     texto = event.raw_text or ""
     match = PADRAO_SHOPEE.search(texto)
     if match:
         link = match.group(0)
         if not link.startswith("http"):
             link = "https://" + link
-        if EXIBIR_LOGS: logger.info("✅ Link encontrado no texto visível.")
+        logger.info("✅ Link encontrado no texto visível.")
         return link.rstrip(").,;!?")
         
     if event.entities:
         for entity in event.entities:
             if hasattr(entity, 'url') and entity.url:
                 if PADRAO_SHOPEE.search(entity.url):
-                    if EXIBIR_LOGS: logger.info("✅ Link encontrado embutido/escondido na formatação.")
+                    logger.info("✅ Link encontrado embutido/escondido na formatação.")
                     return entity.url
-    if EXIBIR_LOGS: logger.info("⏭️ Nenhum link válido da Shopee encontrado.")
+    logger.info("⏭️ Nenhum link válido da Shopee encontrado.")
     return None
 
 from api_gemini import analisar_video_gemini
@@ -77,8 +76,7 @@ from motor_filas import calcular_horarios_distribuicao, faixa_de_config, sortear
 import blacklist_captura  # de quem este robô nunca captura
 import pool_contas  # quem captura e quem reposta
 
-if EXIBIR_LOGS:
-    logger = configurar_logs(__name__)
+logger = configurar_logs(__name__)
 
 API_ID = int(os.getenv('API_ID', 0)) 
 API_HASH = os.getenv('API_HASH', '')
@@ -90,7 +88,7 @@ def carregar_config_autorais():
     """autorais_config, gravado pelo painel do bot_mestre: origem, destino, dias_retorno, cota, janela e pausas."""
     padrao = {"origem": -1003673555953, "origem_topico": None, "destino": "@videos_autorais"}
     dados = db.ler_config("autorais_config", padrao)
-    if not dados and EXIBIR_LOGS:
+    if not dados:
         logger.warning("⚠️ Configuração 'autorais_config' não encontrada. Aguardando o bot principal criá-la.")
     return dados
 
@@ -121,7 +119,7 @@ def pausa_ativa(escopo="autorais"):
             return False
         return bool(cfg.get("pausar_repostagem", False))
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Falha ao consultar a pausa ({escopo}): {e}")
+        logger.error(f"❌ Falha ao consultar a pausa ({escopo}): {e}")
         return False
 
 
@@ -222,7 +220,7 @@ def ler_fila_retorno():
             })
         return {"fila": fila}
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila_autorais do SQLite: {e}")
+        logger.error(f"❌ Erro ao ler fila_autorais do SQLite: {e}")
         return {"fila": []}
 
 def salvar_fila_retorno(dados):
@@ -281,7 +279,7 @@ def salvar_fila_retorno(dados):
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar fila_autorais no SQLite: {e}")
+        logger.error(f"❌ Erro ao salvar fila_autorais no SQLite: {e}")
     finally:
         if conexao is not None:
             try: conexao.close()
@@ -339,7 +337,7 @@ def ler_fila_publico():
             })
         return {"fila": fila}
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila_publico do SQLite: {e}")
+        logger.error(f"❌ Erro ao ler fila_publico do SQLite: {e}")
         return {"fila": []}
 
 # --- Entrada automática nos canais dos parceiros ---
@@ -373,7 +371,7 @@ def marcar_origem_parceiro(parceiro_id, status, motivo=""):
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao marcar origem: {e}")
+        logger.error(f"❌ [Parceiros] Erro ao marcar origem: {e}")
 
 _cache_id_origem = {}
 
@@ -415,7 +413,7 @@ async def resolver_entidade(alvo):
             if int(getattr(dialogo.entity, "id", 0)) == alvo_id:
                 return dialogo.entity
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Falha ao varrer diálogos: {e}")
+        logger.error(f"❌ [Parceiros] Falha ao varrer diálogos: {e}")
 
     return None
 
@@ -540,7 +538,7 @@ def inserir_fila_parceiro(parceiro_id, caminho, link, data_alvo):
         conexao.close()
         return id_unico
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao inserir na fila: {e}")
+        logger.error(f"❌ [Parceiros] Erro ao inserir na fila: {e}")
         return None
 
 async def capturar_para_parceiros(event, chat_id, link_capturado):
@@ -554,7 +552,7 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
     # parceiro parada em zero não diz onde o fluxo parou.
     parceiros = ler_parceiros_ativos_com_acesso()
     if not parceiros:
-        if EXIBIR_LOGS: logger.info("👥 [Parceiros] Vídeo visto, mas nenhum parceiro ativo com acesso liberado.")
+        logger.info("👥 [Parceiros] Vídeo visto, mas nenhum parceiro ativo com acesso liberado.")
         return
 
     try:
@@ -565,24 +563,22 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
 
     # Já reservado (pelo dono ou por outro parceiro): não é de mais ninguém.
     if video_ja_reservado(chaves):
-        if EXIBIR_LOGS: logger.info(f"👥 [Parceiros] Vídeo já reservado por outro. Chat {chat_id}.")
+        logger.info(f"👥 [Parceiros] Vídeo já reservado por outro. Chat {chat_id}.")
         return
 
-    if EXIBIR_LOGS:
-        logger.info(f"👥 [Parceiros] Vídeo com link no chat {_id_curto(chat_id)} — "
-                    f"conferindo {len(parceiros)} parceiro(s) com acesso.")
+    logger.info(f"👥 [Parceiros] Vídeo com link no chat {_id_curto(chat_id)} — "
+                f"conferindo {len(parceiros)} parceiro(s) com acesso.")
 
     for p in parceiros:
         try:
             origem = str(p.get("canal_origem") or "")
             id_origem = await id_do_canal_origem(origem)
             if not id_origem or id_origem != _id_curto(chat_id):
-                if EXIBIR_LOGS:
-                    logger.info(f"👥 [Parceiro {p.get('nome')}] Origem '{origem}' resolve para "
-                                f"{id_origem or 'NADA'}, e o vídeo veio de {_id_curto(chat_id)}. Ignorado.")
+                logger.info(f"👥 [Parceiro {p.get('nome')}] Origem '{origem}' resolve para "
+                            f"{id_origem or 'NADA'}, e o vídeo veio de {_id_curto(chat_id)}. Ignorado.")
                 continue
 
-            if EXIBIR_LOGS: logger.info(f"👥 [Parceiro {p.get('nome')}] Origem bateu. Capturando...")
+            logger.info(f"👥 [Parceiro {p.get('nome')}] Origem bateu. Capturando...")
 
             if not ha_espaco_para_parceiros():
                 return
@@ -602,17 +598,16 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
             await client.download_media(event.media, file=destino)
 
             if not os.path.exists(destino):
-                if EXIBIR_LOGS: logger.warning(f"⚠️ [Parceiro {p.get('nome')}] Download falhou.")
+                logger.warning(f"⚠️ [Parceiro {p.get('nome')}] Download falhou.")
                 continue
 
             inserir_fila_parceiro(p.get("id"), destino, link_capturado, data_alvo)
-            if EXIBIR_LOGS:
-                logger.info(f"🎯 [Parceiro {p.get('nome')}] Vídeo capturado e agendado para {data_alvo}. "
-                            f"Disco: {espaco_usado_parceiros_gb():.2f} GB de {TETO_DISCO_PARCEIROS_GB} GB.")
+            logger.info(f"🎯 [Parceiro {p.get('nome')}] Vídeo capturado e agendado para {data_alvo}. "
+                        f"Disco: {espaco_usado_parceiros_gb():.2f} GB de {TETO_DISCO_PARCEIROS_GB} GB.")
             break   # um vídeo vai para um parceiro só
 
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Falha ao capturar para '{p.get('nome')}': {e}")
+            logger.error(f"❌ [Parceiros] Falha ao capturar para '{p.get('nome')}': {e}")
 
 async def loop_entrada_parceiros():
     """Tenta acessar o canal de origem de um parceiro pendente por ciclo, nunca em lote."""
@@ -625,14 +620,13 @@ async def loop_entrada_parceiros():
             pendentes = ler_parceiros_pendentes()
             if pendentes:
                 p = pendentes[0]
-                if EXIBIR_LOGS: logger.info(f"👥 [Parceiros] Tentando acessar a origem de '{p.get('nome')}'...")
+                logger.info(f"👥 [Parceiros] Tentando acessar a origem de '{p.get('nome')}'...")
                 ok, motivo = await entrar_no_canal_parceiro(p.get("canal_origem"))
                 marcar_origem_parceiro(p.get("id"), 1 if ok else 0, motivo)
-                if EXIBIR_LOGS:
-                    icone = "✅" if ok else "⚠️"
-                    logger.info(f"{icone} [Parceiros] '{p.get('nome')}': {motivo}")
+                icone = "✅" if ok else "⚠️"
+                logger.info(f"{icone} [Parceiros] '{p.get('nome')}': {motivo}")
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Falha no loop de entrada: {e}")
+            logger.error(f"❌ [Parceiros] Falha no loop de entrada: {e}")
 
         await asyncio.sleep(INTERVALO_ENTRADA_PARCEIROS)
 
@@ -659,9 +653,8 @@ def espaco_usado_parceiros_gb():
 def ha_espaco_para_parceiros():
     usado = espaco_usado_parceiros_gb()
     if usado >= TETO_DISCO_PARCEIROS_GB:
-        if EXIBIR_LOGS:
-            logger.warning(f"🛑 [Parceiros] Teto de disco atingido ({usado:.1f} GB de {TETO_DISCO_PARCEIROS_GB} GB). "
-                           "Novas capturas recusadas até liberar espaço.")
+        logger.warning(f"🛑 [Parceiros] Teto de disco atingido ({usado:.1f} GB de {TETO_DISCO_PARCEIROS_GB} GB). "
+                       "Novas capturas recusadas até liberar espaço.")
         return False
     return True
 
@@ -749,7 +742,7 @@ async def resolver_chave_curta(link):
         if linha is not None:
             return linha[0] or None   # vazio = já foi aberto e não tinha produto
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Link Curto] Erro ao ler o cache: {e}")
+        logger.error(f"❌ [Link Curto] Erro ao ler o cache: {e}")
 
     try:
         tempo = aiohttp.ClientTimeout(total=8)
@@ -758,7 +751,7 @@ async def resolver_chave_curta(link):
             async with sessao.get(str(link), allow_redirects=True) as resposta:
                 url_final = str(resposta.url)
     except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ [Link Curto] Não resolveu {codigo}, tentará de novo depois: {e}")
+        logger.warning(f"⚠️ [Link Curto] Não resolveu {codigo}, tentará de novo depois: {e}")
         return None
 
     chave_final = chave_produto(url_final) or ""
@@ -779,13 +772,12 @@ async def resolver_chave_curta(link):
         vencidos = cursor.rowcount
         conexao.commit()
         conexao.close()
-        if vencidos and EXIBIR_LOGS:
+        if vencidos:
             logger.info(f"🧹 [Link Curto] {vencidos} link(s) fora do prazo de {DIAS_VALIDADE_CACHE_LINKS} dias removido(s).")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Link Curto] Erro ao gravar o cache: {e}")
+        logger.error(f"❌ [Link Curto] Erro ao gravar o cache: {e}")
 
-    if EXIBIR_LOGS:
-        logger.info(f"🔗 [Link Curto] {codigo} -> {chave_final or 'sem produto'}, guardado em cache.")
+    logger.info(f"🔗 [Link Curto] {codigo} -> {chave_final or 'sem produto'}, guardado em cache.")
     return chave_final or None
 
 async def chave_produto_resolvida(link):
@@ -825,7 +817,7 @@ def video_ja_reservado(chaves):
         conexao.close()
         return achou
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Reserva] Erro ao consultar: {e}")
+        logger.error(f"❌ [Reserva] Erro ao consultar: {e}")
         return True   # na dúvida, não arrisca duplicar
 
 def reservar_video(chaves, parceiro_id=0):
@@ -856,7 +848,7 @@ def reservar_video(chaves, parceiro_id=0):
         conexao.close()
         return reservou
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Reserva] Erro ao reservar {chaves}: {e}")
+        logger.error(f"❌ [Reserva] Erro ao reservar {chaves}: {e}")
         return False
 
 def salvar_fila_publico(dados):
@@ -911,7 +903,7 @@ def salvar_fila_publico(dados):
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar fila_publico no SQLite: {e}")
+        logger.error(f"❌ Erro ao salvar fila_publico no SQLite: {e}")
     finally:
         if conexao is not None:
             try: conexao.close()
@@ -940,7 +932,7 @@ def contar_ofertas_dia_publico(data_alvo, incrementar=True):
         conexao.close()
         return resultado[0] if resultado else 0
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro no contador de sorteio do Público: {e}")
+        logger.error(f"❌ Erro no contador de sorteio do Público: {e}")
         return 0
 
 def contar_ofertas_dia(data_alvo, incrementar=True):
@@ -974,7 +966,7 @@ def contar_ofertas_dia(data_alvo, incrementar=True):
         conexao.close()
         return linha[0] if linha else 0
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro no contador de sorteio: {e}")
+        logger.error(f"❌ Erro no contador de sorteio: {e}")
         return 0
 
 async def verificar_e_otimizar_video(caminho_video):
@@ -985,7 +977,7 @@ async def verificar_e_otimizar_video(caminho_video):
     if not caminho_video or not os.path.exists(caminho_video): return caminho_video
     
     try:
-        if EXIBIR_LOGS: logger.info(f"🔎 [Upscaling] Inspecionando resolução física de: {caminho_video}")
+        logger.info(f"🔎 [Upscaling] Inspecionando resolução física de: {caminho_video}")
         
         comando_probe = await asyncio.create_subprocess_exec(
             "ffprobe", "-v", "error", "-select_streams", "v:0", 
@@ -996,17 +988,17 @@ async def verificar_e_otimizar_video(caminho_video):
         dimensoes = stdout.decode().strip()
         
         if not dimensoes or "x" not in dimensoes:
-            if EXIBIR_LOGS: logger.warning("⚠️ [Upscaling] Falha ao ler metadados. Ignorando otimização.")
+            logger.warning("⚠️ [Upscaling] Falha ao ler metadados. Ignorando otimização.")
             return caminho_video
             
         largura, altura = map(int, dimensoes.split("x"))
         menor_dimensao = min(largura, altura)
         
         if menor_dimensao >= 720:
-            if EXIBIR_LOGS: logger.info(f"✅ [Upscaling] Qualidade aprovada ({largura}x{altura}). Nenhuma maquiagem necessária.")
+            logger.info(f"✅ [Upscaling] Qualidade aprovada ({largura}x{altura}). Nenhuma maquiagem necessária.")
             return caminho_video
             
-        if EXIBIR_LOGS: logger.info(f"🛠️ [Upscaling] Resolução baixa detectada ({largura}x{altura}). Iniciando renderização para 720p...")
+        logger.info(f"🛠️ [Upscaling] Resolução baixa detectada ({largura}x{altura}). Iniciando renderização para 720p...")
         
         caminho_temp = f"{caminho_video}_upscaled.mp4"
         
@@ -1020,13 +1012,13 @@ async def verificar_e_otimizar_video(caminho_video):
         
         if comando_ffmpeg.returncode == 0 and os.path.exists(caminho_temp):
             os.replace(caminho_temp, caminho_video)
-            if EXIBIR_LOGS: logger.info("✨ [Upscaling] Sucesso! Vídeo re-renderizado para 720x1280 e substituído.")
+            logger.info("✨ [Upscaling] Sucesso! Vídeo re-renderizado para 720x1280 e substituído.")
         else:
-            if EXIBIR_LOGS: logger.error("❌ [Upscaling] Falha na renderização do FFmpeg. Mantendo arquivo original.")
+            logger.error("❌ [Upscaling] Falha na renderização do FFmpeg. Mantendo arquivo original.")
             if os.path.exists(caminho_temp): os.remove(caminho_temp)
             
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Upscaling] Erro na função de otimização: {e}")
+        logger.error(f"❌ [Upscaling] Erro na função de otimização: {e}")
         
     return caminho_video
 
@@ -1047,7 +1039,7 @@ async def gerar_legenda_autoral(caminho_video):
         "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
     )
     
-    titulo = await analisar_video_gemini(caminho_video, prompt, EXIBIR_LOGS)
+    titulo = await analisar_video_gemini(caminho_video, prompt)
     return titulo
 
 from utils import salvar_nome_grupo
@@ -1080,7 +1072,7 @@ def mensagem_ja_processada(chat_id, msg_id):
         conexao.close()
         return ja_registrada
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao consultar o registro de mensagens da origem: {e}")
+        logger.error(f"❌ Erro ao consultar o registro de mensagens da origem: {e}")
         return False
 
 def separar_alvo_e_topico(valor):
@@ -1120,9 +1112,8 @@ async def interceptar_e_espelhar(event):
     # pela outra conta chega aqui como mensagem de terceiro e seria recapturado em laço.
     if blacklist_captura.deve_ignorar(getattr(event, "sender_id", None),
                                       contexto=blacklist_captura.ESCOPO_GLOBAL):
-        if EXIBIR_LOGS:
-            logger.info(f"🚫 [Lista Negra] Ignorado: autor {getattr(event, 'sender_id', '?')} "
-                        f"é uma conta própria ou está bloqueado globalmente.")
+        logger.info(f"🚫 [Lista Negra] Ignorado: autor {getattr(event, 'sender_id', '?')} "
+                    f"é uma conta própria ou está bloqueado globalmente.")
         return
 
     config_atual = carregar_config_autorais()
@@ -1180,7 +1171,7 @@ async def interceptar_e_espelhar(event):
             try:
                 await capturar_para_parceiros(event, getattr(chat, 'id', None), link_parceiro)
             except Exception as e:
-                if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro na captura paralela: {e}")
+                logger.error(f"❌ [Parceiros] Erro na captura paralela: {e}")
 
     if not eh_origem:
         return
@@ -1197,12 +1188,11 @@ async def interceptar_e_espelhar(event):
     autor_user_evento = getattr(autor_evento, "username", None)
 
     if blacklist_captura.deve_ignorar(autor_id_evento, autor_user_evento):
-        if EXIBIR_LOGS:
-            logger.info(f"🚫 [Lista Negra] Fora do sorteio: autor "
-                        f"@{autor_user_evento or '?'} (id {autor_id_evento or '?'}) está na lista negra.")
+        logger.info(f"🚫 [Lista Negra] Fora do sorteio: autor "
+                    f"@{autor_user_evento or '?'} (id {autor_id_evento or '?'}) está na lista negra.")
         return
 
-    if EXIBIR_LOGS: logger.info("🔍 Nova postagem detetada no grupo/tópico de origem configurado.")
+    logger.info("🔍 Nova postagem detetada no grupo/tópico de origem configurado.")
 
     if getattr(event, 'media', None) is None:
         return
@@ -1211,23 +1201,23 @@ async def interceptar_e_espelhar(event):
         link_capturado = extrair_link_shopee(event)
         
         if not link_capturado:
-            if EXIBIR_LOGS: logger.info("⏭️ Postagem ignorada: Não contém link da Shopee (nem embutido).")
+            logger.info("⏭️ Postagem ignorada: Não contém link da Shopee (nem embutido).")
             return
 
         if mensagem_ja_processada(getattr(event, 'chat_id', None), getattr(event, 'id', None)):
-            if EXIBIR_LOGS: logger.info(f"⏭️ Mensagem {getattr(event, 'id', '?')} da origem já foi processada (evento e varredura pegaram a mesma). Ignorada.")
+            logger.info(f"⏭️ Mensagem {getattr(event, 'id', '?')} da origem já foi processada (evento e varredura pegaram a mesma). Ignorada.")
             return
 
-        if EXIBIR_LOGS: logger.info("🔗 A converter o link da Shopee para o seu ID de afiliado via API Central...")
-        link_novo = await converter_link_shopee(link_capturado, "geral", EXIBIR_LOGS)
+        logger.info("🔗 A converter o link da Shopee para o seu ID de afiliado via API Central...")
+        link_novo = await converter_link_shopee(link_capturado, "geral")
 
-        if EXIBIR_LOGS: logger.info("📥 Iniciando o download do vídeo...")
+        logger.info("📥 Iniciando o download do vídeo...")
         caminho_video = await event.download_media(file="temp/temp_espelho_isolado_")
         caminho_video = await verificar_e_otimizar_video(caminho_video)
         
         if caminho_video:
             try:
-                if EXIBIR_LOGS: logger.info("🧠 Solicitando à IA a criação de uma nova Copy autoral...")
+                logger.info("🧠 Solicitando à IA a criação de uma nova Copy autoral...")
                 texto_ia = await gerar_legenda_autoral(caminho_video)
                 
                 if texto_ia:
@@ -1253,7 +1243,7 @@ async def interceptar_e_espelhar(event):
                 # Última checagem antes de publicar: download, otimização e IA levam
                 # dezenas de segundos, e a pausa pedida nesse meio-tempo precisa valer.
                 if pausa_ativa("captura"):
-                    if EXIBIR_LOGS: logger.info("⏸️ [Captura] Pausa pedida durante o processamento. Vídeo descartado sem publicar.")
+                    logger.info("⏸️ [Captura] Pausa pedida durante o processamento. Vídeo descartado sem publicar.")
                     try: os.remove(caminho_video)
                     except Exception: pass
                     return
@@ -1270,7 +1260,7 @@ async def interceptar_e_espelhar(event):
                     registrar_atividade_captura(False, f"{type(e).__name__}: {e}")
                     raise
                 registrar_atividade_captura(True)
-                if EXIBIR_LOGS: logger.info("🚀 Vídeo publicado no canal de destino com a nova legenda autoral!")
+                logger.info("🚀 Vídeo publicado no canal de destino com a nova legenda autoral!")
                 
                 dias_retorno = config_atual.get('dias_retorno', 15)
 
@@ -1318,7 +1308,7 @@ async def interceptar_e_espelhar(event):
                             try: os.remove(caminho_antigo)
                             except Exception: pass
                         fila_dados["fila"] = [v for v in fila_dados.get("fila", []) if v.get("id_unico") != item_descartado.get("id_unico")]
-                        if EXIBIR_LOGS: logger.info(f"🔄 [Sorteio Autorais] Vídeo nº {total_ofertas} do dia tomou a vaga de {item_descartado.get('id_unico')}.")
+                        logger.info(f"🔄 [Sorteio Autorais] Vídeo nº {total_ofertas} do dia tomou a vaga de {item_descartado.get('id_unico')}.")
                     
                     # "📦 Item: <nome>" é o formato que o painel e o relatório leem.
                     nome_produto_autoral = texto_ia.split('\n')[0].strip() if texto_ia else "Produto Exclusivo"
@@ -1338,11 +1328,11 @@ async def interceptar_e_espelhar(event):
                         "autor_username": autor_user_evento or ""
                     })
                     salvar_fila_retorno(fila_dados)
-                    if EXIBIR_LOGS: logger.info(f"🎯 [Sorteio Autorais] Vídeo nº {total_ofertas} do dia SORTEADO para retorno em {data_alvo}.")
+                    logger.info(f"🎯 [Sorteio Autorais] Vídeo nº {total_ofertas} do dia SORTEADO para retorno em {data_alvo}.")
                 else:
                     try:
                         os.remove(caminho_video)
-                        if EXIBIR_LOGS: logger.info(f"🎲 [Sorteio Autorais] Vídeo nº {total_ofertas} do dia não sorteado (chance era {limite_videos}/{total_ofertas}). Removido do disco.")
+                        logger.info(f"🎲 [Sorteio Autorais] Vídeo nº {total_ofertas} do dia não sorteado (chance era {limite_videos}/{total_ofertas}). Removido do disco.")
                     except Exception:
                         pass
 
@@ -1384,7 +1374,7 @@ async def interceptar_e_espelhar(event):
                             if item_descartado_pub:
                                 # Devolve a vaga: o antigo sai da fila do Público
                                 fila_pub["fila"] = [v for v in fila_pub.get("fila", []) if v.get("id_unico") != item_descartado_pub.get("id_unico")]
-                                if EXIBIR_LOGS: logger.info(f"🔄 [Sorteio Público] Vídeo nº {total_ofertas_pub} do dia tomou a vaga de {item_descartado_pub.get('id_unico')}.")
+                                logger.info(f"🔄 [Sorteio Público] Vídeo nº {total_ofertas_pub} do dia tomou a vaga de {item_descartado_pub.get('id_unico')}.")
 
                             fila_pub.setdefault("fila", []).append({
                                 "id_unico": id_unico_pub,
@@ -1407,21 +1397,21 @@ async def interceptar_e_espelhar(event):
                             reservar_video([f"doc_{doc_id}" if doc_id else None,
                                             await chave_produto_resolvida(link_capturado)], parceiro_id=0)
 
-                            if EXIBIR_LOGS: logger.info(f"🎯 [Sorteio Público] Vídeo nº {total_ofertas_pub} do dia SORTEADO para o Grupo Público em {data_alvo_pub}.")
+                            logger.info(f"🎯 [Sorteio Público] Vídeo nº {total_ofertas_pub} do dia SORTEADO para o Grupo Público em {data_alvo_pub}.")
                         else:
-                            if EXIBIR_LOGS: logger.info(f"🎲 [Sorteio Público] Vídeo nº {total_ofertas_pub} do dia não sorteado (chance era {limite_publico}/{total_ofertas_pub}).")
+                            logger.info(f"🎲 [Sorteio Público] Vídeo nº {total_ofertas_pub} do dia não sorteado (chance era {limite_publico}/{total_ofertas_pub}).")
                 except Exception as e:
-                    if EXIBIR_LOGS: logger.error(f"❌ [Sorteio Público] Falha no sorteio: {e}")
+                    logger.error(f"❌ [Sorteio Público] Falha no sorteio: {e}")
 
             except Exception as e:
-                if EXIBIR_LOGS: logger.error(f"❌ Falha ao tentar enviar o vídeo: {e}")
+                logger.error(f"❌ Falha ao tentar enviar o vídeo: {e}")
                 registrar_erro_json(f"interceptar_e_espelhar: {e}", origem="espelhador_videos_autorais.py")
                 
                 # Fica como .pendente em temp/; a faxina do bot_mestre apaga depois.
                 if os.path.exists(caminho_video):
                     try:
                         os.rename(caminho_video, caminho_video + ".pendente")
-                        if EXIBIR_LOGS: logger.info(f"🏷️ Ficheiro isolado para limpeza posterior: {caminho_video}.pendente")
+                        logger.info(f"🏷️ Ficheiro isolado para limpeza posterior: {caminho_video}.pendente")
                     except Exception:
                         pass
 
@@ -1431,7 +1421,7 @@ async def processar_fila_autorais_loop():
     data-alvo hoje e devolve ao grupo de origem no máximo um por ciclo, respeitando
     pausa, janela, teto diário e as travas de idade, lista negra e arquivo trocado.
     """
-    if EXIBIR_LOGS: logger.info("🚀 [Motor Autorais] Loop de processamento autônomo iniciado.")
+    logger.info("🚀 [Motor Autorais] Loop de processamento autônomo iniciado.")
     
     while True:
         try:
@@ -1476,7 +1466,7 @@ async def processar_fila_autorais_loop():
                             conexao.commit()
                             conexao.close()
                             houve_limpeza = True
-                            if EXIBIR_LOGS: logger.info(f"🧹 [Auto-Limpeza] Vídeo Autoral retido e vencido ({data_alvo}) foi deletado para evitar avalanche.")
+                            logger.info(f"🧹 [Auto-Limpeza] Vídeo Autoral retido e vencido ({data_alvo}) foi deletado para evitar avalanche.")
                         except Exception:
                             pass
                         continue
@@ -1513,7 +1503,7 @@ async def processar_fila_autorais_loop():
                     "limite_dias_descarte": dias_retorno_cfg + 7
                 }
                 
-                if EXIBIR_LOGS: logger.info(f"⚙️ [Motor Autorais] Acionando Motor Central para {len(itens_desagendados)} vídeos de retorno...")
+                logger.info(f"⚙️ [Motor Autorais] Acionando Motor Central para {len(itens_desagendados)} vídeos de retorno...")
                 calcular_horarios_distribuicao(itens_desagendados, config_fila, forcar=False)
 
                 # Item que o motor marcou como velho demais sai da fila e do disco,
@@ -1528,7 +1518,7 @@ async def processar_fila_autorais_loop():
                             except Exception: pass
                     fila_dados["fila"] = [i for i in fila_dados.get("fila", []) if i.get("id_unico") not in ids_marcados]
                     fila = fila_dados.get("fila", [])
-                    if EXIBIR_LOGS: logger.info(f"🗑️ [Motor Autorais] {len(marcados)} vídeo(s) descartado(s) por idade.")
+                    logger.info(f"🗑️ [Motor Autorais] {len(marcados)} vídeo(s) descartado(s) por idade.")
 
                 salvar_fila_retorno(fila_dados)
 
@@ -1549,7 +1539,7 @@ async def processar_fila_autorais_loop():
                 ja_saiu = 0
 
             if ja_saiu >= limite_dia:
-                if EXIBIR_LOGS: logger.info(f"🚦 [Motor Autorais] Teto diário atingido ({ja_saiu}/{limite_dia}). Nada mais sai hoje.")
+                logger.info(f"🚦 [Motor Autorais] Teto diário atingido ({ja_saiu}/{limite_dia}). Nada mais sai hoje.")
                 await asyncio.sleep(60)
                 continue
 
@@ -1558,9 +1548,8 @@ async def processar_fila_autorais_loop():
             janela_ini = int(config_atual.get("inicio", 0))
             janela_fim = int(config_atual.get("fim", 24))
             if not (janela_ini <= agora.hour < janela_fim):
-                if EXIBIR_LOGS:
-                    logger.info(f"⏰ [Motor Autorais] Fora da janela ({janela_ini}h-{janela_fim}h). "
-                                f"São {agora.hour}h. Nada será publicado agora.")
+                logger.info(f"⏰ [Motor Autorais] Fora da janela ({janela_ini}h-{janela_fim}h). "
+                            f"São {agora.hour}h. Nada será publicado agora.")
                 await asyncio.sleep(300)
                 continue
 
@@ -1584,7 +1573,7 @@ async def processar_fila_autorais_loop():
                 if deve_disparar:
                     # Reconfere a pausa a cada item, não só no topo do ciclo.
                     if pausa_ativa("autorais"):
-                        if EXIBIR_LOGS: logger.info("⏸️ [Motor Autorais] Pausa detetada. Nenhum vídeo será publicado neste ciclo.")
+                        logger.info("⏸️ [Motor Autorais] Pausa detetada. Nenhum vídeo será publicado neste ciclo.")
                         break
 
                     # Trava de idade: a data_alvo pode estar errada (configuração mudada,
@@ -1608,9 +1597,8 @@ async def processar_fila_autorais_loop():
 
                     if idade_dias is not None and idade_dias < dias_min:
                         nova_alvo = (cap_obj + timedelta(days=dias_min)).strftime("%Y-%m-%d")
-                        if EXIBIR_LOGS:
-                            logger.warning(f"🛡️ [Motor Autorais] Vídeo {item.get('id_unico')} tem só {idade_dias} "
-                                           f"dia(s) (mínimo {dias_min}). NÃO publicado. Reagendado para {nova_alvo}.")
+                        logger.warning(f"🛡️ [Motor Autorais] Vídeo {item.get('id_unico')} tem só {idade_dias} "
+                                       f"dia(s) (mínimo {dias_min}). NÃO publicado. Reagendado para {nova_alvo}.")
                         try:
                             conexao_ag = db.conectar()
                             conexao_ag.execute(
@@ -1620,7 +1608,7 @@ async def processar_fila_autorais_loop():
                             conexao_ag.commit()
                             conexao_ag.close()
                         except Exception as e:
-                            if EXIBIR_LOGS: logger.error(f"❌ [Motor Autorais] Falha ao reagendar o vídeo novo demais: {e}")
+                            logger.error(f"❌ [Motor Autorais] Falha ao reagendar o vídeo novo demais: {e}")
                         break
 
                     caminho_arquivo = item.get("caminho_arquivo")
@@ -1631,10 +1619,9 @@ async def processar_fila_autorais_loop():
                     if item.get("autor_id") or item.get("autor_username"):
                         if blacklist_captura.deve_ignorar(item.get("autor_id"),
                                                           item.get("autor_username")):
-                            if EXIBIR_LOGS:
-                                logger.info(f"🚫 [Lista Negra] Item {item.get('id_unico')} descartado "
-                                            f"sem publicar: autor @{item.get('autor_username') or '?'} "
-                                            f"entrou na lista negra depois da captura.")
+                            logger.info(f"🚫 [Lista Negra] Item {item.get('id_unico')} descartado "
+                                        f"sem publicar: autor @{item.get('autor_username') or '?'} "
+                                        f"entrou na lista negra depois da captura.")
                             try:
                                 if caminho_arquivo and os.path.exists(caminho_arquivo):
                                     os.remove(caminho_arquivo)
@@ -1657,18 +1644,17 @@ async def processar_fila_autorais_loop():
                             cap_dia = datetime.strptime(cap_txt, "%Y-%m-%d") if cap_txt else None
                             mtime = datetime.fromtimestamp(os.path.getmtime(caminho_arquivo))
                             if cap_dia and (mtime - cap_dia).days >= 1:
-                                if EXIBIR_LOGS:
-                                    logger.error(f"🛡️ [Motor Autorais] Vídeo {item.get('id_unico')} "
-                                                 f"capturado em {cap_txt}, mas o arquivo é de "
-                                                 f"{mtime.strftime('%d/%m')}. Nome reciclado: o original "
-                                                 "foi sobrescrito. Item descartado sem publicar.")
+                                logger.error(f"🛡️ [Motor Autorais] Vídeo {item.get('id_unico')} "
+                                             f"capturado em {cap_txt}, mas o arquivo é de "
+                                             f"{mtime.strftime('%d/%m')}. Nome reciclado: o original "
+                                             "foi sobrescrito. Item descartado sem publicar.")
                                 conexao_bd = db.conectar()
                                 conexao_bd.execute("DELETE FROM fila_autorais WHERE id_unico = ?", (item.get("id_unico"),))
                                 conexao_bd.commit()
                                 conexao_bd.close()
                                 break
                         except Exception as e:
-                            if EXIBIR_LOGS: logger.error(f"❌ [Motor Autorais] Falha ao auditar a idade do arquivo: {e}")
+                            logger.error(f"❌ [Motor Autorais] Falha ao auditar a idade do arquivo: {e}")
                     
                     # A origem pode ter tópico ("-100123:5"), que o Telethon não resolve
                     # como entidade.
@@ -1681,7 +1667,7 @@ async def processar_fila_autorais_loop():
                     adiar_item = True   # falha comum: tenta de novo em 30 min
                     escolha = proxima_conta_repost() if origem_final is not None else None
                     if origem_final is None:
-                        if EXIBIR_LOGS: logger.error("❌ [Motor Autorais] Origem não configurada no painel. Vídeo mantido na fila.")
+                        logger.error("❌ [Motor Autorais] Origem não configurada no painel. Vídeo mantido na fila.")
                     elif escolha is None:
                         # Sem conta de repostagem agora: o vídeo espera, sem perder o lugar.
                         adiar_item = False
@@ -1703,17 +1689,17 @@ async def processar_fila_autorais_loop():
                                 item["msg_postada_id"] = getattr(msg_publicada, "id", None)
                                 # Hora real da publicação, mostrada no relatório.
                                 item["data_postagem"] = agora.strftime("%Y-%m-%d %H:%M:%S")
-                                if EXIBIR_LOGS: logger.info(f"✅ [Motor Autorais] Vídeo de retorno {item.get('id_unico')} publicado com sucesso!")
+                                logger.info(f"✅ [Motor Autorais] Vídeo de retorno {item.get('id_unico')} publicado com sucesso!")
                                 
                                 os.remove(caminho_arquivo)
-                                if EXIBIR_LOGS: logger.info("🧹 Ficheiro arquivado removido após postagem final.")
+                                logger.info("🧹 Ficheiro arquivado removido após postagem final.")
                             else:
                                 # Arquivo sumiu do disco: não há o que reenviar. Sai da fila,
                                 # senão fica a ser tentado de 60 em 60 segundos para sempre.
                                 encerrar_item = True
-                                if EXIBIR_LOGS: logger.warning(f"⚠️ Ficheiro arquivado não encontrado em {caminho_arquivo}. Item encerrado.")
+                                logger.warning(f"⚠️ Ficheiro arquivado não encontrado em {caminho_arquivo}. Item encerrado.")
                         except Exception as e:
-                            if EXIBIR_LOGS: logger.error(f"❌ Falha no disparo de retorno: {e}")
+                            logger.error(f"❌ Falha no disparo de retorno: {e}")
                             # Problema da conta (expulsa, sem permissão, espera): outra conta
                             # do rodízio tenta no próximo ciclo, sem adiar o vídeo.
                             if await registrar_falha_repost(conta_rep, e):
@@ -1752,16 +1738,14 @@ async def processar_fila_autorais_loop():
                             marcou = True
                             break
                         except Exception as e:
-                            if EXIBIR_LOGS:
-                                logger.warning(f"⏳ [Motor Autorais] Tentativa {tentativa}/6 de gravar o status "
-                                               f"de {item.get('id_unico')} falhou: {e}")
+                            logger.warning(f"⏳ [Motor Autorais] Tentativa {tentativa}/6 de gravar o status "
+                                           f"de {item.get('id_unico')} falhou: {e}")
                             await asyncio.sleep(2 * tentativa)
 
                     if not marcou and encerrar_item:
                         # Publicado e não registrado: dormir 10 min é mais seguro que republicar.
-                        if EXIBIR_LOGS:
-                            logger.error(f"🛑 [Motor Autorais] {item.get('id_unico')} foi PUBLICADO mas não foi "
-                                         "possível marcar no banco. Loop pausado 10 min para não republicar.")
+                        logger.error(f"🛑 [Motor Autorais] {item.get('id_unico')} foi PUBLICADO mas não foi "
+                                     "possível marcar no banco. Loop pausado 10 min para não republicar.")
                         await asyncio.sleep(600)
 
                     # Um vídeo por ciclo: espaça os posts e deixa a pausa valer entre um e outro.
@@ -1773,7 +1757,7 @@ async def processar_fila_autorais_loop():
             # UPDATE logo depois do envio, e regravar a partir do retrato o desfaria.
 
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro no loop de postagem de autorais: {e}")
+            logger.error(f"❌ Erro no loop de postagem de autorais: {e}")
             
         await asyncio.sleep(60)
 
@@ -1800,7 +1784,7 @@ async def processar_fila_publico_loop():
     Um item por ciclo: baixa o vídeo de cada item da fila_publico com horário
     marcado até HORAS_ANTECEDENCIA_PUBLICO à frente e grava o caminho no item.
     """
-    if EXIBIR_LOGS: logger.info("📬 [Correio Público] Loop de preparo dos vídeos do Grupo Público iniciado.")
+    logger.info("📬 [Correio Público] Loop de preparo dos vídeos do Grupo Público iniciado.")
     ja_auditou = None   # cliente já auditado (a conta da captura pode mudar)
 
     while True:
@@ -1828,9 +1812,9 @@ async def processar_fila_publico_loop():
                 ja_auditou = client
                 try:
                     entidade = await client.get_entity(origem_final)
-                    if EXIBIR_LOGS: logger.info(f"✅ [Correio Público] Acesso à origem OK: {getattr(entidade, 'title', origem_final)}")
+                    logger.info(f"✅ [Correio Público] Acesso à origem OK: {getattr(entidade, 'title', origem_final)}")
                 except Exception as err:
-                    if EXIBIR_LOGS: logger.error(f"❌ [Correio Público] SEM acesso à origem ({origem_final}): {err}")
+                    logger.error(f"❌ [Correio Público] SEM acesso à origem ({origem_final}): {err}")
 
             agora = datetime.now()
             # Sem janela de horário aqui: baixar de madrugada não incomoda ninguém, e
@@ -1872,7 +1856,7 @@ async def processar_fila_publico_loop():
                     cursor.execute("DELETE FROM fila_publico WHERE id_unico = ?", (id_unico,))
                     conexao.commit()
                     conexao.close()
-                    if EXIBIR_LOGS: logger.warning(f"🧹 [Correio Público] Mensagem {msg_id} sumiu da origem. Item {id_unico} removido da fila.")
+                    logger.warning(f"🧹 [Correio Público] Mensagem {msg_id} sumiu da origem. Item {id_unico} removido da fila.")
                     await asyncio.sleep(30)
                     continue
 
@@ -1883,10 +1867,9 @@ async def processar_fila_publico_loop():
                     cursor.execute("DELETE FROM fila_publico WHERE id_unico = ?", (id_unico,))
                     conexao.commit()
                     conexao.close()
-                    if EXIBIR_LOGS:
-                        logger.warning(f"🚫 [Correio Público] Vídeo {id_unico} tem "
-                                       f"{tamanho_origem / (1024**2):.1f} MB, acima do teto de "
-                                       f"{LIMITE_UPLOAD_BOT_MB} MB que o bot consegue enviar. Descartado.")
+                    logger.warning(f"🚫 [Correio Público] Vídeo {id_unico} tem "
+                                   f"{tamanho_origem / (1024**2):.1f} MB, acima do teto de "
+                                   f"{LIMITE_UPLOAD_BOT_MB} MB que o bot consegue enviar. Descartado.")
                     await asyncio.sleep(30)
                     continue
 
@@ -1894,7 +1877,7 @@ async def processar_fila_publico_loop():
                 # o minuto de espera do ciclo.
                 if pausa_ativa("publico"):
                     conexao.close()
-                    if EXIBIR_LOGS: logger.info("⏸️ [Correio Público] Pausa detetada. Nenhum download será feito.")
+                    logger.info("⏸️ [Correio Público] Pausa detetada. Nenhum download será feito.")
                     await asyncio.sleep(60)
                     continue
 
@@ -1908,23 +1891,21 @@ async def processar_fila_publico_loop():
                     (caminho, id_unico)
                 )
                 conexao.commit()
-                if EXIBIR_LOGS:
-                    logger.info(f"📥 [Correio Público] Vídeo {id_unico} baixado "
-                                f"({os.path.getsize(caminho) / (1024**2):.1f} MB). O bot publica no horário.")
+                logger.info(f"📥 [Correio Público] Vídeo {id_unico} baixado "
+                            f"({os.path.getsize(caminho) / (1024**2):.1f} MB). O bot publica no horário.")
 
             except FloodWaitError as e:
                 # Telegram mandou esperar. Respeitar não é opcional: esta conta é a peça
                 # mais frágil do sistema e uma rajada teimosa derruba ela.
                 espera = int(getattr(e, "seconds", 60))
-                if EXIBIR_LOGS: logger.warning(f"⏳ [Correio Público] FloodWait de {espera}s.")
+                logger.warning(f"⏳ [Correio Público] FloodWait de {espera}s.")
                 conexao.close()
                 await asyncio.sleep(espera + 5)
                 continue
 
             except Exception as e:
-                if EXIBIR_LOGS:
-                    logger.error(f"❌ [Correio Público] Falha ao baixar o vídeo {id_unico}: {e} "
-                                 f"| origem={origem_final!r} msg_id={msg_id!r}")
+                logger.error(f"❌ [Correio Público] Falha ao baixar o vídeo {id_unico}: {e} "
+                             f"| origem={origem_final!r} msg_id={msg_id!r}")
                 # Falhou: adia 30 min, senão este item segura o preparo dos seguintes.
                 cursor.execute(
                     "UPDATE fila_publico SET horario_disparo = ? WHERE id_unico = ?",
@@ -1935,7 +1916,7 @@ async def processar_fila_publico_loop():
             conexao.close()
 
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ [Correio Público] Erro estrutural no loop: {e}")
+            logger.error(f"❌ [Correio Público] Erro estrutural no loop: {e}")
 
         await asyncio.sleep(60)
 
@@ -1972,7 +1953,7 @@ async def varredura_origem_loop():
     da origem e passa as novas (id acima do último visto, guardado em
     ultimo_id_varredura) para interceptar_e_espelhar.
     """
-    if EXIBIR_LOGS: logger.info("🔭 [Varredura] Loop de captura por busca ativa iniciado.")
+    logger.info("🔭 [Varredura] Loop de captura por busca ativa iniciado.")
     await asyncio.sleep(30)   # deixa o client assentar antes da primeira consulta
 
     while True:
@@ -2007,14 +1988,13 @@ async def varredura_origem_loop():
             if ultimo_id == 0:
                 marcadores[chave] = maior_id
                 db.salvar_config("ultimo_id_varredura", marcadores)
-                if EXIBIR_LOGS:
-                    logger.info(f"🔭 [Varredura] Marco inicial gravado na origem (id {maior_id}). "
-                                "A captura começa a valer da próxima mensagem.")
+                logger.info(f"🔭 [Varredura] Marco inicial gravado na origem (id {maior_id}). "
+                            "A captura começa a valer da próxima mensagem.")
                 await asyncio.sleep(INTERVALO_VARREDURA_MIN * 60)
                 continue
 
             novas = sorted([m for m in mensagens if m and m.id > ultimo_id], key=lambda m: m.id)
-            if novas and EXIBIR_LOGS:
+            if novas:
                 logger.info(f"🔭 [Varredura] {len(novas)} mensagem(ns) nova(s) na origem desde o id {ultimo_id}.")
 
             for msg in novas:
@@ -2025,7 +2005,7 @@ async def varredura_origem_loop():
                     # garante que só um dos dois caminhos a processa.
                     await interceptar_e_espelhar(EventoSimulado(msg))
                 except Exception as e:
-                    if EXIBIR_LOGS: logger.error(f"❌ [Varredura] Falha ao processar a mensagem {msg.id}: {e}")
+                    logger.error(f"❌ [Varredura] Falha ao processar a mensagem {msg.id}: {e}")
                 await asyncio.sleep(3)
 
             if maior_id > ultimo_id:
@@ -2034,11 +2014,11 @@ async def varredura_origem_loop():
 
         except FloodWaitError as e:
             espera = int(getattr(e, "seconds", 60))
-            if EXIBIR_LOGS: logger.warning(f"⏳ [Varredura] FloodWait de {espera}s.")
+            logger.warning(f"⏳ [Varredura] FloodWait de {espera}s.")
             await asyncio.sleep(espera + 5)
             continue
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ [Varredura] Erro estrutural no loop: {e}")
+            logger.error(f"❌ [Varredura] Erro estrutural no loop: {e}")
 
         await asyncio.sleep(INTERVALO_VARREDURA_MIN * 60)
 
@@ -2077,9 +2057,8 @@ def avisar_sem_conta_repost():
     if _ultimo_aviso_sem_conta and (agora - _ultimo_aviso_sem_conta).total_seconds() < 600:
         return
     _ultimo_aviso_sem_conta = agora
-    if EXIBIR_LOGS:
-        logger.warning("⏸️ [Motor Autorais] Nenhuma conta de repostagem disponível agora. "
-                       "Os vídeos esperam na fila (a captura não reposta).")
+    logger.warning("⏸️ [Motor Autorais] Nenhuma conta de repostagem disponível agora. "
+                   "Os vídeos esperam na fila (a captura não reposta).")
 
 
 def proxima_conta_repost():
@@ -2122,9 +2101,8 @@ async def registrar_falha_repost(conta, erro):
         return True
     if isinstance(erro, ERROS_SEM_PERMISSAO):
         _espera_repost[conta["id"]] = agora + timedelta(hours=HORAS_ESPERA_SEM_PERMISSAO)
-        if EXIBIR_LOGS:
-            logger.warning(f"🚫 [Rodízio] {conta['apelido']} sem permissão de postar na origem "
-                           f"({type(erro).__name__}). Fora do rodízio por {HORAS_ESPERA_SEM_PERMISSAO} h.")
+        logger.warning(f"🚫 [Rodízio] {conta['apelido']} sem permissão de postar na origem "
+                       f"({type(erro).__name__}). Fora do rodízio por {HORAS_ESPERA_SEM_PERMISSAO} h.")
         return True
 
     if isinstance(erro, ERROS_FORA_DO_GRUPO):
@@ -2137,9 +2115,8 @@ async def registrar_falha_repost(conta, erro):
     else:
         return False   # erro do vídeo ou da rede: adia o vídeo, a conta segue
 
-    if EXIBIR_LOGS:
-        logger.error(f"🛑 [Rodízio] {conta['apelido']} perdeu acesso à origem ({type(erro).__name__}). "
-                     "Saindo do rodízio.")
+    logger.error(f"🛑 [Rodízio] {conta['apelido']} perdeu acesso à origem ({type(erro).__name__}). "
+                 "Saindo do rodízio.")
     pool_contas.aplicar_funcoes()
     await montar_contas()
     return True
@@ -2150,7 +2127,7 @@ async def _preparar_cliente(cliente):
     try:
         await cliente.get_dialogs()
     except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ [Contas] Não consegui carregar as conversas: {e}")
+        logger.warning(f"⚠️ [Contas] Não consegui carregar as conversas: {e}")
 
 
 async def _desligar_cliente(cliente):
@@ -2169,7 +2146,7 @@ async def _conectar_conta(conta):
     try:
         cliente = await pool_contas.criar_cliente(conta)
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Contas] Falha ao conectar '{conta.get('apelido')}': {e}")
+        logger.error(f"❌ [Contas] Falha ao conectar '{conta.get('apelido')}': {e}")
         return None
     if cliente is not None:
         await _preparar_cliente(cliente)
@@ -2193,19 +2170,18 @@ async def _apos_trocar_captura():
             # Com a chave sem tópico e com o valor como está gravado no painel.
             salvar_nome_grupo(str(alvo), nome_alvo)
             salvar_nome_grupo(str(config_atual.get(chave)), nome_alvo)
-            if EXIBIR_LOGS: logger.info(f"✅ Nome da {chave} ({nome_alvo}) extraído e salvo no cache automaticamente.")
+            logger.info(f"✅ Nome da {chave} ({nome_alvo}) extraído e salvo no cache automaticamente.")
         except Exception as err:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível auditar a {chave} com a conta da captura: {err}")
+            logger.warning(f"⚠️ Não foi possível auditar a {chave} com a conta da captura: {err}")
 
     try:
         eu = await client.get_me()
         id_atual = getattr(eu, "id", None)
-        if EXIBIR_LOGS:
-            logger.info(f"👤 [Captura] Conta: {getattr(eu, 'first_name', '')} "
-                        f"(@{getattr(eu, 'username', None) or 'sem @'}) · id {id_atual}")
+        logger.info(f"👤 [Captura] Conta: {getattr(eu, 'first_name', '')} "
+                    f"(@{getattr(eu, 'username', None) or 'sem @'}) · id {id_atual}")
     except Exception as e:
         id_atual = None
-        if EXIBIR_LOGS: logger.warning(f"⚠️ [Captura] Não consegui identificar a conta: {e}")
+        logger.warning(f"⚠️ [Captura] Não consegui identificar a conta: {e}")
 
     anterior = (db.ler_config("conta_captura_atual", {}) or {}).get("user_id")
     if id_atual and anterior and anterior != id_atual:
@@ -2214,7 +2190,7 @@ async def _apos_trocar_captura():
             conexao.execute("UPDATE parceiros SET origem_ok = NULL WHERE ativo = 1")
             conexao.commit()
             conexao.close()
-            if EXIBIR_LOGS: logger.info("👥 [Parceiros] Conta da captura mudou: canais dos parceiros serão reconferidos.")
+            logger.info("👥 [Parceiros] Conta da captura mudou: canais dos parceiros serão reconferidos.")
         except sqlite3.OperationalError:
             pass   # tabela de parceiros ainda não existe
     if id_atual:
@@ -2230,7 +2206,7 @@ async def montar_contas():
 
     if not pool_contas.listar_contas():
         if not modo_sessao_fixa:
-            if EXIBIR_LOGS: logger.info(f"👤 [Contas] Nenhuma conta no pool: usando a sessão fixa '{NOME_SESSAO}'.")
+            logger.info(f"👤 [Contas] Nenhuma conta no pool: usando a sessão fixa '{NOME_SESSAO}'.")
             cliente = TelegramClient(NOME_SESSAO, API_ID, API_HASH)
             await cliente.start()
             await _preparar_cliente(cliente)
@@ -2241,7 +2217,7 @@ async def montar_contas():
 
     if modo_sessao_fixa:
         # Contas cadastradas com o robô rodando: deixa a sessão fixa e passa para o pool.
-        if EXIBIR_LOGS: logger.info("👤 [Contas] Contas no pool: deixando a sessão fixa.")
+        logger.info("👤 [Contas] Contas no pool: deixando a sessão fixa.")
         await _desligar_cliente(client)
         client, conta_captura, modo_sessao_fixa = None, None, False
 
@@ -2252,7 +2228,7 @@ async def montar_contas():
         if cid not in desejadas:
             _conta, cliente = clientes_repost.pop(cid)
             await _desligar_cliente(cliente)
-            if EXIBIR_LOGS: logger.info(f"♻️ [Rodízio] {_conta['apelido']} saiu do rodízio.")
+            logger.info(f"♻️ [Rodízio] {_conta['apelido']} saiu do rodízio.")
     for cid, conta in desejadas.items():
         if cid in clientes_repost:
             clientes_repost[cid] = (conta, clientes_repost[cid][1])
@@ -2260,7 +2236,7 @@ async def montar_contas():
         cliente = await _conectar_conta(conta)
         if cliente is not None:
             clientes_repost[cid] = (conta, cliente)
-            if EXIBIR_LOGS: logger.info(f"♻️ [Rodízio] {conta['apelido']} entrou no rodízio.")
+            logger.info(f"♻️ [Rodízio] {conta['apelido']} entrou no rodízio.")
     ordem_rodizio = [c["id"] for c in rodizio]
 
     # Captura: troca o cliente só se a conta do posto mudou.
@@ -2272,15 +2248,15 @@ async def montar_contas():
         await _desligar_cliente(client)
     client, conta_captura = None, None
     if nova is None:
-        if EXIBIR_LOGS: logger.error("🛑 [Captura] Posto VAGO: nenhuma conta apta. A captura está parada.")
+        logger.error("🛑 [Captura] Posto VAGO: nenhuma conta apta. A captura está parada.")
         return
     cliente = await _conectar_conta(nova)
     if cliente is None:
-        if EXIBIR_LOGS: logger.error(f"🛑 [Captura] Não consegui conectar '{nova['apelido']}'. Captura parada até o próximo plantão.")
+        logger.error(f"🛑 [Captura] Não consegui conectar '{nova['apelido']}'. Captura parada até o próximo plantão.")
         return
     cliente.add_event_handler(interceptar_e_espelhar, events.NewMessage(incoming=True))
     client, conta_captura = cliente, nova
-    if EXIBIR_LOGS: logger.info(f"🪞 [Captura] {nova['apelido']} assumiu a captura.")
+    logger.info(f"🪞 [Captura] {nova['apelido']} assumiu a captura.")
     await _apos_trocar_captura()
 
 
@@ -2297,27 +2273,26 @@ async def plantao_contas_loop():
                 if conta_captura and client is not None:
                     ativos[conta_captura["id"]] = client
                 mudancas = await pool_contas.sincronizar_pool(clientes=ativos)
-                if mudancas and EXIBIR_LOGS:
+                if mudancas:
                     logger.info(f"🔄 [Contas] {len(mudancas)} mudança(s) de posto no plantão.")
             await montar_contas()
             blacklist_captura.sincronizar_contas_do_pool()
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ [Contas] Falha no plantão: {e}")
+            logger.error(f"❌ [Contas] Falha no plantão: {e}")
         await asyncio.sleep(INTERVALO_PLANTAO_MIN * 60)
 
 
 async def main():
-    if EXIBIR_LOGS: logger.info("⏳ Iniciando o robô Espelhador Isolado...")
+    logger.info("⏳ Iniciando o robô Espelhador Isolado...")
 
     # Contas próprias na lista negra antes de começar a escutar: o retorno publicado
     # por uma conta do rodízio chega à captura como mensagem de terceiro.
     try:
         _bl_add, _bl_rem = blacklist_captura.sincronizar_contas_do_pool()
-        if EXIBIR_LOGS:
-            logger.info(f"🚫 [Lista Negra] Contas próprias protegidas "
-                        f"(+{_bl_add} / -{_bl_rem}).")
+        logger.info(f"🚫 [Lista Negra] Contas próprias protegidas "
+                    f"(+{_bl_add} / -{_bl_rem}).")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Falha ao sincronizar no start: {e}")
+        logger.error(f"❌ [Lista Negra] Falha ao sincronizar no start: {e}")
 
     await montar_contas()
 
@@ -2327,7 +2302,7 @@ async def main():
     criar_tarefa_fundo(varredura_origem_loop())   # captura por busca ativa na origem
     criar_tarefa_fundo(plantao_contas_loop())   # troca de contas e checagem de 10 em 10 min
 
-    if EXIBIR_LOGS: logger.info("🤖 Sistema a rodar. A escutar o grupo de origem continuamente...")
+    logger.info("🤖 Sistema a rodar. A escutar o grupo de origem continuamente...")
     # Os clientes recebem as mensagens em segundo plano; o processo só precisa ficar vivo.
     await asyncio.Event().wait()
 

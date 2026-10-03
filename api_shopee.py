@@ -59,7 +59,7 @@ def limpar_sub_id(valor, padrao="geral"):
     limpo = re.sub(r"[^a-zA-Z0-9]", "", texto)[:40]
     return limpo or padrao
 
-async def converter_link_shopee(link_original, sub_id_nicho="geral", exibir_logs=True, app_id=None, app_secret=None):
+async def converter_link_shopee(link_original, sub_id_nicho="geral", app_id=None, app_secret=None):
     """
     Converte um link da Shopee em link curto de afiliado, marcado com o subId
     do nicho para rastrear de onde veio a venda.
@@ -74,7 +74,7 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", exibir_logs
     cred_secret = app_secret or SHOPEE_APP_SECRET
 
     if not cred_id or not cred_secret:
-        if exibir_logs: logger.warning("⏳ [API Shopee] Chaves ausentes. Ignorando conversão.")
+        logger.warning("⏳ [API Shopee] Chaves ausentes. Ignorando conversão.")
         return link_original
 
     link_processar = link_original
@@ -87,7 +87,7 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", exibir_logs
                 async with session.get(link_original, allow_redirects=True, headers=headers_redirect) as resp:
                     link_processar = str(resp.url).split('?')[0]
         except Exception as e:
-            if exibir_logs: logger.error(f"❌ [API Shopee] Erro ao expandir URL: {e}")
+            logger.error(f"❌ [API Shopee] Erro ao expandir URL: {e}")
 
     endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
     sub_id_limpo = limpar_sub_id(sub_id_nicho)
@@ -110,13 +110,13 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", exibir_logs
                     novo_link = resposta_dados["data"]["generateShortLink"]["shortLink"]
                     return novo_link
                 else:
-                    if exibir_logs: logger.error(f"❌ [API Shopee] Falha na conversão: {resposta_dados}")
+                    logger.error(f"❌ [API Shopee] Falha na conversão: {resposta_dados}")
     except Exception as e:
-        if exibir_logs: logger.error(f"❌ [API Shopee] Erro de comunicação com o servidor: {e}")
+        logger.error(f"❌ [API Shopee] Erro de comunicação com o servidor: {e}")
         
     return link_original
 
-async def buscar_ofertas_shopee(keyword, limite=10, exibir_logs=True, app_id=None, app_secret=None, sort_type=2):
+async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None, sort_type=2):
     """
     Busca produtos na Shopee por palavra-chave. Devolve a lista de produtos
     (nodes da API) ou lista vazia em qualquer erro.
@@ -130,7 +130,7 @@ async def buscar_ofertas_shopee(keyword, limite=10, exibir_logs=True, app_id=Non
     cred_secret = app_secret or SHOPEE_APP_SECRET
 
     if not cred_id or not cred_secret:
-        if exibir_logs: logger.warning("⏳ [API Shopee] Chaves financeiras ausentes.")
+        logger.warning("⏳ [API Shopee] Chaves financeiras ausentes.")
         return []
 
     endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
@@ -168,14 +168,14 @@ async def buscar_ofertas_shopee(keyword, limite=10, exibir_logs=True, app_id=Non
                     dados = await response.json()
                     erros = dados.get("errors")
                     if erros:
-                        if exibir_logs: logger.error(f"❌ [API Shopee] A API negou o rastreio: {erros[0].get('message')}")
+                        logger.error(f"❌ [API Shopee] A API negou o rastreio: {erros[0].get('message')}")
                         return []
                     return dados.get("data", {}).get("productOfferV2", {}).get("nodes", [])
     except Exception as e:
-        if exibir_logs: logger.error(f"❌ [API Shopee] Erro crítico na prospecção de ofertas: {e}")
+        logger.error(f"❌ [API Shopee] Erro crítico na prospecção de ofertas: {e}")
     return []
 
-async def testar_chaves_afiliado(link_teste, app_id, app_secret, exibir_logs=True):
+async def testar_chaves_afiliado(link_teste, app_id, app_secret):
     """
     Testa um par App ID + Secret convertendo `link_teste` e devolve (ok, motivo).
 
@@ -205,11 +205,11 @@ async def testar_chaves_afiliado(link_teste, app_id, app_secret, exibir_logs=Tru
                 erros = dados.get("errors") or []
                 if erros:
                     motivo = erros[0].get("message", "Erro sem descrição.")
-                    if exibir_logs: logger.error(f"❌ [API Shopee] Teste de chaves recusado: {motivo}")
+                    logger.error(f"❌ [API Shopee] Teste de chaves recusado: {motivo}")
                     return False, motivo
 
-                if exibir_logs: logger.error(f"❌ [API Shopee] Resposta inesperada no teste: {dados}")
+                logger.error(f"❌ [API Shopee] Resposta inesperada no teste: {dados}")
                 return False, f"Resposta inesperada (HTTP {response.status})."
     except Exception as e:
-        if exibir_logs: logger.error(f"❌ [API Shopee] Erro de rede no teste de chaves: {e}")
+        logger.error(f"❌ [API Shopee] Erro de rede no teste de chaves: {e}")
         return False, f"Não consegui falar com a Shopee: {e}"

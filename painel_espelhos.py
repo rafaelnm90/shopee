@@ -15,7 +15,6 @@ A fila liga cada vídeo à rota pelo NOME, por isso renomear rota sincroniza a f
 Para voltar ao menu da rota, os handlers chamam selecionar_acao_edicao com uma
 cópia da mensagem cujo texto é o número da rota, como se o usuário o digitasse.
 """
-EXIBIR_LOGS = True
 import json
 import logging
 import re
@@ -29,10 +28,8 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMar
 from aiogram.filters import StateFilter
 from utils import ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo, id_da_origem, normalizar_origens_rotas, salvar_json_atomico
 from motor_filas import ler_faixa_limite, sortear_teto_do_dia
-EXIBIR_LOGS = True
 
-if EXIBIR_LOGS:
-    logger = logging.getLogger("Espelhador")
+logger = logging.getLogger("Espelhador")
 
 router = Router()
 FUSO_STR = "America/Sao_Paulo"
@@ -45,7 +42,7 @@ def configurar_dependencias(bot: Bot, scheduler):
     global bot_instance, scheduler_instance
     bot_instance = bot
     scheduler_instance = scheduler
-    if EXIBIR_LOGS: logger.info("🔌 Conexão estabelecida: Dependências do Espelhador injetadas com sucesso.")
+    logger.info("🔌 Conexão estabelecida: Dependências do Espelhador injetadas com sucesso.")
 
 # --- Estados do fluxo e teclados ---
 class EspelhadorFluxo(StatesGroup):
@@ -174,9 +171,9 @@ def _renomear_rota_na_fila(nome_antigo, novo_nome):
                 houve_alteracao = True
         if houve_alteracao:
             salvar_fila_espelhador(fila_dados)
-            if EXIBIR_LOGS: logger.info("🔄 Fila de espelhamento sincronizada com o novo nome da rota.")
+            logger.info("🔄 Fila de espelhamento sincronizada com o novo nome da rota.")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao sincronizar a fila de espelhamento após mudança de nome: {e}")
+        logger.error(f"❌ Erro ao sincronizar a fila de espelhamento após mudança de nome: {e}")
 
 def obter_teclado_importacao_espelhador():
     return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Importar Banco Global 🌍")], [KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True, is_persistent=True)
@@ -193,7 +190,7 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
 
     # Ainda não há rota escolhida (ou é o 1º passo da criação): volta ao painel.
     if estado_atual in ["EspelhadorFluxo:aguardando_edicao_escolha_rota", "EspelhadorFluxo:aguardando_remocao", "EspelhadorFluxo:aguardando_rota_esvaziar", "EspelhadorFluxo:aguardando_destino_criacao"]:
-        if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando ao Painel Principal do Espelhador.")
+        logger.info("🔙 Cancelamento: Voltando ao Painel Principal do Espelhador.")
         await state.clear()
         await message.answer("Operação cancelada.", reply_markup=teclado_espelhador_menu)
         await painel_espelhador(message, state)
@@ -211,7 +208,7 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         "EspelhadorFluxo:aguardando_confirmacao_blacklist_conflito"
     ]
     if estado_atual in estados_origem:
-        if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando ao submenu de Origens.")
+        logger.info("🔙 Cancelamento: Voltando ao submenu de Origens.")
         teclado_origens = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="➕ Adicionar Canal"), KeyboardButton(text="🗑️ Remover Canal")],
@@ -240,7 +237,7 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         "EspelhadorFluxo:aguardando_confirmacao_edicao_modo"
     ]
     if estado_atual in estados_edicao and data.get("indice_edicao") is not None:
-        if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando ao menu de Edição da Rota.")
+        logger.info("🔙 Cancelamento: Voltando ao menu de Edição da Rota.")
         await message.answer("Ação cancelada. Retornando às configurações da rota...")
         novo_texto = str(data["indice_edicao"] + 1)
         msg_simulada = message.model_copy(update={"text": novo_texto})
@@ -248,7 +245,7 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         return
 
     # Qualquer outro estado, inclusive a criação de rota: volta ao painel.
-    if EXIBIR_LOGS: logger.info("🔙 Cancelamento Global/Fallback: Voltando ao Painel Principal do Espelhador.")
+    logger.info("🔙 Cancelamento Global/Fallback: Voltando ao Painel Principal do Espelhador.")
     await state.clear()
     await message.answer("Operação cancelada.", reply_markup=teclado_espelhador_menu)
     await painel_espelhador(message, state)
@@ -319,7 +316,7 @@ async def remover_erros_espelhador_callback(callback: types.CallbackQuery, state
     
     # Volta ao menu da rota usando a mensagem do botão como base.
     if indice is not None:
-        if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu de Edição da Rota após limpeza.")
+        logger.info("🔙 Retornando ao menu de Edição da Rota após limpeza.")
         novo_texto = str(indice + 1)
         msg_simulada = callback.message.model_copy(update={"text": novo_texto})
         await selecionar_acao_edicao(msg_simulada, state)
@@ -331,7 +328,7 @@ async def voltar_de_analise_para_edicao(message: types.Message, state: FSMContex
     if indice is not None:
         novo_texto = str(indice + 1)
         msg_simulada = message.model_copy(update={"text": novo_texto})
-        if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu de edição a partir da análise.")
+        logger.info("🔙 Retornando ao menu de edição a partir da análise.")
         await selecionar_acao_edicao(msg_simulada, state)
     else:
         await painel_espelhador(message, state)
@@ -482,7 +479,7 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.menu_principal, F.text == "Adicionar Espelho ➕")
 async def iniciar_cadastro_rota(message: types.Message, state: FSMContext):
     """Criação de rota, passo 1 de 5: pede o canal de destino."""
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando fluxo de cadastro de espelho (Passo 1: Destino)...")
+    logger.info("🚀 Iniciando fluxo de cadastro de espelho (Passo 1: Destino)...")
     await message.answer(
         "Para começar, envie o <b>ID Numérico, Link ou @username</b> do Canal de DESTINO (Para onde o robô vai enviar as cópias):\n"
         "<i>Exemplo: -100123456789 ou https://t.me/meucanal</i>", 
@@ -500,7 +497,7 @@ async def receber_destino_criacao(message: types.Message, state: FSMContext):
     
     if sucesso:
         salvar_nome_grupo(destino_id, nome)
-        if EXIBIR_LOGS: logger.info(f"✅ Destino validado com sucesso: {destino_id}")
+        logger.info(f"✅ Destino validado com sucesso: {destino_id}")
         await state.update_data(destino=destino_id, nome_destino=nome) # nome_destino batiza a rota no fim
         
         texto_origens = (
@@ -511,7 +508,7 @@ async def receber_destino_criacao(message: types.Message, state: FSMContext):
         await message.answer(texto_origens, reply_markup=obter_teclado_importacao_espelhador(), parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_origem_criacao)
     else:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Falha na validação do destino: {message.text}")
+        logger.warning(f"⚠️ Falha na validação do destino: {message.text}")
         await message.answer("⚠️ <b>Canal não encontrado ou sem permissão!</b>\nCertifique-se de que o ID ou @username está correto e de que o bot é administrador do canal.\n\nTente enviar novamente:", reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
 
 @router.message(EspelhadorFluxo.aguardando_origem_criacao)
@@ -612,7 +609,7 @@ async def receber_origem_criacao(message: types.Message, state: FSMContext):
         await message.answer(texto_resposta, reply_markup=teclado_espelhador_janela, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_janela)
     else:
-        if EXIBIR_LOGS: logger.warning("❌ Nenhuma origem válida encontrada no lote.")
+        logger.warning("❌ Nenhuma origem válida encontrada no lote.")
         texto_resposta += "⚠️ <b>Nenhum canal válido aprovado!</b>\nCertifique-se de que os IDs não são links de convite privados ou iguais ao destino.\n\nTente enviar novamente:"
         await message.answer(texto_resposta, reply_markup=teclado_espelhador_cancelar, parse_mode="HTML")
 
@@ -626,7 +623,7 @@ async def receber_janela_rota(message: types.Message, state: FSMContext):
     if texto == "Dia Todo (24h) 🕛" or texto.lower() == "dia todo":
         inicio = 0
         fim = 24
-        if EXIBIR_LOGS: logger.info("🕛 Janela configurada para Dia Todo (24h).")
+        logger.info("🕛 Janela configurada para Dia Todo (24h).")
     else:
         match = re.match(r"^(\d{1,2})-(\d{1,2})$", texto)
         if not match:
@@ -639,7 +636,7 @@ async def receber_janela_rota(message: types.Message, state: FSMContext):
             return
 
     await state.update_data(inicio=inicio, fim=fim)
-    if EXIBIR_LOGS: logger.info(f"✅ Janela da rota configurada com sucesso: {inicio}h as {fim}h.")
+    logger.info(f"✅ Janela da rota configurada com sucesso: {inicio}h as {fim}h.")
     
     teclado_dias = ReplyKeyboardMarkup(
         keyboard=[
@@ -668,7 +665,7 @@ async def receber_intervalo_dias_rota(message: types.Message, state: FSMContext)
     
     # D+0 publica no dia da captura, sempre na ordem de chegada: pula a pergunta do modo.
     if intervalo == 0:
-        if EXIBIR_LOGS: logger.info("⏭️ Atalho UX acionado: D+0 forçando modo 'Ordem de Chegada'.")
+        logger.info("⏭️ Atalho UX acionado: D+0 forçando modo 'Ordem de Chegada'.")
         msg_simulada = message.model_copy(update={"text": "Ordem de Chegada ⬇️"})
         await receber_modo_rota(msg_simulada, state)
         return
@@ -722,7 +719,7 @@ async def receber_modo_rota(message: types.Message, state: FSMContext):
         "Deseja aprovar e ativar este espelhamento inteligente agora?"
     )
     
-    if EXIBIR_LOGS: logger.info(f"✅ Rota preparada para confirmação: {len(origens)} origens para {destino}.")
+    logger.info(f"✅ Rota preparada para confirmação: {len(origens)} origens para {destino}.")
     await message.answer(texto_confirmacao, reply_markup=teclado_espelhador_confirmacao, parse_mode="HTML")
     await state.set_state(EspelhadorFluxo.aguardando_confirmacao_criacao)
 
@@ -756,7 +753,7 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
         contador += 1
         nome_rota = f"{nome_base} ({contador})"
         
-    if EXIBIR_LOGS: logger.info(f"🏷️ Rota nomeada automaticamente como: {nome_rota}")
+    logger.info(f"🏷️ Rota nomeada automaticamente como: {nome_rota}")
 
     nova_rota = {
         "nome": nome_rota,
@@ -775,7 +772,7 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
     dados.setdefault("rotas", []).append(nova_rota)
     salvar_espelhos(dados)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Rota inteligente criada com sucesso: {nome_rota}.")
+    logger.info(f"✅ Rota inteligente criada com sucesso: {nome_rota}.")
     
     dia_texto = "no próprio dia (D+0)" if intervalo_dias == 0 else f"com {intervalo_dias} dia(s) de atraso"
     await message.answer(f"✅ <b>Rota {nome_rota}</b> ativada!\nOs vídeos capturados serão postados {dia_texto} entre as {inicio}h e as {fim}h.", parse_mode="HTML")
@@ -792,9 +789,9 @@ async def iniciar_remocao_rota(message: types.Message, state: FSMContext):
 
     # Com uma rota só, não pergunta qual: vai direto à confirmação.
     if len(rotas) == 1:
-        if EXIBIR_LOGS: logger.info("⏭️ Atalho UX acionado: Apenas 1 rota disponível. Pulando tela de seleção para remoção.")
+        logger.info("⏭️ Atalho UX acionado: Apenas 1 rota disponível. Pulando tela de seleção para remoção.")
         msg_simulada = message.model_copy(update={"text": "1"})
-        if EXIBIR_LOGS: logger.info("🔄 Criada mensagem simulada para desvio seguro (Pydantic).")
+        logger.info("🔄 Criada mensagem simulada para desvio seguro (Pydantic).")
         await pedir_confirmacao_remocao(msg_simulada, state)
         return
         
@@ -854,7 +851,7 @@ async def processar_remocao_rota(message: types.Message, state: FSMContext):
         dados["rotas"] = rotas
         salvar_espelhos(dados)
         
-        if EXIBIR_LOGS: logger.info(f"🗑️ Rota '{rota_removida['nome']}' removida permanentemente.")
+        logger.info(f"🗑️ Rota '{rota_removida['nome']}' removida permanentemente.")
         await message.answer(f"A rota <b>{rota_removida['nome']}</b> foi apagada e os espelhamentos foram interrompidos.", parse_mode="HTML")
         await painel_espelhador(message, state)
     else:
@@ -872,9 +869,9 @@ async def iniciar_edicao_rota(message: types.Message, state: FSMContext):
         
     # Com uma rota só, não pergunta qual: vai direto ao menu dela.
     if len(rotas) == 1:
-        if EXIBIR_LOGS: logger.info("⏭️ Atalho UX acionado: Apenas 1 rota disponível. Pulando tela de seleção.")
+        logger.info("⏭️ Atalho UX acionado: Apenas 1 rota disponível. Pulando tela de seleção.")
         msg_simulada = message.model_copy(update={"text": "1"})
-        if EXIBIR_LOGS: logger.info("🔄 Criada mensagem simulada para desvio seguro (Pydantic).")
+        logger.info("🔄 Criada mensagem simulada para desvio seguro (Pydantic).")
         await selecionar_acao_edicao(msg_simulada, state)
         return
         
@@ -1176,7 +1173,7 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
         data = await state.get_data()
         novo_texto = str(data.get("indice_edicao") + 1)
         msg_simulada = message.model_copy(update={"text": novo_texto})
-        if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu de edição via mensagem simulada.")
+        logger.info("🔙 Retornando ao menu de edição via mensagem simulada.")
         await selecionar_acao_edicao(msg_simulada, state)
         
     else:
@@ -1377,12 +1374,12 @@ async def salvar_edicao_nome(message: types.Message, state: FSMContext):
     
     _renomear_rota_na_fila(nome_antigo, novo_nome)
 
-    if EXIBIR_LOGS: logger.info(f"✏️ Nome da rota '{nome_antigo}' atualizado para '{novo_nome}'.")
+    logger.info(f"✏️ Nome da rota '{nome_antigo}' atualizado para '{novo_nome}'.")
     await message.answer(f"✅ O nome da rota foi atualizado para <b>{novo_nome}</b> com sucesso!", parse_mode="HTML")
     # Volta ao menu da rota.
     novo_texto = str(indice + 1)
     msg_simulada = message.model_copy(update={"text": novo_texto})
-    if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu da rota atual via mensagem simulada (Nome).")
+    logger.info("🔙 Retornando ao menu da rota atual via mensagem simulada (Nome).")
     await selecionar_acao_edicao(msg_simulada, state)
 
 @router.message(EspelhadorFluxo.aguardando_edicao_novo_destino)
@@ -1407,12 +1404,12 @@ async def salvar_edicao_destino(message: types.Message, state: FSMContext):
     dados["rotas"] = rotas
     salvar_espelhos(dados)
 
-    if EXIBIR_LOGS: logger.info(f"✏️ Destino da rota '{nome_rota}' atualizado para {novo_destino}.")
+    logger.info(f"✏️ Destino da rota '{nome_rota}' atualizado para {novo_destino}.")
     await message.answer(f"✅ O destino da rota <b>{nome_rota}</b> foi atualizado para <code>{novo_destino}</code> com sucesso!", parse_mode="HTML")
     # Volta ao menu da rota.
     novo_texto = str(indice + 1)
     msg_simulada = message.model_copy(update={"text": novo_texto})
-    if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu da rota atual via mensagem simulada (Destino).")
+    logger.info("🔙 Retornando ao menu da rota atual via mensagem simulada (Destino).")
     await selecionar_acao_edicao(msg_simulada, state)
 
 @router.message(EspelhadorFluxo.aguardando_edicao_nova_janela)
@@ -1494,7 +1491,7 @@ async def confirmar_edicao_limite_diario(message: types.Message, state: FSMConte
         texto_exibicao = f"entre {piso} e {topo} vídeos por dia"
     else:
         texto_exibicao = f"exatamente {piso} vídeo(s) por dia"
-    if EXIBIR_LOGS: logger.info(f"📊 Faixa diária da rota '{dados['rotas'][indice].get('nome')}' definida: {piso}-{topo or piso}.")
+    logger.info(f"📊 Faixa diária da rota '{dados['rotas'][indice].get('nome')}' definida: {piso}-{topo or piso}.")
     await message.answer(f"✅ Esta rota passa a publicar <b>{texto_exibicao}</b>.", parse_mode="HTML")
 
     msg_simulada = message.model_copy(update={"text": str(indice + 1)})
@@ -1575,7 +1572,7 @@ async def confirmar_edicao_dias(message: types.Message, state: FSMContext):
                 salvar_fila_espelhador(fila_dados)
                 await message.answer(f"⚠️ <b>Gatilho de Recálculo Acionado!</b>\nComo a defasagem da rota '{nome_rota}' mudou, os horários pendentes foram resetados para reorganização.", parse_mode="HTML")
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro ao resetar fila_espelhador após mudança de dias: {e}")
+            logger.error(f"❌ Erro ao resetar fila_espelhador após mudança de dias: {e}")
     
     msg_simulada = message.model_copy(update={"text": str(indice + 1)})
     await selecionar_acao_edicao(msg_simulada, state)
@@ -1615,7 +1612,7 @@ async def confirmar_nova_origem(message: types.Message, state: FSMContext):
     # O botão da lista negra continua na tela enquanto o painel espera as origens:
     # o clique abre a lista negra em vez de ser lido como origem.
     if texto == "Lista Negra (Blacklist) ⛔":
-        if EXIBIR_LOGS: logger.info("⏭️ Redirecionamento Inteligente: Usuário clicou em Blacklist.")
+        logger.info("⏭️ Redirecionamento Inteligente: Usuário clicou em Blacklist.")
         msg_simulada = message.model_copy(update={"text": "Lista Negra (Blacklist) ⛔"})
         await processar_acao_origem(msg_simulada, state)
         return
@@ -1890,13 +1887,13 @@ async def processar_esvaziar_fila(message: types.Message, state: FSMContext):
         await painel_espelhador(message, state)
         return
 
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando processo de forçar postagens para o espelhador...")
+    logger.info("🚀 Iniciando processo de forçar postagens para o espelhador...")
     
     data = await state.get_data()
     indice_rota = data.get("indice_esvaziar")
     
     if indice_rota is None:
-        if EXIBIR_LOGS: logger.error("❌ Erro: Rota não encontrada no estado da máquina.")
+        logger.error("❌ Erro: Rota não encontrada no estado da máquina.")
         await message.answer("Erro ao identificar a rota selecionada.")
         return
 
@@ -1910,13 +1907,13 @@ async def processar_esvaziar_fila(message: types.Message, state: FSMContext):
             
             salvar_espelhos(dados)
             
-            if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Rota '{rota_alvo['nome']}' marcada para esvaziamento imediato.")
+            logger.info(f"✅ Sucesso: Rota '{rota_alvo['nome']}' marcada para esvaziamento imediato.")
             await message.answer(f"✅ <b>Postagens Forçadas!</b>\nTodos os vídeos pendentes na rota <b>{rota_alvo['nome']}</b> serão publicados nos canais em instantes.", parse_mode="HTML", reply_markup=teclado_espelhador_menu)
         else:
             await message.answer("A rota selecionada é inválida ou expirou.")
             
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao atualizar configuração do espelhador: {e}")
+        logger.error(f"❌ Erro ao atualizar configuração do espelhador: {e}")
         await message.answer("Ocorreu um erro interno ao processar o esvaziamento.")
         
     await state.clear()

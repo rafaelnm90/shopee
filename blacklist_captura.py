@@ -96,7 +96,6 @@
 #
 # =============================================================================
 
-EXIBIR_LOGS = True
 
 import os
 import sys
@@ -174,7 +173,7 @@ def inicializar_tabelas():
                    "ON blacklist_captura(username) WHERE username IS NOT NULL")
     conexao.commit()
     conexao.close()
-    if EXIBIR_LOGS and not _TABELA_PRONTA:
+    if not _TABELA_PRONTA:
         logger.info("🚫 [Lista Negra] Tabela verificada.")
     _TABELA_PRONTA = True
 
@@ -284,8 +283,7 @@ async def _buscar_entidade(alvo):
     try:
         import pool_contas
     except Exception as e:
-        if EXIBIR_LOGS:
-            logger.error(f"❌ [Lista Negra] pool_contas indisponível: {e}")
+        logger.error(f"❌ [Lista Negra] pool_contas indisponível: {e}")
         return None
 
     try:
@@ -364,8 +362,7 @@ def _carregar_cache():
                 alvo = users_globais if escopo == ESCOPO_GLOBAL else users_autorais
                 alvo.add(str(linha["username"]).lower())
     except Exception as e:
-        if EXIBIR_LOGS:
-            logger.error(f"❌ [Lista Negra] Falha ao carregar cache: {e}")
+        logger.error(f"❌ [Lista Negra] Falha ao carregar cache: {e}")
         # Devolve o cache velho se existir: melhor uma lista desatualizada do
         # que deixar passar tudo por causa de um erro momentâneo de banco.
         if _CACHE["dados"] is not None:
@@ -413,8 +410,7 @@ def deve_ignorar(user_id, username=None, contexto=ESCOPO_AUTORAIS):
 
         return False
     except Exception as e:
-        if EXIBIR_LOGS:
-            logger.error(f"❌ [Lista Negra] Erro na checagem (deixando passar): {e}")
+        logger.error(f"❌ [Lista Negra] Erro na checagem (deixando passar): {e}")
         return False
 
 
@@ -498,8 +494,7 @@ def adicionar(user_id=None, username=None, nome_exibicao=None,
     invalidar_cache()
 
     rotulo = f"@{arroba}" if arroba else str(user_id)
-    if EXIBIR_LOGS:
-        logger.info(f"🚫 [Lista Negra] {rotulo} adicionado ({origem}/{escopo}).")
+    logger.info(f"🚫 [Lista Negra] {rotulo} adicionado ({origem}/{escopo}).")
     return (True, "adicionado")
 
 
@@ -533,8 +528,7 @@ def remover(alvo):
     conexao.commit()
     conexao.close()
     invalidar_cache()
-    if EXIBIR_LOGS:
-        logger.info(f"✅ [Lista Negra] {texto} removido.")
+    logger.info(f"✅ [Lista Negra] {texto} removido.")
     return (True, "removido")
 
 
@@ -554,8 +548,7 @@ def sincronizar_contas_do_pool():
         import pool_contas
         contas = pool_contas.listar_contas()
     except Exception as e:
-        if EXIBIR_LOGS:
-            logger.error(f"❌ [Lista Negra] Não consegui ler o pool de contas: {e}")
+        logger.error(f"❌ [Lista Negra] Não consegui ler o pool de contas: {e}")
         return (0, 0)
 
     ids_do_pool = set()
@@ -563,11 +556,10 @@ def sincronizar_contas_do_pool():
     for conta in contas:
         if not conta.get("user_id"):
             # Conta cadastrada mas ainda sem ID: roda 'identificar' no pool.
-            if EXIBIR_LOGS:
-                logger.warning(
-                    f"⚠️ [Lista Negra] Conta '{conta.get('apelido')}' ainda sem user_id — "
-                    f"ela NÃO está protegida. Rode: python3 pool_contas.py identificar"
-                )
+            logger.warning(
+                f"⚠️ [Lista Negra] Conta '{conta.get('apelido')}' ainda sem user_id — "
+                f"ela NÃO está protegida. Rode: python3 pool_contas.py identificar"
+            )
             continue
         ids_do_pool.add(int(conta["user_id"]))
         ok, resultado = adicionar(
@@ -594,8 +586,7 @@ def sincronizar_contas_do_pool():
     conexao.close()
     if removidas or adicionadas:
         invalidar_cache()
-        if EXIBIR_LOGS:
-            logger.info(f"🔄 [Lista Negra] Pool sincronizado: +{adicionadas} / -{removidas}.")
+        logger.info(f"🔄 [Lista Negra] Pool sincronizado: +{adicionadas} / -{removidas}.")
     return (adicionadas, removidas)
 
 
@@ -630,9 +621,8 @@ async def resolver_pendentes(cliente=None):
                 entidade = None
 
         if entidade is None:
-            if EXIBIR_LOGS:
-                logger.info(f"⏭️ [Lista Negra] @{arroba} não resolvido ainda "
-                            f"(nenhuma das suas contas conhece esse usuário).")
+            logger.info(f"⏭️ [Lista Negra] @{arroba} não resolvido ainda "
+                        f"(nenhuma das suas contas conhece esse usuário).")
             await asyncio.sleep(1)
             continue
 
@@ -649,11 +639,9 @@ async def resolver_pendentes(cliente=None):
             conexao.commit()
             conexao.close()
             resolvidas += 1
-            if EXIBIR_LOGS:
-                logger.info(f"🔎 [Lista Negra] @{arroba} resolvido para o ID {entidade.id}.")
+            logger.info(f"🔎 [Lista Negra] @{arroba} resolvido para o ID {entidade.id}.")
         except Exception as e:
-            if EXIBIR_LOGS:
-                logger.error(f"❌ [Lista Negra] Falha ao gravar o ID de @{arroba}: {e}")
+            logger.error(f"❌ [Lista Negra] Falha ao gravar o ID de @{arroba}: {e}")
         await asyncio.sleep(1)
 
     if resolvidas:

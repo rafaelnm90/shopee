@@ -15,7 +15,6 @@ um vídeo (Shopee, TikTok, Pinterest, Instagram) e recebe o arquivo sem marca d'
 
 Usa o mesmo banco_dados.db dos outros robôs, com tabelas próprias.
 """
-EXIBIR_LOGS = True
 
 import os
 import re
@@ -39,8 +38,7 @@ from aiogram.filters import Command, ChatMemberUpdatedFilter, IS_NOT_MEMBER, IS_
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile
 from aiogram.fsm.storage.memory import MemoryStorage
 
-if EXIBIR_LOGS:
-    logger = configurar_logs(__name__)
+logger = configurar_logs(__name__)
 
 FUSO = ZoneInfo("America/Sao_Paulo")
 
@@ -143,7 +141,7 @@ def downloads_totais(user_id):
         conexao.close()
         return linha[0] if linha else 0
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler o total: {e}")
+        logger.error(f"❌ Erro ao ler o total: {e}")
         # Na dúvida, considera cortesia esgotada: melhor exigir a mais do que liberar de graça.
         return DOWNLOADS_CORTESIA
 
@@ -167,7 +165,7 @@ def topico_submissao():
         topico = (json.loads(linha[0]) or {}).get("topico_envio")
         return int(topico) if topico else None
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Não consegui ler o tópico de submissão: {e}")
+        logger.error(f"❌ Não consegui ler o tópico de submissão: {e}")
         return None
 
 
@@ -205,14 +203,13 @@ async def convidar_para_comunidade(message, mencao, total_downloads):
             parse_mode="HTML", disable_web_page_preview=True
         )
         registrar_mensagem(convite.message_id)
-        if EXIBIR_LOGS:
-            logger.info(f"💡 [Convite Comunidade] Enviado para {message.from_user.id} "
-                        f"(download nº {total_downloads}).")
+        logger.info(f"💡 [Convite Comunidade] Enviado para {message.from_user.id} "
+                    f"(download nº {total_downloads}).")
         await asyncio.sleep(CONVITE_SEGUNDOS_NA_TELA)
         try: await convite.delete()
         except Exception: pass
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Falha ao enviar o convite da comunidade: {e}")
+        logger.error(f"❌ Falha ao enviar o convite da comunidade: {e}")
 
 
 def somar_download_total(user_id):
@@ -228,7 +225,7 @@ def somar_download_total(user_id):
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao somar o total: {e}")
+        logger.error(f"❌ Erro ao somar o total: {e}")
 
 
 
@@ -252,7 +249,7 @@ def ler_msg_painel():
         conexao.close()
         return int(linha[0]) if linha and linha[0] else None
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler o painel: {e}")
+        logger.error(f"❌ Erro ao ler o painel: {e}")
         return None
 
 
@@ -267,7 +264,7 @@ def salvar_msg_painel(msg_id):
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar o painel: {e}")
+        logger.error(f"❌ Erro ao salvar o painel: {e}")
 
 # Toda mensagem do tópico é apagada depois deste tanto de dias (faxina_topico_loop).
 DIAS_RETENCAO_TOPICO = 3
@@ -296,7 +293,7 @@ def registrar_mensagem(message_id):
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao registrar mensagem: {e}")
+        logger.error(f"❌ Erro ao registrar mensagem: {e}")
 
 
 def mensagens_vencidas():
@@ -311,7 +308,7 @@ def mensagens_vencidas():
         conexao.close()
         return ids
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao listar vencidas: {e}")
+        logger.error(f"❌ Erro ao listar vencidas: {e}")
         return []
 
 
@@ -327,7 +324,7 @@ def esquecer_mensagens(ids):
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao limpar registro: {e}")
+        logger.error(f"❌ Erro ao limpar registro: {e}")
 
 
 def downloads_hoje(user_id):
@@ -342,7 +339,7 @@ def downloads_hoje(user_id):
         conexao.close()
         return linha[0] if linha else 0
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao contar downloads: {e}")
+        logger.error(f"❌ Erro ao contar downloads: {e}")
         return 0
 
 def registrar_download(user_id):
@@ -359,7 +356,7 @@ def registrar_download(user_id):
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao registrar download: {e}")
+        logger.error(f"❌ Erro ao registrar download: {e}")
 
 def limpar_downloads_antigos(dias=7):
     """A contagem só importa no dia. Guardar uma semana já é folga."""
@@ -372,7 +369,7 @@ def limpar_downloads_antigos(dias=7):
         removidos = cursor.rowcount
         conexao.commit()
         conexao.close()
-        if removidos and EXIBIR_LOGS:
+        if removidos:
             logger.info(f"🧹 {removidos} registro(s) de download antigos removidos.")
     except Exception:
         pass
@@ -382,7 +379,7 @@ async def atualizar_yt_dlp():
     Atualiza o yt-dlp do venv (pip install -U). Ele não está no requirements.txt:
     é instalado e atualizado por aqui, ao iniciar e a cada 24 h.
     """
-    if EXIBIR_LOGS: logger.info("🔄 Iniciando verificação automática de atualização do pacote yt-dlp...")
+    logger.info("🔄 Iniciando verificação automática de atualização do pacote yt-dlp...")
     try:
         proc = await asyncio.create_subprocess_exec(
             "/home/ubuntu/shopee/venv/bin/python3", "-m", "pip", "install", "-U", "yt-dlp",
@@ -391,15 +388,15 @@ async def atualizar_yt_dlp():
         )
         stdout, stderr = await proc.communicate()
         if proc.returncode == 0:
-            if EXIBIR_LOGS: logger.info("✅ Sucesso: pacote yt-dlp está atualizado com a versão mais recente.")
+            logger.info("✅ Sucesso: pacote yt-dlp está atualizado com a versão mais recente.")
         else:
-            if EXIBIR_LOGS: logger.error(f"❌ Falha na execução do pip update: {stderr.decode(errors='ignore').strip()}")
+            logger.error(f"❌ Falha na execução do pip update: {stderr.decode(errors='ignore').strip()}")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro sistêmico ao tentar rodar a atualização: {e}")
+        logger.error(f"❌ Erro sistêmico ao tentar rodar a atualização: {e}")
 
 async def faxina_diaria_loop():
     """Atualiza o yt-dlp ao iniciar e, a cada 24 h, atualiza de novo e apaga contagens diárias com mais de 7 dias."""
-    if EXIBIR_LOGS: logger.info("🚀 Loop de manutenção diária (Faxina e Updates) iniciado em background.")
+    logger.info("🚀 Loop de manutenção diária (Faxina e Updates) iniciado em background.")
     await atualizar_yt_dlp()
     while True:
         await asyncio.sleep(86400)
@@ -440,7 +437,7 @@ def buscar_cache_video(url):
         conexao.close()
         return linha[0] if linha else None
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao consultar o cache: {e}")
+        logger.error(f"❌ Erro ao consultar o cache: {e}")
         return None
 
 def guardar_cache_video(url, file_id, plataforma):
@@ -456,7 +453,7 @@ def guardar_cache_video(url, file_id, plataforma):
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao guardar no cache: {e}")
+        logger.error(f"❌ Erro ao guardar no cache: {e}")
 
 def remover_cache_video(url):
     """Chamado quando o file_id guardado não funciona mais."""
@@ -481,7 +478,7 @@ def normalizar_pinterest(url):
     achado = re.search(r'(https?://[a-z0-9.]*pinterest\.[a-z.]+/pin/\d+)', url, re.IGNORECASE)
     if achado:
         limpa = achado.group(1) + "/"
-        if limpa != url and EXIBIR_LOGS:
+        if limpa != url:
             logger.info(f"🧭 URL do Pinterest normalizada para {limpa}")
         return limpa
     return url
@@ -503,7 +500,7 @@ async def expandir_encurtador(url):
             async with sessao.get(url, allow_redirects=True, timeout=15) as resposta:
                 final = str(resposta.url)
                 if "/pin/" in final:
-                    if EXIBIR_LOGS: logger.info(f"🔗 pin.it expandido para {final}")
+                    logger.info(f"🔗 pin.it expandido para {final}")
                     return normalizar_pinterest(final)
 
                 # Às vezes o Pinterest devolve uma página intermediária em JS em vez de
@@ -516,15 +513,14 @@ async def expandir_encurtador(url):
 
                 achado = re.search(r'https?://[a-z0-9.]*pinterest\.[a-z.]+/pin/\d+', corpo, re.IGNORECASE)
                 if achado:
-                    if EXIBIR_LOGS: logger.info(f"🔗 pin.it expandido pelo HTML para {achado.group(0)}")
+                    logger.info(f"🔗 pin.it expandido pelo HTML para {achado.group(0)}")
                     return normalizar_pinterest(achado.group(0))
 
-                if EXIBIR_LOGS:
-                    logger.warning(f"⚠️ pin.it NÃO expandiu: parou em {final} "
-                                   f"(HTTP {resposta.status}, corpo com {len(corpo)} bytes). "
-                                   f"Provável bloqueio por IP ou limite de requisições.")
+                logger.warning(f"⚠️ pin.it NÃO expandiu: parou em {final} "
+                               f"(HTTP {resposta.status}, corpo com {len(corpo)} bytes). "
+                               f"Provável bloqueio por IP ou limite de requisições.")
     except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Não consegui expandir o pin.it: {e}")
+        logger.warning(f"⚠️ Não consegui expandir o pin.it: {e}")
     return url
 
 # Cabeçalho de navegador de celular usado nos pedidos às páginas da Shopee.
@@ -623,7 +619,7 @@ async def limpar_video_shopee(caminho, pasta):
     corte = await _inicio_cartela_shopee(caminho)
 
     if not filtros and not corte:
-        if EXIBIR_LOGS: logger.info("🧼 Nada a limpar neste vídeo da Shopee.")
+        logger.info("🧼 Nada a limpar neste vídeo da Shopee.")
         return caminho
 
     destino = os.path.join(pasta, "limpo.mp4")
@@ -639,12 +635,11 @@ async def limpar_video_shopee(caminho, pasta):
 
     _, _, falha = await _executar(comando, TIMEOUT_LIMPEZA_SEG, capturar=False)
     if falha or not os.path.exists(destino) or os.path.getsize(destino) == 0:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Limpeza falhou, entregando o original: {falha}")
+        logger.warning(f"⚠️ Limpeza falhou, entregando o original: {falha}")
         return caminho
 
-    if EXIBIR_LOGS:
-        logger.info(f"🧼 Limpo (marca: {'sim' if filtros else 'nao'} | "
-                    f"cartela cortada em {corte or 'nenhuma'}s).")
+    logger.info(f"🧼 Limpo (marca: {'sim' if filtros else 'nao'} | "
+                f"cartela cortada em {corte or 'nenhuma'}s).")
     return destino
 
 async def baixar_video_shopee(url, pasta):
@@ -675,7 +670,7 @@ async def baixar_video_shopee(url, pasta):
                 destino_real = urllib.parse.parse_qs(urllib.parse.urlparse(url_final).query).get("redir", [None])[0]
                 if destino_real:
                     destino_real = urllib.parse.unquote(destino_real)
-                    if EXIBIR_LOGS: logger.info(f"🛒 Link real localizado: {destino_real[:70]}...")
+                    logger.info(f"🛒 Link real localizado: {destino_real[:70]}...")
                     async with sessao.get(destino_real, allow_redirects=True, timeout=25) as r2:
                         if r2.status == 200:
                             html = await r2.text()
@@ -726,15 +721,14 @@ async def baixar_video_shopee(url, pasta):
                 try:
                     varrer(json.loads(bruto))
                 except Exception as e:
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ JSON da página não decodificou: {e}")
+                    logger.warning(f"⚠️ JSON da página não decodificou: {e}")
 
             # Rede de segurança, por último: qualquer .mp4 solto no HTML.
             for solto in re.findall(r'https?:[^"\'\\\s<>]+\.mp4[^"\'\\\s<>]*', html):
                 guardar("html", solto)
 
-            if EXIBIR_LOGS:
-                logger.info(f"🛒 {len(candidatos)} candidato(s): "
-                            + ", ".join(k for k, _ in candidatos[:6]))
+            logger.info(f"🛒 {len(candidatos)} candidato(s): "
+                        + ", ".join(k for k, _ in candidatos[:6]))
 
             # É a CHAVE que denuncia a marca: a URL de watermarkVideoUrl
             # não contém a palavra "watermark" em lugar nenhum.
@@ -766,15 +760,15 @@ async def baixar_video_shopee(url, pasta):
                                           timeout=15) as teste:
                         if teste.status in (200, 206):
                             limpos.insert(0, matriz)
-                            if EXIBIR_LOGS: logger.info("🎯 Matriz original localizada!")
+                            logger.info("🎯 Matriz original localizada!")
                             break
                 except Exception as e:
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ Matriz não respondeu: {e}")
+                    logger.warning(f"⚠️ Matriz não respondeu: {e}")
 
             link_mp4 = None
             if limpos:
                 link_mp4 = limpos[0]
-                if EXIBIR_LOGS: logger.info("🧠 Matriz limpa encontrada.")
+                logger.info("🧠 Matriz limpa encontrada.")
             elif marcados:
                 link_mp4 = marcados[0]
                 # Sinaliza para a limpeza que este arquivo tem marca queimada.
@@ -782,13 +776,13 @@ async def baixar_video_shopee(url, pasta):
                     open(os.path.join(pasta, "COM_MARCA"), "w").close()
                 except Exception:
                     pass
-                if EXIBIR_LOGS: logger.warning("⚠️ Só há a versão com marca: o ffmpeg limpa depois.")
+                logger.warning("⚠️ Só há a versão com marca: o ffmpeg limpa depois.")
 
             if not link_mp4:
                 return None, ("não achei nenhum arquivo de vídeo nesta página da Shopee. "
                               "Talvez o link seja de produto, e não de vídeo")
 
-            if EXIBIR_LOGS: logger.info(f"🛒 MP4 Limpo pronto para download: {link_mp4[:70]}...")
+            logger.info(f"🛒 MP4 Limpo pronto para download: {link_mp4[:70]}...")
 
             # Baixa do CDN, parando se passar do limite de tamanho.
             destino = os.path.join(pasta, "video.mp4")
@@ -811,7 +805,7 @@ async def baixar_video_shopee(url, pasta):
     except asyncio.TimeoutError:
         return None, "a Shopee demorou demais para responder"
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro crítico na extração da matriz da Shopee: {e}")
+        logger.error(f"❌ Erro crítico na extração da matriz da Shopee: {e}")
         return None, "erro interno ao extrair matriz da Shopee"
 
 async def _baixar_video_uma_vez(url, pasta):
@@ -859,16 +853,14 @@ async def _baixar_video_uma_vez(url, pasta):
             # Formato indisponível não muda com retentativa: 3 tentativas só
             # fazem a pessoa esperar 15s para receber o mesmo erro.
             if "Requested format is not available" in msg:
-                if EXIBIR_LOGS:
-                    logger.error(f"🎬 Sem formato de vídeo utilizável em {url}\n{msg.strip()[-400:]}")
+                logger.error(f"🎬 Sem formato de vídeo utilizável em {url}\n{msg.strip()[-400:]}")
                 return None, "esse link não tem vídeo, só imagem"
             # Limite de requisições: é temporário, mas 3s de espera não resolve.
             if any(t in msg.lower() for t in ("http error 429", "too many requests",
                                               "rate-limit", "rate limit")):
                 return None, "o site limitou os pedidos por excesso de acessos"
             # Sem isso o motivo real some e não dá para investigar depois.
-            if EXIBIR_LOGS:
-                logger.error(f"❌ yt-dlp saiu com código {proc.returncode} em {url}\n{msg.strip()[-600:]}")
+            logger.error(f"❌ yt-dlp saiu com código {proc.returncode} em {url}\n{msg.strip()[-600:]}")
             return None, "não consegui acessar esse vídeo"
 
         for nome in sorted(os.listdir(pasta)):
@@ -883,7 +875,7 @@ async def _baixar_video_uma_vez(url, pasta):
     except FileNotFoundError:
         return None, "o yt-dlp não está instalado no servidor"
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro inesperado no download: {e}")
+        logger.error(f"❌ Erro inesperado no download: {e}")
         return None, "erro inesperado ao baixar"
 
 # O TikTok derruba pedidos vindos de servidor de forma aleatória: o MESMO
@@ -902,7 +894,7 @@ async def baixar_video(url, pasta, tentativas=3):
     for n in range(1, tentativas + 1):
         caminho, erro = await _baixar_video_uma_vez(url, pasta)
         if not erro:
-            if n > 1 and EXIBIR_LOGS:
+            if n > 1:
                 logger.info(f"✅ Deu certo na tentativa {n}/{tentativas}: {url}")
             return caminho, None
 
@@ -913,8 +905,7 @@ async def baixar_video(url, pasta, tentativas=3):
         if n < tentativas:
             # Bloqueio por excesso de acesso não passa em 3s. Espera bem mais.
             espera = (30 * n) if "limitou os pedidos" in erro else (3 * n)
-            if EXIBIR_LOGS:
-                logger.warning(f"🔁 Tentativa {n}/{tentativas} falhou ({erro}). Repetindo em {espera}s...")
+            logger.warning(f"🔁 Tentativa {n}/{tentativas} falhou ({erro}). Repetindo em {espera}s...")
             for lixo in os.listdir(pasta):
                 try: os.remove(os.path.join(pasta, lixo))
                 except Exception: pass
@@ -950,7 +941,7 @@ async def canais_faltantes(user_id):
                 faltando.append((nome, link))
         except Exception as e:
             # Falha nossa não pode punir quem talvez já esteja no canal.
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Não consegui verificar {nome}: {e}")
+            logger.warning(f"⚠️ Não consegui verificar {nome}: {e}")
     return faltando
 
 # Link que a pessoa mandou enquanto ela entra nos canais, para
@@ -995,7 +986,7 @@ async def expirar_aviso_trava(user_id, msg_id):
     LINKS_PENDENTES.pop(user_id, None)
     try: await aviso.delete()
     except Exception: pass
-    if EXIBIR_LOGS: logger.info(f"⏳ Aviso de trava de {user_id} expirou e foi removido.")
+    logger.info(f"⏳ Aviso de trava de {user_id} expirou e foi removido.")
 
 # Respiro antes de apagar o link original. Sumir no mesmo instante da entrega
 # dá a impressão de que algo deu errado.
@@ -1029,7 +1020,7 @@ async def expirar_aviso_limite(aviso, link_original=None):
     if link_original is not None:
         try: await link_original.delete()
         except Exception: pass
-    if EXIBIR_LOGS: logger.info("⏳ Aviso de limite diário expirou e foi removido do tópico.")
+    logger.info("⏳ Aviso de limite diário expirou e foi removido do tópico.")
 
 @router.message(F.chat.id == GRUPO_DOWNLOADER, F.message_thread_id == TOPICO_DOWNLOADER)
 async def receber_link(message: types.Message):
@@ -1087,9 +1078,8 @@ async def receber_link(message: types.Message):
         try:
             await message.delete()
         except Exception as e:
-            if EXIBIR_LOGS:
-                logger.warning(f"⚠️ Não apaguei a mensagem sem link de {message.from_user.id}: {e}. "
-                               f"Confira se o bot tem a permissão 'Apagar mensagens' no grupo.")
+            logger.warning(f"⚠️ Não apaguei a mensagem sem link de {message.from_user.id}: {e}. "
+                           f"Confira se o bot tem a permissão 'Apagar mensagens' no grupo.")
 
         # O aviso fica um pouco mais para a pessoa ler, depois some também.
         await asyncio.sleep(segundos)
@@ -1115,7 +1105,7 @@ async def receber_link(message: types.Message):
             parse_mode="HTML", reply_markup=teclado_entrar(faltando, message.from_user.id)
         )
         GATES_ABERTOS[message.from_user.id] = aviso_trava
-        if EXIBIR_LOGS: logger.info(f"🔒 {message.from_user.id} bloqueado: falta {len(faltando)} canal(is).")
+        logger.info(f"🔒 {message.from_user.id} bloqueado: falta {len(faltando)} canal(is).")
 
         # Desistiu? O aviso não fica encalhado no tópico. Se ela entrar nos canais
         # nesse meio-tempo, o fluxo normal já terá apagado e o GATES_ABERTOS estará
@@ -1132,12 +1122,12 @@ async def receber_link(message: types.Message):
             "<i>Sua cota volta a zerar à meia-noite. Até lá!</i>",
             parse_mode="HTML"
         )
-        if EXIBIR_LOGS: logger.info(f"📦 {message.from_user.id} atingiu o limite ({usados}).")
+        logger.info(f"📦 {message.from_user.id} atingiu o limite ({usados}).")
         asyncio.create_task(expirar_aviso_limite(aviso_limite, message))
         return
 
     # 4. Liberado — baixa e entrega
-    if EXIBIR_LOGS: logger.info(f"✅ {message.from_user.id} liberado ({usados}/{LIMITE_DIARIO_DOWNLOADS}). {plataforma}: {url}")
+    logger.info(f"✅ {message.from_user.id} liberado ({usados}/{LIMITE_DIARIO_DOWNLOADS}). {plataforma}: {url}")
 
     if semaforo_download.locked():
         aguarde = await message.answer(f"⏳ {mencao}, tem outro vídeo baixando. Você é o próximo!")
@@ -1168,7 +1158,7 @@ async def receber_link(message: types.Message):
             # Mesmo raciocínio da entrega normal: o link original vira ruído.
             asyncio.create_task(apagar_link_original(message))
 
-            if EXIBIR_LOGS: logger.info(f"♻️ Entregue do cache para {message.from_user.id} ({plataforma}).")
+            logger.info(f"♻️ Entregue do cache para {message.from_user.id} ({plataforma}).")
 
             # O painel também desce quando a entrega vem do cache. Sem isto ele
             # só acompanha os downloads reais e fica para trás nas repetições.
@@ -1176,7 +1166,7 @@ async def receber_link(message: types.Message):
             return
         except Exception as e:
             # file_id inválido: tira do cache e baixa normalmente.
-            if EXIBIR_LOGS: logger.warning(f"⚠️ file_id do cache falhou ({e}). Rebaixando.")
+            logger.warning(f"⚠️ file_id do cache falhou ({e}). Rebaixando.")
             remover_cache_video(url)
 
     async with semaforo_download:
@@ -1247,13 +1237,13 @@ async def receber_link(message: types.Message):
                 # Em segundo plano: esperar aqui prenderia a fila de download por 30 s.
                 asyncio.create_task(apagar_depois(aviso_cota, 30))
 
-            if EXIBIR_LOGS: logger.info(f"📤 Vídeo entregue para {message.from_user.id} ({plataforma}).")
+            logger.info(f"📤 Vídeo entregue para {message.from_user.id} ({plataforma}).")
 
             # Marca o painel para descer daqui a 3 min, não na hora.
             agendar_painel()
 
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Falha ao entregar: {e}")
+            logger.error(f"❌ Falha ao entregar: {e}")
             try:
                 await status.edit_text(f"❌ {mencao}, algo deu errado no envio. Tente de novo.")
             except Exception: pass
@@ -1330,9 +1320,8 @@ async def entrou_em_canal(evento: types.ChatMemberUpdated):
 
     user_id = evento.new_chat_member.user.id
     tem_gate = user_id in GATES_ABERTOS
-    if EXIBIR_LOGS:
-        logger.info(f"🔔 {user_id} entrou em {evento.chat.title} "
-                    f"(aviso aberto: {'sim' if tem_gate else 'não'}).")
+    logger.info(f"🔔 {user_id} entrou em {evento.chat.title} "
+                f"(aviso aberto: {'sim' if tem_gate else 'não'}).")
 
     if not tem_gate:
         return
@@ -1353,7 +1342,7 @@ async def reenviar_painel_downloader():
                 disable_web_page_preview=True
             )
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ [Painel] Falha ao enviar o painel: {e}")
+            logger.error(f"❌ [Painel] Falha ao enviar o painel: {e}")
             return
 
         antiga = ler_msg_painel()
@@ -1362,7 +1351,7 @@ async def reenviar_painel_downloader():
             except Exception: pass
 
         salvar_msg_painel(nova.message_id)
-        if EXIBIR_LOGS: logger.info(f"📌 [Painel] Painel recriado no fim do tópico (ID {nova.message_id}).")
+        logger.info(f"📌 [Painel] Painel recriado no fim do tópico (ID {nova.message_id}).")
 
 # Prazo antes do painel descer. Numa rajada de downloads ele desce UMA vez,
 # no fim do prazo, em vez de pular de lugar a cada vídeo entregue.
@@ -1442,15 +1431,14 @@ async def faxina_topico_loop():
                     await asyncio.sleep(0.4)   # folga para não levar flood wait
 
                 esquecer_mensagens(vencidas)
-                if EXIBIR_LOGS:
-                    logger.info(f"🧹 [Faxina Tópico] {sucesso} apagada(s), {falhou} recusada(s) pela API.")
+                logger.info(f"🧹 [Faxina Tópico] {sucesso} apagada(s), {falhou} recusada(s) pela API.")
 
                 # O painel foi junto? Recria, senão o tópico fica sem orientação.
                 if apagou_painel:
                     await reenviar_painel_downloader()
 
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro na faxina do tópico: {e}")
+            logger.error(f"❌ Erro na faxina do tópico: {e}")
 
         await asyncio.sleep(3600)
 

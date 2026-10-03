@@ -19,16 +19,14 @@ Regras gerais:
   nada de horário redondo, intervalo sempre igual ou rajada. Por isso quase
   todo cálculo tem um sorteio.
 """
-EXIBIR_LOGS = True
 
 import random
 import logging
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-if EXIBIR_LOGS:
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-    logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 FUSO_STR = "America/Sao_Paulo"
 fuso_horario = ZoneInfo(FUSO_STR)
@@ -72,8 +70,7 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
 
     agora = datetime.now(fuso_horario)
 
-    if EXIBIR_LOGS:
-        logger.info(f"⚙️ [Motor Filas] Iniciando cálculo matemático para {len(itens_para_agendar)} itens...")
+    logger.info(f"⚙️ [Motor Filas] Iniciando cálculo matemático para {len(itens_para_agendar)} itens...")
 
     if modo == "aleatorio":
         random.shuffle(itens_para_agendar)
@@ -97,7 +94,7 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
         if forcar:
             minuto_atual_busca = agora
             espacamento_segundos = 15
-            if EXIBIR_LOGS: logger.info("⚠️ [Motor Filas] Gatilho de Descarga detectado. Aplicando catraca de 15 segundos.")
+            logger.info("⚠️ [Motor Filas] Gatilho de Descarga detectado. Aplicando catraca de 15 segundos.")
         else:
             # Largada: agora, ou a abertura da janela se ainda não abriu,
             # ou a abertura de amanhã se já fechou.
@@ -137,8 +134,7 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
             if ultimo_ocupado:
                 passo_ini = random.randint(max(60, (base_min - var_min) * 60), (base_min + var_min) * 60)
                 minuto_atual_busca = ultimo_ocupado + timedelta(seconds=passo_ini)
-                if EXIBIR_LOGS:
-                    logger.info(f"🔗 [Motor Filas] {len(ocupados)} item(ns) já agendados. Novo lote começa em {minuto_atual_busca.strftime('%d/%m %H:%M')}.")
+                logger.info(f"🔗 [Motor Filas] {len(ocupados)} item(ns) já agendados. Novo lote começa em {minuto_atual_busca.strftime('%d/%m %H:%M')}.")
 
         limite_dias = config_fila.get("limite_dias_descarte", 5)
         descartados_idade = []
@@ -183,10 +179,9 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
                 deslocamento_inicial_seg = random.randint(0, max(0, (passo_base_min * 60) // 3))
                 minuto_atual_busca += timedelta(seconds=deslocamento_inicial_seg)
 
-            if EXIBIR_LOGS:
-                logger.info(f"📐 [Motor Filas] {len(itens_para_agendar)} item(ns) em {minutos_restantes} min "
-                            f"→ espaçamento de {passo_base_min} ± {variacao_efetiva} min "
-                            f"(largada +{deslocamento_inicial_seg // 60} min).")
+            logger.info(f"📐 [Motor Filas] {len(itens_para_agendar)} item(ns) em {minutos_restantes} min "
+                        f"→ espaçamento de {passo_base_min} ± {variacao_efetiva} min "
+                        f"(largada +{deslocamento_inicial_seg // 60} min).")
 
         for item in itens_para_agendar:
             if usar_espaco_organico:
@@ -234,11 +229,10 @@ def calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar=False
             item["horario_disparo"] = horario_agendado.strftime("%Y-%m-%d %H:%M:%S")
             minuto_atual_busca += timedelta(seconds=espacamento_segundos)
 
-        if descartados_idade and EXIBIR_LOGS:
+        if descartados_idade:
             logger.info(f"🗑️ [Motor Filas] {len(descartados_idade)} item(ns) marcados para descarte: passariam de {limite_dias} dias desde a captura.")
 
-    if EXIBIR_LOGS:
-        logger.info(f"✅ [Motor Filas] Distribuição concluída. (Modo: {modo}, Atraso: D+{intervalo_dias}, Forçado: {forcar})")
+    logger.info(f"✅ [Motor Filas] Distribuição concluída. (Modo: {modo}, Atraso: D+{intervalo_dias}, Forçado: {forcar})")
 
 
     return itens_para_agendar
@@ -364,7 +358,7 @@ def recompactar_horarios(itens, config_fila, agora, margem_min=20):
             movidos.append(registro["item"])
             vagas -= 1
 
-    if movidos and EXIBIR_LOGS:
+    if movidos:
         ultimo_dia = max(por_dia) if por_dia else hoje
         logger.info(f"🧲 [Motor Filas] {len(movidos)} item(ns) antecipado(s) para dias com vaga. "
                     f"A fila agora termina em {ultimo_dia.strftime('%d/%m')}.")
@@ -499,7 +493,7 @@ def aplicar_limite_diario_fila(itens, piso, topo=None, semente="", chave_horario
             item["descartar_por_limite"] = True
             descartados.append(item)
 
-        if excedente and EXIBIR_LOGS:
+        if excedente:
             logger.info(f"✂️ [Motor Filas] Dia {dia} sorteou teto de {limite} "
                         f"(faixa {piso}-{topo or piso}): {len(excedente)} item(ns) descartado(s).")
 
@@ -662,8 +656,7 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
     else:
         linha_destino = "\n   └ 🔗 <i>Aguardando postagem (Destino)</i>"
 
-    if EXIBIR_LOGS:
-        logger.info(f"🎨 [Layout] Formatando item {index} | Status: {status_dia} | Destino injetado.")
+    logger.info(f"🎨 [Layout] Formatando item {index} | Status: {status_dia} | Destino injetado.")
 
     bloco = f"<b>{index}.</b> {status_dia} | 📡 {display_origem}\n"
 
