@@ -374,6 +374,8 @@ async def interceptar_mensagem(event):
     except Exception:
         foi_nossa_equipe = False
 
+    # Decisão do Rafael (DECISOES.md, Canal Viral): no @shopee_video_afiliado os posts do
+    # próprio sistema também são capturados, para serem espelhados em outros canais.
     if foi_nossa_equipe and chat_username != "@shopee_video_afiliado":
         logger.info("🛡️ [Espião] Postagem do próprio sistema bloqueada (Userbot ou Bot Oficial).")
         return
@@ -834,6 +836,8 @@ async def motor_espelhador_userbot(event):
     except Exception:
         foi_nossa_equipe = False
 
+    # Decisão do Rafael (DECISOES.md, Canal Viral): no @shopee_video_afiliado os posts do
+    # próprio sistema também são capturados, para serem espelhados em outros canais.
     if foi_nossa_equipe and chat_username != "@shopee_video_afiliado":
         logger.info("🛡️ [Espelhador] Postagem do próprio sistema bloqueada (Userbot ou Bot Oficial).")
         return

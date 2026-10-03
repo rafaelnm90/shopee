@@ -1254,7 +1254,8 @@ async def receber_link(message: types.Message):
 # O painel fica sempre como a última mensagem do tópico. Envia o novo
 # primeiro e só então apaga o antigo, para o tópico nunca ficar sem painel.
 # Não usa pin_chat_message de propósito: cada fixação gera uma mensagem de
-# serviço ("Fulano fixou...") que se acumula no tópico.
+# serviço ("Fulano fixou...") que se acumula no tópico (decisão do Rafael:
+# DECISOES.md, Baixador).
 _lock_painel = asyncio.Lock()
 
 @router.callback_query(F.data == "canal_ok")

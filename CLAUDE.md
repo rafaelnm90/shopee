@@ -3,6 +3,9 @@
 Mapa curto do projeto e as regras combinadas com o Rafael. Leia antes de mexer
 no código: diz onde fica cada coisa e como validar uma mudança.
 
+O `DECISOES.md` é o diário dos pedidos do Rafael: como cada robô deve se
+comportar e as exceções que o código não explica. Leia a área do que for mudar.
+
 ## O projeto
 
 Afiliados Shopee no Telegram. Cinco serviços systemd num servidor Oracle ARM
@@ -116,6 +119,12 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
 ## Como trabalhamos
 
 - O Rafael pede em português. Responda em português, de forma simples.
+- Diário de decisões (`DECISOES.md`):
+  - Antes de mudar um comportamento, ler a área dele no diário.
+  - Todo pedido do Rafael que define comportamento entra no diário, na mesma mudança que o implementa. Isso inclui as respostas dele às perguntas de intenção.
+  - Pedido novo que contradiz um antigo: riscar o antigo com "substituída em DD/MM/AAAA" e registrar o novo logo abaixo, sem apagar. Na dúvida se contradiz, perguntar.
+  - Não contrariar uma decisão do diário por conta própria, nem para "corrigir" algo que parece bug. Se parecer errado, perguntar.
+  - Exceção a um padrão no código: comentário curto no lugar apontando para a entrada (ex.: `# Decisão do Rafael: DECISOES.md, Canal Viral`).
 - Dúvida sobre a intenção de uma regra (ex.: "era para apagar depois de processar?") → pergunte antes de mudar. Ofereça opções, com a recomendada primeiro.
 - Comentários em português explicam o porquê e a regra de negócio.
   - Sem histórico ("antes era…", "corrigido em…"): isso fica no git.
