@@ -14359,6 +14359,12 @@ def salvar_fila_clonagem(dados):
     salvar_config_bd("fila_clonagem", dados)
 
 async def processar_fila_espiao(forcar=False):
+    """
+    Motor do Espião, de minuto em minuto: trata os atrasados, distribui os horários
+    dos clones pendentes (D+X, janela, espaçamento), recompacta a grade e publica no
+    máximo um clone vencido, com o nome do produto pela IA e o link de afiliado.
+    forcar=True (Forçar Postagens) solta todos os pendentes a partir de agora.
+    """
     dados_espiao = ler_alvos_espiao()
     canal_destino = dados_espiao.get("canal_destino")
     if not canal_destino: return 
@@ -14374,10 +14380,9 @@ async def processar_fila_espiao(forcar=False):
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
 
-    # --- 0. FAXINA E RESGATE DE ATRASADOS (anti-avalanche) ---
-    # Se o robô ficar fora do ar, os horários vencem sem ninguém publicar. Ao voltar,
-    # em vez de despejar tudo de uma vez, descartamos o que é velho demais e
-    # REAGENDAMOS o resto ao longo do que ainda resta do dia.
+    # --- 0. Atrasados (anti-avalanche) ---
+    # Robô fora do ar deixa horários vencerem. Na volta, não despeja tudo de uma vez:
+    # descarta o que é velho demais e redistribui o resto no que sobra do dia.
     LIMITE_DIAS_DESCARTE = 5
     corte_descarte = agora - timedelta(days=LIMITE_DIAS_DESCARTE)
     descartados = 0
@@ -14395,20 +14400,19 @@ async def processar_fila_espiao(forcar=False):
             fila_sobrevivente.append(item)
             continue
 
-        # ⏳ Tolerância: vencer agora é normal e vira publicação no bloco 2.
-        # Só é "atraso real" quem passou de 30 minutos sem ninguém publicar
-        # (sinal de que o robô esteve fora do ar).
+        # Vencer agora é normal (vira publicação no bloco 2). Atraso de verdade é mais de
+        # 30 min sem publicar, sinal de que o robô esteve fora do ar.
         TOLERANCIA_ATRASO_MIN = 30
         if hd_obj <= (agora - timedelta(minutes=TOLERANCIA_ATRASO_MIN)):
             if hd_obj < corte_descarte:
-                # 🗑️ Passou de 5 dias: perdeu a validade, sai da fila
+                # Mais de 5 dias de atraso: perdeu a validade, sai da fila (e do disco)
                 caminho = item.get("caminho_video")
                 if caminho and os.path.exists(caminho):
                     try: os.remove(caminho)
                     except Exception: pass
                 descartados += 1
                 continue
-            # ♻️ Venceu, mas ainda vale: zera o horário para ser redistribuído hoje
+            # Venceu, mas ainda vale: sem horário, entra na redistribuição de hoje
             item["horario_disparo"] = ""
             resgatados += 1
 
@@ -14422,13 +14426,13 @@ async def processar_fila_espiao(forcar=False):
             logger.info(f"🛟 [Espião] Anti-avalanche: {resgatados} clone(s) atrasado(s) reagendado(s) e "
                         f"{descartados} descartado(s) por passar de {LIMITE_DIAS_DESCARTE} dias.")
 
-    # --- 1. MOTOR MATEMÁTICO DE DISTRIBUIÇÃO ---
+    # --- 1. Distribuição dos horários ---
     itens_para_agendar = []
     
     for item in fila:
         if item.get("processado"): continue
         
-        # Se forçou descarga, limpa o horário para aplicar a catraca imediata
+        # Forçar Postagens: todos os pendentes perdem o horário e saem a partir de agora
         if forcar: item["horario_disparo"] = ""
         
         if not item.get("horario_disparo"):
@@ -14442,36 +14446,35 @@ async def processar_fila_espiao(forcar=False):
                 data_alvo_obj = data_cap_obj + timedelta(days=intervalo_dias)
                 dia_alvo = data_alvo_obj.strftime("%Y-%m-%d")
                 
-                # Resgata o vídeo se for para hoje, ou se estivermos puxando o gatilho
+                # Só os que já chegaram no dia (captura + D+X), ou todos se forçado
                 if dia_alvo <= hoje_str or forcar:
                     itens_para_agendar.append(item)
 
     if itens_para_agendar:
-        # ✅ ACIONANDO O NOVO MOTOR MATEMÁTICO CENTRALIZADO
         config_fila = {
             "inicio": inicio_janela,
             "fim": fim_janela,
             "modo": modo,
             "intervalo_dias": intervalo_dias,
-            # ⏱️ Espaçamento orgânico: 10 min ± 5 (de 5 a 15 min entre vídeos)
+            # Espaçamento orgânico: 10 min ± 5 entre vídeos
             "espacamento_base_min": 10,
             "espacamento_variacao_min": 5,
-            # 🗓️ O que não couber transborda para o dia seguinte; passando disso, descarta.
-            # ✅ CORREÇÃO: a margem precisa acompanhar o D+X da fila. Com 5 fixo, qualquer
-            # intervalo_dias maior que 5 fazia o vídeo nascer vencido e voltar sem horário.
-            "limite_dias_descarte": max(7, int(intervalo_dias) + 7),   # 🗓️ 7 dias de folga após a data-alvo
-            # 🔗 Horários já ocupados: o lote novo entra DEPOIS do último agendado,
-            # em vez de recomeçar do zero e se sobrepor ao que já existe.
+            # O que não cabe no dia passa para o seguinte; passando do limite, descarta. O
+            # limite acompanha o D+X: fixo em 5, atraso maior que 5 fazia o vídeo nascer
+            # vencido e voltar sem horário.
+            "limite_dias_descarte": max(7, int(intervalo_dias) + 7),
+            # Horários já ocupados: o lote novo entra depois do último agendado, sem
+            # se sobrepor.
             "horarios_ocupados": [
                 i.get("horario_disparo") for i in fila
                 if not i.get("processado") and i.get("horario_disparo")
             ]
         }
         
-        # O Motor Central aplica a regra de D+X, catraca anti-ban e espaçamento orgânico
+        # O motor central aplica o D+X, a janela e o espaçamento
         calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar)
         
-                # 🗑️ Remove da fila o que o motor marcou como velho demais
+                # Sai da fila (e do disco) o que o motor marcou como velho demais
         marcados = [i for i in fila_data.get("fila", []) if i.get("descartar_por_idade")]
         if marcados:
             for m in marcados:
@@ -14486,11 +14489,10 @@ async def processar_fila_espiao(forcar=False):
         salvar_fila_clonagem(fila_data)
         if EXIBIR_LOGS: logger.info(f"📅 [Espião] Motor Central acionado! {len(itens_para_agendar)} clones organizados com sucesso.")
 
-    # --- 1.5. RECOMPACTAÇÃO DA GRADE ---
-    # Vídeo publicado, descartado ou removido na mão deixa um buraco que a
-    # esteira contínua nunca reaproveita. Aqui o que transbordou para a semana
-    # seguinte volta para os dias que ficaram com vaga. Só grava quando algo
-    # realmente andou, então rodar a cada ciclo não custa escrita à toa.
+    # --- 1.5. Recompactação ---
+    # Vídeo publicado, descartado ou removido deixa buraco na grade. O que tinha
+    # transbordado para dias seguintes volta para os dias com vaga. Só grava quando
+    # algo mudou.
     movidos_recompactacao = recompactar_horarios(fila, {
         "inicio": inicio_janela,
         "fim": fim_janela,
@@ -14504,7 +14506,7 @@ async def processar_fila_espiao(forcar=False):
             logger.info(f"🧲 [Espião] {len(movidos_recompactacao)} vídeo(s) antecipado(s) "
                         f"para dias que tinham vaga.")
 
-    # --- 2. MOTOR DE EXECUÇÃO (A Catraca Anti-Ban) ---
+    # --- 2. Publicação ---
     itens_para_disparar = []
     for item in fila:
         if not item.get("processado") and item.get("horario_disparo"):
@@ -14514,8 +14516,8 @@ async def processar_fila_espiao(forcar=False):
                     itens_para_disparar.append(item)
             except Exception: pass
 
-    # 🚦 RATE LIMIT: no máximo UM disparo por ciclo (o job roda a cada 1 minuto).
-    # Mesmo que 50 vídeos vençam juntos, sai um por minuto — nunca em rajada.
+    # No máximo um por ciclo (o job roda a cada minuto): mesmo com 50 vencidos, sai
+    # um por minuto.
     if len(itens_para_disparar) > 1:
         itens_para_disparar.sort(key=lambda i: i.get("horario_disparo", ""))
         if EXIBIR_LOGS: logger.info(f"🚦 [Espião] {len(itens_para_disparar)} clones vencidos. Publicando 1 por ciclo.")
@@ -14530,11 +14532,9 @@ async def processar_fila_espiao(forcar=False):
         return
 
     for item_pendente in itens_para_disparar:
-                # 🤫 TRAVA DE SILÊNCIO (VIRAL) — versão não destrutiva
-        # ANTES: qualquer rotina a ±15 min empurrava a FILA INTEIRA para frente.
-        # Como há ~29 rotinas/dia (uma a cada 29 min), as zonas de 30 min se encostavam
-        # e formavam uma parede contínua: a fila era empurrada eternamente e nada saía.
-        # AGORA: a janela é curta e o vídeo NÃO é reagendado — só espera o próximo ciclo.
+        # Trava de silêncio: nenhum clone a 2 min de uma rotina do Viral; o vídeo não é
+        # reagendado, só espera o próximo ciclo. Janela curta de propósito: com ~29
+        # rotinas por dia, zonas de ±15 min se encostariam e a fila nunca sairia.
         JANELA_SILENCIO_MIN = 2
 
         conflito_silencio = False
@@ -14549,8 +14549,7 @@ async def processar_fila_espiao(forcar=False):
                     break
 
         if conflito_silencio:
-            # Só adia ESTE ciclo. O horário do vídeo continua intacto e ele sai
-            # no próximo minuto, assim que a rotina passar.
+            # Só pula este ciclo: o horário fica e o clone sai assim que a rotina passar.
             if EXIBIR_LOGS: logger.info(f"🤫 [Espião] Rotina do Viral a menos de {JANELA_SILENCIO_MIN} min. Aguardando o próximo ciclo.")
             return
             
@@ -14581,9 +14580,8 @@ async def processar_fila_espiao(forcar=False):
                 "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
                 "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
             )
-            # ♻️ REAPROVEITA a análise já feita na captura (loop do motor_userbot).
-            # Sem isto o mesmo vídeo seria analisado DUAS vezes: uma para preencher
-            # o nome na fila e outra aqui, dobrando o consumo de cota do Gemini.
+            # Reaproveita a análise feita na captura (motor_userbot): sem isso o vídeo seria
+            # analisado duas vezes, gastando cota do Gemini à toa.
             texto_ia = item_pendente.get("legenda_ia")
             if texto_ia:
                 if EXIBIR_LOGS: logger.info(f"♻️ [Espião] Nome reaproveitado da análise antecipada ({item_id}).")
@@ -14594,8 +14592,8 @@ async def processar_fila_espiao(forcar=False):
             registrar_erro_json(f"processar_fila_espiao IA: {e}", origem="espiao.py")
             texto_ia = None
 
-        # 🧠 RETENTATIVA DA IA: 429/503 costumam ser passageiros. Em vez de publicar
-        # um texto genérico na primeira falha, o clone volta para a fila e tenta de novo.
+        # Retentativa: 429/503 do Gemini costumam passar. Em vez de publicar sem nome na
+        # primeira falha, o clone volta para a fila e tenta de novo daqui a 30 min.
         MAX_TENTATIVAS_IA = 3
         INTERVALO_RETENTATIVA_MIN = 30
 
@@ -14624,7 +14622,7 @@ async def processar_fila_espiao(forcar=False):
             legenda_postagem = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_final}"
             if hashtags: legenda_postagem += f"\n\n<i>{hashtags}</i>"
         else:
-            # 🔗 Reserva: sem texto nenhum, apenas o link já convertido para afiliado
+            # Sem texto da IA: só o link de afiliado
             legenda_postagem = link_final
         
         try:
@@ -14633,11 +14631,11 @@ async def processar_fila_espiao(forcar=False):
             arquivo = FSInputFile(caminho_video)
             msg_enviada = await bot.send_video(chat_id=canal_destino, video=arquivo, caption=legenda_postagem, parse_mode="HTML")
             
-            # ✅ CORREÇÃO DUPLA: Grava o ID do Destino e a Legenda Nova (com o Nome da IA) no banco de dados!
+            # Guarda o ID da mensagem no destino e a legenda publicada (com o nome da IA)
             item_pendente["msg_postada_id"] = msg_enviada.message_id
             item_pendente["legenda"] = legenda_postagem
             
-            registrar_ultimo_post(canal_destino, "video")   # 🚦 Intercalação
+            registrar_ultimo_post(canal_destino, "video")  # Intercalação
             if EXIBIR_LOGS: logger.info(f"✅ Clone {item_id} publicado com sucesso! ID: {msg_enviada.message_id}")
             try: os.remove(caminho_video)
             except: pass
@@ -14651,7 +14649,7 @@ async def processar_fila_espiao(forcar=False):
         item_pendente["horario_postagem"] = agora.strftime("%H:%M")
         salvar_fila_clonagem(fila_data)
         
-        # 🛡️ Catraca limitadora de segurança (Previne banimento no D+0)
+        # Folga entre publicações do mesmo ciclo (no forçado, um atrás do outro)
         await asyncio.sleep(15)
 
 async def sincronizar_financeiro_horario():
