@@ -3,11 +3,8 @@ EXIBIR_LOGS = True
 
 import os
 import asyncio
-import logging
 import json
 import random
-import time
-import hashlib
 import aiohttp
 import re
 from datetime import datetime, timedelta
@@ -21,7 +18,7 @@ from utils import registrar_erro_json
 load_dotenv()
 
 # 🕐 Trava de fuso centralizada: importar o modulo ja aplica America/Sao_Paulo.
-from fuso import FUSO_STR, fuso_horario, configurar_logs
+from fuso import configurar_logs
 
 load_dotenv()
 
@@ -1211,7 +1208,6 @@ async def interceptar_e_espelhar(event):
         return
 
     if isinstance(event.media, MessageMediaDocument):
-        texto_original = event.text or ""
         link_capturado = extrair_link_shopee(event)
         
         if not link_capturado:
@@ -1489,7 +1485,7 @@ async def processar_fila_autorais_loop():
                             conexao.close()
                             houve_limpeza = True
                             if EXIBIR_LOGS: logger.info(f"🧹 [Auto-Limpeza] Vídeo Autoral retido e vencido ({data_alvo}) foi deletado para evitar avalanche.")
-                        except Exception as e:
+                        except Exception:
                             pass
                         continue # Pula para o próximo vídeo, este já foi apagado
                         
@@ -1584,7 +1580,6 @@ async def processar_fila_autorais_loop():
                 await asyncio.sleep(300)
                 continue
 
-            houve_disparo = False
             itens_restantes = []
             
             for item in fila:

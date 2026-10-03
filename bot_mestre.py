@@ -11,16 +11,12 @@ load_dotenv()
 from fuso import FUSO_STR, fuso_horario, configurar_logs
 
 
-import logging
 import json
 import asyncio
 import random
 from datetime import datetime, timedelta
-import time
-import hmac
 import hashlib
 import aiohttp
-from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
@@ -499,8 +495,6 @@ class ConfigRotinaEspiao(StatesGroup):
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
-FUSO_STR = "America/Sao_Paulo"
-fuso_horario = ZoneInfo(FUSO_STR)
 _lock_contador = asyncio.Lock()
 
 # ✅ NOVO: Sistema de travas assíncronas para proteção contra Race Conditions
@@ -1603,7 +1597,7 @@ async def apagar_mensagem_automatica(msg_id, chat_id=GRUPO_ID):
     try:
         await bot.delete_message(chat_id=chat_id, message_id=msg_id)
         if EXIBIR_LOGS: logger.info(f"🧹 Faxina concluída: Mensagem {msg_id} apagada do chat {chat_id}.")
-    except Exception as e:
+    except Exception:
         if EXIBIR_LOGS: logger.info(f"⚠️ Faxina: A mensagem {msg_id} já havia sido apagada manualmente.")
 
 # ==========================================
@@ -1682,7 +1676,6 @@ async def coletar_metricas_diarias():
     try:
         agora = datetime.now(fuso_horario)
         hoje_str = agora.strftime("%Y-%m-%d")
-        ontem_str = (agora - timedelta(days=1)).strftime("%Y-%m-%d")
 
         config_sub = ler_submissao_config()
         grupo_publico = config_sub.get("grupo_id")
@@ -2354,18 +2347,9 @@ def agendar_tarefas_diarias(escopo="todos"):
     rotinas_publico_lista = ROTINAS_PUBLICO
     _escopo_do_job = descobrir_escopo_job
 
-    def _tipo_do_job(job_id):
-        """Extrai o 'tipo' EXATO da rotina a partir do ID do job."""
-        m = re.match(r'^job_rotina_(.+?)_(?:intercalado|reagendado)_\d+$', job_id)
-        if m: return m.group(1)
-        m = re.match(r'^job_rotina_(.+)_\d+$', job_id)
-        if m: return m.group(1)
-        return None
-
     # Remove os jobs antigos respeitando estritamente o ESCOPO solicitado
     for job in scheduler.get_jobs():
         if job.id.startswith('job_rotina_') or job.id.startswith('job_campanha_'):
-            tipo_do_job = _tipo_do_job(job.id)
             escopo_job = _escopo_do_job(job.id)
             if escopo != "todos" and escopo_job != escopo:
                 continue # Pertence a outro robô: não encosta
@@ -2963,7 +2947,6 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("👥 Acessando Painel do Grupo Público e Repostador.")
     config = ler_submissao_config()
     status = "🟢 ATIVADO" if config.get("ativo") else "🔴 DESATIVADO"
-    texto_botao_moderador = "Desativar Robô Moderador 🛑" if config.get("ativo") else "Ativar Robô Moderador ⚙️"
     
     grupo_id = config.get("grupo_id")
     topico_escuta = config.get("topico_envio")
@@ -6800,13 +6783,11 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
 
 def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
     pedidos_db = ler_banco_pedidos()
-    historico = ler_historico_financeiro()
     
     # 🟢 O Robô carrega a sua conta bancária virtual
     saldo_caixa = float(ler_config_bd("saldo_caixa_shopee", 0.0))
     houve_atualizacao = False
     from datetime import timezone
-    import random
     
     if conversoes:
         for conv in conversoes:
@@ -7924,7 +7905,6 @@ async def nomear_grupo_manual(message: types.Message, state: FSMContext):
         )
         return
 
-    comando = partes[0]
     chat_id_bruto = partes[1]
     nome = partes[2].strip()
 
@@ -7957,9 +7937,6 @@ async def menu_relatorio_geral(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     await message.answer("📊 <b>Central de Relatórios</b>\nEscolha qual métrica deseja analisar:", reply_markup=obter_teclado_relatorios(), parse_mode="HTML")
-
-def ler_historico_financeiro():
-    return ler_config_bd("historico_financeiro", padrao={}, arquivo_legado="historico_financeiro.json")
 
 def salvar_historico_financeiro(dados):
     salvar_config_bd("historico_financeiro", dados)
@@ -8001,15 +7978,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     mes_atual_str = hoje.strftime("%Y-%m")
     aprovado_mes = sum(v["aprovado"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     pendente_mes = sum(v["pendente"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    shopee_mes = sum(v["shopee"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    vendedor_mes = sum(v["vendedor"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    
-    qtd_aprovado_mes = sum(v.get("qtd_aprovado", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    qtd_pendente_mes = sum(v.get("qtd_pendente", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    qtd_cancelado_mes = sum(v.get("qtd_cancelado", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    cancelado_mes = sum(v.get("cancelado", 0.0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    clicks_mes = sum(v.get("clicks", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    total_mes = aprovado_mes + pendente_mes + cancelado_mes
     
     # Agrupamento Mensal e Anual
     dados_por_mes = {}
@@ -9644,7 +9612,6 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     # 🧾 Recibo do que acabou de entrar na fila. O contador aponta para o PRÓXIMO,
     # então o vídeo recém-criado é o anterior — mostrar o 237 aqui confundia.
     numero_criado = max(1, proximo_numero - 1)
-    qtd_posts = 2 if nivel_4_ativado else 1
     detalhe_posts = "2 posts · Shopee + TikTok" if nivel_4_ativado else "1 post"
 
     amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -10009,7 +9976,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
                     relatorio["espiao"] += 1
             fila_clonagem["fila"] = mantidos_espiao
             salvar_fila_clonagem(fila_clonagem)
-        except Exception as e:
+        except Exception:
             pass
             
     # 2. Limpar Fila do Espelhador
@@ -10027,7 +9994,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
             fila_espelhador["fila"] = mantidos_espelhador
             with open("fila_espelhador.json", "w", encoding="utf-8") as f:
                 json.dump(fila_espelhador, f, indent=4)
-        except Exception as e:
+        except Exception:
             pass
 
     # 3. Limpar Fila de Autorais
@@ -10045,7 +10012,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
             cursor.execute("DELETE FROM fila_autorais WHERE processado = 0")
             conexao.commit()
             conexao.close()
-        except Exception as e:
+        except Exception:
             pass
 
     # 4. Faxina Cega na Pasta Temp
@@ -10055,7 +10022,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
                 caminho_completo = os.path.join("temp", filename)
                 if os.path.isfile(caminho_completo):
                     apagar_arquivo(caminho_completo)
-    except Exception as e:
+    except Exception:
         pass
 
     # 5. Apagar arquivos de backup (.bkp) na raiz
@@ -10064,7 +10031,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
             for filename in os.listdir("."):
                 if filename.endswith(".bkp") and os.path.isfile(filename):
                     apagar_arquivo(filename)
-        except Exception as e:
+        except Exception:
             pass
 
     # 6. Limpeza de Logs do Servidor Linux
@@ -10081,7 +10048,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
                 status_ubuntu = "✅ Concluída (Mantendo últimos 2 dias)"
             else:
                 status_ubuntu = "⚠️ Falha de permissão (sudo)"
-        except Exception as e:
+        except Exception:
             status_ubuntu = "❌ Erro ao acessar terminal"
 
     await msg_status.delete()
@@ -13388,8 +13355,6 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
                 elif data_adicao_str == "2000-01-01" or data_adicao_str <= hoje_str:
                     status_previsao = "Hoje 🟢"
                 else:
-                    from datetime import timedelta
-                    amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
                     # ✅ CORREÇÃO MESTRE: Limite rígido. Qualquer data futura será tratada como Amanhã.
                     status_previsao = "Amanhã 🟡"
 
@@ -14078,7 +14043,6 @@ async def salvar_nova_numeracao_fila(message: types.Message, state: FSMContext):
     
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
-    import re
     
     if 0 <= posicao < len(fila):
         if EXIBIR_LOGS: logger.info(f"🔄 Iniciando renumeração via SQLite a partir da posição {posicao+1}...")
@@ -14144,7 +14108,6 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
 
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
-    import re
     
     if posicao is not None and 0 <= posicao < len(fila):
         item = fila[posicao]
@@ -14621,7 +14584,6 @@ async def checkup_diario_grupos():
 # =========================================================
 # COLE O CALLBACK AQUI, ANTES DO MAIN()
 # =========================================================
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 @dp.callback_query(F.data == 'forcar_clones_espiao')
 async def forcar_clones_fila(callback: types.CallbackQuery):
@@ -15083,7 +15045,6 @@ async def gerar_botao_permanente(message: types.Message):
 # FLUXO DO USUÁRIO: MODERAÇÃO GUIADA POR BOTÕES 🧠
 # ==========================================
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import asyncio
 
 def checar_permissao_topico(message: types.Message):

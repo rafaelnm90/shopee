@@ -1,14 +1,9 @@
 # 0. CONFIGURAÇÕES INICIAIS
 EXIBIR_LOGS = True
-import os
 import json
 import logging
-import asyncio
-import time
-import hashlib
-import aiohttp
 import re
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 from aiogram import Router, Bot, types, F
 from aiogram.fsm.context import FSMContext
@@ -16,8 +11,8 @@ from motor_userbot import ler_fila_espelhador, salvar_fila_espelhador
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import StateFilter
-from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
-from motor_filas import calcular_horarios_distribuicao, ler_faixa_limite, sortear_teto_do_dia # ⚙️ Novo Motor Centralizado
+from utils import ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
+from motor_filas import ler_faixa_limite, sortear_teto_do_dia # ⚙️ Novo Motor Centralizado
 EXIBIR_LOGS = True
 
 if EXIBIR_LOGS:

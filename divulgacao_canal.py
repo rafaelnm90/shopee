@@ -2,7 +2,6 @@
 EXIBIR_LOGS = True
 import os
 import json
-import logging
 import asyncio
 import random
 from datetime import datetime, timedelta
@@ -19,7 +18,7 @@ from utils import registrar_erro_json, salvar_nome_grupo
 from api_gemini import gerar_texto_gemini
 
 # 🕐 Trava de fuso centralizada: importar o modulo ja aplica America/Sao_Paulo.
-from fuso import FUSO_STR, fuso_horario, configurar_logs
+from fuso import configurar_logs
 
 # 1. CREDENCIAIS DA CONTA
 API_ID = int(os.getenv('API_ID'))

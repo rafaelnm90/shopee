@@ -1,15 +1,11 @@
 import os
 import json
-import logging
 import asyncio
 import re
 from datetime import datetime
-import time
 import hashlib
-import aiohttp
-from telethon import utils, functions
+from telethon import utils
 from telethon import TelegramClient, events
-from telethon.tl.types import MessageMediaDocument
 from dotenv import load_dotenv
 from utils import registrar_erro_json, chave_cache_ia, consultar_cache_ia, gravar_cache_ia
 from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite # ⚙️ Novo Motor Centralizado
@@ -539,8 +535,6 @@ async def analisar_fila_espiao_loop():
         await asyncio.sleep(INTERVALO_ANALISE_ANTECIPADA)
 
 async def processar_fila_espelhador_loop():
-    from datetime import timedelta
-    import random
     while True:
         try:
             fila_dados = ler_fila_espelhador()
@@ -839,7 +833,6 @@ async def motor_espelhador_userbot(event):
         if EXIBIR_LOGS: logger.info("⏭️ [Espelhador] Postagem descartada: Contém o link, mas a mídia não é um vídeo.")
         return
 
-    texto_original = event.text or ""
     link_capturado = extrair_link_shopee(event)
     
     if not link_capturado:
@@ -1256,7 +1249,7 @@ async def monitorar_status_espelhos():
                                     rota["status_verificacao"] = "ok"
                                     alterado = True
                                     
-                            except Exception as e:
+                            except Exception:
                                 if "status_canais" not in rota: rota["status_canais"] = {}
                                 info_atual = rota["status_canais"].get(str(canal), {})
                                 if not isinstance(info_atual, dict): info_atual = {}

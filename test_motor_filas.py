@@ -7,7 +7,7 @@ e falha à noite, porque o motor distribui no tempo que RESTA do dia.
 Rodar:  python3 -m pytest test_motor_filas.py -v
 """
 from unittest.mock import patch
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 import motor_filas
 

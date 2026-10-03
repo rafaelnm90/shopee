@@ -11,7 +11,6 @@ EXIBIR_LOGS = True
 import os
 import re
 import asyncio
-import logging
 import shutil
 import tempfile
 import sqlite3
@@ -38,7 +37,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 🕐 Trava de fuso centralizada: importar o modulo ja aplica America/Sao_Paulo.
-from fuso import FUSO_STR, fuso_horario, configurar_logs
+from fuso import configurar_logs
 
 from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.filters import Command, ChatMemberUpdatedFilter, IS_NOT_MEMBER, IS_MEMBER

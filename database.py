@@ -2,8 +2,6 @@
 EXIBIR_LOGS = True
 import sqlite3
 import logging
-import os
-from datetime import datetime
 
 if EXIBIR_LOGS:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
