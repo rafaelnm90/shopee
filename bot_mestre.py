@@ -10738,12 +10738,13 @@ async def menu_espiao_principal(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "Forçar Postagens 🚀", StateFilter("*"))
 async def iniciar_esvaziar_clones(message: types.Message, state: FSMContext):
+    """Forçar Postagens do Espião: confirma antes de soltar todos os pendentes agora."""
     if message.from_user.id != ADMIN_ID: return
     
     fila_data = ler_fila_clonagem()
     fila = fila_data.get("fila", [])
     
-    # ✅ CORREÇÃO DE BLINDAGEM: Garante que só vai contar e forçar os pendentes reais
+    # Só os pendentes: os já publicados ficam na fila até a faxina.
     qtd_pendentes = len([i for i in fila if i.get("processado") not in [True, 1, "true", "True"]])
     
     if qtd_pendentes == 0:
@@ -10771,16 +10772,19 @@ async def processar_esvaziar_clones(message: types.Message, state: FSMContext):
     await message.answer("✅ <b>Clonagens Forçadas!</b>\nOs vídeos pendentes na fila do Espião serão analisados pela IA e postados em instantes. Você receberá um aviso quando o processo terminar.", parse_mode="HTML", reply_markup=teclado_menu_espiao)
     await state.clear()
     
-    # Chama o processo de forma assíncrona para não travar a interface do Telegram
+    # Em segundo plano: a rajada leva minutos e o painel não pode travar.
     criar_task(esvaziar_fila_espiao_background(message.chat.id))
 
 async def esvaziar_fila_espiao_background(chat_id):
+    """
+    Publica a fila do Espião inteira agora, ignorando a janela e o atraso: chama o
+    motor (um clone por chamada) até não sobrar pendente e avisa no fim.
+    """
     if EXIBIR_LOGS: logger.info("🚀 [Espião] Iniciando rajada forçada em background...")
     while True:
         try:
             dados = ler_fila_clonagem()
             
-            # ✅ CORREÇÃO DE BLINDAGEM: Filtra apenas os pendentes
             pendentes = [i for i in dados.get("fila", []) if i.get("processado") not in [True, 1, "true", "True"]]
             
             if not pendentes:
@@ -10793,13 +10797,13 @@ async def esvaziar_fila_espiao_background(chat_id):
             ontem_str = (agora - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
             
             for item in dados.get("fila", []):
-                # ✅ CORREÇÃO DE BLINDAGEM: Altera a data APENAS dos que NÃO foram processados
+                # Captura passa a ser "ontem": nenhum pendente fica preso no atraso (D+X).
                 if item.get("processado") not in [True, 1, "true", "True"]:
                     item["data_captura"] = ontem_str
                     
             salvar_fila_clonagem(dados)
             
-            # ✅ O PARÂMETRO 'forcar=True' ORDENA AO BOT IGNORAR A JANELA DE TEMPO
+            # forcar=True ignora a janela e o espaçamento: solta tudo a partir de agora.
             await processar_fila_espiao(forcar=True)
             await asyncio.sleep(5) 
             
@@ -10810,6 +10814,9 @@ async def esvaziar_fila_espiao_background(chat_id):
 
 @dp.message(F.text == "Grupos Vigiados 📡")
 async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
+    """
+    Grupos Vigiados: destino e canais na escuta com o status de acesso (lista longa é resumida).
+    """
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("📡 Acessando a lista de grupos vigiados do Espião...")
     
@@ -10838,17 +10845,16 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
         cache_nomes_vigiados = ler_cache_nomes_grupos()
         linhas_geradas = []
         
-        # 1. Pré-processa todas as linhas para saber quais têm erro
+        # 1. Monta todas as linhas antes, para saber quais têm erro
         for i, alvo in enumerate(alvos, 1):
             info = status_alvos.get(alvo, {})
             status_ico = "⏳"
-            # 🧵 Alvo com tópico precisa mostrar "Grupo › Tópico".
             nome_cache = formatar_nome_alvo(alvo, cache_nomes_vigiados)
             detalhe = f"{nome_cache} <code>({alvo})</code>" if nome_cache else alvo
             
             if info.get("status") == "ok":
                 status_ico = "✅"
-                # ⚠️ info['nome'] traz só o nome do GRUPO: recompõe com o tópico.
+                # info['nome'] traz só o nome do grupo: recompõe com o tópico.
                 nome_ok = formatar_nome_alvo(alvo, cache_nomes_vigiados, info.get("nome"))
                 detalhe = f"{nome_ok} <code>({alvo})</code>"
             elif info.get("status") == "erro":
@@ -10860,14 +10866,13 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
                 "tem_erro": status_ico == "❌"
             })
 
-        # 2. Motor de Ocultação Inteligente
+        # 2. Lista grande é resumida
         total = len(linhas_geradas)
         if total <= 15:
-            # Se a lista for pequena, mostra tudo
             for linha in linhas_geradas:
                 texto += linha["texto"]
         else:
-            # Se for grande, mostra 5 primeiros, 5 últimos, e força exibição dos erros
+            # 5 primeiros, 5 últimos e todos os com erro; os ok do meio viram uma linha de contagem
             for i in range(5):
                 texto += linhas_geradas[i]["texto"]
 
@@ -10889,7 +10894,7 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
     else:
         texto += "<i>Nenhum grupo sendo monitorado no momento.</i>\n\n"
         
-    # Tratamento caso a lista de erros seja gigantesca (Limites do Telegram)
+    # Limite de 4096 caracteres do Telegram: corta em várias mensagens
     while len(texto) > 3800:
         corte = texto.rfind('\n', 0, 3800)
         mensagens_para_enviar.append(texto[:corte])
@@ -10908,6 +10913,7 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.aguardando_acao_analise, F.text == "Listar Todos 📜")
 async def listar_todos_espiao(message: types.Message, state: FSMContext):
+    """Lista completa dos canais vigiados, sem resumir."""
     if message.from_user.id != ADMIN_ID: return
     
     dados = ler_alvos_espiao()
@@ -10926,13 +10932,12 @@ async def listar_todos_espiao(message: types.Message, state: FSMContext):
     for i, alvo in enumerate(alvos, 1):
         info = status_alvos.get(str(alvo), {})
         
-        # Puxa o status para definir o ícone (✅ ou ❌)
         status_ico = "❌" if info.get("status") == "erro" else "✅"
         
         nome = formatar_nome_alvo(alvo, cache_nomes, info.get("nome"))
         linha = f"<b>{i}.</b> {status_ico} {nome} (<code>{alvo}</code>)\n"
         
-        # Quebra a mensagem se ficar muito grande para o limite do Telegram
+        # Limite de 4096 caracteres do Telegram: corta em várias mensagens
         if len(texto) + len(linha) > 3800:
             mensagens.append(texto)
             texto = ""
@@ -10945,6 +10950,10 @@ async def listar_todos_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.aguardando_acao_analise, F.text == "⚠️ Duplicados")
 async def verificar_duplicados_espiao(message: types.Message, state: FSMContext):
+    """
+    Aponta pares que parecem o mesmo canal: mesmo ID (com ou sem -100) e tópico, ou mesmo
+    nome entre um @link e um ID.
+    """
     if message.from_user.id != ADMIN_ID: return
     dados = ler_alvos_espiao()
     alvos = dados.get("alvos", [])
@@ -11007,6 +11016,10 @@ async def verificar_duplicados_espiao(message: types.Message, state: FSMContext)
 
 @dp.callback_query(F.data == "remover_duplicados_espiao")
 async def remover_duplicados_espiao_callback(callback: types.CallbackQuery, state: FSMContext):
+    """
+    Remove um de cada par duplicado: fica o que está com acesso ok; empatando, o ID
+    numérico; senão, o primeiro da lista.
+    """
     if callback.from_user.id != ADMIN_ID: return
     dados = ler_alvos_espiao()
     alvos = dados.get("alvos", [])
@@ -11084,9 +11097,13 @@ async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.aguardando_novo_alvo)
 async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
+    """
+    Valida e filtra os canais enviados (ou o Banco Global): barra Lista Negra, o próprio
+    destino (loop) e os já vigiados, e pede confirmação.
+    """
     texto = message.text
     
-    # 🎯 NOVA REDIREÇÃO DA BLACKLIST (COM NOMES)
+    # Lista Negra: mostra os bloqueados com nome e os botões de incluir/remover
     if texto == "Lista Negra (Blacklist) ⛔":
         dados = ler_alvos_espiao()
         blacklist = dados.get("blacklist", [])
@@ -11143,7 +11160,7 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
         entrada_limpa = entrada.strip()
         if not entrada_limpa: continue
 
-        # Se for do Banco Global, pula a lentidão da rede
+        # Do Banco Global os IDs já estão validados: não consulta o Telegram um a um
         if is_importacao_global:
             sucesso = True
             id_final = entrada_limpa
@@ -11263,6 +11280,7 @@ async def acao_blacklist_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.aguardando_blacklist_add)
 async def processar_add_blacklist_espiao(message: types.Message, state: FSMContext):
+    """Inclui na Lista Negra. Canal que já está na escuta pede confirmação, porque sai dela."""
     if message.text == "Cancelar ❌":
         await pedir_alvo_espiao(message, state)
         return
@@ -11350,6 +11368,7 @@ async def processar_add_blacklist_espiao(message: types.Message, state: FSMConte
 
 @dp.message(EspiaoFluxo.aguardando_confirmacao_blacklist_conflito)
 async def confirmar_blacklist_conflito_espiao(message: types.Message, state: FSMContext):
+    """Inclui na Lista Negra e tira da escuta os canais em conflito."""
     if message.text != "Aprovar ✅":
         await message.answer("Operação cancelada.", reply_markup=teclado_cancelar)
         await pedir_alvo_espiao(message, state)
@@ -11394,6 +11413,7 @@ async def confirmar_blacklist_conflito_espiao(message: types.Message, state: FSM
 
 @dp.message(EspiaoFluxo.aguardando_blacklist_remove)
 async def processar_rem_blacklist_espiao(message: types.Message, state: FSMContext):
+    """Tira da Lista Negra os IDs enviados (texto exato)."""
     if message.text == "Cancelar ❌":
         await pedir_alvo_espiao(message, state)
         return
@@ -11496,7 +11516,7 @@ async def processar_remocao_espiao(message: types.Message, state: FSMContext):
     dados = ler_alvos_espiao()
     alvos = dados.get("alvos", [])
     
-    # IMPORTANTE: Ordena de trás para frente para não bagunçar os índices ao fazer o pop()
+    # De trás para frente: o pop() não desloca os índices que ainda faltam
     indices.sort(reverse=True)
     
     removidos = []
@@ -11525,9 +11545,9 @@ async def pedir_destino_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.aguardando_canal_destino)
 async def confirmar_destino_espiao(message: types.Message, state: FSMContext):
+    """Valida o destino do Espião, guarda o nome no cache e pede confirmação."""
     msg_status = await message.answer("⏳ Validando o canal de destino e buscando nome...", reply_markup=teclado_cancelar)
     
-    # Passa o link/ID pelo nosso Motor Inteligente de Validação
     sucesso, destino_id, nome = await validar_e_formatar_alvo(bot, message.text.strip())
     
     await msg_status.delete()
@@ -11536,7 +11556,6 @@ async def confirmar_destino_espiao(message: types.Message, state: FSMContext):
         await message.answer("⚠️ <b>Canal não encontrado ou formato inválido.</b>\nCertifique-se de que o ID ou link está correto. Tente novamente:", reply_markup=teclado_cancelar, parse_mode="HTML")
         return
         
-    # Salva o nome amigável no cache e guarda o ID limpo na memória da conversa
     salvar_nome_grupo(destino_id, nome)
     await state.update_data(novo_destino=destino_id)
     
@@ -11546,7 +11565,6 @@ async def confirmar_destino_espiao(message: types.Message, state: FSMContext):
         is_persistent=True
     )
     
-    # Mostra de forma bonita e padronizada (Nome + ID)
     nome_exibicao = f"{nome} (<code>{destino_id}</code>)" if nome != destino_id else f"<code>{destino_id}</code>"
     
     await message.answer(f"Os vídeos clonados serão enviados automaticamente para o canal:\n\n<b>{nome_exibicao}</b>\n\nConfirma essa alteração?", reply_markup=teclado_confirmacao, parse_mode="HTML")
@@ -11584,7 +11602,7 @@ async def iniciar_config_janela_espiao(message: types.Message, state: FSMContext
         f"Defina a <b>Janela de Horário</b> útil em que o Espião pode postar os vídeos.\n\n"
         f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>) ou clique no botão abaixo para rodar 24h:\n"
         f"<i>Janela atual: {inicio}h às {fim}h</i>", 
-        reply_markup=teclado_janela_espiao, # ✅ Passa a usar o novo teclado
+        reply_markup=teclado_janela_espiao,
         parse_mode="HTML"
     )
     await state.set_state(ConfigRotinaEspiao.aguardando_janela)
@@ -11689,6 +11707,9 @@ async def salvar_config_tempo_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigRotinaEspiao.aguardando_confirmacao_tempo)
 async def confirmar_tempo_espiao(message: types.Message, state: FSMContext):
+    """
+    Grava atraso e modo. Mudou o atraso: zera os horários dos pendentes para o motor redistribuir.
+    """
     if message.text != "Aprovar ✅":
         await message.answer("Operação cancelada.")
         await menu_grupos_vigiados(message, state)
@@ -11724,10 +11745,10 @@ async def confirmar_tempo_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "Rotinas do Espião ⏰", StateFilter("*"))
 async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
+    """Rotinas do Canal Viral: janela e disparos por dia de cada uma, e a pausa delas."""
     if message.from_user.id != ADMIN_ID: return
     dados = ler_config_rotina()
     
-    # Resgata as configurações das três rotinas do canal viral
     config_convite = dados.get("link_grupo_viral", {"inicio": 9, "fim": 21, "frequencia": 2})
     config_gem = dados.get("divulgar_gem_viral", {"inicio": 8, "fim": 22, "frequencia": 1})
     config_promo = dados.get("promo_principal", {"inicio": 10, "fim": 20, "frequencia": 1})
@@ -11755,7 +11776,6 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     
     texto += "Selecione o que deseja editar abaixo:"
     
-    # ✅ NOVO: Verificação do status e adição do botão de pausa dinâmico
     texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado_viral") else "Pausar Rotinas ⏸️"
     
     teclado = ReplyKeyboardMarkup(
@@ -11767,11 +11787,12 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
         is_persistent=True
     )
     await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
-    await state.update_data(menu_origem="espiao") # ✅ Salva a origem para não quebrar a navegação
+    await state.update_data(menu_origem="espiao")  # "Voltar" e os submenus usam a origem para saber de qual canal são as rotinas
     await state.set_state(ConfigRotina.menu_principal)
 
 @dp.message(ConfigRotina.menu_principal, F.text == "Editar Rotinas ✏️")
 async def submenu_editar_rotinas(message: types.Message, state: FSMContext):
+    """Teclado de edição das rotinas do canal de origem (Viral, Público ou principal)."""
     if message.from_user.id != ADMIN_ID: return
     
     data = await state.get_data()
@@ -11817,6 +11838,7 @@ async def submenu_editar_rotinas(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigRotina.menu_principal, F.text == "Disparos Manuais 🚀")
 async def submenu_disparos_manuais(message: types.Message, state: FSMContext):
+    """Teclado de disparo manual das rotinas do canal de origem (Viral, Público ou principal)."""
     if message.from_user.id != ADMIN_ID: return
     
     data = await state.get_data()
@@ -11862,11 +11884,10 @@ async def submenu_disparos_manuais(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "🔙 Voltar ao Menu Rotinas", StateFilter("*"))
 async def voltar_menu_rotinas_dinamico(message: types.Message, state: FSMContext):
-    # ✅ CORREÇÃO: antes este handler exigia o estado ConfigRotina.menu_principal.
-    # Como o FSM vive em memória, qualquer restart do serviço ou expiração por
-    # inatividade apagava o estado e o botão virava um beco sem saída silencioso
-    # (log "Update is not handled"). Agora responde em qualquer estado, igual aos
-    # botões "Disparar ..." do mesmo teclado, que já usavam StateFilter("*").
+    """Volta ao menu de rotinas do canal de origem."""
+    # Responde em qualquer estado: o FSM vive em memória e um restart ou a expiração
+    # por inatividade deixavam o botão sem resposta. Os "Disparar ..." do mesmo
+    # teclado também usam StateFilter("*").
     if message.from_user.id != ADMIN_ID: return
 
     data = await state.get_data()
@@ -11882,8 +11903,7 @@ async def voltar_menu_rotinas_dinamico(message: types.Message, state: FSMContext
     elif origem:
         await gerenciar_rotina(message, state)
     else:
-        # ✅ Sem "menu_origem" o estado foi perdido (restart/inatividade).
-        # Em vez de ignorar o clique, devolve o usuário para a raiz.
+        # Sem "menu_origem" o estado se perdeu (restart/inatividade): volta para a raiz.
         await state.clear()
         await state.update_data(painel_atual="raiz")
         await message.answer(
@@ -11892,9 +11912,8 @@ async def voltar_menu_rotinas_dinamico(message: types.Message, state: FSMContext
             reply_markup=obter_teclado_raiz()
         )
 
-# ✅ NOVOS INTERRUPTORES INTERNOS DE PAUSA (COM CONFIRMAÇÃO)
 
-# --- SPAM PRINCIPAL ---
+# --- Pausas internas (com confirmação): SPAM principal ---
 @dp.message(ConfigDivulgacao.menu_principal, F.text.in_(["Pausar SPAM ⏸️", "Retomar SPAM ▶️"]))
 async def pedir_confirmacao_pausa_spam(message: types.Message, state: FSMContext):
     acao = "pausar" if "Pausar" in message.text else "retomar"
@@ -11934,7 +11953,7 @@ async def processar_pausa_spam_interno(message: types.Message, state: FSMContext
     await gerenciar_divulgacao(message, state)
 
 
-# --- SPAM VIRAL (ESPIÃO) ---
+# --- SPAM Viral ---
 @dp.message(ConfigDivulgacaoViral.menu_principal, F.text.in_(["Pausar SPAM ⏸️", "Retomar SPAM ▶️"]))
 async def pedir_confirmacao_pausa_spam_viral(message: types.Message, state: FSMContext):
     acao = "pausar" if "Pausar" in message.text else "retomar"
@@ -11999,6 +12018,10 @@ async def pedir_confirmacao_pausa_rotinas(message: types.Message, state: FSMCont
 
 @dp.message(ConfigRotina.aguardando_confirmacao_pausa)
 async def processar_pausa_rotinas_interno(message: types.Message, state: FSMContext):
+    """
+    Pausa ou retoma as rotinas do canal de origem. Ao retomar, refaz a grade do dia só
+    daquele canal, com o que ainda falta sair hoje.
+    """
     if "Confirmar" not in message.text:
         await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
         return
@@ -12037,11 +12060,11 @@ async def processar_pausa_rotinas_interno(message: types.Message, state: FSMCont
             agendar_tarefas_diarias(escopo="principal")
         await gerenciar_rotina(message, state)
 
-# ✅ NOVO: Handler específico para corrigir o "Voltar" na pausa programada
 @dp.message(PausaProgramadaFluxo.aguardando_selecao_servicos, F.text == "Voltar 🔙")
 @dp.message(PausaProgramadaFluxo.aguardando_data_retorno, F.text == "Voltar 🔙")
 @dp.message(PausaProgramadaFluxo.aguardando_intencao_encerramento, F.text == "Voltar 🔙")
 async def voltar_pausa_para_inicio(message: types.Message, state: FSMContext):
+    """"Voltar" dentro da Pausa Programada: volta às Configurações Avançadas."""
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🔙 Comando Voltar acionado na Pausa Programada.")
     await state.clear()
@@ -12050,6 +12073,7 @@ async def voltar_pausa_para_inicio(message: types.Message, state: FSMContext):
 
 @dp.message(F.text.in_(["Pausar Postagens 🛑", "Retomar Postagens ▶️"]), StateFilter("*"))
 async def iniciar_pausa_programada(message: types.Message, state: FSMContext):
+    """Pausa Programada: com pausa ativa, oferece encerrar; senão, pede a data de retorno."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     dados_pausa = ler_pausa_programada()
@@ -12067,6 +12091,10 @@ async def iniciar_pausa_programada(message: types.Message, state: FSMContext):
 
 @dp.message(PausaProgramadaFluxo.aguardando_data_retorno)
 async def processar_data_retorno(message: types.Message, state: FSMContext):
+    """
+    Lê o retorno (DD/MM HH:MM; mês já passado vira ano que vem) e oferece os serviços
+    do principal que ainda estão ativos para pausar junto.
+    """
     import re
     from datetime import datetime
     
@@ -12143,6 +12171,10 @@ async def processar_selecao_servicos(message: types.Message, state: FSMContext):
 
 @dp.message(PausaProgramadaFluxo.aguardando_confirmacao_pausa)
 async def confirmar_pausa_programada_final(message: types.Message, state: FSMContext):
+    """
+    Liga a pausa: pausa os serviços escolhidos, posta o aviso no grupo e desfaz os vídeos
+    agendados de hoje.
+    """
     if message.text != "Confirmar Pausa ✅":
         await message.answer("Por favor, clique em Confirmar Pausa ✅ ou Cancelar ❌.")
         return
@@ -12164,7 +12196,7 @@ async def confirmar_pausa_programada_final(message: types.Message, state: FSMCon
         salvar_config_rotina(dados_rotina)
         servicos_pausados.append("rotina")
         
-    # Sorteio de um motivo dinâmico para a pausa
+    # Motivo sorteado: o aviso diário reaproveita o mesmo
     motivos_pausa = [
         "manutenção preventiva nos servidores para garantir estabilidade",
         "curadoria minuciosa e validação de um novo lote gigante de vídeos premium de alta conversão",
@@ -12175,7 +12207,6 @@ async def confirmar_pausa_programada_final(message: types.Message, state: FSMCon
     motivo_escolhido = random.choice(motivos_pausa)
     if EXIBIR_LOGS: logger.info(f"🎲 Motivo de pausa sorteado: {motivo_escolhido}")
 
-    # Extrai apenas o dia e o mês (DD/MM) da string original
     data_curta = data_retorno_str.split(" ")[0][:5]
 
     prompt = (
@@ -12220,6 +12251,10 @@ async def pedir_confirmacao_encerramento(message: types.Message, state: FSMConte
 
 @dp.message(PausaProgramadaFluxo.aguardando_confirmacao_encerramento)
 async def processar_encerramento_pausa(message: types.Message, state: FSMContext):
+    """
+    Encerra a pausa agora: troca o aviso pela mensagem de retorno, reativa os serviços
+    e refaz a grade de hoje.
+    """
     if message.text != "Aprovar Encerramento ✅":
         await message.answer("Por favor, clique em Aprovar Encerramento ✅ ou Cancelar ❌.")
         return
@@ -12227,7 +12262,6 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
     dados_pausa = ler_pausa_programada()
     servicos = dados_pausa.get("servicos_pausados", [])
     
-    # ✅ NOVO: Apaga a mensagem de aviso que ficou pendente no grupo
     id_aviso = dados_pausa.get("id_aviso_imediato")
     if id_aviso:
         await apagar_mensagem_automatica(id_aviso, GRUPO_ID)
@@ -12235,7 +12269,6 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
         
     msg_status = await message.answer("⏳ Gerando mensagem de retorno com a IA...", reply_markup=teclado_cancelar)
     
-    # ✅ NOVO: A IA gera o aviso de retorno ao trabalho
     prompt_retorno = (
         "Você é um assistente de afiliados. Crie uma mensagem MUITO CURTA E EMPOLGANTE "
         "avisando o grupo que a pausa de manutenção acabou, o canal voltou à ativa e os "
@@ -12244,7 +12277,7 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
     )
     texto_retorno = await gerar_mensagem_gemini(prompt_retorno)
     
-    # ✅ CORREÇÃO: Salva a mensagem enviada numa variável e joga o ID na lixeira
+    # A mensagem de retorno vai para a lixeira (apagada na faxina da madrugada)
     msg_retorno = await bot.send_message(GRUPO_ID, texto_retorno)
     registrar_lixeira(msg_retorno.message_id, GRUPO_ID)
     
@@ -12270,7 +12303,7 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
     await message.answer("▶️ Pausa programada encerrada! O aviso antigo foi apagado e a mensagem de retorno foi postada no grupo. Serviços reativados com sucesso!", reply_markup=obter_teclado_principal())
     await state.clear()
 
-# --- LÓGICA DE GERENCIAMENTO DE DIVULGAÇÃO ---
+# --- SPAM em Grupos (divulgação pelo userbot) ---
 def ler_alvos_divulgacao():
     padrao = {"alvos": [], "frequencia_por_hora": 0, "pausado": False, "forcar_disparo": False, "repeticoes_internas": 6, "replicas_mensagem": 5}
     dados = ler_config_bd("alvos_divulgacao", padrao, arquivo_legado="alvos_divulgacao.json")
@@ -12293,6 +12326,7 @@ def salvar_alvos_divulgacao(dados):
 
 @dp.message(F.text == "SPAM em Grupos 📢")
 async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
+    """Painel do SPAM em Grupos: padrão global, alvos e o ajuste de cada um."""
     if message.from_user.id != ADMIN_ID: return
     dados = ler_alvos_divulgacao()
     alvos = dados.get("alvos", [])
