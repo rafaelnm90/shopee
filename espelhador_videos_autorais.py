@@ -1057,7 +1057,38 @@ async def gerar_legenda_autoral(caminho_video):
     titulo = await analisar_video_gemini(caminho_video, prompt, EXIBIR_LOGS)
     return titulo
 
-from utils import salvar_nome_grupo # Adicione isso caso não esteja no topo do arquivo
+from utils import salvar_nome_grupo
+
+DIAS_REGISTRO_MENSAGENS_ORIGEM = 30
+
+def mensagem_ja_processada(chat_id, msg_id):
+    """
+    Registra a mensagem (chat, id) da origem e devolve True se ela já estava registrada.
+
+    A origem chega por dois caminhos: o evento NewMessage e a varredura_origem_loop.
+    Sem este registro, a mesma mensagem vinda pelos dois seria publicada duas vezes
+    no canal e entraria duas vezes na fila. Fica no banco, então vale depois de
+    reiniciar. Sem msg_id ou com erro no banco devolve False (a mensagem é processada).
+    """
+    if msg_id is None:
+        return False
+    chave = f"{_id_curto(chat_id)}:{msg_id}"
+    agora_txt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # A varredura só olha as últimas mensagens da origem; registro mais velho não serve.
+    limite = (datetime.now() - timedelta(days=DIAS_REGISTRO_MENSAGENS_ORIGEM)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("CREATE TABLE IF NOT EXISTS mensagens_origem_autorais (chave TEXT PRIMARY KEY, data_registro TEXT)")
+        cursor.execute("INSERT OR IGNORE INTO mensagens_origem_autorais (chave, data_registro) VALUES (?, ?)", (chave, agora_txt))
+        ja_registrada = cursor.rowcount == 0
+        cursor.execute("DELETE FROM mensagens_origem_autorais WHERE data_registro < ?", (limite,))
+        conexao.commit()
+        conexao.close()
+        return ja_registrada
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao consultar o registro de mensagens da origem: {e}")
+        return False
 
 def separar_alvo_e_topico(valor):
     """
@@ -1089,18 +1120,6 @@ def separar_alvo_e_topico(valor):
 # e reentrava nas filas — um vídeo recém-postado virava um novo vídeo "novo".
 @client.on(events.NewMessage(incoming=True))
 async def interceptar_e_espelhar(event):
-    # 🔬 DIAGNÓSTICO TEMPORÁRIO: registra TODO evento que chega, antes de qualquer
-    # filtro. Serve para responder uma pergunta só — o handler é chamado para o grupo
-    # de origem? Sem isto, um evento descartado e um evento que nunca chegou produzem
-    # exatamente o mesmo silêncio no log. Remover depois de identificar a causa.
-    if EXIBIR_LOGS:
-        logger.info(
-            f"🔬 [Evento] chat_id={getattr(event, 'chat_id', '?')} "
-            f"out={getattr(event, 'out', '?')} "
-            f"media={type(getattr(event, 'media', None)).__name__} "
-            f"texto={(event.raw_text or '')[:40]!r}"
-        )
-
     # 🛡️ Cinto e suspensório: se algum evento próprio escapar do filtro acima, morre aqui.
     if getattr(event, "out", False):
         return
@@ -1212,6 +1231,10 @@ async def interceptar_e_espelhar(event):
         
         if not link_capturado:
             if EXIBIR_LOGS: logger.info("⏭️ Postagem ignorada: Não contém link da Shopee (nem embutido).")
+            return
+
+        if mensagem_ja_processada(getattr(event, 'chat_id', None), getattr(event, 'id', None)):
+            if EXIBIR_LOGS: logger.info(f"⏭️ Mensagem {getattr(event, 'id', '?')} da origem já foi processada (evento e varredura pegaram a mesma). Ignorada.")
             return
 
         if EXIBIR_LOGS: logger.info("🔗 A converter o link da Shopee para o seu ID de afiliado via API Central...")
@@ -1551,7 +1574,10 @@ async def processar_fila_autorais_loop():
             # 🚦 TETO DIÁRIO. O sorteio da captura limita quantos vídeos ENTRAM por dia,
             # mas nada limitava quantos SAEM: uma fila com atraso acumulado despejava
             # tudo de uma vez no grupo dos outros. Agora o dia tem um limite duro.
-            limite_dia = int(config_atual.get("limite_videos", 5))
+            # O teto do dia é a mesma cota que a captura sorteou para esta data (mesma
+            # semente, mesmo dia): sai no dia exatamente o que foi guardado para ele.
+            piso_aut, topo_aut = faixa_de_config(config_atual, "limite_min", "limite_max", "limite_videos")
+            limite_dia = sortear_teto_do_dia("autorais", hoje_str, piso_aut, topo_aut) or piso_aut or 5
             try:
                 conexao_ct = sqlite3.connect("banco_dados.db", timeout=20.0)
                 ja_saiu = conexao_ct.execute(
@@ -2040,8 +2066,8 @@ async def varredura_origem_loop():
                 if not getattr(msg, "media", None):
                     continue
                 try:
-                    # 🔁 A dedupe por doc_id do reservar_video() protege contra o mesmo
-                    # vídeo entrar duas vezes, caso o evento também chegue algum dia.
+                    # Se o evento também entregar esta mensagem, mensagem_ja_processada()
+                    # garante que só um dos dois caminhos a processa.
                     await interceptar_e_espelhar(EventoSimulado(msg))
                 except Exception as e:
                     if EXIBIR_LOGS: logger.error(f"❌ [Varredura] Falha ao processar a mensagem {msg.id}: {e}")
