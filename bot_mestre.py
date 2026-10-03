@@ -14592,6 +14592,7 @@ async def processar_fila_espiao(forcar=False):
         await asyncio.sleep(15)
 
 async def sincronizar_financeiro_horario():
+    """De hora em hora: pedidos dos últimos 3 dias na API da Shopee para o banco."""
     if EXIBIR_LOGS: logger.info("⏰ [Financeiro] Iniciando sincronização em background com a API Shopee...")
     
     conversoes = await buscar_dados_financeiros_shopee(3)
@@ -14600,6 +14601,10 @@ async def sincronizar_financeiro_horario():
         if EXIBIR_LOGS: logger.info("✅ [Financeiro] Varredura horária concluída. Banco de Pedidos atualizado.")
 
 async def varredura_retroativa_pendentes():
+    """
+    Madrugada: com pedido ainda pendente no banco, busca de novo desde o mais antigo
+    (até 90 dias) para fechar confirmados e cancelados.
+    """
     if EXIBIR_LOGS: logger.info("🌙 [Pente Fino] Iniciando varredura de madrugada para caçar pedidos pendentes antigos...")
     
     pedidos_db = ler_banco_pedidos()
@@ -14625,7 +14630,7 @@ async def varredura_retroativa_pendentes():
         return
         
     dias_retroativos = (agora - data_mais_antiga).days + 1
-    # Trava em 90 dias absolutos para respeitar a barreira da API "last 3 months"
+    # A API só devolve os últimos 3 meses: no máximo 90 dias (e no mínimo 5).
     if dias_retroativos > 90: dias_retroativos = 90
     if dias_retroativos < 5: dias_retroativos = 5
     
@@ -14637,11 +14642,12 @@ async def varredura_retroativa_pendentes():
         if EXIBIR_LOGS: logger.info("✅ [Pente Fino] Varredura profunda concluída! Pendentes antigos consolidados (Confirmados ou Cancelados).")
 
 async def checkup_diario_grupos():
+    """Relatório diário ao admin: canais do Espião e rotas do Espelhador com falha de acesso."""
     if EXIBIR_LOGS: logger.info("🚀 Consolidando relatório de saúde diário do sistema...")
     
     relatorio = "📊 <b>Relatório Diário de Saúde dos Robôs</b>\n\n"
     
-    # 1. Auditoria passiva do Espião (lendo o status do banco SQLite)
+    # 1. Espião: canais com falha de acesso (status gravado pelo userbot)
     try:
         dados_espiao = ler_alvos_espiao()
             
@@ -14663,7 +14669,7 @@ async def checkup_diario_grupos():
 
     relatorio += "\n"
     
-    # 2. Auditoria passiva do Espelhador
+    # 2. Espelhador: rotas com falha
     try:
         with open("espelhos_config.json", "r", encoding="utf-8") as f:
             dados_espelho = json.load(f)
@@ -14687,6 +14693,7 @@ async def checkup_diario_grupos():
 
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Pausar Robô Moderador ⏸️", "Retomar Robô Moderador ▶️", "Ativar Robô Moderador ⚙️", "Desativar Robô Moderador 🛑"]))
 async def pedir_confirmacao_toggle(message: types.Message, state: FSMContext):
+    """Pausar/retomar o Robô Moderador do Grupo Público: pede confirmação."""
     if message.from_user.id != ADMIN_ID: return
     config = ler_submissao_config()
     if not config.get("grupo_id"):
@@ -14712,6 +14719,7 @@ async def pedir_confirmacao_toggle(message: types.Message, state: FSMContext):
 
 @dp.message(SubmissaoAdminFluxo.aguardando_confirmacao_toggle)
 async def processar_toggle_submissoes(message: types.Message, state: FSMContext):
+    """Liga ou desliga a moderação automática das submissões."""
     if not message.text or "Confirmar" not in message.text:
         await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
         return
@@ -14739,9 +14747,10 @@ async def processar_toggle_submissoes(message: types.Message, state: FSMContext)
 
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurações do Robô de Rotina do Grupo Público ⏰")
 async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
+    """Rotinas do Grupo Público: tópicos alvo, janela e disparos por dia de cada uma, e a pausa."""
     dados = ler_config_rotina()
     
-    # --- LÓGICA DE EXIBIÇÃO DOS TÓPICOS DE ROTINA ---
+    # Nomes dos tópicos das rotinas: cache, nome salvo, papel do tópico (postagem/escuta), Geral ou "Tópico N"
     config_sub = ler_submissao_config()
     grupo_id = config_sub.get("grupo_id")
     grupo_id_str = str(grupo_id) if grupo_id else ""
@@ -14795,7 +14804,6 @@ async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
     else:
         display_rotinas = "\n   ✅ <i>Chat Geral (Padrão)</i>"
 
-    # --- MONTAGEM DO TEXTO ---
     texto = "⏰ <b>Rotinas do Grupo Público</b>\n\n"
     texto += f"📢 <b>Alvos das Rotinas:</b>{display_rotinas}\n"
     texto += "<i>(Use o botão \"Gerenciar Alvos de Postagem 🎯\" para ativar ou desativar estes locais)</i>\n\n"
@@ -14825,11 +14833,13 @@ async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigRotina.menu_principal, F.text == "Voltar ao Painel Público 🔙")
 async def voltar_pub_rotinas(message: types.Message, state: FSMContext):
+    """Volta ao painel do Grupo Público."""
     await state.clear()
     await painel_submissoes(message, state)
 
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Definir Tópicos de Moderação 💬")
 async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
+    """Tópicos de Moderação: escolha entre o tópico de escuta e o de postagem."""
     if EXIBIR_LOGS: logger.info("⚙️ Acessando submenu modular de configuração de tópicos.")
     
     teclado = ReplyKeyboardMarkup(
@@ -14854,12 +14864,13 @@ async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
 
 @dp.message(SubmissaoAdminFluxo.aguardando_selecao_edicao_grupo)
 async def selecionar_campo_grupo_publico(message: types.Message, state: FSMContext):
+    """Pede o link do tópico escolhido, com exemplo da configuração atual."""
     if message.text == "Voltar às Configurações 🔙":
         await state.set_state(SubmissaoAdminFluxo.menu_principal)
         await submenu_robo_moderador(message, state)
         return
 
-    # ✅ NOVO: o exemplo é montado com a configuração atual do próprio usuário
+    # O exemplo usa o grupo e os tópicos atuais
     config_atual = ler_submissao_config()
     grupo_id_atual = str(config_atual.get("grupo_id") or "")
 
@@ -14896,6 +14907,10 @@ async def selecionar_campo_grupo_publico(message: types.Message, state: FSMConte
 
 @dp.message(SubmissaoAdminFluxo.aguardando_novo_valor_grupo)
 async def receber_novo_valor_grupo(message: types.Message, state: FSMContext):
+    """
+    Lê o tópico (escuta/postagem: grupo e tópico; rotina: lista de tópicos) e pede
+    confirmação. Sem conseguir validar no Telegram, extrai os IDs do link.
+    """
     if message.text == "Cancelar ❌":
         await message.answer("Operação cancelada.")
         await menu_edicao_grupo_publico(message, state)
@@ -14932,8 +14947,8 @@ async def receber_novo_valor_grupo(message: types.Message, state: FSMContext):
             if "t.me/c/" in texto_usuario:
                 so_num = re.search(r't\.me/c/(\d+)', texto_usuario)
                 grupo_id = f"-100{so_num.group(1)}" if so_num else texto_usuario
-                # 🔗 Mesmo bug: em link de MENSAGEM (.../<topico>/<mensagem>) o
-                # último segmento é a mensagem, não o tópico.
+                # Link de mensagem (.../<tópico>/<mensagem>): o tópico é o segundo número, não o
+                # último.
                 m_link = re.search(r't\.me/c/(\d+)/(\d+)(?:/(\d+))?', texto_usuario)
                 topico_id = m_link.group(2) if m_link else "0"
             else:
@@ -14949,9 +14964,8 @@ async def receber_novo_valor_grupo(message: types.Message, state: FSMContext):
             topicos_finais = []
             texto_conf = "✅ Você definiu que as rotinas irão para o <b>Chat Geral (Padrão)</b>.\n\nDeseja confirmar esta alteração?"
         else:
-            # 🔗 Segunda porta para a MESMA config 'topicos_rotina'. Usa o mesmo
-            # extrair_id_topico do "Gerenciar Alvos" para os dois caminhos não
-            # divergirem de novo.
+            # Outra entrada para a mesma config 'topicos_rotina': usa o extrair_id_topico do
+            # "Gerenciar Alvos" para os dois caminhos lerem o link do mesmo jeito.
             grupo_id_rot = str(ler_submissao_config().get("grupo_id") or "")
             topicos_finais = []
             problemas = []
@@ -14985,6 +14999,7 @@ async def receber_novo_valor_grupo(message: types.Message, state: FSMContext):
 
 @dp.message(SubmissaoAdminFluxo.aguardando_confirmacao_grupo)
 async def confirmar_salvamento_grupo(message: types.Message, state: FSMContext):
+    """Grava o tópico confirmado na config de submissão."""
     if message.text == "Cancelar ❌":
         await message.answer("Operação cancelada.")
         await menu_edicao_grupo_publico(message, state)
@@ -15015,9 +15030,7 @@ async def confirmar_salvamento_grupo(message: types.Message, state: FSMContext):
     
     await painel_submissoes(message, state)
 
-# ==========================================
-# GERADOR DO BOTÃO FIXO (Aberto para Todos) 📌
-# ==========================================
+# --- Painel fixo de submissão (aberto a todos) ---
 from aiogram.filters import Command
 
 TEXTO_BOTAO_OFERTAS = (
@@ -15032,11 +15045,12 @@ TEXTO_BOTAO_OFERTAS = (
     "<i>✅ As ofertas aprovadas pela nossa IA vão para o mural com os seus créditos!</i>"
 )
 
-# ✅ NOVO: mantém o painel de submissão SEMPRE como a última mensagem do tópico.
-# Ele é apagado e recriado embaixo, então nunca sobe na tela nem some.
+# O painel de submissão fica sempre como a última mensagem do tópico: é recriado
+# embaixo e o anterior, apagado.
 _lock_botao_ofertas = asyncio.Lock()
 
 async def reenviar_botao_ofertas():
+    """Recria o painel fixo de submissão no fim do tópico de escuta e o fixa."""
     async with _lock_botao_ofertas:
         config = ler_submissao_config()
         grupo_id = config.get("grupo_id")
@@ -15066,7 +15080,7 @@ async def reenviar_botao_ofertas():
             if EXIBIR_LOGS: logger.error(f"❌ [Painel Fixo] Falha ao reenviar o painel de submissão: {e}")
             return
 
-        # Só apaga o painel anterior DEPOIS que o novo já está no ar (evita ficar sem painel)
+        # Só apaga o anterior depois que o novo está no ar: o tópico nunca fica sem painel
         msg_antiga = config.get("msg_botao_ofertas")
         if msg_antiga and msg_antiga != msg.message_id:
             try: await bot.delete_message(chat_id=grupo_id, message_id=int(msg_antiga))
@@ -15075,8 +15089,7 @@ async def reenviar_botao_ofertas():
         config["msg_botao_ofertas"] = msg.message_id
         salvar_submissao_config(config)
 
-        # 📌 Fixa no topo do tópico, sem notificação. O pin do painel anterior cai
-        # sozinho quando aquela mensagem é apagada logo acima.
+        # Fixa sem notificação. O pin do anterior cai sozinho quando ele é apagado.
         try:
             await bot.pin_chat_message(
                 chat_id=grupo_id,
@@ -15090,32 +15103,33 @@ async def reenviar_botao_ofertas():
 
 @dp.message(F.pinned_message)
 async def limpar_aviso_fixacao(message: types.Message):
-    # 📌 "Fulano fixou uma mensagem" não interessa a ninguém e vai se acumulando
-    # no tópico a cada recriação do painel. Some assim que chega.
+    """Apaga o aviso de serviço "fixou uma mensagem"."""
+    # O aviso "fixou uma mensagem" se acumularia a cada recriação do painel.
     try: await message.delete()
     except Exception: pass
 
 @dp.message(Command("botao_ofertas"))
 async def gerar_botao_permanente(message: types.Message):
+    """/botao_ofertas: recria o painel fixo de submissão e apaga o comando."""
     if EXIBIR_LOGS: 
         logger.info(f"📥 Solicitada criação do botão público no tópico. Usuário: {message.from_user.id}")
     
     await reenviar_botao_ofertas()
             
-    # Remove a mensagem de comando para manter o tópico limpo
     try: 
         await message.delete()
     except Exception: 
         pass
 
-# ==========================================
-# FLUXO DO USUÁRIO: MODERAÇÃO GUIADA POR BOTÕES 🧠
-# ==========================================
+# --- Submissão pública: painel guiado por botões ---
 
 import asyncio
 
 def checar_permissao_topico(message: types.Message):
-    """Valida se a mensagem pertence ao grupo e tópico configurados para submissão pública."""
+    """
+    (True, config) se a mensagem é do tópico de escuta do Grupo Público, com a moderação
+    ligada e de um usuário (não bot); senão (False, None).
+    """
     config = ler_submissao_config()
     if not config.get("ativo"): 
         return False, None
@@ -15130,11 +15144,11 @@ def checar_permissao_topico(message: types.Message):
     if str(message.message_thread_id or 0) != str(topico_envio): 
         return False, None
     if message.from_user.is_bot: 
-        return False, None # Filtra apenas outros bots para evitar loops
+        return False, None  # outros bots: evita loop
         
     return True, config
 
-# ⏱️ CRONÔMETRO DO WIZARD
+# Cronômetro do painel
 TEMPO_LIMITE_WIZARD = 180          # segundos por passo (reinicia a cada etapa)
 INTERVALO_CRONOMETRO_WIZARD = 15   # de quanto em quanto a contagem é atualizada na tela
 
@@ -15168,8 +15182,8 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
         restante -= INTERVALO_CRONOMETRO_WIZARD
 
         data = await state.get_data()
-        # O usuário avançou de passo (ou cancelou): este cronômetro se encerra.
-        # Logado porque uma saída muda aqui é indistinguível de uma task morta.
+        # Mudou de passo ou cancelou: este cronômetro acaba. Fica no log porque uma saída
+        # muda aqui pareceria uma task morta.
         sessao_atual = data.get("sessao_wizard_id")
         if sessao_atual != sessao_id:
             if EXIBIR_LOGS:
@@ -15192,10 +15206,8 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
                 reply_markup=teclado
             )
         except Exception as e:
-            # ⚠️ Antes era 'pass' mudo. Se a edição falha sempre, a task continua
-            # viva e girando, mas o painel congela na tela — indistinguível de
-            # task morta. "message is not modified" é normal e segue silencioso;
-            # qualquer outra falha vira log.
+            # Falha que se repete congela o painel na tela com a task viva: vira log.
+            # "message is not modified" é normal e fica quieto.
             if "not modified" not in str(e).lower():
                 if EXIBIR_LOGS:
                     logger.warning(f"⚠️ [Cronômetro] Falha ao editar painel {message_id} ({restante}s restantes): {type(e).__name__}: {e}")
@@ -15206,13 +15218,12 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
     if data.get("sessao_wizard_id") != sessao_id:
         return
 
-    # 🛟 RESGATE: com vídeo + pelo menos 1 link válido (Shopee ou TikTok), o trabalho
-    # do membro NÃO vai para o lixo. Abrimos uma pergunta extra de 1 minuto antes.
+    # Já tem vídeo e pelo menos um link: em vez de descartar, pergunta antes (1 min).
     if data.get("video_file_id") and (data.get("link_shopee") or data.get("link_tiktok")):
         await abrir_confirmacao_expiracao(chat_id, message_id, thread_id, state)
         return
 
-    # ⌛ Expirou: limpa a memória, apaga o painel e avisa (o aviso também se autodestrói)
+    # Expirou sem material suficiente: limpa a sessão, apaga o painel e avisa (o aviso some sozinho)
     await state.clear()
     try:
         await bot.delete_message(chat_id, message_id)
@@ -15233,9 +15244,7 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
     except Exception:
         pass
 
-# ==========================================
-# 🛟 RESGATE PÓS-EXPIRAÇÃO (pergunta extra de 1 minuto)
-# ==========================================
+# --- Resgate depois do prazo (1 minuto extra) ---
 TEMPO_CONFIRMACAO_EXPIRACAO = 60        # segundos para o membro decidir
 INTERVALO_CRONOMETRO_CONFIRMACAO = 10   # de quanto em quanto a contagem é atualizada
 
@@ -15273,8 +15282,8 @@ async def abrir_confirmacao_expiracao(chat_id, message_id, thread_id, state: FSM
     if not dono_id:
         return
 
-    # A confirmação vira a sessão ativa: cronômetros antigos morrem sozinhos e,
-    # se o membro voltar a mexer no painel, esta contagem também morre sozinha.
+    # A confirmação vira a sessão ativa: os cronômetros antigos param e, se o membro
+    # mexer no painel, esta contagem também para.
     sessao_conf = f"conf_{message_id}_{int(datetime.now(fuso_horario).timestamp() * 1000)}"
     await state.update_data(sessao_wizard_id=sessao_conf)
 
@@ -15300,7 +15309,7 @@ async def cronometro_confirmacao_expiracao(chat_id, message_id, thread_id, state
         restante -= INTERVALO_CRONOMETRO_CONFIRMACAO
 
         data = await state.get_data()
-        # Respondeu, cancelou ou mandou item novo: esta contagem morre em silêncio
+        # Respondeu, cancelou ou mandou item novo: esta contagem para
         if data.get("sessao_wizard_id") != sessao_conf:
             return
 
@@ -15319,31 +15328,24 @@ async def cronometro_confirmacao_expiracao(chat_id, message_id, thread_id, state
     if data.get("sessao_wizard_id") != sessao_conf:
         return
 
-            # ⌛ Nem respondeu: em vez de jogar fora uma oferta pronta, publicamos direto.
+    # Sem resposta: publica a oferta pronta em vez de jogá-la fora.
     if EXIBIR_LOGS: logger.info(f"🚀 [Wizard] Prazo de resgate esgotado. Publicando automaticamente a oferta de {data.get('dono_wizard')}.")
     await wizard_publicar_oferta(None, state, chat_forcado=chat_id, mencao_forcada=data.get("mencao_wizard"))
 
-# 1. GATILHO INICIAL: Qualquer mensagem fora de ordem aciona o botão de Iniciar
-# ==========================================================
-# --- 🔎 BUSCADOR DE PRODUTOS ---
-# O membro escreve o que procura no tópico e o robô devolve três opções
-# da Shopee com o link de afiliado.
-#
-# Por que TRÊS e não "o menor preço": a API varre só a Shopee e faz busca
-# por palavra-chave, não casamento de produto. Não dá para afirmar que algo
-# é o menor preço do mercado nem que dois resultados são o mesmo item.
-# Mostrar a faixa e deixar o membro escolher é honesto e mais útil.
-# ==========================================================
+# --- Buscador de produtos ---
+# O membro escreve o que procura no tópico e recebe três opções da Shopee com link
+# de afiliado. Três, e não "o menor preço": a API busca por palavra-chave só na
+# Shopee, então não dá para afirmar menor preço do mercado nem que dois resultados
+# são o mesmo item. Melhor mostrar as opções e a faixa e deixar o membro escolher.
 BUSCA_GRUPO_ID = -1004460669033
-BUSCA_TOPICO_ID = 1          # 1 = General. Use 0 para desligar o buscador.
+BUSCA_TOPICO_ID = 1  # 1 = General; 0 desliga o buscador
 BUSCA_LIMPAR_AVISOS = True   # apaga "Fulano entrou no grupo" do General
 BUSCA_LIMITE_DIARIO = 10     # por membro
 BUSCA_MIN_CARACTERES = 3
-BUSCA_NOTA_MINIMA = 4.0      # descarta vitrine podre
+BUSCA_NOTA_MINIMA = 4.0  # descarta anúncio com nota baixa
 BUSCA_RESULTADOS_API = 30
-# ⚠️ Só os N primeiros da ordem de RELEVÂNCIA entram no sorteio dos 3 ângulos.
-# Sem esta janela o "mais barato" alcança a cauda e devolve acessório: buscando
-# "fone bluetooth" por preço crescente, o topo é capinha de fone a R$ 2,90.
+# Só os N primeiros por relevância entram na escolha das três opções. Sem esse
+# corte o "mais barato" pega a cauda: em "fone bluetooth", capinha a R$ 2,90.
 BUSCA_JANELA_RELEVANCIA = 25
 BUSCA_VENDAS_MINIMAS = 20    # corta anúncio novo sem histórico
 BUSCA_DEBOUNCE_PAINEL = 5    # minutos de silêncio antes de recriar o painel
@@ -15351,6 +15353,7 @@ BUSCA_MINUTOS_APAGAR_FALHA = 3  # busca que não deu em nada some junto com a pe
 
 
 def _iniciar_tabela_buscas():
+    """Cria a tabela do limite diário de buscas por membro."""
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         conexao.execute("""
@@ -15368,6 +15371,7 @@ def _iniciar_tabela_buscas():
 
 
 def contar_buscas_hoje(user_id):
+    """Buscas do membro hoje (0 se der erro)."""
     try:
         hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -15381,6 +15385,7 @@ def contar_buscas_hoje(user_id):
 
 
 def registrar_busca(user_id):
+    """Soma uma busca ao membro no dia."""
     try:
         hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -15499,6 +15504,10 @@ def escolher_destaques(ofertas):
 
 
 async def montar_resposta_busca(termo, ofertas, total_bruto):
+    """
+    Texto da resposta: as três opções com link de afiliado, preço, nota e vendas, e a
+    faixa de preço das opções. None se nada passou no filtro.
+    """
     escolhas, menor, maior = escolher_destaques(ofertas)
     if not escolhas:
         return None
@@ -15534,9 +15543,8 @@ async def montar_resposta_busca(termo, ofertas, total_bruto):
         linhas.append("")
 
     if menor and maior and maior > menor:
-        # "entre as opções que separei" e não "nesta busca": o intervalo é dos
-        # itens que passaram no filtro, não dos 30 que a API devolveu. Dizer
-        # "nesta busca" seria impreciso.
+        # "Entre as opções que separei": a faixa é só dos itens que passaram no filtro,
+        # não dos 30 que a API devolveu.
         linhas.append(f"<i>Entre as opções que separei, os preços vão de {formatar_brl(menor)} a {formatar_brl(maior)}.</i>")
 
     return "\n".join(linhas)
@@ -15560,13 +15568,14 @@ TEXTO_PAINEL_BUSCA = (
     "é a melhor seleção dentro do que a Shopee tem para o seu termo.</i>"
 )
 
-# 📌 Mantém o painel do buscador SEMPRE como a última mensagem do tópico.
-# Mesmo padrão do painel de submissão: cria embaixo, só então apaga o antigo.
+# O painel do buscador fica sempre como a última mensagem do tópico (mesmo esquema
+# do painel de submissão).
 _lock_painel_busca = asyncio.Lock()
 _task_debounce_busca = None
 
 
 async def reenviar_painel_busca():
+    """Recria o painel do buscador no fim do tópico e o fixa. True se publicou."""
     async with _lock_painel_busca:
         if not BUSCA_TOPICO_ID:
             return
@@ -15582,7 +15591,7 @@ async def reenviar_painel_busca():
             if EXIBIR_LOGS: logger.error(f"❌ [Painel Busca] Falha ao reenviar: {e}")
             return False
 
-        # Só apaga o anterior DEPOIS que o novo está no ar: nunca fica sem painel.
+        # Só apaga o anterior depois que o novo está no ar: o tópico nunca fica sem painel
         registro = ler_config_bd("painel_busca_msg", {})
         antiga = registro.get("id")
         if antiga and antiga != msg.message_id:
@@ -15602,6 +15611,7 @@ async def reenviar_painel_busca():
 
 
 async def _esperar_e_reenviar_busca(segundos):
+    """Espera o debounce e recria o painel (cancelada se vier outra busca)."""
     try:
         await asyncio.sleep(segundos)
     except asyncio.CancelledError:
@@ -15638,8 +15648,10 @@ async def _apagar_busca_falha(chat_id, ids, minutos=BUSCA_MINUTOS_APAGAR_FALHA):
 
 
 def eh_topico_da_busca(message: types.Message) -> bool:
-    """⚠️ Mensagem no General NÃO traz message_thread_id: vem None. Um filtro
-    '== 1' nunca dispararia lá. O 'or 1' normaliza None para 1."""
+    """
+    Mensagem no tópico do buscador. No General o message_thread_id vem None (um
+    filtro '== 1' nunca casaria): o 'or 1' trata None como 1.
+    """
     if not BUSCA_TOPICO_ID:
         return False
     return (message.message_thread_id or 1) == BUSCA_TOPICO_ID
@@ -15652,9 +15664,12 @@ def eh_topico_da_busca(message: types.Message) -> bool:
     StateFilter(None),
 )
 async def buscador_produtos(message: types.Message):
-    """⚠️ Os filtros ficam TODOS no decorator de propósito. Se o handler casasse
-    qualquer mensagem de grupo e filtrasse no corpo, ele consumiria o update e
-    o interceptar_envio_livre do Grupo Público nunca rodaria."""
+    """
+    Busca na Shopee pedida no tópico: três opções com link de afiliado e limite diário
+    por membro (o admin não conta). Os filtros ficam no decorator: se o handler casasse
+    qualquer mensagem de grupo e filtrasse no corpo, consumiria o update e o
+    interceptar_envio_livre do Grupo Público nunca rodaria.
+    """
     termo = (message.text or "").strip()
 
     if termo.startswith("/"):
@@ -15684,8 +15699,8 @@ async def buscador_produtos(message: types.Message):
     procurando = await message.reply("🔎 Procurando na Shopee...")
 
     try:
-        # sort_type=1 = relevância. Com o default (2, mais vendidos) a busca
-        # devolvia campeões de venda que só encostavam no termo.
+        # sort_type=1 = relevância. O padrão (2, mais vendidos) trazia campeões de venda
+        # que mal encostavam no termo.
         ofertas = await buscar_ofertas_shopee(termo, limite=BUSCA_RESULTADOS_API, sort_type=1)
         texto = await montar_resposta_busca(termo, ofertas, len(ofertas))
         
@@ -15705,7 +15720,7 @@ async def buscador_produtos(message: types.Message):
         await procurando.edit_text(texto, parse_mode="HTML", disable_web_page_preview=True)
         if EXIBIR_LOGS: logger.info(f"✅ [Busca] Resposta entregue para '{termo}'.")
 
-        # 📌 O painel volta para o fim do tópico quando a conversa esfriar.
+        # O painel volta para o fim do tópico quando a conversa esfriar
         agendar_painel_busca()
 
     except Exception as e:
@@ -15752,17 +15767,21 @@ async def publicar_painel_busca(message: types.Message):
 
 @dp.message(F.chat.type.in_(["supergroup", "group"]), StateFilter(None))
 async def interceptar_envio_livre(message: types.Message, state: FSMContext):
+    """
+    Mensagem solta no tópico de escuta: sai do tópico. Se já é vídeo ou link, abre o painel
+    com o item marcado; senão, mostra o botão de iniciar por 15 s.
+    """
 
     permitido, config = checar_permissao_topico(message)
     if not permitido: 
         return
 
-    # ✅ Detecta se o envio já é aproveitável ANTES de apagar a mensagem
+    # Vê se o envio já serve antes de apagar a mensagem
     video_id = message.video.file_id if message.video else None
     link_shopee = extrair_link_wizard(message.text, PADRAO_LINK_SHOPEE) if message.text else None
     link_tiktok = extrair_link_wizard(message.text, PADRAO_LINK_TIKTOK) if message.text else None
 
-    # Remove o envio avulso para evitar poluição visual
+    # Envio avulso sai do tópico
     try: 
         await message.delete()
     except Exception: 
@@ -15770,8 +15789,7 @@ async def interceptar_envio_livre(message: types.Message, state: FSMContext):
 
     mencao = montar_mencao_usuario(message.from_user)
 
-    # 🚀 ABERTURA AUTOMÁTICA: o membro mandou algo válido sem clicar no botão.
-    # Em vez de perder o envio, o painel abre já com o item marcado.
+    # Mandou algo válido sem tocar no botão: o painel abre já com o item marcado.
     if video_id or link_shopee or link_tiktok:
         if EXIBIR_LOGS: logger.info(f"🚀 [Painel Automático] Envio válido detectado de {message.from_user.id}. Abrindo painel.")
         await criar_painel_submissao(
@@ -15807,23 +15825,24 @@ async def interceptar_envio_livre(message: types.Message, state: FSMContext):
         parse_mode="HTML"
     )
     
-    # Remove a notificação temporária após 15 segundos
     await asyncio.sleep(15)
     try: 
         await aviso.delete()
     except Exception: 
         pass
 
-    # ✅ Devolve o painel para o fim do tópico
+    # Devolve o painel fixo para o fim do tópico
     await reenviar_botao_ofertas()
 
-# 🔒 TRAVA DE AUTORIA: os botões carregam o ID de quem abriu a sessão
+# Os botões levam o ID de quem abriu a sessão: só o dono mexe
 def teclado_wizard_cancelar(dono_id):
+    """Botão Cancelar com o ID do dono da sessão."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ Cancelar", callback_data=f"cancelar_wizard:{dono_id}")]
     ])
 
 def teclado_wizard_tiktok(dono_id):
+    """Botões Pular TikTok e Cancelar com o ID do dono da sessão."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Pular TikTok ⏭️", callback_data=f"pular_tiktok:{dono_id}")],
         [InlineKeyboardButton(text="❌ Cancelar Tudo", callback_data=f"cancelar_wizard:{dono_id}")]
@@ -15849,7 +15868,7 @@ async def bloquear_intruso_wizard(callback: types.CallbackQuery):
         return True
     return False
 
-# 🔗 VALIDAÇÃO DE LINKS DO PAINEL (mesmo padrão usado pelo espelhador)
+# Links aceitos no painel (mesmos padrões do espelhador)
 import re as _re_wizard
 PADRAO_LINK_SHOPEE = _re_wizard.compile(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee|shopee\.com\.br)/[^\s]+', _re_wizard.IGNORECASE)
 PADRAO_LINK_TIKTOK = _re_wizard.compile(r'(?:https?://)?(?:www\.)?(?:vm\.tiktok\.com|vt\.tiktok\.com|tiktok\.com)/[^\s]+', _re_wizard.IGNORECASE)
@@ -15864,7 +15883,7 @@ def extrair_link_wizard(texto, padrao):
         link = "https://" + link
     return link
 
-# 2. PAINEL DINÂMICO DE SUBMISSÃO (dashboard com checkboxes)
+# --- Painel de submissão: texto e teclado ---
 def montar_mencao_usuario(user):
     """Menção clicável: usa o @ quando existe, senão um link pelo ID."""
     if getattr(user, "username", None):
@@ -15878,7 +15897,7 @@ def montar_texto_painel(data):
     tem_shopee = bool(data.get("link_shopee"))
     tem_tiktok = bool(data.get("link_tiktok"))
 
-    # ✅ Publicável com o vídeo + pelo menos 1 link (Shopee OU TikTok)
+    # Publicável: vídeo + pelo menos um link
     pronto = tem_video and (tem_shopee or tem_tiktok)
 
     texto = "📋 <b>Painel de Submissão de Oferta</b>\n"
@@ -15913,8 +15932,8 @@ def montar_teclado_painel(dono_id, data):
 
     linhas = []
 
-    # ✅ O painel detecta tudo sozinho, então botão de "enviar" só confundiria:
-    # ele não abre seletor de arquivo nenhum. Ficam apenas as ações reais.
+    # O painel detecta os envios sozinho; um botão de "enviar" não abriria seletor
+    # nenhum e só confundiria. Ficam as ações reais.
     if pronto:
         linhas.append([InlineKeyboardButton(text="Concluir Oferta ✅", callback_data=f"wz_concluir:{dono_id}")])
 
@@ -15943,19 +15962,19 @@ async def renderizar_painel(chat_id, thread_id, state: FSMContext):
 
     await armar_cronometro_wizard(chat_id, msg_id, thread_id, state, texto, teclado)
 
-# 🛡️ ANTI-ÓRFÃO: o cronômetro e o estado FSM vivem na memória do processo.
-# Todo restart mata as sessões, mas as mensagens de painel ficam no grupo para sempre.
-# Por isso registramos cada painel aberto no banco e varremos na inicialização.
-LIMITE_REGISTRO_PAINEIS = 200   # era 50, e num grupo movimentado isso enchia entre reinícios
+# Anti-órfão: cronômetro e FSM vivem na memória; um restart mata as sessões, mas
+# os painéis ficam no grupo. Cada painel aberto é registrado no banco e varrido
+# na inicialização.
+LIMITE_REGISTRO_PAINEIS = 200  # acima disso o mais antigo sai do registro (e vira órfão)
 
 def registrar_painel_aberto(chat_id, message_id):
+    """Registra o painel aberto para a varredura anti-órfão da próxima subida."""
     try:
         abertos = ler_config_bd("paineis_wizard_abertos", [])
         abertos.append({"chat_id": chat_id, "message_id": message_id})
 
-        # O corte da lista é o que transforma painel em órfão permanente: tudo o
-        # que cai fora daqui nunca mais é varrido, porque ninguém sabe que existe.
-        # Por isso o teto subiu e o descarte passou a gritar em vez de sumir calado.
+        # O que sai da lista nunca mais é varrido (vira órfão permanente): por isso o teto
+        # é alto e o descarte vai para o log.
         if len(abertos) > LIMITE_REGISTRO_PAINEIS:
             perdidos = len(abertos) - LIMITE_REGISTRO_PAINEIS
             if EXIBIR_LOGS:
@@ -15993,11 +16012,9 @@ async def limpar_paineis_orfaos():
             except Exception as e:
                 motivo = str(e)
 
-            # Apagar falhou. A causa quase certa é o limite do Telegram: um bot só
-            # remove a própria mensagem em grupo dentro de 48h, a não ser que seja
-            # admin com "can_delete_messages". Editar NÃO tem esse limite — então
-            # pelo menos o painel deixa de parecer vivo: perde os botões e o
-            # cronômetro, e passa a dizer que a sessão acabou.
+            # Apagar falhou. Quase sempre é o limite do Telegram: bot só apaga a própria
+            # mensagem de grupo em até 48 h, salvo admin com "can_delete_messages". Editar
+            # não tem limite: o painel perde botões e cronômetro e passa a dizer que acabou.
             try:
                 await bot.edit_message_text(
                     chat_id=chat_id, message_id=message_id,
@@ -16010,9 +16027,7 @@ async def limpar_paineis_orfaos():
             except Exception:
                 pass
 
-            # Nem apagou nem editou. Guarda para a próxima subida em vez de
-            # esquecer — era isso que dava a um painel teimoso o direito de ficar
-            # no grupo para sempre. O teto de tentativas evita insistir à toa.
+            # Nem apagou nem editou: tenta de novo na próxima subida, até 3 vezes.
             if tentativas < 3:
                 painel["tentativas"] = tentativas + 1
                 pendentes.append(painel)
@@ -16052,7 +16067,7 @@ async def criar_painel_submissao(chat_id, thread_id, user, state: FSMContext, vi
         reply_markup=teclado, message_thread_id=thread_param
     )
 
-    registrar_painel_aberto(chat_id, msg_painel.message_id)   # 🛡️ Anti-órfão
+    registrar_painel_aberto(chat_id, msg_painel.message_id)  # anti-órfão
 
     await state.set_state(SubmissaoUsuarioInterativa.painel)
     await state.update_data(
@@ -16066,6 +16081,7 @@ async def criar_painel_submissao(chat_id, thread_id, user, state: FSMContext, vi
 
 @dp.callback_query(F.data == "iniciar_wizard_oferta")
 async def wizard_abrir_painel(callback: types.CallbackQuery, state: FSMContext):
+    """Botão "Iniciar Postagem de Oferta": abre um painel novo para quem tocou."""
     await criar_painel_submissao(
         callback.message.chat.id, callback.message.message_thread_id,
         callback.from_user, state
@@ -16074,6 +16090,7 @@ async def wizard_abrir_painel(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("wz_"), StateFilter("*"))
 async def wizard_acao_painel(callback: types.CallbackQuery, state: FSMContext):
+    """Botões do painel (só o dono): concluir, continuar depois do prazo ou o item esperado."""
     if await bloquear_intruso_wizard(callback):
         return
 
@@ -16084,7 +16101,7 @@ async def wizard_acao_painel(callback: types.CallbackQuery, state: FSMContext):
         await wizard_publicar_oferta(callback, state)
         return
 
-    # 🛟 "Não, quero continuar": devolve o painel de onde parou e reinicia os 3 minutos
+    # "Continuar": volta o painel de onde parou e reinicia os 3 minutos
     if acao == "wz_continuar":
         data = await state.get_data()
         if not data.get("dono_wizard"):
@@ -16100,17 +16117,19 @@ async def wizard_acao_painel(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
     await renderizar_painel(callback.message.chat.id, callback.message.message_thread_id, state)
 
-# 📏 Teto de download da Bot API. O bot não consegue BAIXAR arquivo maior que isto:
-# get_file() devolve "Bad Request: file is too big" e a submissão morre no fim do fluxo.
+# Teto de download da Bot API: get_file() recusa arquivo maior ("file is too big").
 LIMITE_DOWNLOAD_BOT_MB = 20
 
-# 📏 Teto de UPLOAD da Bot API. Acima disso o send_video é recusado, e um vídeo que o bot
-# não consegue enviar nunca sai da fila — vira retry eterno. O Correio Público já barra na
-# origem; esta constante é o mesmo limite do lado de cá.
+# Teto de upload da Bot API: acima disso o send_video é recusado e o vídeo nunca
+# sairia da fila. O Correio Público barra na origem com o mesmo limite.
 LIMITE_UPLOAD_BOT_MB = 50
 
 @dp.message(SubmissaoUsuarioInterativa.painel)
 async def wizard_receber_item(message: types.Message, state: FSMContext):
+    """
+    Vídeo ou link mandado pelo dono durante a sessão: marca no painel e confirma.
+    Vídeo acima do teto de download é recusado na hora.
+    """
 
     permitido, config = checar_permissao_topico(message)
     if not permitido: return
@@ -16127,9 +16146,8 @@ async def wizard_receber_item(message: types.Message, state: FSMContext):
     confirmacao = None
 
     if message.video:
-        # 📏 Barra o arquivo grande AQUI, e não lá no fim. Antes o membro preenchia
-        # vídeo + links, clicava em concluir e só então tomava "erro interno" — o
-        # download de 20 MB+ falhava dentro do wizard_publicar_oferta.
+        # Barra o arquivo grande já aqui: o download de mais de 20 MB só falharia no fim,
+        # depois de o membro preencher tudo.
         tamanho_video = message.video.file_size or 0
         if tamanho_video > LIMITE_DOWNLOAD_BOT_MB * 1024 * 1024:
             aviso = await message.answer(
@@ -16179,14 +16197,19 @@ async def wizard_receber_item(message: types.Message, state: FSMContext):
         try: await aviso.delete()
         except Exception: pass
 
-# 3. CONCLUSÃO: IA avalia e publica no mural
+# --- Conclusão: a IA avalia e publica no mural ---
 async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContext, chat_forcado=None, mencao_forcada=None):
-    # 🤖 Duas portas de entrada: o clique em "Concluir Oferta" ou a publicação automática
-    # disparada quando o prazo extra de 1 minuto também expira (aí não existe callback).
+    """
+    A IA avalia o vídeo; aprovado, publica no tópico de postagem com o nome do produto,
+    os links e as hashtags e credita o membro. Com veredito (ou erro), apaga o painel
+    depois de 15 s e recria o fixo; se a IA não responde, o painel fica com o motivo.
+    """
+    # Duas entradas: o "Concluir Oferta" ou a publicação automática quando o minuto
+    # extra também expira (sem callback).
     if callback:
         message = callback.message
     else:
-        from types import SimpleNamespace   # stdlib: portador mínimo só para o chat_id do painel
+        from types import SimpleNamespace  # só carrega o chat_id do painel
         message = SimpleNamespace(chat=SimpleNamespace(id=chat_forcado))
     config = ler_submissao_config()
 
@@ -16196,7 +16219,7 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
     link_shopee = data.get("link_shopee")
     link_tiktok = data.get("link_tiktok")
 
-            # 🔗 Publicável = vídeo + pelo menos 1 link válido (Shopee ou TikTok)
+    # Publicável: vídeo + pelo menos um link
     if not video_id or not (link_shopee or link_tiktok):
         if callback:
             await callback.answer("⚠️ Faltam itens obrigatórios: vídeo e pelo menos um link.", show_alert=True)
@@ -16210,7 +16233,7 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
         )
     except: pass
 
-    await state.clear()   # Libera a memória e encerra o cronômetro
+    await state.clear()  # encerra a sessão e o cronômetro
 
     try:
         file_info = await bot.get_file(video_id)
@@ -16239,8 +16262,8 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
         except: pass
 
         if not analise_ia:
-            # 🔎 O api_gemini já guardava o motivo real em ULTIMO_ERRO_IA, mas ninguém lia:
-            # a tela dizia sempre "falha temporária" e o porquê ficava só no journalctl.
+            # Mostra o motivo real guardado pelo api_gemini (ULTIMO_ERRO_IA), não só "falha
+            # temporária".
             import api_gemini
             motivo_ia = (api_gemini.ULTIMO_ERRO_IA or "motivo não registrado")[:200]
             if EXIBIR_LOGS: logger.error(f"❌ [Submissão] A IA não respondeu → {motivo_ia}")
@@ -16270,9 +16293,8 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
             nome_produto = linhas[1].strip() if len(linhas) > 1 else "Oferta Exclusiva 🛍️"
             hashtags_ia = linhas[2].strip() if len(linhas) > 2 else ""
 
-                        # 🎨 Mesma identidade visual do grupo principal: cada plataforma no seu bloco
-            # 📱 Sem linha divisória: caractere repetido quebra o layout no celular.
-            # A separação vem das quebras de linha e do emoji que encabeça cada bloco.
+            # Mesmo visual do canal principal: um bloco por plataforma, sem linha divisória
+            # (caractere repetido quebra o layout no celular).
             legenda_final = (
                 f"👤 Vídeo enviado por: {user_mention}\n\n"
                 f"<b>{nome_produto}</b>\n\n"
@@ -16294,7 +16316,7 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
                 chat_id=message.chat.id, video=video_id, caption=legenda_final,
                 parse_mode="HTML", message_thread_id=config.get("topico_destino")
             )
-            registrar_ultimo_post(message.chat.id, "video")   # 🚦 Intercalação
+            registrar_ultimo_post(message.chat.id, "video")  # intercalação
 
             try:
                 await bot.edit_message_text(
@@ -16315,9 +16337,7 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
 
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro na submissão guiada: {e}")
-        # 🔎 "erro interno" não diz nada a quem mandou o vídeo. A causa mais comum é o
-        # teto de download da Bot API — vale nomear em vez de deixar o membro tentar
-        # o mesmo arquivo três vezes.
+        # Nomeia a causa mais comum (teto de download) em vez de "erro interno".
         if "too big" in str(e).lower():
             texto_erro = (
                 "❌ <b>Vídeo grande demais.</b>\n\nO robô só consegue baixar arquivos de até "
@@ -16334,10 +16354,10 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
 
     await reenviar_botao_ofertas()
 
-# Cancelamento manual do usuário (Limpa tudo instantaneamente)
 @dp.callback_query(F.data.startswith("cancelar_wizard"), StateFilter("*"))
 async def wizard_cancelar(callback: types.CallbackQuery, state: FSMContext):
-    # 🔒 Só o dono da sessão pode cancelá-la
+    """Cancelamento pelo dono: limpa a sessão, apaga o painel e recria o fixo."""
+    # Só o dono da sessão cancela
     if await bloquear_intruso_wizard(callback):
         return
 
@@ -16358,46 +16378,42 @@ async def wizard_cancelar(callback: types.CallbackQuery, state: FSMContext):
         except: pass
 
     await reenviar_botao_ofertas()
-# ==========================================
 from aiogram.types import ReplyKeyboardRemove
 
 @dp.message(Command("limpar_painel"))
 async def limpar_teclado_fantasma(message: types.Message):
+    """/limpar_painel: tira o teclado do admin da tela do grupo."""
     if message.from_user.id != ADMIN_ID: return
     
-    # O comando ReplyKeyboardRemove() força o Telegram a vaporizar os botões da tela
     aviso = await message.answer(
         "🧹 <b>Limpando lixo visual...</b>\nO painel de administração foi removido deste grupo!", 
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="HTML"
     )
     
-    # Apaga as mensagens após 4 segundos para ninguém perceber
+    # Apaga o comando e o aviso depois de 4 s
     await asyncio.sleep(4)
     try: 
         await message.delete()
         await aviso.delete()
     except: pass
 
-# 🧵 TASKS COM REFERÊNCIA FORTE
-# asyncio.create_task devolve uma task que o event loop só referencia de forma
-# FRACA — a documentação do Python avisa que ela pode ser coletada no meio da
-# execução. Task coletada morre sem exceção e sem log, que é exatamente o
-# sintoma do cronômetro travado em 03:00. Este conjunto segura a referência
-# até a task terminar sozinha.
+# Tasks com referência forte: o event loop só guarda referência fraca das tasks de
+# asyncio.create_task, e task coletada morre sem exceção nem log (foi o cronômetro
+# travado em 03:00). Este conjunto as segura até terminarem.
 _tarefas_vivas = set()
 
 def criar_task(coro):
+    """asyncio.create_task guardando a referência até a task terminar."""
     tarefa = asyncio.create_task(coro)
     _tarefas_vivas.add(tarefa)
     tarefa.add_done_callback(_tarefas_vivas.discard)
     return tarefa
 
-# 🚨 CAPTURADOR DE FALHAS SILENCIOSAS
-# Quando um asyncio.create_task falha, a exceção some sem passar por except nenhum.
-# Foi assim que o painel de submissão travou: a task morreu calada e o cronômetro
-# ficou parado em 00:00 sem uma linha no log. Isto torna essas falhas visíveis.
+# Falha em task assíncrona some sem passar por except nenhum (o painel de
+# submissão travou assim, em 00:00, sem log). Isto a leva para o log.
 def capturar_falha_task(loop, contexto):
+    """Exception handler do loop: falha de task vai para o log e para o registro de erros."""
     excecao = contexto.get("exception")
     try:
         if excecao:
@@ -16406,13 +16422,11 @@ def capturar_falha_task(loop, contexto):
         else:
             logger.error(f"🚨 [Task Órfã] {contexto.get('message', 'erro sem descrição')}")
     except Exception:
-        pass   # o capturador nunca pode ser a causa de um novo erro
+        pass  # o capturador não pode gerar outro erro
 
-# ==========================================
-# 🩺 MONITOR DE SAÚDE
-# Checa a cada hora e só fala quando há problema. Alerta repetido é alerta
-# ignorado, então cada tipo só avisa uma vez a cada 6 horas.
-# ==========================================
+# --- Monitor de saúde ---
+# Checa a cada hora e só fala quando há problema; cada tipo de alerta repete no
+# máximo a cada 6 horas.
 LIMITE_DISCO_PCT = 80          # % de uso da partição
 LIMITE_TEMP_GB = 3             # pasta temp/
 LIMITE_FILA_PARADA_H = 4       # horas sem publicar com fila vencida
@@ -16434,6 +16448,7 @@ def _ja_alertou(chave):
         return False
 
 def _tamanho_pasta_gb(pasta):
+    """Tamanho da pasta em GB (arquivos que somem no meio são ignorados)."""
     total = 0
     try:
         for raiz, _d, arquivos in os.walk(pasta):
@@ -16448,7 +16463,7 @@ async def monitor_saude():
     """Roda de hora em hora. Silencioso quando está tudo bem."""
     alertas = []
     try:
-        # 1️⃣ Disco da partição
+        # 1. Disco
         try:
             import shutil
             uso = shutil.disk_usage("/")
@@ -16458,11 +16473,10 @@ async def monitor_saude():
         except Exception:
             pass
 
-        # 2️⃣ Pasta temp/ inchada
+        # 2. Pasta temp/
         temp_gb = _tamanho_pasta_gb("temp")
         if temp_gb >= LIMITE_TEMP_GB and not _ja_alertou("temp"):
-            # Antes de acusar a faxina, roda a faxina. Avisar sem agir deixava a
-            # pasta crescer até às 03h seguintes com o aviso a repetir-se à toa.
+            # Roda a faxina antes de avisar: só avisar deixava a pasta crescer até as 03h.
             removidos, liberados = await asyncio.to_thread(limpar_arquivos_orfaos)
             presos, orfaos, vencidos = await asyncio.to_thread(diagnostico_temp)
             temp_gb = _tamanho_pasta_gb("temp")
@@ -16481,7 +16495,7 @@ async def monitor_saude():
                               f"cair no próximo ciclo, algo está a escrever em temp/ sem apagar.")
             alertas.append("\n".join(partes))
 
-        # 3️⃣ Fila do Espião vencida sem publicar
+        # 3. Fila do Espião vencida sem publicar
         try:
             agora = datetime.now(fuso_horario)
             fila = ler_fila_clonagem().get("fila", [])
@@ -16506,7 +16520,7 @@ async def monitor_saude():
         except Exception:
             pass
 
-        # 4️⃣ Erros recentes se acumulando
+        # 4. Erros acumulando na última hora
         try:
             erros = ler_config_bd("erros_logs", [], arquivo_legado="erros_logs.json")
             recentes = 0
@@ -16522,7 +16536,7 @@ async def monitor_saude():
         except Exception:
             pass
 
-        # 5️⃣ Nada publicado no dia (com fila cheia)
+        # 5. Nada publicado hoje pelo Espião, com fila do dia
         try:
             hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
             fila = ler_fila_clonagem().get("fila", [])
@@ -16547,66 +16561,63 @@ async def monitor_saude():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Saúde] Falha no monitor: {e}")
 
-# =========================================================
-# O MAIN() E O INICIADOR FICAM SEMPRE NO FINAL ABSOLUTO
-# =========================================================
+# --- main(): agenda os jobs e sobe o bot (fica no fim do arquivo) ---
 async def main():
-    # Agendador mestre que roda todo dia às 00:01
+    """Agenda os jobs, monta a grade de hoje, limpa painéis órfãos e começa o polling."""
+    # Grade do dia, todo dia às 00:01
     scheduler.add_job(agendar_tarefas_diarias, 'cron', hour=0, minute=1, timezone=FUSO_STR)
     
-    # ✅ Agendador da lixeira persistente (roda todos os dias pontualmente às 03:00)
+    # Tabela do buscador; lixeira persistente às 03:00
     _iniciar_tabela_buscas()
     scheduler.add_job(varredor_de_lixeira, 'cron', hour=3, minute=0, timezone=FUSO_STR)
 
-    # 🧹 Faxina de disco de 6 em 6 horas, independente do varredor das 03h.
-    # Com prazo de proteção de 24h e uma só passagem por dia, um órfão criado
-    # logo depois das 03h esperava quase 48h para ser apagado.
+    # Faxina de disco a cada 6 h, além do varredor das 03h: com 24 h de proteção e uma
+    # passagem por dia, um órfão criado logo depois das 03h esperava quase 48 h.
     scheduler.add_job(faxina_disco_periodica, 'interval', hours=6,
                       id='faxina_disco_loop', replace_existing=True)
 
-    # 🩺 Monitor de saúde: avisa no privado quando algo sai do normal
+    # Monitor de saúde (avisa o admin no privado)
     scheduler.add_job(monitor_saude, 'interval', hours=1, id='monitor_saude_loop', replace_existing=True)
 
-    # 👥 Motor de publicação dos parceiros
+    # Motor de publicação dos parceiros
     scheduler.add_job(motor_parceiros_step, 'interval', minutes=2, id='motor_parceiros_loop', replace_existing=True)
 
-    # 🌙 Fechamento do dia de captura dos parceiros: sorteia a cota e apaga o
-    # excedente do disco no mesmo dia, sem esperar os 30 dias do D+X.
+    # Fechamento do dia de captura dos parceiros: sorteia a cota e apaga o excedente
+    # do disco no mesmo dia, sem esperar os 30 dias do D+X.
     scheduler.add_job(fechar_dia_captura_parceiros, 'cron', hour=23, minute=55,
                       timezone=FUSO_STR, kwargs={"incluir_hoje": True},
                       id='fechamento_dia_parceiros', replace_existing=True)
 
-    # 📊 Retrato diário das métricas (prova social das rotinas)
+    # Métricas do dia (prova social das rotinas)
     scheduler.add_job(coletar_metricas_diarias, 'cron', hour=23, minute=50, timezone=FUSO_STR, id='coleta_metricas_diarias', replace_existing=True)
     
-    # ✅ Novo: Despertador e aviso da Pausa Programada (roda às 09:00)
+    # Aviso diário da Pausa Programada (09:00)
     scheduler.add_job(verificar_pausa_diaria, 'cron', hour=9, minute=0, timezone=FUSO_STR)
     
-    # ✅ Novo: Verificador de retorno da Pausa Programada (roda a cada 1 minuto)
+    # Fim da Pausa Programada (de minuto em minuto)
     if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento de retomada de pausa minuto a minuto...")
     scheduler.add_job(verificar_retorno_pausa_minuto, 'interval', minutes=1, timezone=FUSO_STR)
     
-    # ✅ Verificador do Espião: O motor verifica a fila a cada 1 minuto (a cadência aleatória é gerida internamente)
+    # Motor do Espião (de minuto em minuto)
     scheduler.add_job(processar_fila_espiao, 'interval', minutes=1, timezone=FUSO_STR)
 
-    # ✅ Novo: Sincronização financeira horária para resgatar dados em atraso da Shopee
+    # Sincronização financeira com a Shopee (de hora em hora)
     scheduler.add_job(sincronizar_financeiro_horario, 'cron', minute=0, timezone=FUSO_STR)
     
-    # ✅ NOVO: Pente fino de madrugada (roda todos os dias às 02:00) para resgatar pendentes de meses anteriores
+    # Pente fino dos pedidos pendentes antigos (02:00)
     scheduler.add_job(varredura_retroativa_pendentes, 'cron', hour=2, minute=0, timezone=FUSO_STR)
 
-    # ✅ Novo: Check-up diário de permissões em grupos roda todos os dias às 11:00
+    # Relatório diário de saúde dos canais (11:00)
     scheduler.add_job(checkup_diario_grupos, 'cron', hour=11, minute=0, timezone=FUSO_STR)
 
-    # 🎲 Motor Autônomo de Garimpo: o gatilho fixo de 2 em 2 horas saiu de cena.
-    # Cada ciclo agenda o seguinte com intervalo sorteado (rajada/normal/sumiço),
-    # então não existe mais um minuto cravado se repetindo o dia inteiro.
+    # Garimpo do Achadinhos: cada ciclo agenda o seguinte com intervalo sorteado
+    # (rajada/normal/sumiço), sem horário fixo.
     agendar_proximo_garimpo(primeiro=True)
     
-    # ✅ WATCHDOG: O Fiscal Híbrido bate a cada 1 minuto apenas para auditar a memória
+    # Fiscal da fila do principal (de minuto em minuto)
     scheduler.add_job(motor_fila_minuto, 'interval', minutes=1, timezone=FUSO_STR)
     
-    # Roda o agendador imediatamente ao ligar o bot para garantir o dia atual
+    # Grade de hoje já na subida
     agendar_tarefas_diarias()
     
     scheduler.start()
@@ -16617,10 +16628,10 @@ async def main():
         dados_rotina["pausado"] = True
         salvar_config_rotina(dados_rotina)
         if EXIBIR_LOGS: logger.info("⏸️ Rotinas estavam em pausa programada. Marcado como pausado no JSON com sucesso.")
-    # 🚨 Ativa o capturador de falhas em tasks assíncronas
+    # Falhas de tasks assíncronas vão para o log
     asyncio.get_running_loop().set_exception_handler(capturar_falha_task)
 
-    # 🛡️ Remove painéis de submissão que ficaram órfãos por causa do restart
+    # Painéis de submissão que o restart deixou órfãos
     await limpar_paineis_orfaos()
     await reenviar_botao_ofertas()
 
