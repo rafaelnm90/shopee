@@ -1,4 +1,3 @@
-# 0. CONFIGURAÇÕES INICIAIS
 EXIBIR_LOGS = True
 import os
 import re
@@ -7,7 +6,7 @@ import time
 from dotenv import load_dotenv
 load_dotenv()
 
-# 🕐 Trava de fuso centralizada: importar o modulo ja aplica America/Sao_Paulo.
+# Importar o fuso já fixa o processo em America/Sao_Paulo.
 from fuso import FUSO_STR, fuso_horario, configurar_logs
 
 
@@ -28,34 +27,36 @@ from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 import subprocess
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-# ✅ Importação dos nossos novos módulos blindados (Fase 2)
 from api_gemini import gerar_texto_gemini, analisar_video_gemini, MODELOS_CASCATA_GEMINI, client_genai
 from api_shopee import converter_link_shopee, buscar_ofertas_shopee, testar_chaves_afiliado
-from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite, sortear_teto_do_dia, faixa_de_config, recompactar_horarios # ⚙️ Novo Motor Centralizado
+from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite, sortear_teto_do_dia, faixa_de_config, recompactar_horarios
 
 import matplotlib.pyplot as plt
 import io
 import sqlite3
 import painel_espelhos
 import painel_notas
-import pool_contas        # 👥 Pool de contas: quem espelha e quem reposta nos Autorais
-import blacklist_captura  # 🚫 Lista negra: de quem o espelhador NUNCA pode capturar
+import pool_contas  # contas dos userbots (quem espelha, quem reposta)
+import blacklist_captura  # de quem os userbots nunca capturam
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo, salvar_json_atomico
 EXIBIR_LOGS = True
 
-# 2. CONFIGURAÇÃO DE LOGS 🚀
 if EXIBIR_LOGS:
     logger = configurar_logs(__name__)
 
-# ✅ Cria a pasta temp isolada na inicialização
+# temp/: downloads de passagem (a faxina de disco limpa o que sobra).
 os.makedirs("temp", exist_ok=True)
 
 def inicializar_banco_sqlite():
+    """
+    Cria as tabelas do banco compartilhado e as colunas novas. Roda ao importar o
+    módulo; ALTER TABLE de coluna que já existe falha e é ignorado.
+    """
     if EXIBIR_LOGS: logger.info("🚀 Preparando a fundação de dados em SQLite...")
     conexao = sqlite3.connect("banco_dados.db")
     cursor = conexao.cursor()
     
-    # 1. Tabela da Fila de Vídeos Central
+    # Fila do canal principal (vídeos criados em Criar Postagem).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS fila_postagens (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,7 +72,7 @@ def inicializar_banco_sqlite():
         )
     ''')
     
-    # 2. Tabela de Configurações (Guarda o status do Bom Dia/Boa Noite)
+    # Configurações de todos os robôs: chave -> JSON (ler_config_bd / salvar_config_bd).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS configuracoes (
             chave TEXT PRIMARY KEY,
@@ -79,7 +80,7 @@ def inicializar_banco_sqlite():
         )
     ''')
     
-    # 3. Tabela da Lixeira Persistente (Guarda os IDs para apagar às 03h00)
+    # Mensagens a apagar na faxina da madrugada (registrar_lixeira).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS lixeira_mensagens (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,7 +90,7 @@ def inicializar_banco_sqlite():
         )
     ''')
     
-    # 4. Tabela de Logs de Erros
+    # Log de erros (registrar_erro_json do utils).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS erros_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -99,7 +100,7 @@ def inicializar_banco_sqlite():
         )
     ''')
 
-    # 🚀 Migração invisível 2: Colunas do Robô Repostador no Público
+    # fila_autorais (criada pelo espelhador_videos_autorais): colunas da repostagem no Grupo Público.
     try:
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN repostado_publico INTEGER DEFAULT 0")
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_repost_publico TEXT")
@@ -107,7 +108,7 @@ def inicializar_banco_sqlite():
     except sqlite3.OperationalError:
         pass
 
-    # 🚀 Migração invisível 4: Data-alvo própria da fila do Grupo Público
+    # fila_autorais: data-alvo e status próprios do Grupo Público.
     try:
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_alvo_publico TEXT")
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN status_publico TEXT")
@@ -115,15 +116,14 @@ def inicializar_banco_sqlite():
     except sqlite3.OperationalError:
         pass
 
-    # 🚀 Migração invisível 5: garante a coluna de status mesmo em bancos que já tinham a data-alvo
+    # status_publico sozinho, para bancos que já tinham data_alvo_publico (o bloco acima para no primeiro erro).
     try:
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN status_publico TEXT")
         if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'status_publico' adicionada à fila_autorais.")
     except sqlite3.OperationalError:
         pass
         
-    # 🚀 Migração invisível 8: id da mensagem que foi realmente publicada. Sem ela o
-    # relatório sabe QUE postou mas não ONDE, e o link "(Destino)" saía indisponível.
+    # msg_postada_id: id da mensagem publicada; monta o link "(Destino)" no relatório.
     for _tabela_msg in ("fila_autorais", "fila_publico"):
         try:
             cursor.execute(f"ALTER TABLE {_tabela_msg} ADD COLUMN msg_postada_id INTEGER")
@@ -131,26 +131,23 @@ def inicializar_banco_sqlite():
         except sqlite3.OperationalError:
             pass
 
-    # 🚀 Migração invisível 7: caminho do arquivo que o Correio Público (userbot) baixa
-    # para o bot publicar. O canal de origem não é nosso, então o bot nunca consegue
-    # copiar de lá — ele publica a partir do disco, como faz com os parceiros.
+    # fila_publico.caminho_arquivo: vídeo baixado pelo Correio Público (userbot). O bot não
+    # consegue copiar do canal de origem, que não é nosso, e publica a partir do disco.
     try:
         cursor.execute("ALTER TABLE fila_publico ADD COLUMN caminho_arquivo TEXT")
         if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'caminho_arquivo' adicionada à fila_publico.")
     except sqlite3.OperationalError:
         pass
 
-    # 🚀 Migração invisível 6: horário REAL da publicação do retorno autoral.
-    # Sem esta coluna o relatório só tinha o horário previsto e imprimia
-    # "Prev: Hoje às" com o horário em branco nos itens já postados.
+    # fila_autorais.data_postagem: hora real da publicação do retorno, mostrada no relatório.
     try:
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_postagem TEXT")
         if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'data_postagem' adicionada à fila_autorais.")
     except sqlite3.OperationalError:
         pass
 
-        # 9. PARCEIROS: afiliados terceiros que repostam com as próprias credenciais.
-    # Cada um tem canais, atraso e cota próprios — nada é compartilhado com o dono.
+    # Parceiros: afiliados terceiros que repostam com as próprias credenciais. Cada um
+    # tem canais, atraso e cota próprios; nada é compartilhado com o dono.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS parceiros (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -166,8 +163,8 @@ def inicializar_banco_sqlite():
         )
     ''')
 
-    # Migração: status de acesso do userbot ao canal de origem do parceiro
-    # + janela de horário de publicação própria de cada parceiro (0 a 24 = dia todo)
+    # Parceiros: acesso do userbot ao canal de origem e janela de publicação própria
+    # (0 a 24 = dia todo).
     for coluna, tipo in [("origem_ok", "INTEGER DEFAULT 0"), ("origem_erro", "TEXT"),
                          ("janela_inicio", "INTEGER DEFAULT 0"), ("janela_fim", "INTEGER DEFAULT 24"),
                          ("limite_min", "INTEGER DEFAULT 0"), ("limite_max", "INTEGER DEFAULT 0")]:
@@ -176,8 +173,8 @@ def inicializar_banco_sqlite():
         except sqlite3.OperationalError:
             pass
 
-    # 10. RESERVA GLOBAL: garante que um vídeo nunca saia em dois canais.
-    # O dono reserva primeiro (prioridade); os parceiros pulam o que já está aqui.
+    # Reserva global: um vídeo (ou produto) sai num canal só. Quem reserva primeiro leva:
+    # o dono, no sorteio do Grupo Público, ou um parceiro.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS videos_reservados (
             video_id TEXT PRIMARY KEY,
@@ -186,7 +183,7 @@ def inicializar_banco_sqlite():
         )
     ''')
 
-    # 8. Achadinhos já enviados — memória PERMANENTE (antes era lista de 500, que reciclava)
+    # Achadinhos já enviados, para o garimpo não repetir item.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS achadinhos_enviados (
             item_id TEXT PRIMARY KEY,
@@ -195,7 +192,7 @@ def inicializar_banco_sqlite():
         )
     ''')
 
-    # 🚀 Migração única: leva a lista antiga (JSON de 500) para a tabela definitiva
+    # Migração única: a lista antiga (JSON com os últimos 500) vai para a tabela.
     try:
         cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'achadinhos_enviados'")
         antigo = cursor.fetchone()
@@ -211,7 +208,7 @@ def inicializar_banco_sqlite():
     except Exception as e:
         if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível migrar a lista antiga de achadinhos: {e}")
 
-    # 7. Histórico de Métricas (prova social das rotinas)
+    # Métricas diárias, usadas como prova social nas mensagens de rotina.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS historico_metricas (
             data TEXT,
@@ -227,7 +224,7 @@ def inicializar_banco_sqlite():
     except sqlite3.OperationalError:
         pass
 
-    # 🚀 Migração invisível 3: Atualiza a tabela de Logs para suportar o Utils Avançado
+    # erros_logs: rastro do código e contexto (registrar_erro_json do utils).
     try:
         cursor.execute("ALTER TABLE erros_logs ADD COLUMN rastro_codigo TEXT")
         cursor.execute("ALTER TABLE erros_logs ADD COLUMN contexto TEXT")
@@ -241,10 +238,9 @@ def inicializar_banco_sqlite():
 
 inicializar_banco_sqlite()
 
-# 1. CONSTANTES E TOKENS
 API_TOKEN = os.getenv('TELEGRAM_TOKEN')
 # ==========================================================================
-# 👤 CONTAS QUE OPERAM NESTE ROBÔ
+# Contas que operam neste robô
 #
 # Bot oficial (aiogram):
 #   @ShopeeVbot · id 8707808275
@@ -269,21 +265,23 @@ LINK_GRUPO_PUBLICO = "https://t.me/GrupoPublicoAfiliados"
 LINK_CANAL_ACHADINHOS = "https://t.me/centraldeachadinhosvip"
 SHOPEE_APP_ID = os.getenv('SHOPEE_APP_ID')
 SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
-# As chaves do Gemini e a cascata foram removidas. Agora são geridas com total segurança pelo api_gemini.py
 
-# 2.5 SISTEMA DE NUMERAÇÃO DE VÍDEOS 🔢
+# Número da próxima postagem do canal principal (contador.txt).
 def ler_contador():
     try:
         with open("contador.txt", "r") as f:
             return int(f.read().strip())
     except FileNotFoundError:
-        return 1 # Se o arquivo não existir, começa do 1
+        return 1  # arquivo ausente: começa do 1
 
 def salvar_contador(numero):
     with open("contador.txt", "w") as f:
         f.write(str(numero))
 
 async def resolver_nome_topico(base, topico):
+    """
+    Nome do tópico pelo cache de nomes. Tópico 1 ou vazio = "Geral"; sem nome no cache, "Tópico N".
+    """
     if EXIBIR_LOGS: logger.info(f"🔍 Iniciando resolução de nome para o tópico {topico} na base {base}...")
     if not topico or str(topico) == "1":
         if EXIBIR_LOGS: logger.info("✅ Sucesso: Tópico principal identificado como Geral.")
@@ -302,9 +300,11 @@ async def resolver_nome_topico(base, topico):
     return f"Tópico {topico_str}"
 
 def formatar_nome_alvo(alvo, cache_nomes, nome_status=None):
-    """🧵 Monta 'Grupo › Tópico' para alvos de fórum (-100xxx:281).
-    Sem isso, dezenas de alvos do mesmo grupo aparecem com nome idêntico.
-    nome_status = nome vindo do status_alvos (é sempre o nome do GRUPO)."""
+    """
+    Monta 'Grupo › Tópico' para alvos de fórum (-100xxx:281); sem isso, alvos do mesmo
+    grupo aparecem com nome idêntico. nome_status = nome vindo do status_alvos (é
+    sempre o nome do GRUPO).
+    """
     alvo_str = str(alvo)
     if ":" not in alvo_str:
         return nome_status or cache_nomes.get(alvo_str) or alvo_str
@@ -316,17 +316,16 @@ def formatar_nome_alvo(alvo, cache_nomes, nome_status=None):
         nome_topico = "Geral" if topico.strip() == "1" else f"Tópico {topico}"
     return f"{nome_grupo} › {nome_topico}"
 
-# 3. MÁQUINA DE ESTADOS (FSM) PARA O FLUXO DE POSTAGEM
+# --- Estados (FSM) dos fluxos do painel ---
 class PostagemFluxo(StatesGroup):
     aguardando_video = State()             
     aguardando_confirmacao_nome = State()  
     aguardando_chamada_manual = State()    
     aguardando_decisao_erro = State()
-    # ✅ Novos estados para o fluxo aprimorado
     aguardando_plataforma = State()
     aguardando_link_video_shopee = State()
     aguardando_link_video_tiktok = State()
-    # ✅ Estados separados para coletar os links corretos de cada plataforma
+    # Links coletados separadamente para cada plataforma.
     aguardando_links_shopee = State()
     aguardando_links_tiktok = State()
 
@@ -334,10 +333,10 @@ class ConfigFluxo(StatesGroup):
     aguardando_novo_numero = State()
     aguardando_confirmacao_zerar = State()
     aguardando_confirmacao_zerar_filas = State()
-    aguardando_selecao_limpeza = State() # ✅ NOVO: Passo 1 (Escolher o que limpar)
-    aguardando_acao_limpeza = State()    # ✅ NOVO: Passo 2 (Confirmar a limpeza)
+    aguardando_selecao_limpeza = State()  # passo 1: escolher o que limpar
+    aguardando_acao_limpeza = State()  # passo 2: confirmar a limpeza
     aguardando_confirmacao_reiniciar = State()
-    aguardando_confirmacao_rotinas = State() # ✅ NOVO: Aprovar antes de recalcular a grade
+    aguardando_confirmacao_rotinas = State()  # aprovar antes de recalcular a grade
 
 class ConfigDivulgacao(StatesGroup):
     menu_principal = State()
@@ -346,7 +345,7 @@ class ConfigDivulgacao(StatesGroup):
     aguardando_tipo_edicao = State()
     aguardando_selecao_alvo = State()
     aguardando_valores_unificados = State()
-    aguardando_confirmacao_pausa = State() # ✅ NOVO
+    aguardando_confirmacao_pausa = State()
 
 class ConfigDivulgacaoViral(StatesGroup):
     menu_principal = State()
@@ -355,7 +354,7 @@ class ConfigDivulgacaoViral(StatesGroup):
     aguardando_tipo_edicao = State()
     aguardando_selecao_alvo = State()
     aguardando_valores_unificados = State()
-    aguardando_confirmacao_pausa = State() # ✅ NOVO
+    aguardando_confirmacao_pausa = State()
 
 class ConfigDivulgacaoEscopo(StatesGroup):
     """Estados compartilhados pelos painéis de SPAM por escopo (Público e
@@ -370,10 +369,10 @@ class ConfigDivulgacaoEscopo(StatesGroup):
 class ConfigRotina(StatesGroup):
     menu_principal = State()
     aguardando_novo_horario = State()
-    aguardando_confirmacao_pausa = State() # ✅ NOVO: Estado para confirmar a pausa
-    aguardando_confirmacao_disparo = State() # ✅ NOVO: Confirmação dos disparos manuais do Público
-    aguardando_alvos_rotina = State() # ✅ NOVO: Seleção dos tópicos que recebem as rotinas
-    aguardando_confirmacao_alvos_rotina = State() # ✅ NOVO: Confirmação dos alvos de postagem
+    aguardando_confirmacao_pausa = State()
+    aguardando_confirmacao_disparo = State()  # disparos manuais do Público
+    aguardando_alvos_rotina = State()  # tópicos que recebem as rotinas
+    aguardando_confirmacao_alvos_rotina = State()
 
 class ConfigPausa(StatesGroup):
     menu_principal = State()
@@ -404,7 +403,7 @@ class AchadinhosFluxo(StatesGroup):
     menu_principal = State()
     aguardando_nome = State()
     aguardando_destino = State()
-    aguardando_thread_id = State() # ✅ NOVO: Estado para capturar o Tópico
+    aguardando_thread_id = State()  # tópico do destino do nicho
     aguardando_keywords = State()
     aguardando_remocao = State()
     aguardando_confirmacao_remocao = State()
@@ -420,17 +419,17 @@ class SubmissaoAdminFluxo(StatesGroup):
     menu_principal = State()
     aguardando_confirmacao_toggle = State()
     
-    # Estados para Regras de Repostagem
+    # Regras de Repostagem do Grupo Público
     aguardando_repost_dias = State()
     aguardando_repost_limite = State()
     aguardando_confirmacao_repost_dias = State()
     aguardando_confirmacao_repost_limite = State()
     aguardando_confirmacao_pausa_repost = State()
     aguardando_repost_origem = State()
-    aguardando_repost_destino = State() # ✅ NOVO ESTADO AQUI
-    aguardando_confirmacao_destino = State()   # ✅ Confirma troca de origem/destino
+    aguardando_repost_destino = State()
+    aguardando_confirmacao_destino = State()  # confirma troca de origem/destino
 
-    # 👥 Cadastro de parceiros (7 passos + confirmação)
+    # Cadastro de parceiros (7 passos + confirmação)
     parceiro_nome = State()
     parceiro_app_id = State()
     parceiro_app_secret = State()
@@ -444,13 +443,13 @@ class SubmissaoAdminFluxo(StatesGroup):
     parceiro_confirmar_exclusao = State()
     parceiro_confirmar_exclusao_total = State()
     
-    # ✅ NOVOS ESTADOS: Edição Modular do Grupo e Tópicos
+    # Edição do grupo e dos tópicos do módulo de submissão
     aguardando_selecao_edicao_grupo = State()
     aguardando_novo_valor_grupo = State()
     aguardando_confirmacao_grupo = State()
 
 class SubmissaoUsuarioInterativa(StatesGroup):
-    painel = State()   # ✅ Painel único: vídeo e links entram em qualquer ordem
+    painel = State()  # painel único: vídeo e links entram em qualquer ordem
 
 def ler_submissao_config():
     return ler_config_bd("submissao_config", padrao={
@@ -458,7 +457,7 @@ def ler_submissao_config():
         "grupo_id": None, 
         "topico_envio": None, 
         "topico_destino": None,
-        "repost_origem": None, # ✅ NOVO: Chave para a origem
+        "repost_origem": None,
         "repost_dias": 15,
         "repost_limite": 6,
         "repost_pausado": False,
@@ -474,36 +473,36 @@ class AutoraisFluxo(StatesGroup):
     menu_principal = State()
     aguardando_origem = State()
     aguardando_topico = State() 
-    aguardando_confirmacao_origem = State() # ✅ NOVO: Etapa de confirmação
+    aguardando_confirmacao_origem = State()
     aguardando_destino = State()
-    aguardando_confirmacao_destino = State() # ✅ NOVO: Etapa de confirmação
+    aguardando_confirmacao_destino = State()
     aguardando_dias_retorno = State()
-    aguardando_confirmacao_dias_retorno = State() # ✅ NOVO: Etapa de confirmação
+    aguardando_confirmacao_dias_retorno = State()
     aguardando_limite_videos = State()
-    aguardando_confirmacao_limite_videos = State() # ✅ NOVO: Etapa de confirmação
-    aguardando_janela_autorais = State()           # 🕐 NOVO: Janela de horário do retorno
+    aguardando_confirmacao_limite_videos = State()
+    aguardando_janela_autorais = State()  # janela de horário do retorno
     aguardando_confirmacao_janela_autorais = State()
     aguardando_confirmacao_pausa_repost = State()
     aguardando_confirmacao_pausa_robo = State()
-    aguardando_bloqueio = State()  # 🚫 espera o @ que vai para a lista negra
+    aguardando_bloqueio = State()  # espera o @ que vai para a lista negra
 
 class RelatoriosFluxo(StatesGroup):
     menu_filas = State()
-    aguardando_rota_espelhador = State() # ✅ NOVO: Estado para selecionar qual rota visualizar
-    aguardando_parceiro_detalhe = State() # ✅ NOVO: qual parceiro detalhar a fila
+    aguardando_rota_espelhador = State()  # qual rota do Espelhador mostrar
+    aguardando_parceiro_detalhe = State()  # qual parceiro detalhar
 
 class ConfigRotinaEspiao(StatesGroup):
     aguardando_janela = State()
-    aguardando_confirmacao_janela = State() # ✅ NOVO
+    aguardando_confirmacao_janela = State()
     aguardando_intervalo_espiao = State()
     aguardando_modo = State()
-    aguardando_confirmacao_tempo = State() # ✅ NOVO
+    aguardando_confirmacao_tempo = State()
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 _lock_contador = asyncio.Lock()
 
-# ✅ NOVO: Sistema de travas assíncronas para proteção contra Race Conditions
+# Sem uso: as configurações que estes arquivos guardavam hoje ficam no SQLite.
 if EXIBIR_LOGS: logger.info("🚀 Inicializando o gerenciador de travas (Locks) para os arquivos locais...")
 _locks_json = {
     "fila_clonagem.json": asyncio.Lock(),
@@ -527,8 +526,7 @@ dp.include_router(painel_notas.router)
 painel_notas.configurar_dependencias(bot, scheduler)
 if EXIBIR_LOGS: logger.info("✅ Módulo de Notas montado com segurança.")
 
-# --- NOVOS TECLADOS DE CONTROLE ---
-# 🛠️ Teclado para seleção da plataforma
+# --- Teclados ---
 teclado_plataforma = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Ambos 🛒🎵")],
@@ -539,23 +537,21 @@ teclado_plataforma = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# 🛠️ Teclado básico para etapas de entrada de dados
 teclado_cancelar = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Cancelar ❌")]],
     resize_keyboard=True,
     is_persistent=True
 )
 
-# 🔙 Cancelar EXCLUSIVO da tela de alvos do Grupo Público. O texto é próprio
-# de propósito: assim o handler pode usar StateFilter("*") e continuar funcionando
-# mesmo depois de um restart, quando o MemoryStorage do aiogram já zerou o FSM.
+# Cancelar só da tela de alvos do Grupo Público. O texto é próprio de propósito: o
+# handler usa StateFilter("*") e continua funcionando depois de um restart, quando o
+# MemoryStorage do aiogram já zerou o FSM.
 teclado_cancelar_alvos_publico = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="❌ Cancelar e Voltar às Rotinas")]],
     resize_keyboard=True,
     is_persistent=True
 )
 
-# 🛠️ Teclado para erro na IA (NOVO)
 teclado_erro_ia = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Tentar Novamente 🔄"), KeyboardButton(text="Digitar Manualmente ✍️")],
@@ -565,7 +561,6 @@ teclado_erro_ia = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# 🛠️ Teclado de confirmação da análise da inteligência artificial
 teclado_confirmacao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Digitar Nome ✍️")],
@@ -575,7 +570,7 @@ teclado_confirmacao = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# 🛠️ Teclado para a fase de coleta de links e encerramento
+# Coleta de links e encerramento da postagem.
 teclado_finalizar = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Finalizar ✅")],
@@ -585,7 +580,6 @@ teclado_finalizar = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# 🛠️ Teclado de sub-menu para edição da numeração
 teclado_opcoes_numero = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Editar Número ✏️"), KeyboardButton(text="Zerar Contador 🔄")],
@@ -595,7 +589,7 @@ teclado_opcoes_numero = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# 🛠️ Teclado de confirmação de segurança para evitar zerar acidentalmente
+# Confirmação antes de zerar o contador.
 teclado_confirmar_zerar = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]
@@ -604,7 +598,6 @@ teclado_confirmar_zerar = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# --- NOVOS TECLADOS DE CONFIGURAÇÃO ---
 def obter_teclado_configuracoes_gerais():
     dados_pausa = ler_pausa_programada()
     texto_botao_pausa = "Retomar Postagens ▶️" if dados_pausa.get("ativa") else "Pausar Postagens 🛑"
@@ -653,9 +646,8 @@ def obter_teclado_outros_canais():
             [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
             [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
             [KeyboardButton(text="Gerador de Achadinhos 🛍️")],
-            # 👥 Fica AQUI, irmão dos robôs, e não dentro do Vídeos Autorais: as
-            # contas do pool e a lista negra valem para mais de um robô, então
-            # pendurá-las embaixo de um deles dava a impressão errada de escopo.
+            # Fica aqui, ao lado dos robôs, e não dentro do Vídeos Autorais: as contas do pool
+            # e a lista negra valem para mais de um robô.
             [KeyboardButton(text="Contas 👥")],
             [KeyboardButton(text="Voltar ao Início 🔙")]
         ],
@@ -696,7 +688,7 @@ teclado_edicao_nicho = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# 🛠️ Função do novo Menu Inicial Raiz
+# Menu inicial.
 def obter_teclado_raiz():
     botoes = [
         [KeyboardButton(text="Canal Afiliados 📺"), KeyboardButton(text="Outros Canais 🗂️")],
@@ -713,16 +705,16 @@ def obter_teclado_principal():
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
-# 🛠️ Novo Sub-Menu do Servidor
+# Menu Opções do Servidor.
 def obter_teclado_opcoes_servidor():
     botoes = [
         [KeyboardButton(text="Monitorar Servidor 🖥️"), KeyboardButton(text="Zerar Filas e Tarefas 🧹")],
-        [KeyboardButton(text="Reiniciar Robôs 🔄")], # ✅ NOVO BOTÃO AQUI
+        [KeyboardButton(text="Reiniciar Robôs 🔄")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
-# --- SISTEMA DO ESPIÃO (CONFIGURAÇÕES) ---
+# --- Espião: configuração e análise dos canais vigiados ---
 def ler_alvos_espiao():
     padrao = {"alvos": [], "canal_destino": None, "status_alvos": {}}
     return ler_config_bd("alvos_espiao", padrao, arquivo_legado="alvos_espiao.json")
@@ -845,7 +837,6 @@ async def voltar_opcoes_espiao(message: types.Message, state: FSMContext):
     await state.clear()
     await menu_grupos_vigiados(message, state)
 
-# 🛠️ Novo Teclado para Janela do Espião
 teclado_janela_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Dia Todo (24h) 🕛")],
@@ -855,10 +846,14 @@ teclado_janela_espiao = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# --- SISTEMA DE FILA DE POSTAGENS ASSÍNCRONAS ---
+# --- Fila do canal principal (fila_postagens) ---
 def ler_fila_postagens():
+    """
+    Fila do canal principal no formato que os menus usam ({"fila": [...]}, com
+    data_adicao = data_alvo e postado = CONCLUIDO). Item com ERRO aparece como não postado.
+    """
     import os
-    # 📦 Módulo de migração silenciosa (Executa apenas na primeira vez)
+    # fila_postagens.json da versão antiga: migra para o SQLite uma vez e arquiva.
     if os.path.exists("fila_postagens.json"):
         try:
             if EXIBIR_LOGS: logger.info("📦 Migrando dados antigos do JSON para o banco SQLite...")
@@ -876,7 +871,7 @@ def ler_fila_postagens():
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         
-        # Retorna ordenado pela data e depois pela prioridade para manter a ordem visual
+        # Ordem de exibição: data e depois a ordem dentro do dia.
         cursor.execute("SELECT * FROM fila_postagens ORDER BY data_alvo ASC, prioridade ASC")
         linhas = cursor.fetchall()
         conexao.close()
@@ -900,7 +895,10 @@ def ler_fila_postagens():
         return {"fila": []}
 
 def salvar_fila_postagens(dados):
-    # Função adaptador temporária para não quebrar os menus antigos
+    """
+    Regrava fila_postagens inteira (DELETE + INSERT). Só a migração do JSON antigo usa;
+    o resto do código grava com UPDATE/INSERT pontuais.
+    """
     try:
         conexao = sqlite3.connect("banco_dados.db")
         cursor = conexao.cursor()
@@ -929,12 +927,15 @@ def salvar_fila_postagens(dados):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao reescrever fila no SQLite: {e}")
 
-# 🧹 O antigo salvar_fila_postagens() foi completamente eliminado nesta fase.
-# Todas as gravações agora ocorrem através de queries atómicas (UPDATE/INSERT/DELETE).
 
 def agendar_fila_postagens():
+    """
+    Refaz os agendamentos de hoje: espalha os vídeos pendentes entre o Bom Dia e a
+    Boa Noite, um por bloco de tempo, com variação aleatória em torno do meio do bloco.
+    Com a pausa programada ativa, só desfaz os agendamentos.
+    """
     if EXIBIR_LOGS: logger.info("🔄 Recalculando e agendando fila de postagens de forma DINÂMICA (Variação 50%)...")
-    # 1. Limpa agendamentos antigos para evitar duplicidade
+    # Remove os agendamentos anteriores; são refeitos abaixo.
     for job in scheduler.get_jobs():
         if job.id.startswith('job_fila_postagem_'):
             job.remove()
@@ -945,7 +946,7 @@ def agendar_fila_postagens():
         if EXIBIR_LOGS: logger.info("⏸️ Pausa programada ativa: nenhum vídeo da fila foi agendado.")
         return
 
-    # 2. Busca vídeos pendentes para hoje no SQLite
+    # Pendentes de hoje. "2000-01-01" marca vídeo que entrou antes do Bom Dia (sai hoje).
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
     
@@ -965,7 +966,7 @@ def agendar_fila_postagens():
 
     dados_rotina = ler_config_rotina()
     
-    # 3. Determina as fronteiras de expediente (Bom Dia e Boa Noite)
+    # Janela do dia: do próximo Bom Dia até a Boa Noite (horário dos jobs ou o padrão da config).
     job_bd = scheduler.get_job('job_rotina_bom_dia_0')
     if job_bd and getattr(job_bd, 'next_run_time', None):
         limite_inicio = job_bd.next_run_time.astimezone(fuso_horario)
@@ -980,15 +981,14 @@ def agendar_fila_postagens():
         hora_fim = dados_rotina.get("boa_noite", {}).get("inicio", 21)
         limite_fim = agora.replace(hour=hora_fim, minute=59, second=59, microsecond=0)
 
-    # 4. Cálculo Dinâmico de Tempo Restante com Variação de 50%
     import random
     from datetime import timedelta
     
-    # Cria uma margem para o vídeo não sair imediatamente colado ao "agora" ou ao "Bom dia"
+    # Margem de 15 a 30 min para o vídeo não sair colado ao agora nem ao Bom Dia.
     margem_seguranca = timedelta(minutes=random.randint(15, 30))
     inicio_real = max(agora + margem_seguranca, limite_inicio + margem_seguranca)
 
-    # Se já estivermos além do expediente, cancela o agendamento por hoje
+    # O expediente já acabou: os vídeos esperam o dia seguinte.
     if inicio_real >= limite_fim:
         if EXIBIR_LOGS: logger.warning("⚠️ O expediente de postagens encerrou por hoje. Vídeos aguardarão na fila para amanhã.")
         return
@@ -996,7 +996,7 @@ def agendar_fila_postagens():
     minutos_disponiveis = (limite_fim - inicio_real).total_seconds() / 60
     qtd_pendentes = len(pendentes_hoje)
     
-    # Divide o tempo restante em "blocos" iguais para cada vídeo pendente
+    # Divide o tempo restante em blocos iguais, um por vídeo.
     espacamento_bloco = minutos_disponiveis / qtd_pendentes
     tempo_acumulado = inicio_real
 
@@ -1004,23 +1004,20 @@ def agendar_fila_postagens():
         id_unico = item["id_unico"]
         job_id = f"job_fila_postagem_{id_unico}"
         
-        # Descobre o meio exato do bloco de tempo deste vídeo
         meio_do_bloco = tempo_acumulado + timedelta(minutes=(espacamento_bloco / 2))
         
-        # ✅ A SUA LÓGICA DE 50%: 
-        # Se o bloco tem 5 horas, a metade é 2h30. 50% dessa metade é 1h15.
-        # O vídeo vai flutuar dinamicamente entre -1h15 e +1h15 a partir do meio!
+        # Variação de até 50% do meio-bloco: com bloco de 5 h, o vídeo cai entre 1h15
+        # antes e 1h15 depois do meio.
         variacao_max = int((espacamento_bloco / 2) * 0.50)
         
-        # Trava mínima para não dar erro se o bloco for minúsculo (ex: só sobrou 5 minutos do dia)
+        # Pelo menos 2 min de variação, para bloco muito curto.
         variacao_max = max(2, variacao_max) 
         
-        # Sorteia a variação dentro do limiar de 50%
         variacao = random.randint(-variacao_max, variacao_max)
         
         horario_final = meio_do_bloco + timedelta(minutes=variacao)
 
-        # Travas finais de segurança
+        # Nunca depois da Boa Noite nem no passado.
         if horario_final >= limite_fim:
             horario_final = limite_fim - timedelta(minutes=random.randint(2, 8))
         if horario_final <= agora:
@@ -1036,11 +1033,13 @@ def agendar_fila_postagens():
         )
         if EXIBIR_LOGS: logger.info(f"⏳ Postagem {id_unico[:8]} agendada dinamicamente para {horario_final.strftime('%H:%M:%S')}")
         
-        # Avança a linha do tempo para o início do bloco do próximo vídeo
         tempo_acumulado += timedelta(minutes=espacamento_bloco)
 
 async def motor_fila_minuto():
-    # ✅ NOVO FISCAL HÍBRIDO (Watchdog): Apenas vigia a memória e auto-cura a grade
+    """
+    Fiscal de 1 em 1 minuto: no expediente (Bom Dia já saiu, Boa Noite não), se há
+    vídeo pendente e nenhum agendado (reinício, falha), refaz a grade.
+    """
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
     
@@ -1052,7 +1051,7 @@ async def motor_fila_minuto():
     ultimo_bn = dados_rotina.get("ultimo_boa_noite", "")
     
     if ultimo_bd != hoje_str or ultimo_bn == hoje_str:
-        return # Fora do expediente
+        return  # fora do expediente
         
     try:
         conexao = sqlite3.connect("banco_dados.db")
@@ -1062,10 +1061,8 @@ async def motor_fila_minuto():
         conexao.close()
         
         if qtd_db > 0:
-            # Verifica quantos vídeos estão realmente na memória do agendador
             qtd_jobs = sum(1 for job in scheduler.get_jobs() if job.id.startswith('job_fila_postagem_'))
             
-            # Se o banco tem vídeo, mas a memória está vazia, o sistema falhou (reboot, crash, etc)
             if qtd_jobs == 0:
                 if EXIBIR_LOGS: logger.warning("⚠️ O Fiscal detectou vídeos perdidos sem agendamento! Forçando auto-cura da grade...")
                 agendar_fila_postagens()
@@ -1077,6 +1074,11 @@ MAX_TENTATIVAS_POSTAGEM = 3
 MINUTOS_ENTRE_TENTATIVAS = 10
 
 async def executar_postagem_fila(item_id):
+    """
+    Publica um vídeo da fila no canal principal (o arquivo do disco ou, sem ele, o
+    file_id do Telegram) e marca CONCLUIDO. Falha de envio tenta de novo até
+    MAX_TENTATIVAS_POSTAGEM; imagem ou vídeo perdido vira ERRO.
+    """
     if EXIBIR_LOGS: logger.info(f"📤 Iniciando processamento do vídeo {item_id}...")
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
@@ -1098,8 +1100,7 @@ async def executar_postagem_fila(item_id):
             conexao.close()
             return
             
-        # 🛡️ TRAVA ABSOLUTA ANTI-DUPLICIDADE: Se o vídeo não for mais 'PENDENTE', aborta imediatamente.
-        # Isso impede que o Fiscal (Watchdog) ou qualquer atraso de rede gere postagens duplas.
+        # Só publica item PENDENTE: job repetido (fiscal, nova tentativa) não posta duas vezes.
         if item["status"] != 'PENDENTE':
             if EXIBIR_LOGS: logger.warning(f"🛑 Bloqueio ativado: O vídeo já foi processado anteriormente (Status: {item['status']}). Postagem duplicada evitada.")
             conexao.close()
@@ -1113,7 +1114,7 @@ async def executar_postagem_fila(item_id):
         novo_file_id = None
         
         if caminho_video and os.path.exists(caminho_video):
-            # ✅ SEGUNDA TRAVA DE SEGURANÇA MANTIDA INTACTA
+            # Imagem não vai como vídeo: descarta.
             if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
                 if EXIBIR_LOGS: logger.warning("🚫 [Segurança] Upload cancelado! Ficheiro é uma imagem.")
                 try: os.remove(caminho_video)
@@ -1124,7 +1125,7 @@ async def executar_postagem_fila(item_id):
                 msg = await bot.send_video(chat_id=GRUPO_ID, video=arquivo, caption=legenda, parse_mode="HTML")
                 novo_file_id = msg.video.file_id
                 sucesso = True
-                registrar_ultimo_post(GRUPO_ID, "video")   # 🚦 Intercalação
+                registrar_ultimo_post(GRUPO_ID, "video")  # para a intercalação de vídeo e texto (ver registrar_ultimo_post)
                 if EXIBIR_LOGS: logger.info("🚀 [Fluxo] Vídeo enviado com sucesso pelo Motor Central.")
                 try: os.remove(caminho_video)
                 except: pass
@@ -1174,8 +1175,15 @@ async def executar_postagem_fila(item_id):
             conexao.close()
         except Exception: pass
 
-# --- GERENCIADOR CENTRAL DE CONFIGURAÇÕES (SQLITE) ---
+# --- Configurações no SQLite (tabela configuracoes) ---
 def ler_config_bd(chave, padrao=None, arquivo_legado=None):
+    """
+    Valor JSON da chave em configuracoes; padrao se não houver.
+
+    Com arquivo_legado e sem a chave no banco, migra o JSON antigo: grava no banco e
+    renomeia o arquivo para .bkp. Não usar com arquivo que outro serviço ainda grava
+    (como o fila_espelhador.json).
+    """
     if padrao is None: padrao = {}
     try:
         conexao = sqlite3.connect("banco_dados.db")
@@ -1187,7 +1195,6 @@ def ler_config_bd(chave, padrao=None, arquivo_legado=None):
         if resultado:
             return json.loads(resultado[0])
             
-        # Auto-migração transparente do JSON antigo para a nova tabela do SQLite
         import os
         if arquivo_legado and os.path.exists(arquivo_legado):
             with open(arquivo_legado, "r", encoding="utf-8") as f:
@@ -1203,8 +1210,8 @@ def ler_config_bd(chave, padrao=None, arquivo_legado=None):
         return padrao
 
 def salvar_config_bd(chave, dados):
-    # 🔒 É a gravação mais frequente do sistema — todo painel, todo motor, toda rotina
-    # passa por aqui. O conexao_db() fecha com ou sem exceção.
+    # É a gravação mais frequente do sistema (todo painel, motor e rotina passa por aqui):
+    # conexao_db() fecha a conexão com ou sem exceção.
     from utils import conexao_db
     try:
         with conexao_db() as conexao:
@@ -1215,7 +1222,7 @@ def salvar_config_bd(chave, dados):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar configuração '{chave}' no SQLite: {e}")
 
-# 👤 CRÉDITO AUTOMÁTICO DO REPOST: pergunta ao Telegram qual é o @ do administrador
+# Crédito do repost: o @ do administrador, perguntado ao Telegram.
 _cache_credito_repost = {"valor": None, "expira": None}
 
 async def obter_credito_repost():
@@ -1245,7 +1252,7 @@ async def obter_credito_repost():
         if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível obter o @ do administrador ({e}). Usando menção por ID.")
         return f"<a href='tg://user?id={ADMIN_ID}'>Administrador</a>"
 
-# --- SISTEMA DE PAUSA PROGRAMADA ---
+# --- Pausa programada ---
 def ler_pausa_programada():
     padrao = {"ativa": False, "data_retorno": None, "servicos_pausados": []}
     return ler_config_bd("pausa_programada", padrao, arquivo_legado="pausa_programada.json")
@@ -1254,6 +1261,11 @@ def salvar_pausa_programada(dados):
     salvar_config_bd("pausa_programada", dados)
 
 def recalcular_datas_pos_pausa():
+    """
+    Depois da pausa, empurra as datas dos pendentes pelo número de dias em que a
+    fila ficou parada (de hoje até a data pendente mais antiga), mantendo os
+    intervalos entre eles.
+    """
     if EXIBIR_LOGS: logger.info("🔄 Iniciando recálculo de datas no SQLite pós-pausa...")
     try:
         conexao = sqlite3.connect("banco_dados.db")
@@ -1295,6 +1307,7 @@ def recalcular_datas_pos_pausa():
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao recalcular datas pós-pausa: {e}")
 
 async def verificar_pausa_diaria():
+    """Todo dia às 9h, com a pausa ativa: troca o aviso de pausa no grupo por um novo."""
     if EXIBIR_LOGS: logger.info("⏰ Iniciando verificação diária de pausa programada (envio de aviso)...")
     dados_pausa = ler_pausa_programada()
     if not dados_pausa.get("ativa"):
@@ -1331,6 +1344,10 @@ async def verificar_pausa_diaria():
     if EXIBIR_LOGS: logger.info("✅ Aviso diário enviado e salvo na memória com sucesso.")
 
 async def verificar_retorno_pausa_minuto():
+    """
+    De minuto em minuto: chegou a data de retorno, apaga o aviso, posta a volta no
+    grupo, reativa o SPAM e a rotina pausados, empurra as datas da fila e reagenda.
+    """
     dados_pausa = ler_pausa_programada()
     if not dados_pausa.get("ativa"):
         return
@@ -1389,22 +1406,22 @@ async def verificar_retorno_pausa_minuto():
         recalcular_datas_pos_pausa()
         agendar_fila_postagens()
         if EXIBIR_LOGS: logger.info("✅ Serviços reativados e pausa programada encerrada com sucesso.")
-# ----------------------------------
 
-# 4. FUNÇÕES DE GERAÇÃO COM IA E AGENDAMENTO ⏰
 async def gerar_mensagem_gemini(prompt):
+    """Texto da IA para as mensagens do grupo; se a IA falhar, uma frase padrão."""
     texto = await gerar_texto_gemini(prompt, EXIBIR_LOGS)
     if texto:
         return texto
     return "🚀 Novos materiais disponíveis! Bora postar e converter!"
 
-# --- SISTEMA DE LIXEIRA PERSISTENTE (MIGRADO PARA SQLITE) ---
+# --- Lixeira: mensagens apagadas na faxina da madrugada ---
 def limpar_historico_antigo():
     if os.path.exists("historico_mensagens.json"):
         os.remove("historico_mensagens.json")
         if EXIBIR_LOGS: logger.info("🧹 Histórico de mensagens do userbot reiniciado.")
 
 def registrar_lixeira(msg_id, chat_id=GRUPO_ID):
+    """Guarda a mensagem para ser apagada na faxina da madrugada."""
     try:
         conexao = sqlite3.connect("banco_dados.db")
         cursor = conexao.cursor()
@@ -1418,10 +1435,11 @@ def registrar_lixeira(msg_id, chat_id=GRUPO_ID):
 
 
 # ==========================================
-# 🧹 FAXINA DE ARQUIVOS ÓRFÃOS
-# A pasta temp/ é área de passagem, mas downloads interrompidos ficam para trás.
-# Regra de ouro: NUNCA apagar por idade sozinha — sempre cruzar com as filas,
-# senão os vídeos agendados do Espião somem e a fila inteira se perde.
+# Faxina de arquivos órfãos
+# temp/ é área de passagem, mas downloads interrompidos ficam para trás. Nunca apagar
+# só por idade: sempre cruzar com as filas, senão vídeos agendados (do Espião, por
+# exemplo) somem. A fila do canal principal não entra na proteção: sem o arquivo,
+# o vídeo sai pelo file_id guardado na criação.
 # ==========================================
 HORAS_PROTEGIDAS_TEMP = 24        # arquivos recentes podem estar sendo processados
 DIAS_RETENCAO_ARCHIVE = 30        # vídeos dos Autorais já publicados
@@ -1430,7 +1448,7 @@ def _caminhos_protegidos():
     """Todo arquivo referenciado por alguma fila pendente. Estes são intocáveis."""
     protegidos = set()
 
-    # 🕵️ Fila do Espião
+    # Fila do Espião
     try:
         for item in ler_fila_clonagem().get("fila", []):
             if not item.get("processado") and item.get("caminho_video"):
