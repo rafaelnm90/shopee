@@ -1,0 +1,82 @@
+name: Diagnóstico do servidor
+
+# Olha o servidor sem mexer em nada: robôs de pé, reinícios, máquina, banco e
+# volume de log. Roda de hora em hora e pode ser disparado à mão (aba Actions,
+# "Run workflow"). Fica vermelho se um robô estiver fora do ar ou o disco
+# passar de 90%; aí o GitHub manda e-mail.
+#
+# O repositório é público, e os logs do Actions também: aqui só saem estados e
+# números, nunca o conteúdo dos logs dos robôs nem dados do banco. Os detalhes
+# dos erros ficam no /status do bot, no privado.
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnostico:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Olhar o servidor (só leitura)
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          script: |
+            cd ~/shopee
+            SERVICOS="bot_mestre_bot divulgacao_canal_bot motor_userbot_bot espelhador_videos_autorais_bot downloader_bot"
+            ALERTA=0
+
+            echo "== Versão no ar"
+            git log -1 --format='%h  %cd  %s' --date=format:'%d/%m %H:%M'
+
+            # Robô fora do ar no meio de um deploy volta em segundos: confere de
+            # novo depois de 1 min antes de dar alarme.
+            fora() {
+              for S in $SERVICOS; do
+                systemctl is-active --quiet "$S.service" || echo "$S"
+              done
+            }
+            if [ -n "$(fora)" ]; then
+              sleep 60
+            fi
+            CAIDOS="$(fora)"
+
+            echo ""
+            echo "== Robôs"
+            for S in $SERVICOS; do
+              ESTADO=$(systemctl show -p ActiveState --value "$S.service")
+              DESDE=$(systemctl show -p ActiveEnterTimestamp --value "$S.service" | awk '{print $2, $3}')
+              REINICIOS=$(systemctl show -p NRestarts --value "$S.service")
+              LINHAS=$(sudo -n journalctl -u "$S.service" --since "1 hour ago" -q 2>/dev/null | wc -l)
+              if echo "$CAIDOS" | grep -qx "$S"; then MARCA="❌"; ALERTA=1; else MARCA="✅"; fi
+              echo "$MARCA $S: $ESTADO desde $DESDE | reinícios sozinho: $REINICIOS | linhas de log na última hora: $LINHAS"
+            done
+
+            echo ""
+            echo "== Máquina"
+            echo "Ligada há: $(uptime -p | sed 's/^up //')"
+            echo "Carga (1, 5, 15 min): $(cut -d' ' -f1-3 /proc/loadavg) | núcleos: $(nproc)"
+            free -m | awk '/^Mem:/ {printf "Memória: %d de %d MB em uso (%d%%)\n", $3, $2, $3*100/$2}'
+            DISCO=$(df --output=pcent / | tail -1 | tr -dc '0-9')
+            df -h --output=used,size / | tail -1 | awk -v p="$DISCO" '{print "Disco: " $1 " de " $2 " em uso (" p "%)"}'
+            if [ "$DISCO" -ge 90 ]; then
+              echo "❌ Disco acima de 90%"
+              ALERTA=1
+            fi
+
+            echo ""
+            echo "== Banco"
+            for ARQ in banco_dados.db banco_dados.db-wal; do
+              [ -f "$ARQ" ] && echo "$ARQ: $(du -h "$ARQ" | cut -f1)"
+            done
+            CORTE=$(TZ=America/Sao_Paulo date -d '1 hour ago' '+%Y-%m-%d %H:%M:%S')
+            ERROS=$(sqlite3 -readonly banco_dados.db "SELECT COUNT(*) FROM erros_logs WHERE timestamp >= '$CORTE'" 2>/dev/null || echo "?")
+            echo "Erros registrados na última hora: $ERROS (detalhes no /status do bot)"
+
+            exit $ALERTA
