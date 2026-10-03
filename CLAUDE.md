@@ -109,7 +109,9 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
 - CI:
   - `validar.yml` roda em todo PR para a `main`, com a suíte em 4 horários e ordem aleatória.
   - `deploy.yml` roda no merge na `main`. Ele repete a validação e, por SSH, faz `git pull` e `pip install` no servidor e reinicia os 5 serviços. Confere se todos subiram aos 25 s e de novo 3 min depois (processo e contador de reinícios).
-  - Não há acesso direto ao servidor. Para saber o que está no ar, peça ao Rafael o `/status` do bot: serviços, versão, disco, contas e últimos erros.
+  - `diagnostico.yml` olha o servidor de hora em hora, só lendo: robôs (estado, desde quando, reinícios), máquina (carga, memória, disco), banco e volume de log. Fica vermelho com robô fora do ar ou disco acima de 90% (o GitHub manda e-mail). Para ver o servidor agora, dispare-o (`run_workflow` em `diagnostico.yml`) e leia o log do job.
+  - O repositório é público e os logs do Actions também: nos workflows, só estados e números; nunca conteúdo de log dos robôs ou dados do banco.
+  - Não há acesso direto ao servidor por SSH a partir da sessão. Os detalhes dos erros ficam no `/status` do bot, no privado do Rafael.
 
 ## Como trabalhamos
 
