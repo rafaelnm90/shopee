@@ -4764,10 +4764,15 @@ async def motor_repost_publico_step():
                             await asyncio.sleep(2 * tentativa)
 
                     if not marcou:
-                        # Não deu para registrar: encerra este ciclo.
+                        # Não deu para registrar. Apaga o arquivo: sem ele, os ciclos seguintes caem
+                        # na trava "sem arquivo" (adiam o item) em vez de publicar o vídeo de novo.
+                        # O item sai da fila pela tolerância de dias. Melhor um vídeo preso na
+                        # fila do que vinte cópias no grupo.
+                        try: os.remove(caminho)
+                        except Exception: pass
                         if EXIBIR_LOGS:
                             logger.error(f"🛑 [Motor Público] {id_unico} foi PUBLICADO mas não foi possível marcar "
-                                         "no banco. Motor parado para não republicar. Verifique o SQLite.")
+                                         "no banco. Arquivo apagado para não republicar. Verifique o SQLite.")
                         conexao.close()
                         return
 
