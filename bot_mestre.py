@@ -9758,6 +9758,7 @@ async def salvar_novo_numero(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "🛠️ Configurações Avançadas", StateFilter("*"))
 async def menu_configuracoes(message: types.Message, state: FSMContext):
+    """Configurações Avançadas do canal principal."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     if EXIBIR_LOGS: logger.info("⚙️ Acessando Dashboard de Configurações Gerais de Automações.")
@@ -9826,6 +9827,7 @@ async def confirmar_atualizar_rotinas(message: types.Message, state: FSMContext)
 
 @dp.message(ConfigFluxo.aguardando_confirmacao_rotinas)
 async def resetar_expediente(message: types.Message, state: FSMContext):
+    """Recalcula a grade do dia do canal principal (rotinas e vídeos) e mostra o que mudou."""
     if message.from_user.id != ADMIN_ID: return
 
     if message.text != "Aprovar ✅":
@@ -9835,16 +9837,15 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("🔄 Recálculo APROVADO pelo admin. Executando...")
     msg_status = await message.answer("🔄 Analisando o histórico de hoje e recalculando a grade restante. Aguarde...", reply_markup=teclado_cancelar)
     
-    # --- 1. FOTO DO ANTES (Captura o estado atual da memória) ---
+    # Horários antes do recálculo
     jobs_antes = {}
     for job in scheduler.get_jobs():
         if getattr(job, 'next_run_time', None):
             jobs_antes[job.id] = job.next_run_time.astimezone(fuso_horario).strftime("%H:%M")
 
-    # --- 2. EXECUTA O RECÁLCULO ---
     agendar_tarefas_diarias(escopo="principal")
     
-    # --- 3. FOTO DO DEPOIS (Captura o novo estado da memória) ---
+    # Horários depois
     jobs_depois = {}
     for job in scheduler.get_jobs():
         if getattr(job, 'next_run_time', None):
@@ -9852,18 +9853,16 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
 
     await msg_status.delete()
     
-    # --- 4. CONSTRUÇÃO DO PAINEL VISUAL ORDENADO ---
+    # Relatório do que mudou, por horário
     texto = "🔄 <b>Grade Recalculada com Sucesso!</b>\n\n"
     texto += "Aqui está o relatório do que mudou no seu dia:\n\n"
     
     mudancas_rotinas = []
     mudancas_videos = []
     
-    # Compara o Antes e o Depois
     for job_id, hora_nova in jobs_depois.items():
         hora_antiga = jobs_antes.get(job_id)
         
-        # Avalia se a hora mudou ou se é um item totalmente novo
         if hora_antiga != hora_nova:
             marcador_tempo = f"{hora_antiga} ➡️ {hora_nova}" if hora_antiga else f"Novo Encaixe ➡️ {hora_nova}"
             
@@ -9886,11 +9885,10 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
                     else:
                         nome_amigavel = job_id.replace("job_rotina_", "").replace("job_campanha_", "").replace("_", " ").title()
                         
-                # Guarda na lista como uma tupla (hora_nova, texto_formatado) para ordenarmos depois
                 mudancas_rotinas.append((hora_nova, f"🔹 <b>{nome_amigavel}:</b> {marcador_tempo}"))
                 
             elif "fila_postagem" in job_id:
-                # Faz um resgate cirúrgico no SQLite para descobrir o Número Visual do Vídeo
+                # Número do vídeo ("Vídeo N") lido da legenda.
                 id_unico = job_id.replace("job_fila_postagem_", "")
                 nome_video = f"Vídeo {id_unico[:4]}"
                 try:
@@ -9907,7 +9905,6 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
                 
                 mudancas_videos.append((hora_nova, f"📦 <b>{nome_video}:</b> {marcador_tempo}"))
                 
-    # ✅ ORDENAÇÃO CRONOLÓGICA INTELIGENTE (Do mais cedo para o mais tarde)
     mudancas_rotinas.sort(key=lambda x: x[0])
     mudancas_videos.sort(key=lambda x: x[0])
     
@@ -9926,6 +9923,7 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "Zerar Filas e Tarefas 🧹", StateFilter("*"))
 async def menu_zerar_filas_tarefas(message: types.Message, state: FSMContext):
+    """Zerar Filas e Tarefas: escolha do que limpar."""
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("⚠️ Solicitando seleção do tipo de limpeza de filas.")
     
@@ -9953,12 +9951,12 @@ async def menu_zerar_filas_tarefas(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigFluxo.aguardando_selecao_limpeza)
 async def pedir_confirmacao_acao_limpeza(message: types.Message, state: FSMContext):
+    """Confirma a limpeza escolhida antes de executar."""
     opcoes_validas = [
         "Limpar Tudo (Geral) 💥", "Limpar Fila do Espião 🕵️", "Limpar Fila Espelhador 🔄", "Limpar Fila Autorais 🎥"
     ]
 
-    # 🔙 "Voltar" é diferente de "Cancelar": em vez de largar o usuário no menu
-    # principal, devolve para Opções do Servidor, que é de onde ele veio.
+    # "Voltar" devolve às Opções do Servidor, de onde o usuário veio.
     if message.text in ("Voltar ao Menu Anterior 🔙", "Cancelar ❌"):
         await menu_opcoes_servidor_handler(message, state)
         return
@@ -9980,11 +9978,16 @@ async def pedir_confirmacao_acao_limpeza(message: types.Message, state: FSMConte
 
 @dp.message(ConfigFluxo.aguardando_acao_limpeza)
 async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContext):
+    """
+    Executa a limpeza escolhida: tira das filas os pendentes (Espião, Espelhador,
+    Autorais) e apaga os arquivos; varre o lixo de temp/; no Limpar Tudo, também os
+    .bkp e os logs do sistema.
+    """
     if message.text == "Cancelar ❌":
         await cancelar_fluxo_global(message, state)
         return
         
-    # 🔙 Aqui o passo anterior é a própria lista de limpezas, não o menu do servidor.
+    # Aqui o passo anterior é a própria lista de limpezas, não o menu do servidor.
     if message.text in ("Voltar ao Menu Anterior 🔙", "Cancelar ❌"):
         await menu_zerar_filas_tarefas(message, state)
         return
@@ -10021,7 +10024,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
                 relatorio["espaco_mb"] += tamanho
             except: pass
 
-    # 1. Limpar Fila do Espião
+    # 1. Espião: tira os pendentes da fila e apaga os arquivos
     if limpar_espiao:
         try:
             fila_clonagem = ler_fila_clonagem()
@@ -10037,7 +10040,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
         except Exception:
             pass
             
-    # 2. Limpar Fila do Espelhador
+    # 2. Espelhador: tira os pendentes da fila
     if limpar_espelhador:
         try:
             with open("fila_espelhador.json", "r", encoding="utf-8") as f:
@@ -10054,7 +10057,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
         except Exception:
             pass
 
-    # 3. Limpar Fila de Autorais
+    # 3. Autorais: tira os pendentes da fila de retorno e apaga os arquivos
     if limpar_autorais:
         try:
             conexao = sqlite3.connect("banco_dados.db")
@@ -10089,7 +10092,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
     except Exception:
         pass
 
-    # 5. Apagar arquivos de backup (.bkp) na raiz
+    # 5. Arquivos .bkp da raiz (JSON antigos já migrados), só no Limpar Tudo
     if limpar_tudo:
         try:
             for filename in os.listdir("."):
@@ -10098,7 +10101,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
         except Exception:
             pass
 
-    # 6. Limpeza de Logs do Servidor Linux
+    # 6. Logs do sistema (journalctl, mantém 2 dias), só no Limpar Tudo
     status_ubuntu = "Não executada"
     if limpar_tudo:
         try:
@@ -10132,7 +10135,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
         
     texto_final += "\nO seu ambiente de trabalho está atualizado."
     
-    # ✅ CORREÇÃO MESTRE: Exibe a mensagem de sucesso e puxa o menu de limpeza novamente
+    # Mostra o relatório e volta ao menu de limpeza.
     await message.answer(texto_final, parse_mode="HTML")
     await menu_zerar_filas_tarefas(message, state)
 
@@ -10158,6 +10161,7 @@ async def voltar_outros_canais(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "Gerador de Achadinhos 🛍️", StateFilter("*"))
 async def painel_achadinhos(message: types.Message, state: FSMContext):
+    """Painel do Gerador de Achadinhos: nichos, destino, termos, janela e nichos por ciclo."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     
@@ -10172,17 +10176,14 @@ async def painel_achadinhos(message: types.Message, state: FSMContext):
         texto += "\n<i>Nenhum nicho configurado. Clique em 'Adicionar Nicho ➕' para começar.</i>"
     else:
         for i, nicho in enumerate(nichos, 1):
-            # 🧵 Usa o mesmo formatar_nome_alvo dos outros painéis: sem o tópico,
-            # oito nichos do mesmo grupo apareciam com destino idêntico e não dava
-            # para conferir se cada um estava na gaveta certa.
+            # Mesmo formatar_nome_alvo dos outros painéis: com o tópico, nichos do mesmo grupo
+            # não aparecem com destino idêntico.
             destino = nicho.get("destino")
             thread_id = str(nicho.get("thread_id", "0") or "0")
             alvo = f"{destino}:{thread_id}" if thread_id != "0" else str(destino)
 
-            # O helper devolve "Grupo › Tópico" numa linha só, o que embola no
-            # celular. Aqui a gente separa em duas linhas sem perder nada. Se o
-            # formato do helper mudar, o split falha de forma limpa e o nome
-            # inteiro volta para a linha do grupo.
+            # "Grupo › Tópico" vira duas linhas (no celular, uma linha só embola). Sem o
+            # separador, o nome inteiro fica na linha do grupo.
             nome_completo = formatar_nome_alvo(alvo, cache_nomes)
             if " › " in nome_completo:
                 nome_grupo, nome_topico = nome_completo.split(" › ", 1)
@@ -10205,11 +10206,12 @@ async def painel_achadinhos(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "Forçar Garimpo 🚀", StateFilter("*"))
 async def forcar_garimpo_achadinhos(message: types.Message):
+    """Roda um garimpo agora, fora da agenda e ignorando a janela."""
     if message.from_user.id != ADMIN_ID: return
     await message.answer("🚀 <b>Motor Acionado!</b> O garimpo extrairá as melhores ofertas nos nichos mapeados de forma silenciosa no servidor. Em instantes elas cairão nos canais.", parse_mode="HTML")
     criar_task(processar_garimpo_automatico(forcado=True))
 
-# --- FLUXO: ADICIONAR NICHO ---
+# --- Achadinhos: adicionar nicho ---
 @dp.message(AchadinhosFluxo.menu_principal, F.text == "Adicionar Nicho ➕")
 async def pedir_nome_nicho(message: types.Message, state: FSMContext):
     await message.answer("Vamos configurar um novo robô de garimpo!\n\nQual será o <b>Nome deste nicho</b>? (Ex: Achadinhos Tech, Moda Feminina)", parse_mode="HTML", reply_markup=teclado_cancelar)
@@ -10232,7 +10234,8 @@ async def pedir_destino_nicho(message: types.Message, state: FSMContext):
 
 @dp.message(AchadinhosFluxo.aguardando_destino)
 async def pedir_thread_nicho(message: types.Message, state: FSMContext):
-    # 🔗 Um campo só: o link já carrega grupo e tópico.
+    """Recebe o link do tópico do nicho e pede as palavras-chave."""
+    # Um campo só: o link já traz grupo e tópico.
     destino_nicho, thread_id = extrair_destino_e_topico(message.text)
 
     if not destino_nicho:
@@ -10265,6 +10268,7 @@ async def pedir_keywords_nicho(message: types.Message, state: FSMContext):
 
 @dp.message(AchadinhosFluxo.aguardando_keywords)
 async def salvar_novo_nicho(message: types.Message, state: FSMContext):
+    """Grava o nicho novo."""
     keywords_raw = message.text.strip()
     keywords_lista = [k.strip() for k in keywords_raw.split(",") if k.strip()]
     
@@ -10292,7 +10296,7 @@ async def salvar_novo_nicho(message: types.Message, state: FSMContext):
     await message.answer(f"✅ Nicho <b>{nome}</b> criado e ativado com sucesso!", parse_mode="HTML")
     await painel_achadinhos(message, state)
 
-# --- FLUXO: REMOVER NICHO ---
+# --- Achadinhos: remover nicho ---
 @dp.message(AchadinhosFluxo.menu_principal, F.text == "Remover Nicho 🗑️")
 async def pedir_remocao_nicho(message: types.Message, state: FSMContext):
     config = ler_achadinhos_config()
@@ -10347,7 +10351,7 @@ async def processar_remocao_nicho(message: types.Message, state: FSMContext):
     
     await painel_achadinhos(message, state)
 
-# --- FLUXO: EDITAR NICHO ---
+# --- Achadinhos: editar nicho ---
 @dp.message(AchadinhosFluxo.menu_principal, F.text == "Editar Nicho ✏️")
 async def pedir_edicao_nicho(message: types.Message, state: FSMContext):
     config = ler_achadinhos_config()
@@ -10412,8 +10416,9 @@ def _mostrar_valor_campo(valor):
 
 @dp.message(AchadinhosFluxo.aguardando_novo_valor_edicao)
 async def revisar_edicao_nicho(message: types.Message, state: FSMContext):
-    # ⚠️ Edição é destrutiva: a lista antiga some sem deixar rastro. Mostra o
-    # antes e o depois e espera confirmação antes de gravar.
+    """Mostra o antes e o depois do campo editado e pede confirmação."""
+    # Edição destrutiva (a lista antiga some): mostra o antes e o depois e espera
+    # confirmação.
     data = await state.get_data()
     indice = data.get("indice_nicho_edicao")
     campo = data.get("campo_edicao")
@@ -10516,8 +10521,8 @@ async def confirmar_janela_achadinhos(message: types.Message, state: FSMContext)
                                  reply_markup=teclado_janela_achadinhos)
             return
 
-    # 📊 O intervalo agora é sorteado (rajada/normal/sumiço) e fica em ~2h na média,
-    # então a conta vira uma FAIXA, não um número exato.
+    # O intervalo é sorteado (rajada/normal/sumiço), ~2 h na média: a conta sai como
+    # faixa, não como número exato.
     ciclos = max(1, (fim - inicio) // 2)
     qtd_nichos = len(ler_achadinhos_config().get("nichos", []))
     total_dia = ciclos * qtd_nichos
@@ -10615,7 +10620,6 @@ async def voltar_menu_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🔙 Retornando ao Menu Principal do Espião...")
     await state.clear()
-    # Redireciona a execução diretamente para a função principal para exibir o painel completo
     await menu_espiao_principal(message, state)
 
 @dp.message(F.text == "⚙️ Automações (SPAM e Rotina)\u200b", StateFilter("*"))
@@ -10659,46 +10663,45 @@ async def voltar_configs(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
 
-# --- HANDLERS DO PAINEL DO ESPIÃO 🕵️ ---
+# --- Painel do Espião ---
 @dp.message(F.text == "Espião Afiliados 🕵️")
 async def menu_espiao_principal(message: types.Message, state: FSMContext):
+    """Painel do Espião: fila de clonagem, canais vigiados, destino, janela e atraso."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     
     if EXIBIR_LOGS: logger.info("🚀 Iniciando consolidação de estatísticas para o painel do Espião...")
     
-    # 1. Obter quantidade de vídeos pendentes na fila (✅ BLINDADO)
+    # 1. Vídeos pendentes na fila de clonagem
     fila_data = ler_fila_clonagem()
     fila = fila_data.get("fila", [])
     videos_pendentes = len([item for item in fila if item.get("processado") not in [True, 1, "true", "True"]])
     
-   # 2. Obter canais monitorizados e destino do ficheiro de configuração (CORRIGIDO)
+   # 2. Canais vigiados e destino
     dados_espiao = ler_alvos_espiao()
     concorrentes = dados_espiao.get("alvos", [])
     qtd_concorrentes = len(concorrentes)
     canal_destino = dados_espiao.get("canal_destino")
     
-    # Lógica Visual do Destino com Autocura (Puxa o nome em vez de só o ID)
+    # Destino com o nome, não só o ID
     if not canal_destino:
         display_destino = "<i>Não definido</i>"
     else:
         status_destino = dados_espiao.get("status_destino", {})
         nome_dest = status_destino.get("nome", str(canal_destino))
-        # Se não tiver o nome no status, tenta puxar do cache global
         if nome_dest == str(canal_destino):
             cache_nomes = ler_cache_nomes_grupos()
             nome_dest = cache_nomes.get(str(canal_destino), str(canal_destino))
         
-        # Formata bonito: "Nome do Canal (ID)"
         display_destino = f"{nome_dest} (<code>{canal_destino}</code>)" if nome_dest != str(canal_destino) else f"<code>{canal_destino}</code>"
 
-    # ✅ NOVO: Resgate das configurações de tempo e distribuição do Espião
+    # Janela, atraso e modo do Espião
     inicio_e = dados_espiao.get("inicio", 10)
     fim_e = dados_espiao.get("fim", 22)
     modo_e = dados_espiao.get("modo", "aleatorio").title()
     intervalo_e = dados_espiao.get("intervalo_dias", 1)
     
-    # 3. Construir a mensagem unificada do painel
+    # 3. Texto do painel
     texto = "🕵️ <b>Painel Principal do Espião</b>\n\n"
     texto += f"📦 <b>Fila de clonagem:</b> {videos_pendentes} vídeos aguardando.\n"
     texto += f"📡 <b>Radar operacional:</b> {qtd_concorrentes} concorrentes vigiados.\n"
