@@ -278,27 +278,6 @@ def salvar_contador(numero):
     with open("contador.txt", "w") as f:
         f.write(str(numero))
 
-async def resolver_nome_topico(base, topico):
-    """
-    Nome do tópico pelo cache de nomes. Tópico 1 ou vazio = "Geral"; sem nome no cache, "Tópico N".
-    """
-    if EXIBIR_LOGS: logger.info(f"🔍 Iniciando resolução de nome para o tópico {topico} na base {base}...")
-    if not topico or str(topico) == "1":
-        if EXIBIR_LOGS: logger.info("✅ Sucesso: Tópico principal identificado como Geral.")
-        return "Geral"
-    
-    cache_nomes = ler_cache_nomes_grupos()
-    base_str = str(base).strip()
-    topico_str = str(topico).strip()
-    
-    for chave in (f"{base_str}_{topico_str}", f"{base_str}:{topico_str}"):
-        if chave in cache_nomes:
-            if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Nome de tópico encontrado no cache ({cache_nomes[chave]}).")
-            return cache_nomes[chave]
-    
-    if EXIBIR_LOGS: logger.info(f"⚠️ Aviso: Nome não encontrado no cache. Adotando padrão Tópico {topico_str}.")
-    return f"Tópico {topico_str}"
-
 def formatar_nome_alvo(alvo, cache_nomes, nome_status=None):
     """
     Monta 'Grupo › Tópico' para alvos de fórum (-100xxx:281); sem isso, alvos do mesmo
@@ -403,7 +382,6 @@ class AchadinhosFluxo(StatesGroup):
     menu_principal = State()
     aguardando_nome = State()
     aguardando_destino = State()
-    aguardando_thread_id = State()  # tópico do destino do nicho
     aguardando_keywords = State()
     aguardando_remocao = State()
     aguardando_confirmacao_remocao = State()
@@ -501,17 +479,6 @@ class ConfigRotinaEspiao(StatesGroup):
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 _lock_contador = asyncio.Lock()
-
-# Sem uso: as configurações que estes arquivos guardavam hoje ficam no SQLite.
-if EXIBIR_LOGS: logger.info("🚀 Inicializando o gerenciador de travas (Locks) para os arquivos locais...")
-_locks_json = {
-    "fila_clonagem.json": asyncio.Lock(),
-    "pausa_programada.json": asyncio.Lock(),
-    "config_rotina.json": asyncio.Lock(),
-    "alvos_espiao.json": asyncio.Lock(),
-    "banco_pedidos.json": asyncio.Lock()
-}
-if EXIBIR_LOGS: logger.info("✅ Travas de segurança dos bancos JSON prontas e ativas.")
 
 scheduler = AsyncIOScheduler(timezone=FUSO_STR)
 
@@ -1430,11 +1397,6 @@ async def gerar_mensagem_gemini(prompt):
     return "🚀 Novos materiais disponíveis! Bora postar e converter!"
 
 # --- Lixeira: mensagens apagadas na faxina da madrugada ---
-def limpar_historico_antigo():
-    if os.path.exists("historico_mensagens.json"):
-        os.remove("historico_mensagens.json")
-        if EXIBIR_LOGS: logger.info("🧹 Histórico de mensagens do userbot reiniciado.")
-
 def registrar_lixeira(msg_id, chat_id=GRUPO_ID):
     """Guarda a mensagem para ser apagada na faxina da madrugada."""
     try:
@@ -2874,8 +2836,6 @@ class InatividadeMiddleware(BaseMiddleware):
                 id=job_id,
                 replace_existing=True
             )
-            
-        return await handler(event, data)
             
         return await handler(event, data)
 
@@ -9134,13 +9094,6 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await renderizar_painel_divulgacao(message, state, _escopo)
         return
         
-   # Achadinhos (já tratado acima; mantido por segurança)
-    if estado_atual and estado_atual.startswith("AchadinhosFluxo"):
-        await state.clear()
-        await message.answer("Ação cancelada.")
-        await painel_achadinhos(message, state)
-        return
-
     # Disparador de Notas: volta ao menu dele, sem limpar o estado do módulo.
     if estado_atual and estado_atual.startswith("PainelNotasFluxo"):
         import painel_notas
@@ -9175,9 +9128,9 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         # Cancelar a edição de uma rotina volta ao submenu "Editar Rotinas" do canal certo.
         if estado_atual == "ConfigRotina:aguardando_novo_horario":
             if not menu_orig:
-                if tipo_edicao in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral", "promo_achadinhos_viral"]:
+                if tipo_edicao in ROTINAS_VIRAIS:
                     menu_orig = "espiao"
-                elif tipo_edicao in ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico"]:
+                elif tipo_edicao in ROTINAS_PUBLICO:
                     menu_orig = "publico"
                 else:
                     menu_orig = "principal"
@@ -9186,9 +9139,9 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
             await submenu_editar_rotinas(message, state)
             return
 
-        if menu_orig == "espiao" or tipo_edicao in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral", "promo_achadinhos_viral"]:
+        if menu_orig == "espiao" or tipo_edicao in ROTINAS_VIRAIS:
             await gerenciar_rotina_espiao(message, state)
-        elif menu_orig == "publico" or tipo_edicao in ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico"]:
+        elif menu_orig == "publico" or tipo_edicao in ROTINAS_PUBLICO:
             await gerenciar_rotina_publico(message, state)
         else:
             await gerenciar_rotina(message, state)
@@ -10282,13 +10235,6 @@ async def pedir_thread_nicho(message: types.Message, state: FSMContext):
     )
     await state.set_state(AchadinhosFluxo.aguardando_keywords)
 
-@dp.message(AchadinhosFluxo.aguardando_thread_id)
-async def pedir_keywords_nicho(message: types.Message, state: FSMContext):
-    thread_id = message.text.strip()
-    await state.update_data(novo_thread_id=thread_id)
-    await message.answer(f"Tópico salvo: <code>{thread_id}</code>\n\nPor fim, digite as <b>Palavras-chave</b> que o motor usará para rastrear produtos na Shopee. Separe-as por vírgula.\nExemplo: <code>smartwatch, fone bluetooth, gamer</code>", parse_mode="HTML", reply_markup=teclado_cancelar)
-    await state.set_state(AchadinhosFluxo.aguardando_keywords)
-
 @dp.message(AchadinhosFluxo.aguardando_keywords)
 async def salvar_novo_nicho(message: types.Message, state: FSMContext):
     """Grava o nicho novo."""
@@ -10792,7 +10738,6 @@ async def esvaziar_fila_espiao_background(chat_id):
                 await bot.send_message(chat_id, "✅ <b>Concluído!</b>\nTodos os vídeos retidos na fila do Espião foram analisados pela IA e publicados com sucesso no seu canal.", parse_mode="HTML")
                 break
             
-            dados["proximo_processamento"] = "2000-01-01 00:00:00"
             agora = datetime.now(fuso_horario)
             ontem_str = (agora - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
             
@@ -11896,10 +11841,7 @@ async def voltar_menu_rotinas_dinamico(message: types.Message, state: FSMContext
     if origem == "espiao":
         await gerenciar_rotina_espiao(message, state)
     elif origem == "publico":
-        try:
-            await gerenciar_rotina_publico(message, state)
-        except NameError:
-            await message.answer("Retornando...", reply_markup=obter_teclado_configuracoes_gerais())
+        await gerenciar_rotina_publico(message, state)
     elif origem:
         await gerenciar_rotina(message, state)
     else:
@@ -13371,10 +13313,7 @@ async def salvar_horario_rotina(message: types.Message, state: FSMContext):
     # Público: mostra o painel completo de rotinas, já com o valor salvo (igual ao
     # "Voltar ao Menu Rotinas"); os outros voltam ao submenu de edição.
     if origem == "publico":
-        try:
-            await gerenciar_rotina_publico(message, state)
-        except NameError:
-            await submenu_editar_rotinas(message, state)
+        await gerenciar_rotina_publico(message, state)
     else:
         await submenu_editar_rotinas(message, state)
 
@@ -14746,43 +14685,6 @@ async def checkup_diario_grupos():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"⚠️ Erro ao disparar a mensagem do relatório diário: {e}")
 
-# =========================================================
-# COLE O CALLBACK AQUI, ANTES DO MAIN()
-# =========================================================
-
-@dp.callback_query(F.data == 'forcar_clones_espiao')
-async def forcar_clones_fila(callback: types.CallbackQuery):
-    if EXIBIR_LOGS:
-        logger.info("🚀 Iniciando processo de forçar disparo dos clones...")
-        
-    try:
-        dados = ler_fila_clonagem()
-        fila = dados.get("fila", [])
-            
-        quantidade = len([i for i in fila if not i.get("processado")])
-        
-        if quantidade == 0:
-            if EXIBIR_LOGS: logger.info("⚠️ A fila de clonagem já está vazia.")
-            await callback.answer("A fila de clonagem já está vazia!", show_alert=True)
-            return
-            
-        if EXIBIR_LOGS: logger.info(f"📂 {quantidade} vídeos encontrados na fila. Solicitando confirmação...")
-            
-        markup_confirmacao = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="Aprovar ✅", callback_data="executar_forcar_clones"),
-                    InlineKeyboardButton(text="Cancelar ❌", callback_data="cancelar_operacao")
-                ]
-            ]
-        )
-        
-        await callback.message.edit_text(f"Você tem {quantidade} vídeos retidos na fila de clonagem.\nDeseja forçar o processamento imediato de todos?", reply_markup=markup_confirmacao)
-        
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila de clonagem: {e}")
-        await callback.answer("Erro ao acessar a fila de clonagem.", show_alert=True)
-
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Pausar Robô Moderador ⏸️", "Retomar Robô Moderador ▶️", "Ativar Robô Moderador ⚙️", "Desativar Robô Moderador 🛑"]))
 async def pedir_confirmacao_toggle(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
@@ -15650,7 +15552,7 @@ TEXTO_PAINEL_BUSCA = (
     "💰 <b>Mais barato</b> — para gastar pouco\n"
     "⭐ <b>Melhor avaliado</b> — para não errar\n"
     "🔥 <b>Maior desconto</b> — a pechincha da busca\n\n"
-    "Mostro preço, nota, quantidade vendida e a faixa de preço da busca inteira.\n"
+    "Mostro preço, nota, quantidade vendida e a faixa de preço das opções que separei.\n"
     "Quando o produto tem variação, aparece a faixa (ex: R$ 18,98 a R$ 23,98) — "
     "assim você não se surpreende ao abrir o link.\n\n"
     f"<b>Limite:</b> {BUSCA_LIMITE_DIARIO} buscas por dia, por pessoa. Zera à meia-noite.\n\n"
@@ -15678,7 +15580,7 @@ async def reenviar_painel_busca():
             )
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ [Painel Busca] Falha ao reenviar: {e}")
-            return
+            return False
 
         # Só apaga o anterior DEPOIS que o novo está no ar: nunca fica sem painel.
         registro = ler_config_bd("painel_busca_msg", {})
@@ -15696,6 +15598,7 @@ async def reenviar_painel_busca():
             if EXIBIR_LOGS: logger.warning(f"⚠️ [Painel Busca] Não consegui fixar: {e}")
 
         if EXIBIR_LOGS: logger.info(f"📌 [Painel Busca] Painel recriado no fim do tópico (ID {msg.message_id}).")
+        return True
 
 
 async def _esperar_e_reenviar_busca(segundos):
@@ -15833,39 +15736,18 @@ async def limpar_avisos_entrada(message: types.Message):
 
 @dp.message(Command("painelbusca"), StateFilter("*"))
 async def publicar_painel_busca(message: types.Message):
-    """Publica e fixa o texto de orientação no tópico do buscador."""
+    """Publica (ou recria no fim do tópico) o painel fixo do buscador."""
     if message.from_user.id != ADMIN_ID: return
 
     if not BUSCA_TOPICO_ID:
         await message.answer("⚠️ Defina o <code>BUSCA_TOPICO_ID</code> no código antes.", parse_mode="HTML")
         return
 
-    texto = (
-        "🔎 <b>Buscador de Produtos</b>\n\n"
-        "Escreva aqui o que você está procurando e eu vasculho a Shopee para você.\n\n"
-        "<b>Como funciona</b>\n"
-        "Mande só o nome do produto. Quanto mais específico, melhor o resultado:\n"
-        "• <code>fone bluetooth</code> → genérico demais\n"
-        "• <code>fone bluetooth com cancelamento de ruido</code> → bem melhor\n\n"
-        "<b>O que você recebe</b>\n"
-        "Três opções, porque nem todo mundo quer a mesma coisa:\n"
-        "💰 <b>Mais barato</b> — para gastar pouco\n"
-        "⭐ <b>Melhor avaliado</b> — para não errar\n"
-        "🔥 <b>Maior desconto</b> — a pechincha da busca\n\n"
-        "Mostro também a faixa de preço da busca inteira, para você ter noção do que é caro e do que é barato.\n\n"
-        f"<b>Limite:</b> {BUSCA_LIMITE_DIARIO} buscas por dia, por pessoa. Zera à meia-noite.\n\n"
-        "<i>Busco no catálogo da Shopee. Não é comparação com outras lojas — "
-        "é a melhor seleção dentro do que a Shopee tem para o seu termo.</i>"
-    )
-
-    alvo_topico = None if BUSCA_TOPICO_ID == 1 else BUSCA_TOPICO_ID
-    msg = await bot.send_message(BUSCA_GRUPO_ID, texto, parse_mode="HTML",
-                                 message_thread_id=alvo_topico, disable_web_page_preview=True)
-    try:
-        await bot.pin_chat_message(BUSCA_GRUPO_ID, msg.message_id, disable_notification=True)
-        await message.answer("✅ Painel do buscador publicado e fixado.")
-    except Exception as e:
-        await message.answer(f"⚠️ Publiquei, mas não consegui fixar: {e}")
+    # Mesmo painel do debounce, rastreado: ao recriar, o anterior é apagado.
+    if await reenviar_painel_busca():
+        await message.answer("✅ Painel do buscador publicado e fixado no fim do tópico.")
+    else:
+        await message.answer("⚠️ Não consegui publicar o painel do buscador. Veja o log.")
 
 
 @dp.message(F.chat.type.in_(["supergroup", "group"]), StateFilter(None))
@@ -16645,7 +16527,12 @@ async def monitor_saude():
             hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
             fila = ler_fila_clonagem().get("fila", [])
             postados_hoje = len([i for i in fila if i.get("processado") and str(i.get("data_postagem", "")).startswith(hoje)])
-            pendentes = len([i for i in fila if not i.get("processado")])
+            # Só os clones com horário até hoje: os de amanhã (D+1) não deviam ter saído.
+            pendentes = len([
+                i for i in fila
+                if not i.get("processado")
+                and i.get("horario_disparo") and i["horario_disparo"][:10] <= hoje
+            ])
             hora = datetime.now(fuso_horario).hour
             if hora >= 12 and postados_hoje == 0 and pendentes > 5 and not _ja_alertou("sem_postagem"):
                 alertas.append(f"🔇 <b>Nenhuma publicação hoje</b>\n{pendentes} vídeo(s) na fila e nada saiu até as {hora}h.")
