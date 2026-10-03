@@ -98,8 +98,12 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 
 ## Baixador
 
-- **03/10/2026, exceção:** o painel do tópico desce para ser sempre a última mensagem, mas não é fixado. Cada fixação deixava uma mensagem "fixou uma mensagem" acumulando no tópico.
+- ~~**03/10/2026, exceção:** o painel do tópico desce para ser sempre a última mensagem, mas não é fixado. Cada fixação deixava uma mensagem "fixou uma mensagem" acumulando no tópico.~~ Substituída em 03/10/2026: o mais novo fica fixado, e os antigos somem (abaixo).
 - **03/10/2026:** a função que expirava o cache de file_id foi removida. A falha de um file_id já é tratada: o vídeo é baixado de novo.
+- **03/10/2026:** no tópico ficam os vídeos entregues aos usuários, para sempre, e um painel só, o mais recente.
+  - O painel desce para o fim do tópico depois das entregas, e o mais novo fica fixado.
+  - Os painéis antigos e as mensagens "fixou uma mensagem" são apagados sozinhos pela conta principal (userbot, no `divulgacao_canal`), a cada 10 min. O Telegram só deixa bot apagar mensagem com menos de 48 h, por isso o bot não dava conta.
+  - A faxina de 3 dias do bot, que tentava apagar tudo (inclusive os vídeos) e nunca conseguia, saiu.
 
 ## Monitor, deploy e servidor
 
