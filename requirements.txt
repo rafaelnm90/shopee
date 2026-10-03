@@ -45,3 +45,4 @@ yarl==1.23.0
 telethon
 matplotlib
 google-genai
+pandas
