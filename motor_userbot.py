@@ -51,8 +51,11 @@ def limpar_travas_fantasma(nome_sessao):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ [Auto-cura] Falha ao tentar remover trava {arquivo}: {e}")
 
-# Limpa resíduos de base de dados trancada antes de iniciar
-limpar_travas_fantasma('sessao_espiao')
+# Só quando este arquivo roda como serviço, antes de o TelegramClient abrir a sessão.
+# O bot_mestre também importa este módulo (via painel_espelhos) e não pode apagar a
+# trava de uma sessão que o serviço motor_userbot está usando naquele momento.
+if __name__ == "__main__":
+    limpar_travas_fantasma('sessao_espiao')
 
 # ==========================================================================
 # 👤 CONTAS QUE OPERAM NESTE ROBÔ
@@ -1370,28 +1373,30 @@ async def monitorar_topicos_submissao():
                 continue
 
             for grupo_id in grupos_alvo:
-                entidade = await client.get_entity(int(grupo_id))
+                try:
+                    entidade = await client.get_entity(int(grupo_id) if grupo_id.lstrip('-').isdigit() else grupo_id)
+                    argumentos = {
+                        _param_peer: entidade,
+                        "offset_date": None,
+                        "offset_id": 0,
+                        "offset_topic": 0,
+                        "limit": 100,
+                    }
+                    resultado = await client(GetForumTopicsRequest(**argumentos))
 
-            argumentos = {
-                _param_peer: entidade,
-                "offset_date": None,
-                "offset_id": 0,
-                "offset_topic": 0,
-                "limit": 100,
-            }
-            resultado = await client(GetForumTopicsRequest(**argumentos))
+                    total = 0
+                    for topico in getattr(resultado, 'topics', []):
+                        topico_id = getattr(topico, 'id', None)
+                        titulo = getattr(topico, 'title', None)
+                        if topico_id is None or not titulo:
+                            continue
+                        salvar_nome_grupo(f"{grupo_id}_{topico_id}", titulo)
+                        total += 1
 
-            total = 0
-            for topico in getattr(resultado, 'topics', []):
-                topico_id = getattr(topico, 'id', None)
-                titulo = getattr(topico, 'title', None)
-                if topico_id is None or not titulo:
-                    continue
-                salvar_nome_grupo(f"{grupo_id}_{topico_id}", titulo)
-                total += 1
-
-                if EXIBIR_LOGS and total:
-                    logger.info(f"🏷️ [Tópicos] {total} nomes sincronizados do grupo {grupo_id}.")
+                    if EXIBIR_LOGS and total:
+                        logger.info(f"🏷️ [Tópicos] {total} nomes sincronizados do grupo {grupo_id}.")
+                except Exception as e:
+                    if EXIBIR_LOGS: logger.warning(f"⚠️ [Tópicos] Falha ao sincronizar os tópicos do grupo {grupo_id}: {e}")
 
                 await asyncio.sleep(3)   # respiro entre fóruns
 
