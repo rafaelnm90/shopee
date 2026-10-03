@@ -120,7 +120,13 @@ python3 -m pytest tests -q        # ~1 min; sem .env e sem rede
 - PR, rodadas e merge: merge na `main` é deploy em produção.
   - Mudança pronta e validada: abrir o PR, acompanhar e fazer o merge sem perguntar.
   - Antes do merge, o CI do PR precisa passar 5 vezes seguidas no mesmo commit, rodando de novo o workflow "Validar código".
-  - Entre o fim de uma rodada e o início da próxima, esperar 5 minutos.
+  - Entre o fim de uma rodada e o início da próxima, esperar 5 minutos. O Rafael pode mudar esse intervalo para o PR em andamento (ex.: "intervalo de 2 min"); no PR seguinte volta aos 5 minutos.
+  - Todo aviso sobre as rodadas mostra, numa tabela curta:
+    - a posição (ex.: ✅✅✅⏳⬜ rodada 4 de 5);
+    - o horário de Brasília em que a próxima rodada começa;
+    - a previsão do merge e do fim do deploy;
+    - quanto durou a última rodada e o commit testado;
+    - o intervalo atual, lembrando que dá para mudar.
   - Se uma rodada falhar, investigar e corrigir; a contagem volta a zero.
   - Depois do merge, acompanhar o deploy até os 5 serviços aparecerem ativos e avisar o Rafael.
   - Se o Rafael disser para não fazer o merge, não fazer.
