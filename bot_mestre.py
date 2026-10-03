@@ -55,6 +55,7 @@ import painel_espelhos
 import painel_notas
 import pool_contas  # contas dos userbots (quem espelha, quem reposta)
 import blacklist_captura  # de quem os userbots nunca capturam
+import alvos_sem_acesso  # alvos da divulgação a que a conta perdeu o acesso
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo, salvar_json_atomico
 
 logger = configurar_logs(__name__)
@@ -12579,6 +12580,92 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
     await state.clear()
 
 # --- SPAM em Grupos (divulgação pelo userbot) ---
+# Alvo a que a conta perdeu o acesso: o divulgacao_canal pausa (alvos_sem_acesso.py)
+# e aqui ficam o aviso no privado, a marca nos três painéis de SPAM e o botão de
+# reativar. Decisão do Rafael: DECISOES.md, Divulgação.
+def _alvos_cadastrados_divulgacao():
+    """Todos os alvos dos quatro escopos de SPAM."""
+    chaves = ["alvos_divulgacao", "alvos_divulgacao_viral"]
+    chaves += [c["chave"] for c in ESCOPOS_DIVULGACAO_PAINEL.values()]
+    alvos = set()
+    for chave in chaves:
+        alvos.update(str(a) for a in (db.ler_config(chave, {}) or {}).get("alvos", []))
+    return alvos
+
+def linha_sem_acesso(alvo, sem_acesso):
+    """Linha a mais do alvo no painel de SPAM quando ele está pausado por falta de acesso."""
+    info = sem_acesso.get(str(alvo))
+    if not info:
+        return ""
+    desde = info.get("desde", "")
+    try:
+        desde = datetime.strptime(desde, "%Y-%m-%d %H:%M:%S").strftime("%d/%m %H:%M")
+    except ValueError:
+        pass
+    return f"   🔒 Sem acesso desde {desde}: pausado\n"
+
+def teclado_reativar_alvos(alvos):
+    """Um botão 🔓 por alvo pausado."""
+    cache_nomes = ler_cache_nomes_grupos()
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"🔓 Reativar {formatar_nome_alvo(alvo, cache_nomes)}"[:60],
+                              callback_data=f"reat_alvo:{alvos_sem_acesso.codigo(alvo)}")]
+        for alvo in alvos
+    ])
+
+async def oferecer_reativacao(message: types.Message, alvos, sem_acesso):
+    """Depois do painel de SPAM: botões para reativar os alvos dele que estão pausados."""
+    pausados = [alvo for alvo in alvos if str(alvo) in sem_acesso]
+    if pausados:
+        await message.answer("🔒 <b>Alvos pausados por falta de acesso</b>\n"
+                             "Quando a conta voltar ao grupo, toque para reativar:",
+                             parse_mode="HTML", reply_markup=teclado_reativar_alvos(pausados))
+
+async def avisar_alvos_sem_acesso():
+    """De 2 em 2 min: avisa uma vez no privado os alvos que o divulgacao_canal pausou."""
+    try:
+        alvos_sem_acesso.esquecer_fora_da_lista(_alvos_cadastrados_divulgacao())
+        pendentes = list(alvos_sem_acesso.pendentes_de_aviso())
+        if not pendentes:
+            return
+        import html
+        cache_nomes = ler_cache_nomes_grupos()
+        linhas = [f"• <b>{html.escape(formatar_nome_alvo(alvo, cache_nomes))}</b> (<code>{html.escape(alvo)}</code>)"
+                  for alvo in pendentes]
+        texto = ("🔒 <b>Divulgação: a conta perdeu o acesso</b>\n\n" + "\n".join(linhas) +
+                 "\n\nA conta foi removida, banida ou o grupo ficou privado. Parei os envios "
+                 "para esses alvos. Quando a conta voltar ao grupo, toque para reativar "
+                 "(também dá pelos painéis de SPAM).")
+        await bot.send_message(ADMIN_ID, texto, parse_mode="HTML", reply_markup=teclado_reativar_alvos(pendentes))
+        alvos_sem_acesso.marcar_avisados(pendentes)
+        logger.warning(f"🔒 [Divulgação] Aviso de {len(pendentes)} alvo(s) sem acesso enviado ao admin.")
+    except Exception as e:
+        logger.error(f"❌ [Divulgação] Falha ao avisar os alvos sem acesso: {e}")
+
+@dp.callback_query(F.data.startswith("reat_alvo:"), StateFilter("*"))
+async def reativar_alvo_divulgacao(callback: types.CallbackQuery):
+    """Botão 🔓: o alvo volta a receber a partir da próxima hora cheia."""
+    if callback.from_user.id != ADMIN_ID: return
+    alvo = alvos_sem_acesso.alvo_do_codigo(callback.data.split(":", 1)[1])
+    if alvo and alvos_sem_acesso.reativar(alvo):
+        logger.info(f"🔓 [Divulgação] {alvo} reativado pelo admin.")
+        await callback.answer("🔓 Reativado. Volta a receber a partir da próxima hora cheia.", show_alert=True)
+    else:
+        await callback.answer("Esse alvo já está ativo.")
+
+    # Some o botão dos alvos que já estão ativos.
+    ainda_pausados = {alvos_sem_acesso.codigo(a) for a in alvos_sem_acesso.ler()}
+    # Mensagem antiga demais chega sem os botões (InaccessibleMessage).
+    marcacao = getattr(callback.message, "reply_markup", None)
+    teclado = marcacao.inline_keyboard if marcacao else []
+    linhas = [linha for linha in teclado
+              if linha and str(linha[0].callback_data).split(":", 1)[-1] in ainda_pausados]
+    try:
+        await callback.message.edit_reply_markup(
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=linhas) if linhas else None)
+    except Exception:
+        pass
+
 def ler_alvos_divulgacao():
     """Config do SPAM principal; completa repetições e réplicas que faltarem."""
     padrao = {"alvos": [], "frequencia_por_hora": 0, "pausado": False, "forcar_disparo": False, "repeticoes_internas": 6, "replicas_mensagem": 5}
@@ -12611,6 +12698,7 @@ async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
     rep_msg_g = dados.get("replicas_mensagem", 5)
     status_pausa = "⏸️ Pausado" if dados.get("pausado") else "▶️ Rodando"
     config_alvos = dados.get("config_alvos", {})
+    sem_acesso = alvos_sem_acesso.ler()
 
     texto = f"📊 <b>Status da Divulgação</b> [{status_pausa}]\n\n"
     texto += "🌍 <b>Padrão Global:</b>\n"
@@ -12627,6 +12715,7 @@ async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
             marcador = " (Personalizado)" if conf else ""
             texto += f"{i}. {alvo}{marcador}\n"
             texto += f"   └ Freq: {f_a}/h | Rep: {ri_a}x | Rép: {rm_a}x\n"
+            texto += linha_sem_acesso(alvo, sem_acesso)
     else:
         texto += "Nenhum alvo cadastrado no momento.\n"
         
@@ -12642,6 +12731,7 @@ async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
     )
         
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado_dinamico_spam)
+    await oferecer_reativacao(message, alvos, sem_acesso)
     await state.set_state(ConfigDivulgacao.menu_principal)
 
 @dp.message(ConfigDivulgacao.menu_principal, F.text == "Adicionar Alvo ➕")
@@ -12885,6 +12975,7 @@ async def gerenciar_divulgacao_viral(message: types.Message, state: FSMContext):
     rep_msg_g = dados.get("replicas_mensagem", 5)
     status_pausa = "⏸️ Pausado" if dados.get("pausado") else "▶️ Rodando"
     config_alvos = dados.get("config_alvos", {})
+    sem_acesso = alvos_sem_acesso.ler()
 
     texto = f"📊 <b>Status da Divulgação do Viral</b> [{status_pausa}]\n\n"
     texto += "🌍 <b>Padrão Global:</b>\n"
@@ -12901,6 +12992,7 @@ async def gerenciar_divulgacao_viral(message: types.Message, state: FSMContext):
             marcador = " (Personalizado)" if conf else ""
             texto += f"{i}. {alvo}{marcador}\n"
             texto += f"   └ Freq: {f_a}/h | Rep: {ri_a}x | Rép: {rm_a}x\n"
+            texto += linha_sem_acesso(alvo, sem_acesso)
     else:
         texto += "Nenhum alvo cadastrado no momento.\n"
         
@@ -12916,6 +13008,7 @@ async def gerenciar_divulgacao_viral(message: types.Message, state: FSMContext):
     )
         
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado_dinamico_spam_viral)
+    await oferecer_reativacao(message, alvos, sem_acesso)
     await state.set_state(ConfigDivulgacaoViral.menu_principal)
 
 @dp.message(ConfigDivulgacaoViral.menu_principal, F.text == "Adicionar Alvo Viral ➕")
@@ -13179,6 +13272,7 @@ async def renderizar_painel_divulgacao(message: types.Message, state: FSMContext
     rep_msg_g = dados.get("replicas_mensagem", 1)
     status_pausa = "⏸️ Pausado" if dados.get("pausado") else "▶️ Rodando"
     config_alvos = dados.get("config_alvos", {})
+    sem_acesso = alvos_sem_acesso.ler()
 
     # Volume por disparo = réplicas x repetições, mostrado na tela.
     volume = rep_msg_g * rep_int_g
@@ -13199,6 +13293,7 @@ async def renderizar_painel_divulgacao(message: types.Message, state: FSMContext
             marcador = " (Personalizado)" if c else ""
             texto += f"{i}. {alvo}{marcador}\n"
             texto += f"   └ Freq: {f_a}/h | Rep: {ri_a}x | Rép: {rm_a}x\n"
+            texto += linha_sem_acesso(alvo, sem_acesso)
     else:
         texto += "Nenhum alvo cadastrado no momento.\n"
 
@@ -13214,6 +13309,7 @@ async def renderizar_painel_divulgacao(message: types.Message, state: FSMContext
     )
 
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
+    await oferecer_reativacao(message, alvos, sem_acesso)
     await state.set_state(ConfigDivulgacaoEscopo.menu_principal)
     await state.update_data(escopo_div=escopo)
 
@@ -16996,6 +17092,9 @@ async def main():
 
     # Contas dos Autorais: avisa no privado quando uma conta para ou volta na função dela
     scheduler.add_job(verificar_saude_contas, 'interval', minutes=2, id='saude_contas_loop', replace_existing=True)
+
+    # Divulgação: avisa no privado o alvo que o userbot pausou por falta de acesso
+    scheduler.add_job(avisar_alvos_sem_acesso, 'interval', minutes=2, id='alvos_sem_acesso_loop', replace_existing=True)
 
     # Motor de publicação dos parceiros
     scheduler.add_job(motor_parceiros_step, 'interval', minutes=2, id='motor_parceiros_loop', replace_existing=True)

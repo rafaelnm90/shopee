@@ -95,6 +95,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 
 - **03/10/2026:** se o robô reinicia no meio da hora, completa só os envios que faltam naquela hora, sempre respeitando os 15 min entre envios.
 - **03/10/2026:** o "Adicionar Alvo" do SPAM do canal principal valida o alvo como os outros painéis (link t.me, Telegram Web ou @ viram ID).
+- **03/10/2026:** quando a conta perde o acesso a um alvo (foi removida, banida ou o grupo ficou privado), o robô pausa o alvo e avisa: para de enviar para ele em todos os escopos, marca "sem acesso" nos painéis de SPAM e manda um aviso só no privado, com o botão 🔓 para reativar (que também aparece nos painéis). Isso não vai mais para o registro de erros. Alvo excluído de todos os painéis perde a marca: se voltar, volta ativo.
 
 ## Baixador
 

@@ -18,7 +18,8 @@ import random
 from datetime import datetime, timedelta
 import re
 from telethon import TelegramClient
-from telethon.errors import FloodWaitError, PeerFloodError, ChatWriteForbiddenError, UserBannedInChannelError
+from telethon.errors import (FloodWaitError, PeerFloodError, ChatWriteForbiddenError, UserBannedInChannelError,
+                             ChannelPrivateError)
 from telethon.tl.functions.messages import GetForumTopicsRequest
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from dotenv import load_dotenv
@@ -26,6 +27,7 @@ load_dotenv()
 from utils import registrar_erro_json, salvar_nome_grupo
 
 from api_gemini import gerar_texto_gemini
+import alvos_sem_acesso
 import faxina_baixador
 
 # Importar fuso já trava o processo no horário de Brasília.
@@ -232,7 +234,8 @@ async def enviar_mensagem(escopo, alvo):
 
     FloodWait para todos os escopos pelo tempo pedido pelo Telegram + 30 s.
     PeerFlood (conta marcada como spam) para tudo por 1 hora. Alvo sem permissão
-    de escrita é só pulado.
+    de escrita é só pulado. Alvo a que a conta perdeu o acesso fica pausado até o
+    Rafael reativar no painel (alvos_sem_acesso.py).
     """
     global bloqueio_flood_ate
     conf = ESCOPOS[escopo]
@@ -246,6 +249,12 @@ async def enviar_mensagem(escopo, alvo):
     config = carregar_config_escopo(escopo)
     if config and config.get("pausado", False):
         logger.warning(f"🛑 [{rotulo}] Disparo cancelado: escopo pausado no momento.")
+        return
+
+    # Antes de pedir o texto à IA: envio já agendado ou disparo forçado para um
+    # alvo que acabou de ser pausado não gasta cota.
+    if str(alvo) in alvos_sem_acesso.ler():
+        logger.info(f"🔒 [{rotulo}] {alvo} pausado por falta de acesso; envio pulado.")
         return
 
     config_alvos = config.get("config_alvos", {}) if config else {}
@@ -287,6 +296,12 @@ async def enviar_mensagem(escopo, alvo):
 
     except (ChatWriteForbiddenError, UserBannedInChannelError):
         logger.warning(f"🚫 [{rotulo}] Sem permissão de escrita em {alvo} (restrito, silenciado ou banido). Omitindo.")
+
+    except ChannelPrivateError:
+        # A conta saiu do grupo, foi banida ou o grupo ficou privado: insistir só
+        # lotava o registro de erros. Para o alvo e o bot_mestre avisa no privado.
+        if alvos_sem_acesso.marcar(alvo, "ChannelPrivateError"):
+            logger.warning(f"🔒 [{rotulo}] Sem acesso a {alvo}: alvo pausado até reativar no painel.")
 
     except Exception as e:
         erro_str = str(e).lower()
@@ -408,7 +423,10 @@ def programar_envios_da_hora():
         if not config or not config.get("alvos") or config.get("pausado", False):
             continue
 
-        alvos = config["alvos"]
+        sem_acesso = alvos_sem_acesso.ler()
+        alvos = [a for a in config["alvos"] if str(a) not in sem_acesso]
+        if len(alvos) < len(config["alvos"]):
+            logger.info(f"🔒 [{rotulo}] {len(config['alvos']) - len(alvos)} alvo(s) sem acesso ficam de fora até reativar no painel.")
         freq_global = config.get("frequencia_por_hora", 0)
         config_alvos = config.get("config_alvos", {})
 
