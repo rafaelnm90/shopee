@@ -15,45 +15,43 @@
 #
 #       "Qual conta é a responsável pela função X agora?"
 #
-# Quem captura/reposta continua sendo o espelhador_videos_autorais.py. O plano é
-# ele deixar a sessão fixa escrita no código (NOME_SESSAO =
-# 'sessao_espelhador_isolado') e PERGUNTAR aqui quem está de plantão.
+# Quem captura/reposta é o espelhador_videos_autorais.py: ele pergunta aqui quem
+# está em cada posto, conecta essas contas e, de 10 em 10 minutos, checa todas as
+# contas no Telegram (sincronizar_pool) e troca as que mudaram. Sem nenhuma conta
+# cadastrada, ele usa a sessão fixa antiga (sessao_espelhador_isolado).
 #
-# SITUAÇÃO ATUAL: essa integração está PENDENTE. O espelhador ainda usa a sessão
-# fixa e não consulta o plantão. Hoje o pool é usado pela blacklist_captura (marca
-# as contas próprias e busca nomes com elas) e pelo painel "Contas e Postos" do
-# bot_mestre, que mostra e ajusta os postos.
+# O ✅/❌ de cada conta na sua função sai de avaliar_saude(): sessão viva, conta no
+# grupo e último envio sem erro (o robô registra cada envio em atividade_contas).
+# O painel "Contas 👥" do bot_mestre mostra isso e o bot avisa no privado quando muda.
 #
 # ─── AS DUAS FUNÇÕES (POSTOS DE TRABALHO) ────────────────────────────────────
-#   • "espelho"     → a conta que fica DENTRO do grupo dos Autorais capturando
-#                     os vídeos e publicando no canal "Vídeos Autorais Afiliados".
-#   • "repostagem"  → a conta que devolve o vídeo ao grupo de origem no D+X.
+#   • "espelho" (captura) → UMA conta, que fica DENTRO do grupo dos Autorais
+#                     capturando os vídeos e publicando no canal "Vídeos Autorais
+#                     Afiliados" (e baixa os do Grupo Público e vigia os parceiros).
+#   • "repostagem"  → RODÍZIO: todas as contas aptas, menos a da captura, devolvem
+#                     os vídeos ao grupo de origem no D+X, cada vídeo por uma.
 #
-# Uma função é um POSTO, não uma conta. O posto existe sempre; quem o ocupa
-# muda conforme as contas entram e saem do grupo.
+# A captura nunca reposta: postar no grupo dos outros é o que arrisca expulsão, e
+# assim a captura fica protegida. Sem conta de repostagem, a repostagem para (os
+# vídeos esperam na fila) e o bot avisa.
 #
 # ─── A REGRA DE REVEZAMENTO (o coração deste arquivo) ────────────────────────
-# Roda em resolver_funcoes(). Foi escrita para reproduzir exatamente o cenário
-# que o Rafael descreveu, com 5 contas:
+# Roda em resolver_funcoes(). Exemplo com 5 contas:
 #
-#   1. Conta 1 espelha, conta 2 reposta.                → dois postos ocupados
-#   2. Conta 2 sai do grupo; conta 3 entra.             → conta 3 assume a
-#                                                          repostagem sozinha
-#   3. Conta 4 entra depois.                            → fica de RESERVA, não
-#                                                          faz nada, porque
-#                                                          nenhum posto vagou
-#   4. Todas saem; só a conta 5 fica no grupo.          → a conta 5 acumula os
-#                                                          DOIS postos
+#   1. Conta 1 captura, conta 2 reposta.
+#   2. Conta 2 sai do grupo; conta 3 entra.             → a 3 entra no rodízio
+#   3. Conta 4 entra depois.                            → rodízio com a 3 e a 4
+#   4. Todas saem; só a conta 5 fica no grupo.          → a 5 captura e a
+#                                                          repostagem fica parada
 #
-# Em uma frase: posto vago é preenchido na hora pela melhor conta livre; se não
-# houver conta livre, uma conta que já trabalha acumula; se não houver conta
-# nenhuma apta, o posto fica VAGO e o robô daquela função simplesmente não roda
-# (em vez de quebrar com sessão inválida).
+# Captura: quem está no posto e continua apta nunca é trocada. Posto vago vai
+# primeiro para uma conta que não reposta (reserva da captura), depois pela
+# coluna 'prioridade' e por quem cadastrou antes; sem reserva, uma conta do rodízio
+# passa para a captura. Sem conta apta, o posto fica VAGO e a captura para (em vez
+# de quebrar com sessão inválida).
 #
-# Ordem de escolha do substituto:
-#   (1) contas que não estão ocupando nenhum outro posto  → espalha o trabalho
-#   (2) menor valor da coluna 'prioridade'                → preferência manual
-#   (3) menor id                                          → quem cadastrou antes
+# Para uma conta só repostar (nunca capturar), bloqueie "Captura" nela no painel;
+# para só capturar, bloqueie "Repostagem".
 #
 # ─── OS ESTADOS QUE UMA CONTA PODE TER ───────────────────────────────────────
 # Duas dimensões independentes, propositalmente separadas:
@@ -110,9 +108,15 @@
 #     # cliente Telethon já montado e conectado com a sessão certa
 #     cliente = await pool_contas.criar_cliente_da_funcao("espelho")
 #
-#     # rotina periódica (a ideia é rodar de 10 em 10 minutos; hoje só roda
-#     # pelo botão de sincronizar do painel)
-#     await pool_contas.sincronizar_pool()
+#     # as contas do rodízio da repostagem
+#     contas = pool_contas.obter_contas_repostagem()
+#
+#     # rotina periódica (o robô dos Autorais roda de 10 em 10 minutos, passando
+#     # os clientes que já tem conectados; o painel também tem o botão)
+#     await pool_contas.sincronizar_pool(clientes={conta_id: cliente})
+#
+#     # resultado de cada envio, para o ✅/❌ do relatório
+#     pool_contas.registrar_atividade(conta_id, "repostagem", ok=True)
 #
 # ─── LINHA DE COMANDO ────────────────────────────────────────────────────────
 #     python3 pool_contas.py login             # loga uma conta nova e cadastra
@@ -133,9 +137,9 @@
 # ─── O QUE ESTE ARQUIVO NÃO FAZ (de propósito) ───────────────────────────────
 #   • Não entra em grupo sozinho sem o link estar configurado.
 #   • Não cria conta de Telegram, não resolve captcha, não burla nada.
-#   • Não mexe em nenhuma tabela além das três dele (contas_telegram,
-#     funcoes_contas, historico_contas) e de duas chaves da 'configuracoes'
-#     (o sal da criptografia e o link de convite).
+#   • Não mexe em nenhuma tabela além das quatro dele (contas_telegram,
+#     funcoes_contas, historico_contas, atividade_contas) e de duas chaves da
+#     'configuracoes' (o sal da criptografia e o link de convite).
 #   • Não reinicia serviço. Trocou o plantonista? Ele grava no banco e avisa no
 #     log; quem lê o plantão é o serviço, na próxima vez que precisar.
 #
@@ -397,6 +401,27 @@ def inicializar_tabelas():
             detalhe TEXT
         )
     ''')
+
+    # 4) O que cada conta fez em cada função: última ação ok e último erro. É daqui
+    #    que sai o ✅/❌ do relatório ("a conta está funcionando na função dela?").
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS atividade_contas (
+            conta_id INTEGER,
+            funcao TEXT,
+            ultimo_ok TEXT,
+            ultimo_erro TEXT,
+            erro_em TEXT,
+            total_ok INTEGER DEFAULT 0,
+            PRIMARY KEY (conta_id, funcao)
+        )
+    ''')
+
+    # A repostagem é um rodízio: a linha dela guarda a lista inteira em contas_ids
+    # (conta_id fica com a primeira, para quem ainda lê um plantonista só).
+    try:
+        cursor.execute("ALTER TABLE funcoes_contas ADD COLUMN contas_ids TEXT")
+    except sqlite3.OperationalError:
+        pass  # coluna já existe
 
     # Garante que as duas linhas de função existem desde o começo (vagas).
     for funcao in FUNCOES:
@@ -807,6 +832,14 @@ def atribuir_funcao(apelido, funcao):
     if not conta_apta(conta, funcao):
         return (False, _motivo_inaptidao(conta, funcao))
 
+    if funcao == FUNCAO_REPOSTAGEM:
+        # Na repostagem não há titular: toda conta apta já está no rodízio. A única
+        # que fica fora é a da captura, de propósito.
+        if ler_ocupacao().get(FUNCAO_ESPELHO) == conta["id"]:
+            return (False, "é a conta da captura, que não reposta")
+        aplicar_funcoes()
+        return (True, "")
+
     anterior = obter_conta_da_funcao(funcao)
     conexao = _obter_conexao()
     cursor = conexao.cursor()
@@ -825,37 +858,183 @@ def atribuir_funcao(apelido, funcao):
     return (True, "")
 
 
+# =============================================================================
+# ATIVIDADE E SAÚDE: "a conta está funcionando na função dela?"
+# =============================================================================
+# Quem trabalha (o robô dos Autorais) registra cada envio aqui: ok ou erro. O
+# relatório e os avisos do bot_mestre só leem. Uma conta está ✅ quando a sessão
+# está viva, ela está no grupo e o último envio da função não falhou.
+
+# Sem checagem há mais que isto, o robô dos Autorais provavelmente está parado
+# (ele checa as contas de 10 em 10 minutos).
+MINUTOS_CHECAGEM_ATRASADA = 30
+
+ROTULOS_FUNCAO = {FUNCAO_ESPELHO: "🪞 Captura", FUNCAO_REPOSTAGEM: "♻️ Repostagem"}
+
+
+def registrar_atividade(conta_id, funcao, ok, detalhe=""):
+    """Grava o resultado de um envio da conta na função (ok ou erro com o motivo)."""
+    if not conta_id:
+        return
+    try:
+        inicializar_tabelas()
+        conexao = _obter_conexao()
+        cursor = conexao.cursor()
+        cursor.execute(
+            "INSERT OR IGNORE INTO atividade_contas (conta_id, funcao, total_ok) VALUES (?, ?, 0)",
+            (conta_id, funcao),
+        )
+        if ok:
+            cursor.execute(
+                "UPDATE atividade_contas SET ultimo_ok = ?, total_ok = total_ok + 1 "
+                "WHERE conta_id = ? AND funcao = ?",
+                (_agora(), conta_id, funcao),
+            )
+        else:
+            cursor.execute(
+                "UPDATE atividade_contas SET ultimo_erro = ?, erro_em = ? "
+                "WHERE conta_id = ? AND funcao = ?",
+                (str(detalhe)[:200], _agora(), conta_id, funcao),
+            )
+        conexao.commit()
+        conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS:
+            logger.error(f"❌ [Pool] Falha ao registrar atividade: {e}")
+
+
+def ler_atividade():
+    """{(conta_id, funcao): {ultimo_ok, ultimo_erro, erro_em, total_ok}}"""
+    inicializar_tabelas()
+    conexao = _obter_conexao()
+    cursor = conexao.cursor()
+    cursor.execute("SELECT * FROM atividade_contas")
+    dados = {(linha["conta_id"], linha["funcao"]): dict(linha) for linha in cursor.fetchall()}
+    conexao.close()
+    return dados
+
+
+def _tempo_legivel(minutos):
+    """12 → 'há 12 min'; 150 → 'há 2 h'; 3000 → 'há 2 dias'."""
+    if minutos < 120:
+        return f"há {minutos} min"
+    if minutos < 48 * 60:
+        return f"há {minutos // 60} h"
+    return f"há {minutos // (24 * 60)} dias"
+
+
+def _data_curta(texto):
+    """'2026-10-03 14:32:10' → '03/10 14:32'."""
+    try:
+        return datetime.strptime(texto, "%Y-%m-%d %H:%M:%S").strftime("%d/%m %H:%M")
+    except (TypeError, ValueError):
+        return texto or "?"
+
+
+def avaliar_saude(contas, ocupacao, atividade, agora=None):
+    """
+    Estado de cada posto, sem tocar em banco nem rede (testável no autoteste).
+
+    Devolve {"postos": [...], "checagem_atrasada_min": int|None}. Cada item de
+    postos: {"chave", "funcao", "conta_id", "apelido", "ok", "motivo"}; conta_id
+    None é o posto sem ninguém (captura vaga ou rodízio vazio).
+    """
+    if agora is None:
+        agora = datetime.now(fuso_horario).replace(tzinfo=None)
+    por_id = {c["id"]: c for c in contas}
+    postos = []
+
+    def avaliar(funcao, conta):
+        reg = atividade.get((conta["id"], funcao)) or {}
+        ultimo_ok, erro_em = reg.get("ultimo_ok"), reg.get("erro_em")
+        if conta.get("status_sessao") != SESSAO_OK:
+            return False, _motivo_inaptidao(conta, funcao)
+        if conta.get("status_grupo") != STATUS_NO_GRUPO or not conta.get("habilitada", 1):
+            return False, _motivo_inaptidao(conta, funcao)
+        if erro_em and (not ultimo_ok or erro_em > ultimo_ok):
+            return False, f"último envio falhou ({_data_curta(erro_em)}): {reg.get('ultimo_erro') or '?'}"
+        if ultimo_ok:
+            return True, f"último envio ok {_data_curta(ultimo_ok)}"
+        return True, "sem envio ainda"
+
+    trabalhando = [(FUNCAO_ESPELHO, i) for i in _lista_ids(ocupacao.get(FUNCAO_ESPELHO))]
+    trabalhando += [(FUNCAO_REPOSTAGEM, i) for i in _lista_ids(ocupacao.get(FUNCAO_REPOSTAGEM))]
+    for funcao, conta_id in trabalhando:
+        conta = por_id.get(conta_id)
+        if conta is None:
+            continue
+        ok, motivo = avaliar(funcao, conta)
+        postos.append({"chave": f"{funcao}:{conta_id}", "funcao": funcao, "conta_id": conta_id,
+                       "apelido": conta["apelido"], "ok": ok, "motivo": motivo})
+
+    for funcao, vazio in ((FUNCAO_ESPELHO, "nenhuma conta apta: a captura está parada"),
+                          (FUNCAO_REPOSTAGEM, "nenhuma conta no rodízio: a repostagem está parada")):
+        if contas and not any(p["funcao"] == funcao for p in postos):
+            postos.append({"chave": f"{funcao}:vago", "funcao": funcao, "conta_id": None,
+                           "apelido": None, "ok": False, "motivo": vazio})
+
+    atrasada = None
+    checagens = [c.get("ultima_checagem") for c in contas if c.get("ultima_checagem")]
+    if contas:
+        try:
+            ultima = datetime.strptime(max(checagens), "%Y-%m-%d %H:%M:%S") if checagens else None
+        except ValueError:
+            ultima = None
+        minutos = int((agora - ultima).total_seconds() // 60) if ultima else None
+        if minutos is None or minutos > MINUTOS_CHECAGEM_ATRASADA:
+            atrasada = minutos if minutos is not None else -1
+    return {"postos": postos, "checagem_atrasada_min": atrasada}
+
+
+def motivo_saida(conta_id, funcao, ocupacao=None):
+    """Por que a conta não está mais no posto (texto para o aviso do bot_mestre)."""
+    conta = obter_conta(conta_id)
+    if not conta:
+        return "conta removida do cadastro"
+    postos = postos_da_conta(conta_id, ocupacao)
+    if funcao == FUNCAO_REPOSTAGEM and FUNCAO_ESPELHO in postos:
+        return "passou para a captura"
+    if not conta_apta(conta, funcao):
+        return _motivo_inaptidao(conta, funcao)
+    return "outra conta assumiu o posto"
+
+
 def montar_relatorio_telegram():
     """
-    Mesma listagem do terminal, em HTML curto para caber numa mensagem.
+    Relatório do painel: ✅/❌ de cada conta na função dela e, abaixo, todas as
+    contas do pool.
 
     Enxuto de propósito: mensagem do Telegram estoura em 4096 caracteres, e este
     painel cresce a cada conta nova. Com 20 contas ainda cabe.
     """
     contas = listar_contas()
     ocupacao = ler_ocupacao()
-    postos = {}
-    for funcao, conta_id in ocupacao.items():
-        postos.setdefault(conta_id, []).append(funcao)
+    saude = avaliar_saude(contas, ocupacao, ler_atividade())
 
     linhas = ["👥 <b>Contas e Postos</b>", ""]
-    for funcao in FUNCOES:
-        conta = obter_conta_da_funcao(funcao)
-        alvo = f"<b>{conta['apelido']}</b>" if conta else "<i>⚠️ VAGO</i>"
-        rotulo = "🪞 Espelho" if funcao == FUNCAO_ESPELHO else "♻️ Repostagem"
-        linhas.append(f"{rotulo}: {alvo}")
-
     if not contas:
-        linhas.append("")
-        linhas.append("<i>Nenhuma conta cadastrada ainda.</i>")
-        linhas.append("<i>No servidor: python3 pool_contas.py importar-sessoes</i>")
+        linhas.append("<i>Nenhuma conta cadastrada ainda: o robô dos Autorais usa a sessão fixa.</i>")
+        linhas.append("<i>No servidor: python3 pool_contas.py login (ou importar-sessoes)</i>")
         return "\n".join(linhas)
 
-    linhas.append("")
+    for funcao in FUNCOES:
+        linhas.append(f"<b>{ROTULOS_FUNCAO[funcao]}</b>")
+        for p in (p for p in saude["postos"] if p["funcao"] == funcao):
+            icone = "✅" if p["ok"] else "❌"
+            nome = f"<b>{p['apelido']}</b> · " if p["apelido"] else ""
+            linhas.append(f"{icone} {nome}<i>{p['motivo']}</i>")
+        linhas.append("")
+    if saude["checagem_atrasada_min"] is not None:
+        quando = ("nunca" if saude["checagem_atrasada_min"] < 0
+                  else _tempo_legivel(saude["checagem_atrasada_min"]))
+        linhas.append(f"⚠️ <i>Contas checadas pela última vez: {quando}. O robô dos Autorais "
+                      f"checa de 10 em 10 min; se isto não mudar, ele está parado.</i>")
+        linhas.append("")
+
     linhas.append("━━━━━━━━━━━━━━━━")
     for c in contas:
         icone = ICONES_GRUPO.get(c["status_grupo"], "❓")
-        trabalho = postos.get(c["id"], [])
+        trabalho = postos_da_conta(c["id"], ocupacao)
         if trabalho:
             papel = "🎯 " + " + ".join(trabalho)
         elif conta_apta(c, FUNCAO_ESPELHO) or conta_apta(c, FUNCAO_REPOSTAGEM):
@@ -903,66 +1082,78 @@ def conta_apta(conta, funcao):
     return funcao in permitidas
 
 
+def _lista_ids(valor):
+    """Normaliza a ocupação da repostagem para lista de ids (aceita None, id ou lista)."""
+    if valor is None:
+        return []
+    if isinstance(valor, (list, tuple)):
+        return [v for v in valor if v is not None]
+    return [valor]
+
+
 def resolver_funcoes(contas, ocupacao_atual):
     """
     Distribui os postos. Não escreve nada: devolve o que DEVERIA ser.
 
     Entrada:
       contas         → lista de dicts de contas (como vem do listar_contas)
-      ocupacao_atual → {"espelho": id_ou_None, "repostagem": id_ou_None}
+      ocupacao_atual → {"espelho": id_ou_None, "repostagem": [ids]}
 
     Saída:
       (nova_ocupacao, mudancas)
       mudancas → lista de tuplas (funcao, id_antigo, id_novo, motivo)
+
+    Espelho: uma titular. Quem está no posto e continua apta fica; posto vago vai
+    primeiro para uma conta que não reposta (reserva da captura), depois pela
+    prioridade.
+    Repostagem: rodízio com TODAS as contas aptas, menos a do espelho. A conta da
+    captura nunca reposta: sem conta de repostagem, a repostagem fica parada.
     """
     por_id = {c["id"]: c for c in contas}
-    nova = dict(ocupacao_atual)
+    espelho = ocupacao_atual.get(FUNCAO_ESPELHO)
+    rodizio_antes = _lista_ids(ocupacao_atual.get(FUNCAO_REPOSTAGEM))
     mudancas = []
 
-    # ── Passo 1: quem está no posto continua, se ainda estiver apto ──────────
-    # Este passo é o que garante a estabilidade: uma conta que está trabalhando
-    # e continua apta NUNCA é trocada só porque entrou gente nova no grupo.
-    for funcao in FUNCOES:
-        atual_id = nova.get(funcao)
-        if atual_id is None:
-            continue
-        conta = por_id.get(atual_id)
+    # Espelho, passo 1: a titular continua se ainda estiver apta. É o que garante a
+    # estabilidade: conta nova no grupo nunca derruba quem está trabalhando.
+    if espelho is not None:
+        conta = por_id.get(espelho)
         if conta is None:
-            nova[funcao] = None
-            mudancas.append((funcao, atual_id, None, "conta não existe mais no cadastro"))
-        elif not conta_apta(conta, funcao):
-            nova[funcao] = None
-            motivo = _motivo_inaptidao(conta, funcao)
-            mudancas.append((funcao, atual_id, None, motivo))
+            mudancas.append((FUNCAO_ESPELHO, espelho, None, "conta não existe mais no cadastro"))
+            espelho = None
+        elif not conta_apta(conta, FUNCAO_ESPELHO):
+            mudancas.append((FUNCAO_ESPELHO, espelho, None, _motivo_inaptidao(conta, FUNCAO_ESPELHO)))
+            espelho = None
 
-    # ── Passo 2: preencher os postos vagos ──────────────────────────────────
-    for funcao in FUNCOES:
-        if nova.get(funcao) is not None:
+    # Espelho, passo 2: posto vago. Prefere quem não pode repostar, para não tirar
+    # ninguém do rodízio à toa.
+    if espelho is None:
+        candidatas = [c for c in contas if conta_apta(c, FUNCAO_ESPELHO)]
+        if candidatas:
+            escolhida = sorted(candidatas, key=lambda c: (
+                conta_apta(c, FUNCAO_REPOSTAGEM), int(c.get("prioridade") or 100), c["id"]))[0]
+            espelho = escolhida["id"]
+            mudancas.append((FUNCAO_ESPELHO, None, espelho, "assumiu posto vago"))
+
+    # Repostagem: o rodízio é recalculado do zero; as mudanças são o que entrou e saiu.
+    rodizio = [c["id"] for c in _ordenar_candidatas(
+        [c for c in contas if conta_apta(c, FUNCAO_REPOSTAGEM) and c["id"] != espelho])]
+    for antigo in rodizio_antes:
+        if antigo in rodizio:
             continue
+        conta = por_id.get(antigo)
+        if conta is None:
+            motivo = "conta não existe mais no cadastro"
+        elif antigo == espelho:
+            motivo = "passou para a captura (a captura não reposta)"
+        else:
+            motivo = _motivo_inaptidao(conta, FUNCAO_REPOSTAGEM)
+        mudancas.append((FUNCAO_REPOSTAGEM, antigo, None, motivo))
+    for novo in rodizio:
+        if novo not in rodizio_antes:
+            mudancas.append((FUNCAO_REPOSTAGEM, None, novo, "entrou no rodízio"))
 
-        candidatas = [c for c in contas if conta_apta(c, funcao)]
-        if not candidatas:
-            continue
-
-        # Contas que já pegaram algum posto NESTA rodada de distribuição.
-        ja_ocupadas = {v for k, v in nova.items() if v is not None}
-
-        livres = [c for c in candidatas if c["id"] not in ja_ocupadas]
-        acumulando = [c for c in candidatas if c["id"] in ja_ocupadas]
-
-        # Preferência: conta livre. Só acumula quando não sobrou mais ninguém —
-        # é o cenário "todas saíram, só a conta 5 ficou: ela faz tudo".
-        fila = _ordenar_candidatas(livres) or _ordenar_candidatas(acumulando)
-        if not fila:
-            continue
-
-        escolhida = fila[0]
-        motivo = "assumiu posto vago" if escolhida["id"] not in ja_ocupadas \
-            else "acumulou função (não havia outra conta apta)"
-        nova[funcao] = escolhida["id"]
-        mudancas.append((funcao, None, escolhida["id"], motivo))
-
-    return nova, mudancas
+    return {FUNCAO_ESPELHO: espelho, FUNCAO_REPOSTAGEM: rodizio}, mudancas
 
 
 def _ordenar_candidatas(candidatas):
@@ -1006,12 +1197,19 @@ def aplicar_funcoes():
     apelido_por_id = {c["id"]: c["apelido"] for c in contas}
     conexao = _obter_conexao()
     cursor = conexao.cursor()
-    for funcao in FUNCOES:
-        if nova.get(funcao) != ocupacao.get(funcao):
-            cursor.execute(
-                "UPDATE funcoes_contas SET conta_id = ?, assumida_em = ?, motivo = ? WHERE funcao = ?",
-                (nova.get(funcao), _agora(), "redistribuição automática", funcao),
-            )
+    if nova[FUNCAO_ESPELHO] != ocupacao.get(FUNCAO_ESPELHO):
+        cursor.execute(
+            "UPDATE funcoes_contas SET conta_id = ?, assumida_em = ?, motivo = ? WHERE funcao = ?",
+            (nova[FUNCAO_ESPELHO], _agora(), "redistribuição automática", FUNCAO_ESPELHO),
+        )
+    rodizio = nova[FUNCAO_REPOSTAGEM]
+    if rodizio != _lista_ids(ocupacao.get(FUNCAO_REPOSTAGEM)):
+        cursor.execute(
+            "UPDATE funcoes_contas SET conta_id = ?, contas_ids = ?, assumida_em = ?, motivo = ? "
+            "WHERE funcao = ?",
+            (rodizio[0] if rodizio else None, ",".join(str(i) for i in rodizio),
+             _agora(), "redistribuição automática", FUNCAO_REPOSTAGEM),
+        )
     conexao.commit()
     conexao.close()
 
@@ -1027,14 +1225,36 @@ def aplicar_funcoes():
 
 
 def ler_ocupacao():
-    """Devolve {"espelho": id|None, "repostagem": id|None} lido do banco."""
+    """Devolve {"espelho": id|None, "repostagem": [ids do rodízio]} lido do banco."""
     inicializar_tabelas()
     conexao = _obter_conexao()
     cursor = conexao.cursor()
-    cursor.execute("SELECT funcao, conta_id FROM funcoes_contas")
-    dados = {linha["funcao"]: linha["conta_id"] for linha in cursor.fetchall()}
+    cursor.execute("SELECT funcao, conta_id, contas_ids FROM funcoes_contas")
+    linhas = {linha["funcao"]: linha for linha in cursor.fetchall()}
     conexao.close()
-    return {f: dados.get(f) for f in FUNCOES}
+
+    espelho = linhas.get(FUNCAO_ESPELHO)
+    repost = linhas.get(FUNCAO_REPOSTAGEM)
+    rodizio = []
+    if repost is not None:
+        if repost["contas_ids"]:
+            rodizio = [int(i) for i in str(repost["contas_ids"]).split(",") if i.strip().isdigit()]
+        elif repost["conta_id"]:
+            rodizio = [repost["conta_id"]]  # gravado antes do rodízio existir
+    return {FUNCAO_ESPELHO: espelho["conta_id"] if espelho is not None else None,
+            FUNCAO_REPOSTAGEM: rodizio}
+
+
+def postos_da_conta(conta_id, ocupacao=None):
+    """Funções que a conta exerce agora (lista vazia = nenhuma)."""
+    if ocupacao is None:
+        ocupacao = ler_ocupacao()
+    postos = []
+    if ocupacao.get(FUNCAO_ESPELHO) == conta_id:
+        postos.append(FUNCAO_ESPELHO)
+    if conta_id in _lista_ids(ocupacao.get(FUNCAO_REPOSTAGEM)):
+        postos.append(FUNCAO_REPOSTAGEM)
+    return postos
 
 
 # =============================================================================
@@ -1062,6 +1282,13 @@ def obter_conta_da_funcao(funcao):
     conta = cursor.fetchone()
     conexao.close()
     return dict(conta) if conta else None
+
+
+def obter_contas_repostagem():
+    """As contas do rodízio da repostagem, na ordem do rodízio (lista vazia = parada)."""
+    ids = _lista_ids(ler_ocupacao().get(FUNCAO_REPOSTAGEM))
+    por_id = {c["id"]: c for c in listar_contas()}
+    return [por_id[i] for i in ids if i in por_id]
 
 
 def obter_sessao_da_funcao(funcao):
@@ -1140,9 +1367,13 @@ def obter_grupo_autorais():
     return None
 
 
-async def checar_conta(conta, grupo_id=None):
+async def checar_conta(conta, grupo_id=None, cliente=None):
     """
     Conecta com a conta, descobre em que pé ela está e grava no banco.
+
+    cliente: o TelegramClient já conectado desta conta (o robô dos Autorais passa
+    os dele). Assim a checagem não abre uma segunda conexão da mesma conta, e o
+    cliente continua conectado no fim.
 
     Devolve (status_grupo, status_sessao).
 
@@ -1159,9 +1390,10 @@ async def checar_conta(conta, grupo_id=None):
     if grupo_id is None:
         grupo_id = obter_grupo_autorais()
 
-    cliente = None
+    emprestado = cliente is not None
     try:
-        cliente = await criar_cliente(conta)
+        if not emprestado:
+            cliente = await criar_cliente(conta)
         if cliente is None:
             return (conta.get("status_grupo"), SESSAO_MORTA)
 
@@ -1259,14 +1491,14 @@ async def checar_conta(conta, grupo_id=None):
         return (conta.get("status_grupo"), conta.get("status_sessao"))
 
     finally:
-        if cliente is not None:
+        if cliente is not None and not emprestado:
             try:
                 await cliente.disconnect()
             except Exception:
                 pass
 
 
-async def sincronizar_pool():
+async def sincronizar_pool(clientes=None):
     """
     A rotina completa, para pendurar no APScheduler (sugestão: 10 em 10 min).
 
@@ -1275,6 +1507,9 @@ async def sincronizar_pool():
       3. devolve a lista de mudanças
 
     É idempotente: rodar duas vezes seguidas não muda nada na segunda.
+
+    clientes: {conta_id: TelegramClient conectado}, os que o robô dos Autorais já
+    tem abertos; as outras contas conectam só para a checagem.
     """
     inicializar_tabelas()
     contas = listar_contas()
@@ -1290,7 +1525,7 @@ async def sincronizar_pool():
     for conta in contas:
         # Uma pausa curta entre contas: várias conexões simultâneas com o mesmo
         # API_ID é o caminho mais rápido para tomar FloodWait.
-        await checar_conta(conta, grupo_id)
+        await checar_conta(conta, grupo_id, cliente=(clientes or {}).get(conta["id"]))
         await asyncio.sleep(2)
 
     return aplicar_funcoes()
@@ -1367,9 +1602,10 @@ async def login_interativo(apelido=None):
     mudancas = aplicar_funcoes()
     if mudancas:
         print("🔄 Postos redistribuídos:")
-        for funcao, _antigo, novo, motivo in mudancas:
-            quem = obter_conta_da_funcao(funcao)
-            print(f"   • {funcao}: {quem['apelido'] if quem else 'VAGO'} — {motivo}")
+        apelidos = {c["id"]: c["apelido"] for c in listar_contas()}
+        for funcao, antigo, novo, motivo in mudancas:
+            quem = apelidos.get(novo if novo else antigo, "?")
+            print(f"   • {funcao}: {quem} — {motivo}")
     else:
         print("ℹ️  Nenhum posto mudou (os dois já estavam ocupados e saudáveis).")
     return apelido
@@ -1642,9 +1878,6 @@ def montar_relatorio():
     """
     contas = listar_contas()
     ocupacao = ler_ocupacao()
-    postos = {}
-    for funcao, conta_id in ocupacao.items():
-        postos.setdefault(conta_id, []).append(funcao)
 
     if not contas:
         return "👥 Nenhuma conta cadastrada.\n   Cadastre com: python3 pool_contas.py login"
@@ -1652,7 +1885,7 @@ def montar_relatorio():
     linhas = ["👥 CONTAS DO POOL", ""]
     for c in contas:
         icone = ICONES_GRUPO.get(c["status_grupo"], "❓")
-        trabalho = postos.get(c["id"], [])
+        trabalho = postos_da_conta(c["id"], ocupacao)
         if trabalho:
             papel = "🎯 " + " + ".join(trabalho).upper()
         elif conta_apta(c, FUNCAO_ESPELHO) or conta_apta(c, FUNCAO_REPOSTAGEM):
@@ -1676,9 +1909,10 @@ def montar_relatorio():
         linhas.append("")
 
     linhas.append("─" * 50)
-    for funcao in FUNCOES:
-        conta = obter_conta_da_funcao(funcao)
-        linhas.append(f"🎯 {funcao.upper():<12} → {conta['apelido'] if conta else '⚠️ VAGO'}")
+    espelho = obter_conta_da_funcao(FUNCAO_ESPELHO)
+    rodizio = [c["apelido"] for c in obter_contas_repostagem()]
+    linhas.append(f"🎯 {'ESPELHO':<12} → {espelho['apelido'] if espelho else '⚠️ VAGO'}")
+    linhas.append(f"🎯 {'REPOSTAGEM':<12} → {', '.join(rodizio) if rodizio else '⚠️ PARADA (rodízio vazio)'}")
     return "\n".join(linhas)
 
 
@@ -1708,46 +1942,86 @@ def autoteste():
         if obtido != esperado:
             falhas.append(rotulo)
 
+    vazio = {FUNCAO_ESPELHO: None, FUNCAO_REPOSTAGEM: []}
+
     print("\n🧪 CENÁRIO 1 — conta 1 espelha, conta 2 reposta")
     contas = [_conta_falsa(1, "u1", STATUS_NO_GRUPO), _conta_falsa(2, "u2", STATUS_NO_GRUPO)]
-    ocupacao, _ = resolver_funcoes(contas, {FUNCAO_ESPELHO: None, FUNCAO_REPOSTAGEM: None})
+    ocupacao, _ = resolver_funcoes(contas, vazio)
     conferir("espelho", ocupacao[FUNCAO_ESPELHO], 1)
-    conferir("repostagem", ocupacao[FUNCAO_REPOSTAGEM], 2)
+    conferir("repostagem", ocupacao[FUNCAO_REPOSTAGEM], [2])
 
     print("\n🧪 CENÁRIO 2 — a conta 2 sai e a conta 3 entra")
     contas = [_conta_falsa(1, "u1", STATUS_NO_GRUPO), _conta_falsa(2, "u2", STATUS_SAIU),
               _conta_falsa(3, "u3", STATUS_NO_GRUPO)]
     ocupacao, mudancas = resolver_funcoes(contas, ocupacao)
     conferir("espelho continua com a 1", ocupacao[FUNCAO_ESPELHO], 1)
-    conferir("repostagem passa para a 3", ocupacao[FUNCAO_REPOSTAGEM], 3)
+    conferir("repostagem passa para a 3", ocupacao[FUNCAO_REPOSTAGEM], [3])
     conferir("houve exatamente 2 movimentos", len(mudancas), 2)
 
-    print("\n🧪 CENÁRIO 3 — a conta 4 entra no grupo com tudo ocupado")
+    print("\n🧪 CENÁRIO 3 — a conta 4 entra: passa a revezar a repostagem com a 3")
     contas.append(_conta_falsa(4, "u4", STATUS_NO_GRUPO))
     ocupacao, mudancas = resolver_funcoes(contas, ocupacao)
     conferir("espelho intacto", ocupacao[FUNCAO_ESPELHO], 1)
-    conferir("repostagem intacta", ocupacao[FUNCAO_REPOSTAGEM], 3)
-    conferir("a 4 ficou de reserva (nada mudou)", len(mudancas), 0)
+    conferir("rodízio com a 3 e a 4", ocupacao[FUNCAO_REPOSTAGEM], [3, 4])
+    conferir("um movimento (a 4 entrou)", len(mudancas), 1)
 
-    print("\n🧪 CENÁRIO 4 — todas saem, só a conta 5 fica: ela acumula tudo")
+    print("\n🧪 CENÁRIO 4 — todas saem, só a conta 5 fica: captura sim, repostagem parada")
     contas = [_conta_falsa(1, "u1", STATUS_SAIU), _conta_falsa(3, "u3", STATUS_SAIU),
               _conta_falsa(4, "u4", STATUS_SAIU), _conta_falsa(5, "u5", STATUS_NO_GRUPO)]
     ocupacao, _ = resolver_funcoes(contas, ocupacao)
     conferir("espelho com a 5", ocupacao[FUNCAO_ESPELHO], 5)
-    conferir("repostagem também com a 5", ocupacao[FUNCAO_REPOSTAGEM], 5)
+    conferir("a captura não reposta: rodízio vazio", ocupacao[FUNCAO_REPOSTAGEM], [])
 
-    print("\n🧪 CENÁRIO 5 — ninguém no grupo: os dois postos ficam VAGOS")
+    print("\n🧪 CENÁRIO 5 — ninguém no grupo: captura vaga e repostagem parada")
     contas = [_conta_falsa(5, "u5", STATUS_BANIDA_GRUPO)]
     ocupacao, _ = resolver_funcoes(contas, ocupacao)
     conferir("espelho vago", ocupacao[FUNCAO_ESPELHO], None)
-    conferir("repostagem vaga", ocupacao[FUNCAO_REPOSTAGEM], None)
+    conferir("rodízio vazio", ocupacao[FUNCAO_REPOSTAGEM], [])
 
     print("\n🧪 CENÁRIO 6 — conta restrita a uma função só")
     contas = [_conta_falsa(6, "u6", STATUS_NO_GRUPO, funcoes="repostagem"),
               _conta_falsa(7, "u7", STATUS_NO_GRUPO, funcoes="espelho")]
-    ocupacao, _ = resolver_funcoes(contas, {FUNCAO_ESPELHO: None, FUNCAO_REPOSTAGEM: None})
+    ocupacao, _ = resolver_funcoes(contas, vazio)
     conferir("espelho só pode ser a 7", ocupacao[FUNCAO_ESPELHO], 7)
-    conferir("repostagem só pode ser a 6", ocupacao[FUNCAO_REPOSTAGEM], 6)
+    conferir("repostagem só pode ser a 6", ocupacao[FUNCAO_REPOSTAGEM], [6])
+
+    print("\n🧪 CENÁRIO 7 — a captura cai: assume a reserva que não reposta")
+    contas = [_conta_falsa(1, "u1", STATUS_SAIU), _conta_falsa(2, "u2", STATUS_NO_GRUPO),
+              _conta_falsa(8, "u8", STATUS_NO_GRUPO, funcoes="espelho")]
+    ocupacao, _ = resolver_funcoes(contas, {FUNCAO_ESPELHO: 1, FUNCAO_REPOSTAGEM: [2]})
+    conferir("espelho com a 8", ocupacao[FUNCAO_ESPELHO], 8)
+    conferir("rodízio intacto", ocupacao[FUNCAO_REPOSTAGEM], [2])
+
+    print("\n🧪 CENÁRIO 8 — a captura cai sem reserva: uma do rodízio passa para a captura")
+    contas = [_conta_falsa(1, "u1", STATUS_SAIU), _conta_falsa(2, "u2", STATUS_NO_GRUPO),
+              _conta_falsa(3, "u3", STATUS_NO_GRUPO)]
+    ocupacao, mudancas = resolver_funcoes(contas, {FUNCAO_ESPELHO: 1, FUNCAO_REPOSTAGEM: [2, 3]})
+    conferir("espelho com a 2", ocupacao[FUNCAO_ESPELHO], 2)
+    conferir("rodízio só com a 3", ocupacao[FUNCAO_REPOSTAGEM], [3])
+
+    print("\n🧪 CENÁRIO 9 — saúde: envio que falhou depois do último ok vira ❌")
+    contas = [_conta_falsa(1, "u1", STATUS_NO_GRUPO), _conta_falsa(2, "u2", STATUS_NO_GRUPO),
+              _conta_falsa(3, "u3", STATUS_NO_GRUPO)]
+    for c in contas:
+        c["ultima_checagem"] = "2026-10-03 12:00:00"
+    atividade = {
+        (1, FUNCAO_ESPELHO): {"ultimo_ok": "2026-10-03 11:00:00"},
+        (2, FUNCAO_REPOSTAGEM): {"ultimo_ok": "2026-10-03 10:00:00", "erro_em": "2026-10-03 11:30:00",
+                                 "ultimo_erro": "ChatWriteForbiddenError"},
+        (3, FUNCAO_REPOSTAGEM): {"ultimo_ok": "2026-10-03 11:45:00", "erro_em": "2026-10-03 09:00:00"},
+    }
+    saude = avaliar_saude(contas, {FUNCAO_ESPELHO: 1, FUNCAO_REPOSTAGEM: [2, 3]}, atividade,
+                          agora=datetime(2026, 10, 3, 12, 5))
+    estado = {p["chave"]: p["ok"] for p in saude["postos"]}
+    conferir("captura da 1 ✅", estado.get("espelho:1"), True)
+    conferir("repostagem da 2 ❌", estado.get("repostagem:2"), False)
+    conferir("repostagem da 3 ✅", estado.get("repostagem:3"), True)
+    conferir("checagem em dia", saude["checagem_atrasada_min"], None)
+    saude = avaliar_saude(contas, {FUNCAO_ESPELHO: 1, FUNCAO_REPOSTAGEM: []}, atividade,
+                          agora=datetime(2026, 10, 3, 13, 0))
+    estado = {p["chave"]: p["ok"] for p in saude["postos"]}
+    conferir("rodízio vazio aparece como ❌", estado.get("repostagem:vago"), False)
+    conferir("checagem atrasada (60 min)", saude["checagem_atrasada_min"], 60)
 
     print("\n" + "=" * 52)
     if falhas:
