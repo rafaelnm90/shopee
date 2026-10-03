@@ -2,7 +2,7 @@ import os
 import json
 import asyncio
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 import hashlib
 from telethon import utils
 from telethon import TelegramClient, events
@@ -570,10 +570,10 @@ async def processar_fila_espelhador_loop():
                     continue # Já tem carimbo de distribuição matemática ou já foi postado
                 
                 data_captura_obj = datetime.strptime(item["data_captura"], "%Y-%m-%d %H:%M:%S")
-                data_captura_str = data_captura_obj.strftime("%Y-%m-%d")
                 intervalo_dias = int(rota_config.get("intervalo_dias", 1))
-                
-                if intervalo_dias == 0 or data_captura_str < hoje_str or esvaziar_agora:
+                data_alvo_str = (data_captura_obj + timedelta(days=intervalo_dias)).strftime("%Y-%m-%d")
+
+                if intervalo_dias == 0 or data_alvo_str <= hoje_str or esvaziar_agora:
                     itens_por_rota_desagendados.setdefault(nome_rota, []).append(item)
 
             for nome_rota, itens in itens_por_rota_desagendados.items():
