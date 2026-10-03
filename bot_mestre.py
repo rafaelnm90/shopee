@@ -4970,13 +4970,16 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     # Contas de plantão, lidas do pool_contas. Sem conta no pool, o painel mostra o
     # aviso e segue.
     try:
-        _espelho = pool_contas.obter_conta_da_funcao(pool_contas.FUNCAO_ESPELHO)
-        _repost = pool_contas.obter_conta_da_funcao(pool_contas.FUNCAO_REPOSTAGEM)
-        texto_plantao = (
-            f"<b>- Contas de plantão:</b>\n"
-            f"    🪞 Espelho: <b>{_espelho['apelido'] if _espelho else '⚠️ VAGO'}</b>\n"
-            f"    ♻️ Repostagem: <b>{_repost['apelido'] if _repost else '⚠️ VAGO'}</b>\n\n"
-        )
+        if pool_contas.listar_contas():
+            _espelho = pool_contas.obter_conta_da_funcao(pool_contas.FUNCAO_ESPELHO)
+            _rodizio = [c["apelido"] for c in pool_contas.obter_contas_repostagem()]
+            texto_plantao = (
+                f"<b>- Contas de plantão:</b>\n"
+                f"    🪞 Captura: <b>{_espelho['apelido'] if _espelho else '⚠️ VAGA (captura parada)'}</b>\n"
+                f"    ♻️ Repostagem: <b>{', '.join(_rodizio) if _rodizio else '⚠️ parada (nenhuma conta)'}</b>\n\n"
+            )
+        else:
+            texto_plantao = "<b>- Contas de plantão:</b>\n    👤 <i>sessão fixa (nenhuma conta no pool)</i>\n\n"
     except Exception as e_pool:
         if EXIBIR_LOGS: logger.error(f"❌ Não consegui ler o pool de contas: {e_pool}")
         texto_plantao = "<b>- Contas de plantão:</b>\n    ⚠️ <i>pool indisponível</i>\n\n"
@@ -5007,15 +5010,15 @@ async def painel_autorais(message: types.Message, state: FSMContext):
 # ==========================================================================
 # Painel de Contas e Postos (Outros Canais → Contas)
 # --------------------------------------------------------------------------
-# Quem espelha e quem reposta, sem abrir o terminal. A regra mora no
-# pool_contas.py; aqui é só tela. (O espelhador_videos_autorais ainda usa a sessão
-# fixa: a integração com o pool está pendente.)
+# Quem captura e quem reposta, sem abrir o terminal. A regra mora no
+# pool_contas.py; aqui é só tela. O robô dos Autorais lê os postos de 10 em 10 min.
 #
-# Duas ações diferentes:
+# Captura: uma conta. Repostagem: rodízio com todas as contas aptas, menos a da
+# captura (que nunca reposta).
 #   PERMITIR → muda o que a conta PODE fazer. É a ação durável: tirar a permissão
-#              tira do posto e impede o revezamento de recolocar a conta.
-#   ASSUMIR  → troca o plantonista AGORA, sem mexer em permissão. Dura enquanto
-#              a conta continuar apta (quem está no posto e saudável não sai).
+#              tira do posto (ou do rodízio) e impede o revezamento de recolocar a conta.
+#   ASSUMIR  → só na captura: troca a conta AGORA, sem mexer em permissão. Dura
+#              enquanto a conta continuar apta.
 #
 # Callbacks (curtos de propósito: o Telegram limita o callback_data a 64 bytes):
 #   pc_painel | pc_sync | pc_ver:<id> | pc_tog:<id>:<e|r> | pc_ass:<id>:<e|r> |
@@ -5060,8 +5063,7 @@ def _pc_teclado_lista():
 def _pc_tela_conta(conta):
     """Monta texto + teclado da tela de uma conta específica."""
     permitidas = [f.strip() for f in str(conta.get("funcoes_permitidas") or "").split(",") if f.strip()]
-    ocupacao = pool_contas.ler_ocupacao()
-    postos = [f for f, cid in ocupacao.items() if cid == conta["id"]]
+    postos = pool_contas.postos_da_conta(conta["id"])
 
     texto = (
         f"👤 <b>{conta['apelido']}</b>\n\n"
@@ -5079,20 +5081,19 @@ def _pc_tela_conta(conta):
         texto += f"\n⚠️ <i>{conta['ultimo_erro']}</i>\n"
 
     linhas = []
-    for sigla, funcao, rotulo in (("e", pool_contas.FUNCAO_ESPELHO, "Espelho"),
+    for sigla, funcao, rotulo in (("e", pool_contas.FUNCAO_ESPELHO, "Captura"),
                                   ("r", pool_contas.FUNCAO_REPOSTAGEM, "Repostagem")):
         marca = "🔓" if funcao in permitidas else "🔒"
         linhas.append([InlineKeyboardButton(
             text=f"{marca} {rotulo}: {'permitido' if funcao in permitidas else 'bloqueado'}",
             callback_data=f"pc_tog:{conta['id']}:{sigla}"
         )])
-    for sigla, funcao, rotulo in (("e", pool_contas.FUNCAO_ESPELHO, "espelho"),
-                                  ("r", pool_contas.FUNCAO_REPOSTAGEM, "repostagem")):
-        if funcao in permitidas and funcao not in postos:
-            linhas.append([InlineKeyboardButton(
-                text=f"⚡ Assumir {rotulo} agora",
-                callback_data=f"pc_ass:{conta['id']}:{sigla}"
-            )])
+    # Só a captura tem titular; na repostagem toda conta apta já está no rodízio.
+    if pool_contas.FUNCAO_ESPELHO in permitidas and pool_contas.FUNCAO_ESPELHO not in postos:
+        linhas.append([InlineKeyboardButton(
+            text="⚡ Assumir a captura agora",
+            callback_data=f"pc_ass:{conta['id']}:e"
+        )])
     linhas.append([InlineKeyboardButton(
         text="▶️ Habilitar conta" if not conta["habilitada"] else "⏸️ Desabilitar conta",
         callback_data=f"pc_hab:{conta['id']}"
@@ -5247,6 +5248,76 @@ async def pool_habilitar_conta(callback: types.CallbackQuery, state: FSMContext)
         await callback.message.answer(f"🔄 <b>Postos redistribuídos</b>\n{resumo}", parse_mode="HTML")
 
 
+
+
+
+async def verificar_saude_contas():
+    """
+    De 2 em 2 minutos: compara o ✅/❌ de cada conta na função dela com a última
+    vez e avisa o admin no privado só do que mudou (conta caiu, voltou, entrou ou
+    saiu do posto, posto ficou sem conta, robô dos Autorais sem checar as contas).
+    Na primeira rodada (logo depois do deploy) avisa só o que já começa com ❌.
+    """
+    try:
+        contas = pool_contas.listar_contas()
+        if not contas:
+            return
+        ocupacao = pool_contas.ler_ocupacao()
+        saude = pool_contas.avaliar_saude(contas, ocupacao, pool_contas.ler_atividade())
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Contas] Falha ao avaliar a saúde das contas: {e}")
+        return
+
+    agora = {p["chave"]: p for p in saude["postos"]}
+    atrasada = saude["checagem_atrasada_min"] is not None
+    retrato = {"postos": {k: {"ok": p["ok"], "apelido": p["apelido"]} for k, p in agora.items()},
+               "atrasada": atrasada}
+    antes = ler_config_bd("pool_saude_retrato", None)
+    salvar_config_bd("pool_saude_retrato", retrato)
+
+    rotulos = pool_contas.ROTULOS_FUNCAO
+    linhas = []
+    if not antes:
+        for p in agora.values():
+            if not p["ok"]:
+                nome = f" · <b>{p['apelido']}</b>" if p["apelido"] else ""
+                linhas.append(f"❌ {rotulos.get(p['funcao'], p['funcao'])}{nome}: {p['motivo']}")
+        antes = {"postos": retrato["postos"], "atrasada": atrasada}
+    for chave, p in agora.items():
+        anterior = antes.get("postos", {}).get(chave)
+        rotulo = rotulos.get(p["funcao"], p["funcao"])
+        if p["conta_id"] is None:
+            if anterior is None:
+                linhas.append(f"⚠️ {rotulo}: {p['motivo']}")
+        elif anterior is None:
+            estado = "" if p["ok"] else f" ❌ {p['motivo']}"
+            linhas.append(f"➕ {rotulo}: <b>{p['apelido']}</b> assumiu{estado}")
+        elif anterior.get("ok") and not p["ok"]:
+            linhas.append(f"❌ {rotulo} · <b>{p['apelido']}</b>: {p['motivo']}")
+        elif not anterior.get("ok") and p["ok"]:
+            linhas.append(f"✅ {rotulo} · <b>{p['apelido']}</b> voltou a funcionar")
+    for chave, anterior in antes.get("postos", {}).items():
+        if chave in agora:
+            continue
+        funcao, _sep, conta_id = chave.partition(":")
+        rotulo = rotulos.get(funcao, funcao)
+        if conta_id == "vago":
+            linhas.append(f"✅ {rotulo}: voltou a ter conta")
+        else:
+            motivo = pool_contas.motivo_saida(int(conta_id), funcao, ocupacao)
+            linhas.append(f"➖ {rotulo}: <b>{anterior.get('apelido')}</b> saiu ({motivo})")
+    if atrasada and not antes.get("atrasada"):
+        linhas.append("⚠️ As contas não são checadas há mais de "
+                      f"{pool_contas.MINUTOS_CHECAGEM_ATRASADA} min: o robô dos Autorais pode estar parado.")
+    elif not atrasada and antes.get("atrasada"):
+        linhas.append("✅ O robô dos Autorais voltou a checar as contas.")
+
+    if linhas:
+        texto = "👥 <b>Contas dos Autorais</b>\n\n" + "\n".join(linhas) + "\n\n<i>Detalhes no painel Contas 👥.</i>"
+        try:
+            await bot.send_message(ADMIN_ID, texto, parse_mode="HTML")
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Contas] Falha ao avisar o admin: {e}")
 
 
 # ==========================================================================
@@ -16595,6 +16666,9 @@ async def main():
 
     # Monitor de saúde (avisa o admin no privado)
     scheduler.add_job(monitor_saude, 'interval', hours=1, id='monitor_saude_loop', replace_existing=True)
+
+    # Contas dos Autorais: avisa no privado quando uma conta para ou volta na função dela
+    scheduler.add_job(verificar_saude_contas, 'interval', minutes=2, id='saude_contas_loop', replace_existing=True)
 
     # Motor de publicação dos parceiros
     scheduler.add_job(motor_parceiros_step, 'interval', minutes=2, id='motor_parceiros_loop', replace_existing=True)
