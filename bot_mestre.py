@@ -1306,6 +1306,22 @@ def recalcular_datas_pos_pausa():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao recalcular datas pós-pausa: {e}")
 
+def retomar_grade_pos_pausa():
+    """
+    Fim da pausa programada: empurra as datas da fila e refaz a grade de hoje do canal
+    principal, como o "Retomar Rotinas". Se o Bom Dia de hoje não saiu, ele sai em
+    seguida e abre o expediente; vídeos e rotinas se distribuem até a Boa Noite.
+    Depois do horário da Boa Noite o dia já acabou: fica tudo para a grade da madrugada.
+    """
+    recalcular_datas_pos_pausa()
+    # Só agendar_fila_postagens() não basta: o job do Bom Dia que já passou aponta
+    # para amanhã, e a fila tomava amanhã como início do expediente de hoje.
+    hora_boa_noite = ler_config_rotina().get("boa_noite", {}).get("inicio", 21)
+    if datetime.now(fuso_horario).hour < hora_boa_noite:
+        agendar_tarefas_diarias(escopo="principal")
+    else:
+        agendar_fila_postagens()
+
 async def verificar_pausa_diaria():
     """Todo dia às 9h, com a pausa ativa: troca o aviso de pausa no grupo por um novo."""
     if EXIBIR_LOGS: logger.info("⏰ Iniciando verificação diária de pausa programada (envio de aviso)...")
@@ -1403,8 +1419,7 @@ async def verificar_retorno_pausa_minuto():
         dados_pausa["ativa"] = False
         dados_pausa["servicos_pausados"] = []
         salvar_pausa_programada(dados_pausa)
-        recalcular_datas_pos_pausa()
-        agendar_fila_postagens()
+        retomar_grade_pos_pausa()
         if EXIBIR_LOGS: logger.info("✅ Serviços reativados e pausa programada encerrada com sucesso.")
 
 async def gerar_mensagem_gemini(prompt):
@@ -1968,8 +1983,16 @@ def contar_videos_pendentes(chat_destino):
         # Canal Viral (fila de clonagem do Espião)
         dados_espiao = ler_alvos_espiao()
         if alvo == str(dados_espiao.get("canal_destino")):
+            # Só os clones com horário até hoje, como no Público: os de amanhã (D+1)
+            # adiavam os textos da noite até o primeiro vídeo do dia seguinte. Clone
+            # sem horário ainda não foi distribuído (o motor faz isso a cada minuto).
+            hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
             fila = ler_fila_clonagem().get("fila", [])
-            return len([i for i in fila if i.get("processado") not in [True, 1, "true", "True"]])
+            return len([
+                i for i in fila
+                if i.get("processado") not in [True, 1, "true", "True"]
+                and i.get("horario_disparo") and i["horario_disparo"][:10] <= hoje
+            ])
 
         # Grupo Público (fila_publico)
         conexao = sqlite3.connect("banco_dados.db")
@@ -12242,8 +12265,7 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
     dados_pausa["servicos_pausados"] = []
     dados_pausa.pop("id_aviso_imediato", None)
     salvar_pausa_programada(dados_pausa)
-    recalcular_datas_pos_pausa()
-    agendar_fila_postagens()
+    retomar_grade_pos_pausa()
     
     await message.answer("▶️ Pausa programada encerrada! O aviso antigo foi apagado e a mensagem de retorno foi postada no grupo. Serviços reativados com sucesso!", reply_markup=obter_teclado_principal())
     await state.clear()
