@@ -274,7 +274,6 @@ async def _enviar_pendentes(msg_progresso: types.Message = None):
     por e-mail e sai. Ao esvaziar a fila, apaga a pasta de extração, varre pastas
     antigas e manda o resumo ao admin.
     """
-    global bot_instance
     if EXIBIR_LOGS: logger.info("🚀 Iniciando esteira de disparos de notas fiscais...")
     
     conexao = sqlite3.connect("banco_dados.db", timeout=20.0)

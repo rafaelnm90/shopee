@@ -16919,17 +16919,9 @@ async def monitor_saude():
         except Exception:
             pass
 
-        # 4. Erros acumulando na última hora
+        # 4. Erros acumulando na última hora (tabela erros_logs do registrar_erro_json)
         try:
-            erros = ler_config_bd("erros_logs", [], arquivo_legado="erros_logs.json")
-            recentes = 0
-            corte = datetime.now(fuso_horario) - timedelta(hours=1)
-            for e in (erros or []):
-                try:
-                    q = datetime.strptime(e.get("timestamp", ""), "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
-                    if q >= corte: recentes += 1
-                except Exception:
-                    continue
+            recentes = contar_erros_recentes(horas=1)
             if recentes >= 10 and not _ja_alertou("erros"):
                 alertas.append(f"🐛 <b>{recentes} erros na última hora</b>\nConfira o painel de erros.")
         except Exception:
@@ -16959,6 +16951,107 @@ async def monitor_saude():
 
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Saúde] Falha no monitor: {e}")
+
+def contar_erros_recentes(horas=1):
+    """Erros gravados pelo registrar_erro_json (tabela erros_logs) nas últimas horas."""
+    corte = (datetime.now(fuso_horario) - timedelta(hours=horas)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        total = conexao.execute("SELECT COUNT(*) FROM erros_logs WHERE timestamp >= ?", (corte,)).fetchone()[0]
+        conexao.close()
+        return total
+    except sqlite3.Error:
+        return 0
+
+
+# --- /status: o que está no ar, sem abrir o servidor ---
+SERVICOS_SISTEMA = (
+    ("bot_mestre_bot", "Bot Mestre"),
+    ("divulgacao_canal_bot", "Divulgação"),
+    ("motor_userbot_bot", "Motor Userbot"),
+    ("espelhador_videos_autorais_bot", "Autorais"),
+    ("downloader_bot", "Baixador"),
+)
+
+
+def estado_servico(nome):
+    """(estado, desde, reinícios) pelo systemctl; ('?', '', None) fora do servidor."""
+    try:
+        r = subprocess.run(["systemctl", "show", f"{nome}.service", "-p", "ActiveState",
+                            "-p", "ActiveEnterTimestamp", "-p", "NRestarts"],
+                           capture_output=True, text=True, timeout=5)
+        props = dict(linha.split("=", 1) for linha in r.stdout.splitlines() if "=" in linha)
+    except Exception:
+        return "?", "", None
+    desde = ""
+    partes = (props.get("ActiveEnterTimestamp") or "").split()
+    if len(partes) >= 3:   # "Sat 2026-10-03 18:40:00 -03"
+        try:
+            desde = datetime.strptime(f"{partes[1]} {partes[2]}", "%Y-%m-%d %H:%M:%S").strftime("%d/%m %H:%M")
+        except ValueError:
+            pass
+    return props.get("ActiveState") or "?", desde, props.get("NRestarts")
+
+
+def versao_no_ar():
+    """Commit em que o servidor está (o deploy faz git reset para o commit aprovado)."""
+    try:
+        r = subprocess.run(["git", "log", "-1", "--format=%h %cd", "--date=format:%d/%m %H:%M"],
+                           capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() or "?"
+    except Exception:
+        return "?"
+
+
+def montar_status():
+    """Texto do /status: serviços, versão, disco, contas dos Autorais e últimos erros."""
+    import html
+    import shutil
+    linhas = ["🩺 <b>Status do sistema</b>", f"📦 Versão no ar: <code>{html.escape(versao_no_ar())}</code>", ""]
+    for nome, rotulo in SERVICOS_SISTEMA:
+        estado, desde, reinicios = estado_servico(nome)
+        icone = "✅" if estado == "active" else ("❔" if estado == "?" else "❌")
+        extra = f" · desde {desde}" if desde else ""
+        if reinicios and reinicios != "0":
+            extra += f" · {reinicios} reinício(s) automático(s)"
+        linhas.append(f"{icone} {rotulo}: <b>{estado}</b>{extra}")
+
+    try:
+        uso = shutil.disk_usage("/")
+        linhas.append(f"\n💾 Disco: {uso.used / uso.total * 100:.0f}% usado "
+                      f"({uso.free / (1024 ** 3):.1f} GB livres)")
+    except Exception:
+        pass
+
+    try:
+        contas = pool_contas.listar_contas()
+        if contas:
+            saude = pool_contas.avaliar_saude(contas, pool_contas.ler_ocupacao(), pool_contas.ler_atividade())
+            ok = sum(1 for p in saude["postos"] if p["ok"])
+            linhas.append(f"👥 Contas dos Autorais: {ok}/{len(saude['postos'])} ✅ (detalhes em Contas 👥)")
+    except Exception:
+        pass
+
+    linhas.append(f"\n🐛 Erros na última hora: <b>{contar_erros_recentes(1)}</b>")
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        ultimos = conexao.execute(
+            "SELECT timestamp, origem, erro FROM erros_logs ORDER BY id DESC LIMIT 5").fetchall()
+        conexao.close()
+    except sqlite3.Error:
+        ultimos = []
+    for quando, origem, erro in ultimos:
+        linhas.append(f"• <code>{html.escape(str(quando)[5:16])}</code> [{html.escape(str(origem))}] "
+                      f"{html.escape(str(erro)[:90])}")
+    return "\n".join(linhas)
+
+
+@dp.message(Command("status"), StateFilter("*"))
+async def comando_status(message: types.Message, state: FSMContext):
+    """/status: serviços no ar, versão, disco, contas e últimos erros (só o admin)."""
+    if message.from_user.id != ADMIN_ID: return
+    await message.answer(montar_status(), parse_mode="HTML")
+
 
 # --- main(): agenda os jobs e sobe o bot (fica no fim do arquivo) ---
 async def main():

@@ -1,10 +1,11 @@
 name: Validar código
 
+# Roda em todo PR para a main e é chamado pelo deploy (workflow_call) antes de
+# subir para o servidor: o portão do deploy é exatamente esta checagem.
 on:
-  push:
-    branches: [main]
   pull_request:
     branches: [main]
+  workflow_call:
 
 jobs:
   validar:
@@ -19,24 +20,21 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+          cache: pip
 
-      - name: Rodar o validador de deploy
+      - name: Instalar dependências
+        run: pip install -r requirements.txt pytest pyflakes
+
+      - name: Rodar o validador de deploy (todos os .py)
+        run: python3 validar_deploy.py *.py
+
+      - name: Pyflakes (import e variável sem uso, nome indefinido)
+        run: python3 -m pyflakes *.py tests/
+
+      - name: Autotestes do pool de contas e da lista negra
         run: |
-          python3 validar_deploy.py \
-            bot_mestre.py \
-            espelhador_videos_autorais.py \
-            motor_filas.py \
-            painel_espelhos.py \
-            painel_notas.py \
-            utils.py \
-            motor_userbot.py \
-            divulgacao_canal.py \
-            api_gemini.py \
-            api_shopee.py \
-            downloader_bot.py
+          python3 pool_contas.py autoteste
+          python3 blacklist_captura.py autoteste
 
-      - name: Instalar pytest
-        run: pip install pytest
-
-      - name: Rodar testes do motor de filas
-        run: python3 -m pytest test_motor_filas.py -v            
+      - name: Testes (tests/)
+        run: python3 -m pytest tests -q

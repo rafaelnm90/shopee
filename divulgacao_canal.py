@@ -416,7 +416,6 @@ def programar_envios_da_hora():
     envios planejados que ainda estão no futuro são reagendados, os que já
     passaram contam como feitos, e só o que falta para a frequência é sorteado.
     """
-    global ultimos_agendamentos_por_alvo
     agora = datetime.now()
     INTERVALO_MINIMO = 15  # minutos entre dois envios para o mesmo alvo
     hora_atual = agora.strftime("%Y-%m-%d %H")

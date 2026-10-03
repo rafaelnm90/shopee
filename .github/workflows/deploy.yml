@@ -7,34 +7,11 @@ on:
       - master
 
 jobs:
-  # 🛡️ Portão de verdade: o deploy só roda se este job passar. Antes, "Validar código"
-  # era um workflow separado e os dois corriam em PARALELO — o validador podia ficar
-  # vermelho e o servidor reiniciava com o código quebrado do mesmo jeito.
+  # Portão: o deploy só roda se a checagem completa passar (a mesma dos PRs:
+  # validador, pyflakes, autotestes e tests/). Com os dois em paralelo, um
+  # validador vermelho não impedia o servidor de reiniciar com código quebrado.
   validar:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Baixar o código
-        uses: actions/checkout@v5
-
-      - name: Preparar Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.12'
-
-      - name: Rodar o validador de deploy
-        run: |
-          python3 validar_deploy.py \
-            bot_mestre.py \
-            espelhador_videos_autorais.py \
-            motor_filas.py \
-            painel_espelhos.py \
-            painel_notas.py \
-            utils.py \
-            motor_userbot.py \
-            divulgacao_canal.py \
-            api_gemini.py \
-            api_shopee.py \
-            downloader_bot.py
+    uses: ./.github/workflows/validar.yml
 
   deploy:
     needs: validar
@@ -96,5 +73,20 @@ jobs:
             sudo systemctl kill -s SIGKILL downloader_bot.service || true
             sudo systemctl start downloader_bot.service
             
+            # 6. Confere se os robôs ficaram de pé. Robô que cai logo ao iniciar
+            # (erro de import, .env faltando) fica em "activating" no Restart=always:
+            # o deploy fica vermelho e mostra o fim do log de quem caiu.
+            sleep 25
+            FALHOU=0
+            for SERVICO in bot_mestre_bot divulgacao_canal_bot motor_userbot_bot espelhador_videos_autorais_bot downloader_bot; do
+              if systemctl is-active --quiet "$SERVICO.service"; then
+                echo "✅ $SERVICO ativo"
+              else
+                echo "❌ $SERVICO NÃO está ativo ($(systemctl is-active "$SERVICO.service"))"
+                sudo journalctl -u "$SERVICO.service" -n 30 --no-pager || true
+                FALHOU=1
+              fi
+            done
+
             if [ "$EXIBIR_LOGS" = "true" ]; then echo "🚪 Encerrando a conexão SSH de forma limpa..."; fi
-            exit 0
+            exit $FALHOU
