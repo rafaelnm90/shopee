@@ -1955,6 +1955,10 @@ def contar_videos_pendentes(chat_destino):
 
         # 📺 Canal Principal (fila de postagens do SQLite)
         if alvo == str(GRUPO_ID):
+            # Na pausa programada os vídeos não saem: não há o que intercalar, e contar
+            # os pendentes adiaria cada texto de rotina até o fim da pausa.
+            if ler_pausa_programada().get("ativa"):
+                return 0
             hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
             conexao = sqlite3.connect("banco_dados.db")
             cursor = conexao.cursor()
