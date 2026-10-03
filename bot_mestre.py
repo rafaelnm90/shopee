@@ -14275,6 +14275,7 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
         msg_status = await message.answer("📤 A preparar ficheiros e a publicar o vídeo agora mesmo... Aguarde.", reply_markup=teclado_cancelar)
         
         sucesso_upload = False
+        novo_file_id = None  # só existe quando sobe o arquivo do disco
         try:
             # 2. Disparo imediato para o Telegram
             if caminho_video and os.path.exists(caminho_video):
