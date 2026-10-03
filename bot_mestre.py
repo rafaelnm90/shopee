@@ -10072,13 +10072,20 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
         except Exception:
             pass
 
-    # 4. Faxina Cega na Pasta Temp
+    # 4. Pasta temp: apaga o lixo, mas não os arquivos que ainda estão em alguma fila
+    # pendente (Espião, Espelhador, Público...) nem os mexidos nos últimos 10 min
+    # (download em andamento). Os das filas limpas acima já foram apagados com elas.
     try:
         if os.path.exists("temp"):
+            protegidos = _caminhos_protegidos()
+            recente = time.time() - 600
             for filename in os.listdir("temp"):
                 caminho_completo = os.path.join("temp", filename)
-                if os.path.isfile(caminho_completo):
-                    apagar_arquivo(caminho_completo)
+                if not os.path.isfile(caminho_completo):
+                    continue
+                if os.path.abspath(caminho_completo) in protegidos or os.path.getmtime(caminho_completo) > recente:
+                    continue
+                apagar_arquivo(caminho_completo)
     except Exception:
         pass
 
