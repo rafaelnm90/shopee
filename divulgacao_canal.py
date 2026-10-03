@@ -9,7 +9,8 @@ os horários de envio daquela hora; o texto de cada envio é escrito pelo Gemini
 na hora, com uma frase reserva se a IA falhar.
 
 Também mantém o cache de nomes de grupos e tópicos de fórum, que só uma conta de
-usuário consegue ler.
+usuário consegue ler, e roda a faxina do tópico do Baixador (faxina_baixador.py),
+que só uma conta de usuário consegue fazer com mensagens de mais de 48 h.
 """
 import os
 import asyncio
@@ -25,6 +26,7 @@ load_dotenv()
 from utils import registrar_erro_json, salvar_nome_grupo
 
 from api_gemini import gerar_texto_gemini
+import faxina_baixador
 
 # Importar fuso já trava o processo no horário de Brasília.
 from fuso import configurar_logs
@@ -586,6 +588,8 @@ async def main():
     # coleta de métricas, e separar evita os três disputando o mesmo instante.
     scheduler.add_job(sincronizar_nomes_topicos, 'cron', hour=0, minute=7)
     asyncio.create_task(sincronizar_nomes_topicos())
+
+    asyncio.create_task(faxina_baixador.faxina_loop(client))
     
     scheduler.start()
     logger.info("🤖 Sistema automático rodando. Pressione Ctrl+C para parar.")

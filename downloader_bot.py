@@ -11,7 +11,9 @@ um vídeo (Shopee, TikTok, Pinterest, Instagram) e recebe o arquivo sem marca d'
   CANAIS_OBRIGATORIOS. Limite de LIMITE_DIARIO_DOWNLOADS por dia.
 - O mesmo link já entregue é reenviado pelo file_id, sem baixar de novo.
 - O tópico se mantém limpo: o painel de instruções desce para o fim depois das
-  entregas e toda mensagem é apagada depois de DIAS_RETENCAO_TOPICO dias.
+  entregas e o mais novo fica fixado. Os vídeos entregues ficam para sempre; os
+  painéis antigos e os avisos "fixou" são apagados pela conta principal
+  (faxina_baixador.py, no divulgacao_canal), porque bot só apaga até 48 h.
 
 Usa o mesmo banco_dados.db dos outros robôs, com tabelas próprias.
 """
@@ -47,8 +49,9 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 router = Router()
 
-GRUPO_DOWNLOADER = -1003892378604      # Grupo Público para Afiliados
-TOPICO_DOWNLOADER = 1054               # tópico "Downloader Videos"
+# Grupo Público para Afiliados, tópico "Downloader Videos": definidos junto da
+# faxina do tópico, que roda no divulgacao_canal.
+from faxina_baixador import GRUPO_DOWNLOADER, TOPICO_DOWNLOADER
 
 # Canais exigidos depois da cortesia (nesta ordem na tela).
 CANAIS_OBRIGATORIOS = [
@@ -202,7 +205,6 @@ async def convidar_para_comunidade(message, mencao, total_downloads):
             f"<i>Abre o tópico «Poste seus Vídeos Aqui», aqui mesmo no grupo.</i>",
             parse_mode="HTML", disable_web_page_preview=True
         )
-        registrar_mensagem(convite.message_id)
         logger.info(f"💡 [Convite Comunidade] Enviado para {message.from_user.id} "
                     f"(download nº {total_downloads}).")
         await asyncio.sleep(CONVITE_SEGUNDOS_NA_TELA)
@@ -265,67 +267,6 @@ def salvar_msg_painel(msg_id):
         conexao.close()
     except Exception as e:
         logger.error(f"❌ Erro ao salvar o painel: {e}")
-
-# Toda mensagem do tópico é apagada depois deste tanto de dias (faxina_topico_loop).
-DIAS_RETENCAO_TOPICO = 3
-
-
-def _garantir_tabela_mensagens(cursor):
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS mensagens_topico (
-            message_id INTEGER PRIMARY KEY,
-            criado_em TEXT
-        )
-    ''')
-
-
-def registrar_mensagem(message_id):
-    """Anota o ID para a faxina achar depois. A API de bots não lê histórico,
-    então o que não for anotado aqui nunca será apagado."""
-    try:
-        conexao = db.conectar()
-        cursor = conexao.cursor()
-        _garantir_tabela_mensagens(cursor)
-        cursor.execute(
-            "INSERT OR IGNORE INTO mensagens_topico (message_id, criado_em) VALUES (?, ?)",
-            (int(message_id), datetime.now(FUSO).strftime("%Y-%m-%d %H:%M:%S"))
-        )
-        conexao.commit()
-        conexao.close()
-    except Exception as e:
-        logger.error(f"❌ Erro ao registrar mensagem: {e}")
-
-
-def mensagens_vencidas():
-    """IDs das mensagens anotadas há mais de DIAS_RETENCAO_TOPICO dias."""
-    try:
-        corte = (datetime.now(FUSO) - timedelta(days=DIAS_RETENCAO_TOPICO)).strftime("%Y-%m-%d %H:%M:%S")
-        conexao = db.conectar()
-        cursor = conexao.cursor()
-        _garantir_tabela_mensagens(cursor)
-        cursor.execute("SELECT message_id FROM mensagens_topico WHERE criado_em < ?", (corte,))
-        ids = [linha[0] for linha in cursor.fetchall()]
-        conexao.close()
-        return ids
-    except Exception as e:
-        logger.error(f"❌ Erro ao listar vencidas: {e}")
-        return []
-
-
-def esquecer_mensagens(ids):
-    """Tira os IDs do registro da faxina."""
-    if not ids:
-        return
-    try:
-        conexao = db.conectar()
-        cursor = conexao.cursor()
-        _garantir_tabela_mensagens(cursor)
-        cursor.executemany("DELETE FROM mensagens_topico WHERE message_id = ?", [(i,) for i in ids])
-        conexao.commit()
-        conexao.close()
-    except Exception as e:
-        logger.error(f"❌ Erro ao limpar registro: {e}")
-
 
 def downloads_hoje(user_id):
     """Quantos já usou hoje. Persistente: reiniciar o bot não zera o contador."""
@@ -1033,10 +974,6 @@ async def receber_link(message: types.Message):
     4. liberado: entrega do cache ou baixa (um download por vez) e entrega.
     Só conta na cota o que foi entregue.
     """
-    # Anota TODA mensagem que entra no tópico, inclusive as que serão
-    # ignoradas logo abaixo. O que não for anotado aqui a faxina nunca acha.
-    registrar_mensagem(message.message_id)
-
     # Mensagem de serviço "fixou uma mensagem" (quando um admin fixa algo): some.
     if message.pinned_message:
         try: await message.delete()
@@ -1073,8 +1010,8 @@ async def receber_link(message: types.Message):
 
         aviso = await message.answer(texto_aviso, parse_mode="HTML")
 
-        # A mensagem sem link sai na hora; esperar a faxina de DIAS_RETENCAO_TOPICO
-        # deixaria ela empurrando o painel para cima.
+        # A mensagem sem link sai na hora; esperar a faxina de 3 dias deixaria ela
+        # empurrando o painel para cima.
         try:
             await message.delete()
         except Exception as e:
@@ -1251,11 +1188,11 @@ async def receber_link(message: types.Message):
             # Nada fica no servidor: apaga a pasta inteira, dê certo ou não.
             shutil.rmtree(pasta, ignore_errors=True)
 
-# O painel fica sempre como a última mensagem do tópico. Envia o novo
-# primeiro e só então apaga o antigo, para o tópico nunca ficar sem painel.
-# Não usa pin_chat_message de propósito: cada fixação gera uma mensagem de
-# serviço ("Fulano fixou...") que se acumula no tópico (decisão do Rafael:
-# DECISOES.md, Baixador).
+# O painel fica sempre como a última mensagem do tópico, e o mais novo fica
+# fixado. Envia o novo primeiro e só então apaga o antigo, para o tópico nunca
+# ficar sem painel. O bot só consegue apagar o antigo até 48 h depois; o que passar
+# disso, e as mensagens "fixou uma mensagem" que cada fixação gera, a conta
+# principal apaga (faxina_baixador.py). Decisão do Rafael: DECISOES.md, Baixador.
 _lock_painel = asyncio.Lock()
 
 @router.callback_query(F.data == "canal_ok")
@@ -1331,7 +1268,7 @@ async def entrou_em_canal(evento: types.ChatMemberUpdated):
 
 
 async def reenviar_painel_downloader():
-    """Manda o painel de novo no fim do tópico e apaga o anterior."""
+    """Manda o painel de novo no fim do tópico, fixa e apaga o anterior."""
     async with _lock_painel:
         try:
             nova = await bot.send_message(
@@ -1346,13 +1283,19 @@ async def reenviar_painel_downloader():
             logger.error(f"❌ [Painel] Falha ao enviar o painel: {e}")
             return
 
+        try:
+            await bot.pin_chat_message(chat_id=GRUPO_DOWNLOADER, message_id=nova.message_id,
+                                       disable_notification=True)
+        except Exception as e:
+            logger.warning(f"⚠️ [Painel] Não consegui fixar o painel novo: {e}")
+
         antiga = ler_msg_painel()
         if antiga and antiga != nova.message_id:
             try: await bot.delete_message(chat_id=GRUPO_DOWNLOADER, message_id=antiga)
             except Exception: pass
 
         salvar_msg_painel(nova.message_id)
-        logger.info(f"📌 [Painel] Painel recriado no fim do tópico (ID {nova.message_id}).")
+        logger.info(f"📌 [Painel] Painel recriado e fixado no fim do tópico (ID {nova.message_id}).")
 
 # Prazo antes do painel descer. Numa rajada de downloads ele desce UMA vez,
 # no fim do prazo, em vez de pular de lugar a cada vídeo entregue.
@@ -1391,59 +1334,6 @@ async def comando_painel_downloader(message: types.Message):
     try: await message.delete()
     except Exception: pass
 
-# Anota para a faxina tudo o que o bot envia no tópico, num lugar só, em vez de
-# lembrar disso em cada send_message/answer_video. A API de bot não lê histórico:
-# mensagem não anotada nunca é apagada.
-@bot.session.middleware()
-async def registrar_saidas(make_request, bot_, method, *args, **kwargs):
-    resultado = await make_request(bot_, method, *args, **kwargs)
-    try:
-        if (isinstance(resultado, types.Message)
-                and resultado.chat.id == GRUPO_DOWNLOADER
-                and resultado.message_thread_id == TOPICO_DOWNLOADER):
-            registrar_mensagem(resultado.message_id)
-    except Exception:
-        pass
-    return resultado
-
-
-async def faxina_topico_loop():
-    """De hora em hora, apaga o que passou de DIAS_RETENCAO_TOPICO dias."""
-    await asyncio.sleep(120)   # deixa o bot terminar de subir
-    while True:
-        try:
-            vencidas = mensagens_vencidas()
-            if vencidas:
-                painel_atual = ler_msg_painel()
-                apagou_painel = False
-                sucesso = 0
-                falhou = 0
-
-                for msg_id in vencidas:
-                    try:
-                        await bot.delete_message(chat_id=GRUPO_DOWNLOADER, message_id=msg_id)
-                        sucesso += 1
-                        if painel_atual and msg_id == painel_atual:
-                            apagou_painel = True
-                    except Exception:
-                        # Já apagada, ou a API recusou por idade. De qualquer forma
-                        # sai do registro: insistir todo ciclo só gastaria chamada.
-                        falhou += 1
-                    await asyncio.sleep(0.4)   # folga para não levar flood wait
-
-                esquecer_mensagens(vencidas)
-                logger.info(f"🧹 [Faxina Tópico] {sucesso} apagada(s), {falhou} recusada(s) pela API.")
-
-                # O painel foi junto? Recria, senão o tópico fica sem orientação.
-                if apagou_painel:
-                    await reenviar_painel_downloader()
-
-        except Exception as e:
-            logger.error(f"❌ Erro na faxina do tópico: {e}")
-
-        await asyncio.sleep(3600)
-
-
 async def main():
     """Sobe o bot e as rotinas de fundo (atualização do yt-dlp, faxina do tópico, painel)."""
     if not TOKEN:
@@ -1454,8 +1344,6 @@ async def main():
     logger.info(f"📥 Downloader no ar como @{me.username} "
                 f"(privacy {'desligado ✅' if me.can_read_all_group_messages else 'LIGADO ⚠️'})")
     asyncio.create_task(faxina_diaria_loop())
-
-    asyncio.create_task(faxina_topico_loop())
 
     asyncio.create_task(reenviar_painel_downloader())
 
