@@ -12375,11 +12375,34 @@ async def pedir_alvo(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigDivulgacao.aguardando_alvos)
 async def salvar_alvo(message: types.Message, state: FSMContext):
-    novos_alvos = [alvo.strip() for alvo in message.text.split(",") if alvo.strip()]
-    if not novos_alvos:
+    entradas = [alvo.strip() for alvo in message.text.split(",") if alvo.strip()]
+    if not entradas:
         await message.answer("Nenhum alvo detectado. Tente novamente:", reply_markup=teclado_cancelar)
         return
-        
+
+    # Mesma validação do Viral: cru, o link do Telegram Web entrava como URL e o
+    # Telethon falhava no disparo sem dizer o motivo.
+    novos_alvos = []
+    recusados = []
+    for entrada in entradas:
+        ok, alvo_formatado, nome = await validar_e_formatar_alvo(bot, entrada)
+        if ok:
+            novos_alvos.append(alvo_formatado)
+        else:
+            recusados.append(entrada)
+
+    if recusados:
+        await message.answer(
+            "⚠️ Não consegui validar:\n" + "\n".join(f"• <code>{r}</code>" for r in recusados) +
+            "\n\n<i>Use o ID numérico, o link t.me ou a URL do Telegram Web. "
+            "Para grupos privados, a conta do userbot precisa estar dentro.</i>",
+            parse_mode="HTML"
+        )
+
+    if not novos_alvos:
+        await message.answer("Nenhum alvo válido. Tente novamente:", reply_markup=teclado_cancelar)
+        return
+
     dados = ler_alvos_divulgacao()
     dados["alvos"].extend(novos_alvos)
     dados["alvos"] = list(dict.fromkeys(dados["alvos"]))
@@ -12416,6 +12439,7 @@ async def processar_exclusao(message: types.Message, state: FSMContext):
     if 0 <= indice < len(alvos):
         removido = alvos.pop(indice)
         dados["alvos"] = alvos
+        dados.get("config_alvos", {}).pop(removido, None)
         salvar_alvos_divulgacao(dados)
         if EXIBIR_LOGS: logger.info(f"🗑️ Alvo removido com sucesso: {removido}")
         await message.answer(f"Alvo '{removido}' excluído com sucesso!", reply_markup=obter_teclado_configuracoes_gerais())
@@ -12683,6 +12707,7 @@ async def processar_exclusao_viral(message: types.Message, state: FSMContext):
     if 0 <= indice < len(alvos):
         removido = alvos.pop(indice)
         dados["alvos"] = alvos
+        dados.get("config_alvos", {}).pop(removido, None)
         salvar_alvos_divulgacao_viral(dados)
         if EXIBIR_LOGS: logger.info(f"🗑️ Alvo viral removido com sucesso: {removido}")
         await message.answer(f"Alvo Viral '{removido}' excluído com sucesso!")
