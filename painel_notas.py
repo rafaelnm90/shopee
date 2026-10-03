@@ -41,10 +41,29 @@ router = Router()
 bot_instance = None
 scheduler_instance = None
 
+def garantir_tabela_fila_notas():
+    """Cria a fila de envio de notas, se faltar. A coluna valor é acrescentada ao gravar o primeiro lote."""
+    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+    try:
+        conexao.execute('''
+            CREATE TABLE IF NOT EXISTS fila_notas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome_loja TEXT,
+                email_destino TEXT,
+                caminho_pdf TEXT,
+                status TEXT DEFAULT 'PENDENTE',
+                motivo_erro TEXT
+            )
+        ''')
+        conexao.commit()
+    finally:
+        conexao.close()
+
 def configurar_dependencias(bot: Bot, scheduler):
     global bot_instance, scheduler_instance
     bot_instance = bot
     scheduler_instance = scheduler
+    garantir_tabela_fila_notas()
     if EXIBIR_LOGS: logger.info("🔌 Conexão estabelecida: Dependências do Disparador de Notas injetadas com sucesso.")
 
 class PainelNotasFluxo(StatesGroup):

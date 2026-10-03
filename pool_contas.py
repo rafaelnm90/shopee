@@ -212,7 +212,7 @@ CHAVE_CONVITE = "pool_contas_convite_autorais"
 # instante de montar o cliente Telethon.
 
 def _obter_conexao():
-    """Conexão SQLite no mesmo padrão do database.py do projeto."""
+    """Conexão ao banco principal que devolve linhas acessíveis por nome de coluna."""
     conexao = sqlite3.connect(DB_NAME, timeout=20.0)
     conexao.row_factory = sqlite3.Row
     return conexao

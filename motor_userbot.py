@@ -110,6 +110,23 @@ def ler_excecao_ponte():
     val = str(dados.get("destino", "")).strip().lower()
     return val if val else None
 
+def garantir_tabela_registros_unicos():
+    """Cria a tabela da anti-duplicata (links já espelhados e hashes de vídeo), se faltar."""
+    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+    try:
+        conexao.execute('''
+            CREATE TABLE IF NOT EXISTS registros_unicos (
+                identificador TEXT,
+                contexto TEXT,
+                tipo TEXT,
+                data_registro TEXT,
+                PRIMARY KEY (identificador, contexto)
+            )
+        ''')
+        conexao.commit()
+    finally:
+        conexao.close()
+
 def verificar_e_registrar_espelho(link_shopee, contexto="global"):
     agora_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
@@ -1358,6 +1375,7 @@ async def monitorar_topicos_submissao():
 
 async def main():
     if EXIBIR_LOGS: logger.info("🕵️ Iniciando o Módulo Espião de Clonagem...")
+    garantir_tabela_registros_unicos()
     try:
         with open("status_espelhador.json", "w") as f:
             json.dump({}, f)
