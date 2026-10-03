@@ -59,11 +59,67 @@ def garantir_tabela_fila_notas():
     finally:
         conexao.close()
 
+def _ler_retomada():
+    """Horário salvo da retomada automática (datetime) ou None."""
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        try:
+            linha = conexao.execute("SELECT valor FROM configuracoes WHERE chave = 'retomada_notas'").fetchone()
+        finally:
+            conexao.close()
+        return datetime.fromisoformat(linha[0]) if linha and linha[0] else None
+    except Exception:
+        return None
+
+
+def _salvar_retomada(quando):
+    """Grava o horário da retomada automática; None apaga. Falha só vai para o log."""
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        try:
+            if quando is None:
+                conexao.execute("DELETE FROM configuracoes WHERE chave = 'retomada_notas'")
+            else:
+                conexao.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES ('retomada_notas', ?)",
+                                (quando.isoformat(),))
+            conexao.commit()
+        finally:
+            conexao.close()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Notas] Não consegui gravar a retomada automática: {e}")
+
+
+def _restaurar_retomada():
+    """
+    Reagenda a retomada da pausa de 26 h depois de um reinício, já que o
+    agendador só guarda jobs na memória. Se o horário já passou, retoma em 1 min.
+    """
+    quando = _ler_retomada()
+    if quando is None or scheduler_instance is None:
+        return
+    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+    try:
+        pendentes = conexao.execute("SELECT COUNT(*) FROM fila_notas WHERE status = 'PENDENTE'").fetchone()[0]
+    finally:
+        conexao.close()
+    if not pendentes:
+        _salvar_retomada(None)
+        return
+    quando = max(quando, datetime.now() + timedelta(minutes=1))
+    scheduler_instance.add_job(processar_fila_envios, 'date', run_date=quando, id='retomada_notas', replace_existing=True)
+    if EXIBIR_LOGS: logger.info(f"⏰ [Notas] Retomada de {pendentes} nota(s) pendente(s) reagendada para {quando.strftime('%d/%m %H:%M')}.")
+
+
 def configurar_dependencias(bot: Bot, scheduler):
+    """Recebe o bot e o agendador do bot_mestre, cria a tabela e restaura a retomada pendente."""
     global bot_instance, scheduler_instance
     bot_instance = bot
     scheduler_instance = scheduler
     garantir_tabela_fila_notas()
+    try:
+        _restaurar_retomada()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Notas] Não consegui restaurar a retomada automática: {e}")
     if EXIBIR_LOGS: logger.info("🔌 Conexão estabelecida: Dependências do Disparador de Notas injetadas com sucesso.")
 
 class PainelNotasFluxo(StatesGroup):
@@ -188,7 +244,8 @@ async def processar_fila_envios(msg_progresso: types.Message = None):
             agora = datetime.now()
             retomada = agora + timedelta(hours=PAUSA_HORAS)
             scheduler_instance.add_job(processar_fila_envios, 'date', run_date=retomada, id='retomada_notas', replace_existing=True)
-            
+            _salvar_retomada(retomada)
+
             assunto_admin = "[Sistema de Notas Shopee] Aviso de Pausa: Etapa Concluída"
             corpo_admin = f"<p>O limite diário de {LIMITE_DIARIO} foi atingido.</p><p>O script foi programado para retomar a próxima etapa em {retomada.strftime('%d/%m/%Y %H:%M')}.</p><p>Envios realizados nesta etapa: {envios_realizados}</p>"
             
@@ -217,7 +274,17 @@ async def processar_fila_envios(msg_progresso: types.Message = None):
         )
         
         if EXIBIR_LOGS: logger.info(f"⚙️ Processando envio para Loja: {loja} no valor de R$ {valor}...")
-        
+
+        # Sem o PDF, o e-mail sairia sem a nota: marca como erro em vez de enviar.
+        if not pdf or not os.path.exists(pdf):
+            erro_msg = f"PDF não encontrado no disco ({os.path.basename(pdf or '') or 'sem caminho'})"
+            cursor.execute("UPDATE fila_notas SET status = 'ERRO', motivo_erro = ? WHERE id = ?", (erro_msg, id_registro))
+            conexao.commit()
+            erros += 1
+            falhas_etapa.append(f"⚠️ Falha ao processar loja {loja}: {erro_msg}")
+            if EXIBIR_LOGS: logger.error(f"❌ Nota de {loja} não enviada: {erro_msg}")
+            continue
+
         try:
             status_api, resposta_api = await enviar_email_brevo(email, loja, assunto, corpo, pdf)
             
@@ -246,6 +313,7 @@ async def processar_fila_envios(msg_progresso: types.Message = None):
         await asyncio.sleep(1)
 
     conexao.close()
+    _salvar_retomada(None)
 
     # 🧹 Limpa a pasta de extração SEMPRE, inclusive quando houve erro de envio.
     # Antes só apagava no caminho de sucesso, e os PDFs de falhas iam se acumulando.
@@ -258,6 +326,14 @@ async def processar_fila_envios(msg_progresso: types.Message = None):
 
     # 🧹 Varre pastas de execuções antigas que ficaram para trás por erro ou queda
     try:
+        # Pasta com nota ainda pendente (pausa de 26 h) ou em rascunho fica, mesmo antiga.
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        try:
+            em_uso = {os.path.normpath(os.path.dirname(c)) for (c,) in conexao.execute(
+                "SELECT caminho_pdf FROM fila_notas WHERE status IN ('PENDENTE', 'RASCUNHO')") if c}
+        finally:
+            conexao.close()
+
         removidas = 0
         if os.path.exists(PASTA_TEMP):
             limite = time.time() - 86400   # poupa as últimas 24h
@@ -265,7 +341,7 @@ async def processar_fila_envios(msg_progresso: types.Message = None):
                 caminho = os.path.join(PASTA_TEMP, nome)
                 if not nome.startswith("extraido_") or not os.path.isdir(caminho):
                     continue
-                if os.path.getmtime(caminho) > limite:
+                if os.path.getmtime(caminho) > limite or os.path.normpath(caminho) in em_uso:
                     continue
                 shutil.rmtree(caminho, ignore_errors=True)
                 removidas += 1
@@ -850,7 +926,11 @@ async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
         cursor.execute("ALTER TABLE fila_notas ADD COLUMN valor TEXT")
     except sqlite3.OperationalError:
         pass
-    
+
+    # Só existe um lote em aprovação por vez: rascunho que sobrou é de lote abortado
+    # (ou interrompido por reinício) e seria enviado junto com este se ficasse.
+    cursor.execute("DELETE FROM fila_notas WHERE status = 'RASCUNHO'")
+
     resumo_tabela = ""
     for nota in notas_validadas:
         caminho_completo = os.path.join(pasta_extracao, nota['pdf'])
