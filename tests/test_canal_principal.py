@@ -64,10 +64,9 @@ def test_falha_de_envio_tenta_de_novo_ate_3_vezes(bm, telegram):
     assert status("r2") == "ERRO"
 
 
-def test_fim_da_pausa_no_meio_do_dia_volta_no_mesmo_dia(bm, telegram, monkeypatch):
+def test_fim_da_pausa_no_meio_do_dia_volta_no_mesmo_dia(bm, telegram, monkeypatch, relogio):
+    relogio("15:00")    # meio do dia: o Bom Dia já passou e a Boa Noite ainda não
     agora = datetime.now(bm.fuso_horario)
-    if not 10 <= agora.hour < 20:
-        pytest.skip("cenário montado para o meio do dia (Bom Dia já passou, Boa Noite ainda não)")
     hoje = agora.strftime("%Y-%m-%d")
     ontem = (agora - timedelta(days=1)).strftime("%Y-%m-%d")
 
@@ -147,7 +146,9 @@ def test_zerar_uma_fila_nao_apaga_arquivos_das_outras(bm, Msg, Est):
     for nome in ("clone.mp4", "publico.mp4", "lixo.mp4"):
         open(f"temp/{nome}", "wb").write(b"x")
         os.utime(f"temp/{nome}", (velho, velho))
+    # Recém-criado pelo relógio do teste: com --relogio, a hora do sistema de arquivos não é a do teste.
     open("temp/baixando.mp4", "wb").write(b"x")
+    os.utime("temp/baixando.mp4", (time.time(), time.time()))
     bm.salvar_fila_clonagem({"fila": [{"id": "c1", "processado": False, "caminho_video": "temp/clone.mp4"}]})
     conexao = sqlite3.connect("banco_dados.db")
     conexao.execute("CREATE TABLE IF NOT EXISTS fila_publico (id_unico TEXT PRIMARY KEY, msg_id_destino INTEGER, "

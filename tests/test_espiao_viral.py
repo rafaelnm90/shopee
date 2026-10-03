@@ -42,10 +42,12 @@ def item_da_fila(bm, id_):
 
 
 def test_retentativa_da_ia_marca_o_clone_certo(bm, espiao):
-    vencido = (datetime.now(bm.fuso_horario) - timedelta(minutes=5)).strftime(FMT)
+    agora = datetime.now(bm.fuso_horario)
+    vencido = (agora - timedelta(minutes=5)).strftime(FMT)
     open("temp/b.mp4", "wb").write(b"v")
+    # A saiu hoje: postado num dia anterior, a faxina da fila o tiraria (à 00:00 "5 min atrás" é ontem).
     bm.salvar_fila_clonagem({"fila": [
-        {"id": "A", "processado": True, "data_postagem": vencido[:10], "horario_disparo": vencido,
+        {"id": "A", "processado": True, "data_postagem": agora.strftime("%Y-%m-%d"), "horario_disparo": vencido,
          "caminho_video": "x", "link_original": "l", "data_captura": vencido},
         {"id": "B", "processado": False, "horario_disparo": vencido, "caminho_video": "temp/b.mp4",
          "link_original": "https://s.shopee.com.br/b", "data_captura": vencido},
@@ -100,8 +102,9 @@ def test_intercalacao_do_viral_conta_so_os_clones_de_hoje(bm):
     bm.salvar_fila_clonagem({"fila": [{"id": "a", "processado": False, "horario_disparo": amanha},
                                       {"id": "b", "processado": False, "horario_disparo": ""}]})
     assert bm.contar_videos_pendentes(bm.GRUPO_VIRAL_ID) == 0
+    # Ainda hoje, mais tarde: "daqui a 20 min" às 23:59 já é amanhã.
     bm.salvar_fila_clonagem({"fila": [{"id": "c", "processado": False,
-                                       "horario_disparo": (agora + timedelta(minutes=20)).strftime(FMT)}]})
+                                       "horario_disparo": agora.replace(hour=23, minute=59, second=59).strftime(FMT)}]})
     assert bm.contar_videos_pendentes(bm.GRUPO_VIRAL_ID) == 1
 
 
