@@ -3193,7 +3193,8 @@ def atualizar_parceiro(parceiro_id, campo, valor):
 
 def excluir_parceiro(parceiro_id):
     """
-    Remove o parceiro e a fila dele. As RESERVAS são mantidas de propósito:
+    Remove o parceiro, a fila dele e os vídeos baixados (parceiros/<id>/, que contam
+    no teto de disco de todos os parceiros). As RESERVAS são mantidas de propósito:
     vídeo já entregue a alguém nunca volta ao poço.
     """
     try:
@@ -3203,9 +3204,11 @@ def excluir_parceiro(parceiro_id):
         try:
             cursor.execute("DELETE FROM fila_parceiros WHERE parceiro_id = ?", (int(parceiro_id),))
         except sqlite3.OperationalError:
-            pass   # a fila só passa a existir na Fase 3
+            pass   # a tabela só nasce na primeira captura de parceiro
         conexao.commit()
         conexao.close()
+        import shutil
+        shutil.rmtree(os.path.join("parceiros", str(int(parceiro_id))), ignore_errors=True)
         return True
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao excluir: {e}")
@@ -4144,7 +4147,7 @@ async def parceiro_receber_limite(message: types.Message, state: FSMContext):
         f"📤 <b>Destino:</b> {rotulo_alvo(d.get('canal_destino'))}\n"
         f"⏳ <b>Atraso:</b> D+{d.get('dias_atraso')}\n"
         f"📦 <b>Cota:</b> {d.get('limite_diario')} vídeos/dia\n\n"
-        "<i>O parceiro nasce ativo, mas a publicação automática só entra numa próxima etapa.</i>",
+        "<i>O parceiro nasce ativo: o userbot tenta entrar no canal de origem e a captura começa quando o acesso der certo.</i>",
         parse_mode="HTML", reply_markup=teclado_confirmacao
     )
     await state.set_state(SubmissaoAdminFluxo.parceiro_confirmar)
