@@ -121,7 +121,8 @@ def _restaurar_retomada():
         _salvar_retomada(None)
         return
     quando = max(quando, datetime.now() + timedelta(minutes=1))
-    scheduler_instance.add_job(processar_fila_envios, 'date', run_date=quando, id='retomada_notas', replace_existing=True)
+    scheduler_instance.add_job(processar_fila_envios, 'date', run_date=quando, kwargs={"retomada": True},
+                               id='retomada_notas', replace_existing=True)
     if EXIBIR_LOGS: logger.info(f"⏰ [Notas] Retomada de {pendentes} nota(s) pendente(s) reagendada para {quando.strftime('%d/%m %H:%M')}.")
 
 
@@ -207,7 +208,63 @@ async def enviar_email_brevo(para_email, para_nome, assunto, corpo_html, caminho
             texto_resposta = await resposta.text()
             return resposta.status, texto_resposta
 
-async def processar_fila_envios(msg_progresso: types.Message = None):
+async def _liberar_painel(chat_id):
+    """Devolve o teclado de Relatórios, que a aprovação tira da tela durante o envio."""
+    if not bot_instance:
+        return
+    teclado_outros = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Relatório Financeiro 💰"), KeyboardButton(text="Diagnóstico de IA 🧠")],
+            [KeyboardButton(text="Relatórios de Filas 📋"), KeyboardButton(text="Logs de Erros ⚠️")],
+            [KeyboardButton(text="Disparador de Notas 🧾")],
+            [KeyboardButton(text="Voltar ao Início 🔙")]
+        ],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    try:
+        await bot_instance.send_message(chat_id, "O painel principal está liberado.", reply_markup=teclado_outros)
+    except Exception: pass
+
+
+# Uma rodada de envio por vez: duas rodadas juntas leriam as mesmas notas PENDENTE
+# e mandariam cada uma duas vezes.
+_trava_envio = asyncio.Lock()
+
+
+async def processar_fila_envios(msg_progresso: types.Message = None, retomada=False):
+    """
+    Porta de entrada do envio de notas: uma rodada por vez e respeito à pausa de
+    segurança. Se outra rodada está em andamento, esta espera ela terminar. Com a
+    pausa ativa, uma rodada pedida pela aprovação não envia nada: as notas ficam
+    PENDENTE e saem na retomada automática (agendada com retomada=True).
+    """
+    if _trava_envio.locked():
+        if EXIBIR_LOGS: logger.info("⏳ [Notas] Já há um envio em andamento; este lote espera ele terminar.")
+        if msg_progresso:
+            try:
+                await msg_progresso.edit_text("⏳ <i>Há um envio em andamento. Este lote sai assim que ele terminar.</i>", parse_mode="HTML")
+            except Exception:
+                pass
+
+    async with _trava_envio:
+        pausa_ate = _ler_retomada()
+        if not retomada and pausa_ate and pausa_ate > datetime.now():
+            if EXIBIR_LOGS: logger.info(f"⏸️ [Notas] Pausa ativa até {pausa_ate.strftime('%d/%m %H:%M')}; as notas aprovadas saem na retomada.")
+            if msg_progresso:
+                try:
+                    await msg_progresso.edit_text(
+                        f"⏸️ <b>Pausa de segurança ativa</b> até {pausa_ate.strftime('%d/%m às %H:%M')}.\n"
+                        "As notas aprovadas ficaram na fila e saem na retomada automática.",
+                        parse_mode="HTML")
+                except Exception:
+                    pass
+                await _liberar_painel(msg_progresso.chat.id)
+            return
+        await _enviar_pendentes(msg_progresso)
+
+
+async def _enviar_pendentes(msg_progresso: types.Message = None):
     """
     Envia por e-mail todas as notas PENDENTE, uma por segundo, e apaga o PDF de
     cada nota enviada. msg_progresso, se vier, é editada a cada nota.
@@ -261,7 +318,8 @@ async def processar_fila_envios(msg_progresso: types.Message = None):
             if EXIBIR_LOGS: logger.warning(f"⏳ Limite diário atingido. Programando retomada para {PAUSA_HORAS} horas.")
             agora = datetime.now()
             retomada = agora + timedelta(hours=PAUSA_HORAS)
-            scheduler_instance.add_job(processar_fila_envios, 'date', run_date=retomada, id='retomada_notas', replace_existing=True)
+            scheduler_instance.add_job(processar_fila_envios, 'date', run_date=retomada, kwargs={"retomada": True},
+                                       id='retomada_notas', replace_existing=True)
             _salvar_retomada(retomada)
 
             assunto_admin = "[Sistema de Notas Shopee] Aviso de Pausa: Etapa Concluída"
@@ -278,9 +336,10 @@ async def processar_fila_envios(msg_progresso: types.Message = None):
             if msg_progresso:
                 try: 
                     await msg_progresso.edit_text(f"⏸️ <b>PAUSA DE SEGURANÇA:</b> Limite de {LIMITE_DIARIO} atingido.\nRetomada automática programada para {retomada.strftime('%d/%m às %H:%M')}.", parse_mode="HTML")
-                except Exception as e: 
+                except Exception as e:
                     if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao atualizar mensagem de pausa no Telegram: {e}")
                     pass
+                await _liberar_painel(msg_progresso.chat.id)
             return
 
         assunto = f"Sua Nota Fiscal de Comissão Shopee - {loja}"
@@ -391,20 +450,8 @@ async def processar_fila_envios(msg_progresso: types.Message = None):
         
     await enviar_email_brevo(EMAIL_ADMIN, "Administrador", assunto_final, corpo_final)
     
-    if msg_progresso and bot_instance:
-        teclado_outros = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Relatório Financeiro 💰"), KeyboardButton(text="Diagnóstico de IA 🧠")],
-                [KeyboardButton(text="Relatórios de Filas 📋"), KeyboardButton(text="Logs de Erros ⚠️")],
-                [KeyboardButton(text="Disparador de Notas 🧾")],
-                [KeyboardButton(text="Voltar ao Início 🔙")]
-            ],
-            resize_keyboard=True,
-            is_persistent=True
-        )
-        try:
-            await bot_instance.send_message(msg_progresso.chat.id, "O painel principal está liberado.", reply_markup=teclado_outros)
-        except Exception: pass
+    if msg_progresso:
+        await _liberar_painel(msg_progresso.chat.id)
 
 # Fluxo no Telegram: menu → CSV → ZIP → pareamento → resumo → aprovação → envio.
 
@@ -423,7 +470,8 @@ async def ignorar_durante_envio(message: types.Message):
     """
     Responde a qualquer mensagem enquanto o estado é enviando_notas. Na prática
     quase não age: processar_aprovacao_envio limpa o estado logo depois de
-    iniciar o envio, que segue em segundo plano.
+    iniciar o envio, que segue em segundo plano. Quem impede dois envios ao
+    mesmo tempo é a trava em processar_fila_envios.
     """
     await message.answer("⚠️ <b>Aguarde o fim do processo!</b>\nO robô está enviando as notas fiscais passo a passo. Nenhuma outra ação pode ser feita agora.", parse_mode="HTML")
 
