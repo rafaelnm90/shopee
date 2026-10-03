@@ -7,10 +7,17 @@ com cara de token para o GitGuardian) e cada teste roda numa pasta vazia, com
 banco novo. Nada toca a rede: Telegram e IA são substituídos por fakes.
 
 Rodar: python3 -m pytest tests -q
+Opções (o CI usa as duas, em várias rodadas):
+  --ordem aleatoria   embaralha a ordem dos testes; a semente sai no fim, e
+                      --ordem <semente> repete a mesma ordem.
+  --relogio HH:MM     cada teste começa nessa hora de Brasília (de hoje), com o
+                      relógio andando a partir dali.
 """
 import asyncio
+import importlib
 import logging
 import os
+import random
 import sqlite3
 import sys
 import tempfile
@@ -37,10 +44,81 @@ os.environ.update({
     "CHAVE_MESTRA_CONTAS": Fernet.generate_key().decode(),
 })
 
-# A importação dos robôs já cria arquivos: que seja fora do repositório.
+# A importação dos robôs já cria pastas e arquivos (temp/notas_fiscais, sessões):
+# que seja numa pasta descartável, uma vez, antes de qualquer teste. Importados só
+# no primeiro teste que os usa, as sobras cairiam na pasta desse teste, e o
+# resultado dependeria da ordem em que os testes rodam.
 os.chdir(tempfile.mkdtemp(prefix="shopee_testes_"))
+for _modulo in ("bot_mestre", "pool_contas", "espelhador_videos_autorais"):
+    importlib.import_module(_modulo)
 
 import pytest  # noqa: E402
+import time_machine  # noqa: E402
+from datetime import datetime  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+
+FUSO_TESTES = ZoneInfo("America/Sao_Paulo")
+
+
+def pytest_addoption(parser):
+    parser.addoption("--ordem", default=None, metavar="aleatoria|SEMENTE",
+                     help="Embaralha a ordem dos testes; com um número, repete uma ordem anterior.")
+    parser.addoption("--relogio", default=None, metavar="HH:MM[:SS]",
+                     help="Cada teste começa nessa hora de Brasília; o relógio anda a partir dali.")
+
+
+def _semente(config):
+    ordem = config.getoption("--ordem")
+    if not ordem:
+        return None
+    if not hasattr(config, "_semente_ordem"):
+        config._semente_ordem = random.randrange(10**6) if ordem == "aleatoria" else int(ordem)
+    return config._semente_ordem
+
+
+def pytest_collection_modifyitems(config, items):
+    # Teste que só passa numa certa ordem depende de sobra deixada por outro teste.
+    semente = _semente(config)
+    if semente is not None:
+        random.Random(semente).shuffle(items)
+
+
+def pytest_terminal_summary(terminalreporter, config):
+    if config.getoption("--relogio"):
+        terminalreporter.write_line(f"Relógio dos testes: {config.getoption('--relogio')} (Brasília)")
+    semente = _semente(config)
+    if semente is not None:
+        terminalreporter.write_line(f"Ordem aleatória: semente {semente} (repita com --ordem {semente})")
+
+
+def _instante(hora):
+    h, m, *s = (int(x) for x in hora.split(":"))
+    return datetime.now(FUSO_TESTES).replace(hour=h, minute=m, second=s[0] if s else 0, microsecond=0)
+
+
+@pytest.fixture(autouse=True)
+def relogio_da_rodada(request):
+    """Com --relogio, todo teste roda naquela hora: o CI passa a suíte de madrugada, de dia e de noite."""
+    hora = request.config.getoption("--relogio")
+    if not hora:
+        yield
+        return
+    with time_machine.travel(_instante(hora), tick=True):
+        yield
+
+
+@pytest.fixture
+def relogio():
+    """relogio("15:00"): o teste passa a acontecer nessa hora de Brasília, com o relógio andando."""
+    viagens = []
+
+    def fixar(hora):
+        viagem = time_machine.travel(_instante(hora), tick=True)
+        viagem.start()
+        viagens.append(viagem)
+    yield fixar
+    for viagem in reversed(viagens):
+        viagem.stop()
 
 
 @pytest.fixture(autouse=True)

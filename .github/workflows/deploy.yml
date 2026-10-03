@@ -78,7 +78,8 @@ jobs:
             # o deploy fica vermelho e mostra o fim do log de quem caiu.
             sleep 25
             FALHOU=0
-            for SERVICO in bot_mestre_bot divulgacao_canal_bot motor_userbot_bot espelhador_videos_autorais_bot downloader_bot; do
+            SERVICOS="bot_mestre_bot divulgacao_canal_bot motor_userbot_bot espelhador_videos_autorais_bot downloader_bot"
+            for SERVICO in $SERVICOS; do
               if systemctl is-active --quiet "$SERVICO.service"; then
                 echo "✅ $SERVICO ativo"
               else
@@ -87,6 +88,32 @@ jobs:
                 FALHOU=1
               fi
             done
+
+            # 7. Confere de novo 3 min depois. Com Restart=always, o robô que cai depois de
+            # subir (no primeiro agendamento, na conexão com o Telegram) volta sozinho em
+            # 10 s e parece "ativo" numa olhada só. Processo novo (MainPID) ou reinício
+            # contado (NRestarts) desde a 1ª olhada = caiu nesse meio-tempo.
+            if [ $FALHOU -eq 0 ]; then
+              ANTES=""
+              for SERVICO in $SERVICOS; do
+                ANTES="$ANTES $SERVICO:$(systemctl show -p MainPID --value "$SERVICO.service"):$(systemctl show -p NRestarts --value "$SERVICO.service")"
+              done
+              echo "⏳ Conferindo de novo em 3 minutos..."
+              sleep 180
+              for ITEM in $ANTES; do
+                SERVICO=${ITEM%%:*}; RESTO=${ITEM#*:}
+                PID_ANTES=${RESTO%%:*}; REINICIOS_ANTES=${RESTO#*:}
+                PID_AGORA=$(systemctl show -p MainPID --value "$SERVICO.service")
+                REINICIOS_AGORA=$(systemctl show -p NRestarts --value "$SERVICO.service")
+                if systemctl is-active --quiet "$SERVICO.service" && [ "$PID_AGORA" = "$PID_ANTES" ] && [ "$REINICIOS_AGORA" = "$REINICIOS_ANTES" ]; then
+                  echo "✅ $SERVICO continua de pé 3 min depois"
+                else
+                  echo "❌ $SERVICO caiu depois de subir (processo $PID_ANTES -> $PID_AGORA, reinícios $REINICIOS_ANTES -> $REINICIOS_AGORA)"
+                  sudo journalctl -u "$SERVICO.service" -n 40 --no-pager || true
+                  FALHOU=1
+                fi
+              done
+            fi
 
             if [ "$EXIBIR_LOGS" = "true" ]; then echo "🚪 Encerrando a conexão SSH de forma limpa..."; fi
             exit $FALHOU
