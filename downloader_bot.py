@@ -413,7 +413,6 @@ async def faxina_diaria_loop():
 # ♻️ CACHE DE VÍDEOS
 # O file_id é só uma string (~80 bytes) — o vídeo fica nos servidores do Telegram.
 # Reenviar o mesmo id custa zero download, zero banda e zero disco.
-DIAS_CACHE_VIDEO = 30
 
 def chave_cache_video(url):
     """Ignora rastreadores (?fromSource=, ?_t=) para o mesmo vídeo gerar a mesma chave."""
@@ -462,25 +461,6 @@ def guardar_cache_video(url, file_id, plataforma):
         conexao.close()
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao guardar no cache: {e}")
-
-def limpar_cache_videos_antigos(dias=DIAS_CACHE_VIDEO):
-    """file_id antigo pode expirar no Telegram — melhor rebaixar do que entregar quebrado."""
-    try:
-        corte = (datetime.now(FUSO) - timedelta(days=dias)).strftime("%Y-%m-%d %H:%M:%S")
-        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
-        cursor = conexao.cursor()
-        _garantir_cache_videos(cursor)
-        cursor.execute("DELETE FROM cache_videos WHERE data_cache < ?", (corte,))
-        removidos = cursor.rowcount
-        cursor.execute("SELECT COUNT(*), COALESCE(SUM(usos - 1), 0) FROM cache_videos")
-        total, economizados = cursor.fetchone()
-        conexao.commit()
-        conexao.close()
-        if EXIBIR_LOGS:
-            logger.info(f"♻️ [Cache] {total} vídeo(s) guardado(s) · {economizados} download(s) economizado(s)"
-                        + (f" · {removidos} expirado(s) removido(s)" if removidos else ""))
-    except Exception:
-        pass
 
 def remover_cache_video(url):
     """Chamado quando o file_id guardado não funciona mais."""
@@ -836,12 +816,6 @@ async def baixar_video_shopee(url, pasta):
         if EXIBIR_LOGS: logger.error(f"❌ Erro crítico na extração da matriz da Shopee: {e}")
         return None, "erro interno ao extrair matriz da Shopee"
 
-    except asyncio.TimeoutError:
-        return None, "a API externa demorou demais para responder"
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro crítico na comunicação com a API de extração: {e}")
-        return None, "erro interno ao processar a extração via API"
-
 async def _baixar_video_uma_vez(url, pasta):
     """
     Roda o yt-dlp em SUBPROCESSO. Chamar direto travaria o bot inteiro,
@@ -1033,6 +1007,13 @@ ATRASO_APAGAR_LINK_SEG = 3
 async def apagar_link_original(message):
     await asyncio.sleep(ATRASO_APAGAR_LINK_SEG)
     try: await message.delete()
+    except Exception: pass
+
+
+async def apagar_depois(mensagem, segundos):
+    """Apaga a mensagem depois de `segundos`, sem prender quem chamou."""
+    await asyncio.sleep(segundos)
+    try: await mensagem.delete()
     except Exception: pass
 
 # ⏳ O aviso de cota estourada não fica exposto no tópico: quanto menos gente
@@ -1256,9 +1237,8 @@ async def receber_link(message: types.Message):
                     f"(limite de {LIMITE_DIARIO_DOWNLOADS} por dia).",
                     parse_mode="HTML"
                 )
-                await asyncio.sleep(30)
-                try: await aviso_cota.delete()
-                except Exception: pass
+                # Em segundo plano: esperar aqui prenderia a fila de download por 30 s.
+                asyncio.create_task(apagar_depois(aviso_cota, 30))
 
             if EXIBIR_LOGS: logger.info(f"📤 Vídeo entregue para {message.from_user.id} ({plataforma}).")
 
@@ -1366,17 +1346,6 @@ async def reenviar_painel_downloader():
         if antiga and antiga != nova.message_id:
             try: await bot.delete_message(chat_id=GRUPO_DOWNLOADER, message_id=antiga)
             except Exception: pass
-
-        # 📌 Fixa no topo do tópico. Sem notificação, para não tocar sino em ninguém.
-        # O pin antigo cai sozinho quando a mensagem anterior é apagada acima.
-        try:
-            await bot.pin_chat_message(
-                chat_id=GRUPO_DOWNLOADER,
-                message_id=nova.message_id,
-                disable_notification=True
-            )
-        except Exception as e:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ [Painel] Não consegui fixar: {e}")
 
         salvar_msg_painel(nova.message_id)
         if EXIBIR_LOGS: logger.info(f"📌 [Painel] Painel recriado no fim do tópico (ID {nova.message_id}).")
