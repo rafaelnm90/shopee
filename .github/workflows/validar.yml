@@ -23,7 +23,7 @@ jobs:
           cache: pip
 
       - name: Instalar dependências
-        run: pip install -r requirements.txt pytest pyflakes
+        run: pip install -r requirements.txt pytest pyflakes "time-machine>=3,<4"
 
       - name: Rodar o validador de deploy (todos os .py)
         run: python3 validar_deploy.py *.py
@@ -36,5 +36,14 @@ jobs:
           python3 pool_contas.py autoteste
           python3 blacklist_captura.py autoteste
 
-      - name: Testes (tests/)
-        run: python3 -m pytest tests -q
+      # Uma rodada vale por várias: a suíte roda 4 vezes, cada uma numa hora do dia
+      # (virada, manhã, meio-dia, fim do dia) e numa ordem sorteada. Pega bug que só
+      # aparece em certo horário e teste que depende de sobra de outro teste. A
+      # semente sai no fim de cada passagem: --ordem <semente> repete a mesma ordem.
+      - name: Testes (tests/) em 4 horários e ordem aleatória
+        run: |
+          for hora in 00:00:30 08:00 12:30 23:59:30; do
+            echo "::group::Testes às $hora"
+            python3 -m pytest tests -q -p no:cacheprovider --ordem aleatoria --relogio "$hora"
+            echo "::endgroup::"
+          done
