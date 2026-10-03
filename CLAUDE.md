@@ -115,6 +115,7 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
   - `diagnostico.yml` olha o servidor de hora em hora, só lendo: robôs (estado, desde quando, reinícios), máquina (carga, memória, disco), banco e volume de log. Fica vermelho com robô fora do ar ou disco acima de 90% (o GitHub manda e-mail). Para ver o servidor agora, dispare-o (`run_workflow` em `diagnostico.yml`) e leia o log do job.
   - `inventario.yml` (só à mão) roda o `inventario.py` no servidor. Ele mostra:
     - tamanho e idade de cada pasta, os arquivos soltos e as linhas por tabela;
+    - os erros do `erros_logs` por origem e tipo de exceção (sem o texto) e as versões das bibliotecas;
     - as configurações mais pesadas e o histórico da fila do Espelhador;
     - o espaço do journal e as linhas de log que mais se repetem, com arquivo:linha do código;
     - os caches e a memória de cada robô.

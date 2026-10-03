@@ -174,3 +174,20 @@ def test_loop_de_repostagem_com_rodizio(esp, contas, pc, fila_retorno, monkeypat
     erros = sqlite3.connect("banco_dados.db").execute(
         "SELECT COUNT(*) FROM atividade_contas WHERE ultimo_erro IS NOT NULL").fetchone()[0]
     assert erros == 2
+
+
+def test_erro_repetido_da_varredura_grava_uma_vez_por_hora(esp, monkeypatch):
+    gravados = []
+    monkeypatch.setattr(esp, "registrar_erro_json", lambda msg, origem=None: gravados.append(msg))
+    monkeypatch.setattr(esp, "_ultimo_erro_varredura", {"chave": None, "quando": 0.0})
+    relogio = {"agora": 10_000.0}
+    monkeypatch.setattr(esp.time, "monotonic", lambda: relogio["agora"])
+
+    esp.registrar_erro_varredura(ValueError("sem entidade"))
+    esp.registrar_erro_varredura(ValueError("sem entidade"))      # mesma volta seguinte
+    assert gravados == ["varredura_origem_loop: ValueError: sem entidade"]
+
+    esp.registrar_erro_varredura(KeyError("outro"))                # erro diferente grava na hora
+    relogio["agora"] += 3600
+    esp.registrar_erro_varredura(KeyError("outro"))                # o mesmo, uma hora depois
+    assert len(gravados) == 3

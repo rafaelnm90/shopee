@@ -23,6 +23,7 @@ parceiros/<id>/, e também são publicados pelo bot_mestre.
 """
 
 import os
+import time
 import asyncio
 import random
 import aiohttp
@@ -1947,6 +1948,20 @@ class EventoSimulado:
         return getattr(self._msg, nome)
 
 
+# Erro da varredura que vai para o erros_logs (e o /status): o mesmo erro repetido
+# a cada volta só é gravado de novo depois de uma hora, para não empurrar os outros
+# erros para fora da tabela, que guarda só os 50 mais recentes.
+_ultimo_erro_varredura = {"chave": None, "quando": 0.0}
+
+
+def registrar_erro_varredura(e):
+    chave = f"{type(e).__name__}: {e}"
+    agora = time.monotonic()
+    if chave != _ultimo_erro_varredura["chave"] or agora - _ultimo_erro_varredura["quando"] >= 3600:
+        _ultimo_erro_varredura.update(chave=chave, quando=agora)
+        registrar_erro_json(f"varredura_origem_loop: {chave}", origem="espelhador_videos_autorais.py")
+
+
 async def varredura_origem_loop():
     """
     A cada INTERVALO_VARREDURA_MIN minutos lê as últimas LIMITE_VARREDURA mensagens
@@ -2018,7 +2033,8 @@ async def varredura_origem_loop():
             await asyncio.sleep(espera + 5)
             continue
         except Exception as e:
-            logger.error(f"❌ [Varredura] Erro estrutural no loop: {e}")
+            logger.error(f"❌ [Varredura] Erro estrutural no loop ({type(e).__name__}): {e}")
+            registrar_erro_varredura(e)
 
         await asyncio.sleep(INTERVALO_VARREDURA_MIN * 60)
 
