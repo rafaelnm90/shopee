@@ -11686,7 +11686,7 @@ async def receber_intervalo_espiao(message: types.Message, state: FSMContext):
         return
         
     teclado_modo = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")], [KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
-    await message.answer("Como deseja distribute os clones retidos dentro da janela estipulada?", reply_markup=teclado_modo)
+    await message.answer("Como deseja distribuir os clones retidos dentro da janela estipulada?", reply_markup=teclado_modo)
     await state.set_state(ConfigRotinaEspiao.aguardando_modo)
 
 @dp.message(ConfigRotinaEspiao.aguardando_modo)
