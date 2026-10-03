@@ -14481,7 +14481,7 @@ async def processar_fila_espiao(forcar=False):
                     except Exception: pass
             fila_data["fila"] = [i for i in fila_data.get("fila", []) if not i.get("descartar_por_idade")]
             fila = fila_data["fila"]
-            if EXIBIR_LOGS: logger.info(f"🗑️ [Espião] {len(marcados)} clone(s) descartado(s): passariam de 5 dias desde a captura.")
+            if EXIBIR_LOGS: logger.info(f"🗑️ [Espião] {len(marcados)} clone(s) descartado(s): passariam de {config_fila['limite_dias_descarte']} dias desde a captura.")
 
         salvar_fila_clonagem(fila_data)
         if EXIBIR_LOGS: logger.info(f"📅 [Espião] Motor Central acionado! {len(itens_para_agendar)} clones organizados com sucesso.")
@@ -14603,7 +14603,7 @@ async def processar_fila_espiao(forcar=False):
             if tentativas < MAX_TENTATIVAS_IA:
                 novo_horario = (agora + timedelta(minutes=INTERVALO_RETENTATIVA_MIN)).strftime("%Y-%m-%d %H:%M:%S")
                 for f_item in fila_data.get("fila", []):
-                    if f_item.get("id_unico") == item_pendente.get("id_unico"):
+                    if f_item.get("id") == item_pendente.get("id"):
                         f_item["tentativas_ia"] = tentativas
                         f_item["horario_disparo"] = novo_horario
                         break
