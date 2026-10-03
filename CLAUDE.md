@@ -117,12 +117,14 @@ python3 -m pytest tests -q        # ~1 min; sem .env e sem rede
   - Sem emoji nos comentários. Nos textos que o bot mostra, pode.
   - Cada módulo começa com uma docstring que diz o que ele é e quem o usa.
 - Um assunto por commit. O título do commit fica em português, no formato `arquivo ou área: o que mudou`.
-- PR e merge só quando o Rafael pedir: merge na `main` é deploy em produção.
-- Antes de todo merge:
-  - O CI do PR precisa passar 5 vezes seguidas no mesmo commit, rodando de novo o workflow "Validar código".
+- PR, rodadas e merge: merge na `main` é deploy em produção.
+  - Mudança pronta e validada: abrir o PR, acompanhar e fazer o merge sem perguntar.
+  - Antes do merge, o CI do PR precisa passar 5 vezes seguidas no mesmo commit, rodando de novo o workflow "Validar código".
   - Entre o fim de uma rodada e o início da próxima, esperar 5 minutos.
   - Se uma rodada falhar, investigar e corrigir; a contagem volta a zero.
   - Depois do merge, acompanhar o deploy até os 5 serviços aparecerem ativos e avisar o Rafael.
+  - Se o Rafael disser para não fazer o merge, não fazer.
+  - Se o Rafael mandar fazer o merge direto, sem as rodadas, obedecer.
 - O repositório é público:
   - nunca commitar credencial, `.env`, sessão ou banco;
   - nos testes, nada com cara de token (o GitGuardian acusa).
