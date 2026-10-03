@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import hashlib
 from telethon import utils
 from telethon import TelegramClient, events
+from telethon.errors import FloodWaitError
 from dotenv import load_dotenv
 from utils import registrar_erro_json, chave_cache_ia, consultar_cache_ia, gravar_cache_ia
 from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite # ⚙️ Novo Motor Centralizado
@@ -382,7 +383,9 @@ async def interceptar_mensagem(event):
     # ✅ NOVO: Identifica se a mensagem foi enviada em um Tópico (Subgrupo)
     topico_id_evento = None
     if event.message.reply_to:
-        topico_id_evento = getattr(event.message.reply_to, 'forum_topic_id', getattr(event.message.reply_to, 'reply_to_msg_id', None))
+        # Post direto no tópico: o tópico vem em reply_to_msg_id. Resposta dentro do
+        # tópico: o tópico vem em reply_to_top_id (reply_to_msg_id é a mensagem respondida).
+        topico_id_evento = getattr(event.message.reply_to, 'reply_to_top_id', None) or getattr(event.message.reply_to, 'reply_to_msg_id', None)
 
     # ✅ NOVO: Verifica se o grupo e o subgrupo batem com os alvos do banco de dados
     eh_alvo_espiao = False
@@ -412,46 +415,48 @@ async def interceptar_mensagem(event):
     
     # Ignora mensagens de bate-papo, processa apenas se tiver link e mídia
     if link_capturado:
-        
+        # Só vídeo interessa, e isso é checado antes da duplicidade: o link só é
+        # registrado como capturado quando há vídeo. Senão um post com foto e link
+        # bloquearia por 24 h o post com vídeo do mesmo produto.
+        if getattr(event, 'video', None) is None:
+            if EXIBIR_LOGS: logger.info(f"⏭️ Ignorado: O link {link_capturado} foi encontrado, mas a postagem não contém um anexo de vídeo direto.")
+            return
+
         # ✅ NOVO: Bloqueio de vídeos duplicados no módulo Espião (Contexto Isolado)
         if verificar_e_registrar_espelho(link_capturado, contexto="espiao"):
             if EXIBIR_LOGS: logger.info(f"🪞 [Espião] Duplicidade barrada! O produto {link_capturado} já foi capturado nas últimas 24 horas.")
             return # Encerra o processamento da mensagem aqui mesmo, sem baixar o vídeo
             
-        # ✅ TRAVA ESTRITA DE MÍDIA: Filtra rigorosamente apenas vídeos, ignorando fotos
-        if getattr(event, 'video', None) is not None:
-            if EXIBIR_LOGS: logger.info(f"🎯 ALVO LOCALIZADO! Link da Shopee extraído cirurgicamente: {link_capturado}")
-            
-            # ✅ CORREÇÃO DO ERRO FATAL (texto_original em vez de texto)
-            if "magazineluiza" in texto_original.lower() or "meli.li" in texto_original.lower() or "mercadolivre" in texto_original.lower():
-                if EXIBIR_LOGS: logger.info("✂️ Concorrência ignorada: A postagem continha outros domínios, mas apenas o da Shopee foi filtrado.")
-            
-            if EXIBIR_LOGS: logger.info("📥 Iniciando download do vídeo em segundo plano...")
-            caminho_salvo = await event.download_media(file="temp/temp_clone_")
+        if EXIBIR_LOGS: logger.info(f"🎯 ALVO LOCALIZADO! Link da Shopee extraído cirurgicamente: {link_capturado}")
+        
+        # ✅ CORREÇÃO DO ERRO FATAL (texto_original em vez de texto)
+        if "magazineluiza" in texto_original.lower() or "meli.li" in texto_original.lower() or "mercadolivre" in texto_original.lower():
+            if EXIBIR_LOGS: logger.info("✂️ Concorrência ignorada: A postagem continha outros domínios, mas apenas o da Shopee foi filtrado.")
+        
+        if EXIBIR_LOGS: logger.info("📥 Iniciando download do vídeo em segundo plano...")
+        caminho_salvo = await event.download_media(file="temp/temp_clone_")
 
-            # ✅ NOVA TRAVA DE QUALIDADE E UPSCALING
-            caminho_salvo = await verificar_e_otimizar_video(caminho_salvo)
+        # ✅ NOVA TRAVA DE QUALIDADE E UPSCALING
+        caminho_salvo = await verificar_e_otimizar_video(caminho_salvo)
+        
+        hash_arquivo = calcular_hash_video(caminho_salvo)
+        
+        if hash_arquivo and verificar_e_registrar_hash(hash_arquivo):
+            if EXIBIR_LOGS: logger.warning("🚫 Clone bloqueado! O vídeo possui uma assinatura digital idêntica a um ficheiro já processado.")
+            try:
+                os.remove(caminho_salvo)
+                if EXIBIR_LOGS: logger.info("🧹 Ficheiro físico duplicado eliminado com sucesso para poupar espaço.")
+            except Exception as e:
+                if EXIBIR_LOGS: logger.error(f"❌ Erro ao tentar remover ficheiro duplicado: {e}")
+            return
             
-            hash_arquivo = calcular_hash_video(caminho_salvo)
-            
-            if hash_arquivo and verificar_e_registrar_hash(hash_arquivo):
-                if EXIBIR_LOGS: logger.warning("🚫 Clone bloqueado! O vídeo possui uma assinatura digital idêntica a um ficheiro já processado.")
-                try:
-                    os.remove(caminho_salvo)
-                    if EXIBIR_LOGS: logger.info("🧹 Ficheiro físico duplicado eliminado com sucesso para poupar espaço.")
-                except Exception as e:
-                    if EXIBIR_LOGS: logger.error(f"❌ Erro ao tentar remover ficheiro duplicado: {e}")
-                return
-                
-            # 📊 Nome real do grupo, já disponível via Telethon neste momento
-            nome_chat = getattr(chat, 'title', chat_username if chat_username else chat_id)
+        # 📊 Nome real do grupo, já disponível via Telethon neste momento
+        nome_chat = getattr(chat, 'title', chat_username if chat_username else chat_id)
 
-            salvar_na_fila_clonagem(caminho_salvo, link_capturado, chat_origem=chat_id_completo, nome_origem=nome_chat, msg_id=event.id)
-            
-            # 📊 Adiciona a pontuação ao painel estatístico do Espião
-            registrar_historico_espiao(nome_chat)
-        else:
-            if EXIBIR_LOGS: logger.info(f"⏭️ Ignorado: O link {link_capturado} foi encontrado, mas a postagem não contém um anexo de vídeo direto.")
+        salvar_na_fila_clonagem(caminho_salvo, link_capturado, chat_origem=chat_id_completo, nome_origem=nome_chat, msg_id=event.id)
+        
+        # 📊 Adiciona a pontuação ao painel estatístico do Espião
+        registrar_historico_espiao(nome_chat)
 
 # --- MOTOR DO ESPELHADOR (USERBOT) ---
 def ler_espelhos_config():
@@ -662,6 +667,8 @@ async def processar_fila_espelhador_loop():
                     except Exception: pass
                 
                 if deve_disparar:
+                    msg_enviada = None
+                    erro_disparo = None
                     try:
                         chat_origem_bruto = item["chat_origem"]
                         chat_origem = int(chat_origem_bruto) if str(chat_origem_bruto).lstrip('-').isdigit() else chat_origem_bruto
@@ -742,8 +749,26 @@ async def processar_fila_espelhador_loop():
                         else:
                             if EXIBIR_LOGS: logger.warning(f"⚠️ [Espelhador] Mensagem original {msg_id} apagada antes do disparo na rota '{nome_rota}'.")
                     except Exception as e:
+                        erro_disparo = e
                         if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Falha no disparo da rota '{nome_rota}': {e}")
-                    
+
+                    # Erro antes de o vídeo sair (rede, flood, destino inacessível): o item volta
+                    # para a fila e é tentado nos próximos ciclos, até 3 vezes; num flood, só
+                    # depois da espera pedida pelo Telegram. Vídeo apagado ou sem vídeo na
+                    # origem não é erro e segue direto para o histórico.
+                    if erro_disparo is not None and msg_enviada is None:
+                        tentativas = int(item.get("tentativas_disparo", 0)) + 1
+                        if tentativas < 3:
+                            item["tentativas_disparo"] = tentativas
+                            if isinstance(erro_disparo, FloodWaitError):
+                                espera = int(getattr(erro_disparo, "seconds", 60) or 60) + 30
+                                item["horario_disparo"] = (agora + timedelta(seconds=espera)).strftime("%Y-%m-%d %H:%M:%S")
+                            if EXIBIR_LOGS: logger.warning(f"🔁 [Espelhador] Tentativa {tentativas}/3 falhou na rota '{nome_rota}'; vai de novo num próximo ciclo.")
+                            itens_restantes.append(item)
+                            houve_disparo = True
+                            continue
+                        registrar_erro_json(f"Espelhador desistiu após 3 tentativas na rota '{nome_rota}': {erro_disparo}", origem="motor_userbot.py")
+
                     # ✅ MANTÉM NO HISTÓRICO: O vídeo foi enviado, e agora fica salvo para aparecer no relatório!
                     item["processado"] = True
                     item["data_postagem"] = agora.strftime("%Y-%m-%d")
@@ -812,7 +837,9 @@ async def motor_espelhador_userbot(event):
     # ✅ NOVO: Identifica se a mensagem foi enviada em um Tópico (Subgrupo)
     topico_id_evento = None
     if event.message.reply_to:
-        topico_id_evento = getattr(event.message.reply_to, 'forum_topic_id', getattr(event.message.reply_to, 'reply_to_msg_id', None))
+        # Post direto no tópico: o tópico vem em reply_to_msg_id. Resposta dentro do
+        # tópico: o tópico vem em reply_to_top_id (reply_to_msg_id é a mensagem respondida).
+        topico_id_evento = getattr(event.message.reply_to, 'reply_to_top_id', None) or getattr(event.message.reply_to, 'reply_to_msg_id', None)
 
     dados = ler_espelhos_config()
     rotas_ativas = []
