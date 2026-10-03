@@ -144,6 +144,25 @@ def ler_contador_espelhador(nome_rota):
 def salvar_espelhos(dados):
     salvar_json_atomico("espelhos_config.json", dados, indent=4)
 
+def _renomear_rota_na_fila(nome_antigo, novo_nome):
+    """
+    Troca nome_rota nos itens da fila do Espelhador. A fila liga cada vídeo à rota
+    pelo nome: sem isto, renomear a rota deixa os vídeos pendentes órfãos (o motor
+    não os publica e o relatório de filas os apaga).
+    """
+    try:
+        fila_dados = ler_fila_espelhador()
+        houve_alteracao = False
+        for item in fila_dados.get("fila", []):
+            if item.get("nome_rota") == nome_antigo:
+                item["nome_rota"] = novo_nome
+                houve_alteracao = True
+        if houve_alteracao:
+            salvar_fila_espelhador(fila_dados)
+            if EXIBIR_LOGS: logger.info("🔄 Fila de espelhamento sincronizada com o novo nome da rota.")
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao sincronizar a fila de espelhamento após mudança de nome: {e}")
+
 def obter_teclado_importacao_espelhador():
     return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Importar Banco Global 🌍")], [KeyboardButton(text="Cancelar Operação ❌")]], resize_keyboard=True, is_persistent=True)
 
@@ -339,6 +358,7 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
                         
                 # Se achou o nome real em qualquer um dos 3 passos, conserta a rota
                 if nome_real:
+                    _renomear_rota_na_fila(rota['nome'], f"Espelho: {nome_real}")
                     nome_rota = f"Espelho: {nome_real}"
                     rota['nome'] = nome_rota
                     houve_alteracao = True
@@ -665,7 +685,7 @@ async def receber_modo_rota(message: types.Message, state: FSMContext):
     # primeiros e resume o resto.
     LIMITE_LISTA_CONFIRMACAO = 15
     for o in origens[:LIMITE_LISTA_CONFIRMACAO]:
-        texto_confirmacao += f"└ <code>{o}</code>\n"
+        texto_confirmacao += f"└ <code>{id_da_origem(o)}</code>\n"
     if len(origens) > LIMITE_LISTA_CONFIRMACAO:
         restantes = len(origens) - LIMITE_LISTA_CONFIRMACAO
         texto_confirmacao += f"└ <i>... e mais {restantes} canal(is) importado(s)</i>\n"
@@ -1332,20 +1352,7 @@ async def salvar_edicao_nome(message: types.Message, state: FSMContext):
     dados["rotas"] = rotas
     salvar_espelhos(dados)
     
-    # Sincroniza a fila de espelhamento para que os vídeos retidos não fiquem órfãos
-    try:
-        fila_dados = ler_fila_espelhador()
-        fila = fila_dados.get("fila", [])
-        houve_alteracao = False
-        for item in fila:
-            if item.get("nome_rota") == nome_antigo:
-                item["nome_rota"] = novo_nome
-                houve_alteracao = True
-        if houve_alteracao:
-            salvar_fila_espelhador(fila_dados)
-            if EXIBIR_LOGS: logger.info("🔄 Fila de espelhamento sincronizada com o novo nome da rota.")
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao sincronizar a fila de espelhamento após mudança de nome: {e}")
+    _renomear_rota_na_fila(nome_antigo, novo_nome)
 
     if EXIBIR_LOGS: logger.info(f"✏️ Nome da rota '{nome_antigo}' atualizado para '{novo_nome}'.")
     await message.answer(f"✅ O nome da rota foi atualizado para <b>{novo_nome}</b> com sucesso!", parse_mode="HTML")
