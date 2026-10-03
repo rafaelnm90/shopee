@@ -221,6 +221,12 @@ def inicializar_banco_sqlite():
         )
     ''')
         
+    # Tentativas de envio de cada vídeo do canal principal (executar_postagem_fila).
+    try:
+        cursor.execute("ALTER TABLE fila_postagens ADD COLUMN tentativas INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+
     # 🚀 Migração invisível 3: Atualiza a tabela de Logs para suportar o Utils Avançado
     try:
         cursor.execute("ALTER TABLE erros_logs ADD COLUMN rastro_codigo TEXT")
@@ -933,6 +939,12 @@ def agendar_fila_postagens():
         if job.id.startswith('job_fila_postagem_'):
             job.remove()
 
+    # Pausa programada: nenhum vídeo sai. Os pendentes voltam a ser agendados quando
+    # ela acaba (fim pelo painel ou verificar_retorno_pausa_minuto).
+    if ler_pausa_programada().get("ativa"):
+        if EXIBIR_LOGS: logger.info("⏸️ Pausa programada ativa: nenhum vídeo da fila foi agendado.")
+        return
+
     # 2. Busca vídeos pendentes para hoje no SQLite
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
@@ -1061,11 +1073,20 @@ async def motor_fila_minuto():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro no Fiscal da Fila: {e}")
 
+MAX_TENTATIVAS_POSTAGEM = 3
+MINUTOS_ENTRE_TENTATIVAS = 10
+
 async def executar_postagem_fila(item_id):
     if EXIBIR_LOGS: logger.info(f"📤 Iniciando processamento do vídeo {item_id}...")
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
-    
+
+    # Job agendado antes de a pausa começar: o vídeo fica pendente para depois dela.
+    if ler_pausa_programada().get("ativa"):
+        if EXIBIR_LOGS: logger.info(f"⏸️ Pausa programada ativa: vídeo {item_id} continua na fila.")
+        return
+
+    sucesso = False
     try:
         conexao = sqlite3.connect("banco_dados.db")
         conexao.row_factory = sqlite3.Row
@@ -1088,7 +1109,6 @@ async def executar_postagem_fila(item_id):
         video_id = item["video_id"]
         legenda = item["legenda"]
         
-        sucesso = False
         falha_irreversivel = False
         novo_file_id = None
         
@@ -1129,10 +1149,30 @@ async def executar_postagem_fila(item_id):
         try:
             conexao = sqlite3.connect("banco_dados.db")
             cursor = conexao.cursor()
-            cursor.execute("UPDATE fila_postagens SET status = 'ERRO' WHERE id_unico = ?", (item_id,))
+            if sucesso:
+                # O vídeo já foi para o grupo e a falha veio depois: só falta marcar.
+                # Tentar de novo publicaria duas vezes.
+                cursor.execute("UPDATE fila_postagens SET status = 'CONCLUIDO', data_postagem = ?, horario_postagem = ? WHERE id_unico = ?",
+                               (hoje_str, agora.strftime("%H:%M"), item_id))
+            else:
+                cursor.execute("SELECT COALESCE(tentativas, 0) FROM fila_postagens WHERE id_unico = ? AND status = 'PENDENTE'", (item_id,))
+                linha = cursor.fetchone()
+                if linha is not None:
+                    tentativas = linha[0] + 1
+                    if tentativas < MAX_TENTATIVAS_POSTAGEM:
+                        cursor.execute("UPDATE fila_postagens SET tentativas = ? WHERE id_unico = ?", (tentativas, item_id))
+                        nova_tentativa = agora + timedelta(minutes=MINUTOS_ENTRE_TENTATIVAS)
+                        scheduler.add_job(executar_postagem_fila, 'date', run_date=nova_tentativa, args=[item_id],
+                                          id=f"job_fila_postagem_{item_id}", replace_existing=True)
+                        if EXIBIR_LOGS: logger.warning(f"🔁 Tentativa {tentativas}/{MAX_TENTATIVAS_POSTAGEM} do vídeo {item_id} falhou; nova tentativa às {nova_tentativa.strftime('%H:%M')}.")
+                    else:
+                        # data_postagem preenchida: a faxina da madrugada tira o item da fila.
+                        cursor.execute("UPDATE fila_postagens SET status = 'ERRO', tentativas = ?, data_postagem = ?, horario_postagem = ? WHERE id_unico = ?",
+                                       (tentativas, hoje_str, agora.strftime("%H:%M"), item_id))
+                        registrar_erro_json(f"Canal principal desistiu do vídeo {item_id} após {tentativas} tentativas: {e}", origem="bot_mestre.py")
             conexao.commit()
             conexao.close()
-        except: pass
+        except Exception: pass
 
 # --- GERENCIADOR CENTRAL DE CONFIGURAÇÕES (SQLITE) ---
 def ler_config_bd(chave, padrao=None, arquivo_legado=None):
@@ -12110,6 +12150,7 @@ async def confirmar_pausa_programada_final(message: types.Message, state: FSMCon
         "motivo": motivo_escolhido 
     }
     salvar_pausa_programada(dados_pausa)
+    agendar_fila_postagens()  # com a pausa ativa, só desfaz os agendamentos de hoje
     
     if EXIBIR_LOGS: logger.info(f"🛑 Pausa programada até {data_retorno_str}. Aviso imediato disparado. Serviços: {servicos_pausados}")
     await message.answer(f"🛑 <b>Pausa Configurada com Sucesso!</b>\n\nO aviso já foi enviado ao grupo. A partir de amanhã, o robô atualizará esse aviso todos os dias às 09h00 informando o retorno para o dia {data_retorno_str}.\nNo dia marcado, ele acordará automaticamente.", parse_mode="HTML", reply_markup=obter_teclado_principal())
@@ -12176,6 +12217,7 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
     dados_pausa.pop("id_aviso_imediato", None)
     salvar_pausa_programada(dados_pausa)
     recalcular_datas_pos_pausa()
+    agendar_fila_postagens()
     
     await message.answer("▶️ Pausa programada encerrada! O aviso antigo foi apagado e a mensagem de retorno foi postada no grupo. Serviços reativados com sucesso!", reply_markup=obter_teclado_principal())
     await state.clear()
