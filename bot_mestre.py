@@ -7938,6 +7938,10 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
 
 @dp.message(Command("nomeargrupo"), StateFilter("*"))
 async def nomear_grupo_manual(message: types.Message, state: FSMContext):
+    """
+    /nomeargrupo ID Nome: grava o nome no cache, para quando o bot não consegue ler o
+    nome sozinho (canal em que só o userbot está).
+    """
     if message.from_user.id != ADMIN_ID: return
 
     partes = message.text.split(maxsplit=2)
@@ -7960,16 +7964,15 @@ async def nomear_grupo_manual(message: types.Message, state: FSMContext):
             numeros = numeros[3:]
         chat_id_limpo = f"-100{numeros}"
 
-    # Salva no cache geral do bot
     salvar_nome_grupo(chat_id_limpo, nome)
     
-    # Atualiza também o cache de vídeos autorais se for a origem ou destino atual
+    # Resposta mais específica quando o ID é a origem ou o destino dos Autorais.
     config_autorais = ler_autorais_config()
     
     origem_atual = str(config_autorais.get("origem", ""))
     destino_atual = str(config_autorais.get("destino", ""))
     
-    # Verifica variações do ID (-100, sem -100)
+    # Variações do ID (com e sem -100)
     id_variacoes = [chat_id_limpo, chat_id_limpo.replace("-100", "-"), chat_id_limpo.replace("-100", "")]
     
     if any(var == origem_atual for var in id_variacoes) or any(var == destino_atual for var in id_variacoes):
@@ -7988,6 +7991,11 @@ def salvar_historico_financeiro(dados):
 
 @dp.message(F.text == "Relatório Financeiro 💰", StateFilter("*"))
 async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
+    """
+    Relatório financeiro: sincroniza os pedidos com a API de afiliados e monta o
+    balanço do mês, projeção, histórico mensal e anual, recordes, últimos 7 dias e o
+    gráfico.
+    """
     if message.from_user.id != ADMIN_ID: return
     msg_status = await message.answer("💰 Sincronizando API Financeira com a Shopee e processando relatório... Aguarde ⏳")
     if EXIBIR_LOGS: logger.info("🚀 Acionando extração de dados e recálculo dinâmico pelo Rastreio Individual...")
@@ -8024,7 +8032,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     aprovado_mes = sum(v["aprovado"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     pendente_mes = sum(v["pendente"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     
-    # Agrupamento Mensal e Anual
+    # Totais por mês e por ano
     dados_por_mes = {}
     dados_por_ano = {}
     
@@ -8049,7 +8057,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         f"📅 <b>BALANÇO DO MÊS DE {nome_mes_extenso}</b>\n\n"
     )
     
-    # Estimativa de Faturamento
+    # Projeção do mês: média diária dos dias com dados × dias do mês
     import calendar
     dias_no_mes = calendar.monthrange(hoje.year, hoje.month)[1]
     dia_atual = hoje.day
@@ -8175,7 +8183,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         texto += f"• 📉 Pior Dia: {pior_dia_br} (<b>R$ {f_br(todos_totais[pior_dia_str])}</b>)\n"
         texto += f"• ⚖️ Média Diária: <b>R$ {f_br(media_global)}</b>\n"
         
-        # ✅ LEGENDA DOS RECORDES DE VOLTA AQUI
         texto += f"<blockquote><i>O seu pico histórico de vendas ocorreu em {melhor_dia_br}, gerando um total de R$ {f_br(todos_totais[melhor_dia_str])}. O objetivo principal das automações é elevar gradativamente a sua Média Diária atual (R$ {f_br(media_global)}) para que os dias de recorde se tornem o novo padrão de recebimento.</i></blockquote>\n\n"
 
     texto += "📈 <b>DESEMPENHO DIÁRIO (Últimos 7 Dias)</b>\n"
@@ -8243,8 +8250,8 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             
             q_aprov = dados_por_mes.get(m, {}).get("qtd_aprovado", 0)
             q_pend = dados_por_mes.get(m, {}).get("qtd_pendente", 0)
-            # Mês futuro é NaN, não zero. Com zero a linha verde descia até o
-            # eixo e parecia queda de vendas, quando era só mês que não chegou.
+            # Mês futuro é NaN, não zero: com zero a linha descia até o eixo e parecia queda
+            # de vendas.
             valores_pedidos.append(float('nan') if m > mes_atual_grafico else (q_aprov + q_pend))
             
             if m == mes_atual_grafico:
@@ -8258,7 +8265,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         fig, ax1 = plt.subplots(figsize=(8, 5), facecolor='#f4f4f9')
         ax1.set_facecolor('#f4f4f9')
         
-        # ✅ CORES CORRETAS APLICADAS (As suas escolhidas)
         bars = ax1.bar(labels_grafico, valores_comissao, color='#00008B', edgecolor='black', linewidth=0.5, label='Comissão Atual (R$)')
         line_est, = ax1.plot(labels_grafico, valores_estimativa, color='#FF0000', marker='^', linestyle=':', linewidth=2, label='Projeção / Fechamento')
         
@@ -8273,8 +8279,8 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         
         offset_y = max([v for v in valores_comissao + valores_estimativa if v == v]) * 0.02 if any(v == v for v in valores_comissao + valores_estimativa) else 0
 
-        # 📏 Folga no topo para o rótulo do maior mês não encostar no título,
-        # e piso em zero nos dois eixos para a leitura não distorcer.
+        # Folga no topo para o rótulo do maior mês não encostar no título, e piso em zero
+        # nos dois eixos para a leitura não distorcer.
         validos_esq = [v for v in valores_comissao + valores_estimativa if v == v]
         if validos_esq:
             ax1.set_ylim(bottom=0, top=max(validos_esq) * 1.22)
@@ -8285,10 +8291,9 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         for bar in bars:
             yval = bar.get_height()
             if yval == yval and yval > 0:
-                # Caixa branca atrás do texto: sem ela as linhas cortam o número.
-                # O rótulo vai no ax2 (eixo desenhado por último) com as coordenadas
-                # do ax1. Se ficasse no ax1, a linha verde de Pedidos passaria por
-                # cima do número, porque zorder só ordena dentro do mesmo eixo.
+                # Caixa branca atrás do texto, para as linhas não cortarem o número. O rótulo vai
+                # no ax2 (desenhado por último) com as coordenadas do ax1: no ax1, a linha de
+                # Pedidos passaria por cima, porque zorder só ordena dentro do mesmo eixo.
                 ax2.text(
                     bar.get_x() + bar.get_width()/2, yval + offset_y, f'R${yval:.0f}',
                     transform=ax1.transData,
@@ -8297,7 +8302,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
                     bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='#cccccc', alpha=0.9)
                 )
 
-        # ✅ ORDEM DA LEGENDA CORRIGIDA EXATAMENTE PARA: 1º Pedidos, 2º Projeção, 3º Comissão.
+        # Ordem da legenda: Pedidos, Projeção, Comissão.
         lines_1, labels_1 = ax1.get_legend_handles_labels() 
         lines_2, labels_2 = ax2.get_legend_handles_labels() 
         
@@ -8370,6 +8375,7 @@ async def gerar_relatorio_ia(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "Logs de Erros ⚠️", StateFilter("*"))
 async def gerar_relatorio_logs(message: types.Message, state: FSMContext):
+    """Os últimos erros registrados (erros_logs), com o botão para limpar."""
     if message.from_user.id != ADMIN_ID: return
     msg_status = await message.answer("⚠️ A extrair o histórico de falhas do banco de dados... Aguarde ⏳")
     if EXIBIR_LOGS: logger.info("🚀 A iniciar a auditoria da tabela erros_logs...")
@@ -8379,7 +8385,7 @@ async def gerar_relatorio_logs(message: types.Message, state: FSMContext):
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         
-        # Puxa os últimos 5 erros ordenados do mais recente para o mais antigo
+        # Os 5 erros mais recentes
         cursor.execute("SELECT * FROM erros_logs ORDER BY id DESC LIMIT 5")
         erros_db = cursor.fetchall()
         
@@ -8415,11 +8421,14 @@ async def gerar_relatorio_logs(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao processar a leitura dos logs no SQLite: {e}")
         await msg_status.edit_text(f"❌ <b>Erro interno ao processar os logs:</b>\n<code>{e}</code>", parse_mode="HTML")
 
-# ✅ NOVO: Handler (Callback) para limpar o histórico do banco de dados
 from aiogram.types import CallbackQuery
 
 @dp.callback_query(F.data == "limpar_logs")
 async def limpar_historico_erros(callback: CallbackQuery):
+    """
+    Apaga erros_logs e liga a trava_manutencao.txt, que silencia o registro de erros
+    até o próximo deploy (o divulgacao_canal apaga a trava ao subir).
+    """
     if callback.from_user.id != ADMIN_ID: return
     
     if EXIBIR_LOGS: logger.info("🧹 Pedido de exclusão do histórico de erros recebido via botão interativo.")
@@ -8431,7 +8440,7 @@ async def limpar_historico_erros(callback: CallbackQuery):
         conexao.commit()
         conexao.close()
         
-        # Cria o arquivo de trava na raiz do projeto para silenciar erros temporariamente
+        # Trava que silencia o registro de erros até o próximo deploy (o divulgacao_canal a apaga ao subir).
         with open("trava_manutencao.txt", "w") as f:
             f.write("ativo")
             
@@ -8443,7 +8452,7 @@ async def limpar_historico_erros(callback: CallbackQuery):
         
     await callback.answer()
 
-# ✅ Handlers para Envio Manual de Mensagens via Botões (Corrigidos com StateFilter)
+# --- Disparos manuais das rotinas (botões do painel) ---
 @dp.message(F.text == "Disparar Bom Dia ☀️", StateFilter("*"))
 async def manual_bom_dia(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
@@ -8508,7 +8517,7 @@ async def manual_link_grupo(message: types.Message):
     await disparar_mensagem("link_grupo", forcar=True)
     await message.answer("Mensagem de divulgação enviada ao grupo com sucesso! ✅")
 
-# --- Disparos Manuais (Viral) ---
+# Disparos manuais (Viral)
 @dp.message(F.text == "Disparar Convite Viral 🚀", StateFilter("*"))
 async def manual_promo_viral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
@@ -8585,7 +8594,7 @@ async def manual_promo_achadinhos_viral(message: types.Message):
     await disparar_mensagem("promo_achadinhos_viral", forcar=True)
     await message.answer("Divulgação enviada ao canal viral com sucesso! ✅")
 
-# --- Disparos Manuais (Grupo Público) ---
+# Disparos manuais (Grupo Público)
 @dp.message(F.text == "Disparar Promo Público 🗣️", StateFilter("*"))
 async def manual_promo_publico(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
@@ -8617,7 +8626,7 @@ async def manual_promo_achadinhos(message: types.Message):
     await disparar_mensagem("promo_achadinhos", forcar=True)
     await message.answer("Mensagem de Achadinhos VIP enviada ao canal com sucesso! ✅")
 
-# ✅ NOVO: Disparos manuais do Público agora exigem confirmação em duas etapas
+# Disparos manuais do Público pedem confirmação antes de enviar.
 MAPA_DISPAROS_PUBLICO = {
     "Disparar Convite (Próprio) 🔗": ("link_grupo_publico", "Convite (Próprio Grupo) 🔗", "convite para o próprio Grupo Público"),
     "Disparar Promo Principal 🌟": ("promo_principal_publico", "Promo Canal Principal 🌟", "divulgação do Canal Principal"),
@@ -8627,6 +8636,7 @@ MAPA_DISPAROS_PUBLICO = {
 
 @dp.message(F.text.in_(list(MAPA_DISPAROS_PUBLICO.keys())), StateFilter("*"))
 async def pedir_confirmacao_disparo_publico(message: types.Message, state: FSMContext):
+    """Disparo manual de rotina do Público: pede confirmação antes de enviar."""
     if message.from_user.id != ADMIN_ID: return
 
     dados_rotina = ler_config_rotina()
@@ -8653,6 +8663,7 @@ async def pedir_confirmacao_disparo_publico(message: types.Message, state: FSMCo
 
 @dp.message(ConfigRotina.aguardando_confirmacao_disparo)
 async def processar_disparo_publico(message: types.Message, state: FSMContext):
+    """Envia a rotina do Público confirmada, forçando (só as pausas valem)."""
     if message.from_user.id != ADMIN_ID: return
 
     if message.text == "Cancelar ❌":
@@ -8687,10 +8698,10 @@ async def processar_disparo_publico(message: types.Message, state: FSMContext):
     await state.set_state(ConfigRotina.menu_principal)
     await submenu_disparos_manuais(message, state)
 
-# ✅ NOVO: Gestão dos alvos (tópicos) que recebem as rotinas do Grupo Público
+# --- Tópicos do Grupo Público que recebem as rotinas ---
 def extrair_id_topico(entrada, grupo_id_str=""):
     """
-    🔗 Converte uma entrada do admin no ID numérico do tópico.
+    Converte uma entrada do admin no ID numérico do tópico.
 
     Aceita:
       • https://t.me/c/1234567890/6        -> "6"  (link do tópico, grupo privado)
@@ -8698,7 +8709,7 @@ def extrair_id_topico(entrada, grupo_id_str=""):
       • https://t.me/meugrupo/6            -> "6"  (grupo público)
       • t.me/c/1234567890/6                -> "6"  (sem https)
       • -1001234567890_6                   -> "6"  (formato exibido no painel)
-      • 6                                  -> "6"  (ID cru, retrocompatibilidade)
+      • 6                                  -> "6"  (ID cru)
 
     Devolve (topico, erro): só um dos dois vem preenchido.
     """
@@ -8707,9 +8718,8 @@ def extrair_id_topico(entrada, grupo_id_str=""):
         return None, None
 
     if "t.me/" in bruto.lower():
-        # 🎯 Forma /c/<id_interno>/<topico>[/<mensagem>]. O terceiro número, quando
-        # existe, é o ID da MENSAGEM — pegar o último segmento (o que o código
-        # antigo fazia) gravava o alvo errado sem avisar ninguém.
+        # Forma /c/<id_interno>/<topico>[/<mensagem>]: o terceiro número, quando existe, é
+        # a MENSAGEM; o tópico é o segundo.
         m = re.search(r"t\.me/c/(\d+)/(\d+)(?:/(\d+))?", bruto, re.IGNORECASE)
         if m:
             interno, topico = m.group(1), m.group(2)
@@ -8720,14 +8730,14 @@ def extrair_id_topico(entrada, grupo_id_str=""):
                 return None, f"<code>{bruto}</code> é de outro grupo (id {interno})"
             return topico, None
 
-        # 🎯 Forma /<usuario_do_grupo>/<topico>[/<mensagem>], para grupo público.
+        # Forma /<usuario_do_grupo>/<topico>[/<mensagem>], para grupo público.
         m = re.search(r"t\.me/([A-Za-z0-9_]+)/(\d+)(?:/(\d+))?", bruto, re.IGNORECASE)
         if m and m.group(1).lower() != "c":
             return m.group(2), None
 
         return None, f"não achei o número do tópico em <code>{bruto}</code>"
 
-    # 🔢 Entradas sem link continuam funcionando (painel usa 'grupo_topico').
+    # Sem link: "grupo_topico" (como o painel mostra) ou só o número do tópico.
     if "_" in bruto:
         cauda = bruto.split("_")[-1]
         return (cauda, None) if cauda.isdigit() else (None, f"<code>{bruto}</code> não terminou em número")
@@ -8742,6 +8752,7 @@ def extrair_id_topico(entrada, grupo_id_str=""):
 
 @dp.message(ConfigRotina.menu_principal, F.text == "Gerenciar Alvos de Postagem 🎯")
 async def pedir_alvos_rotina_publico(message: types.Message, state: FSMContext):
+    """Mostra os tópicos atuais das rotinas do Público e pede a nova lista."""
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🎯 Acessando gestão de alvos das rotinas do Grupo Público...")
 
@@ -8760,8 +8771,7 @@ async def pedir_alvos_rotina_publico(message: types.Message, state: FSMContext):
     else:
         atual = "   ✅ <i>Chat Geral (Padrão)</i>"
 
-    # 🔗 Monta os exemplos com o ID interno do PRÓPRIO grupo, para o admin poder
-    # copiar e só trocar o número do tópico no fim.
+    # Exemplos com o ID interno do próprio grupo: o admin copia e só troca o tópico.
     interno_ex = grupo_id_str.lstrip("-")
     if interno_ex.startswith("100"):
         interno_ex = interno_ex[3:]
