@@ -560,6 +560,19 @@ async def analisar_fila_espiao_loop():
 
         await asyncio.sleep(INTERVALO_ANALISE_ANTECIPADA)
 
+# Quantos dias o já publicado fica na fila como histórico (o relatório do painel
+# mostra o que saiu hoje). Sem prazo, a fila crescia ~60 itens por dia e era
+# relida e regravada inteira a cada minuto. Decisão do Rafael: DECISOES.md, Espelhador de canais.
+DIAS_HISTORICO_ESPELHADOR = 3
+
+
+def podar_historico(fila, hoje):
+    """A fila sem os itens publicados antes de hoje - DIAS_HISTORICO_ESPELHADOR."""
+    corte = (datetime.strptime(hoje, "%Y-%m-%d") - timedelta(days=DIAS_HISTORICO_ESPELHADOR)).strftime("%Y-%m-%d")
+    return [i for i in fila
+            if not (i.get("processado") and i.get("data_postagem") and str(i["data_postagem"]) < corte)]
+
+
 async def processar_fila_espelhador_loop():
     """
     Laço do Espelhador, a cada 60 s:
@@ -567,7 +580,8 @@ async def processar_fila_espelhador_loop():
        rota) chegou, ou todos se a rota pediu "esvaziar agora";
     2. aplica o teto diário de cada rota (excedente sai da fila sem ser postado);
     3. publica os itens vencidos, 15 s entre um e outro.
-    Itens publicados ficam na fila como histórico (processado=True).
+    Itens publicados ficam na fila como histórico (processado=True) por
+    DIAS_HISTORICO_ESPELHADOR dias.
     """
     while True:
         try:
@@ -576,7 +590,11 @@ async def processar_fila_espelhador_loop():
             if not fila:
                 await asyncio.sleep(60)
                 continue
-                
+
+            tamanho_lido = len(fila)
+            fila = podar_historico(fila, datetime.now(fuso_horario).strftime("%Y-%m-%d"))
+            podou_historico = len(fila) != tamanho_lido
+
             config = ler_espelhos_config()
             rotas = {r.get("nome"): r for r in config.get("rotas", [])}
             
@@ -794,7 +812,7 @@ async def processar_fila_espelhador_loop():
                 salvar_json_atomico("espelhos_config.json", config, indent=4, ensure_ascii=False)
                     
             # Grava a fila só se algo mudou (agendamento, publicação ou itens removidos).
-            if len(fila) != len(itens_restantes) or houve_agendamento or houve_disparo:
+            if podou_historico or len(fila) != len(itens_restantes) or houve_agendamento or houve_disparo:
                 fila_dados["fila"] = itens_restantes
                 salvar_fila_espelhador(fila_dados)
             
