@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-🛡️ VALIDADOR DE DEPLOY — Shopee Video Bot
-Roda antes de reiniciar os serviços. Pega os erros que o 'ast.parse' sozinho não pega.
+Validador de deploy: roda antes de reiniciar os serviços (no GitHub Actions, em
+validar.yml e deploy.yml, e nos aliases do README). Pega erros que o ast.parse
+sozinho não pega, cada um baseado num bug que já derrubou o bot.
+
 Uso:  python3 validar_deploy.py [arquivo1.py arquivo2.py ...]
 Sem argumentos, valida todos os .py da pasta atual.
 Código de saída: 0 = liberado para deploy | 1 = NÃO reinicie
@@ -10,7 +12,7 @@ import ast, sys, os
 from collections import Counter
 
 ERROS, AVISOS = [], []
-FONTES = {}   # guarda o conteúdo dos arquivos para mostrar o trecho do erro
+FONTES = {}   # conteúdo de cada arquivo, para mostrar o trecho em volta do erro
 
 def erro(arq, linha, msg): ERROS.append((arq, linha, msg))
 def aviso(arq, linha, msg): AVISOS.append((arq, linha, msg))
@@ -28,6 +30,7 @@ def mostrar_trecho(arq, linha, margem=4):
         saida.append(f"     {marca} {i+1:>6} | {linhas[i]}")
     return "\n".join(saida)
 
+# Nomes aceitos para o 1º parâmetro de uma função registrada como handler.
 PRIMEIRO_PARAM_OK = {"message", "callback", "event", "query", "msg", "callback_query"}
 
 def eh_decorator_handler(dec):
@@ -62,11 +65,9 @@ def validar(caminho):
             nomes[n.name] += 1
     for nome, qtd in nomes.items():
         if qtd > 1:
-            # ⛔ ERRO, não aviso. Função duplicada quase sempre significa colagem
-            # que não apagou a âncora — e quando o nome coincide com outra
-            # função, uma delas some do arquivo sem deixar rastro. Já derrubou
-            # o wizard de submissão uma vez, com o aviso na tela e o deploy
-            # liberado assim mesmo.
+            # Erro, não aviso: função duplicada quase sempre é colagem que não
+            # apagou a versão antiga, e só a última definição vale. Já derrubou
+            # o wizard de submissão quando isto era só um aviso.
             linha_dup = next(
                 (n.lineno for n in arvore.body
                  if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == nome),
@@ -93,7 +94,7 @@ def validar(caminho):
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for d in n.decorator_list:
                 if eh_decorator_handler(d):
-                    # Compara o decorator INTEIRO: o mesmo texto em estados diferentes é legítimo
+                    # Compara o decorator inteiro: o mesmo texto em estados diferentes é legítimo.
                     txt = ast.unparse(d)
                     if "F.text" in txt or "F.data" in txt:
                         filtros[txt] += 1
@@ -104,8 +105,8 @@ def validar(caminho):
             erro(arq, posicao[chave], f"decorator idêntico registrado {qtd}x — só o primeiro responde:\n       {resumo}")
 
     # 6) FUNÇÃO CHAMADA MAS NUNCA DEFINIDA
-    # Foi assim que 'teclado_confirmacao_expiracao' travou o painel: dentro de uma
-    # task assíncrona o NameError some sem log, e o bot congela em silêncio.
+    # Dentro de uma task assíncrona o NameError some sem log e o bot congela em
+    # silêncio (foi o que travou o painel com 'teclado_confirmacao_expiracao').
     definidas = {n.name for n in ast.walk(arvore) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     definidas |= {n.name for n in ast.walk(arvore) if isinstance(n, ast.ClassDef)}
     for n in ast.walk(arvore):
