@@ -1,5 +1,7 @@
 """
-Robô dos Vídeos Autorais (userbot Telethon, sessão sessao_espelhador_isolado).
+Robô dos Vídeos Autorais (userbot Telethon). As contas vêm do pool_contas: uma
+captura e publica no destino; as do rodízio devolvem os vídeos ao grupo de origem.
+Sem contas no pool, a sessão fixa sessao_espelhador_isolado faz tudo.
 
 Captura: cada vídeo com link da Shopee postado no grupo de origem (autorais_config:
 origem, com tópico opcional) é baixado, ganha legenda nova da IA com o link já
@@ -30,6 +32,7 @@ import re
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events, functions
 from telethon.tl.types import MessageMediaDocument
+from telethon import errors as tg_errors
 from telethon.errors import FloodWaitError, UserAlreadyParticipantError, InviteHashExpiredError
 from dotenv import load_dotenv
 from utils import registrar_erro_json
@@ -73,6 +76,7 @@ from api_gemini import analisar_video_gemini
 from api_shopee import converter_link_shopee
 from motor_filas import calcular_horarios_distribuicao, faixa_de_config, sortear_teto_do_dia
 import blacklist_captura  # de quem este robô nunca captura
+import pool_contas  # quem captura e quem reposta
 
 if EXIBIR_LOGS:
     logger = configurar_logs(__name__)
@@ -151,22 +155,35 @@ def pausa_ativa(escopo="autorais"):
 config_atual = carregar_config_autorais()
 
 # ==========================================================================
-# Conta que opera neste robô
+# Contas que operam neste robô (pool_contas)
 #
-# Sessão: sessao_espelhador_isolado
-#   Rafaelnm (secundário) · sem @ · id 8940405855
-#   → é a conta que está DENTRO do grupo de autorais e faz a captura
-#   → é ela que publica no canal "Vídeos Autorais Afiliados"
-#   → é ela que devolve o vídeo ao grupo de origem na repostagem D+X
+# Captura (posto "espelho"): uma conta fica no grupo de origem, captura, publica no
+# canal de destino, baixa os vídeos do Grupo Público e vigia os canais dos
+# parceiros. Repostagem: as contas do rodízio devolvem os vídeos ao grupo de origem
+# no D+X, cada vídeo por uma conta. A captura nunca reposta: se uma conta da
+# repostagem for expulsa, a captura segue intacta.
 #
-# Um userbot só enxerga os grupos em que a CONTA DELE está. Se um
-# grupo novo for adicionado na configuração, esta conta precisa entrar nele —
-# senão o robô fica cego para aquele chat, sem erro nenhum no log.
+# Quem ocupa cada posto é o pool_contas que decide; o plantao_contas_loop confere
+# as contas de 10 em 10 minutos e troca os clientes daqui sozinho.
 #
-# Confirmado no log em 15/09/2026 pela linha "👤 [Userbot] Sessão ... logada como".
+# Sem nenhuma conta no pool vale o modo antigo: a sessão fixa
+# sessao_espelhador_isolado faz tudo (captura e repostagem).
+#
+# Um userbot só enxerga os grupos em que a conta dele está: a da captura precisa
+# estar na origem e poder publicar no destino; as da repostagem, na origem.
 # ==========================================================================
 NOME_SESSAO = 'sessao_espelhador_isolado'
-client = TelegramClient(NOME_SESSAO, API_ID, API_HASH)
+client = None               # cliente da captura (None = captura parada)
+conta_captura = None        # conta do pool na captura (None no modo sessão fixa)
+modo_sessao_fixa = False
+clientes_repost = {}        # conta_id → (conta, cliente) do rodízio da repostagem
+ordem_rodizio = []          # conta_ids na ordem do pool
+_espera_repost = {}         # conta_id → até quando a conta fica fora do rodízio
+_ultimo_repostador = None   # conta_id do último envio: o rodízio segue dali
+
+INTERVALO_PLANTAO_MIN = 10
+HORAS_ESPERA_SEM_PERMISSAO = 1   # conta sem permissão de postar descansa antes de tentar de novo
+
 
 def ler_fila_retorno():
     """Fila de retorno (tabela fila_autorais) como {"fila": [itens]}. Cria a tabela e as colunas novas se faltarem."""
@@ -407,7 +424,7 @@ async def resolver_entidade(alvo):
     já usa para achar os fóruns.
     """
     alvo = str(alvo or "").strip()
-    if not alvo:
+    if not alvo or client is None:
         return None
 
     try:
@@ -628,6 +645,9 @@ async def loop_entrada_parceiros():
     """Tenta acessar o canal de origem de um parceiro pendente por ciclo, nunca em lote."""
     await asyncio.sleep(60)
     while True:
+        if client is None:   # captura sem conta: os canais seriam testados com ninguém
+            await asyncio.sleep(60)
+            continue
         try:
             pendentes = ler_parceiros_pendentes()
             if pendentes:
@@ -1117,7 +1137,6 @@ def separar_alvo_e_topico(valor):
 # incoming=True: sem ele o Telethon entrega também as mensagens que esta conta envia.
 # O retorno autoral publica no grupo de ORIGEM, e cada retorno seria recapturado e
 # republicado como vídeo novo.
-@client.on(events.NewMessage(incoming=True))
 async def interceptar_e_espelhar(event):
     # Repete o incoming=True: a varredura chama este handler direto, sem o filtro do evento.
     if getattr(event, "out", False):
@@ -1266,13 +1285,18 @@ async def interceptar_e_espelhar(event):
                     except Exception: pass
                     return
 
-                msg_enviada = await client.send_file(
-                    destino_final,
-                    file=caminho_video,
-                    caption=legenda_final,
-                    parse_mode='html',
-                    **kwargs_envio
-                )
+                try:
+                    msg_enviada = await client.send_file(
+                        destino_final,
+                        file=caminho_video,
+                        caption=legenda_final,
+                        parse_mode='html',
+                        **kwargs_envio
+                    )
+                except Exception as e:
+                    registrar_atividade_captura(False, f"{type(e).__name__}: {e}")
+                    raise
+                registrar_atividade_captura(True)
                 if EXIBIR_LOGS: logger.info("🚀 Vídeo publicado no canal de destino com a nova legenda autoral!")
                 
                 dias_retorno = config_atual.get('dias_retorno', 15)
@@ -1681,19 +1705,27 @@ async def processar_fila_autorais_loop():
                         kwargs_retorno['reply_to'] = origem_topico
 
                     encerrar_item = False
+                    adiar_item = True   # falha comum: tenta de novo em 30 min
+                    escolha = proxima_conta_repost() if origem_final is not None else None
                     if origem_final is None:
                         if EXIBIR_LOGS: logger.error("❌ [Motor Autorais] Origem não configurada no painel. Vídeo mantido na fila.")
+                    elif escolha is None:
+                        # Sem conta de repostagem agora: o vídeo espera, sem perder o lugar.
+                        adiar_item = False
+                        avisar_sem_conta_repost()
                     else:
+                        conta_rep, cliente_rep = escolha
                         try:
                             if os.path.exists(caminho_arquivo):
                                 # O id da mensagem publicada monta o link "(Destino)" no relatório.
-                                msg_publicada = await client.send_file(
+                                msg_publicada = await cliente_rep.send_file(
                                     origem_final,
                                     file=caminho_arquivo,
                                     caption=legenda,
                                     parse_mode='md',
                                     **kwargs_retorno
                                 )
+                                registrar_envio_repost(conta_rep)
                                 encerrar_item = True
                                 item["msg_postada_id"] = getattr(msg_publicada, "id", None)
                                 # Hora real da publicação, mostrada no relatório.
@@ -1709,11 +1741,15 @@ async def processar_fila_autorais_loop():
                                 if EXIBIR_LOGS: logger.warning(f"⚠️ Ficheiro arquivado não encontrado em {caminho_arquivo}. Item encerrado.")
                         except Exception as e:
                             if EXIBIR_LOGS: logger.error(f"❌ Falha no disparo de retorno: {e}")
+                            # Problema da conta (expulsa, sem permissão, espera): outra conta
+                            # do rodízio tenta no próximo ciclo, sem adiar o vídeo.
+                            if await registrar_falha_repost(conta_rep, e):
+                                adiar_item = False
 
                     if encerrar_item:
                         # Só marca processado se publicou de fato (ou se o arquivo sumiu).
                         item["processado"] = True
-                    else:
+                    elif adiar_item:
                         # Falhou: adia 30 min e tenta de novo, sem segurar os seguintes.
                         item["horario_disparo"] = (agora + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
 
@@ -1792,9 +1828,12 @@ async def processar_fila_publico_loop():
     marcado até HORAS_ANTECEDENCIA_PUBLICO à frente e grava o caminho no item.
     """
     if EXIBIR_LOGS: logger.info("📬 [Correio Público] Loop de preparo dos vídeos do Grupo Público iniciado.")
-    ja_auditou = False
+    ja_auditou = None   # cliente já auditado (a conta da captura pode mudar)
 
     while True:
+        if client is None:   # a captura está sem conta: é ela que lê o canal de destino
+            await asyncio.sleep(60)
+            continue
         try:
             config = ler_config_bd_autorais("submissao_config", {})
 
@@ -1812,8 +1851,8 @@ async def processar_fila_publico_loop():
 
             # Confere uma vez por execução o acesso à origem: sem ele nada é baixado, e é
             # melhor dizer isso uma vez no log do que falhar em silêncio para sempre.
-            if not ja_auditou:
-                ja_auditou = True
+            if ja_auditou is not client:
+                ja_auditou = client
                 try:
                     entidade = await client.get_entity(origem_final)
                     if EXIBIR_LOGS: logger.info(f"✅ [Correio Público] Acesso à origem OK: {getattr(entidade, 'title', origem_final)}")
@@ -1964,6 +2003,9 @@ async def varredura_origem_loop():
     await asyncio.sleep(30)   # deixa o client assentar antes da primeira consulta
 
     while True:
+        if client is None:   # captura sem conta
+            await asyncio.sleep(60)
+            continue
         try:
             config_atual = carregar_config_autorais()
 
@@ -2028,13 +2070,274 @@ async def varredura_origem_loop():
         await asyncio.sleep(INTERVALO_VARREDURA_MIN * 60)
 
 
+# --- Contas: captura e rodízio da repostagem, vindas do pool_contas ---
+
+# Erros de envio que dizem algo sobre a CONTA, não sobre o vídeo.
+ERROS_FORA_DO_GRUPO = (tg_errors.UserBannedInChannelError, tg_errors.ChannelPrivateError)
+ERROS_SEM_PERMISSAO = (tg_errors.ChatWriteForbiddenError, tg_errors.ChatSendMediaForbiddenError,
+                       tg_errors.ChatSendVideosForbiddenError, tg_errors.ChatRestrictedError,
+                       tg_errors.ChatGuestSendForbiddenError, tg_errors.ChatAdminRequiredError)
+ERROS_SESSAO = (tg_errors.AuthKeyUnregisteredError, tg_errors.SessionRevokedError,
+                tg_errors.UserDeactivatedBanError, tg_errors.UserDeactivatedError)
+
+_ultimo_aviso_sem_conta = None
+
+
+def registrar_atividade_captura(ok, detalhe=""):
+    """Resultado da publicação no destino, para o ✅/❌ da captura no painel."""
+    if conta_captura:
+        pool_contas.registrar_atividade(conta_captura["id"], pool_contas.FUNCAO_ESPELHO, ok, detalhe)
+
+
+def registrar_envio_repost(conta):
+    """Envio de retorno feito: a conta passa a ser a última do rodízio."""
+    global _ultimo_repostador
+    if conta:
+        _ultimo_repostador = conta["id"]
+        pool_contas.registrar_atividade(conta["id"], pool_contas.FUNCAO_REPOSTAGEM, True)
+
+
+def avisar_sem_conta_repost():
+    """Loga no máximo a cada 10 min que a repostagem está sem conta disponível."""
+    global _ultimo_aviso_sem_conta
+    agora = datetime.now()
+    if _ultimo_aviso_sem_conta and (agora - _ultimo_aviso_sem_conta).total_seconds() < 600:
+        return
+    _ultimo_aviso_sem_conta = agora
+    if EXIBIR_LOGS:
+        logger.warning("⏸️ [Motor Autorais] Nenhuma conta de repostagem disponível agora. "
+                       "Os vídeos esperam na fila (a captura não reposta).")
+
+
+def proxima_conta_repost():
+    """
+    (conta, cliente) da vez no rodízio, ou None se nenhuma estiver disponível.
+
+    Segue a ordem do pool a partir da última que postou e pula as que estão em
+    espera. No modo sessão fixa a própria conta da captura reposta (conta None).
+    """
+    if modo_sessao_fixa:
+        return (None, client) if client is not None else None
+    agora = datetime.now()
+    disponiveis = [cid for cid in ordem_rodizio
+                   if cid in clientes_repost and _espera_repost.get(cid, agora) <= agora]
+    if not disponiveis:
+        return None
+    if _ultimo_repostador in ordem_rodizio:
+        pos = ordem_rodizio.index(_ultimo_repostador)
+        seguintes = ordem_rodizio[pos + 1:] + ordem_rodizio[:pos + 1]
+        disponiveis = [cid for cid in seguintes if cid in disponiveis]
+    return clientes_repost[disponiveis[0]]
+
+
+async def registrar_falha_repost(conta, erro):
+    """
+    Registra a falha de envio da conta da repostagem e decide o que fazer com ela.
+
+    Devolve True quando o problema é da conta (o vídeo não deve ser adiado: outra
+    conta tenta no próximo ciclo). Expulsa ou sessão morta sai do rodízio na hora;
+    sem permissão de postar ou em FloodWait, descansa um tempo.
+    """
+    if not conta:
+        return False   # modo sessão fixa: mantém o comportamento de adiar 30 min
+    detalhe = f"{type(erro).__name__}: {erro}"
+    pool_contas.registrar_atividade(conta["id"], pool_contas.FUNCAO_REPOSTAGEM, False, detalhe)
+    agora = datetime.now()
+
+    if isinstance(erro, (FloodWaitError, tg_errors.SlowModeWaitError)):
+        _espera_repost[conta["id"]] = agora + timedelta(seconds=int(getattr(erro, "seconds", 60) or 60) + 5)
+        return True
+    if isinstance(erro, ERROS_SEM_PERMISSAO):
+        _espera_repost[conta["id"]] = agora + timedelta(hours=HORAS_ESPERA_SEM_PERMISSAO)
+        if EXIBIR_LOGS:
+            logger.warning(f"🚫 [Rodízio] {conta['apelido']} sem permissão de postar na origem "
+                           f"({type(erro).__name__}). Fora do rodízio por {HORAS_ESPERA_SEM_PERMISSAO} h.")
+        return True
+
+    if isinstance(erro, ERROS_FORA_DO_GRUPO):
+        pool_contas.atualizar_status(conta["apelido"], status_grupo=pool_contas.STATUS_BANIDA_GRUPO,
+                                     erro=detalhe)
+    elif isinstance(erro, tg_errors.UserNotParticipantError):
+        pool_contas.atualizar_status(conta["apelido"], status_grupo=pool_contas.STATUS_SAIU, erro=detalhe)
+    elif isinstance(erro, ERROS_SESSAO):
+        pool_contas.atualizar_status(conta["apelido"], status_sessao=pool_contas.SESSAO_MORTA, erro=detalhe)
+    else:
+        return False   # erro do vídeo ou da rede: adia o vídeo, a conta segue
+
+    if EXIBIR_LOGS:
+        logger.error(f"🛑 [Rodízio] {conta['apelido']} perdeu acesso à origem ({type(erro).__name__}). "
+                     "Saindo do rodízio.")
+    pool_contas.aplicar_funcoes()
+    await montar_contas()
+    return True
+
+
+async def _preparar_cliente(cliente):
+    """Carrega as conversas: a StringSession nasce sem cache de entidades e get_entity por ID falharia."""
+    try:
+        await cliente.get_dialogs()
+    except Exception as e:
+        if EXIBIR_LOGS: logger.warning(f"⚠️ [Contas] Não consegui carregar as conversas: {e}")
+
+
+async def _desligar_cliente(cliente):
+    try:
+        cliente.remove_event_handler(interceptar_e_espelhar)
+    except Exception:
+        pass
+    try:
+        await cliente.disconnect()
+    except Exception:
+        pass
+
+
+async def _conectar_conta(conta):
+    """Cliente conectado e com o cache carregado, ou None (sessão inválida)."""
+    try:
+        cliente = await pool_contas.criar_cliente(conta)
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ [Contas] Falha ao conectar '{conta.get('apelido')}': {e}")
+        return None
+    if cliente is not None:
+        await _preparar_cliente(cliente)
+    return cliente
+
+
+async def _apos_trocar_captura():
+    """
+    Captura nova: grava os nomes da origem e do destino no cache do painel e, se
+    a conta mudou desde a última vez, manda reconferir os canais dos parceiros
+    (a conta nova pode não estar neles).
+    """
+    config_atual = carregar_config_autorais()
+    for chave in ['origem', 'destino']:
+        alvo, _topico_ignorado = separar_alvo_e_topico(config_atual.get(chave))
+        if alvo is None:
+            continue
+        try:
+            entidade = await client.get_entity(alvo)
+            nome_alvo = getattr(entidade, 'title', getattr(entidade, 'username', str(alvo)))
+            # Com a chave sem tópico e com o valor como está gravado no painel.
+            salvar_nome_grupo(str(alvo), nome_alvo)
+            salvar_nome_grupo(str(config_atual.get(chave)), nome_alvo)
+            if EXIBIR_LOGS: logger.info(f"✅ Nome da {chave} ({nome_alvo}) extraído e salvo no cache automaticamente.")
+        except Exception as err:
+            if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível auditar a {chave} com a conta da captura: {err}")
+
+    try:
+        eu = await client.get_me()
+        id_atual = getattr(eu, "id", None)
+        if EXIBIR_LOGS:
+            logger.info(f"👤 [Captura] Conta: {getattr(eu, 'first_name', '')} "
+                        f"(@{getattr(eu, 'username', None) or 'sem @'}) · id {id_atual}")
+    except Exception as e:
+        id_atual = None
+        if EXIBIR_LOGS: logger.warning(f"⚠️ [Captura] Não consegui identificar a conta: {e}")
+
+    anterior = (ler_config_bd_autorais("conta_captura_atual", {}) or {}).get("user_id")
+    if id_atual and anterior and anterior != id_atual:
+        try:
+            conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+            conexao.execute("UPDATE parceiros SET origem_ok = NULL WHERE ativo = 1")
+            conexao.commit()
+            conexao.close()
+            if EXIBIR_LOGS: logger.info("👥 [Parceiros] Conta da captura mudou: canais dos parceiros serão reconferidos.")
+        except sqlite3.OperationalError:
+            pass   # tabela de parceiros ainda não existe
+    if id_atual:
+        salvar_config_bd_autorais("conta_captura_atual", {"user_id": id_atual})
+
+
+async def montar_contas():
+    """
+    Liga as contas conforme o pool: a da captura (com o handler de mensagens) e as
+    do rodízio. Roda no start e a cada plantão; só mexe no que mudou.
+    """
+    global client, conta_captura, modo_sessao_fixa, ordem_rodizio
+
+    if not pool_contas.listar_contas():
+        if not modo_sessao_fixa:
+            if EXIBIR_LOGS: logger.info(f"👤 [Contas] Nenhuma conta no pool: usando a sessão fixa '{NOME_SESSAO}'.")
+            cliente = TelegramClient(NOME_SESSAO, API_ID, API_HASH)
+            await cliente.start()
+            await _preparar_cliente(cliente)
+            cliente.add_event_handler(interceptar_e_espelhar, events.NewMessage(incoming=True))
+            client, conta_captura, modo_sessao_fixa = cliente, None, True
+            await _apos_trocar_captura()
+        return
+
+    if modo_sessao_fixa:
+        # Contas cadastradas com o robô rodando: deixa a sessão fixa e passa para o pool.
+        if EXIBIR_LOGS: logger.info("👤 [Contas] Contas no pool: deixando a sessão fixa.")
+        await _desligar_cliente(client)
+        client, conta_captura, modo_sessao_fixa = None, None, False
+
+    # Rodízio: sai quem não está mais; as novas conectam.
+    rodizio = pool_contas.obter_contas_repostagem()
+    desejadas = {c["id"]: c for c in rodizio}
+    for cid in list(clientes_repost):
+        if cid not in desejadas:
+            _conta, cliente = clientes_repost.pop(cid)
+            await _desligar_cliente(cliente)
+            if EXIBIR_LOGS: logger.info(f"♻️ [Rodízio] {_conta['apelido']} saiu do rodízio.")
+    for cid, conta in desejadas.items():
+        if cid in clientes_repost:
+            clientes_repost[cid] = (conta, clientes_repost[cid][1])
+            continue
+        cliente = await _conectar_conta(conta)
+        if cliente is not None:
+            clientes_repost[cid] = (conta, cliente)
+            if EXIBIR_LOGS: logger.info(f"♻️ [Rodízio] {conta['apelido']} entrou no rodízio.")
+    ordem_rodizio = [c["id"] for c in rodizio]
+
+    # Captura: troca o cliente só se a conta do posto mudou.
+    nova = pool_contas.obter_conta_da_funcao(pool_contas.FUNCAO_ESPELHO)
+    if (nova or {}).get("id") == (conta_captura or {}).get("id") and (client is not None or nova is None):
+        conta_captura = nova
+        return
+    if client is not None:
+        await _desligar_cliente(client)
+    client, conta_captura = None, None
+    if nova is None:
+        if EXIBIR_LOGS: logger.error("🛑 [Captura] Posto VAGO: nenhuma conta apta. A captura está parada.")
+        return
+    cliente = await _conectar_conta(nova)
+    if cliente is None:
+        if EXIBIR_LOGS: logger.error(f"🛑 [Captura] Não consegui conectar '{nova['apelido']}'. Captura parada até o próximo plantão.")
+        return
+    cliente.add_event_handler(interceptar_e_espelhar, events.NewMessage(incoming=True))
+    client, conta_captura = cliente, nova
+    if EXIBIR_LOGS: logger.info(f"🪞 [Captura] {nova['apelido']} assumiu a captura.")
+    await _apos_trocar_captura()
+
+
+async def plantao_contas_loop():
+    """
+    De INTERVALO_PLANTAO_MIN em INTERVALO_PLANTAO_MIN minutos: checa as contas do
+    pool no Telegram (reaproveitando os clientes já conectados), redistribui os
+    postos e religa as contas deste robô se algo mudou.
+    """
+    while True:
+        try:
+            if pool_contas.listar_contas():
+                ativos = {cid: cliente for cid, (_conta, cliente) in clientes_repost.items()}
+                if conta_captura and client is not None:
+                    ativos[conta_captura["id"]] = client
+                mudancas = await pool_contas.sincronizar_pool(clientes=ativos)
+                if mudancas and EXIBIR_LOGS:
+                    logger.info(f"🔄 [Contas] {len(mudancas)} mudança(s) de posto no plantão.")
+            await montar_contas()
+            blacklist_captura.sincronizar_contas_do_pool()
+        except Exception as e:
+            if EXIBIR_LOGS: logger.error(f"❌ [Contas] Falha no plantão: {e}")
+        await asyncio.sleep(INTERVALO_PLANTAO_MIN * 60)
+
+
 async def main():
     if EXIBIR_LOGS: logger.info("⏳ Iniciando o robô Espelhador Isolado...")
-    await client.start()
 
-    # Garante que TODAS as contas do pool estão na lista negra antes de o robô
-    # começar a escutar — inclusive as que você cadastrar no futuro. Roda a cada
-    # start, então basta reiniciar o serviço depois de cadastrar uma conta.
+    # Contas próprias na lista negra antes de começar a escutar: o retorno publicado
+    # por uma conta do rodízio chega à captura como mensagem de terceiro.
     try:
         _bl_add, _bl_rem = blacklist_captura.sincronizar_contas_do_pool()
         if EXIBIR_LOGS:
@@ -2043,47 +2346,27 @@ async def main():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Falha ao sincronizar no start: {e}")
 
-    # Loga qual conta está nesta sessão: é ela que assina o que o userbot publica e
-    # precisa ter permissão nos destinos.
-    try:
-        eu = await client.get_me()
-        if EXIBIR_LOGS:
-            logger.info(f"👤 [Userbot] Sessão '{NOME_SESSAO}' logada como: "
-                        f"{getattr(eu, 'first_name', '')} (@{getattr(eu, 'username', None) or 'sem @'}) "
-                        f"· id {getattr(eu, 'id', '?')}")
-    except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ [Userbot] Não consegui identificar a conta da sessão: {e}")
+    await montar_contas()
 
-    if EXIBIR_LOGS: logger.info("🔄 Sincronizando banco de dados de grupos...")
-    try:
-        await client.get_dialogs()
-        
-        # Nomes da origem e do destino no cache, para o painel mostrar.
-        config_atual = carregar_config_autorais()
-        for chave in ['origem', 'destino']:
-            alvo, _topico_ignorado = separar_alvo_e_topico(config_atual.get(chave))
-            if alvo is not None:
-                try:
-                    entidade = await client.get_entity(alvo)
-                    nome_alvo = getattr(entidade, 'title', getattr(entidade, 'username', str(alvo)))
-                    # Com a chave sem tópico e com o valor como está gravado no painel.
-                    salvar_nome_grupo(str(alvo), nome_alvo)
-                    salvar_nome_grupo(str(config_atual.get(chave)), nome_alvo)
-                    if EXIBIR_LOGS: logger.info(f"✅ Nome da {chave} ({nome_alvo}) extraído e salvo no cache automaticamente.")
-                except Exception as err:
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível auditar a {chave} na inicialização: {err}")
-                    
-        if EXIBIR_LOGS: logger.info("✅ Sincronização concluída! ID do grupo reconhecido.")
-    except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Aviso na sincronização: {e}")
+    criar_tarefa_fundo(processar_fila_autorais_loop())
+    criar_tarefa_fundo(processar_fila_publico_loop())   # baixa os vídeos do Grupo Público
+    criar_tarefa_fundo(loop_entrada_parceiros())   # entrada nos canais dos parceiros
+    criar_tarefa_fundo(varredura_origem_loop())   # captura por busca ativa na origem
+    criar_tarefa_fundo(plantao_contas_loop())   # troca de contas e checagem de 10 em 10 min
 
-    asyncio.create_task(processar_fila_autorais_loop())
-    asyncio.create_task(processar_fila_publico_loop())   # baixa os vídeos do Grupo Público
-    asyncio.create_task(loop_entrada_parceiros())   # entrada nos canais dos parceiros
-    asyncio.create_task(varredura_origem_loop())   # captura por busca ativa na origem
-    
     if EXIBIR_LOGS: logger.info("🤖 Sistema a rodar. A escutar o grupo de origem continuamente...")
-    await client.run_until_disconnected()
+    # Os clientes recebem as mensagens em segundo plano; o processo só precisa ficar vivo.
+    await asyncio.Event().wait()
+
+
+_tarefas_fundo = set()
+
+def criar_tarefa_fundo(coro):
+    """create_task guardando a referência (task sem referência pode ser coletada no meio)."""
+    tarefa = asyncio.create_task(coro)
+    _tarefas_fundo.add(tarefa)
+    tarefa.add_done_callback(_tarefas_fundo.discard)
+    return tarefa
 
 if __name__ == '__main__':
     asyncio.run(main())
