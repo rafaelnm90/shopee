@@ -125,11 +125,11 @@ def test_saldo_soma_a_comissao_confirmada_uma_vez(bm, monkeypatch, antes, status
     monkeypatch.setattr(bm, "salvar_historico_financeiro", lambda h: None)
     bm.salvar_banco_pedidos({"A1": {"data": "2026-09-01", "status": antes[0], "comissao_total": antes[1],
                                     "comissao_shopee": antes[1], "comissao_vendedor": 0.0}})
-    bm.salvar_config_bd("saldo_caixa_shopee", 100.0)
+    bm.db.salvar_config("saldo_caixa_shopee", 100.0)
     bm.processar_e_salvar_pedidos_api([{
         "purchaseTime": 1788000000, "totalCommission": str(comissao), "shopeeCommissionCapped": str(comissao),
         "sellerCommission": "0", "orders": [{"orderId": "A1", "orderStatus": status_novo}]}])
-    assert bm.ler_config_bd("saldo_caixa_shopee", 0.0) == pytest.approx(esperado)
+    assert bm.db.ler_config("saldo_caixa_shopee", 0.0) == pytest.approx(esperado)
 
 
 def test_excluir_parceiro_apaga_so_a_pasta_dele(bm):

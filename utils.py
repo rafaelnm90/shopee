@@ -1,8 +1,7 @@
 """
-Funções compartilhadas pelos robôs: conexão SQLite, registro de erros, cache de
-análises da IA, cache de nomes de grupos e validação de IDs do Telegram.
-
-Importar este módulo troca sqlite3.connect para o processo inteiro (ver abaixo).
+Funções compartilhadas pelos robôs: registro de erros, cache de análises da IA,
+cache de nomes de grupos e validação de IDs do Telegram. O acesso ao banco fica
+no db.py.
 """
 EXIBIR_LOGS = True
 import os
@@ -11,76 +10,13 @@ from datetime import datetime
 import logging
 from zoneinfo import ZoneInfo
 import traceback
-import sqlite3
+import db
 
 if EXIBIR_LOGS:
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
     logger = logging.getLogger(__name__)
 
 MAX_ERRORS = 50
-DB_NAME = "banco_dados.db"
-
-# Toda conexão SQLite do processo espera até 30 s pelo lock (padrão do Python: 5 s).
-# Vários robôs escrevem no mesmo banco; com 5 s, "database is locked" fazia operações
-# se perderem. O pior caso: o UPDATE que marca o vídeo como postado falhava e o mesmo
-# vídeo era republicado a cada ciclo.
-#
-# Em vez de mudar cada chamada, sqlite3.connect é trocado aqui, uma vez. Vale para
-# todo processo que importa o utils, inclusive chamadas que passam timeout menor só
-# no Python, porque o busy_timeout do SQLite fica em 30 s. O downloader_bot não importa
-# o utils e tem uma cópia desta mesma troca.
-#
-# Isto não fecha conexão esquecida aberta; para isso, use conexao_db().
-_sqlite_connect_original = sqlite3.connect
-
-
-def _conectar_blindado(*args, **kwargs):
-    kwargs.setdefault("timeout", 30.0)
-    conexao = _sqlite_connect_original(*args, **kwargs)
-    try:
-        conexao.execute("PRAGMA busy_timeout = 30000")
-    except Exception:
-        pass
-    return conexao
-
-
-sqlite3.connect = _conectar_blindado
-
-
-from contextlib import contextmanager
-
-
-@contextmanager
-def conexao_db(db=DB_NAME, row_factory=False):
-    """
-    Conexão que sempre fecha, com ou sem exceção; em exceção, desfaz a transação.
-
-    Abrir, trabalhar e fechar no fim do try deixa a conexão aberta quando algo
-    estoura no meio, e um DELETE/INSERT já feito segura o lock de escrita até o
-    coletor de lixo passar. Use nas funções que rodam em loop:
-
-        with conexao_db(row_factory=True) as conexao:
-            cursor = conexao.cursor()
-            ...
-            conexao.commit()
-    """
-    conexao = sqlite3.connect(db, timeout=30.0)
-    if row_factory:
-        conexao.row_factory = sqlite3.Row
-    try:
-        yield conexao
-    except Exception:
-        try: conexao.rollback()
-        except Exception: pass
-        raise
-    finally:
-        try: conexao.close()
-        except Exception: pass
-
-
-def obter_conexao_utils():
-    """Conexão ao banco principal sem depender de outros módulos do projeto."""
-    return sqlite3.connect(DB_NAME, timeout=20.0)
 
 def registrar_erro_json(mensagem_erro, origem="Geral", contexto_extra=None):
     """
@@ -106,7 +42,7 @@ def registrar_erro_json(mensagem_erro, origem="Geral", contexto_extra=None):
         timestamp = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d %H:%M:%S")
         contexto_str = json.dumps(contexto_extra) if contexto_extra else "{}"
 
-        conexao = obter_conexao_utils()
+        conexao = db.conectar()
         cursor = conexao.cursor()
         
         cursor.execute('''
@@ -166,7 +102,7 @@ def consultar_cache_ia(chave):
     if not chave:
         return None
     try:
-        conexao = obter_conexao_utils()
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_cache_ia(cursor)
         cursor.execute("SELECT resultado FROM cache_analises_ia WHERE chave = ?", (str(chave),))
@@ -185,7 +121,7 @@ def gravar_cache_ia(chave, resultado):
     if not chave or not resultado:
         return False
     try:
-        conexao = obter_conexao_utils()
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_cache_ia(cursor)
         cursor.execute(
@@ -202,7 +138,7 @@ def gravar_cache_ia(chave, resultado):
 def estatisticas_cache_ia():
     """(análises guardadas, chamadas à IA economizadas), para o log de faxina."""
     try:
-        conexao = obter_conexao_utils()
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_cache_ia(cursor)
         cursor.execute("SELECT COUNT(*), COALESCE(SUM(usos - 1), 0) FROM cache_analises_ia")
@@ -220,7 +156,7 @@ def limpar_cache_ia_antigo(dias=30):
     try:
         from datetime import timedelta
         corte = (datetime.now(ZoneInfo("America/Sao_Paulo")) - timedelta(days=dias)).strftime("%Y-%m-%d %H:%M:%S")
-        conexao = obter_conexao_utils()
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_cache_ia(cursor)
         cursor.execute("DELETE FROM cache_analises_ia WHERE data_analise < ?", (corte,))
@@ -239,7 +175,7 @@ def ler_cache_nomes_grupos():
     mostram o nome em vez do ID. A chave de um tópico é "<grupo>_<tópico>".
     """
     try:
-        conexao = obter_conexao_utils()
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("CREATE TABLE IF NOT EXISTS cache_nomes (chat_id TEXT PRIMARY KEY, nome TEXT)")
         cursor.execute("SELECT chat_id, nome FROM cache_nomes")
@@ -261,7 +197,7 @@ def salvar_nome_grupo(chat_id, nome):
         return
         
     try:
-        conexao = obter_conexao_utils()
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("CREATE TABLE IF NOT EXISTS cache_nomes (chat_id TEXT PRIMARY KEY, nome TEXT)")
         
@@ -375,7 +311,7 @@ def obter_banco_global_origens():
     """
     origens_globais = set()
     try:
-        conexao = obter_conexao_utils()
+        conexao = db.conectar()
         cursor = conexao.cursor()
         
         cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'alvos_espiao'")

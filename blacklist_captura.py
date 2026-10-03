@@ -101,7 +101,7 @@ EXIBIR_LOGS = True
 import os
 import sys
 import time
-import sqlite3
+import db
 import logging
 import asyncio
 from datetime import datetime
@@ -144,9 +144,7 @@ _TABELA_PRONTA = False
 # =============================================================================
 
 def _obter_conexao():
-    conexao = sqlite3.connect(DB_NAME, timeout=20.0)
-    conexao.row_factory = sqlite3.Row
-    return conexao
+    return db.conectar(DB_NAME, linhas_por_nome=True)
 
 
 def inicializar_tabelas():
@@ -776,13 +774,19 @@ def montar_relatorio_terminal():
 # 6. AUTOTESTE — roda sem Telegram e sem rede
 # =============================================================================
 
+def _apagar_banco_de_teste():
+    # No modo WAL o banco vem com dois arquivos ao lado (-wal e -shm).
+    for sufixo in ("", "-wal", "-shm"):
+        if os.path.exists("teste_blacklist_temp.db" + sufixo):
+            os.remove("teste_blacklist_temp.db" + sufixo)
+
+
 def autoteste():
     """Confere as regras de escopo e origem com um banco temporário."""
     global DB_NAME
     banco_real = DB_NAME
     DB_NAME = "teste_blacklist_temp.db"
-    if os.path.exists(DB_NAME):
-        os.remove(DB_NAME)
+    _apagar_banco_de_teste()
 
     falhas = []
 
@@ -836,8 +840,7 @@ def autoteste():
     finally:
         DB_NAME = banco_real
         invalidar_cache()
-        if os.path.exists("teste_blacklist_temp.db"):
-            os.remove("teste_blacklist_temp.db")
+        _apagar_banco_de_teste()
 
     print("\n" + "=" * 52)
     if falhas:

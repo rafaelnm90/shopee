@@ -51,6 +51,7 @@ from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fi
 import matplotlib.pyplot as plt
 import io
 import sqlite3
+import db
 import painel_espelhos
 import painel_notas
 import pool_contas  # contas dos userbots (quem espelha, quem reposta)
@@ -70,7 +71,7 @@ def inicializar_banco_sqlite():
     módulo; ALTER TABLE de coluna que já existe falha e é ignorado.
     """
     if EXIBIR_LOGS: logger.info("🚀 Preparando a fundação de dados em SQLite...")
-    conexao = sqlite3.connect("banco_dados.db")
+    conexao = db.conectar()
     cursor = conexao.cursor()
     
     # Fila do canal principal (vídeos criados em Criar Postagem).
@@ -89,7 +90,7 @@ def inicializar_banco_sqlite():
         )
     ''')
     
-    # Configurações de todos os robôs: chave -> JSON (ler_config_bd / salvar_config_bd).
+    # Configurações de todos os robôs: chave -> JSON (db.ler_config / db.salvar_config).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS configuracoes (
             chave TEXT PRIMARY KEY,
@@ -447,7 +448,7 @@ class SubmissaoUsuarioInterativa(StatesGroup):
     painel = State()  # painel único: vídeo e links entram em qualquer ordem
 
 def ler_submissao_config():
-    return ler_config_bd("submissao_config", padrao={
+    return db.ler_config("submissao_config", padrao={
         "ativo": False, 
         "grupo_id": None, 
         "topico_envio": None, 
@@ -462,7 +463,7 @@ def ler_submissao_config():
     })
 
 def salvar_submissao_config(dados):
-    salvar_config_bd("submissao_config", dados)
+    db.salvar_config("submissao_config", dados)
 
 class AutoraisFluxo(StatesGroup):
     menu_principal = State()
@@ -701,10 +702,10 @@ def obter_teclado_opcoes_servidor():
 # --- Espião: configuração e análise dos canais vigiados ---
 def ler_alvos_espiao():
     padrao = {"alvos": [], "canal_destino": None, "status_alvos": {}}
-    return ler_config_bd("alvos_espiao", padrao, arquivo_legado="alvos_espiao.json")
+    return db.ler_config("alvos_espiao", padrao, arquivo_legado="alvos_espiao.json")
 
 def salvar_alvos_espiao(dados):
-    salvar_config_bd("alvos_espiao", dados)
+    db.salvar_config("alvos_espiao", dados)
 
 teclado_menu_espiao = ReplyKeyboardMarkup(
     keyboard=[
@@ -851,7 +852,7 @@ def ler_fila_postagens():
             if EXIBIR_LOGS: logger.error(f"❌ Erro na migração do JSON: {e}")
 
     try:
-        conexao = sqlite3.connect("banco_dados.db")
+        conexao = db.conectar()
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         
@@ -884,7 +885,7 @@ def salvar_fila_postagens(dados):
     o resto do código grava com UPDATE/INSERT pontuais.
     """
     try:
-        conexao = sqlite3.connect("banco_dados.db")
+        conexao = db.conectar()
         cursor = conexao.cursor()
         fila = dados.get("fila", [])
         
@@ -935,7 +936,7 @@ def agendar_fila_postagens():
     hoje_str = agora.strftime("%Y-%m-%d")
     
     try:
-        conexao = sqlite3.connect("banco_dados.db")
+        conexao = db.conectar()
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         cursor.execute("SELECT id_unico FROM fila_postagens WHERE status = 'PENDENTE' AND (data_alvo <= ? OR data_alvo = '2000-01-01') ORDER BY prioridade ASC", (hoje_str,))
@@ -1038,7 +1039,7 @@ async def motor_fila_minuto():
         return  # fora do expediente
         
     try:
-        conexao = sqlite3.connect("banco_dados.db")
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("SELECT COUNT(*) FROM fila_postagens WHERE status = 'PENDENTE' AND (data_alvo <= ? OR data_alvo = '2000-01-01')", (hoje_str,))
         qtd_db = cursor.fetchone()[0]
@@ -1074,7 +1075,7 @@ async def executar_postagem_fila(item_id):
 
     sucesso = False
     try:
-        conexao = sqlite3.connect("banco_dados.db")
+        conexao = db.conectar()
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         cursor.execute("SELECT * FROM fila_postagens WHERE id_unico = ?", (item_id,))
@@ -1132,7 +1133,7 @@ async def executar_postagem_fila(item_id):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao postar vídeo da fila: {e}")
         try:
-            conexao = sqlite3.connect("banco_dados.db")
+            conexao = db.conectar()
             cursor = conexao.cursor()
             if sucesso:
                 # O vídeo já foi para o grupo e a falha veio depois: só falta marcar.
@@ -1158,53 +1159,6 @@ async def executar_postagem_fila(item_id):
             conexao.commit()
             conexao.close()
         except Exception: pass
-
-# --- Configurações no SQLite (tabela configuracoes) ---
-def ler_config_bd(chave, padrao=None, arquivo_legado=None):
-    """
-    Valor JSON da chave em configuracoes; padrao se não houver.
-
-    Com arquivo_legado e sem a chave no banco, migra o JSON antigo: grava no banco e
-    renomeia o arquivo para .bkp. Não usar com arquivo que outro serviço ainda grava
-    (como o fila_espelhador.json).
-    """
-    if padrao is None: padrao = {}
-    try:
-        conexao = sqlite3.connect("banco_dados.db")
-        cursor = conexao.cursor()
-        cursor.execute("SELECT valor FROM configuracoes WHERE chave = ?", (chave,))
-        resultado = cursor.fetchone()
-        conexao.close()
-        
-        if resultado:
-            return json.loads(resultado[0])
-            
-        import os
-        if arquivo_legado and os.path.exists(arquivo_legado):
-            with open(arquivo_legado, "r", encoding="utf-8") as f:
-                dados_antigos = json.load(f)
-            salvar_config_bd(chave, dados_antigos)
-            os.rename(arquivo_legado, arquivo_legado + ".bkp")
-            if EXIBIR_LOGS: logger.info(f"📦 Migração concluída: '{arquivo_legado}' movido para o SQLite com sucesso.")
-            return dados_antigos
-            
-        return padrao
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler configuração '{chave}' do SQLite: {e}")
-        return padrao
-
-def salvar_config_bd(chave, dados):
-    # É a gravação mais frequente do sistema (todo painel, motor e rotina passa por aqui):
-    # conexao_db() fecha a conexão com ou sem exceção.
-    from utils import conexao_db
-    try:
-        with conexao_db() as conexao:
-            cursor = conexao.cursor()
-            dados_str = json.dumps(dados, ensure_ascii=False)
-            cursor.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)", (chave, dados_str))
-            conexao.commit()
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar configuração '{chave}' no SQLite: {e}")
 
 # Crédito do repost: o @ do administrador, perguntado ao Telegram.
 _cache_credito_repost = {"valor": None, "expira": None}
@@ -1239,10 +1193,10 @@ async def obter_credito_repost():
 # --- Pausa programada ---
 def ler_pausa_programada():
     padrao = {"ativa": False, "data_retorno": None, "servicos_pausados": []}
-    return ler_config_bd("pausa_programada", padrao, arquivo_legado="pausa_programada.json")
+    return db.ler_config("pausa_programada", padrao, arquivo_legado="pausa_programada.json")
 
 def salvar_pausa_programada(dados):
-    salvar_config_bd("pausa_programada", dados)
+    db.salvar_config("pausa_programada", dados)
 
 def recalcular_datas_pos_pausa():
     """
@@ -1252,7 +1206,7 @@ def recalcular_datas_pos_pausa():
     """
     if EXIBIR_LOGS: logger.info("🔄 Iniciando recálculo de datas no SQLite pós-pausa...")
     try:
-        conexao = sqlite3.connect("banco_dados.db")
+        conexao = db.conectar()
         cursor = conexao.cursor()
         
         cursor.execute("SELECT MIN(data_alvo) FROM fila_postagens WHERE status = 'PENDENTE' AND data_alvo != '2000-01-01'")
@@ -1417,7 +1371,7 @@ async def gerar_mensagem_gemini(prompt):
 def registrar_lixeira(msg_id, chat_id=GRUPO_ID):
     """Guarda a mensagem para ser apagada na faxina da madrugada."""
     try:
-        conexao = sqlite3.connect("banco_dados.db")
+        conexao = db.conectar()
         cursor = conexao.cursor()
         agora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute("INSERT INTO lixeira_mensagens (msg_id, chat_id, data_inclusao) VALUES (?, ?, ?)", (msg_id, str(chat_id), agora))
@@ -1451,7 +1405,7 @@ def _caminhos_protegidos():
         pass
 
     # Fila do Espelhador, lida do arquivo onde o motor_userbot grava. Não usar
-    # ler_config_bd aqui: sem a chave no banco ele "migra" o arquivo e o renomeia
+    # db.ler_config aqui: sem a chave no banco ele "migra" o arquivo e o renomeia
     # para .bkp, e o motor fica com a fila vazia.
     try:
         with open("fila_espelhador.json", "r", encoding="utf-8") as f:
@@ -1466,7 +1420,7 @@ def _caminhos_protegidos():
 
     # Fila dos parceiros
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("SELECT caminho_video FROM fila_parceiros WHERE processado = 0")
         for (c,) in cursor.fetchall():
@@ -1478,7 +1432,7 @@ def _caminhos_protegidos():
     # Grupo Público: o arquivo que o Correio já baixou e o bot ainda não publicou.
     # Sem isto a faxina o apagaria se o item passasse das 24 h protegidas.
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("SELECT caminho_arquivo FROM fila_publico WHERE processado = 0")
         for (c,) in cursor.fetchall():
@@ -1604,7 +1558,7 @@ async def varredor_de_lixeira():
     """
     if EXIBIR_LOGS: logger.info("🧹 Iniciando varredura diária da lixeira persistente (03h00)...")
     try:
-        conexao = sqlite3.connect("banco_dados.db")
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("SELECT id, msg_id, chat_id FROM lixeira_mensagens")
         mensagens = cursor.fetchall()
@@ -1659,7 +1613,7 @@ async def apagar_mensagem_automatica(msg_id, chat_id=GRUPO_ID):
 def salvar_metrica(dia, chave, valor):
     """Grava (ou troca) o valor da métrica no dia."""
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("INSERT OR REPLACE INTO historico_metricas (data, chave, valor) VALUES (?, ?, ?)", (dia, chave, int(valor)))
         conexao.commit()
@@ -1671,7 +1625,7 @@ def ler_metrica(chave, dias_atras=0):
     """Valor da métrica em um dia específico. None se não houver registro."""
     try:
         dia = (datetime.now(fuso_horario) - timedelta(days=dias_atras)).strftime("%Y-%m-%d")
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("SELECT valor FROM historico_metricas WHERE data = ? AND chave = ?", (dia, chave))
         r = cursor.fetchone()
@@ -1691,7 +1645,7 @@ def soma_metrica_periodo(chave, dias):
     """Soma dos valores diários no período (para volume, não para saldo)."""
     try:
         ini = (datetime.now(fuso_horario) - timedelta(days=dias)).strftime("%Y-%m-%d")
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("SELECT SUM(valor) FROM historico_metricas WHERE chave = ? AND data > ?", (chave, ini))
         r = cursor.fetchone()
@@ -1703,7 +1657,7 @@ def soma_metrica_periodo(chave, dias):
 def recorde_metrica(chave):
     """Maior valor já registrado para aquela métrica."""
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("SELECT MAX(valor) FROM historico_metricas WHERE chave = ?", (chave,))
         r = cursor.fetchone()
@@ -1751,7 +1705,7 @@ async def coletar_metricas_diarias():
         # Vídeos publicados hoje
         posts = {"principal": 0, "viral": 0, "publico": 0}
         try:
-            conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+            conexao = db.conectar()
             cursor = conexao.cursor()
 
             cursor.execute("SELECT COUNT(*) FROM fila_postagens WHERE status = 'CONCLUIDO' AND data_postagem = ?", (hoje_str,))
@@ -1784,7 +1738,7 @@ async def coletar_metricas_diarias():
         # retrato diário habilita os fatos de marco e de crescimento.
         dl_total = dl_usuarios = 0
         try:
-            conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+            conexao = db.conectar()
             cursor = conexao.cursor()
             cursor.execute("SELECT COALESCE(SUM(total), 0), COUNT(*) FROM downloads_totais")
             dl_total, dl_usuarios = cursor.fetchone()
@@ -1923,19 +1877,19 @@ def gerar_fato_prova(canal):
 def registrar_ultimo_post(chat_destino, tipo_conteudo):
     """Guarda se a última publicação daquele canal foi 'video' ou 'texto'."""
     try:
-        dados = ler_config_bd("ultimo_post_canais", {})
+        dados = db.ler_config("ultimo_post_canais", {})
         dados[str(chat_destino)] = {
             "tipo": tipo_conteudo,
             "hora": datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
         }
-        salvar_config_bd("ultimo_post_canais", dados)
+        db.salvar_config("ultimo_post_canais", dados)
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao registrar último post: {e}")
 
 def obter_ultimo_post(chat_destino):
     """'video' ou 'texto': a última publicação registrada no canal."""
     try:
-        dados = ler_config_bd("ultimo_post_canais", {})
+        dados = db.ler_config("ultimo_post_canais", {})
         return dados.get(str(chat_destino), {}).get("tipo")
     except Exception:
         return None
@@ -1952,7 +1906,7 @@ def contar_videos_pendentes(chat_destino):
             if ler_pausa_programada().get("ativa"):
                 return 0
             hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
-            conexao = sqlite3.connect("banco_dados.db")
+            conexao = db.conectar()
             cursor = conexao.cursor()
             cursor.execute("SELECT COUNT(*) FROM fila_postagens WHERE status = 'PENDENTE' AND (data_alvo <= ? OR data_alvo = '2000-01-01')", (hoje,))
             total = cursor.fetchone()[0]
@@ -1974,7 +1928,7 @@ def contar_videos_pendentes(chat_destino):
             ])
 
         # Grupo Público (fila_publico)
-        conexao = sqlite3.connect("banco_dados.db")
+        conexao = db.conectar()
         cursor = conexao.cursor()
         # Só conta vídeo que pode sair hoje, como no principal: com a fila inteira, um
         # vídeo agendado para daqui a semanas adiava os textos sem nunca sair.
@@ -2321,7 +2275,7 @@ def ler_config_rotina():
         "historico_diario": {"data": "", "contagem": {}}
     }
     
-    dados = ler_config_bd("config_rotina", padrao, arquivo_legado="config_rotina.json")
+    dados = db.ler_config("config_rotina", padrao, arquivo_legado="config_rotina.json")
     
     houve_alteracao = False
     for chave, valor in padrao.items():
@@ -2330,13 +2284,13 @@ def ler_config_rotina():
             houve_alteracao = True
             
     if houve_alteracao:
-        salvar_config_bd("config_rotina", dados)
+        db.salvar_config("config_rotina", dados)
         if EXIBIR_LOGS: logger.info("✅ Sucesso: Novas chaves de rotina injetadas e salvas no banco.")
         
     return dados
 
 def salvar_config_rotina(dados):
-    salvar_config_bd("config_rotina", dados)
+    db.salvar_config("config_rotina", dados)
 
 # Rotinas de cada robô; o que não está nestas listas é do canal principal.
 ROTINAS_VIRAIS = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral", "promo_achadinhos_viral"]
@@ -2381,7 +2335,7 @@ def agendar_tarefas_diarias(escopo="todos"):
     if escopo == "todos":
         # Faxina da madrugada: itens CONCLUIDO/ERRO de dias anteriores saem da fila e, sem outro uso, do disco.
         try:
-            conexao = sqlite3.connect("banco_dados.db")
+            conexao = db.conectar()
             cursor = conexao.cursor()
             cursor.execute("SELECT caminho_video FROM fila_postagens WHERE status IN ('CONCLUIDO', 'ERRO') AND data_postagem != ?", (hoje_faxina_str,))
             para_apagar = cursor.fetchall()
@@ -2675,7 +2629,7 @@ def agendar_tarefas_diarias(escopo="todos"):
 
         horarios_ocupados_publico = []
         try:
-            conexao_pub = sqlite3.connect("banco_dados.db")
+            conexao_pub = db.conectar()
             cursor_pub = conexao_pub.cursor()
             cursor_pub.execute("SELECT horario_disparo FROM fila_publico WHERE processado = 0 AND horario_disparo IS NOT NULL AND horario_disparo != ''")
             for linha_pub in cursor_pub.fetchall():
@@ -3073,7 +3027,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         icone_rep_orig = "✅" if repost_origem_base in cache_nomes else "⏳"
         display_repost_origem = f"    {icone_rep_orig} {nome_repost_origem} (<code>{str(repost_origem).replace(':', '_')}</code>)"
     else:
-        config_aut = ler_config_bd("autorais_config", {})
+        config_aut = db.ler_config("autorais_config", {})
         dest_aut = config_aut.get("destino", "Não definido")
         dest_aut_base = str(dest_aut).split(":")[0].strip()
         nome_aut = cache_nomes.get(dest_aut_base, str(dest_aut_base))
@@ -3139,7 +3093,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
 def ler_parceiros(apenas_ativos=False):
     """Parceiros cadastrados (só os ativos, se pedido), em ordem de cadastro."""
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         sql = "SELECT * FROM parceiros"
@@ -3156,7 +3110,7 @@ def ler_parceiros(apenas_ativos=False):
 def salvar_parceiro(dados):
     """Cadastra o parceiro (nasce ativo) e devolve o novo ID, ou None."""
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute('''
             INSERT INTO parceiros (nome, app_id, app_secret, canal_origem, canal_destino,
@@ -3183,7 +3137,7 @@ def atualizar_parceiro(parceiro_id, campo, valor):
                      "limite_min", "limite_max"):
         return False
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute(f"UPDATE parceiros SET {campo} = ? WHERE id = ?", (valor, int(parceiro_id)))
         conexao.commit()
@@ -3200,7 +3154,7 @@ def excluir_parceiro(parceiro_id):
     vídeo já entregue a alguém nunca volta ao poço.
     """
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("DELETE FROM parceiros WHERE id = ?", (int(parceiro_id),))
         try:
@@ -3277,7 +3231,7 @@ TETO_DISCO_PARCEIROS_GB_PAINEL = 10  # o mesmo teto do espelhador_videos_autorai
 def ler_fila_parceiro_pendente(parceiro_id):
     """Itens ainda não publicados do parceiro, da data-alvo mais antiga para a mais nova."""
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         cursor.execute("SELECT * FROM fila_parceiros WHERE parceiro_id = ? AND processado = 0 ORDER BY data_alvo ASC",
@@ -3293,7 +3247,7 @@ def atualizar_item_fila_parceiro(id_unico, campo, valor):
     if campo not in ("horario_disparo", "processado", "data_postagem"):
         return
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute(f"UPDATE fila_parceiros SET {campo} = ? WHERE id_unico = ?", (valor, id_unico))
         conexao.commit()
@@ -3307,7 +3261,7 @@ def remover_item_fila_parceiro(id_unico, caminho=None):
         try: os.remove(caminho)
         except Exception: pass
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("DELETE FROM fila_parceiros WHERE id_unico = ?", (id_unico,))
         conexao.commit()
@@ -3325,7 +3279,7 @@ def ler_fila_parceiro_por_dia_captura(parceiro_id):
     """
     grupos = {}
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
 
@@ -4585,7 +4539,7 @@ async def motor_repost_publico_step():
         agora = datetime.now(fuso_horario)
         hoje_str = agora.strftime("%Y-%m-%d")
 
-        conexao = sqlite3.connect("banco_dados.db")
+        conexao = db.conectar()
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
 
@@ -4816,10 +4770,10 @@ def ler_autorais_config():
         "pausar_repostagem": False,
         "pausar_robo_completo": False
     }
-    return ler_config_bd("autorais_config", padrao, arquivo_legado="autorais_config.json")
+    return db.ler_config("autorais_config", padrao, arquivo_legado="autorais_config.json")
 
 def salvar_autorais_config(dados):
-    salvar_config_bd("autorais_config", dados)
+    db.salvar_config("autorais_config", dados)
 
 teclado_menu_autorais = ReplyKeyboardMarkup(
     keyboard=[
@@ -4844,7 +4798,7 @@ teclado_submenu_retorno = ReplyKeyboardMarkup(
 def calcular_dias_restantes_autorais():
     """Dias até a data-alvo mais próxima da fila de retorno; None se já chegou ou não há fila."""
     try:
-        conexao = sqlite3.connect("banco_dados.db")
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("SELECT MIN(data_alvo) FROM fila_autorais")
         resultado = cursor.fetchone()
@@ -5576,8 +5530,8 @@ async def verificar_saude_contas():
     atrasada = saude["checagem_atrasada_min"] is not None
     retrato = {"postos": {k: {"ok": p["ok"], "apelido": p["apelido"]} for k, p in agora.items()},
                "atrasada": atrasada}
-    antes = ler_config_bd("pool_saude_retrato", None)
-    salvar_config_bd("pool_saude_retrato", retrato)
+    antes = db.ler_config("pool_saude_retrato", None)
+    db.salvar_config("pool_saude_retrato", retrato)
 
     rotulos = pool_contas.ROTULOS_FUNCAO
     linhas = []
@@ -5759,7 +5713,7 @@ async def bl_alternar_escopo(callback: types.CallbackQuery):
     """Alterna a entrada entre 'só nos Autorais' e 'em todo lugar'."""
     entrada_id = callback.data.split(":")[1]
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("SELECT escopo FROM blacklist_captura WHERE id = ?", (entrada_id,))
         linha = cursor.fetchone()
@@ -6470,15 +6424,15 @@ def extrair_destino_e_topico(texto):
 # ----------------------------------
 def ler_achadinhos_config():
     """achadinhos_config: nichos (nome, destino, tópico, palavras-chave), janela e sorteio."""
-    return ler_config_bd("achadinhos_config", {"nichos": []}, arquivo_legado="achadinhos_config.json")
+    return db.ler_config("achadinhos_config", {"nichos": []}, arquivo_legado="achadinhos_config.json")
 
 def salvar_achadinhos_config(dados):
-    salvar_config_bd("achadinhos_config", dados)
+    db.salvar_config("achadinhos_config", dados)
 
 def achadinho_ja_enviado(item_id):
     """Se o produto já foi publicado alguma vez (memória permanente, sem limite de tamanho)."""
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("SELECT 1 FROM achadinhos_enviados WHERE item_id = ?", (str(item_id),))
         achou = cursor.fetchone() is not None
@@ -6491,7 +6445,7 @@ def achadinho_ja_enviado(item_id):
 def registrar_achadinho_enviado(item_id, nicho=""):
     """Guarda o produto na memória de publicados."""
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("INSERT OR IGNORE INTO achadinhos_enviados (item_id, data_envio, nicho) VALUES (?, ?, ?)",
                        (str(item_id), datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S"), nicho))
@@ -6508,7 +6462,7 @@ def limpar_achadinhos_antigos():
     """Apaga da memória os produtos publicados há mais de ANOS_RETENCAO_ACHADINHOS anos."""
     try:
         corte = (datetime.now(fuso_horario) - timedelta(days=ANOS_RETENCAO_ACHADINHOS * 365)).strftime("%Y-%m-%d %H:%M:%S")
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("DELETE FROM achadinhos_enviados WHERE data_envio < ?", (corte,))
         removidos = cursor.rowcount
@@ -6521,7 +6475,7 @@ def limpar_achadinhos_antigos():
 
 def total_achadinhos_enviados():
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("SELECT COUNT(*) FROM achadinhos_enviados")
         total = cursor.fetchone()[0]
@@ -7120,10 +7074,10 @@ async def menu_canal_principal(message: types.Message, state: FSMContext):
 # Pedidos e comissões da Shopee (relatório financeiro)
 def ler_banco_pedidos():
     """Pedidos já vistos na API de afiliados: order_id -> data, status e comissões."""
-    return ler_config_bd("banco_pedidos", padrao={}, arquivo_legado="banco_pedidos.json")
+    return db.ler_config("banco_pedidos", padrao={}, arquivo_legado="banco_pedidos.json")
 
 def salvar_banco_pedidos(dados):
-    salvar_config_bd("banco_pedidos", dados)
+    db.salvar_config("banco_pedidos", dados)
 
 async def buscar_dados_financeiros_shopee(dias_retroativos=30):
     """
@@ -7217,7 +7171,7 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
     pedidos_db = ler_banco_pedidos()
     
     # Saldo acumulado das comissões confirmadas ("conta bancária virtual").
-    saldo_caixa = float(ler_config_bd("saldo_caixa_shopee", 0.0))
+    saldo_caixa = float(db.ler_config("saldo_caixa_shopee", 0.0))
     houve_atualizacao = False
     from datetime import timezone
     
@@ -7292,7 +7246,7 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
     if houve_atualizacao:
         salvar_banco_pedidos(pedidos_db)
         if not ignorar_ledger:
-            salvar_config_bd("saldo_caixa_shopee", saldo_caixa)
+            db.salvar_config("saldo_caixa_shopee", saldo_caixa)
             
     # Refaz o histórico por dia (aprovado, pendente, cancelado) usado no relatório e no gráfico.
     historico_limpo = {}
@@ -7562,7 +7516,7 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
     # Origem de onde os vídeos vêm (repost_origem ou o destino dos Autorais).
     canal_origem = config.get("repost_origem")
     if not canal_origem:
-        config_aut = ler_config_bd("autorais_config", {})
+        config_aut = db.ler_config("autorais_config", {})
         canal_origem = config_aut.get("destino", "")
     origem_base = str(canal_origem).split(":")[0].strip()
 
@@ -7574,7 +7528,7 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
     display_origem = cache_nomes.get(origem_base, origem_base or "Origem não definida")
 
     try:
-        conexao = sqlite3.connect("banco_dados.db")
+        conexao = db.conectar()
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         cursor.execute("""
@@ -7738,11 +7692,11 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         fila = fila_data.get("fila", [])
     elif tipo_fila == "Autorais":
         try:
-            conexao = sqlite3.connect("banco_dados.db")
+            conexao = db.conectar()
             conexao.row_factory = sqlite3.Row
             cursor = conexao.cursor()
             # O retorno autoral é publicado no grupo de ORIGEM: é ele o destino do link no relatório.
-            _cfg_aut = ler_config_bd("autorais_config", {})
+            _cfg_aut = db.ler_config("autorais_config", {})
             _destino_retorno = str(_cfg_aut.get("origem") or "").split(":")[0].strip()
 
             cursor.execute("SELECT * FROM fila_autorais ORDER BY data_alvo ASC, horario_disparo ASC")
@@ -7852,7 +7806,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         houve_alteracao = False
         
         try:
-            conexao = sqlite3.connect("banco_dados.db")
+            conexao = db.conectar()
             cursor = conexao.cursor()
             
             for item in fila:
@@ -8362,7 +8316,7 @@ async def menu_relatorio_geral(message: types.Message, state: FSMContext):
     await message.answer("📊 <b>Central de Relatórios</b>\nEscolha qual métrica deseja analisar:", reply_markup=obter_teclado_relatorios(), parse_mode="HTML")
 
 def salvar_historico_financeiro(dados):
-    salvar_config_bd("historico_financeiro", dados)
+    db.salvar_config("historico_financeiro", dados)
 
 @dp.message(F.text == "Relatório Financeiro 💰", StateFilter("*"))
 async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
@@ -8756,7 +8710,7 @@ async def gerar_relatorio_logs(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("🚀 A iniciar a auditoria da tabela erros_logs...")
     
     try:
-        conexao = sqlite3.connect("banco_dados.db")
+        conexao = db.conectar()
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         
@@ -8809,7 +8763,7 @@ async def limpar_historico_erros(callback: CallbackQuery):
     if EXIBIR_LOGS: logger.info("🧹 Pedido de exclusão do histórico de erros recebido via botão interativo.")
     
     try:
-        conexao = sqlite3.connect("banco_dados.db")
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("DELETE FROM erros_logs")
         conexao.commit()
@@ -9308,7 +9262,7 @@ async def manual_repost_autoral(message: types.Message):
     msg_status = await message.answer("♻️ Extraindo um vídeo legível do Canal Autoral...", parse_mode="HTML")
     
     try:
-        conexao = sqlite3.connect("banco_dados.db")
+        conexao = db.conectar()
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         
@@ -9355,7 +9309,7 @@ async def manual_repost_autoral(message: types.Message):
         # Origem: repost_origem ou, sem ela, o destino dos Autorais.
         canal_autorais = config_pub.get("repost_origem")
         if not canal_autorais:
-            config_aut = ler_config_bd("autorais_config", {})
+            config_aut = db.ler_config("autorais_config", {})
             canal_autorais = config_aut.get("destino")
 
         # from_chat_id não aceita o tópico ("-100123:5").
@@ -9992,7 +9946,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
         id_unico = f"{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}"
         
         try:
-            conexao = sqlite3.connect("banco_dados.db")
+            conexao = db.conectar()
             cursor = conexao.cursor()
             
             # Próxima posição dentro do dia.
@@ -10062,7 +10016,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
 
     # Quantos já estão na fila desse dia (contando os que acabaram de entrar).
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("SELECT COUNT(*) FROM fila_postagens WHERE data_alvo = ?", (data_agendamento_base,))
         na_fila_do_dia = int(cursor.fetchone()[0] or 0)
@@ -10267,8 +10221,8 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
                 id_unico = job_id.replace("job_fila_postagem_", "")
                 nome_video = f"Vídeo {id_unico[:4]}"
                 try:
-                    import sqlite3, re
-                    conexao = sqlite3.connect("banco_dados.db")
+                    import re
+                    conexao = db.conectar()
                     cursor = conexao.cursor()
                     cursor.execute("SELECT legenda FROM fila_postagens WHERE id_unico = ?", (id_unico,))
                     res = cursor.fetchone()
@@ -10435,7 +10389,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
     # 3. Autorais: tira os pendentes da fila de retorno e apaga os arquivos
     if limpar_autorais:
         try:
-            conexao = sqlite3.connect("banco_dados.db")
+            conexao = db.conectar()
             cursor = conexao.cursor()
             
             cursor.execute("SELECT caminho_arquivo FROM fila_autorais WHERE processado = 0")
@@ -12648,7 +12602,7 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
 def ler_alvos_divulgacao():
     """Config do SPAM principal; completa repetições e réplicas que faltarem."""
     padrao = {"alvos": [], "frequencia_por_hora": 0, "pausado": False, "forcar_disparo": False, "repeticoes_internas": 6, "replicas_mensagem": 5}
-    dados = ler_config_bd("alvos_divulgacao", padrao, arquivo_legado="alvos_divulgacao.json")
+    dados = db.ler_config("alvos_divulgacao", padrao, arquivo_legado="alvos_divulgacao.json")
     
     houve_alteracao = False
     if "repeticoes_internas" not in dados: 
@@ -12659,12 +12613,12 @@ def ler_alvos_divulgacao():
         houve_alteracao = True
         
     if houve_alteracao:
-        salvar_config_bd("alvos_divulgacao", dados)
+        db.salvar_config("alvos_divulgacao", dados)
         
     return dados
 
 def salvar_alvos_divulgacao(dados):
-    salvar_config_bd("alvos_divulgacao", dados)
+    db.salvar_config("alvos_divulgacao", dados)
 
 @dp.message(F.text == "SPAM em Grupos 📢")
 async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
@@ -12921,7 +12875,7 @@ async def acionar_disparo_imediato(message: types.Message):
 def ler_alvos_divulgacao_viral():
     """Config do SPAM do Viral; completa repetições e réplicas que faltarem."""
     padrao = {"alvos": [], "frequencia_por_hora": 0, "pausado": False, "forcar_disparo": False, "repeticoes_internas": 6, "replicas_mensagem": 5}
-    dados = ler_config_bd("alvos_divulgacao_viral", padrao, arquivo_legado="alvos_divulgacao_viral.json")
+    dados = db.ler_config("alvos_divulgacao_viral", padrao, arquivo_legado="alvos_divulgacao_viral.json")
     
     houve_alteracao = False
     if "repeticoes_internas" not in dados: 
@@ -12932,12 +12886,12 @@ def ler_alvos_divulgacao_viral():
         houve_alteracao = True
         
     if houve_alteracao:
-        salvar_config_bd("alvos_divulgacao_viral", dados)
+        db.salvar_config("alvos_divulgacao_viral", dados)
         
     return dados
 
 def salvar_alvos_divulgacao_viral(dados):
-    salvar_config_bd("alvos_divulgacao_viral", dados)
+    db.salvar_config("alvos_divulgacao_viral", dados)
 
 @dp.message(F.text == "SPAM do Espião 📢", StateFilter("*"))
 async def gerenciar_divulgacao_viral(message: types.Message, state: FSMContext):
@@ -13215,7 +13169,7 @@ def ler_alvos_divulgacao_escopo(escopo):
     conf = ESCOPOS_DIVULGACAO_PAINEL[escopo]
     padrao = {"alvos": [], "frequencia_por_hora": 1, "pausado": True,
               "forcar_disparo": False, "repeticoes_internas": 1, "replicas_mensagem": 1}
-    dados = ler_config_bd(conf["chave"], padrao)
+    dados = db.ler_config(conf["chave"], padrao)
 
     houve_alteracao = False
     for chave, valor in padrao.items():
@@ -13223,11 +13177,11 @@ def ler_alvos_divulgacao_escopo(escopo):
             dados[chave] = valor
             houve_alteracao = True
     if houve_alteracao:
-        salvar_config_bd(conf["chave"], dados)
+        db.salvar_config(conf["chave"], dados)
     return dados
 
 def salvar_alvos_divulgacao_escopo(escopo, dados):
-    salvar_config_bd(ESCOPOS_DIVULGACAO_PAINEL[escopo]["chave"], dados)
+    db.salvar_config(ESCOPOS_DIVULGACAO_PAINEL[escopo]["chave"], dados)
 
 async def _escopo_div_atual(state: FSMContext):
     """Lê do FSM qual painel está aberto. Cai no público se algo se perder."""
@@ -13899,7 +13853,7 @@ async def aplicar_renumeracao_e_salvar(fila_ids_ordenada, message, state, numero
     if EXIBIR_LOGS: logger.info("🔄 Reorganizando prioridades e numeração no SQLite...")
     
     try:
-        conexao = sqlite3.connect("banco_dados.db")
+        conexao = db.conectar()
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
 
@@ -14056,7 +14010,7 @@ async def processar_exclusao_fila(message: types.Message, state: FSMContext):
         caminho_video = item_removido.get("caminho_video")
         
         try:
-            conexao = sqlite3.connect("banco_dados.db")
+            conexao = db.conectar()
             cursor = conexao.cursor()
             cursor.execute("DELETE FROM fila_postagens WHERE id_unico = ?", (id_remover,))
             conexao.commit()
@@ -14119,7 +14073,7 @@ async def salvar_nova_legenda_fila(message: types.Message, state: FSMContext):
     if 0 <= posicao < len(fila):
         id_item = fila[posicao]["id"]
         try:
-            conexao = sqlite3.connect("banco_dados.db")
+            conexao = db.conectar()
             cursor = conexao.cursor()
             cursor.execute("UPDATE fila_postagens SET legenda = ? WHERE id_unico = ?", (nova_legenda, id_item))
             conexao.commit()
@@ -14467,7 +14421,7 @@ async def processar_confirmacao_reordenar(message: types.Message, state: FSMCont
         
         id_movido = item_movido.get("id")
         try:
-            conexao = sqlite3.connect("banco_dados.db")
+            conexao = db.conectar()
             cursor = conexao.cursor()
             cursor.execute("UPDATE fila_postagens SET data_alvo = ? WHERE id_unico = ?", (nova_data_adicao, id_movido))
             conexao.commit()
@@ -14663,7 +14617,7 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
             id_unico = item["id"]
             
             try:
-                conexao = sqlite3.connect("banco_dados.db")
+                conexao = db.conectar()
                 cursor = conexao.cursor()
                 cursor.execute("UPDATE fila_postagens SET status = 'CONCLUIDO', data_postagem = ?, horario_postagem = ? WHERE id_unico = ?", 
                                (agora_manual.strftime("%Y-%m-%d"), agora_manual.strftime("%H:%M"), id_unico))
@@ -14691,10 +14645,10 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
 # --- Motor do Espião (fila de clonagem) ---
 def ler_fila_clonagem():
     padrao = {"fila": []}
-    return ler_config_bd("fila_clonagem", padrao, arquivo_legado="fila_clonagem.json")
+    return db.ler_config("fila_clonagem", padrao, arquivo_legado="fila_clonagem.json")
 
 def salvar_fila_clonagem(dados):
-    salvar_config_bd("fila_clonagem", dados)
+    db.salvar_config("fila_clonagem", dados)
 
 async def processar_fila_espiao(forcar=False):
     """
@@ -15754,7 +15708,7 @@ BUSCA_MINUTOS_APAGAR_FALHA = 3  # busca que não deu em nada some junto com a pe
 def _iniciar_tabela_buscas():
     """Cria a tabela do limite diário de buscas por membro."""
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         conexao.execute("""
             CREATE TABLE IF NOT EXISTS buscas_diarias (
                 user_id INTEGER,
@@ -15773,7 +15727,7 @@ def contar_buscas_hoje(user_id):
     """Buscas do membro hoje (0 se der erro)."""
     try:
         hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("SELECT total FROM buscas_diarias WHERE user_id = ? AND data = ?", (user_id, hoje))
         r = cursor.fetchone()
@@ -15787,7 +15741,7 @@ def registrar_busca(user_id):
     """Soma uma busca ao membro no dia."""
     try:
         hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         conexao.execute("""
             INSERT INTO buscas_diarias (user_id, data, total) VALUES (?, ?, 1)
             ON CONFLICT(user_id, data) DO UPDATE SET total = total + 1
@@ -15991,13 +15945,13 @@ async def reenviar_painel_busca():
             return False
 
         # Só apaga o anterior depois que o novo está no ar: o tópico nunca fica sem painel
-        registro = ler_config_bd("painel_busca_msg", {})
+        registro = db.ler_config("painel_busca_msg", {})
         antiga = registro.get("id")
         if antiga and antiga != msg.message_id:
             try: await bot.delete_message(chat_id=BUSCA_GRUPO_ID, message_id=int(antiga))
             except Exception: pass
 
-        salvar_config_bd("painel_busca_msg", {"id": msg.message_id})
+        db.salvar_config("painel_busca_msg", {"id": msg.message_id})
 
         try:
             await bot.pin_chat_message(chat_id=BUSCA_GRUPO_ID, message_id=msg.message_id,
@@ -16369,7 +16323,7 @@ LIMITE_REGISTRO_PAINEIS = 200  # acima disso o mais antigo sai do registro (e vi
 def registrar_painel_aberto(chat_id, message_id):
     """Registra o painel aberto para a varredura anti-órfão da próxima subida."""
     try:
-        abertos = ler_config_bd("paineis_wizard_abertos", [])
+        abertos = db.ler_config("paineis_wizard_abertos", [])
         abertos.append({"chat_id": chat_id, "message_id": message_id})
 
         # O que sai da lista nunca mais é varrido (vira órfão permanente): por isso o teto
@@ -16381,7 +16335,7 @@ def registrar_painel_aberto(chat_id, message_id):
                                f"terem sido varridos e ficarão no grupo para sempre.")
             abertos = abertos[-LIMITE_REGISTRO_PAINEIS:]
 
-        salvar_config_bd("paineis_wizard_abertos", abertos)
+        db.salvar_config("paineis_wizard_abertos", abertos)
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao registrar painel aberto: {e}")
 
@@ -16392,7 +16346,7 @@ async def limpar_paineis_orfaos():
     então qualquer painel registrado já está morto de qualquer forma.
     """
     try:
-        abertos = ler_config_bd("paineis_wizard_abertos", [])
+        abertos = db.ler_config("paineis_wizard_abertos", [])
         if not abertos:
             return
 
@@ -16437,7 +16391,7 @@ async def limpar_paineis_orfaos():
                 logger.error(f"❌ [Anti-Órfão] Painel {message_id} desistido após 3 tentativas. "
                              f"Confira se o bot é admin com permissão de apagar mensagens. Último erro: {motivo}")
 
-        salvar_config_bd("paineis_wizard_abertos", pendentes)
+        db.salvar_config("paineis_wizard_abertos", pendentes)
         if EXIBIR_LOGS:
             logger.info(f"🧹 [Anti-Órfão] {removidos} painel(is) apagado(s), {neutralizados} "
                         f"neutralizado(s) por edição, {len(pendentes)} guardado(s) para a próxima subida.")
@@ -16834,14 +16788,14 @@ INTERVALO_REALERTA_H = 6       # não repete o mesmo alerta antes disso
 def _ja_alertou(chave):
     """Evita spam: o mesmo alerta só volta depois do intervalo."""
     try:
-        registro = ler_config_bd("alertas_saude", {})
+        registro = db.ler_config("alertas_saude", {})
         ultimo = registro.get(chave)
         if ultimo:
             quando = datetime.strptime(ultimo, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
             if (datetime.now(fuso_horario) - quando).total_seconds() < INTERVALO_REALERTA_H * 3600:
                 return True
         registro[chave] = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
-        salvar_config_bd("alertas_saude", registro)
+        db.salvar_config("alertas_saude", registro)
         return False
     except Exception:
         return False
@@ -16956,7 +16910,7 @@ def contar_erros_recentes(horas=1):
     """Erros gravados pelo registrar_erro_json (tabela erros_logs) nas últimas horas."""
     corte = (datetime.now(fuso_horario) - timedelta(hours=horas)).strftime("%Y-%m-%d %H:%M:%S")
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         total = conexao.execute("SELECT COUNT(*) FROM erros_logs WHERE timestamp >= ?", (corte,)).fetchone()[0]
         conexao.close()
         return total
@@ -17034,7 +16988,7 @@ def montar_status():
 
     linhas.append(f"\n🐛 Erros na última hora: <b>{contar_erros_recentes(1)}</b>")
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         ultimos = conexao.execute(
             "SELECT timestamp, origem, erro FROM erros_logs ORDER BY id DESC LIMIT 5").fetchall()
         conexao.close()

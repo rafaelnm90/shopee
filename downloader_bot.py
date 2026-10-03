@@ -22,24 +22,8 @@ import re
 import asyncio
 import shutil
 import tempfile
-import sqlite3
 import hashlib
-# Toda conexão SQLite espera até 30 s pelo lock (mesma troca que o utils faz nos
-# outros robôs; este serviço não importa o utils).
-_sqlite_connect_original = sqlite3.connect
-
-
-def _conectar_blindado(*args, **kwargs):
-    kwargs["timeout"] = 30.0
-    conexao = _sqlite_connect_original(*args, **kwargs)
-    try:
-        conexao.execute("PRAGMA busy_timeout = 30000")
-    except Exception:
-        pass
-    return conexao
-
-
-sqlite3.connect = _conectar_blindado
+import db
 import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -111,8 +95,6 @@ os.makedirs(PASTA_TEMP_DOWNLOAD, exist_ok=True)
 # Fila: um download por vez. Em paralelo, o ffmpeg derruba a CPU do ARM.
 semaforo_download = asyncio.Semaphore(1)
 
-BANCO_DOWNLOADER = "banco_dados.db"
-
 def _garantir_tabela_downloads(cursor):
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS downloads_usuarios (
@@ -153,7 +135,7 @@ def _garantir_tabela_cortesia(cursor):
 def downloads_totais(user_id):
     """Quantos a pessoa já baixou desde sempre (decide a cortesia). Nunca é zerado."""
     try:
-        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_tabela_cortesia(cursor)
         cursor.execute("SELECT total FROM downloads_totais WHERE user_id = ?", (user_id,))
@@ -175,7 +157,7 @@ def topico_submissao():
     Devolve None quando não achar — e aí o convite simplesmente não sai.
     """
     try:
-        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'submissao_config'")
         linha = cursor.fetchone()
@@ -236,7 +218,7 @@ async def convidar_para_comunidade(message, mencao, total_downloads):
 def somar_download_total(user_id):
     """+1 no total da pessoa (downloads_totais)."""
     try:
-        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_tabela_cortesia(cursor)
         cursor.execute("""
@@ -262,7 +244,7 @@ def _garantir_tabela_painel(cursor):
 def ler_msg_painel():
     """ID da última mensagem do painel. Sobrevive a reinício do serviço."""
     try:
-        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_tabela_painel(cursor)
         cursor.execute("SELECT valor FROM painel_downloader WHERE chave = 'msg_id'")
@@ -277,7 +259,7 @@ def ler_msg_painel():
 def salvar_msg_painel(msg_id):
     """Guarda o ID da mensagem atual do painel."""
     try:
-        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_tabela_painel(cursor)
         cursor.execute("INSERT OR REPLACE INTO painel_downloader (chave, valor) VALUES ('msg_id', ?)",
@@ -304,7 +286,7 @@ def registrar_mensagem(message_id):
     """Anota o ID para a faxina achar depois. A API de bots não lê histórico,
     então o que não for anotado aqui nunca será apagado."""
     try:
-        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_tabela_mensagens(cursor)
         cursor.execute(
@@ -321,7 +303,7 @@ def mensagens_vencidas():
     """IDs das mensagens anotadas há mais de DIAS_RETENCAO_TOPICO dias."""
     try:
         corte = (datetime.now(FUSO) - timedelta(days=DIAS_RETENCAO_TOPICO)).strftime("%Y-%m-%d %H:%M:%S")
-        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_tabela_mensagens(cursor)
         cursor.execute("SELECT message_id FROM mensagens_topico WHERE criado_em < ?", (corte,))
@@ -338,7 +320,7 @@ def esquecer_mensagens(ids):
     if not ids:
         return
     try:
-        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_tabela_mensagens(cursor)
         cursor.executemany("DELETE FROM mensagens_topico WHERE message_id = ?", [(i,) for i in ids])
@@ -352,7 +334,7 @@ def downloads_hoje(user_id):
     """Quantos já usou hoje. Persistente: reiniciar o bot não zera o contador."""
     try:
         hoje = datetime.now(FUSO).strftime("%Y-%m-%d")
-        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_tabela_downloads(cursor)
         cursor.execute("SELECT quantidade FROM downloads_usuarios WHERE user_id = ? AND data = ?", (user_id, hoje))
@@ -367,7 +349,7 @@ def registrar_download(user_id):
     """Conta APÓS a entrega: tentativa que falhou não gasta a cota do usuário."""
     try:
         hoje = datetime.now(FUSO).strftime("%Y-%m-%d")
-        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_tabela_downloads(cursor)
         cursor.execute('''
@@ -383,7 +365,7 @@ def limpar_downloads_antigos(dias=7):
     """A contagem só importa no dia. Guardar uma semana já é folga."""
     try:
         corte = (datetime.now(FUSO) - timedelta(days=dias)).strftime("%Y-%m-%d")
-        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_tabela_downloads(cursor)
         cursor.execute("DELETE FROM downloads_usuarios WHERE data < ?", (corte,))
@@ -446,7 +428,7 @@ def _garantir_cache_videos(cursor):
 def buscar_cache_video(url):
     """Devolve o file_id já guardado, ou None."""
     try:
-        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_cache_videos(cursor)
         chave = chave_cache_video(url)
@@ -464,7 +446,7 @@ def buscar_cache_video(url):
 def guardar_cache_video(url, file_id, plataforma):
     """Guarda o file_id do vídeo entregue para este link (a primeira entrega vale)."""
     try:
-        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_cache_videos(cursor)
         cursor.execute(
@@ -479,7 +461,7 @@ def guardar_cache_video(url, file_id, plataforma):
 def remover_cache_video(url):
     """Chamado quando o file_id guardado não funciona mais."""
     try:
-        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("DELETE FROM cache_videos WHERE chave = ?", (chave_cache_video(url),))
         conexao.commit()
