@@ -1,0 +1,29 @@
+name: Inventário do servidor
+
+# O que ocupa espaço e o que cresce no servidor: pastas, banco, filas em arquivo,
+# journal (e as linhas de log que mais se repetem) e caches. Só lê, e só roda
+# quando disparado à mão (aba Actions, "Run workflow").
+#
+# O repositório é público, e os logs do Actions também: o inventario.py imprime só
+# números e nomes que já estão no código, nunca conteúdo de log, fila ou banco.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventario:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Medir o servidor (só leitura)
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          command_timeout: 8m
+          script: |
+            cd ~/shopee
+            venv/bin/python3 inventario.py

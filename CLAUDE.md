@@ -32,7 +32,7 @@ Módulos de apoio (não são serviços):
 - `painel_espelhos.py` e `painel_notas.py`: routers aiogram incluídos no bot_mestre.
 - `utils.py` (`erros_logs`, caches, validação de IDs) e `fuso.py` (horário de Brasília e formato de log).
 - `api_gemini.py` (IA, com cascata de modelos) e `api_shopee.py` (links de afiliado).
-- Ferramentas: `validar_deploy.py`, `testar_chaves.py`, `backup_config.sh`.
+- Ferramentas: `validar_deploy.py`, `testar_chaves.py`, `inventario.py`, `backup_config.sh`.
 
 O README tem os IDs dos canais, as cinco filas e os comandos do servidor.
 
@@ -113,6 +113,12 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
   - `validar.yml` roda em todo PR para a `main`, com a suíte em 4 horários e ordem aleatória.
   - `deploy.yml` roda no merge na `main`. Ele repete a validação e, por SSH, faz `git pull` e `pip install` no servidor e reinicia os 5 serviços. Confere se todos subiram aos 25 s e de novo 3 min depois (processo e contador de reinícios).
   - `diagnostico.yml` olha o servidor de hora em hora, só lendo: robôs (estado, desde quando, reinícios), máquina (carga, memória, disco), banco e volume de log. Fica vermelho com robô fora do ar ou disco acima de 90% (o GitHub manda e-mail). Para ver o servidor agora, dispare-o (`run_workflow` em `diagnostico.yml`) e leia o log do job.
+  - `inventario.yml` (só à mão) roda o `inventario.py` no servidor. Ele mostra:
+    - tamanho e idade de cada pasta, os arquivos soltos e as linhas por tabela;
+    - as configurações mais pesadas e o histórico da fila do Espelhador;
+    - o espaço do journal e as linhas de log que mais se repetem, com arquivo:linha do código;
+    - os caches e a memória de cada robô.
+    Use para achar o que acumula.
   - O repositório é público e os logs do Actions também: nos workflows, só estados e números; nunca conteúdo de log dos robôs ou dados do banco.
   - Não há acesso direto ao servidor por SSH a partir da sessão. Os detalhes dos erros ficam no `/status` do bot, no privado do Rafael.
 
