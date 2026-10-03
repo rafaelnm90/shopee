@@ -15,7 +15,6 @@ Os dados ficam no banco_dados.db (filas e a tabela configuracoes). Os jobs vivem
 APScheduler em memória e o FSM no MemoryStorage: um restart refaz a grade do dia
 em main() e encerra as sessões abertas dos painéis.
 """
-EXIBIR_LOGS = True
 import os
 import re
 import unicodedata
@@ -57,10 +56,8 @@ import painel_notas
 import pool_contas  # contas dos userbots (quem espelha, quem reposta)
 import blacklist_captura  # de quem os userbots nunca capturam
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo, salvar_json_atomico
-EXIBIR_LOGS = True
 
-if EXIBIR_LOGS:
-    logger = configurar_logs(__name__)
+logger = configurar_logs(__name__)
 
 # temp/: downloads de passagem (a faxina de disco limpa o que sobra).
 os.makedirs("temp", exist_ok=True)
@@ -70,7 +67,7 @@ def inicializar_banco_sqlite():
     Cria as tabelas do banco compartilhado e as colunas novas. Roda ao importar o
     módulo; ALTER TABLE de coluna que já existe falha e é ignorado.
     """
-    if EXIBIR_LOGS: logger.info("🚀 Preparando a fundação de dados em SQLite...")
+    logger.info("🚀 Preparando a fundação de dados em SQLite...")
     conexao = db.conectar()
     cursor = conexao.cursor()
     
@@ -122,7 +119,7 @@ def inicializar_banco_sqlite():
     try:
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN repostado_publico INTEGER DEFAULT 0")
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_repost_publico TEXT")
-        if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Colunas de Repostagem Pública adicionadas à fila_autorais.")
+        logger.info("📦 Banco de dados atualizado: Colunas de Repostagem Pública adicionadas à fila_autorais.")
     except sqlite3.OperationalError:
         pass
 
@@ -130,14 +127,14 @@ def inicializar_banco_sqlite():
     try:
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_alvo_publico TEXT")
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN status_publico TEXT")
-        if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Colunas 'data_alvo_publico' e 'status_publico' adicionadas à fila_autorais.")
+        logger.info("📦 Banco de dados atualizado: Colunas 'data_alvo_publico' e 'status_publico' adicionadas à fila_autorais.")
     except sqlite3.OperationalError:
         pass
 
     # status_publico sozinho, para bancos que já tinham data_alvo_publico (o bloco acima para no primeiro erro).
     try:
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN status_publico TEXT")
-        if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'status_publico' adicionada à fila_autorais.")
+        logger.info("📦 Banco de dados atualizado: Coluna 'status_publico' adicionada à fila_autorais.")
     except sqlite3.OperationalError:
         pass
         
@@ -145,7 +142,7 @@ def inicializar_banco_sqlite():
     for _tabela_msg in ("fila_autorais", "fila_publico"):
         try:
             cursor.execute(f"ALTER TABLE {_tabela_msg} ADD COLUMN msg_postada_id INTEGER")
-            if EXIBIR_LOGS: logger.info(f"📦 Banco de dados atualizado: Coluna 'msg_postada_id' adicionada à {_tabela_msg}.")
+            logger.info(f"📦 Banco de dados atualizado: Coluna 'msg_postada_id' adicionada à {_tabela_msg}.")
         except sqlite3.OperationalError:
             pass
 
@@ -153,14 +150,14 @@ def inicializar_banco_sqlite():
     # consegue copiar do canal de origem, que não é nosso, e publica a partir do disco.
     try:
         cursor.execute("ALTER TABLE fila_publico ADD COLUMN caminho_arquivo TEXT")
-        if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'caminho_arquivo' adicionada à fila_publico.")
+        logger.info("📦 Banco de dados atualizado: Coluna 'caminho_arquivo' adicionada à fila_publico.")
     except sqlite3.OperationalError:
         pass
 
     # fila_autorais.data_postagem: hora real da publicação do retorno, mostrada no relatório.
     try:
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_postagem TEXT")
-        if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'data_postagem' adicionada à fila_autorais.")
+        logger.info("📦 Banco de dados atualizado: Coluna 'data_postagem' adicionada à fila_autorais.")
     except sqlite3.OperationalError:
         pass
 
@@ -221,10 +218,10 @@ def inicializar_banco_sqlite():
                 for item_id in lista_antiga:
                     cursor.execute("INSERT OR IGNORE INTO achadinhos_enviados (item_id, data_envio, nicho) VALUES (?, ?, ?)",
                                    (str(item_id), agora_mig, "migrado"))
-                if EXIBIR_LOGS: logger.info(f"📦 Migração: {len(lista_antiga)} achadinhos antigos movidos para a memória permanente.")
+                logger.info(f"📦 Migração: {len(lista_antiga)} achadinhos antigos movidos para a memória permanente.")
             cursor.execute("DELETE FROM configuracoes WHERE chave = 'achadinhos_enviados'")
     except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível migrar a lista antiga de achadinhos: {e}")
+        logger.warning(f"⚠️ Não foi possível migrar a lista antiga de achadinhos: {e}")
 
     # Métricas diárias, usadas como prova social nas mensagens de rotina.
     cursor.execute('''
@@ -246,13 +243,13 @@ def inicializar_banco_sqlite():
     try:
         cursor.execute("ALTER TABLE erros_logs ADD COLUMN rastro_codigo TEXT")
         cursor.execute("ALTER TABLE erros_logs ADD COLUMN contexto TEXT")
-        if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Colunas 'rastro_codigo' e 'contexto' adicionadas à tabela erros_logs.")
+        logger.info("📦 Banco de dados atualizado: Colunas 'rastro_codigo' e 'contexto' adicionadas à tabela erros_logs.")
     except sqlite3.OperationalError:
         pass
     
     conexao.commit()
     conexao.close()
-    if EXIBIR_LOGS: logger.info("✅ Estrutura SQLite blindada e pronta para receber operações de leitura/escrita.")
+    logger.info("✅ Estrutura SQLite blindada e pronta para receber operações de leitura/escrita.")
 
 inicializar_banco_sqlite()
 
@@ -500,16 +497,16 @@ _lock_contador = asyncio.Lock()
 
 scheduler = AsyncIOScheduler(timezone=FUSO_STR)
 
-if EXIBIR_LOGS: logger.info("🔄 Acoplando o módulo externo Espelhador ao fluxo principal...")
+logger.info("🔄 Acoplando o módulo externo Espelhador ao fluxo principal...")
 dp.include_router(painel_espelhos.router)
 
 painel_espelhos.configurar_dependencias(bot, scheduler)
-if EXIBIR_LOGS: logger.info("✅ Módulo Espelhador montado com segurança.")
+logger.info("✅ Módulo Espelhador montado com segurança.")
 
-if EXIBIR_LOGS: logger.info("🔄 Acoplando o módulo de Disparo de Notas ao fluxo principal...")
+logger.info("🔄 Acoplando o módulo de Disparo de Notas ao fluxo principal...")
 dp.include_router(painel_notas.router)
 painel_notas.configurar_dependencias(bot, scheduler)
-if EXIBIR_LOGS: logger.info("✅ Módulo de Notas montado com segurança.")
+logger.info("✅ Módulo de Notas montado com segurança.")
 
 # --- Teclados ---
 teclado_plataforma = ReplyKeyboardMarkup(
@@ -841,15 +838,15 @@ def ler_fila_postagens():
     # fila_postagens.json da versão antiga: migra para o SQLite uma vez e arquiva.
     if os.path.exists("fila_postagens.json"):
         try:
-            if EXIBIR_LOGS: logger.info("📦 Migrando dados antigos do JSON para o banco SQLite...")
+            logger.info("📦 Migrando dados antigos do JSON para o banco SQLite...")
             with open("fila_postagens.json", "r") as f:
                 dados_antigos = json.load(f)
             
             salvar_fila_postagens(dados_antigos)
             os.rename("fila_postagens.json", "fila_postagens_bkp.json")
-            if EXIBIR_LOGS: logger.info("✅ Migração concluída com sucesso! Ficheiro antigo arquivado.")
+            logger.info("✅ Migração concluída com sucesso! Ficheiro antigo arquivado.")
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro na migração do JSON: {e}")
+            logger.error(f"❌ Erro na migração do JSON: {e}")
 
     try:
         conexao = db.conectar()
@@ -876,7 +873,7 @@ def ler_fila_postagens():
             })
         return {"fila": fila}
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila do SQLite: {e}")
+        logger.error(f"❌ Erro ao ler fila do SQLite: {e}")
         return {"fila": []}
 
 def salvar_fila_postagens(dados):
@@ -910,7 +907,7 @@ def salvar_fila_postagens(dados):
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao reescrever fila no SQLite: {e}")
+        logger.error(f"❌ Erro ao reescrever fila no SQLite: {e}")
 
 
 def agendar_fila_postagens():
@@ -919,7 +916,7 @@ def agendar_fila_postagens():
     Boa Noite, um por bloco de tempo, com variação aleatória em torno do meio do bloco.
     Com a pausa programada ativa, só desfaz os agendamentos.
     """
-    if EXIBIR_LOGS: logger.info("🔄 Recalculando e agendando fila de postagens de forma DINÂMICA (Variação 50%)...")
+    logger.info("🔄 Recalculando e agendando fila de postagens de forma DINÂMICA (Variação 50%)...")
     # Remove os agendamentos anteriores; são refeitos abaixo.
     for job in scheduler.get_jobs():
         if job.id.startswith('job_fila_postagem_'):
@@ -928,7 +925,7 @@ def agendar_fila_postagens():
     # Pausa programada: nenhum vídeo sai. Os pendentes voltam a ser agendados quando
     # ela acaba (fim pelo painel ou verificar_retorno_pausa_minuto).
     if ler_pausa_programada().get("ativa"):
-        if EXIBIR_LOGS: logger.info("⏸️ Pausa programada ativa: nenhum vídeo da fila foi agendado.")
+        logger.info("⏸️ Pausa programada ativa: nenhum vídeo da fila foi agendado.")
         return
 
     # Pendentes de hoje. "2000-01-01" marca vídeo que entrou antes do Bom Dia (sai hoje).
@@ -943,7 +940,7 @@ def agendar_fila_postagens():
         pendentes_hoje = cursor.fetchall()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila no agendador: {e}")
+        logger.error(f"❌ Erro ao ler fila no agendador: {e}")
         return
 
     if not pendentes_hoje:
@@ -975,7 +972,7 @@ def agendar_fila_postagens():
 
     # O expediente já acabou: os vídeos esperam o dia seguinte.
     if inicio_real >= limite_fim:
-        if EXIBIR_LOGS: logger.warning("⚠️ O expediente de postagens encerrou por hoje. Vídeos aguardarão na fila para amanhã.")
+        logger.warning("⚠️ O expediente de postagens encerrou por hoje. Vídeos aguardarão na fila para amanhã.")
         return
 
     minutos_disponiveis = (limite_fim - inicio_real).total_seconds() / 60
@@ -1016,7 +1013,7 @@ def agendar_fila_postagens():
             id=job_id, 
             replace_existing=True
         )
-        if EXIBIR_LOGS: logger.info(f"⏳ Postagem {id_unico[:8]} agendada dinamicamente para {horario_final.strftime('%H:%M:%S')}")
+        logger.info(f"⏳ Postagem {id_unico[:8]} agendada dinamicamente para {horario_final.strftime('%H:%M:%S')}")
         
         tempo_acumulado += timedelta(minutes=espacamento_bloco)
 
@@ -1049,11 +1046,11 @@ async def motor_fila_minuto():
             qtd_jobs = sum(1 for job in scheduler.get_jobs() if job.id.startswith('job_fila_postagem_'))
             
             if qtd_jobs == 0:
-                if EXIBIR_LOGS: logger.warning("⚠️ O Fiscal detectou vídeos perdidos sem agendamento! Forçando auto-cura da grade...")
+                logger.warning("⚠️ O Fiscal detectou vídeos perdidos sem agendamento! Forçando auto-cura da grade...")
                 agendar_fila_postagens()
                 
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro no Fiscal da Fila: {e}")
+        logger.error(f"❌ Erro no Fiscal da Fila: {e}")
 
 MAX_TENTATIVAS_POSTAGEM = 3
 MINUTOS_ENTRE_TENTATIVAS = 10
@@ -1064,13 +1061,13 @@ async def executar_postagem_fila(item_id):
     file_id do Telegram) e marca CONCLUIDO. Falha de envio tenta de novo até
     MAX_TENTATIVAS_POSTAGEM; imagem ou vídeo perdido vira ERRO.
     """
-    if EXIBIR_LOGS: logger.info(f"📤 Iniciando processamento do vídeo {item_id}...")
+    logger.info(f"📤 Iniciando processamento do vídeo {item_id}...")
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
 
     # Job agendado antes de a pausa começar: o vídeo fica pendente para depois dela.
     if ler_pausa_programada().get("ativa"):
-        if EXIBIR_LOGS: logger.info(f"⏸️ Pausa programada ativa: vídeo {item_id} continua na fila.")
+        logger.info(f"⏸️ Pausa programada ativa: vídeo {item_id} continua na fila.")
         return
 
     sucesso = False
@@ -1087,7 +1084,7 @@ async def executar_postagem_fila(item_id):
             
         # Só publica item PENDENTE: job repetido (fiscal, nova tentativa) não posta duas vezes.
         if item["status"] != 'PENDENTE':
-            if EXIBIR_LOGS: logger.warning(f"🛑 Bloqueio ativado: O vídeo já foi processado anteriormente (Status: {item['status']}). Postagem duplicada evitada.")
+            logger.warning(f"🛑 Bloqueio ativado: O vídeo já foi processado anteriormente (Status: {item['status']}). Postagem duplicada evitada.")
             conexao.close()
             return
             
@@ -1101,7 +1098,7 @@ async def executar_postagem_fila(item_id):
         if caminho_video and os.path.exists(caminho_video):
             # Imagem não vai como vídeo: descarta.
             if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
-                if EXIBIR_LOGS: logger.warning("🚫 [Segurança] Upload cancelado! Ficheiro é uma imagem.")
+                logger.warning("🚫 [Segurança] Upload cancelado! Ficheiro é uma imagem.")
                 try: os.remove(caminho_video)
                 except: pass
                 falha_irreversivel = True
@@ -1111,14 +1108,14 @@ async def executar_postagem_fila(item_id):
                 novo_file_id = msg.video.file_id
                 sucesso = True
                 registrar_ultimo_post(GRUPO_ID, "video")  # para a intercalação de vídeo e texto (ver registrar_ultimo_post)
-                if EXIBIR_LOGS: logger.info("🚀 [Fluxo] Vídeo enviado com sucesso pelo Motor Central.")
+                logger.info("🚀 [Fluxo] Vídeo enviado com sucesso pelo Motor Central.")
                 try: os.remove(caminho_video)
                 except: pass
         elif video_id:
             await bot.send_video(chat_id=GRUPO_ID, video=video_id, caption=legenda, parse_mode="HTML")
             sucesso = True
         else:
-            if EXIBIR_LOGS: logger.error("❌ Falha irreversível: Vídeo expirou ou foi perdido fisicamente.")
+            logger.error("❌ Falha irreversível: Vídeo expirou ou foi perdido fisicamente.")
             falha_irreversivel = True
             
         if sucesso or falha_irreversivel:
@@ -1131,7 +1128,7 @@ async def executar_postagem_fila(item_id):
             
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao postar vídeo da fila: {e}")
+        logger.error(f"❌ Falha crítica ao postar vídeo da fila: {e}")
         try:
             conexao = db.conectar()
             cursor = conexao.cursor()
@@ -1150,7 +1147,7 @@ async def executar_postagem_fila(item_id):
                         nova_tentativa = agora + timedelta(minutes=MINUTOS_ENTRE_TENTATIVAS)
                         scheduler.add_job(executar_postagem_fila, 'date', run_date=nova_tentativa, args=[item_id],
                                           id=f"job_fila_postagem_{item_id}", replace_existing=True)
-                        if EXIBIR_LOGS: logger.warning(f"🔁 Tentativa {tentativas}/{MAX_TENTATIVAS_POSTAGEM} do vídeo {item_id} falhou; nova tentativa às {nova_tentativa.strftime('%H:%M')}.")
+                        logger.warning(f"🔁 Tentativa {tentativas}/{MAX_TENTATIVAS_POSTAGEM} do vídeo {item_id} falhou; nova tentativa às {nova_tentativa.strftime('%H:%M')}.")
                     else:
                         # data_postagem preenchida: a faxina da madrugada tira o item da fila.
                         cursor.execute("UPDATE fila_postagens SET status = 'ERRO', tentativas = ?, data_postagem = ?, horario_postagem = ? WHERE id_unico = ?",
@@ -1184,10 +1181,10 @@ async def obter_credito_repost():
 
         _cache_credito_repost["valor"] = credito
         _cache_credito_repost["expira"] = agora + timedelta(hours=24)
-        if EXIBIR_LOGS: logger.info(f"👤 Crédito do repost resolvido automaticamente: {credito}")
+        logger.info(f"👤 Crédito do repost resolvido automaticamente: {credito}")
         return credito
     except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível obter o @ do administrador ({e}). Usando menção por ID.")
+        logger.warning(f"⚠️ Não foi possível obter o @ do administrador ({e}). Usando menção por ID.")
         return f"<a href='tg://user?id={ADMIN_ID}'>Administrador</a>"
 
 # --- Pausa programada ---
@@ -1204,7 +1201,7 @@ def recalcular_datas_pos_pausa():
     fila ficou parada (de hoje até a data pendente mais antiga), mantendo os
     intervalos entre eles.
     """
-    if EXIBIR_LOGS: logger.info("🔄 Iniciando recálculo de datas no SQLite pós-pausa...")
+    logger.info("🔄 Iniciando recálculo de datas no SQLite pós-pausa...")
     try:
         conexao = db.conectar()
         cursor = conexao.cursor()
@@ -1215,7 +1212,7 @@ def recalcular_datas_pos_pausa():
         
         if not menor_data_str:
             conexao.close()
-            if EXIBIR_LOGS: logger.info("⚠️ Fila vazia ou sem datas futuras, nenhum ajuste necessário.")
+            logger.info("⚠️ Fila vazia ou sem datas futuras, nenhum ajuste necessário.")
             return
             
         from datetime import datetime, timedelta
@@ -1225,7 +1222,7 @@ def recalcular_datas_pos_pausa():
         
         if menor_data_obj < hoje_obj:
             offset_dias = (hoje_obj - menor_data_obj).days
-            if EXIBIR_LOGS: logger.info(f"⏳ Deslocamento: {offset_dias} dias. Aplicando offset no banco...")
+            logger.info(f"⏳ Deslocamento: {offset_dias} dias. Aplicando offset no banco...")
             
             cursor.execute("SELECT id_unico, data_alvo FROM fila_postagens WHERE status = 'PENDENTE' AND data_alvo != '2000-01-01'")
             itens = cursor.fetchall()
@@ -1236,13 +1233,13 @@ def recalcular_datas_pos_pausa():
                 cursor.execute("UPDATE fila_postagens SET data_alvo = ? WHERE id_unico = ?", (nova_data.strftime("%Y-%m-%d"), id_unico))
                 
             conexao.commit()
-            if EXIBIR_LOGS: logger.info("✅ Datas recalculadas no SQLite com sucesso.")
+            logger.info("✅ Datas recalculadas no SQLite com sucesso.")
         else:
-            if EXIBIR_LOGS: logger.info("✅ O primeiro vídeo da fila já está no futuro ou presente. Nenhum offset necessário.")
+            logger.info("✅ O primeiro vídeo da fila já está no futuro ou presente. Nenhum offset necessário.")
             
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao recalcular datas pós-pausa: {e}")
+        logger.error(f"❌ Erro ao recalcular datas pós-pausa: {e}")
 
 def retomar_grade_pos_pausa():
     """
@@ -1262,7 +1259,7 @@ def retomar_grade_pos_pausa():
 
 async def verificar_pausa_diaria():
     """Todo dia às 9h, com a pausa ativa: troca o aviso de pausa no grupo por um novo."""
-    if EXIBIR_LOGS: logger.info("⏰ Iniciando verificação diária de pausa programada (envio de aviso)...")
+    logger.info("⏰ Iniciando verificação diária de pausa programada (envio de aviso)...")
     dados_pausa = ler_pausa_programada()
     if not dados_pausa.get("ativa"):
         return
@@ -1271,11 +1268,11 @@ async def verificar_pausa_diaria():
     if not data_retorno_str:
         return
         
-    if EXIBIR_LOGS: logger.info("🛑 Pausa ativa. Enviando aviso diário ao grupo principal...")
+    logger.info("🛑 Pausa ativa. Enviando aviso diário ao grupo principal...")
     
     id_aviso_imediato = dados_pausa.get("id_aviso_imediato")
     if id_aviso_imediato:
-        if EXIBIR_LOGS: logger.info("🧹 Excluindo aviso antigo para dar lugar ao novo aviso diário...")
+        logger.info("🧹 Excluindo aviso antigo para dar lugar ao novo aviso diário...")
         await apagar_mensagem_automatica(id_aviso_imediato, GRUPO_ID)
 
     motivo_salvo = dados_pausa.get("motivo", "organização interna e curadoria de novos conteúdos")
@@ -1295,7 +1292,7 @@ async def verificar_pausa_diaria():
     dados_pausa["id_aviso_imediato"] = msg_enviada.message_id
     salvar_pausa_programada(dados_pausa)
     
-    if EXIBIR_LOGS: logger.info("✅ Aviso diário enviado e salvo na memória com sucesso.")
+    logger.info("✅ Aviso diário enviado e salvo na memória com sucesso.")
 
 async def verificar_retorno_pausa_minuto():
     """
@@ -1323,7 +1320,7 @@ async def verificar_retorno_pausa_minuto():
             return
     
     if hoje >= data_retorno:
-        if EXIBIR_LOGS: logger.info("⏰ Data e hora de retorno atingidas! Reativando serviços pausados...")
+        logger.info("⏰ Data e hora de retorno atingidas! Reativando serviços pausados...")
         
         id_aviso = dados_pausa.pop("id_aviso_imediato", None)
         if id_aviso:
@@ -1339,7 +1336,7 @@ async def verificar_retorno_pausa_minuto():
         msg_retorno = await bot.send_message(GRUPO_ID, texto_retorno)
         registrar_lixeira(msg_retorno.message_id, GRUPO_ID)
         
-        if EXIBIR_LOGS: logger.info("✅ Mensagem triunfal de retorno postada no grupo e enviada para a lixeira.")
+        logger.info("✅ Mensagem triunfal de retorno postada no grupo e enviada para a lixeira.")
             
         servicos = dados_pausa.get("servicos_pausados", [])
         
@@ -1347,22 +1344,22 @@ async def verificar_retorno_pausa_minuto():
             dados_div = ler_alvos_divulgacao()
             dados_div["pausado"] = False
             salvar_alvos_divulgacao(dados_div)
-            if EXIBIR_LOGS: logger.info("✅ SPAM reativado.")
+            logger.info("✅ SPAM reativado.")
         if "rotina" in servicos:
             dados_rotina = ler_config_rotina()
             dados_rotina["pausado"] = False
             salvar_config_rotina(dados_rotina)
-            if EXIBIR_LOGS: logger.info("✅ Mensagens de rotina reativadas.")
+            logger.info("✅ Mensagens de rotina reativadas.")
         
         dados_pausa["ativa"] = False
         dados_pausa["servicos_pausados"] = []
         salvar_pausa_programada(dados_pausa)
         retomar_grade_pos_pausa()
-        if EXIBIR_LOGS: logger.info("✅ Serviços reativados e pausa programada encerrada com sucesso.")
+        logger.info("✅ Serviços reativados e pausa programada encerrada com sucesso.")
 
 async def gerar_mensagem_gemini(prompt):
     """Texto da IA para as mensagens do grupo; se a IA falhar, uma frase padrão."""
-    texto = await gerar_texto_gemini(prompt, EXIBIR_LOGS)
+    texto = await gerar_texto_gemini(prompt)
     if texto:
         return texto
     return "🚀 Novos materiais disponíveis! Bora postar e converter!"
@@ -1377,9 +1374,9 @@ def registrar_lixeira(msg_id, chat_id=GRUPO_ID):
         cursor.execute("INSERT INTO lixeira_mensagens (msg_id, chat_id, data_inclusao) VALUES (?, ?, ?)", (msg_id, str(chat_id), agora))
         conexao.commit()
         conexao.close()
-        if EXIBIR_LOGS: logger.info(f"💾 ID {msg_id} (Chat: {chat_id}) salvo na lixeira persistente (SQLite) para exclusão na madrugada.")
+        logger.info(f"💾 ID {msg_id} (Chat: {chat_id}) salvo na lixeira persistente (SQLite) para exclusão na madrugada.")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao registrar lixeira no banco: {e}")
+        logger.error(f"❌ Erro ao registrar lixeira no banco: {e}")
 
 
 # ==========================================
@@ -1474,7 +1471,7 @@ def diagnostico_temp():
 
         return bytes_presos, bytes_orfaos, vencidos
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Faxina] Falha ao diagnosticar temp/: {e}")
+        logger.error(f"❌ [Faxina] Falha ao diagnosticar temp/: {e}")
         return 0, 0, 0
 
 async def faxina_disco_periodica():
@@ -1524,16 +1521,15 @@ def limpar_arquivos_orfaos():
                 except Exception:
                     pass
 
-        if EXIBIR_LOGS:
-            if removidos:
-                logger.info(f"🧹 [Faxina] {removidos} arquivo(s) órfão(s) removido(s) — "
-                            f"{bytes_liberados / (1024**2):.0f} MB liberados. "
-                            f"{len(protegidos)} arquivo(s) preservado(s) por estarem em fila.")
-            else:
-                logger.info(f"🧹 [Faxina] Nada a remover. {len(protegidos)} arquivo(s) em fila protegidos.")
+        if removidos:
+            logger.info(f"🧹 [Faxina] {removidos} arquivo(s) órfão(s) removido(s) — "
+                        f"{bytes_liberados / (1024**2):.0f} MB liberados. "
+                        f"{len(protegidos)} arquivo(s) preservado(s) por estarem em fila.")
+        else:
+            logger.info(f"🧹 [Faxina] Nada a remover. {len(protegidos)} arquivo(s) em fila protegidos.")
         return removidos, bytes_liberados
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Faxina] Falha ao limpar órfãos: {e}")
+        logger.error(f"❌ [Faxina] Falha ao limpar órfãos: {e}")
         return 0, 0
 
 def relatorio_disco():
@@ -1556,7 +1552,7 @@ async def varredor_de_lixeira():
     Às 3h: apaga as mensagens da lixeira, poda os achadinhos e o cache da IA e limpa
     os arquivos órfãos.
     """
-    if EXIBIR_LOGS: logger.info("🧹 Iniciando varredura diária da lixeira persistente (03h00)...")
+    logger.info("🧹 Iniciando varredura diária da lixeira persistente (03h00)...")
     try:
         conexao = db.conectar()
         cursor = conexao.cursor()
@@ -1570,7 +1566,7 @@ async def varredor_de_lixeira():
                 await apagar_mensagem_automatica(msg_id, chat_id)
                 ids_apagados.append(id_banco)
             except Exception as e:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao processar item da lixeira: {e}")
+                logger.warning(f"⚠️ Erro ao processar item da lixeira: {e}")
                 ids_apagados.append(id_banco)  # sai da lista mesmo com falha, para não travar a lixeira
         
         for id_banco in ids_apagados:
@@ -1578,7 +1574,7 @@ async def varredor_de_lixeira():
             
         conexao.commit()
         conexao.close()
-        if EXIBIR_LOGS: logger.info("✅ Lixeira persistente (SQLite) esvaziada com sucesso.")
+        logger.info("✅ Lixeira persistente (SQLite) esvaziada com sucesso.")
 
         # Aproveita para podar a memória antiga dos achadinhos.
         limpar_achadinhos_antigos()
@@ -1591,20 +1587,20 @@ async def varredor_de_lixeira():
             from utils import limpar_cache_ia_antigo, estatisticas_cache_ia
             limpar_cache_ia_antigo(30)
             _tot, _eco = estatisticas_cache_ia()
-            if EXIBIR_LOGS: logger.info(f"🧠 [Cache IA] {_tot} análise(s) guardada(s) · {_eco} chamada(s) economizada(s).")
+            logger.info(f"🧠 [Cache IA] {_tot} análise(s) guardada(s) · {_eco} chamada(s) economizada(s).")
         except Exception:
             pass
-        if EXIBIR_LOGS: logger.info(f"💾 [Disco] {relatorio_disco()}")
+        logger.info(f"💾 [Disco] {relatorio_disco()}")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro na varredura da lixeira: {e}")
+        logger.error(f"❌ Erro na varredura da lixeira: {e}")
 
 async def apagar_mensagem_automatica(msg_id, chat_id=GRUPO_ID):
     """Apaga a mensagem; se ela já não existir, só registra no log."""
     try:
         await bot.delete_message(chat_id=chat_id, message_id=msg_id)
-        if EXIBIR_LOGS: logger.info(f"🧹 Faxina concluída: Mensagem {msg_id} apagada do chat {chat_id}.")
+        logger.info(f"🧹 Faxina concluída: Mensagem {msg_id} apagada do chat {chat_id}.")
     except Exception:
-        if EXIBIR_LOGS: logger.info(f"⚠️ Faxina: A mensagem {msg_id} já havia sido apagada manualmente.")
+        logger.info(f"⚠️ Faxina: A mensagem {msg_id} já havia sido apagada manualmente.")
 
 # ==========================================
 # Histórico de métricas (prova social)
@@ -1619,7 +1615,7 @@ def salvar_metrica(dia, chave, valor):
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Métricas] Erro ao salvar {chave}: {e}")
+        logger.error(f"❌ [Métricas] Erro ao salvar {chave}: {e}")
 
 def ler_metrica(chave, dias_atras=0):
     """Valor da métrica em um dia específico. None se não houver registro."""
@@ -1700,7 +1696,7 @@ async def coletar_metricas_diarias():
                 total = await bot.get_chat_member_count(chat_id)
                 salvar_metrica(hoje_str, f"membros_{nome}", total)
             except Exception as e:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ [Métricas] Não consegui contar membros de {nome}: {e}")
+                logger.warning(f"⚠️ [Métricas] Não consegui contar membros de {nome}: {e}")
 
         # Vídeos publicados hoje
         posts = {"principal": 0, "viral": 0, "publico": 0}
@@ -1719,7 +1715,7 @@ async def coletar_metricas_diarias():
 
             conexao.close()
         except Exception as e:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ [Métricas] Erro ao contar vídeos: {e}")
+            logger.warning(f"⚠️ [Métricas] Erro ao contar vídeos: {e}")
 
         try:
             fila_esp = ler_fila_clonagem().get("fila", [])
@@ -1749,12 +1745,11 @@ async def coletar_metricas_diarias():
             # A tabela só existe depois do primeiro download.
             pass
 
-        if EXIBIR_LOGS:
-            logger.info(f"📊 [Métricas] Retrato do dia salvo: "
-                        f"Principal {posts['principal']} vídeos | Viral {posts['viral']} | Público {posts['publico']} "
-                        f"| Downloads {dl_total} ({dl_usuarios} afiliados)")
+        logger.info(f"📊 [Métricas] Retrato do dia salvo: "
+                    f"Principal {posts['principal']} vídeos | Viral {posts['viral']} | Público {posts['publico']} "
+                    f"| Downloads {dl_total} ({dl_usuarios} afiliados)")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Métricas] Falha na coleta diária: {e}")
+        logger.error(f"❌ [Métricas] Falha na coleta diária: {e}")
 
 # Modo prova: quais rotinas divulgam qual canal, e como nomeá-lo.
 MAPA_PROVA_ROTINAS = {
@@ -1870,7 +1865,7 @@ def gerar_fato_prova(canal):
 
         return None
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Modo Prova] Erro ao gerar fato: {e}")
+        logger.error(f"❌ [Modo Prova] Erro ao gerar fato: {e}")
         return None
 
 # Intercalação: os vídeos são a espinha dorsal dos canais; os textos de rotina entram no meio.
@@ -1884,7 +1879,7 @@ def registrar_ultimo_post(chat_destino, tipo_conteudo):
         }
         db.salvar_config("ultimo_post_canais", dados)
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao registrar último post: {e}")
+        logger.error(f"❌ Erro ao registrar último post: {e}")
 
 def obter_ultimo_post(chat_destino):
     """'video' ou 'texto': a última publicação registrada no canal."""
@@ -1941,7 +1936,7 @@ def contar_videos_pendentes(chat_destino):
         conexao.close()
         return total
     except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível contar vídeos pendentes: {e}")
+        logger.warning(f"⚠️ Não foi possível contar vídeos pendentes: {e}")
         return 0
 
 # Cada turno de data dupla tem a sua faixa de horas. As faixas não são adjacentes
@@ -1988,7 +1983,7 @@ async def disparar_mensagem(tipo, forcar=False):
     ou Grupo Público. Passa pelas pausas, pelo espaçamento das campanhas, pela
     intercalação com os vídeos e pelo expediente; forcar=True só respeita as pausas.
     """
-    if EXIBIR_LOGS: logger.info(f"🔍 Validando status antes de disparar a rotina '{tipo}' (Forçar: {forcar})...")
+    logger.info(f"🔍 Validando status antes de disparar a rotina '{tipo}' (Forçar: {forcar})...")
     
     dados_rotina = ler_config_rotina()
     
@@ -2006,18 +2001,18 @@ async def disparar_mensagem(tipo, forcar=False):
         config_sub = ler_submissao_config()
         chat_destino = config_sub.get("grupo_id")
         if not chat_destino or chat_destino == "Não definido":
-            if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): Grupo Público ainda não configurado.")
+            logger.warning(f"🛑 Disparo abortado ({tipo}): Grupo Público ainda não configurado.")
             return
 
     # Pausas das rotinas: valem até para disparo forçado.
     if is_viral and dados_rotina.get("pausado_viral", False):
-        if EXIBIR_LOGS: logger.info(f"🛑 Disparo abortado ({tipo}): Rotinas do VIRAL estão pausadas.")
+        logger.info(f"🛑 Disparo abortado ({tipo}): Rotinas do VIRAL estão pausadas.")
         return
     if is_publico and dados_rotina.get("pausado_publico", False):
-        if EXIBIR_LOGS: logger.info(f"🛑 Disparo abortado ({tipo}): Rotinas do PÚBLICO estão pausadas.")
+        logger.info(f"🛑 Disparo abortado ({tipo}): Rotinas do PÚBLICO estão pausadas.")
         return
     if not is_viral and not is_publico and dados_rotina.get("pausado", False):
-        if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): Rotinas do PRINCIPAL estão pausadas.")
+        logger.warning(f"🛑 Disparo abortado ({tipo}): Rotinas do PRINCIPAL estão pausadas.")
         return
 
 
@@ -2038,9 +2033,8 @@ async def disparar_mensagem(tipo, forcar=False):
                     momento = datetime.combine(agora_tz.date(), ultima).replace(tzinfo=fuso_horario)
                     minutos = (agora_tz - momento).total_seconds() / 60
                     if 0 <= minutos < MINUTOS_MINIMOS_CAMPANHA:
-                        if EXIBIR_LOGS:
-                            logger.warning(f"🛑 [Campanha] '{tipo}' descartado: o aviso anterior saiu há "
-                                           f"{minutos:.0f} min, abaixo do piso de {MINUTOS_MINIMOS_CAMPANHA} min.")
+                        logger.warning(f"🛑 [Campanha] '{tipo}' descartado: o aviso anterior saiu há "
+                                       f"{minutos:.0f} min, abaixo do piso de {MINUTOS_MINIMOS_CAMPANHA} min.")
                         return
                 except Exception:
                     pass
@@ -2052,21 +2046,21 @@ async def disparar_mensagem(tipo, forcar=False):
             novo_horario = agora_tz + timedelta(minutes=random.randint(20, 45))
             job_id = f"job_rotina_{tipo}_intercalado_{int(agora_tz.timestamp())}"
             scheduler.add_job(disparar_mensagem, 'date', run_date=novo_horario, args=[tipo], id=job_id, replace_existing=True)
-            if EXIBIR_LOGS: logger.info(f"🚦 [Intercalação] '{tipo}' adiado para {novo_horario.strftime('%H:%M')}: o último post foi texto e há {estoque_videos} vídeo(s) na fila.")
+            logger.info(f"🚦 [Intercalação] '{tipo}' adiado para {novo_horario.strftime('%H:%M')}: o último post foi texto e há {estoque_videos} vídeo(s) na fila.")
             return
     
     # Bom Dia e Boa Noite uma vez por dia; as demais rotinas do principal só no expediente.
     if tipo == "bom_dia" and dados_rotina.get("ultimo_bom_dia") == hoje_str:
-        if EXIBIR_LOGS: logger.warning("🛑 Bloqueio Anti-Acidente: O 'Bom Dia' já foi enviado hoje.")
+        logger.warning("🛑 Bloqueio Anti-Acidente: O 'Bom Dia' já foi enviado hoje.")
         return
     if tipo == "boa_noite" and dados_rotina.get("ultimo_boa_noite") == hoje_str:
-        if EXIBIR_LOGS: logger.warning("🛑 Bloqueio Anti-Acidente: O 'Boa Noite' já foi enviado hoje.")
+        logger.warning("🛑 Bloqueio Anti-Acidente: O 'Boa Noite' já foi enviado hoje.")
         return
         
     if tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
         if not forcar:
             if not is_viral and not is_publico and dados_rotina.get("ultimo_bom_dia") != hoje_str:
-                if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): Expediente principal fechado.")
+                logger.warning(f"🛑 Disparo abortado ({tipo}): Expediente principal fechado.")
                 return
                 
             if not is_viral and not is_publico:
@@ -2168,13 +2162,13 @@ async def disparar_mensagem(tipo, forcar=False):
                 f"Não convide diretamente nem peça para a pessoa entrar: apenas noticie o fato de forma "
                 f"que desperte curiosidade. Máximo 200 caracteres, use emojis e entregue APENAS o texto final."
             )
-            if EXIBIR_LOGS: logger.info(f"📊 [Modo Prova] '{tipo}' usará o fato: {fato}")
-        elif EXIBIR_LOGS:
+            logger.info(f"📊 [Modo Prova] '{tipo}' usará o fato: {fato}")
+        else:
             logger.info(f"📊 [Modo Prova] Sorteado para '{tipo}', mas sem número digno. Mantendo o convite.")
 
     texto = await gerar_mensagem_gemini(prompt)
     
-    if EXIBIR_LOGS: logger.info(f"🚀 Preparando rotina ({tipo}) para o chat {chat_destino}.")
+    logger.info(f"🚀 Preparando rotina ({tipo}) para o chat {chat_destino}.")
     
     # Grupo Público: a rotina vai para cada tópico em topicos_rotina (sem lista, o Geral).
     destinos = []
@@ -2202,7 +2196,7 @@ async def disparar_mensagem(tipo, forcar=False):
             if thread_param == 1:
                 thread_param = None
             
-            if EXIBIR_LOGS: logger.info(f"📤 Disparando {tipo} para Thread: {thread_param if thread_param else 'Geral'}")
+            logger.info(f"📤 Disparando {tipo} para Thread: {thread_param if thread_param else 'Geral'}")
             msg_enviada = await bot.send_message(chat_destino, texto, message_thread_id=thread_param)
             registrar_lixeira(msg_enviada.message_id, chat_destino)
             
@@ -2233,9 +2227,9 @@ async def disparar_mensagem(tipo, forcar=False):
                 
         except Exception as e:
             if "message thread not found" in str(e).lower() or "wrong_id" in str(e).lower():
-                if EXIBIR_LOGS: logger.error(f"❌ O tópico {thread_id} não existe mais no grupo ou o ID '{thread_id}' é inválido.")
+                logger.error(f"❌ O tópico {thread_id} não existe mais no grupo ou o ID '{thread_id}' é inválido.")
             else:
-                if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar rotina {tipo} para thread {thread_id}: {e}")
+                logger.error(f"❌ Erro ao enviar rotina {tipo} para thread {thread_id}: {e}")
             
         await asyncio.sleep(4)  # pausa entre tópicos, para não tomar flood do Telegram
 
@@ -2244,7 +2238,7 @@ async def disparar_mensagem(tipo, forcar=False):
 
 def ler_config_rotina():
     """config_rotina, com as chaves que faltarem preenchidas pelo padrão (e gravadas)."""
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando leitura e validação das configurações de rotina...")
+    logger.info("🚀 Iniciando leitura e validação das configurações de rotina...")
     padrao = {
         # Canal principal
         "bom_dia": {"inicio": 6, "fim": 9, "frequencia": 1},
@@ -2285,7 +2279,7 @@ def ler_config_rotina():
             
     if houve_alteracao:
         db.salvar_config("config_rotina", dados)
-        if EXIBIR_LOGS: logger.info("✅ Sucesso: Novas chaves de rotina injetadas e salvas no banco.")
+        logger.info("✅ Sucesso: Novas chaves de rotina injetadas e salvas no banco.")
         
     return dados
 
@@ -2327,7 +2321,7 @@ def agendar_tarefas_diarias(escopo="todos"):
     faz a faxina da fila do canal principal e reagenda os vídeos dele. Rotina que já
     saiu hoje não é agendada de novo.
     """
-    if EXIBIR_LOGS: logger.info(f"🔄 Sorteando horários de rotina (Escopo: {escopo.upper()})...")
+    logger.info(f"🔄 Sorteando horários de rotina (Escopo: {escopo.upper()})...")
     
     agora_faxina = datetime.now(fuso_horario)
     hoje_faxina_str = agora_faxina.strftime("%Y-%m-%d")
@@ -2351,9 +2345,9 @@ def agendar_tarefas_diarias(escopo="todos"):
             apagados = cursor.rowcount
             conexao.commit()
             conexao.close()
-            if EXIBIR_LOGS and apagados > 0: logger.info(f"🧹 Limpeza da madrugada: {apagados} registos antigos eliminados do SQLite.")
+            if apagados > 0: logger.info(f"🧹 Limpeza da madrugada: {apagados} registos antigos eliminados do SQLite.")
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro na faxina da madrugada (SQLite): {e}")
+            logger.error(f"❌ Erro na faxina da madrugada (SQLite): {e}")
     
     rotinas_virais_lista = ROTINAS_VIRAIS
     rotinas_publico_lista = ROTINAS_PUBLICO
@@ -2367,7 +2361,7 @@ def agendar_tarefas_diarias(escopo="todos"):
                 continue  # de outro robô: não mexe
 
             job.remove()
-            if EXIBIR_LOGS: logger.info(f"🧹 Agendamento antigo apagado da memória [{escopo_job}]: {job.id}")
+            logger.info(f"🧹 Agendamento antigo apagado da memória [{escopo_job}]: {job.id}")
 
     dados_rotina = ler_config_rotina()
     agora = datetime.now(fuso_horario)
@@ -2501,13 +2495,11 @@ def agendar_tarefas_diarias(escopo="todos"):
                     sugestao = encontrar_maior_lacuna_e_inserir(duracao_minima=10)
                     horario_campanha = horario_dentro_do_turno(agora, p, sugestao)
                     if not horario_campanha:
-                        if EXIBIR_LOGS:
-                            logger.info(f"⏰ [Data Dupla] Turno '{p}' de {tipo_alerta} já passou. Ignorado hoje.")
+                        logger.info(f"⏰ [Data Dupla] Turno '{p}' de {tipo_alerta} já passou. Ignorado hoje.")
                         continue
                     scheduler.add_job(disparar_mensagem, 'date', run_date=horario_campanha, args=[tipo_alerta], id=f'job_campanha_{p}', replace_existing=True)
-                    if EXIBIR_LOGS:
-                        logger.info(f"🗓️ [Data Dupla] Turno '{p}' marcado para "
-                                    f"{horario_campanha.strftime('%d/%m às %H:%M')}.")
+                    logger.info(f"🗓️ [Data Dupla] Turno '{p}' marcado para "
+                                f"{horario_campanha.strftime('%d/%m às %H:%M')}.")
                 break
 
     if escopo in ["todos", "viral"]:
@@ -2547,9 +2539,9 @@ def agendar_tarefas_diarias(escopo="todos"):
                 except Exception:
                     pass
             horarios_ocupados_viral.sort()
-            if EXIBIR_LOGS: logger.info(f"🎬 [Rotinas Viral] {len(horarios_ocupados_viral)} vídeo(s) do Espião servirão de âncora para hoje.")
+            logger.info(f"🎬 [Rotinas Viral] {len(horarios_ocupados_viral)} vídeo(s) do Espião servirão de âncora para hoje.")
         except Exception as e:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ [Rotinas Viral] Não consegui ler a fila do Espião: {e}")
+            logger.warning(f"⚠️ [Rotinas Viral] Não consegui ler a fila do Espião: {e}")
 
         def encaixar_na_maior_lacuna(ini_h, fim_h, folga_min=4):
             """Devolve o meio da maior janela livre entre os vídeos, ou None se não couber."""
@@ -2641,9 +2633,9 @@ def agendar_tarefas_diarias(escopo="todos"):
                     pass
             conexao_pub.close()
             horarios_ocupados_publico.sort()
-            if EXIBIR_LOGS: logger.info(f"📬 [Rotinas Público] {len(horarios_ocupados_publico)} vídeo(s) servirão de âncora hoje.")
+            logger.info(f"📬 [Rotinas Público] {len(horarios_ocupados_publico)} vídeo(s) servirão de âncora hoje.")
         except Exception as e:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ [Rotinas Público] Não consegui ler a fila_publico: {e}")
+            logger.warning(f"⚠️ [Rotinas Público] Não consegui ler a fila_publico: {e}")
 
         def encaixar_lacuna_publico(ini_h, fim_h, folga_min=4):
             """Devolve o meio da maior janela livre entre os vídeos do Público, ou None."""
@@ -2722,8 +2714,7 @@ def agendar_tarefas_diarias(escopo="todos"):
                     # Turno vencido fica para amanhã (empurrá-lo para "daqui a pouco" juntava os
                     # três turnos quando "Atualizar Rotinas" rodava à noite).
                     if not horario_campanha:
-                        if EXIBIR_LOGS:
-                            logger.info(f"⏰ [Data Dupla Público] Turno '{p}' já passou. Ignorado hoje.")
+                        logger.info(f"⏰ [Data Dupla Público] Turno '{p}' já passou. Ignorado hoje.")
                         continue
 
                     horarios_ocupados_publico.append(horario_campanha)
@@ -2732,9 +2723,8 @@ def agendar_tarefas_diarias(escopo="todos"):
                     scheduler.add_job(disparar_mensagem, 'date', run_date=horario_campanha,
                                       args=[tipo_alerta_pub], id=f'job_campanha_pub_{p}',
                                       replace_existing=True)
-                    if EXIBIR_LOGS:
-                        logger.info(f"🗓️ [Data Dupla Público] Turno '{p}' marcado para "
-                                    f"{horario_campanha.strftime('%d/%m às %H:%M')}.")
+                    logger.info(f"🗓️ [Data Dupla Público] Turno '{p}' marcado para "
+                                f"{horario_campanha.strftime('%d/%m às %H:%M')}.")
                 break
 
 async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int = None):
@@ -2747,12 +2737,12 @@ async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int 
     if not estado_atual and data.get("painel_atual") == "raiz":
         return
         
-    if EXIBIR_LOGS: logger.info(f"⏳ Cronômetro de inatividade zerou (Tarefa pendente: {estado_atual}). Limpando memória FSM e atualizando a interface minimalista.")
+    logger.info(f"⏳ Cronômetro de inatividade zerou (Tarefa pendente: {estado_atual}). Limpando memória FSM e atualizando a interface minimalista.")
     await state.clear()
     await state.update_data(painel_atual="raiz")
     
     try:
-        if EXIBIR_LOGS: logger.info("✅ Restaurando o menu principal por inatividade e efetuando limpeza...")
+        logger.info("✅ Restaurando o menu principal por inatividade e efetuando limpeza...")
         
         # Aviso temporário, sem botões, apagado em seguida.
         msg_aviso = await bot.send_message(chat_id, "⏳ Sessão expirada por inatividade. Limpando tela...")
@@ -2763,9 +2753,9 @@ async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int 
         if str(chat_id) == str(ADMIN_ID):
             await bot.send_message(chat_id, "🏠 Painel Inicial restaurado.", reply_markup=obter_teclado_raiz())
         
-        if EXIBIR_LOGS: logger.info("🧹 Mensagem temporária apagada e botões restaurados com sucesso.")
+        logger.info("🧹 Mensagem temporária apagada e botões restaurados com sucesso.")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao atualizar o teclado e limpar chat: {e}")
+        logger.error(f"❌ Erro ao atualizar o teclado e limpar chat: {e}")
 
 class InatividadeMiddleware(BaseMiddleware):
     """Rearma, a cada mensagem ou clique do admin no privado, o cronômetro de 15 min do painel."""
@@ -2797,7 +2787,7 @@ class InatividadeMiddleware(BaseMiddleware):
 
             thread_id = getattr(mensagem_base, 'message_thread_id', None)
             origem = "clique" if hasattr(event, "data") else "mensagem"
-            if EXIBIR_LOGS: logger.info(f"⏰ Contagem de inatividade rearmada por {origem} no painel admin.")
+            logger.info(f"⏰ Contagem de inatividade rearmada por {origem} no painel admin.")
 
             scheduler.add_job(
                 resetar_sessao_inatividade, 
@@ -2841,7 +2831,7 @@ class BloqueioAdminMiddleware(BaseMiddleware):
                     
                     if str(chat.id) == str(grupo_alvo) and str(thread_id) == str(topico_alvo):
                         is_submissao = True
-                        if is_callback and EXIBIR_LOGS: logger.info("🟢 [Via Verde] Clique de botão autorizado no painel de submissão.")
+                        if is_callback: logger.info("🟢 [Via Verde] Clique de botão autorizado no painel de submissão.")
             except Exception:
                 pass
 
@@ -2860,7 +2850,7 @@ class BloqueioAdminMiddleware(BaseMiddleware):
         # O admin no grupo também é barrado (fora da via verde), para o painel não aparecer lá.
         if usuario and getattr(usuario, "id", None) == ADMIN_ID:
             if chat and chat.type != "private" and texto != "/limpar_teclado" and not is_submissao:
-                if getattr(event, "text", None) and EXIBIR_LOGS: logger.warning("🛡️ [Segurança Global] Comando bloqueado no grupo para evitar exposição visual.")
+                if getattr(event, "text", None): logger.warning("🛡️ [Segurança Global] Comando bloqueado no grupo para evitar exposição visual.")
                 return 
 
         return await handler(event, data)
@@ -2874,7 +2864,7 @@ class BloqueioTecladoForaDoPrivadoMiddleware:
             destino = getattr(method, "chat_id", None)
             if isinstance(markup, types.ReplyKeyboardMarkup) and str(destino) != str(ADMIN_ID):
                 method.reply_markup = None
-                if EXIBIR_LOGS: logger.warning(f"🛡️ [Trava de Teclado] Painel bloqueado fora do privado (chat {destino}).")
+                logger.warning(f"🛡️ [Trava de Teclado] Painel bloqueado fora do privado (chat {destino}).")
         except Exception:
             pass
         return await make_request(bot, method)
@@ -2913,9 +2903,8 @@ class TruncarMensagemLongaMiddleware:
             for campo, teto in (("text", LIMITE_TEXTO_TELEGRAM), ("caption", LIMITE_LEGENDA_TELEGRAM)):
                 conteudo = getattr(method, campo, None)
                 if isinstance(conteudo, str) and len(conteudo) > teto:
-                    if EXIBIR_LOGS:
-                        logger.warning(f"📏 [Trava de Tamanho] {type(method).__name__}.{campo} tinha "
-                                       f"{len(conteudo)} caracteres (teto {teto}). Cortado antes do envio.")
+                    logger.warning(f"📏 [Trava de Tamanho] {type(method).__name__}.{campo} tinha "
+                                   f"{len(conteudo)} caracteres (teto {teto}). Cortado antes do envio.")
                     setattr(method, campo, _cortar_para_telegram(conteudo, teto))
         except Exception:
             pass
@@ -2940,7 +2929,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     
-    if EXIBIR_LOGS: logger.info("👥 Acessando Painel do Grupo Público e Repostador.")
+    logger.info("👥 Acessando Painel do Grupo Público e Repostador.")
     config = ler_submissao_config()
     status = "🟢 ATIVADO" if config.get("ativo") else "🔴 DESATIVADO"
     
@@ -3104,7 +3093,7 @@ def ler_parceiros(apenas_ativos=False):
         conexao.close()
         return dados
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao ler: {e}")
+        logger.error(f"❌ [Parceiros] Erro ao ler: {e}")
         return []
 
 def salvar_parceiro(dados):
@@ -3127,7 +3116,7 @@ def salvar_parceiro(dados):
         conexao.close()
         return novo_id
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao salvar: {e}")
+        logger.error(f"❌ [Parceiros] Erro ao salvar: {e}")
         return None
 
 def atualizar_parceiro(parceiro_id, campo, valor):
@@ -3144,7 +3133,7 @@ def atualizar_parceiro(parceiro_id, campo, valor):
         conexao.close()
         return True
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao atualizar {campo}: {e}")
+        logger.error(f"❌ [Parceiros] Erro ao atualizar {campo}: {e}")
         return False
 
 def excluir_parceiro(parceiro_id):
@@ -3167,7 +3156,7 @@ def excluir_parceiro(parceiro_id):
         shutil.rmtree(os.path.join("parceiros", str(int(parceiro_id))), ignore_errors=True)
         return True
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao excluir: {e}")
+        logger.error(f"❌ [Parceiros] Erro ao excluir: {e}")
         return False
 
 def buscar_parceiro(parceiro_id):
@@ -3253,7 +3242,7 @@ def atualizar_item_fila_parceiro(id_unico, campo, valor):
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao atualizar a fila: {e}")
+        logger.error(f"❌ [Parceiros] Erro ao atualizar a fila: {e}")
 
 def remover_item_fila_parceiro(id_unico, caminho=None):
     """Apaga o registro e o arquivo: espaço em disco é recurso escasso aqui."""
@@ -3303,7 +3292,7 @@ def ler_fila_parceiro_por_dia_captura(parceiro_id):
             grupos.setdefault((dia_captura, item.get("data_alvo") or ""), []).append(item)
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao agrupar a fila por dia de captura: {e}")
+        logger.error(f"❌ [Parceiros] Erro ao agrupar a fila por dia de captura: {e}")
     return grupos
 
 async def fechar_dia_captura_parceiros(incluir_hoje=False):
@@ -3349,13 +3338,12 @@ async def fechar_dia_captura_parceiros(incluir_hoje=False):
                 for item in excedente:
                     remover_item_fila_parceiro(item["id_unico"], item.get("caminho_video"))
 
-                if EXIBIR_LOGS:
-                    logger.info(f"🌙 [Parceiro {p.get('nome')}] Dia {dia_captura} fechado: "
-                                f"{cota} de {len(itens)} vídeo(s) mantidos para {data_alvo}, "
-                                f"{len(excedente)} apagado(s) do disco.")
+                logger.info(f"🌙 [Parceiro {p.get('nome')}] Dia {dia_captura} fechado: "
+                            f"{cota} de {len(itens)} vídeo(s) mantidos para {data_alvo}, "
+                            f"{len(excedente)} apagado(s) do disco.")
 
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Falha no fechamento do dia de captura: {e}")
+        logger.error(f"❌ [Parceiros] Falha no fechamento do dia de captura: {e}")
         registrar_erro_json(f"fechar_dia_captura_parceiros: {e}", origem="bot_mestre.py")
 
 async def motor_parceiros_step():
@@ -3385,7 +3373,7 @@ async def motor_parceiros_step():
                 alvo = item.get("data_alvo") or ""
                 if alvo and alvo < (agora - timedelta(days=5)).strftime("%Y-%m-%d"):
                     remover_item_fila_parceiro(item["id_unico"], item.get("caminho_video"))
-                    if EXIBIR_LOGS: logger.info(f"🗑️ [Parceiro {p.get('nome')}] Vídeo vencido há mais de 5 dias, descartado.")
+                    logger.info(f"🗑️ [Parceiro {p.get('nome')}] Vídeo vencido há mais de 5 dias, descartado.")
                     continue
                 if alvo and alvo <= hoje_str:
                     desagendados.append(item)
@@ -3419,9 +3407,8 @@ async def motor_parceiros_step():
                 for item in aplicar_limite_diario_fila(agendados_p, piso_p, topo_p,
                                                        semente=f"parceiro:{p.get('id')}"):
                     remover_item_fila_parceiro(item["id_unico"], item.get("caminho_video"))
-                    if EXIBIR_LOGS:
-                        logger.info(f"✂️ [Parceiro {p.get('nome')}] Vídeo acima da faixa "
-                                    f"{piso_p}-{topo_p}/dia descartado.")
+                    logger.info(f"✂️ [Parceiro {p.get('nome')}] Vídeo acima da faixa "
+                                f"{piso_p}-{topo_p}/dia descartado.")
 
             # 2. Publicação: o primeiro vencido, um por ciclo
             agora_txt = agora.strftime("%Y-%m-%d %H:%M:%S")
@@ -3435,12 +3422,12 @@ async def motor_parceiros_step():
 
             if not caminho or not os.path.exists(caminho):
                 remover_item_fila_parceiro(item["id_unico"])
-                if EXIBIR_LOGS: logger.warning(f"⚠️ [Parceiro {p.get('nome')}] Arquivo sumiu do disco. Item removido.")
+                logger.warning(f"⚠️ [Parceiro {p.get('nome')}] Arquivo sumiu do disco. Item removido.")
                 continue
 
             # Link convertido com as credenciais DO PARCEIRO: a comissão é dele.
             link_final = await converter_link_shopee(
-                item.get("link_original"), "parceiro", EXIBIR_LOGS,
+                item.get("link_original"), "parceiro",
                 app_id=p.get("app_id"), app_secret=p.get("app_secret")
             )
 
@@ -3456,7 +3443,7 @@ async def motor_parceiros_step():
                 "#RoupasMasculinas #Automoveis #MaeEBebe #ComputadoresEAcessorios #Saude #ViagensEBagagens "
                 "#JogosEConsoles #Audio."
             )
-            texto_ia = await analisar_video_gemini(caminho, prompt, EXIBIR_LOGS)
+            texto_ia = await analisar_video_gemini(caminho, prompt)
 
             if texto_ia:
                 linhas_ia = texto_ia.split("\n")
@@ -3477,17 +3464,17 @@ async def motor_parceiros_step():
                     chat_id=chat_destino, video=FSInputFile(caminho), caption=legenda,
                     parse_mode="HTML", message_thread_id=int(thread) if thread else None
                 )
-                if EXIBIR_LOGS: logger.info(f"✅ [Parceiro {p.get('nome')}] Vídeo publicado em {chat_destino}.")
+                logger.info(f"✅ [Parceiro {p.get('nome')}] Vídeo publicado em {chat_destino}.")
                 remover_item_fila_parceiro(item["id_unico"], caminho)
             except Exception as e:
-                if EXIBIR_LOGS: logger.error(f"❌ [Parceiro {p.get('nome')}] Falha ao publicar: {e}")
+                logger.error(f"❌ [Parceiro {p.get('nome')}] Falha ao publicar: {e}")
                 atualizar_item_fila_parceiro(
                     item["id_unico"], "horario_disparo",
                     (agora + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
                 )
 
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Falha no motor de publicação: {e}")
+        logger.error(f"❌ [Parceiros] Falha no motor de publicação: {e}")
 
 # --- Parceiros: selecionar, editar, pausar e excluir ---
 def interpretar_faixa_cota(texto):
@@ -3724,7 +3711,7 @@ async def salvar_edicao_parceiro(message: types.Message, state: FSMContext):
         if atualizar_parceiro(pid, "limite_min", piso) and atualizar_parceiro(pid, "limite_max", topo):
             # Zera o campo antigo para não sobrar duas fontes de verdade.
             atualizar_parceiro(pid, "limite_diario", 0)
-            if EXIBIR_LOGS: logger.info(f"👥 [Parceiros] #{pid}: cota diária definida para {piso}-{topo}.")
+            logger.info(f"👥 [Parceiros] #{pid}: cota diária definida para {piso}-{topo}.")
             rotulo = f"{piso} a {topo} vídeos/dia" if topo > piso else f"{piso} vídeos/dia"
             await message.answer(f"✅ <b>Cota atualizada:</b> {rotulo}.", parse_mode="HTML")
         else:
@@ -3741,7 +3728,7 @@ async def salvar_edicao_parceiro(message: types.Message, state: FSMContext):
         if ini >= fim or ini < 0 or fim > 24:
             await message.answer("⚠️ O início precisa ser menor que o fim, dentro de 0 a 24.", parse_mode="HTML"); return
         if atualizar_parceiro(pid, "janela_inicio", ini) and atualizar_parceiro(pid, "janela_fim", fim):
-            if EXIBIR_LOGS: logger.info(f"👥 [Parceiros] #{pid}: janela de publicação definida para {ini}h-{fim}h.")
+            logger.info(f"👥 [Parceiros] #{pid}: janela de publicação definida para {ini}h-{fim}h.")
             await message.answer(f"✅ <b>Janela atualizada:</b> {ini}h às {fim}h.", parse_mode="HTML")
         else:
             await message.answer("❌ Não foi possível atualizar.")
@@ -3785,7 +3772,7 @@ async def salvar_edicao_parceiro(message: types.Message, state: FSMContext):
             valor = id_final
 
     if atualizar_parceiro(pid, campo, valor):
-        if EXIBIR_LOGS: logger.info(f"👥 [Parceiros] #{pid}: '{campo}' alterado para {valor}.")
+        logger.info(f"👥 [Parceiros] #{pid}: '{campo}' alterado para {valor}.")
         await message.answer("✅ <b>Atualizado com sucesso!</b>", parse_mode="HTML")
     else:
         await message.answer("❌ Não foi possível atualizar.")
@@ -3805,7 +3792,7 @@ async def confirmar_exclusao_parceiro(message: types.Message, state: FSMContext)
     p = buscar_parceiro(pid)
     nome = p.get("nome") if p else pid
     if excluir_parceiro(pid):
-        if EXIBIR_LOGS: logger.info(f"🗑️ [Parceiros] '{nome}' (#{pid}) excluído. Reservas mantidas.")
+        logger.info(f"🗑️ [Parceiros] '{nome}' (#{pid}) excluído. Reservas mantidas.")
         await message.answer(f"🗑️ <b>{nome}</b> foi excluído.\n<i>As reservas dele seguem queimadas.</i>", parse_mode="HTML")
     else:
         await message.answer("❌ Não foi possível excluir.")
@@ -3847,7 +3834,7 @@ async def confirmar_exclusao_total(message: types.Message, state: FSMContext):
     total = 0
     for p in ler_parceiros():
         if excluir_parceiro(p.get("id")): total += 1
-    if EXIBIR_LOGS: logger.warning(f"🗑️ [Parceiros] {total} parceiro(s) excluído(s) em massa.")
+    logger.warning(f"🗑️ [Parceiros] {total} parceiro(s) excluído(s) em massa.")
     await message.answer(f"🗑️ <b>{total} parceiro(s) excluído(s).</b>", parse_mode="HTML")
     await painel_parceiros(message, state)
 
@@ -3867,10 +3854,10 @@ async def testar_credenciais_shopee(app_id, app_secret):
     """
     try:
         return await testar_chaves_afiliado(
-            LINK_TESTE_SHOPEE, app_id, app_secret, EXIBIR_LOGS
+            LINK_TESTE_SHOPEE, app_id, app_secret
         )
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao testar credenciais: {e}")
+        logger.error(f"❌ [Parceiros] Erro ao testar credenciais: {e}")
         return False, str(e)
 
 async def voltar_passo_parceiro(message, state: FSMContext, destino):
@@ -4118,7 +4105,7 @@ async def parceiro_confirmar_cadastro(message: types.Message, state: FSMContext)
     novo_id = salvar_parceiro(d)
 
     if novo_id:
-        if EXIBIR_LOGS: logger.info(f"👥 [Parceiros] '{d.get('nome')}' cadastrado com o ID {novo_id}.")
+        logger.info(f"👥 [Parceiros] '{d.get('nome')}' cadastrado com o ID {novo_id}.")
         await message.answer(f"✅ <b>Parceiro cadastrado!</b>\n{d.get('nome')} recebeu o ID <code>#{novo_id}</code>.", parse_mode="HTML")
     else:
         await message.answer("❌ Não foi possível salvar. Verifique o log.")
@@ -4134,7 +4121,7 @@ async def voltar_painel_publico_repost(message: types.Message, state: FSMContext
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurações do Robô Moderador ⚙️")
 async def submenu_robo_moderador(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("⚙️ Acessando submenu de Configurações do Robô Moderador...")
+    logger.info("⚙️ Acessando submenu de Configurações do Robô Moderador...")
 
     config = ler_submissao_config()
     status = "🟢 ATIVADO" if config.get("ativo") else "🔴 PAUSADO"
@@ -4162,7 +4149,7 @@ async def submenu_robo_moderador(message: types.Message, state: FSMContext):
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurações do Robô Repostador ♻️")
 async def submenu_regras_repost_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("♻️ Acessando submenu do Robô Repostador do Grupo Público...")
+    logger.info("♻️ Acessando submenu do Robô Repostador do Grupo Público...")
 
     config = ler_submissao_config()
     status = "🔴 PAUSADO" if config.get("repost_pausado") else "🟢 ATIVADO"
@@ -4290,7 +4277,7 @@ async def confirmar_troca_destino(message: types.Message, state: FSMContext):
     config[chave] = id_novo
     salvar_submissao_config(config)
 
-    if EXIBIR_LOGS: logger.info(f"✅ Painel Público: '{chave}' alterado de {valor_antigo} para {id_novo}.")
+    logger.info(f"✅ Painel Público: '{chave}' alterado de {valor_antigo} para {id_novo}.")
 
     await message.answer(
         f"✅ <b>{rotulo} atualizado com sucesso!</b>\n\n"
@@ -4344,7 +4331,7 @@ async def salvar_origem_repost_publico(message: types.Message, state: FSMContext
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Status do Robô ⏸️")
 async def submenu_status_robo_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("⏸️ Acessando submenu de Status do Robô do Grupo Público...")
+    logger.info("⏸️ Acessando submenu de Status do Robô do Grupo Público...")
     config = ler_submissao_config()
     texto_repostagem = "Retomar Repostagem ▶️" if config.get("repost_pausado") else "Pausar Repostagem ⏸️"
 
@@ -4393,7 +4380,7 @@ async def processar_pausa_repostagem_publico(message: types.Message, state: FSMC
     salvar_submissao_config(config)
 
     status = "PAUSADA 🔴" if config["repost_pausado"] else "RETOMADA 🟢"
-    if EXIBIR_LOGS: logger.info(f"⚙️ Status da repostagem pública alterado para: {status}")
+    logger.info(f"⚙️ Status da repostagem pública alterado para: {status}")
     await message.answer(f"✅ A repostagem automática para o Público foi <b>{status}</b>.", parse_mode="HTML")
     await submenu_regras_repost_publico(message, state)
 
@@ -4440,7 +4427,7 @@ async def processar_dias_repost_publico(message: types.Message, state: FSMContex
     config["repost_dias"] = novo_valor
     salvar_submissao_config(config)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Dias de atraso do repost público atualizados para: {novo_valor}")
+    logger.info(f"✅ Dias de atraso do repost público atualizados para: {novo_valor}")
     await message.answer(f"✅ <b>Tempo de Atraso Atualizado!</b>\nOs vídeos irão para o Grupo Público após {novo_valor} dias da captura original.", parse_mode="HTML")
     await submenu_regras_repost_publico(message, state)
 
@@ -4498,7 +4485,7 @@ async def processar_limite_repost_publico(message: types.Message, state: FSMCont
     config["repost_limite"] = piso
     salvar_submissao_config(config)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Cota do repost público atualizada para: {piso}-{topo}")
+    logger.info(f"✅ Cota do repost público atualizada para: {piso}-{topo}")
     await message.answer(f"✅ <b>Cota Diária Atualizada!</b>\nO robô enviará <b>{rotulo_cota(piso, topo)}</b> ao Grupo Público.", parse_mode="HTML")
     await submenu_regras_repost_publico(message, state)
 
@@ -4562,7 +4549,7 @@ async def motor_repost_publico_step():
             if data_alvo and data_alvo < limite_encalhe:
                 cursor.execute("DELETE FROM fila_publico WHERE id_unico = ?", (item["id_unico"],))
                 houve_limpeza = True
-                if EXIBIR_LOGS: logger.info(f"🧹 [Auto-Limpeza] Vídeo do Público encalhado desde {data_alvo} removido da fila.")
+                logger.info(f"🧹 [Auto-Limpeza] Vídeo do Público encalhado desde {data_alvo} removido da fila.")
                 continue
 
             if item.get("horario_disparo"):
@@ -4573,7 +4560,7 @@ async def motor_repost_publico_step():
             if data_alvo and data_alvo < hoje_str:
                 cursor.execute("DELETE FROM fila_publico WHERE id_unico = ?", (item["id_unico"],))
                 houve_limpeza = True
-                if EXIBIR_LOGS: logger.info(f"🧹 [Auto-Limpeza] Vídeo do Público vencido ({data_alvo}) removido da fila.")
+                logger.info(f"🧹 [Auto-Limpeza] Vídeo do Público vencido ({data_alvo}) removido da fila.")
                 continue
 
             # Data-alvo hoje: entra no agendamento.
@@ -4598,7 +4585,7 @@ async def motor_repost_publico_step():
                 "limite_dias_descarte": dias_publico + 7  # 7 dias de folga depois da data-alvo
             }
 
-            if EXIBIR_LOGS: logger.info(f"⚙️ [Motor Público] Acionando Motor Central para {len(itens_desagendados)} vídeos de hoje...")
+            logger.info(f"⚙️ [Motor Público] Acionando Motor Central para {len(itens_desagendados)} vídeos de hoje...")
             calcular_horarios_distribuicao(itens_desagendados, config_fila, forcar=False)
 
             for item in itens_desagendados:
@@ -4640,9 +4627,8 @@ async def motor_repost_publico_step():
             # Quem baixa o arquivo é o userbot (Correio Público, no espelhador): o canal de
             # origem não é nosso e o bot não consegue lê-lo. Aqui o bot só publica do disco.
             if not caminho or not os.path.exists(caminho):
-                if EXIBIR_LOGS:
-                    logger.warning(f"⏳ [Motor Público] Vídeo {id_unico} ainda sem arquivo no disco. "
-                                   "O correio do userbot não baixou. Nova tentativa em 10 min.")
+                logger.warning(f"⏳ [Motor Público] Vídeo {id_unico} ainda sem arquivo no disco. "
+                               "O correio do userbot não baixou. Nova tentativa em 10 min.")
                 cursor.execute(
                     "UPDATE fila_publico SET horario_disparo = ? WHERE id_unico = ?",
                     ((agora + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S"), id_unico)
@@ -4651,16 +4637,15 @@ async def motor_repost_publico_step():
             elif os.path.getsize(caminho) > LIMITE_UPLOAD_BOT_MB * 1024 * 1024:
                 # Rede de segurança: o Correio já barra arquivo grande antes de baixar; se um
                 # escapar, sai da fila em vez de ser recusado para sempre.
-                if EXIBIR_LOGS:
-                    logger.warning(f"🚫 [Motor Público] Vídeo {id_unico} tem "
-                                   f"{os.path.getsize(caminho) / (1024**2):.1f} MB, acima do teto de "
-                                   f"{LIMITE_UPLOAD_BOT_MB} MB da Bot API. Item descartado.")
+                logger.warning(f"🚫 [Motor Público] Vídeo {id_unico} tem "
+                               f"{os.path.getsize(caminho) / (1024**2):.1f} MB, acima do teto de "
+                               f"{LIMITE_UPLOAD_BOT_MB} MB da Bot API. Item descartado.")
                 cursor.execute("DELETE FROM fila_publico WHERE id_unico = ?", (id_unico,))
                 conexao.commit()
                 try: os.remove(caminho)
                 except Exception: pass
             else:
-                if EXIBIR_LOGS: logger.info("🚀 [Motor Público] Vídeo elegível detetado. A iniciar a repostagem...")
+                logger.info("🚀 [Motor Público] Vídeo elegível detetado. A iniciar a repostagem...")
                 import re
 
                 match_link = re.search(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s<]+', legenda_original, re.IGNORECASE)
@@ -4682,7 +4667,7 @@ async def motor_repost_publico_step():
                 # upload ainda leva alguns segundos.
                 config_agora = ler_submissao_config()
                 if not config_agora.get("ativo") or config_agora.get("repost_pausado", False):
-                    if EXIBIR_LOGS: logger.info("⏸️ [Motor Público] Pausa detetada. Publicação abortada.")
+                    logger.info("⏸️ [Motor Público] Pausa detetada. Publicação abortada.")
                     conexao.close()
                     return
 
@@ -4695,7 +4680,7 @@ async def motor_repost_publico_step():
                         parse_mode="HTML",
                         message_thread_id=int(topico_destino) if topico_destino else None
                     )
-                    if EXIBIR_LOGS: logger.info(f"✅ [Motor Público] Vídeo '{nome_produto}' publicado no Grupo Público.")
+                    logger.info(f"✅ [Motor Público] Vídeo '{nome_produto}' publicado no Grupo Público.")
 
                     # O vídeo já está no grupo: se o processado = 1 não gravar, o ciclo seguinte
                     # escolhe o MESMO item e publica de novo ("database is locked" é comum). Por isso
@@ -4712,9 +4697,8 @@ async def motor_repost_publico_step():
                             marcou = True
                             break
                         except Exception as erro_marca:
-                            if EXIBIR_LOGS:
-                                logger.warning(f"⏳ [Motor Público] Tentativa {tentativa}/6 de marcar {id_unico} "
-                                               f"como postado falhou: {erro_marca}")
+                            logger.warning(f"⏳ [Motor Público] Tentativa {tentativa}/6 de marcar {id_unico} "
+                                           f"como postado falhou: {erro_marca}")
                             await asyncio.sleep(2 * tentativa)
 
                     if not marcou:
@@ -4724,9 +4708,8 @@ async def motor_repost_publico_step():
                         # fila do que vinte cópias no grupo.
                         try: os.remove(caminho)
                         except Exception: pass
-                        if EXIBIR_LOGS:
-                            logger.error(f"🛑 [Motor Público] {id_unico} foi PUBLICADO mas não foi possível marcar "
-                                         "no banco. Arquivo apagado para não republicar. Verifique o SQLite.")
+                        logger.error(f"🛑 [Motor Público] {id_unico} foi PUBLICADO mas não foi possível marcar "
+                                     "no banco. Arquivo apagado para não republicar. Verifique o SQLite.")
                         conexao.close()
                         return
 
@@ -4737,9 +4720,8 @@ async def motor_repost_publico_step():
                     except Exception: pass
 
                 except Exception as e:
-                    if EXIBIR_LOGS:
-                        logger.error(f"❌ [Motor Público] Falha ao publicar: {e} "
-                                     f"| destino={grupo_id!r} topico={topico_destino!r} arquivo={caminho!r}")
+                    logger.error(f"❌ [Motor Público] Falha ao publicar: {e} "
+                                 f"| destino={grupo_id!r} topico={topico_destino!r} arquivo={caminho!r}")
                     # Falhou: adia 30 min em vez de deixar o item parado no topo da fila.
                     cursor.execute(
                         "UPDATE fila_publico SET horario_disparo = ? WHERE id_unico = ?",
@@ -4749,7 +4731,7 @@ async def motor_repost_publico_step():
         
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Motor Público] Erro estrutural crítico: {e}")
+        logger.error(f"❌ [Motor Público] Erro estrutural crítico: {e}")
 
 # Motor do repostador do Grupo Público: a cada 2 minutos.
 scheduler.add_job(motor_repost_publico_step, 'interval', minutes=2, id='motor_repost_publico_loop', replace_existing=True)
@@ -4816,7 +4798,7 @@ def calcular_dias_restantes_autorais():
                 return dias_restantes
         return None
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao calcular dias para repostagem: {e}")
+        logger.error(f"❌ Erro ao calcular dias para repostagem: {e}")
         return None
 
 @dp.message(F.text == "Vídeos Autorais 🎥", StateFilter("*"))
@@ -4827,7 +4809,7 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     
-    if EXIBIR_LOGS: logger.info("🎥 Acessando painel visual do Bot Vídeos Autorais...")
+    logger.info("🎥 Acessando painel visual do Bot Vídeos Autorais...")
     config = ler_autorais_config()
     
     origem = config.get("origem", "Não definida")
@@ -4935,7 +4917,7 @@ async def painel_autorais(message: types.Message, state: FSMContext):
         else:
             texto_plantao = "<b>- Contas de plantão:</b>\n    👤 <i>sessão fixa (nenhuma conta no pool)</i>\n\n"
     except Exception as e_pool:
-        if EXIBIR_LOGS: logger.error(f"❌ Não consegui ler o pool de contas: {e_pool}")
+        logger.error(f"❌ Não consegui ler o pool de contas: {e_pool}")
         texto_plantao = "<b>- Contas de plantão:</b>\n    ⚠️ <i>pool indisponível</i>\n\n"
 
     
@@ -5074,7 +5056,7 @@ async def _pc_redesenhar(mensagem):
         )
     except Exception as e:
         if "not modified" not in str(e).lower():
-            if EXIBIR_LOGS: logger.error(f"❌ [Pool] Falha ao redesenhar o painel: {e}")
+            logger.error(f"❌ [Pool] Falha ao redesenhar o painel: {e}")
 
 
 @dp.message(F.text == "Contas 👥", StateFilter("*"))
@@ -5082,13 +5064,13 @@ async def painel_contas_postos(message: types.Message, state: FSMContext):
     """Abre o painel de Contas (aba Postos), protegendo antes as contas na lista negra."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    if EXIBIR_LOGS: logger.info("👥 Abrindo o painel de Contas...")
+    logger.info("👥 Abrindo o painel de Contas...")
     # Proteger as próprias contas na lista negra é barato e tem de valer sempre: roda
     # em silêncio ao abrir o painel (no lugar de um botão que só criava dúvida).
     try:
         blacklist_captura.sincronizar_contas_do_pool()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Falha ao sincronizar ao abrir: {e}")
+        logger.error(f"❌ [Lista Negra] Falha ao sincronizar ao abrir: {e}")
     try:
         await message.answer(
             pool_contas.montar_relatorio_telegram(),
@@ -5098,7 +5080,7 @@ async def painel_contas_postos(message: types.Message, state: FSMContext):
     except Exception as e:
         await message.answer(f"❌ Não consegui abrir o pool de contas.\n<code>{e}</code>",
                              parse_mode="HTML")
-        if EXIBIR_LOGS: logger.error(f"❌ [Pool] Erro ao abrir o painel: {e}")
+        logger.error(f"❌ [Pool] Erro ao abrir o painel: {e}")
 
 
 @dp.callback_query(F.data == "pc_painel", StateFilter("*"))
@@ -5118,7 +5100,7 @@ async def pool_sincronizar(callback: types.CallbackQuery, state: FSMContext):
         mudancas = await pool_contas.sincronizar_pool()
     except Exception as e:
         await callback.message.answer(f"❌ Falha ao sincronizar: <code>{e}</code>", parse_mode="HTML")
-        if EXIBIR_LOGS: logger.error(f"❌ [Pool] Erro ao sincronizar pelo painel: {e}")
+        logger.error(f"❌ [Pool] Erro ao sincronizar pelo painel: {e}")
         return
     await _pc_redesenhar(callback.message)
     if mudancas:
@@ -5138,7 +5120,7 @@ async def pool_ver_conta(callback: types.CallbackQuery, state: FSMContext):
         await callback.message.edit_text(texto, parse_mode="HTML", reply_markup=teclado)
     except Exception as e:
         if "not modified" not in str(e).lower():
-            if EXIBIR_LOGS: logger.error(f"❌ [Pool] Falha ao abrir a conta: {e}")
+            logger.error(f"❌ [Pool] Falha ao abrir a conta: {e}")
     await callback.answer()
 
 
@@ -5440,7 +5422,7 @@ async def _concluir_nova_conta(message, state, senha):
     try:
         blacklist_captura.sincronizar_contas_do_pool()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Falha ao proteger a conta nova: {e}")
+        logger.error(f"❌ [Lista Negra] Falha ao proteger a conta nova: {e}")
 
     if status_grupo == pool_contas.STATUS_NO_GRUPO:
         situacao = "✅ Já está no grupo de origem."
@@ -5523,7 +5505,7 @@ async def verificar_saude_contas():
         ocupacao = pool_contas.ler_ocupacao()
         saude = pool_contas.avaliar_saude(contas, ocupacao, pool_contas.ler_atividade())
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Contas] Falha ao avaliar a saúde das contas: {e}")
+        logger.error(f"❌ [Contas] Falha ao avaliar a saúde das contas: {e}")
         return
 
     agora = {p["chave"]: p for p in saude["postos"]}
@@ -5575,7 +5557,7 @@ async def verificar_saude_contas():
         try:
             await bot.send_message(ADMIN_ID, texto, parse_mode="HTML")
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ [Contas] Falha ao avisar o admin: {e}")
+            logger.error(f"❌ [Contas] Falha ao avisar o admin: {e}")
 
 
 # ==========================================================================
@@ -5626,7 +5608,7 @@ async def _bl_redesenhar(mensagem):
         )
     except Exception as e:
         if "not modified" not in str(e).lower():
-            if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Falha ao redesenhar: {e}")
+            logger.error(f"❌ [Lista Negra] Falha ao redesenhar: {e}")
 
 
 @dp.callback_query(F.data == "bl_painel", StateFilter("*"))
@@ -5679,7 +5661,7 @@ async def bl_receber_arroba(message: types.Message, state: FSMContext):
                                                                 motivo="adicionado pelo painel")
     except Exception as e:
         ok, aviso = False, f"erro inesperado: {e}"
-        if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Erro ao adicionar {alvo}: {e}")
+        logger.error(f"❌ [Lista Negra] Erro ao adicionar {alvo}: {e}")
 
     await state.clear()
     await message.answer(("✅ " if ok else "❌ ") + aviso, parse_mode="HTML",
@@ -5731,7 +5713,7 @@ async def bl_alternar_escopo(callback: types.CallbackQuery):
         await callback.answer("🌐 em todo lugar" if novo == blacklist_captura.ESCOPO_GLOBAL
                               else "🎥 só nos Autorais")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Erro ao alternar escopo: {e}")
+        logger.error(f"❌ [Lista Negra] Erro ao alternar escopo: {e}")
         await callback.answer("Erro ao alterar.", show_alert=True)
     await _bl_redesenhar(callback.message)
 
@@ -5854,7 +5836,7 @@ async def voltar_menu_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Origem 📥")
 async def pedir_origem_autorais(message: types.Message, state: FSMContext):
-    if EXIBIR_LOGS: logger.info("📥 Solicitando nova origem para vídeos autorais...")
+    logger.info("📥 Solicitando nova origem para vídeos autorais...")
     await message.answer("Envie o <b>ID Numérico, @username ou Link do Telegram Web</b> do grupo de ORIGEM de onde o bot vai puxar os vídeos (Ex: -100123456789 ou https://web.telegram.org/a/#-100...):", parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(AutoraisFluxo.aguardando_origem)
 
@@ -5994,13 +5976,13 @@ async def processar_origem_autorais(message: types.Message, state: FSMContext):
     config["origem_topico"] = topico_final
     salvar_autorais_config(config)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Origem dos vídeos autorais salva: {nova_origem} | Tópico: {topico_final}")
+    logger.info(f"✅ Origem dos vídeos autorais salva: {nova_origem} | Tópico: {topico_final}")
     await message.answer("✅ <b>Origem e Tópico salvos com sucesso!</b>", parse_mode="HTML")
     await painel_autorais(message, state)
 
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Destino 📤")
 async def pedir_destino_autorais(message: types.Message, state: FSMContext):
-    if EXIBIR_LOGS: logger.info("📤 Solicitando novo destino para vídeos autorais...")
+    logger.info("📤 Solicitando novo destino para vídeos autorais...")
     await message.answer("Envie o <b>ID Numérico, @username ou Link do Telegram Web</b> do canal de DESTINO para onde o bot vai enviar os vídeos convertidos (Ex: @meu_canal ou https://web.telegram.org/...):", parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(AutoraisFluxo.aguardando_destino)
 
@@ -6094,7 +6076,7 @@ async def processar_destino_autorais(message: types.Message, state: FSMContext):
     config["destino"] = id_final
     salvar_autorais_config(config)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Destino dos vídeos autorais atualizado para: {id_final}")
+    logger.info(f"✅ Destino dos vídeos autorais atualizado para: {id_final}")
     await message.answer(f"✅ <b>Destino atualizado com sucesso!</b>\nOs vídeos convertidos serão enviados instantaneamente para: <code>{str(id_final).replace(':', '_')}</code>", parse_mode="HTML")
     await painel_autorais(message, state)
 
@@ -6298,7 +6280,7 @@ async def processar_janela_autorais(message: types.Message, state: FSMContext):
     config["fim"] = fim
     salvar_autorais_config(config)
 
-    if EXIBIR_LOGS: logger.info(f"✅ Janela de postagem dos Autorais atualizada para {inicio}h-{fim}h.")
+    logger.info(f"✅ Janela de postagem dos Autorais atualizada para {inicio}h-{fim}h.")
 
     texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"entre as {inicio}h e as {fim}h"
     await message.answer(
@@ -6330,7 +6312,7 @@ async def espelhar_no_feed_central(msg_original, legenda, destino_original, thre
 
     # O nicho já posta no próprio feed central: não duplica.
     if str(destino_original) == str(ESPELHO_ACHADINHOS_DESTINO) and thread_original == thread_espelho:
-        if EXIBIR_LOGS: logger.info("🪞 [Achadinhos] Nicho já aponta para o feed central. Espelho dispensado.")
+        logger.info("🪞 [Achadinhos] Nicho já aponta para o feed central. Espelho dispensado.")
         return
 
     try:
@@ -6343,9 +6325,9 @@ async def espelhar_no_feed_central(msg_original, legenda, destino_original, thre
             parse_mode="HTML",
             message_thread_id=thread_espelho
         )
-        if EXIBIR_LOGS: logger.info(f"🪞 [Achadinhos] Espelhado no feed central (tópico {ESPELHO_ACHADINHOS_TOPICO}).")
+        logger.info(f"🪞 [Achadinhos] Espelhado no feed central (tópico {ESPELHO_ACHADINHOS_TOPICO}).")
     except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ [Achadinhos] Falha ao espelhar no feed central: {e}. A postagem principal foi entregue normalmente.")
+        logger.warning(f"⚠️ [Achadinhos] Falha ao espelhar no feed central: {e}. A postagem principal foi entregue normalmente.")
 
 
 # Achados do dia: só o que passa do piso de desconto. Sem chamada extra à API: o
@@ -6386,9 +6368,9 @@ async def espelhar_achado_do_dia(msg_original, legenda, taxa_desconto, destino_o
             parse_mode="HTML",
             message_thread_id=thread_alvo
         )
-        if EXIBIR_LOGS: logger.info(f"🔥 [Achados] Oferta de -{taxa}% espelhada no tópico de achados.")
+        logger.info(f"🔥 [Achados] Oferta de -{taxa}% espelhada no tópico de achados.")
     except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ [Achados] Falha ao espelhar: {e}. A postagem principal foi entregue.")
+        logger.warning(f"⚠️ [Achados] Falha ao espelhar: {e}. A postagem principal foi entregue.")
 
 
 def extrair_destino_e_topico(texto):
@@ -6439,7 +6421,7 @@ def achadinho_ja_enviado(item_id):
         conexao.close()
         return achou
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Erro ao consultar histórico: {e}")
+        logger.error(f"❌ [Achadinhos] Erro ao consultar histórico: {e}")
         return True  # na dúvida, considera já enviado: melhor pular do que repetir
 
 def registrar_achadinho_enviado(item_id, nicho=""):
@@ -6452,7 +6434,7 @@ def registrar_achadinho_enviado(item_id, nicho=""):
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Erro ao registrar envio: {e}")
+        logger.error(f"❌ [Achadinhos] Erro ao registrar envio: {e}")
 
 # Retenção da memória: 5 anos. Produto mais antigo que isso já mudou de preço ou
 # saiu de linha; se reaparecer, vale como oferta nova.
@@ -6468,10 +6450,10 @@ def limpar_achadinhos_antigos():
         removidos = cursor.rowcount
         conexao.commit()
         conexao.close()
-        if removidos > 0 and EXIBIR_LOGS:
+        if removidos > 0:
             logger.info(f"🧹 [Achadinhos] {removidos} produto(s) com mais de {ANOS_RETENCAO_ACHADINHOS} anos removidos da memória.")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Erro na limpeza por idade: {e}")
+        logger.error(f"❌ [Achadinhos] Erro na limpeza por idade: {e}")
 
 def total_achadinhos_enviados():
     try:
@@ -6535,7 +6517,7 @@ def montar_legenda_achadinho(nome, preco, taxa, nota, link, gancho=None):
 
 async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_loja):
     """Uma linha de chamada da IA para o produto, sem preço; sem IA, uma abertura pronta."""
-    if EXIBIR_LOGS: logger.info("🧠 [Achadinhos] Estruturando estratégia de Copywriting para o produto...")
+    logger.info("🧠 [Achadinhos] Estruturando estratégia de Copywriting para o produto...")
     
     prompt = (
         f"Escreva UMA única linha curta (no máximo 8 palavras) para chamar atenção "
@@ -6548,7 +6530,7 @@ async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_l
         f"'👟 Leveza que segura o treino inteiro'"
     )
 
-    texto_gerado = await gerar_texto_gemini(prompt, EXIBIR_LOGS)
+    texto_gerado = await gerar_texto_gemini(prompt)
     if texto_gerado:
         # A IA às vezes devolve parágrafo; fica só a primeira linha.
         gancho = texto_gerado.strip().split("\n")[0].strip().strip('"')
@@ -6671,11 +6653,10 @@ def agendar_proximo_garimpo(primeiro=False):
         cfg["proximo_garimpo"] = alvo.strftime("%Y-%m-%d %H:%M:%S")
         salvar_achadinhos_config(cfg)
 
-        if EXIBIR_LOGS:
-            logger.info(f"🎲 [Achadinhos] Perfil '{perfil}': próximo garimpo em "
-                        f"{alvo.strftime('%d/%m às %H:%M:%S')} (daqui a {minutos} min).")
+        logger.info(f"🎲 [Achadinhos] Perfil '{perfil}': próximo garimpo em "
+                    f"{alvo.strftime('%d/%m às %H:%M:%S')} (daqui a {minutos} min).")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Falha ao reagendar o garimpo: {e}")
+        logger.error(f"❌ [Achadinhos] Falha ao reagendar o garimpo: {e}")
         # Rede de segurança: sem reagendar aqui, um erro mataria o motor até o próximo restart.
         try:
             resgate = datetime.now(fuso_horario) + timedelta(minutes=random.randint(45, 120))
@@ -6693,7 +6674,7 @@ async def ciclo_garimpo_automatico():
     try:
         await processar_garimpo_automatico()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Ciclo falhou: {e}")
+        logger.error(f"❌ [Achadinhos] Ciclo falhou: {e}")
     finally:
         agendar_proximo_garimpo()
 
@@ -6713,27 +6694,25 @@ async def processar_garimpo_automatico(forcado=False):
 
     agora = datetime.now(fuso_horario)
     if not forcado and not (hora_inicio <= agora.hour < hora_fim):
-        if EXIBIR_LOGS:
-            logger.info(f"🌙 [Achadinhos] Fora da janela ({hora_inicio}h–{hora_fim}h). "
-                        f"Agora são {agora.strftime('%H:%M')}. Garimpo adiado.")
+        logger.info(f"🌙 [Achadinhos] Fora da janela ({hora_inicio}h–{hora_fim}h). "
+                    f"Agora são {agora.strftime('%H:%M')}. Garimpo adiado.")
         return
 
-    if EXIBIR_LOGS: logger.info("🕵️‍♂️ [Achadinhos] Iniciando operação de garimpo...")
+    logger.info("🕵️‍♂️ [Achadinhos] Iniciando operação de garimpo...")
     config = ler_achadinhos_config()
     nichos = config.get("nichos", [])
     
     if not nichos:
-        if EXIBIR_LOGS: logger.warning("⚠️ [Achadinhos] O radar está vazio. Adicione nichos ao arquivo achadinhos_config.json.")
+        logger.warning("⚠️ [Achadinhos] O radar está vazio. Adicione nichos ao arquivo achadinhos_config.json.")
         return
 
     # Sorteio com peso: dá para repetir o mesmo nicho duas vezes seguidas, como faz
     # quem acha duas ofertas boas da mesma categoria.
     nichos_da_vez = sortear_nichos_organico(nichos, config)
 
-    if EXIBIR_LOGS:
-        nomes = ", ".join(n.get("nome", "?") for n in nichos_da_vez)
-        logger.info(f"🎲 [Achadinhos] Sorteio: {len(nichos_da_vez)} de {len(nichos)} nicho(s) → {nomes}")
-        logger.info(f"🧠 [Achadinhos] Memória permanente com {total_achadinhos_enviados()} produtos já publicados.")
+    nomes = ", ".join(n.get("nome", "?") for n in nichos_da_vez)
+    logger.info(f"🎲 [Achadinhos] Sorteio: {len(nichos_da_vez)} de {len(nichos)} nicho(s) → {nomes}")
+    logger.info(f"🧠 [Achadinhos] Memória permanente com {total_achadinhos_enviados()} produtos já publicados.")
 
     for nicho in nichos_da_vez:
         nome_nicho = nicho.get("nome")
@@ -6745,7 +6724,7 @@ async def processar_garimpo_automatico(forcado=False):
             continue
             
         keyword_sorteada = random.choice(keywords)
-        if EXIBIR_LOGS: logger.info(f"🔎 [Achadinhos] Rastreando o setor '{nome_nicho}' buscando por: '{keyword_sorteada}'.")
+        logger.info(f"🔎 [Achadinhos] Rastreando o setor '{nome_nicho}' buscando por: '{keyword_sorteada}'.")
         
         # 40 produtos por busca, para ter amostra
         ofertas = await buscar_ofertas_shopee(keyword_sorteada, limite=40)
@@ -6764,7 +6743,7 @@ async def processar_garimpo_automatico(forcado=False):
                 break
                 
         if not item_escolhido:
-            if EXIBIR_LOGS: logger.info(f"⏭️ [Achadinhos] Nenhum produto inédito com desconto matador (>= 15%) encontrado para '{keyword_sorteada}'. Poupando a vitrine.")
+            logger.info(f"⏭️ [Achadinhos] Nenhum produto inédito com desconto matador (>= 15%) encontrado para '{keyword_sorteada}'. Poupando a vitrine.")
             continue
             
         item_id = str(item_escolhido.get("itemId"))
@@ -6780,7 +6759,7 @@ async def processar_garimpo_automatico(forcado=False):
         link_original = item_escolhido.get("productLink")
         
         gancho = await gerar_copy_achadinho_ia(nome, preco, desconto, nota_loja)
-        link_curto = await converter_link_shopee(link_original, nome_nicho, EXIBIR_LOGS)
+        link_curto = await converter_link_shopee(link_original, nome_nicho)
         legenda_final = montar_legenda_achadinho(nome, preco, taxa_desconto, nota_loja, link_curto, gancho)
         
         try:
@@ -6812,10 +6791,10 @@ async def processar_garimpo_automatico(forcado=False):
                     await espelhar_no_feed_central(msg_original, legenda_final, destino, thread_param)
                 
                 os.remove(temp_img)
-                if EXIBIR_LOGS: logger.info(f"✅ [Achadinhos] Operação concluída. Oferta fresca entregue ao canal {destino}!")
+                logger.info(f"✅ [Achadinhos] Operação concluída. Oferta fresca entregue ao canal {destino}!")
                 
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Falha estrutural ao tratar mídia física do produto: {e}")
+            logger.error(f"❌ [Achadinhos] Falha estrutural ao tratar mídia física do produto: {e}")
             
         # Espaço entre uma oferta e a seguinte no mesmo ciclo: intervalo fixo é assinatura
         # de script. Às vezes emendam, às vezes há uma pausa de minutos.
@@ -6823,7 +6802,7 @@ async def processar_garimpo_automatico(forcado=False):
             tempo_espera = random.randint(25, 90)  # emendou as duas
         else:
             tempo_espera = random.randint(150, 600)  # deu uma sumida no meio
-        if EXIBIR_LOGS: logger.info(f"⏳ Diluição de Tráfego: Aguardando {tempo_espera}s antes de processar o próximo nicho...")
+        logger.info(f"⏳ Diluição de Tráfego: Aguardando {tempo_espera}s antes de processar o próximo nicho...")
         await asyncio.sleep(tempo_espera)
 
 # ----------------------------------
@@ -6845,14 +6824,14 @@ async def comando_start(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     await state.update_data(painel_atual="raiz")
-    if EXIBIR_LOGS: logger.info("⌨️ Iniciando o bot no Menu Raiz.")
+    logger.info("⌨️ Iniciando o bot no Menu Raiz.")
     await message.answer("🏠 Painel de Controle Inicial. Escolha uma área para gerenciar:", reply_markup=obter_teclado_raiz())
 
 @dp.message(F.text == "Opções do Servidor ⚙️", StateFilter("*"))
 async def menu_opcoes_servidor_handler(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    if EXIBIR_LOGS: logger.info("⚙️ Acessando o painel de Opções do Servidor.")
+    logger.info("⚙️ Acessando o painel de Opções do Servidor.")
     await message.answer("⚙️ <b>Opções do Servidor</b>\nEscolha uma ferramenta de manutenção global:", reply_markup=obter_teclado_opcoes_servidor(), parse_mode="HTML")
 
 @dp.message(F.text == "Monitorar Servidor 🖥️", StateFilter("*"))
@@ -6860,7 +6839,7 @@ async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
     """Uso de disco e RAM do servidor (df e free), com status e uma tabela resumida."""
     if message.from_user.id != ADMIN_ID: return
     
-    if EXIBIR_LOGS: logger.info("🖥️ Iniciando auditoria assíncrona de saúde do servidor (Disco e Memória)...")
+    logger.info("🖥️ Iniciando auditoria assíncrona de saúde do servidor (Disco e Memória)...")
     msg_status = await message.answer("🖥️ Lendo sensores da máquina Oracle... ⏳")
     
     try:
@@ -6954,11 +6933,11 @@ async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
             f"{observacao}"
         )
         
-        if EXIBIR_LOGS: logger.info(f"✅ Auditoria concluída em background. Disco: {pct_disco}% | RAM: {pct_ram}%")
+        logger.info(f"✅ Auditoria concluída em background. Disco: {pct_disco}% | RAM: {pct_ram}%")
         await msg_status.edit_text(texto, parse_mode="HTML")
         
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Falha ao tentar coletar métricas no terminal do Linux: {e}")
+        logger.error(f"❌ Falha ao tentar coletar métricas no terminal do Linux: {e}")
         await msg_status.edit_text(f"❌ <b>Erro interno ao ler sensores:</b>\n<code>{e}</code>", parse_mode="HTML")
 
 # Nomes para o painel; serviço fora daqui aparece com o nome técnico.
@@ -6979,11 +6958,11 @@ def listar_servicos_do_projeto():
     try:
         nomes = sorted(f[:-len(".service")] for f in os.listdir(pasta) if f.endswith(".service"))
     except OSError as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Não consegui ler {pasta}: {e}")
+        logger.error(f"❌ Não consegui ler {pasta}: {e}")
         nomes = []
     if not nomes:
         # Sem a pasta, ao menos o próprio painel é reiniciado.
-        if EXIBIR_LOGS: logger.warning("⚠️ Nenhum .service encontrado. Usando só o bot_mestre_bot.")
+        logger.warning("⚠️ Nenhum .service encontrado. Usando só o bot_mestre_bot.")
         return ["bot_mestre_bot"]
     return nomes
 
@@ -6991,7 +6970,7 @@ def listar_servicos_do_projeto():
 async def confirmar_reiniciar_robos(message: types.Message, state: FSMContext):
     """Lista os serviços que serão reiniciados e pede confirmação."""
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("⚠️ Solicitando confirmação para reiniciar os serviços do servidor.")
+    logger.info("⚠️ Solicitando confirmação para reiniciar os serviços do servidor.")
     
     teclado_confirmacao = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="Aprovar Reinício ✅"), KeyboardButton(text="Cancelar ❌")]],
@@ -7017,7 +6996,7 @@ async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
     """Reinicia os outros serviços e, por último, o próprio bot (systemctl, via sudo)."""
     if message.text == "Cancelar ❌":
         await state.clear()
-        if EXIBIR_LOGS: logger.info("❌ Reinício global cancelado pelo administrador.")
+        logger.info("❌ Reinício global cancelado pelo administrador.")
         await message.answer(
             "❌ <b>Reinício cancelado.</b>\n<i>Nenhum robô foi tocado.</i>",
             parse_mode="HTML", reply_markup=obter_teclado_opcoes_servidor()
@@ -7033,7 +7012,7 @@ async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
     # Status sem teclado; o teclado volta na mensagem final.
     msg_status = await message.answer("🔄 <b>Reiniciando os serviços no servidor Linux...</b>\n<i>Aguarde...</i>", parse_mode="HTML")
     
-    if EXIBIR_LOGS: logger.info("🔄 Comando de reinício global acionado pelo administrador.")
+    logger.info("🔄 Comando de reinício global acionado pelo administrador.")
     
     # A lista vem dos .service da pasta versionada.
     servicos = listar_servicos_do_projeto()
@@ -7043,9 +7022,9 @@ async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
     for servico in servicos_background:
         try:
             subprocess.Popen(["sudo", "systemctl", "restart", f"{servico}.service"])
-            if EXIBIR_LOGS: logger.info(f"✅ Disparado reinício para: {servico}")
+            logger.info(f"✅ Disparado reinício para: {servico}")
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro ao reiniciar {servico}: {e}")
+            logger.error(f"❌ Erro ao reiniciar {servico}: {e}")
             
     await asyncio.sleep(2)
 
@@ -7059,7 +7038,7 @@ async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
     
     # 3. Ele mesmo por último: o processo morre aqui.
     try:
-        if EXIBIR_LOGS: logger.info("🔄 Reiniciando o próprio serviço (bot_mestre_bot.service). O script será interrompido agora!")
+        logger.info("🔄 Reiniciando o próprio serviço (bot_mestre_bot.service). O script será interrompido agora!")
         subprocess.Popen(["sudo", "systemctl", "restart", "bot_mestre_bot.service"])
     except Exception:
         pass
@@ -7068,7 +7047,7 @@ async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
 async def menu_canal_principal(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    if EXIBIR_LOGS: logger.info("📂 Acessando a pasta do Canal Afiliados.")
+    logger.info("📂 Acessando a pasta do Canal Afiliados.")
     await message.answer("📺 <b>Menu do Canal Afiliados</b>\nGerencie as postagens e rotinas abaixo:", reply_markup=obter_teclado_principal(), parse_mode="HTML")
 
 # Pedidos e comissões da Shopee (relatório financeiro)
@@ -7085,7 +7064,7 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
     em fatias de 30 (o limite da API é 31). None sem as chaves no .env.
     """
     if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
-        if EXIBIR_LOGS: logger.warning("⏳ [API Shopee] Chaves financeiras ausentes no .env.")
+        logger.warning("⏳ [API Shopee] Chaves financeiras ausentes no .env.")
         return None
         
     from datetime import timedelta
@@ -7146,16 +7125,16 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
                         erros_shopee = dados.get("errors")
                         if erros_shopee:
                             mensagem_erro = erros_shopee[0].get("message", "Erro Desconhecido")
-                            if EXIBIR_LOGS: logger.error(f"❌ A Shopee recusou a fatia {i} a {i+dias_para_puxar} dias: {mensagem_erro}")
+                            logger.error(f"❌ A Shopee recusou a fatia {i} a {i+dias_para_puxar} dias: {mensagem_erro}")
                         else:
                             nodes = dados.get("data", {}).get("conversionReport", {}).get("nodes", [])
                             if nodes:
                                 conversoes_totais.extend(nodes)
-                                if EXIBIR_LOGS: logger.info(f"✅ Fatiamento financeiro ({i} a {i+dias_para_puxar} dias atrás): {len(nodes)} pedidos extraídos.")
+                                logger.info(f"✅ Fatiamento financeiro ({i} a {i+dias_para_puxar} dias atrás): {len(nodes)} pedidos extraídos.")
                     else:
-                        if EXIBIR_LOGS: logger.error(f"❌ Erro de Conexão HTTP {response.status}: {dados_crus}")
+                        logger.error(f"❌ Erro de Conexão HTTP {response.status}: {dados_crus}")
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro crítico no motor financeiro: {e}")
+            logger.error(f"❌ Erro crítico no motor financeiro: {e}")
             
         await asyncio.sleep(1)  # pausa entre as fatias
         
@@ -7212,7 +7191,7 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
                     if not ignorar_ledger:
                         if not estava_confirmado and fica_confirmado:
                             saldo_caixa += c_total_frac
-                            if EXIBIR_LOGS: logger.info(f"💰 Transição detectada! Pedido confirmado: + R${c_total_frac:.2f}")
+                            logger.info(f"💰 Transição detectada! Pedido confirmado: + R${c_total_frac:.2f}")
                         elif estava_confirmado and not fica_confirmado:
                             saldo_caixa -= comissao_anterior  # estorno
                         elif estava_confirmado and c_total_frac > 0 and c_total_frac != comissao_anterior:
@@ -7241,7 +7220,7 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
                     # Já veio confirmado: entra no saldo.
                     if not ignorar_ledger and novo_status == "COMPLETED":
                         saldo_caixa += c_total_frac
-                        if EXIBIR_LOGS: logger.info(f"💰 Novo pedido já nasceu confirmado! + R${c_total_frac:.2f}")
+                        logger.info(f"💰 Novo pedido já nasceu confirmado! + R${c_total_frac:.2f}")
                     
     if houve_atualizacao:
         salvar_banco_pedidos(pedidos_db)
@@ -7285,7 +7264,7 @@ def obter_teclado_relatorios():
 async def relatorio_filas_parceiros(message: types.Message, state: FSMContext):
     """Resumo das filas dos parceiros: vídeos, disco, cota e a prévia do fechamento do dia."""
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("📋 Gerando relatório das filas dos parceiros...")
+    logger.info("📋 Gerando relatório das filas dos parceiros...")
 
     parceiros = ler_parceiros()
     if not parceiros:
@@ -7482,17 +7461,17 @@ def obter_teclado_relatorios_filas():
 @dp.message(F.text == "Relatórios de Filas 📋", StateFilter("*"))
 async def menu_relatorios_filas(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🚀 Acessando o submenu de Relatórios de Filas...")
+    logger.info("🚀 Acessando o submenu de Relatórios de Filas...")
     
     await state.clear()
     await message.answer("📋 <b>Central de Filas</b>\nEscolha qual fila ou radar deseja analisar:", reply_markup=obter_teclado_relatorios_filas(), parse_mode="HTML")
     await state.set_state(RelatoriosFluxo.menu_filas)
-    if EXIBIR_LOGS: logger.info("✅ Menu de Relatórios de Filas exibido com sucesso!")
+    logger.info("✅ Menu de Relatórios de Filas exibido com sucesso!")
 
 @dp.message(F.text == "Voltar aos Relatórios 🔙", StateFilter("*"))
 async def voltar_relatorios_geral(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu principal de relatórios...")
+    logger.info("🔙 Retornando ao menu principal de relatórios...")
     await state.clear()
     await menu_relatorio_geral(message, state)
 
@@ -7503,7 +7482,7 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
     e destino.
     """
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("📬 Compilando o relatório da Fila do Grupo Público...")
+    logger.info("📬 Compilando o relatório da Fila do Grupo Público...")
 
     config = ler_submissao_config()
     dias_atraso = config.get("repost_dias", 15)
@@ -7539,7 +7518,7 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
         linhas = cursor.fetchall()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler a fila do Grupo Público: {e}")
+        logger.error(f"❌ Erro ao ler a fila do Grupo Público: {e}")
         await message.answer(f"❌ Erro interno ao ler o banco de dados: {e}")
         return
 
@@ -7629,7 +7608,7 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
     for msg in mensagens_para_enviar:
         await message.answer(msg, parse_mode="HTML", disable_web_page_preview=True)
 
-    if EXIBIR_LOGS: logger.info(f"✅ Relatório da Fila do Grupo Público entregue ({len(itens)} itens).")
+    logger.info(f"✅ Relatório da Fila do Grupo Público entregue ({len(itens)} itens).")
 
 @dp.message(RelatoriosFluxo.menu_filas, F.text.in_(["Fila do Espelhador 🔄", "Fila do Espião 🕵️", "Fila de Autorais 🎥"]))
 @dp.message(RelatoriosFluxo.aguardando_rota_espelhador)
@@ -7647,14 +7626,14 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     # 1. Escolha de rota do Espelhador (quando há mais de uma)
     if estado_atual == RelatoriosFluxo.aguardando_rota_espelhador:
         if message.text == "Voltar aos Relatórios 🔙":
-            if EXIBIR_LOGS: logger.info("🔙 Cancelando seleção de rota e retornando.")
+            logger.info("🔙 Cancelando seleção de rota e retornando.")
             await state.clear()
             await menu_relatorios_filas(message, state)
             return
             
         tipo_fila = "Espelhador"
         rota_selecionada = message.text
-        if EXIBIR_LOGS: logger.info(f"📊 Rota específica selecionada para exibição: {rota_selecionada}")
+        logger.info(f"📊 Rota específica selecionada para exibição: {rota_selecionada}")
     else:
         if "Espelhador" in message.text:
             tipo_fila = "Espelhador"
@@ -7670,7 +7649,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             rotas = dados_rotas.get("rotas", [])
             
             if len(rotas) > 1:
-                if EXIBIR_LOGS: logger.info("🔄 Múltiplas rotas detectadas no Espelhador. Exibindo menu de seleção...")
+                logger.info("🔄 Múltiplas rotas detectadas no Espelhador. Exibindo menu de seleção...")
                 botoes = []
                 
                 botoes.append([KeyboardButton(text="Todos os Espelhos 🌐")])
@@ -7685,7 +7664,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 await state.set_state(RelatoriosFluxo.aguardando_rota_espelhador)
                 return
 
-    if EXIBIR_LOGS: logger.info(f"📊 Iniciando compilação do relatório unificado (Sem limites) para a fila do {tipo_fila}...")
+    logger.info(f"📊 Iniciando compilação do relatório unificado (Sem limites) para a fila do {tipo_fila}...")
     
     if tipo_fila == "Espião":
         fila_data = ler_fila_clonagem()
@@ -7723,7 +7702,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 })
         except Exception as e:
             fila = []
-            if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila_autorais: {e}")
+            logger.error(f"❌ Erro ao ler fila_autorais: {e}")
     else:
         try:
             with open("fila_espelhador.json", "r", encoding="utf-8") as f:
@@ -7747,11 +7726,11 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         atraso_dias = config_aut.get("dias_retorno", 15)
     elif tipo_fila == "Espião":
         try:
-            if EXIBIR_LOGS: logger.info("🔍 Extraindo configurações de destino do Espião via banco SQLite...")
+            logger.info("🔍 Extraindo configurações de destino do Espião via banco SQLite...")
             dados_espiao = ler_alvos_espiao()
             atraso_dias = dados_espiao.get("intervalo_dias", 1)
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro ao resgatar configurações do Espião: {e}")
+            logger.error(f"❌ Erro ao resgatar configurações do Espião: {e}")
         
     # Pente fino: tira da fila o que já não vai sair e mantém na tela o que saiu hoje.
     pendentes = []
@@ -7768,7 +7747,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         for item in fila:
             if item.get("processado") in [True, 1, "true", "True"]:
                 if str(item.get("data_postagem")) == hoje_str:
-                    if EXIBIR_LOGS: logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo postado hoje ({item.get('id')}) no visual da fila.")
+                    logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo postado hoje ({item.get('id')}) no visual da fila.")
                     fila_limpa.append(item)
                 else:
                     houve_alteracao = True
@@ -7782,7 +7761,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     
                     # Clone preso como "atrasado" além do prazo: sai da fila e do disco.
                     if horas_na_fila > limite_horas:
-                        if EXIBIR_LOGS: logger.info(f"🧹 Pente Fino (Relatório): Removendo clone expirado ({horas_na_fila:.1f}h).")
+                        logger.info(f"🧹 Pente Fino (Relatório): Removendo clone expirado ({horas_na_fila:.1f}h).")
                         houve_alteracao = True
                         caminho_video = item.get("caminho_video")
                         if caminho_video and os.path.exists(caminho_video):
@@ -7815,7 +7794,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     
                     # Publicado hoje: fica na tela.
                     if horario_disp and horario_disp.startswith(hoje_str):
-                        if EXIBIR_LOGS: logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo autoral postado hoje ({item.get('id')}) no visual da fila.")
+                        logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo autoral postado hoje ({item.get('id')}) no visual da fila.")
                         fila_limpa.append(item)
                     else:
                         # Publicado em outro dia: sai do banco, para não acumular.
@@ -7829,7 +7808,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 conexao.commit()
             conexao.close()
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro no pente fino da fila_autorais: {e}")
+            logger.error(f"❌ Erro no pente fino da fila_autorais: {e}")
             
         pendentes = fila_limpa
         
@@ -7863,7 +7842,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
 
             # Rota excluída: o vídeo órfão sai da fila e do disco.
             if not rota_encontrada:
-                if EXIBIR_LOGS: logger.info(f"🧹 Pente Fino: Removendo vídeo órfão de uma rota excluída (Rota antiga: {nome_antigo}).")
+                logger.info(f"🧹 Pente Fino: Removendo vídeo órfão de uma rota excluída (Rota antiga: {nome_antigo}).")
                 houve_alteracao = True
                 caminho_video = item.get("caminho_video")
                 if caminho_video and os.path.exists(caminho_video):
@@ -7874,7 +7853,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             # Publicado hoje: fica na tela.
             if item.get("processado", False):
                 if item.get("data_postagem") == hoje_str:
-                    if EXIBIR_LOGS: logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo postado hoje ({item.get('id', 'SemID')}) no visual da fila do Espelhador.")
+                    logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo postado hoje ({item.get('id', 'SemID')}) no visual da fila do Espelhador.")
                     fila_limpa.append(item)
                 else:
                     houve_alteracao = True
@@ -7889,7 +7868,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     limite_horas = (atraso_dias_rota * 24) + 24
                     
                     if horas_na_fila > limite_horas:
-                        if EXIBIR_LOGS: logger.info(f"🧹 Pente Fino (Relatório): Removendo clone do Espelhador expirado ({horas_na_fila:.1f}h). Rota: {item.get('nome_rota')}")
+                        logger.info(f"🧹 Pente Fino (Relatório): Removendo clone do Espelhador expirado ({horas_na_fila:.1f}h). Rota: {item.get('nome_rota')}")
                         houve_alteracao = True
                         caminho_video = item.get("caminho_video")
                         if caminho_video and os.path.exists(caminho_video):
@@ -7906,9 +7885,9 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             fila_data["fila"] = fila_limpa
             try:
                 salvar_json_atomico("fila_espelhador.json", fila_data, indent=4)
-                if EXIBIR_LOGS: logger.info("✅ Auto-correção: Nomes das rotas sincronizados e lixo antigo limpo.")
+                logger.info("✅ Auto-correção: Nomes das rotas sincronizados e lixo antigo limpo.")
             except Exception as e:
-                if EXIBIR_LOGS: logger.error(f"❌ Erro ao limpar fila espelhador: {e}")
+                logger.error(f"❌ Erro ao limpar fila espelhador: {e}")
             
         pendentes = fila_limpa
         
@@ -7918,7 +7897,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     
     if not pendentes:
         await message.answer(f"📭 A fila do {tipo_fila} está vazia no momento.", parse_mode="HTML")
-        if EXIBIR_LOGS: logger.info(f"✅ Relatório do {tipo_fila} gerado (Fila vazia).")
+        logger.info(f"✅ Relatório do {tipo_fila} gerado (Fila vazia).")
         return
         
     cache_nomes = ler_cache_nomes_grupos()
@@ -8263,7 +8242,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     for msg in mensagens_para_enviar:
         await message.answer(msg, parse_mode="HTML", disable_web_page_preview=True)
         
-    if EXIBIR_LOGS: logger.info(f"✅ Relatório unificado do {tipo_fila} entregue com sucesso!")
+    logger.info(f"✅ Relatório unificado do {tipo_fila} entregue com sucesso!")
 
 @dp.message(Command("nomeargrupo"), StateFilter("*"))
 async def nomear_grupo_manual(message: types.Message, state: FSMContext):
@@ -8327,7 +8306,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     """
     if message.from_user.id != ADMIN_ID: return
     msg_status = await message.answer("💰 Sincronizando API Financeira com a Shopee e processando relatório... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("🚀 Acionando extração de dados e recálculo dinâmico pelo Rastreio Individual...")
+    logger.info("🚀 Acionando extração de dados e recálculo dinâmico pelo Rastreio Individual...")
     
     conversoes = await buscar_dados_financeiros_shopee(30)
     historico_limpo = processar_e_salvar_pedidos_api(conversoes)
@@ -8555,7 +8534,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     await message.answer(texto, parse_mode="HTML")
         
     try:
-        if EXIBIR_LOGS: logger.info("📈 Desenhando gráfico visual estático de 12 meses...")
+        logger.info("📈 Desenhando gráfico visual estático de 12 meses...")
         
         ano_atual_str = str(hoje.year)
         meses_ano_atual = [f"{ano_atual_str}-{str(m).zfill(2)}" for m in range(1, 13)]
@@ -8590,7 +8569,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             else:
                 valores_estimativa.append(float('nan'))
 
-        if EXIBIR_LOGS: logger.info("📈 Estruturando gráfico...")
+        logger.info("📈 Estruturando gráfico...")
         fig, ax1 = plt.subplots(figsize=(8, 5), facecolor='#f4f4f9')
         ax1.set_facecolor('#f4f4f9')
         
@@ -8660,17 +8639,17 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         buf.seek(0)
         plt.close()
         
-        if EXIBIR_LOGS: logger.info("✅ Imagem do gráfico enviada para o Telegram.")
+        logger.info("✅ Imagem do gráfico enviada para o Telegram.")
         await message.answer_photo(photo=types.BufferedInputFile(buf.getvalue(), filename="grafico.png"))
         
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Falha ao processar e enviar a imagem do gráfico: {e}")
+        logger.error(f"❌ Falha ao processar e enviar a imagem do gráfico: {e}")
 
 @dp.message(F.text == "Diagnóstico de IA 🧠", StateFilter("*"))
 async def gerar_relatorio_ia(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     msg_status = await message.answer("🧠 Iniciando teste de diagnóstico dos motores Gemini... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("🧠 Iniciando teste visual e sequencial da Cascata Gemini...")
+    logger.info("🧠 Iniciando teste visual e sequencial da Cascata Gemini...")
     
     texto_modelos = "🧠 <b>STATUS DA CASCATA DE IA (GEMINI)</b>\n\n"
     
@@ -8707,7 +8686,7 @@ async def gerar_relatorio_logs(message: types.Message, state: FSMContext):
     """Os últimos erros registrados (erros_logs), com o botão para limpar."""
     if message.from_user.id != ADMIN_ID: return
     msg_status = await message.answer("⚠️ A extrair o histórico de falhas do banco de dados... Aguarde ⏳")
-    if EXIBIR_LOGS: logger.info("🚀 A iniciar a auditoria da tabela erros_logs...")
+    logger.info("🚀 A iniciar a auditoria da tabela erros_logs...")
     
     try:
         conexao = db.conectar()
@@ -8723,11 +8702,11 @@ async def gerar_relatorio_logs(message: types.Message, state: FSMContext):
         conexao.close()
         
         if total_erros == 0:
-            if EXIBIR_LOGS: logger.info("✅ A tabela de logs está vazia. Sistema limpo.")
+            logger.info("✅ A tabela de logs está vazia. Sistema limpo.")
             await msg_status.edit_text("✅ <b>Sistema Limpo!</b>\nNão existe nenhum registo de erros no banco de dados. A automação está a funcionar perfeitamente.", parse_mode="HTML")
             return
             
-        if EXIBIR_LOGS: logger.info(f"📊 Leitura concluída. Foram encontrados {total_erros} registos no total.")
+        logger.info(f"📊 Leitura concluída. Foram encontrados {total_erros} registos no total.")
         
         texto = f"⚠️ <b>Relatório de Erros Recentes</b> (Últimos {len(erros_db)} de {total_erros})\n\n"
         for i, erro in enumerate(erros_db, 1):
@@ -8747,7 +8726,7 @@ async def gerar_relatorio_logs(message: types.Message, state: FSMContext):
         await msg_status.edit_text(texto, parse_mode="HTML", reply_markup=teclado_limpar)
         
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao processar a leitura dos logs no SQLite: {e}")
+        logger.error(f"❌ Falha crítica ao processar a leitura dos logs no SQLite: {e}")
         await msg_status.edit_text(f"❌ <b>Erro interno ao processar os logs:</b>\n<code>{e}</code>", parse_mode="HTML")
 
 from aiogram.types import CallbackQuery
@@ -8760,7 +8739,7 @@ async def limpar_historico_erros(callback: CallbackQuery):
     """
     if callback.from_user.id != ADMIN_ID: return
     
-    if EXIBIR_LOGS: logger.info("🧹 Pedido de exclusão do histórico de erros recebido via botão interativo.")
+    logger.info("🧹 Pedido de exclusão do histórico de erros recebido via botão interativo.")
     
     try:
         conexao = db.conectar()
@@ -8773,10 +8752,10 @@ async def limpar_historico_erros(callback: CallbackQuery):
         with open("trava_manutencao.txt", "w") as f:
             f.write("ativo")
             
-        if EXIBIR_LOGS: logger.info("✅ Tabela erros_logs limpa e trava_manutencao.txt ativada.")
+        logger.info("✅ Tabela erros_logs limpa e trava_manutencao.txt ativada.")
         await callback.message.edit_text("✅ <b>Histórico Limpo e Trava Ativada!</b>\nOs erros antigos foram apagados do banco de dados. O abafador de ruído está ativo enquanto você faz as correções no código.", parse_mode="HTML")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro de permissão/sistema ao tentar limpar a tabela de logs: {e}")
+        logger.error(f"❌ Erro de permissão/sistema ao tentar limpar a tabela de logs: {e}")
         await callback.answer(f"Erro ao apagar: {e}", show_alert=True)
         
     await callback.answer()
@@ -8785,14 +8764,14 @@ async def limpar_historico_erros(callback: CallbackQuery):
 @dp.message(F.text == "Disparar Bom Dia ☀️", StateFilter("*"))
 async def manual_bom_dia(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🚀 Comando recebido: Forçando disparo de Bom Dia.")
+    logger.info("🚀 Comando recebido: Forçando disparo de Bom Dia.")
     dados_rotina = ler_config_rotina()
     if dados_rotina.get("pausado", False):
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema em pausa.")
+        logger.warning("🛑 Disparo bloqueado: Sistema em pausa.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Principal estão <b>PAUSADAS</b>.", parse_mode="HTML")
     hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
     if dados_rotina.get("ultimo_bom_dia") == hoje_str:
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Bom Dia já enviado hoje.")
+        logger.warning("🛑 Disparo bloqueado: Bom Dia já enviado hoje.")
         return await message.answer("⚠️ <b>Bloqueio Anti-Acidente:</b> O 'Bom Dia' de hoje já foi enviado. Ação cancelada.", parse_mode="HTML")
     await message.answer("Gerando e enviando mensagem de Bom Dia... ⏳")
     await disparar_mensagem("bom_dia", forcar=True)
@@ -8801,14 +8780,14 @@ async def manual_bom_dia(message: types.Message):
 @dp.message(F.text == "Disparar Boa Noite 🌙", StateFilter("*"))
 async def manual_boa_noite(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🚀 Comando recebido: Forçando disparo de Boa Noite.")
+    logger.info("🚀 Comando recebido: Forçando disparo de Boa Noite.")
     dados_rotina = ler_config_rotina()
     if dados_rotina.get("pausado", False):
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema em pausa.")
+        logger.warning("🛑 Disparo bloqueado: Sistema em pausa.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Principal estão <b>PAUSADAS</b>.", parse_mode="HTML")
     hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
     if dados_rotina.get("ultimo_boa_noite") == hoje_str:
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Boa Noite já enviado hoje.")
+        logger.warning("🛑 Disparo bloqueado: Boa Noite já enviado hoje.")
         return await message.answer("⚠️ <b>Bloqueio Anti-Acidente:</b> O 'Boa Noite' de hoje já foi enviado. Ação cancelada.", parse_mode="HTML")
     await message.answer("Gerando e enviando mensagem de Boa Noite... ⏳")
     await disparar_mensagem("boa_noite", forcar=True)
@@ -8817,14 +8796,14 @@ async def manual_boa_noite(message: types.Message):
 @dp.message(F.text == "Disparar Incentivo 🔥", StateFilter("*"))
 async def manual_incentivo(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🚀 Comando recebido: Forçando disparo de Incentivo.")
+    logger.info("🚀 Comando recebido: Forçando disparo de Incentivo.")
     dados_rotina = ler_config_rotina()
     if dados_rotina.get("pausado", False):
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema em pausa.")
+        logger.warning("🛑 Disparo bloqueado: Sistema em pausa.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Principal estão <b>PAUSADAS</b>.", parse_mode="HTML")
     hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
     if dados_rotina.get("ultimo_bom_dia") != hoje_str or dados_rotina.get("ultimo_boa_noite") == hoje_str:
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Fora do expediente permitido.")
+        logger.warning("🛑 Disparo bloqueado: Fora do expediente permitido.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> Dispare esta mensagem apenas durante o expediente.", parse_mode="HTML")
     await message.answer("Gerando e enviando mensagem de Incentivo... ⏳")
     await disparar_mensagem("incentivo", forcar=True)
@@ -8833,14 +8812,14 @@ async def manual_incentivo(message: types.Message):
 @dp.message(F.text == "Disparar Convite do Grupo 🔗", StateFilter("*"))
 async def manual_link_grupo(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🚀 Comando recebido: Forçando disparo de Convite do Grupo.")
+    logger.info("🚀 Comando recebido: Forçando disparo de Convite do Grupo.")
     dados_rotina = ler_config_rotina()
     if dados_rotina.get("pausado", False):
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema em pausa.")
+        logger.warning("🛑 Disparo bloqueado: Sistema em pausa.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Principal estão <b>PAUSADAS</b>.", parse_mode="HTML")
     hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
     if dados_rotina.get("ultimo_bom_dia") != hoje_str or dados_rotina.get("ultimo_boa_noite") == hoje_str:
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Fora do expediente permitido.")
+        logger.warning("🛑 Disparo bloqueado: Fora do expediente permitido.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> Dispare esta mensagem apenas durante o expediente.", parse_mode="HTML")
     await message.answer("Gerando e enviando divulgação do grupo... ⏳")
     await disparar_mensagem("link_grupo", forcar=True)
@@ -8850,14 +8829,14 @@ async def manual_link_grupo(message: types.Message):
 @dp.message(F.text == "Disparar Convite Viral 🚀", StateFilter("*"))
 async def manual_promo_viral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🚀 Comando recebido: Forçando disparo de Promo Viral.")
+    logger.info("🚀 Comando recebido: Forçando disparo de Promo Viral.")
     dados_rotina = ler_config_rotina()
     if dados_rotina.get("pausado", False):
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema em pausa.")
+        logger.warning("🛑 Disparo bloqueado: Sistema em pausa.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Principal estão <b>PAUSADAS</b>.", parse_mode="HTML")
     hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
     if dados_rotina.get("ultimo_bom_dia") != hoje_str or dados_rotina.get("ultimo_boa_noite") == hoje_str:
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Fora do expediente permitido.")
+        logger.warning("🛑 Disparo bloqueado: Fora do expediente permitido.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> Dispare esta mensagem apenas durante o expediente.", parse_mode="HTML")
     await message.answer("Gerando e enviando divulgação do canal parceiro... ⏳")
     await disparar_mensagem("promo_viral", forcar=True)
@@ -8866,10 +8845,10 @@ async def manual_promo_viral(message: types.Message):
 @dp.message(F.text == "Disparar Convite Afiliados 🚀", StateFilter("*"))
 async def manual_promo_afiliados(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🚀 Comando recebido: Forçando disparo de Convite Afiliados.")
+    logger.info("🚀 Comando recebido: Forçando disparo de Convite Afiliados.")
     dados_rotina = ler_config_rotina()
     if dados_rotina.get("pausado_viral", False):
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Viral em pausa.")
+        logger.warning("🛑 Disparo bloqueado: Sistema Viral em pausa.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Viral estão <b>PAUSADAS</b>.", parse_mode="HTML")
     await message.answer("Gerando e enviando divulgação do canal de afiliados... ⏳")
     await disparar_mensagem("promo_principal", forcar=True)
@@ -8878,10 +8857,10 @@ async def manual_promo_afiliados(message: types.Message):
 @dp.message(F.text == "Disparar Convite do Grupo 🔗\u200b", StateFilter("*"))
 async def manual_convite_viral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🚀 Comando recebido: Forçando disparo de Convite do Grupo (Viral).")
+    logger.info("🚀 Comando recebido: Forçando disparo de Convite do Grupo (Viral).")
     dados_rotina = ler_config_rotina()
     if dados_rotina.get("pausado_viral", False):
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Viral em pausa.")
+        logger.warning("🛑 Disparo bloqueado: Sistema Viral em pausa.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Viral estão <b>PAUSADAS</b>.", parse_mode="HTML")
     await message.answer("Gerando e enviando convite do canal viral... ⏳")
     await disparar_mensagem("link_grupo_viral", forcar=True)
@@ -8890,10 +8869,10 @@ async def manual_convite_viral(message: types.Message):
 @dp.message(F.text == "Disparar Prompt GEM 🤖\u200b", StateFilter("*"))
 async def manual_prompt_gem_viral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🚀 Comando recebido: Forçando disparo de Prompt GEM (Viral).")
+    logger.info("🚀 Comando recebido: Forçando disparo de Prompt GEM (Viral).")
     dados_rotina = ler_config_rotina()
     if dados_rotina.get("pausado_viral", False):
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Viral em pausa.")
+        logger.warning("🛑 Disparo bloqueado: Sistema Viral em pausa.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Viral estão <b>PAUSADAS</b>.", parse_mode="HTML")
     await message.answer("Gerando e enviando Prompt GEM para o canal viral... ⏳")
     await disparar_mensagem("divulgar_gem_viral", forcar=True)
@@ -8902,10 +8881,10 @@ async def manual_prompt_gem_viral(message: types.Message):
 @dp.message(F.text == "Disparar Promo Público 👥", StateFilter("*"))
 async def manual_promo_publico_viral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🚀 Comando recebido: Forçando disparo de Promo Público (Viral).")
+    logger.info("🚀 Comando recebido: Forçando disparo de Promo Público (Viral).")
     dados_rotina = ler_config_rotina()
     if dados_rotina.get("pausado_viral", False):
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Viral em pausa.")
+        logger.warning("🛑 Disparo bloqueado: Sistema Viral em pausa.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Viral estão <b>PAUSADAS</b>.", parse_mode="HTML")
     await message.answer("Gerando e enviando divulgação do Grupo Público para o canal viral... ⏳")
     await disparar_mensagem("promo_publico_viral", forcar=True)
@@ -8914,10 +8893,10 @@ async def manual_promo_publico_viral(message: types.Message):
 @dp.message(F.text == "Disparar Achadinhos 🛒", StateFilter("*"))
 async def manual_promo_achadinhos_viral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🛒 Comando recebido: Forçando disparo de Achadinhos (Viral).")
+    logger.info("🛒 Comando recebido: Forçando disparo de Achadinhos (Viral).")
     dados_rotina = ler_config_rotina()
     if dados_rotina.get("pausado_viral", False):
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Viral em pausa.")
+        logger.warning("🛑 Disparo bloqueado: Sistema Viral em pausa.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Viral estão <b>PAUSADAS</b>.", parse_mode="HTML")
     await message.answer("Gerando e enviando divulgação da Central de Achadinhos para o canal viral... ⏳")
     await disparar_mensagem("promo_achadinhos_viral", forcar=True)
@@ -8929,11 +8908,11 @@ async def manual_promo_publico(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
     dados_rotina = ler_config_rotina()
     if dados_rotina.get("pausado", False):
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema em pausa.")
+        logger.warning("🛑 Disparo bloqueado: Sistema em pausa.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Principal estão <b>PAUSADAS</b>.", parse_mode="HTML")
     hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
     if dados_rotina.get("ultimo_bom_dia") != hoje_str or dados_rotina.get("ultimo_boa_noite") == hoje_str:
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Fora do expediente permitido.")
+        logger.warning("🛑 Disparo bloqueado: Fora do expediente permitido.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> Dispare esta mensagem apenas durante o expediente.", parse_mode="HTML")
     await message.answer("Gerando e enviando divulgação do Grupo Público... ⏳")
     await disparar_mensagem("promo_publico", forcar=True)
@@ -8942,14 +8921,14 @@ async def manual_promo_publico(message: types.Message):
 @dp.message(F.text == "Disparar Achadinhos 🛍️", StateFilter("*"))
 async def manual_promo_achadinhos(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🛍️ Comando recebido: Forçando disparo da Promo Achadinhos.")
+    logger.info("🛍️ Comando recebido: Forçando disparo da Promo Achadinhos.")
     dados_rotina = ler_config_rotina()
     if dados_rotina.get("pausado", False):
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema em pausa.")
+        logger.warning("🛑 Disparo bloqueado: Sistema em pausa.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Canal Principal estão <b>PAUSADAS</b>.", parse_mode="HTML")
     hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
     if dados_rotina.get("ultimo_bom_dia") != hoje_str or dados_rotina.get("ultimo_boa_noite") == hoje_str:
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Fora do expediente permitido.")
+        logger.warning("🛑 Disparo bloqueado: Fora do expediente permitido.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> Dispare esta mensagem apenas durante o expediente.", parse_mode="HTML")
     await message.answer("Gerando e enviando divulgação da Central de Achadinhos... ⏳")
     await disparar_mensagem("promo_achadinhos", forcar=True)
@@ -8970,7 +8949,7 @@ async def pedir_confirmacao_disparo_publico(message: types.Message, state: FSMCo
 
     dados_rotina = ler_config_rotina()
     if dados_rotina.get("pausado_publico", False):
-        if EXIBIR_LOGS: logger.warning("🛑 Disparo bloqueado: Sistema Público em pausa.")
+        logger.warning("🛑 Disparo bloqueado: Sistema Público em pausa.")
         return await message.answer("⚠️ <b>Ação Bloqueada:</b> As rotinas do Grupo Público estão <b>PAUSADAS</b>.", parse_mode="HTML")
 
     tipo, nome_amigavel, descricao = MAPA_DISPAROS_PUBLICO[message.text]
@@ -8986,7 +8965,7 @@ async def pedir_confirmacao_disparo_publico(message: types.Message, state: FSMCo
         f"⚠️ Tem certeza de que deseja <b>DISPARAR AGORA</b> a rotina <b>{nome_amigavel}</b>?\n\n"
         f"<i>(A mensagem de {descricao} será gerada pela IA e enviada imediatamente aos tópicos configurados do Grupo Público)</i>"
     )
-    if EXIBIR_LOGS: logger.info(f"🛡️ Disparo manual '{tipo}' interceptado. Aguardando confirmação do administrador...")
+    logger.info(f"🛡️ Disparo manual '{tipo}' interceptado. Aguardando confirmação do administrador...")
     await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(ConfigRotina.aguardando_confirmacao_disparo)
 
@@ -8996,7 +8975,7 @@ async def processar_disparo_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
 
     if message.text == "Cancelar ❌":
-        if EXIBIR_LOGS: logger.info("❌ Disparo manual do Público abortado pelo administrador.")
+        logger.info("❌ Disparo manual do Público abortado pelo administrador.")
         await message.answer("Ação cancelada. Nenhuma mensagem foi enviada.")
         await state.update_data(menu_origem="publico")
         await state.set_state(ConfigRotina.menu_principal)
@@ -9020,7 +8999,7 @@ async def processar_disparo_publico(message: types.Message, state: FSMContext):
 
     await message.answer(f"⏳ Gerando e enviando <b>{nome_amigavel}</b>...", parse_mode="HTML")
     await disparar_mensagem(tipo, forcar=True)
-    if EXIBIR_LOGS: logger.info(f"🚀 Disparo manual confirmado e executado: {tipo}")
+    logger.info(f"🚀 Disparo manual confirmado e executado: {tipo}")
     await message.answer(f"✅ <b>{nome_amigavel}</b> enviada ao Grupo Público com sucesso!", parse_mode="HTML")
 
     await state.update_data(menu_origem="publico")
@@ -9083,7 +9062,7 @@ def extrair_id_topico(entrada, grupo_id_str=""):
 async def pedir_alvos_rotina_publico(message: types.Message, state: FSMContext):
     """Mostra os tópicos atuais das rotinas do Público e pede a nova lista."""
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🎯 Acessando gestão de alvos das rotinas do Grupo Público...")
+    logger.info("🎯 Acessando gestão de alvos das rotinas do Grupo Público...")
 
     config_sub = ler_submissao_config()
     grupo_id_str = str(config_sub.get("grupo_id") or "")
@@ -9139,7 +9118,7 @@ async def cancelar_alvos_rotina_publico(message: types.Message, state: FSMContex
     funciona nos dois casos.
     """
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("❌ Edição dos alvos cancelada. Voltando às Rotinas do Público.")
+    logger.info("❌ Edição dos alvos cancelada. Voltando às Rotinas do Público.")
 
     await state.clear()
     await state.update_data(menu_origem="publico")
@@ -9153,7 +9132,7 @@ async def confirmar_alvos_rotina_publico(message: types.Message, state: FSMConte
     if message.from_user.id != ADMIN_ID: return
 
     if message.text == "Cancelar ❌":
-        if EXIBIR_LOGS: logger.info("❌ Edição dos alvos de postagem cancelada.")
+        logger.info("❌ Edição dos alvos de postagem cancelada.")
         await message.answer("Ação cancelada. Nenhum alvo foi alterado.")
         await gerenciar_rotina_publico(message, state)
         return
@@ -9228,7 +9207,7 @@ async def salvar_alvos_rotina_publico(message: types.Message, state: FSMContext)
     config["topicos_rotina"] = novos_alvos
     salvar_submissao_config(config)
 
-    if EXIBIR_LOGS: logger.info(f"🎯 Alvos das rotinas do Público atualizados para: {novos_alvos or 'Chat Geral'}")
+    logger.info(f"🎯 Alvos das rotinas do Público atualizados para: {novos_alvos or 'Chat Geral'}")
     await message.answer("✅ <b>Alvos de postagem atualizados com sucesso!</b>", parse_mode="HTML")
     await gerenciar_rotina_publico(message, state)
 
@@ -9335,9 +9314,9 @@ async def manual_repost_autoral(message: types.Message):
         conexao.commit()
         
         await msg_status.edit_text("✅ <b>Repost Autoral realizado!</b>\nUm vídeo foi puxado e enviado formatado para o Tópico de Postagem do Grupo Público.", parse_mode="HTML")
-        if EXIBIR_LOGS: logger.info(f"✅ Disparo de repost manual executado com sucesso: {nome_produto}")
+        logger.info(f"✅ Disparo de repost manual executado com sucesso: {nome_produto}")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao dar copy_message no repost manual: {e}")
+        logger.error(f"❌ Erro ao dar copy_message no repost manual: {e}")
         await msg_status.edit_text(f"❌ Erro técnico ao tentar enviar o vídeo: {e}")
         
     conexao.close()
@@ -9351,7 +9330,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     
     estado_atual = await state.get_state()
-    if EXIBIR_LOGS: logger.info(f"❌ Ação cancelada via botão. Estado anterior: {estado_atual}")
+    logger.info(f"❌ Ação cancelada via botão. Estado anterior: {estado_atual}")
 
     data = await state.get_data()
 
@@ -9365,13 +9344,13 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     # Cancelar o recálculo da grade: nada foi alterado.
     if estado_atual == "ConfigFluxo:aguardando_confirmacao_rotinas":
         await state.clear()
-        if EXIBIR_LOGS: logger.info("🔙 Recálculo da grade CANCELADO. Nenhum horário foi alterado.")
+        logger.info("🔙 Recálculo da grade CANCELADO. Nenhum horário foi alterado.")
         await message.answer("❌ Recálculo cancelado. Nenhum horário foi alterado.")
         await menu_configuracoes(message, state)
         return
 
     if estado_atual == "ConfigFluxo:aguardando_acao_limpeza":
-        if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando à seleção de limpeza de filas.")
+        logger.info("🔙 Cancelamento: Voltando à seleção de limpeza de filas.")
         await message.answer("Ação cancelada. Retornando ao menu de limpeza...")
         await menu_zerar_filas_tarefas(message, state)
         return
@@ -9475,7 +9454,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         menu_orig = data.get('menu_origem')
         tipo_edicao = data.get('tipo_edicao')
         await state.clear()
-        if EXIBIR_LOGS: logger.info("🔙 Cancelando configuração de rotina e redirecionando ao menu correto.")
+        logger.info("🔙 Cancelando configuração de rotina e redirecionando ao menu correto.")
         await message.answer("Ação cancelada.")
 
         # Cancelar a edição de uma rotina volta ao submenu "Editar Rotinas" do canal certo.
@@ -9503,7 +9482,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     # Toggle do moderador: volta ao submenu do moderador.
     if estado_atual == "SubmissaoAdminFluxo:aguardando_confirmacao_toggle":
         await state.clear()
-        if EXIBIR_LOGS: logger.info("🔙 Cancelamento do toggle do Moderador. Retornando ao submenu de Configurações do Robô Moderador.")
+        logger.info("🔙 Cancelamento do toggle do Moderador. Retornando ao submenu de Configurações do Robô Moderador.")
         await message.answer("Ação cancelada.")
         await submenu_robo_moderador(message, state)
         return
@@ -9511,7 +9490,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     # Edição de tópico do Público: volta ao menu de tópicos.
     if estado_atual in ["SubmissaoAdminFluxo:aguardando_novo_valor_grupo", "SubmissaoAdminFluxo:aguardando_confirmacao_grupo"]:
         await state.clear()
-        if EXIBIR_LOGS: logger.info("🔙 Cancelamento da edição de tópico. Retornando ao menu Definir Tópicos de Moderação.")
+        logger.info("🔙 Cancelamento da edição de tópico. Retornando ao menu Definir Tópicos de Moderação.")
         await message.answer("Ação cancelada.")
         await menu_edicao_grupo_publico(message, state)
         return
@@ -9519,7 +9498,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     # Demais telas do Grupo Público: volta ao painel do Público.
     if estado_atual and estado_atual.startswith("SubmissaoAdminFluxo"):
         await state.clear()
-        if EXIBIR_LOGS: logger.info("🔙 Cancelamento do Painel de Submissões. Retornando ao painel do Grupo Público.")
+        logger.info("🔙 Cancelamento do Painel de Submissões. Retornando ao painel do Grupo Público.")
         await message.answer("Ação cancelada.")
         await painel_submissoes(message, state)
         return
@@ -9527,12 +9506,12 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     # Pausa programada: volta às Configurações.
     if estado_atual and estado_atual.startswith("PausaProgramadaFluxo"):
         await state.clear()
-        if EXIBIR_LOGS: logger.info("🔙 Cancelamento da Pausa Programada. Voltando para Configurações Avançadas.")
+        logger.info("🔙 Cancelamento da Pausa Programada. Voltando para Configurações Avançadas.")
         await message.answer("Ação cancelada. Retornando ao menu de configurações...")
         await menu_configuracoes(message, state)
         return
 
-    if EXIBIR_LOGS: logger.info("🔍 Limpeza de memória solicitada. Avaliando necessidade de rollback no contador global...")
+    logger.info("🔍 Limpeza de memória solicitada. Avaliando necessidade de rollback no contador global...")
     
     # Criar Postagem cancelado: devolve o número reservado ao contador.
     numero_reservado = data.get('numero_reservado')
@@ -9542,15 +9521,15 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
             # só se ninguém usou um número depois deste
             if contador_atual == numero_reservado + 1:
                 salvar_contador(numero_reservado)
-                if EXIBIR_LOGS: logger.info(f"⏪ Rollback executado: Número {numero_reservado} foi devolvido ao contador global com sucesso.")
+                logger.info(f"⏪ Rollback executado: Número {numero_reservado} foi devolvido ao contador global com sucesso.")
             else:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Rollback abortado: O contador já avançou para {contador_atual} e não pode ser revertido com segurança.")
+                logger.warning(f"⚠️ Rollback abortado: O contador já avançou para {contador_atual} e não pode ser revertido com segurança.")
 
     # Apaga o vídeo baixado para a postagem cancelada.
     caminho_video = data.get('video_path')
     if caminho_video and os.path.exists(caminho_video):
         os.remove(caminho_video)
-        if EXIBIR_LOGS: logger.info("🧹 Vídeo temporário excluído do servidor devido ao cancelamento.")
+        logger.info("🧹 Vídeo temporário excluído do servidor devido ao cancelamento.")
 
     await state.clear()
     await message.answer("Ação cancelada e memória limpa. Voltando ao menu...", reply_markup=obter_teclado_principal())
@@ -9561,7 +9540,7 @@ async def iniciar_postagem(message: types.Message, state: FSMContext):
     """Criar Postagem: pede o vídeo."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    if EXIBIR_LOGS: logger.info("🎬 Iniciando postagem com IA Copywriter.")
+    logger.info("🎬 Iniciando postagem com IA Copywriter.")
     await message.answer("Excelente! Envie o vídeo do produto e eu criarei a legenda de vendas para você.", reply_markup=teclado_cancelar)
     await state.set_state(PostagemFluxo.aguardando_video)
 
@@ -9580,7 +9559,7 @@ async def receber_video(message: types.Message, state: FSMContext):
         async with _lock_contador:
             numero_atual = ler_contador()
             salvar_contador(numero_atual + 1)
-            if EXIBIR_LOGS: logger.info(f"🔒 Concorrência blindada: Número {numero_atual} reservado. Próximo será {numero_atual + 1}.")
+            logger.info(f"🔒 Concorrência blindada: Número {numero_atual} reservado. Próximo será {numero_atual + 1}.")
 
         # 1. Baixa o vídeo
         file_info = await bot.get_file(file_id)
@@ -9599,10 +9578,10 @@ async def receber_video(message: types.Message, state: FSMContext):
             f"Não adicione nenhuma outra palavra, ponto final extra ou descrição."
         )
         
-        chamada_gerada = await analisar_video_gemini(video_path, prompt_ia, EXIBIR_LOGS)
+        chamada_gerada = await analisar_video_gemini(video_path, prompt_ia)
         if not chamada_gerada:
             raise Exception("Falha total na análise do vídeo pela IA.")
-        if EXIBIR_LOGS: logger.info("💾 Mantendo o vídeo no servidor para re-upload posterior com data atualizada.")
+        logger.info("💾 Mantendo o vídeo no servidor para re-upload posterior com data atualizada.")
         
         await state.update_data(video_path=video_path, video_id=file_id, nome_produto=chamada_gerada, links=[], numero_reservado=numero_atual)
         await msg_status.delete()
@@ -9614,8 +9593,8 @@ async def receber_video(message: types.Message, state: FSMContext):
 
     except Exception as e:
         erro_str = str(e)
-        if EXIBIR_LOGS: logger.error(f"❌ Erro na IA ou Download: {erro_str}")
-        if EXIBIR_LOGS: logger.info("💾 Mantendo o vídeo original no servidor apesar do erro na IA.")
+        logger.error(f"❌ Erro na IA ou Download: {erro_str}")
+        logger.info("💾 Mantendo o vídeo original no servidor apesar do erro na IA.")
         await msg_status.delete()
         
         # Traduz o erro para o admin.
@@ -9641,12 +9620,12 @@ async def processar_erro_ia(message: types.Message, state: FSMContext):
     texto = message.text.strip()
     
     if texto == "Digitar Manualmente ✍️":
-        if EXIBIR_LOGS: logger.info("✍️ Usuário optou por digitar manualmente após erro da IA.")
+        logger.info("✍️ Usuário optou por digitar manualmente após erro da IA.")
         await message.answer("Sem problemas. Digite manualmente APENAS O NOME DO PRODUTO ou kit:", reply_markup=teclado_cancelar)
         await state.set_state(PostagemFluxo.aguardando_chamada_manual)
         
     elif texto == "Tentar Novamente 🔄":
-        if EXIBIR_LOGS: logger.info("🔄 Usuário optou por tentar processar o vídeo na IA novamente.")
+        logger.info("🔄 Usuário optou por tentar processar o vídeo na IA novamente.")
         data = await state.get_data()
         video_path = data.get('video_path')
         numero_atual = data.get('numero_reservado')
@@ -9670,7 +9649,7 @@ async def processar_erro_ia(message: types.Message, state: FSMContext):
         )
         
         try:
-            chamada_gerada = await analisar_video_gemini(video_path, prompt_ia, EXIBIR_LOGS)
+            chamada_gerada = await analisar_video_gemini(video_path, prompt_ia)
             if not chamada_gerada:
                 raise Exception("Falha total na análise de re-processamento.")
             await msg_status.delete()
@@ -9682,7 +9661,7 @@ async def processar_erro_ia(message: types.Message, state: FSMContext):
             
         except Exception as e:
             erro_str = str(e)
-            if EXIBIR_LOGS: logger.error(f"❌ Erro na tentativa de reprocessamento: {erro_str}")
+            logger.error(f"❌ Erro na tentativa de reprocessamento: {erro_str}")
             await msg_status.delete()
             motivo = "Falha no servidor."
             if "429" in erro_str:
@@ -9694,7 +9673,7 @@ async def processar_erro_ia(message: types.Message, state: FSMContext):
             
     elif texto != "Cancelar ❌":
         # Atalho: texto digitado direto na tela de erro vira o nome do produto.
-        if EXIBIR_LOGS: logger.info("✍️ Atalho: Usuário digitou o texto direto ignorando os botões de erro.")
+        logger.info("✍️ Atalho: Usuário digitou o texto direto ignorando os botões de erro.")
         data = await state.get_data()
         numero_atual = data.get('numero_reservado')
         
@@ -9708,16 +9687,16 @@ async def confirmar_nome(message: types.Message, state: FSMContext):
     """Aprova o nome da IA, pede para digitar ou aceita o texto digitado como nome."""
     texto = message.text.strip()
     if texto == "Aprovar ✅":
-        if EXIBIR_LOGS: logger.info("✅ Nome aprovado. Avançando para seleção de plataforma.")
+        logger.info("✅ Nome aprovado. Avançando para seleção de plataforma.")
         await message.answer("Onde você postou/vai postar este vídeo?", reply_markup=teclado_plataforma)
         await state.set_state(PostagemFluxo.aguardando_plataforma)
     elif texto == "Digitar Nome ✍️":
-        if EXIBIR_LOGS: logger.info("✍️ Transição manual solicitada para digitação do nome do produto.")
+        logger.info("✍️ Transição manual solicitada para digitação do nome do produto.")
         await message.answer("Sem problemas. Digite manualmente APENAS O NOME DO PRODUTO:", reply_markup=teclado_cancelar)
         await state.set_state(PostagemFluxo.aguardando_chamada_manual)
     elif texto != "Cancelar ❌":
         # Atalho: texto digitado direto na confirmação vira o nome do produto.
-        if EXIBIR_LOGS: logger.info("✍️ Atalho: Usuário digitou o texto direto sobrepondo a IA.")
+        logger.info("✍️ Atalho: Usuário digitou o texto direto sobrepondo a IA.")
         data = await state.get_data()
         numero_atual = data.get('numero_reservado')
         
@@ -9733,7 +9712,7 @@ async def receber_chamada_manual(message: types.Message, state: FSMContext):
     
     nome_formatado = f"Vídeo {numero_atual}\n📦 Item: {message.text.strip()}"
     
-    if EXIBIR_LOGS: logger.info(f"✍️ Identificação manual formatada automaticamente: Vídeo {numero_atual}.")
+    logger.info(f"✍️ Identificação manual formatada automaticamente: Vídeo {numero_atual}.")
     
     await state.update_data(nome_produto=nome_formatado)
     await message.answer(f"Identificação salva como:\n\n{nome_formatado}\n\nOnde você postou/vai postar este vídeo?", reply_markup=teclado_plataforma)
@@ -9750,24 +9729,24 @@ async def receber_plataforma(message: types.Message, state: FSMContext):
     await state.update_data(plataforma_escolhida=plataforma, links_shopee=[], links_tiktok=[])
     
     if plataforma in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
-        if EXIBIR_LOGS: logger.info("🔀 Direcionando para fluxo de vídeo da Shopee.")
+        logger.info("🔀 Direcionando para fluxo de vídeo da Shopee.")
         await message.answer("Certo! Agora envie o <b>Link do Vídeo</b> que você postou na <b>SHOPEE</b>.", reply_markup=teclado_cancelar, parse_mode="HTML")
         await state.set_state(PostagemFluxo.aguardando_link_video_shopee)
     else:
-        if EXIBIR_LOGS: logger.info("🔀 Direcionando para fluxo de vídeo do TikTok.")
+        logger.info("🔀 Direcionando para fluxo de vídeo do TikTok.")
         await message.answer("Certo! Agora envie o <b>Link do Vídeo</b> que você postou no <b>TIKTOK</b>.", reply_markup=teclado_cancelar, parse_mode="HTML")
         await state.set_state(PostagemFluxo.aguardando_link_video_tiktok)
 
 @dp.message(PostagemFluxo.aguardando_link_video_shopee)
 async def receber_link_video_shopee(message: types.Message, state: FSMContext):
-    if EXIBIR_LOGS: logger.info("📥 Recebido link do vídeo da Shopee.")
+    logger.info("📥 Recebido link do vídeo da Shopee.")
     await state.update_data(link_video_shopee=message.text)
     await message.answer("Link do vídeo da Shopee salvo! 🛒\n\nAgora, envie os links dos <b>produtos da SHOPEE</b> um por um. Clique em 'Finalizar' quando terminar.", reply_markup=teclado_finalizar, parse_mode="HTML")
     await state.set_state(PostagemFluxo.aguardando_links_shopee)
 
 @dp.message(PostagemFluxo.aguardando_link_video_tiktok)
 async def receber_link_video_tiktok(message: types.Message, state: FSMContext):
-    if EXIBIR_LOGS: logger.info("📥 Recebido link do vídeo do TikTok.")
+    logger.info("📥 Recebido link do vídeo do TikTok.")
     await state.update_data(link_video_tiktok=message.text)
     await message.answer("Link do vídeo do TikTok salvo! 🎵\n\nAgora, envie os links dos <b>produtos do TIKTOK</b> um por um. Clique em 'Finalizar' quando acabar.", reply_markup=teclado_finalizar, parse_mode="HTML")
     await state.set_state(PostagemFluxo.aguardando_links_tiktok)
@@ -9780,11 +9759,11 @@ async def receber_links_shopee(message: types.Message, state: FSMContext):
     if message.text in ["Finalizar ✅", "/finalizar"]:
         plataforma = data['plataforma_escolhida']
         if plataforma == "Ambos 🛒🎵":
-            if EXIBIR_LOGS: logger.info("🔀 Transição manual: Produtos Shopee concluídos.")
+            logger.info("🔀 Transição manual: Produtos Shopee concluídos.")
             await message.answer("Links da Shopee salvos! 🛒\n\nAgora, envie o <b>Link do Vídeo</b> que você postou no <b>TIKTOK</b>.", reply_markup=teclado_cancelar, parse_mode="HTML")
             await state.set_state(PostagemFluxo.aguardando_link_video_tiktok)
         else:
-            if EXIBIR_LOGS: logger.info("✅ Fluxo Shopee concluído manualmente.")
+            logger.info("✅ Fluxo Shopee concluído manualmente.")
             await finalizar_postagem(message, state)
         return
 
@@ -9792,19 +9771,19 @@ async def receber_links_shopee(message: types.Message, state: FSMContext):
     await state.update_data(links_shopee=links)
     
     if len(links) >= 6:
-        if EXIBIR_LOGS: logger.info("✅ 🎯 Limite máximo de links da Shopee alcançado.")
+        logger.info("✅ 🎯 Limite máximo de links da Shopee alcançado.")
         await message.answer("Link Shopee 6/6 registrado.\nLimite atingido, avançando para a próxima etapa...", parse_mode="HTML")
         
         plataforma = data['plataforma_escolhida']
         if plataforma == "Ambos 🛒🎵":
-            if EXIBIR_LOGS: logger.info("🔀 Transição automática: solicitando vídeo do TikTok.")
+            logger.info("🔀 Transição automática: solicitando vídeo do TikTok.")
             await message.answer("Links da Shopee salvos! 🛒\n\nAgora, envie o <b>Link do Vídeo</b> que você postou no <b>TIKTOK</b>.", reply_markup=teclado_cancelar, parse_mode="HTML")
             await state.set_state(PostagemFluxo.aguardando_link_video_tiktok)
         else:
-            if EXIBIR_LOGS: logger.info("✅ Fluxo Shopee concluído por limite automático.")
+            logger.info("✅ Fluxo Shopee concluído por limite automático.")
             await finalizar_postagem(message, state)
     else:
-        if EXIBIR_LOGS: logger.info(f"🔗 Link Shopee {len(links)}/6 validado.")
+        logger.info(f"🔗 Link Shopee {len(links)}/6 validado.")
         await message.answer(f"Link Shopee {len(links)}/6 registrado. Envie o próximo ou clique em Finalizar.", reply_markup=teclado_finalizar)
 
 @dp.message(PostagemFluxo.aguardando_links_tiktok)
@@ -9813,7 +9792,7 @@ async def receber_links_tiktok(message: types.Message, state: FSMContext):
     links = data.get('links_tiktok', [])
 
     if message.text in ["Finalizar ✅", "/finalizar"]:
-        if EXIBIR_LOGS: logger.info("✅ Fluxo TikTok concluído manualmente.")
+        logger.info("✅ Fluxo TikTok concluído manualmente.")
         await finalizar_postagem(message, state)
         return
 
@@ -9821,11 +9800,11 @@ async def receber_links_tiktok(message: types.Message, state: FSMContext):
     await state.update_data(links_tiktok=links)
     
     if len(links) >= 6:
-        if EXIBIR_LOGS: logger.info("✅ 🎯 Limite máximo de links do TikTok alcançado.")
+        logger.info("✅ 🎯 Limite máximo de links do TikTok alcançado.")
         await message.answer("Link TikTok 6/6 registrado.\nLimite atingido, finalizando a postagem...", parse_mode="HTML")
         await finalizar_postagem(message, state)
     else:
-        if EXIBIR_LOGS: logger.info(f"🔗 Link TikTok {len(links)}/6 validado.")
+        logger.info(f"🔗 Link TikTok {len(links)}/6 validado.")
         await message.answer(f"Link TikTok {len(links)}/6 registrado. Envie o próximo ou clique em Finalizar.", reply_markup=teclado_finalizar)
 
 async def finalizar_postagem(message: types.Message, state: FSMContext):
@@ -9844,7 +9823,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     links_shopee = data.get('links_shopee', [])
     links_tiktok = data.get('links_tiktok', [])
     
-    if EXIBIR_LOGS: logger.info("📤 Iniciando montagem inteligente da legenda (3 níveis).")
+    logger.info("📤 Iniciando montagem inteligente da legenda (3 níveis).")
     
     # Título: "Vídeo N | 📦 Item: ..." numa linha só.
     titulo_limpo = nome.replace('\n', ' | ')
@@ -9892,29 +9871,29 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     # Legenda em níveis até caber nos 1024 caracteres do Telegram: 1) texto de apoio
     # longo; 2) curto; 3) só um rodapé; 4) com as duas plataformas, dois posts.
     legenda_final = montar_legenda(texto_longo, is_rodape=False)
-    if EXIBIR_LOGS: logger.info(f"📏 Avaliando Nível 1: {len(legenda_final)} caracteres.")
+    logger.info(f"📏 Avaliando Nível 1: {len(legenda_final)} caracteres.")
     
     nivel_4_ativado = False
 
     if len(legenda_final) > 1024:
-        if EXIBIR_LOGS: logger.warning("⚠️ Limite excedido no Nível 1. Ativando Nível 2 (texto curto duplo).")
+        logger.warning("⚠️ Limite excedido no Nível 1. Ativando Nível 2 (texto curto duplo).")
         legenda_final = montar_legenda(texto_curto, is_rodape=False)
-        if EXIBIR_LOGS: logger.info(f"📏 Avaliando Nível 2: {len(legenda_final)} caracteres.")
+        logger.info(f"📏 Avaliando Nível 2: {len(legenda_final)} caracteres.")
         
         if len(legenda_final) > 1024:
-            if EXIBIR_LOGS: logger.warning("⚠️ Limite excedido no Nível 2. Ativando Nível 3 (rodapé simples).")
+            logger.warning("⚠️ Limite excedido no Nível 2. Ativando Nível 3 (rodapé simples).")
             legenda_final = montar_legenda(texto_rodape, is_rodape=True)
-            if EXIBIR_LOGS: logger.info(f"📏 Avaliando Nível 3: {len(legenda_final)} caracteres.")
+            logger.info(f"📏 Avaliando Nível 3: {len(legenda_final)} caracteres.")
             
             if len(legenda_final) > 1024 and plataforma == "Ambos 🛒🎵":
-                if EXIBIR_LOGS: logger.warning("🚨 Limite crítico excedido no Nível 3. Ativando Nível 4 (Divisão de Postagem).")
+                logger.warning("🚨 Limite crítico excedido no Nível 3. Ativando Nível 4 (Divisão de Postagem).")
                 nivel_4_ativado = True
 
     # Renova a data do arquivo (sem recomprimir).
     caminho_processado = None
     if caminho_video_original and os.path.exists(caminho_video_original):
         subprocess.run(["touch", caminho_video_original])
-        if EXIBIR_LOGS: logger.info("📅 Data do arquivo renovada sem recompressão.")
+        logger.info("📅 Data do arquivo renovada sem recompressão.")
 
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
@@ -9926,10 +9905,10 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     # 1. Bom Dia de hoje já saiu: o vídeo vai para amanhã; senão, hoje ("2000-01-01").
     if dados_rotina.get("ultimo_bom_dia") == hoje_str:
         data_agendamento_base = amanha_str
-        if EXIBIR_LOGS: logger.info("⏰ O 'Bom Dia' de hoje já passou. Data base projetada para Amanhã.")
+        logger.info("⏰ O 'Bom Dia' de hoje já passou. Data base projetada para Amanhã.")
     else:
         data_agendamento_base = "2000-01-01"  # marca de "hoje"
-        if EXIBIR_LOGS: logger.info("⏰ O 'Bom Dia' de hoje ainda não passou (Madrugada/Manhã). Data base projetada para Hoje.")
+        logger.info("⏰ O 'Bom Dia' de hoje ainda não passou (Madrugada/Manhã). Data base projetada para Hoje.")
         
     # 2. Ninguém fura a fila: se o último vídeo já está num dia futuro, o novo vai junto.
     fila_data_temp = ler_fila_postagens()
@@ -9939,10 +9918,10 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
         
         if ultima_data_str != "2000-01-01" and ultima_data_str > data_agendamento_base:
             data_agendamento_base = ultima_data_str
-            if EXIBIR_LOGS: logger.info(f"🚧 FIFO: O novo vídeo foi empurrado para o fim da fila: {data_agendamento_base}")
+            logger.info(f"🚧 FIFO: O novo vídeo foi empurrado para o fim da fila: {data_agendamento_base}")
     
     def adicionar_a_fila(caminho_vid, vid_id, caption):
-        if EXIBIR_LOGS: logger.info(f"📅 Inserindo no Banco SQLite de forma concorrente. Data alvo: {data_agendamento_base}")
+        logger.info(f"📅 Inserindo no Banco SQLite de forma concorrente. Data alvo: {data_agendamento_base}")
         id_unico = f"{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}"
         
         try:
@@ -9961,30 +9940,30 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
             
             conexao.commit()
             conexao.close()
-            if EXIBIR_LOGS: logger.info(f"✅ Vídeo blindado no SQLite com prioridade {proxima_prioridade}.")
+            logger.info(f"✅ Vídeo blindado no SQLite com prioridade {proxima_prioridade}.")
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro grave ao inserir vídeo direto no banco: {e}")
+            logger.error(f"❌ Erro grave ao inserir vídeo direto no banco: {e}")
 
     caminho_final = caminho_processado if caminho_processado and os.path.exists(caminho_processado) else caminho_video_original
     
     if caminho_processado and caminho_video_original and os.path.exists(caminho_video_original):
         os.remove(caminho_video_original)
 
-    if EXIBIR_LOGS: logger.info("🚀 Aplicando blindagem: Assegurando persistência do video_id para o fallback de segurança...")
+    logger.info("🚀 Aplicando blindagem: Assegurando persistência do video_id para o fallback de segurança...")
 
     if nivel_4_ativado:
         legenda_shopee = montar_legenda(texto_longo, is_rodape=False, plataforma_alvo="Apenas Shopee 🛒")
-        if EXIBIR_LOGS: logger.info(f"📦 A agendar vídeo 1/2 (Shopee) na fila invisível para a data: {data_agendamento_base}.")
+        logger.info(f"📦 A agendar vídeo 1/2 (Shopee) na fila invisível para a data: {data_agendamento_base}.")
         adicionar_a_fila(caminho_final, video_id_fallback, legenda_shopee)
         
         legenda_tiktok = montar_legenda(texto_longo, is_rodape=False, plataforma_alvo="Apenas TikTok 🎵")
-        if EXIBIR_LOGS: logger.info(f"📦 A agendar vídeo 2/2 (TikTok) na fila invisível para a data: {data_agendamento_base}.")
+        logger.info(f"📦 A agendar vídeo 2/2 (TikTok) na fila invisível para a data: {data_agendamento_base}.")
         adicionar_a_fila(caminho_final, video_id_fallback, legenda_tiktok)
     else:
-        if EXIBIR_LOGS: logger.info(f"📦 A agendar vídeo consolidado na fila invisível para a data: {data_agendamento_base}.")
+        logger.info(f"📦 A agendar vídeo consolidado na fila invisível para a data: {data_agendamento_base}.")
         adicionar_a_fila(caminho_final, video_id_fallback, legenda_final)
         
-    if EXIBIR_LOGS: logger.info("💾 Ficheiro físico adormecido. A limpeza ocorrerá automaticamente após o upload escalonado.")
+    logger.info("💾 Ficheiro físico adormecido. A limpeza ocorrerá automaticamente após o upload escalonado.")
     
     async with _lock_contador:
         proximo_numero = ler_contador()
@@ -9992,10 +9971,10 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     # Só refaz a grade de hoje se o vídeo for para hoje; vídeo para o futuro não mexe
     # nos horários já marcados.
     if data_agendamento_base == "2000-01-01" or data_agendamento_base <= hoje_str:
-        if EXIBIR_LOGS: logger.info("🔄 O novo vídeo é para hoje. A recalcular a grelha de publicações em tempo real...")
+        logger.info("🔄 O novo vídeo é para hoje. A recalcular a grelha de publicações em tempo real...")
         agendar_fila_postagens()
     else:
-        if EXIBIR_LOGS: logger.info(f"⏭️ O novo vídeo é para o futuro ({data_agendamento_base}). A grelha de hoje não será afetada.")
+        logger.info(f"⏭️ O novo vídeo é para o futuro ({data_agendamento_base}). A grelha de hoje não será afetada.")
 
     # Recibo: o contador aponta para o PRÓXIMO número, então o vídeo criado é o anterior.
     numero_criado = max(1, proximo_numero - 1)
@@ -10048,7 +10027,7 @@ async def menu_editar_numero(message: types.Message, state: FSMContext):
 async def confirmar_zerar_numero(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     numero_atual = ler_contador()
-    if EXIBIR_LOGS: logger.info("⚠️ Solicitando confirmação de segurança para zerar contador.")
+    logger.info("⚠️ Solicitando confirmação de segurança para zerar contador.")
     texto_confirmacao = (
         f"⚠️ <b>Atenção!</b>\n\n"
         f"O vídeo atual está no número <b>{numero_atual}</b> e iremos zerar para o vídeo número <b>1</b>.\n"
@@ -10061,7 +10040,7 @@ async def confirmar_zerar_numero(message: types.Message, state: FSMContext):
 async def processar_zerar_numero(message: types.Message, state: FSMContext):
     if message.text == "Aprovar ✅":
         salvar_contador(1)
-        if EXIBIR_LOGS: logger.info("🔢 Contador zerado pelo administrador após confirmação.")
+        logger.info("🔢 Contador zerado pelo administrador após confirmação.")
         await message.answer("Contador zerado com sucesso! O próximo post será o 'Vídeo 1'.", reply_markup=obter_teclado_principal())
         await state.clear()
     else:
@@ -10079,7 +10058,7 @@ async def salvar_novo_numero(message: types.Message, state: FSMContext):
     if message.text.isdigit():
         novo_numero = int(message.text)
         salvar_contador(novo_numero)
-        if EXIBIR_LOGS: logger.info(f"🔢 Contador editado manualmente para: {novo_numero}.")
+        logger.info(f"🔢 Contador editado manualmente para: {novo_numero}.")
         await message.answer(f"Sucesso! O próximo post será o 'Vídeo {novo_numero}'.", reply_markup=obter_teclado_principal())
         await state.clear()
     else:
@@ -10090,7 +10069,7 @@ async def menu_configuracoes(message: types.Message, state: FSMContext):
     """Configurações Avançadas do canal principal."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    if EXIBIR_LOGS: logger.info("⚙️ Acessando Dashboard de Configurações Gerais de Automações.")
+    logger.info("⚙️ Acessando Dashboard de Configurações Gerais de Automações.")
     
     dados_div = ler_alvos_divulgacao()
     status_spam = "🔴 PAUSADO" if dados_div.get("pausado", False) else "🟢 ATIVO"
@@ -10150,7 +10129,7 @@ async def confirmar_atualizar_rotinas(message: types.Message, state: FSMContext)
 
     texto += "Deseja continuar?"
 
-    if EXIBIR_LOGS: logger.info(f"🔄 Aguardando aprovação do recálculo ({len(rotinas_afetadas)} rotina(s), {videos_afetados} vídeo(s)).")
+    logger.info(f"🔄 Aguardando aprovação do recálculo ({len(rotinas_afetadas)} rotina(s), {videos_afetados} vídeo(s)).")
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado_confirmar_zerar)
     await state.set_state(ConfigFluxo.aguardando_confirmacao_rotinas)
 
@@ -10163,7 +10142,7 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
         await message.answer("Por favor, clique em <b>Aprovar ✅</b> ou <b>Cancelar ❌</b>.", parse_mode="HTML")
         return
 
-    if EXIBIR_LOGS: logger.info("🔄 Recálculo APROVADO pelo admin. Executando...")
+    logger.info("🔄 Recálculo APROVADO pelo admin. Executando...")
     msg_status = await message.answer("🔄 Analisando o histórico de hoje e recalculando a grade restante. Aguarde...", reply_markup=teclado_cancelar)
     
     # Horários antes do recálculo
@@ -10254,7 +10233,7 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
 async def menu_zerar_filas_tarefas(message: types.Message, state: FSMContext):
     """Zerar Filas e Tarefas: escolha do que limpar."""
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("⚠️ Solicitando seleção do tipo de limpeza de filas.")
+    logger.info("⚠️ Solicitando seleção do tipo de limpeza de filas.")
     
     teclado_opcoes_limpeza = ReplyKeyboardMarkup(
         keyboard=[
@@ -10329,7 +10308,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
     tipo_limpeza = data.get("tipo_limpeza")
 
     msg_status = await message.answer(f"🧹 <b>Executando: {tipo_limpeza}...</b> Isso pode levar alguns segundos. ⏳", reply_markup=teclado_cancelar, parse_mode="HTML")
-    if EXIBIR_LOGS: logger.info(f"🚀 Iniciando protocolo de limpeza modular: {tipo_limpeza}")
+    logger.info(f"🚀 Iniciando protocolo de limpeza modular: {tipo_limpeza}")
     
     limpar_tudo = tipo_limpeza == "Limpar Tudo (Geral) 💥"
     limpar_espiao = tipo_limpeza == "Limpar Fila do Espião 🕵️" or limpar_tudo
@@ -10472,7 +10451,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
 async def menu_outros_canais(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    if EXIBIR_LOGS: logger.info("🗂️ Acessando a gaveta de Outros Canais.")
+    logger.info("🗂️ Acessando a gaveta de Outros Canais.")
     await message.answer("Selecione o robô ou módulo secundário que deseja gerir:", reply_markup=teclado_outros_canais)
 
 @dp.message(F.text == "Voltar ao Início 🔙", StateFilter("*"))
@@ -10550,7 +10529,7 @@ async def pedir_nome_nicho(message: types.Message, state: FSMContext):
 async def pedir_destino_nicho(message: types.Message, state: FSMContext):
     nome_nicho = message.text.strip()
     await state.update_data(novo_nome_nicho=nome_nicho)
-    if EXIBIR_LOGS: logger.info(f"🛍️ Criando novo nicho: {nome_nicho}")
+    logger.info(f"🛍️ Criando novo nicho: {nome_nicho}")
     await message.answer(
         f"Nome salvo: <b>{nome_nicho}</b>\n\n"
         "Agora cole o <b>link do tópico</b> onde as ofertas serão postadas.\n\n"
@@ -10614,7 +10593,7 @@ async def salvar_novo_nicho(message: types.Message, state: FSMContext):
     config.setdefault("nichos", []).append(novo_nicho)
     salvar_achadinhos_config(config)
         
-    if EXIBIR_LOGS: logger.info(f"✅ Nicho '{nome}' adicionado com sucesso e ativo no radar!")
+    logger.info(f"✅ Nicho '{nome}' adicionado com sucesso e ativo no radar!")
     await message.answer(f"✅ Nicho <b>{nome}</b> criado e ativado com sucesso!", parse_mode="HTML")
     await painel_achadinhos(message, state)
 
@@ -10668,7 +10647,7 @@ async def processar_remocao_nicho(message: types.Message, state: FSMContext):
     if indice is not None and 0 <= indice < len(config.get("nichos", [])):
         removido = config["nichos"].pop(indice)
         salvar_achadinhos_config(config)
-        if EXIBIR_LOGS: logger.info(f"🗑️ Nicho '{removido.get('nome')}' excluído.")
+        logger.info(f"🗑️ Nicho '{removido.get('nome')}' excluído.")
         await message.answer(f"✅ Nicho '{removido.get('nome')}' removido com sucesso!")
     
     await painel_achadinhos(message, state)
@@ -10798,7 +10777,7 @@ async def salvar_edicao_nicho(message: types.Message, state: FSMContext):
     if 0 <= indice < len(nichos):
         nichos[indice][campo] = novo_valor
         salvar_achadinhos_config(config)
-        if EXIBIR_LOGS: logger.info(f"✏️ Nicho {indice+1} atualizado. Campo '{campo}' alterado.")
+        logger.info(f"✏️ Nicho {indice+1} atualizado. Campo '{campo}' alterado.")
         await message.answer("✅ Nicho atualizado com sucesso!")
 
     await painel_achadinhos(message, state)
@@ -10881,8 +10860,7 @@ async def salvar_janela_achadinhos(message: types.Message, state: FSMContext):
     config["fim"] = data.get("janela_fim", 22)
     salvar_achadinhos_config(config)
 
-    if EXIBIR_LOGS:
-        logger.info(f"⏰ [Achadinhos] Janela alterada para {config['inicio']}h–{config['fim']}h.")
+    logger.info(f"⏰ [Achadinhos] Janela alterada para {config['inicio']}h–{config['fim']}h.")
     await message.answer(f"✅ Janela salva: <b>{config['inicio']}h às {config['fim']}h</b>.", parse_mode="HTML")
     await painel_achadinhos(message, state)
 
@@ -10928,7 +10906,7 @@ async def salvar_nichos_ciclo(message: types.Message, state: FSMContext):
     fim = int(config.get("fim", 22))
     ciclos = max(1, (fim - inicio) // 2)
 
-    if EXIBIR_LOGS: logger.info(f"🔄 [Achadinhos] Rodízio ajustado para {valor} nicho(s) por ciclo.")
+    logger.info(f"🔄 [Achadinhos] Rodízio ajustado para {valor} nicho(s) por ciclo.")
     await message.answer(
         f"✅ Salvo: <b>{valor}</b> nicho(s) por ciclo.\n\n"
         f"<i>Com {ciclos} ciclo(s) por dia, dará cerca de {ciclos * valor} publicações "
@@ -10940,7 +10918,7 @@ async def salvar_nichos_ciclo(message: types.Message, state: FSMContext):
 @dp.message(F.text == "Voltar ao Menu Espião 🔙", StateFilter("*"))
 async def voltar_menu_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🔙 Retornando ao Menu Principal do Espião...")
+    logger.info("🔙 Retornando ao Menu Principal do Espião...")
     await state.clear()
     await menu_espiao_principal(message, state)
 
@@ -10948,7 +10926,7 @@ async def voltar_menu_espiao(message: types.Message, state: FSMContext):
 async def menu_automacoes_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    if EXIBIR_LOGS: logger.info("⚙️ Acessando Dashboard de Automações do Espião.")
+    logger.info("⚙️ Acessando Dashboard de Automações do Espião.")
     
     dados_div = ler_alvos_divulgacao_viral()
     status_spam = "🔴 PAUSADO" if dados_div.get("pausado", False) else "🟢 ATIVO"
@@ -10968,14 +10946,14 @@ async def menu_automacoes_espiao(message: types.Message, state: FSMContext):
 @dp.message(F.text == "Voltar às Automações 🔙", StateFilter("*"))
 async def voltar_para_automacoes_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🔙 Retornando à Central de Automações do Espião.")
+    logger.info("🔙 Retornando à Central de Automações do Espião.")
     await state.clear()
     await menu_automacoes_espiao(message, state)
 
 @dp.message(F.text == "Voltar às Configs 🔙", StateFilter("*"))
 async def voltar_para_configs_avancadas(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🔙 Retornando à Central de Configurações Avançadas.")
+    logger.info("🔙 Retornando à Central de Configurações Avançadas.")
     await state.clear()
     await menu_configuracoes(message, state)
 
@@ -10992,7 +10970,7 @@ async def menu_espiao_principal(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando consolidação de estatísticas para o painel do Espião...")
+    logger.info("🚀 Iniciando consolidação de estatísticas para o painel do Espião...")
     
     # 1. Vídeos pendentes na fila de clonagem
     fila_data = ler_fila_clonagem()
@@ -11032,7 +11010,7 @@ async def menu_espiao_principal(message: types.Message, state: FSMContext):
     texto += f"📅 <b>Atraso (Defasagem):</b> D+{intervalo_e} (Modo: {modo_e})\n\n"
     texto += "Escolha uma opção para gerenciar:"
     
-    if EXIBIR_LOGS: logger.info("✅ Sucesso: Painel unificado do Espião renderizado com logs operacionais.")
+    logger.info("✅ Sucesso: Painel unificado do Espião renderizado com logs operacionais.")
     await message.answer(texto, reply_markup=teclado_menu_espiao, parse_mode="HTML")
 
 @dp.message(F.text == "Forçar Postagens 🚀", StateFilter("*"))
@@ -11066,7 +11044,7 @@ async def processar_esvaziar_clones(message: types.Message, state: FSMContext):
         await menu_espiao_principal(message, state)
         return
 
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando processo de forçar clones para o Espião...")
+    logger.info("🚀 Iniciando processo de forçar clones para o Espião...")
     
     await message.answer("✅ <b>Clonagens Forçadas!</b>\nOs vídeos pendentes na fila do Espião serão analisados pela IA e postados em instantes. Você receberá um aviso quando o processo terminar.", parse_mode="HTML", reply_markup=teclado_menu_espiao)
     await state.clear()
@@ -11079,7 +11057,7 @@ async def esvaziar_fila_espiao_background(chat_id):
     Publica a fila do Espião inteira agora, ignorando a janela e o atraso: chama o
     motor (um clone por chamada) até não sobrar pendente e avisa no fim.
     """
-    if EXIBIR_LOGS: logger.info("🚀 [Espião] Iniciando rajada forçada em background...")
+    logger.info("🚀 [Espião] Iniciando rajada forçada em background...")
     while True:
         try:
             dados = ler_fila_clonagem()
@@ -11087,7 +11065,7 @@ async def esvaziar_fila_espiao_background(chat_id):
             pendentes = [i for i in dados.get("fila", []) if i.get("processado") not in [True, 1, "true", "True"]]
             
             if not pendentes:
-                if EXIBIR_LOGS: logger.info("✅ [Espião] Fila de clonagem esvaziada com sucesso!")
+                logger.info("✅ [Espião] Fila de clonagem esvaziada com sucesso!")
                 await bot.send_message(chat_id, "✅ <b>Concluído!</b>\nTodos os vídeos retidos na fila do Espião foram analisados pela IA e publicados com sucesso no seu canal.", parse_mode="HTML")
                 break
             
@@ -11106,7 +11084,7 @@ async def esvaziar_fila_espiao_background(chat_id):
             await asyncio.sleep(5) 
             
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro durante esvaziamento forçado: {e}")
+            logger.error(f"❌ Erro durante esvaziamento forçado: {e}")
             await bot.send_message(chat_id, "⚠️ Ocorreu um erro durante o processamento em background. A rajada pode ter sido interrompida.")
             break
 
@@ -11116,7 +11094,7 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
     Grupos Vigiados: destino e canais na escuta com o status de acesso (lista longa é resumida).
     """
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("📡 Acessando a lista de grupos vigiados do Espião...")
+    logger.info("📡 Acessando a lista de grupos vigiados do Espião...")
     
     dados = ler_alvos_espiao()
         
@@ -11554,7 +11532,7 @@ async def confirmar_adicao_alvo_espiao(message: types.Message, state: FSMContext
     if adicionados > 0:
         dados["alvos"] = alvos_existentes
         salvar_alvos_espiao(dados)
-        if EXIBIR_LOGS: logger.info(f"✅ {adicionados} novos alvos do espião adicionados ao radar.")
+        logger.info(f"✅ {adicionados} novos alvos do espião adicionados ao radar.")
         await message.answer(f"✅ <b>{adicionados} alvo(s) adicionado(s) ao radar com sucesso!</b>\nO Userbot verificará o acesso neste(s) canal(is) no próximo ciclo.", parse_mode="HTML")
     else:
         await message.answer("⚠️ Todos os alvos enviados já estavam sendo monitorados pelo Espião.")
@@ -11824,7 +11802,7 @@ async def processar_remocao_espiao(message: types.Message, state: FSMContext):
             
     if removidos:
         salvar_alvos_espiao(dados)
-        if EXIBIR_LOGS: logger.info(f"🗑️ {len(removidos)} alvos do espião removidos.")
+        logger.info(f"🗑️ {len(removidos)} alvos do espião removidos.")
         await message.answer(f"✅ <b>{len(removidos)} alvo(s) removido(s) do radar!</b>", parse_mode="HTML")
     else:
         await message.answer("⚠️ Erro de sincronização. Ação cancelada.")
@@ -11881,7 +11859,7 @@ async def salvar_destino_espiao(message: types.Message, state: FSMContext):
     dados["canal_destino"] = destino
     salvar_alvos_espiao(dados)
     
-    if EXIBIR_LOGS: logger.info(f"🎯 Canal de destino do espião atualizado para: {destino}")
+    logger.info(f"🎯 Canal de destino do espião atualizado para: {destino}")
     await message.answer("✅ Canal de destino configurado com sucesso!")
     
     await menu_grupos_vigiados(message, state)
@@ -11890,7 +11868,7 @@ async def salvar_destino_espiao(message: types.Message, state: FSMContext):
 async def iniciar_config_janela_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando configuração isolada da janela de horário do Espião.")
+    logger.info("🚀 Iniciando configuração isolada da janela de horário do Espião.")
     
     dados = ler_alvos_espiao()
     inicio = dados.get("inicio", 10)
@@ -12051,7 +12029,7 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     config_gem = dados.get("divulgar_gem_viral", {"inicio": 8, "fim": 22, "frequencia": 1})
     config_promo = dados.get("promo_principal", {"inicio": 10, "fim": 20, "frequencia": 1})
     
-    if EXIBIR_LOGS: logger.info("⚙️ Acessando painel de Rotinas do Espião...")
+    logger.info("⚙️ Acessando painel de Rotinas do Espião...")
     config_pub_viral = dados.get("promo_publico_viral", {"inicio": 10, "fim": 20, "frequencia": 1})
     config_ach_viral = dados.get("promo_achadinhos_viral", {"inicio": 10, "fim": 20, "frequencia": 1})
 
@@ -12143,7 +12121,7 @@ async def submenu_disparos_manuais(message: types.Message, state: FSMContext):
     origem = data.get("menu_origem")
     
     if origem == "espiao":
-        if EXIBIR_LOGS: logger.info("✅ Montando teclado manual para o Canal Viral.")
+        logger.info("✅ Montando teclado manual para o Canal Viral.")
         teclado = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="Disparar Convite Afiliados 🚀"), KeyboardButton(text="Disparar Convite do Grupo 🔗\u200b")],
@@ -12239,10 +12217,10 @@ async def processar_pausa_spam_interno(message: types.Message, state: FSMContext
     salvar_alvos_divulgacao(dados)
 
     if novo_status:
-        if EXIBIR_LOGS: logger.info("⏸️ SPAM em grupos PAUSADO internamente.")
+        logger.info("⏸️ SPAM em grupos PAUSADO internamente.")
         await message.answer("⏸️ <b>SPAM em Grupos PAUSADO.</b>\nO Userbot não enviará mais convites.", parse_mode="HTML")
     else:
-        if EXIBIR_LOGS: logger.info("▶️ SPAM em grupos ATIVADO internamente.")
+        logger.info("▶️ SPAM em grupos ATIVADO internamente.")
         await message.answer("▶️ <b>SPAM em Grupos ATIVO.</b>\nO Userbot voltará a operar normalmente.", parse_mode="HTML")
 
     await gerenciar_divulgacao(message, state)
@@ -12279,10 +12257,10 @@ async def processar_pausa_spam_viral_interno(message: types.Message, state: FSMC
     salvar_alvos_divulgacao_viral(dados)
 
     if novo_status:
-        if EXIBIR_LOGS: logger.info("⏸️ SPAM Viral PAUSADO internamente.")
+        logger.info("⏸️ SPAM Viral PAUSADO internamente.")
         await message.answer("⏸️ <b>SPAM Viral PAUSADO.</b>\nO Userbot não enviará convites para o Viral.", parse_mode="HTML")
     else:
-        if EXIBIR_LOGS: logger.info("▶️ SPAM Viral ATIVADO internamente.")
+        logger.info("▶️ SPAM Viral ATIVADO internamente.")
         await message.answer("▶️ <b>SPAM Viral ATIVO.</b>\nO Userbot voltará a operar normalmente para o Viral.", parse_mode="HTML")
 
     await gerenciar_divulgacao_viral(message, state)
@@ -12361,7 +12339,7 @@ async def processar_pausa_rotinas_interno(message: types.Message, state: FSMCont
 async def voltar_pausa_para_inicio(message: types.Message, state: FSMContext):
     """"Voltar" dentro da Pausa Programada: volta às Configurações Avançadas."""
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🔙 Comando Voltar acionado na Pausa Programada.")
+    logger.info("🔙 Comando Voltar acionado na Pausa Programada.")
     await state.clear()
     await message.answer("Operação cancelada. Voltando ao menu de configurações...")
     await menu_configuracoes(message, state)
@@ -12417,7 +12395,7 @@ async def processar_data_retorno(message: types.Message, state: FSMContext):
     data_retorno_str = data_retorno.strftime("%d/%m/%Y %H:%M")
     await state.update_data(data_retorno_str=data_retorno_str)
     
-    if EXIBIR_LOGS: logger.info("🔍 Mapeando serviços ativos para a tela de pausa programada...")
+    logger.info("🔍 Mapeando serviços ativos para a tela de pausa programada...")
     dados_div = ler_alvos_divulgacao()
     spam_ativo = not dados_div.get("pausado", False)
     
@@ -12500,7 +12478,7 @@ async def confirmar_pausa_programada_final(message: types.Message, state: FSMCon
     ]
     import random
     motivo_escolhido = random.choice(motivos_pausa)
-    if EXIBIR_LOGS: logger.info(f"🎲 Motivo de pausa sorteado: {motivo_escolhido}")
+    logger.info(f"🎲 Motivo de pausa sorteado: {motivo_escolhido}")
 
     data_curta = data_retorno_str.split(" ")[0][:5]
 
@@ -12527,7 +12505,7 @@ async def confirmar_pausa_programada_final(message: types.Message, state: FSMCon
     salvar_pausa_programada(dados_pausa)
     agendar_fila_postagens()  # com a pausa ativa, só desfaz os agendamentos de hoje
     
-    if EXIBIR_LOGS: logger.info(f"🛑 Pausa programada até {data_retorno_str}. Aviso imediato disparado. Serviços: {servicos_pausados}")
+    logger.info(f"🛑 Pausa programada até {data_retorno_str}. Aviso imediato disparado. Serviços: {servicos_pausados}")
     await message.answer(f"🛑 <b>Pausa Configurada com Sucesso!</b>\n\nO aviso já foi enviado ao grupo. A partir de amanhã, o robô atualizará esse aviso todos os dias às 09h00 informando o retorno para o dia {data_retorno_str}.\nNo dia marcado, ele acordará automaticamente.", parse_mode="HTML", reply_markup=obter_teclado_principal())
     await state.clear()
 
@@ -12560,7 +12538,7 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
     id_aviso = dados_pausa.get("id_aviso_imediato")
     if id_aviso:
         await apagar_mensagem_automatica(id_aviso, GRUPO_ID)
-        if EXIBIR_LOGS: logger.info("🧹 Aviso de pausa antigo excluído do grupo.")
+        logger.info("🧹 Aviso de pausa antigo excluído do grupo.")
         
     msg_status = await message.answer("⏳ Gerando mensagem de retorno com a IA...", reply_markup=teclado_cancelar)
     
@@ -12582,12 +12560,12 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
         dados_div = ler_alvos_divulgacao()
         dados_div["pausado"] = False
         salvar_alvos_divulgacao(dados_div)
-        if EXIBIR_LOGS: logger.info("✅ SPAM reativado após encerramento forçado.")
+        logger.info("✅ SPAM reativado após encerramento forçado.")
     if "rotina" in servicos:
         dados_rotina = ler_config_rotina()
         dados_rotina["pausado"] = False
         salvar_config_rotina(dados_rotina)
-        if EXIBIR_LOGS: logger.info("✅ Mensagens de rotina reativadas após encerramento forçado.")
+        logger.info("✅ Mensagens de rotina reativadas após encerramento forçado.")
             
     dados_pausa["ativa"] = False
     dados_pausa["servicos_pausados"] = []
@@ -12705,7 +12683,7 @@ async def salvar_alvo(message: types.Message, state: FSMContext):
     dados["alvos"] = list(dict.fromkeys(dados["alvos"]))
     salvar_alvos_divulgacao(dados)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Novos alvos adicionados: {novos_alvos}")
+    logger.info(f"✅ Novos alvos adicionados: {novos_alvos}")
     await message.answer("Alvos adicionados com sucesso!", reply_markup=obter_teclado_configuracoes_gerais())
     await state.clear()
 
@@ -12739,7 +12717,7 @@ async def processar_exclusao(message: types.Message, state: FSMContext):
         dados["alvos"] = alvos
         dados.get("config_alvos", {}).pop(removido, None)
         salvar_alvos_divulgacao(dados)
-        if EXIBIR_LOGS: logger.info(f"🗑️ Alvo removido com sucesso: {removido}")
+        logger.info(f"🗑️ Alvo removido com sucesso: {removido}")
         await message.answer(f"Alvo '{removido}' excluído com sucesso!", reply_markup=obter_teclado_configuracoes_gerais())
         await state.clear()
     else:
@@ -12853,7 +12831,7 @@ async def salvar_valores_unificados(message: types.Message, state: FSMContext):
         msg_final = f"✅ <b>Alvo personalizado atualizado!</b>\nAlvo: {alvo}\nFrequência: {freq}x/h | Repetições: {rep}x | Réplicas: {repl}x"
         
     salvar_alvos_divulgacao(dados)
-    if EXIBIR_LOGS: logger.info(f"⚙️ Configuração salva numa única passagem. Global: {is_global} | Freq: {freq}, Rep: {rep}, Repl: {repl}")
+    logger.info(f"⚙️ Configuração salva numa única passagem. Global: {is_global} | Freq: {freq}, Rep: {rep}, Repl: {repl}")
     
     await message.answer(msg_final, reply_markup=obter_teclado_configuracoes_gerais(), parse_mode="HTML")
     await state.clear()
@@ -12868,7 +12846,7 @@ async def acionar_disparo_imediato(message: types.Message):
         
     dados["forcar_disparo"] = True
     salvar_alvos_divulgacao(dados)
-    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo forçado enviado para o arquivo JSON.")
+    logger.info("🚀 Comando de disparo forçado enviado para o arquivo JSON.")
     await message.answer("🚀 <b>Disparo Imediato Acionado!</b>\nO Userbot detectará o comando e enviará a rajada de convites em até 5 segundos.", parse_mode="HTML", reply_markup=teclado_opcoes_divulgacao)
 
 # --- SPAM do Viral (Espião) ---
@@ -12897,7 +12875,7 @@ def salvar_alvos_divulgacao_viral(dados):
 async def gerenciar_divulgacao_viral(message: types.Message, state: FSMContext):
     """Painel do SPAM do Viral: padrão global, alvos e o ajuste de cada um."""
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("📢 Acessando o painel de SPAM do Canal Viral...")
+    logger.info("📢 Acessando o painel de SPAM do Canal Viral...")
     dados = ler_alvos_divulgacao_viral()
     alvos = dados.get("alvos", [])
     freq_g = dados.get("frequencia_por_hora", 0)
@@ -12979,7 +12957,7 @@ async def salvar_alvo_viral(message: types.Message, state: FSMContext):
     dados["alvos"] = list(dict.fromkeys(dados["alvos"]))
     salvar_alvos_divulgacao_viral(dados)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Novos alvos virais adicionados: {novos_alvos}")
+    logger.info(f"✅ Novos alvos virais adicionados: {novos_alvos}")
     await message.answer("Alvos do Viral adicionados com sucesso!")
     await gerenciar_divulgacao_viral(message, state)
 
@@ -13014,7 +12992,7 @@ async def processar_exclusao_viral(message: types.Message, state: FSMContext):
         dados["alvos"] = alvos
         dados.get("config_alvos", {}).pop(removido, None)
         salvar_alvos_divulgacao_viral(dados)
-        if EXIBIR_LOGS: logger.info(f"🗑️ Alvo viral removido com sucesso: {removido}")
+        logger.info(f"🗑️ Alvo viral removido com sucesso: {removido}")
         await message.answer(f"Alvo Viral '{removido}' excluído com sucesso!")
         await gerenciar_divulgacao_viral(message, state)
     else:
@@ -13127,7 +13105,7 @@ async def salvar_valores_unificados_viral(message: types.Message, state: FSMCont
         msg_final = f"✅ <b>Alvo personalizado (Viral) atualizado!</b>\nAlvo: {alvo}\nFrequência: {freq}x/h | Repetições: {rep}x | Réplicas: {repl}x"
         
     salvar_alvos_divulgacao_viral(dados)
-    if EXIBIR_LOGS: logger.info(f"⚙️ Configuração Viral salva. Global: {is_global} | Freq: {freq}, Rep: {rep}, Repl: {repl}")
+    logger.info(f"⚙️ Configuração Viral salva. Global: {is_global} | Freq: {freq}, Rep: {rep}, Repl: {repl}")
     
     await message.answer(msg_final, parse_mode="HTML")
     await gerenciar_divulgacao_viral(message, state)
@@ -13142,7 +13120,7 @@ async def acionar_disparo_imediato_viral(message: types.Message):
         
     dados["forcar_disparo"] = True
     salvar_alvos_divulgacao_viral(dados)
-    if EXIBIR_LOGS: logger.info("🚀 Comando de disparo forçado enviado para o JSON do Viral.")
+    logger.info("🚀 Comando de disparo forçado enviado para o JSON do Viral.")
     await message.answer("🚀 <b>Disparo Imediato Viral Acionado!</b>\nO Userbot detectará o comando e enviará a rajada de convites.", parse_mode="HTML")
 
 # --- SPAM por escopo (Grupo Público e Central de Achadinhos) ---
@@ -13241,14 +13219,14 @@ async def renderizar_painel_divulgacao(message: types.Message, state: FSMContext
 @dp.message(F.text == "SPAM do Público 📢", StateFilter("*"))
 async def abrir_spam_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("📢 Acessando SPAM do Grupo Público.")
+    logger.info("📢 Acessando SPAM do Grupo Público.")
     await state.clear()
     await renderizar_painel_divulgacao(message, state, "publico")
 
 @dp.message(F.text == "SPAM do Achadinhos 📢", StateFilter("*"))
 async def abrir_spam_achadinhos(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("📢 Acessando SPAM da Central de Achadinhos.")
+    logger.info("📢 Acessando SPAM da Central de Achadinhos.")
     await state.clear()
     await renderizar_painel_divulgacao(message, state, "achadinhos")
 
@@ -13296,7 +13274,7 @@ async def salvar_alvo_div(message: types.Message, state: FSMContext):
     dados["alvos"] = list(dict.fromkeys(dados["alvos"]))
     salvar_alvos_divulgacao_escopo(escopo, dados)
 
-    if EXIBIR_LOGS: logger.info(f"✅ [SPAM/{escopo}] Novos alvos: {novos_alvos}")
+    logger.info(f"✅ [SPAM/{escopo}] Novos alvos: {novos_alvos}")
     await message.answer("Alvos adicionados com sucesso!")
     await renderizar_painel_divulgacao(message, state, escopo)
 
@@ -13332,7 +13310,7 @@ async def processar_exclusao_div(message: types.Message, state: FSMContext):
         dados["alvos"] = alvos
         dados.get("config_alvos", {}).pop(removido, None)
         salvar_alvos_divulgacao_escopo(escopo, dados)
-        if EXIBIR_LOGS: logger.info(f"🗑️ [SPAM/{escopo}] Alvo removido: {removido}")
+        logger.info(f"🗑️ [SPAM/{escopo}] Alvo removido: {removido}")
         await message.answer(f"Alvo '{removido}' excluído com sucesso!")
         await renderizar_painel_divulgacao(message, state, escopo)
     else:
@@ -13432,7 +13410,7 @@ async def salvar_valores_div(message: types.Message, state: FSMContext):
                       f"de PeerFloodError na sessão do userbot.")
 
     salvar_alvos_divulgacao_escopo(escopo, dados)
-    if EXIBIR_LOGS: logger.info(f"⚙️ [SPAM/{escopo}] Config salva. Global: {is_global} | {freq},{rep},{repl}")
+    logger.info(f"⚙️ [SPAM/{escopo}] Config salva. Global: {is_global} | {freq},{rep},{repl}")
 
     await message.answer(msg_final, parse_mode="HTML")
     await renderizar_painel_divulgacao(message, state, escopo)
@@ -13446,7 +13424,7 @@ async def alternar_pausa_div(message: types.Message, state: FSMContext):
     dados["pausado"] = not dados.get("pausado", False)
     salvar_alvos_divulgacao_escopo(escopo, dados)
     estado_txt = "PAUSADA" if dados["pausado"] else "RETOMADA"
-    if EXIBIR_LOGS: logger.info(f"⏯️ [SPAM/{escopo}] Divulgação {estado_txt}.")
+    logger.info(f"⏯️ [SPAM/{escopo}] Divulgação {estado_txt}.")
     await message.answer(f"✅ Divulgação <b>{estado_txt}</b>.", parse_mode="HTML")
     await renderizar_painel_divulgacao(message, state, escopo)
 
@@ -13465,7 +13443,7 @@ async def acionar_disparo_div(message: types.Message, state: FSMContext):
 
     dados["forcar_disparo"] = True
     salvar_alvos_divulgacao_escopo(escopo, dados)
-    if EXIBIR_LOGS: logger.info(f"🚀 [SPAM/{escopo}] Disparo forçado gravado no banco.")
+    logger.info(f"🚀 [SPAM/{escopo}] Disparo forçado gravado no banco.")
     await message.answer("🚀 <b>Disparo Imediato Acionado!</b>\nO Userbot detecta o comando em até 5 segundos.", parse_mode="HTML")
 
 # --- Central de Automações do Grupo Público ---
@@ -13475,7 +13453,7 @@ async def menu_automacoes_publico(message: types.Message, state: FSMContext):
     """Central de Automações do Grupo Público."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    if EXIBIR_LOGS: logger.info("⚙️ Acessando Central de Automações do Grupo Público.")
+    logger.info("⚙️ Acessando Central de Automações do Grupo Público.")
 
     status_spam = "🔴 PAUSADO" if ler_alvos_divulgacao_escopo("publico").get("pausado", False) else "🟢 ATIVO"
     status_rotina = "🔴 PAUSADAS" if ler_config_rotina().get("pausado_publico", False) else "🟢 ATIVAS"
@@ -13499,14 +13477,14 @@ async def abrir_rotinas_publico(message: types.Message, state: FSMContext):
 @dp.message(F.text == "Voltar às Automações do Público 🔙", StateFilter("*"))
 async def voltar_para_automacoes_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🔙 Retornando à Central de Automações do Grupo Público.")
+    logger.info("🔙 Retornando à Central de Automações do Grupo Público.")
     await state.clear()
     await menu_automacoes_publico(message, state)
 
 @dp.message(F.text == "Voltar ao Gerador de Achadinhos 🔙", StateFilter("*"))
 async def voltar_para_painel_achadinhos(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    if EXIBIR_LOGS: logger.info("🔙 Retornando ao Painel do Gerador de Achadinhos.")
+    logger.info("🔙 Retornando ao Painel do Gerador de Achadinhos.")
     await state.clear()
     await painel_achadinhos(message, state)
 
@@ -13558,8 +13536,8 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
 @dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Promo Público 🗣️", "Editar Convite Afiliados 🚀", "Editar Convite do Grupo 🔗", "Editar Prompt GEM 🤖\u200b", "Editar Promo Público 👥", "Editar Convite (Próprio) 🔗", "Editar Promo Principal 🌟", "Editar Promo Viral 💥", "Editar Achadinhos 🛍️", "Editar Achadinhos 🛒", "Editar Achadinhos 🏪"]))
 async def pedir_horario_rotina(message: types.Message, state: FSMContext):
     """Pede a janela (e a quantidade, se não for Bom Dia/Boa Noite) da rotina escolhida."""
-    if EXIBIR_LOGS: logger.info(f"✏️ Iniciando edição da rotina: {message.text}")
-    if EXIBIR_LOGS: logger.info(f"✏️ Processando edição da rotina selecionada: {message.text}")
+    logger.info(f"✏️ Iniciando edição da rotina: {message.text}")
+    logger.info(f"✏️ Processando edição da rotina selecionada: {message.text}")
     tipo_map = {
         "Editar Bom Dia ☀️": "bom_dia",
         "Editar Boa Noite 🌙": "boa_noite",
@@ -13580,7 +13558,7 @@ async def pedir_horario_rotina(message: types.Message, state: FSMContext):
         "Editar Achadinhos 🏪": "promo_achadinhos_publico"
     }
     tipo = tipo_map[message.text]
-    if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Botão mapeado internamente para a chave '{tipo}'.")
+    logger.info(f"✅ Sucesso: Botão mapeado internamente para a chave '{tipo}'.")
     
     dados_atuais = ler_config_rotina()
     config_atual = dados_atuais.get(tipo, {"inicio": 6, "fim": 9, "frequencia": 1})
@@ -13641,7 +13619,7 @@ async def salvar_horario_rotina(message: types.Message, state: FSMContext):
     dados[tipo] = {"inicio": inicio, "fim": fim, "frequencia": freq}
     salvar_config_rotina(dados)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Configuração de {tipo} atualizada: {inicio}h até {fim}h, {freq}x ao dia.")
+    logger.info(f"✅ Configuração de {tipo} atualizada: {inicio}h até {fim}h, {freq}x ao dia.")
     
     # Sorteia de novo já hoje, só no canal da rotina editada
     origem = data.get("menu_origem")
@@ -13706,7 +13684,7 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
     """
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
-    if EXIBIR_LOGS: logger.info("📋 Acessando o painel de gerenciamento de fila...")
+    logger.info("📋 Acessando o painel de gerenciamento de fila...")
     
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
@@ -13743,7 +13721,7 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
     texto += "━━━━━━━━━━━━━━━━━━\n"
     
     if fila:
-        if EXIBIR_LOGS: logger.info("🔍 Lendo itens da fila para montagem do painel visual enriquecido...")
+        logger.info("🔍 Lendo itens da fila para montagem do painel visual enriquecido...")
         import re
         
         dados_pausa = ler_pausa_programada()
@@ -13776,7 +13754,7 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             nome_video = match_video.group(0).title() if match_video else "Vídeo ?"
             nome_item = match_item.group(1).strip() if match_item else "Sem descrição"
             
-            if EXIBIR_LOGS: logger.info(f"⚙️ Tratando segurança de string para a legenda do item {i}...")
+            logger.info(f"⚙️ Tratando segurança de string para a legenda do item {i}...")
             legenda_segura = str(legenda) if legenda is not None else ""
             
             if is_postado:
@@ -13827,12 +13805,12 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             texto += "━━━━━━━━━━━━━━━━━━\n"
             texto += f"🌙 <b>Boa Noite ({data_dia_br}):</b> {hora_bn}\n\n"
             
-        if EXIBIR_LOGS: logger.info("✅ Painel visual da fila montado com metadados e fronteiras com sucesso.")
+        logger.info("✅ Painel visual da fila montado com metadados e fronteiras com sucesso.")
     else:
         texto += "\n<i>A sua fila está completamente vazia no momento.</i>\n\n"
         texto += "━━━━━━━━━━━━━━━━━━\n"
         texto += f"🌙 <b>Boa Noite ({data_dia_br}):</b> {hora_bn}\n\n"
-        if EXIBIR_LOGS: logger.info("⚠️ Fila vazia detectada ao montar o painel.")
+        logger.info("⚠️ Fila vazia detectada ao montar o painel.")
 
     texto += "O que deseja fazer com a fila?"
 
@@ -13850,7 +13828,7 @@ async def aplicar_renumeracao_e_salvar(fila_ids_ordenada, message, state, numero
     de numero_base ou do menor número da lista. Depois refaz a grade do principal.
     """
     import re
-    if EXIBIR_LOGS: logger.info("🔄 Reorganizando prioridades e numeração no SQLite...")
+    logger.info("🔄 Reorganizando prioridades e numeração no SQLite...")
     
     try:
         conexao = db.conectar()
@@ -13894,17 +13872,17 @@ async def aplicar_renumeracao_e_salvar(fila_ids_ordenada, message, state, numero
             # O contador passa a ser o próximo da sequência, maior ou menor que o atual:
             # o próximo vídeo criado continua a numeração da fila.
             salvar_contador(numero_atual_cascata)
-            if EXIBIR_LOGS: logger.info(f"✅ Auto-correção do banco concluída. Novo contador global forçado para: {numero_atual_cascata}.")
+            logger.info(f"✅ Auto-correção do banco concluída. Novo contador global forçado para: {numero_atual_cascata}.")
 
         # Refaz a grade do principal (como o "Atualizar Rotinas") para os horários
         # seguirem a nova ordem.
-        if EXIBIR_LOGS: logger.info("🔄 Alteração na fila detectada. Acionando recálculo inteligente dos horários...")
+        logger.info("🔄 Alteração na fila detectada. Acionando recálculo inteligente dos horários...")
         agendar_tarefas_diarias(escopo="principal")  # só o principal; Viral e Público ficam como estão
 
         await message.answer("✅ Operação concluída com sucesso!\n🔄 A fila e os horários foram sincronizados perfeitamente.")
         await menu_gerenciar_fila(message, state)
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao organizar SQLite: {e}")
+        logger.error(f"❌ Erro ao organizar SQLite: {e}")
         await message.answer(f"❌ Erro interno ao salvar no banco: {e}")
 
 @dp.message(GerenciarFilaFluxo.menu_principal, F.text.in_(["Publicar Agora 🚀", "Excluir Vídeo 🗑️", "Editar Numeração 🔢", "Mover Posição ↕️", "Editar Legenda ✏️"]))
@@ -13918,7 +13896,7 @@ async def trava_fila_vazia(message: types.Message, state: FSMContext):
     videos_pendentes = [item for item in fila if not item.get("postado", False)]
     
     if not videos_pendentes:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Fila: Tentativa de usar '{message.text}' bloqueada (Fila vazia).")
+        logger.warning(f"⚠️ Fila: Tentativa de usar '{message.text}' bloqueada (Fila vazia).")
         await message.answer(f"⚠️ <b>Ação Bloqueada:</b> A sua fila de vídeos está vazia no momento.\n\nNão há nenhum vídeo agendado para poder utilizar a função de {message.text.split(' ')[1]}.", parse_mode="HTML")
         await menu_gerenciar_fila(message, state)
         return
@@ -13952,7 +13930,7 @@ async def confirmar_posicao_exclusao_fila(message: types.Message, state: FSMCont
     if 0 <= posicao < len(fila):
         import re
         if fila[posicao].get("postado", False):
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Fila: Tentativa de excluir vídeo já postado na posição {posicao+1} bloqueada.")
+            logger.warning(f"⚠️ Fila: Tentativa de excluir vídeo já postado na posição {posicao+1} bloqueada.")
             await message.answer("⚠️ <b>Ação Bloqueada:</b> Este vídeo já foi postado e serve apenas como histórico. Por favor, escolha outro número ou clique em Cancelar ❌.", parse_mode="HTML")
             return
             
@@ -13964,7 +13942,7 @@ async def confirmar_posicao_exclusao_fila(message: types.Message, state: FSMCont
             resumo = "Vídeo sem descrição"
             
         await state.update_data(posicao_excluir=posicao)
-        if EXIBIR_LOGS: logger.info(f"🗑️ Fila: Solicitação de exclusão para posição {posicao+1} iniciada. Aguardando confirmação.")
+        logger.info(f"🗑️ Fila: Solicitação de exclusão para posição {posicao+1} iniciada. Aguardando confirmação.")
         
         teclado_confirmacao_exclusao = ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="Aprovar Exclusão ✅"), KeyboardButton(text="Cancelar ❌")]],
@@ -14016,7 +13994,7 @@ async def processar_exclusao_fila(message: types.Message, state: FSMContext):
             conexao.commit()
             conexao.close()
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro ao apagar do banco: {e}")
+            logger.error(f"❌ Erro ao apagar do banco: {e}")
 
         if caminho_video and os.path.exists(caminho_video):
             ainda_usado = any(x.get("caminho_video") == caminho_video for x in fila)
@@ -14024,7 +14002,7 @@ async def processar_exclusao_fila(message: types.Message, state: FSMContext):
                 try: os.remove(caminho_video)
                 except: pass
                 
-        if EXIBIR_LOGS: logger.info(f"🗑️ Vídeo {id_remover} apagado do banco.")
+        logger.info(f"🗑️ Vídeo {id_remover} apagado do banco.")
         
         fila_ids = [item["id"] for item in fila]
         await aplicar_renumeracao_e_salvar(fila_ids, message, state, numero_base=menor_numero_antes)
@@ -14048,7 +14026,7 @@ async def processar_posicao_editar_fila(message: types.Message, state: FSMContex
     
     if 0 <= posicao < len(fila):
         if fila[posicao].get("postado", False):
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Fila: Tentativa de editar legenda de vídeo já postado na posição {posicao+1} bloqueada.")
+            logger.warning(f"⚠️ Fila: Tentativa de editar legenda de vídeo já postado na posição {posicao+1} bloqueada.")
             await message.answer("⚠️ <b>Ação Bloqueada:</b> Este vídeo já foi postado e serve apenas como histórico. Por favor, escolha outro número ou clique em Cancelar ❌.", parse_mode="HTML")
             return
             
@@ -14078,9 +14056,9 @@ async def salvar_nova_legenda_fila(message: types.Message, state: FSMContext):
             cursor.execute("UPDATE fila_postagens SET legenda = ? WHERE id_unico = ?", (nova_legenda, id_item))
             conexao.commit()
             conexao.close()
-            if EXIBIR_LOGS: logger.info(f"✏️ Fila: Legenda do vídeo {id_item} atualizada no SQLite.")
+            logger.info(f"✏️ Fila: Legenda do vídeo {id_item} atualizada no SQLite.")
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro ao editar legenda: {e}")
+            logger.error(f"❌ Erro ao editar legenda: {e}")
             
         await message.answer("✅ Legenda atualizada com sucesso direto no banco de dados!")
         await menu_gerenciar_fila(message, state)
@@ -14123,7 +14101,7 @@ async def pedir_reordenar_fila(message: types.Message, state: FSMContext):
         
         teclado_escolha_data = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
         
-        if EXIBIR_LOGS: logger.info("↕️ Fila: Atalho acionado (Apenas 1 vídeo na fila). Pulando perguntas de posição.")
+        logger.info("↕️ Fila: Atalho acionado (Apenas 1 vídeo na fila). Pulando perguntas de posição.")
         await message.answer("Como há <b>apenas 1 vídeo pendente</b>, não é necessário escolher posições.\n\nPara quando deseja agendar este vídeo?", reply_markup=teclado_escolha_data, parse_mode="HTML")
         await state.set_state(GerenciarFilaFluxo.aguardando_data_posicao)
         return
@@ -14144,7 +14122,7 @@ async def pedir_nova_posicao_fila(message: types.Message, state: FSMContext):
     if 0 <= posicao_atual < len(fila):
         import re
         if fila[posicao_atual].get("postado", False):
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Fila: Tentativa de mover vídeo já postado na posição {posicao_atual+1} bloqueada.")
+            logger.warning(f"⚠️ Fila: Tentativa de mover vídeo já postado na posição {posicao_atual+1} bloqueada.")
             await message.answer("⚠️ <b>Ação Bloqueada:</b> Este vídeo já foi postado e serve apenas como histórico. Por favor, escolha outro número ou clique em Cancelar ❌.", parse_mode="HTML")
             return
             
@@ -14156,7 +14134,7 @@ async def pedir_nova_posicao_fila(message: types.Message, state: FSMContext):
             resumo = "Vídeo sem descrição"
             
         await state.update_data(posicao_origem=posicao_atual)
-        if EXIBIR_LOGS: logger.info(f"↕️ Fila: Posição de origem {posicao_atual+1} selecionada para mover.")
+        logger.info(f"↕️ Fila: Posição de origem {posicao_atual+1} selecionada para mover.")
         await message.answer(f"O vídeo selecionado na posição <b>{posicao_atual+1}</b> é:\n📝 <i>{resumo}...</i>\n\nPara qual posição deseja enviá-lo? (Ex: 1 para o topo)", reply_markup=teclado_cancelar, parse_mode="HTML")
         await state.set_state(GerenciarFilaFluxo.aguardando_nova_posicao)
     else:
@@ -14235,7 +14213,7 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
             else:
                 date_next = amanha_str
                 
-            if EXIBIR_LOGS: logger.info(f"🚧 Fila: Movimento para o final da fila. Limiar aberto gerado com trava diária: {date_prev} vs {date_next}.")
+            logger.info(f"🚧 Fila: Movimento para o final da fila. Limiar aberto gerado com trava diária: {date_prev} vs {date_next}.")
         else:
             # No meio da fila: os vizinhos reais, limitados a amanhã
             if nova_posicao_virtual > 0:
@@ -14266,7 +14244,7 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
                     f"A posição escolhida fica na divisa de datas ou no final da fila.\n"
                     f"Você deseja que este vídeo seja agendado para <b>{label_prev}</b> ou empurrado para <b>{label_next}</b>?"
                 )
-                if EXIBIR_LOGS: logger.info(f"🚧 Fila: Limiar de data detectado ({label_prev} vs {label_next}). Solicitando decisão.")
+                logger.info(f"🚧 Fila: Limiar de data detectado ({label_prev} vs {label_next}). Solicitando decisão.")
                 await message.answer(texto_pergunta, reply_markup=teclado_limiar, parse_mode="HTML")
                 await state.set_state(GerenciarFilaFluxo.aguardando_decisao_limiar)
                 return 
@@ -14320,7 +14298,7 @@ async def processar_decisao_limiar(message: types.Message, state: FSMContext):
         await message.answer("Por favor, utilize os botões na tela para escolher a data.")
         return
         
-    if EXIBIR_LOGS: logger.info(f"✅ Decisão de limiar recebida: O vídeo herdará a data '{texto}'.")
+    logger.info(f"✅ Decisão de limiar recebida: O vídeo herdará a data '{texto}'.")
     await state.update_data(nova_data_adicao=nova_data_adicao)
     
     fila_data = ler_fila_postagens()
@@ -14396,7 +14374,7 @@ async def enviar_confirmacao_reordenar(message: types.Message, state: FSMContext
     texto += f"🗓️ Nova Data Alvo: <b>{data_amigavel}</b>\n\n"
     texto += "Confirma essa alteração?"
     
-    if EXIBIR_LOGS: logger.info("↕️ Fila: Coleta finalizada. Pedindo confirmação para confirmar as alterações.")
+    logger.info("↕️ Fila: Coleta finalizada. Pedindo confirmação para confirmar as alterações.")
     await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(GerenciarFilaFluxo.aguardando_confirmacao_reordenar)
 
@@ -14434,15 +14412,15 @@ async def processar_confirmacao_reordenar(message: types.Message, state: FSMCont
                 job_id_remover = f"job_fila_postagem_{id_movido}"
                 try:
                     scheduler.remove_job(job_id_remover)
-                    if EXIBIR_LOGS: logger.info(f"🧹 Agendamento de memória removido para o vídeo {id_movido} (Movido para o futuro).")
+                    logger.info(f"🧹 Agendamento de memória removido para o vídeo {id_movido} (Movido para o futuro).")
                 except: pass
                 
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro ao mudar data_alvo no DB: {e}")
+            logger.error(f"❌ Erro ao mudar data_alvo no DB: {e}")
             
         fila_simulada.insert(nova_posicao, item_movido)
         
-        if EXIBIR_LOGS: logger.info("↕️ Fila: Confirmação recebida. Vídeo reordenado via SQLite.")
+        logger.info("↕️ Fila: Confirmação recebida. Vídeo reordenado via SQLite.")
         
         fila_ids = [item["id"] for item in fila_simulada]
         await aplicar_renumeracao_e_salvar(fila_ids, message, state)
@@ -14467,7 +14445,7 @@ async def pedir_novo_numero_fila(message: types.Message, state: FSMContext):
     if 0 <= posicao < len(fila):
         import re
         if fila[posicao].get("postado", False):
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Fila: Tentativa de editar numeração de vídeo já postado na posição {posicao+1} bloqueada.")
+            logger.warning(f"⚠️ Fila: Tentativa de editar numeração de vídeo já postado na posição {posicao+1} bloqueada.")
             await message.answer("⚠️ <b>Ação Bloqueada:</b> Este vídeo já foi postado e serve apenas como histórico. Por favor, escolha outro número ou clique em Cancelar ❌.", parse_mode="HTML")
             return
             
@@ -14479,7 +14457,7 @@ async def pedir_novo_numero_fila(message: types.Message, state: FSMContext):
             resumo = "Vídeo sem descrição"
             
         await state.update_data(posicao_numeracao=posicao)
-        if EXIBIR_LOGS: logger.info(f"🔢 Fila: Posição {posicao+1} selecionada para edição de numeração.")
+        logger.info(f"🔢 Fila: Posição {posicao+1} selecionada para edição de numeração.")
         await message.answer(f"O vídeo selecionado na posição <b>{posicao+1}</b> é:\n📝 <i>{resumo}...</i>\n\nQual será o <b>NOVO NÚMERO</b> deste vídeo?", reply_markup=teclado_cancelar, parse_mode="HTML")
         await state.set_state(GerenciarFilaFluxo.aguardando_nova_numeracao)
     else:
@@ -14500,7 +14478,7 @@ async def salvar_nova_numeracao_fila(message: types.Message, state: FSMContext):
     fila = fila_data.get("fila", [])
     
     if 0 <= posicao < len(fila):
-        if EXIBIR_LOGS: logger.info(f"🔄 Iniciando renumeração via SQLite a partir da posição {posicao+1}...")
+        logger.info(f"🔄 Iniciando renumeração via SQLite a partir da posição {posicao+1}...")
         
         # Renumera daqui até o fim da fila
         fila_ids_alvo = [item["id"] for item in fila[posicao:]]
@@ -14526,7 +14504,7 @@ async def preparar_publicacao_imediata(message: types.Message, state: FSMContext
     if 0 <= posicao < len(fila):
         import re
         if fila[posicao].get("postado", False):
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Fila: Tentativa de publicar novamente vídeo já postado na posição {posicao+1} bloqueada.")
+            logger.warning(f"⚠️ Fila: Tentativa de publicar novamente vídeo já postado na posição {posicao+1} bloqueada.")
             await message.answer("⚠️ <b>Ação Bloqueada:</b> Este vídeo já foi postado e serve apenas como histórico. Por favor, escolha outro número ou clique em Cancelar ❌.", parse_mode="HTML")
             return
             
@@ -14538,7 +14516,7 @@ async def preparar_publicacao_imediata(message: types.Message, state: FSMContext
             resumo = "Vídeo sem descrição"
             
         await state.update_data(posicao_publicar=posicao)
-        if EXIBIR_LOGS: logger.info(f"🚀 Fila: Preparando publicação antecipada para a posição {posicao+1}.")
+        logger.info(f"🚀 Fila: Preparando publicação antecipada para a posição {posicao+1}.")
         
         teclado_confirmacao_publicar = ReplyKeyboardMarkup(
             keyboard=[[KeyboardButton(text="Publicar Vídeo 🚀"), KeyboardButton(text="Cancelar ❌")]],
@@ -14573,7 +14551,7 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
         # Publica com a numeração que já está na legenda
         legenda_disparo = item.get("legenda", "")
         
-        if EXIBIR_LOGS: logger.info(f"🚀 Iniciando antecipação do vídeo na posição {posicao+1}. Mantendo a numeração original.")
+        logger.info(f"🚀 Iniciando antecipação do vídeo na posição {posicao+1}. Mantendo a numeração original.")
         
         caminho_video = item.get("caminho_video")
         video_id = item.get("video_id")
@@ -14586,7 +14564,7 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
             if caminho_video and os.path.exists(caminho_video):
                 # Arquivo de imagem não sobe como vídeo
                 if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
-                    if EXIBIR_LOGS: logger.warning("🚫 [Segurança] Disparo imediato abortado! O ficheiro é uma imagem.")
+                    logger.warning("🚫 [Segurança] Disparo imediato abortado! O ficheiro é uma imagem.")
                     raise Exception("O ficheiro físico validado é uma imagem e não um vídeo.")
                     
                 arquivo = FSInputFile(caminho_video)
@@ -14599,7 +14577,7 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
                 await bot.send_video(chat_id=GRUPO_ID, video=video_id, caption=legenda_disparo, parse_mode="HTML")
                 sucesso_upload = True
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Falha no disparo imediato: {e}")
+            logger.error(f"❌ Falha no disparo imediato: {e}")
             if caminho_video and os.path.exists(caminho_video):
                 try: os.rename(caminho_video, caminho_video + ".pendente")
                 except: pass
@@ -14611,7 +14589,7 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
         await msg_status.delete()
             
         if sucesso_upload:
-            if EXIBIR_LOGS: logger.info("✅ Vídeo manual submetido. Atualizando SQLite...")
+            logger.info("✅ Vídeo manual submetido. Atualizando SQLite...")
             
             agora_manual = datetime.now(fuso_horario)
             id_unico = item["id"]
@@ -14628,7 +14606,7 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
                 conexao.commit()
                 conexao.close()
             except Exception as e:
-                if EXIBIR_LOGS: logger.error(f"❌ Erro ao atualizar status manual no DB: {e}")
+                logger.error(f"❌ Erro ao atualizar status manual no DB: {e}")
             
             if caminho_video and os.path.exists(caminho_video):
                 ainda_usado = any(x.get("caminho_video") == caminho_video and not x.get("postado", False) for x in fila)
@@ -14714,9 +14692,8 @@ async def processar_fila_espiao(forcar=False):
         fila_data["fila"] = fila_sobrevivente
         fila = fila_sobrevivente
         salvar_fila_clonagem(fila_data)
-        if EXIBIR_LOGS:
-            logger.info(f"🛟 [Espião] Anti-avalanche: {resgatados} clone(s) atrasado(s) reagendado(s) e "
-                        f"{descartados} descartado(s) por passar de {LIMITE_DIAS_DESCARTE} dias.")
+        logger.info(f"🛟 [Espião] Anti-avalanche: {resgatados} clone(s) atrasado(s) reagendado(s) e "
+                    f"{descartados} descartado(s) por passar de {LIMITE_DIAS_DESCARTE} dias.")
 
     # --- 1. Distribuição dos horários ---
     itens_para_agendar = []
@@ -14776,10 +14753,10 @@ async def processar_fila_espiao(forcar=False):
                     except Exception: pass
             fila_data["fila"] = [i for i in fila_data.get("fila", []) if not i.get("descartar_por_idade")]
             fila = fila_data["fila"]
-            if EXIBIR_LOGS: logger.info(f"🗑️ [Espião] {len(marcados)} clone(s) descartado(s): passariam de {config_fila['limite_dias_descarte']} dias desde a captura.")
+            logger.info(f"🗑️ [Espião] {len(marcados)} clone(s) descartado(s): passariam de {config_fila['limite_dias_descarte']} dias desde a captura.")
 
         salvar_fila_clonagem(fila_data)
-        if EXIBIR_LOGS: logger.info(f"📅 [Espião] Motor Central acionado! {len(itens_para_agendar)} clones organizados com sucesso.")
+        logger.info(f"📅 [Espião] Motor Central acionado! {len(itens_para_agendar)} clones organizados com sucesso.")
 
     # --- 1.5. Recompactação ---
     # Vídeo publicado, descartado ou removido deixa buraco na grade. O que tinha
@@ -14794,9 +14771,8 @@ async def processar_fila_espiao(forcar=False):
     }, agora)
     if movidos_recompactacao:
         salvar_fila_clonagem(fila_data)
-        if EXIBIR_LOGS:
-            logger.info(f"🧲 [Espião] {len(movidos_recompactacao)} vídeo(s) antecipado(s) "
-                        f"para dias que tinham vaga.")
+        logger.info(f"🧲 [Espião] {len(movidos_recompactacao)} vídeo(s) antecipado(s) "
+                    f"para dias que tinham vaga.")
 
     # --- 2. Publicação ---
     itens_para_disparar = []
@@ -14812,7 +14788,7 @@ async def processar_fila_espiao(forcar=False):
     # um por minuto.
     if len(itens_para_disparar) > 1:
         itens_para_disparar.sort(key=lambda i: i.get("horario_disparo", ""))
-        if EXIBIR_LOGS: logger.info(f"🚦 [Espião] {len(itens_para_disparar)} clones vencidos. Publicando 1 por ciclo.")
+        logger.info(f"🚦 [Espião] {len(itens_para_disparar)} clones vencidos. Publicando 1 por ciclo.")
         itens_para_disparar = itens_para_disparar[:1]
 
     if not itens_para_disparar:
@@ -14842,7 +14818,7 @@ async def processar_fila_espiao(forcar=False):
 
         if conflito_silencio:
             # Só pula este ciclo: o horário fica e o clone sai assim que a rotina passar.
-            if EXIBIR_LOGS: logger.info(f"🤫 [Espião] Rotina do Viral a menos de {JANELA_SILENCIO_MIN} min. Aguardando o próximo ciclo.")
+            logger.info(f"🤫 [Espião] Rotina do Viral a menos de {JANELA_SILENCIO_MIN} min. Aguardando o próximo ciclo.")
             return
             
         caminho_video = item_pendente["caminho_video"]
@@ -14854,7 +14830,7 @@ async def processar_fila_espiao(forcar=False):
             salvar_fila_clonagem(fila_data)
             continue
             
-        if EXIBIR_LOGS: logger.info(f"🕵️ Processando clone agendado: {item_id}")
+        logger.info(f"🕵️ Processando clone agendado: {item_id}")
         link_final = await converter_link_shopee(link_original)
         
         try:
@@ -14876,9 +14852,9 @@ async def processar_fila_espiao(forcar=False):
             # analisado duas vezes, gastando cota do Gemini à toa.
             texto_ia = item_pendente.get("legenda_ia")
             if texto_ia:
-                if EXIBIR_LOGS: logger.info(f"♻️ [Espião] Nome reaproveitado da análise antecipada ({item_id}).")
+                logger.info(f"♻️ [Espião] Nome reaproveitado da análise antecipada ({item_id}).")
             else:
-                texto_ia = await analisar_video_gemini(caminho_video, prompt_espiao, EXIBIR_LOGS)
+                texto_ia = await analisar_video_gemini(caminho_video, prompt_espiao)
             if not texto_ia: raise Exception("IA não retornou dados.")
         except Exception as e:
             registrar_erro_json(f"processar_fila_espiao IA: {e}", origem="espiao.py")
@@ -14899,12 +14875,10 @@ async def processar_fila_espiao(forcar=False):
                         f_item["horario_disparo"] = novo_horario
                         break
                 salvar_fila_clonagem(fila_data)
-                if EXIBIR_LOGS:
-                    logger.warning(f"🧠 [Espião] IA indisponível (tentativa {tentativas}/{MAX_TENTATIVAS_IA}). "
-                                   f"Clone adiado para {novo_horario[11:16]}.")
+                logger.warning(f"🧠 [Espião] IA indisponível (tentativa {tentativas}/{MAX_TENTATIVAS_IA}). "
+                               f"Clone adiado para {novo_horario[11:16]}.")
                 continue
-            if EXIBIR_LOGS:
-                logger.warning(f"🧠 [Espião] IA falhou {MAX_TENTATIVAS_IA}x. Publicando somente com o link de afiliado.")
+            logger.warning(f"🧠 [Espião] IA falhou {MAX_TENTATIVAS_IA}x. Publicando somente com o link de afiliado.")
 
         if texto_ia:
             linhas_ia = texto_ia.split('\n')
@@ -14928,11 +14902,11 @@ async def processar_fila_espiao(forcar=False):
             item_pendente["legenda"] = legenda_postagem
             
             registrar_ultimo_post(canal_destino, "video")  # Intercalação
-            if EXIBIR_LOGS: logger.info(f"✅ Clone {item_id} publicado com sucesso! ID: {msg_enviada.message_id}")
+            logger.info(f"✅ Clone {item_id} publicado com sucesso! ID: {msg_enviada.message_id}")
             try: os.remove(caminho_video)
             except: pass
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Falha ao postar clone: {e}")
+            logger.error(f"❌ Falha ao postar clone: {e}")
             try: os.rename(caminho_video, caminho_video + ".pendente")
             except: pass
             
@@ -14946,19 +14920,19 @@ async def processar_fila_espiao(forcar=False):
 
 async def sincronizar_financeiro_horario():
     """De hora em hora: pedidos dos últimos 3 dias na API da Shopee para o banco."""
-    if EXIBIR_LOGS: logger.info("⏰ [Financeiro] Iniciando sincronização em background com a API Shopee...")
+    logger.info("⏰ [Financeiro] Iniciando sincronização em background com a API Shopee...")
     
     conversoes = await buscar_dados_financeiros_shopee(3)
     if conversoes:
         processar_e_salvar_pedidos_api(conversoes)
-        if EXIBIR_LOGS: logger.info("✅ [Financeiro] Varredura horária concluída. Banco de Pedidos atualizado.")
+        logger.info("✅ [Financeiro] Varredura horária concluída. Banco de Pedidos atualizado.")
 
 async def varredura_retroativa_pendentes():
     """
     Madrugada: com pedido ainda pendente no banco, busca de novo desde o mais antigo
     (até 90 dias) para fechar confirmados e cancelados.
     """
-    if EXIBIR_LOGS: logger.info("🌙 [Pente Fino] Iniciando varredura de madrugada para caçar pedidos pendentes antigos...")
+    logger.info("🌙 [Pente Fino] Iniciando varredura de madrugada para caçar pedidos pendentes antigos...")
     
     pedidos_db = ler_banco_pedidos()
     if not pedidos_db:
@@ -14979,7 +14953,7 @@ async def varredura_retroativa_pendentes():
                 pass
                 
     if not tem_pendentes:
-        if EXIBIR_LOGS: logger.info("✅ [Pente Fino] Nenhum pedido pendente no banco de dados. Varredura suspensa.")
+        logger.info("✅ [Pente Fino] Nenhum pedido pendente no banco de dados. Varredura suspensa.")
         return
         
     dias_retroativos = (agora - data_mais_antiga).days + 1
@@ -14987,16 +14961,16 @@ async def varredura_retroativa_pendentes():
     if dias_retroativos > 90: dias_retroativos = 90
     if dias_retroativos < 5: dias_retroativos = 5
     
-    if EXIBIR_LOGS: logger.info(f"🔍 [Pente Fino] Pendentes antigos detetados! A requisitar relatório dos últimos {dias_retroativos} dias à Shopee...")
+    logger.info(f"🔍 [Pente Fino] Pendentes antigos detetados! A requisitar relatório dos últimos {dias_retroativos} dias à Shopee...")
     
     conversoes = await buscar_dados_financeiros_shopee(dias_retroativos)
     if conversoes:
         processar_e_salvar_pedidos_api(conversoes)
-        if EXIBIR_LOGS: logger.info("✅ [Pente Fino] Varredura profunda concluída! Pendentes antigos consolidados (Confirmados ou Cancelados).")
+        logger.info("✅ [Pente Fino] Varredura profunda concluída! Pendentes antigos consolidados (Confirmados ou Cancelados).")
 
 async def checkup_diario_grupos():
     """Relatório diário ao admin: canais do Espião e rotas do Espelhador com falha de acesso."""
-    if EXIBIR_LOGS: logger.info("🚀 Consolidando relatório de saúde diário do sistema...")
+    logger.info("🚀 Consolidando relatório de saúde diário do sistema...")
     
     relatorio = "📊 <b>Relatório Diário de Saúde dos Robôs</b>\n\n"
     
@@ -15017,7 +14991,7 @@ async def checkup_diario_grupos():
         relatorio += f"✅ Ativos: {len(alvos) - erros_espiao}\n"
         relatorio += f"🔴 Com falhas de acesso: {erros_espiao}\n"
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"Erro na auditoria do espião: {e}")
+        logger.error(f"Erro na auditoria do espião: {e}")
         relatorio += "👁️ <b>Espião de Afiliados:</b> <i>Dados não encontrados.</i>\n"
 
     relatorio += "\n"
@@ -15040,9 +15014,9 @@ async def checkup_diario_grupos():
     
     try:
         await bot.send_message(chat_id=ADMIN_ID, text=relatorio, parse_mode="HTML")
-        if EXIBIR_LOGS: logger.info("✅ Relatório de saúde diário consolidado e enviado ao administrador com sucesso.")
+        logger.info("✅ Relatório de saúde diário consolidado e enviado ao administrador com sucesso.")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"⚠️ Erro ao disparar a mensagem do relatório diário: {e}")
+        logger.error(f"⚠️ Erro ao disparar a mensagem do relatório diário: {e}")
 
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Pausar Robô Moderador ⏸️", "Retomar Robô Moderador ▶️", "Ativar Robô Moderador ⚙️", "Desativar Robô Moderador 🛑"]))
 async def pedir_confirmacao_toggle(message: types.Message, state: FSMContext):
@@ -15094,7 +15068,7 @@ async def processar_toggle_submissoes(message: types.Message, state: FSMContext)
         icone = "⏸️"
         status = "PAUSADO"
 
-    if EXIBIR_LOGS: logger.info(f"⚙️ Status do Robô Moderador alterado para: {status}")
+    logger.info(f"⚙️ Status do Robô Moderador alterado para: {status}")
     await message.answer(f"{icone} O Robô Moderador foi <b>{status}</b> com sucesso.", parse_mode="HTML")
     await submenu_robo_moderador(message, state)
 
@@ -15193,7 +15167,7 @@ async def voltar_pub_rotinas(message: types.Message, state: FSMContext):
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Definir Tópicos de Moderação 💬")
 async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
     """Tópicos de Moderação: escolha entre o tópico de escuta e o de postagem."""
-    if EXIBIR_LOGS: logger.info("⚙️ Acessando submenu modular de configuração de tópicos.")
+    logger.info("⚙️ Acessando submenu modular de configuração de tópicos.")
     
     teclado = ReplyKeyboardMarkup(
         keyboard=[
@@ -15378,7 +15352,7 @@ async def confirmar_salvamento_grupo(message: types.Message, state: FSMContext):
 
     salvar_submissao_config(config)
     
-    if EXIBIR_LOGS: logger.info(f"✅ Painel Público: Configuração '{campo}' atualizada com sucesso.")
+    logger.info(f"✅ Painel Público: Configuração '{campo}' atualizada com sucesso.")
     await message.answer("✅ <b>Configuração atualizada com sucesso!</b>", parse_mode="HTML")
     
     await painel_submissoes(message, state)
@@ -15410,7 +15384,7 @@ async def reenviar_botao_ofertas():
         topico_envio = config.get("topico_envio")
 
         if not grupo_id or topico_envio is None:
-            if EXIBIR_LOGS: logger.warning("⚠️ [Painel Fixo] Grupo ou Tópico de Escuta não configurado. Reenvio abortado.")
+            logger.warning("⚠️ [Painel Fixo] Grupo ou Tópico de Escuta não configurado. Reenvio abortado.")
             return
 
         from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -15430,7 +15404,7 @@ async def reenviar_botao_ofertas():
                 disable_notification=True
             )
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ [Painel Fixo] Falha ao reenviar o painel de submissão: {e}")
+            logger.error(f"❌ [Painel Fixo] Falha ao reenviar o painel de submissão: {e}")
             return
 
         # Só apaga o anterior depois que o novo está no ar: o tópico nunca fica sem painel
@@ -15450,9 +15424,9 @@ async def reenviar_botao_ofertas():
                 disable_notification=True
             )
         except Exception as e:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ [Painel Fixo] Não consegui fixar: {e}")
+            logger.warning(f"⚠️ [Painel Fixo] Não consegui fixar: {e}")
 
-        if EXIBIR_LOGS: logger.info(f"📌 [Painel Fixo] Painel de submissão recriado no fim do tópico (ID {msg.message_id}).")
+        logger.info(f"📌 [Painel Fixo] Painel de submissão recriado no fim do tópico (ID {msg.message_id}).")
 
 @dp.message(F.pinned_message)
 async def limpar_aviso_fixacao(message: types.Message):
@@ -15464,8 +15438,7 @@ async def limpar_aviso_fixacao(message: types.Message):
 @dp.message(Command("botao_ofertas"))
 async def gerar_botao_permanente(message: types.Message):
     """/botao_ofertas: recria o painel fixo de submissão e apaga o comando."""
-    if EXIBIR_LOGS: 
-        logger.info(f"📥 Solicitada criação do botão público no tópico. Usuário: {message.from_user.id}")
+    logger.info(f"📥 Solicitada criação do botão público no tópico. Usuário: {message.from_user.id}")
     
     await reenviar_botao_ofertas()
             
@@ -15539,15 +15512,13 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
         # muda aqui pareceria uma task morta.
         sessao_atual = data.get("sessao_wizard_id")
         if sessao_atual != sessao_id:
-            if EXIBIR_LOGS:
-                motivo = "sessão trocada" if sessao_atual else "FSM limpo (state.clear)"
-                logger.info(f"⏹️ [Cronômetro] Encerrando sessão {sessao_id}: {motivo}. Restavam {restante}s.")
+            motivo = "sessão trocada" if sessao_atual else "FSM limpo (state.clear)"
+            logger.info(f"⏹️ [Cronômetro] Encerrando sessão {sessao_id}: {motivo}. Restavam {restante}s.")
             return
 
         texto_base = data.get("texto_wizard_base")
         if not texto_base:
-            if EXIBIR_LOGS:
-                logger.warning(f"⚠️ [Cronômetro] Sessão {sessao_id} sem texto_wizard_base. Encerrando.")
+            logger.warning(f"⚠️ [Cronômetro] Sessão {sessao_id} sem texto_wizard_base. Encerrando.")
             return
 
         try:
@@ -15562,8 +15533,7 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
             # Falha que se repete congela o painel na tela com a task viva: vira log.
             # "message is not modified" é normal e fica quieto.
             if "not modified" not in str(e).lower():
-                if EXIBIR_LOGS:
-                    logger.warning(f"⚠️ [Cronômetro] Falha ao editar painel {message_id} ({restante}s restantes): {type(e).__name__}: {e}")
+                logger.warning(f"⚠️ [Cronômetro] Falha ao editar painel {message_id} ({restante}s restantes): {type(e).__name__}: {e}")
 
     await asyncio.sleep(restante)
 
@@ -15650,7 +15620,7 @@ async def abrir_confirmacao_expiracao(chat_id, message_id, thread_id, state: FSM
     except Exception:
         pass
 
-    if EXIBIR_LOGS: logger.info(f"🛟 [Wizard] Prazo esgotado com material completo. Pergunta de resgate aberta para o dono {dono_id}.")
+    logger.info(f"🛟 [Wizard] Prazo esgotado com material completo. Pergunta de resgate aberta para o dono {dono_id}.")
     criar_task(cronometro_confirmacao_expiracao(chat_id, message_id, thread_id, state, sessao_conf, teclado))
 
 async def cronometro_confirmacao_expiracao(chat_id, message_id, thread_id, state: FSMContext, sessao_conf, teclado):
@@ -15682,7 +15652,7 @@ async def cronometro_confirmacao_expiracao(chat_id, message_id, thread_id, state
         return
 
     # Sem resposta: publica a oferta pronta em vez de jogá-la fora.
-    if EXIBIR_LOGS: logger.info(f"🚀 [Wizard] Prazo de resgate esgotado. Publicando automaticamente a oferta de {data.get('dono_wizard')}.")
+    logger.info(f"🚀 [Wizard] Prazo de resgate esgotado. Publicando automaticamente a oferta de {data.get('dono_wizard')}.")
     await wizard_publicar_oferta(None, state, chat_forcado=chat_id, mencao_forcada=data.get("mencao_wizard"))
 
 # --- Buscador de produtos ---
@@ -15720,7 +15690,7 @@ def _iniciar_tabela_buscas():
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Busca] Falha ao criar tabela: {e}")
+        logger.error(f"❌ [Busca] Falha ao criar tabela: {e}")
 
 
 def contar_buscas_hoje(user_id):
@@ -15749,7 +15719,7 @@ def registrar_busca(user_id):
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Busca] Falha ao registrar: {e}")
+        logger.error(f"❌ [Busca] Falha ao registrar: {e}")
 
 
 # Conectivos não entram na deduplicação: sem isso "De Ouvido ... De Longa
@@ -15879,7 +15849,7 @@ async def montar_resposta_busca(termo, ofertas, total_bruto):
             nota = 0
         vendas = int(oferta.get("sales") or 0)
 
-        link = await converter_link_shopee(oferta.get("productLink"), "busca", EXIBIR_LOGS)
+        link = await converter_link_shopee(oferta.get("productLink"), "busca")
 
         faixa = _faixa_preco(oferta)
         detalhes = [faixa] if faixa else []
@@ -15941,7 +15911,7 @@ async def reenviar_painel_busca():
                 disable_notification=True
             )
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ [Painel Busca] Falha ao reenviar: {e}")
+            logger.error(f"❌ [Painel Busca] Falha ao reenviar: {e}")
             return False
 
         # Só apaga o anterior depois que o novo está no ar: o tópico nunca fica sem painel
@@ -15957,9 +15927,9 @@ async def reenviar_painel_busca():
             await bot.pin_chat_message(chat_id=BUSCA_GRUPO_ID, message_id=msg.message_id,
                                        disable_notification=True)
         except Exception as e:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ [Painel Busca] Não consegui fixar: {e}")
+            logger.warning(f"⚠️ [Painel Busca] Não consegui fixar: {e}")
 
-        if EXIBIR_LOGS: logger.info(f"📌 [Painel Busca] Painel recriado no fim do tópico (ID {msg.message_id}).")
+        logger.info(f"📌 [Painel Busca] Painel recriado no fim do tópico (ID {msg.message_id}).")
         return True
 
 
@@ -15997,7 +15967,7 @@ async def _apagar_busca_falha(chat_id, ids, minutos=BUSCA_MINUTOS_APAGAR_FALHA):
             await bot.delete_message(chat_id=chat_id, message_id=msg_id)
         except Exception:
             pass
-    if EXIBIR_LOGS: logger.info("🧹 [Busca] Tentativa sem resultado removida do tópico.")
+    logger.info("🧹 [Busca] Tentativa sem resultado removida do tópico.")
 
 
 def eh_topico_da_busca(message: types.Message) -> bool:
@@ -16048,7 +16018,7 @@ async def buscador_produtos(message: types.Message):
             except Exception: pass
             return
 
-    if EXIBIR_LOGS: logger.info(f"🔎 [Busca] {user_id} procurando: '{termo}'")
+    logger.info(f"🔎 [Busca] {user_id} procurando: '{termo}'")
     procurando = await message.reply("🔎 Procurando na Shopee...")
 
     try:
@@ -16071,13 +16041,13 @@ async def buscador_produtos(message: types.Message):
             registrar_busca(user_id)
 
         await procurando.edit_text(texto, parse_mode="HTML", disable_web_page_preview=True)
-        if EXIBIR_LOGS: logger.info(f"✅ [Busca] Resposta entregue para '{termo}'.")
+        logger.info(f"✅ [Busca] Resposta entregue para '{termo}'.")
 
         # O painel volta para o fim do tópico quando a conversa esfriar
         agendar_painel_busca()
 
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Busca] Falha ao buscar '{termo}': {e}")
+        logger.error(f"❌ [Busca] Falha ao buscar '{termo}': {e}")
         registrar_erro_json(f"buscador_produtos ({termo}): {e}", origem="bot_mestre.py")
         try:
             await procurando.edit_text(
@@ -16144,7 +16114,7 @@ async def interceptar_envio_livre(message: types.Message, state: FSMContext):
 
     # Mandou algo válido sem tocar no botão: o painel abre já com o item marcado.
     if video_id or link_shopee or link_tiktok:
-        if EXIBIR_LOGS: logger.info(f"🚀 [Painel Automático] Envio válido detectado de {message.from_user.id}. Abrindo painel.")
+        logger.info(f"🚀 [Painel Automático] Envio válido detectado de {message.from_user.id}. Abrindo painel.")
         await criar_painel_submissao(
             message.chat.id, message.message_thread_id, message.from_user, state,
             video_id=video_id, link_shopee=link_shopee, link_tiktok=link_tiktok
@@ -16217,7 +16187,7 @@ async def bloquear_intruso_wizard(callback: types.CallbackQuery):
             "Toque em 🎬 Iniciar Postagem de Oferta no painel para abrir a sua.",
             show_alert=True
         )
-        if EXIBIR_LOGS: logger.info(f"🔒 [Trava de Autoria] Usuário {callback.from_user.id} tentou mexer na sessão de {dono}.")
+        logger.info(f"🔒 [Trava de Autoria] Usuário {callback.from_user.id} tentou mexer na sessão de {dono}.")
         return True
     return False
 
@@ -16330,14 +16300,13 @@ def registrar_painel_aberto(chat_id, message_id):
         # é alto e o descarte vai para o log.
         if len(abertos) > LIMITE_REGISTRO_PAINEIS:
             perdidos = len(abertos) - LIMITE_REGISTRO_PAINEIS
-            if EXIBIR_LOGS:
-                logger.warning(f"⚠️ [Anti-Órfão] {perdidos} painel(is) saíram do registro sem "
-                               f"terem sido varridos e ficarão no grupo para sempre.")
+            logger.warning(f"⚠️ [Anti-Órfão] {perdidos} painel(is) saíram do registro sem "
+                           f"terem sido varridos e ficarão no grupo para sempre.")
             abertos = abertos[-LIMITE_REGISTRO_PAINEIS:]
 
         db.salvar_config("paineis_wizard_abertos", abertos)
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao registrar painel aberto: {e}")
+        logger.error(f"❌ Erro ao registrar painel aberto: {e}")
 
 async def limpar_paineis_orfaos():
     """
@@ -16384,19 +16353,17 @@ async def limpar_paineis_orfaos():
             if tentativas < 3:
                 painel["tentativas"] = tentativas + 1
                 pendentes.append(painel)
-                if EXIBIR_LOGS:
-                    logger.warning(f"⚠️ [Anti-Órfão] Painel {message_id} resistiu "
-                                   f"(tentativa {tentativas + 1}/3): {motivo}")
-            elif EXIBIR_LOGS:
+                logger.warning(f"⚠️ [Anti-Órfão] Painel {message_id} resistiu "
+                               f"(tentativa {tentativas + 1}/3): {motivo}")
+            else:
                 logger.error(f"❌ [Anti-Órfão] Painel {message_id} desistido após 3 tentativas. "
                              f"Confira se o bot é admin com permissão de apagar mensagens. Último erro: {motivo}")
 
         db.salvar_config("paineis_wizard_abertos", pendentes)
-        if EXIBIR_LOGS:
-            logger.info(f"🧹 [Anti-Órfão] {removidos} painel(is) apagado(s), {neutralizados} "
-                        f"neutralizado(s) por edição, {len(pendentes)} guardado(s) para a próxima subida.")
+        logger.info(f"🧹 [Anti-Órfão] {removidos} painel(is) apagado(s), {neutralizados} "
+                    f"neutralizado(s) por edição, {len(pendentes)} guardado(s) para a próxima subida.")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Anti-Órfão] Erro na varredura de painéis: {e}")
+        logger.error(f"❌ [Anti-Órfão] Erro na varredura de painéis: {e}")
 
 async def criar_painel_submissao(chat_id, thread_id, user, state: FSMContext, video_id=None, link_shopee=None, link_tiktok=None):
     """
@@ -16610,7 +16577,7 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
             "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags ou adicionar mensagens extras."
         )
 
-        analise_ia = await analisar_video_gemini(video_path, prompt, EXIBIR_LOGS)
+        analise_ia = await analisar_video_gemini(video_path, prompt)
         try: os.remove(video_path)
         except: pass
 
@@ -16619,7 +16586,7 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
             # temporária".
             import api_gemini
             motivo_ia = (api_gemini.ULTIMO_ERRO_IA or "motivo não registrado")[:200]
-            if EXIBIR_LOGS: logger.error(f"❌ [Submissão] A IA não respondeu → {motivo_ia}")
+            logger.error(f"❌ [Submissão] A IA não respondeu → {motivo_ia}")
             try:
                 await bot.edit_message_text(
                     chat_id=message.chat.id, message_id=msg_wizard_id,
@@ -16689,7 +16656,7 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
             except: pass
 
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro na submissão guiada: {e}")
+        logger.error(f"❌ Erro na submissão guiada: {e}")
         # Nomeia a causa mais comum (teto de download) em vez de "erro interno".
         if "too big" in str(e).lower():
             texto_erro = (
@@ -16901,10 +16868,10 @@ async def monitor_saude():
         if alertas:
             texto = "🩺 <b>ALERTA DE SAÚDE DO SISTEMA</b>\n\n" + "\n\n".join(alertas)
             await bot.send_message(ADMIN_ID, texto, parse_mode="HTML")
-            if EXIBIR_LOGS: logger.warning(f"🩺 [Saúde] {len(alertas)} alerta(s) enviado(s) ao admin.")
+            logger.warning(f"🩺 [Saúde] {len(alertas)} alerta(s) enviado(s) ao admin.")
 
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Saúde] Falha no monitor: {e}")
+        logger.error(f"❌ [Saúde] Falha no monitor: {e}")
 
 def contar_erros_recentes(horas=1):
     """Erros gravados pelo registrar_erro_json (tabela erros_logs) nas últimas horas."""
@@ -17044,7 +17011,7 @@ async def main():
     scheduler.add_job(verificar_pausa_diaria, 'cron', hour=9, minute=0, timezone=FUSO_STR)
     
     # Fim da Pausa Programada (de minuto em minuto)
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento de retomada de pausa minuto a minuto...")
+    logger.info("🚀 Iniciando monitoramento de retomada de pausa minuto a minuto...")
     scheduler.add_job(verificar_retorno_pausa_minuto, 'interval', minutes=1, timezone=FUSO_STR)
     
     # Motor do Espião (de minuto em minuto)
@@ -17070,13 +17037,13 @@ async def main():
     agendar_tarefas_diarias()
     
     scheduler.start()
-    if EXIBIR_LOGS: logger.info("🔍 Verificando status de pausa programada na inicialização...")
+    logger.info("🔍 Verificando status de pausa programada na inicialização...")
     dados_pausa = ler_pausa_programada()
     if dados_pausa.get("ativa") and "rotina" in dados_pausa.get("servicos_pausados", []):
         dados_rotina = ler_config_rotina()
         dados_rotina["pausado"] = True
         salvar_config_rotina(dados_rotina)
-        if EXIBIR_LOGS: logger.info("⏸️ Rotinas estavam em pausa programada. Marcado como pausado no JSON com sucesso.")
+        logger.info("⏸️ Rotinas estavam em pausa programada. Marcado como pausado no JSON com sucesso.")
     # Falhas de tasks assíncronas vão para o log
     asyncio.get_running_loop().set_exception_handler(capturar_falha_task)
 

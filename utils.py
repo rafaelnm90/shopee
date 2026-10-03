@@ -3,7 +3,6 @@ Funções compartilhadas pelos robôs: registro de erros, cache de análises da 
 cache de nomes de grupos e validação de IDs do Telegram. O acesso ao banco fica
 no db.py.
 """
-EXIBIR_LOGS = True
 import os
 import json
 from datetime import datetime
@@ -12,9 +11,8 @@ from zoneinfo import ZoneInfo
 import traceback
 import db
 
-if EXIBIR_LOGS:
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
-    logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 MAX_ERRORS = 50
 
@@ -71,9 +69,9 @@ def registrar_erro_json(mensagem_erro, origem="Geral", contexto_extra=None):
         conexao.commit()
         conexao.close()
         
-        if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Erro de {origem} registado com rastro no SQLite.")
+        logger.info(f"✅ Sucesso: Erro de {origem} registado com rastro no SQLite.")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao tentar registar log no SQLite: {e}")
+        logger.error(f"❌ Falha crítica ao tentar registar log no SQLite: {e}")
 
 # Cache de análises da IA: o Espião e as rotas do Espelhador capturam dos mesmos
 # canais, e sem cache o mesmo vídeo iria para a IA uma vez por robô, gastando cota.
@@ -113,7 +111,7 @@ def consultar_cache_ia(chave):
         conexao.close()
         return linha[0] if linha else None
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Cache IA] Erro ao consultar: {e}")
+        logger.error(f"❌ [Cache IA] Erro ao consultar: {e}")
         return None
 
 def gravar_cache_ia(chave, resultado):
@@ -132,7 +130,7 @@ def gravar_cache_ia(chave, resultado):
         conexao.close()
         return True
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Cache IA] Erro ao gravar: {e}")
+        logger.error(f"❌ [Cache IA] Erro ao gravar: {e}")
         return False
 
 def estatisticas_cache_ia():
@@ -163,7 +161,7 @@ def limpar_cache_ia_antigo(dias=30):
         removidos = cursor.rowcount
         conexao.commit()
         conexao.close()
-        if removidos and EXIBIR_LOGS:
+        if removidos:
             logger.info(f"🧹 [Cache IA] {removidos} análise(s) com mais de {dias} dias removida(s).")
         return removidos
     except Exception:
@@ -184,7 +182,7 @@ def ler_cache_nomes_grupos():
         
         return {linha[0]: linha[1] for linha in resultados}
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler cache de nomes do SQLite: {e}")
+        logger.error(f"❌ Erro ao ler cache de nomes do SQLite: {e}")
         return {}
 
 def salvar_nome_grupo(chat_id, nome):
@@ -212,9 +210,9 @@ def salvar_nome_grupo(chat_id, nome):
         conexao.commit()
         conexao.close()
         
-        if EXIBIR_LOGS: logger.info(f"✅ Nome do grupo {chave} salvo no cache do SQLite: {nome_str}")
+        logger.info(f"✅ Nome do grupo {chave} salvo no cache do SQLite: {nome_str}")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Falha ao salvar nome do grupo {chave} no cache SQLite: {e}")
+        logger.error(f"❌ Falha ao salvar nome do grupo {chave} no cache SQLite: {e}")
 
 async def validar_e_formatar_alvo(bot_instance, entrada):
     """

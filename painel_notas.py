@@ -14,7 +14,6 @@ Filtro anti-duplicidade: PDF com nome já ENVIADO ou PENDENTE é ignorado (os no
 mudam a cada mês). Pode ser desligado pelo menu; volta sozinho depois de 5 minutos
 ou depois de um lote.
 """
-EXIBIR_LOGS = True
 FILTRO_ANTI_DUPLICIDADE = True  # estado inicial; o botão do menu alterna em tempo de execução
 import os
 import zipfile
@@ -50,8 +49,7 @@ EMAIL_ADMIN = 'rafaelnovaismiranda@gmail.com'
 LIMITE_DIARIO = 290
 PAUSA_HORAS = 26
 
-if EXIBIR_LOGS:
-    logger = logging.getLogger("PainelNotas")
+logger = logging.getLogger("PainelNotas")
 
 router = Router()
 bot_instance = None
@@ -102,7 +100,7 @@ def _salvar_retomada(quando):
         finally:
             conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Notas] Não consegui gravar a retomada automática: {e}")
+        logger.error(f"❌ [Notas] Não consegui gravar a retomada automática: {e}")
 
 
 def _restaurar_retomada():
@@ -124,7 +122,7 @@ def _restaurar_retomada():
     quando = max(quando, datetime.now() + timedelta(minutes=1))
     scheduler_instance.add_job(processar_fila_envios, 'date', run_date=quando, kwargs={"retomada": True},
                                id='retomada_notas', replace_existing=True)
-    if EXIBIR_LOGS: logger.info(f"⏰ [Notas] Retomada de {pendentes} nota(s) pendente(s) reagendada para {quando.strftime('%d/%m %H:%M')}.")
+    logger.info(f"⏰ [Notas] Retomada de {pendentes} nota(s) pendente(s) reagendada para {quando.strftime('%d/%m %H:%M')}.")
 
 
 def configurar_dependencias(bot: Bot, scheduler):
@@ -136,8 +134,8 @@ def configurar_dependencias(bot: Bot, scheduler):
     try:
         _restaurar_retomada()
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Notas] Não consegui restaurar a retomada automática: {e}")
-    if EXIBIR_LOGS: logger.info("🔌 Conexão estabelecida: Dependências do Disparador de Notas injetadas com sucesso.")
+        logger.error(f"❌ [Notas] Não consegui restaurar a retomada automática: {e}")
+    logger.info("🔌 Conexão estabelecida: Dependências do Disparador de Notas injetadas com sucesso.")
 
 class PainelNotasFluxo(StatesGroup):
     menu_principal = State()
@@ -241,7 +239,7 @@ async def processar_fila_envios(msg_progresso: types.Message = None, retomada=Fa
     PENDENTE e saem na retomada automática (agendada com retomada=True).
     """
     if _trava_envio.locked():
-        if EXIBIR_LOGS: logger.info("⏳ [Notas] Já há um envio em andamento; este lote espera ele terminar.")
+        logger.info("⏳ [Notas] Já há um envio em andamento; este lote espera ele terminar.")
         if msg_progresso:
             try:
                 await msg_progresso.edit_text("⏳ <i>Há um envio em andamento. Este lote sai assim que ele terminar.</i>", parse_mode="HTML")
@@ -251,7 +249,7 @@ async def processar_fila_envios(msg_progresso: types.Message = None, retomada=Fa
     async with _trava_envio:
         pausa_ate = _ler_retomada()
         if not retomada and pausa_ate and pausa_ate > datetime.now():
-            if EXIBIR_LOGS: logger.info(f"⏸️ [Notas] Pausa ativa até {pausa_ate.strftime('%d/%m %H:%M')}; as notas aprovadas saem na retomada.")
+            logger.info(f"⏸️ [Notas] Pausa ativa até {pausa_ate.strftime('%d/%m %H:%M')}; as notas aprovadas saem na retomada.")
             if msg_progresso:
                 try:
                     await msg_progresso.edit_text(
@@ -275,7 +273,7 @@ async def _enviar_pendentes(msg_progresso: types.Message = None):
     por e-mail e sai. Ao esvaziar a fila, apaga a pasta de extração, varre pastas
     antigas e manda o resumo ao admin.
     """
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando esteira de disparos de notas fiscais...")
+    logger.info("🚀 Iniciando esteira de disparos de notas fiscais...")
     
     conexao = db.conectar()
     conexao.row_factory = sqlite3.Row
@@ -311,11 +309,11 @@ async def _enviar_pendentes(msg_progresso: types.Message = None):
                 status_dinamico = f"🚀 <i>Disparando notas fiscais...</i>\n⏳ Enviando nota ({idx}/{total_notas}): <code>{loja_segura}</code>"
                 await msg_progresso.edit_text(status_dinamico, parse_mode="HTML")
             except Exception as e:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao atualizar interface do Telegram: {e}")
+                logger.warning(f"⚠️ Erro ao atualizar interface do Telegram: {e}")
                 pass
 
         if envios_realizados >= LIMITE_DIARIO:
-            if EXIBIR_LOGS: logger.warning(f"⏳ Limite diário atingido. Programando retomada para {PAUSA_HORAS} horas.")
+            logger.warning(f"⏳ Limite diário atingido. Programando retomada para {PAUSA_HORAS} horas.")
             agora = datetime.now()
             retomada = agora + timedelta(hours=PAUSA_HORAS)
             scheduler_instance.add_job(processar_fila_envios, 'date', run_date=retomada, kwargs={"retomada": True},
@@ -337,7 +335,7 @@ async def _enviar_pendentes(msg_progresso: types.Message = None):
                 try: 
                     await msg_progresso.edit_text(f"⏸️ <b>PAUSA DE SEGURANÇA:</b> Limite de {LIMITE_DIARIO} atingido.\nRetomada automática programada para {retomada.strftime('%d/%m às %H:%M')}.", parse_mode="HTML")
                 except Exception as e:
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao atualizar mensagem de pausa no Telegram: {e}")
+                    logger.warning(f"⚠️ Erro ao atualizar mensagem de pausa no Telegram: {e}")
                     pass
                 await _liberar_painel(msg_progresso.chat.id)
             return
@@ -350,7 +348,7 @@ async def _enviar_pendentes(msg_progresso: types.Message = None):
             f"<p>Atenciosamente,<br><b>RNM Comércio e Intermediações LTDA</b></p>"
         )
         
-        if EXIBIR_LOGS: logger.info(f"⚙️ Processando envio para Loja: {loja} no valor de R$ {valor}...")
+        logger.info(f"⚙️ Processando envio para Loja: {loja} no valor de R$ {valor}...")
 
         # Sem o PDF, o e-mail sairia sem a nota: marca como erro em vez de enviar.
         if not pdf or not os.path.exists(pdf):
@@ -359,7 +357,7 @@ async def _enviar_pendentes(msg_progresso: types.Message = None):
             conexao.commit()
             erros += 1
             falhas_etapa.append(f"⚠️ Falha ao processar loja {loja}: {erro_msg}")
-            if EXIBIR_LOGS: logger.error(f"❌ Nota de {loja} não enviada: {erro_msg}")
+            logger.error(f"❌ Nota de {loja} não enviada: {erro_msg}")
             continue
 
         try:
@@ -369,7 +367,7 @@ async def _enviar_pendentes(msg_progresso: types.Message = None):
                 cursor.execute("UPDATE fila_notas SET status = 'ENVIADO' WHERE id = ?", (id_registro,))
                 envios_realizados += 1
                 
-                if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Nota enviada para {loja} ({email}).")
+                logger.info(f"✅ Sucesso: Nota enviada para {loja} ({email}).")
                 try: os.remove(pdf)
                 except Exception: pass
             else:
@@ -377,14 +375,14 @@ async def _enviar_pendentes(msg_progresso: types.Message = None):
                 cursor.execute("UPDATE fila_notas SET status = 'ERRO', motivo_erro = ? WHERE id = ?", (erro_msg, id_registro))
                 erros += 1
                 falhas_etapa.append(f"⚠️ Falha ao processar loja {loja}: {erro_msg}")
-                if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar para {loja}: {erro_msg}")
+                logger.error(f"❌ Erro ao enviar para {loja}: {erro_msg}")
                 
         except Exception as e:
             erro_msg = f"Erro Interno: {e}"
             cursor.execute("UPDATE fila_notas SET status = 'ERRO', motivo_erro = ? WHERE id = ?", (erro_msg, id_registro))
             erros += 1
             falhas_etapa.append(f"⚠️ Erro de rede/crítico na loja {loja}: {e}")
-            if EXIBIR_LOGS: logger.error(f"❌ Erro Crítico ao enviar para {loja}: {e}")
+            logger.error(f"❌ Erro Crítico ao enviar para {loja}: {e}")
             
         conexao.commit()
         await asyncio.sleep(1)
@@ -397,9 +395,9 @@ async def _enviar_pendentes(msg_progresso: types.Message = None):
     try:
         if pasta_extracao and os.path.exists(pasta_extracao) and "extraido_" in pasta_extracao:
             shutil.rmtree(pasta_extracao)
-            if EXIBIR_LOGS: logger.info(f"🧹 [Notas] Pasta de extração removida: {pasta_extracao}")
+            logger.info(f"🧹 [Notas] Pasta de extração removida: {pasta_extracao}")
     except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ [Notas] Não consegui remover {pasta_extracao}: {e}")
+        logger.warning(f"⚠️ [Notas] Não consegui remover {pasta_extracao}: {e}")
 
     # Também apaga pastas de rodadas antigas que ficaram para trás por erro ou queda.
     try:
@@ -422,7 +420,7 @@ async def _enviar_pendentes(msg_progresso: types.Message = None):
                     continue
                 shutil.rmtree(caminho, ignore_errors=True)
                 removidas += 1
-        if removidas and EXIBIR_LOGS:
+        if removidas:
             logger.info(f"🧹 [Notas] {removidas} pasta(s) de extração antiga(s) removida(s).")
     except Exception:
         pass
@@ -438,7 +436,7 @@ async def _enviar_pendentes(msg_progresso: types.Message = None):
             )
             await msg_progresso.edit_text(texto_conclusao, parse_mode="HTML")
         except Exception as e: 
-            if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao postar conclusão no Telegram: {e}")
+            logger.warning(f"⚠️ Erro ao postar conclusão no Telegram: {e}")
             pass
     
     assunto_final = "[Sistema de Notas Shopee] Processo Totalmente Concluído"
@@ -461,7 +459,7 @@ async def abortador_universal_notas(message: types.Message, state: FSMContext):
     "Abortar" em qualquer etapa das notas: volta ao menu. Os rascunhos do lote
     abortado são apagados quando o próximo lote é montado.
     """
-    if EXIBIR_LOGS: logger.info("❌ Operação de notas abortada pelo usuário.")
+    logger.info("❌ Operação de notas abortada pelo usuário.")
     await message.answer("Operação cancelada. Retornando ao menu do disparador...", reply_markup=obter_teclado_menu_notas())
     await state.set_state(PainelNotasFluxo.menu_principal)
 
@@ -478,7 +476,7 @@ async def ignorar_durante_envio(message: types.Message):
 @router.message(F.text == "Disparador de Notas 🧾", StateFilter("*"))
 async def iniciar_painel_notas(message: types.Message, state: FSMContext):
     await state.clear()
-    if EXIBIR_LOGS: logger.info("🧾 Acessando o menu do Disparador de Notas Fiscais.")
+    logger.info("🧾 Acessando o menu do Disparador de Notas Fiscais.")
     texto = "🧾 <b>Painel do Disparador de Notas</b>\nSelecione uma das opções abaixo:"
     await message.answer(texto, reply_markup=obter_teclado_menu_notas(), parse_mode="HTML")
     await state.set_state(PainelNotasFluxo.menu_principal)
@@ -488,7 +486,7 @@ async def reativar_filtro_automaticamente(chat_id):
     global FILTRO_ANTI_DUPLICIDADE
     if not FILTRO_ANTI_DUPLICIDADE:
         FILTRO_ANTI_DUPLICIDADE = True
-        if EXIBIR_LOGS: logger.info("⏰ Timer de segurança: Filtro Anti-Duplicidade reativado automaticamente após 5 minutos.")
+        logger.info("⏰ Timer de segurança: Filtro Anti-Duplicidade reativado automaticamente após 5 minutos.")
         try:
             if bot_instance:
                 # Manda o teclado de novo para o botão mostrar o estado novo do filtro.
@@ -523,7 +521,7 @@ async def processar_menu_notas(message: types.Message, state: FSMContext):
         FILTRO_ANTI_DUPLICIDADE = not FILTRO_ANTI_DUPLICIDADE
         
         estado_texto = "ATIVADO ✅" if FILTRO_ANTI_DUPLICIDADE else "DESATIVADO ⚠️ (Cuidado com duplicatas)"
-        if EXIBIR_LOGS: logger.info(f"⚙️ Alternância de segurança: O Filtro Anti-Duplicidade foi alterado para {FILTRO_ANTI_DUPLICIDADE}.")
+        logger.info(f"⚙️ Alternância de segurança: O Filtro Anti-Duplicidade foi alterado para {FILTRO_ANTI_DUPLICIDADE}.")
         
         await message.answer(f"⚙️ O Filtro Anti-Duplicidade foi <b>{estado_texto}</b>.", reply_markup=obter_teclado_menu_notas(), parse_mode="HTML")
         
@@ -548,7 +546,7 @@ async def processar_menu_notas(message: types.Message, state: FSMContext):
                 scheduler_instance.remove_job('reativar_filtro_notas')
         
     elif "Informações" in opcao:
-        if EXIBIR_LOGS: logger.info("🔐 Consultando credenciais seguras no .env.")
+        logger.info("🔐 Consultando credenciais seguras no .env.")
         
         brevo_link = "https://app.brevo.com/"
         brevo_login = "rnm.notas@gmail.com"
@@ -573,7 +571,7 @@ async def processar_menu_notas(message: types.Message, state: FSMContext):
         await message.answer(texto, parse_mode="HTML")
         
     elif "Voltar" in opcao:
-        if EXIBIR_LOGS: logger.info("🔙 Retornando à gaveta de Relatórios de forma isolada.")
+        logger.info("🔙 Retornando à gaveta de Relatórios de forma isolada.")
         
         # Volta para o submenu de Relatórios do bot_mestre.
         teclado_relatorios = ReplyKeyboardMarkup(
@@ -610,7 +608,7 @@ async def receber_csv(message: types.Message, state: FSMContext):
     await bot_instance.download(doc, destination=caminho_csv)
     
     await state.update_data(csv_path=caminho_csv)
-    if EXIBIR_LOGS: logger.info(f"✅ Arquivo CSV da Shopee recebido e salvo em {caminho_csv}.")
+    logger.info(f"✅ Arquivo CSV da Shopee recebido e salvo em {caminho_csv}.")
     
     await message.answer("✅ Arquivo CSV recebido!\n\nAgora envie o arquivo <b>.ZIP</b> contendo todos os PDFs das Notas Fiscais.", parse_mode="HTML", reply_markup=teclado_notas_cancelar)
     await state.set_state(PainelNotasFluxo.aguardando_zip)
@@ -650,16 +648,16 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
     try:
         with zipfile.ZipFile(caminho_zip, 'r') as zip_ref:
             zip_ref.extractall(pasta_extracao)
-        if EXIBIR_LOGS: logger.info(f"📂 ZIP extraído com sucesso em {pasta_extracao}.")
+        logger.info(f"📂 ZIP extraído com sucesso em {pasta_extracao}.")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao descompactar ZIP: {e}")
+        logger.error(f"❌ Erro ao descompactar ZIP: {e}")
         await msg_status.edit_text(f"❌ Erro ao descompactar o ZIP: {e}")
         return
         
     try:
         df = pd.read_csv(csv_path, sep=None, engine='python')
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler CSV: {e}")
+        logger.error(f"❌ Erro ao ler CSV: {e}")
         await msg_status.edit_text(f"❌ Erro ao ler o arquivo CSV: {e}")
         return
 
@@ -676,7 +674,7 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
         pdfs_protegidos = [os.path.basename(row[0]).lower() for row in historico if row[0]]
     else:
         await msg_status.edit_text("✅ Extração concluída. ⚠️ Filtro Anti-Duplicidade DESATIVADO. Cruzando todos os dados...")
-        if EXIBIR_LOGS: logger.warning("⚠️ Filtro Anti-Duplicidade desligado. O histórico do banco de dados será ignorado.")
+        logger.warning("⚠️ Filtro Anti-Duplicidade desligado. O histórico do banco de dados será ignorado.")
         pdfs_protegidos = []
         
         # O filtro desligado vale só para este lote: religa na hora.
@@ -769,13 +767,13 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
     )
     
     if pares_similares:
-        if EXIBIR_LOGS: logger.info("🔍 Inspecionando similaridades de notas fiscais...")
+        logger.info("🔍 Inspecionando similaridades de notas fiscais...")
         await enviar_proxima_similaridade(message, state)
     elif lojas_pendentes and pdfs_pendentes:
-        if EXIBIR_LOGS: logger.info("🛠️ Entrando no modo de pareamento manual de notas fiscais...")
+        logger.info("🛠️ Entrando no modo de pareamento manual de notas fiscais...")
         await enviar_lista_manual(message, state)
     else:
-        if EXIBIR_LOGS: logger.info("📊 Gerando resumo final do cruzamento...")
+        logger.info("📊 Gerando resumo final do cruzamento...")
         await gerar_resumo_final_notas(message, state)
 
 async def enviar_proxima_similaridade(message: types.Message, state: FSMContext):
@@ -823,11 +821,11 @@ async def processar_resposta_similaridade(message: types.Message, state: FSMCont
     
     if resposta == "Sim ✅":
         notas_validadas.append({'loja': par_atual['loja_dict']['loja'], 'email': par_atual['loja_dict']['email'], 'pdf': par_atual['pdf'], 'tipo': 'similar', 'valor': par_atual['loja_dict']['valor']})
-        if EXIBIR_LOGS: logger.info(f"✅ Associação aprovada: {par_atual['loja_dict']['loja']} <> {par_atual['pdf']}")
+        logger.info(f"✅ Associação aprovada: {par_atual['loja_dict']['loja']} <> {par_atual['pdf']}")
     else:
         lojas_pendentes.append(par_atual['loja_dict'])
         pdfs_pendentes.append(par_atual['pdf'])
-        if EXIBIR_LOGS: logger.info(f"❌ Associação recusada: {par_atual['loja_dict']['loja']} <> {par_atual['pdf']}")
+        logger.info(f"❌ Associação recusada: {par_atual['loja_dict']['loja']} <> {par_atual['pdf']}")
         
     await state.update_data(pares_similares=pares_similares, notas_validadas=notas_validadas, lojas_pendentes=lojas_pendentes, pdfs_pendentes=pdfs_pendentes)
     await enviar_proxima_similaridade(message, state)
@@ -933,7 +931,7 @@ async def processar_pareamento_manual(message: types.Message, state: FSMContext)
     pdf_selecionado = pdfs.pop(letra_idx)
     
     notas_validadas.append({'loja': loja_selecionada['loja'], 'email': loja_selecionada['email'], 'pdf': pdf_selecionado, 'tipo': 'manual', 'valor': loja_selecionada['valor']})
-    if EXIBIR_LOGS: logger.info(f"✅ Pareamento manual aceito: {loja_selecionada['loja']} <> {pdf_selecionado}")
+    logger.info(f"✅ Pareamento manual aceito: {loja_selecionada['loja']} <> {pdf_selecionado}")
     
     await state.update_data(lojas_pendentes=lojas, pdfs_pendentes=pdfs, notas_validadas=notas_validadas)
     await message.answer(f"✅ <b>Associado com sucesso:</b>\n{loja_selecionada['loja']} ↔️ {pdf_selecionado}", parse_mode="HTML")
@@ -1134,7 +1132,7 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
     
     msg_dinamica = await message.answer("🚀 <i>Sincronizando com a base de dados...</i>", parse_mode="HTML")
     
-    if EXIBIR_LOGS: logger.info("⏰ Acionando motor de envio via Brevo.")
+    logger.info("⏰ Acionando motor de envio via Brevo.")
     
     # O envio roda em segundo plano e a conversa fica livre.
     asyncio.create_task(processar_fila_envios(msg_progresso=msg_dinamica))

@@ -146,7 +146,6 @@
 #
 # =============================================================================
 
-EXIBIR_LOGS = True
 
 import os
 import sys
@@ -254,8 +253,7 @@ def _obter_sal():
     )
     conexao.commit()
     conexao.close()
-    if EXIBIR_LOGS:
-        logger.info("🧂 [Pool] Sal criptográfico criado pela primeira vez neste banco.")
+    logger.info("🧂 [Pool] Sal criptográfico criado pela primeira vez neste banco.")
     return sal
 
 
@@ -327,11 +325,10 @@ def decifrar(blob):
             continue
         except Exception:
             continue
-    if EXIBIR_LOGS:
-        logger.error(
-            "❌ [Pool] Não consegui decifrar uma credencial. "
-            "A CHAVE_MESTRA_CONTAS/API_HASH do .env mudou desde o cadastro?"
-        )
+    logger.error(
+        "❌ [Pool] Não consegui decifrar uma credencial. "
+        "A CHAVE_MESTRA_CONTAS/API_HASH do .env mudou desde o cadastro?"
+    )
     return None
 
 
@@ -431,7 +428,7 @@ def inicializar_tabelas():
 
     conexao.commit()
     conexao.close()
-    if EXIBIR_LOGS and not _TABELAS_PRONTAS:
+    if not _TABELAS_PRONTAS:
         logger.info("👥 [Pool] Tabelas de contas verificadas.")
     _TABELAS_PRONTAS = True
 
@@ -452,10 +449,8 @@ def registrar_evento(apelido, evento, detalhe=""):
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS:
-            logger.error(f"❌ [Pool] Falha ao gravar histórico: {e}")
-    if EXIBIR_LOGS:
-        logger.info(f"📒 [Pool] {apelido}: {evento} {('— ' + detalhe) if detalhe else ''}")
+        logger.error(f"❌ [Pool] Falha ao gravar histórico: {e}")
+    logger.info(f"📒 [Pool] {apelido}: {evento} {('— ' + detalhe) if detalhe else ''}")
 
 
 # =============================================================================
@@ -897,8 +892,7 @@ def registrar_atividade(conta_id, funcao, ok, detalhe=""):
         conexao.commit()
         conexao.close()
     except Exception as e:
-        if EXIBIR_LOGS:
-            logger.error(f"❌ [Pool] Falha ao registrar atividade: {e}")
+        logger.error(f"❌ [Pool] Falha ao registrar atividade: {e}")
 
 
 def ler_atividade():
@@ -1216,8 +1210,7 @@ def aplicar_funcoes():
         para = apelido_por_id.get(novo, "VAGO")
         registrar_evento(para if novo else de, f"FUNCAO_{funcao.upper()}",
                          f"{de} → {para} ({motivo})")
-        if EXIBIR_LOGS:
-            logger.info(f"🔄 [Pool] Posto '{funcao}': {de} → {para} — {motivo}")
+        logger.info(f"🔄 [Pool] Posto '{funcao}': {de} → {para} — {motivo}")
 
     return mudancas
 
@@ -1313,8 +1306,7 @@ async def criar_cliente(conta, conectar=True):
         return None
     sessao = decifrar(conta.get("sessao_cifrada"))
     if not sessao:
-        if EXIBIR_LOGS:
-            logger.error(f"❌ [Pool] Conta '{conta.get('apelido')}' sem sessão utilizável.")
+        logger.error(f"❌ [Pool] Conta '{conta.get('apelido')}' sem sessão utilizável.")
         return None
 
     cliente = TelegramClient(StringSession(sessao), API_ID, API_HASH)
@@ -1332,8 +1324,7 @@ async def criar_cliente_da_funcao(funcao):
     """Atalho: o cliente já conectado de quem está de plantão no posto."""
     conta = obter_conta_da_funcao(funcao)
     if not conta:
-        if EXIBIR_LOGS:
-            logger.warning(f"⚠️ [Pool] Posto '{funcao}' está VAGO — nenhuma conta apta.")
+        logger.warning(f"⚠️ [Pool] Posto '{funcao}' está VAGO — nenhuma conta apta.")
         return None
     return await criar_cliente(conta)
 
@@ -1360,8 +1351,7 @@ def obter_grupo_autorais():
             if origem:
                 return int(origem)
     except Exception as e:
-        if EXIBIR_LOGS:
-            logger.error(f"❌ [Pool] Não consegui ler o grupo dos Autorais: {e}")
+        logger.error(f"❌ [Pool] Não consegui ler o grupo dos Autorais: {e}")
     return None
 
 
@@ -1441,9 +1431,8 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
             # get_dialogs() preenche o cache; é o mesmo truque que o espelhador
             # usa no start. Só depois de tentar de novo é que desistimos.
             try:
-                if EXIBIR_LOGS:
-                    logger.info(f"🗂️ [Pool] {apelido}: cache vazio, carregando as conversas "
-                                f"para localizar o grupo...")
+                logger.info(f"🗂️ [Pool] {apelido}: cache vazio, carregando as conversas "
+                            f"para localizar o grupo...")
                 await cliente.get_dialogs()
                 entidade = await cliente.get_entity(grupo_id)
                 permissoes = await cliente.get_permissions(entidade, "me")
@@ -1468,8 +1457,7 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
     except errors.FloodWaitError as e:
         # Não dá para concluir nada: preserva o estado anterior e sai quieto.
         atualizar_status(apelido, erro=f"FloodWait de {e.seconds}s — checagem adiada")
-        if EXIBIR_LOGS:
-            logger.warning(f"⏳ [Pool] {apelido}: FloodWait de {e.seconds}s. Checagem adiada.")
+        logger.warning(f"⏳ [Pool] {apelido}: FloodWait de {e.seconds}s. Checagem adiada.")
         return (conta.get("status_grupo"), conta.get("status_sessao"))
 
     except (errors.UserDeactivatedBanError, errors.UserDeactivatedError):
@@ -1484,8 +1472,7 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
 
     except Exception as e:
         atualizar_status(apelido, erro=f"{type(e).__name__}: {e}")
-        if EXIBIR_LOGS:
-            logger.error(f"❌ [Pool] Erro ao checar '{apelido}': {type(e).__name__}: {e}")
+        logger.error(f"❌ [Pool] Erro ao checar '{apelido}': {type(e).__name__}: {e}")
         return (conta.get("status_grupo"), conta.get("status_sessao"))
 
     finally:
@@ -1512,13 +1499,11 @@ async def sincronizar_pool(clientes=None):
     inicializar_tabelas()
     contas = listar_contas()
     if not contas:
-        if EXIBIR_LOGS:
-            logger.info("👥 [Pool] Nenhuma conta cadastrada ainda. Use: python3 pool_contas.py login")
+        logger.info("👥 [Pool] Nenhuma conta cadastrada ainda. Use: python3 pool_contas.py login")
         return []
 
     grupo_id = obter_grupo_autorais()
-    if EXIBIR_LOGS:
-        logger.info(f"🔍 [Pool] Checando {len(contas)} conta(s) contra o grupo {grupo_id}...")
+    logger.info(f"🔍 [Pool] Checando {len(contas)} conta(s) contra o grupo {grupo_id}...")
 
     for conta in contas:
         # Uma pausa curta entre contas: várias conexões simultâneas com o mesmo

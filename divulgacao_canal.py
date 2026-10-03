@@ -11,7 +11,6 @@ na hora, com uma frase reserva se a IA falhar.
 Também mantém o cache de nomes de grupos e tópicos de fórum, que só uma conta de
 usuário consegue ler.
 """
-EXIBIR_LOGS = True
 import os
 import asyncio
 import random
@@ -33,8 +32,7 @@ from fuso import configurar_logs
 API_ID = int(os.getenv('API_ID'))
 API_HASH = os.getenv('API_HASH')
 
-if EXIBIR_LOGS:
-    logger = configurar_logs(__name__)
+logger = configurar_logs(__name__)
 
 def limpar_travas_fantasma(nome_sessao):
     """
@@ -58,9 +56,9 @@ def limpar_travas_fantasma(nome_sessao):
     for arquivo in arquivos_trava:
         try:
             os.remove(arquivo)
-            if EXIBIR_LOGS: logger.info(f"🧹 [Auto-cura] Trava fantasma de crash removida: {arquivo}")
+            logger.info(f"🧹 [Auto-cura] Trava fantasma de crash removida: {arquivo}")
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ [Auto-cura] Falha ao tentar remover trava {arquivo}: {e}")
+            logger.error(f"❌ [Auto-cura] Falha ao tentar remover trava {arquivo}: {e}")
 
 # Roda no import, antes de o TelegramClient abrir a sessão.
 limpar_travas_fantasma('sessao_divulgacao')
@@ -84,7 +82,7 @@ scheduler = AsyncIOScheduler()
 
 # Uma chamada ao Telegram por vez nesta conta, para envios e leitura de tópicos não se atropelarem.
 telegram_lock = asyncio.Lock()
-if EXIBIR_LOGS: logger.info("🚦 Semáforo de controle de tráfego do Telegram ativado!")
+logger.info("🚦 Semáforo de controle de tráfego do Telegram ativado!")
 
 import db
 
@@ -191,12 +189,10 @@ def carregar_config_escopo(escopo):
     if not dados:
         if escopo not in _avisos_config_ausente:
             _avisos_config_ausente.add(escopo)
-            if EXIBIR_LOGS:
-                logger.warning(f"⚠️ [{conf['rotulo']}] Configuração '{conf['chave']}' ainda não existe no banco. Ela é criada quando você abre o painel no bot principal. Este aviso não se repete.")
+            logger.warning(f"⚠️ [{conf['rotulo']}] Configuração '{conf['chave']}' ainda não existe no banco. Ela é criada quando você abre o painel no bot principal. Este aviso não se repete.")
     elif escopo in _avisos_config_ausente:
         _avisos_config_ausente.discard(escopo)
-        if EXIBIR_LOGS:
-            logger.info(f"✅ [{conf['rotulo']}] Configuração '{conf['chave']}' encontrada no banco.")
+        logger.info(f"✅ [{conf['rotulo']}] Configuração '{conf['chave']}' encontrada no banco.")
 
     return dados
 
@@ -207,15 +203,15 @@ async def gerar_texto(escopo, repeticoes=1):
     o mesmo bloco aparece várias vezes na mesma mensagem.
     """
     conf = ESCOPOS[escopo]
-    if EXIBIR_LOGS: logger.info(f"🚀 [{conf['rotulo']}] Montando texto de divulgação ({repeticoes}x)...")
+    logger.info(f"🚀 [{conf['rotulo']}] Montando texto de divulgação ({repeticoes}x)...")
 
     # prompt pode ser uma string ou uma lista; sendo lista, sorteia um por envio.
     p = conf["prompt"]
     prompt_escolhido = random.choice(p) if isinstance(p, list) else p
 
-    frase_ia = await gerar_texto_gemini(prompt_escolhido, EXIBIR_LOGS)
+    frase_ia = await gerar_texto_gemini(prompt_escolhido)
     if not frase_ia:
-        if EXIBIR_LOGS: logger.error(f"❌ [{conf['rotulo']}] Todos os modelos falharam. Usando frase padrão de segurança.")
+        logger.error(f"❌ [{conf['rotulo']}] Todos os modelos falharam. Usando frase padrão de segurança.")
         frase_ia = conf["fallback"]
 
     bloco_unico = f"{frase_ia}\n\n{conf['rotulo_link']}👇\n{conf['link']}"
@@ -242,12 +238,12 @@ async def enviar_mensagem(escopo, alvo):
 
     if bloqueio_flood_ate and datetime.now() < bloqueio_flood_ate:
         restante = int((bloqueio_flood_ate - datetime.now()).total_seconds())
-        if EXIBIR_LOGS: logger.warning(f"🛑 [{rotulo}] Disparo abortado: cooldown de flood ativo por mais {restante}s.")
+        logger.warning(f"🛑 [{rotulo}] Disparo abortado: cooldown de flood ativo por mais {restante}s.")
         return
 
     config = carregar_config_escopo(escopo)
     if config and config.get("pausado", False):
-        if EXIBIR_LOGS: logger.warning(f"🛑 [{rotulo}] Disparo cancelado: escopo pausado no momento.")
+        logger.warning(f"🛑 [{rotulo}] Disparo cancelado: escopo pausado no momento.")
         return
 
     config_alvos = config.get("config_alvos", {}) if config else {}
@@ -258,46 +254,46 @@ async def enviar_mensagem(escopo, alvo):
 
     texto = await gerar_texto(escopo, repeticoes)
     try:
-        if EXIBIR_LOGS: logger.info(f"🚦 [{rotulo}] Aguardando sinal verde para {alvo}...")
+        logger.info(f"🚦 [{rotulo}] Aguardando sinal verde para {alvo}...")
         async with telegram_lock:
             # A conexão pode ter caído em segundo plano.
             if not client.is_connected():
-                if EXIBIR_LOGS: logger.info(f"🔄 [{rotulo}] [Auto-cura] Conexão perdida. Forçando reconexão...")
+                logger.info(f"🔄 [{rotulo}] [Auto-cura] Conexão perdida. Forçando reconexão...")
                 await client.connect()
 
             entidade = await client.get_entity(normalizar_alvo(alvo))
-            if EXIBIR_LOGS: logger.info(f"📤 [{rotulo}] Enviando {replicas} mensagem(ns) para {alvo}...")
+            logger.info(f"📤 [{rotulo}] Enviando {replicas} mensagem(ns) para {alvo}...")
 
             for i in range(replicas):
                 await client.send_message(entidade, texto)
-                if EXIBIR_LOGS: logger.info(f"📩 [{rotulo}] Mensagem {i+1}/{replicas} enviada.")
+                logger.info(f"📩 [{rotulo}] Mensagem {i+1}/{replicas} enviada.")
                 if i < replicas - 1:
                     await asyncio.sleep(1.5)
 
-            if EXIBIR_LOGS: logger.info(f"✅ [{rotulo}] Envio concluído para {alvo}.")
+            logger.info(f"✅ [{rotulo}] Envio concluído para {alvo}.")
 
     except FloodWaitError as e:
         espera = int(getattr(e, "seconds", 60) or 60)
         bloqueio_flood_ate = datetime.now() + timedelta(seconds=espera + 30)
-        if EXIBIR_LOGS: logger.error(f"⏳ [{rotulo}] FloodWait de {espera}s em {alvo}. Motor congelado até {bloqueio_flood_ate.strftime('%H:%M:%S')}.")
+        logger.error(f"⏳ [{rotulo}] FloodWait de {espera}s em {alvo}. Motor congelado até {bloqueio_flood_ate.strftime('%H:%M:%S')}.")
         registrar_erro_json(f"FloodWait {espera}s ({escopo}/{alvo})", origem="divulgacao_canal.py")
 
     except PeerFloodError:
         bloqueio_flood_ate = datetime.now() + timedelta(hours=1)
-        if EXIBIR_LOGS: logger.critical(f"🚨 [{rotulo}] PeerFloodError em {alvo}: a CONTA foi sinalizada como spam. Motor congelado por 1 hora. Reduza frequência e réplicas antes de retomar.")
+        logger.critical(f"🚨 [{rotulo}] PeerFloodError em {alvo}: a CONTA foi sinalizada como spam. Motor congelado por 1 hora. Reduza frequência e réplicas antes de retomar.")
         registrar_erro_json(f"PeerFloodError ({escopo}/{alvo}) - conta sinalizada", origem="divulgacao_canal.py")
 
     except (ChatWriteForbiddenError, UserBannedInChannelError):
-        if EXIBIR_LOGS: logger.warning(f"🚫 [{rotulo}] Sem permissão de escrita em {alvo} (restrito, silenciado ou banido). Omitindo.")
+        logger.warning(f"🚫 [{rotulo}] Sem permissão de escrita em {alvo} (restrito, silenciado ou banido). Omitindo.")
 
     except Exception as e:
         erro_str = str(e).lower()
         if "chat is restricted" in erro_str or "forbidden" in erro_str:
-            if EXIBIR_LOGS: logger.warning(f"🚫 [{rotulo}] Omitido: o chat {alvo} é restrito ou a conta foi silenciada.")
+            logger.warning(f"🚫 [{rotulo}] Omitido: o chat {alvo} é restrito ou a conta foi silenciada.")
         elif "database is locked" in erro_str:
-            if EXIBIR_LOGS: logger.error(f"🔒 [{rotulo}] Bloqueio de concorrência no SQLite ao acessar {alvo}.")
+            logger.error(f"🔒 [{rotulo}] Bloqueio de concorrência no SQLite ao acessar {alvo}.")
         else:
-            if EXIBIR_LOGS: logger.error(f"❌ [{rotulo}] Falha ao enviar para {alvo}: {e}")
+            logger.error(f"❌ [{rotulo}] Falha ao enviar para {alvo}: {e}")
             registrar_erro_json(f"enviar_mensagem ({escopo}/{alvo}): {e}", origem="divulgacao_canal.py")
 
 
@@ -328,7 +324,7 @@ def _carregar_agendamentos():
                 recuperado[alvo] = lista
         ultimos_agendamentos_por_alvo = recuperado
     except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ [Agenda] Não recuperei o histórico de horários: {e}")
+        logger.warning(f"⚠️ [Agenda] Não recuperei o histórico de horários: {e}")
 
 
 def _salvar_agendamentos():
@@ -339,7 +335,7 @@ def _salvar_agendamentos():
             for alvo, horarios in ultimos_agendamentos_por_alvo.items()
         })
     except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ [Agenda] Não salvei o histórico de horários: {e}")
+        logger.warning(f"⚠️ [Agenda] Não salvei o histórico de horários: {e}")
 
 
 def _carregar_plano_da_hora(hora):
@@ -427,12 +423,12 @@ def programar_envios_da_hora():
                     _agendar_envio(escopo, alvo, quando)
 
             faltam = freq_alvo - len(ja_planejados)
-            if ja_planejados and EXIBIR_LOGS:
+            if ja_planejados:
                 logger.info(f"♻️ [{rotulo}] {alvo}: {len(ja_planejados)} envio(s) já planejado(s) nesta hora; faltam {max(faltam, 0)}.")
             if faltam <= 0:
                 continue
 
-            if EXIBIR_LOGS: logger.info(f"🔄 [{rotulo}] Sorteando {faltam} envio(s) para {alvo} na hora atual ({agora.hour}h)...")
+            logger.info(f"🔄 [{rotulo}] Sorteando {faltam} envio(s) para {alvo} na hora atual ({agora.hour}h)...")
             espacamento_ideal = 58 // freq_alvo if freq_alvo > 0 else 58
 
             # Os envios que faltam ficam com as últimas fatias da hora.
@@ -459,19 +455,19 @@ def programar_envios_da_hora():
                         ultimos_agendamentos_por_alvo.setdefault(alvo, []).append(horario_disparo)
                         plano.append([escopo, alvo, horario_disparo.isoformat()])
                         _agendar_envio(escopo, alvo, horario_disparo)
-                        if EXIBIR_LOGS: logger.info(f"✅ [{rotulo}] Disparo {i+1}/{freq_alvo} para {alvo} agendado às {horario_disparo.strftime('%H:%M:%S')}")
+                        logger.info(f"✅ [{rotulo}] Disparo {i+1}/{freq_alvo} para {alvo} agendado às {horario_disparo.strftime('%H:%M:%S')}")
                         sucesso = True
                         break
 
                 if not sucesso:
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ [{rotulo}] {alvo} [{i+1}/{freq_alvo}]: acionando fallback forçado.")
+                    logger.warning(f"⚠️ [{rotulo}] {alvo} [{i+1}/{freq_alvo}]: acionando fallback forçado.")
                     agendados = ultimos_agendamentos_por_alvo.get(alvo, [])
                     ultimo_conhecido = max(agendados) if agendados else agora
                     horario_disparo_fallback = ultimo_conhecido + timedelta(minutes=INTERVALO_MINIMO + random.randint(1, 3))
                     ultimos_agendamentos_por_alvo.setdefault(alvo, []).append(horario_disparo_fallback)
                     plano.append([escopo, alvo, horario_disparo_fallback.isoformat()])
                     _agendar_envio(escopo, alvo, horario_disparo_fallback)
-                    if EXIBIR_LOGS: logger.info(f"🛡️ [{rotulo}] Fallback: disparo {i+1} empurrado para {horario_disparo_fallback.strftime('%H:%M:%S')}")
+                    logger.info(f"🛡️ [{rotulo}] Fallback: disparo {i+1} empurrado para {horario_disparo_fallback.strftime('%H:%M:%S')}")
 
     _salvar_agendamentos()
     _salvar_plano_da_hora(hora_atual, plano)
@@ -517,18 +513,17 @@ async def sincronizar_nomes_topicos():
                         topicos += 1
             except FloodWaitError as e:
                 espera = int(getattr(e, "seconds", 60) or 60)
-                if EXIBIR_LOGS: logger.warning(f"⏳ [Cache] FloodWait de {espera}s ao ler tópicos de {entidade.title}. Interrompendo a varredura.")
+                logger.warning(f"⏳ [Cache] FloodWait de {espera}s ao ler tópicos de {entidade.title}. Interrompendo a varredura.")
                 break
             except Exception as e:
-                if EXIBIR_LOGS: logger.warning(f"⚠️ [Cache] Não consegui ler os tópicos de {entidade.title}: {type(e).__name__}")
+                logger.warning(f"⚠️ [Cache] Não consegui ler os tópicos de {entidade.title}: {type(e).__name__}")
 
             await asyncio.sleep(1)  # respiro entre grupos
 
-        if EXIBIR_LOGS:
-            logger.info(f"🧵 [Cache] Sincronizado: {grupos} grupo(s) de fórum, {topicos} tópico(s) nomeados.")
+        logger.info(f"🧵 [Cache] Sincronizado: {grupos} grupo(s) de fórum, {topicos} tópico(s) nomeados.")
 
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Cache] Falha ao sincronizar nomes de tópicos: {e}")
+        logger.error(f"❌ [Cache] Falha ao sincronizar nomes de tópicos: {e}")
         registrar_erro_json(f"sincronizar_nomes_topicos: {e}", origem="divulgacao_canal.py")
 
 async def monitorar_comandos():
@@ -550,37 +545,36 @@ async def monitorar_comandos():
             db.salvar_config(conf["chave"], config)
 
             if config.get("pausado", False):
-                if EXIBIR_LOGS: logger.warning(f"🛑 [{rotulo}] Comando forçado ignorado: escopo pausado.")
+                logger.warning(f"🛑 [{rotulo}] Comando forçado ignorado: escopo pausado.")
                 continue
 
-            if EXIBIR_LOGS: logger.info(f"🚀 [{rotulo}] Comando de DISPARO FORÇADO detectado!")
+            logger.info(f"🚀 [{rotulo}] Comando de DISPARO FORÇADO detectado!")
             for alvo in config.get("alvos", []):
                 await enviar_mensagem(escopo, alvo)
 
         await asyncio.sleep(5)
 
 async def main():
-    if EXIBIR_LOGS: logger.info("⏳ Iniciando o Userbot de Divulgação...")
+    logger.info("⏳ Iniciando o Userbot de Divulgação...")
     await client.start()
 
     # Registra no log qual conta está logada nesta sessão.
     try:
         eu = await client.get_me()
-        if EXIBIR_LOGS:
-            logger.info(f"👤 [Userbot] Sessão de divulgação logada como: "
-                        f"{getattr(eu, 'first_name', '')} (@{getattr(eu, 'username', None) or 'sem @'}) "
-                        f"· id {getattr(eu, 'id', '?')}")
+        logger.info(f"👤 [Userbot] Sessão de divulgação logada como: "
+                    f"{getattr(eu, 'first_name', '')} (@{getattr(eu, 'username', None) or 'sem @'}) "
+                    f"· id {getattr(eu, 'id', '?')}")
     except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ [Userbot] Não consegui identificar a conta da sessão: {e}")
+        logger.warning(f"⚠️ [Userbot] Não consegui identificar a conta da sessão: {e}")
 
     # Sem listar os diálogos uma vez, get_entity() falha com "Cannot find any entity"
     # para ID numérico, mesmo com a conta no canal: o Telethon precisa do access_hash
     # em cache.
     try:
         await client.get_dialogs()
-        if EXIBIR_LOGS: logger.info("🗂️ Cache de entidades da sessão preenchido.")
+        logger.info("🗂️ Cache de entidades da sessão preenchido.")
     except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Não consegui preencher o cache de entidades: {e}")
+        logger.warning(f"⚠️ Não consegui preencher o cache de entidades: {e}")
 
     asyncio.create_task(monitorar_comandos())
     
@@ -594,7 +588,7 @@ async def main():
     asyncio.create_task(sincronizar_nomes_topicos())
     
     scheduler.start()
-    if EXIBIR_LOGS: logger.info("🤖 Sistema automático rodando. Pressione Ctrl+C para parar.")
+    logger.info("🤖 Sistema automático rodando. Pressione Ctrl+C para parar.")
     
     await client.run_until_disconnected()
 

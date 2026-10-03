@@ -40,7 +40,6 @@ from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fi
 from zoneinfo import ZoneInfo
 
 load_dotenv()
-EXIBIR_LOGS = True
 
 FUSO_STR = "America/Sao_Paulo"
 fuso_horario = ZoneInfo(FUSO_STR)
@@ -59,8 +58,7 @@ from api_shopee import converter_link_shopee
 
 LIMITE_REGISTROS_HASH = 1000  # hashes de vídeo guardados por contexto na anti-duplicata
 
-if EXIBIR_LOGS:
-    logger = configurar_logs(__name__)
+logger = configurar_logs(__name__)
 
 def limpar_travas_fantasma(nome_sessao):
     """Apaga os .session-journal/.session.lock que um desligamento forçado deixa e que travam a sessão do Telethon."""
@@ -70,9 +68,9 @@ def limpar_travas_fantasma(nome_sessao):
     for arquivo in arquivos_trava:
         try:
             os.remove(arquivo)
-            if EXIBIR_LOGS: logger.info(f"🧹 [Auto-cura] Trava fantasma de crash removida: {arquivo}")
+            logger.info(f"🧹 [Auto-cura] Trava fantasma de crash removida: {arquivo}")
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ [Auto-cura] Falha ao tentar remover trava {arquivo}: {e}")
+            logger.error(f"❌ [Auto-cura] Falha ao tentar remover trava {arquivo}: {e}")
 
 # Só quando este arquivo roda como serviço, antes de o TelegramClient abrir a sessão.
 # O bot_mestre também importa este módulo (via painel_espelhos) e não pode apagar a
@@ -145,22 +143,22 @@ def verificar_e_registrar_espelho(link_shopee, contexto="global"):
         conexao.close()
         return False
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao verificar espelho no SQLite: {e}")
+        logger.error(f"❌ Erro ao verificar espelho no SQLite: {e}")
         return False
 
 def calcular_hash_video(caminho_arquivo):
     """SHA-256 do arquivo (identifica o mesmo vídeo em qualquer canal), ou None se não der para ler."""
     hash_sha256 = hashlib.sha256()
     try:
-        if EXIBIR_LOGS: logger.info(f"🔍 A calcular a assinatura digital (SHA-256) do ficheiro: {caminho_arquivo}...")
+        logger.info(f"🔍 A calcular a assinatura digital (SHA-256) do ficheiro: {caminho_arquivo}...")
         with open(caminho_arquivo, "rb") as f:
             for bloco in iter(lambda: f.read(4096), b""):
                 hash_sha256.update(bloco)
         resultado = hash_sha256.hexdigest()
-        if EXIBIR_LOGS: logger.info(f"✅ Assinatura única identificada: {resultado[:10]}...")
+        logger.info(f"✅ Assinatura única identificada: {resultado[:10]}...")
         return resultado
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro na leitura física para calcular hash do ficheiro {caminho_arquivo}: {e}")
+        logger.error(f"❌ Erro na leitura física para calcular hash do ficheiro {caminho_arquivo}: {e}")
         return None
 
 def verificar_e_registrar_hash(hash_video, contexto="global"):
@@ -188,7 +186,7 @@ def verificar_e_registrar_hash(hash_video, contexto="global"):
         conexao.close()
         return False
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao verificar hash no SQLite: {e}")
+        logger.error(f"❌ Erro ao verificar hash no SQLite: {e}")
         return False
 
 def ler_fila_clonagem():
@@ -211,7 +209,7 @@ async def verificar_e_otimizar_video(caminho_video, relatorio=None):
     if not caminho_video or not os.path.exists(caminho_video): return caminho_video
     
     try:
-        if EXIBIR_LOGS: logger.info(f"🔎 [Upscaling] Inspecionando resolução física de: {caminho_video}")
+        logger.info(f"🔎 [Upscaling] Inspecionando resolução física de: {caminho_video}")
         
         comando_probe = await asyncio.create_subprocess_exec(
             "ffprobe", "-v", "error", "-select_streams", "v:0", 
@@ -222,17 +220,17 @@ async def verificar_e_otimizar_video(caminho_video, relatorio=None):
         dimensoes = stdout.decode().strip()
         
         if not dimensoes or "x" not in dimensoes:
-            if EXIBIR_LOGS: logger.warning("⚠️ [Upscaling] Falha ao ler metadados. Ignorando otimização.")
+            logger.warning("⚠️ [Upscaling] Falha ao ler metadados. Ignorando otimização.")
             return caminho_video
             
         largura, altura = map(int, dimensoes.split("x"))
         menor_dimensao = min(largura, altura)
         
         if menor_dimensao >= 720:
-            if EXIBIR_LOGS: logger.info(f"✅ [Upscaling] Qualidade aprovada ({largura}x{altura}). Nenhuma maquiagem necessária.")
+            logger.info(f"✅ [Upscaling] Qualidade aprovada ({largura}x{altura}). Nenhuma maquiagem necessária.")
             return caminho_video
             
-        if EXIBIR_LOGS: logger.info(f"🛠️ [Upscaling] Resolução baixa detectada ({largura}x{altura}). Iniciando renderização para 720p...")
+        logger.info(f"🛠️ [Upscaling] Resolução baixa detectada ({largura}x{altura}). Iniciando renderização para 720p...")
         
         caminho_temp = f"{caminho_video}_upscaled.mp4"
         
@@ -249,13 +247,13 @@ async def verificar_e_otimizar_video(caminho_video, relatorio=None):
             os.replace(caminho_temp, caminho_video)
             if relatorio is not None:
                 relatorio["upscaled"] = True
-            if EXIBIR_LOGS: logger.info("✨ [Upscaling] Sucesso! Vídeo re-renderizado para 720x1280 e substituído.")
+            logger.info("✨ [Upscaling] Sucesso! Vídeo re-renderizado para 720x1280 e substituído.")
         else:
-            if EXIBIR_LOGS: logger.error("❌ [Upscaling] Falha na renderização do FFmpeg. Mantendo arquivo original.")
+            logger.error("❌ [Upscaling] Falha na renderização do FFmpeg. Mantendo arquivo original.")
             if os.path.exists(caminho_temp): os.remove(caminho_temp)
             
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Upscaling] Erro na função de otimização: {e}")
+        logger.error(f"❌ [Upscaling] Erro na função de otimização: {e}")
         
     return caminho_video
 
@@ -279,9 +277,9 @@ def salvar_na_fila_clonagem(caminho_video, link_shopee, chat_origem="Desconhecid
         }
         dados.setdefault("fila", []).append(item)
         salvar_fila_clonagem(dados)
-        if EXIBIR_LOGS: logger.info(f"📦 Clone salvo de forma unificada no SQLite com sucesso (ID: {id_unico}).")
+        logger.info(f"📦 Clone salvo de forma unificada no SQLite com sucesso (ID: {id_unico}).")
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar na fila unificada do SQLite: {e}")
+        logger.error(f"❌ Erro ao salvar na fila unificada do SQLite: {e}")
 
 def registrar_historico_espiao(nome_grupo):
     """Soma +1 captura no total e no grupo (estatística mostrada no painel do Espião)."""
@@ -293,7 +291,7 @@ def registrar_historico_espiao(nome_grupo):
     historico["grupos"] = grupos
     
     db.salvar_config("historico_espiao", historico)
-    if EXIBIR_LOGS: logger.info(f"📊 [Estatística] +1 vídeo contabilizado no SQLite para o grupo: {nome_grupo}")
+    logger.info(f"📊 [Estatística] +1 vídeo contabilizado no SQLite para o grupo: {nome_grupo}")
 
 async def gerar_legenda_com_ia_espelhador(caminho_video):
     """
@@ -315,7 +313,7 @@ async def gerar_legenda_com_ia_espelhador(caminho_video):
         "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
     )
     
-    titulo = await analisar_video_gemini(caminho_video, prompt, EXIBIR_LOGS)
+    titulo = await analisar_video_gemini(caminho_video, prompt)
     return titulo
 
 PADRAO_SHOPEE = re.compile(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+', re.IGNORECASE)
@@ -377,11 +375,11 @@ async def interceptar_mensagem(event):
         foi_nossa_equipe = False
 
     if foi_nossa_equipe and chat_username != "@shopee_video_afiliado":
-        if EXIBIR_LOGS: logger.info("🛡️ [Espião] Postagem do próprio sistema bloqueada (Userbot ou Bot Oficial).")
+        logger.info("🛡️ [Espião] Postagem do próprio sistema bloqueada (Userbot ou Bot Oficial).")
         return
 
     if event.out and not eh_ponte and chat_username != "@shopee_video_afiliado":
-        if EXIBIR_LOGS: logger.info("🛡️ [Espião] Trava de canais ativada: Ignorando evento.")
+        logger.info("🛡️ [Espião] Trava de canais ativada: Ignorando evento.")
         return
     
     topico_id_evento = None
@@ -422,20 +420,20 @@ async def interceptar_mensagem(event):
         # registrado como capturado quando há vídeo. Senão um post com foto e link
         # bloquearia por 24 h o post com vídeo do mesmo produto.
         if getattr(event, 'video', None) is None:
-            if EXIBIR_LOGS: logger.info(f"⏭️ Ignorado: O link {link_capturado} foi encontrado, mas a postagem não contém um anexo de vídeo direto.")
+            logger.info(f"⏭️ Ignorado: O link {link_capturado} foi encontrado, mas a postagem não contém um anexo de vídeo direto.")
             return
 
         if verificar_e_registrar_espelho(link_capturado, contexto="espiao"):
-            if EXIBIR_LOGS: logger.info(f"🪞 [Espião] Duplicidade barrada! O produto {link_capturado} já foi capturado nas últimas 24 horas.")
+            logger.info(f"🪞 [Espião] Duplicidade barrada! O produto {link_capturado} já foi capturado nas últimas 24 horas.")
             return  # antes de baixar o vídeo
             
-        if EXIBIR_LOGS: logger.info(f"🎯 ALVO LOCALIZADO! Link da Shopee extraído cirurgicamente: {link_capturado}")
+        logger.info(f"🎯 ALVO LOCALIZADO! Link da Shopee extraído cirurgicamente: {link_capturado}")
         
         # Post com link de outras lojas segue normalmente; só o link da Shopee é usado.
         if "magazineluiza" in texto_original.lower() or "meli.li" in texto_original.lower() or "mercadolivre" in texto_original.lower():
-            if EXIBIR_LOGS: logger.info("✂️ Concorrência ignorada: A postagem continha outros domínios, mas apenas o da Shopee foi filtrado.")
+            logger.info("✂️ Concorrência ignorada: A postagem continha outros domínios, mas apenas o da Shopee foi filtrado.")
         
-        if EXIBIR_LOGS: logger.info("📥 Iniciando download do vídeo em segundo plano...")
+        logger.info("📥 Iniciando download do vídeo em segundo plano...")
         caminho_salvo = await event.download_media(file="temp/temp_clone_")
 
         # Vídeo abaixo de 720p é re-renderizado antes de entrar na fila.
@@ -444,12 +442,12 @@ async def interceptar_mensagem(event):
         hash_arquivo = calcular_hash_video(caminho_salvo)
         
         if hash_arquivo and verificar_e_registrar_hash(hash_arquivo):
-            if EXIBIR_LOGS: logger.warning("🚫 Clone bloqueado! O vídeo possui uma assinatura digital idêntica a um ficheiro já processado.")
+            logger.warning("🚫 Clone bloqueado! O vídeo possui uma assinatura digital idêntica a um ficheiro já processado.")
             try:
                 os.remove(caminho_salvo)
-                if EXIBIR_LOGS: logger.info("🧹 Ficheiro físico duplicado eliminado com sucesso para poupar espaço.")
+                logger.info("🧹 Ficheiro físico duplicado eliminado com sucesso para poupar espaço.")
             except Exception as e:
-                if EXIBIR_LOGS: logger.error(f"❌ Erro ao tentar remover ficheiro duplicado: {e}")
+                logger.error(f"❌ Erro ao tentar remover ficheiro duplicado: {e}")
             return
             
         nome_chat = getattr(chat, 'title', chat_username if chat_username else chat_id)
@@ -528,13 +526,13 @@ async def analisar_fila_espiao_loop():
                     break
 
             if pendente:
-                if EXIBIR_LOGS: logger.info(f"🧠 [Análise Antecipada] Processando {pendente.get('id')}...")
+                logger.info(f"🧠 [Análise Antecipada] Processando {pendente.get('id')}...")
                 _chave_ia = chave_cache_ia(pendente.get("chat_origem"), pendente.get("msg_id"))
                 texto_ia = consultar_cache_ia(_chave_ia)
                 if texto_ia:
-                    if EXIBIR_LOGS: logger.info(f"♻️ [Cache IA] Espião reaproveitou a análise de {_chave_ia}.")
+                    logger.info(f"♻️ [Cache IA] Espião reaproveitou a análise de {_chave_ia}.")
                 else:
-                    texto_ia = await analisar_video_gemini(pendente.get("caminho_video"), PROMPT_NOME_PRODUTO, EXIBIR_LOGS)
+                    texto_ia = await analisar_video_gemini(pendente.get("caminho_video"), PROMPT_NOME_PRODUTO)
                     gravar_cache_ia(_chave_ia, texto_ia)
 
                 dados = ler_fila_clonagem()
@@ -548,15 +546,15 @@ async def analisar_fila_espiao_loop():
                         item["legenda_ia"] = texto_ia
                         # "📦 Item: <nome>" é o formato que o painel de filas procura.
                         item["legenda"] = f"📦 Item: {nome}" + (f"\n\n{tags}" if tags else "")
-                        if EXIBIR_LOGS: logger.info(f"✅ [Análise Antecipada] {pendente.get('id')} → {nome}")
+                        logger.info(f"✅ [Análise Antecipada] {pendente.get('id')} → {nome}")
                     else:
                         item["tentativas_ia_captura"] = int(item.get("tentativas_ia_captura", 0)) + 1
-                        if EXIBIR_LOGS: logger.warning(f"⚠️ [Análise Antecipada] IA falhou ({item['tentativas_ia_captura']}/3) em {pendente.get('id')}.")
+                        logger.warning(f"⚠️ [Análise Antecipada] IA falhou ({item['tentativas_ia_captura']}/3) em {pendente.get('id')}.")
                     break
                 salvar_fila_clonagem(dados)
 
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ [Análise Antecipada] Falha no loop: {e}")
+            logger.error(f"❌ [Análise Antecipada] Falha no loop: {e}")
 
         await asyncio.sleep(INTERVALO_ANALISE_ANTECIPADA)
 
@@ -629,7 +627,7 @@ async def processar_fila_espelhador_loop():
                 
                 forcar_rota = rota_config.get("esvaziar_agora", False)
                 
-                if EXIBIR_LOGS: logger.info(f"📅 [Espelhador] Motor Central acionado para {len(itens)} vídeos na rota '{nome_rota}' (Forçar: {forcar_rota})...")
+                logger.info(f"📅 [Espelhador] Motor Central acionado para {len(itens)} vídeos na rota '{nome_rota}' (Forçar: {forcar_rota})...")
                 calcular_horarios_distribuicao(itens, config_fila, forcar=forcar_rota)
                 houve_agendamento = True
 
@@ -647,7 +645,7 @@ async def processar_fila_espelhador_loop():
                 descartados_teto = aplicar_limite_diario_fila(
                     itens_da_rota, piso_rota, topo_rota, semente=f"espelho:{nome_rota_teto}"
                 )
-                if descartados_teto and EXIBIR_LOGS:
+                if descartados_teto:
                     logger.info(f"✂️ [Espelhador] Rota '{nome_rota_teto}': {len(descartados_teto)} "
                                 f"vídeo(s) acima da faixa de {piso_rota}-{topo_rota}/dia serão descartados.")
 
@@ -689,7 +687,7 @@ async def processar_fila_espelhador_loop():
                         if mensagem_original:
                             # O post de origem pode ter sido editado e perdido o vídeo.
                             if getattr(mensagem_original, 'video', None) is None:
-                                if EXIBIR_LOGS: logger.warning(f"🚫 [Segurança] Espelhador abortou o envio! A mensagem {msg_id} perdeu o formato de vídeo.")
+                                logger.warning(f"🚫 [Segurança] Espelhador abortou o envio! A mensagem {msg_id} perdeu o formato de vídeo.")
                             else:
                                 # Um download serve para a análise da IA e o re-encode. Só chega
                                 # aqui o vídeo que passou pelo teto do dia, então nada é desperdício.
@@ -698,7 +696,7 @@ async def processar_fila_espelhador_loop():
                                 try:
                                     caminho_disparo = await mensagem_original.download_media(file="temp/temp_disparo_espelho_")
                                 except Exception as e:
-                                    if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Download falhou no disparo: {e}")
+                                    logger.error(f"❌ [Espelhador] Download falhou no disparo: {e}")
 
                                 # O re-encode substitui o arquivo no mesmo caminho; se aconteceu,
                                 # quem avisa é o dict, não o retorno.
@@ -723,7 +721,7 @@ async def processar_fila_espelhador_loop():
                                     if houve_upscale and caminho_disparo and os.path.exists(caminho_disparo):
                                         # Sobe o arquivo re-encodado; supports_streaming faz o post sair
                                         # como vídeo reproduzível, não como documento.
-                                        if EXIBIR_LOGS: logger.info("⬆️ [Espelhador] Enviando o vídeo re-encodado para 720p.")
+                                        logger.info("⬆️ [Espelhador] Enviando o vídeo re-encodado para 720p.")
                                         msg_enviada = await client.send_message(entidade_destino, texto, file=caminho_disparo, parse_mode="html", supports_streaming=True)
 
                                         # O re-encode gera um arquivo com hash diferente do registrado na
@@ -733,7 +731,7 @@ async def processar_fila_espelhador_loop():
                                         hash_publicado = calcular_hash_video(caminho_disparo)
                                         if hash_publicado:
                                             verificar_e_registrar_hash(hash_publicado, contexto=str(destino))
-                                            if EXIBIR_LOGS: logger.info(f"🧬 [Espelhador] Hash do vídeo publicado registado no destino {destino}.")
+                                            logger.info(f"🧬 [Espelhador] Hash do vídeo publicado registado no destino {destino}.")
                                     else:
                                         # Sem re-encode, reaproveita a mídia original por referência (nada
                                         # a subir); o hash dela já foi registrado neste destino na captura.
@@ -745,17 +743,17 @@ async def processar_fila_espelhador_loop():
                                         try:
                                             os.remove(caminho_disparo)
                                         except Exception as e:
-                                            if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Erro ao remover temporário do disparo: {e}")
+                                            logger.error(f"❌ [Espelhador] Erro ao remover temporário do disparo: {e}")
                                 
                                 item["msg_postada_id"] = msg_enviada.id  # o painel monta o link do post publicado
-                                if EXIBIR_LOGS: logger.info(f"✅ [Espelhador] Disparo concluído na rota '{nome_rota}' para {destino}.")
+                                logger.info(f"✅ [Espelhador] Disparo concluído na rota '{nome_rota}' para {destino}.")
                                 
                                 await asyncio.sleep(15)  # intervalo mínimo entre envios (anti-ban)
                         else:
-                            if EXIBIR_LOGS: logger.warning(f"⚠️ [Espelhador] Mensagem original {msg_id} apagada antes do disparo na rota '{nome_rota}'.")
+                            logger.warning(f"⚠️ [Espelhador] Mensagem original {msg_id} apagada antes do disparo na rota '{nome_rota}'.")
                     except Exception as e:
                         erro_disparo = e
-                        if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Falha no disparo da rota '{nome_rota}': {e}")
+                        logger.error(f"❌ [Espelhador] Falha no disparo da rota '{nome_rota}': {e}")
 
                     # Erro antes de o vídeo sair (rede, flood, destino inacessível): o item volta
                     # para a fila e é tentado nos próximos ciclos, até 3 vezes; num flood, só
@@ -768,7 +766,7 @@ async def processar_fila_espelhador_loop():
                             if isinstance(erro_disparo, FloodWaitError):
                                 espera = int(getattr(erro_disparo, "seconds", 60) or 60) + 30
                                 item["horario_disparo"] = (agora + timedelta(seconds=espera)).strftime("%Y-%m-%d %H:%M:%S")
-                            if EXIBIR_LOGS: logger.warning(f"🔁 [Espelhador] Tentativa {tentativas}/3 falhou na rota '{nome_rota}'; vai de novo num próximo ciclo.")
+                            logger.warning(f"🔁 [Espelhador] Tentativa {tentativas}/3 falhou na rota '{nome_rota}'; vai de novo num próximo ciclo.")
                             itens_restantes.append(item)
                             houve_disparo = True
                             continue
@@ -799,7 +797,7 @@ async def processar_fila_espelhador_loop():
                 salvar_fila_espelhador(fila_dados)
             
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ Erro crítico no motor de distribuição do espelhador: {e}")
+            logger.error(f"❌ Erro crítico no motor de distribuição do espelhador: {e}")
             registrar_erro_json(f"processar_fila_espelhador_loop: {e}", origem="espelhador.py")
         
         await asyncio.sleep(60)
@@ -837,11 +835,11 @@ async def motor_espelhador_userbot(event):
         foi_nossa_equipe = False
 
     if foi_nossa_equipe and chat_username != "@shopee_video_afiliado":
-        if EXIBIR_LOGS: logger.info("🛡️ [Espelhador] Postagem do próprio sistema bloqueada (Userbot ou Bot Oficial).")
+        logger.info("🛡️ [Espelhador] Postagem do próprio sistema bloqueada (Userbot ou Bot Oficial).")
         return
 
     if event.out and not eh_ponte and chat_username != "@shopee_video_afiliado":
-        if EXIBIR_LOGS: logger.info("🛡️ [Espelhador] Trava de canais ativada: Postagem própria ignorada.")
+        logger.info("🛡️ [Espelhador] Trava de canais ativada: Postagem própria ignorada.")
         return
 
     topico_id_evento = None
@@ -883,21 +881,21 @@ async def motor_espelhador_userbot(event):
 
     # Só vídeo; foto é ignorada.
     if getattr(event, 'video', None) is None:
-        if EXIBIR_LOGS: logger.info("⏭️ [Espelhador] Postagem descartada: Contém o link, mas a mídia não é um vídeo.")
+        logger.info("⏭️ [Espelhador] Postagem descartada: Contém o link, mas a mídia não é um vídeo.")
         return
 
     link_capturado = extrair_link_shopee(event)
     
     if not link_capturado:
-        if EXIBIR_LOGS: logger.info("⏭️ Postagem ignorada: Não contém link da Shopee (nem embutido).")
+        logger.info("⏭️ Postagem ignorada: Não contém link da Shopee (nem embutido).")
         return
     
-    if EXIBIR_LOGS: logger.info(f"🔄 [Espelhador] Interceptação acionada! Mídia e link detetados na origem {chat_id_str}.")
-    if EXIBIR_LOGS: logger.info("🔗 [Espelhador] A converter o link da Shopee encontrado via API Central...")
-    link_final_convertido = await converter_link_shopee(link_capturado, "geral", EXIBIR_LOGS)
-    if EXIBIR_LOGS: logger.info("✅ [Espelhador] Sucesso: Link convertido utilizando a função nativa correta.")
+    logger.info(f"🔄 [Espelhador] Interceptação acionada! Mídia e link detetados na origem {chat_id_str}.")
+    logger.info("🔗 [Espelhador] A converter o link da Shopee encontrado via API Central...")
+    link_final_convertido = await converter_link_shopee(link_capturado, "geral")
+    logger.info("✅ [Espelhador] Sucesso: Link convertido utilizando a função nativa correta.")
 
-    if EXIBIR_LOGS: logger.info("📥 [Espelhador] Descarregando vídeo temporário para verificação de duplicidade...")
+    logger.info("📥 [Espelhador] Descarregando vídeo temporário para verificação de duplicidade...")
     caminho_video_temp = await event.download_media(file="temp/temp_analise_espelho_")
 
     # O download aqui serve só para o hash do vídeo como ele veio, que é o que
@@ -921,13 +919,13 @@ async def motor_espelhador_userbot(event):
         _chave_ia = chave_cache_ia(getattr(event, 'chat_id', None), getattr(event, 'id', None))
         titulo_ia = consultar_cache_ia(_chave_ia)
         if titulo_ia:
-            if EXIBIR_LOGS: logger.info(f"♻️ [Cache IA] Espelhador reaproveitou a análise de {_chave_ia}.")
+            logger.info(f"♻️ [Cache IA] Espelhador reaproveitou a análise de {_chave_ia}.")
         
         try:
             os.remove(caminho_video_temp)
-            if EXIBIR_LOGS: logger.info("🧹 [Espelhador] Vídeo temporário removido do servidor após análise.")
+            logger.info("🧹 [Espelhador] Vídeo temporário removido do servidor após análise.")
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Erro ao remover vídeo temporário: {e}")
+            logger.error(f"❌ [Espelhador] Erro ao remover vídeo temporário: {e}")
     else:
         titulo_ia = None
 
@@ -940,10 +938,10 @@ async def motor_espelhador_userbot(event):
         if hashtags:
             texto_processado += f"\n\n<i>{hashtags}</i>"
             
-        if EXIBIR_LOGS: logger.info("✅ [Espelhador] Legenda inteligente construída com sucesso (Título -> Link -> Hashtags).")
+        logger.info("✅ [Espelhador] Legenda inteligente construída com sucesso (Título -> Link -> Hashtags).")
     else:
         texto_processado = f"🔗 <b>Link do Produto:</b>\n{link_final_convertido}"
-        if EXIBIR_LOGS: logger.info("🕓 [Espelhador] Análise da IA adiada para o disparo. Legenda base gravada como fallback.")
+        logger.info("🕓 [Espelhador] Análise da IA adiada para o disparo. Legenda base gravada como fallback.")
 
     # Sem título vindo do cache, a legenda definitiva é montada na hora de postar.
     legenda_ia_pendente = not bool(titulo_ia)
@@ -961,15 +959,15 @@ async def motor_espelhador_userbot(event):
         nome_rota = rota.get("nome", "Desconhecida")
         
         if forward_origem_id and (destino == forward_origem_id or destino.replace("-100", "") == forward_origem_id.replace("-100", "")):
-            if EXIBIR_LOGS: logger.warning(f"🚫 [Anti-Loop Ativado] O vídeo nasceu no destino ({destino}). Ignorando a clonagem nesta rota.")
+            logger.warning(f"🚫 [Anti-Loop Ativado] O vídeo nasceu no destino ({destino}). Ignorando a clonagem nesta rota.")
             continue
             
         if link_capturado and verificar_e_registrar_espelho(link_capturado, contexto=str(destino)):
-            if EXIBIR_LOGS: logger.info(f"🪞 [Espelhador] Duplicidade barrada na rota '{nome_rota}'! O link já foi postado neste destino nas últimas 24h.")
+            logger.info(f"🪞 [Espelhador] Duplicidade barrada na rota '{nome_rota}'! O link já foi postado neste destino nas últimas 24h.")
             continue
             
         if hash_arquivo and verificar_e_registrar_hash(hash_arquivo, contexto=str(destino)):
-            if EXIBIR_LOGS: logger.warning(f"🚫 [Espelhador] Loop evitado na rota '{nome_rota}'! O ficheiro de vídeo exato já foi postado neste destino.")
+            logger.warning(f"🚫 [Espelhador] Loop evitado na rota '{nome_rota}'! O ficheiro de vídeo exato já foi postado neste destino.")
             continue
             
         fila_dados = ler_fila_espelhador()
@@ -989,7 +987,7 @@ async def motor_espelhador_userbot(event):
         }
         fila_dados["fila"].append(item)
         salvar_fila_espelhador(fila_dados)
-        if EXIBIR_LOGS: logger.info(f"📦 [Espelhador] Vídeo enfileirado dinamicamente na rota '{nome_rota}'.")
+        logger.info(f"📦 [Espelhador] Vídeo enfileirado dinamicamente na rota '{nome_rota}'.")
 
 async def montar_legenda_no_disparo(caminho_video, chat_origem, msg_id, item):
     """
@@ -1014,16 +1012,16 @@ async def montar_legenda_no_disparo(caminho_video, chat_origem, msg_id, item):
         titulo_ia = consultar_cache_ia(chave)
 
         if titulo_ia:
-            if EXIBIR_LOGS: logger.info(f"♻️ [Cache IA] Disparo reaproveitou a análise de {chave}.")
+            logger.info(f"♻️ [Cache IA] Disparo reaproveitou a análise de {chave}.")
         elif not caminho_video:
-            if EXIBIR_LOGS: logger.warning("⚠️ [Espelhador] Sem ficheiro para analisar. A postar com a legenda base.")
+            logger.warning("⚠️ [Espelhador] Sem ficheiro para analisar. A postar com a legenda base.")
             return texto_base
         else:
             titulo_ia = await gerar_legenda_com_ia_espelhador(caminho_video)
             gravar_cache_ia(chave, titulo_ia)
 
         if not titulo_ia:
-            if EXIBIR_LOGS: logger.warning("⚠️ [Espelhador] IA não devolveu título. A postar com a legenda base.")
+            logger.warning("⚠️ [Espelhador] IA não devolveu título. A postar com a legenda base.")
             return texto_base
 
         linhas_ia = titulo_ia.split('\n')
@@ -1037,11 +1035,11 @@ async def montar_legenda_no_disparo(caminho_video, chat_origem, msg_id, item):
         # Grava no item para o painel e o histórico mostrarem a legenda real.
         item["texto_processado"] = texto
         item["legenda_ia_pendente"] = False
-        if EXIBIR_LOGS: logger.info("✅ [Espelhador] Legenda inteligente montada no disparo.")
+        logger.info("✅ [Espelhador] Legenda inteligente montada no disparo.")
         return texto
 
     except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ [Espelhador] Falha ao montar a legenda no disparo: {e}")
+        logger.error(f"❌ [Espelhador] Falha ao montar a legenda no disparo: {e}")
         return texto_base
 
 async def validar_e_obter_entidade(client, alvo):
@@ -1052,7 +1050,7 @@ async def validar_e_obter_entidade(client, alvo):
     """
     alvo_str = str(alvo).strip()
     
-    if EXIBIR_LOGS: logger.info(f"🧹 [Auditor] Higienizando alvo bruto: {alvo_str}")
+    logger.info(f"🧹 [Auditor] Higienizando alvo bruto: {alvo_str}")
 
     # O tópico sai do texto antes da busca e volta no ID normalizado.
     topico_id = None
@@ -1067,7 +1065,7 @@ async def validar_e_obter_entidade(client, alvo):
     if match_privado:
         numero_extraido = match_privado.group(1)
         alvo_str = f"-100{numero_extraido}"
-        if EXIBIR_LOGS: logger.info(f"🔗 [Auditor] Link privado detetado. Convertido para ID base: {alvo_str}")
+        logger.info(f"🔗 [Auditor] Link privado detetado. Convertido para ID base: {alvo_str}")
 
     # Username ou link público (t.me/username).
     elif "t.me/" in alvo_str or alvo_str.startswith("@") or not alvo_str.lstrip('-').isdigit():
@@ -1079,9 +1077,9 @@ async def validar_e_obter_entidade(client, alvo):
         
         for var in variacoes_publicas:
             try:
-                if EXIBIR_LOGS: logger.info(f"🔍 [Auditor] Testando variação de username: {var}")
+                logger.info(f"🔍 [Auditor] Testando variação de username: {var}")
                 ent = await client.get_entity(var)
-                if EXIBIR_LOGS: logger.info(f"✅ [Auditor] Variação {var} aceite pela API do Telegram!")
+                logger.info(f"✅ [Auditor] Variação {var} aceite pela API do Telegram!")
                 id_final = f"{var}:{topico_id}" if topico_id else var
                 return ent, id_final
             except Exception:
@@ -1105,9 +1103,9 @@ async def validar_e_obter_entidade(client, alvo):
             
     for var in variacoes_unicas:
         try:
-            if EXIBIR_LOGS: logger.info(f"🔍 [Auditor] Testando variação numérica de ID: {var}")
+            logger.info(f"🔍 [Auditor] Testando variação numérica de ID: {var}")
             ent = await client.get_entity(int(var))
-            if EXIBIR_LOGS: logger.info(f"✅ [Auditor] Variação {var} aceite pela API do Telegram!")
+            logger.info(f"✅ [Auditor] Variação {var} aceite pela API do Telegram!")
             id_final = f"{var}:{topico_id}" if topico_id else str(var)
             return ent, id_final
         except Exception:
@@ -1125,7 +1123,7 @@ async def monitorar_status_alvos():
     ultimo_destino = None
     ultima_modificacao = 0
 
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento ultraleve (1 min) para os alvos do Espião...")
+    logger.info("🚀 Iniciando monitoramento ultraleve (1 min) para os alvos do Espião...")
     
     while True:
         try:
@@ -1143,7 +1141,7 @@ async def monitorar_status_alvos():
 
                 # O banco muda por vários motivos; só confere se mudaram os alvos ou o destino.
                 if alvos_atuais != ultimo_alvos or destino_atual != ultimo_destino:
-                    if EXIBIR_LOGS: logger.info("🔍 [Auditor] Mudança detectada nos alvos do Espião. Iniciando validação...")
+                    logger.info("🔍 [Auditor] Mudança detectada nos alvos do Espião. Iniciando validação...")
                     
                     novos_status_coletados = {}
                     mapa_correcoes = {}
@@ -1222,12 +1220,12 @@ async def monitorar_status_alvos():
                     except OSError:
                         ultima_modificacao = modificacao_atual
                         
-                    if EXIBIR_LOGS: logger.info("✅ Auditoria do Espião concluída. Nomes atualizados!")
+                    logger.info("✅ Auditoria do Espião concluída. Nomes atualizados!")
                 else:
                     ultima_modificacao = modificacao_atual
 
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"⚠️ Erro no loop de monitoramento do Espião: {e}")
+            logger.error(f"⚠️ Erro no loop de monitoramento do Espião: {e}")
 
         await asyncio.sleep(60)
 
@@ -1239,7 +1237,7 @@ async def monitorar_status_espelhos():
     ultima_assinatura_rotas = None
     ultima_modificacao = 0
 
-    if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento ultraleve (1 min) para as rotas do Espelhador...")
+    logger.info("🚀 Iniciando monitoramento ultraleve (1 min) para as rotas do Espelhador...")
     while True:
         try:
             # Data de modificação do arquivo: se não mudou, não há o que conferir.
@@ -1263,7 +1261,7 @@ async def monitorar_status_espelhos():
                 
                 # Só confere se mudaram as origens ou destinos das rotas.
                 if assinatura_atual != ultima_assinatura_rotas:
-                    if EXIBIR_LOGS: logger.info("🔍 [Auditor] Mudança detectada nas rotas do Espelhador. Iniciando validação...")
+                    logger.info("🔍 [Auditor] Mudança detectada nas rotas do Espelhador. Iniciando validação...")
                     alterado = origens_normalizadas
                     
                     for rota in rotas:
@@ -1319,7 +1317,7 @@ async def monitorar_status_espelhos():
                                     
                     if alterado:
                         salvar_json_atomico("espelhos_config.json", dados_espelho, indent=4, ensure_ascii=False)
-                        if EXIBIR_LOGS: logger.info("✅ Arquivo do Espelhador atualizado e sincronizado após auditoria.")
+                        logger.info("✅ Arquivo do Espelhador atualizado e sincronizado após auditoria.")
                         
                     ultima_assinatura_rotas = str([{ "origens": r.get("origens", [r.get("origem")]), "destino": r.get("destino") } for r in rotas])
                     
@@ -1328,12 +1326,12 @@ async def monitorar_status_espelhos():
                     except OSError:
                         ultima_modificacao = modificacao_atual
                         
-                    if EXIBIR_LOGS: logger.info("✅ Auditoria do Espelhador concluída. Nomes atualizados!")
+                    logger.info("✅ Auditoria do Espelhador concluída. Nomes atualizados!")
                 else:
                     ultima_modificacao = modificacao_atual
 
         except Exception as e:
-            if EXIBIR_LOGS: logger.error(f"⚠️ Erro na auditoria do espelhador: {e}")
+            logger.error(f"⚠️ Erro na auditoria do espelhador: {e}")
             
         await asyncio.sleep(60)
 
@@ -1398,21 +1396,21 @@ async def monitorar_topicos_submissao():
                         salvar_nome_grupo(f"{grupo_id}_{topico_id}", titulo)
                         total += 1
 
-                    if EXIBIR_LOGS and total:
+                    if total:
                         logger.info(f"🏷️ [Tópicos] {total} nomes sincronizados do grupo {grupo_id}.")
                 except Exception as e:
-                    if EXIBIR_LOGS: logger.warning(f"⚠️ [Tópicos] Falha ao sincronizar os tópicos do grupo {grupo_id}: {e}")
+                    logger.warning(f"⚠️ [Tópicos] Falha ao sincronizar os tópicos do grupo {grupo_id}: {e}")
 
                 await asyncio.sleep(3)   # respiro entre fóruns
 
         except Exception as e:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ [Tópicos] Falha ao sincronizar nomes dos tópicos: {e}")
+            logger.warning(f"⚠️ [Tópicos] Falha ao sincronizar nomes dos tópicos: {e}")
 
         await asyncio.sleep(600)
 
 async def main():
     """Inicia a sessão do Telegram e os laços em segundo plano."""
-    if EXIBIR_LOGS: logger.info("🕵️ Iniciando o Módulo Espião de Clonagem...")
+    logger.info("🕵️ Iniciando o Módulo Espião de Clonagem...")
     garantir_tabela_registros_unicos()
     try:
         with open("status_espelhador.json", "w") as f:
@@ -1421,15 +1419,15 @@ async def main():
         pass
     await client.start()
     
-    if EXIBIR_LOGS: logger.info("🔄 Sincronizando banco de dados de grupos e access_hashes...")
+    logger.info("🔄 Sincronizando banco de dados de grupos e access_hashes...")
     try:
         await client.get_dialogs()
-        if EXIBIR_LOGS: logger.info("✅ Sincronização concluída! IDs numéricos agora serão reconhecidos pelo Auditor.")
+        logger.info("✅ Sincronização concluída! IDs numéricos agora serão reconhecidos pelo Auditor.")
     except Exception as e:
-        if EXIBIR_LOGS: logger.warning(f"⚠️ Aviso na sincronização: {e}")
+        logger.warning(f"⚠️ Aviso na sincronização: {e}")
         
     alvos = carregar_alvos()
-    if EXIBIR_LOGS: logger.info(f"📡 Radar ativo para {len(alvos)} concorrentes.")
+    logger.info(f"📡 Radar ativo para {len(alvos)} concorrentes.")
     
     asyncio.create_task(processar_fila_espelhador_loop())
     asyncio.create_task(analisar_fila_espiao_loop())
