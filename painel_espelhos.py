@@ -1,4 +1,20 @@
-# 0. CONFIGURAÇÕES INICIAIS
+"""
+Painel do Espelhador de Canais (handlers aiogram incluídos no bot_mestre).
+
+Cria, edita e remove as rotas de espelhos_config.json. Cada rota liga várias
+origens (canais/grupos vigiados) a um destino, com janela de horário, atraso D+X,
+modo de distribuição (ordem de chegada ou aleatório), limite diário e lista negra.
+Quem captura e publica é o motor_userbot; este módulo grava a configuração e só
+mexe na fila (fila_espelhador.json) para renomear rota e para reagendar quando o
+D+X muda.
+
+Origens são texto: "-100123", "-100123:5" (com tópico) ou "@canal". Rotas antigas
+podem ter uma "origem" única em vez da lista "origens"; os handlers aceitam as duas.
+A fila liga cada vídeo à rota pelo NOME, por isso renomear rota sincroniza a fila.
+
+Para voltar ao menu da rota, os handlers chamam selecionar_acao_edicao com uma
+cópia da mensagem cujo texto é o número da rota, como se o usuário o digitasse.
+"""
 EXIBIR_LOGS = True
 import json
 import logging
@@ -12,7 +28,7 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import StateFilter
 from utils import ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo, id_da_origem, normalizar_origens_rotas, salvar_json_atomico
-from motor_filas import ler_faixa_limite, sortear_teto_do_dia # ⚙️ Novo Motor Centralizado
+from motor_filas import ler_faixa_limite, sortear_teto_do_dia
 EXIBIR_LOGS = True
 
 if EXIBIR_LOGS:
@@ -31,13 +47,13 @@ def configurar_dependencias(bot: Bot, scheduler):
     scheduler_instance = scheduler
     if EXIBIR_LOGS: logger.info("🔌 Conexão estabelecida: Dependências do Espelhador injetadas com sucesso.")
 
-# --- MÁQUINA DE ESTADOS E TECLADOS ---
+# --- Estados do fluxo e teclados ---
 class EspelhadorFluxo(StatesGroup):
     menu_principal = State()
     aguardando_origem = State()
     aguardando_destino = State()
-    aguardando_destino_criacao = State() # ✅ NOVO: Passo 1 da criação
-    aguardando_origem_criacao = State()  # ✅ NOVO: Passo 2 da criação
+    aguardando_destino_criacao = State() # criação, passo 1
+    aguardando_origem_criacao = State()  # criação, passo 2
     aguardando_janela = State()
     aguardando_intervalo_dias = State()
     aguardando_modo = State()
@@ -47,13 +63,13 @@ class EspelhadorFluxo(StatesGroup):
     aguardando_edicao_escolha_rota = State()
     aguardando_acao_edicao = State()
     aguardando_edicao_novo_nome = State()
-    aguardando_edicao_novo_destino = State() # ✅ NOVO ESTADO ADICIONADO AQUI
+    aguardando_edicao_novo_destino = State()
     aguardando_edicao_nova_janela = State()
-    aguardando_edicao_limite_diario = State()      # ✅ NOVO: teto de posts por dia
-    aguardando_confirmacao_edicao_limite = State() # ✅ NOVO: dupla confirmação do teto
-    aguardando_edicao_intervalo_dias = State() # ✅ ESTADO QUE HAVIA SUMIDO
+    aguardando_edicao_limite_diario = State()
+    aguardando_confirmacao_edicao_limite = State()
+    aguardando_edicao_intervalo_dias = State()
     aguardando_edicao_novo_modo = State()
-    aguardando_acao_origem = State() # ✅ ESTADO ADICIONADO PARA O SUBMENU
+    aguardando_acao_origem = State() # submenu Editar Canais
     aguardando_nova_origem = State()
     aguardando_confirmacao_nova_origem = State()
     aguardando_remocao_origem = State()
@@ -64,8 +80,7 @@ class EspelhadorFluxo(StatesGroup):
     aguardando_blacklist_add = State()
     aguardando_blacklist_remove = State()
     aguardando_confirmacao_blacklist_conflito = State()
-    # ✅ NOVO ESTADO DE ANÁLISE:
-    aguardando_acao_analise = State()
+    aguardando_acao_analise = State() # submenu Analisar Canais Vigiados
     aguardando_confirmacao_edicao_janela = State()
     aguardando_confirmacao_edicao_dias = State()
     aguardando_confirmacao_edicao_modo = State()
@@ -74,7 +89,7 @@ teclado_espelhador_menu = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Adicionar Espelho ➕"), KeyboardButton(text="Remover Espelho 🗑️")],
         [KeyboardButton(text="Editar Espelho ✏️")],
-        [KeyboardButton(text="Forçar Espelhos 🚀")], # <--- Alterado aqui
+        [KeyboardButton(text="Forçar Espelhos 🚀")],
         [KeyboardButton(text="Voltar aos Canais 🔙")]
     ],
     resize_keyboard=True,
@@ -87,14 +102,14 @@ teclado_espelhador_cancelar = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# ✅ NOVO: Teclado exclusivo de navegação para voltar sem "cancelar"
+# Nas telas de escolher rota o botão é "voltar", não "cancelar".
 teclado_espelhador_voltar = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Voltar ao Menu Espelho 🔙")]],
     resize_keyboard=True,
     is_persistent=True
 )
 
-# ✅ NOVO: Teclado para Definição da Janela de Horário da Rota
+# Janela de horário: o usuário digita "10-22" ou usa o botão de 24h.
 teclado_espelhador_janela = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Dia Todo (24h) 🕛")],
@@ -104,14 +119,13 @@ teclado_espelhador_janela = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# ✅ NOVO: Teclado de Dupla Confirmação
 teclado_espelhador_confirmacao = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar Operação ❌")]],
     resize_keyboard=True,
     is_persistent=True
 )
 
-# ✅ NOVO: Teclado Inteligente para Injeção Múltipla de Origens
+# Com mais de uma rota: as origens novas entram só nesta rota ou em todas.
 teclado_espelhador_abrangencia = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Apenas nesta Rota 🎯")],
@@ -122,8 +136,9 @@ teclado_espelhador_abrangencia = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# --- BANCO DE DADOS DO ESPELHADOR ---
+# --- Arquivos do Espelhador ---
 def ler_espelhos():
+    """Rotas de espelhos_config.json (origens já no formato de texto). Arquivo ausente ou inválido = nenhuma rota."""
     try:
         with open("espelhos_config.json", "r") as f:
             dados = json.load(f)
@@ -133,10 +148,10 @@ def ler_espelhos():
     return dados
 
 def ler_contador_espelhador(nome_rota):
+    """Quantos vídeos da rota ainda esperam publicação (os já publicados não contam)."""
     try:
         with open("fila_espelhador.json", "r") as f:
             dados = json.load(f)
-            # ✅ CORREÇÃO: Conta APENAS os vídeos que NÃO foram processados
             return len([item for item in dados.get("fila", []) if item.get("nome_rota") == nome_rota and item.get("processado") not in [True, 1, "true", "True"]])
     except (FileNotFoundError, json.JSONDecodeError):
         return 0
@@ -168,10 +183,15 @@ def obter_teclado_importacao_espelhador():
 
 @router.message(F.text.in_(["Cancelar Operação ❌", "Voltar ao Menu Espelho 🔙", "🔙 Voltar ao Menu de Edição"]), StateFilter("*"))
 async def cancelar_espelhador(message: types.Message, state: FSMContext):
+    """
+    Botões de cancelar/voltar, em qualquer estado. Sobe um nível conforme onde o
+    usuário está: escolhendo rota → painel; canais ou lista negra → submenu Editar
+    Canais; editando a rota → menu da rota; qualquer outro → painel.
+    """
     estado_atual = await state.get_state()
     data = await state.get_data()
 
-    # --- PROTEÇÃO ANTI-FANTASMA: Se estiver escolhendo a rota, volta sempre para a raiz ---
+    # Ainda não há rota escolhida (ou é o 1º passo da criação): volta ao painel.
     if estado_atual in ["EspelhadorFluxo:aguardando_edicao_escolha_rota", "EspelhadorFluxo:aguardando_remocao", "EspelhadorFluxo:aguardando_rota_esvaziar", "EspelhadorFluxo:aguardando_destino_criacao"]:
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando ao Painel Principal do Espelhador.")
         await state.clear()
@@ -179,7 +199,7 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         await painel_espelhador(message, state)
         return
 
-    # --- NÍVEL 3: Submenu de Origens ---
+    # Dentro de Editar Canais ou da lista negra: volta ao submenu de canais.
     estados_origem = [
         "EspelhadorFluxo:aguardando_nova_origem",
         "EspelhadorFluxo:aguardando_confirmacao_nova_origem",
@@ -204,20 +224,20 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         await state.set_state(EspelhadorFluxo.aguardando_acao_origem)
         return
 
-    # --- NÍVEL 2: Submenu de Edição da Rota ---
+    # Editando algum item da rota: volta ao menu da rota.
     estados_edicao = [
         "EspelhadorFluxo:aguardando_acao_origem", 
         "EspelhadorFluxo:aguardando_acao_analise",
         "EspelhadorFluxo:aguardando_edicao_novo_nome",
         "EspelhadorFluxo:aguardando_edicao_novo_destino",
         "EspelhadorFluxo:aguardando_edicao_nova_janela",
-        "EspelhadorFluxo:aguardando_edicao_limite_diario",      # ✅ ADICIONADO
-        "EspelhadorFluxo:aguardando_confirmacao_edicao_limite", # ✅ ADICIONADO
+        "EspelhadorFluxo:aguardando_edicao_limite_diario",
+        "EspelhadorFluxo:aguardando_confirmacao_edicao_limite",
         "EspelhadorFluxo:aguardando_edicao_intervalo_dias",
         "EspelhadorFluxo:aguardando_edicao_novo_modo",
-        "EspelhadorFluxo:aguardando_confirmacao_edicao_janela", # ✅ ADICIONADO
-        "EspelhadorFluxo:aguardando_confirmacao_edicao_dias",   # ✅ ADICIONADO
-        "EspelhadorFluxo:aguardando_confirmacao_edicao_modo"    # ✅ ADICIONADO
+        "EspelhadorFluxo:aguardando_confirmacao_edicao_janela",
+        "EspelhadorFluxo:aguardando_confirmacao_edicao_dias",
+        "EspelhadorFluxo:aguardando_confirmacao_edicao_modo"
     ]
     if estado_atual in estados_edicao and data.get("indice_edicao") is not None:
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento: Voltando ao menu de Edição da Rota.")
@@ -227,7 +247,7 @@ async def cancelar_espelhador(message: types.Message, state: FSMContext):
         await selecionar_acao_edicao(msg_simulada, state)
         return
 
-    # --- NÍVEL 1: Cancelamento Raiz (Fallback de Segurança) ---
+    # Qualquer outro estado, inclusive a criação de rota: volta ao painel.
     if EXIBIR_LOGS: logger.info("🔙 Cancelamento Global/Fallback: Voltando ao Painel Principal do Espelhador.")
     await state.clear()
     await message.answer("Operação cancelada.", reply_markup=teclado_espelhador_menu)
@@ -297,7 +317,7 @@ async def remover_erros_espelhador_callback(callback: types.CallbackQuery, state
     
     await callback.answer()
     
-    # ✅ CORREÇÃO: Usando callback.message para simular o retorno com segurança
+    # Volta ao menu da rota usando a mensagem do botão como base.
     if indice is not None:
         if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu de Edição da Rota após limpeza.")
         novo_texto = str(indice + 1)
@@ -318,15 +338,20 @@ async def voltar_de_analise_para_edicao(message: types.Message, state: FSMContex
 
 @router.message(F.text == "Espelhador de Canais 🔄", StateFilter("*"))
 async def painel_espelhador(message: types.Message, state: FSMContext):
+    """
+    Tela inicial: as rotas com destino, origens e o status de cada canal (gravado
+    pelo auditor do motor_userbot). Texto longo sai em várias mensagens de até ~3800
+    caracteres (o Telegram recusa acima de 4096).
+    """
     await state.clear()
     dados = ler_espelhos()
     rotas = dados.get("rotas", [])
-    cache_nomes = ler_cache_nomes_grupos()  # 🚀 Fallback
+    cache_nomes = ler_cache_nomes_grupos()
     
     texto = "🔄 <b>Painel do Espelhador de Canais</b>\n\n"
     texto += "Este módulo clona publicações de um grupo para outro automaticamente, convertendo os links e respeitando um atraso programado.\n\n"
     
-    houve_alteracao = False # ✅ Prepara a variável para salvar o arquivo se houver correção
+    houve_alteracao = False
 
     if rotas:
         texto += "📡 <b>Rotas Ativas:</b>\n"
@@ -335,20 +360,21 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
             destino_rota = rota.get('destino', '')
             status_canais = rota.get("status_canais", {})
             
-            # ✅ NOVO: Autocura Inteligente Definitiva (Lê a própria memória)
+            # Rota criada quando o nome do destino ainda não era conhecido ficou "Espelho: <ID>".
+            # Assim que o nome aparece, a rota é renomeada.
             if "Espelho: -100" in nome_rota or "Espelho: @" in nome_rota or "https://" in nome_rota:
                 nome_real = None
                 
-                # 1. Tenta achar o nome salvo no próprio arquivo JSON (Aonde vimos que funciona!)
+                # 1) nome que o auditor gravou em status_canais
                 info_d = status_canais.get(str(destino_rota), {})
                 if isinstance(info_d, dict) and info_d.get("nome") and info_d.get("nome") != str(destino_rota):
                     nome_real = info_d.get("nome")
                     
-                # 2. Se não achar, tenta no cache global
+                # 2) cache de nomes de grupos
                 elif str(destino_rota) in cache_nomes and cache_nomes[str(destino_rota)] != str(destino_rota):
                     nome_real = cache_nomes[str(destino_rota)]
                     
-                # 3. Em último caso, tenta bater na API do Telegram
+                # 3) pergunta ao Telegram
                 if not nome_real:
                     try:
                         chat_obj = await message.bot.get_chat(destino_rota)
@@ -356,7 +382,6 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
                     except Exception:
                         pass
                         
-                # Se achou o nome real em qualquer um dos 3 passos, conserta a rota
                 if nome_real:
                     _renomear_rota_na_fila(rota['nome'], f"Espelho: {nome_real}")
                     nome_rota = f"Espelho: {nome_real}"
@@ -371,7 +396,7 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
             texto += f"   📦 Fila de Espera: {qtd_fila} vídeo(s)\n"
             texto += "\n"
             
-            # --- 1. DESTINO MOSTRADO PRIMEIRO ---
+            # Destino primeiro, depois as origens.
             info_d = status_canais.get(str(destino_rota), {})
             if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
             
@@ -381,7 +406,6 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
             
             texto += f"🎯 <b>Canal de Destino:</b> {status_destino_ico} {display_d}\n\n"
 
-            # --- 2. ORIGENS MOSTRADAS LOGO ABAIXO ---
             origens = rota.get('origens', [])
             if not origens and 'origem' in rota:
                 origens = [rota['origem']]
@@ -404,17 +428,16 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
 
             total_origens = len(linhas_origem)
             
-            # Lógica de Ocultação Inteligente (Muralha Anti-Crash)
+            # Com mais de 15 origens a mensagem estoura: mostra as 5 primeiras, as 5
+            # últimas e, do meio, só as que estão com erro.
             if total_origens <= 15:
                 for linha in linhas_origem:
                     texto += linha["texto"]
             else:
-                # Mostra os 5 primeiros
                 for idx in range(5):
                     texto += linhas_origem[idx]["texto"]
 
                 ocultos_ok = 0
-                # Varre o meio da lista ocultando os OKs e exibindo apenas os ERROS
                 for idx in range(5, total_origens - 5):
                     if linhas_origem[idx]["tem_erro"]:
                         if ocultos_ok > 0:
@@ -427,14 +450,11 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
                 if ocultos_ok > 0:
                     texto += f"   <i>... e mais {ocultos_ok} canais operando normalmente ...</i>\n"
 
-                # Mostra os 5 últimos
                 for idx in range(total_origens - 5, total_origens):
                     texto += linhas_origem[idx]["texto"]
         
-        # 👇 FORA DO LAÇO 'for'
         texto += "\nEscolha a ação que deseja realizar:"
             
-        # ✅ NOVO: Salva as alterações no banco de dados se a autocura rodou
         if houve_alteracao:
             dados["rotas"] = rotas
             salvar_espelhos(dados)
@@ -461,6 +481,7 @@ async def painel_espelhador(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.menu_principal, F.text == "Adicionar Espelho ➕")
 async def iniciar_cadastro_rota(message: types.Message, state: FSMContext):
+    """Criação de rota, passo 1 de 5: pede o canal de destino."""
     if EXIBIR_LOGS: logger.info("🚀 Iniciando fluxo de cadastro de espelho (Passo 1: Destino)...")
     await message.answer(
         "Para começar, envie o <b>ID Numérico, Link ou @username</b> do Canal de DESTINO (Para onde o robô vai enviar as cópias):\n"
@@ -472,6 +493,7 @@ async def iniciar_cadastro_rota(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.aguardando_destino_criacao)
 async def receber_destino_criacao(message: types.Message, state: FSMContext):
+    """Valida o destino (o bot precisa enxergar o canal) e pede as origens."""
     msg_status = await message.answer("⏳ Validando permissões e acesso ao canal de destino...", reply_markup=teclado_espelhador_cancelar)
     sucesso, destino_id, nome = await validar_e_formatar_alvo(bot_instance, message.text)
     await msg_status.delete()
@@ -479,7 +501,7 @@ async def receber_destino_criacao(message: types.Message, state: FSMContext):
     if sucesso:
         salvar_nome_grupo(destino_id, nome)
         if EXIBIR_LOGS: logger.info(f"✅ Destino validado com sucesso: {destino_id}")
-        await state.update_data(destino=destino_id, nome_destino=nome) # Salva o nome para usar lá no Passo 3
+        await state.update_data(destino=destino_id, nome_destino=nome) # nome_destino batiza a rota no fim
         
         texto_origens = (
             f"✅ Destino confirmado: <code>{destino_id}</code>\n\n"
@@ -494,6 +516,10 @@ async def receber_destino_criacao(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.aguardando_origem_criacao)
 async def receber_origem_criacao(message: types.Message, state: FSMContext):
+    """
+    Passo 2: valida as origens (lista colada ou Banco Global) e pede a janela.
+    Origem igual ao destino é recusada (viraria laço).
+    """
     texto = message.text
     is_importacao_global = texto == "Importar Banco Global 🌍"
     
@@ -524,7 +550,7 @@ async def receber_origem_criacao(message: types.Message, state: FSMContext):
         entrada_limpa = entrada.strip()
         if not entrada_limpa: continue
         
-        # Pula a rede se vier do Banco Global
+        # Banco Global: origens que outro robô já usa. Entram como estão, sem consultar o Telegram.
         if is_importacao_global:
             sucesso = True
             id_final = entrada_limpa
@@ -593,6 +619,7 @@ async def receber_origem_criacao(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.aguardando_janela)
 async def receber_janela_rota(message: types.Message, state: FSMContext):
+    """Passo 3: janela de horário ("10-22" ou dia todo); pergunta o D+X."""
     import re
     texto = message.text.strip()
     
@@ -629,6 +656,7 @@ async def receber_janela_rota(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.aguardando_intervalo_dias)
 async def receber_intervalo_dias_rota(message: types.Message, state: FSMContext):
+    """Passo 4: atraso D+X."""
     mapa_dias = {"Mesmo Dia (D+0) 🟢": 0, "Dia Seguinte (D+1) 🟡": 1, "Dois Dias (D+2) 🔵": 2}
     
     if message.text not in mapa_dias:
@@ -638,7 +666,7 @@ async def receber_intervalo_dias_rota(message: types.Message, state: FSMContext)
     intervalo = mapa_dias[message.text]
     await state.update_data(intervalo_dias=intervalo)
     
-    # ✅ NOVO: Pula a pergunta de Modo se for D+0 e salva direto como "ordem"
+    # D+0 publica no dia da captura, sempre na ordem de chegada: pula a pergunta do modo.
     if intervalo == 0:
         if EXIBIR_LOGS: logger.info("⏭️ Atalho UX acionado: D+0 forçando modo 'Ordem de Chegada'.")
         msg_simulada = message.model_copy(update={"text": "Ordem de Chegada ⬇️"})
@@ -656,9 +684,9 @@ async def receber_intervalo_dias_rota(message: types.Message, state: FSMContext)
     await message.answer("Como deseja distribuir os vídeos retidos dentro dessa janela de horário?", reply_markup=teclado_modo)
     await state.set_state(EspelhadorFluxo.aguardando_modo)
 
-# BLOCO ESPECIFICAMENTE MODIFICADO (Apague tudo o que estiver quebrado e cole isto)
 @router.message(EspelhadorFluxo.aguardando_modo)
 async def receber_modo_rota(message: types.Message, state: FSMContext):
+    """Passo 5: modo de distribuição; mostra o resumo para aprovar."""
     if message.text not in ["Aleatório 🔀", "Ordem de Chegada ⬇️"]:
         await message.answer("Por favor, use os botões para escolher o modo.", reply_markup=teclado_espelhador_cancelar)
         return
@@ -678,11 +706,8 @@ async def receber_modo_rota(message: types.Message, state: FSMContext):
         f"⚠️ <b>Confirmação de Criação de Rota (D+{intervalo_dias})</b>\n\n"
         f"<b>Canais Vigiados ({len(origens)}):</b>\n"
     )
-    # 📏 O Telegram recusa mensagem acima de 4096 caracteres. Com o banco global
-    # importado (101 canais no teste), a lista sozinha passava disso e o envio
-    # estourava com "message is too long" — era esse o erro que matava o cadastro,
-    # tanto pelo atalho do D+0 quanto pela pergunta de Aleatório/Ordem. Mostra os
-    # primeiros e resume o resto.
+    # O Telegram recusa mensagem acima de 4096 caracteres, e com o Banco Global
+    # importado a lista de origens passa disso. Mostra as primeiras e resume o resto.
     LIMITE_LISTA_CONFIRMACAO = 15
     for o in origens[:LIMITE_LISTA_CONFIRMACAO]:
         texto_confirmacao += f"└ <code>{id_da_origem(o)}</code>\n"
@@ -703,6 +728,10 @@ async def receber_modo_rota(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.aguardando_confirmacao_criacao)
 async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
+    """
+    Grava a rota nova e volta ao painel. Nome: "Espelho: <nome do destino>", com
+    (2), (3)... se já existir. Nasce sem limite diário (publica tudo).
+    """
     if message.text != "Aprovar ✅":
         await message.answer("Por favor, utilize os botões para Aprovar ✅ ou Cancelar Operação ❌ a criação.")
         return
@@ -710,7 +739,7 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
     data = await state.get_data()
     origens = data.get("origens", [])
     destino = data.get("destino")
-    nome_destino = data.get("nome_destino", destino) # ✅ Pega o nome do destino salvo no Passo 1
+    nome_destino = data.get("nome_destino", destino)
     inicio = data.get("inicio")
     fim = data.get("fim")
     intervalo_dias = data.get("intervalo_dias", 1)
@@ -718,7 +747,6 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
     
     dados = ler_espelhos()
     
-    # ✅ NOVO: Nomeação Inteligente Baseada no Destino (Como pediu no vídeo)
     nome_base = f"Espelho: {nome_destino}"
     nome_rota = nome_base
     contador = 1
@@ -762,7 +790,7 @@ async def iniciar_remocao_rota(message: types.Message, state: FSMContext):
         await message.answer("Não há rotas ativas para remover.", reply_markup=teclado_espelhador_menu)
         return
 
-    # ✅ NOVO: Atalho Inteligente! Se houver apenas 1 rota, pula a pergunta e vai direto para a confirmação de remoção.
+    # Com uma rota só, não pergunta qual: vai direto à confirmação.
     if len(rotas) == 1:
         if EXIBIR_LOGS: logger.info("⏭️ Atalho UX acionado: Apenas 1 rota disponível. Pulando tela de seleção para remoção.")
         msg_simulada = message.model_copy(update={"text": "1"})
@@ -772,7 +800,6 @@ async def iniciar_remocao_rota(message: types.Message, state: FSMContext):
         
     texto = "Digite o <b>NÚMERO</b> da rota que deseja remover:\n\n"
     
-    # 🧹 CÓDIGO OTIMIZADO: Removida a redundância de busca de nomes aqui
     for i, rota in enumerate(rotas, 1):
         nome_exibicao = rota.get('nome', f'Rota {i}')
         qtd_origens = len(rota.get('origens', [rota.get('origem')]))
@@ -843,7 +870,7 @@ async def iniciar_edicao_rota(message: types.Message, state: FSMContext):
         await message.answer("Não há rotas ativas para editar.", reply_markup=teclado_espelhador_menu)
         return
         
-    # ✅ NOVO: Atalho Inteligente! Se houver apenas 1 rota, pula a pergunta e vai direto para a edição.
+    # Com uma rota só, não pergunta qual: vai direto ao menu dela.
     if len(rotas) == 1:
         if EXIBIR_LOGS: logger.info("⏭️ Atalho UX acionado: Apenas 1 rota disponível. Pulando tela de seleção.")
         msg_simulada = message.model_copy(update={"text": "1"})
@@ -853,7 +880,6 @@ async def iniciar_edicao_rota(message: types.Message, state: FSMContext):
         
     texto = "Digite o <b>NÚMERO</b> da rota que deseja configurar:\n\n"
     
-    # 🧹 CÓDIGO OTIMIZADO: Removida a redundância de busca de nomes aqui
     for i, rota in enumerate(rotas, 1):
         nome_exibicao = rota.get('nome', f'Rota {i}')
         texto += f"{i}. {nome_exibicao}\n"
@@ -863,6 +889,10 @@ async def iniciar_edicao_rota(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.aguardando_edicao_escolha_rota)
 async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
+    """
+    Menu da rota: configuração, destino e origens com status, e os botões de edição.
+    Recebe o NÚMERO da rota no texto da mensagem.
+    """
     if not message.text.isdigit():
         await message.answer("Por favor, digite apenas o número da rota.", reply_markup=teclado_espelhador_cancelar)
         return
@@ -897,7 +927,7 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         cache_nomes = ler_cache_nomes_grupos()
         status_canais = rota_alvo.get("status_canais", {})
 
-        # --- 1. DESTINO MOSTRADO PRIMEIRO NO MODO DE EDIÇÃO ---
+        # Mesmo layout do painel: destino primeiro, depois as origens.
         destino_rota = rota_alvo.get('destino')
         info_d = status_canais.get(str(destino_rota), {})
         if isinstance(info_d, str): info_d = {"status": info_d, "nome": str(destino_rota)}
@@ -908,7 +938,6 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
         
         texto += f"\n🎯 <b>Canal de Destino:</b> {status_destino_ico} {display_d}\n\n"
 
-        # --- 2. ORIGENS MOSTRADAS LOGO ABAIXO ---
         origens = rota_alvo.get('origens', [])
         if not origens and 'origem' in rota_alvo:
             origens = [rota_alvo['origem']]
@@ -931,17 +960,15 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
 
         total_origens = len(linhas_origem)
         
-        # Lógica de Ocultação Inteligente (Muralha Anti-Crash)
+        # Acima de 15 origens: 5 primeiras, 5 últimas e, do meio, só as com erro.
         if total_origens <= 15:
             for linha in linhas_origem:
                 texto += linha["texto"]
         else:
-            # Mostra os 5 primeiros
             for idx in range(5):
                 texto += linhas_origem[idx]["texto"]
 
             ocultos_ok = 0
-            # Varre o meio da lista ocultando os OKs e exibindo apenas os ERROS
             for idx in range(5, total_origens - 5):
                 if linhas_origem[idx]["tem_erro"]:
                     if ocultos_ok > 0:
@@ -954,13 +981,11 @@ async def selecionar_acao_edicao(message: types.Message, state: FSMContext):
             if ocultos_ok > 0:
                 texto += f"   <i>... e mais {ocultos_ok} canais operando normalmente ...</i>\n"
 
-            # Mostra os 5 últimos
             for idx in range(total_origens - 5, total_origens):
                 texto += linhas_origem[idx]["texto"]
         
         texto += "\nEscolha a ação que deseja realizar:"
         
-        # ✅ Menu com o novo botão "Analisar Canais Vigiados"
         teclado_submenu = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="📝 Editar Nome"), KeyboardButton(text="🔀 Modificar Modo")],
@@ -1106,7 +1131,7 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
         )
         await state.set_state(EspelhadorFluxo.aguardando_nova_origem)
 
-    # ✅ AQUI ESTÁ A TELA DA BLACKLIST COM A PUXADA DE NOMES
+    # Lista negra da rota: canais que não podem entrar como origem dela (nem pelo Banco Global).
     elif texto == "Lista Negra (Blacklist) ⛔":
         data = await state.get_data()
         indice = data.get("indice_edicao")
@@ -1157,9 +1182,7 @@ async def processar_acao_origem(message: types.Message, state: FSMContext):
     else:
         await message.answer("Use os botões do menu para escolher a ação.")
 
-# ==========================================
-# NOVAS FUNÇÕES INDEPENDENTES DE ANÁLISE
-# ==========================================
+# --- Analisar Canais Vigiados: listar todos, erros de acesso e duplicados ---
 
 @router.message(EspelhadorFluxo.aguardando_acao_analise, F.text == "📜 Listar Todos")
 async def listar_todos_espelhador(message: types.Message, state: FSMContext):
@@ -1356,7 +1379,7 @@ async def salvar_edicao_nome(message: types.Message, state: FSMContext):
 
     if EXIBIR_LOGS: logger.info(f"✏️ Nome da rota '{nome_antigo}' atualizado para '{novo_nome}'.")
     await message.answer(f"✅ O nome da rota foi atualizado para <b>{novo_nome}</b> com sucesso!", parse_mode="HTML")
-    # ✅ CORREÇÃO: Volta para o menu de edição da rota atual
+    # Volta ao menu da rota.
     novo_texto = str(indice + 1)
     msg_simulada = message.model_copy(update={"text": novo_texto})
     if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu da rota atual via mensagem simulada (Nome).")
@@ -1386,7 +1409,7 @@ async def salvar_edicao_destino(message: types.Message, state: FSMContext):
 
     if EXIBIR_LOGS: logger.info(f"✏️ Destino da rota '{nome_rota}' atualizado para {novo_destino}.")
     await message.answer(f"✅ O destino da rota <b>{nome_rota}</b> foi atualizado para <code>{novo_destino}</code> com sucesso!", parse_mode="HTML")
-    # ✅ CORREÇÃO: Volta para o menu de edição da rota atual
+    # Volta ao menu da rota.
     novo_texto = str(indice + 1)
     msg_simulada = message.model_copy(update={"text": novo_texto})
     if EXIBIR_LOGS: logger.info("🔙 Retornando ao menu da rota atual via mensagem simulada (Destino).")
@@ -1530,7 +1553,7 @@ async def confirmar_edicao_dias(message: types.Message, state: FSMContext):
     intervalo_antigo = dados["rotas"][indice].get("intervalo_dias", 1)
     
     dados["rotas"][indice]["intervalo_dias"] = intervalo
-    # Se for D+0, força o modo para 'ordem' (anti-ban natural)
+    # D+0 é sempre ordem de chegada (mesma regra da criação).
     if intervalo == 0:
         dados["rotas"][indice]["modo"] = "ordem"
         
@@ -1538,7 +1561,7 @@ async def confirmar_edicao_dias(message: types.Message, state: FSMContext):
     
     await message.answer(f"✅ O intervalo de dias foi atualizado para <b>D+{intervalo}</b> com sucesso!", parse_mode="HTML")
     
-    # Resetar horários pendentes na fila se o intervalo mudou
+    # O D+X mudou: apaga o horário dos pendentes da rota para o motor reagendar.
     if intervalo_antigo != intervalo:
         try:
             nome_rota = dados["rotas"][indice]["nome"]
@@ -1589,7 +1612,8 @@ async def confirmar_edicao_modo(message: types.Message, state: FSMContext):
 async def confirmar_nova_origem(message: types.Message, state: FSMContext):
     texto = message.text
     
-    # 🎯 NOVA REDIREÇÃO DA BLACKLIST (Para corrigir o bug do vídeo)
+    # O botão da lista negra continua na tela enquanto o painel espera as origens:
+    # o clique abre a lista negra em vez de ser lido como origem.
     if texto == "Lista Negra (Blacklist) ⛔":
         if EXIBIR_LOGS: logger.info("⏭️ Redirecionamento Inteligente: Usuário clicou em Blacklist.")
         msg_simulada = message.model_copy(update={"text": "Lista Negra (Blacklist) ⛔"})
@@ -1635,16 +1659,13 @@ async def confirmar_nova_origem(message: types.Message, state: FSMContext):
         if sucesso:
             id_base = id_final.replace("-100", "")
             
-            # ⛔ Verifica Blacklist
             if id_final in blacklist or id_base in [b.replace("-100", "") for b in blacklist]:
                 origens_invalidas.append(f"{entrada_limpa} (Blacklist ⛔)")
-            # 🛑 Trava Anti-Loop
+            # A origem é o próprio destino: viraria laço.
             elif destino_atual and id_base == destino_atual.replace("-100", ""):
                 origens_em_loop.append(entrada_limpa)
-            # ℹ️ Verifica Duplicidade
             elif id_final in origens_atuais or id_final in [o['id'] for o in origens_validas]:
                 origens_duplicadas.append(entrada_limpa)
-            # ✅ Adiciona nova origem válida
             else:
                 salvar_nome_grupo(id_final, nome)
                 origens_validas.append({"id": id_final, "nome": nome})
@@ -1653,7 +1674,6 @@ async def confirmar_nova_origem(message: types.Message, state: FSMContext):
 
     await msg_status.delete()
 
-    # 5. Restauro do texto original conforme pedido
     texto_resumo = ""
 
     if origens_validas:
@@ -1747,7 +1767,7 @@ async def processar_nova_origem(message: types.Message, state: FSMContext):
         
     await message.answer(msg_final, parse_mode="HTML")
     
-    # 🚀 CORREÇÃO: Volta suavemente ao menu da rota após aprovar
+    # Volta ao menu da rota.
     novo_texto = str(indice_atual + 1)
     msg_simulada = message.model_copy(update={"text": novo_texto})
     await selecionar_acao_edicao(msg_simulada, state)
@@ -1798,7 +1818,7 @@ async def processar_remocao_origem(message: types.Message, state: FSMContext):
     origens = rota.get('origens', [])
     if not origens and 'origem' in rota: origens = [rota['origem']]
     
-    # Ordena de trás para frente para evitar bugs na remoção múltipla
+    # Do maior índice para o menor, para a remoção não deslocar os seguintes.
     indices_remover.sort(reverse=True)
     
     removidos = 0
@@ -1814,7 +1834,7 @@ async def processar_remocao_origem(message: types.Message, state: FSMContext):
     else:
         await message.answer("Erro de sincronização. As origens não puderam ser removidas.")
         
-    # 🚀 CORREÇÃO: Volta suavemente ao menu da rota após aprovar
+    # Volta ao menu da rota.
     novo_texto = str(indice_rota + 1)
     msg_simulada = message.model_copy(update={"text": novo_texto})
     await selecionar_acao_edicao(msg_simulada, state)
@@ -1859,9 +1879,12 @@ async def confirmar_esvaziar(message: types.Message, state: FSMContext):
     else:
         await message.answer("Número inválido. Tente novamente.", reply_markup=teclado_espelhador_cancelar)
 
-# BLOCO MODIFICADO (Substituir todo o bloco @dp.callback_query_handler antigo por este)
 @router.message(EspelhadorFluxo.aguardando_confirmacao_esvaziar)
 async def processar_esvaziar_fila(message: types.Message, state: FSMContext):
+    """
+    Forçar Espelhos: liga esvaziar_agora na rota. O motor_userbot reagenda todos os
+    pendentes dela para já e desliga o pedido em seguida.
+    """
     if message.text != "Aprovar ✅":
         await message.answer("Operação cancelada.", reply_markup=teclado_espelhador_menu)
         await painel_espelhador(message, state)
@@ -1900,6 +1923,10 @@ async def processar_esvaziar_fila(message: types.Message, state: FSMContext):
 
 @router.message(EspelhadorFluxo.aguardando_acao_blacklist)
 async def acao_bl_espelhador(message: types.Message, state: FSMContext):
+    """
+    Lista negra da rota. Bloquear um canal que já é origem pede confirmação e o
+    tira das origens.
+    """
     if message.text == "➕ Add à Blacklist":
         texto_bl = (
             "Envie os @usernames, links ou IDs dos canais que deseja <b>BLOQUEAR NESTA ROTA</b>.\n\n"
@@ -1915,7 +1942,7 @@ async def acao_bl_espelhador(message: types.Message, state: FSMContext):
 @router.message(EspelhadorFluxo.aguardando_blacklist_add)
 async def salvar_bl_add_espelhador(message: types.Message, state: FSMContext):
     if message.text == "Cancelar Operação ❌":
-        # Simula o botão de voltar para redirecionar corretamente
+        # Cancelar volta ao menu da rota.
         msg_simulada = message.model_copy(update={"text": "🔙 Voltar ao Menu de Edição"})
         await processar_acao_origem(msg_simulada, state)
         return
@@ -1987,7 +2014,7 @@ async def salvar_bl_add_espelhador(message: types.Message, state: FSMContext):
         dados["rotas"][idx]["blacklist"] = blacklist
         salvar_espelhos(dados)
         
-        # ✅ NOVO: Monta a lista atualizada e mantém o usuário no menu da Blacklist
+        # Mostra a lista atualizada e continua no menu da lista negra.
         cache_nomes = ler_cache_nomes_grupos()
         txt_lista = f"⛔ <b>Lista Negra da Rota '{rota_atual['nome']}'</b>\n"
         for i, b in enumerate(blacklist, 1):
@@ -2039,7 +2066,7 @@ async def confirmar_blacklist_conflito_espelhador(message: types.Message, state:
 
     salvar_espelhos(dados)
 
-    # ✅ NOVO: Monta a lista atualizada e mantém o usuário no menu da Blacklist
+    # Mostra a lista atualizada e continua no menu da lista negra.
     cache_nomes = ler_cache_nomes_grupos()
     txt_lista = "\n⛔ <b>Lista Negra Atualizada:</b>\n"
     for i, b in enumerate(blacklist, 1):
@@ -2076,7 +2103,7 @@ async def salvar_bl_rem_espelhador(message: types.Message, state: FSMContext):
     dados["rotas"][idx]["blacklist"] = nova_blacklist
     salvar_espelhos(dados)
     
-    # ✅ NOVO: Monta a lista atualizada e mantém o usuário no menu da Blacklist
+    # Mostra a lista atualizada e continua no menu da lista negra.
     cache_nomes = ler_cache_nomes_grupos()
     txt_lista = f"⛔ <b>Lista Negra da Rota '{rota_atual['nome']}'</b>\n"
     if nova_blacklist:
