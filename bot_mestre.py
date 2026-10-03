@@ -1095,7 +1095,7 @@ async def executar_postagem_fila(item_id):
         if caminho_video and os.path.exists(caminho_video):
             # ✅ SEGUNDA TRAVA DE SEGURANÇA MANTIDA INTACTA
             if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
-                if EXIBIR_LOGS: logger.warning(f"🚫 [Segurança] Upload cancelado! Ficheiro é uma imagem.")
+                if EXIBIR_LOGS: logger.warning("🚫 [Segurança] Upload cancelado! Ficheiro é uma imagem.")
                 try: os.remove(caminho_video)
                 except: pass
                 falha_irreversivel = True
@@ -5634,7 +5634,7 @@ async def processar_origem_autorais(message: types.Message, state: FSMContext):
     salvar_autorais_config(config)
     
     if EXIBIR_LOGS: logger.info(f"✅ Origem dos vídeos autorais salva: {nova_origem} | Tópico: {topico_final}")
-    await message.answer(f"✅ <b>Origem e Tópico salvos com sucesso!</b>", parse_mode="HTML")
+    await message.answer("✅ <b>Origem e Tópico salvos com sucesso!</b>", parse_mode="HTML")
     await painel_autorais(message, state)
 
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Destino 📤")
@@ -6165,7 +6165,7 @@ def montar_legenda_achadinho(nome, preco, taxa, nota, link, gancho=None):
     return "\n".join(linhas)
 
 async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_loja):
-    if EXIBIR_LOGS: logger.info(f"🧠 [Achadinhos] Estruturando estratégia de Copywriting para o produto...")
+    if EXIBIR_LOGS: logger.info("🧠 [Achadinhos] Estruturando estratégia de Copywriting para o produto...")
     
     prompt = (
         f"Escreva UMA única linha curta (no máximo 8 palavras) para chamar atenção "
@@ -8042,7 +8042,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             
         texto += f"⚖️ <b>Média Diária: R$ {f_br(media_diaria)}</b> <i>(Ontem: R$ {f_br(faturamento_ontem)} | {texto_var})</i>\n\n"
     else:
-        texto += f"🚀 <b>PROJEÇÃO MENSAL ESTIMADA: Calculando...</b>\n\n"
+        texto += "🚀 <b>PROJEÇÃO MENSAL ESTIMADA: Calculando...</b>\n\n"
     
     texto += "🗓️ <b>HISTÓRICO MENSAL E CRESCIMENTO</b>\n"
     meses_ordenados_desc = sorted(dados_por_mes.keys(), reverse=True)
@@ -9472,7 +9472,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
         legenda_temp = cabecalho
         
         if plat_atual in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
-            legenda_temp += f"🔶 <b>SHOPEE VÍDEO</b> 🔶\n\n"
+            legenda_temp += "🔶 <b>SHOPEE VÍDEO</b> 🔶\n\n"
             legenda_temp += f"🎬 Link do Vídeo:\n{link_vid_shopee}\n"
             if not is_rodape:
                 legenda_temp += mensagem_apoio
@@ -9486,7 +9486,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
                 legenda_temp += "\n"
                 
         if plat_atual in ["Ambos 🛒🎵", "Apenas TikTok 🎵"]:
-            legenda_temp += f"⬛ <b>TIKTOK</b> ⬛\n\n"
+            legenda_temp += "⬛ <b>TIKTOK</b> ⬛\n\n"
             legenda_temp += f"🎬 Link do Vídeo:\n{link_vid_tiktok}\n"
             if not is_rodape:
                 legenda_temp += mensagem_apoio
@@ -10730,7 +10730,7 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
     status_alvos = dados.get("status_alvos", {})
     status_destino = dados.get("status_destino", {})
     
-    texto = f"📡 <b>Gestão de Grupos Vigiados</b>\n\n"
+    texto = "📡 <b>Gestão de Grupos Vigiados</b>\n\n"
     
     if destino != "Não definido":
         nome_dest = status_destino.get("nome", str(destino))
@@ -11220,9 +11220,9 @@ async def processar_add_blacklist_espiao(message: types.Message, state: FSMConte
         await state.update_data(novos_blacklist=novos_blacklist, alvos_para_remover=conflitos)
         cache_nomes = ler_cache_nomes_grupos()
         texto_aviso = (
-            f"⚠️ <b>Atenção: Conflito Detetado!</b>\n\n"
-            f"Você está a tentar adicionar canais à Lista Negra que <b>já estão a ser monitorizados</b> pelo Espião.\n\n"
-            f"Canais que serão <b>AUTOMATICAMENTE REMOVIDOS</b> da escuta:\n"
+            "⚠️ <b>Atenção: Conflito Detetado!</b>\n\n"
+            "Você está a tentar adicionar canais à Lista Negra que <b>já estão a ser monitorizados</b> pelo Espião.\n\n"
+            "Canais que serão <b>AUTOMATICAMENTE REMOVIDOS</b> da escuta:\n"
         )
         for c in conflitos:
             nome_conflito = formatar_nome_alvo(c, cache_nomes)
@@ -11573,7 +11573,7 @@ async def receber_intervalo_espiao(message: types.Message, state: FSMContext):
     if intervalo == 0:
         await state.update_data(modo="ordem")
         teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
-        await message.answer(f"Deseja confirmar o atraso de D+0 (Mesmo Dia) com modo de Ordem de Chegada?", reply_markup=teclado_conf)
+        await message.answer("Deseja confirmar o atraso de D+0 (Mesmo Dia) com modo de Ordem de Chegada?", reply_markup=teclado_conf)
         await state.set_state(ConfigRotinaEspiao.aguardando_confirmacao_tempo)
         return
         
@@ -11628,7 +11628,7 @@ async def confirmar_tempo_espiao(message: types.Message, state: FSMContext):
                 houve_reset = True
         if houve_reset:
             salvar_fila_clonagem(fila_data)
-        await message.answer(f"⚠️ <b>Gatilho de Recálculo Acionado!</b>\nComo você alterou a defasagem, todos os horários pendentes foram resetados.", parse_mode="HTML")
+        await message.answer("⚠️ <b>Gatilho de Recálculo Acionado!</b>\nComo você alterou a defasagem, todos os horários pendentes foram resetados.", parse_mode="HTML")
         
     await menu_grupos_vigiados(message, state)
 
@@ -12212,7 +12212,7 @@ async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
     config_alvos = dados.get("config_alvos", {})
 
     texto = f"📊 <b>Status da Divulgação</b> [{status_pausa}]\n\n"
-    texto += f"🌍 <b>Padrão Global:</b>\n"
+    texto += "🌍 <b>Padrão Global:</b>\n"
     texto += f"Frequência: {freq_g} msgs/hora\nRepetições no Texto: {rep_int_g}x\nRéplicas por Disparo: {rep_msg_g}x\n\n"
     texto += "🎯 <b>Alvos Ativos:</b>\n"
     
@@ -12455,7 +12455,7 @@ async def gerenciar_divulgacao_viral(message: types.Message, state: FSMContext):
     config_alvos = dados.get("config_alvos", {})
 
     texto = f"📊 <b>Status da Divulgação do Viral</b> [{status_pausa}]\n\n"
-    texto += f"🌍 <b>Padrão Global:</b>\n"
+    texto += "🌍 <b>Padrão Global:</b>\n"
     texto += f"Frequência: {freq_g} msgs/hora\nRepetições no Texto: {rep_int_g}x\nRéplicas por Disparo: {rep_msg_g}x\n\n"
     texto += "🎯 <b>Alvos Ativos:</b>\n"
     
@@ -13943,7 +13943,7 @@ async def enviar_confirmacao_reordenar(message: types.Message, state: FSMContext
     texto += f"🗓️ Nova Data Alvo: <b>{data_amigavel}</b>\n\n"
     texto += "Confirma essa alteração?"
     
-    if EXIBIR_LOGS: logger.info(f"↕️ Fila: Coleta finalizada. Pedindo confirmação para confirmar as alterações.")
+    if EXIBIR_LOGS: logger.info("↕️ Fila: Coleta finalizada. Pedindo confirmação para confirmar as alterações.")
     await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(GerenciarFilaFluxo.aguardando_confirmacao_reordenar)
 
@@ -13988,7 +13988,7 @@ async def processar_confirmacao_reordenar(message: types.Message, state: FSMCont
             
         fila_simulada.insert(nova_posicao, item_movido)
         
-        if EXIBIR_LOGS: logger.info(f"↕️ Fila: Confirmação recebida. Vídeo reordenado via SQLite.")
+        if EXIBIR_LOGS: logger.info("↕️ Fila: Confirmação recebida. Vídeo reordenado via SQLite.")
         
         fila_ids = [item["id"] for item in fila_simulada]
         await aplicar_renumeracao_e_salvar(fila_ids, message, state)
@@ -14550,7 +14550,7 @@ async def checkup_diario_grupos():
             if info.get("status") == "erro":
                 erros_espiao += 1
                 
-        relatorio += f"👁️ <b>Espião de Afiliados:</b>\n"
+        relatorio += "👁️ <b>Espião de Afiliados:</b>\n"
         relatorio += f"✅ Ativos: {len(alvos) - erros_espiao}\n"
         relatorio += f"🔴 Com falhas de acesso: {erros_espiao}\n"
     except Exception as e:
@@ -14567,7 +14567,7 @@ async def checkup_diario_grupos():
         rotas = dados_espelho.get("rotas", [])
         erros_espelho = [r for r in rotas if r.get("status_verificacao") == "erro"]
         
-        relatorio += f"🔄 <b>Espelhador de Canais:</b>\n"
+        relatorio += "🔄 <b>Espelhador de Canais:</b>\n"
         relatorio += f"✅ Rotas ativas: {len(rotas) - len(erros_espelho)}\n"
         relatorio += f"🔴 Rotas quebradas: {len(erros_espelho)}\n"
     except FileNotFoundError:
@@ -15566,7 +15566,7 @@ async def _apagar_busca_falha(chat_id, ids, minutos=BUSCA_MINUTOS_APAGAR_FALHA):
             await bot.delete_message(chat_id=chat_id, message_id=msg_id)
         except Exception:
             pass
-    if EXIBIR_LOGS: logger.info(f"🧹 [Busca] Tentativa sem resultado removida do tópico.")
+    if EXIBIR_LOGS: logger.info("🧹 [Busca] Tentativa sem resultado removida do tópico.")
 
 
 def eh_topico_da_busca(message: types.Message) -> bool:

@@ -232,7 +232,7 @@ async def verificar_e_otimizar_video(caminho_video, relatorio=None):
             os.replace(caminho_temp, caminho_video)
             if relatorio is not None:
                 relatorio["upscaled"] = True
-            if EXIBIR_LOGS: logger.info(f"✨ [Upscaling] Sucesso! Vídeo re-renderizado para 720x1280 e substituído.")
+            if EXIBIR_LOGS: logger.info("✨ [Upscaling] Sucesso! Vídeo re-renderizado para 720x1280 e substituído.")
         else:
             if EXIBIR_LOGS: logger.error("❌ [Upscaling] Falha na renderização do FFmpeg. Mantendo arquivo original.")
             if os.path.exists(caminho_temp): os.remove(caminho_temp)
@@ -418,7 +418,7 @@ async def interceptar_mensagem(event):
             hash_arquivo = calcular_hash_video(caminho_salvo)
             
             if hash_arquivo and verificar_e_registrar_hash(hash_arquivo):
-                if EXIBIR_LOGS: logger.warning(f"🚫 Clone bloqueado! O vídeo possui uma assinatura digital idêntica a um ficheiro já processado.")
+                if EXIBIR_LOGS: logger.warning("🚫 Clone bloqueado! O vídeo possui uma assinatura digital idêntica a um ficheiro já processado.")
                 try:
                     os.remove(caminho_salvo)
                     if EXIBIR_LOGS: logger.info("🧹 Ficheiro físico duplicado eliminado com sucesso para poupar espaço.")

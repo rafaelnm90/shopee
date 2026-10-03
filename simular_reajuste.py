@@ -151,7 +151,7 @@ def main():
         print(f"  ... e mais {len(dias) - 20} dia(s)")
 
     if descartados:
-        print(f"\n  🗑️  Exemplos do que seria descartado:")
+        print("\n  🗑️  Exemplos do que seria descartado:")
         for item in descartados[:5]:
             print(f"     {item.get('id_unico')}  →  {item.get('_motivo')}")
 

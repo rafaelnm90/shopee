@@ -75,7 +75,7 @@ async def principal(url):
     if achado:
         try:
             estado = json.loads(achado.group(1))
-            print(f"\n--- __INITIAL_STATE__ decodificado, chaves de topo ---")
+            print("\n--- __INITIAL_STATE__ decodificado, chaves de topo ---")
             print(" ", list(estado.keys())[:25])
         except Exception as e:
             print(f"\n__INITIAL_STATE__ existe mas nao decodifica: {e}")

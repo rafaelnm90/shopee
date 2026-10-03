@@ -639,10 +639,10 @@ def gerar_layout_item_padrao(index, item, tipo_fila, atraso_dias, agora, fuso_ho
         linha_destino = f"\n   └ 🔗 <a href='{link_destino}'>{texto_link_dest}</a>"
     elif is_postado:
         # Se foi postado, mas o banco de dados antigo não tem o ID exato da mensagem
-        linha_destino = f"\n   └ 🔗 <i>Ver Post no Telegram (Link indisponível)</i>"
+        linha_destino = "\n   └ 🔗 <i>Ver Post no Telegram (Link indisponível)</i>"
     else:
         # Espaço reservado para vídeos que estão na fila
-        linha_destino = f"\n   └ 🔗 <i>Aguardando postagem (Destino)</i>"
+        linha_destino = "\n   └ 🔗 <i>Aguardando postagem (Destino)</i>"
 
     if EXIBIR_LOGS:
         logger.info(f"🎨 [Layout] Formatando item {index} | Status: {status_dia} | Destino injetado.")

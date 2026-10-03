@@ -856,8 +856,8 @@ async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
         os.remove(caminho_zip)
     except: pass
     
-    resumo = f"✅ <b>Validação finalizada!</b>\n\n"
-    resumo += f"📊 <b>Balanço Geral:</b>\n"
+    resumo = "✅ <b>Validação finalizada!</b>\n\n"
+    resumo += "📊 <b>Balanço Geral:</b>\n"
     resumo += f"✅ Notas prontas para envio: <b>{len(notas_validadas)}</b>\n"
     resumo += f"❌ Lojas sem PDF: <b>{len(lojas_pendentes)}</b>\n"
     

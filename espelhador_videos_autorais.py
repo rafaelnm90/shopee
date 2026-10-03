@@ -1028,7 +1028,7 @@ async def verificar_e_otimizar_video(caminho_video):
         
         if comando_ffmpeg.returncode == 0 and os.path.exists(caminho_temp):
             os.replace(caminho_temp, caminho_video)
-            if EXIBIR_LOGS: logger.info(f"✨ [Upscaling] Sucesso! Vídeo re-renderizado para 720x1280 e substituído.")
+            if EXIBIR_LOGS: logger.info("✨ [Upscaling] Sucesso! Vídeo re-renderizado para 720x1280 e substituído.")
         else:
             if EXIBIR_LOGS: logger.error("❌ [Upscaling] Falha na renderização do FFmpeg. Mantendo arquivo original.")
             if os.path.exists(caminho_temp): os.remove(caminho_temp)

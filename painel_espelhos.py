@@ -1342,7 +1342,7 @@ async def salvar_edicao_nome(message: types.Message, state: FSMContext):
                 houve_alteracao = True
         if houve_alteracao:
             salvar_fila_espelhador(fila_dados)
-            if EXIBIR_LOGS: logger.info(f"🔄 Fila de espelhamento sincronizada com o novo nome da rota.")
+            if EXIBIR_LOGS: logger.info("🔄 Fila de espelhamento sincronizada com o novo nome da rota.")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao sincronizar a fila de espelhamento após mudança de nome: {e}")
 
@@ -1960,9 +1960,9 @@ async def salvar_bl_add_espelhador(message: types.Message, state: FSMContext):
         await state.update_data(novos_blacklist=novos_blacklist, alvos_para_remover=conflitos)
         cache_nomes = ler_cache_nomes_grupos()
         texto_aviso = (
-            f"⚠️ <b>Atenção: Conflito Detetado!</b>\n\n"
-            f"Você está a tentar adicionar canais à Lista Negra que <b>já estão a ser monitorizados</b> nesta rota.\n\n"
-            f"Canais que serão <b>AUTOMATICAMENTE REMOVIDOS</b> da escuta:\n"
+            "⚠️ <b>Atenção: Conflito Detetado!</b>\n\n"
+            "Você está a tentar adicionar canais à Lista Negra que <b>já estão a ser monitorizados</b> nesta rota.\n\n"
+            "Canais que serão <b>AUTOMATICAMENTE REMOVIDOS</b> da escuta:\n"
         )
         for c in conflitos:
              nome_conflito = cache_nomes.get(str(c), str(c))
@@ -2033,7 +2033,7 @@ async def confirmar_blacklist_conflito_espelhador(message: types.Message, state:
 
     # ✅ NOVO: Monta a lista atualizada e mantém o usuário no menu da Blacklist
     cache_nomes = ler_cache_nomes_grupos()
-    txt_lista = f"\n⛔ <b>Lista Negra Atualizada:</b>\n"
+    txt_lista = "\n⛔ <b>Lista Negra Atualizada:</b>\n"
     for i, b in enumerate(blacklist, 1):
         nome = cache_nomes.get(str(b), str(b))
         txt_lista += f"{i}. {nome} (<code>{b}</code>)\n"
