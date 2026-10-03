@@ -1,13 +1,30 @@
-# 0. CONFIGURAÇÕES INICIAIS
+"""
+Robô dos Vídeos Autorais (userbot Telethon, sessão sessao_espelhador_isolado).
+
+Captura: cada vídeo com link da Shopee postado no grupo de origem (autorais_config:
+origem, com tópico opcional) é baixado, ganha legenda nova da IA com o link já
+convertido para o afiliado e é publicado no canal de destino. A mensagem chega pelo
+evento NewMessage e pela varredura_origem_loop (o evento nem sempre chega);
+mensagem_ja_processada impede que a mesma seja processada duas vezes.
+
+Retorno D+X: o vídeo pode entrar na fila_autorais para voltar ao grupo de origem
+dias_retorno dias depois. Quantos entram por dia sai de um sorteio por reservatório
+(todo vídeo do dia tem a mesma chance) com a cota diária do painel; o
+processar_fila_autorais_loop devolve um por ciclo, dentro da janela e do teto.
+Os arquivos ficam em archive/ até a publicação.
+
+Grupo Público: sorteio independente, sobre o mesmo vídeo, para a fila_publico. Este
+robô só baixa o arquivo (processar_fila_publico_loop); quem publica é o bot_mestre.
+
+Parceiros: vídeos dos canais de origem dos parceiros vão para a fila_parceiros, em
+parceiros/<id>/, e também são publicados pelo bot_mestre.
+"""
 EXIBIR_LOGS = True
 
 import os
 import asyncio
-import logging
 import json
 import random
-import time
-import hashlib
 import aiohttp
 import re
 from datetime import datetime, timedelta
@@ -15,25 +32,24 @@ from telethon import TelegramClient, events, functions
 from telethon.tl.types import MessageMediaDocument
 from telethon.errors import FloodWaitError, UserAlreadyParticipantError, InviteHashExpiredError
 from dotenv import load_dotenv
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from utils import registrar_erro_json
 
 load_dotenv()
 
-# 🕐 Trava de fuso centralizada: importar o modulo ja aplica America/Sao_Paulo.
-from fuso import FUSO_STR, fuso_horario, configurar_logs
+# Importar o fuso já fixa o processo em America/Sao_Paulo.
+from fuso import configurar_logs
 
 load_dotenv()
 
-# ✅ Cria as pastas isoladas na inicialização
+# temp/: downloads de passagem. archive/: vídeos da fila de retorno até a publicação.
 os.makedirs("temp", exist_ok=True)
 os.makedirs("archive", exist_ok=True)
 
-# Expressão regular aprimorada (ignora maiúsculas e aceita sem http)
+# Link da Shopee em qualquer encurtador, com ou sem http, em maiúsculas ou não.
 PADRAO_SHOPEE = re.compile(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+', re.IGNORECASE)
 
 def extrair_link_shopee(event):
-    """Busca links no texto puro e dentro de hiperlinks escondidos no Telegram"""
+    """Primeiro link da Shopee da mensagem, no texto visível ou escondido num hiperlink. None se não houver."""
     if EXIBIR_LOGS: logger.info("🔍 Analisando mensagem em busca de links...")
     texto = event.raw_text or ""
     match = PADRAO_SHOPEE.search(texto)
@@ -53,27 +69,21 @@ def extrair_link_shopee(event):
     if EXIBIR_LOGS: logger.info("⏭️ Nenhum link válido da Shopee encontrado.")
     return None
 
-## ✅ Importando os Módulos Centrais de IA e Shopee
 from api_gemini import analisar_video_gemini
 from api_shopee import converter_link_shopee
-from motor_filas import calcular_horarios_distribuicao, faixa_de_config, sortear_teto_do_dia # ⚙️ Motor Central Importado
-import blacklist_captura  # 🚫 Lista negra: de quem este robô NUNCA pode capturar
-
-# As chaves da Shopee e do Gemini foram movidas para os módulos centrais.
-
-# Inicialização do Agendador
-scheduler = AsyncIOScheduler(timezone="America/Sao_Paulo")
+from motor_filas import calcular_horarios_distribuicao, faixa_de_config, sortear_teto_do_dia
+import blacklist_captura  # de quem este robô nunca captura
 
 if EXIBIR_LOGS:
     logger = configurar_logs(__name__)
 
-# 1. CREDENCIAIS E CONFIGURAÇÕES
 API_ID = int(os.getenv('API_ID', 0)) 
 API_HASH = os.getenv('API_HASH', '')
 
 import sqlite3
 
 def ler_config_bd_autorais(chave, padrao=None):
+    """Valor JSON da tabela configuracoes (o mesmo banco do bot_mestre); padrao se não houver."""
     if padrao is None: padrao = {}
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -100,6 +110,7 @@ def salvar_config_bd_autorais(chave, dados):
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar '{chave}' no SQLite: {e}")
 
 def carregar_config_autorais():
+    """autorais_config, gravado pelo painel do bot_mestre: origem, destino, dias_retorno, cota, janela e pausas."""
     padrao = {"origem": -1003673555953, "origem_topico": None, "destino": "@videos_autorais"}
     dados = ler_config_bd_autorais("autorais_config", padrao)
     if not dados and EXIBIR_LOGS:
@@ -111,12 +122,11 @@ def salvar_config_autorais(config):
 
 
 def pausa_ativa(escopo="autorais"):
-    """⏸️ Lê a pausa direto do banco, NA HORA.
+    """Lê a pausa direto do banco, na hora.
 
-    A checagem feita no topo de um ciclo já está velha quando o envio acontece: entre
-    uma coisa e outra passam 60 segundos de loop, ou dezenas de segundos de download,
-    ffmpeg e IA. Clicar em pausar no painel no meio disso não interrompia nada. Esta
-    função existe para ser chamada logo ANTES de cada publicação.
+    Para ser chamada logo antes de cada publicação: entre o topo do ciclo e o envio
+    passam até 60 s de loop, ou dezenas de segundos de download, ffmpeg e IA, e a
+    pausa pedida no painel nesse meio-tempo precisa valer.
 
     escopo "captura"  → só a pausa geral do robô autoral
     escopo "autorais" → pausa geral OU pausa da repostagem de retorno
@@ -141,7 +151,7 @@ def pausa_ativa(escopo="autorais"):
 config_atual = carregar_config_autorais()
 
 # ==========================================================================
-# 👤 CONTAS QUE OPERAM NESTE ROBÔ
+# Conta que opera neste robô
 #
 # Sessão: sessao_espelhador_isolado
 #   Rafaelnm (secundário) · sem @ · id 8940405855
@@ -149,7 +159,7 @@ config_atual = carregar_config_autorais()
 #   → é ela que publica no canal "Vídeos Autorais Afiliados"
 #   → é ela que devolve o vídeo ao grupo de origem na repostagem D+X
 #
-# Lembrete: um userbot só enxerga os grupos em que a CONTA DELE está. Se um
+# Um userbot só enxerga os grupos em que a CONTA DELE está. Se um
 # grupo novo for adicionado na configuração, esta conta precisa entrar nele —
 # senão o robô fica cego para aquele chat, sem erro nenhum no log.
 #
@@ -159,12 +169,13 @@ NOME_SESSAO = 'sessao_espelhador_isolado'
 client = TelegramClient(NOME_SESSAO, API_ID, API_HASH)
 
 def ler_fila_retorno():
+    """Fila de retorno (tabela fila_autorais) como {"fila": [itens]}. Cria a tabela e as colunas novas se faltarem."""
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         
-        # Prevenção: Cria a tabela caso o init não tenha rodado
+        # Cria a tabela se o bot_mestre ainda não a criou.
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS fila_autorais (
                 id_unico TEXT PRIMARY KEY,
@@ -177,9 +188,8 @@ def ler_fila_retorno():
                 processado INTEGER DEFAULT 0
             )
         ''')
-        # 🚀 Migração local: o bot_mestre também cria esta coluna, mas os dois serviços
-        # sobem em ordem imprevisível. Garantir aqui evita que o salvar_fila_retorno()
-        # estoure "no such column" e perca a fila inteira num deploy.
+        # Colunas novas. O bot_mestre também as cria, mas os serviços sobem em qualquer
+        # ordem, e sem elas o salvar_fila_retorno() falharia com "no such column".
         try:
             cursor.execute("ALTER TABLE fila_autorais ADD COLUMN msg_postada_id INTEGER")
             conexao.commit()
@@ -190,10 +200,9 @@ def ler_fila_retorno():
             conexao.commit()
         except sqlite3.OperationalError:
             pass
-        # 🚫 Quem postou o vídeo original. Guardado na captura para que a lista
-        # negra possa ser reconferida na hora de repostar — é o que resolve o
-        # caso "bloqueei o cara depois que o vídeo dele já estava na fila".
-        # Itens antigos ficam com NULL e são tratados como "autor desconhecido".
+        # Autor do vídeo original, gravado na captura para a lista negra ser
+        # reconferida na hora de repostar (autor bloqueado depois de o vídeo entrar
+        # na fila). Itens antigos ficam com NULL: autor desconhecido.
         for _coluna, _tipo in (("autor_id", "INTEGER"), ("autor_username", "TEXT")):
             try:
                 cursor.execute(f"ALTER TABLE fila_autorais ADD COLUMN {_coluna} {_tipo}")
@@ -227,18 +236,22 @@ def ler_fila_retorno():
         return {"fila": []}
 
 def salvar_fila_retorno(dados):
-    # 🔒 Esta função faz DELETE + N INSERTs: é a transação de escrita mais longa do
-    # sistema. Se estourar no meio (foi o que aconteceu hoje), a conexão precisa fechar
-    # de qualquer jeito — senão o lock de escrita fica preso com o DELETE em aberto.
+    """
+    Regrava a tabela fila_autorais a partir de dados (DELETE + INSERT de cada item).
+
+    processado, data_postagem e msg_postada_id de quem já está no banco são relidos
+    aqui e mantidos: o loop de retorno grava esses campos com UPDATE logo depois de
+    publicar, e regravar a partir de um retrato antigo devolveria o vídeo a
+    "pendente" (seria publicado de novo). horario_disparo vem do retrato, que é quem
+    sorteia os horários; o do banco só vale quando o retrato não tem.
+    """
+    # É a transação de escrita mais longa do sistema: a conexão fecha no finally
+    # mesmo se estourar no meio, senão o lock fica preso com o DELETE aberto.
     conexao = None
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
         
-        # 🛡️ O loop de retorno grava processado / data_postagem nas MESMAS linhas, com
-        # UPDATE pontual, logo depois de publicar. Reescrever a tabela a partir de um
-        # retrato em memória desfazia isso: o vídeo voltava a "pendente" e era publicado
-        # outra vez. Aqui o status de quem já está no banco é relido no último instante.
         status_atual = {}
         try:
             cursor.execute("SELECT id_unico, horario_disparo, processado, data_postagem, msg_postada_id FROM fila_autorais")
@@ -256,8 +269,6 @@ def salvar_fila_retorno(dados):
                 horario_bd, processado_final, postagem_final = "", (1 if item.get("processado") else 0), item.get("data_postagem", "")
                 msg_post_final = item.get("msg_postada_id")
 
-            # ⏰ O horário vem do retrato quando existe: é este arquivo que sorteia os
-            # horários da fila autoral. Só cai para o banco quando o retrato não tem nada.
             horario_final = item.get("horario_disparo") or horario_bd or ""
 
             cursor.execute('''
@@ -287,7 +298,7 @@ def salvar_fila_retorno(dados):
             except Exception: pass
 
 def ler_fila_publico():
-    """Fila própria do Grupo Público. Espelha ler_fila_retorno(), com tabela separada."""
+    """Fila do Grupo Público (tabela fila_publico), no mesmo formato de ler_fila_retorno()."""
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         conexao.row_factory = sqlite3.Row
@@ -305,9 +316,8 @@ def ler_fila_publico():
                 data_postagem TEXT
             )
         ''')
-        # 🚀 Migração local: o arquivo baixado pelo Correio Público mora nesta coluna.
-        # O bot_mestre também a cria, mas os serviços sobem em ordem imprevisível —
-        # garantir aqui evita um "no such column" no meio de um deploy.
+        # Colunas novas (caminho_arquivo guarda o vídeo baixado pelo Correio Público).
+        # O bot_mestre também as cria, mas os serviços sobem em qualquer ordem.
         try:
             cursor.execute("ALTER TABLE fila_publico ADD COLUMN msg_postada_id INTEGER")
             conexao.commit()
@@ -342,11 +352,9 @@ def ler_fila_publico():
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila_publico do SQLite: {e}")
         return {"fila": []}
 
-# ==========================================
-# 👥 ENTRADA AUTOMÁTICA NOS CANAIS DOS PARCEIROS
+# --- Entrada automática nos canais dos parceiros ---
 # Uma por ciclo, com intervalo longo: entrar em vários canais seguidos é o
-# padrão que o Telegram pune. A conta do userbot é a peça mais crítica do sistema.
-# ==========================================
+# padrão que o Telegram pune, e a conta do userbot é a peça mais crítica do sistema.
 INTERVALO_ENTRADA_PARCEIROS = 900   # 15 min entre uma entrada e outra
 
 def ler_parceiros_pendentes():
@@ -366,6 +374,7 @@ def ler_parceiros_pendentes():
         return []
 
 def marcar_origem_parceiro(parceiro_id, status, motivo=""):
+    """Grava em parceiros se o userbot acessa o canal de origem (origem_ok) e, se não, o motivo."""
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -453,7 +462,7 @@ async def entrar_no_canal_parceiro(alvo):
         return False, "origem vazia"
 
     try:
-        # Já temos acesso? Então não há o que fazer.
+        # Já acessa o canal: nada a fazer.
         if await resolver_entidade(alvo):
             return True, "já acessível"
 
@@ -479,11 +488,11 @@ async def entrar_no_canal_parceiro(alvo):
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
 
-# ==========================================
-# 🎣 CAPTURA POR PARCEIRO
-# Roda no MESMO evento do userbot, depois do sorteio do dono — que já reservou
-# o que era dele. Aqui cada parceiro sorteia a própria cota do que sobrou.
-# ==========================================
+# --- Captura por parceiro ---
+# Roda no mesmo evento do userbot, antes do fluxo do dono. Vídeo ou produto que o
+# dono já reservou (no sorteio do Grupo Público) fica de fora. Se o canal do
+# parceiro for a própria origem do dono, o parceiro passa na frente: a reserva do
+# dono para aquele vídeo só acontece mais adiante no mesmo evento.
 def ler_parceiros_ativos_com_acesso():
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -546,12 +555,13 @@ def inserir_fila_parceiro(parceiro_id, caminho, link, data_alvo):
 
 async def capturar_para_parceiros(event, chat_id, link_capturado):
     """
-    Chamada em TODA mensagem com vídeo + link Shopee. Para cada parceiro cujo
-    canal de origem seja este chat, roda o sorteio dele sobre o que o dono não levou.
+    Chamada em toda mensagem com vídeo e link da Shopee. Se o chat é o canal de
+    origem de um parceiro com acesso, baixa o vídeo para a pasta dele e o agenda
+    para o D+X do parceiro. Vídeo ou produto já reservado fica de fora, e cada
+    vídeo vai para um parceiro só.
     """
-    # 🔎 DIAGNÓSTICO: cada saída antecipada daqui era silenciosa, então uma fila
-    # parada em zero não dizia NADA sobre onde o fluxo tinha morrido. Agora cada
-    # porta fechada se anuncia, com o dado que permite conferir a configuração.
+    # Cada saída antecipada registra o motivo no log: sem isso, uma fila de
+    # parceiro parada em zero não diz onde o fluxo parou.
     parceiros = ler_parceiros_ativos_com_acesso()
     if not parceiros:
         if EXIBIR_LOGS: logger.info("👥 [Parceiros] Vídeo visto, mas nenhum parceiro ativo com acesso liberado.")
@@ -563,7 +573,7 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
         doc_id = None
     chaves = [f"doc_{doc_id}" if doc_id else None, await chave_produto_resolvida(link_capturado)]
 
-    # 🔒 O dono já reservou? Então este vídeo não é de ninguém mais.
+    # Já reservado (pelo dono ou por outro parceiro): não é de mais ninguém.
     if video_ja_reservado(chaves):
         if EXIBIR_LOGS: logger.info(f"👥 [Parceiros] Vídeo já reservado por outro. Chat {chat_id}.")
         return
@@ -590,11 +600,11 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
             dias = int(p.get("dias_atraso", 30))
             data_alvo = (datetime.now() + timedelta(days=dias)).strftime("%Y-%m-%d")
 
-            # 📦 O 'limite_diario' NÃO corta mais aqui: captura-se tudo e a escolha de
-            # quais vídeos vão ao ar passou para o motor de publicação (bot_mestre).
-            # O único freio na captura passa a ser o teto de disco, checado acima.
+            # O limite diário do parceiro não corta aqui: captura tudo, e o bot_mestre
+            # escolhe na publicação o que vai ao ar. Na captura, o único freio é o
+            # teto de disco, checado acima.
 
-            # 🔒 Reserva ANTES de baixar: se outro parceiro pegou no mesmo instante, para aqui
+            # Reserva antes de baixar: se outro parceiro pegou no mesmo instante, para aqui.
             if not reservar_video(chaves, parceiro_id=p.get("id")):
                 continue
 
@@ -609,13 +619,13 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
             if EXIBIR_LOGS:
                 logger.info(f"🎯 [Parceiro {p.get('nome')}] Vídeo capturado e agendado para {data_alvo}. "
                             f"Disco: {espaco_usado_parceiros_gb():.2f} GB de {TETO_DISCO_PARCEIROS_GB} GB.")
-            break   # um vídeo pertence a UM parceiro só
+            break   # um vídeo vai para um parceiro só
 
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Falha ao capturar para '{p.get('nome')}': {e}")
 
 async def loop_entrada_parceiros():
-    """Entra em UM canal por ciclo. Nunca em lote."""
+    """Tenta acessar o canal de origem de um parceiro pendente por ciclo, nunca em lote."""
     await asyncio.sleep(60)
     while True:
         try:
@@ -633,12 +643,10 @@ async def loop_entrada_parceiros():
 
         await asyncio.sleep(INTERVALO_ENTRADA_PARCEIROS)
 
-# ==========================================
-# 💾 ARMAZENAMENTO DOS VÍDEOS DOS PARCEIROS
+# --- Armazenamento dos vídeos dos parceiros ---
 # Os arquivos ficam em disco até a data de publicação (D+X do parceiro).
-# Teto rígido: se estourar, novas capturas são RECUSADAS em vez de encher o disco
-# e derrubar todo o sistema (Espião, Autorais e o SQLite junto).
-# ==========================================
+# Teto rígido: estourou, novas capturas são recusadas, em vez de encher o disco
+# e derrubar o sistema inteiro (Espião, Autorais e o SQLite junto).
 PASTA_PARCEIROS = "parceiros"
 TETO_DISCO_PARCEIROS_GB = 10
 
@@ -692,16 +700,13 @@ def chave_produto(link):
         return f"curto_{m.group(1)}"
     return None
 
-# 🗓️ Prazo de validade do cache de encurtadores. O par código → produto em si
-# nunca muda, mas guardar para sempre acumula lixo de campanha velha sem
-# proveito: link de um ano atrás dificilmente volta a aparecer.
+# Validade do cache de encurtadores. O par código → produto não muda, mas guardar
+# para sempre acumula campanha velha: link de um ano atrás dificilmente volta.
 DIAS_VALIDADE_CACHE_LINKS = 365
 
 def _garantir_tabela_links(cursor):
-    # A versão anterior guardava a URL inteira na coluna 'url_final'. Como isto
-    # é só cache, o mais limpo na migração é derrubar a tabela velha e deixar
-    # reconstruir-se sozinha: nada de valor se perde, apenas se resolve de novo
-    # na primeira vez que cada link voltar a aparecer.
+    # Tabela no formato antigo (URL inteira em url_final, sem chave_final) é
+    # apagada e recriada: é só cache, cada link se resolve de novo quando voltar.
     try:
         colunas = [c[1] for c in cursor.execute("PRAGMA table_info(links_resolvidos)").fetchall()]
         if colunas and "chave_final" not in colunas:
@@ -719,24 +724,17 @@ def _garantir_tabela_links(cursor):
 
 async def resolver_chave_curta(link):
     """
-    🔗 Descobre qual PRODUTO está por trás de um link curto da Shopee.
+    Descobre qual produto está por trás de um link curto da Shopee.
 
-    Existe por causa de uma brecha na trava anti-duplicata: dois afiliados que
-    divulgam o MESMO item geram encurtadores diferentes, e a chave saía
-    `curto_AbCd123` contra `curto_XyZw789` — duas identidades para um produto
-    só, e o item aparecia duas vezes no grupo. Resolvido o destino, os dois
-    viram o mesmo `prod_loja_item` e a trava pega.
+    Dois afiliados que divulgam o mesmo item geram encurtadores diferentes, e a
+    chave sairia `curto_AbCd123` contra `curto_XyZw789`: duas identidades para um
+    produto só, que a trava anti-duplicata deixaria passar. Abrindo o link, os dois
+    viram o mesmo `prod_loja_item`.
 
-    Guarda só a CHAVE, não a URL inteira: é o único dado usado, ocupa bem menos
-    e dispensa reprocessar a URL a cada leitura.
-
-    O cache vale DIAS_VALIDADE_CACHE_LINKS dias. Passado o prazo a linha é
-    ignorada e some na próxima gravação, então a tabela se recicla sozinha sem
-    precisar de tarefa agendada só para isso.
-
-    Guarda também o resultado VAZIO de um link que abriu mas não tinha produto,
-    senão a rede seria consultada de novo por algo que nunca vai resolver. Falha
-    de rede NÃO é gravada, para poder tentar outra vez mais tarde.
+    Guarda só a chave, não a URL. O cache vale DIAS_VALIDADE_CACHE_LINKS dias; o
+    que vence é apagado na próxima gravação. Link que abriu mas não tinha produto
+    também é guardado (vazio), para não consultar de novo; falha de rede não é
+    guardada, para tentar outra vez depois.
     """
     achado = re.search(r'(?:s\.shopee\.com\.br|shp\.ee|shope\.ee|br\.shp\.ee)/([A-Za-z0-9]+)', str(link or "").lower())
     if not achado:
@@ -756,7 +754,7 @@ async def resolver_chave_curta(link):
         linha = cursor.fetchone()
         conexao.close()
         if linha is not None:
-            return linha[0] or None   # vazio = já tentámos e não havia produto
+            return linha[0] or None   # vazio = já foi aberto e não tinha produto
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Link Curto] Erro ao ler o cache: {e}")
 
@@ -782,9 +780,8 @@ async def resolver_chave_curta(link):
             "INSERT OR REPLACE INTO links_resolvidos (codigo_curto, chave_final, data_resolucao) VALUES (?, ?, ?)",
             (codigo, chave_final, datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
         )
-        # 🧹 Faxina de carona: aproveita a gravação para varrer o que venceu. Só
-        # corre quando aparece um encurtador novo, que é raro, e a tabela é
-        # pequena — não justifica uma tarefa agendada própria.
+        # Aproveita a gravação para apagar o que venceu. Só roda quando aparece
+        # encurtador novo, e a tabela é pequena.
         cursor.execute("DELETE FROM links_resolvidos WHERE data_resolucao < ?", (limite_validade,))
         vencidos = cursor.rowcount
         conexao.commit()
@@ -840,9 +837,9 @@ def video_ja_reservado(chaves):
 
 def reservar_video(chaves, parceiro_id=0):
     """
-    🔒 RESERVA GLOBAL DUPLA — bloqueia por ARQUIVO e por PRODUTO.
-    Assim o mesmo item não sai duas vezes nem quando os vídeos são diferentes.
-    parceiro_id = 0 significa "reservado pelo dono", que sorteia primeiro.
+    Reserva o vídeo por arquivo (doc_<id>) e por produto, para o mesmo item não
+    sair duas vezes nem com vídeos diferentes. parceiro_id 0 = dono. Devolve True
+    se reservou alguma chave nova.
     """
     if not isinstance(chaves, (list, tuple)):
         chaves = [chaves]
@@ -870,18 +867,20 @@ def reservar_video(chaves, parceiro_id=0):
         return False
 
 def salvar_fila_publico(dados):
-    """Espelha salvar_fila_retorno(), gravando na tabela fila_publico."""
-    # 🔒 Mesmo caso da irmã acima: DELETE + N INSERTs. Fechar sempre, dê no que der.
+    """
+    Regrava a tabela fila_publico a partir de dados (DELETE + INSERT).
+
+    O bot_mestre e o Correio gravam horario_disparo, processado, data_postagem,
+    caminho_arquivo e msg_postada_id nas mesmas linhas, de outro processo. Para quem
+    já está no banco esses campos são relidos aqui e mantidos; regravar a partir de
+    um retrato antigo devolveria o vídeo a "pendente" (seria publicado de novo).
+    """
+    # Mesma transação longa de salvar_fila_retorno: fecha no finally.
     conexao = None
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
 
-        # 🛡️ O bot_mestre e o Correio escrevem processado / data_postagem / horario_disparo
-        # / caminho_arquivo NAS MESMAS LINHAS, de outro processo. Reescrever a tabela a
-        # partir de um retrato em memória desfazia essas gravações: um vídeo já publicado
-        # voltava a "pendente" e era publicado outra vez. Aqui as colunas de status de
-        # quem já está no banco são relidas no último instante e mantidas.
         status_atual = {}
         try:
             cursor.execute("SELECT id_unico, horario_disparo, processado, data_postagem, caminho_arquivo, msg_postada_id FROM fila_publico")
@@ -926,10 +925,7 @@ def salvar_fila_publico(dados):
             except Exception: pass
 
 def contar_ofertas_dia_publico(data_alvo, incrementar=True):
-    """
-    🎲 Contador do Sorteio do Grupo Público (Amostragem de Reservatório)
-    Espelha contar_ofertas_dia(), com tabela própria e independente.
-    """
+    """Contador do sorteio do Grupo Público: o mesmo que contar_ofertas_dia(), com tabela própria."""
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -956,9 +952,9 @@ def contar_ofertas_dia_publico(data_alvo, incrementar=True):
 
 def contar_ofertas_dia(data_alvo, incrementar=True):
     """
-    🎲 Contador do Sorteio (Amostragem de Reservatório)
-    Guarda quantos vídeos a origem já ofereceu para aquela data_alvo.
-    É esse número que garante a chance justa de (limite/total) para cada vídeo do dia.
+    Contador do sorteio dos autorais: quantos vídeos a origem já ofereceu para a
+    data_alvo (incrementa e devolve). É o total que dá a cada vídeo do dia a mesma
+    chance, limite/total.
     """
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -975,7 +971,7 @@ def contar_ofertas_dia(data_alvo, incrementar=True):
             if cursor.rowcount == 0:
                 cursor.execute("INSERT INTO contador_autorais (data_alvo, total) VALUES (?, 1)", (data_alvo,))
 
-            # Faxina: contadores de datas já vencidas não servem mais para nada
+            # Contador de data com mais de 90 dias não serve mais.
             limite_faxina = (datetime.now() - timedelta(days=90)).strftime("%Y-%m-%d")
             cursor.execute("DELETE FROM contador_autorais WHERE data_alvo < ?", (limite_faxina,))
             conexao.commit()
@@ -990,8 +986,8 @@ def contar_ofertas_dia(data_alvo, incrementar=True):
 
 async def verificar_e_otimizar_video(caminho_video):
     """
-    Inspeciona a resolução física do arquivo.
-    Se for inferior a 720p, realiza o upscaling com FFmpeg em background.
+    Vídeo com o lado menor abaixo de 720 px é re-renderizado para 720x1280 (com
+    bordas pretas) e substitui o original. Em qualquer falha, devolve o arquivo como está.
     """
     if not caminho_video or not os.path.exists(caminho_video): return caminho_video
     
@@ -1031,7 +1027,7 @@ async def verificar_e_otimizar_video(caminho_video):
         
         if comando_ffmpeg.returncode == 0 and os.path.exists(caminho_temp):
             os.replace(caminho_temp, caminho_video)
-            if EXIBIR_LOGS: logger.info(f"✨ [Upscaling] Sucesso! Vídeo re-renderizado para 720x1280 e substituído.")
+            if EXIBIR_LOGS: logger.info("✨ [Upscaling] Sucesso! Vídeo re-renderizado para 720x1280 e substituído.")
         else:
             if EXIBIR_LOGS: logger.error("❌ [Upscaling] Falha na renderização do FFmpeg. Mantendo arquivo original.")
             if os.path.exists(caminho_temp): os.remove(caminho_temp)
@@ -1042,6 +1038,7 @@ async def verificar_e_otimizar_video(caminho_video):
     return caminho_video
 
 async def gerar_legenda_autoral(caminho_video):
+    """Pede à IA o nome do produto com emoji (linha 1) e as hashtags de categoria (linha 2)."""
     prompt = (
         "Assista ao vídeo e identifique qual é o produto demonstrado. "
         "Sua resposta deve conter EXATAMENTE duas linhas.\n"
@@ -1060,7 +1057,38 @@ async def gerar_legenda_autoral(caminho_video):
     titulo = await analisar_video_gemini(caminho_video, prompt, EXIBIR_LOGS)
     return titulo
 
-from utils import salvar_nome_grupo # Adicione isso caso não esteja no topo do arquivo
+from utils import salvar_nome_grupo
+
+DIAS_REGISTRO_MENSAGENS_ORIGEM = 30
+
+def mensagem_ja_processada(chat_id, msg_id):
+    """
+    Registra a mensagem (chat, id) da origem e devolve True se ela já estava registrada.
+
+    A origem chega por dois caminhos: o evento NewMessage e a varredura_origem_loop.
+    Sem este registro, a mesma mensagem vinda pelos dois seria publicada duas vezes
+    no canal e entraria duas vezes na fila. Fica no banco, então vale depois de
+    reiniciar. Sem msg_id ou com erro no banco devolve False (a mensagem é processada).
+    """
+    if msg_id is None:
+        return False
+    chave = f"{_id_curto(chat_id)}:{msg_id}"
+    agora_txt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # A varredura só olha as últimas mensagens da origem; registro mais velho não serve.
+    limite = (datetime.now() - timedelta(days=DIAS_REGISTRO_MENSAGENS_ORIGEM)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        cursor = conexao.cursor()
+        cursor.execute("CREATE TABLE IF NOT EXISTS mensagens_origem_autorais (chave TEXT PRIMARY KEY, data_registro TEXT)")
+        cursor.execute("INSERT OR IGNORE INTO mensagens_origem_autorais (chave, data_registro) VALUES (?, ?)", (chave, agora_txt))
+        ja_registrada = cursor.rowcount == 0
+        cursor.execute("DELETE FROM mensagens_origem_autorais WHERE data_registro < ?", (limite,))
+        conexao.commit()
+        conexao.close()
+        return ja_registrada
+    except Exception as e:
+        if EXIBIR_LOGS: logger.error(f"❌ Erro ao consultar o registro de mensagens da origem: {e}")
+        return False
 
 def separar_alvo_e_topico(valor):
     """
@@ -1086,33 +1114,18 @@ def separar_alvo_e_topico(valor):
 
     return base, topico
 
-# 🔁 incoming=True é o que impede o ciclo vicioso: sem ele, o Telethon entrega a este
-# handler TAMBÉM as mensagens que esta própria conta envia. Como o retorno autoral
-# publica dentro do grupo de ORIGEM, cada retorno era recapturado, republicado no canal
-# e reentrava nas filas — um vídeo recém-postado virava um novo vídeo "novo".
+# incoming=True: sem ele o Telethon entrega também as mensagens que esta conta envia.
+# O retorno autoral publica no grupo de ORIGEM, e cada retorno seria recapturado e
+# republicado como vídeo novo.
 @client.on(events.NewMessage(incoming=True))
 async def interceptar_e_espelhar(event):
-    # 🔬 DIAGNÓSTICO TEMPORÁRIO: registra TODO evento que chega, antes de qualquer
-    # filtro. Serve para responder uma pergunta só — o handler é chamado para o grupo
-    # de origem? Sem isto, um evento descartado e um evento que nunca chegou produzem
-    # exatamente o mesmo silêncio no log. Remover depois de identificar a causa.
-    if EXIBIR_LOGS:
-        logger.info(
-            f"🔬 [Evento] chat_id={getattr(event, 'chat_id', '?')} "
-            f"out={getattr(event, 'out', '?')} "
-            f"media={type(getattr(event, 'media', None)).__name__} "
-            f"texto={(event.raw_text or '')[:40]!r}"
-        )
-
-    # 🛡️ Cinto e suspensório: se algum evento próprio escapar do filtro acima, morre aqui.
+    # Repete o incoming=True: a varredura chama este handler direto, sem o filtro do evento.
     if getattr(event, "out", False):
         return
 
-    # 🚫 LISTA NEGRA — CORTE GLOBAL
-    # O 'out' acima só protege contra a conta que roda ESTA sessão. Com o pool de
-    # contas, o espelho e a repostagem podem ser contas diferentes: quando a conta
-    # da repostagem devolve o vídeo ao grupo, para a conta do espelho essa mensagem
-    # é INCOMING (out=False) e seria recapturada — laço infinito. Morre aqui.
+    # Lista negra global. O 'out' acima só cobre a conta desta sessão. Com o pool de
+    # contas, espelho e repostagem podem ser contas diferentes: o retorno publicado
+    # pela outra conta chega aqui como mensagem de terceiro e seria recapturado em laço.
     if blacklist_captura.deve_ignorar(getattr(event, "sender_id", None),
                                       contexto=blacklist_captura.ESCOPO_GLOBAL):
         if EXIBIR_LOGS:
@@ -1122,21 +1135,19 @@ async def interceptar_e_espelhar(event):
 
     config_atual = carregar_config_autorais()
     
-    # ✅ VERIFICAÇÃO DE PAUSA GLOBAL DO ROBÔ AUTORAL
     if config_atual.get("pausar_robo_completo", False):
         return
         
     chat = await event.get_chat()
     
-    # --- A MÁGICA ACONTECE AQUI ---
+    # Nome do chat no cache que o painel usa para mostrar nomes.
     if chat and hasattr(chat, 'title'):
         salvar_nome_grupo(str(chat.id), chat.title)
-    # ------------------------------
     
     origem_configurada, topico_embutido = separar_alvo_e_topico(config_atual.get('origem'))
     topico_configurado = config_atual.get('origem_topico')
 
-    # ✅ O tópico colado no ID pelo painel tem prioridade sobre a chave separada
+    # Tópico colado no ID ("-100123:5") tem prioridade sobre a chave origem_topico.
     if topico_embutido is not None:
         topico_configurado = topico_embutido
     if isinstance(topico_configurado, str) and topico_configurado.strip().isdigit():
@@ -1145,7 +1156,7 @@ async def interceptar_e_espelhar(event):
     eh_origem = False
 
     if isinstance(origem_configurada, int):
-        # ✅ Compara pelo número puro, ignorando prefixo -100 e sinal negativo
+        # Compara só o número, sem o -100 e o sinal.
         num_config = str(origem_configurada).replace("-100", "").lstrip("-")
         num_evento = str(getattr(event, 'chat_id', "") or "").replace("-100", "").lstrip("-")
         if num_config and num_config == num_evento:
@@ -1155,7 +1166,7 @@ async def interceptar_e_espelhar(event):
         if username_chat and username_chat.lower() == origem_configurada.lstrip('@').lower():
             eh_origem = True
 
-    # ✅ VERIFICAÇÃO DE TÓPICO (Subcanal) - None significa "ler tudo"
+    # Com tópico configurado, só vale mensagem desse tópico (None = o grupo todo).
     if eh_origem and topico_configurado is not None:
         topic_id = None
         reply_info = getattr(event.message, 'reply_to', None)
@@ -1169,9 +1180,8 @@ async def interceptar_e_espelhar(event):
         if t_evento != t_config:
             eh_origem = False
 
-    # 👥 PARCEIROS: cada parceiro vigia o PRÓPRIO canal de origem, que quase nunca
-    # é o mesmo canal do dono. Por isso esta chamada precisa vir ANTES do corte do
-    # "eh_origem" — abaixo dele o evento já foi descartado e o parceiro nunca vê nada.
+    # Parceiros: cada um vigia o próprio canal de origem, que quase nunca é a origem
+    # do dono. Por isso esta chamada vem antes do corte de eh_origem.
     if isinstance(getattr(event, 'media', None), MessageMediaDocument):
         link_parceiro = extrair_link_shopee(event)
         if link_parceiro:
@@ -1183,15 +1193,10 @@ async def interceptar_e_espelhar(event):
     if not eh_origem:
         return
 
-    # 🚫 LISTA NEGRA — CORTE DO GRUPO DOS AUTORAIS
-    # ⚠️ A POSIÇÃO DESTE BLOCO É PROPOSITAL. Ele fica ANTES do sorteio (o
-    # 'random.random() < limite/total' mais abaixo). É isso que faz um vídeo de
-    # autor bloqueado nem DISPUTAR vaga no aleatório: se ele disputasse, além de
-    # poder ser escolhido, poderia derrubar um vídeo bom que já estava na fila
-    # (o 'item_descartado'). Não mova para depois do sorteio.
-    #
-    # Também é aqui que o autor é identificado e guardado em autor_evento, para
-    # ser gravado junto com o item da fila mais adiante.
+    # Lista negra do grupo dos autorais. Fica ANTES do sorteio de propósito: vídeo de
+    # autor bloqueado nem disputa vaga (se disputasse, poderia tirar da fila um vídeo
+    # bom, o item_descartado). Não mover para depois do sorteio.
+    # O autor identificado aqui também é gravado no item da fila.
     try:
         autor_evento = await event.get_sender()
     except Exception:
@@ -1211,27 +1216,21 @@ async def interceptar_e_espelhar(event):
         return
 
     if isinstance(event.media, MessageMediaDocument):
-        texto_original = event.text or ""
         link_capturado = extrair_link_shopee(event)
         
         if not link_capturado:
             if EXIBIR_LOGS: logger.info("⏭️ Postagem ignorada: Não contém link da Shopee (nem embutido).")
             return
 
+        if mensagem_ja_processada(getattr(event, 'chat_id', None), getattr(event, 'id', None)):
+            if EXIBIR_LOGS: logger.info(f"⏭️ Mensagem {getattr(event, 'id', '?')} da origem já foi processada (evento e varredura pegaram a mesma). Ignorada.")
+            return
+
         if EXIBIR_LOGS: logger.info("🔗 A converter o link da Shopee para o seu ID de afiliado via API Central...")
         link_novo = await converter_link_shopee(link_capturado, "geral", EXIBIR_LOGS)
-        
-        # ✅ Novo motor de substituição: Telethon usa Markdown por padrão na propriedade .text
-        texto_base = event.text or ""
-        texto_convertido = PADRAO_SHOPEE.sub(link_novo, texto_base)
-        
-        # Prevenção extra: Se o concorrente escondeu o link na formatação, injetamos no final em formato Markdown
-        if link_novo not in texto_convertido:
-            texto_convertido += f"\n\n🔗 **Link do Produto:**\n{link_novo}"
 
         if EXIBIR_LOGS: logger.info("📥 Iniciando o download do vídeo...")
         caminho_video = await event.download_media(file="temp/temp_espelho_isolado_")
-        # ✅ NOVA TRAVA DE QUALIDADE E UPSCALING
         caminho_video = await verificar_e_otimizar_video(caminho_video)
         
         if caminho_video:
@@ -1250,7 +1249,7 @@ async def interceptar_e_espelhar(event):
                 else:
                     legenda_final = f"<b>Vídeo do Produto</b> 🛍️\n\n🔗 <b>Link do Produto:</b>\n{link_novo}"
 
-                # ✅ Destino também pode vir no formato composto "-100123:5"
+                # O destino também pode ter tópico ("-100123:5").
                 destino_final, destino_topico = separar_alvo_e_topico(config_atual.get('destino'))
                 if destino_final is None:
                     raise ValueError("Destino não configurado no painel de Vídeos Autorais.")
@@ -1259,10 +1258,8 @@ async def interceptar_e_espelhar(event):
                 if destino_topico and destino_topico > 1:
                     kwargs_envio['reply_to'] = destino_topico
 
-                # ⏸️ ÚLTIMA PORTA ANTES DE PUBLICAR. A pausa pode ter sido pedida DEPOIS
-                # que este vídeo entrou em processamento — download, otimização e IA
-                # levam dezenas de segundos. A checagem lá do topo do handler já não
-                # vale nada aqui; esta é a que conta.
+                # Última checagem antes de publicar: download, otimização e IA levam
+                # dezenas de segundos, e a pausa pedida nesse meio-tempo precisa valer.
                 if pausa_ativa("captura"):
                     if EXIBIR_LOGS: logger.info("⏸️ [Captura] Pausa pedida durante o processamento. Vídeo descartado sem publicar.")
                     try: os.remove(caminho_video)
@@ -1278,23 +1275,21 @@ async def interceptar_e_espelhar(event):
                 )
                 if EXIBIR_LOGS: logger.info("🚀 Vídeo publicado no canal de destino com a nova legenda autoral!")
                 
-                # ✅ Regra dinâmica de dias e limite de vídeos lida diretamente do painel
                 dias_retorno = config_atual.get('dias_retorno', 15)
 
                 agora = datetime.now()
                 data_alvo = (agora + timedelta(days=dias_retorno)).strftime("%Y-%m-%d")
 
-                # 🎲 A cota do dia sai de um sorteio dentro da faixa, e não mais de um
-                # número fixo. Reservatório do mesmo tamanho todo santo dia é assinatura
-                # de robô; variando, a quantidade publicada parece decisão de gente. O
-                # sorteio é determinístico pela DATA-ALVO, então o reservatório não muda
-                # de tamanho no meio do próprio dia nem depois de um reinício.
+                # A cota do dia é sorteada dentro da faixa do painel: reservatório do mesmo
+                # tamanho todo dia é assinatura de robô. O sorteio é determinístico pela
+                # data-alvo (não muda no meio do dia nem ao reiniciar), e o loop de retorno
+                # usa o mesmo número como teto de saída.
                 piso_aut, topo_aut = faixa_de_config(config_atual, "limite_min", "limite_max", "limite_videos")
                 limite_videos = sortear_teto_do_dia("autorais", data_alvo, piso_aut, topo_aut) or piso_aut or 5
                 
                 fila_dados = ler_fila_retorno()
-                # 🎲 SORTEIO JUSTO (Amostragem de Reservatório)
-                # Todo vídeo do dia tem a mesma chance de ser escolhido, e não só os primeiros.
+                # Amostragem por reservatório: todo vídeo do dia tem a mesma chance de
+                # ficar, não só os primeiros.
                 total_ofertas = contar_ofertas_dia(data_alvo)
                 candidatos = [v for v in fila_dados.get("fila", []) if v.get("data_alvo") == data_alvo and not v.get("processado")]
 
@@ -1312,12 +1307,9 @@ async def interceptar_e_espelhar(event):
                 if foi_sorteado:
                     id_unico = f"autoral_{int(agora.timestamp())}_{random.randint(1000, 9999)}"
 
-                    # 🏷️ NOME ÚNICO NO ARQUIVO. Antes o arquivado herdava o nome do temp
-                    # ("temp_espelho_isolado_ (4).mp4"), e o Telethon só evita colisão
-                    # DENTRO de temp/. Assim que o arquivo saía de lá o nome ficava livre,
-                    # o download seguinte o reusava, e o os.rename sobrescrevia o destino
-                    # em silêncio. Resultado: um item de 30 dias atrás passava a apontar
-                    # para o vídeo baixado hoje — e era ELE que voltava para o grupo.
+                    # Nome único em archive/. Reaproveitar o nome do temp/ colide: o
+                    # Telethon só evita colisão dentro de temp/, e o os.rename
+                    # sobrescreveria em silêncio o vídeo de outro item da fila.
                     extensao = os.path.splitext(caminho_video)[1] or ".mp4"
                     novo_caminho = f"archive/{id_unico}{extensao}"
                     os.rename(caminho_video, novo_caminho)
@@ -1331,9 +1323,7 @@ async def interceptar_e_espelhar(event):
                         fila_dados["fila"] = [v for v in fila_dados.get("fila", []) if v.get("id_unico") != item_descartado.get("id_unico")]
                         if EXIBIR_LOGS: logger.info(f"🔄 [Sorteio Autorais] Vídeo nº {total_ofertas} do dia tomou a vaga de {item_descartado.get('id_unico')}.")
                     
-                    # ✅ Grava o nome que a IA já produziu, no formato que o painel lê.
-                    # Antes salvava o texto do concorrente, e o relatório caía no
-                    # placeholder "Aguardando análise da IA".
+                    # "📦 Item: <nome>" é o formato que o painel e o relatório leem.
                     nome_produto_autoral = texto_ia.split('\n')[0].strip() if texto_ia else "Produto Exclusivo"
                     legenda_autoral = f"📦 Item: {nome_produto_autoral}\n\n{legenda_final}"
 
@@ -1346,8 +1336,7 @@ async def interceptar_e_espelhar(event):
                         "data_alvo": data_alvo,
                         "horario_disparo": "",
                         "processado": False,
-                        # 🚫 Carimbo do autor original, para a reconferência da
-                        # lista negra na hora de repostar.
+                        # Autor original, para reconferir a lista negra na hora de repostar.
                         "autor_id": autor_id_evento,
                         "autor_username": autor_user_evento or ""
                     })
@@ -1360,18 +1349,16 @@ async def interceptar_e_espelhar(event):
                     except Exception:
                         pass
 
-                # 🎲 SORTEIO JUSTO DO GRUPO PÚBLICO (Amostragem de Reservatório)
-                # Loteria INDEPENDENTE, disparada pelo mesmo evento e sobre o mesmo vídeo.
-                # Motor idêntico ao dos Autorais, com contador, fila e regras próprias.
+                # Sorteio do Grupo Público: independente, sobre o mesmo vídeo, com
+                # contador, fila e regras próprias (submissao_config).
                 try:
                     config_pub = ler_config_bd_autorais("submissao_config", {})
                     if config_pub.get("ativo") and not config_pub.get("repost_pausado", False):
                         dias_publico = config_pub.get("repost_dias", 15)
                         data_alvo_pub = (agora + timedelta(days=dias_publico)).strftime("%Y-%m-%d")
 
-                        # 🎲 Mesma ideia dos autorais: o tamanho do reservatório do Grupo
-                        # Público varia por dia, com semente própria para não sortear o
-                        # mesmo número que os autorais na mesma data.
+                        # Cota sorteada como a dos autorais, com semente própria para não
+                        # sair o mesmo número na mesma data.
                         piso_pub, topo_pub = faixa_de_config(config_pub, "repost_limite_min", "repost_limite_max", "repost_limite")
                         limite_publico = sortear_teto_do_dia("publico", data_alvo_pub, piso_pub, topo_pub) or piso_pub or 6
 
@@ -1393,8 +1380,7 @@ async def interceptar_e_espelhar(event):
                         if foi_sorteado_pub:
                             id_unico_pub = f"publico_{int(agora.timestamp())}_{random.randint(1000, 9999)}"
 
-                            # ✅ Grava o nome real do produto na legenda, no formato que o
-                            # painel e o motor de repostagem sabem ler ("📦 Item:").
+                            # Mesmo formato "📦 Item:" que o painel e a repostagem leem.
                             nome_produto_pub = texto_ia.split('\n')[0].strip() if texto_ia else "Produto Exclusivo"
                             legenda_publico = f"📦 Item: {nome_produto_pub}\n\n{legenda_final}"
 
@@ -1415,8 +1401,8 @@ async def interceptar_e_espelhar(event):
                             })
                             salvar_fila_publico(fila_pub)
 
-                            # 🔒 Marca o vídeo como do DONO, por ARQUIVO e por PRODUTO.
-                            # Parceiros consultam esta tabela antes de sortear.
+                            # Reserva para o dono, por arquivo e por produto: parceiros
+                            # consultam a reserva antes de capturar.
                             try:
                                 doc_id = event.media.document.id
                             except Exception:
@@ -1434,7 +1420,7 @@ async def interceptar_e_espelhar(event):
                 if EXIBIR_LOGS: logger.error(f"❌ Falha ao tentar enviar o vídeo: {e}")
                 registrar_erro_json(f"interceptar_e_espelhar: {e}", origem="espelhador_videos_autorais.py")
                 
-                # Etiqueta de Falha
+                # Fica como .pendente em temp/; a faxina do bot_mestre apaga depois.
                 if os.path.exists(caminho_video):
                     try:
                         os.rename(caminho_video, caminho_video + ".pendente")
@@ -1443,6 +1429,11 @@ async def interceptar_e_espelhar(event):
                         pass
 
 async def processar_fila_autorais_loop():
+    """
+    Fila de retorno D+X. A cada minuto agenda na janela do painel os vídeos com
+    data-alvo hoje e devolve ao grupo de origem no máximo um por ciclo, respeitando
+    pausa, janela, teto diário e as travas de idade, lista negra e arquivo trocado.
+    """
     if EXIBIR_LOGS: logger.info("🚀 [Motor Autorais] Loop de processamento autônomo iniciado.")
     
     while True:
@@ -1456,7 +1447,7 @@ async def processar_fila_autorais_loop():
                 
             config_atual = carregar_config_autorais()
             
-            # Se pausado, não processa postagens (empurra organicamente)
+            # Pausado: nada é agendado nem publicado.
             if config_atual.get("pausar_robo_completo", False) or config_atual.get("pausar_repostagem", False):
                 await asyncio.sleep(60)
                 continue
@@ -1464,7 +1455,7 @@ async def processar_fila_autorais_loop():
             agora = datetime.now()
             hoje_str = agora.strftime("%Y-%m-%d")
             
-            # --- 1. MOTOR MATEMÁTICO E FAXINA DE ATRASADOS ---
+            # 1) Agenda os vídeos de hoje; apaga os que perderam o dia sem horário.
             itens_desagendados = []
             houve_limpeza = False
             
@@ -1474,7 +1465,7 @@ async def processar_fila_autorais_loop():
                 if not item.get("horario_disparo"):
                     data_alvo = item.get("data_alvo")
                     
-                    # ✅ TRAVA DE SEGURANÇA: Se a data ficou no passado, o vídeo perde a validade e é excluído sumariamente
+                    # Data-alvo passou sem horário: o vídeo perde a validade e é apagado.
                     if data_alvo < hoje_str:
                         caminho_arquivo = item.get("caminho_arquivo")
                         if caminho_arquivo and os.path.exists(caminho_arquivo):
@@ -1489,29 +1480,26 @@ async def processar_fila_autorais_loop():
                             conexao.close()
                             houve_limpeza = True
                             if EXIBIR_LOGS: logger.info(f"🧹 [Auto-Limpeza] Vídeo Autoral retido e vencido ({data_alvo}) foi deletado para evitar avalanche.")
-                        except Exception as e:
+                        except Exception:
                             pass
-                        continue # Pula para o próximo vídeo, este já foi apagado
+                        continue
                         
-                    # Se for EXATAMENTE o dia de hoje, adiciona para ser postado!
                     if data_alvo == hoje_str:
                         itens_desagendados.append(item)
             
             if houve_limpeza:
-                # Recarrega a fila do banco de dados para evitar tentar processar os arquivos que acabamos de deletar
+                # Relê a fila sem os itens apagados.
                 fila_dados = ler_fila_retorno()
                 fila = fila_dados.get("fila", [])
                     
             if itens_desagendados:
-                # ⏰ Janela e regras lidas do painel (Regras de Repostagem > Janela de Horário).
-                # ✅ CORREÇÃO: estas quatro variáveis não existiam no arquivo e o bloco
-                # inteiro quebrava com NameError a cada ciclo do loop.
+                # Janela e modo do painel (Regras de Repostagem).
                 inicio_janela = int(config_atual.get("inicio", 10))
                 fim_janela = int(config_atual.get("fim", 20))
                 modo = config_atual.get("modo", "aleatorio")
                 dias_retorno_cfg = int(config_atual.get("dias_retorno", 15))
-                # A data_alvo já aplicou o atraso D+X lá na captura. Aqui basta cair
-                # no ramo diluído do motor, que é quem espalha os vídeos pela janela.
+                # A data_alvo já tem o D+X aplicado na captura; intervalo 1 só faz o
+                # motor espalhar os vídeos pela janela.
                 intervalo_dias = 1
 
                 config_fila = {
@@ -1519,23 +1507,19 @@ async def processar_fila_autorais_loop():
                     "fim": fim_janela,
                     "modo": modo,
                     "intervalo_dias": intervalo_dias,
-                    # ⏱️ PISO de segurança, não intervalo padrão: com poucos vídeos o motor
+                    # Piso de segurança, não intervalo padrão: com poucos vídeos o motor
                     # divide a janela e espalha pelo dia. O piso só age em volume alto.
                     "espacamento_base_min": 15,
                     "espacamento_variacao_min": 6,
-                    # ✅ CORREÇÃO: o descarte por idade precisa acompanhar o D+X da fila.
-                    # Com 5 fixo e dias_retorno=15, todo vídeo nascia vencido e voltava
-                    # do motor sem horário nenhum.
-                    # 🗓️ Folga de 7 dias DEPOIS da data-alvo. O descarte conta a partir da
-                    # captura, então "atraso + 7" é exatamente isso: vídeo empurrado mais de
-                    # uma semana além do dia em que deveria sair perde a validade.
+                    # O descarte por idade conta da captura: com atraso + 7, vídeo empurrado
+                    # mais de uma semana além da data-alvo perde a validade.
                     "limite_dias_descarte": dias_retorno_cfg + 7
                 }
                 
                 if EXIBIR_LOGS: logger.info(f"⚙️ [Motor Autorais] Acionando Motor Central para {len(itens_desagendados)} vídeos de retorno...")
                 calcular_horarios_distribuicao(itens_desagendados, config_fila, forcar=False)
 
-                # 🗑️ O motor marcou algum item como velho demais? Sai da fila e do disco,
+                # Item que o motor marcou como velho demais sai da fila e do disco,
                 # senão ele fica sem horário e volta a ser reprocessado a cada 60s.
                 marcados = [i for i in itens_desagendados if i.get("descartar_por_idade")]
                 if marcados:
@@ -1551,11 +1535,12 @@ async def processar_fila_autorais_loop():
 
                 salvar_fila_retorno(fila_dados)
 
-            # --- 2. EXECUÇÃO DOS DISPAROS (Catraca do Motor) ---
-            # 🚦 TETO DIÁRIO. O sorteio da captura limita quantos vídeos ENTRAM por dia,
-            # mas nada limitava quantos SAEM: uma fila com atraso acumulado despejava
-            # tudo de uma vez no grupo dos outros. Agora o dia tem um limite duro.
-            limite_dia = int(config_atual.get("limite_videos", 5))
+            # 2) Publica.
+            # Teto diário de saída: sem ele, uma fila com atraso acumulado sairia toda de
+            # uma vez no grupo dos outros. É a mesma cota que a captura sorteou para esta
+            # data (mesma semente e dia): sai no dia exatamente o que foi guardado para ele.
+            piso_aut, topo_aut = faixa_de_config(config_atual, "limite_min", "limite_max", "limite_videos")
+            limite_dia = sortear_teto_do_dia("autorais", hoje_str, piso_aut, topo_aut) or piso_aut or 5
             try:
                 conexao_ct = sqlite3.connect("banco_dados.db", timeout=20.0)
                 ja_saiu = conexao_ct.execute(
@@ -1571,10 +1556,8 @@ async def processar_fila_autorais_loop():
                 await asyncio.sleep(60)
                 continue
 
-            # ⏰ JANELA DE HORÁRIO. O sorteio calcula os horários dentro da janela, mas o
-            # disparo só olhava "horario_disparo <= agora" — então item atrasado de ontem,
-            # ou item cuja janela mudou depois do sorteio, saía fora do horário permitido.
-            # Aqui o motor simplesmente não publica fora da janela configurada.
+            # Fora da janela nada sai, nem item atrasado de ontem nem item cuja janela
+            # mudou depois do agendamento.
             janela_ini = int(config_atual.get("inicio", 0))
             janela_fim = int(config_atual.get("fim", 24))
             if not (janela_ini <= agora.hour < janela_fim):
@@ -1584,7 +1567,6 @@ async def processar_fila_autorais_loop():
                 await asyncio.sleep(300)
                 continue
 
-            houve_disparo = False
             itens_restantes = []
             
             for item in fila:
@@ -1603,17 +1585,15 @@ async def processar_fila_autorais_loop():
                     except: pass
                     
                 if deve_disparar:
-                    # ⏸️ Reconfere a pausa a cada item, não só no topo do ciclo.
+                    # Reconfere a pausa a cada item, não só no topo do ciclo.
                     if pausa_ativa("autorais"):
                         if EXIBIR_LOGS: logger.info("⏸️ [Motor Autorais] Pausa detetada. Nenhum vídeo será publicado neste ciclo.")
                         break
 
-                    # 🛡️ TRAVA DE IDADE. A data_alvo foi calculada lá na captura e pode
-                    # estar errada: configuração mudada no meio do caminho, item
-                    # recapturado, fila migrada. Esta checagem ignora a data_alvo e olha
-                    # a idade REAL do vídeo. Nada capturado há menos de dias_retorno volta
-                    # para o grupo — é o que impede o robô de devolver ao autor um vídeo
-                    # que ele publicou esta semana.
+                    # Trava de idade: a data_alvo pode estar errada (configuração mudada,
+                    # item recapturado, fila migrada). Aqui vale a idade real: nada
+                    # capturado há menos de dias_retorno volta ao grupo, para não
+                    # devolver ao autor um vídeo que ele publicou esta semana.
                     dias_min = int(config_atual.get("dias_retorno", 15))
                     cap_str = item.get("data_captura", "")
                     idade_dias = None
@@ -1649,12 +1629,8 @@ async def processar_fila_autorais_loop():
                     caminho_arquivo = item.get("caminho_arquivo")
                     legenda = item.get("legenda")
 
-                    # 🚫 RECONFERÊNCIA DA LISTA NEGRA
-                    # O corte da captura só vale para o que ainda não foi pego. Este
-                    # aqui pega o outro caso: o vídeo entrou na fila e SÓ DEPOIS você
-                    # bloqueou o autor. Sem isto, ele seria devolvido ao grupo assim
-                    # mesmo no D+X. Item de fila antiga vem com autor_id nulo e passa
-                    # (não dá para adivinhar quem postou).
+                    # Lista negra de novo: o autor pode ter sido bloqueado depois de o
+                    # vídeo entrar na fila. Item antigo, sem autor gravado, passa.
                     if item.get("autor_id") or item.get("autor_username"):
                         if blacklist_captura.deve_ignorar(item.get("autor_id"),
                                                           item.get("autor_username")):
@@ -1674,13 +1650,10 @@ async def processar_fila_autorais_loop():
                             conexao_bl.close()
                             break
 
-                    # 🛡️ ESTE ARQUIVO É MESMO O DAQUELE DIA?
-                    #O nome do arquivado era
-                    # reciclado e o os.rename sobrescrevia sem avisar, então um item
-                    # antigo podia estar apontando para um vídeo baixado esta semana.
-                    # A data de modificação do arquivo denuncia: se ele é muito mais novo
-                    # que a captura, o original foi perdido. Publicar seria devolver ao
-                    # grupo um vídeo recente — o pior erro possível aqui.
+                    # O arquivo é mesmo daquele dia? Item gravado quando o nome do
+                    # arquivo ainda era reciclado pode apontar para um vídeo baixado
+                    # depois. Arquivo muito mais novo que a captura = original perdido;
+                    # publicar devolveria ao grupo um vídeo recente.
                     if caminho_arquivo and os.path.exists(caminho_arquivo):
                         try:
                             cap_txt = (item.get("data_captura") or "")[:10]
@@ -1700,9 +1673,8 @@ async def processar_fila_autorais_loop():
                         except Exception as e:
                             if EXIBIR_LOGS: logger.error(f"❌ [Motor Autorais] Falha ao auditar a idade do arquivo: {e}")
                     
-                    # 🎯 A origem pode estar gravada no formato composto "-100123:5".
-                    # Este era o ÚNICO ponto do arquivo que usava o valor cru: o Telethon
-                    # não resolve "-100123:5" como entidade e o envio morria aqui.
+                    # A origem pode ter tópico ("-100123:5"), que o Telethon não resolve
+                    # como entidade.
                     origem_final, origem_topico = separar_alvo_e_topico(config_atual.get('origem'))
                     kwargs_retorno = {}
                     if origem_topico and origem_topico > 1:
@@ -1714,8 +1686,7 @@ async def processar_fila_autorais_loop():
                     else:
                         try:
                             if os.path.exists(caminho_arquivo):
-                                # 📌 O Telethon devolve a mensagem criada. O id dela é o que
-                                # monta o link "(Destino)" no relatório — antes ia para o lixo.
+                                # O id da mensagem publicada monta o link "(Destino)" no relatório.
                                 msg_publicada = await client.send_file(
                                     origem_final,
                                     file=caminho_arquivo,
@@ -1725,8 +1696,7 @@ async def processar_fila_autorais_loop():
                                 )
                                 encerrar_item = True
                                 item["msg_postada_id"] = getattr(msg_publicada, "id", None)
-                                # ⏱️ Carimba a hora REAL da publicação — é o que o relatório
-                                # precisa mostrar nos itens já postados.
+                                # Hora real da publicação, mostrada no relatório.
                                 item["data_postagem"] = agora.strftime("%Y-%m-%d %H:%M:%S")
                                 if EXIBIR_LOGS: logger.info(f"✅ [Motor Autorais] Vídeo de retorno {item.get('id_unico')} publicado com sucesso!")
                                 
@@ -1741,23 +1711,18 @@ async def processar_fila_autorais_loop():
                             if EXIBIR_LOGS: logger.error(f"❌ Falha no disparo de retorno: {e}")
 
                     if encerrar_item:
-                        # ✅ Só sai da fila quando REALMENTE saiu. Antes esta linha vivia fora
-                        # do try e marcava "processado" mesmo depois de exceção: o relatório
-                        # mostrava "✅ Postado" e o vídeo nunca tinha ido ao ar.
+                        # Só marca processado se publicou de fato (ou se o arquivo sumiu).
                         item["processado"] = True
                     else:
-                        # 🚦 ANTI-TRAVA: adia 30 min e tenta de novo, sem segurar os seguintes.
+                        # Falhou: adia 30 min e tenta de novo, sem segurar os seguintes.
                         item["horario_disparo"] = (agora + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
 
-                    # 🎯 UPDATE pontual, e NUNCA salvar_fila_retorno() aqui. Aquela função
-                    # apaga a tabela e reescreve a partir do retrato lido no INÍCIO do
-                    # ciclo — ou seja, antes do await do envio acima. Tudo que foi gravado
-                    # nesse meio-tempo era desfeito, inclusive este "processado": o vídeo
-                    # voltava a pendente e era publicado de novo, e de novo.
-                    # ⚠️ O VÍDEO JÁ FOI PARA O GRUPO. Se o "processado = 1" não entrar, o
-                    # ciclo seguinte republica o mesmo vídeo — e foi isso que aconteceu com
-                    # o autoral_1786711348_6535, publicado quatro vezes enquanto o UPDATE
-                    # batia em "database is locked". Insiste até gravar.
+                    # UPDATE pontual, nunca salvar_fila_retorno() aqui: ela regrava a tabela
+                    # a partir do retrato lido no início do ciclo, antes do envio, e
+                    # desfaria o processado (o vídeo seria publicado de novo).
+                    # O vídeo já foi para o grupo: se o processado = 1 não gravar, o ciclo
+                    # seguinte republica. Por isso insiste ("database is locked" é comum
+                    # com vários serviços no mesmo banco).
                     marcou = False
                     for tentativa in range(1, 7):
                         try:
@@ -1784,30 +1749,26 @@ async def processar_fila_autorais_loop():
                             await asyncio.sleep(2 * tentativa)
 
                     if not marcou and encerrar_item:
-                        # 🛑 Publicado e não registrado. Dormir é mais seguro que repetir.
+                        # Publicado e não registrado: dormir 10 min é mais seguro que republicar.
                         if EXIBIR_LOGS:
                             logger.error(f"🛑 [Motor Autorais] {item.get('id_unico')} foi PUBLICADO mas não foi "
                                          "possível marcar no banco. Loop pausado 10 min para não republicar.")
                         await asyncio.sleep(600)
 
-                    # 🚦 UM vídeo por ciclo. Antes este "for" varria a fila inteira e
-                    # disparava todos os vencidos em rajada, sem deixar a pausa entrar no
-                    # meio — e sem respeitar espaçamento nenhum entre um post e outro.
+                    # Um vídeo por ciclo: espaça os posts e deixa a pausa valer entre um e outro.
                     break
 
                 itens_restantes.append(item)
                 
-            # 🛡️ Nada de salvar a fila inteira no fim do ciclo: o status de cada vídeo já
-            # foi gravado com UPDATE pontual logo depois do envio. Reescrever a tabela a
-            # partir do retrato antigo era exatamente o que ressuscitava vídeos postados.
+            # Sem salvar a fila inteira no fim: o status de cada vídeo já foi gravado com
+            # UPDATE logo depois do envio, e regravar a partir do retrato o desfaria.
 
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro no loop de postagem de autorais: {e}")
             
-        await asyncio.sleep(60) # Respira 1 minuto e volta a procurar
+        await asyncio.sleep(60)
 
-# ==========================================
-# 📬 CORREIO DO GRUPO PÚBLICO — o userbot baixa, quem publica é o bot
+# --- Correio do Grupo Público: o userbot baixa, quem publica é o bot ---
 #
 # O canal onde os autorais são publicados não é nosso: o bot não pode entrar lá e o
 # copy_message dele devolve "chat not found". Esta conta tem acesso, mas publicar
@@ -1816,17 +1777,20 @@ async def processar_fila_autorais_loop():
 #
 # Então o userbot não publica nada: ele só faz a ponte. Baixa o arquivo para o disco e
 # anota o caminho na fila. O bot_mestre publica a partir do arquivo e credita o perfil
-# na legenda — exatamente como já faz com os vídeos dos parceiros.
-# ==========================================
+# na legenda, como já faz com os vídeos dos parceiros.
 HORAS_ANTECEDENCIA_PUBLICO = 3   # baixa o vídeo com esta folga antes do horário dele
 
-# 📏 Teto de UPLOAD da Bot API. Quem publica é o bot, e acima disso o send_video dele é
+# Teto de upload da Bot API. Quem publica é o bot, e acima disso o send_video dele é
 # recusado. Como o item nunca conseguiria sair, não vale nem gastar banda baixando: ele
 # é descartado aqui, antes do download.
 LIMITE_UPLOAD_BOT_MB = 50
 
 
 async def processar_fila_publico_loop():
+    """
+    Um item por ciclo: baixa o vídeo de cada item da fila_publico com horário
+    marcado até HORAS_ANTECEDENCIA_PUBLICO à frente e grava o caminho no item.
+    """
     if EXIBIR_LOGS: logger.info("📬 [Correio Público] Loop de preparo dos vídeos do Grupo Público iniciado.")
     ja_auditou = False
 
@@ -1838,7 +1802,7 @@ async def processar_fila_publico_loop():
                 await asyncio.sleep(120)
                 continue
 
-            # 📥 Origem: o canal onde o vídeo autoral foi publicado
+            # Origem: o canal onde o vídeo autoral foi publicado (repost_origem ou o destino dos autorais).
             origem_final, _ = separar_alvo_e_topico(
                 config.get("repost_origem") or carregar_config_autorais().get("destino")
             )
@@ -1846,7 +1810,7 @@ async def processar_fila_publico_loop():
                 await asyncio.sleep(120)
                 continue
 
-            # 🔎 Auditoria única por execução: sem acesso à origem nada é baixado, e é
+            # Confere uma vez por execução o acesso à origem: sem ele nada é baixado, e é
             # melhor dizer isso uma vez no log do que falhar em silêncio para sempre.
             if not ja_auditou:
                 ja_auditou = True
@@ -1857,11 +1821,11 @@ async def processar_fila_publico_loop():
                     if EXIBIR_LOGS: logger.error(f"❌ [Correio Público] SEM acesso à origem ({origem_final}): {err}")
 
             agora = datetime.now()
-            # ⏰ Sem janela de horário aqui: baixar de madrugada não incomoda ninguém, e
+            # Sem janela de horário aqui: baixar de madrugada não incomoda ninguém, e
             # quanto antes o arquivo estiver no disco, mais certo o bot publica no horário.
             limite = (agora + timedelta(hours=HORAS_ANTECEDENCIA_PUBLICO)).strftime("%Y-%m-%d %H:%M:%S")
 
-            # 🎯 UPDATE pontual, nunca salvar_fila_publico(): aquela função apaga a tabela
+            # UPDATE pontual, nunca salvar_fila_publico(): aquela função apaga a tabela
             # e reinsere tudo, e o bot_mestre escreve os horários na MESMA fila.
             conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
             conexao.row_factory = sqlite3.Row
@@ -1900,7 +1864,7 @@ async def processar_fila_publico_loop():
                     await asyncio.sleep(30)
                     continue
 
-                # 🚫 Grande demais para o bot publicar? Sai da fila agora. Sem isto ele
+                # Grande demais para o bot publicar: sai da fila agora. Sem isto ele
                 # seria baixado, recusado no envio, adiado 30 min e tentado para sempre.
                 tamanho_origem = getattr(getattr(msg_origem, "file", None), "size", 0) or 0
                 if tamanho_origem > LIMITE_UPLOAD_BOT_MB * 1024 * 1024:
@@ -1914,7 +1878,7 @@ async def processar_fila_publico_loop():
                     await asyncio.sleep(30)
                     continue
 
-                # ⏸️ Reconfere antes de gastar banda: a pausa pode ter chegado durante
+                # Reconfere antes de gastar banda: a pausa pode ter chegado durante
                 # o minuto de espera do ciclo.
                 if pausa_ativa("publico"):
                     conexao.close()
@@ -1949,7 +1913,7 @@ async def processar_fila_publico_loop():
                 if EXIBIR_LOGS:
                     logger.error(f"❌ [Correio Público] Falha ao baixar o vídeo {id_unico}: {e} "
                                  f"| origem={origem_final!r} msg_id={msg_id!r}")
-                # 🚦 ANTI-TRAVA: adia 30 min, senão este item segura o preparo dos seguintes.
+                # Falhou: adia 30 min, senão este item segura o preparo dos seguintes.
                 cursor.execute(
                     "UPDATE fila_publico SET horario_disparo = ? WHERE id_unico = ?",
                     ((agora + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S"), id_unico)
@@ -1963,20 +1927,12 @@ async def processar_fila_publico_loop():
 
         await asyncio.sleep(60)
 
-# ==========================================================================
-# 🔭 VARREDURA DA ORIGEM — captura por busca ativa
-#
-# O events.NewMessage não estava entregando as mensagens do grupo de origem. O log
-# mostrava "Got difference for channel 3673555953" (prova de que houve movimento lá)
-# sem nenhum evento correspondente chegar ao handler: mensagem recuperada por
-# getDifference não passa pelo NewMessage do Telethon.
-#
-# Em vez de depender do evento chegar, aqui o robô PERGUNTA de tempos em tempos o que
-# há de novo. De quebra resolve um buraco que sempre existiu: o que era postado
-# enquanto o serviço estava fora do ar era perdido para sempre; agora é recuperado.
-#
-# O atraso de alguns minutos é irrelevante numa fila que só reposta dias depois.
-# ==========================================================================
+# --- Varredura da origem: captura por busca ativa ---
+# Mensagem que o Telethon recupera por getDifference não passa pelo NewMessage, e o
+# grupo de origem chega assim (o log mostra "Got difference for channel ..." sem
+# evento nenhum). Aqui o robô pergunta de tempos em tempos o que há de novo, o que
+# também recupera o que foi postado com o serviço fora do ar. Alguns minutos de
+# atraso não importam numa fila que só reposta dias depois.
 INTERVALO_VARREDURA_MIN = 5
 LIMITE_VARREDURA = 30
 
@@ -1999,6 +1955,11 @@ class EventoSimulado:
 
 
 async def varredura_origem_loop():
+    """
+    A cada INTERVALO_VARREDURA_MIN minutos lê as últimas LIMITE_VARREDURA mensagens
+    da origem e passa as novas (id acima do último visto, guardado em
+    ultimo_id_varredura) para interceptar_e_espelhar.
+    """
     if EXIBIR_LOGS: logger.info("🔭 [Varredura] Loop de captura por busca ativa iniciado.")
     await asyncio.sleep(30)   # deixa o client assentar antes da primeira consulta
 
@@ -2026,8 +1987,8 @@ async def varredura_origem_loop():
 
             maior_id = max(m.id for m in mensagens if m)
 
-            # 🥇 Primeira volta: só anota onde a fila está HOJE. Sem isto, o robô
-            # despejaria as 30 últimas mensagens do grupo de uma vez.
+            # Primeira volta: só anota o último id. Sem isso, as últimas mensagens do
+            # grupo entrariam todas de uma vez.
             if ultimo_id == 0:
                 marcadores[chave] = maior_id
                 salvar_config_bd_autorais("ultimo_id_varredura", marcadores)
@@ -2045,8 +2006,8 @@ async def varredura_origem_loop():
                 if not getattr(msg, "media", None):
                     continue
                 try:
-                    # 🔁 A dedupe por doc_id do reservar_video() protege contra o mesmo
-                    # vídeo entrar duas vezes, caso o evento também chegue algum dia.
+                    # Se o evento também entregar esta mensagem, mensagem_ja_processada()
+                    # garante que só um dos dois caminhos a processa.
                     await interceptar_e_espelhar(EventoSimulado(msg))
                 except Exception as e:
                     if EXIBIR_LOGS: logger.error(f"❌ [Varredura] Falha ao processar a mensagem {msg.id}: {e}")
@@ -2071,7 +2032,7 @@ async def main():
     if EXIBIR_LOGS: logger.info("⏳ Iniciando o robô Espelhador Isolado...")
     await client.start()
 
-    # 🚫 Garante que TODAS as contas do pool estão na lista negra antes de o robô
+    # Garante que TODAS as contas do pool estão na lista negra antes de o robô
     # começar a escutar — inclusive as que você cadastrar no futuro. Roda a cada
     # start, então basta reiniciar o serviço depois de cadastrar uma conta.
     try:
@@ -2082,9 +2043,8 @@ async def main():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Lista Negra] Falha ao sincronizar no start: {e}")
 
-    # 👤 Qual conta está nesta sessão? É ela que assina TUDO que o userbot publica, e é
-    # ela que precisa ter permissão nos destinos. Sem esta linha, descobrir isso exigia
-    # abrir o Telegram e adivinhar.
+    # Loga qual conta está nesta sessão: é ela que assina o que o userbot publica e
+    # precisa ter permissão nos destinos.
     try:
         eu = await client.get_me()
         if EXIBIR_LOGS:
@@ -2098,7 +2058,7 @@ async def main():
     try:
         await client.get_dialogs()
         
-        # ✅ Lógica de Identificação Automática Visual
+        # Nomes da origem e do destino no cache, para o painel mostrar.
         config_atual = carregar_config_autorais()
         for chave in ['origem', 'destino']:
             alvo, _topico_ignorado = separar_alvo_e_topico(config_atual.get(chave))
@@ -2106,7 +2066,7 @@ async def main():
                 try:
                     entidade = await client.get_entity(alvo)
                     nome_alvo = getattr(entidade, 'title', getattr(entidade, 'username', str(alvo)))
-                    # ✅ Grava no cache com a chave crua E com o ID base, para o painel achar
+                    # Com a chave sem tópico e com o valor como está gravado no painel.
                     salvar_nome_grupo(str(alvo), nome_alvo)
                     salvar_nome_grupo(str(config_atual.get(chave)), nome_alvo)
                     if EXIBIR_LOGS: logger.info(f"✅ Nome da {chave} ({nome_alvo}) extraído e salvo no cache automaticamente.")
@@ -2117,11 +2077,10 @@ async def main():
     except Exception as e:
         if EXIBIR_LOGS: logger.warning(f"⚠️ Aviso na sincronização: {e}")
 
-    # Aciona o Loop do motor em Background
     asyncio.create_task(processar_fila_autorais_loop())
-    asyncio.create_task(processar_fila_publico_loop())   # 📬 repostagem no Grupo Público
-    asyncio.create_task(loop_entrada_parceiros())   # 👥 entrada nos canais dos parceiros
-    asyncio.create_task(varredura_origem_loop())   # 🔭 captura por busca ativa na origem
+    asyncio.create_task(processar_fila_publico_loop())   # baixa os vídeos do Grupo Público
+    asyncio.create_task(loop_entrada_parceiros())   # entrada nos canais dos parceiros
+    asyncio.create_task(varredura_origem_loop())   # captura por busca ativa na origem
     
     if EXIBIR_LOGS: logger.info("🤖 Sistema a rodar. A escutar o grupo de origem continuamente...")
     await client.run_until_disconnected()

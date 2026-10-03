@@ -1,13 +1,13 @@
 """
-Testes do Motor de Filas — o coração da distribuição de todos os robôs.
+Testes do motor_filas, que distribui os horários de publicação de todos os robôs.
 
-⚠️ O RELÓGIO É FIXADO em cada teste. Sem isso, o mesmo teste passa de manhã
-e falha à noite, porque o motor distribui no tempo que RESTA do dia.
+O relógio é fixado em cada teste (20/08/2026, na hora pedida). Sem isso, o mesmo
+teste passa de manhã e falha à noite, porque o motor distribui no tempo que resta do dia.
 
 Rodar:  python3 -m pytest test_motor_filas.py -v
 """
 from unittest.mock import patch
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 import motor_filas
 
@@ -130,3 +130,14 @@ def test_fila_sem_piso_usa_motor_antigo():
 def test_descarga_forcada_e_rapida():
     g = gaps(horarios(distribuir(10, CFG_ESPIAO, forcar=True)))
     assert max(g) < 5
+
+# ── TETO DIÁRIO ────────────────────────────────────────────────
+def test_teto_sem_topo_e_fixo_no_piso():
+    for dia in ("2026-08-20", "2026-08-21", "2026-08-22", "2026-08-23"):
+        assert motor_filas.sortear_teto_do_dia("teste", dia, 5, None) == 5
+        assert motor_filas.sortear_teto_do_dia("teste", dia, 5, 0) == 5
+
+def test_limite_diario_sem_topo_corta_no_piso():
+    itens = [{"horario_disparo": f"2026-08-{d} {h:02d}:00:00"} for d in (20, 21, 22) for h in range(10, 20)]
+    descartados = motor_filas.aplicar_limite_diario_fila(itens, 3, semente="teste")
+    assert len(descartados) == 3 * 7

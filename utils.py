@@ -1,3 +1,9 @@
+"""
+Funções compartilhadas pelos robôs: conexão SQLite, registro de erros, cache de
+análises da IA, cache de nomes de grupos e validação de IDs do Telegram.
+
+Importar este módulo troca sqlite3.connect para o processo inteiro (ver abaixo).
+"""
 EXIBIR_LOGS = True
 import os
 import json
@@ -14,24 +20,17 @@ if EXIBIR_LOGS:
 MAX_ERRORS = 50
 DB_NAME = "banco_dados.db"
 
-# ==========================================================================
-# 🔒 BLINDAGEM GLOBAL DO SQLITE
+# Toda conexão SQLite do processo espera até 30 s pelo lock (padrão do Python: 5 s).
+# Vários robôs escrevem no mesmo banco; com 5 s, "database is locked" fazia operações
+# se perderem. O pior caso: o UPDATE que marca o vídeo como postado falhava e o mesmo
+# vídeo era republicado a cada ciclo.
 #
-# Dezenas de chamadas espalhadas pelo sistema abrem o banco sem passar "timeout=",
-# e o padrão do Python é 5 segundos: passou disso, o SQLite devolve "database is
-# locked" e a operação se perde. Com quatro processos escrevendo no mesmo arquivo,
-# 5s é pouco — foi o que encheu o log de erro, e o pior caso foi o UPDATE que marca
-# vídeo como postado: ele falhava, o item continuava pendente, e o mesmo vídeo era
-# republicado no grupo a cada ciclo.
+# Em vez de mudar cada chamada, sqlite3.connect é trocado aqui, uma vez. Vale para
+# todo processo que importa o utils, inclusive chamadas que passam timeout menor só
+# no Python, porque o busy_timeout do SQLite fica em 30 s. O downloader_bot não importa
+# o utils e tem uma cópia desta mesma troca.
 #
-# Em vez de tocar em 81 chamadas uma a uma, a fábrica de conexões é trocada UMA vez,
-# aqui. Como o módulo sqlite3 é único por processo e todo serviço importa o utils,
-# isto vale para o sistema inteiro: toda conexão nasce com 30s de paciência, no
-# Python e no próprio SQLite.
-#
-# O que isto NÃO faz: não fecha conexão vazada. Para as funções que rodam em loop e
-# seguram transação longa, use o conexao_db() abaixo, que garante o fechamento.
-# ==========================================================================
+# Isto não fecha conexão esquecida aberta; para isso, use conexao_db().
 _sqlite_connect_original = sqlite3.connect
 
 
@@ -53,11 +52,12 @@ from contextlib import contextmanager
 
 @contextmanager
 def conexao_db(db=DB_NAME, row_factory=False):
-    """Conexão que SEMPRE fecha, com ou sem exceção.
+    """
+    Conexão que sempre fecha, com ou sem exceção; em exceção, desfaz a transação.
 
-    O padrão antigo (abrir, trabalhar, fechar no fim do try) deixa a conexão aberta
-    quando algo estoura no meio — e se já havia um DELETE ou INSERT, o lock de escrita
-    fica preso até o coletor de lixo passar. Use isto nas funções que rodam em loop:
+    Abrir, trabalhar e fechar no fim do try deixa a conexão aberta quando algo
+    estoura no meio, e um DELETE/INSERT já feito segura o lock de escrita até o
+    coletor de lixo passar. Use nas funções que rodam em loop:
 
         with conexao_db(row_factory=True) as conexao:
             cursor = conexao.cursor()
@@ -79,13 +79,22 @@ def conexao_db(db=DB_NAME, row_factory=False):
 
 
 def obter_conexao_utils():
-    """Conexão local para o utils não depender de importações cruzadas."""
+    """Conexão ao banco principal sem depender de outros módulos do projeto."""
     return sqlite3.connect(DB_NAME, timeout=20.0)
 
-# Mantivemos o nome 'registrar_erro_json' para não quebrar a importação dos outros scripts
 def registrar_erro_json(mensagem_erro, origem="Geral", contexto_extra=None):
+    """
+    Grava um erro (com o traceback atual, se houver) na tabela erros_logs, que o
+    painel de erros do bot_mestre mostra. Guarda só os MAX_ERRORS mais recentes.
+
+    O nome diz "json" porque antes gravava num arquivo JSON; ficou para não
+    quebrar quem importa.
+
+    Não grava nada enquanto existir trava_manutencao.txt: o botão de limpar logs
+    do bot_mestre cria esse arquivo para silenciar erros enquanto o código é
+    corrigido, e o divulgacao_canal apaga ao iniciar (no próximo deploy).
+    """
     try:
-        # Se a trava de manutenção existir, o erro é completamente ignorado
         if os.path.exists("trava_manutencao.txt"):
             return
 
@@ -93,15 +102,13 @@ def registrar_erro_json(mensagem_erro, origem="Geral", contexto_extra=None):
         if rastro == "NoneType: None\n":
             rastro = "Sem rastro de código associado (Possível erro lógico ou manual)."
 
-        # 🕐 Fuso explícito: o log de erro é lido por humano, então a hora precisa
-        # estar certa mesmo se esta função for chamada fora dos serviços principais.
+        # Fuso explícito: a hora precisa sair certa mesmo num processo que não importou fuso.py.
         timestamp = datetime.now(ZoneInfo("America/Sao_Paulo")).strftime("%Y-%m-%d %H:%M:%S")
         contexto_str = json.dumps(contexto_extra) if contexto_extra else "{}"
 
         conexao = obter_conexao_utils()
         cursor = conexao.cursor()
         
-        # Garante que a tabela existe
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS erros_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -118,7 +125,6 @@ def registrar_erro_json(mensagem_erro, origem="Geral", contexto_extra=None):
             VALUES (?, ?, ?, ?, ?)
         ''', (timestamp, origem, str(mensagem_erro), rastro.strip(), contexto_str))
         
-        # Limpa logs antigos para manter o limite exato de MAX_ERRORS no banco
         cursor.execute(f'''
             DELETE FROM erros_logs 
             WHERE id NOT IN (
@@ -133,14 +139,9 @@ def registrar_erro_json(mensagem_erro, origem="Geral", contexto_extra=None):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao tentar registar log no SQLite: {e}")
 
-# --- CACHE PERSISTENTE DE NOMES DE GRUPOS/CANAIS ---
-
-# ==========================================
-# 🧠 CACHE DE ANÁLISES DA IA
-# Vários robôs capturam dos MESMOS canais (Espião e as rotas do Espelhador).
-# Sem cache, o mesmo vídeo é enviado à IA uma vez por robô — triplicando a cota.
-# A chave é a mensagem de origem: chat + msg_id identificam o post exato.
-# ==========================================
+# Cache de análises da IA: o Espião e as rotas do Espelhador capturam dos mesmos
+# canais, e sem cache o mesmo vídeo iria para a IA uma vez por robô, gastando cota.
+# A chave é o post de origem (chat + msg_id), na tabela cache_analises_ia.
 def _garantir_cache_ia(cursor):
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS cache_analises_ia (
@@ -152,13 +153,16 @@ def _garantir_cache_ia(cursor):
     ''')
 
 def chave_cache_ia(chat_origem, msg_id):
-    """Identidade do post de origem. None quando não há dados suficientes."""
+    """
+    Chave do cache para o post de origem: "<chat>_<msg_id>", sem o tópico do chat.
+    None quando falta chat ou msg_id.
+    """
     if not chat_origem or not msg_id:
         return None
     return f"{str(chat_origem).split(':')[0].strip()}_{msg_id}"
 
 def consultar_cache_ia(chave):
-    """Devolve a análise já feita por outro robô, ou None."""
+    """Devolve a análise já feita para este post (e conta mais um uso), ou None."""
     if not chave:
         return None
     try:
@@ -177,6 +181,7 @@ def consultar_cache_ia(chave):
         return None
 
 def gravar_cache_ia(chave, resultado):
+    """Guarda a análise do post. Se a chave já existe, mantém a primeira. Devolve True se gravou."""
     if not chave or not resultado:
         return False
     try:
@@ -195,7 +200,7 @@ def gravar_cache_ia(chave, resultado):
         return False
 
 def estatisticas_cache_ia():
-    """(entradas, reaproveitamentos) — mostra quanto o cache economizou."""
+    """(análises guardadas, chamadas à IA economizadas), para o log de faxina."""
     try:
         conexao = obter_conexao_utils()
         cursor = conexao.cursor()
@@ -208,7 +213,10 @@ def estatisticas_cache_ia():
         return 0, 0
 
 def limpar_cache_ia_antigo(dias=30):
-    """O vídeo já foi publicado por todos muito antes disso."""
+    """
+    Apaga análises com mais de `dias` dias; a essa altura todos os robôs já
+    publicaram o vídeo. Devolve quantas foram removidas.
+    """
     try:
         from datetime import timedelta
         corte = (datetime.now(ZoneInfo("America/Sao_Paulo")) - timedelta(days=dias)).strftime("%Y-%m-%d %H:%M:%S")
@@ -226,6 +234,10 @@ def limpar_cache_ia_antigo(dias=30):
         return 0
 
 def ler_cache_nomes_grupos():
+    """
+    Nomes de grupos/canais/tópicos já descobertos, {chat_id: nome}. Os painéis
+    mostram o nome em vez do ID. A chave de um tópico é "<grupo>_<tópico>".
+    """
     try:
         conexao = obter_conexao_utils()
         cursor = conexao.cursor()
@@ -240,6 +252,7 @@ def ler_cache_nomes_grupos():
         return {}
 
 def salvar_nome_grupo(chat_id, nome):
+    """Guarda o nome no cache; ignora nome vazio ou igual ao próprio ID."""
     if not chat_id or not nome:
         return
     chave = str(chat_id).strip()
@@ -252,7 +265,6 @@ def salvar_nome_grupo(chat_id, nome):
         cursor = conexao.cursor()
         cursor.execute("CREATE TABLE IF NOT EXISTS cache_nomes (chat_id TEXT PRIMARY KEY, nome TEXT)")
         
-        # Verifica se já existe e é exatamente igual para poupar gravações desnecessárias
         cursor.execute("SELECT nome FROM cache_nomes WHERE chat_id = ?", (chave,))
         resultado = cursor.fetchone()
         
@@ -268,11 +280,19 @@ def salvar_nome_grupo(chat_id, nome):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao salvar nome do grupo {chave} no cache SQLite: {e}")
 
-# --- NOVO: MOTOR INTELIGENTE DE VALIDAÇÃO DE ALVOS ---
 async def validar_e_formatar_alvo(bot_instance, entrada):
     """
-    Analisa a entrada, extrai o subgrupo (tópico) se existir,
-    testa as variações de ID no Telegram e devolve o ID numérico confirmado + Nome.
+    Converte o que o admin digitou (link t.me, link do Telegram Web, @username,
+    ID, "ID_tópico", "ID:tópico" ou "ID/tópico") no ID do chat, confirmando no
+    Telegram.
+
+    Devolve (ok, id_final, nome). id_final é "<id>" ou "<id>:<tópico>".
+    - Bot consegue ler o chat: ok=True com o ID real (-100... para canal e
+      supergrupo) e o nome.
+    - Bot não consegue ler, mas é ID numérico: aceita assim mesmo (o Espião pode
+      estar num chat onde o bot não está) e devolve o próprio ID como nome.
+    - Bot não consegue ler e é @username: recusa (ok=False), porque sem o
+      Telegram não dá para descobrir o ID numérico.
     """
     entrada = str(entrada).strip()
     if not entrada:
@@ -281,7 +301,7 @@ async def validar_e_formatar_alvo(bot_instance, entrada):
     chat_base = entrada
     topico_id = None
 
-    # 1. Extrair ID base e Subgrupo (Tópico)
+    # Separa o chat e o tópico conforme o formato digitado.
     if "t.me/c/" in entrada:
         partes = entrada.split("t.me/c/")[1].split("/")
         chat_base = f"-100{partes[0]}"
@@ -291,7 +311,7 @@ async def validar_e_formatar_alvo(bot_instance, entrada):
         chat_base = f"@{partes[0]}"
         if len(partes) > 1 and partes[1].isdigit(): topico_id = partes[1]
     elif "web.telegram.org" in entrada and "#" in entrada:
-        # ✅ NOVO: Trata o Telegram Web "K" e "A", separando o tópico pelo underline (_)
+        # Telegram Web (versões K e A): o tópico vem depois de "_".
         parte_web = entrada.split("#")[1].split("/")[0]
         if "_" in parte_web:
             partes_web = parte_web.split("_")
@@ -300,8 +320,8 @@ async def validar_e_formatar_alvo(bot_instance, entrada):
         else:
             chat_base = parte_web
     elif "_" in entrada and not "http" in entrada:
-        # ✅ NOVO: aceita o formato exibido no painel ("-1003673555953_1").
-        # rsplit + checagem dupla evita quebrar @usernames com underline (@meu_canal).
+        # Formato que o painel exibe ("-1003673555953_1"). Só vale se os dois lados
+        # forem números, para não quebrar @usernames com underline (@meu_canal).
         partes = entrada.rsplit("_", 1)
         if len(partes) == 2 and partes[1].strip().isdigit() and partes[0].strip().lstrip('-').isdigit():
             chat_base = partes[0].strip()
@@ -315,20 +335,18 @@ async def validar_e_formatar_alvo(bot_instance, entrada):
         chat_base = partes[0]
         if len(partes) > 1 and partes[1].isdigit(): topico_id = partes[1]
 
-    # 2. Gerar variações de ID para o teste
+    # O admin pode ter digitado o ID com ou sem -100; testa as variações.
     variacoes = [chat_base]
     if chat_base.lstrip('-').isdigit():
         so_num = chat_base.replace("-100", "").replace("-", "")
         variacoes = [chat_base, f"-100{so_num}", f"-{so_num}", so_num]
 
-    # 3. Testar no Telegram
     id_confirmado = None
     nome_confirmado = None
     for var in variacoes:
         try:
             chat_obj = await bot_instance.get_chat(var)
             id_confirmado = str(chat_obj.id)
-            # Adiciona o -100 ao ID confirmado se for um supergrupo/canal
             if chat_obj.type in ["supergroup", "channel"] and not id_confirmado.startswith("-100"):
                  id_confirmado = f"-100{id_confirmado}"
             nome_confirmado = chat_obj.title or chat_obj.full_name or id_confirmado
@@ -336,33 +354,30 @@ async def validar_e_formatar_alvo(bot_instance, entrada):
         except Exception:
             continue 
 
-    # 4. Retornar os resultados
     if id_confirmado:
         id_final = f"{id_confirmado}:{topico_id}" if topico_id else id_confirmado
         return True, id_final, nome_confirmado
     else:
-        # ✅ CORREÇÃO (MODO TRUST): Se o bot não tem permissão para ler o grupo para pegar o nome,
-        # MAS o que você enviou é claramente um ID numérico ou @username, ele aprova mesmo assim!
-        # No Modo Trust, tentaremos extrair o ID numérico do username se possível.
         if chat_base.lstrip('-').isdigit() or chat_base.startswith("@"):
              if chat_base.startswith("@"):
-                  # Modo Trust não pode resolver usernames em IDs numéricos de forma confiável
-                  # É mais seguro falhar e pedir o ID numérico do que arriscar um loop
                   return False, entrada, None 
              else:
                   id_final = f"{chat_base}:{topico_id}" if topico_id else chat_base
-                  return True, id_final, chat_base # Retorna o próprio ID no lugar do nome
+                  return True, id_final, chat_base
 
         return False, entrada, None
 
 def obter_banco_global_origens():
-    """Varre todos os bancos de dados e junta todos os IDs monitorados no sistema."""
+    """
+    Todas as origens (canais/grupos) monitoradas por algum robô: alvos do Espião,
+    origem do Autorais e origens das rotas do Espelhador (espelhos_config.json).
+    Alimenta o botão "Importar Banco Global", que copia essas origens para outro robô.
+    """
     origens_globais = set()
     try:
         conexao = obter_conexao_utils()
         cursor = conexao.cursor()
         
-        # 1. Puxa do Espião
         cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'alvos_espiao'")
         res = cursor.fetchone()
         if res:
@@ -370,7 +385,6 @@ def obter_banco_global_origens():
             for alvo in dados_espiao.get("alvos", []):
                 origens_globais.add(str(alvo))
                 
-        # 2. Puxa de Autorais
         cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'autorais_config'")
         res = cursor.fetchone()
         if res:
@@ -382,15 +396,89 @@ def obter_banco_global_origens():
         conexao.close()
     except Exception: pass
     
-    # 3. Puxa do Espelhador (JSON)
     try:
         with open("espelhos_config.json", "r", encoding="utf-8") as f:
             dados_espelhos = json.load(f)
             for rota in dados_espelhos.get("rotas", []):
                 for o in rota.get("origens", []):
-                    origens_globais.add(str(o))
+                    origens_globais.add(id_da_origem(o))
                 if "origem" in rota:
                     origens_globais.add(str(rota["origem"]))
     except Exception: pass
     
     return list(origens_globais)
+
+
+def id_da_origem(origem):
+    """
+    Origem de rota do Espelhador como texto ("-100123", "-100123:5" ou "@canal").
+
+    Rotas criadas pelo assistente do painel antes da correção gravavam a origem como
+    {"id": ..., "nome": ...}; o motor compara texto e nunca casava com esse formato.
+    """
+    if isinstance(origem, dict):
+        return str(origem.get("id") or "")
+    return str(origem)
+
+
+def normalizar_origens_rotas(dados):
+    """
+    Converte, em dados (conteúdo do espelhos_config.json), as origens gravadas como
+    {"id", "nome"} para o ID em texto, sem repetir origem. Também tira de
+    status_canais as entradas que o auditor criou para o formato antigo.
+
+    Altera dados no lugar e devolve True se mudou alguma coisa (quem chamou decide
+    se grava).
+    """
+    mudou = False
+    for rota in dados.get("rotas", []):
+        origens = rota.get("origens")
+        if isinstance(origens, list) and any(isinstance(o, dict) for o in origens):
+            novas = []
+            for o in origens:
+                alvo = id_da_origem(o)
+                if alvo and alvo not in novas:
+                    novas.append(alvo)
+            rota["origens"] = novas
+            mudou = True
+
+        status = rota.get("status_canais")
+        if isinstance(status, dict):
+            lixo = [chave for chave in status if str(chave).startswith("{")]
+            for chave in lixo:
+                del status[chave]
+                mudou = True
+    return mudou
+
+
+def salvar_json_atomico(caminho, dados, **opcoes_dump):
+    """
+    Grava dados em JSON sem que outro processo leia o arquivo pela metade.
+
+    espelhos_config.json e fila_espelhador.json são reescritos pelo painel, pelo
+    motor_userbot e pelo bot_mestre. Com open("w") o arquivo fica vazio até o
+    json.dump terminar; quem lê nesse instante recebe JSON inválido, e o painel trata
+    isso como "nenhuma rota" (um salvamento seguinte apagaria todas). Aqui o conteúdo
+    vai para um arquivo temporário na mesma pasta e os.replace troca os dois de uma
+    vez: quem lê vê o arquivo antigo inteiro ou o novo inteiro.
+
+    opcoes_dump vai direto para json.dump (indent, ensure_ascii).
+    """
+    import tempfile
+    pasta = os.path.dirname(os.path.abspath(caminho))
+    descritor, temporario = tempfile.mkstemp(dir=pasta, prefix=".tmp_", suffix=".json")
+    try:
+        with os.fdopen(descritor, "w", encoding="utf-8") as f:
+            json.dump(dados, f, **opcoes_dump)
+        # mkstemp cria com permissão 600; mantém a do arquivo que está sendo trocado.
+        try:
+            os.chmod(temporario, os.stat(caminho).st_mode & 0o777)
+        except FileNotFoundError:
+            os.chmod(temporario, 0o644)
+        os.replace(temporario, caminho)
+    except BaseException:
+        try:
+            os.remove(temporario)
+        except OSError:
+            pass
+        raise

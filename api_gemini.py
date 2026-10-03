@@ -1,3 +1,10 @@
+"""
+Acesso ao Gemini (Google) para gerar texto e analisar vídeos.
+
+As duas funções tentam os modelos de MODELOS_CASCATA_GEMINI em ordem e passam
+para o próximo quando um falha, estoura a cota ou responde vazio. A chave fica
+em GEMINI_KEY no .env.
+"""
 import os
 import asyncio
 import logging
@@ -5,13 +12,12 @@ import time
 from dotenv import load_dotenv
 from google import genai
 
-# Carrega as chaves do .env para garantir segurança no GitHub
 load_dotenv()
 GEMINI_API_KEY = os.getenv('GEMINI_KEY')
 
-# Inicializa o cliente moderno da SDK do Google
 client_genai = genai.Client(api_key=GEMINI_API_KEY)
 
+# Ordem de tentativa: o primeiro modelo que responder vence.
 MODELOS_CASCATA_GEMINI = [
     "gemini-3.1-pro-preview",
     "gemini-3.7-flash",
@@ -27,11 +33,12 @@ MODELOS_CASCATA_GEMINI = [
 
 logger = logging.getLogger("API_Gemini")
 
-# 🔎 Guarda o motivo REAL da última falha da IA para o bot exibir na tela.
+# Motivo da última falha de analisar_video_gemini. O bot_mestre mostra na tela de
+# submissão quando a análise falha, em vez de um genérico "falha temporária".
 ULTIMO_ERRO_IA = None
 
 def _motivo_resposta_vazia(response):
-    """Traduz uma resposta sem texto no motivo real (bloqueio de segurança, corte, filtro)."""
+    """Explica por que a resposta veio sem texto (bloqueio de segurança, corte, filtro)."""
     try:
         pedacos = []
         feedback = getattr(response, "prompt_feedback", None)
@@ -49,7 +56,12 @@ def _motivo_resposta_vazia(response):
         return f"motivo ilegível ({e})"
 
 async def gerar_texto_gemini(prompt, exibir_logs=True):
-    """Tenta gerar texto iterando pelos modelos da cascata até obter sucesso."""
+    """
+    Gera texto com o primeiro modelo da cascata que responder.
+
+    Em erro de cota espera 2 s antes do próximo modelo. Devolve o texto ou None
+    se todos falharem (não grava ULTIMO_ERRO_IA).
+    """
     for modelo_nome in MODELOS_CASCATA_GEMINI:
         try:
             if exibir_logs: logger.info(f"⏳ [IA] Consultando motor: {modelo_nome}...")
@@ -77,7 +89,15 @@ async def gerar_texto_gemini(prompt, exibir_logs=True):
     return None
 
 async def analisar_video_gemini(caminho_video, prompt, exibir_logs=True):
-    """Faz o upload do vídeo de forma segura, analisa com o prompt e limpa a nuvem em seguida."""
+    """
+    Sobe o vídeo para o Gemini, espera o processamento e pede a análise com
+    `prompt`, tentando os modelos da cascata em ordem.
+
+    O vídeo é sempre apagado do Google no final, com sucesso ou não, para não
+    gastar a cota de armazenamento. O upload tem 3 tentativas. Roda numa thread
+    porque a SDK é bloqueante. Devolve o texto ou None; em falha, o motivo
+    fica em ULTIMO_ERRO_IA.
+    """
     def processar_ia():
         if exibir_logs: logger.info("🚀 [IA] Iniciando upload do vídeo para o Google Storage...")
         
@@ -103,7 +123,7 @@ async def analisar_video_gemini(caminho_video, prompt, exibir_logs=True):
                 
             if exibir_logs: logger.info("✅ [IA] Vídeo pronto! Gerando a copy...")
 
-            falhas = []   # 🔎 registra por que CADA modelo recusou, para o log contar a história
+            falhas = []   # motivo de cada modelo, para a mensagem de erro final
             for modelo_nome in MODELOS_CASCATA_GEMINI:
                 try:
                     response = client_genai.models.generate_content(
@@ -121,7 +141,7 @@ async def analisar_video_gemini(caminho_video, prompt, exibir_logs=True):
                         if exibir_logs: logger.info(f"✅ [IA] Sucesso com o modelo {modelo_nome}!")
                         return texto.strip()
 
-                    # 🚫 Respondeu, mas veio vazio: quase sempre é bloqueio de segurança do Google.
+                    # Respondeu, mas vazio: quase sempre é bloqueio de segurança do Google.
                     motivo = _motivo_resposta_vazia(response)
                     falhas.append(f"{modelo_nome}: VAZIO ({motivo})")
                     if exibir_logs: logger.warning(f"⚠️ [IA] {modelo_nome} devolveu resposta vazia → {motivo}")

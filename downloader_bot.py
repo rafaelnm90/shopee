@@ -1,21 +1,31 @@
-# ==========================================
-# 📥 SHOPEE DOWNLOADER — serviço independente
-# Bot próprio (@ShopeedownloadVideoBot) para isolar o risco: se este serviço
-# cair, tomar limite do Telegram ou quebrar por causa do yt-dlp, os quatro
-# robôs que geram receita continuam intactos.
-#
-# FASE 0: apenas a trava de acesso. Nenhum download acontece ainda.
-# ==========================================
+"""
+Baixador de vídeos (serviço downloader_bot): bot próprio, @ShopeedownloadVideoBot,
+separado dos outros para isolar o risco. Se ele cair, tomar limite do Telegram ou
+quebrar por causa do yt-dlp, os robôs que geram receita continuam funcionando.
+
+Atende só no tópico "Downloader Videos" do Grupo Público. A pessoa cola o link de
+um vídeo (Shopee, TikTok, Pinterest, Instagram) e recebe o arquivo sem marca d'água.
+- Shopee: o MP4 é tirado do HTML da página (o yt-dlp não suporta); demais sites,
+  pelo yt-dlp em subprocesso.
+- Os primeiros DOWNLOADS_CORTESIA são livres; depois é preciso estar nos canais de
+  CANAIS_OBRIGATORIOS. Limite de LIMITE_DIARIO_DOWNLOADS por dia.
+- O mesmo link já entregue é reenviado pelo file_id, sem baixar de novo.
+- O tópico se mantém limpo: o painel de instruções desce para o fim depois das
+  entregas e toda mensagem é apagada depois de DIAS_RETENCAO_TOPICO dias.
+
+Usa o mesmo banco_dados.db dos outros robôs, com tabelas próprias.
+"""
 EXIBIR_LOGS = True
 
 import os
 import re
 import asyncio
-import logging
 import shutil
 import tempfile
 import sqlite3
 import hashlib
+# Toda conexão SQLite espera até 30 s pelo lock (mesma troca que o utils faz nos
+# outros robôs; este serviço não importa o utils).
 _sqlite_connect_original = sqlite3.connect
 
 
@@ -37,8 +47,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# 🕐 Trava de fuso centralizada: importar o modulo ja aplica America/Sao_Paulo.
-from fuso import FUSO_STR, fuso_horario, configurar_logs
+# Importar fuso já trava o processo no horário de Brasília.
+from fuso import configurar_logs
 
 from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.filters import Command, ChatMemberUpdatedFilter, IS_NOT_MEMBER, IS_MEMBER
@@ -55,11 +65,10 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 router = Router()
 
-# --- ONDE O ROBÔ ATUA ---
 GRUPO_DOWNLOADER = -1003892378604      # Grupo Público para Afiliados
 TOPICO_DOWNLOADER = 1054               # tópico "Downloader Videos"
 
-# --- CANAIS OBRIGATÓRIOS (a ordem é a que o usuário vê) ---
+# Canais exigidos depois da cortesia (nesta ordem na tela).
 CANAIS_OBRIGATORIOS = [
     (-1003909405581, "Acervo Afiliados Shopee",   "https://t.me/shopee_video_afiliado"),
     (-1003932482573, "Acervo Viral Shopee",       "https://t.me/acervo_viral_shopee"),
@@ -69,23 +78,21 @@ CANAIS_OBRIGATORIOS = [
 
 LIMITE_DIARIO_DOWNLOADS = 10
 
-# 💡 EMPURRÃOZINHO PARA A COMUNIDADE
-# O tópico do baixador fica DENTRO do Grupo Público, então quem baixa já é
-# membro: basta apontar para o tópico ao lado. O convite sai de vez em quando,
-# logo depois de a pessoa RECEBER um vídeo — o pico de boa vontade dela.
+# Convite para publicar no tópico da comunidade. O baixador fica DENTRO do Grupo
+# Público, então quem baixa já é membro: basta apontar para o tópico ao lado. Sai
+# de vez em quando, logo depois de a pessoa RECEBER um vídeo (o pico de boa vontade).
 CONVITE_COMUNIDADE_ATIVO = True
 CONVITE_A_CADA = 5               # a cada N downloads da pessoa. 0 desliga.
 CONVITE_SEGUNDOS_NA_TELA = 40    # depois some sozinho
 
-# 🎁 CORTESIA: os primeiros downloads saem sem exigir os canais. Precisa ficar
-# aqui em cima porque o texto do painel usa este valor antes das funções.
+# Downloads livres antes de exigir os canais.
 DOWNLOADS_CORTESIA = 5
 
-# ♾️ Quem está aqui não tem limite diário. Usado para testar o bot sem
+# Quem está aqui não tem limite diário. Usado para testar o bot sem
 # queimar cota e para atender pedidos manuais.
 IDS_SEM_LIMITE = {1226920464}   # Rafael (admin)
 
-# Piloto: YouTube fica de fora — é a plataforma que mais quebra o yt-dlp
+# YouTube fica de fora: é a plataforma que mais quebra o yt-dlp
 # e a que gera arquivos acima do limite de 50 MB do Telegram.
 PADROES_SUPORTADOS = {
     "TikTok":    r'(?:vm\.tiktok\.com|vt\.tiktok\.com|tiktok\.com)/\S+',
@@ -101,7 +108,7 @@ ALTURA_MAXIMA = 720              # 1080p estoura o limite do Telegram com facili
 
 os.makedirs(PASTA_TEMP_DOWNLOAD, exist_ok=True)
 
-# 🚦 Fila: um download por vez. Em paralelo, o ffmpeg derruba a CPU do ARM.
+# Fila: um download por vez. Em paralelo, o ffmpeg derruba a CPU do ARM.
 semaforo_download = asyncio.Semaphore(1)
 
 BANCO_DOWNLOADER = "banco_dados.db"
@@ -116,7 +123,7 @@ def _garantir_tabela_downloads(cursor):
         )
     ''')
 
-# 📌 Painel fixo do tópico: explica para que serve e o que dá para baixar.
+# Painel de instruções do tópico (sempre a última mensagem; ver reenviar_painel_downloader).
 TEXTO_PAINEL_DOWNLOADER = (
     "📥 <b>BAIXADOR DE VÍDEOS</b>\n\n"
     "Cole aqui o <b>link</b> do vídeo e eu devolvo o arquivo, "
@@ -144,7 +151,7 @@ def _garantir_tabela_cortesia(cursor):
 
 
 def downloads_totais(user_id):
-    """Quantos a pessoa já baixou desde sempre. Nunca é zerado."""
+    """Quantos a pessoa já baixou desde sempre (decide a cortesia). Nunca é zerado."""
     try:
         conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
         cursor = conexao.cursor()
@@ -199,7 +206,7 @@ async def convidar_para_comunidade(message, mencao, total_downloads):
     if not topico:
         return
 
-    # 🔗 Link direto do tópico. Funciona porque o baixador vive DENTRO do grupo:
+    # Link direto do tópico. Funciona porque o baixador vive DENTRO do grupo:
     # quem está lendo isto já é membro e o Telegram abre o tópico na hora.
     interno = str(GRUPO_DOWNLOADER).lstrip("-")
     if interno.startswith("100"):
@@ -227,6 +234,7 @@ async def convidar_para_comunidade(message, mencao, total_downloads):
 
 
 def somar_download_total(user_id):
+    """+1 no total da pessoa (downloads_totais)."""
     try:
         conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
         cursor = conexao.cursor()
@@ -267,6 +275,7 @@ def ler_msg_painel():
 
 
 def salvar_msg_painel(msg_id):
+    """Guarda o ID da mensagem atual do painel."""
     try:
         conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
         cursor = conexao.cursor()
@@ -278,7 +287,7 @@ def salvar_msg_painel(msg_id):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar o painel: {e}")
 
-# 🧹 Auto-limpeza: o tópico guarda mensagens por este tanto de dias.
+# Toda mensagem do tópico é apagada depois deste tanto de dias (faxina_topico_loop).
 DIAS_RETENCAO_TOPICO = 3
 
 
@@ -309,6 +318,7 @@ def registrar_mensagem(message_id):
 
 
 def mensagens_vencidas():
+    """IDs das mensagens anotadas há mais de DIAS_RETENCAO_TOPICO dias."""
     try:
         corte = (datetime.now(FUSO) - timedelta(days=DIAS_RETENCAO_TOPICO)).strftime("%Y-%m-%d %H:%M:%S")
         conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
@@ -324,6 +334,7 @@ def mensagens_vencidas():
 
 
 def esquecer_mensagens(ids):
+    """Tira os IDs do registro da faxina."""
     if not ids:
         return
     try:
@@ -385,7 +396,10 @@ def limpar_downloads_antigos(dias=7):
         pass
 
 async def atualizar_yt_dlp():
-    """Atualiza o yt-dlp silenciosamente via subprocesso no servidor."""
+    """
+    Atualiza o yt-dlp do venv (pip install -U). Ele não está no requirements.txt:
+    é instalado e atualizado por aqui, ao iniciar e a cada 24 h.
+    """
     if EXIBIR_LOGS: logger.info("🔄 Iniciando verificação automática de atualização do pacote yt-dlp...")
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -402,19 +416,16 @@ async def atualizar_yt_dlp():
         if EXIBIR_LOGS: logger.error(f"❌ Erro sistêmico ao tentar rodar a atualização: {e}")
 
 async def faxina_diaria_loop():
-    """Uma vez por dia, poda a tabela de contagem e atualiza os motores de extração."""
+    """Atualiza o yt-dlp ao iniciar e, a cada 24 h, atualiza de novo e apaga contagens diárias com mais de 7 dias."""
     if EXIBIR_LOGS: logger.info("🚀 Loop de manutenção diária (Faxina e Updates) iniciado em background.")
-    # Executa a primeira atualização imediatamente ao ligar o bot
     await atualizar_yt_dlp()
     while True:
-        await asyncio.sleep(86400) # Pausa de 24 horas
+        await asyncio.sleep(86400)
         await atualizar_yt_dlp()
         limpar_downloads_antigos()
 
-# ♻️ CACHE DE VÍDEOS
-# O file_id é só uma string (~80 bytes) — o vídeo fica nos servidores do Telegram.
-# Reenviar o mesmo id custa zero download, zero banda e zero disco.
-DIAS_CACHE_VIDEO = 30
+# Cache de vídeos entregues (tabela cache_videos). O file_id é só uma string; o vídeo
+# fica nos servidores do Telegram, e reenviar o mesmo id não baixa nem ocupa disco.
 
 def chave_cache_video(url):
     """Ignora rastreadores (?fromSource=, ?_t=) para o mesmo vídeo gerar a mesma chave."""
@@ -451,6 +462,7 @@ def buscar_cache_video(url):
         return None
 
 def guardar_cache_video(url, file_id, plataforma):
+    """Guarda o file_id do vídeo entregue para este link (a primeira entrega vale)."""
     try:
         conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
         cursor = conexao.cursor()
@@ -463,25 +475,6 @@ def guardar_cache_video(url, file_id, plataforma):
         conexao.close()
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao guardar no cache: {e}")
-
-def limpar_cache_videos_antigos(dias=DIAS_CACHE_VIDEO):
-    """file_id antigo pode expirar no Telegram — melhor rebaixar do que entregar quebrado."""
-    try:
-        corte = (datetime.now(FUSO) - timedelta(days=dias)).strftime("%Y-%m-%d %H:%M:%S")
-        conexao = sqlite3.connect(BANCO_DOWNLOADER, timeout=20.0)
-        cursor = conexao.cursor()
-        _garantir_cache_videos(cursor)
-        cursor.execute("DELETE FROM cache_videos WHERE data_cache < ?", (corte,))
-        removidos = cursor.rowcount
-        cursor.execute("SELECT COUNT(*), COALESCE(SUM(usos - 1), 0) FROM cache_videos")
-        total, economizados = cursor.fetchone()
-        conexao.commit()
-        conexao.close()
-        if EXIBIR_LOGS:
-            logger.info(f"♻️ [Cache] {total} vídeo(s) guardado(s) · {economizados} download(s) economizado(s)"
-                        + (f" · {removidos} expirado(s) removido(s)" if removidos else ""))
-    except Exception:
-        pass
 
 def remover_cache_video(url):
     """Chamado quando o file_id guardado não funciona mais."""
@@ -518,7 +511,7 @@ async def expandir_encurtador(url):
     Sem os cabeçalhos certos, o yt-dlp recebe a página inicial e não acha vídeo.
     """
     if "pin.it" not in url.lower():
-        # 🧭 Link do Pinterest colado direto também pode vir com /sent/ e query.
+        # Link do Pinterest colado direto também pode vir com /sent/ e parâmetros.
         return normalizar_pinterest(url)
     try:
         import aiohttp
@@ -531,11 +524,9 @@ async def expandir_encurtador(url):
                     if EXIBIR_LOGS: logger.info(f"🔗 pin.it expandido para {final}")
                     return normalizar_pinterest(final)
 
-                # 🔍 O Pinterest às vezes devolve uma página intersticial em JS em
-                # vez de um redirect 30x. Nesse caso resposta.url continua sendo o
-                # pin.it, mas o link real está no <link rel="canonical"> do corpo.
-                # Antes esta função caía no 'return url' SEM logar nada, e o yt-dlp
-                # recebia o link curto e morria sem ninguém saber o porquê.
+                # Às vezes o Pinterest devolve uma página intermediária em JS em vez de
+                # redirecionar: a URL continua sendo o pin.it, mas o link real está no corpo
+                # (<link rel="canonical">). Se nem assim achar, registra no log o motivo.
                 try:
                     corpo = await resposta.text()
                 except Exception:
@@ -554,20 +545,15 @@ async def expandir_encurtador(url):
         if EXIBIR_LOGS: logger.warning(f"⚠️ Não consegui expandir o pin.it: {e}")
     return url
 
-# 🛒 A Shopee não é suportada pelo yt-dlp, mas a URL do MP4 vem embutida
-# no HTML da página. O CDN alterna entre hosts (down-ws, down-tx, down-bs),
-# por isso o padrão aceita qualquer um deles.
+# Cabeçalho de navegador de celular usado nos pedidos às páginas da Shopee.
 CABECALHO_NAVEGADOR = {
     "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
                   "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
 }
 
-# ==========================================================
-# 🧼 LIMPEZA DO RENDER DA SHOPEE
-# Quando a matriz limpa não está exposta na página, o que sobra é o render
-# do app: marca "Shopee Video / @usuario" queimada no pixel e uma cartela
-# laranja no fim. O ffmpeg resolve os dois localmente, sem API de terceiro.
-# ==========================================================
+# Limpeza do vídeo da Shopee com marca: quando o original limpo não está disponível,
+# sobra o render do app, com a marca "Shopee Video / @usuario" queimada na imagem
+# e uma cartela laranja no fim. O ffmpeg borra a marca e corta a cartela, localmente.
 LIMPAR_VIDEO_SHOPEE = True
 FFMPEG = "ffmpeg"
 FFPROBE = "ffprobe"
@@ -595,6 +581,7 @@ async def _executar(comando, timeout, capturar=True):
     return saida, erro, None
 
 async def _dimensoes_video(caminho):
+    """(largura, altura) do vídeo pelo ffprobe, ou (None, None)."""
     comando = [FFPROBE, "-v", "error", "-select_streams", "v:0",
                "-show_entries", "stream=width,height", "-of", "csv=p=0", caminho]
     saida, _, falha = await _executar(comando, 30)
@@ -632,7 +619,7 @@ async def _inicio_cartela_shopee(caminho):
 
     inicio = (i + 1) / 10.0
     duracao = len(cores) / 10.0
-    # 🛡️ Trava: nunca engolir metade do vídeo por causa de uma cena laranja.
+    # Trava: nunca engolir metade do vídeo por causa de uma cena laranja.
     if inicio < 1.0 or inicio < duracao * 0.5:
         return None
     return inicio
@@ -641,7 +628,7 @@ async def limpar_video_shopee(caminho, pasta):
     """Devolve o caminho do vídeo limpo. Se algo falhar, devolve o original:
     entregar com marca é melhor do que não entregar nada."""
     filtros = []
-    # 🧼 Só borra se o download veio da versão marcada (ver baixar_video_shopee).
+    # Só borra se o download veio da versão marcada (ver baixar_video_shopee).
     tem_marca = os.path.exists(os.path.join(pasta, "COM_MARCA"))
     largura, altura = await _dimensoes_video(caminho)
     if tem_marca and largura and altura:
@@ -679,21 +666,29 @@ async def limpar_video_shopee(caminho, pasta):
     return destino
 
 async def baixar_video_shopee(url, pasta):
-    """Busca o vídeo matriz limpo via Engenharia Reversa do estado (JSON) interno da Shopee."""
+    """
+    Baixa o vídeo de um link da Shopee em `pasta`. Devolve (caminho, None) ou
+    (None, motivo para mostrar à pessoa).
+
+    Procura URLs de vídeo no JSON embutido na página e no HTML. Prefere o arquivo
+    original do criador, sem marca, derivado da URL marcada; se não houver, baixa
+    a versão marcada e deixa o arquivo COM_MARCA na pasta para limpar_video_shopee
+    borrar a marca. Recusa vídeo acima de LIMITE_TELEGRAM_MB.
+    """
     try:
         import aiohttp
         import json
         import urllib.parse
 
         async with aiohttp.ClientSession(headers=CABECALHO_NAVEGADOR) as sessao:
-            # 1. Resolve o link encurtado (br.shp.ee)
+            # Segue o link curto (br.shp.ee) até a página.
             async with sessao.get(url, allow_redirects=True, timeout=25) as resposta:
                 if resposta.status != 200:
                     return None, "não consegui abrir a página da Shopee"
                 html = await resposta.text()
                 url_final = str(resposta.url)
 
-            # 2. Desvenda o redirecionamento universal-link oculto
+            # Às vezes a página é um "universal-link" com o destino real no parâmetro redir.
             if "universal-link" in url_final and "redir=" in url_final:
                 destino_real = urllib.parse.parse_qs(urllib.parse.urlparse(url_final).query).get("redir", [None])[0]
                 if destino_real:
@@ -703,7 +698,7 @@ async def baixar_video_shopee(url, pasta):
                         if r2.status == 200:
                             html = await r2.text()
 
-            # 3. Coleta candidatos a vídeo. A Shopee serve DUAS gerações de página:
+            # Candidatos a vídeo. A Shopee serve duas gerações de página:
             # a antiga com window.__INITIAL_STATE__ e a nova em Next.js com
             # <script id="__NEXT_DATA__">. Hoje o link de compartilhamento só
             # expõe "watermarkVideoUrl" — não existe matriz limpa aqui.
@@ -759,7 +754,7 @@ async def baixar_video_shopee(url, pasta):
                 logger.info(f"🛒 {len(candidatos)} candidato(s): "
                             + ", ".join(k for k, _ in candidatos[:6]))
 
-            # ⚠️ É a CHAVE que denuncia a marca: a URL de watermarkVideoUrl
+            # É a CHAVE que denuncia a marca: a URL de watermarkVideoUrl
             # não contém a palavra "watermark" em lugar nenhum.
             def tem_marca(chave, url):
                 return "watermark" in chave.lower() or "watermark" in url.lower()
@@ -767,7 +762,7 @@ async def baixar_video_shopee(url, pasta):
             limpos = [u for k, u in candidatos if not tem_marca(k, u)]
             marcados = [u for k, u in candidatos if tem_marca(k, u)]            
 
-            # 🎯 A URL marcada termina em <arquivo>.<idVideo>.<perfil>.mp4.
+            # A URL marcada termina em <arquivo>.<idVideo>.<perfil>.mp4.
             # Esses dois campos finais são o carimbo do render de compartilhamento,
             # que é onde a marca e a cartela de 3s são queimadas. Sem eles sobra o
             # arquivo ORIGINAL do criador: medido 3,03 MB em 720x1280 contra
@@ -800,7 +795,7 @@ async def baixar_video_shopee(url, pasta):
                 if EXIBIR_LOGS: logger.info("🧠 Matriz limpa encontrada.")
             elif marcados:
                 link_mp4 = marcados[0]
-                # 🧼 Sinaliza para a limpeza que este arquivo tem marca queimada.
+                # Sinaliza para a limpeza que este arquivo tem marca queimada.
                 try:
                     open(os.path.join(pasta, "COM_MARCA"), "w").close()
                 except Exception:
@@ -813,7 +808,7 @@ async def baixar_video_shopee(url, pasta):
 
             if EXIBIR_LOGS: logger.info(f"🛒 MP4 Limpo pronto para download: {link_mp4[:70]}...")
 
-            # 5. Baixa o arquivo direto do CDN
+            # Baixa do CDN, parando se passar do limite de tamanho.
             destino = os.path.join(pasta, "video.mp4")
             async with sessao.get(link_mp4, timeout=TIMEOUT_DOWNLOAD_SEG) as fluxo:
                 if fluxo.status != 200:
@@ -837,12 +832,6 @@ async def baixar_video_shopee(url, pasta):
         if EXIBIR_LOGS: logger.error(f"❌ Erro crítico na extração da matriz da Shopee: {e}")
         return None, "erro interno ao extrair matriz da Shopee"
 
-    except asyncio.TimeoutError:
-        return None, "a API externa demorou demais para responder"
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro crítico na comunicação com a API de extração: {e}")
-        return None, "erro interno ao processar a extração via API"
-
 async def _baixar_video_uma_vez(url, pasta):
     """
     Roda o yt-dlp em SUBPROCESSO. Chamar direto travaria o bot inteiro,
@@ -852,10 +841,9 @@ async def _baixar_video_uma_vez(url, pasta):
     modelo = os.path.join(pasta, "video.%(ext)s")
     comando = [
         "/home/ubuntu/shopee/venv/bin/yt-dlp",
-        # 🎬 'best' sozinho exige vídeo E áudio no MESMO arquivo. Quando o site
-        # serve streams separados (HLS), os três fallbacks antigos falhavam em
-        # cascata -> 'Requested format is not available'. As entradas com bv*+ba
-        # cobrem esse caso juntando os dois com ffmpeg.
+        # Formatos em ordem de preferência, até ALTURA_MAXIMA. 'b' exige vídeo e áudio no
+        # mesmo arquivo; quando o site serve os dois separados (HLS), as opções bv*+ba
+        # juntam com o ffmpeg. Sem elas: 'Requested format is not available'.
         "-f", (f"b[height<={ALTURA_MAXIMA}][ext=mp4]/b[height<={ALTURA_MAXIMA}]/"
                f"bv*[height<={ALTURA_MAXIMA}]+ba/b/bv*+ba/bv*"),
         "--merge-output-format", "mp4",
@@ -886,23 +874,23 @@ async def _baixar_video_uma_vez(url, pasta):
                 return None, "o vídeo é privado ou exige login"
             if "Unsupported URL" in msg:
                 return None, "este link não é suportado"
-            # 🎬 Formato indisponível não muda com retentativa: 3 tentativas só
+            # Formato indisponível não muda com retentativa: 3 tentativas só
             # fazem a pessoa esperar 15s para receber o mesmo erro.
             if "Requested format is not available" in msg:
                 if EXIBIR_LOGS:
                     logger.error(f"🎬 Sem formato de vídeo utilizável em {url}\n{msg.strip()[-400:]}")
                 return None, "esse link não tem vídeo, só imagem"
-            # 🚦 Limite de requisições: é temporário, mas 3s de espera não resolve.
+            # Limite de requisições: é temporário, mas 3s de espera não resolve.
             if any(t in msg.lower() for t in ("http error 429", "too many requests",
                                               "rate-limit", "rate limit")):
                 return None, "o site limitou os pedidos por excesso de acessos"
-            # 🔍 Sem isso o motivo real some e não dá para investigar depois.
+            # Sem isso o motivo real some e não dá para investigar depois.
             if EXIBIR_LOGS:
                 logger.error(f"❌ yt-dlp saiu com código {proc.returncode} em {url}\n{msg.strip()[-600:]}")
             return None, "não consegui acessar esse vídeo"
 
         for nome in sorted(os.listdir(pasta)):
-            # ⚠️ Sobra de tentativa anterior: enviar isso entrega vídeo corrompido.
+            # Sobra de tentativa anterior: enviar isso entrega vídeo corrompido.
             if nome.endswith((".part", ".ytdl", ".temp")):
                 continue
             caminho = os.path.join(pasta, nome)
@@ -916,7 +904,7 @@ async def _baixar_video_uma_vez(url, pasta):
         if EXIBIR_LOGS: logger.error(f"❌ Erro inesperado no download: {e}")
         return None, "erro inesperado ao baixar"
 
-# 🔁 O TikTok derruba pedidos vindos de servidor de forma aleatória: o MESMO
+# O TikTok derruba pedidos vindos de servidor de forma aleatória: o MESMO
 # link falha agora e funciona 5s depois. Sem retentativa, o usuário leva um
 # "não deu certo" que não é culpa dele nem do link.
 ERROS_QUE_MERECEM_NOVA_TENTATIVA = (
@@ -941,7 +929,7 @@ async def baixar_video(url, pasta, tentativas=3):
             return None, erro
 
         if n < tentativas:
-            # 🚦 Bloqueio por excesso de acesso não passa em 3s. Espera bem mais.
+            # Bloqueio por excesso de acesso não passa em 3s. Espera bem mais.
             espera = (30 * n) if "limitou os pedidos" in erro else (3 * n)
             if EXIBIR_LOGS:
                 logger.warning(f"🔁 Tentativa {n}/{tentativas} falhou ({erro}). Repetindo em {espera}s...")
@@ -983,12 +971,12 @@ async def canais_faltantes(user_id):
             if EXIBIR_LOGS: logger.warning(f"⚠️ Não consegui verificar {nome}: {e}")
     return faltando
 
-# 🔗 Guarda o link que a pessoa mandou enquanto ela cumpre as etapas, para
+# Link que a pessoa mandou enquanto ela entra nos canais, para
 # que o download comece sozinho depois. Some se o serviço reiniciar — nesse
 # caso ela só manda o link de novo.
 LINKS_PENDENTES = {}
 
-# 🔔 Aviso de trava aberto no momento, por usuário. Sem isto o evento de entrada
+# Aviso de trava aberto no momento, por usuário. Sem isto o evento de entrada
 # no canal chega mas o bot não sabe qual mensagem repintar.
 GATES_ABERTOS = {}
 
@@ -1008,11 +996,12 @@ def teclado_entrar(faltando, user_id):
                                         callback_data=f"verificar:{user_id}")])
     return InlineKeyboardMarkup(inline_keyboard=linhas)
 
-# ⏳ Quanto tempo o aviso de trava fica no tópico antes de sumir sozinho.
+# Quanto tempo o aviso de trava fica no tópico antes de sumir sozinho.
 EXPIRACAO_AVISO_TRAVA_SEG = 180
 
 
 async def expirar_aviso_trava(user_id, msg_id):
+    """Apaga o aviso de canais obrigatórios (e esquece o link) se a pessoa não concluir em EXPIRACAO_AVISO_TRAVA_SEG."""
     await asyncio.sleep(EXPIRACAO_AVISO_TRAVA_SEG)
 
     # Já foi resolvido ou substituído por outro aviso? Não mexe.
@@ -1026,22 +1015,31 @@ async def expirar_aviso_trava(user_id, msg_id):
     except Exception: pass
     if EXIBIR_LOGS: logger.info(f"⏳ Aviso de trava de {user_id} expirou e foi removido.")
 
-# ⏳ Respiro antes de apagar o link original. Sumir no mesmo instante da entrega
+# Respiro antes de apagar o link original. Sumir no mesmo instante da entrega
 # dá a impressão de que algo deu errado.
 ATRASO_APAGAR_LINK_SEG = 3
 
 
 async def apagar_link_original(message):
+    """Apaga a mensagem com o link depois da entrega (a legenda do vídeo já traz o link)."""
     await asyncio.sleep(ATRASO_APAGAR_LINK_SEG)
     try: await message.delete()
     except Exception: pass
 
-# ⏳ O aviso de cota estourada não fica exposto no tópico: quanto menos gente
+
+async def apagar_depois(mensagem, segundos):
+    """Apaga a mensagem depois de `segundos`, sem prender quem chamou."""
+    await asyncio.sleep(segundos)
+    try: await mensagem.delete()
+    except Exception: pass
+
+# O aviso de cota estourada não fica exposto no tópico: quanto menos gente
 # souber que existe limite, menos gente tenta contornar.
 EXPIRACAO_AVISO_LIMITE_SEG = 180
 
 
 async def expirar_aviso_limite(aviso, link_original=None):
+    """Apaga o aviso de limite diário (e o link junto) depois de EXPIRACAO_AVISO_LIMITE_SEG."""
     await asyncio.sleep(EXPIRACAO_AVISO_LIMITE_SEG)
     try: await aviso.delete()
     except Exception: pass
@@ -1053,12 +1051,20 @@ async def expirar_aviso_limite(aviso, link_original=None):
 
 @router.message(F.chat.id == GRUPO_DOWNLOADER, F.message_thread_id == TOPICO_DOWNLOADER)
 async def receber_link(message: types.Message):
-    # 🧹 Anota TODA mensagem que entra no tópico, inclusive as que serão
+    """
+    Toda mensagem do tópico do baixador. Na ordem:
+    1. sem link reconhecido: orienta e apaga;
+    2. cortesia esgotada e fora de algum canal obrigatório: mostra os canais e guarda
+       o link (sai sozinho quando ela entrar);
+    3. limite diário atingido: avisa (o aviso some depois);
+    4. liberado: entrega do cache ou baixa (um download por vez) e entrega.
+    Só conta na cota o que foi entregue.
+    """
+    # Anota TODA mensagem que entra no tópico, inclusive as que serão
     # ignoradas logo abaixo. O que não for anotado aqui a faxina nunca acha.
     registrar_mensagem(message.message_id)
 
-    # 📌 Aviso de serviço "fixou uma mensagem": não interessa a ninguém, some.
-    # Precisa vir ANTES do teste de is_bot, senão o return abaixo o deixa passar.
+    # Mensagem de serviço "fixou uma mensagem" (quando um admin fixa algo): some.
     if message.pinned_message:
         try: await message.delete()
         except Exception: pass
@@ -1070,9 +1076,9 @@ async def receber_link(message: types.Message):
     plataforma, url = detectar_plataforma(message.text or message.caption or "")
     mencao = mencao_usuario(message.from_user)
 
-    # 1️⃣ Não é link reconhecido: orienta e some
+    # 1. Não é link reconhecido: orienta e some
     if not url:
-        # 📎 Arquivo no lugar do link é um caso diferente de recado solto: a pessoa
+        # Arquivo no lugar do link é um caso diferente de recado solto: a pessoa
         # acha que mandou "o vídeo" e não entende por que o bot pediu link de novo.
         tem_midia = bool(message.video or message.photo or message.document
                          or message.animation or message.video_note or message.sticker)
@@ -1094,9 +1100,8 @@ async def receber_link(message: types.Message):
 
         aviso = await message.answer(texto_aviso, parse_mode="HTML")
 
-        # 🧹 A mensagem que não é link sai NA HORA. Antes só o aviso do bot sumia e
-        # o arquivo ficava até a faxina de DIAS_RETENCAO_TOPICO passar, empurrando
-        # o painel para cima o tempo todo.
+        # A mensagem sem link sai na hora; esperar a faxina de DIAS_RETENCAO_TOPICO
+        # deixaria ela empurrando o painel para cima.
         try:
             await message.delete()
         except Exception as e:
@@ -1110,8 +1115,8 @@ async def receber_link(message: types.Message):
         except Exception: pass
         return
 
-    # 2️⃣ Trava de acesso
-    # 🎁 Cortesia: os primeiros downloads saem livres, sem pedir nada.
+    # 2. Trava de acesso
+    # Cortesia: os primeiros downloads saem livres, sem pedir nada.
     ja_baixou = downloads_totais(message.from_user.id)
     faltando = await canais_faltantes(message.from_user.id) if ja_baixou >= DOWNLOADS_CORTESIA else []
 
@@ -1130,13 +1135,13 @@ async def receber_link(message: types.Message):
         GATES_ABERTOS[message.from_user.id] = aviso_trava
         if EXIBIR_LOGS: logger.info(f"🔒 {message.from_user.id} bloqueado: falta {len(faltando)} canal(is).")
 
-        # ⏳ Desistiu? O aviso não fica encalhado no tópico. Se ela entrar nos canais
+        # Desistiu? O aviso não fica encalhado no tópico. Se ela entrar nos canais
         # nesse meio-tempo, o fluxo normal já terá apagado e o GATES_ABERTOS estará
         # limpo — por isso a conferência antes de remover.
         asyncio.create_task(expirar_aviso_trava(message.from_user.id, aviso_trava.message_id))
         return
 
-    # 3️⃣ Limite diário
+    # 3. Limite diário
     usados = downloads_hoje(message.from_user.id)
     if usados >= LIMITE_DIARIO_DOWNLOADS and message.from_user.id not in IDS_SEM_LIMITE:
         aviso_limite = await message.answer(
@@ -1149,7 +1154,7 @@ async def receber_link(message: types.Message):
         asyncio.create_task(expirar_aviso_limite(aviso_limite, message))
         return
 
-    # 4️⃣ Liberado — baixa e entrega
+    # 4. Liberado — baixa e entrega
     if EXIBIR_LOGS: logger.info(f"✅ {message.from_user.id} liberado ({usados}/{LIMITE_DIARIO_DOWNLOADS}). {plataforma}: {url}")
 
     if semaforo_download.locked():
@@ -1157,7 +1162,7 @@ async def receber_link(message: types.Message):
     else:
         aguarde = None
 
-    # ♻️ Alguém já pediu este vídeo? Entrega na hora, sem baixar de novo.
+    # Alguém já pediu este vídeo? Entrega na hora, sem baixar de novo.
     file_id_guardado = buscar_cache_video(url)
     if file_id_guardado:
         # Veio do cache: não há fila para esperar, o aviso perde o sentido.
@@ -1174,21 +1179,21 @@ async def receber_link(message: types.Message):
             registrar_download(message.from_user.id)
             somar_download_total(message.from_user.id)
 
-            # 💡 Momento de maior boa vontade: acabou de receber o vídeo.
+            # Momento de maior boa vontade: acabou de receber o vídeo.
             asyncio.create_task(convidar_para_comunidade(
                 message, mencao, downloads_totais(message.from_user.id)))
 
-            # 🧹 Mesmo raciocínio da entrega normal: o link original vira ruído.
+            # Mesmo raciocínio da entrega normal: o link original vira ruído.
             asyncio.create_task(apagar_link_original(message))
 
             if EXIBIR_LOGS: logger.info(f"♻️ Entregue do cache para {message.from_user.id} ({plataforma}).")
 
-            # 📌 O painel também desce quando a entrega vem do cache. Sem isto ele
+            # O painel também desce quando a entrega vem do cache. Sem isto ele
             # só acompanha os downloads reais e fica para trás nas repetições.
             agendar_painel()
             return
         except Exception as e:
-            # file_id expirou ou foi invalidado: apaga do cache e baixa normalmente
+            # file_id inválido: tira do cache e baixa normalmente.
             if EXIBIR_LOGS: logger.warning(f"⚠️ file_id do cache falhou ({e}). Rebaixando.")
             remover_cache_video(url)
 
@@ -1208,7 +1213,7 @@ async def receber_link(message: types.Message):
             else:
                 caminho, erro = await baixar_video(url, pasta)
 
-            # 🧼 Tira a marca queimada e a cartela final do render da Shopee.
+            # Tira a marca queimada e a cartela final do render da Shopee.
             if not erro and caminho and plataforma == "Shopee" and LIMPAR_VIDEO_SHOPEE:
                 caminho = await limpar_video_shopee(caminho, pasta)
 
@@ -1229,22 +1234,22 @@ async def receber_link(message: types.Message):
                 caption=legenda,
                 parse_mode="HTML"
             )
-            # ♻️ Guarda o id para quem pedir o mesmo link depois
+            # Guarda o id para quem pedir o mesmo link depois
             if enviado and enviado.video:
                 guardar_cache_video(url_pedido, enviado.video.file_id, plataforma)
 
             try: await status.delete()
             except Exception: pass
 
-            # ✅ Só conta o que foi entregue: falha não gasta a cota de ninguém
+            # Só conta o que foi entregue: falha não gasta a cota de ninguém
             registrar_download(message.from_user.id)
             somar_download_total(message.from_user.id)
 
-            # 💡 Momento de maior boa vontade: acabou de receber o vídeo.
+            # Momento de maior boa vontade: acabou de receber o vídeo.
             asyncio.create_task(convidar_para_comunidade(
                 message, mencao, downloads_totais(message.from_user.id)))
 
-            # 🧹 O link que a pessoa colou já cumpriu o papel: a legenda do vídeo
+            # O link que a pessoa colou já cumpriu o papel: a legenda do vídeo
             # traz ele de volta, bem mais organizado. Só apaga DEPOIS da entrega,
             # senão uma falha no download deixaria ela sem o link. O atraso evita
             # o susto de ver a própria mensagem sumir no mesmo instante.
@@ -1257,13 +1262,12 @@ async def receber_link(message: types.Message):
                     f"(limite de {LIMITE_DIARIO_DOWNLOADS} por dia).",
                     parse_mode="HTML"
                 )
-                await asyncio.sleep(30)
-                try: await aviso_cota.delete()
-                except Exception: pass
+                # Em segundo plano: esperar aqui prenderia a fila de download por 30 s.
+                asyncio.create_task(apagar_depois(aviso_cota, 30))
 
             if EXIBIR_LOGS: logger.info(f"📤 Vídeo entregue para {message.from_user.id} ({plataforma}).")
 
-            # 📌 Marca o painel para descer daqui a 3 min, não na hora.
+            # Marca o painel para descer daqui a 3 min, não na hora.
             agendar_painel()
 
         except Exception as e:
@@ -1272,10 +1276,10 @@ async def receber_link(message: types.Message):
                 await status.edit_text(f"❌ {mencao}, algo deu errado no envio. Tente de novo.")
             except Exception: pass
         finally:
-            # 🧹 Nada fica no servidor: apaga a pasta inteira, dê certo ou não.
+            # Nada fica no servidor: apaga a pasta inteira, dê certo ou não.
             shutil.rmtree(pasta, ignore_errors=True)
 
-# 📌 Mantém o painel SEMPRE como a última mensagem do tópico. Envia o novo
+# O painel fica sempre como a última mensagem do tópico. Envia o novo
 # primeiro e só então apaga o antigo, para o tópico nunca ficar sem painel.
 # Não usa pin_chat_message de propósito: cada fixação gera uma mensagem de
 # serviço ("Fulano fixou...") que se acumula no tópico.
@@ -1283,12 +1287,14 @@ _lock_painel = asyncio.Lock()
 
 @router.callback_query(F.data == "canal_ok")
 async def canal_ja_cumprido(callback: types.CallbackQuery):
+    """Botão de canal já cumprido (✅): só responde, não faz nada."""
     await callback.answer("Esse já está cumprido ✅")
 
 
 @router.callback_query(F.data.startswith("verificar:"))
 async def verificar_canais(callback: types.CallbackQuery):
-    # 🔒 Só o dono do aviso mexe no próprio aviso.
+    """Botão "Já entrei": confere os canais e, se tudo cumprido, solta o download guardado."""
+    # Só o dono do aviso mexe no próprio aviso.
     dono_id = int(callback.data.split(":")[1])
     if callback.from_user.id != dono_id:
         await callback.answer("Este aviso é de outra pessoa.", show_alert=True)
@@ -1332,7 +1338,11 @@ async def concluir_liberacao(user_id):
 
 @router.chat_member(ChatMemberUpdatedFilter(member_status_changed=IS_NOT_MEMBER >> IS_MEMBER))
 async def entrou_em_canal(evento: types.ChatMemberUpdated):
-    # 🔔 Só interessa entrada nos canais da trava, e só de quem tem aviso aberto.
+    """
+    Evento de entrada num canal obrigatório: atualiza o aviso da pessoa e solta o
+    download guardado quando ela cumprir todos. Só chega se o bot for admin do canal.
+    """
+    # Só interessa entrada nos canais da trava, e só de quem tem aviso aberto.
     if evento.chat.id not in {cid for cid, _, _ in CANAIS_OBRIGATORIOS}:
         return
 
@@ -1349,6 +1359,7 @@ async def entrou_em_canal(evento: types.ChatMemberUpdated):
 
 
 async def reenviar_painel_downloader():
+    """Manda o painel de novo no fim do tópico e apaga o anterior."""
     async with _lock_painel:
         try:
             nova = await bot.send_message(
@@ -1368,21 +1379,10 @@ async def reenviar_painel_downloader():
             try: await bot.delete_message(chat_id=GRUPO_DOWNLOADER, message_id=antiga)
             except Exception: pass
 
-        # 📌 Fixa no topo do tópico. Sem notificação, para não tocar sino em ninguém.
-        # O pin antigo cai sozinho quando a mensagem anterior é apagada acima.
-        try:
-            await bot.pin_chat_message(
-                chat_id=GRUPO_DOWNLOADER,
-                message_id=nova.message_id,
-                disable_notification=True
-            )
-        except Exception as e:
-            if EXIBIR_LOGS: logger.warning(f"⚠️ [Painel] Não consegui fixar: {e}")
-
         salvar_msg_painel(nova.message_id)
         if EXIBIR_LOGS: logger.info(f"📌 [Painel] Painel recriado no fim do tópico (ID {nova.message_id}).")
 
-# ⏳ Prazo antes do painel descer. Numa rajada de downloads ele desce UMA vez,
+# Prazo antes do painel descer. Numa rajada de downloads ele desce UMA vez,
 # no fim do prazo, em vez de pular de lugar a cada vídeo entregue.
 ATRASO_PAINEL_SEG = 180
 
@@ -1412,14 +1412,16 @@ def agendar_painel():
 
 @router.message(Command("painel_downloader"))
 async def comando_painel_downloader(message: types.Message):
+    """/painel_downloader (só admin): recria o painel agora."""
     if message.from_user.id not in IDS_SEM_LIMITE:
         return
     await reenviar_painel_downloader()
     try: await message.delete()
     except Exception: pass
 
-# 🧹 Um único gancho para TUDO que o bot envia. Sem isto eu teria que
-# lembrar de anotar o ID em cada send_message/answer_video espalhado no arquivo.
+# Anota para a faxina tudo o que o bot envia no tópico, num lugar só, em vez de
+# lembrar disso em cada send_message/answer_video. A API de bot não lê histórico:
+# mensagem não anotada nunca é apagada.
 @bot.session.middleware()
 async def registrar_saidas(make_request, bot_, method, *args, **kwargs):
     resultado = await make_request(bot_, method, *args, **kwargs)
@@ -1472,6 +1474,7 @@ async def faxina_topico_loop():
 
 
 async def main():
+    """Sobe o bot e as rotinas de fundo (atualização do yt-dlp, faxina do tópico, painel)."""
     if not TOKEN:
         logger.error("❌ TELEGRAM_TOKEN_DOWNLOADER não encontrado no .env. Encerrando.")
         return
@@ -1479,13 +1482,10 @@ async def main():
     me = await bot.get_me()
     logger.info(f"📥 Downloader no ar como @{me.username} "
                 f"(privacy {'desligado ✅' if me.can_read_all_group_messages else 'LIGADO ⚠️'})")
-# Inicia a rotina autônoma de manutenção (Limpeza de BD e Update do yt-dlp)
     asyncio.create_task(faxina_diaria_loop())
 
-    # 🧹 Faxina do tópico: apaga mensagens com mais de 3 dias.
     asyncio.create_task(faxina_topico_loop())
 
-    # 📌 Garante que o painel exista no tópico assim que o serviço sobe.
     asyncio.create_task(reenviar_painel_downloader())
 
     await dp.start_polling(bot)

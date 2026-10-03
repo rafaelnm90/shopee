@@ -1,14 +1,17 @@
-# ==========================================
-# 🕐 FUSO ÚNICO DO ECOSSISTEMA
-#
-# Importar este módulo JÁ trava o processo no horário de Brasília — não existe
-# função para chamar nem passo para esquecer. Viaja junto com o repositório,
-# então trocar de servidor não exige nenhum ajuste manual no sistema.
-#
-# Fuso não é soma: aplicar "America/Sao_Paulo" aqui e também no relógio do
-# servidor dá o mesmo resultado que aplicar só aqui. O kernel guarda epoch UTC
-# e o fuso apenas decide como esse número vira texto.
-# ==========================================
+"""
+Fuso horário único de todos os robôs: America/Sao_Paulo.
+
+Importar este módulo já trava o processo no horário de Brasília (variável TZ +
+time.tzset()); não há função para chamar. Por viajar com o repositório, trocar
+de servidor não exige ajustar o relógio do sistema. Todo robô importa daqui
+antes de calcular qualquer data ou hora.
+
+Aplicar o fuso aqui e também no servidor não "soma" nada: o kernel guarda o
+tempo em UTC e o fuso só decide como esse número vira texto.
+
+Também define o formato de log comum a todos os robôs (configurar_logs), com o
+offset (-0300) dentro de cada linha.
+"""
 import os
 import time
 import logging
@@ -17,7 +20,6 @@ from zoneinfo import ZoneInfo
 
 FUSO_STR = "America/Sao_Paulo"
 
-# 🔒 Trava aplicada no import, antes de qualquer módulo calcular data/hora.
 os.environ["TZ"] = FUSO_STR
 time.tzset()
 
@@ -26,20 +28,19 @@ fuso_horario = ZoneInfo(FUSO_STR)
 FORMATO_LOG = "%(asctime)s.%(msecs)03d " + time.strftime("%z") + " - %(message)s"
 FORMATO_DATA = "%Y-%m-%d %H:%M:%S"
 
-# 🔒 Trava de reentrada: o motor_userbot e um robo proprio E um modulo importado
-# (bot_mestre -> painel_espelhos -> motor_userbot), entao configurar_logs seria
-# chamado duas vezes no mesmo processo. Quem chega primeiro configura; os demais
-# so recebem o logger, sem remontar o handler nem repetir a linha de boot.
+# configurar_logs pode ser chamado duas vezes no mesmo processo: o motor_userbot
+# roda como robô próprio e também é importado pelo bot_mestre (via painel_espelhos).
+# Só a primeira chamada configura; as outras só recebem o logger.
 _LOGS_CONFIGURADOS = False
 
 
 def fuso_do_servidor():
     """
-    Descobre o fuso do sistema operacional. Só para registrar no log.
+    Nome do fuso configurado no sistema operacional. Serve só para o log de boot.
 
-    O symlink /etc/localtime vem PRIMEIRO porque é o que o systemd — e portanto
-    o journalctl — realmente usa. O /etc/timezone é legado do Debian e o
-    timedatectl não o atualiza: ele continua dizendo "Etc/UTC" para sempre.
+    Lê primeiro o link /etc/localtime, que é o que o systemd (e o journalctl)
+    usa de verdade. O /etc/timezone é legado do Debian e o timedatectl não o
+    atualiza, então pode continuar dizendo "Etc/UTC" para sempre.
     """
     try:
         caminho = os.path.realpath("/etc/localtime")
@@ -60,10 +61,12 @@ def fuso_do_servidor():
 
 def configurar_logs(nome=None, nivel=logging.INFO):
     """
-    Formato de log único de todos os robôs, com o offset carimbado na linha.
+    Configura o log do processo no formato comum e devolve o logger `nome`.
 
-    force=True vence qualquer configuração de log feita por módulo importado
-    antes (motor_filas e utils configuram o root logger ao serem importados).
+    Usa force=True para passar por cima da configuração que motor_filas e utils
+    fazem ao serem importados. Na primeira chamada registra no log o fuso do
+    processo e o do servidor; se forem diferentes, avisa que a hora da margem
+    do journalctl é a do servidor e que a confiável é a de dentro da linha.
     """
     global _LOGS_CONFIGURADOS
     logger = logging.getLogger(nome or "fuso")

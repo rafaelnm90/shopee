@@ -1,8 +1,19 @@
-# 0. CONFIGURAÇÕES INICIAIS
+"""
+Robô de divulgação (serviço divulgacao_canal_bot). Uma conta de usuário do
+Telegram (Telethon, sessão sessao_divulgacao) posta convites para os grupos e
+canais do projeto nos grupos-alvo configurados no painel do bot_mestre.
+
+Cada escopo (principal, viral, público, achadinhos) tem a própria lista de alvos
+e frequência por hora, na tabela configuracoes. A cada hora cheia o robô sorteia
+os horários de envio daquela hora; o texto de cada envio é escrito pelo Gemini
+na hora, com uma frase reserva se a IA falhar.
+
+Também mantém o cache de nomes de grupos e tópicos de fórum, que só uma conta de
+usuário consegue ler.
+"""
 EXIBIR_LOGS = True
 import os
 import json
-import logging
 import asyncio
 import random
 from datetime import datetime, timedelta
@@ -15,27 +26,28 @@ from dotenv import load_dotenv
 load_dotenv()
 from utils import registrar_erro_json, salvar_nome_grupo
 
-# ✅ Importando o nosso Cérebro Central
 from api_gemini import gerar_texto_gemini
 
-# 🕐 Trava de fuso centralizada: importar o modulo ja aplica America/Sao_Paulo.
-from fuso import FUSO_STR, fuso_horario, configurar_logs
+# Importar fuso já trava o processo no horário de Brasília.
+from fuso import configurar_logs
 
-# 1. CREDENCIAIS DA CONTA
 API_ID = int(os.getenv('API_ID'))
 API_HASH = os.getenv('API_HASH')
-# A chave do Gemini e a cascata foram movidas para o módulo api_gemini.py com segurança.
 
-# 2. CONFIGURAÇÃO DE LOGS 🚀
 if EXIBIR_LOGS:
     logger = configurar_logs(__name__)
 
-# 3. SISTEMA DE AUTOLIMPEZA E INICIALIZAÇÃO
 def limpar_travas_fantasma(nome_sessao):
+    """
+    Limpeza ao iniciar o processo:
+    - apaga trava_manutencao.txt, religando o registro de erros que o botão
+      "limpar logs" do bot_mestre silenciou (este robô reinicia a cada deploy);
+    - apaga os .session-journal/.session.lock que um desligamento forçado deixa
+      para trás e que travam a sessão do Telethon.
+    """
     import glob
     import os
     
-    # ✅ NOVO: Destrói a trava de manutenção no exato segundo em que o script inicia
     if os.path.exists("trava_manutencao.txt"):
         try:
             os.remove("trava_manutencao.txt")
@@ -51,40 +63,34 @@ def limpar_travas_fantasma(nome_sessao):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ [Auto-cura] Falha ao tentar remover trava {arquivo}: {e}")
 
-# ✅ Limpa resíduos de reboot forçado no servidor antes de tocar na base de dados
+# Roda no import, antes de o TelegramClient abrir a sessão.
 limpar_travas_fantasma('sessao_divulgacao')
 
-# O nome da sessão é mantido independente
 def normalizar_alvo(alvo):
-    """🔢 O get_entity só resolve ID numérico quando recebe int. Com string ele
-    tenta interpretar como @usuario, não acha e falha — mesmo a conta estando
-    no canal. Links e @usuarios seguem como texto."""
+    """
+    ID numérico vira int; link e @usuário continuam texto. O get_entity do
+    Telethon só resolve ID numérico recebendo int: com string, procura como
+    @usuário e falha mesmo com a conta no canal.
+    """
     texto = str(alvo).strip()
     if re.fullmatch(r"-?\d+", texto):
         return int(texto)
     return texto
 
 
-# ==========================================================================
-# 👤 CONTAS QUE OPERAM NESTE ROBÔ
-#
-# Sessão: sessao_divulgacao
-#   Rafaelnm (PRINCIPAL) · @Rafaelnm · id 1226920464
-#   → é o mesmo id que o bot_mestre usa como ADMIN_ID
-#   → é a conta que aparece creditada em "👤 Vídeo enviado por" nos reposts
-#
-# Confirmado no log em 15/09/2026 pela linha "👤 [Userbot] Sessão de divulgação".
-# ==========================================================================
+# A sessao_divulgacao é a conta principal do admin (@Rafaelnm, id 1226920464), o
+# mesmo ADMIN_ID do bot_mestre. É ela que aparece em "Vídeo enviado por" nos reposts.
 client = TelegramClient('sessao_divulgacao', API_ID, API_HASH)
 scheduler = AsyncIOScheduler()
 
-# 🚦 Semáforo de proteção assíncrona para o banco de dados SQLite
+# Uma chamada ao Telegram por vez nesta conta, para envios e leitura de tópicos não se atropelarem.
 telegram_lock = asyncio.Lock()
 if EXIBIR_LOGS: logger.info("🚦 Semáforo de controle de tráfego do Telegram ativado!")
 
 import sqlite3
 
 def ler_config_bd_divulgacao(chave, padrao=None):
+    """Valor (JSON) da chave na tabela configuracoes, ou `padrao` se não existir ou der erro."""
     if padrao is None: padrao = {}
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -100,6 +106,7 @@ def ler_config_bd_divulgacao(chave, padrao=None):
         return padrao
 
 def salvar_config_bd_divulgacao(chave, dados):
+    """Grava `dados` como JSON na chave da tabela configuracoes."""
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -110,11 +117,10 @@ def salvar_config_bd_divulgacao(chave, dados):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar '{chave}' no SQLite: {e}")
 
-# 4. MOTOR UNIFICADO DE DIVULGAÇÃO
-# ✅ Consolidação: Principal, Viral e Público usam o MESMO motor. Antes eram
-# blocos clonados e toda correção precisava ser aplicada N vezes — na prática
-# nunca era (a validação de alvo só existia no Viral). Para criar um escopo
-# novo agora basta acrescentar uma entrada neste dicionário.
+# Escopos de divulgação, todos tratados pelo mesmo código. Para criar um escopo,
+# basta acrescentar uma entrada: chave = configuração no banco (criada pelo painel
+# do bot_mestre), link = grupo divulgado, prompt = instrução para a IA,
+# fallback = frase usada quando a IA falha.
 ESCOPOS = {
     "principal": {
         "rotulo": "PRINCIPAL",
@@ -152,10 +158,9 @@ ESCOPOS = {
         "chave": "alvos_divulgacao_publico",
         "rotulo_link": "ENTRE NO GRUPO:",
         "link": "https://t.me/GrupoPublicoAfiliados",
-        # Lista = rodízio. Um ângulo é sorteado a cada disparo.
-        # Para criar um terceiro, acrescente uma string aqui.
+        # Lista de prompts: um é sorteado a cada envio (rodízio de ângulos).
         "prompt": [
-            # Ângulo 1 — comunidade
+            # Ângulo 1: a comunidade.
             "Você é um copywriter que divulga uma comunidade do Telegram para afiliados da Shopee. "
             "Escreva UMA ÚNICA FRASE curta e convidativa, diferente das anteriores, variando estrutura e tom a cada execução. "
             "Destaque que é uma comunidade ativa onde os membros trocam vídeos, achados e experiências, e que a entrada é GRÁTIS (exatamente assim, em maiúsculas). "
@@ -163,7 +168,7 @@ ESCOPOS = {
             "Tom cordial e direto, como quem convida um colega — nada de urgência artificial ou alarmismo. "
             "Entregue APENAS a frase final, sem aspas.",
 
-            # Ângulo 2 — o baixador de vídeos (fatos vindos do downloader_bot.py)
+            # Ângulo 2: o robô que baixa vídeos (o que ele faz está no downloader_bot.py).
             "Você é um copywriter que divulga uma comunidade do Telegram para afiliados da Shopee. "
             "Escreva UMA ÚNICA FRASE curta e convidativa, diferente das anteriores, variando estrutura e tom a cada execução. "
             "Destaque que dentro do grupo tem um robô que baixa vídeos SEM MARCA D'ÁGUA de Shopee, TikTok, Pinterest e Instagram: "
@@ -192,20 +197,23 @@ ESCOPOS = {
     },
 }
 
-# 🛡️ Cooldown global de flood. Quando o Telegram devolve FloodWait/PeerFlood,
-# TODOS os escopos param até a punição expirar. Sem isto os jobs já agendados
-# seguiam batendo na porta durante o castigo — que é o caminho de uma limitação
-# temporária virar permanente.
+# Até quando o robô fica parado por punição de flood. Vale para todos os escopos:
+# continuar enviando durante o castigo é o caminho para a limitação temporária
+# virar permanente.
 bloqueio_flood_ate = None
 
 
-# Escopos que já avisaram "config ausente". Sem isto o monitorar_comandos(),
-# que roda de 5 em 5 segundos, repetiria o mesmo aviso ~17 mil vezes por dia
-# por escopo. Avisa uma vez e rearma se a configuração aparecer depois.
+# Escopos que já avisaram "config ausente". O monitorar_comandos roda a cada 5 s
+# e repetiria o aviso ~17 mil vezes por dia; assim avisa uma vez e volta a avisar
+# só se a configuração aparecer e sumir de novo.
 _avisos_config_ausente = set()
 
 
 def carregar_config_escopo(escopo):
+    """
+    Configuração do escopo no banco (alvos, frequencia_por_hora, pausado,
+    réplicas, repetições, config_alvos por alvo) ou None se ainda não existir.
+    """
     conf = ESCOPOS[escopo]
     dados = ler_config_bd_divulgacao(conf["chave"], padrao=None)
 
@@ -223,12 +231,14 @@ def carregar_config_escopo(escopo):
 
 
 async def gerar_texto(escopo, repeticoes=1):
+    """
+    Texto de um envio: frase escrita pela IA + link do grupo. Com repeticoes > 1,
+    o mesmo bloco aparece várias vezes na mesma mensagem.
+    """
     conf = ESCOPOS[escopo]
     if EXIBIR_LOGS: logger.info(f"🚀 [{conf['rotulo']}] Montando texto de divulgação ({repeticoes}x)...")
 
-    # "prompt" aceita uma string (um ângulo só) ou uma lista de strings.
-    # Sendo lista, sorteia um ângulo por disparo. Para dar rodízio a qualquer
-    # escopo, basta transformar a string dele numa lista.
+    # prompt pode ser uma string ou uma lista; sendo lista, sorteia um por envio.
     p = conf["prompt"]
     prompt_escolhido = random.choice(p) if isinstance(p, list) else p
 
@@ -245,11 +255,20 @@ async def gerar_texto(escopo, repeticoes=1):
 
 
 async def enviar_mensagem(escopo, alvo):
+    """
+    Envia a divulgação do escopo para um alvo: `replicas` mensagens seguidas
+    (1,5 s entre elas), cada uma com o bloco repetido `repeticoes` vezes. Os dois
+    números vêm do alvo (config_alvos) ou do escopo. Não envia durante punição
+    de flood nem com o escopo pausado.
+
+    FloodWait para todos os escopos pelo tempo pedido pelo Telegram + 30 s.
+    PeerFlood (conta marcada como spam) para tudo por 1 hora. Alvo sem permissão
+    de escrita é só pulado.
+    """
     global bloqueio_flood_ate
     conf = ESCOPOS[escopo]
     rotulo = conf["rotulo"]
 
-    # 🛡️ Respeita castigo de flood vigente, tenha ele vindo de qualquer escopo.
     if bloqueio_flood_ate and datetime.now() < bloqueio_flood_ate:
         restante = int((bloqueio_flood_ate - datetime.now()).total_seconds())
         if EXIBIR_LOGS: logger.warning(f"🛑 [{rotulo}] Disparo abortado: cooldown de flood ativo por mais {restante}s.")
@@ -270,7 +289,7 @@ async def enviar_mensagem(escopo, alvo):
     try:
         if EXIBIR_LOGS: logger.info(f"🚦 [{rotulo}] Aguardando sinal verde para {alvo}...")
         async with telegram_lock:
-            # ✅ Proteção ativa: reconecta caso o socket tenha caído em background
+            # A conexão pode ter caído em segundo plano.
             if not client.is_connected():
                 if EXIBIR_LOGS: logger.info(f"🔄 [{rotulo}] [Auto-cura] Conexão perdida. Forçando reconexão...")
                 await client.connect()
@@ -287,15 +306,12 @@ async def enviar_mensagem(escopo, alvo):
             if EXIBIR_LOGS: logger.info(f"✅ [{rotulo}] Envio concluído para {alvo}.")
 
     except FloodWaitError as e:
-        # ✅ Antes caía no except genérico e o agendador continuava disparando
-        # DENTRO da janela de punição. Agora todo o motor congela.
         espera = int(getattr(e, "seconds", 60) or 60)
         bloqueio_flood_ate = datetime.now() + timedelta(seconds=espera + 30)
         if EXIBIR_LOGS: logger.error(f"⏳ [{rotulo}] FloodWait de {espera}s em {alvo}. Motor congelado até {bloqueio_flood_ate.strftime('%H:%M:%S')}.")
         registrar_erro_json(f"FloodWait {espera}s ({escopo}/{alvo})", origem="divulgacao_canal.py")
 
     except PeerFloodError:
-        # 🚨 Sinal de conta marcada como spam. 1h de silêncio total.
         bloqueio_flood_ate = datetime.now() + timedelta(hours=1)
         if EXIBIR_LOGS: logger.critical(f"🚨 [{rotulo}] PeerFloodError em {alvo}: a CONTA foi sinalizada como spam. Motor congelado por 1 hora. Reduza frequência e réplicas antes de retomar.")
         registrar_erro_json(f"PeerFloodError ({escopo}/{alvo}) - conta sinalizada", origem="divulgacao_canal.py")
@@ -314,23 +330,17 @@ async def enviar_mensagem(escopo, alvo):
             registrar_erro_json(f"enviar_mensagem ({escopo}/{alvo}): {e}", origem="divulgacao_canal.py")
 
 
-# Agendamentos já sorteados na hora corrente, por alvo. COMPARTILHADO entre
-# TODOS os escopos: se o mesmo grupo estiver em duas listas, a trava de 15
-# minutos continua valendo entre elas.
-#
-# ⚠️ Guarda uma LISTA, não um datetime. A versão anterior sobrescrevia o valor
-# e só comparava contra o ÚLTIMO horário sorteado — bastava intercalar escopos
-# para furar a trava (14:15 e 14:18 conviviam porque a memória, naquele
-# instante, guardava 14:57). Com 4 escopos o furo apareceria com mais força.
+# Horários já sorteados por alvo (última hora), compartilhados entre os escopos:
+# se o mesmo grupo está em duas listas, os 15 minutos de distância valem entre
+# elas. Guarda a lista inteira porque comparar só com o último horário deixava
+# escopos intercalados furarem a distância.
 ultimos_agendamentos_por_alvo = {}
 
 
 def _carregar_agendamentos():
-    """Recupera do banco o histórico de horários já sorteados.
-
-    Sem isto a trava de 15 minutos zerava a cada restart — e zerava justamente
-    no pior momento, porque o main() reagenda a hora inteira ao subir. Um deploy
-    no minuto 55 refazia a hora sem lembrar do que já tinha saído nela.
+    """
+    Recupera do banco (chave agendamentos_divulgacao) os horários já sorteados,
+    para a distância de 15 min valer também depois de um reinício.
     """
     global ultimos_agendamentos_por_alvo
     try:
@@ -351,6 +361,7 @@ def _carregar_agendamentos():
 
 
 def _salvar_agendamentos():
+    """Grava no banco os horários sorteados, para sobreviverem a um reinício."""
     try:
         salvar_config_bd_divulgacao("agendamentos_divulgacao", {
             alvo: [h.isoformat() for h in horarios]
@@ -360,15 +371,60 @@ def _salvar_agendamentos():
         if EXIBIR_LOGS: logger.warning(f"⚠️ [Agenda] Não salvei o histórico de horários: {e}")
 
 
+def _carregar_plano_da_hora(hora):
+    """
+    Envios já planejados para a hora `hora` ("AAAA-MM-DD HH"), como lista de
+    [escopo, alvo, horário ISO]. Vazia se o plano salvo é de outra hora.
+    """
+    plano = ler_config_bd_divulgacao("plano_divulgacao_hora", {}) or {}
+    if not isinstance(plano, dict) or plano.get("hora") != hora:
+        return []
+    validos = []
+    for envio in plano.get("envios", []):
+        try:
+            escopo, alvo, iso = envio
+            datetime.fromisoformat(iso)
+        except (TypeError, ValueError):
+            continue
+        validos.append([escopo, alvo, iso])
+    return validos
+
+
+def _salvar_plano_da_hora(hora, envios):
+    """Grava no banco o plano da hora (chave plano_divulgacao_hora); só a hora corrente fica guardada."""
+    salvar_config_bd_divulgacao("plano_divulgacao_hora", {"hora": hora, "envios": envios})
+
+
+def _agendar_envio(escopo, alvo, quando):
+    # O id torna o agendamento idempotente: reagendar o mesmo envio substitui o anterior.
+    scheduler.add_job(enviar_mensagem, 'date', run_date=quando, args=[escopo, alvo],
+                      id=f"divulgacao|{escopo}|{alvo}|{quando.isoformat()}", replace_existing=True)
+
+
 def programar_envios_da_hora():
+    """
+    Sorteia e agenda os envios da hora corrente para todos os escopos e alvos.
+    Roda a cada hora cheia e uma vez quando o robô inicia.
+
+    Cada alvo recebe `frequencia` envios, um em cada fatia da hora, a 15 min ou
+    mais de qualquer outro envio para o mesmo alvo (de qualquer escopo) e nunca
+    no passado. Se 100 sorteios não acharem minuto livre na fatia, o envio vai
+    para 16 a 18 min depois do último do alvo, mesmo que caia na hora seguinte.
+
+    Os agendamentos ficam na memória do agendador e se perdem num reinício. Por
+    isso o plano da hora fica salvo no banco: ao reiniciar no meio da hora, os
+    envios planejados que ainda estão no futuro são reagendados, os que já
+    passaram contam como feitos, e só o que falta para a frequência é sorteado.
+    """
     global ultimos_agendamentos_por_alvo
     agora = datetime.now()
-    INTERVALO_MINIMO = 15  # Distanciamento rigoroso entre disparos no mesmo alvo
+    INTERVALO_MINIMO = 15  # minutos entre dois envios para o mesmo alvo
+    hora_atual = agora.strftime("%Y-%m-%d %H")
 
-    # 💾 Recupera o que foi sorteado antes de um eventual restart.
     _carregar_agendamentos()
+    plano = _carregar_plano_da_hora(hora_atual)
 
-    # Descarta o que já passou da janela para o dicionário não crescer sem fim.
+    # Esquece horários com mais de 1 hora, para o dicionário não crescer sem fim.
     corte = agora - timedelta(hours=1)
     for _alvo in list(ultimos_agendamentos_por_alvo):
         restantes = [h for h in ultimos_agendamentos_por_alvo[_alvo] if h > corte]
@@ -395,10 +451,22 @@ def programar_envios_da_hora():
             if freq_alvo <= 0:
                 continue
 
-            if EXIBIR_LOGS: logger.info(f"🔄 [{rotulo}] Sorteando {freq_alvo} envio(s) para {alvo} na hora atual ({agora.hour}h)...")
+            ja_planejados = [datetime.fromisoformat(iso) for e, a, iso in plano if e == escopo and a == alvo]
+            for quando in ja_planejados:
+                if quando > agora:
+                    _agendar_envio(escopo, alvo, quando)
+
+            faltam = freq_alvo - len(ja_planejados)
+            if ja_planejados and EXIBIR_LOGS:
+                logger.info(f"♻️ [{rotulo}] {alvo}: {len(ja_planejados)} envio(s) já planejado(s) nesta hora; faltam {max(faltam, 0)}.")
+            if faltam <= 0:
+                continue
+
+            if EXIBIR_LOGS: logger.info(f"🔄 [{rotulo}] Sorteando {faltam} envio(s) para {alvo} na hora atual ({agora.hour}h)...")
             espacamento_ideal = 58 // freq_alvo if freq_alvo > 0 else 58
 
-            for i in range(freq_alvo):
+            # Os envios que faltam ficam com as últimas fatias da hora.
+            for i in range(len(ja_planejados), freq_alvo):
                 sucesso = False
                 min_inicio_busca = (i * espacamento_ideal) + 1
                 min_fim_busca = min(((i + 1) * espacamento_ideal), 59)
@@ -409,8 +477,6 @@ def programar_envios_da_hora():
                     minuto_sorteado = random.randint(min_inicio_busca, min_fim_busca)
                     horario_disparo = agora.replace(minute=minuto_sorteado, second=random.randint(0, 59))
 
-                    # ✅ Compara contra TODOS os horários já sorteados para este
-                    # alvo nesta hora, não só contra o último.
                     agendados = ultimos_agendamentos_por_alvo.get(alvo, [])
                     colisao = any(
                         abs((horario_disparo - h).total_seconds() / 60) < INTERVALO_MINIMO
@@ -421,7 +487,8 @@ def programar_envios_da_hora():
 
                     if not colisao:
                         ultimos_agendamentos_por_alvo.setdefault(alvo, []).append(horario_disparo)
-                        scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo, args=[escopo, alvo])
+                        plano.append([escopo, alvo, horario_disparo.isoformat()])
+                        _agendar_envio(escopo, alvo, horario_disparo)
                         if EXIBIR_LOGS: logger.info(f"✅ [{rotulo}] Disparo {i+1}/{freq_alvo} para {alvo} agendado às {horario_disparo.strftime('%H:%M:%S')}")
                         sucesso = True
                         break
@@ -432,22 +499,22 @@ def programar_envios_da_hora():
                     ultimo_conhecido = max(agendados) if agendados else agora
                     horario_disparo_fallback = ultimo_conhecido + timedelta(minutes=INTERVALO_MINIMO + random.randint(1, 3))
                     ultimos_agendamentos_por_alvo.setdefault(alvo, []).append(horario_disparo_fallback)
-                    scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo_fallback, args=[escopo, alvo])
+                    plano.append([escopo, alvo, horario_disparo_fallback.isoformat()])
+                    _agendar_envio(escopo, alvo, horario_disparo_fallback)
                     if EXIBIR_LOGS: logger.info(f"🛡️ [{rotulo}] Fallback: disparo {i+1} empurrado para {horario_disparo_fallback.strftime('%H:%M:%S')}")
 
-    # 💾 Grava o que foi sorteado nesta hora, para sobreviver a restart.
     _salvar_agendamentos()
+    _salvar_plano_da_hora(hora_atual, plano)
 
 async def sincronizar_nomes_topicos():
-    """🧵 Varre TODOS os grupos de fórum desta conta e grava, no cache
-    compartilhado, o nome do grupo e o nome de cada tópico.
+    """
+    Grava no cache de nomes (utils.salvar_nome_grupo) o nome de cada grupo de
+    fórum desta conta e de cada tópico, para os painéis mostrarem "Grupo › Tópico".
 
-    Por que vive aqui e não no bot_mestre: a API de bot NÃO consegue ler nome
-    de tópico — só devolve o message_thread_id. Só o MTProto (conta de usuário)
-    tem o GetForumTopics. Como o cache fica no banco_dados.db compartilhado,
-    todos os painéis passam a exibir 'Grupo › Tópico' de uma vez.
-
-    Renomeou um tópico no Telegram? A próxima passagem atualiza sozinha.
+    Fica neste robô porque a API de bot não lê nome de tópico (só o ID); só uma
+    conta de usuário (GetForumTopics) consegue. Roda ao iniciar e todo dia às
+    00:07; tópico renomeado é atualizado na passagem seguinte. Interrompe a
+    varredura no primeiro FloodWait.
     """
     grupos = topicos = 0
     try:
@@ -465,8 +532,8 @@ async def sincronizar_nomes_topicos():
             grupos += 1
 
             try:
-                # O lock é pego por chamada, não pela varredura inteira: segurar
-                # por 30s atrasaria os disparos de divulgação sem necessidade.
+                # Lock por chamada, não pela varredura inteira: segurar por ~30 s
+                # atrasaria os envios de divulgação.
                 async with telegram_lock:
                     resposta = await client(GetForumTopicsRequest(
                         peer=entidade, offset_date=0, offset_id=0,
@@ -475,7 +542,7 @@ async def sincronizar_nomes_topicos():
                 for t in resposta.topics:
                     titulo = getattr(t, "title", None)
                     if titulo:
-                        # Chave no formato que o formatar_nome_alvo procura.
+                        # Chave "<grupo>_<tópico>", o formato que o formatar_nome_alvo do bot_mestre procura.
                         salvar_nome_grupo(f"{chat_id}_{t.id}", titulo)
                         topicos += 1
             except FloodWaitError as e:
@@ -495,6 +562,11 @@ async def sincronizar_nomes_topicos():
         registrar_erro_json(f"sincronizar_nomes_topicos: {e}", origem="divulgacao_canal.py")
 
 async def monitorar_comandos():
+    """
+    A cada 5 s procura o pedido de disparo forçado que o painel do bot_mestre
+    grava na config do escopo (forcar_disparo=True) e envia na hora para todos
+    os alvos, salvo se o escopo estiver pausado.
+    """
     while True:
         for escopo, conf in ESCOPOS.items():
             rotulo = conf["rotulo"]
@@ -503,7 +575,7 @@ async def monitorar_comandos():
             if not config or not config.get("forcar_disparo"):
                 continue
 
-            # Baixa a bandeira ANTES de disparar, para não repetir se algo travar.
+            # Desliga o pedido antes de enviar, para não repetir se algo travar no meio.
             config["forcar_disparo"] = False
             salvar_config_bd_divulgacao(conf["chave"], config)
 
@@ -521,7 +593,7 @@ async def main():
     if EXIBIR_LOGS: logger.info("⏳ Iniciando o Userbot de Divulgação...")
     await client.start()
 
-    # 👤 Mesma identificação do espelhador: saber qual conta assina o que este robô faz.
+    # Registra no log qual conta está logada nesta sessão.
     try:
         eu = await client.get_me()
         if EXIBIR_LOGS:
@@ -531,35 +603,29 @@ async def main():
     except Exception as e:
         if EXIBIR_LOGS: logger.warning(f"⚠️ [Userbot] Não consegui identificar a conta da sessão: {e}")
 
-    # 🗂️ Popula o cache de entidades da sessão. Sem isto, get_entity() falha com
-    # "Cannot find any entity" ao receber ID numérico puro, mesmo a conta
-    # participando do canal — o Telethon precisa do access_hash em cache, e ele
-    # só aparece depois de listar os diálogos ao menos uma vez.
+    # Sem listar os diálogos uma vez, get_entity() falha com "Cannot find any entity"
+    # para ID numérico, mesmo com a conta no canal: o Telethon precisa do access_hash
+    # em cache.
     try:
         await client.get_dialogs()
         if EXIBIR_LOGS: logger.info("🗂️ Cache de entidades da sessão preenchido.")
     except Exception as e:
         if EXIBIR_LOGS: logger.warning(f"⚠️ Não consegui preencher o cache de entidades: {e}")
 
-    # Inicia a tarefa paralela que vigia o arquivo JSON a cada 5 segundos
     asyncio.create_task(monitorar_comandos())
     
-    # Executa imediatamente o agendamento da hora atual ao iniciar o script
     programar_envios_da_hora()
     
-    # Agenda a função para rodar toda vez que o relógio virar a hora (minuto 0)
     scheduler.add_job(programar_envios_da_hora, 'cron', minute=0)
 
-    # 🧵 Nomes de grupo e tópico para o cache compartilhado, uma vez por dia.
     # 00:07 e não 00:00: a virada do dia já tem o programar_envios_da_hora e a
-    # coleta de métricas: separar evita os três disputando o mesmo instante.
+    # coleta de métricas, e separar evita os três disputando o mesmo instante.
     scheduler.add_job(sincronizar_nomes_topicos, 'cron', hour=0, minute=7)
-    asyncio.create_task(sincronizar_nomes_topicos())  # primeira carga na subida
+    asyncio.create_task(sincronizar_nomes_topicos())
     
     scheduler.start()
     if EXIBIR_LOGS: logger.info("🤖 Sistema automático rodando. Pressione Ctrl+C para parar.")
     
-    # Mantém a sessão do Telegram aberta escutando os eventos do agendador
     await client.run_until_disconnected()
 
 if __name__ == '__main__':

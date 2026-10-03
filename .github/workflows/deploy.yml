@@ -33,7 +33,8 @@ jobs:
             motor_userbot.py \
             divulgacao_canal.py \
             api_gemini.py \
-            api_shopee.py
+            api_shopee.py \
+            downloader_bot.py
 
   deploy:
     needs: validar
@@ -88,6 +89,12 @@ jobs:
             sudo systemctl stop espelhador_videos_autorais_bot.service || true
             sudo systemctl kill -s SIGKILL espelhador_videos_autorais_bot.service || true
             sudo systemctl start espelhador_videos_autorais_bot.service
+
+            # 5. Reinicia o Downloader (baixador de vídeos)
+            if [ "$EXIBIR_LOGS" = "true" ]; then echo "📥 Reiniciando Downloader..."; fi
+            sudo systemctl stop downloader_bot.service || true
+            sudo systemctl kill -s SIGKILL downloader_bot.service || true
+            sudo systemctl start downloader_bot.service
             
             if [ "$EXIBIR_LOGS" = "true" ]; then echo "🚪 Encerrando a conexão SSH de forma limpa..."; fi
             exit 0

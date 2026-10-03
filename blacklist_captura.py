@@ -1,8 +1,8 @@
 # =============================================================================
-# 🚫 LISTA NEGRA DE CAPTURA — blacklist_captura.py
+# LISTA NEGRA DE CAPTURA — blacklist_captura.py
 # =============================================================================
 #
-# 📖 LEIA-ME PARA A IA (e para o Rafael daqui a seis meses)
+# LEIA-ME PARA A IA (e para o Rafael daqui a seis meses)
 #
 # ─── O QUE ESTE ARQUIVO É ────────────────────────────────────────────────────
 # Uma lista de autores cujas postagens o espelhador NUNCA deve capturar. Ele
@@ -13,7 +13,7 @@
 # Ele não captura, não posta, não agenda. Só diz sim ou não.
 #
 # ─── POR QUE ELE PRECISOU EXISTIR ────────────────────────────────────────────
-# ⚠️ ISTO AQUI É O MOTIVO REAL DESTE ARQUIVO. NÃO APAGUE ESTE BLOCO.
+# ISTO AQUI É O MOTIVO REAL DESTE ARQUIVO. NÃO APAGUE ESTE BLOCO.
 #
 # Até então, a única proteção contra capturar as próprias postagens era o
 # 'incoming=True' do Telethon mais o 'if event.out: return' no espelhador.
@@ -29,8 +29,8 @@
 #   • o espelho recaptura, republica no canal, reentra na fila
 #   • no D+X seguinte, reposta de novo → laço infinito
 #
-# Não existe nenhum anti-loop por hash no espelhador_videos_autorais.py para
-# segurar isso (procurei: hashlib está importado mas não é usado para dedupe).
+# Não existe anti-loop por hash de vídeo no espelhador_videos_autorais.py para
+# segurar isso (a tabela videos_reservados é reserva por produto, dos parceiros).
 # Ou seja: a lista negra não é um luxo, é o que impede o laço assim que as duas
 # funções ficam em contas diferentes.
 #
@@ -110,7 +110,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# 🕐 Trava de fuso centralizada, no mesmo padrão dos outros módulos.
+# Importar fuso já trava o processo no horário de Brasília; sem o fuso.py, segue com
+# o fuso e o log padrão.
 try:
     from fuso import fuso_horario, configurar_logs
     logger = configurar_logs(__name__)
@@ -205,7 +206,7 @@ def extrair_alvo(texto):
       630077263                                        → ID
       @fulano  ou  fulano                              → @fulano
 
-    ⚠️ O LINK É O MELHOR CAMINHO. No Telegram Web, o que vem depois do '#' na
+    O LINK É O MELHOR CAMINHO. No Telegram Web, o que vem depois do '#' na
     barra de endereço é o ID numérico da conversa aberta — ou seja, o ID da
     pessoa. E ID não muda nunca, enquanto o @ a pessoa troca quando quiser. Além
     disso, bloquear por ID funciona na hora: a checagem compara com o
@@ -273,7 +274,7 @@ async def _buscar_entidade(alvo):
     Pergunta "quem é este @ / este ID?" para as contas do pool, UMA DE CADA VEZ,
     e devolve a primeira resposta que vier.
 
-    ⚠️ Por que todas e não só uma: cada conta só enxerga quem ELA já cruzou. Você
+    Por que todas e não só uma: cada conta só enxerga quem ELA já cruzou. Você
     pode estar conversando com a pessoa pela conta principal enquanto a busca
     tentava só a secundária — e aí voltava sem nome nenhum, que foi o que
     aconteceu no primeiro bloqueio por link. Vale principalmente para ID

@@ -1,4 +1,20 @@
-# 0. CONFIGURAÇÕES INICIAIS
+"""
+Bot mestre (aiogram): o painel do admin no privado e os motores que publicam nos
+canais e grupos.
+
+- Canal principal: fila de vídeos (fila_postagens) distribuída entre o Bom Dia e a
+  Boa Noite, rotinas de texto da IA, pausa programada e Gerenciar Fila.
+- Canal Viral: fila de clonagem do Espião (vídeos capturados pelo motor_userbot,
+  publicados com D+X, nome do produto pela IA e link de afiliado) e suas rotinas.
+- Grupo Público: submissão guiada pelos membros (a IA aprova e publica), repost de
+  vídeos autorais e de parceiros, rotinas e SPAM próprios, buscador de produtos.
+- Achadinhos, financeiro (pedidos e comissões da Shopee), faxinas, monitor de
+  saúde; o Espelhador e o Disparador de Notas entram como routers.
+
+Os dados ficam no banco_dados.db (filas e a tabela configuracoes). Os jobs vivem no
+APScheduler em memória e o FSM no MemoryStorage: um restart refaz a grade do dia
+em main() e encerra as sessões abertas dos painéis.
+"""
 EXIBIR_LOGS = True
 import os
 import re
@@ -7,20 +23,16 @@ import time
 from dotenv import load_dotenv
 load_dotenv()
 
-# 🕐 Trava de fuso centralizada: importar o modulo ja aplica America/Sao_Paulo.
+# Importar o fuso já fixa o processo em America/Sao_Paulo.
 from fuso import FUSO_STR, fuso_horario, configurar_logs
 
 
-import logging
 import json
 import asyncio
 import random
 from datetime import datetime, timedelta
-import time
-import hmac
 import hashlib
 import aiohttp
-from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
@@ -32,34 +44,36 @@ from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 import subprocess
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-# ✅ Importação dos nossos novos módulos blindados (Fase 2)
 from api_gemini import gerar_texto_gemini, analisar_video_gemini, MODELOS_CASCATA_GEMINI, client_genai
 from api_shopee import converter_link_shopee, buscar_ofertas_shopee, testar_chaves_afiliado
-from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite, sortear_teto_do_dia, faixa_de_config, recompactar_horarios # ⚙️ Novo Motor Centralizado
+from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite, sortear_teto_do_dia, faixa_de_config, recompactar_horarios
 
 import matplotlib.pyplot as plt
 import io
 import sqlite3
 import painel_espelhos
 import painel_notas
-import pool_contas        # 👥 Pool de contas: quem espelha e quem reposta nos Autorais
-import blacklist_captura  # 🚫 Lista negra: de quem o espelhador NUNCA pode capturar
-from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
+import pool_contas  # contas dos userbots (quem espelha, quem reposta)
+import blacklist_captura  # de quem os userbots nunca capturam
+from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo, salvar_json_atomico
 EXIBIR_LOGS = True
 
-# 2. CONFIGURAÇÃO DE LOGS 🚀
 if EXIBIR_LOGS:
     logger = configurar_logs(__name__)
 
-# ✅ Cria a pasta temp isolada na inicialização
+# temp/: downloads de passagem (a faxina de disco limpa o que sobra).
 os.makedirs("temp", exist_ok=True)
 
 def inicializar_banco_sqlite():
+    """
+    Cria as tabelas do banco compartilhado e as colunas novas. Roda ao importar o
+    módulo; ALTER TABLE de coluna que já existe falha e é ignorado.
+    """
     if EXIBIR_LOGS: logger.info("🚀 Preparando a fundação de dados em SQLite...")
     conexao = sqlite3.connect("banco_dados.db")
     cursor = conexao.cursor()
     
-    # 1. Tabela da Fila de Vídeos Central
+    # Fila do canal principal (vídeos criados em Criar Postagem).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS fila_postagens (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,7 +89,7 @@ def inicializar_banco_sqlite():
         )
     ''')
     
-    # 2. Tabela de Configurações (Guarda o status do Bom Dia/Boa Noite)
+    # Configurações de todos os robôs: chave -> JSON (ler_config_bd / salvar_config_bd).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS configuracoes (
             chave TEXT PRIMARY KEY,
@@ -83,7 +97,7 @@ def inicializar_banco_sqlite():
         )
     ''')
     
-    # 3. Tabela da Lixeira Persistente (Guarda os IDs para apagar às 03h00)
+    # Mensagens a apagar na faxina da madrugada (registrar_lixeira).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS lixeira_mensagens (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,7 +107,7 @@ def inicializar_banco_sqlite():
         )
     ''')
     
-    # 4. Tabela de Logs de Erros
+    # Log de erros (registrar_erro_json do utils).
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS erros_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,7 +117,7 @@ def inicializar_banco_sqlite():
         )
     ''')
 
-    # 🚀 Migração invisível 2: Colunas do Robô Repostador no Público
+    # fila_autorais (criada pelo espelhador_videos_autorais): colunas da repostagem no Grupo Público.
     try:
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN repostado_publico INTEGER DEFAULT 0")
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_repost_publico TEXT")
@@ -111,7 +125,7 @@ def inicializar_banco_sqlite():
     except sqlite3.OperationalError:
         pass
 
-    # 🚀 Migração invisível 4: Data-alvo própria da fila do Grupo Público
+    # fila_autorais: data-alvo e status próprios do Grupo Público.
     try:
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_alvo_publico TEXT")
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN status_publico TEXT")
@@ -119,15 +133,14 @@ def inicializar_banco_sqlite():
     except sqlite3.OperationalError:
         pass
 
-    # 🚀 Migração invisível 5: garante a coluna de status mesmo em bancos que já tinham a data-alvo
+    # status_publico sozinho, para bancos que já tinham data_alvo_publico (o bloco acima para no primeiro erro).
     try:
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN status_publico TEXT")
         if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'status_publico' adicionada à fila_autorais.")
     except sqlite3.OperationalError:
         pass
         
-    # 🚀 Migração invisível 8: id da mensagem que foi realmente publicada. Sem ela o
-    # relatório sabe QUE postou mas não ONDE, e o link "(Destino)" saía indisponível.
+    # msg_postada_id: id da mensagem publicada; monta o link "(Destino)" no relatório.
     for _tabela_msg in ("fila_autorais", "fila_publico"):
         try:
             cursor.execute(f"ALTER TABLE {_tabela_msg} ADD COLUMN msg_postada_id INTEGER")
@@ -135,26 +148,23 @@ def inicializar_banco_sqlite():
         except sqlite3.OperationalError:
             pass
 
-    # 🚀 Migração invisível 7: caminho do arquivo que o Correio Público (userbot) baixa
-    # para o bot publicar. O canal de origem não é nosso, então o bot nunca consegue
-    # copiar de lá — ele publica a partir do disco, como faz com os parceiros.
+    # fila_publico.caminho_arquivo: vídeo baixado pelo Correio Público (userbot). O bot não
+    # consegue copiar do canal de origem, que não é nosso, e publica a partir do disco.
     try:
         cursor.execute("ALTER TABLE fila_publico ADD COLUMN caminho_arquivo TEXT")
         if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'caminho_arquivo' adicionada à fila_publico.")
     except sqlite3.OperationalError:
         pass
 
-    # 🚀 Migração invisível 6: horário REAL da publicação do retorno autoral.
-    # Sem esta coluna o relatório só tinha o horário previsto e imprimia
-    # "Prev: Hoje às" com o horário em branco nos itens já postados.
+    # fila_autorais.data_postagem: hora real da publicação do retorno, mostrada no relatório.
     try:
         cursor.execute("ALTER TABLE fila_autorais ADD COLUMN data_postagem TEXT")
         if EXIBIR_LOGS: logger.info("📦 Banco de dados atualizado: Coluna 'data_postagem' adicionada à fila_autorais.")
     except sqlite3.OperationalError:
         pass
 
-        # 9. PARCEIROS: afiliados terceiros que repostam com as próprias credenciais.
-    # Cada um tem canais, atraso e cota próprios — nada é compartilhado com o dono.
+    # Parceiros: afiliados terceiros que repostam com as próprias credenciais. Cada um
+    # tem canais, atraso e cota próprios; nada é compartilhado com o dono.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS parceiros (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -170,8 +180,8 @@ def inicializar_banco_sqlite():
         )
     ''')
 
-    # Migração: status de acesso do userbot ao canal de origem do parceiro
-    # + janela de horário de publicação própria de cada parceiro (0 a 24 = dia todo)
+    # Parceiros: acesso do userbot ao canal de origem e janela de publicação própria
+    # (0 a 24 = dia todo).
     for coluna, tipo in [("origem_ok", "INTEGER DEFAULT 0"), ("origem_erro", "TEXT"),
                          ("janela_inicio", "INTEGER DEFAULT 0"), ("janela_fim", "INTEGER DEFAULT 24"),
                          ("limite_min", "INTEGER DEFAULT 0"), ("limite_max", "INTEGER DEFAULT 0")]:
@@ -180,8 +190,8 @@ def inicializar_banco_sqlite():
         except sqlite3.OperationalError:
             pass
 
-    # 10. RESERVA GLOBAL: garante que um vídeo nunca saia em dois canais.
-    # O dono reserva primeiro (prioridade); os parceiros pulam o que já está aqui.
+    # Reserva global: um vídeo (ou produto) sai num canal só. Quem reserva primeiro leva:
+    # o dono, no sorteio do Grupo Público, ou um parceiro.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS videos_reservados (
             video_id TEXT PRIMARY KEY,
@@ -190,7 +200,7 @@ def inicializar_banco_sqlite():
         )
     ''')
 
-    # 8. Achadinhos já enviados — memória PERMANENTE (antes era lista de 500, que reciclava)
+    # Achadinhos já enviados, para o garimpo não repetir item.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS achadinhos_enviados (
             item_id TEXT PRIMARY KEY,
@@ -199,7 +209,7 @@ def inicializar_banco_sqlite():
         )
     ''')
 
-    # 🚀 Migração única: leva a lista antiga (JSON de 500) para a tabela definitiva
+    # Migração única: a lista antiga (JSON com os últimos 500) vai para a tabela.
     try:
         cursor.execute("SELECT valor FROM configuracoes WHERE chave = 'achadinhos_enviados'")
         antigo = cursor.fetchone()
@@ -215,7 +225,7 @@ def inicializar_banco_sqlite():
     except Exception as e:
         if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível migrar a lista antiga de achadinhos: {e}")
 
-    # 7. Histórico de Métricas (prova social das rotinas)
+    # Métricas diárias, usadas como prova social nas mensagens de rotina.
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS historico_metricas (
             data TEXT,
@@ -225,7 +235,13 @@ def inicializar_banco_sqlite():
         )
     ''')
         
-    # 🚀 Migração invisível 3: Atualiza a tabela de Logs para suportar o Utils Avançado
+    # Tentativas de envio de cada vídeo do canal principal (executar_postagem_fila).
+    try:
+        cursor.execute("ALTER TABLE fila_postagens ADD COLUMN tentativas INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
+
+    # erros_logs: rastro do código e contexto (registrar_erro_json do utils).
     try:
         cursor.execute("ALTER TABLE erros_logs ADD COLUMN rastro_codigo TEXT")
         cursor.execute("ALTER TABLE erros_logs ADD COLUMN contexto TEXT")
@@ -239,10 +255,9 @@ def inicializar_banco_sqlite():
 
 inicializar_banco_sqlite()
 
-# 1. CONSTANTES E TOKENS
 API_TOKEN = os.getenv('TELEGRAM_TOKEN')
 # ==========================================================================
-# 👤 CONTAS QUE OPERAM NESTE ROBÔ
+# Contas que operam neste robô
 #
 # Bot oficial (aiogram):
 #   @ShopeeVbot · id 8707808275
@@ -267,42 +282,25 @@ LINK_GRUPO_PUBLICO = "https://t.me/GrupoPublicoAfiliados"
 LINK_CANAL_ACHADINHOS = "https://t.me/centraldeachadinhosvip"
 SHOPEE_APP_ID = os.getenv('SHOPEE_APP_ID')
 SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
-# As chaves do Gemini e a cascata foram removidas. Agora são geridas com total segurança pelo api_gemini.py
 
-# 2.5 SISTEMA DE NUMERAÇÃO DE VÍDEOS 🔢
+# Número da próxima postagem do canal principal (contador.txt).
 def ler_contador():
     try:
         with open("contador.txt", "r") as f:
             return int(f.read().strip())
     except FileNotFoundError:
-        return 1 # Se o arquivo não existir, começa do 1
+        return 1  # arquivo ausente: começa do 1
 
 def salvar_contador(numero):
     with open("contador.txt", "w") as f:
         f.write(str(numero))
 
-async def resolver_nome_topico(base, topico):
-    if EXIBIR_LOGS: logger.info(f"🔍 Iniciando resolução de nome para o tópico {topico} na base {base}...")
-    if not topico or str(topico) == "1":
-        if EXIBIR_LOGS: logger.info("✅ Sucesso: Tópico principal identificado como Geral.")
-        return "Geral"
-    
-    cache_nomes = ler_cache_nomes_grupos()
-    base_str = str(base).strip()
-    topico_str = str(topico).strip()
-    
-    for chave in (f"{base_str}_{topico_str}", f"{base_str}:{topico_str}"):
-        if chave in cache_nomes:
-            if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Nome de tópico encontrado no cache ({cache_nomes[chave]}).")
-            return cache_nomes[chave]
-    
-    if EXIBIR_LOGS: logger.info(f"⚠️ Aviso: Nome não encontrado no cache. Adotando padrão Tópico {topico_str}.")
-    return f"Tópico {topico_str}"
-
 def formatar_nome_alvo(alvo, cache_nomes, nome_status=None):
-    """🧵 Monta 'Grupo › Tópico' para alvos de fórum (-100xxx:281).
-    Sem isso, dezenas de alvos do mesmo grupo aparecem com nome idêntico.
-    nome_status = nome vindo do status_alvos (é sempre o nome do GRUPO)."""
+    """
+    Monta 'Grupo › Tópico' para alvos de fórum (-100xxx:281); sem isso, alvos do mesmo
+    grupo aparecem com nome idêntico. nome_status = nome vindo do status_alvos (é
+    sempre o nome do GRUPO).
+    """
     alvo_str = str(alvo)
     if ":" not in alvo_str:
         return nome_status or cache_nomes.get(alvo_str) or alvo_str
@@ -314,17 +312,16 @@ def formatar_nome_alvo(alvo, cache_nomes, nome_status=None):
         nome_topico = "Geral" if topico.strip() == "1" else f"Tópico {topico}"
     return f"{nome_grupo} › {nome_topico}"
 
-# 3. MÁQUINA DE ESTADOS (FSM) PARA O FLUXO DE POSTAGEM
+# --- Estados (FSM) dos fluxos do painel ---
 class PostagemFluxo(StatesGroup):
     aguardando_video = State()             
     aguardando_confirmacao_nome = State()  
     aguardando_chamada_manual = State()    
     aguardando_decisao_erro = State()
-    # ✅ Novos estados para o fluxo aprimorado
     aguardando_plataforma = State()
     aguardando_link_video_shopee = State()
     aguardando_link_video_tiktok = State()
-    # ✅ Estados separados para coletar os links corretos de cada plataforma
+    # Links coletados separadamente para cada plataforma.
     aguardando_links_shopee = State()
     aguardando_links_tiktok = State()
 
@@ -332,10 +329,10 @@ class ConfigFluxo(StatesGroup):
     aguardando_novo_numero = State()
     aguardando_confirmacao_zerar = State()
     aguardando_confirmacao_zerar_filas = State()
-    aguardando_selecao_limpeza = State() # ✅ NOVO: Passo 1 (Escolher o que limpar)
-    aguardando_acao_limpeza = State()    # ✅ NOVO: Passo 2 (Confirmar a limpeza)
+    aguardando_selecao_limpeza = State()  # passo 1: escolher o que limpar
+    aguardando_acao_limpeza = State()  # passo 2: confirmar a limpeza
     aguardando_confirmacao_reiniciar = State()
-    aguardando_confirmacao_rotinas = State() # ✅ NOVO: Aprovar antes de recalcular a grade
+    aguardando_confirmacao_rotinas = State()  # aprovar antes de recalcular a grade
 
 class ConfigDivulgacao(StatesGroup):
     menu_principal = State()
@@ -344,7 +341,7 @@ class ConfigDivulgacao(StatesGroup):
     aguardando_tipo_edicao = State()
     aguardando_selecao_alvo = State()
     aguardando_valores_unificados = State()
-    aguardando_confirmacao_pausa = State() # ✅ NOVO
+    aguardando_confirmacao_pausa = State()
 
 class ConfigDivulgacaoViral(StatesGroup):
     menu_principal = State()
@@ -353,7 +350,7 @@ class ConfigDivulgacaoViral(StatesGroup):
     aguardando_tipo_edicao = State()
     aguardando_selecao_alvo = State()
     aguardando_valores_unificados = State()
-    aguardando_confirmacao_pausa = State() # ✅ NOVO
+    aguardando_confirmacao_pausa = State()
 
 class ConfigDivulgacaoEscopo(StatesGroup):
     """Estados compartilhados pelos painéis de SPAM por escopo (Público e
@@ -368,10 +365,10 @@ class ConfigDivulgacaoEscopo(StatesGroup):
 class ConfigRotina(StatesGroup):
     menu_principal = State()
     aguardando_novo_horario = State()
-    aguardando_confirmacao_pausa = State() # ✅ NOVO: Estado para confirmar a pausa
-    aguardando_confirmacao_disparo = State() # ✅ NOVO: Confirmação dos disparos manuais do Público
-    aguardando_alvos_rotina = State() # ✅ NOVO: Seleção dos tópicos que recebem as rotinas
-    aguardando_confirmacao_alvos_rotina = State() # ✅ NOVO: Confirmação dos alvos de postagem
+    aguardando_confirmacao_pausa = State()
+    aguardando_confirmacao_disparo = State()  # disparos manuais do Público
+    aguardando_alvos_rotina = State()  # tópicos que recebem as rotinas
+    aguardando_confirmacao_alvos_rotina = State()
 
 class ConfigPausa(StatesGroup):
     menu_principal = State()
@@ -402,7 +399,6 @@ class AchadinhosFluxo(StatesGroup):
     menu_principal = State()
     aguardando_nome = State()
     aguardando_destino = State()
-    aguardando_thread_id = State() # ✅ NOVO: Estado para capturar o Tópico
     aguardando_keywords = State()
     aguardando_remocao = State()
     aguardando_confirmacao_remocao = State()
@@ -418,17 +414,17 @@ class SubmissaoAdminFluxo(StatesGroup):
     menu_principal = State()
     aguardando_confirmacao_toggle = State()
     
-    # Estados para Regras de Repostagem
+    # Regras de Repostagem do Grupo Público
     aguardando_repost_dias = State()
     aguardando_repost_limite = State()
     aguardando_confirmacao_repost_dias = State()
     aguardando_confirmacao_repost_limite = State()
     aguardando_confirmacao_pausa_repost = State()
     aguardando_repost_origem = State()
-    aguardando_repost_destino = State() # ✅ NOVO ESTADO AQUI
-    aguardando_confirmacao_destino = State()   # ✅ Confirma troca de origem/destino
+    aguardando_repost_destino = State()
+    aguardando_confirmacao_destino = State()  # confirma troca de origem/destino
 
-    # 👥 Cadastro de parceiros (7 passos + confirmação)
+    # Cadastro de parceiros (7 passos + confirmação)
     parceiro_nome = State()
     parceiro_app_id = State()
     parceiro_app_secret = State()
@@ -442,13 +438,13 @@ class SubmissaoAdminFluxo(StatesGroup):
     parceiro_confirmar_exclusao = State()
     parceiro_confirmar_exclusao_total = State()
     
-    # ✅ NOVOS ESTADOS: Edição Modular do Grupo e Tópicos
+    # Edição do grupo e dos tópicos do módulo de submissão
     aguardando_selecao_edicao_grupo = State()
     aguardando_novo_valor_grupo = State()
     aguardando_confirmacao_grupo = State()
 
 class SubmissaoUsuarioInterativa(StatesGroup):
-    painel = State()   # ✅ Painel único: vídeo e links entram em qualquer ordem
+    painel = State()  # painel único: vídeo e links entram em qualquer ordem
 
 def ler_submissao_config():
     return ler_config_bd("submissao_config", padrao={
@@ -456,7 +452,7 @@ def ler_submissao_config():
         "grupo_id": None, 
         "topico_envio": None, 
         "topico_destino": None,
-        "repost_origem": None, # ✅ NOVO: Chave para a origem
+        "repost_origem": None,
         "repost_dias": 15,
         "repost_limite": 6,
         "repost_pausado": False,
@@ -472,47 +468,34 @@ class AutoraisFluxo(StatesGroup):
     menu_principal = State()
     aguardando_origem = State()
     aguardando_topico = State() 
-    aguardando_confirmacao_origem = State() # ✅ NOVO: Etapa de confirmação
+    aguardando_confirmacao_origem = State()
     aguardando_destino = State()
-    aguardando_confirmacao_destino = State() # ✅ NOVO: Etapa de confirmação
+    aguardando_confirmacao_destino = State()
     aguardando_dias_retorno = State()
-    aguardando_confirmacao_dias_retorno = State() # ✅ NOVO: Etapa de confirmação
+    aguardando_confirmacao_dias_retorno = State()
     aguardando_limite_videos = State()
-    aguardando_confirmacao_limite_videos = State() # ✅ NOVO: Etapa de confirmação
-    aguardando_janela_autorais = State()           # 🕐 NOVO: Janela de horário do retorno
+    aguardando_confirmacao_limite_videos = State()
+    aguardando_janela_autorais = State()  # janela de horário do retorno
     aguardando_confirmacao_janela_autorais = State()
     aguardando_confirmacao_pausa_repost = State()
     aguardando_confirmacao_pausa_robo = State()
-    aguardando_bloqueio = State()  # 🚫 espera o @ que vai para a lista negra
+    aguardando_bloqueio = State()  # espera o @ que vai para a lista negra
 
 class RelatoriosFluxo(StatesGroup):
     menu_filas = State()
-    aguardando_rota_espelhador = State() # ✅ NOVO: Estado para selecionar qual rota visualizar
-    aguardando_parceiro_detalhe = State() # ✅ NOVO: qual parceiro detalhar a fila
+    aguardando_rota_espelhador = State()  # qual rota do Espelhador mostrar
+    aguardando_parceiro_detalhe = State()  # qual parceiro detalhar
 
 class ConfigRotinaEspiao(StatesGroup):
     aguardando_janela = State()
-    aguardando_confirmacao_janela = State() # ✅ NOVO
+    aguardando_confirmacao_janela = State()
     aguardando_intervalo_espiao = State()
     aguardando_modo = State()
-    aguardando_confirmacao_tempo = State() # ✅ NOVO
+    aguardando_confirmacao_tempo = State()
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
-FUSO_STR = "America/Sao_Paulo"
-fuso_horario = ZoneInfo(FUSO_STR)
 _lock_contador = asyncio.Lock()
-
-# ✅ NOVO: Sistema de travas assíncronas para proteção contra Race Conditions
-if EXIBIR_LOGS: logger.info("🚀 Inicializando o gerenciador de travas (Locks) para os arquivos locais...")
-_locks_json = {
-    "fila_clonagem.json": asyncio.Lock(),
-    "pausa_programada.json": asyncio.Lock(),
-    "config_rotina.json": asyncio.Lock(),
-    "alvos_espiao.json": asyncio.Lock(),
-    "banco_pedidos.json": asyncio.Lock()
-}
-if EXIBIR_LOGS: logger.info("✅ Travas de segurança dos bancos JSON prontas e ativas.")
 
 scheduler = AsyncIOScheduler(timezone=FUSO_STR)
 
@@ -527,8 +510,7 @@ dp.include_router(painel_notas.router)
 painel_notas.configurar_dependencias(bot, scheduler)
 if EXIBIR_LOGS: logger.info("✅ Módulo de Notas montado com segurança.")
 
-# --- NOVOS TECLADOS DE CONTROLE ---
-# 🛠️ Teclado para seleção da plataforma
+# --- Teclados ---
 teclado_plataforma = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Ambos 🛒🎵")],
@@ -539,23 +521,21 @@ teclado_plataforma = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# 🛠️ Teclado básico para etapas de entrada de dados
 teclado_cancelar = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Cancelar ❌")]],
     resize_keyboard=True,
     is_persistent=True
 )
 
-# 🔙 Cancelar EXCLUSIVO da tela de alvos do Grupo Público. O texto é próprio
-# de propósito: assim o handler pode usar StateFilter("*") e continuar funcionando
-# mesmo depois de um restart, quando o MemoryStorage do aiogram já zerou o FSM.
+# Cancelar só da tela de alvos do Grupo Público. O texto é próprio de propósito: o
+# handler usa StateFilter("*") e continua funcionando depois de um restart, quando o
+# MemoryStorage do aiogram já zerou o FSM.
 teclado_cancelar_alvos_publico = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="❌ Cancelar e Voltar às Rotinas")]],
     resize_keyboard=True,
     is_persistent=True
 )
 
-# 🛠️ Teclado para erro na IA (NOVO)
 teclado_erro_ia = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Tentar Novamente 🔄"), KeyboardButton(text="Digitar Manualmente ✍️")],
@@ -565,7 +545,6 @@ teclado_erro_ia = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# 🛠️ Teclado de confirmação da análise da inteligência artificial
 teclado_confirmacao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Digitar Nome ✍️")],
@@ -575,7 +554,7 @@ teclado_confirmacao = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# 🛠️ Teclado para a fase de coleta de links e encerramento
+# Coleta de links e encerramento da postagem.
 teclado_finalizar = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Finalizar ✅")],
@@ -585,7 +564,6 @@ teclado_finalizar = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# 🛠️ Teclado de sub-menu para edição da numeração
 teclado_opcoes_numero = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Editar Número ✏️"), KeyboardButton(text="Zerar Contador 🔄")],
@@ -595,7 +573,7 @@ teclado_opcoes_numero = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# 🛠️ Teclado de confirmação de segurança para evitar zerar acidentalmente
+# Confirmação antes de zerar o contador.
 teclado_confirmar_zerar = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]
@@ -604,7 +582,6 @@ teclado_confirmar_zerar = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# --- NOVOS TECLADOS DE CONFIGURAÇÃO ---
 def obter_teclado_configuracoes_gerais():
     dados_pausa = ler_pausa_programada()
     texto_botao_pausa = "Retomar Postagens ▶️" if dados_pausa.get("ativa") else "Pausar Postagens 🛑"
@@ -653,9 +630,8 @@ def obter_teclado_outros_canais():
             [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
             [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
             [KeyboardButton(text="Gerador de Achadinhos 🛍️")],
-            # 👥 Fica AQUI, irmão dos robôs, e não dentro do Vídeos Autorais: as
-            # contas do pool e a lista negra valem para mais de um robô, então
-            # pendurá-las embaixo de um deles dava a impressão errada de escopo.
+            # Fica aqui, ao lado dos robôs, e não dentro do Vídeos Autorais: as contas do pool
+            # e a lista negra valem para mais de um robô.
             [KeyboardButton(text="Contas 👥")],
             [KeyboardButton(text="Voltar ao Início 🔙")]
         ],
@@ -696,7 +672,7 @@ teclado_edicao_nicho = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# 🛠️ Função do novo Menu Inicial Raiz
+# Menu inicial.
 def obter_teclado_raiz():
     botoes = [
         [KeyboardButton(text="Canal Afiliados 📺"), KeyboardButton(text="Outros Canais 🗂️")],
@@ -713,16 +689,16 @@ def obter_teclado_principal():
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
-# 🛠️ Novo Sub-Menu do Servidor
+# Menu Opções do Servidor.
 def obter_teclado_opcoes_servidor():
     botoes = [
         [KeyboardButton(text="Monitorar Servidor 🖥️"), KeyboardButton(text="Zerar Filas e Tarefas 🧹")],
-        [KeyboardButton(text="Reiniciar Robôs 🔄")], # ✅ NOVO BOTÃO AQUI
+        [KeyboardButton(text="Reiniciar Robôs 🔄")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
-# --- SISTEMA DO ESPIÃO (CONFIGURAÇÕES) ---
+# --- Espião: configuração e análise dos canais vigiados ---
 def ler_alvos_espiao():
     padrao = {"alvos": [], "canal_destino": None, "status_alvos": {}}
     return ler_config_bd("alvos_espiao", padrao, arquivo_legado="alvos_espiao.json")
@@ -845,7 +821,6 @@ async def voltar_opcoes_espiao(message: types.Message, state: FSMContext):
     await state.clear()
     await menu_grupos_vigiados(message, state)
 
-# 🛠️ Novo Teclado para Janela do Espião
 teclado_janela_espiao = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Dia Todo (24h) 🕛")],
@@ -855,10 +830,14 @@ teclado_janela_espiao = ReplyKeyboardMarkup(
     is_persistent=True
 )
 
-# --- SISTEMA DE FILA DE POSTAGENS ASSÍNCRONAS ---
+# --- Fila do canal principal (fila_postagens) ---
 def ler_fila_postagens():
+    """
+    Fila do canal principal no formato que os menus usam ({"fila": [...]}, com
+    data_adicao = data_alvo e postado = CONCLUIDO). Item com ERRO aparece como não postado.
+    """
     import os
-    # 📦 Módulo de migração silenciosa (Executa apenas na primeira vez)
+    # fila_postagens.json da versão antiga: migra para o SQLite uma vez e arquiva.
     if os.path.exists("fila_postagens.json"):
         try:
             if EXIBIR_LOGS: logger.info("📦 Migrando dados antigos do JSON para o banco SQLite...")
@@ -876,7 +855,7 @@ def ler_fila_postagens():
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         
-        # Retorna ordenado pela data e depois pela prioridade para manter a ordem visual
+        # Ordem de exibição: data e depois a ordem dentro do dia.
         cursor.execute("SELECT * FROM fila_postagens ORDER BY data_alvo ASC, prioridade ASC")
         linhas = cursor.fetchall()
         conexao.close()
@@ -900,7 +879,10 @@ def ler_fila_postagens():
         return {"fila": []}
 
 def salvar_fila_postagens(dados):
-    # Função adaptador temporária para não quebrar os menus antigos
+    """
+    Regrava fila_postagens inteira (DELETE + INSERT). Só a migração do JSON antigo usa;
+    o resto do código grava com UPDATE/INSERT pontuais.
+    """
     try:
         conexao = sqlite3.connect("banco_dados.db")
         cursor = conexao.cursor()
@@ -929,17 +911,26 @@ def salvar_fila_postagens(dados):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao reescrever fila no SQLite: {e}")
 
-# 🧹 O antigo salvar_fila_postagens() foi completamente eliminado nesta fase.
-# Todas as gravações agora ocorrem através de queries atómicas (UPDATE/INSERT/DELETE).
 
 def agendar_fila_postagens():
+    """
+    Refaz os agendamentos de hoje: espalha os vídeos pendentes entre o Bom Dia e a
+    Boa Noite, um por bloco de tempo, com variação aleatória em torno do meio do bloco.
+    Com a pausa programada ativa, só desfaz os agendamentos.
+    """
     if EXIBIR_LOGS: logger.info("🔄 Recalculando e agendando fila de postagens de forma DINÂMICA (Variação 50%)...")
-    # 1. Limpa agendamentos antigos para evitar duplicidade
+    # Remove os agendamentos anteriores; são refeitos abaixo.
     for job in scheduler.get_jobs():
         if job.id.startswith('job_fila_postagem_'):
             job.remove()
 
-    # 2. Busca vídeos pendentes para hoje no SQLite
+    # Pausa programada: nenhum vídeo sai. Os pendentes voltam a ser agendados quando
+    # ela acaba (fim pelo painel ou verificar_retorno_pausa_minuto).
+    if ler_pausa_programada().get("ativa"):
+        if EXIBIR_LOGS: logger.info("⏸️ Pausa programada ativa: nenhum vídeo da fila foi agendado.")
+        return
+
+    # Pendentes de hoje. "2000-01-01" marca vídeo que entrou antes do Bom Dia (sai hoje).
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
     
@@ -959,7 +950,7 @@ def agendar_fila_postagens():
 
     dados_rotina = ler_config_rotina()
     
-    # 3. Determina as fronteiras de expediente (Bom Dia e Boa Noite)
+    # Janela do dia: do próximo Bom Dia até a Boa Noite (horário dos jobs ou o padrão da config).
     job_bd = scheduler.get_job('job_rotina_bom_dia_0')
     if job_bd and getattr(job_bd, 'next_run_time', None):
         limite_inicio = job_bd.next_run_time.astimezone(fuso_horario)
@@ -974,15 +965,14 @@ def agendar_fila_postagens():
         hora_fim = dados_rotina.get("boa_noite", {}).get("inicio", 21)
         limite_fim = agora.replace(hour=hora_fim, minute=59, second=59, microsecond=0)
 
-    # 4. Cálculo Dinâmico de Tempo Restante com Variação de 50%
     import random
     from datetime import timedelta
     
-    # Cria uma margem para o vídeo não sair imediatamente colado ao "agora" ou ao "Bom dia"
+    # Margem de 15 a 30 min para o vídeo não sair colado ao agora nem ao Bom Dia.
     margem_seguranca = timedelta(minutes=random.randint(15, 30))
     inicio_real = max(agora + margem_seguranca, limite_inicio + margem_seguranca)
 
-    # Se já estivermos além do expediente, cancela o agendamento por hoje
+    # O expediente já acabou: os vídeos esperam o dia seguinte.
     if inicio_real >= limite_fim:
         if EXIBIR_LOGS: logger.warning("⚠️ O expediente de postagens encerrou por hoje. Vídeos aguardarão na fila para amanhã.")
         return
@@ -990,7 +980,7 @@ def agendar_fila_postagens():
     minutos_disponiveis = (limite_fim - inicio_real).total_seconds() / 60
     qtd_pendentes = len(pendentes_hoje)
     
-    # Divide o tempo restante em "blocos" iguais para cada vídeo pendente
+    # Divide o tempo restante em blocos iguais, um por vídeo.
     espacamento_bloco = minutos_disponiveis / qtd_pendentes
     tempo_acumulado = inicio_real
 
@@ -998,23 +988,20 @@ def agendar_fila_postagens():
         id_unico = item["id_unico"]
         job_id = f"job_fila_postagem_{id_unico}"
         
-        # Descobre o meio exato do bloco de tempo deste vídeo
         meio_do_bloco = tempo_acumulado + timedelta(minutes=(espacamento_bloco / 2))
         
-        # ✅ A SUA LÓGICA DE 50%: 
-        # Se o bloco tem 5 horas, a metade é 2h30. 50% dessa metade é 1h15.
-        # O vídeo vai flutuar dinamicamente entre -1h15 e +1h15 a partir do meio!
+        # Variação de até 50% do meio-bloco: com bloco de 5 h, o vídeo cai entre 1h15
+        # antes e 1h15 depois do meio.
         variacao_max = int((espacamento_bloco / 2) * 0.50)
         
-        # Trava mínima para não dar erro se o bloco for minúsculo (ex: só sobrou 5 minutos do dia)
+        # Pelo menos 2 min de variação, para bloco muito curto.
         variacao_max = max(2, variacao_max) 
         
-        # Sorteia a variação dentro do limiar de 50%
         variacao = random.randint(-variacao_max, variacao_max)
         
         horario_final = meio_do_bloco + timedelta(minutes=variacao)
 
-        # Travas finais de segurança
+        # Nunca depois da Boa Noite nem no passado.
         if horario_final >= limite_fim:
             horario_final = limite_fim - timedelta(minutes=random.randint(2, 8))
         if horario_final <= agora:
@@ -1030,11 +1017,13 @@ def agendar_fila_postagens():
         )
         if EXIBIR_LOGS: logger.info(f"⏳ Postagem {id_unico[:8]} agendada dinamicamente para {horario_final.strftime('%H:%M:%S')}")
         
-        # Avança a linha do tempo para o início do bloco do próximo vídeo
         tempo_acumulado += timedelta(minutes=espacamento_bloco)
 
 async def motor_fila_minuto():
-    # ✅ NOVO FISCAL HÍBRIDO (Watchdog): Apenas vigia a memória e auto-cura a grade
+    """
+    Fiscal de 1 em 1 minuto: no expediente (Bom Dia já saiu, Boa Noite não), se há
+    vídeo pendente e nenhum agendado (reinício, falha), refaz a grade.
+    """
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
     
@@ -1046,7 +1035,7 @@ async def motor_fila_minuto():
     ultimo_bn = dados_rotina.get("ultimo_boa_noite", "")
     
     if ultimo_bd != hoje_str or ultimo_bn == hoje_str:
-        return # Fora do expediente
+        return  # fora do expediente
         
     try:
         conexao = sqlite3.connect("banco_dados.db")
@@ -1056,10 +1045,8 @@ async def motor_fila_minuto():
         conexao.close()
         
         if qtd_db > 0:
-            # Verifica quantos vídeos estão realmente na memória do agendador
             qtd_jobs = sum(1 for job in scheduler.get_jobs() if job.id.startswith('job_fila_postagem_'))
             
-            # Se o banco tem vídeo, mas a memória está vazia, o sistema falhou (reboot, crash, etc)
             if qtd_jobs == 0:
                 if EXIBIR_LOGS: logger.warning("⚠️ O Fiscal detectou vídeos perdidos sem agendamento! Forçando auto-cura da grade...")
                 agendar_fila_postagens()
@@ -1067,11 +1054,25 @@ async def motor_fila_minuto():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro no Fiscal da Fila: {e}")
 
+MAX_TENTATIVAS_POSTAGEM = 3
+MINUTOS_ENTRE_TENTATIVAS = 10
+
 async def executar_postagem_fila(item_id):
+    """
+    Publica um vídeo da fila no canal principal (o arquivo do disco ou, sem ele, o
+    file_id do Telegram) e marca CONCLUIDO. Falha de envio tenta de novo até
+    MAX_TENTATIVAS_POSTAGEM; imagem ou vídeo perdido vira ERRO.
+    """
     if EXIBIR_LOGS: logger.info(f"📤 Iniciando processamento do vídeo {item_id}...")
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
-    
+
+    # Job agendado antes de a pausa começar: o vídeo fica pendente para depois dela.
+    if ler_pausa_programada().get("ativa"):
+        if EXIBIR_LOGS: logger.info(f"⏸️ Pausa programada ativa: vídeo {item_id} continua na fila.")
+        return
+
+    sucesso = False
     try:
         conexao = sqlite3.connect("banco_dados.db")
         conexao.row_factory = sqlite3.Row
@@ -1083,8 +1084,7 @@ async def executar_postagem_fila(item_id):
             conexao.close()
             return
             
-        # 🛡️ TRAVA ABSOLUTA ANTI-DUPLICIDADE: Se o vídeo não for mais 'PENDENTE', aborta imediatamente.
-        # Isso impede que o Fiscal (Watchdog) ou qualquer atraso de rede gere postagens duplas.
+        # Só publica item PENDENTE: job repetido (fiscal, nova tentativa) não posta duas vezes.
         if item["status"] != 'PENDENTE':
             if EXIBIR_LOGS: logger.warning(f"🛑 Bloqueio ativado: O vídeo já foi processado anteriormente (Status: {item['status']}). Postagem duplicada evitada.")
             conexao.close()
@@ -1094,14 +1094,13 @@ async def executar_postagem_fila(item_id):
         video_id = item["video_id"]
         legenda = item["legenda"]
         
-        sucesso = False
         falha_irreversivel = False
         novo_file_id = None
         
         if caminho_video and os.path.exists(caminho_video):
-            # ✅ SEGUNDA TRAVA DE SEGURANÇA MANTIDA INTACTA
+            # Imagem não vai como vídeo: descarta.
             if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
-                if EXIBIR_LOGS: logger.warning(f"🚫 [Segurança] Upload cancelado! Ficheiro é uma imagem.")
+                if EXIBIR_LOGS: logger.warning("🚫 [Segurança] Upload cancelado! Ficheiro é uma imagem.")
                 try: os.remove(caminho_video)
                 except: pass
                 falha_irreversivel = True
@@ -1110,7 +1109,7 @@ async def executar_postagem_fila(item_id):
                 msg = await bot.send_video(chat_id=GRUPO_ID, video=arquivo, caption=legenda, parse_mode="HTML")
                 novo_file_id = msg.video.file_id
                 sucesso = True
-                registrar_ultimo_post(GRUPO_ID, "video")   # 🚦 Intercalação
+                registrar_ultimo_post(GRUPO_ID, "video")  # para a intercalação de vídeo e texto (ver registrar_ultimo_post)
                 if EXIBIR_LOGS: logger.info("🚀 [Fluxo] Vídeo enviado com sucesso pelo Motor Central.")
                 try: os.remove(caminho_video)
                 except: pass
@@ -1135,13 +1134,40 @@ async def executar_postagem_fila(item_id):
         try:
             conexao = sqlite3.connect("banco_dados.db")
             cursor = conexao.cursor()
-            cursor.execute("UPDATE fila_postagens SET status = 'ERRO' WHERE id_unico = ?", (item_id,))
+            if sucesso:
+                # O vídeo já foi para o grupo e a falha veio depois: só falta marcar.
+                # Tentar de novo publicaria duas vezes.
+                cursor.execute("UPDATE fila_postagens SET status = 'CONCLUIDO', data_postagem = ?, horario_postagem = ? WHERE id_unico = ?",
+                               (hoje_str, agora.strftime("%H:%M"), item_id))
+            else:
+                cursor.execute("SELECT COALESCE(tentativas, 0) FROM fila_postagens WHERE id_unico = ? AND status = 'PENDENTE'", (item_id,))
+                linha = cursor.fetchone()
+                if linha is not None:
+                    tentativas = linha[0] + 1
+                    if tentativas < MAX_TENTATIVAS_POSTAGEM:
+                        cursor.execute("UPDATE fila_postagens SET tentativas = ? WHERE id_unico = ?", (tentativas, item_id))
+                        nova_tentativa = agora + timedelta(minutes=MINUTOS_ENTRE_TENTATIVAS)
+                        scheduler.add_job(executar_postagem_fila, 'date', run_date=nova_tentativa, args=[item_id],
+                                          id=f"job_fila_postagem_{item_id}", replace_existing=True)
+                        if EXIBIR_LOGS: logger.warning(f"🔁 Tentativa {tentativas}/{MAX_TENTATIVAS_POSTAGEM} do vídeo {item_id} falhou; nova tentativa às {nova_tentativa.strftime('%H:%M')}.")
+                    else:
+                        # data_postagem preenchida: a faxina da madrugada tira o item da fila.
+                        cursor.execute("UPDATE fila_postagens SET status = 'ERRO', tentativas = ?, data_postagem = ?, horario_postagem = ? WHERE id_unico = ?",
+                                       (tentativas, hoje_str, agora.strftime("%H:%M"), item_id))
+                        registrar_erro_json(f"Canal principal desistiu do vídeo {item_id} após {tentativas} tentativas: {e}", origem="bot_mestre.py")
             conexao.commit()
             conexao.close()
-        except: pass
+        except Exception: pass
 
-# --- GERENCIADOR CENTRAL DE CONFIGURAÇÕES (SQLITE) ---
+# --- Configurações no SQLite (tabela configuracoes) ---
 def ler_config_bd(chave, padrao=None, arquivo_legado=None):
+    """
+    Valor JSON da chave em configuracoes; padrao se não houver.
+
+    Com arquivo_legado e sem a chave no banco, migra o JSON antigo: grava no banco e
+    renomeia o arquivo para .bkp. Não usar com arquivo que outro serviço ainda grava
+    (como o fila_espelhador.json).
+    """
     if padrao is None: padrao = {}
     try:
         conexao = sqlite3.connect("banco_dados.db")
@@ -1153,7 +1179,6 @@ def ler_config_bd(chave, padrao=None, arquivo_legado=None):
         if resultado:
             return json.loads(resultado[0])
             
-        # Auto-migração transparente do JSON antigo para a nova tabela do SQLite
         import os
         if arquivo_legado and os.path.exists(arquivo_legado):
             with open(arquivo_legado, "r", encoding="utf-8") as f:
@@ -1169,8 +1194,8 @@ def ler_config_bd(chave, padrao=None, arquivo_legado=None):
         return padrao
 
 def salvar_config_bd(chave, dados):
-    # 🔒 É a gravação mais frequente do sistema — todo painel, todo motor, toda rotina
-    # passa por aqui. O conexao_db() fecha com ou sem exceção.
+    # É a gravação mais frequente do sistema (todo painel, motor e rotina passa por aqui):
+    # conexao_db() fecha a conexão com ou sem exceção.
     from utils import conexao_db
     try:
         with conexao_db() as conexao:
@@ -1181,7 +1206,7 @@ def salvar_config_bd(chave, dados):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar configuração '{chave}' no SQLite: {e}")
 
-# 👤 CRÉDITO AUTOMÁTICO DO REPOST: pergunta ao Telegram qual é o @ do administrador
+# Crédito do repost: o @ do administrador, perguntado ao Telegram.
 _cache_credito_repost = {"valor": None, "expira": None}
 
 async def obter_credito_repost():
@@ -1211,7 +1236,7 @@ async def obter_credito_repost():
         if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível obter o @ do administrador ({e}). Usando menção por ID.")
         return f"<a href='tg://user?id={ADMIN_ID}'>Administrador</a>"
 
-# --- SISTEMA DE PAUSA PROGRAMADA ---
+# --- Pausa programada ---
 def ler_pausa_programada():
     padrao = {"ativa": False, "data_retorno": None, "servicos_pausados": []}
     return ler_config_bd("pausa_programada", padrao, arquivo_legado="pausa_programada.json")
@@ -1220,6 +1245,11 @@ def salvar_pausa_programada(dados):
     salvar_config_bd("pausa_programada", dados)
 
 def recalcular_datas_pos_pausa():
+    """
+    Depois da pausa, empurra as datas dos pendentes pelo número de dias em que a
+    fila ficou parada (de hoje até a data pendente mais antiga), mantendo os
+    intervalos entre eles.
+    """
     if EXIBIR_LOGS: logger.info("🔄 Iniciando recálculo de datas no SQLite pós-pausa...")
     try:
         conexao = sqlite3.connect("banco_dados.db")
@@ -1260,7 +1290,24 @@ def recalcular_datas_pos_pausa():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao recalcular datas pós-pausa: {e}")
 
+def retomar_grade_pos_pausa():
+    """
+    Fim da pausa programada: empurra as datas da fila e refaz a grade de hoje do canal
+    principal, como o "Retomar Rotinas". Se o Bom Dia de hoje não saiu, ele sai em
+    seguida e abre o expediente; vídeos e rotinas se distribuem até a Boa Noite.
+    Depois do horário da Boa Noite o dia já acabou: fica tudo para a grade da madrugada.
+    """
+    recalcular_datas_pos_pausa()
+    # Só agendar_fila_postagens() não basta: o job do Bom Dia que já passou aponta
+    # para amanhã, e a fila tomava amanhã como início do expediente de hoje.
+    hora_boa_noite = ler_config_rotina().get("boa_noite", {}).get("inicio", 21)
+    if datetime.now(fuso_horario).hour < hora_boa_noite:
+        agendar_tarefas_diarias(escopo="principal")
+    else:
+        agendar_fila_postagens()
+
 async def verificar_pausa_diaria():
+    """Todo dia às 9h, com a pausa ativa: troca o aviso de pausa no grupo por um novo."""
     if EXIBIR_LOGS: logger.info("⏰ Iniciando verificação diária de pausa programada (envio de aviso)...")
     dados_pausa = ler_pausa_programada()
     if not dados_pausa.get("ativa"):
@@ -1297,6 +1344,10 @@ async def verificar_pausa_diaria():
     if EXIBIR_LOGS: logger.info("✅ Aviso diário enviado e salvo na memória com sucesso.")
 
 async def verificar_retorno_pausa_minuto():
+    """
+    De minuto em minuto: chegou a data de retorno, apaga o aviso, posta a volta no
+    grupo, reativa o SPAM e a rotina pausados, empurra as datas da fila e reagenda.
+    """
     dados_pausa = ler_pausa_programada()
     if not dados_pausa.get("ativa"):
         return
@@ -1352,25 +1403,19 @@ async def verificar_retorno_pausa_minuto():
         dados_pausa["ativa"] = False
         dados_pausa["servicos_pausados"] = []
         salvar_pausa_programada(dados_pausa)
-        recalcular_datas_pos_pausa()
-        agendar_fila_postagens()
+        retomar_grade_pos_pausa()
         if EXIBIR_LOGS: logger.info("✅ Serviços reativados e pausa programada encerrada com sucesso.")
-# ----------------------------------
 
-# 4. FUNÇÕES DE GERAÇÃO COM IA E AGENDAMENTO ⏰
 async def gerar_mensagem_gemini(prompt):
+    """Texto da IA para as mensagens do grupo; se a IA falhar, uma frase padrão."""
     texto = await gerar_texto_gemini(prompt, EXIBIR_LOGS)
     if texto:
         return texto
     return "🚀 Novos materiais disponíveis! Bora postar e converter!"
 
-# --- SISTEMA DE LIXEIRA PERSISTENTE (MIGRADO PARA SQLITE) ---
-def limpar_historico_antigo():
-    if os.path.exists("historico_mensagens.json"):
-        os.remove("historico_mensagens.json")
-        if EXIBIR_LOGS: logger.info("🧹 Histórico de mensagens do userbot reiniciado.")
-
+# --- Lixeira: mensagens apagadas na faxina da madrugada ---
 def registrar_lixeira(msg_id, chat_id=GRUPO_ID):
+    """Guarda a mensagem para ser apagada na faxina da madrugada."""
     try:
         conexao = sqlite3.connect("banco_dados.db")
         cursor = conexao.cursor()
@@ -1384,10 +1429,11 @@ def registrar_lixeira(msg_id, chat_id=GRUPO_ID):
 
 
 # ==========================================
-# 🧹 FAXINA DE ARQUIVOS ÓRFÃOS
-# A pasta temp/ é área de passagem, mas downloads interrompidos ficam para trás.
-# Regra de ouro: NUNCA apagar por idade sozinha — sempre cruzar com as filas,
-# senão os vídeos agendados do Espião somem e a fila inteira se perde.
+# Faxina de arquivos órfãos
+# temp/ é área de passagem, mas downloads interrompidos ficam para trás. Nunca apagar
+# só por idade: sempre cruzar com as filas, senão vídeos agendados (do Espião, por
+# exemplo) somem. A fila do canal principal não entra na proteção: sem o arquivo,
+# o vídeo sai pelo file_id guardado na criação.
 # ==========================================
 HORAS_PROTEGIDAS_TEMP = 24        # arquivos recentes podem estar sendo processados
 DIAS_RETENCAO_ARCHIVE = 30        # vídeos dos Autorais já publicados
@@ -1396,7 +1442,7 @@ def _caminhos_protegidos():
     """Todo arquivo referenciado por alguma fila pendente. Estes são intocáveis."""
     protegidos = set()
 
-    # 🕵️ Fila do Espião
+    # Fila do Espião
     try:
         for item in ler_fila_clonagem().get("fila", []):
             if not item.get("processado") and item.get("caminho_video"):
@@ -1404,9 +1450,12 @@ def _caminhos_protegidos():
     except Exception:
         pass
 
-    # 🔄 Fila do Espelhador
+    # Fila do Espelhador, lida do arquivo onde o motor_userbot grava. Não usar
+    # ler_config_bd aqui: sem a chave no banco ele "migra" o arquivo e o renomeia
+    # para .bkp, e o motor fica com a fila vazia.
     try:
-        dados = ler_config_bd("fila_espelhador", {}, arquivo_legado="fila_espelhador.json")
+        with open("fila_espelhador.json", "r", encoding="utf-8") as f:
+            dados = json.load(f)
         for item in (dados.get("fila", dados) if isinstance(dados, dict) else dados) or []:
             if isinstance(item, dict) and not item.get("processado"):
                 for chave in ("caminho_video", "caminho", "caminho_arquivo"):
@@ -1415,7 +1464,7 @@ def _caminhos_protegidos():
     except Exception:
         pass
 
-    # 👥 Fila dos parceiros
+    # Fila dos parceiros
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -1426,8 +1475,8 @@ def _caminhos_protegidos():
     except Exception:
         pass
 
-    # 📬 Fila do Grupo Público: o arquivo que o Correio já baixou e o bot ainda não
-    # publicou. Sem isto a faxina o apagaria se o item passasse das 24h protegidas.
+    # Grupo Público: o arquivo que o Correio já baixou e o bot ainda não publicou.
+    # Sem isto a faxina o apagaria se o item passasse das 24 h protegidas.
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -1443,11 +1492,10 @@ def _caminhos_protegidos():
 
 def diagnostico_temp():
     """
-    📊 Reparte o peso de temp/ entre o que está preso a alguma fila e o que é lixo.
+    Divide o peso de temp/ entre o que está preso a alguma fila e o que é lixo.
 
-    Sem essa separação o alerta não diz nada útil: 3 GB de fila pendente é o
-    sistema a funcionar normalmente, 3 GB de órfão é a faxina a falhar, e o
-    aviso saía igual nos dois casos.
+    Sem a separação, o alerta não diz nada: 3 GB de fila pendente é o sistema
+    funcionando, 3 GB de órfão é a faxina falhando.
 
     Devolve (bytes presos em fila, bytes órfãos, nº de órfãos já fora do prazo).
     """
@@ -1477,16 +1525,9 @@ def diagnostico_temp():
 
 async def faxina_disco_periodica():
     """
-    🧹 A faxina de disco com agenda PRÓPRIA, a cada 6 horas.
-
-    Antes ela vivia dentro do varredor_de_lixeira das 03h, no meio do mesmo
-    try: se o commit do SQLite falhasse (banco ocupado é rotina aqui, são vários
-    serviços no mesmo ficheiro) ou se limpar_achadinhos_antigos() rebentasse, a
-    limpeza do disco era saltada em silêncio e só tinha nova hipótese 24h depois.
-    Uma tarefa de disco não devia depender de uma rotina de mensagens do Telegram.
-
-    Corre em thread separada porque percorre o sistema de ficheiros e não pode
-    prender o event loop dos bots.
+    Faxina de disco com agenda própria, a cada 6 horas, separada da lixeira das 3h:
+    uma falha no SQLite ou nos achadinhos não pode pular a limpeza do disco. Roda
+    numa thread porque percorre o sistema de arquivos e não pode prender o event loop.
     """
     await asyncio.to_thread(limpar_arquivos_orfaos)
 
@@ -1512,7 +1553,7 @@ def limpar_arquivos_orfaos():
                 except Exception:
                     pass
 
-        # 📦 archive/: vídeos já publicados, retenção por idade
+        # archive/: vídeos dos Autorais, apagados por idade depois de DIAS_RETENCAO_ARCHIVE dias.
         limite_archive = time.time() - (DIAS_RETENCAO_ARCHIVE * 86400)
         for raiz, _dirs, arquivos in os.walk("archive"):
             for nome in arquivos:
@@ -1557,6 +1598,10 @@ def relatorio_disco():
     return "  |  ".join(linhas)
 
 async def varredor_de_lixeira():
+    """
+    Às 3h: apaga as mensagens da lixeira, poda os achadinhos e o cache da IA e limpa
+    os arquivos órfãos.
+    """
     if EXIBIR_LOGS: logger.info("🧹 Iniciando varredura diária da lixeira persistente (03h00)...")
     try:
         conexao = sqlite3.connect("banco_dados.db")
@@ -1572,7 +1617,7 @@ async def varredor_de_lixeira():
                 ids_apagados.append(id_banco)
             except Exception as e:
                 if EXIBIR_LOGS: logger.warning(f"⚠️ Erro ao processar item da lixeira: {e}")
-                ids_apagados.append(id_banco) # Remove do banco mesmo com falha para não travar
+                ids_apagados.append(id_banco)  # sai da lista mesmo com falha, para não travar a lixeira
         
         for id_banco in ids_apagados:
             cursor.execute("DELETE FROM lixeira_mensagens WHERE id = ?", (id_banco,))
@@ -1581,13 +1626,13 @@ async def varredor_de_lixeira():
         conexao.close()
         if EXIBIR_LOGS: logger.info("✅ Lixeira persistente (SQLite) esvaziada com sucesso.")
 
-                # ⏳ Aproveita a faxina para podar a memória antiga dos achadinhos
+        # Aproveita para podar a memória antiga dos achadinhos.
         limpar_achadinhos_antigos()
 
-        # 🧹 Remove arquivos órfãos, cruzando com TODAS as filas antes de apagar
+        # Também roda a cada 6 h em faxina_disco_periodica.
         limpar_arquivos_orfaos()
 
-        # 🧠 Poda o cache de análises: 30 dias já passou de qualquer publicação
+        # Cache de análises da IA: 30 dias já passou de qualquer publicação.
         try:
             from utils import limpar_cache_ia_antigo, estatisticas_cache_ia
             limpar_cache_ia_antigo(30)
@@ -1600,18 +1645,19 @@ async def varredor_de_lixeira():
         if EXIBIR_LOGS: logger.error(f"❌ Erro na varredura da lixeira: {e}")
 
 async def apagar_mensagem_automatica(msg_id, chat_id=GRUPO_ID):
+    """Apaga a mensagem; se ela já não existir, só registra no log."""
     try:
         await bot.delete_message(chat_id=chat_id, message_id=msg_id)
         if EXIBIR_LOGS: logger.info(f"🧹 Faxina concluída: Mensagem {msg_id} apagada do chat {chat_id}.")
-    except Exception as e:
+    except Exception:
         if EXIBIR_LOGS: logger.info(f"⚠️ Faxina: A mensagem {msg_id} já havia sido apagada manualmente.")
 
 # ==========================================
-# 📊 HISTÓRICO DE MÉTRICAS (prova social)
-# Grava um retrato diário de cada canal no SQLite. Sobrevive a restart,
-# deploy e troca de servidor, porque mora no mesmo banco_dados.db.
+# Histórico de métricas (prova social)
+# Um retrato diário de cada canal no SQLite, que sobrevive a restart e deploy.
 # ==========================================
 def salvar_metrica(dia, chave, valor):
+    """Grava (ou troca) o valor da métrica no dia."""
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -1682,7 +1728,6 @@ async def coletar_metricas_diarias():
     try:
         agora = datetime.now(fuso_horario)
         hoje_str = agora.strftime("%Y-%m-%d")
-        ontem_str = (agora - timedelta(days=1)).strftime("%Y-%m-%d")
 
         config_sub = ler_submissao_config()
         grupo_publico = config_sub.get("grupo_id")
@@ -1693,7 +1738,7 @@ async def coletar_metricas_diarias():
             "publico": grupo_publico
         }
 
-        # --- 1. Membros / inscritos ---
+        # Membros / inscritos
         for nome, chat_id in canais.items():
             if not chat_id:
                 continue
@@ -1703,7 +1748,7 @@ async def coletar_metricas_diarias():
             except Exception as e:
                 if EXIBIR_LOGS: logger.warning(f"⚠️ [Métricas] Não consegui contar membros de {nome}: {e}")
 
-        # --- 2. Vídeos publicados hoje ---
+        # Vídeos publicados hoje
         posts = {"principal": 0, "viral": 0, "publico": 0}
         try:
             conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -1728,16 +1773,15 @@ async def coletar_metricas_diarias():
         except Exception:
             pass
 
-        # --- 3. Grava o dia e atualiza o acervo acumulado ---
+        # Grava o dia e atualiza o acervo acumulado
         for nome, qtd in posts.items():
             salvar_metrica(hoje_str, f"posts_dia_{nome}", qtd)
             acumulado_ontem = ler_metrica(f"posts_total_{nome}", 1) or 0
             salvar_metrica(hoje_str, f"posts_total_{nome}", acumulado_ontem + qtd)
 
-        # --- 4. Downloader: total acumulado e quantos afiliados já usaram ---
-        # A tabela downloads_totais nunca é zerada, então o total já é o número
-        # real desde sempre. O retrato diário é o que passa a existir a partir
-        # de agora — é ele que habilita os fatos de marco e de crescimento.
+        # Downloader: total acumulado e quantos afiliados já usaram. A tabela
+        # downloads_totais nunca é zerada, então o total já é o número desde sempre; o
+        # retrato diário habilita os fatos de marco e de crescimento.
         dl_total = dl_usuarios = 0
         try:
             conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -1748,7 +1792,7 @@ async def coletar_metricas_diarias():
             salvar_metrica(hoje_str, "downloads_total", dl_total or 0)
             salvar_metrica(hoje_str, "downloads_usuarios", dl_usuarios or 0)
         except Exception:
-            # A tabela só existe depois do primeiro download. Silêncio proposital.
+            # A tabela só existe depois do primeiro download.
             pass
 
         if EXIBIR_LOGS:
@@ -1758,7 +1802,7 @@ async def coletar_metricas_diarias():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Métricas] Falha na coleta diária: {e}")
 
-# 📊 MODO PROVA: quais rotinas divulgam qual canal, e como nomeá-lo
+# Modo prova: quais rotinas divulgam qual canal, e como nomeá-lo.
 MAPA_PROVA_ROTINAS = {
     "promo_publico": "publico",
     "promo_publico_viral": "publico",
@@ -1772,7 +1816,7 @@ NOMES_CANAIS_PROVA = {
     "principal": "Canal Acervo Afiliados",
     "viral": "Canal Acervo Viral",
 }
-CHANCE_MODO_PROVA = 0.40   # 40% prova / 60% pedir
+CHANCE_MODO_PROVA = 0.40  # 40% prova / 60% pedir
 
 # Pisos do downloader. Abaixo disso o número não impressiona e a escada segue
 # para os fatos de canal. Suba conforme o bot for crescendo.
@@ -1782,24 +1826,26 @@ PISO_DOWNLOADS_SEMANA = 20
 
 
 def _fato_downloader():
-    """Fatos de USO do baixador de vídeos. None se ainda não houver número digno.
-    Prova de uso vale mais que métrica de vaidade: membro entra e some, download
-    é alguém apertando o botão. Por isso entra no topo da escada do Público."""
+    """
+    Fatos de USO do baixador de vídeos; None se ainda não há número digno.
+    Prova de uso vale mais que métrica de vaidade (membro entra e some, download é
+    alguém apertando o botão), por isso vem no topo da escada do Público.
+    """
     total = ler_metrica("downloads_total", 0)
     if total is None:
         return None
     usuarios = ler_metrica("downloads_usuarios", 0) or 0
 
-    # 1. Marco redondo cruzado hoje. O filtro pelo piso é essencial: a lista de
-    #    marcos foi feita para MEMBROS e começa em 10 — anunciar "passou de 10
-    #    vídeos" seria confessar que ninguém usa.
+    # 1. Marco redondo cruzado hoje. O piso é essencial: a lista de marcos foi feita
+    #    para MEMBROS e começa em 10, e "passou de 10 vídeos" seria confessar que
+    #    ninguém usa.
     marco = marco_cruzado(total, ler_metrica("downloads_total", 1))
     if marco and marco >= PISO_DOWNLOADS_TOTAL:
         return f"o baixador de vídeos do grupo acabou de passar de {marco} vídeos entregues"
 
     # 2. Total acumulado com quantas pessoas usaram. Vem antes do volume semanal
-    #    de propósito: o total sobe todo dia, então o número nunca empaca. O
-    #    semanal, sob crescimento estável, repetiria o mesmo valor por semanas.
+    #    de propósito: o total sobe todo dia, então o número nunca empaca; o
+    #    semanal, com crescimento estável, repetiria o mesmo valor por semanas.
     if total >= PISO_DOWNLOADS_TOTAL and usuarios >= PISO_DOWNLOADS_USUARIOS:
         return f"{total} vídeos já baixados no grupo por {usuarios} afiliados"
 
@@ -1807,7 +1853,7 @@ def _fato_downloader():
     if total >= PISO_DOWNLOADS_TOTAL:
         return f"{total} vídeos já baixados pelo robô do grupo"
 
-    # 4. Volume da semana — socorre a fase inicial, antes do total cruzar o piso
+    # 4. Volume da semana: socorre a fase inicial, antes do total cruzar o piso
     semana = crescimento_metrica("downloads_total", 7)
     if semana and semana >= PISO_DOWNLOADS_SEMANA:
         return f"{semana} vídeos baixados no grupo nos últimos 7 dias"
@@ -1821,8 +1867,7 @@ def gerar_fato_prova(canal):
     None significa 'nenhum número digno' — a rotina volta ao modo PEDIR.
     """
     try:
-        # 0. Downloader — exclusivo do Grupo Público e mais forte que qualquer
-        #    métrica de canal, então é consultado antes de tudo.
+        # 0. Downloader: só no Grupo Público, e mais forte que qualquer métrica de canal.
         if canal == "publico":
             fato_dl = _fato_downloader()
             if fato_dl:
@@ -1874,7 +1919,7 @@ def gerar_fato_prova(canal):
         if EXIBIR_LOGS: logger.error(f"❌ [Modo Prova] Erro ao gerar fato: {e}")
         return None
 
-# 🚦 SISTEMA DE INTERCALAÇÃO: vídeos são a espinha dorsal, textos entram no meio
+# Intercalação: os vídeos são a espinha dorsal dos canais; os textos de rotina entram no meio.
 def registrar_ultimo_post(chat_destino, tipo_conteudo):
     """Guarda se a última publicação daquele canal foi 'video' ou 'texto'."""
     try:
@@ -1888,6 +1933,7 @@ def registrar_ultimo_post(chat_destino, tipo_conteudo):
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao registrar último post: {e}")
 
 def obter_ultimo_post(chat_destino):
+    """'video' ou 'texto': a última publicação registrada no canal."""
     try:
         dados = ler_config_bd("ultimo_post_canais", {})
         return dados.get(str(chat_destino), {}).get("tipo")
@@ -1895,12 +1941,16 @@ def obter_ultimo_post(chat_destino):
         return None
 
 def contar_videos_pendentes(chat_destino):
-    """Estoque de vídeos ainda não publicados naquele canal. 0 = libera textos seguidos."""
+    """Vídeos que ainda saem hoje naquele canal, para a intercalação. 0 libera textos seguidos."""
     try:
         alvo = str(chat_destino)
 
-        # 📺 Canal Principal (fila de postagens do SQLite)
+        # Canal principal (fila_postagens)
         if alvo == str(GRUPO_ID):
+            # Na pausa programada os vídeos não saem: não há o que intercalar, e contar
+            # os pendentes adiaria cada texto de rotina até o fim da pausa.
+            if ler_pausa_programada().get("ativa"):
+                return 0
             hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
             conexao = sqlite3.connect("banco_dados.db")
             cursor = conexao.cursor()
@@ -1909,19 +1959,25 @@ def contar_videos_pendentes(chat_destino):
             conexao.close()
             return total
 
-        # 🕵️ Canal Viral (fila de clonagem do Espião)
+        # Canal Viral (fila de clonagem do Espião)
         dados_espiao = ler_alvos_espiao()
         if alvo == str(dados_espiao.get("canal_destino")):
+            # Só os clones com horário até hoje, como no Público: os de amanhã (D+1)
+            # adiavam os textos da noite até o primeiro vídeo do dia seguinte. Clone
+            # sem horário ainda não foi distribuído (o motor faz isso a cada minuto).
+            hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
             fila = ler_fila_clonagem().get("fila", [])
-            return len([i for i in fila if i.get("processado") not in [True, 1, "true", "True"]])
+            return len([
+                i for i in fila
+                if i.get("processado") not in [True, 1, "true", "True"]
+                and i.get("horario_disparo") and i["horario_disparo"][:10] <= hoje
+            ])
 
-        # 📬 Grupo Público (fila própria do repostador)
+        # Grupo Público (fila_publico)
         conexao = sqlite3.connect("banco_dados.db")
         cursor = conexao.cursor()
-        # ⚠️ Só conta vídeo ELEGÍVEL hoje, como já faz o Principal na linha acima.
-        # Contando a fila inteira, os agendados para semanas à frente entravam
-        # na conta: a intercalação adiava o texto para dar passagem a um vídeo
-        # que só sai daqui a 11 dias, e nenhum dos dois publicava.
+        # Só conta vídeo que pode sair hoje, como no principal: com a fila inteira, um
+        # vídeo agendado para daqui a semanas adiava os textos sem nunca sair.
         hoje_pub = datetime.now(fuso_horario).strftime("%Y-%m-%d")
         cursor.execute(
             "SELECT COUNT(*) FROM fila_publico WHERE processado = 0 AND data_alvo <= ?",
@@ -1934,30 +1990,21 @@ def contar_videos_pendentes(chat_destino):
         if EXIBIR_LOGS: logger.warning(f"⚠️ Não foi possível contar vídeos pendentes: {e}")
         return 0
 
-# 🗓️ Cada turno de data dupla vive na SUA faixa de horas. As faixas garantem
-# pelo menos 2h entre um aviso e o seguinte, mesmo no pior encaixe possível.
-# As faixas são propositadamente NÃO adjacentes: com "tarde" a acabar às 17h59 e
-# "noite" a começar às 18h00, um par podia sair com 14 minutos de intervalo. Assim
-# o menor intervalo possível entre dois turnos é de 2h01, acima do piso abaixo.
+# Cada turno de data dupla tem a sua faixa de horas. As faixas não são adjacentes
+# de propósito: o menor intervalo possível entre dois turnos é de 2h01, acima do
+# piso abaixo (com faixas coladas, um par podia sair com minutos de diferença).
 FAIXAS_TURNO_CAMPANHA = {"manha": (8, 11), "tarde": (14, 16), "noite": (19, 21)}
 
-# Piso absoluto entre dois avisos da MESMA campanha, conferido na hora de disparar.
-# É a rede: mesmo que o agendamento se atrapalhe depois de um reinício ou de um
-# "Atualizar Rotinas" no meio do dia, o segundo aviso morre aqui.
-# 110 e não um número redondo qualquer: as faixas acima garantem no mínimo 121
-# minutos entre turnos, então o piso fica logo abaixo disso. Assim um agendamento
-# legítimo nunca é barrado, e qualquer coisa mais junta é acidente por definição.
+# Piso entre dois avisos da MESMA campanha, conferido na hora de disparar: mesmo
+# que o agendamento se atrapalhe (reinício, "Atualizar Rotinas" no meio do dia),
+# o segundo aviso morre aqui. Fica logo abaixo dos 121 min garantidos pelas faixas:
+# um agendamento legítimo nunca é barrado.
 MINUTOS_MINIMOS_CAMPANHA = 110
 
 def horario_dentro_do_turno(agora, turno, horario_sugerido=None):
     """
-    ⏰ Devolve um horário válido DENTRO da faixa do turno, ou None se o turno já
-    passou por hoje.
-
-    Existe porque o encaixe anterior tratava "manhã", "tarde" e "noite" como
-    meros rótulos: os três horários saíam da mesma busca por lacuna livre e
-    podiam cair colados. Foi assim que o alerta do 09.09 saiu às 13h19, 14h10 e
-    15h01 — três vezes em duas horas, no lugar de um por turno.
+    Horário válido DENTRO da faixa do turno (manhã, tarde, noite), ou None se o turno
+    já passou hoje. Usa horario_sugerido quando ele cai na faixa e no futuro.
     """
     faixa = FAIXAS_TURNO_CAMPANHA.get(turno)
     if not faixa:
@@ -1966,7 +2013,7 @@ def horario_dentro_do_turno(agora, turno, horario_sugerido=None):
 
     limite_turno = agora.replace(hour=faixa_fim, minute=59, second=0, microsecond=0)
     if agora > limite_turno:
-        return None   # o turno terminou: fica para amanhã, não vira apêndice de outro
+        return None  # o turno terminou: fica para amanhã, não vira apêndice de outro
 
     if horario_sugerido and faixa_ini <= horario_sugerido.hour <= faixa_fim and horario_sugerido > agora:
         return horario_sugerido
@@ -1982,11 +2029,16 @@ def horario_dentro_do_turno(agora, turno, horario_sugerido=None):
     return candidato if candidato <= limite_turno else None
 
 async def disparar_mensagem(tipo, forcar=False):
+    """
+    Dispara uma rotina de texto (gerada pela IA) no canal do tipo: principal, Viral
+    ou Grupo Público. Passa pelas pausas, pelo espaçamento das campanhas, pela
+    intercalação com os vídeos e pelo expediente; forcar=True só respeita as pausas.
+    """
     if EXIBIR_LOGS: logger.info(f"🔍 Validando status antes de disparar a rotina '{tipo}' (Forçar: {forcar})...")
     
     dados_rotina = ler_config_rotina()
     
-    # 🎯 MAPEAMENTO DE DESTINOS
+    # Destino de cada rotina
     rotinas_virais = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral", "promo_achadinhos_viral"]
     rotinas_publico = ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico", "promo_achadinhos_publico"]
     
@@ -2003,7 +2055,7 @@ async def disparar_mensagem(tipo, forcar=False):
             if EXIBIR_LOGS: logger.warning(f"🛑 Disparo abortado ({tipo}): Grupo Público ainda não configurado.")
             return
 
-    # 🚀 PAUSAS ABSOLUTAS (Bloqueia sem exceção para forçar)
+    # Pausas das rotinas: valem até para disparo forçado.
     if is_viral and dados_rotina.get("pausado_viral", False):
         if EXIBIR_LOGS: logger.info(f"🛑 Disparo abortado ({tipo}): Rotinas do VIRAL estão pausadas.")
         return
@@ -2018,11 +2070,10 @@ async def disparar_mensagem(tipo, forcar=False):
     agora_tz = datetime.now(fuso_horario)
     hoje_str = agora_tz.strftime("%Y-%m-%d")
 
-    # 🚦 ESPAÇAMENTO MÍNIMO ENTRE AVISOS DA MESMA CAMPANHA
-    # Os três turnos da data dupla partilham o MESMO 'tipo', e campanhas estão
-    # isentas de todas as outras travas daqui para baixo. Esta é a única que as
-    # segura: se o aviso anterior saiu há menos de MINUTOS_MINIMOS_CAMPANHA, este
-    # é descartado em vez de reagendado — o dia já foi avisado, repetir só irrita.
+    # Espaçamento mínimo entre avisos da mesma campanha. Os três turnos da data dupla
+    # têm o mesmo 'tipo', e campanhas não passam pelas travas abaixo; esta é a única
+    # que as segura. Aviso cedo demais é descartado, não reagendado: o dia já foi
+    # avisado.
     if tipo.startswith("campanha_") and not forcar:
         historico_dia = dados_rotina.get("historico_diario", {})
         if historico_dia.get("data") == hoje_str:
@@ -2040,7 +2091,7 @@ async def disparar_mensagem(tipo, forcar=False):
                 except Exception:
                     pass
 
-    # 🚦 TRAVA DE INTERCALAÇÃO: não posta dois textos seguidos se ainda houver vídeo na fila
+    # Intercalação: não posta dois textos seguidos se ainda há vídeo do dia na fila.
     if not forcar and tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
         estoque_videos = contar_videos_pendentes(chat_destino)
         if obter_ultimo_post(chat_destino) == "texto" and estoque_videos > 0:
@@ -2050,7 +2101,7 @@ async def disparar_mensagem(tipo, forcar=False):
             if EXIBIR_LOGS: logger.info(f"🚦 [Intercalação] '{tipo}' adiado para {novo_horario.strftime('%H:%M')}: o último post foi texto e há {estoque_videos} vídeo(s) na fila.")
             return
     
-    # 🚀 LÓGICA DE TRAVA ABSOLUTA E EXPEDIENTE
+    # Bom Dia e Boa Noite uma vez por dia; as demais rotinas do principal só no expediente.
     if tipo == "bom_dia" and dados_rotina.get("ultimo_bom_dia") == hoje_str:
         if EXIBIR_LOGS: logger.warning("🛑 Bloqueio Anti-Acidente: O 'Bom Dia' já foi enviado hoje.")
         return
@@ -2107,7 +2158,7 @@ async def disparar_mensagem(tipo, forcar=False):
         "Entregue APENAS o texto da mensagem, sem introduções e sem aspas."
     )
 
-    # 🧠 PROMPTS DA INTELIGÊNCIA ARTIFICIAL
+    # Prompts da IA
     if tipo == "bom_dia":
         prompt = f"{contexto_afiliado} Crie uma mensagem de bom dia motivadora avisando que os vídeos de hoje estão prontos. Use emojis."
     elif tipo == "boa_noite":
@@ -2119,8 +2170,8 @@ async def disparar_mensagem(tipo, forcar=False):
     elif tipo == "link_grupo_viral":
         prompt = f"{contexto_afiliado} Peça aos membros para convidarem amigos para o acervo de virais. Não use links. Use emojis."
     elif tipo.startswith("campanha_"):
-        # 🧩 'campanha_pub_0_08.08' vira 'campanha_0_08.08' antes de fatiar:
-        # sem isto o int(partes[1]) recebe a string "pub" e estoura.
+        # 'campanha_pub_0_08.08' vira 'campanha_0_08.08' antes de fatiar; senão
+        # int(partes[1]) receberia "pub".
         partes = tipo.replace("campanha_pub_", "campanha_").split("_")
         dias_restantes = int(partes[1])
         data_dupla = partes[2] if len(partes) > 2 else ""
@@ -2138,7 +2189,6 @@ async def disparar_mensagem(tipo, forcar=False):
     elif tipo in ["promo_achadinhos", "promo_achadinhos_viral"]:
         prompt = "Recomende nosso canal Central de Achadinhos VIP. Diga que lá saem ofertas e promoções de produtos garimpados todos os dias, com o link pronto para comprar. Fale como quem indica um achado, não como anúncio. Máximo 200 caracteres, use emojis, sem links."
 
-    ## ✅ NOVOS PROMPTS DA EXPANSÃO DO PÚBLICO
     elif tipo in ["promo_publico", "promo_publico_viral"]:
         prompt = "Recomende nosso Grupo Público. Explique que é um espaço aberto onde todos os afiliados podem postar seus vídeos com links para divulgação. Destaque que é uma comunidade de ajuda mútua, garantindo que sempre tenham vídeos disponíveis para todos usarem. Seja empolgante, máximo 200 caracteres, use emojis, sem links."
     elif tipo == "link_grupo_publico":
@@ -2150,8 +2200,8 @@ async def disparar_mensagem(tipo, forcar=False):
     elif tipo == "promo_achadinhos_publico":
         prompt = "Atue como moderador do grupo público. Recomende nossa Central de Achadinhos VIP, onde saem ofertas garimpadas todos os dias com o link pronto para comprar. Fale como quem indica um achado, não como anúncio. Máximo 200 caracteres, use emojis, sem links."
 
-    # 📊 MODO PROVA: em 40% dos disparos, troca o convite por um dado real.
-    # Se não houver número digno, mantém o convite (modo PEDIR) sem alarde.
+    # Modo prova: em CHANCE_MODO_PROVA dos disparos, troca o convite por um dado real.
+    # Sem número digno, mantém o convite.
     canal_prova = MAPA_PROVA_ROTINAS.get(tipo)
     if canal_prova and random.random() < CHANCE_MODO_PROVA:
         fato = gerar_fato_prova(canal_prova)
@@ -2172,13 +2222,12 @@ async def disparar_mensagem(tipo, forcar=False):
     
     if EXIBIR_LOGS: logger.info(f"🚀 Preparando rotina ({tipo}) para o chat {chat_destino}.")
     
-    # ✅ NOVO: Lógica de Multi-Tópicos (Multi-Threading)
+    # Grupo Público: a rotina vai para cada tópico em topicos_rotina (sem lista, o Geral).
     destinos = []
     if is_publico:
         config_sub = ler_submissao_config()
         topicos_rotina = config_sub.get("topicos_rotina", [])
         if topicos_rotina:
-            # Transforma os IDs em inteiros e inclui os tópicos de escuta/vitrine se necessário
             for t in topicos_rotina:
                 try: destinos.append(int(t))
                 except: pass
@@ -2187,17 +2236,14 @@ async def disparar_mensagem(tipo, forcar=False):
     else:
         destinos.append(None)
 
-    # ✅ Segurança: se a lista ficou vazia (ex: todos os IDs inválidos),
-    # cai para o Geral em vez de não enviar nada.
+    # Lista vazia (IDs inválidos): manda no Geral em vez de não enviar nada.
     if not destinos:
         destinos.append(None)
 
     for thread_id in destinos:
         try:
-            # ✅ CORREÇÃO: Converte o ID rigorosamente para número inteiro.
-            # O tópico 1 é o "Geral" do fórum e a Bot API do Telegram REJEITA
-            # message_thread_id=1 ("message thread not found"). Para postar no
-            # Geral é obrigatório OMITIR o parâmetro, ou seja, enviar None.
+            # A Bot API recusa message_thread_id=1 (o Geral do fórum, "message thread not
+            # found"): para postar no Geral, o parâmetro vai como None.
             thread_param = int(thread_id) if thread_id is not None else None
             if thread_param == 1:
                 thread_param = None
@@ -2206,9 +2252,9 @@ async def disparar_mensagem(tipo, forcar=False):
             msg_enviada = await bot.send_message(chat_destino, texto, message_thread_id=thread_param)
             registrar_lixeira(msg_enviada.message_id, chat_destino)
             
-            await asyncio.sleep(1) # Pausa de respiro para anexos
+            await asyncio.sleep(1)  # respiro antes do anexo
             
-            # 🔗 ANEXADORES DE LINKS ISOLADOS
+            # Links que acompanham cada tipo de rotina
             if tipo == "link_grupo":
                 msg_link = await bot.send_message(chat_destino, f"👇 <b>Link de Convite:</b>\n{LINK_GRUPO}", parse_mode="HTML", message_thread_id=thread_param)
                 registrar_lixeira(msg_link.message_id, chat_destino)
@@ -2237,15 +2283,16 @@ async def disparar_mensagem(tipo, forcar=False):
             else:
                 if EXIBIR_LOGS: logger.error(f"❌ Erro ao enviar rotina {tipo} para thread {thread_id}: {e}")
             
-        await asyncio.sleep(4) # ✅ CORREÇÃO: Pausa LONGA (4 seg) para não tomar punição de flood do Telegram entre um tópico e outro!
+        await asyncio.sleep(4)  # pausa entre tópicos, para não tomar flood do Telegram
 
-    # 🚦 Marca que a última publicação deste canal foi um TEXTO
+    # Para a intercalação: a última publicação deste canal foi um texto.
     registrar_ultimo_post(chat_destino, "texto")
 
 def ler_config_rotina():
+    """config_rotina, com as chaves que faltarem preenchidas pelo padrão (e gravadas)."""
     if EXIBIR_LOGS: logger.info("🚀 Iniciando leitura e validação das configurações de rotina...")
     padrao = {
-        # Rotinas do Canal Principal
+        # Canal principal
         "bom_dia": {"inicio": 6, "fim": 9, "frequencia": 1},
         "incentivo": {"inicio": 10, "fim": 20, "frequencia": 2},
         "boa_noite": {"inicio": 21, "fim": 23, "frequencia": 1},
@@ -2255,14 +2302,14 @@ def ler_config_rotina():
         "promo_publico": {"inicio": 10, "fim": 20, "frequencia": 1},
         "promo_achadinhos": {"inicio": 10, "fim": 20, "frequencia": 1},
 
-        # Rotinas do Canal Viral
+        # Canal Viral
         "promo_principal": {"inicio": 10, "fim": 20, "frequencia": 1},
         "divulgar_gem_viral": {"inicio": 8, "fim": 22, "frequencia": 1},
         "link_grupo_viral": {"inicio": 9, "fim": 21, "frequencia": 2},
         "promo_publico_viral": {"inicio": 10, "fim": 20, "frequencia": 1},
         "promo_achadinhos_viral": {"inicio": 10, "fim": 20, "frequencia": 1},
 
-        # Rotinas do Grupo Público
+        # Grupo Público
         "link_grupo_publico": {"inicio": 9, "fim": 21, "frequencia": 2},
         "promo_principal_publico": {"inicio": 10, "fim": 20, "frequencia": 1},
         "promo_viral_publico": {"inicio": 10, "fim": 20, "frequencia": 1},
@@ -2291,12 +2338,12 @@ def ler_config_rotina():
 def salvar_config_rotina(dados):
     salvar_config_bd("config_rotina", dados)
 
-# 🎯 CADA ROBÔ TEM A SUA PRÓPRIA LISTA. Nada de misturar.
+# Rotinas de cada robô; o que não está nestas listas é do canal principal.
 ROTINAS_VIRAIS = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral", "promo_achadinhos_viral"]
 ROTINAS_PUBLICO = ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico", "promo_achadinhos_publico"]
 
 def descobrir_escopo_job(job_id):
-    """Descobre a QUAL robô o job pertence, comparando o tipo por igualdade exata."""
+    """A qual robô o job pertence (principal, viral, publico), pelo tipo da rotina no id."""
     if job_id.startswith('job_campanha_pub_'):
         return "publico"
     if job_id.startswith('job_campanha_'):
@@ -2320,13 +2367,19 @@ NOMES_AMIGAVEIS_ROTINA = {
 }
 
 def agendar_tarefas_diarias(escopo="todos"):
+    """
+    Sorteia os horários de rotina do dia e refaz os jobs do escopo pedido ("todos",
+    "principal", "viral" ou "publico"). Com "todos" (madrugada e ligar o bot), também
+    faz a faxina da fila do canal principal e reagenda os vídeos dele. Rotina que já
+    saiu hoje não é agendada de novo.
+    """
     if EXIBIR_LOGS: logger.info(f"🔄 Sorteando horários de rotina (Escopo: {escopo.upper()})...")
     
     agora_faxina = datetime.now(fuso_horario)
     hoje_faxina_str = agora_faxina.strftime("%Y-%m-%d")
     
     if escopo == "todos":
-        # --- Limpeza de Madrugada no SQLite ---
+        # Faxina da madrugada: itens CONCLUIDO/ERRO de dias anteriores saem da fila e, sem outro uso, do disco.
         try:
             conexao = sqlite3.connect("banco_dados.db")
             cursor = conexao.cursor()
@@ -2348,27 +2401,16 @@ def agendar_tarefas_diarias(escopo="todos"):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro na faxina da madrugada (SQLite): {e}")
     
-        # 🎯 As listas e o identificador de dono agora vivem no topo do arquivo,
-    # para que o painel de confirmação também consiga usá-los.
     rotinas_virais_lista = ROTINAS_VIRAIS
     rotinas_publico_lista = ROTINAS_PUBLICO
     _escopo_do_job = descobrir_escopo_job
 
-    def _tipo_do_job(job_id):
-        """Extrai o 'tipo' EXATO da rotina a partir do ID do job."""
-        m = re.match(r'^job_rotina_(.+?)_(?:intercalado|reagendado)_\d+$', job_id)
-        if m: return m.group(1)
-        m = re.match(r'^job_rotina_(.+)_\d+$', job_id)
-        if m: return m.group(1)
-        return None
-
-    # Remove os jobs antigos respeitando estritamente o ESCOPO solicitado
+    # Remove os jobs antigos, só do escopo pedido.
     for job in scheduler.get_jobs():
         if job.id.startswith('job_rotina_') or job.id.startswith('job_campanha_'):
-            tipo_do_job = _tipo_do_job(job.id)
             escopo_job = _escopo_do_job(job.id)
             if escopo != "todos" and escopo_job != escopo:
-                continue # Pertence a outro robô: não encosta
+                continue  # de outro robô: não mexe
 
             job.remove()
             if EXIBIR_LOGS: logger.info(f"🧹 Agendamento antigo apagado da memória [{escopo_job}]: {job.id}")
@@ -2377,7 +2419,7 @@ def agendar_tarefas_diarias(escopo="todos"):
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
     
-    # 1. ABERTURA E FECHAMENTO RÍGIDOS (Apenas se o escopo permitir)
+    # 1. Bom Dia e Boa Noite (só no escopo principal)
     if escopo in ["todos", "principal"]:
         for tipo in ["bom_dia", "boa_noite"]:
             if tipo not in dados_rotina or type(dados_rotina[tipo]) is not dict: continue
@@ -2399,10 +2441,10 @@ def agendar_tarefas_diarias(escopo="todos"):
                 
             scheduler.add_job(disparar_mensagem, 'cron', hour=hora_sorteada, minute=min_sorteado, timezone=FUSO_STR, args=[tipo], id=f"job_rotina_{tipo}_0", replace_existing=True)
 
-        # 2. DISTRIBUIÇÃO DOS VÍDEOS (Fila do Canal Principal)
+        # 2. Vídeos do canal principal
         agendar_fila_postagens()
     
-    # 3. MAPEAMENTO DAS LACUNAS (Sempre roda para achar as fronteiras de limite)
+    # 3. Lacunas do dia: entre Bom Dia, vídeos e Boa Noite
     eventos_fixos = []
     for job in scheduler.get_jobs():
         if job.id.startswith('job_rotina_bom_dia') or job.id.startswith('job_rotina_boa_noite') or job.id.startswith('job_fila_postagem_'):
@@ -2442,7 +2484,6 @@ def agendar_tarefas_diarias(escopo="todos"):
             return ponto_insercao
         return None
 
-    # PREPARAÇÃO DINÂMICA
     tipos_restantes = [t for t in dados_rotina.keys() if t not in ["bom_dia", "boa_noite", "pausado", "pausado_viral", "pausado_publico", "ultimo_bom_dia", "ultimo_boa_noite", "historico_diario"]]
     rotinas_virais = [t for t in tipos_restantes if t in rotinas_virais_lista]
     rotinas_publico = [t for t in tipos_restantes if t in rotinas_publico_lista]
@@ -2456,7 +2497,7 @@ def agendar_tarefas_diarias(escopo="todos"):
         return len(registro) if isinstance(registro, list) else registro
 
     if escopo in ["todos", "principal"]:
-        # 4.1 AGENDAMENTO DA GRADE PRINCIPAL
+        # 4. Rotinas do canal principal, distribuídas nas maiores lacunas, alternando os tipos
         grupos_tarefas = {}
         for tipo in rotinas_principais:
             config = dados_rotina[tipo]
@@ -2494,15 +2535,15 @@ def agendar_tarefas_diarias(escopo="todos"):
                 scheduler.add_job(disparar_mensagem, 'date', run_date=horario_fallback, args=[tipo], id=f"job_rotina_{tipo}_{indice}", replace_existing=True)
                 ultimo_tipo_agendado = tipo
 
-        # 5. AGENDAMENTO DAS CAMPANHAS ESPECIAIS
+        # 5. Datas duplas (dia == mês, ex. 9.9) dos próximos 4 dias: um aviso por turno
         for i in range(4):
             data_futura = agora + timedelta(days=i)
             if data_futura.day == data_futura.month:
                 tipo_alerta = f"campanha_{i}_{data_futura.day:02d}.{data_futura.month:02d}"
                 turnos_pendentes = ["manha", "tarde", "noite"][obter_qtd_disparos(tipo_alerta):]
                 for p in turnos_pendentes:
-                    # A lacuna livre continua sendo a preferência, mas agora só vale
-                    # se cair dentro do turno. Fora dele, sorteia-se na faixa certa.
+                    # A lacuna livre é a preferência, mas só vale dentro do turno; fora dele, sorteia
+                    # na faixa certa.
                     sugestao = encontrar_maior_lacuna_e_inserir(duracao_minima=10)
                     horario_campanha = horario_dentro_do_turno(agora, p, sugestao)
                     if not horario_campanha:
@@ -2516,7 +2557,7 @@ def agendar_tarefas_diarias(escopo="todos"):
                 break
 
     if escopo in ["todos", "viral"]:
-        # 4.5. AGENDAMENTO PARALELO PARA O CANAL VIRAL
+        # 6. Rotinas do Canal Viral
         grupos_virais = {}
         for tipo in rotinas_virais:
             config = dados_rotina[tipo]
@@ -2538,9 +2579,8 @@ def agendar_tarefas_diarias(escopo="todos"):
             for chave in chaves_remover: chaves_virais.remove(chave)
                 
         ultimo_tipo_viral = None
-                # 🎬 OS VÍDEOS SÃO A ESPINHA DORSAL DO CANAL VIRAL.
-        # As rotinas deixam de sortear horário no escuro e passam a se ENCAIXAR
-        # nas maiores lacunas entre os clones já agendados pelo Espião.
+        # Os vídeos são a espinha dorsal do Viral: as rotinas se encaixam nas maiores
+        # lacunas entre os clones já agendados pelo Espião.
         horarios_ocupados_viral = []
         try:
             for it in ler_fila_clonagem().get("fila", []):
@@ -2577,8 +2617,7 @@ def agendar_tarefas_diarias(escopo="todos"):
                     maior, melhor = gap, pontos[i] + gap / 2
             if melhor and maior >= timedelta(minutes=folga_min * 2):
                 encaixe = melhor.replace(second=0, microsecond=0)
-                # 🛡️ Trava final: o ponto médio da lacuna pode cair FORA da janela
-                # configurada quando há poucos vídeos. A janela manda sempre.
+                # Com poucos vídeos, o meio da lacuna pode cair fora da janela; a janela manda.
                 if encaixe < limite_ini or encaixe > limite_fim:
                     return None
                 return encaixe
@@ -2588,7 +2627,7 @@ def agendar_tarefas_diarias(escopo="todos"):
             encaixe = encaixar_na_maior_lacuna(config.get("inicio", 8), config.get("fim", 22))
             if encaixe:
                 horario_candidato = encaixe
-                horarios_ocupados_viral.append(encaixe)   # ocupa a lacuna para a próxima rotina
+                horarios_ocupados_viral.append(encaixe)  # ocupa a lacuna para a próxima rotina
                 horarios_ocupados_viral.sort()
             else:
                 minuto_absoluto = random.randint(config.get("inicio", 8) * 60, config.get("fim", 22) * 60 + 59)
@@ -2612,9 +2651,8 @@ def agendar_tarefas_diarias(escopo="todos"):
             ultimo_tipo_viral = tipo
 
     if escopo in ["todos", "publico"]:
-        # 4.6. AGENDAMENTO INDEPENDENTE DO GRUPO PÚBLICO
-        # Mesma filosofia do Viral: as rotinas se encaixam nas lacunas entre os
-        # vídeos já agendados na fila_publico, sem depender do Canal Afiliados.
+        # 7. Rotinas do Grupo Público: como no Viral, encaixadas entre os vídeos já
+        # agendados na fila_publico.
         grupos_publico = {}
         for tipo in rotinas_publico:
             config = dados_rotina.get(tipo)
@@ -2697,7 +2735,7 @@ def agendar_tarefas_diarias(escopo="todos"):
             if horario_candidato <= agora:
                 horario_candidato = agora + timedelta(minutes=random.randint(3, 12))
 
-            # 🛡️ Anti-colisão SOMENTE contra outras rotinas do próprio Público
+            # Anti-colisão só contra as rotinas do próprio Público.
             for job_existente in scheduler.get_jobs():
                 if getattr(job_existente, 'next_run_time', None) and _escopo_do_job(job_existente.id) == "publico":
                     if abs((horario_candidato - job_existente.next_run_time.astimezone(fuso_horario)).total_seconds()) < 120:
@@ -2707,11 +2745,9 @@ def agendar_tarefas_diarias(escopo="todos"):
             scheduler.add_job(disparar_mensagem, 'date', run_date=horario_candidato, args=[tipo], id=f"job_rotina_{tipo}_{indice}", replace_existing=True)
             ultimo_tipo_publico = tipo
 
-        # 5.1 CAMPANHAS DE DATA DUPLA DO GRUPO PÚBLICO
-        # Espelha o Canal Principal (3 turnos no dia do evento), mas com namespace
-        # 'job_campanha_pub_' próprio para o escopo não colidir na hora da limpeza.
-        # O roteamento para "Bate Papo Geral" e "Vídeos da Comunidade" é automático:
-        # o disparar_mensagem espalha para todos os topicos_rotina quando is_publico.
+        # 8. Datas duplas do Grupo Público: 3 turnos no dia do evento, com o prefixo
+        # 'job_campanha_pub_' para não colidir com o principal na limpeza por escopo. O
+        # disparar_mensagem manda para todos os topicos_rotina.
         for i in range(4):
             data_futura = agora + timedelta(days=i)
             if data_futura.day == data_futura.month:
@@ -2725,13 +2761,12 @@ def agendar_tarefas_diarias(escopo="todos"):
                     else:
                         faixa_ini, faixa_fim = 18, 21
 
-                    # Tenta encaixar na maior lacuna do turno; se não couber, sorteia.
+                    # Tenta a maior lacuna do turno; se não couber, sorteia na faixa.
                     horario_campanha = horario_dentro_do_turno(
                         agora, p, encaixar_lacuna_publico(faixa_ini, faixa_fim, folga_min=3)
                     )
-                    # ⚠️ O "+3 a 10 minutos" que estava aqui empurrava um turno vencido
-                    # para logo depois de agora. Rodando "Atualizar Rotinas" às 19h, os
-                    # três turnos caíam juntos. Turno vencido agora fica para amanhã.
+                    # Turno vencido fica para amanhã (empurrá-lo para "daqui a pouco" juntava os
+                    # três turnos quando "Atualizar Rotinas" rodava à noite).
                     if not horario_campanha:
                         if EXIBIR_LOGS:
                             logger.info(f"⏰ [Data Dupla Público] Turno '{p}' já passou. Ignorado hoje.")
@@ -2749,12 +2784,12 @@ def agendar_tarefas_diarias(escopo="todos"):
                 break
 
 async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int = None):
-    # 1. Recupera o estado de navegação atual do utilizador de forma remota
+    """Fim dos 15 min sem atividade no painel: limpa o estado (FSM) e devolve o menu inicial."""
     state = FSMContext(storage=dp.storage, key=StorageKey(bot_id=bot.id, chat_id=chat_id, user_id=user_id, thread_id=thread_id))
     estado_atual = await state.get_state()
     data = await state.get_data()
     
-    # Trava de inteligência: Se já estiver na raiz (estado vazio E flag confirmada), a função morre silenciosamente
+    # Já está na raiz: nada a fazer.
     if not estado_atual and data.get("painel_atual") == "raiz":
         return
         
@@ -2762,17 +2797,15 @@ async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int 
     await state.clear()
     await state.update_data(painel_atual="raiz")
     
-    # 2. Notifica o encerramento, aguarda renderização e limpa o chat
     try:
         if EXIBIR_LOGS: logger.info("✅ Restaurando o menu principal por inatividade e efetuando limpeza...")
         
-        # Passo A: Envia o aviso temporário SEM botões
+        # Aviso temporário, sem botões, apagado em seguida.
         msg_aviso = await bot.send_message(chat_id, "⏳ Sessão expirada por inatividade. Limpando tela...")
         await asyncio.sleep(1.5)
         await bot.delete_message(chat_id=chat_id, message_id=msg_aviso.message_id)
         
-        # Passo B: Envia a mensagem âncora definitiva COM os botões do menu raiz
-        # 🛡️ Só restaura o painel no chat privado do administrador
+        # Volta o menu inicial, só no privado do admin.
         if str(chat_id) == str(ADMIN_ID):
             await bot.send_message(chat_id, "🏠 Painel Inicial restaurado.", reply_markup=obter_teclado_raiz())
         
@@ -2781,20 +2814,20 @@ async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int 
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao atualizar o teclado e limpar chat: {e}")
 
 class InatividadeMiddleware(BaseMiddleware):
+    """Rearma, a cada mensagem ou clique do admin no privado, o cronômetro de 15 min do painel."""
     async def __call__(
         self,
         handler: Callable[[types.Message, Dict[str, Any]], Awaitable[Any]],
         event: types.Message,
         data: Dict[str, Any]
     ) -> Any:
-                # ✅ Aceita tanto mensagem quanto clique em botão inline.
-        # Sem isso, painéis que só têm botões inline nunca rearmavam a contagem.
+        # Vale para mensagem e para clique em botão inline (painéis só com botões inline
+        # também rearmam a contagem).
         mensagem_base = getattr(event, "message", None) if hasattr(event, "data") else event
         chat = getattr(mensagem_base, "chat", None)
 
-        # 🛡️ O cronômetro vale SOMENTE no painel administrativo (chat privado do admin).
-        # Em grupos e canais ele não deve existir: lá o wizard tem o próprio cronômetro,
-        # e limpar o estado atrapalharia quem está no meio de uma submissão.
+        # Só no painel (chat privado do admin). Em grupos, o wizard de submissão tem o
+        # próprio cronômetro, e limpar o estado atrapalharia quem está no meio dele.
         eh_painel_admin = (
             event.from_user
             and event.from_user.id == ADMIN_ID
@@ -2805,7 +2838,6 @@ class InatividadeMiddleware(BaseMiddleware):
         if eh_painel_admin:
             job_id = f"job_inatividade_{event.from_user.id}"
 
-            # 1. Inicia uma nova contagem limpa de 15 minutos
             from datetime import datetime, timedelta
             novo_limite = datetime.now(fuso_horario) + timedelta(minutes=15)
 
@@ -2813,7 +2845,6 @@ class InatividadeMiddleware(BaseMiddleware):
             origem = "clique" if hasattr(event, "data") else "mensagem"
             if EXIBIR_LOGS: logger.info(f"⏰ Contagem de inatividade rearmada por {origem} no painel admin.")
 
-            # 2. Adiciona ou sobrepõe o cronômetro antigo de forma limpa e unificada
             scheduler.add_job(
                 resetar_sessao_inatividade, 
                 'date', 
@@ -2824,10 +2855,11 @@ class InatividadeMiddleware(BaseMiddleware):
             )
             
         return await handler(event, data)
-            
-        return await handler(event, data)
 
 class BloqueioAdminMiddleware(BaseMiddleware):
+    """
+    Só o admin usa o bot, e só no privado; a exceção são as vias verdes (submissão e buscador).
+    """
     async def __call__(
         self,
         handler: Callable[[Any, Dict[str, Any]], Awaitable[Any]],
@@ -2836,14 +2868,13 @@ class BloqueioAdminMiddleware(BaseMiddleware):
     ) -> Any:
         usuario = getattr(event, "from_user", None)
         
-        # Identifica se é uma mensagem de texto ou um clique num botão (CallbackQuery)
         is_callback = hasattr(event, "data")
         mensagem_base = event.message if is_callback else event
         
         chat = getattr(mensagem_base, "chat", None)
         texto = getattr(event, "text", getattr(event, "data", ""))
         
-        # 1. VIA VERDE: Verifica se a mensagem está no grupo e tópico de submissão
+        # Via verde: mensagem no grupo e tópico de submissão (membros enviam vídeos).
         is_submissao = False
         if chat:
             try:
@@ -2854,28 +2885,25 @@ class BloqueioAdminMiddleware(BaseMiddleware):
                     
                     thread_id = getattr(mensagem_base, "message_thread_id", None)
                     
-                    # Valida se está exatamente no grupo e no tópico configurado
                     if str(chat.id) == str(grupo_alvo) and str(thread_id) == str(topico_alvo):
                         is_submissao = True
                         if is_callback and EXIBIR_LOGS: logger.info("🟢 [Via Verde] Clique de botão autorizado no painel de submissão.")
             except Exception:
                 pass
 
-        # 1b. VIA VERDE DO BUSCADOR: o tópico de busca é feito para o membro
-        # escrever livremente. Sem esta exceção o middleware barra tudo antes
-        # de qualquer handler — inclusive as suas próprias buscas.
-        # Escopo mínimo de propósito: só este grupo, só este tópico, só texto.
+        # Via verde do buscador: no tópico de busca o membro escreve livremente. Escopo
+        # mínimo: só este grupo, só este tópico, só texto.
         if chat and BUSCA_TOPICO_ID and not is_callback:
             thread_busca = getattr(mensagem_base, "message_thread_id", None)
             if chat.id == BUSCA_GRUPO_ID and (thread_busca or 1) == BUSCA_TOPICO_ID:
                 is_submissao = True
 
-        # 2. Bloqueia quem não for ADMIN, EXCETO se estiver na Via Verde
+        # Quem não é o admin só passa pela via verde.
         if usuario and getattr(usuario, "id", None) != ADMIN_ID:
             if not is_submissao:
                 return
                 
-        # 3. Bloqueia o próprio ADMIN se usar o bot em grupo (evita expor botões)
+        # O admin no grupo também é barrado (fora da via verde), para o painel não aparecer lá.
         if usuario and getattr(usuario, "id", None) == ADMIN_ID:
             if chat and chat.type != "private" and texto != "/limpar_teclado" and not is_submissao:
                 if getattr(event, "text", None) and EXIBIR_LOGS: logger.warning("🛡️ [Segurança Global] Comando bloqueado no grupo para evitar exposição visual.")
@@ -2883,9 +2911,8 @@ class BloqueioAdminMiddleware(BaseMiddleware):
 
         return await handler(event, data)
 
-# 🛡️ TRAVA GLOBAL DE SAÍDA: nenhum teclado de painel pode sair para fora do privado do admin.
-# Age na resposta do bot (não na entrada), fechando qualquer brecha de exposição em grupos.
-# Botões inline (submissões, wizard) NÃO são afetados — só ReplyKeyboardMarkup.
+# Nenhum teclado do painel (ReplyKeyboardMarkup) sai para fora do privado do admin.
+# Age no envio, fechando qualquer brecha em grupos. Botões inline não são afetados.
 class BloqueioTecladoForaDoPrivadoMiddleware:
     async def __call__(self, make_request, bot, method):
         try:
@@ -2901,12 +2928,10 @@ class BloqueioTecladoForaDoPrivadoMiddleware:
 bot.session.middleware(BloqueioTecladoForaDoPrivadoMiddleware())
 
 
-# 📏 TRAVA GLOBAL DE TAMANHO
-# O Telegram recusa texto acima de 4096 caracteres (1024 em legenda de mídia), e a
-# recusa derruba o handler inteiro — foi o que travou o cadastro de espelho, que
-# listava 101 canais numa mensagem só. Existem ~26 laços parecidos espalhados pelos
-# painéis, então em vez de limitar cada um, a mensagem é cortada aqui, no único ponto
-# por onde passa toda chamada à API. Vale para os laços de hoje e para os de amanhã.
+# Corte de tamanho: o Telegram recusa texto acima de 4096 caracteres (1024 em
+# legenda), e a recusa derruba o handler inteiro. Há dezenas de listas montadas
+# nos painéis; em vez de limitar cada uma, o corte é feito aqui, por onde passa
+# toda chamada à API.
 LIMITE_TEXTO_TELEGRAM = 4096
 LIMITE_LEGENDA_TELEGRAM = 1024
 AVISO_CORTE_TELEGRAM = "\n\n<i>… lista cortada: a mensagem passou do limite do Telegram.</i>"
@@ -2945,25 +2970,25 @@ class TruncarMensagemLongaMiddleware:
 
 bot.session.middleware(TruncarMensagemLongaMiddleware())
 
-# Acopla os interceptadores de segurança e inatividade ao núcleo do robô para vigiar todas as mensagens
+# Ordem: o bloqueio de quem não é admin roda antes do cronômetro de inatividade.
 dp.message.middleware(BloqueioAdminMiddleware())
 dp.callback_query.middleware(BloqueioAdminMiddleware())
 dp.message.middleware(InatividadeMiddleware())
-dp.callback_query.middleware(InatividadeMiddleware())   # ⏰ cliques também contam como atividade
+dp.callback_query.middleware(InatividadeMiddleware())  # cliques também contam como atividade
 
 # ==========================================
-# PAINEL DO GRUPO PÚBLICO & MOTOR REPOSTADOR
+# Painel do Grupo Público e repostador
 # ==========================================
 
 @dp.message(F.text == "Grupo Público 📬", StateFilter("*"))
 async def painel_submissoes(message: types.Message, state: FSMContext):
+    """Painel do Grupo Público: moderador (escuta e publica), repostador e rotinas."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     
     if EXIBIR_LOGS: logger.info("👥 Acessando Painel do Grupo Público e Repostador.")
     config = ler_submissao_config()
     status = "🟢 ATIVADO" if config.get("ativo") else "🔴 DESATIVADO"
-    texto_botao_moderador = "Desativar Robô Moderador 🛑" if config.get("ativo") else "Ativar Robô Moderador ⚙️"
     
     grupo_id = config.get("grupo_id")
     topico_escuta = config.get("topico_envio")
@@ -2971,10 +2996,10 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
 
     cache_nomes = ler_cache_nomes_grupos()
 
-    # Extrai o ID do grupo para montar as chaves compostas dos tópicos
+    # Chaves dos tópicos no cache de nomes: "<grupo>_<tópico>".
     grupo_id_str = str(grupo_id) if grupo_id else ""
 
-    # --- 1. Tópico de Escuta ---
+    # Tópico de escuta (onde os membros enviam)
     topico_escuta_str = str(topico_escuta) if topico_escuta else ""
     chave_escuta = f"{grupo_id_str}_{topico_escuta_str}"
     
@@ -2988,7 +3013,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     else:
         display_escuta = f"    {icone_escuta} {nome_escuta} (<code>{chave_escuta}</code>)"
 
-# --- 2. Tópico de Postagem (Postando) ---
+    # Tópico de postagem (onde o moderador publica)
     topico_vitrine_str = str(topico_vitrine) if topico_vitrine else ""
     chave_vitrine = f"{grupo_id_str}_{topico_vitrine_str}"
     
@@ -3002,7 +3027,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     else:
         display_vitrine = f"    {icone_vitrine} {nome_vitrine} (<code>{chave_vitrine}</code>)"
 
-    # --- 3. Tópicos de Rotina ---
+    # Tópicos que recebem as rotinas
     topicos_rotina = config.get("topicos_rotina", [])
     nomes_rotinas_salvos = config.get("nomes_topicos_rotina", {})
 
@@ -3036,12 +3061,11 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     else:
         display_rotinas = "\n    ✅ <i>Chat Geral (Padrão)</i>"
 
-    # --- INFORMAÇÕES DO ROBÔ REPOSTADOR ---
+    # Repostador
     repost_status = "🔴 PAUSADO" if config.get("repost_pausado") else "🟢 ATIVADO"
     dias = config.get("repost_dias", 15)
     limite = rotulo_cota_de_config(config, "repost_limite_min", "repost_limite_max", "repost_limite")
     
-    # Origem do Repostador
     repost_origem = config.get("repost_origem")
     if repost_origem:
         repost_origem_base = str(repost_origem).split(":")[0].strip()
@@ -3056,7 +3080,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         icone_rep_orig = "✅" if dest_aut_base in cache_nomes else "⏳"
         display_repost_origem = f"    {icone_rep_orig} {nome_aut} (<code>{str(dest_aut).replace(':', '_')}</code>) [Padrão]"
 
-    # Destino do Repostador (Flexível)
+    # Destino do repostador: o configurado ou, sem ele, o tópico de postagem.
     repost_destino = config.get("repost_destino")
     if repost_destino:
         repost_dest_base = str(repost_destino).split(":")[0].strip()
@@ -3066,7 +3090,7 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     else:
         display_repost_destino = f"\n{display_vitrine} [Padrão]"
 
-    # --- STATUS DAS ROTINAS DO PÚBLICO ---
+    # Rotinas do Público
     dados_rotina = ler_config_rotina()
     status_rotinas = "🔴 PAUSADAS" if dados_rotina.get("pausado_publico") else "🟢 ATIVAS"
 
@@ -3108,11 +3132,12 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
 
 # ==========================================
-# 👥 PARCEIROS AFILIADOS (multiusuário do Grupo Público)
-# Cada parceiro reposta com as PRÓPRIAS credenciais, nos PRÓPRIOS canais.
-# O repostador do dono continua intacto e tem prioridade no sorteio.
+# Parceiros afiliados (multiusuário do Grupo Público)
+# Cada parceiro reposta com as PRÓPRIAS credenciais, nos PRÓPRIOS canais. Os
+# vídeos dele saem dos canais de origem dele; o que o dono reservou fica de fora.
 # ==========================================
 def ler_parceiros(apenas_ativos=False):
+    """Parceiros cadastrados (só os ativos, se pedido), em ordem de cadastro."""
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         conexao.row_factory = sqlite3.Row
@@ -3129,6 +3154,7 @@ def ler_parceiros(apenas_ativos=False):
         return []
 
 def salvar_parceiro(dados):
+    """Cadastra o parceiro (nasce ativo) e devolve o novo ID, ou None."""
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -3169,7 +3195,8 @@ def atualizar_parceiro(parceiro_id, campo, valor):
 
 def excluir_parceiro(parceiro_id):
     """
-    Remove o parceiro e a fila dele. As RESERVAS são mantidas de propósito:
+    Remove o parceiro, a fila dele e os vídeos baixados (parceiros/<id>/, que contam
+    no teto de disco de todos os parceiros). As RESERVAS são mantidas de propósito:
     vídeo já entregue a alguém nunca volta ao poço.
     """
     try:
@@ -3179,15 +3206,18 @@ def excluir_parceiro(parceiro_id):
         try:
             cursor.execute("DELETE FROM fila_parceiros WHERE parceiro_id = ?", (int(parceiro_id),))
         except sqlite3.OperationalError:
-            pass   # a fila só passa a existir na Fase 3
+            pass   # a tabela só nasce na primeira captura de parceiro
         conexao.commit()
         conexao.close()
+        import shutil
+        shutil.rmtree(os.path.join("parceiros", str(int(parceiro_id))), ignore_errors=True)
         return True
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Erro ao excluir: {e}")
         return False
 
 def buscar_parceiro(parceiro_id):
+    """O parceiro pelo ID, ou None."""
     for p in ler_parceiros():
         if str(p.get("id")) == str(parceiro_id):
             return p
@@ -3200,6 +3230,7 @@ def mascarar_segredo(valor):
 
 @dp.message(F.text == "Parceiros Afiliados 👥", StateFilter("*"))
 async def painel_parceiros(message: types.Message, state: FSMContext):
+    """Lista os parceiros com credencial mascarada, canais, atraso, cota, janela e acesso."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
 
@@ -3237,13 +3268,14 @@ async def painel_parceiros(message: types.Message, state: FSMContext):
     await message.answer(texto, reply_markup=ReplyKeyboardMarkup(keyboard=linhas, resize_keyboard=True, is_persistent=True), parse_mode="HTML")
 
 # ==========================================
-# 🚀 MOTOR DE PUBLICAÇÃO DOS PARCEIROS
-# Roda a cada 2 min, em paralelo ao seu. Cada parceiro tem credenciais,
-# canal, atraso e cota próprios. Um disparo por ciclo, nunca em lote.
+# Motor de publicação dos parceiros
+# Roda a cada 2 min. Cada parceiro tem credenciais, canal, atraso e cota
+# próprios. Um disparo por ciclo, nunca em lote.
 # ==========================================
-TETO_DISCO_PARCEIROS_GB_PAINEL = 10   # espelha o teto definido no espelhador
+TETO_DISCO_PARCEIROS_GB_PAINEL = 10  # o mesmo teto do espelhador_videos_autorais
 
 def ler_fila_parceiro_pendente(parceiro_id):
+    """Itens ainda não publicados do parceiro, da data-alvo mais antiga para a mais nova."""
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         conexao.row_factory = sqlite3.Row
@@ -3257,6 +3289,7 @@ def ler_fila_parceiro_pendente(parceiro_id):
         return []
 
 def atualizar_item_fila_parceiro(id_unico, campo, valor):
+    """Atualiza UM campo de um item da fila (lista branca de colunas)."""
     if campo not in ("horario_disparo", "processado", "data_postagem"):
         return
     try:
@@ -3296,10 +3329,8 @@ def ler_fila_parceiro_por_dia_captura(parceiro_id):
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
 
-        # A tabela nasce no espelhador, na PRIMEIRA captura de parceiro que
-        # acontecer. Enquanto nenhuma tiver acontecido ela simplesmente não
-        # existe, e isso é estado normal — não erro que mereça encher o log de
-        # 2 em 2 minutos. Qualquer outra falha continua sendo registrada.
+        # A tabela nasce no espelhador, na primeira captura de parceiro. Antes disso
+        # ela não existe, o que é normal e não merece log a cada 2 minutos.
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='fila_parceiros'")
         if not cursor.fetchone():
             conexao.close()
@@ -3323,48 +3354,42 @@ def ler_fila_parceiro_por_dia_captura(parceiro_id):
 
 async def fechar_dia_captura_parceiros(incluir_hoje=False):
     """
-    🌙 FECHAMENTO DO DIA DE CAPTURA.
+    Fecha o dia de captura: sorteia a cota do dia e apaga do disco o excedente na hora,
+    em vez de esperar o D+X. Sem isso, um parceiro que captura 100 por dia com D+30
+    acumularia 3.000 arquivos antes da primeira publicação e estouraria o teto de disco,
+    que para a captura de TODOS os parceiros.
 
-    O sorteio da cota acontece AQUI, no fim do dia em que os vídeos entraram, e
-    o excedente é apagado do disco na hora — em vez de esperar os 30 dias do
-    D+X. Sem isto, um parceiro que captura 100 por dia com D+30 acumula 3.000
-    ficheiros antes da primeira publicação e estoura o TETO_DISCO_PARCEIROS_GB
-    muito antes de chegar lá; quando o teto de disco bate, a captura para para
-    TODOS os parceiros de uma vez.
+    Idempotente: o sorteio da cota e o de quais ficam são determinísticos, então rodar
+    de novo no mesmo dia não apaga mais nada. Por isso pode rodar como recuperação a
+    cada 2 minutos.
 
-    Idempotente de propósito. O sorteio da cota é determinístico e o sorteio de
-    QUAIS ficam também: rodar de novo no mesmo dia encontra a quantidade já
-    cortada e não apaga mais nada. É isso que permite chamar como recuperação a
-    cada 2 minutos sem risco.
-
-    incluir_hoje=False  → fecha só os dias já vencidos (recuperação)
-    incluir_hoje=True   → fecha também o dia corrente (chamada do cron das 23:55)
+    incluir_hoje=False → fecha só os dias já vencidos (recuperação)
+    incluir_hoje=True  → fecha também o dia corrente (cron das 23:55)
     """
     try:
         hoje_str = datetime.now(fuso_horario).strftime("%Y-%m-%d")
 
-        # Fecha a fila de TODOS os parceiros, inclusive os pausados: quem está
-        # pausado não captura mais, mas o que já entrou continua ocupando disco.
+        # Fecha a fila de TODOS os parceiros, inclusive os pausados: quem está pausado não
+        # captura mais, mas o que já entrou continua ocupando disco.
         for p in ler_parceiros():
             piso, topo = ler_faixa_limite(p)
             if piso <= 0:
-                continue   # sem teto configurado: não há o que cortar
+                continue  # sem teto configurado: não há o que cortar
 
             grupos = ler_fila_parceiro_por_dia_captura(p.get("id"))
             for (dia_captura, data_alvo), itens in sorted(grupos.items()):
                 if dia_captura > hoje_str:
                     continue
                 if dia_captura == hoje_str and not incluir_hoje:
-                    continue   # o dia ainda está a correr: só fecha às 23:55
+                    continue  # o dia ainda está correndo: só fecha às 23:55
 
-                # A cota é do DIA DA PUBLICAÇÃO, sorteada já aqui no fecho.
+                # A cota é a do dia da publicação, sorteada já aqui.
                 cota = sortear_teto_do_dia(f"parceiro:{p.get('id')}",
                                            data_alvo or dia_captura, piso, topo)
                 if cota <= 0 or len(itens) <= cota:
                     continue
 
-                # 🎲 Quais ficam é sorteio reprodutível: uma segunda passagem
-                # escolheria os mesmos, então nada se perde por engano.
+                # Quais ficam é sorteio reprodutível: uma segunda passagem escolheria os mesmos.
                 random.Random(f"parceiro:{p.get('id')}|{dia_captura}|selecao").shuffle(itens)
                 excedente = itens[cota:]
                 for item in excedente:
@@ -3380,9 +3405,13 @@ async def fechar_dia_captura_parceiros(incluir_hoje=False):
         registrar_erro_json(f"fechar_dia_captura_parceiros: {e}", origem="bot_mestre.py")
 
 async def motor_parceiros_step():
-    """Um disparo por ciclo, percorrendo os parceiros ativos."""
-    # 🌙 Recuperação: se o serviço estava fora às 23:55, o dia vencido é fechado
-    # aqui. Só mexe em dias já encerrados, nunca no que ainda está a correr.
+    """
+    A cada 2 min, para cada parceiro ativo: agenda os vídeos do dia na janela dele, corta
+    o excedente da cota e publica um vídeo vencido (link convertido com as credenciais
+    dele, legenda da IA).
+    """
+    # Recuperação: se o serviço estava fora às 23:55, o dia vencido é fechado aqui.
+    # Só mexe em dias encerrados, nunca no que ainda está correndo.
     await fechar_dia_captura_parceiros(incluir_hoje=False)
 
     try:
@@ -3394,7 +3423,7 @@ async def motor_parceiros_step():
             if not pendentes:
                 continue
 
-            # --- 1. Faxina e agendamento do dia ---
+            # 1. Faxina e agendamento do dia
             desagendados = []
             for item in pendentes:
                 if item.get("horario_disparo"):
@@ -3409,10 +3438,9 @@ async def motor_parceiros_step():
 
             if desagendados:
                 ocupados = [i.get("horario_disparo") for i in pendentes if i.get("horario_disparo")]
-                # ✅ CORREÇÃO: o descarte por idade precisa acompanhar o dias_atraso do
-                # parceiro. Com 5 fixo e dias_atraso=30, o motor descartava tudo.
+                # O descarte por idade acompanha o dias_atraso do parceiro.
                 dias_atraso_p = int(p.get("dias_atraso", 30))
-                # 🕒 Janela de publicação própria do parceiro (0 a 24 = dia todo)
+                # Janela de publicação própria do parceiro (0 a 24 = dia todo).
                 janela_ini = int(p.get("janela_inicio", 0) or 0)
                 janela_fim = int(p.get("janela_fim", 24) or 24)
                 if janela_ini >= janela_fim:
@@ -3420,7 +3448,7 @@ async def motor_parceiros_step():
                 calcular_horarios_distribuicao(desagendados, {
                     "inicio": janela_ini, "fim": janela_fim, "modo": "aleatorio", "intervalo_dias": 1,
                     "espacamento_base_min": 10, "espacamento_variacao_min": 5,
-                    "limite_dias_descarte": dias_atraso_p + 7, "horarios_ocupados": ocupados   # 🗓️ 7 dias de folga após a data-alvo
+                    "limite_dias_descarte": dias_atraso_p + 7, "horarios_ocupados": ocupados  # 7 dias de folga depois da data-alvo
                 }, forcar=False)
                 for item in desagendados:
                     if item.get("descartar_por_idade"):
@@ -3428,13 +3456,12 @@ async def motor_parceiros_step():
                         continue
                     atualizar_item_fila_parceiro(item["id_unico"], "horario_disparo", item.get("horario_disparo", ""))
 
-            # --- 1.5. TETO DIÁRIO: o corte agora é na PUBLICAÇÃO, não na captura.
-            # Captura-se tudo; aqui escolhe-se quantos vão ao ar por dia e o excedente
-            # é apagado do disco junto com o registo da fila.
+            # 1.5. Teto diário: o corte é na publicação. Captura-se tudo; aqui sai quantos vão
+            # ao ar por dia, e o excedente é apagado do disco junto com o registro.
             piso_p, topo_p = ler_faixa_limite(p)
             if piso_p > 0:
                 agendados_p = [i for i in ler_fila_parceiro_pendente(p.get("id")) if i.get("horario_disparo")]
-                # 🎲 Semente com o ID do parceiro: cada um sorteia o seu número do dia.
+                # Semente com o ID do parceiro: cada um sorteia o seu número do dia.
                 for item in aplicar_limite_diario_fila(agendados_p, piso_p, topo_p,
                                                        semente=f"parceiro:{p.get('id')}"):
                     remover_item_fila_parceiro(item["id_unico"], item.get("caminho_video"))
@@ -3442,7 +3469,7 @@ async def motor_parceiros_step():
                         logger.info(f"✂️ [Parceiro {p.get('nome')}] Vídeo acima da faixa "
                                     f"{piso_p}-{topo_p}/dia descartado.")
 
-            # --- 2. Publicação (o primeiro vencido, um por ciclo) ---
+            # 2. Publicação: o primeiro vencido, um por ciclo
             agora_txt = agora.strftime("%Y-%m-%d %H:%M:%S")
             vencidos = [i for i in ler_fila_parceiro_pendente(p.get("id"))
                         if i.get("horario_disparo") and i["horario_disparo"] <= agora_txt]
@@ -3457,7 +3484,7 @@ async def motor_parceiros_step():
                 if EXIBIR_LOGS: logger.warning(f"⚠️ [Parceiro {p.get('nome')}] Arquivo sumiu do disco. Item removido.")
                 continue
 
-            # 🔑 Link convertido com as credenciais DO PARCEIRO: a comissão é dele
+            # Link convertido com as credenciais DO PARCEIRO: a comissão é dele.
             link_final = await converter_link_shopee(
                 item.get("link_original"), "parceiro", EXIBIR_LOGS,
                 app_id=p.get("app_id"), app_secret=p.get("app_secret")
@@ -3485,7 +3512,7 @@ async def motor_parceiros_step():
                 if hashtags:
                     legenda += f"\n\n<i>{hashtags}</i>"
             else:
-                legenda = link_final   # reserva: só o link de afiliado do parceiro
+                legenda = link_final  # sem IA: só o link de afiliado do parceiro
 
             destino_raw = str(p.get("canal_destino") or "")
             chat_destino = destino_raw.split(":")[0].strip()
@@ -3508,7 +3535,7 @@ async def motor_parceiros_step():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Parceiros] Falha no motor de publicação: {e}")
 
-# --- GESTÃO: selecionar, editar, pausar e excluir ---
+# --- Parceiros: selecionar, editar, pausar e excluir ---
 def interpretar_faixa_cota(texto):
     """
     Aceita "6" (número fixo) ou "4-8" (faixa). Devolve (piso, topo), ou None
@@ -3535,7 +3562,7 @@ def rotulo_cota_de_config(config, chave_min, chave_max, chave_legado=None):
     return rotulo_cota(piso, topo) if piso else "sem cota"
 
 def rotulo_cota_parceiro(p):
-    """📦 Como a cota do parceiro aparece no painel: faixa, número fixo ou sem teto."""
+    """Como a cota do parceiro aparece no painel: faixa, número fixo ou sem teto."""
     piso, topo = ler_faixa_limite(p)
     if not piso:
         return "sem teto (publica tudo)"
@@ -3557,6 +3584,7 @@ def teclado_gerenciar_parceiro(p):
     ], resize_keyboard=True, is_persistent=True)
 
 async def mostrar_parceiro(message, state: FSMContext, parceiro_id):
+    """Tela de um parceiro, com os botões de gestão."""
     p = buscar_parceiro(parceiro_id)
     if not p:
         await message.answer("⚠️ Parceiro não encontrado.")
@@ -3629,6 +3657,7 @@ async def pedir_id_parceiro(message: types.Message, state: FSMContext):
 
 @dp.message(SubmissaoAdminFluxo.parceiro_selecionar)
 async def acoes_parceiro(message: types.Message, state: FSMContext):
+    """Gerenciar parceiro: primeiro recebe o número; depois, a ação escolhida no menu."""
     if message.from_user.id != ADMIN_ID: return
     texto = (message.text or "").strip()
 
@@ -3638,13 +3667,13 @@ async def acoes_parceiro(message: types.Message, state: FSMContext):
     data = await state.get_data()
     pid = data.get("parceiro_id")
 
-    # Ainda escolhendo pelo número
+    # Ainda escolhendo pelo número.
     if not pid:
         if not texto.isdigit():
             await message.answer("⚠️ Envie apenas o <b>número</b> do parceiro.", parse_mode="HTML"); return
 
-        # Veio pelo atalho "Remover Parceiro 🗑️": pula o menu e vai direto à
-        # confirmação, que é a mesma tela usada por dentro de Gerenciar.
+        # Veio pelo atalho "Remover Parceiro": vai direto à confirmação, a mesma tela
+        # usada dentro de Gerenciar.
         if data.get("remover_direto"):
             alvo = buscar_parceiro(texto)
             if not alvo:
@@ -3675,10 +3704,8 @@ async def acoes_parceiro(message: types.Message, state: FSMContext):
         await message.answer(f"✅ <b>{p.get('nome')}</b> foi <b>{estado}</b>.\n<i>{aviso}</i>", parse_mode="HTML")
         await mostrar_parceiro(message, state, pid); return
 
-    # Cada campo traz a pergunta INTEIRA, e não um pedaço encaixado numa frase
-    # genérica. Cota e janela precisam explicar o formato aceito, e isso não cabe
-    # em "Envie o novo <descrição>" — era o que deixava a pergunta dos parceiros
-    # pior que a dos autorais, que já perguntava direito.
+    # Cada campo traz a pergunta inteira: cota e janela precisam explicar o formato
+    # aceito, o que não cabe numa frase genérica como "Envie o novo <campo>".
     mapa = {
         "Editar Origem 📥":  ("canal_origem",
             "✏️ Envie o novo <b>canal de ORIGEM</b> (de onde os vídeos são pegos):"),
@@ -3721,6 +3748,7 @@ async def acoes_parceiro(message: types.Message, state: FSMContext):
 
 @dp.message(SubmissaoAdminFluxo.parceiro_editar_valor)
 async def salvar_edicao_parceiro(message: types.Message, state: FSMContext):
+    """Grava o campo em edição do parceiro (origem, destino, dias, cota ou janela)."""
     if message.from_user.id != ADMIN_ID: return
     if message.text == "Cancelar ❌":
         data = await state.get_data()
@@ -3731,7 +3759,7 @@ async def salvar_edicao_parceiro(message: types.Message, state: FSMContext):
     valor = (message.text or "").strip()
 
     if campo == "cota":
-        # 📦 Uma pergunta, duas colunas: aceita faixa "6-10" ou número fixo "6".
+        # Uma pergunta, duas colunas: faixa "6-10" ou número fixo "6".
         casou = re.match(r"^(\d{1,3})(?:\s*-\s*(\d{1,3}))?$", valor)
         if not casou:
             await message.answer("⚠️ Envie um número (<code>6</code>) ou uma faixa (<code>6-10</code>).", parse_mode="HTML"); return
@@ -3740,7 +3768,7 @@ async def salvar_edicao_parceiro(message: types.Message, state: FSMContext):
         if topo < piso:
             await message.answer("⚠️ O segundo número precisa ser maior que o primeiro.", parse_mode="HTML"); return
         if atualizar_parceiro(pid, "limite_min", piso) and atualizar_parceiro(pid, "limite_max", topo):
-            # Zera o campo antigo para não sobrar duas fontes de verdade na mesma linha.
+            # Zera o campo antigo para não sobrar duas fontes de verdade.
             atualizar_parceiro(pid, "limite_diario", 0)
             if EXIBIR_LOGS: logger.info(f"👥 [Parceiros] #{pid}: cota diária definida para {piso}-{topo}.")
             rotulo = f"{piso} a {topo} vídeos/dia" if topo > piso else f"{piso} vídeos/dia"
@@ -3751,7 +3779,7 @@ async def salvar_edicao_parceiro(message: types.Message, state: FSMContext):
         return
 
     if campo == "janela":
-        # 🕒 Uma pergunta, duas colunas: grava janela_inicio e janela_fim de uma vez.
+        # Uma pergunta, duas colunas: janela_inicio e janela_fim de uma vez.
         casou = re.match(r"^(\d{1,2})\s*-\s*(\d{1,2})$", valor)
         if not casou:
             await message.answer("⚠️ Use o formato <code>Inicio-Fim</code>. Exemplo: <code>8-23</code>.", parse_mode="HTML"); return
@@ -3783,10 +3811,9 @@ async def salvar_edicao_parceiro(message: types.Message, state: FSMContext):
             await message.answer("⚠️ Canal não encontrado. O valor será salvo mesmo assim.", parse_mode="HTML")
 
         if campo == "canal_origem":
-            # A ORIGEM é lida pelo userbot, que só entra por @username ou link
-            # de convite. Salvar o ID normalizado aqui mataria a entrada
-            # automática — por isso o formato digitado é preservado.
-            # O DESTINO segue normalizado: lá quem publica é o bot, via ID.
+            # A ORIGEM é lida pelo userbot, que só entra sozinho por @username ou link de
+            # convite: o formato digitado é preservado (o ID normalizado mataria a entrada
+            # automática). O DESTINO é normalizado, porque quem publica é o bot, pelo ID.
             entra_sozinho = valor.startswith("@") or "t.me/" in valor
             valor = valor if entra_sozinho else str(id_final).split(":")[0]
 
@@ -3870,13 +3897,13 @@ async def confirmar_exclusao_total(message: types.Message, state: FSMContext):
     await message.answer(f"🗑️ <b>{total} parceiro(s) excluído(s).</b>", parse_mode="HTML")
     await painel_parceiros(message, state)
 
-# --- WIZARD DE CADASTRO: 7 passos + confirmação ---
+# --- Cadastro de parceiro: 7 passos + confirmação ---
 teclado_wizard_nav = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text="Voltar ⬅️"), KeyboardButton(text="Cancelar ❌")]],
     resize_keyboard=True
 )
 
-# Link real usado só para provar que as credenciais funcionam
+# Link real, usado só para provar que as credenciais funcionam.
 LINK_TESTE_SHOPEE = "https://shopee.com.br/product/366207309/22648772967"
 
 async def testar_credenciais_shopee(app_id, app_secret):
@@ -3893,7 +3920,7 @@ async def testar_credenciais_shopee(app_id, app_secret):
         return False, str(e)
 
 async def voltar_passo_parceiro(message, state: FSMContext, destino):
-    """Reenvia a pergunta do passo anterior sem derrubar o que já foi digitado."""
+    """Mostra a pergunta do passo do cadastro, sem perder o que já foi digitado."""
     passos = {
         "nome":       ("👤 <b>PASSO 1 de 7 — Nome do parceiro</b>\n\nComo você quer identificar este afiliado? (ex: <i>João Silva</i>)", SubmissaoAdminFluxo.parceiro_nome),
         "app_id":     ("🔑 <b>PASSO 2 de 7 — App ID da Shopee</b>\n\nCole o <b>App ID</b> da conta de afiliado deste parceiro.", SubmissaoAdminFluxo.parceiro_app_id),
@@ -3961,8 +3988,8 @@ async def parceiro_receber_secret(message: types.Message, state: FSMContext):
         )
         return
 
-    # Caractere invisível derruba o SHA256 sem dar nenhuma pista. Copiar de
-    # print ou de painel web traz espaço não-quebrável e afins. Barra aqui.
+    # Caractere invisível derruba a assinatura SHA256 sem dar pista (copiar de print ou
+    # de painel web traz espaço não-quebrável e afins). Barra aqui.
     if not app_secret.isascii() or not app_secret.isalnum():
         estranhos = [c for c in app_secret if not c.isascii() or not c.isalnum()]
         await message.answer(
@@ -4033,10 +4060,9 @@ async def parceiro_receber_origem(message: types.Message, state: FSMContext):
 
     salvar_nome_grupo(str(id_final).split(":")[0], nome_chat)
 
-    # O userbot só entra sozinho por @username ou link de convite. Com ID
-    # numérico ele depende de já ser membro do canal. Em vez de bloquear,
-    # guardamos o ID normalizado e avisamos o que falta — o painel mostra
-    # "aguardando entrada" se o acesso não existir de fato.
+    # O userbot só entra sozinho por @username ou link de convite; com ID numérico ele
+    # precisa já ser membro. Em vez de bloquear, guarda o ID e avisa: o painel mostra
+    # "aguardando entrada" enquanto o acesso não existir.
     entra_sozinho = entrada.startswith("@") or "t.me/" in entrada
     valor_salvo = entrada if entra_sozinho else str(id_final).split(":")[0]
 
@@ -4120,7 +4146,7 @@ async def parceiro_receber_limite(message: types.Message, state: FSMContext):
         f"📤 <b>Destino:</b> {rotulo_alvo(d.get('canal_destino'))}\n"
         f"⏳ <b>Atraso:</b> D+{d.get('dias_atraso')}\n"
         f"📦 <b>Cota:</b> {d.get('limite_diario')} vídeos/dia\n\n"
-        "<i>O parceiro nasce ativo, mas a publicação automática só entra numa próxima etapa.</i>",
+        "<i>O parceiro nasce ativo: o userbot tenta entrar no canal de origem e a captura começa quando o acesso der certo.</i>",
         parse_mode="HTML", reply_markup=teclado_confirmacao
     )
     await state.set_state(SubmissaoAdminFluxo.parceiro_confirmar)
@@ -4211,7 +4237,6 @@ async def submenu_regras_repost_publico(message: types.Message, state: FSMContex
     await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
 
-# ✅ NOVO: Handlers para Editar o Destino do Repost Público
 @dp.message(F.text == "Editar Postando (Público) 📤", StateFilter("*"))
 async def pedir_destino_repost_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
@@ -4252,11 +4277,10 @@ async def salvar_destino_repost_publico(message: types.Message, state: FSMContex
 
     await pedir_confirmacao_destino(message, state, "repost_destino", "Destino do Repost", id_final, nome_chat if sucesso else None)
 
-# ✅ CONFIRMAÇÃO DE TROCA DE DESTINO/ORIGEM
-# Campos que mudam PARA ONDE o conteúdo vai nunca são salvos direto:
-# o admin vê o "de → para" e precisa aprovar.
+# Confirmação de troca de destino/origem: campos que mudam PARA ONDE o conteúdo vai
+# nunca são salvos direto; o admin vê o "antes → depois" e aprova.
 def rotulo_alvo(valor):
-    """Transforma o ID salvo no nome amigável do canal, quando conhecido."""
+    """O ID salvo com o nome do canal, quando conhecido."""
     if not valor:
         return "<i>não definido (usando o padrão)</i>"
     base = str(valor).split(":")[0].strip()
@@ -4264,6 +4288,7 @@ def rotulo_alvo(valor):
     return f"<b>{nome}</b> (<code>{str(valor).replace(':', '_')}</code>)" if nome else f"<code>{str(valor).replace(':', '_')}</code>"
 
 async def pedir_confirmacao_destino(message, state: FSMContext, chave, rotulo, id_novo, nome_novo=None):
+    """Mostra o antes e o depois de origem/destino do repostador e espera a aprovação."""
     config = ler_submissao_config()
     valor_atual = config.get(chave)
 
@@ -4322,7 +4347,6 @@ async def confirmar_troca_destino(message: types.Message, state: FSMContext):
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
     await submenu_regras_repost_publico(message, state)
 
-# ✅ NOVO: Handlers para Editar a Origem do Repost Público
 @dp.message(F.text == "Editar Escutando (Público) 📥", StateFilter("*"))
 async def pedir_origem_repost_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
@@ -4525,12 +4549,17 @@ async def processar_limite_repost_publico(message: types.Message, state: FSMCont
     await submenu_regras_repost_publico(message, state)
 
 async def motor_repost_publico_step():
+    """
+    Repostador do Grupo Público, a cada 2 min: agenda os vídeos com data-alvo hoje
+    na janela, apaga os vencidos e publica um vídeo por ciclo a partir do arquivo que
+    o Correio Público (userbot) baixou.
+    """
     try:
         config = ler_submissao_config()
         if not config.get("ativo") or config.get("repost_pausado", False):
             return
             
-        # ✅ Puxa a flexibilidade de roteamento
+        # Destino: repost_destino ("-100123:5" ou só o grupo) ou o tópico de postagem.
         grupo_id_base = config.get("grupo_id")
         topico_destino_base = config.get("topico_destino")
         repost_destino = config.get("repost_destino")
@@ -4549,7 +4578,7 @@ async def motor_repost_publico_step():
         if not grupo_id:
             return
 
-        # ⏰ Janela de postagem (mesma lógica do painel de Autorais)
+        # Janela de postagem do repostador.
         janela_inicio = int(config.get("repost_inicio", 10))
         janela_fim = int(config.get("repost_fim", 20))
 
@@ -4560,24 +4589,22 @@ async def motor_repost_publico_step():
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
 
-        # --- 1. MOTOR MATEMÁTICO E FAXINA DE ATRASADOS (idêntico ao dos Autorais) ---
+        # 1. Agenda os vídeos de hoje e apaga os vencidos (como no loop dos Autorais).
         cursor.execute("SELECT * FROM fila_publico WHERE processado = 0")
         pendentes = [dict(linha) for linha in cursor.fetchall()]
 
         itens_desagendados = []
         houve_limpeza = False
 
-        # 🗓️ Folga antes de desistir de um item que JÁ tem horário sorteado. O anti-trava
-        # adia 30 min a cada falha, então sem um teto o vídeo ficaria em retry eterno.
-        # Dois dias é tempo de sobra para uma falha passageira se resolver sozinha.
+        # Tolerância para item que JÁ tem horário: a cada falha ele é adiado 30 min, então
+        # sem um limite ficaria em retry eterno. Dois dias bastam para uma falha passageira.
         DIAS_TOLERANCIA_PUBLICO = 2
         limite_encalhe = (agora - timedelta(days=DIAS_TOLERANCIA_PUBLICO)).strftime("%Y-%m-%d")
 
         for item in pendentes:
             data_alvo = item.get("data_alvo") or ""
 
-            # 🧹 TRAVA CONTRA RETRY ETERNO: vale para item COM horário sorteado também.
-            # Passou da tolerância desde a data-alvo, perdeu a validade e sai da fila.
+            # Passou da tolerância desde a data-alvo: perde a validade e sai da fila.
             if data_alvo and data_alvo < limite_encalhe:
                 cursor.execute("DELETE FROM fila_publico WHERE id_unico = ?", (item["id_unico"],))
                 houve_limpeza = True
@@ -4587,38 +4614,34 @@ async def motor_repost_publico_step():
             if item.get("horario_disparo"):
                 continue
 
-            # ✅ TRAVA DE SEGURANÇA: data no passado significa que o robô ficou fora do ar.
-            # O vídeo perde a validade e sai da fila, evitando avalanche de posts atrasados.
+            # Data-alvo passou sem horário (robô fora do ar): o vídeo perde a validade, sem
+            # avalanche de posts atrasados.
             if data_alvo and data_alvo < hoje_str:
                 cursor.execute("DELETE FROM fila_publico WHERE id_unico = ?", (item["id_unico"],))
                 houve_limpeza = True
                 if EXIBIR_LOGS: logger.info(f"🧹 [Auto-Limpeza] Vídeo do Público vencido ({data_alvo}) removido da fila.")
                 continue
 
-            # Se for exatamente hoje, entra no sorteio de horários
+            # Data-alvo hoje: entra no agendamento.
             if data_alvo == hoje_str:
                 itens_desagendados.append(item)
 
         if houve_limpeza:
             conexao.commit()
 
-        # ✅ CORREÇÃO: este bloco vivia dentro do "if houve_limpeza". A fila do Público
-        # só era agendada nos ciclos em que algum vídeo vencido tinha sido apagado.
         if itens_desagendados:
             dias_publico = int(config.get("repost_dias", 15))
 
             config_fila = {
                 "inicio": janela_inicio,
                 "fim": janela_fim,
-                "modo": "aleatorio",   # Vídeos do Público misturam-se naturalmente
-                "intervalo_dias": 1,   # 1 = ramo diluído (a data_alvo já cuidou do atraso)
-                # ⏱️ PISO de segurança, não intervalo padrão: com poucos vídeos o motor
-                # divide a janela e espalha pelo dia. O piso só age em volume alto.
+                "modo": "aleatorio",  # Vídeos do Público misturam-se naturalmente
+                "intervalo_dias": 1,  # a data_alvo já tem o atraso; 1 só faz o motor espalhar pela janela
+                # Piso de segurança, não intervalo padrão: com poucos vídeos o motor divide a
+                # janela e espalha pelo dia. O piso só age em volume alto.
                 "espacamento_base_min": 15,
                 "espacamento_variacao_min": 6,
-                # ✅ CORREÇÃO: com 5 fixo e repost_dias=15, todo vídeo chegava vencido
-                # no dia do agendamento e o motor devolvia horário vazio.
-                "limite_dias_descarte": dias_publico + 7   # 🗓️ 7 dias de folga após a data-alvo
+                "limite_dias_descarte": dias_publico + 7  # 7 dias de folga depois da data-alvo
             }
 
             if EXIBIR_LOGS: logger.info(f"⚙️ [Motor Público] Acionando Motor Central para {len(itens_desagendados)} vídeos de hoje...")
@@ -4632,16 +4655,14 @@ async def motor_repost_publico_step():
                                (item.get("horario_disparo", ""), item["id_unico"]))
             conexao.commit()
 
-        # --- 2. EXECUÇÃO DOS DISPAROS (respeita o horário sorteado) ---
-        # 🚚 Trava de compatibilidade: se um dia o envio voltar para o userbot, basta
-        # gravar repost_via_userbot = True na submissao_config. O padrão é o bot publicar
-        # daqui, com o perfil apenas creditado na legenda.
+        # 2. Publica, no horário sorteado.
+        # Com repost_via_userbot = True na submissao_config, este motor não publica (o envio
+        # voltaria para o userbot). O padrão é o bot publicar, creditando o perfil na legenda.
         if config.get("repost_via_userbot", False):
             conexao.close()
             return
 
-        # ⏰ Janela de postagem. Item atrasado de ontem não pode sair de madrugada — é o
-        # oposto do que a fila passa o dia inteiro tentando parecer.
+        # Fora da janela nada sai: item atrasado de ontem não pode sair de madrugada.
         if not (janela_inicio <= agora.hour < janela_fim):
             conexao.close()
             return
@@ -4662,9 +4683,8 @@ async def motor_repost_publico_step():
             legenda_original = video_alvo["legenda"] or ""
             caminho = dict(video_alvo).get("caminho_arquivo") or ""
 
-            # 📥 Quem baixa o arquivo é o userbot (Correio Público, no espelhador): o canal
-            # de origem não é nosso e o bot não consegue lê-lo. Aqui o bot só publica a
-            # partir do disco, igual ao motor dos Parceiros.
+            # Quem baixa o arquivo é o userbot (Correio Público, no espelhador): o canal de
+            # origem não é nosso e o bot não consegue lê-lo. Aqui o bot só publica do disco.
             if not caminho or not os.path.exists(caminho):
                 if EXIBIR_LOGS:
                     logger.warning(f"⏳ [Motor Público] Vídeo {id_unico} ainda sem arquivo no disco. "
@@ -4675,8 +4695,8 @@ async def motor_repost_publico_step():
                 )
                 conexao.commit()
             elif os.path.getsize(caminho) > LIMITE_UPLOAD_BOT_MB * 1024 * 1024:
-                # 🚫 Rede de segurança: o Correio já barra o arquivo grande antes de baixar,
-                # mas se um escapar, aqui ele sai da fila em vez de ser recusado para sempre.
+                # Rede de segurança: o Correio já barra arquivo grande antes de baixar; se um
+                # escapar, sai da fila em vez de ser recusado para sempre.
                 if EXIBIR_LOGS:
                     logger.warning(f"🚫 [Motor Público] Vídeo {id_unico} tem "
                                    f"{os.path.getsize(caminho) / (1024**2):.1f} MB, acima do teto de "
@@ -4704,9 +4724,8 @@ async def motor_repost_publico_step():
                     f"<i>#Recomendado #Shopee</i>"
                 )
 
-                # ⏸️ ÚLTIMA PORTA: o config lido no topo desta função pode ter até 2
-                # minutos, e o upload ainda leva alguns segundos. Reler aqui é barato e
-                # é o que faz o botão de pausa valer no instante em que é clicado.
+                # Última checagem da pausa: o config lido no topo pode ter até 2 minutos, e o
+                # upload ainda leva alguns segundos.
                 config_agora = ler_submissao_config()
                 if not config_agora.get("ativo") or config_agora.get("repost_pausado", False):
                     if EXIBIR_LOGS: logger.info("⏸️ [Motor Público] Pausa detetada. Publicação abortada.")
@@ -4714,8 +4733,7 @@ async def motor_repost_publico_step():
                     return
 
                 try:
-                    # 📌 O retorno traz o message_id da mensagem criada. É ele que vira o
-                    # link "(Destino)" no relatório — antes era jogado fora.
+                    # O message_id da mensagem publicada monta o link "(Destino)" no relatório.
                     msg_publicada = await bot.send_video(
                         chat_id=grupo_id,
                         video=FSInputFile(caminho),
@@ -4725,11 +4743,9 @@ async def motor_repost_publico_step():
                     )
                     if EXIBIR_LOGS: logger.info(f"✅ [Motor Público] Vídeo '{nome_produto}' publicado no Grupo Público.")
 
-                    # ⚠️ O VÍDEO JÁ ESTÁ NO GRUPO. Daqui para frente nada pode falhar em
-                    # silêncio: se o "processado = 1" não for gravado, o ciclo seguinte
-                    # escolhe o MESMO item e publica de novo. Foi assim que o grupo levou
-                    # o mesmo vídeo de 2 em 2 minutos durante uma hora — o envio dava
-                    # certo e o UPDATE morria com "database is locked".
+                    # O vídeo já está no grupo: se o processado = 1 não gravar, o ciclo seguinte
+                    # escolhe o MESMO item e publica de novo ("database is locked" é comum). Por isso
+                    # insiste.
                     marcou = False
                     for tentativa in range(1, 7):
                         try:
@@ -4748,18 +4764,21 @@ async def motor_repost_publico_step():
                             await asyncio.sleep(2 * tentativa)
 
                     if not marcou:
-                        # 🛑 Não conseguimos registrar. O arquivo FICA no disco de propósito:
-                        # a trava "sem arquivo no disco" segura o item até alguém olhar,
-                        # e é muito melhor um vídeo preso do que vinte cópias no grupo.
+                        # Não deu para registrar. Apaga o arquivo: sem ele, os ciclos seguintes caem
+                        # na trava "sem arquivo" (adiam o item) em vez de publicar o vídeo de novo.
+                        # O item sai da fila pela tolerância de dias. Melhor um vídeo preso na
+                        # fila do que vinte cópias no grupo.
+                        try: os.remove(caminho)
+                        except Exception: pass
                         if EXIBIR_LOGS:
                             logger.error(f"🛑 [Motor Público] {id_unico} foi PUBLICADO mas não foi possível marcar "
-                                         "no banco. Motor parado para não republicar. Verifique o SQLite.")
+                                         "no banco. Arquivo apagado para não republicar. Verifique o SQLite.")
                         conexao.close()
                         return
 
-                    registrar_ultimo_post(grupo_id, "video")   # 🚦 Intercalação
+                    registrar_ultimo_post(grupo_id, "video")  # para a intercalação
 
-                    # 🧹 O arquivo já cumpriu o papel. Sai do disco na hora.
+                    # O arquivo cumpriu o papel: sai do disco na hora.
                     try: os.remove(caminho)
                     except Exception: pass
 
@@ -4767,7 +4786,7 @@ async def motor_repost_publico_step():
                     if EXIBIR_LOGS:
                         logger.error(f"❌ [Motor Público] Falha ao publicar: {e} "
                                      f"| destino={grupo_id!r} topico={topico_destino!r} arquivo={caminho!r}")
-                    # 🚦 ANTI-TRAVA: adia 30 min em vez de deixar o item parado no topo da fila.
+                    # Falhou: adia 30 min em vez de deixar o item parado no topo da fila.
                     cursor.execute(
                         "UPDATE fila_publico SET horario_disparo = ? WHERE id_unico = ?",
                         ((agora + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S"), id_unico)
@@ -4778,21 +4797,22 @@ async def motor_repost_publico_step():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Motor Público] Erro estrutural crítico: {e}")
 
-# Inicia o motor autônomo agendado no APScheduler a cada 2 minutos
+# Motor do repostador do Grupo Público: a cada 2 minutos.
 scheduler.add_job(motor_repost_publico_step, 'interval', minutes=2, id='motor_repost_publico_loop', replace_existing=True)
 
 # ----------------------------------
-# NOVO MÓDULO: VÍDEOS AUTORAIS 🎥
+# Vídeos Autorais (painel; o robô é o espelhador_videos_autorais)
 # ----------------------------------
 def ler_autorais_config():
+    """autorais_config com o padrão para o que faltar (o robô é o espelhador_videos_autorais)."""
     padrao = {
         "origem": -1003673555953, 
         "origem_topico": None, 
         "destino": "@videos_autorais", 
         "dias_retorno": 15, 
         "limite_videos": 5,
-        "inicio": 10,   # 🕐 Janela de postagem: hora de abertura
-        "fim": 20,      # 🕐 Janela de postagem: hora de fechamento
+        "inicio": 10,  # janela de postagem: abertura
+        "fim": 20,  # janela de postagem: fechamento
         "pausar_repostagem": False,
         "pausar_robo_completo": False
     }
@@ -4822,11 +4842,10 @@ teclado_submenu_retorno = ReplyKeyboardMarkup(
 )
 
 def calcular_dias_restantes_autorais():
-    """Busca o vídeo mais antigo na fila de autorais e calcula quantos dias faltam para ele ser postado."""
+    """Dias até a data-alvo mais próxima da fila de retorno; None se já chegou ou não há fila."""
     try:
         conexao = sqlite3.connect("banco_dados.db")
         cursor = conexao.cursor()
-        # Busca a data mais próxima que está agendada
         cursor.execute("SELECT MIN(data_alvo) FROM fila_autorais")
         resultado = cursor.fetchone()
         conexao.close()
@@ -4834,13 +4853,11 @@ def calcular_dias_restantes_autorais():
         if resultado and resultado[0]:
             data_alvo_str = resultado[0]
             
-            # Compara a data do banco com o dia de hoje
             hoje = datetime.now(fuso_horario).date()
             data_alvo = datetime.strptime(data_alvo_str, "%Y-%m-%d").date()
 
             dias_restantes = (data_alvo - hoje).days
             
-            # Só retorna a contagem se ainda faltarem dias (> 0)
             if dias_restantes > 0:
                 return dias_restantes
         return None
@@ -4850,6 +4867,9 @@ def calcular_dias_restantes_autorais():
 
 @dp.message(F.text == "Vídeos Autorais 🎥", StateFilter("*"))
 async def painel_autorais(message: types.Message, state: FSMContext):
+    """
+    Painel dos Vídeos Autorais: status, origem, destino, contas de plantão e regras do retorno.
+    """
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     
@@ -4859,8 +4879,8 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     origem = config.get("origem", "Não definida")
     topico = config.get("origem_topico")
 
-    # ✅ CORREÇÃO: o ID pode ter chegado no formato composto "-100123:1".
-    # Separamos aqui para o painel não imprimir ":1:1" e para o cache achar o nome.
+    # O ID pode vir com tópico ("-100123:1"): separa para não imprimir ":1:1" e para
+    # o cache achar o nome.
     if isinstance(origem, str) and ":" in origem:
         _partes_origem = origem.split(":")
         origem = _partes_origem[0].strip()
@@ -4880,16 +4900,14 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     janela_inicio = config.get("inicio", 10)
     janela_fim = config.get("fim", 20)
     
-    # Verifica os status de pausa
     pausar_repost = config.get("pausar_repostagem", False)
     pausar_robo = config.get("pausar_robo_completo", False)
     
     status_robo = "🔴 Pausado" if pausar_robo else "🟢 Ativo"
     status_repost = "🔴 Pausada" if pausar_repost else "🟢 Ativa"
     
-    # ✅ LÓGICA DA CONTAGEM REGRESSIVA
+    # Contagem regressiva até o primeiro retorno (só com a repostagem ativa).
     texto_contagem = ""
-    # A contagem só aparece se a repostagem NÃO estiver pausada
     if not pausar_repost:
         dias_restantes = calcular_dias_restantes_autorais()
         if dias_restantes:
@@ -4897,7 +4915,7 @@ async def painel_autorais(message: types.Message, state: FSMContext):
 
     cache_nomes = ler_cache_nomes_grupos()
 
-    # --- Lógica Avançada Visual da Origem ---
+    # Origem: nome pelo cache, pelo Telegram ou pelo status do Espião.
     nome_origem = str(origem)
     icone_origem = "⏳"
     
@@ -4931,7 +4949,7 @@ async def painel_autorais(message: types.Message, state: FSMContext):
                     nome_origem = f"<code>{origem}{topico_str}</code> - <i>Aguardando leitura do Userbot...</i>"
                     icone_origem = "⏳"
                 
-    # --- Lógica Visual do Destino ---
+    # Destino
     nome_destino = str(destino)
     icone_destino = "⏳"
     if str(destino) != "Não definido":
@@ -4949,9 +4967,8 @@ async def painel_autorais(message: types.Message, state: FSMContext):
                 nome_destino = f"<code>{destino}{destino_topico_str}</code> - <i>Acesso Negado</i>"
                 icone_destino = "❌"
     
-    # --- 👥 QUEM ESTÁ DE PLANTÃO (lido do pool_contas) ---
-    # Resumo de uma linha por posto. Se o pool ainda não tiver conta nenhuma,
-    # o painel não quebra: mostra o aviso e segue normal.
+    # Contas de plantão, lidas do pool_contas. Sem conta no pool, o painel mostra o
+    # aviso e segue.
     try:
         _espelho = pool_contas.obter_conta_da_funcao(pool_contas.FUNCAO_ESPELHO)
         _repost = pool_contas.obter_conta_da_funcao(pool_contas.FUNCAO_REPOSTAGEM)
@@ -4964,9 +4981,8 @@ async def painel_autorais(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.error(f"❌ Não consegui ler o pool de contas: {e_pool}")
         texto_plantao = "<b>- Contas de plantão:</b>\n    ⚠️ <i>pool indisponível</i>\n\n"
 
-    # --- MONTAGEM DO TEXTO ---
     
-    # --- MONTAGEM DO TEXTO ---
+    # Texto do painel
     texto = (
         "🎥 <b>Painel do Bot Vídeos Autorais</b>\n\n"
         f"<b>- Status Geral:</b>\n"
@@ -4989,19 +5005,17 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     await state.set_state(AutoraisFluxo.menu_principal)
 
 # ==========================================================================
-# 👥 PAINEL DE CONTAS E POSTOS  (dentro de Vídeos Autorais)
+# Painel de Contas e Postos (Outros Canais → Contas)
 # --------------------------------------------------------------------------
-# Tela para ver quem está espelhando, quem está repostando, e mexer nisso sem
-# abrir o terminal. Toda a REGRA mora no pool_contas.py; aqui é só tela.
+# Quem espelha e quem reposta, sem abrir o terminal. A regra mora no
+# pool_contas.py; aqui é só tela. (O espelhador_videos_autorais ainda usa a sessão
+# fixa: a integração com o pool está pendente.)
 #
-# Duas ações diferentes, que é onde costuma dar confusão:
-#
-#   🔓/🔒 PERMITIR   → muda o que a conta PODE fazer. É a ação durável. Tirar a
-#                      permissão tira do posto e impede o revezamento de
-#                      recolocar a mesma conta na próxima sincronização.
-#   ⚡ ASSUMIR       → troca o plantonista AGORA, sem mexer em permissão. Dura
-#                      enquanto a conta continuar apta (o motor nunca derruba
-#                      quem está no posto e está saudável).
+# Duas ações diferentes:
+#   PERMITIR → muda o que a conta PODE fazer. É a ação durável: tirar a permissão
+#              tira do posto e impede o revezamento de recolocar a conta.
+#   ASSUMIR  → troca o plantonista AGORA, sem mexer em permissão. Dura enquanto
+#              a conta continuar apta (quem está no posto e saudável não sai).
 #
 # Callbacks (curtos de propósito: o Telegram limita o callback_data a 64 bytes):
 #   pc_painel | pc_sync | pc_ver:<id> | pc_tog:<id>:<e|r> | pc_ass:<id>:<e|r> |
@@ -5024,9 +5038,8 @@ def _abas(ativa):
     return [
         InlineKeyboardButton(text=("• 🎯 Postos" if ativa == "postos" else "🎯 Postos"),
                              callback_data="pc_painel"),
-        # ⚠️ NÃO chame isto de "Lista Negra": o Espião já tem uma, e ela bloqueia
-        # CANAIS (para não importar/monitorar). Esta aqui bloqueia PESSOAS (para
-        # não capturar o que elas postam). Dois conceitos, nomes diferentes.
+        # Não chamar esta aba de "Lista Negra": a do Espião bloqueia CANAIS (não importar
+        # nem monitorar); esta bloqueia PESSOAS (não capturar o que elas postam).
         InlineKeyboardButton(text=("• 🚫 Autores" if ativa == "negra" else "🚫 Autores"),
                              callback_data="bl_painel"),
     ]
@@ -5103,12 +5116,12 @@ async def _pc_redesenhar(mensagem):
 
 @dp.message(F.text == "Contas 👥", StateFilter("*"))
 async def painel_contas_postos(message: types.Message, state: FSMContext):
+    """Abre o painel de Contas (aba Postos), protegendo antes as contas na lista negra."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     if EXIBIR_LOGS: logger.info("👥 Abrindo o painel de Contas...")
-    # Proteger as suas próprias contas é barato e tem que valer sempre, então
-    # roda em silêncio ao abrir. Era isto que o botão "Sincronizar minhas contas"
-    # fazia; ele saiu porque só criava dúvida sobre quando apertar.
+    # Proteger as próprias contas na lista negra é barato e tem de valer sempre: roda
+    # em silêncio ao abrir o painel (no lugar de um botão que só criava dúvida).
     try:
         blacklist_captura.sincronizar_contas_do_pool()
     except Exception as e:
@@ -5134,6 +5147,7 @@ async def pool_voltar_lista(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "pc_sync", StateFilter("*"))
 async def pool_sincronizar(callback: types.CallbackQuery, state: FSMContext):
+    """Checa cada conta no Telegram e redistribui os postos se algo mudou."""
     if callback.from_user.id != ADMIN_ID: return
     # A checagem conecta conta por conta no Telegram: pode levar alguns segundos.
     await callback.answer("Checando cada conta no Telegram...", show_alert=False)
@@ -5167,6 +5181,7 @@ async def pool_ver_conta(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("pc_tog:"), StateFilter("*"))
 async def pool_alternar_permissao(callback: types.CallbackQuery, state: FSMContext):
+    """Permite ou bloqueia uma função (espelho, repostagem) para a conta."""
     if callback.from_user.id != ADMIN_ID: return
     _p, id_conta, sigla = callback.data.split(":")
     conta = pool_contas.obter_conta(id_conta)
@@ -5189,6 +5204,7 @@ async def pool_alternar_permissao(callback: types.CallbackQuery, state: FSMConte
 
 @dp.callback_query(F.data.startswith("pc_ass:"), StateFilter("*"))
 async def pool_assumir_funcao(callback: types.CallbackQuery, state: FSMContext):
+    """A conta assume o posto agora, sem mudar permissões."""
     if callback.from_user.id != ADMIN_ID: return
     _p, id_conta, sigla = callback.data.split(":")
     conta = pool_contas.obter_conta(id_conta)
@@ -5210,6 +5226,7 @@ async def pool_assumir_funcao(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("pc_hab:"), StateFilter("*"))
 async def pool_habilitar_conta(callback: types.CallbackQuery, state: FSMContext):
+    """Habilita ou desabilita a conta e redistribui os postos."""
     if callback.from_user.id != ADMIN_ID: return
     conta = pool_contas.obter_conta(callback.data.split(":")[1])
     if not conta:
@@ -5233,18 +5250,17 @@ async def pool_habilitar_conta(callback: types.CallbackQuery, state: FSMContext)
 
 
 # ==========================================================================
-# 🚫 PAINEL DE AUTORES BLOQUEADOS  (aba do painel de Contas)
+# Painel de autores bloqueados (aba do painel de Contas)
 # --------------------------------------------------------------------------
-# Tela para bloquear e desbloquear autores pelo celular, sem abrir o terminal.
-# Toda a REGRA mora no blacklist_captura.py; aqui é só tela.
+# Bloquear e desbloquear autores pelo celular. A regra mora no
+# blacklist_captura.py; aqui é só tela.
 #
-# Duas categorias aparecem na tela e se comportam diferente:
-#
-#   🔒 SUAS CONTAS   → entram sozinhas, vindas do pool_contas, com escopo
-#                      global. NÃO têm botão de remover de propósito: tirar uma
-#                      delas recria o laço de recaptura (a conta da repostagem
-#                      devolve o vídeo e a do espelho captura de novo).
-#   ✋ MANUAIS       → os @ que você adiciona. Esses têm botão de remover.
+# Duas categorias, que se comportam diferente:
+#   SUAS CONTAS → entram sozinhas, vindas do pool_contas, com escopo global. Sem
+#                 botão de remover de propósito: tirar uma delas recria o laço de
+#                 recaptura (a conta da repostagem devolve o vídeo e a do espelho
+#                 captura de novo).
+#   MANUAIS     → os @ que você adiciona. Esses têm botão de remover.
 #
 # Callbacks (curtos: o Telegram limita o callback_data a 64 bytes):
 #   bl_painel | bl_add | bl_del:<id> | bl_esc:<id>
@@ -5255,13 +5271,12 @@ def _bl_teclado_lista():
     linhas = [_abas("negra"),
               [InlineKeyboardButton(text="➕ Bloquear alguém", callback_data="bl_add")]]
 
-    # Só as manuais ganham botão. As do pool são intocáveis pela tela.
+    # Só as manuais ganham botão; as do pool são intocáveis pela tela.
     manuais = [e for e in blacklist_captura.listar() if e["origem"] != blacklist_captura.ORIGEM_POOL]
     for entrada in manuais[:20]:
         alvo = (entrada["nome_exibicao"]
                 or (f"@{entrada['username']}" if entrada["username"] else str(entrada["user_id"])))
-        # O rótulo diz o que o botão FAZ, não só o estado. Antes aparecia só
-        # "🎥 fulano" e não dava para adivinhar que tocar ali troca o alcance.
+        # O rótulo diz o que o botão FAZ (tocar alterna o alcance), não só o estado.
         onde = ("🌐 todo lugar" if entrada["escopo"] == blacklist_captura.ESCOPO_GLOBAL
                 else "🎥 só Autorais")
         linhas.append([
@@ -5294,6 +5309,7 @@ async def bl_voltar_painel(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "bl_add", StateFilter("*"))
 async def bl_pedir_arroba(callback: types.CallbackQuery, state: FSMContext):
+    """Pede quem bloquear (@, ID ou link do perfil). Entra valendo só nos Autorais."""
     await callback.answer()
     await state.set_state(AutoraisFluxo.aguardando_bloqueio)
     await callback.message.answer(
@@ -5314,6 +5330,7 @@ async def bl_pedir_arroba(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_bloqueio)
 async def bl_receber_arroba(message: types.Message, state: FSMContext):
+    """Bloqueia o autor informado ("@fulano global" já entra valendo em todo lugar)."""
     if message.text == "Cancelar ❌":
         await cancelar_fluxo_global(message, state)
         return
@@ -5344,6 +5361,7 @@ async def bl_receber_arroba(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("bl_del:"), StateFilter("*"))
 async def bl_remover(callback: types.CallbackQuery):
+    """Desbloqueia uma entrada manual."""
     entrada_id = callback.data.split(":")[1]
     alvo = None
     for entrada in blacklist_captura.listar():
@@ -5389,22 +5407,20 @@ async def bl_alternar_escopo(callback: types.CallbackQuery):
     await _bl_redesenhar(callback.message)
 
 
-# ----------------------------------------------------
-# SUBSTITUA OS HANDLERS DOS SUBMENUS POR ESTES:
-# ----------------------------------------------------
 
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Regras de Repostagem ♻️")
 async def submenu_regras_retorno(message: types.Message, state: FSMContext):
+    """Menu das regras do retorno D+X: dias, cota e janela."""
     if message.from_user.id != ADMIN_ID: return
     await message.answer("♻️ <b>Regras de Repostagem</b>\nEscolha o que deseja editar:", reply_markup=teclado_submenu_retorno, parse_mode="HTML")
-    # ✅ CORREÇÃO: reancora o estado no menu principal dos Autorais.
-    # Sem isto, quando chamada de dentro do cancelar_fluxo_global (que dá
-    # state.clear()) ou após Aprovar/Cancelar, o estado fica None e os botões
-    # "Editar Dias ⏳" / "Editar Limite 📦" param de responder.
+    # Reancora o estado no menu dos Autorais: chamada de dentro do cancelar_fluxo_global
+    # (que limpa o estado) ou depois de Aprovar/Cancelar, o estado ficaria vazio e os
+    # botões "Editar Dias" / "Editar Limite" parariam de responder.
     await state.set_state(AutoraisFluxo.menu_principal)
 
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Status do Robô ⏸️")
 async def submenu_status_robo(message: types.Message, state: FSMContext):
+    """Menu de pausa dos Autorais: repostagem (retorno) e robô completo."""
     config = ler_autorais_config()
     texto_repostagem = "Retomar Repostagem ▶️" if config.get("pausar_repostagem") else "Pausar Repostagem ⏸️"
     texto_robo = "Retomar Robô Completo ▶️" if config.get("pausar_robo_completo") else "Pausar Robô Completo ⏸️"
@@ -5419,10 +5435,10 @@ async def submenu_status_robo(message: types.Message, state: FSMContext):
         is_persistent=True
     )
     await message.answer("⏸️ <b>Controle de Pausa</b>\nSelecione o serviço que deseja pausar ou retomar:", reply_markup=teclado_submenu_pausa, parse_mode="HTML")
-    # ✅ IMPORTANTE: Volta o estado para o menu principal dos autorais para que os botões funcionem corretamente
+    # Mesmo motivo do submenu_regras_retorno: os botões dependem deste estado.
     await state.set_state(AutoraisFluxo.menu_principal)
 
-# --- LÓGICA DE CONFIRMAÇÃO DE PAUSA DA REPOSTAGEM ---
+# Pausa da repostagem (retorno D+X)
 @dp.message(AutoraisFluxo.menu_principal, F.text.in_(["Pausar Repostagem ⏸️", "Retomar Repostagem ▶️"]))
 async def pedir_confirmacao_repostagem(message: types.Message, state: FSMContext):
     acao = "pausar" if "Pausar" in message.text else "retomar"
@@ -5441,13 +5457,11 @@ async def pedir_confirmacao_repostagem(message: types.Message, state: FSMContext
 
 @dp.message(AutoraisFluxo.aguardando_confirmacao_pausa_repost)
 async def processar_pausa_repostagem(message: types.Message, state: FSMContext):
-    # ✅ Lógica para o botão Cancelar
     if message.text == "Cancelar ❌":
         await message.answer("Ação cancelada.")
         await submenu_status_robo(message, state) 
         return
 
-    # ✅ Lógica para quando ele não apertar nem Cancelar e nem Confirmar
     if "Confirmar" not in message.text:
         await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
         return
@@ -5456,7 +5470,6 @@ async def processar_pausa_repostagem(message: types.Message, state: FSMContext):
     data = await state.get_data()
     acao = data.get("acao_repost")
     
-    # Se a ação for "pausar", ele salva como True, senão salva como False
     config["pausar_repostagem"] = (acao == "pausar")
     salvar_autorais_config(config)
 
@@ -5464,7 +5477,7 @@ async def processar_pausa_repostagem(message: types.Message, state: FSMContext):
     await message.answer(f"✅ A repostagem automática de vídeos antigos foi <b>{status}</b>.", parse_mode="HTML")
     await submenu_status_robo(message, state)
 
-# --- LÓGICA DE CONFIRMAÇÃO DE PAUSA DO ROBÔ COMPLETO ---
+# Pausa do robô completo (captura e retorno)
 @dp.message(AutoraisFluxo.menu_principal, F.text.in_(["Pausar Robô Completo ⏸️", "Retomar Robô Completo ▶️"]))
 async def pedir_confirmacao_robo(message: types.Message, state: FSMContext):
     acao = "pausar" if "Pausar" in message.text else "retomar"
@@ -5483,13 +5496,11 @@ async def pedir_confirmacao_robo(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_confirmacao_pausa_robo)
 async def processar_pausa_robo(message: types.Message, state: FSMContext):
-    # ✅ Lógica para o botão Cancelar
     if message.text == "Cancelar ❌":
         await message.answer("Ação cancelada.")
         await submenu_status_robo(message, state) 
         return
 
-    # ✅ Lógica para quando ele não apertar nem Cancelar e nem Confirmar
     if "Confirmar" not in message.text:
         await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
         return
@@ -5498,7 +5509,6 @@ async def processar_pausa_robo(message: types.Message, state: FSMContext):
     data = await state.get_data()
     acao = data.get("acao_robo")
 
-    # Se a ação for "pausar", ele salva como True, senão salva como False
     config["pausar_robo_completo"] = (acao == "pausar")
     salvar_autorais_config(config)
 
@@ -5507,7 +5517,7 @@ async def processar_pausa_robo(message: types.Message, state: FSMContext):
     await submenu_status_robo(message, state)
 
 # ----------------------------------------------------
-# REGRAS DE ORIGEM E DESTINO
+# Origem e destino dos Autorais
 # ----------------------------------------------------
 @dp.message(F.text == "Voltar ao Menu Autorais 🔙", StateFilter("*"))
 async def voltar_menu_autorais(message: types.Message, state: FSMContext):
@@ -5521,6 +5531,7 @@ async def pedir_origem_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_origem)
 async def pedir_topico_autorais(message: types.Message, state: FSMContext):
+    """Valida a nova origem e pergunta o tópico (ou usa o que veio no link)."""
     if message.text == "Cancelar ❌":
         await cancelar_fluxo_global(message, state)
         return
@@ -5533,8 +5544,8 @@ async def pedir_topico_autorais(message: types.Message, state: FSMContext):
     await msg_status.delete()
 
     if sucesso:
-        # ✅ Se o bot não enxerga o grupo, a função devolve o próprio ID no lugar
-        # do nome. Nesse caso buscamos o nome real que o Userbot já cacheou.
+        # Sem acesso ao grupo, a validação devolve o próprio ID no lugar do nome: usa o
+        # nome que o userbot já guardou no cache.
         id_base_exibicao = str(id_final).split(":")[0].strip()
         if str(nome_chat).strip() == id_base_exibicao:
             cache_nomes = ler_cache_nomes_grupos()
@@ -5553,8 +5564,8 @@ async def pedir_topico_autorais(message: types.Message, state: FSMContext):
              
         await message.answer("⚠️ <b>Aviso de Permissão:</b> O Bot Principal não tem permissão para enxergar este grupo. O ID será salvo, pois a Conta Secundária é quem fará a extração física.", parse_mode="HTML")
 
-    # ✅ NOVO: o link já pode trazer o tópico embutido ("-100123:1" vindo do "_1").
-    # Se veio, não faz sentido perguntar de novo - pulamos direto para a confirmação.
+    # O link pode trazer o tópico ("-100123:1", vindo do "_1"): então não pergunta de
+    # novo e vai direto à confirmação.
     partes_id = str(id_final).split(":")
     origem_base = partes_id[0].strip()
     topico_detectado = int(partes_id[1].strip()) if len(partes_id) > 1 and partes_id[1].strip().isdigit() else None
@@ -5574,8 +5585,10 @@ async def pedir_topico_autorais(message: types.Message, state: FSMContext):
     await state.set_state(AutoraisFluxo.aguardando_topico)
 
 async def confirmar_origem_autorais(message, state, nova_origem, topico_final, nome_novo=None):
-    """Monta a tela de aprovação da ORIGEM. Usada tanto pelo caminho automático
-    (tópico vindo do link) quanto pelo manual (tópico digitado)."""
+    """
+    Tela de aprovação da ORIGEM, com o antes e o depois. Serve ao caminho automático
+    (tópico no link) e ao manual (tópico digitado).
+    """
     await state.update_data(origem_pendente=nova_origem, topico_pendente=topico_final)
     
     config = ler_autorais_config()
@@ -5606,13 +5619,14 @@ async def confirmar_origem_autorais(message, state, nova_origem, topico_final, n
 
 @dp.message(AutoraisFluxo.aguardando_topico)
 async def salvar_origem_autorais(message: types.Message, state: FSMContext):
+    """Recebe o tópico da origem (0 = o grupo todo) e vai para a aprovação."""
     if message.text == "Cancelar ❌":
         await cancelar_fluxo_global(message, state)
         return
     
     entrada_topico = message.text.strip()
     
-    # ✅ Tolerante: se colarem o link ou "ID_1" de novo, extraímos só o tópico
+    # Tolerante: se colarem o link ou "ID_1" de novo, extrai só o tópico.
     if not entrada_topico.isdigit():
         import re
         achado = re.search(r'[_:/](\d+)\s*$', entrada_topico)
@@ -5632,6 +5646,7 @@ async def salvar_origem_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_confirmacao_origem)
 async def processar_origem_autorais(message: types.Message, state: FSMContext):
+    """Grava a origem e o tópico aprovados."""
     if message.text == "Cancelar ❌":
         await message.answer("❌ Operação cancelada. A origem <b>não</b> foi alterada.", parse_mode="HTML")
         await painel_autorais(message, state)
@@ -5651,7 +5666,7 @@ async def processar_origem_autorais(message: types.Message, state: FSMContext):
     salvar_autorais_config(config)
     
     if EXIBIR_LOGS: logger.info(f"✅ Origem dos vídeos autorais salva: {nova_origem} | Tópico: {topico_final}")
-    await message.answer(f"✅ <b>Origem e Tópico salvos com sucesso!</b>", parse_mode="HTML")
+    await message.answer("✅ <b>Origem e Tópico salvos com sucesso!</b>", parse_mode="HTML")
     await painel_autorais(message, state)
 
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Destino 📤")
@@ -5662,6 +5677,7 @@ async def pedir_destino_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_destino)
 async def salvar_destino_autorais(message: types.Message, state: FSMContext):
+    """Valida o novo destino e pede aprovação; avisa se for o mesmo grupo da origem (laço)."""
     if message.text == "Cancelar ❌":
         await cancelar_fluxo_global(message, state)
         return
@@ -5674,8 +5690,7 @@ async def salvar_destino_autorais(message: types.Message, state: FSMContext):
     await msg_status.delete()
 
     if sucesso:
-        # ✅ Mesmo tratamento da origem: usa o nome real do cache se a função
-        # tiver devolvido o próprio ID (Modo Trust).
+        # Mesmo tratamento da origem: o nome real do cache quando a validação devolveu o ID.
         id_base_exibicao = str(id_final).split(":")[0].strip()
         if str(nome_chat).strip() == id_base_exibicao:
             cache_nomes = ler_cache_nomes_grupos()
@@ -5697,11 +5712,11 @@ async def salvar_destino_autorais(message: types.Message, state: FSMContext):
     config = ler_autorais_config()
     destino_antigo = config.get("destino", "Não definido")
     
-    # ✅ NOVO: guarda o valor e pede aprovação antes de gravar
+    # Pede aprovação antes de gravar.
     await state.update_data(destino_pendente=id_final, nome_destino_validado=nome_chat)
     
     nome_novo = nome_chat or id_final
-    # ✅ Exibição no mesmo formato do link do Telegram Web ("-100123_1")
+    # Exibe no formato do link do Telegram Web ("-100123_1").
     id_final_exibicao = str(id_final).replace(":", "_")
     destino_antigo_exibicao = str(destino_antigo).replace(":", "_")
     origem_atual = str(config.get("origem", "")).split(":")[0].strip()
@@ -5733,6 +5748,7 @@ async def salvar_destino_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_confirmacao_destino)
 async def processar_destino_autorais(message: types.Message, state: FSMContext):
+    """Grava o destino aprovado."""
     if message.text == "Cancelar ❌":
         await message.answer("❌ Operação cancelada. O destino <b>não</b> foi alterado.", parse_mode="HTML")
         await painel_autorais(message, state)
@@ -5754,7 +5770,7 @@ async def processar_destino_autorais(message: types.Message, state: FSMContext):
     await painel_autorais(message, state)
 
 # ----------------------------------------------------
-# LÓGICA DE CONFIRMAÇÃO PARA EDIÇÃO DE DIAS E LIMITES
+# Dias de retorno e cota diária (com confirmação)
 # ----------------------------------------------------
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Dias ⏳")
 async def pedir_dias_autorais(message: types.Message, state: FSMContext):
@@ -5861,7 +5877,7 @@ async def processar_limite_autorais(message: types.Message, state: FSMContext):
     await submenu_regras_retorno(message, state)
 
 # ----------------------------------------------------
-# 🕐 JANELA DE HORÁRIO DOS VÍDEOS AUTORAIS
+# Janela de horário do retorno dos Autorais
 # ----------------------------------------------------
 teclado_janela_autorais = ReplyKeyboardMarkup(
     keyboard=[
@@ -5891,6 +5907,7 @@ async def pedir_janela_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_janela_autorais)
 async def confirmar_janela_autorais(message: types.Message, state: FSMContext):
+    """Valida a janela ("8-22" ou dia todo) e pede aprovação, com o espaçamento aproximado."""
     import re
 
     if message.text == "Cancelar ❌":
@@ -5933,6 +5950,7 @@ async def confirmar_janela_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_confirmacao_janela_autorais)
 async def processar_janela_autorais(message: types.Message, state: FSMContext):
+    """Grava a janela aprovada; vale a partir do próximo agendamento."""
     if message.text == "Cancelar ❌":
         await message.answer("Operação cancelada. A janela <b>não</b> foi alterada.", parse_mode="HTML")
         await submenu_regras_retorno(message, state)
@@ -5962,19 +5980,18 @@ async def processar_janela_autorais(message: types.Message, state: FSMContext):
     )
     await submenu_regras_retorno(message, state)
 
-# 🪞 FEED CENTRAL DOS ACHADINHOS
-# Todo achadinho cai no tópico do seu nicho E também aqui. Os tópicos por
-# categoria continuam servindo quem quer só uma delas; este feed é a vitrine
-# cheia para quem acabou de entrar e não sabe o que procurar.
-# Deixe ESPELHO_ACHADINHOS_DESTINO como None para desligar o espelho.
+# Feed central dos achadinhos: todo achadinho cai no tópico do seu nicho E também
+# aqui. Os tópicos por categoria servem quem quer só uma delas; o feed é a vitrine
+# cheia para quem acabou de entrar. ESPELHO_ACHADINHOS_DESTINO = None desliga.
 ESPELHO_ACHADINHOS_DESTINO = "-1004460669033"
 ESPELHO_ACHADINHOS_TOPICO = "247"
 
 
 async def espelhar_no_feed_central(msg_original, legenda, destino_original, thread_original):
-    """Republica a mesma foto no feed central reaproveitando o file_id do primeiro
-    envio: nada é baixado nem enviado de novo, só referenciado. Falha aqui nunca
-    derruba a postagem principal, que a essa altura já foi entregue."""
+    """
+    Republica o achadinho no feed central reaproveitando o file_id do primeiro envio
+    (nada é baixado nem enviado de novo). Falha aqui nunca derruba a postagem principal.
+    """
     if not ESPELHO_ACHADINHOS_DESTINO:
         return
 
@@ -6002,19 +6019,20 @@ async def espelhar_no_feed_central(msg_original, legenda, destino_original, thre
         if EXIBIR_LOGS: logger.warning(f"⚠️ [Achadinhos] Falha ao espelhar no feed central: {e}. A postagem principal foi entregue normalmente.")
 
 
-# 🔥 ACHADOS DO DIA — só o que passa do piso de desconto.
-# Não custa chamada extra à API: o garimpo já ordena por desconto decrescente,
-# então o item escolhido JÁ é o de maior desconto daquela busca. Aqui a gente
-# só verifica se ele passa da régua e espelha num tópico próprio.
+# Achados do dia: só o que passa do piso de desconto. Sem chamada extra à API: o
+# garimpo já ordena por desconto, então o item escolhido já é o de maior desconto
+# da busca; aqui só confere a régua e espelha num tópico próprio.
 ACHADOS_DESTINO = "-1004460669033"
-ACHADOS_TOPICO = "393"          # ⚠️ Coloque o ID do tópico "🔥 Achados do Dia". Em 0 fica desligado.
-ACHADOS_PISO_DESCONTO = 60    # % mínimo para virar "achado"
-ACHADOS_PULA_FEED_CENTRAL = False  # True = achado NÃO vai também para Ofertas do Dia
+ACHADOS_TOPICO = "393"  # tópico "Achados do Dia"; 0 desliga
+ACHADOS_PISO_DESCONTO = 60  # % mínimo de desconto para virar "achado"
+ACHADOS_PULA_FEED_CENTRAL = False  # True = o achado NÃO vai também para o feed central
 
 
 async def espelhar_achado_do_dia(msg_original, legenda, taxa_desconto, destino_original, thread_original):
-    """Republica no tópico de achados quando o desconto passa do piso.
-    Reaproveita o file_id: nada é baixado nem enviado de novo."""
+    """
+    Republica no tópico de achados quando o desconto passa do piso, reaproveitando o
+    file_id. Falha aqui nunca derruba a postagem principal.
+    """
     if not ACHADOS_TOPICO or str(ACHADOS_TOPICO) == "0":
         return
 
@@ -6045,10 +6063,11 @@ async def espelhar_achado_do_dia(msg_original, legenda, taxa_desconto, destino_o
 
 
 def extrair_destino_e_topico(texto):
-    """🔗 Aceita link do Telegram Web, link t.me/c/ ou o ID cru, e devolve
-    (destino, thread_id). Poupa o operador de garimpar dois números na URL.
-    Devolve (None, None) quando não reconhece — inclusive no link público
-    t.me/nomedogrupo, que não carrega o ID numérico."""
+    """
+    Aceita link do Telegram Web, link t.me/c/ ou o ID cru e devolve (destino,
+    thread_id). Devolve (None, None) quando não reconhece, inclusive no link público
+    t.me/nomedogrupo, que não traz o ID numérico.
+    """
     texto = (texto or "").strip()
 
     # web.telegram.org/a/#-1004460669033_195  (o _195 é opcional)
@@ -6056,7 +6075,7 @@ def extrair_destino_e_topico(texto):
     if m:
         return m.group(1), m.group(2) or "0"
 
-    # t.me/c/4460669033/195 — neste formato o -100 vem omitido
+    # t.me/c/4460669033/195: neste formato o -100 vem omitido
     m = re.search(r"t\.me/c/(\d+)(?:/(\d+))?", texto)
     if m:
         return f"-100{m.group(1)}", m.group(2) or "0"
@@ -6072,19 +6091,17 @@ def extrair_destino_e_topico(texto):
     return None, None
 
 # ----------------------------------
-# NOVO MÓDULO: GERADOR AUTÔNOMO DE ACHADINHOS 🛍️
+# Gerador de Achadinhos: garimpa ofertas na API da Shopee e publica nos nichos
 # ----------------------------------
 def ler_achadinhos_config():
+    """achadinhos_config: nichos (nome, destino, tópico, palavras-chave), janela e sorteio."""
     return ler_config_bd("achadinhos_config", {"nichos": []}, arquivo_legado="achadinhos_config.json")
 
 def salvar_achadinhos_config(dados):
     salvar_config_bd("achadinhos_config", dados)
 
 def achadinho_ja_enviado(item_id):
-    """
-    Memória PERMANENTE de produtos já publicados.
-    A PRIMARY KEY da tabela garante que nada se repita, sem limite de tamanho.
-    """
+    """Se o produto já foi publicado alguma vez (memória permanente, sem limite de tamanho)."""
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -6094,9 +6111,10 @@ def achadinho_ja_enviado(item_id):
         return achou
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Erro ao consultar histórico: {e}")
-        return True   # Na dúvida, considera já enviado: melhor pular do que repetir
+        return True  # na dúvida, considera já enviado: melhor pular do que repetir
 
 def registrar_achadinho_enviado(item_id, nicho=""):
+    """Guarda o produto na memória de publicados."""
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -6107,11 +6125,12 @@ def registrar_achadinho_enviado(item_id, nicho=""):
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Erro ao registrar envio: {e}")
 
-# ⏳ Retenção: a memória guarda 5 anos. Produto mais antigo que isso já mudou
-# de preço ou saiu de linha — se reaparecer, vale como oferta nova.
+# Retenção da memória: 5 anos. Produto mais antigo que isso já mudou de preço ou
+# saiu de linha; se reaparecer, vale como oferta nova.
 ANOS_RETENCAO_ACHADINHOS = 5
 
 def limpar_achadinhos_antigos():
+    """Apaga da memória os produtos publicados há mais de ANOS_RETENCAO_ACHADINHOS anos."""
     try:
         corte = (datetime.now(fuso_horario) - timedelta(days=ANOS_RETENCAO_ACHADINHOS * 365)).strftime("%Y-%m-%d %H:%M:%S")
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -6136,8 +6155,8 @@ def total_achadinhos_enviados():
     except Exception:
         return 0
 
-# 🏷️ Formatação de preço e cálculo do "de/por". A API só devolve o preço ATUAL
-# e a taxa de desconto — o valor antigo precisa ser deduzido daí.
+# Preço "de/por": a API só devolve o preço ATUAL e a taxa de desconto; o valor
+# antigo é deduzido daí.
 ABERTURAS_ACHADINHO = [
     "😍 Olha esse preço!", "🔥 Achadinho do dia!", "🚨 Baixou de novo!",
     "💥 Corre que acaba!", "🤩 Achei e trouxe pra você!", "⚡ Oferta relâmpago!",
@@ -6150,8 +6169,10 @@ def formatar_brl(valor):
 
 
 def preco_de_por(preco, taxa):
-    """Devolve (preco_antigo, preco_atual, taxa). O antigo vem None quando a
-    taxa não permite deduzir com segurança."""
+    """
+    Devolve (preco_antigo, preco_atual, taxa). O antigo vem None quando a taxa não
+    permite deduzir com segurança.
+    """
     try:
         atual = float(str(preco).replace(",", "."))
         taxa = int(taxa or 0)
@@ -6163,8 +6184,10 @@ def preco_de_por(preco, taxa):
 
 
 def montar_legenda_achadinho(nome, preco, taxa, nota, link, gancho=None):
-    """🎨 O bloco de preço é montado por código, nunca pela IA. Assim o número
-    é sempre exato e o layout não quebra quando a IA falha."""
+    """
+    O bloco de preço é montado por código, nunca pela IA: o número sai sempre exato
+    e o layout não quebra quando a IA falha.
+    """
     original, atual, taxa = preco_de_por(preco, taxa)
     if atual is None:
         return f"{gancho or random.choice(ABERTURAS_ACHADINHO)}\n\n📦 <b>{nome}</b>\n\n🔗 <b>Confira a oferta aqui</b> 👇\n{link}"
@@ -6182,7 +6205,8 @@ def montar_legenda_achadinho(nome, preco, taxa, nota, link, gancho=None):
     return "\n".join(linhas)
 
 async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_loja):
-    if EXIBIR_LOGS: logger.info(f"🧠 [Achadinhos] Estruturando estratégia de Copywriting para o produto...")
+    """Uma linha de chamada da IA para o produto, sem preço; sem IA, uma abertura pronta."""
+    if EXIBIR_LOGS: logger.info("🧠 [Achadinhos] Estruturando estratégia de Copywriting para o produto...")
     
     prompt = (
         f"Escreva UMA única linha curta (no máximo 8 palavras) para chamar atenção "
@@ -6202,21 +6226,18 @@ async def gerar_copy_achadinho_ia(nome_produto, preco_original, desconto, nota_l
         if 0 < len(gancho) <= 60:
             return gancho
 
-    # 🎲 Sem IA, sorteia entre oito aberturas: repete menos que um texto fixo.
+    # Sem IA, sorteia entre as aberturas prontas: repete menos que um texto fixo.
     return random.choice(ABERTURAS_ACHADINHO)
 
 
 def sortear_nichos_organico(nichos, config):
     """
-    🎲 Escolhe quais nichos entram no ciclo SEM rodízio de posição fixa.
+    Escolhe quais nichos entram no ciclo, sem rodízio fixo.
 
-    Cada nicho ganha um peso. Quem publicou há pouco tem o peso reduzido, mas
-    NUNCA zerado: repetir o mesmo tópico duas vezes seguidas é justamente o que
-    uma pessoa faz. A memória dos últimos sorteados fica salva no config, então
-    o comportamento sobrevive a restart do serviço.
-
-    O 'nichos_por_ciclo' do painel continua valendo — mas como MÉDIA, não como
-    número cravado: a quantidade oscila em torno dele.
+    Cada nicho ganha um peso: quem publicou há pouco tem o peso reduzido, mas nunca
+    zerado (repetir o mesmo tópico é o que uma pessoa faz). A memória dos últimos
+    sorteados fica no config e sobrevive a restart. O 'nichos_por_ciclo' do painel vale
+    como MÉDIA: a quantidade oscila em torno dele.
     """
     memoria = [str(n) for n in (config.get("memoria_nichos") or [])]
     base = max(1, min(int(config.get("nichos_por_ciclo", 2)), len(nichos)))
@@ -6233,36 +6254,34 @@ def sortear_nichos_organico(nichos, config):
     for _ in range(quantidade):
         ultimas = {}
         for i, m in enumerate(memoria):
-            ultimas[m] = i          # guarda a posição MAIS RECENTE de cada nome
+            ultimas[m] = i  # posição mais recente de cada nome
 
         pesos = []
         for n in nichos:
             nome = str(n.get("nome", "?"))
             pos = ultimas.get(nome)
             distancia = 99 if pos is None else (len(memoria) - pos)
-            # Acabou de sair -> peso 2.5 | faz tempo -> peso 10 (teto)
+            # acabou de sair -> peso 2.5 | faz tempo -> peso 10 (teto)
             pesos.append(max(1.0, min(10.0, float(distancia) * 2.5)))
 
         sorteado = random.choices(nichos, weights=pesos, k=1)[0]
         escolhidos.append(sorteado)
         memoria.append(str(sorteado.get("nome", "?")))
 
-    config["memoria_nichos"] = memoria[-6:]     # memória curta: 6 últimos
-    config.pop("posicao_rodizio", None)         # aposenta o contador do rodízio
+    config["memoria_nichos"] = memoria[-6:]  # memória curta: os 6 últimos
+    config.pop("posicao_rodizio", None)  # chave da versão antiga (rodízio fixo), não usada mais
     salvar_achadinhos_config(config)
     return escolhidos
 
 
 def sortear_intervalo_garimpo():
     """
-    ⏱️ Sorteia quantos minutos faltam para o próximo garimpo.
-
-    Três perfis com peso — é isso que quebra a cadência de relógio:
-      • rajada (30%): 12-40 min    -> duas ofertas quase juntas
-      • normal (45%): 55-160 min   -> ritmo de quem vai olhando ao longo do dia
-      • sumiço (25%): 190-420 min  -> ninguém fica postando o dia inteiro
-
-    A média cai perto das 2h de hoje, então o volume diário não dispara.
+    Quantos minutos até o próximo garimpo. Três perfis com peso, para quebrar a
+    cadência de relógio:
+      rajada (30%): 12-40 min    -> duas ofertas quase juntas
+      normal (45%): 55-160 min   -> ritmo de quem vai olhando ao longo do dia
+      sumiço (25%): 190-420 min  -> ninguém fica postando o dia inteiro
+    A média fica perto de 2 h.
     """
     perfil = random.choices(("rajada", "normal", "sumico"),
                             weights=(0.30, 0.45, 0.25), k=1)[0]
@@ -6275,13 +6294,9 @@ def sortear_intervalo_garimpo():
 
 def agendar_proximo_garimpo(primeiro=False):
     """
-    📌 Marca o PRÓXIMO garimpo como job 'date' único e descartável.
-    Cada execução chama esta função de novo — é o que substitui o
-    'interval, hours=2', que cravava o mesmo minuto o dia inteiro.
-
-    Se o horário sorteado cair fora da janela do painel, ele NÃO é empurrado
-    para o minuto exato da abertura (isso viraria outro carimbo diário):
-    cai em algum ponto da primeira hora e meia depois que a janela abre.
+    Marca o PRÓXIMO garimpo como um job 'date' único; cada ciclo chama esta função de
+    novo (um intervalo fixo cravaria o mesmo minuto o dia todo). Horário fora da janela
+    não vai para o minuto exato da abertura: cai na primeira hora e meia depois dela.
     """
     try:
         cfg = ler_achadinhos_config()
@@ -6289,9 +6304,8 @@ def agendar_proximo_garimpo(primeiro=False):
         hora_fim = int(cfg.get("fim", 22))
         agora = datetime.now(fuso_horario)
         if primeiro:
-            # 🔁 Restart NÃO pode virar gatilho de postagem. Se já havia um horário
-            # sorteado no ar e ele ainda está no futuro, ele é restaurado tal e qual.
-            # Sem isto, cada 'deploybot' enfia um ciclo extra 3-25 min depois.
+            # Restart não pode virar gatilho de postagem: se havia um horário sorteado ainda
+            # no futuro, ele é restaurado tal e qual (senão cada deploy enfiaria um ciclo extra).
             salvo = cfg.get("proximo_garimpo", "")
             alvo_salvo = None
             if salvo:
@@ -6310,7 +6324,7 @@ def agendar_proximo_garimpo(primeiro=False):
 
         alvo = agora + timedelta(minutes=minutos)
 
-        # Caiu fora da janela? Reabre no próximo expediente, em ponto aleatório.
+        # Fora da janela: vai para o próximo expediente, num ponto aleatório.
         if hora_fim > hora_inicio and not (hora_inicio <= alvo.hour < hora_fim):
             base = alvo if alvo.hour < hora_inicio else (alvo + timedelta(days=1))
             alvo = base.replace(hour=hora_inicio, minute=0, second=0, microsecond=0) \
@@ -6324,7 +6338,7 @@ def agendar_proximo_garimpo(primeiro=False):
         scheduler.add_job(ciclo_garimpo_automatico, 'date', run_date=alvo,
                           id='job_garimpo_achadinhos', replace_existing=True)
 
-        # 💾 Guarda o horário para sobreviver a restart (ver bloco 'retomada' acima).
+        # Guarda o horário para sobreviver a restart (ver "retomada" acima).
         cfg["proximo_garimpo"] = alvo.strftime("%Y-%m-%d %H:%M:%S")
         salvar_achadinhos_config(cfg)
 
@@ -6333,7 +6347,7 @@ def agendar_proximo_garimpo(primeiro=False):
                         f"{alvo.strftime('%d/%m às %H:%M:%S')} (daqui a {minutos} min).")
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Falha ao reagendar o garimpo: {e}")
-        # 🛡️ Rede de segurança: sem isto um erro aqui MATA o motor para sempre.
+        # Rede de segurança: sem reagendar aqui, um erro mataria o motor até o próximo restart.
         try:
             resgate = datetime.now(fuso_horario) + timedelta(minutes=random.randint(45, 120))
             scheduler.add_job(ciclo_garimpo_automatico, 'date', run_date=resgate,
@@ -6344,9 +6358,8 @@ def agendar_proximo_garimpo(primeiro=False):
 
 async def ciclo_garimpo_automatico():
     """
-    🔁 Casca que o agendador chama. Roda o garimpo e, aconteça o que acontecer,
-    marca o próximo. O 'finally' é obrigatório: se o ciclo estourar no meio e
-    ninguém reagendar, o motor morre calado até o próximo restart.
+    O que o agendador chama: roda o garimpo e, aconteça o que acontecer, marca o
+    próximo (sem o finally, um erro no meio mataria o motor até o próximo restart).
     """
     try:
         await processar_garimpo_automatico()
@@ -6357,8 +6370,14 @@ async def ciclo_garimpo_automatico():
 
 
 async def processar_garimpo_automatico(forcado=False):
-    # ⏰ Janela lida do painel. Post de madrugada some no feed quando o pessoal
-    # acorda e ainda queima um produto inédito da memória permanente.
+    """
+    Um ciclo do garimpo: para cada nicho sorteado, busca ofertas pela palavra-chave,
+    escolhe a de maior desconto ainda inédita (>= 15%) e publica a foto com a legenda
+    no tópico do nicho, no feed central e, se for o caso, nos achados do dia.
+    forcado=True ignora a janela.
+    """
+    # Janela do painel: post de madrugada some no feed até o pessoal acordar, e ainda
+    # queima um produto inédito da memória.
     cfg_janela = ler_achadinhos_config()
     hora_inicio = int(cfg_janela.get("inicio", 8))
     hora_fim = int(cfg_janela.get("fim", 22))
@@ -6378,9 +6397,8 @@ async def processar_garimpo_automatico(forcado=False):
         if EXIBIR_LOGS: logger.warning("⚠️ [Achadinhos] O radar está vazio. Adicione nichos ao arquivo achadinhos_config.json.")
         return
 
-    # 🎲 SORTEIO ORGÂNICO: o rodízio de posição fixa saiu. Agora cada ciclo sorteia
-    # quais nichos entram, com peso — dá para repetir o mesmo tópico duas vezes
-    # seguidas, exatamente como faz quem acha duas ofertas boas da mesma categoria.
+    # Sorteio com peso: dá para repetir o mesmo nicho duas vezes seguidas, como faz
+    # quem acha duas ofertas boas da mesma categoria.
     nichos_da_vez = sortear_nichos_organico(nichos, config)
 
     if EXIBIR_LOGS:
@@ -6400,10 +6418,10 @@ async def processar_garimpo_automatico(forcado=False):
         keyword_sorteada = random.choice(keywords)
         if EXIBIR_LOGS: logger.info(f"🔎 [Achadinhos] Rastreando o setor '{nome_nicho}' buscando por: '{keyword_sorteada}'.")
         
-        # Aumentamos a "pesca" para 40 produtos virais para ter uma amostra rica
+        # 40 produtos por busca, para ter amostra
         ofertas = await buscar_ofertas_shopee(keyword_sorteada, limite=40)
         
-        # 🧠 Curadoria: O robô organiza a lista internamente do maior desconto para o menor
+        # Do maior desconto para o menor.
         ofertas.sort(key=lambda x: int(x.get("priceDiscountRate") or 0), reverse=True)
         
         item_escolhido = None
@@ -6411,7 +6429,7 @@ async def processar_garimpo_automatico(forcado=False):
             item_id = str(oferta.get("itemId"))
             taxa_desconto = int(oferta.get("priceDiscountRate") or 0)
             
-            # 🛡️ Trava de Qualidade: Só aprova se for inédito E o desconto for de no mínimo 15%
+            # Só entra produto inédito com pelo menos 15% de desconto.
             if not achadinho_ja_enviado(item_id) and taxa_desconto >= 15:
                 item_escolhido = oferta
                 break
@@ -6447,7 +6465,7 @@ async def processar_garimpo_automatico(forcado=False):
             if os.path.exists(temp_img):
                 arquivo_img = FSInputFile(temp_img)
                 
-                # 🚀 Roteamento Inteligente: Define se o disparo vai para o chat raiz ou para a gaveta do tópico
+                # Tópico do nicho (0 = chat raiz).
                 thread_param = None
                 if thread_id_nicho and str(thread_id_nicho) != "0":
                     thread_param = int(thread_id_nicho)
@@ -6456,11 +6474,11 @@ async def processar_garimpo_automatico(forcado=False):
                 
                 registrar_achadinho_enviado(item_id, nome_nicho)
 
-                # 🔥 Desconto acima do piso vira "Achado do Dia" num tópico próprio.
+                # Desconto acima do piso vira "Achado do Dia" num tópico próprio.
                 eh_achado = int(taxa_desconto or 0) >= ACHADOS_PISO_DESCONTO if taxa_desconto else False
                 await espelhar_achado_do_dia(msg_original, legenda_final, taxa_desconto, destino, thread_param)
 
-                # 🪞 Além do tópico do nicho, a oferta cai também no feed central.
+                # Além do tópico do nicho, a oferta cai também no feed central.
                 if not (eh_achado and ACHADOS_PULA_FEED_CENTRAL):
                     await espelhar_no_feed_central(msg_original, legenda_final, destino, thread_param)
                 
@@ -6470,20 +6488,18 @@ async def processar_garimpo_automatico(forcado=False):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ [Achadinhos] Falha estrutural ao tratar mídia física do produto: {e}")
             
-        # 🎲 Espaço entre uma oferta e a seguinte DENTRO do mesmo ciclo.
-        # Fixo em 15-35s todo santo dia é assinatura de script: as duas postagens
-        # sempre caíam no mesmo minuto. Agora às vezes emendam (achou duas boas),
-        # às vezes há uma pausa de minutos no meio.
+        # Espaço entre uma oferta e a seguinte no mesmo ciclo: intervalo fixo é assinatura
+        # de script. Às vezes emendam, às vezes há uma pausa de minutos.
         if random.random() < 0.45:
-            tempo_espera = random.randint(25, 90)      # emendou as duas
+            tempo_espera = random.randint(25, 90)  # emendou as duas
         else:
-            tempo_espera = random.randint(150, 600)    # deu uma sumida no meio
+            tempo_espera = random.randint(150, 600)  # deu uma sumida no meio
         if EXIBIR_LOGS: logger.info(f"⏳ Diluição de Tráfego: Aguardando {tempo_espera}s antes de processar o próximo nicho...")
         await asyncio.sleep(tempo_espera)
 
 # ----------------------------------
-
-# 5. HANDLERS DE COMANDO E INTERAÇÃO
+# Handlers de comando e interação do painel
+# ----------------------------------
 
 @dp.message(Command("limpar_teclado"), StateFilter("*"))
 async def limpar_teclado_grupo(message: types.Message):
@@ -6512,50 +6528,48 @@ async def menu_opcoes_servidor_handler(message: types.Message, state: FSMContext
 
 @dp.message(F.text == "Monitorar Servidor 🖥️", StateFilter("*"))
 async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
+    """Uso de disco e RAM do servidor (df e free), com status e uma tabela resumida."""
     if message.from_user.id != ADMIN_ID: return
     
     if EXIBIR_LOGS: logger.info("🖥️ Iniciando auditoria assíncrona de saúde do servidor (Disco e Memória)...")
     msg_status = await message.answer("🖥️ Lendo sensores da máquina Oracle... ⏳")
     
     try:
-        # --- 1. COLETA E CÁLCULO DO DISCO ---
+        # Disco (df -h /)
         comando_disco = await asyncio.create_subprocess_exec("df", "-h", "/", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         stdout_disco, _ = await comando_disco.communicate()
-        # Pega a última linha (que contém os dados da raiz /)
+        # a última linha é a da raiz /
         linha_disco = stdout_disco.decode().strip().split('\n')[-1].split()
         
-        # Formatações amigáveis (ex: de "45G" para "45 GB")
         total_disco = linha_disco[1].replace("G", " GB")
         usado_disco = linha_disco[2].replace("G", " GB")
         livre_disco = linha_disco[3].replace("G", " GB")
         pct_disco_str = linha_disco[4]
         pct_disco = int(pct_disco_str.replace('%', ''))
         
-        # --- 2. COLETA E CÁLCULO DA RAM ---
+        # RAM (free -m)
         comando_ram = await asyncio.create_subprocess_exec("free", "-m", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         stdout_ram, _ = await comando_ram.communicate()
         linha_ram = stdout_ram.decode().strip().split('\n')[1].split()
         
         total_ram_mb = int(linha_ram[1])
         usado_ram_mb = int(linha_ram[2])
-        # Pega a coluna 'available' (mais precisa no Linux moderno)
+        # coluna 'available' (a mais fiel no Linux atual)
         disp_ram_mb = int(linha_ram[6]) if len(linha_ram) > 6 else int(linha_ram[3])
         
-        # Conversão de MB para GB com 1 casa decimal
         total_ram_gb = round(total_ram_mb / 1024, 1)
         usado_ram_gb = round(usado_ram_mb / 1024, 1)
         disp_ram_gb = round(disp_ram_mb / 1024, 1)
         
         pct_ram = int((usado_ram_mb / total_ram_mb) * 100) if total_ram_mb > 0 else 0
         
-        # --- 3. DEFINIÇÃO DE STATUS E ÍCONES ---
+        # Status e ícones: até 75% bom, até 90% atenção, acima disso crítico
         icone_disco = "🟢" if pct_disco < 75 else "🟡" if pct_disco < 90 else "🔴"
         status_disco_txt = "Excelente" if pct_disco < 75 else "Atenção" if pct_disco < 90 else "Crítico"
         
         icone_ram = "🟢" if pct_ram < 75 else "🟡" if pct_ram < 90 else "🔴"
         status_ram_txt = "Excelente" if pct_ram < 75 else "Atenção" if pct_ram < 90 else "Crítico"
         
-        # Analisa o status macro para o texto introdutório
         if pct_disco < 75 and pct_ram < 75:
             status_geral = "<b>excelente saúde</b> (🟢 Saudável em todos os aspectos primários)"
             texto_risco = "Não há nenhum gargalo de recursos ou risco iminente de queda por esgotamento de hardware."
@@ -6566,8 +6580,7 @@ async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
             status_geral = "<b>risco crítico</b> (🔴 Esgotamento iminente)"
             texto_risco = "Atenção! Há um gargalo severo de recursos. Recomenda-se realizar limpeza ou upgrade de hardware imediatamente."
 
-        # --- 4. CONSTRUÇÃO DA TABELA VISUAL ALINHADA (<pre>) ---
-        # A tag <pre> alinha os espaços como no bloco de notas
+        # Tabela alinhada com <pre>
         tabela = (
             f"<pre>\n"
             f"Recurso | Total | Uso | Livre | Status\n"
@@ -6577,23 +6590,39 @@ async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
             f"</pre>"
         )
 
-        # --- 5. MONTAGEM DA MENSAGEM FINAL ---
+        # Os comentários de folga só aparecem quando o recurso está mesmo folgado.
+        if pct_disco < 75:
+            texto_disco = (f"Com apenas {usado_disco} ocupados de um total de {total_disco}, você possui {livre_disco} livres. "
+                           "O espaço em disco está bastante confortável para logs, banco de dados ou atualizações de sistema.")
+        else:
+            texto_disco = f"{usado_disco} ocupados de um total de {total_disco}; restam {livre_disco} livres."
+        if pct_ram < 75:
+            texto_ram = (f"O sistema está utilizando apenas {usado_ram_gb} GB de um total de {total_ram_gb} GB disponíveis ({total_ram_mb} MB). "
+                         f"Você tem aproximadamente {disp_ram_gb} GB livres/disponíveis (<code>available</code>), o que garante uma margem "
+                         "extremamente ampla para rodar novas aplicações, containers ou processos pesados.")
+        else:
+            texto_ram = (f"{usado_ram_gb} GB em uso de um total de {total_ram_gb} GB ({total_ram_mb} MB); "
+                         f"cerca de {disp_ram_gb} GB disponíveis (<code>available</code>).")
+        observacao = ("<blockquote><b>Observação técnica:</b> A utilização da instância Oracle Cloud Free Tier (4 vCPUs Ampere + 24 GB RAM) "
+                      "está super dimensionada para a carga de trabalho atual, garantindo altíssima estabilidade.</blockquote>"
+                      if pct_disco < 75 and pct_ram < 75 else "")
+
         texto = (
             f"Seu servidor está em um estado de {status_geral}. {texto_risco}\n"
             f"Abaixo está o diagnóstico detalhado dos recursos analisados:\n\n"
             
             f"💻 <b>Diagnóstico dos Recursos</b>\n\n"
             
-            f"🔹 <b>Disco (/dev/sda1):</b> {icone_disco} <b>{pct_disco}% de Uso</b>\n"
-            f"Com apenas {usado_disco} ocupados de um total de {total_disco}, você possui {livre_disco} livres. O espaço em disco está bastante confortável para logs, banco de dados ou atualizações de sistema.\n\n"
+            f"🔹 <b>Disco (/):</b> {icone_disco} <b>{pct_disco}% de Uso</b>\n"
+            f"{texto_disco}\n\n"
             
             f"🔹 <b>Memória RAM:</b> {icone_ram} <b>~{pct_ram}% de Uso Real</b>\n"
-            f"O sistema está utilizando apenas {usado_ram_gb} GB de um total de {total_ram_gb} GB disponíveis ({total_ram_mb} MB). Você tem aproximadamente {disp_ram_gb} GB livres/disponíveis (<code>available</code>), o que garante uma margem extremamente ampla para rodar novas aplicações, containers ou processos pesados.\n\n"
+            f"{texto_ram}\n\n"
             
             f"📊 <b>Resumo do Status</b>\n"
             f"{tabela}\n"
             
-            f"<blockquote><b>Observação técnica:</b> A utilização da instância Oracle Cloud Free Tier (4 vCPUs Ampere + 24 GB RAM) está super dimensionada para a carga de trabalho atual, garantindo altíssima estabilidade.</blockquote>"
+            f"{observacao}"
         )
         
         if EXIBIR_LOGS: logger.info(f"✅ Auditoria concluída em background. Disco: {pct_disco}% | RAM: {pct_ram}%")
@@ -6603,8 +6632,7 @@ async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao tentar coletar métricas no terminal do Linux: {e}")
         await msg_status.edit_text(f"❌ <b>Erro interno ao ler sensores:</b>\n<code>{e}</code>", parse_mode="HTML")
 
-# 🤖 Nomes bonitos para exibir no painel. Serviço que não estiver aqui
-# aparece com o nome técnico mesmo, sem quebrar nada.
+# Nomes para o painel; serviço fora daqui aparece com o nome técnico.
 NOMES_AMIGAVEIS_SERVICOS = {
     "bot_mestre_bot": "Bot Mestre (Painel Principal)",
     "motor_userbot_bot": "Motor Espião (Userbot)",
@@ -6614,9 +6642,10 @@ NOMES_AMIGAVEIS_SERVICOS = {
 }
 
 def listar_servicos_do_projeto():
-    """Lê os .service da pasta versionada servicos_linux/.
-    Robô novo entra sozinho na lista: basta o .service estar no repositório.
-    Nenhuma lista precisa ser editada na mão nunca mais."""
+    """
+    Serviços do projeto: os .service da pasta versionada servicos_linux/. Robô novo entra
+    sozinho na lista, basta o .service estar no repositório.
+    """
     pasta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "servicos_linux")
     try:
         nomes = sorted(f[:-len(".service")] for f in os.listdir(pasta) if f.endswith(".service"))
@@ -6624,13 +6653,14 @@ def listar_servicos_do_projeto():
         if EXIBIR_LOGS: logger.error(f"❌ Não consegui ler {pasta}: {e}")
         nomes = []
     if not nomes:
-        # Rede de segurança: se a pasta sumir, pelo menos o painel volta sozinho.
+        # Sem a pasta, ao menos o próprio painel é reiniciado.
         if EXIBIR_LOGS: logger.warning("⚠️ Nenhum .service encontrado. Usando só o bot_mestre_bot.")
         return ["bot_mestre_bot"]
     return nomes
 
 @dp.message(F.text == "Reiniciar Robôs 🔄", StateFilter("*"))
 async def confirmar_reiniciar_robos(message: types.Message, state: FSMContext):
+    """Lista os serviços que serão reiniciados e pede confirmação."""
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("⚠️ Solicitando confirmação para reiniciar os serviços do servidor.")
     
@@ -6655,6 +6685,7 @@ async def confirmar_reiniciar_robos(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigFluxo.aguardando_confirmacao_reiniciar)
 async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
+    """Reinicia os outros serviços e, por último, o próprio bot (systemctl, via sudo)."""
     if message.text == "Cancelar ❌":
         await state.clear()
         if EXIBIR_LOGS: logger.info("❌ Reinício global cancelado pelo administrador.")
@@ -6670,16 +6701,16 @@ async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
 
     await state.clear()
     
-    # 1. Envia a mensagem de status SEM o teclado embutido
+    # Status sem teclado; o teclado volta na mensagem final.
     msg_status = await message.answer("🔄 <b>Reiniciando os serviços no servidor Linux...</b>\n<i>Aguarde...</i>", parse_mode="HTML")
     
     if EXIBIR_LOGS: logger.info("🔄 Comando de reinício global acionado pelo administrador.")
     
-    # 🔎 A lista vem dos .service da pasta versionada, não de código fixo.
+    # A lista vem dos .service da pasta versionada.
     servicos = listar_servicos_do_projeto()
     servicos_background = [s for s in servicos if s != "bot_mestre_bot"]
 
-    # 1. Reinicia os serviços secundários em background
+    # 1. Os outros serviços, em segundo plano
     for servico in servicos_background:
         try:
             subprocess.Popen(["sudo", "systemctl", "restart", f"{servico}.service"])
@@ -6687,10 +6718,9 @@ async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro ao reiniciar {servico}: {e}")
             
-    # Dá tempo para as threads do Linux processarem os outros robôs
     await asyncio.sleep(2)
 
-    # 2. Apaga a mensagem temporária e envia a nova mensagem de Sucesso COM o teclado
+    # 2. Mensagem final com o teclado, antes de o bot cair
     await msg_status.delete()
     await message.answer(
         f"✅ <b>{len(servicos_background)} Sistemas Secundários Reiniciados!</b>\n"
@@ -6698,7 +6728,7 @@ async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
         parse_mode="HTML", reply_markup=obter_teclado_opcoes_servidor()
     )
     
-    # 3. Reinicia a si mesmo por último (esse comando interrompe o bot mestre na hora)
+    # 3. Ele mesmo por último: o processo morre aqui.
     try:
         if EXIBIR_LOGS: logger.info("🔄 Reiniciando o próprio serviço (bot_mestre_bot.service). O script será interrompido agora!")
         subprocess.Popen(["sudo", "systemctl", "restart", "bot_mestre_bot.service"])
@@ -6712,14 +6742,19 @@ async def menu_canal_principal(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("📂 Acessando a pasta do Canal Afiliados.")
     await message.answer("📺 <b>Menu do Canal Afiliados</b>\nGerencie as postagens e rotinas abaixo:", reply_markup=obter_teclado_principal(), parse_mode="HTML")
 
-# NOVO: Funções de Gestão do Banco de Pedidos Individuais
+# Pedidos e comissões da Shopee (relatório financeiro)
 def ler_banco_pedidos():
+    """Pedidos já vistos na API de afiliados: order_id -> data, status e comissões."""
     return ler_config_bd("banco_pedidos", padrao={}, arquivo_legado="banco_pedidos.json")
 
 def salvar_banco_pedidos(dados):
     salvar_config_bd("banco_pedidos", dados)
 
 async def buscar_dados_financeiros_shopee(dias_retroativos=30):
+    """
+    Relatório de conversões da API de afiliados dos últimos dias_retroativos dias,
+    em fatias de 30 (o limite da API é 31). None sem as chaves no .env.
+    """
     if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
         if EXIBIR_LOGS: logger.warning("⏳ [API Shopee] Chaves financeiras ausentes no .env.")
         return None
@@ -6728,8 +6763,7 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
     agora = datetime.now(fuso_horario)
     conversoes_totais = []
     
-    # ✅ A API da Shopee barra requisições > 31 dias.
-    # O robô agora "fatia" buscas longas em janelas de 30 dias automaticamente!
+    # A API da Shopee recusa período acima de 31 dias: a busca vai em fatias de 30.
     for i in range(0, dias_retroativos, 30):
         dias_para_puxar = min(30, dias_retroativos - i)
         
@@ -6794,19 +6828,23 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro crítico no motor financeiro: {e}")
             
-        await asyncio.sleep(1) # Pequena pausa anti-ban da Shopee entre os blocos
+        await asyncio.sleep(1)  # pausa entre as fatias
         
     return conversoes_totais
 
 def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
+    """
+    Atualiza o banco de pedidos com as conversões da API e o saldo das comissões
+    confirmadas (soma na confirmação, estorna se deixar de estar confirmado). Com
+    ignorar_ledger=True só atualiza os pedidos, sem mexer no saldo. Devolve o histórico
+    por dia.
+    """
     pedidos_db = ler_banco_pedidos()
-    historico = ler_historico_financeiro()
     
-    # 🟢 O Robô carrega a sua conta bancária virtual
+    # Saldo acumulado das comissões confirmadas ("conta bancária virtual").
     saldo_caixa = float(ler_config_bd("saldo_caixa_shopee", 0.0))
     houve_atualizacao = False
     from datetime import timezone
-    import random
     
     if conversoes:
         for conv in conversoes:
@@ -6835,30 +6873,34 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
                 
                 if order_sn in pedidos_db:
                     estado_anterior = pedidos_db[order_sn]["status"]
+                    comissao_anterior = pedidos_db[order_sn].get("comissao_total", 0) or 0
+                    estava_confirmado = estado_anterior == "COMPLETED"
+                    fica_confirmado = novo_status == "COMPLETED"
+
+                    # O saldo é a soma das comissões confirmadas: confirmou agora, entra a
+                    # comissão atual; deixou de estar confirmado, sai o que tinha entrado;
+                    # continua confirmado com outro valor, entra só a diferença.
+                    if not ignorar_ledger:
+                        if not estava_confirmado and fica_confirmado:
+                            saldo_caixa += c_total_frac
+                            if EXIBIR_LOGS: logger.info(f"💰 Transição detectada! Pedido confirmado: + R${c_total_frac:.2f}")
+                        elif estava_confirmado and not fica_confirmado:
+                            saldo_caixa -= comissao_anterior  # estorno
+                        elif estava_confirmado and c_total_frac > 0 and c_total_frac != comissao_anterior:
+                            saldo_caixa += c_total_frac - comissao_anterior
+
                     if estado_anterior != novo_status:
                         pedidos_db[order_sn]["status"] = novo_status
                         houve_atualizacao = True
-                        
-                        # 🟢 A MÁGICA: Se o pedido MUDOU para Confirmado agora, ele soma no seu Saldo!
-                        if not ignorar_ledger:
-                            if estado_anterior != "COMPLETED" and novo_status == "COMPLETED":
-                                saldo_caixa += c_total_frac
-                                if EXIBIR_LOGS: logger.info(f"💰 Transição detectada! Pedido confirmado: + R${c_total_frac:.2f}")
-                            elif estado_anterior == "COMPLETED" and novo_status != "COMPLETED":
-                                saldo_caixa -= c_total_frac # Estorno de segurança
-                                
-                    # Atualiza comissões caso o valor tenha sido ajustado pela Shopee
-                    if c_total_frac > 0 and pedidos_db[order_sn].get("comissao_total", 0) != c_total_frac:
-                        if not ignorar_ledger and novo_status == "COMPLETED":
-                            diferenca = c_total_frac - pedidos_db[order_sn]["comissao_total"]
-                            saldo_caixa += diferenca
-                        
+
+                    # Comissão ajustada pela Shopee
+                    if c_total_frac > 0 and comissao_anterior != c_total_frac:
                         pedidos_db[order_sn]["comissao_total"] = c_total_frac
                         pedidos_db[order_sn]["comissao_shopee"] = c_shopee_frac
                         pedidos_db[order_sn]["comissao_vendedor"] = c_extra_frac
                         houve_atualizacao = True
                 else:
-                    # É um Pedido Novo Inédito
+                    # Pedido novo
                     pedidos_db[order_sn] = {
                         "data": dt_db_str,
                         "status": novo_status,
@@ -6867,7 +6909,7 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
                         "comissao_vendedor": c_extra_frac
                     }
                     houve_atualizacao = True
-                    # Se ele já nasceu confirmado na API, soma no Saldo
+                    # Já veio confirmado: entra no saldo.
                     if not ignorar_ledger and novo_status == "COMPLETED":
                         saldo_caixa += c_total_frac
                         if EXIBIR_LOGS: logger.info(f"💰 Novo pedido já nasceu confirmado! + R${c_total_frac:.2f}")
@@ -6875,9 +6917,9 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
     if houve_atualizacao:
         salvar_banco_pedidos(pedidos_db)
         if not ignorar_ledger:
-            salvar_config_bd("saldo_caixa_shopee", saldo_caixa) # Salva a conta bancária
+            salvar_config_bd("saldo_caixa_shopee", saldo_caixa)
             
-    # Reconstrói a visão de desempenho do DRE (Fica intacta para o gráfico)
+    # Refaz o histórico por dia (aprovado, pendente, cancelado) usado no relatório e no gráfico.
     historico_limpo = {}
     for sn, p in pedidos_db.items():
         d_str = p["data"]
@@ -6912,6 +6954,7 @@ def obter_teclado_relatorios():
 
 @dp.message(F.text == "Filas dos Parceiros 👥", StateFilter("*"))
 async def relatorio_filas_parceiros(message: types.Message, state: FSMContext):
+    """Resumo das filas dos parceiros: vídeos, disco, cota e a prévia do fechamento do dia."""
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("📋 Gerando relatório das filas dos parceiros...")
 
@@ -6943,7 +6986,7 @@ async def relatorio_filas_parceiros(message: types.Message, state: FSMContext):
         status = "🟢" if p.get("ativo") else "⏸️"
         acesso = "✅" if p.get("origem_ok") else "⏳"
 
-        # Agrupa por dia para dar noção do cronograma
+        # Agrupa por dia, para dar noção do cronograma.
         por_dia = {}
         for i in itens:
             por_dia[i.get("data_alvo") or "?"] = por_dia.get(i.get("data_alvo") or "?", 0) + 1
@@ -6960,9 +7003,8 @@ async def relatorio_filas_parceiros(message: types.Message, state: FSMContext):
         )
 
         if por_dia:
-            # 🎲 Prévia do fechamento das 23:55: mostra a cota já sorteada para
-            # cada dia e quantos serão descartados. Sem isto o painel só dizia
-            # "3 vídeos" e não dava para saber o que aconteceria à noite.
+            # Prévia do fechamento das 23:55: a cota já sorteada para cada dia e quantos
+            # serão descartados.
             proximos = sorted(por_dia.items())[:4]
             linhas_dias = []
             for dia, qtd in proximos:
@@ -7032,11 +7074,8 @@ async def pedir_parceiro_detalhe(message: types.Message, state: FSMContext):
 @dp.message(RelatoriosFluxo.aguardando_parceiro_detalhe)
 async def detalhar_fila_parceiro(message: types.Message, state: FSMContext):
     """
-    📋 A fila do parceiro vídeo a vídeo.
-
-    O painel de filas só dava o número, e número não diz o que está lá dentro.
-    Aqui sai cada item com a data de captura, o dia em que sai, o horário já
-    sorteado (quando existe) e o link do produto para conferir na hora.
+    A fila de um parceiro vídeo a vídeo: captura, dia e horário de saída, tamanho e
+    link do produto.
     """
     if message.from_user.id != ADMIN_ID: return
     texto = (message.text or "").strip()
@@ -7128,28 +7167,31 @@ async def voltar_relatorios_geral(message: types.Message, state: FSMContext):
     await state.clear()
     await menu_relatorio_geral(message, state)
 
-# ✅ NOVO: Fila dedicada do Grupo Público (espelha o layout da Fila de Autorais)
 @dp.message(RelatoriosFluxo.menu_filas, F.text == "Fila do Grupo Público 📬")
 async def relatorio_fila_publico(message: types.Message, state: FSMContext):
+    """
+    Relatório da fila do Grupo Público: publicados hoje e agendados, com links de origem
+    e destino.
+    """
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("📬 Compilando o relatório da Fila do Grupo Público...")
 
     config = ler_submissao_config()
     dias_atraso = config.get("repost_dias", 15)
-    limite = config.get("repost_limite", 6)
+    limite = rotulo_cota_de_config(config, "repost_limite_min", "repost_limite_max", "repost_limite")
     is_pausado = config.get("repost_pausado", False) or not config.get("ativo", False)
 
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
 
-    # Origem real de onde os vídeos são puxados para o Público
+    # Origem de onde os vídeos vêm (repost_origem ou o destino dos Autorais).
     canal_origem = config.get("repost_origem")
     if not canal_origem:
         config_aut = ler_config_bd("autorais_config", {})
         canal_origem = config_aut.get("destino", "")
     origem_base = str(canal_origem).split(":")[0].strip()
 
-    # Destino real: o grupo (e tópico) onde o vídeo foi publicado
+    # Destino: o grupo (e tópico) onde o vídeo é publicado.
     destino_bruto = config.get("repost_destino") or config.get("grupo_id") or ""
     destino_base = str(destino_bruto).split(":")[0].strip()
 
@@ -7191,7 +7233,7 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
             "legenda": linha["legenda"],
             "data_captura": linha["data_captura"],
             "processado": bool(linha["processado"]),
-            # ✅ Se o motor já cravou o horário exato, usa ele; senão mostra só a data
+            # horário sorteado, quando já existe; senão, só a data-alvo
             "data_publicacao": (linha["horario_disparo"] or data_alvo),
             "data_postagem": data_post.split(" ")[0] if data_post else "",
             "horario_postagem": data_post.split(" ")[1][:5] if " " in data_post else "",
@@ -7199,7 +7241,7 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
             "is_pausado": is_pausado
         })
 
-    # Postados hoje aparecem primeiro; depois os agendados por data-alvo
+    # Postados hoje primeiro; depois os agendados, por data.
     itens.sort(key=lambda x: (0 if x["processado"] else 1, x.get("data_publicacao") or ""))
     qtd_pendentes = len([i for i in itens if not i["processado"]])
 
@@ -7208,8 +7250,8 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
     status_txt = "🔴 PAUSADO" if is_pausado else "🟢 ATIVO"
     texto_atual = f"📊 <b>Relatório da Fila Grupo Público (D+{dias_atraso})</b>\n\n"
     texto_atual += f"📡 <b>Rota: Repostagem Pública</b> ({qtd_pendentes} vídeos agendados)\n"
-    texto_atual += f"🕒 <b>Postagem:</b> D+{dias_atraso}, entre 10h e 20h\n"
-    texto_atual += f"📦 <b>Cota Diária:</b> {limite} vídeos/dia  ·  ⚙️ {status_txt}\n"
+    texto_atual += f"🕒 <b>Postagem:</b> D+{dias_atraso}, entre {config.get('repost_inicio', 10)}h e {config.get('repost_fim', 20)}h\n"
+    texto_atual += f"📦 <b>Cota Diária:</b> {limite}  ·  ⚙️ {status_txt}\n"
 
     mensagens_para_enviar = []
 
@@ -7223,8 +7265,8 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
             elif origem_base.startswith("@"):
                 link_origem = f"https://t.me/{origem_base.replace('@', '')}/{msg_id}"
 
-        # 🔗 Link do post no destino. Só existe para item já publicado e com o id da
-        # mensagem gravado; os antigos continuam sem, porque ninguém guardou na época.
+        # Link do post no destino: só para item publicado com o id da mensagem gravado
+        # (os mais antigos não têm).
         link_destino = None
         msg_postada = v.get("msg_postada_id")
         if v.get("processado") and msg_postada and destino_base:
@@ -7263,12 +7305,17 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
 @dp.message(RelatoriosFluxo.menu_filas, F.text.in_(["Fila do Espelhador 🔄", "Fila do Espião 🕵️", "Fila de Autorais 🎥"]))
 @dp.message(RelatoriosFluxo.aguardando_rota_espelhador)
 async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
+    """
+    Relatório das filas do Espião, do Espelhador (por rota) e dos Autorais. Faz também
+    o pente fino: tira da fila o que expirou, o que é de rota excluída e o que já foi
+    publicado em outro dia.
+    """
     if message.from_user.id != ADMIN_ID: return
     
     estado_atual = await state.get_state()
     rota_selecionada = None
     
-    # 1. TRATAMENTO DO NOVO MENU DE MÚLTIPLAS ROTAS (ESPELHADOR)
+    # 1. Escolha de rota do Espelhador (quando há mais de uma)
     if estado_atual == RelatoriosFluxo.aguardando_rota_espelhador:
         if message.text == "Voltar aos Relatórios 🔙":
             if EXIBIR_LOGS: logger.info("🔙 Cancelando seleção de rota e retornando.")
@@ -7287,7 +7334,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         else:
             tipo_fila = "Espião"
         
-        # Se for o Espelhador e existirem múltiplas rotas, cria a interrupção visual
+        # Espelhador com várias rotas: pergunta qual mostrar.
         if tipo_fila == "Espelhador":
             import painel_espelhos
             dados_rotas = painel_espelhos.ler_espelhos()
@@ -7297,14 +7344,11 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 if EXIBIR_LOGS: logger.info("🔄 Múltiplas rotas detectadas no Espelhador. Exibindo menu de seleção...")
                 botoes = []
                 
-                # Primeiro botão isolado no topo
                 botoes.append([KeyboardButton(text="Todos os Espelhos 🌐")])
                 
-                # Um botão para cada espelho
                 for r in rotas:
                     botoes.append([KeyboardButton(text=r['nome'])])
                     
-                # Botão de voltar no final
                 botoes.append([KeyboardButton(text="Voltar aos Relatórios 🔙")])
                 
                 teclado = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -7321,8 +7365,8 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         try:
             conexao = sqlite3.connect("banco_dados.db")
             conexao.row_factory = sqlite3.Row
-            cursor = conexao.cursor()            # 🎯 O retorno autoral é publicado no grupo de ORIGEM, então é ele o destino
-            # do link do relatório.
+            cursor = conexao.cursor()
+            # O retorno autoral é publicado no grupo de ORIGEM: é ele o destino do link no relatório.
             _cfg_aut = ler_config_bd("autorais_config", {})
             _destino_retorno = str(_cfg_aut.get("origem") or "").split(":")[0].strip()
 
@@ -7341,9 +7385,8 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     "data_alvo": linha["data_alvo"],
                     "horario_disparo": linha["horario_disparo"],
                     "processado": bool(linha["processado"]),
-                    # ⏱️ Horário real da publicação. Item antigo não tem a coluna
-                    # preenchida: aí cai no horário sorteado, que é o valor mais
-                    # próximo que existe, em vez de sair em branco na tela.
+                    # Hora real da publicação; item antigo sem a coluna cai no horário sorteado, em vez
+                    # de sair em branco.
                     "data_postagem": (dict(linha).get("data_postagem") or linha["horario_disparo"] or "").split(" ")[0],
                     "horario_postagem": ((dict(linha).get("data_postagem") or linha["horario_disparo"] or "") + " ").split(" ")[1][:5],
                     "chat_destino": _destino_retorno,
@@ -7361,7 +7404,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             fila_data = {"fila": []}
             fila = []
 
-    # --- Obter a defasagem temporal real configurada (Precisamos disso cedo para o Espião) ---
+    # D+X configurado (o Espião precisa dele para o pente fino abaixo).
     atraso_dias = 0
     dados_espiao = {}
     if tipo_fila == "Espelhador":
@@ -7381,7 +7424,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro ao resgatar configurações do Espião: {e}")
         
-    # Lógica de filtragem corrigida (Pente Fino ATIVO)
+    # Pente fino: tira da fila o que já não vai sair e mantém na tela o que saiu hoje.
     pendentes = []
     agora = datetime.now(fuso_horario)
     agora_str = agora.strftime("%Y-%m-%d %H:%M:%S")
@@ -7389,12 +7432,11 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     if tipo_fila == "Espião":
         fila_limpa = []
         houve_alteracao = False
-        limite_horas = (atraso_dias * 24) + 24 # Expiração fluida (Ex: D+1 expira em 48h)
+        limite_horas = (atraso_dias * 24) + 24  # expira um dia depois do D+X (D+1 -> 48 h)
         
         hoje_str = agora.strftime("%Y-%m-%d")
         
         for item in fila:
-            # ✅ CORREÇÃO BLINDADA: Aceita qualquer formato de "True" para forçar a permanência
             if item.get("processado") in [True, 1, "true", "True"]:
                 if str(item.get("data_postagem")) == hoje_str:
                     if EXIBIR_LOGS: logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo postado hoje ({item.get('id')}) no visual da fila.")
@@ -7409,7 +7451,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     data_captura = datetime.strptime(data_cap_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
                     horas_na_fila = (agora - data_captura).total_seconds() / 3600
                     
-                    # Elimina os vídeos fantasmas que ficaram presos no estado "Atrasado"
+                    # Clone preso como "atrasado" além do prazo: sai da fila e do disco.
                     if horas_na_fila > limite_horas:
                         if EXIBIR_LOGS: logger.info(f"🧹 Pente Fino (Relatório): Removendo clone expirado ({horas_na_fila:.1f}h).")
                         houve_alteracao = True
@@ -7417,13 +7459,12 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                         if caminho_video and os.path.exists(caminho_video):
                             try: os.remove(caminho_video)
                             except: pass
-                        continue # Pula este item, ele não vai para a fila limpa
+                        continue
                 except ValueError:
                     pass
             
             fila_limpa.append(item)
             
-        # Se encontrou lixo, salva o JSON limpo imediatamente
         if houve_alteracao:
             fila_data["fila"] = fila_limpa
             salvar_fila_clonagem(fila_data)
@@ -7441,20 +7482,18 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             
             for item in fila:
                 if item.get("processado", False) or item.get("processado") == 1:
-                    # O robô autoral usa o horario_disparo para marcar o momento exato da postagem
                     horario_disp = item.get("horario_disparo", "")
                     
-                    # Se foi postado hoje, mantém ele vivo para aparecer no relatório!
+                    # Publicado hoje: fica na tela.
                     if horario_disp and horario_disp.startswith(hoje_str):
                         if EXIBIR_LOGS: logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo autoral postado hoje ({item.get('id')}) no visual da fila.")
                         fila_limpa.append(item)
                     else:
-                        # Se já virou o dia, apaga o registro do banco de dados para não acumular
+                        # Publicado em outro dia: sai do banco, para não acumular.
                         cursor.execute("DELETE FROM fila_autorais WHERE id_unico = ?", (item["id"],))
                         houve_alteracao = True
                     continue
                 
-                # Se for pendente, continua na lista normalmente
                 fila_limpa.append(item)
                 
             if houve_alteracao:
@@ -7475,16 +7514,14 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         hoje_str = agora.strftime("%Y-%m-%d")
         
         for item in fila:
-            # 🚀 AUTO-CORREÇÃO DINÂMICA: Entende cada espelho cruzando a origem, destino OU Nome
+            # Liga cada vídeo à sua rota pela origem (rotas antigas) ou pelo nome.
             nome_antigo = item.get("nome_rota", "")
             origem_item = str(item.get("chat_origem", item.get("origem", "")))
             
-            # ✅ NOVO: Flag para verificar se a rota do vídeo ainda existe
             rota_encontrada = False
             atraso_dias_rota = 1
             
             for r in lista_rotas:
-                # Compara usando a origem OU o nome da rota (para compatibilidade com itens antigos)
                 if (origem_item and str(r.get("origem", "")) == origem_item) or (nome_antigo and r.get("nome", "") == nome_antigo):
                     rota_encontrada = True
                     nome_atualizado = r.get("nome")
@@ -7495,7 +7532,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                         houve_alteracao = True
                     break
 
-            # 🛡️ PENTE FINO: Se a rota não existe mais, deleta o vídeo órfão!
+            # Rota excluída: o vídeo órfão sai da fila e do disco.
             if not rota_encontrada:
                 if EXIBIR_LOGS: logger.info(f"🧹 Pente Fino: Removendo vídeo órfão de uma rota excluída (Rota antiga: {nome_antigo}).")
                 houve_alteracao = True
@@ -7503,9 +7540,9 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 if caminho_video and os.path.exists(caminho_video):
                     try: os.remove(caminho_video)
                     except: pass
-                continue # Pula este item, ele não vai para a fila limpa
+                continue
 
-            # Mantém no visual os que foram postados HOJE no Espelhador.
+            # Publicado hoje: fica na tela.
             if item.get("processado", False):
                 if item.get("data_postagem") == hoje_str:
                     if EXIBIR_LOGS: logger.info(f"👁️ Pente Fino (Relatório): Mantendo o vídeo postado hoje ({item.get('id', 'SemID')}) no visual da fila do Espelhador.")
@@ -7514,15 +7551,14 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     houve_alteracao = True
                 continue
 
-            # ✅ NOVO: PENTE FINO DE VALIDADE (Padronizado com o Espião)
+            # Validade, como no Espião: um dia depois do D+X da rota.
             data_cap_str = item.get("data_captura", "")
             if data_cap_str:
                 try:
                     data_captura = datetime.strptime(data_cap_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
                     horas_na_fila = (agora - data_captura).total_seconds() / 3600
-                    limite_horas = (atraso_dias_rota * 24) + 24 # Expiração baseada no atraso DAQUELA rota
+                    limite_horas = (atraso_dias_rota * 24) + 24
                     
-                    # Elimina os vídeos fantasmas que ficaram presos
                     if horas_na_fila > limite_horas:
                         if EXIBIR_LOGS: logger.info(f"🧹 Pente Fino (Relatório): Removendo clone do Espelhador expirado ({horas_na_fila:.1f}h). Rota: {item.get('nome_rota')}")
                         houve_alteracao = True
@@ -7530,25 +7566,24 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                         if caminho_video and os.path.exists(caminho_video):
                             try: os.remove(caminho_video)
                             except: pass
-                        continue # Pula este item, deletando-o da fila
+                        continue
                 except ValueError:
                     pass
                 
             fila_limpa.append(item)
             
-        # Se encontrou lixo antigo ou atualizou os nomes dos robôs, salva o JSON silenciosamente
+        # Grava a fila limpa (lixo removido, nomes de rota sincronizados).
         if houve_alteracao:
             fila_data["fila"] = fila_limpa
             try:
-                with open("fila_espelhador.json", "w", encoding="utf-8") as f:
-                    json.dump(fila_data, f, indent=4)
+                salvar_json_atomico("fila_espelhador.json", fila_data, indent=4)
                 if EXIBIR_LOGS: logger.info("✅ Auto-correção: Nomes das rotas sincronizados e lixo antigo limpo.")
             except Exception as e:
                 if EXIBIR_LOGS: logger.error(f"❌ Erro ao limpar fila espelhador: {e}")
             
         pendentes = fila_limpa
         
-        # ✅ NOVO: Aplica o filtro de listagem caso o usuário tenha clicado em uma rota específica
+        # Rota escolhida no menu: só os vídeos dela.
         if rota_selecionada and rota_selecionada != "Todos os Espelhos 🌐":
             pendentes = [i for i in pendentes if i.get("nome_rota") == rota_selecionada]
     
@@ -7573,8 +7608,8 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     elif tipo_fila == "Autorais":
         mapa_rotas = {
             "Repostagem Autoral": {
-                "inicio": 10,
-                "fim": 20,
+                "inicio": ler_autorais_config().get("inicio", 10),
+                "fim": ler_autorais_config().get("fim", 20),
                 "status_canais": {},
                 "intervalo_dias": atraso_dias
             }
@@ -7597,37 +7632,30 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
         }
         rotas_agrupadas["Radar Global"] = pendentes
 
-    # ✅ ORDENAÇÃO UNIVERSAL E INTELIGENTE (ESPIÃO E ESPELHADOR)
+    # Ordenação pelo dia em que cada vídeo vai ao ar
     def chave_ordenacao_universal(item, atraso_da_rota):
         """
-        Ordena pelo DIA EM QUE O VÍDEO VAI AO AR, e não por já ter ou não um
-        horário sorteado.
-
-        O critério anterior separava a fila em dois blocos: primeiro tudo o que
-        tinha horario_disparo, depois o resto pela data de captura. O efeito na
-        tela era um vídeo marcado para 18/09 aparecendo ACIMA de um que sai
-        amanhã, só porque o de amanhã ainda não passou pelo sorteio de horário.
-
-        A previsão exibida no card é calculada como data_captura + D+X. A ordem
-        precisa usar EXATAMENTE a mesma conta, senão tela e ordenação discordam.
+        Ordena pelo DIA EM QUE O VÍDEO VAI AO AR, não por já ter ou não horário sorteado
+        (senão um vídeo de daqui a dias aparecia acima de um que sai amanhã). A previsão do
+        card é data_captura + D+X; a ordem usa exatamente a mesma conta.
         """
         # 1. Já publicados encabeçam a lista, do mais cedo para o mais tarde
         if item.get("processado") in [True, 1, "true", "True"]:
             return (0, str(item.get("data_postagem") or ""),
                        str(item.get("horario_postagem") or "00:00"))
 
-        # 2. Horário já sorteado: é a informação mais precisa que existe
+        # 2. Horário já sorteado: a informação mais precisa que existe
         horario = item.get("horario_disparo") or item.get("data_publicacao") or ""
         if horario:
             return (1, str(horario)[:19], "")
 
-        # 3. Data-alvo sem hora (filas de Autorais e Público). O sufixo alto joga
-        #    o item para o fim do próprio dia, atrás dos que já têm hora cravada.
+        # 3. Data-alvo sem hora (Autorais e Público): o sufixo alto põe o item no fim do
+        #    próprio dia, depois dos que já têm hora.
         alvo = item.get("data_alvo")
         if alvo:
             return (1, f"{str(alvo)[:10]} 99:99:99", "")
 
-        # 4. Nada agendado ainda: repete a conta do card (captura + D+X)
+        # 4. Nada agendado ainda: a mesma conta do card (captura + D+X)
         captura = str(item.get("data_captura") or "")
         try:
             formato = "%Y-%m-%d %H:%M:%S" if len(captura) > 10 else "%Y-%m-%d"
@@ -7637,7 +7665,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             return (2, "9999-12-31", "")
 
     for nome_rota in rotas_agrupadas:
-        # Cada rota do Espelhador tem o próprio D+X; Espião e Autorais caem no global.
+        # Cada rota do Espelhador tem o próprio D+X; Espião e Autorais usam o global.
         atraso_da_rota = int(mapa_rotas.get(nome_rota, {}).get("intervalo_dias", atraso_dias) or 0)
         rotas_agrupadas[nome_rota].sort(key=lambda i: chave_ordenacao_universal(i, atraso_da_rota))
          
@@ -7647,7 +7675,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     primeira_rota = True
 
     for nome_rota, itens in rotas_agrupadas.items():
-        # ✅ Insere uma mensagem divisória antes de começar a próxima rota
+        # Divisória entre uma rota e a próxima.
         if not primeira_rota:
             mensagens_para_enviar.append("➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖\n🔄 <i>Próximo Espelho...</i>\n➖➖➖➖➖➖➖➖➖➖➖➖➖➖➖")
 
@@ -7655,7 +7683,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             texto_atual = f"📊 <b>Relatório da Fila {tipo_fila}{titulo_atraso}</b>\n\n"
             primeira_rota = False
         else:
-            texto_atual = "" # Rota nova = Mensagem limpa nova
+            texto_atual = ""  # rota nova começa numa mensagem nova
 
         rota_info = mapa_rotas.get(nome_rota, {})
         inicio = rota_info.get("inicio", 10)
@@ -7676,7 +7704,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             link_original = v.get("link_original", "")
             msg_id = v.get("mensagem_id") or v.get("msg_id") or v.get("message_id")
             
-            # --- 1. RESGATE ESTRUTURAL (Com suporte exclusivo a Autorais) ---
+            # 1. Origem e link (os Autorais têm tratamento próprio)
             if tipo_fila == "Autorais":
                 origem_bruta = str(config_aut.get("destino", ""))
                 id_destino = str(config_aut.get("origem", ""))
@@ -7693,7 +7721,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 
                 link_final_exibicao = link_telegram
                 
-                # ✅ Extração Inteligente do Nome do Produto
+                # Nome do produto: o "📦 Item:" da legenda ou a primeira linha que não é link.
                 legenda = v.get("legenda", "")
                 import re
                 
@@ -7718,19 +7746,18 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     if not nome_produto:
                         nome_produto = "Produto Autoral (Sem Descrição)"
 
-                # 🔥 O VERDADEIRO PULO DO GATO:
-                # 1. Colocamos o Nome do Canal (com emoji) na chave que o motor usa para o topo
+                # O card do motor_filas mostra nome_origem no topo e o "📦 Item:" da legenda no
+                # '└ Nome:': os dois são preenchidos aqui para o card dos Autorais.
                 nome_origem_canal = cache_nomes.get(origem_bruta, origem_bruta)
                 v["nome_origem"] = f"🎥 {nome_origem_canal[:30]}"
                 
-                # 2. Enganamos o motor injetando "📦 Item: " na legenda para ele exibir no '└ Nome:'
                 v["legenda"] = f"📦 Item: {nome_produto[:45]}\n{legenda}"
                 
                 nome_origem = cache_nomes.get(origem_bruta, origem_bruta)
                 display_origem = f"📦 Acervo: {nome_origem[:20]}"
                 link_destino = None
             else:
-                # O CÓDIGO NORMAL DA ORIGEM DOS OUTROS MÓDULOS COMEÇA AQUI
+                # Outras filas: origem do item ou, sem ela, da rota
                 if not origem_bruta or origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None"]:
                     nome_rota_item = v.get("nome_rota")
                     if tipo_fila == "Espelhador" and nome_rota_item:
@@ -7751,7 +7778,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     try: origem_bruta = "@" + link_original.split("t.me/")[1].split("/")[0]
                     except: pass
 
-            # --- 2. CONSTRUÇÃO PRIORITÁRIA DO LINK DO TELEGRAM ---
+            # 2. Link do post no Telegram
             link_telegram = ""
             if msg_id and origem_bruta not in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 if origem_bruta.lstrip("-").isdigit():
@@ -7761,7 +7788,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     username = origem_bruta.replace("@", "")
                     link_telegram = f"https://t.me/{username}/{msg_id}"
             
-            # --- 3. PREPARAÇÃO DO LINK DE ORIGEM ---
+            # 3. Link de origem exibido
             link_final_exibicao = link_telegram if link_telegram else link_original
             
             if link_final_exibicao:
@@ -7791,7 +7818,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 elif id_destino and not id_destino.lstrip("-").isdigit():
                     link_display += f" | <a href='https://t.me/{id_destino.replace('@', '')}'>📤 Destino</a>"
                 
-            # --- 4. RESOLUÇÃO DE NOMES COM CACHE E BUSCA PROFUNDA ---
+            # 4. Nome da origem: item, cache, status dos alvos, rotas e, por fim, o Telegram
             if origem_bruta in ["Desconhecida", "Origem desconhecida", "Origem não mapeada", "None", ""]:
                 display_origem = "<code>Pendente de rastreio</code>"
             else:
@@ -7856,10 +7883,10 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     if nome_origem != origem_bruta:
                         salvar_nome_grupo(origem_bruta, nome_origem)
                 
-                # ✅ CORREÇÃO: sem corte. O nome do canal sai sempre completo.
+                # Nome do canal completo, sem corte.
                 display_origem = str(nome_origem) if nome_origem else str(origem_bruta)
                 
-            # --- 5. PREPARAÇÃO DO LINK DE DESTINO (Apenas se postado) ---
+            # 5. Link de destino (só item publicado)
             link_destino = None
             if v.get("processado", False) or v.get("processado") == 1:
                 if tipo_fila == "Espião":
@@ -7879,7 +7906,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 elif id_destino and not id_destino.lstrip("-").isdigit():
                     link_destino = f"https://t.me/{id_destino.replace('@', '')}"
 
-            # --- 6. ACIONANDO O MOTOR CENTRAL PARA O DESIGN DA FILA ---
+            # 6. Card do item (layout do motor_filas)
             from motor_filas import gerar_layout_item_padrao
             
             linha_video = gerar_layout_item_padrao(
@@ -7900,11 +7927,10 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                 
             texto_atual += linha_video
             
-        # ✅ Salva a rota atual na lista de mensagens ANTES de ir para a próxima rota
         if texto_atual.strip():
             mensagens_para_enviar.append(texto_atual)
 
-    # Dispara todas as mensagens (Relatórios e Divisórias) separadamente
+    # Envia relatórios e divisórias em mensagens separadas.
     for msg in mensagens_para_enviar:
         await message.answer(msg, parse_mode="HTML", disable_web_page_preview=True)
         
@@ -7912,6 +7938,10 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
 
 @dp.message(Command("nomeargrupo"), StateFilter("*"))
 async def nomear_grupo_manual(message: types.Message, state: FSMContext):
+    """
+    /nomeargrupo ID Nome: grava o nome no cache, para quando o bot não consegue ler o
+    nome sozinho (canal em que só o userbot está).
+    """
     if message.from_user.id != ADMIN_ID: return
 
     partes = message.text.split(maxsplit=2)
@@ -7924,7 +7954,6 @@ async def nomear_grupo_manual(message: types.Message, state: FSMContext):
         )
         return
 
-    comando = partes[0]
     chat_id_bruto = partes[1]
     nome = partes[2].strip()
 
@@ -7935,16 +7964,15 @@ async def nomear_grupo_manual(message: types.Message, state: FSMContext):
             numeros = numeros[3:]
         chat_id_limpo = f"-100{numeros}"
 
-    # Salva no cache geral do bot
     salvar_nome_grupo(chat_id_limpo, nome)
     
-    # Atualiza também o cache de vídeos autorais se for a origem ou destino atual
+    # Resposta mais específica quando o ID é a origem ou o destino dos Autorais.
     config_autorais = ler_autorais_config()
     
     origem_atual = str(config_autorais.get("origem", ""))
     destino_atual = str(config_autorais.get("destino", ""))
     
-    # Verifica variações do ID (-100, sem -100)
+    # Variações do ID (com e sem -100)
     id_variacoes = [chat_id_limpo, chat_id_limpo.replace("-100", "-"), chat_id_limpo.replace("-100", "")]
     
     if any(var == origem_atual for var in id_variacoes) or any(var == destino_atual for var in id_variacoes):
@@ -7958,14 +7986,16 @@ async def menu_relatorio_geral(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("📊 <b>Central de Relatórios</b>\nEscolha qual métrica deseja analisar:", reply_markup=obter_teclado_relatorios(), parse_mode="HTML")
 
-def ler_historico_financeiro():
-    return ler_config_bd("historico_financeiro", padrao={}, arquivo_legado="historico_financeiro.json")
-
 def salvar_historico_financeiro(dados):
     salvar_config_bd("historico_financeiro", dados)
 
 @dp.message(F.text == "Relatório Financeiro 💰", StateFilter("*"))
 async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
+    """
+    Relatório financeiro: sincroniza os pedidos com a API de afiliados e monta o
+    balanço do mês, projeção, histórico mensal e anual, recordes, últimos 7 dias e o
+    gráfico.
+    """
     if message.from_user.id != ADMIN_ID: return
     msg_status = await message.answer("💰 Sincronizando API Financeira com a Shopee e processando relatório... Aguarde ⏳")
     if EXIBIR_LOGS: logger.info("🚀 Acionando extração de dados e recálculo dinâmico pelo Rastreio Individual...")
@@ -8001,17 +8031,8 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
     mes_atual_str = hoje.strftime("%Y-%m")
     aprovado_mes = sum(v["aprovado"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     pendente_mes = sum(v["pendente"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    shopee_mes = sum(v["shopee"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    vendedor_mes = sum(v["vendedor"] for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
     
-    qtd_aprovado_mes = sum(v.get("qtd_aprovado", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    qtd_pendente_mes = sum(v.get("qtd_pendente", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    qtd_cancelado_mes = sum(v.get("qtd_cancelado", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    cancelado_mes = sum(v.get("cancelado", 0.0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    clicks_mes = sum(v.get("clicks", 0) for k, v in historico_limpo.items() if k.startswith(mes_atual_str))
-    total_mes = aprovado_mes + pendente_mes + cancelado_mes
-    
-    # Agrupamento Mensal e Anual
+    # Totais por mês e por ano
     dados_por_mes = {}
     dados_por_ano = {}
     
@@ -8036,7 +8057,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         f"📅 <b>BALANÇO DO MÊS DE {nome_mes_extenso}</b>\n\n"
     )
     
-    # Estimativa de Faturamento
+    # Projeção do mês: média diária dos dias com dados × dias do mês
     import calendar
     dias_no_mes = calendar.monthrange(hoje.year, hoje.month)[1]
     dia_atual = hoje.day
@@ -8074,7 +8095,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             
         texto += f"⚖️ <b>Média Diária: R$ {f_br(media_diaria)}</b> <i>(Ontem: R$ {f_br(faturamento_ontem)} | {texto_var})</i>\n\n"
     else:
-        texto += f"🚀 <b>PROJEÇÃO MENSAL ESTIMADA: Calculando...</b>\n\n"
+        texto += "🚀 <b>PROJEÇÃO MENSAL ESTIMADA: Calculando...</b>\n\n"
     
     texto += "🗓️ <b>HISTÓRICO MENSAL E CRESCIMENTO</b>\n"
     meses_ordenados_desc = sorted(dados_por_mes.keys(), reverse=True)
@@ -8162,7 +8183,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         texto += f"• 📉 Pior Dia: {pior_dia_br} (<b>R$ {f_br(todos_totais[pior_dia_str])}</b>)\n"
         texto += f"• ⚖️ Média Diária: <b>R$ {f_br(media_global)}</b>\n"
         
-        # ✅ LEGENDA DOS RECORDES DE VOLTA AQUI
         texto += f"<blockquote><i>O seu pico histórico de vendas ocorreu em {melhor_dia_br}, gerando um total de R$ {f_br(todos_totais[melhor_dia_str])}. O objetivo principal das automações é elevar gradativamente a sua Média Diária atual (R$ {f_br(media_global)}) para que os dias de recorde se tornem o novo padrão de recebimento.</i></blockquote>\n\n"
 
     texto += "📈 <b>DESEMPENHO DIÁRIO (Últimos 7 Dias)</b>\n"
@@ -8230,8 +8250,8 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
             
             q_aprov = dados_por_mes.get(m, {}).get("qtd_aprovado", 0)
             q_pend = dados_por_mes.get(m, {}).get("qtd_pendente", 0)
-            # Mês futuro é NaN, não zero. Com zero a linha verde descia até o
-            # eixo e parecia queda de vendas, quando era só mês que não chegou.
+            # Mês futuro é NaN, não zero: com zero a linha descia até o eixo e parecia queda
+            # de vendas.
             valores_pedidos.append(float('nan') if m > mes_atual_grafico else (q_aprov + q_pend))
             
             if m == mes_atual_grafico:
@@ -8245,7 +8265,6 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         fig, ax1 = plt.subplots(figsize=(8, 5), facecolor='#f4f4f9')
         ax1.set_facecolor('#f4f4f9')
         
-        # ✅ CORES CORRETAS APLICADAS (As suas escolhidas)
         bars = ax1.bar(labels_grafico, valores_comissao, color='#00008B', edgecolor='black', linewidth=0.5, label='Comissão Atual (R$)')
         line_est, = ax1.plot(labels_grafico, valores_estimativa, color='#FF0000', marker='^', linestyle=':', linewidth=2, label='Projeção / Fechamento')
         
@@ -8260,8 +8279,8 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         
         offset_y = max([v for v in valores_comissao + valores_estimativa if v == v]) * 0.02 if any(v == v for v in valores_comissao + valores_estimativa) else 0
 
-        # 📏 Folga no topo para o rótulo do maior mês não encostar no título,
-        # e piso em zero nos dois eixos para a leitura não distorcer.
+        # Folga no topo para o rótulo do maior mês não encostar no título, e piso em zero
+        # nos dois eixos para a leitura não distorcer.
         validos_esq = [v for v in valores_comissao + valores_estimativa if v == v]
         if validos_esq:
             ax1.set_ylim(bottom=0, top=max(validos_esq) * 1.22)
@@ -8272,10 +8291,9 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
         for bar in bars:
             yval = bar.get_height()
             if yval == yval and yval > 0:
-                # Caixa branca atrás do texto: sem ela as linhas cortam o número.
-                # O rótulo vai no ax2 (eixo desenhado por último) com as coordenadas
-                # do ax1. Se ficasse no ax1, a linha verde de Pedidos passaria por
-                # cima do número, porque zorder só ordena dentro do mesmo eixo.
+                # Caixa branca atrás do texto, para as linhas não cortarem o número. O rótulo vai
+                # no ax2 (desenhado por último) com as coordenadas do ax1: no ax1, a linha de
+                # Pedidos passaria por cima, porque zorder só ordena dentro do mesmo eixo.
                 ax2.text(
                     bar.get_x() + bar.get_width()/2, yval + offset_y, f'R${yval:.0f}',
                     transform=ax1.transData,
@@ -8284,7 +8302,7 @@ async def gerar_relatorio_financeiro(message: types.Message, state: FSMContext):
                     bbox=dict(boxstyle='round,pad=0.25', facecolor='white', edgecolor='#cccccc', alpha=0.9)
                 )
 
-        # ✅ ORDEM DA LEGENDA CORRIGIDA EXATAMENTE PARA: 1º Pedidos, 2º Projeção, 3º Comissão.
+        # Ordem da legenda: Pedidos, Projeção, Comissão.
         lines_1, labels_1 = ax1.get_legend_handles_labels() 
         lines_2, labels_2 = ax2.get_legend_handles_labels() 
         
@@ -8357,6 +8375,7 @@ async def gerar_relatorio_ia(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "Logs de Erros ⚠️", StateFilter("*"))
 async def gerar_relatorio_logs(message: types.Message, state: FSMContext):
+    """Os últimos erros registrados (erros_logs), com o botão para limpar."""
     if message.from_user.id != ADMIN_ID: return
     msg_status = await message.answer("⚠️ A extrair o histórico de falhas do banco de dados... Aguarde ⏳")
     if EXIBIR_LOGS: logger.info("🚀 A iniciar a auditoria da tabela erros_logs...")
@@ -8366,7 +8385,7 @@ async def gerar_relatorio_logs(message: types.Message, state: FSMContext):
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         
-        # Puxa os últimos 5 erros ordenados do mais recente para o mais antigo
+        # Os 5 erros mais recentes
         cursor.execute("SELECT * FROM erros_logs ORDER BY id DESC LIMIT 5")
         erros_db = cursor.fetchall()
         
@@ -8402,11 +8421,14 @@ async def gerar_relatorio_logs(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.error(f"❌ Falha crítica ao processar a leitura dos logs no SQLite: {e}")
         await msg_status.edit_text(f"❌ <b>Erro interno ao processar os logs:</b>\n<code>{e}</code>", parse_mode="HTML")
 
-# ✅ NOVO: Handler (Callback) para limpar o histórico do banco de dados
 from aiogram.types import CallbackQuery
 
 @dp.callback_query(F.data == "limpar_logs")
 async def limpar_historico_erros(callback: CallbackQuery):
+    """
+    Apaga erros_logs e liga a trava_manutencao.txt, que silencia o registro de erros
+    até o próximo deploy (o divulgacao_canal apaga a trava ao subir).
+    """
     if callback.from_user.id != ADMIN_ID: return
     
     if EXIBIR_LOGS: logger.info("🧹 Pedido de exclusão do histórico de erros recebido via botão interativo.")
@@ -8418,7 +8440,7 @@ async def limpar_historico_erros(callback: CallbackQuery):
         conexao.commit()
         conexao.close()
         
-        # Cria o arquivo de trava na raiz do projeto para silenciar erros temporariamente
+        # Trava que silencia o registro de erros até o próximo deploy (o divulgacao_canal a apaga ao subir).
         with open("trava_manutencao.txt", "w") as f:
             f.write("ativo")
             
@@ -8430,7 +8452,7 @@ async def limpar_historico_erros(callback: CallbackQuery):
         
     await callback.answer()
 
-# ✅ Handlers para Envio Manual de Mensagens via Botões (Corrigidos com StateFilter)
+# --- Disparos manuais das rotinas (botões do painel) ---
 @dp.message(F.text == "Disparar Bom Dia ☀️", StateFilter("*"))
 async def manual_bom_dia(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
@@ -8495,7 +8517,7 @@ async def manual_link_grupo(message: types.Message):
     await disparar_mensagem("link_grupo", forcar=True)
     await message.answer("Mensagem de divulgação enviada ao grupo com sucesso! ✅")
 
-# --- Disparos Manuais (Viral) ---
+# Disparos manuais (Viral)
 @dp.message(F.text == "Disparar Convite Viral 🚀", StateFilter("*"))
 async def manual_promo_viral(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
@@ -8572,7 +8594,7 @@ async def manual_promo_achadinhos_viral(message: types.Message):
     await disparar_mensagem("promo_achadinhos_viral", forcar=True)
     await message.answer("Divulgação enviada ao canal viral com sucesso! ✅")
 
-# --- Disparos Manuais (Grupo Público) ---
+# Disparos manuais (Grupo Público)
 @dp.message(F.text == "Disparar Promo Público 🗣️", StateFilter("*"))
 async def manual_promo_publico(message: types.Message):
     if message.from_user.id != ADMIN_ID: return
@@ -8604,7 +8626,7 @@ async def manual_promo_achadinhos(message: types.Message):
     await disparar_mensagem("promo_achadinhos", forcar=True)
     await message.answer("Mensagem de Achadinhos VIP enviada ao canal com sucesso! ✅")
 
-# ✅ NOVO: Disparos manuais do Público agora exigem confirmação em duas etapas
+# Disparos manuais do Público pedem confirmação antes de enviar.
 MAPA_DISPAROS_PUBLICO = {
     "Disparar Convite (Próprio) 🔗": ("link_grupo_publico", "Convite (Próprio Grupo) 🔗", "convite para o próprio Grupo Público"),
     "Disparar Promo Principal 🌟": ("promo_principal_publico", "Promo Canal Principal 🌟", "divulgação do Canal Principal"),
@@ -8614,6 +8636,7 @@ MAPA_DISPAROS_PUBLICO = {
 
 @dp.message(F.text.in_(list(MAPA_DISPAROS_PUBLICO.keys())), StateFilter("*"))
 async def pedir_confirmacao_disparo_publico(message: types.Message, state: FSMContext):
+    """Disparo manual de rotina do Público: pede confirmação antes de enviar."""
     if message.from_user.id != ADMIN_ID: return
 
     dados_rotina = ler_config_rotina()
@@ -8640,6 +8663,7 @@ async def pedir_confirmacao_disparo_publico(message: types.Message, state: FSMCo
 
 @dp.message(ConfigRotina.aguardando_confirmacao_disparo)
 async def processar_disparo_publico(message: types.Message, state: FSMContext):
+    """Envia a rotina do Público confirmada, forçando (só as pausas valem)."""
     if message.from_user.id != ADMIN_ID: return
 
     if message.text == "Cancelar ❌":
@@ -8674,10 +8698,10 @@ async def processar_disparo_publico(message: types.Message, state: FSMContext):
     await state.set_state(ConfigRotina.menu_principal)
     await submenu_disparos_manuais(message, state)
 
-# ✅ NOVO: Gestão dos alvos (tópicos) que recebem as rotinas do Grupo Público
+# --- Tópicos do Grupo Público que recebem as rotinas ---
 def extrair_id_topico(entrada, grupo_id_str=""):
     """
-    🔗 Converte uma entrada do admin no ID numérico do tópico.
+    Converte uma entrada do admin no ID numérico do tópico.
 
     Aceita:
       • https://t.me/c/1234567890/6        -> "6"  (link do tópico, grupo privado)
@@ -8685,7 +8709,7 @@ def extrair_id_topico(entrada, grupo_id_str=""):
       • https://t.me/meugrupo/6            -> "6"  (grupo público)
       • t.me/c/1234567890/6                -> "6"  (sem https)
       • -1001234567890_6                   -> "6"  (formato exibido no painel)
-      • 6                                  -> "6"  (ID cru, retrocompatibilidade)
+      • 6                                  -> "6"  (ID cru)
 
     Devolve (topico, erro): só um dos dois vem preenchido.
     """
@@ -8694,9 +8718,8 @@ def extrair_id_topico(entrada, grupo_id_str=""):
         return None, None
 
     if "t.me/" in bruto.lower():
-        # 🎯 Forma /c/<id_interno>/<topico>[/<mensagem>]. O terceiro número, quando
-        # existe, é o ID da MENSAGEM — pegar o último segmento (o que o código
-        # antigo fazia) gravava o alvo errado sem avisar ninguém.
+        # Forma /c/<id_interno>/<topico>[/<mensagem>]: o terceiro número, quando existe, é
+        # a MENSAGEM; o tópico é o segundo.
         m = re.search(r"t\.me/c/(\d+)/(\d+)(?:/(\d+))?", bruto, re.IGNORECASE)
         if m:
             interno, topico = m.group(1), m.group(2)
@@ -8707,14 +8730,14 @@ def extrair_id_topico(entrada, grupo_id_str=""):
                 return None, f"<code>{bruto}</code> é de outro grupo (id {interno})"
             return topico, None
 
-        # 🎯 Forma /<usuario_do_grupo>/<topico>[/<mensagem>], para grupo público.
+        # Forma /<usuario_do_grupo>/<topico>[/<mensagem>], para grupo público.
         m = re.search(r"t\.me/([A-Za-z0-9_]+)/(\d+)(?:/(\d+))?", bruto, re.IGNORECASE)
         if m and m.group(1).lower() != "c":
             return m.group(2), None
 
         return None, f"não achei o número do tópico em <code>{bruto}</code>"
 
-    # 🔢 Entradas sem link continuam funcionando (painel usa 'grupo_topico').
+    # Sem link: "grupo_topico" (como o painel mostra) ou só o número do tópico.
     if "_" in bruto:
         cauda = bruto.split("_")[-1]
         return (cauda, None) if cauda.isdigit() else (None, f"<code>{bruto}</code> não terminou em número")
@@ -8729,6 +8752,7 @@ def extrair_id_topico(entrada, grupo_id_str=""):
 
 @dp.message(ConfigRotina.menu_principal, F.text == "Gerenciar Alvos de Postagem 🎯")
 async def pedir_alvos_rotina_publico(message: types.Message, state: FSMContext):
+    """Mostra os tópicos atuais das rotinas do Público e pede a nova lista."""
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🎯 Acessando gestão de alvos das rotinas do Grupo Público...")
 
@@ -8747,8 +8771,7 @@ async def pedir_alvos_rotina_publico(message: types.Message, state: FSMContext):
     else:
         atual = "   ✅ <i>Chat Geral (Padrão)</i>"
 
-    # 🔗 Monta os exemplos com o ID interno do PRÓPRIO grupo, para o admin poder
-    # copiar e só trocar o número do tópico no fim.
+    # Exemplos com o ID interno do próprio grupo: o admin copia e só troca o tópico.
     interno_ex = grupo_id_str.lstrip("-")
     if interno_ex.startswith("100"):
         interno_ex = interno_ex[3:]
@@ -8797,6 +8820,7 @@ async def cancelar_alvos_rotina_publico(message: types.Message, state: FSMContex
 
 @dp.message(ConfigRotina.aguardando_alvos_rotina)
 async def confirmar_alvos_rotina_publico(message: types.Message, state: FSMContext):
+    """Valida os tópicos digitados para as rotinas do Público e pede confirmação."""
     if message.from_user.id != ADMIN_ID: return
 
     if message.text == "Cancelar ❌":
@@ -8818,7 +8842,7 @@ async def confirmar_alvos_rotina_publico(message: types.Message, state: FSMConte
             if erro:
                 problemas.append(erro)
             elif topico and topico != "0" and topico not in topicos_finais:
-                # 🔁 Duplicata silenciosa fazia a rotina postar duas vezes no mesmo tópico.
+                # Tópico repetido é ignorado (senão a rotina sairia duas vezes no mesmo tópico).
                 topicos_finais.append(topico)
 
         if problemas:
@@ -8856,6 +8880,7 @@ async def confirmar_alvos_rotina_publico(message: types.Message, state: FSMConte
 
 @dp.message(ConfigRotina.aguardando_confirmacao_alvos_rotina)
 async def salvar_alvos_rotina_publico(message: types.Message, state: FSMContext):
+    """Grava os tópicos aprovados das rotinas do Público."""
     if message.from_user.id != ADMIN_ID: return
 
     if message.text == "Cancelar ❌":
@@ -8880,11 +8905,12 @@ async def salvar_alvos_rotina_publico(message: types.Message, state: FSMContext)
 
 @dp.message(F.text == "Disparar Repost Autoral ♻️", StateFilter("*"))
 async def manual_repost_autoral(message: types.Message):
+    """Repost manual de um vídeo autoral no Grupo Público (copy_message da origem)."""
     if message.from_user.id != ADMIN_ID: return
     
     config_pub = ler_submissao_config()
     
-    # ✅ Puxa a flexibilidade de roteamento
+    # Destino: repost_destino ou o tópico de postagem do Público.
     grupo_id_base = config_pub.get("grupo_id")
     topico_destino_base = config_pub.get("topico_destino")
     repost_destino = config_pub.get("repost_destino")
@@ -8911,7 +8937,7 @@ async def manual_repost_autoral(message: types.Message):
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         
-        # ✅ CORREÇÃO: Garante que ele não reposte manualmente algo que já foi pelo automático
+        # Só vídeo que ainda não foi para o Público.
         cursor.execute("SELECT * FROM fila_autorais WHERE processado = 1 AND repostado_publico = 0 ORDER BY id_unico DESC LIMIT 30")
         autorais_recentes = cursor.fetchall()
     except Exception as e:
@@ -8951,13 +8977,13 @@ async def manual_repost_autoral(message: types.Message):
     )
     
     try:
-        # ✅ NOVO: Tenta usar a origem personalizada. Se não tiver, usa a dos Autorais.
+        # Origem: repost_origem ou, sem ela, o destino dos Autorais.
         canal_autorais = config_pub.get("repost_origem")
         if not canal_autorais:
             config_aut = ler_config_bd("autorais_config", {})
             canal_autorais = config_aut.get("destino")
 
-        # 🧹 Mesmo tratamento do motor automático: o from_chat_id não aceita "-100123:5".
+        # from_chat_id não aceita o tópico ("-100123:5").
         if canal_autorais:
             canal_autorais = str(canal_autorais).split(":")[0].strip()
         
@@ -8974,7 +9000,7 @@ async def manual_repost_autoral(message: types.Message):
             **kwargs
         )
         
-        # Marca como repostado para garantir a integridade da fila autônoma
+        # Marca como repostado no Público.
         agora_str = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute("UPDATE fila_autorais SET repostado_publico = 1, data_repost_publico = ? WHERE id_unico = ?", (agora_str, id_unico))
         conexao.commit()
@@ -8987,9 +9013,12 @@ async def manual_repost_autoral(message: types.Message):
         
     conexao.close()
 
-# ❌ NOVO: Handler Global para Cancelar via Botão (Agora 100% à prova de falhas)
 @dp.message(F.text == "Cancelar ❌", StateFilter("*"))
 async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
+    """
+    Botão "Cancelar ❌" de qualquer tela: limpa o estado e volta ao menu de onde o
+    usuário veio. No Criar Postagem, devolve o número reservado e apaga o vídeo baixado.
+    """
     if message.from_user.id != ADMIN_ID: return
     
     estado_atual = await state.get_state()
@@ -8997,8 +9026,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 
     data = await state.get_data()
 
-    # 🔁 Roteamento Inteligente: Se estiver na CONFIRMAÇÃO de Limpeza, volta para a SELEÇÃO de Limpeza
-    # 🔁 Roteamento Inteligente: cancelou o recálculo da grade? Nada foi alterado.
+    # Cancelar o recálculo da grade: nada foi alterado.
     if estado_atual == "ConfigFluxo:aguardando_confirmacao_rotinas":
         await state.clear()
         if EXIBIR_LOGS: logger.info("🔙 Recálculo da grade CANCELADO. Nenhum horário foi alterado.")
@@ -9012,29 +9040,27 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await menu_zerar_filas_tarefas(message, state)
         return
         
-    # 🔀 Roteamento Inteligente: Se cancelar da seleção de limpeza ou do reinício, volta pro painel de Servidor
+    # Seleção de limpeza ou reinício cancelados: volta às Opções do Servidor.
     if estado_atual in ["ConfigFluxo:aguardando_selecao_limpeza", "ConfigFluxo:aguardando_confirmacao_reiniciar"]:
         await state.clear()
         await message.answer("Ação cancelada. Nenhuma alteração foi feita no servidor.", reply_markup=obter_teclado_opcoes_servidor())
         return
 
-    # 🔀 Roteamento Inteligente: cancelou dentro do fluxo de Achadinhos? Volta para
-    # o painel dele. O prefixo cobre os dez estados de uma vez (cadastro, edição,
-    # remoção), sem precisar listar um por um.
+    # Achadinhos: o prefixo cobre todos os estados do fluxo (cadastro, edição, remoção).
     if estado_atual and estado_atual.startswith("AchadinhosFluxo:"):
         await state.clear()
         await message.answer("Ação cancelada.")
         await painel_achadinhos(message, state)
         return
         
-    # 🔁 Roteamento Inteligente: Se estiver no Gerenciador de Fila
+    # Gerenciar Fila
     if estado_atual and estado_atual.startswith("GerenciarFilaFluxo"):
         await state.clear()
         await message.answer("Ação cancelada.")
         await menu_gerenciar_fila(message, state)
         return
         
-    # 🔁 Roteamento Inteligente: Se estiver no Espião (Grupos Vigiados ou Configurando Tempos)
+    # Espião: forçar clones volta ao menu do Espião; o resto volta aos Grupos Vigiados.
     if estado_atual == "EspiaoFluxo:aguardando_confirmacao_forcar_clones":
         await state.clear()
         await message.answer("Ação cancelada.")
@@ -9043,7 +9069,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 
     estados_espiao_vigiados = [
         "EspiaoFluxo:aguardando_novo_alvo",
-        "EspiaoFluxo:aguardando_confirmacao_alvo", # ✅ O estado que falhou no seu vídeo!
+        "EspiaoFluxo:aguardando_confirmacao_alvo",
         "EspiaoFluxo:aguardando_remocao_alvo",
         "EspiaoFluxo:aguardando_confirmacao_remocao",
         "EspiaoFluxo:aguardando_canal_destino",
@@ -9061,22 +9087,22 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await menu_grupos_vigiados(message, state)
         return
 
-    # 🔁 Roteamento Inteligente: Se estiver no SPAM Principal
+    # SPAM do canal principal
     if estado_atual and estado_atual.startswith("ConfigDivulgacao:"):
         await state.clear()
         await message.answer("Ação cancelada.")
         await gerenciar_divulgacao(message, state)
         return
 
-    # 🔁 Roteamento Inteligente: Se estiver no SPAM Viral
+    # SPAM do Viral
     if estado_atual and estado_atual.startswith("ConfigDivulgacaoViral"):
         await state.clear()
         await message.answer("Ação cancelada.")
         await gerenciar_divulgacao_viral(message, state)
         return
 
-    # 🔁 Roteamento Inteligente: SPAM por escopo (Público / Achadinhos).
-    # Lê o escopo ANTES do clear, senão volta sempre para o painel errado.
+    # SPAM por escopo (Público / Achadinhos): lê o escopo ANTES de limpar o estado,
+    # senão voltaria sempre para o painel errado.
     if estado_atual and estado_atual.startswith("ConfigDivulgacaoEscopo"):
         _info = await state.get_data()
         _escopo = _info.get("escopo_div", "publico")
@@ -9085,40 +9111,30 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await renderizar_painel_divulgacao(message, state, _escopo)
         return
         
-   # 🔁 Roteamento Inteligente: Se estiver no Gerador de Achadinhos
-    if estado_atual and estado_atual.startswith("AchadinhosFluxo"):
-        await state.clear()
-        await message.answer("Ação cancelada.")
-        await painel_achadinhos(message, state)
-        return
-
-    # 🔁 Roteamento Inteligente: Se estiver no Disparador de Notas
+    # Disparador de Notas: volta ao menu dele, sem limpar o estado do módulo.
     if estado_atual and estado_atual.startswith("PainelNotasFluxo"):
         import painel_notas
         await message.answer("Ação cancelada. Voltando ao menu do disparador...", reply_markup=painel_notas.obter_teclado_menu_notas())
         await state.set_state(painel_notas.PainelNotasFluxo.menu_principal)
         return
 
-    # 🔁 Roteamento Inteligente: Se estiver em Vídeos Autorais
+    # Vídeos Autorais: volta ao submenu de onde veio.
     if estado_atual and estado_atual.startswith("AutoraisFluxo"):
         await state.clear()
         await message.answer("Ação cancelada.")
         
-        # Verifica se estava editando Dias, Limites ou Janela para voltar ao SUBMENU de Retorno
         if estado_atual in ["AutoraisFluxo:aguardando_dias_retorno", "AutoraisFluxo:aguardando_limite_videos", "AutoraisFluxo:aguardando_confirmacao_dias_retorno", "AutoraisFluxo:aguardando_confirmacao_limite_videos", "AutoraisFluxo:aguardando_janela_autorais", "AutoraisFluxo:aguardando_confirmacao_janela_autorais"]:
             await submenu_regras_retorno(message, state)
             
-        # Verifica se estava confirmando Pausas para voltar ao SUBMENU de Status
         elif estado_atual in ["AutoraisFluxo:aguardando_confirmacao_pausa_repost", "AutoraisFluxo:aguardando_confirmacao_pausa_robo"]:
             await submenu_status_robo(message, state)
             
         else:
-            # Caso contrário (origem/destino), volta pro menu principal dos Autorais
             await painel_autorais(message, state)
             
         return
         
-    # 🔁 Roteamento Inteligente: Se estiver nas Rotinas
+    # Rotinas: volta ao menu de rotinas do canal certo.
     if estado_atual and estado_atual.startswith("ConfigRotina"):
         menu_orig = data.get('menu_origem')
         tipo_edicao = data.get('tipo_edicao')
@@ -9126,13 +9142,12 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.info("🔙 Cancelando configuração de rotina e redirecionando ao menu correto.")
         await message.answer("Ação cancelada.")
 
-        # ✅ NOVO: cancelar a edição de uma rotina devolve ao submenu "Editar Rotinas",
-        # e não ao menu raiz, preservando o contexto de edição.
+        # Cancelar a edição de uma rotina volta ao submenu "Editar Rotinas" do canal certo.
         if estado_atual == "ConfigRotina:aguardando_novo_horario":
             if not menu_orig:
-                if tipo_edicao in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral", "promo_achadinhos_viral"]:
+                if tipo_edicao in ROTINAS_VIRAIS:
                     menu_orig = "espiao"
-                elif tipo_edicao in ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico"]:
+                elif tipo_edicao in ROTINAS_PUBLICO:
                     menu_orig = "publico"
                 else:
                     menu_orig = "principal"
@@ -9141,15 +9156,15 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
             await submenu_editar_rotinas(message, state)
             return
 
-        if menu_orig == "espiao" or tipo_edicao in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral", "promo_achadinhos_viral"]:
+        if menu_orig == "espiao" or tipo_edicao in ROTINAS_VIRAIS:
             await gerenciar_rotina_espiao(message, state)
-        elif menu_orig == "publico" or tipo_edicao in ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico"]:
+        elif menu_orig == "publico" or tipo_edicao in ROTINAS_PUBLICO:
             await gerenciar_rotina_publico(message, state)
         else:
             await gerenciar_rotina(message, state)
         return
 
-    # 🔁 Roteamento Inteligente: Cancelamento do toggle do Moderador volta ao submenu de origem
+    # Toggle do moderador: volta ao submenu do moderador.
     if estado_atual == "SubmissaoAdminFluxo:aguardando_confirmacao_toggle":
         await state.clear()
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento do toggle do Moderador. Retornando ao submenu de Configurações do Robô Moderador.")
@@ -9157,7 +9172,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await submenu_robo_moderador(message, state)
         return
 
-    # 🔁 Roteamento Inteligente: Cancelamento na edição de um tópico volta ao menu de tópicos
+    # Edição de tópico do Público: volta ao menu de tópicos.
     if estado_atual in ["SubmissaoAdminFluxo:aguardando_novo_valor_grupo", "SubmissaoAdminFluxo:aguardando_confirmacao_grupo"]:
         await state.clear()
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento da edição de tópico. Retornando ao menu Definir Tópicos de Moderação.")
@@ -9165,15 +9180,15 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await menu_edicao_grupo_publico(message, state)
         return
 
-    # 🔁 Roteamento Inteligente: Se estiver nas Submissões do Público
+    # Demais telas do Grupo Público: volta ao painel do Público.
     if estado_atual and estado_atual.startswith("SubmissaoAdminFluxo"):
         await state.clear()
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento do Painel de Submissões. Retornando ao painel do Grupo Público.")
         await message.answer("Ação cancelada.")
-        await painel_submissoes(message, state) # ✅ CORREÇÃO: Agora volta para o painel correto
+        await painel_submissoes(message, state)
         return
 
-    # 🔁 Roteamento Inteligente: Se estiver na Pausa Programada
+    # Pausa programada: volta às Configurações.
     if estado_atual and estado_atual.startswith("PausaProgramadaFluxo"):
         await state.clear()
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento da Pausa Programada. Voltando para Configurações Avançadas.")
@@ -9183,19 +9198,19 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 
     if EXIBIR_LOGS: logger.info("🔍 Limpeza de memória solicitada. Avaliando necessidade de rollback no contador global...")
     
-    # ✅ SISTEMA DE ROLLBACK: Devolve o número reservado ao cancelar a criação da postagem
+    # Criar Postagem cancelado: devolve o número reservado ao contador.
     numero_reservado = data.get('numero_reservado')
     if estado_atual and estado_atual.startswith("PostagemFluxo") and numero_reservado is not None:
         async with _lock_contador:
             contador_atual = ler_contador()
-            # Só executa o rollback se o contador não tiver avançado por outro processo simultâneo
+            # só se ninguém usou um número depois deste
             if contador_atual == numero_reservado + 1:
                 salvar_contador(numero_reservado)
                 if EXIBIR_LOGS: logger.info(f"⏪ Rollback executado: Número {numero_reservado} foi devolvido ao contador global com sucesso.")
             else:
                 if EXIBIR_LOGS: logger.warning(f"⚠️ Rollback abortado: O contador já avançou para {contador_atual} e não pode ser revertido com segurança.")
 
-    # 🧹 Limpeza de arquivos de vídeo que ficaram órfãos
+    # Apaga o vídeo baixado para a postagem cancelada.
     caminho_video = data.get('video_path')
     if caminho_video and os.path.exists(caminho_video):
         os.remove(caminho_video)
@@ -9207,6 +9222,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 @dp.message(Command("postar"), StateFilter("*"))
 @dp.message(F.text == "Criar Postagem 📝", StateFilter("*"))
 async def iniciar_postagem(message: types.Message, state: FSMContext):
+    """Criar Postagem: pede o vídeo."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     if EXIBIR_LOGS: logger.info("🎬 Iniciando postagem com IA Copywriter.")
@@ -9215,6 +9231,7 @@ async def iniciar_postagem(message: types.Message, state: FSMContext):
 
 @dp.message(PostagemFluxo.aguardando_video)
 async def receber_video(message: types.Message, state: FSMContext):
+    """Baixa o vídeo, reserva o número e pede à IA a identificação do produto."""
     if not message.video:
         await message.answer("Por favor, envie um arquivo de vídeo.", reply_markup=teclado_cancelar)
         return
@@ -9223,18 +9240,18 @@ async def receber_video(message: types.Message, state: FSMContext):
     file_id = message.video.file_id
     
     try:
-        # ✨ Proteção contra concorrência: Reserva o número instantaneamente
+        # Reserva o número da postagem já na entrada, com trava (o cancelar devolve).
         async with _lock_contador:
             numero_atual = ler_contador()
             salvar_contador(numero_atual + 1)
             if EXIBIR_LOGS: logger.info(f"🔒 Concorrência blindada: Número {numero_atual} reservado. Próximo será {numero_atual + 1}.")
 
-        # 1. Download do vídeo para o servidor Ubuntu
+        # 1. Baixa o vídeo
         file_info = await bot.get_file(file_id)
         video_path = f"temp/temp_{file_id}.mp4"
         await bot.download_file(file_info.file_path, destination=video_path)
 
-        # 2. Processa a Copy pela API Central do Gemini
+        # 2. A IA identifica o produto ("Vídeo N" + "📦 Item: ...")
         prompt_ia = (
             f"Assista ao vídeo INTEIRO para identificar o produto ou kit principal. "
             f"Sua resposta deve conter EXATAMENTE duas linhas. "
@@ -9251,11 +9268,9 @@ async def receber_video(message: types.Message, state: FSMContext):
             raise Exception("Falha total na análise do vídeo pela IA.")
         if EXIBIR_LOGS: logger.info("💾 Mantendo o vídeo no servidor para re-upload posterior com data atualizada.")
         
-        # ✅ Salva o texto da IA e o caminho do vídeo físico na memória
         await state.update_data(video_path=video_path, video_id=file_id, nome_produto=chamada_gerada, links=[], numero_reservado=numero_atual)
         await msg_status.delete()
         
-        # ✅ Junta o texto da IA com uma pergunta orientativa apenas para exibição ao administrador
         mensagem_aprovacao = f"{chamada_gerada}\n\n👉 <b>Esta identificação está correta?</b> Escolha uma opção abaixo:"
         
         await message.answer(mensagem_aprovacao, reply_markup=teclado_confirmacao, parse_mode="HTML")
@@ -9267,7 +9282,7 @@ async def receber_video(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.info("💾 Mantendo o vídeo original no servidor apesar do erro na IA.")
         await msg_status.delete()
         
-        # ✅ Analisa o erro e traduz para o utilizador
+        # Traduz o erro para o admin.
         motivo = "Falha no servidor."
         if "file is too big" in erro_str.lower():
             motivo = "O vídeo ultrapassa o limite de 20MB do Telegram para Bots."
@@ -9276,18 +9291,17 @@ async def receber_video(message: types.Message, state: FSMContext):
         else:
             motivo = erro_str[:150] 
             
-        # ✅ NOVO: Exibe o teclado com as três opções claras
         await message.answer(f"⚠️ A IA não conseguiu processar este vídeo.\n**Motivo:** {motivo}\n\nO que você deseja fazer agora?", reply_markup=teclado_erro_ia)
         
-        # ✅ Em caso de erro, preservamos o arquivo físico e o número já reservado
+        # Mantém o arquivo e o número reservado para tentar de novo.
         video_path_recuperacao = f"temp/temp_{file_id}.mp4"
         await state.update_data(video_path=video_path_recuperacao, video_id=file_id, links=[], numero_reservado=numero_atual)
         
-        # ✅ Redireciona para o novo estado de decisão
         await state.set_state(PostagemFluxo.aguardando_decisao_erro)
 
 @dp.message(PostagemFluxo.aguardando_decisao_erro)
 async def processar_erro_ia(message: types.Message, state: FSMContext):
+    """Depois de falha da IA: digitar o nome, tentar de novo ou digitar direto o nome."""
     texto = message.text.strip()
     
     if texto == "Digitar Manualmente ✍️":
@@ -9301,7 +9315,7 @@ async def processar_erro_ia(message: types.Message, state: FSMContext):
         video_path = data.get('video_path')
         numero_atual = data.get('numero_reservado')
         
-        # Trava de segurança caso o arquivo físico tenha sido corrompido ou apagado
+        # O arquivo sumiu: não há o que reenviar.
         if not video_path or not os.path.exists(video_path):
             await message.answer("⚠️ O arquivo de vídeo foi perdido no servidor. Por favor, clique em Cancelar e envie o vídeo novamente.", reply_markup=teclado_erro_ia)
             return
@@ -9343,7 +9357,7 @@ async def processar_erro_ia(message: types.Message, state: FSMContext):
             await message.answer(f"⚠️ A IA falhou novamente.\n**Motivo:** {motivo}\n\nO que você deseja fazer agora?", reply_markup=teclado_erro_ia)
             
     elif texto != "Cancelar ❌":
-        # 🚀 ATALHO: O usuário digitou o nome do produto diretamente na tela de erro
+        # Atalho: texto digitado direto na tela de erro vira o nome do produto.
         if EXIBIR_LOGS: logger.info("✍️ Atalho: Usuário digitou o texto direto ignorando os botões de erro.")
         data = await state.get_data()
         numero_atual = data.get('numero_reservado')
@@ -9355,6 +9369,7 @@ async def processar_erro_ia(message: types.Message, state: FSMContext):
 
 @dp.message(PostagemFluxo.aguardando_confirmacao_nome)
 async def confirmar_nome(message: types.Message, state: FSMContext):
+    """Aprova o nome da IA, pede para digitar ou aceita o texto digitado como nome."""
     texto = message.text.strip()
     if texto == "Aprovar ✅":
         if EXIBIR_LOGS: logger.info("✅ Nome aprovado. Avançando para seleção de plataforma.")
@@ -9365,7 +9380,7 @@ async def confirmar_nome(message: types.Message, state: FSMContext):
         await message.answer("Sem problemas. Digite manualmente APENAS O NOME DO PRODUTO:", reply_markup=teclado_cancelar)
         await state.set_state(PostagemFluxo.aguardando_chamada_manual)
     elif texto != "Cancelar ❌":
-        # 🚀 ATALHO: O usuário digitou o nome do produto diretamente na tela de confirmação
+        # Atalho: texto digitado direto na confirmação vira o nome do produto.
         if EXIBIR_LOGS: logger.info("✍️ Atalho: Usuário digitou o texto direto sobrepondo a IA.")
         data = await state.get_data()
         numero_atual = data.get('numero_reservado')
@@ -9390,6 +9405,7 @@ async def receber_chamada_manual(message: types.Message, state: FSMContext):
 
 @dp.message(PostagemFluxo.aguardando_plataforma)
 async def receber_plataforma(message: types.Message, state: FSMContext):
+    """Shopee, TikTok ou os dois: define quais links serão pedidos."""
     plataforma = message.text
     if plataforma not in ["Ambos 🛒🎵", "Apenas Shopee 🛒", "Apenas TikTok 🎵"]:
         await message.answer("Por favor, use os botões para escolher a plataforma.")
@@ -9477,6 +9493,11 @@ async def receber_links_tiktok(message: types.Message, state: FSMContext):
         await message.answer(f"Link TikTok {len(links)}/6 registrado. Envie o próximo ou clique em Finalizar.", reply_markup=teclado_finalizar)
 
 async def finalizar_postagem(message: types.Message, state: FSMContext):
+    """
+    Monta a legenda (com os links), põe o vídeo na fila do canal principal no dia
+    certo e mostra o recibo. Sem caber nos 1024 caracteres com as duas plataformas,
+    vira dois posts (Shopee e TikTok).
+    """
     data = await state.get_data()
     nome = data['nome_produto']
     video_id_fallback = data.get('video_id')
@@ -9488,9 +9509,8 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     links_tiktok = data.get('links_tiktok', [])
     
     if EXIBIR_LOGS: logger.info("📤 Iniciando montagem inteligente da legenda (3 níveis).")
-    # ✅ A leitura e o incremento do contador foram movidos para a primeira etapa do fluxo
     
-    # Substitui a quebra de linha por espaço e formata o título
+    # Título: "Vídeo N | 📦 Item: ..." numa linha só.
     titulo_limpo = nome.replace('\n', ' | ')
     linha_divisoria = "━━━━━━━━━━━━━━━"
     cabecalho = f"<b>{titulo_limpo}</b>\n\n{linha_divisoria}\n\n"
@@ -9504,7 +9524,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
         legenda_temp = cabecalho
         
         if plat_atual in ["Ambos 🛒🎵", "Apenas Shopee 🛒"]:
-            legenda_temp += f"🔶 <b>SHOPEE VÍDEO</b> 🔶\n\n"
+            legenda_temp += "🔶 <b>SHOPEE VÍDEO</b> 🔶\n\n"
             legenda_temp += f"🎬 Link do Vídeo:\n{link_vid_shopee}\n"
             if not is_rodape:
                 legenda_temp += mensagem_apoio
@@ -9518,7 +9538,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
                 legenda_temp += "\n"
                 
         if plat_atual in ["Ambos 🛒🎵", "Apenas TikTok 🎵"]:
-            legenda_temp += f"⬛ <b>TIKTOK</b> ⬛\n\n"
+            legenda_temp += "⬛ <b>TIKTOK</b> ⬛\n\n"
             legenda_temp += f"🎬 Link do Vídeo:\n{link_vid_tiktok}\n"
             if not is_rodape:
                 legenda_temp += mensagem_apoio
@@ -9533,7 +9553,8 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
             
         return legenda_temp
 
-    # Nível 1: Tenta o texto longo duplo
+    # Legenda em níveis até caber nos 1024 caracteres do Telegram: 1) texto de apoio
+    # longo; 2) curto; 3) só um rodapé; 4) com as duas plataformas, dois posts.
     legenda_final = montar_legenda(texto_longo, is_rodape=False)
     if EXIBIR_LOGS: logger.info(f"📏 Avaliando Nível 1: {len(legenda_final)} caracteres.")
     
@@ -9553,7 +9574,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
                 if EXIBIR_LOGS: logger.warning("🚨 Limite crítico excedido no Nível 3. Ativando Nível 4 (Divisão de Postagem).")
                 nivel_4_ativado = True
 
-    # ✅ Renova a data do arquivo sem recompressão
+    # Renova a data do arquivo (sem recomprimir).
     caminho_processado = None
     if caminho_video_original and os.path.exists(caminho_video_original):
         subprocess.run(["touch", caminho_video_original])
@@ -9563,24 +9584,23 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     hoje_str = agora.strftime("%Y-%m-%d")
     amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
     
-    # 🚀 LÓGICA DE INTELIGÊNCIA TEMPORAL E FILA ESTRITA (FIFO)
+    # Data da fila (FIFO)
     dados_rotina = ler_config_rotina()
     
-    # 1. Define a data base olhando para a bandeira do Bom Dia
+    # 1. Bom Dia de hoje já saiu: o vídeo vai para amanhã; senão, hoje ("2000-01-01").
     if dados_rotina.get("ultimo_bom_dia") == hoje_str:
         data_agendamento_base = amanha_str
         if EXIBIR_LOGS: logger.info("⏰ O 'Bom Dia' de hoje já passou. Data base projetada para Amanhã.")
     else:
-        data_agendamento_base = "2000-01-01" # Flag interna para 'Imediato/Hoje'
+        data_agendamento_base = "2000-01-01"  # marca de "hoje"
         if EXIBIR_LOGS: logger.info("⏰ O 'Bom Dia' de hoje ainda não passou (Madrugada/Manhã). Data base projetada para Hoje.")
         
-    # 2. 🚧 Trava de Ordem Cronológica (Não permite furar a fila)
+    # 2. Ninguém fura a fila: se o último vídeo já está num dia futuro, o novo vai junto.
     fila_data_temp = ler_fila_postagens()
     fila_temp = fila_data_temp.get("fila", [])
     if fila_temp:
         ultima_data_str = fila_temp[-1].get("data_adicao", "2000-01-01")
         
-        # Se o último vídeo da fila já foi empurrado para o futuro, o novo vídeo tem que acompanhá-lo.
         if ultima_data_str != "2000-01-01" and ultima_data_str > data_agendamento_base:
             data_agendamento_base = ultima_data_str
             if EXIBIR_LOGS: logger.info(f"🚧 FIFO: O novo vídeo foi empurrado para o fim da fila: {data_agendamento_base}")
@@ -9593,7 +9613,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
             conexao = sqlite3.connect("banco_dados.db")
             cursor = conexao.cursor()
             
-            # Descobre a próxima prioridade para este dia
+            # Próxima posição dentro do dia.
             cursor.execute("SELECT MAX(prioridade) FROM fila_postagens WHERE data_alvo = ?", (data_agendamento_base,))
             resultado = cursor.fetchone()[0]
             proxima_prioridade = (resultado if resultado else 0) + 1
@@ -9633,18 +9653,16 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     async with _lock_contador:
         proximo_numero = ler_contador()
 
-    # ✅ CORREÇÃO: O recálculo só acontece se o vídeo for para HOJE.
-    # Vídeos do futuro entram na fila sem afetar os horários já definidos para hoje.
+    # Só refaz a grade de hoje se o vídeo for para hoje; vídeo para o futuro não mexe
+    # nos horários já marcados.
     if data_agendamento_base == "2000-01-01" or data_agendamento_base <= hoje_str:
         if EXIBIR_LOGS: logger.info("🔄 O novo vídeo é para hoje. A recalcular a grelha de publicações em tempo real...")
         agendar_fila_postagens()
     else:
         if EXIBIR_LOGS: logger.info(f"⏭️ O novo vídeo é para o futuro ({data_agendamento_base}). A grelha de hoje não será afetada.")
 
-    # 🧾 Recibo do que acabou de entrar na fila. O contador aponta para o PRÓXIMO,
-    # então o vídeo recém-criado é o anterior — mostrar o 237 aqui confundia.
+    # Recibo: o contador aponta para o PRÓXIMO número, então o vídeo criado é o anterior.
     numero_criado = max(1, proximo_numero - 1)
-    qtd_posts = 2 if nivel_4_ativado else 1
     detalhe_posts = "2 posts · Shopee + TikTok" if nivel_4_ativado else "1 post"
 
     amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -9660,7 +9678,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
         except Exception:
             quando = f"🔵 {data_agendamento_base}"
 
-    # Quantos já disputam esse mesmo dia (inclui os que acabaram de entrar).
+    # Quantos já estão na fila desse dia (contando os que acabaram de entrar).
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -9682,7 +9700,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     )
     await state.clear()
 
-# ✅ Handlers para Gerenciar a Numeração
+# --- Número da postagem ---
 @dp.message(F.text == "Editar Número da Postagem 🔢", StateFilter("*"))
 async def menu_editar_numero(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
@@ -9733,6 +9751,7 @@ async def salvar_novo_numero(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "🛠️ Configurações Avançadas", StateFilter("*"))
 async def menu_configuracoes(message: types.Message, state: FSMContext):
+    """Configurações Avançadas do canal principal."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     if EXIBIR_LOGS: logger.info("⚙️ Acessando Dashboard de Configurações Gerais de Automações.")
@@ -9801,6 +9820,7 @@ async def confirmar_atualizar_rotinas(message: types.Message, state: FSMContext)
 
 @dp.message(ConfigFluxo.aguardando_confirmacao_rotinas)
 async def resetar_expediente(message: types.Message, state: FSMContext):
+    """Recalcula a grade do dia do canal principal (rotinas e vídeos) e mostra o que mudou."""
     if message.from_user.id != ADMIN_ID: return
 
     if message.text != "Aprovar ✅":
@@ -9810,16 +9830,15 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("🔄 Recálculo APROVADO pelo admin. Executando...")
     msg_status = await message.answer("🔄 Analisando o histórico de hoje e recalculando a grade restante. Aguarde...", reply_markup=teclado_cancelar)
     
-    # --- 1. FOTO DO ANTES (Captura o estado atual da memória) ---
+    # Horários antes do recálculo
     jobs_antes = {}
     for job in scheduler.get_jobs():
         if getattr(job, 'next_run_time', None):
             jobs_antes[job.id] = job.next_run_time.astimezone(fuso_horario).strftime("%H:%M")
 
-    # --- 2. EXECUTA O RECÁLCULO ---
     agendar_tarefas_diarias(escopo="principal")
     
-    # --- 3. FOTO DO DEPOIS (Captura o novo estado da memória) ---
+    # Horários depois
     jobs_depois = {}
     for job in scheduler.get_jobs():
         if getattr(job, 'next_run_time', None):
@@ -9827,18 +9846,16 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
 
     await msg_status.delete()
     
-    # --- 4. CONSTRUÇÃO DO PAINEL VISUAL ORDENADO ---
+    # Relatório do que mudou, por horário
     texto = "🔄 <b>Grade Recalculada com Sucesso!</b>\n\n"
     texto += "Aqui está o relatório do que mudou no seu dia:\n\n"
     
     mudancas_rotinas = []
     mudancas_videos = []
     
-    # Compara o Antes e o Depois
     for job_id, hora_nova in jobs_depois.items():
         hora_antiga = jobs_antes.get(job_id)
         
-        # Avalia se a hora mudou ou se é um item totalmente novo
         if hora_antiga != hora_nova:
             marcador_tempo = f"{hora_antiga} ➡️ {hora_nova}" if hora_antiga else f"Novo Encaixe ➡️ {hora_nova}"
             
@@ -9861,11 +9878,10 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
                     else:
                         nome_amigavel = job_id.replace("job_rotina_", "").replace("job_campanha_", "").replace("_", " ").title()
                         
-                # Guarda na lista como uma tupla (hora_nova, texto_formatado) para ordenarmos depois
                 mudancas_rotinas.append((hora_nova, f"🔹 <b>{nome_amigavel}:</b> {marcador_tempo}"))
                 
             elif "fila_postagem" in job_id:
-                # Faz um resgate cirúrgico no SQLite para descobrir o Número Visual do Vídeo
+                # Número do vídeo ("Vídeo N") lido da legenda.
                 id_unico = job_id.replace("job_fila_postagem_", "")
                 nome_video = f"Vídeo {id_unico[:4]}"
                 try:
@@ -9882,7 +9898,6 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
                 
                 mudancas_videos.append((hora_nova, f"📦 <b>{nome_video}:</b> {marcador_tempo}"))
                 
-    # ✅ ORDENAÇÃO CRONOLÓGICA INTELIGENTE (Do mais cedo para o mais tarde)
     mudancas_rotinas.sort(key=lambda x: x[0])
     mudancas_videos.sort(key=lambda x: x[0])
     
@@ -9901,6 +9916,7 @@ async def resetar_expediente(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "Zerar Filas e Tarefas 🧹", StateFilter("*"))
 async def menu_zerar_filas_tarefas(message: types.Message, state: FSMContext):
+    """Zerar Filas e Tarefas: escolha do que limpar."""
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("⚠️ Solicitando seleção do tipo de limpeza de filas.")
     
@@ -9928,12 +9944,12 @@ async def menu_zerar_filas_tarefas(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigFluxo.aguardando_selecao_limpeza)
 async def pedir_confirmacao_acao_limpeza(message: types.Message, state: FSMContext):
+    """Confirma a limpeza escolhida antes de executar."""
     opcoes_validas = [
         "Limpar Tudo (Geral) 💥", "Limpar Fila do Espião 🕵️", "Limpar Fila Espelhador 🔄", "Limpar Fila Autorais 🎥"
     ]
 
-    # 🔙 "Voltar" é diferente de "Cancelar": em vez de largar o usuário no menu
-    # principal, devolve para Opções do Servidor, que é de onde ele veio.
+    # "Voltar" devolve às Opções do Servidor, de onde o usuário veio.
     if message.text in ("Voltar ao Menu Anterior 🔙", "Cancelar ❌"):
         await menu_opcoes_servidor_handler(message, state)
         return
@@ -9955,11 +9971,16 @@ async def pedir_confirmacao_acao_limpeza(message: types.Message, state: FSMConte
 
 @dp.message(ConfigFluxo.aguardando_acao_limpeza)
 async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContext):
+    """
+    Executa a limpeza escolhida: tira das filas os pendentes (Espião, Espelhador,
+    Autorais) e apaga os arquivos; varre o lixo de temp/; no Limpar Tudo, também os
+    .bkp e os logs do sistema.
+    """
     if message.text == "Cancelar ❌":
         await cancelar_fluxo_global(message, state)
         return
         
-    # 🔙 Aqui o passo anterior é a própria lista de limpezas, não o menu do servidor.
+    # Aqui o passo anterior é a própria lista de limpezas, não o menu do servidor.
     if message.text in ("Voltar ao Menu Anterior 🔙", "Cancelar ❌"):
         await menu_zerar_filas_tarefas(message, state)
         return
@@ -9996,7 +10017,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
                 relatorio["espaco_mb"] += tamanho
             except: pass
 
-    # 1. Limpar Fila do Espião
+    # 1. Espião: tira os pendentes da fila e apaga os arquivos
     if limpar_espiao:
         try:
             fila_clonagem = ler_fila_clonagem()
@@ -10009,10 +10030,10 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
                     relatorio["espiao"] += 1
             fila_clonagem["fila"] = mantidos_espiao
             salvar_fila_clonagem(fila_clonagem)
-        except Exception as e:
+        except Exception:
             pass
             
-    # 2. Limpar Fila do Espelhador
+    # 2. Espelhador: tira os pendentes da fila
     if limpar_espelhador:
         try:
             with open("fila_espelhador.json", "r", encoding="utf-8") as f:
@@ -10025,12 +10046,11 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
                     apagar_arquivo(item.get("caminho_video"))
                     relatorio["espelhador"] += 1
             fila_espelhador["fila"] = mantidos_espelhador
-            with open("fila_espelhador.json", "w", encoding="utf-8") as f:
-                json.dump(fila_espelhador, f, indent=4)
-        except Exception as e:
+            salvar_json_atomico("fila_espelhador.json", fila_espelhador, indent=4)
+        except Exception:
             pass
 
-    # 3. Limpar Fila de Autorais
+    # 3. Autorais: tira os pendentes da fila de retorno e apaga os arquivos
     if limpar_autorais:
         try:
             conexao = sqlite3.connect("banco_dados.db")
@@ -10045,29 +10065,36 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
             cursor.execute("DELETE FROM fila_autorais WHERE processado = 0")
             conexao.commit()
             conexao.close()
-        except Exception as e:
+        except Exception:
             pass
 
-    # 4. Faxina Cega na Pasta Temp
+    # 4. Pasta temp: apaga o lixo, mas não os arquivos que ainda estão em alguma fila
+    # pendente (Espião, Espelhador, Público...) nem os mexidos nos últimos 10 min
+    # (download em andamento). Os das filas limpas acima já foram apagados com elas.
     try:
         if os.path.exists("temp"):
+            protegidos = _caminhos_protegidos()
+            recente = time.time() - 600
             for filename in os.listdir("temp"):
                 caminho_completo = os.path.join("temp", filename)
-                if os.path.isfile(caminho_completo):
-                    apagar_arquivo(caminho_completo)
-    except Exception as e:
+                if not os.path.isfile(caminho_completo):
+                    continue
+                if os.path.abspath(caminho_completo) in protegidos or os.path.getmtime(caminho_completo) > recente:
+                    continue
+                apagar_arquivo(caminho_completo)
+    except Exception:
         pass
 
-    # 5. Apagar arquivos de backup (.bkp) na raiz
+    # 5. Arquivos .bkp da raiz (JSON antigos já migrados), só no Limpar Tudo
     if limpar_tudo:
         try:
             for filename in os.listdir("."):
                 if filename.endswith(".bkp") and os.path.isfile(filename):
                     apagar_arquivo(filename)
-        except Exception as e:
+        except Exception:
             pass
 
-    # 6. Limpeza de Logs do Servidor Linux
+    # 6. Logs do sistema (journalctl, mantém 2 dias), só no Limpar Tudo
     status_ubuntu = "Não executada"
     if limpar_tudo:
         try:
@@ -10081,7 +10108,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
                 status_ubuntu = "✅ Concluída (Mantendo últimos 2 dias)"
             else:
                 status_ubuntu = "⚠️ Falha de permissão (sudo)"
-        except Exception as e:
+        except Exception:
             status_ubuntu = "❌ Erro ao acessar terminal"
 
     await msg_status.delete()
@@ -10101,7 +10128,7 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
         
     texto_final += "\nO seu ambiente de trabalho está atualizado."
     
-    # ✅ CORREÇÃO MESTRE: Exibe a mensagem de sucesso e puxa o menu de limpeza novamente
+    # Mostra o relatório e volta ao menu de limpeza.
     await message.answer(texto_final, parse_mode="HTML")
     await menu_zerar_filas_tarefas(message, state)
 
@@ -10127,6 +10154,7 @@ async def voltar_outros_canais(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "Gerador de Achadinhos 🛍️", StateFilter("*"))
 async def painel_achadinhos(message: types.Message, state: FSMContext):
+    """Painel do Gerador de Achadinhos: nichos, destino, termos, janela e nichos por ciclo."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     
@@ -10141,17 +10169,14 @@ async def painel_achadinhos(message: types.Message, state: FSMContext):
         texto += "\n<i>Nenhum nicho configurado. Clique em 'Adicionar Nicho ➕' para começar.</i>"
     else:
         for i, nicho in enumerate(nichos, 1):
-            # 🧵 Usa o mesmo formatar_nome_alvo dos outros painéis: sem o tópico,
-            # oito nichos do mesmo grupo apareciam com destino idêntico e não dava
-            # para conferir se cada um estava na gaveta certa.
+            # Mesmo formatar_nome_alvo dos outros painéis: com o tópico, nichos do mesmo grupo
+            # não aparecem com destino idêntico.
             destino = nicho.get("destino")
             thread_id = str(nicho.get("thread_id", "0") or "0")
             alvo = f"{destino}:{thread_id}" if thread_id != "0" else str(destino)
 
-            # O helper devolve "Grupo › Tópico" numa linha só, o que embola no
-            # celular. Aqui a gente separa em duas linhas sem perder nada. Se o
-            # formato do helper mudar, o split falha de forma limpa e o nome
-            # inteiro volta para a linha do grupo.
+            # "Grupo › Tópico" vira duas linhas (no celular, uma linha só embola). Sem o
+            # separador, o nome inteiro fica na linha do grupo.
             nome_completo = formatar_nome_alvo(alvo, cache_nomes)
             if " › " in nome_completo:
                 nome_grupo, nome_topico = nome_completo.split(" › ", 1)
@@ -10174,11 +10199,12 @@ async def painel_achadinhos(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "Forçar Garimpo 🚀", StateFilter("*"))
 async def forcar_garimpo_achadinhos(message: types.Message):
+    """Roda um garimpo agora, fora da agenda e ignorando a janela."""
     if message.from_user.id != ADMIN_ID: return
     await message.answer("🚀 <b>Motor Acionado!</b> O garimpo extrairá as melhores ofertas nos nichos mapeados de forma silenciosa no servidor. Em instantes elas cairão nos canais.", parse_mode="HTML")
     criar_task(processar_garimpo_automatico(forcado=True))
 
-# --- FLUXO: ADICIONAR NICHO ---
+# --- Achadinhos: adicionar nicho ---
 @dp.message(AchadinhosFluxo.menu_principal, F.text == "Adicionar Nicho ➕")
 async def pedir_nome_nicho(message: types.Message, state: FSMContext):
     await message.answer("Vamos configurar um novo robô de garimpo!\n\nQual será o <b>Nome deste nicho</b>? (Ex: Achadinhos Tech, Moda Feminina)", parse_mode="HTML", reply_markup=teclado_cancelar)
@@ -10201,7 +10227,8 @@ async def pedir_destino_nicho(message: types.Message, state: FSMContext):
 
 @dp.message(AchadinhosFluxo.aguardando_destino)
 async def pedir_thread_nicho(message: types.Message, state: FSMContext):
-    # 🔗 Um campo só: o link já carrega grupo e tópico.
+    """Recebe o link do tópico do nicho e pede as palavras-chave."""
+    # Um campo só: o link já traz grupo e tópico.
     destino_nicho, thread_id = extrair_destino_e_topico(message.text)
 
     if not destino_nicho:
@@ -10225,15 +10252,9 @@ async def pedir_thread_nicho(message: types.Message, state: FSMContext):
     )
     await state.set_state(AchadinhosFluxo.aguardando_keywords)
 
-@dp.message(AchadinhosFluxo.aguardando_thread_id)
-async def pedir_keywords_nicho(message: types.Message, state: FSMContext):
-    thread_id = message.text.strip()
-    await state.update_data(novo_thread_id=thread_id)
-    await message.answer(f"Tópico salvo: <code>{thread_id}</code>\n\nPor fim, digite as <b>Palavras-chave</b> que o motor usará para rastrear produtos na Shopee. Separe-as por vírgula.\nExemplo: <code>smartwatch, fone bluetooth, gamer</code>", parse_mode="HTML", reply_markup=teclado_cancelar)
-    await state.set_state(AchadinhosFluxo.aguardando_keywords)
-
 @dp.message(AchadinhosFluxo.aguardando_keywords)
 async def salvar_novo_nicho(message: types.Message, state: FSMContext):
+    """Grava o nicho novo."""
     keywords_raw = message.text.strip()
     keywords_lista = [k.strip() for k in keywords_raw.split(",") if k.strip()]
     
@@ -10261,7 +10282,7 @@ async def salvar_novo_nicho(message: types.Message, state: FSMContext):
     await message.answer(f"✅ Nicho <b>{nome}</b> criado e ativado com sucesso!", parse_mode="HTML")
     await painel_achadinhos(message, state)
 
-# --- FLUXO: REMOVER NICHO ---
+# --- Achadinhos: remover nicho ---
 @dp.message(AchadinhosFluxo.menu_principal, F.text == "Remover Nicho 🗑️")
 async def pedir_remocao_nicho(message: types.Message, state: FSMContext):
     config = ler_achadinhos_config()
@@ -10316,7 +10337,7 @@ async def processar_remocao_nicho(message: types.Message, state: FSMContext):
     
     await painel_achadinhos(message, state)
 
-# --- FLUXO: EDITAR NICHO ---
+# --- Achadinhos: editar nicho ---
 @dp.message(AchadinhosFluxo.menu_principal, F.text == "Editar Nicho ✏️")
 async def pedir_edicao_nicho(message: types.Message, state: FSMContext):
     config = ler_achadinhos_config()
@@ -10381,8 +10402,9 @@ def _mostrar_valor_campo(valor):
 
 @dp.message(AchadinhosFluxo.aguardando_novo_valor_edicao)
 async def revisar_edicao_nicho(message: types.Message, state: FSMContext):
-    # ⚠️ Edição é destrutiva: a lista antiga some sem deixar rastro. Mostra o
-    # antes e o depois e espera confirmação antes de gravar.
+    """Mostra o antes e o depois do campo editado e pede confirmação."""
+    # Edição destrutiva (a lista antiga some): mostra o antes e o depois e espera
+    # confirmação.
     data = await state.get_data()
     indice = data.get("indice_nicho_edicao")
     campo = data.get("campo_edicao")
@@ -10485,8 +10507,8 @@ async def confirmar_janela_achadinhos(message: types.Message, state: FSMContext)
                                  reply_markup=teclado_janela_achadinhos)
             return
 
-    # 📊 O intervalo agora é sorteado (rajada/normal/sumiço) e fica em ~2h na média,
-    # então a conta vira uma FAIXA, não um número exato.
+    # O intervalo é sorteado (rajada/normal/sumiço), ~2 h na média: a conta sai como
+    # faixa, não como número exato.
     ciclos = max(1, (fim - inicio) // 2)
     qtd_nichos = len(ler_achadinhos_config().get("nichos", []))
     total_dia = ciclos * qtd_nichos
@@ -10584,7 +10606,6 @@ async def voltar_menu_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🔙 Retornando ao Menu Principal do Espião...")
     await state.clear()
-    # Redireciona a execução diretamente para a função principal para exibir o painel completo
     await menu_espiao_principal(message, state)
 
 @dp.message(F.text == "⚙️ Automações (SPAM e Rotina)\u200b", StateFilter("*"))
@@ -10628,46 +10649,45 @@ async def voltar_configs(message: types.Message, state: FSMContext):
     await state.clear()
     await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
 
-# --- HANDLERS DO PAINEL DO ESPIÃO 🕵️ ---
+# --- Painel do Espião ---
 @dp.message(F.text == "Espião Afiliados 🕵️")
 async def menu_espiao_principal(message: types.Message, state: FSMContext):
+    """Painel do Espião: fila de clonagem, canais vigiados, destino, janela e atraso."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     
     if EXIBIR_LOGS: logger.info("🚀 Iniciando consolidação de estatísticas para o painel do Espião...")
     
-    # 1. Obter quantidade de vídeos pendentes na fila (✅ BLINDADO)
+    # 1. Vídeos pendentes na fila de clonagem
     fila_data = ler_fila_clonagem()
     fila = fila_data.get("fila", [])
     videos_pendentes = len([item for item in fila if item.get("processado") not in [True, 1, "true", "True"]])
     
-   # 2. Obter canais monitorizados e destino do ficheiro de configuração (CORRIGIDO)
+   # 2. Canais vigiados e destino
     dados_espiao = ler_alvos_espiao()
     concorrentes = dados_espiao.get("alvos", [])
     qtd_concorrentes = len(concorrentes)
     canal_destino = dados_espiao.get("canal_destino")
     
-    # Lógica Visual do Destino com Autocura (Puxa o nome em vez de só o ID)
+    # Destino com o nome, não só o ID
     if not canal_destino:
         display_destino = "<i>Não definido</i>"
     else:
         status_destino = dados_espiao.get("status_destino", {})
         nome_dest = status_destino.get("nome", str(canal_destino))
-        # Se não tiver o nome no status, tenta puxar do cache global
         if nome_dest == str(canal_destino):
             cache_nomes = ler_cache_nomes_grupos()
             nome_dest = cache_nomes.get(str(canal_destino), str(canal_destino))
         
-        # Formata bonito: "Nome do Canal (ID)"
         display_destino = f"{nome_dest} (<code>{canal_destino}</code>)" if nome_dest != str(canal_destino) else f"<code>{canal_destino}</code>"
 
-    # ✅ NOVO: Resgate das configurações de tempo e distribuição do Espião
+    # Janela, atraso e modo do Espião
     inicio_e = dados_espiao.get("inicio", 10)
     fim_e = dados_espiao.get("fim", 22)
     modo_e = dados_espiao.get("modo", "aleatorio").title()
     intervalo_e = dados_espiao.get("intervalo_dias", 1)
     
-    # 3. Construir a mensagem unificada do painel
+    # 3. Texto do painel
     texto = "🕵️ <b>Painel Principal do Espião</b>\n\n"
     texto += f"📦 <b>Fila de clonagem:</b> {videos_pendentes} vídeos aguardando.\n"
     texto += f"📡 <b>Radar operacional:</b> {qtd_concorrentes} concorrentes vigiados.\n"
@@ -10681,12 +10701,13 @@ async def menu_espiao_principal(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "Forçar Postagens 🚀", StateFilter("*"))
 async def iniciar_esvaziar_clones(message: types.Message, state: FSMContext):
+    """Forçar Postagens do Espião: confirma antes de soltar todos os pendentes agora."""
     if message.from_user.id != ADMIN_ID: return
     
     fila_data = ler_fila_clonagem()
     fila = fila_data.get("fila", [])
     
-    # ✅ CORREÇÃO DE BLINDAGEM: Garante que só vai contar e forçar os pendentes reais
+    # Só os pendentes: os já publicados ficam na fila até a faxina.
     qtd_pendentes = len([i for i in fila if i.get("processado") not in [True, 1, "true", "True"]])
     
     if qtd_pendentes == 0:
@@ -10714,16 +10735,19 @@ async def processar_esvaziar_clones(message: types.Message, state: FSMContext):
     await message.answer("✅ <b>Clonagens Forçadas!</b>\nOs vídeos pendentes na fila do Espião serão analisados pela IA e postados em instantes. Você receberá um aviso quando o processo terminar.", parse_mode="HTML", reply_markup=teclado_menu_espiao)
     await state.clear()
     
-    # Chama o processo de forma assíncrona para não travar a interface do Telegram
+    # Em segundo plano: a rajada leva minutos e o painel não pode travar.
     criar_task(esvaziar_fila_espiao_background(message.chat.id))
 
 async def esvaziar_fila_espiao_background(chat_id):
+    """
+    Publica a fila do Espião inteira agora, ignorando a janela e o atraso: chama o
+    motor (um clone por chamada) até não sobrar pendente e avisa no fim.
+    """
     if EXIBIR_LOGS: logger.info("🚀 [Espião] Iniciando rajada forçada em background...")
     while True:
         try:
             dados = ler_fila_clonagem()
             
-            # ✅ CORREÇÃO DE BLINDAGEM: Filtra apenas os pendentes
             pendentes = [i for i in dados.get("fila", []) if i.get("processado") not in [True, 1, "true", "True"]]
             
             if not pendentes:
@@ -10731,18 +10755,17 @@ async def esvaziar_fila_espiao_background(chat_id):
                 await bot.send_message(chat_id, "✅ <b>Concluído!</b>\nTodos os vídeos retidos na fila do Espião foram analisados pela IA e publicados com sucesso no seu canal.", parse_mode="HTML")
                 break
             
-            dados["proximo_processamento"] = "2000-01-01 00:00:00"
             agora = datetime.now(fuso_horario)
             ontem_str = (agora - timedelta(days=1)).strftime("%Y-%m-%d %H:%M:%S")
             
             for item in dados.get("fila", []):
-                # ✅ CORREÇÃO DE BLINDAGEM: Altera a data APENAS dos que NÃO foram processados
+                # Captura passa a ser "ontem": nenhum pendente fica preso no atraso (D+X).
                 if item.get("processado") not in [True, 1, "true", "True"]:
                     item["data_captura"] = ontem_str
                     
             salvar_fila_clonagem(dados)
             
-            # ✅ O PARÂMETRO 'forcar=True' ORDENA AO BOT IGNORAR A JANELA DE TEMPO
+            # forcar=True ignora a janela e o espaçamento: solta tudo a partir de agora.
             await processar_fila_espiao(forcar=True)
             await asyncio.sleep(5) 
             
@@ -10753,6 +10776,9 @@ async def esvaziar_fila_espiao_background(chat_id):
 
 @dp.message(F.text == "Grupos Vigiados 📡")
 async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
+    """
+    Grupos Vigiados: destino e canais na escuta com o status de acesso (lista longa é resumida).
+    """
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("📡 Acessando a lista de grupos vigiados do Espião...")
     
@@ -10763,7 +10789,7 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
     status_alvos = dados.get("status_alvos", {})
     status_destino = dados.get("status_destino", {})
     
-    texto = f"📡 <b>Gestão de Grupos Vigiados</b>\n\n"
+    texto = "📡 <b>Gestão de Grupos Vigiados</b>\n\n"
     
     if destino != "Não definido":
         nome_dest = status_destino.get("nome", str(destino))
@@ -10781,17 +10807,16 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
         cache_nomes_vigiados = ler_cache_nomes_grupos()
         linhas_geradas = []
         
-        # 1. Pré-processa todas as linhas para saber quais têm erro
+        # 1. Monta todas as linhas antes, para saber quais têm erro
         for i, alvo in enumerate(alvos, 1):
             info = status_alvos.get(alvo, {})
             status_ico = "⏳"
-            # 🧵 Alvo com tópico precisa mostrar "Grupo › Tópico".
             nome_cache = formatar_nome_alvo(alvo, cache_nomes_vigiados)
             detalhe = f"{nome_cache} <code>({alvo})</code>" if nome_cache else alvo
             
             if info.get("status") == "ok":
                 status_ico = "✅"
-                # ⚠️ info['nome'] traz só o nome do GRUPO: recompõe com o tópico.
+                # info['nome'] traz só o nome do grupo: recompõe com o tópico.
                 nome_ok = formatar_nome_alvo(alvo, cache_nomes_vigiados, info.get("nome"))
                 detalhe = f"{nome_ok} <code>({alvo})</code>"
             elif info.get("status") == "erro":
@@ -10803,14 +10828,13 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
                 "tem_erro": status_ico == "❌"
             })
 
-        # 2. Motor de Ocultação Inteligente
+        # 2. Lista grande é resumida
         total = len(linhas_geradas)
         if total <= 15:
-            # Se a lista for pequena, mostra tudo
             for linha in linhas_geradas:
                 texto += linha["texto"]
         else:
-            # Se for grande, mostra 5 primeiros, 5 últimos, e força exibição dos erros
+            # 5 primeiros, 5 últimos e todos os com erro; os ok do meio viram uma linha de contagem
             for i in range(5):
                 texto += linhas_geradas[i]["texto"]
 
@@ -10832,7 +10856,7 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
     else:
         texto += "<i>Nenhum grupo sendo monitorado no momento.</i>\n\n"
         
-    # Tratamento caso a lista de erros seja gigantesca (Limites do Telegram)
+    # Limite de 4096 caracteres do Telegram: corta em várias mensagens
     while len(texto) > 3800:
         corte = texto.rfind('\n', 0, 3800)
         mensagens_para_enviar.append(texto[:corte])
@@ -10851,6 +10875,7 @@ async def menu_grupos_vigiados(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.aguardando_acao_analise, F.text == "Listar Todos 📜")
 async def listar_todos_espiao(message: types.Message, state: FSMContext):
+    """Lista completa dos canais vigiados, sem resumir."""
     if message.from_user.id != ADMIN_ID: return
     
     dados = ler_alvos_espiao()
@@ -10869,13 +10894,12 @@ async def listar_todos_espiao(message: types.Message, state: FSMContext):
     for i, alvo in enumerate(alvos, 1):
         info = status_alvos.get(str(alvo), {})
         
-        # Puxa o status para definir o ícone (✅ ou ❌)
         status_ico = "❌" if info.get("status") == "erro" else "✅"
         
         nome = formatar_nome_alvo(alvo, cache_nomes, info.get("nome"))
         linha = f"<b>{i}.</b> {status_ico} {nome} (<code>{alvo}</code>)\n"
         
-        # Quebra a mensagem se ficar muito grande para o limite do Telegram
+        # Limite de 4096 caracteres do Telegram: corta em várias mensagens
         if len(texto) + len(linha) > 3800:
             mensagens.append(texto)
             texto = ""
@@ -10888,6 +10912,10 @@ async def listar_todos_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.aguardando_acao_analise, F.text == "⚠️ Duplicados")
 async def verificar_duplicados_espiao(message: types.Message, state: FSMContext):
+    """
+    Aponta pares que parecem o mesmo canal: mesmo ID (com ou sem -100) e tópico, ou mesmo
+    nome entre um @link e um ID.
+    """
     if message.from_user.id != ADMIN_ID: return
     dados = ler_alvos_espiao()
     alvos = dados.get("alvos", [])
@@ -10950,6 +10978,10 @@ async def verificar_duplicados_espiao(message: types.Message, state: FSMContext)
 
 @dp.callback_query(F.data == "remover_duplicados_espiao")
 async def remover_duplicados_espiao_callback(callback: types.CallbackQuery, state: FSMContext):
+    """
+    Remove um de cada par duplicado: fica o que está com acesso ok; empatando, o ID
+    numérico; senão, o primeiro da lista.
+    """
     if callback.from_user.id != ADMIN_ID: return
     dados = ler_alvos_espiao()
     alvos = dados.get("alvos", [])
@@ -11027,9 +11059,13 @@ async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.aguardando_novo_alvo)
 async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
+    """
+    Valida e filtra os canais enviados (ou o Banco Global): barra Lista Negra, o próprio
+    destino (loop) e os já vigiados, e pede confirmação.
+    """
     texto = message.text
     
-    # 🎯 NOVA REDIREÇÃO DA BLACKLIST (COM NOMES)
+    # Lista Negra: mostra os bloqueados com nome e os botões de incluir/remover
     if texto == "Lista Negra (Blacklist) ⛔":
         dados = ler_alvos_espiao()
         blacklist = dados.get("blacklist", [])
@@ -11086,7 +11122,7 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
         entrada_limpa = entrada.strip()
         if not entrada_limpa: continue
 
-        # Se for do Banco Global, pula a lentidão da rede
+        # Do Banco Global os IDs já estão validados: não consulta o Telegram um a um
         if is_importacao_global:
             sucesso = True
             id_final = entrada_limpa
@@ -11206,6 +11242,7 @@ async def acao_blacklist_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.aguardando_blacklist_add)
 async def processar_add_blacklist_espiao(message: types.Message, state: FSMContext):
+    """Inclui na Lista Negra. Canal que já está na escuta pede confirmação, porque sai dela."""
     if message.text == "Cancelar ❌":
         await pedir_alvo_espiao(message, state)
         return
@@ -11253,9 +11290,9 @@ async def processar_add_blacklist_espiao(message: types.Message, state: FSMConte
         await state.update_data(novos_blacklist=novos_blacklist, alvos_para_remover=conflitos)
         cache_nomes = ler_cache_nomes_grupos()
         texto_aviso = (
-            f"⚠️ <b>Atenção: Conflito Detetado!</b>\n\n"
-            f"Você está a tentar adicionar canais à Lista Negra que <b>já estão a ser monitorizados</b> pelo Espião.\n\n"
-            f"Canais que serão <b>AUTOMATICAMENTE REMOVIDOS</b> da escuta:\n"
+            "⚠️ <b>Atenção: Conflito Detetado!</b>\n\n"
+            "Você está a tentar adicionar canais à Lista Negra que <b>já estão a ser monitorizados</b> pelo Espião.\n\n"
+            "Canais que serão <b>AUTOMATICAMENTE REMOVIDOS</b> da escuta:\n"
         )
         for c in conflitos:
             nome_conflito = formatar_nome_alvo(c, cache_nomes)
@@ -11293,6 +11330,7 @@ async def processar_add_blacklist_espiao(message: types.Message, state: FSMConte
 
 @dp.message(EspiaoFluxo.aguardando_confirmacao_blacklist_conflito)
 async def confirmar_blacklist_conflito_espiao(message: types.Message, state: FSMContext):
+    """Inclui na Lista Negra e tira da escuta os canais em conflito."""
     if message.text != "Aprovar ✅":
         await message.answer("Operação cancelada.", reply_markup=teclado_cancelar)
         await pedir_alvo_espiao(message, state)
@@ -11337,6 +11375,7 @@ async def confirmar_blacklist_conflito_espiao(message: types.Message, state: FSM
 
 @dp.message(EspiaoFluxo.aguardando_blacklist_remove)
 async def processar_rem_blacklist_espiao(message: types.Message, state: FSMContext):
+    """Tira da Lista Negra os IDs enviados (texto exato)."""
     if message.text == "Cancelar ❌":
         await pedir_alvo_espiao(message, state)
         return
@@ -11439,7 +11478,7 @@ async def processar_remocao_espiao(message: types.Message, state: FSMContext):
     dados = ler_alvos_espiao()
     alvos = dados.get("alvos", [])
     
-    # IMPORTANTE: Ordena de trás para frente para não bagunçar os índices ao fazer o pop()
+    # De trás para frente: o pop() não desloca os índices que ainda faltam
     indices.sort(reverse=True)
     
     removidos = []
@@ -11468,9 +11507,9 @@ async def pedir_destino_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(EspiaoFluxo.aguardando_canal_destino)
 async def confirmar_destino_espiao(message: types.Message, state: FSMContext):
+    """Valida o destino do Espião, guarda o nome no cache e pede confirmação."""
     msg_status = await message.answer("⏳ Validando o canal de destino e buscando nome...", reply_markup=teclado_cancelar)
     
-    # Passa o link/ID pelo nosso Motor Inteligente de Validação
     sucesso, destino_id, nome = await validar_e_formatar_alvo(bot, message.text.strip())
     
     await msg_status.delete()
@@ -11479,7 +11518,6 @@ async def confirmar_destino_espiao(message: types.Message, state: FSMContext):
         await message.answer("⚠️ <b>Canal não encontrado ou formato inválido.</b>\nCertifique-se de que o ID ou link está correto. Tente novamente:", reply_markup=teclado_cancelar, parse_mode="HTML")
         return
         
-    # Salva o nome amigável no cache e guarda o ID limpo na memória da conversa
     salvar_nome_grupo(destino_id, nome)
     await state.update_data(novo_destino=destino_id)
     
@@ -11489,7 +11527,6 @@ async def confirmar_destino_espiao(message: types.Message, state: FSMContext):
         is_persistent=True
     )
     
-    # Mostra de forma bonita e padronizada (Nome + ID)
     nome_exibicao = f"{nome} (<code>{destino_id}</code>)" if nome != destino_id else f"<code>{destino_id}</code>"
     
     await message.answer(f"Os vídeos clonados serão enviados automaticamente para o canal:\n\n<b>{nome_exibicao}</b>\n\nConfirma essa alteração?", reply_markup=teclado_confirmacao, parse_mode="HTML")
@@ -11527,7 +11564,7 @@ async def iniciar_config_janela_espiao(message: types.Message, state: FSMContext
         f"Defina a <b>Janela de Horário</b> útil em que o Espião pode postar os vídeos.\n\n"
         f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>) ou clique no botão abaixo para rodar 24h:\n"
         f"<i>Janela atual: {inicio}h às {fim}h</i>", 
-        reply_markup=teclado_janela_espiao, # ✅ Passa a usar o novo teclado
+        reply_markup=teclado_janela_espiao,
         parse_mode="HTML"
     )
     await state.set_state(ConfigRotinaEspiao.aguardando_janela)
@@ -11606,12 +11643,12 @@ async def receber_intervalo_espiao(message: types.Message, state: FSMContext):
     if intervalo == 0:
         await state.update_data(modo="ordem")
         teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
-        await message.answer(f"Deseja confirmar o atraso de D+0 (Mesmo Dia) com modo de Ordem de Chegada?", reply_markup=teclado_conf)
+        await message.answer("Deseja confirmar o atraso de D+0 (Mesmo Dia) com modo de Ordem de Chegada?", reply_markup=teclado_conf)
         await state.set_state(ConfigRotinaEspiao.aguardando_confirmacao_tempo)
         return
         
     teclado_modo = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")], [KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
-    await message.answer("Como deseja distribute os clones retidos dentro da janela estipulada?", reply_markup=teclado_modo)
+    await message.answer("Como deseja distribuir os clones retidos dentro da janela estipulada?", reply_markup=teclado_modo)
     await state.set_state(ConfigRotinaEspiao.aguardando_modo)
 
 @dp.message(ConfigRotinaEspiao.aguardando_modo)
@@ -11632,6 +11669,9 @@ async def salvar_config_tempo_espiao(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigRotinaEspiao.aguardando_confirmacao_tempo)
 async def confirmar_tempo_espiao(message: types.Message, state: FSMContext):
+    """
+    Grava atraso e modo. Mudou o atraso: zera os horários dos pendentes para o motor redistribuir.
+    """
     if message.text != "Aprovar ✅":
         await message.answer("Operação cancelada.")
         await menu_grupos_vigiados(message, state)
@@ -11661,16 +11701,16 @@ async def confirmar_tempo_espiao(message: types.Message, state: FSMContext):
                 houve_reset = True
         if houve_reset:
             salvar_fila_clonagem(fila_data)
-        await message.answer(f"⚠️ <b>Gatilho de Recálculo Acionado!</b>\nComo você alterou a defasagem, todos os horários pendentes foram resetados.", parse_mode="HTML")
+        await message.answer("⚠️ <b>Gatilho de Recálculo Acionado!</b>\nComo você alterou a defasagem, todos os horários pendentes foram resetados.", parse_mode="HTML")
         
     await menu_grupos_vigiados(message, state)
 
 @dp.message(F.text == "Rotinas do Espião ⏰", StateFilter("*"))
 async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
+    """Rotinas do Canal Viral: janela e disparos por dia de cada uma, e a pausa delas."""
     if message.from_user.id != ADMIN_ID: return
     dados = ler_config_rotina()
     
-    # Resgata as configurações das três rotinas do canal viral
     config_convite = dados.get("link_grupo_viral", {"inicio": 9, "fim": 21, "frequencia": 2})
     config_gem = dados.get("divulgar_gem_viral", {"inicio": 8, "fim": 22, "frequencia": 1})
     config_promo = dados.get("promo_principal", {"inicio": 10, "fim": 20, "frequencia": 1})
@@ -11698,7 +11738,6 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     
     texto += "Selecione o que deseja editar abaixo:"
     
-    # ✅ NOVO: Verificação do status e adição do botão de pausa dinâmico
     texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado_viral") else "Pausar Rotinas ⏸️"
     
     teclado = ReplyKeyboardMarkup(
@@ -11710,11 +11749,12 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
         is_persistent=True
     )
     await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
-    await state.update_data(menu_origem="espiao") # ✅ Salva a origem para não quebrar a navegação
+    await state.update_data(menu_origem="espiao")  # "Voltar" e os submenus usam a origem para saber de qual canal são as rotinas
     await state.set_state(ConfigRotina.menu_principal)
 
 @dp.message(ConfigRotina.menu_principal, F.text == "Editar Rotinas ✏️")
 async def submenu_editar_rotinas(message: types.Message, state: FSMContext):
+    """Teclado de edição das rotinas do canal de origem (Viral, Público ou principal)."""
     if message.from_user.id != ADMIN_ID: return
     
     data = await state.get_data()
@@ -11760,6 +11800,7 @@ async def submenu_editar_rotinas(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigRotina.menu_principal, F.text == "Disparos Manuais 🚀")
 async def submenu_disparos_manuais(message: types.Message, state: FSMContext):
+    """Teclado de disparo manual das rotinas do canal de origem (Viral, Público ou principal)."""
     if message.from_user.id != ADMIN_ID: return
     
     data = await state.get_data()
@@ -11805,11 +11846,10 @@ async def submenu_disparos_manuais(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "🔙 Voltar ao Menu Rotinas", StateFilter("*"))
 async def voltar_menu_rotinas_dinamico(message: types.Message, state: FSMContext):
-    # ✅ CORREÇÃO: antes este handler exigia o estado ConfigRotina.menu_principal.
-    # Como o FSM vive em memória, qualquer restart do serviço ou expiração por
-    # inatividade apagava o estado e o botão virava um beco sem saída silencioso
-    # (log "Update is not handled"). Agora responde em qualquer estado, igual aos
-    # botões "Disparar ..." do mesmo teclado, que já usavam StateFilter("*").
+    """Volta ao menu de rotinas do canal de origem."""
+    # Responde em qualquer estado: o FSM vive em memória e um restart ou a expiração
+    # por inatividade deixavam o botão sem resposta. Os "Disparar ..." do mesmo
+    # teclado também usam StateFilter("*").
     if message.from_user.id != ADMIN_ID: return
 
     data = await state.get_data()
@@ -11818,15 +11858,11 @@ async def voltar_menu_rotinas_dinamico(message: types.Message, state: FSMContext
     if origem == "espiao":
         await gerenciar_rotina_espiao(message, state)
     elif origem == "publico":
-        try:
-            await gerenciar_rotina_publico(message, state)
-        except NameError:
-            await message.answer("Retornando...", reply_markup=obter_teclado_configuracoes_gerais())
+        await gerenciar_rotina_publico(message, state)
     elif origem:
         await gerenciar_rotina(message, state)
     else:
-        # ✅ Sem "menu_origem" o estado foi perdido (restart/inatividade).
-        # Em vez de ignorar o clique, devolve o usuário para a raiz.
+        # Sem "menu_origem" o estado se perdeu (restart/inatividade): volta para a raiz.
         await state.clear()
         await state.update_data(painel_atual="raiz")
         await message.answer(
@@ -11835,9 +11871,8 @@ async def voltar_menu_rotinas_dinamico(message: types.Message, state: FSMContext
             reply_markup=obter_teclado_raiz()
         )
 
-# ✅ NOVOS INTERRUPTORES INTERNOS DE PAUSA (COM CONFIRMAÇÃO)
 
-# --- SPAM PRINCIPAL ---
+# --- Pausas internas (com confirmação): SPAM principal ---
 @dp.message(ConfigDivulgacao.menu_principal, F.text.in_(["Pausar SPAM ⏸️", "Retomar SPAM ▶️"]))
 async def pedir_confirmacao_pausa_spam(message: types.Message, state: FSMContext):
     acao = "pausar" if "Pausar" in message.text else "retomar"
@@ -11877,7 +11912,7 @@ async def processar_pausa_spam_interno(message: types.Message, state: FSMContext
     await gerenciar_divulgacao(message, state)
 
 
-# --- SPAM VIRAL (ESPIÃO) ---
+# --- SPAM Viral ---
 @dp.message(ConfigDivulgacaoViral.menu_principal, F.text.in_(["Pausar SPAM ⏸️", "Retomar SPAM ▶️"]))
 async def pedir_confirmacao_pausa_spam_viral(message: types.Message, state: FSMContext):
     acao = "pausar" if "Pausar" in message.text else "retomar"
@@ -11942,6 +11977,10 @@ async def pedir_confirmacao_pausa_rotinas(message: types.Message, state: FSMCont
 
 @dp.message(ConfigRotina.aguardando_confirmacao_pausa)
 async def processar_pausa_rotinas_interno(message: types.Message, state: FSMContext):
+    """
+    Pausa ou retoma as rotinas do canal de origem. Ao retomar, refaz a grade do dia só
+    daquele canal, com o que ainda falta sair hoje.
+    """
     if "Confirmar" not in message.text:
         await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
         return
@@ -11980,11 +12019,11 @@ async def processar_pausa_rotinas_interno(message: types.Message, state: FSMCont
             agendar_tarefas_diarias(escopo="principal")
         await gerenciar_rotina(message, state)
 
-# ✅ NOVO: Handler específico para corrigir o "Voltar" na pausa programada
 @dp.message(PausaProgramadaFluxo.aguardando_selecao_servicos, F.text == "Voltar 🔙")
 @dp.message(PausaProgramadaFluxo.aguardando_data_retorno, F.text == "Voltar 🔙")
 @dp.message(PausaProgramadaFluxo.aguardando_intencao_encerramento, F.text == "Voltar 🔙")
 async def voltar_pausa_para_inicio(message: types.Message, state: FSMContext):
+    """"Voltar" dentro da Pausa Programada: volta às Configurações Avançadas."""
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("🔙 Comando Voltar acionado na Pausa Programada.")
     await state.clear()
@@ -11993,6 +12032,7 @@ async def voltar_pausa_para_inicio(message: types.Message, state: FSMContext):
 
 @dp.message(F.text.in_(["Pausar Postagens 🛑", "Retomar Postagens ▶️"]), StateFilter("*"))
 async def iniciar_pausa_programada(message: types.Message, state: FSMContext):
+    """Pausa Programada: com pausa ativa, oferece encerrar; senão, pede a data de retorno."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     dados_pausa = ler_pausa_programada()
@@ -12010,6 +12050,10 @@ async def iniciar_pausa_programada(message: types.Message, state: FSMContext):
 
 @dp.message(PausaProgramadaFluxo.aguardando_data_retorno)
 async def processar_data_retorno(message: types.Message, state: FSMContext):
+    """
+    Lê o retorno (DD/MM HH:MM; mês já passado vira ano que vem) e oferece os serviços
+    do principal que ainda estão ativos para pausar junto.
+    """
     import re
     from datetime import datetime
     
@@ -12086,6 +12130,10 @@ async def processar_selecao_servicos(message: types.Message, state: FSMContext):
 
 @dp.message(PausaProgramadaFluxo.aguardando_confirmacao_pausa)
 async def confirmar_pausa_programada_final(message: types.Message, state: FSMContext):
+    """
+    Liga a pausa: pausa os serviços escolhidos, posta o aviso no grupo e desfaz os vídeos
+    agendados de hoje.
+    """
     if message.text != "Confirmar Pausa ✅":
         await message.answer("Por favor, clique em Confirmar Pausa ✅ ou Cancelar ❌.")
         return
@@ -12107,7 +12155,7 @@ async def confirmar_pausa_programada_final(message: types.Message, state: FSMCon
         salvar_config_rotina(dados_rotina)
         servicos_pausados.append("rotina")
         
-    # Sorteio de um motivo dinâmico para a pausa
+    # Motivo sorteado: o aviso diário reaproveita o mesmo
     motivos_pausa = [
         "manutenção preventiva nos servidores para garantir estabilidade",
         "curadoria minuciosa e validação de um novo lote gigante de vídeos premium de alta conversão",
@@ -12118,7 +12166,6 @@ async def confirmar_pausa_programada_final(message: types.Message, state: FSMCon
     motivo_escolhido = random.choice(motivos_pausa)
     if EXIBIR_LOGS: logger.info(f"🎲 Motivo de pausa sorteado: {motivo_escolhido}")
 
-    # Extrai apenas o dia e o mês (DD/MM) da string original
     data_curta = data_retorno_str.split(" ")[0][:5]
 
     prompt = (
@@ -12142,6 +12189,7 @@ async def confirmar_pausa_programada_final(message: types.Message, state: FSMCon
         "motivo": motivo_escolhido 
     }
     salvar_pausa_programada(dados_pausa)
+    agendar_fila_postagens()  # com a pausa ativa, só desfaz os agendamentos de hoje
     
     if EXIBIR_LOGS: logger.info(f"🛑 Pausa programada até {data_retorno_str}. Aviso imediato disparado. Serviços: {servicos_pausados}")
     await message.answer(f"🛑 <b>Pausa Configurada com Sucesso!</b>\n\nO aviso já foi enviado ao grupo. A partir de amanhã, o robô atualizará esse aviso todos os dias às 09h00 informando o retorno para o dia {data_retorno_str}.\nNo dia marcado, ele acordará automaticamente.", parse_mode="HTML", reply_markup=obter_teclado_principal())
@@ -12162,6 +12210,10 @@ async def pedir_confirmacao_encerramento(message: types.Message, state: FSMConte
 
 @dp.message(PausaProgramadaFluxo.aguardando_confirmacao_encerramento)
 async def processar_encerramento_pausa(message: types.Message, state: FSMContext):
+    """
+    Encerra a pausa agora: troca o aviso pela mensagem de retorno, reativa os serviços
+    e refaz a grade de hoje.
+    """
     if message.text != "Aprovar Encerramento ✅":
         await message.answer("Por favor, clique em Aprovar Encerramento ✅ ou Cancelar ❌.")
         return
@@ -12169,7 +12221,6 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
     dados_pausa = ler_pausa_programada()
     servicos = dados_pausa.get("servicos_pausados", [])
     
-    # ✅ NOVO: Apaga a mensagem de aviso que ficou pendente no grupo
     id_aviso = dados_pausa.get("id_aviso_imediato")
     if id_aviso:
         await apagar_mensagem_automatica(id_aviso, GRUPO_ID)
@@ -12177,7 +12228,6 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
         
     msg_status = await message.answer("⏳ Gerando mensagem de retorno com a IA...", reply_markup=teclado_cancelar)
     
-    # ✅ NOVO: A IA gera o aviso de retorno ao trabalho
     prompt_retorno = (
         "Você é um assistente de afiliados. Crie uma mensagem MUITO CURTA E EMPOLGANTE "
         "avisando o grupo que a pausa de manutenção acabou, o canal voltou à ativa e os "
@@ -12186,7 +12236,7 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
     )
     texto_retorno = await gerar_mensagem_gemini(prompt_retorno)
     
-    # ✅ CORREÇÃO: Salva a mensagem enviada numa variável e joga o ID na lixeira
+    # A mensagem de retorno vai para a lixeira (apagada na faxina da madrugada)
     msg_retorno = await bot.send_message(GRUPO_ID, texto_retorno)
     registrar_lixeira(msg_retorno.message_id, GRUPO_ID)
     
@@ -12207,13 +12257,14 @@ async def processar_encerramento_pausa(message: types.Message, state: FSMContext
     dados_pausa["servicos_pausados"] = []
     dados_pausa.pop("id_aviso_imediato", None)
     salvar_pausa_programada(dados_pausa)
-    recalcular_datas_pos_pausa()
+    retomar_grade_pos_pausa()
     
     await message.answer("▶️ Pausa programada encerrada! O aviso antigo foi apagado e a mensagem de retorno foi postada no grupo. Serviços reativados com sucesso!", reply_markup=obter_teclado_principal())
     await state.clear()
 
-# --- LÓGICA DE GERENCIAMENTO DE DIVULGAÇÃO ---
+# --- SPAM em Grupos (divulgação pelo userbot) ---
 def ler_alvos_divulgacao():
+    """Config do SPAM principal; completa repetições e réplicas que faltarem."""
     padrao = {"alvos": [], "frequencia_por_hora": 0, "pausado": False, "forcar_disparo": False, "repeticoes_internas": 6, "replicas_mensagem": 5}
     dados = ler_config_bd("alvos_divulgacao", padrao, arquivo_legado="alvos_divulgacao.json")
     
@@ -12235,6 +12286,7 @@ def salvar_alvos_divulgacao(dados):
 
 @dp.message(F.text == "SPAM em Grupos 📢")
 async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
+    """Painel do SPAM em Grupos: padrão global, alvos e o ajuste de cada um."""
     if message.from_user.id != ADMIN_ID: return
     dados = ler_alvos_divulgacao()
     alvos = dados.get("alvos", [])
@@ -12245,7 +12297,7 @@ async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
     config_alvos = dados.get("config_alvos", {})
 
     texto = f"📊 <b>Status da Divulgação</b> [{status_pausa}]\n\n"
-    texto += f"🌍 <b>Padrão Global:</b>\n"
+    texto += "🌍 <b>Padrão Global:</b>\n"
     texto += f"Frequência: {freq_g} msgs/hora\nRepetições no Texto: {rep_int_g}x\nRéplicas por Disparo: {rep_msg_g}x\n\n"
     texto += "🎯 <b>Alvos Ativos:</b>\n"
     
@@ -12283,11 +12335,35 @@ async def pedir_alvo(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigDivulgacao.aguardando_alvos)
 async def salvar_alvo(message: types.Message, state: FSMContext):
-    novos_alvos = [alvo.strip() for alvo in message.text.split(",") if alvo.strip()]
-    if not novos_alvos:
+    """Valida e grava os alvos novos do SPAM principal."""
+    entradas = [alvo.strip() for alvo in message.text.split(",") if alvo.strip()]
+    if not entradas:
         await message.answer("Nenhum alvo detectado. Tente novamente:", reply_markup=teclado_cancelar)
         return
-        
+
+    # Mesma validação do Viral: cru, o link do Telegram Web entrava como URL e o
+    # Telethon falhava no disparo sem dizer o motivo.
+    novos_alvos = []
+    recusados = []
+    for entrada in entradas:
+        ok, alvo_formatado, nome = await validar_e_formatar_alvo(bot, entrada)
+        if ok:
+            novos_alvos.append(alvo_formatado)
+        else:
+            recusados.append(entrada)
+
+    if recusados:
+        await message.answer(
+            "⚠️ Não consegui validar:\n" + "\n".join(f"• <code>{r}</code>" for r in recusados) +
+            "\n\n<i>Use o ID numérico, o link t.me ou a URL do Telegram Web. "
+            "Para grupos privados, a conta do userbot precisa estar dentro.</i>",
+            parse_mode="HTML"
+        )
+
+    if not novos_alvos:
+        await message.answer("Nenhum alvo válido. Tente novamente:", reply_markup=teclado_cancelar)
+        return
+
     dados = ler_alvos_divulgacao()
     dados["alvos"].extend(novos_alvos)
     dados["alvos"] = list(dict.fromkeys(dados["alvos"]))
@@ -12313,6 +12389,7 @@ async def pedir_exclusao(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigDivulgacao.aguardando_exclusao_alvo)
 async def processar_exclusao(message: types.Message, state: FSMContext):
+    """Exclui o alvo pelo número (e o ajuste personalizado dele)."""
     if not message.text.isdigit():
         await message.answer("Por favor, digite apenas o NÚMERO do alvo.", reply_markup=teclado_cancelar)
         return
@@ -12324,6 +12401,7 @@ async def processar_exclusao(message: types.Message, state: FSMContext):
     if 0 <= indice < len(alvos):
         removido = alvos.pop(indice)
         dados["alvos"] = alvos
+        dados.get("config_alvos", {}).pop(removido, None)
         salvar_alvos_divulgacao(dados)
         if EXIBIR_LOGS: logger.info(f"🗑️ Alvo removido com sucesso: {removido}")
         await message.answer(f"Alvo '{removido}' excluído com sucesso!", reply_markup=obter_teclado_configuracoes_gerais())
@@ -12338,6 +12416,7 @@ async def iniciar_edicao_spam(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigDivulgacao.aguardando_tipo_edicao, F.text.in_(["Global 🌍", "Por Alvo 🎯"]))
 async def selecionar_tipo_edicao(message: types.Message, state: FSMContext):
+    """Edição do padrão global ou de um alvo: pede os três valores ou o número do alvo."""
     is_global = message.text == "Global 🌍"
     await state.update_data(edicao_global=is_global)
     
@@ -12406,6 +12485,7 @@ async def selecionar_alvo_edicao(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigDivulgacao.aguardando_valores_unificados)
 async def salvar_valores_unificados(message: types.Message, state: FSMContext):
+    """Grava frequência, repetições e réplicas (global ou do alvo escolhido)."""
     import re
     match = re.match(r"^(\d+)\s*,\s*(\d+)\s*,\s*(\d+)$", message.text.strip())
     
@@ -12444,6 +12524,7 @@ async def salvar_valores_unificados(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigDivulgacao.menu_principal, F.text == "Forçar Disparo Agora 🚀")
 async def acionar_disparo_imediato(message: types.Message):
+    """Marca forcar_disparo; o userbot vê e dispara a rajada em até 5 s."""
     dados = ler_alvos_divulgacao()
     if dados.get("pausado", False):
         await message.answer("⚠️ <b>Ação Bloqueada:</b> O SPAM Principal está <b>PAUSADO</b>. Retome-o antes de tentar disparos manuais.", parse_mode="HTML")
@@ -12454,8 +12535,9 @@ async def acionar_disparo_imediato(message: types.Message):
     if EXIBIR_LOGS: logger.info("🚀 Comando de disparo forçado enviado para o arquivo JSON.")
     await message.answer("🚀 <b>Disparo Imediato Acionado!</b>\nO Userbot detectará o comando e enviará a rajada de convites em até 5 segundos.", parse_mode="HTML", reply_markup=teclado_opcoes_divulgacao)
 
-# --- LÓGICA DE GERENCIAMENTO DE DIVULGAÇÃO (CANAL VIRAL) ---
+# --- SPAM do Viral (Espião) ---
 def ler_alvos_divulgacao_viral():
+    """Config do SPAM do Viral; completa repetições e réplicas que faltarem."""
     padrao = {"alvos": [], "frequencia_por_hora": 0, "pausado": False, "forcar_disparo": False, "repeticoes_internas": 6, "replicas_mensagem": 5}
     dados = ler_config_bd("alvos_divulgacao_viral", padrao, arquivo_legado="alvos_divulgacao_viral.json")
     
@@ -12477,6 +12559,7 @@ def salvar_alvos_divulgacao_viral(dados):
 
 @dp.message(F.text == "SPAM do Espião 📢", StateFilter("*"))
 async def gerenciar_divulgacao_viral(message: types.Message, state: FSMContext):
+    """Painel do SPAM do Viral: padrão global, alvos e o ajuste de cada um."""
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("📢 Acessando o painel de SPAM do Canal Viral...")
     dados = ler_alvos_divulgacao_viral()
@@ -12488,7 +12571,7 @@ async def gerenciar_divulgacao_viral(message: types.Message, state: FSMContext):
     config_alvos = dados.get("config_alvos", {})
 
     texto = f"📊 <b>Status da Divulgação do Viral</b> [{status_pausa}]\n\n"
-    texto += f"🌍 <b>Padrão Global:</b>\n"
+    texto += "🌍 <b>Padrão Global:</b>\n"
     texto += f"Frequência: {freq_g} msgs/hora\nRepetições no Texto: {rep_int_g}x\nRéplicas por Disparo: {rep_msg_g}x\n\n"
     texto += "🎯 <b>Alvos Ativos:</b>\n"
     
@@ -12526,13 +12609,14 @@ async def pedir_alvo_viral(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigDivulgacaoViral.aguardando_alvos)
 async def salvar_alvo_viral(message: types.Message, state: FSMContext):
+    """Valida e grava os alvos novos do SPAM do Viral."""
     entradas = [alvo.strip() for alvo in message.text.split(",") if alvo.strip()]
     if not entradas:
         await message.answer("Nenhum alvo detectado. Tente novamente:", reply_markup=teclado_cancelar)
         return
 
-    # ✅ CORREÇÃO: o alvo era gravado cru. Link do Telegram Web ia parar no banco
-    # como URL e o Telethon não resolve isso — o disparo falhava sem explicação.
+    # Valida e converte para o ID: cru, o link do Telegram Web entrava como URL e o
+    # Telethon falhava no disparo sem dizer o motivo.
     novos_alvos = []
     recusados = []
     for entrada in entradas:
@@ -12580,6 +12664,7 @@ async def pedir_exclusao_viral(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigDivulgacaoViral.aguardando_exclusao_alvo)
 async def processar_exclusao_viral(message: types.Message, state: FSMContext):
+    """Exclui o alvo do Viral pelo número (e o ajuste personalizado dele)."""
     if not message.text.isdigit():
         await message.answer("Por favor, digite apenas o NÚMERO do alvo.", reply_markup=teclado_cancelar)
         return
@@ -12591,6 +12676,7 @@ async def processar_exclusao_viral(message: types.Message, state: FSMContext):
     if 0 <= indice < len(alvos):
         removido = alvos.pop(indice)
         dados["alvos"] = alvos
+        dados.get("config_alvos", {}).pop(removido, None)
         salvar_alvos_divulgacao_viral(dados)
         if EXIBIR_LOGS: logger.info(f"🗑️ Alvo viral removido com sucesso: {removido}")
         await message.answer(f"Alvo Viral '{removido}' excluído com sucesso!")
@@ -12673,6 +12759,7 @@ async def selecionar_alvo_edicao_viral(message: types.Message, state: FSMContext
 
 @dp.message(ConfigDivulgacaoViral.aguardando_valores_unificados)
 async def salvar_valores_unificados_viral(message: types.Message, state: FSMContext):
+    """Grava frequência, repetições e réplicas do Viral (global ou do alvo)."""
     import re
     match = re.match(r"^(\d+)\s*,\s*(\d+)\s*,\s*(\d+)$", message.text.strip())
     
@@ -12711,6 +12798,7 @@ async def salvar_valores_unificados_viral(message: types.Message, state: FSMCont
 
 @dp.message(ConfigDivulgacaoViral.menu_principal, F.text == "Forçar Disparo Viral 🚀")
 async def acionar_disparo_imediato_viral(message: types.Message):
+    """Marca forcar_disparo do Viral; o userbot vê e dispara a rajada."""
     dados = ler_alvos_divulgacao_viral()
     if dados.get("pausado", False):
         await message.answer("⚠️ <b>Ação Bloqueada:</b> O SPAM Viral está <b>PAUSADO</b>. Retome-o antes de tentar disparos manuais.", parse_mode="HTML")
@@ -12721,15 +12809,10 @@ async def acionar_disparo_imediato_viral(message: types.Message):
     if EXIBIR_LOGS: logger.info("🚀 Comando de disparo forçado enviado para o JSON do Viral.")
     await message.answer("🚀 <b>Disparo Imediato Viral Acionado!</b>\nO Userbot detectará o comando e enviará a rajada de convites.", parse_mode="HTML")
 
-# ==========================================================
-# --- SPAM POR ESCOPO (Grupo Público e Central de Achadinhos) ---
-# Um único conjunto de handlers atende os dois. O escopo ativo fica
-# guardado no FSM (`escopo_div`), então adicionar um terceiro painel
-# no futuro é só somar uma entrada neste dicionário.
-#
-# Defaults conservadores: 1 mensagem, 1 repetição, 1x/hora, nascendo
-# pausado. Os controles ficam todos no painel para calibrar.
-# ==========================================================
+# --- SPAM por escopo (Grupo Público e Central de Achadinhos) ---
+# Os mesmos handlers atendem os dois; o escopo aberto fica no FSM (escopo_div).
+# Outro painel é só mais uma entrada no dicionário. Padrão conservador: 1
+# mensagem, 1 repetição, 1x por hora, começando pausado.
 ESCOPOS_DIVULGACAO_PAINEL = {
     "publico": {
         "rotulo": "Grupo Público",
@@ -12746,6 +12829,7 @@ ESCOPOS_DIVULGACAO_PAINEL = {
 }
 
 def ler_alvos_divulgacao_escopo(escopo):
+    """Config do SPAM do escopo; completa as chaves que faltarem com o padrão."""
     conf = ESCOPOS_DIVULGACAO_PAINEL[escopo]
     padrao = {"alvos": [], "frequencia_por_hora": 1, "pausado": True,
               "forcar_disparo": False, "repeticoes_internas": 1, "replicas_mensagem": 1}
@@ -12770,6 +12854,7 @@ async def _escopo_div_atual(state: FSMContext):
     return escopo if escopo in ESCOPOS_DIVULGACAO_PAINEL else "publico"
 
 async def renderizar_painel_divulgacao(message: types.Message, state: FSMContext, escopo: str):
+    """Painel do SPAM do escopo: link divulgado, padrão, volume e alvos."""
     conf = ESCOPOS_DIVULGACAO_PAINEL[escopo]
     dados = ler_alvos_divulgacao_escopo(escopo)
     alvos = dados.get("alvos", [])
@@ -12779,8 +12864,7 @@ async def renderizar_painel_divulgacao(message: types.Message, state: FSMContext
     status_pausa = "⏸️ Pausado" if dados.get("pausado") else "▶️ Rodando"
     config_alvos = dados.get("config_alvos", {})
 
-    # Volume por disparo = réplicas x repetições internas. Explícito na tela
-    # para o número não surpreender depois.
+    # Volume por disparo = réplicas x repetições, mostrado na tela.
     volume = rep_msg_g * rep_int_g
 
     texto = f"📢 <b>SPAM · {conf['rotulo']}</b> [{status_pausa}]\n\n"
@@ -12817,7 +12901,7 @@ async def renderizar_painel_divulgacao(message: types.Message, state: FSMContext
     await state.set_state(ConfigDivulgacaoEscopo.menu_principal)
     await state.update_data(escopo_div=escopo)
 
-# --- ENTRADAS: um handler curto por escopo ---
+# Entradas: um handler por escopo
 @dp.message(F.text == "SPAM do Público 📢", StateFilter("*"))
 async def abrir_spam_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
@@ -12832,7 +12916,7 @@ async def abrir_spam_achadinhos(message: types.Message, state: FSMContext):
     await state.clear()
     await renderizar_painel_divulgacao(message, state, "achadinhos")
 
-# --- ADICIONAR ALVO ---
+# --- Adicionar alvo ---
 @dp.message(ConfigDivulgacaoEscopo.menu_principal, F.text == "Adicionar Alvo SPAM ➕")
 async def pedir_alvo_div(message: types.Message, state: FSMContext):
     await message.answer(
@@ -12850,8 +12934,7 @@ async def salvar_alvo_div(message: types.Message, state: FSMContext):
         await message.answer("Nenhum alvo detectado. Tente novamente:", reply_markup=teclado_cancelar)
         return
 
-    # ✅ Validação que hoje só existe no Viral. Sem ela o alvo entra cru no
-    # banco e o Telethon falha lá na frente sem dizer o motivo.
+    # Mesma validação do Viral: cru, o alvo falhava no Telethon sem dizer o motivo.
     novos_alvos, recusados = [], []
     for entrada in entradas:
         ok, alvo_formatado, nome = await validar_e_formatar_alvo(bot, entrada)
@@ -12881,7 +12964,7 @@ async def salvar_alvo_div(message: types.Message, state: FSMContext):
     await message.answer("Alvos adicionados com sucesso!")
     await renderizar_painel_divulgacao(message, state, escopo)
 
-# --- EXCLUIR ALVO ---
+# --- Excluir alvo ---
 @dp.message(ConfigDivulgacaoEscopo.menu_principal, F.text == "Excluir Alvo SPAM 🗑️")
 async def pedir_exclusao_div(message: types.Message, state: FSMContext):
     escopo = await _escopo_div_atual(state)
@@ -12919,7 +13002,7 @@ async def processar_exclusao_div(message: types.Message, state: FSMContext):
     else:
         await message.answer("Número inválido. Tente novamente:", reply_markup=teclado_cancelar)
 
-# --- EDITAR CONFIGURAÇÕES ---
+# --- Editar configurações ---
 @dp.message(ConfigDivulgacaoEscopo.menu_principal, F.text == "Editar Configs SPAM ⚙️")
 async def iniciar_edicao_div(message: types.Message, state: FSMContext):
     await message.answer("Deseja editar o Padrão Global ou configurar um Alvo Específico?", reply_markup=teclado_tipo_edicao)
@@ -12977,6 +13060,7 @@ async def selecionar_alvo_edicao_div(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigDivulgacaoEscopo.aguardando_valores_unificados)
 async def salvar_valores_div(message: types.Message, state: FSMContext):
+    """Grava os três valores; avisa quando o volume passa de 6 anúncios por disparo."""
     escopo = await _escopo_div_atual(state)
     match = re.match(r"^(\d+)\s*,\s*(\d+)\s*,\s*(\d+)$", message.text.strip())
     if not match:
@@ -13017,9 +13101,10 @@ async def salvar_valores_div(message: types.Message, state: FSMContext):
     await message.answer(msg_final, parse_mode="HTML")
     await renderizar_painel_divulgacao(message, state, escopo)
 
-# --- PAUSAR / RETOMAR ---
+# --- Pausar / retomar ---
 @dp.message(ConfigDivulgacaoEscopo.menu_principal, F.text.in_(["Pausar Divulgação ⏸️", "Retomar Divulgação ▶️"]))
 async def alternar_pausa_div(message: types.Message, state: FSMContext):
+    """Pausa ou retoma o SPAM do escopo (sem confirmação)."""
     escopo = await _escopo_div_atual(state)
     dados = ler_alvos_divulgacao_escopo(escopo)
     dados["pausado"] = not dados.get("pausado", False)
@@ -13029,9 +13114,10 @@ async def alternar_pausa_div(message: types.Message, state: FSMContext):
     await message.answer(f"✅ Divulgação <b>{estado_txt}</b>.", parse_mode="HTML")
     await renderizar_painel_divulgacao(message, state, escopo)
 
-# --- DISPARO MANUAL ---
+# --- Disparo manual ---
 @dp.message(ConfigDivulgacaoEscopo.menu_principal, F.text == "Forçar Disparo SPAM 🚀")
 async def acionar_disparo_div(message: types.Message, state: FSMContext):
+    """Marca forcar_disparo do escopo; o userbot vê em até 5 s."""
     escopo = await _escopo_div_atual(state)
     dados = ler_alvos_divulgacao_escopo(escopo)
     if dados.get("pausado", False):
@@ -13046,13 +13132,11 @@ async def acionar_disparo_div(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info(f"🚀 [SPAM/{escopo}] Disparo forçado gravado no banco.")
     await message.answer("🚀 <b>Disparo Imediato Acionado!</b>\nO Userbot detecta o comando em até 5 segundos.", parse_mode="HTML")
 
-# ==========================================================
-# --- CENTRAL DE AUTOMAÇÕES DO GRUPO PÚBLICO ---
-# Espelho da Central do Espião: hub com o status dos dois módulos
-# (SPAM externo + Rotinas internas) e um botão para cada.
-# ==========================================================
+# --- Central de Automações do Grupo Público ---
+# Como a do Espião: status do SPAM (fora do grupo) e das rotinas (dentro dele).
 @dp.message(F.text == "⚙️ Automações do Grupo Público\u200b", StateFilter("*"))
 async def menu_automacoes_publico(message: types.Message, state: FSMContext):
+    """Central de Automações do Grupo Público."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     if EXIBIR_LOGS: logger.info("⚙️ Acessando Central de Automações do Grupo Público.")
@@ -13072,8 +13156,7 @@ async def menu_automacoes_publico(message: types.Message, state: FSMContext):
 
 @dp.message(F.text == "Rotinas do Público ⏰", StateFilter("*"))
 async def abrir_rotinas_publico(message: types.Message, state: FSMContext):
-    """Atalho curto para o painel de rotinas que já existe, agora acessado
-    pela Central em vez do botão comprido no painel raiz."""
+    """Abre o painel de rotinas do Público pela Central."""
     if message.from_user.id != ADMIN_ID: return
     await gerenciar_rotina_publico(message, state)
 
@@ -13092,9 +13175,10 @@ async def voltar_para_painel_achadinhos(message: types.Message, state: FSMContex
     await painel_achadinhos(message, state)
 
 
-# --- LÓGICA DE MENSAGENS DE ROTINA ---
+# --- Mensagens de rotina do canal principal ---
 @dp.message(F.text == "Mensagens de Rotina ⏰")
 async def gerenciar_rotina(message: types.Message, state: FSMContext):
+    """Painel de rotinas do canal principal: janela e disparos por dia de cada uma."""
     if message.from_user.id != ADMIN_ID: return
     dados = ler_config_rotina()
     texto = "⏰ <b>Configuração de Janelas e Frequência</b>\n\n"
@@ -13110,7 +13194,6 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
         "promo_achadinhos": "Achadinhos VIP 🛍️"
     }
     
-    # Ordem de exibição forçada para organizar o painel
     ordem_exibicao = ["bom_dia", "incentivo", "link_grupo", "divulgar_gem", "promo_viral", "promo_publico", "promo_achadinhos", "boa_noite"]
     
     for tipo in ordem_exibicao:
@@ -13133,11 +13216,12 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
     
     texto += "Selecione o que deseja gerir abaixo:"
     await message.answer(texto, reply_markup=teclado_dinamico_rotina, parse_mode="HTML")
-    await state.update_data(menu_origem="principal") # ✅ Adicione esta linha exata aqui
+    await state.update_data(menu_origem="principal")
     await state.set_state(ConfigRotina.menu_principal)
 
 @dp.message(ConfigRotina.menu_principal, F.text.in_(["Editar Bom Dia ☀️", "Editar Boa Noite 🌙", "Editar Incentivo 🔥", "Editar Convite 🔗", "Editar Prompt GEM 🤖", "Editar Convite Viral 🚀", "Editar Promo Público 🗣️", "Editar Convite Afiliados 🚀", "Editar Convite do Grupo 🔗", "Editar Prompt GEM 🤖\u200b", "Editar Promo Público 👥", "Editar Convite (Próprio) 🔗", "Editar Promo Principal 🌟", "Editar Promo Viral 💥", "Editar Achadinhos 🛍️", "Editar Achadinhos 🛒", "Editar Achadinhos 🏪"]))
 async def pedir_horario_rotina(message: types.Message, state: FSMContext):
+    """Pede a janela (e a quantidade, se não for Bom Dia/Boa Noite) da rotina escolhida."""
     if EXIBIR_LOGS: logger.info(f"✏️ Iniciando edição da rotina: {message.text}")
     if EXIBIR_LOGS: logger.info(f"✏️ Processando edição da rotina selecionada: {message.text}")
     tipo_map = {
@@ -13162,7 +13246,6 @@ async def pedir_horario_rotina(message: types.Message, state: FSMContext):
     tipo = tipo_map[message.text]
     if EXIBIR_LOGS: logger.info(f"✅ Sucesso: Botão mapeado internamente para a chave '{tipo}'.")
     
-    # ✅ Lê as configurações atuais para criar os exemplos dinâmicos
     dados_atuais = ler_config_rotina()
     config_atual = dados_atuais.get(tipo, {"inicio": 6, "fim": 9, "frequencia": 1})
     inicio_ex = config_atual["inicio"]
@@ -13191,12 +13274,13 @@ async def pedir_horario_rotina(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigRotina.aguardando_novo_horario)
 async def salvar_horario_rotina(message: types.Message, state: FSMContext):
+    """Valida e grava a janela da rotina e refaz a grade de hoje do canal dela."""
     import re
     data = await state.get_data()
     tipo = data['tipo_edicao']
     
     if tipo in ["bom_dia", "boa_noite"]:
-        # ✅ Validação exclusiva para rotinas de disparo único
+        # Bom Dia e Boa Noite: só a janela; saem 1x por dia
         match = re.match(r"^(\d{1,2})-(\d{1,2})$", message.text.strip())
         if not match:
             await message.answer("Formato inválido! Use o formato exato como no exemplo: 6-9", reply_markup=teclado_cancelar)
@@ -13205,7 +13289,7 @@ async def salvar_horario_rotina(message: types.Message, state: FSMContext):
         inicio, fim = map(int, match.groups())
         freq = 1
     else:
-        # ✅ Validação completa para a rotina de incentivo
+        # Demais rotinas: janela e quantidade por dia
         match = re.match(r"^(\d{1,2})-(\d{1,2}),\s*(\d+)$", message.text.strip())
         if not match:
             await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-20, 3", reply_markup=teclado_cancelar)
@@ -13223,11 +13307,9 @@ async def salvar_horario_rotina(message: types.Message, state: FSMContext):
     
     if EXIBIR_LOGS: logger.info(f"✅ Configuração de {tipo} atualizada: {inicio}h até {fim}h, {freq}x ao dia.")
     
-    # Força o re-sorteio imediato para aplicar as novas regras hoje mesmo
+    # Sorteia de novo já hoje, só no canal da rotina editada
     origem = data.get("menu_origem")
 
-    # ✅ CORREÇÃO: o Grupo Público não tinha ramo próprio e caía no "else",
-    # jogando o usuário no menu do Canal Principal.
     if origem == "espiao":
         agendar_tarefas_diarias(escopo="viral")
         texto_ok = "✅ Configuração salva! Os novos horários do Canal Viral já foram sorteados e agendados para hoje."
@@ -13241,25 +13323,18 @@ async def salvar_horario_rotina(message: types.Message, state: FSMContext):
 
     await message.answer(texto_ok)
 
-    # ✅ Volta para o submenu "Editar Rotinas", permitindo editar outra rotina em seguida
+    # Fica no menu de rotinas para editar outra em seguida
     await state.update_data(menu_origem=origem)
     await state.set_state(ConfigRotina.menu_principal)
 
-    # 📋 GRUPO PÚBLICO: em vez do submenu de edição, sobe o painel COMPLETO de
-    # rotinas logo abaixo da confirmação. O gerenciar_rotina_publico relê o
-    # ler_config_rotina() do zero, então o quadro já sai com o valor recém-salvo.
-    # Mesma ação do botão "Voltar ao Menu Rotinas", só que automática.
+    # Público: mostra o painel completo de rotinas, já com o valor salvo (igual ao
+    # "Voltar ao Menu Rotinas"); os outros voltam ao submenu de edição.
     if origem == "publico":
-        try:
-            await gerenciar_rotina_publico(message, state)
-        except NameError:
-            # 🛡️ Rede de segurança idêntica à do voltar_menu_rotinas_dinamico:
-            # se a função sumir num refactor, o fluxo antigo assume no lugar.
-            await submenu_editar_rotinas(message, state)
+        await gerenciar_rotina_publico(message, state)
     else:
         await submenu_editar_rotinas(message, state)
 
-# --- SISTEMA DE GERENCIAMENTO DE FILA (INTERATIVO) ---
+# --- Gerenciar Fila de Postagens (canal principal) ---
 class GerenciarFilaFluxo(StatesGroup):
     menu_principal = State()
     aguardando_posicao_excluir = State()
@@ -13268,7 +13343,7 @@ class GerenciarFilaFluxo(StatesGroup):
     aguardando_nova_legenda = State()
     aguardando_posicao_reordenar = State()
     aguardando_nova_posicao = State()
-    aguardando_decisao_limiar = State() # ✅ NOVO: Estado de decisão de fronteira
+    aguardando_decisao_limiar = State()  # vídeo na divisa entre dois dias: qual data?
     aguardando_confirmacao_reordenar = State()
     aguardando_data_posicao = State()
     aguardando_posicao_numeracao = State()
@@ -13289,6 +13364,10 @@ teclado_gerenciar_fila = ReplyKeyboardMarkup(
 
 @dp.message(F.text == "Gerenciar Fila 📋", StateFilter("*"))
 async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
+    """
+    Gerenciar Fila: vídeos pendentes e os postados hoje, com o lote, a previsão e a hora
+    agendada, entre o Bom Dia e a Boa Noite.
+    """
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     if EXIBIR_LOGS: logger.info("📋 Acessando o painel de gerenciamento de fila...")
@@ -13299,7 +13378,7 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
     texto = "📋 <b>Gerenciador de Fila de Postagens</b>\n"
     texto += f"Total de vídeos agendados: <b>{len(fila)}</b>\n\n"
     
-    # --- CAPTURA DE BOM DIA / BOA NOITE ---
+    # Bom Dia e Boa Noite de hoje: o horário agendado ou o que já saiu
     from datetime import datetime
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
@@ -13342,20 +13421,19 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             is_postado = item.get("postado", False)
             data_postagem_str = item.get("data_postagem", "")
             
-            # 🛡️ PENTE FINO: Só exibe os vídeos PENDENTES ou os que foram POSTADOS HOJE
+            # Só os pendentes e os postados hoje
             if is_postado and data_postagem_str != hoje_str:
                 continue
             
-            # Identifica se o vídeo pertence ao dia de Hoje (para fins de exibição da divisória do Boa Noite)
+            # Vídeo de hoje? A divisória da Boa Noite separa hoje do resto.
             is_hoje = (data_adicao_str == "2000-01-01" or (data_adicao_str and data_adicao_str <= hoje_str))
             
-            # Se for o primeiro vídeo de "Amanhã" (ou além) e ainda não imprimimos a tampa de Boa Noite, imprime agora
             if not is_hoje and not is_postado and not imprimiu_bn:
                 texto += "━━━━━━━━━━━━━━━━━━\n"
                 texto += f"🌙 <b>Boa Noite ({data_dia_br}):</b> {hora_bn}\n\n"
                 imprimiu_bn = True
             
-            # Extrai Número do Vídeo e Nome do Item da Legenda HTML
+            # Número ("Vídeo N") e nome do item tirados da legenda
             match_video = re.search(r'(?i)Vídeo\s+\d+', legenda)
             match_item = re.search(r'📦\s*Item:\s*([^\n<]+)', legenda)
             
@@ -13382,18 +13460,15 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
                 else:
                     data_br = "Data desconhecida"
                     
-                # Define a Previsão de Postagem base
                 if is_pausado:
                     status_previsao = "Pausado 🛑"
                 elif data_adicao_str == "2000-01-01" or data_adicao_str <= hoje_str:
                     status_previsao = "Hoje 🟢"
                 else:
-                    from datetime import timedelta
-                    amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
-                    # ✅ CORREÇÃO MESTRE: Limite rígido. Qualquer data futura será tratada como Amanhã.
+                    # Toda data futura aparece como Amanhã (a data exata está no Lote)
                     status_previsao = "Amanhã 🟡"
 
-                # ✅ CORREÇÃO: Interrogação Silenciosa do Motor APENAS para vídeos de HOJE
+                # Hora exata só para os de hoje: a do job agendado
                 hora_agendada_str = ""
                 if status_previsao == "Hoje 🟢":
                     job_id_esperado = f"job_fila_postagem_{item.get('id')}"
@@ -13411,7 +13486,7 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             else:
                 texto += f"   └ Lote (Data-Alvo): {data_br} | Previsão: {status_previsao_final}\n\n"
                 
-        # Se terminou de varrer toda a fila e não encontrou vídeos de "Amanhã", a tampa do Boa Noite vai no final
+        # Sem vídeo de amanhã, a divisória da Boa Noite vai no fim
         if not imprimiu_bn:
             texto += "━━━━━━━━━━━━━━━━━━\n"
             texto += f"🌙 <b>Boa Noite ({data_dia_br}):</b> {hora_bn}\n\n"
@@ -13434,6 +13509,10 @@ async def sair_menu_fila(message: types.Message, state: FSMContext):
     await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
 
 async def aplicar_renumeracao_e_salvar(fila_ids_ordenada, message, state, numero_base=None):
+    """
+    Grava a ordem (prioridade) e renumera o "Vídeo N" das legendas em sequência, a partir
+    de numero_base ou do menor número da lista. Depois refaz a grade do principal.
+    """
     import re
     if EXIBIR_LOGS: logger.info("🔄 Reorganizando prioridades e numeração no SQLite...")
     
@@ -13476,16 +13555,15 @@ async def aplicar_renumeracao_e_salvar(fila_ids_ordenada, message, state, numero
         conexao.close()
 
         async with _lock_contador:
-            # ✅ CORREÇÃO MESTRE: O contador global SEMPRE herda o próximo número da cascata, 
-            # independentemente de ser maior ou menor. Isso garante sincronia total.
+            # O contador passa a ser o próximo da sequência, maior ou menor que o atual:
+            # o próximo vídeo criado continua a numeração da fila.
             salvar_contador(numero_atual_cascata)
             if EXIBIR_LOGS: logger.info(f"✅ Auto-correção do banco concluída. Novo contador global forçado para: {numero_atual_cascata}.")
 
-        # ✅ NOVO GATILHO INTELIGENTE: Aciona o recálculo automático da grade!
-        # Isso faz exatamente a mesma coisa que o botão "Atualizar Rotinas",
-        # garantindo que os horários sejam recalculados para respeitar a nova ordem da fila sem atropelos.
+        # Refaz a grade do principal (como o "Atualizar Rotinas") para os horários
+        # seguirem a nova ordem.
         if EXIBIR_LOGS: logger.info("🔄 Alteração na fila detectada. Acionando recálculo inteligente dos horários...")
-        agendar_tarefas_diarias(escopo="principal") # Garante que mexer na fila não reseta o canal viral
+        agendar_tarefas_diarias(escopo="principal")  # só o principal; Viral e Público ficam como estão
 
         await message.answer("✅ Operação concluída com sucesso!\n🔄 A fila e os horários foram sincronizados perfeitamente.")
         await menu_gerenciar_fila(message, state)
@@ -13493,24 +13571,23 @@ async def aplicar_renumeracao_e_salvar(fila_ids_ordenada, message, state, numero
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao organizar SQLite: {e}")
         await message.answer(f"❌ Erro interno ao salvar no banco: {e}")
 
-# ✅ NOVO: Muralha de Segurança - Trava todas as edições se a fila estiver vazia
 @dp.message(GerenciarFilaFluxo.menu_principal, F.text.in_(["Publicar Agora 🚀", "Excluir Vídeo 🗑️", "Editar Numeração 🔢", "Mover Posição ↕️", "Editar Legenda ✏️"]))
 async def trava_fila_vazia(message: types.Message, state: FSMContext):
+    """Botões da fila: sem vídeo pendente, avisa e volta; senão, segue para o fluxo do botão."""
     if message.from_user.id != ADMIN_ID: return
     
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
     
-    # Verifica se a fila está vazia ou se só tem vídeos já postados
     videos_pendentes = [item for item in fila if not item.get("postado", False)]
     
     if not videos_pendentes:
         if EXIBIR_LOGS: logger.warning(f"⚠️ Fila: Tentativa de usar '{message.text}' bloqueada (Fila vazia).")
         await message.answer(f"⚠️ <b>Ação Bloqueada:</b> A sua fila de vídeos está vazia no momento.\n\nNão há nenhum vídeo agendado para poder utilizar a função de {message.text.split(' ')[1]}.", parse_mode="HTML")
-        await menu_gerenciar_fila(message, state) # Recarrega o menu principal da fila
+        await menu_gerenciar_fila(message, state)
         return
         
-    # 🔁 Roteamento Inteligente (Se tiver vídeos, ele deixa passar para o handler correto)
+    # Há pendentes: segue para o fluxo do botão
     if message.text == "Excluir Vídeo 🗑️":
         await pedir_exclusao_fila(message, state)
     elif message.text == "Editar Legenda ✏️":
@@ -13566,6 +13643,10 @@ async def confirmar_posicao_exclusao_fila(message: types.Message, state: FSMCont
 
 @dp.message(GerenciarFilaFluxo.aguardando_confirmacao_exclusao)
 async def processar_exclusao_fila(message: types.Message, state: FSMContext):
+    """
+    Exclui o vídeo (e o arquivo, se nenhum outro usa) e renumera a fila a partir do menor
+    número de antes.
+    """
     if message.text != "Aprovar Exclusão ✅":
         await message.answer("Por favor, utilize os botões abaixo para aprovar ou cancelar a exclusão.")
         return
@@ -13645,6 +13726,7 @@ async def processar_posicao_editar_fila(message: types.Message, state: FSMContex
 
 @dp.message(GerenciarFilaFluxo.aguardando_nova_legenda)
 async def salvar_nova_legenda_fila(message: types.Message, state: FSMContext):
+    """Grava a legenda nova (com a formatação do Telegram)."""
     data = await state.get_data()
     posicao = data.get("posicao_edicao")
     nova_legenda = message.html_text 
@@ -13671,13 +13753,13 @@ async def salvar_nova_legenda_fila(message: types.Message, state: FSMContext):
         await menu_gerenciar_fila(message, state)
 
 async def pedir_reordenar_fila(message: types.Message, state: FSMContext):
+    """Mover Posição: pede a posição do vídeo; com 1 pendente, vai direto para a data."""
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
     
-    # Descobre quantos vídeos realmente faltam postar
     indices_pendentes = [i for i, item in enumerate(fila) if not item.get("postado", False)]
     
-    # 🚀 ATALHO INTELIGENTE: Se só existe 1 vídeo, pula as perguntas de posição!
+    # Só 1 pendente: não há posição para escolher, só a data
     if len(indices_pendentes) == 1:
         posicao_unica = indices_pendentes[0]
         await state.update_data(posicao_origem=posicao_unica, nova_posicao=posicao_unica)
@@ -13693,14 +13775,14 @@ async def pedir_reordenar_fila(message: types.Message, state: FSMContext):
             opcoes.append("Hoje 🟢")
         opcoes.append("Amanhã 🟡")
         
-        # Adiciona os próximos 3 dias para dar flexibilidade
+        # Hoje (se a Boa Noite não saiu), amanhã e os 3 dias seguintes
         for i in range(2, 5):
             d_futuro = agora + timedelta(days=i)
             opcoes.append(f"{d_futuro.strftime('%d/%m/%Y')} 🔵")
             
-        botoes = [[KeyboardButton(text=op)] for op in opcoes[:3]] # Primeira linha com 3 botões
+        botoes = [[KeyboardButton(text=op)] for op in opcoes[:3]]
         if len(opcoes) > 3:
-            botoes.append([KeyboardButton(text=op) for op in opcoes[3:]]) # Segunda linha com os restantes
+            botoes.append([KeyboardButton(text=op) for op in opcoes[3:]])
         botoes.append([KeyboardButton(text="Cancelar ❌")])
         
         teclado_escolha_data = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -13710,7 +13792,6 @@ async def pedir_reordenar_fila(message: types.Message, state: FSMContext):
         await state.set_state(GerenciarFilaFluxo.aguardando_data_posicao)
         return
 
-    # Comportamento normal se houver mais de 1 vídeo
     await message.answer("Digite o <b>NÚMERO</b> da posição atual do vídeo que deseja mover:", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(GerenciarFilaFluxo.aguardando_posicao_reordenar)
 
@@ -13747,6 +13828,10 @@ async def pedir_nova_posicao_fila(message: types.Message, state: FSMContext):
 
 @dp.message(GerenciarFilaFluxo.aguardando_nova_posicao)
 async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
+    """
+    Calcula a data do vídeo na posição nova pelos vizinhos; na divisa entre dois dias,
+    pergunta.
+    """
     if not message.text.isdigit():
         await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
         return
@@ -13759,7 +13844,7 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
     fila = fila_data.get("fila", [])
     
     if 0 <= posicao_origem < len(fila):
-        # ✅ TRAVA DE PROTEÇÃO: Impede mover vídeo para a posição de vídeos postados
+        # Não pode ocupar o lugar de um vídeo já postado
         if 0 <= nova_posicao < len(fila) and fila[nova_posicao].get("postado", False):
             await message.answer("⚠️ <b>Ação Bloqueada:</b> Você não pode mover um vídeo pendente para o lugar de um vídeo que já foi postado.\n\nEscolha uma posição livre abaixo dos postados:", parse_mode="HTML")
             return
@@ -13768,7 +13853,7 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         
         await state.update_data(nova_posicao=nova_posicao)
         
-        # 1. Simulação Perfeita: Removemos o item da posição original
+        # 1. Tira o vídeo da posição atual (numa cópia da fila)
         fila_simulada = fila.copy()
         item_movido = fila_simulada.pop(posicao_origem)
         
@@ -13782,7 +13867,7 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
             try: return f"{datetime.strptime(d_str, '%Y-%m-%d').strftime('%d/%m/%Y')} 🔵"
             except: return "Data Desconhecida"
         
-        # Se a fila ficou vazia (só havia 1 vídeo)
+        # Era o único vídeo: hoje, ou amanhã se a Boa Noite já saiu
         if len(fila_simulada) == 0:
             dados_rotina = ler_config_rotina()
             expediente_encerrado = dados_rotina.get("ultimo_boa_noite") == hoje_str
@@ -13791,7 +13876,7 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
             await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
             return
             
-        # 2. Inserção Virtual: Colocamos o item na nova posição para testar os vizinhos
+        # 2. Põe na posição nova para ver os vizinhos
         is_ultimo_item = False
         if nova_posicao >= len(fila_simulada):
             fila_simulada.append(item_movido)
@@ -13801,39 +13886,36 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
             fila_simulada.insert(nova_posicao, item_movido)
             nova_posicao_virtual = nova_posicao
             
-        # 3. Análise de Vizinhança e Detecção de Limiar
+        # 3. Data dos vizinhos
         date_prev = None
         date_next = None
         
         if is_ultimo_item:
             date_prev = fila_simulada[nova_posicao_virtual - 1].get("data_adicao", "2000-01-01")
             
-            # ✅ CORREÇÃO: Limite rígido. Se o penúltimo for Hoje, o próximo pode ser Amanhã.
-            # Se o penúltimo JÁ for Amanhã, o próximo TAMBÉM SERÁ Amanhã (Não existe "depois de amanhã").
+            # Fim da fila: o vizinho de baixo é amanhã (a fila não passa de amanhã).
             if date_prev == "2000-01-01" or date_prev <= hoje_str:
                 date_next = amanha_str
             else:
-                date_next = amanha_str # Trava a data no amanhã
+                date_next = amanha_str
                 
             if EXIBIR_LOGS: logger.info(f"🚧 Fila: Movimento para o final da fila. Limiar aberto gerado com trava diária: {date_prev} vs {date_next}.")
         else:
-            # Comportamento normal: O vídeo foi inserido no meio da fila.
+            # No meio da fila: os vizinhos reais, limitados a amanhã
             if nova_posicao_virtual > 0:
                 date_prev = fila_simulada[nova_posicao_virtual - 1].get("data_adicao", "2000-01-01")
                 
             if nova_posicao_virtual < len(fila_simulada) - 1:
                 date_next = fila_simulada[nova_posicao_virtual + 1].get("data_adicao", "2000-01-01")
                 
-            # ✅ CORREÇÃO: Garante que os vizinhos nunca ultrapassem o limite de Amanhã
             if date_prev and date_prev > amanha_str: date_prev = amanha_str
             if date_next and date_next > amanha_str: date_next = amanha_str
         
-        # 4. Verificação de Limiar (Aciona a Pergunta ao Usuário)
+        # 4. Vizinhos em dias diferentes: o usuário escolhe a data
         if date_prev and date_next:
             label_prev = format_date(date_prev)
             label_next = format_date(date_next)
             
-            # Se os rótulos de dia forem diferentes, detectamos um limiar!
             if label_prev != label_next:
                 await state.update_data(data_limiar_prev=date_prev, data_limiar_next=date_next)
                 
@@ -13853,7 +13935,7 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
                 await state.set_state(GerenciarFilaFluxo.aguardando_decisao_limiar)
                 return 
 
-        # 5. Se não houver limiar (ex: moveu dentro do mesmo dia)
+        # 5. Mesmo dia dos dois lados: herda a data do vizinho
         if date_prev: nova_data_adicao = date_prev
         elif date_next: nova_data_adicao = date_next
         else: nova_data_adicao = "2000-01-01"
@@ -13864,9 +13946,9 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         await message.answer("Erro de sincronização. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
 
-# ✅ NOVO: Handler que processa o clique no botão do Limiar
 @dp.message(GerenciarFilaFluxo.aguardando_decisao_limiar)
 async def processar_decisao_limiar(message: types.Message, state: FSMContext):
+    """Data escolhida na divisa entre dois dias."""
     texto = message.text
     
     if texto == "Cancelar ❌":
@@ -13908,11 +13990,11 @@ async def processar_decisao_limiar(message: types.Message, state: FSMContext):
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
     
-    # Continua o fluxo normalmente para a confirmação visual
     await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
 
 @dp.message(GerenciarFilaFluxo.aguardando_data_posicao)
 async def processar_data_posicao_fila(message: types.Message, state: FSMContext):
+    """Data escolhida no atalho de 1 vídeo."""
     texto = message.text
     if "Hoje" in texto or "Amanhã" in texto or "🔵" in texto:
         pass
@@ -13945,6 +14027,7 @@ async def processar_data_posicao_fila(message: types.Message, state: FSMContext)
     await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
 
 async def enviar_confirmacao_reordenar(message: types.Message, state: FSMContext, fila, posicao_origem, nova_posicao):
+    """Mostra a mudança de posição e a data nova e pede confirmação."""
     import re
     from datetime import datetime
     legenda = fila[posicao_origem].get("legenda", "")
@@ -13963,7 +14046,6 @@ async def enviar_confirmacao_reordenar(message: types.Message, state: FSMContext
     data = await state.get_data()
     nova_data_adicao = data.get("nova_data_adicao")
     
-    # Formata a data para ficar amigável na mensagem de confirmação
     if nova_data_adicao == "2000-01-01":
         data_amigavel = "Imediato/Hoje"
     else:
@@ -13971,19 +14053,20 @@ async def enviar_confirmacao_reordenar(message: types.Message, state: FSMContext
     
     texto = f"Você está prestes a alterar o agendamento do vídeo:\n📝 <i>{resumo}...</i>\n\n"
     
-    # Só exibe a mudança de posição se ela realmente mudou
+    # A posição só aparece se mudou (o atalho de 1 vídeo só muda a data)
     if posicao_origem != nova_posicao:
         texto += f"Da posição <b>{posicao_origem + 1}</b> ➡️ Para a posição <b>{nova_posicao + 1}</b>.\n"
         
     texto += f"🗓️ Nova Data Alvo: <b>{data_amigavel}</b>\n\n"
     texto += "Confirma essa alteração?"
     
-    if EXIBIR_LOGS: logger.info(f"↕️ Fila: Coleta finalizada. Pedindo confirmação para confirmar as alterações.")
+    if EXIBIR_LOGS: logger.info("↕️ Fila: Coleta finalizada. Pedindo confirmação para confirmar as alterações.")
     await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(GerenciarFilaFluxo.aguardando_confirmacao_reordenar)
 
 @dp.message(GerenciarFilaFluxo.aguardando_confirmacao_reordenar)
 async def processar_confirmacao_reordenar(message: types.Message, state: FSMContext):
+    """Grava a data nova, aplica a ordem e renumera."""
     if message.text != "Aprovar Mudança ✅":
         await message.answer("Por favor, clique em Aprovar ou Cancelar.")
         return
@@ -14008,7 +14091,7 @@ async def processar_confirmacao_reordenar(message: types.Message, state: FSMCont
             conexao.commit()
             conexao.close()
             
-            # ✅ CORREÇÃO: Se o vídeo foi empurrado para o futuro, remove a "bomba relógio" da memória de hoje
+            # Foi para depois de hoje: sai o job que o publicaria hoje
             agora = datetime.now(fuso_horario)
             hoje_str = agora.strftime("%Y-%m-%d")
             if nova_data_adicao != "2000-01-01" and nova_data_adicao > hoje_str:
@@ -14023,7 +14106,7 @@ async def processar_confirmacao_reordenar(message: types.Message, state: FSMCont
             
         fila_simulada.insert(nova_posicao, item_movido)
         
-        if EXIBIR_LOGS: logger.info(f"↕️ Fila: Confirmação recebida. Vídeo reordenado via SQLite.")
+        if EXIBIR_LOGS: logger.info("↕️ Fila: Confirmação recebida. Vídeo reordenado via SQLite.")
         
         fila_ids = [item["id"] for item in fila_simulada]
         await aplicar_renumeracao_e_salvar(fila_ids, message, state)
@@ -14068,6 +14151,7 @@ async def pedir_novo_numero_fila(message: types.Message, state: FSMContext):
 
 @dp.message(GerenciarFilaFluxo.aguardando_nova_numeracao)
 async def salvar_nova_numeracao_fila(message: types.Message, state: FSMContext):
+    """Renumera do vídeo escolhido até o fim, a partir do número digitado."""
     if not message.text.isdigit():
         await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
         return
@@ -14078,12 +14162,11 @@ async def salvar_nova_numeracao_fila(message: types.Message, state: FSMContext):
     
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
-    import re
     
     if 0 <= posicao < len(fila):
         if EXIBIR_LOGS: logger.info(f"🔄 Iniciando renumeração via SQLite a partir da posição {posicao+1}...")
         
-        # Pega a lista de IDs a partir da posição selecionada
+        # Renumera daqui até o fim da fila
         fila_ids_alvo = [item["id"] for item in fila[posicao:]]
         await aplicar_renumeracao_e_salvar(fila_ids_alvo, message, state, numero_base=novo_numero_inicial)
     else:
@@ -14132,9 +14215,12 @@ async def preparar_publicacao_imediata(message: types.Message, state: FSMContext
     else:
         await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
 
-# 🚀 CORREÇÃO: Vinculação do handler ao estado correto da FSM para processar o clique
 @dp.message(GerenciarFilaFluxo.aguardando_confirmacao_publicar)
 async def processar_publicacao_imediata(message: types.Message, state: FSMContext):
+    """
+    Publica agora um vídeo da fila no canal principal e marca CONCLUIDO. As outras cópias
+    do mesmo arquivo passam a usar o file_id do envio.
+    """
     if message.text != "Publicar Vídeo 🚀":
         await message.answer("Por favor, utilize os botões abaixo para aprovar ou cancelar a publicação.")
         return
@@ -14144,12 +14230,11 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
 
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
-    import re
     
     if posicao is not None and 0 <= posicao < len(fila):
         item = fila[posicao]
         
-        # 1. Preserva o número original do vídeo (ignora o contador global)
+        # Publica com a numeração que já está na legenda
         legenda_disparo = item.get("legenda", "")
         
         if EXIBIR_LOGS: logger.info(f"🚀 Iniciando antecipação do vídeo na posição {posicao+1}. Mantendo a numeração original.")
@@ -14160,10 +14245,10 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
         msg_status = await message.answer("📤 A preparar ficheiros e a publicar o vídeo agora mesmo... Aguarde.", reply_markup=teclado_cancelar)
         
         sucesso_upload = False
+        novo_file_id = None  # só existe quando sobe o arquivo do disco
         try:
-            # 2. Disparo imediato para o Telegram
             if caminho_video and os.path.exists(caminho_video):
-                # ✅ SEGUNDA TRAVA DE SEGURANÇA: Inspeção da extensão física
+                # Arquivo de imagem não sobe como vídeo
                 if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
                     if EXIBIR_LOGS: logger.warning("🚫 [Segurança] Disparo imediato abortado! O ficheiro é uma imagem.")
                     raise Exception("O ficheiro físico validado é uma imagem e não um vídeo.")
@@ -14221,7 +14306,7 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
         await message.answer("Erro de sincronização ou posição inválida. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
 
-# --- MOTOR DE PROCESSAMENTO DO ESPIÃO ---
+# --- Motor do Espião (fila de clonagem) ---
 def ler_fila_clonagem():
     padrao = {"fila": []}
     return ler_config_bd("fila_clonagem", padrao, arquivo_legado="fila_clonagem.json")
@@ -14230,6 +14315,12 @@ def salvar_fila_clonagem(dados):
     salvar_config_bd("fila_clonagem", dados)
 
 async def processar_fila_espiao(forcar=False):
+    """
+    Motor do Espião, de minuto em minuto: trata os atrasados, distribui os horários
+    dos clones pendentes (D+X, janela, espaçamento), recompacta a grade e publica no
+    máximo um clone vencido, com o nome do produto pela IA e o link de afiliado.
+    forcar=True (Forçar Postagens) solta todos os pendentes a partir de agora.
+    """
     dados_espiao = ler_alvos_espiao()
     canal_destino = dados_espiao.get("canal_destino")
     if not canal_destino: return 
@@ -14245,10 +14336,9 @@ async def processar_fila_espiao(forcar=False):
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
 
-    # --- 0. FAXINA E RESGATE DE ATRASADOS (anti-avalanche) ---
-    # Se o robô ficar fora do ar, os horários vencem sem ninguém publicar. Ao voltar,
-    # em vez de despejar tudo de uma vez, descartamos o que é velho demais e
-    # REAGENDAMOS o resto ao longo do que ainda resta do dia.
+    # --- 0. Atrasados (anti-avalanche) ---
+    # Robô fora do ar deixa horários vencerem. Na volta, não despeja tudo de uma vez:
+    # descarta o que é velho demais e redistribui o resto no que sobra do dia.
     LIMITE_DIAS_DESCARTE = 5
     corte_descarte = agora - timedelta(days=LIMITE_DIAS_DESCARTE)
     descartados = 0
@@ -14266,20 +14356,19 @@ async def processar_fila_espiao(forcar=False):
             fila_sobrevivente.append(item)
             continue
 
-        # ⏳ Tolerância: vencer agora é normal e vira publicação no bloco 2.
-        # Só é "atraso real" quem passou de 30 minutos sem ninguém publicar
-        # (sinal de que o robô esteve fora do ar).
+        # Vencer agora é normal (vira publicação no bloco 2). Atraso de verdade é mais de
+        # 30 min sem publicar, sinal de que o robô esteve fora do ar.
         TOLERANCIA_ATRASO_MIN = 30
         if hd_obj <= (agora - timedelta(minutes=TOLERANCIA_ATRASO_MIN)):
             if hd_obj < corte_descarte:
-                # 🗑️ Passou de 5 dias: perdeu a validade, sai da fila
+                # Mais de 5 dias de atraso: perdeu a validade, sai da fila (e do disco)
                 caminho = item.get("caminho_video")
                 if caminho and os.path.exists(caminho):
                     try: os.remove(caminho)
                     except Exception: pass
                 descartados += 1
                 continue
-            # ♻️ Venceu, mas ainda vale: zera o horário para ser redistribuído hoje
+            # Venceu, mas ainda vale: sem horário, entra na redistribuição de hoje
             item["horario_disparo"] = ""
             resgatados += 1
 
@@ -14293,13 +14382,13 @@ async def processar_fila_espiao(forcar=False):
             logger.info(f"🛟 [Espião] Anti-avalanche: {resgatados} clone(s) atrasado(s) reagendado(s) e "
                         f"{descartados} descartado(s) por passar de {LIMITE_DIAS_DESCARTE} dias.")
 
-    # --- 1. MOTOR MATEMÁTICO DE DISTRIBUIÇÃO ---
+    # --- 1. Distribuição dos horários ---
     itens_para_agendar = []
     
     for item in fila:
         if item.get("processado"): continue
         
-        # Se forçou descarga, limpa o horário para aplicar a catraca imediata
+        # Forçar Postagens: todos os pendentes perdem o horário e saem a partir de agora
         if forcar: item["horario_disparo"] = ""
         
         if not item.get("horario_disparo"):
@@ -14313,36 +14402,35 @@ async def processar_fila_espiao(forcar=False):
                 data_alvo_obj = data_cap_obj + timedelta(days=intervalo_dias)
                 dia_alvo = data_alvo_obj.strftime("%Y-%m-%d")
                 
-                # Resgata o vídeo se for para hoje, ou se estivermos puxando o gatilho
+                # Só os que já chegaram no dia (captura + D+X), ou todos se forçado
                 if dia_alvo <= hoje_str or forcar:
                     itens_para_agendar.append(item)
 
     if itens_para_agendar:
-        # ✅ ACIONANDO O NOVO MOTOR MATEMÁTICO CENTRALIZADO
         config_fila = {
             "inicio": inicio_janela,
             "fim": fim_janela,
             "modo": modo,
             "intervalo_dias": intervalo_dias,
-            # ⏱️ Espaçamento orgânico: 10 min ± 5 (de 5 a 15 min entre vídeos)
+            # Espaçamento orgânico: 10 min ± 5 entre vídeos
             "espacamento_base_min": 10,
             "espacamento_variacao_min": 5,
-            # 🗓️ O que não couber transborda para o dia seguinte; passando disso, descarta.
-            # ✅ CORREÇÃO: a margem precisa acompanhar o D+X da fila. Com 5 fixo, qualquer
-            # intervalo_dias maior que 5 fazia o vídeo nascer vencido e voltar sem horário.
-            "limite_dias_descarte": max(7, int(intervalo_dias) + 7),   # 🗓️ 7 dias de folga após a data-alvo
-            # 🔗 Horários já ocupados: o lote novo entra DEPOIS do último agendado,
-            # em vez de recomeçar do zero e se sobrepor ao que já existe.
+            # O que não cabe no dia passa para o seguinte; passando do limite, descarta. O
+            # limite acompanha o D+X: fixo em 5, atraso maior que 5 fazia o vídeo nascer
+            # vencido e voltar sem horário.
+            "limite_dias_descarte": max(7, int(intervalo_dias) + 7),
+            # Horários já ocupados: o lote novo entra depois do último agendado, sem
+            # se sobrepor.
             "horarios_ocupados": [
                 i.get("horario_disparo") for i in fila
                 if not i.get("processado") and i.get("horario_disparo")
             ]
         }
         
-        # O Motor Central aplica a regra de D+X, catraca anti-ban e espaçamento orgânico
+        # O motor central aplica o D+X, a janela e o espaçamento
         calcular_horarios_distribuicao(itens_para_agendar, config_fila, forcar)
         
-                # 🗑️ Remove da fila o que o motor marcou como velho demais
+        # Sai da fila (e do disco) o que o motor marcou como velho demais
         marcados = [i for i in fila_data.get("fila", []) if i.get("descartar_por_idade")]
         if marcados:
             for m in marcados:
@@ -14352,16 +14440,15 @@ async def processar_fila_espiao(forcar=False):
                     except Exception: pass
             fila_data["fila"] = [i for i in fila_data.get("fila", []) if not i.get("descartar_por_idade")]
             fila = fila_data["fila"]
-            if EXIBIR_LOGS: logger.info(f"🗑️ [Espião] {len(marcados)} clone(s) descartado(s): passariam de 5 dias desde a captura.")
+            if EXIBIR_LOGS: logger.info(f"🗑️ [Espião] {len(marcados)} clone(s) descartado(s): passariam de {config_fila['limite_dias_descarte']} dias desde a captura.")
 
         salvar_fila_clonagem(fila_data)
         if EXIBIR_LOGS: logger.info(f"📅 [Espião] Motor Central acionado! {len(itens_para_agendar)} clones organizados com sucesso.")
 
-    # --- 1.5. RECOMPACTAÇÃO DA GRADE ---
-    # Vídeo publicado, descartado ou removido na mão deixa um buraco que a
-    # esteira contínua nunca reaproveita. Aqui o que transbordou para a semana
-    # seguinte volta para os dias que ficaram com vaga. Só grava quando algo
-    # realmente andou, então rodar a cada ciclo não custa escrita à toa.
+    # --- 1.5. Recompactação ---
+    # Vídeo publicado, descartado ou removido deixa buraco na grade. O que tinha
+    # transbordado para dias seguintes volta para os dias com vaga. Só grava quando
+    # algo mudou.
     movidos_recompactacao = recompactar_horarios(fila, {
         "inicio": inicio_janela,
         "fim": fim_janela,
@@ -14375,7 +14462,7 @@ async def processar_fila_espiao(forcar=False):
             logger.info(f"🧲 [Espião] {len(movidos_recompactacao)} vídeo(s) antecipado(s) "
                         f"para dias que tinham vaga.")
 
-    # --- 2. MOTOR DE EXECUÇÃO (A Catraca Anti-Ban) ---
+    # --- 2. Publicação ---
     itens_para_disparar = []
     for item in fila:
         if not item.get("processado") and item.get("horario_disparo"):
@@ -14385,8 +14472,8 @@ async def processar_fila_espiao(forcar=False):
                     itens_para_disparar.append(item)
             except Exception: pass
 
-    # 🚦 RATE LIMIT: no máximo UM disparo por ciclo (o job roda a cada 1 minuto).
-    # Mesmo que 50 vídeos vençam juntos, sai um por minuto — nunca em rajada.
+    # No máximo um por ciclo (o job roda a cada minuto): mesmo com 50 vencidos, sai
+    # um por minuto.
     if len(itens_para_disparar) > 1:
         itens_para_disparar.sort(key=lambda i: i.get("horario_disparo", ""))
         if EXIBIR_LOGS: logger.info(f"🚦 [Espião] {len(itens_para_disparar)} clones vencidos. Publicando 1 por ciclo.")
@@ -14401,26 +14488,24 @@ async def processar_fila_espiao(forcar=False):
         return
 
     for item_pendente in itens_para_disparar:
-                # 🤫 TRAVA DE SILÊNCIO (VIRAL) — versão não destrutiva
-        # ANTES: qualquer rotina a ±15 min empurrava a FILA INTEIRA para frente.
-        # Como há ~29 rotinas/dia (uma a cada 29 min), as zonas de 30 min se encostavam
-        # e formavam uma parede contínua: a fila era empurrada eternamente e nada saía.
-        # AGORA: a janela é curta e o vídeo NÃO é reagendado — só espera o próximo ciclo.
+        # Trava de silêncio: nenhum clone a 2 min de uma rotina do Viral; o vídeo não é
+        # reagendado, só espera o próximo ciclo. Janela curta de propósito: com ~29
+        # rotinas por dia, zonas de ±15 min se encostariam e a fila nunca sairia.
         JANELA_SILENCIO_MIN = 2
 
         conflito_silencio = False
-        rotinas_virais = ["job_rotina_promo_principal", "job_rotina_link_grupo_viral", "job_rotina_divulgar_gem_viral"]
 
         for job in scheduler.get_jobs():
-            if any(rv in job.id for rv in rotinas_virais) and getattr(job, 'next_run_time', None):
+            # Todas as rotinas do Viral (ROTINAS_VIRAIS), e só elas.
+            eh_rotina_viral = job.id.startswith("job_rotina_") and descobrir_escopo_job(job.id) == "viral"
+            if eh_rotina_viral and getattr(job, 'next_run_time', None):
                 tempo_rotina = job.next_run_time.astimezone(fuso_horario)
                 if abs((agora - tempo_rotina).total_seconds() / 60) <= JANELA_SILENCIO_MIN:
                     conflito_silencio = True
                     break
 
         if conflito_silencio:
-            # Só adia ESTE ciclo. O horário do vídeo continua intacto e ele sai
-            # no próximo minuto, assim que a rotina passar.
+            # Só pula este ciclo: o horário fica e o clone sai assim que a rotina passar.
             if EXIBIR_LOGS: logger.info(f"🤫 [Espião] Rotina do Viral a menos de {JANELA_SILENCIO_MIN} min. Aguardando o próximo ciclo.")
             return
             
@@ -14451,9 +14536,8 @@ async def processar_fila_espiao(forcar=False):
                 "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
                 "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
             )
-            # ♻️ REAPROVEITA a análise já feita na captura (loop do motor_userbot).
-            # Sem isto o mesmo vídeo seria analisado DUAS vezes: uma para preencher
-            # o nome na fila e outra aqui, dobrando o consumo de cota do Gemini.
+            # Reaproveita a análise feita na captura (motor_userbot): sem isso o vídeo seria
+            # analisado duas vezes, gastando cota do Gemini à toa.
             texto_ia = item_pendente.get("legenda_ia")
             if texto_ia:
                 if EXIBIR_LOGS: logger.info(f"♻️ [Espião] Nome reaproveitado da análise antecipada ({item_id}).")
@@ -14464,8 +14548,8 @@ async def processar_fila_espiao(forcar=False):
             registrar_erro_json(f"processar_fila_espiao IA: {e}", origem="espiao.py")
             texto_ia = None
 
-        # 🧠 RETENTATIVA DA IA: 429/503 costumam ser passageiros. Em vez de publicar
-        # um texto genérico na primeira falha, o clone volta para a fila e tenta de novo.
+        # Retentativa: 429/503 do Gemini costumam passar. Em vez de publicar sem nome na
+        # primeira falha, o clone volta para a fila e tenta de novo daqui a 30 min.
         MAX_TENTATIVAS_IA = 3
         INTERVALO_RETENTATIVA_MIN = 30
 
@@ -14474,7 +14558,7 @@ async def processar_fila_espiao(forcar=False):
             if tentativas < MAX_TENTATIVAS_IA:
                 novo_horario = (agora + timedelta(minutes=INTERVALO_RETENTATIVA_MIN)).strftime("%Y-%m-%d %H:%M:%S")
                 for f_item in fila_data.get("fila", []):
-                    if f_item.get("id_unico") == item_pendente.get("id_unico"):
+                    if f_item.get("id") == item_pendente.get("id"):
                         f_item["tentativas_ia"] = tentativas
                         f_item["horario_disparo"] = novo_horario
                         break
@@ -14494,7 +14578,7 @@ async def processar_fila_espiao(forcar=False):
             legenda_postagem = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_final}"
             if hashtags: legenda_postagem += f"\n\n<i>{hashtags}</i>"
         else:
-            # 🔗 Reserva: sem texto nenhum, apenas o link já convertido para afiliado
+            # Sem texto da IA: só o link de afiliado
             legenda_postagem = link_final
         
         try:
@@ -14503,11 +14587,11 @@ async def processar_fila_espiao(forcar=False):
             arquivo = FSInputFile(caminho_video)
             msg_enviada = await bot.send_video(chat_id=canal_destino, video=arquivo, caption=legenda_postagem, parse_mode="HTML")
             
-            # ✅ CORREÇÃO DUPLA: Grava o ID do Destino e a Legenda Nova (com o Nome da IA) no banco de dados!
+            # Guarda o ID da mensagem no destino e a legenda publicada (com o nome da IA)
             item_pendente["msg_postada_id"] = msg_enviada.message_id
             item_pendente["legenda"] = legenda_postagem
             
-            registrar_ultimo_post(canal_destino, "video")   # 🚦 Intercalação
+            registrar_ultimo_post(canal_destino, "video")  # Intercalação
             if EXIBIR_LOGS: logger.info(f"✅ Clone {item_id} publicado com sucesso! ID: {msg_enviada.message_id}")
             try: os.remove(caminho_video)
             except: pass
@@ -14521,10 +14605,11 @@ async def processar_fila_espiao(forcar=False):
         item_pendente["horario_postagem"] = agora.strftime("%H:%M")
         salvar_fila_clonagem(fila_data)
         
-        # 🛡️ Catraca limitadora de segurança (Previne banimento no D+0)
+        # Folga entre publicações do mesmo ciclo (no forçado, um atrás do outro)
         await asyncio.sleep(15)
 
 async def sincronizar_financeiro_horario():
+    """De hora em hora: pedidos dos últimos 3 dias na API da Shopee para o banco."""
     if EXIBIR_LOGS: logger.info("⏰ [Financeiro] Iniciando sincronização em background com a API Shopee...")
     
     conversoes = await buscar_dados_financeiros_shopee(3)
@@ -14533,6 +14618,10 @@ async def sincronizar_financeiro_horario():
         if EXIBIR_LOGS: logger.info("✅ [Financeiro] Varredura horária concluída. Banco de Pedidos atualizado.")
 
 async def varredura_retroativa_pendentes():
+    """
+    Madrugada: com pedido ainda pendente no banco, busca de novo desde o mais antigo
+    (até 90 dias) para fechar confirmados e cancelados.
+    """
     if EXIBIR_LOGS: logger.info("🌙 [Pente Fino] Iniciando varredura de madrugada para caçar pedidos pendentes antigos...")
     
     pedidos_db = ler_banco_pedidos()
@@ -14558,7 +14647,7 @@ async def varredura_retroativa_pendentes():
         return
         
     dias_retroativos = (agora - data_mais_antiga).days + 1
-    # Trava em 90 dias absolutos para respeitar a barreira da API "last 3 months"
+    # A API só devolve os últimos 3 meses: no máximo 90 dias (e no mínimo 5).
     if dias_retroativos > 90: dias_retroativos = 90
     if dias_retroativos < 5: dias_retroativos = 5
     
@@ -14570,11 +14659,12 @@ async def varredura_retroativa_pendentes():
         if EXIBIR_LOGS: logger.info("✅ [Pente Fino] Varredura profunda concluída! Pendentes antigos consolidados (Confirmados ou Cancelados).")
 
 async def checkup_diario_grupos():
+    """Relatório diário ao admin: canais do Espião e rotas do Espelhador com falha de acesso."""
     if EXIBIR_LOGS: logger.info("🚀 Consolidando relatório de saúde diário do sistema...")
     
     relatorio = "📊 <b>Relatório Diário de Saúde dos Robôs</b>\n\n"
     
-    # 1. Auditoria passiva do Espião (lendo o status do banco SQLite)
+    # 1. Espião: canais com falha de acesso (status gravado pelo userbot)
     try:
         dados_espiao = ler_alvos_espiao()
             
@@ -14587,7 +14677,7 @@ async def checkup_diario_grupos():
             if info.get("status") == "erro":
                 erros_espiao += 1
                 
-        relatorio += f"👁️ <b>Espião de Afiliados:</b>\n"
+        relatorio += "👁️ <b>Espião de Afiliados:</b>\n"
         relatorio += f"✅ Ativos: {len(alvos) - erros_espiao}\n"
         relatorio += f"🔴 Com falhas de acesso: {erros_espiao}\n"
     except Exception as e:
@@ -14596,7 +14686,7 @@ async def checkup_diario_grupos():
 
     relatorio += "\n"
     
-    # 2. Auditoria passiva do Espelhador
+    # 2. Espelhador: rotas com falha
     try:
         with open("espelhos_config.json", "r", encoding="utf-8") as f:
             dados_espelho = json.load(f)
@@ -14604,7 +14694,7 @@ async def checkup_diario_grupos():
         rotas = dados_espelho.get("rotas", [])
         erros_espelho = [r for r in rotas if r.get("status_verificacao") == "erro"]
         
-        relatorio += f"🔄 <b>Espelhador de Canais:</b>\n"
+        relatorio += "🔄 <b>Espelhador de Canais:</b>\n"
         relatorio += f"✅ Rotas ativas: {len(rotas) - len(erros_espelho)}\n"
         relatorio += f"🔴 Rotas quebradas: {len(erros_espelho)}\n"
     except FileNotFoundError:
@@ -14618,46 +14708,9 @@ async def checkup_diario_grupos():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"⚠️ Erro ao disparar a mensagem do relatório diário: {e}")
 
-# =========================================================
-# COLE O CALLBACK AQUI, ANTES DO MAIN()
-# =========================================================
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-@dp.callback_query(F.data == 'forcar_clones_espiao')
-async def forcar_clones_fila(callback: types.CallbackQuery):
-    if EXIBIR_LOGS:
-        logger.info("🚀 Iniciando processo de forçar disparo dos clones...")
-        
-    try:
-        dados = ler_fila_clonagem()
-        fila = dados.get("fila", [])
-            
-        quantidade = len([i for i in fila if not i.get("processado")])
-        
-        if quantidade == 0:
-            if EXIBIR_LOGS: logger.info("⚠️ A fila de clonagem já está vazia.")
-            await callback.answer("A fila de clonagem já está vazia!", show_alert=True)
-            return
-            
-        if EXIBIR_LOGS: logger.info(f"📂 {quantidade} vídeos encontrados na fila. Solicitando confirmação...")
-            
-        markup_confirmacao = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="Aprovar ✅", callback_data="executar_forcar_clones"),
-                    InlineKeyboardButton(text="Cancelar ❌", callback_data="cancelar_operacao")
-                ]
-            ]
-        )
-        
-        await callback.message.edit_text(f"Você tem {quantidade} vídeos retidos na fila de clonagem.\nDeseja forçar o processamento imediato de todos?", reply_markup=markup_confirmacao)
-        
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler fila de clonagem: {e}")
-        await callback.answer("Erro ao acessar a fila de clonagem.", show_alert=True)
-
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text.in_(["Pausar Robô Moderador ⏸️", "Retomar Robô Moderador ▶️", "Ativar Robô Moderador ⚙️", "Desativar Robô Moderador 🛑"]))
 async def pedir_confirmacao_toggle(message: types.Message, state: FSMContext):
+    """Pausar/retomar o Robô Moderador do Grupo Público: pede confirmação."""
     if message.from_user.id != ADMIN_ID: return
     config = ler_submissao_config()
     if not config.get("grupo_id"):
@@ -14683,6 +14736,7 @@ async def pedir_confirmacao_toggle(message: types.Message, state: FSMContext):
 
 @dp.message(SubmissaoAdminFluxo.aguardando_confirmacao_toggle)
 async def processar_toggle_submissoes(message: types.Message, state: FSMContext):
+    """Liga ou desliga a moderação automática das submissões."""
     if not message.text or "Confirmar" not in message.text:
         await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
         return
@@ -14710,9 +14764,10 @@ async def processar_toggle_submissoes(message: types.Message, state: FSMContext)
 
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Configurações do Robô de Rotina do Grupo Público ⏰")
 async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
+    """Rotinas do Grupo Público: tópicos alvo, janela e disparos por dia de cada uma, e a pausa."""
     dados = ler_config_rotina()
     
-    # --- LÓGICA DE EXIBIÇÃO DOS TÓPICOS DE ROTINA ---
+    # Nomes dos tópicos das rotinas: cache, nome salvo, papel do tópico (postagem/escuta), Geral ou "Tópico N"
     config_sub = ler_submissao_config()
     grupo_id = config_sub.get("grupo_id")
     grupo_id_str = str(grupo_id) if grupo_id else ""
@@ -14766,7 +14821,6 @@ async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
     else:
         display_rotinas = "\n   ✅ <i>Chat Geral (Padrão)</i>"
 
-    # --- MONTAGEM DO TEXTO ---
     texto = "⏰ <b>Rotinas do Grupo Público</b>\n\n"
     texto += f"📢 <b>Alvos das Rotinas:</b>{display_rotinas}\n"
     texto += "<i>(Use o botão \"Gerenciar Alvos de Postagem 🎯\" para ativar ou desativar estes locais)</i>\n\n"
@@ -14796,11 +14850,13 @@ async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigRotina.menu_principal, F.text == "Voltar ao Painel Público 🔙")
 async def voltar_pub_rotinas(message: types.Message, state: FSMContext):
+    """Volta ao painel do Grupo Público."""
     await state.clear()
     await painel_submissoes(message, state)
 
 @dp.message(SubmissaoAdminFluxo.menu_principal, F.text == "Definir Tópicos de Moderação 💬")
 async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
+    """Tópicos de Moderação: escolha entre o tópico de escuta e o de postagem."""
     if EXIBIR_LOGS: logger.info("⚙️ Acessando submenu modular de configuração de tópicos.")
     
     teclado = ReplyKeyboardMarkup(
@@ -14825,12 +14881,13 @@ async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
 
 @dp.message(SubmissaoAdminFluxo.aguardando_selecao_edicao_grupo)
 async def selecionar_campo_grupo_publico(message: types.Message, state: FSMContext):
+    """Pede o link do tópico escolhido, com exemplo da configuração atual."""
     if message.text == "Voltar às Configurações 🔙":
         await state.set_state(SubmissaoAdminFluxo.menu_principal)
         await submenu_robo_moderador(message, state)
         return
 
-    # ✅ NOVO: o exemplo é montado com a configuração atual do próprio usuário
+    # O exemplo usa o grupo e os tópicos atuais
     config_atual = ler_submissao_config()
     grupo_id_atual = str(config_atual.get("grupo_id") or "")
 
@@ -14867,6 +14924,10 @@ async def selecionar_campo_grupo_publico(message: types.Message, state: FSMConte
 
 @dp.message(SubmissaoAdminFluxo.aguardando_novo_valor_grupo)
 async def receber_novo_valor_grupo(message: types.Message, state: FSMContext):
+    """
+    Lê o tópico (escuta/postagem: grupo e tópico; rotina: lista de tópicos) e pede
+    confirmação. Sem conseguir validar no Telegram, extrai os IDs do link.
+    """
     if message.text == "Cancelar ❌":
         await message.answer("Operação cancelada.")
         await menu_edicao_grupo_publico(message, state)
@@ -14903,8 +14964,8 @@ async def receber_novo_valor_grupo(message: types.Message, state: FSMContext):
             if "t.me/c/" in texto_usuario:
                 so_num = re.search(r't\.me/c/(\d+)', texto_usuario)
                 grupo_id = f"-100{so_num.group(1)}" if so_num else texto_usuario
-                # 🔗 Mesmo bug: em link de MENSAGEM (.../<topico>/<mensagem>) o
-                # último segmento é a mensagem, não o tópico.
+                # Link de mensagem (.../<tópico>/<mensagem>): o tópico é o segundo número, não o
+                # último.
                 m_link = re.search(r't\.me/c/(\d+)/(\d+)(?:/(\d+))?', texto_usuario)
                 topico_id = m_link.group(2) if m_link else "0"
             else:
@@ -14920,9 +14981,8 @@ async def receber_novo_valor_grupo(message: types.Message, state: FSMContext):
             topicos_finais = []
             texto_conf = "✅ Você definiu que as rotinas irão para o <b>Chat Geral (Padrão)</b>.\n\nDeseja confirmar esta alteração?"
         else:
-            # 🔗 Segunda porta para a MESMA config 'topicos_rotina'. Usa o mesmo
-            # extrair_id_topico do "Gerenciar Alvos" para os dois caminhos não
-            # divergirem de novo.
+            # Outra entrada para a mesma config 'topicos_rotina': usa o extrair_id_topico do
+            # "Gerenciar Alvos" para os dois caminhos lerem o link do mesmo jeito.
             grupo_id_rot = str(ler_submissao_config().get("grupo_id") or "")
             topicos_finais = []
             problemas = []
@@ -14956,6 +15016,7 @@ async def receber_novo_valor_grupo(message: types.Message, state: FSMContext):
 
 @dp.message(SubmissaoAdminFluxo.aguardando_confirmacao_grupo)
 async def confirmar_salvamento_grupo(message: types.Message, state: FSMContext):
+    """Grava o tópico confirmado na config de submissão."""
     if message.text == "Cancelar ❌":
         await message.answer("Operação cancelada.")
         await menu_edicao_grupo_publico(message, state)
@@ -14986,9 +15047,7 @@ async def confirmar_salvamento_grupo(message: types.Message, state: FSMContext):
     
     await painel_submissoes(message, state)
 
-# ==========================================
-# GERADOR DO BOTÃO FIXO (Aberto para Todos) 📌
-# ==========================================
+# --- Painel fixo de submissão (aberto a todos) ---
 from aiogram.filters import Command
 
 TEXTO_BOTAO_OFERTAS = (
@@ -15003,11 +15062,12 @@ TEXTO_BOTAO_OFERTAS = (
     "<i>✅ As ofertas aprovadas pela nossa IA vão para o mural com os seus créditos!</i>"
 )
 
-# ✅ NOVO: mantém o painel de submissão SEMPRE como a última mensagem do tópico.
-# Ele é apagado e recriado embaixo, então nunca sobe na tela nem some.
+# O painel de submissão fica sempre como a última mensagem do tópico: é recriado
+# embaixo e o anterior, apagado.
 _lock_botao_ofertas = asyncio.Lock()
 
 async def reenviar_botao_ofertas():
+    """Recria o painel fixo de submissão no fim do tópico de escuta e o fixa."""
     async with _lock_botao_ofertas:
         config = ler_submissao_config()
         grupo_id = config.get("grupo_id")
@@ -15037,7 +15097,7 @@ async def reenviar_botao_ofertas():
             if EXIBIR_LOGS: logger.error(f"❌ [Painel Fixo] Falha ao reenviar o painel de submissão: {e}")
             return
 
-        # Só apaga o painel anterior DEPOIS que o novo já está no ar (evita ficar sem painel)
+        # Só apaga o anterior depois que o novo está no ar: o tópico nunca fica sem painel
         msg_antiga = config.get("msg_botao_ofertas")
         if msg_antiga and msg_antiga != msg.message_id:
             try: await bot.delete_message(chat_id=grupo_id, message_id=int(msg_antiga))
@@ -15046,8 +15106,7 @@ async def reenviar_botao_ofertas():
         config["msg_botao_ofertas"] = msg.message_id
         salvar_submissao_config(config)
 
-        # 📌 Fixa no topo do tópico, sem notificação. O pin do painel anterior cai
-        # sozinho quando aquela mensagem é apagada logo acima.
+        # Fixa sem notificação. O pin do anterior cai sozinho quando ele é apagado.
         try:
             await bot.pin_chat_message(
                 chat_id=grupo_id,
@@ -15061,33 +15120,33 @@ async def reenviar_botao_ofertas():
 
 @dp.message(F.pinned_message)
 async def limpar_aviso_fixacao(message: types.Message):
-    # 📌 "Fulano fixou uma mensagem" não interessa a ninguém e vai se acumulando
-    # no tópico a cada recriação do painel. Some assim que chega.
+    """Apaga o aviso de serviço "fixou uma mensagem"."""
+    # O aviso "fixou uma mensagem" se acumularia a cada recriação do painel.
     try: await message.delete()
     except Exception: pass
 
 @dp.message(Command("botao_ofertas"))
 async def gerar_botao_permanente(message: types.Message):
+    """/botao_ofertas: recria o painel fixo de submissão e apaga o comando."""
     if EXIBIR_LOGS: 
         logger.info(f"📥 Solicitada criação do botão público no tópico. Usuário: {message.from_user.id}")
     
     await reenviar_botao_ofertas()
             
-    # Remove a mensagem de comando para manter o tópico limpo
     try: 
         await message.delete()
     except Exception: 
         pass
 
-# ==========================================
-# FLUXO DO USUÁRIO: MODERAÇÃO GUIADA POR BOTÕES 🧠
-# ==========================================
+# --- Submissão pública: painel guiado por botões ---
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import asyncio
 
 def checar_permissao_topico(message: types.Message):
-    """Valida se a mensagem pertence ao grupo e tópico configurados para submissão pública."""
+    """
+    (True, config) se a mensagem é do tópico de escuta do Grupo Público, com a moderação
+    ligada e de um usuário (não bot); senão (False, None).
+    """
     config = ler_submissao_config()
     if not config.get("ativo"): 
         return False, None
@@ -15102,11 +15161,11 @@ def checar_permissao_topico(message: types.Message):
     if str(message.message_thread_id or 0) != str(topico_envio): 
         return False, None
     if message.from_user.is_bot: 
-        return False, None # Filtra apenas outros bots para evitar loops
+        return False, None  # outros bots: evita loop
         
     return True, config
 
-# ⏱️ CRONÔMETRO DO WIZARD
+# Cronômetro do painel
 TEMPO_LIMITE_WIZARD = 180          # segundos por passo (reinicia a cada etapa)
 INTERVALO_CRONOMETRO_WIZARD = 15   # de quanto em quanto a contagem é atualizada na tela
 
@@ -15140,8 +15199,8 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
         restante -= INTERVALO_CRONOMETRO_WIZARD
 
         data = await state.get_data()
-        # O usuário avançou de passo (ou cancelou): este cronômetro se encerra.
-        # Logado porque uma saída muda aqui é indistinguível de uma task morta.
+        # Mudou de passo ou cancelou: este cronômetro acaba. Fica no log porque uma saída
+        # muda aqui pareceria uma task morta.
         sessao_atual = data.get("sessao_wizard_id")
         if sessao_atual != sessao_id:
             if EXIBIR_LOGS:
@@ -15164,10 +15223,8 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
                 reply_markup=teclado
             )
         except Exception as e:
-            # ⚠️ Antes era 'pass' mudo. Se a edição falha sempre, a task continua
-            # viva e girando, mas o painel congela na tela — indistinguível de
-            # task morta. "message is not modified" é normal e segue silencioso;
-            # qualquer outra falha vira log.
+            # Falha que se repete congela o painel na tela com a task viva: vira log.
+            # "message is not modified" é normal e fica quieto.
             if "not modified" not in str(e).lower():
                 if EXIBIR_LOGS:
                     logger.warning(f"⚠️ [Cronômetro] Falha ao editar painel {message_id} ({restante}s restantes): {type(e).__name__}: {e}")
@@ -15178,13 +15235,12 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
     if data.get("sessao_wizard_id") != sessao_id:
         return
 
-    # 🛟 RESGATE: com vídeo + pelo menos 1 link válido (Shopee ou TikTok), o trabalho
-    # do membro NÃO vai para o lixo. Abrimos uma pergunta extra de 1 minuto antes.
+    # Já tem vídeo e pelo menos um link: em vez de descartar, pergunta antes (1 min).
     if data.get("video_file_id") and (data.get("link_shopee") or data.get("link_tiktok")):
         await abrir_confirmacao_expiracao(chat_id, message_id, thread_id, state)
         return
 
-    # ⌛ Expirou: limpa a memória, apaga o painel e avisa (o aviso também se autodestrói)
+    # Expirou sem material suficiente: limpa a sessão, apaga o painel e avisa (o aviso some sozinho)
     await state.clear()
     try:
         await bot.delete_message(chat_id, message_id)
@@ -15205,9 +15261,7 @@ async def cronometro_sessao_wizard(chat_id, message_id, thread_id, state: FSMCon
     except Exception:
         pass
 
-# ==========================================
-# 🛟 RESGATE PÓS-EXPIRAÇÃO (pergunta extra de 1 minuto)
-# ==========================================
+# --- Resgate depois do prazo (1 minuto extra) ---
 TEMPO_CONFIRMACAO_EXPIRACAO = 60        # segundos para o membro decidir
 INTERVALO_CRONOMETRO_CONFIRMACAO = 10   # de quanto em quanto a contagem é atualizada
 
@@ -15245,8 +15299,8 @@ async def abrir_confirmacao_expiracao(chat_id, message_id, thread_id, state: FSM
     if not dono_id:
         return
 
-    # A confirmação vira a sessão ativa: cronômetros antigos morrem sozinhos e,
-    # se o membro voltar a mexer no painel, esta contagem também morre sozinha.
+    # A confirmação vira a sessão ativa: os cronômetros antigos param e, se o membro
+    # mexer no painel, esta contagem também para.
     sessao_conf = f"conf_{message_id}_{int(datetime.now(fuso_horario).timestamp() * 1000)}"
     await state.update_data(sessao_wizard_id=sessao_conf)
 
@@ -15272,7 +15326,7 @@ async def cronometro_confirmacao_expiracao(chat_id, message_id, thread_id, state
         restante -= INTERVALO_CRONOMETRO_CONFIRMACAO
 
         data = await state.get_data()
-        # Respondeu, cancelou ou mandou item novo: esta contagem morre em silêncio
+        # Respondeu, cancelou ou mandou item novo: esta contagem para
         if data.get("sessao_wizard_id") != sessao_conf:
             return
 
@@ -15291,31 +15345,24 @@ async def cronometro_confirmacao_expiracao(chat_id, message_id, thread_id, state
     if data.get("sessao_wizard_id") != sessao_conf:
         return
 
-            # ⌛ Nem respondeu: em vez de jogar fora uma oferta pronta, publicamos direto.
+    # Sem resposta: publica a oferta pronta em vez de jogá-la fora.
     if EXIBIR_LOGS: logger.info(f"🚀 [Wizard] Prazo de resgate esgotado. Publicando automaticamente a oferta de {data.get('dono_wizard')}.")
     await wizard_publicar_oferta(None, state, chat_forcado=chat_id, mencao_forcada=data.get("mencao_wizard"))
 
-# 1. GATILHO INICIAL: Qualquer mensagem fora de ordem aciona o botão de Iniciar
-# ==========================================================
-# --- 🔎 BUSCADOR DE PRODUTOS ---
-# O membro escreve o que procura no tópico e o robô devolve três opções
-# da Shopee com o link de afiliado.
-#
-# Por que TRÊS e não "o menor preço": a API varre só a Shopee e faz busca
-# por palavra-chave, não casamento de produto. Não dá para afirmar que algo
-# é o menor preço do mercado nem que dois resultados são o mesmo item.
-# Mostrar a faixa e deixar o membro escolher é honesto e mais útil.
-# ==========================================================
+# --- Buscador de produtos ---
+# O membro escreve o que procura no tópico e recebe três opções da Shopee com link
+# de afiliado. Três, e não "o menor preço": a API busca por palavra-chave só na
+# Shopee, então não dá para afirmar menor preço do mercado nem que dois resultados
+# são o mesmo item. Melhor mostrar as opções e a faixa e deixar o membro escolher.
 BUSCA_GRUPO_ID = -1004460669033
-BUSCA_TOPICO_ID = 1          # 1 = General. Use 0 para desligar o buscador.
+BUSCA_TOPICO_ID = 1  # 1 = General; 0 desliga o buscador
 BUSCA_LIMPAR_AVISOS = True   # apaga "Fulano entrou no grupo" do General
 BUSCA_LIMITE_DIARIO = 10     # por membro
 BUSCA_MIN_CARACTERES = 3
-BUSCA_NOTA_MINIMA = 4.0      # descarta vitrine podre
+BUSCA_NOTA_MINIMA = 4.0  # descarta anúncio com nota baixa
 BUSCA_RESULTADOS_API = 30
-# ⚠️ Só os N primeiros da ordem de RELEVÂNCIA entram no sorteio dos 3 ângulos.
-# Sem esta janela o "mais barato" alcança a cauda e devolve acessório: buscando
-# "fone bluetooth" por preço crescente, o topo é capinha de fone a R$ 2,90.
+# Só os N primeiros por relevância entram na escolha das três opções. Sem esse
+# corte o "mais barato" pega a cauda: em "fone bluetooth", capinha a R$ 2,90.
 BUSCA_JANELA_RELEVANCIA = 25
 BUSCA_VENDAS_MINIMAS = 20    # corta anúncio novo sem histórico
 BUSCA_DEBOUNCE_PAINEL = 5    # minutos de silêncio antes de recriar o painel
@@ -15323,6 +15370,7 @@ BUSCA_MINUTOS_APAGAR_FALHA = 3  # busca que não deu em nada some junto com a pe
 
 
 def _iniciar_tabela_buscas():
+    """Cria a tabela do limite diário de buscas por membro."""
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         conexao.execute("""
@@ -15340,6 +15388,7 @@ def _iniciar_tabela_buscas():
 
 
 def contar_buscas_hoje(user_id):
+    """Buscas do membro hoje (0 se der erro)."""
     try:
         hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -15353,6 +15402,7 @@ def contar_buscas_hoje(user_id):
 
 
 def registrar_busca(user_id):
+    """Soma uma busca ao membro no dia."""
     try:
         hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
@@ -15471,6 +15521,10 @@ def escolher_destaques(ofertas):
 
 
 async def montar_resposta_busca(termo, ofertas, total_bruto):
+    """
+    Texto da resposta: as três opções com link de afiliado, preço, nota e vendas, e a
+    faixa de preço das opções. None se nada passou no filtro.
+    """
     escolhas, menor, maior = escolher_destaques(ofertas)
     if not escolhas:
         return None
@@ -15506,9 +15560,8 @@ async def montar_resposta_busca(termo, ofertas, total_bruto):
         linhas.append("")
 
     if menor and maior and maior > menor:
-        # "entre as opções que separei" e não "nesta busca": o intervalo é dos
-        # itens que passaram no filtro, não dos 30 que a API devolveu. Dizer
-        # "nesta busca" seria impreciso.
+        # "Entre as opções que separei": a faixa é só dos itens que passaram no filtro,
+        # não dos 30 que a API devolveu.
         linhas.append(f"<i>Entre as opções que separei, os preços vão de {formatar_brl(menor)} a {formatar_brl(maior)}.</i>")
 
     return "\n".join(linhas)
@@ -15524,7 +15577,7 @@ TEXTO_PAINEL_BUSCA = (
     "💰 <b>Mais barato</b> — para gastar pouco\n"
     "⭐ <b>Melhor avaliado</b> — para não errar\n"
     "🔥 <b>Maior desconto</b> — a pechincha da busca\n\n"
-    "Mostro preço, nota, quantidade vendida e a faixa de preço da busca inteira.\n"
+    "Mostro preço, nota, quantidade vendida e a faixa de preço das opções que separei.\n"
     "Quando o produto tem variação, aparece a faixa (ex: R$ 18,98 a R$ 23,98) — "
     "assim você não se surpreende ao abrir o link.\n\n"
     f"<b>Limite:</b> {BUSCA_LIMITE_DIARIO} buscas por dia, por pessoa. Zera à meia-noite.\n\n"
@@ -15532,13 +15585,14 @@ TEXTO_PAINEL_BUSCA = (
     "é a melhor seleção dentro do que a Shopee tem para o seu termo.</i>"
 )
 
-# 📌 Mantém o painel do buscador SEMPRE como a última mensagem do tópico.
-# Mesmo padrão do painel de submissão: cria embaixo, só então apaga o antigo.
+# O painel do buscador fica sempre como a última mensagem do tópico (mesmo esquema
+# do painel de submissão).
 _lock_painel_busca = asyncio.Lock()
 _task_debounce_busca = None
 
 
 async def reenviar_painel_busca():
+    """Recria o painel do buscador no fim do tópico e o fixa. True se publicou."""
     async with _lock_painel_busca:
         if not BUSCA_TOPICO_ID:
             return
@@ -15552,9 +15606,9 @@ async def reenviar_painel_busca():
             )
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ [Painel Busca] Falha ao reenviar: {e}")
-            return
+            return False
 
-        # Só apaga o anterior DEPOIS que o novo está no ar: nunca fica sem painel.
+        # Só apaga o anterior depois que o novo está no ar: o tópico nunca fica sem painel
         registro = ler_config_bd("painel_busca_msg", {})
         antiga = registro.get("id")
         if antiga and antiga != msg.message_id:
@@ -15570,9 +15624,11 @@ async def reenviar_painel_busca():
             if EXIBIR_LOGS: logger.warning(f"⚠️ [Painel Busca] Não consegui fixar: {e}")
 
         if EXIBIR_LOGS: logger.info(f"📌 [Painel Busca] Painel recriado no fim do tópico (ID {msg.message_id}).")
+        return True
 
 
 async def _esperar_e_reenviar_busca(segundos):
+    """Espera o debounce e recria o painel (cancelada se vier outra busca)."""
     try:
         await asyncio.sleep(segundos)
     except asyncio.CancelledError:
@@ -15605,12 +15661,14 @@ async def _apagar_busca_falha(chat_id, ids, minutos=BUSCA_MINUTOS_APAGAR_FALHA):
             await bot.delete_message(chat_id=chat_id, message_id=msg_id)
         except Exception:
             pass
-    if EXIBIR_LOGS: logger.info(f"🧹 [Busca] Tentativa sem resultado removida do tópico.")
+    if EXIBIR_LOGS: logger.info("🧹 [Busca] Tentativa sem resultado removida do tópico.")
 
 
 def eh_topico_da_busca(message: types.Message) -> bool:
-    """⚠️ Mensagem no General NÃO traz message_thread_id: vem None. Um filtro
-    '== 1' nunca dispararia lá. O 'or 1' normaliza None para 1."""
+    """
+    Mensagem no tópico do buscador. No General o message_thread_id vem None (um
+    filtro '== 1' nunca casaria): o 'or 1' trata None como 1.
+    """
     if not BUSCA_TOPICO_ID:
         return False
     return (message.message_thread_id or 1) == BUSCA_TOPICO_ID
@@ -15623,9 +15681,12 @@ def eh_topico_da_busca(message: types.Message) -> bool:
     StateFilter(None),
 )
 async def buscador_produtos(message: types.Message):
-    """⚠️ Os filtros ficam TODOS no decorator de propósito. Se o handler casasse
-    qualquer mensagem de grupo e filtrasse no corpo, ele consumiria o update e
-    o interceptar_envio_livre do Grupo Público nunca rodaria."""
+    """
+    Busca na Shopee pedida no tópico: três opções com link de afiliado e limite diário
+    por membro (o admin não conta). Os filtros ficam no decorator: se o handler casasse
+    qualquer mensagem de grupo e filtrasse no corpo, consumiria o update e o
+    interceptar_envio_livre do Grupo Público nunca rodaria.
+    """
     termo = (message.text or "").strip()
 
     if termo.startswith("/"):
@@ -15655,8 +15716,8 @@ async def buscador_produtos(message: types.Message):
     procurando = await message.reply("🔎 Procurando na Shopee...")
 
     try:
-        # sort_type=1 = relevância. Com o default (2, mais vendidos) a busca
-        # devolvia campeões de venda que só encostavam no termo.
+        # sort_type=1 = relevância. O padrão (2, mais vendidos) trazia campeões de venda
+        # que mal encostavam no termo.
         ofertas = await buscar_ofertas_shopee(termo, limite=BUSCA_RESULTADOS_API, sort_type=1)
         texto = await montar_resposta_busca(termo, ofertas, len(ofertas))
         
@@ -15676,7 +15737,7 @@ async def buscador_produtos(message: types.Message):
         await procurando.edit_text(texto, parse_mode="HTML", disable_web_page_preview=True)
         if EXIBIR_LOGS: logger.info(f"✅ [Busca] Resposta entregue para '{termo}'.")
 
-        # 📌 O painel volta para o fim do tópico quando a conversa esfriar.
+        # O painel volta para o fim do tópico quando a conversa esfriar
         agendar_painel_busca()
 
     except Exception as e:
@@ -15707,54 +15768,37 @@ async def limpar_avisos_entrada(message: types.Message):
 
 @dp.message(Command("painelbusca"), StateFilter("*"))
 async def publicar_painel_busca(message: types.Message):
-    """Publica e fixa o texto de orientação no tópico do buscador."""
+    """Publica (ou recria no fim do tópico) o painel fixo do buscador."""
     if message.from_user.id != ADMIN_ID: return
 
     if not BUSCA_TOPICO_ID:
         await message.answer("⚠️ Defina o <code>BUSCA_TOPICO_ID</code> no código antes.", parse_mode="HTML")
         return
 
-    texto = (
-        "🔎 <b>Buscador de Produtos</b>\n\n"
-        "Escreva aqui o que você está procurando e eu vasculho a Shopee para você.\n\n"
-        "<b>Como funciona</b>\n"
-        "Mande só o nome do produto. Quanto mais específico, melhor o resultado:\n"
-        "• <code>fone bluetooth</code> → genérico demais\n"
-        "• <code>fone bluetooth com cancelamento de ruido</code> → bem melhor\n\n"
-        "<b>O que você recebe</b>\n"
-        "Três opções, porque nem todo mundo quer a mesma coisa:\n"
-        "💰 <b>Mais barato</b> — para gastar pouco\n"
-        "⭐ <b>Melhor avaliado</b> — para não errar\n"
-        "🔥 <b>Maior desconto</b> — a pechincha da busca\n\n"
-        "Mostro também a faixa de preço da busca inteira, para você ter noção do que é caro e do que é barato.\n\n"
-        f"<b>Limite:</b> {BUSCA_LIMITE_DIARIO} buscas por dia, por pessoa. Zera à meia-noite.\n\n"
-        "<i>Busco no catálogo da Shopee. Não é comparação com outras lojas — "
-        "é a melhor seleção dentro do que a Shopee tem para o seu termo.</i>"
-    )
-
-    alvo_topico = None if BUSCA_TOPICO_ID == 1 else BUSCA_TOPICO_ID
-    msg = await bot.send_message(BUSCA_GRUPO_ID, texto, parse_mode="HTML",
-                                 message_thread_id=alvo_topico, disable_web_page_preview=True)
-    try:
-        await bot.pin_chat_message(BUSCA_GRUPO_ID, msg.message_id, disable_notification=True)
-        await message.answer("✅ Painel do buscador publicado e fixado.")
-    except Exception as e:
-        await message.answer(f"⚠️ Publiquei, mas não consegui fixar: {e}")
+    # Mesmo painel do debounce, rastreado: ao recriar, o anterior é apagado.
+    if await reenviar_painel_busca():
+        await message.answer("✅ Painel do buscador publicado e fixado no fim do tópico.")
+    else:
+        await message.answer("⚠️ Não consegui publicar o painel do buscador. Veja o log.")
 
 
 @dp.message(F.chat.type.in_(["supergroup", "group"]), StateFilter(None))
 async def interceptar_envio_livre(message: types.Message, state: FSMContext):
+    """
+    Mensagem solta no tópico de escuta: sai do tópico. Se já é vídeo ou link, abre o painel
+    com o item marcado; senão, mostra o botão de iniciar por 15 s.
+    """
 
     permitido, config = checar_permissao_topico(message)
     if not permitido: 
         return
 
-    # ✅ Detecta se o envio já é aproveitável ANTES de apagar a mensagem
+    # Vê se o envio já serve antes de apagar a mensagem
     video_id = message.video.file_id if message.video else None
     link_shopee = extrair_link_wizard(message.text, PADRAO_LINK_SHOPEE) if message.text else None
     link_tiktok = extrair_link_wizard(message.text, PADRAO_LINK_TIKTOK) if message.text else None
 
-    # Remove o envio avulso para evitar poluição visual
+    # Envio avulso sai do tópico
     try: 
         await message.delete()
     except Exception: 
@@ -15762,8 +15806,7 @@ async def interceptar_envio_livre(message: types.Message, state: FSMContext):
 
     mencao = montar_mencao_usuario(message.from_user)
 
-    # 🚀 ABERTURA AUTOMÁTICA: o membro mandou algo válido sem clicar no botão.
-    # Em vez de perder o envio, o painel abre já com o item marcado.
+    # Mandou algo válido sem tocar no botão: o painel abre já com o item marcado.
     if video_id or link_shopee or link_tiktok:
         if EXIBIR_LOGS: logger.info(f"🚀 [Painel Automático] Envio válido detectado de {message.from_user.id}. Abrindo painel.")
         await criar_painel_submissao(
@@ -15799,23 +15842,24 @@ async def interceptar_envio_livre(message: types.Message, state: FSMContext):
         parse_mode="HTML"
     )
     
-    # Remove a notificação temporária após 15 segundos
     await asyncio.sleep(15)
     try: 
         await aviso.delete()
     except Exception: 
         pass
 
-    # ✅ Devolve o painel para o fim do tópico
+    # Devolve o painel fixo para o fim do tópico
     await reenviar_botao_ofertas()
 
-# 🔒 TRAVA DE AUTORIA: os botões carregam o ID de quem abriu a sessão
+# Os botões levam o ID de quem abriu a sessão: só o dono mexe
 def teclado_wizard_cancelar(dono_id):
+    """Botão Cancelar com o ID do dono da sessão."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ Cancelar", callback_data=f"cancelar_wizard:{dono_id}")]
     ])
 
 def teclado_wizard_tiktok(dono_id):
+    """Botões Pular TikTok e Cancelar com o ID do dono da sessão."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Pular TikTok ⏭️", callback_data=f"pular_tiktok:{dono_id}")],
         [InlineKeyboardButton(text="❌ Cancelar Tudo", callback_data=f"cancelar_wizard:{dono_id}")]
@@ -15841,7 +15885,7 @@ async def bloquear_intruso_wizard(callback: types.CallbackQuery):
         return True
     return False
 
-# 🔗 VALIDAÇÃO DE LINKS DO PAINEL (mesmo padrão usado pelo espelhador)
+# Links aceitos no painel (mesmos padrões do espelhador)
 import re as _re_wizard
 PADRAO_LINK_SHOPEE = _re_wizard.compile(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee|shopee\.com\.br)/[^\s]+', _re_wizard.IGNORECASE)
 PADRAO_LINK_TIKTOK = _re_wizard.compile(r'(?:https?://)?(?:www\.)?(?:vm\.tiktok\.com|vt\.tiktok\.com|tiktok\.com)/[^\s]+', _re_wizard.IGNORECASE)
@@ -15856,7 +15900,7 @@ def extrair_link_wizard(texto, padrao):
         link = "https://" + link
     return link
 
-# 2. PAINEL DINÂMICO DE SUBMISSÃO (dashboard com checkboxes)
+# --- Painel de submissão: texto e teclado ---
 def montar_mencao_usuario(user):
     """Menção clicável: usa o @ quando existe, senão um link pelo ID."""
     if getattr(user, "username", None):
@@ -15870,7 +15914,7 @@ def montar_texto_painel(data):
     tem_shopee = bool(data.get("link_shopee"))
     tem_tiktok = bool(data.get("link_tiktok"))
 
-    # ✅ Publicável com o vídeo + pelo menos 1 link (Shopee OU TikTok)
+    # Publicável: vídeo + pelo menos um link
     pronto = tem_video and (tem_shopee or tem_tiktok)
 
     texto = "📋 <b>Painel de Submissão de Oferta</b>\n"
@@ -15905,8 +15949,8 @@ def montar_teclado_painel(dono_id, data):
 
     linhas = []
 
-    # ✅ O painel detecta tudo sozinho, então botão de "enviar" só confundiria:
-    # ele não abre seletor de arquivo nenhum. Ficam apenas as ações reais.
+    # O painel detecta os envios sozinho; um botão de "enviar" não abriria seletor
+    # nenhum e só confundiria. Ficam as ações reais.
     if pronto:
         linhas.append([InlineKeyboardButton(text="Concluir Oferta ✅", callback_data=f"wz_concluir:{dono_id}")])
 
@@ -15935,19 +15979,19 @@ async def renderizar_painel(chat_id, thread_id, state: FSMContext):
 
     await armar_cronometro_wizard(chat_id, msg_id, thread_id, state, texto, teclado)
 
-# 🛡️ ANTI-ÓRFÃO: o cronômetro e o estado FSM vivem na memória do processo.
-# Todo restart mata as sessões, mas as mensagens de painel ficam no grupo para sempre.
-# Por isso registramos cada painel aberto no banco e varremos na inicialização.
-LIMITE_REGISTRO_PAINEIS = 200   # era 50, e num grupo movimentado isso enchia entre reinícios
+# Anti-órfão: cronômetro e FSM vivem na memória; um restart mata as sessões, mas
+# os painéis ficam no grupo. Cada painel aberto é registrado no banco e varrido
+# na inicialização.
+LIMITE_REGISTRO_PAINEIS = 200  # acima disso o mais antigo sai do registro (e vira órfão)
 
 def registrar_painel_aberto(chat_id, message_id):
+    """Registra o painel aberto para a varredura anti-órfão da próxima subida."""
     try:
         abertos = ler_config_bd("paineis_wizard_abertos", [])
         abertos.append({"chat_id": chat_id, "message_id": message_id})
 
-        # O corte da lista é o que transforma painel em órfão permanente: tudo o
-        # que cai fora daqui nunca mais é varrido, porque ninguém sabe que existe.
-        # Por isso o teto subiu e o descarte passou a gritar em vez de sumir calado.
+        # O que sai da lista nunca mais é varrido (vira órfão permanente): por isso o teto
+        # é alto e o descarte vai para o log.
         if len(abertos) > LIMITE_REGISTRO_PAINEIS:
             perdidos = len(abertos) - LIMITE_REGISTRO_PAINEIS
             if EXIBIR_LOGS:
@@ -15985,11 +16029,9 @@ async def limpar_paineis_orfaos():
             except Exception as e:
                 motivo = str(e)
 
-            # Apagar falhou. A causa quase certa é o limite do Telegram: um bot só
-            # remove a própria mensagem em grupo dentro de 48h, a não ser que seja
-            # admin com "can_delete_messages". Editar NÃO tem esse limite — então
-            # pelo menos o painel deixa de parecer vivo: perde os botões e o
-            # cronômetro, e passa a dizer que a sessão acabou.
+            # Apagar falhou. Quase sempre é o limite do Telegram: bot só apaga a própria
+            # mensagem de grupo em até 48 h, salvo admin com "can_delete_messages". Editar
+            # não tem limite: o painel perde botões e cronômetro e passa a dizer que acabou.
             try:
                 await bot.edit_message_text(
                     chat_id=chat_id, message_id=message_id,
@@ -16002,9 +16044,7 @@ async def limpar_paineis_orfaos():
             except Exception:
                 pass
 
-            # Nem apagou nem editou. Guarda para a próxima subida em vez de
-            # esquecer — era isso que dava a um painel teimoso o direito de ficar
-            # no grupo para sempre. O teto de tentativas evita insistir à toa.
+            # Nem apagou nem editou: tenta de novo na próxima subida, até 3 vezes.
             if tentativas < 3:
                 painel["tentativas"] = tentativas + 1
                 pendentes.append(painel)
@@ -16044,7 +16084,7 @@ async def criar_painel_submissao(chat_id, thread_id, user, state: FSMContext, vi
         reply_markup=teclado, message_thread_id=thread_param
     )
 
-    registrar_painel_aberto(chat_id, msg_painel.message_id)   # 🛡️ Anti-órfão
+    registrar_painel_aberto(chat_id, msg_painel.message_id)  # anti-órfão
 
     await state.set_state(SubmissaoUsuarioInterativa.painel)
     await state.update_data(
@@ -16058,6 +16098,7 @@ async def criar_painel_submissao(chat_id, thread_id, user, state: FSMContext, vi
 
 @dp.callback_query(F.data == "iniciar_wizard_oferta")
 async def wizard_abrir_painel(callback: types.CallbackQuery, state: FSMContext):
+    """Botão "Iniciar Postagem de Oferta": abre um painel novo para quem tocou."""
     await criar_painel_submissao(
         callback.message.chat.id, callback.message.message_thread_id,
         callback.from_user, state
@@ -16066,6 +16107,7 @@ async def wizard_abrir_painel(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("wz_"), StateFilter("*"))
 async def wizard_acao_painel(callback: types.CallbackQuery, state: FSMContext):
+    """Botões do painel (só o dono): concluir, continuar depois do prazo ou o item esperado."""
     if await bloquear_intruso_wizard(callback):
         return
 
@@ -16076,7 +16118,7 @@ async def wizard_acao_painel(callback: types.CallbackQuery, state: FSMContext):
         await wizard_publicar_oferta(callback, state)
         return
 
-    # 🛟 "Não, quero continuar": devolve o painel de onde parou e reinicia os 3 minutos
+    # "Continuar": volta o painel de onde parou e reinicia os 3 minutos
     if acao == "wz_continuar":
         data = await state.get_data()
         if not data.get("dono_wizard"):
@@ -16092,17 +16134,19 @@ async def wizard_acao_painel(callback: types.CallbackQuery, state: FSMContext):
     await callback.answer()
     await renderizar_painel(callback.message.chat.id, callback.message.message_thread_id, state)
 
-# 📏 Teto de download da Bot API. O bot não consegue BAIXAR arquivo maior que isto:
-# get_file() devolve "Bad Request: file is too big" e a submissão morre no fim do fluxo.
+# Teto de download da Bot API: get_file() recusa arquivo maior ("file is too big").
 LIMITE_DOWNLOAD_BOT_MB = 20
 
-# 📏 Teto de UPLOAD da Bot API. Acima disso o send_video é recusado, e um vídeo que o bot
-# não consegue enviar nunca sai da fila — vira retry eterno. O Correio Público já barra na
-# origem; esta constante é o mesmo limite do lado de cá.
+# Teto de upload da Bot API: acima disso o send_video é recusado e o vídeo nunca
+# sairia da fila. O Correio Público barra na origem com o mesmo limite.
 LIMITE_UPLOAD_BOT_MB = 50
 
 @dp.message(SubmissaoUsuarioInterativa.painel)
 async def wizard_receber_item(message: types.Message, state: FSMContext):
+    """
+    Vídeo ou link mandado pelo dono durante a sessão: marca no painel e confirma.
+    Vídeo acima do teto de download é recusado na hora.
+    """
 
     permitido, config = checar_permissao_topico(message)
     if not permitido: return
@@ -16119,9 +16163,8 @@ async def wizard_receber_item(message: types.Message, state: FSMContext):
     confirmacao = None
 
     if message.video:
-        # 📏 Barra o arquivo grande AQUI, e não lá no fim. Antes o membro preenchia
-        # vídeo + links, clicava em concluir e só então tomava "erro interno" — o
-        # download de 20 MB+ falhava dentro do wizard_publicar_oferta.
+        # Barra o arquivo grande já aqui: o download de mais de 20 MB só falharia no fim,
+        # depois de o membro preencher tudo.
         tamanho_video = message.video.file_size or 0
         if tamanho_video > LIMITE_DOWNLOAD_BOT_MB * 1024 * 1024:
             aviso = await message.answer(
@@ -16171,14 +16214,19 @@ async def wizard_receber_item(message: types.Message, state: FSMContext):
         try: await aviso.delete()
         except Exception: pass
 
-# 3. CONCLUSÃO: IA avalia e publica no mural
+# --- Conclusão: a IA avalia e publica no mural ---
 async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContext, chat_forcado=None, mencao_forcada=None):
-    # 🤖 Duas portas de entrada: o clique em "Concluir Oferta" ou a publicação automática
-    # disparada quando o prazo extra de 1 minuto também expira (aí não existe callback).
+    """
+    A IA avalia o vídeo; aprovado, publica no tópico de postagem com o nome do produto,
+    os links e as hashtags e credita o membro. Com veredito (ou erro), apaga o painel
+    depois de 15 s e recria o fixo; se a IA não responde, o painel fica com o motivo.
+    """
+    # Duas entradas: o "Concluir Oferta" ou a publicação automática quando o minuto
+    # extra também expira (sem callback).
     if callback:
         message = callback.message
     else:
-        from types import SimpleNamespace   # stdlib: portador mínimo só para o chat_id do painel
+        from types import SimpleNamespace  # só carrega o chat_id do painel
         message = SimpleNamespace(chat=SimpleNamespace(id=chat_forcado))
     config = ler_submissao_config()
 
@@ -16188,7 +16236,7 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
     link_shopee = data.get("link_shopee")
     link_tiktok = data.get("link_tiktok")
 
-            # 🔗 Publicável = vídeo + pelo menos 1 link válido (Shopee ou TikTok)
+    # Publicável: vídeo + pelo menos um link
     if not video_id or not (link_shopee or link_tiktok):
         if callback:
             await callback.answer("⚠️ Faltam itens obrigatórios: vídeo e pelo menos um link.", show_alert=True)
@@ -16202,7 +16250,7 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
         )
     except: pass
 
-    await state.clear()   # Libera a memória e encerra o cronômetro
+    await state.clear()  # encerra a sessão e o cronômetro
 
     try:
         file_info = await bot.get_file(video_id)
@@ -16231,8 +16279,8 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
         except: pass
 
         if not analise_ia:
-            # 🔎 O api_gemini já guardava o motivo real em ULTIMO_ERRO_IA, mas ninguém lia:
-            # a tela dizia sempre "falha temporária" e o porquê ficava só no journalctl.
+            # Mostra o motivo real guardado pelo api_gemini (ULTIMO_ERRO_IA), não só "falha
+            # temporária".
             import api_gemini
             motivo_ia = (api_gemini.ULTIMO_ERRO_IA or "motivo não registrado")[:200]
             if EXIBIR_LOGS: logger.error(f"❌ [Submissão] A IA não respondeu → {motivo_ia}")
@@ -16262,9 +16310,8 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
             nome_produto = linhas[1].strip() if len(linhas) > 1 else "Oferta Exclusiva 🛍️"
             hashtags_ia = linhas[2].strip() if len(linhas) > 2 else ""
 
-                        # 🎨 Mesma identidade visual do grupo principal: cada plataforma no seu bloco
-            # 📱 Sem linha divisória: caractere repetido quebra o layout no celular.
-            # A separação vem das quebras de linha e do emoji que encabeça cada bloco.
+            # Mesmo visual do canal principal: um bloco por plataforma, sem linha divisória
+            # (caractere repetido quebra o layout no celular).
             legenda_final = (
                 f"👤 Vídeo enviado por: {user_mention}\n\n"
                 f"<b>{nome_produto}</b>\n\n"
@@ -16286,7 +16333,7 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
                 chat_id=message.chat.id, video=video_id, caption=legenda_final,
                 parse_mode="HTML", message_thread_id=config.get("topico_destino")
             )
-            registrar_ultimo_post(message.chat.id, "video")   # 🚦 Intercalação
+            registrar_ultimo_post(message.chat.id, "video")  # intercalação
 
             try:
                 await bot.edit_message_text(
@@ -16307,9 +16354,7 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
 
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ Erro na submissão guiada: {e}")
-        # 🔎 "erro interno" não diz nada a quem mandou o vídeo. A causa mais comum é o
-        # teto de download da Bot API — vale nomear em vez de deixar o membro tentar
-        # o mesmo arquivo três vezes.
+        # Nomeia a causa mais comum (teto de download) em vez de "erro interno".
         if "too big" in str(e).lower():
             texto_erro = (
                 "❌ <b>Vídeo grande demais.</b>\n\nO robô só consegue baixar arquivos de até "
@@ -16326,10 +16371,10 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
 
     await reenviar_botao_ofertas()
 
-# Cancelamento manual do usuário (Limpa tudo instantaneamente)
 @dp.callback_query(F.data.startswith("cancelar_wizard"), StateFilter("*"))
 async def wizard_cancelar(callback: types.CallbackQuery, state: FSMContext):
-    # 🔒 Só o dono da sessão pode cancelá-la
+    """Cancelamento pelo dono: limpa a sessão, apaga o painel e recria o fixo."""
+    # Só o dono da sessão cancela
     if await bloquear_intruso_wizard(callback):
         return
 
@@ -16350,46 +16395,42 @@ async def wizard_cancelar(callback: types.CallbackQuery, state: FSMContext):
         except: pass
 
     await reenviar_botao_ofertas()
-# ==========================================
 from aiogram.types import ReplyKeyboardRemove
 
 @dp.message(Command("limpar_painel"))
 async def limpar_teclado_fantasma(message: types.Message):
+    """/limpar_painel: tira o teclado do admin da tela do grupo."""
     if message.from_user.id != ADMIN_ID: return
     
-    # O comando ReplyKeyboardRemove() força o Telegram a vaporizar os botões da tela
     aviso = await message.answer(
         "🧹 <b>Limpando lixo visual...</b>\nO painel de administração foi removido deste grupo!", 
         reply_markup=ReplyKeyboardRemove(),
         parse_mode="HTML"
     )
     
-    # Apaga as mensagens após 4 segundos para ninguém perceber
+    # Apaga o comando e o aviso depois de 4 s
     await asyncio.sleep(4)
     try: 
         await message.delete()
         await aviso.delete()
     except: pass
 
-# 🧵 TASKS COM REFERÊNCIA FORTE
-# asyncio.create_task devolve uma task que o event loop só referencia de forma
-# FRACA — a documentação do Python avisa que ela pode ser coletada no meio da
-# execução. Task coletada morre sem exceção e sem log, que é exatamente o
-# sintoma do cronômetro travado em 03:00. Este conjunto segura a referência
-# até a task terminar sozinha.
+# Tasks com referência forte: o event loop só guarda referência fraca das tasks de
+# asyncio.create_task, e task coletada morre sem exceção nem log (foi o cronômetro
+# travado em 03:00). Este conjunto as segura até terminarem.
 _tarefas_vivas = set()
 
 def criar_task(coro):
+    """asyncio.create_task guardando a referência até a task terminar."""
     tarefa = asyncio.create_task(coro)
     _tarefas_vivas.add(tarefa)
     tarefa.add_done_callback(_tarefas_vivas.discard)
     return tarefa
 
-# 🚨 CAPTURADOR DE FALHAS SILENCIOSAS
-# Quando um asyncio.create_task falha, a exceção some sem passar por except nenhum.
-# Foi assim que o painel de submissão travou: a task morreu calada e o cronômetro
-# ficou parado em 00:00 sem uma linha no log. Isto torna essas falhas visíveis.
+# Falha em task assíncrona some sem passar por except nenhum (o painel de
+# submissão travou assim, em 00:00, sem log). Isto a leva para o log.
 def capturar_falha_task(loop, contexto):
+    """Exception handler do loop: falha de task vai para o log e para o registro de erros."""
     excecao = contexto.get("exception")
     try:
         if excecao:
@@ -16398,13 +16439,11 @@ def capturar_falha_task(loop, contexto):
         else:
             logger.error(f"🚨 [Task Órfã] {contexto.get('message', 'erro sem descrição')}")
     except Exception:
-        pass   # o capturador nunca pode ser a causa de um novo erro
+        pass  # o capturador não pode gerar outro erro
 
-# ==========================================
-# 🩺 MONITOR DE SAÚDE
-# Checa a cada hora e só fala quando há problema. Alerta repetido é alerta
-# ignorado, então cada tipo só avisa uma vez a cada 6 horas.
-# ==========================================
+# --- Monitor de saúde ---
+# Checa a cada hora e só fala quando há problema; cada tipo de alerta repete no
+# máximo a cada 6 horas.
 LIMITE_DISCO_PCT = 80          # % de uso da partição
 LIMITE_TEMP_GB = 3             # pasta temp/
 LIMITE_FILA_PARADA_H = 4       # horas sem publicar com fila vencida
@@ -16426,6 +16465,7 @@ def _ja_alertou(chave):
         return False
 
 def _tamanho_pasta_gb(pasta):
+    """Tamanho da pasta em GB (arquivos que somem no meio são ignorados)."""
     total = 0
     try:
         for raiz, _d, arquivos in os.walk(pasta):
@@ -16440,7 +16480,7 @@ async def monitor_saude():
     """Roda de hora em hora. Silencioso quando está tudo bem."""
     alertas = []
     try:
-        # 1️⃣ Disco da partição
+        # 1. Disco
         try:
             import shutil
             uso = shutil.disk_usage("/")
@@ -16450,11 +16490,10 @@ async def monitor_saude():
         except Exception:
             pass
 
-        # 2️⃣ Pasta temp/ inchada
+        # 2. Pasta temp/
         temp_gb = _tamanho_pasta_gb("temp")
         if temp_gb >= LIMITE_TEMP_GB and not _ja_alertou("temp"):
-            # Antes de acusar a faxina, roda a faxina. Avisar sem agir deixava a
-            # pasta crescer até às 03h seguintes com o aviso a repetir-se à toa.
+            # Roda a faxina antes de avisar: só avisar deixava a pasta crescer até as 03h.
             removidos, liberados = await asyncio.to_thread(limpar_arquivos_orfaos)
             presos, orfaos, vencidos = await asyncio.to_thread(diagnostico_temp)
             temp_gb = _tamanho_pasta_gb("temp")
@@ -16473,7 +16512,7 @@ async def monitor_saude():
                               f"cair no próximo ciclo, algo está a escrever em temp/ sem apagar.")
             alertas.append("\n".join(partes))
 
-        # 3️⃣ Fila do Espião vencida sem publicar
+        # 3. Fila do Espião vencida sem publicar
         try:
             agora = datetime.now(fuso_horario)
             fila = ler_fila_clonagem().get("fila", [])
@@ -16498,7 +16537,7 @@ async def monitor_saude():
         except Exception:
             pass
 
-        # 4️⃣ Erros recentes se acumulando
+        # 4. Erros acumulando na última hora
         try:
             erros = ler_config_bd("erros_logs", [], arquivo_legado="erros_logs.json")
             recentes = 0
@@ -16514,12 +16553,17 @@ async def monitor_saude():
         except Exception:
             pass
 
-        # 5️⃣ Nada publicado no dia (com fila cheia)
+        # 5. Nada publicado hoje pelo Espião, com fila do dia
         try:
             hoje = datetime.now(fuso_horario).strftime("%Y-%m-%d")
             fila = ler_fila_clonagem().get("fila", [])
             postados_hoje = len([i for i in fila if i.get("processado") and str(i.get("data_postagem", "")).startswith(hoje)])
-            pendentes = len([i for i in fila if not i.get("processado")])
+            # Só os clones com horário até hoje: os de amanhã (D+1) não deviam ter saído.
+            pendentes = len([
+                i for i in fila
+                if not i.get("processado")
+                and i.get("horario_disparo") and i["horario_disparo"][:10] <= hoje
+            ])
             hora = datetime.now(fuso_horario).hour
             if hora >= 12 and postados_hoje == 0 and pendentes > 5 and not _ja_alertou("sem_postagem"):
                 alertas.append(f"🔇 <b>Nenhuma publicação hoje</b>\n{pendentes} vídeo(s) na fila e nada saiu até as {hora}h.")
@@ -16534,66 +16578,63 @@ async def monitor_saude():
     except Exception as e:
         if EXIBIR_LOGS: logger.error(f"❌ [Saúde] Falha no monitor: {e}")
 
-# =========================================================
-# O MAIN() E O INICIADOR FICAM SEMPRE NO FINAL ABSOLUTO
-# =========================================================
+# --- main(): agenda os jobs e sobe o bot (fica no fim do arquivo) ---
 async def main():
-    # Agendador mestre que roda todo dia às 00:01
+    """Agenda os jobs, monta a grade de hoje, limpa painéis órfãos e começa o polling."""
+    # Grade do dia, todo dia às 00:01
     scheduler.add_job(agendar_tarefas_diarias, 'cron', hour=0, minute=1, timezone=FUSO_STR)
     
-    # ✅ Agendador da lixeira persistente (roda todos os dias pontualmente às 03:00)
+    # Tabela do buscador; lixeira persistente às 03:00
     _iniciar_tabela_buscas()
     scheduler.add_job(varredor_de_lixeira, 'cron', hour=3, minute=0, timezone=FUSO_STR)
 
-    # 🧹 Faxina de disco de 6 em 6 horas, independente do varredor das 03h.
-    # Com prazo de proteção de 24h e uma só passagem por dia, um órfão criado
-    # logo depois das 03h esperava quase 48h para ser apagado.
+    # Faxina de disco a cada 6 h, além do varredor das 03h: com 24 h de proteção e uma
+    # passagem por dia, um órfão criado logo depois das 03h esperava quase 48 h.
     scheduler.add_job(faxina_disco_periodica, 'interval', hours=6,
                       id='faxina_disco_loop', replace_existing=True)
 
-    # 🩺 Monitor de saúde: avisa no privado quando algo sai do normal
+    # Monitor de saúde (avisa o admin no privado)
     scheduler.add_job(monitor_saude, 'interval', hours=1, id='monitor_saude_loop', replace_existing=True)
 
-    # 👥 Motor de publicação dos parceiros
+    # Motor de publicação dos parceiros
     scheduler.add_job(motor_parceiros_step, 'interval', minutes=2, id='motor_parceiros_loop', replace_existing=True)
 
-    # 🌙 Fechamento do dia de captura dos parceiros: sorteia a cota e apaga o
-    # excedente do disco no mesmo dia, sem esperar os 30 dias do D+X.
+    # Fechamento do dia de captura dos parceiros: sorteia a cota e apaga o excedente
+    # do disco no mesmo dia, sem esperar os 30 dias do D+X.
     scheduler.add_job(fechar_dia_captura_parceiros, 'cron', hour=23, minute=55,
                       timezone=FUSO_STR, kwargs={"incluir_hoje": True},
                       id='fechamento_dia_parceiros', replace_existing=True)
 
-    # 📊 Retrato diário das métricas (prova social das rotinas)
+    # Métricas do dia (prova social das rotinas)
     scheduler.add_job(coletar_metricas_diarias, 'cron', hour=23, minute=50, timezone=FUSO_STR, id='coleta_metricas_diarias', replace_existing=True)
     
-    # ✅ Novo: Despertador e aviso da Pausa Programada (roda às 09:00)
+    # Aviso diário da Pausa Programada (09:00)
     scheduler.add_job(verificar_pausa_diaria, 'cron', hour=9, minute=0, timezone=FUSO_STR)
     
-    # ✅ Novo: Verificador de retorno da Pausa Programada (roda a cada 1 minuto)
+    # Fim da Pausa Programada (de minuto em minuto)
     if EXIBIR_LOGS: logger.info("🚀 Iniciando monitoramento de retomada de pausa minuto a minuto...")
     scheduler.add_job(verificar_retorno_pausa_minuto, 'interval', minutes=1, timezone=FUSO_STR)
     
-    # ✅ Verificador do Espião: O motor verifica a fila a cada 1 minuto (a cadência aleatória é gerida internamente)
+    # Motor do Espião (de minuto em minuto)
     scheduler.add_job(processar_fila_espiao, 'interval', minutes=1, timezone=FUSO_STR)
 
-    # ✅ Novo: Sincronização financeira horária para resgatar dados em atraso da Shopee
+    # Sincronização financeira com a Shopee (de hora em hora)
     scheduler.add_job(sincronizar_financeiro_horario, 'cron', minute=0, timezone=FUSO_STR)
     
-    # ✅ NOVO: Pente fino de madrugada (roda todos os dias às 02:00) para resgatar pendentes de meses anteriores
+    # Pente fino dos pedidos pendentes antigos (02:00)
     scheduler.add_job(varredura_retroativa_pendentes, 'cron', hour=2, minute=0, timezone=FUSO_STR)
 
-    # ✅ Novo: Check-up diário de permissões em grupos roda todos os dias às 11:00
+    # Relatório diário de saúde dos canais (11:00)
     scheduler.add_job(checkup_diario_grupos, 'cron', hour=11, minute=0, timezone=FUSO_STR)
 
-    # 🎲 Motor Autônomo de Garimpo: o gatilho fixo de 2 em 2 horas saiu de cena.
-    # Cada ciclo agenda o seguinte com intervalo sorteado (rajada/normal/sumiço),
-    # então não existe mais um minuto cravado se repetindo o dia inteiro.
+    # Garimpo do Achadinhos: cada ciclo agenda o seguinte com intervalo sorteado
+    # (rajada/normal/sumiço), sem horário fixo.
     agendar_proximo_garimpo(primeiro=True)
     
-    # ✅ WATCHDOG: O Fiscal Híbrido bate a cada 1 minuto apenas para auditar a memória
+    # Fiscal da fila do principal (de minuto em minuto)
     scheduler.add_job(motor_fila_minuto, 'interval', minutes=1, timezone=FUSO_STR)
     
-    # Roda o agendador imediatamente ao ligar o bot para garantir o dia atual
+    # Grade de hoje já na subida
     agendar_tarefas_diarias()
     
     scheduler.start()
@@ -16604,10 +16645,10 @@ async def main():
         dados_rotina["pausado"] = True
         salvar_config_rotina(dados_rotina)
         if EXIBIR_LOGS: logger.info("⏸️ Rotinas estavam em pausa programada. Marcado como pausado no JSON com sucesso.")
-    # 🚨 Ativa o capturador de falhas em tasks assíncronas
+    # Falhas de tasks assíncronas vão para o log
     asyncio.get_running_loop().set_exception_handler(capturar_falha_task)
 
-    # 🛡️ Remove painéis de submissão que ficaram órfãos por causa do restart
+    # Painéis de submissão que o restart deixou órfãos
     await limpar_paineis_orfaos()
     await reenviar_botao_ofertas()
 

@@ -32,7 +32,8 @@ jobs:
             motor_userbot.py \
             divulgacao_canal.py \
             api_gemini.py \
-            api_shopee.py
+            api_shopee.py \
+            downloader_bot.py
 
       - name: Instalar pytest
         run: pip install pytest

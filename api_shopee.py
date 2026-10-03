@@ -1,3 +1,11 @@
+"""
+Cliente da API de afiliados da Shopee (GraphQL): converte links em links de
+afiliado, busca ofertas e testa chaves.
+
+As credenciais padrão vêm do .env (SHOPEE_APP_ID e SHOPEE_APP_SECRET). As
+funções aceitam app_id/app_secret de outro afiliado: é assim que os links dos
+parceiros saem no nome deles.
+"""
 import os
 import json
 import time
@@ -8,7 +16,6 @@ import aiohttp
 import logging
 from dotenv import load_dotenv
 
-# Carrega as chaves do .env
 load_dotenv()
 SHOPEE_APP_ID = os.getenv('SHOPEE_APP_ID')
 SHOPEE_APP_SECRET = os.getenv('SHOPEE_APP_SECRET')
@@ -17,9 +24,12 @@ logger = logging.getLogger("API_Shopee")
 
 def gerar_headers_e_payload(payload_dict, app_id=None, app_secret=None):
     """
-    Gera a assinatura criptografada e os headers exigidos pela API da Shopee.
-    Sem app_id/app_secret usa as chaves do .env (comportamento de sempre).
-    Com eles, assina em nome de outro afiliado — base do modo multiparceiro.
+    Monta os headers assinados que a API exige: SHA256 de app_id + timestamp +
+    payload + secret. Devolve (headers, payload_json); envie exatamente esse
+    payload_json, porque a assinatura vale só para ele.
+
+    Sem app_id/app_secret usa as chaves do .env; com eles, assina em nome de
+    outro afiliado (parceiros).
     """
     app_id = app_id or SHOPEE_APP_ID
     app_secret = app_secret or SHOPEE_APP_SECRET
@@ -37,12 +47,12 @@ def gerar_headers_e_payload(payload_dict, app_id=None, app_secret=None):
     return headers, payload_json
 
 def limpar_sub_id(valor, padrao="geral"):
-    """Deixa o subId só com letra e número.
+    """
+    Deixa o subId só com letras e números (sem acento), até 40 caracteres.
 
-    A Shopee recusa subId com underscore (erro 11001 - invalid sub id).
-    A limpeza antiga trocava caractere inválido POR underscore, então todo
-    nicho com espaço ou acento no nome virava subId inválido — e a conversão
-    falhava calada, devolvendo o link SEM rastreio de afiliado.
+    A Shopee recusa subId com underscore ou outros símbolos (erro 11001 -
+    invalid sub id), e a conversão falharia calada, devolvendo o link sem
+    rastreio de afiliado. Se não sobrar nada, usa `padrao`.
     """
     texto = unicodedata.normalize("NFKD", str(valor).strip())
     texto = texto.encode("ascii", "ignore").decode("ascii")
@@ -51,8 +61,14 @@ def limpar_sub_id(valor, padrao="geral"):
 
 async def converter_link_shopee(link_original, sub_id_nicho="geral", exibir_logs=True, app_id=None, app_secret=None):
     """
-    Encurta o link da Shopee gerando a URL de afiliado com rastreio.
-    app_id/app_secret opcionais: quando informados, o link sai no nome do parceiro.
+    Converte um link da Shopee em link curto de afiliado, marcado com o subId
+    do nicho para rastrear de onde veio a venda.
+
+    Em QUALQUER falha (sem chaves, erro de rede, recusa da API) devolve o link
+    original: a postagem segue, mas sem rastreio de afiliado. Para saber o
+    motivo de uma recusa, use testar_chaves_afiliado.
+
+    Com app_id/app_secret, o link sai no nome do parceiro.
     """
     cred_id = app_id or SHOPEE_APP_ID
     cred_secret = app_secret or SHOPEE_APP_SECRET
@@ -63,7 +79,7 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", exibir_logs
 
     link_processar = link_original
     
-    # Expansão de links curtos
+    # Link curto: segue o redirecionamento até o link do produto e tira os parâmetros (?...).
     if "shp.ee" in link_original or "shope.ee" in link_original or "s.shopee.com.br" in link_original:
         try:
             headers_redirect = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
@@ -101,12 +117,15 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", exibir_logs
     return link_original
 
 async def buscar_ofertas_shopee(keyword, limite=10, exibir_logs=True, app_id=None, app_secret=None, sort_type=2):
-    """Rastreia ofertas e produtos baseados em palavras-chave na Shopee.
+    """
+    Busca produtos na Shopee por palavra-chave. Devolve a lista de produtos
+    (nodes da API) ou lista vazia em qualquer erro.
 
-    sort_type: 1=relevância · 2=mais vendidos · 3=preço↓ · 4=preço↑ · 5=comissão↓
-    O default 2 preserva o comportamento do garimpo. O buscador usa 1, porque
-    ordenar por preço num conjunto não-relevante devolve acessório barato em
-    vez do produto (o sortType=4 traz capinha de fone, não fone)."""
+    sort_type: 1=relevância, 2=mais vendidos, 3=preço maior, 4=preço menor,
+    5=maior comissão. O padrão 2 é o do garimpo de ofertas. O buscador usa 1,
+    porque ordenar por preço num conjunto pouco relevante traz acessório
+    barato em vez do produto (sort_type=4 traz capinha de fone, não fone).
+    """
     cred_id = app_id or SHOPEE_APP_ID
     cred_secret = app_secret or SHOPEE_APP_SECRET
 
@@ -157,11 +176,12 @@ async def buscar_ofertas_shopee(keyword, limite=10, exibir_logs=True, app_id=Non
     return []
 
 async def testar_chaves_afiliado(link_teste, app_id, app_secret, exibir_logs=True):
-    """Testa um par App ID + Secret e devolve (ok, motivo).
+    """
+    Testa um par App ID + Secret convertendo `link_teste` e devolve (ok, motivo).
 
-    Existe separada de converter_link_shopee porque aquela devolve o link
-    original em qualquer falha — ótimo pro fluxo normal, inútil pra
-    diagnóstico. Aqui o motivo da recusa sobe até quem chamou.
+    Separada de converter_link_shopee porque aquela esconde a falha devolvendo
+    o link original; aqui o motivo da recusa chega a quem chamou (cadastro de
+    parceiro).
     """
     if not app_id or not app_secret:
         return False, "Chaves ausentes."
@@ -169,9 +189,7 @@ async def testar_chaves_afiliado(link_teste, app_id, app_secret, exibir_logs=Tru
     endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
     payload = {
         "query": "mutation generateShortLink($originUrl: String!, $subIds: [String!]) { generateShortLink(input: {originUrl: $originUrl, subIds: $subIds}) { shortLink } }",
-        # subId curto e só com letras: "teste_cadastro" era recusado com
-        # 11001 (invalid sub id). Os que rodam em produção sem falhar são
-        # todos assim — "geral", "busca".
+        # subId só com letras e números; com underscore a Shopee recusa (11001).
         "variables": {"originUrl": link_teste, "subIds": [limpar_sub_id("teste cadastro")]}
     }
     headers, payload_json = gerar_headers_e_payload(payload, app_id, app_secret)

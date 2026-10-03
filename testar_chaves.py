@@ -1,10 +1,10 @@
 """
-🔍 Testa um par App ID + Secret direto contra a API da Shopee.
+Ferramenta de terminal: testa um par App ID + Secret direto na API da Shopee.
 
-Serve para diagnosticar credencial de parceiro sem passar pelo wizard do
-Telegram. Mostra a resposta crua da Shopee e faz uma varredura de caracteres
-invisíveis, que é a causa silenciosa mais comum de 'Invalid Signature':
-o secret parece certo na tela, mas veio com um caractere que não é ASCII.
+Serve para diagnosticar a credencial de um parceiro sem passar pelo cadastro no
+Telegram. Procura caracteres invisíveis ou fora do ASCII, a causa mais comum de
+'Invalid Signature' (o secret parece certo na tela, mas veio com um caractere
+estranho colado), e mostra se a conversão de link funcionou.
 
 Uso:
     python3 testar_chaves.py <APP_ID> <APP_SECRET>
