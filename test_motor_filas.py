@@ -1,8 +1,8 @@
 """
-Testes do Motor de Filas — o coração da distribuição de todos os robôs.
+Testes do motor_filas, que distribui os horários de publicação de todos os robôs.
 
-⚠️ O RELÓGIO É FIXADO em cada teste. Sem isso, o mesmo teste passa de manhã
-e falha à noite, porque o motor distribui no tempo que RESTA do dia.
+O relógio é fixado em cada teste (20/08/2026, na hora pedida). Sem isso, o mesmo
+teste passa de manhã e falha à noite, porque o motor distribui no tempo que resta do dia.
 
 Rodar:  python3 -m pytest test_motor_filas.py -v
 """
