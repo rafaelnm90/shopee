@@ -371,6 +371,36 @@ def _salvar_agendamentos():
         if EXIBIR_LOGS: logger.warning(f"⚠️ [Agenda] Não salvei o histórico de horários: {e}")
 
 
+def _carregar_plano_da_hora(hora):
+    """
+    Envios já planejados para a hora `hora` ("AAAA-MM-DD HH"), como lista de
+    [escopo, alvo, horário ISO]. Vazia se o plano salvo é de outra hora.
+    """
+    plano = ler_config_bd_divulgacao("plano_divulgacao_hora", {}) or {}
+    if not isinstance(plano, dict) or plano.get("hora") != hora:
+        return []
+    validos = []
+    for envio in plano.get("envios", []):
+        try:
+            escopo, alvo, iso = envio
+            datetime.fromisoformat(iso)
+        except (TypeError, ValueError):
+            continue
+        validos.append([escopo, alvo, iso])
+    return validos
+
+
+def _salvar_plano_da_hora(hora, envios):
+    """Grava no banco o plano da hora (chave plano_divulgacao_hora); só a hora corrente fica guardada."""
+    salvar_config_bd_divulgacao("plano_divulgacao_hora", {"hora": hora, "envios": envios})
+
+
+def _agendar_envio(escopo, alvo, quando):
+    # O id torna o agendamento idempotente: reagendar o mesmo envio substitui o anterior.
+    scheduler.add_job(enviar_mensagem, 'date', run_date=quando, args=[escopo, alvo],
+                      id=f"divulgacao|{escopo}|{alvo}|{quando.isoformat()}", replace_existing=True)
+
+
 def programar_envios_da_hora():
     """
     Sorteia e agenda os envios da hora corrente para todos os escopos e alvos.
@@ -381,15 +411,18 @@ def programar_envios_da_hora():
     no passado. Se 100 sorteios não acharem minuto livre na fatia, o envio vai
     para 16 a 18 min depois do último do alvo, mesmo que caia na hora seguinte.
 
-    Os envios agendados ficam só na memória do agendador. Num reinício, os que
-    ainda não saíram se perdem e a hora é sorteada de novo por completo, sem
-    descontar o que já foi enviado antes do reinício.
+    Os agendamentos ficam na memória do agendador e se perdem num reinício. Por
+    isso o plano da hora fica salvo no banco: ao reiniciar no meio da hora, os
+    envios planejados que ainda estão no futuro são reagendados, os que já
+    passaram contam como feitos, e só o que falta para a frequência é sorteado.
     """
     global ultimos_agendamentos_por_alvo
     agora = datetime.now()
     INTERVALO_MINIMO = 15  # minutos entre dois envios para o mesmo alvo
+    hora_atual = agora.strftime("%Y-%m-%d %H")
 
     _carregar_agendamentos()
+    plano = _carregar_plano_da_hora(hora_atual)
 
     # Esquece horários com mais de 1 hora, para o dicionário não crescer sem fim.
     corte = agora - timedelta(hours=1)
@@ -418,10 +451,22 @@ def programar_envios_da_hora():
             if freq_alvo <= 0:
                 continue
 
-            if EXIBIR_LOGS: logger.info(f"🔄 [{rotulo}] Sorteando {freq_alvo} envio(s) para {alvo} na hora atual ({agora.hour}h)...")
+            ja_planejados = [datetime.fromisoformat(iso) for e, a, iso in plano if e == escopo and a == alvo]
+            for quando in ja_planejados:
+                if quando > agora:
+                    _agendar_envio(escopo, alvo, quando)
+
+            faltam = freq_alvo - len(ja_planejados)
+            if ja_planejados and EXIBIR_LOGS:
+                logger.info(f"♻️ [{rotulo}] {alvo}: {len(ja_planejados)} envio(s) já planejado(s) nesta hora; faltam {max(faltam, 0)}.")
+            if faltam <= 0:
+                continue
+
+            if EXIBIR_LOGS: logger.info(f"🔄 [{rotulo}] Sorteando {faltam} envio(s) para {alvo} na hora atual ({agora.hour}h)...")
             espacamento_ideal = 58 // freq_alvo if freq_alvo > 0 else 58
 
-            for i in range(freq_alvo):
+            # Os envios que faltam ficam com as últimas fatias da hora.
+            for i in range(len(ja_planejados), freq_alvo):
                 sucesso = False
                 min_inicio_busca = (i * espacamento_ideal) + 1
                 min_fim_busca = min(((i + 1) * espacamento_ideal), 59)
@@ -442,7 +487,8 @@ def programar_envios_da_hora():
 
                     if not colisao:
                         ultimos_agendamentos_por_alvo.setdefault(alvo, []).append(horario_disparo)
-                        scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo, args=[escopo, alvo])
+                        plano.append([escopo, alvo, horario_disparo.isoformat()])
+                        _agendar_envio(escopo, alvo, horario_disparo)
                         if EXIBIR_LOGS: logger.info(f"✅ [{rotulo}] Disparo {i+1}/{freq_alvo} para {alvo} agendado às {horario_disparo.strftime('%H:%M:%S')}")
                         sucesso = True
                         break
@@ -453,10 +499,12 @@ def programar_envios_da_hora():
                     ultimo_conhecido = max(agendados) if agendados else agora
                     horario_disparo_fallback = ultimo_conhecido + timedelta(minutes=INTERVALO_MINIMO + random.randint(1, 3))
                     ultimos_agendamentos_por_alvo.setdefault(alvo, []).append(horario_disparo_fallback)
-                    scheduler.add_job(enviar_mensagem, 'date', run_date=horario_disparo_fallback, args=[escopo, alvo])
+                    plano.append([escopo, alvo, horario_disparo_fallback.isoformat()])
+                    _agendar_envio(escopo, alvo, horario_disparo_fallback)
                     if EXIBIR_LOGS: logger.info(f"🛡️ [{rotulo}] Fallback: disparo {i+1} empurrado para {horario_disparo_fallback.strftime('%H:%M:%S')}")
 
     _salvar_agendamentos()
+    _salvar_plano_da_hora(hora_atual, plano)
 
 async def sincronizar_nomes_topicos():
     """
