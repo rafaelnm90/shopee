@@ -20,3 +20,19 @@ def test_linha_do_journal_volta_para_o_lugar_do_codigo():
 def test_tamanho_legivel():
     assert inventario.tamanho_legivel(512) == "512 B"
     assert inventario.tamanho_legivel(5 * 1024 * 1024) == "5.0 MB"
+
+
+def test_erros_por_origem_e_tipo_sem_o_texto_do_erro(capsys):
+    from utils import registrar_erro_json
+    for _ in range(2):
+        try:
+            raise ValueError("Could not find the input entity for -100123 (segredo)")
+        except ValueError as e:
+            registrar_erro_json(f"varredura_origem_loop: {e}", origem="espelhador_videos_autorais.py")
+    registrar_erro_json("enviar_mensagem (principal/@grupo): falhou", origem="divulgacao_canal.py")
+
+    inventario.erros_registrados()
+    saida = capsys.readouterr().out
+    assert "ValueError" in saida and "varredura_origem_loop" in saida
+    assert "2x" in saida and "enviar_mensagem" in saida
+    assert "segredo" not in saida and "-100123" not in saida and "@grupo" not in saida

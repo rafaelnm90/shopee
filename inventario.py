@@ -8,8 +8,9 @@ números e nomes que já estão no código (tabelas, chaves de configuração, p
 do projeto, trechos fixos das mensagens de log). Nunca o conteúdo dos logs, das
 filas ou do banco; ids de parceiro também não.
 
-Seções: pastas do projeto, arquivos soltos, banco, filas em arquivo, journal (com
-as linhas de log que mais se repetem e de onde vêm no código) e fora do projeto.
+Seções: pastas do projeto, arquivos soltos, banco, erros por origem e tipo, filas
+em arquivo, journal (com as linhas de log que mais se repetem e de onde vêm no
+código), versões das bibliotecas e fora do projeto.
 """
 import ast
 import glob
@@ -107,6 +108,49 @@ def banco():
         for chave, tamanho in conexao.execute(
                 "SELECT chave, LENGTH(valor) FROM configuracoes ORDER BY LENGTH(valor) DESC LIMIT 10"):
             print(f"   {chave:32} {tamanho_legivel(tamanho or 0):>9}")
+
+
+def erros_registrados():
+    """
+    O erros_logs por origem e tipo de exceção (a última linha do rastro). O texto
+    do erro não sai: pode ter dados. Os detalhes ficam no /status do bot.
+    """
+    secao("Erros registrados (tabela erros_logs, os 50 mais recentes)")
+    with db.conexao() as conexao:
+        linhas = conexao.execute("SELECT timestamp, origem, erro, rastro_codigo FROM erros_logs").fetchall()
+    if not linhas:
+        print("nenhum")
+        return
+    corte = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 86400))
+    grupos = {}
+    for quando, origem, erro, rastro in linhas:
+        tipo = "(sem rastro)"
+        for linha in reversed((rastro or "").strip().splitlines()):
+            m = re.match(r"^([A-Za-z_][\w.]*(?:Error|Exception|Wait|Invalid|Forbidden|Timeout)\w*)\b", linha.strip())
+            if m:
+                tipo = m.group(1)
+                break
+        else:
+            m = re.search(r"\b([A-Z]\w+(?:Error|Exception|Wait|Invalid|Forbidden|Timeout)\w*)\b", erro or "")
+            if m:
+                tipo = m.group(1)
+        # De onde: o começo fixo do erro ("enviar_mensagem (", "varredura_origem_loop:").
+        onde = re.split(r"[ :(]", (erro or "").strip(), 1)[0][:40] or "?"
+        chave = (origem or "?", onde, tipo)
+        total, recentes, ultimo = grupos.get(chave, (0, 0, ""))
+        grupos[chave] = (total + 1, recentes + (1 if (quando or "") >= corte else 0), max(ultimo, quando or ""))
+    for (origem, onde, tipo), (total, recentes, ultimo) in sorted(grupos.items(), key=lambda x: -x[1][0]):
+        print(f"{total:4}x ({recentes:3} nas últimas 24 h)  {origem:30} {onde:28} {tipo:32} último: {ultimo}")
+
+
+def versoes():
+    secao("Versões instaladas (bibliotecas sem versão fixa no requirements.txt)")
+    from importlib import metadata
+    for nome in ("telethon", "pandas", "matplotlib", "google-genai", "aiogram", "yt-dlp"):
+        try:
+            print(f"{nome:16} {metadata.version(nome)}")
+        except metadata.PackageNotFoundError:
+            print(f"{nome:16} (não instalado)")
 
 
 def filas_em_arquivo():
@@ -241,7 +285,8 @@ def fora_do_projeto():
 
 if __name__ == "__main__":
     os.chdir(PASTA)
-    for parte in (pastas_do_projeto, arquivos_soltos, banco, filas_em_arquivo, journal, fora_do_projeto):
+    for parte in (pastas_do_projeto, arquivos_soltos, banco, erros_registrados, filas_em_arquivo, journal,
+                  versoes, fora_do_projeto):
         try:
             parte()
         except Exception as e:
