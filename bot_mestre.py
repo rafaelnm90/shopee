@@ -6590,22 +6590,39 @@ async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
             f"</pre>"
         )
 
+        # Os comentários de folga só aparecem quando o recurso está mesmo folgado.
+        if pct_disco < 75:
+            texto_disco = (f"Com apenas {usado_disco} ocupados de um total de {total_disco}, você possui {livre_disco} livres. "
+                           "O espaço em disco está bastante confortável para logs, banco de dados ou atualizações de sistema.")
+        else:
+            texto_disco = f"{usado_disco} ocupados de um total de {total_disco}; restam {livre_disco} livres."
+        if pct_ram < 75:
+            texto_ram = (f"O sistema está utilizando apenas {usado_ram_gb} GB de um total de {total_ram_gb} GB disponíveis ({total_ram_mb} MB). "
+                         f"Você tem aproximadamente {disp_ram_gb} GB livres/disponíveis (<code>available</code>), o que garante uma margem "
+                         "extremamente ampla para rodar novas aplicações, containers ou processos pesados.")
+        else:
+            texto_ram = (f"{usado_ram_gb} GB em uso de um total de {total_ram_gb} GB ({total_ram_mb} MB); "
+                         f"cerca de {disp_ram_gb} GB disponíveis (<code>available</code>).")
+        observacao = ("<blockquote><b>Observação técnica:</b> A utilização da instância Oracle Cloud Free Tier (4 vCPUs Ampere + 24 GB RAM) "
+                      "está super dimensionada para a carga de trabalho atual, garantindo altíssima estabilidade.</blockquote>"
+                      if pct_disco < 75 and pct_ram < 75 else "")
+
         texto = (
             f"Seu servidor está em um estado de {status_geral}. {texto_risco}\n"
             f"Abaixo está o diagnóstico detalhado dos recursos analisados:\n\n"
             
             f"💻 <b>Diagnóstico dos Recursos</b>\n\n"
             
-            f"🔹 <b>Disco (/dev/sda1):</b> {icone_disco} <b>{pct_disco}% de Uso</b>\n"
-            f"Com apenas {usado_disco} ocupados de um total de {total_disco}, você possui {livre_disco} livres. O espaço em disco está bastante confortável para logs, banco de dados ou atualizações de sistema.\n\n"
+            f"🔹 <b>Disco (/):</b> {icone_disco} <b>{pct_disco}% de Uso</b>\n"
+            f"{texto_disco}\n\n"
             
             f"🔹 <b>Memória RAM:</b> {icone_ram} <b>~{pct_ram}% de Uso Real</b>\n"
-            f"O sistema está utilizando apenas {usado_ram_gb} GB de um total de {total_ram_gb} GB disponíveis ({total_ram_mb} MB). Você tem aproximadamente {disp_ram_gb} GB livres/disponíveis (<code>available</code>), o que garante uma margem extremamente ampla para rodar novas aplicações, containers ou processos pesados.\n\n"
+            f"{texto_ram}\n\n"
             
             f"📊 <b>Resumo do Status</b>\n"
             f"{tabela}\n"
             
-            f"<blockquote><b>Observação técnica:</b> A utilização da instância Oracle Cloud Free Tier (4 vCPUs Ampere + 24 GB RAM) está super dimensionada para a carga de trabalho atual, garantindo altíssima estabilidade.</blockquote>"
+            f"{observacao}"
         )
         
         if EXIBIR_LOGS: logger.info(f"✅ Auditoria concluída em background. Disco: {pct_disco}% | RAM: {pct_ram}%")
@@ -7161,7 +7178,7 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
 
     config = ler_submissao_config()
     dias_atraso = config.get("repost_dias", 15)
-    limite = config.get("repost_limite", 6)
+    limite = rotulo_cota_de_config(config, "repost_limite_min", "repost_limite_max", "repost_limite")
     is_pausado = config.get("repost_pausado", False) or not config.get("ativo", False)
 
     agora = datetime.now(fuso_horario)
@@ -7233,8 +7250,8 @@ async def relatorio_fila_publico(message: types.Message, state: FSMContext):
     status_txt = "🔴 PAUSADO" if is_pausado else "🟢 ATIVO"
     texto_atual = f"📊 <b>Relatório da Fila Grupo Público (D+{dias_atraso})</b>\n\n"
     texto_atual += f"📡 <b>Rota: Repostagem Pública</b> ({qtd_pendentes} vídeos agendados)\n"
-    texto_atual += f"🕒 <b>Postagem:</b> D+{dias_atraso}, entre 10h e 20h\n"
-    texto_atual += f"📦 <b>Cota Diária:</b> {limite} vídeos/dia  ·  ⚙️ {status_txt}\n"
+    texto_atual += f"🕒 <b>Postagem:</b> D+{dias_atraso}, entre {config.get('repost_inicio', 10)}h e {config.get('repost_fim', 20)}h\n"
+    texto_atual += f"📦 <b>Cota Diária:</b> {limite}  ·  ⚙️ {status_txt}\n"
 
     mensagens_para_enviar = []
 
@@ -7591,8 +7608,8 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
     elif tipo_fila == "Autorais":
         mapa_rotas = {
             "Repostagem Autoral": {
-                "inicio": 10,
-                "fim": 20,
+                "inicio": ler_autorais_config().get("inicio", 10),
+                "fim": ler_autorais_config().get("fim", 20),
                 "status_canais": {},
                 "intervalo_dias": atraso_dias
             }
