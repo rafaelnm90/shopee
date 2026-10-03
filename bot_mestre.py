@@ -6528,50 +6528,48 @@ async def menu_opcoes_servidor_handler(message: types.Message, state: FSMContext
 
 @dp.message(F.text == "Monitorar Servidor 🖥️", StateFilter("*"))
 async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
+    """Uso de disco e RAM do servidor (df e free), com status e uma tabela resumida."""
     if message.from_user.id != ADMIN_ID: return
     
     if EXIBIR_LOGS: logger.info("🖥️ Iniciando auditoria assíncrona de saúde do servidor (Disco e Memória)...")
     msg_status = await message.answer("🖥️ Lendo sensores da máquina Oracle... ⏳")
     
     try:
-        # --- 1. COLETA E CÁLCULO DO DISCO ---
+        # Disco (df -h /)
         comando_disco = await asyncio.create_subprocess_exec("df", "-h", "/", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         stdout_disco, _ = await comando_disco.communicate()
-        # Pega a última linha (que contém os dados da raiz /)
+        # a última linha é a da raiz /
         linha_disco = stdout_disco.decode().strip().split('\n')[-1].split()
         
-        # Formatações amigáveis (ex: de "45G" para "45 GB")
         total_disco = linha_disco[1].replace("G", " GB")
         usado_disco = linha_disco[2].replace("G", " GB")
         livre_disco = linha_disco[3].replace("G", " GB")
         pct_disco_str = linha_disco[4]
         pct_disco = int(pct_disco_str.replace('%', ''))
         
-        # --- 2. COLETA E CÁLCULO DA RAM ---
+        # RAM (free -m)
         comando_ram = await asyncio.create_subprocess_exec("free", "-m", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
         stdout_ram, _ = await comando_ram.communicate()
         linha_ram = stdout_ram.decode().strip().split('\n')[1].split()
         
         total_ram_mb = int(linha_ram[1])
         usado_ram_mb = int(linha_ram[2])
-        # Pega a coluna 'available' (mais precisa no Linux moderno)
+        # coluna 'available' (a mais fiel no Linux atual)
         disp_ram_mb = int(linha_ram[6]) if len(linha_ram) > 6 else int(linha_ram[3])
         
-        # Conversão de MB para GB com 1 casa decimal
         total_ram_gb = round(total_ram_mb / 1024, 1)
         usado_ram_gb = round(usado_ram_mb / 1024, 1)
         disp_ram_gb = round(disp_ram_mb / 1024, 1)
         
         pct_ram = int((usado_ram_mb / total_ram_mb) * 100) if total_ram_mb > 0 else 0
         
-        # --- 3. DEFINIÇÃO DE STATUS E ÍCONES ---
+        # Status e ícones: até 75% bom, até 90% atenção, acima disso crítico
         icone_disco = "🟢" if pct_disco < 75 else "🟡" if pct_disco < 90 else "🔴"
         status_disco_txt = "Excelente" if pct_disco < 75 else "Atenção" if pct_disco < 90 else "Crítico"
         
         icone_ram = "🟢" if pct_ram < 75 else "🟡" if pct_ram < 90 else "🔴"
         status_ram_txt = "Excelente" if pct_ram < 75 else "Atenção" if pct_ram < 90 else "Crítico"
         
-        # Analisa o status macro para o texto introdutório
         if pct_disco < 75 and pct_ram < 75:
             status_geral = "<b>excelente saúde</b> (🟢 Saudável em todos os aspectos primários)"
             texto_risco = "Não há nenhum gargalo de recursos ou risco iminente de queda por esgotamento de hardware."
@@ -6582,8 +6580,7 @@ async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
             status_geral = "<b>risco crítico</b> (🔴 Esgotamento iminente)"
             texto_risco = "Atenção! Há um gargalo severo de recursos. Recomenda-se realizar limpeza ou upgrade de hardware imediatamente."
 
-        # --- 4. CONSTRUÇÃO DA TABELA VISUAL ALINHADA (<pre>) ---
-        # A tag <pre> alinha os espaços como no bloco de notas
+        # Tabela alinhada com <pre>
         tabela = (
             f"<pre>\n"
             f"Recurso | Total | Uso | Livre | Status\n"
@@ -6593,7 +6590,6 @@ async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
             f"</pre>"
         )
 
-        # --- 5. MONTAGEM DA MENSAGEM FINAL ---
         texto = (
             f"Seu servidor está em um estado de {status_geral}. {texto_risco}\n"
             f"Abaixo está o diagnóstico detalhado dos recursos analisados:\n\n"
@@ -6619,8 +6615,7 @@ async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.error(f"❌ Falha ao tentar coletar métricas no terminal do Linux: {e}")
         await msg_status.edit_text(f"❌ <b>Erro interno ao ler sensores:</b>\n<code>{e}</code>", parse_mode="HTML")
 
-# 🤖 Nomes bonitos para exibir no painel. Serviço que não estiver aqui
-# aparece com o nome técnico mesmo, sem quebrar nada.
+# Nomes para o painel; serviço fora daqui aparece com o nome técnico.
 NOMES_AMIGAVEIS_SERVICOS = {
     "bot_mestre_bot": "Bot Mestre (Painel Principal)",
     "motor_userbot_bot": "Motor Espião (Userbot)",
@@ -6630,9 +6625,10 @@ NOMES_AMIGAVEIS_SERVICOS = {
 }
 
 def listar_servicos_do_projeto():
-    """Lê os .service da pasta versionada servicos_linux/.
-    Robô novo entra sozinho na lista: basta o .service estar no repositório.
-    Nenhuma lista precisa ser editada na mão nunca mais."""
+    """
+    Serviços do projeto: os .service da pasta versionada servicos_linux/. Robô novo entra
+    sozinho na lista, basta o .service estar no repositório.
+    """
     pasta = os.path.join(os.path.dirname(os.path.abspath(__file__)), "servicos_linux")
     try:
         nomes = sorted(f[:-len(".service")] for f in os.listdir(pasta) if f.endswith(".service"))
@@ -6640,13 +6636,14 @@ def listar_servicos_do_projeto():
         if EXIBIR_LOGS: logger.error(f"❌ Não consegui ler {pasta}: {e}")
         nomes = []
     if not nomes:
-        # Rede de segurança: se a pasta sumir, pelo menos o painel volta sozinho.
+        # Sem a pasta, ao menos o próprio painel é reiniciado.
         if EXIBIR_LOGS: logger.warning("⚠️ Nenhum .service encontrado. Usando só o bot_mestre_bot.")
         return ["bot_mestre_bot"]
     return nomes
 
 @dp.message(F.text == "Reiniciar Robôs 🔄", StateFilter("*"))
 async def confirmar_reiniciar_robos(message: types.Message, state: FSMContext):
+    """Lista os serviços que serão reiniciados e pede confirmação."""
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("⚠️ Solicitando confirmação para reiniciar os serviços do servidor.")
     
@@ -6671,6 +6668,7 @@ async def confirmar_reiniciar_robos(message: types.Message, state: FSMContext):
 
 @dp.message(ConfigFluxo.aguardando_confirmacao_reiniciar)
 async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
+    """Reinicia os outros serviços e, por último, o próprio bot (systemctl, via sudo)."""
     if message.text == "Cancelar ❌":
         await state.clear()
         if EXIBIR_LOGS: logger.info("❌ Reinício global cancelado pelo administrador.")
@@ -6686,16 +6684,16 @@ async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
 
     await state.clear()
     
-    # 1. Envia a mensagem de status SEM o teclado embutido
+    # Status sem teclado; o teclado volta na mensagem final.
     msg_status = await message.answer("🔄 <b>Reiniciando os serviços no servidor Linux...</b>\n<i>Aguarde...</i>", parse_mode="HTML")
     
     if EXIBIR_LOGS: logger.info("🔄 Comando de reinício global acionado pelo administrador.")
     
-    # 🔎 A lista vem dos .service da pasta versionada, não de código fixo.
+    # A lista vem dos .service da pasta versionada.
     servicos = listar_servicos_do_projeto()
     servicos_background = [s for s in servicos if s != "bot_mestre_bot"]
 
-    # 1. Reinicia os serviços secundários em background
+    # 1. Os outros serviços, em segundo plano
     for servico in servicos_background:
         try:
             subprocess.Popen(["sudo", "systemctl", "restart", f"{servico}.service"])
@@ -6703,10 +6701,9 @@ async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro ao reiniciar {servico}: {e}")
             
-    # Dá tempo para as threads do Linux processarem os outros robôs
     await asyncio.sleep(2)
 
-    # 2. Apaga a mensagem temporária e envia a nova mensagem de Sucesso COM o teclado
+    # 2. Mensagem final com o teclado, antes de o bot cair
     await msg_status.delete()
     await message.answer(
         f"✅ <b>{len(servicos_background)} Sistemas Secundários Reiniciados!</b>\n"
@@ -6714,7 +6711,7 @@ async def processar_reiniciar_robos(message: types.Message, state: FSMContext):
         parse_mode="HTML", reply_markup=obter_teclado_opcoes_servidor()
     )
     
-    # 3. Reinicia a si mesmo por último (esse comando interrompe o bot mestre na hora)
+    # 3. Ele mesmo por último: o processo morre aqui.
     try:
         if EXIBIR_LOGS: logger.info("🔄 Reiniciando o próprio serviço (bot_mestre_bot.service). O script será interrompido agora!")
         subprocess.Popen(["sudo", "systemctl", "restart", "bot_mestre_bot.service"])
@@ -6728,14 +6725,19 @@ async def menu_canal_principal(message: types.Message, state: FSMContext):
     if EXIBIR_LOGS: logger.info("📂 Acessando a pasta do Canal Afiliados.")
     await message.answer("📺 <b>Menu do Canal Afiliados</b>\nGerencie as postagens e rotinas abaixo:", reply_markup=obter_teclado_principal(), parse_mode="HTML")
 
-# NOVO: Funções de Gestão do Banco de Pedidos Individuais
+# Pedidos e comissões da Shopee (relatório financeiro)
 def ler_banco_pedidos():
+    """Pedidos já vistos na API de afiliados: order_id -> data, status e comissões."""
     return ler_config_bd("banco_pedidos", padrao={}, arquivo_legado="banco_pedidos.json")
 
 def salvar_banco_pedidos(dados):
     salvar_config_bd("banco_pedidos", dados)
 
 async def buscar_dados_financeiros_shopee(dias_retroativos=30):
+    """
+    Relatório de conversões da API de afiliados dos últimos dias_retroativos dias,
+    em fatias de 30 (o limite da API é 31). None sem as chaves no .env.
+    """
     if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
         if EXIBIR_LOGS: logger.warning("⏳ [API Shopee] Chaves financeiras ausentes no .env.")
         return None
@@ -6744,8 +6746,7 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
     agora = datetime.now(fuso_horario)
     conversoes_totais = []
     
-    # ✅ A API da Shopee barra requisições > 31 dias.
-    # O robô agora "fatia" buscas longas em janelas de 30 dias automaticamente!
+    # A API da Shopee recusa período acima de 31 dias: a busca vai em fatias de 30.
     for i in range(0, dias_retroativos, 30):
         dias_para_puxar = min(30, dias_retroativos - i)
         
@@ -6810,14 +6811,20 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
         except Exception as e:
             if EXIBIR_LOGS: logger.error(f"❌ Erro crítico no motor financeiro: {e}")
             
-        await asyncio.sleep(1) # Pequena pausa anti-ban da Shopee entre os blocos
+        await asyncio.sleep(1)  # pausa entre as fatias
         
     return conversoes_totais
 
 def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
+    """
+    Atualiza o banco de pedidos com as conversões da API e o saldo das comissões
+    confirmadas (soma na confirmação, estorna se deixar de estar confirmado). Com
+    ignorar_ledger=True só atualiza os pedidos, sem mexer no saldo. Devolve o histórico
+    por dia.
+    """
     pedidos_db = ler_banco_pedidos()
     
-    # 🟢 O Robô carrega a sua conta bancária virtual
+    # Saldo acumulado das comissões confirmadas ("conta bancária virtual").
     saldo_caixa = float(ler_config_bd("saldo_caixa_shopee", 0.0))
     houve_atualizacao = False
     from datetime import timezone
@@ -6853,15 +6860,15 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
                         pedidos_db[order_sn]["status"] = novo_status
                         houve_atualizacao = True
                         
-                        # 🟢 A MÁGICA: Se o pedido MUDOU para Confirmado agora, ele soma no seu Saldo!
+                        # Virou COMPLETED agora: soma no saldo (e o contrário estorna).
                         if not ignorar_ledger:
                             if estado_anterior != "COMPLETED" and novo_status == "COMPLETED":
                                 saldo_caixa += c_total_frac
                                 if EXIBIR_LOGS: logger.info(f"💰 Transição detectada! Pedido confirmado: + R${c_total_frac:.2f}")
                             elif estado_anterior == "COMPLETED" and novo_status != "COMPLETED":
-                                saldo_caixa -= c_total_frac # Estorno de segurança
+                                saldo_caixa -= c_total_frac  # estorno
                                 
-                    # Atualiza comissões caso o valor tenha sido ajustado pela Shopee
+                    # Comissão ajustada pela Shopee
                     if c_total_frac > 0 and pedidos_db[order_sn].get("comissao_total", 0) != c_total_frac:
                         if not ignorar_ledger and novo_status == "COMPLETED":
                             diferenca = c_total_frac - pedidos_db[order_sn]["comissao_total"]
@@ -6872,7 +6879,7 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
                         pedidos_db[order_sn]["comissao_vendedor"] = c_extra_frac
                         houve_atualizacao = True
                 else:
-                    # É um Pedido Novo Inédito
+                    # Pedido novo
                     pedidos_db[order_sn] = {
                         "data": dt_db_str,
                         "status": novo_status,
@@ -6881,7 +6888,7 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
                         "comissao_vendedor": c_extra_frac
                     }
                     houve_atualizacao = True
-                    # Se ele já nasceu confirmado na API, soma no Saldo
+                    # Já veio confirmado: entra no saldo.
                     if not ignorar_ledger and novo_status == "COMPLETED":
                         saldo_caixa += c_total_frac
                         if EXIBIR_LOGS: logger.info(f"💰 Novo pedido já nasceu confirmado! + R${c_total_frac:.2f}")
@@ -6889,9 +6896,9 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
     if houve_atualizacao:
         salvar_banco_pedidos(pedidos_db)
         if not ignorar_ledger:
-            salvar_config_bd("saldo_caixa_shopee", saldo_caixa) # Salva a conta bancária
+            salvar_config_bd("saldo_caixa_shopee", saldo_caixa)
             
-    # Reconstrói a visão de desempenho do DRE (Fica intacta para o gráfico)
+    # Refaz o histórico por dia (aprovado, pendente, cancelado) usado no relatório e no gráfico.
     historico_limpo = {}
     for sn, p in pedidos_db.items():
         d_str = p["data"]
@@ -6926,6 +6933,7 @@ def obter_teclado_relatorios():
 
 @dp.message(F.text == "Filas dos Parceiros 👥", StateFilter("*"))
 async def relatorio_filas_parceiros(message: types.Message, state: FSMContext):
+    """Resumo das filas dos parceiros: vídeos, disco, cota e a prévia do fechamento do dia."""
     if message.from_user.id != ADMIN_ID: return
     if EXIBIR_LOGS: logger.info("📋 Gerando relatório das filas dos parceiros...")
 
@@ -6957,7 +6965,7 @@ async def relatorio_filas_parceiros(message: types.Message, state: FSMContext):
         status = "🟢" if p.get("ativo") else "⏸️"
         acesso = "✅" if p.get("origem_ok") else "⏳"
 
-        # Agrupa por dia para dar noção do cronograma
+        # Agrupa por dia, para dar noção do cronograma.
         por_dia = {}
         for i in itens:
             por_dia[i.get("data_alvo") or "?"] = por_dia.get(i.get("data_alvo") or "?", 0) + 1
@@ -6974,9 +6982,8 @@ async def relatorio_filas_parceiros(message: types.Message, state: FSMContext):
         )
 
         if por_dia:
-            # 🎲 Prévia do fechamento das 23:55: mostra a cota já sorteada para
-            # cada dia e quantos serão descartados. Sem isto o painel só dizia
-            # "3 vídeos" e não dava para saber o que aconteceria à noite.
+            # Prévia do fechamento das 23:55: a cota já sorteada para cada dia e quantos
+            # serão descartados.
             proximos = sorted(por_dia.items())[:4]
             linhas_dias = []
             for dia, qtd in proximos:
@@ -7046,11 +7053,8 @@ async def pedir_parceiro_detalhe(message: types.Message, state: FSMContext):
 @dp.message(RelatoriosFluxo.aguardando_parceiro_detalhe)
 async def detalhar_fila_parceiro(message: types.Message, state: FSMContext):
     """
-    📋 A fila do parceiro vídeo a vídeo.
-
-    O painel de filas só dava o número, e número não diz o que está lá dentro.
-    Aqui sai cada item com a data de captura, o dia em que sai, o horário já
-    sorteado (quando existe) e o link do produto para conferir na hora.
+    A fila de um parceiro vídeo a vídeo: captura, dia e horário de saída, tamanho e
+    link do produto.
     """
     if message.from_user.id != ADMIN_ID: return
     texto = (message.text or "").strip()
