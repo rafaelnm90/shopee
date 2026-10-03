@@ -50,6 +50,9 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **03/10/2026:** se o envio falha por causa temporária, o vídeo volta para a fila e tenta no ciclo seguinte, até 3 vezes. Vídeo apagado ou sem vídeo na origem é descartado na hora.
 - **03/10/2026:** rotas criadas pelo assistente "Criar Rota" gravam as origens no formato que o motor lê, e as rotas antigas foram convertidas. As origens da criação passaram a capturar.
 - **03/10/2026:** `espelhos_config.json` e `fila_espelhador.json` são gravados em arquivo temporário e trocados de uma vez, para ninguém ler o arquivo pela metade.
+- **03/10/2026:** o que já foi publicado fica na fila como histórico só por 3 dias.
+  - Antes ficava para sempre: eram 1.099 itens desde 14/09, e o arquivo de 1 MB era regravado a cada minuto.
+  - Os pendentes nunca são podados.
 
 ## Vídeos Autorais e contas do pool
 
