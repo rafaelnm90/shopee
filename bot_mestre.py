@@ -13387,7 +13387,7 @@ class GerenciarFilaFluxo(StatesGroup):
     aguardando_nova_legenda = State()
     aguardando_posicao_reordenar = State()
     aguardando_nova_posicao = State()
-    aguardando_decisao_limiar = State() # ✅ NOVO: Estado de decisão de fronteira
+    aguardando_decisao_limiar = State()  # vídeo na divisa entre dois dias: qual data?
     aguardando_confirmacao_reordenar = State()
     aguardando_data_posicao = State()
     aguardando_posicao_numeracao = State()
@@ -13408,6 +13408,10 @@ teclado_gerenciar_fila = ReplyKeyboardMarkup(
 
 @dp.message(F.text == "Gerenciar Fila 📋", StateFilter("*"))
 async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
+    """
+    Gerenciar Fila: vídeos pendentes e os postados hoje, com o lote, a previsão e a hora
+    agendada, entre o Bom Dia e a Boa Noite.
+    """
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     if EXIBIR_LOGS: logger.info("📋 Acessando o painel de gerenciamento de fila...")
@@ -13418,7 +13422,7 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
     texto = "📋 <b>Gerenciador de Fila de Postagens</b>\n"
     texto += f"Total de vídeos agendados: <b>{len(fila)}</b>\n\n"
     
-    # --- CAPTURA DE BOM DIA / BOA NOITE ---
+    # Bom Dia e Boa Noite de hoje: o horário agendado ou o que já saiu
     from datetime import datetime
     agora = datetime.now(fuso_horario)
     hoje_str = agora.strftime("%Y-%m-%d")
@@ -13461,20 +13465,19 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             is_postado = item.get("postado", False)
             data_postagem_str = item.get("data_postagem", "")
             
-            # 🛡️ PENTE FINO: Só exibe os vídeos PENDENTES ou os que foram POSTADOS HOJE
+            # Só os pendentes e os postados hoje
             if is_postado and data_postagem_str != hoje_str:
                 continue
             
-            # Identifica se o vídeo pertence ao dia de Hoje (para fins de exibição da divisória do Boa Noite)
+            # Vídeo de hoje? A divisória da Boa Noite separa hoje do resto.
             is_hoje = (data_adicao_str == "2000-01-01" or (data_adicao_str and data_adicao_str <= hoje_str))
             
-            # Se for o primeiro vídeo de "Amanhã" (ou além) e ainda não imprimimos a tampa de Boa Noite, imprime agora
             if not is_hoje and not is_postado and not imprimiu_bn:
                 texto += "━━━━━━━━━━━━━━━━━━\n"
                 texto += f"🌙 <b>Boa Noite ({data_dia_br}):</b> {hora_bn}\n\n"
                 imprimiu_bn = True
             
-            # Extrai Número do Vídeo e Nome do Item da Legenda HTML
+            # Número ("Vídeo N") e nome do item tirados da legenda
             match_video = re.search(r'(?i)Vídeo\s+\d+', legenda)
             match_item = re.search(r'📦\s*Item:\s*([^\n<]+)', legenda)
             
@@ -13501,16 +13504,15 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
                 else:
                     data_br = "Data desconhecida"
                     
-                # Define a Previsão de Postagem base
                 if is_pausado:
                     status_previsao = "Pausado 🛑"
                 elif data_adicao_str == "2000-01-01" or data_adicao_str <= hoje_str:
                     status_previsao = "Hoje 🟢"
                 else:
-                    # ✅ CORREÇÃO MESTRE: Limite rígido. Qualquer data futura será tratada como Amanhã.
+                    # Toda data futura aparece como Amanhã (a data exata está no Lote)
                     status_previsao = "Amanhã 🟡"
 
-                # ✅ CORREÇÃO: Interrogação Silenciosa do Motor APENAS para vídeos de HOJE
+                # Hora exata só para os de hoje: a do job agendado
                 hora_agendada_str = ""
                 if status_previsao == "Hoje 🟢":
                     job_id_esperado = f"job_fila_postagem_{item.get('id')}"
@@ -13528,7 +13530,7 @@ async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
             else:
                 texto += f"   └ Lote (Data-Alvo): {data_br} | Previsão: {status_previsao_final}\n\n"
                 
-        # Se terminou de varrer toda a fila e não encontrou vídeos de "Amanhã", a tampa do Boa Noite vai no final
+        # Sem vídeo de amanhã, a divisória da Boa Noite vai no fim
         if not imprimiu_bn:
             texto += "━━━━━━━━━━━━━━━━━━\n"
             texto += f"🌙 <b>Boa Noite ({data_dia_br}):</b> {hora_bn}\n\n"
@@ -13551,6 +13553,10 @@ async def sair_menu_fila(message: types.Message, state: FSMContext):
     await message.answer("Painel de Controle atualizado.", reply_markup=obter_teclado_principal())
 
 async def aplicar_renumeracao_e_salvar(fila_ids_ordenada, message, state, numero_base=None):
+    """
+    Grava a ordem (prioridade) e renumera o "Vídeo N" das legendas em sequência, a partir
+    de numero_base ou do menor número da lista. Depois refaz a grade do principal.
+    """
     import re
     if EXIBIR_LOGS: logger.info("🔄 Reorganizando prioridades e numeração no SQLite...")
     
@@ -13593,16 +13599,15 @@ async def aplicar_renumeracao_e_salvar(fila_ids_ordenada, message, state, numero
         conexao.close()
 
         async with _lock_contador:
-            # ✅ CORREÇÃO MESTRE: O contador global SEMPRE herda o próximo número da cascata, 
-            # independentemente de ser maior ou menor. Isso garante sincronia total.
+            # O contador passa a ser o próximo da sequência, maior ou menor que o atual:
+            # o próximo vídeo criado continua a numeração da fila.
             salvar_contador(numero_atual_cascata)
             if EXIBIR_LOGS: logger.info(f"✅ Auto-correção do banco concluída. Novo contador global forçado para: {numero_atual_cascata}.")
 
-        # ✅ NOVO GATILHO INTELIGENTE: Aciona o recálculo automático da grade!
-        # Isso faz exatamente a mesma coisa que o botão "Atualizar Rotinas",
-        # garantindo que os horários sejam recalculados para respeitar a nova ordem da fila sem atropelos.
+        # Refaz a grade do principal (como o "Atualizar Rotinas") para os horários
+        # seguirem a nova ordem.
         if EXIBIR_LOGS: logger.info("🔄 Alteração na fila detectada. Acionando recálculo inteligente dos horários...")
-        agendar_tarefas_diarias(escopo="principal") # Garante que mexer na fila não reseta o canal viral
+        agendar_tarefas_diarias(escopo="principal")  # só o principal; Viral e Público ficam como estão
 
         await message.answer("✅ Operação concluída com sucesso!\n🔄 A fila e os horários foram sincronizados perfeitamente.")
         await menu_gerenciar_fila(message, state)
@@ -13610,24 +13615,23 @@ async def aplicar_renumeracao_e_salvar(fila_ids_ordenada, message, state, numero
         if EXIBIR_LOGS: logger.error(f"❌ Erro ao organizar SQLite: {e}")
         await message.answer(f"❌ Erro interno ao salvar no banco: {e}")
 
-# ✅ NOVO: Muralha de Segurança - Trava todas as edições se a fila estiver vazia
 @dp.message(GerenciarFilaFluxo.menu_principal, F.text.in_(["Publicar Agora 🚀", "Excluir Vídeo 🗑️", "Editar Numeração 🔢", "Mover Posição ↕️", "Editar Legenda ✏️"]))
 async def trava_fila_vazia(message: types.Message, state: FSMContext):
+    """Botões da fila: sem vídeo pendente, avisa e volta; senão, segue para o fluxo do botão."""
     if message.from_user.id != ADMIN_ID: return
     
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
     
-    # Verifica se a fila está vazia ou se só tem vídeos já postados
     videos_pendentes = [item for item in fila if not item.get("postado", False)]
     
     if not videos_pendentes:
         if EXIBIR_LOGS: logger.warning(f"⚠️ Fila: Tentativa de usar '{message.text}' bloqueada (Fila vazia).")
         await message.answer(f"⚠️ <b>Ação Bloqueada:</b> A sua fila de vídeos está vazia no momento.\n\nNão há nenhum vídeo agendado para poder utilizar a função de {message.text.split(' ')[1]}.", parse_mode="HTML")
-        await menu_gerenciar_fila(message, state) # Recarrega o menu principal da fila
+        await menu_gerenciar_fila(message, state)
         return
         
-    # 🔁 Roteamento Inteligente (Se tiver vídeos, ele deixa passar para o handler correto)
+    # Há pendentes: segue para o fluxo do botão
     if message.text == "Excluir Vídeo 🗑️":
         await pedir_exclusao_fila(message, state)
     elif message.text == "Editar Legenda ✏️":
@@ -13683,6 +13687,10 @@ async def confirmar_posicao_exclusao_fila(message: types.Message, state: FSMCont
 
 @dp.message(GerenciarFilaFluxo.aguardando_confirmacao_exclusao)
 async def processar_exclusao_fila(message: types.Message, state: FSMContext):
+    """
+    Exclui o vídeo (e o arquivo, se nenhum outro usa) e renumera a fila a partir do menor
+    número de antes.
+    """
     if message.text != "Aprovar Exclusão ✅":
         await message.answer("Por favor, utilize os botões abaixo para aprovar ou cancelar a exclusão.")
         return
@@ -13762,6 +13770,7 @@ async def processar_posicao_editar_fila(message: types.Message, state: FSMContex
 
 @dp.message(GerenciarFilaFluxo.aguardando_nova_legenda)
 async def salvar_nova_legenda_fila(message: types.Message, state: FSMContext):
+    """Grava a legenda nova (com a formatação do Telegram)."""
     data = await state.get_data()
     posicao = data.get("posicao_edicao")
     nova_legenda = message.html_text 
@@ -13788,13 +13797,13 @@ async def salvar_nova_legenda_fila(message: types.Message, state: FSMContext):
         await menu_gerenciar_fila(message, state)
 
 async def pedir_reordenar_fila(message: types.Message, state: FSMContext):
+    """Mover Posição: pede a posição do vídeo; com 1 pendente, vai direto para a data."""
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
     
-    # Descobre quantos vídeos realmente faltam postar
     indices_pendentes = [i for i, item in enumerate(fila) if not item.get("postado", False)]
     
-    # 🚀 ATALHO INTELIGENTE: Se só existe 1 vídeo, pula as perguntas de posição!
+    # Só 1 pendente: não há posição para escolher, só a data
     if len(indices_pendentes) == 1:
         posicao_unica = indices_pendentes[0]
         await state.update_data(posicao_origem=posicao_unica, nova_posicao=posicao_unica)
@@ -13810,14 +13819,14 @@ async def pedir_reordenar_fila(message: types.Message, state: FSMContext):
             opcoes.append("Hoje 🟢")
         opcoes.append("Amanhã 🟡")
         
-        # Adiciona os próximos 3 dias para dar flexibilidade
+        # Hoje (se a Boa Noite não saiu), amanhã e os 3 dias seguintes
         for i in range(2, 5):
             d_futuro = agora + timedelta(days=i)
             opcoes.append(f"{d_futuro.strftime('%d/%m/%Y')} 🔵")
             
-        botoes = [[KeyboardButton(text=op)] for op in opcoes[:3]] # Primeira linha com 3 botões
+        botoes = [[KeyboardButton(text=op)] for op in opcoes[:3]]
         if len(opcoes) > 3:
-            botoes.append([KeyboardButton(text=op) for op in opcoes[3:]]) # Segunda linha com os restantes
+            botoes.append([KeyboardButton(text=op) for op in opcoes[3:]])
         botoes.append([KeyboardButton(text="Cancelar ❌")])
         
         teclado_escolha_data = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -13827,7 +13836,6 @@ async def pedir_reordenar_fila(message: types.Message, state: FSMContext):
         await state.set_state(GerenciarFilaFluxo.aguardando_data_posicao)
         return
 
-    # Comportamento normal se houver mais de 1 vídeo
     await message.answer("Digite o <b>NÚMERO</b> da posição atual do vídeo que deseja mover:", reply_markup=teclado_cancelar, parse_mode="HTML")
     await state.set_state(GerenciarFilaFluxo.aguardando_posicao_reordenar)
 
@@ -13864,6 +13872,10 @@ async def pedir_nova_posicao_fila(message: types.Message, state: FSMContext):
 
 @dp.message(GerenciarFilaFluxo.aguardando_nova_posicao)
 async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
+    """
+    Calcula a data do vídeo na posição nova pelos vizinhos; na divisa entre dois dias,
+    pergunta.
+    """
     if not message.text.isdigit():
         await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
         return
@@ -13876,7 +13888,7 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
     fila = fila_data.get("fila", [])
     
     if 0 <= posicao_origem < len(fila):
-        # ✅ TRAVA DE PROTEÇÃO: Impede mover vídeo para a posição de vídeos postados
+        # Não pode ocupar o lugar de um vídeo já postado
         if 0 <= nova_posicao < len(fila) and fila[nova_posicao].get("postado", False):
             await message.answer("⚠️ <b>Ação Bloqueada:</b> Você não pode mover um vídeo pendente para o lugar de um vídeo que já foi postado.\n\nEscolha uma posição livre abaixo dos postados:", parse_mode="HTML")
             return
@@ -13885,7 +13897,7 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         
         await state.update_data(nova_posicao=nova_posicao)
         
-        # 1. Simulação Perfeita: Removemos o item da posição original
+        # 1. Tira o vídeo da posição atual (numa cópia da fila)
         fila_simulada = fila.copy()
         item_movido = fila_simulada.pop(posicao_origem)
         
@@ -13899,7 +13911,7 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
             try: return f"{datetime.strptime(d_str, '%Y-%m-%d').strftime('%d/%m/%Y')} 🔵"
             except: return "Data Desconhecida"
         
-        # Se a fila ficou vazia (só havia 1 vídeo)
+        # Era o único vídeo: hoje, ou amanhã se a Boa Noite já saiu
         if len(fila_simulada) == 0:
             dados_rotina = ler_config_rotina()
             expediente_encerrado = dados_rotina.get("ultimo_boa_noite") == hoje_str
@@ -13908,7 +13920,7 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
             await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
             return
             
-        # 2. Inserção Virtual: Colocamos o item na nova posição para testar os vizinhos
+        # 2. Põe na posição nova para ver os vizinhos
         is_ultimo_item = False
         if nova_posicao >= len(fila_simulada):
             fila_simulada.append(item_movido)
@@ -13918,39 +13930,36 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
             fila_simulada.insert(nova_posicao, item_movido)
             nova_posicao_virtual = nova_posicao
             
-        # 3. Análise de Vizinhança e Detecção de Limiar
+        # 3. Data dos vizinhos
         date_prev = None
         date_next = None
         
         if is_ultimo_item:
             date_prev = fila_simulada[nova_posicao_virtual - 1].get("data_adicao", "2000-01-01")
             
-            # ✅ CORREÇÃO: Limite rígido. Se o penúltimo for Hoje, o próximo pode ser Amanhã.
-            # Se o penúltimo JÁ for Amanhã, o próximo TAMBÉM SERÁ Amanhã (Não existe "depois de amanhã").
+            # Fim da fila: o vizinho de baixo é amanhã (a fila não passa de amanhã).
             if date_prev == "2000-01-01" or date_prev <= hoje_str:
                 date_next = amanha_str
             else:
-                date_next = amanha_str # Trava a data no amanhã
+                date_next = amanha_str
                 
             if EXIBIR_LOGS: logger.info(f"🚧 Fila: Movimento para o final da fila. Limiar aberto gerado com trava diária: {date_prev} vs {date_next}.")
         else:
-            # Comportamento normal: O vídeo foi inserido no meio da fila.
+            # No meio da fila: os vizinhos reais, limitados a amanhã
             if nova_posicao_virtual > 0:
                 date_prev = fila_simulada[nova_posicao_virtual - 1].get("data_adicao", "2000-01-01")
                 
             if nova_posicao_virtual < len(fila_simulada) - 1:
                 date_next = fila_simulada[nova_posicao_virtual + 1].get("data_adicao", "2000-01-01")
                 
-            # ✅ CORREÇÃO: Garante que os vizinhos nunca ultrapassem o limite de Amanhã
             if date_prev and date_prev > amanha_str: date_prev = amanha_str
             if date_next and date_next > amanha_str: date_next = amanha_str
         
-        # 4. Verificação de Limiar (Aciona a Pergunta ao Usuário)
+        # 4. Vizinhos em dias diferentes: o usuário escolhe a data
         if date_prev and date_next:
             label_prev = format_date(date_prev)
             label_next = format_date(date_next)
             
-            # Se os rótulos de dia forem diferentes, detectamos um limiar!
             if label_prev != label_next:
                 await state.update_data(data_limiar_prev=date_prev, data_limiar_next=date_next)
                 
@@ -13970,7 +13979,7 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
                 await state.set_state(GerenciarFilaFluxo.aguardando_decisao_limiar)
                 return 
 
-        # 5. Se não houver limiar (ex: moveu dentro do mesmo dia)
+        # 5. Mesmo dia dos dois lados: herda a data do vizinho
         if date_prev: nova_data_adicao = date_prev
         elif date_next: nova_data_adicao = date_next
         else: nova_data_adicao = "2000-01-01"
@@ -13981,9 +13990,9 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
         await message.answer("Erro de sincronização. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
 
-# ✅ NOVO: Handler que processa o clique no botão do Limiar
 @dp.message(GerenciarFilaFluxo.aguardando_decisao_limiar)
 async def processar_decisao_limiar(message: types.Message, state: FSMContext):
+    """Data escolhida na divisa entre dois dias."""
     texto = message.text
     
     if texto == "Cancelar ❌":
@@ -14025,11 +14034,11 @@ async def processar_decisao_limiar(message: types.Message, state: FSMContext):
     fila_data = ler_fila_postagens()
     fila = fila_data.get("fila", [])
     
-    # Continua o fluxo normalmente para a confirmação visual
     await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
 
 @dp.message(GerenciarFilaFluxo.aguardando_data_posicao)
 async def processar_data_posicao_fila(message: types.Message, state: FSMContext):
+    """Data escolhida no atalho de 1 vídeo."""
     texto = message.text
     if "Hoje" in texto or "Amanhã" in texto or "🔵" in texto:
         pass
@@ -14062,6 +14071,7 @@ async def processar_data_posicao_fila(message: types.Message, state: FSMContext)
     await enviar_confirmacao_reordenar(message, state, fila, posicao_origem, nova_posicao)
 
 async def enviar_confirmacao_reordenar(message: types.Message, state: FSMContext, fila, posicao_origem, nova_posicao):
+    """Mostra a mudança de posição e a data nova e pede confirmação."""
     import re
     from datetime import datetime
     legenda = fila[posicao_origem].get("legenda", "")
@@ -14080,7 +14090,6 @@ async def enviar_confirmacao_reordenar(message: types.Message, state: FSMContext
     data = await state.get_data()
     nova_data_adicao = data.get("nova_data_adicao")
     
-    # Formata a data para ficar amigável na mensagem de confirmação
     if nova_data_adicao == "2000-01-01":
         data_amigavel = "Imediato/Hoje"
     else:
@@ -14088,7 +14097,7 @@ async def enviar_confirmacao_reordenar(message: types.Message, state: FSMContext
     
     texto = f"Você está prestes a alterar o agendamento do vídeo:\n📝 <i>{resumo}...</i>\n\n"
     
-    # Só exibe a mudança de posição se ela realmente mudou
+    # A posição só aparece se mudou (o atalho de 1 vídeo só muda a data)
     if posicao_origem != nova_posicao:
         texto += f"Da posição <b>{posicao_origem + 1}</b> ➡️ Para a posição <b>{nova_posicao + 1}</b>.\n"
         
@@ -14101,6 +14110,7 @@ async def enviar_confirmacao_reordenar(message: types.Message, state: FSMContext
 
 @dp.message(GerenciarFilaFluxo.aguardando_confirmacao_reordenar)
 async def processar_confirmacao_reordenar(message: types.Message, state: FSMContext):
+    """Grava a data nova, aplica a ordem e renumera."""
     if message.text != "Aprovar Mudança ✅":
         await message.answer("Por favor, clique em Aprovar ou Cancelar.")
         return
@@ -14125,7 +14135,7 @@ async def processar_confirmacao_reordenar(message: types.Message, state: FSMCont
             conexao.commit()
             conexao.close()
             
-            # ✅ CORREÇÃO: Se o vídeo foi empurrado para o futuro, remove a "bomba relógio" da memória de hoje
+            # Foi para depois de hoje: sai o job que o publicaria hoje
             agora = datetime.now(fuso_horario)
             hoje_str = agora.strftime("%Y-%m-%d")
             if nova_data_adicao != "2000-01-01" and nova_data_adicao > hoje_str:
@@ -14185,6 +14195,7 @@ async def pedir_novo_numero_fila(message: types.Message, state: FSMContext):
 
 @dp.message(GerenciarFilaFluxo.aguardando_nova_numeracao)
 async def salvar_nova_numeracao_fila(message: types.Message, state: FSMContext):
+    """Renumera do vídeo escolhido até o fim, a partir do número digitado."""
     if not message.text.isdigit():
         await message.answer("Por favor, digite apenas números.", reply_markup=teclado_cancelar)
         return
@@ -14199,7 +14210,7 @@ async def salvar_nova_numeracao_fila(message: types.Message, state: FSMContext):
     if 0 <= posicao < len(fila):
         if EXIBIR_LOGS: logger.info(f"🔄 Iniciando renumeração via SQLite a partir da posição {posicao+1}...")
         
-        # Pega a lista de IDs a partir da posição selecionada
+        # Renumera daqui até o fim da fila
         fila_ids_alvo = [item["id"] for item in fila[posicao:]]
         await aplicar_renumeracao_e_salvar(fila_ids_alvo, message, state, numero_base=novo_numero_inicial)
     else:
@@ -14248,9 +14259,12 @@ async def preparar_publicacao_imediata(message: types.Message, state: FSMContext
     else:
         await message.answer("Número de posição inválido. Tente novamente:", reply_markup=teclado_cancelar)
 
-# 🚀 CORREÇÃO: Vinculação do handler ao estado correto da FSM para processar o clique
 @dp.message(GerenciarFilaFluxo.aguardando_confirmacao_publicar)
 async def processar_publicacao_imediata(message: types.Message, state: FSMContext):
+    """
+    Publica agora um vídeo da fila no canal principal e marca CONCLUIDO. As outras cópias
+    do mesmo arquivo passam a usar o file_id do envio.
+    """
     if message.text != "Publicar Vídeo 🚀":
         await message.answer("Por favor, utilize os botões abaixo para aprovar ou cancelar a publicação.")
         return
@@ -14264,7 +14278,7 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
     if posicao is not None and 0 <= posicao < len(fila):
         item = fila[posicao]
         
-        # 1. Preserva o número original do vídeo (ignora o contador global)
+        # Publica com a numeração que já está na legenda
         legenda_disparo = item.get("legenda", "")
         
         if EXIBIR_LOGS: logger.info(f"🚀 Iniciando antecipação do vídeo na posição {posicao+1}. Mantendo a numeração original.")
@@ -14277,9 +14291,8 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
         sucesso_upload = False
         novo_file_id = None  # só existe quando sobe o arquivo do disco
         try:
-            # 2. Disparo imediato para o Telegram
             if caminho_video and os.path.exists(caminho_video):
-                # ✅ SEGUNDA TRAVA DE SEGURANÇA: Inspeção da extensão física
+                # Arquivo de imagem não sobe como vídeo
                 if caminho_video.lower().endswith(('.jpg', '.jpeg', '.png', '.webp', '.gif')):
                     if EXIBIR_LOGS: logger.warning("🚫 [Segurança] Disparo imediato abortado! O ficheiro é uma imagem.")
                     raise Exception("O ficheiro físico validado é uma imagem e não um vídeo.")
@@ -14337,7 +14350,7 @@ async def processar_publicacao_imediata(message: types.Message, state: FSMContex
         await message.answer("Erro de sincronização ou posição inválida. Operação cancelada.")
         await menu_gerenciar_fila(message, state)
 
-# --- MOTOR DE PROCESSAMENTO DO ESPIÃO ---
+# --- Motor do Espião (fila de clonagem) ---
 def ler_fila_clonagem():
     padrao = {"fila": []}
     return ler_config_bd("fila_clonagem", padrao, arquivo_legado="fila_clonagem.json")
