@@ -7,6 +7,8 @@ projeto sai daqui; o tests/test_db.py barra sqlite3.connect em outro arquivo.
 - conexao(): a mesma conexão num with, que grava (commit) no fim, desfaz
   (rollback) se der erro e fecha sempre, com ou sem erro. Prefira esta em código novo.
 - ler_config() e salvar_config(): a tabela configuracoes (chave -> JSON).
+- atualizar_config(): lê, altera e grava uma chave sem perder a gravação de
+  outro robô que mexa na mesma chave ao mesmo tempo.
 
 Por que WAL: no modo padrão do SQLite, quem está lendo impede quem quer gravar
 de concluir a gravação. Os robôs leem um item da fila e seguram essa leitura
@@ -154,3 +156,28 @@ def salvar_config(chave, dados):
     except Exception as e:
         logger.error(f"❌ [Banco] Erro ao salvar a configuração '{chave}': {e}")
         return False
+
+
+def atualizar_config(chave, alterar, padrao=None):
+    """
+    Lê a chave, chama alterar(dados) e grava, tudo numa transação só.
+
+    O BEGIN IMMEDIATE pega o lock de gravação antes da leitura: se outro robô
+    grava a mesma chave no meio, ele espera, em vez de uma gravação apagar a
+    outra. alterar muda os dados no lugar e devolve o que quiser repassar a
+    quem chamou. Devolve esse retorno, ou None se der erro.
+    """
+    try:
+        with conexao() as con:
+            con.execute("BEGIN IMMEDIATE")
+            linha = con.execute("SELECT valor FROM configuracoes WHERE chave = ?", (chave,)).fetchone()
+            dados = json.loads(linha[0]) if linha else ({} if padrao is None else padrao)
+            resultado = alterar(dados)
+            con.execute(
+                "INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)",
+                (chave, json.dumps(dados, ensure_ascii=False)),
+            )
+        return resultado
+    except Exception as e:
+        logger.error(f"❌ [Banco] Erro ao atualizar a configuração '{chave}': {e}")
+        return None

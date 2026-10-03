@@ -29,6 +29,7 @@ Módulos de apoio (não são serviços):
   - O ✅/❌ de cada conta sai de `avaliar_saude`.
   - Login em etapas (`iniciar_login` → `confirmar_codigo` → `confirmar_senha` → `finalizar_cadastro`), usado pelo botão ➕ Nova conta.
 - `blacklist_captura.py`: autores que o espelhador nunca captura, incluindo as próprias contas do pool, para não haver laço de recaptura.
+- `alvos_sem_acesso.py`: alvos da divulgação a que a conta perdeu o acesso. O `divulgacao_canal` marca e para de enviar; o bot_mestre avisa e reativa.
 - `painel_espelhos.py` e `painel_notas.py`: routers aiogram incluídos no bot_mestre.
 - `utils.py` (`erros_logs`, caches, validação de IDs) e `fuso.py` (horário de Brasília e formato de log).
 - `api_gemini.py` (IA, com cascata de modelos) e `api_shopee.py` (links de afiliado).
@@ -66,7 +67,7 @@ arquivo cresce: `grep -n "^# --- " bot_mestre.py`. Os blocos grandes usam
   - `db.conectar()`: conexão solta, quem abre fecha.
   - Nunca `sqlite3.connect` direto: o `tests/test_db.py` barra.
   - O banco fica em modo WAL: leitura e gravação não se bloqueiam. Os arquivos `banco_dados.db-wal` e `-shm` fazem parte do banco.
-  - `configuracoes` (chave → JSON): `db.ler_config` e `db.salvar_config`, os mesmos em todos os robôs.
+  - `configuracoes` (chave → JSON): `db.ler_config` e `db.salvar_config`, os mesmos em todos os robôs. Chave que dois robôs gravam: `db.atualizar_config` (lê, altera e grava sem perder a gravação do outro).
   - Filas em tabelas: `fila_postagens` (canal principal), `fila_autorais`, `fila_publico`, `fila_parceiros` e `fila_notas`.
   - A fila do Espião (`fila_clonagem`) é uma chave de `configuracoes`.
   - `erros_logs`.

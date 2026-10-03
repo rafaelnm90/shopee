@@ -49,7 +49,7 @@ os.environ.update({
 # no primeiro teste que os usa, as sobras cairiam na pasta desse teste, e o
 # resultado dependeria da ordem em que os testes rodam.
 os.chdir(tempfile.mkdtemp(prefix="shopee_testes_"))
-for _modulo in ("bot_mestre", "pool_contas", "espelhador_videos_autorais"):
+for _modulo in ("bot_mestre", "pool_contas", "espelhador_videos_autorais", "divulgacao_canal"):
     importlib.import_module(_modulo)
 
 import pytest  # noqa: E402
