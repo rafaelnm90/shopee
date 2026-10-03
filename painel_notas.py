@@ -22,6 +22,7 @@ import pandas as pd
 import asyncio
 import aiohttp
 import sqlite3
+import db
 import base64
 import time
 import logging
@@ -58,7 +59,7 @@ scheduler_instance = None
 
 def garantir_tabela_fila_notas():
     """Cria a fila de envio de notas, se faltar. A coluna valor é acrescentada ao gravar o primeiro lote."""
-    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+    conexao = db.conectar()
     try:
         conexao.execute('''
             CREATE TABLE IF NOT EXISTS fila_notas (
@@ -77,7 +78,7 @@ def garantir_tabela_fila_notas():
 def _ler_retomada():
     """Horário salvo da retomada automática (datetime) ou None."""
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         try:
             linha = conexao.execute("SELECT valor FROM configuracoes WHERE chave = 'retomada_notas'").fetchone()
         finally:
@@ -90,7 +91,7 @@ def _ler_retomada():
 def _salvar_retomada(quando):
     """Grava o horário da retomada automática; None apaga. Falha só vai para o log."""
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         try:
             if quando is None:
                 conexao.execute("DELETE FROM configuracoes WHERE chave = 'retomada_notas'")
@@ -112,7 +113,7 @@ def _restaurar_retomada():
     quando = _ler_retomada()
     if quando is None or scheduler_instance is None:
         return
-    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+    conexao = db.conectar()
     try:
         pendentes = conexao.execute("SELECT COUNT(*) FROM fila_notas WHERE status = 'PENDENTE'").fetchone()[0]
     finally:
@@ -276,7 +277,7 @@ async def _enviar_pendentes(msg_progresso: types.Message = None):
     """
     if EXIBIR_LOGS: logger.info("🚀 Iniciando esteira de disparos de notas fiscais...")
     
-    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+    conexao = db.conectar()
     conexao.row_factory = sqlite3.Row
     cursor = conexao.cursor()
     cursor.execute("SELECT * FROM fila_notas WHERE status = 'PENDENTE'")
@@ -403,7 +404,7 @@ async def _enviar_pendentes(msg_progresso: types.Message = None):
     # Também apaga pastas de rodadas antigas que ficaram para trás por erro ou queda.
     try:
         # Pasta com nota ainda pendente (pausa de 26 h) ou em rascunho fica, mesmo antiga.
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         try:
             em_uso = {os.path.normpath(os.path.dirname(c)) for (c,) in conexao.execute(
                 "SELECT caminho_pdf FROM fila_notas WHERE status IN ('PENDENTE', 'RASCUNHO')") if c}
@@ -666,7 +667,7 @@ async def receber_zip_e_cruzar(message: types.Message, state: FSMContext):
         await msg_status.edit_text("✅ Extração concluída. Verificando histórico de envios e cruzando dados...")
         
         # PDFs com nome já ENVIADO ou PENDENTE não entram de novo.
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("SELECT caminho_pdf FROM fila_notas WHERE status IN ('ENVIADO', 'PENDENTE')")
         historico = cursor.fetchall()
@@ -994,7 +995,7 @@ async def gerar_resumo_final_notas(message: types.Message, state: FSMContext):
     csv_path = data.get('csv_path_temp')
     caminho_zip = data.get('zip_path_temp')
     
-    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+    conexao = db.conectar()
     cursor = conexao.cursor()
     
     try:
@@ -1121,7 +1122,7 @@ async def processar_aprovacao_envio(message: types.Message, state: FSMContext):
     # Muda de estado antes de tudo, para um segundo clique em Aprovar não iniciar outro envio.
     await state.set_state(PainelNotasFluxo.enviando_notas)
 
-    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+    conexao = db.conectar()
     cursor = conexao.cursor()
     cursor.execute("UPDATE fila_notas SET status = 'PENDENTE' WHERE status = 'RASCUNHO'")
     conexao.commit()

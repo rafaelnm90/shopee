@@ -87,40 +87,12 @@ if __name__ == "__main__":
 #   sessao_espelhador_isolado -> conta secundária (sem @, id 8940405855)
 client = TelegramClient('sessao_espiao', API_ID, API_HASH)
 
-import sqlite3
+import db
 import random
-
-def ler_config_bd_espiao(chave, padrao=None):
-    """Valor (JSON) da chave na tabela configuracoes, ou `padrao` se não existir ou der erro."""
-    if padrao is None: padrao = {}
-    try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
-        cursor = conexao.cursor()
-        cursor.execute("SELECT valor FROM configuracoes WHERE chave = ?", (chave,))
-        resultado = cursor.fetchone()
-        conexao.close()
-        if resultado:
-            return json.loads(resultado[0])
-        return padrao
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler '{chave}' do SQLite: {e}")
-        return padrao
-
-def salvar_config_bd_espiao(chave, dados):
-    """Grava `dados` como JSON na chave da tabela configuracoes."""
-    try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
-        cursor = conexao.cursor()
-        dados_str = json.dumps(dados, ensure_ascii=False)
-        cursor.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)", (chave, dados_str))
-        conexao.commit()
-        conexao.close()
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar '{chave}' no SQLite: {e}")
 
 def carregar_alvos():
     """Canais vigiados pelo Espião: "<chat>" ou "<chat>:<tópico>"."""
-    dados = ler_config_bd_espiao("alvos_espiao", padrao={"alvos": []})
+    dados = db.ler_config("alvos_espiao", padrao={"alvos": []})
     return dados.get("alvos", [])
 
 def ler_excecao_ponte():
@@ -128,13 +100,13 @@ def ler_excecao_ponte():
     Destino configurado no painel dos Autorais (a "ponte"), em minúsculas, ou None.
     O Espião sempre escuta esse chat, mesmo que ele não esteja na lista de alvos.
     """
-    dados = ler_config_bd_espiao("autorais_config", padrao={})
+    dados = db.ler_config("autorais_config", padrao={})
     val = str(dados.get("destino", "")).strip().lower()
     return val if val else None
 
 def garantir_tabela_registros_unicos():
     """Cria a tabela da anti-duplicata (links já espelhados e hashes de vídeo), se faltar."""
-    conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+    conexao = db.conectar()
     try:
         conexao.execute('''
             CREATE TABLE IF NOT EXISTS registros_unicos (
@@ -156,7 +128,7 @@ def verificar_e_registrar_espelho(link_shopee, contexto="global"):
     """
     agora_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         
         cursor.execute("DELETE FROM registros_unicos WHERE tipo = 'espelho' AND contexto = ? AND datetime(data_registro) <= datetime('now', '-1 day')", (contexto,))
@@ -198,7 +170,7 @@ def verificar_e_registrar_hash(hash_video, contexto="global"):
     """
     agora_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         
         cursor.execute("SELECT 1 FROM registros_unicos WHERE identificador = ? AND contexto = ? AND tipo = 'hash'", (hash_video, contexto))
@@ -221,10 +193,10 @@ def verificar_e_registrar_hash(hash_video, contexto="global"):
 
 def ler_fila_clonagem():
     """Fila do Espião (configuracoes, chave fila_clonagem), publicada pelo bot_mestre."""
-    return ler_config_bd_espiao("fila_clonagem", {"fila": []})
+    return db.ler_config("fila_clonagem", {"fila": []})
 
 def salvar_fila_clonagem(dados):
-    salvar_config_bd_espiao("fila_clonagem", dados)
+    db.salvar_config("fila_clonagem", dados)
 
 async def verificar_e_otimizar_video(caminho_video, relatorio=None):
     """
@@ -313,14 +285,14 @@ def salvar_na_fila_clonagem(caminho_video, link_shopee, chat_origem="Desconhecid
 
 def registrar_historico_espiao(nome_grupo):
     """Soma +1 captura no total e no grupo (estatística mostrada no painel do Espião)."""
-    historico = ler_config_bd_espiao("historico_espiao", padrao={"total": 0, "grupos": {}})
+    historico = db.ler_config("historico_espiao", padrao={"total": 0, "grupos": {}})
     
     historico["total"] = historico.get("total", 0) + 1
     grupos = historico.get("grupos", {})
     grupos[nome_grupo] = grupos.get(nome_grupo, 0) + 1
     historico["grupos"] = grupos
     
-    salvar_config_bd_espiao("historico_espiao", historico)
+    db.salvar_config("historico_espiao", historico)
     if EXIBIR_LOGS: logger.info(f"📊 [Estatística] +1 vídeo contabilizado no SQLite para o grupo: {nome_grupo}")
 
 async def gerar_legenda_com_ia_espelhador(caminho_video):
@@ -1164,7 +1136,7 @@ async def monitorar_status_alvos():
                 modificacao_atual = 0
 
             if modificacao_atual != ultima_modificacao:
-                dados_iniciais = ler_config_bd_espiao("alvos_espiao", {"alvos": [], "canal_destino": None, "status_alvos": {}})
+                dados_iniciais = db.ler_config("alvos_espiao", {"alvos": [], "canal_destino": None, "status_alvos": {}})
                 
                 alvos_atuais = [str(a) for a in dados_iniciais.get("alvos", [])]
                 destino_atual = str(dados_iniciais.get("canal_destino")) if dados_iniciais.get("canal_destino") else None
@@ -1201,7 +1173,7 @@ async def monitorar_status_alvos():
                             status_destino_coletado = {"status": "erro", "nome": str(destino_atual)}
                         await asyncio.sleep(2)
                         
-                    dados_frescos = ler_config_bd_espiao("alvos_espiao", {"alvos": [], "canal_destino": None, "status_alvos": {}})
+                    dados_frescos = db.ler_config("alvos_espiao", {"alvos": [], "canal_destino": None, "status_alvos": {}})
                     alvos_reais_agora = [str(a) for a in dados_frescos.get("alvos", [])]
                     status_alvos_antigos = dados_frescos.get("status_alvos", {})
                     
@@ -1240,7 +1212,7 @@ async def monitorar_status_alvos():
                     if houve_alteracao:
                         dados_frescos["alvos"] = nova_lista_alvos
                         dados_frescos["status_alvos"] = status_alvos_final
-                        salvar_config_bd_espiao("alvos_espiao", dados_frescos)
+                        db.salvar_config("alvos_espiao", dados_frescos)
                         
                     ultimo_alvos = nova_lista_alvos
                     ultimo_destino = str(dados_frescos.get("canal_destino")) if dados_frescos.get("canal_destino") else None
@@ -1385,7 +1357,7 @@ async def monitorar_topicos_submissao():
 
     while True:
         try:
-            config = ler_config_bd_espiao("submissao_config", padrao={})
+            config = db.ler_config("submissao_config", padrao={})
 
             # Inclui os grupos dos alvos com tópico: senão o painel do Espião mostra só o
             # nome do grupo, e vários alvos do mesmo fórum ficam iguais.

@@ -5,6 +5,8 @@ __pycache__/
 # Exceção: configuração do Claude Code (hook de início de sessão), sem dados
 !.claude/settings.json
 *.db
+*.db-wal
+*.db-shm
 *.session
 *.session-journal
 temp/

@@ -13,7 +13,6 @@ usuário consegue ler.
 """
 EXIBIR_LOGS = True
 import os
-import json
 import asyncio
 import random
 from datetime import datetime, timedelta
@@ -87,35 +86,7 @@ scheduler = AsyncIOScheduler()
 telegram_lock = asyncio.Lock()
 if EXIBIR_LOGS: logger.info("🚦 Semáforo de controle de tráfego do Telegram ativado!")
 
-import sqlite3
-
-def ler_config_bd_divulgacao(chave, padrao=None):
-    """Valor (JSON) da chave na tabela configuracoes, ou `padrao` se não existir ou der erro."""
-    if padrao is None: padrao = {}
-    try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
-        cursor = conexao.cursor()
-        cursor.execute("SELECT valor FROM configuracoes WHERE chave = ?", (chave,))
-        resultado = cursor.fetchone()
-        conexao.close()
-        if resultado:
-            return json.loads(resultado[0])
-        return padrao
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler '{chave}' do SQLite: {e}")
-        return padrao
-
-def salvar_config_bd_divulgacao(chave, dados):
-    """Grava `dados` como JSON na chave da tabela configuracoes."""
-    try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
-        cursor = conexao.cursor()
-        dados_str = json.dumps(dados, ensure_ascii=False)
-        cursor.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)", (chave, dados_str))
-        conexao.commit()
-        conexao.close()
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar '{chave}' no SQLite: {e}")
+import db
 
 # Escopos de divulgação, todos tratados pelo mesmo código. Para criar um escopo,
 # basta acrescentar uma entrada: chave = configuração no banco (criada pelo painel
@@ -215,7 +186,7 @@ def carregar_config_escopo(escopo):
     réplicas, repetições, config_alvos por alvo) ou None se ainda não existir.
     """
     conf = ESCOPOS[escopo]
-    dados = ler_config_bd_divulgacao(conf["chave"], padrao=None)
+    dados = db.ler_config(conf["chave"], padrao=None)
 
     if not dados:
         if escopo not in _avisos_config_ausente:
@@ -344,7 +315,7 @@ def _carregar_agendamentos():
     """
     global ultimos_agendamentos_por_alvo
     try:
-        bruto = ler_config_bd_divulgacao("agendamentos_divulgacao", {}) or {}
+        bruto = db.ler_config("agendamentos_divulgacao", {}) or {}
         recuperado = {}
         for alvo, horarios in bruto.items():
             lista = []
@@ -363,7 +334,7 @@ def _carregar_agendamentos():
 def _salvar_agendamentos():
     """Grava no banco os horários sorteados, para sobreviverem a um reinício."""
     try:
-        salvar_config_bd_divulgacao("agendamentos_divulgacao", {
+        db.salvar_config("agendamentos_divulgacao", {
             alvo: [h.isoformat() for h in horarios]
             for alvo, horarios in ultimos_agendamentos_por_alvo.items()
         })
@@ -376,7 +347,7 @@ def _carregar_plano_da_hora(hora):
     Envios já planejados para a hora `hora` ("AAAA-MM-DD HH"), como lista de
     [escopo, alvo, horário ISO]. Vazia se o plano salvo é de outra hora.
     """
-    plano = ler_config_bd_divulgacao("plano_divulgacao_hora", {}) or {}
+    plano = db.ler_config("plano_divulgacao_hora", {}) or {}
     if not isinstance(plano, dict) or plano.get("hora") != hora:
         return []
     validos = []
@@ -392,7 +363,7 @@ def _carregar_plano_da_hora(hora):
 
 def _salvar_plano_da_hora(hora, envios):
     """Grava no banco o plano da hora (chave plano_divulgacao_hora); só a hora corrente fica guardada."""
-    salvar_config_bd_divulgacao("plano_divulgacao_hora", {"hora": hora, "envios": envios})
+    db.salvar_config("plano_divulgacao_hora", {"hora": hora, "envios": envios})
 
 
 def _agendar_envio(escopo, alvo, quando):
@@ -576,7 +547,7 @@ async def monitorar_comandos():
 
             # Desliga o pedido antes de enviar, para não repetir se algo travar no meio.
             config["forcar_disparo"] = False
-            salvar_config_bd_divulgacao(conf["chave"], config)
+            db.salvar_config(conf["chave"], config)
 
             if config.get("pausado", False):
                 if EXIBIR_LOGS: logger.warning(f"🛑 [{rotulo}] Comando forçado ignorado: escopo pausado.")

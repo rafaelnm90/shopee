@@ -25,7 +25,6 @@ EXIBIR_LOGS = True
 
 import os
 import asyncio
-import json
 import random
 import aiohttp
 import re
@@ -85,44 +84,18 @@ API_ID = int(os.getenv('API_ID', 0))
 API_HASH = os.getenv('API_HASH', '')
 
 import sqlite3
-
-def ler_config_bd_autorais(chave, padrao=None):
-    """Valor JSON da tabela configuracoes (o mesmo banco do bot_mestre); padrao se não houver."""
-    if padrao is None: padrao = {}
-    try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
-        cursor = conexao.cursor()
-        cursor.execute("SELECT valor FROM configuracoes WHERE chave = ?", (chave,))
-        resultado = cursor.fetchone()
-        conexao.close()
-        if resultado:
-            return json.loads(resultado[0])
-        return padrao
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao ler '{chave}' do SQLite: {e}")
-        return padrao
-
-def salvar_config_bd_autorais(chave, dados):
-    try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
-        cursor = conexao.cursor()
-        dados_str = json.dumps(dados, ensure_ascii=False)
-        cursor.execute("INSERT OR REPLACE INTO configuracoes (chave, valor) VALUES (?, ?)", (chave, dados_str))
-        conexao.commit()
-        conexao.close()
-    except Exception as e:
-        if EXIBIR_LOGS: logger.error(f"❌ Erro ao salvar '{chave}' no SQLite: {e}")
+import db
 
 def carregar_config_autorais():
     """autorais_config, gravado pelo painel do bot_mestre: origem, destino, dias_retorno, cota, janela e pausas."""
     padrao = {"origem": -1003673555953, "origem_topico": None, "destino": "@videos_autorais"}
-    dados = ler_config_bd_autorais("autorais_config", padrao)
+    dados = db.ler_config("autorais_config", padrao)
     if not dados and EXIBIR_LOGS:
         logger.warning("⚠️ Configuração 'autorais_config' não encontrada. Aguardando o bot principal criá-la.")
     return dados
 
 def salvar_config_autorais(config):
-    salvar_config_bd_autorais("autorais_config", config)
+    db.salvar_config("autorais_config", config)
 
 
 def pausa_ativa(escopo="autorais"):
@@ -138,10 +111,10 @@ def pausa_ativa(escopo="autorais"):
     """
     try:
         if escopo == "publico":
-            cfg = ler_config_bd_autorais("submissao_config", {})
+            cfg = db.ler_config("submissao_config", {})
             return (not cfg.get("ativo", False)) or bool(cfg.get("repost_pausado", False))
 
-        cfg = ler_config_bd_autorais("autorais_config", {})
+        cfg = db.ler_config("autorais_config", {})
         if bool(cfg.get("pausar_robo_completo", False)):
             return True
         if escopo == "captura":
@@ -188,7 +161,7 @@ HORAS_ESPERA_SEM_PERMISSAO = 1   # conta sem permissão de postar descansa antes
 def ler_fila_retorno():
     """Fila de retorno (tabela fila_autorais) como {"fila": [itens]}. Cria a tabela e as colunas novas se faltarem."""
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         
@@ -266,7 +239,7 @@ def salvar_fila_retorno(dados):
     # mesmo se estourar no meio, senão o lock fica preso com o DELETE aberto.
     conexao = None
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         
         status_atual = {}
@@ -317,7 +290,7 @@ def salvar_fila_retorno(dados):
 def ler_fila_publico():
     """Fila do Grupo Público (tabela fila_publico), no mesmo formato de ler_fila_retorno()."""
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
 
@@ -377,7 +350,7 @@ INTERVALO_ENTRADA_PARCEIROS = 900   # 15 min entre uma entrada e outra
 def ler_parceiros_pendentes():
     """Parceiros ativos cujo canal de origem o userbot ainda não acessa."""
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         try:
@@ -393,7 +366,7 @@ def ler_parceiros_pendentes():
 def marcar_origem_parceiro(parceiro_id, status, motivo=""):
     """Grava em parceiros se o userbot acessa o canal de origem (origem_ok) e, se não, o motivo."""
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("UPDATE parceiros SET origem_ok = ?, origem_erro = ? WHERE id = ?",
                        (int(status), str(motivo)[:200], int(parceiro_id)))
@@ -512,7 +485,7 @@ async def entrar_no_canal_parceiro(alvo):
 # dono para aquele vídeo só acontece mais adiante no mesmo evento.
 def ler_parceiros_ativos_com_acesso():
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         try:
@@ -542,7 +515,7 @@ def _garantir_fila_parceiros(cursor):
 
 def contar_fila_parceiro(parceiro_id, data_alvo):
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_fila_parceiros(cursor)
         cursor.execute("SELECT COUNT(*) FROM fila_parceiros WHERE parceiro_id = ? AND data_alvo = ? AND processado = 0",
@@ -555,7 +528,7 @@ def contar_fila_parceiro(parceiro_id, data_alvo):
 
 def inserir_fila_parceiro(parceiro_id, caminho, link, data_alvo):
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_fila_parceiros(cursor)
         id_unico = f"p{parceiro_id}_{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}"
@@ -763,7 +736,7 @@ async def resolver_chave_curta(link):
     limite_validade = (datetime.now() - timedelta(days=DIAS_VALIDADE_CACHE_LINKS)).strftime("%Y-%m-%d %H:%M:%S")
 
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_tabela_links(cursor)
         conexao.commit()
@@ -793,7 +766,7 @@ async def resolver_chave_curta(link):
         chave_final = ""   # o destino também era curto: não serve de identidade
 
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_tabela_links(cursor)
         cursor.execute(
@@ -843,7 +816,7 @@ def video_ja_reservado(chaves):
     if not chaves:
         return False
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_tabela_reservas(cursor)
         marcadores = ",".join("?" * len(chaves))
@@ -867,7 +840,7 @@ def reservar_video(chaves, parceiro_id=0):
     if not chaves:
         return False
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_tabela_reservas(cursor)
         agora_txt = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -898,7 +871,7 @@ def salvar_fila_publico(dados):
     # Mesma transação longa de salvar_fila_retorno: fecha no finally.
     conexao = None
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
 
         status_atual = {}
@@ -947,7 +920,7 @@ def salvar_fila_publico(dados):
 def contar_ofertas_dia_publico(data_alvo, incrementar=True):
     """Contador do sorteio do Grupo Público: o mesmo que contar_ofertas_dia(), com tabela própria."""
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS contador_publico (
@@ -977,7 +950,7 @@ def contar_ofertas_dia(data_alvo, incrementar=True):
     chance, limite/total.
     """
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS contador_autorais (
@@ -1097,7 +1070,7 @@ def mensagem_ja_processada(chat_id, msg_id):
     # A varredura só olha as últimas mensagens da origem; registro mais velho não serve.
     limite = (datetime.now() - timedelta(days=DIAS_REGISTRO_MENSAGENS_ORIGEM)).strftime("%Y-%m-%d %H:%M:%S")
     try:
-        conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+        conexao = db.conectar()
         cursor = conexao.cursor()
         cursor.execute("CREATE TABLE IF NOT EXISTS mensagens_origem_autorais (chave TEXT PRIMARY KEY, data_registro TEXT)")
         cursor.execute("INSERT OR IGNORE INTO mensagens_origem_autorais (chave, data_registro) VALUES (?, ?)", (chave, agora_txt))
@@ -1376,7 +1349,7 @@ async def interceptar_e_espelhar(event):
                 # Sorteio do Grupo Público: independente, sobre o mesmo vídeo, com
                 # contador, fila e regras próprias (submissao_config).
                 try:
-                    config_pub = ler_config_bd_autorais("submissao_config", {})
+                    config_pub = db.ler_config("submissao_config", {})
                     if config_pub.get("ativo") and not config_pub.get("repost_pausado", False):
                         dias_publico = config_pub.get("repost_dias", 15)
                         data_alvo_pub = (agora + timedelta(days=dias_publico)).strftime("%Y-%m-%d")
@@ -1497,7 +1470,7 @@ async def processar_fila_autorais_loop():
                             except: pass
                         
                         try:
-                            conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+                            conexao = db.conectar()
                             cursor = conexao.cursor()
                             cursor.execute("DELETE FROM fila_autorais WHERE id_unico = ?", (item["id_unico"],))
                             conexao.commit()
@@ -1566,7 +1539,7 @@ async def processar_fila_autorais_loop():
             piso_aut, topo_aut = faixa_de_config(config_atual, "limite_min", "limite_max", "limite_videos")
             limite_dia = sortear_teto_do_dia("autorais", hoje_str, piso_aut, topo_aut) or piso_aut or 5
             try:
-                conexao_ct = sqlite3.connect("banco_dados.db", timeout=20.0)
+                conexao_ct = db.conectar()
                 ja_saiu = conexao_ct.execute(
                     "SELECT COUNT(*) FROM fila_autorais WHERE processado = 1 AND data_postagem LIKE ?",
                     (hoje_str + "%",)
@@ -1639,7 +1612,7 @@ async def processar_fila_autorais_loop():
                             logger.warning(f"🛡️ [Motor Autorais] Vídeo {item.get('id_unico')} tem só {idade_dias} "
                                            f"dia(s) (mínimo {dias_min}). NÃO publicado. Reagendado para {nova_alvo}.")
                         try:
-                            conexao_ag = sqlite3.connect("banco_dados.db", timeout=20.0)
+                            conexao_ag = db.conectar()
                             conexao_ag.execute(
                                 "UPDATE fila_autorais SET data_alvo = ?, horario_disparo = '' WHERE id_unico = ?",
                                 (nova_alvo, item.get("id_unico"))
@@ -1667,7 +1640,7 @@ async def processar_fila_autorais_loop():
                                     os.remove(caminho_arquivo)
                             except Exception:
                                 pass
-                            conexao_bl = sqlite3.connect("banco_dados.db", timeout=20.0)
+                            conexao_bl = db.conectar()
                             conexao_bl.execute("DELETE FROM fila_autorais WHERE id_unico = ?",
                                                (item.get("id_unico"),))
                             conexao_bl.commit()
@@ -1689,7 +1662,7 @@ async def processar_fila_autorais_loop():
                                                  f"capturado em {cap_txt}, mas o arquivo é de "
                                                  f"{mtime.strftime('%d/%m')}. Nome reciclado: o original "
                                                  "foi sobrescrito. Item descartado sem publicar.")
-                                conexao_bd = sqlite3.connect("banco_dados.db", timeout=20.0)
+                                conexao_bd = db.conectar()
                                 conexao_bd.execute("DELETE FROM fila_autorais WHERE id_unico = ?", (item.get("id_unico"),))
                                 conexao_bd.commit()
                                 conexao_bd.close()
@@ -1762,7 +1735,7 @@ async def processar_fila_autorais_loop():
                     marcou = False
                     for tentativa in range(1, 7):
                         try:
-                            conexao_st = sqlite3.connect("banco_dados.db", timeout=20.0)
+                            conexao_st = db.conectar()
                             cursor_st = conexao_st.cursor()
                             if encerrar_item:
                                 cursor_st.execute(
@@ -1835,7 +1808,7 @@ async def processar_fila_publico_loop():
             await asyncio.sleep(60)
             continue
         try:
-            config = ler_config_bd_autorais("submissao_config", {})
+            config = db.ler_config("submissao_config", {})
 
             if not config.get("ativo") or config.get("repost_pausado", False):
                 await asyncio.sleep(120)
@@ -1866,7 +1839,7 @@ async def processar_fila_publico_loop():
 
             # UPDATE pontual, nunca salvar_fila_publico(): aquela função apaga a tabela
             # e reinsere tudo, e o bot_mestre escreve os horários na MESMA fila.
-            conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+            conexao = db.conectar()
             conexao.row_factory = sqlite3.Row
             cursor = conexao.cursor()
             cursor.execute('''
@@ -2018,7 +1991,7 @@ async def varredura_origem_loop():
                 await asyncio.sleep(300)
                 continue
 
-            marcadores = ler_config_bd_autorais("ultimo_id_varredura", {}) or {}
+            marcadores = db.ler_config("ultimo_id_varredura", {}) or {}
             chave = str(origem_final)
             ultimo_id = int(marcadores.get(chave, 0) or 0)
 
@@ -2033,7 +2006,7 @@ async def varredura_origem_loop():
             # grupo entrariam todas de uma vez.
             if ultimo_id == 0:
                 marcadores[chave] = maior_id
-                salvar_config_bd_autorais("ultimo_id_varredura", marcadores)
+                db.salvar_config("ultimo_id_varredura", marcadores)
                 if EXIBIR_LOGS:
                     logger.info(f"🔭 [Varredura] Marco inicial gravado na origem (id {maior_id}). "
                                 "A captura começa a valer da próxima mensagem.")
@@ -2057,7 +2030,7 @@ async def varredura_origem_loop():
 
             if maior_id > ultimo_id:
                 marcadores[chave] = maior_id
-                salvar_config_bd_autorais("ultimo_id_varredura", marcadores)
+                db.salvar_config("ultimo_id_varredura", marcadores)
 
         except FloodWaitError as e:
             espera = int(getattr(e, "seconds", 60))
@@ -2234,10 +2207,10 @@ async def _apos_trocar_captura():
         id_atual = None
         if EXIBIR_LOGS: logger.warning(f"⚠️ [Captura] Não consegui identificar a conta: {e}")
 
-    anterior = (ler_config_bd_autorais("conta_captura_atual", {}) or {}).get("user_id")
+    anterior = (db.ler_config("conta_captura_atual", {}) or {}).get("user_id")
     if id_atual and anterior and anterior != id_atual:
         try:
-            conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
+            conexao = db.conectar()
             conexao.execute("UPDATE parceiros SET origem_ok = NULL WHERE ativo = 1")
             conexao.commit()
             conexao.close()
@@ -2245,7 +2218,7 @@ async def _apos_trocar_captura():
         except sqlite3.OperationalError:
             pass   # tabela de parceiros ainda não existe
     if id_atual:
-        salvar_config_bd_autorais("conta_captura_atual", {"user_id": id_atual})
+        db.salvar_config("conta_captura_atual", {"user_id": id_atual})
 
 
 async def montar_contas():
