@@ -59,9 +59,15 @@ def fuso_do_servidor():
     return "desconhecido"
 
 
-def configurar_logs(nome=None, nivel=logging.INFO):
+# Nível do log de cada robô, pela variável NIVEL_LOG do .env. Sem ela, INFO (tudo).
+# NIVEL_LOG=WARNING deixa no journal só avisos e erros; DEBUG mostra até os detalhes.
+NIVEIS_LOG = {"DEBUG": logging.DEBUG, "INFO": logging.INFO, "WARNING": logging.WARNING, "ERROR": logging.ERROR}
+
+
+def configurar_logs(nome=None, nivel=None):
     """
     Configura o log do processo no formato comum e devolve o logger `nome`.
+    Sem `nivel`, usa o NIVEL_LOG do .env (valor desconhecido vale INFO).
 
     Usa force=True para passar por cima da configuração que motor_filas e utils
     fazem ao serem importados. Na primeira chamada registra no log o fuso do
@@ -74,6 +80,8 @@ def configurar_logs(nome=None, nivel=logging.INFO):
         return logger
     _LOGS_CONFIGURADOS = True
 
+    if nivel is None:
+        nivel = NIVEIS_LOG.get(os.getenv("NIVEL_LOG", "INFO").strip().upper(), logging.INFO)
     logging.basicConfig(
         level=nivel,
         format=FORMATO_LOG,
