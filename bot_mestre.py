@@ -5005,19 +5005,17 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     await state.set_state(AutoraisFluxo.menu_principal)
 
 # ==========================================================================
-# 👥 PAINEL DE CONTAS E POSTOS  (dentro de Vídeos Autorais)
+# Painel de Contas e Postos (Outros Canais → Contas)
 # --------------------------------------------------------------------------
-# Tela para ver quem está espelhando, quem está repostando, e mexer nisso sem
-# abrir o terminal. Toda a REGRA mora no pool_contas.py; aqui é só tela.
+# Quem espelha e quem reposta, sem abrir o terminal. A regra mora no
+# pool_contas.py; aqui é só tela. (O espelhador_videos_autorais ainda usa a sessão
+# fixa: a integração com o pool está pendente.)
 #
-# Duas ações diferentes, que é onde costuma dar confusão:
-#
-#   🔓/🔒 PERMITIR   → muda o que a conta PODE fazer. É a ação durável. Tirar a
-#                      permissão tira do posto e impede o revezamento de
-#                      recolocar a mesma conta na próxima sincronização.
-#   ⚡ ASSUMIR       → troca o plantonista AGORA, sem mexer em permissão. Dura
-#                      enquanto a conta continuar apta (o motor nunca derruba
-#                      quem está no posto e está saudável).
+# Duas ações diferentes:
+#   PERMITIR → muda o que a conta PODE fazer. É a ação durável: tirar a permissão
+#              tira do posto e impede o revezamento de recolocar a conta.
+#   ASSUMIR  → troca o plantonista AGORA, sem mexer em permissão. Dura enquanto
+#              a conta continuar apta (quem está no posto e saudável não sai).
 #
 # Callbacks (curtos de propósito: o Telegram limita o callback_data a 64 bytes):
 #   pc_painel | pc_sync | pc_ver:<id> | pc_tog:<id>:<e|r> | pc_ass:<id>:<e|r> |
@@ -5040,9 +5038,8 @@ def _abas(ativa):
     return [
         InlineKeyboardButton(text=("• 🎯 Postos" if ativa == "postos" else "🎯 Postos"),
                              callback_data="pc_painel"),
-        # ⚠️ NÃO chame isto de "Lista Negra": o Espião já tem uma, e ela bloqueia
-        # CANAIS (para não importar/monitorar). Esta aqui bloqueia PESSOAS (para
-        # não capturar o que elas postam). Dois conceitos, nomes diferentes.
+        # Não chamar esta aba de "Lista Negra": a do Espião bloqueia CANAIS (não importar
+        # nem monitorar); esta bloqueia PESSOAS (não capturar o que elas postam).
         InlineKeyboardButton(text=("• 🚫 Autores" if ativa == "negra" else "🚫 Autores"),
                              callback_data="bl_painel"),
     ]
@@ -5119,12 +5116,12 @@ async def _pc_redesenhar(mensagem):
 
 @dp.message(F.text == "Contas 👥", StateFilter("*"))
 async def painel_contas_postos(message: types.Message, state: FSMContext):
+    """Abre o painel de Contas (aba Postos), protegendo antes as contas na lista negra."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     if EXIBIR_LOGS: logger.info("👥 Abrindo o painel de Contas...")
-    # Proteger as suas próprias contas é barato e tem que valer sempre, então
-    # roda em silêncio ao abrir. Era isto que o botão "Sincronizar minhas contas"
-    # fazia; ele saiu porque só criava dúvida sobre quando apertar.
+    # Proteger as próprias contas na lista negra é barato e tem de valer sempre: roda
+    # em silêncio ao abrir o painel (no lugar de um botão que só criava dúvida).
     try:
         blacklist_captura.sincronizar_contas_do_pool()
     except Exception as e:
@@ -5150,6 +5147,7 @@ async def pool_voltar_lista(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data == "pc_sync", StateFilter("*"))
 async def pool_sincronizar(callback: types.CallbackQuery, state: FSMContext):
+    """Checa cada conta no Telegram e redistribui os postos se algo mudou."""
     if callback.from_user.id != ADMIN_ID: return
     # A checagem conecta conta por conta no Telegram: pode levar alguns segundos.
     await callback.answer("Checando cada conta no Telegram...", show_alert=False)
@@ -5183,6 +5181,7 @@ async def pool_ver_conta(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("pc_tog:"), StateFilter("*"))
 async def pool_alternar_permissao(callback: types.CallbackQuery, state: FSMContext):
+    """Permite ou bloqueia uma função (espelho, repostagem) para a conta."""
     if callback.from_user.id != ADMIN_ID: return
     _p, id_conta, sigla = callback.data.split(":")
     conta = pool_contas.obter_conta(id_conta)
@@ -5205,6 +5204,7 @@ async def pool_alternar_permissao(callback: types.CallbackQuery, state: FSMConte
 
 @dp.callback_query(F.data.startswith("pc_ass:"), StateFilter("*"))
 async def pool_assumir_funcao(callback: types.CallbackQuery, state: FSMContext):
+    """A conta assume o posto agora, sem mudar permissões."""
     if callback.from_user.id != ADMIN_ID: return
     _p, id_conta, sigla = callback.data.split(":")
     conta = pool_contas.obter_conta(id_conta)
@@ -5226,6 +5226,7 @@ async def pool_assumir_funcao(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("pc_hab:"), StateFilter("*"))
 async def pool_habilitar_conta(callback: types.CallbackQuery, state: FSMContext):
+    """Habilita ou desabilita a conta e redistribui os postos."""
     if callback.from_user.id != ADMIN_ID: return
     conta = pool_contas.obter_conta(callback.data.split(":")[1])
     if not conta:
@@ -5249,18 +5250,17 @@ async def pool_habilitar_conta(callback: types.CallbackQuery, state: FSMContext)
 
 
 # ==========================================================================
-# 🚫 PAINEL DE AUTORES BLOQUEADOS  (aba do painel de Contas)
+# Painel de autores bloqueados (aba do painel de Contas)
 # --------------------------------------------------------------------------
-# Tela para bloquear e desbloquear autores pelo celular, sem abrir o terminal.
-# Toda a REGRA mora no blacklist_captura.py; aqui é só tela.
+# Bloquear e desbloquear autores pelo celular. A regra mora no
+# blacklist_captura.py; aqui é só tela.
 #
-# Duas categorias aparecem na tela e se comportam diferente:
-#
-#   🔒 SUAS CONTAS   → entram sozinhas, vindas do pool_contas, com escopo
-#                      global. NÃO têm botão de remover de propósito: tirar uma
-#                      delas recria o laço de recaptura (a conta da repostagem
-#                      devolve o vídeo e a do espelho captura de novo).
-#   ✋ MANUAIS       → os @ que você adiciona. Esses têm botão de remover.
+# Duas categorias, que se comportam diferente:
+#   SUAS CONTAS → entram sozinhas, vindas do pool_contas, com escopo global. Sem
+#                 botão de remover de propósito: tirar uma delas recria o laço de
+#                 recaptura (a conta da repostagem devolve o vídeo e a do espelho
+#                 captura de novo).
+#   MANUAIS     → os @ que você adiciona. Esses têm botão de remover.
 #
 # Callbacks (curtos: o Telegram limita o callback_data a 64 bytes):
 #   bl_painel | bl_add | bl_del:<id> | bl_esc:<id>
@@ -5271,13 +5271,12 @@ def _bl_teclado_lista():
     linhas = [_abas("negra"),
               [InlineKeyboardButton(text="➕ Bloquear alguém", callback_data="bl_add")]]
 
-    # Só as manuais ganham botão. As do pool são intocáveis pela tela.
+    # Só as manuais ganham botão; as do pool são intocáveis pela tela.
     manuais = [e for e in blacklist_captura.listar() if e["origem"] != blacklist_captura.ORIGEM_POOL]
     for entrada in manuais[:20]:
         alvo = (entrada["nome_exibicao"]
                 or (f"@{entrada['username']}" if entrada["username"] else str(entrada["user_id"])))
-        # O rótulo diz o que o botão FAZ, não só o estado. Antes aparecia só
-        # "🎥 fulano" e não dava para adivinhar que tocar ali troca o alcance.
+        # O rótulo diz o que o botão FAZ (tocar alterna o alcance), não só o estado.
         onde = ("🌐 todo lugar" if entrada["escopo"] == blacklist_captura.ESCOPO_GLOBAL
                 else "🎥 só Autorais")
         linhas.append([
@@ -5310,6 +5309,7 @@ async def bl_voltar_painel(callback: types.CallbackQuery):
 
 @dp.callback_query(F.data == "bl_add", StateFilter("*"))
 async def bl_pedir_arroba(callback: types.CallbackQuery, state: FSMContext):
+    """Pede quem bloquear (@, ID ou link do perfil). Entra valendo só nos Autorais."""
     await callback.answer()
     await state.set_state(AutoraisFluxo.aguardando_bloqueio)
     await callback.message.answer(
@@ -5330,6 +5330,7 @@ async def bl_pedir_arroba(callback: types.CallbackQuery, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_bloqueio)
 async def bl_receber_arroba(message: types.Message, state: FSMContext):
+    """Bloqueia o autor informado ("@fulano global" já entra valendo em todo lugar)."""
     if message.text == "Cancelar ❌":
         await cancelar_fluxo_global(message, state)
         return
@@ -5360,6 +5361,7 @@ async def bl_receber_arroba(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("bl_del:"), StateFilter("*"))
 async def bl_remover(callback: types.CallbackQuery):
+    """Desbloqueia uma entrada manual."""
     entrada_id = callback.data.split(":")[1]
     alvo = None
     for entrada in blacklist_captura.listar():
@@ -5405,22 +5407,20 @@ async def bl_alternar_escopo(callback: types.CallbackQuery):
     await _bl_redesenhar(callback.message)
 
 
-# ----------------------------------------------------
-# SUBSTITUA OS HANDLERS DOS SUBMENUS POR ESTES:
-# ----------------------------------------------------
 
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Regras de Repostagem ♻️")
 async def submenu_regras_retorno(message: types.Message, state: FSMContext):
+    """Menu das regras do retorno D+X: dias, cota e janela."""
     if message.from_user.id != ADMIN_ID: return
     await message.answer("♻️ <b>Regras de Repostagem</b>\nEscolha o que deseja editar:", reply_markup=teclado_submenu_retorno, parse_mode="HTML")
-    # ✅ CORREÇÃO: reancora o estado no menu principal dos Autorais.
-    # Sem isto, quando chamada de dentro do cancelar_fluxo_global (que dá
-    # state.clear()) ou após Aprovar/Cancelar, o estado fica None e os botões
-    # "Editar Dias ⏳" / "Editar Limite 📦" param de responder.
+    # Reancora o estado no menu dos Autorais: chamada de dentro do cancelar_fluxo_global
+    # (que limpa o estado) ou depois de Aprovar/Cancelar, o estado ficaria vazio e os
+    # botões "Editar Dias" / "Editar Limite" parariam de responder.
     await state.set_state(AutoraisFluxo.menu_principal)
 
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Status do Robô ⏸️")
 async def submenu_status_robo(message: types.Message, state: FSMContext):
+    """Menu de pausa dos Autorais: repostagem (retorno) e robô completo."""
     config = ler_autorais_config()
     texto_repostagem = "Retomar Repostagem ▶️" if config.get("pausar_repostagem") else "Pausar Repostagem ⏸️"
     texto_robo = "Retomar Robô Completo ▶️" if config.get("pausar_robo_completo") else "Pausar Robô Completo ⏸️"
@@ -5435,10 +5435,10 @@ async def submenu_status_robo(message: types.Message, state: FSMContext):
         is_persistent=True
     )
     await message.answer("⏸️ <b>Controle de Pausa</b>\nSelecione o serviço que deseja pausar ou retomar:", reply_markup=teclado_submenu_pausa, parse_mode="HTML")
-    # ✅ IMPORTANTE: Volta o estado para o menu principal dos autorais para que os botões funcionem corretamente
+    # Mesmo motivo do submenu_regras_retorno: os botões dependem deste estado.
     await state.set_state(AutoraisFluxo.menu_principal)
 
-# --- LÓGICA DE CONFIRMAÇÃO DE PAUSA DA REPOSTAGEM ---
+# Pausa da repostagem (retorno D+X)
 @dp.message(AutoraisFluxo.menu_principal, F.text.in_(["Pausar Repostagem ⏸️", "Retomar Repostagem ▶️"]))
 async def pedir_confirmacao_repostagem(message: types.Message, state: FSMContext):
     acao = "pausar" if "Pausar" in message.text else "retomar"
@@ -5457,13 +5457,11 @@ async def pedir_confirmacao_repostagem(message: types.Message, state: FSMContext
 
 @dp.message(AutoraisFluxo.aguardando_confirmacao_pausa_repost)
 async def processar_pausa_repostagem(message: types.Message, state: FSMContext):
-    # ✅ Lógica para o botão Cancelar
     if message.text == "Cancelar ❌":
         await message.answer("Ação cancelada.")
         await submenu_status_robo(message, state) 
         return
 
-    # ✅ Lógica para quando ele não apertar nem Cancelar e nem Confirmar
     if "Confirmar" not in message.text:
         await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
         return
@@ -5472,7 +5470,6 @@ async def processar_pausa_repostagem(message: types.Message, state: FSMContext):
     data = await state.get_data()
     acao = data.get("acao_repost")
     
-    # Se a ação for "pausar", ele salva como True, senão salva como False
     config["pausar_repostagem"] = (acao == "pausar")
     salvar_autorais_config(config)
 
@@ -5480,7 +5477,7 @@ async def processar_pausa_repostagem(message: types.Message, state: FSMContext):
     await message.answer(f"✅ A repostagem automática de vídeos antigos foi <b>{status}</b>.", parse_mode="HTML")
     await submenu_status_robo(message, state)
 
-# --- LÓGICA DE CONFIRMAÇÃO DE PAUSA DO ROBÔ COMPLETO ---
+# Pausa do robô completo (captura e retorno)
 @dp.message(AutoraisFluxo.menu_principal, F.text.in_(["Pausar Robô Completo ⏸️", "Retomar Robô Completo ▶️"]))
 async def pedir_confirmacao_robo(message: types.Message, state: FSMContext):
     acao = "pausar" if "Pausar" in message.text else "retomar"
@@ -5499,13 +5496,11 @@ async def pedir_confirmacao_robo(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_confirmacao_pausa_robo)
 async def processar_pausa_robo(message: types.Message, state: FSMContext):
-    # ✅ Lógica para o botão Cancelar
     if message.text == "Cancelar ❌":
         await message.answer("Ação cancelada.")
         await submenu_status_robo(message, state) 
         return
 
-    # ✅ Lógica para quando ele não apertar nem Cancelar e nem Confirmar
     if "Confirmar" not in message.text:
         await message.answer("Por favor, clique no botão para confirmar ou cancelar.")
         return
@@ -5514,7 +5509,6 @@ async def processar_pausa_robo(message: types.Message, state: FSMContext):
     data = await state.get_data()
     acao = data.get("acao_robo")
 
-    # Se a ação for "pausar", ele salva como True, senão salva como False
     config["pausar_robo_completo"] = (acao == "pausar")
     salvar_autorais_config(config)
 
@@ -5523,7 +5517,7 @@ async def processar_pausa_robo(message: types.Message, state: FSMContext):
     await submenu_status_robo(message, state)
 
 # ----------------------------------------------------
-# REGRAS DE ORIGEM E DESTINO
+# Origem e destino dos Autorais
 # ----------------------------------------------------
 @dp.message(F.text == "Voltar ao Menu Autorais 🔙", StateFilter("*"))
 async def voltar_menu_autorais(message: types.Message, state: FSMContext):
@@ -5537,6 +5531,7 @@ async def pedir_origem_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_origem)
 async def pedir_topico_autorais(message: types.Message, state: FSMContext):
+    """Valida a nova origem e pergunta o tópico (ou usa o que veio no link)."""
     if message.text == "Cancelar ❌":
         await cancelar_fluxo_global(message, state)
         return
@@ -5549,8 +5544,8 @@ async def pedir_topico_autorais(message: types.Message, state: FSMContext):
     await msg_status.delete()
 
     if sucesso:
-        # ✅ Se o bot não enxerga o grupo, a função devolve o próprio ID no lugar
-        # do nome. Nesse caso buscamos o nome real que o Userbot já cacheou.
+        # Sem acesso ao grupo, a validação devolve o próprio ID no lugar do nome: usa o
+        # nome que o userbot já guardou no cache.
         id_base_exibicao = str(id_final).split(":")[0].strip()
         if str(nome_chat).strip() == id_base_exibicao:
             cache_nomes = ler_cache_nomes_grupos()
@@ -5569,8 +5564,8 @@ async def pedir_topico_autorais(message: types.Message, state: FSMContext):
              
         await message.answer("⚠️ <b>Aviso de Permissão:</b> O Bot Principal não tem permissão para enxergar este grupo. O ID será salvo, pois a Conta Secundária é quem fará a extração física.", parse_mode="HTML")
 
-    # ✅ NOVO: o link já pode trazer o tópico embutido ("-100123:1" vindo do "_1").
-    # Se veio, não faz sentido perguntar de novo - pulamos direto para a confirmação.
+    # O link pode trazer o tópico ("-100123:1", vindo do "_1"): então não pergunta de
+    # novo e vai direto à confirmação.
     partes_id = str(id_final).split(":")
     origem_base = partes_id[0].strip()
     topico_detectado = int(partes_id[1].strip()) if len(partes_id) > 1 and partes_id[1].strip().isdigit() else None
@@ -5590,8 +5585,10 @@ async def pedir_topico_autorais(message: types.Message, state: FSMContext):
     await state.set_state(AutoraisFluxo.aguardando_topico)
 
 async def confirmar_origem_autorais(message, state, nova_origem, topico_final, nome_novo=None):
-    """Monta a tela de aprovação da ORIGEM. Usada tanto pelo caminho automático
-    (tópico vindo do link) quanto pelo manual (tópico digitado)."""
+    """
+    Tela de aprovação da ORIGEM, com o antes e o depois. Serve ao caminho automático
+    (tópico no link) e ao manual (tópico digitado).
+    """
     await state.update_data(origem_pendente=nova_origem, topico_pendente=topico_final)
     
     config = ler_autorais_config()
@@ -5622,13 +5619,14 @@ async def confirmar_origem_autorais(message, state, nova_origem, topico_final, n
 
 @dp.message(AutoraisFluxo.aguardando_topico)
 async def salvar_origem_autorais(message: types.Message, state: FSMContext):
+    """Recebe o tópico da origem (0 = o grupo todo) e vai para a aprovação."""
     if message.text == "Cancelar ❌":
         await cancelar_fluxo_global(message, state)
         return
     
     entrada_topico = message.text.strip()
     
-    # ✅ Tolerante: se colarem o link ou "ID_1" de novo, extraímos só o tópico
+    # Tolerante: se colarem o link ou "ID_1" de novo, extrai só o tópico.
     if not entrada_topico.isdigit():
         import re
         achado = re.search(r'[_:/](\d+)\s*$', entrada_topico)
@@ -5648,6 +5646,7 @@ async def salvar_origem_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_confirmacao_origem)
 async def processar_origem_autorais(message: types.Message, state: FSMContext):
+    """Grava a origem e o tópico aprovados."""
     if message.text == "Cancelar ❌":
         await message.answer("❌ Operação cancelada. A origem <b>não</b> foi alterada.", parse_mode="HTML")
         await painel_autorais(message, state)
@@ -5678,6 +5677,7 @@ async def pedir_destino_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_destino)
 async def salvar_destino_autorais(message: types.Message, state: FSMContext):
+    """Valida o novo destino e pede aprovação; avisa se for o mesmo grupo da origem (laço)."""
     if message.text == "Cancelar ❌":
         await cancelar_fluxo_global(message, state)
         return
@@ -5690,8 +5690,7 @@ async def salvar_destino_autorais(message: types.Message, state: FSMContext):
     await msg_status.delete()
 
     if sucesso:
-        # ✅ Mesmo tratamento da origem: usa o nome real do cache se a função
-        # tiver devolvido o próprio ID (Modo Trust).
+        # Mesmo tratamento da origem: o nome real do cache quando a validação devolveu o ID.
         id_base_exibicao = str(id_final).split(":")[0].strip()
         if str(nome_chat).strip() == id_base_exibicao:
             cache_nomes = ler_cache_nomes_grupos()
@@ -5713,11 +5712,11 @@ async def salvar_destino_autorais(message: types.Message, state: FSMContext):
     config = ler_autorais_config()
     destino_antigo = config.get("destino", "Não definido")
     
-    # ✅ NOVO: guarda o valor e pede aprovação antes de gravar
+    # Pede aprovação antes de gravar.
     await state.update_data(destino_pendente=id_final, nome_destino_validado=nome_chat)
     
     nome_novo = nome_chat or id_final
-    # ✅ Exibição no mesmo formato do link do Telegram Web ("-100123_1")
+    # Exibe no formato do link do Telegram Web ("-100123_1").
     id_final_exibicao = str(id_final).replace(":", "_")
     destino_antigo_exibicao = str(destino_antigo).replace(":", "_")
     origem_atual = str(config.get("origem", "")).split(":")[0].strip()
@@ -5749,6 +5748,7 @@ async def salvar_destino_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_confirmacao_destino)
 async def processar_destino_autorais(message: types.Message, state: FSMContext):
+    """Grava o destino aprovado."""
     if message.text == "Cancelar ❌":
         await message.answer("❌ Operação cancelada. O destino <b>não</b> foi alterado.", parse_mode="HTML")
         await painel_autorais(message, state)
@@ -5770,7 +5770,7 @@ async def processar_destino_autorais(message: types.Message, state: FSMContext):
     await painel_autorais(message, state)
 
 # ----------------------------------------------------
-# LÓGICA DE CONFIRMAÇÃO PARA EDIÇÃO DE DIAS E LIMITES
+# Dias de retorno e cota diária (com confirmação)
 # ----------------------------------------------------
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Dias ⏳")
 async def pedir_dias_autorais(message: types.Message, state: FSMContext):
@@ -5877,7 +5877,7 @@ async def processar_limite_autorais(message: types.Message, state: FSMContext):
     await submenu_regras_retorno(message, state)
 
 # ----------------------------------------------------
-# 🕐 JANELA DE HORÁRIO DOS VÍDEOS AUTORAIS
+# Janela de horário do retorno dos Autorais
 # ----------------------------------------------------
 teclado_janela_autorais = ReplyKeyboardMarkup(
     keyboard=[
@@ -5907,6 +5907,7 @@ async def pedir_janela_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_janela_autorais)
 async def confirmar_janela_autorais(message: types.Message, state: FSMContext):
+    """Valida a janela ("8-22" ou dia todo) e pede aprovação, com o espaçamento aproximado."""
     import re
 
     if message.text == "Cancelar ❌":
@@ -5949,6 +5950,7 @@ async def confirmar_janela_autorais(message: types.Message, state: FSMContext):
 
 @dp.message(AutoraisFluxo.aguardando_confirmacao_janela_autorais)
 async def processar_janela_autorais(message: types.Message, state: FSMContext):
+    """Grava a janela aprovada; vale a partir do próximo agendamento."""
     if message.text == "Cancelar ❌":
         await message.answer("Operação cancelada. A janela <b>não</b> foi alterada.", parse_mode="HTML")
         await submenu_regras_retorno(message, state)
@@ -5978,19 +5980,18 @@ async def processar_janela_autorais(message: types.Message, state: FSMContext):
     )
     await submenu_regras_retorno(message, state)
 
-# 🪞 FEED CENTRAL DOS ACHADINHOS
-# Todo achadinho cai no tópico do seu nicho E também aqui. Os tópicos por
-# categoria continuam servindo quem quer só uma delas; este feed é a vitrine
-# cheia para quem acabou de entrar e não sabe o que procurar.
-# Deixe ESPELHO_ACHADINHOS_DESTINO como None para desligar o espelho.
+# Feed central dos achadinhos: todo achadinho cai no tópico do seu nicho E também
+# aqui. Os tópicos por categoria servem quem quer só uma delas; o feed é a vitrine
+# cheia para quem acabou de entrar. ESPELHO_ACHADINHOS_DESTINO = None desliga.
 ESPELHO_ACHADINHOS_DESTINO = "-1004460669033"
 ESPELHO_ACHADINHOS_TOPICO = "247"
 
 
 async def espelhar_no_feed_central(msg_original, legenda, destino_original, thread_original):
-    """Republica a mesma foto no feed central reaproveitando o file_id do primeiro
-    envio: nada é baixado nem enviado de novo, só referenciado. Falha aqui nunca
-    derruba a postagem principal, que a essa altura já foi entregue."""
+    """
+    Republica o achadinho no feed central reaproveitando o file_id do primeiro envio
+    (nada é baixado nem enviado de novo). Falha aqui nunca derruba a postagem principal.
+    """
     if not ESPELHO_ACHADINHOS_DESTINO:
         return
 
@@ -6018,19 +6019,20 @@ async def espelhar_no_feed_central(msg_original, legenda, destino_original, thre
         if EXIBIR_LOGS: logger.warning(f"⚠️ [Achadinhos] Falha ao espelhar no feed central: {e}. A postagem principal foi entregue normalmente.")
 
 
-# 🔥 ACHADOS DO DIA — só o que passa do piso de desconto.
-# Não custa chamada extra à API: o garimpo já ordena por desconto decrescente,
-# então o item escolhido JÁ é o de maior desconto daquela busca. Aqui a gente
-# só verifica se ele passa da régua e espelha num tópico próprio.
+# Achados do dia: só o que passa do piso de desconto. Sem chamada extra à API: o
+# garimpo já ordena por desconto, então o item escolhido já é o de maior desconto
+# da busca; aqui só confere a régua e espelha num tópico próprio.
 ACHADOS_DESTINO = "-1004460669033"
-ACHADOS_TOPICO = "393"          # ⚠️ Coloque o ID do tópico "🔥 Achados do Dia". Em 0 fica desligado.
-ACHADOS_PISO_DESCONTO = 60    # % mínimo para virar "achado"
-ACHADOS_PULA_FEED_CENTRAL = False  # True = achado NÃO vai também para Ofertas do Dia
+ACHADOS_TOPICO = "393"  # tópico "Achados do Dia"; 0 desliga
+ACHADOS_PISO_DESCONTO = 60  # % mínimo de desconto para virar "achado"
+ACHADOS_PULA_FEED_CENTRAL = False  # True = o achado NÃO vai também para o feed central
 
 
 async def espelhar_achado_do_dia(msg_original, legenda, taxa_desconto, destino_original, thread_original):
-    """Republica no tópico de achados quando o desconto passa do piso.
-    Reaproveita o file_id: nada é baixado nem enviado de novo."""
+    """
+    Republica no tópico de achados quando o desconto passa do piso, reaproveitando o
+    file_id. Falha aqui nunca derruba a postagem principal.
+    """
     if not ACHADOS_TOPICO or str(ACHADOS_TOPICO) == "0":
         return
 
@@ -6061,10 +6063,11 @@ async def espelhar_achado_do_dia(msg_original, legenda, taxa_desconto, destino_o
 
 
 def extrair_destino_e_topico(texto):
-    """🔗 Aceita link do Telegram Web, link t.me/c/ ou o ID cru, e devolve
-    (destino, thread_id). Poupa o operador de garimpar dois números na URL.
-    Devolve (None, None) quando não reconhece — inclusive no link público
-    t.me/nomedogrupo, que não carrega o ID numérico."""
+    """
+    Aceita link do Telegram Web, link t.me/c/ ou o ID cru e devolve (destino,
+    thread_id). Devolve (None, None) quando não reconhece, inclusive no link público
+    t.me/nomedogrupo, que não traz o ID numérico.
+    """
     texto = (texto or "").strip()
 
     # web.telegram.org/a/#-1004460669033_195  (o _195 é opcional)
@@ -6072,7 +6075,7 @@ def extrair_destino_e_topico(texto):
     if m:
         return m.group(1), m.group(2) or "0"
 
-    # t.me/c/4460669033/195 — neste formato o -100 vem omitido
+    # t.me/c/4460669033/195: neste formato o -100 vem omitido
     m = re.search(r"t\.me/c/(\d+)(?:/(\d+))?", texto)
     if m:
         return f"-100{m.group(1)}", m.group(2) or "0"
