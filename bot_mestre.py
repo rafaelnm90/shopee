@@ -8820,6 +8820,7 @@ async def cancelar_alvos_rotina_publico(message: types.Message, state: FSMContex
 
 @dp.message(ConfigRotina.aguardando_alvos_rotina)
 async def confirmar_alvos_rotina_publico(message: types.Message, state: FSMContext):
+    """Valida os tópicos digitados para as rotinas do Público e pede confirmação."""
     if message.from_user.id != ADMIN_ID: return
 
     if message.text == "Cancelar ❌":
@@ -8841,7 +8842,7 @@ async def confirmar_alvos_rotina_publico(message: types.Message, state: FSMConte
             if erro:
                 problemas.append(erro)
             elif topico and topico != "0" and topico not in topicos_finais:
-                # 🔁 Duplicata silenciosa fazia a rotina postar duas vezes no mesmo tópico.
+                # Tópico repetido é ignorado (senão a rotina sairia duas vezes no mesmo tópico).
                 topicos_finais.append(topico)
 
         if problemas:
@@ -8879,6 +8880,7 @@ async def confirmar_alvos_rotina_publico(message: types.Message, state: FSMConte
 
 @dp.message(ConfigRotina.aguardando_confirmacao_alvos_rotina)
 async def salvar_alvos_rotina_publico(message: types.Message, state: FSMContext):
+    """Grava os tópicos aprovados das rotinas do Público."""
     if message.from_user.id != ADMIN_ID: return
 
     if message.text == "Cancelar ❌":
@@ -8903,11 +8905,12 @@ async def salvar_alvos_rotina_publico(message: types.Message, state: FSMContext)
 
 @dp.message(F.text == "Disparar Repost Autoral ♻️", StateFilter("*"))
 async def manual_repost_autoral(message: types.Message):
+    """Repost manual de um vídeo autoral no Grupo Público (copy_message da origem)."""
     if message.from_user.id != ADMIN_ID: return
     
     config_pub = ler_submissao_config()
     
-    # ✅ Puxa a flexibilidade de roteamento
+    # Destino: repost_destino ou o tópico de postagem do Público.
     grupo_id_base = config_pub.get("grupo_id")
     topico_destino_base = config_pub.get("topico_destino")
     repost_destino = config_pub.get("repost_destino")
@@ -8934,7 +8937,7 @@ async def manual_repost_autoral(message: types.Message):
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         
-        # ✅ CORREÇÃO: Garante que ele não reposte manualmente algo que já foi pelo automático
+        # Só vídeo que ainda não foi para o Público.
         cursor.execute("SELECT * FROM fila_autorais WHERE processado = 1 AND repostado_publico = 0 ORDER BY id_unico DESC LIMIT 30")
         autorais_recentes = cursor.fetchall()
     except Exception as e:
@@ -8974,13 +8977,13 @@ async def manual_repost_autoral(message: types.Message):
     )
     
     try:
-        # ✅ NOVO: Tenta usar a origem personalizada. Se não tiver, usa a dos Autorais.
+        # Origem: repost_origem ou, sem ela, o destino dos Autorais.
         canal_autorais = config_pub.get("repost_origem")
         if not canal_autorais:
             config_aut = ler_config_bd("autorais_config", {})
             canal_autorais = config_aut.get("destino")
 
-        # 🧹 Mesmo tratamento do motor automático: o from_chat_id não aceita "-100123:5".
+        # from_chat_id não aceita o tópico ("-100123:5").
         if canal_autorais:
             canal_autorais = str(canal_autorais).split(":")[0].strip()
         
@@ -8997,7 +9000,7 @@ async def manual_repost_autoral(message: types.Message):
             **kwargs
         )
         
-        # Marca como repostado para garantir a integridade da fila autônoma
+        # Marca como repostado no Público.
         agora_str = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute("UPDATE fila_autorais SET repostado_publico = 1, data_repost_publico = ? WHERE id_unico = ?", (agora_str, id_unico))
         conexao.commit()
@@ -9010,9 +9013,12 @@ async def manual_repost_autoral(message: types.Message):
         
     conexao.close()
 
-# ❌ NOVO: Handler Global para Cancelar via Botão (Agora 100% à prova de falhas)
 @dp.message(F.text == "Cancelar ❌", StateFilter("*"))
 async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
+    """
+    Botão "Cancelar ❌" de qualquer tela: limpa o estado e volta ao menu de onde o
+    usuário veio. No Criar Postagem, devolve o número reservado e apaga o vídeo baixado.
+    """
     if message.from_user.id != ADMIN_ID: return
     
     estado_atual = await state.get_state()
@@ -9020,8 +9026,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 
     data = await state.get_data()
 
-    # 🔁 Roteamento Inteligente: Se estiver na CONFIRMAÇÃO de Limpeza, volta para a SELEÇÃO de Limpeza
-    # 🔁 Roteamento Inteligente: cancelou o recálculo da grade? Nada foi alterado.
+    # Cancelar o recálculo da grade: nada foi alterado.
     if estado_atual == "ConfigFluxo:aguardando_confirmacao_rotinas":
         await state.clear()
         if EXIBIR_LOGS: logger.info("🔙 Recálculo da grade CANCELADO. Nenhum horário foi alterado.")
@@ -9035,29 +9040,27 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await menu_zerar_filas_tarefas(message, state)
         return
         
-    # 🔀 Roteamento Inteligente: Se cancelar da seleção de limpeza ou do reinício, volta pro painel de Servidor
+    # Seleção de limpeza ou reinício cancelados: volta às Opções do Servidor.
     if estado_atual in ["ConfigFluxo:aguardando_selecao_limpeza", "ConfigFluxo:aguardando_confirmacao_reiniciar"]:
         await state.clear()
         await message.answer("Ação cancelada. Nenhuma alteração foi feita no servidor.", reply_markup=obter_teclado_opcoes_servidor())
         return
 
-    # 🔀 Roteamento Inteligente: cancelou dentro do fluxo de Achadinhos? Volta para
-    # o painel dele. O prefixo cobre os dez estados de uma vez (cadastro, edição,
-    # remoção), sem precisar listar um por um.
+    # Achadinhos: o prefixo cobre todos os estados do fluxo (cadastro, edição, remoção).
     if estado_atual and estado_atual.startswith("AchadinhosFluxo:"):
         await state.clear()
         await message.answer("Ação cancelada.")
         await painel_achadinhos(message, state)
         return
         
-    # 🔁 Roteamento Inteligente: Se estiver no Gerenciador de Fila
+    # Gerenciar Fila
     if estado_atual and estado_atual.startswith("GerenciarFilaFluxo"):
         await state.clear()
         await message.answer("Ação cancelada.")
         await menu_gerenciar_fila(message, state)
         return
         
-    # 🔁 Roteamento Inteligente: Se estiver no Espião (Grupos Vigiados ou Configurando Tempos)
+    # Espião: forçar clones volta ao menu do Espião; o resto volta aos Grupos Vigiados.
     if estado_atual == "EspiaoFluxo:aguardando_confirmacao_forcar_clones":
         await state.clear()
         await message.answer("Ação cancelada.")
@@ -9066,7 +9069,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 
     estados_espiao_vigiados = [
         "EspiaoFluxo:aguardando_novo_alvo",
-        "EspiaoFluxo:aguardando_confirmacao_alvo", # ✅ O estado que falhou no seu vídeo!
+        "EspiaoFluxo:aguardando_confirmacao_alvo",
         "EspiaoFluxo:aguardando_remocao_alvo",
         "EspiaoFluxo:aguardando_confirmacao_remocao",
         "EspiaoFluxo:aguardando_canal_destino",
@@ -9084,22 +9087,22 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await menu_grupos_vigiados(message, state)
         return
 
-    # 🔁 Roteamento Inteligente: Se estiver no SPAM Principal
+    # SPAM do canal principal
     if estado_atual and estado_atual.startswith("ConfigDivulgacao:"):
         await state.clear()
         await message.answer("Ação cancelada.")
         await gerenciar_divulgacao(message, state)
         return
 
-    # 🔁 Roteamento Inteligente: Se estiver no SPAM Viral
+    # SPAM do Viral
     if estado_atual and estado_atual.startswith("ConfigDivulgacaoViral"):
         await state.clear()
         await message.answer("Ação cancelada.")
         await gerenciar_divulgacao_viral(message, state)
         return
 
-    # 🔁 Roteamento Inteligente: SPAM por escopo (Público / Achadinhos).
-    # Lê o escopo ANTES do clear, senão volta sempre para o painel errado.
+    # SPAM por escopo (Público / Achadinhos): lê o escopo ANTES de limpar o estado,
+    # senão voltaria sempre para o painel errado.
     if estado_atual and estado_atual.startswith("ConfigDivulgacaoEscopo"):
         _info = await state.get_data()
         _escopo = _info.get("escopo_div", "publico")
@@ -9108,40 +9111,37 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await renderizar_painel_divulgacao(message, state, _escopo)
         return
         
-   # 🔁 Roteamento Inteligente: Se estiver no Gerador de Achadinhos
+   # Achadinhos (já tratado acima; mantido por segurança)
     if estado_atual and estado_atual.startswith("AchadinhosFluxo"):
         await state.clear()
         await message.answer("Ação cancelada.")
         await painel_achadinhos(message, state)
         return
 
-    # 🔁 Roteamento Inteligente: Se estiver no Disparador de Notas
+    # Disparador de Notas: volta ao menu dele, sem limpar o estado do módulo.
     if estado_atual and estado_atual.startswith("PainelNotasFluxo"):
         import painel_notas
         await message.answer("Ação cancelada. Voltando ao menu do disparador...", reply_markup=painel_notas.obter_teclado_menu_notas())
         await state.set_state(painel_notas.PainelNotasFluxo.menu_principal)
         return
 
-    # 🔁 Roteamento Inteligente: Se estiver em Vídeos Autorais
+    # Vídeos Autorais: volta ao submenu de onde veio.
     if estado_atual and estado_atual.startswith("AutoraisFluxo"):
         await state.clear()
         await message.answer("Ação cancelada.")
         
-        # Verifica se estava editando Dias, Limites ou Janela para voltar ao SUBMENU de Retorno
         if estado_atual in ["AutoraisFluxo:aguardando_dias_retorno", "AutoraisFluxo:aguardando_limite_videos", "AutoraisFluxo:aguardando_confirmacao_dias_retorno", "AutoraisFluxo:aguardando_confirmacao_limite_videos", "AutoraisFluxo:aguardando_janela_autorais", "AutoraisFluxo:aguardando_confirmacao_janela_autorais"]:
             await submenu_regras_retorno(message, state)
             
-        # Verifica se estava confirmando Pausas para voltar ao SUBMENU de Status
         elif estado_atual in ["AutoraisFluxo:aguardando_confirmacao_pausa_repost", "AutoraisFluxo:aguardando_confirmacao_pausa_robo"]:
             await submenu_status_robo(message, state)
             
         else:
-            # Caso contrário (origem/destino), volta pro menu principal dos Autorais
             await painel_autorais(message, state)
             
         return
         
-    # 🔁 Roteamento Inteligente: Se estiver nas Rotinas
+    # Rotinas: volta ao menu de rotinas do canal certo.
     if estado_atual and estado_atual.startswith("ConfigRotina"):
         menu_orig = data.get('menu_origem')
         tipo_edicao = data.get('tipo_edicao')
@@ -9149,8 +9149,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.info("🔙 Cancelando configuração de rotina e redirecionando ao menu correto.")
         await message.answer("Ação cancelada.")
 
-        # ✅ NOVO: cancelar a edição de uma rotina devolve ao submenu "Editar Rotinas",
-        # e não ao menu raiz, preservando o contexto de edição.
+        # Cancelar a edição de uma rotina volta ao submenu "Editar Rotinas" do canal certo.
         if estado_atual == "ConfigRotina:aguardando_novo_horario":
             if not menu_orig:
                 if tipo_edicao in ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral", "promo_achadinhos_viral"]:
@@ -9172,7 +9171,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
             await gerenciar_rotina(message, state)
         return
 
-    # 🔁 Roteamento Inteligente: Cancelamento do toggle do Moderador volta ao submenu de origem
+    # Toggle do moderador: volta ao submenu do moderador.
     if estado_atual == "SubmissaoAdminFluxo:aguardando_confirmacao_toggle":
         await state.clear()
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento do toggle do Moderador. Retornando ao submenu de Configurações do Robô Moderador.")
@@ -9180,7 +9179,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await submenu_robo_moderador(message, state)
         return
 
-    # 🔁 Roteamento Inteligente: Cancelamento na edição de um tópico volta ao menu de tópicos
+    # Edição de tópico do Público: volta ao menu de tópicos.
     if estado_atual in ["SubmissaoAdminFluxo:aguardando_novo_valor_grupo", "SubmissaoAdminFluxo:aguardando_confirmacao_grupo"]:
         await state.clear()
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento da edição de tópico. Retornando ao menu Definir Tópicos de Moderação.")
@@ -9188,15 +9187,15 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await menu_edicao_grupo_publico(message, state)
         return
 
-    # 🔁 Roteamento Inteligente: Se estiver nas Submissões do Público
+    # Demais telas do Grupo Público: volta ao painel do Público.
     if estado_atual and estado_atual.startswith("SubmissaoAdminFluxo"):
         await state.clear()
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento do Painel de Submissões. Retornando ao painel do Grupo Público.")
         await message.answer("Ação cancelada.")
-        await painel_submissoes(message, state) # ✅ CORREÇÃO: Agora volta para o painel correto
+        await painel_submissoes(message, state)
         return
 
-    # 🔁 Roteamento Inteligente: Se estiver na Pausa Programada
+    # Pausa programada: volta às Configurações.
     if estado_atual and estado_atual.startswith("PausaProgramadaFluxo"):
         await state.clear()
         if EXIBIR_LOGS: logger.info("🔙 Cancelamento da Pausa Programada. Voltando para Configurações Avançadas.")
@@ -9206,19 +9205,19 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 
     if EXIBIR_LOGS: logger.info("🔍 Limpeza de memória solicitada. Avaliando necessidade de rollback no contador global...")
     
-    # ✅ SISTEMA DE ROLLBACK: Devolve o número reservado ao cancelar a criação da postagem
+    # Criar Postagem cancelado: devolve o número reservado ao contador.
     numero_reservado = data.get('numero_reservado')
     if estado_atual and estado_atual.startswith("PostagemFluxo") and numero_reservado is not None:
         async with _lock_contador:
             contador_atual = ler_contador()
-            # Só executa o rollback se o contador não tiver avançado por outro processo simultâneo
+            # só se ninguém usou um número depois deste
             if contador_atual == numero_reservado + 1:
                 salvar_contador(numero_reservado)
                 if EXIBIR_LOGS: logger.info(f"⏪ Rollback executado: Número {numero_reservado} foi devolvido ao contador global com sucesso.")
             else:
                 if EXIBIR_LOGS: logger.warning(f"⚠️ Rollback abortado: O contador já avançou para {contador_atual} e não pode ser revertido com segurança.")
 
-    # 🧹 Limpeza de arquivos de vídeo que ficaram órfãos
+    # Apaga o vídeo baixado para a postagem cancelada.
     caminho_video = data.get('video_path')
     if caminho_video and os.path.exists(caminho_video):
         os.remove(caminho_video)
@@ -9230,6 +9229,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 @dp.message(Command("postar"), StateFilter("*"))
 @dp.message(F.text == "Criar Postagem 📝", StateFilter("*"))
 async def iniciar_postagem(message: types.Message, state: FSMContext):
+    """Criar Postagem: pede o vídeo."""
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     if EXIBIR_LOGS: logger.info("🎬 Iniciando postagem com IA Copywriter.")
@@ -9238,6 +9238,7 @@ async def iniciar_postagem(message: types.Message, state: FSMContext):
 
 @dp.message(PostagemFluxo.aguardando_video)
 async def receber_video(message: types.Message, state: FSMContext):
+    """Baixa o vídeo, reserva o número e pede à IA a identificação do produto."""
     if not message.video:
         await message.answer("Por favor, envie um arquivo de vídeo.", reply_markup=teclado_cancelar)
         return
@@ -9246,18 +9247,18 @@ async def receber_video(message: types.Message, state: FSMContext):
     file_id = message.video.file_id
     
     try:
-        # ✨ Proteção contra concorrência: Reserva o número instantaneamente
+        # Reserva o número da postagem já na entrada, com trava (o cancelar devolve).
         async with _lock_contador:
             numero_atual = ler_contador()
             salvar_contador(numero_atual + 1)
             if EXIBIR_LOGS: logger.info(f"🔒 Concorrência blindada: Número {numero_atual} reservado. Próximo será {numero_atual + 1}.")
 
-        # 1. Download do vídeo para o servidor Ubuntu
+        # 1. Baixa o vídeo
         file_info = await bot.get_file(file_id)
         video_path = f"temp/temp_{file_id}.mp4"
         await bot.download_file(file_info.file_path, destination=video_path)
 
-        # 2. Processa a Copy pela API Central do Gemini
+        # 2. A IA identifica o produto ("Vídeo N" + "📦 Item: ...")
         prompt_ia = (
             f"Assista ao vídeo INTEIRO para identificar o produto ou kit principal. "
             f"Sua resposta deve conter EXATAMENTE duas linhas. "
@@ -9274,11 +9275,9 @@ async def receber_video(message: types.Message, state: FSMContext):
             raise Exception("Falha total na análise do vídeo pela IA.")
         if EXIBIR_LOGS: logger.info("💾 Mantendo o vídeo no servidor para re-upload posterior com data atualizada.")
         
-        # ✅ Salva o texto da IA e o caminho do vídeo físico na memória
         await state.update_data(video_path=video_path, video_id=file_id, nome_produto=chamada_gerada, links=[], numero_reservado=numero_atual)
         await msg_status.delete()
         
-        # ✅ Junta o texto da IA com uma pergunta orientativa apenas para exibição ao administrador
         mensagem_aprovacao = f"{chamada_gerada}\n\n👉 <b>Esta identificação está correta?</b> Escolha uma opção abaixo:"
         
         await message.answer(mensagem_aprovacao, reply_markup=teclado_confirmacao, parse_mode="HTML")
@@ -9290,7 +9289,7 @@ async def receber_video(message: types.Message, state: FSMContext):
         if EXIBIR_LOGS: logger.info("💾 Mantendo o vídeo original no servidor apesar do erro na IA.")
         await msg_status.delete()
         
-        # ✅ Analisa o erro e traduz para o utilizador
+        # Traduz o erro para o admin.
         motivo = "Falha no servidor."
         if "file is too big" in erro_str.lower():
             motivo = "O vídeo ultrapassa o limite de 20MB do Telegram para Bots."
@@ -9299,18 +9298,17 @@ async def receber_video(message: types.Message, state: FSMContext):
         else:
             motivo = erro_str[:150] 
             
-        # ✅ NOVO: Exibe o teclado com as três opções claras
         await message.answer(f"⚠️ A IA não conseguiu processar este vídeo.\n**Motivo:** {motivo}\n\nO que você deseja fazer agora?", reply_markup=teclado_erro_ia)
         
-        # ✅ Em caso de erro, preservamos o arquivo físico e o número já reservado
+        # Mantém o arquivo e o número reservado para tentar de novo.
         video_path_recuperacao = f"temp/temp_{file_id}.mp4"
         await state.update_data(video_path=video_path_recuperacao, video_id=file_id, links=[], numero_reservado=numero_atual)
         
-        # ✅ Redireciona para o novo estado de decisão
         await state.set_state(PostagemFluxo.aguardando_decisao_erro)
 
 @dp.message(PostagemFluxo.aguardando_decisao_erro)
 async def processar_erro_ia(message: types.Message, state: FSMContext):
+    """Depois de falha da IA: digitar o nome, tentar de novo ou digitar direto o nome."""
     texto = message.text.strip()
     
     if texto == "Digitar Manualmente ✍️":
@@ -9324,7 +9322,7 @@ async def processar_erro_ia(message: types.Message, state: FSMContext):
         video_path = data.get('video_path')
         numero_atual = data.get('numero_reservado')
         
-        # Trava de segurança caso o arquivo físico tenha sido corrompido ou apagado
+        # O arquivo sumiu: não há o que reenviar.
         if not video_path or not os.path.exists(video_path):
             await message.answer("⚠️ O arquivo de vídeo foi perdido no servidor. Por favor, clique em Cancelar e envie o vídeo novamente.", reply_markup=teclado_erro_ia)
             return
@@ -9366,7 +9364,7 @@ async def processar_erro_ia(message: types.Message, state: FSMContext):
             await message.answer(f"⚠️ A IA falhou novamente.\n**Motivo:** {motivo}\n\nO que você deseja fazer agora?", reply_markup=teclado_erro_ia)
             
     elif texto != "Cancelar ❌":
-        # 🚀 ATALHO: O usuário digitou o nome do produto diretamente na tela de erro
+        # Atalho: texto digitado direto na tela de erro vira o nome do produto.
         if EXIBIR_LOGS: logger.info("✍️ Atalho: Usuário digitou o texto direto ignorando os botões de erro.")
         data = await state.get_data()
         numero_atual = data.get('numero_reservado')
@@ -9378,6 +9376,7 @@ async def processar_erro_ia(message: types.Message, state: FSMContext):
 
 @dp.message(PostagemFluxo.aguardando_confirmacao_nome)
 async def confirmar_nome(message: types.Message, state: FSMContext):
+    """Aprova o nome da IA, pede para digitar ou aceita o texto digitado como nome."""
     texto = message.text.strip()
     if texto == "Aprovar ✅":
         if EXIBIR_LOGS: logger.info("✅ Nome aprovado. Avançando para seleção de plataforma.")
@@ -9388,7 +9387,7 @@ async def confirmar_nome(message: types.Message, state: FSMContext):
         await message.answer("Sem problemas. Digite manualmente APENAS O NOME DO PRODUTO:", reply_markup=teclado_cancelar)
         await state.set_state(PostagemFluxo.aguardando_chamada_manual)
     elif texto != "Cancelar ❌":
-        # 🚀 ATALHO: O usuário digitou o nome do produto diretamente na tela de confirmação
+        # Atalho: texto digitado direto na confirmação vira o nome do produto.
         if EXIBIR_LOGS: logger.info("✍️ Atalho: Usuário digitou o texto direto sobrepondo a IA.")
         data = await state.get_data()
         numero_atual = data.get('numero_reservado')
@@ -9413,6 +9412,7 @@ async def receber_chamada_manual(message: types.Message, state: FSMContext):
 
 @dp.message(PostagemFluxo.aguardando_plataforma)
 async def receber_plataforma(message: types.Message, state: FSMContext):
+    """Shopee, TikTok ou os dois: define quais links serão pedidos."""
     plataforma = message.text
     if plataforma not in ["Ambos 🛒🎵", "Apenas Shopee 🛒", "Apenas TikTok 🎵"]:
         await message.answer("Por favor, use os botões para escolher a plataforma.")
@@ -9500,6 +9500,11 @@ async def receber_links_tiktok(message: types.Message, state: FSMContext):
         await message.answer(f"Link TikTok {len(links)}/6 registrado. Envie o próximo ou clique em Finalizar.", reply_markup=teclado_finalizar)
 
 async def finalizar_postagem(message: types.Message, state: FSMContext):
+    """
+    Monta a legenda (com os links), põe o vídeo na fila do canal principal no dia
+    certo e mostra o recibo. Sem caber nos 1024 caracteres com as duas plataformas,
+    vira dois posts (Shopee e TikTok).
+    """
     data = await state.get_data()
     nome = data['nome_produto']
     video_id_fallback = data.get('video_id')
@@ -9511,9 +9516,8 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     links_tiktok = data.get('links_tiktok', [])
     
     if EXIBIR_LOGS: logger.info("📤 Iniciando montagem inteligente da legenda (3 níveis).")
-    # ✅ A leitura e o incremento do contador foram movidos para a primeira etapa do fluxo
     
-    # Substitui a quebra de linha por espaço e formata o título
+    # Título: "Vídeo N | 📦 Item: ..." numa linha só.
     titulo_limpo = nome.replace('\n', ' | ')
     linha_divisoria = "━━━━━━━━━━━━━━━"
     cabecalho = f"<b>{titulo_limpo}</b>\n\n{linha_divisoria}\n\n"
@@ -9556,7 +9560,8 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
             
         return legenda_temp
 
-    # Nível 1: Tenta o texto longo duplo
+    # Legenda em níveis até caber nos 1024 caracteres do Telegram: 1) texto de apoio
+    # longo; 2) curto; 3) só um rodapé; 4) com as duas plataformas, dois posts.
     legenda_final = montar_legenda(texto_longo, is_rodape=False)
     if EXIBIR_LOGS: logger.info(f"📏 Avaliando Nível 1: {len(legenda_final)} caracteres.")
     
@@ -9576,7 +9581,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
                 if EXIBIR_LOGS: logger.warning("🚨 Limite crítico excedido no Nível 3. Ativando Nível 4 (Divisão de Postagem).")
                 nivel_4_ativado = True
 
-    # ✅ Renova a data do arquivo sem recompressão
+    # Renova a data do arquivo (sem recomprimir).
     caminho_processado = None
     if caminho_video_original and os.path.exists(caminho_video_original):
         subprocess.run(["touch", caminho_video_original])
@@ -9586,24 +9591,23 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     hoje_str = agora.strftime("%Y-%m-%d")
     amanha_str = (agora + timedelta(days=1)).strftime("%Y-%m-%d")
     
-    # 🚀 LÓGICA DE INTELIGÊNCIA TEMPORAL E FILA ESTRITA (FIFO)
+    # Data da fila (FIFO)
     dados_rotina = ler_config_rotina()
     
-    # 1. Define a data base olhando para a bandeira do Bom Dia
+    # 1. Bom Dia de hoje já saiu: o vídeo vai para amanhã; senão, hoje ("2000-01-01").
     if dados_rotina.get("ultimo_bom_dia") == hoje_str:
         data_agendamento_base = amanha_str
         if EXIBIR_LOGS: logger.info("⏰ O 'Bom Dia' de hoje já passou. Data base projetada para Amanhã.")
     else:
-        data_agendamento_base = "2000-01-01" # Flag interna para 'Imediato/Hoje'
+        data_agendamento_base = "2000-01-01"  # marca de "hoje"
         if EXIBIR_LOGS: logger.info("⏰ O 'Bom Dia' de hoje ainda não passou (Madrugada/Manhã). Data base projetada para Hoje.")
         
-    # 2. 🚧 Trava de Ordem Cronológica (Não permite furar a fila)
+    # 2. Ninguém fura a fila: se o último vídeo já está num dia futuro, o novo vai junto.
     fila_data_temp = ler_fila_postagens()
     fila_temp = fila_data_temp.get("fila", [])
     if fila_temp:
         ultima_data_str = fila_temp[-1].get("data_adicao", "2000-01-01")
         
-        # Se o último vídeo da fila já foi empurrado para o futuro, o novo vídeo tem que acompanhá-lo.
         if ultima_data_str != "2000-01-01" and ultima_data_str > data_agendamento_base:
             data_agendamento_base = ultima_data_str
             if EXIBIR_LOGS: logger.info(f"🚧 FIFO: O novo vídeo foi empurrado para o fim da fila: {data_agendamento_base}")
@@ -9616,7 +9620,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
             conexao = sqlite3.connect("banco_dados.db")
             cursor = conexao.cursor()
             
-            # Descobre a próxima prioridade para este dia
+            # Próxima posição dentro do dia.
             cursor.execute("SELECT MAX(prioridade) FROM fila_postagens WHERE data_alvo = ?", (data_agendamento_base,))
             resultado = cursor.fetchone()[0]
             proxima_prioridade = (resultado if resultado else 0) + 1
@@ -9656,16 +9660,15 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     async with _lock_contador:
         proximo_numero = ler_contador()
 
-    # ✅ CORREÇÃO: O recálculo só acontece se o vídeo for para HOJE.
-    # Vídeos do futuro entram na fila sem afetar os horários já definidos para hoje.
+    # Só refaz a grade de hoje se o vídeo for para hoje; vídeo para o futuro não mexe
+    # nos horários já marcados.
     if data_agendamento_base == "2000-01-01" or data_agendamento_base <= hoje_str:
         if EXIBIR_LOGS: logger.info("🔄 O novo vídeo é para hoje. A recalcular a grelha de publicações em tempo real...")
         agendar_fila_postagens()
     else:
         if EXIBIR_LOGS: logger.info(f"⏭️ O novo vídeo é para o futuro ({data_agendamento_base}). A grelha de hoje não será afetada.")
 
-    # 🧾 Recibo do que acabou de entrar na fila. O contador aponta para o PRÓXIMO,
-    # então o vídeo recém-criado é o anterior — mostrar o 237 aqui confundia.
+    # Recibo: o contador aponta para o PRÓXIMO número, então o vídeo criado é o anterior.
     numero_criado = max(1, proximo_numero - 1)
     detalhe_posts = "2 posts · Shopee + TikTok" if nivel_4_ativado else "1 post"
 
@@ -9682,7 +9685,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
         except Exception:
             quando = f"🔵 {data_agendamento_base}"
 
-    # Quantos já disputam esse mesmo dia (inclui os que acabaram de entrar).
+    # Quantos já estão na fila desse dia (contando os que acabaram de entrar).
     try:
         conexao = sqlite3.connect("banco_dados.db", timeout=20.0)
         cursor = conexao.cursor()
@@ -9704,7 +9707,7 @@ async def finalizar_postagem(message: types.Message, state: FSMContext):
     )
     await state.clear()
 
-# ✅ Handlers para Gerenciar a Numeração
+# --- Número da postagem ---
 @dp.message(F.text == "Editar Número da Postagem 🔢", StateFilter("*"))
 async def menu_editar_numero(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
