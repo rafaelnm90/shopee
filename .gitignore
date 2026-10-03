@@ -2,6 +2,8 @@ venv/
 .env
 __pycache__/
 *.json
+# Exceção: configuração do Claude Code (hook de início de sessão), sem dados
+!.claude/settings.json
 *.db
 *.session
 *.session-journal
