@@ -1,8 +1,8 @@
 # =============================================================================
-# 👥 POOL DE CONTAS — pool_contas.py
+# POOL DE CONTAS — pool_contas.py
 # =============================================================================
 #
-# 📖 LEIA-ME PARA A IA (e para o Rafael daqui a seis meses)
+# LEIA-ME PARA A IA (e para o Rafael daqui a seis meses)
 #
 # ─── O QUE ESTE ARQUIVO É ────────────────────────────────────────────────────
 # Este módulo é o "RH" das contas de usuário do Telegram (userbots Telethon) do
@@ -15,10 +15,14 @@
 #
 #       "Qual conta é a responsável pela função X agora?"
 #
-# Quem captura/reposta continua sendo o espelhador_videos_autorais.py. O que
-# muda é que ele para de ter uma sessão fixa escrita no código
-# (NOME_SESSAO = 'sessao_espelhador_isolado') e passa a PERGUNTAR aqui quem
-# está de plantão. A conta virou variável — era exatamente esse o pedido.
+# Quem captura/reposta continua sendo o espelhador_videos_autorais.py. O plano é
+# ele deixar a sessão fixa escrita no código (NOME_SESSAO =
+# 'sessao_espelhador_isolado') e PERGUNTAR aqui quem está de plantão.
+#
+# SITUAÇÃO ATUAL: essa integração está PENDENTE. O espelhador ainda usa a sessão
+# fixa e não consulta o plantão. Hoje o pool é usado pela blacklist_captura (marca
+# as contas próprias e busca nomes com elas) e pelo painel "Contas e Postos" do
+# bot_mestre, que mostra e ajusta os postos.
 #
 # ─── AS DUAS FUNÇÕES (POSTOS DE TRABALHO) ────────────────────────────────────
 #   • "espelho"     → a conta que fica DENTRO do grupo dos Autorais capturando
@@ -70,7 +74,7 @@
 # habilitada=1 **e** a função na lista de funcoes_permitidas.
 #
 # ─── ONDE FICAM OS DADOS SENSÍVEIS ───────────────────────────────────────────
-# ⚠️ O repositório é PÚBLICO. Nada sensível pode entrar nele. O desenho é:
+# O repositório é PÚBLICO. Nada sensível pode entrar nele. O desenho é:
 #
 #   • O arquivo .py (este aqui) é público e NÃO contém segredo nenhum.
 #   • As credenciais moram no banco_dados.db, que já está no .gitignore.
@@ -106,7 +110,8 @@
 #     # cliente Telethon já montado e conectado com a sessão certa
 #     cliente = await pool_contas.criar_cliente_da_funcao("espelho")
 #
-#     # rotina periódica (colocar no APScheduler, de 10 em 10 minutos)
+#     # rotina periódica (a ideia é rodar de 10 em 10 minutos; hoje só roda
+#     # pelo botão de sincronizar do painel)
 #     await pool_contas.sincronizar_pool()
 #
 # ─── LINHA DE COMANDO ────────────────────────────────────────────────────────
@@ -128,7 +133,9 @@
 # ─── O QUE ESTE ARQUIVO NÃO FAZ (de propósito) ───────────────────────────────
 #   • Não entra em grupo sozinho sem o link estar configurado.
 #   • Não cria conta de Telegram, não resolve captcha, não burla nada.
-#   • Não mexe em nenhuma tabela que não seja as três dele.
+#   • Não mexe em nenhuma tabela além das três dele (contas_telegram,
+#     funcoes_contas, historico_contas) e de duas chaves da 'configuracoes'
+#     (o sal da criptografia e o link de convite).
 #   • Não reinicia serviço. Trocou o plantonista? Ele grava no banco e avisa no
 #     log; quem lê o plantão é o serviço, na próxima vez que precisar.
 #
@@ -150,8 +157,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# 🕐 Trava de fuso centralizada: importar o módulo já aplica America/Sao_Paulo.
-# Mantém o padrão dos outros arquivos do projeto (fuso.py).
+# Importar fuso já trava o processo no horário de Brasília; sem o fuso.py, segue
+# com o fuso e o log padrão.
 try:
     from fuso import fuso_horario, configurar_logs
     logger = configurar_logs(__name__)
@@ -603,7 +610,7 @@ def remover_conta(apelido):
 # 4B. CREDENCIAIS — o que dá e o que NÃO dá para descobrir sozinho
 # =============================================================================
 #
-# ⚠️ LEIA ISTO ANTES DE ESPERAR MÁGICA DESTE BLOCO.
+# LEIA ISTO ANTES DE ESPERAR MÁGICA DESTE BLOCO.
 #
 # O Telegram NÃO tem login e senha no sentido clássico. O que existe é:
 #
@@ -1197,7 +1204,7 @@ async def checar_conta(conta, grupo_id=None):
             return (fora, SESSAO_OK)
 
         except ValueError:
-            # ⚠️ ARMADILHA: o cache de entidades mora no arquivo .session e NÃO
+            # ARMADILHA: o cache de entidades mora no arquivo .session e NÃO
             # viaja para a StringSession. Numa conta recém-adotada o cache está
             # vazio, então get_entity() falha por ID mesmo quando a conta ESTÁ
             # no grupo — e a checagem concluía "NUNCA_ENTROU" por engano.
@@ -1395,7 +1402,7 @@ async def adotar_sessoes_existentes():
             print(f"⏭️  {nome_arquivo}.session não existe neste servidor.")
             continue
 
-        # ⚠️ NÃO ABRA O .session ORIGINAL. Ele é um banco SQLite que o serviço
+        # NÃO ABRA O .session ORIGINAL. Ele é um banco SQLite que o serviço
         # correspondente mantém ABERTO E TRAVADO enquanto roda. Tentar abrir
         # dava "database is locked" e a adoção falhava justamente nas contas dos
         # serviços que estão no ar. Trabalhamos sempre sobre uma CÓPIA.
