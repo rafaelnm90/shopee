@@ -415,6 +415,9 @@ def sortear_teto_do_dia(semente, dia, piso, topo):
     """
     Quantos posts o dia aceita, sorteado dentro de [piso, topo]. 0 = sem teto.
 
+    topo ausente (None ou 0) ou igual ao piso = número fixo, o próprio piso.
+    topo menor que o piso = faixa digitada invertida; os dois trocam de lugar.
+
     O sorteio é determinístico de propósito: mesma semente + mesmo dia dá
     sempre o mesmo número. O motor reavalia a fila a cada 60 s e o descarte é
     irreversível; com sorteio novo a cada volta, um vídeo aprovado às 10h00
@@ -433,6 +436,8 @@ def sortear_teto_do_dia(semente, dia, piso, topo):
 
     if piso <= 0:
         return 0
+    if topo <= 0:
+        return piso
     if topo < piso:
         piso, topo = topo, piso
     if topo == piso:
@@ -446,8 +451,8 @@ def aplicar_limite_diario_fila(itens, piso, topo=None, semente="", chave_horario
 
     Captura-se tudo; aqui se decide o que de fato vai ao ar. Cada dia sorteia o
     próprio teto dentro de [piso, topo] (ver sortear_teto_do_dia), o que evita o
-    mesmo número de posts todo dia. Os chamadores passam o par vindo de
-    ler_faixa_limite, que garante topo >= piso. piso 0 ou ausente = sem teto.
+    mesmo número de posts todo dia. Com topo ausente ou igual ao piso, o teto
+    é fixo. piso 0 ou ausente = sem teto.
 
     Ficam os primeiros de cada dia por horário: como o motor já embaralhou ou
     ordenou por captura antes de agendar, essa ordem já é a prioridade.
