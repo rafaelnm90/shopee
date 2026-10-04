@@ -31,6 +31,7 @@ import asyncio
 import random
 from datetime import datetime, timedelta
 import hashlib
+from html import escape as html_escape
 import aiohttp
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.fsm.context import FSMContext
@@ -7262,116 +7263,132 @@ def obter_teclado_relatorios():
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
 
-@dp.message(F.text == "Filas dos Parceiros 👥", StateFilter("*"))
-async def relatorio_filas_parceiros(message: types.Message, state: FSMContext):
-    """Resumo das filas dos parceiros: vídeos, disco, cota e a prévia do fechamento do dia."""
-    if message.from_user.id != ADMIN_ID: return
-    logger.info("📋 Gerando relatório das filas dos parceiros...")
-
-    parceiros = ler_parceiros()
-    if not parceiros:
-        await message.answer("👥 <b>Nenhum parceiro cadastrado.</b>", parse_mode="HTML",
-                             reply_markup=obter_teclado_relatorios_filas())
-        return
-
-    agora = datetime.now(fuso_horario)
-    hoje_str = agora.strftime("%Y-%m-%d")
-
-    total_geral = 0
-    disco_total = 0
-    blocos = []
-
-    for p in parceiros:
-        itens = ler_fila_parceiro_pendente(p.get("id"))
-        total_geral += len(itens)
-
-        ocupado = 0
-        for i in itens:
-            caminho = i.get("caminho_video")
-            if caminho and os.path.exists(caminho):
-                try: ocupado += os.path.getsize(caminho)
-                except OSError: pass
-        disco_total += ocupado
-
-        status = "🟢" if p.get("ativo") else "⏸️"
-        acesso = "✅" if p.get("origem_ok") else "⏳"
-
-        # Agrupa por dia, para dar noção do cronograma.
-        por_dia = {}
-        for i in itens:
-            por_dia[i.get("data_alvo") or "?"] = por_dia.get(i.get("data_alvo") or "?", 0) + 1
-
-        piso_p, topo_p = ler_faixa_limite(p)
-
-        bloco = (
-            f"{status} <b>{p.get('nome')}</b>  ·  <code>#{p.get('id')}</code>\n"
-            "<blockquote>"
-            f"📦 Na fila: <b>{len(itens)}</b> vídeo(s)  ·  💾 {ocupado / (1024**2):.0f} MB\n"
-            f"⏳ Oculto por: <b>{p.get('dias_atraso')} dias</b>\n"
-            f"📅 Cota Diária: <b>{rotulo_cota_parceiro(p)}</b>\n"
-            f"🤖 Acesso à origem: {acesso}\n"
-        )
-
-        if por_dia:
-            # Prévia do fechamento das 23:55: a cota já sorteada para cada dia e quantos
-            # serão descartados.
-            proximos = sorted(por_dia.items())[:4]
-            linhas_dias = []
-            for dia, qtd in proximos:
-                marca = "🔵" if dia > hoje_str else "🟢"
-                try:
-                    dia_fmt = datetime.strptime(dia, "%Y-%m-%d").strftime("%d/%m")
-                except Exception:
-                    dia_fmt = dia
-
-                if piso_p:
-                    cota_dia = sortear_teto_do_dia(f"parceiro:{p.get('id')}", dia, piso_p, topo_p)
-                    if qtd > cota_dia:
-                        linhas_dias.append(f"{marca} {dia_fmt}: {qtd} → sorteia {cota_dia}, descarta {qtd - cota_dia}")
-                    else:
-                        linhas_dias.append(f"{marca} {dia_fmt}: {qtd} (cabe na cota de {cota_dia})")
-                else:
-                    linhas_dias.append(f"{marca} {dia_fmt}: {qtd} (sem cota, publica tudo)")
-
-            bloco += "🗓️ " + "\n🗓️ ".join(linhas_dias)
-            if len(por_dia) > 4:
-                bloco += f"\n<i>(+{len(por_dia) - 4} dias)</i>"
-        else:
-            bloco += "<i>Fila vazia — aguardando novas capturas.</i>"
-
-        # Próxima publicação já agendada
-        agendados = sorted([i["horario_disparo"] for i in itens if i.get("horario_disparo")])
-        if agendados:
+def _disco_da_fila(itens):
+    """Bytes que os vídeos da fila ainda ocupam no disco."""
+    total = 0
+    for item in itens:
+        caminho = item.get("caminho_video")
+        if caminho and os.path.exists(caminho):
             try:
-                prox = datetime.strptime(agendados[0], "%Y-%m-%d %H:%M:%S").strftime("%d/%m às %H:%M")
-                bloco += f"\n🚀 Próxima: <b>{prox}</b>"
-            except Exception:
+                total += os.path.getsize(caminho)
+            except OSError:
                 pass
+    return total
 
-        bloco += "</blockquote>\n"
-        blocos.append(bloco)
-
-    cabecalho = (
-        "👥 <b>FILAS DOS PARCEIROS</b>\n"
-        f"<i>{len(parceiros)} parceiro(s)  ·  {total_geral} vídeo(s) aguardando  ·  "
-        f"{disco_total / (1024**3):.2f} GB de {TETO_DISCO_PARCEIROS_GB_PAINEL} GB</i>\n\n"
+def resumo_fila_parceiro(p, itens, hoje_str, disco_todos):
+    """
+    Topo da fila do parceiro: situação, disco, cota, acesso à origem, a prévia do
+    fechamento das 23:55 (cota já sorteada para cada dia e quantos serão
+    descartados) e a próxima publicação.
+    """
+    status = "🟢" if p.get("ativo") else "⏸️"
+    acesso = "✅" if p.get("origem_ok") else "⏳"
+    texto = (
+        f"{status} <b>{html_escape(p.get('nome'))}</b>  ·  <code>#{p.get('id')}</code>\n"
+        "<blockquote>"
+        f"📦 Na fila: <b>{len(itens)}</b> vídeo(s)  ·  💾 {_disco_da_fila(itens) / (1024**2):.0f} MB "
+        f"({disco_todos / (1024**3):.2f} de {TETO_DISCO_PARCEIROS_GB_PAINEL} GB de todos os parceiros)\n"
+        f"⏳ Oculto por: <b>{p.get('dias_atraso')} dias</b>\n"
+        f"📅 Cota Diária: <b>{rotulo_cota_parceiro(p)}</b>\n"
+        f"🤖 Acesso à origem: {acesso}\n"
     )
 
-    texto = cabecalho + "\n".join(blocos)
-    if len(texto) > 4000:
-        texto = texto[:3900] + "\n\n<i>...relatório truncado.</i>"
+    por_dia = {}
+    for item in itens:
+        dia = item.get("data_alvo") or "?"
+        por_dia[dia] = por_dia.get(dia, 0) + 1
+    piso_p, topo_p = ler_faixa_limite(p)
+    linhas_dias = []
+    for dia, qtd in sorted(por_dia.items())[:4]:
+        marca = "🔵" if dia > hoje_str else "🟢"
+        try:
+            dia_fmt = datetime.strptime(dia, "%Y-%m-%d").strftime("%d/%m")
+        except Exception:
+            dia_fmt = dia
+        if piso_p:
+            cota_dia = sortear_teto_do_dia(f"parceiro:{p.get('id')}", dia, piso_p, topo_p)
+            if qtd > cota_dia:
+                linhas_dias.append(f"{marca} {dia_fmt}: {qtd} → sorteia {cota_dia}, descarta {qtd - cota_dia}")
+            else:
+                linhas_dias.append(f"{marca} {dia_fmt}: {qtd} (cabe na cota de {cota_dia})")
+        else:
+            linhas_dias.append(f"{marca} {dia_fmt}: {qtd} (sem cota, publica tudo)")
+    if linhas_dias:
+        texto += "🗓️ " + "\n🗓️ ".join(linhas_dias)
+        if len(por_dia) > 4:
+            texto += f"\n<i>(+{len(por_dia) - 4} dias)</i>"
+    else:
+        texto += "<i>Fila vazia — aguardando novas capturas.</i>"
 
-    await message.answer(texto, parse_mode="HTML", reply_markup=obter_teclado_relatorios_filas())
+    agendados = sorted(i["horario_disparo"] for i in itens if i.get("horario_disparo"))
+    if agendados:
+        try:
+            prox = datetime.strptime(agendados[0], "%Y-%m-%d %H:%M:%S").strftime("%d/%m às %H:%M")
+            texto += f"\n🚀 Próxima: <b>{prox}</b>"
+        except Exception:
+            pass
+    return texto + "</blockquote>"
 
-@dp.message(F.text == "Fila dos Parceiros 🔍", StateFilter("*"))
+async def mostrar_fila_parceiro(message: types.Message, state: FSMContext, p):
+    """
+    A fila de um parceiro: o resumo no topo e, embaixo, vídeo a vídeo (captura,
+    dia e horário de saída, tamanho e link do produto).
+    Decisão do Rafael: DECISOES.md, Parceiros.
+    """
+    itens = ler_fila_parceiro_pendente(p.get("id"))
+    itens.sort(key=lambda i: (i.get("data_alvo") or "", i.get("horario_disparo") or ""))
+    disco_todos = sum(_disco_da_fila(ler_fila_parceiro_pendente(q.get("id"))) for q in ler_parceiros())
+    texto = resumo_fila_parceiro(p, itens, datetime.now(fuso_horario).strftime("%Y-%m-%d"), disco_todos)
+
+    if itens:
+        texto += "\n\n🚀 = horário já sorteado  ·  🕓 = ainda aguardando o fechamento\n"
+        mostrados = 0
+        for n, item in enumerate(itens, 1):
+            try:
+                captura = datetime.strptime((item.get("data_captura") or "")[:10], "%Y-%m-%d").strftime("%d/%m")
+            except Exception:
+                captura = "?"
+            try:
+                alvo = datetime.strptime(item.get("data_alvo") or "", "%Y-%m-%d").strftime("%d/%m")
+            except Exception:
+                alvo = "?"
+            horario = item.get("horario_disparo") or ""
+            if horario:
+                marca, quando = "🚀", f"sai {alvo} às {horario[11:16]}"
+            else:
+                marca, quando = "🕓", f"previsto {alvo}, horário ainda não sorteado"
+            tamanho = ""
+            caminho = item.get("caminho_video")
+            if caminho and os.path.exists(caminho):
+                tamanho = f"  ·  {os.path.getsize(caminho) / (1024**2):.1f} MB"
+            linha = (f"\n{marca} <b>{n}.</b> capturado {captura}  ·  {quando}{tamanho}\n"
+                     f"     <a href=\"{html_escape(item.get('link_original') or '')}\">🔗 ver produto</a>")
+            # O Telegram corta mensagem acima de 4096 caracteres: para antes.
+            if len(texto) + len(linha) > 3900:
+                break
+            texto += linha
+            mostrados += 1
+        if mostrados < len(itens):
+            texto += f"\n\n<i>...e mais {len(itens) - mostrados} vídeo(s).</i>"
+
+    await message.answer(texto, parse_mode="HTML", disable_web_page_preview=True,
+                         reply_markup=obter_teclado_relatorios_filas())
+    await state.set_state(RelatoriosFluxo.menu_filas)
+
+# O botão antigo "Filas dos Parceiros 👥" pode continuar no teclado do celular até o
+# menu ser aberto de novo: leva ao mesmo lugar.
+@dp.message(F.text.in_({"Fila dos Parceiros 🔍", "Filas dos Parceiros 👥"}), StateFilter("*"))
 async def pedir_parceiro_detalhe(message: types.Message, state: FSMContext):
+    """Fila dos parceiros: com um parceiro só, abre direto; com mais, pergunta qual."""
     if message.from_user.id != ADMIN_ID: return
     parceiros = ler_parceiros()
     if not parceiros:
         await message.answer("⚠️ Nenhum parceiro cadastrado ainda."); return
+    if len(parceiros) == 1:
+        await mostrar_fila_parceiro(message, state, parceiros[0]); return
 
     lista = "\n".join(
-        f"<b>{p.get('id')}</b> — {p.get('nome')} {'🟢' if p.get('ativo') else '⏸️'}"
+        f"<b>{p.get('id')}</b> — {html_escape(p.get('nome'))} {'🟢' if p.get('ativo') else '⏸️'}"
         for p in parceiros
     )
     await message.answer(
@@ -7383,10 +7400,7 @@ async def pedir_parceiro_detalhe(message: types.Message, state: FSMContext):
 
 @dp.message(RelatoriosFluxo.aguardando_parceiro_detalhe)
 async def detalhar_fila_parceiro(message: types.Message, state: FSMContext):
-    """
-    A fila de um parceiro vídeo a vídeo: captura, dia e horário de saída, tamanho e
-    link do produto.
-    """
+    """Recebe o número do parceiro escolhido e mostra a fila dele."""
     if message.from_user.id != ADMIN_ID: return
     texto = (message.text or "").strip()
     if texto in ("Cancelar ❌", "Voltar aos Relatórios 🔙"):
@@ -7397,65 +7411,13 @@ async def detalhar_fila_parceiro(message: types.Message, state: FSMContext):
     p = buscar_parceiro(texto)
     if not p:
         await message.answer("⚠️ Parceiro não encontrado."); return
-
-    itens = ler_fila_parceiro_pendente(p.get("id"))
-    if not itens:
-        await message.answer(
-            f"📋 <b>{p.get('nome')}</b>\n\n<i>Fila vazia — nada capturado ainda.</i>",
-            parse_mode="HTML", reply_markup=obter_teclado_relatorios_filas()
-        )
-        await state.set_state(RelatoriosFluxo.menu_filas)
-        return
-
-    itens.sort(key=lambda i: (i.get("data_alvo") or "", i.get("horario_disparo") or ""))
-    linhas = []
-    for n, item in enumerate(itens[:25], 1):
-        try:
-            captura = datetime.strptime((item.get("data_captura") or "")[:10], "%Y-%m-%d").strftime("%d/%m")
-        except Exception:
-            captura = "?"
-        try:
-            alvo = datetime.strptime(item.get("data_alvo") or "", "%Y-%m-%d").strftime("%d/%m")
-        except Exception:
-            alvo = "?"
-
-        horario = item.get("horario_disparo") or ""
-        if horario:
-            marca = "🚀"
-            quando = f"sai {alvo} às {horario[11:16]}"
-        else:
-            marca = "🕓"
-            quando = f"previsto {alvo}, horário ainda não sorteado"
-
-        tamanho = ""
-        caminho = item.get("caminho_video")
-        if caminho and os.path.exists(caminho):
-            tamanho = f"  ·  {os.path.getsize(caminho) / (1024**2):.1f} MB"
-
-        linhas.append(
-            f"{marca} <b>{n}.</b> capturado {captura}  ·  {quando}{tamanho}\n"
-            f"     <a href=\"{item.get('link_original')}\">🔗 ver produto</a>"
-        )
-
-    cabecalho = (
-        f"📋 <b>FILA DE {p.get('nome').upper()}</b>\n"
-        f"<i>{len(itens)} vídeo(s) na fila  ·  cota {rotulo_cota_parceiro(p)}</i>\n\n"
-        "🚀 = horário já sorteado  ·  🕓 = ainda aguardando o fechamento\n\n"
-    )
-    rodape = f"\n\n<i>...e mais {len(itens) - 25} vídeo(s).</i>" if len(itens) > 25 else ""
-
-    await message.answer(
-        cabecalho + "\n".join(linhas) + rodape,
-        parse_mode="HTML", disable_web_page_preview=True,
-        reply_markup=obter_teclado_relatorios_filas()
-    )
-    await state.set_state(RelatoriosFluxo.menu_filas)
+    await mostrar_fila_parceiro(message, state, p)
 
 def obter_teclado_relatorios_filas():
     botoes = [
         [KeyboardButton(text="Fila do Espião 🕵️"), KeyboardButton(text="Fila do Espelhador 🔄")],
         [KeyboardButton(text="Fila de Autorais 🎥"), KeyboardButton(text="Fila do Grupo Público 📬")],
-        [KeyboardButton(text="Filas dos Parceiros 👥"), KeyboardButton(text="Fila dos Parceiros 🔍")],
+        [KeyboardButton(text="Fila dos Parceiros 🔍")],
         [KeyboardButton(text="Voltar aos Relatórios 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
