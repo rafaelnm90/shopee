@@ -66,7 +66,7 @@ def test_captura_que_nao_publica_no_canal_fica_com_x(pc):
     pc.aplicar_funcoes()
     pc.marcar_publicacao_no_destino("A", False)
     texto = pc.montar_relatorio_telegram()
-    assert "❌ <b>A</b>" in texto and "não é admin do seu canal" in texto
+    assert "❌ <b>A</b>" in texto and "não é admin do canal de destino" in texto
     pc.marcar_publicacao_no_destino("A", True)
     assert "✅ <b>A</b>" in pc.montar_relatorio_telegram()
 
@@ -77,7 +77,7 @@ def test_relatorio_em_palavras(pc):
     pc.salvar_conta("B", funcoes_permitidas="nenhuma")
     pc.aplicar_funcoes()
     texto = pc.montar_relatorio_telegram()
-    assert "🎯 Captura e publicação no seu canal" in texto
+    assert "🎯 Captura e publicação no canal de destino" in texto
     assert "papel não escolhido" in texto and "ainda não conferida" in texto
     assert "pode:" not in texto
 
@@ -339,3 +339,10 @@ def test_marcar_situacao_no_grupo_pelo_painel(bm, pc, Msg, Est):
     rodar(bm.contas_salvar_situacao(Msg("Deixar Automático 🔄"), st))
     assert pc.texto_grupo(pc.obter_conta("a")) == "⚪ fora"
 
+
+def test_textos_falam_em_canal_de_destino(bm, pc):
+    pc.salvar_conta("a", sessao="x", funcoes_permitidas="espelho")
+    pc.marcar_publicacao_no_destino("a", False)
+    tela = bm.texto_tela_conta(pc.obter_conta("a"))
+    assert "📣 Canal de destino:" in tela and "não é admin do canal de destino" in tela
+    assert "seu canal" not in tela.lower() and "seu canal" not in pc.montar_relatorio_telegram().lower()

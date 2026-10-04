@@ -5106,7 +5106,7 @@ def _avisos_da_conta(conta):
         avisos.append("🚪 Ela não está no grupo de origem: toque em <b>Colocar no Grupo 🚪</b> "
                       "ou adicione a conta pelo app.")
     if papel in (pool_contas.PAPEL_CAPTURA, pool_contas.PAPEL_AMBAS) and conta.get("publica_no_destino") == 0:
-        avisos.append("📣 Ela não é admin do seu canal: torne-a admin com permissão de "
+        avisos.append("📣 Ela não é admin do canal de destino: torne-a admin com permissão de "
                       "<b>publicar mensagens</b>, senão os vídeos capturados não saem.")
     if not papel or papel == pool_contas.PAPEL_AMBAS:
         avisos.append("🧩 Escolha para que ela serve: <b>Usar na Captura 🎯</b> ou <b>Usar na Repostagem 🔁</b>.")
@@ -5124,7 +5124,7 @@ def texto_tela_conta(conta):
     if not conta["habilitada"]:
         agora = "⏸️ pausada por você"
     elif pool_contas.FUNCAO_ESPELHO in postos:
-        agora = "capturando e publicando no seu canal"
+        agora = "capturando e publicando no canal de destino"
     elif postos:
         agora = "repostando no grupo de origem (revezamento)"
     else:
@@ -5140,7 +5140,7 @@ def texto_tela_conta(conta):
         f"📍 Grupo de origem: <b>{pool_contas.texto_grupo(conta)}</b>\n"
     )
     if papel != pool_contas.PAPEL_REPOSTAGEM:
-        texto += f"📣 Seu canal: <b>{pool_contas.texto_canal(conta)}</b>\n"
+        texto += f"📣 Canal de destino: <b>{pool_contas.texto_canal(conta)}</b>\n"
     texto += (
         f"⚙️ Agora: <b>{agora}</b>\n"
         f"🔌 Telegram: <b>{sessao}</b>\n"
@@ -5697,11 +5697,11 @@ async def _concluir_nova_conta(message, state, senha):
     await state.update_data(conta_id=conta["id"], remover_direto=False)
     await message.answer(
         "<b>Para que serve esta conta?</b>\n\n"
-        "🎯 <b>Captura</b>: pega os vídeos do grupo de origem e publica no seu canal (uma conta só; "
+        "🎯 <b>Captura</b>: pega os vídeos do grupo de origem e publica no canal de destino (uma conta só; "
         "precisa ser admin do canal).\n"
         "🔁 <b>Repostagem</b>: devolve os vídeos ao grupo de origem, revezando com as outras "
         "(se uma cair, as outras seguem).\n\n"
-        f"📣 Seu canal: {pool_contas.texto_canal(conta)}",
+        f"📣 Canal de destino: {pool_contas.texto_canal(conta)}",
         parse_mode="HTML", reply_markup=teclado_papel_conta
     )
 
@@ -5809,7 +5809,7 @@ async def bloqueados_pedir_pessoa(message: types.Message, state: FSMContext):
     await message.answer(
         "🚫 <b>Bloquear Pessoa</b>\n"
         "Os vídeos que essa pessoa postar no grupo de origem <b>não serão copiados para o "
-        "seu canal</b> (e, por isso, nunca serão repostados).\n\n"
+        "canal de destino</b> (e, por isso, nunca serão repostados).\n\n"
         "Envie um destes:\n"
         "• <b>@usuario</b>\n"
         "• <b>ID numérico</b>\n"

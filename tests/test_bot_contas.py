@@ -238,7 +238,7 @@ def test_cadastro_pergunta_para_que_serve_com_dois_botoes(bm, pc, telegram, Msg,
     rodar(bm.contas_definir_papel(escolha, st))
     assert pc.papel_da_conta(pc.obter_conta("repost_um")) == pc.PAPEL_CAPTURA
     tela = escolha.saidas[-1]
-    assert "não está no grupo de origem" in tela and "não é admin do seu canal" in tela
+    assert "não está no grupo de origem" in tela and "não é admin do canal de destino" in tela
     assert st.estado == bm.ContasFluxo.conta
 
     escolha = Msg(bm.BOTAO_REPOSTAGEM)

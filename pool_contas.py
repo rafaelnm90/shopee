@@ -842,7 +842,7 @@ FUNCOES_DO_PAPEL = {
     PAPEL_REPOSTAGEM: FUNCAO_REPOSTAGEM,
 }
 ROTULOS_PAPEL = {
-    PAPEL_CAPTURA: "🎯 Captura e publicação no seu canal",
+    PAPEL_CAPTURA: "🎯 Captura e publicação no canal de destino",
     PAPEL_REPOSTAGEM: "🔁 Repostagem no grupo de origem",
     PAPEL_AMBAS: "🔀 captura ou repostagem (escolha uma)",
 }
@@ -1018,7 +1018,7 @@ def avaliar_saude(contas, ocupacao, atividade, agora=None):
         if conta.get("status_grupo") != STATUS_NO_GRUPO or not conta.get("habilitada", 1):
             return False, _motivo_inaptidao(conta, funcao)
         if funcao == FUNCAO_ESPELHO and conta.get("publica_no_destino") == 0:
-            return False, "não é admin do seu canal: não consegue publicar os vídeos"
+            return False, "não é admin do canal de destino: não consegue publicar os vídeos"
         if erro_em and (not ultimo_ok or erro_em > ultimo_ok):
             return False, f"último envio falhou ({_data_curta(erro_em)}): {reg.get('ultimo_erro') or '?'}"
         if ultimo_ok:
@@ -1148,7 +1148,7 @@ def identificar(conta):
 
 
 def texto_canal(conta):
-    """Se a conta consegue publicar no seu canal (só importa para quem captura)."""
+    """Se a conta consegue publicar no canal de destino (só importa para quem captura)."""
     pode = conta.get("publica_no_destino")
     if pode is None:
         return "❔ ainda não conferido"
@@ -1168,7 +1168,7 @@ def montar_relatorio_telegram():
     saude = avaliar_saude(contas, ocupacao, ler_atividade())
 
     linhas = ["👥 <b>Contas dos Autorais</b>",
-              "<i>🎯 Captura: uma conta pega os vídeos do grupo de origem e publica no seu canal.\n"
+              "<i>🎯 Captura: uma conta pega os vídeos do grupo de origem e publica no canal de destino.\n"
               "🔁 Repostagem: as outras devolvem os vídeos ao grupo de origem, revezando.</i>",
               ""]
     if not contas:
@@ -1206,7 +1206,7 @@ def montar_relatorio_telegram():
                  f"🧩 {ROTULOS_PAPEL[papel] if papel else '⚪ papel não escolhido'} · {agora}\n"
                  f"📍 {grupo}")
         if papel != PAPEL_REPOSTAGEM:
-            linha += f"\n📣 canal: {texto_canal(c)}"
+            linha += f"\n📣 Canal de destino: {texto_canal(c)}"
         linhas.append(linha + "</blockquote>")
     return "\n".join(linhas)
 

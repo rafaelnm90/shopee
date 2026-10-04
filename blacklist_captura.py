@@ -712,7 +712,7 @@ def montar_relatorio_telegram():
     # "Pessoas bloqueadas" e não "Lista Negra": o Espião já tem uma lista negra, e a
     # dele é de CANAIS. Esta é de PESSOAS cujas postagens o robô dos Autorais não copia.
     linhas = ["🚫 <b>Pessoas bloqueadas</b>",
-              "<i>O robô dos Autorais não copia para o seu canal os vídeos que estas pessoas "
+              "<i>O robô dos Autorais não copia para o canal de destino os vídeos que estas pessoas "
               "postam. Como não são copiados, também nunca são repostados.</i>", ""]
 
     linhas.append(f"🔒 <b>Suas contas ({len(do_pool)})</b>: entram sozinhas")

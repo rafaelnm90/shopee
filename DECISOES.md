@@ -89,6 +89,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **04/10/2026:** a tela da conta fica enxuta, a pedido do Rafael. O nome aparece sem explicação do automático e o grupo de origem numa palavra: ✅ dentro, 🚪 saiu, ⚪ fora, ⛔ banida.
   - O robô descobre sozinho se a conta saiu ou foi banida: guarda o acesso ao grupo quando a conta está nele (para as contas antigas, lê o da sessão antiga) e, quando o grupo some, pergunta ao Telegram.
   - Para o que aconteceu antes (ou se ele errar), "Situação no Grupo 📝" deixa marcar à mão: Foi Banida, Saiu do Grupo ou Deixar Automático. A marcação some quando a conta volta ao grupo.
+- **04/10/2026:** nas telas de Contas, "seu canal" passa a ser "canal de destino" (o canal onde a conta da captura publica).
 - **03/10/2026:** com cota em faixa (ex.: 6–10), o teto de saída do dia é o mesmo número sorteado na captura para aquela data.
 - **03/10/2026:** cada mensagem da origem é processada uma vez só, venha pelo evento ou pela varredura (trava pelo ID, gravada no banco).
 - **03/10/2026:** o log de diagnóstico "🔬 [Evento]", que registrava toda mensagem de todo chat, foi removido.
