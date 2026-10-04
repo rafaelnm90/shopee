@@ -150,7 +150,7 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
   - resultado claro = corrigir e subir sozinho, do começo ao fim (PR, CI, merge, deploy), sem pedir aprovação. Esperar o Rafael só em dúvida de verdade (intenção, regra do diário). Se a solução depende de algo que só ele faz (ex.: pôr uma conta num canal), dizer exatamente o quê;
   - dizer ao Rafael quando será a conferência. Sem resultado ainda, reagendar e avisar o novo horário. No fim, avisar o que foi achado e feito.
 - Retomada automática (o crédito pode acabar no meio de um pedido, e eu não volto sozinho):
-  - a rotina "Retomar trabalho pela metade (8h–22h)" chama esta conversa de hora em hora, das 8h às 22h de Brasília;
+  - a rotina "Retomar trabalho pela metade (a cada 3 h, 8h–20h)" chama esta conversa às 8h, 11h, 14h, 17h e 20h de Brasília;
   - em cada chamada, conferir se algo ficou pela metade: pedido sem "✅ Concluído", mudança sem commit ou push, PR aberto, CI ou deploy não acompanhado até o verde, conferência que não rodou, tarefa pendente, opções oferecidas sem resposta (mostrar de novo);
   - havendo algo, continuar de onde parou, seguindo as regras daqui; não havendo, só responder "Nada pendente." (sem aviso no Telegram);
   - chamada que cai sem crédito não roda; a próxima, com crédito, retoma.
