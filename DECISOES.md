@@ -145,6 +145,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - O painel desce para o fim do tópico depois das entregas, e o mais novo fica fixado.
   - Os painéis antigos e as mensagens "fixou uma mensagem" são apagados sozinhos pela conta principal (userbot, no `divulgacao_canal`), a cada 10 min. O Telegram só deixa bot apagar mensagem com menos de 48 h, por isso o bot não dava conta.
   - A faxina de 3 dias do bot, que tentava apagar tudo (inclusive os vídeos) e nunca conseguia, saiu.
+- **04/10/2026:** quem já usou os downloads de cortesia e não está nos canais obrigatórios recebe o aviso para entrar, que some em 3 min. Se a pessoa não entrar, o link dela some junto, como no aviso de limite diário: no tópico não fica link que parece ignorado.
 
 ## Shopee Vídeo
 
