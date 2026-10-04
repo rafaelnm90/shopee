@@ -145,6 +145,11 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
   - na conferência: ler o resultado (inventário, diagnóstico, `/status`) e concluir a causa;
   - resultado claro = corrigir e subir sozinho, do começo ao fim (PR, CI, merge, deploy), sem pedir aprovação. Esperar o Rafael só em dúvida de verdade (intenção, regra do diário). Se a solução depende de algo que só ele faz (ex.: pôr uma conta num canal), dizer exatamente o quê;
   - dizer ao Rafael quando será a conferência. Sem resultado ainda, reagendar e avisar o novo horário. No fim, avisar o que foi achado e feito.
+- Retomada automática (o crédito pode acabar no meio de um pedido, e eu não volto sozinho):
+  - a rotina "Retomar trabalho pela metade (8h–22h)" chama esta conversa de hora em hora, das 8h às 22h de Brasília;
+  - em cada chamada, conferir se algo ficou pela metade: pedido sem "✅ Concluído", mudança sem commit ou push, PR aberto, CI ou deploy não acompanhado até o verde, conferência que não rodou, tarefa pendente;
+  - havendo algo, continuar de onde parou, seguindo as regras daqui; não havendo, só responder "Nada pendente." (sem aviso no Telegram);
+  - chamada que cai sem crédito não roda; a próxima, com crédito, retoma.
 - Pergunta ao Rafael sem resposta: o robô avisa no Telegram.
   - Ao perguntar, agendar (`send_later`) uma conferência 1 h depois.
   - Ainda sem resposta: disparar o `avisar.yml` (`run_workflow`, entrada `assunto` em poucas palavras e sem dado privado, `link` = link da sessão). O bot principal manda o aviso no privado dele.
