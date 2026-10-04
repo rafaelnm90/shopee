@@ -86,6 +86,10 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - **Editar Nome ✏️** (na tela da conta): o nome dado pelo Rafael tem preferência sobre o automático.
   - **Usar Nome Automático 🔄:** volta ao automático, que fica sempre guardado.
 - **04/10/2026:** o "Colocar no Grupo 🚪" explica o que é antes de pedir o link: o nome do grupo de origem, que a conta precisa ser membro dele e onde achar o link de convite (no grupo → Convidar via link, só para admin).
+- **04/10/2026:** a tela da conta fica enxuta, a pedido do Rafael. O nome aparece sem explicação do automático e o grupo de origem numa palavra: ✅ dentro, 🚪 saiu, ⚪ fora, ⛔ banida.
+  - O robô descobre sozinho se a conta saiu ou foi banida: guarda o acesso ao grupo quando a conta está nele (para as contas antigas, lê o da sessão antiga) e, quando o grupo some, pergunta ao Telegram.
+  - Para o que aconteceu antes (ou se ele errar), "Situação no Grupo 📝" deixa marcar à mão: Foi Banida, Saiu do Grupo ou Deixar Automático. A marcação some quando a conta volta ao grupo.
+- **04/10/2026:** nas telas de Contas, "seu canal" passa a ser "canal de destino" (o canal onde a conta da captura publica).
 - **03/10/2026:** com cota em faixa (ex.: 6–10), o teto de saída do dia é o mesmo número sorteado na captura para aquela data.
 - **03/10/2026:** cada mensagem da origem é processada uma vez só, venha pelo evento ou pela varredura (trava pelo ID, gravada no banco).
 - **03/10/2026:** o log de diagnóstico "🔬 [Evento]", que registrava toda mensagem de todo chat, foi removido.
@@ -105,6 +109,12 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **04/10/2026:** na fila do parceiro, os vídeos aparecem no mesmo card das outras filas (status do dia, nome, captura ➡️ previsão, links de origem e destino), todos, em quantas mensagens forem precisas. O resumo do parceiro continua numa mensagem antes da lista.
 - **04/10/2026:** o acesso à origem de um parceiro só vale quando a conta da captura é membro do canal, e não só quando o encontra. Causa provável da captura parada desde 15/09: a conta achava o canal, mas não estava dentro, e o Telegram só entrega as mensagens a quem é membro. O robô reconfere a cada 6 h e entra de novo sozinho quando a origem é @ ou link. Parceiro sem acesso gera aviso no privado (monitor de saúde), e a fila mostra o motivo e a data da última captura.
 - **04/10/2026:** a fila do parceiro mostra o que chegou hoje do canal de origem: mensagens, vídeos, com link, capturados e o motivo de cada recusa. Com a captura parada desde 15/09, o acesso confirmado e a conta da Rafaela fora do caso (ela não posta no canal), o robô passou a contar onde o vídeo para.
+- **04/10/2026:** os links da fila do parceiro seguem o padrão da fila do Grupo Público.
+  - **Origem:** "Ver Post no Telegram", o post de onde o vídeo foi capturado. O link da Shopee não aparece; ele fica guardado só para gerar o link de afiliado do parceiro.
+  - **Destino:** depois de publicado, vira "Ver Post no Telegram (Destino)", com o link do post.
+  - Os publicados de hoje aparecem no topo, como no Público. O vídeo sai do disco na hora, mas o registro fica 3 dias.
+  - Os vídeos capturados antes desta mudança não têm o post de origem guardado e aparecem "Sem link de origem".
+- **04/10/2026:** quando nenhuma conta está na captura dos Autorais, a fila e o painel de Parceiros dizem "❌ nenhuma conta está capturando", e não "✅" com o acesso velho. É a mesma conta que captura dos parceiros.
 
 ## Financeiro
 

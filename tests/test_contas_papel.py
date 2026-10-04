@@ -66,7 +66,7 @@ def test_captura_que_nao_publica_no_canal_fica_com_x(pc):
     pc.aplicar_funcoes()
     pc.marcar_publicacao_no_destino("A", False)
     texto = pc.montar_relatorio_telegram()
-    assert "❌ <b>A</b>" in texto and "não é admin do seu canal" in texto
+    assert "❌ <b>A</b>" in texto and "não é admin do canal de destino" in texto
     pc.marcar_publicacao_no_destino("A", True)
     assert "✅ <b>A</b>" in pc.montar_relatorio_telegram()
 
@@ -77,7 +77,7 @@ def test_relatorio_em_palavras(pc):
     pc.salvar_conta("B", funcoes_permitidas="nenhuma")
     pc.aplicar_funcoes()
     texto = pc.montar_relatorio_telegram()
-    assert "🎯 Captura e publicação no seu canal" in texto
+    assert "🎯 Captura e publicação no canal de destino" in texto
     assert "papel não escolhido" in texto and "ainda não conferida" in texto
     assert "pode:" not in texto
 
@@ -305,3 +305,44 @@ def test_colocar_no_grupo_explica_com_o_nome_do_grupo(bm, pc, Msg, Est):
     rodar(bm.contas_colocar_no_grupo(pedido, st))
     assert "<b>VIDEOS AUTORAIS - Afiliados Unidos</b>" in pedido.saidas[-1]
     assert "Convidar via link" in pedido.saidas[-1]
+
+
+def test_tela_da_conta_sem_explicacao_do_automatico_nem_erro_repetido(bm, pc):
+    pc.salvar_conta("a", sessao="x", username="chip_um")
+    pc.atualizar_status("a", status_grupo=pc.STATUS_NUNCA_ENTROU,
+                        erro="o grupo de origem não está nas conversas da conta")
+    tela = bm.texto_tela_conta(pc.obter_conta("a"))
+    assert "🏷️ Nome: <b>@chip_um</b>\n" in tela and "automático" not in tela
+    assert "não está nas conversas" not in tela and "Ela não está no grupo de origem" in tela
+    pc.definir_nome("a", "Chip 1")
+    assert "🏷️ Nome: <b>Chip 1</b> (editado por você)" in bm.texto_tela_conta(pc.obter_conta("a"))
+
+
+def test_marcar_situacao_no_grupo_pelo_painel(bm, pc, Msg, Est):
+    pc.salvar_conta("a", sessao="x")
+    pc.atualizar_status("a", status_grupo=pc.STATUS_NUNCA_ENTROU)
+    st = Est()
+    tela = Msg()
+    rodar(bm.mostrar_conta(tela, st, pc.obter_conta("a")["id"]))
+    assert "📍 Grupo de origem: <b>⚪ fora</b>" in tela.saidas[-1] and "nunca entrou" not in tela.saidas[-1]
+    assert "Situação no Grupo 📝" in [b.text for l in bm.teclado_gerenciar_conta(pc.obter_conta("a")).keyboard
+                                       for b in l]
+    rodar(bm.contas_pedir_situacao(Msg("Situação no Grupo 📝"), st))
+    errado = Msg("qualquer")
+    rodar(bm.contas_salvar_situacao(errado, st))
+    assert "Toque em uma das opções" in errado.saidas[-1]
+    marcado = Msg("Foi Banida ⛔")
+    rodar(bm.contas_salvar_situacao(marcado, st))
+    assert "⛔ banida (marcado por você)" in marcado.saidas[0]
+    assert "só um admin do grupo pode desbanir" in marcado.saidas[-1]
+    rodar(bm.contas_pedir_situacao(Msg("Situação no Grupo 📝"), st))
+    rodar(bm.contas_salvar_situacao(Msg("Deixar Automático 🔄"), st))
+    assert pc.texto_grupo(pc.obter_conta("a")) == "⚪ fora"
+
+
+def test_textos_falam_em_canal_de_destino(bm, pc):
+    pc.salvar_conta("a", sessao="x", funcoes_permitidas="espelho")
+    pc.marcar_publicacao_no_destino("a", False)
+    tela = bm.texto_tela_conta(pc.obter_conta("a"))
+    assert "📣 Canal de destino:" in tela and "não é admin do canal de destino" in tela
+    assert "seu canal" not in tela.lower() and "seu canal" not in pc.montar_relatorio_telegram().lower()

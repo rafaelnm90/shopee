@@ -242,6 +242,14 @@ def inicializar_banco_sqlite():
     except sqlite3.OperationalError:
         pass
 
+    # fila_parceiros (criada pelo robô dos Autorais): link do post de origem no Telegram,
+    # mensagem publicada no destino e nome do produto. Sem a tabela, nada a fazer.
+    for coluna in ("link_post_origem TEXT DEFAULT ''", "msg_postada_id INTEGER", "nome_produto TEXT DEFAULT ''"):
+        try:
+            cursor.execute(f"ALTER TABLE fila_parceiros ADD COLUMN {coluna}")
+        except sqlite3.OperationalError:
+            pass  # coluna já existe ou a tabela ainda não nasceu
+
     # erros_logs: rastro do código e contexto (registrar_erro_json do utils).
     try:
         cursor.execute("ALTER TABLE erros_logs ADD COLUMN rastro_codigo TEXT")
@@ -3179,6 +3187,7 @@ async def painel_parceiros(message: types.Message, state: FSMContext):
     parceiros = ler_parceiros()
     texto = "👥 <b>PARCEIROS AFILIADOS</b>\n<i>Afiliados que repostam com as próprias credenciais.</i>\n\n"
 
+    captura_parada = captura_parada_motivo()
     if not parceiros:
         texto += "<i>Nenhum parceiro cadastrado ainda.</i>\n\n"
     else:
@@ -3193,8 +3202,10 @@ async def painel_parceiros(message: types.Message, state: FSMContext):
                 f"⏳ Oculto por: <b>{p.get('dias_atraso')} dias</b>\n"
                 f"📦 Cota Diária: <b>{rotulo_cota_parceiro(p)}</b>\n"
                 f"🕒 Janela de Postagem: <b>{p.get('janela_inicio', 0) or 0}h às {p.get('janela_fim', 24) or 24}h</b>\n"
-                f"🤖 Acesso à origem: {'✅ conectado' if p.get('origem_ok') else '⏳ aguardando entrada'}"
-                + (f"\n<i>{p.get('origem_erro')}</i>" if p.get('origem_erro') and not p.get('origem_ok') else "")
+                + (f"🤖 Acesso à origem: ❌ {html_escape(captura_parada)}" if captura_parada else
+                   f"🤖 Acesso à origem: {'✅ conectado' if p.get('origem_ok') else '⏳ aguardando entrada'}")
+                + (f"\n<i>{p.get('origem_erro')}</i>" if p.get('origem_erro') and not p.get('origem_ok')
+                   and not captura_parada else "")
                 + "</blockquote>\n\n"
             )
 
@@ -3444,6 +3455,7 @@ async def motor_parceiros_step():
             )
             texto_ia = await analisar_video_gemini(caminho, prompt)
 
+            nome_produto = ""
             if texto_ia:
                 linhas_ia = texto_ia.split("\n")
                 nome_produto = linhas_ia[0].strip()
@@ -3459,12 +3471,13 @@ async def motor_parceiros_step():
             thread = destino_raw.split(":")[1].strip() if ":" in destino_raw else None
 
             try:
-                await bot.send_video(
+                enviada = await bot.send_video(
                     chat_id=chat_destino, video=FSInputFile(caminho), caption=legenda,
                     parse_mode="HTML", message_thread_id=int(thread) if thread else None
                 )
                 logger.info(f"✅ [Parceiro {p.get('nome')}] Vídeo publicado em {chat_destino}.")
-                remover_item_fila_parceiro(item["id_unico"], caminho)
+                marcar_parceiro_postado(item["id_unico"], caminho, getattr(enviada, "message_id", None),
+                                        nome_produto)
             except Exception as e:
                 logger.error(f"❌ [Parceiro {p.get('nome')}] Falha ao publicar: {e}")
                 atualizar_item_fila_parceiro(
@@ -3500,6 +3513,55 @@ def rotulo_cota_de_config(config, chave_min, chave_max, chave_legado=None):
     """O rótulo pronto a partir da config, sem desempacotar tupla no meio da linha."""
     piso, topo = faixa_de_config(config, chave_min, chave_max, chave_legado)
     return rotulo_cota(piso, topo) if piso else "sem cota"
+
+DIAS_HISTORICO_PARCEIROS = 3   # publicados ficam na fila por 3 dias, só como registro
+
+
+def marcar_parceiro_postado(id_unico, caminho, msg_id, nome_produto=""):
+    """
+    Publicado: apaga o vídeo do disco (espaço é recurso escasso) e guarda no registro
+    a mensagem do destino e o nome do produto, para a fila mostrar o link do post.
+    Os publicados com mais de DIAS_HISTORICO_PARCEIROS dias saem do banco.
+    """
+    if caminho and os.path.exists(caminho):
+        try: os.remove(caminho)
+        except Exception: pass
+    agora = datetime.now(fuso_horario)
+    limite = (agora - timedelta(days=DIAS_HISTORICO_PARCEIROS)).strftime("%Y-%m-%d")
+    try:
+        with db.conexao() as conexao:
+            conexao.execute(
+                "UPDATE fila_parceiros SET processado = 1, data_postagem = ?, msg_postada_id = ?, "
+                "nome_produto = ?, caminho_video = '' WHERE id_unico = ?",
+                (agora.strftime("%Y-%m-%d %H:%M:%S"), msg_id, nome_produto or "", id_unico))
+            conexao.execute("DELETE FROM fila_parceiros WHERE processado = 1 AND data_postagem < ?", (limite,))
+    except Exception as e:
+        logger.error(f"❌ [Parceiros] Erro ao marcar o vídeo como publicado: {e}")
+
+
+def ler_fila_parceiro_postados(parceiro_id, dia):
+    """Publicados no dia (YYYY-MM-DD), para a fila mostrar o link do post no destino."""
+    try:
+        with db.conexao(linhas_por_nome=True) as conexao:
+            linhas = conexao.execute(
+                "SELECT * FROM fila_parceiros WHERE parceiro_id = ? AND processado = 1 AND data_postagem LIKE ? "
+                "ORDER BY data_postagem ASC", (int(parceiro_id), f"{dia}%")).fetchall()
+        return [dict(linha) for linha in linhas]
+    except Exception:
+        return []
+
+
+def link_post_destino(destino, msg_id):
+    """Link da mensagem publicada: t.me/c/<id>/<msg> (ID) ou t.me/<@>/<msg> (@)."""
+    base = str(destino or "").split(":")[0].strip()
+    if not msg_id or not base:
+        return None
+    if base.lstrip("-").isdigit():
+        return f"https://t.me/c/{base.replace('-100', '', 1).lstrip('-')}/{msg_id}"
+    if base.startswith("@"):
+        return f"https://t.me/{base[1:]}/{msg_id}"
+    return None
+
 
 def rotulo_cota_parceiro(p):
     """Como a cota do parceiro aparece no painel: faixa, número fixo ou sem teto."""
@@ -4968,6 +5030,7 @@ class ContasFluxo(StatesGroup):
     aguardando_convite = State()     # link de convite do grupo de origem
     aguardando_papel = State()       # fim do cadastro: captura ou repostagem
     aguardando_nome = State()        # nome novo da conta no painel
+    aguardando_situacao = State()    # banida ou saiu, marcada à mão
     bloqueados = State()             # lista de pessoas bloqueadas
     aguardando_bloqueio = State()    # @, ID ou link de quem bloquear
     aguardando_alcance = State()     # onde o bloqueio vale
@@ -4977,6 +5040,8 @@ BOTAO_CAPTURA = "Usar na Captura 🎯"
 BOTAO_REPOSTAGEM = "Usar na Repostagem 🔁"
 _PAPEL_DO_BOTAO = {BOTAO_CAPTURA: pool_contas.PAPEL_CAPTURA, BOTAO_REPOSTAGEM: pool_contas.PAPEL_REPOSTAGEM}
 BOTAO_NOME_AUTOMATICO = "Usar Nome Automático 🔄"
+BOTOES_SITUACAO = {"Foi Banida ⛔": pool_contas.STATUS_BANIDA_GRUPO, "Saiu do Grupo 🚪": pool_contas.STATUS_SAIU,
+                   "Deixar Automático 🔄": None}
 BOTAO_SO_AUTORAIS = "Só nos Autorais 🎥"
 BOTAO_AUTORAIS_PARCEIROS = "Autorais e Parceiros 🌐"
 
@@ -4993,7 +5058,7 @@ def teclado_painel_contas(tem_contas):
 def teclado_gerenciar_conta(conta):
     linhas = [[KeyboardButton(text=BOTAO_CAPTURA), KeyboardButton(text=BOTAO_REPOSTAGEM)]]
     if conta["status_grupo"] != pool_contas.STATUS_NO_GRUPO:
-        linhas.append([KeyboardButton(text="Colocar no Grupo 🚪")])
+        linhas.append([KeyboardButton(text="Colocar no Grupo 🚪"), KeyboardButton(text="Situação no Grupo 📝")])
     linhas.append([KeyboardButton(text="Editar Nome ✏️")])
     linhas.append([KeyboardButton(text="Pausar Conta ⏸️" if conta["habilitada"] else "Reativar Conta ▶️")])
     linhas.append([KeyboardButton(text="Excluir Conta 🗑️")])
@@ -5031,18 +5096,25 @@ def _avisos_da_conta(conta):
     """O que ainda falta para a conta trabalhar, em palavras."""
     papel = pool_contas.papel_da_conta(conta)
     avisos = []
-    if conta["status_grupo"] == pool_contas.STATUS_BANIDA_GRUPO:
+    situacao, _manual = pool_contas.situacao_no_grupo(conta)
+    if situacao == pool_contas.STATUS_BANIDA_GRUPO:
         avisos.append("⛔ Ela foi banida do grupo de origem: só um admin do grupo pode desbanir. "
                       "Enquanto isso, use outra conta.")
-    elif conta["status_grupo"] != pool_contas.STATUS_NO_GRUPO:
+    elif situacao == pool_contas.STATUS_SAIU:
+        avisos.append("🚪 Ela saiu do grupo de origem: toque em <b>Colocar no Grupo 🚪</b> para voltar.")
+    elif situacao != pool_contas.STATUS_NO_GRUPO:
         avisos.append("🚪 Ela não está no grupo de origem: toque em <b>Colocar no Grupo 🚪</b> "
                       "ou adicione a conta pelo app.")
     if papel in (pool_contas.PAPEL_CAPTURA, pool_contas.PAPEL_AMBAS) and conta.get("publica_no_destino") == 0:
-        avisos.append("📣 Ela não é admin do seu canal: torne-a admin com permissão de "
+        avisos.append("📣 Ela não é admin do canal de destino: torne-a admin com permissão de "
                       "<b>publicar mensagens</b>, senão os vídeos capturados não saem.")
     if not papel or papel == pool_contas.PAPEL_AMBAS:
         avisos.append("🧩 Escolha para que ela serve: <b>Usar na Captura 🎯</b> ou <b>Usar na Repostagem 🔁</b>.")
     return avisos
+
+
+ERROS_DITOS_NOS_AVISOS = ("o grupo de origem não está nas conversas da conta", "banida do grupo de origem",
+                          "saiu do grupo de origem")
 
 
 def texto_tela_conta(conta):
@@ -5052,7 +5124,7 @@ def texto_tela_conta(conta):
     if not conta["habilitada"]:
         agora = "⏸️ pausada por você"
     elif pool_contas.FUNCAO_ESPELHO in postos:
-        agora = "capturando e publicando no seu canal"
+        agora = "capturando e publicando no canal de destino"
     elif postos:
         agora = "repostando no grupo de origem (revezamento)"
     else:
@@ -5062,14 +5134,13 @@ def texto_tela_conta(conta):
     texto = (
         f"👤 {pool_contas.identificar(conta)}\n\n"
         "<blockquote>"
-        f"🏷️ Nome: <b>{html_escape(pool_contas.nome_da_conta(conta))}</b> "
-        + (f"(editado por você · automático: {html_escape(pool_contas.nome_automatico(conta))})\n"
-           if conta.get("nome_painel") else "(automático: @ ou nome do Telegram)\n") +
+        f"🏷️ Nome: <b>{html_escape(pool_contas.nome_da_conta(conta))}</b>"
+        + (" (editado por você)\n" if conta.get("nome_painel") else "\n") +
         f"🧩 Função: <b>{pool_contas.ROTULOS_PAPEL[papel] if papel else 'ainda não escolhida'}</b>\n"
-        f"📍 Grupo de origem: <b>{pool_contas.TEXTOS_GRUPO.get(conta['status_grupo'], conta['status_grupo'])}</b>\n"
+        f"📍 Grupo de origem: <b>{pool_contas.texto_grupo(conta)}</b>\n"
     )
     if papel != pool_contas.PAPEL_REPOSTAGEM:
-        texto += f"📣 Seu canal: <b>{pool_contas.texto_canal(conta)}</b>\n"
+        texto += f"📣 Canal de destino: <b>{pool_contas.texto_canal(conta)}</b>\n"
     texto += (
         f"⚙️ Agora: <b>{agora}</b>\n"
         f"🔌 Telegram: <b>{sessao}</b>\n"
@@ -5077,8 +5148,9 @@ def texto_tela_conta(conta):
         f"{('@' + conta['username']) if conta['username'] else 'sem @'} · {conta['nome_exibicao'] or '—'}"
         "</blockquote>\n"
     )
-    if conta["ultimo_erro"]:
-        texto += f"\n⚠️ <i>{conta['ultimo_erro']}</i>\n"
+    # O erro que só repete a situação do grupo já está nos avisos abaixo.
+    if conta["ultimo_erro"] and conta["ultimo_erro"] not in ERROS_DITOS_NOS_AVISOS:
+        texto += f"\n⚠️ <i>{html_escape(conta['ultimo_erro'])}</i>\n"
     avisos = _avisos_da_conta(conta)
     if avisos:
         texto += "\n" + "\n".join(avisos) + "\n"
@@ -5161,7 +5233,7 @@ async def contas_cancelar(message: types.Message, state: FSMContext):
                   ContasFluxo.aguardando_desbloqueio.state):
         await mostrar_bloqueados(message, state)
     elif (estado in (ContasFluxo.confirmando_exclusao.state, ContasFluxo.aguardando_convite.state,
-                     ContasFluxo.aguardando_nome.state)
+                     ContasFluxo.aguardando_nome.state, ContasFluxo.aguardando_situacao.state)
           and dados.get("conta_id") and not dados.get("remover_direto")):
         await mostrar_conta(message, state, dados["conta_id"])
     else:
@@ -5327,6 +5399,43 @@ async def contas_salvar_nome(message: types.Message, state: FSMContext):
     conta = pool_contas.obter_conta(conta["id"])
     await message.answer(f"✅ Nome da conta: <b>{html_escape(pool_contas.nome_da_conta(conta))}</b>.",
                          parse_mode="HTML")
+    await mostrar_conta(message, state, conta["id"])
+
+
+@dp.message(ContasFluxo.conta, F.text == "Situação no Grupo 📝")
+async def contas_pedir_situacao(message: types.Message, state: FSMContext):
+    """Marca à mão que a conta foi banida ou saiu, quando o robô não tem como descobrir."""
+    if message.from_user.id != ADMIN_ID: return
+    conta = await _conta_do_estado(message, state)
+    if not conta:
+        return
+    await state.set_state(ContasFluxo.aguardando_situacao)
+    await message.answer(
+        "📝 <b>Situação no grupo de origem</b>\n\n"
+        f"Hoje: <b>{pool_contas.texto_grupo(conta)}</b>\n\n"
+        "O robô descobre sozinho quando a conta sai ou é banida. Para o que aconteceu antes de ele "
+        "saber (ou se ele mostrar errado), marque aqui. Quando a conta voltar ao grupo, a marcação "
+        "some sozinha.",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Foi Banida ⛔"), KeyboardButton(text="Saiu do Grupo 🚪")],
+                      [KeyboardButton(text="Deixar Automático 🔄")], [KeyboardButton(text="Cancelar ❌")]],
+            resize_keyboard=True, is_persistent=True)
+    )
+
+
+@dp.message(ContasFluxo.aguardando_situacao)
+async def contas_salvar_situacao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if message.text not in BOTOES_SITUACAO:
+        await message.answer("Toque em uma das opções abaixo.")
+        return
+    conta = await _conta_do_estado(message, state)
+    if not conta:
+        return
+    pool_contas.marcar_situacao(conta["apelido"], BOTOES_SITUACAO[message.text])
+    conta = pool_contas.obter_conta(conta["id"])
+    await message.answer(f"✅ Grupo de origem: <b>{pool_contas.texto_grupo(conta)}</b>.", parse_mode="HTML")
     await mostrar_conta(message, state, conta["id"])
 
 
@@ -5588,11 +5697,11 @@ async def _concluir_nova_conta(message, state, senha):
     await state.update_data(conta_id=conta["id"], remover_direto=False)
     await message.answer(
         "<b>Para que serve esta conta?</b>\n\n"
-        "🎯 <b>Captura</b>: pega os vídeos do grupo de origem e publica no seu canal (uma conta só; "
+        "🎯 <b>Captura</b>: pega os vídeos do grupo de origem e publica no canal de destino (uma conta só; "
         "precisa ser admin do canal).\n"
         "🔁 <b>Repostagem</b>: devolve os vídeos ao grupo de origem, revezando com as outras "
         "(se uma cair, as outras seguem).\n\n"
-        f"📣 Seu canal: {pool_contas.texto_canal(conta)}",
+        f"📣 Canal de destino: {pool_contas.texto_canal(conta)}",
         parse_mode="HTML", reply_markup=teclado_papel_conta
     )
 
@@ -5700,7 +5809,7 @@ async def bloqueados_pedir_pessoa(message: types.Message, state: FSMContext):
     await message.answer(
         "🚫 <b>Bloquear Pessoa</b>\n"
         "Os vídeos que essa pessoa postar no grupo de origem <b>não serão copiados para o "
-        "seu canal</b> (e, por isso, nunca serão repostados).\n\n"
+        "canal de destino</b> (e, por isso, nunca serão repostados).\n\n"
         "Envie um destes:\n"
         "• <b>@usuario</b>\n"
         "• <b>ID numérico</b>\n"
@@ -7366,6 +7475,21 @@ def diagnostico_origem_parceiro(parceiro_id, hoje_str):
         texto += "\n🚫 Recusados: " + " · ".join(f"{html_escape(motivo)} ({qtd})" for motivo, qtd in recusas)
     return texto + (f"\n🕓 Última mensagem: {ultima}" if ultima else "")
 
+def captura_parada_motivo():
+    """
+    Quem captura dos parceiros é a conta da captura dos Autorais. Com contas no pool e
+    o posto vago, nada chega de canal nenhum, e o "acesso à origem" gravado antes
+    fica velho. Devolve o motivo, ou None quando há conta capturando.
+    """
+    try:
+        if pool_contas.listar_contas() and not pool_contas.obter_conta_da_funcao(pool_contas.FUNCAO_ESPELHO):
+            return ("nenhuma conta está capturando (veja Vídeos Autorais 🎥 → Contas 👥: a conta da "
+                    "captura precisa estar no grupo de origem)")
+    except Exception as e:
+        logger.error(f"❌ [Parceiros] Não consegui ler a conta da captura: {e}")
+    return None
+
+
 def resumo_fila_parceiro(p, itens, hoje_str, disco_todos):
     """
     Topo da fila do parceiro: situação, disco, cota, acesso à origem, a prévia do
@@ -7373,7 +7497,10 @@ def resumo_fila_parceiro(p, itens, hoje_str, disco_todos):
     descartados) e a próxima publicação.
     """
     status = "🟢" if p.get("ativo") else "⏸️"
-    if p.get("origem_ok"):
+    parada = captura_parada_motivo()
+    if parada:
+        acesso = "❌ " + html_escape(parada)
+    elif p.get("origem_ok"):
         acesso = "✅"
     else:
         acesso = "⏳ " + html_escape(p.get("origem_erro") or "aguardando a conta da captura entrar no canal")
@@ -7441,29 +7568,40 @@ async def mostrar_fila_parceiro(message: types.Message, state: FSMContext, p):
     agora = datetime.now(fuso_horario)
     itens = ler_fila_parceiro_pendente(p.get("id"))
     itens.sort(key=lambda i: (i.get("data_alvo") or "", i.get("horario_disparo") or ""))
+    postados = ler_fila_parceiro_postados(p.get("id"), agora.strftime("%Y-%m-%d"))
     disco_todos = sum(_disco_da_fila(ler_fila_parceiro_pendente(q.get("id"))) for q in ler_parceiros())
     dias = int(p.get("dias_atraso") or 0)
 
     mensagens = [f"📊 <b>Relatório da Fila do Parceiro (D+{dias})</b>\n\n"
                  + resumo_fila_parceiro(p, itens, agora.strftime("%Y-%m-%d"), disco_todos)]
 
-    if itens:
+    if itens or postados:
         nome = html_escape(p.get("nome") or "")
         base_origem = str(p.get("canal_origem") or "").split(":")[0].strip()
         origem = html_escape(ler_cache_nomes_grupos().get(base_origem) or base_origem or "Origem do parceiro")
         janela = f"entre {p.get('janela_inicio', 0) or 0}h e {p.get('janela_fim', 24) or 24}h"
         texto = (f"📡 <b>Rota: {nome}</b> ({len(itens)} vídeos agendados)\n"
                  f"🕒 <b>Postagem:</b> D+{dias}, {janela}\n\n")
-        for n, item in enumerate(itens, 1):
+        # Como na fila do Grupo Público: os publicados hoje primeiro, depois os agendados.
+        for n, item in enumerate(postados + itens, 1):
             card_item = dict(item)
             # Sem horário sorteado, a previsão é a data-alvo gravada na captura, e não a
             # captura + o D+X de hoje (o atraso do parceiro pode ter mudado depois).
             if not card_item.get("horario_disparo") and card_item.get("data_alvo"):
                 card_item["data_publicacao"] = card_item["data_alvo"]
+            link_destino = None
+            if card_item.get("processado"):
+                data_post = card_item.get("data_postagem") or ""
+                card_item["data_postagem"], _, hora = data_post.partition(" ")
+                card_item["horario_postagem"] = hora[:5]
+                link_destino = link_post_destino(p.get("canal_destino"), card_item.get("msg_postada_id"))
+            # Origem: o post no Telegram de onde o vídeo veio (o link da Shopee fica só para
+            # gerar o link de afiliado). Decisão do Rafael: DECISOES.md, Parceiros.
             card = gerar_layout_item_padrao(
                 index=n, item=card_item, tipo_fila="Parceiros", atraso_dias=dias, agora=agora,
                 fuso_horario=fuso_horario, display_origem=origem,
-                link_origem=html_escape(item.get("link_original") or ""), link_destino=None,
+                link_origem=html_escape(card_item.get("link_post_origem") or ""),
+                link_destino=html_escape(link_destino) if link_destino else None,
             )
             # O Telegram corta mensagem acima de 4096 caracteres: continua na próxima.
             if len(texto) + len(card) > 3800:

@@ -184,6 +184,18 @@ def atualizar_config(chave, alterar, padrao=None):
         return None
 
 
+def ler_sqlite(arquivo, sql, parametros=()):
+    """
+    Consulta só de leitura num SQLite que não é o banco (ex.: um .session antigo do
+    Telethon). Abre em modo ro: não muda o modo de diário nem grava nada no arquivo.
+    """
+    conexao = _connect_com_espera(f"file:{os.path.abspath(arquivo)}?mode=ro", uri=True)
+    try:
+        return conexao.execute(sql, parametros).fetchall()
+    finally:
+        conexao.close()
+
+
 def copiar_sqlite(origem, destino):
     """
     Copia um arquivo SQLite (o banco ou uma sessão do Telethon) para destino pelo
