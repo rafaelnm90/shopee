@@ -693,16 +693,21 @@ async def adicionar_por_arroba(arroba, escopo=ESCOPO_AUTORAIS, motivo=""):
 # 5. RELATÓRIOS
 # =============================================================================
 
+def manuais():
+    """Quem o Rafael bloqueou (sem as contas do pool), na ordem em que o painel numera."""
+    return [e for e in listar() if e["origem"] != ORIGEM_POOL]
+
+
 def montar_relatorio_telegram():
     """
-    Texto HTML da lista, para o painel do bot.
+    Texto HTML do painel Pessoas Bloqueadas: as contas do pool e, numeradas, as
+    bloqueadas à mão (o número é o que o Rafael digita para desbloquear).
 
     Corta em 40 entradas de propósito: o Telegram derruba mensagem acima de
     4096 caracteres, e esse erro já derrubou tela neste projeto antes.
     """
-    entradas = listar()
-    do_pool = [e for e in entradas if e["origem"] == ORIGEM_POOL]
-    manuais = [e for e in entradas if e["origem"] != ORIGEM_POOL]
+    do_pool = [e for e in listar() if e["origem"] == ORIGEM_POOL]
+    lista_manual = manuais()
 
     # "Pessoas bloqueadas" e não "Lista Negra": o Espião já tem uma lista negra, e a
     # dele é de CANAIS. Esta é de PESSOAS cujas postagens o robô dos Autorais não copia.
@@ -716,23 +721,19 @@ def montar_relatorio_telegram():
         rotulo = e["nome_exibicao"] or (f"@{e['username']}" if e["username"] else "—")
         linhas.append(f"   • {rotulo} · <code>{e['user_id']}</code>")
     if not do_pool:
-        linhas.append("   <i>nenhuma (abra Contas 👥 de novo para proteger)</i>")
+        linhas.append("   <i>nenhuma</i>")
 
     linhas.append("")
-    linhas.append(f"✋ <b>Bloqueadas por você ({len(manuais)})</b>")
-    if not manuais:
-        linhas.append("   <i>nenhuma: toque em ➕ Bloquear alguém</i>")
-    for e in manuais[:30]:
+    linhas.append(f"✋ <b>Bloqueadas por você ({len(lista_manual)})</b>")
+    if not lista_manual:
+        linhas.append("   <i>nenhuma</i>")
+    for i, e in enumerate(lista_manual[:30], 1):
         alvo = f"@{e['username']}" if e["username"] else f"<code>{e['user_id']}</code>"
-        marca = "🌐" if e["escopo"] == ESCOPO_GLOBAL else "🎥"
-        pendente = "" if e["user_id"] else " ⏳"
-        linhas.append(f"   {marca} {alvo}{pendente}")
-    if len(manuais) > 30:
-        linhas.append(f"   <i>… e mais {len(manuais) - 30}</i>")
-
-    linhas.append("")
-    linhas.append("<i>🎥 só no grupo de origem dos Autorais · 🌐 também nos canais dos parceiros · "
-                  "⏳ @ ainda não confirmado. Toque na pessoa para trocar entre 🎥 e 🌐; 🗑️ desbloqueia.</i>")
+        onde = "🌐 Autorais e parceiros" if e["escopo"] == ESCOPO_GLOBAL else "🎥 só nos Autorais"
+        pendente = " · ⏳ @ ainda não confirmado" if not e["user_id"] else ""
+        linhas.append(f"<b>{i}</b> — {alvo} · {onde}{pendente}")
+    if len(lista_manual) > 30:
+        linhas.append(f"   <i>… e mais {len(lista_manual) - 30}</i>")
     return "\n".join(linhas)
 
 

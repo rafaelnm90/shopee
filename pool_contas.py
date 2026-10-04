@@ -120,7 +120,7 @@
 #
 # ─── LINHA DE COMANDO ────────────────────────────────────────────────────────
 #     python3 pool_contas.py login             # loga uma conta nova e cadastra
-#                                              # (ou pelo bot: Contas 👥 › ➕ Nova conta)
+#                                              # (ou pelo bot: Contas 👥 › Cadastrar Conta ➕)
 #     python3 pool_contas.py listar            # a tabela de todas as contas
 #     python3 pool_contas.py sincronizar       # checa todo mundo e redistribui
 #     python3 pool_contas.py importar-sessoes  # adota os .session já existentes
@@ -1069,8 +1069,8 @@ def texto_canal(conta):
 
 def montar_relatorio_telegram():
     """
-    Relatório do painel: o que cada posto faz, o ✅/❌ de quem está nele e, abaixo,
-    todas as contas do pool com a situação e o papel de cada uma.
+    Texto do painel de Contas: o que cada posto faz, o ✅/❌ de quem está nele e,
+    numeradas, todas as contas (o número é o que o Rafael digita para gerenciar).
 
     Enxuto de propósito: mensagem do Telegram estoura em 4096 caracteres, e este
     painel cresce a cada conta nova. Com 20 contas ainda cabe.
@@ -1080,53 +1080,47 @@ def montar_relatorio_telegram():
     saude = avaliar_saude(contas, ocupacao, ler_atividade())
 
     linhas = ["👥 <b>Contas dos Autorais</b>",
-              "<i>Contas do Telegram que o robô dos Autorais usa:</i>",
-              "🎯 <b>Captura</b>: uma conta pega os vídeos do grupo de origem e publica no seu canal.",
-              "🔁 <b>Repostagem</b>: as outras devolvem os vídeos ao grupo de origem, uma de cada vez.",
+              "<i>🎯 Captura: uma conta pega os vídeos do grupo de origem e publica no seu canal.\n"
+              "🔁 Repostagem: as outras devolvem os vídeos ao grupo de origem, revezando.</i>",
               ""]
     if not contas:
-        linhas.append("<i>Nenhuma conta cadastrada ainda: toque em ➕ Nova conta.</i>")
+        linhas.append("<i>Nenhuma conta cadastrada ainda: toque em Cadastrar Conta ➕.</i>")
         return "\n".join(linhas)
 
-    titulos = {FUNCAO_ESPELHO: "🎯 <b>Captura agora</b>", FUNCAO_REPOSTAGEM: "🔁 <b>Repostagem agora</b>"}
+    titulos = {FUNCAO_ESPELHO: "🎯 <b>Captura</b>", FUNCAO_REPOSTAGEM: "🔁 <b>Repostagem</b>"}
     for funcao in FUNCOES:
-        linhas.append(titulos[funcao])
         for p in (p for p in saude["postos"] if p["funcao"] == funcao):
             icone = "✅" if p["ok"] else "❌"
             nome = f"<b>{p['apelido']}</b> · " if p["apelido"] else ""
-            linhas.append(f"{icone} {nome}<i>{p['motivo']}</i>")
-        linhas.append("")
+            linhas.append(f"{titulos[funcao]}: {icone} {nome}<i>{p['motivo']}</i>")
     if saude["checagem_atrasada_min"] is not None:
         quando = ("nunca" if saude["checagem_atrasada_min"] < 0
                   else _tempo_legivel(saude["checagem_atrasada_min"]))
         linhas.append(f"⚠️ <i>Contas checadas pela última vez: {quando}. O robô dos Autorais "
                       f"checa de 10 em 10 min; se isto não mudar, ele está parado.</i>")
-        linhas.append("")
+    linhas.append("")
 
-    linhas.append("━━━━━━━━━━━━━━━━")
-    for c in contas:
-        icone = ICONES_GRUPO.get(c["status_grupo"], "❓")
+    for i, c in enumerate(contas, 1):
         trabalho = postos_da_conta(c["id"], ocupacao)
-        if FUNCAO_ESPELHO in trabalho:
+        if not c["habilitada"]:
+            agora = "⏸️ pausada"
+        elif c["status_sessao"] != SESSAO_OK:
+            agora = "⚠️ desconectada do Telegram"
+        elif FUNCAO_ESPELHO in trabalho:
             agora = "capturando"
         elif trabalho:
             agora = "repostando"
-        elif conta_apta(c, FUNCAO_ESPELHO) or conta_apta(c, FUNCAO_REPOSTAGEM):
-            agora = "reserva"
         else:
             agora = "parada"
-        if not c["habilitada"]:
-            agora = "pausada por você"
-        elif c["status_sessao"] != SESSAO_OK:
-            agora = "desconectada do Telegram"
         identidade = ("@" + c["username"]) if c["username"] else f"id {c['user_id'] or '?'}"
         papel = papel_da_conta(c)
-        linhas.append(f"{icone} <b>{c['apelido']}</b> ({identidade}) · {agora}")
-        linhas.append(f"   {TEXTOS_GRUPO.get(c['status_grupo'], c['status_grupo'])} · "
-                      f"{ROTULOS_PAPEL[papel] if papel else '⚪ papel não escolhido'}")
-
-    linhas.append("")
-    linhas.append("<i>Toque numa conta para ver os detalhes e escolher para que ela serve.</i>")
+        grupo = f"{ICONES_GRUPO.get(c['status_grupo'], '❓')} {TEXTOS_GRUPO.get(c['status_grupo'], c['status_grupo'])}"
+        linha = (f"<blockquote><b>{i}</b> — <b>{c['apelido']}</b> · {identidade}\n"
+                 f"🧩 {ROTULOS_PAPEL[papel] if papel else '⚪ papel não escolhido'} · {agora}\n"
+                 f"📍 {grupo}")
+        if papel in (PAPEL_CAPTURA, PAPEL_AMBAS):
+            linha += f" · 📣 canal: {texto_canal(c)}"
+        linhas.append(linha + "</blockquote>")
     return "\n".join(linhas)
 
 
@@ -1756,7 +1750,7 @@ async def login_interativo(apelido=None):
 
     Fluxo: telefone → código do SMS/app → senha de 2FA (se houver) → get_me()
     → cifra a StringSession → grava → checa o grupo → redistribui os postos.
-    O bot faz o mesmo pelo painel Contas 👥 (➕ Nova conta), com as mesmas etapas.
+    O bot faz o mesmo pelo painel Contas 👥 (Cadastrar Conta ➕), com as mesmas etapas.
     """
     inicializar_tabelas()
 

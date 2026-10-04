@@ -480,7 +480,6 @@ class AutoraisFluxo(StatesGroup):
     aguardando_confirmacao_janela_autorais = State()
     aguardando_confirmacao_pausa_repost = State()
     aguardando_confirmacao_pausa_robo = State()
-    aguardando_bloqueio = State()  # espera o @ que vai para a lista negra
 
 class RelatoriosFluxo(StatesGroup):
     menu_filas = State()
@@ -4947,359 +4946,373 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     await state.set_state(AutoraisFluxo.menu_principal)
 
 # ==========================================================================
-# Painel de Contas (Vídeos Autorais → Contas)
+# Painel de Contas (Vídeos Autorais → Contas 👥)
 # --------------------------------------------------------------------------
 # Quem captura e quem reposta, sem abrir o terminal. A regra mora no
-# pool_contas.py; aqui é só tela. O robô dos Autorais lê os postos de 10 em 10 min.
+# pool_contas.py (e a das pessoas bloqueadas no blacklist_captura.py); aqui é só
+# tela. O robô dos Autorais lê os postos de 10 em 10 min.
+#
+# Mesmo padrão dos outros painéis (Parceiros): lista numerada no texto, botões no
+# teclado de baixo, número digitado para escolher e confirmação antes de excluir.
+# Decisão do Rafael: DECISOES.md, Vídeos Autorais e contas do pool.
 #
 # Captura: uma conta. Repostagem: rodízio com todas as contas aptas, menos a da
 # captura (que nunca reposta).
-#   PERMITIR → muda o que a conta PODE fazer. É a ação durável: tirar a permissão
-#              tira do posto (ou do rodízio) e impede o revezamento de recolocar a conta.
-#   ASSUMIR  → só na captura: troca a conta AGORA, sem mexer em permissão. Dura
-#              enquanto a conta continuar apta.
-#
-# Callbacks (curtos de propósito: o Telegram limita o callback_data a 64 bytes):
-#   pc_painel | pc_sync | pc_ver:<id> | pc_papel:<id>:<c|r> | pc_ass:<id>:<e|r> |
-#   pc_hab:<id> | pc_nova | pc_nova_x | pc_ent:<id> | pc_conv:<id>
-#   (pc_tog:<id>:<e|r> só atende botões de mensagens antigas)
 # ==========================================================================
 
-def _pc_sigla_para_funcao(sigla):
-    """Traduz a sigla que viaja no callback para o nome real da função."""
-    return pool_contas.FUNCAO_ESPELHO if sigla == "e" else pool_contas.FUNCAO_REPOSTAGEM
+class ContasFluxo(StatesGroup):
+    painel = State()                 # lista das contas
+    escolhendo_conta = State()       # esperando o número (gerenciar ou remover)
+    conta = State()                  # tela de uma conta (conta_id nos dados)
+    confirmando_exclusao = State()
+    aguardando_convite = State()     # link de convite do grupo de origem
+    aguardando_papel = State()       # fim do cadastro: captura ou repostagem
+    bloqueados = State()             # lista de pessoas bloqueadas
+    aguardando_bloqueio = State()    # @, ID ou link de quem bloquear
+    aguardando_alcance = State()     # onde o bloqueio vale
+    aguardando_desbloqueio = State()
+
+BOTAO_CAPTURA = "Usar na Captura 🎯"
+BOTAO_REPOSTAGEM = "Usar na Repostagem 🔁"
+_PAPEL_DO_BOTAO = {BOTAO_CAPTURA: pool_contas.PAPEL_CAPTURA, BOTAO_REPOSTAGEM: pool_contas.PAPEL_REPOSTAGEM}
+BOTAO_SO_AUTORAIS = "Só nos Autorais 🎥"
+BOTAO_AUTORAIS_PARCEIROS = "Autorais e Parceiros 🌐"
 
 
-def _abas(ativa):
-    """
-    Linha de abas do painel de Contas.
-
-    As duas telas (Postos e Lista Negra) vivem na MESMA mensagem: tocar numa aba
-    edita o texto no lugar em vez de mandar mensagem nova. A aba em que você está
-    aparece marcada com •.
-    """
-    return [
-        InlineKeyboardButton(text=("• 👥 Contas" if ativa == "postos" else "👥 Contas"),
-                             callback_data="pc_painel"),
-        # Não chamar esta aba de "Lista Negra": a do Espião bloqueia CANAIS (não importar
-        # nem monitorar); esta bloqueia PESSOAS (não copiar o que elas postam).
-        InlineKeyboardButton(text=("• 🚫 Pessoas bloqueadas" if ativa == "negra" else "🚫 Pessoas bloqueadas"),
-                             callback_data="bl_painel"),
-    ]
+def teclado_painel_contas(tem_contas):
+    linhas = [[KeyboardButton(text="Cadastrar Conta ➕")]]
+    if tem_contas:
+        linhas.append([KeyboardButton(text="Gerenciar Conta 🔧"), KeyboardButton(text="Remover Conta 🗑️")])
+    linhas.append([KeyboardButton(text="Pessoas Bloqueadas 🚫")])
+    linhas.append([KeyboardButton(text="Voltar ao Menu Autorais 🔙")])
+    return ReplyKeyboardMarkup(keyboard=linhas, resize_keyboard=True, is_persistent=True)
 
 
-def _pc_teclado_lista():
-    """Teclado da aba Postos: abas + uma linha por conta + sincronizar."""
-    botoes = [_abas("postos"),
-              [InlineKeyboardButton(text="🔄 Sincronizar com o Telegram", callback_data="pc_sync")],
-              [InlineKeyboardButton(text="➕ Nova conta", callback_data="pc_nova")]]
-    for c in pool_contas.listar_contas():
-        icone = pool_contas.ICONES_GRUPO.get(c["status_grupo"], "❓")
-        papel = pool_contas.papel_da_conta(c)
-        rotulo = pool_contas.ROTULOS_PAPEL[papel].split(" ")[0] if papel else "⚪"
-        botoes.append([InlineKeyboardButton(
-            text=f"{icone} {c['apelido']} · {rotulo}", callback_data=f"pc_ver:{c['id']}"
-        )])
-    return InlineKeyboardMarkup(inline_keyboard=botoes)
+def teclado_gerenciar_conta(conta):
+    linhas = [[KeyboardButton(text=BOTAO_CAPTURA), KeyboardButton(text=BOTAO_REPOSTAGEM)]]
+    if conta["status_grupo"] != pool_contas.STATUS_NO_GRUPO:
+        linhas.append([KeyboardButton(text="Colocar no Grupo 🚪")])
+    linhas.append([KeyboardButton(text="Pausar Conta ⏸️" if conta["habilitada"] else "Reativar Conta ▶️")])
+    linhas.append([KeyboardButton(text="Excluir Conta 🗑️")])
+    linhas.append([KeyboardButton(text="Voltar às Contas 🔙")])
+    return ReplyKeyboardMarkup(keyboard=linhas, resize_keyboard=True, is_persistent=True)
 
 
-# Sigla do papel no callback e o papel do pool_contas. Só dois botões: várias contas
-# na repostagem já são reserva umas das outras. Decisão do Rafael: DECISOES.md,
-# Vídeos Autorais e contas do pool.
-_PC_PAPEIS = {"c": pool_contas.PAPEL_CAPTURA, "r": pool_contas.PAPEL_REPOSTAGEM}
+teclado_papel_conta = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text=BOTAO_CAPTURA)], [KeyboardButton(text=BOTAO_REPOSTAGEM)]],
+    resize_keyboard=True, is_persistent=True
+)
+
+teclado_confirmar_exclusao_conta = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
+    resize_keyboard=True, is_persistent=True
+)
 
 
-def _pc_botoes_papel(conta):
-    """Os dois papéis; o atual vem marcado com ✔️."""
-    atual = pool_contas.papel_da_conta(conta)
-    return [[InlineKeyboardButton(
-        text=("✔️ " if papel == atual else "") + pool_contas.ROTULOS_PAPEL[papel],
-        callback_data=f"pc_papel:{conta['id']}:{sigla}"
-    )] for sigla, papel in _PC_PAPEIS.items()]
+def teclado_bloqueados(tem_manuais):
+    linhas = [[KeyboardButton(text="Bloquear Pessoa ➕")]]
+    if tem_manuais:
+        linhas[0].append(KeyboardButton(text="Desbloquear Pessoa 🗑️"))
+    linhas.append([KeyboardButton(text="Voltar às Contas 🔙")])
+    return ReplyKeyboardMarkup(keyboard=linhas, resize_keyboard=True, is_persistent=True)
 
 
-def _pc_tela_conta(conta):
-    """Monta texto + teclado da tela de uma conta específica."""
+teclado_alcance_bloqueio = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text=BOTAO_SO_AUTORAIS)], [KeyboardButton(text=BOTAO_AUTORAIS_PARCEIROS)],
+              [KeyboardButton(text="Cancelar ❌")]],
+    resize_keyboard=True, is_persistent=True
+)
+
+
+def _avisos_da_conta(conta):
+    """O que ainda falta para a conta trabalhar, em palavras."""
+    papel = pool_contas.papel_da_conta(conta)
+    avisos = []
+    if conta["status_grupo"] != pool_contas.STATUS_NO_GRUPO:
+        avisos.append("🚪 Ela não está no grupo de origem: toque em <b>Colocar no Grupo 🚪</b> "
+                      "ou adicione a conta pelo app.")
+    if papel in (pool_contas.PAPEL_CAPTURA, pool_contas.PAPEL_AMBAS) and conta.get("publica_no_destino") == 0:
+        avisos.append("📣 Ela não é admin do seu canal: torne-a admin com permissão de "
+                      "<b>publicar mensagens</b>, senão os vídeos capturados não saem.")
+    if not papel or papel == pool_contas.PAPEL_AMBAS:
+        avisos.append("🧩 Escolha para que ela serve: <b>Usar na Captura 🎯</b> ou <b>Usar na Repostagem 🔁</b>.")
+    return avisos
+
+
+def texto_tela_conta(conta):
+    """Tela de uma conta: quem é, para que serve, onde está e o que falta."""
     postos = pool_contas.postos_da_conta(conta["id"])
     papel = pool_contas.papel_da_conta(conta)
-    if pool_contas.FUNCAO_ESPELHO in postos:
+    if not conta["habilitada"]:
+        agora = "⏸️ pausada por você"
+    elif pool_contas.FUNCAO_ESPELHO in postos:
         agora = "capturando e publicando no seu canal"
     elif postos:
         agora = "repostando no grupo de origem (revezamento)"
     else:
-        agora = "nada (reserva ou parada)"
-
+        agora = "parada"
+    sessao = ("conectada" if conta["status_sessao"] == pool_contas.SESSAO_OK
+              else f"desconectada ({conta['status_sessao']})")
     texto = (
-        f"👤 <b>{conta['apelido']}</b>\n"
-        f"🆔 <code>{conta['user_id'] or '?'}</code> · "
-        f"{('@' + conta['username']) if conta['username'] else 'sem @'} · "
-        f"{conta['nome_exibicao'] or '—'}\n"
-        f"📱 {conta['telefone'] or '?'}\n\n"
+        f"👤 <b>{conta['apelido']}</b>  ·  "
+        f"{('@' + conta['username']) if conta['username'] else 'id ' + str(conta['user_id'] or '?')}\n\n"
+        "<blockquote>"
+        f"🧩 Função: <b>{pool_contas.ROTULOS_PAPEL[papel] if papel else 'ainda não escolhida'}</b>\n"
         f"📍 Grupo de origem: <b>{pool_contas.TEXTOS_GRUPO.get(conta['status_grupo'], conta['status_grupo'])}</b>\n"
     )
     if papel in (pool_contas.PAPEL_CAPTURA, pool_contas.PAPEL_AMBAS):
         texto += f"📣 Seu canal: <b>{pool_contas.texto_canal(conta)}</b>\n"
     texto += (
-        f"🔌 Telegram: <b>{'conectada' if conta['status_sessao'] == pool_contas.SESSAO_OK else 'desconectada (' + conta['status_sessao'] + ')'}</b>\n"
-        f"⚙️ Fazendo agora: <b>{agora}</b>\n"
-        f"🧩 Serve para: <b>{pool_contas.ROTULOS_PAPEL[papel] if papel else 'ainda não escolhido'}</b>\n"
+        f"⚙️ Agora: <b>{agora}</b>\n"
+        f"🔌 Telegram: <b>{sessao}</b>\n"
+        f"📱 {conta['telefone'] or '?'} · {conta['nome_exibicao'] or '—'}"
+        "</blockquote>\n"
     )
-    if not conta["habilitada"]:
-        texto += "\n⏸️ <i>Conta pausada por você: o robô não a usa.</i>\n"
     if conta["ultimo_erro"]:
         texto += f"\n⚠️ <i>{conta['ultimo_erro']}</i>\n"
-    if conta["status_grupo"] != pool_contas.STATUS_NO_GRUPO:
-        texto += ("\n<i>Para trabalhar, a conta precisa estar no grupo de origem: "
-                  "use o link de convite abaixo ou adicione-a pelo app.</i>\n")
-    if (papel in (pool_contas.PAPEL_CAPTURA, pool_contas.PAPEL_AMBAS)
-            and conta.get("publica_no_destino") == 0):
-        texto += ("\n<i>Para capturar, ela também precisa ser admin do seu canal, com "
-                  "permissão de publicar mensagens.</i>\n")
-    texto += "\n<b>Para que serve esta conta?</b>"
-
-    linhas = _pc_botoes_papel(conta)
-    # Só a captura tem titular; na repostagem toda conta apta já está no rodízio.
-    if papel in (pool_contas.PAPEL_CAPTURA, pool_contas.PAPEL_AMBAS) and pool_contas.FUNCAO_ESPELHO not in postos:
-        linhas.append([InlineKeyboardButton(
-            text="⚡ Passar a captura para ela agora",
-            callback_data=f"pc_ass:{conta['id']}:e"
-        )])
-    # Fora do grupo de origem: entrar pelo link de convite guardado, ou guardar um.
-    if conta["status_grupo"] != pool_contas.STATUS_NO_GRUPO:
-        if pool_contas.ler_convite():
-            linhas.append([InlineKeyboardButton(text="🚪 Entrar no grupo de origem (link de convite)",
-                                                callback_data=f"pc_ent:{conta['id']}")])
-        linhas.append([InlineKeyboardButton(text="🔗 Guardar link de convite do grupo",
-                                            callback_data=f"pc_conv:{conta['id']}")])
-    linhas.append([InlineKeyboardButton(
-        text="▶️ Voltar a usar esta conta" if not conta["habilitada"] else "⏸️ Pausar esta conta",
-        callback_data=f"pc_hab:{conta['id']}"
-    )])
-    linhas.append([InlineKeyboardButton(text="🔙 Voltar às contas", callback_data="pc_painel")])
-    return texto, InlineKeyboardMarkup(inline_keyboard=linhas)
+    avisos = _avisos_da_conta(conta)
+    if avisos:
+        texto += "\n" + "\n".join(avisos) + "\n"
+    return texto + "\nEscolha a ação desejada:"
 
 
-async def _pc_redesenhar(mensagem):
-    """Redesenha a tela principal. Engole o 'message is not modified'."""
-    try:
-        await mensagem.edit_text(
-            pool_contas.montar_relatorio_telegram(),
-            parse_mode="HTML",
-            reply_markup=_pc_teclado_lista()
-        )
-    except Exception as e:
-        if "not modified" not in str(e).lower():
-            logger.error(f"❌ [Pool] Falha ao redesenhar o painel: {e}")
-
-
-@dp.message(F.text == "Contas 👥", StateFilter("*"))
-async def painel_contas_postos(message: types.Message, state: FSMContext):
-    """Abre o painel de Contas, protegendo antes as contas na lista negra."""
-    if message.from_user.id != ADMIN_ID: return
-    # O botão fica no menu dos Autorais: o estado continua nele, para os outros
-    # botões do menu seguirem respondendo.
-    await state.set_state(AutoraisFluxo.menu_principal)
-    logger.info("👥 Abrindo o painel de Contas...")
-    # Proteger as próprias contas na lista negra é barato e tem de valer sempre: roda
-    # em silêncio ao abrir o painel (no lugar de um botão que só criava dúvida).
+async def mostrar_painel_contas(message, state):
+    """Painel de Contas: os postos, a lista numerada e as ações."""
+    # Proteger as próprias contas na lista de bloqueados é barato e tem de valer
+    # sempre: roda em silêncio a cada abertura do painel.
     try:
         blacklist_captura.sincronizar_contas_do_pool()
     except Exception as e:
         logger.error(f"❌ [Lista Negra] Falha ao sincronizar ao abrir: {e}")
+    await state.set_state(ContasFluxo.painel)
+    await state.update_data(conta_id=None, remover_direto=False)
     try:
-        await message.answer(
-            pool_contas.montar_relatorio_telegram(),
-            parse_mode="HTML",
-            reply_markup=_pc_teclado_lista()
-        )
+        contas = pool_contas.listar_contas()
+        texto = pool_contas.montar_relatorio_telegram()
     except Exception as e:
-        await message.answer(f"❌ Não consegui abrir o pool de contas.\n<code>{e}</code>",
-                             parse_mode="HTML")
         logger.error(f"❌ [Pool] Erro ao abrir o painel: {e}")
-
-
-@dp.callback_query(F.data == "pc_painel", StateFilter("*"))
-async def pool_voltar_lista(callback: types.CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID: return
-    await _pc_redesenhar(callback.message)
-    await callback.answer()
-
-
-@dp.callback_query(F.data == "pc_sync", StateFilter("*"))
-async def pool_sincronizar(callback: types.CallbackQuery, state: FSMContext):
-    """Checa cada conta no Telegram e redistribui os postos se algo mudou."""
-    if callback.from_user.id != ADMIN_ID: return
-    # A checagem conecta conta por conta no Telegram: pode levar alguns segundos.
-    await callback.answer("Checando cada conta no Telegram...", show_alert=False)
-    try:
-        mudancas = await pool_contas.sincronizar_pool()
-    except Exception as e:
-        await callback.message.answer(f"❌ Falha ao sincronizar: <code>{e}</code>", parse_mode="HTML")
-        logger.error(f"❌ [Pool] Erro ao sincronizar pelo painel: {e}")
+        await message.answer(f"❌ Não consegui abrir as contas.\n<code>{e}</code>", parse_mode="HTML")
         return
-    await _pc_redesenhar(callback.message)
-    if mudancas:
-        resumo = "\n".join(f"• <b>{f}</b>: {m}" for f, _a, _n, m in mudancas)
-        await callback.message.answer(f"🔄 <b>Postos redistribuídos</b>\n{resumo}", parse_mode="HTML")
+    await message.answer(texto + "\n\nEscolha a ação desejada:", parse_mode="HTML",
+                         reply_markup=teclado_painel_contas(bool(contas)))
 
 
-@dp.callback_query(F.data.startswith("pc_ver:"), StateFilter("*"))
-async def pool_ver_conta(callback: types.CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID: return
-    conta = pool_contas.obter_conta(callback.data.split(":")[1])
+async def mostrar_conta(message, state, conta_id):
+    conta = pool_contas.obter_conta(conta_id)
     if not conta:
-        await callback.answer("Conta não encontrada.", show_alert=True)
+        await message.answer("⚠️ Conta não encontrada.")
+        await mostrar_painel_contas(message, state)
         return
-    texto, teclado = _pc_tela_conta(conta)
-    try:
-        await callback.message.edit_text(texto, parse_mode="HTML", reply_markup=teclado)
-    except Exception as e:
-        if "not modified" not in str(e).lower():
-            logger.error(f"❌ [Pool] Falha ao abrir a conta: {e}")
-    await callback.answer()
+    await state.set_state(ContasFluxo.conta)
+    await state.update_data(conta_id=conta["id"], remover_direto=False)
+    await message.answer(texto_tela_conta(conta), parse_mode="HTML", reply_markup=teclado_gerenciar_conta(conta))
 
 
-@dp.callback_query(F.data.startswith("pc_tog:"), StateFilter("*"))
-async def pool_alternar_permissao(callback: types.CallbackQuery, state: FSMContext):
-    """Permite ou bloqueia uma função (espelho, repostagem) para a conta."""
-    if callback.from_user.id != ADMIN_ID: return
-    _p, id_conta, sigla = callback.data.split(":")
-    conta = pool_contas.obter_conta(id_conta)
+async def _conta_do_estado(message, state):
+    """A conta aberta na tela; sem ela (restart, conta apagada) volta ao painel."""
+    conta = pool_contas.obter_conta((await state.get_data()).get("conta_id") or "")
     if not conta:
-        await callback.answer("Conta não encontrada.", show_alert=True)
+        await message.answer("⚠️ Abra a conta de novo em Gerenciar Conta 🔧.")
+        await mostrar_painel_contas(message, state)
+    return conta
+
+
+@dp.message(F.text == "Contas 👥", StateFilter("*"))
+async def painel_contas_postos(message: types.Message, state: FSMContext):
+    """Abre o painel de Contas."""
+    if message.from_user.id != ADMIN_ID: return
+    logger.info("👥 Abrindo o painel de Contas...")
+    await mostrar_painel_contas(message, state)
+
+
+@dp.message(F.text == "Voltar às Contas 🔙", StateFilter("*"))
+async def contas_voltar(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await mostrar_painel_contas(message, state)
+
+
+# Cancelar em qualquer etapa das Contas volta para a tela de onde veio. Fica antes
+# dos handlers que leem texto livre (número, link, @), senão eles o leriam.
+@dp.message(StateFilter(ContasFluxo), F.text == "Cancelar ❌")
+async def contas_cancelar(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    estado = await state.get_state()
+    dados = await state.get_data()
+    await message.answer("❌ Nada foi alterado.")
+    if estado in (ContasFluxo.aguardando_bloqueio.state, ContasFluxo.aguardando_alcance.state,
+                  ContasFluxo.aguardando_desbloqueio.state):
+        await mostrar_bloqueados(message, state)
+    elif (estado in (ContasFluxo.confirmando_exclusao.state, ContasFluxo.aguardando_convite.state)
+          and dados.get("conta_id") and not dados.get("remover_direto")):
+        await mostrar_conta(message, state, dados["conta_id"])
+    else:
+        await mostrar_painel_contas(message, state)
+
+
+@dp.message(F.text.in_({"Gerenciar Conta 🔧", "Remover Conta 🗑️"}), StateFilter("*"))
+async def contas_pedir_numero(message: types.Message, state: FSMContext):
+    """Pede o número da conta, como nos Parceiros. Com uma conta só, Gerenciar abre direto."""
+    if message.from_user.id != ADMIN_ID: return
+    contas = pool_contas.listar_contas()
+    if not contas:
+        await mostrar_painel_contas(message, state)
         return
-    funcao = _pc_sigla_para_funcao(sigla)
-    ligada, mudancas = pool_contas.alternar_funcao_permitida(conta["apelido"], funcao)
-    await callback.answer(f"{funcao}: {'liberado' if ligada else 'bloqueado'}")
+    remover = message.text == "Remover Conta 🗑️"
+    if len(contas) == 1 and not remover:
+        await mostrar_conta(message, state, contas[0]["id"])
+        return
+    lista = "\n".join(f"<b>{i}</b> — {c['apelido']}" for i, c in enumerate(contas, 1))
+    if remover:
+        texto = (f"🗑️ <b>Qual conta você quer remover?</b>\n\n{lista}\n\n"
+                 "<i>Envie apenas o número correspondente. Ainda haverá uma confirmação.</i>")
+    else:
+        texto = f"🔧 <b>Qual conta você quer gerenciar?</b>\n\n{lista}\n\n<i>Envie apenas o número correspondente.</i>"
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(ContasFluxo.escolhendo_conta)
+    await state.update_data(conta_id=None, remover_direto=remover)
 
-    texto, teclado = _pc_tela_conta(pool_contas.obter_conta(id_conta))
-    try:
-        await callback.message.edit_text(texto, parse_mode="HTML", reply_markup=teclado)
-    except Exception:
-        pass
-    if mudancas:
-        resumo = "\n".join(f"• <b>{f}</b>: {m}" for f, _a, _n, m in mudancas)
-        await callback.message.answer(f"🔄 <b>Postos redistribuídos</b>\n{resumo}", parse_mode="HTML")
+
+@dp.message(ContasFluxo.escolhendo_conta)
+async def contas_receber_numero(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    contas = pool_contas.listar_contas()
+    texto = (message.text or "").strip()
+    if not texto.isdigit() or not 1 <= int(texto) <= len(contas):
+        await message.answer(f"⚠️ Envie apenas o <b>número</b> da conta (de 1 a {len(contas)}).", parse_mode="HTML")
+        return
+    conta = contas[int(texto) - 1]
+    if (await state.get_data()).get("remover_direto"):
+        await _pedir_confirmacao_exclusao(message, state, conta)
+    else:
+        await mostrar_conta(message, state, conta["id"])
 
 
-@dp.callback_query(F.data.startswith("pc_papel:"), StateFilter("*"))
-async def pool_definir_papel(callback: types.CallbackQuery, state: FSMContext):
+@dp.message(StateFilter(ContasFluxo.conta, ContasFluxo.aguardando_papel), F.text.in_(set(_PAPEL_DO_BOTAO)))
+async def contas_definir_papel(message: types.Message, state: FSMContext):
     """Para que serve a conta: captura ou repostagem. Já redistribui os postos."""
-    if callback.from_user.id != ADMIN_ID: return
-    _p, id_conta, sigla = callback.data.split(":")
-    conta = pool_contas.obter_conta(id_conta)
-    papel = _PC_PAPEIS.get(sigla)
-    if not conta or not papel:
-        await callback.answer("Essa opção não existe mais: abra a conta de novo em Contas 👥.", show_alert=True)
+    if message.from_user.id != ADMIN_ID: return
+    conta = await _conta_do_estado(message, state)
+    if not conta:
         return
+    papel = _PAPEL_DO_BOTAO[message.text]
     _ok, resultado, mudancas = pool_contas.definir_papel(conta["apelido"], papel)
-    conta = pool_contas.obter_conta(id_conta)
-    # O Telegram recusa resposta de botão com mais de 200 caracteres.
-    await callback.answer(f"{pool_contas.ROTULOS_PAPEL[papel]}: {resultado}"[:190])
-
-    avisos = []
-    if conta["status_grupo"] != pool_contas.STATUS_NO_GRUPO:
-        avisos.append("🚪 Ela ainda não está no grupo de origem: só começa depois de entrar "
-                      "(botão de convite na tela dela, ou adicione pelo app).")
-    if papel in (pool_contas.PAPEL_CAPTURA, pool_contas.PAPEL_AMBAS) and conta.get("publica_no_destino") == 0:
-        avisos.append("📣 Ela não é admin do seu canal: torne-a admin com permissão de "
-                      "<b>publicar mensagens</b>, senão os vídeos capturados não saem.")
-    texto, teclado = _pc_tela_conta(conta)
-    try:
-        await callback.message.edit_text(texto, parse_mode="HTML", reply_markup=teclado)
-    except Exception:
-        pass
-    if avisos or mudancas:
-        resumo = [f"✅ <b>{conta['apelido']}</b>: {pool_contas.ROTULOS_PAPEL[papel]} ({resultado})."]
-        resumo += avisos
-        if mudancas:
-            resumo.append("🔄 Postos: " + "; ".join(f"{f}: {m}" for f, _a, _n, m in mudancas))
-        await callback.message.answer("\n\n".join(resumo), parse_mode="HTML")
-
-
-@dp.callback_query(F.data.startswith("pc_ass:"), StateFilter("*"))
-async def pool_assumir_funcao(callback: types.CallbackQuery, state: FSMContext):
-    """A conta assume o posto agora, sem mudar permissões."""
-    if callback.from_user.id != ADMIN_ID: return
-    _p, id_conta, sigla = callback.data.split(":")
-    conta = pool_contas.obter_conta(id_conta)
-    if not conta:
-        await callback.answer("Conta não encontrada.", show_alert=True)
-        return
-    funcao = _pc_sigla_para_funcao(sigla)
-    ok, motivo = pool_contas.atribuir_funcao(conta["apelido"], funcao)
-    if not ok:
-        await callback.answer(f"Não deu: {motivo}", show_alert=True)
-        return
-    await callback.answer(f"{conta['apelido']} assumiu {funcao}.")
-    texto, teclado = _pc_tela_conta(pool_contas.obter_conta(id_conta))
-    try:
-        await callback.message.edit_text(texto, parse_mode="HTML", reply_markup=teclado)
-    except Exception:
-        pass
-
-
-@dp.callback_query(F.data.startswith("pc_hab:"), StateFilter("*"))
-async def pool_habilitar_conta(callback: types.CallbackQuery, state: FSMContext):
-    """Habilita ou desabilita a conta e redistribui os postos."""
-    if callback.from_user.id != ADMIN_ID: return
-    conta = pool_contas.obter_conta(callback.data.split(":")[1])
-    if not conta:
-        await callback.answer("Conta não encontrada.", show_alert=True)
-        return
-    novo_estado = not bool(conta["habilitada"])
-    pool_contas.definir_habilitada(conta["apelido"], novo_estado)
-    mudancas = pool_contas.aplicar_funcoes()
-    await callback.answer("Conta habilitada." if novo_estado else "Conta desabilitada.")
-
-    texto, teclado = _pc_tela_conta(pool_contas.obter_conta(conta["apelido"]))
-    try:
-        await callback.message.edit_text(texto, parse_mode="HTML", reply_markup=teclado)
-    except Exception:
-        pass
+    texto = f"✅ <b>{conta['apelido']}</b>: {pool_contas.ROTULOS_PAPEL[papel]} ({resultado})."
     if mudancas:
-        resumo = "\n".join(f"• <b>{f}</b>: {m}" for f, _a, _n, m in mudancas)
-        await callback.message.answer(f"🔄 <b>Postos redistribuídos</b>\n{resumo}", parse_mode="HTML")
+        texto += "\n🔄 Postos: " + "; ".join(f"{f}: {m}" for f, _a, _n, m in mudancas)
+    await message.answer(texto, parse_mode="HTML")
+    await mostrar_conta(message, state, conta["id"])
 
 
+@dp.message(ContasFluxo.conta, F.text == "Colocar no Grupo 🚪")
+async def contas_colocar_no_grupo(message: types.Message, state: FSMContext):
+    """Entra pelo link de convite guardado; sem link (ou se ele não serviu), pede um."""
+    if message.from_user.id != ADMIN_ID: return
+    conta = await _conta_do_estado(message, state)
+    if not conta:
+        return
+    if pool_contas.ler_convite():
+        aviso = await message.answer(f"⏳ Colocando {conta['apelido']} no grupo de origem pelo link guardado...")
+        ok, resultado = await pool_contas.entrar_no_grupo(conta["apelido"])
+        await aviso.edit_text(resultado)
+        if ok:
+            await mostrar_conta(message, state, conta["id"])
+            return
+    await message.answer(
+        "🔗 Mande o <b>link de convite</b> do grupo de origem (ex.: <code>https://t.me/+AbCdEf</code>).\n"
+        "<i>Ele fica guardado para as próximas contas.</i>",
+        parse_mode="HTML", reply_markup=teclado_cancelar
+    )
+    await state.set_state(ContasFluxo.aguardando_convite)
 
 
+@dp.message(ContasFluxo.aguardando_convite)
+async def contas_salvar_convite(message: types.Message, state: FSMContext):
+    """Guarda o link e já tenta colocar a conta no grupo."""
+    if message.from_user.id != ADMIN_ID: return
+    link = (message.text or "").strip()
+    if "t.me/+" not in link and "joinchat/" not in link:
+        await message.answer("⚠️ Isso não parece um link de convite. Mande algo como "
+                             "<code>https://t.me/+AbCdEf</code>.", parse_mode="HTML")
+        return
+    conta = await _conta_do_estado(message, state)
+    if not conta:
+        return
+    pool_contas.guardar_convite(link)
+    aviso = await message.answer(f"✅ Link guardado. Colocando {conta['apelido']} no grupo...")
+    _ok, resultado = await pool_contas.entrar_no_grupo(conta["apelido"])
+    await aviso.edit_text(resultado)
+    await mostrar_conta(message, state, conta["id"])
+
+
+@dp.message(ContasFluxo.conta, F.text.in_({"Pausar Conta ⏸️", "Reativar Conta ▶️"}))
+async def contas_pausar(message: types.Message, state: FSMContext):
+    """Pausa ou reativa a conta e redistribui os postos."""
+    if message.from_user.id != ADMIN_ID: return
+    conta = await _conta_do_estado(message, state)
+    if not conta:
+        return
+    ligar = message.text == "Reativar Conta ▶️"
+    pool_contas.definir_habilitada(conta["apelido"], ligar)
+    pool_contas.aplicar_funcoes()
+    await message.answer(f"▶️ {conta['apelido']} voltou a ser usada pelo robô." if ligar
+                         else f"⏸️ {conta['apelido']} pausada: o robô não a usa até você reativar.")
+    await mostrar_conta(message, state, conta["id"])
+
+
+async def _pedir_confirmacao_exclusao(message, state, conta):
+    await state.set_state(ContasFluxo.confirmando_exclusao)
+    await state.update_data(conta_id=conta["id"])
+    await message.answer(
+        f"🗑️ <b>Excluir a conta {conta['apelido']}?</b>\n\n"
+        "• Ela deixa de capturar e de repostar\n"
+        "• A conta continua existindo no Telegram: só sai deste robô\n"
+        "• Para usar de novo, é preciso cadastrar outra vez (com o código do Telegram)",
+        parse_mode="HTML", reply_markup=teclado_confirmar_exclusao_conta
+    )
+
+
+@dp.message(ContasFluxo.conta, F.text == "Excluir Conta 🗑️")
+async def contas_excluir(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    conta = await _conta_do_estado(message, state)
+    if conta:
+        await _pedir_confirmacao_exclusao(message, state, conta)
+
+
+@dp.message(ContasFluxo.confirmando_exclusao)
+async def contas_confirmar_exclusao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if message.text != "Aprovar ✅":
+        await message.answer("Toque em <b>Aprovar ✅</b> para excluir ou em <b>Cancelar ❌</b>.", parse_mode="HTML")
+        return
+    conta = await _conta_do_estado(message, state)
+    if not conta:
+        return
+    pool_contas.remover_conta(conta["apelido"])
+    pool_contas.aplicar_funcoes()
+    await message.answer(f"✅ Conta <b>{conta['apelido']}</b> excluída.", parse_mode="HTML")
+    await mostrar_painel_contas(message, state)
+
+
+# Um botão de uma versão antiga do painel (dentro da mensagem): avisa onde está o menu.
+@dp.callback_query(F.data.startswith(("pc_", "bl_")), StateFilter("*"))
+async def contas_botao_antigo(callback: types.CallbackQuery, state: FSMContext):
+    await callback.answer("Este menu mudou: abra Vídeos Autorais 🎥 → Contas 👥.", show_alert=True)
 
 
 # --- Nova conta pelo bot ---
 # O mesmo login do terminal (pool_contas.iniciar_login → confirmar_codigo →
 # confirmar_senha → finalizar_cadastro), em etapas no chat privado. O cliente do
 # login fica em memória só enquanto espera a resposta: 5 min sem resposta, ele é
-# desconectado e o cadastro é cancelado.
+# desconectado e o cadastro é cancelado. No fim, a conta escolhe o papel.
 
 class NovaContaFluxo(StatesGroup):
     aguardando_telefone = State()
     aguardando_codigo = State()
     aguardando_senha = State()
-    aguardando_convite = State()
 
 MINUTOS_LOGIN_CONTA = 5
-
-
-async def _texto_cancelado(state):
-    """O que foi cancelado: o link de convite usa o mesmo fluxo do cadastro."""
-    if await state.get_state() == NovaContaFluxo.aguardando_convite.state:
-        return "❌ Cancelado: nenhum link de convite guardado."
-    return "❌ Cadastro de conta cancelado."
-
-
-async def _voltar_ao_menu_autorais(state):
-    """
-    Fim (ou cancelamento) de um fluxo do painel de Contas: o teclado na tela é o do
-    menu dos Autorais, então o estado volta para ele, e não para vazio. Sem isso os
-    botões do menu (Regras de Repostagem, Editar Origem...) param de responder.
-    """
-    await state.set_state(AutoraisFluxo.menu_principal)
 _login_conta = {}   # login em andamento (só o admin usa): cliente, telefone, codigo_hash, prazo
-
-teclado_cancelar_conta = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="❌ Cancelar", callback_data="pc_nova_x")]
-])
 
 
 def _parar_prazo_login():
@@ -5317,6 +5330,13 @@ async def _encerrar_login_conta():
         await pool_contas.cancelar_login(cliente)
 
 
+async def _cadastro_encerrado(message, state, texto):
+    """Fim do cadastro sem conta nova (cancelado ou falhou): avisa e volta ao painel."""
+    await _encerrar_login_conta()
+    await message.answer(texto)
+    await mostrar_painel_contas(message, state)
+
+
 async def _prazo_login_conta(chat_id, state):
     try:
         await asyncio.sleep(MINUTOS_LOGIN_CONTA * 60)
@@ -5324,10 +5344,11 @@ async def _prazo_login_conta(chat_id, state):
         return
     _login_conta.pop("prazo", None)
     await _encerrar_login_conta()
-    await _voltar_ao_menu_autorais(state)
+    await state.set_state(ContasFluxo.painel)
     try:
         await bot.send_message(chat_id, f"⌛ Cadastro de conta cancelado: {MINUTOS_LOGIN_CONTA} min sem resposta. "
-                                        "Toque em ➕ Nova conta para recomeçar.")
+                                        "Toque em Cadastrar Conta ➕ para recomeçar.",
+                               reply_markup=teclado_painel_contas(bool(pool_contas.listar_contas())))
     except Exception:
         pass
 
@@ -5338,42 +5359,25 @@ def _rearmar_prazo_login(chat_id, state):
     _login_conta["prazo"] = criar_task(_prazo_login_conta(chat_id, state))
 
 
-@dp.callback_query(F.data == "pc_nova", StateFilter("*"))
-async def pool_nova_conta(callback: types.CallbackQuery, state: FSMContext):
-    """➕ Nova conta: pede o telefone."""
-    if callback.from_user.id != ADMIN_ID: return
+@dp.message(F.text == "Cadastrar Conta ➕", StateFilter("*"))
+async def pool_nova_conta(message: types.Message, state: FSMContext):
+    """Cadastrar Conta: pede o telefone."""
+    if message.from_user.id != ADMIN_ID: return
     await _encerrar_login_conta()
     await state.set_state(NovaContaFluxo.aguardando_telefone)
-    await callback.message.answer(
-        "➕ <b>Nova conta</b>\n\nMande o <b>telefone</b> da conta, com DDI.\n"
+    await message.answer(
+        "➕ <b>Cadastrar Conta</b>\n\nMande o <b>telefone</b> da conta, com DDI.\n"
         "Ex.: <code>+5532999998888</code>",
-        parse_mode="HTML", reply_markup=teclado_cancelar_conta
+        parse_mode="HTML", reply_markup=teclado_cancelar
     )
-    _rearmar_prazo_login(callback.message.chat.id, state)
-    await callback.answer()
-
-
-@dp.callback_query(F.data == "pc_nova_x", StateFilter("*"))
-async def pool_nova_conta_cancelar(callback: types.CallbackQuery, state: FSMContext):
-    if callback.from_user.id != ADMIN_ID: return
-    texto = await _texto_cancelado(state)
-    await _encerrar_login_conta()
-    await _voltar_ao_menu_autorais(state)
-    await callback.answer("Cancelado.")
-    try:
-        await callback.message.edit_text(texto)
-    except Exception:
-        pass
+    _rearmar_prazo_login(message.chat.id, state)
 
 
 @dp.message(StateFilter(NovaContaFluxo), F.text == "Cancelar ❌")
 async def pool_nova_conta_cancelar_texto(message: types.Message, state: FSMContext):
-    """Cancelar ❌ do teclado no meio do cadastro (os handlers abaixo o leriam como resposta)."""
+    """Cancelar ❌ no meio do cadastro (os handlers abaixo o leriam como resposta)."""
     if message.from_user.id != ADMIN_ID: return
-    texto = await _texto_cancelado(state)
-    await _encerrar_login_conta()
-    await _voltar_ao_menu_autorais(state)
-    await message.answer(texto)
+    await _cadastro_encerrado(message, state, "❌ Cadastro de conta cancelado.")
 
 
 @dp.message(NovaContaFluxo.aguardando_telefone)
@@ -5384,7 +5388,7 @@ async def pool_nova_conta_telefone(message: types.Message, state: FSMContext):
     telefone = "+" + re.sub(r"\D", "", message.text or "")
     if not 10 <= len(telefone) - 1 <= 15:
         await message.answer("⚠️ Telefone inválido. Mande com DDI, ex.: <code>+5532999998888</code>",
-                             parse_mode="HTML", reply_markup=teclado_cancelar_conta)
+                             parse_mode="HTML")
         return
 
     aviso = await message.answer("⏳ Pedindo o código ao Telegram...")
@@ -5400,9 +5404,8 @@ async def pool_nova_conta_telefone(message: types.Message, state: FSMContext):
     except Exception as e:
         erro = f"{type(e).__name__}: {e}"
     if erro:
-        await _encerrar_login_conta()
-        await _voltar_ao_menu_autorais(state)
         await aviso.edit_text(f"❌ Não deu para pedir o código: {erro}.")
+        await _cadastro_encerrado(message, state, "Cadastro encerrado.")
         return
 
     _login_conta.update(cliente=cliente, telefone=telefone, codigo_hash=codigo_hash)
@@ -5411,7 +5414,7 @@ async def pool_nova_conta_telefone(message: types.Message, state: FSMContext):
         "📨 Código enviado para o app do Telegram dessa conta (ou por SMS).\n\n"
         "Mande o código <b>com espaços entre os números</b>, ex.: <code>1 2 3 4 5</code>.\n"
         "<i>Sem os espaços, o Telegram percebe o código numa mensagem e o invalida.</i>",
-        parse_mode="HTML", reply_markup=teclado_cancelar_conta
+        parse_mode="HTML"
     )
     _rearmar_prazo_login(message.chat.id, state)
 
@@ -5427,39 +5430,35 @@ async def pool_nova_conta_codigo(message: types.Message, state: FSMContext):
     except Exception:
         pass
     if not _login_conta.get("cliente"):
-        await _voltar_ao_menu_autorais(state)
-        await message.answer("⌛ Este cadastro já tinha sido encerrado. Toque em ➕ Nova conta para recomeçar.")
+        await _cadastro_encerrado(message, state, "⌛ Este cadastro já tinha sido encerrado. "
+                                                  "Toque em Cadastrar Conta ➕ para recomeçar.")
         return
     if len(codigo) < 5:
         await message.answer("⚠️ Código incompleto. Mande de novo, com espaços: <code>1 2 3 4 5</code>",
-                             parse_mode="HTML", reply_markup=teclado_cancelar_conta)
+                             parse_mode="HTML")
         return
 
     try:
         precisa_senha = await pool_contas.confirmar_codigo(
             _login_conta["cliente"], _login_conta["telefone"], codigo, _login_conta["codigo_hash"])
     except tg_errors.PhoneCodeInvalidError:
-        await message.answer("⚠️ Código errado. Confira no app e mande de novo, com espaços.",
-                             reply_markup=teclado_cancelar_conta)
+        await message.answer("⚠️ Código errado. Confira no app e mande de novo, com espaços.")
         _rearmar_prazo_login(message.chat.id, state)
         return
     except tg_errors.PhoneCodeExpiredError:
-        await _encerrar_login_conta()
-        await _voltar_ao_menu_autorais(state)
-        await message.answer("❌ O código expirou. Isso costuma acontecer quando ele vai sem espaços. "
-                             "Toque em ➕ Nova conta e mande o próximo código com espaços.")
+        await _cadastro_encerrado(message, state, "❌ O código expirou. Isso costuma acontecer quando ele vai "
+                                                  "sem espaços. Toque em Cadastrar Conta ➕ e mande o próximo "
+                                                  "código com espaços.")
         return
     except Exception as e:
-        await _encerrar_login_conta()
-        await _voltar_ao_menu_autorais(state)
-        await message.answer(f"❌ Falha no login: {type(e).__name__}: {e}")
+        await _cadastro_encerrado(message, state, f"❌ Falha no login: {type(e).__name__}: {e}")
         return
 
     if precisa_senha:
         await state.set_state(NovaContaFluxo.aguardando_senha)
         await message.answer("🔐 A conta tem verificação em duas etapas. Mande a senha.\n"
                              "<i>Apago a sua mensagem assim que ler; a senha fica guardada cifrada.</i>",
-                             parse_mode="HTML", reply_markup=teclado_cancelar_conta)
+                             parse_mode="HTML")
         _rearmar_prazo_login(message.chat.id, state)
         return
     await _concluir_nova_conta(message, state, None)
@@ -5476,111 +5475,55 @@ async def pool_nova_conta_senha(message: types.Message, state: FSMContext):
     except Exception:
         pass
     if not _login_conta.get("cliente"):
-        await _voltar_ao_menu_autorais(state)
-        await message.answer("⌛ Este cadastro já tinha sido encerrado. Toque em ➕ Nova conta para recomeçar.")
+        await _cadastro_encerrado(message, state, "⌛ Este cadastro já tinha sido encerrado. "
+                                                  "Toque em Cadastrar Conta ➕ para recomeçar.")
         return
     try:
         await pool_contas.confirmar_senha(_login_conta["cliente"], senha)
     except tg_errors.PasswordHashInvalidError:
-        await message.answer("⚠️ Senha errada. Mande de novo.", reply_markup=teclado_cancelar_conta)
+        await message.answer("⚠️ Senha errada. Mande de novo.")
         _rearmar_prazo_login(message.chat.id, state)
         return
     except Exception as e:
-        await _encerrar_login_conta()
-        await _voltar_ao_menu_autorais(state)
-        await message.answer(f"❌ Falha no login: {type(e).__name__}: {e}")
+        await _cadastro_encerrado(message, state, f"❌ Falha no login: {type(e).__name__}: {e}")
         return
     await _concluir_nova_conta(message, state, senha)
 
 
 async def _concluir_nova_conta(message, state, senha):
-    """Grava a conta no pool, protege na lista negra e abre a tela dela."""
+    """Grava a conta no pool, protege na lista de bloqueados e pergunta para que ela serve."""
     _parar_prazo_login()
     cliente, telefone = _login_conta.get("cliente"), _login_conta.get("telefone")
     _login_conta.clear()
-    await _voltar_ao_menu_autorais(state)
     aviso = await message.answer("⏳ Gravando a conta e conferindo o grupo de origem...")
     try:
         apelido, status_grupo, _mudancas = await pool_contas.finalizar_cadastro(cliente, telefone, senha)
     except Exception as e:
         await pool_contas.cancelar_login(cliente)
         await aviso.edit_text(f"❌ Login feito, mas não consegui gravar a conta: {type(e).__name__}: {e}")
+        await mostrar_painel_contas(message, state)
         return
-    # Na lista negra já: um vídeo que ela repostar não pode voltar como captura nova.
+    # Na lista de bloqueados já: um vídeo que ela repostar não pode voltar como captura nova.
     try:
         blacklist_captura.sincronizar_contas_do_pool()
     except Exception as e:
         logger.error(f"❌ [Lista Negra] Falha ao proteger a conta nova: {e}")
 
-    if status_grupo == pool_contas.STATUS_NO_GRUPO:
-        situacao = "✅ Já está no grupo de origem."
-    else:
-        situacao = "⚠️ Ainda não está no grupo de origem: depois de escolher, use o link de convite ou adicione a conta pelo app."
     conta = pool_contas.obter_conta(apelido)
-    await aviso.edit_text(
-        f"✅ <b>Conta {apelido} cadastrada.</b>\n{situacao}\n\n"
-        "<b>Para que serve esta conta?</b>\n"
-        "🎯 <b>Captura</b>: pega os vídeos do grupo de origem e publica no seu canal (uma conta só).\n"
+    situacao = ("✅ Já está no grupo de origem." if status_grupo == pool_contas.STATUS_NO_GRUPO
+                else "⚠️ Ainda não está no grupo de origem: depois de escolher, toque em Colocar no Grupo 🚪.")
+    await aviso.edit_text(f"✅ <b>Conta {apelido} cadastrada.</b>\n{situacao}", parse_mode="HTML")
+    await state.set_state(ContasFluxo.aguardando_papel)
+    await state.update_data(conta_id=conta["id"], remover_direto=False)
+    await message.answer(
+        "<b>Para que serve esta conta?</b>\n\n"
+        "🎯 <b>Captura</b>: pega os vídeos do grupo de origem e publica no seu canal (uma conta só; "
+        "precisa ser admin do canal).\n"
         "🔁 <b>Repostagem</b>: devolve os vídeos ao grupo de origem, revezando com as outras "
         "(se uma cair, as outras seguem).\n\n"
         f"📣 Seu canal: {pool_contas.texto_canal(conta)}",
-        parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=_pc_botoes_papel(conta)))
-
-
-@dp.callback_query(F.data.startswith("pc_ent:"), StateFilter("*"))
-async def pool_entrar_grupo(callback: types.CallbackQuery, state: FSMContext):
-    """A conta entra no grupo de origem pelo link de convite guardado."""
-    if callback.from_user.id != ADMIN_ID: return
-    conta = pool_contas.obter_conta(callback.data.split(":")[1])
-    if not conta:
-        await callback.answer("Conta não encontrada.", show_alert=True)
-        return
-    await callback.answer("Entrando no grupo...")
-    _ok, mensagem = await pool_contas.entrar_no_grupo(conta["apelido"])
-    await callback.message.answer(mensagem)
-    texto, teclado = _pc_tela_conta(pool_contas.obter_conta(conta["apelido"]))
-    try:
-        await callback.message.edit_text(texto, parse_mode="HTML", reply_markup=teclado)
-    except Exception:
-        pass
-
-
-@dp.callback_query(F.data.startswith("pc_conv:"), StateFilter("*"))
-async def pool_pedir_convite(callback: types.CallbackQuery, state: FSMContext):
-    """Pede o link de convite do grupo de origem (fica guardado para as próximas contas)."""
-    if callback.from_user.id != ADMIN_ID: return
-    await state.set_state(NovaContaFluxo.aguardando_convite)
-    await state.update_data(conta_convite=callback.data.split(":")[1])
-    await callback.message.answer(
-        "🔗 Mande o <b>link de convite</b> do grupo de origem (ex.: <code>https://t.me/+AbCdEf</code>).\n"
-        "<i>Ele fica guardado para as próximas contas.</i>",
-        parse_mode="HTML", reply_markup=teclado_cancelar_conta
+        parse_mode="HTML", reply_markup=teclado_papel_conta
     )
-    await callback.answer()
-
-
-@dp.message(NovaContaFluxo.aguardando_convite)
-async def pool_salvar_convite(message: types.Message, state: FSMContext):
-    """Guarda o link e já tenta colocar a conta no grupo."""
-    if message.from_user.id != ADMIN_ID: return
-    link = (message.text or "").strip()
-    if "t.me/+" not in link and "joinchat/" not in link:
-        await message.answer("⚠️ Isso não parece um link de convite. Mande algo como "
-                             "<code>https://t.me/+AbCdEf</code>.", parse_mode="HTML",
-                             reply_markup=teclado_cancelar_conta)
-        return
-    dados = await state.get_data()
-    await _voltar_ao_menu_autorais(state)
-    pool_contas.guardar_convite(link)
-    conta = pool_contas.obter_conta(dados.get("conta_convite") or "")
-    if not conta:
-        await message.answer("✅ Link de convite guardado.")
-        return
-    aviso = await message.answer(f"✅ Link guardado. Colocando {conta['apelido']} no grupo...")
-    _ok, mensagem = await pool_contas.entrar_no_grupo(conta["apelido"])
-    await aviso.edit_text(mensagem)
-    texto, teclado = _pc_tela_conta(pool_contas.obter_conta(conta["apelido"]))
-    await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
 
 
 async def verificar_saude_contas():
@@ -5653,70 +5596,38 @@ async def verificar_saude_contas():
 
 
 # ==========================================================================
-# Painel de autores bloqueados (aba do painel de Contas)
+# Pessoas bloqueadas (Contas 👥 → Pessoas Bloqueadas 🚫)
 # --------------------------------------------------------------------------
-# Bloquear e desbloquear autores pelo celular. A regra mora no
-# blacklist_captura.py; aqui é só tela.
+# Quem o robô dos Autorais não copia para o canal (e por isso nunca reposta). A
+# regra mora no blacklist_captura.py; aqui é só tela, no mesmo padrão do painel.
 #
-# Duas categorias, que se comportam diferente:
-#   SUAS CONTAS → entram sozinhas, vindas do pool_contas, com escopo global. Sem
-#                 botão de remover de propósito: tirar uma delas recria o laço de
-#                 recaptura (a conta da repostagem devolve o vídeo e a do espelho
-#                 captura de novo).
-#   MANUAIS     → os @ que você adiciona. Esses têm botão de remover.
-#
-# Callbacks (curtos: o Telegram limita o callback_data a 64 bytes):
-#   bl_painel | bl_add | bl_del:<id> | bl_esc:<id>
+# Duas categorias:
+#   SUAS CONTAS → entram sozinhas, vindas do pool_contas, valendo em todo lugar.
+#                 Não aparecem para desbloquear: tirar uma delas recria o laço de
+#                 recaptura (a conta da repostagem devolve o vídeo e a da captura
+#                 pegaria de novo).
+#   MANUAIS     → quem o Rafael bloqueia. Numeradas, para desbloquear pelo número.
 # ==========================================================================
 
-def _bl_teclado_lista():
-    """Teclado da aba Pessoas bloqueadas: abas + bloquear + uma linha por entrada manual."""
-    linhas = [_abas("negra"),
-              [InlineKeyboardButton(text="➕ Bloquear alguém", callback_data="bl_add")]]
-
-    # Só as manuais ganham botão; as do pool são intocáveis pela tela.
-    manuais = [e for e in blacklist_captura.listar() if e["origem"] != blacklist_captura.ORIGEM_POOL]
-    for entrada in manuais[:20]:
-        alvo = (entrada["nome_exibicao"]
-                or (f"@{entrada['username']}" if entrada["username"] else str(entrada["user_id"])))
-        # O rótulo diz o que o botão FAZ (tocar alterna o alcance), não só o estado.
-        onde = ("🌐 Autorais e parceiros" if entrada["escopo"] == blacklist_captura.ESCOPO_GLOBAL
-                else "🎥 só Autorais")
-        linhas.append([
-            InlineKeyboardButton(text=f"{onde} · {alvo}"[:58], callback_data=f"bl_esc:{entrada['id']}"),
-            InlineKeyboardButton(text="🗑️", callback_data=f"bl_del:{entrada['id']}")
-        ])
-
-    return InlineKeyboardMarkup(inline_keyboard=linhas)
+async def mostrar_bloqueados(message, state):
+    await state.set_state(ContasFluxo.bloqueados)
+    await message.answer(blacklist_captura.montar_relatorio_telegram() + "\n\nEscolha a ação desejada:",
+                         parse_mode="HTML", reply_markup=teclado_bloqueados(bool(blacklist_captura.manuais())))
 
 
-async def _bl_redesenhar(mensagem):
-    """Redesenha a tela. Engole o 'message is not modified' do Telegram."""
-    try:
-        await mensagem.edit_text(
-            blacklist_captura.montar_relatorio_telegram(),
-            parse_mode="HTML",
-            reply_markup=_bl_teclado_lista()
-        )
-    except Exception as e:
-        if "not modified" not in str(e).lower():
-            logger.error(f"❌ [Lista Negra] Falha ao redesenhar: {e}")
+@dp.message(F.text == "Pessoas Bloqueadas 🚫", StateFilter("*"))
+async def bloqueados_painel(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    await mostrar_bloqueados(message, state)
 
 
-@dp.callback_query(F.data == "bl_painel", StateFilter("*"))
-async def bl_voltar_painel(callback: types.CallbackQuery):
-    """Aba Lista Negra. Edita a mesma mensagem, então funciona como aba mesmo."""
-    await callback.answer()
-    await _bl_redesenhar(callback.message)
-
-
-@dp.callback_query(F.data == "bl_add", StateFilter("*"))
-async def bl_pedir_arroba(callback: types.CallbackQuery, state: FSMContext):
-    """Pede quem bloquear (@, ID ou link do perfil). Entra valendo só nos Autorais."""
-    await callback.answer()
-    await state.set_state(AutoraisFluxo.aguardando_bloqueio)
-    await callback.message.answer(
-        "🚫 <b>Bloquear alguém</b>\n"
+@dp.message(F.text == "Bloquear Pessoa ➕", StateFilter("*"))
+async def bloqueados_pedir_pessoa(message: types.Message, state: FSMContext):
+    """Pede quem bloquear (@, ID ou link do perfil)."""
+    if message.from_user.id != ADMIN_ID: return
+    await state.set_state(ContasFluxo.aguardando_bloqueio)
+    await message.answer(
+        "🚫 <b>Bloquear Pessoa</b>\n"
         "Os vídeos que essa pessoa postar no grupo de origem <b>não serão copiados para o "
         "seu canal</b> (e, por isso, nunca serão repostados).\n\n"
         "Envie um destes:\n"
@@ -5725,96 +5636,78 @@ async def bl_pedir_arroba(callback: types.CallbackQuery, state: FSMContext):
         "• <b>link do perfil</b>: abra a conversa com a pessoa no Telegram Web "
         "e cole a barra de endereço inteira\n\n"
         "<i>O link é o mais confiável: ele traz o ID numérico, que a pessoa não "
-        "consegue trocar. O @ ela troca quando quiser.</i>\n\n"
-        "Vale no grupo de origem dos Autorais. Para valer também nos canais dos "
-        "parceiros, toque na pessoa na lista depois (🎥 só Autorais ↔ 🌐 Autorais e parceiros).",
-        parse_mode="HTML",
-        reply_markup=teclado_cancelar
+        "consegue trocar. O @ ela troca quando quiser.</i>",
+        parse_mode="HTML", reply_markup=teclado_cancelar
     )
 
 
-@dp.message(AutoraisFluxo.aguardando_bloqueio)
-async def bl_receber_arroba(message: types.Message, state: FSMContext):
-    """Bloqueia o autor informado ("@fulano global" já entra valendo em todo lugar)."""
-    if message.text == "Cancelar ❌":
-        # Volta para a lista de onde veio (aba do painel de Contas), não ao painel dos Autorais.
-        await state.set_state(AutoraisFluxo.menu_principal)
-        await message.answer("❌ Nada foi bloqueado.", reply_markup=teclado_menu_autorais)
-        await message.answer(blacklist_captura.montar_relatorio_telegram(),
-                             parse_mode="HTML", reply_markup=_bl_teclado_lista())
-        return
-
-    partes = (message.text or "").strip().split()
-    if not partes:
+@dp.message(ContasFluxo.aguardando_bloqueio)
+async def bloqueados_receber_pessoa(message: types.Message, state: FSMContext):
+    """Guarda quem bloquear e pergunta onde o bloqueio vale."""
+    if message.from_user.id != ADMIN_ID: return
+    alvo = (message.text or "").strip().split()
+    if not alvo:
         await message.answer("❌ Não entendi. Envie algo como <code>@usuario</code>.", parse_mode="HTML")
         return
+    await state.update_data(alvo_bloqueio=alvo[0])
+    await state.set_state(ContasFluxo.aguardando_alcance)
+    await message.answer(
+        f"🚫 Onde o bloqueio de <b>{html_escape(alvo[0])}</b> vale?\n\n"
+        "🎥 <b>Só nos Autorais</b>: só no grupo de origem dos Autorais.\n"
+        "🌐 <b>Autorais e Parceiros</b>: também nos canais dos parceiros.",
+        parse_mode="HTML", reply_markup=teclado_alcance_bloqueio
+    )
 
-    alvo = partes[0]
-    escopo = (blacklist_captura.ESCOPO_GLOBAL
-              if len(partes) > 1 and partes[1].lower() == "global"
+
+@dp.message(ContasFluxo.aguardando_alcance)
+async def bloqueados_confirmar_alcance(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if message.text not in (BOTAO_SO_AUTORAIS, BOTAO_AUTORAIS_PARCEIROS):
+        await message.answer("Toque em uma das opções abaixo.")
+        return
+    escopo = (blacklist_captura.ESCOPO_GLOBAL if message.text == BOTAO_AUTORAIS_PARCEIROS
               else blacklist_captura.ESCOPO_AUTORAIS)
-
+    alvo = (await state.get_data()).get("alvo_bloqueio") or ""
     try:
         ok, aviso = await blacklist_captura.adicionar_por_arroba(alvo, escopo=escopo,
                                                                 motivo="adicionado pelo painel")
     except Exception as e:
         ok, aviso = False, f"erro inesperado: {e}"
         logger.error(f"❌ [Lista Negra] Erro ao adicionar {alvo}: {e}")
-
-    await state.set_state(AutoraisFluxo.menu_principal)
-    await message.answer(("✅ " if ok else "❌ ") + aviso, parse_mode="HTML",
-                         reply_markup=teclado_menu_autorais)
-    await message.answer(blacklist_captura.montar_relatorio_telegram(),
-                         parse_mode="HTML", reply_markup=_bl_teclado_lista())
+    await message.answer(("✅ " if ok else "❌ ") + aviso, parse_mode="HTML")
+    await mostrar_bloqueados(message, state)
 
 
-@dp.callback_query(F.data.startswith("bl_del:"), StateFilter("*"))
-async def bl_remover(callback: types.CallbackQuery):
-    """Desbloqueia uma entrada manual."""
-    entrada_id = callback.data.split(":")[1]
-    alvo = None
-    for entrada in blacklist_captura.listar():
-        if str(entrada["id"]) == entrada_id:
-            alvo = entrada["username"] or str(entrada["user_id"])
-            break
-
-    if alvo is None:
-        await callback.answer("Entrada não encontrada.", show_alert=True)
-        await _bl_redesenhar(callback.message)
+@dp.message(F.text == "Desbloquear Pessoa 🗑️", StateFilter("*"))
+async def bloqueados_pedir_numero(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if not blacklist_captura.manuais():
+        await mostrar_bloqueados(message, state)
         return
+    await state.set_state(ContasFluxo.aguardando_desbloqueio)
+    await message.answer(
+        "🗑️ <b>Quem você quer desbloquear?</b>\nDigite o <b>número</b> da lista "
+        "(bloqueadas por você).\n<i>Para vários, separe por vírgula. Ex.: 1, 3</i>",
+        parse_mode="HTML", reply_markup=teclado_cancelar
+    )
 
-    ok, aviso = blacklist_captura.remover(alvo)
-    await callback.answer(("✅ " if ok else "❌ ") + aviso, show_alert=not ok)
-    await _bl_redesenhar(callback.message)
 
-
-@dp.callback_query(F.data.startswith("bl_esc:"), StateFilter("*"))
-async def bl_alternar_escopo(callback: types.CallbackQuery):
-    """Alterna a entrada entre 'só nos Autorais' e 'em todo lugar'."""
-    entrada_id = callback.data.split(":")[1]
-    try:
-        conexao = db.conectar()
-        cursor = conexao.cursor()
-        cursor.execute("SELECT escopo FROM blacklist_captura WHERE id = ?", (entrada_id,))
-        linha = cursor.fetchone()
-        if not linha:
-            conexao.close()
-            await callback.answer("Entrada não encontrada.", show_alert=True)
-            return
-        novo = (blacklist_captura.ESCOPO_AUTORAIS
-                if linha[0] == blacklist_captura.ESCOPO_GLOBAL
-                else blacklist_captura.ESCOPO_GLOBAL)
-        cursor.execute("UPDATE blacklist_captura SET escopo = ? WHERE id = ?", (novo, entrada_id))
-        conexao.commit()
-        conexao.close()
-        blacklist_captura.invalidar_cache()
-        await callback.answer("🌐 Autorais e parceiros" if novo == blacklist_captura.ESCOPO_GLOBAL
-                              else "🎥 só nos Autorais")
-    except Exception as e:
-        logger.error(f"❌ [Lista Negra] Erro ao alternar escopo: {e}")
-        await callback.answer("Erro ao alterar.", show_alert=True)
-    await _bl_redesenhar(callback.message)
-
+@dp.message(ContasFluxo.aguardando_desbloqueio)
+async def bloqueados_desbloquear(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    lista = blacklist_captura.manuais()
+    numeros = [p for p in (message.text or "").replace(" ", "").split(",") if p]
+    if not numeros or not all(p.isdigit() and 1 <= int(p) <= len(lista) for p in numeros):
+        await message.answer(f"⚠️ Envie o número da pessoa (de 1 a {len(lista)}). Ex.: <code>1</code> ou "
+                             "<code>1, 3</code>", parse_mode="HTML")
+        return
+    respostas = []
+    for i in sorted({int(p) for p in numeros}):
+        entrada = lista[i - 1]
+        ok, aviso = blacklist_captura.remover(entrada["username"] or str(entrada["user_id"]))
+        respostas.append(("✅ " if ok else "❌ ") + aviso)
+    await message.answer("\n".join(respostas), parse_mode="HTML")
+    await mostrar_bloqueados(message, state)
 
 
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Regras de Repostagem ♻️")
@@ -9441,10 +9334,7 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 
     # Cadastro de conta: desconecta o login em andamento.
     if estado_atual and estado_atual.startswith("NovaContaFluxo"):
-        texto = await _texto_cancelado(state)
-        await _encerrar_login_conta()
-        await _voltar_ao_menu_autorais(state)
-        await message.answer(texto)
+        await _cadastro_encerrado(message, state, "❌ Cadastro de conta cancelado.")
         return
 
     # Cancelar o recálculo da grade: nada foi alterado.

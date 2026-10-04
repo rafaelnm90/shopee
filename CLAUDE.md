@@ -27,7 +27,7 @@ Módulos de apoio (não são serviços):
   - `espelho` (captura): uma conta só.
   - `repostagem`: rodízio entre todas as aptas, menos a da captura.
   - O ✅/❌ de cada conta sai de `avaliar_saude`.
-  - Login em etapas (`iniciar_login` → `confirmar_codigo` → `confirmar_senha` → `finalizar_cadastro`), usado pelo botão ➕ Nova conta.
+  - Login em etapas (`iniciar_login` → `confirmar_codigo` → `confirmar_senha` → `finalizar_cadastro`), usado pelo botão Cadastrar Conta ➕.
 - `blacklist_captura.py`: autores que o espelhador nunca captura, incluindo as próprias contas do pool, para não haver laço de recaptura.
 - `alvos_sem_acesso.py`: alvos da divulgação a que a conta perdeu o acesso. O `divulgacao_canal` marca e para de enviar; o bot_mestre avisa e reativa.
 - `painel_espelhos.py` e `painel_notas.py`: routers aiogram incluídos no bot_mestre.
