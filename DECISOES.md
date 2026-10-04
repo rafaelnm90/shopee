@@ -67,6 +67,14 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - **Relatório:** ✅/❌ por conta e função no painel "Contas e Postos".
   - **Aviso no privado:** quando uma conta para de funcionar ou outra assume, só quando muda.
 - **03/10/2026:** conta nova do pool é cadastrada pelo próprio bot ("➕ Nova conta"), sem terminal.
+- **04/10/2026:** no fim do "➕ Nova conta", o bot pergunta "Para que serve esta conta?" e já configura tudo com um toque. A tela de cada conta usa os mesmos botões, no lugar de ligar e desligar funções.
+  - 🎯 **Captura e publicação no seu canal:** uma conta só; se já houver outra na captura, ela assume e a outra vai repostar.
+  - 🔁 **Repostagem no grupo de origem:** reveza com as outras e nunca assume a captura.
+  - 🔀 **As duas:** reposta e assume a captura se a da captura cair. É o comportamento que as contas já tinham.
+- **04/10/2026:** o robô confere se a conta da captura consegue publicar no seu canal: admin com "publicar mensagens" (ou dono). Se não consegue, a captura fica ❌ no painel, com aviso no privado, e o cadastro já avisa.
+- **04/10/2026:** o botão "Contas 👥" fica dentro de "Vídeos Autorais 🎥", e não solto em "Outros Canais": as contas e as pessoas bloqueadas só servem a esse robô (captura dos Autorais e dos parceiros). Telas em palavras:
+  - "Pessoas bloqueadas" (era "Autores Bloqueados") explica que bloquear alguém faz o robô não copiar para o seu canal o que essa pessoa posta no grupo de origem, e por isso também não repostar. As suas próprias contas entram ali sozinhas, para o robô não recapturar o que elas repostam.
+  - O "Cancelar" do "Bloquear alguém" volta para a lista de bloqueados.
 - **03/10/2026:** com cota em faixa (ex.: 6–10), o teto de saída do dia é o mesmo número sorteado na captura para aquela data.
 - **03/10/2026:** cada mensagem da origem é processada uma vez só, venha pelo evento ou pela varredura (trava pelo ID, gravada no banco).
 - **03/10/2026:** o log de diagnóstico "🔬 [Evento]", que registrava toda mensagem de todo chat, foi removido.
