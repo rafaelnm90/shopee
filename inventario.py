@@ -10,13 +10,16 @@ filas ou do banco; ids de parceiro também não.
 
 Seções: pastas do projeto, arquivos soltos, banco, erros por origem e tipo, filas
 em arquivo, captura dos parceiros, contas dos Autorais (só estados), journal (com as linhas de log que mais se repetem e de onde vêm no
-código), versões das bibliotecas e fora do projeto.
+código), versões das bibliotecas, fora do projeto e se o servidor aguenta um
+Android virtual (para o robô da Shopee Vídeo).
 """
 import ast
 import glob
 import json
 import os
+import platform
 import re
+import shutil
 import subprocess
 import time
 
@@ -356,11 +359,76 @@ def fora_do_projeto():
         print(f"   {servico:32} {tamanho_legivel(int(valor)) if valor.isdigit() else valor:>9}")
 
 
+def _comando(*partes):
+    """(código de saída, saída) de um comando, ou None se ele não existe na máquina."""
+    try:
+        r = subprocess.run(partes, capture_output=True, text=True, timeout=15)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    return r.returncode, (r.stdout or "").strip()
+
+
+def _sim_nao(valor):
+    return "sim" if valor else "não"
+
+
+def android_virtual():
+    """
+    Se o servidor aguenta um Android virtual (Redroid em Docker), que o robô da
+    Shopee Vídeo usaria para postar pelo app. Só lê: arquitetura, memória, disco,
+    o binder do kernel (sem ele o Android não sobe), Docker e se dá para instalar
+    o que falta sem senha.
+    """
+    secao("Android virtual (Shopee Vídeo): o servidor aguenta?")
+    kernel = platform.release()
+    print(f"arquitetura: {platform.machine()} | kernel: {kernel} | CPUs: {os.cpu_count()}")
+
+    memoria = {}
+    try:
+        with open("/proc/meminfo") as f:
+            for linha in f:
+                nome, valor = linha.split(":", 1)
+                memoria[nome] = int(valor.split()[0]) * 1024
+    except OSError:
+        pass
+    print(f"memória: {tamanho_legivel(memoria.get('MemTotal', 0))} no total, "
+          f"{tamanho_legivel(memoria.get('MemAvailable', 0))} disponível | "
+          f"swap: {tamanho_legivel(memoria.get('SwapTotal', 0))}")
+    disco = shutil.disk_usage(os.path.expanduser("~"))
+    print(f"disco: {tamanho_legivel(disco.free)} livre de {tamanho_legivel(disco.total)}")
+
+    def ler(caminho):
+        try:
+            with open(caminho) as f:
+                return f.read()
+        except OSError:
+            return ""
+
+    config = ler(f"/boot/config-{kernel}")
+    opcoes = {o: (re.search(rf"^{o}=(\w+)", config, re.M) or [None, "ausente"])[1]
+              for o in ("CONFIG_ANDROID_BINDER_IPC", "CONFIG_ANDROID_BINDERFS")}
+    print("binder no kernel: " + ", ".join(f"{o.replace('CONFIG_ANDROID_', '')}={v}" for o, v in opcoes.items())
+          + ("" if config else " (sem o arquivo de configuração do kernel)"))
+    modulo = _comando("modinfo", "-F", "filename", "binder_linux")
+    print(f"módulo binder_linux: disponível {_sim_nao(modulo and modulo[0] == 0)}, "
+          f"carregado {_sim_nao('binder_linux' in ler('/proc/modules'))} | "
+          f"binderfs: {_sim_nao('binder' in ler('/proc/filesystems'))} | "
+          f"/dev/binder: {_sim_nao(os.path.exists('/dev/binder'))}")
+    extra = _comando("dpkg-query", "-W", "-f=${Status}", f"linux-modules-extra-{kernel}")
+    print(f"pacote linux-modules-extra do kernel: "
+          f"{_sim_nao(extra and extra[0] == 0 and 'installed' in extra[1].split())}")
+
+    docker = _comando("docker", "--version")
+    print(f"docker: {docker[1].split(',')[0] if docker and docker[0] == 0 else 'não instalado'}")
+    sudo = _comando("sudo", "-n", "true")
+    print(f"sudo sem senha: {_sim_nao(sudo and sudo[0] == 0)}")
+
+
 if __name__ == "__main__":
     os.chdir(PASTA)
     for parte in (pastas_do_projeto, arquivos_soltos, banco, erros_registrados, filas_em_arquivo,
                   captura_dos_parceiros, contas_dos_autorais, journal,
-                  versoes, fora_do_projeto):
+                  versoes, fora_do_projeto, android_virtual):
         try:
             parte()
         except Exception as e:

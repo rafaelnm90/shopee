@@ -146,6 +146,13 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - Os painéis antigos e as mensagens "fixou uma mensagem" são apagados sozinhos pela conta principal (userbot, no `divulgacao_canal`), a cada 10 min. O Telegram só deixa bot apagar mensagem com menos de 48 h, por isso o bot não dava conta.
   - A faxina de 3 dias do bot, que tentava apagar tudo (inclusive os vídeos) e nunca conseguia, saiu.
 
+## Shopee Vídeo
+
+- **04/10/2026:** robô novo que posta sozinho na Shopee Vídeo pelo app, num Android virtual no servidor. A Shopee não tem forma oficial de postar por programa: a Shopee Vídeo só aceita postagem pelo app. O Rafael escolheu sabendo dos riscos: vai contra os termos da Shopee, ela pode perceber o emulador, e uma atualização do app pode quebrar a automação.
+- **04/10/2026:** posta na conta principal de afiliado do Rafael, ciente de que um bloqueio atinge essa conta.
+- **04/10/2026:** os vídeos vêm dos Autorais (feitos para afiliados repostarem), com o produto vinculado no próprio vídeo: a comissão só conta assim, e link na descrição não vale.
+- **04/10/2026:** 10 vídeos por dia.
+
 ## Monitor, deploy e servidor
 
 - **03/10/2026:** o alerta "Nenhuma publicação hoje" do Espião conta só os clones com horário até hoje.
