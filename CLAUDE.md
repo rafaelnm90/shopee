@@ -166,6 +166,10 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
     - se algo falhar, com o que falhou e o que vou fazer;
     - no fim, com o merge feito e os robôs no ar.
     - No meio, só se ele pedir o status.
+  - Pedido concluído (incluir, editar ou excluir algo nos robôs): no fim da resposta, um bloco "✅ Concluído", mesmo que outras ações ainda estejam em andamento. Ele diz que aquele pedido terminou e traz:
+    - o que foi feito;
+    - o impacto para o Rafael (o que muda no uso dos robôs);
+    - onde achar no bot (caminho do menu, ex.: Outros Canais → Vídeos Autorais 🎥 → Contas 👥).
   - Se o Rafael disser para não fazer o merge, não fazer.
   - Se o Rafael mandar fazer o merge direto, sem esperar o CI, obedecer.
   - Se o Rafael pedir rodadas extras (ex.: "faz 5 rodadas"), repetir o CI quantas vezes ele pedir, com o intervalo que ele disser (padrão: 5 min), avisando posição e horário da próxima.
