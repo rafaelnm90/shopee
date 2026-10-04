@@ -59,7 +59,10 @@ PARAMETROS_BOOT = (
 )
 DISPOSITIVOS_BINDER = "binder,hwbinder,vndbinder"
 
-PASTA_APP = os.path.expanduser("~/android_shopee/app")
+# Arquivos de trabalho das ferramentas, numa pasta do próprio usuário: a pasta dos
+# dados do Android é criada pelo Docker como root, e o usuário não escreve nela.
+PASTA_TRABALHO = os.path.expanduser("~/shopee_video")
+PASTA_APP = os.path.join(PASTA_TRABALHO, "app")
 URLS_APP = (
     f"https://d.apkpure.com/b/XAPK/{PACOTE_SHOPEE}?version=latest",
     f"https://d.apkpure.com/b/APK/{PACOTE_SHOPEE}?version=latest",
@@ -69,8 +72,8 @@ NAVEGADOR = ("Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Ge
 # O servidor é ARM 64: as partes do app para armeabi_v7a, x86 e x86_64 sobram.
 OUTRAS_ARQUITETURAS = ("armeabi", "x86")
 
-ARQUIVO_TELA = os.path.expanduser("~/android_shopee/tela_estado")
-LOG_TELA = os.path.expanduser("~/android_shopee/tela.log")
+ARQUIVO_TELA = os.path.join(PASTA_TRABALHO, "tela_estado")
+LOG_TELA = os.path.join(PASTA_TRABALHO, "tela.log")
 URL_CLOUDFLARED = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-{}.deb"
 SEGUNDOS_PARA_ABRIR_TELA = 120
 
@@ -230,6 +233,7 @@ def abrir_tela():
             return False
         if not _passo("instalar o cloudflared", _rodar("sudo", "-n", "dpkg", "-i", deb, timeout=300)):
             return False
+    os.makedirs(PASTA_TRABALHO, exist_ok=True)
     try:
         os.remove(ARQUIVO_TELA)
     except FileNotFoundError:

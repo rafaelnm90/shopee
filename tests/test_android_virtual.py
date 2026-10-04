@@ -97,6 +97,14 @@ def test_estado_com_android_ligado(monkeypatch, capsys):
     assert "android: ligado, versão 13" in saida and "app da Shopee: não instalado" in saida
 
 
+def test_arquivos_de_trabalho_fora_da_pasta_que_o_docker_cria():
+    # O Docker cria a pasta dos dados do Android (e a de cima) como root: o usuário
+    # dos robôs não escreve ali, e o instalar-shopee caía com PermissionError.
+    pasta_do_docker = av.os.path.dirname(av.PASTA_DADOS)
+    for caminho in (av.PASTA_APP, av.ARQUIVO_TELA, av.LOG_TELA):
+        assert not caminho.startswith(pasta_do_docker + av.os.sep)
+
+
 def _zip(caminho, nomes):
     import zipfile
     with zipfile.ZipFile(caminho, "w") as z:
