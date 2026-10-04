@@ -95,3 +95,76 @@ def test_estado_com_android_ligado(monkeypatch, capsys):
     av.mostrar_estado()
     saida = capsys.readouterr().out
     assert "android: ligado, versão 13" in saida and "app da Shopee: não instalado" in saida
+
+
+def _zip(caminho, nomes):
+    import zipfile
+    with zipfile.ZipFile(caminho, "w") as z:
+        for nome in nomes:
+            z.writestr(nome, "x")
+    return str(caminho)
+
+
+def test_xapk_sobe_so_as_partes_do_arm64(tmp_path):
+    arquivo = _zip(tmp_path / "s.zip", ["manifest.json", "icon.png", "com.shopee.br.apk",
+                                        "config.arm64_v8a.apk", "config.armeabi_v7a.apk",
+                                        "config.x86.apk", "config.x86_64.apk", "config.xhdpi.apk"])
+    partes = av.partes_do_app(arquivo, str(tmp_path / "x"))
+    assert [p.rsplit("/", 1)[1] for p in partes] == ["com.shopee.br.apk", "config.arm64_v8a.apk",
+                                                    "config.xhdpi.apk"]
+
+
+def test_apk_comum_vai_inteiro(tmp_path):
+    arquivo = _zip(tmp_path / "s.zip", ["AndroidManifest.xml", "classes.dex"])
+    assert av.partes_do_app(arquivo, str(tmp_path)) == [arquivo]
+
+
+def test_instalar_shopee_baixa_instala_e_limpa(monkeypatch, tmp_path, capsys):
+    m = Maquina()
+    _instalar(monkeypatch, m)
+    monkeypatch.setattr(av, "PASTA_APP", str(tmp_path / "app"))
+
+    def rodar(*partes, timeout=120):
+        if partes[0] == "curl":
+            _zip(partes[partes.index("-o") + 1], ["base.apk", "config.arm64_v8a.apk"])
+            return (0, "")
+        if "dumpsys" in partes:
+            return (0, "    versionName=3.40.21\n")
+        return Maquina.rodar(m, *partes, timeout=timeout)
+
+    monkeypatch.setattr(av, "_rodar", rodar)
+    m.rodar = rodar
+    assert av.instalar_shopee() is True
+    saida = capsys.readouterr().out
+    assert "instalar no Android: ok" in saida and "versão 3.40.21" in saida
+    assert not (tmp_path / "app").exists()                     # o arquivo baixado não fica no servidor
+
+
+def test_tela_abre_e_nao_mostra_o_link(monkeypatch, tmp_path, capsys):
+    m = Maquina()
+    _instalar(monkeypatch, m)
+    monkeypatch.setattr(av, "ARQUIVO_TELA", str(tmp_path / "tela_estado"))
+    monkeypatch.setattr(av, "LOG_TELA", str(tmp_path / "tela.log"))
+    abertos = []
+
+    def popen(comando, **kw):
+        abertos.append((comando, kw))
+        (tmp_path / "tela_estado").write_text("enviado")
+
+    monkeypatch.setattr(av.subprocess, "Popen", popen)
+    assert av.abrir_tela() is True
+    comando, kw = abertos[0]
+    assert comando[-1].endswith("tela_android.py") and kw["start_new_session"] is True
+    saida = capsys.readouterr().out
+    assert "o link foi no privado" in saida and "https://" not in saida
+
+
+def test_tela_com_erro_conta_o_motivo(monkeypatch, tmp_path, capsys):
+    m = Maquina()
+    _instalar(monkeypatch, m)
+    monkeypatch.setattr(av, "ARQUIVO_TELA", str(tmp_path / "tela_estado"))
+    monkeypatch.setattr(av, "LOG_TELA", str(tmp_path / "tela.log"))
+    monkeypatch.setattr(av.subprocess, "Popen",
+                        lambda c, **k: (tmp_path / "tela_estado").write_text("erro: já existe uma tela aberta"))
+    assert av.abrir_tela() is False
+    assert "tela: erro: já existe uma tela aberta" in capsys.readouterr().out
