@@ -46,3 +46,24 @@ def test_captura_dos_parceiros_so_numeros_e_motivos(bm, capsys):
     saida = capsys.readouterr().out
     assert "parceiro #1 em 2026-10-04: 12 mensagem(ns), 5 vídeo(s), 0 com link" in saida
     assert "recusado: vídeo sem link da Shopee (5)" in saida
+
+
+def test_contas_dos_autorais_so_estados_sem_nome_nem_telefone(bm, pc, capsys):
+    pc.salvar_conta("joana", telefone="+5511999990000", user_id=777, username="joaninha",
+                    nome_exibicao="Joana Silva")
+    pc.atualizar_status("joana", status_grupo=pc.STATUS_NUNCA_ENTROU,
+                        erro="grupo não encontrado nem depois de carregar as conversas")
+    pc.salvar_conta("outra")
+    pc.atualizar_status("outra", erro="ValueError: Could not find the input entity for PeerChannel(1234)")
+    bm.db.salvar_config("autorais_config", {"origem": "-1001234:5"})
+
+    inventario.contas_dos_autorais()
+    saida = capsys.readouterr().out
+
+    assert "conta #1: grupo NUNCA_ENTROU, sessão OK" in saida
+    assert "erro: grupo não encontrado nem depois de carregar as conversas" in saida
+    assert "erro: ValueError" in saida and "1234" not in saida.split("origem")[0]
+    assert "STATUS_GRUPO (DESCONHECIDO → NUNCA_ENTROU)" in saida
+    assert "origem dos Autorais gravada como str com tópico" in saida
+    for privado in ("joana", "joaninha", "Joana", "99999", "777"):
+        assert privado not in saida

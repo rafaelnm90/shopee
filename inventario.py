@@ -9,7 +9,7 @@ do projeto, trechos fixos das mensagens de log). Nunca o conteúdo dos logs, das
 filas ou do banco; ids de parceiro também não.
 
 Seções: pastas do projeto, arquivos soltos, banco, erros por origem e tipo, filas
-em arquivo, journal (com as linhas de log que mais se repetem e de onde vêm no
+em arquivo, captura dos parceiros, contas dos Autorais (só estados), journal (com as linhas de log que mais se repetem e de onde vêm no
 código), versões das bibliotecas e fora do projeto.
 """
 import ast
@@ -199,6 +199,56 @@ def captura_dos_parceiros():
             print(f"   recusado: {motivo} ({qtd})")
 
 
+# Erros que o pool_contas grava com texto fixo; qualquer outro sai só com o tipo.
+ERROS_FIXOS_DO_POOL = (
+    "grupo dos Autorais não configurado", "restrita no grupo", "grupo inacessível para esta conta",
+    "grupo não encontrado nem depois de carregar as conversas", "conta banida/desativada pelo Telegram",
+    "sessão revogada/expirada",
+)
+
+
+def contas_dos_autorais():
+    """
+    Estado de cada conta do pool (contas_telegram) e os últimos eventos
+    (historico_contas). A conta aparece pelo número interno, nunca pelo apelido,
+    telefone ou @; dos eventos, só o tipo, e a troca de estado quando é de grupo
+    ou de sessão.
+    """
+    secao("Contas dos Autorais (pool)")
+    with db.conexao(linhas_por_nome=True) as con:
+        tabelas = {t[0] for t in con.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        if "contas_telegram" not in tabelas:
+            print("   sem a tabela de contas")
+            return
+        contas = [dict(c) for c in con.execute("SELECT * FROM contas_telegram ORDER BY id")]
+        numero = {c["apelido"]: c["id"] for c in contas}
+        for c in contas:
+            erro = (c.get("ultimo_erro") or "").strip()
+            if erro and erro not in ERROS_FIXOS_DO_POOL:
+                erro = erro.split(":")[0].split(" ")[0][:40]   # só o tipo (FloodWait, ValueError...)
+            print(f"conta #{c['id']}: grupo {c.get('status_grupo')}, sessão {c.get('status_sessao')}, "
+                  f"pode {c.get('funcoes_permitidas') or '-'}, habilitada {c.get('habilitada')}, "
+                  f"já esteve no grupo {c.get('ja_esteve_no_grupo')}, cadastrada {c.get('criada_em')}, "
+                  f"checada {c.get('ultima_checagem') or 'nunca'}" + (f", erro: {erro}" if erro else ""))
+        if "funcoes_contas" in tabelas:
+            for f in con.execute("SELECT * FROM funcoes_contas"):
+                f = dict(f)
+                print(f"posto {f.get('funcao')}: conta #{f.get('conta_id') or '-'}"
+                      + (f" (rodízio {f.get('contas_ids')})" if f.get("contas_ids") else ""))
+        if "historico_contas" in tabelas:
+            print("Últimos eventos:")
+            for ev in con.execute("SELECT * FROM historico_contas ORDER BY id DESC LIMIT 25"):
+                ev = dict(ev)
+                detalhe = f" ({ev['detalhe']})" if ev["evento"] in ("STATUS_GRUPO", "STATUS_SESSAO") else ""
+                print(f"   {ev['data']}  conta #{numero.get(ev['apelido'], '?')}  {ev['evento']}{detalhe}")
+    try:
+        origem = db.ler_config("autorais_config", {}).get("origem")
+        print(f"origem dos Autorais gravada como {type(origem).__name__}"
+              + (" com tópico" if isinstance(origem, str) and ":" in origem else ""))
+    except Exception as e:
+        print(f"   (não deu para ler a origem: {type(e).__name__})")
+
+
 def modelos_de_log():
     """
     Trechos fixos de cada logger.info/warning/error do código, com arquivo e linha.
@@ -309,7 +359,7 @@ def fora_do_projeto():
 if __name__ == "__main__":
     os.chdir(PASTA)
     for parte in (pastas_do_projeto, arquivos_soltos, banco, erros_registrados, filas_em_arquivo,
-                  captura_dos_parceiros, journal,
+                  captura_dos_parceiros, contas_dos_autorais, journal,
                   versoes, fora_do_projeto):
         try:
             parte()
