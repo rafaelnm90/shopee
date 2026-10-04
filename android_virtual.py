@@ -93,12 +93,18 @@ SEGUNDOS_PARA_ABRIR_TELA = 120
 
 
 def _rodar(*partes, timeout=120):
-    """(código de saída, saída) de um comando; None se ele não existe ou travou."""
+    """
+    (código de saída, saída) de um comando; None se ele não existe ou travou. Na
+    falha, a saída leva também o stderr, onde o adb diz o motivo (INSTALL_FAILED_...).
+    """
     try:
         r = subprocess.run(partes, capture_output=True, text=True, timeout=timeout)
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
-    return r.returncode, (r.stdout or "").strip()
+    saida = (r.stdout or "").strip()
+    if r.returncode != 0:
+        saida = (saida + "\n" + (r.stderr or "")).strip()
+    return r.returncode, saida
 
 
 def _ok(resultado):

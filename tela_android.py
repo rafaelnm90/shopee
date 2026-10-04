@@ -141,9 +141,34 @@ def instalar_arquivo(arquivo):
     if not partes:
         return False, "não achei o app dentro do arquivo"
     comando = "install" if len(partes) == 1 else "install-multiple"
-    if not av._ok(av._adb(comando, "-r", "-g", *partes, timeout=900)):
-        return False, "o Android recusou o app"
+    r = av._adb(comando, "-r", "-g", *partes, timeout=900)
+    if not av._ok(r):
+        return False, motivo_da_recusa(r[1] if r else "")
     return True, f"app da Shopee: {av.versao_shopee()}"
+
+
+# O que os códigos mais comuns de recusa do Android querem dizer, para o Rafael.
+RECUSAS = {
+    "INSTALL_FAILED_NO_MATCHING_ABIS": "esse arquivo não é para o processador do servidor (ARM 64 bits): baixe a "
+                                       "versão mais nova da Shopee Brasil",
+    "INSTALL_FAILED_OLDER_SDK": "esse app pede um Android mais novo que o 13",
+    "INSTALL_FAILED_DEPRECATED_SDK_VERSION": "esse app é antigo demais para o Android 13: baixe a versão mais nova",
+    "INSTALL_FAILED_UPDATE_INCOMPATIBLE": "já existe outra Shopee instalada com assinatura diferente",
+    "INSTALL_FAILED_VERSION_DOWNGRADE": "já existe uma versão mais nova instalada",
+    "INSTALL_PARSE_FAILED_NOT_APK": "o arquivo está corrompido ou incompleto",
+    "INSTALL_FAILED_INVALID_APK": "o arquivo está corrompido ou faltam partes do app",
+    "INSTALL_FAILED_MISSING_SPLIT": "faltam partes do app: baixe o XAPK completo",
+    "INSTALL_FAILED_INSUFFICIENT_STORAGE": "falta espaço no Android",
+}
+
+
+def motivo_da_recusa(saida_adb):
+    """O código que o adb devolve (INSTALL_FAILED_...) traduzido, ou só o código."""
+    achado = re.search(r"INSTALL_[A-Z_]+", saida_adb or "")
+    if not achado:
+        return "o Android recusou o app (sem motivo informado)"
+    codigo = achado.group(0)
+    return f"o Android recusou o app: {RECUSAS.get(codigo, codigo)}"
 
 
 # O app enviado chega em pedaços (o túnel recusa pedido acima de uns 100 MB, e o

@@ -188,3 +188,21 @@ def test_endereco_do_tunel_na_saida_do_cloudflared():
     assert rodar(tela.achar_url(processo, 5)) == "https://palavras-soltas-aqui.trycloudflare.com"
     processo.stdout = Saida(["INF erro qualquer"])
     assert rodar(tela.achar_url(processo, 5)) is None
+
+
+def test_recusa_do_android_mostra_o_motivo(monkeypatch, tmp_path):
+    monkeypatch.setattr(tela.av, "PASTA_APP", str(tmp_path / "app"))
+    saida = ("Performing Streamed Install\nadb: failed to install /x/shopee.apk: Failure "
+             "[INSTALL_FAILED_NO_MATCHING_ABIS: Failed to extract native libraries, res=-113]")
+    monkeypatch.setattr(tela.av, "_adb", lambda *p, timeout=30: (1, saida))
+    (tmp_path / "app").mkdir()
+    arquivo = tmp_path / "app" / "enviado.zip"
+    _zip(arquivo, ["AndroidManifest.xml"])
+    ok, mensagem = tela.instalar_arquivo(str(arquivo))
+    assert ok is False and "processador do servidor" in mensagem
+
+
+def test_codigo_de_recusa_desconhecido_aparece_como_veio():
+    assert tela.motivo_da_recusa("Failure [INSTALL_FAILED_ALGO_NOVO]") == \
+        "o Android recusou o app: INSTALL_FAILED_ALGO_NOVO"
+    assert "sem motivo" in tela.motivo_da_recusa("")
