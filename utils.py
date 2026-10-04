@@ -186,13 +186,16 @@ def ler_cache_nomes_grupos():
         return {}
 
 def salvar_nome_grupo(chat_id, nome):
-    """Guarda o nome no cache; ignora nome vazio ou igual ao próprio ID."""
+    """
+    Guarda o nome no cache; ignora nome vazio ou igual ao próprio ID. Devolve
+    True só quando gravou um nome novo ou diferente do que estava.
+    """
     if not chat_id or not nome:
-        return
+        return False
     chave = str(chat_id).strip()
     nome_str = str(nome).strip()
     if not chave or not nome_str or nome_str == chave:
-        return
+        return False
         
     try:
         conexao = db.conectar()
@@ -204,15 +207,17 @@ def salvar_nome_grupo(chat_id, nome):
         
         if resultado and resultado[0] == nome_str:
             conexao.close()
-            return
+            return False
             
         cursor.execute("INSERT OR REPLACE INTO cache_nomes (chat_id, nome) VALUES (?, ?)", (chave, nome_str))
         conexao.commit()
         conexao.close()
         
         logger.info(f"✅ Nome do grupo {chave} salvo no cache do SQLite: {nome_str}")
+        return True
     except Exception as e:
         logger.error(f"❌ Falha ao salvar nome do grupo {chave} no cache SQLite: {e}")
+        return False
 
 async def validar_e_formatar_alvo(bot_instance, entrada):
     """

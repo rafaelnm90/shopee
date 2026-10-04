@@ -63,6 +63,13 @@ def fuso_do_servidor():
 # NIVEL_LOG=WARNING deixa no journal só avisos e erros; DEBUG mostra até os detalhes.
 NIVEIS_LOG = {"DEBUG": logging.DEBUG, "INFO": logging.INFO, "WARNING": logging.WARNING, "ERROR": logging.ERROR}
 
+# Bibliotecas que em INFO escrevem uma linha a cada job do agendador ("Running
+# job", "executed successfully"), cada update do Telegram, cada conexão do
+# Telethon e cada chamada HTTP da IA: eram mais de 80% do log do bot_mestre.
+# Ficam em WARNING, então os avisos e erros delas continuam aparecendo. Com
+# NIVEL_LOG=DEBUG voltam a mostrar tudo.
+BIBLIOTECAS_SO_AVISOS = ("apscheduler", "aiogram.event", "telethon", "httpx", "httpcore")
+
 
 def configurar_logs(nome=None, nivel=None):
     """
@@ -88,6 +95,8 @@ def configurar_logs(nome=None, nivel=None):
         datefmt=FORMATO_DATA,
         force=True,
     )
+    for biblioteca in BIBLIOTECAS_SO_AVISOS:
+        logging.getLogger(biblioteca).setLevel(logging.NOTSET if nivel <= logging.DEBUG else max(nivel, logging.WARNING))
 
     servidor = fuso_do_servidor()
     logger.info(
