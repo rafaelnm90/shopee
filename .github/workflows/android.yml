@@ -1,18 +1,24 @@
 name: Android virtual (Shopee Vídeo)
 
 # O Android virtual onde o robô da Shopee Vídeo opera o app (android_virtual.py).
-# Só roda à mão. Sem marcar "preparar", só mostra o estado; marcado, instala o
-# Docker e o adb, carrega o binder do kernel e liga o Android (só o que falta).
+# Só roda à mão. Ações:
+#   estado          só mostra como está;
+#   preparar        instala o Docker e o adb, carrega o binder e liga o Android
+#                   (só o que falta);
+#   instalar-shopee baixa e instala (ou atualiza) o app da Shopee;
+#   tela            abre a tela do Android no navegador por 30 min; o link vai
+#                   só no privado do Rafael, pelo bot.
 #
 # O repositório é público, e os logs do Actions também: o android_virtual.py
-# imprime só estados e números.
+# imprime só estados e números, nunca o link da tela.
 on:
   workflow_dispatch:
     inputs:
-      preparar:
-        description: "Instalar o que falta e ligar o Android (desmarcado: só mostra o estado)"
-        type: boolean
-        default: false
+      acao:
+        description: "O que fazer"
+        type: choice
+        options: [estado, preparar, instalar-shopee, tela]
+        default: estado
 
 permissions:
   contents: read
@@ -31,4 +37,4 @@ jobs:
           command_timeout: 25m
           script: |
             cd ~/shopee
-            venv/bin/python3 android_virtual.py ${{ inputs.preparar && '--preparar' || '' }}
+            venv/bin/python3 android_virtual.py ${{ inputs.acao != 'estado' && format('--{0}', inputs.acao) || '' }}

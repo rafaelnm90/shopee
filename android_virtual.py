@@ -6,8 +6,10 @@ aceita postagem pelo app, por isso o Android.
 
 Roda à mão pelo workflow android.yml ou no servidor:
 
-    python3 android_virtual.py              # só mostra o estado
-    python3 android_virtual.py --preparar   # instala o que falta e liga o Android
+    python3 android_virtual.py                    # só mostra o estado
+    python3 android_virtual.py --preparar         # instala o que falta e liga o Android
+    python3 android_virtual.py --instalar-shopee  # baixa e instala (ou atualiza) o app da Shopee
+    python3 android_virtual.py --tela             # abre a tela no navegador (tela_android.py)
 
 O --preparar faz só o que falta, e pode rodar de novo sem estragar nada:
 1. instala o Docker e o adb do Ubuntu;
@@ -19,15 +21,26 @@ O --preparar faz só o que falta, e pode rodar de novo sem estragar nada:
    contêiner e sobrevivem a ele ser recriado;
 4. espera o Android terminar de ligar.
 
+O --instalar-shopee baixa o app do APKPure (o Android virtual não tem a Play
+Store) e instala. Quando o app vem em partes (XAPK), sobem só as que servem
+para o processador ARM 64 do servidor.
+
+O --tela deixa o tela_android.py rodando sozinho por 30 min e sai: o link vai
+no privado do Rafael, nunca no log.
+
 Imprime só estados e números, porque o log do Actions é público.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
 import os
+import platform
+import re
 import shutil
 import subprocess
 import sys
 import time
+import zipfile
 
+PASTA = os.path.dirname(os.path.abspath(__file__))
 CONTEINER = "android_shopee"
 IMAGEM = "redroid/redroid:13.0.0_64only-latest"
 PASTA_DADOS = os.path.expanduser("~/android_shopee/data")
@@ -45,6 +58,21 @@ PARAMETROS_BOOT = (
     "androidboot.use_memfd=true",
 )
 DISPOSITIVOS_BINDER = "binder,hwbinder,vndbinder"
+
+PASTA_APP = os.path.expanduser("~/android_shopee/app")
+URLS_APP = (
+    f"https://d.apkpure.com/b/XAPK/{PACOTE_SHOPEE}?version=latest",
+    f"https://d.apkpure.com/b/APK/{PACOTE_SHOPEE}?version=latest",
+)
+NAVEGADOR = ("Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) "
+             "Chrome/124.0 Mobile Safari/537.36")
+# O servidor é ARM 64: as partes do app para armeabi_v7a, x86 e x86_64 sobram.
+OUTRAS_ARQUITETURAS = ("armeabi", "x86")
+
+ARQUIVO_TELA = os.path.expanduser("~/android_shopee/tela_estado")
+LOG_TELA = os.path.expanduser("~/android_shopee/tela.log")
+URL_CLOUDFLARED = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-{}.deb"
+SEGUNDOS_PARA_ABRIR_TELA = 120
 
 
 def _rodar(*partes, timeout=120):
@@ -114,9 +142,114 @@ def mostrar_estado():
         print("android: ainda ligando (ou o adb não conecta)")
         return
     versao = _adb("shell", "getprop", "ro.build.version.release")
-    shopee = _adb("shell", "pm", "list", "packages", PACOTE_SHOPEE)
-    print(f"android: ligado, versão {versao[1] if _ok(versao) else '?'} | "
-          f"app da Shopee: {'instalado' if _ok(shopee) and PACOTE_SHOPEE in shopee[1] else 'não instalado'}")
+    print(f"android: ligado, versão {versao[1] if _ok(versao) else '?'} | app da Shopee: {versao_shopee()}")
+    try:
+        with open(ARQUIVO_TELA) as f:
+            print(f"tela no navegador: {f.read().strip()}")
+    except OSError:
+        pass
+
+
+def versao_shopee():
+    """'versão X' se o app da Shopee está instalado, ou 'não instalado'."""
+    r = _adb("shell", "dumpsys", "package", PACOTE_SHOPEE)
+    achado = re.search(r"versionName=(\S+)", r[1]) if _ok(r) else None
+    return f"instalado, versão {achado.group(1)}" if achado else "não instalado"
+
+
+def partes_do_app(arquivo, pasta):
+    """
+    Os .apk a instalar. Um APK comum vai inteiro; um XAPK (zip com o app em
+    partes) é aberto, e só fica de fora a parte de outra arquitetura de processador.
+    """
+    with zipfile.ZipFile(arquivo) as z:
+        nomes = z.namelist()
+        if "AndroidManifest.xml" in nomes:
+            return [arquivo]
+        apks = sorted(n for n in nomes if n.endswith(".apk") and "/" not in n
+                      and not any(a in n.lower() for a in OUTRAS_ARQUITETURAS))
+        for nome in apks:
+            z.extract(nome, pasta)
+    return [os.path.join(pasta, nome) for nome in apks]
+
+
+def instalar_shopee():
+    """Baixa o app da Shopee e instala (ou atualiza, mantendo o login)."""
+    print("== App da Shopee")
+    if not android_ligado():
+        print("android: desligado; rode o preparar antes")
+        return False
+    shutil.rmtree(PASTA_APP, ignore_errors=True)
+    os.makedirs(PASTA_APP)
+    arquivo = os.path.join(PASTA_APP, "shopee.zip")
+    try:
+        for url in URLS_APP:
+            r = _rodar("curl", "-fsSL", "--retry", "2", "-A", NAVEGADOR, "-o", arquivo, url, timeout=900)
+            if _ok(r) and zipfile.is_zipfile(arquivo):
+                break
+        else:
+            print("baixar o app: falhou")
+            return False
+        partes = partes_do_app(arquivo, PASTA_APP)
+        if not partes:
+            print("baixar o app: o arquivo veio sem app dentro")
+            return False
+        print(f"baixado: {os.path.getsize(arquivo) / 1024 / 1024:.0f} MB, {len(partes)} parte(s)")
+        comando = "install" if len(partes) == 1 else "install-multiple"
+        if not _passo("instalar no Android", _adb(comando, "-r", "-g", *partes, timeout=900)):
+            return False
+        print(f"app da Shopee: {versao_shopee()}")
+        return True
+    finally:
+        shutil.rmtree(PASTA_APP, ignore_errors=True)
+
+
+def _ler_estado_tela():
+    try:
+        with open(ARQUIVO_TELA) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def abrir_tela():
+    """
+    Deixa o tela_android.py rodando sozinho (sobrevive ao fim desta conexão) e
+    espera ele contar que mandou o link no privado do Rafael.
+    """
+    print("== Tela no navegador")
+    if not android_ligado():
+        print("android: desligado; rode o preparar antes")
+        return False
+    if shutil.which("cloudflared") is None:
+        arquitetura = {"aarch64": "arm64", "x86_64": "amd64"}.get(platform.machine(), "arm64")
+        deb = os.path.join(os.path.dirname(ARQUIVO_TELA), "cloudflared.deb")
+        os.makedirs(os.path.dirname(deb), exist_ok=True)
+        if not _passo("baixar o cloudflared", _rodar("curl", "-fsSL", "-o", deb,
+                                                     URL_CLOUDFLARED.format(arquitetura), timeout=300)):
+            return False
+        if not _passo("instalar o cloudflared", _rodar("sudo", "-n", "dpkg", "-i", deb, timeout=300)):
+            return False
+    try:
+        os.remove(ARQUIVO_TELA)
+    except FileNotFoundError:
+        pass
+    with open(LOG_TELA, "w") as log:
+        subprocess.Popen([sys.executable, os.path.join(PASTA, "tela_android.py")], cwd=PASTA,
+                         stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                         start_new_session=True)
+    prazo = time.monotonic() + SEGUNDOS_PARA_ABRIR_TELA
+    while time.monotonic() < prazo:
+        estado = _ler_estado_tela()
+        if estado == "enviado":
+            print("tela: aberta; o link foi no privado do Rafael")
+            return True
+        if estado.startswith("erro"):
+            print(f"tela: {estado}")
+            return False
+        time.sleep(3)
+    print(f"tela: não abriu em {SEGUNDOS_PARA_ABRIR_TELA} s")
+    return False
 
 
 def _passo(nome, resultado):
@@ -170,8 +303,13 @@ def preparar():
 
 
 if __name__ == "__main__":
+    pedidos = sys.argv[1:]
     ok = True
-    if "--preparar" in sys.argv[1:]:
+    if "--preparar" in pedidos:
         ok = preparar()
+    if ok and "--instalar-shopee" in pedidos:
+        ok = instalar_shopee()
+    if ok and "--tela" in pedidos:
+        ok = abrir_tela()
     mostrar_estado()
     sys.exit(0 if ok else 1)

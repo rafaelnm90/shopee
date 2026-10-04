@@ -154,6 +154,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **04/10/2026:** os vídeos vêm dos Autorais (feitos para afiliados repostarem), com o produto vinculado no próprio vídeo: a comissão só conta assim, e link na descrição não vale.
 - **04/10/2026:** 10 vídeos por dia.
 - **04/10/2026:** o Android virtual é um Redroid (Android 13, 64 bits) em Docker no próprio servidor, limitado a 4 GB de memória e 2 CPUs para não atrapalhar os robôs. O adb fica aberto só para a própria máquina, nunca para a internet. Os dados do Android (app e login) ficam fora do contêiner, em `~/android_shopee`.
+- **04/10/2026:** o login da Shopee (e o que mais precisar de mão humana, como código ou quebra-cabeça de segurança) é feito pelo Rafael na tela do Android aberta no navegador do celular. O link leva uma chave aleatória e vai só no privado dele, por um túnel temporário do Cloudflare (sem abrir porta no servidor), e fecha em 30 min ou no botão Terminei.
 
 ## Monitor, deploy e servidor
 
