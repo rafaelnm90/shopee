@@ -5281,6 +5281,13 @@ class NovaContaFluxo(StatesGroup):
 MINUTOS_LOGIN_CONTA = 5
 
 
+async def _texto_cancelado(state):
+    """O que foi cancelado: o link de convite usa o mesmo fluxo do cadastro."""
+    if await state.get_state() == NovaContaFluxo.aguardando_convite.state:
+        return "❌ Cancelado: nenhum link de convite guardado."
+    return "❌ Cadastro de conta cancelado."
+
+
 async def _voltar_ao_menu_autorais(state):
     """
     Fim (ou cancelamento) de um fluxo do painel de Contas: o teclado na tela é o do
@@ -5349,11 +5356,12 @@ async def pool_nova_conta(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "pc_nova_x", StateFilter("*"))
 async def pool_nova_conta_cancelar(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID: return
+    texto = await _texto_cancelado(state)
     await _encerrar_login_conta()
     await _voltar_ao_menu_autorais(state)
-    await callback.answer("Cadastro cancelado.")
+    await callback.answer("Cancelado.")
     try:
-        await callback.message.edit_text("❌ Cadastro de conta cancelado.")
+        await callback.message.edit_text(texto)
     except Exception:
         pass
 
@@ -5362,9 +5370,10 @@ async def pool_nova_conta_cancelar(callback: types.CallbackQuery, state: FSMCont
 async def pool_nova_conta_cancelar_texto(message: types.Message, state: FSMContext):
     """Cancelar ❌ do teclado no meio do cadastro (os handlers abaixo o leriam como resposta)."""
     if message.from_user.id != ADMIN_ID: return
+    texto = await _texto_cancelado(state)
     await _encerrar_login_conta()
     await _voltar_ao_menu_autorais(state)
-    await message.answer("❌ Cadastro de conta cancelado.")
+    await message.answer(texto)
 
 
 @dp.message(NovaContaFluxo.aguardando_telefone)
@@ -9432,9 +9441,10 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 
     # Cadastro de conta: desconecta o login em andamento.
     if estado_atual and estado_atual.startswith("NovaContaFluxo"):
+        texto = await _texto_cancelado(state)
         await _encerrar_login_conta()
         await _voltar_ao_menu_autorais(state)
-        await message.answer("❌ Cadastro de conta cancelado.")
+        await message.answer(texto)
         return
 
     # Cancelar o recálculo da grade: nada foi alterado.

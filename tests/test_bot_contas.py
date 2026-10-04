@@ -268,3 +268,12 @@ def test_so_dois_botoes_de_papel_e_opcao_antiga_nao_muda_nada(bm, pc, telegram, 
     rodar(bm.pool_definir_papel(callback(bm, Msg, f"pc_papel:{conta_a['id']}:a"), Est()))
     assert pc.obter_conta("A")["funcoes_permitidas"] == "espelho,repostagem"
 
+
+def test_cancelar_link_de_convite_nao_fala_em_cadastro(bm, pc, telegram, Msg, Est):
+    pc.salvar_conta("A", sessao="x")
+    st = Est()
+    rodar(bm.pool_pedir_convite(callback(bm, Msg, f"pc_conv:{pc.obter_conta('A')['id']}"), st))
+    cancelar = Msg("Cancelar ❌")
+    rodar(bm.pool_nova_conta_cancelar_texto(cancelar, st))
+    assert cancelar.saidas[-1] == "❌ Cancelado: nenhum link de convite guardado."
+    assert st.estado == bm.AutoraisFluxo.menu_principal
