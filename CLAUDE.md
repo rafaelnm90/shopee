@@ -55,7 +55,7 @@ arquivo cresce: `grep -n "^# --- " bot_mestre.py`. Os blocos grandes usam
   - Painel do Grupo Público: bloco `===`.
   - `--- Submissão pública ---` e `--- Buscador de produtos ---`.
   - Parceiros: blocos `===` e `--- Cadastro de parceiro ---`.
-- Contas: bloco `=== Painel de Contas e Postos`, `--- Nova conta pelo bot ---` e o painel de autores bloqueados.
+- Contas (dentro do menu Vídeos Autorais): bloco `=== Painel de Contas`, `--- Nova conta pelo bot ---` e o painel de pessoas bloqueadas.
 - Fim do arquivo:
   - `--- Monitor de saúde ---`;
   - `--- /status ---`;

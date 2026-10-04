@@ -522,7 +522,7 @@ def remover(alvo):
         return (False, "não encontrado na lista")
     if linha["origem"] == ORIGEM_POOL:
         conexao.close()
-        return (False, "é uma conta sua do pool — remova pelo painel de Contas e Postos")
+        return (False, "é uma conta sua do pool — remova pelo painel de Contas")
 
     cursor.execute("DELETE FROM blacklist_captura WHERE id = ?", (linha["id"],))
     conexao.commit()
