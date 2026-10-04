@@ -1,0 +1,42 @@
+name: Avisar o Rafael
+
+# O Claude dispara este workflow quando uma pergunta dele ao Rafael está há muito
+# tempo sem resposta: o bot principal manda um aviso curto no privado do Rafael
+# (avisar_rafael.py). Só roda à mão (run_workflow).
+#
+# O repositório é público, e os logs e as entradas do Actions também: o assunto
+# vai em poucas palavras, sem dado privado (nome de canal, de pessoa, valores).
+on:
+  workflow_dispatch:
+    inputs:
+      assunto:
+        description: "Assunto da pendência, em poucas palavras e sem dado privado"
+        required: true
+        type: string
+      link:
+        description: "Link da sessão do Claude (opcional)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  avisar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Aviso no privado pelo bot
+        uses: appleboy/ssh-action@master
+        env:
+          ASSUNTO: ${{ inputs.assunto }}
+          LINK: ${{ inputs.link }}
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          envs: ASSUNTO,LINK
+          command_timeout: 2m
+          script: |
+            cd ~/shopee
+            venv/bin/python3 avisar_rafael.py "$ASSUNTO" "$LINK"

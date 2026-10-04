@@ -34,7 +34,7 @@ Módulos de apoio (não são serviços):
 - `utils.py` (`erros_logs`, caches, validação de IDs) e `fuso.py` (horário de Brasília e formato de log).
 - `api_gemini.py` (IA, com cascata de modelos) e `api_shopee.py` (links de afiliado).
 - `backup_dados.py`: backup diário (03:40, pelo bot_mestre) do banco, das sessões, dos JSON e do `.env` em `~/backups`, ficam 7. O `/status` mostra a idade do último.
-- Ferramentas: `validar_deploy.py`, `testar_chaves.py`, `inventario.py`, `servicos_afetados.py` (o deploy pergunta a ele quem reiniciar) e `faxina_servidor.py` (tira tabelas, chaves e arquivos sem uso, guardando cópia antes).
+- Ferramentas: `validar_deploy.py`, `testar_chaves.py`, `inventario.py`, `avisar_rafael.py` (aviso no privado pelo bot, usado pelo `avisar.yml`), `servicos_afetados.py` (o deploy pergunta a ele quem reiniciar) e `faxina_servidor.py` (tira tabelas, chaves e arquivos sem uso, guardando cópia antes).
 
 O README tem os IDs dos canais, as cinco filas e os comandos do servidor.
 
@@ -122,6 +122,7 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
     - o espaço do journal e as linhas de log que mais se repetem, com arquivo:linha do código;
     - os caches e a memória de cada robô.
     Use para achar o que acumula.
+  - `avisar.yml` (só à mão): o Claude dispara quando uma pergunta ao Rafael está sem resposta; o bot manda o aviso no privado (`avisar_rafael.py`).
   - `faxina.yml` (só à mão) roda o `faxina_servidor.py` no servidor: sem marcar "executar", só mostra; marcado, guarda em `~/backups/antigos` e tira. Para tirar outra coisa sem uso, acrescentar na lista do `faxina_servidor.py` depois de conferir que nenhum código usa.
   - O repositório é público e os logs do Actions também: nos workflows, só estados e números; nunca conteúdo de log dos robôs ou dados do banco.
   - Não há acesso direto ao servidor por SSH a partir da sessão. Os detalhes dos erros ficam no `/status` do bot, no privado do Rafael.
@@ -141,8 +142,13 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
 - Dúvida sobre a intenção de uma regra (ex.: "era para apagar depois de processar?") → pergunte antes de mudar. Ofereça opções, com a recomendada primeiro.
 - Investigação que depende de esperar o servidor (contagem, log, diagnóstico novo, correção que só se confirma com o uso):
   - o Rafael não precisa lembrar de conferir. Ao subir a mudança, agendar eu mesmo a conferência (`send_later`) para quando o resultado já deve existir (ex.: na manhã seguinte, se o canal posta de dia);
-  - na conferência: ler o resultado (inventário, diagnóstico, `/status`), concluir a causa, corrigir pelo fluxo normal ou explicar o que ele precisa fazer, e avisar;
-  - dizer ao Rafael quando será a conferência. Sem resultado ainda, reagendar e avisar o novo horário.
+  - na conferência: ler o resultado (inventário, diagnóstico, `/status`) e concluir a causa;
+  - resultado claro = corrigir e subir sozinho, do começo ao fim (PR, CI, merge, deploy), sem pedir aprovação. Esperar o Rafael só em dúvida de verdade (intenção, regra do diário). Se a solução depende de algo que só ele faz (ex.: pôr uma conta num canal), dizer exatamente o quê;
+  - dizer ao Rafael quando será a conferência. Sem resultado ainda, reagendar e avisar o novo horário. No fim, avisar o que foi achado e feito.
+- Pergunta ao Rafael sem resposta: o robô avisa no Telegram.
+  - Ao perguntar, agendar (`send_later`) uma conferência 1 h depois.
+  - Ainda sem resposta: disparar o `avisar.yml` (`run_workflow`, entrada `assunto` em poucas palavras e sem dado privado, `link` = link da sessão). O bot principal manda o aviso no privado dele.
+  - Avisar só entre 8h e 22h (Brasília); fora disso, agendar para as 8h. Repetir no máximo uma vez por dia enquanto a pergunta estiver aberta.
 - Comentários em português explicam o porquê e a regra de negócio.
   - Sem histórico ("antes era…", "corrigido em…"): isso fica no git.
   - Sem emoji nos comentários. Nos textos que o bot mostra, pode.
