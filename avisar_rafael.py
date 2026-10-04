@@ -1,7 +1,8 @@
 """
 Manda um aviso curto no privado do Rafael pelo bot principal. Usado pelo
 workflow avisar.yml, que o Claude dispara quando uma pergunta dele ao Rafael
-está há muito tempo sem resposta (regra no CLAUDE.md, "Como trabalhamos").
+está há muito tempo sem resposta (regra no CLAUDE.md, "Como trabalhamos"). O
+tela_android.py usa o mandar_texto para levar o link da tela do Android.
 
     python3 avisar_rafael.py "assunto da pendência" [link da sessão do Claude]
 
@@ -38,16 +39,21 @@ def montar_texto(assunto, link=""):
     return texto
 
 
-def enviar(assunto, link=""):
-    """Manda pelo Bot API do Telegram. Devolve True se o Telegram aceitou."""
+def mandar_texto(texto):
+    """Manda um texto no privado do Rafael pelo Bot API. Devolve True se o Telegram aceitou."""
     load_dotenv(os.path.join(PASTA, ".env"))
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
         raise RuntimeError("TELEGRAM_TOKEN ausente no .env")
-    dados = urllib.parse.urlencode({"chat_id": admin_id(), "text": montar_texto(assunto, link),
+    dados = urllib.parse.urlencode({"chat_id": admin_id(), "text": texto,
                                     "disable_web_page_preview": "true"}).encode()
     with urllib.request.urlopen(f"https://api.telegram.org/bot{token}/sendMessage", dados, timeout=20) as r:
         return bool(json.loads(r.read().decode()).get("ok"))
+
+
+def enviar(assunto, link=""):
+    """O aviso de pergunta sem resposta. Devolve True se o Telegram aceitou."""
+    return mandar_texto(montar_texto(assunto, link))
 
 
 if __name__ == "__main__":
