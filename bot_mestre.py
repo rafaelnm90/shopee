@@ -5045,6 +5045,9 @@ def _avisos_da_conta(conta):
     return avisos
 
 
+ERROS_DITOS_NOS_AVISOS = ("o grupo de origem não está nas conversas da conta", "banida do grupo de origem")
+
+
 def texto_tela_conta(conta):
     """Tela de uma conta: quem é, para que serve, onde está e o que falta."""
     postos = pool_contas.postos_da_conta(conta["id"])
@@ -5062,9 +5065,8 @@ def texto_tela_conta(conta):
     texto = (
         f"👤 {pool_contas.identificar(conta)}\n\n"
         "<blockquote>"
-        f"🏷️ Nome: <b>{html_escape(pool_contas.nome_da_conta(conta))}</b> "
-        + (f"(editado por você · automático: {html_escape(pool_contas.nome_automatico(conta))})\n"
-           if conta.get("nome_painel") else "(automático: @ ou nome do Telegram)\n") +
+        f"🏷️ Nome: <b>{html_escape(pool_contas.nome_da_conta(conta))}</b>"
+        + (" (editado por você)\n" if conta.get("nome_painel") else "\n") +
         f"🧩 Função: <b>{pool_contas.ROTULOS_PAPEL[papel] if papel else 'ainda não escolhida'}</b>\n"
         f"📍 Grupo de origem: <b>{pool_contas.TEXTOS_GRUPO.get(conta['status_grupo'], conta['status_grupo'])}</b>\n"
     )
@@ -5077,8 +5079,9 @@ def texto_tela_conta(conta):
         f"{('@' + conta['username']) if conta['username'] else 'sem @'} · {conta['nome_exibicao'] or '—'}"
         "</blockquote>\n"
     )
-    if conta["ultimo_erro"]:
-        texto += f"\n⚠️ <i>{conta['ultimo_erro']}</i>\n"
+    # O erro que só repete a situação do grupo já está nos avisos abaixo.
+    if conta["ultimo_erro"] and conta["ultimo_erro"] not in ERROS_DITOS_NOS_AVISOS:
+        texto += f"\n⚠️ <i>{html_escape(conta['ultimo_erro'])}</i>\n"
     avisos = _avisos_da_conta(conta)
     if avisos:
         texto += "\n" + "\n".join(avisos) + "\n"

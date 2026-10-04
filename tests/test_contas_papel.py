@@ -305,3 +305,14 @@ def test_colocar_no_grupo_explica_com_o_nome_do_grupo(bm, pc, Msg, Est):
     rodar(bm.contas_colocar_no_grupo(pedido, st))
     assert "<b>VIDEOS AUTORAIS - Afiliados Unidos</b>" in pedido.saidas[-1]
     assert "Convidar via link" in pedido.saidas[-1]
+
+
+def test_tela_da_conta_sem_explicacao_do_automatico_nem_erro_repetido(bm, pc):
+    pc.salvar_conta("a", sessao="x", username="chip_um")
+    pc.atualizar_status("a", status_grupo=pc.STATUS_NUNCA_ENTROU,
+                        erro="o grupo de origem não está nas conversas da conta")
+    tela = bm.texto_tela_conta(pc.obter_conta("a"))
+    assert "🏷️ Nome: <b>@chip_um</b>\n" in tela and "automático" not in tela
+    assert "não está nas conversas" not in tela and "Ela não está no grupo de origem" in tela
+    pc.definir_nome("a", "Chip 1")
+    assert "🏷️ Nome: <b>Chip 1</b> (editado por você)" in bm.texto_tela_conta(pc.obter_conta("a"))
