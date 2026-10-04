@@ -23,6 +23,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - ~~**03/10/2026:** 5 rodadas do CI no mesmo commit, com 5 min entre elas, antes do merge.~~ Substituída em 03/10/2026 pela rodada reforçada (testes em 4 horários e ordem aleatória), porque repetir o mesmo commit não testava nada novo.
 - **03/10/2026:** todo pedido que define comportamento entra neste diário.
 - **03/10/2026:** vídeo que o Rafael mandar é visto e ouvido por inteiro antes de seguir a instrução: todos os quadros e a fala transcrita. Sem conseguir ouvir, dizer isso logo e pedir a transcrição antes de mudar qualquer coisa.
+- **04/10/2026:** quando uma mudança serve para descobrir por que algo dá errado, o Claude agenda sozinho a conferência do resultado, no horário em que ele já deve existir. O Rafael não precisa lembrar: na hora marcada, o Claude lê o resultado, corrige ou orienta e avisa.
 
 ## Canal principal
 
