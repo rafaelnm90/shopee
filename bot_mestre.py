@@ -242,6 +242,14 @@ def inicializar_banco_sqlite():
     except sqlite3.OperationalError:
         pass
 
+    # fila_parceiros (criada pelo robô dos Autorais): link do post de origem no Telegram,
+    # mensagem publicada no destino e nome do produto. Sem a tabela, nada a fazer.
+    for coluna in ("link_post_origem TEXT DEFAULT ''", "msg_postada_id INTEGER", "nome_produto TEXT DEFAULT ''"):
+        try:
+            cursor.execute(f"ALTER TABLE fila_parceiros ADD COLUMN {coluna}")
+        except sqlite3.OperationalError:
+            pass  # coluna já existe ou a tabela ainda não nasceu
+
     # erros_logs: rastro do código e contexto (registrar_erro_json do utils).
     try:
         cursor.execute("ALTER TABLE erros_logs ADD COLUMN rastro_codigo TEXT")
@@ -3444,6 +3452,7 @@ async def motor_parceiros_step():
             )
             texto_ia = await analisar_video_gemini(caminho, prompt)
 
+            nome_produto = ""
             if texto_ia:
                 linhas_ia = texto_ia.split("\n")
                 nome_produto = linhas_ia[0].strip()
@@ -3459,12 +3468,13 @@ async def motor_parceiros_step():
             thread = destino_raw.split(":")[1].strip() if ":" in destino_raw else None
 
             try:
-                await bot.send_video(
+                enviada = await bot.send_video(
                     chat_id=chat_destino, video=FSInputFile(caminho), caption=legenda,
                     parse_mode="HTML", message_thread_id=int(thread) if thread else None
                 )
                 logger.info(f"✅ [Parceiro {p.get('nome')}] Vídeo publicado em {chat_destino}.")
-                remover_item_fila_parceiro(item["id_unico"], caminho)
+                marcar_parceiro_postado(item["id_unico"], caminho, getattr(enviada, "message_id", None),
+                                        nome_produto)
             except Exception as e:
                 logger.error(f"❌ [Parceiro {p.get('nome')}] Falha ao publicar: {e}")
                 atualizar_item_fila_parceiro(
@@ -3500,6 +3510,55 @@ def rotulo_cota_de_config(config, chave_min, chave_max, chave_legado=None):
     """O rótulo pronto a partir da config, sem desempacotar tupla no meio da linha."""
     piso, topo = faixa_de_config(config, chave_min, chave_max, chave_legado)
     return rotulo_cota(piso, topo) if piso else "sem cota"
+
+DIAS_HISTORICO_PARCEIROS = 3   # publicados ficam na fila por 3 dias, só como registro
+
+
+def marcar_parceiro_postado(id_unico, caminho, msg_id, nome_produto=""):
+    """
+    Publicado: apaga o vídeo do disco (espaço é recurso escasso) e guarda no registro
+    a mensagem do destino e o nome do produto, para a fila mostrar o link do post.
+    Os publicados com mais de DIAS_HISTORICO_PARCEIROS dias saem do banco.
+    """
+    if caminho and os.path.exists(caminho):
+        try: os.remove(caminho)
+        except Exception: pass
+    agora = datetime.now(fuso_horario)
+    limite = (agora - timedelta(days=DIAS_HISTORICO_PARCEIROS)).strftime("%Y-%m-%d")
+    try:
+        with db.conexao() as conexao:
+            conexao.execute(
+                "UPDATE fila_parceiros SET processado = 1, data_postagem = ?, msg_postada_id = ?, "
+                "nome_produto = ?, caminho_video = '' WHERE id_unico = ?",
+                (agora.strftime("%Y-%m-%d %H:%M:%S"), msg_id, nome_produto or "", id_unico))
+            conexao.execute("DELETE FROM fila_parceiros WHERE processado = 1 AND data_postagem < ?", (limite,))
+    except Exception as e:
+        logger.error(f"❌ [Parceiros] Erro ao marcar o vídeo como publicado: {e}")
+
+
+def ler_fila_parceiro_postados(parceiro_id, dia):
+    """Publicados no dia (YYYY-MM-DD), para a fila mostrar o link do post no destino."""
+    try:
+        with db.conexao(linhas_por_nome=True) as conexao:
+            linhas = conexao.execute(
+                "SELECT * FROM fila_parceiros WHERE parceiro_id = ? AND processado = 1 AND data_postagem LIKE ? "
+                "ORDER BY data_postagem ASC", (int(parceiro_id), f"{dia}%")).fetchall()
+        return [dict(linha) for linha in linhas]
+    except Exception:
+        return []
+
+
+def link_post_destino(destino, msg_id):
+    """Link da mensagem publicada: t.me/c/<id>/<msg> (ID) ou t.me/<@>/<msg> (@)."""
+    base = str(destino or "").split(":")[0].strip()
+    if not msg_id or not base:
+        return None
+    if base.lstrip("-").isdigit():
+        return f"https://t.me/c/{base.replace('-100', '', 1).lstrip('-')}/{msg_id}"
+    if base.startswith("@"):
+        return f"https://t.me/{base[1:]}/{msg_id}"
+    return None
+
 
 def rotulo_cota_parceiro(p):
     """Como a cota do parceiro aparece no painel: faixa, número fixo ou sem teto."""
@@ -7444,29 +7503,40 @@ async def mostrar_fila_parceiro(message: types.Message, state: FSMContext, p):
     agora = datetime.now(fuso_horario)
     itens = ler_fila_parceiro_pendente(p.get("id"))
     itens.sort(key=lambda i: (i.get("data_alvo") or "", i.get("horario_disparo") or ""))
+    postados = ler_fila_parceiro_postados(p.get("id"), agora.strftime("%Y-%m-%d"))
     disco_todos = sum(_disco_da_fila(ler_fila_parceiro_pendente(q.get("id"))) for q in ler_parceiros())
     dias = int(p.get("dias_atraso") or 0)
 
     mensagens = [f"📊 <b>Relatório da Fila do Parceiro (D+{dias})</b>\n\n"
                  + resumo_fila_parceiro(p, itens, agora.strftime("%Y-%m-%d"), disco_todos)]
 
-    if itens:
+    if itens or postados:
         nome = html_escape(p.get("nome") or "")
         base_origem = str(p.get("canal_origem") or "").split(":")[0].strip()
         origem = html_escape(ler_cache_nomes_grupos().get(base_origem) or base_origem or "Origem do parceiro")
         janela = f"entre {p.get('janela_inicio', 0) or 0}h e {p.get('janela_fim', 24) or 24}h"
         texto = (f"📡 <b>Rota: {nome}</b> ({len(itens)} vídeos agendados)\n"
                  f"🕒 <b>Postagem:</b> D+{dias}, {janela}\n\n")
-        for n, item in enumerate(itens, 1):
+        # Como na fila do Grupo Público: os publicados hoje primeiro, depois os agendados.
+        for n, item in enumerate(postados + itens, 1):
             card_item = dict(item)
             # Sem horário sorteado, a previsão é a data-alvo gravada na captura, e não a
             # captura + o D+X de hoje (o atraso do parceiro pode ter mudado depois).
             if not card_item.get("horario_disparo") and card_item.get("data_alvo"):
                 card_item["data_publicacao"] = card_item["data_alvo"]
+            link_destino = None
+            if card_item.get("processado"):
+                data_post = card_item.get("data_postagem") or ""
+                card_item["data_postagem"], _, hora = data_post.partition(" ")
+                card_item["horario_postagem"] = hora[:5]
+                link_destino = link_post_destino(p.get("canal_destino"), card_item.get("msg_postada_id"))
+            # Origem: o post no Telegram de onde o vídeo veio (o link da Shopee fica só para
+            # gerar o link de afiliado). Decisão do Rafael: DECISOES.md, Parceiros.
             card = gerar_layout_item_padrao(
                 index=n, item=card_item, tipo_fila="Parceiros", atraso_dias=dias, agora=agora,
                 fuso_horario=fuso_horario, display_origem=origem,
-                link_origem=html_escape(item.get("link_original") or ""), link_destino=None,
+                link_origem=html_escape(card_item.get("link_post_origem") or ""),
+                link_destino=html_escape(link_destino) if link_destino else None,
             )
             # O Telegram corta mensagem acima de 4096 caracteres: continua na próxima.
             if len(texto) + len(card) > 3800:

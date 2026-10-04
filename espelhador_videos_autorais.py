@@ -589,9 +589,28 @@ def _garantir_fila_parceiros(cursor):
             data_alvo TEXT,
             horario_disparo TEXT DEFAULT '',
             processado INTEGER DEFAULT 0,
-            data_postagem TEXT DEFAULT ''
+            data_postagem TEXT DEFAULT '',
+            link_post_origem TEXT DEFAULT '',
+            msg_postada_id INTEGER,
+            nome_produto TEXT DEFAULT ''
         )
     ''')
+    # Colunas que a tabela antiga não tinha: o link do post de origem (no Telegram,
+    # não o da Shopee), a mensagem publicada no destino e o nome do produto.
+    for coluna in ("link_post_origem TEXT DEFAULT ''", "msg_postada_id INTEGER", "nome_produto TEXT DEFAULT ''"):
+        try:
+            cursor.execute(f"ALTER TABLE fila_parceiros ADD COLUMN {coluna}")
+        except sqlite3.OperationalError:
+            pass  # coluna já existe
+
+def link_do_post(chat, msg_id):
+    """Link da mensagem no Telegram: t.me/<@>/<id> se o canal tem @, t.me/c/<id>/<id> se não."""
+    if not chat or not msg_id:
+        return ""
+    if getattr(chat, "username", None):
+        return f"https://t.me/{chat.username}/{msg_id}"
+    id_interno = _id_curto(getattr(chat, "id", None))
+    return f"https://t.me/c/{id_interno}/{msg_id}" if id_interno else ""
 
 def contar_fila_parceiro(parceiro_id, data_alvo):
     try:
@@ -606,15 +625,17 @@ def contar_fila_parceiro(parceiro_id, data_alvo):
     except Exception:
         return 0
 
-def inserir_fila_parceiro(parceiro_id, caminho, link, data_alvo):
+def inserir_fila_parceiro(parceiro_id, caminho, link, data_alvo, link_post=""):
     try:
         conexao = db.conectar()
         cursor = conexao.cursor()
         _garantir_fila_parceiros(cursor)
         id_unico = f"p{parceiro_id}_{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}"
         cursor.execute(
-            "INSERT INTO fila_parceiros (id_unico, parceiro_id, caminho_video, link_original, data_captura, data_alvo) VALUES (?, ?, ?, ?, ?, ?)",
-            (id_unico, int(parceiro_id), caminho, link, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), data_alvo)
+            "INSERT INTO fila_parceiros (id_unico, parceiro_id, caminho_video, link_original, data_captura, "
+            "data_alvo, link_post_origem) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (id_unico, int(parceiro_id), caminho, link, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), data_alvo,
+             link_post or "")
         )
         conexao.commit()
         conexao.close()
@@ -623,7 +644,7 @@ def inserir_fila_parceiro(parceiro_id, caminho, link, data_alvo):
         logger.error(f"❌ [Parceiros] Erro ao inserir na fila: {e}")
         return None
 
-async def capturar_para_parceiros(event, chat_id, link_capturado, parceiro_origem=None):
+async def capturar_para_parceiros(event, chat_id, link_capturado, parceiro_origem=None, link_post=""):
     """
     Chamada em toda mensagem com vídeo e link da Shopee. Se o chat é o canal de
     origem de um parceiro com acesso, baixa o vídeo para a pasta dele e o agenda
@@ -688,7 +709,7 @@ async def capturar_para_parceiros(event, chat_id, link_capturado, parceiro_orige
                 anotar_parceiro(p.get("id"), "recusado", "download do vídeo falhou")
                 continue
 
-            inserir_fila_parceiro(p.get("id"), destino, link_capturado, data_alvo)
+            inserir_fila_parceiro(p.get("id"), destino, link_capturado, data_alvo, link_post)
             anotar_parceiro(p.get("id"), "capturados")
             logger.info(f"🎯 [Parceiro {p.get('nome')}] Vídeo capturado e agendado para {data_alvo}. "
                         f"Disco: {espaco_usado_parceiros_gb():.2f} GB de {TETO_DISCO_PARCEIROS_GB} GB.")
@@ -1294,7 +1315,8 @@ async def interceptar_e_espelhar(event):
         if link_parceiro:
             anotar_parceiro(parceiro_origem, "com_link")
             try:
-                await capturar_para_parceiros(event, getattr(chat, 'id', None), link_parceiro, parceiro_origem)
+                await capturar_para_parceiros(event, getattr(chat, 'id', None), link_parceiro, parceiro_origem,
+                                              link_do_post(chat, getattr(event, 'id', None)))
             except Exception as e:
                 logger.error(f"❌ [Parceiros] Erro na captura paralela: {e}")
         else:
