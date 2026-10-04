@@ -209,21 +209,51 @@ def test_codigo_de_recusa_desconhecido_aparece_como_veio():
     assert "sem motivo" in tela.motivo_da_recusa("")
 
 
-def test_fechar_apps_fecha_os_instalados_e_volta_ao_inicio(monkeypatch):
+RECENTES = b"""ACTIVITY MANAGER RECENT TASKS (dumpsys activity recents)
+mRecentsUid=10085
+  Recent tasks:
+  * Recent #0: Task{8c1d2e5 #1 type=home A=10085:com.android.launcher3 U=0 visible=true sz=1}
+  * Recent #1: Task{2d4c1b4 #12 type=standard A=10123:com.shopee.br U=0 visible=false sz=1}
+  * Recent #2: Task{9f03a77 #9 type=standard A=10118:com.apkpure.aegon U=0 visible=false sz=0}
+  Visible recent tasks (most recent first):
+  * RecentTaskInfo #0: id=12 userId=0 hasTask=true lastActiveTime=1234
+"""
+
+
+def test_fechar_apps_limpa_os_recentes_fecha_os_instalados_e_volta_ao_inicio(monkeypatch):
     chamados = []
 
     async def adb(*partes, timeout=20):
         chamados.append(partes)
         if partes[:4] == ("shell", "pm", "list", "packages"):
             return b"package:com.shopee.br\npackage:com.apkpure.aegon\n"
+        if partes == ("shell", "dumpsys", "activity", "recents"):
+            return RECENTES
         return b""
 
     monkeypatch.setattr(tela, "adb", adb)
     resposta = rodar(tela.acao(Pedido(tela.CHAVE, {"tipo": "fechar_apps"})))
     assert resposta.status == 200
+    assert "2 app(s)" in json.loads(resposta.text)["mensagem"]
+    # O cartão de cada app sai da lista de recentes; o da tela inicial fica.
+    removidos = [p[4] for p in chamados if p[:4] == ("shell", "am", "stack", "remove")]
+    assert removidos == ["12", "9"]
     assert ("shell", "am", "force-stop", "com.shopee.br") in chamados
     assert ("shell", "am", "force-stop", "com.apkpure.aegon") in chamados
     assert chamados[-1] == ("shell", "input", "keyevent", "3")             # tela inicial
+
+
+def test_fechar_apps_com_a_lista_de_recentes_vazia(monkeypatch):
+    chamados = []
+
+    async def adb(*partes, timeout=20):
+        chamados.append(partes)
+        return b""
+
+    monkeypatch.setattr(tela, "adb", adb)
+    assert rodar(tela.fechar_apps()) == 0
+    assert not [p for p in chamados if p[:3] == ("shell", "am", "stack")]
+    assert chamados[-1] == ("shell", "input", "keyevent", "3")
 
 
 def test_reiniciar_religa_o_conteiner_e_espera_ligar(monkeypatch):

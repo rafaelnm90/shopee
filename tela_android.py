@@ -124,7 +124,7 @@ async def acao(request):
         return web.json_response({"ok": True})
     if dados.get("tipo") == "fechar_apps":
         fechados = await fechar_apps()
-        return web.json_response({"ok": True, "mensagem": f"{fechados} app(s) fechado(s)"})
+        return web.json_response({"ok": True, "mensagem": f"{fechados} app(s) fechado(s) e a lista de recentes limpa"})
     if dados.get("tipo") in ("reiniciar", "resetar"):
         # Um de cada vez: reiniciar no meio de um reset (ou o contrário) deixaria o Android pela metade.
         if _reinicio.get("tarefa") and not _reinicio["tarefa"].done():
@@ -143,15 +143,25 @@ async def acao(request):
 
 async def fechar_apps():
     """
-    Fecha todos os apps instalados (os do sistema ficam) e volta à tela inicial.
-    Devolve quantos foram fechados.
+    Fecha tudo, como o "Limpar tudo" dos apps recentes de um celular: tira cada
+    app da lista de recentes (a do botão quadrado), para os apps instalados (os
+    do sistema ficam) e volta à tela inicial. Parar o app sozinho não basta: o
+    cartão dele continuaria na lista e pareceria aberto.
+    Devolve quantos cartões saíram da lista.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
+    recentes = (await adb("shell", "dumpsys", "activity", "recents")).decode(errors="ignore")
+    # Só os apps (type=standard): a tela inicial também é uma tarefa e tem de ficar.
+    tarefas = dict.fromkeys(re.findall(r"Recent #\d+: Task\{\S+ #(\d+) type=standard", recentes))
+    for tarefa in tarefas:
+        # No Android 13, "am stack remove" tira a tarefa da lista e fecha o que ela tinha aberto.
+        await adb("shell", "am", "stack", "remove", tarefa)
     lista = (await adb("shell", "pm", "list", "packages", "-3")).decode(errors="ignore")
     pacotes = [linha.split(":", 1)[1].strip() for linha in lista.splitlines() if linha.startswith("package:")]
     for pacote in pacotes:
         await adb("shell", "am", "force-stop", pacote)
     await adb("shell", "input", "keyevent", str(TECLAS["inicio"]))
-    return len(pacotes)
+    return len(tarefas)
 
 
 _reinicio = {}
