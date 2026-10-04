@@ -31,10 +31,25 @@ def test_um_parceiro_abre_direto_com_resumo_e_lista(bm, Msg, Est):
     msg = Msg("Fila dos Parceiros 🔍")
     rodar(bm.pedir_parceiro_detalhe(msg, Est()))
 
-    texto = msg.saidas[-1]
-    assert "Loja &amp; Cia" in texto and "Na fila: <b>3</b>" in texto and "Cota Diária" in texto
-    assert "descarta 2" in texto                          # prévia do fechamento: cota 1, três na fila
-    assert texto.count("ver produto") == 3 and "a=1&amp;b=2" in texto
+    resumo, lista = msg.saidas
+    assert "Loja &amp; Cia" in resumo and "Na fila: <b>3</b>" in resumo and "Cota Diária" in resumo
+    assert "descarta 2" in resumo                         # prévia do fechamento: cota 1, três na fila
+    # Os vídeos vêm no mesmo card das outras filas, com a data-alvo gravada na captura.
+    assert "📡 <b>Rota: Loja &amp; Cia</b> (3 vídeos agendados)" in lista
+    assert lista.count("Ver Produto na Shopee (Origem)") == 3 and "a=1&amp;b=2" in lista
+    assert lista.count("🟡 Agendado p/ Amanhã") == 3 and "Aguardando postagem (Destino)" in lista
+
+
+def test_fila_comprida_continua_em_outra_mensagem_sem_cortar_videos(bm, Msg, Est):
+    pid = _parceiro(bm, "Grande")
+    dia = (datetime.now() + timedelta(days=5)).strftime("%Y-%m-%d")
+    for n in range(40):
+        _video(pid, n, dia)
+    msg = Msg("Fila dos Parceiros 🔍")
+    rodar(bm.pedir_parceiro_detalhe(msg, Est()))
+    assert len(msg.saidas) >= 3 and all(len(s) < 4096 for s in msg.saidas)
+    assert "(Continuação)" in msg.saidas[2]
+    assert sum(s.count("Ver Produto na Shopee") for s in msg.saidas) == 40
 
 
 def test_com_dois_parceiros_pergunta_qual_e_mostra_o_escolhido(bm, Msg, Est):
@@ -49,4 +64,4 @@ def test_com_dois_parceiros_pergunta_qual_e_mostra_o_escolhido(bm, Msg, Est):
 
     resposta = Msg(str(pid))
     rodar(bm.detalhar_fila_parceiro(resposta, est))
-    assert "Segundo" in resposta.saidas[-1] and "ver produto" in resposta.saidas[-1]
+    assert "Segundo" in resposta.saidas[0] and "Ver Produto na Shopee" in resposta.saidas[-1]
