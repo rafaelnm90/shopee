@@ -1574,32 +1574,31 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
             # ARMADILHA: o cache de entidades mora no arquivo .session e NÃO
             # viaja para a StringSession. Numa conta recém-adotada o cache está
             # vazio, então get_entity() falha por ID mesmo quando a conta ESTÁ
-            # no grupo — e a checagem concluía "NUNCA_ENTROU" por engano.
-            # get_dialogs() preenche o cache; é o mesmo truque que o espelhador
-            # usa no start. Só depois de tentar de novo é que desistimos.
+            # no grupo. Procura o grupo direto nas conversas da conta: estar lá
+            # (sem "left") é estar no grupo. Erro aqui (FloodWait, rede) sobe para
+            # os tratadores de fora, que guardam o motivo e não mudam o estado.
+            logger.info(f"🗂️ [Pool] {apelido}: cache vazio, procurando o grupo nas conversas...")
+            entidade = None
+            async for dialogo in cliente.iter_dialogs():
+                if dialogo.id == grupo_id:
+                    entidade = dialogo.entity
+                    break
+            fora = STATUS_SAIU if conta.get("ja_esteve_no_grupo") else STATUS_NUNCA_ENTROU
+            if entidade is None or getattr(entidade, "left", False):
+                atualizar_status(apelido, status_grupo=fora, status_sessao=SESSAO_OK,
+                                 erro="o grupo de origem não está nas conversas da conta")
+                return (fora, SESSAO_OK)
             try:
-                logger.info(f"🗂️ [Pool] {apelido}: cache vazio, carregando as conversas "
-                            f"para localizar o grupo...")
-                await cliente.get_dialogs()
-                entidade = await cliente.get_entity(grupo_id)
                 permissoes = await cliente.get_permissions(entidade, "me")
-                if getattr(permissoes, "is_banned", False):
-                    atualizar_status(apelido, status_grupo=STATUS_BANIDA_GRUPO,
-                                     status_sessao=SESSAO_OK, erro="restrita no grupo")
-                    return (STATUS_BANIDA_GRUPO, SESSAO_OK)
-                atualizar_status(apelido, status_grupo=STATUS_NO_GRUPO, status_sessao=SESSAO_OK)
-                return (STATUS_NO_GRUPO, SESSAO_OK)
             except errors.UserNotParticipantError:
-                fora = STATUS_SAIU if conta.get("ja_esteve_no_grupo") else STATUS_NUNCA_ENTROU
                 atualizar_status(apelido, status_grupo=fora, status_sessao=SESSAO_OK)
                 return (fora, SESSAO_OK)
-            except Exception:
-                pass
-
-            fora = STATUS_SAIU if conta.get("ja_esteve_no_grupo") else STATUS_NUNCA_ENTROU
-            atualizar_status(apelido, status_grupo=fora, status_sessao=SESSAO_OK,
-                             erro="grupo não encontrado nem depois de carregar as conversas")
-            return (fora, SESSAO_OK)
+            if getattr(permissoes, "is_banned", False):
+                atualizar_status(apelido, status_grupo=STATUS_BANIDA_GRUPO,
+                                 status_sessao=SESSAO_OK, erro="restrita no grupo")
+                return (STATUS_BANIDA_GRUPO, SESSAO_OK)
+            atualizar_status(apelido, status_grupo=STATUS_NO_GRUPO, status_sessao=SESSAO_OK)
+            return (STATUS_NO_GRUPO, SESSAO_OK)
 
     except errors.FloodWaitError as e:
         # Não dá para concluir nada: preserva o estado anterior e sai quieto.

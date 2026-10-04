@@ -202,7 +202,7 @@ def captura_dos_parceiros():
 # Erros que o pool_contas grava com texto fixo; qualquer outro sai só com o tipo.
 ERROS_FIXOS_DO_POOL = (
     "grupo dos Autorais não configurado", "restrita no grupo", "grupo inacessível para esta conta",
-    "grupo não encontrado nem depois de carregar as conversas", "conta banida/desativada pelo Telegram",
+    "o grupo de origem não está nas conversas da conta", "conta banida/desativada pelo Telegram",
     "sessão revogada/expirada",
 )
 

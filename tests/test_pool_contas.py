@@ -86,3 +86,58 @@ def test_sincronizar_reaproveita_cliente_conectado(pc, monkeypatch):
     assert [f.nome for f in criados] == ["R"]               # só a reserva abriu conexão
     assert not criados[0].conectado
     assert pc.obter_conta("B")["status_grupo"] == pc.STATUS_BANIDA_GRUPO
+
+
+class SemCache:
+    """Conta de StringSession nova: get_entity por ID falha; o grupo só aparece nas conversas."""
+
+    def __init__(self, conversas=(), erro=None):
+        self.conversas, self.erro = conversas, erro
+
+    async def get_me(self):
+        return SimpleNamespace(first_name="X", last_name=None, username=None, id=7, phone=None)
+
+    async def get_entity(self, alvo):
+        raise ValueError("Could not find the input entity")
+
+    async def iter_dialogs(self):
+        if self.erro:
+            raise self.erro
+        for id_, saiu in self.conversas:
+            yield SimpleNamespace(id=id_, entity=SimpleNamespace(id=id_, left=saiu))
+
+    async def get_permissions(self, entidade, quem):
+        return SimpleNamespace(is_banned=False)
+
+
+def checar_sem_cache(pc, monkeypatch, cliente):
+    from telethon import errors
+    monkeypatch.setattr(pc, "obter_grupo_autorais", lambda: -100123)
+    monkeypatch.setattr(pc, "obter_destino_autorais", lambda: None)
+    pc.salvar_conta("A", sessao="x")
+    rodar(pc.checar_conta(pc.obter_conta("A"), cliente=cliente))
+    return pc.obter_conta("A"), errors
+
+
+def test_checagem_acha_o_grupo_nas_conversas_sem_cache(pc, monkeypatch):
+    conta_a, _ = checar_sem_cache(pc, monkeypatch, SemCache([(-100999, False), (-100123, False)]))
+    assert conta_a["status_grupo"] == pc.STATUS_NO_GRUPO and not conta_a["ultimo_erro"]
+
+
+def test_checagem_sem_o_grupo_nas_conversas_ou_com_saida(pc, monkeypatch):
+    conta_a, _ = checar_sem_cache(pc, monkeypatch, SemCache([(-100999, False)]))
+    assert conta_a["status_grupo"] == pc.STATUS_NUNCA_ENTROU
+    assert conta_a["ultimo_erro"] == "o grupo de origem não está nas conversas da conta"
+    pc.atualizar_status("A", status_grupo=pc.STATUS_NO_GRUPO)
+    rodar(pc.checar_conta(pc.obter_conta("A"), cliente=SemCache([(-100123, True)])))
+    assert pc.obter_conta("A")["status_grupo"] == pc.STATUS_SAIU
+
+
+def test_checagem_com_erro_guarda_o_motivo_e_nao_muda_o_estado(pc, monkeypatch):
+    from telethon import errors
+    conta_a, _ = checar_sem_cache(pc, monkeypatch, SemCache(erro=errors.FloodWaitError(request=None, capture=300)))
+    assert conta_a["status_grupo"] == pc.STATUS_DESCONHECIDO and "FloodWait" in conta_a["ultimo_erro"]
+    rodar(pc.checar_conta(pc.obter_conta("A"), cliente=SemCache(erro=RuntimeError("rede caiu"))))
+    conta_a = pc.obter_conta("A")
+    assert conta_a["status_grupo"] == pc.STATUS_DESCONHECIDO
+    assert conta_a["ultimo_erro"] == "RuntimeError: rede caiu"
