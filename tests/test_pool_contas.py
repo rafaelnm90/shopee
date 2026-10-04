@@ -186,3 +186,82 @@ def test_entrar_no_grupo_banida_avisa_e_marca(pc, monkeypatch):
     ok, mensagem = rodar(pc.entrar_no_grupo("A"))
     assert not ok and "banida do grupo de origem" in mensagem
     assert pc.obter_conta("A")["status_grupo"] == pc.STATUS_BANIDA_GRUPO
+
+
+class Sumido(SemCache):
+    """O grupo não está nas conversas; o Telegram responde pelo acesso guardado."""
+
+    def __init__(self, resposta=None, erro=None):
+        super().__init__([])
+        self.resposta, self.erro_acesso, self.pedidos = resposta, erro, []
+
+    async def __call__(self, pedido):
+        self.pedidos.append(pedido)
+        if self.erro_acesso:
+            raise self.erro_acesso
+        return SimpleNamespace(chats=[self.resposta])
+
+
+def _sem_grupo(pc, monkeypatch, cliente, acesso="3673555953:999"):
+    monkeypatch.setattr(pc, "obter_grupo_autorais", lambda: -1003673555953)
+    monkeypatch.setattr(pc, "obter_destino_autorais", lambda: None)
+    pc.salvar_conta("A", sessao="x")
+    if acesso:
+        inserir("UPDATE contas_telegram SET grupo_acesso = ? WHERE apelido = 'A'", acesso)
+    rodar(pc.checar_conta(pc.obter_conta("A"), cliente=cliente))
+    return pc.obter_conta("A")
+
+
+def test_grupo_sumido_e_proibido_pelo_acesso_guardado_e_banimento(pc, monkeypatch):
+    proibido = type("ChannelForbidden", (), {})()
+    conta_a = _sem_grupo(pc, monkeypatch, Sumido(resposta=proibido))
+    assert conta_a["status_grupo"] == pc.STATUS_BANIDA_GRUPO
+    assert pc.texto_grupo(conta_a) == "⛔ banida"
+
+
+def test_grupo_sumido_com_left_e_saida(pc, monkeypatch):
+    conta_a = _sem_grupo(pc, monkeypatch, Sumido(resposta=SimpleNamespace(left=True)))
+    assert conta_a["status_grupo"] == pc.STATUS_SAIU and conta_a["ultimo_erro"] == "saiu do grupo de origem"
+
+
+def test_grupo_privado_pelo_acesso_e_banimento(pc, monkeypatch):
+    from telethon import errors
+    conta_a = _sem_grupo(pc, monkeypatch, Sumido(erro=errors.ChannelPrivateError(request=None)))
+    assert conta_a["status_grupo"] == pc.STATUS_BANIDA_GRUPO
+
+
+def test_sem_acesso_guardado_fica_fora_sem_perguntar(pc, monkeypatch):
+    cliente = Sumido(resposta=SimpleNamespace(left=True))
+    conta_a = _sem_grupo(pc, monkeypatch, cliente, acesso=None)
+    assert conta_a["status_grupo"] == pc.STATUS_NUNCA_ENTROU and cliente.pedidos == []
+    assert pc.texto_grupo(conta_a) == "⚪ fora"
+
+
+def test_acesso_lido_da_sessao_antiga_sem_alterar_o_arquivo(pc):
+    import os
+    arquivo = "sessao_espelhador_isolado.session"
+    with pc.db.conexao(arquivo) as con:
+        con.execute("CREATE TABLE entities (id INTEGER PRIMARY KEY, hash INTEGER)")
+        con.execute("INSERT INTO entities VALUES (-1003673555953, 4242)")
+    antes = os.path.getmtime(arquivo)
+    pc.salvar_conta("espelhador", sessao="x")
+    assert pc._hash_do_grupo(pc.obter_conta("espelhador"), 3673555953) == 4242
+    assert os.path.getmtime(arquivo) == antes
+    pc.salvar_conta("outra", sessao="x")                          # só a conta adotada daquele arquivo
+    assert pc._hash_do_grupo(pc.obter_conta("outra"), 3673555953) is None
+
+
+def test_no_grupo_guarda_o_acesso_e_apaga_a_marcacao_manual(pc, monkeypatch):
+    class ComHash(SemCache):
+        async def iter_dialogs(self):
+            yield SimpleNamespace(id=-1003673555953,
+                                  entity=SimpleNamespace(id=3673555953, access_hash=777, left=False))
+    monkeypatch.setattr(pc, "obter_grupo_autorais", lambda: -1003673555953)
+    monkeypatch.setattr(pc, "obter_destino_autorais", lambda: None)
+    pc.salvar_conta("A", sessao="x")
+    pc.marcar_situacao("A", pc.STATUS_BANIDA_GRUPO)
+    assert pc.texto_grupo(pc.obter_conta("A")) == "⛔ banida (marcado por você)"
+    rodar(pc.checar_conta(pc.obter_conta("A"), cliente=ComHash()))
+    conta_a = pc.obter_conta("A")
+    assert conta_a["grupo_acesso"] == "3673555953:777" and conta_a["situacao_manual"] is None
+    assert pc.texto_grupo(conta_a) == "✅ dentro"

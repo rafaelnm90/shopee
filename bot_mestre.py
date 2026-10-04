@@ -5030,6 +5030,7 @@ class ContasFluxo(StatesGroup):
     aguardando_convite = State()     # link de convite do grupo de origem
     aguardando_papel = State()       # fim do cadastro: captura ou repostagem
     aguardando_nome = State()        # nome novo da conta no painel
+    aguardando_situacao = State()    # banida ou saiu, marcada à mão
     bloqueados = State()             # lista de pessoas bloqueadas
     aguardando_bloqueio = State()    # @, ID ou link de quem bloquear
     aguardando_alcance = State()     # onde o bloqueio vale
@@ -5039,6 +5040,8 @@ BOTAO_CAPTURA = "Usar na Captura 🎯"
 BOTAO_REPOSTAGEM = "Usar na Repostagem 🔁"
 _PAPEL_DO_BOTAO = {BOTAO_CAPTURA: pool_contas.PAPEL_CAPTURA, BOTAO_REPOSTAGEM: pool_contas.PAPEL_REPOSTAGEM}
 BOTAO_NOME_AUTOMATICO = "Usar Nome Automático 🔄"
+BOTOES_SITUACAO = {"Foi Banida ⛔": pool_contas.STATUS_BANIDA_GRUPO, "Saiu do Grupo 🚪": pool_contas.STATUS_SAIU,
+                   "Deixar Automático 🔄": None}
 BOTAO_SO_AUTORAIS = "Só nos Autorais 🎥"
 BOTAO_AUTORAIS_PARCEIROS = "Autorais e Parceiros 🌐"
 
@@ -5055,7 +5058,7 @@ def teclado_painel_contas(tem_contas):
 def teclado_gerenciar_conta(conta):
     linhas = [[KeyboardButton(text=BOTAO_CAPTURA), KeyboardButton(text=BOTAO_REPOSTAGEM)]]
     if conta["status_grupo"] != pool_contas.STATUS_NO_GRUPO:
-        linhas.append([KeyboardButton(text="Colocar no Grupo 🚪")])
+        linhas.append([KeyboardButton(text="Colocar no Grupo 🚪"), KeyboardButton(text="Situação no Grupo 📝")])
     linhas.append([KeyboardButton(text="Editar Nome ✏️")])
     linhas.append([KeyboardButton(text="Pausar Conta ⏸️" if conta["habilitada"] else "Reativar Conta ▶️")])
     linhas.append([KeyboardButton(text="Excluir Conta 🗑️")])
@@ -5093,10 +5096,13 @@ def _avisos_da_conta(conta):
     """O que ainda falta para a conta trabalhar, em palavras."""
     papel = pool_contas.papel_da_conta(conta)
     avisos = []
-    if conta["status_grupo"] == pool_contas.STATUS_BANIDA_GRUPO:
+    situacao, _manual = pool_contas.situacao_no_grupo(conta)
+    if situacao == pool_contas.STATUS_BANIDA_GRUPO:
         avisos.append("⛔ Ela foi banida do grupo de origem: só um admin do grupo pode desbanir. "
                       "Enquanto isso, use outra conta.")
-    elif conta["status_grupo"] != pool_contas.STATUS_NO_GRUPO:
+    elif situacao == pool_contas.STATUS_SAIU:
+        avisos.append("🚪 Ela saiu do grupo de origem: toque em <b>Colocar no Grupo 🚪</b> para voltar.")
+    elif situacao != pool_contas.STATUS_NO_GRUPO:
         avisos.append("🚪 Ela não está no grupo de origem: toque em <b>Colocar no Grupo 🚪</b> "
                       "ou adicione a conta pelo app.")
     if papel in (pool_contas.PAPEL_CAPTURA, pool_contas.PAPEL_AMBAS) and conta.get("publica_no_destino") == 0:
@@ -5107,7 +5113,8 @@ def _avisos_da_conta(conta):
     return avisos
 
 
-ERROS_DITOS_NOS_AVISOS = ("o grupo de origem não está nas conversas da conta", "banida do grupo de origem")
+ERROS_DITOS_NOS_AVISOS = ("o grupo de origem não está nas conversas da conta", "banida do grupo de origem",
+                          "saiu do grupo de origem")
 
 
 def texto_tela_conta(conta):
@@ -5130,7 +5137,7 @@ def texto_tela_conta(conta):
         f"🏷️ Nome: <b>{html_escape(pool_contas.nome_da_conta(conta))}</b>"
         + (" (editado por você)\n" if conta.get("nome_painel") else "\n") +
         f"🧩 Função: <b>{pool_contas.ROTULOS_PAPEL[papel] if papel else 'ainda não escolhida'}</b>\n"
-        f"📍 Grupo de origem: <b>{pool_contas.TEXTOS_GRUPO.get(conta['status_grupo'], conta['status_grupo'])}</b>\n"
+        f"📍 Grupo de origem: <b>{pool_contas.texto_grupo(conta)}</b>\n"
     )
     if papel != pool_contas.PAPEL_REPOSTAGEM:
         texto += f"📣 Seu canal: <b>{pool_contas.texto_canal(conta)}</b>\n"
@@ -5226,7 +5233,7 @@ async def contas_cancelar(message: types.Message, state: FSMContext):
                   ContasFluxo.aguardando_desbloqueio.state):
         await mostrar_bloqueados(message, state)
     elif (estado in (ContasFluxo.confirmando_exclusao.state, ContasFluxo.aguardando_convite.state,
-                     ContasFluxo.aguardando_nome.state)
+                     ContasFluxo.aguardando_nome.state, ContasFluxo.aguardando_situacao.state)
           and dados.get("conta_id") and not dados.get("remover_direto")):
         await mostrar_conta(message, state, dados["conta_id"])
     else:
@@ -5392,6 +5399,43 @@ async def contas_salvar_nome(message: types.Message, state: FSMContext):
     conta = pool_contas.obter_conta(conta["id"])
     await message.answer(f"✅ Nome da conta: <b>{html_escape(pool_contas.nome_da_conta(conta))}</b>.",
                          parse_mode="HTML")
+    await mostrar_conta(message, state, conta["id"])
+
+
+@dp.message(ContasFluxo.conta, F.text == "Situação no Grupo 📝")
+async def contas_pedir_situacao(message: types.Message, state: FSMContext):
+    """Marca à mão que a conta foi banida ou saiu, quando o robô não tem como descobrir."""
+    if message.from_user.id != ADMIN_ID: return
+    conta = await _conta_do_estado(message, state)
+    if not conta:
+        return
+    await state.set_state(ContasFluxo.aguardando_situacao)
+    await message.answer(
+        "📝 <b>Situação no grupo de origem</b>\n\n"
+        f"Hoje: <b>{pool_contas.texto_grupo(conta)}</b>\n\n"
+        "O robô descobre sozinho quando a conta sai ou é banida. Para o que aconteceu antes de ele "
+        "saber (ou se ele mostrar errado), marque aqui. Quando a conta voltar ao grupo, a marcação "
+        "some sozinha.",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="Foi Banida ⛔"), KeyboardButton(text="Saiu do Grupo 🚪")],
+                      [KeyboardButton(text="Deixar Automático 🔄")], [KeyboardButton(text="Cancelar ❌")]],
+            resize_keyboard=True, is_persistent=True)
+    )
+
+
+@dp.message(ContasFluxo.aguardando_situacao)
+async def contas_salvar_situacao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    if message.text not in BOTOES_SITUACAO:
+        await message.answer("Toque em uma das opções abaixo.")
+        return
+    conta = await _conta_do_estado(message, state)
+    if not conta:
+        return
+    pool_contas.marcar_situacao(conta["apelido"], BOTOES_SITUACAO[message.text])
+    conta = pool_contas.obter_conta(conta["id"])
+    await message.answer(f"✅ Grupo de origem: <b>{pool_contas.texto_grupo(conta)}</b>.", parse_mode="HTML")
     await mostrar_conta(message, state, conta["id"])
 
 

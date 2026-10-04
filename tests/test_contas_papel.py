@@ -316,3 +316,26 @@ def test_tela_da_conta_sem_explicacao_do_automatico_nem_erro_repetido(bm, pc):
     assert "não está nas conversas" not in tela and "Ela não está no grupo de origem" in tela
     pc.definir_nome("a", "Chip 1")
     assert "🏷️ Nome: <b>Chip 1</b> (editado por você)" in bm.texto_tela_conta(pc.obter_conta("a"))
+
+
+def test_marcar_situacao_no_grupo_pelo_painel(bm, pc, Msg, Est):
+    pc.salvar_conta("a", sessao="x")
+    pc.atualizar_status("a", status_grupo=pc.STATUS_NUNCA_ENTROU)
+    st = Est()
+    tela = Msg()
+    rodar(bm.mostrar_conta(tela, st, pc.obter_conta("a")["id"]))
+    assert "📍 Grupo de origem: <b>⚪ fora</b>" in tela.saidas[-1] and "nunca entrou" not in tela.saidas[-1]
+    assert "Situação no Grupo 📝" in [b.text for l in bm.teclado_gerenciar_conta(pc.obter_conta("a")).keyboard
+                                       for b in l]
+    rodar(bm.contas_pedir_situacao(Msg("Situação no Grupo 📝"), st))
+    errado = Msg("qualquer")
+    rodar(bm.contas_salvar_situacao(errado, st))
+    assert "Toque em uma das opções" in errado.saidas[-1]
+    marcado = Msg("Foi Banida ⛔")
+    rodar(bm.contas_salvar_situacao(marcado, st))
+    assert "⛔ banida (marcado por você)" in marcado.saidas[0]
+    assert "só um admin do grupo pode desbanir" in marcado.saidas[-1]
+    rodar(bm.contas_pedir_situacao(Msg("Situação no Grupo 📝"), st))
+    rodar(bm.contas_salvar_situacao(Msg("Deixar Automático 🔄"), st))
+    assert pc.texto_grupo(pc.obter_conta("a")) == "⚪ fora"
+
