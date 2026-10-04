@@ -115,6 +115,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **03/10/2026:** um diagnóstico de hora em hora olha o servidor só lendo, e fica vermelho (e-mail do GitHub) com robô fora do ar ou disco acima de 90%.
   - Nos logs do Actions saem só estados e números, porque o repositório é público.
   - Nada de acesso SSH direto pela sessão do Claude.
+- **03/10/2026:** backup automático todo dia às 03:40 do banco, das sessões, dos JSON e do `.env` em `~/backups`, ficando os 7 mais novos. Se falhar, aviso no privado. O monitor de saúde avisa se o último passar de 30 h, e o `/status` mostra a idade dele.
 
 ## Código e manutenção
 

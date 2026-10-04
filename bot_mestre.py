@@ -56,6 +56,7 @@ import painel_notas
 import pool_contas  # contas dos userbots (quem espelha, quem reposta)
 import blacklist_captura  # de quem os userbots nunca capturam
 import alvos_sem_acesso  # alvos da divulgação a que a conta perdeu o acesso
+import backup_dados  # backup diário do banco, sessões e .env em ~/backups
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo, salvar_json_atomico
 
 logger = configurar_logs(__name__)
@@ -16842,6 +16843,34 @@ def capturar_falha_task(loop, contexto):
     except Exception:
         pass  # o capturador não pode gerar outro erro
 
+# --- Backup diário (backup_dados.py) ---
+# Às 03:40, depois da lixeira das 03:00. Se o robô sobe com o último backup
+# velho (mais de 24 h), faz um 5 min depois de subir, sem esperar a madrugada.
+IDADE_MAXIMA_BACKUP_H = 30     # o monitor de saúde avisa acima disso
+
+async def backup_diario():
+    """Gera o backup do dia; se falhar, registra o erro e avisa no privado."""
+    try:
+        caminho, tamanho, removidos = await asyncio.to_thread(backup_dados.fazer_backup)
+        logger.info(f"💾 [Backup] {os.path.basename(caminho)} criado ({tamanho / 1024 / 1024:.1f} MB); "
+                    f"{removidos} antigo(s) removido(s).")
+    except Exception as e:
+        logger.error(f"❌ [Backup] Falhou ({type(e).__name__}): {e}")
+        registrar_erro_json(f"backup_diario: {type(e).__name__}: {e}", origem="backup_dados.py")
+        try:
+            await bot.send_message(ADMIN_ID, f"💾 <b>O backup diário falhou</b>\n<code>{type(e).__name__}</code>. "
+                                             "Detalhes no /status.", parse_mode="HTML")
+        except Exception:
+            pass
+
+def agendar_backup_atrasado():
+    """Na subida: último backup com mais de 24 h (ou nenhum) = um backup daqui a 5 min."""
+    ultimo = backup_dados.ultimo_backup()
+    if ultimo is None or ultimo[1] > 24:
+        scheduler.add_job(backup_diario, 'date', run_date=datetime.now(fuso_horario) + timedelta(minutes=5),
+                          id='backup_atrasado', replace_existing=True)
+        logger.info("💾 [Backup] Último backup velho ou inexistente: um novo sai em 5 min.")
+
 # --- Monitor de saúde ---
 # Checa a cada hora e só fala quando há problema; cada tipo de alerta repete no
 # máximo a cada 6 horas.
@@ -16963,6 +16992,16 @@ async def monitor_saude():
         except Exception:
             pass
 
+        # 6. Backup diário parado
+        try:
+            ultimo = backup_dados.ultimo_backup()
+            idade = ultimo[1] if ultimo else None
+            if (idade is None or idade > IDADE_MAXIMA_BACKUP_H) and not _ja_alertou("backup"):
+                quando = f"o último tem {idade:.0f} h" if idade is not None else "não há nenhum em ~/backups"
+                alertas.append(f"💾 <b>Backup atrasado</b>\n{quando}.")
+        except Exception:
+            pass
+
         if alertas:
             texto = "🩺 <b>ALERTA DE SAÚDE DO SISTEMA</b>\n\n" + "\n\n".join(alertas)
             await bot.send_message(ADMIN_ID, texto, parse_mode="HTML")
@@ -17041,6 +17080,15 @@ def montar_status():
                       f"({uso.free / (1024 ** 3):.1f} GB livres)")
     except Exception:
         pass
+    try:
+        ultimo = backup_dados.ultimo_backup()
+        if ultimo:
+            icone = "🗄️" if ultimo[1] <= IDADE_MAXIMA_BACKUP_H else "⚠️"
+            linhas.append(f"{icone} Último backup: há {ultimo[1]:.0f} h ({ultimo[2] / 1024 / 1024:.1f} MB)")
+        else:
+            linhas.append("⚠️ Nenhum backup em ~/backups")
+    except Exception:
+        pass
 
     try:
         contas = pool_contas.listar_contas()
@@ -17089,6 +17137,11 @@ async def main():
 
     # Monitor de saúde (avisa o admin no privado)
     scheduler.add_job(monitor_saude, 'interval', hours=1, id='monitor_saude_loop', replace_existing=True)
+
+    # Backup diário do banco, sessões e .env (e um já, se o último estiver velho)
+    scheduler.add_job(backup_diario, 'cron', hour=3, minute=40, timezone=FUSO_STR,
+                      id='backup_diario', replace_existing=True)
+    agendar_backup_atrasado()
 
     # Contas dos Autorais: avisa no privado quando uma conta para ou volta na função dela
     scheduler.add_job(verificar_saude_contas, 'interval', minutes=2, id='saude_contas_loop', replace_existing=True)

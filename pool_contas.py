@@ -81,11 +81,11 @@
 #     vê só um bloco de bytes.
 #   • A chave vem de uma senha-mestra no .env (CHAVE_MESTRA_CONTAS). Se ela não
 #     existir, o módulo usa o API_HASH — que já é secreto, já está no .env e já
-#     é copiado pelo backup_config.sh. Assim nunca há um "esqueci de configurar
-#     e tudo parou".
+#     é copiado pelo backup diário (backup_dados.py). Assim nunca há um
+#     "esqueci de configurar e tudo parou".
 #   • O sal do PBKDF2 mora na tabela 'configuracoes' do próprio banco. Ou seja:
 #     .env + banco_dados.db = tudo funcionando. É exatamente o par que o
-#     backup_config.sh já empacota.
+#     backup diário já empacota.
 #
 # ─── TROCAR DE SERVIDOR SEM REFAZER LOGIN ────────────────────────────────────
 # O que é guardado não é o arquivo .session (que é preso a caminho de disco),

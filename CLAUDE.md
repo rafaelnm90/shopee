@@ -33,7 +33,8 @@ Módulos de apoio (não são serviços):
 - `painel_espelhos.py` e `painel_notas.py`: routers aiogram incluídos no bot_mestre.
 - `utils.py` (`erros_logs`, caches, validação de IDs) e `fuso.py` (horário de Brasília e formato de log).
 - `api_gemini.py` (IA, com cascata de modelos) e `api_shopee.py` (links de afiliado).
-- Ferramentas: `validar_deploy.py`, `testar_chaves.py`, `inventario.py`, `backup_config.sh`.
+- `backup_dados.py`: backup diário (03:40, pelo bot_mestre) do banco, das sessões, dos JSON e do `.env` em `~/backups`, ficam 7. O `/status` mostra a idade do último.
+- Ferramentas: `validar_deploy.py`, `testar_chaves.py`, `inventario.py`.
 
 O README tem os IDs dos canais, as cinco filas e os comandos do servidor.
 
@@ -73,7 +74,7 @@ arquivo cresce: `grep -n "^# --- " bot_mestre.py`. Os blocos grandes usam
   - `erros_logs`.
   - Pool: `contas_telegram`, `funcoes_contas` e `atividade_contas`.
 - O Espelhador de canais ainda usa arquivos: `espelhos_config.json` e `fila_espelhador.json`.
-- Nada disso está no git: o `.gitignore` cobre `*.db`, `*.json`, `*.session` e `.env`. No servidor, o `backup_config.sh` guarda essas coisas.
+- Nada disso está no git: o `.gitignore` cobre `*.db`, `*.json`, `*.session` e `.env`. No servidor, o backup diário (`backup_dados.py`) guarda essas coisas em `~/backups`.
 
 ## Armadilhas conhecidas
 

@@ -9,6 +9,7 @@ projeto sai daqui; o tests/test_db.py barra sqlite3.connect em outro arquivo.
 - ler_config() e salvar_config(): a tabela configuracoes (chave -> JSON).
 - atualizar_config(): lê, altera e grava uma chave sem perder a gravação de
   outro robô que mexa na mesma chave ao mesmo tempo.
+- copiar_sqlite(): cópia consistente de um arquivo SQLite, para o backup.
 
 Por que WAL: no modo padrão do SQLite, quem está lendo impede quem quer gravar
 de concluir a gravação. Os robôs leem um item da fila e seguram essa leitura
@@ -19,8 +20,8 @@ esperam uma pela outra (até os 30 s).
 
 O modo WAL fica gravado no próprio arquivo do banco, e o banco passa a ter dois
 arquivos ao lado (banco_dados.db-wal e banco_dados.db-shm). Eles fazem parte do
-banco: não apague com os robôs rodando. O backup_config.sh usa o .backup do
-sqlite3, que já inclui o que está no -wal.
+banco: não apague com os robôs rodando. O backup diário (backup_dados.py) copia
+pelo backup do próprio SQLite, que já inclui o que está no -wal.
 """
 import json
 import logging
@@ -181,3 +182,21 @@ def atualizar_config(chave, alterar, padrao=None):
     except Exception as e:
         logger.error(f"❌ [Banco] Erro ao atualizar a configuração '{chave}': {e}")
         return None
+
+
+def copiar_sqlite(origem, destino):
+    """
+    Copia um arquivo SQLite (o banco ou uma sessão do Telethon) para destino pelo
+    backup do próprio SQLite: um retrato consistente mesmo com outro robô
+    gravando, ao contrário de um cp. Abre a origem só para leitura e sem mudar o
+    modo dela (as sessões do Telethon não ficam em WAL).
+    """
+    fonte = _connect_com_espera(f"file:{os.path.abspath(origem)}?mode=ro", uri=True)
+    try:
+        alvo = _connect_original(destino)
+        try:
+            fonte.backup(alvo)
+        finally:
+            alvo.close()
+    finally:
+        fonte.close()
