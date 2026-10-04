@@ -7350,48 +7350,50 @@ def resumo_fila_parceiro(p, itens, hoje_str, disco_todos):
 
 async def mostrar_fila_parceiro(message: types.Message, state: FSMContext, p):
     """
-    A fila de um parceiro: o resumo no topo e, embaixo, vídeo a vídeo (captura,
-    dia e horário de saída, tamanho e link do produto).
-    Decisão do Rafael: DECISOES.md, Parceiros.
+    A fila de um parceiro: o resumo numa mensagem e, depois, os vídeos no mesmo
+    card das outras filas (status do dia, captura, previsão e links), em quantas
+    mensagens forem precisas. Decisão do Rafael: DECISOES.md, Parceiros.
     """
+    from motor_filas import gerar_layout_item_padrao
+
+    agora = datetime.now(fuso_horario)
     itens = ler_fila_parceiro_pendente(p.get("id"))
     itens.sort(key=lambda i: (i.get("data_alvo") or "", i.get("horario_disparo") or ""))
     disco_todos = sum(_disco_da_fila(ler_fila_parceiro_pendente(q.get("id"))) for q in ler_parceiros())
-    texto = resumo_fila_parceiro(p, itens, datetime.now(fuso_horario).strftime("%Y-%m-%d"), disco_todos)
+    dias = int(p.get("dias_atraso") or 0)
+
+    mensagens = [f"📊 <b>Relatório da Fila do Parceiro (D+{dias})</b>\n\n"
+                 + resumo_fila_parceiro(p, itens, agora.strftime("%Y-%m-%d"), disco_todos)]
 
     if itens:
-        texto += "\n\n🚀 = horário já sorteado  ·  🕓 = ainda aguardando o fechamento\n"
-        mostrados = 0
+        nome = html_escape(p.get("nome") or "")
+        base_origem = str(p.get("canal_origem") or "").split(":")[0].strip()
+        origem = html_escape(ler_cache_nomes_grupos().get(base_origem) or base_origem or "Origem do parceiro")
+        janela = f"entre {p.get('janela_inicio', 0) or 0}h e {p.get('janela_fim', 24) or 24}h"
+        texto = (f"📡 <b>Rota: {nome}</b> ({len(itens)} vídeos agendados)\n"
+                 f"🕒 <b>Postagem:</b> D+{dias}, {janela}\n\n")
         for n, item in enumerate(itens, 1):
-            try:
-                captura = datetime.strptime((item.get("data_captura") or "")[:10], "%Y-%m-%d").strftime("%d/%m")
-            except Exception:
-                captura = "?"
-            try:
-                alvo = datetime.strptime(item.get("data_alvo") or "", "%Y-%m-%d").strftime("%d/%m")
-            except Exception:
-                alvo = "?"
-            horario = item.get("horario_disparo") or ""
-            if horario:
-                marca, quando = "🚀", f"sai {alvo} às {horario[11:16]}"
-            else:
-                marca, quando = "🕓", f"previsto {alvo}, horário ainda não sorteado"
-            tamanho = ""
-            caminho = item.get("caminho_video")
-            if caminho and os.path.exists(caminho):
-                tamanho = f"  ·  {os.path.getsize(caminho) / (1024**2):.1f} MB"
-            linha = (f"\n{marca} <b>{n}.</b> capturado {captura}  ·  {quando}{tamanho}\n"
-                     f"     <a href=\"{html_escape(item.get('link_original') or '')}\">🔗 ver produto</a>")
-            # O Telegram corta mensagem acima de 4096 caracteres: para antes.
-            if len(texto) + len(linha) > 3900:
-                break
-            texto += linha
-            mostrados += 1
-        if mostrados < len(itens):
-            texto += f"\n\n<i>...e mais {len(itens) - mostrados} vídeo(s).</i>"
+            card_item = dict(item)
+            # Sem horário sorteado, a previsão é a data-alvo gravada na captura, e não a
+            # captura + o D+X de hoje (o atraso do parceiro pode ter mudado depois).
+            if not card_item.get("horario_disparo") and card_item.get("data_alvo"):
+                card_item["data_publicacao"] = card_item["data_alvo"]
+            card = gerar_layout_item_padrao(
+                index=n, item=card_item, tipo_fila="Parceiros", atraso_dias=dias, agora=agora,
+                fuso_horario=fuso_horario, display_origem=origem,
+                link_origem=html_escape(item.get("link_original") or ""), link_destino=None,
+            )
+            # O Telegram corta mensagem acima de 4096 caracteres: continua na próxima.
+            if len(texto) + len(card) > 3800:
+                mensagens.append(texto)
+                texto = f"📡 <b>Rota: {nome} (Continuação)</b>\n\n"
+            texto += card
+        mensagens.append(texto)
 
-    await message.answer(texto, parse_mode="HTML", disable_web_page_preview=True,
-                         reply_markup=obter_teclado_relatorios_filas())
+    for i, texto in enumerate(mensagens):
+        ultima = i == len(mensagens) - 1
+        await message.answer(texto, parse_mode="HTML", disable_web_page_preview=True,
+                             reply_markup=obter_teclado_relatorios_filas() if ultima else None)
     await state.set_state(RelatoriosFluxo.menu_filas)
 
 # O botão antigo "Filas dos Parceiros 👥" pode continuar no teclado do celular até o
