@@ -22,6 +22,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - O Rafael pode barrar o merge, mandar fazer direto ou pedir rodadas extras.
 - ~~**03/10/2026:** 5 rodadas do CI no mesmo commit, com 5 min entre elas, antes do merge.~~ Substituída em 03/10/2026 pela rodada reforçada (testes em 4 horários e ordem aleatória), porque repetir o mesmo commit não testava nada novo.
 - **03/10/2026:** todo pedido que define comportamento entra neste diário.
+- **03/10/2026:** vídeo que o Rafael mandar é visto e ouvido por inteiro antes de seguir a instrução: todos os quadros e a fala transcrita. Sem conseguir ouvir, dizer isso logo e pedir a transcrição antes de mudar qualquer coisa.
 
 ## Canal principal
 

@@ -127,6 +127,9 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
 ## Como trabalhamos
 
 - O Rafael pede em português. Responda em português, de forma simples.
+- Vídeo do Rafael: ver e ouvir o vídeo inteiro antes de responder ou agir.
+  - `.claude/scripts/ver_video.sh VIDEO PASTA` gera as folhas de quadros (ler todas, em ordem) e a fala transcrita (`fala.txt`).
+  - Sem transcrição (a rede do ambiente bloqueia o modelo de voz no huggingface.co), dizer isso logo e pedir a transcrição antes de mudar qualquer coisa. Nunca agir só pelos quadros quando o vídeo tem fala.
 - Diário de decisões (`DECISOES.md`):
   - Antes de mudar um comportamento, ler a área dele no diário.
   - Todo pedido do Rafael que define comportamento entra no diário, na mesma mudança que o implementa. Isso inclui as respostas dele às perguntas de intenção.
