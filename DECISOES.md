@@ -80,6 +80,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 
 - **03/10/2026:** excluir um parceiro apaga também a pasta `parceiros/<id>/`, para os vídeos dele não ocuparem o teto de 10 GB dos outros.
 - **03/10/2026:** nos Relatórios de Filas fica um botão só, "Fila dos Parceiros 🔍". Ele mostra no topo o resumo do parceiro (disco, cota, acesso à origem, descarte do fechamento e próxima publicação) e, embaixo, a lista vídeo a vídeo. Com um parceiro só, abre direto, sem perguntar o número.
+- **04/10/2026:** o acesso à origem de um parceiro só vale quando a conta da captura é membro do canal, e não só quando o encontra. Causa provável da captura parada desde 15/09: a conta achava o canal, mas não estava dentro, e o Telegram só entrega as mensagens a quem é membro. O robô reconfere a cada 6 h e entra de novo sozinho quando a origem é @ ou link. Parceiro sem acesso gera aviso no privado (monitor de saúde), e a fila mostra o motivo e a data da última captura.
 
 ## Financeiro
 

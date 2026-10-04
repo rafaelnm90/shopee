@@ -345,6 +345,7 @@ def ler_fila_publico():
 # Uma por ciclo, com intervalo longo: entrar em vários canais seguidos é o
 # padrão que o Telegram pune, e a conta do userbot é a peça mais crítica do sistema.
 INTERVALO_ENTRADA_PARCEIROS = 900   # 15 min entre uma entrada e outra
+INTERVALO_RECONFERIR_PARCEIROS = 6 * 3600   # de quanto em quanto a conta é reconferida nos canais
 
 def ler_parceiros_pendentes():
     """Parceiros ativos cujo canal de origem o userbot ainda não acessa."""
@@ -440,20 +441,28 @@ async def id_do_canal_origem(alvo):
         return _cache_id_origem[chave]
     return None
 
+def e_membro(entidade):
+    """
+    A conta está dentro do canal ou grupo. Achar o canal não basta: um @ público
+    qualquer conta acha, mas o Telegram só entrega as mensagens novas a quem é
+    membro. Fora dele, o Telegram devolve o canal com left=True.
+    """
+    return entidade is not None and not getattr(entidade, "left", False)
+
 async def entrar_no_canal_parceiro(alvo):
     """
-    Devolve (sucesso, motivo). Se o userbot já enxerga o canal, qualquer
-    formato serve — inclusive ID numérico. Só quando ele NÃO é membro é que
-    o Telegram exige @username ou link de convite para a entrada automática.
+    Devolve (sucesso, motivo). Se a conta da captura já é membro, qualquer formato
+    serve, inclusive ID numérico. Quando ela NÃO é membro, o Telegram exige
+    @username ou link de convite para a entrada automática.
     """
     alvo = str(alvo or "").strip()
     if not alvo:
         return False, "origem vazia"
 
     try:
-        # Já acessa o canal: nada a fazer.
-        if await resolver_entidade(alvo):
-            return True, "já acessível"
+        entidade = await resolver_entidade(alvo)
+        if e_membro(entidade):
+            return True, "a conta da captura já é membro"
 
         if "+" in alvo or "joinchat" in alvo:
             hash_convite = alvo.split("+")[-1].split("/")[-1]
@@ -465,7 +474,7 @@ async def entrar_no_canal_parceiro(alvo):
             await client(functions.channels.JoinChannelRequest(usuario))
             return True, "entrou pelo @username"
 
-        return False, ("userbot não é membro e ID numérico não permite entrada "
+        return False, ("a conta da captura não é membro e ID numérico não permite entrada "
                        "automática: adicione a conta no canal ou use @username / link de convite")
 
     except UserAlreadyParticipantError:
@@ -610,14 +619,44 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
         except Exception as e:
             logger.error(f"❌ [Parceiros] Falha ao capturar para '{p.get('nome')}': {e}")
 
+async def reconferir_parceiros_com_acesso():
+    """
+    Confere se a conta da captura continua dentro do canal de cada parceiro marcado
+    com acesso. Saiu (ou nunca entrou: o acesso era marcado só por achar o canal)?
+    Volta para pendente, e o laço tenta entrar de novo.
+    """
+    for p in ler_parceiros_ativos_com_acesso():
+        origem = str(p.get("canal_origem") or "").strip()
+        try:
+            entidade = await resolver_entidade(origem)
+        except Exception:
+            continue   # falha de rede não é prova de que saiu
+        # Um @ público que não resolveu agora é falha de rede ou @ trocado, não prova
+        # de que a conta saiu: fica para a próxima. Fora dele, o @ volta com left=True.
+        publico = origem.startswith("@") or ("t.me/" in origem and "+" not in origem and "joinchat" not in origem)
+        if entidade is None and publico:
+            continue
+        if not e_membro(entidade):
+            marcar_origem_parceiro(p.get("id"), 0, "a conta da captura não está no canal de origem")
+            logger.warning(f"⚠️ [Parceiros] '{p.get('nome')}': a conta da captura não está no canal "
+                           f"de origem. Vou tentar entrar de novo.")
+        await asyncio.sleep(2)
+
 async def loop_entrada_parceiros():
-    """Tenta acessar o canal de origem de um parceiro pendente por ciclo, nunca em lote."""
+    """
+    Tenta acessar o canal de origem de um parceiro pendente por ciclo, nunca em
+    lote. Ao subir e a cada 6 h, reconfere os que estão marcados com acesso.
+    """
     await asyncio.sleep(60)
+    ultima_reconferencia = None
     while True:
         if client is None:   # captura sem conta: os canais seriam testados com ninguém
             await asyncio.sleep(60)
             continue
         try:
+            if ultima_reconferencia is None or time.monotonic() - ultima_reconferencia >= INTERVALO_RECONFERIR_PARCEIROS:
+                ultima_reconferencia = time.monotonic()
+                await reconferir_parceiros_com_acesso()
             pendentes = ler_parceiros_pendentes()
             if pendentes:
                 p = pendentes[0]
