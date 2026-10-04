@@ -26,6 +26,9 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **04/10/2026:** quando uma mudança serve para descobrir por que algo dá errado, o Claude agenda sozinho a conferência do resultado, no horário em que ele já deve existir. O Rafael não precisa lembrar: na hora marcada, o Claude lê o resultado, corrige ou orienta e avisa.
 - **04/10/2026:** na conferência, com o resultado claro, o Claude corrige e sobe sozinho (PR, CI, merge, deploy), sem ação do Rafael. Só espera o Rafael quando houver dúvida de verdade.
 - **04/10/2026:** pergunta do Claude ao Rafael que fica sem resposta (1 h) vira aviso no privado do Telegram, pelo bot principal, para ele abrir a conversa com o Claude. Só entre 8h e 22h, no máximo um por dia por pergunta.
+- **04/10/2026:** pedido terminado (incluir, editar ou excluir algo nos robôs) fecha com um bloco "✅ Concluído": o que foi feito, o impacto para o Rafael e onde achar no bot. Vale mesmo com outras ações ainda em andamento.
+- **04/10/2026:** uma rotina chama a conversa às 8h, 11h, 14h, 17h e 20h para retomar o que ficou pela metade quando o crédito acaba. Sem pendência, só responde "Nada pendente.". A cada 3 h, e não de hora em hora, para gastar menos crédito.
+- **04/10/2026:** opções oferecidas ao Rafael ficam abertas até ele escolher, mesmo que demore. Se o seletor sumir, as mesmas opções aparecem de novo. A demora nunca vira escolha: até ele responder, fica valendo o que já estava.
 
 ## Canal principal
 
@@ -142,6 +145,13 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - O painel desce para o fim do tópico depois das entregas, e o mais novo fica fixado.
   - Os painéis antigos e as mensagens "fixou uma mensagem" são apagados sozinhos pela conta principal (userbot, no `divulgacao_canal`), a cada 10 min. O Telegram só deixa bot apagar mensagem com menos de 48 h, por isso o bot não dava conta.
   - A faxina de 3 dias do bot, que tentava apagar tudo (inclusive os vídeos) e nunca conseguia, saiu.
+
+## Shopee Vídeo
+
+- **04/10/2026:** robô novo que posta sozinho na Shopee Vídeo pelo app, num Android virtual no servidor. A Shopee não tem forma oficial de postar por programa: a Shopee Vídeo só aceita postagem pelo app. O Rafael escolheu sabendo dos riscos: vai contra os termos da Shopee, ela pode perceber o emulador, e uma atualização do app pode quebrar a automação.
+- **04/10/2026:** posta na conta principal de afiliado do Rafael, ciente de que um bloqueio atinge essa conta.
+- **04/10/2026:** os vídeos vêm dos Autorais (feitos para afiliados repostarem), com o produto vinculado no próprio vídeo: a comissão só conta assim, e link na descrição não vale.
+- **04/10/2026:** 10 vídeos por dia.
 
 ## Monitor, deploy e servidor
 

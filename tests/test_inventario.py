@@ -67,3 +67,19 @@ def test_contas_dos_autorais_so_estados_sem_nome_nem_telefone(bm, pc, capsys):
     assert "origem dos Autorais gravada como str com tópico" in saida
     for privado in ("joana", "joaninha", "Joana", "99999", "777"):
         assert privado not in saida
+
+
+def test_android_virtual_so_estados_e_numeros(capsys, monkeypatch):
+    chamados = []
+
+    def comando(*partes):
+        chamados.append(partes)
+        return {"docker": (0, "Docker version 27.1.1, build abc"), "sudo": (0, "")}.get(partes[0])
+
+    monkeypatch.setattr(inventario, "_comando", comando)
+    inventario.android_virtual()
+    saida = capsys.readouterr().out
+    for rotulo in ("arquitetura:", "memória:", "disco:", "binder no kernel:", "módulo binder_linux:",
+                   "linux-modules-extra", "docker: Docker version 27.1.1", "sudo sem senha: sim"):
+        assert rotulo in saida
+    assert ("sudo", "-n", "true") in chamados      # só confere: não pede senha nem instala nada
