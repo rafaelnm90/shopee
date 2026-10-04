@@ -522,7 +522,7 @@ def remover(alvo):
         return (False, "não encontrado na lista")
     if linha["origem"] == ORIGEM_POOL:
         conexao.close()
-        return (False, "é uma conta sua do pool — remova pelo painel de Contas e Postos")
+        return (False, "é uma conta sua do pool — remova pelo painel de Contas")
 
     cursor.execute("DELETE FROM blacklist_captura WHERE id = ?", (linha["id"],))
     conexao.commit()
@@ -701,30 +701,27 @@ def montar_relatorio_telegram():
     4096 caracteres, e esse erro já derrubou tela neste projeto antes.
     """
     entradas = listar()
-    if not entradas:
-        return ("🚫 <b>Autores Bloqueados</b>\n\n"
-                "<i>Vazia.</i> Nem as suas contas estão protegidas — "
-                "rode a sincronização.")
-
     do_pool = [e for e in entradas if e["origem"] == ORIGEM_POOL]
     manuais = [e for e in entradas if e["origem"] != ORIGEM_POOL]
 
-    # "Autores" e não "Lista Negra": o Espião já tem uma lista negra, e a dele é
-    # de CANAIS. Esta é de PESSOAS cujas postagens o espelhador não captura.
-    linhas = ["🚫 <b>Autores Bloqueados</b>",
-              "<i>Ninguém aqui tem o vídeo capturado pelo espelhador.</i>", ""]
+    # "Pessoas bloqueadas" e não "Lista Negra": o Espião já tem uma lista negra, e a
+    # dele é de CANAIS. Esta é de PESSOAS cujas postagens o robô dos Autorais não copia.
+    linhas = ["🚫 <b>Pessoas bloqueadas</b>",
+              "<i>O robô dos Autorais não copia para o seu canal os vídeos que estas pessoas "
+              "postam. Como não são copiados, também nunca são repostados.</i>", ""]
 
-    linhas.append(f"🔒 <b>Suas contas ({len(do_pool)})</b> — automático, em todo lugar")
+    linhas.append(f"🔒 <b>Suas contas ({len(do_pool)})</b>: entram sozinhas")
+    linhas.append("<i>Para o robô não copiar de novo o que as suas próprias contas repostam no grupo.</i>")
     for e in do_pool[:10]:
         rotulo = e["nome_exibicao"] or (f"@{e['username']}" if e["username"] else "—")
         linhas.append(f"   • {rotulo} · <code>{e['user_id']}</code>")
     if not do_pool:
-        linhas.append("   <i>nenhuma — rode a sincronização</i>")
+        linhas.append("   <i>nenhuma (abra Contas 👥 de novo para proteger)</i>")
 
     linhas.append("")
-    linhas.append(f"✋ <b>Adicionados por você ({len(manuais)})</b>")
+    linhas.append(f"✋ <b>Bloqueadas por você ({len(manuais)})</b>")
     if not manuais:
-        linhas.append("   <i>nenhum</i>")
+        linhas.append("   <i>nenhuma: toque em ➕ Bloquear alguém</i>")
     for e in manuais[:30]:
         alvo = f"@{e['username']}" if e["username"] else f"<code>{e['user_id']}</code>"
         marca = "🌐" if e["escopo"] == ESCOPO_GLOBAL else "🎥"
@@ -734,7 +731,8 @@ def montar_relatorio_telegram():
         linhas.append(f"   <i>… e mais {len(manuais) - 30}</i>")
 
     linhas.append("")
-    linhas.append("<i>🌐 em todo lugar · 🎥 só nos Autorais · ⏳ @ ainda não resolvido</i>")
+    linhas.append("<i>🎥 só no grupo de origem dos Autorais · 🌐 também nos canais dos parceiros · "
+                  "⏳ @ ainda não confirmado. Toque na pessoa para trocar entre 🎥 e 🌐; 🗑️ desbloqueia.</i>")
     return "\n".join(linhas)
 
 

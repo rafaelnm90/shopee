@@ -418,6 +418,13 @@ def inicializar_tabelas():
     except sqlite3.OperationalError:
         pass  # coluna já existe
 
+    # A conta da captura é quem publica no canal de destino: 1 = pode publicar,
+    # 0 = não pode (não é admin), NULL = ainda não conferido.
+    try:
+        cursor.execute("ALTER TABLE contas_telegram ADD COLUMN publica_no_destino INTEGER")
+    except sqlite3.OperationalError:
+        pass  # coluna já existe
+
     # Garante que as duas linhas de função existem desde o começo (vagas).
     for funcao in FUNCOES:
         cursor.execute(
@@ -805,6 +812,56 @@ def alternar_funcao_permitida(apelido, funcao):
     return (ligada, aplicar_funcoes())
 
 
+# Papéis que o painel oferece, em vez de ligar e desligar cada função.
+PAPEL_CAPTURA = "captura"        # pega do grupo de origem e publica no canal; nunca reposta
+PAPEL_REPOSTAGEM = "repostagem"  # só reveza na devolução ao grupo; nunca assume a captura
+PAPEL_AMBAS = "ambas"            # reposta e assume a captura se a da captura cair
+FUNCOES_DO_PAPEL = {
+    PAPEL_CAPTURA: FUNCAO_ESPELHO,
+    PAPEL_REPOSTAGEM: FUNCAO_REPOSTAGEM,
+    PAPEL_AMBAS: f"{FUNCAO_ESPELHO},{FUNCAO_REPOSTAGEM}",
+}
+ROTULOS_PAPEL = {
+    PAPEL_CAPTURA: "🎯 Captura e publicação no seu canal",
+    PAPEL_REPOSTAGEM: "🔁 Repostagem no grupo de origem",
+    PAPEL_AMBAS: "🔀 Repostagem e reserva da captura",
+}
+
+
+def papel_da_conta(conta):
+    """O papel que as funções permitidas da conta formam (None: nenhuma)."""
+    permitidas = {f.strip() for f in str(conta.get("funcoes_permitidas") or "").split(",")}
+    if FUNCAO_ESPELHO in permitidas and FUNCAO_REPOSTAGEM in permitidas:
+        return PAPEL_AMBAS
+    if FUNCAO_ESPELHO in permitidas:
+        return PAPEL_CAPTURA
+    if FUNCAO_REPOSTAGEM in permitidas:
+        return PAPEL_REPOSTAGEM
+    return None
+
+
+def definir_papel(apelido, papel):
+    """
+    Grava as funções do papel e redistribui os postos. Na captura, a conta assume
+    o posto agora se já estiver apta (senão assume sozinha quando ficar).
+    Devolve (ok, mensagem, mudanças).
+    """
+    conta = obter_conta(apelido)
+    if not conta or papel not in FUNCOES_DO_PAPEL:
+        return (False, "conta ou papel não encontrado", [])
+    salvar_conta(apelido, funcoes_permitidas=FUNCOES_DO_PAPEL[papel])
+    registrar_evento(apelido, "PAPEL", f"{papel} (escolhido no painel)")
+    if papel == PAPEL_CAPTURA:
+        ok, motivo = atribuir_funcao(apelido, FUNCAO_ESPELHO)
+        if ok:
+            return (True, "assumiu a captura", [])
+        return (True, f"assume a captura assim que puder ({motivo})", aplicar_funcoes())
+    mudancas = aplicar_funcoes()
+    if papel == PAPEL_REPOSTAGEM:
+        return (True, "entra no revezamento da repostagem assim que puder", mudancas)
+    return (True, "reposta e cobre a captura se a outra conta cair", mudancas)
+
+
 def atribuir_funcao(apelido, funcao):
     """
     Coloca uma conta específica no posto AGORA, na marra.
@@ -943,6 +1000,8 @@ def avaliar_saude(contas, ocupacao, atividade, agora=None):
             return False, _motivo_inaptidao(conta, funcao)
         if conta.get("status_grupo") != STATUS_NO_GRUPO or not conta.get("habilitada", 1):
             return False, _motivo_inaptidao(conta, funcao)
+        if funcao == FUNCAO_ESPELHO and conta.get("publica_no_destino") == 0:
+            return False, "não é admin do seu canal: não consegue publicar os vídeos"
         if erro_em and (not ultimo_ok or erro_em > ultimo_ok):
             return False, f"último envio falhou ({_data_curta(erro_em)}): {reg.get('ultimo_erro') or '?'}"
         if ultimo_ok:
@@ -991,10 +1050,28 @@ def motivo_saida(conta_id, funcao, ocupacao=None):
     return "outra conta assumiu o posto"
 
 
+# Situação da conta no grupo de origem, em palavras (painel do bot).
+TEXTOS_GRUPO = {
+    STATUS_NO_GRUPO: "no grupo de origem",
+    STATUS_SAIU: "saiu do grupo de origem",
+    STATUS_NUNCA_ENTROU: "não está no grupo de origem",
+    STATUS_BANIDA_GRUPO: "banida ou restrita no grupo de origem",
+    STATUS_DESCONHECIDO: "ainda não conferida",
+}
+
+
+def texto_canal(conta):
+    """Se a conta consegue publicar no seu canal (só importa para quem captura)."""
+    pode = conta.get("publica_no_destino")
+    if pode is None:
+        return "❔ ainda não conferido"
+    return "✅ pode publicar" if pode else "❌ não é admin (não consegue publicar)"
+
+
 def montar_relatorio_telegram():
     """
-    Relatório do painel: ✅/❌ de cada conta na função dela e, abaixo, todas as
-    contas do pool.
+    Relatório do painel: o que cada posto faz, o ✅/❌ de quem está nele e, abaixo,
+    todas as contas do pool com a situação e o papel de cada uma.
 
     Enxuto de propósito: mensagem do Telegram estoura em 4096 caracteres, e este
     painel cresce a cada conta nova. Com 20 contas ainda cabe.
@@ -1003,14 +1080,18 @@ def montar_relatorio_telegram():
     ocupacao = ler_ocupacao()
     saude = avaliar_saude(contas, ocupacao, ler_atividade())
 
-    linhas = ["👥 <b>Contas e Postos</b>", ""]
+    linhas = ["👥 <b>Contas dos Autorais</b>",
+              "<i>Contas do Telegram que o robô dos Autorais usa:</i>",
+              "🎯 <b>Captura</b>: uma conta pega os vídeos do grupo de origem e publica no seu canal.",
+              "🔁 <b>Repostagem</b>: as outras devolvem os vídeos ao grupo de origem, uma de cada vez.",
+              ""]
     if not contas:
-        linhas.append("<i>Nenhuma conta cadastrada ainda: o robô dos Autorais usa a sessão fixa.</i>")
-        linhas.append("<i>No servidor: python3 pool_contas.py login (ou importar-sessoes)</i>")
+        linhas.append("<i>Nenhuma conta cadastrada ainda: toque em ➕ Nova conta.</i>")
         return "\n".join(linhas)
 
+    titulos = {FUNCAO_ESPELHO: "🎯 <b>Captura agora</b>", FUNCAO_REPOSTAGEM: "🔁 <b>Repostagem agora</b>"}
     for funcao in FUNCOES:
-        linhas.append(f"<b>{ROTULOS_FUNCAO[funcao]}</b>")
+        linhas.append(titulos[funcao])
         for p in (p for p in saude["postos"] if p["funcao"] == funcao):
             icone = "✅" if p["ok"] else "❌"
             nome = f"<b>{p['apelido']}</b> · " if p["apelido"] else ""
@@ -1027,22 +1108,26 @@ def montar_relatorio_telegram():
     for c in contas:
         icone = ICONES_GRUPO.get(c["status_grupo"], "❓")
         trabalho = postos_da_conta(c["id"], ocupacao)
-        if trabalho:
-            papel = "🎯 " + " + ".join(trabalho)
+        if FUNCAO_ESPELHO in trabalho:
+            agora = "capturando"
+        elif trabalho:
+            agora = "repostando"
         elif conta_apta(c, FUNCAO_ESPELHO) or conta_apta(c, FUNCAO_REPOSTAGEM):
-            papel = "🟡 reserva"
+            agora = "reserva"
         else:
-            papel = "⚫ fora"
-        extra = "" if c["habilitada"] else " ⏸️"
-        if c["status_sessao"] != SESSAO_OK:
-            extra += f" ⚠️{c['status_sessao']}"
-        linhas.append(f"{icone} <b>{c['apelido']}</b> · {papel}{extra}")
-        linhas.append(f"   <code>{c['user_id'] or '?'}</code> · "
-                      f"{('@' + c['username']) if c['username'] else 'sem @'} "
-                      f"· pode: {c['funcoes_permitidas']}")
+            agora = "parada"
+        if not c["habilitada"]:
+            agora = "pausada por você"
+        elif c["status_sessao"] != SESSAO_OK:
+            agora = "desconectada do Telegram"
+        identidade = ("@" + c["username"]) if c["username"] else f"id {c['user_id'] or '?'}"
+        papel = papel_da_conta(c)
+        linhas.append(f"{icone} <b>{c['apelido']}</b> ({identidade}) · {agora}")
+        linhas.append(f"   {TEXTOS_GRUPO.get(c['status_grupo'], c['status_grupo'])} · "
+                      f"{ROTULOS_PAPEL[papel] if papel else '⚪ papel não escolhido'}")
 
     linhas.append("")
-    linhas.append("<i>Toque numa conta para mudar as funções dela.</i>")
+    linhas.append("<i>Toque numa conta para ver os detalhes e escolher para que ela serve.</i>")
     return "\n".join(linhas)
 
 
@@ -1355,6 +1440,63 @@ def obter_grupo_autorais():
     return None
 
 
+def obter_destino_autorais():
+    """Canal onde a conta da captura publica os vídeos ('autorais_config' → 'destino')."""
+    try:
+        conexao = _obter_conexao()
+        linha = conexao.execute("SELECT valor FROM configuracoes WHERE chave = 'autorais_config'").fetchone()
+        conexao.close()
+        destino = str(json.loads(linha["valor"]).get("destino") or "").split(":")[0].strip() if linha else ""
+        if destino.lstrip("-").isdigit():
+            return int(destino)
+        return destino or None
+    except Exception as e:
+        logger.error(f"❌ [Pool] Não consegui ler o canal de destino dos Autorais: {e}")
+        return None
+
+
+def marcar_publicacao_no_destino(apelido, pode):
+    conexao = _obter_conexao()
+    conexao.execute("UPDATE contas_telegram SET publica_no_destino = ? WHERE apelido = ?",
+                    (None if pode is None else int(bool(pode)), apelido))
+    conexao.commit()
+    conexao.close()
+
+
+async def conferir_destino(cliente, conta):
+    """
+    A conta consegue publicar no canal de destino? Num canal de transmissão só o
+    dono e o admin com "publicar mensagens" conseguem; num grupo, qualquer membro
+    não restrito. Grava em publica_no_destino e devolve True/False, ou None quando
+    não deu para concluir (sem destino configurado, limite do Telegram).
+    """
+    from telethon import errors
+
+    destino = obter_destino_autorais()
+    if not destino:
+        return None
+    try:
+        try:
+            entidade = await cliente.get_entity(destino)
+        except ValueError:
+            # Cache vazio (StringSession nova): carrega as conversas e tenta de novo.
+            # Se nem assim aparece, a conta não está no canal.
+            await cliente.get_dialogs()
+            entidade = await cliente.get_entity(destino)
+        permissoes = await cliente.get_permissions(entidade, "me")
+        if getattr(entidade, "broadcast", False):
+            direitos = getattr(getattr(permissoes, "participant", None), "admin_rights", None)
+            pode = bool(permissoes.is_creator or (permissoes.is_admin and getattr(direitos, "post_messages", False)))
+        else:
+            pode = not getattr(permissoes, "is_banned", False)
+    except errors.FloodWaitError:
+        return None
+    except Exception:
+        pode = False   # fora do canal, canal privado para ela ou não encontrado
+    marcar_publicacao_no_destino(conta["apelido"], pode)
+    return pode
+
+
 async def checar_conta(conta, grupo_id=None, cliente=None):
     """
     Conecta com a conta, descobre em que pé ela está e grava no banco.
@@ -1394,6 +1536,11 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
                          nome_exibicao=nome or apelido,
                          telefone=getattr(eu, "phone", None))
 
+        # Quem pode capturar também publica no seu canal: confere antes do grupo,
+        # para o cadastro já avisar mesmo com a conta ainda fora do grupo de origem.
+        if FUNCAO_ESPELHO in str(conta.get("funcoes_permitidas") or ""):
+            await conferir_destino(cliente, conta)
+
         if not grupo_id:
             atualizar_status(apelido, status_sessao=SESSAO_OK,
                              erro="grupo dos Autorais não configurado")
@@ -1427,32 +1574,31 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
             # ARMADILHA: o cache de entidades mora no arquivo .session e NÃO
             # viaja para a StringSession. Numa conta recém-adotada o cache está
             # vazio, então get_entity() falha por ID mesmo quando a conta ESTÁ
-            # no grupo — e a checagem concluía "NUNCA_ENTROU" por engano.
-            # get_dialogs() preenche o cache; é o mesmo truque que o espelhador
-            # usa no start. Só depois de tentar de novo é que desistimos.
+            # no grupo. Procura o grupo direto nas conversas da conta: estar lá
+            # (sem "left") é estar no grupo. Erro aqui (FloodWait, rede) sobe para
+            # os tratadores de fora, que guardam o motivo e não mudam o estado.
+            logger.info(f"🗂️ [Pool] {apelido}: cache vazio, procurando o grupo nas conversas...")
+            entidade = None
+            async for dialogo in cliente.iter_dialogs():
+                if dialogo.id == grupo_id:
+                    entidade = dialogo.entity
+                    break
+            fora = STATUS_SAIU if conta.get("ja_esteve_no_grupo") else STATUS_NUNCA_ENTROU
+            if entidade is None or getattr(entidade, "left", False):
+                atualizar_status(apelido, status_grupo=fora, status_sessao=SESSAO_OK,
+                                 erro="o grupo de origem não está nas conversas da conta")
+                return (fora, SESSAO_OK)
             try:
-                logger.info(f"🗂️ [Pool] {apelido}: cache vazio, carregando as conversas "
-                            f"para localizar o grupo...")
-                await cliente.get_dialogs()
-                entidade = await cliente.get_entity(grupo_id)
                 permissoes = await cliente.get_permissions(entidade, "me")
-                if getattr(permissoes, "is_banned", False):
-                    atualizar_status(apelido, status_grupo=STATUS_BANIDA_GRUPO,
-                                     status_sessao=SESSAO_OK, erro="restrita no grupo")
-                    return (STATUS_BANIDA_GRUPO, SESSAO_OK)
-                atualizar_status(apelido, status_grupo=STATUS_NO_GRUPO, status_sessao=SESSAO_OK)
-                return (STATUS_NO_GRUPO, SESSAO_OK)
             except errors.UserNotParticipantError:
-                fora = STATUS_SAIU if conta.get("ja_esteve_no_grupo") else STATUS_NUNCA_ENTROU
                 atualizar_status(apelido, status_grupo=fora, status_sessao=SESSAO_OK)
                 return (fora, SESSAO_OK)
-            except Exception:
-                pass
-
-            fora = STATUS_SAIU if conta.get("ja_esteve_no_grupo") else STATUS_NUNCA_ENTROU
-            atualizar_status(apelido, status_grupo=fora, status_sessao=SESSAO_OK,
-                             erro="grupo não encontrado nem depois de carregar as conversas")
-            return (fora, SESSAO_OK)
+            if getattr(permissoes, "is_banned", False):
+                atualizar_status(apelido, status_grupo=STATUS_BANIDA_GRUPO,
+                                 status_sessao=SESSAO_OK, erro="restrita no grupo")
+                return (STATUS_BANIDA_GRUPO, SESSAO_OK)
+            atualizar_status(apelido, status_grupo=STATUS_NO_GRUPO, status_sessao=SESSAO_OK)
+            return (STATUS_NO_GRUPO, SESSAO_OK)
 
     except errors.FloodWaitError as e:
         # Não dá para concluir nada: preserva o estado anterior e sai quieto.
