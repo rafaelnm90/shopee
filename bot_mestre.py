@@ -7275,6 +7275,16 @@ def _disco_da_fila(itens):
                 pass
     return total
 
+def ultima_captura_parceiro(parceiro_id):
+    """Data da captura mais recente do parceiro (publicada ou não), ou None."""
+    try:
+        with db.conexao() as conexao:
+            linha = conexao.execute("SELECT MAX(data_captura) FROM fila_parceiros WHERE parceiro_id = ?",
+                                    (int(parceiro_id),)).fetchone()
+        return linha[0] if linha and linha[0] else None
+    except Exception:
+        return None
+
 def resumo_fila_parceiro(p, itens, hoje_str, disco_todos):
     """
     Topo da fila do parceiro: situação, disco, cota, acesso à origem, a prévia do
@@ -7282,7 +7292,15 @@ def resumo_fila_parceiro(p, itens, hoje_str, disco_todos):
     descartados) e a próxima publicação.
     """
     status = "🟢" if p.get("ativo") else "⏸️"
-    acesso = "✅" if p.get("origem_ok") else "⏳"
+    if p.get("origem_ok"):
+        acesso = "✅"
+    else:
+        acesso = "⏳ " + html_escape(p.get("origem_erro") or "aguardando a conta da captura entrar no canal")
+    ultima = ultima_captura_parceiro(p.get("id"))
+    try:
+        ultima = datetime.strptime(ultima[:16], "%Y-%m-%d %H:%M").strftime("%d/%m às %H:%M") if ultima else "nenhuma ainda"
+    except ValueError:
+        pass
     texto = (
         f"{status} <b>{html_escape(p.get('nome'))}</b>  ·  <code>#{p.get('id')}</code>\n"
         "<blockquote>"
@@ -7291,6 +7309,7 @@ def resumo_fila_parceiro(p, itens, hoje_str, disco_todos):
         f"⏳ Oculto por: <b>{p.get('dias_atraso')} dias</b>\n"
         f"📅 Cota Diária: <b>{rotulo_cota_parceiro(p)}</b>\n"
         f"🤖 Acesso à origem: {acesso}\n"
+        f"📥 Última captura: <b>{ultima}</b>\n"
     )
 
     por_dia = {}
@@ -16954,7 +16973,16 @@ async def monitor_saude():
         except Exception:
             pass
 
-        # 6. Backup diário parado
+        # 6. Parceiro ativo cuja origem a conta da captura não acessa: nada é capturado
+        try:
+            for p in ler_parceiros(apenas_ativos=True):
+                if p.get("origem_ok") == 0 and p.get("origem_erro") and not _ja_alertou(f"parceiro_{p.get('id')}"):
+                    alertas.append(f"👥 <b>Parceiro {html_escape(p.get('nome'))} sem captura</b>\n"
+                                   f"A conta da captura não acessa a origem: {html_escape(p.get('origem_erro'))}")
+        except Exception:
+            pass
+
+        # 7. Backup diário parado
         try:
             ultimo = backup_dados.ultimo_backup()
             idade = ultimo[1] if ultimo else None
