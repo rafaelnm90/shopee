@@ -79,17 +79,17 @@ def _zip(caminho, nomes):
     return open(caminho, "rb").read()
 
 
-def _enviar(conteudo, chave=None, tamanho_pedaco=None, ordem=None):
+def _enviar(conteudo, chave=None, tamanho_pedaco=None, inicios=None):
     """Sobe o servidor da tela de verdade e envia o arquivo em pedaços, como a página faz."""
     from aiohttp.test_utils import TestClient, TestServer
     k = tela.CHAVE if chave is None else chave
     tamanho = tamanho_pedaco or max(1, len(conteudo))
-    pedacos = [conteudo[i:i + tamanho] for i in range(0, max(1, len(conteudo)), tamanho)]
+    inicios = inicios if inicios is not None else list(range(0, max(1, len(conteudo)), tamanho))
 
     async def cenario():
         async with TestClient(TestServer(tela.montar_app())) as cliente:
-            for n in (ordem or range(len(pedacos))):
-                r = await cliente.post(f"/app/pedaco?k={k}&n={n}", data=pedacos[n])
+            for inicio in inicios:
+                r = await cliente.post(f"/app/pedaco?k={k}&inicio={inicio}", data=conteudo[inicio:inicio + tamanho])
                 if r.status != 200:
                     return r.status, None
                 corpo = await r.json()
@@ -140,11 +140,39 @@ def test_enviar_app_grande_demais(monkeypatch, tmp_path):
     assert not (tmp_path / "app").exists()
 
 
-def test_pedaco_fora_de_ordem_pede_para_enviar_de_novo(monkeypatch, tmp_path):
+def test_pedaco_que_pula_bytes_pede_para_enviar_de_novo(monkeypatch, tmp_path):
     instalados = _android_falso(monkeypatch, tmp_path)
-    status, corpo = _enviar(b"abcdef", tamanho_pedaco=2, ordem=[0, 2, 1])
+    status, corpo = _enviar(b"abcdef", tamanho_pedaco=2, inicios=[0, 4])
     assert corpo == {"ok": False, "mensagem": "o envio se perdeu no meio: envie de novo"}
     assert instalados == []
+
+
+def test_pedaco_repetido_nao_duplica_o_arquivo(monkeypatch, tmp_path):
+    # O celular repete o pedaço quando a resposta se perde no caminho.
+    instalados = _android_falso(monkeypatch, tmp_path)
+    recebido = []
+    monkeypatch.setattr(tela, "instalar_arquivo", lambda arq: recebido.append(open(arq, "rb").read()) or (True, "ok"))
+    conteudo = b"0123456789"
+    status, corpo = _enviar(conteudo, tamanho_pedaco=4, inicios=[0, 4, 4, 8])
+    assert corpo == {"ok": True, "mensagem": "ok"} and recebido == [conteudo]
+    assert instalados == []
+
+
+def test_erro_no_envio_fica_registrado_so_o_tipo(monkeypatch, tmp_path):
+    _android_falso(monkeypatch, tmp_path)
+    monkeypatch.setattr(tela, "ESTADO", str(tmp_path / "tela_estado"))
+
+    original = tela.os.makedirs
+
+    def quebra(caminho, *a, **k):
+        if caminho == tela.av.PASTA_APP:
+            raise PermissionError("/home/fulano/segredo")
+        return original(caminho, *a, **k)
+
+    monkeypatch.setattr(tela.os, "makedirs", quebra)
+    status, _ = _enviar(b"abc")
+    assert status == 500
+    assert (tmp_path / "tela_estado").read_text() == "enviado; último erro: pedaço PermissionError"
 
 
 def test_endereco_do_tunel_na_saida_do_cloudflared():
@@ -160,3 +188,21 @@ def test_endereco_do_tunel_na_saida_do_cloudflared():
     assert rodar(tela.achar_url(processo, 5)) == "https://palavras-soltas-aqui.trycloudflare.com"
     processo.stdout = Saida(["INF erro qualquer"])
     assert rodar(tela.achar_url(processo, 5)) is None
+
+
+def test_recusa_do_android_mostra_o_motivo(monkeypatch, tmp_path):
+    monkeypatch.setattr(tela.av, "PASTA_APP", str(tmp_path / "app"))
+    saida = ("Performing Streamed Install\nadb: failed to install /x/shopee.apk: Failure "
+             "[INSTALL_FAILED_NO_MATCHING_ABIS: Failed to extract native libraries, res=-113]")
+    monkeypatch.setattr(tela.av, "_adb", lambda *p, timeout=30: (1, saida))
+    (tmp_path / "app").mkdir()
+    arquivo = tmp_path / "app" / "enviado.zip"
+    _zip(arquivo, ["AndroidManifest.xml"])
+    ok, mensagem = tela.instalar_arquivo(str(arquivo))
+    assert ok is False and "processador do servidor" in mensagem
+
+
+def test_codigo_de_recusa_desconhecido_aparece_como_veio():
+    assert tela.motivo_da_recusa("Failure [INSTALL_FAILED_ALGO_NOVO]") == \
+        "o Android recusou o app: INSTALL_FAILED_ALGO_NOVO"
+    assert "sem motivo" in tela.motivo_da_recusa("")

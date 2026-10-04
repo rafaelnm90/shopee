@@ -93,12 +93,18 @@ SEGUNDOS_PARA_ABRIR_TELA = 120
 
 
 def _rodar(*partes, timeout=120):
-    """(código de saída, saída) de um comando; None se ele não existe ou travou."""
+    """
+    (código de saída, saída) de um comando; None se ele não existe ou travou. Na
+    falha, a saída leva também o stderr, onde o adb diz o motivo (INSTALL_FAILED_...).
+    """
     try:
         r = subprocess.run(partes, capture_output=True, text=True, timeout=timeout)
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
-    return r.returncode, (r.stdout or "").strip()
+    saida = (r.stdout or "").strip()
+    if r.returncode != 0:
+        saida = (saida + "\n" + (r.stderr or "")).strip()
+    return r.returncode, saida
 
 
 def _ok(resultado):
@@ -316,6 +322,10 @@ def abrir_tela():
         if not _passo("instalar o cloudflared", _rodar("sudo", "-n", "dpkg", "-i", deb, timeout=300)):
             return False
     os.makedirs(PASTA_TRABALHO, exist_ok=True)
+    # Uma tela nova substitui a anterior: o Rafael não precisa ter tocado em Terminei.
+    if _ok(_rodar("pkill", "-f", "tela_android.py")):
+        print("tela anterior: fechada")
+        time.sleep(2)
     try:
         os.remove(ARQUIVO_TELA)
     except FileNotFoundError:

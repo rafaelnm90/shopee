@@ -141,18 +141,47 @@ def instalar_arquivo(arquivo):
     if not partes:
         return False, "não achei o app dentro do arquivo"
     comando = "install" if len(partes) == 1 else "install-multiple"
-    if not av._ok(av._adb(comando, "-r", "-g", *partes, timeout=900)):
-        return False, "o Android recusou o app"
+    r = av._adb(comando, "-r", "-g", *partes, timeout=900)
+    if not av._ok(r):
+        return False, motivo_da_recusa(r[1] if r else "")
     return True, f"app da Shopee: {av.versao_shopee()}"
 
 
-# O app enviado chega em pedaços de 8 MB, em ordem: o túnel recusa pedido acima de
-# uns 100 MB, e o app da Shopee passa disso. O pedaço 0 começa o arquivo do zero.
-_envio = {"proximo": 0, "bytes": 0}
+# O que os códigos mais comuns de recusa do Android querem dizer, para o Rafael.
+RECUSAS = {
+    "INSTALL_FAILED_NO_MATCHING_ABIS": "esse arquivo não é para o processador do servidor (ARM 64 bits): baixe a "
+                                       "versão mais nova da Shopee Brasil",
+    "INSTALL_FAILED_OLDER_SDK": "esse app pede um Android mais novo que o 13",
+    "INSTALL_FAILED_DEPRECATED_SDK_VERSION": "esse app é antigo demais para o Android 13: baixe a versão mais nova",
+    "INSTALL_FAILED_UPDATE_INCOMPATIBLE": "já existe outra Shopee instalada com assinatura diferente",
+    "INSTALL_FAILED_VERSION_DOWNGRADE": "já existe uma versão mais nova instalada",
+    "INSTALL_PARSE_FAILED_NOT_APK": "o arquivo está corrompido ou incompleto",
+    "INSTALL_FAILED_INVALID_APK": "o arquivo está corrompido ou faltam partes do app",
+    "INSTALL_FAILED_MISSING_SPLIT": "faltam partes do app: baixe o XAPK completo",
+    "INSTALL_FAILED_INSUFFICIENT_STORAGE": "falta espaço no Android",
+}
 
 
+def motivo_da_recusa(saida_adb):
+    """O código que o adb devolve (INSTALL_FAILED_...) traduzido, ou só o código."""
+    achado = re.search(r"INSTALL_[A-Z_]+", saida_adb or "")
+    if not achado:
+        return "o Android recusou o app (sem motivo informado)"
+    codigo = achado.group(0)
+    return f"o Android recusou o app: {RECUSAS.get(codigo, codigo)}"
+
+
+# O app enviado chega em pedaços (o túnel recusa pedido acima de uns 100 MB, e o
+# app da Shopee passa disso). Cada pedaço diz em que byte começa: o 0 começa o
+# arquivo do zero, e um pedaço repetido (a resposta se perdeu no caminho e o
+# celular tentou de novo) sobrescreve o que já tinha chegado em vez de duplicar.
 def _arquivo_enviado():
     return os.path.join(av.PASTA_APP, "enviado.zip")
+
+
+def registrar_erro(onde, erro):
+    """Só o tipo do erro, no estado da tela: o android_virtual mostra no Actions."""
+    gravar_estado(f"enviado; último erro: {onde} {type(erro).__name__}")
 
 
 async def receber_pedaco(request):
@@ -163,25 +192,31 @@ async def receber_pedaco(request):
     if not autorizado(request):
         raise web.HTTPNotFound()
     try:
-        numero = int(request.query.get("n", ""))
+        inicio = int(request.query.get("inicio", ""))
     except ValueError:
         raise web.HTTPBadRequest()
-    if numero == 0:
-        shutil.rmtree(av.PASTA_APP, ignore_errors=True)
-        os.makedirs(av.PASTA_APP)
-        _envio.update(proximo=0, bytes=0)
-    if numero != _envio["proximo"]:
-        return web.json_response({"ok": False, "mensagem": "o envio se perdeu no meio: envie de novo"})
-    with open(_arquivo_enviado(), "ab") as destino:
-        async for bloco in request.content.iter_chunked(1024 * 1024):
-            _envio["bytes"] += len(bloco)
-            if _envio["bytes"] > LIMITE_APP_MB * 1024 * 1024:
-                shutil.rmtree(av.PASTA_APP, ignore_errors=True)
-                _envio.update(proximo=0, bytes=0)
-                return web.json_response({"ok": False, "mensagem": f"arquivo maior que {LIMITE_APP_MB} MB"})
-            destino.write(bloco)
-    _envio["proximo"] += 1
-    return web.json_response({"ok": True})
+    try:
+        if inicio == 0:
+            shutil.rmtree(av.PASTA_APP, ignore_errors=True)
+            os.makedirs(av.PASTA_APP)
+        tamanho = os.path.getsize(_arquivo_enviado()) if os.path.exists(_arquivo_enviado()) else 0
+        if inicio > tamanho:
+            return web.json_response({"ok": False, "mensagem": "o envio se perdeu no meio: envie de novo"})
+        with open(_arquivo_enviado(), "r+b" if tamanho else "wb") as destino:
+            destino.truncate(inicio)
+            destino.seek(inicio)
+            total = inicio
+            async for bloco in request.content.iter_chunked(256 * 1024):
+                total += len(bloco)
+                if total > LIMITE_APP_MB * 1024 * 1024:
+                    destino.close()
+                    shutil.rmtree(av.PASTA_APP, ignore_errors=True)
+                    return web.json_response({"ok": False, "mensagem": f"arquivo maior que {LIMITE_APP_MB} MB"})
+                destino.write(bloco)
+        return web.json_response({"ok": True, "recebido": total})
+    except Exception as e:
+        registrar_erro("pedaço", e)
+        raise
 
 
 async def instalar_enviado(request):
@@ -193,9 +228,11 @@ async def instalar_enviado(request):
             return web.json_response({"ok": False, "mensagem": "nenhum arquivo chegou: envie de novo"})
         ok, mensagem = await asyncio.to_thread(instalar_arquivo, _arquivo_enviado())
         return web.json_response({"ok": ok, "mensagem": mensagem})
+    except Exception as e:
+        registrar_erro("instalação", e)
+        raise
     finally:
         shutil.rmtree(av.PASTA_APP, ignore_errors=True)
-        _envio.update(proximo=0, bytes=0)
 
 
 def montar_app():
@@ -271,7 +308,9 @@ async def main():
             await asyncio.wait_for(FIM.wait(), MINUTOS_ABERTA * 60)
         except asyncio.TimeoutError:
             pass
-        gravar_estado("fechada")
+        with open(ESTADO) as f:
+            erro = f.read().partition("; ")[2]
+        gravar_estado("fechada" + (f"; {erro}" if erro else ""))
     finally:
         if tunel.returncode is None:
             tunel.terminate()
@@ -339,7 +378,21 @@ function digitar() {
 }
 function tecla(nome) { enviar({ tipo: "tecla", tecla: nome }); }
 function avisar(texto) { document.getElementById("aviso").textContent = texto; }
-const PEDACO = 8 * 1024 * 1024;
+const PEDACO = 2 * 1024 * 1024;
+async function enviarPedaco(arquivo, inicio) {
+  // Até 3 tentativas: a rede do celular oscila, e o servidor aceita o mesmo pedaço de novo.
+  let motivo = "";
+  for (let tentativa = 1; tentativa <= 3; tentativa++) {
+    try {
+      const r = await fetch("/app/pedaco?k=" + K + "&inicio=" + inicio,
+                            { method: "POST", body: arquivo.slice(inicio, inicio + PEDACO) });
+      if (r.ok) return await r.json();
+      motivo = "o servidor respondeu " + r.status;
+    } catch (e) { motivo = "a conexão caiu (" + e.name + ")"; }
+    await new Promise(ok => setTimeout(ok, 2000 * tentativa));
+  }
+  return { ok: false, mensagem: motivo + ". Me avise no chat." };
+}
 async function enviarApp() {
   const campo = document.getElementById("arquivo");
   if (!campo.files.length) { avisar("Escolha primeiro o arquivo do app (APK ou XAPK)."); return; }
@@ -348,19 +401,18 @@ async function enviarApp() {
     avisar("❌ O .apkm (APKMirror) é trancado. Baixe o APK ou XAPK pelo Uptodown ou APKPure.");
     return;
   }
-  const total = Math.max(1, Math.ceil(arquivo.size / PEDACO));
+  for (let inicio = 0; inicio < Math.max(1, arquivo.size); inicio += PEDACO) {
+    avisar("Enviando... " + Math.round(inicio * 100 / arquivo.size) + "%");
+    const j = await enviarPedaco(arquivo, inicio);
+    if (!j.ok) { avisar("❌ " + j.mensagem); return; }
+  }
+  avisar("Instalando no Android... (pode levar 1 min)");
   try {
-    for (let n = 0; n < total; n++) {
-      avisar("Enviando... " + Math.round(n * 100 / total) + "%");
-      const r = await fetch("/app/pedaco?k=" + K + "&n=" + n,
-                            { method: "POST", body: arquivo.slice(n * PEDACO, (n + 1) * PEDACO) });
-      const j = await r.json();
-      if (!j.ok) { avisar("❌ " + j.mensagem); return; }
-    }
-    avisar("Instalando no Android... (pode levar 1 min)");
-    const j = await (await fetch("/app/instalar?k=" + K, { method: "POST" })).json();
+    const r = await fetch("/app/instalar?k=" + K, { method: "POST" });
+    if (!r.ok) { avisar("❌ O servidor respondeu " + r.status + " na instalação. Me avise no chat."); return; }
+    const j = await r.json();
     avisar((j.ok ? "✅ " : "❌ ") + j.mensagem);
-  } catch (e) { avisar("❌ O envio caiu. Tente de novo."); }
+  } catch (e) { avisar("❌ A conexão caiu na instalação (" + e.name + "). Me avise no chat."); }
 }
 function terminar() {
   if (!confirm("Fechar a tela do Android? Depois disso este link para de funcionar.")) return;
