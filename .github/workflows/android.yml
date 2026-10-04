@@ -1,0 +1,34 @@
+name: Android virtual (Shopee Vídeo)
+
+# O Android virtual onde o robô da Shopee Vídeo opera o app (android_virtual.py).
+# Só roda à mão. Sem marcar "preparar", só mostra o estado; marcado, instala o
+# Docker e o adb, carrega o binder do kernel e liga o Android (só o que falta).
+#
+# O repositório é público, e os logs do Actions também: o android_virtual.py
+# imprime só estados e números.
+on:
+  workflow_dispatch:
+    inputs:
+      preparar:
+        description: "Instalar o que falta e ligar o Android (desmarcado: só mostra o estado)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Android virtual no servidor
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          command_timeout: 25m
+          script: |
+            cd ~/shopee
+            venv/bin/python3 android_virtual.py ${{ inputs.preparar && '--preparar' || '' }}

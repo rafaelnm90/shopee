@@ -34,7 +34,7 @@ Módulos de apoio (não são serviços):
 - `utils.py` (`erros_logs`, caches, validação de IDs) e `fuso.py` (horário de Brasília e formato de log).
 - `api_gemini.py` (IA, com cascata de modelos) e `api_shopee.py` (links de afiliado).
 - `backup_dados.py`: backup diário (03:40, pelo bot_mestre) do banco, das sessões, dos JSON e do `.env` em `~/backups`, ficam 7. O `/status` mostra a idade do último.
-- Ferramentas: `validar_deploy.py`, `testar_chaves.py`, `inventario.py`, `avisar_rafael.py` (aviso no privado pelo bot, usado pelo `avisar.yml`), `servicos_afetados.py` (o deploy pergunta a ele quem reiniciar) e `faxina_servidor.py` (tira tabelas, chaves e arquivos sem uso, guardando cópia antes).
+- Ferramentas: `validar_deploy.py`, `testar_chaves.py`, `inventario.py`, `avisar_rafael.py` (aviso no privado pelo bot, usado pelo `avisar.yml`), `servicos_afetados.py` (o deploy pergunta a ele quem reiniciar), `faxina_servidor.py` (tira tabelas, chaves e arquivos sem uso, guardando cópia antes) e `android_virtual.py` (o Android virtual do robô da Shopee Vídeo: Redroid em Docker, adb só em 127.0.0.1).
 
 O README tem os IDs dos canais, as cinco filas e os comandos do servidor.
 
@@ -124,6 +124,7 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
     Use para achar o que acumula.
   - `avisar.yml` (só à mão): o Claude dispara quando uma pergunta ao Rafael está sem resposta; o bot manda o aviso no privado (`avisar_rafael.py`).
   - `faxina.yml` (só à mão) roda o `faxina_servidor.py` no servidor: sem marcar "executar", só mostra; marcado, guarda em `~/backups/antigos` e tira. Para tirar outra coisa sem uso, acrescentar na lista do `faxina_servidor.py` depois de conferir que nenhum código usa.
+  - `android.yml` (só à mão) roda o `android_virtual.py` no servidor: sem marcar "preparar", só mostra o estado do Android virtual; marcado, instala o Docker e o adb, carrega o binder e liga o Android (só o que falta).
   - O repositório é público e os logs do Actions também: nos workflows, só estados e números; nunca conteúdo de log dos robôs ou dados do banco.
   - Não há acesso direto ao servidor por SSH a partir da sessão. Os detalhes dos erros ficam no `/status` do bot, no privado do Rafael.
 
