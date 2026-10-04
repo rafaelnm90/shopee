@@ -34,7 +34,7 @@ Módulos de apoio (não são serviços):
 - `utils.py` (`erros_logs`, caches, validação de IDs) e `fuso.py` (horário de Brasília e formato de log).
 - `api_gemini.py` (IA, com cascata de modelos) e `api_shopee.py` (links de afiliado).
 - `backup_dados.py`: backup diário (03:40, pelo bot_mestre) do banco, das sessões, dos JSON e do `.env` em `~/backups`, ficam 7. O `/status` mostra a idade do último.
-- Ferramentas: `validar_deploy.py`, `testar_chaves.py`, `inventario.py`.
+- Ferramentas: `validar_deploy.py`, `testar_chaves.py`, `inventario.py` e `servicos_afetados.py` (o deploy pergunta a ele quem reiniciar).
 
 O README tem os IDs dos canais, as cinco filas e os comandos do servidor.
 
@@ -80,7 +80,7 @@ arquivo cresce: `grep -n "^# --- " bot_mestre.py`. Os blocos grandes usam
 
 - Importar `db` (o `utils` importa) troca o `sqlite3.connect` do processo inteiro, para as sessões do Telethon também esperarem 30 s pelo lock. Importar `fuso` trava o fuso no horário de Brasília.
 - Os jobs do APScheduler e o FSM do aiogram ficam em memória.
-  - Um restart (todo deploy) refaz a grade do dia em `main()`.
+  - Um restart refaz a grade do dia em `main()`. O deploy só reinicia o robô cujo código mudou.
   - Também derruba os fluxos de painel que estavam abertos.
 - aiogram: ganha o primeiro handler registrado que casar. Num fluxo FSM, o handler de "Cancelar ❌" tem de vir antes do handler que lê texto livre.
 - `validar_deploy.py` exige que o 1º parâmetro de um handler se chame `message`, `callback`, `event`, `query`, `msg` ou `callback_query`.
@@ -113,7 +113,7 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
 - `--ordem aleatoria` embaralha os testes. Um teste não pode depender de outro ter rodado antes.
 - CI:
   - `validar.yml` roda em todo PR para a `main`, com a suíte em 4 horários e ordem aleatória.
-  - `deploy.yml` roda no merge na `main`. Ele repete a validação e, por SSH, faz `git pull` e `pip install` no servidor e reinicia os 5 serviços. Confere se todos subiram aos 25 s e de novo 3 min depois (processo e contador de reinícios).
+  - `deploy.yml` roda no merge na `main`. Ele repete a validação e, por SSH, faz `git pull` e `pip install` no servidor. Reinicia só os serviços cujo código mudou (o arquivo do robô ou um módulo que ele importa; `requirements.txt` ou dúvida = todos; só docs, testes ou workflows = nenhum). Confere os 5 aos 25 s e de novo 3 min depois (processo e contador de reinícios). Robô que cai mostra só o tipo do erro no log.
   - `diagnostico.yml` olha o servidor de hora em hora, só lendo: robôs (estado, desde quando, reinícios), máquina (carga, memória, disco), banco e volume de log. Fica vermelho com robô fora do ar ou disco acima de 90% (o GitHub manda e-mail). Para ver o servidor agora, dispare-o (`run_workflow` em `diagnostico.yml`) e leia o log do job.
   - `inventario.yml` (só à mão) roda o `inventario.py` no servidor. Ele mostra:
     - tamanho e idade de cada pasta, os arquivos soltos e as linhas por tabela;

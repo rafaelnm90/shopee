@@ -112,6 +112,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **03/10/2026:** o alerta "Nenhuma publicação hoje" do Espião conta só os clones com horário até hoje.
 - **03/10/2026:** o deploy reinicia também o `downloader_bot`, como os outros quatro.
 - **03/10/2026:** o deploy confere os robôs aos 25 s e de novo 3 min depois.
+- **03/10/2026:** o deploy reinicia só os robôs cujo código mudou (o arquivo do robô ou um módulo que ele importa). Mudança só em documentação, testes ou workflows não reinicia ninguém; `requirements.txt` ou dúvida reinicia todos. Robô parado reinicia sempre.
 - **03/10/2026:** um diagnóstico de hora em hora olha o servidor só lendo, e fica vermelho (e-mail do GitHub) com robô fora do ar ou disco acima de 90%.
   - Nos logs do Actions saem só estados e números, porque o repositório é público.
   - Nada de acesso SSH direto pela sessão do Claude.
