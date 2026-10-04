@@ -8,6 +8,8 @@ e sai; ela fecha depois de MINUTOS_ABERTA ou no botão "Terminei".
 Como funciona:
 - um servidor web pequeno, só em 127.0.0.1, mostra prints da tela em sequência
   (adb screencap) e repassa toques, arrastos, texto e teclas (adb input);
+- o botão "Enviar app" recebe um APK ou XAPK baixado no celular do Rafael e
+  instala no Android (os sites de APK recusam o servidor, não o celular dele);
 - um túnel temporário do Cloudflare (cloudflared, sem conta) dá um endereço
   https aleatório sem abrir porta nenhuma no servidor;
 - o link leva uma chave aleatória e vai só no privado do Rafael, pelo bot. Sem a
@@ -22,7 +24,9 @@ import os
 import re
 import secrets
 import shlex
+import shutil
 import subprocess
+import zipfile
 
 from aiohttp import web
 
@@ -34,6 +38,7 @@ MINUTOS_ABERTA = 30
 ESTADO = av.ARQUIVO_TELA
 TECLAS = {"voltar": 4, "inicio": 3, "apagar": 67, "enter": 66, "apps": 187}
 LIMITE_COORDENADA = 5000
+LIMITE_APP_MB = 400
 URL_TUNEL = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
 
 CHAVE = secrets.token_urlsafe(24)
@@ -124,8 +129,54 @@ async def acao(request):
     return web.json_response({"ok": True})
 
 
+def instalar_arquivo(arquivo):
+    """
+    Instala o app enviado pela página (APK, XAPK ou APKS, que são zips). Devolve
+    (ok, mensagem para a página).
+    """
+    if not zipfile.is_zipfile(arquivo):
+        return False, "o arquivo não é um app (escolha um APK ou XAPK)"
+    partes = av.partes_do_app(arquivo, os.path.join(os.path.dirname(arquivo), "partes"))
+    if not partes:
+        return False, "não achei o app dentro do arquivo"
+    comando = "install" if len(partes) == 1 else "install-multiple"
+    if not av._ok(av._adb(comando, "-r", "-g", *partes, timeout=900)):
+        return False, "o Android recusou o app"
+    return True, f"app da Shopee: {av.versao_shopee()}"
+
+
+async def receber_app(request):
+    """
+    O Rafael baixa o app no celular (os sites de APK recusam o servidor, não o
+    celular dele) e envia por aqui. O arquivo vai em pedaços para o disco e sai de
+    lá depois de instalado.
+    """
+    if not autorizado(request):
+        raise web.HTTPNotFound()
+    leitor = await request.multipart()
+    campo = await leitor.next()
+    if campo is None or campo.name != "arquivo":
+        raise web.HTTPBadRequest()
+    shutil.rmtree(av.PASTA_APP, ignore_errors=True)
+    os.makedirs(av.PASTA_APP)
+    arquivo = os.path.join(av.PASTA_APP, "enviado.zip")
+    try:
+        total = 0
+        with open(arquivo, "wb") as destino:
+            while pedaco := await campo.read_chunk(1024 * 1024):
+                total += len(pedaco)
+                if total > LIMITE_APP_MB * 1024 * 1024:
+                    return web.json_response({"ok": False, "mensagem": f"arquivo maior que {LIMITE_APP_MB} MB"})
+                destino.write(pedaco)
+        ok, mensagem = await asyncio.to_thread(instalar_arquivo, arquivo)
+        return web.json_response({"ok": ok, "mensagem": mensagem})
+    finally:
+        shutil.rmtree(av.PASTA_APP, ignore_errors=True)
+
+
 def montar_app():
     app = web.Application(client_max_size=64 * 1024)
+    app.router.add_post("/app", receber_app)
     app.router.add_get("/", pagina)
     app.router.add_get("/tela.png", tela)
     app.router.add_post("/acao", acao)
@@ -180,7 +231,8 @@ async def main():
                 "📱 Tela do Android da Shopee Vídeo\n\n"
                 f"{url}/?k={CHAVE}\n\n"
                 f"Abra no navegador do celular. Toque na tela como num celular normal; arraste para "
-                f"rolar. O campo de texto embaixo digita no Android.\n"
+                f"rolar. O campo de texto embaixo digita no Android, e o botão Enviar app instala um "
+                f"app baixado no seu celular.\n"
                 f"Fica aberta {MINUTOS_ABERTA} min. Quando terminar, toque em Terminei. "
                 "Não repasse este link: quem tiver ele mexe no Android."):
                 erro = "o Telegram recusou o link"
@@ -222,6 +274,8 @@ PAGINA = """<!doctype html>
 <div class="barra"><button onclick="tecla('voltar')">◀ Voltar</button>
   <button onclick="tecla('inicio')">● Início</button><button onclick="tecla('apagar')">⌫ Apagar</button>
   <button onclick="tecla('enter')">↵ Enter</button></div>
+<div class="barra"><input type="file" id="arquivo" accept=".apk,.xapk,.apks">
+  <button onclick="enviarApp()">📦 Enviar app</button></div>
 <div class="barra"><button onclick="terminar()">✅ Terminei</button></div>
 <div id="aviso">Toque para clicar. Arraste para rolar ou para o quebra-cabeça.</div>
 <script>
@@ -258,6 +312,28 @@ function digitar() {
   campo.value = "";
 }
 function tecla(nome) { enviar({ tipo: "tecla", tecla: nome }); }
+function avisar(texto) { document.getElementById("aviso").textContent = texto; }
+function enviarApp() {
+  const campo = document.getElementById("arquivo");
+  if (!campo.files.length) { avisar("Escolha primeiro o arquivo do app (APK ou XAPK)."); return; }
+  const dados = new FormData();
+  dados.append("arquivo", campo.files[0]);
+  const envio = new XMLHttpRequest();
+  envio.open("POST", "/app?k=" + K);
+  envio.upload.onprogress = e => {
+    if (!e.lengthComputable) return;
+    const pct = Math.round(e.loaded * 100 / e.total);
+    avisar(pct < 100 ? "Enviando... " + pct + "%" : "Instalando no Android... (pode levar 1 min)");
+  };
+  envio.onload = () => {
+    if (envio.status === 413) { avisar("❌ O arquivo passou do limite do túnel. Me avise no chat."); return; }
+    try { const r = JSON.parse(envio.responseText); avisar((r.ok ? "✅ " : "❌ ") + r.mensagem); }
+    catch (e) { avisar("❌ Erro " + envio.status + ". Me avise no chat."); }
+  };
+  envio.onerror = () => avisar("❌ O envio caiu. Tente de novo.");
+  avisar("Enviando... 0%");
+  envio.send(dados);
+}
 function terminar() {
   enviar({ tipo: "fim" });
   document.getElementById("aviso").textContent = "Tela fechada. Pode sair desta página.";
