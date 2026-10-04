@@ -148,18 +148,94 @@ def test_contas_fica_dentro_do_menu_dos_autorais(bm):
     assert "Contas 👥" not in textos(bm.teclado_outros_canais)
 
 
-def test_abrir_contas_mantem_o_menu_dos_autorais(bm, pc, Msg, Est):
+def test_painel_de_contas_no_padrao_lista_numerada_e_teclado(bm, pc, Msg, Est):
+    nova(pc, "A", "espelho")
+    nova(pc, "B", "repostagem", no_grupo=False)
     st = Est(estado=bm.AutoraisFluxo.menu_principal)
     msg = Msg("Contas 👥")
     rodar(bm.painel_contas_postos(msg, st))
-    assert st.estado == bm.AutoraisFluxo.menu_principal
-    assert "Contas dos Autorais" in msg.saidas[-1]
+    assert st.estado == bm.ContasFluxo.painel
+    assert "<b>1</b> — <b>A</b>" in msg.saidas[-1] and "<b>2</b> — <b>B</b>" in msg.saidas[-1]
+    teclado = [b.text for linha in bm.teclado_painel_contas(True).keyboard for b in linha]
+    assert teclado == ["Cadastrar Conta ➕", "Gerenciar Conta 🔧", "Remover Conta 🗑️",
+                       "Pessoas Bloqueadas 🚫", "Voltar ao Menu Autorais 🔙"]
+
+
+def test_gerenciar_pelo_numero_e_excluir_com_confirmacao(bm, pc, Msg, Est):
+    nova(pc, "A")
+    nova(pc, "B")
+    st = Est()
+    rodar(bm.contas_pedir_numero(Msg("Gerenciar Conta 🔧"), st))
+    errado = Msg("9")
+    rodar(bm.contas_receber_numero(errado, st))
+    assert "de 1 a 2" in errado.saidas[-1]
+    tela = Msg("2")
+    rodar(bm.contas_receber_numero(tela, st))
+    assert st.estado == bm.ContasFluxo.conta and "<b>B</b>" in tela.saidas[-1]
+
+    rodar(bm.contas_excluir(Msg("Excluir Conta 🗑️"), st))
+    assert st.estado == bm.ContasFluxo.confirmando_exclusao
+    rodar(bm.contas_confirmar_exclusao(Msg("qualquer coisa"), st))
+    assert pc.obter_conta("B") is not None                 # só exclui com Aprovar
+    rodar(bm.contas_confirmar_exclusao(Msg("Aprovar ✅"), st))
+    assert pc.obter_conta("B") is None and st.estado == bm.ContasFluxo.painel
+
+
+def test_remover_pelo_painel_e_cancelar_nao_exclui(bm, pc, Msg, Est):
+    nova(pc, "A")
+    st = Est()
+    rodar(bm.contas_pedir_numero(Msg("Remover Conta 🗑️"), st))
+    rodar(bm.contas_receber_numero(Msg("1"), st))
+    assert st.estado == bm.ContasFluxo.confirmando_exclusao
+    rodar(bm.contas_cancelar(Msg("Cancelar ❌"), st))
+    assert pc.obter_conta("A") is not None and st.estado == bm.ContasFluxo.painel
+
+
+def test_pausar_e_reativar(bm, pc, Msg, Est):
+    nova(pc, "A")
+    st = Est()
+    rodar(bm.mostrar_conta(Msg(), st, pc.obter_conta("A")["id"]))
+    rodar(bm.contas_pausar(Msg("Pausar Conta ⏸️"), st))
+    assert not pc.obter_conta("A")["habilitada"]
+    assert "Reativar Conta ▶️" in [b.text for linha in bm.teclado_gerenciar_conta(pc.obter_conta("A")).keyboard
+                                   for b in linha]
+    rodar(bm.contas_pausar(Msg("Reativar Conta ▶️"), st))
+    assert pc.obter_conta("A")["habilitada"]
+
+
+def test_bloquear_pessoa_pergunta_onde_vale(bm, pc, Msg, Est, monkeypatch):
+    async def adicionar(alvo, escopo, motivo=""):
+        bm.blacklist_captura.adicionar(username=alvo.lstrip("@"), escopo=escopo, motivo=motivo)
+        return True, f"{alvo} bloqueado"
+    monkeypatch.setattr(bm.blacklist_captura, "adicionar_por_arroba", adicionar)
+    st = Est()
+    rodar(bm.bloqueados_pedir_pessoa(Msg("Bloquear Pessoa ➕"), st))
+    rodar(bm.bloqueados_receber_pessoa(Msg("@fulano"), st))
+    assert st.estado == bm.ContasFluxo.aguardando_alcance
+    final = Msg(bm.BOTAO_AUTORAIS_PARCEIROS)
+    rodar(bm.bloqueados_confirmar_alcance(final, st))
+    assert "<b>1</b> — @fulano · 🌐 Autorais e parceiros" in final.saidas[-1]
+    assert st.estado == bm.ContasFluxo.bloqueados
+
+    rodar(bm.bloqueados_pedir_numero(Msg("Desbloquear Pessoa 🗑️"), st))
+    rodar(bm.bloqueados_desbloquear(Msg("1"), st))
+    assert bm.blacklist_captura.manuais() == []
 
 
 def test_cancelar_bloqueio_volta_para_a_lista_de_bloqueados(bm, pc, Msg, Est):
-    st = Est(estado=bm.AutoraisFluxo.aguardando_bloqueio)
+    st = Est(estado=bm.ContasFluxo.aguardando_bloqueio)
     msg = Msg("Cancelar ❌")
-    rodar(bm.bl_receber_arroba(msg, st))
-    assert st.estado == bm.AutoraisFluxo.menu_principal
+    rodar(bm.contas_cancelar(msg, st))
+    assert st.estado == bm.ContasFluxo.bloqueados
     assert "Pessoas bloqueadas" in msg.saidas[-1]
     assert "Painel do Bot Vídeos Autorais" not in "".join(msg.saidas)
+
+
+def test_botao_antigo_do_painel_avisa_onde_esta_o_menu(bm, Msg, Est):
+    respostas = []
+
+    async def answer(texto=None, **k):
+        respostas.append(texto)
+    cb = SimpleNamespace(data="pc_ver:1", answer=answer)
+    rodar(bm.contas_botao_antigo(cb, Est()))
+    assert "Vídeos Autorais 🎥 → Contas 👥" in respostas[0]

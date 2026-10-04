@@ -144,20 +144,26 @@ def callback(bm, Msg, dados):
                            answer=lambda *a, **k: asyncio.sleep(0))
 
 
+def cadastrar(bm, Msg, st, telefone="+5532999990001", codigo="1 2 3 4 5"):
+    """Cadastrar Conta ➕ → telefone → código. Devolve a mensagem do código."""
+    rodar(bm.pool_nova_conta(Msg("Cadastrar Conta ➕"), st))
+    rodar(bm.pool_nova_conta_telefone(Msg(telefone), st))
+    msg = Msg(codigo)
+    rodar(bm.pool_nova_conta_codigo(msg, st))
+    return msg
+
+
 def test_cadastro_sem_duas_etapas(bm, pc, telegram, Msg, Est):
     st = Est()
-    rodar(bm.pool_nova_conta(callback(bm, Msg, "pc_nova"), st))
-    rodar(bm.pool_nova_conta_telefone(Msg("+55 32 99999-0001"), st))
-    codigo = Msg("1 2 3 4 5")
-    rodar(bm.pool_nova_conta_codigo(codigo, st))
+    codigo = cadastrar(bm, Msg, st, "+55 32 99999-0001")
     assert pc.obter_conta("repost_um") is not None
-    assert codigo.apagada and st.estado == bm.AutoraisFluxo.menu_principal
+    assert codigo.apagada and st.estado == bm.ContasFluxo.aguardando_papel
     assert not FakeTG.conectados[-1].conectado
 
 
 def test_cadastro_com_duas_etapas_e_erros(bm, pc, telegram, Msg, Est):
     st = Est()
-    rodar(bm.pool_nova_conta(callback(bm, Msg, "pc_nova"), st))
+    rodar(bm.pool_nova_conta(Msg("Cadastrar Conta ➕"), st))
     rodar(bm.pool_nova_conta_telefone(Msg("+5532999990002"), st))
     errado = Msg("1 1 1 1 1")
     rodar(bm.pool_nova_conta_codigo(errado, st))
@@ -174,21 +180,19 @@ def test_cadastro_com_duas_etapas_e_erros(bm, pc, telegram, Msg, Est):
     assert b"segredo" not in (salva["senha_2fa_cifrada"] or b"")
 
 
-def test_codigo_expirado_e_cancelar_desconectam(bm, telegram, Msg, Est):
+def test_codigo_expirado_e_cancelar_desconectam_e_voltam_ao_painel(bm, telegram, Msg, Est):
     st = Est()
-    rodar(bm.pool_nova_conta(callback(bm, Msg, "pc_nova"), st))
-    rodar(bm.pool_nova_conta_telefone(Msg("+5532999990001"), st))
-    login = FakeTG.conectados[-1]
-    expirado = Msg("0 0 0 0 0")
-    rodar(bm.pool_nova_conta_codigo(expirado, st))
-    assert "expirou" in expirado.saidas[-1] and not login.conectado
-    assert st.estado == bm.AutoraisFluxo.menu_principal   # o teclado na tela é o dos Autorais
+    expirado = cadastrar(bm, Msg, st, codigo="0 0 0 0 0")
+    assert "expirou" in "".join(expirado.saidas) and not FakeTG.conectados[-1].conectado
+    assert st.estado == bm.ContasFluxo.painel and "Contas dos Autorais" in expirado.saidas[-1]
 
-    rodar(bm.pool_nova_conta(callback(bm, Msg, "pc_nova"), st))
+    rodar(bm.pool_nova_conta(Msg("Cadastrar Conta ➕"), st))
     rodar(bm.pool_nova_conta_telefone(Msg("+5532999990001"), st))
     login = FakeTG.conectados[-1]
-    rodar(bm.pool_nova_conta_cancelar_texto(Msg("Cancelar ❌"), st))
-    assert not login.conectado and st.estado == bm.AutoraisFluxo.menu_principal
+    cancelar = Msg("Cancelar ❌")
+    rodar(bm.pool_nova_conta_cancelar_texto(cancelar, st))
+    assert not login.conectado and st.estado == bm.ContasFluxo.painel
+    assert "Cadastro de conta cancelado" in cancelar.saidas[0]
 
 
 def test_prazo_de_resposta_cancela(bm, telegram, Msg, Est, monkeypatch):
@@ -201,79 +205,71 @@ def test_prazo_de_resposta_cancela(bm, telegram, Msg, Est, monkeypatch):
     monkeypatch.setattr(bm.bot, "send_message", send_message)
 
     async def cenario():
-        await bm.pool_nova_conta(callback(bm, Msg, "pc_nova"), st)
+        await bm.pool_nova_conta(Msg("Cadastrar Conta ➕"), st)
         await bm.pool_nova_conta_telefone(Msg("+5532999990001"), st)
         await asyncio.sleep(0.4)
     rodar(cenario())
-    assert not FakeTG.conectados[-1].conectado and st.estado == bm.AutoraisFluxo.menu_principal
+    assert not FakeTG.conectados[-1].conectado and st.estado == bm.ContasFluxo.painel
     assert avisos and "cancelado" in avisos[-1]
 
 
 def test_telefone_invalido(bm, telegram, Msg, Est):
     st = Est()
-    rodar(bm.pool_nova_conta(callback(bm, Msg, "pc_nova"), st))
+    rodar(bm.pool_nova_conta(Msg("Cadastrar Conta ➕"), st))
     msg = Msg("+5532999990009")
     rodar(bm.pool_nova_conta_telefone(msg, st))
-    assert "não reconhece este número" in msg.saidas[-1]
+    assert "não reconhece este número" in "".join(msg.saidas)
+    assert st.estado == bm.ContasFluxo.painel
 
 
-def test_guardar_convite_e_entrar_no_grupo(bm, pc, telegram, Msg, Est):
-    st = Est()
-    rodar(bm.pool_nova_conta(callback(bm, Msg, "pc_nova"), st))
-    rodar(bm.pool_nova_conta_telefone(Msg("+5532999990001"), st))
-    rodar(bm.pool_nova_conta_codigo(Msg("1 2 3 4 5"), st))
-    conta_nova = pc.obter_conta("repost_um")
-    assert conta_nova["status_grupo"] != pc.STATUS_NO_GRUPO
-    botoes = [b.text for linha in bm._pc_tela_conta(conta_nova)[1].inline_keyboard for b in linha]
-    assert any("Guardar link" in b for b in botoes)
-
-    rodar(bm.pool_pedir_convite(callback(bm, Msg, f"pc_conv:{conta_nova['id']}"), st))
-    rodar(bm.pool_salvar_convite(Msg("https://t.me/+AbCdEf"), st))
-    assert pc.ler_convite() == "https://t.me/+AbCdEf"
-    assert pc.obter_conta("repost_um")["status_grupo"] == pc.STATUS_NO_GRUPO
+def botoes(teclado):
+    return [b.text for linha in teclado.keyboard for b in linha]
 
 
-def test_cadastro_pergunta_para_que_serve_e_confere_o_canal(bm, pc, telegram, Msg, Est, monkeypatch):
+def test_cadastro_pergunta_para_que_serve_com_dois_botoes(bm, pc, telegram, Msg, Est, monkeypatch):
     monkeypatch.setattr(pc, "obter_destino_autorais", lambda: -100777)
     st = Est()
-    rodar(bm.pool_nova_conta(callback(bm, Msg, "pc_nova"), st))
-    rodar(bm.pool_nova_conta_telefone(Msg("+5532999990001"), st))
-    codigo = Msg("1 2 3 4 5")
-    rodar(bm.pool_nova_conta_codigo(codigo, st))
+    codigo = cadastrar(bm, Msg, st)
     assert "Para que serve esta conta?" in codigo.saidas[-1]
     assert "❌ não é admin" in codigo.saidas[-1]          # a conta falsa não está no canal
-    assert "🔀" not in codigo.saidas[-1]                     # só dois papéis
+    assert botoes(bm.teclado_papel_conta) == [bm.BOTAO_CAPTURA, bm.BOTAO_REPOSTAGEM]
 
-    nova = pc.obter_conta("repost_um")
-    cb = callback(bm, Msg, f"pc_papel:{nova['id']}:c")
-    rodar(bm.pool_definir_papel(cb, st))
+    escolha = Msg(bm.BOTAO_CAPTURA)
+    rodar(bm.contas_definir_papel(escolha, st))
     assert pc.papel_da_conta(pc.obter_conta("repost_um")) == pc.PAPEL_CAPTURA
-    assert any("não está no grupo de origem" in t for t in cb.message.saidas)
-    assert any("não é admin do seu canal" in t for t in cb.message.saidas)
+    tela = escolha.saidas[-1]
+    assert "não está no grupo de origem" in tela and "não é admin do seu canal" in tela
+    assert st.estado == bm.ContasFluxo.conta
 
-    cb = callback(bm, Msg, f"pc_papel:{nova['id']}:r")
-    rodar(bm.pool_definir_papel(cb, st))
+    escolha = Msg(bm.BOTAO_REPOSTAGEM)
+    rodar(bm.contas_definir_papel(escolha, st))
     assert pc.obter_conta("repost_um")["funcoes_permitidas"] == "repostagem"
-    assert not any("admin" in t for t in cb.message.saidas)   # quem só reposta não publica no canal
+    assert "admin" not in escolha.saidas[-1]               # quem só reposta não publica no canal
 
 
-def test_so_dois_botoes_de_papel_e_opcao_antiga_nao_muda_nada(bm, pc, telegram, Msg, Est):
-    pc.salvar_conta("A", sessao="x")
-    conta_a = pc.obter_conta("A")
-    _texto, teclado = bm._pc_tela_conta(conta_a)
-    papeis = [b.callback_data for linha in teclado.inline_keyboard for b in linha
-              if b.callback_data.startswith("pc_papel:")]
-    assert papeis == [f"pc_papel:{conta_a['id']}:c", f"pc_papel:{conta_a['id']}:r"]
+def test_colocar_no_grupo_pede_o_link_e_entra(bm, pc, telegram, Msg, Est):
+    st = Est()
+    cadastrar(bm, Msg, st)
+    rodar(bm.contas_definir_papel(Msg(bm.BOTAO_REPOSTAGEM), st))
+    conta_nova = pc.obter_conta("repost_um")
+    assert "Colocar no Grupo 🚪" in botoes(bm.teclado_gerenciar_conta(conta_nova))
 
-    rodar(bm.pool_definir_papel(callback(bm, Msg, f"pc_papel:{conta_a['id']}:a"), Est()))
-    assert pc.obter_conta("A")["funcoes_permitidas"] == "espelho,repostagem"
+    pedido = Msg("Colocar no Grupo 🚪")
+    rodar(bm.contas_colocar_no_grupo(pedido, st))          # sem link guardado: pede um
+    assert "link de convite" in pedido.saidas[-1] and st.estado == bm.ContasFluxo.aguardando_convite
+    rodar(bm.contas_salvar_convite(Msg("https://t.me/+AbCdEf"), st))
+    assert pc.ler_convite() == "https://t.me/+AbCdEf"
+    conta_nova = pc.obter_conta("repost_um")
+    assert conta_nova["status_grupo"] == pc.STATUS_NO_GRUPO
+    assert "Colocar no Grupo 🚪" not in botoes(bm.teclado_gerenciar_conta(conta_nova))
 
 
-def test_cancelar_link_de_convite_nao_fala_em_cadastro(bm, pc, telegram, Msg, Est):
+def test_cancelar_o_link_de_convite_volta_para_a_conta(bm, pc, telegram, Msg, Est):
     pc.salvar_conta("A", sessao="x")
     st = Est()
-    rodar(bm.pool_pedir_convite(callback(bm, Msg, f"pc_conv:{pc.obter_conta('A')['id']}"), st))
+    rodar(bm.mostrar_conta(Msg(), st, pc.obter_conta("A")["id"]))
+    rodar(bm.contas_colocar_no_grupo(Msg("Colocar no Grupo 🚪"), st))
     cancelar = Msg("Cancelar ❌")
-    rodar(bm.pool_nova_conta_cancelar_texto(cancelar, st))
-    assert cancelar.saidas[-1] == "❌ Cancelado: nenhum link de convite guardado."
-    assert st.estado == bm.AutoraisFluxo.menu_principal
+    rodar(bm.contas_cancelar(cancelar, st))
+    assert cancelar.saidas[0] == "❌ Nada foi alterado."
+    assert st.estado == bm.ContasFluxo.conta and "<b>A</b>" in cancelar.saidas[-1]

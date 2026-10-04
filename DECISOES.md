@@ -76,6 +76,11 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **04/10/2026:** o botão "Contas 👥" fica dentro de "Vídeos Autorais 🎥", e não solto em "Outros Canais": as contas e as pessoas bloqueadas só servem a esse robô (captura dos Autorais e dos parceiros). Telas em palavras:
   - "Pessoas bloqueadas" (era "Autores Bloqueados") explica que bloquear alguém faz o robô não copiar para o seu canal o que essa pessoa posta no grupo de origem, e por isso também não repostar. As suas próprias contas entram ali sozinhas, para o robô não recapturar o que elas repostam.
   - O "Cancelar" do "Bloquear alguém" volta para a lista de bloqueados.
+- **04/10/2026:** o menu de Contas segue o padrão dos outros painéis (como o de Parceiros), porque o Rafael achou o anterior confuso: nada de botões dentro da mensagem nem de abas.
+  - **Painel:** lista numerada das contas no texto e, no teclado de baixo, Cadastrar Conta ➕, Gerenciar Conta 🔧, Remover Conta 🗑️, Pessoas Bloqueadas 🚫 e Voltar ao Menu Autorais 🔙.
+  - **Escolha pelo número**, como nos Parceiros: com uma conta só, Gerenciar abre direto. Excluir pede Aprovar ✅.
+  - **Na conta:** Usar na Captura 🎯, Usar na Repostagem 🔁, Colocar no Grupo 🚪 (usa o link guardado ou pede um), Pausar/Reativar, Excluir e Voltar às Contas 🔙.
+  - **Pessoas Bloqueadas 🚫:** lista numerada, Bloquear Pessoa ➕ (pergunta onde vale: só nos Autorais ou Autorais e parceiros) e Desbloquear Pessoa 🗑️ pelo número.
 - **03/10/2026:** com cota em faixa (ex.: 6–10), o teto de saída do dia é o mesmo número sorteado na captura para aquela data.
 - **03/10/2026:** cada mensagem da origem é processada uma vez só, venha pelo evento ou pela varredura (trava pelo ID, gravada no banco).
 - **03/10/2026:** o log de diagnóstico "🔬 [Evento]", que registrava toda mensagem de todo chat, foi removido.
