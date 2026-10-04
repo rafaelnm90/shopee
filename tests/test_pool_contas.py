@@ -155,7 +155,8 @@ def test_conta_sem_papel_tambem_tem_o_canal_conferido(pc, monkeypatch):
         rodar(pc.checar_conta(pc.obter_conta(apelido), cliente=SemCache([(-100123, False)])))
     assert conferidas == ["sem_papel", "captura"]          # quem só reposta não publica no canal
     pc.marcar_publicacao_no_destino("sem_papel", True)
-    assert "📣 canal: ✅ pode publicar" in pc.montar_relatorio_telegram().split("sem_papel")[1]
+    primeira = pc.montar_relatorio_telegram().split("<b>1</b> — ")[1].split("<b>2</b> — ")[0]
+    assert "📣 canal: ✅ pode publicar" in primeira
 
 
 def test_grupo_proibido_nas_conversas_e_banimento(pc, monkeypatch):

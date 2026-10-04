@@ -157,6 +157,7 @@ import logging
 import asyncio
 import getpass
 import re
+from html import escape as html_escape
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -423,6 +424,12 @@ def inicializar_tabelas():
     # 0 = não pode (não é admin), NULL = ainda não conferido.
     try:
         cursor.execute("ALTER TABLE contas_telegram ADD COLUMN publica_no_destino INTEGER")
+    except sqlite3.OperationalError:
+        pass  # coluna já existe
+
+    # Nome que o Rafael deu à conta no painel. NULL = automático (@ ou nome do Telegram).
+    try:
+        cursor.execute("ALTER TABLE contas_telegram ADD COLUMN nome_painel TEXT")
     except sqlite3.OperationalError:
         pass  # coluna já existe
 
@@ -1016,7 +1023,7 @@ def avaliar_saude(contas, ocupacao, atividade, agora=None):
             continue
         ok, motivo = avaliar(funcao, conta)
         postos.append({"chave": f"{funcao}:{conta_id}", "funcao": funcao, "conta_id": conta_id,
-                       "apelido": conta["apelido"], "ok": ok, "motivo": motivo})
+                       "apelido": html_escape(nome_da_conta(conta)), "ok": ok, "motivo": motivo})
 
     for funcao, vazio in ((FUNCAO_ESPELHO, "nenhuma conta apta: a captura está parada"),
                           (FUNCAO_REPOSTAGEM, "nenhuma conta no rodízio: a repostagem está parada")):
@@ -1071,9 +1078,35 @@ def telefone_legivel(telefone):
     return "+" + numeros
 
 
+LIMITE_NOME_PAINEL = 30
+
+
+def nome_automatico(conta):
+    """O @ da conta; sem @, o nome do Telegram; sem os dois, o apelido interno."""
+    if conta.get("username"):
+        return "@" + conta["username"]
+    return (conta.get("nome_exibicao") or "").strip() or conta["apelido"]
+
+
+def nome_da_conta(conta):
+    """Nome mostrado no painel: o que o Rafael deu tem preferência; senão, o automático."""
+    return (conta.get("nome_painel") or "").strip() or nome_automatico(conta)
+
+
+def definir_nome(apelido, nome):
+    """Grava o nome do painel; None (ou vazio) volta ao nome automático."""
+    nome = (nome or "").strip()[:LIMITE_NOME_PAINEL] or None
+    conexao = _obter_conexao()
+    conexao.execute("UPDATE contas_telegram SET nome_painel = ?, atualizada_em = ? WHERE apelido = ?",
+                    (nome, _agora(), apelido))
+    conexao.commit()
+    conexao.close()
+    registrar_evento(apelido, "NOME", "editado no painel" if nome else "automático")
+
+
 def identificar(conta):
-    """Como a conta aparece em todas as telas, sempre igual: apelido e telefone do chip."""
-    return f"<b>{conta['apelido']}</b> · 📱 {telefone_legivel(conta.get('telefone'))}"
+    """Como a conta aparece em todas as telas, sempre igual: nome e telefone do chip."""
+    return f"<b>{html_escape(nome_da_conta(conta))}</b> · 📱 {telefone_legivel(conta.get('telefone'))}"
 
 
 def texto_canal(conta):
@@ -1954,23 +1987,24 @@ async def entrar_no_grupo(apelido):
         return resultado(False, "❌ Nenhum link de convite guardado. Use: python3 pool_contas.py convite <link>")
     hash_convite = link.rstrip("/").split("/")[-1].lstrip("+")
 
+    nome = nome_da_conta(conta)
     cliente = await criar_cliente(conta)
     if not cliente:
-        return resultado(False, f"❌ Não consegui conectar '{apelido}' (sessão inválida).")
+        return resultado(False, f"❌ Não consegui conectar {nome} (sessão inválida).")
     try:
         await cliente(functions.messages.ImportChatInviteRequest(hash_convite))
         registrar_evento(apelido, "ENTROU_NO_GRUPO", "via link de convite")
-        msg = f"✅ {apelido} entrou no grupo."
+        msg = f"✅ {nome} entrou no grupo."
     except UserAlreadyParticipantError:
-        msg = f"ℹ️ {apelido} já estava no grupo."
+        msg = f"ℹ️ {nome} já estava no grupo."
     except InviteRequestSentError:
-        return resultado(False, f"⏳ Pedido de entrada de {apelido} enviado: um admin do grupo precisa aprovar.")
+        return resultado(False, f"⏳ Pedido de entrada de {nome} enviado: um admin do grupo precisa aprovar.")
     except (InviteHashExpiredError, InviteHashInvalidError):
         return resultado(False, "❌ O link de convite expirou ou é inválido. Guarde um link novo.")
     except (ChannelPrivateError, UserBannedInChannelError):
         # Com o link certo, o Telegram só recusa assim quem foi banido do grupo.
         atualizar_status(apelido, status_grupo=STATUS_BANIDA_GRUPO, erro="banida do grupo de origem")
-        return resultado(False, f"⛔ {apelido} foi banida do grupo de origem e não consegue entrar. "
+        return resultado(False, f"⛔ {nome} foi banida do grupo de origem e não consegue entrar. "
                                 "Só um admin do grupo pode desbanir; senão, use outra conta.")
     except Exception as e:
         return resultado(False, f"❌ Falha ao entrar: {type(e).__name__}: {e}")

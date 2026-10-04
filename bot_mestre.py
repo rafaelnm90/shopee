@@ -4910,11 +4910,11 @@ async def painel_autorais(message: types.Message, state: FSMContext):
     try:
         if pool_contas.listar_contas():
             _espelho = pool_contas.obter_conta_da_funcao(pool_contas.FUNCAO_ESPELHO)
-            _rodizio = [c["apelido"] for c in pool_contas.obter_contas_repostagem()]
+            _rodizio = [pool_contas.nome_da_conta(c) for c in pool_contas.obter_contas_repostagem()]
             texto_plantao = (
                 f"<b>- Contas (detalhes em Contas 👥):</b>\n"
-                f"    🎯 Captura: <b>{_espelho['apelido'] if _espelho else '⚠️ nenhuma conta (captura parada)'}</b>\n"
-                f"    🔁 Repostagem: <b>{', '.join(_rodizio) if _rodizio else '⚠️ nenhuma conta (parada)'}</b>\n\n"
+                f"    🎯 Captura: <b>{html_escape(pool_contas.nome_da_conta(_espelho)) if _espelho else '⚠️ nenhuma conta (captura parada)'}</b>\n"
+                f"    🔁 Repostagem: <b>{html_escape(', '.join(_rodizio)) if _rodizio else '⚠️ nenhuma conta (parada)'}</b>\n\n"
             )
         else:
             texto_plantao = "<b>- Contas de plantão:</b>\n    👤 <i>sessão fixa (nenhuma conta no pool)</i>\n\n"
@@ -4967,6 +4967,7 @@ class ContasFluxo(StatesGroup):
     confirmando_exclusao = State()
     aguardando_convite = State()     # link de convite do grupo de origem
     aguardando_papel = State()       # fim do cadastro: captura ou repostagem
+    aguardando_nome = State()        # nome novo da conta no painel
     bloqueados = State()             # lista de pessoas bloqueadas
     aguardando_bloqueio = State()    # @, ID ou link de quem bloquear
     aguardando_alcance = State()     # onde o bloqueio vale
@@ -4975,6 +4976,7 @@ class ContasFluxo(StatesGroup):
 BOTAO_CAPTURA = "Usar na Captura 🎯"
 BOTAO_REPOSTAGEM = "Usar na Repostagem 🔁"
 _PAPEL_DO_BOTAO = {BOTAO_CAPTURA: pool_contas.PAPEL_CAPTURA, BOTAO_REPOSTAGEM: pool_contas.PAPEL_REPOSTAGEM}
+BOTAO_NOME_AUTOMATICO = "Usar Nome Automático 🔄"
 BOTAO_SO_AUTORAIS = "Só nos Autorais 🎥"
 BOTAO_AUTORAIS_PARCEIROS = "Autorais e Parceiros 🌐"
 
@@ -4992,6 +4994,7 @@ def teclado_gerenciar_conta(conta):
     linhas = [[KeyboardButton(text=BOTAO_CAPTURA), KeyboardButton(text=BOTAO_REPOSTAGEM)]]
     if conta["status_grupo"] != pool_contas.STATUS_NO_GRUPO:
         linhas.append([KeyboardButton(text="Colocar no Grupo 🚪")])
+    linhas.append([KeyboardButton(text="Editar Nome ✏️")])
     linhas.append([KeyboardButton(text="Pausar Conta ⏸️" if conta["habilitada"] else "Reativar Conta ▶️")])
     linhas.append([KeyboardButton(text="Excluir Conta 🗑️")])
     linhas.append([KeyboardButton(text="Voltar às Contas 🔙")])
@@ -5059,6 +5062,9 @@ def texto_tela_conta(conta):
     texto = (
         f"👤 {pool_contas.identificar(conta)}\n\n"
         "<blockquote>"
+        f"🏷️ Nome: <b>{html_escape(pool_contas.nome_da_conta(conta))}</b> "
+        + (f"(editado por você · automático: {html_escape(pool_contas.nome_automatico(conta))})\n"
+           if conta.get("nome_painel") else "(automático: @ ou nome do Telegram)\n") +
         f"🧩 Função: <b>{pool_contas.ROTULOS_PAPEL[papel] if papel else 'ainda não escolhida'}</b>\n"
         f"📍 Grupo de origem: <b>{pool_contas.TEXTOS_GRUPO.get(conta['status_grupo'], conta['status_grupo'])}</b>\n"
     )
@@ -5111,6 +5117,15 @@ async def mostrar_conta(message, state, conta_id):
     await message.answer(texto_tela_conta(conta), parse_mode="HTML", reply_markup=teclado_gerenciar_conta(conta))
 
 
+async def nome_grupo_origem():
+    """
+    Nome do grupo de origem dos Autorais, do cache de nomes (o painel dos Autorais o
+    grava ao abrir). Sem ele, uma descrição de onde o grupo está configurado.
+    """
+    origem = str(ler_autorais_config().get("origem") or "").split(":")[0].strip()
+    return ler_cache_nomes_grupos().get(origem) or "configurado em Editar Origem 📥"
+
+
 async def _conta_do_estado(message, state):
     """A conta aberta na tela; sem ela (restart, conta apagada) volta ao painel."""
     conta = pool_contas.obter_conta((await state.get_data()).get("conta_id") or "")
@@ -5145,7 +5160,8 @@ async def contas_cancelar(message: types.Message, state: FSMContext):
     if estado in (ContasFluxo.aguardando_bloqueio.state, ContasFluxo.aguardando_alcance.state,
                   ContasFluxo.aguardando_desbloqueio.state):
         await mostrar_bloqueados(message, state)
-    elif (estado in (ContasFluxo.confirmando_exclusao.state, ContasFluxo.aguardando_convite.state)
+    elif (estado in (ContasFluxo.confirmando_exclusao.state, ContasFluxo.aguardando_convite.state,
+                     ContasFluxo.aguardando_nome.state)
           and dados.get("conta_id") and not dados.get("remover_direto")):
         await mostrar_conta(message, state, dados["conta_id"])
     else:
@@ -5199,7 +5215,7 @@ async def contas_definir_papel(message: types.Message, state: FSMContext):
         return
     papel = _PAPEL_DO_BOTAO[message.text]
     _ok, resultado, mudancas = pool_contas.definir_papel(conta["apelido"], papel)
-    texto = f"✅ <b>{conta['apelido']}</b>: {pool_contas.ROTULOS_PAPEL[papel]} ({resultado})."
+    texto = f"✅ <b>{html_escape(pool_contas.nome_da_conta(conta))}</b>: {pool_contas.ROTULOS_PAPEL[papel]} ({resultado})."
     if mudancas:
         texto += "\n🔄 Postos: " + "; ".join(f"{f}: {m}" for f, _a, _n, m in mudancas)
     await message.answer(texto, parse_mode="HTML")
@@ -5214,15 +5230,23 @@ async def contas_colocar_no_grupo(message: types.Message, state: FSMContext):
     if not conta:
         return
     if pool_contas.ler_convite():
-        aviso = await message.answer(f"⏳ Colocando {conta['apelido']} no grupo de origem pelo link guardado...")
+        aviso = await message.answer(f"⏳ Colocando {pool_contas.nome_da_conta(conta)} no grupo de origem "
+                                     "pelo link guardado...")
         ok, resultado = await pool_contas.entrar_no_grupo(conta["apelido"])
         await aviso.edit_text(resultado)
         if ok:
             await mostrar_conta(message, state, conta["id"])
             return
+    grupo = html_escape(await nome_grupo_origem())
     await message.answer(
-        "🔗 Mande o <b>link de convite</b> do grupo de origem (ex.: <code>https://t.me/+AbCdEf</code>).\n"
-        "<i>Ele fica guardado para as próximas contas.</i>",
+        "🔗 <b>Colocar no grupo de origem</b>\n\n"
+        f"O robô pega os vídeos do grupo <b>{grupo}</b>. Para capturar (ou repostar), a conta "
+        "precisa ser membro dele.\n\n"
+        "Mande o <b>link de convite</b> desse grupo (ex.: <code>https://t.me/+AbCdEf</code>) e o bot "
+        "faz a conta entrar sozinha.\n\n"
+        "📍 <b>Onde achar o link:</b> no grupo, toque no nome dele → <b>Convidar via link</b>. Só "
+        "aparece para quem é admin; se você não for, peça o link a um admin do grupo.\n"
+        "<i>O link fica guardado para as próximas contas.</i>",
         parse_mode="HTML", reply_markup=teclado_cancelar
     )
     await state.set_state(ContasFluxo.aguardando_convite)
@@ -5241,7 +5265,7 @@ async def contas_salvar_convite(message: types.Message, state: FSMContext):
     if not conta:
         return
     pool_contas.guardar_convite(link)
-    aviso = await message.answer(f"✅ Link guardado. Colocando {conta['apelido']} no grupo...")
+    aviso = await message.answer(f"✅ Link guardado. Colocando {pool_contas.nome_da_conta(conta)} no grupo...")
     _ok, resultado = await pool_contas.entrar_no_grupo(conta["apelido"])
     await aviso.edit_text(resultado)
     await mostrar_conta(message, state, conta["id"])
@@ -5257,8 +5281,52 @@ async def contas_pausar(message: types.Message, state: FSMContext):
     ligar = message.text == "Reativar Conta ▶️"
     pool_contas.definir_habilitada(conta["apelido"], ligar)
     pool_contas.aplicar_funcoes()
-    await message.answer(f"▶️ {conta['apelido']} voltou a ser usada pelo robô." if ligar
-                         else f"⏸️ {conta['apelido']} pausada: o robô não a usa até você reativar.")
+    await message.answer(f"▶️ {pool_contas.nome_da_conta(conta)} voltou a ser usada pelo robô." if ligar
+                         else f"⏸️ {pool_contas.nome_da_conta(conta)} pausada: o robô não a usa até você reativar.")
+    await mostrar_conta(message, state, conta["id"])
+
+
+@dp.message(ContasFluxo.conta, F.text == "Editar Nome ✏️")
+async def contas_pedir_nome(message: types.Message, state: FSMContext):
+    """Pede o nome novo; o automático (@ ou nome do Telegram) continua disponível."""
+    if message.from_user.id != ADMIN_ID: return
+    conta = await _conta_do_estado(message, state)
+    if not conta:
+        return
+    await state.set_state(ContasFluxo.aguardando_nome)
+    await message.answer(
+        f"✏️ <b>Nome da conta</b>\n\n"
+        f"Hoje: <b>{html_escape(pool_contas.nome_da_conta(conta))}</b>\n"
+        f"Automático: <b>{html_escape(pool_contas.nome_automatico(conta))}</b> (o @ ou o nome do Telegram)\n\n"
+        f"Mande o nome novo (até {pool_contas.LIMITE_NOME_PAINEL} letras). O telefone continua aparecendo "
+        f"ao lado.\nPara voltar ao automático, toque em <b>{BOTAO_NOME_AUTOMATICO}</b>.",
+        parse_mode="HTML",
+        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=BOTAO_NOME_AUTOMATICO)],
+                                                   [KeyboardButton(text="Cancelar ❌")]],
+                                         resize_keyboard=True, is_persistent=True)
+    )
+
+
+@dp.message(ContasFluxo.aguardando_nome)
+async def contas_salvar_nome(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    conta = await _conta_do_estado(message, state)
+    if not conta:
+        return
+    texto = (message.text or "").strip()
+    if texto == BOTAO_NOME_AUTOMATICO:
+        pool_contas.definir_nome(conta["apelido"], None)
+    elif not texto:
+        await message.answer("⚠️ Mande o nome em texto.")
+        return
+    elif len(texto) > pool_contas.LIMITE_NOME_PAINEL:
+        await message.answer(f"⚠️ Nome longo demais: use até {pool_contas.LIMITE_NOME_PAINEL} letras.")
+        return
+    else:
+        pool_contas.definir_nome(conta["apelido"], texto)
+    conta = pool_contas.obter_conta(conta["id"])
+    await message.answer(f"✅ Nome da conta: <b>{html_escape(pool_contas.nome_da_conta(conta))}</b>.",
+                         parse_mode="HTML")
     await mostrar_conta(message, state, conta["id"])
 
 
@@ -5266,7 +5334,7 @@ async def _pedir_confirmacao_exclusao(message, state, conta):
     await state.set_state(ContasFluxo.confirmando_exclusao)
     await state.update_data(conta_id=conta["id"])
     await message.answer(
-        f"🗑️ <b>Excluir a conta {conta['apelido']}?</b>\n\n"
+        f"🗑️ <b>Excluir a conta {html_escape(pool_contas.nome_da_conta(conta))}?</b>\n\n"
         "• Ela deixa de capturar e de repostar\n"
         "• A conta continua existindo no Telegram: só sai deste robô\n"
         "• Para usar de novo, é preciso cadastrar outra vez (com o código do Telegram)",
@@ -5293,7 +5361,7 @@ async def contas_confirmar_exclusao(message: types.Message, state: FSMContext):
         return
     pool_contas.remover_conta(conta["apelido"])
     pool_contas.aplicar_funcoes()
-    await message.answer(f"✅ Conta <b>{conta['apelido']}</b> excluída.", parse_mode="HTML")
+    await message.answer(f"✅ Conta <b>{html_escape(pool_contas.nome_da_conta(conta))}</b> excluída.", parse_mode="HTML")
     await mostrar_painel_contas(message, state)
 
 
@@ -5515,7 +5583,7 @@ async def _concluir_nova_conta(message, state, senha):
     conta = pool_contas.obter_conta(apelido)
     situacao = ("✅ Já está no grupo de origem." if status_grupo == pool_contas.STATUS_NO_GRUPO
                 else "⚠️ Ainda não está no grupo de origem: depois de escolher, toque em Colocar no Grupo 🚪.")
-    await aviso.edit_text(f"✅ <b>Conta {apelido} cadastrada.</b>\n{situacao}", parse_mode="HTML")
+    await aviso.edit_text(f"✅ <b>Conta {html_escape(pool_contas.nome_da_conta(conta))} cadastrada.</b>\n{situacao}", parse_mode="HTML")
     await state.set_state(ContasFluxo.aguardando_papel)
     await state.update_data(conta_id=conta["id"], remover_direto=False)
     await message.answer(

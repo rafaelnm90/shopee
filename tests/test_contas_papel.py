@@ -246,8 +246,8 @@ def test_contas_aparecem_sempre_pelo_telefone(bm, pc):
     pc.salvar_conta("rafaelnm", sessao="x", user_id=8002, username="Rafaelnm", telefone="+5532988880002")
     painel = pc.montar_relatorio_telegram()
     assert "<b>espelhador</b> · 📱 +55 32 99999-0001" in painel
-    assert "<b>rafaelnm</b> · 📱 +55 32 98888-0002" in painel
-    assert "@Rafaelnm" not in painel and "id 8001" not in painel
+    assert "<b>@Rafaelnm</b> · 📱 +55 32 98888-0002" in painel     # o @ é o nome automático
+    assert "id 8001" not in painel
     bm.blacklist_captura.sincronizar_contas_do_pool()
     bloqueados = bm.blacklist_captura.montar_relatorio_telegram()
     assert "<b>espelhador</b> · 📱 +55 32 99999-0001" in bloqueados
@@ -258,3 +258,50 @@ def test_telefone_legivel(pc):
     assert pc.telefone_legivel("553288880002") == "+55 32 8888-0002"
     assert pc.telefone_legivel("14155550100") == "+14155550100"
     assert pc.telefone_legivel(None) == "telefone ainda não lido"
+
+
+
+def test_nome_automatico_e_editado(pc):
+    pc.salvar_conta("a", sessao="x", username="chip_um", nome_exibicao="Rafael")
+    pc.salvar_conta("b", sessao="x", nome_exibicao="Rafael Chip")
+    pc.salvar_conta("c", sessao="x")
+    assert [pc.nome_da_conta(pc.obter_conta(x)) for x in "abc"] == ["@chip_um", "Rafael Chip", "c"]
+    pc.definir_nome("b", "Chip da repostagem")
+    assert pc.nome_da_conta(pc.obter_conta("b")) == "Chip da repostagem"       # o editado vale
+    assert pc.nome_automatico(pc.obter_conta("b")) == "Rafael Chip"            # o automático fica guardado
+    pc.definir_nome("b", None)
+    assert pc.nome_da_conta(pc.obter_conta("b")) == "Rafael Chip"
+
+
+def test_editar_nome_pelo_painel_e_voltar_ao_automatico(bm, pc, Msg, Est):
+    pc.salvar_conta("a", sessao="x", username="chip_um", telefone="5532999990001")
+    st = Est()
+    rodar(bm.mostrar_conta(Msg(), st, pc.obter_conta("a")["id"]))
+    pedido = Msg("Editar Nome ✏️")
+    rodar(bm.contas_pedir_nome(pedido, st))
+    assert "Automático: <b>@chip_um</b>" in pedido.saidas[-1] and st.estado == bm.ContasFluxo.aguardando_nome
+
+    longo = Msg("x" * 31)
+    rodar(bm.contas_salvar_nome(longo, st))
+    assert "longo demais" in longo.saidas[-1] and pc.obter_conta("a")["nome_painel"] is None
+
+    novo = Msg("Chip <1>")
+    rodar(bm.contas_salvar_nome(novo, st))
+    assert "<b>Chip &lt;1&gt;</b> · 📱 +55 32 99999-0001" in pc.montar_relatorio_telegram()   # escapado
+    assert "editado por você" in novo.saidas[-1] and st.estado == bm.ContasFluxo.conta
+
+    rodar(bm.contas_pedir_nome(Msg("Editar Nome ✏️"), st))
+    rodar(bm.contas_salvar_nome(Msg(bm.BOTAO_NOME_AUTOMATICO), st))
+    assert pc.nome_da_conta(pc.obter_conta("a")) == "@chip_um"
+
+
+def test_colocar_no_grupo_explica_com_o_nome_do_grupo(bm, pc, Msg, Est):
+    bm.db.salvar_config("autorais_config", {"origem": "-1003673555953"})
+    bm.salvar_nome_grupo("-1003673555953", "VIDEOS AUTORAIS - Afiliados Unidos")
+    pc.salvar_conta("a", sessao="x")
+    st = Est()
+    rodar(bm.mostrar_conta(Msg(), st, pc.obter_conta("a")["id"]))
+    pedido = Msg("Colocar no Grupo 🚪")
+    rodar(bm.contas_colocar_no_grupo(pedido, st))
+    assert "<b>VIDEOS AUTORAIS - Afiliados Unidos</b>" in pedido.saidas[-1]
+    assert "Convidar via link" in pedido.saidas[-1]

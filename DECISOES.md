@@ -81,6 +81,11 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - **Escolha pelo número**, como nos Parceiros: com uma conta só, Gerenciar abre direto. Excluir pede Aprovar ✅.
   - **Na conta:** Usar na Captura 🎯, Usar na Repostagem 🔁, Colocar no Grupo 🚪 (usa o link guardado ou pede um), Pausar/Reativar, Excluir e Voltar às Contas 🔙.
   - **Pessoas Bloqueadas 🚫:** lista numerada, Bloquear Pessoa ➕ (pergunta onde vale: só nos Autorais ou Autorais e parceiros) e Desbloquear Pessoa 🗑️ pelo número.
+- **04/10/2026:** toda conta aparece do mesmo jeito em todas as telas: nome e telefone do chip. O telefone fica sempre, porque é o que identifica o chip.
+  - **Nome automático:** o @ da conta ou, sem @, o nome do Telegram. Ele acompanha as mudanças no Telegram.
+  - **Editar Nome ✏️** (na tela da conta): o nome dado pelo Rafael tem preferência sobre o automático.
+  - **Usar Nome Automático 🔄:** volta ao automático, que fica sempre guardado.
+- **04/10/2026:** o "Colocar no Grupo 🚪" explica o que é antes de pedir o link: o nome do grupo de origem, que a conta precisa ser membro dele e onde achar o link de convite (no grupo → Convidar via link, só para admin).
 - **03/10/2026:** com cota em faixa (ex.: 6–10), o teto de saída do dia é o mesmo número sorteado na captura para aquela data.
 - **03/10/2026:** cada mensagem da origem é processada uma vez só, venha pelo evento ou pela varredura (trava pelo ID, gravada no banco).
 - **03/10/2026:** o log de diagnóstico "🔬 [Evento]", que registrava toda mensagem de todo chat, foi removido.
