@@ -37,6 +37,11 @@ jobs:
             # Atualiza as bibliotecas se houver mudanças
             source venv/bin/activate
             pip install -r requirements.txt --no-cache-dir
+            # Bibliotecas que saíram do requirements.txt porque nenhum código usa: o
+            # pip install não as remove sozinho. Depois que saíram, não faz nada.
+            pip uninstall -y -q google-generativeai google-ai-generativelanguage google-api-python-client \
+              google-api-core google-auth-httplib2 googleapis-common-protos grpcio grpcio-status \
+              httplib2 proto-plus protobuf tqdm uritemplate 2>/dev/null || true
             
             # Recarrega as configurações do sistema caso algum .service tenha sido alterado no GitHub
             sudo systemctl daemon-reload
