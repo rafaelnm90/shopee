@@ -126,3 +126,4 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **03/10/2026:** todo acesso ao banco passa pelo `db.py`, em modo WAL.
 - **03/10/2026:** log direto (`logger.info/warning/error`), com o nível pelo `NIVEL_LOG` do `.env`.
 - **03/10/2026:** log enxuto: as bibliotecas (agendador, aiogram, Telethon, HTTP) só mostram avisos e erros, e com `NIVEL_LOG=DEBUG` voltam a mostrar tudo. Mensagem que se repetia a cada volta (pausa do motor dos Autorais, nomes de tópicos, passo a passo do Auditor, leitura das rotinas) só sai quando algo muda ou fica no DEBUG.
+- **03/10/2026:** a IA pula o modelo que respondeu sem cota (até a cota voltar: o prazo que o Google informa, ou a virada do dia no horário do Pacífico) e o modelo que não existe (por 6 h). Se todos estiverem de fora, tenta todos, como antes.
