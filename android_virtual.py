@@ -21,9 +21,9 @@ O --preparar faz só o que falta, e pode rodar de novo sem estragar nada:
    contêiner e sobrevivem a ele ser recriado;
 4. espera o Android terminar de ligar.
 
-O --instalar-shopee baixa o app do APKPure (o Android virtual não tem a Play
-Store) e instala. Quando o app vem em partes (XAPK), sobem só as que servem
-para o processador ARM 64 do servidor.
+O --instalar-shopee baixa o app do APKPure ou, se ele recusar, do Aptoide (o
+Android virtual não tem a Play Store) e instala. Quando o app vem em partes
+(XAPK), sobem só as que servem para o processador ARM 64 do servidor.
 
 O --tela deixa o tela_android.py rodando sozinho por 30 min e sai: o link vai
 no privado do Rafael, nunca no log.
@@ -31,6 +31,7 @@ no privado do Rafael, nunca no log.
 Imprime só estados e números, porque o log do Actions é público.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
+import json
 import os
 import platform
 import re
@@ -63,10 +64,15 @@ DISPOSITIVOS_BINDER = "binder,hwbinder,vndbinder"
 # dados do Android é criada pelo Docker como root, e o usuário não escreve nela.
 PASTA_TRABALHO = os.path.expanduser("~/shopee_video")
 PASTA_APP = os.path.join(PASTA_TRABALHO, "app")
-URLS_APP = (
-    f"https://d.apkpure.com/b/XAPK/{PACOTE_SHOPEE}?version=latest",
-    f"https://d.apkpure.com/b/APK/{PACOTE_SHOPEE}?version=latest",
+# De onde baixar o app, em ordem. O Aptoide só vale quando a própria loja marca o
+# arquivo como confiável (assinatura conferida com a do app original).
+FONTES_APP = (
+    ("APKPure XAPK", f"https://d.apkpure.com/b/XAPK/{PACOTE_SHOPEE}?version=latest"),
+    ("APKPure APK", f"https://d.apkpure.com/b/APK/{PACOTE_SHOPEE}?version=latest"),
+    ("APKPure .net", f"https://d.apkpure.net/b/XAPK/{PACOTE_SHOPEE}?version=latest"),
+    ("Aptoide", None),
 )
+URL_APTOIDE = f"https://ws75.aptoide.com/api/7/app/getMeta/package_name={PACOTE_SHOPEE}"
 NAVEGADOR = ("Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) "
              "Chrome/124.0 Mobile Safari/537.36")
 # O servidor é ARM 64: as partes do app para armeabi_v7a, x86 e x86_64 sobram.
@@ -167,13 +173,43 @@ def partes_do_app(arquivo, pasta):
     """
     with zipfile.ZipFile(arquivo) as z:
         nomes = z.namelist()
-        if "AndroidManifest.xml" in nomes:
-            return [arquivo]
+    if "AndroidManifest.xml" in nomes:
+        # O adb só instala arquivo com final .apk.
+        apk = os.path.join(pasta, "shopee.apk")
+        os.makedirs(pasta, exist_ok=True)
+        shutil.copyfile(arquivo, apk)
+        return [apk]
+    with zipfile.ZipFile(arquivo) as z:
         apks = sorted(n for n in nomes if n.endswith(".apk") and "/" not in n
                       and not any(a in n.lower() for a in OUTRAS_ARQUITETURAS))
         for nome in apks:
             z.extract(nome, pasta)
     return [os.path.join(pasta, nome) for nome in apks]
+
+
+def _baixar(url, destino):
+    """Código HTTP do download (o curl segue os redirecionamentos); 0 se nem respondeu."""
+    r = _rodar("curl", "-sSL", "--retry", "2", "-A", NAVEGADOR, "-o", destino, "-w", "%{http_code}", url,
+               timeout=900)
+    if r is None:
+        return 0
+    codigo = r[1][-3:]
+    return int(codigo) if codigo.isdigit() else 0
+
+
+def _url_aptoide():
+    """(endereço do APK, motivo). Só devolve endereço se o Aptoide marca o arquivo como TRUSTED."""
+    r = _rodar("curl", "-sSL", "-A", NAVEGADOR, URL_APTOIDE, timeout=60)
+    if not _ok(r):
+        return None, "sem resposta"
+    try:
+        arquivo = json.loads(r[1])["data"]["file"]
+    except (ValueError, KeyError, TypeError):
+        return None, "resposta inesperada"
+    if (arquivo.get("malware") or {}).get("rank") != "TRUSTED":
+        return None, "arquivo não marcado como confiável"
+    url = arquivo.get("path") or arquivo.get("path_alt")
+    return (url, "ok") if url else (None, "sem endereço do arquivo")
 
 
 def instalar_shopee():
@@ -186,18 +222,26 @@ def instalar_shopee():
     os.makedirs(PASTA_APP)
     arquivo = os.path.join(PASTA_APP, "shopee.zip")
     try:
-        for url in URLS_APP:
-            r = _rodar("curl", "-fsSL", "--retry", "2", "-A", NAVEGADOR, "-o", arquivo, url, timeout=900)
-            if _ok(r) and zipfile.is_zipfile(arquivo):
+        for nome, url in FONTES_APP:
+            if url is None:
+                url, motivo = _url_aptoide()
+                if url is None:
+                    print(f"{nome}: {motivo}")
+                    continue
+            codigo = _baixar(url, arquivo)
+            valido = codigo == 200 and zipfile.is_zipfile(arquivo)
+            print(f"{nome}: HTTP {codigo}" + ("" if valido else ", sem o app"))
+            if valido:
                 break
         else:
-            print("baixar o app: falhou")
+            print("baixar o app: nenhuma fonte deu certo")
             return False
+        tamanho = os.path.getsize(arquivo)
         partes = partes_do_app(arquivo, PASTA_APP)
         if not partes:
             print("baixar o app: o arquivo veio sem app dentro")
             return False
-        print(f"baixado: {os.path.getsize(arquivo) / 1024 / 1024:.0f} MB, {len(partes)} parte(s)")
+        print(f"baixado: {tamanho / 1024 / 1024:.0f} MB, {len(partes)} parte(s)")
         comando = "install" if len(partes) == 1 else "install-multiple"
         if not _passo("instalar no Android", _adb(comando, "-r", "-g", *partes, timeout=900)):
             return False
