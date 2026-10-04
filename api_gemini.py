@@ -2,13 +2,17 @@
 Acesso ao Gemini (Google) para gerar texto e analisar vídeos.
 
 As duas funções tentam os modelos de MODELOS_CASCATA_GEMINI em ordem e passam
-para o próximo quando um falha, estoura a cota ou responde vazio. A chave fica
-em GEMINI_KEY no .env.
+para o próximo quando um falha, estoura a cota ou responde vazio. Modelo sem
+cota ou que não existe fica de fora da cascata por um tempo (_fora_ate). A
+chave fica em GEMINI_KEY no .env.
 """
 import os
+import re
 import asyncio
 import logging
 import time
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from google import genai
 
@@ -32,6 +36,57 @@ MODELOS_CASCATA_GEMINI = [
 ]
 
 logger = logging.getLogger("API_Gemini")
+
+# Modelo que respondeu "sem cota" (429) ou "modelo não existe" (404) fica de fora
+# da cascata por um tempo, em vez de gastar uma chamada a cada pedido: eram ~300
+# por dia batendo em cota estourada. Vale por processo (cada robô descobre sozinho).
+# Se todos estiverem de fora, a cascata tenta todos, como se não houvesse a pausa.
+_fora_ate = {}                      # modelo -> time.monotonic() em que volta
+ESPERA_COTA_S = 10 * 60             # cota estourada sem prazo informado
+ESPERA_MODELO_INEXISTENTE_S = 6 * 3600
+
+
+def _segundos_ate_virada_da_cota():
+    """A cota diária do Gemini vira à meia-noite do horário do Pacífico."""
+    agora = datetime.now(ZoneInfo("America/Los_Angeles"))
+    virada = (agora + timedelta(days=1)).replace(hour=0, minute=5, second=0, microsecond=0)
+    return (virada - agora).total_seconds()
+
+
+def tempo_fora(erro_txt):
+    """
+    (segundos, motivo) que o modelo fica de fora por esse erro, ou None se o erro
+    não é de cota nem de modelo inexistente (aí ele continua na cascata).
+    """
+    if "429" in erro_txt or "RESOURCE_EXHAUSTED" in erro_txt.upper() or "quota" in erro_txt.lower():
+        if "PerDay" in erro_txt:
+            return _segundos_ate_virada_da_cota(), "cota do dia"
+        prazo = re.search(r"retry\w*\W{0,6}(?:in\s+)?(\d+(?:\.\d+)?)s", erro_txt, re.IGNORECASE)
+        if prazo:
+            return float(prazo.group(1)) + 5, "cota do minuto"
+        return ESPERA_COTA_S, "cota"
+    if "NOT_FOUND" in erro_txt.upper():
+        return ESPERA_MODELO_INEXISTENTE_S, "modelo não encontrado"
+    return None
+
+
+def _modelos_da_vez():
+    agora = time.monotonic()
+    livres = [m for m in MODELOS_CASCATA_GEMINI if _fora_ate.get(m, 0) <= agora]
+    return livres or list(MODELOS_CASCATA_GEMINI)
+
+
+def _tirar_da_vez(modelo, erro_txt):
+    """Tira o modelo da cascata conforme o erro. True se tirou."""
+    fora = tempo_fora(erro_txt)
+    if fora is None:
+        return False
+    segundos, motivo = fora
+    _fora_ate[modelo] = time.monotonic() + segundos
+    volta = datetime.now() + timedelta(seconds=segundos)
+    logger.warning(f"⏸️ [IA] {modelo} fora da cascata até {volta:%d/%m %H:%M} ({motivo}).")
+    return True
+
 
 # Motivo da última falha de analisar_video_gemini. O bot_mestre mostra na tela de
 # submissão quando a análise falha, em vez de um genérico "falha temporária".
@@ -59,12 +114,11 @@ async def gerar_texto_gemini(prompt):
     """
     Gera texto com o primeiro modelo da cascata que responder.
 
-    Em erro de cota espera 2 s antes do próximo modelo. Devolve o texto ou None
-    se todos falharem (não grava ULTIMO_ERRO_IA).
+    Devolve o texto ou None se todos falharem (não grava ULTIMO_ERRO_IA).
     """
-    for modelo_nome in MODELOS_CASCATA_GEMINI:
+    for modelo_nome in _modelos_da_vez():
         try:
-            logger.info(f"⏳ [IA] Consultando motor: {modelo_nome}...")
+            logger.debug(f"⏳ [IA] Consultando motor: {modelo_nome}...")
             
             response = await asyncio.to_thread(
                 client_genai.models.generate_content,
@@ -77,12 +131,8 @@ async def gerar_texto_gemini(prompt):
                 return response.text.strip()
                 
         except Exception as e:
-            erro_str = str(e).lower()
-            if "429" in erro_str or "quota" in erro_str or "exhausted" in erro_str:
-                logger.warning(f"⚠️ [IA] Limite atingido em {modelo_nome}. Pausando 2s...")
-                await asyncio.sleep(2)
-            else:
-                logger.warning(f"⚠️ [IA] Erro no modelo {modelo_nome}: {erro_str[:50]}...")
+            if not _tirar_da_vez(modelo_nome, str(e)):
+                logger.warning(f"⚠️ [IA] Erro no modelo {modelo_nome}: {str(e)[:80]}...")
             continue
 
     logger.error("❌ [IA] Falha crítica: Nenhum motor da cascata respondeu.")
@@ -124,7 +174,7 @@ async def analisar_video_gemini(caminho_video, prompt):
             logger.info("✅ [IA] Vídeo pronto! Gerando a copy...")
 
             falhas = []   # motivo de cada modelo, para a mensagem de erro final
-            for modelo_nome in MODELOS_CASCATA_GEMINI:
+            for modelo_nome in _modelos_da_vez():
                 try:
                     response = client_genai.models.generate_content(
                         model=modelo_nome,
@@ -149,10 +199,7 @@ async def analisar_video_gemini(caminho_video, prompt):
                 except Exception as erro_modelo:
                     erro_txt = str(erro_modelo)
                     falhas.append(f"{modelo_nome}: {type(erro_modelo).__name__} {erro_txt[:150]}")
-                    if "429" in erro_txt or "RESOURCE_EXHAUSTED" in erro_txt.upper():
-                        logger.warning(f"⚠️ [IA] Cota estourada em {modelo_nome}. Tentando o próximo...")
-                        time.sleep(3)
-                    else:
+                    if not _tirar_da_vez(modelo_nome, erro_txt):
                         logger.warning(f"⚠️ [IA] Erro em {modelo_nome}: {type(erro_modelo).__name__} → {erro_txt[:200]}")
                     continue
 

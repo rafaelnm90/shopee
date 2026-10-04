@@ -33,7 +33,8 @@ Módulos de apoio (não são serviços):
 - `painel_espelhos.py` e `painel_notas.py`: routers aiogram incluídos no bot_mestre.
 - `utils.py` (`erros_logs`, caches, validação de IDs) e `fuso.py` (horário de Brasília e formato de log).
 - `api_gemini.py` (IA, com cascata de modelos) e `api_shopee.py` (links de afiliado).
-- Ferramentas: `validar_deploy.py`, `testar_chaves.py`, `inventario.py`, `backup_config.sh`.
+- `backup_dados.py`: backup diário (03:40, pelo bot_mestre) do banco, das sessões, dos JSON e do `.env` em `~/backups`, ficam 7. O `/status` mostra a idade do último.
+- Ferramentas: `validar_deploy.py`, `testar_chaves.py`, `inventario.py`, `servicos_afetados.py` (o deploy pergunta a ele quem reiniciar) e `faxina_servidor.py` (tira tabelas, chaves e arquivos sem uso, guardando cópia antes).
 
 O README tem os IDs dos canais, as cinco filas e os comandos do servidor.
 
@@ -73,13 +74,13 @@ arquivo cresce: `grep -n "^# --- " bot_mestre.py`. Os blocos grandes usam
   - `erros_logs`.
   - Pool: `contas_telegram`, `funcoes_contas` e `atividade_contas`.
 - O Espelhador de canais ainda usa arquivos: `espelhos_config.json` e `fila_espelhador.json`.
-- Nada disso está no git: o `.gitignore` cobre `*.db`, `*.json`, `*.session` e `.env`. No servidor, o `backup_config.sh` guarda essas coisas.
+- Nada disso está no git: o `.gitignore` cobre `*.db`, `*.json`, `*.session` e `.env`. No servidor, o backup diário (`backup_dados.py`) guarda essas coisas em `~/backups`.
 
 ## Armadilhas conhecidas
 
 - Importar `db` (o `utils` importa) troca o `sqlite3.connect` do processo inteiro, para as sessões do Telethon também esperarem 30 s pelo lock. Importar `fuso` trava o fuso no horário de Brasília.
 - Os jobs do APScheduler e o FSM do aiogram ficam em memória.
-  - Um restart (todo deploy) refaz a grade do dia em `main()`.
+  - Um restart refaz a grade do dia em `main()`. O deploy só reinicia o robô cujo código mudou.
   - Também derruba os fluxos de painel que estavam abertos.
 - aiogram: ganha o primeiro handler registrado que casar. Num fluxo FSM, o handler de "Cancelar ❌" tem de vir antes do handler que lê texto livre.
 - `validar_deploy.py` exige que o 1º parâmetro de um handler se chame `message`, `callback`, `event`, `query`, `msg` ou `callback_query`.
@@ -112,7 +113,7 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
 - `--ordem aleatoria` embaralha os testes. Um teste não pode depender de outro ter rodado antes.
 - CI:
   - `validar.yml` roda em todo PR para a `main`, com a suíte em 4 horários e ordem aleatória.
-  - `deploy.yml` roda no merge na `main`. Ele repete a validação e, por SSH, faz `git pull` e `pip install` no servidor e reinicia os 5 serviços. Confere se todos subiram aos 25 s e de novo 3 min depois (processo e contador de reinícios).
+  - `deploy.yml` roda no merge na `main`. Ele repete a validação e, por SSH, faz `git pull` e `pip install` no servidor. Reinicia só os serviços cujo código mudou (o arquivo do robô ou um módulo que ele importa; `requirements.txt` ou dúvida = todos; só docs, testes ou workflows = nenhum). Confere os 5 aos 25 s e de novo 3 min depois (processo e contador de reinícios). Robô que cai mostra só o tipo do erro no log.
   - `diagnostico.yml` olha o servidor de hora em hora, só lendo: robôs (estado, desde quando, reinícios), máquina (carga, memória, disco), banco e volume de log. Fica vermelho com robô fora do ar ou disco acima de 90% (o GitHub manda e-mail). Para ver o servidor agora, dispare-o (`run_workflow` em `diagnostico.yml`) e leia o log do job.
   - `inventario.yml` (só à mão) roda o `inventario.py` no servidor. Ele mostra:
     - tamanho e idade de cada pasta, os arquivos soltos e as linhas por tabela;
@@ -121,6 +122,7 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
     - o espaço do journal e as linhas de log que mais se repetem, com arquivo:linha do código;
     - os caches e a memória de cada robô.
     Use para achar o que acumula.
+  - `faxina.yml` (só à mão) roda o `faxina_servidor.py` no servidor: sem marcar "executar", só mostra; marcado, guarda em `~/backups/antigos` e tira. Para tirar outra coisa sem uso, acrescentar na lista do `faxina_servidor.py` depois de conferir que nenhum código usa.
   - O repositório é público e os logs do Actions também: nos workflows, só estados e números; nunca conteúdo de log dos robôs ou dados do banco.
   - Não há acesso direto ao servidor por SSH a partir da sessão. Os detalhes dos erros ficam no `/status` do bot, no privado do Rafael.
 

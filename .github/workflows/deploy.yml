@@ -27,6 +27,9 @@ jobs:
             # Acessa a pasta exata onde o bot está no servidor
             cd ~/shopee
             
+            # Commit que estava no ar: o que mudou desde ele decide quem reinicia.
+            ANTES=$(git rev-parse HEAD 2>/dev/null || echo desconhecido)
+
             # Sincroniza o código com o GitHub forçando a cópia exata
             git fetch --all
             # 📌 Sobe EXATAMENTE o commit que o job 'validar' aprovou. Com origin/main,
@@ -37,41 +40,38 @@ jobs:
             # Atualiza as bibliotecas se houver mudanças
             source venv/bin/activate
             pip install -r requirements.txt --no-cache-dir
+            # Bibliotecas que saíram do requirements.txt porque nenhum código usa: o
+            # pip install não as remove sozinho. Depois que saíram, não faz nada.
+            pip uninstall -y -q google-generativeai google-ai-generativelanguage google-api-python-client \
+              google-api-core google-auth-httplib2 googleapis-common-protos grpcio grpcio-status \
+              httplib2 proto-plus protobuf tqdm uritemplate 2>/dev/null || true
             
             # Recarrega as configurações do sistema caso algum .service tenha sido alterado no GitHub
             sudo systemctl daemon-reload
             
-            # 1. Reinicia o Bot Mestre (Antigo Shopee)
-            echo "🚀 Reiniciando Bot Mestre..."
-            sudo systemctl stop bot_mestre_bot.service || true
-            sudo systemctl kill -s SIGKILL bot_mestre_bot.service || true
-            sudo systemctl start bot_mestre_bot.service
-            
-            # 2. Reinicia o Userbot de Divulgacao
-            echo "🚀 Reiniciando Divulgação Canal..."
-            sudo systemctl stop divulgacao_canal_bot.service || true
-            sudo systemctl kill -s SIGKILL divulgacao_canal_bot.service || true
-            sudo systemctl start divulgacao_canal_bot.service
+            # Reinicia só os robôs cujo código mudou (o arquivo deles ou um módulo que
+            # importam): cada reinício derruba os painéis abertos e refaz a grade do
+            # dia. Mudança só em documentação, testes ou workflows não reinicia
+            # ninguém. Na dúvida (requirements, o mesmo commit de novo, erro no
+            # seletor), todos. Robô que estava parado reinicia sempre.
+            SERVICOS="bot_mestre_bot divulgacao_canal_bot motor_userbot_bot espelhador_videos_autorais_bot downloader_bot"
+            if ! MUDARAM=$(python3 servicos_afetados.py "$ANTES" "${{ github.sha }}"); then
+              MUDARAM=$(echo $SERVICOS | tr ' ' '\n')
+            fi
+            REINICIADOS=""
+            for SERVICO in $SERVICOS; do
+              if echo "$MUDARAM" | grep -qx "$SERVICO" || ! systemctl is-active --quiet "$SERVICO.service"; then
+                echo "🔄 Reiniciando $SERVICO..."
+                sudo systemctl stop "$SERVICO.service" || true
+                sudo systemctl kill -s SIGKILL "$SERVICO.service" || true
+                sudo systemctl start "$SERVICO.service"
+                REINICIADOS="$REINICIADOS $SERVICO"
+              else
+                echo "⏭️ $SERVICO sem mudança no código: continua rodando"
+              fi
+            done
 
-            # 3. Reinicia o Motor Userbot (Antigo Espião)
-            echo "🕵️ Reiniciando Motor Userbot..."
-            sudo systemctl stop motor_userbot_bot.service || true
-            sudo systemctl kill -s SIGKILL motor_userbot_bot.service || true
-            sudo systemctl start motor_userbot_bot.service
-
-            # 4. Reinicia o Espelhador de Videos Autorais
-            echo "🔄 Reiniciando Espelhador Autorais..."
-            sudo systemctl stop espelhador_videos_autorais_bot.service || true
-            sudo systemctl kill -s SIGKILL espelhador_videos_autorais_bot.service || true
-            sudo systemctl start espelhador_videos_autorais_bot.service
-
-            # 5. Reinicia o Downloader (baixador de vídeos)
-            echo "📥 Reiniciando Downloader..."
-            sudo systemctl stop downloader_bot.service || true
-            sudo systemctl kill -s SIGKILL downloader_bot.service || true
-            sudo systemctl start downloader_bot.service
-            
-            # 6. Confere se os robôs ficaram de pé. Robô que cai logo ao iniciar
+            # Confere se os robôs ficaram de pé. Robô que cai logo ao iniciar
             # (erro de import, .env faltando) fica em "activating" no Restart=always:
             # o deploy fica vermelho e mostra o tipo do último erro de quem caiu.
             # Só o tipo: o log dos robôs tem nomes de grupos, contas e links, e o log
@@ -81,9 +81,8 @@ jobs:
                 | grep -oE '^[A-Za-z_][A-Za-z0-9_.]*(Error|Exception|Interrupt)\b' | tail -1)
               echo "   último erro no log: ${TIPO:-nenhum reconhecido}"
             }
-            sleep 25
+            if [ -n "$REINICIADOS" ]; then sleep 25; fi
             FALHOU=0
-            SERVICOS="bot_mestre_bot divulgacao_canal_bot motor_userbot_bot espelhador_videos_autorais_bot downloader_bot"
             for SERVICO in $SERVICOS; do
               if systemctl is-active --quiet "$SERVICO.service"; then
                 echo "✅ $SERVICO ativo"
@@ -94,18 +93,18 @@ jobs:
               fi
             done
 
-            # 7. Confere de novo 3 min depois. Com Restart=always, o robô que cai depois de
+            # Confere de novo 3 min depois. Com Restart=always, o robô que cai depois de
             # subir (no primeiro agendamento, na conexão com o Telegram) volta sozinho em
             # 10 s e parece "ativo" numa olhada só. Processo novo (MainPID) ou reinício
             # contado (NRestarts) desde a 1ª olhada = caiu nesse meio-tempo.
-            if [ $FALHOU -eq 0 ]; then
-              ANTES=""
+            if [ $FALHOU -eq 0 ] && [ -n "$REINICIADOS" ]; then
+              RETRATO=""
               for SERVICO in $SERVICOS; do
-                ANTES="$ANTES $SERVICO:$(systemctl show -p MainPID --value "$SERVICO.service"):$(systemctl show -p NRestarts --value "$SERVICO.service")"
+                RETRATO="$RETRATO $SERVICO:$(systemctl show -p MainPID --value "$SERVICO.service"):$(systemctl show -p NRestarts --value "$SERVICO.service")"
               done
               echo "⏳ Conferindo de novo em 3 minutos..."
               sleep 180
-              for ITEM in $ANTES; do
+              for ITEM in $RETRATO; do
                 SERVICO=${ITEM%%:*}; RESTO=${ITEM#*:}
                 PID_ANTES=${RESTO%%:*}; REINICIOS_ANTES=${RESTO#*:}
                 PID_AGORA=$(systemctl show -p MainPID --value "$SERVICO.service")

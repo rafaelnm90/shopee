@@ -112,9 +112,11 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **03/10/2026:** o alerta "Nenhuma publicação hoje" do Espião conta só os clones com horário até hoje.
 - **03/10/2026:** o deploy reinicia também o `downloader_bot`, como os outros quatro.
 - **03/10/2026:** o deploy confere os robôs aos 25 s e de novo 3 min depois.
+- **03/10/2026:** o deploy reinicia só os robôs cujo código mudou (o arquivo do robô ou um módulo que ele importa). Mudança só em documentação, testes ou workflows não reinicia ninguém; `requirements.txt` ou dúvida reinicia todos. Robô parado reinicia sempre.
 - **03/10/2026:** um diagnóstico de hora em hora olha o servidor só lendo, e fica vermelho (e-mail do GitHub) com robô fora do ar ou disco acima de 90%.
   - Nos logs do Actions saem só estados e números, porque o repositório é público.
   - Nada de acesso SSH direto pela sessão do Claude.
+- **03/10/2026:** backup automático todo dia às 03:40 do banco, das sessões, dos JSON e do `.env` em `~/backups`, ficando os 7 mais novos. Se falhar, aviso no privado. O monitor de saúde avisa se o último passar de 30 h, e o `/status` mostra a idade dele.
 
 ## Código e manutenção
 
@@ -126,3 +128,6 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **03/10/2026:** todo acesso ao banco passa pelo `db.py`, em modo WAL.
 - **03/10/2026:** log direto (`logger.info/warning/error`), com o nível pelo `NIVEL_LOG` do `.env`.
 - **03/10/2026:** log enxuto: as bibliotecas (agendador, aiogram, Telethon, HTTP) só mostram avisos e erros, e com `NIVEL_LOG=DEBUG` voltam a mostrar tudo. Mensagem que se repetia a cada volta (pausa do motor dos Autorais, nomes de tópicos, passo a passo do Auditor, leitura das rotinas) só sai quando algo muda ou fica no DEBUG.
+- **03/10/2026:** a IA pula o modelo que respondeu sem cota (até a cota voltar: o prazo que o Google informa, ou a virada do dia no horário do Pacífico) e o modelo que não existe (por 6 h). Se todos estiverem de fora, tenta todos, como antes.
+- **03/10/2026:** bibliotecas com versão fixa, a mesma do servidor (Telethon, pandas, matplotlib e google-genai estavam soltas). Saíram 13 que nenhum código usa (o SDK antigo do Gemini e as dependências dele), do requirements e do servidor.
+- **03/10/2026:** o que a auditoria achou sem uso sai do servidor, sempre com cópia em `~/backups/antigos`: as tabelas mortas (fila_espelhador, fila_espiao, financeiro_despesas, financeiro_saques, historico_financeiro, pedidos_financeiro, mensagens_topico), a chave velha `fila_espelhador` e os arquivos velhos (cópias antigas do banco, backup_dados.tar.gz, conferir.png, registro_hashes.json, variantes/). Arquivos são movidos, não apagados.
