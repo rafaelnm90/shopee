@@ -122,11 +122,64 @@ async def acao(request):
     if dados.get("tipo") == "fim":
         FIM.set()
         return web.json_response({"ok": True})
+    if dados.get("tipo") == "fechar_apps":
+        fechados = await fechar_apps()
+        return web.json_response({"ok": True, "mensagem": f"{fechados} app(s) fechado(s)"})
+    if dados.get("tipo") == "reiniciar":
+        if _reinicio.get("tarefa") and not _reinicio["tarefa"].done():
+            return web.json_response({"ok": True, "mensagem": "o Android já está reiniciando"})
+        _reinicio["tarefa"] = asyncio.create_task(reiniciar_android())
+        return web.json_response({"ok": True, "mensagem": "reiniciando o Android: a tela volta em 1 a 2 min"})
     comando = comando_da_acao(dados)
     if comando is None:
         raise web.HTTPBadRequest()
     await adb(*comando)
     return web.json_response({"ok": True})
+
+
+async def fechar_apps():
+    """
+    Fecha todos os apps instalados (os do sistema ficam) e volta à tela inicial.
+    Devolve quantos foram fechados.
+    """
+    lista = (await adb("shell", "pm", "list", "packages", "-3")).decode(errors="ignore")
+    pacotes = [linha.split(":", 1)[1].strip() for linha in lista.splitlines() if linha.startswith("package:")]
+    for pacote in pacotes:
+        await adb("shell", "am", "force-stop", pacote)
+    await adb("shell", "input", "keyevent", str(TECLAS["inicio"]))
+    return len(pacotes)
+
+
+_reinicio = {}
+
+
+async def _rodar_comando(*partes, timeout=120):
+    proc = await asyncio.create_subprocess_exec(*partes, stdout=asyncio.subprocess.DEVNULL,
+                                                stderr=asyncio.subprocess.DEVNULL)
+    try:
+        await asyncio.wait_for(proc.wait(), timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return False
+    return proc.returncode == 0
+
+
+async def reiniciar_android(espera=10, prazo=240):
+    """
+    Reinicia o Android como quem reinicia um celular: o contêiner religa, e os
+    apps e o login continuam (os dados ficam fora dele). Depois reconecta o adb
+    até o Android terminar de ligar, para a tela voltar sozinha.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    if not await _rodar_comando("sudo", "-n", "docker", "restart", av.CONTEINER):
+        registrar_erro("reinício", RuntimeError())
+        return False
+    for _ in range(max(1, prazo // max(1, espera))):
+        await asyncio.sleep(espera)
+        await _rodar_comando("adb", "connect", av.ENDERECO_ADB, timeout=15)
+        if (await adb("shell", "getprop", "sys.boot_completed")).strip() == b"1":
+            return True
+    return False
 
 
 def instalar_arquivo(arquivo):
@@ -341,6 +394,8 @@ PAGINA = """<!doctype html>
   <button onclick="tecla('enter')">↵ Enter</button></div>
 <div class="barra"><input type="file" id="arquivo" accept=".apk,.xapk,.apks"></div>
 <div class="barra"><button onclick="enviarApp()">📦 Enviar app</button></div>
+<div class="barra"><button onclick="fecharApps()">🧹 Fechar apps</button>
+  <button onclick="reiniciar()">🔄 Reiniciar Android</button></div>
 <div class="barra"><button onclick="terminar()">✅ Terminei</button></div>
 <div id="aviso">Toque para clicar. Arraste para rolar ou para o quebra-cabeça.</div>
 <script>
@@ -377,6 +432,19 @@ function digitar() {
   campo.value = "";
 }
 function tecla(nome) { enviar({ tipo: "tecla", tecla: nome }); }
+async function pedir(tipo) {
+  try {
+    const r = await enviar({ tipo: tipo });
+    const j = await r.json();
+    avisar((j.ok ? "✅ " : "❌ ") + j.mensagem);
+  } catch (e) { avisar("❌ A conexão caiu (" + e.name + "). Tente de novo."); }
+}
+function fecharApps() { avisar("Fechando os apps..."); pedir("fechar_apps"); }
+function reiniciar() {
+  if (!confirm("Reiniciar o Android? Os apps e o login continuam; a tela volta em 1 a 2 min.")) return;
+  avisar("Reiniciando...");
+  pedir("reiniciar");
+}
 function avisar(texto) { document.getElementById("aviso").textContent = texto; }
 const PEDACO = 2 * 1024 * 1024;
 async function enviarPedaco(arquivo, inicio) {

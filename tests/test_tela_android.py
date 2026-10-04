@@ -1,5 +1,6 @@
 """tela_android.py: só responde com a chave, e cada ação da página vira um comando adb seguro."""
 import asyncio
+import json
 
 import pytest
 from aiohttp import web
@@ -206,3 +207,64 @@ def test_codigo_de_recusa_desconhecido_aparece_como_veio():
     assert tela.motivo_da_recusa("Failure [INSTALL_FAILED_ALGO_NOVO]") == \
         "o Android recusou o app: INSTALL_FAILED_ALGO_NOVO"
     assert "sem motivo" in tela.motivo_da_recusa("")
+
+
+def test_fechar_apps_fecha_os_instalados_e_volta_ao_inicio(monkeypatch):
+    chamados = []
+
+    async def adb(*partes, timeout=20):
+        chamados.append(partes)
+        if partes[:4] == ("shell", "pm", "list", "packages"):
+            return b"package:com.shopee.br\npackage:com.apkpure.aegon\n"
+        return b""
+
+    monkeypatch.setattr(tela, "adb", adb)
+    resposta = rodar(tela.acao(Pedido(tela.CHAVE, {"tipo": "fechar_apps"})))
+    assert resposta.status == 200
+    assert ("shell", "am", "force-stop", "com.shopee.br") in chamados
+    assert ("shell", "am", "force-stop", "com.apkpure.aegon") in chamados
+    assert chamados[-1] == ("shell", "input", "keyevent", "3")             # tela inicial
+
+
+def test_reiniciar_religa_o_conteiner_e_espera_ligar(monkeypatch):
+    comandos, boot = [], iter([b"", b"1\n"])
+
+    async def rodar_comando(*partes, timeout=120):
+        comandos.append(partes)
+        return True
+
+    async def adb(*partes, timeout=20):
+        return next(boot)
+
+    monkeypatch.setattr(tela, "_rodar_comando", rodar_comando)
+    monkeypatch.setattr(tela, "adb", adb)
+    assert rodar(tela.reiniciar_android(espera=0)) is True
+    assert comandos[0] == ("sudo", "-n", "docker", "restart", tela.av.CONTEINER)   # religa, não apaga nada
+    assert ("adb", "connect", tela.av.ENDERECO_ADB) in comandos
+
+
+def test_reiniciar_que_falha_fica_registrado(monkeypatch, tmp_path):
+    monkeypatch.setattr(tela, "ESTADO", str(tmp_path / "tela_estado"))
+
+    async def rodar_comando(*partes, timeout=120):
+        return False
+
+    monkeypatch.setattr(tela, "_rodar_comando", rodar_comando)
+    assert rodar(tela.reiniciar_android(espera=0)) is False
+    assert "reinício RuntimeError" in (tmp_path / "tela_estado").read_text()
+
+
+def test_botao_reiniciar_nao_empilha_dois_reinicios(monkeypatch):
+    async def demora():
+        await asyncio.sleep(10)
+
+    async def cenario():
+        monkeypatch.setattr(tela, "reiniciar_android", demora)
+        monkeypatch.setitem(tela._reinicio, "tarefa", None)
+        primeira = await tela.acao(Pedido(tela.CHAVE, {"tipo": "reiniciar"}))
+        segunda = await tela.acao(Pedido(tela.CHAVE, {"tipo": "reiniciar"}))
+        tela._reinicio["tarefa"].cancel()
+        return json.loads(primeira.text)["mensagem"], json.loads(segunda.text)["mensagem"]
+
+    primeira, segunda = rodar(cenario())
+    assert "reiniciando o Android" in primeira and "já está reiniciando" in segunda
