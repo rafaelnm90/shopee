@@ -122,9 +122,11 @@ def test_xapk_sobe_so_as_partes_do_arm64(tmp_path):
                                                     "config.xhdpi.apk"]
 
 
-def test_apk_comum_vai_inteiro(tmp_path):
+def test_apk_comum_vai_inteiro_com_final_apk(tmp_path):
     arquivo = _zip(tmp_path / "s.zip", ["AndroidManifest.xml", "classes.dex"])
-    assert av.partes_do_app(arquivo, str(tmp_path)) == [arquivo]
+    partes = av.partes_do_app(arquivo, str(tmp_path / "x"))
+    assert len(partes) == 1 and partes[0].endswith(".apk")     # o adb recusa outro final
+    assert open(partes[0], "rb").read() == open(arquivo, "rb").read()
 
 
 def test_instalar_shopee_baixa_instala_e_limpa(monkeypatch, tmp_path, capsys):
@@ -135,7 +137,7 @@ def test_instalar_shopee_baixa_instala_e_limpa(monkeypatch, tmp_path, capsys):
     def rodar(*partes, timeout=120):
         if partes[0] == "curl":
             _zip(partes[partes.index("-o") + 1], ["base.apk", "config.arm64_v8a.apk"])
-            return (0, "")
+            return (0, "200")
         if "dumpsys" in partes:
             return (0, "    versionName=3.40.21\n")
         return Maquina.rodar(m, *partes, timeout=timeout)
@@ -146,6 +148,54 @@ def test_instalar_shopee_baixa_instala_e_limpa(monkeypatch, tmp_path, capsys):
     saida = capsys.readouterr().out
     assert "instalar no Android: ok" in saida and "versão 3.40.21" in saida
     assert not (tmp_path / "app").exists()                     # o arquivo baixado não fica no servidor
+
+
+def _fontes_recusando(monkeypatch, tmp_path, resposta_aptoide):
+    """APKPure responde 403 em tudo; o Aptoide responde o JSON dado."""
+    m = Maquina()
+    _instalar(monkeypatch, m)
+    monkeypatch.setattr(av, "PASTA_APP", str(tmp_path / "app"))
+    baixados = []
+
+    def rodar(*partes, timeout=120):
+        if partes[0] == "curl" and av.URL_APTOIDE in partes:
+            return (0, resposta_aptoide)
+        if partes[0] == "curl":
+            url = partes[-1]
+            baixados.append(url)
+            destino = partes[partes.index("-o") + 1]
+            if "aptoide" in url:
+                _zip(destino, ["AndroidManifest.xml", "classes.dex"])
+                return (0, "200")
+            open(destino, "w").write("<html>bloqueado</html>")
+            return (0, "403")
+        return Maquina.rodar(m, *partes, timeout=timeout)
+
+    monkeypatch.setattr(av, "_rodar", rodar)
+    return baixados
+
+
+def test_apkpure_recusando_cai_no_aptoide_confiavel(monkeypatch, tmp_path, capsys):
+    import json
+    resposta = json.dumps({"data": {"file": {"path": "https://pool.apk.aptoide.com/shopee.apk",
+                                             "malware": {"rank": "TRUSTED"}}}})
+    baixados = _fontes_recusando(monkeypatch, tmp_path, resposta)
+    assert av.instalar_shopee() is True
+    saida = capsys.readouterr().out
+    assert "APKPure XAPK: HTTP 403, sem o app" in saida and "Aptoide: HTTP 200" in saida
+    assert baixados[-1] == "https://pool.apk.aptoide.com/shopee.apk"
+
+
+def test_aptoide_sem_selo_de_confianca_nao_instala(monkeypatch, tmp_path, capsys):
+    import json
+    resposta = json.dumps({"data": {"file": {"path": "https://pool.apk.aptoide.com/shopee.apk",
+                                             "malware": {"rank": "UNKNOWN"}}}})
+    baixados = _fontes_recusando(monkeypatch, tmp_path, resposta)
+    assert av.instalar_shopee() is False
+    saida = capsys.readouterr().out
+    assert "Aptoide: arquivo não marcado como confiável" in saida
+    assert "nenhuma fonte deu certo" in saida
+    assert not any("aptoide" in u for u in baixados)
 
 
 def test_tela_abre_e_nao_mostra_o_link(monkeypatch, tmp_path, capsys):
