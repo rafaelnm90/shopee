@@ -16,10 +16,13 @@ def log_do_zero(monkeypatch):
     """configurar_logs como na subida do robô; devolve o nível que o processo tinha antes."""
     raiz = logging.getLogger()
     nivel_antes, handlers_antes = raiz.level, list(raiz.handlers)
+    bibliotecas_antes = {b: logging.getLogger(b).level for b in fuso.BIBLIOTECAS_SO_AVISOS}
     monkeypatch.setattr(fuso, "_LOGS_CONFIGURADOS", False)
     yield
     raiz.handlers[:] = handlers_antes
     raiz.setLevel(nivel_antes)
+    for biblioteca, nivel in bibliotecas_antes.items():
+        logging.getLogger(biblioteca).setLevel(nivel)
 
 
 @pytest.mark.parametrize("valor, esperado", [
@@ -36,6 +39,20 @@ def test_nivel_do_log_vem_do_env(log_do_zero, monkeypatch, valor, esperado):
         monkeypatch.setenv("NIVEL_LOG", valor)
     fuso.configurar_logs("teste")
     assert logging.getLogger().level == esperado
+
+
+@pytest.mark.parametrize("valor, esperado", [
+    ("INFO", logging.WARNING),
+    ("ERROR", logging.ERROR),
+    ("DEBUG", logging.DEBUG),
+])
+def test_bibliotecas_falam_so_avisos_fora_do_debug(log_do_zero, monkeypatch, valor, esperado):
+    monkeypatch.setenv("NIVEL_LOG", valor)
+    fuso.configurar_logs("teste")
+    for biblioteca in ("apscheduler.executors.default", "aiogram.event", "telethon.network", "httpx"):
+        assert logging.getLogger(biblioteca).getEffectiveLevel() == esperado, biblioteca
+    # O resto do aiogram (início do polling, falhas de conexão) continua no nível do robô.
+    assert logging.getLogger("aiogram.dispatcher").getEffectiveLevel() == logging.getLogger().level
 
 
 def test_nenhum_arquivo_volta_a_usar_chave_de_log():

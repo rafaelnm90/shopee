@@ -125,3 +125,4 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **03/10/2026, exceção:** o handler "Disparar Repost Autoral ♻️" fica, mesmo sem botão em nenhum teclado: o Rafael não pediu para tirar (pode ser usado digitando o texto). Não remover como código morto.
 - **03/10/2026:** todo acesso ao banco passa pelo `db.py`, em modo WAL.
 - **03/10/2026:** log direto (`logger.info/warning/error`), com o nível pelo `NIVEL_LOG` do `.env`.
+- **03/10/2026:** log enxuto: as bibliotecas (agendador, aiogram, Telethon, HTTP) só mostram avisos e erros, e com `NIVEL_LOG=DEBUG` voltam a mostrar tudo. Mensagem que se repetia a cada volta (pausa do motor dos Autorais, nomes de tópicos, passo a passo do Auditor, leitura das rotinas) só sai quando algo muda ou fica no DEBUG.

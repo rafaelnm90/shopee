@@ -903,7 +903,7 @@ async def motor_espelhador_userbot(event):
 
     # Só vídeo; foto é ignorada.
     if getattr(event, 'video', None) is None:
-        logger.info("⏭️ [Espelhador] Postagem descartada: Contém o link, mas a mídia não é um vídeo.")
+        logger.debug("⏭️ [Espelhador] Postagem descartada: Contém o link, mas a mídia não é um vídeo.")
         return
 
     link_capturado = extrair_link_shopee(event)
@@ -1072,7 +1072,7 @@ async def validar_e_obter_entidade(client, alvo):
     """
     alvo_str = str(alvo).strip()
     
-    logger.info(f"🧹 [Auditor] Higienizando alvo bruto: {alvo_str}")
+    logger.debug(f"🧹 [Auditor] Higienizando alvo bruto: {alvo_str}")
 
     # O tópico sai do texto antes da busca e volta no ID normalizado.
     topico_id = None
@@ -1087,7 +1087,7 @@ async def validar_e_obter_entidade(client, alvo):
     if match_privado:
         numero_extraido = match_privado.group(1)
         alvo_str = f"-100{numero_extraido}"
-        logger.info(f"🔗 [Auditor] Link privado detetado. Convertido para ID base: {alvo_str}")
+        logger.debug(f"🔗 [Auditor] Link privado detetado. Convertido para ID base: {alvo_str}")
 
     # Username ou link público (t.me/username).
     elif "t.me/" in alvo_str or alvo_str.startswith("@") or not alvo_str.lstrip('-').isdigit():
@@ -1099,9 +1099,9 @@ async def validar_e_obter_entidade(client, alvo):
         
         for var in variacoes_publicas:
             try:
-                logger.info(f"🔍 [Auditor] Testando variação de username: {var}")
+                logger.debug(f"🔍 [Auditor] Testando variação de username: {var}")
                 ent = await client.get_entity(var)
-                logger.info(f"✅ [Auditor] Variação {var} aceite pela API do Telegram!")
+                logger.debug(f"✅ [Auditor] Variação {var} aceite pela API do Telegram!")
                 id_final = f"{var}:{topico_id}" if topico_id else var
                 return ent, id_final
             except Exception:
@@ -1125,9 +1125,9 @@ async def validar_e_obter_entidade(client, alvo):
             
     for var in variacoes_unicas:
         try:
-            logger.info(f"🔍 [Auditor] Testando variação numérica de ID: {var}")
+            logger.debug(f"🔍 [Auditor] Testando variação numérica de ID: {var}")
             ent = await client.get_entity(int(var))
-            logger.info(f"✅ [Auditor] Variação {var} aceite pela API do Telegram!")
+            logger.debug(f"✅ [Auditor] Variação {var} aceite pela API do Telegram!")
             id_final = f"{var}:{topico_id}" if topico_id else str(var)
             return ent, id_final
         except Exception:
@@ -1409,17 +1409,19 @@ async def monitorar_topicos_submissao():
                     }
                     resultado = await client(GetForumTopicsRequest(**argumentos))
 
-                    total = 0
+                    # Loga só o que mudou: a cada 10 min quase sempre é nada, e
+                    # contar os nomes de todos os fóruns lotava o log.
+                    novos = 0
                     for topico in getattr(resultado, 'topics', []):
                         topico_id = getattr(topico, 'id', None)
                         titulo = getattr(topico, 'title', None)
                         if topico_id is None or not titulo:
                             continue
-                        salvar_nome_grupo(f"{grupo_id}_{topico_id}", titulo)
-                        total += 1
+                        if salvar_nome_grupo(f"{grupo_id}_{topico_id}", titulo):
+                            novos += 1
 
-                    if total:
-                        logger.info(f"🏷️ [Tópicos] {total} nomes sincronizados do grupo {grupo_id}.")
+                    if novos:
+                        logger.info(f"🏷️ [Tópicos] {novos} nome(s) de tópico novo(s) ou mudado(s) no grupo {grupo_id}.")
                 except Exception as e:
                     logger.warning(f"⚠️ [Tópicos] Falha ao sincronizar os tópicos do grupo {grupo_id}: {e}")
 

@@ -1416,6 +1416,24 @@ async def interceptar_e_espelhar(event):
                     except Exception:
                         pass
 
+# Pausa do motor (teto do dia, fora da janela) já avisada no log: o aviso sai uma
+# vez quando o motor para, e não a cada volta do laço (eram centenas de linhas por
+# dia iguais). Volta a ser None quando o motor segue para publicar.
+_pausa_avisada = None
+
+
+def avisar_pausa(chave, texto):
+    global _pausa_avisada
+    if chave != _pausa_avisada:
+        _pausa_avisada = chave
+        logger.info(texto)
+
+
+def fim_da_pausa():
+    global _pausa_avisada
+    _pausa_avisada = None
+
+
 async def processar_fila_autorais_loop():
     """
     Fila de retorno D+X. A cada minuto agenda na janela do painel os vídeos com
@@ -1540,7 +1558,8 @@ async def processar_fila_autorais_loop():
                 ja_saiu = 0
 
             if ja_saiu >= limite_dia:
-                logger.info(f"🚦 [Motor Autorais] Teto diário atingido ({ja_saiu}/{limite_dia}). Nada mais sai hoje.")
+                avisar_pausa(("teto", hoje_str),
+                             f"🚦 [Motor Autorais] Teto diário atingido ({ja_saiu}/{limite_dia}). Nada mais sai hoje.")
                 await asyncio.sleep(60)
                 continue
 
@@ -1549,10 +1568,12 @@ async def processar_fila_autorais_loop():
             janela_ini = int(config_atual.get("inicio", 0))
             janela_fim = int(config_atual.get("fim", 24))
             if not (janela_ini <= agora.hour < janela_fim):
-                logger.info(f"⏰ [Motor Autorais] Fora da janela ({janela_ini}h-{janela_fim}h). "
-                            f"São {agora.hour}h. Nada será publicado agora.")
+                avisar_pausa(("janela", hoje_str, janela_ini, janela_fim),
+                             f"⏰ [Motor Autorais] Fora da janela ({janela_ini}h-{janela_fim}h). "
+                             f"São {agora.hour}h. Nada será publicado até as {janela_ini}h.")
                 await asyncio.sleep(300)
                 continue
+            fim_da_pausa()
 
             itens_restantes = []
             

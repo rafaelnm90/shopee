@@ -2239,7 +2239,7 @@ async def disparar_mensagem(tipo, forcar=False):
 
 def ler_config_rotina():
     """config_rotina, com as chaves que faltarem preenchidas pelo padrão (e gravadas)."""
-    logger.info("🚀 Iniciando leitura e validação das configurações de rotina...")
+    logger.debug("🚀 Iniciando leitura e validação das configurações de rotina...")
     padrao = {
         # Canal principal
         "bom_dia": {"inicio": 6, "fim": 9, "frequencia": 1},
