@@ -294,3 +294,14 @@ def test_editar_nome_pelo_painel_e_voltar_ao_automatico(bm, pc, Msg, Est):
     rodar(bm.contas_salvar_nome(Msg(bm.BOTAO_NOME_AUTOMATICO), st))
     assert pc.nome_da_conta(pc.obter_conta("a")) == "@chip_um"
 
+
+def test_colocar_no_grupo_explica_com_o_nome_do_grupo(bm, pc, Msg, Est):
+    bm.db.salvar_config("autorais_config", {"origem": "-1003673555953"})
+    bm.salvar_nome_grupo("-1003673555953", "VIDEOS AUTORAIS - Afiliados Unidos")
+    pc.salvar_conta("a", sessao="x")
+    st = Est()
+    rodar(bm.mostrar_conta(Msg(), st, pc.obter_conta("a")["id"]))
+    pedido = Msg("Colocar no Grupo 🚪")
+    rodar(bm.contas_colocar_no_grupo(pedido, st))
+    assert "<b>VIDEOS AUTORAIS - Afiliados Unidos</b>" in pedido.saidas[-1]
+    assert "Convidar via link" in pedido.saidas[-1]

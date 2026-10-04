@@ -5117,6 +5117,15 @@ async def mostrar_conta(message, state, conta_id):
     await message.answer(texto_tela_conta(conta), parse_mode="HTML", reply_markup=teclado_gerenciar_conta(conta))
 
 
+async def nome_grupo_origem():
+    """
+    Nome do grupo de origem dos Autorais, do cache de nomes (o painel dos Autorais o
+    grava ao abrir). Sem ele, uma descrição de onde o grupo está configurado.
+    """
+    origem = str(ler_autorais_config().get("origem") or "").split(":")[0].strip()
+    return ler_cache_nomes_grupos().get(origem) or "configurado em Editar Origem 📥"
+
+
 async def _conta_do_estado(message, state):
     """A conta aberta na tela; sem ela (restart, conta apagada) volta ao painel."""
     conta = pool_contas.obter_conta((await state.get_data()).get("conta_id") or "")
@@ -5228,9 +5237,16 @@ async def contas_colocar_no_grupo(message: types.Message, state: FSMContext):
         if ok:
             await mostrar_conta(message, state, conta["id"])
             return
+    grupo = html_escape(await nome_grupo_origem())
     await message.answer(
-        "🔗 Mande o <b>link de convite</b> do grupo de origem (ex.: <code>https://t.me/+AbCdEf</code>).\n"
-        "<i>Ele fica guardado para as próximas contas.</i>",
+        "🔗 <b>Colocar no grupo de origem</b>\n\n"
+        f"O robô pega os vídeos do grupo <b>{grupo}</b>. Para capturar (ou repostar), a conta "
+        "precisa ser membro dele.\n\n"
+        "Mande o <b>link de convite</b> desse grupo (ex.: <code>https://t.me/+AbCdEf</code>) e o bot "
+        "faz a conta entrar sozinha.\n\n"
+        "📍 <b>Onde achar o link:</b> no grupo, toque no nome dele → <b>Convidar via link</b>. Só "
+        "aparece para quem é admin; se você não for, peça o link a um admin do grupo.\n"
+        "<i>O link fica guardado para as próximas contas.</i>",
         parse_mode="HTML", reply_markup=teclado_cancelar
     )
     await state.set_state(ContasFluxo.aguardando_convite)
