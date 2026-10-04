@@ -242,6 +242,7 @@ def test_cadastro_pergunta_para_que_serve_e_confere_o_canal(bm, pc, telegram, Ms
     rodar(bm.pool_nova_conta_codigo(codigo, st))
     assert "Para que serve esta conta?" in codigo.saidas[-1]
     assert "❌ não é admin" in codigo.saidas[-1]          # a conta falsa não está no canal
+    assert "🔀" not in codigo.saidas[-1]                     # só dois papéis
 
     nova = pc.obter_conta("repost_um")
     cb = callback(bm, Msg, f"pc_papel:{nova['id']}:c")
@@ -254,3 +255,25 @@ def test_cadastro_pergunta_para_que_serve_e_confere_o_canal(bm, pc, telegram, Ms
     rodar(bm.pool_definir_papel(cb, st))
     assert pc.obter_conta("repost_um")["funcoes_permitidas"] == "repostagem"
     assert not any("admin" in t for t in cb.message.saidas)   # quem só reposta não publica no canal
+
+
+def test_so_dois_botoes_de_papel_e_opcao_antiga_nao_muda_nada(bm, pc, telegram, Msg, Est):
+    pc.salvar_conta("A", sessao="x")
+    conta_a = pc.obter_conta("A")
+    _texto, teclado = bm._pc_tela_conta(conta_a)
+    papeis = [b.callback_data for linha in teclado.inline_keyboard for b in linha
+              if b.callback_data.startswith("pc_papel:")]
+    assert papeis == [f"pc_papel:{conta_a['id']}:c", f"pc_papel:{conta_a['id']}:r"]
+
+    rodar(bm.pool_definir_papel(callback(bm, Msg, f"pc_papel:{conta_a['id']}:a"), Est()))
+    assert pc.obter_conta("A")["funcoes_permitidas"] == "espelho,repostagem"
+
+
+def test_cancelar_link_de_convite_nao_fala_em_cadastro(bm, pc, telegram, Msg, Est):
+    pc.salvar_conta("A", sessao="x")
+    st = Est()
+    rodar(bm.pool_pedir_convite(callback(bm, Msg, f"pc_conv:{pc.obter_conta('A')['id']}"), st))
+    cancelar = Msg("Cancelar ❌")
+    rodar(bm.pool_nova_conta_cancelar_texto(cancelar, st))
+    assert cancelar.saidas[-1] == "❌ Cancelado: nenhum link de convite guardado."
+    assert st.estado == bm.AutoraisFluxo.menu_principal

@@ -4960,7 +4960,7 @@ async def painel_autorais(message: types.Message, state: FSMContext):
 #              enquanto a conta continuar apta.
 #
 # Callbacks (curtos de propósito: o Telegram limita o callback_data a 64 bytes):
-#   pc_painel | pc_sync | pc_ver:<id> | pc_papel:<id>:<c|r|a> | pc_ass:<id>:<e|r> |
+#   pc_painel | pc_sync | pc_ver:<id> | pc_papel:<id>:<c|r> | pc_ass:<id>:<e|r> |
 #   pc_hab:<id> | pc_nova | pc_nova_x | pc_ent:<id> | pc_conv:<id>
 #   (pc_tog:<id>:<e|r> só atende botões de mensagens antigas)
 # ==========================================================================
@@ -5003,12 +5003,14 @@ def _pc_teclado_lista():
     return InlineKeyboardMarkup(inline_keyboard=botoes)
 
 
-# Sigla do papel no callback (c, r, a) e o papel do pool_contas.
-_PC_PAPEIS = {"c": pool_contas.PAPEL_CAPTURA, "r": pool_contas.PAPEL_REPOSTAGEM, "a": pool_contas.PAPEL_AMBAS}
+# Sigla do papel no callback e o papel do pool_contas. Só dois botões: várias contas
+# na repostagem já são reserva umas das outras. Decisão do Rafael: DECISOES.md,
+# Vídeos Autorais e contas do pool.
+_PC_PAPEIS = {"c": pool_contas.PAPEL_CAPTURA, "r": pool_contas.PAPEL_REPOSTAGEM}
 
 
 def _pc_botoes_papel(conta):
-    """Os três papéis; o atual vem marcado com ✔️."""
+    """Os dois papéis; o atual vem marcado com ✔️."""
     atual = pool_contas.papel_da_conta(conta)
     return [[InlineKeyboardButton(
         text=("✔️ " if papel == atual else "") + pool_contas.ROTULOS_PAPEL[papel],
@@ -5182,13 +5184,13 @@ async def pool_alternar_permissao(callback: types.CallbackQuery, state: FSMConte
 
 @dp.callback_query(F.data.startswith("pc_papel:"), StateFilter("*"))
 async def pool_definir_papel(callback: types.CallbackQuery, state: FSMContext):
-    """Para que serve a conta: captura, repostagem ou as duas. Já redistribui os postos."""
+    """Para que serve a conta: captura ou repostagem. Já redistribui os postos."""
     if callback.from_user.id != ADMIN_ID: return
     _p, id_conta, sigla = callback.data.split(":")
     conta = pool_contas.obter_conta(id_conta)
     papel = _PC_PAPEIS.get(sigla)
     if not conta or not papel:
-        await callback.answer("Conta não encontrada.", show_alert=True)
+        await callback.answer("Essa opção não existe mais: abra a conta de novo em Contas 👥.", show_alert=True)
         return
     _ok, resultado, mudancas = pool_contas.definir_papel(conta["apelido"], papel)
     conta = pool_contas.obter_conta(id_conta)
@@ -5279,6 +5281,13 @@ class NovaContaFluxo(StatesGroup):
 MINUTOS_LOGIN_CONTA = 5
 
 
+async def _texto_cancelado(state):
+    """O que foi cancelado: o link de convite usa o mesmo fluxo do cadastro."""
+    if await state.get_state() == NovaContaFluxo.aguardando_convite.state:
+        return "❌ Cancelado: nenhum link de convite guardado."
+    return "❌ Cadastro de conta cancelado."
+
+
 async def _voltar_ao_menu_autorais(state):
     """
     Fim (ou cancelamento) de um fluxo do painel de Contas: o teclado na tela é o do
@@ -5347,11 +5356,12 @@ async def pool_nova_conta(callback: types.CallbackQuery, state: FSMContext):
 @dp.callback_query(F.data == "pc_nova_x", StateFilter("*"))
 async def pool_nova_conta_cancelar(callback: types.CallbackQuery, state: FSMContext):
     if callback.from_user.id != ADMIN_ID: return
+    texto = await _texto_cancelado(state)
     await _encerrar_login_conta()
     await _voltar_ao_menu_autorais(state)
-    await callback.answer("Cadastro cancelado.")
+    await callback.answer("Cancelado.")
     try:
-        await callback.message.edit_text("❌ Cadastro de conta cancelado.")
+        await callback.message.edit_text(texto)
     except Exception:
         pass
 
@@ -5360,9 +5370,10 @@ async def pool_nova_conta_cancelar(callback: types.CallbackQuery, state: FSMCont
 async def pool_nova_conta_cancelar_texto(message: types.Message, state: FSMContext):
     """Cancelar ❌ do teclado no meio do cadastro (os handlers abaixo o leriam como resposta)."""
     if message.from_user.id != ADMIN_ID: return
+    texto = await _texto_cancelado(state)
     await _encerrar_login_conta()
     await _voltar_ao_menu_autorais(state)
-    await message.answer("❌ Cadastro de conta cancelado.")
+    await message.answer(texto)
 
 
 @dp.message(NovaContaFluxo.aguardando_telefone)
@@ -5510,8 +5521,8 @@ async def _concluir_nova_conta(message, state, senha):
         f"✅ <b>Conta {apelido} cadastrada.</b>\n{situacao}\n\n"
         "<b>Para que serve esta conta?</b>\n"
         "🎯 <b>Captura</b>: pega os vídeos do grupo de origem e publica no seu canal (uma conta só).\n"
-        "🔁 <b>Repostagem</b>: devolve os vídeos ao grupo de origem, revezando com as outras.\n"
-        "🔀 <b>As duas</b>: reposta e assume a captura se a conta da captura cair.\n\n"
+        "🔁 <b>Repostagem</b>: devolve os vídeos ao grupo de origem, revezando com as outras "
+        "(se uma cair, as outras seguem).\n\n"
         f"📣 Seu canal: {pool_contas.texto_canal(conta)}",
         parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=_pc_botoes_papel(conta)))
 
@@ -9430,9 +9441,10 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
 
     # Cadastro de conta: desconecta o login em andamento.
     if estado_atual and estado_atual.startswith("NovaContaFluxo"):
+        texto = await _texto_cancelado(state)
         await _encerrar_login_conta()
         await _voltar_ao_menu_autorais(state)
-        await message.answer("❌ Cadastro de conta cancelado.")
+        await message.answer(texto)
         return
 
     # Cancelar o recálculo da grade: nada foi alterado.
