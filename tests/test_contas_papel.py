@@ -239,3 +239,22 @@ def test_botao_antigo_do_painel_avisa_onde_esta_o_menu(bm, Msg, Est):
     cb = SimpleNamespace(data="pc_ver:1", answer=answer)
     rodar(bm.contas_botao_antigo(cb, Est()))
     assert "Vídeos Autorais 🎥 → Contas 👥" in respostas[0]
+
+
+def test_contas_aparecem_sempre_pelo_telefone(bm, pc):
+    pc.salvar_conta("espelhador", sessao="x", user_id=8001, telefone="5532999990001")
+    pc.salvar_conta("rafaelnm", sessao="x", user_id=8002, username="Rafaelnm", telefone="+5532988880002")
+    painel = pc.montar_relatorio_telegram()
+    assert "<b>espelhador</b> · 📱 +55 32 99999-0001" in painel
+    assert "<b>rafaelnm</b> · 📱 +55 32 98888-0002" in painel
+    assert "@Rafaelnm" not in painel and "id 8001" not in painel
+    bm.blacklist_captura.sincronizar_contas_do_pool()
+    bloqueados = bm.blacklist_captura.montar_relatorio_telegram()
+    assert "<b>espelhador</b> · 📱 +55 32 99999-0001" in bloqueados
+
+
+def test_telefone_legivel(pc):
+    assert pc.telefone_legivel("+55 (32) 99999-0001") == "+55 32 99999-0001"
+    assert pc.telefone_legivel("553288880002") == "+55 32 8888-0002"
+    assert pc.telefone_legivel("14155550100") == "+14155550100"
+    assert pc.telefone_legivel(None) == "telefone ainda não lido"

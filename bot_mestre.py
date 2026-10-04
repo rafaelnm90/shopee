@@ -5028,7 +5028,10 @@ def _avisos_da_conta(conta):
     """O que ainda falta para a conta trabalhar, em palavras."""
     papel = pool_contas.papel_da_conta(conta)
     avisos = []
-    if conta["status_grupo"] != pool_contas.STATUS_NO_GRUPO:
+    if conta["status_grupo"] == pool_contas.STATUS_BANIDA_GRUPO:
+        avisos.append("⛔ Ela foi banida do grupo de origem: só um admin do grupo pode desbanir. "
+                      "Enquanto isso, use outra conta.")
+    elif conta["status_grupo"] != pool_contas.STATUS_NO_GRUPO:
         avisos.append("🚪 Ela não está no grupo de origem: toque em <b>Colocar no Grupo 🚪</b> "
                       "ou adicione a conta pelo app.")
     if papel in (pool_contas.PAPEL_CAPTURA, pool_contas.PAPEL_AMBAS) and conta.get("publica_no_destino") == 0:
@@ -5054,18 +5057,18 @@ def texto_tela_conta(conta):
     sessao = ("conectada" if conta["status_sessao"] == pool_contas.SESSAO_OK
               else f"desconectada ({conta['status_sessao']})")
     texto = (
-        f"👤 <b>{conta['apelido']}</b>  ·  "
-        f"{('@' + conta['username']) if conta['username'] else 'id ' + str(conta['user_id'] or '?')}\n\n"
+        f"👤 {pool_contas.identificar(conta)}\n\n"
         "<blockquote>"
         f"🧩 Função: <b>{pool_contas.ROTULOS_PAPEL[papel] if papel else 'ainda não escolhida'}</b>\n"
         f"📍 Grupo de origem: <b>{pool_contas.TEXTOS_GRUPO.get(conta['status_grupo'], conta['status_grupo'])}</b>\n"
     )
-    if papel in (pool_contas.PAPEL_CAPTURA, pool_contas.PAPEL_AMBAS):
+    if papel != pool_contas.PAPEL_REPOSTAGEM:
         texto += f"📣 Seu canal: <b>{pool_contas.texto_canal(conta)}</b>\n"
     texto += (
         f"⚙️ Agora: <b>{agora}</b>\n"
         f"🔌 Telegram: <b>{sessao}</b>\n"
-        f"📱 {conta['telefone'] or '?'} · {conta['nome_exibicao'] or '—'}"
+        f"🆔 Telegram: id {conta['user_id'] or '?'} · "
+        f"{('@' + conta['username']) if conta['username'] else 'sem @'} · {conta['nome_exibicao'] or '—'}"
         "</blockquote>\n"
     )
     if conta["ultimo_erro"]:
@@ -5161,7 +5164,7 @@ async def contas_pedir_numero(message: types.Message, state: FSMContext):
     if len(contas) == 1 and not remover:
         await mostrar_conta(message, state, contas[0]["id"])
         return
-    lista = "\n".join(f"<b>{i}</b> — {c['apelido']}" for i, c in enumerate(contas, 1))
+    lista = "\n".join(f"<b>{i}</b> — {pool_contas.identificar(c)}" for i, c in enumerate(contas, 1))
     if remover:
         texto = (f"🗑️ <b>Qual conta você quer remover?</b>\n\n{lista}\n\n"
                  "<i>Envie apenas o número correspondente. Ainda haverá uma confirmação.</i>")

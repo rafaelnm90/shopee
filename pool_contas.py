@@ -156,6 +156,7 @@ import db
 import logging
 import asyncio
 import getpass
+import re
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -1053,10 +1054,26 @@ def motivo_saida(conta_id, funcao, ocupacao=None):
 TEXTOS_GRUPO = {
     STATUS_NO_GRUPO: "no grupo de origem",
     STATUS_SAIU: "saiu do grupo de origem",
-    STATUS_NUNCA_ENTROU: "não está no grupo de origem",
+    STATUS_NUNCA_ENTROU: "não está no grupo de origem (nunca entrou ou foi removida)",
     STATUS_BANIDA_GRUPO: "banida ou restrita no grupo de origem",
     STATUS_DESCONHECIDO: "ainda não conferida",
 }
+
+
+def telefone_legivel(telefone):
+    """Telefone no formato que o Rafael reconhece no chip (+55 32 99999-0001)."""
+    numeros = re.sub(r"\D", "", str(telefone or ""))
+    if not numeros:
+        return "telefone ainda não lido"
+    if numeros.startswith("55") and len(numeros) in (12, 13):
+        resto = numeros[4:]
+        return f"+55 {numeros[2:4]} {resto[:-4]}-{resto[-4:]}"
+    return "+" + numeros
+
+
+def identificar(conta):
+    """Como a conta aparece em todas as telas, sempre igual: apelido e telefone do chip."""
+    return f"<b>{conta['apelido']}</b> · 📱 {telefone_legivel(conta.get('telefone'))}"
 
 
 def texto_canal(conta):
@@ -1112,14 +1129,13 @@ def montar_relatorio_telegram():
             agora = "repostando"
         else:
             agora = "parada"
-        identidade = ("@" + c["username"]) if c["username"] else f"id {c['user_id'] or '?'}"
         papel = papel_da_conta(c)
         grupo = f"{ICONES_GRUPO.get(c['status_grupo'], '❓')} {TEXTOS_GRUPO.get(c['status_grupo'], c['status_grupo'])}"
-        linha = (f"<blockquote><b>{i}</b> — <b>{c['apelido']}</b> · {identidade}\n"
+        linha = (f"<blockquote><b>{i}</b> — {identificar(c)}\n"
                  f"🧩 {ROTULOS_PAPEL[papel] if papel else '⚪ papel não escolhido'} · {agora}\n"
                  f"📍 {grupo}")
-        if papel in (PAPEL_CAPTURA, PAPEL_AMBAS):
-            linha += f" · 📣 canal: {texto_canal(c)}"
+        if papel != PAPEL_REPOSTAGEM:
+            linha += f"\n📣 canal: {texto_canal(c)}"
         linhas.append(linha + "</blockquote>")
     return "\n".join(linhas)
 
@@ -1531,7 +1547,8 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
 
         # Quem pode capturar também publica no seu canal: confere antes do grupo,
         # para o cadastro já avisar mesmo com a conta ainda fora do grupo de origem.
-        if FUNCAO_ESPELHO in str(conta.get("funcoes_permitidas") or ""):
+        # Conta sem papel escolhido também, para o painel não mostrar a linha vazia.
+        if papel_da_conta(conta) != PAPEL_REPOSTAGEM:
             await conferir_destino(cliente, conta)
 
         if not grupo_id:
@@ -1577,6 +1594,10 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
                     entidade = dialogo.entity
                     break
             fora = STATUS_SAIU if conta.get("ja_esteve_no_grupo") else STATUS_NUNCA_ENTROU
+            if type(entidade).__name__ == "ChannelForbidden":
+                atualizar_status(apelido, status_grupo=STATUS_BANIDA_GRUPO, status_sessao=SESSAO_OK,
+                                 erro="banida do grupo de origem")
+                return (STATUS_BANIDA_GRUPO, SESSAO_OK)
             if entidade is None or getattr(entidade, "left", False):
                 atualizar_status(apelido, status_grupo=fora, status_sessao=SESSAO_OK,
                                  erro="o grupo de origem não está nas conversas da conta")
@@ -1917,7 +1938,8 @@ async def entrar_no_grupo(apelido):
     """
     from telethon import functions
     from telethon.errors import (UserAlreadyParticipantError, InviteHashExpiredError,
-                                 InviteHashInvalidError, InviteRequestSentError)
+                                 InviteHashInvalidError, InviteRequestSentError,
+                                 ChannelPrivateError, UserBannedInChannelError)
 
     def resultado(ok, mensagem):
         print(mensagem)
@@ -1945,6 +1967,11 @@ async def entrar_no_grupo(apelido):
         return resultado(False, f"⏳ Pedido de entrada de {apelido} enviado: um admin do grupo precisa aprovar.")
     except (InviteHashExpiredError, InviteHashInvalidError):
         return resultado(False, "❌ O link de convite expirou ou é inválido. Guarde um link novo.")
+    except (ChannelPrivateError, UserBannedInChannelError):
+        # Com o link certo, o Telegram só recusa assim quem foi banido do grupo.
+        atualizar_status(apelido, status_grupo=STATUS_BANIDA_GRUPO, erro="banida do grupo de origem")
+        return resultado(False, f"⛔ {apelido} foi banida do grupo de origem e não consegue entrar. "
+                                "Só um admin do grupo pode desbanir; senão, use outra conta.")
     except Exception as e:
         return resultado(False, f"❌ Falha ao entrar: {type(e).__name__}: {e}")
     finally:

@@ -717,9 +717,20 @@ def montar_relatorio_telegram():
 
     linhas.append(f"🔒 <b>Suas contas ({len(do_pool)})</b>: entram sozinhas")
     linhas.append("<i>Para o robô não copiar de novo o que as suas próprias contas repostam no grupo.</i>")
+    # As contas aparecem como no painel de Contas (apelido e telefone), não pelo nome
+    # do Telegram, que pode ser igual nas duas.
+    try:
+        import pool_contas
+        por_id = {c["user_id"]: c for c in pool_contas.listar_contas() if c.get("user_id")}
+    except Exception:
+        por_id = {}
     for e in do_pool[:10]:
-        rotulo = e["nome_exibicao"] or (f"@{e['username']}" if e["username"] else "—")
-        linhas.append(f"   • {rotulo} · <code>{e['user_id']}</code>")
+        conta = por_id.get(e["user_id"])
+        if conta:
+            linhas.append(f"   • {pool_contas.identificar(conta)}")
+        else:
+            rotulo = e["nome_exibicao"] or (f"@{e['username']}" if e["username"] else "—")
+            linhas.append(f"   • {rotulo} · <code>{e['user_id']}</code>")
     if not do_pool:
         linhas.append("   <i>nenhuma</i>")
 
