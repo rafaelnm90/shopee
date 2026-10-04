@@ -268,3 +268,61 @@ def test_botao_reiniciar_nao_empilha_dois_reinicios(monkeypatch):
 
     primeira, segunda = rodar(cenario())
     assert "reiniciando o Android" in primeira and "já está reiniciando" in segunda
+
+
+def test_resetar_desliga_apaga_os_dados_e_liga_do_zero(monkeypatch):
+    comandos = []
+
+    async def rodar_comando(*partes, timeout=120):
+        comandos.append(partes)
+        return True
+
+    async def adb(*partes, timeout=20):
+        return b"1"
+
+    monkeypatch.setattr(tela, "_rodar_comando", rodar_comando)
+    monkeypatch.setattr(tela, "adb", adb)
+    assert rodar(tela.resetar_android(espera=0)) is True
+    assert comandos[:3] == [
+        ("sudo", "-n", "docker", "stop", tela.av.CONTEINER),
+        ("sudo", "-n", "find", tela.av.PASTA_DADOS, "-mindepth", "1", "-delete"),   # a pasta fica, o conteúdo sai
+        ("sudo", "-n", "docker", "start", tela.av.CONTEINER),
+    ]
+
+
+def test_resetar_para_no_primeiro_passo_que_falha(monkeypatch, tmp_path):
+    monkeypatch.setattr(tela, "ESTADO", str(tmp_path / "tela_estado"))
+    comandos = []
+
+    async def rodar_comando(*partes, timeout=120):
+        comandos.append(partes)
+        return "stop" not in partes                       # o docker stop falha
+
+    monkeypatch.setattr(tela, "_rodar_comando", rodar_comando)
+    assert rodar(tela.resetar_android(espera=0)) is False
+    assert len(comandos) == 1                             # não apaga nada se não conseguiu desligar
+    assert "reset RuntimeError" in (tmp_path / "tela_estado").read_text()
+
+
+def test_reset_e_reinicio_nao_rodam_juntos(monkeypatch):
+    async def demora():
+        await asyncio.sleep(10)
+
+    async def cenario():
+        monkeypatch.setattr(tela, "reiniciar_android", demora)
+        monkeypatch.setattr(tela, "resetar_android", demora)
+        monkeypatch.setitem(tela._reinicio, "tarefa", None)
+        primeira = await tela.acao(Pedido(tela.CHAVE, {"tipo": "resetar"}))
+        segunda = await tela.acao(Pedido(tela.CHAVE, {"tipo": "reiniciar"}))
+        tela._reinicio["tarefa"].cancel()
+        return json.loads(primeira.text)["mensagem"], json.loads(segunda.text)["mensagem"]
+
+    primeira, segunda = rodar(cenario())
+    assert "apagando tudo" in primeira and "já está reiniciando" in segunda
+
+
+def test_os_tres_botoes_pedem_confirmacao():
+    for funcao in ("function fecharApps()", "function reiniciar()", "function resetar()"):
+        corpo = tela.PAGINA.split(funcao, 1)[1].split("\nfunction ", 1)[0]
+        assert "confirm(" in corpo, funcao
+    assert tela.PAGINA.split("function resetar()", 1)[1].split("\nfunction ", 1)[0].count("confirm(") == 2

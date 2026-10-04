@@ -125,11 +125,15 @@ async def acao(request):
     if dados.get("tipo") == "fechar_apps":
         fechados = await fechar_apps()
         return web.json_response({"ok": True, "mensagem": f"{fechados} app(s) fechado(s)"})
-    if dados.get("tipo") == "reiniciar":
+    if dados.get("tipo") in ("reiniciar", "resetar"):
+        # Um de cada vez: reiniciar no meio de um reset (ou o contrário) deixaria o Android pela metade.
         if _reinicio.get("tarefa") and not _reinicio["tarefa"].done():
             return web.json_response({"ok": True, "mensagem": "o Android já está reiniciando"})
-        _reinicio["tarefa"] = asyncio.create_task(reiniciar_android())
-        return web.json_response({"ok": True, "mensagem": "reiniciando o Android: a tela volta em 1 a 2 min"})
+        if dados["tipo"] == "reiniciar":
+            _reinicio["tarefa"] = asyncio.create_task(reiniciar_android())
+            return web.json_response({"ok": True, "mensagem": "reiniciando o Android: a tela volta em 1 a 2 min"})
+        _reinicio["tarefa"] = asyncio.create_task(resetar_android())
+        return web.json_response({"ok": True, "mensagem": "apagando tudo e ligando do zero: a tela volta em 2 a 4 min"})
     comando = comando_da_acao(dados)
     if comando is None:
         raise web.HTTPBadRequest()
@@ -174,6 +178,27 @@ async def reiniciar_android(espera=10, prazo=240):
     if not await _rodar_comando("sudo", "-n", "docker", "restart", av.CONTEINER):
         registrar_erro("reinício", RuntimeError())
         return False
+    return await _esperar_ligar(espera, prazo)
+
+
+async def resetar_android(espera=10, prazo=420):
+    """
+    Volta o Android ao de fábrica: desliga o contêiner, apaga o conteúdo da pasta
+    de dados (apps instalados, login da Shopee, tudo) e liga de novo, do zero. A
+    pasta em si fica, porque o contêiner a monta. A página pede confirmação dupla.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    for passo in (("sudo", "-n", "docker", "stop", av.CONTEINER),
+                  ("sudo", "-n", "find", av.PASTA_DADOS, "-mindepth", "1", "-delete"),
+                  ("sudo", "-n", "docker", "start", av.CONTEINER)):
+        if not await _rodar_comando(*passo, timeout=300):
+            registrar_erro("reset", RuntimeError())
+            return False
+    return await _esperar_ligar(espera, prazo)
+
+
+async def _esperar_ligar(espera, prazo):
+    """Reconecta o adb até o Android terminar de ligar, para a tela voltar sozinha."""
     for _ in range(max(1, prazo // max(1, espera))):
         await asyncio.sleep(espera)
         await _rodar_comando("adb", "connect", av.ENDERECO_ADB, timeout=15)
@@ -385,6 +410,7 @@ PAGINA = """<!doctype html>
   .barra input { flex: 3; background: #fff; color: #000; }
   .barra input[type=file] { flex: 1; min-width: 0; font-size: 14px; }
   #aviso { text-align: center; font-size: 13px; opacity: .7; padding: 4px 8px; }
+  .barra button.perigo { background: #7a1f1f; }
 </style></head><body>
 <img id="tela" alt="Tela do Android">
 <div class="barra"><input id="texto" placeholder="Texto para digitar" autocomplete="off">
@@ -396,6 +422,7 @@ PAGINA = """<!doctype html>
 <div class="barra"><button onclick="enviarApp()">📦 Enviar app</button></div>
 <div class="barra"><button onclick="fecharApps()">🧹 Fechar apps</button>
   <button onclick="reiniciar()">🔄 Reiniciar Android</button></div>
+<div class="barra"><button class="perigo" onclick="resetar()">🗑️ Resetar de fábrica</button></div>
 <div class="barra"><button onclick="terminar()">✅ Terminei</button></div>
 <div id="aviso">Toque para clicar. Arraste para rolar ou para o quebra-cabeça.</div>
 <script>
@@ -439,11 +466,22 @@ async function pedir(tipo) {
     avisar((j.ok ? "✅ " : "❌ ") + j.mensagem);
   } catch (e) { avisar("❌ A conexão caiu (" + e.name + "). Tente de novo."); }
 }
-function fecharApps() { avisar("Fechando os apps..."); pedir("fechar_apps"); }
+function fecharApps() {
+  if (!confirm("Fechar todos os apps abertos no Android?")) return;
+  avisar("Fechando os apps...");
+  pedir("fechar_apps");
+}
 function reiniciar() {
   if (!confirm("Reiniciar o Android? Os apps e o login continuam; a tela volta em 1 a 2 min.")) return;
   avisar("Reiniciando...");
   pedir("reiniciar");
+}
+function resetar() {
+  // Confirmação dupla: apaga apps e login, e não dá para desfazer.
+  if (!confirm("⚠️ Resetar de fábrica? Isso APAGA todos os apps e o login da Shopee do Android.")) return;
+  if (!confirm("Tem certeza? Não dá para desfazer. Depois será preciso instalar a Shopee e entrar de novo.")) return;
+  avisar("Apagando tudo e ligando do zero...");
+  pedir("resetar");
 }
 function avisar(texto) { document.getElementById("aviso").textContent = texto; }
 const PEDACO = 2 * 1024 * 1024;
