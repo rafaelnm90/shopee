@@ -7285,6 +7285,28 @@ def ultima_captura_parceiro(parceiro_id):
     except Exception:
         return None
 
+def diagnostico_origem_parceiro(parceiro_id, hoje_str):
+    """
+    O que chegou hoje do canal de origem do parceiro, contado pelo robô dos Autorais
+    (chave diagnostico_parceiros): mensagens, vídeos, com link, capturados e os
+    motivos de recusa. Mostra onde a captura parou quando a fila não anda.
+    """
+    dia = (db.ler_config("diagnostico_parceiros", {}) or {}).get(str(parceiro_id)) or {}
+    ultima = dia.get("ultima_mensagem")
+    try:
+        ultima = datetime.strptime(ultima[:16], "%Y-%m-%d %H:%M").strftime("%d/%m às %H:%M") if ultima else None
+    except ValueError:
+        pass
+    if dia.get("data") != hoje_str or not dia.get("mensagens"):
+        texto = "👀 Origem hoje: <b>nada recebido do canal</b>"
+        return texto + (f" (última mensagem: {ultima})" if ultima else "")
+    texto = (f"👀 Origem hoje: {dia.get('mensagens', 0)} mensagem(ns) · {dia.get('videos', 0)} vídeo(s) · "
+             f"{dia.get('com_link', 0)} com link · <b>{dia.get('capturados', 0)} capturado(s)</b>")
+    recusas = sorted((dia.get("recusados") or {}).items(), key=lambda x: -x[1])
+    if recusas:
+        texto += "\n🚫 Recusados: " + " · ".join(f"{html_escape(motivo)} ({qtd})" for motivo, qtd in recusas)
+    return texto + (f"\n🕓 Última mensagem: {ultima}" if ultima else "")
+
 def resumo_fila_parceiro(p, itens, hoje_str, disco_todos):
     """
     Topo da fila do parceiro: situação, disco, cota, acesso à origem, a prévia do
@@ -7310,6 +7332,7 @@ def resumo_fila_parceiro(p, itens, hoje_str, disco_todos):
         f"📅 Cota Diária: <b>{rotulo_cota_parceiro(p)}</b>\n"
         f"🤖 Acesso à origem: {acesso}\n"
         f"📥 Última captura: <b>{ultima}</b>\n"
+        f"{diagnostico_origem_parceiro(p.get('id'), hoje_str)}\n"
     )
 
     por_dia = {}
