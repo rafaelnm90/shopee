@@ -486,6 +486,78 @@ async def entrar_no_canal_parceiro(alvo):
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
 
+# --- Diagnóstico da captura dos parceiros ---
+# Conta, por parceiro e por dia, o que chega do canal de origem e o que acontece com
+# cada vídeo. Sem isso, uma captura parada não diz se o canal parou de postar, se a
+# conta não recebe o canal ou se o vídeo foi recusado (e por quê). Vai para o banco
+# (chave diagnostico_parceiros) a cada 5 min e aparece na fila do parceiro no bot_mestre.
+CHAVE_DIAGNOSTICO_PARCEIROS = "diagnostico_parceiros"
+INTERVALO_GRAVAR_DIAGNOSTICO = 300
+_diagnostico_parceiros = {}
+_diagnostico_gravado_em = 0.0
+_origens_parceiros = {"ids": {}, "quando": None}   # id curto da origem -> id do parceiro
+
+def ler_parceiros_ativos():
+    try:
+        conexao = db.conectar()
+        conexao.row_factory = sqlite3.Row
+        try:
+            dados = [dict(l) for l in conexao.execute("SELECT * FROM parceiros WHERE ativo = 1").fetchall()]
+        except sqlite3.OperationalError:
+            dados = []
+        conexao.close()
+        return dados
+    except Exception:
+        return []
+
+async def parceiro_da_origem(chat_id):
+    """Id do parceiro cujo canal de origem é este chat, ou None. Refaz o mapa a cada 10 min."""
+    agora = time.monotonic()
+    if _origens_parceiros["quando"] is None or agora - _origens_parceiros["quando"] >= 600:
+        ids = {}
+        for p in ler_parceiros_ativos():
+            try:
+                id_origem = await id_do_canal_origem(p.get("canal_origem"))
+            except Exception:
+                id_origem = None
+            if id_origem:
+                ids[id_origem] = p.get("id")
+        _origens_parceiros.update(ids=ids, quando=agora)
+    return _origens_parceiros["ids"].get(_id_curto(chat_id))
+
+def _diagnostico_do_dia(parceiro_id):
+    """Contadores de hoje do parceiro; ao subir, continua de onde o banco parou."""
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    chave = str(parceiro_id)
+    atual = _diagnostico_parceiros.get(chave)
+    if atual is None:
+        atual = (db.ler_config(CHAVE_DIAGNOSTICO_PARCEIROS, {}) or {}).get(chave)
+    if not atual or atual.get("data") != hoje:
+        atual = {"data": hoje, "mensagens": 0, "videos": 0, "com_link": 0, "capturados": 0,
+                 "recusados": {}, "ultima_mensagem": (atual or {}).get("ultima_mensagem")}
+    _diagnostico_parceiros[chave] = atual
+    return atual
+
+def anotar_parceiro(parceiro_id, campo, motivo=None):
+    """Soma 1 no contador do dia (campo) ou no motivo de recusa (campo="recusado")."""
+    global _diagnostico_gravado_em
+    if not parceiro_id:
+        return
+    try:
+        dia = _diagnostico_do_dia(parceiro_id)
+        if campo == "recusado":
+            dia["recusados"][motivo] = dia["recusados"].get(motivo, 0) + 1
+        else:
+            dia[campo] = dia.get(campo, 0) + 1
+        if campo == "mensagens":
+            dia["ultima_mensagem"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if time.monotonic() - _diagnostico_gravado_em >= INTERVALO_GRAVAR_DIAGNOSTICO or campo == "capturados":
+            _diagnostico_gravado_em = time.monotonic()
+            copia = {k: dict(v, recusados=dict(v["recusados"])) for k, v in _diagnostico_parceiros.items()}
+            db.atualizar_config(CHAVE_DIAGNOSTICO_PARCEIROS, lambda dados: dados.update(copia))
+    except Exception as e:
+        logger.warning(f"⚠️ [Parceiros] Falha no diagnóstico: {e}")
+
 # --- Captura por parceiro ---
 # Roda no mesmo evento do userbot, antes do fluxo do dono. Vídeo ou produto que o
 # dono já reservou (no sorteio do Grupo Público) fica de fora. Se o canal do
@@ -551,7 +623,7 @@ def inserir_fila_parceiro(parceiro_id, caminho, link, data_alvo):
         logger.error(f"❌ [Parceiros] Erro ao inserir na fila: {e}")
         return None
 
-async def capturar_para_parceiros(event, chat_id, link_capturado):
+async def capturar_para_parceiros(event, chat_id, link_capturado, parceiro_origem=None):
     """
     Chamada em toda mensagem com vídeo e link da Shopee. Se o chat é o canal de
     origem de um parceiro com acesso, baixa o vídeo para a pasta dele e o agenda
@@ -563,6 +635,7 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
     parceiros = ler_parceiros_ativos_com_acesso()
     if not parceiros:
         logger.info("👥 [Parceiros] Vídeo visto, mas nenhum parceiro ativo com acesso liberado.")
+        anotar_parceiro(parceiro_origem, "recusado", "acesso à origem não confirmado")
         return
 
     try:
@@ -574,6 +647,7 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
     # Já reservado (pelo dono ou por outro parceiro): não é de mais ninguém.
     if video_ja_reservado(chaves):
         logger.info(f"👥 [Parceiros] Vídeo já reservado por outro. Chat {chat_id}.")
+        anotar_parceiro(parceiro_origem, "recusado", "vídeo ou produto já reservado")
         return
 
     logger.info(f"👥 [Parceiros] Vídeo com link no chat {_id_curto(chat_id)} — "
@@ -591,6 +665,7 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
             logger.info(f"👥 [Parceiro {p.get('nome')}] Origem bateu. Capturando...")
 
             if not ha_espaco_para_parceiros():
+                anotar_parceiro(p.get("id"), "recusado", "teto de disco dos parceiros")
                 return
 
             dias = int(p.get("dias_atraso", 30))
@@ -602,6 +677,7 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
 
             # Reserva antes de baixar: se outro parceiro pegou no mesmo instante, para aqui.
             if not reservar_video(chaves, parceiro_id=p.get("id")):
+                anotar_parceiro(p.get("id"), "recusado", "vídeo ou produto já reservado")
                 continue
 
             destino = os.path.join(pasta_do_parceiro(p.get("id")), f"{int(datetime.now().timestamp())}_{random.randint(1000,9999)}.mp4")
@@ -609,9 +685,11 @@ async def capturar_para_parceiros(event, chat_id, link_capturado):
 
             if not os.path.exists(destino):
                 logger.warning(f"⚠️ [Parceiro {p.get('nome')}] Download falhou.")
+                anotar_parceiro(p.get("id"), "recusado", "download do vídeo falhou")
                 continue
 
             inserir_fila_parceiro(p.get("id"), destino, link_capturado, data_alvo)
+            anotar_parceiro(p.get("id"), "capturados")
             logger.info(f"🎯 [Parceiro {p.get('nome')}] Vídeo capturado e agendado para {data_alvo}. "
                         f"Disco: {espaco_usado_parceiros_gb():.2f} GB de {TETO_DISCO_PARCEIROS_GB} GB.")
             break   # um vídeo vai para um parceiro só
@@ -1147,6 +1225,9 @@ async def interceptar_e_espelhar(event):
     if getattr(event, "out", False):
         return
 
+    parceiro_origem = await parceiro_da_origem(getattr(event, "chat_id", None))
+    anotar_parceiro(parceiro_origem, "mensagens")
+
     # Lista negra global. O 'out' acima só cobre a conta desta sessão. Com o pool de
     # contas, espelho e repostagem podem ser contas diferentes: o retorno publicado
     # pela outra conta chega aqui como mensagem de terceiro e seria recapturado em laço.
@@ -1154,11 +1235,13 @@ async def interceptar_e_espelhar(event):
                                       contexto=blacklist_captura.ESCOPO_GLOBAL):
         logger.info(f"🚫 [Lista Negra] Ignorado: autor {getattr(event, 'sender_id', '?')} "
                     f"é uma conta própria ou está bloqueado globalmente.")
+        anotar_parceiro(parceiro_origem, "recusado", "autor na lista negra")
         return
 
     config_atual = carregar_config_autorais()
     
     if config_atual.get("pausar_robo_completo", False):
+        anotar_parceiro(parceiro_origem, "recusado", "robô dos Autorais pausado")
         return
         
     chat = await event.get_chat()
@@ -1206,12 +1289,16 @@ async def interceptar_e_espelhar(event):
     # Parceiros: cada um vigia o próprio canal de origem, que quase nunca é a origem
     # do dono. Por isso esta chamada vem antes do corte de eh_origem.
     if isinstance(getattr(event, 'media', None), MessageMediaDocument):
+        anotar_parceiro(parceiro_origem, "videos")
         link_parceiro = extrair_link_shopee(event)
         if link_parceiro:
+            anotar_parceiro(parceiro_origem, "com_link")
             try:
-                await capturar_para_parceiros(event, getattr(chat, 'id', None), link_parceiro)
+                await capturar_para_parceiros(event, getattr(chat, 'id', None), link_parceiro, parceiro_origem)
             except Exception as e:
                 logger.error(f"❌ [Parceiros] Erro na captura paralela: {e}")
+        else:
+            anotar_parceiro(parceiro_origem, "recusado", "vídeo sem link da Shopee")
 
     if not eh_origem:
         return

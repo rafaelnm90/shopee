@@ -23,6 +23,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - ~~**03/10/2026:** 5 rodadas do CI no mesmo commit, com 5 min entre elas, antes do merge.~~ Substituída em 03/10/2026 pela rodada reforçada (testes em 4 horários e ordem aleatória), porque repetir o mesmo commit não testava nada novo.
 - **03/10/2026:** todo pedido que define comportamento entra neste diário.
 - **03/10/2026:** vídeo que o Rafael mandar é visto e ouvido por inteiro antes de seguir a instrução: todos os quadros e a fala transcrita. Sem conseguir ouvir, dizer isso logo e pedir a transcrição antes de mudar qualquer coisa.
+- **04/10/2026:** quando uma mudança serve para descobrir por que algo dá errado, o Claude agenda sozinho a conferência do resultado, no horário em que ele já deve existir. O Rafael não precisa lembrar: na hora marcada, o Claude lê o resultado, corrige ou orienta e avisa.
 
 ## Canal principal
 
@@ -82,6 +83,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **03/10/2026:** nos Relatórios de Filas fica um botão só, "Fila dos Parceiros 🔍". Ele mostra no topo o resumo do parceiro (disco, cota, acesso à origem, descarte do fechamento e próxima publicação) e, embaixo, a lista vídeo a vídeo. Com um parceiro só, abre direto, sem perguntar o número.
 - **04/10/2026:** na fila do parceiro, os vídeos aparecem no mesmo card das outras filas (status do dia, nome, captura ➡️ previsão, links de origem e destino), todos, em quantas mensagens forem precisas. O resumo do parceiro continua numa mensagem antes da lista.
 - **04/10/2026:** o acesso à origem de um parceiro só vale quando a conta da captura é membro do canal, e não só quando o encontra. Causa provável da captura parada desde 15/09: a conta achava o canal, mas não estava dentro, e o Telegram só entrega as mensagens a quem é membro. O robô reconfere a cada 6 h e entra de novo sozinho quando a origem é @ ou link. Parceiro sem acesso gera aviso no privado (monitor de saúde), e a fila mostra o motivo e a data da última captura.
+- **04/10/2026:** a fila do parceiro mostra o que chegou hoje do canal de origem: mensagens, vídeos, com link, capturados e o motivo de cada recusa. Com a captura parada desde 15/09, o acesso confirmado e a conta da Rafaela fora do caso (ela não posta no canal), o robô passou a contar onde o vídeo para.
 
 ## Financeiro
 

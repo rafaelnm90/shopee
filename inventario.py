@@ -176,6 +176,29 @@ def filas_em_arquivo():
         print(f"   (não deu para ler a fila do Espelhador: {type(e).__name__})")
 
 
+def captura_dos_parceiros():
+    """
+    O que o robô dos Autorais contou hoje de cada origem de parceiro (chave
+    diagnostico_parceiros). Só o número do parceiro, contagens e os motivos de
+    recusa, que são textos fixos do código: nada de nome de canal ou de pessoa.
+    """
+    secao("Captura dos parceiros (contagem do robô dos Autorais)")
+    try:
+        dados = db.ler_config("diagnostico_parceiros", {}) or {}
+    except Exception as e:
+        print(f"   (não deu para ler: {type(e).__name__})")
+        return
+    if not dados:
+        print("   nada contado ainda")
+        return
+    for pid, dia in sorted(dados.items()):
+        print(f"parceiro #{pid} em {dia.get('data')}: {dia.get('mensagens', 0)} mensagem(ns), "
+              f"{dia.get('videos', 0)} vídeo(s), {dia.get('com_link', 0)} com link, "
+              f"{dia.get('capturados', 0)} capturado(s); última mensagem {dia.get('ultima_mensagem') or 'nenhuma'}")
+        for motivo, qtd in sorted((dia.get("recusados") or {}).items(), key=lambda x: -x[1]):
+            print(f"   recusado: {motivo} ({qtd})")
+
+
 def modelos_de_log():
     """
     Trechos fixos de cada logger.info/warning/error do código, com arquivo e linha.
@@ -285,7 +308,8 @@ def fora_do_projeto():
 
 if __name__ == "__main__":
     os.chdir(PASTA)
-    for parte in (pastas_do_projeto, arquivos_soltos, banco, erros_registrados, filas_em_arquivo, journal,
+    for parte in (pastas_do_projeto, arquivos_soltos, banco, erros_registrados, filas_em_arquivo,
+                  captura_dos_parceiros, journal,
                   versoes, fora_do_projeto):
         try:
             parte()

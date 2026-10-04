@@ -36,3 +36,13 @@ def test_erros_por_origem_e_tipo_sem_o_texto_do_erro(capsys):
     assert "ValueError" in saida and "varredura_origem_loop" in saida
     assert "2x" in saida and "enviar_mensagem" in saida
     assert "segredo" not in saida and "-100123" not in saida and "@grupo" not in saida
+
+
+def test_captura_dos_parceiros_so_numeros_e_motivos(bm, capsys):
+    bm.db.salvar_config("diagnostico_parceiros", {"1": {
+        "data": "2026-10-04", "mensagens": 12, "videos": 5, "com_link": 0, "capturados": 0,
+        "recusados": {"vídeo sem link da Shopee": 5}, "ultima_mensagem": "2026-10-04 10:00:00"}})
+    inventario.captura_dos_parceiros()
+    saida = capsys.readouterr().out
+    assert "parceiro #1 em 2026-10-04: 12 mensagem(ns), 5 vídeo(s), 0 com link" in saida
+    assert "recusado: vídeo sem link da Shopee (5)" in saida

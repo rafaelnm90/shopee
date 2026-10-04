@@ -139,6 +139,10 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
   - Não contrariar uma decisão do diário por conta própria, nem para "corrigir" algo que parece bug. Se parecer errado, perguntar.
   - Exceção a um padrão no código: comentário curto no lugar apontando para a entrada (ex.: `# Decisão do Rafael: DECISOES.md, Canal Viral`).
 - Dúvida sobre a intenção de uma regra (ex.: "era para apagar depois de processar?") → pergunte antes de mudar. Ofereça opções, com a recomendada primeiro.
+- Investigação que depende de esperar o servidor (contagem, log, diagnóstico novo, correção que só se confirma com o uso):
+  - o Rafael não precisa lembrar de conferir. Ao subir a mudança, agendar eu mesmo a conferência (`send_later`) para quando o resultado já deve existir (ex.: na manhã seguinte, se o canal posta de dia);
+  - na conferência: ler o resultado (inventário, diagnóstico, `/status`), concluir a causa, corrigir pelo fluxo normal ou explicar o que ele precisa fazer, e avisar;
+  - dizer ao Rafael quando será a conferência. Sem resultado ainda, reagendar e avisar o novo horário.
 - Comentários em português explicam o porquê e a regra de negócio.
   - Sem histórico ("antes era…", "corrigido em…"): isso fica no git.
   - Sem emoji nos comentários. Nos textos que o bot mostra, pode.
