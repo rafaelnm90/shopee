@@ -71,6 +71,68 @@ def test_terminei_fecha_a_tela(monkeypatch):
     assert tela.FIM.is_set()
 
 
+def _zip(caminho, nomes):
+    import zipfile
+    with zipfile.ZipFile(caminho, "w") as z:
+        for nome in nomes:
+            z.writestr(nome, "x")
+    return open(caminho, "rb").read()
+
+
+def _enviar(conteudo, chave=None, nome="shopee.xapk"):
+    """Sobe o servidor da tela de verdade e envia o arquivo pelo botão Enviar app."""
+    from aiohttp import FormData
+    from aiohttp.test_utils import TestClient, TestServer
+
+    async def cenario():
+        async with TestClient(TestServer(tela.montar_app())) as cliente:
+            dados = FormData()
+            dados.add_field("arquivo", conteudo, filename=nome)
+            resposta = await cliente.post(f"/app?k={tela.CHAVE if chave is None else chave}", data=dados)
+            corpo = await resposta.json() if resposta.status == 200 else None
+            return resposta.status, corpo
+    return rodar(cenario())
+
+
+def _android_falso(monkeypatch, tmp_path):
+    instalados = []
+    monkeypatch.setattr(tela.av, "PASTA_APP", str(tmp_path / "app"))
+    monkeypatch.setattr(tela.av, "_adb", lambda *p, timeout=30: instalados.append(p) or (0, ""))
+    monkeypatch.setattr(tela.av, "versao_shopee", lambda pacote=None: "instalado, versão 3.40.21")
+    return instalados
+
+
+def test_enviar_app_xapk_instala_as_partes(monkeypatch, tmp_path):
+    instalados = _android_falso(monkeypatch, tmp_path)
+    conteudo = _zip(tmp_path / "s.xapk", ["manifest.json", "com.shopee.br.apk", "config.arm64_v8a.apk",
+                                         "config.x86_64.apk"])
+    status, corpo = _enviar(conteudo)
+    assert status == 200 and corpo == {"ok": True, "mensagem": "app da Shopee: instalado, versão 3.40.21"}
+    comando = instalados[0]
+    assert comando[0] == "install-multiple" and len(comando) == 5          # -r -g e as 2 partes do ARM 64
+    assert not (tmp_path / "app").exists()                                # nada fica no servidor
+
+
+def test_enviar_algo_que_nao_e_app(monkeypatch, tmp_path):
+    instalados = _android_falso(monkeypatch, tmp_path)
+    status, corpo = _enviar(b"isto nao e um zip", nome="foto.jpg")
+    assert status == 200 and corpo["ok"] is False and "não é um app" in corpo["mensagem"]
+    assert instalados == []
+
+
+def test_enviar_app_sem_a_chave(monkeypatch, tmp_path):
+    instalados = _android_falso(monkeypatch, tmp_path)
+    status, _ = _enviar(b"x", chave="errada")
+    assert status == 404 and instalados == []
+
+
+def test_enviar_app_grande_demais(monkeypatch, tmp_path):
+    instalados = _android_falso(monkeypatch, tmp_path)
+    monkeypatch.setattr(tela, "LIMITE_APP_MB", 1)
+    status, corpo = _enviar(b"x" * (2 * 1024 * 1024))
+    assert corpo == {"ok": False, "mensagem": "arquivo maior que 1 MB"} and instalados == []
+
+
 def test_endereco_do_tunel_na_saida_do_cloudflared():
     class Saida:
         def __init__(self, linhas):
