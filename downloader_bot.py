@@ -915,7 +915,11 @@ EXPIRACAO_AVISO_TRAVA_SEG = 180
 
 
 async def expirar_aviso_trava(user_id, msg_id):
-    """Apaga o aviso de canais obrigatórios (e esquece o link) se a pessoa não concluir em EXPIRACAO_AVISO_TRAVA_SEG."""
+    """
+    Apaga o aviso de canais obrigatórios e o link da pessoa se ela não concluir em
+    EXPIRACAO_AVISO_TRAVA_SEG. Sem o aviso, o link solto no tópico parece um pedido
+    que o bot ignorou. Decisão do Rafael: DECISOES.md, Baixador.
+    """
     await asyncio.sleep(EXPIRACAO_AVISO_TRAVA_SEG)
 
     # Já foi resolvido ou substituído por outro aviso? Não mexe.
@@ -924,10 +928,13 @@ async def expirar_aviso_trava(user_id, msg_id):
         return
 
     GATES_ABERTOS.pop(user_id, None)
-    LINKS_PENDENTES.pop(user_id, None)
+    link_original = LINKS_PENDENTES.pop(user_id, None)
     try: await aviso.delete()
     except Exception: pass
-    logger.info(f"⏳ Aviso de trava de {user_id} expirou e foi removido.")
+    if link_original is not None:
+        try: await link_original.delete()
+        except Exception: pass
+    logger.info(f"⏳ Aviso de trava de {user_id} expirou e foi removido junto com o link.")
 
 # Respiro antes de apagar o link original. Sumir no mesmo instante da entrega
 # dá a impressão de que algo deu errado.
