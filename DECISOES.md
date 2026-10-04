@@ -24,6 +24,8 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **03/10/2026:** todo pedido que define comportamento entra neste diário.
 - **03/10/2026:** vídeo que o Rafael mandar é visto e ouvido por inteiro antes de seguir a instrução: todos os quadros e a fala transcrita. Sem conseguir ouvir, dizer isso logo e pedir a transcrição antes de mudar qualquer coisa.
 - **04/10/2026:** quando uma mudança serve para descobrir por que algo dá errado, o Claude agenda sozinho a conferência do resultado, no horário em que ele já deve existir. O Rafael não precisa lembrar: na hora marcada, o Claude lê o resultado, corrige ou orienta e avisa.
+- **04/10/2026:** na conferência, com o resultado claro, o Claude corrige e sobe sozinho (PR, CI, merge, deploy), sem ação do Rafael. Só espera o Rafael quando houver dúvida de verdade.
+- **04/10/2026:** pergunta do Claude ao Rafael que fica sem resposta (1 h) vira aviso no privado do Telegram, pelo bot principal, para ele abrir a conversa com o Claude. Só entre 8h e 22h, no máximo um por dia por pergunta.
 
 ## Canal principal
 
