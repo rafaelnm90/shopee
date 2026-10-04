@@ -161,6 +161,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **04/10/2026:** o login da Shopee (e o que mais precisar de mão humana, como código ou quebra-cabeça de segurança) é feito pelo Rafael na tela do Android aberta no navegador do celular. O link leva uma chave aleatória e vai só no privado dele, por um túnel temporário do Cloudflare (sem abrir porta no servidor), e fecha em 30 min ou no botão Terminei.
 - **04/10/2026:** a tela do Android tem os botões "🧹 Fechar apps" (fecha todos os apps instalados e volta à tela inicial) e "🔄 Reiniciar Android". Reiniciar é só religar, como num celular: os apps e o login da Shopee continuam.
 - **04/10/2026:** também o botão "🗑️ Resetar de fábrica": desliga o Android, apaga os apps e o login e liga do zero. Os três botões pedem confirmação antes; o de fábrica pede duas vezes, porque não dá para desfazer.
+- **04/10/2026:** "Fechar apps" funciona como o "Limpar tudo" do celular: além de fechar os apps, tira todos da lista de recentes (a do botão quadrado). O Rafael mostrou em vídeo que os apps continuavam nessa lista e pareciam abertos.
 
 ## Monitor, deploy e servidor
 
