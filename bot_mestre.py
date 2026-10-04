@@ -4960,7 +4960,7 @@ async def painel_autorais(message: types.Message, state: FSMContext):
 #              enquanto a conta continuar apta.
 #
 # Callbacks (curtos de propósito: o Telegram limita o callback_data a 64 bytes):
-#   pc_painel | pc_sync | pc_ver:<id> | pc_papel:<id>:<c|r|a> | pc_ass:<id>:<e|r> |
+#   pc_painel | pc_sync | pc_ver:<id> | pc_papel:<id>:<c|r> | pc_ass:<id>:<e|r> |
 #   pc_hab:<id> | pc_nova | pc_nova_x | pc_ent:<id> | pc_conv:<id>
 #   (pc_tog:<id>:<e|r> só atende botões de mensagens antigas)
 # ==========================================================================
@@ -5003,12 +5003,14 @@ def _pc_teclado_lista():
     return InlineKeyboardMarkup(inline_keyboard=botoes)
 
 
-# Sigla do papel no callback (c, r, a) e o papel do pool_contas.
-_PC_PAPEIS = {"c": pool_contas.PAPEL_CAPTURA, "r": pool_contas.PAPEL_REPOSTAGEM, "a": pool_contas.PAPEL_AMBAS}
+# Sigla do papel no callback e o papel do pool_contas. Só dois botões: várias contas
+# na repostagem já são reserva umas das outras. Decisão do Rafael: DECISOES.md,
+# Vídeos Autorais e contas do pool.
+_PC_PAPEIS = {"c": pool_contas.PAPEL_CAPTURA, "r": pool_contas.PAPEL_REPOSTAGEM}
 
 
 def _pc_botoes_papel(conta):
-    """Os três papéis; o atual vem marcado com ✔️."""
+    """Os dois papéis; o atual vem marcado com ✔️."""
     atual = pool_contas.papel_da_conta(conta)
     return [[InlineKeyboardButton(
         text=("✔️ " if papel == atual else "") + pool_contas.ROTULOS_PAPEL[papel],
@@ -5182,13 +5184,13 @@ async def pool_alternar_permissao(callback: types.CallbackQuery, state: FSMConte
 
 @dp.callback_query(F.data.startswith("pc_papel:"), StateFilter("*"))
 async def pool_definir_papel(callback: types.CallbackQuery, state: FSMContext):
-    """Para que serve a conta: captura, repostagem ou as duas. Já redistribui os postos."""
+    """Para que serve a conta: captura ou repostagem. Já redistribui os postos."""
     if callback.from_user.id != ADMIN_ID: return
     _p, id_conta, sigla = callback.data.split(":")
     conta = pool_contas.obter_conta(id_conta)
     papel = _PC_PAPEIS.get(sigla)
     if not conta or not papel:
-        await callback.answer("Conta não encontrada.", show_alert=True)
+        await callback.answer("Essa opção não existe mais: abra a conta de novo em Contas 👥.", show_alert=True)
         return
     _ok, resultado, mudancas = pool_contas.definir_papel(conta["apelido"], papel)
     conta = pool_contas.obter_conta(id_conta)
@@ -5510,8 +5512,8 @@ async def _concluir_nova_conta(message, state, senha):
         f"✅ <b>Conta {apelido} cadastrada.</b>\n{situacao}\n\n"
         "<b>Para que serve esta conta?</b>\n"
         "🎯 <b>Captura</b>: pega os vídeos do grupo de origem e publica no seu canal (uma conta só).\n"
-        "🔁 <b>Repostagem</b>: devolve os vídeos ao grupo de origem, revezando com as outras.\n"
-        "🔀 <b>As duas</b>: reposta e assume a captura se a conta da captura cair.\n\n"
+        "🔁 <b>Repostagem</b>: devolve os vídeos ao grupo de origem, revezando com as outras "
+        "(se uma cair, as outras seguem).\n\n"
         f"📣 Seu canal: {pool_contas.texto_canal(conta)}",
         parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=_pc_botoes_papel(conta)))
 

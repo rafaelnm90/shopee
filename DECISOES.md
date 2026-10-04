@@ -70,7 +70,8 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **04/10/2026:** no fim do "➕ Nova conta", o bot pergunta "Para que serve esta conta?" e já configura tudo com um toque. A tela de cada conta usa os mesmos botões, no lugar de ligar e desligar funções.
   - 🎯 **Captura e publicação no seu canal:** uma conta só; se já houver outra na captura, ela assume e a outra vai repostar.
   - 🔁 **Repostagem no grupo de origem:** reveza com as outras e nunca assume a captura.
-  - 🔀 **As duas:** reposta e assume a captura se a da captura cair. É o comportamento que as contas já tinham.
+  - ~~🔀 **As duas:** reposta e assume a captura se a da captura cair. É o comportamento que as contas já tinham.~~ Substituída em 04/10/2026: o Rafael preferiu só dois botões (abaixo).
+  - **04/10/2026:** ficam só 🎯 Captura e 🔁 Repostagem. Várias contas na repostagem já são reserva umas das outras (revezam e, se uma cair, as outras seguem). Se a conta da captura cair, o Rafael recebe o aviso e escolhe outra com um toque. Conta antiga com as duas funções continua valendo até ele escolher.
 - **04/10/2026:** o robô confere se a conta da captura consegue publicar no seu canal: admin com "publicar mensagens" (ou dono). Se não consegue, a captura fica ❌ no painel, com aviso no privado, e o cadastro já avisa.
 - **04/10/2026:** o botão "Contas 👥" fica dentro de "Vídeos Autorais 🎥", e não solto em "Outros Canais": as contas e as pessoas bloqueadas só servem a esse robô (captura dos Autorais e dos parceiros). Telas em palavras:
   - "Pessoas bloqueadas" (era "Autores Bloqueados") explica que bloquear alguém faz o robô não copiar para o seu canal o que essa pessoa posta no grupo de origem, e por isso também não repostar. As suas próprias contas entram ali sozinhas, para o robô não recapturar o que elas repostam.

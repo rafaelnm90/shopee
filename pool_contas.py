@@ -812,19 +812,21 @@ def alternar_funcao_permitida(apelido, funcao):
     return (ligada, aplicar_funcoes())
 
 
-# Papéis que o painel oferece, em vez de ligar e desligar cada função.
+# Papéis que o painel oferece, em vez de ligar e desligar cada função. São só dois:
+# várias contas na repostagem já são reserva umas das outras. Decisão do Rafael:
+# DECISOES.md, Vídeos Autorais e contas do pool.
 PAPEL_CAPTURA = "captura"        # pega do grupo de origem e publica no canal; nunca reposta
 PAPEL_REPOSTAGEM = "repostagem"  # só reveza na devolução ao grupo; nunca assume a captura
-PAPEL_AMBAS = "ambas"            # reposta e assume a captura se a da captura cair
+# Conta antiga com as duas funções ligadas: continua valendo até o Rafael escolher.
+PAPEL_AMBAS = "ambas"
 FUNCOES_DO_PAPEL = {
     PAPEL_CAPTURA: FUNCAO_ESPELHO,
     PAPEL_REPOSTAGEM: FUNCAO_REPOSTAGEM,
-    PAPEL_AMBAS: f"{FUNCAO_ESPELHO},{FUNCAO_REPOSTAGEM}",
 }
 ROTULOS_PAPEL = {
     PAPEL_CAPTURA: "🎯 Captura e publicação no seu canal",
     PAPEL_REPOSTAGEM: "🔁 Repostagem no grupo de origem",
-    PAPEL_AMBAS: "🔀 Repostagem e reserva da captura",
+    PAPEL_AMBAS: "🔀 captura ou repostagem (escolha uma)",
 }
 
 
@@ -856,10 +858,7 @@ def definir_papel(apelido, papel):
         if ok:
             return (True, "assumiu a captura", [])
         return (True, f"assume a captura assim que puder ({motivo})", aplicar_funcoes())
-    mudancas = aplicar_funcoes()
-    if papel == PAPEL_REPOSTAGEM:
-        return (True, "entra no revezamento da repostagem assim que puder", mudancas)
-    return (True, "reposta e cobre a captura se a outra conta cair", mudancas)
+    return (True, "entra no revezamento da repostagem assim que puder", aplicar_funcoes())
 
 
 def atribuir_funcao(apelido, funcao):
