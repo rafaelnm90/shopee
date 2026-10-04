@@ -316,6 +316,10 @@ def abrir_tela():
         if not _passo("instalar o cloudflared", _rodar("sudo", "-n", "dpkg", "-i", deb, timeout=300)):
             return False
     os.makedirs(PASTA_TRABALHO, exist_ok=True)
+    # Uma tela nova substitui a anterior: o Rafael não precisa ter tocado em Terminei.
+    if _ok(_rodar("pkill", "-f", "tela_android.py")):
+        print("tela anterior: fechada")
+        time.sleep(2)
     try:
         os.remove(ARQUIVO_TELA)
     except FileNotFoundError:
