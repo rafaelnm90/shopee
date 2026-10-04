@@ -1118,8 +1118,8 @@ def montar_relatorio_telegram():
         linha = (f"<blockquote><b>{i}</b> — <b>{c['apelido']}</b> · {identidade}\n"
                  f"🧩 {ROTULOS_PAPEL[papel] if papel else '⚪ papel não escolhido'} · {agora}\n"
                  f"📍 {grupo}")
-        if papel in (PAPEL_CAPTURA, PAPEL_AMBAS):
-            linha += f" · 📣 canal: {texto_canal(c)}"
+        if papel != PAPEL_REPOSTAGEM:
+            linha += f"\n📣 canal: {texto_canal(c)}"
         linhas.append(linha + "</blockquote>")
     return "\n".join(linhas)
 
@@ -1531,7 +1531,8 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
 
         # Quem pode capturar também publica no seu canal: confere antes do grupo,
         # para o cadastro já avisar mesmo com a conta ainda fora do grupo de origem.
-        if FUNCAO_ESPELHO in str(conta.get("funcoes_permitidas") or ""):
+        # Conta sem papel escolhido também, para o painel não mostrar a linha vazia.
+        if papel_da_conta(conta) != PAPEL_REPOSTAGEM:
             await conferir_destino(cliente, conta)
 
         if not grupo_id:

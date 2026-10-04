@@ -141,3 +141,19 @@ def test_checagem_com_erro_guarda_o_motivo_e_nao_muda_o_estado(pc, monkeypatch):
     conta_a = pc.obter_conta("A")
     assert conta_a["status_grupo"] == pc.STATUS_DESCONHECIDO
     assert conta_a["ultimo_erro"] == "RuntimeError: rede caiu"
+
+
+def test_conta_sem_papel_tambem_tem_o_canal_conferido(pc, monkeypatch):
+    conferidas = []
+
+    async def conferir(cliente, conta):
+        conferidas.append(conta["apelido"])
+    monkeypatch.setattr(pc, "conferir_destino", conferir)
+    monkeypatch.setattr(pc, "obter_grupo_autorais", lambda: -100123)
+    for apelido, funcoes in (("sem_papel", "nenhuma"), ("captura", "espelho"), ("repost", "repostagem")):
+        pc.salvar_conta(apelido, sessao="x", funcoes_permitidas=funcoes)
+        rodar(pc.checar_conta(pc.obter_conta(apelido), cliente=SemCache([(-100123, False)])))
+    assert conferidas == ["sem_papel", "captura"]          # quem só reposta não publica no canal
+    pc.marcar_publicacao_no_destino("sem_papel", True)
+    assert "📣 canal: ✅ pode publicar" in pc.montar_relatorio_telegram().split("sem_papel")[1]
+

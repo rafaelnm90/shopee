@@ -5060,7 +5060,7 @@ def texto_tela_conta(conta):
         f"🧩 Função: <b>{pool_contas.ROTULOS_PAPEL[papel] if papel else 'ainda não escolhida'}</b>\n"
         f"📍 Grupo de origem: <b>{pool_contas.TEXTOS_GRUPO.get(conta['status_grupo'], conta['status_grupo'])}</b>\n"
     )
-    if papel in (pool_contas.PAPEL_CAPTURA, pool_contas.PAPEL_AMBAS):
+    if papel != pool_contas.PAPEL_REPOSTAGEM:
         texto += f"📣 Seu canal: <b>{pool_contas.texto_canal(conta)}</b>\n"
     texto += (
         f"⚙️ Agora: <b>{agora}</b>\n"
