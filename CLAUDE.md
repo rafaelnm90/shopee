@@ -140,14 +140,18 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
   - Não contrariar uma decisão do diário por conta própria, nem para "corrigir" algo que parece bug. Se parecer errado, perguntar.
   - Exceção a um padrão no código: comentário curto no lugar apontando para a entrada (ex.: `# Decisão do Rafael: DECISOES.md, Canal Viral`).
 - Dúvida sobre a intenção de uma regra (ex.: "era para apagar depois de processar?") → pergunte antes de mudar. Ofereça opções, com a recomendada primeiro.
+- Opções oferecidas ao Rafael ficam abertas até ele escolher, mesmo que ele demore:
+  - oferecer pelo seletor de opções (`AskUserQuestion`), não só em texto;
+  - se o seletor sumir sem resposta (ex.: uma chamada agendada chegou antes), mostrar as mesmas opções de novo na próxima resposta;
+  - nunca escolher por ele por causa da demora. Até ele responder, fica valendo o que já estava.
 - Investigação que depende de esperar o servidor (contagem, log, diagnóstico novo, correção que só se confirma com o uso):
   - o Rafael não precisa lembrar de conferir. Ao subir a mudança, agendar eu mesmo a conferência (`send_later`) para quando o resultado já deve existir (ex.: na manhã seguinte, se o canal posta de dia);
   - na conferência: ler o resultado (inventário, diagnóstico, `/status`) e concluir a causa;
   - resultado claro = corrigir e subir sozinho, do começo ao fim (PR, CI, merge, deploy), sem pedir aprovação. Esperar o Rafael só em dúvida de verdade (intenção, regra do diário). Se a solução depende de algo que só ele faz (ex.: pôr uma conta num canal), dizer exatamente o quê;
   - dizer ao Rafael quando será a conferência. Sem resultado ainda, reagendar e avisar o novo horário. No fim, avisar o que foi achado e feito.
 - Retomada automática (o crédito pode acabar no meio de um pedido, e eu não volto sozinho):
-  - a rotina "Retomar trabalho pela metade (8h–22h)" chama esta conversa de hora em hora, das 8h às 22h de Brasília;
-  - em cada chamada, conferir se algo ficou pela metade: pedido sem "✅ Concluído", mudança sem commit ou push, PR aberto, CI ou deploy não acompanhado até o verde, conferência que não rodou, tarefa pendente;
+  - a rotina "Retomar trabalho pela metade (a cada 3 h, 8h–20h)" chama esta conversa às 8h, 11h, 14h, 17h e 20h de Brasília;
+  - em cada chamada, conferir se algo ficou pela metade: pedido sem "✅ Concluído", mudança sem commit ou push, PR aberto, CI ou deploy não acompanhado até o verde, conferência que não rodou, tarefa pendente, opções oferecidas sem resposta (mostrar de novo);
   - havendo algo, continuar de onde parou, seguindo as regras daqui; não havendo, só responder "Nada pendente." (sem aviso no Telegram);
   - chamada que cai sem crédito não roda; a próxima, com crédito, retoma.
 - Pergunta ao Rafael sem resposta: o robô avisa no Telegram.
