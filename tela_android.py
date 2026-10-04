@@ -135,7 +135,8 @@ def instalar_arquivo(arquivo):
     (ok, mensagem para a página).
     """
     if not zipfile.is_zipfile(arquivo):
-        return False, "o arquivo não é um app (escolha um APK ou XAPK)"
+        return False, ("o arquivo não é um app aberto (o .apkm do APKMirror é trancado): baixe o APK "
+                       "ou XAPK pelo Uptodown ou APKPure")
     partes = av.partes_do_app(arquivo, os.path.join(os.path.dirname(arquivo), "partes"))
     if not partes:
         return False, "não achei o app dentro do arquivo"
@@ -145,38 +146,62 @@ def instalar_arquivo(arquivo):
     return True, f"app da Shopee: {av.versao_shopee()}"
 
 
-async def receber_app(request):
+# O app enviado chega em pedaços de 8 MB, em ordem: o túnel recusa pedido acima de
+# uns 100 MB, e o app da Shopee passa disso. O pedaço 0 começa o arquivo do zero.
+_envio = {"proximo": 0, "bytes": 0}
+
+
+def _arquivo_enviado():
+    return os.path.join(av.PASTA_APP, "enviado.zip")
+
+
+async def receber_pedaco(request):
     """
     O Rafael baixa o app no celular (os sites de APK recusam o servidor, não o
-    celular dele) e envia por aqui. O arquivo vai em pedaços para o disco e sai de
-    lá depois de instalado.
+    celular dele) e envia pela página, um pedaço por pedido.
     """
     if not autorizado(request):
         raise web.HTTPNotFound()
-    leitor = await request.multipart()
-    campo = await leitor.next()
-    if campo is None or campo.name != "arquivo":
-        raise web.HTTPBadRequest()
-    shutil.rmtree(av.PASTA_APP, ignore_errors=True)
-    os.makedirs(av.PASTA_APP)
-    arquivo = os.path.join(av.PASTA_APP, "enviado.zip")
     try:
-        total = 0
-        with open(arquivo, "wb") as destino:
-            while pedaco := await campo.read_chunk(1024 * 1024):
-                total += len(pedaco)
-                if total > LIMITE_APP_MB * 1024 * 1024:
-                    return web.json_response({"ok": False, "mensagem": f"arquivo maior que {LIMITE_APP_MB} MB"})
-                destino.write(pedaco)
-        ok, mensagem = await asyncio.to_thread(instalar_arquivo, arquivo)
+        numero = int(request.query.get("n", ""))
+    except ValueError:
+        raise web.HTTPBadRequest()
+    if numero == 0:
+        shutil.rmtree(av.PASTA_APP, ignore_errors=True)
+        os.makedirs(av.PASTA_APP)
+        _envio.update(proximo=0, bytes=0)
+    if numero != _envio["proximo"]:
+        return web.json_response({"ok": False, "mensagem": "o envio se perdeu no meio: envie de novo"})
+    with open(_arquivo_enviado(), "ab") as destino:
+        async for bloco in request.content.iter_chunked(1024 * 1024):
+            _envio["bytes"] += len(bloco)
+            if _envio["bytes"] > LIMITE_APP_MB * 1024 * 1024:
+                shutil.rmtree(av.PASTA_APP, ignore_errors=True)
+                _envio.update(proximo=0, bytes=0)
+                return web.json_response({"ok": False, "mensagem": f"arquivo maior que {LIMITE_APP_MB} MB"})
+            destino.write(bloco)
+    _envio["proximo"] += 1
+    return web.json_response({"ok": True})
+
+
+async def instalar_enviado(request):
+    """Todos os pedaços chegaram: instala e apaga o arquivo, dê certo ou não."""
+    if not autorizado(request):
+        raise web.HTTPNotFound()
+    try:
+        if not os.path.exists(_arquivo_enviado()):
+            return web.json_response({"ok": False, "mensagem": "nenhum arquivo chegou: envie de novo"})
+        ok, mensagem = await asyncio.to_thread(instalar_arquivo, _arquivo_enviado())
         return web.json_response({"ok": ok, "mensagem": mensagem})
     finally:
         shutil.rmtree(av.PASTA_APP, ignore_errors=True)
+        _envio.update(proximo=0, bytes=0)
 
 
 def montar_app():
     app = web.Application(client_max_size=64 * 1024)
-    app.router.add_post("/app", receber_app)
+    app.router.add_post("/app/pedaco", receber_pedaco)
+    app.router.add_post("/app/instalar", instalar_enviado)
     app.router.add_get("/", pagina)
     app.router.add_get("/tela.png", tela)
     app.router.add_post("/acao", acao)
@@ -260,12 +285,13 @@ PAGINA = """<!doctype html>
 <style>
   :root { color-scheme: light dark; --fundo: #111; --texto: #eee; --botao: #2b2b2b; }
   body { margin: 0; background: var(--fundo); color: var(--texto); font-family: system-ui, sans-serif; }
-  #tela { display: block; width: 100%; max-width: 480px; margin: 0 auto; touch-action: none;
+  #tela { display: block; width: auto; max-width: 100%; max-height: 60vh; margin: 0 auto; touch-action: none;
           user-select: none; -webkit-user-select: none; }
   .barra { display: flex; gap: 6px; max-width: 480px; margin: 6px auto; padding: 0 8px; box-sizing: border-box; }
   .barra button, .barra input { flex: 1; padding: 12px 6px; font-size: 16px; border-radius: 8px;
           border: 0; background: var(--botao); color: var(--texto); }
   .barra input { flex: 3; background: #fff; color: #000; }
+  .barra input[type=file] { flex: 1; min-width: 0; font-size: 14px; }
   #aviso { text-align: center; font-size: 13px; opacity: .7; padding: 4px 8px; }
 </style></head><body>
 <img id="tela" alt="Tela do Android">
@@ -274,8 +300,8 @@ PAGINA = """<!doctype html>
 <div class="barra"><button onclick="tecla('voltar')">◀ Voltar</button>
   <button onclick="tecla('inicio')">● Início</button><button onclick="tecla('apagar')">⌫ Apagar</button>
   <button onclick="tecla('enter')">↵ Enter</button></div>
-<div class="barra"><input type="file" id="arquivo" accept=".apk,.xapk,.apks">
-  <button onclick="enviarApp()">📦 Enviar app</button></div>
+<div class="barra"><input type="file" id="arquivo" accept=".apk,.xapk,.apks"></div>
+<div class="barra"><button onclick="enviarApp()">📦 Enviar app</button></div>
 <div class="barra"><button onclick="terminar()">✅ Terminei</button></div>
 <div id="aviso">Toque para clicar. Arraste para rolar ou para o quebra-cabeça.</div>
 <script>
@@ -313,30 +339,33 @@ function digitar() {
 }
 function tecla(nome) { enviar({ tipo: "tecla", tecla: nome }); }
 function avisar(texto) { document.getElementById("aviso").textContent = texto; }
-function enviarApp() {
+const PEDACO = 8 * 1024 * 1024;
+async function enviarApp() {
   const campo = document.getElementById("arquivo");
   if (!campo.files.length) { avisar("Escolha primeiro o arquivo do app (APK ou XAPK)."); return; }
-  const dados = new FormData();
-  dados.append("arquivo", campo.files[0]);
-  const envio = new XMLHttpRequest();
-  envio.open("POST", "/app?k=" + K);
-  envio.upload.onprogress = e => {
-    if (!e.lengthComputable) return;
-    const pct = Math.round(e.loaded * 100 / e.total);
-    avisar(pct < 100 ? "Enviando... " + pct + "%" : "Instalando no Android... (pode levar 1 min)");
-  };
-  envio.onload = () => {
-    if (envio.status === 413) { avisar("❌ O arquivo passou do limite do túnel. Me avise no chat."); return; }
-    try { const r = JSON.parse(envio.responseText); avisar((r.ok ? "✅ " : "❌ ") + r.mensagem); }
-    catch (e) { avisar("❌ Erro " + envio.status + ". Me avise no chat."); }
-  };
-  envio.onerror = () => avisar("❌ O envio caiu. Tente de novo.");
-  avisar("Enviando... 0%");
-  envio.send(dados);
+  const arquivo = campo.files[0];
+  if (arquivo.name.toLowerCase().endsWith(".apkm")) {
+    avisar("❌ O .apkm (APKMirror) é trancado. Baixe o APK ou XAPK pelo Uptodown ou APKPure.");
+    return;
+  }
+  const total = Math.max(1, Math.ceil(arquivo.size / PEDACO));
+  try {
+    for (let n = 0; n < total; n++) {
+      avisar("Enviando... " + Math.round(n * 100 / total) + "%");
+      const r = await fetch("/app/pedaco?k=" + K + "&n=" + n,
+                            { method: "POST", body: arquivo.slice(n * PEDACO, (n + 1) * PEDACO) });
+      const j = await r.json();
+      if (!j.ok) { avisar("❌ " + j.mensagem); return; }
+    }
+    avisar("Instalando no Android... (pode levar 1 min)");
+    const j = await (await fetch("/app/instalar?k=" + K, { method: "POST" })).json();
+    avisar((j.ok ? "✅ " : "❌ ") + j.mensagem);
+  } catch (e) { avisar("❌ O envio caiu. Tente de novo."); }
 }
 function terminar() {
+  if (!confirm("Fechar a tela do Android? Depois disso este link para de funcionar.")) return;
   enviar({ tipo: "fim" });
-  document.getElementById("aviso").textContent = "Tela fechada. Pode sair desta página.";
+  avisar("Tela fechada. Pode sair desta página.");
 }
 atualizar();
 </script></body></html>

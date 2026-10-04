@@ -79,18 +79,24 @@ def _zip(caminho, nomes):
     return open(caminho, "rb").read()
 
 
-def _enviar(conteudo, chave=None, nome="shopee.xapk"):
-    """Sobe o servidor da tela de verdade e envia o arquivo pelo botão Enviar app."""
-    from aiohttp import FormData
+def _enviar(conteudo, chave=None, tamanho_pedaco=None, ordem=None):
+    """Sobe o servidor da tela de verdade e envia o arquivo em pedaços, como a página faz."""
     from aiohttp.test_utils import TestClient, TestServer
+    k = tela.CHAVE if chave is None else chave
+    tamanho = tamanho_pedaco or max(1, len(conteudo))
+    pedacos = [conteudo[i:i + tamanho] for i in range(0, max(1, len(conteudo)), tamanho)]
 
     async def cenario():
         async with TestClient(TestServer(tela.montar_app())) as cliente:
-            dados = FormData()
-            dados.add_field("arquivo", conteudo, filename=nome)
-            resposta = await cliente.post(f"/app?k={tela.CHAVE if chave is None else chave}", data=dados)
-            corpo = await resposta.json() if resposta.status == 200 else None
-            return resposta.status, corpo
+            for n in (ordem or range(len(pedacos))):
+                r = await cliente.post(f"/app/pedaco?k={k}&n={n}", data=pedacos[n])
+                if r.status != 200:
+                    return r.status, None
+                corpo = await r.json()
+                if not corpo["ok"]:
+                    return r.status, corpo
+            r = await cliente.post(f"/app/instalar?k={k}")
+            return r.status, (await r.json() if r.status == 200 else None)
     return rodar(cenario())
 
 
@@ -102,21 +108,21 @@ def _android_falso(monkeypatch, tmp_path):
     return instalados
 
 
-def test_enviar_app_xapk_instala_as_partes(monkeypatch, tmp_path):
+def test_enviar_app_em_pedacos_instala_as_partes(monkeypatch, tmp_path):
     instalados = _android_falso(monkeypatch, tmp_path)
     conteudo = _zip(tmp_path / "s.xapk", ["manifest.json", "com.shopee.br.apk", "config.arm64_v8a.apk",
                                          "config.x86_64.apk"])
-    status, corpo = _enviar(conteudo)
+    status, corpo = _enviar(conteudo, tamanho_pedaco=len(conteudo) // 3 + 1)   # 3 pedaços
     assert status == 200 and corpo == {"ok": True, "mensagem": "app da Shopee: instalado, versão 3.40.21"}
     comando = instalados[0]
     assert comando[0] == "install-multiple" and len(comando) == 5          # -r -g e as 2 partes do ARM 64
     assert not (tmp_path / "app").exists()                                # nada fica no servidor
 
 
-def test_enviar_algo_que_nao_e_app(monkeypatch, tmp_path):
+def test_apkm_trancado_e_recusado_com_o_motivo(monkeypatch, tmp_path):
     instalados = _android_falso(monkeypatch, tmp_path)
-    status, corpo = _enviar(b"isto nao e um zip", nome="foto.jpg")
-    assert status == 200 and corpo["ok"] is False and "não é um app" in corpo["mensagem"]
+    status, corpo = _enviar(b"conteudo cifrado do apkmirror")
+    assert status == 200 and corpo["ok"] is False and ".apkm" in corpo["mensagem"]
     assert instalados == []
 
 
@@ -129,8 +135,16 @@ def test_enviar_app_sem_a_chave(monkeypatch, tmp_path):
 def test_enviar_app_grande_demais(monkeypatch, tmp_path):
     instalados = _android_falso(monkeypatch, tmp_path)
     monkeypatch.setattr(tela, "LIMITE_APP_MB", 1)
-    status, corpo = _enviar(b"x" * (2 * 1024 * 1024))
+    status, corpo = _enviar(b"x" * (2 * 1024 * 1024), tamanho_pedaco=700 * 1024)
     assert corpo == {"ok": False, "mensagem": "arquivo maior que 1 MB"} and instalados == []
+    assert not (tmp_path / "app").exists()
+
+
+def test_pedaco_fora_de_ordem_pede_para_enviar_de_novo(monkeypatch, tmp_path):
+    instalados = _android_falso(monkeypatch, tmp_path)
+    status, corpo = _enviar(b"abcdef", tamanho_pedaco=2, ordem=[0, 2, 1])
+    assert corpo == {"ok": False, "mensagem": "o envio se perdeu no meio: envie de novo"}
+    assert instalados == []
 
 
 def test_endereco_do_tunel_na_saida_do_cloudflared():
