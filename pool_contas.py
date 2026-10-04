@@ -156,6 +156,7 @@ import db
 import logging
 import asyncio
 import getpass
+import re
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -1059,6 +1060,22 @@ TEXTOS_GRUPO = {
 }
 
 
+def telefone_legivel(telefone):
+    """Telefone no formato que o Rafael reconhece no chip (+55 32 99999-0001)."""
+    numeros = re.sub(r"\D", "", str(telefone or ""))
+    if not numeros:
+        return "telefone ainda não lido"
+    if numeros.startswith("55") and len(numeros) in (12, 13):
+        resto = numeros[4:]
+        return f"+55 {numeros[2:4]} {resto[:-4]}-{resto[-4:]}"
+    return "+" + numeros
+
+
+def identificar(conta):
+    """Como a conta aparece em todas as telas, sempre igual: apelido e telefone do chip."""
+    return f"<b>{conta['apelido']}</b> · 📱 {telefone_legivel(conta.get('telefone'))}"
+
+
 def texto_canal(conta):
     """Se a conta consegue publicar no seu canal (só importa para quem captura)."""
     pode = conta.get("publica_no_destino")
@@ -1112,10 +1129,9 @@ def montar_relatorio_telegram():
             agora = "repostando"
         else:
             agora = "parada"
-        identidade = ("@" + c["username"]) if c["username"] else f"id {c['user_id'] or '?'}"
         papel = papel_da_conta(c)
         grupo = f"{ICONES_GRUPO.get(c['status_grupo'], '❓')} {TEXTOS_GRUPO.get(c['status_grupo'], c['status_grupo'])}"
-        linha = (f"<blockquote><b>{i}</b> — <b>{c['apelido']}</b> · {identidade}\n"
+        linha = (f"<blockquote><b>{i}</b> — {identificar(c)}\n"
                  f"🧩 {ROTULOS_PAPEL[papel] if papel else '⚪ papel não escolhido'} · {agora}\n"
                  f"📍 {grupo}")
         if papel != PAPEL_REPOSTAGEM:
