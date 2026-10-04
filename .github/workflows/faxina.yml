@@ -1,0 +1,35 @@
+name: Faxina do servidor
+
+# Tira o que a auditoria achou sem uso: tabelas e chaves mortas do banco e
+# arquivos velhos da pasta do projeto, sempre guardando uma cópia em
+# ~/backups/antigos antes (nada é apagado sem cópia). Só roda à mão. Sem marcar
+# "executar", só mostra o que faria.
+#
+# O repositório é público, e os logs do Actions também: o faxina_servidor.py
+# imprime só nomes e números, nunca conteúdo do banco.
+on:
+  workflow_dispatch:
+    inputs:
+      executar:
+        description: "Fazer a faxina (desmarcado: só mostra o que faria)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  faxina:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Faxina no servidor
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          command_timeout: 5m
+          script: |
+            cd ~/shopee
+            venv/bin/python3 faxina_servidor.py ${{ inputs.executar && '--executar' || '' }}

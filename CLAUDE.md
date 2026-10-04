@@ -34,7 +34,7 @@ Módulos de apoio (não são serviços):
 - `utils.py` (`erros_logs`, caches, validação de IDs) e `fuso.py` (horário de Brasília e formato de log).
 - `api_gemini.py` (IA, com cascata de modelos) e `api_shopee.py` (links de afiliado).
 - `backup_dados.py`: backup diário (03:40, pelo bot_mestre) do banco, das sessões, dos JSON e do `.env` em `~/backups`, ficam 7. O `/status` mostra a idade do último.
-- Ferramentas: `validar_deploy.py`, `testar_chaves.py`, `inventario.py` e `servicos_afetados.py` (o deploy pergunta a ele quem reiniciar).
+- Ferramentas: `validar_deploy.py`, `testar_chaves.py`, `inventario.py`, `servicos_afetados.py` (o deploy pergunta a ele quem reiniciar) e `faxina_servidor.py` (tira tabelas, chaves e arquivos sem uso, guardando cópia antes).
 
 O README tem os IDs dos canais, as cinco filas e os comandos do servidor.
 
@@ -122,6 +122,7 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
     - o espaço do journal e as linhas de log que mais se repetem, com arquivo:linha do código;
     - os caches e a memória de cada robô.
     Use para achar o que acumula.
+  - `faxina.yml` (só à mão) roda o `faxina_servidor.py` no servidor: sem marcar "executar", só mostra; marcado, guarda em `~/backups/antigos` e tira. Para tirar outra coisa sem uso, acrescentar na lista do `faxina_servidor.py` depois de conferir que nenhum código usa.
   - O repositório é público e os logs do Actions também: nos workflows, só estados e números; nunca conteúdo de log dos robôs ou dados do banco.
   - Não há acesso direto ao servidor por SSH a partir da sessão. Os detalhes dos erros ficam no `/status` do bot, no privado do Rafael.
 
