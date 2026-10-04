@@ -151,7 +151,7 @@ def test_cadastro_sem_duas_etapas(bm, pc, telegram, Msg, Est):
     codigo = Msg("1 2 3 4 5")
     rodar(bm.pool_nova_conta_codigo(codigo, st))
     assert pc.obter_conta("repost_um") is not None
-    assert codigo.apagada and st.estado is None
+    assert codigo.apagada and st.estado == bm.AutoraisFluxo.menu_principal
     assert not FakeTG.conectados[-1].conectado
 
 
@@ -181,13 +181,14 @@ def test_codigo_expirado_e_cancelar_desconectam(bm, telegram, Msg, Est):
     login = FakeTG.conectados[-1]
     expirado = Msg("0 0 0 0 0")
     rodar(bm.pool_nova_conta_codigo(expirado, st))
-    assert "expirou" in expirado.saidas[-1] and not login.conectado and st.estado is None
+    assert "expirou" in expirado.saidas[-1] and not login.conectado
+    assert st.estado == bm.AutoraisFluxo.menu_principal   # o teclado na tela é o dos Autorais
 
     rodar(bm.pool_nova_conta(callback(bm, Msg, "pc_nova"), st))
     rodar(bm.pool_nova_conta_telefone(Msg("+5532999990001"), st))
     login = FakeTG.conectados[-1]
     rodar(bm.pool_nova_conta_cancelar_texto(Msg("Cancelar ❌"), st))
-    assert not login.conectado and st.estado is None
+    assert not login.conectado and st.estado == bm.AutoraisFluxo.menu_principal
 
 
 def test_prazo_de_resposta_cancela(bm, telegram, Msg, Est, monkeypatch):
@@ -204,7 +205,7 @@ def test_prazo_de_resposta_cancela(bm, telegram, Msg, Est, monkeypatch):
         await bm.pool_nova_conta_telefone(Msg("+5532999990001"), st)
         await asyncio.sleep(0.4)
     rodar(cenario())
-    assert not FakeTG.conectados[-1].conectado and st.estado is None
+    assert not FakeTG.conectados[-1].conectado and st.estado == bm.AutoraisFluxo.menu_principal
     assert avisos and "cancelado" in avisos[-1]
 
 
@@ -230,3 +231,26 @@ def test_guardar_convite_e_entrar_no_grupo(bm, pc, telegram, Msg, Est):
     rodar(bm.pool_salvar_convite(Msg("https://t.me/+AbCdEf"), st))
     assert pc.ler_convite() == "https://t.me/+AbCdEf"
     assert pc.obter_conta("repost_um")["status_grupo"] == pc.STATUS_NO_GRUPO
+
+
+def test_cadastro_pergunta_para_que_serve_e_confere_o_canal(bm, pc, telegram, Msg, Est, monkeypatch):
+    monkeypatch.setattr(pc, "obter_destino_autorais", lambda: -100777)
+    st = Est()
+    rodar(bm.pool_nova_conta(callback(bm, Msg, "pc_nova"), st))
+    rodar(bm.pool_nova_conta_telefone(Msg("+5532999990001"), st))
+    codigo = Msg("1 2 3 4 5")
+    rodar(bm.pool_nova_conta_codigo(codigo, st))
+    assert "Para que serve esta conta?" in codigo.saidas[-1]
+    assert "❌ não é admin" in codigo.saidas[-1]          # a conta falsa não está no canal
+
+    nova = pc.obter_conta("repost_um")
+    cb = callback(bm, Msg, f"pc_papel:{nova['id']}:c")
+    rodar(bm.pool_definir_papel(cb, st))
+    assert pc.papel_da_conta(pc.obter_conta("repost_um")) == pc.PAPEL_CAPTURA
+    assert any("não está no grupo de origem" in t for t in cb.message.saidas)
+    assert any("não é admin do seu canal" in t for t in cb.message.saidas)
+
+    cb = callback(bm, Msg, f"pc_papel:{nova['id']}:r")
+    rodar(bm.pool_definir_papel(cb, st))
+    assert pc.obter_conta("repost_um")["funcoes_permitidas"] == "repostagem"
+    assert not any("admin" in t for t in cb.message.saidas)   # quem só reposta não publica no canal
