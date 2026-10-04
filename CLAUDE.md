@@ -124,7 +124,7 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
     Use para achar o que acumula.
   - `avisar.yml` (só à mão): o Claude dispara quando uma pergunta ao Rafael está sem resposta; o bot manda o aviso no privado (`avisar_rafael.py`).
   - `faxina.yml` (só à mão) roda o `faxina_servidor.py` no servidor: sem marcar "executar", só mostra; marcado, guarda em `~/backups/antigos` e tira. Para tirar outra coisa sem uso, acrescentar na lista do `faxina_servidor.py` depois de conferir que nenhum código usa.
-  - `android.yml` (só à mão) roda o `android_virtual.py` no servidor, com a ação escolhida: `estado` (só mostra), `preparar` (instala o Docker e o adb, carrega o binder e liga o Android, só o que falta), `instalar-shopee` (baixa e instala o app) ou `tela` (abre a tela no navegador; o link vai no privado do Rafael, nunca no log).
+  - `android.yml` (só à mão) roda o `android_virtual.py` no servidor, com a ação escolhida: `estado` (só mostra), `preparar` (instala o Docker e o adb, carrega o binder e liga o Android, só o que falta), `instalar-loja` (instala a Aurora Store, pela qual o Rafael instala a Shopee do Google Play na tela), `instalar-shopee` (tenta baixar o app de sites de APK, que recusam o servidor) ou `tela` (abre a tela no navegador; o link vai no privado do Rafael, nunca no log).
   - O repositório é público e os logs do Actions também: nos workflows, só estados e números; nunca conteúdo de log dos robôs ou dados do banco.
   - Não há acesso direto ao servidor por SSH a partir da sessão. Os detalhes dos erros ficam no `/status` do bot, no privado do Rafael.
 

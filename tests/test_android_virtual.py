@@ -198,6 +198,50 @@ def test_aptoide_sem_selo_de_confianca_nao_instala(monkeypatch, tmp_path, capsys
     assert not any("aptoide" in u for u in baixados)
 
 
+def _fdroid(monkeypatch, tmp_path, resposta_api, codigo_apk="200"):
+    m = Maquina()
+    _instalar(monkeypatch, m)
+    monkeypatch.setattr(av, "PASTA_APP", str(tmp_path / "app"))
+
+    def rodar(*partes, timeout=120):
+        if partes[0] == "curl" and av.URL_FDROID_API in partes:
+            return (0, resposta_api)
+        if partes[0] == "curl":
+            _zip(partes[partes.index("-o") + 1], ["AndroidManifest.xml"])
+            return (0, codigo_apk)
+        if "dumpsys" in partes:
+            return (0, "    versionName=4.6.1\n")
+        return Maquina.rodar(m, *partes, timeout=timeout)
+
+    monkeypatch.setattr(av, "_rodar", rodar)
+    return m
+
+
+def test_loja_instala_a_versao_que_o_fdroid_recomenda(monkeypatch, tmp_path, capsys):
+    _fdroid(monkeypatch, tmp_path, '{"packageName": "com.aurora.store", "suggestedVersionCode": 70}\n200')
+    chamados = []
+    rodar_fdroid = av._rodar
+
+    def rodar(*partes, timeout=120):
+        chamados.append(partes)
+        return rodar_fdroid(*partes, timeout=timeout)
+
+    monkeypatch.setattr(av, "_rodar", rodar)
+    assert av.instalar_loja() is True
+    baixou = [c for c in chamados if c[0] == "curl" and "-o" in c][0]
+    assert baixou[-1] == "https://f-droid.org/repo/com.aurora.store_70.apk"
+    assert any("install" in c and c[-1].endswith("aurora.apk") for c in chamados)
+    saida = capsys.readouterr().out
+    assert "F-Droid: HTTP 200, versão 70" in saida and "instalar a Aurora Store: ok" in saida
+    assert not (tmp_path / "app").exists()
+
+
+def test_loja_sem_resposta_do_fdroid_nao_instala(monkeypatch, tmp_path, capsys):
+    _fdroid(monkeypatch, tmp_path, "<html>erro</html>\n503")
+    assert av.instalar_loja() is False
+    assert "F-Droid: HTTP 503, sem a versão da loja" in capsys.readouterr().out
+
+
 def test_tela_abre_e_nao_mostra_o_link(monkeypatch, tmp_path, capsys):
     m = Maquina()
     _instalar(monkeypatch, m)

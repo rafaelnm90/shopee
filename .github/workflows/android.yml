@@ -5,7 +5,9 @@ name: Android virtual (Shopee Vídeo)
 #   estado          só mostra como está;
 #   preparar        instala o Docker e o adb, carrega o binder e liga o Android
 #                   (só o que falta);
-#   instalar-shopee baixa e instala (ou atualiza) o app da Shopee;
+#   instalar-loja   instala a Aurora Store (vinda do F-Droid), que baixa os
+#                   apps direto do Google Play;
+#   instalar-shopee baixa e instala (ou atualiza) o app da Shopee de sites de APK;
 #   tela            abre a tela do Android no navegador por 30 min; o link vai
 #                   só no privado do Rafael, pelo bot.
 #
@@ -17,7 +19,7 @@ on:
       acao:
         description: "O que fazer"
         type: choice
-        options: [estado, preparar, instalar-shopee, tela]
+        options: [estado, preparar, instalar-loja, instalar-shopee, tela]
         default: estado
 
 permissions:

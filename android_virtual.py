@@ -8,6 +8,7 @@ Roda à mão pelo workflow android.yml ou no servidor:
 
     python3 android_virtual.py                    # só mostra o estado
     python3 android_virtual.py --preparar         # instala o que falta e liga o Android
+    python3 android_virtual.py --instalar-loja    # instala a Aurora Store (apps do Google Play)
     python3 android_virtual.py --instalar-shopee  # baixa e instala (ou atualiza) o app da Shopee
     python3 android_virtual.py --tela             # abre a tela no navegador (tela_android.py)
 
@@ -73,6 +74,13 @@ FONTES_APP = (
     ("Aptoide", None),
 )
 URL_APTOIDE = f"https://ws75.aptoide.com/api/7/app/getMeta/package_name={PACOTE_SHOPEE}"
+
+# Os sites de APK recusam o servidor. A Aurora Store (código aberto, vinda do
+# F-Droid) baixa os apps direto do Google Play, assinados pelo próprio dono: o
+# Rafael instala a Shopee por ela, na tela do Android.
+PACOTE_LOJA = "com.aurora.store"
+URL_FDROID_API = f"https://f-droid.org/api/v1/packages/{PACOTE_LOJA}"
+URL_FDROID_APK = "https://f-droid.org/repo/" + PACOTE_LOJA + "_{}.apk"
 NAVEGADOR = ("Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) "
              "Chrome/124.0 Mobile Safari/537.36")
 # O servidor é ARM 64: as partes do app para armeabi_v7a, x86 e x86_64 sobram.
@@ -151,7 +159,8 @@ def mostrar_estado():
         print("android: ainda ligando (ou o adb não conecta)")
         return
     versao = _adb("shell", "getprop", "ro.build.version.release")
-    print(f"android: ligado, versão {versao[1] if _ok(versao) else '?'} | app da Shopee: {versao_shopee()}")
+    print(f"android: ligado, versão {versao[1] if _ok(versao) else '?'} | app da Shopee: {versao_shopee()} | "
+          f"Aurora Store: {versao_shopee(PACOTE_LOJA)}")
     try:
         with open(ARQUIVO_TELA) as f:
             print(f"tela no navegador: {f.read().strip()}")
@@ -159,9 +168,9 @@ def mostrar_estado():
         pass
 
 
-def versao_shopee():
-    """'versão X' se o app da Shopee está instalado, ou 'não instalado'."""
-    r = _adb("shell", "dumpsys", "package", PACOTE_SHOPEE)
+def versao_shopee(pacote=PACOTE_SHOPEE):
+    """'instalado, versão X' se o app (por padrão o da Shopee) está no Android, ou 'não instalado'."""
+    r = _adb("shell", "dumpsys", "package", pacote)
     achado = re.search(r"versionName=(\S+)", r[1]) if _ok(r) else None
     return f"instalado, versão {achado.group(1)}" if achado else "não instalado"
 
@@ -246,6 +255,35 @@ def instalar_shopee():
         if not _passo("instalar no Android", _adb(comando, "-r", "-g", *partes, timeout=900)):
             return False
         print(f"app da Shopee: {versao_shopee()}")
+        return True
+    finally:
+        shutil.rmtree(PASTA_APP, ignore_errors=True)
+
+
+def instalar_loja():
+    """Instala (ou atualiza) a Aurora Store, pela versão que o F-Droid recomenda."""
+    print("== Aurora Store (Google Play)")
+    if not android_ligado():
+        print("android: desligado; rode o preparar antes")
+        return False
+    r = _rodar("curl", "-sSL", "-A", NAVEGADOR, "-w", "\n%{http_code}", URL_FDROID_API, timeout=60)
+    linhas = r[1].rsplit("\n", 1) if r else ["", "0"]
+    try:
+        versao = int(json.loads(linhas[0])["suggestedVersionCode"])
+    except (ValueError, KeyError, TypeError, IndexError):
+        print(f"F-Droid: HTTP {linhas[-1] if len(linhas) > 1 else 0}, sem a versão da loja")
+        return False
+    os.makedirs(PASTA_APP, exist_ok=True)
+    apk = os.path.join(PASTA_APP, "aurora.apk")
+    try:
+        codigo = _baixar(URL_FDROID_APK.format(versao), apk)
+        valido = codigo == 200 and zipfile.is_zipfile(apk)
+        print(f"F-Droid: HTTP {codigo}, versão {versao}" + ("" if valido else ", sem o app"))
+        if not valido:
+            return False
+        if not _passo("instalar a Aurora Store", _adb("install", "-r", "-g", apk, timeout=600)):
+            return False
+        print(f"Aurora Store: {versao_shopee(PACOTE_LOJA)}")
         return True
     finally:
         shutil.rmtree(PASTA_APP, ignore_errors=True)
@@ -355,6 +393,8 @@ if __name__ == "__main__":
     ok = True
     if "--preparar" in pedidos:
         ok = preparar()
+    if ok and "--instalar-loja" in pedidos:
+        ok = instalar_loja()
     if ok and "--instalar-shopee" in pedidos:
         ok = instalar_shopee()
     if ok and "--tela" in pedidos:
