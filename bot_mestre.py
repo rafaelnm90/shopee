@@ -5028,7 +5028,10 @@ def _avisos_da_conta(conta):
     """O que ainda falta para a conta trabalhar, em palavras."""
     papel = pool_contas.papel_da_conta(conta)
     avisos = []
-    if conta["status_grupo"] != pool_contas.STATUS_NO_GRUPO:
+    if conta["status_grupo"] == pool_contas.STATUS_BANIDA_GRUPO:
+        avisos.append("⛔ Ela foi banida do grupo de origem: só um admin do grupo pode desbanir. "
+                      "Enquanto isso, use outra conta.")
+    elif conta["status_grupo"] != pool_contas.STATUS_NO_GRUPO:
         avisos.append("🚪 Ela não está no grupo de origem: toque em <b>Colocar no Grupo 🚪</b> "
                       "ou adicione a conta pelo app.")
     if papel in (pool_contas.PAPEL_CAPTURA, pool_contas.PAPEL_AMBAS) and conta.get("publica_no_destino") == 0:

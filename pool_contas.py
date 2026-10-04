@@ -1053,7 +1053,7 @@ def motivo_saida(conta_id, funcao, ocupacao=None):
 TEXTOS_GRUPO = {
     STATUS_NO_GRUPO: "no grupo de origem",
     STATUS_SAIU: "saiu do grupo de origem",
-    STATUS_NUNCA_ENTROU: "não está no grupo de origem",
+    STATUS_NUNCA_ENTROU: "não está no grupo de origem (nunca entrou ou foi removida)",
     STATUS_BANIDA_GRUPO: "banida ou restrita no grupo de origem",
     STATUS_DESCONHECIDO: "ainda não conferida",
 }
@@ -1578,6 +1578,10 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
                     entidade = dialogo.entity
                     break
             fora = STATUS_SAIU if conta.get("ja_esteve_no_grupo") else STATUS_NUNCA_ENTROU
+            if type(entidade).__name__ == "ChannelForbidden":
+                atualizar_status(apelido, status_grupo=STATUS_BANIDA_GRUPO, status_sessao=SESSAO_OK,
+                                 erro="banida do grupo de origem")
+                return (STATUS_BANIDA_GRUPO, SESSAO_OK)
             if entidade is None or getattr(entidade, "left", False):
                 atualizar_status(apelido, status_grupo=fora, status_sessao=SESSAO_OK,
                                  erro="o grupo de origem não está nas conversas da conta")
@@ -1918,7 +1922,8 @@ async def entrar_no_grupo(apelido):
     """
     from telethon import functions
     from telethon.errors import (UserAlreadyParticipantError, InviteHashExpiredError,
-                                 InviteHashInvalidError, InviteRequestSentError)
+                                 InviteHashInvalidError, InviteRequestSentError,
+                                 ChannelPrivateError, UserBannedInChannelError)
 
     def resultado(ok, mensagem):
         print(mensagem)
@@ -1946,6 +1951,11 @@ async def entrar_no_grupo(apelido):
         return resultado(False, f"⏳ Pedido de entrada de {apelido} enviado: um admin do grupo precisa aprovar.")
     except (InviteHashExpiredError, InviteHashInvalidError):
         return resultado(False, "❌ O link de convite expirou ou é inválido. Guarde um link novo.")
+    except (ChannelPrivateError, UserBannedInChannelError):
+        # Com o link certo, o Telegram só recusa assim quem foi banido do grupo.
+        atualizar_status(apelido, status_grupo=STATUS_BANIDA_GRUPO, erro="banida do grupo de origem")
+        return resultado(False, f"⛔ {apelido} foi banida do grupo de origem e não consegue entrar. "
+                                "Só um admin do grupo pode desbanir; senão, use outra conta.")
     except Exception as e:
         return resultado(False, f"❌ Falha ao entrar: {type(e).__name__}: {e}")
     finally:

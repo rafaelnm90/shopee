@@ -157,3 +157,31 @@ def test_conta_sem_papel_tambem_tem_o_canal_conferido(pc, monkeypatch):
     pc.marcar_publicacao_no_destino("sem_papel", True)
     assert "📣 canal: ✅ pode publicar" in pc.montar_relatorio_telegram().split("sem_papel")[1]
 
+
+def test_grupo_proibido_nas_conversas_e_banimento(pc, monkeypatch):
+    class Proibido(SemCache):
+        async def iter_dialogs(self):
+            yield SimpleNamespace(id=-100123, entity=type("ChannelForbidden", (), {"left": False})())
+    conta_a, _ = checar_sem_cache(pc, monkeypatch, Proibido())
+    assert conta_a["status_grupo"] == pc.STATUS_BANIDA_GRUPO
+    assert conta_a["ultimo_erro"] == "banida do grupo de origem"
+
+
+def test_entrar_no_grupo_banida_avisa_e_marca(pc, monkeypatch):
+    from telethon import errors
+
+    class Cliente:
+        async def __call__(self, pedido):
+            raise errors.ChannelPrivateError(request=None)
+
+        async def disconnect(self):
+            pass
+
+    async def criar_cliente(conta, conectar=True):
+        return Cliente()
+    monkeypatch.setattr(pc, "criar_cliente", criar_cliente)
+    pc.salvar_conta("A", sessao="x")
+    pc.guardar_convite("https://t.me/+AbCdEf")
+    ok, mensagem = rodar(pc.entrar_no_grupo("A"))
+    assert not ok and "banida do grupo de origem" in mensagem
+    assert pc.obter_conta("A")["status_grupo"] == pc.STATUS_BANIDA_GRUPO
