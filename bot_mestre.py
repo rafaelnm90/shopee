@@ -5192,7 +5192,8 @@ async def pool_definir_papel(callback: types.CallbackQuery, state: FSMContext):
         return
     _ok, resultado, mudancas = pool_contas.definir_papel(conta["apelido"], papel)
     conta = pool_contas.obter_conta(id_conta)
-    await callback.answer(f"{pool_contas.ROTULOS_PAPEL[papel]}: {resultado}")
+    # O Telegram recusa resposta de botão com mais de 200 caracteres.
+    await callback.answer(f"{pool_contas.ROTULOS_PAPEL[papel]}: {resultado}"[:190])
 
     avisos = []
     if conta["status_grupo"] != pool_contas.STATUS_NO_GRUPO:
