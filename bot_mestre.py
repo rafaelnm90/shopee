@@ -3187,6 +3187,7 @@ async def painel_parceiros(message: types.Message, state: FSMContext):
     parceiros = ler_parceiros()
     texto = "👥 <b>PARCEIROS AFILIADOS</b>\n<i>Afiliados que repostam com as próprias credenciais.</i>\n\n"
 
+    captura_parada = captura_parada_motivo()
     if not parceiros:
         texto += "<i>Nenhum parceiro cadastrado ainda.</i>\n\n"
     else:
@@ -3201,8 +3202,10 @@ async def painel_parceiros(message: types.Message, state: FSMContext):
                 f"⏳ Oculto por: <b>{p.get('dias_atraso')} dias</b>\n"
                 f"📦 Cota Diária: <b>{rotulo_cota_parceiro(p)}</b>\n"
                 f"🕒 Janela de Postagem: <b>{p.get('janela_inicio', 0) or 0}h às {p.get('janela_fim', 24) or 24}h</b>\n"
-                f"🤖 Acesso à origem: {'✅ conectado' if p.get('origem_ok') else '⏳ aguardando entrada'}"
-                + (f"\n<i>{p.get('origem_erro')}</i>" if p.get('origem_erro') and not p.get('origem_ok') else "")
+                + (f"🤖 Acesso à origem: ❌ {html_escape(captura_parada)}" if captura_parada else
+                   f"🤖 Acesso à origem: {'✅ conectado' if p.get('origem_ok') else '⏳ aguardando entrada'}")
+                + (f"\n<i>{p.get('origem_erro')}</i>" if p.get('origem_erro') and not p.get('origem_ok')
+                   and not captura_parada else "")
                 + "</blockquote>\n\n"
             )
 
@@ -7428,6 +7431,21 @@ def diagnostico_origem_parceiro(parceiro_id, hoje_str):
         texto += "\n🚫 Recusados: " + " · ".join(f"{html_escape(motivo)} ({qtd})" for motivo, qtd in recusas)
     return texto + (f"\n🕓 Última mensagem: {ultima}" if ultima else "")
 
+def captura_parada_motivo():
+    """
+    Quem captura dos parceiros é a conta da captura dos Autorais. Com contas no pool e
+    o posto vago, nada chega de canal nenhum, e o "acesso à origem" gravado antes
+    fica velho. Devolve o motivo, ou None quando há conta capturando.
+    """
+    try:
+        if pool_contas.listar_contas() and not pool_contas.obter_conta_da_funcao(pool_contas.FUNCAO_ESPELHO):
+            return ("nenhuma conta está capturando (veja Vídeos Autorais 🎥 → Contas 👥: a conta da "
+                    "captura precisa estar no grupo de origem)")
+    except Exception as e:
+        logger.error(f"❌ [Parceiros] Não consegui ler a conta da captura: {e}")
+    return None
+
+
 def resumo_fila_parceiro(p, itens, hoje_str, disco_todos):
     """
     Topo da fila do parceiro: situação, disco, cota, acesso à origem, a prévia do
@@ -7435,7 +7453,10 @@ def resumo_fila_parceiro(p, itens, hoje_str, disco_todos):
     descartados) e a próxima publicação.
     """
     status = "🟢" if p.get("ativo") else "⏸️"
-    if p.get("origem_ok"):
+    parada = captura_parada_motivo()
+    if parada:
+        acesso = "❌ " + html_escape(parada)
+    elif p.get("origem_ok"):
         acesso = "✅"
     else:
         acesso = "⏳ " + html_escape(p.get("origem_erro") or "aguardando a conta da captura entrar no canal")

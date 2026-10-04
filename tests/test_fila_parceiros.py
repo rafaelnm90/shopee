@@ -117,6 +117,16 @@ def test_link_do_post_no_destino(bm):
     assert bm.link_post_destino("-1001", None) is None
 
 
+def test_resumo_diz_que_ninguem_captura_com_o_posto_vago(bm, pc, Msg, Est):
+    pid = _parceiro(bm, "Rafa")
+    pc.salvar_conta("fora", sessao="x")                            # conta no pool, fora do grupo
+    pc.aplicar_funcoes()
+    _video(pid, 1, (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%d"))
+    msg = Msg("Fila dos Parceiros 🔍")
+    rodar(bm.pedir_parceiro_detalhe(msg, Est()))
+    assert "Acesso à origem: ❌ nenhuma conta está capturando" in msg.saidas[0]
+
+
 def test_captura_guarda_o_link_do_post_no_telegram(esp):
     from types import SimpleNamespace
     assert esp.link_do_post(SimpleNamespace(username="canal_x", id=5), 9) == "https://t.me/canal_x/9"

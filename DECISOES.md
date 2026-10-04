@@ -110,6 +110,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - **Destino:** depois de publicado, vira "Ver Post no Telegram (Destino)", com o link do post.
   - Os publicados de hoje aparecem no topo, como no Público. O vídeo sai do disco na hora, mas o registro fica 3 dias.
   - Os vídeos capturados antes desta mudança não têm o post de origem guardado e aparecem "Sem link de origem".
+- **04/10/2026:** quando nenhuma conta está na captura dos Autorais, a fila e o painel de Parceiros dizem "❌ nenhuma conta está capturando", e não "✅" com o acesso velho. É a mesma conta que captura dos parceiros.
 
 ## Financeiro
 
