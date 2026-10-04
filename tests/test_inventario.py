@@ -83,3 +83,18 @@ def test_android_virtual_so_estados_e_numeros(capsys, monkeypatch):
                    "linux-modules-extra", "docker: Docker version 27.1.1", "sudo sem senha: sim"):
         assert rotulo in saida
     assert ("sudo", "-n", "true") in chamados      # só confere: não pede senha nem instala nada
+
+
+def test_baixador_por_hora_so_contagens():
+    linhas = [
+        "2026-10-04 08:12:01.000 -0300 - ✅ 555 liberado (0/10). TikTok: https://vt.tiktok.com/abc/",
+        "2026-10-04 08:12:30.000 -0300 - 📤 Vídeo entregue para 555 (TikTok).",
+        "2026-10-04 08:41:05.000 -0300 - 🔒 555 bloqueado: falta 1 canal(is).",
+        "2026-10-04 08:44:05.000 -0300 - ⏳ Aviso de trava de 555 expirou e foi removido.",
+        "2026-10-04 15:32:10.000 -0300 - ♻️ Entregue do cache para 777 (TikTok).",
+        "linha de biblioteca sem hora",
+    ]
+    por_hora = inventario.contar_baixador(linhas)
+    assert por_hora["2026-10-04 08"] == {"pedido(s) liberado(s)": 1, "entregue(s)": 1,
+                                         "trava(s) de canais": 1, "trava(s) expirada(s) sem entrar": 1}
+    assert por_hora["2026-10-04 15"] == {"entregue(s)": 1}

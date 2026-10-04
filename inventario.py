@@ -10,7 +10,7 @@ filas ou do banco; ids de parceiro também não.
 
 Seções: pastas do projeto, arquivos soltos, banco, erros por origem e tipo, filas
 em arquivo, captura dos parceiros, contas dos Autorais (só estados), journal (com as linhas de log que mais se repetem e de onde vêm no
-código), versões das bibliotecas, fora do projeto e se o servidor aguenta um
+código), o Baixador hora a hora (só contagens), versões das bibliotecas, fora do projeto e se o servidor aguenta um
 Android virtual (para o robô da Shopee Vídeo).
 """
 import ast
@@ -333,6 +333,52 @@ def journal():
                   "(bibliotecas, rastros de erro, linhas quebradas)")
 
 
+# O que o Baixador faz com cada link, pelo começo fixo das linhas de log dele.
+EVENTOS_BAIXADOR = (
+    ("pedido(s) liberado(s)", re.compile(r"✅ \d+ liberado \(")),
+    ("entregue(s)", re.compile(r"(📤 Vídeo entregue|♻️ Entregue do cache) ")),
+    ("trava(s) de canais", re.compile(r"🔒 \d+ bloqueado: falta")),
+    ("trava(s) expirada(s) sem entrar", re.compile(r"⏳ Aviso de trava de \d+ expirou")),
+    ("limite(s) diário(s)", re.compile(r"📦 \d+ atingiu o limite")),
+    ("falha(s) de download", re.compile(r"(❌ yt-dlp saiu|🎬 Sem formato|❌ Falha ao entregar)")),
+    ("início(s) do robô", re.compile(r"📥 Downloader no ar")),
+)
+
+
+def contar_baixador(linhas):
+    """{hora: {evento: quantidade}} pela hora de Brasília escrita na própria linha."""
+    por_hora = {}
+    for linha in linhas:
+        achado = re.match(r"(\d{4}-\d{2}-\d{2} \d{2}):\d{2}", linha)
+        if not achado:
+            continue
+        mensagem = linha.split(" - ", 1)[1] if " - " in linha else linha
+        for nome, regex in EVENTOS_BAIXADOR:
+            if regex.match(mensagem):
+                contagem = por_hora.setdefault(achado.group(1), {})
+                contagem[nome] = contagem.get(nome, 0) + 1
+                break
+    return por_hora
+
+
+def baixador_por_hora():
+    """
+    O que aconteceu com os links do tópico do Baixador nas últimas 24 h, hora a
+    hora: liberados, entregues, travas de canais (e as que expiraram sem a pessoa
+    entrar), limites, falhas e reinícios do robô. Só contagens, sem quem pediu.
+    """
+    secao("Baixador hora a hora (últimas 24 h, horário de Brasília)")
+    r = subprocess.run(["sudo", "-n", "journalctl", "-u", "downloader_bot.service", "--since", "24 hours ago",
+                        "-o", "cat", "-q"], capture_output=True, text=True, timeout=120)
+    por_hora = contar_baixador(r.stdout.splitlines())
+    if not por_hora:
+        print("   nada registrado")
+        return
+    for hora in sorted(por_hora):
+        print(f"   {hora}h: " + ", ".join(f"{qtd} {nome}" for nome, _ in EVENTOS_BAIXADOR
+                                          if (qtd := por_hora[hora].get(nome))))
+
+
 def fora_do_projeto():
     secao("Fora do projeto")
     casa = os.path.expanduser("~")
@@ -427,7 +473,7 @@ def android_virtual():
 if __name__ == "__main__":
     os.chdir(PASTA)
     for parte in (pastas_do_projeto, arquivos_soltos, banco, erros_registrados, filas_em_arquivo,
-                  captura_dos_parceiros, contas_dos_autorais, journal,
+                  captura_dos_parceiros, contas_dos_autorais, journal, baixador_por_hora,
                   versoes, fora_do_projeto, android_virtual):
         try:
             parte()

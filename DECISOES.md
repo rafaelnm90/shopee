@@ -152,6 +152,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **04/10/2026:** posta na conta principal de afiliado do Rafael, ciente de que um bloqueio atinge essa conta.
 - **04/10/2026:** os vídeos vêm dos Autorais (feitos para afiliados repostarem), com o produto vinculado no próprio vídeo: a comissão só conta assim, e link na descrição não vale.
 - **04/10/2026:** 10 vídeos por dia.
+- **04/10/2026:** o Android virtual é um Redroid (Android 13, 64 bits) em Docker no próprio servidor, limitado a 4 GB de memória e 2 CPUs para não atrapalhar os robôs. O adb fica aberto só para a própria máquina, nunca para a internet. Os dados do Android (app e login) ficam fora do contêiner, em `~/android_shopee`.
 
 ## Monitor, deploy e servidor
 
