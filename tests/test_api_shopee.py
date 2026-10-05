@@ -226,3 +226,31 @@ def test_sinais_de_produto_contados_na_pagina(monkeypatch):
     resumo = rodar(inventario.produto_na_pagina("https://sv.shopee.com.br/x", inventario.CELULAR))
     assert resumo.startswith("status 200") and "-i. 1" in resumo and "/product/ 0" in resumo
     assert "itemid 2" in resumo and "shopid 2" in resumo
+
+
+def test_parametros_mascarados_mostram_so_nome_e_tamanho():
+    url = "https://sv.shopee.com.br/share-video/x?item_id=22334455667&shop_id=123456789&from=feed&Tok3n=abc&uls_trackid=zz"
+    assert inventario.parametros_mascarados(url) == \
+        "from=<texto>, item_id=#11, shop_id=#9, uls_trackid=<texto> +1 outro(s)"
+    assert inventario.parametros_mascarados("https://sv.shopee.com.br/x") == "nenhum"
+
+
+def test_inventario_pergunta_a_api_pelo_produto_do_opaanlp(bm, monkeypatch, capsys):
+    bm.db.salvar_config("fila_clonagem", {"fila": [{"id": "a", "link_original": "https://s.shopee.com.br/segredo1"}]})
+
+    async def seguir(link, saltos=10):
+        return [link, "https://shopee.com.br/opaanlp/123456789/22334455667?utm_source=x"]
+
+    perguntas = []
+
+    async def api(loja, item):
+        perguntas.append((loja, item))
+        return "achou: shopee.com.br/product/#9/#11" if loja == "123456789" else "não achou"
+
+    monkeypatch.setattr(api_shopee, "seguir_link", seguir)
+    monkeypatch.setattr(inventario, "produto_pela_api", api)
+    inventario.links_do_espiao()
+    saida = capsys.readouterr().out
+    assert "API de afiliado, loja/item: achou: shopee.com.br/product/#9/#11 | invertido: não achou" in saida
+    assert perguntas == [("123456789", "22334455667"), ("22334455667", "123456789")]
+    assert "123456789" not in saida and "segredo" not in saida
