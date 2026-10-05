@@ -17,6 +17,7 @@ em main() e encerra as sessões abertas dos painéis.
 """
 import os
 import re
+import sys
 import unicodedata
 import time
 from dotenv import load_dotenv
@@ -698,7 +699,7 @@ def obter_teclado_principal():
 def obter_teclado_opcoes_servidor():
     botoes = [
         [KeyboardButton(text="Monitorar Servidor 🖥️"), KeyboardButton(text="Zerar Filas e Tarefas 🧹")],
-        [KeyboardButton(text="Reiniciar Robôs 🔄")],
+        [KeyboardButton(text="Reiniciar Robôs 🔄"), KeyboardButton(text="Tela do Android 📱")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -7004,6 +7005,69 @@ async def menu_opcoes_servidor_handler(message: types.Message, state: FSMContext
     await state.clear()
     logger.info("⚙️ Acessando o painel de Opções do Servidor.")
     await message.answer("⚙️ <b>Opções do Servidor</b>\nEscolha uma ferramenta de manutenção global:", reply_markup=obter_teclado_opcoes_servidor(), parse_mode="HTML")
+
+# --- Tela do Android (Shopee Vídeo) ---
+# Uma abertura de cada vez: dois toques seguidos abririam duas telas, e a segunda derrubaria a primeira.
+_tela_android = {"abrindo": False}
+
+async def abrir_tela_android(timeout=300):
+    """
+    Roda o android_virtual.py --tela, que deixa a tela rodando sozinha e manda o
+    link no privado do Rafael. Devolve (ok, motivo da falha).
+    Roda como processo à parte, sem importar: assim cada abertura usa o código mais
+    novo, e o deploy não reinicia o painel quando só o android_virtual muda. A tela
+    fica no grupo de processos deste serviço: se o painel reiniciar, ela fecha junto.
+    """
+    pasta = os.path.dirname(os.path.abspath(__file__))
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable, os.path.join(pasta, "android_virtual.py"), "--tela", cwd=pasta,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+    try:
+        saida, _ = await asyncio.wait_for(proc.communicate(), timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return False, "o servidor demorou demais para abrir"
+    if proc.returncode == 0:
+        return True, ""
+    return False, motivo_da_tela(saida.decode(errors="ignore"))
+
+def motivo_da_tela(saida):
+    """Onde a abertura parou: as linhas da parte "== Tela no navegador" da saída do android_virtual."""
+    linhas, dentro = [], False
+    for linha in saida.splitlines():
+        if linha.startswith("== "):
+            dentro = linha.startswith("== Tela no navegador")
+        elif dentro and linha.strip():
+            linhas.append(linha.strip())
+    return "; ".join(linhas) or "sem detalhes"
+
+@dp.message(F.text == "Tela do Android 📱", StateFilter("*"))
+async def tela_android_handler(message: types.Message, state: FSMContext):
+    """
+    Abre a tela do Android da Shopee Vídeo no navegador. O link chega neste
+    privado, mandado pela própria tela; uma tela nova substitui a anterior.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    if message.from_user.id != ADMIN_ID: return
+    if _tela_android["abrindo"]:
+        await message.answer("⏳ Já estou abrindo a tela do Android. O link chega em instantes.")
+        return
+    _tela_android["abrindo"] = True
+    logger.info("📱 Abrindo a tela do Android pelo painel.")
+    aviso = await message.answer("📱 Abrindo a tela do Android... O link chega aqui em até 1 min.")
+    try:
+        ok, motivo = await abrir_tela_android()
+    except Exception as e:
+        logger.error(f"❌ Erro ao abrir a tela do Android: {e}")
+        ok, motivo = False, type(e).__name__
+    finally:
+        _tela_android["abrindo"] = False
+    if ok:
+        await aviso.edit_text("✅ Tela do Android aberta: o link chegou logo abaixo.\n"
+                              "Tocar de novo em Tela do Android 📱 abre outra no lugar desta.")
+    else:
+        logger.warning(f"⚠️ A tela do Android não abriu: {motivo}")
+        await aviso.edit_text(f"❌ A tela do Android não abriu: {motivo}\nTente de novo em 1 min.")
 
 @dp.message(F.text == "Monitorar Servidor 🖥️", StateFilter("*"))
 async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):

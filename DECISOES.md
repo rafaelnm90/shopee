@@ -162,6 +162,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **04/10/2026:** a tela do Android tem os botões "🧹 Fechar apps" (fecha todos os apps instalados e volta à tela inicial) e "🔄 Reiniciar Android". Reiniciar é só religar, como num celular: os apps e o login da Shopee continuam.
 - **04/10/2026:** também o botão "🗑️ Resetar de fábrica": desliga o Android, apaga os apps e o login e liga do zero. Os três botões pedem confirmação antes; o de fábrica pede duas vezes, porque não dá para desfazer.
 - **04/10/2026:** "Fechar apps" funciona como o "Limpar tudo" do celular: além de fechar os apps, tira todos da lista de recentes (a do botão quadrado). O Rafael mostrou em vídeo que os apps continuavam nessa lista e pareciam abertos.
+- **04/10/2026:** o Rafael abre a tela do Android sozinho pelo bot, no botão "Tela do Android 📱" das Opções do Servidor. O link chega no mesmo privado, e uma tela nova substitui a anterior. Se o painel reiniciar (deploy do bot_mestre), a tela aberta por ele fecha junto e basta tocar de novo.
 
 ## Monitor, deploy e servidor
 
