@@ -16,7 +16,9 @@ name: Android virtual (Shopee Vídeo)
 #   desligar        desliga o Android sem apagar nada (app e login ficam); o
 #                   preparar religa;
 #   apagar          desliga e apaga tudo dentro do Android (apps e login da
-#                   Shopee), como um reset de fábrica; fica desligado.
+#                   Shopee), como um reset de fábrica; fica desligado;
+#   tailscale       liga o servidor à rede privada do Rafael (plano do celular
+#                   de verdade), com a chave do segredo TAILSCALE_AUTHKEY.
 #
 # O repositório é público, e os logs do Actions também: o android_virtual.py
 # imprime só estados e números, nunca o link da tela, e o explorar mostra só a
@@ -27,7 +29,7 @@ on:
       acao:
         description: "O que fazer"
         type: choice
-        options: [estado, preparar, instalar-loja, instalar-shopee, tela, explorar, desligar, apagar]
+        options: [estado, preparar, instalar-loja, instalar-shopee, tela, explorar, desligar, apagar, tailscale]
         default: estado
       passos:
         description: "Só no explorar: passos separados por ; (ex.: abrir; tocar:Eu)"
@@ -46,12 +48,13 @@ jobs:
         uses: appleboy/ssh-action@master
         env:
           PASSOS: ${{ inputs.passos }}
+          TS_KEY: ${{ secrets.TAILSCALE_AUTHKEY }}
         with:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
           command_timeout: 25m
-          envs: PASSOS
+          envs: PASSOS,TS_KEY
           script: |
             cd ~/shopee
             if [ "${{ inputs.acao }}" = "explorar" ]; then

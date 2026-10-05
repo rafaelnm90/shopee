@@ -67,6 +67,37 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
    produtos do criador, título pelo prompt do Gem, diretrizes sempre, vídeo com
    violação não sai.
 
+## Plano do celular de verdade (em preparação desde 05/10/2026)
+
+O robô continua no servidor, mas toca num celular de verdade do Rafael, guardado em
+casa, em vez do Android virtual. A ligação é por uma rede privada (Tailscale), sem
+porta aberta na internet. Para a Shopee, quem posta é um celular de verdade, na
+internet de casa, com localização e sensores reais: nada é disfarçado.
+
+```
+Servidor (prepara vídeo, título, produtos)
+        │  rede privada (Tailscale)
+        ▼
+Celular guardado (perfil reserva, carregador, Wi-Fi)
+```
+
+| Fase | Quem | O quê | Situação |
+|---|---|---|---|
+| 0 | Rafael | Celular só para isso: no carregador e no Wi-Fi, sem economia de bateria para a Shopee; Shopee pela Play Store com o **perfil reserva**; modo desenvolvedor com "depuração sem fio"; app Tailscale | em espera: o celular não está com ele |
+| 1a | Rafael | Conta no Tailscale e uma chave de acesso (auth key) salva no GitHub como segredo `TAILSCALE_AUTHKEY`; nunca colar a chave na conversa | falta |
+| 1b | Claude | `android.yml` → `tailscale`: o servidor entra na rede privada (sem mexer no DNS nem nas rotas) | pronto, esperando a chave |
+| 1c | Claude + Rafael | Parear o adb com o celular. O código da depuração sem fio vai só para o bot, no privado (fluxo a fazer quando o celular estiver pronto); o explorar passa a aceitar o celular como alvo | a fazer |
+| 2 | Claude | Explorar devagar até Rascunhos, com as regras de "Para voltar" | a fazer |
+| 3 | os dois | Um rascunho por dia que o Rafael confere; depois 1 ou 2 postagens reais por dia, na janela e com quantidade variada; observar 2 a 4 semanas | a fazer |
+| 4 | os dois | Só com semanas sem verificação nem bloqueio: pensar em aumentar o volume. A conta principal continua no modo assistente | a fazer |
+
+Riscos que continuam: robô vai contra os termos da Shopee, e o ritmo calmo diminui o
+risco, mas não zera. O modo desenvolvedor ligado é um sinal que alguns apps olham,
+e não vamos escondê-lo. A comissão vai para a conta que posta: conferir se a Shopee
+permite um segundo perfil de afiliado no nome do Rafael. Se a depuração sem fio
+ficar instável, a troca é um computador velho ligado em casa, com o celular no cabo
+USB; o resto do plano não muda.
+
 ## O que não se faz
 
 Disfarçar o Android para a Shopee não se faz: localização falsa, dados de sensor

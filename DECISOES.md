@@ -197,6 +197,8 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **05/10/2026:** o projeto do robô no servidor fica **guardado**, parado, com o roteiro em `roteiro_robo_shopee_video.md` (onde paramos e o que fazer na volta). O Rafael pode conseguir um perfil reserva para testar: a volta é com ele, nunca com a conta principal, devagar, sem toques rápidos e sem ficar saindo e entrando no app.
 - **05/10/2026:** o Rafael pediu para o roteiro usar qualquer artifício contra a detecção de robô (localização de acordo com o usuário, dados de sensores). Não se faz, como em 04/10: é driblar o antifraude da Shopee, e a diretriz 9.2 proíbe. A alternativa honesta é o celular de verdade dele.
 - **05/10/2026:** botão "Fonte dos Vídeos 🎞️" no painel: o Rafael escolhe de onde o assistente puxa os vídeos, entre Autorais 🎥 (continua o padrão e o recomendado), Viral (Espião) 🕵️, Canal Afiliados 📺 e Grupo Público 📬. Vale para os envios do horário e para o Enviar 1 Agora. Os Parceiros ficam de fora, porque os vídeos são deles. A tela da escolha avisa que a Shopee não recomenda conteúdo copiado (diretriz 7.2.1), o que pesa no Viral e no Grupo Público.
+- **05/10/2026:** plano do celular de verdade (no `roteiro_robo_shopee_video.md`): o robô continua no servidor e toca num celular guardado do Rafael, ligado por uma rede privada (Tailscale, sem porta aberta), com o perfil reserva. O modo assistente continua. A preparação começa já; a parte que precisa do celular fica em espera até o Rafael ter acesso a ele.
+- **05/10/2026:** um lembrete diário único (8h47, no privado) com tudo o que o Rafael tem pendente, no lugar dos lembretes separados: "pode acontecer de eu esquecer". Cada item sai da lista quando ele resolve.
 
 ## Monitor, deploy e servidor
 
