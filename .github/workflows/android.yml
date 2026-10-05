@@ -9,18 +9,26 @@ name: Android virtual (Shopee Vídeo)
 #                   apps direto do Google Play;
 #   instalar-shopee baixa e instala (ou atualiza) o app da Shopee de sites de APK;
 #   tela            abre a tela do Android no navegador por 30 min; o link vai
-#                   só no privado do Rafael, pelo bot.
+#                   só no privado do Rafael, pelo bot;
+#   explorar        roda o postador_shopee_video.py --explorar com os passos do
+#                   campo "passos" (ex.: abrir; tocar:Eu) e descreve cada tela,
+#                   sem os textos da conta; nunca toca em Postar.
 #
 # O repositório é público, e os logs do Actions também: o android_virtual.py
-# imprime só estados e números, nunca o link da tela.
+# imprime só estados e números, nunca o link da tela, e o explorar mostra só a
+# forma da tela (palavras de botão; o resto vira "…" e os números, "#").
 on:
   workflow_dispatch:
     inputs:
       acao:
         description: "O que fazer"
         type: choice
-        options: [estado, preparar, instalar-loja, instalar-shopee, tela]
+        options: [estado, preparar, instalar-loja, instalar-shopee, tela, explorar]
         default: estado
+      passos:
+        description: "Só no explorar: passos separados por ; (ex.: abrir; tocar:Eu)"
+        type: string
+        default: "tela"
 
 permissions:
   contents: read
@@ -32,11 +40,18 @@ jobs:
     steps:
       - name: Android virtual no servidor
         uses: appleboy/ssh-action@master
+        env:
+          PASSOS: ${{ inputs.passos }}
         with:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
           command_timeout: 25m
+          envs: PASSOS
           script: |
             cd ~/shopee
-            venv/bin/python3 android_virtual.py ${{ inputs.acao != 'estado' && format('--{0}', inputs.acao) || '' }}
+            if [ "${{ inputs.acao }}" = "explorar" ]; then
+              venv/bin/python3 postador_shopee_video.py --explorar "$PASSOS"
+            else
+              venv/bin/python3 android_virtual.py ${{ inputs.acao != 'estado' && format('--{0}', inputs.acao) || '' }}
+            fi
