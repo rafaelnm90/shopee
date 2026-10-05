@@ -287,6 +287,52 @@ async def produto_na_pagina(url, navegador):
     return f"status {status}, {tamanho_legivel(len(corpo))}; sinais de produto: {sinais}"
 
 
+def parametros_mascarados(url):
+    """
+    Os parâmetros do endereço com o valor mascarado: nome=#<dígitos> quando o valor é
+    só número, nome=<texto> no resto. Só nomes em minúsculas e sublinhado aparecem (os
+    da Shopee são assim); os outros só são contados.
+    """
+    itens, outros = [], 0
+    for nome, valor in urllib.parse.parse_qsl(urllib.parse.urlsplit(url or "").query, keep_blank_values=True):
+        if not re.fullmatch(r"[a-z][a-z_]{1,30}", nome):
+            outros += 1
+            continue
+        itens.append(f"{nome}=#{len(valor)}" if valor.isdigit() else f"{nome}=<texto>")
+    return ", ".join(sorted(itens)) + (f" +{outros} outro(s)" if outros else "") or "nenhum"
+
+
+async def produto_pela_api(loja, item):
+    """
+    Pergunta à API de afiliado (productOfferV2) se loja/item é um produto, e devolve o
+    desenho do productLink que ela dá, ou por que não deu. Só leitura.
+    """
+    import aiohttp
+    import api_shopee
+    if not (api_shopee.SHOPEE_APP_ID and api_shopee.SHOPEE_APP_SECRET):
+        return "sem as chaves da API"
+    payload = {
+        "query": """query produto($shopId: Int64, $itemId: Int64) {
+            productOfferV2(shopId: $shopId, itemId: $itemId, limit: 1) { nodes { itemId productLink } }
+        }""",
+        "variables": {"shopId": int(loja), "itemId": int(item)},
+    }
+    headers, corpo = api_shopee.gerar_headers_e_payload(payload)
+    try:
+        async with aiohttp.ClientSession() as sessao:
+            async with sessao.post("https://open-api.affiliate.shopee.com.br/graphql",
+                                   headers=headers, data=corpo) as resp:
+                dados = await resp.json(content_type=None)
+    except Exception as e:
+        return f"não respondeu ({type(e).__name__})"
+    if dados.get("errors"):
+        return f"erro da API: {str(dados['errors'][0].get('message', ''))[:80]}"
+    nos = ((dados.get("data") or {}).get("productOfferV2") or {}).get("nodes") or []
+    if not nos:
+        return "não achou"
+    return f"achou: {forma_do_link(nos[0].get('productLink') or '')}"
+
+
 def links_do_espiao(quantos=10):
     """
     Onde os links mais recentes do Espião levam quando o servidor os abre, salto a
@@ -316,7 +362,14 @@ def links_do_espiao(quantos=10):
               f"produto no caminho: {'sim' if com_produto else 'NÃO'}")
         for endereco in caminho[1:]:
             print(f"      {forma_do_link(endereco)}")
+        for endereco in caminho[1:]:
+            casou = re.search(r"/opaanlp/(\d+)/(\d+)", urllib.parse.urlsplit(endereco).path)
+            if casou:
+                primeiro, segundo = casou.groups()
+                print(f"      API de afiliado, loja/item: {asyncio.run(produto_pela_api(primeiro, segundo))}"
+                      f" | invertido: {asyncio.run(produto_pela_api(segundo, primeiro))}")
         if urllib.parse.urlsplit(caminho[-1]).netloc.lower().startswith("sv."):
+            print(f"      parâmetros do vídeo: {parametros_mascarados(caminho[-1])}")
             for nome, navegador in (("computador", api_shopee.NAVEGADOR), ("celular", CELULAR)):
                 print(f"      página do vídeo ({nome}): {asyncio.run(produto_na_pagina(caminho[-1], navegador))}")
     print(f"   {parou_fora} parou fora do produto, mas com o produto no meio do caminho; "
