@@ -167,6 +167,18 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **04/10/2026:** o robô da Shopee Vídeo tem painel próprio em Outros Canais → "Shopee Vídeo 🎬", onde o Rafael controla tudo dele: pausar e retomar, "Vídeos por Dia 📦" (faixa, ex.: 5-10, ou número fixo; até 50), "Horário de Postagem ⏰" (ex.: 13-22, ou o dia todo), "Tela do Android 📱" e o "Tutorial do Android 📖" com o passo a passo completo da instalação pelo SAI (Play Store, `com.mtv.sai`; pasta nova "Backups"; o backup pode pedir o PRO, e depois é bom cancelar a assinatura), o envio pela tela, o login e os problemas comuns. ~~A Tela do Android continua também nas Opções do Servidor.~~ O robô começa pausado, com 5 a 10 vídeos por dia das 13h às 22h, e só posta quando ele retomar.
 - **05/10/2026:** a "Tela do Android 📱" fica só no painel da Shopee Vídeo e saiu das Opções do Servidor: para o Rafael, o servidor dos robôs (Linux) e o Android são coisas diferentes.
 - **05/10/2026:** o SAI PRO foi comprado vitalício (04/10/2026): não há assinatura a cancelar, e o tutorial diz isso para quando ele precisar de novo.
+- **05/10/2026:** o caminho da postagem, do tutorial em vídeo do Rafael:
+  - abrir o link do post na Shopee e, em "Ver Produtos", curtir só os produtos que o criador vinculou ao vídeo, nunca os de "Você Também Pode Gostar". Link de um produto só: só ele;
+  - Eu → Criadores e Afiliados → Perfil em Shopee Vídeo → Postar vídeo → o vídeo na galeria → Próximo;
+  - efeito de giro é opcional: o robô começa sem;
+  - Adicionar Produto → Minhas Curtidas: primeiro o de menor preço; no empate, o de maior comissão;
+  - o título vai no campo da legenda, e as chaves da última tela ficam como vêm (reutilização ligada; salvar no aparelho e rótulo de IA desligados).
+- **05/10/2026:** o Rafael confirmou que os vídeos vêm dos Autorais (o tutorial usou um vídeo do Acervo Viral).
+- **05/10/2026:** o texto vem do prompt do Gem "Shopee Vídeo" do Rafael, adaptado ao robô. Do que o Gem gera, o robô usa só o "título do vídeo": nome do produto sem frase de gancho, emojis e hashtags, de 130 a 150 caracteres, sem marca. A headline fica de fora, como o Rafael já faz.
+- **05/10/2026:** as diretrizes da Shopee Vídeo (PDF do Rafael) ficam resumidas em `diretrizes_shopee_video.md` e valem sempre ("isso é importante"). A IA recebe o resumo com cada vídeo e, se achar violação (o ❌ do Gem), o robô não posta aquele vídeo.
+- **05/10/2026:** curtir o vídeo, comentar e curtir o próprio comentário (o fim do tutorial) não é automático: a diretriz 9.1.1 proíbe curtidas e comentários automáticos. Depois de cada postagem, o texto do comentário do Gem (400 a 450 caracteres, com 5 a 10 hashtags no fim) vai no privado do Rafael, que comenta à mão se quiser.
+- **05/10/2026:** o primeiro teste termina em Rascunhos, não em Postar: o Rafael confere na Tela do Android e posta. Depois que ele aprovar, o robô passa a postar sozinho.
+- **05/10/2026:** para aprender as telas do app, a exploração (`postador_shopee_video.py --explorar`, ação "explorar" do android.yml) nunca toca em Postar, e o log mostra só a forma da tela, porque a tela mostra a conta do Rafael.
 
 ## Monitor, deploy e servidor
 
