@@ -211,6 +211,7 @@ ROTAS_CONHECIDAS = {
     "login", "verify", "captcha", "find_similar_products", "collections", "list", "landing",
     "deep_link", "web", "affiliate", "event", "events", "promo", "flash_sale", "daily_discover",
     "user", "cart", "share", "api", "v4", "item", "items", "app", "download", "redirect",
+    "share-video", "video", "videos", "sv", "post", "feed", "creator",
 }
 
 
@@ -255,6 +256,37 @@ def forma_do_link(url):
     return desenho
 
 
+# Como o produto pode aparecer dentro da página de um vídeo da Shopee Vídeo: no endereço
+# do produto (-i.<loja>.<item>, /product/<loja>/<item>) ou nos dados da página.
+SINAIS_DE_PRODUTO = {
+    "-i.": re.compile(r"-i\.\d+\.\d+"),
+    "/product/": re.compile(r"/product/\d+/\d+"),
+    "itemid": re.compile(r'item_?id"?\s*[:=]\s*"?\d{6,}', re.IGNORECASE),
+    "shopid": re.compile(r'shop_?id"?\s*[:=]\s*"?\d{5,}', re.IGNORECASE),
+}
+
+
+CELULAR = {"User-Agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 "
+                         "(KHTML, like Gecko) Chrome/129.0 Mobile Safari/537.36"}
+
+
+async def produto_na_pagina(url, navegador):
+    """
+    Abre a página (um vídeo da Shopee Vídeo) e conta quantas vezes cada sinal de produto
+    aparece nela. Só números: a página e o que tem nela não aparecem.
+    """
+    import aiohttp
+    try:
+        async with aiohttp.ClientSession(headers=navegador) as sessao:
+            async with sessao.get(url, allow_redirects=True) as resp:
+                corpo = (await resp.content.read(3 * 1024 * 1024)).decode(errors="ignore")
+                status = resp.status
+    except Exception as e:
+        return f"não abriu ({type(e).__name__})"
+    sinais = ", ".join(f"{nome} {len(padrao.findall(corpo))}" for nome, padrao in SINAIS_DE_PRODUTO.items())
+    return f"status {status}, {tamanho_legivel(len(corpo))}; sinais de produto: {sinais}"
+
+
 def links_do_espiao(quantos=10):
     """
     Onde os links mais recentes do Espião levam quando o servidor os abre, salto a
@@ -284,6 +316,9 @@ def links_do_espiao(quantos=10):
               f"produto no caminho: {'sim' if com_produto else 'NÃO'}")
         for endereco in caminho[1:]:
             print(f"      {forma_do_link(endereco)}")
+        if urllib.parse.urlsplit(caminho[-1]).netloc.lower().startswith("sv."):
+            for nome, navegador in (("computador", api_shopee.NAVEGADOR), ("celular", CELULAR)):
+                print(f"      página do vídeo ({nome}): {asyncio.run(produto_na_pagina(caminho[-1], navegador))}")
     print(f"   {parou_fora} parou fora do produto, mas com o produto no meio do caminho; "
           f"{sem_produto} sem produto em lugar nenhum")
 
