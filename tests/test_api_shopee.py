@@ -165,3 +165,64 @@ def test_forma_do_link_sem_nada_que_identifique_produto_ou_loja():
     desenho = inventario.forma_do_link("https://shopee.com.br/lojadamaria/Panela-Bonita?maria=1&telefone=5511")
     assert desenho == "shopee.com.br/<texto>/<texto> ? +2 outro(s)"
     assert "maria" not in desenho and "5511" not in desenho and "Panela" not in desenho
+
+
+def test_inventario_conta_sinais_de_produto_na_pagina_do_video(bm, monkeypatch, capsys):
+    video = "https://sv.shopee.com.br/share-video/abcSEGREDO?uls_trackid=x&nome=maria"
+    bm.db.salvar_config("fila_clonagem", {"fila": [{"id": "a", "link_original": "https://s.shopee.com.br/segredo1"}]})
+
+    async def seguir(link, saltos=10):
+        return [link, "https://shopee.com.br/universal-link?redir=x&uls_trackid=y", video]
+
+    paginas = []
+
+    async def pagina(url, navegador):
+        paginas.append(url)
+        return "status 200, 10 KB; sinais de produto: -i. 0, /product/ 0, itemid 2, shopid 2"
+
+    monkeypatch.setattr(api_shopee, "seguir_link", seguir)
+    monkeypatch.setattr(inventario, "produto_na_pagina", pagina)
+    inventario.links_do_espiao()
+    saida = capsys.readouterr().out
+    assert "      sv.shopee.com.br/share-video/<texto> ?uls_trackid +1 outro(s)" in saida
+    assert "página do vídeo (computador): status 200" in saida and "página do vídeo (celular)" in saida
+    assert paginas == [video, video]                                       # abre a página inteira
+    assert "segredo" not in saida.lower() and "maria" not in saida and "https://" not in saida
+
+
+def test_sinais_de_produto_contados_na_pagina(monkeypatch):
+    html = ('<a href="/Panela-i.123456789.22334455667">x</a> {"itemid": 22334455667, "shopid": 123456789} '
+            '{"item_id":"22334455668","shop_id":"123456789"}')
+
+    class Resp:
+        status = 200
+
+        class content:
+            @staticmethod
+            async def read(n):
+                return html.encode()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    class Sessao:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def get(self, url, allow_redirects=True):
+            return Resp()
+
+    import aiohttp
+    monkeypatch.setattr(aiohttp, "ClientSession", Sessao)
+    resumo = rodar(inventario.produto_na_pagina("https://sv.shopee.com.br/x", inventario.CELULAR))
+    assert resumo.startswith("status 200") and "-i. 1" in resumo and "/product/ 0" in resumo
+    assert "itemid 2" in resumo and "shopid 2" in resumo
