@@ -302,21 +302,15 @@ def parametros_mascarados(url):
     return ", ".join(sorted(itens)) + (f" +{outros} outro(s)" if outros else "") or "nenhum"
 
 
-async def produto_pela_api(loja, item):
-    """
-    Pergunta à API de afiliado (productOfferV2) se loja/item é um produto, e devolve o
-    desenho do productLink que ela dá, ou por que não deu. Só leitura.
-    """
+async def _consultar_api(consulta, variaveis=None):
+    """Resposta (dict) da API de afiliado, ou o motivo (texto) de não ter dado certo."""
     import aiohttp
     import api_shopee
     if not (api_shopee.SHOPEE_APP_ID and api_shopee.SHOPEE_APP_SECRET):
         return "sem as chaves da API"
-    payload = {
-        "query": """query produto($shopId: Int64, $itemId: Int64) {
-            productOfferV2(shopId: $shopId, itemId: $itemId, limit: 1) { nodes { itemId productLink } }
-        }""",
-        "variables": {"shopId": int(loja), "itemId": int(item)},
-    }
+    payload = {"query": consulta}
+    if variaveis:
+        payload["variables"] = variaveis
     headers, corpo = api_shopee.gerar_headers_e_payload(payload)
     try:
         async with aiohttp.ClientSession() as sessao:
@@ -327,6 +321,78 @@ async def produto_pela_api(loja, item):
         return f"não respondeu ({type(e).__name__})"
     if dados.get("errors"):
         return f"erro da API: {str(dados['errors'][0].get('message', ''))[:80]}"
+    return dados
+
+
+async def conversao_de_teste(origem):
+    """
+    Gera um link de afiliado de teste (subId "diagnostico") para o endereço e segue o
+    link gerado: mostra por onde ele leva, só com o desenho de cada salto.
+    """
+    import api_shopee
+    dados = await _consultar_api(
+        "mutation gerar($originUrl: String!, $subIds: [String!]) { generateShortLink(input: "
+        "{originUrl: $originUrl, subIds: $subIds}) { shortLink } }",
+        {"originUrl": origem, "subIds": ["diagnostico"]})
+    if isinstance(dados, str):
+        return dados
+    curto = ((dados.get("data") or {}).get("generateShortLink") or {}).get("shortLink")
+    if not curto:
+        return "a API não devolveu link"
+    caminho = await api_shopee.seguir_link(curto)
+    return " → ".join(forma_do_link(e) for e in caminho[1:]) or "o link gerado não redireciona"
+
+
+def _desenho_do_valor(valor, fundo=0):
+    """Estrutura de um JSON com os valores mascarados (#<dígitos>, <texto>), até 3 níveis."""
+    if isinstance(valor, dict):
+        if fundo >= 3:
+            return "{…}"
+        return "{" + ", ".join(f"{chave if re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,30}', str(chave)) else '?'}: "
+                               f"{_desenho_do_valor(v, fundo + 1)}" for chave, v in list(valor.items())[:25]) + "}"
+    if isinstance(valor, list):
+        return f"[{len(valor)}× {_desenho_do_valor(valor[0], fundo + 1)}]" if valor else "[]"
+    if isinstance(valor, bool) or valor is None:
+        return str(valor)
+    if isinstance(valor, (int, float)) or str(valor).isdigit():
+        return f"#{len(str(valor))}"
+    return "<texto>"
+
+
+def estrutura_do_share_obj(url):
+    """
+    O que vem no parâmetro share_obj do link do vídeo: tenta base64 e JSON e mostra só a
+    estrutura (nomes dos campos e valores mascarados), para ver se o produto está ali.
+    """
+    import base64
+    valor = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url or "").query)).get("share_obj")
+    if not valor:
+        return "sem share_obj"
+    for decodificar in (base64.urlsafe_b64decode, base64.b64decode):
+        try:
+            bruto = decodificar(valor + "=" * (-len(valor) % 4))
+        except Exception:
+            continue
+        try:
+            return f"base64 → JSON {_desenho_do_valor(json.loads(bruto))}"
+        except Exception:
+            longos = sorted({len(n) for n in re.findall(rb"\d{6,}", bruto)})
+            return f"base64 de {len(bruto)} bytes, não é JSON; números longos com {longos} dígitos"
+    longos = sorted({len(n) for n in re.findall(r"\d{6,}", valor)})
+    return f"não é base64 ({len(valor)} caracteres); números longos com {longos} dígitos"
+
+
+async def produto_pela_api(loja, item):
+    """
+    Pergunta à API de afiliado (productOfferV2) se loja/item é um produto, e devolve o
+    desenho do productLink que ela dá, ou por que não deu. Só leitura.
+    """
+    # Números direto na consulta: declarar a variável como Int64 dá "wrong type".
+    dados = await _consultar_api(
+        f"query {{ productOfferV2(shopId: {int(loja)}, itemId: {int(item)}, limit: 1) "
+        f"{{ nodes {{ itemId productLink }} }} }}")
+    if isinstance(dados, str):
+        return dados
     nos = ((dados.get("data") or {}).get("productOfferV2") or {}).get("nodes") or []
     if not nos:
         return "não achou"
@@ -354,7 +420,8 @@ def links_do_espiao(quantos=10):
         return [await api_shopee.seguir_link(link) for link in links]
 
     sem_produto = parou_fora = 0
-    for n, caminho in enumerate(asyncio.run(seguir_todos()), 1):
+    caminhos = asyncio.run(seguir_todos())
+    for n, caminho in enumerate(caminhos, 1):
         com_produto = any(api_shopee.produto_do_link(endereco) for endereco in caminho[1:])
         sem_produto += not com_produto
         parou_fora += com_produto and api_shopee.tipo_de_link(caminho[-1]) != "produto"
@@ -370,10 +437,39 @@ def links_do_espiao(quantos=10):
                       f" | invertido: {asyncio.run(produto_pela_api(segundo, primeiro))}")
         if urllib.parse.urlsplit(caminho[-1]).netloc.lower().startswith("sv."):
             print(f"      parâmetros do vídeo: {parametros_mascarados(caminho[-1])}")
+            print(f"      share_obj: {estrutura_do_share_obj(caminho[-1])}")
             for nome, navegador in (("computador", api_shopee.NAVEGADOR), ("celular", CELULAR)):
                 print(f"      página do vídeo ({nome}): {asyncio.run(produto_na_pagina(caminho[-1], navegador))}")
     print(f"   {parou_fora} parou fora do produto, mas com o produto no meio do caminho; "
           f"{sem_produto} sem produto em lugar nenhum")
+    testes_de_conversao(caminhos)
+
+
+def testes_de_conversao(caminhos):
+    """
+    Para o primeiro link de vídeo e o primeiro opaanlp, gera links de afiliado de teste a
+    partir de cada candidato a endereço e mostra por onde cada um leva. Escolhe a correção.
+    """
+    candidatos = []
+    video = next((c for c in caminhos if urllib.parse.urlsplit(c[-1]).netloc.lower().startswith("sv.")), None)
+    if video:
+        candidatos += [("vídeo cortado (como é hoje)", video[-1].split("?")[0]),
+                       ("vídeo inteiro", video[-1]),
+                       ("universal-link inteiro", video[1])]
+    for caminho in caminhos:
+        achado = next((re.search(r"/opaanlp/(\d+)/(\d+)", urllib.parse.urlsplit(e).path) for e in caminho[1:]
+                       if "/opaanlp/" in e), None)
+        if achado:
+            pagina = next(e for e in caminho[1:] if "/opaanlp/" in e)
+            candidatos += [("opaanlp cortado (como é hoje)", pagina.split("?")[0]),
+                           ("produto loja/item", f"https://shopee.com.br/product/{achado.group(1)}/{achado.group(2)}")]
+            break
+    if not candidatos:
+        return
+    import asyncio
+    print("   Conversões de teste (links com subId diagnostico):")
+    for rotulo, origem in candidatos:
+        print(f"      {rotulo}: {asyncio.run(conversao_de_teste(origem))}")
 
 
 # Erros que o pool_contas grava com texto fixo; qualquer outro sai só com o tipo.
