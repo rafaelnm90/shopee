@@ -1,5 +1,4 @@
-"""Painel da Shopee Vídeo (Outros Canais): pausa, vídeos por dia, horário de postagem e tutorial."""
-import tela_android
+"""Painel da Shopee Vídeo (Outros Canais, modo assistente): pausa, vídeos por dia, horário e Enviar 1 Agora."""
 from conftest import rodar
 
 
@@ -23,11 +22,13 @@ def test_painel_comeca_pausado_com_5_a_10_das_13h_as_22h(bm, Msg, Est):
     rodar(sv.painel_handler(msg, est))
     texto = msg.saidas[-1]
     assert "Pausado" in texto and "5 a 10" in texto and "das 13h às 22h" in texto and "hoje:" in texto
+    assert "modo assistente" in texto and "Mandados hoje: <b>0</b>" in texto
     assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu.state
     teclado = _textos(sv.teclado_painel(sv.ler_config()))
-    for botao in ("Vídeos por Dia 📦", "Horário de Postagem ⏰", "Retomar Robô ▶️",
-                  "Tela do Android 📱", "Tutorial do Android 📖", "Voltar aos Canais 🔙"):
+    for botao in ("Vídeos por Dia 📦", "Horário de Postagem ⏰", "Retomar Robô ▶️", "Enviar 1 Agora 📤",
+                  "Voltar aos Canais 🔙"):
         assert botao in teclado
+    assert "Tela do Android 📱" not in teclado and "Tutorial do Android 📖" not in teclado
 
 
 def test_faixa_de_videos_por_dia_pede_confirmacao_e_grava(bm, Msg, Est):
@@ -100,7 +101,7 @@ def test_botoes_vem_antes_das_respostas_de_texto(bm):
     # tem de abrir o botão, e não ser lido como resposta.
     sv = _painel(bm)
     ordem = [h.callback.__name__ for h in sv.router.message.handlers]
-    botoes = ("painel_handler", "pedir_faixa", "pedir_janela", "pedir_pausa", "tutorial_android_handler")
+    botoes = ("painel_handler", "pedir_faixa", "pedir_janela", "pedir_pausa", "enviar_agora_handler")
     respostas = ("confirmar_faixa", "confirmar_janela", "confirmar_com_os_botoes")
     assert max(ordem.index(b) for b in botoes) < min(ordem.index(r) for r in respostas)
 
@@ -108,34 +109,67 @@ def test_botoes_vem_antes_das_respostas_de_texto(bm):
 def test_so_o_admin_usa_o_painel(bm, Msg, Est):
     sv = _painel(bm)
     for handler, texto in ((sv.painel_handler, "Shopee Vídeo 🎬"), (sv.pedir_faixa, "Vídeos por Dia 📦"),
-                           (sv.pedir_pausa, "Retomar Robô ▶️"), (sv.tutorial_android_handler, "Tutorial do Android 📖")):
+                           (sv.pedir_pausa, "Retomar Robô ▶️"), (sv.enviar_agora_handler, "Enviar 1 Agora 📤")):
         msg = Msg(texto, user_id=123)
         rodar(handler(msg, Est()))
         assert msg.saidas == [], texto
 
 
-def test_tutorial_manda_as_quatro_partes_em_html_valido(bm, Msg, Est):
+def test_enviar_agora_manda_mesmo_pausado(bm, Msg, Est, monkeypatch):
     sv = _painel(bm)
-    msg = Msg("Tutorial do Android 📖")
-    rodar(sv.tutorial_android_handler(msg, Est()))
-    assert msg.saidas == list(sv.TUTORIAL_ANDROID) and len(msg.saidas) == 4
-    for parte in msg.saidas:
-        assert len(parte) <= 4096                                          # limite de uma mensagem
-        assert parte.count("<b>") == parte.count("</b>")
-        sem_tags = parte.replace("<b>", "").replace("</b>", "")
-        assert "<" not in sem_tags and ">" not in sem_tags and "&" not in sem_tags
-    assert "https://play.google.com/store/apps/details?id=com.mtv.sai" in msg.saidas[1]
+    pedidos = []
+
+    async def preparar(bot, admin_id, agora=None):
+        pedidos.append(admin_id)
+        return "postagem mandada no seu privado"
+
+    monkeypatch.setattr(sv.assistente, "preparar_e_enviar", preparar)
+    msg = Msg("Enviar 1 Agora 📤")
+    rodar(sv.enviar_agora_handler(msg, Est()))
+    assert pedidos == [sv.ADMIN_ID] and sv.ler_config()["pausado"] is True
+    assert "Preparando" in msg.saidas[0] and len(msg.saidas) == 1
 
 
-def test_tutorial_usa_os_nomes_que_existem_no_bot_e_na_pagina(bm):
+def test_enviar_agora_diz_por_que_nao_mandou(bm, Msg, Est, monkeypatch):
     sv = _painel(bm)
-    texto = "".join(sv.TUTORIAL_ANDROID)
-    for botao in ("📦 Enviar app", "🧹 Fechar apps", "🔄 Reiniciar Android", "🗑️ Resetar de fábrica",
-                  "✅ Terminei", "Texto para digitar", "Digitar", "● Início", "Esperando a imagem do Android"):
-        assert botao in texto and botao in tela_android.PAGINA, botao
-    # O caminho citado no tutorial existe: Outros Canais → Shopee Vídeo → Tela do Android.
-    assert "Outros Canais 🗂️" in _textos(bm.obter_teclado_raiz())
-    assert "Shopee Vídeo 🎬" in _textos(bm.obter_teclado_outros_canais())
-    assert "Tela do Android 📱" in _textos(sv.teclado_painel(sv.ler_config()))
-    for passo in ("Outros Canais 🗂️", "Shopee Vídeo 🎬", "Tela do Android 📱"):
-        assert passo in texto
+
+    async def sem_video(bot, admin_id, agora=None):
+        return "não há vídeo dos Autorais para mandar (a fila está vazia ou sem arquivos)"
+
+    async def quebra(bot, admin_id, agora=None):
+        raise RuntimeError("segredo")
+
+    monkeypatch.setattr(sv.assistente, "preparar_e_enviar", sem_video)
+    msg = Msg("Enviar 1 Agora 📤")
+    rodar(sv.enviar_agora_handler(msg, Est()))
+    assert "Não mandei: não há vídeo dos Autorais" in msg.saidas[-1]
+    monkeypatch.setattr(sv.assistente, "preparar_e_enviar", quebra)
+    msg = Msg("Enviar 1 Agora 📤")
+    rodar(sv.enviar_agora_handler(msg, Est()))
+    assert "deu erro ao preparar (RuntimeError)" in msg.saidas[-1] and "segredo" not in msg.saidas[-1]
+
+
+def test_agendador_so_manda_quando_chega_a_hora_e_nao_pausado(bm, monkeypatch):
+    sv = _painel(bm)
+    pedidos = []
+
+    async def preparar(bot, admin_id, agora=None):
+        pedidos.append(1)
+        return "postagem mandada no seu privado"
+
+    monkeypatch.setattr(sv.assistente, "preparar_e_enviar", preparar)
+    monkeypatch.setattr(sv.assistente, "decidir_envio", lambda config: not config["pausado"])
+    rodar(sv.verificar_envio())
+    assert pedidos == []                                                   # começa pausado
+    sv.alterar_config(pausado=False)
+    rodar(sv.verificar_envio())
+    assert pedidos == [1]
+
+
+def test_envio_fica_no_agendador_a_cada_5_min(bm):
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    sv = _painel(bm)
+    agendador = AsyncIOScheduler(timezone=bm.FUSO_STR)
+    sv.configurar_dependencias(sv.bot_instance, agendador, sv.ADMIN_ID)
+    job = agendador.get_job("shopee_video_assistente")
+    assert job is not None and job.trigger.interval.total_seconds() == 300
