@@ -23,6 +23,7 @@ import re
 import shutil
 import subprocess
 import time
+import urllib.parse
 
 import db
 
@@ -203,10 +204,62 @@ def captura_dos_parceiros():
             print(f"   recusado: {motivo} ({qtd})")
 
 
+# Partes fixas de endereço da Shopee, que podem aparecer no desenho do link. Qualquer
+# outra parte (nome de produto, de loja, códigos) vira um marcador.
+ROTAS_CONHECIDAS = {
+    "opaanlp", "product", "universal-link", "search", "an_redir", "m", "mall", "shop", "buyer",
+    "login", "verify", "captcha", "find_similar_products", "collections", "list", "landing",
+    "deep_link", "web", "affiliate", "event", "events", "promo", "flash_sale", "daily_discover",
+    "user", "cart", "share", "api", "v4", "item", "items", "app", "download", "redirect",
+}
+
+
+# Nomes de parâmetro que podem aparecer no desenho; os outros só são contados.
+PARAMETROS_CONHECIDOS = {
+    "lp", "itemid", "shopid", "catid", "keyword", "origin_link", "affiliate_id", "sub_id", "next",
+    "redir", "url", "publisher_id", "smtt", "xptdk", "deep_and_deferred", "share_channel_code",
+    "scene", "from", "entrypoint", "is_from_login", "page", "ref",
+}
+PREFIXOS_CONHECIDOS = ("utm_", "gads_", "mmp_", "af_", "sp_", "uls_")
+
+
+def forma_do_link(url):
+    """
+    O desenho do link, sem nada que identifique produto, loja ou pessoa: o host, as
+    partes fixas do caminho (as de ROTAS_CONHECIDAS), números como #<quantos dígitos>,
+    o resto como <texto>, e só os nomes dos parâmetros. Serve para o inventário mostrar
+    por onde a Shopee manda o servidor sem pôr links no log público.
+    """
+    partes = urllib.parse.urlsplit(url or "")
+    pedacos = []
+    for parte in partes.path.split("/"):
+        if not parte:
+            continue
+        if parte.lower() in ROTAS_CONHECIDAS:
+            pedacos.append(parte.lower())
+        elif parte.isdigit():
+            pedacos.append(f"#{len(parte)}")
+        elif re.search(r"-i\.\d+\.\d+$", parte):
+            pedacos.append("<nome>-i.#.#")
+        elif re.search(r"-cat\.[\d.]+$", parte):
+            pedacos.append("<nome>-cat.#")
+        else:
+            pedacos.append("<texto>")
+    nomes = {nome for nome, _ in urllib.parse.parse_qsl(partes.query, keep_blank_values=True)}
+    conhecidos = sorted(n for n in nomes if n.lower() in PARAMETROS_CONHECIDOS
+                        or n.lower().startswith(PREFIXOS_CONHECIDOS))
+    outros = len(nomes) - len(conhecidos)
+    desenho = f"{partes.netloc.lower()}/{'/'.join(pedacos)}"
+    if conhecidos or outros:
+        desenho += " ?" + ",".join(conhecidos) + (f" +{outros} outro(s)" if outros else "")
+    return desenho
+
+
 def links_do_espiao(quantos=10):
     """
     Onde os links mais recentes do Espião levam quando o servidor os abre, salto a
-    salto, só com o tipo de cada página (produto, categoria, busca...). Mostra se o
+    salto, só com o tipo de cada página (produto, categoria, busca...) e o desenho de
+    cada endereço (forma_do_link: partes fixas, números como #<dígitos>). Mostra se o
     link de afiliado sai para o produto: o conversor usa o produto achado em qualquer
     salto; sem produto no caminho, usaria a última página. Nenhum link aparece.
     """
@@ -229,6 +282,8 @@ def links_do_espiao(quantos=10):
         parou_fora += com_produto and api_shopee.tipo_de_link(caminho[-1]) != "produto"
         print(f"{n}. {' → '.join(api_shopee.tipo_de_link(e) for e in caminho)} | "
               f"produto no caminho: {'sim' if com_produto else 'NÃO'}")
+        for endereco in caminho[1:]:
+            print(f"      {forma_do_link(endereco)}")
     print(f"   {parou_fora} parou fora do produto, mas com o produto no meio do caminho; "
           f"{sem_produto} sem produto em lugar nenhum")
 

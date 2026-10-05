@@ -148,6 +148,20 @@ def test_inventario_mostra_so_o_tipo_de_cada_salto(bm, monkeypatch, capsys):
     inventario.links_do_espiao()
     saida = capsys.readouterr().out
     assert "1. link curto → produto → categoria | produto no caminho: sim" in saida
+    assert "      shopee.com.br/<nome>-i.#.# + 1 outro(s)" not in saida                 # sem espaço sobrando
+    assert "      shopee.com.br/<nome>-i.#.# ? +1 outro(s)" in saida                   # o parâmetro só é contado
+    assert "      shopee.com.br/<nome>-cat.#" in saida
     assert "2. link curto → categoria | produto no caminho: NÃO" in saida
     assert "1 parou fora do produto, mas com o produto no meio do caminho; 1 sem produto" in saida
-    assert "segredo" not in saida and "shopee.com.br" not in saida
+    assert "segredo" not in saida and "https://" not in saida               # nenhum link inteiro
+
+
+def test_forma_do_link_sem_nada_que_identifique_produto_ou_loja():
+    assert inventario.forma_do_link("https://shopee.com.br/opaanlp/123456789/22334455667?gads_t_sig=x&utm_source=an_1") \
+        == "shopee.com.br/opaanlp/#9/#11 ?gads_t_sig,utm_source"
+    assert inventario.forma_do_link(PRODUTO + "?sp_atk=1") == "shopee.com.br/<nome>-i.#.# ?sp_atk"
+    assert inventario.forma_do_link("https://shopee.com.br/x?shopid=3&itemid=2&catid=1") \
+        == "shopee.com.br/<texto> ?catid,itemid,shopid"
+    desenho = inventario.forma_do_link("https://shopee.com.br/lojadamaria/Panela-Bonita?maria=1&telefone=5511")
+    assert desenho == "shopee.com.br/<texto>/<texto> ? +2 outro(s)"
+    assert "maria" not in desenho and "5511" not in desenho and "Panela" not in desenho
