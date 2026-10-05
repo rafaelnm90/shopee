@@ -70,7 +70,9 @@ PALAVRAS_DA_TELA = frozenset("""
     minutos máximo mínimo escolha toque aqui novo nova criar categoria categorias também
     pode gostar opções detalhes sobre pedido pedidos pagar avaliar compras carteira
     histórico serviços financeiros atividades visto recentemente suporte moedas cupons
-    ganhos comissões relatório upload duet costurar adesivos clipes
+    ganhos comissões relatório upload duet costurar adesivos clipes tudo caminho envio
+    postagem postagens publicação publicações modelo modelos ir lojas tela telas
+    post next done cancel save draft drafts gallery album photos videos add product products
 """.split())
 NUMERO = re.compile(r"[\d.,%R$()+x×/:#-]*\d[\d.,%R$()+x×/:#-]*")
 PONTUACAO = ".,:;!?()[]{}\"'«»“”‘’-–—/|+*·•"
