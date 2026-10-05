@@ -2,12 +2,18 @@ name: Inventário do servidor
 
 # O que ocupa espaço e o que cresce no servidor: pastas, banco, filas em arquivo,
 # journal (e as linhas de log que mais se repetem) e caches. Só lê, e só roda
-# quando disparado à mão (aba Actions, "Run workflow").
+# quando disparado à mão (aba Actions, "Run workflow"). Com "link_de_teste" marcado,
+# em vez do inventário, gera um link de afiliado de teste e manda no privado do Rafael.
 #
 # O repositório é público, e os logs do Actions também: o inventario.py imprime só
 # números e nomes que já estão no código, nunca conteúdo de log, fila ou banco.
 on:
   workflow_dispatch:
+    inputs:
+      link_de_teste:
+        description: "Só gerar o link de afiliado de teste do vídeo mais recente do Espião e mandar no privado do Rafael"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -26,4 +32,4 @@ jobs:
           command_timeout: 8m
           script: |
             cd ~/shopee
-            venv/bin/python3 inventario.py
+            venv/bin/python3 inventario.py ${{ inputs.link_de_teste && '--link-de-teste' || '' }}
