@@ -55,6 +55,7 @@ import sqlite3
 import db
 import painel_espelhos
 import painel_notas
+import painel_shopee_video  # painel do robô da Shopee Vídeo (Outros Canais)
 import pool_contas  # contas dos userbots (quem espelha, quem reposta)
 import blacklist_captura  # de quem os userbots nunca capturam
 import alvos_sem_acesso  # alvos da divulgação a que a conta perdeu o acesso
@@ -519,6 +520,9 @@ dp.include_router(painel_notas.router)
 painel_notas.configurar_dependencias(bot, scheduler)
 logger.info("✅ Módulo de Notas montado com segurança.")
 
+dp.include_router(painel_shopee_video.router)
+painel_shopee_video.configurar_dependencias(bot, scheduler, ADMIN_ID)
+
 # --- Teclados ---
 teclado_plataforma = ReplyKeyboardMarkup(
     keyboard=[
@@ -638,7 +642,7 @@ def obter_teclado_outros_canais():
         keyboard=[
             [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
             [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
-            [KeyboardButton(text="Gerador de Achadinhos 🛍️")],
+            [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Shopee Vídeo 🎬")],
             [KeyboardButton(text="Voltar ao Início 🔙")]
         ],
         resize_keyboard=True,
@@ -699,8 +703,7 @@ def obter_teclado_principal():
 def obter_teclado_opcoes_servidor():
     botoes = [
         [KeyboardButton(text="Monitorar Servidor 🖥️"), KeyboardButton(text="Zerar Filas e Tarefas 🧹")],
-        [KeyboardButton(text="Reiniciar Robôs 🔄")],
-        [KeyboardButton(text="Tela do Android 📱"), KeyboardButton(text="Tutorial do Android 📖")],
+        [KeyboardButton(text="Reiniciar Robôs 🔄"), KeyboardButton(text="Tela do Android 📱")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -7070,80 +7073,6 @@ async def tela_android_handler(message: types.Message, state: FSMContext):
         logger.warning(f"⚠️ A tela do Android não abriu: {motivo}")
         await aviso.edit_text(f"❌ A tela do Android não abriu: {motivo}\nTente de novo em 1 min.")
 
-# Passo a passo para instalar a Shopee no Android virtual, para quando o Rafael
-# precisar de novo (reset de fábrica, atualização da Shopee, login que caiu) e
-# ninguém lembrar como foi. Cada parte cabe numa mensagem do Telegram (4096 caracteres).
-# Decisão do Rafael: DECISOES.md, Shopee Vídeo.
-TUTORIAL_ANDROID = (
-    "📖 <b>Tutorial do Android da Shopee Vídeo (1/4)</b>\n\n"
-    "O robô da Shopee Vídeo usa um celular Android virtual, que roda dentro do servidor. "
-    "Nele ficam o app da Shopee Brasil e o login da sua conta.\n\n"
-    "<b>Quando usar este passo a passo:</b>\n"
-    "• na primeira vez, ou depois de um \"Resetar de fábrica\";\n"
-    "• quando a Shopee pedir atualização;\n"
-    "• quando o login da Shopee cair.\n\n"
-    "<b>Por que o app vem do seu celular:</b> a Play Store e os sites de APK recusam o servidor. "
-    "Então você instala a Shopee no seu celular, faz uma cópia dela com o app SAI e envia a cópia "
-    "para o Android virtual.\n\n"
-    "São duas etapas: <b>2/4</b> no seu celular e <b>3/4</b> no Android virtual. "
-    "A <b>4/4</b> traz os problemas mais comuns.",
-
-    "📱 <b>2/4: no seu celular, copiar a Shopee com o SAI</b>\n\n"
-    "1. Na Play Store, instale ou atualize a <b>Shopee</b>. Abra uma vez e confira que está em português, "
-    "com preços em R$.\n"
-    "2. Instale o <b>SAI (Split APKs Installer)</b>:\n"
-    "https://play.google.com/store/apps/details?id=com.mtv.sai\n"
-    "3. Abra o SAI e toque na aba <b>Backup</b>, embaixo.\n"
-    "4. Na primeira vez, ele pede a pasta dos backups. O Android não deixa usar a pasta principal nem a "
-    "Download, então: toque em <b>CRIAR NOVA PASTA</b>, dê o nome <b>Backups</b>, toque em OK, entre nela "
-    "e toque em <b>USAR ESTA PASTA</b> → <b>Permitir</b>.\n"
-    "5. Na lista de apps, toque em <b>Shopee</b> → <b>Backup</b>. O SAI pode pedir a assinatura PRO "
-    "para fazer o backup (em 04/10/2026 foi preciso assinar).\n"
-    "6. Espere terminar: aparece um arquivo terminado em <b>.apks</b> (uns 120 MB) na pasta Backups. "
-    "Guarde esse arquivo: ele serve de novo se precisar.\n"
-    "7. Se assinou o PRO, cancele depois para não ser cobrado de novo: Play Store → foto do perfil → "
-    "<b>Pagamentos e assinaturas</b> → <b>Assinaturas</b> → SAI → <b>Cancelar assinatura</b>.\n\n"
-    "⚠️ Não use o \"Compartilhar\" do SAI: ele manda só uma parte da Shopee, e o Android recusa.",
-
-    "🤖 <b>3/4: no Android virtual, instalar e entrar</b>\n\n"
-    "1. Aqui no bot: <b>Opções do Servidor ⚙️</b> → <b>Tela do Android 📱</b>. O link chega aqui "
-    "em até 1 min. Abra no navegador do celular. A tela fica aberta 30 min.\n"
-    "2. Na página, toque em <b>Escolher arquivo</b> → pasta <b>Backups</b> → o arquivo .apks da Shopee "
-    "→ <b>📦 Enviar app</b>.\n"
-    "3. Deixe a página aberta. Aparece \"Enviando... %\" (pode levar alguns minutos), depois "
-    "\"Instalando no Android...\" e, no fim, \"✅ app da Shopee: instalado\".\n"
-    "4. Na imagem do Android, toque em <b>● Início</b>, abra a <b>Shopee</b> e entre com a sua conta principal:\n"
-    "• para escrever (e-mail, senha, código), toque no campo dentro da imagem, escreva em "
-    "<b>Texto para digitar</b> e toque em <b>Digitar</b>;\n"
-    "• no quebra-cabeça de segurança, arraste o dedo sobre a imagem.\n"
-    "5. Quando terminar, toque em <b>✅ Terminei</b>. O link para de funcionar, e ninguém mais mexe no Android por ele.",
-
-    "🛠️ <b>4/4: problemas comuns</b>\n\n"
-    "• <b>A imagem não aparece</b> (\"⏳ Esperando a imagem do Android\"): se o Android acabou de "
-    "reiniciar ou resetar, espere de 1 a 4 min. Se não voltar, toque em Tela do Android 📱 de novo.\n"
-    "• <b>\"Error 1033\" ao abrir o link:</b> a tela já fechou (Terminei, 30 min ou uma tela nova no lugar). "
-    "Peça outra em Tela do Android 📱.\n"
-    "• <b>\"❌ o Android recusou o app\":</b> a mensagem diz o motivo. O mais comum é arquivo antigo ou da "
-    "Shopee de outro país: refaça a parte 2/4 com a Shopee Brasil atualizada.\n"
-    "• <b>Arquivo .apkm</b> (do APKMirror) não serve: só .apks, .xapk ou .apk.\n"
-    "• <b>A Shopee pediu atualização:</b> atualize no celular, faça um backup novo no SAI e envie o arquivo "
-    "novo. O login continua, porque a instalação vai por cima.\n"
-    "• <b>A tela fechou no meio:</b> o bot pode ter reiniciado numa atualização. Toque em Tela do Android 📱 de novo.\n\n"
-    "<b>Botões da página:</b>\n"
-    "• <b>🧹 Fechar apps:</b> fecha todos os apps e limpa a lista de recentes.\n"
-    "• <b>🔄 Reiniciar Android:</b> religa o Android. Os apps e o login continuam (volta em 1 a 2 min).\n"
-    "• <b>🗑️ Resetar de fábrica:</b> apaga TUDO, inclusive a Shopee e o login. Depois é preciso refazer "
-    "a parte 3/4. Use só se o Android estiver muito travado.",
-)
-
-@dp.message(F.text == "Tutorial do Android 📖", StateFilter("*"))
-async def tutorial_android_handler(message: types.Message, state: FSMContext):
-    """Manda o passo a passo da instalação da Shopee no Android virtual, em partes."""
-    if message.from_user.id != ADMIN_ID: return
-    logger.info("📖 Mostrando o tutorial do Android.")
-    for parte in TUTORIAL_ANDROID:
-        await message.answer(parte, parse_mode="HTML", disable_web_page_preview=True)
-
 @dp.message(F.text == "Monitorar Servidor 🖥️", StateFilter("*"))
 async def monitorar_servidor_oracle(message: types.Message, state: FSMContext):
     """Uso de disco e RAM do servidor (df e free), com status e uma tabela resumida."""
@@ -9703,6 +9632,13 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
     if estado_atual in ["ConfigFluxo:aguardando_selecao_limpeza", "ConfigFluxo:aguardando_confirmacao_reiniciar"]:
         await state.clear()
         await message.answer("Ação cancelada. Nenhuma alteração foi feita no servidor.", reply_markup=obter_teclado_opcoes_servidor())
+        return
+
+    # Shopee Vídeo: qualquer ajuste cancelado volta ao painel do robô.
+    if estado_atual and estado_atual.startswith("ShopeeVideoFluxo:"):
+        await state.clear()
+        await message.answer("Ação cancelada. Nada foi alterado.")
+        await painel_shopee_video.mostrar_painel(message, state)
         return
 
     # Achadinhos: o prefixo cobre todos os estados do fluxo (cadastro, edição, remoção).
