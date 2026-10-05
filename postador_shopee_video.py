@@ -41,6 +41,7 @@ import db
 from api_shopee import link_para_converter, tipo_de_link
 
 PACOTE = av.PACOTE_SHOPEE
+PACOTE_SISTEMA = "com.android.systemui"
 GALERIA = "/sdcard/DCIM/Camera"
 NOME_NA_GALERIA = "autoral_shopee_video.mp4"
 SEGUNDOS_DEPOIS_DO_PASSO = 3
@@ -98,7 +99,10 @@ def _limites(no):
 
 
 def elementos(xml):
-    """Elementos visíveis da tela que interessam: com texto, descrição, id ou que aceitam toque."""
+    """
+    Elementos visíveis da tela que interessam: com texto, descrição, id ou que aceitam
+    toque. As barras do Android (relógio, bateria, voltar) ficam de fora: só enchem o log.
+    """
     try:
         raiz = ET.fromstring(xml)
     except ET.ParseError:
@@ -106,7 +110,7 @@ def elementos(xml):
     achados = []
     for no in raiz.iter("node"):
         caixa = _limites(no)
-        if not caixa or no.get("visible-to-user", "true") != "true":
+        if not caixa or no.get("visible-to-user", "true") != "true" or no.get("package") == PACOTE_SISTEMA:
             continue
         texto, descricao = no.get("text", ""), no.get("content-desc", "")
         ident = no.get("resource-id", "").split(":id/")[-1]
@@ -279,19 +283,23 @@ def conectar():
 
 
 def explorar(texto, d=None):
-    """Faz os passos e descreve a tela depois de cada um. Para no primeiro que falhar."""
+    """
+    Faz os passos e descreve a tela depois de cada um. Para no primeiro que falhar.
+    True se todos deram certo, False se um falhou e None se nem começou (passo
+    desconhecido ou Android desligado).
+    """
     print("== Explorando o app da Shopee")
     try:
         passos = separar_passos(texto)
     except ValueError as e:
         print(f"passos: {e}")
-        return False
+        return None
     if not passos:
         passos = [("tela", "")]
     if d is None:
         if not av.android_ligado():
             print("android: desligado; rode o preparar antes")
-            return False
+            return None
         d = conectar()
     for numero, (nome, argumento) in enumerate(passos, 1):
         try:
@@ -312,7 +320,15 @@ def explorar(texto, d=None):
     return True
 
 
+def codigo_de_saida(resultado):
+    """
+    Botão que não está na tela é resposta da exploração, não erro: o workflow só fica
+    vermelho (e o GitHub manda e-mail ao Rafael) quando a exploração nem começou.
+    """
+    return 1 if resultado is None else 0
+
+
 if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "--explorar":
-        sys.exit(0 if explorar(" ".join(sys.argv[2:])) else 1)
+        sys.exit(codigo_de_saida(explorar(" ".join(sys.argv[2:]))))
     print(__doc__)
