@@ -254,3 +254,54 @@ def test_inventario_pergunta_a_api_pelo_produto_do_opaanlp(bm, monkeypatch, caps
     assert "API de afiliado, loja/item: achou: shopee.com.br/product/#9/#11 | invertido: não achou" in saida
     assert perguntas == [("123456789", "22334455667"), ("22334455667", "123456789")]
     assert "123456789" not in saida and "segredo" not in saida
+
+
+def test_share_obj_mostra_so_a_estrutura():
+    import base64
+    obj = {"item_id": 22334455667, "shop_id": "123456789", "nome": "Panela da Maria", "lista": [{"x": 1}]}
+    cod = base64.urlsafe_b64encode(json.dumps(obj).encode()).decode().rstrip("=")
+    desenho = inventario.estrutura_do_share_obj(f"https://sv.shopee.com.br/share-video/a?share_obj={cod}")
+    assert desenho == "base64 → JSON {item_id: #11, shop_id: #9, nome: <texto>, lista: [1× {x: #1}]}"
+    assert "Maria" not in desenho and "22334455667" not in desenho
+    binario = base64.b64encode(b"\x01\x02 22334455667 \xff").decode()
+    assert "não é JSON; números longos com [11] dígitos" in \
+        inventario.estrutura_do_share_obj(f"https://sv.shopee.com.br/x?share_obj={binario}")
+    assert inventario.estrutura_do_share_obj("https://sv.shopee.com.br/x") == "sem share_obj"
+
+
+def test_conversao_de_teste_mostra_por_onde_o_link_gerado_leva(monkeypatch):
+    pedidos = []
+
+    async def api(consulta, variaveis=None):
+        pedidos.append(variaveis)
+        return {"data": {"generateShortLink": {"shortLink": "https://s.shopee.com.br/teste"}}}
+
+    async def seguir(link, saltos=10):
+        return [link, PRODUTO + "?utm_source=x"]
+
+    monkeypatch.setattr(inventario, "_consultar_api", api)
+    monkeypatch.setattr(api_shopee, "seguir_link", seguir)
+    assert rodar(inventario.conversao_de_teste(PRODUTO)) == "shopee.com.br/<nome>-i.#.# ?utm_source"
+    assert pedidos == [{"originUrl": PRODUTO, "subIds": ["diagnostico"]}]
+
+
+def test_testes_de_conversao_por_tipo_de_link(monkeypatch, capsys):
+    origens = []
+
+    async def conversao(origem):
+        origens.append(origem)
+        return "shopee.com.br/<nome>-i.#.#"
+
+    monkeypatch.setattr(inventario, "conversao_de_teste", conversao)
+    video = "https://sv.shopee.com.br/share-video/abc?share_obj=x&pid=y"
+    universal = "https://shopee.com.br/universal-link?redir=z"
+    opaanlp = "https://shopee.com.br/opaanlp/123456789/22334455667?utm_source=x"
+    inventario.testes_de_conversao([[CURTO, universal, video], [CURTO, opaanlp]])
+    saida = capsys.readouterr().out
+    assert origens == ["https://sv.shopee.com.br/share-video/abc", video, universal,
+                       "https://shopee.com.br/opaanlp/123456789/22334455667",
+                       "https://shopee.com.br/product/123456789/22334455667"]
+    for rotulo in ("vídeo cortado (como é hoje)", "vídeo inteiro", "universal-link inteiro",
+                   "opaanlp cortado (como é hoje)", "produto loja/item"):
+        assert f"      {rotulo}: shopee.com.br/<nome>-i.#.#" in saida
+    assert "123456789" not in saida and "https://" not in saida
