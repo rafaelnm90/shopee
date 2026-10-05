@@ -84,8 +84,8 @@ Celular guardado (perfil reserva, carregador, Wi-Fi)
 | Fase | Quem | O quê | Situação |
 |---|---|---|---|
 | 0 | Rafael | Celular só para isso: no carregador e no Wi-Fi, sem economia de bateria para a Shopee; Shopee pela Play Store com o **perfil reserva**; modo desenvolvedor com "depuração sem fio"; app Tailscale | em espera: o celular não está com ele |
-| 1a | Rafael | Conta no Tailscale e uma chave de acesso (auth key) salva no GitHub como segredo `TAILSCALE_AUTHKEY`; nunca colar a chave na conversa | falta |
-| 1b | Claude | `android.yml` → `tailscale`: o servidor entra na rede privada (sem mexer no DNS nem nas rotas) | pronto, esperando a chave |
+| 1a | Rafael | Conta no Tailscale e uma chave de acesso (auth key) salva no GitHub como segredo `TAILSCALE_AUTHKEY`; nunca colar a chave na conversa. Falta só desligar a expiração da chave do servidor (Machines → shopee-servidor → ⋯ → Disable key expiry) | feita em 05/10/2026 |
+| 1b | Claude | `android.yml` → `tailscale`: o servidor entra na rede privada (sem mexer no DNS nem nas rotas), com o nome `shopee-servidor` | feita em 05/10/2026: conectado |
 | 1c | Claude + Rafael | Parear o adb com o celular. O código da depuração sem fio vai só para o bot, no privado (fluxo a fazer quando o celular estiver pronto); o explorar passa a aceitar o celular como alvo | a fazer |
 | 2 | Claude | Explorar devagar até Rascunhos, com as regras de "Para voltar" | a fazer |
 | 3 | os dois | Um rascunho por dia que o Rafael confere; depois 1 ou 2 postagens reais por dia, na janela e com quantidade variada; observar 2 a 4 semanas | a fazer |
