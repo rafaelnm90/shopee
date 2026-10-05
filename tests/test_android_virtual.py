@@ -78,6 +78,24 @@ def test_conteiner_parado_e_religado(monkeypatch):
     assert m.pediu("docker", "start", av.CONTEINER) and not m.pediu("docker", "run")
 
 
+def test_desligar_para_o_conteiner_sem_apagar_e_fecha_a_tela(monkeypatch, capsys):
+    m = Maquina()
+    _instalar(monkeypatch, m)
+    assert av.desligar() is True
+    assert m.pediu("pkill", "-f", "tela_android.py")
+    assert m.pediu("docker", "stop", av.CONTEINER)
+    assert not m.pediu("docker", "rm") and not m.pediu("rm")
+    assert "desligar o contêiner: ok" in capsys.readouterr().out
+
+
+def test_desligar_de_novo_nao_para_outra_vez(monkeypatch, capsys):
+    m = Maquina(conteiner="exited")
+    _instalar(monkeypatch, m)
+    assert av.desligar() is True
+    assert not m.pediu("docker", "stop")
+    assert "já estava desligado" in capsys.readouterr().out
+
+
 def test_falha_na_instalacao_para_e_mostra_so_o_codigo(monkeypatch, capsys):
     m = Maquina(docker=False, conteiner=None)
     _instalar(monkeypatch, m)
