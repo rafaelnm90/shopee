@@ -11,6 +11,7 @@ Roda à mão pelo workflow android.yml ou no servidor:
     python3 android_virtual.py --instalar-loja    # instala a Aurora Store (apps do Google Play)
     python3 android_virtual.py --instalar-shopee  # baixa e instala (ou atualiza) o app da Shopee
     python3 android_virtual.py --tela             # abre a tela no navegador (tela_android.py)
+    python3 android_virtual.py --desligar         # desliga o Android (o --preparar religa)
 
 O --preparar faz só o que falta, e pode rodar de novo sem estragar nada:
 1. instala o Docker e o adb do Ubuntu;
@@ -28,6 +29,10 @@ Android virtual não tem a Play Store) e instala. Quando o app vem em partes
 
 O --tela deixa o tela_android.py rodando sozinho por 30 min e sai: o link vai
 no privado do Rafael, nunca no log.
+
+O --desligar para o contêiner (e fecha a tela, se aberta) sem apagar nada: o
+app e o login continuam, e o --preparar religa. Serve para pausas, quando a
+conta da Shopee não deve ficar conectada pelo servidor.
 
 Imprime só estados e números, porque o log do Actions é público.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
@@ -394,6 +399,24 @@ def abrir_tela():
     return False
 
 
+def desligar():
+    """
+    Desliga o Android sem apagar nada. Com o restart unless-stopped, ele continua
+    desligado mesmo se o servidor reiniciar, até o --preparar religar.
+    """
+    print("== Desligando o Android virtual")
+    if _ok(_rodar("pkill", "-f", "tela_android.py")):
+        print("tela aberta: fechada")
+    estado = estado_conteiner()
+    if estado is None:
+        print("android: o contêiner não existe")
+        return True
+    if estado != "running":
+        print("android: já estava desligado")
+        return True
+    return _passo("desligar o contêiner", _rodar("sudo", "-n", "docker", "stop", CONTEINER, timeout=180))
+
+
 def _passo(nome, resultado):
     print(f"{nome}: {'ok' if _ok(resultado) else 'falhou (' + _codigo(resultado) + ')'}")
     return _ok(resultado)
@@ -447,6 +470,8 @@ def preparar():
 if __name__ == "__main__":
     pedidos = sys.argv[1:]
     ok = True
+    if "--desligar" in pedidos:
+        ok = desligar()
     if "--preparar" in pedidos:
         ok = preparar()
     if ok and "--instalar-loja" in pedidos:

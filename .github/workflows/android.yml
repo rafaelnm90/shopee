@@ -12,7 +12,9 @@ name: Android virtual (Shopee Vídeo)
 #                   só no privado do Rafael, pelo bot;
 #   explorar        roda o postador_shopee_video.py --explorar com os passos do
 #                   campo "passos" (ex.: abrir; tocar:Eu) e descreve cada tela,
-#                   sem os textos da conta; nunca toca em Postar.
+#                   sem os textos da conta; nunca toca em Postar;
+#   desligar        desliga o Android sem apagar nada (app e login ficam); o
+#                   preparar religa.
 #
 # O repositório é público, e os logs do Actions também: o android_virtual.py
 # imprime só estados e números, nunca o link da tela, e o explorar mostra só a
@@ -23,7 +25,7 @@ on:
       acao:
         description: "O que fazer"
         type: choice
-        options: [estado, preparar, instalar-loja, instalar-shopee, tela, explorar]
+        options: [estado, preparar, instalar-loja, instalar-shopee, tela, explorar, desligar]
         default: estado
       passos:
         description: "Só no explorar: passos separados por ; (ex.: abrir; tocar:Eu)"
