@@ -14,7 +14,9 @@ name: Android virtual (Shopee Vídeo)
 #                   campo "passos" (ex.: abrir; tocar:Eu) e descreve cada tela,
 #                   sem os textos da conta; nunca toca em Postar;
 #   desligar        desliga o Android sem apagar nada (app e login ficam); o
-#                   preparar religa.
+#                   preparar religa;
+#   apagar          desliga e apaga tudo dentro do Android (apps e login da
+#                   Shopee), como um reset de fábrica; fica desligado.
 #
 # O repositório é público, e os logs do Actions também: o android_virtual.py
 # imprime só estados e números, nunca o link da tela, e o explorar mostra só a
@@ -25,7 +27,7 @@ on:
       acao:
         description: "O que fazer"
         type: choice
-        options: [estado, preparar, instalar-loja, instalar-shopee, tela, explorar, desligar]
+        options: [estado, preparar, instalar-loja, instalar-shopee, tela, explorar, desligar, apagar]
         default: estado
       passos:
         description: "Só no explorar: passos separados por ; (ex.: abrir; tocar:Eu)"
