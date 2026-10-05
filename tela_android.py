@@ -26,6 +26,7 @@ import secrets
 import shlex
 import shutil
 import subprocess
+import time
 import zipfile
 
 from aiohttp import web
@@ -108,8 +109,47 @@ async def pagina(request):
 async def tela(request):
     if not autorizado(request):
         raise web.HTTPNotFound()
-    png = await adb("exec-out", "screencap", "-p")
+    png, motivo = await print_da_tela()
+    if motivo and time.monotonic() - _imagem["reconectou"] > 10:
+        # Depois de reiniciar ou resetar, o adb pode ficar preso na conexão velha.
+        _imagem["reconectou"] = time.monotonic()
+        await _rodar_comando("adb", "reconnect", "offline", timeout=15)
+        await _rodar_comando("adb", "connect", av.ENDERECO_ADB, timeout=15)
+        png, motivo = await print_da_tela()
+    if motivo:
+        registrar_falha_da_imagem(motivo)
+        return web.Response(status=503, text=motivo, headers={"Cache-Control": "no-store"})
     return web.Response(body=png, content_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+_imagem = {"reconectou": 0.0, "motivo": ""}
+
+
+async def print_da_tela(timeout=20):
+    """(png, "") com o print do Android, ou (b"", motivo) se ele não veio."""
+    proc = await asyncio.create_subprocess_exec(
+        "adb", "-s", av.ENDERECO_ADB, "exec-out", "screencap", "-p",
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    try:
+        saida, erro = await asyncio.wait_for(proc.communicate(), timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        return b"", av.motivo_da_imagem(None)
+    motivo = av.motivo_da_imagem((proc.returncode, saida, erro))
+    return (b"", motivo) if motivo else (saida, "")
+
+
+def registrar_falha_da_imagem(motivo):
+    """
+    Guarda no estado da tela por que a imagem não veio, para o android_virtual
+    mostrar no Actions. Durante um reinício a falha é esperada e não conta; o
+    arquivo só é regravado quando o motivo muda (a página pede a imagem sem parar).
+    """
+    if _reinicio.get("tarefa") and not _reinicio["tarefa"].done():
+        return
+    if motivo != _imagem["motivo"]:
+        _imagem["motivo"] = motivo
+        gravar_estado(f"enviado; último erro: imagem ({motivo})")
 
 
 async def acao(request):
@@ -439,10 +479,17 @@ PAGINA = """<!doctype html>
 const K = "__CHAVE__";
 const img = document.getElementById("tela");
 let inicio = null;
+let falhas = 0;
 function atualizar() {
   const nova = new Image();
-  nova.onload = () => { img.src = nova.src; setTimeout(atualizar, 600); };
-  nova.onerror = () => setTimeout(atualizar, 1500);
+  nova.onload = () => {
+    if (falhas >= 3) avisar("✅ A imagem do Android voltou.");
+    falhas = 0; img.src = nova.src; setTimeout(atualizar, 600);
+  };
+  nova.onerror = () => {
+    if (++falhas == 3) avisar("⏳ Esperando a imagem do Android. Se ele acabou de reiniciar, espere 1 a 4 min.");
+    setTimeout(atualizar, 1500);
+  };
   nova.src = "/tela.png?k=" + K + "&t=" + Date.now();
 }
 function ponto(e) {
