@@ -139,6 +139,50 @@ def _adb(*partes, timeout=30):
     return _rodar("adb", "-s", ENDERECO_ADB, *partes, timeout=timeout)
 
 
+def _rodar_bytes(*partes, timeout=30):
+    """(código, stdout, stderr) em bytes, para saídas binárias como o print da tela; None se travou."""
+    try:
+        r = subprocess.run(partes, capture_output=True, timeout=timeout)
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+    return r.returncode, r.stdout, r.stderr
+
+
+# O que o adb ou o Android dizem quando o print da tela falha, em palavras simples.
+# Só a categoria aparece (no log do Actions e no estado da tela), nunca a mensagem crua.
+MOTIVOS_IMAGEM = (
+    ("offline", "adb desconectado (offline)"),
+    ("unauthorized", "o Android não autorizou o adb"),
+    ("not found", "o adb não acha o Android"),
+    ("no devices", "o adb não acha o Android"),
+    ("failed", "o Android não conseguiu tirar o print"),
+)
+
+
+def motivo_da_imagem(resultado):
+    """
+    Por que o print da tela falhou, a partir de (código, stdout, stderr) do adb;
+    "" se veio um PNG.
+    """
+    if resultado is None:
+        return "o adb travou"
+    codigo, saida, erro = resultado
+    if codigo == 0 and saida.startswith(b"\x89PNG"):
+        return ""
+    texto = (erro + saida[:300]).decode(errors="ignore").lower()
+    for trecho, motivo in MOTIVOS_IMAGEM:
+        if trecho in texto:
+            return motivo
+    if codigo == 0:
+        return "o print veio vazio" if not saida else "o print não veio em PNG"
+    return f"código {codigo}"
+
+
+def testar_imagem():
+    """Tira um print como a tela no navegador faz; "" se deu certo, senão o motivo."""
+    return motivo_da_imagem(_rodar_bytes("adb", "-s", ENDERECO_ADB, "exec-out", "screencap", "-p"))
+
+
 def android_ligado():
     """O Android terminou de ligar (sys.boot_completed = 1)."""
     if shutil.which("adb") is None:
@@ -167,6 +211,8 @@ def mostrar_estado():
     versao = _adb("shell", "getprop", "ro.build.version.release")
     print(f"android: ligado, versão {versao[1] if _ok(versao) else '?'} | app da Shopee: {versao_shopee()} | "
           f"Aurora Store: {versao_shopee(PACOTE_LOJA)}")
+    motivo = testar_imagem()
+    print(f"imagem da tela: {'falhou: ' + motivo if motivo else 'ok'}")
     try:
         with open(ARQUIVO_TELA) as f:
             print(f"tela no navegador: {f.read().strip()}")

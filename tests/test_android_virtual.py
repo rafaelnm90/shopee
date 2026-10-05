@@ -23,12 +23,19 @@ class Maquina:
             return (0, "1.5GiB / 4GiB | CPU 3.00%")
         return (0, "")
 
+    def rodar_bytes(self, *partes, timeout=30):
+        self.comandos.append(partes)
+        return self.imagem
+
+    imagem = (0, b"\x89PNG imagem", b"")
+
     def pediu(self, *trecho):
         return [c for c in self.comandos if all(t in c for t in trecho)]
 
 
 def _instalar(monkeypatch, maquina):
     monkeypatch.setattr(av, "_rodar", maquina.rodar)
+    monkeypatch.setattr(av, "_rodar_bytes", maquina.rodar_bytes)
     monkeypatch.setattr(av, "docker_instalado", lambda: maquina.docker)
     monkeypatch.setattr(av, "binder_carregado", lambda: maquina.binder)
     monkeypatch.setattr(av.shutil, "which", lambda nome: f"/usr/bin/{nome}" if maquina.docker else None)
@@ -95,6 +102,28 @@ def test_estado_com_android_ligado(monkeypatch, capsys):
     av.mostrar_estado()
     saida = capsys.readouterr().out
     assert "android: ligado, versão 13" in saida and "app da Shopee: não instalado" in saida
+    assert "imagem da tela: ok" in saida
+    assert m.pediu("exec-out", "screencap", "-p")              # o mesmo print que a tela no navegador tira
+
+
+def test_estado_mostra_por_que_a_imagem_falhou_sem_a_mensagem_crua(monkeypatch, capsys):
+    m = Maquina()
+    m.imagem = (1, b"", b"error: device offline (segredo)\n")
+    _instalar(monkeypatch, m)
+    av.mostrar_estado()
+    saida = capsys.readouterr().out
+    assert "imagem da tela: falhou: adb desconectado (offline)" in saida and "segredo" not in saida
+
+
+def test_motivo_da_imagem():
+    assert av.motivo_da_imagem((0, b"\x89PNG...", b"")) == ""
+    assert av.motivo_da_imagem(None) == "o adb travou"
+    assert av.motivo_da_imagem((1, b"", b"error: device unauthorized.")) == "o Android não autorizou o adb"
+    assert av.motivo_da_imagem((1, b"", b"error: device '127.0.0.1:5555' not found")) == "o adb não acha o Android"
+    assert av.motivo_da_imagem((0, b"Capturing failed.", b"")) == "o Android não conseguiu tirar o print"
+    assert av.motivo_da_imagem((0, b"", b"")) == "o print veio vazio"
+    assert av.motivo_da_imagem((0, b"<html>", b"")) == "o print não veio em PNG"
+    assert av.motivo_da_imagem((7, b"", b"algo novo")) == "código 7"
 
 
 def test_arquivos_de_trabalho_fora_da_pasta_que_o_docker_cria():

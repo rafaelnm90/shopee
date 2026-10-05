@@ -273,6 +273,81 @@ def test_reiniciar_religa_o_conteiner_e_espera_ligar(monkeypatch):
     assert ("adb", "connect", tela.av.ENDERECO_ADB) in comandos
 
 
+def _prints(monkeypatch, respostas):
+    """Prints falsos do Android, em ordem; devolve a lista de comandos de reconexão."""
+    fila, comandos = list(respostas), []
+
+    async def print_da_tela(timeout=20):
+        return fila.pop(0)
+
+    async def rodar_comando(*partes, timeout=120):
+        comandos.append(partes)
+        return True
+
+    monkeypatch.setattr(tela, "print_da_tela", print_da_tela)
+    monkeypatch.setattr(tela, "_rodar_comando", rodar_comando)
+    monkeypatch.setitem(tela._imagem, "reconectou", 0.0)
+    monkeypatch.setitem(tela._imagem, "motivo", "")
+    monkeypatch.setitem(tela._reinicio, "tarefa", None)
+    return comandos
+
+
+def test_imagem_que_falha_reconecta_o_adb_e_tenta_de_novo(monkeypatch, tmp_path):
+    monkeypatch.setattr(tela, "ESTADO", str(tmp_path / "tela_estado"))
+    comandos = _prints(monkeypatch, [(b"", "adb desconectado (offline)"), (b"\x89PNG ok", "")])
+    resposta = rodar(tela.tela(Pedido(tela.CHAVE)))
+    assert resposta.status == 200 and resposta.body == b"\x89PNG ok"
+    assert ("adb", "reconnect", "offline") in comandos
+    assert ("adb", "connect", tela.av.ENDERECO_ADB) in comandos
+    assert not (tmp_path / "tela_estado").exists()                       # voltou: nada a registrar
+
+
+def test_imagem_que_nao_volta_responde_503_e_registra_o_motivo_uma_vez(monkeypatch, tmp_path):
+    monkeypatch.setattr(tela, "ESTADO", str(tmp_path / "tela_estado"))
+    sem_imagem = (b"", "o Android não conseguiu tirar o print")
+    comandos = _prints(monkeypatch, [sem_imagem] * 3)
+    gravacoes = []
+    original = tela.gravar_estado
+    monkeypatch.setattr(tela, "gravar_estado", lambda texto: (gravacoes.append(texto), original(texto)))
+    primeira = rodar(tela.tela(Pedido(tela.CHAVE)))
+    segunda = rodar(tela.tela(Pedido(tela.CHAVE)))                       # logo depois: não reconecta de novo
+    assert primeira.status == segunda.status == 503
+    assert len([c for c in comandos if c[:2] == ("adb", "connect")]) == 1
+    assert gravacoes == ["enviado; último erro: imagem (o Android não conseguiu tirar o print)"]
+
+
+def test_imagem_durante_o_reinicio_nao_conta_como_erro(monkeypatch, tmp_path):
+    monkeypatch.setattr(tela, "ESTADO", str(tmp_path / "tela_estado"))
+    _prints(monkeypatch, [(b"", "adb desconectado (offline)")] * 2)
+
+    class Rodando:
+        def done(self):
+            return False
+
+    monkeypatch.setitem(tela._reinicio, "tarefa", Rodando())
+    assert rodar(tela.tela(Pedido(tela.CHAVE))).status == 503
+    assert not (tmp_path / "tela_estado").exists()
+
+
+def test_print_da_tela_de_verdade_pelo_adb(monkeypatch):
+    class Proc:
+        returncode = 1
+
+        async def communicate(self):
+            return b"", b"error: device offline"
+
+    async def criar(*partes, **kw):
+        assert partes == ("adb", "-s", tela.av.ENDERECO_ADB, "exec-out", "screencap", "-p")
+        return Proc()
+
+    monkeypatch.setattr(tela.asyncio, "create_subprocess_exec", criar)
+    assert rodar(tela.print_da_tela()) == (b"", "adb desconectado (offline)")
+
+
+def test_pagina_avisa_quando_a_imagem_nao_vem():
+    assert "Esperando a imagem do Android" in tela.PAGINA and "A imagem do Android voltou" in tela.PAGINA
+
+
 def test_reiniciar_que_falha_fica_registrado(monkeypatch, tmp_path):
     monkeypatch.setattr(tela, "ESTADO", str(tmp_path / "tela_estado"))
 
