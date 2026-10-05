@@ -11,10 +11,10 @@ def _painel(bm):
     return bm.painel_shopee_video
 
 
-def test_botao_fica_em_outros_canais_e_o_tutorial_saiu_das_opcoes_do_servidor(bm):
+def test_botao_fica_em_outros_canais_e_o_android_saiu_das_opcoes_do_servidor(bm):
     assert "Shopee Vídeo 🎬" in _textos(bm.obter_teclado_outros_canais())
     opcoes = _textos(bm.obter_teclado_opcoes_servidor())
-    assert "Tutorial do Android 📖" not in opcoes and "Tela do Android 📱" in opcoes
+    assert "Tutorial do Android 📖" not in opcoes and "Tela do Android 📱" not in opcoes
 
 
 def test_painel_comeca_pausado_com_5_a_10_das_13h_as_22h(bm, Msg, Est):

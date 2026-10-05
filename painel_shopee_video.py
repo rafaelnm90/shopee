@@ -248,12 +248,11 @@ TUTORIAL_ANDROID = (
     "4. Na primeira vez, ele pede a pasta dos backups. O Android não deixa usar a pasta principal nem a "
     "Download, então: toque em <b>CRIAR NOVA PASTA</b>, dê o nome <b>Backups</b>, toque em OK, entre nela "
     "e toque em <b>USAR ESTA PASTA</b> → <b>Permitir</b>.\n"
-    "5. Na lista de apps, toque em <b>Shopee</b> → <b>Backup</b>. O SAI pode pedir a assinatura PRO "
-    "para fazer o backup (em 04/10/2026 foi preciso assinar).\n"
+    "5. Na lista de apps, toque em <b>Shopee</b> → <b>Backup</b>. O backup é do SAI PRO: você "
+    "comprou o PRO vitalício em 04/10/2026, então não precisa pagar de novo: ele vale enquanto "
+    "o celular usar a mesma conta Google da Play Store, mesmo reinstalando o SAI.\n"
     "6. Espere terminar: aparece um arquivo terminado em <b>.apks</b> (uns 120 MB) na pasta Backups. "
     "Guarde esse arquivo: ele serve de novo se precisar.\n"
-    "7. Se assinou o PRO, cancele depois para não ser cobrado de novo: Play Store → foto do perfil → "
-    "<b>Pagamentos e assinaturas</b> → <b>Assinaturas</b> → SAI → <b>Cancelar assinatura</b>.\n\n"
     "⚠️ Não use o \"Compartilhar\" do SAI: ele manda só uma parte da Shopee, e o Android recusa.",
 
     "🤖 <b>3/4: no Android virtual, instalar e entrar</b>\n\n"

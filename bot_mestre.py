@@ -703,7 +703,7 @@ def obter_teclado_principal():
 def obter_teclado_opcoes_servidor():
     botoes = [
         [KeyboardButton(text="Monitorar Servidor 🖥️"), KeyboardButton(text="Zerar Filas e Tarefas 🧹")],
-        [KeyboardButton(text="Reiniciar Robôs 🔄"), KeyboardButton(text="Tela do Android 📱")],
+        [KeyboardButton(text="Reiniciar Robôs 🔄")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -7048,8 +7048,9 @@ def motivo_da_tela(saida):
 @dp.message(F.text == "Tela do Android 📱", StateFilter("*"))
 async def tela_android_handler(message: types.Message, state: FSMContext):
     """
-    Abre a tela do Android da Shopee Vídeo no navegador. O link chega neste
-    privado, mandado pela própria tela; uma tela nova substitui a anterior.
+    Abre a tela do Android da Shopee Vídeo no navegador (botão do painel da Shopee
+    Vídeo). O link chega neste privado, mandado pela própria tela; uma tela nova
+    substitui a anterior.
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     if message.from_user.id != ADMIN_ID: return
