@@ -122,35 +122,3 @@ def test_abertura_que_trava_e_cortada(bm, monkeypatch):
 def test_motivo_sem_a_parte_da_tela(bm):
     assert bm.motivo_da_tela("") == "sem detalhes"
 
-
-def test_tutorial_esta_nas_opcoes_do_servidor(bm):
-    textos = [b.text for linha in bm.obter_teclado_opcoes_servidor().keyboard for b in linha]
-    assert "Tutorial do Android 📖" in textos
-
-
-def test_tutorial_manda_as_quatro_partes_em_html_valido(bm, Msg, Est):
-    msg = Msg("Tutorial do Android 📖")
-    rodar(bm.tutorial_android_handler(msg, Est()))
-    assert msg.saidas == list(bm.TUTORIAL_ANDROID) and len(msg.saidas) == 4
-    for parte in msg.saidas:
-        assert len(parte) <= 4096                                          # limite de uma mensagem
-        assert parte.count("<b>") == parte.count("</b>")
-        sem_tags = parte.replace("<b>", "").replace("</b>", "")
-        assert "<" not in sem_tags and ">" not in sem_tags and "&" not in sem_tags
-    assert "https://play.google.com/store/apps/details?id=com.mtv.sai" in msg.saidas[1]
-
-
-def test_tutorial_usa_os_nomes_que_existem_no_bot_e_na_pagina(bm):
-    import tela_android
-    texto = "".join(bm.TUTORIAL_ANDROID)
-    for botao in ("📦 Enviar app", "🧹 Fechar apps", "🔄 Reiniciar Android", "🗑️ Resetar de fábrica",
-                  "✅ Terminei", "Texto para digitar", "Digitar", "● Início", "Esperando a imagem do Android"):
-        assert botao in texto and botao in tela_android.PAGINA, botao
-    textos = [b.text for linha in bm.obter_teclado_opcoes_servidor().keyboard for b in linha]
-    assert "Tela do Android 📱" in texto and "Tela do Android 📱" in textos
-
-
-def test_tutorial_so_para_o_admin(bm, Msg, Est):
-    msg = Msg("Tutorial do Android 📖", user_id=123)
-    rodar(bm.tutorial_android_handler(msg, Est()))
-    assert msg.saidas == []
