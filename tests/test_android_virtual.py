@@ -96,6 +96,25 @@ def test_desligar_de_novo_nao_para_outra_vez(monkeypatch, capsys):
     assert "já estava desligado" in capsys.readouterr().out
 
 
+def test_apagar_desliga_e_apaga_o_conteudo_sem_religar(monkeypatch, tmp_path, capsys):
+    m = Maquina()
+    _instalar(monkeypatch, m)
+    monkeypatch.setattr(av, "PASTA_DADOS", str(tmp_path))
+    assert av.apagar() is True
+    assert m.pediu("docker", "stop", av.CONTEINER)
+    assert m.pediu("find", str(tmp_path), "-mindepth", "1", "-delete")
+    assert not m.pediu("docker", "start") and not m.pediu("docker", "rm")
+    assert "apagar apps e login: ok" in capsys.readouterr().out
+
+
+def test_apagar_sem_pasta_de_dados_nao_apaga_nada(monkeypatch, tmp_path):
+    m = Maquina(conteiner="exited")
+    _instalar(monkeypatch, m)
+    monkeypatch.setattr(av, "PASTA_DADOS", str(tmp_path / "nao_existe"))
+    assert av.apagar() is True
+    assert not m.pediu("find")
+
+
 def test_falha_na_instalacao_para_e_mostra_so_o_codigo(monkeypatch, capsys):
     m = Maquina(docker=False, conteiner=None)
     _instalar(monkeypatch, m)

@@ -12,6 +12,7 @@ Roda à mão pelo workflow android.yml ou no servidor:
     python3 android_virtual.py --instalar-shopee  # baixa e instala (ou atualiza) o app da Shopee
     python3 android_virtual.py --tela             # abre a tela no navegador (tela_android.py)
     python3 android_virtual.py --desligar         # desliga o Android (o --preparar religa)
+    python3 android_virtual.py --apagar           # desliga e apaga apps e login (de fábrica)
 
 O --preparar faz só o que falta, e pode rodar de novo sem estragar nada:
 1. instala o Docker e o adb do Ubuntu;
@@ -33,6 +34,10 @@ no privado do Rafael, nunca no log.
 O --desligar para o contêiner (e fecha a tela, se aberta) sem apagar nada: o
 app e o login continuam, e o --preparar religa. Serve para pausas, quando a
 conta da Shopee não deve ficar conectada pelo servidor.
+
+O --apagar desliga e apaga tudo o que está dentro do Android (apps, login da
+Shopee), como um reset de fábrica, e o deixa desligado. O --preparar liga de
+novo, do zero.
 
 Imprime só estados e números, porque o log do Actions é público.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
@@ -417,6 +422,22 @@ def desligar():
     return _passo("desligar o contêiner", _rodar("sudo", "-n", "docker", "stop", CONTEINER, timeout=180))
 
 
+def apagar():
+    """
+    Desliga o Android e apaga o conteúdo da pasta de dados (apps instalados, login
+    da Shopee, tudo), sem ligar de novo. A pasta em si fica, porque o contêiner a monta.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    if not desligar():
+        return False
+    print("== Apagando os dados do Android")
+    if not os.path.isdir(PASTA_DADOS):
+        print("dados: a pasta não existe, nada a apagar")
+        return True
+    return _passo("apagar apps e login", _rodar("sudo", "-n", "find", PASTA_DADOS, "-mindepth", "1", "-delete",
+                                                timeout=600))
+
+
 def _passo(nome, resultado):
     print(f"{nome}: {'ok' if _ok(resultado) else 'falhou (' + _codigo(resultado) + ')'}")
     return _ok(resultado)
@@ -470,7 +491,9 @@ def preparar():
 if __name__ == "__main__":
     pedidos = sys.argv[1:]
     ok = True
-    if "--desligar" in pedidos:
+    if "--apagar" in pedidos:
+        ok = apagar()
+    elif "--desligar" in pedidos:
         ok = desligar()
     if "--preparar" in pedidos:
         ok = preparar()
