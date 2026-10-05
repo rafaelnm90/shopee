@@ -115,6 +115,51 @@ def test_apagar_sem_pasta_de_dados_nao_apaga_nada(monkeypatch, tmp_path):
     assert not m.pediu("find")
 
 
+def _tailscale(monkeypatch, m, conectada):
+    estados = iter(conectada)
+
+    def rodar(*partes, timeout=120):
+        m.comandos.append(partes)
+        if partes[:2] == ("tailscale", "status"):
+            return 0, '{"BackendState": "%s"}' % ("Running" if next(estados) else "NeedsLogin")
+        return 0, ""
+
+    monkeypatch.setattr(av, "_rodar", rodar)
+
+
+def test_tailscale_conecta_sem_mexer_no_dns_e_sem_mostrar_a_chave(monkeypatch, capsys):
+    m = Maquina()
+    _instalar(monkeypatch, m)
+    _tailscale(monkeypatch, m, [False, True, True])
+    monkeypatch.setenv("TS_KEY", "chave-de-teste")
+    assert av.conectar_tailscale() is True
+    subir = m.pediu("tailscale", "up")[0]
+    assert "--auth-key=chave-de-teste" in subir and "--accept-dns=false" in subir and "--accept-routes=false" in subir
+    saida = capsys.readouterr().out
+    assert "chave-de-teste" not in saida and "rede privada: conectada" in saida
+
+
+def test_tailscale_sem_o_segredo_avisa_e_nao_tenta(monkeypatch, capsys):
+    m = Maquina()
+    _instalar(monkeypatch, m)
+    _tailscale(monkeypatch, m, [False])
+    monkeypatch.delenv("TS_KEY", raising=False)
+    assert av.conectar_tailscale() is False
+    assert not m.pediu("tailscale", "up") and "falta o segredo TAILSCALE_AUTHKEY" in capsys.readouterr().out
+
+
+def test_tailscale_ja_conectado_nao_reconecta(monkeypatch):
+    m = Maquina()
+    _instalar(monkeypatch, m)
+    _tailscale(monkeypatch, m, [True])
+    assert av.conectar_tailscale() is True and not m.pediu("tailscale", "up")
+
+
+def test_estado_da_rede_privada_sem_tailscale(monkeypatch):
+    monkeypatch.setattr(av.shutil, "which", lambda nome: None)
+    assert av.estado_tailscale() == "não instalada"
+
+
 def test_falha_na_instalacao_para_e_mostra_so_o_codigo(monkeypatch, capsys):
     m = Maquina(docker=False, conteiner=None)
     _instalar(monkeypatch, m)

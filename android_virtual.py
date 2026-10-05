@@ -13,6 +13,7 @@ Roda à mão pelo workflow android.yml ou no servidor:
     python3 android_virtual.py --tela             # abre a tela no navegador (tela_android.py)
     python3 android_virtual.py --desligar         # desliga o Android (o --preparar religa)
     python3 android_virtual.py --apagar           # desliga e apaga apps e login (de fábrica)
+    python3 android_virtual.py --tailscale        # liga o servidor à rede privada do celular
 
 O --preparar faz só o que falta, e pode rodar de novo sem estragar nada:
 1. instala o Docker e o adb do Ubuntu;
@@ -38,6 +39,12 @@ conta da Shopee não deve ficar conectada pelo servidor.
 O --apagar desliga e apaga tudo o que está dentro do Android (apps, login da
 Shopee), como um reset de fábrica, e o deixa desligado. O --preparar liga de
 novo, do zero.
+
+O --tailscale instala o Tailscale (se faltar) e liga o servidor à rede privada do
+Rafael, onde vai ficar o celular de verdade do plano B (roteiro_robo_shopee_video.md).
+A chave vem do segredo TAILSCALE_AUTHKEY do GitHub, pela variável TS_KEY, e nunca
+aparece no log. A rede privada não mexe no DNS nem nas rotas do servidor: a internet
+dos robôs continua igual.
 
 Imprime só estados e números, porque o log do Actions é público.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
@@ -209,6 +216,7 @@ def mostrar_estado():
           f"binder: {'carregado' if binder_carregado() else 'não carregado'}")
     estado = estado_conteiner()
     print(f"contêiner {CONTEINER}: {estado or 'não existe'}")
+    print(f"rede privada (celular): {estado_tailscale()}")
     if estado != "running":
         return
     uso = _rodar("sudo", "-n", "docker", "stats", "--no-stream", "--format", "{{.MemUsage}} | CPU {{.CPUPerc}}",
@@ -438,6 +446,44 @@ def apagar():
                                                 timeout=600))
 
 
+def estado_tailscale():
+    """'conectada', 'desligada' ou 'não instalada': só o estado, sem endereços nem nomes."""
+    if shutil.which("tailscale") is None:
+        return "não instalada"
+    r = _rodar("tailscale", "status", "--json", timeout=30)
+    try:
+        conectada = _ok(r) and json.loads(r[1]).get("BackendState") == "Running"
+    except ValueError:
+        conectada = False
+    return "conectada" if conectada else "desligada"
+
+
+def conectar_tailscale():
+    """
+    Liga o servidor à rede privada. Com --accept-dns=false e --accept-routes=false, a
+    rede privada só serve para falar com os aparelhos do Rafael. Devolve True se ficou
+    conectada.
+    """
+    print("== Rede privada (Tailscale)")
+    if shutil.which("tailscale") is None:
+        if not _passo("instalar o tailscale", _rodar(
+                "sh", "-c", "curl -fsSL https://tailscale.com/install.sh | sudo -n sh", timeout=900)):
+            return False
+    if estado_tailscale() == "conectada":
+        print("rede privada: já estava conectada")
+        return True
+    chave = os.environ.get("TS_KEY", "").strip()
+    if not chave:
+        print("rede privada: falta o segredo TAILSCALE_AUTHKEY no GitHub")
+        return False
+    if not _passo("conectar à rede privada", _rodar(
+            "sudo", "-n", "tailscale", "up", f"--auth-key={chave}", "--hostname=shopee-servidor",
+            "--accept-dns=false", "--accept-routes=false", timeout=120)):
+        return False
+    print(f"rede privada: {estado_tailscale()}")
+    return estado_tailscale() == "conectada"
+
+
 def _passo(nome, resultado):
     print(f"{nome}: {'ok' if _ok(resultado) else 'falhou (' + _codigo(resultado) + ')'}")
     return _ok(resultado)
@@ -495,6 +541,8 @@ if __name__ == "__main__":
         ok = apagar()
     elif "--desligar" in pedidos:
         ok = desligar()
+    if "--tailscale" in pedidos:
+        ok = conectar_tailscale()
     if "--preparar" in pedidos:
         ok = preparar()
     if ok and "--instalar-loja" in pedidos:
