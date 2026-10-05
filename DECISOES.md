@@ -149,8 +149,8 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 
 ## Shopee Vídeo
 
-- **04/10/2026:** robô novo que posta sozinho na Shopee Vídeo pelo app, num Android virtual no servidor. A Shopee não tem forma oficial de postar por programa: a Shopee Vídeo só aceita postagem pelo app. O Rafael escolheu sabendo dos riscos: vai contra os termos da Shopee, ela pode perceber o emulador, e uma atualização do app pode quebrar a automação.
-- **04/10/2026:** posta na conta principal de afiliado do Rafael, ciente de que um bloqueio atinge essa conta.
+- ~~**04/10/2026:** robô novo que posta sozinho na Shopee Vídeo pelo app, num Android virtual no servidor. A Shopee não tem forma oficial de postar por programa: a Shopee Vídeo só aceita postagem pelo app. O Rafael escolheu sabendo dos riscos: vai contra os termos da Shopee, ela pode perceber o emulador, e uma atualização do app pode quebrar a automação.~~ Substituída em 05/10/2026 pelo modo assistente (abaixo).
+- ~~**04/10/2026:** posta na conta principal de afiliado do Rafael, ciente de que um bloqueio atinge essa conta.~~ Substituída em 05/10/2026: a conta principal não fica mais num robô (modo assistente, abaixo).
 - **04/10/2026:** os vídeos vêm dos Autorais (feitos para afiliados repostarem), com o produto vinculado no próprio vídeo: a comissão só conta assim, e link na descrição não vale.
 - ~~**04/10/2026:** 10 vídeos por dia.~~ Substituída em 04/10/2026 pela faixa sorteada e pela janela de horário (abaixo).
 - **04/10/2026:** a quantidade por dia é uma faixa escolhida pelo Rafael (ex.: de 5 a 10). Cada dia sorteia um número dentro dela, e os vídeos se espalham por uma janela de horário que ele também escolhe (ex.: das 13h às 22h), como nas outras filas (`motor_filas`). No painel, ele pausa e retoma as postagens quando quiser e muda a faixa e a janela.
@@ -177,12 +177,15 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **05/10/2026:** o texto vem do prompt do Gem "Shopee Vídeo" do Rafael, adaptado ao robô. Do que o Gem gera, o robô usa só o "título do vídeo": nome do produto sem frase de gancho, emojis e hashtags, de 130 a 150 caracteres, sem marca. A headline fica de fora, como o Rafael já faz.
 - **05/10/2026:** as diretrizes da Shopee Vídeo (PDF do Rafael) ficam resumidas em `diretrizes_shopee_video.md` e valem sempre ("isso é importante"). A IA recebe o resumo com cada vídeo e, se achar violação (o ❌ do Gem), o robô não posta aquele vídeo.
 - **05/10/2026:** curtir o vídeo, comentar e curtir o próprio comentário (o fim do tutorial) não é automático: a diretriz 9.1.1 proíbe curtidas e comentários automáticos. Depois de cada postagem, o texto do comentário do Gem (400 a 450 caracteres, com 5 a 10 hashtags no fim) vai no privado do Rafael, que comenta à mão se quiser.
-- **05/10/2026:** o primeiro teste termina em Rascunhos, não em Postar: o Rafael confere na Tela do Android e posta. Depois que ele aprovar, o robô passa a postar sozinho.
+- ~~**05/10/2026:** o primeiro teste termina em Rascunhos, não em Postar: o Rafael confere na Tela do Android e posta. Depois que ele aprovar, o robô passa a postar sozinho.~~ Substituída em 05/10/2026: no modo assistente quem posta é o Rafael.
 - **05/10/2026:** para aprender as telas do app, a exploração (`postador_shopee_video.py --explorar`, ação "explorar" do android.yml) nunca toca em Postar, e o log mostra só a forma da tela, porque a tela mostra a conta do Rafael.
-- **05/10/2026:** robô da Shopee Vídeo **em pausa**. Depois das primeiras explorações (o app fechado e reaberto várias vezes em meia hora), a Shopee passou a abrir sozinha uma página de "Verificação" de segurança, que dava erro ao carregar. O Rafael pausou para não arriscar a conta principal:
-  - o Android virtual fica desligado durante a pausa (ação "desligar" do android.yml), para a conta não ficar conectada pelo servidor de nuvem; o app e o login continuam lá;
-  - lembrete diário no privado dele até retomarmos;
-  - na volta: religar o Android, o Rafael resolve a verificação pela Tela do Android 📱 e eu testo devagar (uma rodada, poucos toques, sem fechar e reabrir o app). Se a verificação voltar mesmo assim, decidimos juntos; disfarçar o Android continua fora.
+- ~~**05/10/2026:** robô da Shopee Vídeo **em pausa**. Depois das primeiras explorações (o app fechado e reaberto várias vezes em meia hora), a Shopee passou a abrir sozinha uma página de "Verificação" de segurança, que dava erro ao carregar. O Rafael pausou para não arriscar a conta principal:~~ Substituída em 05/10/2026 pelo modo assistente (abaixo).
+  - ~~o Android virtual fica desligado durante a pausa (ação "desligar" do android.yml), para a conta não ficar conectada pelo servidor de nuvem; o app e o login continuam lá;~~
+  - ~~lembrete diário no privado dele até retomarmos;~~
+  - ~~na volta: religar o Android, o Rafael resolve a verificação pela Tela do Android 📱 e eu testo devagar (uma rodada, poucos toques, sem fechar e reabrir o app). Se a verificação voltar mesmo assim, decidimos juntos; disfarçar o Android continua fora.~~
+- **05/10/2026:** **modo assistente** no lugar do robô que posta sozinho. O Rafael teve receio de perder a conta principal: a Shopee vê que é servidor de nuvem e Android virtual, e já tinha pedido verificação. O robô prepara tudo e manda no privado dele: o vídeo dos Autorais, o título pelo prompt do Gem (conferido com as diretrizes), os produtos na ordem (menor preço primeiro; no empate, maior comissão) e o texto do comentário. Ele posta pelo próprio celular. Quantidade por dia, janela de horário e pausa continuam no painel.
+- **05/10/2026:** o Android virtual foi apagado (apps e login da Shopee, ação "apagar" do android.yml) e fica desligado. O Rafael troca a senha da Shopee pelo celular, para desconectar aquele aparelho de vez.
+- **05/10/2026:** para depois do modo assistente: o Rafael quer testar a postagem automática num celular de verdade dele, que está parado em casa e ficaria ligado o tempo todo (internet de casa e aparelho real, em vez de servidor de nuvem e Android virtual). Como ligar esse celular ao robô com segurança fica para quando ele quiser testar.
 
 ## Monitor, deploy e servidor
 
