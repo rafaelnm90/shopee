@@ -13,6 +13,9 @@ em arquivo, captura dos parceiros, contas dos Autorais (só estados), onde os li
 Espião levam (só o tipo de cada página), journal (com as linhas de log que mais se repetem e de onde vêm no
 código), o Baixador hora a hora (só contagens), versões das bibliotecas, fora do projeto e se o servidor aguenta um
 Android virtual (para o robô da Shopee Vídeo).
+
+Com --link-de-teste, em vez do inventário, gera o link de afiliado do vídeo mais
+recente do Espião e manda no privado do Rafael, para ele conferir se abre o produto.
 """
 import ast
 import glob
@@ -22,6 +25,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import time
 import urllib.parse
 
@@ -499,6 +503,42 @@ def testes_de_conversao(caminhos):
         print(f"      {rotulo}: {asyncio.run(conversao_de_teste(origem))}")
 
 
+def link_de_teste(quantos=10):
+    """
+    Gera, com o conversor de verdade (subId "diagnostico"), o link de afiliado do vídeo
+    da Shopee Vídeo mais recente da fila do Espião e manda no privado do Rafael, junto
+    com o link original, para ele tocar e conferir se abre o produto. No log, só se foi
+    enviado.
+    """
+    secao("Link de teste do Espião (vai no privado do Rafael)")
+    import asyncio
+    import api_shopee
+    import avisar_rafael
+    fila = (db.ler_config("fila_clonagem", {"fila": []}) or {}).get("fila", [])
+    links = [item.get("link_original") for item in fila if item.get("link_original")][-quantos:]
+
+    async def achar_e_converter():
+        for link in reversed(links):
+            caminho = await api_shopee.seguir_link(link)
+            if api_shopee.eh_video(caminho[-1]):
+                return link, await api_shopee.converter_link_shopee(link, "diagnostico")
+        return None, None
+
+    original, novo = asyncio.run(achar_e_converter())
+    if not original:
+        print(f"   nenhum link de vídeo nos {quantos} mais recentes")
+        return
+    if novo == original:
+        print("   a conversão falhou (a API devolveu o link original)")
+        return
+    enviado = avisar_rafael.mandar_texto(
+        "🔗 Link de teste do Espião (vídeo da Shopee Vídeo)\n\n"
+        f"Toque e veja se abre o PRODUTO, e não a categoria:\n{novo}\n\n"
+        f"Para comparar, o link original do grupo:\n{original}\n\n"
+        "Depois conte no chat do Claude o que abriu.")
+    print("   enviado no privado do Rafael" if enviado else "   o Telegram não aceitou a mensagem")
+
+
 # Erros que o pool_contas grava com texto fixo; qualquer outro sai só com o tipo.
 ERROS_FIXOS_DO_POOL = (
     "grupo dos Autorais não configurado", "restrita no grupo", "grupo inacessível para esta conta",
@@ -769,6 +809,9 @@ def android_virtual():
 
 if __name__ == "__main__":
     os.chdir(PASTA)
+    if "--link-de-teste" in sys.argv:
+        link_de_teste()
+        sys.exit(0)
     for parte in (pastas_do_projeto, arquivos_soltos, banco, erros_registrados, filas_em_arquivo,
                   captura_dos_parceiros, contas_dos_autorais, links_do_espiao, journal, baixador_por_hora,
                   versoes, fora_do_projeto, android_virtual):
