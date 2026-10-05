@@ -23,10 +23,11 @@ def test_painel_comeca_pausado_com_5_a_10_das_13h_as_22h(bm, Msg, Est):
     texto = msg.saidas[-1]
     assert "Pausado" in texto and "5 a 10" in texto and "das 13h às 22h" in texto and "hoje:" in texto
     assert "modo assistente" in texto and "Mandados hoje: <b>0</b>" in texto
+    assert "Fonte dos vídeos: <b>Autorais 🎥</b>" in texto
     assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu.state
     teclado = _textos(sv.teclado_painel(sv.ler_config()))
     for botao in ("Vídeos por Dia 📦", "Horário de Postagem ⏰", "Retomar Robô ▶️", "Enviar 1 Agora 📤",
-                  "Voltar aos Canais 🔙"):
+                  "Fonte dos Vídeos 🎞️", "Voltar aos Canais 🔙"):
         assert botao in teclado
     assert "Tela do Android 📱" not in teclado and "Tutorial do Android 📖" not in teclado
 
@@ -101,8 +102,9 @@ def test_botoes_vem_antes_das_respostas_de_texto(bm):
     # tem de abrir o botão, e não ser lido como resposta.
     sv = _painel(bm)
     ordem = [h.callback.__name__ for h in sv.router.message.handlers]
-    botoes = ("painel_handler", "pedir_faixa", "pedir_janela", "pedir_pausa", "enviar_agora_handler")
-    respostas = ("confirmar_faixa", "confirmar_janela", "confirmar_com_os_botoes")
+    botoes = ("painel_handler", "pedir_faixa", "pedir_janela", "pedir_pausa", "enviar_agora_handler",
+              "pedir_fonte")
+    respostas = ("confirmar_faixa", "confirmar_janela", "salvar_fonte", "confirmar_com_os_botoes")
     assert max(ordem.index(b) for b in botoes) < min(ordem.index(r) for r in respostas)
 
 
@@ -119,30 +121,30 @@ def test_enviar_agora_manda_mesmo_pausado(bm, Msg, Est, monkeypatch):
     sv = _painel(bm)
     pedidos = []
 
-    async def preparar(bot, admin_id, agora=None):
-        pedidos.append(admin_id)
+    async def preparar(bot, admin_id, agora=None, fonte=None):
+        pedidos.append((admin_id, fonte))
         return "postagem mandada no seu privado"
 
     monkeypatch.setattr(sv.assistente, "preparar_e_enviar", preparar)
     msg = Msg("Enviar 1 Agora 📤")
     rodar(sv.enviar_agora_handler(msg, Est()))
-    assert pedidos == [sv.ADMIN_ID] and sv.ler_config()["pausado"] is True
+    assert pedidos == [(sv.ADMIN_ID, "autorais")] and sv.ler_config()["pausado"] is True
     assert "Preparando" in msg.saidas[0] and len(msg.saidas) == 1
 
 
 def test_enviar_agora_diz_por_que_nao_mandou(bm, Msg, Est, monkeypatch):
     sv = _painel(bm)
 
-    async def sem_video(bot, admin_id, agora=None):
-        return "não há vídeo dos Autorais para mandar (a fila está vazia ou sem arquivos)"
+    async def sem_video(bot, admin_id, agora=None, fonte=None):
+        return "não há vídeo em Autorais 🎥 para mandar (a fila está vazia ou sem arquivos)"
 
-    async def quebra(bot, admin_id, agora=None):
+    async def quebra(bot, admin_id, agora=None, fonte=None):
         raise RuntimeError("segredo")
 
     monkeypatch.setattr(sv.assistente, "preparar_e_enviar", sem_video)
     msg = Msg("Enviar 1 Agora 📤")
     rodar(sv.enviar_agora_handler(msg, Est()))
-    assert "Não mandei: não há vídeo dos Autorais" in msg.saidas[-1]
+    assert "Não mandei: não há vídeo em Autorais 🎥" in msg.saidas[-1]
     monkeypatch.setattr(sv.assistente, "preparar_e_enviar", quebra)
     msg = Msg("Enviar 1 Agora 📤")
     rodar(sv.enviar_agora_handler(msg, Est()))
@@ -153,17 +155,17 @@ def test_agendador_so_manda_quando_chega_a_hora_e_nao_pausado(bm, monkeypatch):
     sv = _painel(bm)
     pedidos = []
 
-    async def preparar(bot, admin_id, agora=None):
-        pedidos.append(1)
+    async def preparar(bot, admin_id, agora=None, fonte=None):
+        pedidos.append(fonte)
         return "postagem mandada no seu privado"
 
     monkeypatch.setattr(sv.assistente, "preparar_e_enviar", preparar)
     monkeypatch.setattr(sv.assistente, "decidir_envio", lambda config: not config["pausado"])
     rodar(sv.verificar_envio())
     assert pedidos == []                                                   # começa pausado
-    sv.alterar_config(pausado=False)
+    sv.alterar_config(pausado=False, fonte="viral")
     rodar(sv.verificar_envio())
-    assert pedidos == [1]
+    assert pedidos == ["viral"]
 
 
 def test_envio_fica_no_agendador_a_cada_5_min(bm):
@@ -173,3 +175,22 @@ def test_envio_fica_no_agendador_a_cada_5_min(bm):
     sv.configurar_dependencias(sv.bot_instance, agendador, sv.ADMIN_ID)
     job = agendador.get_job("shopee_video_assistente")
     assert job is not None and job.trigger.interval.total_seconds() == 300
+
+
+def test_fonte_dos_videos_muda_pelos_botoes(bm, Msg, Est):
+    sv, est = _painel(bm), Est()
+    msg = Msg("Fonte dos Vídeos 🎞️")
+    rodar(sv.pedir_fonte(msg, est))
+    assert "Hoje: <b>Autorais 🎥</b>" in msg.saidas[0] and "7.2.1" in msg.saidas[0]
+    assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.aguardando_fonte.state
+    msg = Msg("Canal Afiliados 📺")
+    rodar(sv.salvar_fonte(msg, est))
+    assert sv.ler_config()["fonte"] == "principal" and "Canal Afiliados 📺" in msg.saidas[0]
+    assert "Fonte dos vídeos: <b>Canal Afiliados 📺</b>" in msg.saidas[-1]
+
+
+def test_fonte_cancelada_nao_muda_nada(bm, Msg, Est):
+    sv = _painel(bm)
+    est = Est(estado=sv.ShopeeVideoFluxo.aguardando_fonte)
+    rodar(bm.cancelar_fluxo_global(Msg("Cancelar ❌"), est))
+    assert sv.ler_config()["fonte"] == "autorais"
