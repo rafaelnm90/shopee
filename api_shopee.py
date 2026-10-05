@@ -12,6 +12,7 @@ import time
 import hashlib
 import re
 import unicodedata
+import urllib.parse
 import aiohttp
 import logging
 from dotenv import load_dotenv
@@ -59,6 +60,99 @@ def limpar_sub_id(valor, padrao="geral"):
     limpo = re.sub(r"[^a-zA-Z0-9]", "", texto)[:40]
     return limpo or padrao
 
+# Onde um link da Shopee diz qual é o produto: no caminho (Nome-do-produto-i.<loja>.<item>
+# ou product/<loja>/<item>, que cobre também o universal-link/product/...) ou num link
+# guardado dentro dos parâmetros (an_redir?origin_link=...), por isso a busca vai no texto
+# já decodificado.
+PADROES_PRODUTO = (re.compile(r"-i\.(\d+)\.(\d+)"), re.compile(r"/product/(\d+)/(\d+)"))
+HOSTS_CURTOS = ("s.shopee.com.br", "shope.ee", "shp.ee")
+NAVEGADOR = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+
+
+def produto_do_link(url):
+    """
+    Link canônico do produto (https://shopee.com.br/product/<loja>/<item>) que o link
+    aponta, ou None se ele não leva a um produto (busca, categoria, login...).
+    """
+    texto = urllib.parse.unquote(urllib.parse.unquote(url or ""))
+    for padrao in PADROES_PRODUTO:
+        achado = padrao.search(texto)
+        if achado:
+            return f"https://shopee.com.br/product/{achado.group(1)}/{achado.group(2)}"
+    parametros = urllib.parse.parse_qs(urllib.parse.urlsplit(texto).query)
+    loja, item = parametros.get("shopid", [""])[0], parametros.get("itemid", [""])[0]
+    if loja.isdigit() and item.isdigit():
+        return f"https://shopee.com.br/product/{loja}/{item}"
+    return None
+
+
+def tipo_de_link(url):
+    """Que página o link abre, numa palavra: serve para o log e o inventário, que não mostram links."""
+    if produto_do_link(url):
+        return "produto"
+    caminho = urllib.parse.urlsplit(url or "").path.lower()
+    if _eh_link_curto(url):
+        return "link curto"
+    if "an_redir" in caminho:
+        return "redirecionador de afiliado"
+    if caminho.startswith("/search"):
+        return "busca"
+    if "-cat." in caminho or caminho.startswith("/cat"):
+        return "categoria"
+    if any(trecho in caminho for trecho in ("login", "verify", "captcha")):
+        return "login ou verificação"
+    if caminho in ("", "/"):
+        return "página inicial"
+    return "outra página"
+
+
+async def seguir_link(link, saltos=10):
+    """
+    Cada endereço por onde o link passa até parar, a começar pelo próprio link. Segue
+    um redirecionamento de cada vez para não perder os do meio: a Shopee às vezes manda
+    o servidor do produto para outra página (categoria, busca), e o produto só aparece
+    num dos saltos.
+    """
+    caminho = [link]
+    try:
+        async with aiohttp.ClientSession(headers=NAVEGADOR) as session:
+            for _ in range(saltos):
+                async with session.get(caminho[-1], allow_redirects=False) as resp:
+                    destino = resp.headers.get("Location")
+                    if resp.status not in (301, 302, 303, 307, 308) or not destino:
+                        break
+                caminho.append(urllib.parse.urljoin(caminho[-1], destino))
+    except Exception as e:
+        logger.error(f"❌ [API Shopee] Erro ao expandir URL: {type(e).__name__}")
+    return caminho
+
+
+def _eh_link_curto(link):
+    host = urllib.parse.urlsplit(link or "").netloc.lower()
+    return any(host == h or host.endswith("." + h) for h in HOSTS_CURTOS)
+
+
+async def link_para_converter(link_original):
+    """
+    O endereço que vai para a API de afiliado. Link curto: o produto, achado em
+    qualquer salto dos redirecionamentos (a própria página do produto, sem os
+    parâmetros, ou o produto guardado num parâmetro). Sem produto em lugar nenhum,
+    fica o último endereço sem os parâmetros, e o log diz onde o link parou. Link que
+    não é curto vai como veio.
+    """
+    if not _eh_link_curto(link_original):
+        return link_original
+    caminho = await seguir_link(link_original)
+    for endereco in caminho[1:]:
+        if any(padrao.search(urllib.parse.urlsplit(endereco).path) for padrao in PADROES_PRODUTO):
+            return endereco.split('?')[0]
+        produto = produto_do_link(endereco)
+        if produto:
+            return produto
+    logger.warning(f"⚠️ [API Shopee] Link sem produto: termina em {tipo_de_link(caminho[-1])}.")
+    return caminho[-1].split('?')[0]
+
+
 async def converter_link_shopee(link_original, sub_id_nicho="geral", app_id=None, app_secret=None):
     """
     Converte um link da Shopee em link curto de afiliado, marcado com o subId
@@ -77,17 +171,10 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", app_id=None
         logger.warning("⏳ [API Shopee] Chaves ausentes. Ignorando conversão.")
         return link_original
 
-    link_processar = link_original
-    
-    # Link curto: segue o redirecionamento até o link do produto e tira os parâmetros (?...).
-    if "shp.ee" in link_original or "shope.ee" in link_original or "s.shopee.com.br" in link_original:
-        try:
-            headers_redirect = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-            async with aiohttp.ClientSession() as session:
-                async with session.get(link_original, allow_redirects=True, headers=headers_redirect) as resp:
-                    link_processar = str(resp.url).split('?')[0]
-        except Exception as e:
-            logger.error(f"❌ [API Shopee] Erro ao expandir URL: {e}")
+    # O link de afiliado sai para o produto, e não para a página onde o redirecionamento
+    # parou: se a Shopee manda o servidor para a categoria, o link levaria o cliente para
+    # a categoria em vez do produto.
+    link_processar = await link_para_converter(link_original)
 
     endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
     sub_id_limpo = limpar_sub_id(sub_id_nicho)

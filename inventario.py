@@ -9,7 +9,8 @@ do projeto, trechos fixos das mensagens de log). Nunca o conteúdo dos logs, das
 filas ou do banco; ids de parceiro também não.
 
 Seções: pastas do projeto, arquivos soltos, banco, erros por origem e tipo, filas
-em arquivo, captura dos parceiros, contas dos Autorais (só estados), journal (com as linhas de log que mais se repetem e de onde vêm no
+em arquivo, captura dos parceiros, contas dos Autorais (só estados), onde os links do
+Espião levam (só o tipo de cada página), journal (com as linhas de log que mais se repetem e de onde vêm no
 código), o Baixador hora a hora (só contagens), versões das bibliotecas, fora do projeto e se o servidor aguenta um
 Android virtual (para o robô da Shopee Vídeo).
 """
@@ -200,6 +201,36 @@ def captura_dos_parceiros():
               f"{dia.get('capturados', 0)} capturado(s); última mensagem {dia.get('ultima_mensagem') or 'nenhuma'}")
         for motivo, qtd in sorted((dia.get("recusados") or {}).items(), key=lambda x: -x[1]):
             print(f"   recusado: {motivo} ({qtd})")
+
+
+def links_do_espiao(quantos=10):
+    """
+    Onde os links mais recentes do Espião levam quando o servidor os abre, salto a
+    salto, só com o tipo de cada página (produto, categoria, busca...). Mostra se o
+    link de afiliado sai para o produto: o conversor usa o produto achado em qualquer
+    salto; sem produto no caminho, usaria a última página. Nenhum link aparece.
+    """
+    secao(f"Links do Espião: onde o servidor chega (os {quantos} mais recentes)")
+    import asyncio
+    import api_shopee
+    fila = (db.ler_config("fila_clonagem", {"fila": []}) or {}).get("fila", [])
+    links = [item.get("link_original") for item in fila if item.get("link_original")][-quantos:]
+    if not links:
+        print("   nenhum link na fila")
+        return
+
+    async def seguir_todos():
+        return [await api_shopee.seguir_link(link) for link in links]
+
+    sem_produto = parou_fora = 0
+    for n, caminho in enumerate(asyncio.run(seguir_todos()), 1):
+        com_produto = any(api_shopee.produto_do_link(endereco) for endereco in caminho[1:])
+        sem_produto += not com_produto
+        parou_fora += com_produto and api_shopee.tipo_de_link(caminho[-1]) != "produto"
+        print(f"{n}. {' → '.join(api_shopee.tipo_de_link(e) for e in caminho)} | "
+              f"produto no caminho: {'sim' if com_produto else 'NÃO'}")
+    print(f"   {parou_fora} parou fora do produto, mas com o produto no meio do caminho; "
+          f"{sem_produto} sem produto em lugar nenhum")
 
 
 # Erros que o pool_contas grava com texto fixo; qualquer outro sai só com o tipo.
@@ -473,7 +504,7 @@ def android_virtual():
 if __name__ == "__main__":
     os.chdir(PASTA)
     for parte in (pastas_do_projeto, arquivos_soltos, banco, erros_registrados, filas_em_arquivo,
-                  captura_dos_parceiros, contas_dos_autorais, journal, baixador_por_hora,
+                  captura_dos_parceiros, contas_dos_autorais, links_do_espiao, journal, baixador_por_hora,
                   versoes, fora_do_projeto, android_virtual):
         try:
             parte()
