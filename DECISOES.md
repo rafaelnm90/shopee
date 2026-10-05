@@ -210,6 +210,10 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - Nos logs do Actions saem só estados e números, porque o repositório é público.
   - Nada de acesso SSH direto pela sessão do Claude.
 - **03/10/2026:** backup automático todo dia às 03:40 do banco, das sessões, dos JSON e do `.env` em `~/backups`, ficando os 7 mais novos. Se falhar, aviso no privado. O monitor de saúde avisa se o último passar de 30 h, e o `/status` mostra a idade dele.
+- **05/10/2026:** nas Opções do Servidor há o botão "Acessos do Servidor 🔐", no mesmo formato das Informações de Acesso das notas (link, login para copiar e senha escondida), para o Rafael lembrar onde entrar:
+  - Tailscale (rede privada do celular): login.tailscale.com, entrando pelo Google. Guarda só qual conta Google; a senha é a do Google e não fica no bot.
+  - Oracle Cloud (servidor dos robôs): cloud.oracle.com, com nome da conta na nuvem, e-mail e senha.
+  - O Rafael cadastra e troca os dados pelo próprio bot (Editar Tailscale ✏️ e Editar Oracle ✏️). Ficam no banco do servidor, nunca no código (o repositório é público) nem no log; a mensagem com a senha é apagada da conversa logo depois de guardada.
 
 ## Código e manutenção
 

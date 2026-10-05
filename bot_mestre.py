@@ -55,6 +55,7 @@ import db
 import painel_espelhos
 import painel_notas
 import painel_shopee_video  # painel do robô da Shopee Vídeo (Outros Canais)
+import painel_acessos  # Acessos do Servidor: Tailscale e Oracle (Opções do Servidor)
 import pool_contas  # contas dos userbots (quem espelha, quem reposta)
 import blacklist_captura  # de quem os userbots nunca capturam
 import alvos_sem_acesso  # alvos da divulgação a que a conta perdeu o acesso
@@ -522,6 +523,9 @@ logger.info("✅ Módulo de Notas montado com segurança.")
 dp.include_router(painel_shopee_video.router)
 painel_shopee_video.configurar_dependencias(bot, scheduler, ADMIN_ID)
 
+dp.include_router(painel_acessos.router)
+painel_acessos.configurar_dependencias(bot, ADMIN_ID)
+
 # --- Teclados ---
 teclado_plataforma = ReplyKeyboardMarkup(
     keyboard=[
@@ -702,7 +706,7 @@ def obter_teclado_principal():
 def obter_teclado_opcoes_servidor():
     botoes = [
         [KeyboardButton(text="Monitorar Servidor 🖥️"), KeyboardButton(text="Zerar Filas e Tarefas 🧹")],
-        [KeyboardButton(text="Reiniciar Robôs 🔄")],
+        [KeyboardButton(text="Reiniciar Robôs 🔄"), KeyboardButton(text="Acessos do Servidor 🔐")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
@@ -7002,7 +7006,7 @@ async def comando_start(message: types.Message, state: FSMContext):
     logger.info("⌨️ Iniciando o bot no Menu Raiz.")
     await message.answer("🏠 Painel de Controle Inicial. Escolha uma área para gerenciar:", reply_markup=obter_teclado_raiz())
 
-@dp.message(F.text == "Opções do Servidor ⚙️", StateFilter("*"))
+@dp.message(F.text.in_(["Opções do Servidor ⚙️", painel_acessos.VOLTAR]), StateFilter("*"))
 async def menu_opcoes_servidor_handler(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
@@ -9575,6 +9579,12 @@ async def cancelar_fluxo_global(message: types.Message, state: FSMContext):
         await state.clear()
         await message.answer("Ação cancelada. Nada foi alterado.")
         await painel_shopee_video.mostrar_painel(message, state)
+        return
+
+    # Acessos do Servidor: edição cancelada volta ao painel, sem gravar nada.
+    if estado_atual and estado_atual.startswith("AcessosFluxo:"):
+        await message.answer("Ação cancelada. Nada foi alterado.")
+        await painel_acessos.mostrar_painel(message, state)
         return
 
     # Achadinhos: o prefixo cobre todos os estados do fluxo (cadastro, edição, remoção).
