@@ -1,0 +1,353 @@
+"""
+Modo assistente da Shopee Vídeo: prepara cada postagem e manda no privado do Rafael,
+que posta pelo próprio celular. Usado pelo painel_shopee_video (bot_mestre).
+
+Para cada vídeo:
+- o vídeo vem dos Autorais (fila_autorais), o mais novo que ainda tem o arquivo e
+  não foi mandado;
+- a IA (Gemini) assiste ao vídeo com o prompt do Gem "Shopee Vídeo" do Rafael,
+  adaptado, e com o resumo das diretrizes (diretrizes_shopee_video.md): devolve o
+  título (130 a 150 caracteres, sem marca), o texto do comentário e se viu violação.
+  Vídeo com violação não é mandado; o Rafael recebe o motivo;
+- os produtos saem do link do post: link de produto vira nome, preço e comissão pela
+  API de afiliado; link de vídeo da Shopee Vídeo não diz os produtos, e o Rafael os
+  vê no próprio vídeo.
+
+Quando mandar: cada dia sorteia quantos vídeos (a faixa do painel) e espalha os
+horários pela janela do painel, com um sorteio fixo por dia. A cada volta do agendador,
+manda no máximo um vídeo, e só se um horário já passou. Pausado, os horários que
+passam são pulados, para não sair tudo de uma vez ao retomar.
+
+O robô nunca posta, curte nem comenta na Shopee (diretriz 9.1.1).
+Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+"""
+import html
+import json
+import logging
+import os
+import random
+import re
+from datetime import datetime
+
+import aiohttp
+
+import api_gemini
+import api_shopee
+import db
+from fuso import fuso_horario
+from motor_filas import sortear_teto_do_dia
+
+logger = logging.getLogger("ShopeeVideo")
+
+CHAVE_DIA = "shopee_video_dia"
+ARQUIVO_DIRETRIZES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "diretrizes_shopee_video.md")
+TITULO_MIN, TITULO_MAX = 130, 150
+URL_API = "https://open-api.affiliate.shopee.com.br/graphql"
+LINK_DO_POST = re.compile(r"https?://[^\s<>\"]*shopee[^\s<>\"]*")
+
+PROMPT = """Atue como um especialista em Growth Hacking e Marketing para Shopee. Analise \
+detalhadamente o vídeo (produto, estilo e público-alvo) e gere o texto para postar na Shopee Vídeo.
+
+Responda SOMENTE com um JSON, sem nada antes ou depois, neste formato:
+{{"violacao": false, "motivo": "", "titulo": "...", "comentario": "..."}}
+
+"titulo": o Título do Vídeo, com apenas o nome do produto (sem frase de gancho nem texto \
+criativo), seguido de emojis e do máximo possível de hashtags de alta performance e grande \
+volume de busca, escolhidas para a visibilidade e a venda deste produto (ex.: Varal de Chão \
+Dobrável #varal #varaldechao #organizacao #roupas). O total (título + emojis + hashtags) deve \
+ter obrigatoriamente entre {titulo_min} e {titulo_max} caracteres, preenchendo o espaço ao \
+máximo sem passar do limite.
+
+"comentario": uma Descrição Estratégica para o comentário, para persuadir o cliente e \
+impulsionar o vídeo (SEO e copy de vendas), com obrigatoriamente entre 400 e 450 caracteres \
+no total (texto + hashtags), terminando com um rodapé de 5 a 10 hashtags complementares \
+(cauda longa e sinônimos que não estão no título).
+
+É proibido usar, promover ou associar marcas registradas: nada de logotipos, nomes de \
+marcas (ex.: Stanley, Apple) ou identidades visuais em nenhuma parte (título, comentário, \
+hashtags). Para produto de marca famosa, use termos genéricos (ex.: "Copo Térmico de Inox" \
+e #copotermico em vez da marca).
+
+Antes de responder, analise com rigor o vídeo e o texto que você gerou contra as diretrizes \
+da Shopee Vídeo abaixo. Se algo violar uma diretriz, responda "violacao": true e diga em \
+"motivo", em uma frase curta, qual regra. Se não, "violacao": false e "motivo": "".
+
+{produto}Diretrizes da Shopee Vídeo:
+{diretrizes}"""
+
+
+# --- Quando mandar ---
+
+def hoje(agora=None):
+    return (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d")
+
+
+def quantos_hoje(config, dia):
+    return sortear_teto_do_dia("shopee_video", dia, config["limite_min"], config["limite_max"])
+
+
+def planejar(config, dia):
+    """
+    Horários ("HH:MM") dos envios do dia: a janela dividida em partes iguais, um
+    horário sorteado dentro de cada parte. Mesmo dia, mesma lista (sorteio fixo).
+    """
+    quantos = quantos_hoje(config, dia)
+    if quantos <= 0:
+        return []
+    inicio, fim = config["inicio"] * 60, min(config["fim"] * 60, 24 * 60 - 1)
+    parte = (fim - inicio) / quantos
+    sorteio = random.Random(f"shopee_video:{dia}")
+    horarios = []
+    for i in range(quantos):
+        comeco = inicio + i * parte
+        minuto = int(comeco + sorteio.uniform(min(5, parte / 3), max(parte - 5, parte * 2 / 3)))
+        horarios.append(f"{minuto // 60:02d}:{minuto % 60:02d}")
+    return sorted(horarios)
+
+
+def estado_do_dia(config, agora=None):
+    """O plano de hoje ({data, horarios, feitos}), refeito quando o dia muda."""
+    dia = hoje(agora)
+    estado = db.ler_config(CHAVE_DIA, {}) or {}
+    if estado.get("data") != dia:
+        estado = {"data": dia, "horarios": planejar(config, dia), "feitos": 0}
+        db.salvar_config(CHAVE_DIA, estado)
+    return estado
+
+
+def vencidos(estado, agora=None):
+    """Quantos horários do plano já passaram."""
+    hora = (agora or datetime.now(fuso_horario)).strftime("%H:%M")
+    return sum(1 for h in estado["horarios"] if h <= hora)
+
+
+def decidir_envio(config, agora=None):
+    """
+    True se é hora de mandar um vídeo agora. Marca o horário como feito antes de
+    mandar: se o envio falhar, aquele horário fica perdido em vez de repetir em laço.
+    Vários horários vencidos de uma vez (robô fora do ar) contam como um só.
+    """
+    estado = estado_do_dia(config, agora)
+    passados = vencidos(estado, agora)
+    if passados <= estado["feitos"]:
+        return False
+    estado["feitos"] = passados
+    db.salvar_config(CHAVE_DIA, estado)
+    return not config["pausado"]
+
+
+# --- Qual vídeo ---
+
+def _criar_tabela(con):
+    con.execute("CREATE TABLE IF NOT EXISTS shopee_video_enviados ("
+                "id_unico TEXT PRIMARY KEY, enviado_em TEXT, status TEXT, motivo TEXT)")
+
+
+def proximo_video():
+    """
+    {"id", "arquivo", "link", "nome"} do Autoral mais novo que ainda tem o arquivo e
+    não foi mandado; None se não há nenhum.
+    """
+    try:
+        with db.conexao() as con:
+            _criar_tabela(con)
+            linhas = con.execute(
+                "SELECT id_unico, legenda, caminho_arquivo FROM fila_autorais "
+                "WHERE id_unico NOT IN (SELECT id_unico FROM shopee_video_enviados) "
+                "ORDER BY data_captura DESC").fetchall()
+    except Exception as e:
+        logger.warning(f"⚠️ [Shopee Vídeo] Não deu para ler a fila dos Autorais: {type(e).__name__}")
+        return None
+    for id_unico, legenda, caminho in linhas:
+        link = LINK_DO_POST.search(legenda or "")
+        if caminho and link and os.path.exists(caminho):
+            return {"id": id_unico, "arquivo": caminho, "link": link.group(0), "nome": nome_da_legenda(legenda)}
+    return None
+
+
+def nome_da_legenda(legenda):
+    """O nome do produto que a captura dos Autorais pôs em negrito na primeira linha."""
+    achado = re.search(r"<b>(.*?)</b>", legenda or "")
+    nome = re.sub(r"<[^>]+>", "", achado.group(1)).strip() if achado else ""
+    return "" if nome in ("", "Vídeo do Produto") else nome
+
+
+def registrar(id_unico, status, motivo="", agora=None):
+    momento = (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d %H:%M:%S")
+    with db.conexao() as con:
+        _criar_tabela(con)
+        con.execute("INSERT OR REPLACE INTO shopee_video_enviados VALUES (?, ?, ?, ?)",
+                    (id_unico, momento, status, motivo))
+
+
+def enviados_hoje(agora=None):
+    with db.conexao() as con:
+        _criar_tabela(con)
+        return con.execute("SELECT COUNT(*) FROM shopee_video_enviados WHERE status = 'enviado' "
+                           "AND enviado_em LIKE ?", (hoje(agora) + "%",)).fetchone()[0]
+
+
+# --- Produtos ---
+
+async def produtos_do_link(link):
+    """
+    (produtos, destino): produtos = lista de {nome, preco, comissao, link} na ordem de
+    adicionar (menor preço; no empate, maior comissão), vazia quando o link é de um
+    vídeo da Shopee Vídeo (os produtos ficam no próprio vídeo) ou a API não respondeu.
+    destino = o endereço para o Rafael abrir.
+    """
+    destino = await api_shopee.link_para_converter(link)
+    produto = api_shopee.produto_do_link(destino)
+    if api_shopee.eh_video(destino) or not produto:
+        return [], link
+    loja, item = re.search(r"/product/(\d+)/(\d+)", produto).groups()
+    dados = await _consultar_produto(loja, item)
+    if not dados:
+        return [], link
+    return ordenar_produtos([dados]), link
+
+
+async def _consultar_produto(loja, item):
+    # Números direto na consulta: declarar a variável como Int64 dá "wrong type".
+    consulta = (f"query {{ productOfferV2(shopId: {int(loja)}, itemId: {int(item)}, limit: 1) "
+                "{ nodes { productName priceMin priceMax commissionRate } } }")
+    headers, corpo = api_shopee.gerar_headers_e_payload({"query": consulta})
+    try:
+        async with aiohttp.ClientSession() as sessao:
+            async with sessao.post(URL_API, headers=headers, data=corpo) as resp:
+                dados = await resp.json(content_type=None)
+    except Exception as e:
+        logger.warning(f"⚠️ [Shopee Vídeo] A API de afiliado não respondeu: {type(e).__name__}")
+        return None
+    nos = (((dados or {}).get("data") or {}).get("productOfferV2") or {}).get("nodes") or []
+    if not nos:
+        return None
+    no = nos[0]
+    return {"nome": no.get("productName") or "", "preco": _numero(no.get("priceMin")),
+            "comissao": _numero(no.get("commissionRate")) * 100}
+
+
+def _numero(valor):
+    try:
+        return float(valor)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def ordenar_produtos(produtos):
+    """Menor preço primeiro; no empate, a maior comissão (regra do Rafael)."""
+    return sorted(produtos, key=lambda p: (p["preco"], -p["comissao"]))
+
+
+# --- Texto da IA ---
+
+def ler_diretrizes():
+    try:
+        with open(ARQUIVO_DIRETRIZES, encoding="utf-8") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def montar_prompt(nome_produto=""):
+    produto = f"Nome do produto, segundo o post (pode ajudar a identificar): {nome_produto}\n\n" if nome_produto else ""
+    return PROMPT.format(titulo_min=TITULO_MIN, titulo_max=TITULO_MAX, produto=produto, diretrizes=ler_diretrizes())
+
+
+def ler_resposta(texto):
+    """O JSON da IA como dict ({violacao, motivo, titulo, comentario}); None se não veio um JSON."""
+    achado = re.search(r"\{.*\}", texto or "", re.S)
+    if not achado:
+        return None
+    try:
+        dados = json.loads(achado.group(0))
+    except ValueError:
+        return None
+    if not isinstance(dados, dict):
+        return None
+    return {"violacao": bool(dados.get("violacao")), "motivo": str(dados.get("motivo") or "").strip(),
+            "titulo": encaixar_titulo(str(dados.get("titulo") or "")),
+            "comentario": str(dados.get("comentario") or "").strip()}
+
+
+def encaixar_titulo(titulo):
+    """O título dentro dos 150 caracteres da Shopee: tira palavras do fim, nunca corta uma no meio."""
+    titulo = " ".join(titulo.split())
+    while len(titulo) > TITULO_MAX and " " in titulo:
+        titulo = titulo.rsplit(" ", 1)[0]
+    return titulo[:TITULO_MAX]
+
+
+async def gerar_textos(arquivo, nome_produto=""):
+    return ler_resposta(await api_gemini.analisar_video_gemini(arquivo, montar_prompt(nome_produto)))
+
+
+# --- Mensagem ---
+
+def _reais(valor):
+    return f"R$ {valor:.2f}".replace(".", ",")
+
+
+def montar_mensagem(textos, produtos, link):
+    """A mensagem do privado: título e comentário para copiar com um toque, produtos e o caminho."""
+    if produtos:
+        linhas = [f"{i}. {html.escape(p['nome'])}: {_reais(p['preco'])}, comissão {p['comissao']:.1f}%".replace(".0%", "%")
+                  for i, p in enumerate(produtos, 1)]
+        bloco_produtos = ("🛒 <b>Produto para vincular</b> (em Adicionar Produto, busque pelo nome):\n"
+                          + "\n".join(linhas) + f"\n🔗 {html.escape(link)}")
+    else:
+        bloco_produtos = ("🛒 <b>Produtos:</b> abra o link e veja os que o criador vinculou ao vídeo. "
+                          "Adicione só eles: o de menor preço primeiro; no empate, o de maior comissão.\n"
+                          f"🔗 {html.escape(link)}")
+    return (
+        "🎬 <b>Postagem pronta para a Shopee Vídeo</b>\n\n"
+        f"📝 <b>Título</b> ({len(textos['titulo'])} caracteres; toque para copiar):\n"
+        f"<code>{html.escape(textos['titulo'])}</code>\n\n"
+        f"{bloco_produtos}\n\n"
+        "💬 <b>Comentário</b> (depois de postar; toque para copiar):\n"
+        f"<code>{html.escape(textos['comentario'])}</code>\n\n"
+        "<b>Como postar:</b> salve o vídeo acima → Shopee → Eu → Criadores e Afiliados → "
+        "Perfil em Shopee Vídeo → Postar vídeo → escolha o vídeo → Próximo → Adicionar Produto → "
+        "cole o título → Postar."
+    )
+
+
+# --- Envio ---
+
+async def preparar_e_enviar(bot, admin_id, agora=None):
+    """
+    Prepara o próximo vídeo e manda no privado. Devolve o que aconteceu, numa frase,
+    para o log e para o botão Enviar 1 Agora.
+    """
+    video = proximo_video()
+    if not video:
+        return "não há vídeo dos Autorais para mandar (a fila está vazia ou sem arquivos)"
+    try:
+        return await _preparar_e_enviar(bot, admin_id, video, agora)
+    except Exception as e:
+        # Vídeo que dá erro (ex.: o Telegram recusa o arquivo) é pulado: sem isso, ele
+        # voltaria em todo horário e travaria a fila.
+        registrar(video["id"], "erro", type(e).__name__, agora)
+        raise
+
+
+async def _preparar_e_enviar(bot, admin_id, video, agora):
+    from aiogram.types import FSInputFile
+
+    textos = await gerar_textos(video["arquivo"], video["nome"])
+    if not textos or not textos["titulo"]:
+        registrar(video["id"], "erro", "a IA não respondeu", agora)
+        return "a IA não gerou o texto; o vídeo foi pulado"
+    if textos["violacao"]:
+        registrar(video["id"], "violacao", textos["motivo"], agora)
+        await bot.send_message(admin_id, "⚠️ <b>Shopee Vídeo:</b> pulei um vídeo dos Autorais. A IA viu "
+                               f"possível violação das diretrizes: {html.escape(textos['motivo'] or 'sem motivo')}",
+                               parse_mode="HTML")
+        return "vídeo pulado por possível violação das diretrizes"
+    produtos, link = await produtos_do_link(video["link"])
+    await bot.send_video(admin_id, video=FSInputFile(video["arquivo"]), supports_streaming=True,
+                         caption="🎬 Vídeo para a Shopee Vídeo: salve e poste pelo seu celular.")
+    await bot.send_message(admin_id, montar_mensagem(textos, produtos, link), parse_mode="HTML",
+                           disable_web_page_preview=True)
+    registrar(video["id"], "enviado", "", agora)
+    return "postagem mandada no seu privado"

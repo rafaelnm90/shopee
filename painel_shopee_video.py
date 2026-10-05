@@ -1,16 +1,18 @@
 """
 Painel da Shopee Vídeo: roteador do bot_mestre (Outros Canais → Shopee Vídeo 🎬).
 
-O robô da Shopee Vídeo posta os vídeos dos Autorais, com o produto vinculado, pelo
-app da Shopee num Android virtual no servidor (android_virtual.py). Este painel
-guarda o que o Rafael controla, na chave "shopee_video" das configurações:
+Modo assistente: o robô prepara cada postagem (vídeo dos Autorais, título pela IA,
+produtos e comentário) e manda no privado do Rafael, que posta pelo próprio celular
+(assistente_shopee_video.py). Este painel guarda o que o Rafael controla, na chave
+"shopee_video" das configurações:
 - se o robô está pausado;
 - quantos vídeos por dia: uma faixa (ex.: 5 a 10), sorteada a cada dia;
-- a janela de horário em que os vídeos se espalham (ex.: das 13h às 22h).
-O motor que posta lê essa mesma chave. O painel também reúne o acesso ao Android:
-o botão da tela no navegador (handler no bot_mestre) e o tutorial da instalação.
+- a janela de horário em que os envios se espalham (ex.: das 13h às 22h).
+Também liga o envio no agendador (a cada 5 min vê se chegou a hora) e tem o botão
+"Enviar 1 Agora 📤", que manda uma postagem na hora, mesmo pausado.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
+import asyncio
 import logging
 import re
 from datetime import datetime
@@ -21,6 +23,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
+import assistente_shopee_video as assistente
 import db
 from fuso import fuso_horario
 from motor_filas import sortear_teto_do_dia
@@ -33,7 +36,7 @@ scheduler_instance = None
 ADMIN_ID = None
 
 CHAVE_CONFIG = "shopee_video"
-# Começa pausado: o robô posta na conta principal do Rafael e só liga quando ele mandar.
+# Começa pausado: só manda postagens quando o Rafael retomar no painel.
 PADRAO = {"pausado": True, "limite_min": 5, "limite_max": 10, "inicio": 13, "fim": 22}
 MAXIMO_POR_DIA = 50
 
@@ -41,6 +44,29 @@ MAXIMO_POR_DIA = 50
 def configurar_dependencias(bot: Bot, scheduler, admin_id):
     global bot_instance, scheduler_instance, ADMIN_ID
     bot_instance, scheduler_instance, ADMIN_ID = bot, scheduler, admin_id
+    scheduler.add_job(verificar_envio, "interval", minutes=5, id="shopee_video_assistente",
+                      replace_existing=True, max_instances=1, coalesce=True)
+
+
+# Um envio de cada vez: o agendador e o botão Enviar 1 Agora pegariam o mesmo vídeo.
+_envio = asyncio.Lock()
+
+
+async def enviar_um():
+    """Prepara e manda uma postagem no privado. Devolve o que aconteceu, numa frase."""
+    async with _envio:
+        try:
+            return await assistente.preparar_e_enviar(bot_instance, ADMIN_ID)
+        except Exception as e:
+            logger.error(f"❌ [Shopee Vídeo] Erro ao preparar a postagem: {type(e).__name__}: {e}")
+            return f"deu erro ao preparar ({type(e).__name__})"
+
+
+async def verificar_envio():
+    """Volta do agendador: manda um vídeo se um horário do plano de hoje já passou."""
+    if _envio.locked() or not assistente.decidir_envio(ler_config()):
+        return
+    logger.info(f"🎬 [Shopee Vídeo] {await enviar_um()}.")
 
 
 def _admin(message):
@@ -117,8 +143,7 @@ def teclado_painel(config):
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="Vídeos por Dia 📦"), KeyboardButton(text="Horário de Postagem ⏰")],
-            [KeyboardButton(text=pausa)],
-            [KeyboardButton(text="Tela do Android 📱"), KeyboardButton(text="Tutorial do Android 📖")],
+            [KeyboardButton(text=pausa), KeyboardButton(text="Enviar 1 Agora 📤")],
             [KeyboardButton(text="Voltar aos Canais 🔙")],
         ],
         resize_keyboard=True,
@@ -143,12 +168,14 @@ def texto_painel(config, agora=None):
     piso, topo = config["limite_min"], config["limite_max"]
     hoje = f" (sorteado a cada dia; hoje: <b>{videos_hoje(config, agora)}</b>)" if topo > piso else ""
     return (
-        "🎬 <b>Shopee Vídeo</b>\n"
-        "Posta os vídeos dos Autorais, com o produto vinculado, pelo app da Shopee no Android virtual.\n\n"
+        "🎬 <b>Shopee Vídeo</b> (modo assistente)\n"
+        "Prepara as postagens dos Autorais (vídeo, título, produtos e comentário) e manda aqui no "
+        "seu privado, para você postar pelo seu celular.\n\n"
         f"Status: {status}\n"
         f"📦 Vídeos por dia: <b>{rotulo_faixa(piso, topo)}</b>{hoje}\n"
-        f"⏰ Horário de postagem: <b>{rotulo_janela(config['inicio'], config['fim'])}</b>\n\n"
-        "🚧 <i>Robô em construção: ainda não posta. O que você ajustar aqui já vale quando ele começar.</i>"
+        f"⏰ Horário dos envios: <b>{rotulo_janela(config['inicio'], config['fim'])}</b>\n"
+        f"📤 Mandados hoje: <b>{assistente.enviados_hoje(agora)}</b>\n\n"
+        "<i>Enviar 1 Agora 📤 manda uma postagem na hora, mesmo pausado.</i>"
     )
 
 
@@ -192,7 +219,7 @@ async def pedir_janela(message: types.Message, state: FSMContext):
     if not _admin(message): return
     config = ler_config()
     await message.answer(
-        "Em que horário os vídeos podem ser postados? Eles se espalham dentro dessa faixa.\n\n"
+        "Em que horário as postagens podem chegar? Elas se espalham dentro dessa faixa.\n\n"
         "Envie <code>início-fim</code> (ex.: <code>13-22</code>) ou toque em Dia Todo.\n"
         f"<i>Hoje está {rotulo_janela(config['inicio'], config['fim'])}.</i>",
         parse_mode="HTML", reply_markup=teclado_janela)
@@ -207,10 +234,10 @@ async def pedir_pausa(message: types.Message, state: FSMContext):
     if not _admin(message): return
     pausar = message.text.startswith("Pausar")
     await state.update_data(pausar=pausar)
-    pergunta = ("⚠️ <b>Pausar</b> o robô da Shopee Vídeo? Ele para de postar até você retomar."
+    pergunta = ("⚠️ <b>Pausar</b> o robô da Shopee Vídeo? Ele para de mandar postagens até você retomar."
                 if pausar else
-                "▶️ <b>Retomar</b> o robô da Shopee Vídeo? Ele volta a postar na sua conta, "
-                "dentro do horário e da quantidade do painel.")
+                "▶️ <b>Retomar</b> o robô da Shopee Vídeo? Ele volta a mandar as postagens aqui no seu "
+                "privado, dentro do horário e da quantidade do painel.")
     botao = "Confirmar Pausa ✅" if pausar else "Confirmar Retomada ✅"
     teclado = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=botao), KeyboardButton(text="Cancelar ❌")]],
@@ -220,80 +247,20 @@ async def pedir_pausa(message: types.Message, state: FSMContext):
 
 
 
-# --- Tutorial ---
+# --- Enviar 1 agora ---
 
-# Passo a passo para instalar a Shopee no Android virtual, para quando o Rafael
-# precisar de novo (reset de fábrica, atualização da Shopee, login que caiu) e
-# ninguém lembrar como foi. Cada parte cabe numa mensagem do Telegram (4096 caracteres).
-TUTORIAL_ANDROID = (
-    "📖 <b>Tutorial do Android da Shopee Vídeo (1/4)</b>\n\n"
-    "O robô da Shopee Vídeo usa um celular Android virtual, que roda dentro do servidor. "
-    "Nele ficam o app da Shopee Brasil e o login da sua conta.\n\n"
-    "<b>Quando usar este passo a passo:</b>\n"
-    "• na primeira vez, ou depois de um \"Resetar de fábrica\";\n"
-    "• quando a Shopee pedir atualização;\n"
-    "• quando o login da Shopee cair.\n\n"
-    "<b>Por que o app vem do seu celular:</b> a Play Store e os sites de APK recusam o servidor. "
-    "Então você instala a Shopee no seu celular, faz uma cópia dela com o app SAI e envia a cópia "
-    "para o Android virtual.\n\n"
-    "São duas etapas: <b>2/4</b> no seu celular e <b>3/4</b> no Android virtual. "
-    "A <b>4/4</b> traz os problemas mais comuns.",
-
-    "📱 <b>2/4: no seu celular, copiar a Shopee com o SAI</b>\n\n"
-    "1. Na Play Store, instale ou atualize a <b>Shopee</b>. Abra uma vez e confira que está em português, "
-    "com preços em R$.\n"
-    "2. Instale o <b>SAI (Split APKs Installer)</b>:\n"
-    "https://play.google.com/store/apps/details?id=com.mtv.sai\n"
-    "3. Abra o SAI e toque na aba <b>Backup</b>, embaixo.\n"
-    "4. Na primeira vez, ele pede a pasta dos backups. O Android não deixa usar a pasta principal nem a "
-    "Download, então: toque em <b>CRIAR NOVA PASTA</b>, dê o nome <b>Backups</b>, toque em OK, entre nela "
-    "e toque em <b>USAR ESTA PASTA</b> → <b>Permitir</b>.\n"
-    "5. Na lista de apps, toque em <b>Shopee</b> → <b>Backup</b>. O backup é do SAI PRO: você "
-    "comprou o PRO vitalício em 04/10/2026, então não precisa pagar de novo: ele vale enquanto "
-    "o celular usar a mesma conta Google da Play Store, mesmo reinstalando o SAI.\n"
-    "6. Espere terminar: aparece um arquivo terminado em <b>.apks</b> (uns 120 MB) na pasta Backups. "
-    "Guarde esse arquivo: ele serve de novo se precisar.\n"
-    "⚠️ Não use o \"Compartilhar\" do SAI: ele manda só uma parte da Shopee, e o Android recusa.",
-
-    "🤖 <b>3/4: no Android virtual, instalar e entrar</b>\n\n"
-    "1. Aqui no bot: <b>Outros Canais 🗂️</b> → <b>Shopee Vídeo 🎬</b> → <b>Tela do Android 📱</b>. "
-    "O link chega aqui em até 1 min. Abra no navegador do celular. A tela fica aberta 30 min.\n"
-    "2. Na página, toque em <b>Escolher arquivo</b> → pasta <b>Backups</b> → o arquivo .apks da Shopee "
-    "→ <b>📦 Enviar app</b>.\n"
-    "3. Deixe a página aberta. Aparece \"Enviando... %\" (pode levar alguns minutos), depois "
-    "\"Instalando no Android...\" e, no fim, \"✅ app da Shopee: instalado\".\n"
-    "4. Na imagem do Android, toque em <b>● Início</b>, abra a <b>Shopee</b> e entre com a sua conta principal:\n"
-    "• para escrever (e-mail, senha, código), toque no campo dentro da imagem, escreva em "
-    "<b>Texto para digitar</b> e toque em <b>Digitar</b>;\n"
-    "• no quebra-cabeça de segurança, arraste o dedo sobre a imagem.\n"
-    "5. Quando terminar, toque em <b>✅ Terminei</b>. O link para de funcionar, e ninguém mais mexe no Android por ele.",
-
-    "🛠️ <b>4/4: problemas comuns</b>\n\n"
-    "• <b>A imagem não aparece</b> (\"⏳ Esperando a imagem do Android\"): se o Android acabou de "
-    "reiniciar ou resetar, espere de 1 a 4 min. Se não voltar, toque em Tela do Android 📱 de novo.\n"
-    "• <b>\"Error 1033\" ao abrir o link:</b> a tela já fechou (Terminei, 30 min ou uma tela nova no lugar). "
-    "Peça outra em Tela do Android 📱.\n"
-    "• <b>\"❌ o Android recusou o app\":</b> a mensagem diz o motivo. O mais comum é arquivo antigo ou da "
-    "Shopee de outro país: refaça a parte 2/4 com a Shopee Brasil atualizada.\n"
-    "• <b>Arquivo .apkm</b> (do APKMirror) não serve: só .apks, .xapk ou .apk.\n"
-    "• <b>A Shopee pediu atualização:</b> atualize no celular, faça um backup novo no SAI e envie o arquivo "
-    "novo. O login continua, porque a instalação vai por cima.\n"
-    "• <b>A tela fechou no meio:</b> o bot pode ter reiniciado numa atualização. Toque em Tela do Android 📱 de novo.\n\n"
-    "<b>Botões da página:</b>\n"
-    "• <b>🧹 Fechar apps:</b> fecha todos os apps e limpa a lista de recentes.\n"
-    "• <b>🔄 Reiniciar Android:</b> religa o Android. Os apps e o login continuam (volta em 1 a 2 min).\n"
-    "• <b>🗑️ Resetar de fábrica:</b> apaga TUDO, inclusive a Shopee e o login. Depois é preciso refazer "
-    "a parte 3/4. Use só se o Android estiver muito travado.",
-)
-
-
-@router.message(F.text == "Tutorial do Android 📖", StateFilter("*"))
-async def tutorial_android_handler(message: types.Message, state: FSMContext):
-    """Manda o passo a passo da instalação da Shopee no Android virtual, em partes."""
+@router.message(F.text == "Enviar 1 Agora 📤", StateFilter("*"))
+async def enviar_agora_handler(message: types.Message, state: FSMContext):
+    """Manda uma postagem na hora, mesmo pausado (para testar ou para postar mais uma)."""
     if not _admin(message): return
-    logger.info("📖 Mostrando o tutorial do Android.")
-    for parte in TUTORIAL_ANDROID:
-        await message.answer(parte, parse_mode="HTML", disable_web_page_preview=True)
+    if _envio.locked():
+        await message.answer("⏳ Já estou preparando uma postagem. Ela chega em instantes.")
+        return
+    logger.info("📤 Shopee Vídeo: Enviar 1 Agora.")
+    await message.answer("⏳ Preparando a postagem: a IA assiste ao vídeo e escreve o texto (1 a 2 min).")
+    resultado = await enviar_um()
+    if resultado != "postagem mandada no seu privado":
+        await message.answer(f"⚠️ Não mandei: {resultado}.")
 
 
 # --- Respostas dentro de cada ajuste ---
