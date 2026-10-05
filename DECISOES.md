@@ -179,6 +179,10 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **05/10/2026:** curtir o vídeo, comentar e curtir o próprio comentário (o fim do tutorial) não é automático: a diretriz 9.1.1 proíbe curtidas e comentários automáticos. Depois de cada postagem, o texto do comentário do Gem (400 a 450 caracteres, com 5 a 10 hashtags no fim) vai no privado do Rafael, que comenta à mão se quiser.
 - **05/10/2026:** o primeiro teste termina em Rascunhos, não em Postar: o Rafael confere na Tela do Android e posta. Depois que ele aprovar, o robô passa a postar sozinho.
 - **05/10/2026:** para aprender as telas do app, a exploração (`postador_shopee_video.py --explorar`, ação "explorar" do android.yml) nunca toca em Postar, e o log mostra só a forma da tela, porque a tela mostra a conta do Rafael.
+- **05/10/2026:** robô da Shopee Vídeo **em pausa**. Depois das primeiras explorações (o app fechado e reaberto várias vezes em meia hora), a Shopee passou a abrir sozinha uma página de "Verificação" de segurança, que dava erro ao carregar. O Rafael pausou para não arriscar a conta principal:
+  - o Android virtual fica desligado durante a pausa (ação "desligar" do android.yml), para a conta não ficar conectada pelo servidor de nuvem; o app e o login continuam lá;
+  - lembrete diário no privado dele até retomarmos;
+  - na volta: religar o Android, o Rafael resolve a verificação pela Tela do Android 📱 e eu testo devagar (uma rodada, poucos toques, sem fechar e reabrir o app). Se a verificação voltar mesmo assim, decidimos juntos; disfarçar o Android continua fora.
 
 ## Monitor, deploy e servidor
 
