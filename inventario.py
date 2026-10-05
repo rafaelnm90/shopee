@@ -290,15 +290,21 @@ async def produto_na_pagina(url, navegador):
 def parametros_mascarados(url):
     """
     Os parâmetros do endereço com o valor mascarado: nome=#<dígitos> quando o valor é
-    só número, nome=<texto> no resto. Só nomes em minúsculas e sublinhado aparecem (os
-    da Shopee são assim); os outros só são contados.
+    só número, nome=[desenho] quando é outro link, nome=<texto> no resto. Só nomes de
+    letras e sublinhado aparecem (os da Shopee são assim); os outros só são contados.
     """
     itens, outros = [], 0
     for nome, valor in urllib.parse.parse_qsl(urllib.parse.urlsplit(url or "").query, keep_blank_values=True):
-        if not re.fullmatch(r"[a-z][a-z_]{1,30}", nome):
+        if not re.fullmatch(r"[A-Za-z][A-Za-z_]{1,30}", nome):
             outros += 1
             continue
-        itens.append(f"{nome}=#{len(valor)}" if valor.isdigit() else f"{nome}=<texto>")
+        if valor.isdigit():
+            itens.append(f"{nome}=#{len(valor)}")
+        elif re.match(r"^[a-z]+://", urllib.parse.unquote(valor)):
+            # Um link dentro do parâmetro (o destino do app, por exemplo): só o desenho dele.
+            itens.append(f"{nome}=[{forma_do_link(urllib.parse.unquote(valor))}]")
+        else:
+            itens.append(f"{nome}=<texto>")
     return ", ".join(sorted(itens)) + (f" +{outros} outro(s)" if outros else "") or "nenhum"
 
 
@@ -436,13 +442,34 @@ def links_do_espiao(quantos=10):
                 print(f"      API de afiliado, loja/item: {asyncio.run(produto_pela_api(primeiro, segundo))}"
                       f" | invertido: {asyncio.run(produto_pela_api(segundo, primeiro))}")
         if urllib.parse.urlsplit(caminho[-1]).netloc.lower().startswith("sv."):
+            for endereco in caminho[1:-1]:
+                print(f"      parâmetros de {forma_do_link(endereco).split(' ?')[0]}: {parametros_mascarados(endereco)}")
             print(f"      parâmetros do vídeo: {parametros_mascarados(caminho[-1])}")
+            celular = asyncio.run(seguir_como(caminho[0], CELULAR))
+            print(f"      como celular: {' → '.join(forma_do_link(e) for e in celular[1:]) or 'não redireciona'}")
             print(f"      share_obj: {estrutura_do_share_obj(caminho[-1])}")
             for nome, navegador in (("computador", api_shopee.NAVEGADOR), ("celular", CELULAR)):
                 print(f"      página do vídeo ({nome}): {asyncio.run(produto_na_pagina(caminho[-1], navegador))}")
     print(f"   {parou_fora} parou fora do produto, mas com o produto no meio do caminho; "
           f"{sem_produto} sem produto em lugar nenhum")
     testes_de_conversao(caminhos)
+
+
+async def seguir_como(link, navegador, saltos=10):
+    """Os saltos do link para um navegador escolhido (o api_shopee segue como computador)."""
+    import aiohttp
+    caminho = [link]
+    try:
+        async with aiohttp.ClientSession(headers=navegador) as sessao:
+            for _ in range(saltos):
+                async with sessao.get(caminho[-1], allow_redirects=False) as resp:
+                    destino = resp.headers.get("Location")
+                    if resp.status not in (301, 302, 303, 307, 308) or not destino:
+                        break
+                caminho.append(urllib.parse.urljoin(caminho[-1], destino))
+    except Exception as e:
+        caminho.append(f"erro:{type(e).__name__}")
+    return caminho
 
 
 def testes_de_conversao(caminhos):

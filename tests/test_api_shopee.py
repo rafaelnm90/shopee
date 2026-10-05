@@ -180,13 +180,20 @@ def test_inventario_conta_sinais_de_produto_na_pagina_do_video(bm, monkeypatch, 
         paginas.append(url)
         return "status 200, 10 KB; sinais de produto: -i. 0, /product/ 0, itemid 2, shopid 2"
 
+    async def como(link, navegador, saltos=10):
+        assert navegador is inventario.CELULAR
+        return [link, "https://shopee.com.br/Panela-i.123456789.22334455667?x=1"]
+
     monkeypatch.setattr(api_shopee, "seguir_link", seguir)
     monkeypatch.setattr(inventario, "produto_na_pagina", pagina)
+    monkeypatch.setattr(inventario, "seguir_como", como)
     inventario.links_do_espiao()
     saida = capsys.readouterr().out
     assert "      sv.shopee.com.br/share-video/<texto> ?uls_trackid +1 outro(s)" in saida
     assert "página do vídeo (computador): status 200" in saida and "página do vídeo (celular)" in saida
     assert paginas == [video, video]                                       # abre a página inteira
+    assert "      como celular: shopee.com.br/<nome>-i.#.# ? +1 outro(s)" in saida
+    assert "      parâmetros de shopee.com.br/universal-link: redir=<texto>, uls_trackid=<texto>" in saida
     assert "segredo" not in saida.lower() and "maria" not in saida and "https://" not in saida
 
 
@@ -232,6 +239,10 @@ def test_parametros_mascarados_mostram_so_nome_e_tamanho():
     url = "https://sv.shopee.com.br/share-video/x?item_id=22334455667&shop_id=123456789&from=feed&Tok3n=abc&uls_trackid=zz"
     assert inventario.parametros_mascarados(url) == \
         "from=<texto>, item_id=#11, shop_id=#9, uls_trackid=<texto> +1 outro(s)"
+    app = "https://shopee.com.br/universal-link?redir=https%3A%2F%2Fsv.shopee.com.br%2Fshare-video%2Fabc&deepLink=" \
+          "shopee%3A%2F%2Fproduct%2F123456789%2F22334455667&itemId=22334455667"
+    assert inventario.parametros_mascarados(app) == \
+        "deepLink=[product/#9/#11], itemId=#11, redir=[sv.shopee.com.br/share-video/<texto>]"
     assert inventario.parametros_mascarados("https://sv.shopee.com.br/x") == "nenhum"
 
 
