@@ -1,4 +1,4 @@
-"""Botão Tela do Android 📱 (Opções do Servidor): abre a tela pelo android_virtual e diz onde parou se falhar."""
+"""Botão Tela do Android 📱 (painel da Shopee Vídeo): abre a tela pelo android_virtual e diz onde parou se falhar."""
 import asyncio
 
 from conftest import rodar
@@ -10,8 +10,9 @@ docker: instalado | adb: instalado | binder: carregado
 """
 
 
-def test_botao_esta_nas_opcoes_do_servidor(bm):
-    textos = [b.text for linha in bm.obter_teclado_opcoes_servidor().keyboard for b in linha]
+def test_botao_esta_no_painel_da_shopee_video(bm):
+    sv = bm.painel_shopee_video
+    textos = [b.text for linha in sv.teclado_painel(sv.ler_config()).keyboard for b in linha]
     assert "Tela do Android 📱" in textos
 
 
