@@ -19,6 +19,8 @@ TELA_EU = """<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
     <node text="Reutilização" class="android.widget.Switch" checked="true" bounds="[600,300][700,340]" />
     <node text="sem tamanho" class="android.widget.TextView" bounds="[0,0][0,0]" />
     <node text="escondido" class="android.widget.TextView" bounds="[0,0][10,10]" visible-to-user="false" />
+    <node text="12:00" resource-id="com.android.systemui:id/clock" package="com.android.systemui"
+          class="android.widget.TextView" bounds="[0,0][100,40]" />
   </node>
 </hierarchy>"""
 
@@ -98,6 +100,7 @@ def test_descricao_tem_os_botoes_e_nao_tem_a_conta():
     assert 'desc="Criadores & Afiliados"' in texto and "id=nome" in texto
     assert "[ligado]" in texto
     assert "sem tamanho" not in texto and "escondido" not in texto
+    assert "clock" not in texto and ps.achar(TELA_EU, "@clock") is None
 
 
 def test_acha_igual_antes_de_parecido():
@@ -130,13 +133,13 @@ def test_explorar_nunca_toca_em_postar(passo, capsys):
 
 def test_passo_desconhecido_nao_toca_em_nada(capsys):
     aparelho = Aparelho()
-    assert not ps.explorar("abrir; publicar", aparelho)
+    assert ps.explorar("abrir; publicar", aparelho) is None
     assert aparelho.comandos == [] and "passo desconhecido: publicar" in capsys.readouterr().out
 
 
 def test_para_no_primeiro_passo_que_falha(capsys):
     aparelho = Aparelho()
-    assert not ps.explorar("tocar:Comprar; voltar", aparelho)
+    assert ps.explorar("tocar:Comprar; voltar", aparelho) is False
     assert aparelho.teclas == [] and "não achei na tela" in capsys.readouterr().out
 
 
@@ -208,5 +211,11 @@ def test_sem_autorais_o_link_e_o_video_falham(capsys):
 def test_android_desligado_nem_conecta(monkeypatch, capsys):
     monkeypatch.setattr(ps.av, "android_ligado", lambda: False)
     monkeypatch.setattr(ps, "conectar", lambda: pytest.fail("não devia conectar"))
-    assert not ps.explorar("tela")
+    assert ps.explorar("tela") is None
     assert "android: desligado" in capsys.readouterr().out
+
+
+def test_so_fica_vermelho_quando_nem_comecou():
+    assert ps.codigo_de_saida(True) == 0
+    assert ps.codigo_de_saida(False) == 0
+    assert ps.codigo_de_saida(None) == 1
