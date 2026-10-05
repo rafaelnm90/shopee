@@ -316,3 +316,93 @@ def test_testes_de_conversao_por_tipo_de_link(monkeypatch, capsys):
                    "opaanlp cortado (como é hoje)", "produto loja/item"):
         assert f"      {rotulo}: shopee.com.br/<nome>-i.#.#" in saida
     assert "123456789" not in saida and "https://" not in saida
+
+
+VIDEO = "https://sv.shopee.com.br/share-video/abc?jumpType=pdp&pid=x&share_obj=y&shareUserId=1234567890"
+
+
+def test_link_de_video_vai_inteiro_para_a_api(monkeypatch):
+    # O app abre o produto do vídeo guiado pelos parâmetros (jumpType...); cortados, abre a categoria.
+    avisos = []
+    monkeypatch.setattr(api_shopee.logger, "warning", avisos.append)
+    _caminho(monkeypatch, ["https://shopee.com.br/universal-link?redir=x&deep_and_web=1", VIDEO])
+    assert rodar(api_shopee.link_para_converter(CURTO)) == VIDEO
+    assert avisos == []
+    assert api_shopee.tipo_de_link(VIDEO) == "vídeo da Shopee Vídeo"
+
+
+def test_pagina_de_afiliado_do_produto_e_produto(monkeypatch):
+    opaanlp = "https://shopee.com.br/opaanlp/123456789/22334455667"
+    assert api_shopee.produto_do_link(opaanlp + "?utm_source=x") == "https://shopee.com.br/product/123456789/22334455667"
+    assert api_shopee.tipo_de_link(opaanlp) == "produto"
+    _caminho(monkeypatch, [opaanlp + "?utm_source=x"])
+    assert rodar(api_shopee.link_para_converter(CURTO)) == opaanlp                # como já funcionava
+
+
+def test_converter_manda_o_video_inteiro(monkeypatch):
+    sessao = _Sessao(gets=[_Resposta(302, "https://shopee.com.br/universal-link?redir=x"), _Resposta(302, VIDEO),
+                           _Resposta(200)],
+                     corpo_post={"data": {"generateShortLink": {"shortLink": "https://s.shopee.com.br/novo"}}})
+    monkeypatch.setattr(api_shopee.aiohttp, "ClientSession", sessao)
+    monkeypatch.setattr(api_shopee, "SHOPEE_APP_ID", "1")
+    monkeypatch.setattr(api_shopee, "SHOPEE_APP_SECRET", "2")
+    assert rodar(api_shopee.converter_link_shopee(CURTO, "espiao")) == "https://s.shopee.com.br/novo"
+    assert sessao.postados[0]["variables"]["originUrl"] == VIDEO
+
+
+def _fila_com_video(bm, monkeypatch):
+    bm.db.salvar_config("fila_clonagem", {"fila": [
+        {"id": "a", "link_original": "https://s.shopee.com.br/video_velho"},
+        {"id": "b", "link_original": "https://s.shopee.com.br/produto"},
+        {"id": "c", "link_original": "https://s.shopee.com.br/video_novo"},
+    ]})
+
+    async def seguir(link, saltos=10):
+        return [link, VIDEO] if "video" in link else [link, PRODUTO]
+
+    monkeypatch.setattr(api_shopee, "seguir_link", seguir)
+
+
+def test_link_de_teste_vai_no_privado_com_o_video_mais_recente(bm, monkeypatch, capsys):
+    import avisar_rafael
+    _fila_com_video(bm, monkeypatch)
+    convertidos, mensagens = [], []
+
+    async def converter(link, sub_id="geral", **k):
+        convertidos.append((link, sub_id))
+        return "https://s.shopee.com.br/meuLinkDeTeste"
+
+    monkeypatch.setattr(api_shopee, "converter_link_shopee", converter)
+    monkeypatch.setattr(avisar_rafael, "mandar_texto", lambda texto: mensagens.append(texto) or True)
+    inventario.link_de_teste()
+    saida = capsys.readouterr().out
+    assert convertidos == [("https://s.shopee.com.br/video_novo", "diagnostico")]
+    assert "https://s.shopee.com.br/meuLinkDeTeste" in mensagens[0]
+    assert "https://s.shopee.com.br/video_novo" in mensagens[0]
+    assert "enviado no privado do Rafael" in saida and "https://" not in saida   # o log não mostra links
+
+
+def test_link_de_teste_sem_video_ou_com_conversao_falha(bm, monkeypatch, capsys):
+    import avisar_rafael
+    monkeypatch.setattr(avisar_rafael, "mandar_texto", lambda texto: pytest_falha())
+    bm.db.salvar_config("fila_clonagem", {"fila": [{"id": "b", "link_original": "https://s.shopee.com.br/produto"}]})
+
+    async def seguir(link, saltos=10):
+        return [link, PRODUTO]
+
+    monkeypatch.setattr(api_shopee, "seguir_link", seguir)
+    inventario.link_de_teste()
+    assert "nenhum link de vídeo" in capsys.readouterr().out
+
+    _fila_com_video(bm, monkeypatch)
+
+    async def falha(link, sub_id="geral", **k):
+        return link
+
+    monkeypatch.setattr(api_shopee, "converter_link_shopee", falha)
+    inventario.link_de_teste()
+    assert "a conversão falhou" in capsys.readouterr().out
+
+
+def pytest_falha():
+    raise AssertionError("não devia mandar mensagem")
