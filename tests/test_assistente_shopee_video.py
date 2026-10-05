@@ -255,3 +255,56 @@ def test_video_que_da_erro_e_pulado_para_nao_travar_a_fila(monkeypatch):
     with pytest.raises(RuntimeError):
         rodar(asv.preparar_e_enviar(BotQueRecusa(), 42))
     assert asv.proximo_video() is None
+
+
+# --- Fontes ---
+
+def _arquivo(caminho):
+    with open(caminho, "wb") as f:
+        f.write(b"video")
+    return caminho
+
+
+def test_viral_usa_a_fila_do_espiao_com_o_link_original():
+    import db
+    db.salvar_config("fila_clonagem", {"fila": [
+        {"id": "c1", "caminho_video": _arquivo("temp/c1.mp4"), "link_original": "https://s.shopee.com.br/v1",
+         "data_captura": "2026-10-05 09:00:00"},
+        {"id": "c2", "caminho_video": "temp/sumiu.mp4", "link_original": "https://s.shopee.com.br/v2",
+         "data_captura": "2026-10-05 10:00:00"},
+    ]})
+    video = asv.proximo_video("viral")
+    assert video == {"id": "viral:c1", "arquivo": "temp/c1.mp4", "link": "https://s.shopee.com.br/v1", "nome": ""}
+    asv.registrar("viral:c1", "enviado")
+    assert asv.proximo_video("viral") is None
+
+
+def test_canal_afiliados_pula_imagem_e_usa_a_legenda():
+    inserir("CREATE TABLE fila_postagens (id INTEGER PRIMARY KEY AUTOINCREMENT, id_unico TEXT UNIQUE, "
+            "caminho_video TEXT, legenda TEXT)")
+    inserir("INSERT INTO fila_postagens (id_unico, caminho_video, legenda) VALUES (?, ?, ?)",
+            "p1", _arquivo("temp/p1.mp4"), LEGENDA)
+    inserir("INSERT INTO fila_postagens (id_unico, caminho_video, legenda) VALUES (?, ?, ?)",
+            "p2", _arquivo("temp/p2.jpg"), LEGENDA)
+    video = asv.proximo_video("principal")
+    assert video["id"] == "principal:p1" and video["nome"] == "Garrafa Térmica 🧊"
+
+
+def test_grupo_publico_e_ids_de_fontes_diferentes_nao_colidem():
+    inserir("CREATE TABLE fila_publico (id_unico TEXT PRIMARY KEY, legenda TEXT, caminho_arquivo TEXT, "
+            "data_captura TEXT)")
+    inserir("INSERT INTO fila_publico VALUES (?, ?, ?, ?)", "x1", LEGENDA, _arquivo("temp/x1.mp4"), "2026-10-05")
+    _fila(("x1", LEGENDA, "archive/x1.mp4", "2026-10-05 10:00"))
+    asv.registrar("x1", "enviado")                                         # o Autoral x1 já foi
+    assert asv.proximo_video("publico")["id"] == "publico:x1"
+    assert asv.proximo_video("autorais") is None
+
+
+def test_fonte_sem_fila_ou_desconhecida_nao_quebra():
+    assert asv.proximo_video("principal") is None                          # tabela nem existe
+    _fila(("a1", LEGENDA, "archive/a1.mp4", "2026-10-05 10:00"))
+    assert asv.proximo_video("inventada")["id"] == "a1"                    # cai no padrão (Autorais)
+
+
+def test_sem_video_diz_qual_fonte_esta_vazia():
+    assert "Viral (Espião) 🕵️" in rodar(asv.preparar_e_enviar(Bot(), 42, fonte="viral"))

@@ -3,8 +3,8 @@ Modo assistente da Shopee Vídeo: prepara cada postagem e manda no privado do Ra
 que posta pelo próprio celular. Usado pelo painel_shopee_video (bot_mestre).
 
 Para cada vídeo:
-- o vídeo vem dos Autorais (fila_autorais), o mais novo que ainda tem o arquivo e
-  não foi mandado;
+- o vídeo vem da fonte escolhida no painel (padrão: os Autorais), o mais novo que
+  ainda tem o arquivo e não foi mandado;
 - a IA (Gemini) assiste ao vídeo com o prompt do Gem "Shopee Vídeo" do Rafael,
   adaptado, e com o resumo das diretrizes (diretrizes_shopee_video.md): devolve o
   título (130 a 150 caracteres, sem marca), o texto do comentário e se viu violação.
@@ -44,6 +44,17 @@ ARQUIVO_DIRETRIZES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "d
 TITULO_MIN, TITULO_MAX = 130, 150
 URL_API = "https://open-api.affiliate.shopee.com.br/graphql"
 LINK_DO_POST = re.compile(r"https?://[^\s<>\"]*shopee[^\s<>\"]*")
+EXTENSOES_DE_IMAGEM = (".jpg", ".jpeg", ".png", ".webp", ".gif")
+
+# De onde o assistente pode puxar os vídeos: filas que guardam o arquivo e o link do
+# produto. Os Parceiros ficam de fora: os vídeos são deles.
+FONTES = {
+    "autorais": "Autorais 🎥",
+    "viral": "Viral (Espião) 🕵️",
+    "principal": "Canal Afiliados 📺",
+    "publico": "Grupo Público 📬",
+}
+FONTE_PADRAO = "autorais"
 
 PROMPT = """Atue como um especialista em Growth Hacking e Marketing para Shopee. Analise \
 detalhadamente o vídeo (produto, estilo e público-alvo) e gere o texto para postar na Shopee Vídeo.
@@ -143,30 +154,56 @@ def _criar_tabela(con):
                 "id_unico TEXT PRIMARY KEY, enviado_em TEXT, status TEXT, motivo TEXT)")
 
 
-def proximo_video():
+# Consulta de cada fila em tabela: (SQL, prefixo do id). Os Autorais ficam sem prefixo,
+# que foi como os primeiros envios foram registrados; as outras levam o nome da fonte
+# para um id não colidir com o de outra fila.
+CONSULTAS = {
+    "autorais": ("SELECT id_unico, caminho_arquivo, legenda FROM fila_autorais ORDER BY data_captura DESC", ""),
+    "principal": ("SELECT id_unico, caminho_video, legenda FROM fila_postagens ORDER BY id DESC", "principal:"),
+    "publico": ("SELECT id_unico, caminho_arquivo, legenda FROM fila_publico ORDER BY data_captura DESC", "publico:"),
+}
+
+
+def _candidatos(fonte):
+    """(id, arquivo, link, legenda) dos vídeos da fonte, do mais novo para o mais velho."""
+    if fonte == "viral":
+        fila = (db.ler_config("fila_clonagem", {"fila": []}) or {}).get("fila", [])
+        fila = sorted(fila, key=lambda item: item.get("data_captura") or "", reverse=True)
+        return [(f"viral:{item.get('id')}", item.get("caminho_video"), item.get("link_original"), "")
+                for item in fila]
+    sql, prefixo = CONSULTAS[fonte]
+    with db.conexao() as con:
+        linhas = con.execute(sql).fetchall()
+    candidatos = []
+    for id_unico, arquivo, legenda in linhas:
+        link = LINK_DO_POST.search(legenda or "")
+        candidatos.append((f"{prefixo}{id_unico}", arquivo, link.group(0) if link else None, legenda))
+    return candidatos
+
+
+def proximo_video(fonte=FONTE_PADRAO):
     """
-    {"id", "arquivo", "link", "nome"} do Autoral mais novo que ainda tem o arquivo e
-    não foi mandado; None se não há nenhum.
+    {"id", "arquivo", "link", "nome"} do vídeo mais novo da fonte que ainda tem o
+    arquivo e o link e não foi mandado; None se não há nenhum.
     """
     try:
+        candidatos = _candidatos(fonte if fonte in FONTES else FONTE_PADRAO)
         with db.conexao() as con:
             _criar_tabela(con)
-            linhas = con.execute(
-                "SELECT id_unico, legenda, caminho_arquivo FROM fila_autorais "
-                "WHERE id_unico NOT IN (SELECT id_unico FROM shopee_video_enviados) "
-                "ORDER BY data_captura DESC").fetchall()
+            mandados = {linha[0] for linha in con.execute("SELECT id_unico FROM shopee_video_enviados")}
     except Exception as e:
-        logger.warning(f"⚠️ [Shopee Vídeo] Não deu para ler a fila dos Autorais: {type(e).__name__}")
+        logger.warning(f"⚠️ [Shopee Vídeo] Não deu para ler a fila ({fonte}): {type(e).__name__}")
         return None
-    for id_unico, legenda, caminho in linhas:
-        link = LINK_DO_POST.search(legenda or "")
-        if caminho and link and os.path.exists(caminho):
-            return {"id": id_unico, "arquivo": caminho, "link": link.group(0), "nome": nome_da_legenda(legenda)}
+    for id_unico, arquivo, link, legenda in candidatos:
+        if (id_unico in mandados or not arquivo or not link or not os.path.exists(arquivo)
+                or arquivo.lower().endswith(EXTENSOES_DE_IMAGEM)):
+            continue
+        return {"id": id_unico, "arquivo": arquivo, "link": link, "nome": nome_da_legenda(legenda)}
     return None
 
 
 def nome_da_legenda(legenda):
-    """O nome do produto que a captura dos Autorais pôs em negrito na primeira linha."""
+    """O nome do produto que a captura pôs em negrito na primeira linha da legenda."""
     achado = re.search(r"<b>(.*?)</b>", legenda or "")
     nome = re.sub(r"<[^>]+>", "", achado.group(1)).strip() if achado else ""
     return "" if nome in ("", "Vídeo do Produto") else nome
@@ -314,14 +351,14 @@ def montar_mensagem(textos, produtos, link):
 
 # --- Envio ---
 
-async def preparar_e_enviar(bot, admin_id, agora=None):
+async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO):
     """
     Prepara o próximo vídeo e manda no privado. Devolve o que aconteceu, numa frase,
     para o log e para o botão Enviar 1 Agora.
     """
-    video = proximo_video()
+    video = proximo_video(fonte)
     if not video:
-        return "não há vídeo dos Autorais para mandar (a fila está vazia ou sem arquivos)"
+        return f"não há vídeo em {FONTES.get(fonte, fonte)} para mandar (a fila está vazia ou sem arquivos)"
     try:
         return await _preparar_e_enviar(bot, admin_id, video, agora)
     except Exception as e:
@@ -340,7 +377,7 @@ async def _preparar_e_enviar(bot, admin_id, video, agora):
         return "a IA não gerou o texto; o vídeo foi pulado"
     if textos["violacao"]:
         registrar(video["id"], "violacao", textos["motivo"], agora)
-        await bot.send_message(admin_id, "⚠️ <b>Shopee Vídeo:</b> pulei um vídeo dos Autorais. A IA viu "
+        await bot.send_message(admin_id, "⚠️ <b>Shopee Vídeo:</b> pulei um vídeo. A IA viu "
                                f"possível violação das diretrizes: {html.escape(textos['motivo'] or 'sem motivo')}",
                                parse_mode="HTML")
         return "vídeo pulado por possível violação das diretrizes"

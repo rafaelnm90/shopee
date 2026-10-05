@@ -190,12 +190,13 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **05/10/2026:** como o assistente manda, a cada dia:
   - a quantidade é sorteada dentro da faixa, e os horários também: a janela é dividida em partes iguais e cada envio cai num minuto sorteado da sua parte. Nunca no mesmo horário todo dia nem na mesma quantidade (pedido do Rafael: "faixas de horário, e não um horário específico");
   - no máximo um envio por vez; horários que passaram com o robô fora do ar contam como um só, e os que passam pausado são pulados (retomar não solta tudo de uma vez);
-  - o vídeo é o Autoral mais novo que ainda tem o arquivo e não foi mandado;
+  - ~~o vídeo é o Autoral mais novo que ainda tem o arquivo e não foi mandado;~~ Substituída em 05/10/2026: o vídeo é o mais novo da fonte escolhida no painel (abaixo) que ainda tem o arquivo e não foi mandado;
   - a mensagem traz o vídeo, o título (toque para copiar), o produto (link de produto: nome, preço e comissão pela API; link de vídeo: o Rafael vê os produtos do criador no link) e o comentário (toque para copiar);
   - vídeo que a IA marca como violação das diretrizes não é mandado, e o Rafael recebe o motivo; se a IA não responder, o vídeo é pulado.
 - **05/10/2026:** para o teste futuro no celular de verdade do Rafael: devagar e com pouco volume no começo (toques rápidos e perfeitos e horário de máquina denunciam robô), e com as mesmas regras do painel: faixa de horário e quantidade variada por dia.
 - **05/10/2026:** o projeto do robô no servidor fica **guardado**, parado, com o roteiro em `roteiro_robo_shopee_video.md` (onde paramos e o que fazer na volta). O Rafael pode conseguir um perfil reserva para testar: a volta é com ele, nunca com a conta principal, devagar, sem toques rápidos e sem ficar saindo e entrando no app.
 - **05/10/2026:** o Rafael pediu para o roteiro usar qualquer artifício contra a detecção de robô (localização de acordo com o usuário, dados de sensores). Não se faz, como em 04/10: é driblar o antifraude da Shopee, e a diretriz 9.2 proíbe. A alternativa honesta é o celular de verdade dele.
+- **05/10/2026:** botão "Fonte dos Vídeos 🎞️" no painel: o Rafael escolhe de onde o assistente puxa os vídeos, entre Autorais 🎥 (continua o padrão e o recomendado), Viral (Espião) 🕵️, Canal Afiliados 📺 e Grupo Público 📬. Vale para os envios do horário e para o Enviar 1 Agora. Os Parceiros ficam de fora, porque os vídeos são deles. A tela da escolha avisa que a Shopee não recomenda conteúdo copiado (diretriz 7.2.1), o que pesa no Viral e no Grupo Público.
 
 ## Monitor, deploy e servidor
 

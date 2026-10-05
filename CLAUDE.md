@@ -30,8 +30,8 @@ Módulos de apoio (não são serviços):
   - Login em etapas (`iniciar_login` → `confirmar_codigo` → `confirmar_senha` → `finalizar_cadastro`), usado pelo botão Cadastrar Conta ➕.
 - `blacklist_captura.py`: autores que o espelhador nunca captura, incluindo as próprias contas do pool, para não haver laço de recaptura.
 - `alvos_sem_acesso.py`: alvos da divulgação a que a conta perdeu o acesso. O `divulgacao_canal` marca e para de enviar; o bot_mestre avisa e reativa.
-- `painel_espelhos.py`, `painel_notas.py` e `painel_shopee_video.py` (Outros Canais → Shopee Vídeo 🎬: pausa, vídeos por dia, horário dos envios e Enviar 1 Agora; config na chave `shopee_video`): routers aiogram incluídos no bot_mestre.
-- `assistente_shopee_video.py`: o modo assistente da Shopee Vídeo. Prepara cada postagem (vídeo dos Autorais, título e comentário pela IA com o prompt do Gem do Rafael e as diretrizes, produtos pela API) e manda no privado do Rafael, que posta pelo celular. O painel agenda a cada 5 min; o plano do dia fica na chave `shopee_video_dia`, e o que já foi mandado na tabela `shopee_video_enviados`.
+- `painel_espelhos.py`, `painel_notas.py` e `painel_shopee_video.py` (Outros Canais → Shopee Vídeo 🎬: pausa, vídeos por dia, horário dos envios, fonte dos vídeos e Enviar 1 Agora; config na chave `shopee_video`): routers aiogram incluídos no bot_mestre.
+- `assistente_shopee_video.py`: o modo assistente da Shopee Vídeo. Prepara cada postagem (vídeo da fonte escolhida: Autorais, Viral, Canal Afiliados ou Grupo Público; título e comentário pela IA com o prompt do Gem do Rafael e as diretrizes, produtos pela API) e manda no privado do Rafael, que posta pelo celular. O painel agenda a cada 5 min; o plano do dia fica na chave `shopee_video_dia`, e o que já foi mandado na tabela `shopee_video_enviados`.
 - `utils.py` (`erros_logs`, caches, validação de IDs) e `fuso.py` (horário de Brasília e formato de log).
 - `api_gemini.py` (IA, com cascata de modelos) e `api_shopee.py` (links de afiliado).
 - `backup_dados.py`: backup diário (03:40, pelo bot_mestre) do banco, das sessões, dos JSON e do `.env` em `~/backups`, ficam 7. O `/status` mostra a idade do último.
