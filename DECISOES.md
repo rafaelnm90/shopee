@@ -194,6 +194,8 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - a mensagem traz o vídeo, o título (toque para copiar), o produto (link de produto: nome, preço e comissão pela API; link de vídeo: o Rafael vê os produtos do criador no link) e o comentário (toque para copiar);
   - vídeo que a IA marca como violação das diretrizes não é mandado, e o Rafael recebe o motivo; se a IA não responder, o vídeo é pulado.
 - **05/10/2026:** para o teste futuro no celular de verdade do Rafael: devagar e com pouco volume no começo (toques rápidos e perfeitos e horário de máquina denunciam robô), e com as mesmas regras do painel: faixa de horário e quantidade variada por dia.
+- **05/10/2026:** o projeto do robô no servidor fica **guardado**, parado, com o roteiro em `roteiro_robo_shopee_video.md` (onde paramos e o que fazer na volta). O Rafael pode conseguir um perfil reserva para testar: a volta é com ele, nunca com a conta principal, devagar, sem toques rápidos e sem ficar saindo e entrando no app.
+- **05/10/2026:** o Rafael pediu para o roteiro usar qualquer artifício contra a detecção de robô (localização de acordo com o usuário, dados de sensores). Não se faz, como em 04/10: é driblar o antifraude da Shopee, e a diretriz 9.2 proíbe. A alternativa honesta é o celular de verdade dele.
 
 ## Monitor, deploy e servidor
 
