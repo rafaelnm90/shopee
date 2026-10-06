@@ -1,9 +1,22 @@
 """api_shopee: o link de afiliado sai para o produto, mesmo quando o redirecionamento para fora dele."""
 import json
 
+import pytest
+
 import api_shopee
 import inventario
 from conftest import rodar
+
+
+@pytest.fixture(autouse=True)
+def sem_espera_entre_tentativas(monkeypatch):
+    pausas = []
+
+    async def dormir(segundos):
+        pausas.append(segundos)
+
+    monkeypatch.setattr(api_shopee.asyncio, "sleep", dormir)
+    return pausas
 
 CURTO = "https://s.shopee.com.br/gO7p0x2tU"
 PRODUTO = "https://shopee.com.br/Jogo-de-Panelas-Cacarolas-10-Pecas-i.123456.7890123"
@@ -529,3 +542,34 @@ def test_status_e_monitor_mostram_os_links_sem_conversao(bm, Msg, monkeypatch):
     alertas.clear()
     rodar(bm.monitor_saude())                                              # não repete na hora seguinte
     assert not any("sem a sua marcação" in a for a in alertas)
+
+
+def test_tenta_tres_vezes_antes_de_desistir_e_acerta_na_segunda(monkeypatch, sem_espera_entre_tentativas):
+    respostas = [{"data": None}, {"data": {"generateShortLink": {"shortLink": "https://s.shopee.com.br/novo"}}}]
+    _api_que_responde(monkeypatch)
+    sessao = api_shopee.aiohttp.ClientSession
+    sessao.post = lambda url, headers=None, data=None: _Resposta(200, corpo=respostas.pop(0))
+    assert rodar(api_shopee.converter_link_shopee(PRODUTO)) == "https://s.shopee.com.br/novo"
+    assert sem_espera_entre_tentativas == [2] and _registros_sem_conversao() == []    # acertou: nada registrado
+
+    tentativas = []
+
+    def sempre_cai(url, headers=None, data=None):
+        tentativas.append(json.loads(data))
+        raise OSError("caiu")
+
+    sessao.post = sempre_cai
+    sem_espera_entre_tentativas.clear()
+    assert rodar(api_shopee.converter_link_shopee(PRODUTO)) == PRODUTO
+    assert len(tentativas) == 3 and sem_espera_entre_tentativas == [2, 5]
+    assert len(_registros_sem_conversao()) == 1                            # um registro por link, não por tentativa
+
+
+def test_registro_traz_robo_tipo_e_detalhe_no_contexto(monkeypatch):
+    import db
+    recusa = {"errors": [{"message": "error", "extensions": {"code": 10020, "message": "invalid signature"}}]}
+    _api_que_responde(monkeypatch, corpo=recusa)
+    rodar(api_shopee.converter_link_shopee(PRODUTO, "espiao"))
+    with db.conexao() as con:
+        contexto = json.loads(con.execute("SELECT contexto FROM erros_logs").fetchone()[0])
+    assert contexto["tipo"] == "recusa" and contexto["detalhe"] == "10020" and contexto["robo"]
