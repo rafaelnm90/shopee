@@ -22,34 +22,25 @@ HASHTAGS = (
 )
 
 
-def prompt_nome_e_hashtags(emoji_no_inicio=False):
-    """
-    O pedido à IA: duas linhas, o nome do produto com um emoji e as hashtags da lista.
-    O emoji vai no fim do nome; nos Autorais, que sempre o tiveram no começo, no início.
-    O exemplo do organizador de sacos evita a categoria pela palavra ("saco" virar bolsa).
-    """
-    if emoji_no_inicio:
-        emoji = "no início (Exemplo: 👟 Tênis Casual Feminino)"
-    else:
-        emoji = "no final (Exemplo: Tênis Casual Feminino 👟)"
-    return (
-        "Assista ao vídeo INTEIRO e identifique qual é o produto demonstrado. "
-        "Sua resposta deve conter EXATAMENTE duas linhas.\n"
-        f"Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente {emoji}.\n"
-        "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais "
-        "de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
-        "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. "
-        "É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras (exemplo prático: "
-        "um organizador de sacos plásticos de cozinha pertence a #CasaEDecoracao e NUNCA a #BolsasFemininas, pois não "
-        "é um acessório de moda).\n"
-        "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se "
-        f"aplicável: {', '.join(HASHTAGS)}.\n"
-        "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais "
-        "ou adicionar frases de encerramento."
-    )
-
-
-PROMPT_NOME_E_HASHTAGS = prompt_nome_e_hashtags()
+# Duas linhas: o nome do produto com um emoji no fim (em todos os robôs, Autorais
+# inclusive: DECISOES.md, Vídeos Autorais e contas do pool) e as hashtags da lista. O
+# exemplo do organizador de sacos evita a categoria pela palavra ("saco" virar bolsa).
+PROMPT_NOME_E_HASHTAGS = (
+    "Assista ao vídeo INTEIRO e identifique qual é o produto demonstrado. "
+    "Sua resposta deve conter EXATAMENTE duas linhas.\n"
+    "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no final "
+    "(Exemplo: Tênis Casual Feminino 👟).\n"
+    "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais "
+    "de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
+    "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. "
+    "É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras (exemplo prático: "
+    "um organizador de sacos plásticos de cozinha pertence a #CasaEDecoracao e NUNCA a #BolsasFemininas, pois não "
+    "é um acessório de moda).\n"
+    "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se "
+    f"aplicável: {', '.join(HASHTAGS)}.\n"
+    "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais "
+    "ou adicionar frases de encerramento."
+)
 
 
 def separar_nome_e_hashtags(texto_ia):

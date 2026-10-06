@@ -106,6 +106,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **03/10/2026:** com cota em faixa (ex.: 6–10), o teto de saída do dia é o mesmo número sorteado na captura para aquela data.
 - **03/10/2026:** cada mensagem da origem é processada uma vez só, venha pelo evento ou pela varredura (trava pelo ID, gravada no banco).
 - **03/10/2026:** o log de diagnóstico "🔬 [Evento]", que registrava toda mensagem de todo chat, foi removido.
+- **06/10/2026:** na legenda dos Autorais, o emoji vai no fim do nome do produto, igual aos outros robôs (ex.: "Tênis Casual Feminino 👟"). Antes ia no começo.
 
 ## Grupo Público e Achadinhos
 
@@ -242,4 +243,4 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - Ordem: 1) links da Shopee (`links_shopee.py`); 2) legendas e o pedido de nome e hashtags à IA; 3) vídeos (720p e hash); 4) fila do Espelhador no banco, porque dois robôs gravam o mesmo arquivo; 5) trava única de admin, teclados, logs repetidos e o teste lento.
   - O `bot_mestre.py` é dividido aos poucos: um painel sai para o próprio arquivo quando precisar de outra mudança, nunca tudo de uma vez.
   - Motivo: o conserto do link de produto valeu para o Espião e não para o Espelhador, que tinha a própria cópia. Um teste barra cópia nova da receita de link.
-  - Etapa 2 (`legendas.py`): uma legenda e um pedido de nome e hashtags à IA para Espião, Espelhador, Autorais e Parceiros. Os Autorais continuam com o emoji no início do nome, como sempre foram, e os outros no fim; igualar só se o Rafael pedir. O nome que vem da IA passa a ser escapado no HTML: um "<" no nome não derruba mais o post.
+  - Etapa 2 (`legendas.py`): uma legenda e um pedido de nome e hashtags à IA para Espião, Espelhador, Autorais e Parceiros. O nome que vem da IA passa a ser escapado no HTML: um "<" no nome não derruba mais o post.

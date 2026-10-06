@@ -1136,8 +1136,8 @@ async def verificar_e_otimizar_video(caminho_video):
     return caminho_video
 
 async def gerar_legenda_autoral(caminho_video):
-    """Pede à IA o nome do produto com o emoji no início (linha 1) e as hashtags de categoria (linha 2)."""
-    return await analisar_video_gemini(caminho_video, legendas.prompt_nome_e_hashtags(emoji_no_inicio=True))
+    """Pede à IA o nome do produto com o emoji no fim (linha 1) e as hashtags de categoria (linha 2)."""
+    return await analisar_video_gemini(caminho_video, legendas.PROMPT_NOME_E_HASHTAGS)
 
 from utils import salvar_nome_grupo
 

@@ -46,14 +46,9 @@ def test_prompt_pede_o_emoji_no_fim_e_traz_todas_as_hashtags():
     assert "emoji correspondente no final (Exemplo: Tênis Casual Feminino 👟)" in prompt
     assert ", ".join(legendas.HASHTAGS) in prompt
     assert len(legendas.HASHTAGS) == len(set(legendas.HASHTAGS)) == 30
-    # Nos Autorais, o emoji no início; o resto do pedido é o mesmo.
-    autorais = legendas.prompt_nome_e_hashtags(emoji_no_inicio=True)
-    assert "emoji correspondente no início (Exemplo: 👟 Tênis Casual Feminino)" in autorais
-    assert autorais.replace("no início (Exemplo: 👟 Tênis Casual Feminino)",
-                            "no final (Exemplo: Tênis Casual Feminino 👟)") == prompt
 
 
-def test_os_robos_pedem_a_ia_pelo_modulo(monkeypatch):
+def test_os_robos_pedem_a_ia_com_o_mesmo_prompt(monkeypatch):
     import espelhador_videos_autorais as autorais
     pedidos = []
 
@@ -65,7 +60,8 @@ def test_os_robos_pedem_a_ia_pelo_modulo(monkeypatch):
     monkeypatch.setattr(autorais, "analisar_video_gemini", analisar)
     rodar(mu.gerar_legenda_com_ia_espelhador("video.mp4"))
     rodar(autorais.gerar_legenda_autoral("video.mp4"))
-    assert pedidos == [legendas.PROMPT_NOME_E_HASHTAGS, legendas.prompt_nome_e_hashtags(emoji_no_inicio=True)]
+    # Autorais inclusive: o emoji vai no fim do nome em todos os robôs.
+    assert pedidos == [legendas.PROMPT_NOME_E_HASHTAGS] * 2
 
     fonte = open(os.path.join(PASTA, "bot_mestre.py"), encoding="utf-8").read()
     assert fonte.count("= legendas.PROMPT_NOME_E_HASHTAGS") == 2   # Parceiros e Espião
