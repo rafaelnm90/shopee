@@ -14,8 +14,9 @@ Espião levam (só o tipo de cada página), journal (com as linhas de log que ma
 código), o Baixador hora a hora (só contagens), versões das bibliotecas, fora do projeto e se o servidor aguenta um
 Android virtual (para o robô da Shopee Vídeo).
 
-Com --link-de-teste, em vez do inventário, gera o link de afiliado do vídeo mais
-recente do Espião e manda no privado do Rafael, para ele conferir se abre o produto.
+Com --link-de-teste, em vez do inventário, gera os links de afiliado do vídeo e do
+produto mais recentes do Espião e manda no privado do Rafael, para ele conferir se
+cada um abre o mesmo que o original.
 """
 import ast
 import glob
@@ -492,8 +493,9 @@ def testes_de_conversao(caminhos):
                        if "/opaanlp/" in e), None)
         if achado:
             pagina = next(e for e in caminho[1:] if "/opaanlp/" in e)
-            candidatos += [("opaanlp cortado (como é hoje)", pagina.split("?")[0]),
-                           ("produto loja/item", f"https://shopee.com.br/product/{achado.group(1)}/{achado.group(2)}")]
+            candidatos += [("opaanlp cortado", pagina.split("?")[0]),
+                           ("produto loja/item (como é hoje)",
+                            f"https://shopee.com.br/product/{achado.group(1)}/{achado.group(2)}")]
             break
     if not candidatos:
         return
@@ -506,9 +508,9 @@ def testes_de_conversao(caminhos):
 def link_de_teste(quantos=10):
     """
     Gera, com o conversor de verdade (subId "diagnostico"), o link de afiliado do vídeo
-    da Shopee Vídeo mais recente da fila do Espião e manda no privado do Rafael, junto
-    com o link original, para ele tocar e conferir se abre o produto. No log, só se foi
-    enviado.
+    da Shopee Vídeo e o do produto mais recentes da fila do Espião e manda no privado
+    do Rafael, junto com os links originais, para ele tocar e conferir se cada um abre
+    o mesmo que o original. No log, só o que foi enviado.
     """
     secao("Link de teste do Espião (vai no privado do Rafael)")
     import asyncio
@@ -518,25 +520,39 @@ def link_de_teste(quantos=10):
     links = [item.get("link_original") for item in fila if item.get("link_original")][-quantos:]
 
     async def achar_e_converter():
+        achados = {}
         for link in reversed(links):
             caminho = await api_shopee.seguir_link(link)
             if api_shopee.eh_video(caminho[-1]):
-                return link, await api_shopee.converter_link_shopee(link, "diagnostico")
-        return None, None
+                tipo = "vídeo"
+            elif any(api_shopee.produto_do_link(e) for e in caminho[1:]):
+                tipo = "produto"
+            else:
+                continue
+            if tipo not in achados:
+                achados[tipo] = (link, await api_shopee.converter_link_shopee(link, "diagnostico"))
+            if len(achados) == 2:
+                break
+        return achados
 
-    original, novo = asyncio.run(achar_e_converter())
-    if not original:
-        print(f"   nenhum link de vídeo nos {quantos} mais recentes")
+    achados = asyncio.run(achar_e_converter())
+    if not achados:
+        print(f"   nenhum link de vídeo nem de produto nos {quantos} mais recentes")
         return
-    if novo == original:
-        print("   a conversão falhou (a API devolveu o link original)")
+    blocos = []
+    for tipo, (original, novo) in achados.items():
+        if novo == original:
+            print(f"   a conversão do {tipo} falhou (a API devolveu o link original)")
+            continue
+        abre = "o VÍDEO com o produto" if tipo == "vídeo" else "o PRODUTO"
+        blocos.append(f"{'🎬' if tipo == 'vídeo' else '🛍️'} Link de {tipo}: toque e veja se abre {abre}, "
+                      f"e não a busca nem a categoria:\n{novo}\n\nO original do grupo, para comparar:\n{original}")
+    if not blocos:
         return
     enviado = avisar_rafael.mandar_texto(
-        "🔗 Link de teste do Espião (vídeo da Shopee Vídeo)\n\n"
-        f"Toque e veja se abre o PRODUTO, e não a categoria:\n{novo}\n\n"
-        f"Para comparar, o link original do grupo:\n{original}\n\n"
-        "Depois conte no chat do Claude o que abriu.")
-    print("   enviado no privado do Rafael" if enviado else "   o Telegram não aceitou a mensagem")
+        "🔗 Links de teste do Espião\n\n" + "\n\n".join(blocos) + "\n\nDepois conte no chat do Claude o que abriu.")
+    tipos = " e ".join(tipo for tipo, (original, novo) in achados.items() if novo != original)
+    print(f"   enviado no privado do Rafael ({tipos})" if enviado else "   o Telegram não aceitou a mensagem")
 
 
 # Erros que o pool_contas grava com texto fixo; qualquer outro sai só com o tipo.
