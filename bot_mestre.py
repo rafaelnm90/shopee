@@ -1147,6 +1147,7 @@ async def executar_postagem_fila(item_id):
         conexao.close()
     except Exception as e:
         logger.error(f"❌ Falha crítica ao postar vídeo da fila: {e}")
+        desistiu_apos = None
         try:
             conexao = db.conectar()
             cursor = conexao.cursor()
@@ -1170,10 +1171,14 @@ async def executar_postagem_fila(item_id):
                         # data_postagem preenchida: a faxina da madrugada tira o item da fila.
                         cursor.execute("UPDATE fila_postagens SET status = 'ERRO', tentativas = ?, data_postagem = ?, horario_postagem = ? WHERE id_unico = ?",
                                        (tentativas, hoje_str, agora.strftime("%H:%M"), item_id))
-                        registrar_erro_json(f"Canal principal desistiu do vídeo {item_id} após {tentativas} tentativas: {e}", origem="bot_mestre.py")
+                        desistiu_apos = tentativas
             conexao.commit()
             conexao.close()
         except Exception: pass
+        # Só depois de fechar a conexão acima: registrar_erro_json grava por outra, que
+        # esperaria esta soltar o banco (30 s com o robô parado) e desistiria sem registrar.
+        if desistiu_apos:
+            registrar_erro_json(f"Canal principal desistiu do vídeo {item_id} após {desistiu_apos} tentativas: {e}", origem="bot_mestre.py")
 
 # Crédito do repost: o @ do administrador, perguntado ao Telegram.
 _cache_credito_repost = {"valor": None, "expira": None}
