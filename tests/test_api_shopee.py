@@ -582,7 +582,8 @@ def test_registro_traz_robo_tipo_e_detalhe_no_contexto(monkeypatch):
 
 
 def _fila_espelhador(pasta, itens):
-    (pasta / "fila_espelhador.json").write_text(json.dumps({"fila": itens}), encoding="utf-8")
+    import fila_espelhador
+    fila_espelhador.atualizar(lambda dados: dados.update({"fila": itens}))
 
 
 def test_link_de_teste_manda_tambem_o_proximo_do_espelhador(bm, monkeypatch, capsys, fila_do_espelhador_na_pasta_do_teste):
@@ -618,6 +619,6 @@ def test_inventario_conta_pendentes_do_espelhador_de_antes_do_conserto(capsys, f
         {"id": "c", "nome_rota": "R", "processado": True, "data_postagem": "2026-10-05"},
     ])
     (pasta / "espelhos_config.json").write_text(json.dumps({"rotas": [{"nome": "R"}]}), encoding="utf-8")
-    inventario.filas_em_arquivo()
+    inventario.fila_do_espelhador()
     saida = capsys.readouterr().out
     assert "pendentes: 2, capturados antes do conserto do link de produto: 1, sem o link original guardado: 1" in saida

@@ -31,6 +31,7 @@ import time
 import urllib.parse
 
 import db
+import fila_espelhador
 
 SERVICOS = ("bot_mestre_bot", "divulgacao_canal_bot", "motor_userbot_bot",
             "espelhador_videos_autorais_bot", "downloader_bot")
@@ -167,16 +168,15 @@ def versoes():
 CONSERTO_LINK_PRODUTO = "2026-10-05 22:43:00"
 
 
-def filas_em_arquivo():
-    secao("Filas em arquivo")
-    for nome in ("fila_espelhador.json", "espelhos_config.json"):
+def fila_do_espelhador():
+    secao("Fila e rotas do Espelhador")
+    for nome in (fila_espelhador.ARQUIVO, fila_espelhador.ARQUIVO + ".bkp", "espelhos_config.json"):
         caminho = os.path.join(PASTA, nome)
         if not os.path.exists(caminho):
             continue
         print(f"{nome:24} {tamanho_legivel(os.path.getsize(caminho)):>9}")
     try:
-        with open(os.path.join(PASTA, "fila_espelhador.json"), encoding="utf-8") as f:
-            fila = json.load(f).get("fila", [])
+        fila = fila_espelhador.ler().get("fila", [])
         with open(os.path.join(PASTA, "espelhos_config.json"), encoding="utf-8") as f:
             rotas = {r.get("nome") for r in json.load(f).get("rotas", [])}
         processados = [i for i in fila if i.get("processado")]
@@ -518,11 +518,7 @@ def testes_de_conversao(caminhos):
 
 def _pendente_do_espelhador():
     """O pendente mais recente da fila do Espelhador que tem link, ou None."""
-    try:
-        with open(os.path.join(PASTA, "fila_espelhador.json"), encoding="utf-8") as f:
-            fila = json.load(f).get("fila", [])
-    except Exception:
-        return None
+    fila = fila_espelhador.ler().get("fila", [])
     pendentes = [i for i in fila if not i.get("processado") and (i.get("link_original") or i.get("link_convertido"))]
     return pendentes[-1] if pendentes else None
 
@@ -864,7 +860,7 @@ if __name__ == "__main__":
     if "--link-de-teste" in sys.argv:
         link_de_teste()
         sys.exit(0)
-    for parte in (pastas_do_projeto, arquivos_soltos, banco, erros_registrados, filas_em_arquivo,
+    for parte in (pastas_do_projeto, arquivos_soltos, banco, erros_registrados, fila_do_espelhador,
                   captura_dos_parceiros, contas_dos_autorais, links_do_espiao, journal, baixador_por_hora,
                   versoes, fora_do_projeto, android_virtual):
         try:

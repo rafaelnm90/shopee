@@ -48,6 +48,7 @@ from api_gemini import gerar_texto_gemini, analisar_video_gemini, MODELOS_CASCAT
 from api_shopee import converter_link_shopee, buscar_ofertas_shopee, testar_chaves_afiliado, ORIGEM_SEM_CONVERSAO
 import links_shopee  # achar links da Shopee do mesmo jeito em todos os robôs
 import legendas  # legenda dos posts e pedido de nome e hashtags à IA, iguais em todos os robôs
+import fila_espelhador  # a fila do Espelhador, no banco
 from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite, sortear_teto_do_dia, faixa_de_config, recompactar_horarios
 
 import matplotlib.pyplot as plt
@@ -62,7 +63,7 @@ import pool_contas  # contas dos userbots (quem espelha, quem reposta)
 import blacklist_captura  # de quem os userbots nunca capturam
 import alvos_sem_acesso  # alvos da divulgação a que a conta perdeu o acesso
 import backup_dados  # backup diário do banco, sessões e .env em ~/backups
-from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo, salvar_json_atomico
+from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
 
 logger = configurar_logs(__name__)
 
@@ -1418,13 +1419,9 @@ def _caminhos_protegidos():
     except Exception:
         pass
 
-    # Fila do Espelhador, lida do arquivo onde o motor_userbot grava. Não usar
-    # db.ler_config aqui: sem a chave no banco ele "migra" o arquivo e o renomeia
-    # para .bkp, e o motor fica com a fila vazia.
+    # Fila do Espelhador (no banco; até o motor_userbot passá-la, no arquivo).
     try:
-        with open("fila_espelhador.json", "r", encoding="utf-8") as f:
-            dados = json.load(f)
-        for item in (dados.get("fila", dados) if isinstance(dados, dict) else dados) or []:
+        for item in fila_espelhador.ler().get("fila", []):
             if isinstance(item, dict) and not item.get("processado"):
                 for chave in ("caminho_video", "caminho", "caminho_arquivo"):
                     if item.get(chave):
@@ -7903,13 +7900,10 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             fila = []
             logger.error(f"❌ Erro ao ler fila_autorais: {e}")
     else:
-        try:
-            with open("fila_espelhador.json", "r", encoding="utf-8") as f:
-                fila_data = json.load(f)
-                fila = fila_data.get("fila", [])
-        except (FileNotFoundError, json.JSONDecodeError):
-            fila_data = {"fila": []}
-            fila = []
+        fila = fila_espelhador.ler().get("fila", [])
+        # Para a auto-correção abaixo gravar só o que ela mudou, sem apagar o que o
+        # motor_userbot gravou enquanto o relatório era montado.
+        foto_espelhador = fila_espelhador.fotografar(fila)
 
     # D+X configurado (o Espião precisa dele para o pente fino abaixo).
     atraso_dias = 0
@@ -8081,12 +8075,10 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
             
         # Grava a fila limpa (lixo removido, nomes de rota sincronizados).
         if houve_alteracao:
-            fila_data["fila"] = fila_limpa
-            try:
-                salvar_json_atomico("fila_espelhador.json", fila_data, indent=4)
+            if fila_espelhador.gravar_mudancas(foto_espelhador, fila_limpa) is not None:
                 logger.info("✅ Auto-correção: Nomes das rotas sincronizados e lixo antigo limpo.")
-            except Exception as e:
-                logger.error(f"❌ Erro ao limpar fila espelhador: {e}")
+            else:
+                logger.error("❌ Erro ao limpar fila espelhador.")
             
         pendentes = fila_limpa
         
@@ -10561,20 +10553,14 @@ async def processar_zerar_filas_tarefas(message: types.Message, state: FSMContex
             
     # 2. Espelhador: tira os pendentes da fila
     if limpar_espelhador:
-        try:
-            with open("fila_espelhador.json", "r", encoding="utf-8") as f:
-                fila_espelhador = json.load(f)
-            mantidos_espelhador = []
-            for item in fila_espelhador.get("fila", []):
-                if item.get("processado") in [True, 1, "true", "True"]:
-                    mantidos_espelhador.append(item)
-                else:
-                    apagar_arquivo(item.get("caminho_video"))
-                    relatorio["espelhador"] += 1
-            fila_espelhador["fila"] = mantidos_espelhador
-            salvar_json_atomico("fila_espelhador.json", fila_espelhador, indent=4)
-        except Exception:
-            pass
+        def tirar_pendentes(dados):
+            pendentes = [i for i in dados["fila"] if i.get("processado") not in [True, 1, "true", "True"]]
+            dados["fila"] = [i for i in dados["fila"] if i.get("processado") in [True, 1, "true", "True"]]
+            return pendentes
+
+        for item in fila_espelhador.atualizar(tirar_pendentes) or []:
+            apagar_arquivo(item.get("caminho_video"))
+            relatorio["espelhador"] += 1
 
     # 3. Autorais: tira os pendentes da fila de retorno e apaga os arquivos
     if limpar_autorais:
