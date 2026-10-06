@@ -530,7 +530,7 @@ def link_de_teste(quantos=10):
             else:
                 continue
             if tipo not in achados:
-                achados[tipo] = (link, await api_shopee.converter_link_shopee(link, "diagnostico"))
+                achados[tipo] = (link, await api_shopee.converter_link_shopee(link, "diagnostico", avisar_falha=False))
             if len(achados) == 2:
                 break
         return achados

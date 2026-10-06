@@ -45,7 +45,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, FSInputFile, Inli
 import subprocess
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from api_gemini import gerar_texto_gemini, analisar_video_gemini, MODELOS_CASCATA_GEMINI, client_genai
-from api_shopee import converter_link_shopee, buscar_ofertas_shopee, testar_chaves_afiliado
+from api_shopee import converter_link_shopee, buscar_ofertas_shopee, testar_chaves_afiliado, ORIGEM_SEM_CONVERSAO
 from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite, sortear_teto_do_dia, faixa_de_config, recompactar_horarios
 
 import matplotlib.pyplot as plt
@@ -17233,6 +17233,17 @@ async def monitor_saude():
         except Exception:
             pass
 
+        # 8. Link que saiu sem a marcação de afiliado (a API da Shopee falhou na hora).
+        # Decisão do Rafael: DECISOES.md, Canal Viral.
+        try:
+            sem_marca = contar_links_sem_conversao(horas=1)
+            if sem_marca and not _ja_alertou("link_sem_conversao"):
+                alertas.append(f"🔗 <b>{sem_marca} link(s) sem a sua marcação de afiliado</b>\n"
+                               "Na última hora, a Shopee não converteu e o post saiu com o link original. "
+                               "O robô e o motivo estão no /status.")
+        except Exception:
+            pass
+
         if alertas:
             texto = "🩺 <b>ALERTA DE SAÚDE DO SISTEMA</b>\n\n" + "\n\n".join(alertas)
             await bot.send_message(ADMIN_ID, texto, parse_mode="HTML")
@@ -17240,6 +17251,17 @@ async def monitor_saude():
 
     except Exception as e:
         logger.error(f"❌ [Saúde] Falha no monitor: {e}")
+
+def contar_links_sem_conversao(horas=24):
+    """Links que saíram sem a marcação de afiliado (o api_shopee registra no erros_logs)."""
+    corte = (datetime.now(fuso_horario) - timedelta(hours=horas)).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with db.conexao() as con:
+            return con.execute("SELECT COUNT(*) FROM erros_logs WHERE origem = ? AND timestamp >= ?",
+                               (ORIGEM_SEM_CONVERSAO, corte)).fetchone()[0]
+    except sqlite3.Error:
+        return 0
+
 
 def contar_erros_recentes(horas=1):
     """Erros gravados pelo registrar_erro_json (tabela erros_logs) nas últimas horas."""
@@ -17330,6 +17352,9 @@ def montar_status():
     except Exception:
         pass
 
+    sem_marca = contar_links_sem_conversao(24)
+    linhas.append(f"🔗 Links sem a sua marcação de afiliado (24 h): <b>{sem_marca}</b>"
+                  + (" ⚠️" if sem_marca else " ✅"))
     linhas.append(f"\n🐛 Erros na última hora: <b>{contar_erros_recentes(1)}</b>")
     try:
         conexao = db.conectar()
