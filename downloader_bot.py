@@ -26,6 +26,7 @@ import tempfile
 import hashlib
 import db
 import json
+import links_shopee
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
@@ -83,7 +84,7 @@ PADROES_SUPORTADOS = {
     "TikTok":    r'(?:vm\.tiktok\.com|vt\.tiktok\.com|tiktok\.com)/\S+',
     "Instagram": r'instagram\.com/(?:p|reel|reels|tv)/\S+',
     "Pinterest": r'(?:pin\.it|pinterest\.[a-z.]+)/\S+',
-    "Shopee":    r'(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee|shopee\.com\.br)/\S+',
+    "Shopee":    links_shopee.PADRAO_LINK_SHOPEE.pattern,
 }
 
 PASTA_TEMP_DOWNLOAD = "temp_downloads"
@@ -857,11 +858,8 @@ async def baixar_video(url, pasta, tentativas=3):
 def detectar_plataforma(texto):
     """Devolve (plataforma, url) do primeiro link reconhecido, ou (None, None)."""
     for nome, padrao in PADROES_SUPORTADOS.items():
-        achado = re.search(padrao, texto or "", re.IGNORECASE)
-        if achado:
-            url = achado.group(0).rstrip(").,;!?")
-            if not url.lower().startswith("http"):
-                url = "https://" + url
+        url = links_shopee.primeiro_link(texto, re.compile(padrao, re.IGNORECASE))
+        if url:
             return nome, url
     return None, None
 

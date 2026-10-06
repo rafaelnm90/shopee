@@ -55,6 +55,7 @@ API_HASH = os.getenv('API_HASH')
 
 from api_gemini import analisar_video_gemini
 from api_shopee import converter_link_shopee
+from links_shopee import extrair_link_shopee
 
 LIMITE_REGISTROS_HASH = 1000  # hashes de vídeo guardados por contexto na anti-duplicata
 
@@ -315,26 +316,6 @@ async def gerar_legenda_com_ia_espelhador(caminho_video):
     
     titulo = await analisar_video_gemini(caminho_video, prompt)
     return titulo
-
-PADRAO_SHOPEE = re.compile(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+', re.IGNORECASE)
-
-def extrair_link_shopee(event):
-    """Primeiro link da Shopee do post: no texto visível ou escondido num hiperlink. None se não houver."""
-    texto = event.raw_text or ""
-    match = PADRAO_SHOPEE.search(texto)
-    if match:
-        link = match.group(0)
-        if not link.startswith("http"):
-            link = "https://" + link
-        return link.rstrip(").,;!?")
-        
-    # Link escondido atrás de um texto (entidade com url).
-    if event.entities:
-        for entity in event.entities:
-            if hasattr(entity, 'url') and entity.url:
-                if PADRAO_SHOPEE.search(entity.url):
-                    return entity.url
-    return None
 
 @client.on(events.NewMessage)
 async def interceptar_mensagem(event):
