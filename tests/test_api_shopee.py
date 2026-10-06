@@ -445,3 +445,87 @@ def test_link_de_teste_manda_o_que_converteu_quando_um_falha(bm, monkeypatch, ca
 
 def pytest_falha():
     raise AssertionError("não devia mandar mensagem")
+
+
+# --- Link que sai sem a marcação de afiliado: vai para o erros_logs (/status e monitor) ---
+
+def _registros_sem_conversao():
+    import db
+    with db.conexao() as con:
+        tabela = con.execute("SELECT name FROM sqlite_master WHERE name = 'erros_logs'").fetchone()
+        if not tabela:
+            return []
+        return [linha[0] for linha in con.execute(
+            "SELECT erro FROM erros_logs WHERE origem = ?", (api_shopee.ORIGEM_SEM_CONVERSAO,))]
+
+
+def _api_que_responde(monkeypatch, corpo=None, erro=None):
+    sessao = _Sessao(gets=[_Resposta(200)], corpo_post=corpo)
+    if erro:
+        def post(*a, **k):
+            raise erro
+        sessao.post = post
+    monkeypatch.setattr(api_shopee.aiohttp, "ClientSession", sessao)
+    monkeypatch.setattr(api_shopee, "SHOPEE_APP_ID", "1")
+    monkeypatch.setattr(api_shopee, "SHOPEE_APP_SECRET", "2")
+
+
+def test_recusa_da_api_registra_o_link_sem_conversao_sem_mostrar_o_link(monkeypatch):
+    recusa = {"errors": [{"message": "error", "extensions": {"code": 10020, "message": "invalid signature"}}]}
+    _api_que_responde(monkeypatch, corpo=recusa)
+    assert rodar(api_shopee.converter_link_shopee(PRODUTO, "espiao")) == PRODUTO   # o post segue com o original
+    registros = _registros_sem_conversao()
+    assert len(registros) == 1
+    assert "sem a sua marcação" in registros[0] and "subId espiao" in registros[0]
+    assert "10020 invalid signature" in registros[0] and "shopee.com.br" not in registros[0]
+
+
+def test_api_fora_do_ar_e_chaves_ausentes_tambem_registram(monkeypatch):
+    _api_que_responde(monkeypatch, erro=OSError("caiu"))
+    assert rodar(api_shopee.converter_link_shopee(PRODUTO)) == PRODUTO
+    monkeypatch.setattr(api_shopee, "SHOPEE_APP_ID", None)
+    assert rodar(api_shopee.converter_link_shopee(PRODUTO)) == PRODUTO
+    registros = _registros_sem_conversao()
+    assert "sem resposta da API (OSError)" in registros[0] and "sem as chaves de afiliado" in registros[1]
+
+
+def test_link_do_parceiro_sem_conversao_diz_que_e_do_parceiro(monkeypatch):
+    _api_que_responde(monkeypatch, corpo={"data": None})
+    rodar(api_shopee.converter_link_shopee(PRODUTO, "parceiro", app_id="9", app_secret="8"))
+    assert "sem a marcação do parceiro" in _registros_sem_conversao()[0]
+
+
+def test_conversao_certa_e_diagnostico_nao_registram(monkeypatch):
+    _api_que_responde(monkeypatch, corpo={"data": {"generateShortLink": {"shortLink": "https://s.shopee.com.br/novo"}}})
+    assert rodar(api_shopee.converter_link_shopee(PRODUTO)) == "https://s.shopee.com.br/novo"
+    _api_que_responde(monkeypatch, corpo={"data": None})
+    assert rodar(api_shopee.converter_link_shopee(PRODUTO, "diagnostico", avisar_falha=False)) == PRODUTO
+    assert _registros_sem_conversao() == []
+
+
+def test_status_e_monitor_mostram_os_links_sem_conversao(bm, Msg, monkeypatch):
+    from types import SimpleNamespace
+    alertas = []
+
+    async def send_message(chat, texto, **k):
+        alertas.append(texto)
+
+    monkeypatch.setattr(bm.bot, "send_message", send_message)
+    monkeypatch.setattr(bm.subprocess, "run", lambda cmd, **k: SimpleNamespace(stdout=""))
+    msg = Msg("/status")
+    rodar(bm.comando_status(msg, None))
+    assert "Links sem a sua marcação de afiliado (24 h): <b>0</b> ✅" in msg.saidas[-1]
+    rodar(bm.monitor_saude())
+    assert not any("sem a sua marcação" in a for a in alertas)
+
+    _api_que_responde(monkeypatch, corpo={"data": None})
+    rodar(api_shopee.converter_link_shopee(PRODUTO, "espiao"))
+    msg = Msg("/status")
+    rodar(bm.comando_status(msg, None))
+    assert "Links sem a sua marcação de afiliado (24 h): <b>1</b> ⚠️" in msg.saidas[-1]
+    assert "[Link sem conversão]" in msg.saidas[-1]
+    rodar(bm.monitor_saude())
+    assert any("1 link(s) sem a sua marcação de afiliado" in a for a in alertas)
+    alertas.clear()
+    rodar(bm.monitor_saude())                                              # não repete na hora seguinte
+    assert not any("sem a sua marcação" in a for a in alertas)

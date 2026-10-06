@@ -63,7 +63,7 @@ async def main():
 
     print("\n🌐 Chamando a API da Shopee...")
     resultado = await converter_link_shopee(
-        LINK_TESTE, "diagnostico", app_id=app_id, app_secret=app_secret
+        LINK_TESTE, "diagnostico", app_id=app_id, app_secret=app_secret, avisar_falha=False
     )
 
     print()
