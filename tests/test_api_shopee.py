@@ -9,6 +9,12 @@ from conftest import rodar
 
 
 @pytest.fixture(autouse=True)
+def fila_do_espelhador_na_pasta_do_teste(monkeypatch, tmp_path):
+    monkeypatch.setattr(inventario, "PASTA", str(tmp_path))
+    return tmp_path
+
+
+@pytest.fixture(autouse=True)
 def sem_espera_entre_tentativas(monkeypatch):
     pausas = []
 
@@ -573,3 +579,45 @@ def test_registro_traz_robo_tipo_e_detalhe_no_contexto(monkeypatch):
     with db.conexao() as con:
         contexto = json.loads(con.execute("SELECT contexto FROM erros_logs").fetchone()[0])
     assert contexto["tipo"] == "recusa" and contexto["detalhe"] == "10020" and contexto["robo"]
+
+
+def _fila_espelhador(pasta, itens):
+    (pasta / "fila_espelhador.json").write_text(json.dumps({"fila": itens}), encoding="utf-8")
+
+
+def test_link_de_teste_manda_tambem_o_proximo_do_espelhador(bm, monkeypatch, capsys, fila_do_espelhador_na_pasta_do_teste):
+    import avisar_rafael
+    bm.db.salvar_config("fila_clonagem", {"fila": []})
+    _fila_espelhador(fila_do_espelhador_na_pasta_do_teste, [
+        {"id": "ja_saiu", "processado": True, "link_convertido": "https://s.shopee.com.br/velho_postado"},
+        {"id": "antigo", "link_convertido": "https://s.shopee.com.br/guardado_antigo"},
+        {"id": "novo", "link_original": "https://s.shopee.com.br/original_novo",
+         "link_convertido": "https://s.shopee.com.br/guardado_novo"},
+    ])
+    convertidos, mensagens = [], []
+
+    async def converter(link, sub_id="geral", **k):
+        convertidos.append(link)
+        return "https://s.shopee.com.br/renovado"
+
+    monkeypatch.setattr(api_shopee, "converter_link_shopee", converter)
+    monkeypatch.setattr(avisar_rafael, "mandar_texto", lambda texto: mensagens.append(texto) or True)
+    inventario.link_de_teste()
+    saida = capsys.readouterr().out
+    assert convertidos == ["https://s.shopee.com.br/original_novo"]      # o pendente mais novo, do original
+    assert "Link do Espelhador" in mensagens[0] and "renovado" in mensagens[0] and "guardado_novo" in mensagens[0]
+    assert "enviado no privado do Rafael (Espelhador)" in saida and "https://" not in saida
+
+
+def test_inventario_conta_pendentes_do_espelhador_de_antes_do_conserto(capsys, fila_do_espelhador_na_pasta_do_teste):
+    pasta = fila_do_espelhador_na_pasta_do_teste
+    _fila_espelhador(pasta, [
+        {"id": "a", "nome_rota": "R", "data_captura": "2026-10-04 10:00:00", "link_convertido": "x"},
+        {"id": "b", "nome_rota": "R", "data_captura": "2026-10-06 09:00:00", "link_convertido": "x",
+         "link_original": "y"},
+        {"id": "c", "nome_rota": "R", "processado": True, "data_postagem": "2026-10-05"},
+    ])
+    (pasta / "espelhos_config.json").write_text(json.dumps({"rotas": [{"nome": "R"}]}), encoding="utf-8")
+    inventario.filas_em_arquivo()
+    saida = capsys.readouterr().out
+    assert "pendentes: 2, capturados antes do conserto do link de produto: 1, sem o link original guardado: 1" in saida

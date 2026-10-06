@@ -53,6 +53,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **06/10/2026:** o link de afiliado abre o mesmo tipo de página que o link do post de origem, em todo robô que troca link (Espião, Autorais, Espelhador, Grupo Público):
   - origem que abre um vídeo da Shopee Vídeo: o link novo abre o vídeo, com o produto;
   - origem que abre um produto: o link novo abre o produto, e nunca uma busca ou categoria. Vídeo do Rafael de 05/10: a Mochila abria o produto na origem e a busca "Mochilas" no Acervo Viral.
+  - quem guarda o link numa fila gera de novo na hora de postar, para o conserto valer também para o que já estava na fila. O Espelhador guardava o link da captura, e vídeos capturados antes do conserto saíam abrindo a busca (pedido do Rafael em 06/10: corrigir em todos os robôs que trocam link, não só no Espião). O Espião e os parceiros já geravam o link na hora; os Autorais postam logo depois da captura.
 - **06/10/2026:** link que sai sem a marcação de afiliado (a API da Shopee falhou na hora) continua postando com o link original, mas o Rafael fica sabendo:
   - cada um entra no registro de erros, com o robô, o subId e o motivo, sem o link;
   - o `/status` mostra quantos houve nas últimas 24 h;

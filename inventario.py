@@ -163,6 +163,10 @@ def versoes():
             print(f"{nome:16} (não instalado)")
 
 
+# Quando o conversor passou a mandar o link padrão do produto (deploy do PR #65).
+CONSERTO_LINK_PRODUTO = "2026-10-05 22:43:00"
+
+
 def filas_em_arquivo():
     secao("Filas em arquivo")
     for nome in ("fila_espelhador.json", "espelhos_config.json"):
@@ -182,6 +186,13 @@ def filas_em_arquivo():
               f"{len(orfaos)} de rota que não existe mais")
         if datas:
             print(f"   processado mais antigo ainda na fila: {datas[0]}")
+        # Pendentes com link convertido antes do conserto do link de produto (05/10 22:43):
+        # o disparo gera o link de novo, mas a conta mostra quantos ainda vão passar por isso.
+        pendentes = [i for i in fila if not i.get("processado")]
+        antigos = [i for i in pendentes if (i.get("data_captura") or "") < CONSERTO_LINK_PRODUTO]
+        sem_original = [i for i in pendentes if not i.get("link_original")]
+        print(f"   pendentes: {len(pendentes)}, capturados antes do conserto do link de produto: "
+              f"{len(antigos)}, sem o link original guardado: {len(sem_original)}")
     except Exception as e:
         print(f"   (não deu para ler a fila do Espelhador: {type(e).__name__})")
 
@@ -505,19 +516,32 @@ def testes_de_conversao(caminhos):
         print(f"      {rotulo}: {asyncio.run(conversao_de_teste(origem))}")
 
 
+def _pendente_do_espelhador():
+    """O pendente mais recente da fila do Espelhador que tem link, ou None."""
+    try:
+        with open(os.path.join(PASTA, "fila_espelhador.json"), encoding="utf-8") as f:
+            fila = json.load(f).get("fila", [])
+    except Exception:
+        return None
+    pendentes = [i for i in fila if not i.get("processado") and (i.get("link_original") or i.get("link_convertido"))]
+    return pendentes[-1] if pendentes else None
+
+
 def link_de_teste(quantos=10):
     """
     Gera, com o conversor de verdade (subId "diagnostico"), o link de afiliado do vídeo
-    da Shopee Vídeo e o do produto mais recentes da fila do Espião e manda no privado
-    do Rafael, junto com os links originais, para ele tocar e conferir se cada um abre
-    o mesmo que o original. No log, só o que foi enviado.
+    da Shopee Vídeo e o do produto mais recentes da fila do Espião, e o do próximo da
+    fila do Espelhador gerado de novo como no disparo, e manda no privado do Rafael,
+    cada um com o link para comparar, para ele tocar e conferir se abre o mesmo que o
+    original. No log, só o que foi enviado.
     """
-    secao("Link de teste do Espião (vai no privado do Rafael)")
+    secao("Links de teste (vão no privado do Rafael)")
     import asyncio
     import api_shopee
     import avisar_rafael
     fila = (db.ler_config("fila_clonagem", {"fila": []}) or {}).get("fila", [])
     links = [item.get("link_original") for item in fila if item.get("link_original")][-quantos:]
+    espelho = _pendente_do_espelhador()
 
     async def achar_e_converter():
         achados = {}
@@ -533,16 +557,28 @@ def link_de_teste(quantos=10):
                 achados[tipo] = (link, await api_shopee.converter_link_shopee(link, "diagnostico", avisar_falha=False))
             if len(achados) == 2:
                 break
+        if espelho:
+            # Como o disparo faz (motor_userbot.renovar_link_no_disparo): do original, ou do
+            # link guardado quando o item é de antes de o original ser guardado.
+            origem = espelho.get("link_original") or espelho.get("link_convertido")
+            achados["Espelhador"] = (espelho.get("link_convertido") or origem,
+                                     await api_shopee.converter_link_shopee(origem, "diagnostico", avisar_falha=False))
         return achados
 
     achados = asyncio.run(achar_e_converter())
     if not achados:
-        print(f"   nenhum link de vídeo nem de produto nos {quantos} mais recentes")
+        print(f"   nenhum link de vídeo nem de produto nos {quantos} mais recentes, nem pendente no Espelhador")
         return
-    blocos = []
+    blocos, enviados = [], []
     for tipo, (original, novo) in achados.items():
         if novo == original:
             print(f"   a conversão do {tipo} falhou (a API devolveu o link original)")
+            continue
+        enviados.append(tipo)
+        if tipo == "Espelhador":
+            blocos.append("🪞 Link do Espelhador (o próximo da fila, gerado de novo como no disparo): toque e "
+                          f"veja se abre o mesmo que o post de origem, e não a busca:\n{novo}\n\n"
+                          f"O que estava guardado na fila, para comparar:\n{original}")
             continue
         abre = "o VÍDEO com o produto" if tipo == "vídeo" else "o PRODUTO"
         blocos.append(f"{'🎬' if tipo == 'vídeo' else '🛍️'} Link de {tipo}: toque e veja se abre {abre}, "
@@ -550,9 +586,9 @@ def link_de_teste(quantos=10):
     if not blocos:
         return
     enviado = avisar_rafael.mandar_texto(
-        "🔗 Links de teste do Espião\n\n" + "\n\n".join(blocos) + "\n\nDepois conte no chat do Claude o que abriu.")
-    tipos = " e ".join(tipo for tipo, (original, novo) in achados.items() if novo != original)
-    print(f"   enviado no privado do Rafael ({tipos})" if enviado else "   o Telegram não aceitou a mensagem")
+        "🔗 Links de teste\n\n" + "\n\n".join(blocos) + "\n\nDepois conte no chat do Claude o que abriu.")
+    print(f"   enviado no privado do Rafael ({' e '.join(enviados)})" if enviado
+          else "   o Telegram não aceitou a mensagem")
 
 
 # Erros que o pool_contas grava com texto fixo; qualquer outro sai só com o tipo.
