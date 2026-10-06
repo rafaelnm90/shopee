@@ -50,6 +50,9 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **03/10/2026, exceção:** Espião e Espelhador ignoram posts do próprio sistema, para não recapturar o que publicaram. No @shopee_video_afiliado é o contrário: capturam até os posts do sistema, de propósito. O bot posta no grupo principal, e esses posts devem ser espelhados para outros canais.
 - **03/10/2026:** a trava de silêncio vale para todas as rotinas do Viral, e não para as do Grupo Público.
 - **03/10/2026:** o "esvaziar/forçar" a fila de clones solta tudo a partir de agora, um a cada 15 s, a qualquer hora, ignorando a janela. Forçar é publicar já.
+- **06/10/2026:** o link de afiliado abre o mesmo tipo de página que o link do post de origem, em todo robô que troca link (Espião, Autorais, Espelhador, Grupo Público):
+  - origem que abre um vídeo da Shopee Vídeo: o link novo abre o vídeo, com o produto;
+  - origem que abre um produto: o link novo abre o produto, e nunca uma busca ou categoria. Vídeo do Rafael de 05/10: a Mochila abria o produto na origem e a busca "Mochilas" no Acervo Viral.
 
 ## Espelhador de canais
 

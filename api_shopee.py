@@ -60,12 +60,13 @@ def limpar_sub_id(valor, padrao="geral"):
     limpo = re.sub(r"[^a-zA-Z0-9]", "", texto)[:40]
     return limpo or padrao
 
-# Onde um link da Shopee diz qual é o produto: no caminho (Nome-do-produto-i.<loja>.<item>,
-# product/<loja>/<item>, que cobre também o universal-link/product/..., ou opaanlp/<loja>/<item>,
-# a página de afiliado por onde passa o link de afiliado de um produto) ou num link guardado
-# dentro dos parâmetros (an_redir?origin_link=...), por isso a busca vai no texto já decodificado.
-PADROES_PRODUTO = (re.compile(r"-i\.(\d+)\.(\d+)"), re.compile(r"/product/(\d+)/(\d+)"),
-                   re.compile(r"/opaanlp/(\d+)/(\d+)"))
+# Onde um link da Shopee diz qual é o produto: no caminho da página do produto
+# (Nome-do-produto-i.<loja>.<item> ou product/<loja>/<item>, que cobre também o
+# universal-link/product/...), no caminho da página de afiliado por onde passa o link de
+# afiliado de outra pessoa (opaanlp/<loja>/<item>) ou num link guardado dentro dos parâmetros
+# (an_redir?origin_link=...), por isso a busca vai no texto já decodificado.
+PADROES_PAGINA_DO_PRODUTO = (re.compile(r"-i\.(\d+)\.(\d+)"), re.compile(r"/product/(\d+)/(\d+)"))
+PADROES_PRODUTO = PADROES_PAGINA_DO_PRODUTO + (re.compile(r"/opaanlp/(\d+)/(\d+)"),)
 HOSTS_CURTOS = ("s.shopee.com.br", "shope.ee", "shp.ee")
 NAVEGADOR = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
 
@@ -145,7 +146,8 @@ async def link_para_converter(link_original):
     """
     O endereço que vai para a API de afiliado. Link curto: o produto, achado em
     qualquer salto dos redirecionamentos (a própria página do produto, sem os
-    parâmetros, ou o produto guardado num parâmetro). Link de vídeo da Shopee Vídeo:
+    parâmetros, ou o link padrão do produto, quando ele aparece na página de afiliado
+    de outra pessoa ou guardado num parâmetro). Link de vídeo da Shopee Vídeo:
     o endereço do vídeo inteiro (ver abaixo). Sem produto em lugar nenhum, fica o
     último endereço sem os parâmetros, e o log diz onde o link parou. Link que não é
     curto vai como veio.
@@ -154,8 +156,11 @@ async def link_para_converter(link_original):
         return link_original
     caminho = await seguir_link(link_original)
     for endereco in caminho[1:]:
-        if any(padrao.search(urllib.parse.urlsplit(endereco).path) for padrao in PADROES_PRODUTO):
+        if any(padrao.search(urllib.parse.urlsplit(endereco).path) for padrao in PADROES_PAGINA_DO_PRODUTO):
             return endereco.split('?')[0]
+        # A página de afiliado (opaanlp) é do link de quem postou na origem: convertida como
+        # veio, o link novo abre no app uma busca pelo tipo do produto. O link padrão do
+        # produto abre o produto.
         produto = produto_do_link(endereco)
         if produto:
             return produto
