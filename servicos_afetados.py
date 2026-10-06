@@ -10,6 +10,7 @@ indiretamente (inclusive import dentro de função). Mudança só em documentaç
 testes, workflows ou ferramentas que nenhum robô importa não reinicia ninguém:
 cada reinício derruba os painéis abertos e refaz a grade do dia.
 
+Um .py que mudou só em comentários ou docstrings também não reinicia ninguém.
 Na dúvida, todos: requirements.txt mudou, o mesmo commit de novo (deploy
 rodado outra vez à mão), git falhou ou arquivo que não se encaixa nas regras.
 """
@@ -85,13 +86,42 @@ def servicos_afetados(mudados, pasta=PASTA):
     return sorted(afetados)
 
 
+def codigo_sem_comentarios(texto):
+    """
+    O código do arquivo sem comentários, docstrings, linhas em branco e posição das
+    linhas (ast.dump não guarda nada disso): dois textos com o mesmo resultado rodam igual.
+    """
+    arvore = ast.parse(texto)
+    for no in ast.walk(arvore):
+        corpo = getattr(no, "body", None)
+        if (isinstance(no, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)) and corpo
+                and isinstance(corpo[0], ast.Expr) and isinstance(corpo[0].value, ast.Constant)
+                and isinstance(corpo[0].value.value, str)):
+            no.body = corpo[1:] or [ast.Pass()]
+    return ast.dump(arvore)
+
+
+def so_comentarios_mudaram(caminho, antigo, novo, pasta=PASTA):
+    """True se o .py mudou só em comentários ou docstrings entre os dois commits."""
+    if not caminho.endswith(".py"):
+        return False
+    try:
+        textos = [subprocess.run(["git", "show", f"{commit}:{caminho}"], cwd=pasta, capture_output=True,
+                                 text=True, timeout=30, check=True).stdout for commit in (antigo, novo)]
+        return codigo_sem_comentarios(textos[0]) == codigo_sem_comentarios(textos[1])
+    except Exception:
+        return False
+
+
 def main(antigo, novo):
     if antigo == novo:
         return sorted(SERVICOS)
     try:
         r = subprocess.run(["git", "diff", "--name-only", antigo, novo], cwd=PASTA,
                            capture_output=True, text=True, timeout=30, check=True)
-        return servicos_afetados([linha for linha in r.stdout.splitlines() if linha.strip()])
+        mudados = [linha for linha in r.stdout.splitlines() if linha.strip()]
+        # Comentário não muda o que o robô faz: reiniciar por ele só derrubaria os painéis.
+        return servicos_afetados([c for c in mudados if not so_comentarios_mudaram(c, antigo, novo)])
     except Exception:
         return sorted(SERVICOS)
 

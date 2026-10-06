@@ -119,7 +119,7 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
 - `--ordem aleatoria` embaralha os testes. Um teste não pode depender de outro ter rodado antes.
 - CI:
   - `validar.yml` roda em todo PR para a `main`, com a suíte em 4 horários e ordem aleatória.
-  - `deploy.yml` roda no merge na `main`. Ele repete a validação e, por SSH, faz `git pull` e `pip install` no servidor. Reinicia só os serviços cujo código mudou (o arquivo do robô ou um módulo que ele importa; `requirements.txt` ou dúvida = todos; só docs, testes ou workflows = nenhum). Confere os 5 aos 25 s e de novo 3 min depois (processo e contador de reinícios). Robô que cai mostra só o tipo do erro no log.
+  - `deploy.yml` roda no merge na `main`. Ele repete a validação e, por SSH, faz `git pull` e `pip install` no servidor. Reinicia só os serviços cujo código mudou (o arquivo do robô ou um módulo que ele importa; `requirements.txt` ou dúvida = todos; só docs, testes, workflows ou comentários = nenhum). Confere os 5 aos 25 s e de novo 3 min depois (processo e contador de reinícios). Robô que cai mostra só o tipo do erro no log.
   - `diagnostico.yml` olha o servidor de hora em hora, só lendo: robôs (estado, desde quando, reinícios), máquina (carga, memória, disco), banco, volume de log e links que saíram sem a marcação de afiliado (contagem por robô e motivo). Fica vermelho com robô fora do ar ou disco acima de 90% (o GitHub manda e-mail). Para ver o servidor agora, dispare-o (`run_workflow` em `diagnostico.yml`) e leia o log do job.
   - `inventario.yml` (só à mão) roda o `inventario.py` no servidor. Ele mostra:
     - tamanho e idade de cada pasta, os arquivos soltos e as linhas por tabela;
