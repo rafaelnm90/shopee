@@ -2002,7 +2002,7 @@ async def disparar_mensagem(tipo, forcar=False):
     ou Grupo Público. Passa pelas pausas, pelo espaçamento das campanhas, pela
     intercalação com os vídeos e pelo expediente; forcar=True só respeita as pausas.
     """
-    logger.info(f"🔍 Validando status antes de disparar a rotina '{tipo}' (Forçar: {forcar})...")
+    logger.debug(f"🔍 Validando status antes de disparar a rotina '{tipo}' (Forçar: {forcar})...")
     
     dados_rotina = ler_config_rotina()
     
@@ -4547,6 +4547,10 @@ async def processar_limite_repost_publico(message: types.Message, state: FSMCont
     await message.answer(f"✅ <b>Cota Diária Atualizada!</b>\nO robô enviará <b>{rotulo_cota(piso, topo)}</b> ao Grupo Público.", parse_mode="HTML")
     await submenu_regras_repost_publico(message, state)
 
+# Quando o motor do Grupo Público avisou, por vídeo, que o arquivo ainda não estava no
+# disco (o aviso se repete no máximo a cada 6 h).
+_avisos_sem_arquivo_publico = {}
+
 async def motor_repost_publico_step():
     """
     Repostador do Grupo Público, a cada 2 min: agenda os vídeos com data-alvo hoje
@@ -4685,8 +4689,15 @@ async def motor_repost_publico_step():
             # Quem baixa o arquivo é o userbot (Correio Público, no espelhador): o canal de
             # origem não é nosso e o bot não consegue lê-lo. Aqui o bot só publica do disco.
             if not caminho or not os.path.exists(caminho):
-                logger.warning(f"⏳ [Motor Público] Vídeo {id_unico} ainda sem arquivo no disco. "
-                               "O correio do userbot não baixou. Nova tentativa em 10 min.")
+                # Repete a cada 10 min enquanto o Correio não baixa: o aviso sai uma vez a cada
+                # 6 h por vídeo, e as outras voltas ficam no DEBUG.
+                ultimo_aviso = _avisos_sem_arquivo_publico.get(id_unico)
+                if not ultimo_aviso or agora - ultimo_aviso >= timedelta(hours=6):
+                    _avisos_sem_arquivo_publico[id_unico] = agora
+                    logger.warning(f"⏳ [Motor Público] Vídeo {id_unico} ainda sem arquivo no disco. "
+                                   "O correio do userbot não baixou. Nova tentativa a cada 10 min.")
+                else:
+                    logger.debug(f"⏳ [Motor Público] Vídeo {id_unico} continua sem arquivo no disco.")
                 cursor.execute(
                     "UPDATE fila_publico SET horario_disparo = ? WHERE id_unico = ?",
                     ((agora + timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S"), id_unico)
