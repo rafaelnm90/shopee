@@ -149,6 +149,10 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
   - oferecer pelo seletor de opções (`AskUserQuestion`), não só em texto;
   - se o seletor sumir sem resposta (ex.: uma chamada agendada chegou antes), mostrar as mesmas opções de novo na próxima resposta;
   - nunca escolher por ele por causa da demora. Até ele responder, fica valendo o que já estava.
+- Nunca presumir como um robô deve se comportar:
+  - toda escolha que mudaria o que um robô faz, mesmo pequena (ex.: o texto pedido à IA, o formato de um post), vira pergunta ao Rafael no fim do trabalho, pelo seletor de opções;
+  - a parte que depende da resposta não vai ao ar antes dela (o PR espera); o resto segue;
+  - pergunta sem resposta entra na lista do "Lembrete diário: tudo o que o Rafael tem pendente" (`update_trigger`) e sai quando ele responder.
 - Investigação que depende de esperar o servidor (contagem, log, diagnóstico novo, correção que só se confirma com o uso):
   - o Rafael não precisa lembrar de conferir. Ao subir a mudança, agendar eu mesmo a conferência (`send_later`) para quando o resultado já deve existir (ex.: na manhã seguinte, se o canal posta de dia);
   - na conferência: ler o resultado (inventário, diagnóstico, `/status`) e concluir a causa;

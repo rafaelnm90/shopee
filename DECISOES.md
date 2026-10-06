@@ -29,6 +29,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **04/10/2026:** pedido terminado (incluir, editar ou excluir algo nos robôs) fecha com um bloco "✅ Concluído": o que foi feito, o impacto para o Rafael e onde achar no bot. Vale mesmo com outras ações ainda em andamento.
 - **04/10/2026:** uma rotina chama a conversa às 8h, 11h, 14h, 17h e 20h para retomar o que ficou pela metade quando o crédito acaba. Sem pendência, só responde "Nada pendente.". A cada 3 h, e não de hora em hora, para gastar menos crédito.
 - **04/10/2026:** opções oferecidas ao Rafael ficam abertas até ele escolher, mesmo que demore. Se o seletor sumir, as mesmas opções aparecem de novo. A demora nunca vira escolha: até ele responder, fica valendo o que já estava.
+- **06/10/2026:** o Claude não presume como um robô deve se comportar. Toda escolha que mudaria o que um robô faz, mesmo pequena, vira pergunta ao Rafael no fim do trabalho, e a mudança espera a resposta. A pergunta sem resposta entra na lista do lembrete diário e é lembrada todo dia até ele responder.
 
 ## Canal principal
 
