@@ -79,4 +79,18 @@ jobs:
             ERROS=$(sqlite3 -readonly banco_dados.db "SELECT COUNT(*) FROM erros_logs WHERE timestamp >= '$CORTE'" 2>/dev/null || echo "?")
             echo "Erros registrados na última hora: $ERROS (detalhes no /status do bot)"
 
+            # Links que saíram sem a marcação de afiliado (api_shopee). Só contagens, o robô e
+            # o tipo/código do motivo, que o Claude lê nas retomadas para investigar e consertar.
+            echo ""
+            echo "== Links sem conversão"
+            ORIGEM='Link sem conversão'
+            JANELAS=""
+            for H in 3 12 24; do
+              DESDE=$(TZ=America/Sao_Paulo date -d "$H hours ago" '+%Y-%m-%d %H:%M:%S')
+              N=$(sqlite3 -readonly banco_dados.db "SELECT COUNT(*) FROM erros_logs WHERE origem = '$ORIGEM' AND timestamp >= '$DESDE'" 2>/dev/null || echo "?")
+              JANELAS="$JANELAS últimas $H h: $N |"
+            done
+            echo "Links sem a marcação de afiliado:${JANELAS%|}"
+            sqlite3 -readonly -separator ' · ' banco_dados.db "SELECT json_extract(contexto, '\$.robo'), json_extract(contexto, '\$.tipo') || ' ' || json_extract(contexto, '\$.detalhe'), COUNT(*) || ' link(s)' FROM erros_logs WHERE origem = '$ORIGEM' AND timestamp >= '$DESDE' GROUP BY 1, 2 ORDER BY COUNT(*) DESC" 2>/dev/null | sed 's/^/   /'
+
             exit $ALERTA

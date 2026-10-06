@@ -116,7 +116,7 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
 - CI:
   - `validar.yml` roda em todo PR para a `main`, com a suíte em 4 horários e ordem aleatória.
   - `deploy.yml` roda no merge na `main`. Ele repete a validação e, por SSH, faz `git pull` e `pip install` no servidor. Reinicia só os serviços cujo código mudou (o arquivo do robô ou um módulo que ele importa; `requirements.txt` ou dúvida = todos; só docs, testes ou workflows = nenhum). Confere os 5 aos 25 s e de novo 3 min depois (processo e contador de reinícios). Robô que cai mostra só o tipo do erro no log.
-  - `diagnostico.yml` olha o servidor de hora em hora, só lendo: robôs (estado, desde quando, reinícios), máquina (carga, memória, disco), banco e volume de log. Fica vermelho com robô fora do ar ou disco acima de 90% (o GitHub manda e-mail). Para ver o servidor agora, dispare-o (`run_workflow` em `diagnostico.yml`) e leia o log do job.
+  - `diagnostico.yml` olha o servidor de hora em hora, só lendo: robôs (estado, desde quando, reinícios), máquina (carga, memória, disco), banco, volume de log e links que saíram sem a marcação de afiliado (contagem por robô e motivo). Fica vermelho com robô fora do ar ou disco acima de 90% (o GitHub manda e-mail). Para ver o servidor agora, dispare-o (`run_workflow` em `diagnostico.yml`) e leia o log do job.
   - `inventario.yml` (só à mão) roda o `inventario.py` no servidor. Ele mostra:
     - tamanho e idade de cada pasta, os arquivos soltos e as linhas por tabela;
     - os erros do `erros_logs` por origem e tipo de exceção (sem o texto) e as versões das bibliotecas;
@@ -155,6 +155,7 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
 - Retomada automática (o crédito pode acabar no meio de um pedido, e eu não volto sozinho):
   - a rotina "Retomar trabalho pela metade (a cada 3 h, 8h–20h)" chama esta conversa às 8h, 11h, 14h, 17h e 20h de Brasília;
   - em cada chamada, conferir se algo ficou pela metade: pedido sem "✅ Concluído", mudança sem commit ou push, PR aberto, CI ou deploy não acompanhado até o verde, conferência que não rodou, tarefa pendente, opções oferecidas sem resposta (mostrar de novo);
+  - em cada chamada, ler também a seção "Links sem conversão" do último `diagnostico.yml` (às 8h, a janela de 12 h; nas outras, a de 3 h). Havendo link que saiu sem a marcação de afiliado, investigar o motivo pelo robô e pelo tipo/código, consertar e subir sozinho quando o conserto é de código; quando depende do Rafael (ex.: chaves da Shopee recusadas), dizer exatamente o quê. Falha passageira que as 3 tentativas do robô não venceram e não se repete não pede conserto;
   - havendo algo, continuar de onde parou, seguindo as regras daqui; não havendo, só responder "Nada pendente." (sem aviso no Telegram);
   - chamada que cai sem crédito não roda; a próxima, com crédito, retoma.
 - Pergunta ao Rafael sem resposta: o robô avisa no Telegram.

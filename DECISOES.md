@@ -56,7 +56,9 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **06/10/2026:** link que sai sem a marcação de afiliado (a API da Shopee falhou na hora) continua postando com o link original, mas o Rafael fica sabendo:
   - cada um entra no registro de erros, com o robô, o subId e o motivo, sem o link;
   - o `/status` mostra quantos houve nas últimas 24 h;
-  - o monitor de saúde avisa no privado quando houve algum na última hora (no máximo um aviso a cada 6 h).
+  - o monitor de saúde avisa no privado quando houve algum na última hora (no máximo um aviso a cada 6 h);
+  - antes de desistir, o robô tenta converter 3 vezes (esperas de 2 s e 5 s);
+  - o Claude confere nas retomadas de sempre (8h, 11h, 14h, 17h e 20h), pelo diagnóstico de hora em hora: investiga o motivo e conserta sozinho quando dá; o que depender do Rafael, ele diz o quê. O Rafael escolheu essas conferências, sem gasto extra, em vez de uma de hora em hora.
 
 ## Espelhador de canais
 
