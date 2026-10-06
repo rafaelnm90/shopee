@@ -93,12 +93,6 @@ def test_proximo_video_e_o_mais_novo_com_arquivo_e_link_ainda_nao_mandado():
     assert asv.proximo_video() is None
 
 
-def test_nome_da_legenda():
-    assert asv.nome_da_legenda(LEGENDA) == "Garrafa Térmica 🧊"
-    assert asv.nome_da_legenda("<b>Vídeo do Produto</b> 🛍️") == ""
-    assert asv.nome_da_legenda("sem negrito") == ""
-
-
 def test_conta_so_os_mandados_de_hoje():
     asv.registrar("a", "enviado", agora=_as("14:00"))
     asv.registrar("b", "violacao", "x", agora=_as("15:00"))

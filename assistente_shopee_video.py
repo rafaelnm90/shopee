@@ -34,6 +34,7 @@ import aiohttp
 import api_gemini
 import api_shopee
 import db
+import legendas
 from fuso import fuso_horario
 from motor_filas import sortear_teto_do_dia
 
@@ -198,15 +199,8 @@ def proximo_video(fonte=FONTE_PADRAO):
         if (id_unico in mandados or not arquivo or not link or not os.path.exists(arquivo)
                 or arquivo.lower().endswith(EXTENSOES_DE_IMAGEM)):
             continue
-        return {"id": id_unico, "arquivo": arquivo, "link": link, "nome": nome_da_legenda(legenda)}
+        return {"id": id_unico, "arquivo": arquivo, "link": link, "nome": legendas.nome_da_legenda(legenda)}
     return None
-
-
-def nome_da_legenda(legenda):
-    """O nome do produto que a captura pôs em negrito na primeira linha da legenda."""
-    achado = re.search(r"<b>(.*?)</b>", legenda or "")
-    nome = re.sub(r"<[^>]+>", "", achado.group(1)).strip() if achado else ""
-    return "" if nome in ("", "Vídeo do Produto") else nome
 
 
 def registrar(id_unico, status, motivo="", agora=None):

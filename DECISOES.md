@@ -29,6 +29,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **04/10/2026:** pedido terminado (incluir, editar ou excluir algo nos robôs) fecha com um bloco "✅ Concluído": o que foi feito, o impacto para o Rafael e onde achar no bot. Vale mesmo com outras ações ainda em andamento.
 - **04/10/2026:** uma rotina chama a conversa às 8h, 11h, 14h, 17h e 20h para retomar o que ficou pela metade quando o crédito acaba. Sem pendência, só responde "Nada pendente.". A cada 3 h, e não de hora em hora, para gastar menos crédito.
 - **04/10/2026:** opções oferecidas ao Rafael ficam abertas até ele escolher, mesmo que demore. Se o seletor sumir, as mesmas opções aparecem de novo. A demora nunca vira escolha: até ele responder, fica valendo o que já estava.
+- **06/10/2026:** o Claude não presume como um robô deve se comportar. Toda escolha que mudaria o que um robô faz, mesmo pequena, vira pergunta ao Rafael no fim do trabalho, e a mudança espera a resposta. A pergunta sem resposta entra na lista do lembrete diário e é lembrada todo dia até ele responder.
 
 ## Canal principal
 
@@ -106,6 +107,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **03/10/2026:** com cota em faixa (ex.: 6–10), o teto de saída do dia é o mesmo número sorteado na captura para aquela data.
 - **03/10/2026:** cada mensagem da origem é processada uma vez só, venha pelo evento ou pela varredura (trava pelo ID, gravada no banco).
 - **03/10/2026:** o log de diagnóstico "🔬 [Evento]", que registrava toda mensagem de todo chat, foi removido.
+- **06/10/2026:** na legenda dos Autorais, o emoji vai no fim do nome do produto, igual aos outros robôs (ex.: "Tênis Casual Feminino 👟"). Antes ia no começo.
 
 ## Grupo Público e Achadinhos
 
@@ -242,3 +244,5 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - Ordem: 1) links da Shopee (`links_shopee.py`); 2) legendas e o pedido de nome e hashtags à IA; 3) vídeos (720p e hash); 4) fila do Espelhador no banco, porque dois robôs gravam o mesmo arquivo; 5) trava única de admin, teclados, logs repetidos e o teste lento.
   - O `bot_mestre.py` é dividido aos poucos: um painel sai para o próprio arquivo quando precisar de outra mudança, nunca tudo de uma vez.
   - Motivo: o conserto do link de produto valeu para o Espião e não para o Espelhador, que tinha a própria cópia. Um teste barra cópia nova da receita de link.
+  - Etapa 2 (`legendas.py`): uma legenda e um pedido de nome e hashtags à IA para Espião, Espelhador, Autorais e Parceiros. O nome que vem da IA passa a ser escapado no HTML: um "<" no nome não derruba mais o post.
+  - Respostas do Rafael (06/10/2026): o pedido à IA é a versão completa em todos os robôs (assistir o vídeo inteiro, o exemplo do organizador de sacos e a proibição de texto de venda), inclusive Parceiros e Espião no disparo, que usavam uma versão curta. Ficam também o escape do nome no HTML e, no repost do Grupo Público, o `https://` e a pontuação tirada do fim do link, como nos outros robôs.

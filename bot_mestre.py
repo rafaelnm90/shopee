@@ -47,6 +47,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from api_gemini import gerar_texto_gemini, analisar_video_gemini, MODELOS_CASCATA_GEMINI, client_genai
 from api_shopee import converter_link_shopee, buscar_ofertas_shopee, testar_chaves_afiliado, ORIGEM_SEM_CONVERSAO
 import links_shopee  # achar links da Shopee do mesmo jeito em todos os robôs
+import legendas  # legenda dos posts e pedido de nome e hashtags à IA, iguais em todos os robôs
 from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite, sortear_teto_do_dia, faixa_de_config, recompactar_horarios
 
 import matplotlib.pyplot as plt
@@ -3450,28 +3451,13 @@ async def motor_parceiros_step():
                 app_id=p.get("app_id"), app_secret=p.get("app_secret")
             )
 
-            prompt = (
-                "Assista ao vídeo e identifique qual é o produto demonstrado. "
-                "Responda em DUAS linhas.\n"
-                "Linha 1: APENAS o nome do produto com um emoji no final.\n"
-                "Linha 2: hashtags da lista, separadas por espaço. "
-                "SÓ estas: #RoupasFemininas #SapatosFemininos #CelularesEDispositivos #AcessoriosParaVeiculos "
-                "#Relogios #AlimentosEBebidas #CasaEDecoracao #SapatosMasculinos #EsportesELazer #BolsasMasculinas "
-                "#BolsasFemininas #RoupasPlusSize #ModaInfantil #Eletrodomesticos #Motocicletas #AnimaisDomesticos "
-                "#CamerasEDrones #Beleza #AcessoriosDeModa #BrinquedosEHobbies #Papelaria #LivrosERevistas "
-                "#RoupasMasculinas #Automoveis #MaeEBebe #ComputadoresEAcessorios #Saude #ViagensEBagagens "
-                "#JogosEConsoles #Audio."
-            )
+            prompt = legendas.PROMPT_NOME_E_HASHTAGS
             texto_ia = await analisar_video_gemini(caminho, prompt)
 
             nome_produto = ""
             if texto_ia:
-                linhas_ia = texto_ia.split("\n")
-                nome_produto = linhas_ia[0].strip()
-                hashtags = "\n".join(linhas_ia[1:]).strip() if len(linhas_ia) > 1 else ""
-                legenda = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_final}"
-                if hashtags:
-                    legenda += f"\n\n<i>{hashtags}</i>"
+                nome_produto, _ = legendas.separar_nome_e_hashtags(texto_ia)
+                legenda = legendas.legenda_da_ia(texto_ia, link_final)
             else:
                 legenda = link_final  # sem IA: só o link de afiliado do parceiro
 
@@ -15154,20 +15140,7 @@ async def processar_fila_espiao(forcar=False):
         link_final = await converter_link_shopee(link_original)
         
         try:
-            prompt_espiao = (
-                "Assista ao vídeo e identifique qual é o produto demonstrado. "
-                "Sua resposta deve conter EXATAMENTE duas linhas.\n"
-                "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no final (Exemplo: Tênis Casual Feminino 👟).\n"
-                "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
-                "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras.\n"
-                "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
-                "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
-                "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
-                "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
-                "#AcessoriosDeModa, #BrinquedosEHobbies, #Papelaria, #LivrosERevistas, #RoupasMasculinas, #Automoveis, #MaeEBebe, "
-                "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
-                "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
-            )
+            prompt_espiao = legendas.PROMPT_NOME_E_HASHTAGS
             # Reaproveita a análise feita na captura (motor_userbot): sem isso o vídeo seria
             # analisado duas vezes, gastando cota do Gemini à toa.
             texto_ia = item_pendente.get("legenda_ia")
@@ -15201,12 +15174,7 @@ async def processar_fila_espiao(forcar=False):
             logger.warning(f"🧠 [Espião] IA falhou {MAX_TENTATIVAS_IA}x. Publicando somente com o link de afiliado.")
 
         if texto_ia:
-            linhas_ia = texto_ia.split('\n')
-            nome_produto = linhas_ia[0].strip()
-            hashtags = '\n'.join(linhas_ia[1:]).strip() if len(linhas_ia) > 1 else ""
-
-            legenda_postagem = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_final}"
-            if hashtags: legenda_postagem += f"\n\n<i>{hashtags}</i>"
+            legenda_postagem = legendas.legenda_da_ia(texto_ia, link_final)
         else:
             # Sem texto da IA: só o link de afiliado
             legenda_postagem = link_final
@@ -16883,11 +16851,7 @@ async def wizard_publicar_oferta(callback: types.CallbackQuery, state: FSMContex
             "Linha 2: Se rejeitado, dê um motivo curto. Se aprovado, escreva APENAS o nome do produto acompanhado de um emoji correspondente no final (Ex: Tênis Casual Feminino 👟).\n"
             "Linha 3: Se rejeitado, deixe em branco. Se aprovado, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Separe-as APENAS com espaços em branco, NUNCA utilize vírgulas. "
             "REGRA ABSOLUTA DE HASHTAGS: Você SÓ PODE escolher hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
-            "#RoupasFemininas #SapatosFemininos #CelularesEDispositivos #AcessoriosParaVeiculos #Relogios "
-            "#AlimentosEBebidas #CasaEDecoracao #SapatosMasculinos #EsportesELazer #BolsasMasculinas #BolsasFemininas "
-            "#RoupasPlusSize #ModaInfantil #Eletrodomesticos #Motocicletas #AnimaisDomesticos #CamerasEDrones #Beleza "
-            "#AcessoriosDeModa #BrinquedosEHobbies #Papelaria #LivrosERevistas #RoupasMasculinas #Automoveis #MaeEBebe "
-            "#ComputadoresEAcessorios #Saude #ViagensEBagagens #JogosEConsoles #Audio. "
+            f"{' '.join(legendas.HASHTAGS)}. "
             "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags ou adicionar mensagens extras."
         )
 

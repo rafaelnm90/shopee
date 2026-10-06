@@ -56,6 +56,7 @@ API_HASH = os.getenv('API_HASH')
 from api_gemini import analisar_video_gemini
 from api_shopee import converter_link_shopee
 from links_shopee import extrair_link_shopee
+import legendas
 
 LIMITE_REGISTROS_HASH = 1000  # hashes de vídeo guardados por contexto na anti-duplicata
 
@@ -295,27 +296,8 @@ def registrar_historico_espiao(nome_grupo):
     logger.info(f"📊 [Estatística] +1 vídeo contabilizado no SQLite para o grupo: {nome_grupo}")
 
 async def gerar_legenda_com_ia_espelhador(caminho_video):
-    """
-    Pede à IA duas linhas: o nome do produto (com emoji no início) e as hashtags,
-    escolhidas só da lista fixa de categorias. Devolve o texto ou None.
-    """
-    prompt = (
-        "Assista ao vídeo e identifique qual é o produto demonstrado. "
-        "Sua resposta deve conter EXATAMENTE duas linhas.\n"
-        "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no início (Exemplo: 👟 Tênis Casual Feminino).\n"
-        "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
-        "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras.\n"
-        "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
-        "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
-        "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
-        "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
-        "#AcessoriosDeModa, #BrinquedosEHobbies, #Papelaria, #LivrosERevistas, #RoupasMasculinas, #Automoveis, #MaeEBebe, "
-        "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
-        "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
-    )
-    
-    titulo = await analisar_video_gemini(caminho_video, prompt)
-    return titulo
+    """Pede à IA o nome do produto e as hashtags (legendas.PROMPT_NOME_E_HASHTAGS). Devolve o texto ou None."""
+    return await analisar_video_gemini(caminho_video, legendas.PROMPT_NOME_E_HASHTAGS)
 
 @client.on(events.NewMessage)
 async def interceptar_mensagem(event):
@@ -466,22 +448,6 @@ def salvar_fila_espelhador(dados):
 # que vem o erro 429 de cota). Com o nome já salvo, a publicação não chama a IA.
 INTERVALO_ANALISE_ANTECIPADA = 45   # segundos entre uma análise e outra
 
-PROMPT_NOME_PRODUTO = (
-    "Assista ao vídeo INTEIRO e identifique qual é o produto demonstrado. "
-    "Sua resposta deve conter EXATAMENTE duas linhas.\n"
-    "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no final "
-    "(Exemplo: Tênis Casual Feminino 👟).\n"
-    "Na segunda linha, inclua as hashtags correspondentes aos setores do produto, separadas APENAS por espaços. "
-    "REGRA DE CONTEXTO: Categorize pela utilidade prática e ambiente de uso, nunca por associação literal de palavras.\n"
-    "REGRA ABSOLUTA: Você só pode escolher hashtags desta lista exata, podendo combinar mais de uma: "
-    "#RoupasFemininas #SapatosFemininos #CelularesEDispositivos #AcessoriosParaVeiculos #Relogios "
-    "#AlimentosEBebidas #CasaEDecoracao #SapatosMasculinos #EsportesELazer #BolsasMasculinas #BolsasFemininas "
-    "#RoupasPlusSize #ModaInfantil #Eletrodomesticos #Motocicletas #AnimaisDomesticos #CamerasEDrones #Beleza "
-    "#AcessoriosDeModa #BrinquedosEHobbies #Papelaria #LivrosERevistas #RoupasMasculinas #Automoveis #MaeEBebe "
-    "#ComputadoresEAcessorios #Saude #ViagensEBagagens #JogosEConsoles #Audio.\n"
-    "É proibido criar textos de venda, descrições, inventar hashtags ou adicionar frases de encerramento."
-)
-
 async def analisar_fila_espiao_loop():
     """
     Preenche o nome do produto dos itens da fila de clonagem que ainda não têm,
@@ -515,7 +481,7 @@ async def analisar_fila_espiao_loop():
                 if texto_ia:
                     logger.info(f"♻️ [Cache IA] Espião reaproveitou a análise de {_chave_ia}.")
                 else:
-                    texto_ia = await analisar_video_gemini(pendente.get("caminho_video"), PROMPT_NOME_PRODUTO)
+                    texto_ia = await analisar_video_gemini(pendente.get("caminho_video"), legendas.PROMPT_NOME_E_HASHTAGS)
                     gravar_cache_ia(_chave_ia, texto_ia)
 
                 dados = ler_fila_clonagem()
@@ -935,17 +901,10 @@ async def motor_espelhador_userbot(event):
         titulo_ia = None
 
     if titulo_ia:
-        linhas_ia = titulo_ia.split('\n')
-        nome_produto = linhas_ia[0].strip()
-        hashtags = '\n'.join(linhas_ia[1:]).strip() if len(linhas_ia) > 1 else ""
-        
-        texto_processado = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_final_convertido}"
-        if hashtags:
-            texto_processado += f"\n\n<i>{hashtags}</i>"
-            
+        texto_processado = legendas.legenda_da_ia(titulo_ia, link_final_convertido)
         logger.info("✅ [Espelhador] Legenda inteligente construída com sucesso (Título -> Link -> Hashtags).")
     else:
-        texto_processado = f"🔗 <b>Link do Produto:</b>\n{link_final_convertido}"
+        texto_processado = legendas.legenda_so_link(link_final_convertido)
         logger.info("🕓 [Espelhador] Análise da IA adiada para o disparo. Legenda base gravada como fallback.")
 
     # Sem título vindo do cache, a legenda definitiva é montada na hora de postar.
@@ -1038,7 +997,7 @@ async def montar_legenda_no_disparo(caminho_video, chat_origem, msg_id, item):
     fallback que já existia quando a IA falhava na captura.
     """
     link = item.get("link_convertido") or ""
-    texto_base = item.get("texto_processado") or (f"🔗 <b>Link do Produto:</b>\n{link}" if link else "")
+    texto_base = item.get("texto_processado") or (legendas.legenda_so_link(link) if link else "")
 
     try:
         chave = chave_cache_ia(chat_origem, msg_id)
@@ -1057,13 +1016,7 @@ async def montar_legenda_no_disparo(caminho_video, chat_origem, msg_id, item):
             logger.warning("⚠️ [Espelhador] IA não devolveu título. A postar com a legenda base.")
             return texto_base
 
-        linhas_ia = titulo_ia.split('\n')
-        nome_produto = linhas_ia[0].strip()
-        hashtags = '\n'.join(linhas_ia[1:]).strip() if len(linhas_ia) > 1 else ""
-
-        texto = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link}"
-        if hashtags:
-            texto += f"\n\n<i>{hashtags}</i>"
+        texto = legendas.legenda_da_ia(titulo_ia, link)
 
         # Grava no item para o painel e o histórico mostrarem a legenda real.
         item["texto_processado"] = texto
