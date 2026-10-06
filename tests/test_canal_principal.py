@@ -58,10 +58,14 @@ def test_falha_de_envio_tenta_de_novo_ate_3_vezes(bm, telegram):
 
     video(bm, "r2")
     telegram.falhas = 5
+    inicio = time.monotonic()
     for _ in range(4):
         if status("r2") == "PENDENTE":
             rodar(bm.executar_postagem_fila("r2"))
     assert status("r2") == "ERRO"
+    # A desistência vai para o /status sem travar o robô esperando o próprio banco.
+    assert consultar("SELECT COUNT(*) FROM erros_logs WHERE erro LIKE '%desistiu do vídeo r2%'")[0] == 1
+    assert time.monotonic() - inicio < 10
 
 
 def test_fim_da_pausa_no_meio_do_dia_volta_no_mesmo_dia(bm, telegram, monkeypatch, relogio):

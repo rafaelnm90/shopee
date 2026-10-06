@@ -1740,7 +1740,7 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
             # no grupo. Procura o grupo direto nas conversas da conta: estar lá
             # (sem "left") é estar no grupo. Erro aqui (FloodWait, rede) sobe para
             # os tratadores de fora, que guardam o motivo e não mudam o estado.
-            logger.info(f"🗂️ [Pool] {apelido}: cache vazio, procurando o grupo nas conversas...")
+            logger.debug(f"🗂️ [Pool] {apelido}: cache vazio, procurando o grupo nas conversas...")
             entidade = None
             async for dialogo in cliente.iter_dialogs():
                 if dialogo.id == grupo_id:
@@ -1826,7 +1826,7 @@ async def sincronizar_pool(clientes=None):
         return []
 
     grupo_id = obter_grupo_autorais()
-    logger.info(f"🔍 [Pool] Checando {len(contas)} conta(s) contra o grupo {grupo_id}...")
+    logger.debug(f"🔍 [Pool] Checando {len(contas)} conta(s) contra o grupo {grupo_id}...")
 
     for conta in contas:
         # Uma pausa curta entre contas: várias conexões simultâneas com o mesmo

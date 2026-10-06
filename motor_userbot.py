@@ -151,12 +151,12 @@ def calcular_hash_video(caminho_arquivo):
     """SHA-256 do arquivo (identifica o mesmo vídeo em qualquer canal), ou None se não der para ler."""
     hash_sha256 = hashlib.sha256()
     try:
-        logger.info(f"🔍 A calcular a assinatura digital (SHA-256) do ficheiro: {caminho_arquivo}...")
+        logger.debug(f"🔍 A calcular a assinatura digital (SHA-256) do ficheiro: {caminho_arquivo}...")
         with open(caminho_arquivo, "rb") as f:
             for bloco in iter(lambda: f.read(4096), b""):
                 hash_sha256.update(bloco)
         resultado = hash_sha256.hexdigest()
-        logger.info(f"✅ Assinatura única identificada: {resultado[:10]}...")
+        logger.debug(f"✅ Assinatura única identificada: {resultado[:10]}...")
         return resultado
     except Exception as e:
         logger.error(f"❌ Erro na leitura física para calcular hash do ficheiro {caminho_arquivo}: {e}")
@@ -278,7 +278,7 @@ async def interceptar_mensagem(event):
     # Decisão do Rafael (DECISOES.md, Canal Viral): no @shopee_video_afiliado os posts do
     # próprio sistema também são capturados, para serem espelhados em outros canais.
     if foi_nossa_equipe and chat_username != "@shopee_video_afiliado":
-        logger.info("🛡️ [Espião] Postagem do próprio sistema bloqueada (Userbot ou Bot Oficial).")
+        logger.debug("🛡️ [Espião] Postagem do próprio sistema bloqueada (Userbot ou Bot Oficial).")
         return
 
     if event.out and not eh_ponte and chat_username != "@shopee_video_afiliado":
@@ -738,7 +738,7 @@ async def motor_espelhador_userbot(event):
     # Decisão do Rafael (DECISOES.md, Canal Viral): no @shopee_video_afiliado os posts do
     # próprio sistema também são capturados, para serem espelhados em outros canais.
     if foi_nossa_equipe and chat_username != "@shopee_video_afiliado":
-        logger.info("🛡️ [Espelhador] Postagem do próprio sistema bloqueada (Userbot ou Bot Oficial).")
+        logger.debug("🛡️ [Espelhador] Postagem do próprio sistema bloqueada (Userbot ou Bot Oficial).")
         return
 
     if event.out and not eh_ponte and chat_username != "@shopee_video_afiliado":

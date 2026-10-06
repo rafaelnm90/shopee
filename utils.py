@@ -394,10 +394,10 @@ def salvar_json_atomico(caminho, dados, **opcoes_dump):
     """
     Grava dados em JSON sem que outro processo leia o arquivo pela metade.
 
-    espelhos_config.json e fila_espelhador.json são reescritos pelo painel, pelo
-    motor_userbot e pelo bot_mestre. Com open("w") o arquivo fica vazio até o
-    json.dump terminar; quem lê nesse instante recebe JSON inválido, e o painel trata
-    isso como "nenhuma rota" (um salvamento seguinte apagaria todas). Aqui o conteúdo
+    O espelhos_config.json é reescrito pelo painel e pelo motor_userbot. Com open("w")
+    o arquivo fica vazio até o json.dump terminar; quem lê nesse instante recebe JSON
+    inválido, e o painel trata isso como "nenhuma rota" (um salvamento seguinte
+    apagaria todas). Aqui o conteúdo
     vai para um arquivo temporário na mesma pasta e os.replace troca os dois de uma
     vez: quem lê vê o arquivo antigo inteiro ou o novo inteiro.
 

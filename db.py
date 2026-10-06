@@ -120,8 +120,9 @@ def ler_config(chave, padrao=None, arquivo_legado=None):
     Valor (JSON) da chave na tabela configuracoes; padrao se não houver ou der erro.
 
     Com arquivo_legado e sem a chave no banco, migra o JSON antigo: grava no banco e
-    renomeia o arquivo para .bkp. Não usar com arquivo que outro serviço ainda grava
-    (como o fila_espelhador.json).
+    renomeia o arquivo para .bkp. Não usar com arquivo que outro serviço ainda grava:
+    a gravação que chegar depois da migração fica no arquivo e se perde (a fila do
+    Espelhador fez a passagem pelo fila_espelhador.passar_arquivo_para_o_banco).
     """
     if padrao is None:
         padrao = {}

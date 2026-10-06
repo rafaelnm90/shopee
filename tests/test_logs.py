@@ -63,3 +63,32 @@ def test_nenhum_arquivo_volta_a_usar_chave_de_log():
         with open(caminho, encoding="utf-8") as f:
             culpados += [f"{os.path.basename(caminho)}:{n}" for n, linha in enumerate(f, 1) if padrao.search(linha)]
     assert culpados == [], "use o NIVEL_LOG: " + ", ".join(culpados)
+
+
+def test_video_publico_sem_arquivo_avisa_uma_vez_a_cada_6_horas(bm, relogio, caplog, monkeypatch):
+    # O motor do Grupo Público volta a cada 2 min; enquanto o Correio não baixa o vídeo,
+    # o aviso não pode encher o log (era a linha mais repetida do bot_mestre).
+    from datetime import datetime, timedelta
+    import espelhador_videos_autorais
+    from conftest import inserir, rodar
+    relogio("15:00")
+    espelhador_videos_autorais.ler_fila_publico()   # cria a tabela fila_publico
+    monkeypatch.setattr(bm, "_avisos_sem_arquivo_publico", {})
+    bm.salvar_submissao_config({"ativo": True, "grupo_id": "-100123", "repost_inicio": 0, "repost_fim": 24})
+    agora = datetime.now(bm.fuso_horario)
+
+    def vencido():
+        inserir("UPDATE fila_publico SET horario_disparo = ? WHERE id_unico = 'v1'",
+                (agora - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M:%S"))
+
+    inserir("INSERT INTO fila_publico (id_unico, legenda, data_alvo, horario_disparo, processado, caminho_arquivo) "
+            "VALUES ('v1', '', ?, ?, 0, 'sumiu.mp4')", agora.strftime("%Y-%m-%d"),
+            (agora - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M:%S"))
+    with caplog.at_level(logging.DEBUG):
+        rodar(bm.motor_repost_publico_step())
+        vencido()
+        rodar(bm.motor_repost_publico_step())
+    avisos = [r for r in caplog.records if "ainda sem arquivo no disco" in r.getMessage()]
+    assert len(avisos) == 1 and avisos[0].levelno == logging.WARNING
+    assert any("continua sem arquivo no disco" in r.getMessage() and r.levelno == logging.DEBUG
+               for r in caplog.records)
