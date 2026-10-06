@@ -25,11 +25,12 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **03/10/2026:** vídeo que o Rafael mandar é visto e ouvido por inteiro antes de seguir a instrução: todos os quadros e a fala transcrita. Sem conseguir ouvir, dizer isso logo e pedir a transcrição antes de mudar qualquer coisa.
 - **04/10/2026:** quando uma mudança serve para descobrir por que algo dá errado, o Claude agenda sozinho a conferência do resultado, no horário em que ele já deve existir. O Rafael não precisa lembrar: na hora marcada, o Claude lê o resultado, corrige ou orienta e avisa.
 - **04/10/2026:** na conferência, com o resultado claro, o Claude corrige e sobe sozinho (PR, CI, merge, deploy), sem ação do Rafael. Só espera o Rafael quando houver dúvida de verdade.
-- **04/10/2026:** pergunta do Claude ao Rafael que fica sem resposta (1 h) vira aviso no privado do Telegram, pelo bot principal, para ele abrir a conversa com o Claude. Só entre 8h e 22h, no máximo um por dia por pergunta.
+- ~~**04/10/2026:** pergunta do Claude ao Rafael que fica sem resposta (1 h) vira aviso no privado do Telegram, pelo bot principal, para ele abrir a conversa com o Claude. Só entre 8h e 22h, no máximo um por dia por pergunta.~~ Substituída em 06/10/2026: cobrança de hora em hora, a qualquer hora, até ele responder (abaixo).
 - **04/10/2026:** pedido terminado (incluir, editar ou excluir algo nos robôs) fecha com um bloco "✅ Concluído": o que foi feito, o impacto para o Rafael e onde achar no bot. Vale mesmo com outras ações ainda em andamento.
 - **04/10/2026:** uma rotina chama a conversa às 8h, 11h, 14h, 17h e 20h para retomar o que ficou pela metade quando o crédito acaba. Sem pendência, só responde "Nada pendente.". A cada 3 h, e não de hora em hora, para gastar menos crédito.
 - **04/10/2026:** opções oferecidas ao Rafael ficam abertas até ele escolher, mesmo que demore. Se o seletor sumir, as mesmas opções aparecem de novo. A demora nunca vira escolha: até ele responder, fica valendo o que já estava.
 - **06/10/2026:** o Claude não presume como um robô deve se comportar. Toda escolha que mudaria o que um robô faz, mesmo pequena, vira pergunta ao Rafael no fim do trabalho, e a mudança espera a resposta. A pergunta sem resposta entra na lista do lembrete diário e é lembrada todo dia até ele responder.
+- **06/10/2026:** toda pergunta do Claude tem de ser respondida pelo Rafael: não pode passar despercebida nem expirar. Se o seletor sumir sem resposta, a pergunta aparece de novo na resposta seguinte, entra na lista do lembrete diário e o bot cobra no privado do Telegram **de hora em hora, a qualquer hora (de dia e de noite)**, até ele responder. Escolhas do Rafael: 1 h entre as cobranças e sem pausa à noite.
 
 ## Canal principal
 
