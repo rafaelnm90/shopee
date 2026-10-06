@@ -51,6 +51,7 @@ from api_gemini import analisar_video_gemini
 from api_shopee import converter_link_shopee
 from links_shopee import extrair_link_shopee, codigo_do_link_curto
 import legendas
+from videos import verificar_e_otimizar_video
 from motor_filas import calcular_horarios_distribuicao, faixa_de_config, sortear_teto_do_dia
 import blacklist_captura  # de quem este robô nunca captura
 import pool_contas  # quem captura e quem reposta
@@ -1081,59 +1082,6 @@ def contar_ofertas_dia(data_alvo, incrementar=True):
     except Exception as e:
         logger.error(f"❌ Erro no contador de sorteio: {e}")
         return 0
-
-async def verificar_e_otimizar_video(caminho_video):
-    """
-    Vídeo com o lado menor abaixo de 720 px é re-renderizado para 720x1280 (com
-    bordas pretas) e substitui o original. Em qualquer falha, devolve o arquivo como está.
-    """
-    if not caminho_video or not os.path.exists(caminho_video): return caminho_video
-    
-    try:
-        logger.info(f"🔎 [Upscaling] Inspecionando resolução física de: {caminho_video}")
-        
-        comando_probe = await asyncio.create_subprocess_exec(
-            "ffprobe", "-v", "error", "-select_streams", "v:0", 
-            "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", caminho_video,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        stdout, _ = await comando_probe.communicate()
-        dimensoes = stdout.decode().strip()
-        
-        if not dimensoes or "x" not in dimensoes:
-            logger.warning("⚠️ [Upscaling] Falha ao ler metadados. Ignorando otimização.")
-            return caminho_video
-            
-        largura, altura = map(int, dimensoes.split("x"))
-        menor_dimensao = min(largura, altura)
-        
-        if menor_dimensao >= 720:
-            logger.info(f"✅ [Upscaling] Qualidade aprovada ({largura}x{altura}). Nenhuma maquiagem necessária.")
-            return caminho_video
-            
-        logger.info(f"🛠️ [Upscaling] Resolução baixa detectada ({largura}x{altura}). Iniciando renderização para 720p...")
-        
-        caminho_temp = f"{caminho_video}_upscaled.mp4"
-        
-        comando_ffmpeg = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-y", "-i", caminho_video, 
-            "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:color=black", 
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-c:a", "copy", caminho_temp,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        await comando_ffmpeg.communicate()
-        
-        if comando_ffmpeg.returncode == 0 and os.path.exists(caminho_temp):
-            os.replace(caminho_temp, caminho_video)
-            logger.info("✨ [Upscaling] Sucesso! Vídeo re-renderizado para 720x1280 e substituído.")
-        else:
-            logger.error("❌ [Upscaling] Falha na renderização do FFmpeg. Mantendo arquivo original.")
-            if os.path.exists(caminho_temp): os.remove(caminho_temp)
-            
-    except Exception as e:
-        logger.error(f"❌ [Upscaling] Erro na função de otimização: {e}")
-        
-    return caminho_video
 
 async def gerar_legenda_autoral(caminho_video):
     """Pede à IA o nome do produto com o emoji no fim (linha 1) e as hashtags de categoria (linha 2)."""
