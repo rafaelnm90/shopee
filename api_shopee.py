@@ -17,6 +17,8 @@ import unicodedata
 import urllib.parse
 import aiohttp
 import logging
+
+import links_shopee
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -69,7 +71,7 @@ def limpar_sub_id(valor, padrao="geral"):
 # (an_redir?origin_link=...), por isso a busca vai no texto já decodificado.
 PADROES_PAGINA_DO_PRODUTO = (re.compile(r"-i\.(\d+)\.(\d+)"), re.compile(r"/product/(\d+)/(\d+)"))
 PADROES_PRODUTO = PADROES_PAGINA_DO_PRODUTO + (re.compile(r"/opaanlp/(\d+)/(\d+)"),)
-HOSTS_CURTOS = ("s.shopee.com.br", "shope.ee", "shp.ee")
+HOSTS_CURTOS = links_shopee.ENCURTADORES
 NAVEGADOR = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
 
 

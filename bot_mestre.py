@@ -46,6 +46,7 @@ import subprocess
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from api_gemini import gerar_texto_gemini, analisar_video_gemini, MODELOS_CASCATA_GEMINI, client_genai
 from api_shopee import converter_link_shopee, buscar_ofertas_shopee, testar_chaves_afiliado, ORIGEM_SEM_CONVERSAO
+import links_shopee  # achar links da Shopee do mesmo jeito em todos os robôs
 from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite, sortear_teto_do_dia, faixa_de_config, recompactar_horarios
 
 import matplotlib.pyplot as plt
@@ -4717,8 +4718,7 @@ async def motor_repost_publico_step():
                 logger.info("🚀 [Motor Público] Vídeo elegível detetado. A iniciar a repostagem...")
                 import re
 
-                match_link = re.search(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s<]+', legenda_original, re.IGNORECASE)
-                link_shopee = match_link.group(0) if match_link else "https://shopee.com.br"
+                link_shopee = links_shopee.primeiro_link(legenda_original) or "https://shopee.com.br"
 
                 match_item = re.search(r'📦\s*Item:\s*([^\n<]+)', legenda_original)
                 nome_produto = match_item.group(1).strip() if match_item else "Produto Exclusivo"
@@ -9486,8 +9486,7 @@ async def manual_repost_autoral(message: types.Message):
     
     legenda_original = video_sorteado["legenda"]
     import re
-    match_link = re.search(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s<]+', legenda_original, re.IGNORECASE)
-    link_shopee = match_link.group(0) if match_link else "https://shopee.com.br"
+    link_shopee = links_shopee.primeiro_link(legenda_original) or "https://shopee.com.br"
     
     match_item = re.search(r'📦\s*Item:\s*([^\n<]+)', legenda_original)
     nome_produto = match_item.group(1).strip() if match_item else "Produto Exclusivo"
@@ -16514,18 +16513,12 @@ async def bloquear_intruso_wizard(callback: types.CallbackQuery):
 
 # Links aceitos no painel (mesmos padrões do espelhador)
 import re as _re_wizard
-PADRAO_LINK_SHOPEE = _re_wizard.compile(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee|shopee\.com\.br)/[^\s]+', _re_wizard.IGNORECASE)
+PADRAO_LINK_SHOPEE = links_shopee.PADRAO_LINK_SHOPEE
 PADRAO_LINK_TIKTOK = _re_wizard.compile(r'(?:https?://)?(?:www\.)?(?:vm\.tiktok\.com|vt\.tiktok\.com|tiktok\.com)/[^\s]+', _re_wizard.IGNORECASE)
 
 def extrair_link_wizard(texto, padrao):
     """Devolve a URL limpa se o texto contiver um link válido daquele domínio."""
-    achado = padrao.search(texto or "")
-    if not achado:
-        return None
-    link = achado.group(0).rstrip(").,;!?")
-    if not link.lower().startswith("http"):
-        link = "https://" + link
-    return link
+    return links_shopee.primeiro_link(texto, padrao)
 
 # --- Painel de submissão: texto e teclado ---
 def montar_mencao_usuario(user):

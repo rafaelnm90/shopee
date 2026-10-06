@@ -47,32 +47,9 @@ load_dotenv()
 os.makedirs("temp", exist_ok=True)
 os.makedirs("archive", exist_ok=True)
 
-# Link da Shopee em qualquer encurtador, com ou sem http, em maiúsculas ou não.
-PADRAO_SHOPEE = re.compile(r'(?:https?://)?(?:s\.shopee\.com\.br|shope\.ee|br\.shp\.ee|shp\.ee)/[^\s]+', re.IGNORECASE)
-
-def extrair_link_shopee(event):
-    """Primeiro link da Shopee da mensagem, no texto visível ou escondido num hiperlink. None se não houver."""
-    logger.info("🔍 Analisando mensagem em busca de links...")
-    texto = event.raw_text or ""
-    match = PADRAO_SHOPEE.search(texto)
-    if match:
-        link = match.group(0)
-        if not link.startswith("http"):
-            link = "https://" + link
-        logger.info("✅ Link encontrado no texto visível.")
-        return link.rstrip(").,;!?")
-        
-    if event.entities:
-        for entity in event.entities:
-            if hasattr(entity, 'url') and entity.url:
-                if PADRAO_SHOPEE.search(entity.url):
-                    logger.info("✅ Link encontrado embutido/escondido na formatação.")
-                    return entity.url
-    logger.info("⏭️ Nenhum link válido da Shopee encontrado.")
-    return None
-
 from api_gemini import analisar_video_gemini
 from api_shopee import converter_link_shopee
+from links_shopee import extrair_link_shopee, codigo_do_link_curto
 from motor_filas import calcular_horarios_distribuicao, faixa_de_config, sortear_teto_do_dia
 import blacklist_captura  # de quem este robô nunca captura
 import pool_contas  # quem captura e quem reposta
@@ -811,7 +788,6 @@ def chave_produto(link):
     como identidade. Quem precisa dessa garantia chama chave_produto_resolvida,
     que abre o link antes e assim chega ao ID real do produto.
     """
-    import re
     if not link:
         return None
     alvo = str(link).split("?")[0].strip().lower()
@@ -820,10 +796,8 @@ def chave_produto(link):
     if m:
         return f"prod_{m.group(1)}_{m.group(2)}"
     # Link curto: usa o código dele como identidade
-    m = re.search(r'(?:s\.shopee\.com\.br|shp\.ee|shope\.ee|br\.shp\.ee)/([A-Za-z0-9]+)', alvo)
-    if m:
-        return f"curto_{m.group(1)}"
-    return None
+    codigo = codigo_do_link_curto(alvo)
+    return f"curto_{codigo}" if codigo else None
 
 # Validade do cache de encurtadores. O par código → produto não muda, mas guardar
 # para sempre acumula campanha velha: link de um ano atrás dificilmente volta.
@@ -861,10 +835,9 @@ async def resolver_chave_curta(link):
     também é guardado (vazio), para não consultar de novo; falha de rede não é
     guardada, para tentar outra vez depois.
     """
-    achado = re.search(r'(?:s\.shopee\.com\.br|shp\.ee|shope\.ee|br\.shp\.ee)/([A-Za-z0-9]+)', str(link or "").lower())
-    if not achado:
+    codigo = codigo_do_link_curto(link)
+    if not codigo:
         return None
-    codigo = achado.group(1)
     limite_validade = (datetime.now() - timedelta(days=DIAS_VALIDADE_CACHE_LINKS)).strftime("%Y-%m-%d %H:%M:%S")
 
     try:
