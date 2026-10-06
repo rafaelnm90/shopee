@@ -50,6 +50,7 @@ os.makedirs("archive", exist_ok=True)
 from api_gemini import analisar_video_gemini
 from api_shopee import converter_link_shopee
 from links_shopee import extrair_link_shopee, codigo_do_link_curto
+import legendas
 from motor_filas import calcular_horarios_distribuicao, faixa_de_config, sortear_teto_do_dia
 import blacklist_captura  # de quem este robô nunca captura
 import pool_contas  # quem captura e quem reposta
@@ -1135,24 +1136,8 @@ async def verificar_e_otimizar_video(caminho_video):
     return caminho_video
 
 async def gerar_legenda_autoral(caminho_video):
-    """Pede à IA o nome do produto com emoji (linha 1) e as hashtags de categoria (linha 2)."""
-    prompt = (
-        "Assista ao vídeo e identifique qual é o produto demonstrado. "
-        "Sua resposta deve conter EXATAMENTE duas linhas.\n"
-        "Na primeira linha, escreva APENAS o nome do produto acompanhado de um emoji correspondente no final (Exemplo: Tênis Casual Feminino 👟).\n"
-        "Na segunda linha, inclua as hashtags correspondentes aos setores do produto. IMPORTANTE: Se utilizar mais de uma hashtag, separe-as APENAS com espaços em branco, NUNCA utilize vírgulas.\n"
-        "REGRA DE CONTEXTO: Categorize o produto baseando-se estritamente na sua utilidade prática e ambiente de uso. É terminantemente proibido utilizar atalhos semânticos ou associações literais de palavras (exemplo prático: um organizador de sacos plásticos de cozinha pertence a #CasaEDecoracao e NUNCA a #BolsasFemininas, pois não é um acessório de moda).\n"
-        "REGRA ABSOLUTA: Você só pode escolher as hashtags desta lista exata, podendo combinar mais de uma se aplicável: "
-        "#RoupasFemininas, #SapatosFemininos, #CelularesEDispositivos, #AcessoriosParaVeiculos, #Relogios, "
-        "#AlimentosEBebidas, #CasaEDecoracao, #SapatosMasculinos, #EsportesELazer, #BolsasMasculinas, #BolsasFemininas, "
-        "#RoupasPlusSize, #ModaInfantil, #Eletrodomesticos, #Motocicletas, #AnimaisDomesticos, #CamerasEDrones, #Beleza, "
-        "#AcessoriosDeModa, #BrinquedosEHobbies, #Papelaria, #LivrosERevistas, #RoupasMasculinas, #Automoveis, #MaeEBebe, "
-        "#ComputadoresEAcessorios, #Saude, #ViagensEBagagens, #JogosEConsoles, #Audio.\n"
-        "É estritamente proibido criar textos de vendas, descrições, inventar novas hashtags, usar gatilhos mentais ou adicionar frases de encerramento."
-    )
-    
-    titulo = await analisar_video_gemini(caminho_video, prompt)
-    return titulo
+    """Pede à IA o nome do produto com o emoji no início (linha 1) e as hashtags de categoria (linha 2)."""
+    return await analisar_video_gemini(caminho_video, legendas.prompt_nome_e_hashtags(emoji_no_inicio=True))
 
 from utils import salvar_nome_grupo
 
@@ -1343,15 +1328,9 @@ async def interceptar_e_espelhar(event):
                 texto_ia = await gerar_legenda_autoral(caminho_video)
                 
                 if texto_ia:
-                    linhas_ia = texto_ia.split('\n')
-                    nome_produto = linhas_ia[0].strip()
-                    hashtags = '\n'.join(linhas_ia[1:]).strip() if len(linhas_ia) > 1 else ""
-                    
-                    legenda_final = f"<b>{nome_produto}</b>\n\n🔗 <b>Link do Produto:</b>\n{link_novo}"
-                    if hashtags:
-                        legenda_final += f"\n\n<i>{hashtags}</i>"
+                    legenda_final = legendas.legenda_da_ia(texto_ia, link_novo)
                 else:
-                    legenda_final = f"<b>Vídeo do Produto</b> 🛍️\n\n🔗 <b>Link do Produto:</b>\n{link_novo}"
+                    legenda_final = legendas.legenda_sem_nome(link_novo)
 
                 # O destino também pode ter tópico ("-100123:5").
                 destino_final, destino_topico = separar_alvo_e_topico(config_atual.get('destino'))
