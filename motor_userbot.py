@@ -725,6 +725,8 @@ async def processar_fila_espelhador_loop():
                                     caminho_disparo = await verificar_e_otimizar_video(caminho_disparo, relatorio_upscale)
                                     houve_upscale = bool(relatorio_upscale.get("upscaled"))
 
+                                texto = await renovar_link_no_disparo(item, texto)
+
                                 # IA só agora, no vídeo que vai mesmo ao ar.
                                 if item.get("legenda_ia_pendente"):
                                     texto = await montar_legenda_no_disparo(
@@ -1001,15 +1003,43 @@ async def motor_espelhador_userbot(event):
             "destino": destino,
             "nome_rota": nome_rota,
             "texto_processado": texto_processado,
-            # O link convertido fica guardado à parte para o disparo remontar a
-            # legenda sem ter de converter de novo na API da Shopee.
+            # O link convertido fica guardado à parte para o painel e para o disparo
+            # remontar a legenda; o original, para o disparo gerar o link de novo
+            # (renovar_link_no_disparo).
             "link_convertido": link_final_convertido,
+            "link_original": link_capturado,
             "legenda_ia_pendente": legenda_ia_pendente,
             "data_captura": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         fila_dados["fila"].append(item)
         salvar_fila_espelhador(fila_dados)
         logger.info(f"📦 [Espelhador] Vídeo enfileirado dinamicamente na rota '{nome_rota}'.")
+
+async def renovar_link_no_disparo(item, texto):
+    """
+    Gera o link de afiliado de novo na hora de postar e troca na legenda (texto) e no
+    item. O vídeo espera horas ou dias na fila, e o link guardado na captura sai com o
+    conversor daquela hora: links de produto capturados antes de 05/10 abriam a busca
+    no app. Item antigo, sem o link original, reconverte o próprio link guardado: ele
+    leva à página de afiliado do produto, onde o conversor acha o produto.
+    Se a API falhar, fica o link guardado, que já é do Rafael.
+    Decisão do Rafael: DECISOES.md, Canal Viral.
+    """
+    guardado = item.get("link_convertido") or ""
+    origem = item.get("link_original") or guardado
+    if not origem:
+        return texto
+    novo = await converter_link_shopee(origem, "geral", avisar_falha=False)
+    if not novo or novo == origem:
+        logger.warning("⚠️ [Espelhador] Link não renovado no disparo; vai o da captura.")
+        return texto
+    if guardado:
+        texto = texto.replace(guardado, novo)
+        item["texto_processado"] = (item.get("texto_processado") or "").replace(guardado, novo)
+    item["link_convertido"] = novo
+    logger.info("🔗 [Espelhador] Link de afiliado gerado de novo no disparo.")
+    return texto
+
 
 async def montar_legenda_no_disparo(caminho_video, chat_origem, msg_id, item):
     """
