@@ -50,7 +50,7 @@ São 17 mil linhas. Navegue pelos marcadores de seção, que não mudam quando o
 arquivo cresce: `grep -n "^# --- " bot_mestre.py`. Os blocos grandes usam
 `# ===` com o título na linha seguinte. Exemplos:
 
-- `--- Estados (FSM) ---` e `--- Teclados ---`: estados e teclados de todos os fluxos.
+- `--- Estados (FSM) ---` e `--- Teclados ---`: estados e teclados de todos os fluxos. Teclado novo sai do `montar_teclado(linhas)` (ou `teclado_com_cancelar`); o `tests/test_teclados.py` barra o `ReplyKeyboardMarkup` do padrão escrito à mão.
 - `--- Fila do canal principal ---`, `--- Pausa programada ---` e `--- Gerenciar Fila de Postagens ---`.
 - `--- Painel do Espião ---` e `--- Motor do Espião (fila de clonagem) ---`.
 - Painéis de SPAM:

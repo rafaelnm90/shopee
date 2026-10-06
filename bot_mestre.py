@@ -530,76 +530,58 @@ dp.include_router(painel_acessos.router)
 painel_acessos.configurar_dependencias(bot, ADMIN_ID)
 
 # --- Teclados ---
-teclado_plataforma = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Ambos 🛒🎵")],
-        [KeyboardButton(text="Apenas Shopee 🛒"), KeyboardButton(text="Apenas TikTok 🎵")],
-        [KeyboardButton(text="Cancelar ❌")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+def montar_teclado(linhas):
+    """Teclado fixo embaixo da conversa, no padrão de todos os painéis do bot."""
+    return ReplyKeyboardMarkup(keyboard=linhas, resize_keyboard=True, is_persistent=True)
 
-teclado_cancelar = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text="Cancelar ❌")]],
-    resize_keyboard=True,
-    is_persistent=True
-)
+
+def teclado_com_cancelar(texto_botao):
+    """Um botão de confirmar (texto_botao) ao lado do Cancelar ❌."""
+    return montar_teclado([[KeyboardButton(text=texto_botao), KeyboardButton(text="Cancelar ❌")]])
+
+
+# Teclados que vários painéis usam iguais: um só, para o texto de um botão mudar em todos.
+teclado_aprovar_cancelar = montar_teclado([[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]])
+teclado_janela_dia_todo = montar_teclado([[KeyboardButton(text="Dia Todo (24h) 🕛")], [KeyboardButton(text="Cancelar ❌")]])
+teclado_lista_negra = montar_teclado([
+    [KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Remover da Blacklist")],
+    [KeyboardButton(text="Cancelar ❌")],
+])
+teclado_encerrar_pausa = montar_teclado([[KeyboardButton(text="Encerrar Pausa Agora ▶️")], [KeyboardButton(text="Voltar 🔙")]])
+
+teclado_plataforma = montar_teclado([
+    [KeyboardButton(text="Ambos 🛒🎵")],
+    [KeyboardButton(text="Apenas Shopee 🛒"), KeyboardButton(text="Apenas TikTok 🎵")],
+    [KeyboardButton(text="Cancelar ❌")]
+])
+
+teclado_cancelar = montar_teclado([[KeyboardButton(text="Cancelar ❌")]])
 
 # Cancelar só da tela de alvos do Grupo Público. O texto é próprio de propósito: o
 # handler usa StateFilter("*") e continua funcionando depois de um restart, quando o
 # MemoryStorage do aiogram já zerou o FSM.
-teclado_cancelar_alvos_publico = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text="❌ Cancelar e Voltar às Rotinas")]],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_cancelar_alvos_publico = montar_teclado([[KeyboardButton(text="❌ Cancelar e Voltar às Rotinas")]])
 
-teclado_erro_ia = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Tentar Novamente 🔄"), KeyboardButton(text="Digitar Manualmente ✍️")],
-        [KeyboardButton(text="Cancelar ❌")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_erro_ia = montar_teclado([
+    [KeyboardButton(text="Tentar Novamente 🔄"), KeyboardButton(text="Digitar Manualmente ✍️")],
+    [KeyboardButton(text="Cancelar ❌")]
+])
 
-teclado_confirmacao = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Digitar Nome ✍️")],
-        [KeyboardButton(text="Cancelar ❌")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_confirmacao = montar_teclado([
+    [KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Digitar Nome ✍️")],
+    [KeyboardButton(text="Cancelar ❌")]
+])
 
 # Coleta de links e encerramento da postagem.
-teclado_finalizar = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Finalizar ✅")],
-        [KeyboardButton(text="Cancelar ❌")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_finalizar = montar_teclado([
+    [KeyboardButton(text="Finalizar ✅")],
+    [KeyboardButton(text="Cancelar ❌")]
+])
 
-teclado_opcoes_numero = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Editar Número ✏️"), KeyboardButton(text="Zerar Contador 🔄")],
-        [KeyboardButton(text="Voltar 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
-
-# Confirmação antes de zerar o contador.
-teclado_confirmar_zerar = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_opcoes_numero = montar_teclado([
+    [KeyboardButton(text="Editar Número ✏️"), KeyboardButton(text="Zerar Contador 🔄")],
+    [KeyboardButton(text="Voltar 🔙")]
+])
 
 def obter_teclado_configuracoes_gerais():
     dados_pausa = ler_pausa_programada()
@@ -611,82 +593,50 @@ def obter_teclado_configuracoes_gerais():
         [KeyboardButton(text="🔄 Atualizar Rotinas"), KeyboardButton(text="Zerar Filas e Tarefas 🧹")],
         [KeyboardButton(text="Voltar 🔙")]
     ]
-    return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+    return montar_teclado(botoes)
 
-teclado_opcoes_divulgacao = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Adicionar Alvo ➕"), KeyboardButton(text="Excluir Alvo 🗑️")],
-        [KeyboardButton(text="Editar Configurações ⚙️"), KeyboardButton(text="Forçar Disparo Agora 🚀")],
-        [KeyboardButton(text="Pausar SPAM ⏸️"), KeyboardButton(text="Voltar às Configs 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_opcoes_divulgacao = montar_teclado([
+    [KeyboardButton(text="Adicionar Alvo ➕"), KeyboardButton(text="Excluir Alvo 🗑️")],
+    [KeyboardButton(text="Editar Configurações ⚙️"), KeyboardButton(text="Forçar Disparo Agora 🚀")],
+    [KeyboardButton(text="Pausar SPAM ⏸️"), KeyboardButton(text="Voltar às Configs 🔙")]
+])
 
-teclado_tipo_edicao = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Global 🌍"), KeyboardButton(text="Por Alvo 🎯")],
-        [KeyboardButton(text="Cancelar ❌")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_tipo_edicao = montar_teclado([
+    [KeyboardButton(text="Global 🌍"), KeyboardButton(text="Por Alvo 🎯")],
+    [KeyboardButton(text="Cancelar ❌")]
+])
 
-teclado_opcoes_rotina = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
-        [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
-        [KeyboardButton(text="Editar Boa Noite 🌙"), KeyboardButton(text="Pausar Rotinas ⏸️")],
-        [KeyboardButton(text="Voltar às Configs 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_opcoes_rotina = montar_teclado([
+    [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
+    [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
+    [KeyboardButton(text="Editar Boa Noite 🌙"), KeyboardButton(text="Pausar Rotinas ⏸️")],
+    [KeyboardButton(text="Voltar às Configs 🔙")]
+])
 
 def obter_teclado_outros_canais():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
-            [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
-            [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Shopee Vídeo 🎬")],
-            [KeyboardButton(text="Voltar ao Início 🔙")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    return montar_teclado([
+        [KeyboardButton(text="Espião Afiliados 🕵️"), KeyboardButton(text="Espelhador de Canais 🔄")],
+        [KeyboardButton(text="Vídeos Autorais 🎥"), KeyboardButton(text="Grupo Público 📬")],
+        [KeyboardButton(text="Gerador de Achadinhos 🛍️"), KeyboardButton(text="Shopee Vídeo 🎬")],
+        [KeyboardButton(text="Voltar ao Início 🔙")]
+    ])
 
 teclado_outros_canais = obter_teclado_outros_canais()
 
-teclado_menu_achadinhos = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Adicionar Nicho ➕"), KeyboardButton(text="Remover Nicho 🗑️")],
-        [KeyboardButton(text="Editar Nicho ✏️"), KeyboardButton(text="Forçar Garimpo 🚀")],
-        [KeyboardButton(text="Janela de Horário ⏰"), KeyboardButton(text="Nichos por Ciclo 🔄")],
-        [KeyboardButton(text="SPAM do Achadinhos 📢")],
-        [KeyboardButton(text="Voltar aos Canais 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_menu_achadinhos = montar_teclado([
+    [KeyboardButton(text="Adicionar Nicho ➕"), KeyboardButton(text="Remover Nicho 🗑️")],
+    [KeyboardButton(text="Editar Nicho ✏️"), KeyboardButton(text="Forçar Garimpo 🚀")],
+    [KeyboardButton(text="Janela de Horário ⏰"), KeyboardButton(text="Nichos por Ciclo 🔄")],
+    [KeyboardButton(text="SPAM do Achadinhos 📢")],
+    [KeyboardButton(text="Voltar aos Canais 🔙")]
+])
 
-teclado_janela_achadinhos = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Dia Todo (24h) 🕛")],
-        [KeyboardButton(text="Cancelar ❌")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
 
-teclado_edicao_nicho = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Editar Nome 📝"), KeyboardButton(text="Editar Destino 🎯")],
-        [KeyboardButton(text="Editar Tópico 💬"), KeyboardButton(text="Editar Palavras-chave 🔑")],
-        [KeyboardButton(text="Cancelar ❌")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_edicao_nicho = montar_teclado([
+    [KeyboardButton(text="Editar Nome 📝"), KeyboardButton(text="Editar Destino 🎯")],
+    [KeyboardButton(text="Editar Tópico 💬"), KeyboardButton(text="Editar Palavras-chave 🔑")],
+    [KeyboardButton(text="Cancelar ❌")]
+])
 
 # Menu inicial.
 def obter_teclado_raiz():
@@ -695,7 +645,7 @@ def obter_teclado_raiz():
         [KeyboardButton(text="Relatório Geral 📊")],
         [KeyboardButton(text="Opções do Servidor ⚙️")]
     ]
-    return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+    return montar_teclado(botoes)
 
 def obter_teclado_principal():
     botoes = [
@@ -703,7 +653,7 @@ def obter_teclado_principal():
         [KeyboardButton(text="🛠️ Configurações Avançadas")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
-    return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+    return montar_teclado(botoes)
 
 # Menu Opções do Servidor.
 def obter_teclado_opcoes_servidor():
@@ -712,7 +662,7 @@ def obter_teclado_opcoes_servidor():
         [KeyboardButton(text="Reiniciar Robôs 🔄"), KeyboardButton(text="Acessos do Servidor 🔐")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
-    return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+    return montar_teclado(botoes)
 
 # --- Espião: configuração e análise dos canais vigiados ---
 def ler_alvos_espiao():
@@ -722,60 +672,40 @@ def ler_alvos_espiao():
 def salvar_alvos_espiao(dados):
     db.salvar_config("alvos_espiao", dados)
 
-teclado_menu_espiao = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Grupos Vigiados 📡")],
-        [KeyboardButton(text="Forçar Postagens 🚀")],
-        [KeyboardButton(text="⚙️ Automações (SPAM e Rotina)\u200b")],
-        [KeyboardButton(text="Voltar aos Canais 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_menu_espiao = montar_teclado([
+    [KeyboardButton(text="Grupos Vigiados 📡")],
+    [KeyboardButton(text="Forçar Postagens 🚀")],
+    [KeyboardButton(text="⚙️ Automações (SPAM e Rotina)\u200b")],
+    [KeyboardButton(text="Voltar aos Canais 🔙")]
+])
 
-teclado_automacoes_espiao = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Rotinas do Espião ⏰"), KeyboardButton(text="SPAM do Espião 📢")],
-        [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_automacoes_espiao = montar_teclado([
+    [KeyboardButton(text="Rotinas do Espião ⏰"), KeyboardButton(text="SPAM do Espião 📢")],
+    [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
+])
 
-teclado_automacoes_publico = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Rotinas do Público ⏰"), KeyboardButton(text="SPAM do Público 📢")],
-        [KeyboardButton(text="Voltar ao Painel Público 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_automacoes_publico = montar_teclado([
+    [KeyboardButton(text="Rotinas do Público ⏰"), KeyboardButton(text="SPAM do Público 📢")],
+    [KeyboardButton(text="Voltar ao Painel Público 🔙")]
+])
 
-teclado_opcoes_espiao = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Definir Destino 🎯")],
-        [KeyboardButton(text="Adicionar Grupo ➕"), KeyboardButton(text="Remover Grupo 🗑️")],
-        [KeyboardButton(text="Editar Janela 🕒"), KeyboardButton(text="Editar Atraso ⏳")],
-        [KeyboardButton(text="Analisar Canais Vigiados 🔎")],
-        [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_opcoes_espiao = montar_teclado([
+    [KeyboardButton(text="Definir Destino 🎯")],
+    [KeyboardButton(text="Adicionar Grupo ➕"), KeyboardButton(text="Remover Grupo 🗑️")],
+    [KeyboardButton(text="Editar Janela 🕒"), KeyboardButton(text="Editar Atraso ⏳")],
+    [KeyboardButton(text="Analisar Canais Vigiados 🔎")],
+    [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
+])
 
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Analisar Canais Vigiados 🔎")
 async def menu_analise_canais_espiao(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     
-    teclado_analise = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Listar Todos 📜"), KeyboardButton(text="❌ Erros")],
-            [KeyboardButton(text="⚠️ Duplicados")],
-            [KeyboardButton(text="Voltar às Opções 🔙")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_analise = montar_teclado([
+        [KeyboardButton(text="Listar Todos 📜"), KeyboardButton(text="❌ Erros")],
+        [KeyboardButton(text="⚠️ Duplicados")],
+        [KeyboardButton(text="Voltar às Opções 🔙")]
+    ])
     await message.answer("🔎 <b>Análise de Canais Vigiados</b>\nEscolha a ferramenta que deseja utilizar:", reply_markup=teclado_analise, parse_mode="HTML")
     await state.set_state(EspiaoFluxo.aguardando_acao_analise)
 
@@ -837,14 +767,6 @@ async def voltar_opcoes_espiao(message: types.Message, state: FSMContext):
     await state.clear()
     await menu_grupos_vigiados(message, state)
 
-teclado_janela_espiao = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Dia Todo (24h) 🕛")],
-        [KeyboardButton(text="Cancelar ❌")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
 
 # --- Fila do canal principal (fila_postagens) ---
 def ler_fila_postagens():
@@ -3081,15 +3003,13 @@ async def painel_submissoes(message: types.Message, state: FSMContext):
         "Escolha a ação desejada:"
     )
     
-    teclado_pub = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Configurações do Robô Moderador ⚙️")],
-            [KeyboardButton(text="Configurações do Robô Repostador ♻️")],
-            [KeyboardButton(text="⚙️ Automações do Grupo Público\u200b")],
-            [KeyboardButton(text="Parceiros Afiliados 👥")],
-            [KeyboardButton(text="Voltar aos Canais 🔙")]
-        ], resize_keyboard=True, is_persistent=True
-    )
+    teclado_pub = montar_teclado([
+        [KeyboardButton(text="Configurações do Robô Moderador ⚙️")],
+        [KeyboardButton(text="Configurações do Robô Repostador ♻️")],
+        [KeyboardButton(text="⚙️ Automações do Grupo Público\u200b")],
+        [KeyboardButton(text="Parceiros Afiliados 👥")],
+        [KeyboardButton(text="Voltar aos Canais 🔙")]
+    ])
     await message.answer(texto, reply_markup=teclado_pub, parse_mode="HTML")
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
 
@@ -3230,7 +3150,7 @@ async def painel_parceiros(message: types.Message, state: FSMContext):
         linhas.append([KeyboardButton(text="Excluir Todos 🗑️")])
     linhas.append([KeyboardButton(text="Voltar ao Painel Público 🔙")])
 
-    await message.answer(texto, reply_markup=ReplyKeyboardMarkup(keyboard=linhas, resize_keyboard=True, is_persistent=True), parse_mode="HTML")
+    await message.answer(texto, reply_markup=montar_teclado(linhas), parse_mode="HTML")
 
 # ==========================================
 # Motor de publicação dos parceiros
@@ -3573,14 +3493,14 @@ def rotulo_cota_parceiro(p):
 
 def teclado_gerenciar_parceiro(p):
     acao = "Pausar Parceiro ⏸️" if p.get("ativo") else "Ativar Parceiro ▶️"
-    return ReplyKeyboardMarkup(keyboard=[
+    return montar_teclado([
         [KeyboardButton(text=acao)],
         [KeyboardButton(text="Editar Origem 📥"), KeyboardButton(text="Editar Destino 📤")],
         [KeyboardButton(text="Editar Dias ⏳"), KeyboardButton(text="Editar Cota 📦")],
         [KeyboardButton(text="Editar Janela 🕒")],
         [KeyboardButton(text="Excluir Parceiro 🗑️")],
         [KeyboardButton(text="Voltar aos Parceiros 🔙")]
-    ], resize_keyboard=True, is_persistent=True)
+    ])
 
 async def mostrar_parceiro(message, state: FSMContext, parceiro_id):
     """Tela de um parceiro, com os botões de gestão."""
@@ -4185,13 +4105,11 @@ async def submenu_robo_moderador(message: types.Message, state: FSMContext):
     status = "🟢 ATIVADO" if config.get("ativo") else "🔴 PAUSADO"
     texto_botao_moderador = "Pausar Robô Moderador ⏸️" if config.get("ativo") else "Retomar Robô Moderador ▶️"
 
-    teclado_mod = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Definir Tópicos de Moderação 💬")],
-            [KeyboardButton(text=texto_botao_moderador)],
-            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
-        ], resize_keyboard=True, is_persistent=True
-    )
+    teclado_mod = montar_teclado([
+        [KeyboardButton(text="Definir Tópicos de Moderação 💬")],
+        [KeyboardButton(text=texto_botao_moderador)],
+        [KeyboardButton(text="Voltar ao Painel Público 🔙")]
+    ])
 
     texto = (
         "⚙️ <b>Configurações do Robô Moderador</b>\n\n"
@@ -4213,16 +4131,12 @@ async def submenu_regras_repost_publico(message: types.Message, state: FSMContex
     status = "🔴 PAUSADO" if config.get("repost_pausado") else "🟢 ATIVADO"
     texto_repostagem = "Retomar Repostagem ▶️" if config.get("repost_pausado") else "Pausar Repostagem ⏸️"
 
-    teclado = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Editar Escutando (Público) 📥"), KeyboardButton(text="Editar Postando (Público) 📤")],
-            [KeyboardButton(text="Editar Dias (Público) ⏳"), KeyboardButton(text="Editar Limite (Público) 📦")],
-            [KeyboardButton(text=texto_repostagem)],
-            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado = montar_teclado([
+        [KeyboardButton(text="Editar Escutando (Público) 📥"), KeyboardButton(text="Editar Postando (Público) 📤")],
+        [KeyboardButton(text="Editar Dias (Público) ⏳"), KeyboardButton(text="Editar Limite (Público) 📦")],
+        [KeyboardButton(text=texto_repostagem)],
+        [KeyboardButton(text="Voltar ao Painel Público 🔙")]
+    ])
 
     texto = (
         "♻️ <b>Configurações do Robô Repostador</b>\n\n"
@@ -4393,14 +4307,10 @@ async def submenu_status_robo_publico(message: types.Message, state: FSMContext)
     config = ler_submissao_config()
     texto_repostagem = "Retomar Repostagem ▶️" if config.get("repost_pausado") else "Pausar Repostagem ⏸️"
 
-    teclado_submenu_pausa = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=texto_repostagem)],
-            [KeyboardButton(text="Voltar ao Painel Público 🔙")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_submenu_pausa = montar_teclado([
+        [KeyboardButton(text=texto_repostagem)],
+        [KeyboardButton(text="Voltar ao Painel Público 🔙")]
+    ])
     await message.answer("⏸️ <b>Controle de Pausa do Repostador</b>\nSelecione a ação:", reply_markup=teclado_submenu_pausa, parse_mode="HTML")
     await state.set_state(SubmissaoAdminFluxo.menu_principal)
 
@@ -4410,11 +4320,7 @@ async def pedir_confirmacao_repostagem_publico(message: types.Message, state: FS
     await state.update_data(acao_repost_pub=acao)
 
     texto_botao = "Confirmar Pausa ✅" if acao == "pausar" else "Confirmar Retomada ✅"
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=texto_botao), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = teclado_com_cancelar(texto_botao)
 
     texto = f"⚠️ Tem certeza de que deseja <b>{'PAUSAR' if acao == 'pausar' else 'RETOMAR'}</b> a repostagem automática para o Grupo Público?"
     await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
@@ -4460,11 +4366,7 @@ async def confirmar_dias_repost_publico(message: types.Message, state: FSMContex
     novo_valor = int(message.text)
     await state.update_data(novo_valor_dias_pub=novo_valor)
     
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = teclado_aprovar_cancelar
     await message.answer(f"Tem certeza que deseja configurar o atraso para <b>{novo_valor} dias</b>?", parse_mode="HTML", reply_markup=teclado_confirmacao)
     await state.set_state(SubmissaoAdminFluxo.aguardando_confirmacao_repost_dias)
 
@@ -4514,11 +4416,7 @@ async def confirmar_limite_repost_publico(message: types.Message, state: FSMCont
     piso, topo = faixa
     await state.update_data(novo_valor_limite_pub=piso, novo_valor_limite_pub_max=topo)
     
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = teclado_aprovar_cancelar
     await message.answer(f"Tem certeza que deseja definir a cota diária para <b>{rotulo_cota(piso, topo)}</b>?", parse_mode="HTML", reply_markup=teclado_confirmacao)
     await state.set_state(SubmissaoAdminFluxo.aguardando_confirmacao_repost_limite)
 
@@ -4825,28 +4723,20 @@ def ler_autorais_config():
 def salvar_autorais_config(dados):
     db.salvar_config("autorais_config", dados)
 
-teclado_menu_autorais = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Editar Origem 📥"), KeyboardButton(text="Editar Destino 📤")],
-        [KeyboardButton(text="Regras de Repostagem ♻️"), KeyboardButton(text="Status do Robô ⏸️")],
-        # As contas e os bloqueados só servem a este robô (captura dos Autorais e dos
-        # parceiros). Decisão do Rafael: DECISOES.md, Vídeos Autorais e contas do pool.
-        [KeyboardButton(text="Contas 👥")],
-        [KeyboardButton(text="Voltar aos Canais 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_menu_autorais = montar_teclado([
+    [KeyboardButton(text="Editar Origem 📥"), KeyboardButton(text="Editar Destino 📤")],
+    [KeyboardButton(text="Regras de Repostagem ♻️"), KeyboardButton(text="Status do Robô ⏸️")],
+    # As contas e os bloqueados só servem a este robô (captura dos Autorais e dos
+    # parceiros). Decisão do Rafael: DECISOES.md, Vídeos Autorais e contas do pool.
+    [KeyboardButton(text="Contas 👥")],
+    [KeyboardButton(text="Voltar aos Canais 🔙")]
+])
 
-teclado_submenu_retorno = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Editar Dias ⏳"), KeyboardButton(text="Editar Limite 📦")],
-        [KeyboardButton(text="Janela de Horário ⏰")],
-        [KeyboardButton(text="Voltar ao Menu Autorais 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_submenu_retorno = montar_teclado([
+    [KeyboardButton(text="Editar Dias ⏳"), KeyboardButton(text="Editar Limite 📦")],
+    [KeyboardButton(text="Janela de Horário ⏰")],
+    [KeyboardButton(text="Voltar ao Menu Autorais 🔙")]
+])
 
 def calcular_dias_restantes_autorais():
     """Dias até a data-alvo mais próxima da fila de retorno; None se já chegou ou não há fila."""
@@ -5059,7 +4949,7 @@ def teclado_painel_contas(tem_contas):
         linhas.append([KeyboardButton(text="Gerenciar Conta 🔧"), KeyboardButton(text="Remover Conta 🗑️")])
     linhas.append([KeyboardButton(text="Pessoas Bloqueadas 🚫")])
     linhas.append([KeyboardButton(text="Voltar ao Menu Autorais 🔙")])
-    return ReplyKeyboardMarkup(keyboard=linhas, resize_keyboard=True, is_persistent=True)
+    return montar_teclado(linhas)
 
 
 def teclado_gerenciar_conta(conta):
@@ -5070,18 +4960,11 @@ def teclado_gerenciar_conta(conta):
     linhas.append([KeyboardButton(text="Pausar Conta ⏸️" if conta["habilitada"] else "Reativar Conta ▶️")])
     linhas.append([KeyboardButton(text="Excluir Conta 🗑️")])
     linhas.append([KeyboardButton(text="Voltar às Contas 🔙")])
-    return ReplyKeyboardMarkup(keyboard=linhas, resize_keyboard=True, is_persistent=True)
+    return montar_teclado(linhas)
 
 
-teclado_papel_conta = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text=BOTAO_CAPTURA)], [KeyboardButton(text=BOTAO_REPOSTAGEM)]],
-    resize_keyboard=True, is_persistent=True
-)
+teclado_papel_conta = montar_teclado([[KeyboardButton(text=BOTAO_CAPTURA)], [KeyboardButton(text=BOTAO_REPOSTAGEM)]])
 
-teclado_confirmar_exclusao_conta = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-    resize_keyboard=True, is_persistent=True
-)
 
 
 def teclado_bloqueados(tem_manuais):
@@ -5089,14 +4972,11 @@ def teclado_bloqueados(tem_manuais):
     if tem_manuais:
         linhas[0].append(KeyboardButton(text="Desbloquear Pessoa 🗑️"))
     linhas.append([KeyboardButton(text="Voltar às Contas 🔙")])
-    return ReplyKeyboardMarkup(keyboard=linhas, resize_keyboard=True, is_persistent=True)
+    return montar_teclado(linhas)
 
 
-teclado_alcance_bloqueio = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text=BOTAO_SO_AUTORAIS)], [KeyboardButton(text=BOTAO_AUTORAIS_PARCEIROS)],
-              [KeyboardButton(text="Cancelar ❌")]],
-    resize_keyboard=True, is_persistent=True
-)
+teclado_alcance_bloqueio = montar_teclado([[KeyboardButton(text=BOTAO_SO_AUTORAIS)], [KeyboardButton(text=BOTAO_AUTORAIS_PARCEIROS)],
+[KeyboardButton(text="Cancelar ❌")]])
 
 
 def _avisos_da_conta(conta):
@@ -5380,9 +5260,8 @@ async def contas_pedir_nome(message: types.Message, state: FSMContext):
         f"Mande o nome novo (até {pool_contas.LIMITE_NOME_PAINEL} letras). O telefone continua aparecendo "
         f"ao lado.\nPara voltar ao automático, toque em <b>{BOTAO_NOME_AUTOMATICO}</b>.",
         parse_mode="HTML",
-        reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text=BOTAO_NOME_AUTOMATICO)],
-                                                   [KeyboardButton(text="Cancelar ❌")]],
-                                         resize_keyboard=True, is_persistent=True)
+        reply_markup=montar_teclado([[KeyboardButton(text=BOTAO_NOME_AUTOMATICO)],
+        [KeyboardButton(text="Cancelar ❌")]])
     )
 
 
@@ -5424,10 +5303,8 @@ async def contas_pedir_situacao(message: types.Message, state: FSMContext):
         "saber (ou se ele mostrar errado), marque aqui. Quando a conta voltar ao grupo, a marcação "
         "some sozinha.",
         parse_mode="HTML",
-        reply_markup=ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="Foi Banida ⛔"), KeyboardButton(text="Saiu do Grupo 🚪")],
-                      [KeyboardButton(text="Deixar Automático 🔄")], [KeyboardButton(text="Cancelar ❌")]],
-            resize_keyboard=True, is_persistent=True)
+        reply_markup=montar_teclado([[KeyboardButton(text="Foi Banida ⛔"), KeyboardButton(text="Saiu do Grupo 🚪")],
+        [KeyboardButton(text="Deixar Automático 🔄")], [KeyboardButton(text="Cancelar ❌")]])
     )
 
 
@@ -5454,7 +5331,7 @@ async def _pedir_confirmacao_exclusao(message, state, conta):
         "• Ela deixa de capturar e de repostar\n"
         "• A conta continua existindo no Telegram: só sai deste robô\n"
         "• Para usar de novo, é preciso cadastrar outra vez (com o código do Telegram)",
-        parse_mode="HTML", reply_markup=teclado_confirmar_exclusao_conta
+        parse_mode="HTML", reply_markup=teclado_aprovar_cancelar
     )
 
 
@@ -5914,15 +5791,11 @@ async def submenu_status_robo(message: types.Message, state: FSMContext):
     texto_repostagem = "Retomar Repostagem ▶️" if config.get("pausar_repostagem") else "Pausar Repostagem ⏸️"
     texto_robo = "Retomar Robô Completo ▶️" if config.get("pausar_robo_completo") else "Pausar Robô Completo ⏸️"
 
-    teclado_submenu_pausa = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=texto_repostagem)],
-            [KeyboardButton(text=texto_robo)],
-            [KeyboardButton(text="Voltar ao Menu Autorais 🔙")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_submenu_pausa = montar_teclado([
+        [KeyboardButton(text=texto_repostagem)],
+        [KeyboardButton(text=texto_robo)],
+        [KeyboardButton(text="Voltar ao Menu Autorais 🔙")]
+    ])
     await message.answer("⏸️ <b>Controle de Pausa</b>\nSelecione o serviço que deseja pausar ou retomar:", reply_markup=teclado_submenu_pausa, parse_mode="HTML")
     # Mesmo motivo do submenu_regras_retorno: os botões dependem deste estado.
     await state.set_state(AutoraisFluxo.menu_principal)
@@ -5934,11 +5807,7 @@ async def pedir_confirmacao_repostagem(message: types.Message, state: FSMContext
     await state.update_data(acao_repost=acao)
 
     texto_botao = "Confirmar Pausa ✅" if acao == "pausar" else "Confirmar Retomada ✅"
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=texto_botao), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = teclado_com_cancelar(texto_botao)
 
     texto = f"⚠️ Tem certeza de que deseja <b>{'PAUSAR' if acao == 'pausar' else 'RETOMAR'}</b> a repostagem automática de vídeos antigos?"
     await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
@@ -5973,11 +5842,7 @@ async def pedir_confirmacao_robo(message: types.Message, state: FSMContext):
     await state.update_data(acao_robo=acao)
 
     texto_botao = "Confirmar Pausa ✅" if acao == "pausar" else "Confirmar Retomada ✅"
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=texto_botao), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = teclado_com_cancelar(texto_botao)
 
     texto = f"⚠️ Tem certeza de que deseja <b>{'PAUSAR' if acao == 'pausar' else 'RETOMAR'}</b> o funcionamento geral do robô Espelhador Isolado?"
     await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
@@ -6090,11 +5955,7 @@ async def confirmar_origem_autorais(message, state, nova_origem, topico_final, n
     texto_topico_novo = f"Tópico {topico_final}" if topico_final else "Todos os tópicos"
     texto_topico_antigo = f"Tópico {topico_antigo}" if topico_antigo else "Todos os tópicos"
     
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = teclado_aprovar_cancelar
     
     texto = (
         "⚠️ <b>Confirme a alteração da ORIGEM</b>\n\n"
@@ -6218,11 +6079,7 @@ async def salvar_destino_autorais(message: types.Message, state: FSMContext):
             "Só aprove se souber o que está fazendo."
         )
     
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = teclado_aprovar_cancelar
     
     texto = (
         "⚠️ <b>Confirme a alteração do DESTINO</b>\n\n"
@@ -6279,11 +6136,7 @@ async def confirmar_dias_autorais(message: types.Message, state: FSMContext):
     novo_valor = int(message.text)
     await state.update_data(novo_valor_dias=novo_valor)
     
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = teclado_aprovar_cancelar
     await message.answer(f"Tem certeza que deseja configurar o retorno para <b>{novo_valor} dias</b>?", parse_mode="HTML", reply_markup=teclado_confirmacao)
     await state.set_state(AutoraisFluxo.aguardando_confirmacao_dias_retorno)
 
@@ -6332,11 +6185,7 @@ async def confirmar_limite_autorais(message: types.Message, state: FSMContext):
     piso, topo = faixa
     await state.update_data(novo_valor_limite=piso, novo_valor_limite_max=topo)
     
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = teclado_aprovar_cancelar
     await message.answer(f"Tem certeza que deseja definir a cota diária para <b>{rotulo_cota(piso, topo)}</b>?", parse_mode="HTML", reply_markup=teclado_confirmacao)
     await state.set_state(AutoraisFluxo.aguardando_confirmacao_limite_videos)
 
@@ -6368,14 +6217,6 @@ async def processar_limite_autorais(message: types.Message, state: FSMContext):
 # ----------------------------------------------------
 # Janela de horário do retorno dos Autorais
 # ----------------------------------------------------
-teclado_janela_autorais = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Dia Todo (24h) 🕛")],
-        [KeyboardButton(text="Cancelar ❌")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
 
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Janela de Horário ⏰")
 async def pedir_janela_autorais(message: types.Message, state: FSMContext):
@@ -6390,7 +6231,7 @@ async def pedir_janela_autorais(message: types.Message, state: FSMContext):
         f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>8-22</code>) ou clique no botão para rodar 24h.\n"
         f"<i>Janela atual: {inicio}h às {fim}h</i>",
         parse_mode="HTML",
-        reply_markup=teclado_janela_autorais
+        reply_markup=teclado_janela_dia_todo
     )
     await state.set_state(AutoraisFluxo.aguardando_janela_autorais)
 
@@ -6410,11 +6251,11 @@ async def confirmar_janela_autorais(message: types.Message, state: FSMContext):
     else:
         match = re.match(r"^(\d{1,2})\s*-\s*(\d{1,2})$", texto)
         if not match:
-            await message.answer("⚠️ Formato inválido! Use exatamente como no exemplo: <code>8-22</code>.", parse_mode="HTML", reply_markup=teclado_janela_autorais)
+            await message.answer("⚠️ Formato inválido! Use exatamente como no exemplo: <code>8-22</code>.", parse_mode="HTML", reply_markup=teclado_janela_dia_todo)
             return
         inicio, fim = map(int, match.groups())
         if inicio >= fim or inicio < 0 or fim > 24:
-            await message.answer("⚠️ Valores inválidos! A hora de início precisa ser menor que a do fim (0 a 24).", reply_markup=teclado_janela_autorais)
+            await message.answer("⚠️ Valores inválidos! A hora de início precisa ser menor que a do fim (0 a 24).", reply_markup=teclado_janela_dia_todo)
             return
 
     limite = ler_autorais_config().get("limite_videos", 5)
@@ -6424,11 +6265,7 @@ async def confirmar_janela_autorais(message: types.Message, state: FSMContext):
     await state.update_data(janela_inicio=inicio, janela_fim=fim)
 
     texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"entre {inicio}h e {fim}h"
-    teclado_conf = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_conf = teclado_aprovar_cancelar
     await message.answer(
         f"Confirmar a janela de postagem <b>{texto_exibicao}</b>?\n\n"
         f"<i>Com {limite} vídeos/dia, dará cerca de {espaco} minutos entre um vídeo e outro.</i>",
@@ -7150,11 +6987,7 @@ async def confirmar_reiniciar_robos(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     logger.info("⚠️ Solicitando confirmação para reiniciar os serviços do servidor.")
     
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar Reinício ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = montar_teclado([[KeyboardButton(text="Aprovar Reinício ✅"), KeyboardButton(text="Cancelar ❌")]])
     
     servicos = listar_servicos_do_projeto()
     lista_txt = "\n".join(f"🔹 {NOMES_AMIGAVEIS_SERVICOS.get(s, s)}" for s in servicos)
@@ -7436,7 +7269,7 @@ def obter_teclado_relatorios():
         [KeyboardButton(text="Disparador de Notas 🧾")],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
-    return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+    return montar_teclado(botoes)
 
 def _disco_da_fila(itens):
     """Bytes que os vídeos da fila ainda ocupam no disco."""
@@ -7668,7 +7501,7 @@ def obter_teclado_relatorios_filas():
         [KeyboardButton(text="Fila dos Parceiros 🔍")],
         [KeyboardButton(text="Voltar aos Relatórios 🔙")]
     ]
-    return ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+    return montar_teclado(botoes)
 
 @dp.message(F.text == "Relatórios de Filas 📋", StateFilter("*"))
 async def menu_relatorios_filas(message: types.Message, state: FSMContext):
@@ -7871,7 +7704,7 @@ async def relatorio_filas_unificado(message: types.Message, state: FSMContext):
                     
                 botoes.append([KeyboardButton(text="Voltar aos Relatórios 🔙")])
                 
-                teclado = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+                teclado = montar_teclado(botoes)
                 await message.answer("🔄 <b>Múltiplas rotas detectadas!</b>\nQual fila do Espelhador deseja analisar?", reply_markup=teclado, parse_mode="HTML")
                 await state.set_state(RelatoriosFluxo.aguardando_rota_espelhador)
                 return
@@ -9162,11 +8995,7 @@ async def pedir_confirmacao_disparo_publico(message: types.Message, state: FSMCo
     tipo, nome_amigavel, descricao = MAPA_DISPAROS_PUBLICO[message.text]
     await state.update_data(tipo_disparo_publico=tipo, nome_disparo_publico=nome_amigavel, menu_origem="publico")
 
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Confirmar Disparo ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = montar_teclado([[KeyboardButton(text="Confirmar Disparo ✅"), KeyboardButton(text="Cancelar ❌")]])
 
     texto = (
         f"⚠️ Tem certeza de que deseja <b>DISPARAR AGORA</b> a rotina <b>{nome_amigavel}</b>?\n\n"
@@ -9381,10 +9210,7 @@ async def confirmar_alvos_rotina_publico(message: types.Message, state: FSMConte
     await state.update_data(novos_alvos_rotina=topicos_finais)
     resumo = ", ".join(topicos_finais) if topicos_finais else "Chat Geral (Padrão)"
 
-    teclado_conf = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True, is_persistent=True
-    )
+    teclado_conf = teclado_aprovar_cancelar
     await message.answer(
         f"🎯 As rotinas do Grupo Público passarão a ser publicadas em: <code>{resumo}</code>\n\n"
         "<i>(Os nomes reais dos tópicos serão sincronizados em background pelo Userbot)</i>\n\n"
@@ -10252,7 +10078,7 @@ async def confirmar_zerar_numero(message: types.Message, state: FSMContext):
         f"O vídeo atual está no número <b>{numero_atual}</b> e iremos zerar para o vídeo número <b>1</b>.\n"
         f"Você aprova essa ação?"
     )
-    await message.answer(texto_confirmacao, reply_markup=teclado_confirmar_zerar, parse_mode="HTML")
+    await message.answer(texto_confirmacao, reply_markup=teclado_aprovar_cancelar, parse_mode="HTML")
     await state.set_state(ConfigFluxo.aguardando_confirmacao_zerar)
 
 @dp.message(ConfigFluxo.aguardando_confirmacao_zerar)
@@ -10263,7 +10089,7 @@ async def processar_zerar_numero(message: types.Message, state: FSMContext):
         await message.answer("Contador zerado com sucesso! O próximo post será o 'Vídeo 1'.", reply_markup=obter_teclado_principal())
         await state.clear()
     else:
-        await message.answer("Por favor, clique em Aprovar ✅ ou Cancelar ❌.", reply_markup=teclado_confirmar_zerar)
+        await message.answer("Por favor, clique em Aprovar ✅ ou Cancelar ❌.", reply_markup=teclado_aprovar_cancelar)
 
 @dp.message(F.text == "Editar Número ✏️")
 async def pedir_novo_numero(message: types.Message, state: FSMContext):
@@ -10349,7 +10175,7 @@ async def confirmar_atualizar_rotinas(message: types.Message, state: FSMContext)
     texto += "Deseja continuar?"
 
     logger.info(f"🔄 Aguardando aprovação do recálculo ({len(rotinas_afetadas)} rotina(s), {videos_afetados} vídeo(s)).")
-    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_confirmar_zerar)
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_aprovar_cancelar)
     await state.set_state(ConfigFluxo.aguardando_confirmacao_rotinas)
 
 @dp.message(ConfigFluxo.aguardando_confirmacao_rotinas)
@@ -10454,15 +10280,11 @@ async def menu_zerar_filas_tarefas(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     logger.info("⚠️ Solicitando seleção do tipo de limpeza de filas.")
     
-    teclado_opcoes_limpeza = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Limpar Tudo (Geral) 💥")],
-            [KeyboardButton(text="Limpar Fila do Espião 🕵️"), KeyboardButton(text="Limpar Fila Espelhador 🔄")],
-            [KeyboardButton(text="Limpar Fila Autorais 🎥"), KeyboardButton(text="Voltar ao Menu Anterior 🔙")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_opcoes_limpeza = montar_teclado([
+        [KeyboardButton(text="Limpar Tudo (Geral) 💥")],
+        [KeyboardButton(text="Limpar Fila do Espião 🕵️"), KeyboardButton(text="Limpar Fila Espelhador 🔄")],
+        [KeyboardButton(text="Limpar Fila Autorais 🎥"), KeyboardButton(text="Voltar ao Menu Anterior 🔙")]
+    ])
     
     texto = (
         "🧹 <b>CENTRAL DE LIMPEZA DO SERVIDOR</b>\n\n"
@@ -10494,11 +10316,7 @@ async def pedir_confirmacao_acao_limpeza(message: types.Message, state: FSMConte
 
     await state.update_data(tipo_limpeza=message.text)
 
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar Exclusão ✅"), KeyboardButton(text="Voltar ao Menu Anterior 🔙")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = montar_teclado([[KeyboardButton(text="Aprovar Exclusão ✅"), KeyboardButton(text="Voltar ao Menu Anterior 🔙")]])
 
     await message.answer(f"⚠️ <b>Atenção:</b> Você está prestes a executar a operação: <b>{message.text}</b>.\n\nEsta ação apagará arquivos físicos e limpará a fila selecionada. Deseja continuar?", reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(ConfigFluxo.aguardando_acao_limpeza)
@@ -10841,7 +10659,7 @@ async def confirmar_remocao_nicho(message: types.Message, state: FSMContext):
         nicho_selecionado = nichos[indice]
         await state.update_data(indice_nicho_remocao=indice)
         
-        teclado_confirmacao = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Confirmar Exclusão ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
+        teclado_confirmacao = montar_teclado([[KeyboardButton(text="Confirmar Exclusão ✅"), KeyboardButton(text="Cancelar ❌")]])
         await message.answer(f"Tem certeza que deseja apagar permanentemente o nicho <b>{nicho_selecionado.get('nome')}</b> do motor?", parse_mode="HTML", reply_markup=teclado_confirmacao)
         await state.set_state(AchadinhosFluxo.aguardando_confirmacao_remocao)
     else:
@@ -11008,7 +10826,7 @@ async def pedir_janela_achadinhos(message: types.Message, state: FSMContext):
         f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>8-22</code>) ou clique no botão para rodar 24h.\n"
         f"<i>Janela atual: {inicio}h às {fim}h</i>",
         parse_mode="HTML",
-        reply_markup=teclado_janela_achadinhos
+        reply_markup=teclado_janela_dia_todo
     )
     await state.set_state(AchadinhosFluxo.aguardando_janela)
 
@@ -11027,12 +10845,12 @@ async def confirmar_janela_achadinhos(message: types.Message, state: FSMContext)
         match = re.match(r"^(\d{1,2})\s*-\s*(\d{1,2})$", texto)
         if not match:
             await message.answer("⚠️ Formato inválido! Use exatamente como no exemplo: <code>8-22</code>.",
-                                 parse_mode="HTML", reply_markup=teclado_janela_achadinhos)
+                                 parse_mode="HTML", reply_markup=teclado_janela_dia_todo)
             return
         inicio, fim = map(int, match.groups())
         if inicio >= fim or inicio < 0 or fim > 24:
             await message.answer("⚠️ Valores inválidos! A hora de início precisa ser menor que a do fim (0 a 24).",
-                                 reply_markup=teclado_janela_achadinhos)
+                                 reply_markup=teclado_janela_dia_todo)
             return
 
     # O intervalo é sorteado (rajada/normal/sumiço), ~2 h na média: a conta sai como
@@ -11044,11 +10862,7 @@ async def confirmar_janela_achadinhos(message: types.Message, state: FSMContext)
     await state.update_data(janela_inicio=inicio, janela_fim=fim)
 
     texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"entre {inicio}h e {fim}h"
-    teclado_conf = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_conf = teclado_aprovar_cancelar
     await message.answer(
         f"Confirmar a janela de garimpo <b>{texto_exibicao}</b>?\n\n"
         f"<i>Dará algo entre {max(1, ciclos - 2)} e {ciclos + 2} ciclo(s) por dia — o "
@@ -11241,11 +11055,7 @@ async def iniciar_esvaziar_clones(message: types.Message, state: FSMContext):
         await message.answer("A fila de clonagem já está vazia no momento.", reply_markup=teclado_menu_espiao)
         return
         
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = teclado_aprovar_cancelar
     
     await message.answer(f"🚀 Tem certeza que deseja forçar o processamento de <b>{qtd_pendentes} vídeos</b> da fila do Espião imediatamente?", reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(EspiaoFluxo.aguardando_confirmacao_forcar_clones)
@@ -11566,15 +11376,11 @@ async def remover_duplicados_espiao_callback(callback: types.CallbackQuery, stat
 
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Adicionar Grupo ➕")
 async def pedir_alvo_espiao(message: types.Message, state: FSMContext):
-    teclado_dinamico = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Importar Banco Global 🌍")], 
-            [KeyboardButton(text="Lista Negra (Blacklist) ⛔")],
-            [KeyboardButton(text="Cancelar ❌")]
-        ], 
-        resize_keyboard=True, 
-        is_persistent=True
-    )
+    teclado_dinamico = montar_teclado([
+        [KeyboardButton(text="Importar Banco Global 🌍")], 
+        [KeyboardButton(text="Lista Negra (Blacklist) ⛔")],
+        [KeyboardButton(text="Cancelar ❌")]
+    ])
     await message.answer(
         "Envie os @usernames, links ou IDs dos grupos que deseja monitorar como ORIGEM.\n\n"
         "OBS: Você pode enviar vários separando por vírgula (Ex: @grupo1, -100123, https://t.me/grupo2, https://web.telegram.org/a/#-1002856422690):\n\n"
@@ -11606,14 +11412,7 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
         else: 
             texto_bl += "<i>A lista negra está vazia.</i>\n"
         
-        tcl = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Remover da Blacklist")], 
-                [KeyboardButton(text="Cancelar ❌")]
-            ], 
-            resize_keyboard=True, 
-            is_persistent=True
-        )
+        tcl = teclado_lista_negra
         await message.answer(texto_bl, reply_markup=tcl, parse_mode="HTML")
         await state.set_state(EspiaoFluxo.aguardando_acao_blacklist)
         return
@@ -11720,7 +11519,7 @@ async def processar_novo_alvo_espiao(message: types.Message, state: FSMContext):
     await state.update_data(novos_alvos_espiao=alvos_novos_para_adicionar)
     texto_resposta += "Confirma a adição dos novos alvos?"
     
-    teclado_confirmacao = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
+    teclado_confirmacao = teclado_aprovar_cancelar
     await message.answer(texto_resposta, reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(EspiaoFluxo.aguardando_confirmacao_alvo)
 
@@ -11827,7 +11626,7 @@ async def processar_add_blacklist_espiao(message: types.Message, state: FSMConte
 
         texto_aviso += "\nDeseja aprovar a adição à Lista Negra e a exclusão destes canais da escuta simultaneamente?"
 
-        teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
+        teclado_conf = teclado_aprovar_cancelar
         await message.answer(texto_aviso, reply_markup=teclado_conf, parse_mode="HTML")
         await state.set_state(EspiaoFluxo.aguardando_confirmacao_blacklist_conflito)
     else:
@@ -11844,14 +11643,7 @@ async def processar_add_blacklist_espiao(message: types.Message, state: FSMConte
             
         texto_final = f"✅ <b>{len(novos_blacklist)} canal(is) bloqueado(s) com sucesso!</b>\n\n{txt_lista}"
 
-        tcl_bl = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Remover da Blacklist")], 
-                [KeyboardButton(text="Cancelar ❌")]
-            ], 
-            resize_keyboard=True, 
-            is_persistent=True
-        )
+        tcl_bl = teclado_lista_negra
         await message.answer(texto_final, parse_mode="HTML", reply_markup=tcl_bl)
         await state.set_state(EspiaoFluxo.aguardando_acao_blacklist)
 
@@ -11889,14 +11681,7 @@ async def confirmar_blacklist_conflito_espiao(message: types.Message, state: FSM
 
     texto_final = f"✅ <b>Sucesso!</b>\n⛔ {len(novos_blacklist)} adicionado(s).\n🗑️ {len(alvos_para_remover)} removido(s) da escuta.\n{txt_lista}"
 
-    tcl_bl = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Remover da Blacklist")], 
-            [KeyboardButton(text="Cancelar ❌")]
-        ], 
-        resize_keyboard=True, 
-        is_persistent=True
-    )
+    tcl_bl = teclado_lista_negra
     await message.answer(texto_final, parse_mode="HTML", reply_markup=tcl_bl)
     await state.set_state(EspiaoFluxo.aguardando_acao_blacklist)
 
@@ -11925,14 +11710,7 @@ async def processar_rem_blacklist_espiao(message: types.Message, state: FSMConte
 
     texto_final = f"✅ <b>Blacklist atualizada com sucesso!</b>\n\n{txt_lista}"
     
-    tcl_bl = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="➕ Add à Blacklist"), KeyboardButton(text="🗑️ Remover da Blacklist")], 
-            [KeyboardButton(text="Cancelar ❌")]
-        ], 
-        resize_keyboard=True, 
-        is_persistent=True
-    )
+    tcl_bl = teclado_lista_negra
     await message.answer(texto_final, parse_mode="HTML", reply_markup=tcl_bl)
     await state.set_state(EspiaoFluxo.aguardando_acao_blacklist)
 
@@ -11989,7 +11767,7 @@ async def confirmar_remocao_espiao(message: types.Message, state: FSMContext):
     for idx in indices_para_remover:
         texto_confirmacao += f"🗑️ <b>{alvos[idx]}</b>\n"
         
-    teclado_confirmacao = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
+    teclado_confirmacao = teclado_aprovar_cancelar
     await message.answer(texto_confirmacao, reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(EspiaoFluxo.aguardando_confirmacao_remocao)
 
@@ -12048,11 +11826,7 @@ async def confirmar_destino_espiao(message: types.Message, state: FSMContext):
     salvar_nome_grupo(destino_id, nome)
     await state.update_data(novo_destino=destino_id)
     
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = teclado_aprovar_cancelar
     
     nome_exibicao = f"{nome} (<code>{destino_id}</code>)" if nome != destino_id else f"<code>{destino_id}</code>"
     
@@ -12091,7 +11865,7 @@ async def iniciar_config_janela_espiao(message: types.Message, state: FSMContext
         f"Defina a <b>Janela de Horário</b> útil em que o Espião pode postar os vídeos.\n\n"
         f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>) ou clique no botão abaixo para rodar 24h:\n"
         f"<i>Janela atual: {inicio}h às {fim}h</i>", 
-        reply_markup=teclado_janela_espiao,
+        reply_markup=teclado_janela_dia_todo,
         parse_mode="HTML"
     )
     await state.set_state(ConfigRotinaEspiao.aguardando_janela)
@@ -12106,17 +11880,17 @@ async def receber_janela_espiao(message: types.Message, state: FSMContext):
     else:
         match = re.match(r"^(\d{1,2})-(\d{1,2})$", texto)
         if not match:
-            await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22.", reply_markup=teclado_janela_espiao)
+            await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22.", reply_markup=teclado_janela_dia_todo)
             return
         inicio, fim = map(int, match.groups())
         if inicio >= fim or inicio < 0 or fim > 24:
-            await message.answer("Valores inválidos! A hora de início deve ser menor que a do fim.", reply_markup=teclado_janela_espiao)
+            await message.answer("Valores inválidos! A hora de início deve ser menor que a do fim.", reply_markup=teclado_janela_dia_todo)
             return
 
     await state.update_data(inicio=inicio, fim=fim)
     texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"estritamente entre {inicio}h e {fim}h"
     
-    teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
+    teclado_conf = teclado_aprovar_cancelar
     await message.answer(f"Deseja confirmar a nova janela para postar <b>{texto_exibicao}</b>?", parse_mode="HTML", reply_markup=teclado_conf)
     await state.set_state(ConfigRotinaEspiao.aguardando_confirmacao_janela)
 
@@ -12146,14 +11920,12 @@ async def iniciar_config_atraso_espiao(message: types.Message, state: FSMContext
     if message.from_user.id != ADMIN_ID: return
     await state.clear()
     
-    teclado_dias = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Mesmo Dia (D+0) 🟢")],
-            [KeyboardButton(text="Dia Seguinte (D+1) 🟡")],
-            [KeyboardButton(text="Dois Dias (D+2) 🔵")],
-            [KeyboardButton(text="Cancelar ❌")]
-        ], resize_keyboard=True, is_persistent=True
-    )
+    teclado_dias = montar_teclado([
+        [KeyboardButton(text="Mesmo Dia (D+0) 🟢")],
+        [KeyboardButton(text="Dia Seguinte (D+1) 🟡")],
+        [KeyboardButton(text="Dois Dias (D+2) 🔵")],
+        [KeyboardButton(text="Cancelar ❌")]
+    ])
     await message.answer("Escolha a defasagem temporal (Atraso) das postagens extraídas do Espião:", reply_markup=teclado_dias)
     await state.set_state(ConfigRotinaEspiao.aguardando_intervalo_espiao)
 
@@ -12169,12 +11941,12 @@ async def receber_intervalo_espiao(message: types.Message, state: FSMContext):
     
     if intervalo == 0:
         await state.update_data(modo="ordem")
-        teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
+        teclado_conf = teclado_aprovar_cancelar
         await message.answer("Deseja confirmar o atraso de D+0 (Mesmo Dia) com modo de Ordem de Chegada?", reply_markup=teclado_conf)
         await state.set_state(ConfigRotinaEspiao.aguardando_confirmacao_tempo)
         return
         
-    teclado_modo = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")], [KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
+    teclado_modo = montar_teclado([[KeyboardButton(text="Aleatório 🔀"), KeyboardButton(text="Ordem de Chegada ⬇️")], [KeyboardButton(text="Cancelar ❌")]])
     await message.answer("Como deseja distribuir os clones retidos dentro da janela estipulada?", reply_markup=teclado_modo)
     await state.set_state(ConfigRotinaEspiao.aguardando_modo)
 
@@ -12190,7 +11962,7 @@ async def salvar_config_tempo_espiao(message: types.Message, state: FSMContext):
     data = await state.get_data()
     intervalo = data.get("intervalo_dias_espiao", 1)
     
-    teclado_conf = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]], resize_keyboard=True, is_persistent=True)
+    teclado_conf = teclado_aprovar_cancelar
     await message.answer(f"Deseja confirmar o atraso de D+{intervalo} com distribuição {message.text}?", reply_markup=teclado_conf)
     await state.set_state(ConfigRotinaEspiao.aguardando_confirmacao_tempo)
 
@@ -12267,14 +12039,10 @@ async def gerenciar_rotina_espiao(message: types.Message, state: FSMContext):
     
     texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado_viral") else "Pausar Rotinas ⏸️"
     
-    teclado = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Editar Rotinas ✏️"), KeyboardButton(text="Disparos Manuais 🚀")],
-            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Automações 🔙")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado = montar_teclado([
+        [KeyboardButton(text="Editar Rotinas ✏️"), KeyboardButton(text="Disparos Manuais 🚀")],
+        [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Automações 🔙")]
+    ])
     await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
     await state.update_data(menu_origem="espiao")  # "Voltar" e os submenus usam a origem para saber de qual canal são as rotinas
     await state.set_state(ConfigRotina.menu_principal)
@@ -12288,39 +12056,27 @@ async def submenu_editar_rotinas(message: types.Message, state: FSMContext):
     origem = data.get("menu_origem")
     
     if origem == "espiao":
-        teclado = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Editar Convite do Grupo 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖\u200b")],
-                [KeyboardButton(text="Editar Convite Afiliados 🚀"), KeyboardButton(text="Editar Promo Público 👥")],
-                [KeyboardButton(text="Editar Achadinhos 🛒"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
-            ],
-            resize_keyboard=True,
-            is_persistent=True
-        )
+        teclado = montar_teclado([
+            [KeyboardButton(text="Editar Convite do Grupo 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖\u200b")],
+            [KeyboardButton(text="Editar Convite Afiliados 🚀"), KeyboardButton(text="Editar Promo Público 👥")],
+            [KeyboardButton(text="Editar Achadinhos 🛒"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
+        ])
         texto = "✏️ <b>Editar Rotinas (Canal Viral)</b>\nSelecione qual rotina deseja configurar:"
     elif origem == "publico":
-        teclado = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Editar Convite (Próprio) 🔗"), KeyboardButton(text="Editar Promo Principal 🌟")],
-                [KeyboardButton(text="Editar Promo Viral 💥"), KeyboardButton(text="Editar Achadinhos 🏪")],
-                [KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
-            ],
-            resize_keyboard=True,
-            is_persistent=True
-        )
+        teclado = montar_teclado([
+            [KeyboardButton(text="Editar Convite (Próprio) 🔗"), KeyboardButton(text="Editar Promo Principal 🌟")],
+            [KeyboardButton(text="Editar Promo Viral 💥"), KeyboardButton(text="Editar Achadinhos 🏪")],
+            [KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
+        ])
         texto = "✏️ <b>Editar Rotinas (Grupo Público)</b>\nSelecione qual rotina deseja configurar:"
     else:
-        teclado = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
-                [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
-                [KeyboardButton(text="Editar Convite Viral 🚀"), KeyboardButton(text="Editar Promo Público 🗣️")],
-                [KeyboardButton(text="Editar Achadinhos 🛍️"), KeyboardButton(text="Editar Boa Noite 🌙")],
-                [KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
-            ],
-            resize_keyboard=True,
-            is_persistent=True
-        )
+        teclado = montar_teclado([
+            [KeyboardButton(text="Editar Bom Dia ☀️"), KeyboardButton(text="Editar Incentivo 🔥")],
+            [KeyboardButton(text="Editar Convite 🔗"), KeyboardButton(text="Editar Prompt GEM 🤖")],
+            [KeyboardButton(text="Editar Convite Viral 🚀"), KeyboardButton(text="Editar Promo Público 🗣️")],
+            [KeyboardButton(text="Editar Achadinhos 🛍️"), KeyboardButton(text="Editar Boa Noite 🌙")],
+            [KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
+        ])
         texto = "✏️ <b>Editar Rotinas (Canal Principal)</b>\nSelecione qual rotina deseja configurar:"
         
     await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
@@ -12335,38 +12091,26 @@ async def submenu_disparos_manuais(message: types.Message, state: FSMContext):
     
     if origem == "espiao":
         logger.info("✅ Montando teclado manual para o Canal Viral.")
-        teclado = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Disparar Convite Afiliados 🚀"), KeyboardButton(text="Disparar Convite do Grupo 🔗\u200b")],
-                [KeyboardButton(text="Disparar Prompt GEM 🤖\u200b"), KeyboardButton(text="Disparar Promo Público 👥")],
-                [KeyboardButton(text="Disparar Achadinhos 🛒"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
-            ],
-            resize_keyboard=True,
-            is_persistent=True
-        )
+        teclado = montar_teclado([
+            [KeyboardButton(text="Disparar Convite Afiliados 🚀"), KeyboardButton(text="Disparar Convite do Grupo 🔗\u200b")],
+            [KeyboardButton(text="Disparar Prompt GEM 🤖\u200b"), KeyboardButton(text="Disparar Promo Público 👥")],
+            [KeyboardButton(text="Disparar Achadinhos 🛒"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
+        ])
         texto = "🚀 <b>Disparos Manuais (Canal Viral)</b>\nSelecione qual mensagem deseja forçar o envio agora:"
     elif origem == "publico":
-        teclado = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Disparar Convite (Próprio) 🔗"), KeyboardButton(text="Disparar Promo Principal 🌟")],
-                [KeyboardButton(text="Disparar Promo Viral 💥"), KeyboardButton(text="Disparar Achadinhos 🏪")],
-                [KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
-            ],
-            resize_keyboard=True,
-            is_persistent=True
-        )
+        teclado = montar_teclado([
+            [KeyboardButton(text="Disparar Convite (Próprio) 🔗"), KeyboardButton(text="Disparar Promo Principal 🌟")],
+            [KeyboardButton(text="Disparar Promo Viral 💥"), KeyboardButton(text="Disparar Achadinhos 🏪")],
+            [KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
+        ])
         texto = "🚀 <b>Disparos Manuais (Grupo Público)</b>\nSelecione qual mensagem deseja forçar o envio agora:"
     else:
-        teclado = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="Disparar Bom Dia ☀️"), KeyboardButton(text="Disparar Incentivo 🔥")],
-                [KeyboardButton(text="Disparar Convite do Grupo 🔗"), KeyboardButton(text="Disparar Convite Viral 🚀")],
-                [KeyboardButton(text="Disparar Promo Público 🗣️"), KeyboardButton(text="Disparar Achadinhos 🛍️")],
-                [KeyboardButton(text="Disparar Boa Noite 🌙"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
-            ],
-            resize_keyboard=True,
-            is_persistent=True
-        )
+        teclado = montar_teclado([
+            [KeyboardButton(text="Disparar Bom Dia ☀️"), KeyboardButton(text="Disparar Incentivo 🔥")],
+            [KeyboardButton(text="Disparar Convite do Grupo 🔗"), KeyboardButton(text="Disparar Convite Viral 🚀")],
+            [KeyboardButton(text="Disparar Promo Público 🗣️"), KeyboardButton(text="Disparar Achadinhos 🛍️")],
+            [KeyboardButton(text="Disparar Boa Noite 🌙"), KeyboardButton(text="🔙 Voltar ao Menu Rotinas")]
+        ])
         texto = "🚀 <b>Disparos Manuais (Canal Principal)</b>\nSelecione qual mensagem de rotina deseja forçar o envio agora:"
         
     await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
@@ -12406,11 +12150,7 @@ async def pedir_confirmacao_pausa_spam(message: types.Message, state: FSMContext
     await state.update_data(acao_pausa_spam=acao)
     
     texto_botao = "Confirmar Pausa ✅" if acao == "pausar" else "Confirmar Retomada ✅"
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=texto_botao), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = teclado_com_cancelar(texto_botao)
     
     texto = f"⚠️ Tem certeza de que deseja <b>{'PAUSAR' if acao == 'pausar' else 'RETOMAR'}</b> o SPAM em Grupos?"
     await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
@@ -12446,11 +12186,7 @@ async def pedir_confirmacao_pausa_spam_viral(message: types.Message, state: FSMC
     await state.update_data(acao_pausa_spam_viral=acao)
     
     texto_botao = "Confirmar Pausa ✅" if acao == "pausar" else "Confirmar Retomada ✅"
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=texto_botao), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = teclado_com_cancelar(texto_botao)
     
     texto = f"⚠️ Tem certeza de que deseja <b>{'PAUSAR' if acao == 'pausar' else 'RETOMAR'}</b> o SPAM Viral?"
     await message.answer(texto, reply_markup=teclado_confirmacao, parse_mode="HTML")
@@ -12484,11 +12220,7 @@ async def pedir_confirmacao_pausa_rotinas(message: types.Message, state: FSMCont
     await state.update_data(acao_pausa_rotina=acao)
     
     texto_botao = "Confirmar Pausa ✅" if acao == "pausar" else "Confirmar Retomada ✅"
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=texto_botao), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = teclado_com_cancelar(texto_botao)
     
     if acao == "pausar":
         texto = "⚠️ Tem certeza de que deseja <b>PAUSAR</b> as mensagens de rotina deste módulo?"
@@ -12567,7 +12299,7 @@ async def iniciar_pausa_programada(message: types.Message, state: FSMContext):
     if dados_pausa.get("ativa"):
         data_retorno = dados_pausa.get("data_retorno")
         texto = f"⚠️ <b>Pausa Programada Ativa!</b>\nO robô está em modo de descanso até <b>{data_retorno}</b>.\n\nDeseja cancelar esta pausa e retomar os serviços agora?"
-        teclado = ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Encerrar Pausa Agora ▶️")], [KeyboardButton(text="Voltar 🔙")]], resize_keyboard=True, is_persistent=True)
+        teclado = teclado_encerrar_pausa
         await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
         await state.set_state(PausaProgramadaFluxo.aguardando_intencao_encerramento)
         return
@@ -12646,11 +12378,7 @@ async def processar_selecao_servicos(message: types.Message, state: FSMContext):
     data = await state.get_data()
     data_retorno_str = data["data_retorno_str"]
     
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Confirmar Pausa ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = montar_teclado([[KeyboardButton(text="Confirmar Pausa ✅"), KeyboardButton(text="Cancelar ❌")]])
     
     await message.answer(f"Você escolheu: <b>{message.text}</b>\nO robô ficará pausado até <b>{data_retorno_str}</b>.\n\nConfirma o agendamento desta pausa?", reply_markup=teclado_confirmacao, parse_mode="HTML")
     await state.set_state(PausaProgramadaFluxo.aguardando_confirmacao_pausa)
@@ -12725,15 +12453,11 @@ async def confirmar_pausa_programada_final(message: types.Message, state: FSMCon
 @dp.message(PausaProgramadaFluxo.aguardando_intencao_encerramento)
 async def pedir_confirmacao_encerramento(message: types.Message, state: FSMContext):
     if message.text == "Encerrar Pausa Agora ▶️":
-        teclado_confirmacao = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="Aprovar Encerramento ✅"), KeyboardButton(text="Cancelar ❌")]],
-            resize_keyboard=True,
-            is_persistent=True
-        )
+        teclado_confirmacao = montar_teclado([[KeyboardButton(text="Aprovar Encerramento ✅"), KeyboardButton(text="Cancelar ❌")]])
         await message.answer("⚠️ Tem certeza de que deseja <b>encerrar a pausa agora</b>, recalcular a fila e acordar o robô imediatamente?", reply_markup=teclado_confirmacao, parse_mode="HTML")
         await state.set_state(PausaProgramadaFluxo.aguardando_confirmacao_encerramento)
     else:
-        await message.answer("Use os botões abaixo para escolher.", reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Encerrar Pausa Agora ▶️")], [KeyboardButton(text="Voltar 🔙")]], resize_keyboard=True, is_persistent=True))
+        await message.answer("Use os botões abaixo para escolher.", reply_markup=teclado_encerrar_pausa)
 
 @dp.message(PausaProgramadaFluxo.aguardando_confirmacao_encerramento)
 async def processar_encerramento_pausa(message: types.Message, state: FSMContext):
@@ -12930,15 +12654,11 @@ async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
         texto += "Nenhum alvo cadastrado no momento.\n"
         
     texto_botao_pausa = "Retomar SPAM ▶️" if dados.get("pausado") else "Pausar SPAM ⏸️"
-    teclado_dinamico_spam = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Adicionar Alvo ➕"), KeyboardButton(text="Excluir Alvo 🗑️")],
-            [KeyboardButton(text="Editar Configurações ⚙️"), KeyboardButton(text="Forçar Disparo Agora 🚀")],
-            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Configs 🔙")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_dinamico_spam = montar_teclado([
+        [KeyboardButton(text="Adicionar Alvo ➕"), KeyboardButton(text="Excluir Alvo 🗑️")],
+        [KeyboardButton(text="Editar Configurações ⚙️"), KeyboardButton(text="Forçar Disparo Agora 🚀")],
+        [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Configs 🔙")]
+    ])
         
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado_dinamico_spam)
     await oferecer_reativacao(message, alvos, sem_acesso)
@@ -13207,15 +12927,11 @@ async def gerenciar_divulgacao_viral(message: types.Message, state: FSMContext):
         texto += "Nenhum alvo cadastrado no momento.\n"
         
     texto_botao_pausa = "Retomar SPAM ▶️" if dados.get("pausado") else "Pausar SPAM ⏸️"
-    teclado_dinamico_spam_viral = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Adicionar Alvo Viral ➕"), KeyboardButton(text="Excluir Alvo Viral 🗑️")],
-            [KeyboardButton(text="Editar Configs Viral ⚙️"), KeyboardButton(text="Forçar Disparo Viral 🚀")],
-            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Automações 🔙")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_dinamico_spam_viral = montar_teclado([
+        [KeyboardButton(text="Adicionar Alvo Viral ➕"), KeyboardButton(text="Excluir Alvo Viral 🗑️")],
+        [KeyboardButton(text="Editar Configs Viral ⚙️"), KeyboardButton(text="Forçar Disparo Viral 🚀")],
+        [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Automações 🔙")]
+    ])
         
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado_dinamico_spam_viral)
     await oferecer_reativacao(message, alvos, sem_acesso)
@@ -13508,15 +13224,11 @@ async def renderizar_painel_divulgacao(message: types.Message, state: FSMContext
         texto += "Nenhum alvo cadastrado no momento.\n"
 
     texto_botao_pausa = "Retomar Divulgação ▶️" if dados.get("pausado") else "Pausar Divulgação ⏸️"
-    teclado = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Adicionar Alvo SPAM ➕"), KeyboardButton(text="Excluir Alvo SPAM 🗑️")],
-            [KeyboardButton(text="Editar Configs SPAM ⚙️"), KeyboardButton(text="Forçar Disparo SPAM 🚀")],
-            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text=conf["voltar"])]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado = montar_teclado([
+        [KeyboardButton(text="Adicionar Alvo SPAM ➕"), KeyboardButton(text="Excluir Alvo SPAM 🗑️")],
+        [KeyboardButton(text="Editar Configs SPAM ⚙️"), KeyboardButton(text="Forçar Disparo SPAM 🚀")],
+        [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text=conf["voltar"])]
+    ])
 
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado)
     await oferecer_reativacao(message, alvos, sem_acesso)
@@ -13827,14 +13539,10 @@ async def gerenciar_rotina(message: types.Message, state: FSMContext):
             texto += f"   Disparos por Dia: {config['frequencia']}x\n\n"
         
     texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado") else "Pausar Rotinas ⏸️"
-    teclado_dinamico_rotina = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Editar Rotinas ✏️"), KeyboardButton(text="Disparos Manuais 🚀")],
-            [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Configs 🔙")]
-        ],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_dinamico_rotina = montar_teclado([
+        [KeyboardButton(text="Editar Rotinas ✏️"), KeyboardButton(text="Disparos Manuais 🚀")],
+        [KeyboardButton(text=texto_botao_pausa), KeyboardButton(text="Voltar às Configs 🔙")]
+    ])
     
     texto += "Selecione o que deseja gerir abaixo:"
     await message.answer(texto, reply_markup=teclado_dinamico_rotina, parse_mode="HTML")
@@ -13973,16 +13681,12 @@ class GerenciarFilaFluxo(StatesGroup):
     aguardando_posicao_publicar = State()
     aguardando_confirmacao_publicar = State()
 
-teclado_gerenciar_fila = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="Publicar Agora 🚀")],
-        [KeyboardButton(text="Excluir Vídeo 🗑️")],
-        [KeyboardButton(text="Editar Numeração 🔢"), KeyboardButton(text="Mover Posição ↕️")],
-        [KeyboardButton(text="Editar Legenda ✏️"), KeyboardButton(text="Voltar 🔙")]
-    ],
-    resize_keyboard=True,
-    is_persistent=True
-)
+teclado_gerenciar_fila = montar_teclado([
+    [KeyboardButton(text="Publicar Agora 🚀")],
+    [KeyboardButton(text="Excluir Vídeo 🗑️")],
+    [KeyboardButton(text="Editar Numeração 🔢"), KeyboardButton(text="Mover Posição ↕️")],
+    [KeyboardButton(text="Editar Legenda ✏️"), KeyboardButton(text="Voltar 🔙")]
+])
 
 @dp.message(F.text == "Gerenciar Fila 📋", StateFilter("*"))
 async def menu_gerenciar_fila(message: types.Message, state: FSMContext):
@@ -14252,11 +13956,7 @@ async def confirmar_posicao_exclusao_fila(message: types.Message, state: FSMCont
         await state.update_data(posicao_excluir=posicao)
         logger.info(f"🗑️ Fila: Solicitação de exclusão para posição {posicao+1} iniciada. Aguardando confirmação.")
         
-        teclado_confirmacao_exclusao = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="Aprovar Exclusão ✅"), KeyboardButton(text="Cancelar ❌")]],
-            resize_keyboard=True,
-            is_persistent=True
-        )
+        teclado_confirmacao_exclusao = montar_teclado([[KeyboardButton(text="Aprovar Exclusão ✅"), KeyboardButton(text="Cancelar ❌")]])
         
         await message.answer(f"Você selecionou o vídeo na posição <b>{posicao+1}</b>:\n📝 <i>{resumo}...</i>\n\nTem certeza de que deseja excluir este vídeo da fila?", reply_markup=teclado_confirmacao_exclusao, parse_mode="HTML")
         await state.set_state(GerenciarFilaFluxo.aguardando_confirmacao_exclusao)
@@ -14407,7 +14107,7 @@ async def pedir_reordenar_fila(message: types.Message, state: FSMContext):
             botoes.append([KeyboardButton(text=op) for op in opcoes[3:]])
         botoes.append([KeyboardButton(text="Cancelar ❌")])
         
-        teclado_escolha_data = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+        teclado_escolha_data = montar_teclado(botoes)
         
         logger.info("↕️ Fila: Atalho acionado (Apenas 1 vídeo na fila). Pulando perguntas de posição.")
         await message.answer("Como há <b>apenas 1 vídeo pendente</b>, não é necessário escolher posições.\n\nPara quando deseja agendar este vídeo?", reply_markup=teclado_escolha_data, parse_mode="HTML")
@@ -14545,7 +14245,7 @@ async def salvar_nova_posicao_fila(message: types.Message, state: FSMContext):
                     [KeyboardButton(text=label_prev), KeyboardButton(text=label_next)],
                     [KeyboardButton(text="Cancelar ❌")]
                 ]
-                teclado_limiar = ReplyKeyboardMarkup(keyboard=botoes, resize_keyboard=True, is_persistent=True)
+                teclado_limiar = montar_teclado(botoes)
                 
                 texto_pergunta = (
                     f"🤔 <b>Decisão de Limiar</b>\n\n"
@@ -14659,11 +14359,7 @@ async def enviar_confirmacao_reordenar(message: types.Message, state: FSMContext
     else:
         resumo = "Vídeo sem descrição"
 
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar Mudança ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = montar_teclado([[KeyboardButton(text="Aprovar Mudança ✅"), KeyboardButton(text="Cancelar ❌")]])
     
     data = await state.get_data()
     nova_data_adicao = data.get("nova_data_adicao")
@@ -14826,11 +14522,7 @@ async def preparar_publicacao_imediata(message: types.Message, state: FSMContext
         await state.update_data(posicao_publicar=posicao)
         logger.info(f"🚀 Fila: Preparando publicação antecipada para a posição {posicao+1}.")
         
-        teclado_confirmacao_publicar = ReplyKeyboardMarkup(
-            keyboard=[[KeyboardButton(text="Publicar Vídeo 🚀"), KeyboardButton(text="Cancelar ❌")]],
-            resize_keyboard=True,
-            is_persistent=True
-        )
+        teclado_confirmacao_publicar = montar_teclado([[KeyboardButton(text="Publicar Vídeo 🚀"), KeyboardButton(text="Cancelar ❌")]])
         
         await message.answer(f"Você selecionou o vídeo na posição <b>{posicao+1}</b>:\n📝 <i>{resumo}...</i>\n\nTem certeza de que deseja publicar este vídeo agora mesmo e recalcular o restante da fila?", reply_markup=teclado_confirmacao_publicar, parse_mode="HTML")
         await state.set_state(GerenciarFilaFluxo.aguardando_confirmacao_publicar)
@@ -15320,11 +15012,7 @@ async def pedir_confirmacao_toggle(message: types.Message, state: FSMContext):
     await state.update_data(acao_moderador_pub=acao)
 
     texto_botao = "Confirmar Pausa ✅" if acao == "pausar" else "Confirmar Retomada ✅"
-    teclado_confirmacao = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text=texto_botao), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True,
-        is_persistent=True
-    )
+    teclado_confirmacao = teclado_com_cancelar(texto_botao)
 
     texto = (
         f"⚠️ Tem certeza de que deseja <b>{'PAUSAR' if acao == 'pausar' else 'RETOMAR'}</b> a moderação automática de vídeos neste grupo?\n\n"
@@ -15436,14 +15124,12 @@ async def gerenciar_rotina_publico(message: types.Message, state: FSMContext):
     texto += f"🔹 <b>Promo Central de Achadinhos 🏪</b>\n   Janela: {config_ach['inicio']}h às {config_ach['fim']}h | {config_ach['frequencia']}x/dia\n\n"
     
     texto_botao_pausa = "Retomar Rotinas ▶️" if dados.get("pausado_publico") else "Pausar Rotinas ⏸️"
-    teclado = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Editar Rotinas ✏️"), KeyboardButton(text="Disparos Manuais 🚀")],
-            [KeyboardButton(text="Gerenciar Alvos de Postagem 🎯")],
-            [KeyboardButton(text=texto_botao_pausa)],
-            [KeyboardButton(text="Voltar às Automações do Público 🔙")]
-        ], resize_keyboard=True, is_persistent=True
-    )
+    teclado = montar_teclado([
+        [KeyboardButton(text="Editar Rotinas ✏️"), KeyboardButton(text="Disparos Manuais 🚀")],
+        [KeyboardButton(text="Gerenciar Alvos de Postagem 🎯")],
+        [KeyboardButton(text=texto_botao_pausa)],
+        [KeyboardButton(text="Voltar às Automações do Público 🔙")]
+    ])
     await message.answer(texto, reply_markup=teclado, parse_mode="HTML")
     await state.update_data(menu_origem="publico")
     await state.set_state(ConfigRotina.menu_principal)
@@ -15459,12 +15145,10 @@ async def menu_edicao_grupo_publico(message: types.Message, state: FSMContext):
     """Tópicos de Moderação: escolha entre o tópico de escuta e o de postagem."""
     logger.info("⚙️ Acessando submenu modular de configuração de tópicos.")
     
-    teclado = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="Editar Tópico de Escuta 💬"), KeyboardButton(text="Editar Tópico de Postagem 📤")],
-            [KeyboardButton(text="Voltar às Configurações 🔙")]
-        ], resize_keyboard=True, is_persistent=True
-    )
+    teclado = montar_teclado([
+        [KeyboardButton(text="Editar Tópico de Escuta 💬"), KeyboardButton(text="Editar Tópico de Postagem 📤")],
+        [KeyboardButton(text="Voltar às Configurações 🔙")]
+    ])
     
     texto = (
         "💬 <b>Tópicos de Moderação</b>\n\n"
@@ -15607,10 +15291,7 @@ async def receber_novo_valor_grupo(message: types.Message, state: FSMContext):
 
         await state.update_data(novos_topicos_rotina=topicos_finais)
 
-    teclado_conf = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Aprovar ✅"), KeyboardButton(text="Cancelar ❌")]],
-        resize_keyboard=True, is_persistent=True
-    )
+    teclado_conf = teclado_aprovar_cancelar
     await message.answer(texto_conf, parse_mode="HTML", reply_markup=teclado_conf)
     await state.set_state(SubmissaoAdminFluxo.aguardando_confirmacao_grupo)
 
