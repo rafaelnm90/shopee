@@ -27,6 +27,7 @@ import hashlib
 import db
 import json
 import links_shopee
+import videos
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
@@ -476,7 +477,6 @@ CABECALHO_NAVEGADOR = {
 # e uma cartela laranja no fim. O ffmpeg borra a marca e corta a cartela, localmente.
 LIMPAR_VIDEO_SHOPEE = True
 FFMPEG = "ffmpeg"
-FFPROBE = "ffprobe"
 COR_CARTELA_SHOPEE = (238, 77, 45)
 TOLERANCIA_CARTELA = 60
 # Caixa da marca em PROPORÇÃO do quadro (x, y, largura, altura):
@@ -499,19 +499,6 @@ async def _executar(comando, timeout, capturar=True):
     if proc.returncode != 0:
         return None, None, (erro or b"").decode(errors="ignore")[-300:]
     return saida, erro, None
-
-async def _dimensoes_video(caminho):
-    """(largura, altura) do vídeo pelo ffprobe, ou (None, None)."""
-    comando = [FFPROBE, "-v", "error", "-select_streams", "v:0",
-               "-show_entries", "stream=width,height", "-of", "csv=p=0", caminho]
-    saida, _, falha = await _executar(comando, 30)
-    if falha or not saida:
-        return None, None
-    try:
-        largura, altura = saida.decode().strip().split(",")[:2]
-        return int(largura), int(altura)
-    except Exception:
-        return None, None
 
 async def _inicio_cartela_shopee(caminho):
     """Reduz cada quadro a 1 pixel e acha onde começa o bloco laranja FINAL.
@@ -550,7 +537,7 @@ async def limpar_video_shopee(caminho, pasta):
     filtros = []
     # Só borra se o download veio da versão marcada (ver baixar_video_shopee).
     tem_marca = os.path.exists(os.path.join(pasta, "COM_MARCA"))
-    largura, altura = await _dimensoes_video(caminho)
+    largura, altura = await videos.dimensoes(caminho, timeout=30)
     if tem_marca and largura and altura:
         px, py, pw, ph = MARCA_SHOPEE_PROPORCAO
         x, y = max(1, int(largura * px)), max(1, int(altura * py))

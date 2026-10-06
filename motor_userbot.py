@@ -57,6 +57,7 @@ from api_gemini import analisar_video_gemini
 from api_shopee import converter_link_shopee
 from links_shopee import extrair_link_shopee
 import legendas
+from videos import verificar_e_otimizar_video
 
 LIMITE_REGISTROS_HASH = 1000  # hashes de vídeo guardados por contexto na anti-duplicata
 
@@ -197,67 +198,6 @@ def ler_fila_clonagem():
 
 def salvar_fila_clonagem(dados):
     db.salvar_config("fila_clonagem", dados)
-
-async def verificar_e_otimizar_video(caminho_video, relatorio=None):
-    """
-    Inspeciona a resolução física do arquivo.
-    Se for inferior a 720p, realiza o upscaling com FFmpeg em background.
-
-    O ficheiro é substituído NO MESMO CAMINHO (os.replace), por isso o retorno
-    nunca muda e não serve para saber se houve trabalho. Quem precisa saber
-    passa um dict em `relatorio` e recebe relatorio["upscaled"] = True quando o
-    re-encode aconteceu de facto. Chamar sem o dict mantém o comportamento antigo.
-    """
-    if not caminho_video or not os.path.exists(caminho_video): return caminho_video
-    
-    try:
-        logger.info(f"🔎 [Upscaling] Inspecionando resolução física de: {caminho_video}")
-        
-        comando_probe = await asyncio.create_subprocess_exec(
-            "ffprobe", "-v", "error", "-select_streams", "v:0", 
-            "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", caminho_video,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        stdout, _ = await comando_probe.communicate()
-        dimensoes = stdout.decode().strip()
-        
-        if not dimensoes or "x" not in dimensoes:
-            logger.warning("⚠️ [Upscaling] Falha ao ler metadados. Ignorando otimização.")
-            return caminho_video
-            
-        largura, altura = map(int, dimensoes.split("x"))
-        menor_dimensao = min(largura, altura)
-        
-        if menor_dimensao >= 720:
-            logger.info(f"✅ [Upscaling] Qualidade aprovada ({largura}x{altura}). Nenhuma maquiagem necessária.")
-            return caminho_video
-            
-        logger.info(f"🛠️ [Upscaling] Resolução baixa detectada ({largura}x{altura}). Iniciando renderização para 720p...")
-        
-        caminho_temp = f"{caminho_video}_upscaled.mp4"
-        
-        comando_ffmpeg = await asyncio.create_subprocess_exec(
-            "ffmpeg", "-y", "-i", caminho_video, 
-            "-vf", "scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2:color=black", 
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23", "-c:a", "copy", caminho_temp,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-        )
-        await comando_ffmpeg.communicate()
-        
-        
-        if comando_ffmpeg.returncode == 0 and os.path.exists(caminho_temp):
-            os.replace(caminho_temp, caminho_video)
-            if relatorio is not None:
-                relatorio["upscaled"] = True
-            logger.info("✨ [Upscaling] Sucesso! Vídeo re-renderizado para 720x1280 e substituído.")
-        else:
-            logger.error("❌ [Upscaling] Falha na renderização do FFmpeg. Mantendo arquivo original.")
-            if os.path.exists(caminho_temp): os.remove(caminho_temp)
-            
-    except Exception as e:
-        logger.error(f"❌ [Upscaling] Erro na função de otimização: {e}")
-        
-    return caminho_video
 
 def salvar_na_fila_clonagem(caminho_video, link_shopee, chat_origem="Desconhecida", nome_origem=None, msg_id=None):
     """Acrescenta um vídeo capturado pelo Espião à fila de clonagem, ainda não processado."""
