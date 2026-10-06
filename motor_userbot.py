@@ -7,9 +7,9 @@ para a fila de clonagem (configuracoes, chave fila_clonagem) e, em segundo plano
 pede à IA o nome do produto. Quem publica essa fila é o bot_mestre.
 
 Espelhador: para cada rota de espelhos_config.json (origens -> destino), captura o
-vídeo com link da Shopee, converte o link para afiliado e enfileira em
-fila_espelhador.json. Um laço publica cada item no horário sorteado pelo motor_filas,
-respeitando o atraso D+X e o teto diário da rota.
+vídeo com link da Shopee, converte o link para afiliado e enfileira na fila do
+banco (fila_espelhador.py). Um laço publica cada item no horário sorteado pelo
+motor_filas, respeitando o atraso D+X e o teto diário da rota.
 
 Também confere a cada minuto se alvos e rotas continuam acessíveis (status nos
 painéis) e sincroniza os nomes dos tópicos de fórum.
@@ -21,9 +21,6 @@ Anti-duplicata (tabela registros_unicos): o mesmo link no mesmo contexto nas úl
 Posts do próprio sistema (esta conta ou o bot) são ignorados, menos no grupo
 principal @shopee_video_afiliado: lá o bot posta e esses posts são espelhados de
 propósito para outros canais.
-
-O bot_mestre também importa este módulo (via painel_espelhos) só para ler e gravar
-a fila do Espelhador.
 """
 import os
 import json
@@ -58,6 +55,7 @@ from api_shopee import converter_link_shopee
 from links_shopee import extrair_link_shopee
 import legendas
 from videos import verificar_e_otimizar_video
+import fila_espelhador
 
 LIMITE_REGISTROS_HASH = 1000  # hashes de vídeo guardados por contexto na anti-duplicata
 
@@ -373,15 +371,8 @@ def ler_espelhos_config():
     return dados
 
 def ler_fila_espelhador():
-    """Fila do Espelhador (fila_espelhador.json): itens agendados e o histórico do que já saiu."""
-    try:
-        with open("fila_espelhador.json", "r") as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"fila": []}
-
-def salvar_fila_espelhador(dados):
-    salvar_json_atomico("fila_espelhador.json", dados, indent=4)
+    """Fila do Espelhador (fila_espelhador.CHAVE no banco): itens agendados e o histórico do que já saiu."""
+    return fila_espelhador.ler()
 
 # Análise antecipada da fila do Espião: em segundo plano, um vídeo por vez. Fazer na
 # captura causaria rajada de chamadas quando vários canais postam juntos (e é assim
@@ -472,8 +463,10 @@ async def processar_fila_espelhador_loop():
     """
     while True:
         try:
-            fila_dados = ler_fila_espelhador()
-            fila = fila_dados.get("fila", [])
+            fila = ler_fila_espelhador().get("fila", [])
+            # Como cada item estava agora: no fim, o ciclo grava só o que ele mudou, sem
+            # apagar o que a captura ou o painel gravaram enquanto ele publicava.
+            foto = fila_espelhador.fotografar(fila)
             if not fila:
                 await asyncio.sleep(60)
                 continue
@@ -702,8 +695,7 @@ async def processar_fila_espelhador_loop():
                     
             # Grava a fila só se algo mudou (agendamento, publicação ou itens removidos).
             if podou_historico or len(fila) != len(itens_restantes) or houve_agendamento or houve_disparo:
-                fila_dados["fila"] = itens_restantes
-                salvar_fila_espelhador(fila_dados)
+                fila_espelhador.gravar_mudancas(foto, itens_restantes)
             
         except Exception as e:
             logger.error(f"❌ Erro crítico no motor de distribuição do espelhador: {e}")
@@ -874,7 +866,6 @@ async def motor_espelhador_userbot(event):
             logger.warning(f"🚫 [Espelhador] Loop evitado na rota '{nome_rota}'! O ficheiro de vídeo exato já foi postado neste destino.")
             continue
             
-        fila_dados = ler_fila_espelhador()
         item = {
             "id": f"espelho_{int(datetime.now().timestamp())}_{chat_id_str}",
             "chat_origem": chat_id_completo,
@@ -891,8 +882,8 @@ async def motor_espelhador_userbot(event):
             "legenda_ia_pendente": legenda_ia_pendente,
             "data_captura": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
-        fila_dados["fila"].append(item)
-        salvar_fila_espelhador(fila_dados)
+        # Acrescenta direto no banco: o laço de disparo pode estar no meio de um ciclo.
+        fila_espelhador.atualizar(lambda dados, novo=item: dados["fila"].append(novo))
         logger.info(f"📦 [Espelhador] Vídeo enfileirado dinamicamente na rota '{nome_rota}'.")
 
 async def renovar_link_no_disparo(item, texto):
@@ -1357,6 +1348,9 @@ async def main():
     alvos = carregar_alvos()
     logger.info(f"📡 Radar ativo para {len(alvos)} concorrentes.")
     
+    # A fila do Espelhador sai do arquivo para o banco aqui, quando a versão anterior
+    # deste robô já parou: nenhuma gravação velha chega depois da passagem.
+    fila_espelhador.passar_arquivo_para_o_banco()
     asyncio.create_task(processar_fila_espelhador_loop())
     asyncio.create_task(analisar_fila_espiao_loop())
     asyncio.create_task(monitorar_status_alvos())

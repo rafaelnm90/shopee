@@ -5,8 +5,8 @@ Cria, edita e remove as rotas de espelhos_config.json. Cada rota liga várias
 origens (canais/grupos vigiados) a um destino, com janela de horário, atraso D+X,
 modo de distribuição (ordem de chegada ou aleatório), limite diário e lista negra.
 Quem captura e publica é o motor_userbot; este módulo grava a configuração e só
-mexe na fila (fila_espelhador.json) para renomear rota e para reagendar quando o
-D+X muda.
+mexe na fila (fila_espelhador.py, no banco) para renomear rota e para reagendar
+quando o D+X muda.
 
 Origens são texto: "-100123", "-100123:5" (com tópico) ou "@canal". Rotas antigas
 podem ter uma "origem" única em vez da lista "origens"; os handlers aceitam as duas.
@@ -22,7 +22,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from aiogram import Router, Bot, types, F
 from aiogram.fsm.context import FSMContext
-from motor_userbot import ler_fila_espelhador, salvar_fila_espelhador
+import fila_espelhador
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import StateFilter
@@ -146,12 +146,8 @@ def ler_espelhos():
 
 def ler_contador_espelhador(nome_rota):
     """Quantos vídeos da rota ainda esperam publicação (os já publicados não contam)."""
-    try:
-        with open("fila_espelhador.json", "r") as f:
-            dados = json.load(f)
-            return len([item for item in dados.get("fila", []) if item.get("nome_rota") == nome_rota and item.get("processado") not in [True, 1, "true", "True"]])
-    except (FileNotFoundError, json.JSONDecodeError):
-        return 0
+    fila = fila_espelhador.ler().get("fila", [])
+    return len([item for item in fila if item.get("nome_rota") == nome_rota and item.get("processado") not in [True, 1, "true", "True"]])
 
 def salvar_espelhos(dados):
     salvar_json_atomico("espelhos_config.json", dados, indent=4)
@@ -162,15 +158,14 @@ def _renomear_rota_na_fila(nome_antigo, novo_nome):
     pelo nome: sem isto, renomear a rota deixa os vídeos pendentes órfãos (o motor
     não os publica e o relatório de filas os apaga).
     """
+    def renomear(dados):
+        itens = [item for item in dados["fila"] if item.get("nome_rota") == nome_antigo]
+        for item in itens:
+            item["nome_rota"] = novo_nome
+        return len(itens)
+
     try:
-        fila_dados = ler_fila_espelhador()
-        houve_alteracao = False
-        for item in fila_dados.get("fila", []):
-            if item.get("nome_rota") == nome_antigo:
-                item["nome_rota"] = novo_nome
-                houve_alteracao = True
-        if houve_alteracao:
-            salvar_fila_espelhador(fila_dados)
+        if fila_espelhador.atualizar(renomear):
             logger.info("🔄 Fila de espelhamento sincronizada com o novo nome da rota.")
     except Exception as e:
         logger.error(f"❌ Erro ao sincronizar a fila de espelhamento após mudança de nome: {e}")
@@ -1562,14 +1557,15 @@ async def confirmar_edicao_dias(message: types.Message, state: FSMContext):
     if intervalo_antigo != intervalo:
         try:
             nome_rota = dados["rotas"][indice]["nome"]
-            fila_dados = ler_fila_espelhador()
-            houve_reset = False
-            for item in fila_dados.get("fila", []):
-                if item.get("nome_rota") == nome_rota and not item.get("processado"):
+
+            def desagendar(fila_dados):
+                itens = [item for item in fila_dados["fila"]
+                         if item.get("nome_rota") == nome_rota and not item.get("processado")]
+                for item in itens:
                     item["horario_disparo"] = ""
-                    houve_reset = True
-            if houve_reset:
-                salvar_fila_espelhador(fila_dados)
+                return len(itens)
+
+            if fila_espelhador.atualizar(desagendar):
                 await message.answer(f"⚠️ <b>Gatilho de Recálculo Acionado!</b>\nComo a defasagem da rota '{nome_rota}' mudou, os horários pendentes foram resetados para reorganização.", parse_mode="HTML")
         except Exception as e:
             logger.error(f"❌ Erro ao resetar fila_espelhador após mudança de dias: {e}")

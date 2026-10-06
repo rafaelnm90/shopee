@@ -37,6 +37,7 @@ Módulos de apoio (não são serviços):
 - `links_shopee.py`: acha link da Shopee em texto e mensagem (`primeiro_link`, `extrair_link_shopee`, `codigo_do_link_curto`), igual em todos os robôs. Nunca escrever outra receita de link: o `tests/test_links_shopee.py` barra cópia. O que se repete entre robôs vai para um módulo assim (DECISOES.md, Código e manutenção).
 - `legendas.py`: a legenda dos posts de vídeo (`legenda_da_ia`, `legenda_so_link`, `legenda_sem_nome`, com o nome escapado no HTML), o pedido de nome e hashtags à IA (`PROMPT_NOME_E_HASHTAGS`, com o emoji no fim do nome em todos os robôs) e a leitura do nome de volta (`nome_da_legenda`, usada pelo assistente da Shopee Vídeo). O `tests/test_legendas.py` barra cópia da lista de hashtags ou do prompt.
 - `videos.py`: arquivo de vídeo tratado igual em todos os robôs: `dimensoes` (ffprobe) e `verificar_e_otimizar_video` (vídeo abaixo de 720 px re-renderizado em 720x1280 no mesmo caminho). O `tests/test_videos.py` barra cópia.
+- `fila_espelhador.py`: a fila do Espelhador no banco, gravada sem um robô apagar o que o outro gravou (detalhes em "Dados"). O `motor_userbot` passa o antigo `fila_espelhador.json` para o banco ao ligar; o `tests/test_fila_espelhador.py` barra quem voltar a usar o arquivo.
 - `backup_dados.py`: backup diário (03:40, pelo bot_mestre) do banco, das sessões, dos JSON e do `.env` em `~/backups`, ficam 7. O `/status` mostra a idade do último.
 - Ferramentas: `validar_deploy.py`, `testar_chaves.py`, `inventario.py`, `avisar_rafael.py` (aviso no privado pelo bot, usado pelo `avisar.yml`), `servicos_afetados.py` (o deploy pergunta a ele quem reiniciar), `faxina_servidor.py` (tira tabelas, chaves e arquivos sem uso, guardando cópia antes) `android_virtual.py` (o Android virtual do robô da Shopee Vídeo: Redroid em Docker, adb só em 127.0.0.1), `tela_android.py` (a tela desse Android no navegador, por 30 min, com o link só no privado do Rafael; o botão "Enviar app" instala um app baixado no celular dele, e há botões, com confirmação, para fechar os apps, reiniciar o Android e resetar de fábrica) e `postador_shopee_video.py` (explora as telas do app da Shopee nesse Android, mostrando a forma delas no log, e nunca toca em Postar). Desde 05/10/2026 o Android está apagado e desligado, e esses três ficam parados: a Shopee Vídeo é feita pelo modo assistente. O `roteiro_robo_shopee_video.md` diz onde o robô parou e como retomar.
 - `diretrizes_shopee_video.md`: resumo das diretrizes da Shopee Vídeo que o robô dela sempre segue; a IA recebe o resumo com cada vídeo.
@@ -78,7 +79,7 @@ arquivo cresce: `grep -n "^# --- " bot_mestre.py`. Os blocos grandes usam
   - A fila do Espião (`fila_clonagem`) é uma chave de `configuracoes`.
   - `erros_logs`.
   - Pool: `contas_telegram`, `funcoes_contas` e `atividade_contas`.
-- O Espelhador de canais ainda usa arquivos: `espelhos_config.json` e `fila_espelhador.json`.
+- A fila do Espelhador de canais é a chave `espelhador_fila` de `configuracoes`, sempre pelo `fila_espelhador.py` (`ler`, `atualizar`, e `fotografar` + `gravar_mudancas` para quem mexe nela por muito tempo). As rotas ainda ficam no arquivo `espelhos_config.json`.
 - Nada disso está no git: o `.gitignore` cobre `*.db`, `*.json`, `*.session` e `.env`. No servidor, o backup diário (`backup_dados.py`) guarda essas coisas em `~/backups`.
 
 ## Armadilhas conhecidas

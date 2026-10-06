@@ -25,11 +25,11 @@ PASTA_PROJETO = os.path.dirname(os.path.abspath(__file__))
 DESTINO = os.path.expanduser("~/backups/antigos")
 
 TABELAS_SEM_USO = (
-    "fila_espelhador", "fila_espiao",                  # a fila do Espelhador é arquivo; a do Espião, chave
+    "fila_espelhador", "fila_espiao",                  # as duas filas moram em chaves de configuracoes
     "financeiro_despesas", "financeiro_saques", "historico_financeiro", "pedidos_financeiro",
     "mensagens_topico",                                # a faxina do Baixador não guarda mais mensagens
 )
-CHAVES_SEM_USO = ("fila_espelhador",)                  # cópia velha da fila, que mora no fila_espelhador.json
+CHAVES_SEM_USO = ("fila_espelhador",)                  # cópia velha da fila; a de agora é fila_espelhador.CHAVE
 ARQUIVOS_VELHOS = (
     "banco_dados.bak-2026-08-31.db", "banco_dados.bak-2026-08-31.dbsqlite3",
     "banco_dados.bak-2026-09-01-noite.db", "backup_dados.tar.gz",
