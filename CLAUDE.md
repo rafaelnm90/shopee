@@ -166,10 +166,11 @@ python3 -m pytest tests -q --ordem aleatoria --relogio 23:59:30   # como o CI
   - em cada chamada, ler também a seção "Links sem conversão" do último `diagnostico.yml` (às 8h, a janela de 12 h; nas outras, a de 3 h). Havendo link que saiu sem a marcação de afiliado, investigar o motivo pelo robô e pelo tipo/código, consertar e subir sozinho quando o conserto é de código; quando depende do Rafael (ex.: chaves da Shopee recusadas), dizer exatamente o quê. Falha passageira que as 3 tentativas do robô não venceram e não se repete não pede conserto;
   - havendo algo, continuar de onde parou, seguindo as regras daqui; não havendo, só responder "Nada pendente." (sem aviso no Telegram);
   - chamada que cai sem crédito não roda; a próxima, com crédito, retoma.
-- Pergunta ao Rafael sem resposta: o robô avisa no Telegram.
-  - Ao perguntar, agendar (`send_later`) uma conferência 1 h depois.
-  - Ainda sem resposta: disparar o `avisar.yml` (`run_workflow`, entrada `assunto` em poucas palavras e sem dado privado, `link` = link da sessão). O bot principal manda o aviso no privado dele.
-  - Avisar só entre 8h e 22h (Brasília); fora disso, agendar para as 8h. Repetir no máximo uma vez por dia enquanto a pergunta estiver aberta.
+- Toda pergunta ao Rafael tem de ser respondida: nunca passa despercebida nem expira.
+  - Seletor que some sem resposta: mostrar a mesma pergunta de novo na resposta seguinte.
+  - Pergunta sem resposta entra na lista do lembrete diário e liga a rotina "Cobrar perguntas sem resposta (de hora em hora)" (`update_trigger` `enabled=true`).
+  - A rotina cobra de hora em hora, a qualquer hora (de dia e de noite): dispara o `avisar.yml` (`run_workflow`, entrada `assunto` em poucas palavras e sem dado privado, `link` = link da sessão), e o bot principal avisa no privado dele; depois mostra a pergunta de novo pelo seletor.
+  - Respondida: sai da lista do lembrete; sem nenhuma aberta, a rotina se desliga.
 - Comentários em português explicam o porquê e a regra de negócio.
   - Sem histórico ("antes era…", "corrigido em…"): isso fica no git.
   - Sem emoji nos comentários. Nos textos que o bot mostra, pode.
