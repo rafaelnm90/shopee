@@ -345,21 +345,22 @@ def _linha_do_produto(produto):
 def montar_mensagem(textos, produtos, link):
     """
     A mensagem do privado, em passos na ordem de fazer, com título e comentário para
-    copiar com um toque. Favoritar o produto vem primeiro: abrir o link dele no meio da
-    postagem tira o Rafael da tela de postar, e ele perde o que já fez.
+    copiar com um toque: salvar o vídeo, favoritar o produto, postar e comentar.
+    Favoritar vem antes de postar: abrir o link do produto no meio da postagem tira o
+    Rafael da tela de postar, e ele perde o que já fez.
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     if len(produtos) == 1:
-        favoritar = (f"1️⃣ <b>Favorite o produto</b> ❤️\n{_linha_do_produto(produtos[0])}\n"
+        favoritar = (f"2️⃣ <b>Favorite o produto</b> ❤️\n{_linha_do_produto(produtos[0])}\n"
                      f"🔗 {html.escape(link)}\nAbra, toque no coração e volte aqui.")
         adicionar = "Adicionar Produto → Minhas Curtidas → o produto → Postar."
     elif produtos:
         linhas = [f"{i}. {_linha_do_produto(p)}" for i, p in enumerate(produtos, 1)]
-        favoritar = ("1️⃣ <b>Favorite os produtos</b> ❤️\n" + "\n".join(linhas)
+        favoritar = ("2️⃣ <b>Favorite os produtos</b> ❤️\n" + "\n".join(linhas)
                      + f"\n🔗 {html.escape(link)}\nAbra, toque no coração e volte aqui.")
         adicionar = "Adicionar Produto → Minhas Curtidas → os produtos, na ordem da lista → Postar."
     else:
-        favoritar = ("1️⃣ <b>Favorite os produtos</b> ❤️\n"
+        favoritar = ("2️⃣ <b>Favorite os produtos</b> ❤️\n"
                      "Abra o link e, em Ver Produtos, favorite só os que o criador vinculou ao vídeo "
                      "(nunca os de Você Também Pode Gostar). Depois volte aqui.\n"
                      f"🔗 {html.escape(link)}")
@@ -371,8 +372,8 @@ def montar_mensagem(textos, produtos, link):
     return (
         "🎬 <b>Postagem pronta para a Shopee Vídeo</b>\n"
         "Siga na ordem: abrir o link no meio da postagem faz a Shopee perder o que você já fez.\n\n"
+        "1️⃣ <b>Salve o vídeo</b> acima na galeria.\n\n"
         f"{favoritar}\n\n"
-        "2️⃣ <b>Salve o vídeo</b> acima na galeria.\n\n"
         "3️⃣ <b>Poste:</b> Shopee → Eu → Criadores e Afiliados → Perfil em Shopee Vídeo → "
         "Postar vídeo → escolha o vídeo → Próximo.\n"
         f"📝 <b>Título</b> ({tamanho} caracteres{curto}; toque para copiar):\n"
