@@ -7,8 +7,8 @@ Para cada vídeo:
   ainda tem o arquivo e não foi mandado;
 - a IA (Gemini) assiste ao vídeo com o prompt do Gem "Shopee Vídeo" do Rafael,
   adaptado, e com o resumo das diretrizes (diretrizes_shopee_video.md): devolve o
-  título (130 a 150 caracteres, sem marca), o texto do comentário e se viu violação.
-  Vídeo com violação não é mandado; o Rafael recebe o motivo;
+  título (130 a 150 caracteres, sem marca; curto, é pedido mais uma vez), o texto do
+  comentário e se viu violação. Vídeo com violação não é mandado; o Rafael recebe o motivo;
 - os produtos saem do link do post: link de produto vira nome, preço e comissão pela
   API de afiliado; link de vídeo da Shopee Vídeo não diz os produtos, e o Rafael os
   vê no próprio vídeo.
@@ -313,33 +313,73 @@ async def gerar_textos(arquivo, nome_produto=""):
     return ler_resposta(await api_gemini.analisar_video_gemini(arquivo, montar_prompt(nome_produto)))
 
 
+async def textos_do_video(arquivo, nome_produto=""):
+    """
+    O texto da IA para o vídeo. Título abaixo de TITULO_MIN: pede mais uma vez e fica com
+    o título mais longo; se continuar curto, vai assim mesmo, e a mensagem mostra o
+    tamanho para o Rafael completar se quiser. Violação na segunda resposta também vale.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    textos = await gerar_textos(arquivo, nome_produto)
+    if not textos or textos["violacao"] or not textos["titulo"] or len(textos["titulo"]) >= TITULO_MIN:
+        return textos
+    logger.info(f"🔁 [Shopee Vídeo] Título com {len(textos['titulo'])} caracteres "
+                f"(mínimo {TITULO_MIN}); pedindo de novo à IA.")
+    outra = await gerar_textos(arquivo, nome_produto)
+    if outra and outra["titulo"] and (outra["violacao"] or len(outra["titulo"]) > len(textos["titulo"])):
+        return outra
+    return textos
+
+
 # --- Mensagem ---
 
 def _reais(valor):
     return f"R$ {valor:.2f}".replace(".", ",")
 
 
+def _linha_do_produto(produto):
+    return (f"{html.escape(produto['nome'])}: {_reais(produto['preco'])}, "
+            f"comissão {produto['comissao']:.1f}%").replace(".0%", "%")
+
+
 def montar_mensagem(textos, produtos, link):
-    """A mensagem do privado: título e comentário para copiar com um toque, produtos e o caminho."""
-    if produtos:
-        linhas = [f"{i}. {html.escape(p['nome'])}: {_reais(p['preco'])}, comissão {p['comissao']:.1f}%".replace(".0%", "%")
-                  for i, p in enumerate(produtos, 1)]
-        bloco_produtos = ("🛒 <b>Produto para vincular</b> (em Adicionar Produto, busque pelo nome):\n"
-                          + "\n".join(linhas) + f"\n🔗 {html.escape(link)}")
+    """
+    A mensagem do privado, em passos na ordem de fazer, com título e comentário para
+    copiar com um toque. Favoritar o produto vem primeiro: abrir o link dele no meio da
+    postagem tira o Rafael da tela de postar, e ele perde o que já fez.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    if len(produtos) == 1:
+        favoritar = (f"1️⃣ <b>Favorite o produto</b> ❤️\n{_linha_do_produto(produtos[0])}\n"
+                     f"🔗 {html.escape(link)}\nAbra, toque no coração e volte aqui.")
+        adicionar = "Adicionar Produto → Minhas Curtidas → o produto → Postar."
+    elif produtos:
+        linhas = [f"{i}. {_linha_do_produto(p)}" for i, p in enumerate(produtos, 1)]
+        favoritar = ("1️⃣ <b>Favorite os produtos</b> ❤️\n" + "\n".join(linhas)
+                     + f"\n🔗 {html.escape(link)}\nAbra, toque no coração e volte aqui.")
+        adicionar = "Adicionar Produto → Minhas Curtidas → os produtos, na ordem da lista → Postar."
     else:
-        bloco_produtos = ("🛒 <b>Produtos:</b> abra o link e veja os que o criador vinculou ao vídeo. "
-                          "Adicione só eles: o de menor preço primeiro; no empate, o de maior comissão.\n"
-                          f"🔗 {html.escape(link)}")
+        favoritar = ("1️⃣ <b>Favorite os produtos</b> ❤️\n"
+                     "Abra o link e, em Ver Produtos, favorite só os que o criador vinculou ao vídeo "
+                     "(nunca os de Você Também Pode Gostar). Depois volte aqui.\n"
+                     f"🔗 {html.escape(link)}")
+        adicionar = ("Adicionar Produto → Minhas Curtidas → os produtos: o de menor preço primeiro; "
+                     "no empate, o de maior comissão → Postar.")
+
+    tamanho = len(textos["titulo"])
+    curto = f", abaixo de {TITULO_MIN} ⚠️" if tamanho < TITULO_MIN else ""
     return (
-        "🎬 <b>Postagem pronta para a Shopee Vídeo</b>\n\n"
-        f"📝 <b>Título</b> ({len(textos['titulo'])} caracteres; toque para copiar):\n"
-        f"<code>{html.escape(textos['titulo'])}</code>\n\n"
-        f"{bloco_produtos}\n\n"
-        "💬 <b>Comentário</b> (depois de postar; toque para copiar):\n"
-        f"<code>{html.escape(textos['comentario'])}</code>\n\n"
-        "<b>Como postar:</b> salve o vídeo acima → Shopee → Eu → Criadores e Afiliados → "
-        "Perfil em Shopee Vídeo → Postar vídeo → escolha o vídeo → Próximo → Adicionar Produto → "
-        "cole o título → Postar."
+        "🎬 <b>Postagem pronta para a Shopee Vídeo</b>\n"
+        "Siga na ordem: abrir o link no meio da postagem faz a Shopee perder o que você já fez.\n\n"
+        f"{favoritar}\n\n"
+        "2️⃣ <b>Salve o vídeo</b> acima na galeria.\n\n"
+        "3️⃣ <b>Poste:</b> Shopee → Eu → Criadores e Afiliados → Perfil em Shopee Vídeo → "
+        "Postar vídeo → escolha o vídeo → Próximo.\n"
+        f"📝 <b>Título</b> ({tamanho} caracteres{curto}; toque para copiar):\n"
+        f"<code>{html.escape(textos['titulo'])}</code>\n"
+        f"{adicionar}\n\n"
+        "4️⃣ <b>Depois de postar, comente</b> no vídeo (toque para copiar):\n"
+        f"<code>{html.escape(textos['comentario'])}</code>"
     )
 
 
@@ -365,7 +405,7 @@ async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO):
 async def _preparar_e_enviar(bot, admin_id, video, agora):
     from aiogram.types import FSInputFile
 
-    textos = await gerar_textos(video["arquivo"], video["nome"])
+    textos = await textos_do_video(video["arquivo"], video["nome"])
     if not textos or not textos["titulo"]:
         registrar(video["id"], "erro", "a IA não respondeu", agora)
         return "a IA não gerou o texto; o vídeo foi pulado"
@@ -377,7 +417,7 @@ async def _preparar_e_enviar(bot, admin_id, video, agora):
         return "vídeo pulado por possível violação das diretrizes"
     produtos, link = await produtos_do_link(video["link"])
     await bot.send_video(admin_id, video=FSInputFile(video["arquivo"]), supports_streaming=True,
-                         caption="🎬 Vídeo para a Shopee Vídeo: salve e poste pelo seu celular.")
+                         caption="🎬 Vídeo para a Shopee Vídeo: siga os passos da mensagem abaixo.")
     await bot.send_message(admin_id, montar_mensagem(textos, produtos, link), parse_mode="HTML",
                            disable_web_page_preview=True)
     registrar(video["id"], "enviado", "", agora)
