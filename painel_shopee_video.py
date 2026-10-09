@@ -263,7 +263,7 @@ async def enviar_agora_handler(message: types.Message, state: FSMContext):
         await message.answer("⏳ Já estou preparando uma postagem. Ela chega em instantes.")
         return
     logger.info("📤 Shopee Vídeo: Enviar 1 Agora.")
-    await message.answer("⏳ Preparando a postagem: a IA assiste ao vídeo e escreve o texto (1 a 2 min).")
+    await message.answer("⏳ Preparando a postagem: a IA assiste ao vídeo e escreve o texto (1 a 2 min; até 4 se ela precisar refazer o título).")
     resultado = await enviar_um(ler_config()["fonte"])
     if resultado != "postagem mandada no seu privado":
         await message.answer(f"⚠️ Não mandei: {resultado}.")

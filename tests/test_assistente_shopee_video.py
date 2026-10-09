@@ -173,14 +173,77 @@ def test_mensagem_com_produto_tem_titulo_e_comentario_para_copiar():
                                 "https://s.shopee.com.br/abc")
     assert "<code>Copo &lt;Térmico&gt; 🧊 #copo</code>" in texto
     assert "<code>Gelado &amp; bom #casa</code>" in texto
-    assert "1. Copo &amp; Tampa: R$ 19,90, comissão 8%" in texto
+    assert "Copo &amp; Tampa: R$ 19,90, comissão 8%" in texto
     assert "https://s.shopee.com.br/abc" in texto and "Postar vídeo" in texto
+    assert "Minhas Curtidas" in texto and "busque pelo nome" not in texto
     assert len(texto) <= 4096
+
+
+def test_mensagem_vem_em_passos_com_o_produto_antes_da_postagem():
+    # Abrir o link do produto no meio da postagem faz a Shopee perder o que já foi feito.
+    for produtos in ([{"nome": "Copo", "preco": 19.9, "comissao": 8.0}], []):
+        texto = asv.montar_mensagem(TEXTOS, produtos, "https://s.shopee.com.br/abc")
+        passos = ["1️⃣ <b>Favorite", "https://s.shopee.com.br/abc", "2️⃣ <b>Salve o vídeo", "3️⃣ <b>Poste",
+                  "<code>Copo &lt;Térmico", "Minhas Curtidas", "4️⃣ <b>Depois de postar", "<code>Gelado"]
+        posicoes = [texto.index(p) for p in passos]
+        assert posicoes == sorted(posicoes), produtos
 
 
 def test_mensagem_de_video_manda_ver_os_produtos_do_criador():
     texto = asv.montar_mensagem(TEXTOS, [], "https://s.shopee.com.br/v")
     assert "os que o criador vinculou" in texto and "menor preço primeiro" in texto
+
+
+def test_mensagem_mostra_o_titulo_curto():
+    curto = asv.montar_mensagem(TEXTOS, [], "https://s.shopee.com.br/v")
+    assert f"({len(TEXTOS['titulo'])} caracteres, abaixo de {asv.TITULO_MIN} ⚠️;" in curto
+    certo = asv.montar_mensagem({**TEXTOS, "titulo": "x" * asv.TITULO_MIN}, [], "https://s.shopee.com.br/v")
+    assert f"({asv.TITULO_MIN} caracteres;" in certo and "abaixo de" not in certo
+
+
+# --- Título fora do tamanho ---
+
+def _respostas(monkeypatch, *respostas):
+    chamadas = []
+
+    async def gerar(arquivo, nome=""):
+        chamadas.append(arquivo)
+        return respostas[len(chamadas) - 1]
+
+    monkeypatch.setattr(asv, "gerar_textos", gerar)
+    return chamadas
+
+
+def _com_titulo(tamanho, **extra):
+    return {**TEXTOS, "titulo": "t" * tamanho, **extra}
+
+
+def test_titulo_no_tamanho_pede_a_ia_uma_vez_so(monkeypatch):
+    chamadas = _respostas(monkeypatch, _com_titulo(asv.TITULO_MIN))
+    assert rodar(asv.textos_do_video("v.mp4"))["titulo"] == "t" * asv.TITULO_MIN
+    assert len(chamadas) == 1
+
+
+def test_titulo_curto_pede_de_novo_e_fica_com_o_mais_longo(monkeypatch):
+    chamadas = _respostas(monkeypatch, _com_titulo(115), _com_titulo(140))
+    assert len(rodar(asv.textos_do_video("v.mp4"))["titulo"]) == 140 and len(chamadas) == 2
+
+    _respostas(monkeypatch, _com_titulo(120), _com_titulo(100))
+    assert len(rodar(asv.textos_do_video("v.mp4"))["titulo"]) == 120
+
+    _respostas(monkeypatch, _com_titulo(120), None)                       # a IA não respondeu de novo
+    assert len(rodar(asv.textos_do_video("v.mp4"))["titulo"]) == 120
+
+
+def test_titulo_curto_com_violacao_na_segunda_resposta_pula(monkeypatch):
+    _respostas(monkeypatch, _com_titulo(115), _com_titulo(100, violacao=True, motivo="marca"))
+    assert rodar(asv.textos_do_video("v.mp4"))["violacao"] is True
+
+
+def test_violacao_ou_ia_sem_resposta_nao_pede_de_novo(monkeypatch):
+    for primeira in (None, _com_titulo(50, violacao=True)):
+        chamadas = _respostas(monkeypatch, primeira)
+        assert rodar(asv.textos_do_video("v.mp4")) == primeira and len(chamadas) == 1
 
 
 # --- Envio ---
@@ -213,6 +276,7 @@ def test_envio_manda_video_e_mensagem_e_registra(monkeypatch):
     bot = Bot()
     assert rodar(asv.preparar_e_enviar(bot, 42, _as("14:00"))) == "postagem mandada no seu privado"
     assert bot.videos == [(42, "novo.mp4")] and "Postagem pronta" in bot.mensagens[0][1]
+    assert "1️⃣ <b>Favorite o produto" in bot.mensagens[0][1]
     assert asv.enviados_hoje(_as("15:00")) == 1 and asv.proximo_video() is None
 
 
