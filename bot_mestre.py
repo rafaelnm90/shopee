@@ -1132,6 +1132,24 @@ async def obter_credito_repost():
         logger.warning(f"⚠️ Não foi possível obter o @ do administrador ({e}). Usando menção por ID.")
         return f"<a href='tg://user?id={ADMIN_ID}'>Administrador</a>"
 
+
+def legenda_repost_publico(user_mention, nome_produto, link, legenda_original):
+    """
+    A legenda do vídeo dos Autorais repostado no Grupo Público (automático e Disparar
+    Repost Autoral): o crédito, o nome, o link e as hashtags de categoria que a IA
+    escolheu para o vídeo nos Autorais. Sem hashtags na legenda original, sai sem.
+    Decisão do Rafael: DECISOES.md, Grupo Público e Achadinhos.
+    """
+    legenda = (
+        f"👤 Vídeo enviado por: {user_mention}\n\n"
+        f"<b>{nome_produto}</b>\n\n"
+        f"🔗 <b>Link do Produto:</b>\n{link}"
+    )
+    hashtags = legendas.hashtags_da_legenda(legenda_original)
+    if hashtags:
+        legenda += f"\n\n<i>{html_escape(hashtags)}</i>"
+    return legenda
+
 # --- Pausa programada ---
 def ler_pausa_programada():
     padrao = {"ativa": False, "data_retorno": None, "servicos_pausados": []}
@@ -4622,12 +4640,7 @@ async def motor_repost_publico_step():
 
                 user_mention = await obter_credito_repost()
 
-                legenda_final = (
-                    f"👤 Vídeo enviado por: {user_mention}\n\n"
-                    f"<b>{nome_produto}</b>\n\n"
-                    f"🔗 <b>Link do Produto:</b>\n{link_shopee}\n\n"
-                    f"<i>#Recomendado #Shopee</i>"
-                )
+                legenda_final = legenda_repost_publico(user_mention, nome_produto, link_shopee, legenda_original)
 
                 # Última checagem da pausa: o config lido no topo pode ter até 2 minutos, e o
                 # upload ainda leva alguns segundos.
@@ -9311,12 +9324,7 @@ async def manual_repost_autoral(message: types.Message):
     match_item = re.search(r'📦\s*Item:\s*([^\n<]+)', legenda_original)
     nome_produto = match_item.group(1).strip() if match_item else "Produto Exclusivo"
 
-    legenda_final = (
-        f"👤 Vídeo enviado por: {user_mention}\n\n"
-        f"<b>{nome_produto}</b>\n\n"
-        f"🔗 <b>Link do Produto:</b>\n{link_shopee}\n\n"
-        f"<i>#Recomendado #Shopee</i>"
-    )
+    legenda_final = legenda_repost_publico(user_mention, nome_produto, link_shopee, legenda_original)
     
     try:
         # Origem: repost_origem ou, sem ela, o destino dos Autorais.

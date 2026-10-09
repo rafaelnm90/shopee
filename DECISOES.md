@@ -113,6 +113,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 ## Grupo Público e Achadinhos
 
 - **03/10/2026:** "Zerar Filas e Tarefas" apaga de `temp/` só o que não está em fila nenhuma, para não quebrar as filas que não foram limpas.
+- **09/10/2026:** os vídeos dos Autorais repostados no Grupo Público (o automático e o botão Disparar Repost Autoral ♻️) levam as hashtags de categoria que a IA escolheu para o vídeo nos Autorais, como nos outros robôs e nos vídeos dos membros, no lugar do "#Recomendado #Shopee" fixo. Sem hashtag na legenda original, o repost sai sem.
 
 ## Buscador de produtos
 
