@@ -180,10 +180,11 @@ def test_mensagem_com_produto_tem_titulo_e_comentario_para_copiar():
 
 
 def test_mensagem_vem_em_passos_com_o_produto_antes_da_postagem():
-    # Abrir o link do produto no meio da postagem faz a Shopee perder o que já foi feito.
+    # Salvar o vídeo e depois favoritar: abrir o link do produto no meio da postagem faz
+    # a Shopee perder o que já foi feito.
     for produtos in ([{"nome": "Copo", "preco": 19.9, "comissao": 8.0}], []):
         texto = asv.montar_mensagem(TEXTOS, produtos, "https://s.shopee.com.br/abc")
-        passos = ["1️⃣ <b>Favorite", "https://s.shopee.com.br/abc", "2️⃣ <b>Salve o vídeo", "3️⃣ <b>Poste",
+        passos = ["1️⃣ <b>Salve o vídeo", "2️⃣ <b>Favorite", "https://s.shopee.com.br/abc", "3️⃣ <b>Poste",
                   "<code>Copo &lt;Térmico", "Minhas Curtidas", "4️⃣ <b>Depois de postar", "<code>Gelado"]
         posicoes = [texto.index(p) for p in passos]
         assert posicoes == sorted(posicoes), produtos
@@ -276,7 +277,7 @@ def test_envio_manda_video_e_mensagem_e_registra(monkeypatch):
     bot = Bot()
     assert rodar(asv.preparar_e_enviar(bot, 42, _as("14:00"))) == "postagem mandada no seu privado"
     assert bot.videos == [(42, "novo.mp4")] and "Postagem pronta" in bot.mensagens[0][1]
-    assert "1️⃣ <b>Favorite o produto" in bot.mensagens[0][1]
+    assert "2️⃣ <b>Favorite o produto" in bot.mensagens[0][1]
     assert asv.enviados_hoje(_as("15:00")) == 1 and asv.proximo_video() is None
 
 
