@@ -1,13 +1,15 @@
 """
 Arquivo de vídeo tratado do mesmo jeito em todos os robôs: medir a resolução
-(ffprobe) e subir para 720p o vídeo pequeno antes de postar. Usado pelo Espião e
-pelo Espelhador (motor_userbot), pelos Autorais (espelhador_videos_autorais) e pelo
-Baixador (downloader_bot, só a medição).
+(ffprobe), subir para 720p o vídeo pequeno antes de postar e a assinatura SHA-256 que
+reconhece o mesmo vídeo. Usado pelo Espião e pelo Espelhador (motor_userbot), pelos
+Autorais (espelhador_videos_autorais, pelo repetidos_publico) e pelo Baixador
+(downloader_bot, só a medição).
 
 Um lugar só para que um ajuste no tratamento valha para todos os canais
 (DECISOES.md, Código e manutenção).
 """
 import asyncio
+import hashlib
 import logging
 import os
 
@@ -93,3 +95,16 @@ async def verificar_e_otimizar_video(caminho_video, relatorio=None):
         logger.error(f"❌ [Upscaling] Erro na função de otimização: {e}")
 
     return caminho_video
+
+
+def calcular_hash_video(caminho_arquivo):
+    """SHA-256 do arquivo (identifica o mesmo vídeo em qualquer canal), ou None se não der para ler."""
+    hash_sha256 = hashlib.sha256()
+    try:
+        with open(caminho_arquivo, "rb") as f:
+            for bloco in iter(lambda: f.read(65536), b""):
+                hash_sha256.update(bloco)
+        return hash_sha256.hexdigest()
+    except Exception as e:
+        logger.error(f"❌ Erro na leitura física para calcular hash do ficheiro {caminho_arquivo}: {e}")
+        return None

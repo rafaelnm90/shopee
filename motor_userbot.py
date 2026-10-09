@@ -27,7 +27,6 @@ import json
 import asyncio
 import re
 from datetime import datetime, timedelta
-import hashlib
 from telethon import utils
 from telethon import TelegramClient, events
 from telethon.errors import FloodWaitError
@@ -54,7 +53,7 @@ from api_gemini import analisar_video_gemini
 from api_shopee import converter_link_shopee
 from links_shopee import extrair_link_shopee
 import legendas
-from videos import verificar_e_otimizar_video
+from videos import verificar_e_otimizar_video, calcular_hash_video
 import fila_espelhador
 
 LIMITE_REGISTROS_HASH = 1000  # hashes de vídeo guardados por contexto na anti-duplicata
@@ -146,21 +145,6 @@ def verificar_e_registrar_espelho(link_shopee, contexto="global"):
     except Exception as e:
         logger.error(f"❌ Erro ao verificar espelho no SQLite: {e}")
         return False
-
-def calcular_hash_video(caminho_arquivo):
-    """SHA-256 do arquivo (identifica o mesmo vídeo em qualquer canal), ou None se não der para ler."""
-    hash_sha256 = hashlib.sha256()
-    try:
-        logger.debug(f"🔍 A calcular a assinatura digital (SHA-256) do ficheiro: {caminho_arquivo}...")
-        with open(caminho_arquivo, "rb") as f:
-            for bloco in iter(lambda: f.read(4096), b""):
-                hash_sha256.update(bloco)
-        resultado = hash_sha256.hexdigest()
-        logger.debug(f"✅ Assinatura única identificada: {resultado[:10]}...")
-        return resultado
-    except Exception as e:
-        logger.error(f"❌ Erro na leitura física para calcular hash do ficheiro {caminho_arquivo}: {e}")
-        return None
 
 def verificar_e_registrar_hash(hash_video, contexto="global"):
     """

@@ -1,4 +1,4 @@
-"""videos: medir a resolução e subir para 720p do mesmo jeito em todos os robôs."""
+"""videos: medir a resolução, subir para 720p e a assinatura do arquivo do mesmo jeito em todos os robôs."""
 import asyncio
 import glob
 import os
@@ -88,11 +88,22 @@ def test_ffmpeg_falhou_mantem_o_original(monkeypatch, tmp_path):
     assert rodar(videos.verificar_e_otimizar_video(str(tmp_path / "sumiu.mp4"))) == str(tmp_path / "sumiu.mp4")
 
 
+def test_assinatura_igual_para_o_mesmo_conteudo(tmp_path):
+    a, b, c = tmp_path / "a.mp4", tmp_path / "b.mp4", tmp_path / "c.mp4"
+    a.write_bytes(b"video" * 50000)
+    b.write_bytes(b"video" * 50000)
+    c.write_bytes(b"outro" * 50000)
+    assert videos.calcular_hash_video(str(a)) == videos.calcular_hash_video(str(b))
+    assert videos.calcular_hash_video(str(a)) != videos.calcular_hash_video(str(c))
+    assert videos.calcular_hash_video(str(tmp_path / "sumiu.mp4")) is None
+
+
 def test_os_robos_usam_o_modulo():
     import downloader_bot
     import espelhador_videos_autorais as autorais
     import motor_userbot
     assert motor_userbot.verificar_e_otimizar_video is videos.verificar_e_otimizar_video
+    assert motor_userbot.calcular_hash_video is videos.calcular_hash_video
     assert autorais.verificar_e_otimizar_video is videos.verificar_e_otimizar_video
     assert downloader_bot.videos is videos
 
@@ -104,7 +115,8 @@ def test_nenhum_arquivo_tem_a_propria_receita_de_video():
         if os.path.basename(arquivo) == "videos.py":
             continue
         texto = open(arquivo, encoding="utf-8").read()
-        for receita in ('"ffprobe"', "scale=720:1280", "def verificar_e_otimizar_video"):
+        for receita in ('"ffprobe"', "scale=720:1280", "def verificar_e_otimizar_video",
+                        "def calcular_hash_video"):
             if receita in texto:
                 copias.append((os.path.basename(arquivo), receita))
     assert copias == []
