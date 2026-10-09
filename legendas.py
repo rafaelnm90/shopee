@@ -91,3 +91,16 @@ def nome_da_legenda(legenda):
     achado = re.search(r"<b>(.*?)</b>", legenda or "")
     nome = html.unescape(re.sub(r"<[^>]+>", "", achado.group(1))).strip() if achado else ""
     return "" if nome in ("", NOME_SEM_IA) else nome
+
+
+def hashtags_da_legenda(legenda):
+    """
+    As hashtags que a legenda já leva (o itálico de montar_legenda), em texto puro e
+    separadas por espaço; vazio se não houver. O repost dos Autorais no Grupo Público
+    repete as categorias que a IA escolheu para o vídeo (DECISOES.md, Grupo Público e Achadinhos).
+    """
+    for trecho in reversed(re.findall(r"<i>(.*?)</i>", legenda or "", re.S)):
+        tags = [p for p in html.unescape(re.sub(r"<[^>]+>", "", trecho)).split() if p.startswith("#")]
+        if tags:
+            return " ".join(tags)
+    return ""

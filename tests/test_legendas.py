@@ -41,6 +41,24 @@ def test_nome_generico_sem_ia_conta_como_sem_nome():
     assert legendas.nome_da_legenda(None) == ""
 
 
+def test_hashtags_lidas_de_volta_da_legenda():
+    autoral = "📦 Item: Copo 🥤\n\n" + legendas.legenda_da_ia("Copo 🥤\n#CasaEDecoracao #Saude", LINK)
+    assert legendas.hashtags_da_legenda(autoral) == "#CasaEDecoracao #Saude"
+    assert legendas.hashtags_da_legenda(legendas.legenda_da_ia("Copo & Cia 🥤\n#Beleza", LINK)) == "#Beleza"
+    for sem in (legendas.legenda_sem_nome(LINK), legendas.legenda_so_link(LINK), "", None, "<i>Oferta</i>"):
+        assert legendas.hashtags_da_legenda(sem) == "", sem
+
+
+def test_repost_dos_autorais_no_publico_leva_as_hashtags_do_video(bm):
+    autoral = "📦 Item: Kit Soul Care 🧴\n\n" + legendas.legenda_da_ia("Kit Soul Care 🧴\n#Beleza #Saude", LINK)
+    legenda = bm.legenda_repost_publico("@Rafaelnm", "Kit Soul Care 🧴", LINK, autoral)
+    assert legenda == (f"👤 Vídeo enviado por: @Rafaelnm\n\n<b>Kit Soul Care 🧴</b>\n\n"
+                       f"🔗 <b>Link do Produto:</b>\n{LINK}\n\n<i>#Beleza #Saude</i>")
+    sem = bm.legenda_repost_publico("@Rafaelnm", "Kit", LINK, legendas.legenda_sem_nome(LINK))
+    assert sem.endswith(LINK) and "#" not in sem
+    assert "#Recomendado" not in open(os.path.join(PASTA, "bot_mestre.py"), encoding="utf-8").read()
+
+
 def test_prompt_pede_o_emoji_no_fim_e_traz_todas_as_hashtags():
     prompt = legendas.PROMPT_NOME_E_HASHTAGS
     assert "emoji correspondente no final (Exemplo: Tênis Casual Feminino 👟)" in prompt
