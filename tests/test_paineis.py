@@ -1,4 +1,5 @@
-"""Painéis do bot: SPAM, Cancelar das rotinas e painel do buscador."""
+"""Painéis do bot: SPAM, Cancelar das rotinas, painel do buscador e painel de ofertas do Grupo Público."""
+import logging
 from types import SimpleNamespace
 
 from conftest import rodar
@@ -53,3 +54,56 @@ def test_painel_do_buscador_fica_um_so(bm, Msg, monkeypatch):
     rodar(bm.reenviar_painel_busca())
     rodar(bm.publicar_painel_busca(Msg("/painelbusca")))
     assert len(publicados) - len(apagados) == 1
+
+
+def _painel_ofertas(bm, monkeypatch, recusa_apagar=False):
+    publicados, apagados = [], []
+
+    async def send_message(*a, **k):
+        publicados.append(len(publicados) + 100)
+        return SimpleNamespace(message_id=publicados[-1])
+
+    async def delete_message(chat_id=None, message_id=None):
+        if recusa_apagar:
+            raise RuntimeError("message can't be deleted")
+        apagados.append(message_id)
+
+    async def pin(*a, **k):
+        pass
+    monkeypatch.setattr(bm.bot, "send_message", send_message)
+    monkeypatch.setattr(bm.bot, "delete_message", delete_message)
+    monkeypatch.setattr(bm.bot, "pin_chat_message", pin)
+    bm.salvar_submissao_config({**bm.ler_submissao_config(), "grupo_id": -1001, "topico_envio": 7})
+    return publicados, apagados
+
+
+def test_painel_de_ofertas_renova_com_24_h_para_o_anterior_poder_sair(bm, monkeypatch):
+    # O Telegram só deixa o bot apagar mensagem com menos de 48 h.
+    publicados, apagados = _painel_ofertas(bm, monkeypatch)
+    rodar(bm.reenviar_botao_ofertas())
+    criado = bm.datetime.strptime(bm.ler_submissao_config()["msg_botao_ofertas_em"], "%Y-%m-%d %H:%M:%S")
+    criado = criado.replace(tzinfo=bm.fuso_horario)
+
+    rodar(bm.renovar_botao_ofertas_velho(criado + bm.timedelta(hours=23)))
+    assert publicados == [100]
+    rodar(bm.renovar_botao_ofertas_velho(criado + bm.timedelta(hours=24)))
+    assert publicados == [100, 101] and apagados == [100]
+    assert bm.ler_submissao_config()["msg_botao_ofertas"] == 101
+
+
+def test_painel_sem_hora_renova_e_sem_painel_nao_cria(bm, monkeypatch):
+    publicados, _ = _painel_ofertas(bm, monkeypatch)
+    rodar(bm.renovar_botao_ofertas_velho())
+    assert publicados == []                                     # nenhum painel no tópico ainda
+    bm.salvar_submissao_config({**bm.ler_submissao_config(), "msg_botao_ofertas": 55})
+    rodar(bm.renovar_botao_ofertas_velho())                     # painel de antes da renovação
+    assert publicados == [100]
+
+
+def test_painel_antigo_que_nao_sai_fica_no_log(bm, monkeypatch, caplog):
+    _painel_ofertas(bm, monkeypatch, recusa_apagar=True)
+    bm.salvar_submissao_config({**bm.ler_submissao_config(), "msg_botao_ofertas": 55})
+    with caplog.at_level(logging.WARNING):
+        rodar(bm.reenviar_botao_ofertas())
+    assert any("Não consegui apagar o painel anterior (ID 55)" in r.getMessage() for r in caplog.records)
+    assert bm.ler_submissao_config()["msg_botao_ofertas"] == 100
