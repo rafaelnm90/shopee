@@ -15355,6 +15355,11 @@ TEXTO_BOTAO_OFERTAS = (
 # embaixo e o anterior, apagado.
 _lock_botao_ofertas = asyncio.Lock()
 
+# O Telegram só deixa o bot apagar mensagem com menos de 48 h: o painel é renovado
+# quando faz 24 h, para o anterior sempre poder sair e ficar um só no tópico.
+# Decisão do Rafael: DECISOES.md, Grupo Público e Achadinhos.
+IDADE_RENOVAR_PAINEL = timedelta(hours=24)
+
 async def reenviar_botao_ofertas():
     """Recria o painel fixo de submissão no fim do tópico de escuta e o fixa."""
     async with _lock_botao_ofertas:
@@ -15389,10 +15394,14 @@ async def reenviar_botao_ofertas():
         # Só apaga o anterior depois que o novo está no ar: o tópico nunca fica sem painel
         msg_antiga = config.get("msg_botao_ofertas")
         if msg_antiga and msg_antiga != msg.message_id:
-            try: await bot.delete_message(chat_id=grupo_id, message_id=int(msg_antiga))
-            except Exception: pass
+            try:
+                await bot.delete_message(chat_id=grupo_id, message_id=int(msg_antiga))
+            except Exception as e:
+                logger.warning(f"⚠️ [Painel Fixo] Não consegui apagar o painel anterior (ID {msg_antiga}): "
+                               f"{type(e).__name__}. Ele fica duplicado no tópico até ser apagado à mão.")
 
         config["msg_botao_ofertas"] = msg.message_id
+        config["msg_botao_ofertas_em"] = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
         salvar_submissao_config(config)
 
         # Fixa sem notificação. O pin do anterior cai sozinho quando ele é apagado.
@@ -15406,6 +15415,22 @@ async def reenviar_botao_ofertas():
             logger.warning(f"⚠️ [Painel Fixo] Não consegui fixar: {e}")
 
         logger.info(f"📌 [Painel Fixo] Painel de submissão recriado no fim do tópico (ID {msg.message_id}).")
+
+async def renovar_botao_ofertas_velho(agora=None):
+    """Job de hora em hora: recria o painel de submissão que já fez IDADE_RENOVAR_PAINEL."""
+    config = ler_submissao_config()
+    if not config.get("msg_botao_ofertas"):
+        return
+    agora = agora or datetime.now(fuso_horario)
+    try:
+        criado = datetime.strptime(config.get("msg_botao_ofertas_em") or "", "%Y-%m-%d %H:%M:%S")
+        criado = criado.replace(tzinfo=fuso_horario)
+    except ValueError:
+        criado = None  # painel de antes da renovação: idade desconhecida, renova já
+    if criado and agora - criado < IDADE_RENOVAR_PAINEL:
+        return
+    logger.info("🔁 [Painel Fixo] Painel de submissão com 24 h: renovando para o anterior poder ser apagado.")
+    await reenviar_botao_ofertas()
 
 @dp.message(F.pinned_message)
 async def limpar_aviso_fixacao(message: types.Message):
@@ -17041,6 +17066,11 @@ async def main():
 
     # Monitor de saúde (avisa o admin no privado)
     scheduler.add_job(monitor_saude, 'interval', hours=1, id='monitor_saude_loop', replace_existing=True)
+
+    # Painel de submissão do Grupo Público: renovado com 24 h, antes do limite de 48 h
+    # do Telegram para o bot apagar o anterior
+    scheduler.add_job(renovar_botao_ofertas_velho, 'interval', hours=1, id='renovar_painel_ofertas',
+                      replace_existing=True)
 
     # Backup diário do banco, sessões e .env (e um já, se o último estiver velho)
     scheduler.add_job(backup_diario, 'cron', hour=3, minute=40, timezone=FUSO_STR,
