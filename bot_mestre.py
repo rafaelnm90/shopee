@@ -61,6 +61,7 @@ import painel_shopee_video  # painel do robô da Shopee Vídeo (Outros Canais)
 import painel_acessos  # Acessos do Servidor: Tailscale e Oracle (Opções do Servidor)
 import pool_contas  # contas dos userbots (quem espelha, quem reposta)
 import blacklist_captura  # de quem os userbots nunca capturam
+import repetidos_publico  # vídeo que já foi ao Grupo Público não vai de novo
 import alvos_sem_acesso  # alvos da divulgação a que a conta perdeu o acesso
 import backup_dados  # backup diário do banco, sessões e .env em ~/backups
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
@@ -9293,9 +9294,11 @@ async def manual_repost_autoral(message: types.Message):
         conexao.row_factory = sqlite3.Row
         cursor = conexao.cursor()
         
-        # Só vídeo que ainda não foi para o Público.
+        # Só vídeo que ainda não foi para o Público, nem por outro item com o mesmo vídeo
+        # (a origem postou de novo): DECISOES.md, Grupo Público e Achadinhos.
         cursor.execute("SELECT * FROM fila_autorais WHERE processado = 1 AND repostado_publico = 0 ORDER BY id_unico DESC LIMIT 30")
-        autorais_recentes = cursor.fetchall()
+        autorais_recentes = [v for v in cursor.fetchall()
+                             if not repetidos_publico.ja_foi(repetidos_publico.chaves_da_coluna(dict(v).get("chaves_video")))]
     except Exception as e:
         await msg_status.edit_text(f"❌ Erro ao ler banco de autorais: {e}")
         return
@@ -9354,6 +9357,7 @@ async def manual_repost_autoral(message: types.Message):
         agora_str = datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute("UPDATE fila_autorais SET repostado_publico = 1, data_repost_publico = ? WHERE id_unico = ?", (agora_str, id_unico))
         conexao.commit()
+        repetidos_publico.registrar(repetidos_publico.chaves_da_coluna(dict(video_sorteado).get("chaves_video")), id_unico)
         
         await msg_status.edit_text("✅ <b>Repost Autoral realizado!</b>\nUm vídeo foi puxado e enviado formatado para o Tópico de Postagem do Grupo Público.", parse_mode="HTML")
         logger.info(f"✅ Disparo de repost manual executado com sucesso: {nome_produto}")

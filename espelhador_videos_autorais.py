@@ -23,6 +23,7 @@ parceiros/<id>/, e também são publicados pelo bot_mestre.
 """
 
 import os
+import json
 import time
 import asyncio
 import random
@@ -54,6 +55,7 @@ import legendas
 from videos import verificar_e_otimizar_video
 from motor_filas import calcular_horarios_distribuicao, faixa_de_config, sortear_teto_do_dia
 import blacklist_captura  # de quem este robô nunca captura
+import repetidos_publico  # vídeo que já foi ao Grupo Público não vai de novo
 import pool_contas  # quem captura e quem reposta
 
 logger = configurar_logs(__name__)
@@ -168,15 +170,7 @@ def ler_fila_retorno():
             conexao.commit()
         except sqlite3.OperationalError:
             pass
-        # Autor do vídeo original, gravado na captura para a lista negra ser
-        # reconferida na hora de repostar (autor bloqueado depois de o vídeo entrar
-        # na fila). Itens antigos ficam com NULL: autor desconhecido.
-        for _coluna, _tipo in (("autor_id", "INTEGER"), ("autor_username", "TEXT")):
-            try:
-                cursor.execute(f"ALTER TABLE fila_autorais ADD COLUMN {_coluna} {_tipo}")
-                conexao.commit()
-            except sqlite3.OperationalError:
-                pass
+        _garantir_colunas_novas(cursor, conexao)
 
         cursor.execute("SELECT * FROM fila_autorais")
         linhas = cursor.fetchall()
@@ -196,12 +190,30 @@ def ler_fila_retorno():
                 "data_postagem": dict(linha).get("data_postagem") or "",
                 "msg_postada_id": dict(linha).get("msg_postada_id"),
                 "autor_id": dict(linha).get("autor_id"),
-                "autor_username": dict(linha).get("autor_username") or ""
+                "autor_username": dict(linha).get("autor_username") or "",
+                "chaves_video": dict(linha).get("chaves_video") or ""
             })
         return {"fila": fila}
     except Exception as e:
         logger.error(f"❌ Erro ao ler fila_autorais do SQLite: {e}")
         return {"fila": []}
+
+def _garantir_colunas_novas(cursor, conexao):
+    """
+    Colunas que a fila_autorais ganhou depois. autor_*: o autor do vídeo original, para
+    a lista negra ser reconferida na hora de repostar (itens antigos: NULL, autor
+    desconhecido). repostado_publico e data_repost_publico: o botão Disparar Repost
+    Autoral do bot_mestre marca o que já foi ao Grupo Público. chaves_video: o que
+    reconhece o vídeo (repetidos_publico).
+    """
+    for coluna, tipo in (("autor_id", "INTEGER"), ("autor_username", "TEXT"),
+                         ("repostado_publico", "INTEGER DEFAULT 0"), ("data_repost_publico", "TEXT"),
+                         ("chaves_video", "TEXT")):
+        try:
+            cursor.execute(f"ALTER TABLE fila_autorais ADD COLUMN {coluna} {tipo}")
+            conexao.commit()
+        except sqlite3.OperationalError:
+            pass
 
 def salvar_fila_retorno(dados):
     """
@@ -210,7 +222,9 @@ def salvar_fila_retorno(dados):
     processado, data_postagem e msg_postada_id de quem já está no banco são relidos
     aqui e mantidos: o loop de retorno grava esses campos com UPDATE logo depois de
     publicar, e regravar a partir de um retrato antigo devolveria o vídeo a
-    "pendente" (seria publicado de novo). horario_disparo vem do retrato, que é quem
+    "pendente" (seria publicado de novo). O mesmo vale para repostado_publico e
+    data_repost_publico, que o botão Disparar Repost Autoral grava: sem isso o vídeo
+    voltaria a poder ir ao Grupo Público outra vez. horario_disparo vem do retrato, que é quem
     sorteia os horários; o do banco só vale quando o retrato não tem.
     """
     # É a transação de escrita mais longa do sistema: a conexão fecha no finally
@@ -220,9 +234,11 @@ def salvar_fila_retorno(dados):
         conexao = db.conectar()
         cursor = conexao.cursor()
         
+        _garantir_colunas_novas(cursor, conexao)
         status_atual = {}
         try:
-            cursor.execute("SELECT id_unico, horario_disparo, processado, data_postagem, msg_postada_id FROM fila_autorais")
+            cursor.execute("SELECT id_unico, horario_disparo, processado, data_postagem, msg_postada_id, "
+                           "repostado_publico, data_repost_publico FROM fila_autorais")
             for linha in cursor.fetchall():
                 status_atual[linha[0]] = linha[1:]
         except Exception:
@@ -232,16 +248,17 @@ def salvar_fila_retorno(dados):
         for item in dados.get("fila", []):
             gravado = status_atual.get(item.get("id_unico"))
             if gravado:
-                horario_bd, processado_final, postagem_final, msg_post_final = gravado
+                horario_bd, processado_final, postagem_final, msg_post_final, repost_pub, data_repost_pub = gravado
             else:
                 horario_bd, processado_final, postagem_final = "", (1 if item.get("processado") else 0), item.get("data_postagem", "")
                 msg_post_final = item.get("msg_postada_id")
+                repost_pub, data_repost_pub = 0, None
 
             horario_final = item.get("horario_disparo") or horario_bd or ""
 
             cursor.execute('''
-                INSERT INTO fila_autorais (id_unico, msg_id_destino, legenda, caminho_arquivo, data_captura, data_alvo, horario_disparo, processado, data_postagem, msg_postada_id, autor_id, autor_username)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO fila_autorais (id_unico, msg_id_destino, legenda, caminho_arquivo, data_captura, data_alvo, horario_disparo, processado, data_postagem, msg_postada_id, autor_id, autor_username, repostado_publico, data_repost_publico, chaves_video)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (
                 item.get("id_unico"),
                 item.get("msg_id_destino"),
@@ -254,7 +271,10 @@ def salvar_fila_retorno(dados):
                 postagem_final,
                 msg_post_final,
                 item.get("autor_id"),
-                item.get("autor_username") or ""
+                item.get("autor_username") or "",
+                repost_pub or 0,
+                data_repost_pub,
+                item.get("chaves_video") or ""
             ))
         conexao.commit()
         conexao.close()
@@ -1268,6 +1288,13 @@ async def interceptar_e_espelhar(event):
 
         logger.info("📥 Iniciando o download do vídeo...")
         caminho_video = await event.download_media(file="temp/temp_espelho_isolado_")
+        # Antes de re-renderizar: o arquivo como chegou é o que se repete se a origem
+        # mandar o mesmo vídeo de novo.
+        try:
+            doc_id_video = event.media.document.id
+        except Exception:
+            doc_id_video = None
+        chaves_video = repetidos_publico.chaves_do_video(doc_id_video, caminho_video)
         caminho_video = await verificar_e_otimizar_video(caminho_video)
         
         if caminho_video:
@@ -1374,7 +1401,8 @@ async def interceptar_e_espelhar(event):
                         "processado": False,
                         # Autor original, para reconferir a lista negra na hora de repostar.
                         "autor_id": autor_id_evento,
-                        "autor_username": autor_user_evento or ""
+                        "autor_username": autor_user_evento or "",
+                        "chaves_video": json.dumps(chaves_video)
                     })
                     salvar_fila_retorno(fila_dados)
                     logger.info(f"🎯 [Sorteio Autorais] Vídeo nº {total_ofertas} do dia SORTEADO para retorno em {data_alvo}.")
@@ -1389,7 +1417,13 @@ async def interceptar_e_espelhar(event):
                 # contador, fila e regras próprias (submissao_config).
                 try:
                     config_pub = db.ler_config("submissao_config", {})
-                    if config_pub.get("ativo") and not config_pub.get("repost_pausado", False):
+                    ativo_pub = config_pub.get("ativo") and not config_pub.get("repost_pausado", False)
+                    if ativo_pub and repetidos_publico.ja_foi(chaves_video):
+                        # O mesmo vídeo de novo na origem: não volta ao Grupo Público
+                        # (DECISOES.md, Grupo Público e Achadinhos).
+                        logger.info("♻️ [Sorteio Público] Este vídeo já foi para o Grupo Público. Fica de fora do sorteio.")
+                        ativo_pub = False
+                    if ativo_pub:
                         dias_publico = config_pub.get("repost_dias", 15)
                         data_alvo_pub = (agora + timedelta(days=dias_publico)).strftime("%Y-%m-%d")
 
@@ -1421,8 +1455,10 @@ async def interceptar_e_espelhar(event):
                             legenda_publico = f"📦 Item: {nome_produto_pub}\n\n{legenda_final}"
 
                             if item_descartado_pub:
-                                # Devolve a vaga: o antigo sai da fila do Público
+                                # Devolve a vaga: o antigo sai da fila do Público, e o vídeo
+                                # dele, que nunca chegou ao grupo, pode voltar a concorrer.
                                 fila_pub["fila"] = [v for v in fila_pub.get("fila", []) if v.get("id_unico") != item_descartado_pub.get("id_unico")]
+                                repetidos_publico.liberar(item_descartado_pub.get("id_unico"))
                                 logger.info(f"🔄 [Sorteio Público] Vídeo nº {total_ofertas_pub} do dia tomou a vaga de {item_descartado_pub.get('id_unico')}.")
 
                             fila_pub.setdefault("fila", []).append({
@@ -1436,6 +1472,7 @@ async def interceptar_e_espelhar(event):
                                 "data_postagem": ""
                             })
                             salvar_fila_publico(fila_pub)
+                            repetidos_publico.registrar(chaves_video, id_unico_pub)
 
                             # Reserva para o dono, por arquivo e por produto: parceiros
                             # consultam a reserva antes de capturar.
