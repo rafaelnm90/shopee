@@ -31,6 +31,7 @@ import alvos_sem_acesso
 import faxina_baixador
 import faxina_viral  # vídeos que já não servem saem do Acervo Viral
 import registro_admins  # quem administra os grupos e canais do Rafael, conferido todo dia
+import registro_privado  # a cópia desse registro no repositório privado do GitHub
 
 # Importar fuso já trava o processo no horário de Brasília.
 from fuso import configurar_logs
@@ -622,6 +623,7 @@ async def main():
     scheduler.add_job(registro_admins.conferir, 'cron', hour=registro_admins.HORA_CONFERENCIA[0],
                       minute=registro_admins.HORA_CONFERENCIA[1], args=[client])
     asyncio.create_task(registro_admins.conferir_se_atrasado(client))
+    asyncio.create_task(registro_privado.loop_publicacao())
     
     scheduler.start()
     logger.info("🤖 Sistema automático rodando. Pressione Ctrl+C para parar.")

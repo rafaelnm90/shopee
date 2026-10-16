@@ -17155,6 +17155,7 @@ async def main():
     scheduler.add_job(avisar_alvos_sem_acesso, 'interval', minutes=2, id='alvos_sem_acesso_loop', replace_existing=True)
     # O registro dos administradores é montado pelo divulgacao_canal; o aviso sai daqui.
     scheduler.add_job(painel_admins.avisar_mudancas, 'interval', minutes=15, id='admins_mudancas_loop', replace_existing=True)
+    scheduler.add_job(painel_admins.avisar_registro_privado, 'interval', minutes=15, id='registro_privado_aviso', replace_existing=True)
 
     # Motor de publicação dos parceiros
     scheduler.add_job(motor_parceiros_step, 'interval', minutes=2, id='motor_parceiros_loop', replace_existing=True)
