@@ -12,7 +12,8 @@ comentário) e manda no privado do Rafael, que posta pelo próprio celular
 Também liga o envio no agendador (a cada 5 min vê se chegou a hora) e tem o botão
 "Enviar 1 Agora 📤", que manda uma postagem na hora, mesmo pausado. O botão
 "Celular do Robô 📱" liga o servidor ao celular guardado do Rafael (celular_robo.py),
-onde o robô vai postar: o código de pareamento chega só aqui, no privado.
+onde o robô vai postar: o código de pareamento chega só aqui, no privado. Lá, o
+"Passo a Passo 📖" ensina a deixar o celular pronto de novo depois de um reset.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
 import asyncio
@@ -156,6 +157,7 @@ BOTAO_CELULAR = "Celular do Robô 📱"
 BOTAO_PAREAR = "Parear Celular 🔗"
 BOTAO_RECONECTAR = "Reconectar Celular 🔄"
 BOTAO_VOLTAR = "Voltar à Shopee Vídeo 🔙"
+BOTAO_PASSO_A_PASSO = "Passo a Passo 📖"
 
 def teclado_painel(config):
     pausa = "Retomar Robô ▶️" if config["pausado"] else "Pausar Robô ⏸️"
@@ -303,7 +305,43 @@ async def pedir_fonte(message: types.Message, state: FSMContext):
 
 def teclado_celular():
     return montar_teclado([[KeyboardButton(text=BOTAO_PAREAR), KeyboardButton(text=BOTAO_RECONECTAR)],
+                           [KeyboardButton(text=BOTAO_PASSO_A_PASSO)],
                            [KeyboardButton(text=BOTAO_VOLTAR)]])
+
+
+# Para o Rafael refazer tudo sozinho depois de resetar o celular, talvez meses depois:
+# frases curtas, na ordem, com os nomes das telas como aparecem no Motorola.
+PASSO_A_PASSO = (
+    "📖 <b>Passo a passo do celular do robô</b>\n"
+    "Para quando você resetar o celular guardado (ou trocar de celular). Faça na ordem.\n\n"
+    "🔁 <b>Só reiniciou ou desligou a depuração?</b> Não precisa de tudo: ligue a "
+    f"<b>Depuração por Wi-Fi</b> (passo 6) e toque em <b>{BOTAO_RECONECTAR}</b>.\n\n"
+    "<b>Parte 1: no celular guardado</b>\n"
+    "1️⃣ <b>Ligar:</b> configure o celular, entre na sua conta Google e conecte no <b>Wi-Fi de casa</b>. "
+    "Deixe no carregador.\n"
+    "2️⃣ <b>Apps:</b> na Play Store, instale a <b>Shopee</b> e o <b>Tailscale</b>.\n"
+    "3️⃣ <b>Shopee:</b> entre na sua conta pessoal (a de sempre). Se pedir verificação, resolva com a mão. "
+    "Depois: Configurações → Apps → Shopee → Bateria → <b>Sem restrições</b>.\n"
+    "4️⃣ <b>Tailscale:</b> entre com a mesma conta de antes e ligue (aceite o pedido de VPN). "
+    "Depois: Configurações → Rede e Internet → VPN → ⚙️ do Tailscale → ligue <b>VPN sempre ativa</b>.\n"
+    "5️⃣ <b>Modo desenvolvedor:</b> Configurações → Sobre o telefone → toque <b>7 vezes</b> em "
+    "\"Número da versão\" (ele pede o PIN).\n"
+    "6️⃣ <b>Opções do desenvolvedor:</b> ligue <b>Manter ativado</b> e <b>Depuração por Wi-Fi</b> "
+    "(toque em Permitir).\n"
+    "💡 Não achou uma opção? Use a lupa 🔍 no alto das Configurações e digite o nome dela.\n\n"
+    "<b>Parte 2: aqui no bot</b>\n"
+    f"7️⃣ Toque em <b>{BOTAO_PAREAR}</b>.\n"
+    "8️⃣ No celular: Depuração por Wi-Fi → <b>Parear o dispositivo com um código de pareamento</b>. "
+    "Deixe a janela aberta.\n"
+    "9️⃣ Mande aqui os números da janela: o <b>código de 6 dígitos</b>, um espaço e a <b>porta</b> "
+    "(o número depois dos dois-pontos). Ex.: <code>123456 37123</code>. Eu apago a sua mensagem.\n"
+    "🔟 Depois eu peço a <b>porta da conexão</b>: na tela da Depuração por Wi-Fi, em \"Endereço IP e "
+    "porta\", é o número depois dos dois-pontos (outro número). Mande só ele.\n"
+    "✅ Pronto quando aparecer <b>Celular conectado</b>. Avise o Claude.\n\n"
+    "<b>Uma vez só, no navegador</b> (para o celular não sair da rede depois de uns meses): "
+    "login.tailscale.com → Machines → o celular → ⋯ → <b>Disable key expiry</b>. Se o celular antigo "
+    "ainda aparecer na lista, pode tirar (⋯ → Remove)."
+)
 
 
 def _data_curta(texto):
@@ -333,7 +371,8 @@ async def texto_celular():
             f"🔗 Pareado: {pareado}\n"
             f"📶 Conexão: {conexao}\n\n"
             f"<i>Parear é uma vez só. {BOTAO_RECONECTAR} é para depois que o celular reiniciar ou a "
-            "Depuração por Wi-Fi for desligada, porque a porta muda.</i>")
+            "Depuração por Wi-Fi for desligada, porque a porta muda. Resetou o celular? Toque em "
+            f"{BOTAO_PASSO_A_PASSO}.</i>")
 
 
 async def mostrar_celular(message: types.Message, state: FSMContext):
@@ -346,6 +385,13 @@ async def celular_handler(message: types.Message, state: FSMContext):
     if not _admin(message): return
     logger.info("📱 Acessando o celular do robô.")
     await mostrar_celular(message, state)
+
+
+@router.message(F.text == BOTAO_PASSO_A_PASSO, StateFilter("*"))
+async def passo_a_passo_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await state.set_state(ShopeeVideoFluxo.celular)
+    await message.answer(PASSO_A_PASSO, parse_mode="HTML", reply_markup=teclado_celular())
 
 
 @router.message(F.text == BOTAO_VOLTAR, StateFilter("*"))

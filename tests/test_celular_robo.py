@@ -160,3 +160,18 @@ def test_explorar_no_celular_desconectado_nem_comeca(cr, monkeypatch, capsys):
     import postador_shopee_video as ps
     assert ps.explorar("tela", celular=True) is None
     assert "Celular do Robô" in capsys.readouterr().out
+
+
+def test_passo_a_passo_para_refazer_depois_do_reset(bm, cr, monkeypatch, Msg, Est):
+    sv = _painel(bm, cr, monkeypatch, _rede(("moto-g100", "android", True, IP)))
+    tela = Msg("Celular do Robô 📱")
+    rodar(sv.celular_handler(tela, Est()))
+    assert "Passo a Passo 📖" in _textos(sv.teclado_celular()) and "Resetou o celular?" in tela.saidas[0]
+    msg, est = Msg("Passo a Passo 📖"), Est(estado=sv.ShopeeVideoFluxo.aguardando_porta)
+    rodar(sv.passo_a_passo_handler(msg, est))
+    texto = msg.saidas[0]
+    for trecho in ("Shopee", "Tailscale", "VPN sempre ativa", "7 vezes", "Manter ativado",
+                   "Depuração por Wi-Fi", "Parear Celular 🔗", "Reconectar Celular 🔄", "Disable key expiry"):
+        assert trecho in texto
+    assert len(texto) < 4096                                             # cabe numa mensagem do Telegram
+    assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.celular.state
