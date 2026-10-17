@@ -10,13 +10,16 @@ comentário) e manda no privado do Rafael, que posta pelo próprio celular
 - quantos vídeos por dia: uma faixa (ex.: 5 a 10), sorteada a cada dia;
 - a janela de horário em que os envios se espalham (ex.: das 13h às 22h).
 Também liga o envio no agendador (a cada 5 min vê se chegou a hora) e tem o botão
-"Enviar 1 Agora 📤", que manda uma postagem na hora, mesmo pausado.
+"Enviar 1 Agora 📤", que manda uma postagem na hora, mesmo pausado. O botão
+"Celular do Robô 📱" liga o servidor ao celular guardado do Rafael (celular_robo.py),
+onde o robô vai postar: o código de pareamento chega só aqui, no privado.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
 import asyncio
 import logging
 import re
 from datetime import datetime
+from html import escape as html_escape
 
 from aiogram import Router, Bot, types, F
 from aiogram.filters import StateFilter
@@ -27,6 +30,7 @@ from teclados import (montar_teclado, teclado_com_cancelar, teclado_cancelar,
                       teclado_aprovar_cancelar, teclado_janela_dia_todo)
 
 import assistente_shopee_video as assistente
+import celular_robo
 import db
 from fuso import fuso_horario
 from motor_filas import sortear_teto_do_dia
@@ -86,6 +90,10 @@ class ShopeeVideoFluxo(StatesGroup):
     aguardando_confirmacao_janela = State()
     aguardando_confirmacao_pausa = State()
     aguardando_fonte = State()
+    celular = State()
+    aguardando_escolha_celular = State()
+    aguardando_pareamento = State()
+    aguardando_porta = State()
 
 
 # --- Configuração ---
@@ -144,12 +152,18 @@ def videos_hoje(config, agora=None):
 
 # --- Painel ---
 
+BOTAO_CELULAR = "Celular do Robô 📱"
+BOTAO_PAREAR = "Parear Celular 🔗"
+BOTAO_RECONECTAR = "Reconectar Celular 🔄"
+BOTAO_VOLTAR = "Voltar à Shopee Vídeo 🔙"
+
 def teclado_painel(config):
     pausa = "Retomar Robô ▶️" if config["pausado"] else "Pausar Robô ⏸️"
     return montar_teclado([
         [KeyboardButton(text="Vídeos por Dia 📦"), KeyboardButton(text="Horário de Postagem ⏰")],
         [KeyboardButton(text="Fonte dos Vídeos 🎞️")],
         [KeyboardButton(text=pausa), KeyboardButton(text="Enviar 1 Agora 📤")],
+        [KeyboardButton(text=BOTAO_CELULAR)],
         [KeyboardButton(text="Voltar aos Canais 🔙")],
     ])
 
@@ -282,6 +296,124 @@ async def pedir_fonte(message: types.Message, state: FSMContext):
     await state.set_state(ShopeeVideoFluxo.aguardando_fonte)
 
 
+# --- Celular do robô ---
+# Plano do celular de verdade (roteiro_robo_shopee_video.md, fase 1c): parear uma vez,
+# com o código que só existe enquanto a janela dele está aberta no celular, e
+# reconectar quando a porta muda (o celular reiniciou ou a depuração foi desligada).
+
+def teclado_celular():
+    return montar_teclado([[KeyboardButton(text=BOTAO_PAREAR), KeyboardButton(text=BOTAO_RECONECTAR)],
+                           [KeyboardButton(text=BOTAO_VOLTAR)]])
+
+
+def _data_curta(texto):
+    return f"{texto[8:10]}/{texto[5:7]} às {texto[11:16]}" if texto and len(texto) >= 16 else "?"
+
+
+async def texto_celular():
+    dados = celular_robo.ler()
+    rede = await asyncio.to_thread(celular_robo.celulares_na_rede)
+    conectado = await asyncio.to_thread(celular_robo.conectado) if dados.get("porta") else False
+    if not rede:
+        linha_rede = "❌ nenhum celular (ligue o Tailscale no celular guardado)"
+    else:
+        linha_rede = ", ".join(f"<b>{html_escape(c['nome'])}</b> {'✅ ligado' if c['online'] else '⚠️ fora do ar'}"
+                               for c in rede)
+    pareado = f"✅ em {_data_curta(dados['pareado_em'])}" if dados.get("pareado_em") else "⏳ ainda não"
+    if conectado:
+        conexao = f"✅ conectado ({html_escape(dados.get('modelo') or 'celular')})"
+    elif dados.get("porta"):
+        conexao = f"⚠️ desconectado: toque em {BOTAO_RECONECTAR}"
+    else:
+        conexao = "⏳ ainda não"
+    return ("📱 <b>Celular do Robô</b>\n"
+            "O robô da Shopee Vídeo vai postar pelo seu celular guardado, ligado ao servidor pela "
+            "rede privada (Tailscale).\n\n"
+            f"🌐 Na rede privada: {linha_rede}\n"
+            f"🔗 Pareado: {pareado}\n"
+            f"📶 Conexão: {conexao}\n\n"
+            f"<i>Parear é uma vez só. {BOTAO_RECONECTAR} é para depois que o celular reiniciar ou a "
+            "Depuração por Wi-Fi for desligada, porque a porta muda.</i>")
+
+
+async def mostrar_celular(message: types.Message, state: FSMContext):
+    await state.set_state(ShopeeVideoFluxo.celular)
+    await message.answer(await texto_celular(), parse_mode="HTML", reply_markup=teclado_celular())
+
+
+@router.message(F.text == BOTAO_CELULAR, StateFilter("*"))
+async def celular_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    logger.info("📱 Acessando o celular do robô.")
+    await mostrar_celular(message, state)
+
+
+@router.message(F.text == BOTAO_VOLTAR, StateFilter("*"))
+async def voltar_ao_painel(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await mostrar_painel(message, state)
+
+
+async def _seguir_com_celular(message, state, celular, acao):
+    """Com o celular escolhido, pede o código (parear) ou a porta (reconectar)."""
+    await state.update_data(celular_ip=celular["ip"], celular_nome=celular["nome"])
+    nome = html_escape(celular["nome"])
+    if acao == "parear":
+        await message.answer(
+            f"🔗 <b>Parear o celular</b> ({nome})\n\n"
+            "No celular guardado:\n"
+            "1. Opções do desenvolvedor → <b>Depuração por Wi-Fi</b>.\n"
+            "2. Toque em <b>Parear dispositivo com código de pareamento</b>.\n"
+            "3. Mande aqui o <b>código de 6 dígitos</b> e a <b>porta</b> (o número depois dos dois-pontos "
+            "em \"Endereço IP e porta\"), assim: <code>123456 37123</code>.\n\n"
+            "<i>Deixe a janela do código aberta até eu responder. Apago a sua mensagem logo depois de "
+            "usar o código.</i>",
+            parse_mode="HTML", reply_markup=teclado_cancelar)
+        await state.set_state(ShopeeVideoFluxo.aguardando_pareamento)
+    else:
+        await message.answer(
+            f"🔄 <b>Conectar ao celular</b> ({nome})\n\n"
+            "No celular guardado, abra Opções do desenvolvedor → <b>Depuração por Wi-Fi</b> (ligada). "
+            "No alto aparece <b>Endereço IP e porta</b>: mande aqui só a <b>porta</b>, o número depois "
+            "dos dois-pontos (ex.: <code>41235</code>).",
+            parse_mode="HTML", reply_markup=teclado_cancelar)
+        await state.set_state(ShopeeVideoFluxo.aguardando_porta)
+
+
+async def _escolher_celular(message, state, acao):
+    """Acha o celular ligado na rede privada; com mais de um, pergunta qual."""
+    online = [c for c in await asyncio.to_thread(celular_robo.celulares_na_rede) if c["online"]]
+    if not online:
+        await message.answer(
+            "⚠️ Não achei nenhum celular ligado na rede privada. No celular guardado, confira se o "
+            "<b>Tailscale</b> está ligado e se ele está no Wi-Fi.", parse_mode="HTML", reply_markup=teclado_celular())
+        return
+    salvo = next((c for c in online if c["ip"] == celular_robo.ler().get("ip")), None)
+    if salvo or len(online) == 1:
+        await _seguir_com_celular(message, state, salvo or online[0], acao)
+        return
+    await state.update_data(acao_celular=acao, celulares=online)
+    await message.answer("Qual destes é o celular guardado?", reply_markup=montar_teclado(
+        [[KeyboardButton(text=c["nome"])] for c in online] + [[KeyboardButton(text="Cancelar ❌")]]))
+    await state.set_state(ShopeeVideoFluxo.aguardando_escolha_celular)
+
+
+@router.message(F.text == BOTAO_PAREAR, StateFilter("*"))
+async def pedir_pareamento(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await _escolher_celular(message, state, "parear")
+
+
+@router.message(F.text == BOTAO_RECONECTAR, StateFilter("*"))
+async def pedir_reconexao(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    if not celular_robo.ler().get("pareado_em"):
+        await message.answer(f"⚠️ O celular ainda não foi pareado: toque em {BOTAO_PAREAR} primeiro.",
+                             reply_markup=teclado_celular())
+        return
+    await _escolher_celular(message, state, "reconectar")
+
+
 # --- Respostas dentro de cada ajuste ---
 # Ficam depois de todos os botões: no aiogram ganha o primeiro handler que casar, e um
 # botão do painel tocado no meio de um ajuste tem de abrir o botão, não virar resposta.
@@ -359,3 +491,62 @@ async def salvar_fonte(message: types.Message, state: FSMContext):
                             ShopeeVideoFluxo.aguardando_fonte))
 async def confirmar_com_os_botoes(message: types.Message, state: FSMContext):
     await message.answer("Toque em um dos botões para confirmar ou em Cancelar ❌.")
+
+
+@router.message(ShopeeVideoFluxo.aguardando_escolha_celular)
+async def receber_escolha_celular(message: types.Message, state: FSMContext):
+    dados = await state.get_data()
+    celular = next((c for c in dados.get("celulares", []) if c["nome"] == message.text), None)
+    if not celular:
+        await message.answer("Toque no nome do celular guardado ou em Cancelar ❌.")
+        return
+    await _seguir_com_celular(message, state, celular, dados.get("acao_celular", "parear"))
+
+
+@router.message(ShopeeVideoFluxo.aguardando_pareamento)
+async def receber_pareamento(message: types.Message, state: FSMContext):
+    lido = celular_robo.interpretar_pareamento(message.text)
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.warning(f"⚠️ Celular do robô: não consegui apagar a mensagem do código ({type(e).__name__}).")
+    if not lido:
+        await message.answer("⚠️ Mande o código de 6 dígitos e a porta, separados por espaço "
+                             "(ex.: <code>123456 37123</code>).", parse_mode="HTML", reply_markup=teclado_cancelar)
+        return
+    codigo, porta = lido
+    dados = await state.get_data()
+    await message.answer("⏳ Pareando com o celular…")
+    ok, motivo = await asyncio.to_thread(celular_robo.parear, dados["celular_ip"], porta, codigo)
+    if not ok:
+        logger.warning(f"⚠️ Celular do robô: pareamento falhou ({motivo}).")
+        await message.answer(f"⚠️ Não pareou: {motivo}. Toque em {BOTAO_PAREAR} para tentar de novo, com um "
+                             "código novo.", reply_markup=teclado_celular())
+        await state.set_state(ShopeeVideoFluxo.celular)
+        return
+    logger.info("✅ Celular do robô: pareado.")
+    await message.answer(
+        "✅ <b>Pareado!</b> Agora feche a janela do código. No alto da tela Depuração por Wi-Fi aparece "
+        "<b>Endereço IP e porta</b>: mande aqui só a <b>porta</b>, o número depois dos dois-pontos "
+        "(ex.: <code>41235</code>).", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.set_state(ShopeeVideoFluxo.aguardando_porta)
+
+
+@router.message(ShopeeVideoFluxo.aguardando_porta)
+async def receber_porta(message: types.Message, state: FSMContext):
+    porta = celular_robo.interpretar_porta(message.text)
+    if not porta:
+        await message.answer("⚠️ Mande só a porta, o número depois dos dois-pontos (ex.: <code>41235</code>).",
+                             parse_mode="HTML", reply_markup=teclado_cancelar)
+        return
+    dados = await state.get_data()
+    await message.answer("⏳ Conectando ao celular…")
+    ok, resultado = await asyncio.to_thread(celular_robo.conectar, dados["celular_ip"], porta)
+    if not ok:
+        logger.warning(f"⚠️ Celular do robô: conexão falhou ({resultado}).")
+        await message.answer(f"⚠️ Não conectou: {resultado}. Confira a porta e mande de novo.",
+                             reply_markup=teclado_cancelar)
+        return
+    logger.info("✅ Celular do robô: conectado.")
+    await message.answer(f"✅ <b>Celular conectado:</b> {html_escape(resultado)}.", parse_mode="HTML")
+    await mostrar_celular(message, state)

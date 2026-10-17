@@ -9,6 +9,10 @@ campos e onde ficam), para ensinar o caminho da postagem que o Rafael mostrou
 no tutorial. Roda à mão pelo workflow android.yml (ação explorar) ou no servidor:
 
     python3 postador_shopee_video.py --explorar "abrir; tocar:Eu; tocar:Criadores"
+    python3 postador_shopee_video.py --explorar --celular "tela"   # no celular guardado
+
+Com --celular, explora no celular de verdade do Rafael (celular_robo.py), pareado pelo
+bot; sem ele, no Android virtual.
 
 Passos, separados por ponto e vírgula:
     abrir            abre o app da Shopee (fechar: fecha)
@@ -37,6 +41,7 @@ import time
 import xml.etree.ElementTree as ET
 
 import android_virtual as av
+import celular_robo
 import db
 from api_shopee import link_para_converter, tipo_de_link
 
@@ -281,14 +286,19 @@ def fazer_passo(d, nome, argumento):
     return True, "só a tela"
 
 
-def conectar():
-    """O Android pelo uiautomator2, que lê a tela mesmo com vídeo tocando (o uiautomator do adb trava)."""
+def conectar(celular=False):
+    """
+    O Android pelo uiautomator2, que lê a tela mesmo com vídeo tocando (o uiautomator do
+    adb trava): o celular guardado (celular=True) ou o Android virtual.
+    """
     import uiautomator2
+    if celular:
+        return uiautomator2.connect(celular_robo.endereco())
     av.android_ligado()
     return uiautomator2.connect(av.ENDERECO_ADB)
 
 
-def explorar(texto, d=None):
+def explorar(texto, d=None, celular=False):
     """
     Faz os passos e descreve a tela depois de cada um. Para no primeiro que falhar.
     True se todos deram certo, False se um falhou e None se nem começou (passo
@@ -303,10 +313,13 @@ def explorar(texto, d=None):
     if not passos:
         passos = [("tela", "")]
     if d is None:
-        if not av.android_ligado():
+        if celular and not celular_robo.conectado():
+            print("celular: desconectado; conecte pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱)")
+            return None
+        if not celular and not av.android_ligado():
             print("android: desligado; rode o preparar antes")
             return None
-        d = conectar()
+        d = conectar(celular)
     for numero, (nome, argumento) in enumerate(passos, 1):
         try:
             ok, resultado = fazer_passo(d, nome, argumento)
@@ -336,5 +349,7 @@ def codigo_de_saida(resultado):
 
 if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "--explorar":
-        sys.exit(codigo_de_saida(explorar(" ".join(sys.argv[2:]))))
+        no_celular = sys.argv[2:3] == ["--celular"]
+        passos = " ".join(sys.argv[3:] if no_celular else sys.argv[2:])
+        sys.exit(codigo_de_saida(explorar(passos, celular=no_celular)))
     print(__doc__)

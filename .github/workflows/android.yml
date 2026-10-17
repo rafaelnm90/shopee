@@ -13,6 +13,8 @@ name: Android virtual (Shopee Vídeo)
 #   explorar        roda o postador_shopee_video.py --explorar com os passos do
 #                   campo "passos" (ex.: abrir; tocar:Eu) e descreve cada tela,
 #                   sem os textos da conta; nunca toca em Postar;
+#   explorar-celular o mesmo, no celular guardado do Rafael (conectado pelo bot,
+#                   em Shopee Vídeo 🎬 → Celular do Robô 📱);
 #   desligar        desliga o Android sem apagar nada (app e login ficam); o
 #                   preparar religa;
 #   apagar          desliga e apaga tudo dentro do Android (apps e login da
@@ -29,7 +31,7 @@ on:
       acao:
         description: "O que fazer"
         type: choice
-        options: [estado, preparar, instalar-loja, instalar-shopee, tela, explorar, desligar, apagar, tailscale]
+        options: [estado, preparar, instalar-loja, instalar-shopee, tela, explorar, explorar-celular, desligar, apagar, tailscale]
         default: estado
       passos:
         description: "Só no explorar: passos separados por ; (ex.: abrir; tocar:Eu)"
@@ -59,6 +61,8 @@ jobs:
             cd ~/shopee
             if [ "${{ inputs.acao }}" = "explorar" ]; then
               venv/bin/python3 postador_shopee_video.py --explorar "$PASSOS"
+            elif [ "${{ inputs.acao }}" = "explorar-celular" ]; then
+              venv/bin/python3 postador_shopee_video.py --explorar --celular "$PASSOS"
             else
               venv/bin/python3 android_virtual.py ${{ inputs.acao != 'estado' && format('--{0}', inputs.acao) || '' }}
             fi
