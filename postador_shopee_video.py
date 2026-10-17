@@ -26,7 +26,9 @@ Passos, separados por ponto e vírgula:
     video            põe na galeria o vídeo do Autoral mais novo
     tela             só descreve a tela
 
-Nunca toca em "Postar": a exploração termina, no máximo, em Rascunhos.
+Nunca toca em "Postar": a exploração termina, no máximo, em Rascunhos. Nunca mexe
+na Verificação (CAPTCHA) da Shopee: se ela aparece, antes ou depois de um passo, a
+exploração para ali, e quem resolve é o Rafael, com a mão no celular.
 
 Imprime a forma da tela, não o conteúdo, porque o log do Actions é público e a
 tela mostra a conta do Rafael: palavra que não é de botão vira "…" e número
@@ -183,6 +185,15 @@ def achar(xml, alvo):
     return (x1 + x2) // 2, (y1 + y2) // 2
 
 
+def eh_verificacao(xml):
+    """A Shopee está pedindo a Verificação (CAPTCHA) nesta tela?"""
+    return any("captcha" in f"{el['id']} {el['texto']}".casefold() or _normal(el["texto"]) == "verificação"
+               for el in elementos(xml))
+
+
+AVISO_VERIFICACAO = "\n== verificação na tela: parado; o Rafael resolve com a mão no celular"
+
+
 def eh_botao_de_postar(alvo):
     return _normal(alvo) == "postar"
 
@@ -300,9 +311,9 @@ def conectar(celular=False):
 
 def explorar(texto, d=None, celular=False):
     """
-    Faz os passos e descreve a tela depois de cada um. Para no primeiro que falhar.
-    True se todos deram certo, False se um falhou e None se nem começou (passo
-    desconhecido ou Android desligado).
+    Faz os passos e descreve a tela depois de cada um. Para no primeiro que falhar
+    e na Verificação da Shopee. True se todos deram certo, False se um falhou ou a
+    verificação apareceu e None se nem começou (passo desconhecido ou Android desligado).
     """
     print("== Explorando o app da Shopee")
     try:
@@ -320,6 +331,9 @@ def explorar(texto, d=None, celular=False):
             print("android: desligado; rode o preparar antes")
             return None
         d = conectar(celular)
+    if eh_verificacao(_tela(d)):
+        print(AVISO_VERIFICACAO)
+        return False
     for numero, (nome, argumento) in enumerate(passos, 1):
         try:
             ok, resultado = fazer_passo(d, nome, argumento)
@@ -328,15 +342,28 @@ def explorar(texto, d=None, celular=False):
         print(f"\n== passo {numero}: {nome}{':' + argumento if argumento else ''} → {resultado}")
         if nome != "esperar":
             time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
+        tela = ""
         try:
             atual = d.app_current()
             print(f"app: {atual.get('package', '?')} | tela: {atual.get('activity', '?').rsplit('.', 1)[-1]}")
-            print("\n".join(descrever(d.dump_hierarchy())) or "  (tela sem elementos)")
+            tela = d.dump_hierarchy()
+            print("\n".join(descrever(tela)) or "  (tela sem elementos)")
         except Exception as e:
             print(f"tela: não deu para ler ({type(e).__name__})")
+        if eh_verificacao(tela):
+            print(AVISO_VERIFICACAO)
+            return False
         if not ok:
             return False
     return True
+
+
+def _tela(d):
+    """A tela de agora; vazia se não deu para ler (o primeiro passo mostra o erro)."""
+    try:
+        return d.dump_hierarchy()
+    except Exception:
+        return ""
 
 
 def codigo_de_saida(resultado):

@@ -54,7 +54,9 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
    - uma rodada por vez, com poucos toques;
    - espera de vários segundos entre toques, e tempos que variam;
    - não fechar e reabrir o app em seguida;
-   - parar no primeiro sinal de verificação.
+   - a verificação para a exploração na hora (o `explorar` não toca nela), e o Rafael
+     resolve com a mão; no celular de verdade a exploração continua depois (escolha
+     dele em 17/10/2026).
 4. **Mapear até Rascunhos:** Postar vídeo → galeria (o vídeo entra pelo passo
    `video` do explorar) → Próximo → Adicionar Produto → legenda. O primeiro teste
    termina em Rascunhos.
@@ -86,8 +88,8 @@ Celular guardado (perfil pessoal do Rafael, carregador, Wi-Fi)
 | 0 | Rafael | Celular só para isso: no carregador e no Wi-Fi, sem economia de bateria para a Shopee; Shopee pela Play Store com o **perfil pessoal** do Rafael (sem perfil reserva: escolha dele em 09/10/2026); modo desenvolvedor com "depuração sem fio" (no Motorola, "Depuração por Wi-Fi") e "Manter ativado"; app Tailscale com VPN sempre ativa | feita em 17/10/2026 (Motorola) |
 | 1a | Rafael | Conta no Tailscale e uma chave de acesso (auth key) salva no GitHub como segredo `TAILSCALE_AUTHKEY`; nunca colar a chave na conversa. A chave do servidor não expira (Disable key expiry em Machines → shopee-servidor) | feita em 05/10/2026 |
 | 1b | Claude | `android.yml` → `tailscale`: o servidor entra na rede privada (sem mexer no DNS nem nas rotas), com o nome `shopee-servidor` | feita em 05/10/2026: conectado |
-| 1c | Claude + Rafael | Parear o adb com o celular pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱, `celular_robo.py`): o código vai só no privado e o bot apaga a mensagem; Reconectar quando a porta muda. O explorar aceita o celular (`android.yml` → `explorar-celular`) | fluxo pronto em 17/10/2026; falta o Rafael parear |
-| 2 | Claude | Explorar devagar até Rascunhos, com as regras de "Para voltar" | a fazer |
+| 1c | Claude + Rafael | Parear o adb com o celular pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱, `celular_robo.py`): o código vai só no privado e o bot apaga a mensagem; Reconectar quando a porta muda. O explorar aceita o celular (`android.yml` → `explorar-celular`) | feita em 17/10/2026: pareado e conectado (moto g(100)) |
+| 2 | Claude | Explorar devagar até Rascunhos, com as regras de "Para voltar" | em andamento desde 17/10/2026: na 1ª rodada (abrir e esperar 20 s) a Shopee abriu a Verificação (CAPTCHA); o Rafael escolheu continuar e resolve cada verificação com a mão |
 | 3 | os dois | Um rascunho por dia que o Rafael confere; depois 1 ou 2 postagens reais por dia, na janela e com quantidade variada; observar 2 a 4 semanas | a fazer |
 | 4 | os dois | Só com semanas sem verificação nem bloqueio: pensar em aumentar o volume | a fazer |
 
@@ -95,8 +97,9 @@ Riscos que continuam: robô vai contra os termos da Shopee, e o ritmo calmo dimi
 risco, mas não zera. O modo desenvolvedor ligado é um sinal que alguns apps olham,
 e não vamos escondê-lo. O robô posta na conta pessoal do Rafael, a principal de
 afiliado: um bloqueio por automação atinge essa conta e as comissões dela. Por isso o
-ritmo calmo, o teste em Rascunhos e a parada no primeiro sinal de verificação valem
-desde o primeiro dia. Se a depuração sem fio
+ritmo calmo, o teste em Rascunhos e a parada a cada verificação (o Rafael resolve com a
+mão) valem desde o primeiro dia. Na 1ª rodada no celular (17/10/2026), a Shopee pediu a
+verificação 20 s depois de o robô abrir o app, como no Android virtual. Se a depuração sem fio
 ficar instável, a troca é um computador velho ligado em casa, com o celular no cabo
 USB; o resto do plano não muda.
 

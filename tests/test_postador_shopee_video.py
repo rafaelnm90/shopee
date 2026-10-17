@@ -143,6 +143,42 @@ def test_para_no_primeiro_passo_que_falha(capsys):
     assert aparelho.teclas == [] and "não achei na tela" in capsys.readouterr().out
 
 
+TELA_VERIFICACAO = """<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+  <node text="" class="android.widget.FrameLayout" bounds="[0,0][720,1280]">
+    <node text="Verificação" resource-id="com.shopee.br:id/title_text" class="android.widget.TextView"
+          clickable="true" bounds="[200,100][500,160]" />
+    <node text="" resource-id="NEW_CAPTCHA" class="android.view.View" bounds="[0,300][720,900]" />
+    <node text="Atualizar CAPTCHA" class="android.widget.Button" clickable="true" bounds="[500,700][600,760]" />
+  </node>
+</hierarchy>"""
+
+
+def test_verificacao_antes_do_primeiro_passo_nao_toca_em_nada(capsys):
+    aparelho = Aparelho(tela=TELA_VERIFICACAO)
+    assert ps.explorar("voltar; xy:300,600; tocar:Atualizar", aparelho) is False
+    assert aparelho.toques == [] and aparelho.teclas == []
+    assert "o Rafael resolve com a mão" in capsys.readouterr().out
+
+
+def test_verificacao_depois_de_um_passo_para_ali(capsys):
+    class VaiParaVerificacao(Aparelho):
+        def app_start(self, pacote, wait=False):
+            super().app_start(pacote, wait)
+            self.tela = TELA_VERIFICACAO
+
+    aparelho = VaiParaVerificacao()
+    assert ps.explorar("abrir; voltar; tocar:Atualizar", aparelho) is False
+    saida = capsys.readouterr().out
+    assert aparelho.teclas == [] and aparelho.toques == []
+    assert "== passo 1: abrir" in saida and "passo 2" not in saida and "o Rafael resolve com a mão" in saida
+    assert ps.codigo_de_saida(False) == 0                                # resposta da exploração, não erro
+
+
+def test_tela_comum_nao_e_verificacao():
+    assert not ps.eh_verificacao(TELA_EU) and ps.eh_verificacao(TELA_VERIFICACAO)
+
+
 def test_erro_no_passo_mostra_so_o_tipo(capsys):
     class Quebrado(Aparelho):
         def click(self, x, y):
