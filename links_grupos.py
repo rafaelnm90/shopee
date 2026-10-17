@@ -122,6 +122,30 @@ def link(alvo, guardados=None):
     return None
 
 
+def arroba(alvo, guardados=None):
+    """
+    O @ público do grupo ou canal alvo ("@canal"), ou None se ele não tem @ (privado,
+    convite ou número que o Telegram nunca contou com @). Usado no crédito do parceiro.
+    """
+    texto = str(alvo or "").strip()
+    if re.match(r"^(?:https?://)?t\.me/(?:\+|joinchat/)", texto):
+        return None
+    usuario = _USUARIO.match(texto)
+    if usuario:
+        return f"@{usuario.group(1)}"
+    numero = _NUMERO.match(texto)
+    if not numero:
+        return None
+    if guardados is None:
+        guardados = _guardados_recentes()
+    chat_id = numero.group(1)
+    # A origem pode estar cadastrada sem o -100 que o Telegram usa nos canais.
+    for chave in (chat_id, f"-100{chat_id}" if not chat_id.startswith("-") else None):
+        if chave and (guardados.get(chave) or {}).get("usuario"):
+            return f"@{guardados[chave]['usuario']}"
+    return None
+
+
 def nome_clicavel(nome, alvo, guardados=None):
     """O nome (já escapado para o HTML do Telegram) como link para o grupo, se houver link."""
     texto = html.escape(str(nome))

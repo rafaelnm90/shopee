@@ -49,6 +49,7 @@ from api_shopee import converter_link_shopee, buscar_ofertas_shopee, testar_chav
 import links_shopee  # achar links da Shopee do mesmo jeito em todos os robôs
 import legendas  # legenda dos posts e pedido de nome e hashtags à IA, iguais em todos os robôs
 from links_grupos import nome_clicavel  # nome do grupo como atalho para abri-lo
+from links_grupos import arroba as arroba_do_grupo
 from teclados import montar_teclado, teclado_com_cancelar, teclado_cancelar, teclado_aprovar_cancelar, teclado_janela_dia_todo
 import fila_espelhador  # a fila do Espelhador, no banco
 from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite, sortear_teto_do_dia, faixa_de_config, recompactar_horarios
@@ -3165,16 +3166,24 @@ def destino_no_grupo_publico(destino):
         return False
     return chat.replace("-100", "", 1) == str(grupo).strip().replace("-100", "", 1)
 
+def credito_do_parceiro(p):
+    """
+    O @ do "👤 Vídeo enviado por" do parceiro: o cadastrado ou, sem ele, o @ público do
+    canal de origem (no canal, o Telegram não diz quem postou). Vazio = sem a linha.
+    Decisão do Rafael: DECISOES.md, Parceiros.
+    """
+    return (p.get("arroba") or "").strip() or arroba_do_grupo(p.get("canal_origem")) or ""
+
 def legenda_do_parceiro(p, texto_ia, link_final):
     """
     A legenda do vídeo do parceiro. No Grupo Público, o padrão do grupo com "👤 Vídeo
-    enviado por: @parceiro" (sem @ cadastrado, sem a linha) e o bloco da Shopee. Nos
-    outros destinos, a legenda dos outros robôs; sem a IA, só o link de afiliado.
+    enviado por" (credito_do_parceiro) e o bloco da Shopee. Nos outros destinos, a
+    legenda dos outros robôs; sem a IA, só o link de afiliado.
     Decisão do Rafael: DECISOES.md, Parceiros.
     """
     if destino_no_grupo_publico(p.get("canal_destino")):
         nome, hashtags = legendas.separar_nome_e_hashtags(texto_ia) if texto_ia else ("", "")
-        return legendas.legenda_grupo_publico((p.get("arroba") or "").strip(), nome,
+        return legendas.legenda_grupo_publico(credito_do_parceiro(p), nome,
                                               link_shopee=link_final, hashtags=hashtags)
     return legendas.legenda_da_ia(texto_ia, link_final) if texto_ia else link_final
 
@@ -3542,6 +3551,14 @@ def link_post_destino(destino, msg_id):
     return None
 
 
+def rotulo_arroba_parceiro(p):
+    """O @ na tela do parceiro: o cadastrado ou, sem ele, o do canal que vai no crédito."""
+    if (p.get("arroba") or "").strip():
+        return p["arroba"]
+    credito = credito_do_parceiro(p)
+    return f"não cadastrado (o crédito sai com {credito}, do canal de origem)" if credito else \
+        "não cadastrado (sem a linha do crédito)"
+
 def rotulo_cota_parceiro(p):
     """Como a cota do parceiro aparece no painel: faixa, número fixo ou sem teto."""
     piso, topo = ler_faixa_limite(p)
@@ -3582,7 +3599,7 @@ async def mostrar_parceiro(message, state: FSMContext, parceiro_id):
         f"🔑 App ID: <code>{mascarar_segredo(p.get('app_id'))}</code>\n"
         f"📥 Origem: {rotulo_alvo(p.get('canal_origem'))}\n"
         f"📤 Destino: {rotulo_alvo(p.get('canal_destino'))}\n"
-        f"👤 @ no Telegram: {p.get('arroba') or 'não cadastrado'}\n"
+        f"👤 @ no Telegram: {rotulo_arroba_parceiro(p)}\n"
         f"⏳ Oculto por: <b>{p.get('dias_atraso')} dias</b>\n"
         f"📦 Cota Diária: <b>{rotulo_cota_parceiro(p)}</b>\n"
         f"🕒 Janela de Postagem: <b>{p.get('janela_inicio', 0) or 0}h às {p.get('janela_fim', 24) or 24}h</b>\n"
@@ -3919,7 +3936,7 @@ async def voltar_passo_parceiro(message, state: FSMContext, destino):
     """Mostra a pergunta do passo do cadastro, sem perder o que já foi digitado."""
     passos = {
         "nome":       ("👤 <b>PASSO 1 de 8 — Nome do parceiro</b>\n\nComo você quer identificar este afiliado? (ex: <i>João Silva</i>)", SubmissaoAdminFluxo.parceiro_nome),
-        "arroba":     ("📣 <b>PASSO 2 de 8 — @ do parceiro no Telegram</b>\n\nEnvie o @ dele (ex: <code>@joaosilva</code>). Ele aparece em \"👤 Vídeo enviado por\" nos vídeos deste parceiro que vão para a Vídeos da Comunidade do Grupo Público.\n<i>Sem @? Envie <code>-</code> (os vídeos saem sem a linha do crédito).</i>", SubmissaoAdminFluxo.parceiro_arroba),
+        "arroba":     ("📣 <b>PASSO 2 de 8 — @ do parceiro no Telegram</b>\n\nEnvie o @ dele (ex: <code>@joaosilva</code>). Ele aparece em \"👤 Vídeo enviado por\" nos vídeos deste parceiro que vão para a Vídeos da Comunidade do Grupo Público.\n<i>Sem @? Envie <code>-</code>: o crédito sai com o @ do canal de origem, se ele for público, ou sem a linha.</i>", SubmissaoAdminFluxo.parceiro_arroba),
         "app_id":     ("🔑 <b>PASSO 3 de 8 — App ID da Shopee</b>\n\nCole o <b>App ID</b> da conta de afiliado deste parceiro.", SubmissaoAdminFluxo.parceiro_app_id),
         "app_secret": ("🔐 <b>PASSO 4 de 8 — App Secret</b>\n\nCole o <b>App Secret</b> deste parceiro.\n<i>⚠️ Dado sensível: apague a mensagem do chat depois de enviar.</i>", SubmissaoAdminFluxo.parceiro_app_secret),
         "origem":     ("📥 <b>PASSO 5 de 8 — Canal de ORIGEM</b>\n\nDe onde este parceiro vai pegar os vídeos?\nEnvie o <b>ID, @username ou link</b> do canal.", SubmissaoAdminFluxo.parceiro_origem),

@@ -19,12 +19,12 @@ def test_arroba_do_parceiro_aceita_os_jeitos_comuns_de_escrever(bm, digitado, es
     assert bm.normalizar_arroba(digitado) == esperado
 
 
-def _publicar_um_video(bm, monkeypatch, destino, arroba):
+def _publicar_um_video(bm, monkeypatch, destino, arroba, origem="-1001234567890"):
     """Roda o motor dos parceiros com um vídeo vencido e devolve a legenda publicada."""
     bm.salvar_submissao_config({**bm.ler_submissao_config(), "grupo_id": GRUPO_PUBLICO,
                                 "topico_destino": TOPICO_COMUNIDADE})
     pid = bm.salvar_parceiro({"nome": "Loja da Ana", "arroba": arroba, "app_id": "123456",
-                              "app_secret": "x" * 20, "canal_origem": "@origem",
+                              "app_secret": "x" * 20, "canal_origem": origem,
                               "canal_destino": destino, "limite_diario": 6})
     inserir("CREATE TABLE IF NOT EXISTS fila_parceiros (id_unico TEXT PRIMARY KEY, parceiro_id INTEGER, "
             "caminho_video TEXT, link_original TEXT, data_captura TEXT, data_alvo TEXT, "
@@ -72,10 +72,36 @@ def test_parceiro_na_comunidade_sai_com_o_arroba_dele(bm, monkeypatch, relogio):
                        "<i>#SapatosFemininos</i>")
 
 
-def test_parceiro_sem_arroba_sai_sem_a_linha_do_credito(bm, monkeypatch, relogio):
+def test_parceiro_sem_arroba_e_canal_privado_sai_sem_a_linha_do_credito(bm, monkeypatch, relogio):
     relogio("15:00")
     legenda = _publicar_um_video(bm, monkeypatch, f"{GRUPO_PUBLICO}:{TOPICO_COMUNIDADE}", "")
     assert legenda.startswith("<b>Tênis Casual Feminino 👟</b>\n\n🔶 <b>SHOPEE</b> 🔶")
+
+
+@pytest.mark.parametrize("origem", ["@canal_da_ana", "https://t.me/canal_da_ana", "-1001234567890"])
+def test_parceiro_sem_arroba_sai_com_o_arroba_do_canal_de_origem(bm, monkeypatch, relogio, origem):
+    # Escolha do Rafael em 16/10: no canal o Telegram não diz quem postou; sem @
+    # cadastrado, vai o @ público do canal do parceiro (dito pela origem ou guardado
+    # pelos userbots ao ler as conversas).
+    import links_grupos
+    relogio("15:00")
+    links_grupos.guardar("-1001234567890", "canal_da_ana")
+    legenda = _publicar_um_video(bm, monkeypatch, f"{GRUPO_PUBLICO}:{TOPICO_COMUNIDADE}", "", origem)
+    assert legenda.startswith("👤 Vídeo enviado por: @canal_da_ana\n\n<b>Tênis Casual Feminino 👟</b>")
+
+
+def test_arroba_cadastrado_vale_mais_que_o_do_canal(bm, monkeypatch, relogio):
+    relogio("15:00")
+    legenda = _publicar_um_video(bm, monkeypatch, f"{GRUPO_PUBLICO}:{TOPICO_COMUNIDADE}", "@loja_da_ana",
+                                 "@canal_da_ana")
+    assert legenda.startswith("👤 Vídeo enviado por: @loja_da_ana\n\n")
+
+
+@pytest.mark.parametrize("origem", ["https://t.me/+AbCdEfGh", "t.me/joinchat/AbCdEfGh", "", None, "-100999"])
+def test_canal_sem_arroba_publico_nao_inventa_credito(bm, origem):
+    import links_grupos
+    assert links_grupos.arroba(origem) is None
+    assert bm.credito_do_parceiro({"arroba": "", "canal_origem": origem}) == ""
 
 
 def test_padrao_vale_para_o_grupo_publico_inteiro(bm, monkeypatch, relogio):
@@ -109,3 +135,9 @@ def test_arroba_cadastrado_e_editado_pelo_painel(bm, Msg, Est):
     assert bm.buscar_parceiro(pid)["arroba"] == "@loja_da_ana"   # inválido não grava
     rodar(bm.salvar_edicao_parceiro(Msg("-"), Est({"parceiro_id": pid, "campo_edicao": "arroba"})))
     assert bm.buscar_parceiro(pid)["arroba"] == ""
+
+
+def test_tela_do_parceiro_mostra_de_onde_sai_o_credito(bm):
+    assert bm.rotulo_arroba_parceiro({"arroba": "@loja_da_ana", "canal_origem": "@canal_da_ana"}) == "@loja_da_ana"
+    assert "o crédito sai com @canal_da_ana" in bm.rotulo_arroba_parceiro({"arroba": "", "canal_origem": "@canal_da_ana"})
+    assert "sem a linha do crédito" in bm.rotulo_arroba_parceiro({"arroba": "", "canal_origem": "-100999"})
