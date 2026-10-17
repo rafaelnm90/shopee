@@ -4,8 +4,8 @@ Administradores: roteador do bot_mestre (Opções do Servidor → Administradore
 Mostra, no privado do Rafael, o registro que a conta principal monta todo dia
 (registro_admins): cada grupo e canal em que ele é dono ou admin, quem são os
 administradores, o que cada um pode fazer, e as últimas mudanças. O aviso no privado
-quando algo muda sai do bot_mestre (avisar_mudancas), a cada 15 min, e também as
-instruções para ligar a cópia no repositório privado (avisar_registro_privado).
+quando algo muda sai do bot_mestre (avisar_mudancas), a cada 15 min, e também a chave
+da cópia cifrada no repositório, uma vez por chave (avisar_registro_privado).
 Decisão do Rafael: DECISOES.md, Monitor, deploy e servidor.
 """
 import logging
@@ -58,52 +58,40 @@ async def painel_handler(message: types.Message, state: FSMContext):
 
 
 def linha_registro_privado():
-    """Como está a cópia no repositório privado do GitHub; vazio se ainda não tentou."""
-    status = registro_privado.situacao()
-    situacao = status.get("situacao")
-    if situacao == "ok":
-        quando = status.get("ultimo_envio") or ""
-        quando = f"{quando[8:10]}/{quando[5:7]} às {quando[11:16]}" if len(quando) >= 16 else "?"
-        return f"📁 Cópia no GitHub privado: ✅ em dia (último envio em {quando})"
-    if situacao == "sem_acesso":
-        return "📁 Cópia no GitHub privado: ⏳ esperando o repositório e a chave (instruções no seu privado)"
-    if situacao == "erro":
-        return "📁 Cópia no GitHub privado: ❌ o último envio falhou; tento de novo a cada 10 min"
-    return ""
+    """Quando saiu a última cópia cifrada no repositório (ramo registro-admins)."""
+    quando = registro_privado.situacao().get("ultima_copia") or ""
+    if len(quando) < 16:
+        return f"🔐 Cópia cifrada no GitHub: a primeira sai às {registro_privado.HORARIO_COPIA}"
+    return (f"🔐 Cópia cifrada no GitHub: última em {quando[8:10]}/{quando[5:7]} às {quando[11:16]} "
+            f"(todo dia às {registro_privado.HORARIO_COPIA})")
 
 
-def texto_da_chave(chave_publica):
-    """As instruções para ligar a cópia privada, com a parte pública da chave do servidor."""
-    return ("🔐 <b>Registro privado dos administradores no GitHub</b>\n\n"
-            "Para o servidor gravar o registro no seu repositório privado:\n\n"
-            f"1. Se ainda não criou, crie o repositório <b>{registro_privado.REPOSITORIO.split('/')[1]}</b>, "
-            f"marcado como <b>Private</b> e com <b>Add a README file</b>: {registro_privado.LINK_NOVO_REPOSITORIO}\n"
-            f"2. Abra {registro_privado.LINK_CADASTRAR_CHAVE}, ponha o título <b>Servidor dos robôs</b>, cole a chave "
-            "abaixo e marque <b>Allow write access</b>.\n\n"
-            f"<code>{chave_publica}</code>\n\n"
-            "<i>É a parte pública da chave: sozinha, não dá acesso a nada. Depois de cadastrada, o servidor envia "
-            "o arquivo em até 10 minutos e eu te aviso aqui.</i>")
+def texto_da_chave(valor):
+    """As instruções para o Claude abrir a cópia cifrada, com a chave do servidor."""
+    return ("🔐 <b>Registro dos administradores: chave da cópia cifrada</b>\n\n"
+            "Todo dia o registro vai para o repositório dos robôs (ramo "
+            f"<b>{registro_privado.RAMO}</b>) embaralhado: sem esta chave, é só um monte de letras. "
+            "Quem abre é o Claude, com a chave nas configurações do ambiente dele.\n\n"
+            "Faça uma vez só, no app ou no site do Claude:\n"
+            "1. Na conversa com o Claude, toque no nome do ambiente, no alto, e depois em <b>Editar</b>.\n"
+            "2. Em <b>Variáveis de ambiente</b>, acrescente esta linha e salve:\n\n"
+            f"<code>{registro_privado.VARIAVEL_CHAVE}={valor}</code>\n\n"
+            "<i>Não mande esta chave no chat do Claude nem para ninguém. Depois de salvar, pode apagar "
+            "esta mensagem. Vale a partir da próxima vez que o ambiente do Claude iniciar.</i>")
 
 
 async def avisar_registro_privado():
-    """Uma vez por chave: as instruções com ela (o servidor gera outra se a perdeu). Depois, uma vez: que ligou."""
+    """Manda a chave da cópia cifrada ao Rafael, uma vez por chave (o servidor gera outra se a perder)."""
     try:
-        status = registro_privado.situacao()
-        if (status.get("situacao") == "sem_acesso" and status.get("chave_publica")
-                and status.get("avisado_chave") != status["chave_publica"]):
-            await bot_instance.send_message(ADMIN_ID, texto_da_chave(status["chave_publica"]), parse_mode="HTML",
-                                            disable_web_page_preview=True)
-            db.atualizar_config(registro_privado.CHAVE_STATUS,
-                                lambda s: s.update(avisado_chave=status["chave_publica"], avisado_ok=False))
-            logger.info("🔐 Instruções do registro privado enviadas ao admin.")
-        elif status.get("situacao") == "ok" and not status.get("avisado_ok"):
-            await bot_instance.send_message(
-                ADMIN_ID, "✅ <b>Registro privado ligado.</b> Os administradores estão no seu repositório privado "
-                f"<b>{registro_privado.REPOSITORIO}</b>, e o arquivo se atualiza sozinho quando algo muda.",
-                parse_mode="HTML")
-            db.atualizar_config(registro_privado.CHAVE_STATUS, lambda s: s.update(avisado_ok=True))
+        valor = registro_privado.chave()
+        marca = registro_privado.id_da_chave(valor)
+        if registro_privado.situacao().get("avisado_chave") == marca:
+            return
+        await bot_instance.send_message(ADMIN_ID, texto_da_chave(valor.decode("ascii")), parse_mode="HTML")
+        db.atualizar_config(registro_privado.CHAVE_STATUS, lambda s: s.update(avisado_chave=marca))
+        logger.info("🔐 Chave da cópia cifrada do registro enviada ao admin.")
     except Exception as e:
-        logger.error(f"❌ [Admins] Falha ao avisar sobre o registro privado: {type(e).__name__}: {e}")
+        logger.error(f"❌ [Admins] Falha ao mandar a chave da cópia cifrada: {type(e).__name__}")
 
 
 def texto_do_aviso(mudancas):

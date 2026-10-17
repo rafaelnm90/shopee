@@ -1,19 +1,21 @@
-"""Registro privado: o administradores.md no repositório privado do GitHub, só para o Rafael e o Claude."""
+"""Registro privado: o registro dos administradores cifrado no ramo registro-admins, só o Claude abre."""
 import os
-from types import SimpleNamespace
+import stat
+import subprocess
+import sys
 
 import pytest
 
 from conftest import rodar
 
-CHAVE_PUBLICA = "ssh-ed25519 CHAVEPUBLICADETESTE robo-shopee-registro"
+PASTA_PROJETO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 @pytest.fixture
 def rp(monkeypatch, tmp_path):
     import registro_admins
     import registro_privado
-    monkeypatch.setattr(registro_privado, "PASTA", str(tmp_path / "clone"))
+    monkeypatch.setattr(registro_privado, "CHAVE_ARQUIVO", str(tmp_path / "config" / "registro_admins.chave"))
     registro_admins.inicializar_tabelas()
     grupos = [{"chat_id": "-1003932482573", "nome": "Acervo Viral Shopee", "tipo": "canal", "admins": [
         {"user_id": 1, "nome": "Rafael", "usuario": "Rafaelnm", "bot": False, "papel": "dono", "titulo": "",
@@ -26,64 +28,58 @@ def rp(monkeypatch, tmp_path):
     return registro_privado
 
 
-class GitFalso:
-    """Respostas do git por comando; cria a pasta do clone quando o clone dá certo."""
-
-    def __init__(self, rp, respostas=None):
-        self.rp, self.respostas, self.chamadas = rp, respostas or {}, []
-
-    def __call__(self, *argumentos, pasta=None):
-        comando = argumentos[0] if argumentos[0] != "-c" else argumentos[4]
-        self.chamadas.append(comando)
-        codigo, erro = self.respostas.get(comando, (0, ""))
-        if comando == "clone" and codigo == 0:
-            os.makedirs(os.path.join(self.rp.PASTA, ".git"))
-        return SimpleNamespace(returncode=codigo, stderr=erro, stdout="")
-
-
 def test_arquivo_tem_os_admins_de_cada_grupo_e_o_historico(rp):
     texto = rp.montar_relatorio()
     assert "## 📢 Acervo Viral Shopee (canal)" in texto and "ID `-1003932482573`" in texto
     assert "| Rafael | @Rafaelnm | dono | tudo |  |  |" in texto
-    assert "Bot \\| Vídeos (bot): deixou de ser admin" not in texto     # o nome vai na mudança, sem escapar
     assert "· Acervo Viral Shopee: Bot | Vídeos deixou de ser admin" in texto
     assert rp.montar_relatorio() == texto                               # sem hora de agora: não muda à toa
 
 
-def test_sem_repositorio_ou_sem_chave_vira_sem_acesso(rp, monkeypatch):
-    monkeypatch.setattr(rp, "_git", GitFalso(rp, {"clone": (128, "ERROR: Repository not found.")}))
-    assert rp.publicar("texto") == "sem_acesso"
-    git = GitFalso(rp, {"diff": (1, ""), "push": (128, "ERROR: The key you are authenticating with has been "
-                                                        "marked as read only.")})
-    monkeypatch.setattr(rp, "_git", git)
-    assert rp.publicar("texto") == "sem_acesso"
+def test_chave_criada_uma_vez_so_para_o_dono(rp):
+    chave = rp.chave()
+    assert rp.chave() == chave
+    assert stat.S_IMODE(os.stat(rp.CHAVE_ARQUIVO).st_mode) == 0o600
+    assert os.listdir(os.path.dirname(rp.CHAVE_ARQUIVO)) == ["registro_admins.chave"]
 
 
-def test_envia_so_quando_o_arquivo_muda(rp, monkeypatch):
-    git = GitFalso(rp, {"diff": (1, "")})
-    monkeypatch.setattr(rp, "_git", git)
-    assert rp.publicar("versão 1") == "ok" and git.chamadas[-2:] == ["commit", "push"]
-    assert open(os.path.join(rp.PASTA, rp.ARQUIVO), encoding="utf-8").read() == "versão 1"
-    git = GitFalso(rp, {"diff": (0, "")})
-    monkeypatch.setattr(rp, "_git", git)
-    assert rp.publicar("versão 1") == "sem_mudanca" and "push" not in git.chamadas
+def test_cifrado_nao_mostra_nomes_e_so_a_chave_abre(rp):
+    saida = rp.cifrado()
+    assert "Rafael" not in saida and "Acervo" not in saida and saida.startswith("gAAAAA")
+    assert rp.abrir(saida, rp.chave().decode()) == rp.montar_relatorio()
+    from cryptography.fernet import Fernet, InvalidToken
+    with pytest.raises(InvalidToken):
+        rp.abrir(saida, Fernet.generate_key().decode())
 
 
-def test_loop_guarda_a_situacao_e_nao_reenvia_o_mesmo_arquivo(rp, monkeypatch):
-    respostas, enviados = ["sem_acesso", "ok"], []
-
-    def publicar(texto):
-        enviados.append(texto)
-        return respostas.pop(0)
-
-    monkeypatch.setattr(rp, "publicar", publicar)
-    assert rodar(rp.publicar_se_mudou(CHAVE_PUBLICA)) == "sem_acesso"
-    assert rp.situacao()["situacao"] == "sem_acesso" and rp.situacao()["chave_publica"] == CHAVE_PUBLICA
-    assert rodar(rp.publicar_se_mudou(CHAVE_PUBLICA)) == "ok"
-    assert rodar(rp.publicar_se_mudou(CHAVE_PUBLICA)) == "sem_mudanca" and len(enviados) == 2
+def test_mesmo_registro_da_o_mesmo_arquivo_e_mudanca_da_outro(rp):
+    import registro_admins
+    primeiro = rp.cifrado()
+    assert rp.cifrado() == primeiro                                     # o workflow não faz commit à toa
+    assert rp.situacao()["ultima_copia"]
+    registro_admins.gravar([])                                          # o grupo saiu do registro
+    assert rp.cifrado() != primeiro
 
 
-def test_bot_manda_a_chave_uma_vez_e_avisa_quando_liga(bm, rp, monkeypatch):
+def test_sem_conferencia_ainda_sai_um_arquivo_que_diz_isso(rp):
+    import db
+    db.salvar_config("registro_admins", {})
+    assert "Ainda sem conferência" in rp.abrir(rp.cifrado(), rp.chave().decode())
+
+
+def test_claude_le_o_arquivo_com_a_chave_do_ambiente(rp, tmp_path):
+    arquivo = tmp_path / rp.ARQUIVO
+    arquivo.write_text(rp.cifrado(), encoding="ascii")
+    comando = [sys.executable, os.path.join(PASTA_PROJETO, "registro_privado.py"), "ler", str(arquivo)]
+    ambiente = dict(os.environ, **{rp.VARIAVEL_CHAVE: rp.chave().decode()})
+    resultado = subprocess.run(comando, capture_output=True, text=True, env=ambiente, cwd=tmp_path, timeout=60)
+    assert resultado.returncode == 0 and resultado.stdout == rp.montar_relatorio()
+    ambiente.pop(rp.VARIAVEL_CHAVE)
+    resultado = subprocess.run(comando, capture_output=True, text=True, env=ambiente, cwd=tmp_path, timeout=60)
+    assert resultado.returncode == 1 and rp.VARIAVEL_CHAVE in resultado.stdout
+
+
+def test_bot_manda_a_chave_uma_vez_por_chave(bm, rp, monkeypatch):
     import painel_admins
     enviadas = []
 
@@ -91,19 +87,14 @@ def test_bot_manda_a_chave_uma_vez_e_avisa_quando_liga(bm, rp, monkeypatch):
         enviadas.append(texto)
 
     monkeypatch.setattr(bm.bot, "send_message", send_message)
-    bm.db.salvar_config(rp.CHAVE_STATUS, {"situacao": "sem_acesso", "chave_publica": CHAVE_PUBLICA})
+    assert "a primeira sai às 05:47" in painel_admins.linha_registro_privado()
     rodar(painel_admins.avisar_registro_privado())
     rodar(painel_admins.avisar_registro_privado())
-    assert len(enviadas) == 1 and CHAVE_PUBLICA in enviadas[0] and rp.LINK_CADASTRAR_CHAVE in enviadas[0]
-    assert "esperando o repositório e a chave" in painel_admins.linha_registro_privado()
+    assert len(enviadas) == 1 and f"{rp.VARIAVEL_CHAVE}={rp.chave().decode()}" in enviadas[0]
 
-    bm.db.atualizar_config(rp.CHAVE_STATUS, lambda s: s.update(situacao="ok", ultimo_envio="2026-10-16 21:00:00"))
+    os.remove(rp.CHAVE_ARQUIVO)                                         # o servidor perdeu a chave e gera outra
     rodar(painel_admins.avisar_registro_privado())
-    rodar(painel_admins.avisar_registro_privado())
-    assert len(enviadas) == 2 and "Registro privado ligado" in enviadas[1]
-    assert "✅ em dia (último envio em 16/10 às 21:00)" in painel_admins.linha_registro_privado()
+    assert len(enviadas) == 2 and rp.chave().decode() in enviadas[1]
 
-    outra = CHAVE_PUBLICA.replace("TESTE", "NOVA")                       # o servidor perdeu a chave e gerou outra
-    bm.db.atualizar_config(rp.CHAVE_STATUS, lambda s: s.update(situacao="sem_acesso", chave_publica=outra))
-    rodar(painel_admins.avisar_registro_privado())
-    assert len(enviadas) == 3 and outra in enviadas[2]
+    bm.db.atualizar_config(rp.CHAVE_STATUS, lambda s: s.update(ultima_copia="2026-10-17 05:47:10"))
+    assert "última em 17/10 às 05:47" in painel_admins.linha_registro_privado()

@@ -1,68 +1,67 @@
 """
-Cópia privada do registro dos administradores no GitHub: o arquivo administradores.md
-do repositório privado rafaelnm90/shopee-privado, que só o Rafael e o Claude abrem.
-Pedido do Rafael: um registro só "para nós", que o Claude lê quando precisar. O
-repositório dos robôs é público, então esses nomes nunca passam por ele nem pelo log
-do Actions.
+Cópia cifrada do registro dos administradores no próprio repositório dos robôs:
+o arquivo administradores.md.cifrado do ramo registro-admins. O repositório é
+público, então o arquivo vai embaralhado: só abre com a chave do servidor, que o
+Rafael guarda nas configurações do ambiente do Claude (REGISTRO_ADMINS_CHAVE).
+Pedido do Rafael: um registro só "para nós", no mesmo repositório, que o Claude lê
+quando precisar.
 
-Roda no divulgacao_canal (loop_publicacao): a cada 10 min monta o arquivo a partir do
-registro (registro_admins) e, se mudou, faz o commit e o push. Escreve com uma chave
-SSH própria do servidor (~/.ssh/registro_privado), que o Rafael cadastra uma vez como
-deploy key com escrita só nesse repositório; a chave privada nunca sai do servidor.
-Enquanto o envio não funciona, o bot_mestre manda a parte pública ao Rafael
-(painel_admins.avisar_registro_privado).
+Quem usa:
+- workflow registro_admins.yml: roda "registro_privado.py cifrado" no servidor e
+  grava a saída no ramo (só quando mudou);
+- bot_mestre (painel_admins): manda a chave ao Rafael no privado, uma vez por chave;
+- Claude: "registro_privado.py ler ARQUIVO" abre o arquivo do ramo com a chave do ambiente.
+A chave fica num arquivo do servidor (CHAVE_ARQUIVO): nunca no banco, no log ou no git.
 Decisão do Rafael: DECISOES.md, Monitor, deploy e servidor.
 """
-import asyncio
 import hashlib
-import logging
 import os
-import subprocess
+import sys
 from datetime import datetime
+
+from cryptography.fernet import Fernet, InvalidToken
 
 import db
 import links_grupos
 import registro_admins
+from fuso import fuso_horario
 
-logger = logging.getLogger("Registro_Privado")
-
-REPOSITORIO = "rafaelnm90/shopee-privado"
-# Porta 443: passa mesmo onde a saída pela 22 é fechada.
-URL_SSH = f"ssh://git@ssh.github.com:443/{REPOSITORIO}.git"
-LINK_NOVO_REPOSITORIO = "https://github.com/new"
-LINK_CADASTRAR_CHAVE = f"https://github.com/{REPOSITORIO}/settings/keys/new"
-CHAVE = os.path.expanduser("~/.ssh/registro_privado")
-CONHECIDOS = os.path.expanduser("~/.ssh/registro_privado_known_hosts")
-PASTA = os.path.expanduser("~/registro_privado")
-ARQUIVO = "administradores.md"
-INTERVALO_S = 600
+RAMO = "registro-admins"
+ARQUIVO = "administradores.md.cifrado"
+CHAVE_ARQUIVO = os.path.expanduser("~/.config/registro_admins.chave")
+VARIAVEL_CHAVE = "REGISTRO_ADMINS_CHAVE"
 CHAVE_STATUS = "registro_privado"
+HORARIO_COPIA = "05:47"  # o cron do registro_admins.yml, depois da conferência das 04:20
 LIMITE_HISTORICO = 200
-
-# Respostas do git/ssh que querem dizer "o repositório não existe ou a chave não escreve nele".
-SINAIS_SEM_ACESSO = ("permission denied", "repository not found", "could not read from remote repository",
-                     "denied to deploy key", "read only", "access denied")
+SEM_CONFERENCIA = "# Administradores dos grupos e canais do Rafael\n\nAinda sem conferência.\n"
 
 
-def preparar_chave():
-    """Gera a chave do servidor na primeira vez. Devolve a parte pública, ou None se não deu."""
+def chave():
+    """A chave do servidor, criada na primeira vez por quem chegar antes (bot ou workflow)."""
     try:
-        if not os.path.exists(CHAVE):
-            os.makedirs(os.path.dirname(CHAVE), mode=0o700, exist_ok=True)
-            subprocess.run(["ssh-keygen", "-t", "ed25519", "-N", "", "-q", "-C", "robo-shopee-registro",
-                            "-f", CHAVE], check=True, capture_output=True, timeout=30)
-        with open(CHAVE + ".pub", encoding="utf-8") as arquivo:
+        with open(CHAVE_ARQUIVO, "rb") as arquivo:
             return arquivo.read().strip()
-    except Exception as e:
-        logger.error(f"❌ [Registro Privado] Não consegui preparar a chave: {type(e).__name__}.")
-        return None
+    except FileNotFoundError:
+        pass
+    os.makedirs(os.path.dirname(CHAVE_ARQUIVO), mode=0o700, exist_ok=True)
+    provisoria = f"{CHAVE_ARQUIVO}.{os.getpid()}"
+    descritor = os.open(provisoria, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descritor, "wb") as arquivo:
+        arquivo.write(Fernet.generate_key())
+    try:
+        # O link só cria se ainda não existe: os dois robôs nunca ficam com chaves diferentes.
+        os.link(provisoria, CHAVE_ARQUIVO)
+    except FileExistsError:
+        pass
+    finally:
+        os.unlink(provisoria)
+    with open(CHAVE_ARQUIVO, "rb") as arquivo:
+        return arquivo.read().strip()
 
 
-def _git(*argumentos, pasta=None):
-    ambiente = dict(os.environ, GIT_TERMINAL_PROMPT="0", GIT_SSH_COMMAND=(
-        f"ssh -i {CHAVE} -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new "
-        f"-o UserKnownHostsFile={CONHECIDOS}"))
-    return subprocess.run(["git", *argumentos], cwd=pasta, env=ambiente, capture_output=True, text=True, timeout=120)
+def id_da_chave(valor):
+    """Marca curta da chave, para saber se ela mudou sem guardar a chave no banco."""
+    return hashlib.sha256(valor).hexdigest()[:12]
 
 
 def _celula(texto):
@@ -79,7 +78,7 @@ def montar_relatorio():
     linhas = ["# Administradores dos grupos e canais do Rafael", "",
               f"Conferência de {quando}: {resumo.get('grupos', 0)} grupo(s) e canal(is) em que a conta principal "
               f"é dona ou admin, {resumo.get('admins', 0)} administradores no total.",
-              "Arquivo mantido pelo servidor dos robôs (registro_privado.py); não editar à mão.", ""]
+              "Arquivo montado pelo servidor dos robôs (registro_privado.py); não editar à mão.", ""]
     for grupo in sorted(registro_admins._foto_atual().values(), key=lambda g: (g["tipo"], g["nome"].lower())):
         nomes = {a["user_id"]: a["nome"] for a in grupo["admins"]}
         link = links_grupos.link(grupo["chat_id"])
@@ -103,69 +102,53 @@ def montar_relatorio():
     return "\n".join(linhas) + "\n"
 
 
-def _sem_acesso(resultado):
-    return any(sinal in (resultado.stderr or "").lower() for sinal in SINAIS_SEM_ACESSO)
-
-
-def publicar(texto):
-    """Grava o arquivo no repositório privado: 'ok', 'sem_mudanca', 'sem_acesso' ou 'erro'."""
-    if not os.path.isdir(os.path.join(PASTA, ".git")):
-        resultado = _git("clone", URL_SSH, PASTA)
-        if resultado.returncode != 0:
-            return "sem_acesso" if _sem_acesso(resultado) else "erro"
-    for passo in (("fetch", "origin"), ("reset", "--hard", "origin/HEAD")):
-        resultado = _git(*passo, pasta=PASTA)
-        if resultado.returncode != 0:
-            return "sem_acesso" if _sem_acesso(resultado) else "erro"
-    with open(os.path.join(PASTA, ARQUIVO), "w", encoding="utf-8") as arquivo:
-        arquivo.write(texto)
-    _git("add", ARQUIVO, pasta=PASTA)
-    if _git("diff", "--cached", "--quiet", pasta=PASTA).returncode == 0:
-        return "sem_mudanca"
-    _git("-c", "user.name=Robô Shopee", "-c", "user.email=robo-shopee@localhost",
-         "commit", "-m", "Administradores: registro atualizado", pasta=PASTA)
-    resultado = _git("push", "origin", "HEAD", pasta=PASTA)
-    if resultado.returncode != 0:
-        return "sem_acesso" if _sem_acesso(resultado) else "erro"
-    return "ok"
-
-
-def _atualizar_status(**campos):
-    db.atualizar_config(CHAVE_STATUS, lambda status: status.update(campos))
-
-
-async def publicar_se_mudou(chave_publica=None):
-    """Um passo do loop: publica se o arquivo mudou desde o último envio ou se o último falhou."""
-    texto = montar_relatorio()
-    if texto is None:
-        return None
+def cifrado():
+    """O registro cifrado. Enquanto o registro e a chave não mudam, devolve o mesmo texto
+    cifrado de antes (cifrar de novo daria outro texto e um commit à toa no ramo)."""
+    texto = montar_relatorio() or SEM_CONFERENCIA
+    valor = chave()
     marca = hashlib.sha256(texto.encode("utf-8")).hexdigest()
     status = situacao()
-    if status.get("situacao") == "ok" and status.get("marca") == marca:
-        return "sem_mudanca"
-    resultado = await asyncio.to_thread(publicar, texto)
-    campos = {"situacao": "ok" if resultado in ("ok", "sem_mudanca") else resultado,
-              "chave_publica": chave_publica or status.get("chave_publica"), "ultimo_resultado": resultado}
-    if campos["situacao"] == "ok":
-        campos.update(marca=marca, ultimo_envio=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    if resultado != status.get("ultimo_resultado"):
-        logger.info(f"📁 [Registro Privado] Envio ao repositório privado: {resultado}.")
-    _atualizar_status(**campos)
-    return resultado
+    if status.get("marca") == marca and status.get("chave_id") == id_da_chave(valor) and status.get("cifrado"):
+        saida = status["cifrado"]
+    else:
+        saida = Fernet(valor).encrypt(texto.encode("utf-8")).decode("ascii")
+    campos = {"marca": marca, "chave_id": id_da_chave(valor), "cifrado": saida,
+              "ultima_copia": datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S")}
+    db.atualizar_config(CHAVE_STATUS, lambda s: s.update(campos))
+    return saida
 
 
-async def loop_publicacao():
-    """A cada INTERVALO_S, publica o registro se ele mudou."""
-    await asyncio.sleep(150)  # depois da primeira conferência do registro ao subir
-    chave_publica = await asyncio.to_thread(preparar_chave)
-    while True:
-        try:
-            await publicar_se_mudou(chave_publica)
-        except Exception as e:
-            logger.error(f"❌ [Registro Privado] Falhou: {type(e).__name__}.")
-        await asyncio.sleep(INTERVALO_S)
+def abrir(texto_cifrado, valor_chave):
+    """O registro em texto, a partir do arquivo do ramo e da chave."""
+    return Fernet(valor_chave.strip().encode("ascii")).decrypt(texto_cifrado.strip().encode("ascii")).decode("utf-8")
 
 
 def situacao():
-    """O estado do envio, para o painel e o aviso do bot_mestre."""
+    """O estado da cópia, para o painel e o aviso do bot_mestre."""
     return db.ler_config(CHAVE_STATUS, {}) or {}
+
+
+def _ler(caminho):
+    valor = os.environ.get(VARIAVEL_CHAVE, "")
+    if not valor:
+        print(f"Falta a variável {VARIAVEL_CHAVE} no ambiente do Claude (a chave que o bot mandou ao Rafael).")
+        return 1
+    with open(caminho, encoding="ascii") as arquivo:
+        texto_cifrado = arquivo.read()
+    try:
+        print(abrir(texto_cifrado, valor), end="")
+    except (InvalidToken, ValueError):
+        print("A chave do ambiente não abre este arquivo: o servidor pode ter gerado outra (o bot manda a nova).")
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    if sys.argv[1:2] == ["cifrado"]:
+        print(cifrado())
+    elif sys.argv[1:2] == ["ler"]:
+        sys.exit(_ler(sys.argv[2] if len(sys.argv) > 2 else ARQUIVO))
+    else:
+        print("Uso: registro_privado.py cifrado | ler [ARQUIVO]")
+        sys.exit(2)

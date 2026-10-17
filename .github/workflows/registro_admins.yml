@@ -1,0 +1,74 @@
+name: Registro dos administradores (cifrado)
+
+# Guarda o registro dos administradores dos grupos do Rafael no ramo
+# registro-admins deste repositório, cifrado pelo servidor (registro_privado.py).
+# Só abre com a chave que o bot mandou ao Rafael e que fica no ambiente do Claude.
+# Roda todo dia depois da conferência das 04:20 e pode ser disparado à mão.
+#
+# O repositório e os logs do Actions são públicos: aqui não sai nada do
+# conteúdo, nem cifrado; só se o registro mudou ou não.
+on:
+  schedule:
+    - cron: "47 8 * * *"   # 05:47 em Brasília (registro_privado.HORARIO_COPIA)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: registro-admins
+
+jobs:
+  copiar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Buscar o registro cifrado no servidor e guardar no ramo
+        env:
+          HOST: ${{ secrets.ORACLE_HOST }}
+          USUARIO: ${{ secrets.ORACLE_USER }}
+          CHAVE_SSH: ${{ secrets.ORACLE_SSH_KEY }}
+          TOKEN: ${{ github.token }}
+          REPOSITORIO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CHAVE_SSH" > ~/.ssh/servidor
+          chmod 600 ~/.ssh/servidor
+
+          git init -q ramo
+          cd ramo
+          git remote add origin "https://x-access-token:${TOKEN}@github.com/${REPOSITORIO}.git"
+          if git fetch -q --depth 1 origin registro-admins 2>/dev/null; then
+            git checkout -q -b registro-admins FETCH_HEAD
+          else
+            git checkout -q --orphan registro-admins
+          fi
+
+          ssh -i ~/.ssh/servidor -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null \
+            -o LogLevel=ERROR "$USUARIO@$HOST" \
+            'cd ~/shopee && venv/bin/python3 registro_privado.py cifrado' > ../novo
+          if ! grep -q '^gAAAAA' ../novo; then
+            echo "❌ O servidor não devolveu o registro cifrado."
+            exit 1
+          fi
+          mv ../novo administradores.md.cifrado
+
+          cat > README.md <<'FIM'
+          # Registro dos administradores (cifrado)
+
+          Este ramo guarda só o `administradores.md.cifrado`, montado pelo servidor dos
+          robôs (`registro_privado.py`) e gravado pelo workflow `registro_admins.yml`.
+          Sem a chave do servidor, o arquivo não abre. Não é ramo de código.
+          FIM
+
+          git add README.md administradores.md.cifrado
+          if git diff --cached --quiet; then
+            echo "✅ Registro sem mudança desde a última cópia."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898173+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Registro dos administradores (cifrado)"
+          git push -q origin registro-admins
+          echo "✅ Registro cifrado atualizado no ramo registro-admins."
