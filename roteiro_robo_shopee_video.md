@@ -27,6 +27,10 @@ voltarmos a ele. As decisões ficam no `DECISOES.md`, área Shopee Vídeo.
   - uns 20 s depois de abrir, o app foi sozinho para a Verificação;
   - a Verificação começou depois de várias explorações em meia hora, com o app
     fechado e reaberto muitas vezes.
+- **No celular de verdade (17/10/2026), o caminho até Postar vídeo, todo em telas nativas:**
+  abrir → **Eu** → **Criadores & Afiliados** → aba **Conta** → **Perfil em Shopee Vídeo** →
+  **Postar vídeo** (embaixo, à direita). Só a 1ª rodada pediu verificação; as outras 5
+  passaram, com uns 15 min entre elas. O vídeo do passo `video` sai da Fonte dos Vídeos do painel.
 - **Por que parou:** o Rafael não quer arriscar a conta principal. A Shopee vê que é
   servidor de nuvem e Android virtual.
 

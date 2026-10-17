@@ -22,8 +22,11 @@ Passos, separados por ponto e vírgula:
     rolar:baixo      arrasta a tela (rolar:cima)
     esperar:N        espera N segundos
     escrever:TEXTO   escreve no campo que está com o cursor
-    link             abre no app o produto (ou o vídeo) do Autoral mais novo
-    video            põe na galeria o vídeo do Autoral mais novo
+    link             abre no app o produto (ou o vídeo) do vídeo da fonte do painel
+    video            põe na galeria o vídeo da fonte do painel
+
+O vídeo do link e do video sai da "Fonte dos Vídeos 🎞️" do painel da Shopee Vídeo,
+escolhido como no modo assistente (o mais novo com arquivo e link ainda não mandado).
     tela             só descreve a tela
 
 Nunca toca em "Postar": a exploração termina, no máximo, em Rascunhos. Nunca mexe
@@ -43,6 +46,7 @@ import time
 import xml.etree.ElementTree as ET
 
 import android_virtual as av
+import assistente_shopee_video as assistente
 import celular_robo
 import db
 from api_shopee import link_para_converter, tipo_de_link
@@ -50,6 +54,7 @@ from api_shopee import link_para_converter, tipo_de_link
 PACOTE = av.PACOTE_SHOPEE
 PACOTE_SISTEMA = "com.android.systemui"
 GALERIA = "/sdcard/DCIM/Camera"
+CHAVE_PAINEL = "shopee_video"  # a mesma chave do painel_shopee_video
 NOME_NA_GALERIA = "autoral_shopee_video.mp4"
 SEGUNDOS_DEPOIS_DO_PASSO = 3
 MAXIMO_ESPERA = 60
@@ -198,23 +203,15 @@ def eh_botao_de_postar(alvo):
     return _normal(alvo) == "postar"
 
 
-def ultimo_autoral():
-    """(arquivo do vídeo, link da Shopee) do Autoral mais novo que ainda tem o vídeo; (None, None) sem nenhum."""
-    try:
-        with db.conexao() as con:
-            linhas = con.execute("SELECT caminho_arquivo, legenda FROM fila_autorais "
-                                 "ORDER BY data_captura DESC").fetchall()
-    except Exception:
-        return None, None
-    for caminho, legenda in linhas:
-        if not caminho:
-            continue
-        # Caminho relativo à pasta do projeto, de onde os robôs rodam (archive/...).
-        arquivo = os.path.abspath(caminho)
-        link = re.search(r"https?://[^\s<>\"]*shopee[^\s<>\"]*", legenda or "")
-        if os.path.exists(arquivo) and link:
-            return arquivo, link.group(0)
-    return None, None
+def video_da_fonte():
+    """
+    (arquivo do vídeo, link da Shopee) do vídeo que o modo assistente mandaria agora,
+    da fonte escolhida no painel; (None, None) sem nenhum.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    fonte = (db.ler_config(CHAVE_PAINEL, {}) or {}).get("fonte", assistente.FONTE_PADRAO)
+    video = assistente.proximo_video(fonte)
+    return (os.path.abspath(video["arquivo"]), video["link"]) if video else (None, None)
 
 
 def abrir_link(d, link):
@@ -288,9 +285,9 @@ def fazer_passo(d, nome, argumento):
         d.send_keys(argumento)
         return True, "escrito"
     if nome in ("link", "video"):
-        arquivo, link = ultimo_autoral()
+        arquivo, link = video_da_fonte()
         if not arquivo:
-            return False, "nenhum vídeo dos Autorais com arquivo e link"
+            return False, "nenhum vídeo da fonte do painel com arquivo e link"
         if nome == "link":
             return True, f"aberto: {abrir_link(d, link)}"
         return (True, "vídeo na galeria") if por_na_galeria(d, arquivo) else (False, "o vídeo não apareceu na galeria")

@@ -208,11 +208,24 @@ def _autorais():
             "'archive/antigo.mp4', '2026-10-04 10:00')")
 
 
-def test_ultimo_autoral_pula_o_que_perdeu_o_arquivo():
-    assert ps.ultimo_autoral() == (None, None)
+def test_video_da_fonte_pula_o_que_perdeu_o_arquivo():
+    assert ps.video_da_fonte() == (None, None)
     _autorais()
-    arquivo, link = ps.ultimo_autoral()
+    arquivo, link = ps.video_da_fonte()
     assert arquivo == os.path.abspath("archive/antigo.mp4") and link == "https://s.shopee.com.br/abc"
+
+
+def test_video_da_fonte_segue_a_fonte_do_painel():
+    _autorais()
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    import db
+    db.salvar_config("fila_clonagem", {"fila": [{"id": 7, "caminho_video": "archive/viral.mp4",
+                                                 "link_original": "https://s.shopee.com.br/viral",
+                                                 "data_captura": "2026-10-17 10:00"}]})
+    with open("archive/viral.mp4", "wb") as f:
+        f.write(b"video")
+    db.salvar_config(ps.CHAVE_PAINEL, {"fonte": "viral"})
+    assert ps.video_da_fonte() == (os.path.abspath("archive/viral.mp4"), "https://s.shopee.com.br/viral")
 
 
 def test_link_abre_o_produto_no_app_sem_mostrar_o_endereco(monkeypatch, capsys):
@@ -239,9 +252,9 @@ def test_video_vai_para_a_galeria():
     assert not ps.explorar("video", Aparelho(galeria=""))
 
 
-def test_sem_autorais_o_link_e_o_video_falham(capsys):
+def test_sem_video_na_fonte_o_link_e_o_video_falham(capsys):
     assert not ps.explorar("video", Aparelho())
-    assert "nenhum vídeo dos Autorais" in capsys.readouterr().out
+    assert "nenhum vídeo da fonte do painel" in capsys.readouterr().out
 
 
 def test_android_desligado_nem_conecta(monkeypatch, capsys):
