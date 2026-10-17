@@ -3168,11 +3168,13 @@ def destino_no_grupo_publico(destino):
 
 def credito_do_parceiro(p):
     """
-    O @ do "👤 Vídeo enviado por" do parceiro: o cadastrado ou, sem ele, o @ público do
-    canal de origem (no canal, o Telegram não diz quem postou). Vazio = sem a linha.
+    O "👤 Vídeo enviado por" do parceiro, já pronto para o HTML: o @ cadastrado; sem ele,
+    o @ público do canal de origem (no canal, o Telegram não diz quem postou); sem
+    nenhum @, o nome do cadastro, como o membro sem @. Vazio = sem a linha.
     Decisão do Rafael: DECISOES.md, Parceiros.
     """
-    return (p.get("arroba") or "").strip() or arroba_do_grupo(p.get("canal_origem")) or ""
+    arroba = (p.get("arroba") or "").strip() or arroba_do_grupo(p.get("canal_origem"))
+    return arroba or html_escape((p.get("nome") or "").strip())
 
 def legenda_do_parceiro(p, texto_ia, link_final):
     """
@@ -3552,12 +3554,14 @@ def link_post_destino(destino, msg_id):
 
 
 def rotulo_arroba_parceiro(p):
-    """O @ na tela do parceiro: o cadastrado ou, sem ele, o do canal que vai no crédito."""
+    """O @ na tela do parceiro: o cadastrado ou, sem ele, o que vai no crédito no lugar."""
     if (p.get("arroba") or "").strip():
         return p["arroba"]
-    credito = credito_do_parceiro(p)
-    return f"não cadastrado (o crédito sai com {credito}, do canal de origem)" if credito else \
-        "não cadastrado (sem a linha do crédito)"
+    canal = arroba_do_grupo(p.get("canal_origem"))
+    if canal:
+        return f"não cadastrado (o crédito sai com {canal}, do canal de origem)"
+    nome = credito_do_parceiro(p)
+    return f"não cadastrado (o crédito sai com o nome: {nome})" if nome else "não cadastrado (sem a linha do crédito)"
 
 def rotulo_cota_parceiro(p):
     """Como a cota do parceiro aparece no painel: faixa, número fixo ou sem teto."""
@@ -3936,7 +3940,7 @@ async def voltar_passo_parceiro(message, state: FSMContext, destino):
     """Mostra a pergunta do passo do cadastro, sem perder o que já foi digitado."""
     passos = {
         "nome":       ("👤 <b>PASSO 1 de 8 — Nome do parceiro</b>\n\nComo você quer identificar este afiliado? (ex: <i>João Silva</i>)", SubmissaoAdminFluxo.parceiro_nome),
-        "arroba":     ("📣 <b>PASSO 2 de 8 — @ do parceiro no Telegram</b>\n\nEnvie o @ dele (ex: <code>@joaosilva</code>). Ele aparece em \"👤 Vídeo enviado por\" nos vídeos deste parceiro que vão para a Vídeos da Comunidade do Grupo Público.\n<i>Sem @? Envie <code>-</code>: o crédito sai com o @ do canal de origem, se ele for público, ou sem a linha.</i>", SubmissaoAdminFluxo.parceiro_arroba),
+        "arroba":     ("📣 <b>PASSO 2 de 8 — @ do parceiro no Telegram</b>\n\nEnvie o @ dele (ex: <code>@joaosilva</code>). Ele aparece em \"👤 Vídeo enviado por\" nos vídeos deste parceiro que vão para a Vídeos da Comunidade do Grupo Público.\n<i>Sem @? Envie <code>-</code>: o crédito sai com o @ do canal de origem, se ele for público, ou com o nome do parceiro.</i>", SubmissaoAdminFluxo.parceiro_arroba),
         "app_id":     ("🔑 <b>PASSO 3 de 8 — App ID da Shopee</b>\n\nCole o <b>App ID</b> da conta de afiliado deste parceiro.", SubmissaoAdminFluxo.parceiro_app_id),
         "app_secret": ("🔐 <b>PASSO 4 de 8 — App Secret</b>\n\nCole o <b>App Secret</b> deste parceiro.\n<i>⚠️ Dado sensível: apague a mensagem do chat depois de enviar.</i>", SubmissaoAdminFluxo.parceiro_app_secret),
         "origem":     ("📥 <b>PASSO 5 de 8 — Canal de ORIGEM</b>\n\nDe onde este parceiro vai pegar os vídeos?\nEnvie o <b>ID, @username ou link</b> do canal.", SubmissaoAdminFluxo.parceiro_origem),

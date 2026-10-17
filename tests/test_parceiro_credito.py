@@ -72,10 +72,13 @@ def test_parceiro_na_comunidade_sai_com_o_arroba_dele(bm, monkeypatch, relogio):
                        "<i>#SapatosFemininos</i>")
 
 
-def test_parceiro_sem_arroba_e_canal_privado_sai_sem_a_linha_do_credito(bm, monkeypatch, relogio):
+def test_parceiro_sem_nenhum_arroba_sai_com_o_nome_do_cadastro(bm, monkeypatch, relogio):
+    # Escolha do Rafael em 16/10: sem @ cadastrado e com canal privado, vai o nome do
+    # cadastro, como o membro sem @ (o caso da parceira sem @ no Telegram).
     relogio("15:00")
     legenda = _publicar_um_video(bm, monkeypatch, f"{GRUPO_PUBLICO}:{TOPICO_COMUNIDADE}", "")
-    assert legenda.startswith("<b>Tênis Casual Feminino 👟</b>\n\n🔶 <b>SHOPEE</b> 🔶")
+    assert legenda.startswith("👤 Vídeo enviado por: Loja da Ana\n\n<b>Tênis Casual Feminino 👟</b>\n\n"
+                              "🔶 <b>SHOPEE</b> 🔶")
 
 
 @pytest.mark.parametrize("origem", ["@canal_da_ana", "https://t.me/canal_da_ana", "-1001234567890"])
@@ -102,6 +105,8 @@ def test_canal_sem_arroba_publico_nao_inventa_credito(bm, origem):
     import links_grupos
     assert links_grupos.arroba(origem) is None
     assert bm.credito_do_parceiro({"arroba": "", "canal_origem": origem}) == ""
+    assert bm.credito_do_parceiro({"arroba": "", "canal_origem": origem, "nome": "Ana & <Cia>"}) == \
+        "Ana &amp; &lt;Cia&gt;"
 
 
 def test_padrao_vale_para_o_grupo_publico_inteiro(bm, monkeypatch, relogio):
@@ -140,4 +145,6 @@ def test_arroba_cadastrado_e_editado_pelo_painel(bm, Msg, Est):
 def test_tela_do_parceiro_mostra_de_onde_sai_o_credito(bm):
     assert bm.rotulo_arroba_parceiro({"arroba": "@loja_da_ana", "canal_origem": "@canal_da_ana"}) == "@loja_da_ana"
     assert "o crédito sai com @canal_da_ana" in bm.rotulo_arroba_parceiro({"arroba": "", "canal_origem": "@canal_da_ana"})
+    assert "o crédito sai com o nome: Loja da Ana" in bm.rotulo_arroba_parceiro(
+        {"arroba": "", "canal_origem": "-100999", "nome": "Loja da Ana"})
     assert "sem a linha do crédito" in bm.rotulo_arroba_parceiro({"arroba": "", "canal_origem": "-100999"})
