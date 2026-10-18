@@ -288,6 +288,27 @@ def test_link_e_titulo_usam_o_video_escolhido_no_passo_video():
     assert ps.video_do_teste()["id"] == "antigo"
 
 
+def test_passo_video_usa_o_video_guardado_e_so_video_novo_troca(monkeypatch):
+    _autorais()
+
+    async def converter(link):
+        return "https://shopee.com.br/product/11/22"
+
+    monkeypatch.setattr(ps, "link_para_converter", converter)
+    assert ps.explorar("link", Aparelho())
+    with open("archive/mais_novo.mp4", "wb") as f:
+        f.write(b"video")
+    inserir("INSERT INTO fila_autorais VALUES ('mais_novo', 'Link: https://s.shopee.com.br/outro', "
+            "'archive/mais_novo.mp4', '2026-10-06 10:00')")
+    galeria = f"Row: 0 _display_name={ps.NOME_NA_GALERIA}"
+    aparelho = Aparelho(galeria=galeria)
+    assert ps.explorar("video", aparelho)
+    assert aparelho.enviados[0][0] == os.path.abspath("archive/antigo.mp4")
+    aparelho = Aparelho(galeria=galeria)
+    assert ps.explorar("video:novo", aparelho)
+    assert aparelho.enviados[0][0] == os.path.abspath("archive/mais_novo.mp4")
+
+
 def test_titulo_da_ia_vai_para_o_campo_e_o_log_mostra_so_o_tamanho(monkeypatch, capsys):
     _autorais()
     pedidos = []

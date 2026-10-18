@@ -23,16 +23,16 @@ Passos, separados por ponto e vírgula:
     rolar:baixo      arrasta a tela (rolar:cima)
     esperar:N        espera N segundos
     escrever:TEXTO   escreve no campo que está com o cursor
-    video            escolhe o vídeo do teste e põe na galeria
+    video            põe na galeria o vídeo do teste (video:novo escolhe outro na fonte)
     link             abre no app o produto (ou o vídeo) do vídeo do teste
     titulo           escreve no campo com o cursor o título da IA para o vídeo do teste
     print            manda um print da tela no privado do Rafael (nunca no log)
     tela             só descreve a tela
 
 O vídeo do teste sai da "Fonte dos Vídeos 🎞️" do painel da Shopee Vídeo, escolhido
-como no modo assistente (o mais novo com arquivo e link ainda não mandado). O passo
-video escolhe e guarda (chave CHAVE_TESTE); link e titulo usam o guardado, para o
-vídeo não trocar entre uma rodada e outra.
+como no modo assistente (o mais novo com arquivo e link ainda não mandado), e fica
+guardado (chave CHAVE_TESTE): video, link e titulo usam sempre o mesmo, para o produto
+curtido ser o do vídeo do rascunho. Só video:novo troca.
 
 Nunca toca em "Postar" nem nos botões de comprar da página do produto (Compre agora,
 carrinho, chat), por texto, id ou ponto: a exploração termina, no máximo, em Rascunhos. Nunca mexe
@@ -256,8 +256,8 @@ def video_da_fonte():
 
 def video_do_teste(novo=False):
     """
-    O vídeo do teste no celular: com novo=True (passo video), escolhe na fonte e guarda;
-    sem, devolve o guardado, enquanto o arquivo existir. None sem nenhum.
+    O vídeo do teste no celular: com novo=True (passo video:novo), escolhe na fonte e
+    guarda; sem, devolve o guardado, enquanto o arquivo existir. None sem nenhum.
     """
     guardado = db.ler_config(CHAVE_TESTE, {}) or {}
     if not novo and guardado.get("arquivo") and os.path.exists(guardado["arquivo"]):
@@ -372,7 +372,7 @@ def fazer_passo(d, nome, argumento):
         d.send_keys(argumento)
         return True, "escrito"
     if nome in ("link", "video", "titulo"):
-        video = video_do_teste(novo=nome == "video")
+        video = video_do_teste(novo=nome == "video" and argumento == "novo")
         if not video:
             return False, "nenhum vídeo da fonte do painel com arquivo e link"
         if nome == "link":

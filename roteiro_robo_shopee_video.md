@@ -100,6 +100,10 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
      do produto. Nela, o coração de curtir é `buttonItemLike` (ponta direita da linha
      do preço, ~1028,1233); embaixo ficam `buttonProductChatNow`,
      `buttonProductAddCart` e `buttonProductBuyNow`, que o explorar recusa tocar.
+   - Curtir (7ª rodada de 18/10/2026): `tocar:@buttonItemLike`; depois do toque o id vira
+     `buttonItemLiked` e aparece "Adicionado aos Meus Favoritos com sucesso!". Se o
+     produto já está curtido, `@buttonItemLike` não existe e o passo falha sem
+     descurtir. O vídeo do teste fica o mesmo em todos os passos; `video:novo` troca.
    - Página do produto presa no esqueleto (ícone de presente e barras cinzas, ids
      `ll_head_root` e `iv_head_image`), até abrindo à mão: era a verificação das 04:27
      de 18/10/2026, que expirou sem resposta. Forçar a parada da Shopee faz a
