@@ -118,6 +118,12 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
      da IA na legenda; o produto sai de "Minhas Curtidas"; `print` manda a tela no
      privado do Rafael antes de tocar em Rascunhos; `produto` toca em Adicionar só no
      produto do vídeo, achado pelo nome na lista.
+   - Conferências do produto (escolha do Rafael em 18/10/2026, depois de um ponto de
+     punição da Shopee pelo produto errado): `ia` (a IA confere se o produto do link é o
+     do vídeo), `produto` (pelo nome, na lista e na janela "Editar nome do produto") e
+     `conferir` (na tela final, o único produto anexado é o do vídeo; o toque em
+     Rascunhos confere sozinho). Qualquer uma que não bate para a rodada e avisa no
+     privado.
    - O `link` abre o link do vídeo como veio (o app segue o link curto sozinho), como
      o Rafael faz com o link do modo assistente. Aberto pelo endereço final do produto
      (/product/loja/item), o app ficou preso no esqueleto da página, carregando
@@ -136,12 +142,15 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
      `ll_head_root` e `iv_head_image`), até abrindo à mão: era a verificação das 04:27
      de 18/10/2026, que expirou sem resposta. Forçar a parada da Shopee faz a
      verificação aparecer de novo; resolvida pelo Rafael, a página volta ao normal.
-5. **Ritmo do robô pronto:**
+5. **Postar só com o OK do Rafael** (escolha dele em 18/10/2026): o robô pronto manda o
+   print da tela final no privado e só toca em Postar depois da aprovação dele, pelo
+   menos nas primeiras semanas; antes disso, as conferências `ia`, `produto` e `conferir`.
+6. **Ritmo do robô pronto:**
    - poucos vídeos por dia no começo (1 ou 2);
    - faixa de horário e quantidade sorteada por dia, como no painel;
    - nenhum toque rápido demais;
    - o app fica aberto entre um vídeo e outro, sem sair e entrar direto.
-6. **Conteúdo:** as mesmas regras do modo assistente: vídeo dos Autorais, só os
+7. **Conteúdo:** as mesmas regras do modo assistente: vídeo dos Autorais, só os
    produtos do criador, título pelo prompt do Gem, diretrizes sempre, vídeo com
    violação não sai.
 

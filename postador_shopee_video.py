@@ -26,11 +26,17 @@ Passos, separados por ponto e vírgula:
     video            põe na galeria o vídeo do teste (video:novo escolhe outro na fonte)
     link             abre no app o produto (ou o vídeo) do vídeo do teste
     titulo           escreve no campo com o cursor o título da IA para o vídeo do teste
+    ia               a IA assiste ao vídeo do teste e diz se o produto do link é o do vídeo
     produto          na lista de Adicionar Produto, toca em Adicionar só no produto do vídeo
-                     do teste, achado pelo nome, e confere o nome na janela que abre (sem
-                     achar ou com outro produto, para e avisa no privado)
+                     do teste, achado pelo nome, e confere o nome na janela que abre
+    conferir         confere na tela final que o produto anexado é o do vídeo (o toque em
+                     Rascunhos faz essa conferência antes, sozinho)
     print            manda um print da tela no privado do Rafael (nunca no log)
     tela             só descreve a tela
+
+ia, produto e conferir param a exploração quando o produto não bate, e avisam o Rafael
+no privado, com o nome do produto (nunca no log): um produto errado no post rende ponto
+de punição na Shopee.
 
 O vídeo do teste sai da "Fonte dos Vídeos 🎞️" do painel da Shopee Vídeo, escolhido
 como no modo assistente (o mais novo com arquivo e link ainda não mandado), e fica
@@ -50,6 +56,7 @@ vira "#". Também nunca imprime os links.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
 import asyncio
+import json
 import logging
 import os
 import re
@@ -60,6 +67,7 @@ import xml.etree.ElementTree as ET
 from datetime import datetime
 
 import android_virtual as av
+import api_gemini
 import assistente_shopee_video as assistente
 import avisar_rafael
 import celular_robo
@@ -77,6 +85,15 @@ CHAVE_TESTE = "celular_robo_teste"
 HORARIO_DAS_RODADAS = (8, 22)
 LEGENDA_PRINT = "🤖 Robô da Shopee Vídeo (teste): a tela antes de salvar o rascunho."
 AVISO_SEM_PRODUTO = "🤖 Robô da Shopee Vídeo (teste): nenhum produto foi adicionado ao vídeo."
+AVISO_IA = "🤖 Robô da Shopee Vídeo (teste): a IA viu que o produto do link não é o produto do vídeo. Parei aqui."
+AVISO_TELA_FINAL = ("🤖 Robô da Shopee Vídeo (teste): na tela final, o produto anexado não é o do vídeo "
+                    "(ou há produto a mais ou a menos). Não salvei nem postei; confira o celular.")
+PROMPT_PRODUTO_DO_VIDEO = """Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.
+O link que vai junto com o vídeo leva a este produto: "{nome}".
+Assista ao vídeo inteiro e diga se o produto mostrado no vídeo é esse produto (o mesmo produto, \
+ou pelo menos o mesmo tipo de produto: vídeo de vestido infantil com link de vestido infantil confere; \
+vídeo de vestido com link de fibra de cabelo não confere).
+Responda só com um JSON: {{"confere": true ou false, "motivo": "uma frase curta"}}"""
 AVISO_JANELA_ERRADA = ("🤖 Robô da Shopee Vídeo (teste): a janela de editar o nome aberta no celular é de outro "
                        "produto, não do produto do vídeo. Parei sem tocar em Feito; confira o celular.")
 # Quantas vezes o passo produto rola a lista de Minhas Curtidas atrás do produto do vídeo.
@@ -359,6 +376,8 @@ def ponto_livre(botao, xml):
 
 def nome_do_produto(video):
     """Nome do produto do vídeo pela API de afiliado, a partir do link; "" quando o link não diz."""
+    if not (video or {}).get("link"):
+        return ""
     produtos, _ = asyncio.run(assistente.produtos_do_link(video["link"]))
     return produtos[0]["nome"] if produtos else ""
 
@@ -422,6 +441,53 @@ def conferir_janela(d, nome, ponto):
     return True, f"produto do vídeo achado pelo nome; Adicionar tocado em {ponto}; a janela confere"
 
 
+def ia_confere_produto(video):
+    """
+    A IA assiste ao vídeo com o nome do produto do link e diz se é o mesmo produto:
+    pega o link errado que vem da fonte antes de qualquer toque. Sem confirmação da IA
+    (não confere, não respondeu ou o link não diz o produto), a exploração para.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    nome = nome_do_produto(video)
+    if not nome:
+        avisar_rafael.mandar_texto(f"{AVISO_IA}\n\nO link do vídeo não diz qual é o produto.")
+        return False, "o link não diz o produto do vídeo: a IA não tem o que conferir (aviso no privado)"
+    resposta = asyncio.run(api_gemini.analisar_video_gemini(video["arquivo"],
+                                                            PROMPT_PRODUTO_DO_VIDEO.format(nome=nome)))
+    achado = re.search(r"\{.*\}", resposta or "", re.S)
+    try:
+        dados = json.loads(achado.group(0)) if achado else None
+    except ValueError:
+        dados = None
+    if not isinstance(dados, dict):
+        return False, "a IA não respondeu à conferência: parado"
+    if dados.get("confere") is not True:
+        avisar_rafael.mandar_texto(f"{AVISO_IA}\n\nProduto do link: {nome}\nO que a IA viu: "
+                                   f"{str(dados.get('motivo') or '').strip()}")
+        return False, "a IA viu outro produto no vídeo: parado (aviso no privado)"
+    return True, "a IA confere: o produto do link é o do vídeo"
+
+
+def conferir_tela_final(d, video):
+    """
+    Na tela final, antes de Rascunhos (e, no robô pronto, de Postar): o único produto
+    anexado tem de ser o do vídeo. Diferente, a mais ou nenhum: não segue e avisa.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    nome = nome_do_produto(video)
+    anexados = [el["texto"] for el in elementos(d.dump_hierarchy()) if el["id"] == "tv_product_title"]
+    if nome and len(anexados) == 1 and mesmo_produto(anexados[0], nome):
+        return True, "tela final confere: o produto anexado é o do vídeo"
+    avisar_rafael.mandar_texto(f"{AVISO_TELA_FINAL}\n\nProduto do vídeo: {nome or 'o link não diz'}")
+    return False, (f"tela final com {len(anexados)} produto(s) anexado(s) que não confere(m) com o do vídeo: "
+                   "nada salvo (aviso no privado)")
+
+
+def toca_em_rascunhos(xml, x, y):
+    """O ponto cai no botão Rascunhos da tela final (tv_drafts_box)?"""
+    return any(el["id"] == "tv_drafts_box" and _dentro((x, y), el["caixa"]) for el in elementos(xml))
+
+
 def rolar(d, para_cima=False):
     """Arrasta a tela no meio, de baixo para cima (o conteúdo desce) ou o contrário."""
     largura, altura = d.window_size()
@@ -467,7 +533,7 @@ def por_na_galeria(d, arquivo):
 def separar_passos(texto):
     """Lista de (nome, argumento). Passo desconhecido vira ValueError antes de tocar em qualquer coisa."""
     conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "esperar", "escrever",
-                  "link", "video", "titulo", "produto", "print", "tela"}
+                  "link", "video", "titulo", "ia", "produto", "conferir", "print", "tela"}
     passos = []
     for pedaco in (texto or "").split(";"):
         pedaco = pedaco.strip()
@@ -499,12 +565,21 @@ def fazer_passo(d, nome, argumento):
         x, y = ponto
         if proibido_no_ponto(tela, x, y):
             return False, RECUSA
+        if toca_em_rascunhos(tela, x, y):
+            ok, resultado = conferir_tela_final(d, db.ler_config(CHAVE_TESTE, {}))
+            if not ok:
+                return False, resultado
         d.click(x, y)
         return True, f"tocado em {ponto}"
     if nome == "xy":
         x, y = (int(n) for n in argumento.split(","))
-        if proibido_no_ponto(d.dump_hierarchy(), x, y):
+        tela = d.dump_hierarchy()
+        if proibido_no_ponto(tela, x, y):
             return False, RECUSA
+        if toca_em_rascunhos(tela, x, y):
+            ok, resultado = conferir_tela_final(d, db.ler_config(CHAVE_TESTE, {}))
+            if not ok:
+                return False, resultado
         d.click(x, y)
         return True, f"tocado em ({x},{y})"
     if nome in ("voltar", "inicio"):
@@ -519,7 +594,7 @@ def fazer_passo(d, nome, argumento):
     if nome == "escrever":
         d.send_keys(argumento)
         return True, "escrito"
-    if nome in ("link", "video", "titulo", "produto"):
+    if nome in ("link", "video", "titulo", "ia", "produto", "conferir"):
         video = video_do_teste(novo=nome == "video" and argumento == "novo")
         if not video:
             return False, "nenhum vídeo da fonte do painel com arquivo e link"
@@ -527,8 +602,12 @@ def fazer_passo(d, nome, argumento):
             return True, f"aberto: {abrir_link(d, video['link'])}"
         if nome == "titulo":
             return escrever_titulo(d, video)
+        if nome == "ia":
+            return ia_confere_produto(video)
         if nome == "produto":
             return adicionar_produto(d, video)
+        if nome == "conferir":
+            return conferir_tela_final(d, video)
         return ((True, "vídeo na galeria") if por_na_galeria(d, video["arquivo"])
                 else (False, "o vídeo não apareceu na galeria"))
     if nome == "print":

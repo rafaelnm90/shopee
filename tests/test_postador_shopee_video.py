@@ -573,6 +573,96 @@ def test_produto_sem_nome_pelo_link_nao_adiciona_nada(monkeypatch, capsys):
     assert "o link não diz o produto" in capsys.readouterr().out
 
 
+TELA_FINAL = """<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+  <node text="" class="android.widget.FrameLayout" bounds="[0,0][1080,2400]" clickable="false">
+    <node text="Adicionar produto" resource-id="com.shopee.br:id/tv_add_product_title"
+          class="android.widget.TextView" bounds="[40,710][320,750]" />
+    PRODUTOS
+    <node text="Rascunhos" resource-id="com.shopee.br:id/tv_drafts_box" class="android.widget.TextView"
+          clickable="true" bounds="[40,2270][185,2345]" />
+    <node text="Postar" resource-id="com.shopee.br:id/btn_post" class="android.widget.TextView"
+          clickable="true" bounds="[260,2265][1000,2340]" />
+  </node>
+</hierarchy>"""
+
+
+def _tela_final(*nomes):
+    produtos = "\n".join(f'<node text="{nome}" resource-id="com.shopee.br:id/tv_product_title" '
+                         f'class="android.widget.TextView" bounds="[130,{820 + 200 * i}][960,{875 + 200 * i}]" />'
+                         for i, nome in enumerate(nomes))
+    return TELA_FINAL.replace("PRODUTOS", produtos)
+
+
+@pytest.mark.parametrize("anexados, confere", [
+    ((VESTIDO,), True),
+    (("Vestido Infantil Estampado Gatinho Para Meni",), True),
+    (("Fibra Proteína Cabelo Cacheado Luxo",), False),
+    ((VESTIDO, "Fibra Proteína Cabelo Cacheado Luxo"), False),
+    ((), False),
+])
+def test_conferir_tela_final(anexados, confere, monkeypatch, capsys):
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    avisos = _avisos(monkeypatch)
+    assert ps.explorar("conferir", Aparelho(tela=_tela_final(*anexados))) is confere
+    assert len(avisos) == (0 if confere else 1)
+    saida = capsys.readouterr().out
+    assert ("tela final confere" in saida) is confere and "Vestido" not in saida and "Fibra" not in saida
+
+
+def test_rascunhos_so_e_tocado_com_o_produto_do_video_na_tela_final(monkeypatch, capsys):
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    _avisos(monkeypatch)
+    assert ps.explorar("video", Aparelho(galeria=f"Row: 0 _display_name={ps.NOME_NA_GALERIA}"))
+    errada = Aparelho(tela=_tela_final("Fibra Proteína Cabelo Cacheado Luxo"))
+    assert not ps.explorar("tocar:@tv_drafts_box", errada)
+    assert not ps.explorar("xy:112,2308", errada)
+    assert errada.toques == [] and "nada salvo" in capsys.readouterr().out
+    certa = Aparelho(tela=_tela_final(VESTIDO))
+    assert ps.explorar("tocar:Rascunhos", certa)
+    assert certa.toques == [(112, 2307)]
+
+
+def _ia(monkeypatch, resposta):
+    pedidos = []
+
+    async def analisar(arquivo, prompt):
+        pedidos.append((arquivo, prompt))
+        return resposta
+
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    return pedidos
+
+
+def test_ia_confere_o_produto_do_link_com_o_video(monkeypatch, capsys):
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    avisos = _avisos(monkeypatch)
+    pedidos = _ia(monkeypatch, '```json\n{"confere": true, "motivo": "vestido infantil"}\n```')
+    assert ps.explorar("ia", Aparelho())
+    assert pedidos[0][0] == os.path.abspath("archive/antigo.mp4") and VESTIDO in pedidos[0][1]
+    assert avisos == [] and "a IA confere" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("resposta, avisa", [
+    ('{"confere": false, "motivo": "o vídeo mostra um vestido; o link é de fibra de cabelo"}', True),
+    ('{"confere": "talvez"}', True),
+    ("não consegui ver o vídeo", False),
+    (None, False),
+])
+def test_ia_sem_confirmacao_para(resposta, avisa, monkeypatch, capsys):
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    avisos = _avisos(monkeypatch)
+    _ia(monkeypatch, resposta)
+    assert not ps.explorar("ia", Aparelho())
+    assert len(avisos) == (1 if avisa else 0)
+    saida = capsys.readouterr().out
+    assert "parado" in saida and "fibra" not in saida and "Vestido" not in saida
+
+
 @pytest.mark.parametrize("texto, nome, igual", [
     (VESTIDO, VESTIDO, True),
     ("  vestido infantil  estampado gatinho para meninas de 4 a 14 anos ", VESTIDO, True),
