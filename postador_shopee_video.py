@@ -34,7 +34,8 @@ como no modo assistente (o mais novo com arquivo e link ainda não mandado). O p
 video escolhe e guarda (chave CHAVE_TESTE); link e titulo usam o guardado, para o
 vídeo não trocar entre uma rodada e outra.
 
-Nunca toca em "Postar": a exploração termina, no máximo, em Rascunhos. Nunca mexe
+Nunca toca em "Postar" nem nos botões de comprar da página do produto (Compre agora,
+carrinho, chat), por texto, id ou ponto: a exploração termina, no máximo, em Rascunhos. Nunca mexe
 na Verificação (CAPTCHA) da Shopee: se ela aparece, antes ou depois de um passo, a
 exploração para ali, e quem resolve é o Rafael, com a mão no celular.
 
@@ -216,8 +217,30 @@ def eh_verificacao(xml):
 AVISO_VERIFICACAO = "\n== verificação na tela: parado; o Rafael resolve com a mão no celular"
 
 
-def eh_botao_de_postar(alvo):
-    return _normal(alvo) == "postar"
+# Botões que a exploração nunca toca: o que publica o vídeo e os de comprar da página do
+# produto (Compre agora, carrinho e chat, embaixo). "Postar vídeo" não entra: só abre a câmera.
+# Postar: DECISOES.md, Shopee Vídeo.
+TEXTOS_PROIBIDOS = frozenset({"postar", "compre agora", "comprar agora", "adicionar ao carrinho"})
+IDS_PROIBIDOS = frozenset({"btn_post", "buttonProductBuyNow", "buttonProductAddCart", "buttonProductChatNow"})
+RECUSA = "recusado: a exploração nunca toca em Postar nem nos botões de comprar"
+
+
+def eh_alvo_proibido(alvo):
+    """O alvo de um tocar (texto ou @id) é um dos botões proibidos?"""
+    if alvo.startswith("@"):
+        return alvo[1:] in IDS_PROIBIDOS
+    return _normal(alvo) in TEXTOS_PROIBIDOS
+
+
+def proibido_no_ponto(xml, x, y):
+    """Algum botão proibido cobre esse ponto da tela? Vale para o toque por texto e por xy."""
+    for el in elementos(xml):
+        x1, y1, x2, y2 = el["caixa"]
+        if x1 <= x <= x2 and y1 <= y <= y2 and (
+                el["id"] in IDS_PROIBIDOS
+                or any(_normal(el[campo]) in TEXTOS_PROIBIDOS for campo in ("texto", "descricao"))):
+            return True
+    return False
 
 
 def video_da_fonte():
@@ -317,15 +340,21 @@ def fazer_passo(d, nome, argumento):
         d.app_stop(PACOTE)
         return True, "app fechado"
     if nome == "tocar":
-        if eh_botao_de_postar(argumento):
-            return False, "recusado: a exploração nunca toca em Postar"
-        ponto = achar(d.dump_hierarchy(), argumento)
+        if eh_alvo_proibido(argumento):
+            return False, RECUSA
+        tela = d.dump_hierarchy()
+        ponto = achar(tela, argumento)
         if not ponto:
             return False, "não achei na tela"
-        d.click(*ponto)
+        x, y = ponto
+        if proibido_no_ponto(tela, x, y):
+            return False, RECUSA
+        d.click(x, y)
         return True, f"tocado em {ponto}"
     if nome == "xy":
         x, y = (int(n) for n in argumento.split(","))
+        if proibido_no_ponto(d.dump_hierarchy(), x, y):
+            return False, RECUSA
         d.click(x, y)
         return True, f"tocado em ({x},{y})"
     if nome in ("voltar", "inicio"):

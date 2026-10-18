@@ -94,6 +94,16 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
      o Rafael faz com o link do modo assistente. Aberto pelo endereço final do produto
      (/product/loja/item), o app ficou preso no esqueleto da página, carregando
      (3 rodadas em 18/10/2026; foto do Rafael).
+   - O link de vídeo de outro afiliado abre a página de entrada da Shopee: busca da
+     categoria em cima, o produto do vídeo no alto (bloco do preço em 540,1271) e
+     "Escolhas Populares para Você" embaixo. Tocar no bloco do produto abre a página
+     do produto. Nela, o coração de curtir é `buttonItemLike` (ponta direita da linha
+     do preço, ~1028,1233); embaixo ficam `buttonProductChatNow`,
+     `buttonProductAddCart` e `buttonProductBuyNow`, que o explorar recusa tocar.
+   - Página do produto presa no esqueleto (ícone de presente e barras cinzas, ids
+     `ll_head_root` e `iv_head_image`), até abrindo à mão: era a verificação das 04:27
+     de 18/10/2026, que expirou sem resposta. Forçar a parada da Shopee faz a
+     verificação aparecer de novo; resolvida pelo Rafael, a página volta ao normal.
 5. **Ritmo do robô pronto:**
    - poucos vídeos por dia no começo (1 ou 2);
    - faixa de horário e quantidade sorteada por dia, como no painel;

@@ -148,6 +148,34 @@ def test_explorar_nunca_toca_em_postar(passo, capsys):
     assert "nunca toca em Postar" in capsys.readouterr().out
 
 
+TELA_PRODUTO = """<hierarchy><node class="android.widget.FrameLayout" bounds="[0,0][1080,2400]">
+  <node resource-id="com.shopee.br:id/buttonItemLike" class="android.widget.ImageView"
+        bounds="[1000,1205][1056,1261]" />
+  <node resource-id="com.shopee.br:id/buttonProductAddCart" class="android.view.ViewGroup" clickable="true"
+        bounds="[270,2262][540,2400]" />
+  <node resource-id="com.shopee.br:id/buttonProductBuyNow" class="android.view.ViewGroup" clickable="true"
+        bounds="[540,2262][1080,2400]">
+    <node text="Compre agora" class="android.widget.TextView" bounds="[700,2300][920,2360]" />
+  </node>
+</node></hierarchy>"""
+
+
+@pytest.mark.parametrize("passo", ["tocar:Compre agora", "tocar:Compre", "tocar:@buttonProductBuyNow",
+                                   "tocar:@buttonProductAddCart", "tocar:@btn_post", "xy:810,2331",
+                                   "xy:400,2300"])
+def test_explorar_nunca_toca_nos_botoes_de_comprar(passo, capsys):
+    aparelho = Aparelho(tela=TELA_PRODUTO)
+    assert not ps.explorar(passo, aparelho)
+    assert aparelho.toques == []
+    assert "nunca toca em Postar nem nos botões de comprar" in capsys.readouterr().out
+
+
+def test_curtir_toca_so_no_coracao():
+    aparelho = Aparelho(tela=TELA_PRODUTO)
+    assert ps.explorar("tocar:@buttonItemLike", aparelho)
+    assert aparelho.toques == [(1028, 1233)]
+
+
 def test_passo_desconhecido_nao_toca_em_nada(capsys):
     aparelho = Aparelho()
     assert ps.explorar("abrir; publicar", aparelho) is None
