@@ -149,6 +149,11 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
    para curtir e comentar à mão (pedido dele em 18/10/2026). Falta mapear onde o app dá
    o link do post (compartilhar → copiar link); o comentário já sai no teste (passo
    `comentario`).
+   Como aprovar (ideia e escolhas do Rafael em 18/10/2026): o robô deixa cada vídeo em
+   Rascunhos e manda no privado o vídeo, o título, o link do produto anexado e o print
+   da tela final, com Aprovar e Recusar. Aprovou: o robô abre o rascunho, confere a
+   tela final de novo e posta. Recusou: apaga o rascunho. Falta mapear abrir e apagar
+   um rascunho (Perfil em Shopee Vídeo → Rascunhos).
 6. **Ritmo do robô pronto:**
    - poucos vídeos por dia no começo (1 ou 2);
    - faixa de horário e quantidade sorteada por dia, como no painel;
