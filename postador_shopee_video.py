@@ -12,7 +12,8 @@ no tutorial. Roda à mão pelo workflow android.yml (ação explorar) ou no serv
     python3 postador_shopee_video.py --explorar --celular "tela"   # no celular guardado
 
 Com --celular, explora no celular de verdade do Rafael (celular_robo.py), pareado pelo
-bot; sem ele, no Android virtual.
+bot; sem ele, no Android virtual. No celular, só das 8h às 22h de Brasília
+(HORARIO_DAS_RODADAS): a verificação da Shopee precisa do Rafael acordado para resolver.
 
 Passos, separados por ponto e vírgula:
     abrir            abre o app da Shopee (fechar: fecha)
@@ -49,6 +50,7 @@ import sys
 import tempfile
 import time
 import xml.etree.ElementTree as ET
+from datetime import datetime
 
 import android_virtual as av
 import assistente_shopee_video as assistente
@@ -56,12 +58,16 @@ import avisar_rafael
 import celular_robo
 import db
 from api_shopee import link_para_converter, tipo_de_link
+from fuso import fuso_horario
 
 PACOTE = av.PACOTE_SHOPEE
 PACOTE_SISTEMA = "com.android.systemui"
 GALERIA = "/sdcard/DCIM/Camera"
 CHAVE_PAINEL = "shopee_video"  # a mesma chave do painel_shopee_video
 CHAVE_TESTE = "celular_robo_teste"
+# Horas de Brasília (início, fim) em que uma rodada no celular pode começar.
+# Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+HORARIO_DAS_RODADAS = (8, 22)
 LEGENDA_PRINT = "🤖 Robô da Shopee Vídeo (teste): a tela antes de salvar o rascunho."
 NOME_NA_GALERIA = "autoral_shopee_video.mp4"
 SEGUNDOS_DEPOIS_DO_PASSO = 3
@@ -356,6 +362,11 @@ def conectar(celular=False):
     return uiautomator2.connect(av.ENDERECO_ADB)
 
 
+def no_horario_das_rodadas():
+    inicio, fim = HORARIO_DAS_RODADAS
+    return inicio <= datetime.now(fuso_horario).hour < fim
+
+
 def explorar(texto, d=None, celular=False):
     """
     Faz os passos e descreve a tela depois de cada um. Para no primeiro que falhar
@@ -373,6 +384,10 @@ def explorar(texto, d=None, celular=False):
     if d is None:
         if celular and not celular_robo.conectado():
             print("celular: desconectado; conecte pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱)")
+            return None
+        if celular and not no_horario_das_rodadas():
+            inicio, fim = HORARIO_DAS_RODADAS
+            print(f"celular: fora do horário das rodadas ({inicio}h às {fim}h de Brasília); nada foi tocado")
             return None
         if not celular and not av.android_ligado():
             print("android: desligado; rode o preparar antes")

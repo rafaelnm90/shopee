@@ -330,6 +330,18 @@ def test_android_desligado_nem_conecta(monkeypatch, capsys):
     assert "android: desligado" in capsys.readouterr().out
 
 
+@pytest.mark.parametrize("hora, comeca", [("07:59", False), ("08:00", True), ("21:59", True), ("22:00", False),
+                                         ("03:00", False)])
+def test_no_celular_so_das_8h_as_22h(hora, comeca, relogio, monkeypatch, capsys):
+    relogio(hora)
+    aparelho = Aparelho()
+    monkeypatch.setattr(ps.celular_robo, "conectado", lambda: True)
+    monkeypatch.setattr(ps, "conectar", lambda celular: aparelho)
+    assert ps.explorar("xy:10,20", celular=True) is (True if comeca else None)
+    assert aparelho.toques == ([(10, 20)] if comeca else [])
+    assert ("fora do horário das rodadas" in capsys.readouterr().out) is not comeca
+
+
 def test_so_fica_vermelho_quando_nem_comecou():
     assert ps.codigo_de_saida(True) == 0
     assert ps.codigo_de_saida(False) == 0
