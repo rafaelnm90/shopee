@@ -27,10 +27,30 @@ voltarmos a ele. As decisões ficam no `DECISOES.md`, área Shopee Vídeo.
   - uns 20 s depois de abrir, o app foi sozinho para a Verificação;
   - a Verificação começou depois de várias explorações em meia hora, com o app
     fechado e reaberto muitas vezes.
-- **No celular de verdade (17/10/2026), o caminho até Postar vídeo, todo em telas nativas:**
-  abrir → **Eu** → **Criadores & Afiliados** → aba **Conta** → **Perfil em Shopee Vídeo** →
-  **Postar vídeo** (embaixo, à direita). Só a 1ª rodada pediu verificação; as outras 5
-  passaram, com uns 15 min entre elas. O vídeo do passo `video` sai da Fonte dos Vídeos do painel.
+- **No celular de verdade (17 e 18/10/2026), o caminho até Rascunhos:**
+  1. abrir → **Eu** → **Criadores & Afiliados** (quase sempre tela nativa; às vezes abre
+     como página web) → aba **Conta** → **Perfil em Shopee Vídeo** → **Postar vídeo**
+     (embaixo, à direita);
+  2. a câmera da Shopee abre (abas Vídeo e Modelos, Efeito, Adicionar Música) →
+     **Biblioteca** → Galeria (abas Tudo, Vídeo e Foto) → marcar o vídeo (o círculo no
+     canto da miniatura) → **Próximo (1)**;
+  3. na primeira vez aparece a janela **Dicas de Upload** → **Ok** → **Próximo**;
+  4. edição do vídeo (Adicionar Música, Efeito de giro, Filtro, Efeitos; Cortar, Texto,
+     Captions, Figurinha) → **Próximo**;
+  5. tela final: **Adicionar legenda** (onde vai o título), Selecionar Capa, Hashtag,
+     **Adicionar produto** (abre a lista com busca, abas **Minhas Curtidas** e **Todos**,
+     ordem Relevância/Mais Recente/Em Destaque/Preço e, em cada produto, taxa de comissão,
+     preço e **Adicionar**; o voltar devolve a tela final sem perder o vídeo), as chaves
+     Permitir a reutilização, Salvar no dispositivo, Rótulo de IA e Compartilhar
+     automaticamente, e embaixo **Rascunhos** e **Postar**;
+  6. **Rascunhos** salva (barra de progresso "carregando, aguarde") e volta para a aba
+     Live e Vídeo.
+
+  Permissões que o Rafael deu com a mão, uma vez: câmera ("Durante o uso do app") no
+  primeiro Postar vídeo, e fotos e mídia na primeira Biblioteca. O vídeo do passo `video`
+  sai da Fonte dos Vídeos do painel. Verificação (CAPTCHA): na 1ª rodada (20 s depois de
+  abrir o app) e na 16ª (18/10, 04:27, ao tocar em Criadores & Afiliados, que abriu como
+  página web); nas 14 rodadas entre elas, com uns 15 min de espera, nenhuma.
 - **Por que parou:** o Rafael não quer arriscar a conta principal. A Shopee vê que é
   servidor de nuvem e Android virtual.
 
@@ -93,7 +113,7 @@ Celular guardado (perfil pessoal do Rafael, carregador, Wi-Fi)
 | 1a | Rafael | Conta no Tailscale e uma chave de acesso (auth key) salva no GitHub como segredo `TAILSCALE_AUTHKEY`; nunca colar a chave na conversa. A chave do servidor não expira (Disable key expiry em Machines → shopee-servidor) | feita em 05/10/2026 |
 | 1b | Claude | `android.yml` → `tailscale`: o servidor entra na rede privada (sem mexer no DNS nem nas rotas), com o nome `shopee-servidor` | feita em 05/10/2026: conectado |
 | 1c | Claude + Rafael | Parear o adb com o celular pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱, `celular_robo.py`): o código vai só no privado e o bot apaga a mensagem; Reconectar quando a porta muda. O explorar aceita o celular (`android.yml` → `explorar-celular`) | feita em 17/10/2026: pareado e conectado (moto g(100)). Depois de um reset, o Rafael refaz as fases 0 e 1c pelo botão Passo a Passo 📖 do Celular do Robô 📱 |
-| 2 | Claude | Explorar devagar até Rascunhos, com as regras de "Para voltar" | em andamento desde 17/10/2026: na 1ª rodada (abrir e esperar 20 s) a Shopee abriu a Verificação (CAPTCHA); o Rafael escolheu continuar e resolve cada verificação com a mão |
+| 2 | Claude | Explorar devagar até Rascunhos, com as regras de "Para voltar" | caminho mapeado até Rascunhos em 18/10/2026 (16 rodadas; o 1º rascunho só com o vídeo, sem título nem produto). Duas verificações (1ª e 16ª rodadas); o Rafael escolheu continuar e resolve cada uma com a mão. Falta o teste completo: curtir o produto pelo link antes, título na legenda e produto pela lista |
 | 3 | os dois | Um rascunho por dia que o Rafael confere; depois 1 ou 2 postagens reais por dia, na janela e com quantidade variada; observar 2 a 4 semanas | a fazer |
 | 4 | os dois | Só com semanas sem verificação nem bloqueio: pensar em aumentar o volume | a fazer |
 
