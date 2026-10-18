@@ -106,6 +106,9 @@ PALAVRAS_DA_TELA = frozenset("""
 """.split())
 NUMERO = re.compile(r"[\d.,%R$()+x×/:#-]*\d[\d.,%R$()+x×/:#-]*")
 PONTUACAO = ".,:;!?()[]{}\"'«»“”‘’-–—/|+*·•"
+# Id que é nome de código (buttonActionBarBack, tv_drafts_box) vai para o log; o resto
+# vira "…": o app também usa como id o endereço da imagem do produto, e o log é público.
+ID_DE_CODIGO = re.compile(r"[A-Za-z][A-Za-z0-9_]*")
 
 
 def mascarar(texto):
@@ -161,7 +164,7 @@ def descrever(xml):
         x1, y1, x2, y2 = el["caixa"]
         partes = [f"({(x1 + x2) // 2},{(y1 + y2) // 2})", el["classe"] or "?"]
         if el["id"]:
-            partes.append(f"id={el['id']}")
+            partes.append(f"id={el['id'] if ID_DE_CODIGO.fullmatch(el['id']) else '…'}")
         if el["texto"]:
             partes.append(f'"{mascarar(el["texto"])}"')
         if el["descricao"]:

@@ -108,6 +108,18 @@ def test_descricao_tem_os_botoes_e_nao_tem_a_conta():
     assert "clock" not in texto and ps.achar(TELA_EU, "@clock") is None
 
 
+def test_id_que_e_endereco_nao_vai_para_o_log():
+    tela = """<hierarchy><node class="android.widget.FrameLayout" bounds="[0,0][720,1280]">
+      <node resource-id="_https://cf.shopee.com.br/file/br-11134207-abc_tn_mainpic" class="android.widget.ImageView"
+            bounds="[0,0][300,300]" />
+      <node resource-id="com.shopee.br:id/buttonActionBarBack" class="android.view.ViewGroup" clickable="true"
+            bounds="[0,0][100,100]" />
+    </node></hierarchy>"""
+    linhas = "\n".join(ps.descrever(tela))
+    assert "https" not in linhas and "cf.shopee" not in linhas and "id=…" in linhas
+    assert "id=buttonActionBarBack" in linhas
+
+
 def test_acha_igual_antes_de_parecido():
     assert ps.achar(TELA_EU, "Postar") == (360, 1230)
     assert ps.achar(TELA_EU, "postar VÍDEO") == (600, 1140)
