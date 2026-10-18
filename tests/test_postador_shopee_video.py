@@ -1,4 +1,5 @@
 """Exploração das telas do app da Shopee (postador_shopee_video): forma da tela sem os dados da conta, toques e passos."""
+import logging
 import os
 
 import pytest
@@ -324,6 +325,21 @@ def test_titulo_da_ia_vai_para_o_campo_e_o_log_mostra_so_o_tamanho(monkeypatch, 
     assert pedidos == [(os.path.abspath("archive/antigo.mp4"), "Produto")]
     saida = capsys.readouterr().out
     assert "título com 28 caracteres" in saida and "Garrafa" not in saida
+
+
+def test_log_da_ia_nao_vai_para_o_log_publico(monkeypatch, capsys, caplog):
+    _autorais()
+
+    async def textos(arquivo, nome):
+        logging.getLogger("httpx").warning("HTTP Request: POST /upload?upload_id=SESSAO")
+        logging.getLogger("API_Gemini").error("falha com SESSAO")
+        return {"violacao": False, "motivo": "", "titulo": "Garrafa", "comentario": "x"}
+
+    monkeypatch.setattr(ps.assistente, "textos_do_video", textos)
+    assert ps.explorar("titulo", Aparelho())
+    saida = capsys.readouterr()
+    assert "SESSAO" not in saida.out + saida.err + caplog.text
+    assert logging.getLogger("API_Gemini").isEnabledFor(logging.ERROR)
 
 
 def test_titulo_com_violacao_nao_e_escrito(monkeypatch, capsys):

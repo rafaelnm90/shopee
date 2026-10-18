@@ -45,6 +45,7 @@ vira "#". Também nunca imprime os links.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
 import asyncio
+import logging
 import os
 import re
 import sys
@@ -408,7 +409,19 @@ def explorar(texto, d=None, celular=False):
     Faz os passos e descreve a tela depois de cada um. Para no primeiro que falhar
     e na Verificação da Shopee. True se todos deram certo, False se um falhou ou a
     verificação apareceu e None se nem começou (passo desconhecido ou Android desligado).
+
+    O log do Actions é público: nele só entram as linhas do próprio explorar (a forma
+    da tela, estados e números). O log dos módulos que ele usa fica calado, porque a
+    IA registra os endereços que chama, com o código da sessão de envio do vídeo.
     """
+    logging.disable(logging.CRITICAL)
+    try:
+        return _explorar(texto, d, celular)
+    finally:
+        logging.disable(logging.NOTSET)
+
+
+def _explorar(texto, d, celular):
     print("== Explorando o app da Shopee")
     try:
         passos = separar_passos(texto)
