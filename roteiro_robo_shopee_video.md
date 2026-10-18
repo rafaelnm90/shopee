@@ -78,6 +78,22 @@ voltarmos a ele. As decisões ficam no `DECISOES.md`, área Shopee Vídeo.
   rascunho: o robô publica, com o OK dele (Galeria → Rascunhos → abrir → tela final →
   `conferir; print:postar` → OK → `postar` → achar o link do post).
 
+  **Publicar um rascunho (18/10/2026, mapeado e feito):** Eu → Criadores & Afiliados →
+  Conta → Perfil em Shopee Vídeo (`ReactActivity_`): o 1º quadro da grade Vídeos é
+  **"Rascunhos: N"** (`tocar:Rascunhos`) → a lista (rascunhos lado a lado, ~179,658 e
+  ~540,658, data embaixo; "Selecionar" no alto, ~933,173) → o rascunho abre na edição
+  (`SSZDraftMultipleEditActivity`) → `tocar:@tv_compress` → a tela final com produto e
+  legenda guardados → `conferir; print:postar` → OK do Rafael → `postar` → o app volta
+  para Live e Vídeo. O post saiu às 20:20 e foi removido em 1 min por propriedade
+  intelectual (vídeo copiado; a fonte do painel está fora dos Autorais, escolha do
+  Rafael mantê-la). Falta mapear: o link do post (Perfil → o vídeo → compartilhar →
+  copiar link) e apagar um rascunho (Selecionar na lista). O rascunho só-vídeo antigo
+  ainda está na lista.
+
+  **Retomada (quinta, 22/10/2026, 15h):** montar o robô automático com o botão no bot
+  (todos os rascunhos, aprovados um por um), usando os passos do explorar e as
+  conferências; rodadas paradas até lá para guardar o crédito do Claude.
+
   Ainda não testado: link que, em vez da página do produto, abre um **vídeo com o
   produto anexado** (alguns links são assim). Quando aparecer, mapear onde fica o
   produto do vídeo para curtir.
