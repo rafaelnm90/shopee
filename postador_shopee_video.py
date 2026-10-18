@@ -33,7 +33,9 @@ Passos, separados por ponto e vírgula:
                      do teste, achado pelo nome, e confere o nome na janela que abre
     conferir         confere na tela final que o produto anexado é o do vídeo (o toque em
                      Rascunhos faz essa conferência antes, sozinho)
-    print            manda um print da tela no privado do Rafael (nunca no log)
+    postar           toca em Postar na tela final, com o produto conferido de novo na hora
+    print            manda um print da tela no privado do Rafael (nunca no log); print:postar
+                     avisa que é a tela antes de postar
     tela             só descreve a tela
 
 ia, produto e conferir param a exploração quando o produto não bate, e avisam o Rafael
@@ -45,8 +47,9 @@ como no modo assistente (o mais novo com arquivo e link ainda não mandado), e f
 guardado (chave CHAVE_TESTE): video, link e titulo usam sempre o mesmo, para o produto
 curtido ser o do vídeo do rascunho. Só video:novo troca.
 
-Nunca toca em "Postar" nem nos botões de comprar da página do produto (Compre agora,
-carrinho, chat), por texto, id ou ponto: a exploração termina, no máximo, em Rascunhos. Nunca mexe
+Nunca toca nos botões de comprar da página do produto (Compre agora, carrinho, chat), por
+texto, id ou ponto. Em "Postar", só pelo passo postar: tocar e xy recusam, e o Claude só
+dispara o postar depois do OK do Rafael no print da tela final. Nunca mexe
 na Verificação (CAPTCHA) da Shopee: se ela aparece, antes ou depois de um passo, a
 exploração para ali, e quem resolve é o Rafael, com a mão no celular ou pela tela do
 celular, cujo link vai no privado dele (tela_android.py). Enquanto essa tela está
@@ -86,6 +89,8 @@ CHAVE_TESTE = "celular_robo_teste"
 # Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 HORARIO_DAS_RODADAS = (8, 22)
 LEGENDA_PRINT = "🤖 Robô da Shopee Vídeo (teste): a tela antes de salvar o rascunho."
+LEGENDA_PRINT_POSTAR = ("🤖 Robô da Shopee Vídeo (teste): a tela antes de postar. Confira o vídeo, o título "
+                        "e o produto: só posto com o seu OK.")
 AVISO_SEM_PRODUTO = "🤖 Robô da Shopee Vídeo (teste): nenhum produto foi adicionado ao vídeo."
 AVISO_COMENTARIO = ("💬 Robô da Shopee Vídeo (teste): o comentário deste vídeo. Depois de postar, "
                     "curta o vídeo e comente com o texto abaixo (copie e cole).")
@@ -253,9 +258,9 @@ def eh_verificacao(xml):
 AVISO_VERIFICACAO = "\n== verificação na tela: parado; o Rafael resolve com a mão no celular"
 
 
-# Botões que a exploração nunca toca: o que publica o vídeo e os de comprar da página do
-# produto (Compre agora, carrinho e chat, embaixo). "Postar vídeo" não entra: só abre a câmera.
-# Postar: DECISOES.md, Shopee Vídeo.
+# Botões que tocar e xy nunca tocam: o que publica o vídeo (só o passo postar chega nele) e
+# os de comprar da página do produto (Compre agora, carrinho e chat, embaixo). "Postar
+# vídeo" não entra: só abre a câmera. Postar: DECISOES.md, Shopee Vídeo.
 TEXTOS_PROIBIDOS = frozenset({"postar", "compre agora", "comprar agora", "adicionar ao carrinho"})
 IDS_PROIBIDOS = frozenset({"btn_post", "buttonProductBuyNow", "buttonProductAddCart", "buttonProductChatNow"})
 RECUSA = "recusado: a exploração nunca toca em Postar nem nos botões de comprar"
@@ -509,6 +514,23 @@ def toca_em_rascunhos(xml, x, y):
     return any(el["id"] == "tv_drafts_box" and _dentro((x, y), el["caixa"]) for el in elementos(xml))
 
 
+def postar(d, video):
+    """
+    Toca em Postar uma vez, só na tela final e com o produto conferido de novo na hora.
+    É o único caminho até esse botão: tocar e xy recusam. O Claude só dispara este passo
+    depois do OK do Rafael no print da tela final (print:postar).
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    botoes = [el for el in elementos(d.dump_hierarchy()) if el["id"] == "btn_post"]
+    if len(botoes) != 1:
+        return False, "Postar não está na tela: nada postado"
+    ok, resultado = conferir_tela_final(d, video)
+    if not ok:
+        return False, resultado
+    d.click(*_centro(botoes[0]))
+    return True, "Postar tocado, com a tela final conferida"
+
+
 def rolar(d, para_cima=False):
     """Arrasta a tela no meio, de baixo para cima (o conteúdo desce) ou o contrário."""
     largura, altura = d.window_size()
@@ -516,13 +538,13 @@ def rolar(d, para_cima=False):
     d.swipe(largura // 2, int(altura * de), largura // 2, int(altura * ate), 0.4)
 
 
-def mandar_print(d):
+def mandar_print(d, legenda=LEGENDA_PRINT):
     """Print da tela no privado do Rafael. O arquivo sai do servidor logo depois."""
     descritor, caminho = tempfile.mkstemp(suffix=".png")
     os.close(descritor)
     try:
         d.screenshot(caminho)
-        return avisar_rafael.mandar_foto(caminho, LEGENDA_PRINT)
+        return avisar_rafael.mandar_foto(caminho, legenda)
     finally:
         if os.path.exists(caminho):
             os.remove(caminho)
@@ -554,7 +576,8 @@ def por_na_galeria(d, arquivo):
 def separar_passos(texto):
     """Lista de (nome, argumento). Passo desconhecido vira ValueError antes de tocar em qualquer coisa."""
     conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "esperar", "escrever",
-                  "link", "video", "titulo", "comentario", "ia", "produto", "conferir", "print", "tela"}
+                  "link", "video", "titulo", "comentario", "ia", "produto", "conferir", "postar", "print",
+                  "tela"}
     passos = []
     for pedaco in (texto or "").split(";"):
         pedaco = pedaco.strip()
@@ -615,7 +638,7 @@ def fazer_passo(d, nome, argumento):
     if nome == "escrever":
         d.send_keys(argumento)
         return True, "escrito"
-    if nome in ("link", "video", "titulo", "comentario", "ia", "produto", "conferir"):
+    if nome in ("link", "video", "titulo", "comentario", "ia", "produto", "conferir", "postar"):
         video = video_do_teste(novo=nome == "video" and argumento == "novo")
         if not video:
             return False, "nenhum vídeo da fonte do painel com arquivo e link"
@@ -631,10 +654,14 @@ def fazer_passo(d, nome, argumento):
             return adicionar_produto(d, video)
         if nome == "conferir":
             return conferir_tela_final(d, video)
+        if nome == "postar":
+            return postar(d, video)
         return ((True, "vídeo na galeria") if por_na_galeria(d, video["arquivo"])
                 else (False, "o vídeo não apareceu na galeria"))
     if nome == "print":
-        return (True, "print mandado no privado") if mandar_print(d) else (False, "o Telegram recusou o print")
+        legenda = LEGENDA_PRINT_POSTAR if argumento == "postar" else LEGENDA_PRINT
+        return ((True, "print mandado no privado") if mandar_print(d, legenda)
+                else (False, "o Telegram recusou o print"))
     return True, "só a tela"
 
 

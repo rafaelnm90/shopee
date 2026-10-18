@@ -33,7 +33,9 @@ voltarmos a ele. As decisões ficam no `DECISOES.md`, área Shopee Vídeo.
      (embaixo, à direita);
   2. a câmera da Shopee abre (abas Vídeo e Modelos, Efeito, Adicionar Música) →
      **Biblioteca** → Galeria (abas Tudo, Vídeo e Foto) → marcar o vídeo (o círculo no
-     canto da miniatura, `@ll_check`) → **Próximo (1)** (`@tv_pick_next`);
+     canto da miniatura, `@ll_check`) → **Próximo (1)** (depois de marcar, ele sobe para o
+     alto: `@tv_pick_top_next`, ~919,2103; o `@tv_pick_next` some). No alto da Galeria,
+     à direita, fica **Rascunhos** (`@ll_draft`, ~914,193): a lista dos rascunhos;
   3. na primeira vez aparece a janela **Dicas de Upload** → **Ok** → **Próximo**; nas
      outras, a prévia do vídeo → **Próximo** no alto (`@tv_pick_top_next`);
   4. edição do vídeo (Adicionar Música, Efeito de giro, Filtro, Efeitos; Cortar, Texto,
@@ -65,7 +67,16 @@ voltarmos a ele. As decisões ficam no `DECISOES.md`, área Shopee Vídeo.
      (~540,2315), sem mudar o nome;
   5. de volta à tela final, o produto aparece com "Sem Cupom" e o botão "Adicionar Mais"
      (~888,731) → `print` (a tela no privado do Rafael) → `tocar:@tv_drafts_box`
-     (Rascunhos, ~112,2308). **Postar** (`btn_post`, ~631,2303) nunca.
+     (Rascunhos, ~112,2308). **Postar** (`btn_post`, ~631,2303) só pelo passo `postar`,
+     depois do OK do Rafael no `print:postar`.
+
+  **Segundo teste completo (18/10/2026, à tarde)**, com as conferências: `video:novo` →
+  `ia` (confirmou) → `link` → curtir → … → `produto` (achou pelo nome, o 1º de Mais
+  Recente; a janela conferiu) → Feito → `conferir` → `comentario` → `print` → o Rafael
+  liberou → Rascunhos (a conferência da tela final passou e o app voltou para Live e
+  Vídeo). Nenhuma verificação da Shopee nas 11 rodadas. Escolha do Rafael para esse
+  rascunho: o robô publica, com o OK dele (Galeria → Rascunhos → abrir → tela final →
+  `conferir; print:postar` → OK → `postar` → achar o link do post).
 
   Ainda não testado: link que, em vez da página do produto, abre um **vídeo com o
   produto anexado** (alguns links são assim). Quando aparecer, mapear onde fica o

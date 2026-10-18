@@ -644,6 +644,32 @@ def test_rascunhos_so_e_tocado_com_o_produto_do_video_na_tela_final(monkeypatch,
     assert certa.toques == [(112, 2307)]
 
 
+def test_postar_so_toca_em_postar_com_o_produto_do_video_na_tela_final(monkeypatch, capsys):
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    avisos = _avisos(monkeypatch)
+    errada = Aparelho(tela=_tela_final("Fibra Proteína Cabelo Cacheado Luxo"))
+    assert not ps.explorar("postar", errada)
+    assert errada.toques == [] and len(avisos) == 1
+    # Fora da tela final (sem o btn_post), nem o texto "Postar" de outro botão serve.
+    fora = Aparelho()
+    assert not ps.explorar("postar", fora)
+    assert fora.toques == [] and len(avisos) == 1
+    certa = Aparelho(tela=_tela_final(VESTIDO))
+    assert ps.explorar("postar", certa)
+    assert certa.toques == [(630, 2302)]
+    saida = capsys.readouterr().out
+    assert "nada postado" in saida and "Postar tocado" in saida
+    assert "Vestido" not in saida and "Fibra" not in saida
+
+
+def test_print_antes_de_postar_avisa_na_legenda(monkeypatch):
+    legendas = []
+    monkeypatch.setattr(ps.avisar_rafael, "mandar_foto", lambda caminho, legenda="": legendas.append(legenda) or True)
+    assert ps.explorar("print:postar; print", Aparelho())
+    assert legendas == [ps.LEGENDA_PRINT_POSTAR, ps.LEGENDA_PRINT]
+
+
 def _ia(monkeypatch, resposta):
     pedidos = []
 
