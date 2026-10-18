@@ -22,12 +22,16 @@ Passos, separados por ponto e vírgula:
     rolar:baixo      arrasta a tela (rolar:cima)
     esperar:N        espera N segundos
     escrever:TEXTO   escreve no campo que está com o cursor
-    link             abre no app o produto (ou o vídeo) do vídeo da fonte do painel
-    video            põe na galeria o vídeo da fonte do painel
-
-O vídeo do link e do video sai da "Fonte dos Vídeos 🎞️" do painel da Shopee Vídeo,
-escolhido como no modo assistente (o mais novo com arquivo e link ainda não mandado).
+    video            escolhe o vídeo do teste e põe na galeria
+    link             abre no app o produto (ou o vídeo) do vídeo do teste
+    titulo           escreve no campo com o cursor o título da IA para o vídeo do teste
+    print            manda um print da tela no privado do Rafael (nunca no log)
     tela             só descreve a tela
+
+O vídeo do teste sai da "Fonte dos Vídeos 🎞️" do painel da Shopee Vídeo, escolhido
+como no modo assistente (o mais novo com arquivo e link ainda não mandado). O passo
+video escolhe e guarda (chave CHAVE_TESTE); link e titulo usam o guardado, para o
+vídeo não trocar entre uma rodada e outra.
 
 Nunca toca em "Postar": a exploração termina, no máximo, em Rascunhos. Nunca mexe
 na Verificação (CAPTCHA) da Shopee: se ela aparece, antes ou depois de um passo, a
@@ -42,11 +46,13 @@ import asyncio
 import os
 import re
 import sys
+import tempfile
 import time
 import xml.etree.ElementTree as ET
 
 import android_virtual as av
 import assistente_shopee_video as assistente
+import avisar_rafael
 import celular_robo
 import db
 from api_shopee import link_para_converter, tipo_de_link
@@ -55,6 +61,8 @@ PACOTE = av.PACOTE_SHOPEE
 PACOTE_SISTEMA = "com.android.systemui"
 GALERIA = "/sdcard/DCIM/Camera"
 CHAVE_PAINEL = "shopee_video"  # a mesma chave do painel_shopee_video
+CHAVE_TESTE = "celular_robo_teste"
+LEGENDA_PRINT = "🤖 Robô da Shopee Vídeo (teste): a tela antes de salvar o rascunho."
 NOME_NA_GALERIA = "autoral_shopee_video.mp4"
 SEGUNDOS_DEPOIS_DO_PASSO = 3
 MAXIMO_ESPERA = 60
@@ -205,13 +213,50 @@ def eh_botao_de_postar(alvo):
 
 def video_da_fonte():
     """
-    (arquivo do vídeo, link da Shopee) do vídeo que o modo assistente mandaria agora,
-    da fonte escolhida no painel; (None, None) sem nenhum.
+    {"id", "arquivo", "link", "nome"} do vídeo que o modo assistente mandaria agora,
+    da fonte escolhida no painel; None sem nenhum.
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     fonte = (db.ler_config(CHAVE_PAINEL, {}) or {}).get("fonte", assistente.FONTE_PADRAO)
     video = assistente.proximo_video(fonte)
-    return (os.path.abspath(video["arquivo"]), video["link"]) if video else (None, None)
+    return dict(video, arquivo=os.path.abspath(video["arquivo"])) if video else None
+
+
+def video_do_teste(novo=False):
+    """
+    O vídeo do teste no celular: com novo=True (passo video), escolhe na fonte e guarda;
+    sem, devolve o guardado, enquanto o arquivo existir. None sem nenhum.
+    """
+    guardado = db.ler_config(CHAVE_TESTE, {}) or {}
+    if not novo and guardado.get("arquivo") and os.path.exists(guardado["arquivo"]):
+        return guardado
+    video = video_da_fonte()
+    if video:
+        db.salvar_config(CHAVE_TESTE, video)
+    return video
+
+
+def escrever_titulo(d, video):
+    """Escreve o título da IA (prompt do Gem e diretrizes) no campo com o cursor. (ok, o que dizer no log)."""
+    textos = asyncio.run(assistente.textos_do_video(video["arquivo"], video.get("nome") or ""))
+    if textos and textos["violacao"]:
+        return False, "a IA viu violação das diretrizes: título não escrito"
+    if not textos or not textos["titulo"]:
+        return False, "a IA não devolveu título"
+    d.send_keys(textos["titulo"])
+    return True, f"título com {len(textos['titulo'])} caracteres"
+
+
+def mandar_print(d):
+    """Print da tela no privado do Rafael. O arquivo sai do servidor logo depois."""
+    descritor, caminho = tempfile.mkstemp(suffix=".png")
+    os.close(descritor)
+    try:
+        d.screenshot(caminho)
+        return avisar_rafael.mandar_foto(caminho, LEGENDA_PRINT)
+    finally:
+        if os.path.exists(caminho):
+            os.remove(caminho)
 
 
 def abrir_link(d, link):
@@ -236,7 +281,7 @@ def por_na_galeria(d, arquivo):
 def separar_passos(texto):
     """Lista de (nome, argumento). Passo desconhecido vira ValueError antes de tocar em qualquer coisa."""
     conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "esperar", "escrever",
-                  "link", "video", "tela"}
+                  "link", "video", "titulo", "print", "tela"}
     passos = []
     for pedaco in (texto or "").split(";"):
         pedaco = pedaco.strip()
@@ -284,13 +329,18 @@ def fazer_passo(d, nome, argumento):
     if nome == "escrever":
         d.send_keys(argumento)
         return True, "escrito"
-    if nome in ("link", "video"):
-        arquivo, link = video_da_fonte()
-        if not arquivo:
+    if nome in ("link", "video", "titulo"):
+        video = video_do_teste(novo=nome == "video")
+        if not video:
             return False, "nenhum vídeo da fonte do painel com arquivo e link"
         if nome == "link":
-            return True, f"aberto: {abrir_link(d, link)}"
-        return (True, "vídeo na galeria") if por_na_galeria(d, arquivo) else (False, "o vídeo não apareceu na galeria")
+            return True, f"aberto: {abrir_link(d, video['link'])}"
+        if nome == "titulo":
+            return escrever_titulo(d, video)
+        return ((True, "vídeo na galeria") if por_na_galeria(d, video["arquivo"])
+                else (False, "o vídeo não apareceu na galeria"))
+    if nome == "print":
+        return (True, "print mandado no privado") if mandar_print(d) else (False, "o Telegram recusou o print")
     return True, "só a tela"
 
 

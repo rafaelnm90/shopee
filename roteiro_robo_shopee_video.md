@@ -84,6 +84,10 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
 4. **Mapear até Rascunhos:** Postar vídeo → galeria (o vídeo entra pelo passo
    `video` do explorar) → Próximo → Adicionar Produto → legenda. O primeiro teste
    termina em Rascunhos.
+   - Teste completo (escolha do Rafael em 18/10/2026): `video` escolhe e guarda o
+     vídeo do teste; `link` abre o produto dele para curtir; `titulo` escreve o título
+     da IA na legenda; o produto sai de "Minhas Curtidas"; `print` manda a tela no
+     privado do Rafael antes de tocar em Rascunhos.
 5. **Ritmo do robô pronto:**
    - poucos vídeos por dia no começo (1 ou 2);
    - faixa de horário e quantidade sorteada por dia, como no painel;
@@ -113,7 +117,7 @@ Celular guardado (perfil pessoal do Rafael, carregador, Wi-Fi)
 | 1a | Rafael | Conta no Tailscale e uma chave de acesso (auth key) salva no GitHub como segredo `TAILSCALE_AUTHKEY`; nunca colar a chave na conversa. A chave do servidor não expira (Disable key expiry em Machines → shopee-servidor) | feita em 05/10/2026 |
 | 1b | Claude | `android.yml` → `tailscale`: o servidor entra na rede privada (sem mexer no DNS nem nas rotas), com o nome `shopee-servidor` | feita em 05/10/2026: conectado |
 | 1c | Claude + Rafael | Parear o adb com o celular pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱, `celular_robo.py`): o código vai só no privado e o bot apaga a mensagem; Reconectar quando a porta muda. O explorar aceita o celular (`android.yml` → `explorar-celular`) | feita em 17/10/2026: pareado e conectado (moto g(100)). Depois de um reset, o Rafael refaz as fases 0 e 1c pelo botão Passo a Passo 📖 do Celular do Robô 📱 |
-| 2 | Claude | Explorar devagar até Rascunhos, com as regras de "Para voltar" | caminho mapeado até Rascunhos em 18/10/2026 (16 rodadas; o 1º rascunho só com o vídeo, sem título nem produto). Duas verificações (1ª e 16ª rodadas); o Rafael escolheu continuar e resolve cada uma com a mão. Falta o teste completo: curtir o produto pelo link antes, título na legenda e produto pela lista |
+| 2 | Claude | Explorar devagar até Rascunhos, com as regras de "Para voltar" | caminho mapeado até Rascunhos em 18/10/2026 (16 rodadas; o 1º rascunho só com o vídeo, sem título nem produto). Duas verificações (1ª e 16ª rodadas); o Rafael escolheu continuar e resolve cada uma com a mão. Falta o teste completo: curtir o produto pelo link antes, título na legenda e produto pela lista (passos `titulo` e `print` prontos em 18/10/2026) |
 | 3 | os dois | Um rascunho por dia que o Rafael confere; depois 1 ou 2 postagens reais por dia, na janela e com quantidade variada; observar 2 a 4 semanas | a fazer |
 | 4 | os dois | Só com semanas sem verificação nem bloqueio: pensar em aumentar o volume | a fazer |
 

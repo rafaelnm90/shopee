@@ -2,7 +2,8 @@
 Manda um aviso curto no privado do Rafael pelo bot principal. Usado pelo
 workflow avisar.yml, que o Claude dispara quando uma pergunta dele ao Rafael
 está há muito tempo sem resposta (regra no CLAUDE.md, "Como trabalhamos"). O
-tela_android.py usa o mandar_texto para levar o link da tela do Android.
+tela_android.py usa o mandar_texto para levar o link da tela do Android, e o
+postador_shopee_video.py usa o mandar_foto para o print do rascunho.
 
     python3 avisar_rafael.py "assunto da pendência" [link da sessão do Claude]
 
@@ -15,6 +16,7 @@ import re
 import sys
 import urllib.parse
 import urllib.request
+import uuid
 
 from dotenv import load_dotenv
 
@@ -48,6 +50,27 @@ def mandar_texto(texto):
     dados = urllib.parse.urlencode({"chat_id": admin_id(), "text": texto,
                                     "disable_web_page_preview": "true"}).encode()
     with urllib.request.urlopen(f"https://api.telegram.org/bot{token}/sendMessage", dados, timeout=20) as r:
+        return bool(json.loads(r.read().decode()).get("ok"))
+
+
+def mandar_foto(caminho, legenda=""):
+    """Manda uma imagem no privado do Rafael pelo Bot API. Devolve True se o Telegram aceitou."""
+    load_dotenv(os.path.join(PASTA, ".env"))
+    token = os.getenv("TELEGRAM_TOKEN")
+    if not token:
+        raise RuntimeError("TELEGRAM_TOKEN ausente no .env")
+    fronteira = uuid.uuid4().hex
+    partes = []
+    for nome, valor in (("chat_id", str(admin_id())), ("caption", legenda[:1000])):
+        partes.append(f'--{fronteira}\r\nContent-Disposition: form-data; name="{nome}"\r\n\r\n{valor}\r\n'.encode())
+    with open(caminho, "rb") as f:
+        imagem = f.read()
+    partes.append(f'--{fronteira}\r\nContent-Disposition: form-data; name="photo"; filename="tela.png"\r\n'
+                  "Content-Type: image/png\r\n\r\n".encode() + imagem + b"\r\n")
+    partes.append(f"--{fronteira}--\r\n".encode())
+    pedido = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendPhoto", data=b"".join(partes),
+                                    headers={"Content-Type": f"multipart/form-data; boundary={fronteira}"})
+    with urllib.request.urlopen(pedido, timeout=60) as r:
         return bool(json.loads(r.read().decode()).get("ok"))
 
 

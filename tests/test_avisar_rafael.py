@@ -36,3 +36,27 @@ def test_envia_para_o_admin_pelo_bot(bm, monkeypatch):
     url, campos = pedidos[0]
     assert url.endswith("/sendMessage") and campos["chat_id"] == [str(bm.ADMIN_ID)]
     assert "Pergunta pendente" in campos["text"][0]
+
+
+def test_foto_vai_para_o_admin_pelo_bot(bm, monkeypatch, tmp_path):
+    pedidos = []
+
+    class Resposta(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def urlopen(pedido, timeout=None):
+        pedidos.append(pedido)
+        return Resposta(json.dumps({"ok": True}).encode())
+    monkeypatch.setattr(avisar_rafael.urllib.request, "urlopen", urlopen)
+    imagem = tmp_path / "tela.png"
+    imagem.write_bytes(b"\x89PNG imagem")
+
+    assert avisar_rafael.mandar_foto(str(imagem), "Rascunho") is True
+    pedido = pedidos[0]
+    assert pedido.full_url.endswith("/sendPhoto") and b"\x89PNG imagem" in pedido.data
+    assert f'name="chat_id"\r\n\r\n{bm.ADMIN_ID}\r\n'.encode() in pedido.data
+    assert b'name="caption"\r\n\r\nRascunho\r\n' in pedido.data

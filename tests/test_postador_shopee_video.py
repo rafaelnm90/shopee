@@ -71,6 +71,11 @@ class Aparelho:
     def push(self, origem, destino):
         self.enviados.append((origem, destino))
 
+    def screenshot(self, caminho):
+        self.print = caminho
+        with open(caminho, "wb") as f:
+            f.write(b"png")
+
 
 @pytest.fixture(autouse=True)
 def sem_espera(monkeypatch):
@@ -198,6 +203,7 @@ def test_rolar_escrever_e_teclas():
 
 
 def _autorais():
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
     inserir("CREATE TABLE fila_autorais (id_unico TEXT PRIMARY KEY, legenda TEXT, caminho_arquivo TEXT, "
             "data_captura TEXT)")
     with open("archive/antigo.mp4", "wb") as f:
@@ -209,15 +215,15 @@ def _autorais():
 
 
 def test_video_da_fonte_pula_o_que_perdeu_o_arquivo():
-    assert ps.video_da_fonte() == (None, None)
+    assert ps.video_da_fonte() is None
     _autorais()
-    arquivo, link = ps.video_da_fonte()
-    assert arquivo == os.path.abspath("archive/antigo.mp4") and link == "https://s.shopee.com.br/abc"
+    video = ps.video_da_fonte()
+    assert video["arquivo"] == os.path.abspath("archive/antigo.mp4") and video["link"] == "https://s.shopee.com.br/abc"
+    assert video["id"] == "antigo" and video["nome"] == "Produto"
 
 
 def test_video_da_fonte_segue_a_fonte_do_painel():
     _autorais()
-    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
     import db
     db.salvar_config("fila_clonagem", {"fila": [{"id": 7, "caminho_video": "archive/viral.mp4",
                                                  "link_original": "https://s.shopee.com.br/viral",
@@ -225,7 +231,67 @@ def test_video_da_fonte_segue_a_fonte_do_painel():
     with open("archive/viral.mp4", "wb") as f:
         f.write(b"video")
     db.salvar_config(ps.CHAVE_PAINEL, {"fonte": "viral"})
-    assert ps.video_da_fonte() == (os.path.abspath("archive/viral.mp4"), "https://s.shopee.com.br/viral")
+    video = ps.video_da_fonte()
+    assert (video["arquivo"], video["link"]) == (os.path.abspath("archive/viral.mp4"), "https://s.shopee.com.br/viral")
+
+
+def test_link_e_titulo_usam_o_video_escolhido_no_passo_video():
+    _autorais()
+    assert ps.explorar("video", Aparelho(galeria=f"Row: 0 _display_name={ps.NOME_NA_GALERIA}"))
+    with open("archive/mais_novo.mp4", "wb") as f:
+        f.write(b"video")
+    inserir("INSERT INTO fila_autorais VALUES ('mais_novo', 'Link: https://s.shopee.com.br/outro', "
+            "'archive/mais_novo.mp4', '2026-10-06 10:00')")
+    assert ps.video_do_teste()["id"] == "antigo"
+    assert ps.video_do_teste(novo=True)["id"] == "mais_novo"
+    os.remove("archive/mais_novo.mp4")
+    assert ps.video_do_teste()["id"] == "antigo"
+
+
+def test_titulo_da_ia_vai_para_o_campo_e_o_log_mostra_so_o_tamanho(monkeypatch, capsys):
+    _autorais()
+    pedidos = []
+
+    async def textos(arquivo, nome):
+        pedidos.append((arquivo, nome))
+        return {"violacao": False, "motivo": "", "titulo": "Garrafa térmica inox 1 litro", "comentario": "x"}
+
+    monkeypatch.setattr(ps.assistente, "textos_do_video", textos)
+    aparelho = Aparelho()
+    assert ps.explorar("titulo", aparelho)
+    assert aparelho.escrito == ["Garrafa térmica inox 1 litro"]
+    assert pedidos == [(os.path.abspath("archive/antigo.mp4"), "Produto")]
+    saida = capsys.readouterr().out
+    assert "título com 28 caracteres" in saida and "Garrafa" not in saida
+
+
+def test_titulo_com_violacao_nao_e_escrito(monkeypatch, capsys):
+    _autorais()
+
+    async def textos(arquivo, nome):
+        return {"violacao": True, "motivo": "marca", "titulo": "", "comentario": ""}
+
+    monkeypatch.setattr(ps.assistente, "textos_do_video", textos)
+    aparelho = Aparelho()
+    assert not ps.explorar("titulo", aparelho)
+    assert aparelho.escrito == [] and "violação" in capsys.readouterr().out
+
+
+def test_print_vai_so_para_o_privado_e_o_arquivo_sai(monkeypatch, capsys):
+    mandados = []
+
+    def mandar_foto(caminho, legenda=""):
+        with open(caminho, "rb") as f:
+            mandados.append(f.read())
+        return True
+
+    monkeypatch.setattr(ps.avisar_rafael, "mandar_foto", mandar_foto)
+    aparelho = Aparelho()
+    assert ps.explorar("print", aparelho)
+    assert mandados == [b"png"] and not os.path.exists(aparelho.print)
+    assert "print mandado no privado" in capsys.readouterr().out
+    monkeypatch.setattr(ps.avisar_rafael, "mandar_foto", lambda caminho, legenda="": False)
+    assert not ps.explorar("print", aparelho) and not os.path.exists(aparelho.print)
 
 
 def test_link_abre_o_produto_no_app_sem_mostrar_o_endereco(monkeypatch, capsys):
