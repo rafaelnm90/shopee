@@ -347,6 +347,25 @@ def test_titulo_da_ia_vai_para_o_campo_e_o_log_mostra_so_o_tamanho(monkeypatch, 
     assert "título com 28 caracteres" in saida and "Garrafa" not in saida
 
 
+def test_comentario_da_ia_vai_so_para_o_privado_com_o_lembrete(monkeypatch, capsys):
+    _autorais()
+
+    async def textos(arquivo, nome):
+        return {"violacao": False, "motivo": "", "titulo": "Garrafa térmica inox 1 litro",
+                "comentario": "Amei essa garrafa! #achadinhos"}
+
+    monkeypatch.setattr(ps.assistente, "textos_do_video", textos)
+    avisos = []
+    monkeypatch.setattr(ps.avisar_rafael, "mandar_texto", lambda texto: avisos.append(texto) or True)
+    assert not ps.explorar("comentario", Aparelho())
+    assert avisos == [] and "o passo titulo vem antes" in capsys.readouterr().out
+    assert ps.explorar("titulo; comentario", Aparelho())
+    assert len(avisos) == 1 and "Amei essa garrafa! #achadinhos" in avisos[0]
+    assert "curta o vídeo e comente" in avisos[0]
+    saida = capsys.readouterr().out
+    assert "comentário com 30 caracteres" in saida and "Amei" not in saida
+
+
 def test_log_da_ia_nao_vai_para_o_log_publico(monkeypatch, capsys, caplog):
     _autorais()
 

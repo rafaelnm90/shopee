@@ -145,6 +145,10 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
 5. **Postar só com o OK do Rafael** (escolha dele em 18/10/2026): o robô pronto manda o
    print da tela final no privado e só toca em Postar depois da aprovação dele, pelo
    menos nas primeiras semanas; antes disso, as conferências `ia`, `produto` e `conferir`.
+   Depois de postar, manda no privado o link do post, o comentário pronto e o aviso
+   para curtir e comentar à mão (pedido dele em 18/10/2026). Falta mapear onde o app dá
+   o link do post (compartilhar → copiar link); o comentário já sai no teste (passo
+   `comentario`).
 6. **Ritmo do robô pronto:**
    - poucos vídeos por dia no começo (1 ou 2);
    - faixa de horário e quantidade sorteada por dia, como no painel;

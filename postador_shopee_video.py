@@ -26,6 +26,8 @@ Passos, separados por ponto e vírgula:
     video            põe na galeria o vídeo do teste (video:novo escolhe outro na fonte)
     link             abre no app o produto (ou o vídeo) do vídeo do teste
     titulo           escreve no campo com o cursor o título da IA para o vídeo do teste
+    comentario       manda no privado do Rafael o comentário da IA (o da mesma resposta do
+                     titulo), para ele curtir e comentar o vídeo depois de postar
     ia               a IA assiste ao vídeo do teste e diz se o produto do link é o do vídeo
     produto          na lista de Adicionar Produto, toca em Adicionar só no produto do vídeo
                      do teste, achado pelo nome, e confere o nome na janela que abre
@@ -85,6 +87,8 @@ CHAVE_TESTE = "celular_robo_teste"
 HORARIO_DAS_RODADAS = (8, 22)
 LEGENDA_PRINT = "🤖 Robô da Shopee Vídeo (teste): a tela antes de salvar o rascunho."
 AVISO_SEM_PRODUTO = "🤖 Robô da Shopee Vídeo (teste): nenhum produto foi adicionado ao vídeo."
+AVISO_COMENTARIO = ("💬 Robô da Shopee Vídeo (teste): o comentário deste vídeo. Depois de postar, "
+                    "curta o vídeo e comente com o texto abaixo (copie e cole).")
 AVISO_IA = "🤖 Robô da Shopee Vídeo (teste): a IA viu que o produto do link não é o produto do vídeo. Parei aqui."
 AVISO_TELA_FINAL = ("🤖 Robô da Shopee Vídeo (teste): na tela final, o produto anexado não é o do vídeo "
                     "(ou há produto a mais ou a menos). Não salvei nem postei; confira o celular.")
@@ -308,7 +312,24 @@ def escrever_titulo(d, video):
     if not textos or not textos["titulo"]:
         return False, "a IA não devolveu título"
     d.send_keys(textos["titulo"])
+    # O comentário sai da mesma resposta da IA e fica guardado para o passo comentario.
+    db.salvar_config(CHAVE_TESTE, dict(video, comentario=textos.get("comentario") or ""))
     return True, f"título com {len(textos['titulo'])} caracteres"
+
+
+def mandar_comentario(video):
+    """
+    Manda no privado do Rafael o comentário da IA para o vídeo, com o lembrete de curtir
+    e comentar à mão depois de postar: curtir e comentar nunca são automáticos (diretriz
+    9.1.1). O texto não vai para o log.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    comentario = (video.get("comentario") or "").strip()
+    if not comentario:
+        return False, "nenhum comentário guardado: o passo titulo vem antes"
+    if not avisar_rafael.mandar_texto(f"{AVISO_COMENTARIO}\n\n{comentario}"):
+        return False, "o Telegram recusou o comentário"
+    return True, f"comentário com {len(comentario)} caracteres mandado no privado"
 
 
 def _centro(el):
@@ -533,7 +554,7 @@ def por_na_galeria(d, arquivo):
 def separar_passos(texto):
     """Lista de (nome, argumento). Passo desconhecido vira ValueError antes de tocar em qualquer coisa."""
     conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "esperar", "escrever",
-                  "link", "video", "titulo", "ia", "produto", "conferir", "print", "tela"}
+                  "link", "video", "titulo", "comentario", "ia", "produto", "conferir", "print", "tela"}
     passos = []
     for pedaco in (texto or "").split(";"):
         pedaco = pedaco.strip()
@@ -594,7 +615,7 @@ def fazer_passo(d, nome, argumento):
     if nome == "escrever":
         d.send_keys(argumento)
         return True, "escrito"
-    if nome in ("link", "video", "titulo", "ia", "produto", "conferir"):
+    if nome in ("link", "video", "titulo", "comentario", "ia", "produto", "conferir"):
         video = video_do_teste(novo=nome == "video" and argumento == "novo")
         if not video:
             return False, "nenhum vídeo da fonte do painel com arquivo e link"
@@ -602,6 +623,8 @@ def fazer_passo(d, nome, argumento):
             return True, f"aberto: {abrir_link(d, video['link'])}"
         if nome == "titulo":
             return escrever_titulo(d, video)
+        if nome == "comentario":
+            return mandar_comentario(video)
         if nome == "ia":
             return ia_confere_produto(video)
         if nome == "produto":
