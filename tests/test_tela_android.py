@@ -431,3 +431,65 @@ def test_os_tres_botoes_pedem_confirmacao():
         corpo = tela.PAGINA.split(funcao, 1)[1].split("\nfunction ", 1)[0]
         assert "confirm(" in corpo, funcao
     assert tela.PAGINA.split("function resetar()", 1)[1].split("\nfunction ", 1)[0].count("confirm(") == 2
+
+
+CELULAR = "100.70.1.2:41235"
+
+
+def _no_celular(monkeypatch):
+    """Tela apontada para o celular guardado; o monkeypatch volta ao Android virtual no fim."""
+    monkeypatch.setattr(tela, "NO_CELULAR", False)
+    monkeypatch.setattr(tela, "ALVO", tela.av.ENDERECO_ADB)
+    monkeypatch.setattr(tela.celular_robo, "endereco", lambda: CELULAR)
+    assert tela.configurar(celular=True)
+
+
+def test_no_celular_so_tem_toque_texto_e_teclas(monkeypatch):
+    _no_celular(monkeypatch)
+    html = tela.html_da_pagina()
+    assert "Terminei" in html and "Digitar" in html and tela.CHAVE in html
+    for botao in ("enviarApp()", "fecharApps()", "reiniciar()", "resetar()"):
+        assert f'onclick="{botao}"' not in html
+    for tipo in ("fechar_apps", "reiniciar", "resetar"):
+        with pytest.raises(web.HTTPBadRequest):
+            rodar(tela.acao(Pedido(tela.CHAVE, {"tipo": tipo})))
+    rotas = [rota.resource.canonical for rota in tela.montar_app().router.routes()]
+    assert "/app/pedaco" not in rotas and "/app/instalar" not in rotas and "/tela.png" in rotas
+
+
+def test_no_celular_print_e_toque_vao_para_o_celular(monkeypatch):
+    _no_celular(monkeypatch)
+    pedidos = []
+
+    class Proc:
+        returncode = 0
+
+        async def communicate(self):
+            return b"\x89PNG", b""
+
+    async def criar(*partes, **kw):
+        pedidos.append(partes)
+        return Proc()
+
+    monkeypatch.setattr(tela.asyncio, "create_subprocess_exec", criar)
+    rodar(tela.print_da_tela())
+    rodar(tela.acao(Pedido(tela.CHAVE, {"tipo": "toque", "x": 5, "y": 6})))
+    assert pedidos == [("adb", "-s", CELULAR, "exec-out", "screencap", "-p"),
+                       ("adb", "-s", CELULAR, "shell", "input", "tap", "5", "6")]
+
+
+def test_link_da_verificacao_diz_que_o_robo_parou(monkeypatch):
+    _no_celular(monkeypatch)
+    texto = tela.texto_do_link("https://abc.trycloudflare.com", verificacao=True)
+    assert "verificação" in texto and "o robô parou" in texto and f"?k={tela.CHAVE}" in texto
+    assert "mexe no celular" in texto and "Enviar app" not in texto
+    assert "verificação" not in tela.texto_do_link("https://abc.trycloudflare.com")
+
+
+def test_celular_nunca_conectado_nao_abre_a_tela(monkeypatch, tmp_path):
+    monkeypatch.setattr(tela, "NO_CELULAR", False)
+    monkeypatch.setattr(tela, "ALVO", tela.av.ENDERECO_ADB)
+    monkeypatch.setattr(tela, "ESTADO", str(tmp_path / "tela_estado"))
+    monkeypatch.setattr(tela.celular_robo, "endereco", lambda: None)
+    rodar(tela.main(celular=True))
+    assert (tmp_path / "tela_estado").read_text() == "erro: o celular nunca foi conectado pelo bot"

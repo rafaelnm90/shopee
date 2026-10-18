@@ -175,3 +175,25 @@ def test_passo_a_passo_para_refazer_depois_do_reset(bm, cr, monkeypatch, Msg, Es
         assert trecho in texto
     assert len(texto) < 4096                                             # cabe numa mensagem do Telegram
     assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.celular.state
+
+
+def test_ver_tela_do_celular_manda_o_link_so_conectado(bm, cr, monkeypatch, Msg, Est):
+    sv = _painel(bm, cr, monkeypatch, _rede(("moto-g100", "android", True, IP)))
+    assert "Ver Tela do Celular 🖥️" in _textos(sv.teclado_celular())
+    abertas = []
+    monkeypatch.setattr(sv.av, "abrir_tela", lambda celular=False: abertas.append(celular) or True)
+    msg = Msg("Ver Tela do Celular 🖥️")
+    rodar(sv.abrir_tela_handler(msg, Est()))
+    assert "desconectado" in msg.saidas[0] and abertas == []             # nunca conectou
+
+    monkeypatch.setattr(cr, "conectado", lambda: True)
+    msg, est = Msg("Ver Tela do Celular 🖥️"), Est(estado=sv.ShopeeVideoFluxo.aguardando_porta)
+    rodar(sv.abrir_tela_handler(msg, est))
+    assert abertas == [True] and "link da tela chegou" in msg.saidas[-1] and "Terminei" in msg.saidas[-1]
+    assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.celular.state
+
+    monkeypatch.setattr(sv.av, "abrir_tela", lambda celular=False: False)
+    monkeypatch.setattr(sv.av, "_ler_estado_tela", lambda: "erro: o túnel não deu endereço")
+    msg = Msg("Ver Tela do Celular 🖥️")
+    rodar(sv.abrir_tela_handler(msg, Est()))
+    assert "A tela não abriu (o túnel não deu endereço)" in msg.saidas[-1]

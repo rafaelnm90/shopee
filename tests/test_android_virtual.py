@@ -381,3 +381,48 @@ def test_tela_com_erro_conta_o_motivo(monkeypatch, tmp_path, capsys):
                         lambda c, **k: (tmp_path / "tela_estado").write_text("erro: já existe uma tela aberta"))
     assert av.abrir_tela() is False
     assert "tela: erro: já existe uma tela aberta" in capsys.readouterr().out
+
+
+def _tela_falsa(monkeypatch, tmp_path, conectado=True):
+    import celular_robo
+    m = Maquina(docker=True, ligado=False)                               # o Android virtual fica desligado
+    _instalar(monkeypatch, m)
+    monkeypatch.setattr(celular_robo, "conectado", lambda: conectado)
+    monkeypatch.setattr(av, "ARQUIVO_TELA", str(tmp_path / "tela_estado"))
+    monkeypatch.setattr(av, "LOG_TELA", str(tmp_path / "tela.log"))
+    abertos = []
+
+    def popen(comando, **kw):
+        abertos.append(comando)
+        (tmp_path / "tela_estado").write_text("enviado")
+
+    monkeypatch.setattr(av.subprocess, "Popen", popen)
+    return abertos
+
+
+def test_tela_do_celular_abre_mesmo_com_o_android_virtual_desligado(monkeypatch, tmp_path, capsys):
+    abertos = _tela_falsa(monkeypatch, tmp_path)
+    assert av.abrir_tela(celular=True, verificacao=True) is True
+    assert abertos[0][-3].endswith("tela_android.py") and abertos[0][-2:] == ["--celular", "--verificacao"]
+    assert "o link foi no privado" in capsys.readouterr().out
+
+
+def test_tela_do_celular_desconectado_nao_abre(monkeypatch, tmp_path, capsys):
+    abertos = _tela_falsa(monkeypatch, tmp_path, conectado=False)
+    assert av.abrir_tela(celular=True) is False
+    assert abertos == [] and "celular: desconectado" in capsys.readouterr().out
+
+
+def test_tela_aberta_so_com_o_link_mandado_e_o_processo_vivo(monkeypatch, tmp_path):
+    estado = tmp_path / "tela_estado"
+    monkeypatch.setattr(av, "ARQUIVO_TELA", str(estado))
+    vivo = {"codigo": 0}
+    monkeypatch.setattr(av, "_rodar", lambda *p, timeout=120: (vivo["codigo"], ""))
+    assert not av.tela_aberta()                                          # nunca abriu
+    estado.write_text("enviado; último erro: imagem (adb desconectado)")
+    assert av.tela_aberta()
+    vivo["codigo"] = 1                                                   # o processo morreu (restart do bot)
+    assert not av.tela_aberta()
+    vivo["codigo"] = 0
+    estado.write_text("fechada")
+    assert not av.tela_aberta()

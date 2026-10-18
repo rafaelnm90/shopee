@@ -221,6 +221,26 @@ def test_verificacao_depois_de_um_passo_para_ali(capsys):
     assert ps.codigo_de_saida(False) == 0                                # resposta da exploração, não erro
 
 
+def test_verificacao_no_celular_manda_a_tela_no_privado(monkeypatch, capsys):
+    abertas = []
+    monkeypatch.setattr(ps.av, "abrir_tela", lambda celular=False, verificacao=False:
+                        abertas.append((celular, verificacao)) or True)
+    aparelho = Aparelho(tela=TELA_VERIFICACAO)
+    assert ps.explorar("voltar", aparelho, celular=True) is False
+    assert abertas == [(True, True)] and aparelho.teclas == []
+    assert not ps.explorar("voltar", Aparelho(tela=TELA_VERIFICACAO))  # no Android virtual, só para
+    assert abertas == [(True, True)]
+
+
+def test_com_a_tela_do_celular_aberta_o_robo_nao_mexe(relogio, monkeypatch, capsys):
+    relogio("15:00")
+    monkeypatch.setattr(ps.celular_robo, "conectado", lambda: True)
+    monkeypatch.setattr(ps.av, "tela_aberta", lambda: True)
+    monkeypatch.setattr(ps, "conectar", lambda celular: pytest.fail("não devia conectar"))
+    assert ps.explorar("xy:10,20", celular=True) is None
+    assert "tela do celular está aberta" in capsys.readouterr().out
+
+
 def test_tela_comum_nao_e_verificacao():
     assert not ps.eh_verificacao(TELA_EU) and ps.eh_verificacao(TELA_VERIFICACAO)
 
@@ -414,6 +434,7 @@ def test_no_celular_so_das_8h_as_22h(hora, comeca, relogio, monkeypatch, capsys)
     relogio(hora)
     aparelho = Aparelho()
     monkeypatch.setattr(ps.celular_robo, "conectado", lambda: True)
+    monkeypatch.setattr(ps.av, "tela_aberta", lambda: False)
     monkeypatch.setattr(ps, "conectar", lambda celular: aparelho)
     assert ps.explorar("xy:10,20", celular=True) is (True if comeca else None)
     assert aparelho.toques == ([(10, 20)] if comeca else [])

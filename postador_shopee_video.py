@@ -37,7 +37,9 @@ curtido ser o do vídeo do rascunho. Só video:novo troca.
 Nunca toca em "Postar" nem nos botões de comprar da página do produto (Compre agora,
 carrinho, chat), por texto, id ou ponto: a exploração termina, no máximo, em Rascunhos. Nunca mexe
 na Verificação (CAPTCHA) da Shopee: se ela aparece, antes ou depois de um passo, a
-exploração para ali, e quem resolve é o Rafael, com a mão no celular.
+exploração para ali, e quem resolve é o Rafael, com a mão no celular ou pela tela do
+celular, cujo link vai no privado dele (tela_android.py). Enquanto essa tela está
+aberta, o explorar no celular nem começa.
 
 Imprime a forma da tela, não o conteúdo, porque o log do Actions é público e a
 tela mostra a conta do Rafael: palavra que não é de botão vira "…" e número
@@ -438,13 +440,16 @@ def _explorar(texto, d, celular):
             inicio, fim = HORARIO_DAS_RODADAS
             print(f"celular: fora do horário das rodadas ({inicio}h às {fim}h de Brasília); nada foi tocado")
             return None
+        if celular and av.tela_aberta():
+            # O Rafael pode estar mexendo no celular pela tela: o robô não toca junto.
+            print("celular: a tela do celular está aberta no privado do Rafael; nada foi tocado")
+            return None
         if not celular and not av.android_ligado():
             print("android: desligado; rode o preparar antes")
             return None
         d = conectar(celular)
     if eh_verificacao(_tela(d)):
-        print(AVISO_VERIFICACAO)
-        return False
+        return parar_na_verificacao(celular)
     for numero, (nome, argumento) in enumerate(passos, 1):
         try:
             ok, resultado = fazer_passo(d, nome, argumento)
@@ -462,11 +467,22 @@ def _explorar(texto, d, celular):
         except Exception as e:
             print(f"tela: não deu para ler ({type(e).__name__})")
         if eh_verificacao(tela):
-            print(AVISO_VERIFICACAO)
-            return False
+            return parar_na_verificacao(celular)
         if not ok:
             return False
     return True
+
+
+def parar_na_verificacao(celular):
+    """
+    Para a exploração na verificação. No celular, manda no privado do Rafael o link da
+    tela do celular, para ele resolver de onde estiver. Devolve False (a rodada parou).
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    print(AVISO_VERIFICACAO)
+    if celular:
+        av.abrir_tela(celular=True, verificacao=True)
+    return False
 
 
 def _tela(d):

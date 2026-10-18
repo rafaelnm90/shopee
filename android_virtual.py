@@ -31,6 +31,8 @@ Android virtual não tem a Play Store) e instala. Quando o app vem em partes
 
 O --tela deixa o tela_android.py rodando sozinho por 30 min e sai: o link vai
 no privado do Rafael, nunca no log.
+A mesma tela abre para o celular guardado (abrir_tela(celular=True)): pelo botão
+do bot em Celular do Robô 📱 e quando o explorar no celular para numa verificação.
 
 O --desligar para o contêiner (e fecha a tela, se aberta) sem apagar nada: o
 app e o login continuam, e o --preparar religa. Serve para pausas, quando a
@@ -367,13 +369,20 @@ def _ler_estado_tela():
         return ""
 
 
-def abrir_tela():
+def abrir_tela(celular=False, verificacao=False):
     """
     Deixa o tela_android.py rodando sozinho (sobrevive ao fim desta conexão) e
-    espera ele contar que mandou o link no privado do Rafael.
+    espera ele contar que mandou o link no privado do Rafael. Com celular=True, a
+    tela é a do celular guardado (celular_robo.py); com verificacao=True, o link
+    avisa que o robô parou numa verificação da Shopee.
     """
-    print("== Tela no navegador")
-    if not android_ligado():
+    print("== Tela no navegador" + (" (celular do robô)" if celular else ""))
+    if celular:
+        import celular_robo  # aqui dentro: o celular_robo importa este módulo
+        if not celular_robo.conectado():
+            print("celular: desconectado; conecte pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱)")
+            return False
+    elif not android_ligado():
         print("android: desligado; rode o preparar antes")
         return False
     if shutil.which("cloudflared") is None:
@@ -394,8 +403,11 @@ def abrir_tela():
         os.remove(ARQUIVO_TELA)
     except FileNotFoundError:
         pass
+    comando = [sys.executable, os.path.join(PASTA, "tela_android.py")]
+    comando += ["--celular"] if celular else []
+    comando += ["--verificacao"] if verificacao else []
     with open(LOG_TELA, "w") as log:
-        subprocess.Popen([sys.executable, os.path.join(PASTA, "tela_android.py")], cwd=PASTA,
+        subprocess.Popen(comando, cwd=PASTA,
                          stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
                          start_new_session=True)
     prazo = time.monotonic() + SEGUNDOS_PARA_ABRIR_TELA
@@ -410,6 +422,11 @@ def abrir_tela():
         time.sleep(3)
     print(f"tela: não abriu em {SEGUNDOS_PARA_ABRIR_TELA} s")
     return False
+
+
+def tela_aberta():
+    """O link da tela foi mandado e ela continua aberta (o Rafael pode estar mexendo)?"""
+    return _ler_estado_tela().startswith("enviado") and _ok(_rodar("pgrep", "-f", "tela_android.py"))
 
 
 def desligar():

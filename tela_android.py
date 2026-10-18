@@ -15,6 +15,12 @@ Como funciona:
 - o link leva uma chave aleatória e vai só no privado do Rafael, pelo bot. Sem a
   chave, nada responde. Nada disso aparece no log do Actions.
 
+Com --celular, a tela é a do celular guardado do Rafael (celular_robo.py), para ele
+resolver de longe a verificação da Shopee ou mexer no app. Ali só valem os toques, o
+texto e as teclas: instalar app, fechar apps, reiniciar e resetar são do Android
+virtual (no celular, fechar os apps derrubaria o Tailscale e, com ele, a ligação com o
+servidor). Com --verificacao, a mensagem do link diz que o robô parou numa verificação.
+
 Estado para quem abriu (android_virtual.py): o arquivo ESTADO diz "abrindo",
 "enviado", "fechada" ou "erro: ...".
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
@@ -26,6 +32,7 @@ import secrets
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 import zipfile
 
@@ -33,6 +40,7 @@ from aiohttp import web
 
 import android_virtual as av
 import avisar_rafael
+import celular_robo
 
 PORTA = 8765
 MINUTOS_ABERTA = 30
@@ -45,6 +53,19 @@ URL_TUNEL = re.compile(r"https://[a-z0-9-]+\.trycloudflare\.com")
 CHAVE = secrets.token_urlsafe(24)
 FIM = asyncio.Event()
 
+# Para onde vão o print e os toques: o Android virtual, ou o celular guardado (--celular).
+ALVO = av.ENDERECO_ADB
+NO_CELULAR = False
+SO_NO_ANDROID_VIRTUAL = ("fechar_apps", "reiniciar", "resetar")
+
+
+def configurar(celular=False):
+    """Aponta a tela para o celular guardado; False se ele nunca foi conectado pelo bot."""
+    global ALVO, NO_CELULAR
+    NO_CELULAR = celular
+    ALVO = celular_robo.endereco() if celular else av.ENDERECO_ADB
+    return bool(ALVO)
+
 
 def gravar_estado(texto):
     os.makedirs(os.path.dirname(ESTADO), exist_ok=True)
@@ -53,9 +74,9 @@ def gravar_estado(texto):
 
 
 async def adb(*partes, timeout=20):
-    """Saída (bytes) de um comando adb no Android virtual; b"" se falhar."""
+    """Saída (bytes) de um comando adb no aparelho da tela (ALVO); b"" se falhar."""
     proc = await asyncio.create_subprocess_exec(
-        "adb", "-s", av.ENDERECO_ADB, *partes,
+        "adb", "-s", ALVO, *partes,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
     try:
         saida, _ = await asyncio.wait_for(proc.communicate(), timeout)
@@ -100,10 +121,18 @@ def comando_da_acao(dados):
     return None
 
 
+def html_da_pagina():
+    """A página com a chave; no celular, sem os botões que só existem no Android virtual."""
+    html = PAGINA.replace("__CHAVE__", CHAVE)
+    if NO_CELULAR:
+        html = re.sub(r"<!--virtual-->.*?<!--/virtual-->", "", html, flags=re.S)
+    return html
+
+
 async def pagina(request):
     if not autorizado(request):
         raise web.HTTPNotFound()
-    return web.Response(text=PAGINA.replace("__CHAVE__", CHAVE), content_type="text/html")
+    return web.Response(text=html_da_pagina(), content_type="text/html")
 
 
 async def tela(request):
@@ -114,7 +143,7 @@ async def tela(request):
         # Depois de reiniciar ou resetar, o adb pode ficar preso na conexão velha.
         _imagem["reconectou"] = time.monotonic()
         await _rodar_comando("adb", "reconnect", "offline", timeout=15)
-        await _rodar_comando("adb", "connect", av.ENDERECO_ADB, timeout=15)
+        await _rodar_comando("adb", "connect", ALVO, timeout=15)
         png, motivo = await print_da_tela()
     if motivo:
         registrar_falha_da_imagem(motivo)
@@ -128,7 +157,7 @@ _imagem = {"reconectou": 0.0, "motivo": ""}
 async def print_da_tela(timeout=20):
     """(png, "") com o print do Android, ou (b"", motivo) se ele não veio."""
     proc = await asyncio.create_subprocess_exec(
-        "adb", "-s", av.ENDERECO_ADB, "exec-out", "screencap", "-p",
+        "adb", "-s", ALVO, "exec-out", "screencap", "-p",
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
         saida, erro = await asyncio.wait_for(proc.communicate(), timeout)
@@ -162,6 +191,8 @@ async def acao(request):
     if dados.get("tipo") == "fim":
         FIM.set()
         return web.json_response({"ok": True})
+    if NO_CELULAR and dados.get("tipo") in SO_NO_ANDROID_VIRTUAL:
+        raise web.HTTPBadRequest()
     if dados.get("tipo") == "fechar_apps":
         fechados = await fechar_apps()
         return web.json_response({"ok": True, "mensagem": f"{fechados} app(s) fechado(s) e a lista de recentes limpa"})
@@ -365,8 +396,9 @@ async def instalar_enviado(request):
 
 def montar_app():
     app = web.Application(client_max_size=64 * 1024)
-    app.router.add_post("/app/pedaco", receber_pedaco)
-    app.router.add_post("/app/instalar", instalar_enviado)
+    if not NO_CELULAR:
+        app.router.add_post("/app/pedaco", receber_pedaco)
+        app.router.add_post("/app/instalar", instalar_enviado)
     app.router.add_get("/", pagina)
     app.router.add_get("/tela.png", tela)
     app.router.add_post("/acao", acao)
@@ -395,9 +427,33 @@ async def esvaziar(processo):
         pass
 
 
-async def main():
+def texto_do_link(url, verificacao=False):
+    """A mensagem do link, no privado do Rafael."""
+    link = f"{url}/?k={CHAVE}"
+    if not NO_CELULAR:
+        return ("📱 Tela do Android da Shopee Vídeo\n\n"
+                f"{link}\n\n"
+                f"Abra no navegador do celular. Toque na tela como num celular normal; arraste para "
+                f"rolar. O campo de texto embaixo digita no Android, e o botão Enviar app instala um "
+                f"app baixado no seu celular.\n"
+                f"Fica aberta {MINUTOS_ABERTA} min. Quando terminar, toque em Terminei. "
+                "Não repasse este link: quem tiver ele mexe no Android.")
+    topo = ("⚠️ A Shopee pediu uma verificação no celular do robô, e o robô parou. Resolva por esta "
+            "tela, de onde estiver (ou com a mão no celular):" if verificacao else
+            "📱 Tela do celular do robô")
+    return (f"{topo}\n\n{link}\n\n"
+            "Abra no navegador. Toque na tela como no celular; arraste para rolar ou para o "
+            "quebra-cabeça. O campo de texto embaixo digita no celular.\n"
+            f"Fica aberta {MINUTOS_ABERTA} min. Quando terminar, toque em Terminei. "
+            "Não repasse este link: quem tiver ele mexe no celular.")
+
+
+async def main(celular=False, verificacao=False):
     gravar_estado("abrindo")
-    subprocess.run(["adb", "connect", av.ENDERECO_ADB], capture_output=True, timeout=15)
+    if not configurar(celular):
+        gravar_estado("erro: o celular nunca foi conectado pelo bot")
+        return
+    subprocess.run(["adb", "connect", ALVO], capture_output=True, timeout=15)
     runner = web.AppRunner(montar_app())
     await runner.setup()
     try:
@@ -417,14 +473,7 @@ async def main():
         asyncio.create_task(esvaziar(tunel))
         erro = None
         try:
-            if not avisar_rafael.mandar_texto(
-                "📱 Tela do Android da Shopee Vídeo\n\n"
-                f"{url}/?k={CHAVE}\n\n"
-                f"Abra no navegador do celular. Toque na tela como num celular normal; arraste para "
-                f"rolar. O campo de texto embaixo digita no Android, e o botão Enviar app instala um "
-                f"app baixado no seu celular.\n"
-                f"Fica aberta {MINUTOS_ABERTA} min. Quando terminar, toque em Terminei. "
-                "Não repasse este link: quem tiver ele mexe no Android."):
+            if not avisar_rafael.mandar_texto(texto_do_link(url, verificacao)):
                 erro = "o Telegram recusou o link"
         except Exception as e:
             erro = f"link não enviado ({type(e).__name__})"
@@ -468,11 +517,13 @@ PAGINA = """<!doctype html>
 <div class="barra"><button onclick="tecla('voltar')">◀ Voltar</button>
   <button onclick="tecla('inicio')">● Início</button><button onclick="tecla('apagar')">⌫ Apagar</button>
   <button onclick="tecla('enter')">↵ Enter</button></div>
+<!--virtual-->
 <div class="barra"><input type="file" id="arquivo" accept=".apk,.xapk,.apks"></div>
 <div class="barra"><button onclick="enviarApp()">📦 Enviar app</button></div>
 <div class="barra"><button onclick="fecharApps()">🧹 Fechar apps</button>
   <button onclick="reiniciar()">🔄 Reiniciar Android</button></div>
 <div class="barra"><button class="perigo" onclick="resetar()">🗑️ Resetar de fábrica</button></div>
+<!--/virtual-->
 <div class="barra"><button onclick="terminar()">✅ Terminei</button></div>
 <div id="aviso">Toque para clicar. Arraste para rolar ou para o quebra-cabeça.</div>
 <script>
@@ -588,4 +639,4 @@ atualizar();
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(main(celular="--celular" in sys.argv[1:], verificacao="--verificacao" in sys.argv[1:]))

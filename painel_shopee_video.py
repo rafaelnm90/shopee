@@ -13,7 +13,9 @@ Também liga o envio no agendador (a cada 5 min vê se chegou a hora) e tem o bo
 "Enviar 1 Agora 📤", que manda uma postagem na hora, mesmo pausado. O botão
 "Celular do Robô 📱" liga o servidor ao celular guardado do Rafael (celular_robo.py),
 onde o robô vai postar: o código de pareamento chega só aqui, no privado. Lá, o
-"Passo a Passo 📖" ensina a deixar o celular pronto de novo depois de um reset.
+"Passo a Passo 📖" ensina a deixar o celular pronto de novo depois de um reset, e o
+"Ver Tela do Celular 🖥️" manda no privado um link de 30 min para o Rafael ver e tocar
+na tela do celular de longe (tela_android.py).
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
 import asyncio
@@ -30,6 +32,7 @@ from aiogram.types import KeyboardButton
 from teclados import (montar_teclado, teclado_com_cancelar, teclado_cancelar,
                       teclado_aprovar_cancelar, teclado_janela_dia_todo)
 
+import android_virtual as av
 import assistente_shopee_video as assistente
 import celular_robo
 import db
@@ -158,6 +161,7 @@ BOTAO_PAREAR = "Parear Celular 🔗"
 BOTAO_RECONECTAR = "Reconectar Celular 🔄"
 BOTAO_VOLTAR = "Voltar à Shopee Vídeo 🔙"
 BOTAO_PASSO_A_PASSO = "Passo a Passo 📖"
+BOTAO_TELA = "Ver Tela do Celular 🖥️"
 
 def teclado_painel(config):
     pausa = "Retomar Robô ▶️" if config["pausado"] else "Pausar Robô ⏸️"
@@ -304,7 +308,8 @@ async def pedir_fonte(message: types.Message, state: FSMContext):
 # reconectar quando a porta muda (o celular reiniciou ou a depuração foi desligada).
 
 def teclado_celular():
-    return montar_teclado([[KeyboardButton(text=BOTAO_PAREAR), KeyboardButton(text=BOTAO_RECONECTAR)],
+    return montar_teclado([[KeyboardButton(text=BOTAO_TELA)],
+                           [KeyboardButton(text=BOTAO_PAREAR), KeyboardButton(text=BOTAO_RECONECTAR)],
                            [KeyboardButton(text=BOTAO_PASSO_A_PASSO)],
                            [KeyboardButton(text=BOTAO_VOLTAR)]])
 
@@ -370,7 +375,8 @@ async def texto_celular():
             f"🌐 Na rede privada: {linha_rede}\n"
             f"🔗 Pareado: {pareado}\n"
             f"📶 Conexão: {conexao}\n\n"
-            f"<i>Parear é uma vez só. {BOTAO_RECONECTAR} é para depois que o celular reiniciar ou a "
+            f"<i>{BOTAO_TELA} manda aqui um link de 30 min para ver e tocar na tela do celular de "
+            "longe. Parear é uma vez só. {BOTAO_RECONECTAR} é para depois que o celular reiniciar ou a "
             "Depuração por Wi-Fi for desligada, porque a porta muda. Resetou o celular? Toque em "
             f"{BOTAO_PASSO_A_PASSO}.</i>")
 
@@ -392,6 +398,32 @@ async def passo_a_passo_handler(message: types.Message, state: FSMContext):
     if not _admin(message): return
     await state.set_state(ShopeeVideoFluxo.celular)
     await message.answer(PASSO_A_PASSO, parse_mode="HTML", reply_markup=teclado_celular())
+
+
+@router.message(F.text == BOTAO_TELA, StateFilter("*"))
+async def abrir_tela_handler(message: types.Message, state: FSMContext):
+    """
+    A tela do celular no navegador, para o Rafael resolver a verificação ou mexer no app
+    de longe. O link vai no privado (pelo avisar_rafael), nunca no log.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    if not _admin(message): return
+    await state.set_state(ShopeeVideoFluxo.celular)
+    if not await asyncio.to_thread(celular_robo.conectado):
+        await message.answer(f"⚠️ O celular está desconectado: toque em {BOTAO_RECONECTAR} primeiro.",
+                             reply_markup=teclado_celular())
+        return
+    await message.answer("⏳ Abrindo a tela do celular (leva até 1 min)...")
+    logger.info("🖥️ Abrindo a tela do celular do robô.")
+    if await asyncio.to_thread(av.abrir_tela, True):
+        await message.answer(
+            "✅ O link da tela chegou aqui no privado e vale 30 min. Na página, toque em "
+            "<b>Terminei</b> quando acabar: enquanto ela está aberta, o robô não mexe no celular.",
+            parse_mode="HTML", reply_markup=teclado_celular())
+        return
+    motivo = av._ler_estado_tela().removeprefix("erro: ") or "não respondeu a tempo"
+    await message.answer(f"❌ A tela não abriu ({html_escape(motivo)}). Tente de novo daqui a pouco.",
+                         parse_mode="HTML", reply_markup=teclado_celular())
 
 
 @router.message(F.text == BOTAO_VOLTAR, StateFilter("*"))
