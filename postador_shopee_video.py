@@ -26,6 +26,9 @@ Passos, separados por ponto e vírgula:
     video            põe na galeria o vídeo do teste (video:novo escolhe outro na fonte)
     link             abre no app o produto (ou o vídeo) do vídeo do teste
     titulo           escreve no campo com o cursor o título da IA para o vídeo do teste
+    produto          na lista de Adicionar Produto, toca em Adicionar só no produto do vídeo
+                     do teste, achado pelo nome, e confere o nome na janela que abre (sem
+                     achar ou com outro produto, para e avisa no privado)
     print            manda um print da tela no privado do Rafael (nunca no log)
     tela             só descreve a tela
 
@@ -73,6 +76,15 @@ CHAVE_TESTE = "celular_robo_teste"
 # Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 HORARIO_DAS_RODADAS = (8, 22)
 LEGENDA_PRINT = "🤖 Robô da Shopee Vídeo (teste): a tela antes de salvar o rascunho."
+AVISO_SEM_PRODUTO = "🤖 Robô da Shopee Vídeo (teste): nenhum produto foi adicionado ao vídeo."
+AVISO_JANELA_ERRADA = ("🤖 Robô da Shopee Vídeo (teste): a janela de editar o nome aberta no celular é de outro "
+                       "produto, não do produto do vídeo. Parei sem tocar em Feito; confira o celular.")
+# Quantas vezes o passo produto rola a lista de Minhas Curtidas atrás do produto do vídeo.
+ROLAGENS_DO_PRODUTO = 3
+# Nome cortado na lista só vale como o mesmo produto a partir deste tamanho.
+TAMANHO_MINIMO_DO_NOME = 15
+# Elemento de outro app até este tamanho (px) é coisa flutuante, como a bolinha da Motorola.
+LADO_MAXIMO_FLUTUANTE = 400
 NOME_NA_GALERIA = "autoral_shopee_video.mp4"
 SEGUNDOS_DEPOIS_DO_PASSO = 3
 MAXIMO_ESPERA = 60
@@ -157,7 +169,7 @@ def elementos(xml):
         if texto or descricao or ident or clicavel:
             achados.append({"texto": texto, "descricao": descricao, "id": ident, "clicavel": clicavel,
                             "classe": no.get("class", "").rsplit(".", 1)[-1], "caixa": caixa,
-                            "marcado": no.get("checked") == "true"})
+                            "marcado": no.get("checked") == "true", "pacote": no.get("package", "")})
     return achados
 
 
@@ -282,6 +294,141 @@ def escrever_titulo(d, video):
     return True, f"título com {len(textos['titulo'])} caracteres"
 
 
+def _centro(el):
+    x1, y1, x2, y2 = el["caixa"]
+    return (x1 + x2) // 2, (y1 + y2) // 2
+
+
+def _dentro(ponto, caixa):
+    x1, y1, x2, y2 = caixa
+    return x1 <= ponto[0] <= x2 and y1 <= ponto[1] <= y2
+
+
+def mesmo_produto(texto, nome):
+    """
+    O texto da tela é o nome desse produto? Igual, ou um começa com o outro, porque a
+    lista pode cortar o nome com reticências; o pedaço cortado precisa ser grande o
+    bastante para não confundir dois produtos parecidos.
+    """
+    a, b = (_normal(t).rstrip(".… ") for t in (texto, nome))
+    if not a or not b:
+        return False
+    curto, longo = sorted((a, b), key=len)
+    return a == b or (len(curto) >= TAMANHO_MINIMO_DO_NOME and longo.startswith(curto))
+
+
+def adicionar_do_produto(xml, nome):
+    """
+    O botão Adicionar do produto com esse nome na lista de Adicionar Produto; None se
+    ele não está na tela. O botão certo é o único Adicionar dentro do menor bloco de
+    toque que contém o nome: com mais de um, o bloco é a lista e o robô não adivinha.
+    """
+    lista = elementos(xml)
+    botoes = [el for el in lista if _normal(el["texto"]) == "adicionar"]
+    for el in lista:
+        if not mesmo_produto(el["texto"], nome):
+            continue
+        blocos = sorted((b for b in lista if b["clicavel"] and _dentro(_centro(el), b["caixa"])),
+                        key=lambda b: (b["caixa"][2] - b["caixa"][0]) * (b["caixa"][3] - b["caixa"][1]))
+        for bloco in blocos:
+            dentro = [bt for bt in botoes if _dentro(_centro(bt), bloco["caixa"])]
+            if len(dentro) == 1:
+                return dentro[0]
+            if dentro:
+                break
+    return None
+
+
+def ponto_livre(botao, xml):
+    """
+    Ponto do botão que nenhum outro app cobre: a bolinha de dicas da Motorola fica em
+    cima do Adicionar do 1º produto e pega o toque. O centro ou, coberto, as pontas;
+    None se o botão todo está coberto. Só conta o que flutua (pequeno), não uma tela inteira.
+    """
+    x1, y1, x2, y2 = botao["caixa"]
+    meio = (y1 + y2) // 2
+    cobertas = [el["caixa"] for el in elementos(xml)
+                if el["pacote"] and el["pacote"] != botao["pacote"]
+                and el["caixa"][2] - el["caixa"][0] <= LADO_MAXIMO_FLUTUANTE
+                and el["caixa"][3] - el["caixa"][1] <= LADO_MAXIMO_FLUTUANTE]
+    for x in ((x1 + x2) // 2, x1 + (x2 - x1) // 5, x2 - (x2 - x1) // 5):
+        if not any(_dentro((x, meio), caixa) for caixa in cobertas):
+            return x, meio
+    return None
+
+
+def nome_do_produto(video):
+    """Nome do produto do vídeo pela API de afiliado, a partir do link; "" quando o link não diz."""
+    produtos, _ = asyncio.run(assistente.produtos_do_link(video["link"]))
+    return produtos[0]["nome"] if produtos else ""
+
+
+def adicionar_produto(d, video):
+    """
+    Toca em Adicionar só no produto do vídeo, achado pelo nome, rolando a lista se
+    preciso, e confere o nome de novo na janela "Editar nome do produto" que abre.
+    Pela posição, um toque desviado adiciona outro produto: a bolinha de dicas da
+    Motorola fica em cima do Adicionar do 1º, e o toque que a fecha pode cair na lista.
+    Sem achar ou com outro produto na janela, não segue (o Feito fica sem tocar) e avisa
+    o Rafael no privado; o nome não vai para o log.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    nome = nome_do_produto(video)
+    if not nome:
+        avisar_rafael.mandar_texto(f"{AVISO_SEM_PRODUTO}\n\nO link do vídeo não diz qual é o produto.")
+        return False, "o link não diz o produto do vídeo: nada adicionado (aviso no privado)"
+    if janela_de_editar_aberta(elementos(d.dump_hierarchy())):
+        # Um toque de antes (como o que fecha a bolinha da Motorola) já abriu um produto.
+        return conferir_janela(d, nome, None)
+    for rolagem in range(ROLAGENS_DO_PRODUTO + 1):
+        tela = d.dump_hierarchy()
+        botao = adicionar_do_produto(tela, nome)
+        if botao:
+            ponto = ponto_livre(botao, tela)
+            if not ponto:
+                return False, "o Adicionar do produto está coberto por outro app: nada tocado"
+            x, y = ponto
+            if proibido_no_ponto(tela, x, y):
+                return False, RECUSA
+            d.click(x, y)
+            return conferir_janela(d, nome, ponto)
+        if rolagem < ROLAGENS_DO_PRODUTO:
+            rolar(d)
+            time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
+    avisar_rafael.mandar_texto(f"{AVISO_SEM_PRODUTO}\n\nO produto do vídeo não está em Minhas Curtidas: {nome}")
+    return False, "o produto do vídeo não está na lista: nada adicionado (aviso no privado)"
+
+
+def janela_de_editar_aberta(lista):
+    """A janela "Editar nome do produto" (a do Feito) está na tela?"""
+    return any(_normal(el["texto"]) == "feito" for el in lista)
+
+
+def conferir_janela(d, nome, ponto):
+    """
+    A janela "Editar nome do produto" mostra o produto do vídeo? Depois do Adicionar
+    (ponto = onde tocou) ou quando ela já estava aberta no começo do passo (ponto None).
+    """
+    if ponto:
+        time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
+    lista = elementos(d.dump_hierarchy())
+    if not janela_de_editar_aberta(lista):
+        return False, f"Adicionar tocado em {ponto}, mas a janela de editar o nome não abriu"
+    if not any(mesmo_produto(el["texto"], nome) for el in lista):
+        avisar_rafael.mandar_texto(f"{AVISO_JANELA_ERRADA}\n\nO produto do vídeo é: {nome}")
+        return False, "a janela de editar o nome é de outro produto: Feito não tocado (aviso no privado)"
+    if not ponto:
+        return True, "a janela do produto do vídeo já estava aberta; nada tocado"
+    return True, f"produto do vídeo achado pelo nome; Adicionar tocado em {ponto}; a janela confere"
+
+
+def rolar(d, para_cima=False):
+    """Arrasta a tela no meio, de baixo para cima (o conteúdo desce) ou o contrário."""
+    largura, altura = d.window_size()
+    de, ate = (0.3, 0.75) if para_cima else (0.75, 0.3)
+    d.swipe(largura // 2, int(altura * de), largura // 2, int(altura * ate), 0.4)
+
+
 def mandar_print(d):
     """Print da tela no privado do Rafael. O arquivo sai do servidor logo depois."""
     descritor, caminho = tempfile.mkstemp(suffix=".png")
@@ -320,7 +467,7 @@ def por_na_galeria(d, arquivo):
 def separar_passos(texto):
     """Lista de (nome, argumento). Passo desconhecido vira ValueError antes de tocar em qualquer coisa."""
     conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "esperar", "escrever",
-                  "link", "video", "titulo", "print", "tela"}
+                  "link", "video", "titulo", "produto", "print", "tela"}
     passos = []
     for pedaco in (texto or "").split(";"):
         pedaco = pedaco.strip()
@@ -364,9 +511,7 @@ def fazer_passo(d, nome, argumento):
         d.press("back" if nome == "voltar" else "home")
         return True, "tecla apertada"
     if nome == "rolar":
-        largura, altura = d.window_size()
-        de, ate = (0.75, 0.3) if argumento != "cima" else (0.3, 0.75)
-        d.swipe(largura // 2, int(altura * de), largura // 2, int(altura * ate), 0.4)
+        rolar(d, para_cima=argumento == "cima")
         return True, "rolado"
     if nome == "esperar":
         time.sleep(min(float(argumento or 1), MAXIMO_ESPERA))
@@ -374,7 +519,7 @@ def fazer_passo(d, nome, argumento):
     if nome == "escrever":
         d.send_keys(argumento)
         return True, "escrito"
-    if nome in ("link", "video", "titulo"):
+    if nome in ("link", "video", "titulo", "produto"):
         video = video_do_teste(novo=nome == "video" and argumento == "novo")
         if not video:
             return False, "nenhum vídeo da fonte do painel com arquivo e link"
@@ -382,6 +527,8 @@ def fazer_passo(d, nome, argumento):
             return True, f"aberto: {abrir_link(d, video['link'])}"
         if nome == "titulo":
             return escrever_titulo(d, video)
+        if nome == "produto":
+            return adicionar_produto(d, video)
         return ((True, "vídeo na galeria") if por_na_galeria(d, video["arquivo"])
                 else (False, "o vídeo não apareceu na galeria"))
     if nome == "print":

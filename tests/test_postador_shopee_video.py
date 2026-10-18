@@ -421,6 +421,178 @@ def test_sem_video_na_fonte_o_link_e_o_video_falham(capsys):
     assert "nenhum vídeo da fonte do painel" in capsys.readouterr().out
 
 
+TELA_CURTIDAS = """<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+  <node text="" class="android.widget.FrameLayout" bounds="[0,0][1080,2400]" clickable="false">
+    <node text="Adicionar Produto" class="android.widget.TextView" bounds="[400,150][740,200]" />
+    <node text="Minhas Curtidas" class="android.view.ViewGroup" clickable="true" bounds="[300,410][510,460]" />
+    <node text="" class="android.widget.ScrollView" clickable="true" bounds="[0,700][1080,2400]">
+      <node text="" class="android.view.ViewGroup" clickable="true" bounds="[0,780][1080,1055]">
+        <node text="Fibra Proteína Cabelo Cacheado Luxo" class="android.widget.TextView"
+              bounds="[300,770][1040,830]" />
+        <node text="R$125,32" class="android.widget.TextView" bounds="[300,970][430,1010]" />
+        <node text="" class="android.view.ViewGroup" clickable="true" bounds="[840,945][1010,1010]">
+          <node text="Adicionar" class="android.widget.TextView" bounds="[850,955][1000,1000]" />
+        </node>
+      </node>
+      <node text="" class="android.view.ViewGroup" clickable="true" bounds="[0,1060][1080,1330]">
+        <node text="Vestido Infantil Estampado Gatinho Para Meninas de 4 a 14 Anos"
+              class="android.widget.TextView" bounds="[300,1070][1040,1130]" />
+        <node text="R$59,90" class="android.widget.TextView" bounds="[300,1250][430,1290]" />
+        <node text="" class="android.view.ViewGroup" clickable="true" bounds="[840,1225][1010,1290]">
+          <node text="Adicionar" class="android.widget.TextView" bounds="[850,1235][1000,1280]" />
+        </node>
+      </node>
+    </node>
+  </node>
+</hierarchy>"""
+VESTIDO = "Vestido Infantil Estampado Gatinho Para Meninas de 4 a 14 Anos"
+
+
+TELA_EDITAR_NOME = """<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+<hierarchy rotation="0">
+  <node text="" class="android.widget.FrameLayout" bounds="[0,0][1080,2400]" clickable="false">
+    <node text="Editar nome do produto" class="android.widget.TextView" bounds="[300,1310][780,1370]" />
+    <node text="NOME_NA_JANELA" class="android.widget.TextView" bounds="[360,1450][1040,1510]" />
+    <node text="R$59,90" class="android.widget.TextView" bounds="[360,1610][700,1660]" />
+    <node text="" class="android.view.ViewGroup" clickable="true" bounds="[40,2270][1040,2360]">
+      <node text="Feito" class="android.widget.TextView" bounds="[480,2290][600,2340]" />
+    </node>
+  </node>
+</hierarchy>"""
+
+
+class AparelhoComJanela(Aparelho):
+    """Mostra a lista até o primeiro toque e, depois dele, a janela de editar o nome."""
+
+    def __init__(self, tela=TELA_CURTIDAS, nome_na_janela=VESTIDO):
+        super().__init__(tela=tela)
+        self.janela = TELA_EDITAR_NOME.replace("NOME_NA_JANELA", nome_na_janela)
+
+    def dump_hierarchy(self):
+        return self.janela if self.toques else self.tela
+
+
+def _produto_do_link(monkeypatch, nome):
+    links = []
+
+    async def produtos_do_link(link):
+        links.append(link)
+        return ([{"nome": nome, "preco": 59.9, "comissao": 10.0}] if nome else []), link
+
+    monkeypatch.setattr(ps.assistente, "produtos_do_link", produtos_do_link)
+    return links
+
+
+def _avisos(monkeypatch):
+    avisos = []
+    monkeypatch.setattr(ps.avisar_rafael, "mandar_texto", lambda texto: avisos.append(texto) or True)
+    return avisos
+
+
+def test_produto_adiciona_o_do_video_pelo_nome_e_nao_o_primeiro_da_lista(monkeypatch, capsys):
+    _autorais()
+    links = _produto_do_link(monkeypatch, VESTIDO)
+    avisos = _avisos(monkeypatch)
+    aparelho = AparelhoComJanela()
+    assert ps.explorar("produto", aparelho)
+    assert aparelho.toques == [(925, 1257)] and links == ["https://s.shopee.com.br/abc"] and avisos == []
+    saida = capsys.readouterr().out
+    assert "achado pelo nome" in saida and "a janela confere" in saida
+    assert "Vestido" not in saida and "Gatinho" not in saida
+
+
+def test_produto_aceita_o_nome_cortado_na_lista_e_na_janela(monkeypatch):
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    aparelho = AparelhoComJanela(tela=TELA_CURTIDAS.replace(VESTIDO, "Vestido Infantil Estampado Gatinho…"),
+                                 nome_na_janela="Vestido Infantil Estampado Gatinho Para")
+    assert ps.explorar("produto", aparelho)
+    assert aparelho.toques == [(925, 1257)]
+
+
+def test_produto_nao_toca_onde_a_bolinha_da_motorola_cobre(monkeypatch):
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    bolinha = ('<node text="" resource-id="com.motorola.mototour:id/root" package="com.motorola.mototour" '
+               'class="android.widget.FrameLayout" bounds="[890,1190][1060,1330]" />\n  </node>\n</hierarchy>')
+    tela = TELA_CURTIDAS.replace("  </node>\n</hierarchy>", bolinha).replace(
+        'class="android.widget.TextView" bounds=', 'package="com.shopee.br" class="android.widget.TextView" bounds=')
+    aparelho = AparelhoComJanela(tela=tela)
+    assert ps.explorar("produto", aparelho)
+    assert aparelho.toques == [(880, 1257)]
+    coberta = tela.replace("[890,1190][1060,1330]", "[840,1190][1060,1330]")
+    aparelho = AparelhoComJanela(tela=coberta)
+    assert not ps.explorar("produto", aparelho)
+    assert aparelho.toques == []
+
+
+def test_janela_de_outro_produto_para_sem_tocar_em_feito(monkeypatch, capsys):
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    avisos = _avisos(monkeypatch)
+    aparelho = AparelhoComJanela(nome_na_janela="Fibra Proteína Cabelo Cacheado Luxo")
+    assert not ps.explorar("produto; tocar:Feito", aparelho)
+    assert aparelho.toques == [(925, 1257)]
+    assert len(avisos) == 1 and "outro produto" in avisos[0] and VESTIDO in avisos[0]
+    saida = capsys.readouterr().out
+    assert "Feito não tocado" in saida and "passo 2" not in saida and "Fibra" not in saida
+
+
+def test_janela_de_outro_produto_ja_aberta_nao_toca_em_nada(monkeypatch, capsys):
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    avisos = _avisos(monkeypatch)
+    aparelho = AparelhoComJanela(nome_na_janela="Fibra Proteína Cabelo Cacheado Luxo")
+    aparelho.tela = aparelho.janela
+    assert not ps.explorar("produto", aparelho)
+    assert aparelho.toques == [] and not any(comando[0] == "rolar" for comando in aparelho.comandos)
+    assert len(avisos) == 1 and "Feito não tocado" in capsys.readouterr().out
+
+
+def test_produto_fora_da_lista_nao_adiciona_nada_e_avisa_no_privado(monkeypatch, capsys):
+    _autorais()
+    _produto_do_link(monkeypatch, "Garrafa Térmica Inox 1 Litro Com Alça")
+    avisos = _avisos(monkeypatch)
+    aparelho = Aparelho(tela=TELA_CURTIDAS)
+    assert not ps.explorar("produto", aparelho)
+    assert aparelho.toques == []
+    assert sum(1 for comando in aparelho.comandos if comando[0] == "rolar") == ps.ROLAGENS_DO_PRODUTO
+    assert len(avisos) == 1 and "Garrafa Térmica Inox" in avisos[0]
+    saida = capsys.readouterr().out
+    assert "nada adicionado" in saida and "Garrafa" not in saida
+
+
+def test_produto_sem_nome_pelo_link_nao_adiciona_nada(monkeypatch, capsys):
+    _autorais()
+    _produto_do_link(monkeypatch, "")
+    avisos = _avisos(monkeypatch)
+    aparelho = Aparelho(tela=TELA_CURTIDAS)
+    assert not ps.explorar("produto", aparelho)
+    assert aparelho.toques == [] and len(avisos) == 1
+    assert "o link não diz o produto" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("texto, nome, igual", [
+    (VESTIDO, VESTIDO, True),
+    ("  vestido infantil  estampado gatinho para meninas de 4 a 14 anos ", VESTIDO, True),
+    ("Vestido Infantil Estampado...", VESTIDO, True),
+    ("Vestido", VESTIDO, False),
+    ("Vestido Infantil Liso Para Meninas", VESTIDO, False),
+    ("", VESTIDO, False),
+])
+def test_mesmo_produto(texto, nome, igual):
+    assert ps.mesmo_produto(texto, nome) is igual
+
+
+def test_botao_adicionar_so_dentro_do_bloco_do_produto():
+    # Sem o bloco de cada produto, o menor bloco com o nome é a lista inteira: o robô não adivinha.
+    tela = TELA_CURTIDAS.replace('class="android.view.ViewGroup" clickable="true" bounds="[0,1060][1080,1330]"',
+                                 'class="android.view.ViewGroup" clickable="false" bounds="[0,1060][1080,1330]"')
+    assert ps.adicionar_do_produto(TELA_CURTIDAS, VESTIDO)["caixa"] == (850, 1235, 1000, 1280)
+    assert ps.adicionar_do_produto(tela, VESTIDO) is None
+
+
 def test_android_desligado_nem_conecta(monkeypatch, capsys):
     monkeypatch.setattr(ps.av, "android_ligado", lambda: False)
     monkeypatch.setattr(ps, "conectar", lambda: pytest.fail("não devia conectar"))

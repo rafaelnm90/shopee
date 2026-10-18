@@ -51,11 +51,16 @@ voltarmos a ele. As decisões ficam no `DECISOES.md`, área Shopee Vídeo.
   1. legenda: `tocar:@et_caption` → `titulo` (o título da IA; no log, só o tamanho) →
      **OK** no alto à direita (`@tv_right`, ~1012,178), que fecha o teclado;
   2. `tocar:@ll_add_product_symbol` (Adicionar produto, ~728,738) → a lista
-     (`ReactActivity_`) → **Minhas Curtidas** → **Mais Recente**: o curtido por último
-     fica em cima;
-  3. **Adicionar** do produto escolhido (coluna x=924; o do 1º produto em ~924,977). A
+     (`ReactActivity_`) → **Minhas Curtidas** → **Mais Recente**;
+  3. **Adicionar** do produto do vídeo (coluna x=924; o do 1º produto em ~924,977). A
      bolinha de dicas da Motorola (`com.motorola.mototour`, em ~1001,1024) pode ficar
-     em cima e pegar o toque: fecha em **Agora não** (~538,1718), e o toque se repete;
+     em cima e pegar o toque: fecha em **Agora não** (~538,1718), e o toque se repete.
+     Neste teste o toque foi pela posição e pegou o produto errado: o vestido estava em
+     1º, mas o "Agora não" da bolinha fica na altura do 4º produto (uma Fibra de cabelo)
+     e quase certamente caiu na lista; a janela seguinte veio com o preço da Fibra. O
+     Rafael publicou o rascunho e viu. Agora é o passo `produto`: acha o produto do vídeo
+     pelo nome (o da API, pelo link), toca no Adicionar dele fora da bolinha e confere o
+     nome na janela que abre; sem achar ou com outro produto, para e avisa no privado;
   4. abre a janela **Editar nome do produto** (`ReactTransparentActivity_`) → **Feito**
      (~540,2315), sem mudar o nome;
   5. de volta à tela final, o produto aparece com "Sem Cupom" e o botão "Adicionar Mais"
@@ -82,7 +87,8 @@ voltarmos a ele. As decisões ficam no `DECISOES.md`, área Shopee Vídeo.
    galeria → Próximo. Efeito de giro é opcional.
 3. Adicionar Produto → Minhas Curtidas → Mais Recente: os curtidos agora ficam em
    cima (curtiu 2, são os 2 primeiros). Entre eles, o de menor preço primeiro; no
-   empate, o de maior comissão. Na janela "Editar nome do produto", só **Feito**.
+   empate, o de maior comissão. O robô acha cada um pelo nome, não pela posição. Na
+   janela "Editar nome do produto", só **Feito**.
 4. Título no campo da legenda; as chaves da última tela como vêm.
 5. Postar. Curtir e comentar nunca é automático (diretriz 9.1.1).
 
@@ -110,7 +116,8 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
    - Teste completo (escolha do Rafael em 18/10/2026): `video` escolhe e guarda o
      vídeo do teste; `link` abre o produto dele para curtir; `titulo` escreve o título
      da IA na legenda; o produto sai de "Minhas Curtidas"; `print` manda a tela no
-     privado do Rafael antes de tocar em Rascunhos.
+     privado do Rafael antes de tocar em Rascunhos; `produto` toca em Adicionar só no
+     produto do vídeo, achado pelo nome na lista.
    - O `link` abre o link do vídeo como veio (o app segue o link curto sozinho), como
      o Rafael faz com o link do modo assistente. Aberto pelo endereço final do produto
      (/product/loja/item), o app ficou preso no esqueleto da página, carregando
@@ -158,7 +165,7 @@ Celular guardado (perfil pessoal do Rafael, carregador, Wi-Fi)
 | 1a | Rafael | Conta no Tailscale e uma chave de acesso (auth key) salva no GitHub como segredo `TAILSCALE_AUTHKEY`; nunca colar a chave na conversa. A chave do servidor não expira (Disable key expiry em Machines → shopee-servidor) | feita em 05/10/2026 |
 | 1b | Claude | `android.yml` → `tailscale`: o servidor entra na rede privada (sem mexer no DNS nem nas rotas), com o nome `shopee-servidor` | feita em 05/10/2026: conectado |
 | 1c | Claude + Rafael | Parear o adb com o celular pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱, `celular_robo.py`): o código vai só no privado e o bot apaga a mensagem; Reconectar quando a porta muda. O explorar aceita o celular (`android.yml` → `explorar-celular`) | feita em 17/10/2026: pareado e conectado (moto g(100)). Depois de um reset, o Rafael refaz as fases 0 e 1c pelo botão Passo a Passo 📖 do Celular do Robô 📱 |
-| 2 | Claude | Explorar devagar até Rascunhos, com as regras de "Para voltar" | caminho mapeado até Rascunhos em 18/10/2026 (16 rodadas; o 1º rascunho só com o vídeo, sem título nem produto). Duas verificações (1ª e 16ª rodadas; a da 16ª, às 04:27, expirou com o Rafael dormindo); o Rafael escolheu continuar e resolve cada uma com a mão, com rodadas só das 8h às 22h. Teste completo feito em 18/10/2026: produto curtido pelo link, título da IA na legenda, produto por Minhas Curtidas → Mais Recente, print no privado e Rascunhos. Falta o Rafael conferir o rascunho no Motorola e testar o link que abre um vídeo com produto anexado |
+| 2 | Claude | Explorar devagar até Rascunhos, com as regras de "Para voltar" | caminho mapeado até Rascunhos em 18/10/2026 (16 rodadas; o 1º rascunho só com o vídeo, sem título nem produto). Duas verificações (1ª e 16ª rodadas; a da 16ª, às 04:27, expirou com o Rafael dormindo); o Rafael escolheu continuar e resolve cada uma com a mão, com rodadas só das 8h às 22h. Teste completo feito em 18/10/2026: produto curtido pelo link, título da IA na legenda, produto por Minhas Curtidas → Mais Recente, print no privado e Rascunhos. O Rafael publicou o rascunho e viu o produto errado (o toque que fechou a bolinha da Motorola caiu no 4º produto); o passo `produto` acha o produto pelo nome e confere na janela antes do Feito. Falta repetir o teste com o passo `produto` e testar o link que abre um vídeo com produto anexado |
 | 3 | os dois | Um rascunho por dia que o Rafael confere; depois 1 ou 2 postagens reais por dia, na janela e com quantidade variada; observar 2 a 4 semanas | a fazer |
 | 4 | os dois | Só com semanas sem verificação nem bloqueio: pensar em aumentar o volume | a fazer |
 
