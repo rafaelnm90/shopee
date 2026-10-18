@@ -266,10 +266,14 @@ def mandar_print(d):
 
 
 def abrir_link(d, link):
-    """Abre no app da Shopee o produto (ou o vídeo) do link. Devolve o tipo de página, para o log."""
-    destino = asyncio.run(link_para_converter(link))
-    d.shell(["am", "start", "-a", "android.intent.action.VIEW", "-d", destino, "-p", PACOTE])
-    return tipo_de_link(destino)
+    """
+    Abre no app da Shopee o link do vídeo como veio, como o Rafael abre o link que o modo
+    assistente manda: o app segue o link curto sozinho até o produto. Pelo endereço final
+    do produto (/product/loja/item), o app fica preso no esqueleto da página, carregando.
+    Devolve o tipo de página a que o link leva, para o log.
+    """
+    d.shell(["am", "start", "-a", "android.intent.action.VIEW", "-d", link, "-p", PACOTE])
+    return tipo_de_link(asyncio.run(link_para_converter(link)))
 
 
 def por_na_galeria(d, arquivo):

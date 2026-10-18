@@ -294,7 +294,7 @@ def test_print_vai_so_para_o_privado_e_o_arquivo_sai(monkeypatch, capsys):
     assert not ps.explorar("print", aparelho) and not os.path.exists(aparelho.print)
 
 
-def test_link_abre_o_produto_no_app_sem_mostrar_o_endereco(monkeypatch, capsys):
+def test_link_abre_o_link_do_video_como_veio_sem_mostrar_o_endereco(monkeypatch, capsys):
     _autorais()
 
     async def converter(link):
@@ -304,10 +304,11 @@ def test_link_abre_o_produto_no_app_sem_mostrar_o_endereco(monkeypatch, capsys):
     monkeypatch.setattr(ps, "link_para_converter", converter)
     aparelho = Aparelho()
     assert ps.explorar("link", aparelho)
-    assert ["am", "start", "-a", "android.intent.action.VIEW", "-d", "https://shopee.com.br/product/11/22",
+    assert ["am", "start", "-a", "android.intent.action.VIEW", "-d", "https://s.shopee.com.br/abc",
             "-p", ps.PACOTE] in aparelho.comandos
+    assert not any("shopee.com.br/product" in parte for comando in aparelho.comandos for parte in comando)
     saida = capsys.readouterr().out
-    assert "aberto: produto" in saida and "shopee.com.br/product" not in saida
+    assert "aberto: produto" in saida and "shopee.com.br" not in saida
 
 
 def test_video_vai_para_a_galeria():

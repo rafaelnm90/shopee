@@ -90,6 +90,10 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
      vídeo do teste; `link` abre o produto dele para curtir; `titulo` escreve o título
      da IA na legenda; o produto sai de "Minhas Curtidas"; `print` manda a tela no
      privado do Rafael antes de tocar em Rascunhos.
+   - O `link` abre o link do vídeo como veio (o app segue o link curto sozinho), como
+     o Rafael faz com o link do modo assistente. Aberto pelo endereço final do produto
+     (/product/loja/item), o app ficou preso no esqueleto da página, carregando
+     (3 rodadas em 18/10/2026; foto do Rafael).
 5. **Ritmo do robô pronto:**
    - poucos vídeos por dia no começo (1 ou 2);
    - faixa de horário e quantidade sorteada por dia, como no painel;
