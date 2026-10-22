@@ -850,3 +850,22 @@ def test_so_fica_vermelho_quando_nem_comecou():
     assert ps.codigo_de_saida(True) == 0
     assert ps.codigo_de_saida(False) == 0
     assert ps.codigo_de_saida(None) == 1
+
+
+@pytest.mark.parametrize("texto, igual", [
+    (VESTIDO, True), ("Oficial " + VESTIDO, True), ("1 " + VESTIDO, True), ("￼ " + VESTIDO, True),
+    ("Vestido Infantil Liso Para Meninas", False), ("Fibra " + "Proteína Cabelo Cacheado Luxo", False),
+    ("Um texto bem comprido antes do nome " + VESTIDO, False),
+])
+def test_nome_na_pagina_aceita_um_pedaco_curto_antes(texto, igual):
+    # Na página do link, o app pôs um pedaço antes do nome (19 e 22/10): o nome tem de valer.
+    assert ps.nome_na_pagina(texto, VESTIDO) is igual
+
+
+def test_curtir_acha_o_nome_com_o_selo_antes(monkeypatch):
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    aparelho = AparelhoDaPagina(curtiu=CURTIDO)
+    aparelho.tela = TELA_PAGINA_CURTA.replace(f'text="{VESTIDO}"', f'text="Oficial {VESTIDO}"')
+    assert ps.explorar("curtir", aparelho)
+    assert aparelho.toques == [(525, 1217), (1028, 1233)]
