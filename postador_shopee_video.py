@@ -152,6 +152,10 @@ PALAVRAS_DA_TELA = frozenset("""
     ganhos comissões relatório upload duet costurar adesivos clipes tudo caminho envio
     postagem postagens publicação publicações modelo modelos ir lojas tela telas
     post next done cancel save draft drafts gallery album photos videos add product products
+    excluir excluído excluídos apagar apagado deletar remover descartar copiar copiado
+    fixado fixados fixar desafixar alterações deseja certeza perder perdido perdidas isso
+    este esta esse essa será serão editado edição editando manter selecionado
+    selecionados item itens tem mil
     verificação verificar segurança arraste arrastar deslize deslizar controle deslizante
     quebra-cabeça peça complete completar tente atualizar erro carregando aguarde rede
     conexão internet ops algo deu errado página encontrada negado bloqueado suspeita

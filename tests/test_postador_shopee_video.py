@@ -92,6 +92,10 @@ def sem_espera(monkeypatch):
     ("Rafael Novais de Miranda", "… de …"),
     ("2mil Seguidores", "… Seguidores"),
     ("Criadores & Afiliados 🛍️", "Criadores & Afiliados 🛍️"),
+    ("Excluir 1 item?", "Excluir # item?"),
+    ("Descartar alterações", "Descartar alterações"),
+    ("Fixado", "Fixado"),
+    ("Copiar link", "Copiar link"),
     ("", ""),
 ])
 def test_mascara_tira_o_que_nao_e_botao(texto, forma):
