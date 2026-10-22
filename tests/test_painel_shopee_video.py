@@ -23,15 +23,42 @@ def test_painel_comeca_pausado_com_5_a_10_das_13h_as_22h(bm, Msg, Est):
     msg, est = Msg("Shopee Vídeo 🎬"), Est()
     rodar(sv.painel_handler(msg, est))
     texto = msg.saidas[-1]
-    assert "Pausado" in texto and "5 a 10" in texto and "das 13h às 22h" in texto and "hoje:" in texto
-    assert "Modo assistente" in texto and "Mandados hoje: <b>0</b>" in texto
+    # A tela inicial diz quem posta agora e o que cada botão faz.
+    assert "Quem posta agora" in texto and "ninguém" in texto and "O que cada botão faz" in texto
     assert "Fonte dos vídeos: <b>Autorais 🎥</b>" in texto
     assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu.state
-    teclado = _textos(sv.teclado_painel(sv.ler_config()))
+    assert _textos(sv.teclado_painel(sv.ler_config())) == [
+        "Rascunhos do Robô 📝", "Robô Automático 🤖", "Modo Assistente 📲", "Fonte dos Vídeos 🎞️",
+        "Como Funciona ❓", "Voltar aos Canais 🔙"]
+    msg = Msg("Modo Assistente 📲")
+    rodar(sv.menu_assistente_handler(msg, est))
+    texto = msg.saidas[-1]
+    assert "Pausado" in texto and "5 a 10" in texto and "das 13h às 22h" in texto and "hoje:" in texto
+    assert "Mandados hoje: <b>0</b>" in texto and "O que cada botão faz" in texto
+    assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu_assistente.state
+    teclado = _textos(sv.teclado_assistente(sv.ler_config()))
     for botao in ("Vídeos por Dia 📦", "Horário de Postagem ⏰", "Retomar Assistente ▶️", "Enviar 1 Agora 📤",
-                  "Fonte dos Vídeos 🎞️", "Voltar aos Canais 🔙"):
+                  "Voltar à Shopee Vídeo 🔙"):
         assert botao in teclado
     assert "Tela do Android 📱" not in teclado and "Tutorial do Android 📖" not in teclado
+
+
+def test_menu_do_robo_e_como_funciona(bm, Msg, Est):
+    sv, est = _painel(bm), Est()
+    msg = Msg("Robô Automático 🤖")
+    rodar(sv.menu_robo_handler(msg, est))
+    texto = msg.saidas[-1]
+    assert "Robô Automático" in texto and "Pausado" in texto and "Celular: ⚠️" in texto
+    assert "O que cada botão faz" in texto and "Testar Caminho 🧭" in texto
+    assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu_robo.state
+    assert _textos(sv.teclado_robo(sv.ler_config())) == [
+        "Retomar Postagem ▶️", "Rascunhos do Robô 📝", "Rascunhos por Dia 📦", "Horário do Robô 🕗",
+        "Testar Caminho 🧭", "Celular do Robô 📱", "Voltar à Shopee Vídeo 🔙"]
+    msg = Msg("Como Funciona ❓")
+    rodar(sv.como_funciona_handler(msg, est))
+    for trecho in ("Um cobre o outro", "Depuração por Wi-Fi", "Retomar Postagem ▶️", "Passo a Passo 📖"):
+        assert trecho in msg.saidas[-1]
+    assert len(msg.saidas[-1]) < 4096
 
 
 def test_faixa_de_videos_por_dia_pede_confirmacao_e_grava(bm, Msg, Est):
@@ -76,7 +103,7 @@ def test_pausar_e_retomar_com_confirmacao(bm, Msg, Est):
     assert "Retomar" in msg.saidas[0] and "assistente" in msg.saidas[0] and sv.ler_config()["pausado"] is True
     rodar(sv.salvar_pausa(Msg("Confirmar Retomada ✅"), est))
     assert sv.ler_config()["pausado"] is False and sv.ler_config()["robo_pausado"] is True
-    assert "Pausar Assistente ⏸️" in _textos(sv.teclado_painel(sv.ler_config()))
+    assert "Pausar Assistente ⏸️" in _textos(sv.teclado_assistente(sv.ler_config()))
     rodar(sv.pedir_pausa(Msg("Pausar Assistente ⏸️"), est))
     rodar(sv.salvar_pausa(Msg("Confirmar Pausa ✅"), est))
     assert sv.ler_config()["pausado"] is True
@@ -92,16 +119,17 @@ def test_botao_antigo_do_teclado_ainda_pausa_o_assistente(bm, Msg, Est):
 def test_pausa_do_robo_automatico_e_separada_e_o_botao_troca(bm, Msg, Est, monkeypatch):
     sv, est = _painel(bm), Est()
     monkeypatch.setattr(sv.celular_robo, "reconectar_sozinho", lambda: (True, "moto g(100)"))
-    teclado = _textos(sv.teclado_painel(sv.ler_config()))
-    assert "Retomar Postagem ▶️" in teclado and "Retomar Assistente ▶️" in teclado   # os dois começam pausados
+    config = sv.ler_config()
+    assert "Retomar Postagem ▶️" in _textos(sv.teclado_robo(config))           # os dois começam pausados
+    assert "Retomar Assistente ▶️" in _textos(sv.teclado_assistente(config))
     msg = Msg("Retomar Postagem ▶️")
     rodar(sv.pedir_pausa_robo(msg, est))
     assert "robô automático" in msg.saidas[0]
     rodar(sv.salvar_pausa_robo(Msg("Confirmar Retomada ✅"), est))
     config = sv.ler_config()
     assert config["robo_pausado"] is False and config["pausado"] is True
-    teclado = _textos(sv.teclado_painel(config))
-    assert "Pausar Postagem ⏸️" in teclado and "Retomar Assistente ▶️" in teclado
+    assert "Pausar Postagem ⏸️" in _textos(sv.teclado_robo(config))
+    assert "Retomar Assistente ▶️" in _textos(sv.teclado_assistente(config))
     rodar(sv.pedir_pausa_robo(Msg("Pausar Postagem ⏸️"), est))
     rodar(sv.salvar_pausa_robo(Msg("Confirmar Pausa ✅"), est))
     assert sv.ler_config()["robo_pausado"] is True
@@ -115,7 +143,7 @@ def test_retomar_postagem_sem_o_celular_continua_pausado_e_diz_o_que_fazer(bm, M
     rodar(sv.salvar_pausa_robo(msg, est))
     assert sv.ler_config()["robo_pausado"] is True
     assert "Não retomei" in msg.saidas[1] and "Depuração por Wi-Fi" in msg.saidas[1]
-    assert "Retomar Postagem ▶️" in _textos(sv.teclado_painel(sv.ler_config()))
+    assert "Retomar Postagem ▶️" in _textos(sv.teclado_robo(sv.ler_config()))
 
 
 def test_um_cobre_o_outro_robo_ativo_deixa_o_assistente_em_espera(bm, monkeypatch):
@@ -131,12 +159,14 @@ def test_um_cobre_o_outro_robo_ativo_deixa_o_assistente_em_espera(bm, monkeypatc
     sv.alterar_config(pausado=False, robo_pausado=False)
     rodar(sv.verificar_envio())
     assert pedidos == []
-    assert "Em espera" in sv.texto_painel(sv.ler_config())
+    assert "Em espera" in sv.texto_assistente(sv.ler_config())
+    assert "o Robô Automático" in sv.texto_painel(sv.ler_config())
     # O celular desconectou: o robô pausou sozinho, e o assistente volta a mandar.
     sv.alterar_config(robo_pausado=True, robo_pausa_motivo="celular desconectado")
     rodar(sv.verificar_envio())
     assert pedidos == ["autorais"]
-    assert "o celular desconectou" in sv.texto_painel(sv.ler_config())
+    assert "o Motorola desconectou" in sv.texto_painel(sv.ler_config())
+    assert "o Motorola desconectou" in sv.texto_robo(sv.ler_config())
 
 
 def test_reconectar_acha_a_porta_sozinho_antes_de_pedir(bm, Msg, Est, monkeypatch):
@@ -165,7 +195,7 @@ def test_rascunhos_por_dia_e_horario_do_robo(bm, Msg, Est):
     config = sv.ler_config()
     assert (config["robo_limite_min"], config["robo_limite_max"], config["robo_inicio"], config["robo_fim"]) == (2, 4, 9, 21)
     assert (config["limite_min"], config["inicio"]) == (5, 13)                # o assistente não muda
-    texto = sv.texto_painel(config)
+    texto = sv.texto_robo(config)
     assert "Rascunhos por dia: <b>2 a 4</b>" in texto and "Horário do robô: <b>das 9h às 21h</b>" in texto
     # O explorar no celular segue o mesmo horário.
     assert sv.robo.ps.horario_das_rodadas() == (9, 21)
@@ -291,8 +321,9 @@ def test_cancelar_volta_ao_painel_sem_mudar_nada(bm, Msg, Est):
     est = Est(estado=sv.ShopeeVideoFluxo.aguardando_faixa)
     msg = Msg("Cancelar ❌")
     rodar(bm.cancelar_fluxo_global(msg, est))
-    assert "cancelada" in msg.saidas[0] and "Shopee Vídeo" in msg.saidas[-1]
-    assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu.state
+    # Volta à tela de onde o ajuste saiu: o Modo Assistente.
+    assert "cancelada" in msg.saidas[0] and "Modo Assistente" in msg.saidas[-1]
+    assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu_assistente.state
     assert sv.ler_config()["limite_min"] == 5
 
 
@@ -308,7 +339,8 @@ def test_botoes_vem_antes_das_respostas_de_texto(bm):
     # tem de abrir o botão, e não ser lido como resposta.
     sv = _painel(bm)
     ordem = [h.callback.__name__ for h in sv.router.message.handlers]
-    botoes = ("painel_handler", "pedir_faixa", "pedir_janela", "pedir_pausa", "enviar_agora_handler",
+    botoes = ("painel_handler", "menu_robo_handler", "menu_assistente_handler", "como_funciona_handler",
+              "voltar_ao_robo", "pedir_faixa", "pedir_janela", "pedir_pausa", "enviar_agora_handler",
               "pedir_fonte", "pedir_pausa_robo", "pedir_faixa_robo", "pedir_janela_robo", "treino_handler",
               "rascunhos_handler", "aprovar_handler", "pedir_recusa", "proximo_handler")
     respostas = ("confirmar_faixa", "confirmar_janela", "salvar_fonte", "confirmar_com_os_botoes",
