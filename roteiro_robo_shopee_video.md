@@ -15,6 +15,11 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   do dia: Rascunhos por Dia 📦 sorteado e espalhado pelo Horário do Robô 🕗). Pausado,
   fora do horário, com o celular desconectado ou com a tela dele aberta, não toca em nada.
   O explorar e o robô pegam a mesma trava (`celular_robo.trava()`): nunca os dois juntos.
+- **Celular desconectado:** antes de cada rodada, `celular_robo.reconectar_sozinho()` tenta
+  a porta guardada e, se não der, procura a porta nova da Depuração por Wi-Fi (portas
+  32768 a 60999 do IP do celular na rede privada) e conecta. Sem conseguir (depuração
+  desligada, celular fora do Tailscale), a Postagem pausa sozinha e o assistente assume;
+  Retomar Postagem ▶️ procura de novo antes de retomar.
 - **Mapa:** os caminhos ficam nas listas `CAMINHO_PERFIL`, `CAMINHO_POSTAR` e
   `CAMINHO_PRODUTO` do `robo_shopee_video.py` (o que tocar, a espera e o que tem de
   aparecer depois). O treino confere cada passo contra elas; quando a Shopee mudar uma
