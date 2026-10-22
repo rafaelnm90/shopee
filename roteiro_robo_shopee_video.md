@@ -1,9 +1,40 @@
-# Robô da Shopee Vídeo no servidor: guardado (roteiro para a volta)
+# Robô da Shopee Vídeo no celular guardado (roteiro)
 
-Parado desde 05/10/2026. A Shopee Vídeo é feita hoje pelo **modo assistente**
-(`assistente_shopee_video.py`): o robô prepara a postagem e o Rafael posta pelo
-celular. Este roteiro diz onde o robô que posta sozinho parou e o que fazer se
-voltarmos a ele. As decisões ficam no `DECISOES.md`, área Shopee Vídeo.
+Desde 22/10/2026 há dois robôs, cada um com o seu botão de pausar: o **modo
+assistente** (`assistente_shopee_video.py`: prepara a postagem e o Rafael posta pelo
+celular) e o **robô automático** (`robo_shopee_video.py`: prepara rascunhos sozinho no
+celular guardado e posta os que o Rafael aprova no bot). Este roteiro diz o que já se
+sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
+`DECISOES.md`, área Shopee Vídeo.
+
+## Robô automático (22/10/2026)
+
+- **Rodada:** o bot_mestre chama `robo_shopee_video.py --rodada` a cada 15 min, num
+  processo à parte. Cada rodada faz no máximo uma coisa: treino (1ª rodada de segunda),
+  apagar um recusado, postar um aprovado cuja hora chegou ou preparar um rascunho (plano
+  do dia: Rascunhos por Dia 📦 sorteado e espalhado pelo Horário do Robô 🕗). Pausado,
+  fora do horário, com o celular desconectado ou com a tela dele aberta, não toca em nada.
+  O explorar e o robô pegam a mesma trava (`celular_robo.trava()`): nunca os dois juntos.
+- **Mapa:** os caminhos ficam nas listas `CAMINHO_PERFIL`, `CAMINHO_POSTAR` e
+  `CAMINHO_PRODUTO` do `robo_shopee_video.py` (o que tocar, a espera e o que tem de
+  aparecer depois). O treino confere cada passo contra elas; quando a Shopee mudar uma
+  tela, remapear com o explorar e mudar ali.
+- **Rascunhos:** tabela `shopee_video_rascunhos` (estados preparando → rascunho →
+  aprovado → postado, ou recusado → apagado; pulado quando o problema é do vídeo). O
+  vídeo e o print ficam em `~/shopee_video/rascunhos` (ID.mp4 e ID.png). Na galeria do
+  celular, o vídeo de cada rascunho tem nome próprio (`robo_shopee_video_ID.mp4`), para
+  ser o mais novo, e sai de lá depois de postado ou apagado.
+- **Ainda a mapear no Motorola** (o robô para e avisa se não achar; nada disso foi visto
+  ainda):
+  - a página completa depois de tocar no nome do produto (o passo `curtir`);
+  - a lista de rascunhos: os quadros (o robô escolhe pela posição, do mais novo para o
+    mais velho, e confere o título e o produto antes de postar) e apagar um rascunho
+    (Selecionar → o rascunho → Excluir → confirmar);
+  - o que o app pergunta ao sair da tela final sem salvar (o robô toca em Descartar, Sair
+    sem salvar ou Não salvar) e se isso apaga um rascunho aberto;
+  - o link do post (o vídeo mais novo do Perfil → Compartilhar → Copiar link);
+  - o link que abre um vídeo (Ver Produtos, vários produtos): até lá, o robô só usa
+    vídeos com link de produto, e os outros ficam para o assistente.
 
 ## Onde paramos
 
@@ -90,9 +121,14 @@ voltarmos a ele. As decisões ficam no `DECISOES.md`, área Shopee Vídeo.
   copiar link) e apagar um rascunho (Selecionar na lista). O rascunho só-vídeo antigo
   ainda está na lista.
 
-  **Retomada (quinta, 22/10/2026, 15h):** montar o robô automático com o botão no bot
-  (todos os rascunhos, aprovados um por um), usando os passos do explorar e as
-  conferências; rodadas paradas até lá para guardar o crédito do Claude.
+  **Retomada (quinta, 22/10/2026, 15h):** o robô automático foi montado (seção Robô
+  automático, no alto). O celular estava desconectado nessa hora (a porta da Depuração
+  por Wi-Fi mudou): o mapeamento que falta espera o Rafael reconectar.
+
+  **Teste de 19/10/2026 (08:15):** parou na curtida. O link de produto abre a página
+  curta (ReactActivity_: foto, preço, nome com a seta ">", Compre Agora, "Escolhas
+  Populares para Você"), sem o coração; tocar no nome do produto abre a página completa
+  (passo `curtir`).
 
   Ainda não testado: link que, em vez da página do produto, abre um **vídeo com o
   produto anexado** (alguns links são assim). Quando aparecer, mapear onde fica o

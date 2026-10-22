@@ -1,4 +1,6 @@
-"""Painel da Shopee Vídeo (Outros Canais, modo assistente): pausa, vídeos por dia, horário e Enviar 1 Agora."""
+"""Painel da Shopee Vídeo (Outros Canais): o assistente (pausa, vídeos por dia, horário e Enviar 1 Agora) e o robô automático (pausa, rascunhos por dia, horário, rascunhos para aprovar e treino)."""
+import os
+
 from conftest import rodar
 
 
@@ -22,11 +24,11 @@ def test_painel_comeca_pausado_com_5_a_10_das_13h_as_22h(bm, Msg, Est):
     rodar(sv.painel_handler(msg, est))
     texto = msg.saidas[-1]
     assert "Pausado" in texto and "5 a 10" in texto and "das 13h às 22h" in texto and "hoje:" in texto
-    assert "modo assistente" in texto and "Mandados hoje: <b>0</b>" in texto
+    assert "Modo assistente" in texto and "Mandados hoje: <b>0</b>" in texto
     assert "Fonte dos vídeos: <b>Autorais 🎥</b>" in texto
     assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu.state
     teclado = _textos(sv.teclado_painel(sv.ler_config()))
-    for botao in ("Vídeos por Dia 📦", "Horário de Postagem ⏰", "Retomar Robô ▶️", "Enviar 1 Agora 📤",
+    for botao in ("Vídeos por Dia 📦", "Horário de Postagem ⏰", "Retomar Assistente ▶️", "Enviar 1 Agora 📤",
                   "Fonte dos Vídeos 🎞️", "Voltar aos Canais 🔙"):
         assert botao in teclado
     assert "Tela do Android 📱" not in teclado and "Tutorial do Android 📖" not in teclado
@@ -69,15 +71,172 @@ def test_horario_de_postagem_e_dia_todo(bm, Msg, Est):
 
 def test_pausar_e_retomar_com_confirmacao(bm, Msg, Est):
     sv, est = _painel(bm), Est()
-    msg = Msg("Retomar Robô ▶️")
+    msg = Msg("Retomar Assistente ▶️")
     rodar(sv.pedir_pausa(msg, est))
-    assert "Retomar" in msg.saidas[0] and sv.ler_config()["pausado"] is True
+    assert "Retomar" in msg.saidas[0] and "assistente" in msg.saidas[0] and sv.ler_config()["pausado"] is True
     rodar(sv.salvar_pausa(Msg("Confirmar Retomada ✅"), est))
-    assert sv.ler_config()["pausado"] is False
-    assert "Pausar Robô ⏸️" in _textos(sv.teclado_painel(sv.ler_config()))
-    rodar(sv.pedir_pausa(Msg("Pausar Robô ⏸️"), est))
+    assert sv.ler_config()["pausado"] is False and sv.ler_config()["robo_pausado"] is True
+    assert "Pausar Assistente ⏸️" in _textos(sv.teclado_painel(sv.ler_config()))
+    rodar(sv.pedir_pausa(Msg("Pausar Assistente ⏸️"), est))
     rodar(sv.salvar_pausa(Msg("Confirmar Pausa ✅"), est))
     assert sv.ler_config()["pausado"] is True
+
+
+def test_botao_antigo_do_teclado_ainda_pausa_o_assistente(bm, Msg, Est):
+    sv, est = _painel(bm), Est()
+    rodar(sv.pedir_pausa(Msg("Retomar Robô ▶️"), est))
+    rodar(sv.salvar_pausa(Msg("Confirmar Retomada ✅"), est))
+    assert sv.ler_config()["pausado"] is False and sv.ler_config()["robo_pausado"] is True
+
+
+def test_pausa_do_robo_automatico_e_separada_e_o_botao_troca(bm, Msg, Est):
+    sv, est = _painel(bm), Est()
+    teclado = _textos(sv.teclado_painel(sv.ler_config()))
+    assert "Retomar Postagem ▶️" in teclado and "Retomar Assistente ▶️" in teclado   # os dois começam pausados
+    msg = Msg("Retomar Postagem ▶️")
+    rodar(sv.pedir_pausa_robo(msg, est))
+    assert "robô automático" in msg.saidas[0]
+    rodar(sv.salvar_pausa_robo(Msg("Confirmar Retomada ✅"), est))
+    config = sv.ler_config()
+    assert config["robo_pausado"] is False and config["pausado"] is True
+    teclado = _textos(sv.teclado_painel(config))
+    assert "Pausar Postagem ⏸️" in teclado and "Retomar Assistente ▶️" in teclado
+    rodar(sv.pedir_pausa_robo(Msg("Pausar Postagem ⏸️"), est))
+    rodar(sv.salvar_pausa_robo(Msg("Confirmar Pausa ✅"), est))
+    assert sv.ler_config()["robo_pausado"] is True
+
+
+def test_rascunhos_por_dia_e_horario_do_robo(bm, Msg, Est):
+    sv, est = _painel(bm), Est()
+    rodar(sv.pedir_faixa_robo(Msg("Rascunhos por Dia 📦"), est))
+    rodar(sv.confirmar_faixa_robo(Msg("2-4"), est))
+    assert sv.ler_config()["robo_limite_max"] == 2                         # só grava depois de aprovar
+    rodar(sv.salvar_faixa_robo(Msg("Aprovar ✅"), est))
+    rodar(sv.pedir_janela_robo(Msg("Horário do Robô 🕗"), est))
+    rodar(sv.confirmar_janela_robo(Msg("9-21"), est))
+    rodar(sv.salvar_janela_robo(Msg("Aprovar ✅"), est))
+    config = sv.ler_config()
+    assert (config["robo_limite_min"], config["robo_limite_max"], config["robo_inicio"], config["robo_fim"]) == (2, 4, 9, 21)
+    assert (config["limite_min"], config["inicio"]) == (5, 13)                # o assistente não muda
+    texto = sv.texto_painel(config)
+    assert "Rascunhos por dia: <b>2 a 4</b>" in texto and "Horário do robô: <b>das 9h às 21h</b>" in texto
+    # O explorar no celular segue o mesmo horário.
+    assert sv.robo.ps.horario_das_rodadas() == (9, 21)
+    msg = Msg("30")
+    rodar(sv.confirmar_faixa_robo(msg, Est(estado=sv.ShopeeVideoFluxo.aguardando_faixa_robo)))
+    assert "⚠️" in msg.saidas[0]
+
+
+class MsgComMidia:
+    """Mensagem que também guarda os vídeos e as fotos mandados."""
+
+    def __init__(self, Msg, texto):
+        self.msg, self.midias = Msg(texto), []
+
+    def __getattr__(self, nome):
+        return getattr(self.msg, nome)
+
+    async def answer_video(self, video, **kwargs):
+        self.midias.append(("video", video.path, kwargs.get("caption", "")))
+
+    async def answer_photo(self, foto, **kwargs):
+        self.midias.append(("foto", foto.path, kwargs.get("caption", "")))
+
+
+def _rascunho(sv, titulo="Vestido Infantil 👗 #vestido", criado="2026-10-22 10:00:00"):
+    robo = sv.robo
+    ident = robo.criar("video:%s" % titulo, None)
+    os.makedirs(robo.PASTA_RASCUNHOS, exist_ok=True)
+    arquivo, print_tela = (os.path.join(robo.PASTA_RASCUNHOS, f"{ident}.{ext}") for ext in ("mp4", "png"))
+    for caminho in (arquivo, print_tela):
+        with open(caminho, "wb") as f:
+            f.write(b"x")
+    robo.atualizar(ident, estado="rascunho", criado_em=criado, titulo=titulo, link="https://s.shopee.com.br/x",
+                   produtos=["Vestido Infantil"], comentario="Amei!", arquivo=arquivo, print=print_tela)
+    return ident
+
+
+def test_rascunhos_um_por_um_com_video_print_titulo_e_link(bm, Msg, Est):
+    sv, est = _painel(bm), Est()
+    primeiro = _rascunho(sv, "Primeiro título #a")
+    segundo = _rascunho(sv, "Segundo título #b", "2026-10-22 11:00:00")
+    msg = MsgComMidia(Msg, "Rascunhos do Robô 📝")
+    rodar(sv.rascunhos_handler(msg, est))
+    assert [m[0] for m in msg.midias] == ["video", "foto"]
+    texto = msg.saidas[-1]
+    assert "Rascunho 1 de 2" in texto and "Primeiro título #a" in texto and "https://s.shopee.com.br/x" in texto
+    assert "Vestido Infantil" in texto
+    msg = MsgComMidia(Msg, "Aprovar Rascunho ✅")
+    rodar(sv.aprovar_handler(msg, est))
+    assert sv.robo.pegar(primeiro)["estado"] == "aprovado" and sv.robo.pegar(primeiro)["postar_em"]
+    assert "Aprovado" in msg.saidas[0] and "Segundo título #b" in msg.saidas[-1]
+    msg = MsgComMidia(Msg, "Recusar Rascunho ❌")
+    rodar(sv.pedir_recusa(msg, est))
+    assert sv.robo.pegar(segundo)["estado"] == "rascunho"                    # pede confirmação antes
+    msg = MsgComMidia(Msg, "Confirmar Recusa ✅")
+    rodar(sv.salvar_recusa(msg, est))
+    assert sv.robo.pegar(segundo)["estado"] == "recusado"
+    assert "Nenhum rascunho esperando" in msg.saidas[-2]
+
+
+def test_proximo_rascunho_da_a_volta(bm, Msg, Est):
+    sv, est = _painel(bm), Est()
+    _rascunho(sv, "Primeiro #a")
+    _rascunho(sv, "Segundo #b", "2026-10-22 11:00:00")
+    rodar(sv.rascunhos_handler(MsgComMidia(Msg, "Rascunhos do Robô 📝"), est))
+    msg = MsgComMidia(Msg, "Próximo Rascunho ⏭️")
+    rodar(sv.proximo_handler(msg, est))
+    assert "Segundo #b" in msg.saidas[-1]
+    msg = MsgComMidia(Msg, "Próximo Rascunho ⏭️")
+    rodar(sv.proximo_handler(msg, est))
+    assert "Primeiro #a" in msg.saidas[-1]
+
+
+def test_aprovar_rascunho_ja_resolvido_mostra_o_proximo(bm, Msg, Est):
+    sv = _painel(bm)
+    ident = _rascunho(sv)
+    sv.robo.recusar(ident)
+    msg = MsgComMidia(Msg, "Aprovar Rascunho ✅")
+    rodar(sv.aprovar_handler(msg, Est(dados={"rascunho_id": ident})))
+    assert sv.robo.pegar(ident)["estado"] == "recusado" and "já foi resolvido" in msg.saidas[0]
+
+
+def test_robo_roda_a_cada_15_min_so_ativo_e_no_horario(bm, monkeypatch):
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    sv = _painel(bm)
+    agendador = AsyncIOScheduler(timezone=bm.FUSO_STR)
+    sv.configurar_dependencias(sv.bot_instance, agendador, sv.ADMIN_ID)
+    assert agendador.get_job("shopee_video_robo").trigger.interval.total_seconds() == 900
+    rodadas = []
+
+    async def rodar_robo(*argumentos):
+        rodadas.append(argumentos)
+
+    monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
+    rodar(sv.verificar_robo())
+    assert rodadas == []                                                     # começa pausado
+    sv.alterar_config(robo_pausado=False, robo_inicio=0, robo_fim=24)
+    rodar(sv.verificar_robo())
+    assert rodadas == [("--rodada",)]
+
+
+def test_testar_caminho_roda_o_treino_na_hora(bm, Msg, Est, monkeypatch):
+    sv = _painel(bm)
+    rodadas = []
+
+    async def rodar_robo(*argumentos):
+        rodadas.append(argumentos)
+
+    monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
+
+    async def tocar():
+        msg = Msg("Testar Caminho 🧭")
+        await sv.treino_handler(msg, Est())
+        await __import__("asyncio").sleep(0)
+        return msg
+
+    msg = rodar(tocar())
+    assert rodadas == [("--treino",)] and "Treino começando" in msg.saidas[0]
 
 
 def test_cancelar_volta_ao_painel_sem_mudar_nada(bm, Msg, Est):
@@ -103,15 +262,19 @@ def test_botoes_vem_antes_das_respostas_de_texto(bm):
     sv = _painel(bm)
     ordem = [h.callback.__name__ for h in sv.router.message.handlers]
     botoes = ("painel_handler", "pedir_faixa", "pedir_janela", "pedir_pausa", "enviar_agora_handler",
-              "pedir_fonte")
-    respostas = ("confirmar_faixa", "confirmar_janela", "salvar_fonte", "confirmar_com_os_botoes")
+              "pedir_fonte", "pedir_pausa_robo", "pedir_faixa_robo", "pedir_janela_robo", "treino_handler",
+              "rascunhos_handler", "aprovar_handler", "pedir_recusa", "proximo_handler")
+    respostas = ("confirmar_faixa", "confirmar_janela", "salvar_fonte", "confirmar_com_os_botoes",
+                 "confirmar_faixa_robo", "confirmar_janela_robo", "salvar_recusa")
     assert max(ordem.index(b) for b in botoes) < min(ordem.index(r) for r in respostas)
 
 
 def test_so_o_admin_usa_o_painel(bm, Msg, Est):
     sv = _painel(bm)
     for handler, texto in ((sv.painel_handler, "Shopee Vídeo 🎬"), (sv.pedir_faixa, "Vídeos por Dia 📦"),
-                           (sv.pedir_pausa, "Retomar Robô ▶️"), (sv.enviar_agora_handler, "Enviar 1 Agora 📤")):
+                           (sv.pedir_pausa, "Retomar Robô ▶️"), (sv.enviar_agora_handler, "Enviar 1 Agora 📤"),
+                           (sv.pedir_pausa_robo, "Retomar Postagem ▶️"), (sv.rascunhos_handler, "Rascunhos do Robô 📝"),
+                           (sv.treino_handler, "Testar Caminho 🧭"), (sv.aprovar_handler, "Aprovar Rascunho ✅")):
         msg = Msg(texto, user_id=123)
         rodar(handler(msg, Est()))
         assert msg.saidas == [], texto

@@ -12,8 +12,9 @@ no tutorial. Roda à mão pelo workflow android.yml (ação explorar) ou no serv
     python3 postador_shopee_video.py --explorar --celular "tela"   # no celular guardado
 
 Com --celular, explora no celular de verdade do Rafael (celular_robo.py), pareado pelo
-bot; sem ele, no Android virtual. No celular, só das 8h às 22h de Brasília
-(HORARIO_DAS_RODADAS): a verificação da Shopee precisa do Rafael acordado para resolver.
+bot; sem ele, no Android virtual. No celular, só dentro do Horário do Robô 🕗 do painel
+(padrão: das 8h às 22h de Brasília): a verificação da Shopee precisa do Rafael acordado
+para resolver. Com o robô automático (robo_shopee_video.py) tocando no celular, nem começa.
 
 Passos, separados por ponto e vírgula:
     abrir            abre o app da Shopee (fechar: fecha)
@@ -25,10 +26,13 @@ Passos, separados por ponto e vírgula:
     escrever:TEXTO   escreve no campo que está com o cursor
     video            põe na galeria o vídeo do teste (video:novo escolhe outro na fonte)
     link             abre no app o produto (ou o vídeo) do vídeo do teste
+    curtir           na página que o link abriu, toca no nome do produto (abre a página
+                     completa) e curte; já curtido, segue sem tocar no coração
     titulo           escreve no campo com o cursor o título da IA para o vídeo do teste
     comentario       manda no privado do Rafael o comentário da IA (o da mesma resposta do
-                     titulo), para ele curtir e comentar o vídeo depois de postar
-    ia               a IA assiste ao vídeo do teste e diz se o produto do link é o do vídeo
+                     titulo), numa mensagem só dele, depois do lembrete de curtir e comentar
+    ia               a IA assiste ao vídeo do teste duas vezes e diz se o produto do link é o
+                     do vídeo; segue só se as duas confirmarem
     produto          na lista de Adicionar Produto, toca em Adicionar só no produto do vídeo
                      do teste, achado pelo nome, e confere o nome na janela que abre
     conferir         confere na tela final que o produto anexado é o do vídeo (o toque em
@@ -85,17 +89,18 @@ PACOTE_SISTEMA = "com.android.systemui"
 GALERIA = "/sdcard/DCIM/Camera"
 CHAVE_PAINEL = "shopee_video"  # a mesma chave do painel_shopee_video
 CHAVE_TESTE = "celular_robo_teste"
-# Horas de Brasília (início, fim) em que uma rodada no celular pode começar.
+# Horas de Brasília (início, fim) em que uma rodada no celular pode começar, enquanto o
+# Rafael não muda o Horário do Robô 🕗 no painel (chaves robo_inicio e robo_fim).
 # Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 HORARIO_DAS_RODADAS = (8, 22)
-LEGENDA_PRINT = "🤖 Robô da Shopee Vídeo (teste): a tela antes de salvar o rascunho."
-LEGENDA_PRINT_POSTAR = ("🤖 Robô da Shopee Vídeo (teste): a tela antes de postar. Confira o vídeo, o título "
+LEGENDA_PRINT = "🤖 Robô da Shopee Vídeo: a tela antes de salvar o rascunho."
+LEGENDA_PRINT_POSTAR = ("🤖 Robô da Shopee Vídeo: a tela antes de postar. Confira o vídeo, o título "
                         "e o produto: só posto com o seu OK.")
-AVISO_SEM_PRODUTO = "🤖 Robô da Shopee Vídeo (teste): nenhum produto foi adicionado ao vídeo."
-AVISO_COMENTARIO = ("💬 Robô da Shopee Vídeo (teste): o comentário deste vídeo. Depois de postar, "
-                    "curta o vídeo e comente com o texto abaixo (copie e cole).")
-AVISO_IA = "🤖 Robô da Shopee Vídeo (teste): a IA viu que o produto do link não é o produto do vídeo. Parei aqui."
-AVISO_TELA_FINAL = ("🤖 Robô da Shopee Vídeo (teste): na tela final, o produto anexado não é o do vídeo "
+AVISO_SEM_PRODUTO = "🤖 Robô da Shopee Vídeo: nenhum produto foi adicionado ao vídeo."
+AVISO_COMENTARIO = ("💬 Robô da Shopee Vídeo: o comentário deste vídeo vem na próxima mensagem. Depois de "
+                    "postar, curta o vídeo e comente com aquele texto (toque nele, copie e cole).")
+AVISO_IA = "🤖 Robô da Shopee Vídeo: a IA viu que o produto do link não é o produto do vídeo. Parei aqui."
+AVISO_TELA_FINAL = ("🤖 Robô da Shopee Vídeo: na tela final, o produto anexado não é o do vídeo "
                     "(ou há produto a mais ou a menos). Não salvei nem postei; confira o celular.")
 PROMPT_PRODUTO_DO_VIDEO = """Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.
 O link que vai junto com o vídeo leva a este produto: "{nome}".
@@ -103,10 +108,16 @@ Assista ao vídeo inteiro e diga se o produto mostrado no vídeo é esse produto
 ou pelo menos o mesmo tipo de produto: vídeo de vestido infantil com link de vestido infantil confere; \
 vídeo de vestido com link de fibra de cabelo não confere).
 Responda só com um JSON: {{"confere": true ou false, "motivo": "uma frase curta"}}"""
-AVISO_JANELA_ERRADA = ("🤖 Robô da Shopee Vídeo (teste): a janela de editar o nome aberta no celular é de outro "
+AVISO_JANELA_ERRADA = ("🤖 Robô da Shopee Vídeo: a janela de editar o nome aberta no celular é de outro "
                        "produto, não do produto do vídeo. Parei sem tocar em Feito; confira o celular.")
 # Quantas vezes o passo produto rola a lista de Minhas Curtidas atrás do produto do vídeo.
 ROLAGENS_DO_PRODUTO = 3
+# Quantas vezes o passo curtir rola a página completa do produto atrás do coração.
+ROLAGENS_DO_CORACAO = 2
+# Quantas vezes a IA confere o produto do link com o vídeo: ela já recusou um vídeo que
+# tinha aceitado antes, então só segue com todas as respostas confirmando.
+VEZES_DA_IA = 2
+SEGUNDOS_DA_PAGINA = 8
 # Nome cortado na lista só vale como o mesmo produto a partir deste tamanho.
 TAMANHO_MINIMO_DO_NOME = 15
 # Elemento de outro app até este tamanho (px) é coisa flutuante, como a bolinha da Motorola.
@@ -317,22 +328,24 @@ def escrever_titulo(d, video):
     if not textos or not textos["titulo"]:
         return False, "a IA não devolveu título"
     d.send_keys(textos["titulo"])
-    # O comentário sai da mesma resposta da IA e fica guardado para o passo comentario.
-    db.salvar_config(CHAVE_TESTE, dict(video, comentario=textos.get("comentario") or ""))
+    # O título fica guardado para a aprovação do rascunho mostrar o texto que está na
+    # legenda, e o comentário (da mesma resposta da IA) para o passo comentario.
+    db.salvar_config(CHAVE_TESTE, dict(video, titulo=textos["titulo"], comentario=textos.get("comentario") or ""))
     return True, f"título com {len(textos['titulo'])} caracteres"
 
 
 def mandar_comentario(video):
     """
-    Manda no privado do Rafael o comentário da IA para o vídeo, com o lembrete de curtir
-    e comentar à mão depois de postar: curtir e comentar nunca são automáticos (diretriz
-    9.1.1). O texto não vai para o log.
+    Manda no privado do Rafael o lembrete de curtir e comentar à mão depois de postar
+    (curtir e comentar nunca são automáticos, diretriz 9.1.1) e, numa mensagem só dele,
+    o comentário da IA: emendado no lembrete, ficava difícil de copiar. O texto não vai
+    para o log.
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     comentario = (video.get("comentario") or "").strip()
     if not comentario:
         return False, "nenhum comentário guardado: o passo titulo vem antes"
-    if not avisar_rafael.mandar_texto(f"{AVISO_COMENTARIO}\n\n{comentario}"):
+    if not (avisar_rafael.mandar_texto(AVISO_COMENTARIO) and avisar_rafael.mandar_texto(comentario)):
         return False, "o Telegram recusou o comentário"
     return True, f"comentário com {len(comentario)} caracteres mandado no privado"
 
@@ -470,7 +483,8 @@ def conferir_janela(d, nome, ponto):
 def ia_confere_produto(video):
     """
     A IA assiste ao vídeo com o nome do produto do link e diz se é o mesmo produto:
-    pega o link errado que vem da fonte antes de qualquer toque. Sem confirmação da IA
+    pega o link errado que vem da fonte antes de qualquer toque. Confere VEZES_DA_IA
+    vezes, porque já recusou um vídeo que tinha aceitado antes. Sem confirmação em todas
     (não confere, não respondeu ou o link não diz o produto), a exploração para.
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
@@ -478,20 +492,78 @@ def ia_confere_produto(video):
     if not nome:
         avisar_rafael.mandar_texto(f"{AVISO_IA}\n\nO link do vídeo não diz qual é o produto.")
         return False, "o link não diz o produto do vídeo: a IA não tem o que conferir (aviso no privado)"
-    resposta = asyncio.run(api_gemini.analisar_video_gemini(video["arquivo"],
-                                                            PROMPT_PRODUTO_DO_VIDEO.format(nome=nome)))
-    achado = re.search(r"\{.*\}", resposta or "", re.S)
-    try:
-        dados = json.loads(achado.group(0)) if achado else None
-    except ValueError:
-        dados = None
-    if not isinstance(dados, dict):
-        return False, "a IA não respondeu à conferência: parado"
-    if dados.get("confere") is not True:
-        avisar_rafael.mandar_texto(f"{AVISO_IA}\n\nProduto do link: {nome}\nO que a IA viu: "
-                                   f"{str(dados.get('motivo') or '').strip()}")
-        return False, "a IA viu outro produto no vídeo: parado (aviso no privado)"
-    return True, "a IA confere: o produto do link é o do vídeo"
+    for vez in range(1, VEZES_DA_IA + 1):
+        resposta = asyncio.run(api_gemini.analisar_video_gemini(video["arquivo"],
+                                                                PROMPT_PRODUTO_DO_VIDEO.format(nome=nome)))
+        achado = re.search(r"\{.*\}", resposta or "", re.S)
+        try:
+            dados = json.loads(achado.group(0)) if achado else None
+        except ValueError:
+            dados = None
+        if not isinstance(dados, dict):
+            return False, f"a IA não respondeu à conferência ({vez}ª vez): parado"
+        if dados.get("confere") is not True:
+            avisar_rafael.mandar_texto(f"{AVISO_IA}\n\nProduto do link: {nome}\nO que a IA viu: "
+                                       f"{str(dados.get('motivo') or '').strip()}")
+            return False, f"a IA viu outro produto no vídeo ({vez}ª vez): parado (aviso no privado)"
+    return True, f"a IA confere {VEZES_DA_IA} vezes: o produto do link é o do vídeo"
+
+
+def tem_coracao(lista):
+    """O coração da página completa do produto está na tela (curtido ou não)?"""
+    return any(el["id"] in ("buttonItemLike", "buttonItemLiked") for el in lista)
+
+
+def abrir_pagina_completa(d, video):
+    """
+    A página completa do produto do vídeo, a que tem o coração. O link abre uma página
+    curta (foto, preço, nome com a seta ">" e Compre Agora), sem o coração: o robô toca no
+    nome do produto, achado pelo nome da API, e rola se o coração ficar mais embaixo.
+    Devolve (ok, o que dizer no log, a tela).
+    """
+    tela = d.dump_hierarchy()
+    if tem_coracao(elementos(tela)):
+        return True, "a página completa do produto já estava aberta", tela
+    nome = nome_do_produto(video)
+    if not nome:
+        return False, "o link não diz o produto do vídeo: não sei em que nome tocar", tela
+    alvo = next((el for el in elementos(tela) if mesmo_produto(el["texto"], nome)), None)
+    if not alvo:
+        return False, "o nome do produto do vídeo não está na página: nada tocado", tela
+    x, y = _centro(alvo)
+    if proibido_no_ponto(tela, x, y):
+        return False, RECUSA, tela
+    d.click(x, y)
+    time.sleep(SEGUNDOS_DA_PAGINA)
+    for rolagem in range(ROLAGENS_DO_CORACAO + 1):
+        tela = d.dump_hierarchy()
+        if tem_coracao(elementos(tela)):
+            return True, "nome tocado: a página completa do produto abriu", tela
+        if rolagem < ROLAGENS_DO_CORACAO:
+            rolar(d)
+            time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
+    return False, "o coração não está na página do produto: nada curtido", tela
+
+
+def curtir(d, video):
+    """
+    Curte o produto do vídeo na página completa dele (abrir_pagina_completa). Já curtido
+    (buttonItemLiked), segue sem tocar: o toque descurtiria. Sem achar o nome ou o
+    coração, para sem curtir nada.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    ok, resultado, tela = abrir_pagina_completa(d, video)
+    if not ok:
+        return False, resultado
+    lista = elementos(tela)
+    if any(el["id"] == "buttonItemLiked" for el in lista):
+        return True, "o produto já estava curtido: segui sem tocar no coração"
+    coracao = next(el for el in lista if el["id"] == "buttonItemLike")
+    d.click(*_centro(coracao))
+    time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
+    if not any(el["id"] == "buttonItemLiked" for el in elementos(d.dump_hierarchy())):
+        return False, "toquei no coração, mas o produto não ficou curtido"
+    return True, "produto curtido"
 
 
 def conferir_tela_final(d, video):
@@ -561,23 +633,23 @@ def abrir_link(d, link):
     return tipo_de_link(asyncio.run(link_para_converter(link)))
 
 
-def por_na_galeria(d, arquivo):
+def por_na_galeria(d, arquivo, nome=NOME_NA_GALERIA):
     """Copia o vídeo para a câmera do Android e avisa a galeria. True se ele apareceu nela."""
-    destino = f"{GALERIA}/{NOME_NA_GALERIA}"
+    destino = f"{GALERIA}/{nome}"
     d.shell(["mkdir", "-p", GALERIA])
     d.push(arquivo, destino)
     d.shell(["am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", "file://" + destino])
     time.sleep(3)
     lista = d.shell(["content", "query", "--uri", "content://media/external/video/media",
                      "--projection", "_display_name"])
-    return NOME_NA_GALERIA in getattr(lista, "output", "")
+    return nome in getattr(lista, "output", "")
 
 
 def separar_passos(texto):
     """Lista de (nome, argumento). Passo desconhecido vira ValueError antes de tocar em qualquer coisa."""
     conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "esperar", "escrever",
-                  "link", "video", "titulo", "comentario", "ia", "produto", "conferir", "postar", "print",
-                  "tela"}
+                  "link", "video", "titulo", "comentario", "ia", "curtir", "produto", "conferir", "postar",
+                  "print", "tela"}
     passos = []
     for pedaco in (texto or "").split(";"):
         pedaco = pedaco.strip()
@@ -638,7 +710,7 @@ def fazer_passo(d, nome, argumento):
     if nome == "escrever":
         d.send_keys(argumento)
         return True, "escrito"
-    if nome in ("link", "video", "titulo", "comentario", "ia", "produto", "conferir", "postar"):
+    if nome in ("link", "video", "titulo", "comentario", "ia", "curtir", "produto", "conferir", "postar"):
         video = video_do_teste(novo=nome == "video" and argumento == "novo")
         if not video:
             return False, "nenhum vídeo da fonte do painel com arquivo e link"
@@ -650,6 +722,8 @@ def fazer_passo(d, nome, argumento):
             return mandar_comentario(video)
         if nome == "ia":
             return ia_confere_produto(video)
+        if nome == "curtir":
+            return curtir(d, video)
         if nome == "produto":
             return adicionar_produto(d, video)
         if nome == "conferir":
@@ -677,9 +751,15 @@ def conectar(celular=False):
     return uiautomator2.connect(av.ENDERECO_ADB)
 
 
-def no_horario_das_rodadas():
-    inicio, fim = HORARIO_DAS_RODADAS
-    return inicio <= datetime.now(fuso_horario).hour < fim
+def horario_das_rodadas():
+    """(início, fim) das rodadas no celular, em horas de Brasília: o Horário do Robô 🕗 do painel."""
+    config = db.ler_config(CHAVE_PAINEL, {}) or {}
+    return (config.get("robo_inicio", HORARIO_DAS_RODADAS[0]), config.get("robo_fim", HORARIO_DAS_RODADAS[1]))
+
+
+def no_horario_das_rodadas(agora=None):
+    inicio, fim = horario_das_rodadas()
+    return inicio <= (agora or datetime.now(fuso_horario)).hour < fim
 
 
 def explorar(texto, d=None, celular=False):
@@ -694,6 +774,12 @@ def explorar(texto, d=None, celular=False):
     """
     logging.disable(logging.CRITICAL)
     try:
+        if celular and d is None:
+            with celular_robo.trava() as livre:
+                if not livre:
+                    print("celular: o robô automático está tocando no celular agora; nada foi tocado")
+                    return None
+                return _explorar(texto, d, celular)
         return _explorar(texto, d, celular)
     finally:
         logging.disable(logging.NOTSET)
@@ -713,7 +799,7 @@ def _explorar(texto, d, celular):
             print("celular: desconectado; conecte pelo bot (Shopee Vídeo 🎬 → Celular do Robô 📱)")
             return None
         if celular and not no_horario_das_rodadas():
-            inicio, fim = HORARIO_DAS_RODADAS
+            inicio, fim = horario_das_rodadas()
             print(f"celular: fora do horário das rodadas ({inicio}h às {fim}h de Brasília); nada foi tocado")
             return None
         if celular and av.tela_aberta():
