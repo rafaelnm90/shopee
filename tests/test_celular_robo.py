@@ -96,7 +96,7 @@ def _painel(bm, cr, monkeypatch, rede, **adb):
 
 def test_botao_no_painel_e_tela_do_celular(bm, cr, monkeypatch, Msg, Est):
     sv = _painel(bm, cr, monkeypatch, _rede(("moto-g84", "android", True, IP)))
-    assert "Celular do Robô 📱" in _textos(sv.teclado_painel(sv.ler_config()))
+    assert "Celular do Robô 📱" in _textos(sv.teclado_robo(sv.ler_config()))
     msg, est = Msg("Celular do Robô 📱"), Est()
     rodar(sv.celular_handler(msg, est))
     assert "moto-g84</b> ✅ ligado" in msg.saidas[0] and "Pareado: ⏳ ainda não" in msg.saidas[0]
@@ -169,7 +169,9 @@ def test_passo_a_passo_para_refazer_depois_do_reset(bm, cr, monkeypatch, Msg, Es
     sv = _painel(bm, cr, monkeypatch, _rede(("moto-g100", "android", True, IP)))
     tela = Msg("Celular do Robô 📱")
     rodar(sv.celular_handler(tela, Est()))
-    assert "Passo a Passo 📖" in _textos(sv.teclado_celular()) and "Resetou o celular?" in tela.saidas[0]
+    assert "Passo a Passo 📖" in _textos(sv.teclado_celular()) and "resetar o Motorola" in tela.saidas[0]
+    # Cada botão explicado, e sem nome de botão quebrado no texto.
+    assert "O que cada botão faz" in tela.saidas[0] and "{" not in tela.saidas[0]
     msg, est = Msg("Passo a Passo 📖"), Est(estado=sv.ShopeeVideoFluxo.aguardando_porta)
     rodar(sv.passo_a_passo_handler(msg, est))
     texto = msg.saidas[0]

@@ -147,6 +147,8 @@ def _admin(message):
 
 class ShopeeVideoFluxo(StatesGroup):
     menu = State()
+    menu_robo = State()
+    menu_assistente = State()
     aguardando_faixa = State()
     aguardando_confirmacao_faixa = State()
     aguardando_janela = State()
@@ -247,18 +249,41 @@ PAUSA_ASSISTENTE = ["Pausar Assistente ⏸️", "Retomar Assistente ▶️", "Pa
 PAUSA_ROBO = ["Pausar Postagem ⏸️", "Retomar Postagem ▶️"]
 
 
+BOTAO_MENU_ROBO = "Robô Automático 🤖"
+BOTAO_MENU_ASSISTENTE = "Modo Assistente 📲"
+BOTAO_COMO_FUNCIONA = "Como Funciona ❓"
+BOTAO_VOLTAR_ROBO = "Voltar ao Robô 🔙"
+
+
+# O menu é separado por robô, e cada tela diz em uma linha o que cada botão faz: o
+# Rafael tem de entender tudo sozinho daqui a meses. Decisão do Rafael: DECISOES.md,
+# Shopee Vídeo.
+
 def teclado_painel(config):
-    pausa = "Retomar Assistente ▶️" if config["pausado"] else "Pausar Assistente ⏸️"
+    return montar_teclado([
+        [KeyboardButton(text=BOTAO_RASCUNHOS)],
+        [KeyboardButton(text=BOTAO_MENU_ROBO), KeyboardButton(text=BOTAO_MENU_ASSISTENTE)],
+        [KeyboardButton(text="Fonte dos Vídeos 🎞️"), KeyboardButton(text=BOTAO_COMO_FUNCIONA)],
+        [KeyboardButton(text="Voltar aos Canais 🔙")],
+    ])
+
+
+def teclado_robo(config):
     pausa_robo = "Retomar Postagem ▶️" if config["robo_pausado"] else "Pausar Postagem ⏸️"
     return montar_teclado([
-        [KeyboardButton(text="Vídeos por Dia 📦"), KeyboardButton(text="Horário de Postagem ⏰")],
-        [KeyboardButton(text=pausa), KeyboardButton(text="Enviar 1 Agora 📤")],
-        [KeyboardButton(text="Fonte dos Vídeos 🎞️")],
-        [KeyboardButton(text=BOTAO_RASCUNHOS)],
-        [KeyboardButton(text=pausa_robo), KeyboardButton(text=BOTAO_TREINO)],
+        [KeyboardButton(text=pausa_robo), KeyboardButton(text=BOTAO_RASCUNHOS)],
         [KeyboardButton(text=BOTAO_FAIXA_ROBO), KeyboardButton(text=BOTAO_HORARIO_ROBO)],
-        [KeyboardButton(text=BOTAO_CELULAR)],
-        [KeyboardButton(text="Voltar aos Canais 🔙")],
+        [KeyboardButton(text=BOTAO_TREINO), KeyboardButton(text=BOTAO_CELULAR)],
+        [KeyboardButton(text=BOTAO_VOLTAR)],
+    ])
+
+
+def teclado_assistente(config):
+    pausa = "Retomar Assistente ▶️" if config["pausado"] else "Pausar Assistente ⏸️"
+    return montar_teclado([
+        [KeyboardButton(text=pausa), KeyboardButton(text="Enviar 1 Agora 📤")],
+        [KeyboardButton(text="Vídeos por Dia 📦"), KeyboardButton(text="Horário de Postagem ⏰")],
+        [KeyboardButton(text=BOTAO_VOLTAR)],
     ])
 
 
@@ -271,49 +296,158 @@ def _linha_treino():
     return f"✅ caminho OK em {quando}" if resultado == "ok" else f"⚠️ {html_escape(resultado)} em {quando}"
 
 
+def quem_posta(config):
+    """Quem está postando agora, numa frase: o robô, o assistente ou ninguém."""
+    if not config["robo_pausado"]:
+        return "🤖 <b>o Robô Automático</b> (pelo Motorola; o assistente fica em espera)"
+    if config["pausado"]:
+        return "⏸️ <b>ninguém</b> (os dois estão pausados)"
+    if config.get("robo_pausa_motivo") == "celular desconectado":
+        return "📲 <b>o Assistente</b> (você posta à mão; o robô pausou porque o Motorola desconectou)"
+    return "📲 <b>o Assistente</b> (você posta à mão)"
+
+
 def texto_painel(config, agora=None):
+    return (
+        "🎬 <b>Shopee Vídeo</b>\n\n"
+        f"Quem posta agora: {quem_posta(config)}\n"
+        f"📝 Rascunhos esperando você: <b>{len(robo.esperando_aprovacao())}</b>\n"
+        f"🎞️ Fonte dos vídeos: <b>{assistente.FONTES.get(config['fonte'], config['fonte'])}</b>\n\n"
+        "<b>O que cada botão faz</b>\n"
+        f"📝 <b>{BOTAO_RASCUNHOS}</b>: os vídeos que o robô deixou prontos no Motorola, um por um, "
+        "para você aprovar ou recusar.\n"
+        f"🤖 <b>{BOTAO_MENU_ROBO}</b>: ligar ou pausar o robô, quantos rascunhos por dia, o horário dele, "
+        "o teste do caminho e o celular.\n"
+        f"📲 <b>{BOTAO_MENU_ASSISTENTE}</b>: ligar ou pausar os envios no seu privado, quantos por dia, o "
+        "horário e o Enviar 1 Agora.\n"
+        "🎞️ <b>Fonte dos Vídeos</b>: de onde os dois puxam os vídeos.\n"
+        f"❓ <b>{BOTAO_COMO_FUNCIONA}</b>: o resumo de tudo, para quando você esquecer."
+    )
+
+
+def status_robo(config):
+    if not config["robo_pausado"]:
+        return "▶️ <b>Ativo</b>"
+    if config.get("robo_pausa_motivo") == "celular desconectado":
+        return "⏸️ <b>Pausado</b> (o Motorola desconectou: toque em Retomar Postagem ▶️)"
+    return "⏸️ <b>Pausado</b>"
+
+
+def texto_robo(config, agora=None, celular=None):
+    """A tela do Robô Automático. celular: o adb fala com o Motorola agora (None = não olhou)."""
+    piso, topo = config["robo_limite_min"], config["robo_limite_max"]
+    hoje = f" (hoje: <b>{rascunhos_hoje(config, agora)}</b>)" if topo > piso else ""
+    linha_celular = ""
+    if celular is not None:
+        linha_celular = ("📱 Celular: ✅ <b>conectado</b>\n" if celular
+                         else f"📱 Celular: ⚠️ <b>desconectado</b> (veja em {BOTAO_CELULAR})\n")
+    return (
+        "🤖 <b>Robô Automático</b>\n"
+        "Prepara os vídeos sozinho no Motorola e só posta o que você aprovar. Com ele ligado, o "
+        "assistente fica em espera.\n\n"
+        f"Status: {status_robo(config)}\n"
+        f"{linha_celular}"
+        f"📦 Rascunhos por dia: <b>{rotulo_faixa(piso, topo)}</b>{hoje}\n"
+        f"🕗 Horário do robô: <b>{rotulo_janela(config['robo_inicio'], config['robo_fim'])}</b>\n"
+        f"📝 Esperando a sua aprovação: <b>{len(robo.esperando_aprovacao())}</b> | "
+        f"✅ Aprovados na fila: <b>{len(robo.listar('aprovado'))}</b>\n"
+        f"🧭 Treino: {_linha_treino()}\n\n"
+        "<b>O que cada botão faz</b>\n"
+        "▶️ <b>Retomar / Pausar Postagem</b>: liga ou pausa o robô. O Retomar acha o Motorola sozinho; "
+        "pausado, o assistente volta a mandar no seu privado.\n"
+        f"📝 <b>{BOTAO_RASCUNHOS}</b>: aprovar ou recusar os rascunhos, um por um.\n"
+        f"📦 <b>{BOTAO_FAIXA_ROBO}</b>: quantos rascunhos ele prepara por dia (uma faixa, sorteada a cada dia).\n"
+        f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele pode mexer no celular e postar.\n"
+        f"🧭 <b>{BOTAO_TREINO}</b>: confere agora se as telas do app da Shopee continuam iguais "
+        "(ele faz isso sozinho toda segunda).\n"
+        f"📱 <b>{BOTAO_CELULAR}</b>: a ligação com o Motorola (reconectar, ver a tela de longe)."
+    )
+
+
+def texto_assistente(config, agora=None):
     if config["pausado"]:
         status = "⏸️ <b>Pausado</b>"
     elif assistente_em_espera(config):
         status = "💤 <b>Em espera</b> (o robô automático está postando)"
     else:
         status = "▶️ <b>Ativo</b>"
-    if not config["robo_pausado"]:
-        status_robo = "▶️ <b>Ativo</b>"
-    elif config.get("robo_pausa_motivo") == "celular desconectado":
-        status_robo = "⏸️ <b>Pausado</b> (o celular desconectou; toque em Retomar Postagem ▶️)"
-    else:
-        status_robo = "⏸️ <b>Pausado</b>"
     piso, topo = config["limite_min"], config["limite_max"]
     hoje = f" (sorteado a cada dia; hoje: <b>{videos_hoje(config, agora)}</b>)" if topo > piso else ""
-    piso_robo, topo_robo = config["robo_limite_min"], config["robo_limite_max"]
-    hoje_robo = f" (hoje: <b>{rascunhos_hoje(config, agora)}</b>)" if topo_robo > piso_robo else ""
     return (
-        "🎬 <b>Shopee Vídeo</b>\n"
-        f"🎞️ Fonte dos vídeos: <b>{assistente.FONTES.get(config['fonte'], config['fonte'])}</b>\n\n"
-        "📲 <b>Modo assistente</b>: prepara as postagens (vídeo, título, produtos e comentário) e "
-        "manda aqui no seu privado, para você postar pelo seu celular.\n"
+        "📲 <b>Modo Assistente</b>\n"
+        "Prepara cada postagem (vídeo, título, produtos e comentário) e manda aqui no seu privado, para "
+        "você postar pelo seu celular. Trabalha quando o robô automático está pausado.\n\n"
         f"Status: {status}\n"
         f"📦 Vídeos por dia: <b>{rotulo_faixa(piso, topo)}</b>{hoje}\n"
         f"⏰ Horário dos envios: <b>{rotulo_janela(config['inicio'], config['fim'])}</b>\n"
         f"📤 Mandados hoje: <b>{assistente.enviados_hoje(agora)}</b>\n\n"
-        "🤖 <b>Robô automático</b>: prepara rascunhos sozinho no celular guardado e posta os que "
-        "você aprovar em Rascunhos do Robô 📝. Com ele ativo, o assistente fica em espera.\n"
-        f"Status: {status_robo}\n"
-        f"📦 Rascunhos por dia: <b>{rotulo_faixa(piso_robo, topo_robo)}</b>{hoje_robo}\n"
-        f"🕗 Horário do robô: <b>{rotulo_janela(config['robo_inicio'], config['robo_fim'])}</b>\n"
-        f"📝 Esperando a sua aprovação: <b>{len(robo.esperando_aprovacao())}</b> | "
-        f"✅ Aprovados na fila: <b>{len(robo.listar('aprovado'))}</b>\n"
-        f"🧭 Treino: {_linha_treino()}\n\n"
-        "<i>Enviar 1 Agora 📤 manda uma postagem do assistente na hora, mesmo pausado. "
-        "Testar Caminho 🧭 confere agora se as telas do app continuam como o robô conhece.</i>"
+        "<b>O que cada botão faz</b>\n"
+        "⏸️ <b>Pausar / Retomar Assistente</b>: para ou volta a mandar as postagens no seu privado "
+        "(pausado, ele não manda nem com o robô parado).\n"
+        "📤 <b>Enviar 1 Agora</b>: manda uma postagem na hora, mesmo pausado.\n"
+        "📦 <b>Vídeos por Dia</b>: quantas postagens por dia (uma faixa, sorteada a cada dia).\n"
+        "⏰ <b>Horário de Postagem</b>: em que horário as postagens chegam."
     )
+
+
+COMO_FUNCIONA = (
+    "❓ <b>Como funciona a Shopee Vídeo</b>\n\n"
+    "1️⃣ <b>Dois robôs.</b> O 🤖 Robô Automático prepara os vídeos sozinho no Motorola e só posta o que "
+    "você aprovar. O 📲 Assistente manda tudo pronto aqui no privado para você postar à mão.\n\n"
+    "2️⃣ <b>Um cobre o outro.</b> Com o robô ligado, o assistente fica em espera. Pausou o robô (ou o "
+    "Motorola desconectou), o assistente volta a mandar. Nunca os dois juntos.\n\n"
+    "3️⃣ <b>No dia a dia.</b> O robô avisa quando deixa um rascunho pronto. Toque em Rascunhos do Robô 📝 "
+    "e aprove ✅ ou recuse ❌. Os aprovados saem espalhados no horário do robô, e você recebe o link do "
+    "post e o comentário para copiar. Curtir e comentar o vídeo é sempre com a sua mão.\n\n"
+    "4️⃣ <b>Motorola desconectou?</b> Chega um aviso. No Motorola: Configurações → Sistema → Opções do "
+    "desenvolvedor → ligue a <b>Depuração por Wi-Fi</b>. Depois: Robô Automático 🤖 → <b>Retomar "
+    "Postagem ▶️</b>. O servidor acha o celular sozinho.\n\n"
+    "5️⃣ <b>Verificação da Shopee (quebra-cabeça)?</b> O robô para e manda aqui um link para você "
+    "resolver pela tela do celular, de onde estiver.\n\n"
+    "6️⃣ <b>A Shopee mudou o app?</b> Toda segunda o robô treina o caminho e avisa se algo mudou "
+    "(Testar Caminho 🧭 faz isso na hora). Aí o Claude ajusta.\n\n"
+    "7️⃣ <b>Resetou ou trocou o Motorola?</b> Robô Automático 🤖 → Celular do Robô 📱 → Passo a Passo 📖."
+)
 
 
 async def mostrar_painel(message: types.Message, state: FSMContext):
     await state.set_state(ShopeeVideoFluxo.menu)
     config = ler_config()
     await message.answer(texto_painel(config), parse_mode="HTML", reply_markup=teclado_painel(config))
+
+
+async def mostrar_robo(message: types.Message, state: FSMContext):
+    await state.set_state(ShopeeVideoFluxo.menu_robo)
+    config = ler_config()
+    celular = await asyncio.to_thread(celular_robo.conectado)
+    await message.answer(texto_robo(config, celular=celular), parse_mode="HTML", reply_markup=teclado_robo(config))
+
+
+async def mostrar_assistente(message: types.Message, state: FSMContext):
+    await state.set_state(ShopeeVideoFluxo.menu_assistente)
+    config = ler_config()
+    await message.answer(texto_assistente(config), parse_mode="HTML", reply_markup=teclado_assistente(config))
+
+
+# Depois de um Cancelar ❌ (bot_mestre), volta à tela de onde o ajuste saiu.
+ESTADOS_DO_ROBO = ("aguardando_faixa_robo", "aguardando_confirmacao_faixa_robo", "aguardando_janela_robo",
+                   "aguardando_confirmacao_janela_robo", "aguardando_confirmacao_pausa_robo", "menu_robo",
+                   "rascunho", "aguardando_confirmacao_recusa")
+ESTADOS_DO_ASSISTENTE = ("aguardando_faixa", "aguardando_confirmacao_faixa", "aguardando_janela",
+                         "aguardando_confirmacao_janela", "aguardando_confirmacao_pausa", "menu_assistente")
+ESTADOS_DO_CELULAR = ("celular", "aguardando_escolha_celular", "aguardando_pareamento", "aguardando_porta")
+
+
+async def voltar_depois_de_cancelar(message: types.Message, state: FSMContext, estado_anterior):
+    nome = (estado_anterior or "").split(":")[-1]
+    if nome in ESTADOS_DO_ROBO:
+        await mostrar_robo(message, state)
+    elif nome in ESTADOS_DO_ASSISTENTE:
+        await mostrar_assistente(message, state)
+    elif nome in ESTADOS_DO_CELULAR:
+        await mostrar_celular(message, state)
+    else:
+        await mostrar_painel(message, state)
 
 
 # Os botões do painel funcionam em qualquer estado (StateFilter("*")): depois de um
@@ -323,6 +457,31 @@ async def painel_handler(message: types.Message, state: FSMContext):
     if not _admin(message): return
     logger.info("🎬 Acessando o painel da Shopee Vídeo.")
     await mostrar_painel(message, state)
+
+
+@router.message(F.text == BOTAO_MENU_ROBO, StateFilter("*"))
+async def menu_robo_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await mostrar_robo(message, state)
+
+
+@router.message(F.text.in_([BOTAO_MENU_ASSISTENTE]), StateFilter("*"))
+async def menu_assistente_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await mostrar_assistente(message, state)
+
+
+@router.message(F.text == BOTAO_COMO_FUNCIONA, StateFilter("*"))
+async def como_funciona_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await state.set_state(ShopeeVideoFluxo.menu)
+    await message.answer(COMO_FUNCIONA, parse_mode="HTML", reply_markup=teclado_painel(ler_config()))
+
+
+@router.message(F.text == BOTAO_VOLTAR_ROBO, StateFilter("*"))
+async def voltar_ao_robo(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await mostrar_robo(message, state)
 
 
 # --- Vídeos por dia ---
@@ -585,10 +744,9 @@ async def proximo_handler(message: types.Message, state: FSMContext):
 # reconectar quando a porta muda (o celular reiniciou ou a depuração foi desligada).
 
 def teclado_celular():
-    return montar_teclado([[KeyboardButton(text=BOTAO_TELA)],
-                           [KeyboardButton(text=BOTAO_PAREAR), KeyboardButton(text=BOTAO_RECONECTAR)],
-                           [KeyboardButton(text=BOTAO_PASSO_A_PASSO)],
-                           [KeyboardButton(text=BOTAO_VOLTAR)]])
+    return montar_teclado([[KeyboardButton(text=BOTAO_RECONECTAR), KeyboardButton(text=BOTAO_TELA)],
+                           [KeyboardButton(text=BOTAO_PAREAR), KeyboardButton(text=BOTAO_PASSO_A_PASSO)],
+                           [KeyboardButton(text=BOTAO_VOLTAR_ROBO)]])
 
 
 # Para o Rafael refazer tudo sozinho depois de resetar o celular, talvez meses depois:
@@ -646,16 +804,26 @@ async def texto_celular():
         conexao = f"⚠️ desconectado: toque em {BOTAO_RECONECTAR}"
     else:
         conexao = "⏳ ainda não"
+    if conectado:
+        situacao = "✅ <b>Tudo certo</b>: o robô consegue usar o Motorola."
+    elif dados.get("pareado_em"):
+        situacao = f"⚠️ <b>Desconectado</b>: toque em <b>{BOTAO_RECONECTAR}</b>."
+    else:
+        situacao = f"⏳ <b>Ainda não ligado ao servidor</b>: siga o <b>{BOTAO_PASSO_A_PASSO}</b>."
     return ("📱 <b>Celular do Robô</b>\n"
-            "O robô da Shopee Vídeo vai postar pelo seu celular guardado, ligado ao servidor pela "
-            "rede privada (Tailscale).\n\n"
+            "O Motorola guardado, onde o robô automático posta. Ele fala com o servidor pela rede "
+            "privada (Tailscale).\n\n"
+            f"{situacao}\n"
             f"🌐 Na rede privada: {linha_rede}\n"
             f"🔗 Pareado: {pareado}\n"
             f"📶 Conexão: {conexao}\n\n"
-            f"<i>{BOTAO_TELA} manda aqui um link de 30 min para ver e tocar na tela do celular de "
-            "longe. Parear é uma vez só. {BOTAO_RECONECTAR} é para depois que o celular reiniciar ou a "
-            "Depuração por Wi-Fi for desligada, porque a porta muda. Resetou o celular? Toque em "
-            f"{BOTAO_PASSO_A_PASSO}.</i>")
+            "<b>O que cada botão faz</b>\n"
+            f"🔄 <b>{BOTAO_RECONECTAR}</b>: use quando aparecer \"desconectado\". O servidor acha o "
+            "celular sozinho; se não achar, ligue a Depuração por Wi-Fi no Motorola e toque de novo.\n"
+            f"🖥️ <b>{BOTAO_TELA}</b>: manda aqui um link de 30 min para ver e tocar na tela do Motorola de "
+            "longe (por exemplo, para resolver a verificação da Shopee).\n"
+            f"🔗 <b>{BOTAO_PAREAR}</b>: só depois de resetar o Motorola ou trocar de celular.\n"
+            f"📖 <b>{BOTAO_PASSO_A_PASSO}</b>: o guia completo para deixar o celular pronto de novo.")
 
 
 async def mostrar_celular(message: types.Message, state: FSMContext):
@@ -803,7 +971,7 @@ async def salvar_faixa(message: types.Message, state: FSMContext):
     alterar_config(limite_min=piso, limite_max=topo)
     logger.info(f"✅ Shopee Vídeo: {piso} a {topo} vídeos por dia.")
     await message.answer(f"✅ Vídeos por dia: <b>{rotulo_faixa(piso, topo)}</b>.", parse_mode="HTML")
-    await mostrar_painel(message, state)
+    await mostrar_assistente(message, state)
 
 
 @router.message(ShopeeVideoFluxo.aguardando_janela)
@@ -826,7 +994,7 @@ async def salvar_janela(message: types.Message, state: FSMContext):
     alterar_config(inicio=inicio, fim=fim)
     logger.info(f"✅ Shopee Vídeo: janela {inicio}h-{fim}h.")
     await message.answer(f"✅ Horário de postagem: <b>{rotulo_janela(inicio, fim)}</b>.", parse_mode="HTML")
-    await mostrar_painel(message, state)
+    await mostrar_assistente(message, state)
 
 
 @router.message(ShopeeVideoFluxo.aguardando_confirmacao_pausa,
@@ -837,7 +1005,7 @@ async def salvar_pausa(message: types.Message, state: FSMContext):
     logger.info(f"✅ Shopee Vídeo {'pausado' if pausar else 'retomado'}.")
     await message.answer("⏸️ Modo assistente <b>pausado</b>." if pausar
                          else "▶️ Modo assistente <b>retomado</b>.", parse_mode="HTML")
-    await mostrar_painel(message, state)
+    await mostrar_assistente(message, state)
 
 
 @router.message(ShopeeVideoFluxo.aguardando_fonte, F.text.in_(list(assistente.FONTES.values())))
@@ -870,7 +1038,7 @@ async def salvar_faixa_robo(message: types.Message, state: FSMContext):
     alterar_config(robo_limite_min=piso, robo_limite_max=topo)
     logger.info(f"✅ Shopee Vídeo: robô com {piso} a {topo} rascunhos por dia.")
     await message.answer(f"✅ Rascunhos por dia: <b>{rotulo_faixa(piso, topo)}</b>.", parse_mode="HTML")
-    await mostrar_painel(message, state)
+    await mostrar_robo(message, state)
 
 
 @router.message(ShopeeVideoFluxo.aguardando_janela_robo)
@@ -894,7 +1062,7 @@ async def salvar_janela_robo(message: types.Message, state: FSMContext):
     alterar_config(robo_inicio=inicio, robo_fim=fim)
     logger.info(f"✅ Shopee Vídeo: Horário do Robô {inicio}h-{fim}h.")
     await message.answer(f"✅ Horário do robô: <b>{rotulo_janela(inicio, fim)}</b>.", parse_mode="HTML")
-    await mostrar_painel(message, state)
+    await mostrar_robo(message, state)
 
 
 @router.message(ShopeeVideoFluxo.aguardando_confirmacao_pausa_robo,
@@ -911,7 +1079,7 @@ async def salvar_pausa_robo(message: types.Message, state: FSMContext):
         logger.info("✅ Robô automático da Shopee Vídeo pausado.")
         await message.answer("⏸️ Robô automático <b>pausado</b>. O modo assistente volta a mandar as postagens "
                              "aqui no privado.", parse_mode="HTML")
-        await mostrar_painel(message, state)
+        await mostrar_robo(message, state)
         return
     await message.answer("⏳ Procurando o celular guardado (até 1 min)...")
     ok, resultado = await asyncio.to_thread(celular_robo.reconectar_sozinho)
@@ -922,13 +1090,13 @@ async def salvar_pausa_robo(message: types.Message, state: FSMContext):
             "desenvolvedor → ligue a <b>Depuração por Wi-Fi</b> e confira se o <b>Tailscale</b> está ligado. "
             "Depois toque de novo em <b>Retomar Postagem ▶️</b>. Enquanto isso, o modo assistente continua "
             "mandando as postagens aqui.", parse_mode="HTML")
-        await mostrar_painel(message, state)
+        await mostrar_robo(message, state)
         return
     alterar_config(robo_pausado=False, robo_pausa_motivo="")
     logger.info("✅ Robô automático da Shopee Vídeo retomado.")
     await message.answer(f"▶️ Robô automático <b>retomado</b> ({html_escape(resultado)} conectado). O modo "
                          "assistente fica em espera.", parse_mode="HTML")
-    await mostrar_painel(message, state)
+    await mostrar_robo(message, state)
 
 
 @router.message(ShopeeVideoFluxo.aguardando_confirmacao_recusa, F.text == "Confirmar Recusa ✅")

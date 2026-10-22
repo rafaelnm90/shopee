@@ -373,6 +373,16 @@ def mesmo_produto(texto, nome):
     return a == b or (len(curto) >= TAMANHO_MINIMO_DO_NOME and longo.startswith(curto))
 
 
+def nome_na_pagina(texto, nome):
+    """
+    O texto da página do produto é o nome desse produto? A página pode pôr um pedaço curto
+    antes do nome (o selo "Oficial", um número): vale o nome começando numa das primeiras
+    palavras, com a mesma régua de mesmo_produto.
+    """
+    palavras = (texto or "").split()
+    return any(mesmo_produto(" ".join(palavras[i:]), nome) for i in range(min(len(palavras), 4)))
+
+
 def adicionar_do_produto(xml, nome):
     """
     O botão Adicionar do produto com esse nome na lista de Adicionar Produto; None se
@@ -527,7 +537,7 @@ def abrir_pagina_completa(d, video):
     nome = nome_do_produto(video)
     if not nome:
         return False, "o link não diz o produto do vídeo: não sei em que nome tocar", tela
-    alvo = next((el for el in elementos(tela) if mesmo_produto(el["texto"], nome)), None)
+    alvo = next((el for el in elementos(tela) if nome_na_pagina(el["texto"], nome)), None)
     if not alvo:
         return False, "o nome do produto do vídeo não está na página: nada tocado", tela
     x, y = _centro(alvo)
