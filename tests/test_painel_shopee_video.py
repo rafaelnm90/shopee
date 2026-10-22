@@ -89,8 +89,9 @@ def test_botao_antigo_do_teclado_ainda_pausa_o_assistente(bm, Msg, Est):
     assert sv.ler_config()["pausado"] is False and sv.ler_config()["robo_pausado"] is True
 
 
-def test_pausa_do_robo_automatico_e_separada_e_o_botao_troca(bm, Msg, Est):
+def test_pausa_do_robo_automatico_e_separada_e_o_botao_troca(bm, Msg, Est, monkeypatch):
     sv, est = _painel(bm), Est()
+    monkeypatch.setattr(sv.celular_robo, "reconectar_sozinho", lambda: (True, "moto g(100)"))
     teclado = _textos(sv.teclado_painel(sv.ler_config()))
     assert "Retomar Postagem ▶️" in teclado and "Retomar Assistente ▶️" in teclado   # os dois começam pausados
     msg = Msg("Retomar Postagem ▶️")
@@ -104,6 +105,52 @@ def test_pausa_do_robo_automatico_e_separada_e_o_botao_troca(bm, Msg, Est):
     rodar(sv.pedir_pausa_robo(Msg("Pausar Postagem ⏸️"), est))
     rodar(sv.salvar_pausa_robo(Msg("Confirmar Pausa ✅"), est))
     assert sv.ler_config()["robo_pausado"] is True
+
+
+def test_retomar_postagem_sem_o_celular_continua_pausado_e_diz_o_que_fazer(bm, Msg, Est, monkeypatch):
+    sv, est = _painel(bm), Est()
+    monkeypatch.setattr(sv.celular_robo, "reconectar_sozinho",
+                        lambda: (False, "a Depuração por Wi-Fi está desligada no celular"))
+    msg = Msg("Confirmar Retomada ✅")
+    rodar(sv.salvar_pausa_robo(msg, est))
+    assert sv.ler_config()["robo_pausado"] is True
+    assert "Não retomei" in msg.saidas[1] and "Depuração por Wi-Fi" in msg.saidas[1]
+    assert "Retomar Postagem ▶️" in _textos(sv.teclado_painel(sv.ler_config()))
+
+
+def test_um_cobre_o_outro_robo_ativo_deixa_o_assistente_em_espera(bm, monkeypatch):
+    sv = _painel(bm)
+    pedidos = []
+
+    async def preparar(bot, admin_id, agora=None, fonte=None):
+        pedidos.append(fonte)
+        return "postagem mandada no seu privado"
+
+    monkeypatch.setattr(sv.assistente, "preparar_e_enviar", preparar)
+    monkeypatch.setattr(sv.assistente, "decidir_envio", lambda config: not config["pausado"])
+    sv.alterar_config(pausado=False, robo_pausado=False)
+    rodar(sv.verificar_envio())
+    assert pedidos == []
+    assert "Em espera" in sv.texto_painel(sv.ler_config())
+    # O celular desconectou: o robô pausou sozinho, e o assistente volta a mandar.
+    sv.alterar_config(robo_pausado=True, robo_pausa_motivo="celular desconectado")
+    rodar(sv.verificar_envio())
+    assert pedidos == ["autorais"]
+    assert "o celular desconectou" in sv.texto_painel(sv.ler_config())
+
+
+def test_reconectar_acha_a_porta_sozinho_antes_de_pedir(bm, Msg, Est, monkeypatch):
+    sv = _painel(bm)
+    monkeypatch.setattr(sv.celular_robo, "ler", lambda: {"pareado_em": "2026-10-17 10:00:00", "ip": "100.1.2.3"})
+    monkeypatch.setattr(sv.celular_robo, "reconectar_sozinho", lambda: (True, "motorola moto g(100), Android 12"))
+
+    async def texto_celular():
+        return "📱 Celular do Robô"
+
+    monkeypatch.setattr(sv, "texto_celular", texto_celular)
+    msg = Msg("Reconectar Celular 🔄")
+    rodar(sv.pedir_reconexao(msg, Est()))
+    assert "Celular conectado" in msg.saidas[1] and "porta" not in msg.saidas[1]
 
 
 def test_rascunhos_por_dia_e_horario_do_robo(bm, Msg, Est):

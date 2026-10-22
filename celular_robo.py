@@ -11,11 +11,16 @@ Quem usa:
 O explorar e o robô automático pegam a trava() antes de tocar no celular: os dois
 juntos tocariam em cima um do outro.
 
+A porta da Depuração por Wi-Fi muda cada vez que ela é ligada (o celular reiniciou,
+trocou de Wi-Fi). Com ela ligada, reconectar_sozinho() acha a porta nova pela rede
+privada, sem o Rafael mandar nada; só a depuração desligada pede a mão dele.
+
 O código de pareamento vale só enquanto a janela dele está aberta no celular e passa
 só pelo bot: nunca vai para o log nem para o banco. No banco (chave CHAVE) ficam o
 nome do celular na rede, o endereço e a porta da conexão, o modelo e as datas.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
+import asyncio
 import contextlib
 import fcntl
 import json
@@ -30,6 +35,9 @@ from fuso import fuso_horario
 
 CHAVE = "celular_robo"
 ARQUIVO_TRAVA = os.path.join(av.PASTA_TRABALHO, "celular.trava")
+# Onde o Android abre a porta da Depuração por Wi-Fi: as portas "efêmeras" do Linux,
+# sorteadas cada vez que a depuração é ligada.
+PORTAS_DA_DEPURACAO = range(32768, 61000)
 
 
 def ler():
@@ -153,6 +161,51 @@ def conectado():
     av._rodar("adb", "connect", alvo, timeout=10)
     r = av._rodar("adb", "-s", alvo, "get-state", timeout=10)
     return av._ok(r) and r[1].strip() == "device"
+
+
+def portas_abertas(ip, portas=PORTAS_DA_DEPURACAO, prazo=0.5, juntas=400):
+    """As portas TCP abertas do celular, testadas em paralelo pela rede privada (uns 30 s)."""
+    async def testar(porta, limite):
+        async with limite:
+            try:
+                _, escritor = await asyncio.wait_for(asyncio.open_connection(ip, porta), prazo)
+            except (OSError, asyncio.TimeoutError):
+                return None
+            escritor.close()
+            return porta
+
+    async def todas():
+        limite = asyncio.Semaphore(juntas)
+        return [p for p in await asyncio.gather(*(testar(p, limite) for p in portas)) if p]
+
+    return asyncio.run(todas())
+
+
+def reconectar_sozinho():
+    """
+    Reconecta sem o Rafael mandar a porta: primeiro a porta guardada; se não der, procura
+    a porta nova da Depuração por Wi-Fi no celular, pela rede privada, e conecta nela.
+    Só a depuração desligada (ou o celular fora da rede) impede. (True, modelo) ou
+    (False, motivo em palavras simples).
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    if conectado():
+        return True, ler().get("modelo") or "celular"
+    dados = ler()
+    if not dados.get("pareado_em") or not dados.get("ip"):
+        return False, "o celular ainda não foi pareado com o servidor"
+    if shutil.which("adb") is None:
+        return False, "o adb não está instalado no servidor"
+    rede = {c["ip"]: c for c in celulares_na_rede()}
+    if not rede.get(dados["ip"], {}).get("online"):
+        return False, "o celular não está na rede privada (Tailscale desligado ou celular sem internet)"
+    for porta in portas_abertas(dados["ip"]):
+        if porta == dados.get("porta"):
+            continue
+        ok, resultado = conectar(dados["ip"], porta)
+        if ok:
+            return True, resultado
+    return False, "a Depuração por Wi-Fi está desligada no celular"
 
 
 @contextlib.contextmanager

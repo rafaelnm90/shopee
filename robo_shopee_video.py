@@ -20,9 +20,12 @@ Cada rodada faz no máximo uma coisa, nesta ordem:
    intervalo sorteado entre eles, sempre dentro do Horário do Robô;
 4. prepara um rascunho novo quando um horário do plano do dia passou: cada dia sorteia
    quantos (a faixa Rascunhos por Dia) e espalha os horários pelo Horário do Robô.
-Pausado (Pausar Postagem ⏸️), fora do Horário do Robô, com o celular desconectado, com a
-tela do celular aberta no privado do Rafael ou com o explorar tocando nele, não toca em
-nada. Na Verificação da Shopee para na hora e manda o link da tela do celular no privado.
+Pausado (Pausar Postagem ⏸️), fora do Horário do Robô, com a tela do celular aberta no
+privado do Rafael ou com o explorar tocando nele, não toca em nada. Celular desconectado:
+tenta reconectar sozinho (celular_robo.reconectar_sozinho); sem conseguir, pausa a
+Postagem e avisa, e o modo assistente volta a mandar as postagens no privado até o
+Rafael tocar em Retomar Postagem ▶️. Na Verificação da Shopee para na hora e manda o
+link da tela do celular no privado.
 
 Nunca toca em Postar sem o Aprovar do Rafael no bot, nem nos botões de comprar. Curtir e
 comentar o próprio vídeo continuam à mão (diretriz 9.1.1): depois de postar, o comentário
@@ -754,20 +757,19 @@ def _sair_sem_salvar(d):
 
 # --- A rodada ---
 
-def celular_pronto():
-    """O celular responde e o Rafael não está com a tela dele aberta no privado."""
-    return celular_robo.conectado() and not av.tela_aberta()
-
-
-def avisar_desconectado(agora=None):
-    """Uma vez por dia: sem o celular, o robô não faz nada, e o Rafael precisa reconectar."""
-    dia = agora_br(agora).strftime("%Y-%m-%d")
-    if ler_estado().get("aviso_desconectado") == dia:
-        return
-    gravar_estado(aviso_desconectado=dia)
-    avisar("📱 Robô da Shopee Vídeo: não consigo falar com o celular guardado, então não fiz nada. No "
-           "Motorola, ligue a Depuração por Wi-Fi e, no bot, toque em Shopee Vídeo 🎬 → Celular do Robô 📱 → "
-           "Reconectar Celular 🔄.")
+def pausar_por_desconexao(motivo):
+    """
+    Sem o celular, a Postagem pausa sozinha (o botão vira Retomar Postagem ▶️) e o modo
+    assistente volta a mandar as postagens no privado, para o Rafael postar à mão.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    db.atualizar_config(CHAVE_CONFIG, lambda dados: dados.update(robo_pausado=True,
+                                                                robo_pausa_motivo="celular desconectado"))
+    logger.warning(f"⚠️ [Robô Shopee Vídeo] Celular desconectado ({motivo}): Postagem pausada.")
+    avisar(f"📱 Robô da Shopee Vídeo: perdi a conexão com o celular guardado ({motivo}). Pausei a Postagem, "
+           "e o modo assistente volta a mandar as postagens aqui no privado para você postar à mão.\n\n"
+           "Para voltar ao automático: no Motorola, ligue a Depuração por Wi-Fi (Opções do desenvolvedor) e, "
+           "no bot, toque em Shopee Vídeo 🎬 → Retomar Postagem ▶️. Eu acho o celular sozinho.")
 
 
 def rodada(treino=False, d=None, agora=None):
@@ -782,10 +784,15 @@ def rodada(treino=False, d=None, agora=None):
             return "pausado"
         if not no_horario(config, agora):
             return "fora do Horário do Robô"
-    if d is None and not celular_pronto():
-        if not treino:
-            avisar_desconectado(agora)
-        return "celular desconectado ou com a tela aberta no privado"
+    if d is None:
+        if av.tela_aberta():
+            return "a tela do celular está aberta no privado do Rafael"
+        if not celular_robo.conectado():
+            ok, motivo = celular_robo.reconectar_sozinho()
+            if not ok:
+                if not treino:
+                    pausar_por_desconexao(motivo)
+                return f"celular desconectado ({motivo})"
     with celular_robo.trava() as livre:
         if not livre:
             return "o explorar está tocando no celular"

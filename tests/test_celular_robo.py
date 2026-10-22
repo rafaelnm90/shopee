@@ -151,8 +151,11 @@ def test_reconectar_so_depois_de_parear(bm, cr, monkeypatch, Msg, Est):
     rodar(sv.pedir_reconexao(msg, Est()))
     assert "ainda não foi pareado" in msg.saidas[0]
     cr.parear(IP, 37123, "123456")
-    est = Est()
-    rodar(sv.pedir_reconexao(Msg("Reconectar Celular 🔄"), est))
+    # Com a depuração desligada, não acha a porta sozinho e pede ao Rafael.
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [])
+    est, msg = Est(), Msg("Reconectar Celular 🔄")
+    rodar(sv.pedir_reconexao(msg, est))
+    assert "Não achei sozinho" in msg.saidas[1]
     assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.aguardando_porta.state
 
 
@@ -197,3 +200,42 @@ def test_ver_tela_do_celular_manda_o_link_so_conectado(bm, cr, monkeypatch, Msg,
     msg = Msg("Ver Tela do Celular 🖥️")
     rodar(sv.abrir_tela_handler(msg, Est()))
     assert "A tela não abriu (o túnel não deu endereço)" in msg.saidas[-1]
+
+
+def test_acha_a_porta_aberta_da_depuracao(cr):
+    import socket
+    servidor = socket.socket()
+    servidor.bind(("127.0.0.1", 0))
+    servidor.listen()
+    porta = servidor.getsockname()[1]
+    try:
+        assert cr.portas_abertas("127.0.0.1", range(porta - 2, porta + 3)) == [porta]
+    finally:
+        servidor.close()
+
+
+def test_reconecta_sozinho_procurando_a_porta_nova(cr, monkeypatch):
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr, "conectado", lambda: False)
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [37000, 39999, 41000])
+    tentadas = []
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: tentadas.append(porta) or (
+        (True, "moto g(100)") if porta == 41000 else (False, "o celular recusou")))
+    assert cr.reconectar_sozinho() == (True, "moto g(100)")
+    assert tentadas == [39999, 41000]                                       # a porta velha não é tentada de novo
+
+
+@pytest.mark.parametrize("dados, online, portas, motivo", [
+    ({}, True, [41000], "ainda não foi pareado"),
+    ({"ip": IP, "pareado_em": "x"}, False, [41000], "não está na rede privada"),
+    ({"ip": IP, "pareado_em": "x"}, True, [], "Depuração por Wi-Fi está desligada"),
+])
+def test_sem_achar_o_celular_diz_o_motivo(cr, monkeypatch, dados, online, portas, motivo):
+    cr._gravar(**dados)
+    monkeypatch.setattr(cr, "conectado", lambda: False)
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": online}])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: portas)
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: pytest.fail("não devia conectar"))
+    ok, resultado = cr.reconectar_sozinho()
+    assert not ok and motivo in resultado
