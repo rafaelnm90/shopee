@@ -204,6 +204,42 @@ def test_rascunhos_por_dia_e_horario_do_robo(bm, Msg, Est):
     assert "⚠️" in msg.saidas[0]
 
 
+def test_rascunhos_por_dia_com_os_botoes_faixa_e_fixo(bm, Msg, Est):
+    # Pedido do Rafael (vídeo de 22/10): escolher Faixa ou Fixo num botão e só depois
+    # digitar os números.
+    sv, est = _painel(bm), Est()
+    rodar(sv.pedir_faixa_robo(Msg("Rascunhos por Dia 📦"), est))
+    assert _textos(sv.teclado_faixa_ou_fixo) == ["Faixa 🎲", "Fixo 📌", "Cancelar ❌"]
+    assert est.estado == sv.ShopeeVideoFluxo.aguardando_tipo_faixa_robo
+    rodar(sv.escolher_tipo_faixa_robo(Msg("Faixa 🎲"), est))
+    for errado in ("2", "3-3"):                                          # faixa pede mínimo < máximo
+        msg = Msg(errado)
+        rodar(sv.confirmar_faixa_robo(msg, est))
+        assert "⚠️" in msg.saidas[0] and est.estado == sv.ShopeeVideoFluxo.aguardando_faixa_robo
+    rodar(sv.confirmar_faixa_robo(Msg("1-3"), est))
+    rodar(sv.salvar_faixa_robo(Msg("Aprovar ✅"), est))
+    assert (sv.ler_config()["robo_limite_min"], sv.ler_config()["robo_limite_max"]) == (1, 3)
+
+    est = Est()
+    rodar(sv.pedir_faixa_robo(Msg("Rascunhos por Dia 📦"), est))
+    rodar(sv.escolher_tipo_faixa_robo(Msg("Fixo 📌"), est))
+    msg = Msg("1-3")                                                     # fixo pede um número só
+    rodar(sv.confirmar_faixa_robo(msg, est))
+    assert "⚠️" in msg.saidas[0]
+    msg = Msg("4")
+    rodar(sv.confirmar_faixa_robo(msg, est))
+    assert "<b>4 (fixo)</b>" in msg.saidas[0]
+    rodar(sv.salvar_faixa_robo(Msg("Aprovar ✅"), est))
+    assert (sv.ler_config()["robo_limite_min"], sv.ler_config()["robo_limite_max"]) == (4, 4)
+
+
+def test_cancelar_na_escolha_de_faixa_ou_fixo_volta_ao_robo(bm, Msg, Est):
+    sv = _painel(bm)
+    msg, est = Msg("Cancelar ❌"), Est()
+    rodar(sv.voltar_depois_de_cancelar(msg, est, "ShopeeVideoFluxo:aguardando_tipo_faixa_robo"))
+    assert est.estado == sv.ShopeeVideoFluxo.menu_robo
+
+
 class MsgComMidia:
     """Mensagem que também guarda os vídeos e as fotos mandados."""
 
@@ -341,7 +377,7 @@ def test_botoes_vem_antes_das_respostas_de_texto(bm):
     ordem = [h.callback.__name__ for h in sv.router.message.handlers]
     botoes = ("painel_handler", "menu_robo_handler", "menu_assistente_handler", "como_funciona_handler",
               "voltar_ao_robo", "pedir_faixa", "pedir_janela", "pedir_pausa", "enviar_agora_handler",
-              "pedir_fonte", "pedir_pausa_robo", "pedir_faixa_robo", "pedir_janela_robo", "treino_handler",
+              "pedir_fonte", "pedir_pausa_robo", "pedir_faixa_robo", "escolher_tipo_faixa_robo", "pedir_janela_robo", "treino_handler",
               "rascunhos_handler", "aprovar_handler", "pedir_recusa", "proximo_handler")
     respostas = ("confirmar_faixa", "confirmar_janela", "salvar_fonte", "confirmar_com_os_botoes",
                  "confirmar_faixa_robo", "confirmar_janela_robo", "salvar_recusa")
