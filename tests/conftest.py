@@ -133,6 +133,15 @@ def pasta_limpa(tmp_path, monkeypatch):
     logging.disable(logging.NOTSET)
 
 
+@pytest.fixture(autouse=True)
+def celular_na_pasta_do_teste(tmp_path, monkeypatch):
+    """A trava do celular e os rascunhos do robô na pasta do teste, nunca na casa de quem roda."""
+    import celular_robo
+    import robo_shopee_video
+    monkeypatch.setattr(celular_robo, "ARQUIVO_TRAVA", str(tmp_path / "celular.trava"))
+    monkeypatch.setattr(robo_shopee_video, "PASTA_RASCUNHOS", str(tmp_path / "rascunhos"))
+
+
 @pytest.fixture
 def bm(monkeypatch):
     """bot_mestre com banco novo, agendador novo e sem esperas (asyncio.sleep instantâneo)."""
