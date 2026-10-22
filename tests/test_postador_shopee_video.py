@@ -177,6 +177,85 @@ def test_curtir_toca_so_no_coracao():
     assert aparelho.toques == [(1028, 1233)]
 
 
+# A página que o link abre: foto, preço, nome com a seta e Compre Agora, sem o coração.
+TELA_PAGINA_CURTA = """<hierarchy><node class="android.widget.FrameLayout" bounds="[0,0][1080,2400]">
+  <node class="android.view.ViewGroup" clickable="true" bounds="[0,1100][1080,1440]">
+    <node text="R$59,90" class="android.widget.TextView" bounds="[40,1100][300,1150]" />
+    <node text="Vestido Infantil Estampado Gatinho Para Meninas de 4 a 14 Anos"
+          class="android.widget.TextView" bounds="[40,1190][1010,1245]" />
+  </node>
+  <node class="android.view.ViewGroup" clickable="true" bounds="[230,1350][1040,1420]">
+    <node text="Compre Agora" class="android.widget.TextView" bounds="[500,1365][720,1410]" />
+  </node>
+</node></hierarchy>"""
+
+
+class AparelhoDaPagina(Aparelho):
+    """A página curta até o primeiro toque; depois, a página completa (curtida ou não)."""
+
+    def __init__(self, completa=TELA_PRODUTO, curtiu=None):
+        super().__init__(tela=TELA_PAGINA_CURTA)
+        self.completa, self.curtiu = completa, curtiu
+
+    def dump_hierarchy(self):
+        if not self.toques:
+            return self.tela
+        if len(self.toques) > 1 and self.curtiu:
+            return self.curtiu
+        return self.completa
+
+
+CURTIDO = TELA_PRODUTO.replace("buttonItemLike", "buttonItemLiked")
+
+
+def test_curtir_abre_a_pagina_completa_pelo_nome_e_curte(monkeypatch, capsys):
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    aparelho = AparelhoDaPagina(curtiu=CURTIDO)
+    assert ps.explorar("curtir", aparelho)
+    # Primeiro o nome do produto (abre a página completa), depois o coração.
+    assert aparelho.toques == [(525, 1217), (1028, 1233)]
+    saida = capsys.readouterr().out
+    assert "produto curtido" in saida and "Vestido" not in saida
+
+
+def test_curtir_com_o_produto_ja_curtido_nao_toca_no_coracao(monkeypatch, capsys):
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    aparelho = AparelhoDaPagina(completa=CURTIDO)
+    assert ps.explorar("curtir", aparelho)
+    assert aparelho.toques == [(525, 1217)]
+    assert "já estava curtido" in capsys.readouterr().out
+
+
+def test_curtir_rola_atras_do_coracao_e_para_sem_ele(monkeypatch, capsys):
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    aparelho = AparelhoDaPagina(completa=TELA_PAGINA_CURTA.replace("Vestido", "Outro"))
+    assert not ps.explorar("curtir", aparelho)
+    assert aparelho.toques == [(525, 1217)]
+    assert len([c for c in aparelho.comandos if c[0] == "rolar"]) == ps.ROLAGENS_DO_CORACAO
+    assert "o coração não está na página" in capsys.readouterr().out
+
+
+def test_curtir_sem_o_nome_do_produto_na_pagina_nao_toca_em_nada(monkeypatch, capsys):
+    _autorais()
+    _produto_do_link(monkeypatch, "Fibra Proteína Cabelo Cacheado Luxo")
+    aparelho = AparelhoDaPagina()
+    assert not ps.explorar("curtir", aparelho)
+    assert aparelho.toques == []
+    assert "não está na página" in capsys.readouterr().out
+
+
+def test_curtir_que_nao_pega_avisa(monkeypatch, capsys):
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    aparelho = AparelhoDaPagina()
+    assert not ps.explorar("curtir", aparelho)
+    assert aparelho.toques == [(525, 1217), (1028, 1233)]
+    assert "não ficou curtido" in capsys.readouterr().out
+
+
 def test_passo_desconhecido_nao_toca_em_nada(capsys):
     aparelho = Aparelho()
     assert ps.explorar("abrir; publicar", aparelho) is None
@@ -343,6 +422,8 @@ def test_titulo_da_ia_vai_para_o_campo_e_o_log_mostra_so_o_tamanho(monkeypatch, 
     assert ps.explorar("titulo", aparelho)
     assert aparelho.escrito == ["Garrafa térmica inox 1 litro"]
     assert pedidos == [(os.path.abspath("archive/antigo.mp4"), "Produto")]
+    # Guardado para a aprovação do rascunho mostrar o texto que está na legenda.
+    assert ps.db.ler_config(ps.CHAVE_TESTE)["titulo"] == "Garrafa térmica inox 1 litro"
     saida = capsys.readouterr().out
     assert "título com 28 caracteres" in saida and "Garrafa" not in saida
 
@@ -360,7 +441,8 @@ def test_comentario_da_ia_vai_so_para_o_privado_com_o_lembrete(monkeypatch, caps
     assert not ps.explorar("comentario", Aparelho())
     assert avisos == [] and "o passo titulo vem antes" in capsys.readouterr().out
     assert ps.explorar("titulo; comentario", Aparelho())
-    assert len(avisos) == 1 and "Amei essa garrafa! #achadinhos" in avisos[0]
+    # O comentário vai sozinho, numa mensagem só dele, para copiar com um toque.
+    assert avisos == [ps.AVISO_COMENTARIO, "Amei essa garrafa! #achadinhos"]
     assert "curta o vídeo e comente" in avisos[0]
     saida = capsys.readouterr().out
     assert "comentário com 30 caracteres" in saida and "Amei" not in saida
@@ -687,8 +769,24 @@ def test_ia_confere_o_produto_do_link_com_o_video(monkeypatch, capsys):
     avisos = _avisos(monkeypatch)
     pedidos = _ia(monkeypatch, '```json\n{"confere": true, "motivo": "vestido infantil"}\n```')
     assert ps.explorar("ia", Aparelho())
+    # Confere duas vezes: a IA já recusou um vídeo que tinha aceitado antes.
+    assert len(pedidos) == 2
     assert pedidos[0][0] == os.path.abspath("archive/antigo.mp4") and VESTIDO in pedidos[0][1]
-    assert avisos == [] and "a IA confere" in capsys.readouterr().out
+    assert avisos == [] and "a IA confere 2 vezes" in capsys.readouterr().out
+
+
+def test_ia_que_confirma_e_depois_nega_para(monkeypatch, capsys):
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    avisos = _avisos(monkeypatch)
+    respostas = iter(['{"confere": true, "motivo": "vestido"}', '{"confere": false, "motivo": "outro produto"}'])
+
+    async def analisar(arquivo, prompt):
+        return next(respostas)
+
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    assert not ps.explorar("ia", Aparelho())
+    assert len(avisos) == 1 and "2ª vez" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("resposta, avisa", [

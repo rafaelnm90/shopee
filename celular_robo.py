@@ -6,14 +6,20 @@ rede privada (Tailscale): o celular fica em casa, com a "Depuração por Wi-Fi" 
 Quem usa:
 - painel_shopee_video (botão Celular do Robô 📱): acha o celular na rede privada,
   pareia com o código que o Rafael manda no privado do bot e conecta;
-- postador_shopee_video (--celular): explora o app da Shopee no celular.
+- postador_shopee_video (--celular): explora o app da Shopee no celular;
+- robo_shopee_video: o robô automático, que prepara os rascunhos e posta.
+O explorar e o robô automático pegam a trava() antes de tocar no celular: os dois
+juntos tocariam em cima um do outro.
 
 O código de pareamento vale só enquanto a janela dele está aberta no celular e passa
 só pelo bot: nunca vai para o log nem para o banco. No banco (chave CHAVE) ficam o
 nome do celular na rede, o endereço e a porta da conexão, o modelo e as datas.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
+import contextlib
+import fcntl
 import json
+import os
 import re
 import shutil
 from datetime import datetime
@@ -23,6 +29,7 @@ import db
 from fuso import fuso_horario
 
 CHAVE = "celular_robo"
+ARQUIVO_TRAVA = os.path.join(av.PASTA_TRABALHO, "celular.trava")
 
 
 def ler():
@@ -146,3 +153,23 @@ def conectado():
     av._rodar("adb", "connect", alvo, timeout=10)
     r = av._rodar("adb", "-s", alvo, "get-state", timeout=10)
     return av._ok(r) and r[1].strip() == "device"
+
+
+@contextlib.contextmanager
+def trava():
+    """
+    Um de cada vez no celular. Rende True com a trava na mão e False se outro processo
+    (o robô automático ou o explorar) já está tocando nele. O sistema solta a trava
+    sozinho se o processo cair no meio.
+    """
+    os.makedirs(os.path.dirname(ARQUIVO_TRAVA), exist_ok=True)
+    with open(ARQUIVO_TRAVA, "w") as arquivo:
+        try:
+            fcntl.flock(arquivo, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(arquivo, fcntl.LOCK_UN)
