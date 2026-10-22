@@ -126,7 +126,7 @@ class Intocavel:
 
 def test_pausado_nao_toca_e_pula_os_horarios(monkeypatch, avisos):
     robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_limite_min": 1, "robo_limite_max": 1})
-    monkeypatch.setattr(robo, "celular_pronto", lambda: pytest.fail("pausado nem olha o celular"))
+    monkeypatch.setattr(robo.celular_robo, "conectado", lambda: pytest.fail("pausado nem olha o celular"))
     assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 21:59")) == "pausado"
     assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 21:59"))["feitos"] == 1
 
@@ -136,14 +136,39 @@ def test_fora_do_horario_nao_toca(monkeypatch, avisos):
     assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 22:00")) == "fora do Horário do Robô"
 
 
-def test_celular_desconectado_avisa_uma_vez_por_dia(monkeypatch, avisos):
+def test_celular_desconectado_tenta_sozinho_e_sem_ele_pausa_e_avisa(monkeypatch, avisos):
     ativar(robo_inicio=0, robo_fim=24)
-    monkeypatch.setattr(robo, "celular_pronto", lambda: False)
-    for hora in ("10:00", "10:15", "18:00"):
-        assert "desconectado" in robo.rodada(agora=momento(f"2026-10-22 {hora}"))
-    assert len(avisos) == 1 and "Reconectar Celular 🔄" in avisos[0]
-    robo.rodada(agora=momento("2026-10-23 10:00"))
-    assert len(avisos) == 2
+    tentativas = []
+    monkeypatch.setattr(robo.av, "tela_aberta", lambda: False)
+    monkeypatch.setattr(robo.celular_robo, "conectado", lambda: False)
+    monkeypatch.setattr(robo.celular_robo, "reconectar_sozinho",
+                        lambda: tentativas.append(1) or (False, "a Depuração por Wi-Fi está desligada no celular"))
+    assert "desconectado" in robo.rodada(agora=momento("2026-10-22 10:00"))
+    config = robo.ler_config()
+    # A Postagem pausa sozinha, e o assistente volta a mandar no privado.
+    assert tentativas == [1] and config["robo_pausado"] is True
+    assert config["robo_pausa_motivo"] == "celular desconectado"
+    assert len(avisos) == 1 and "Retomar Postagem ▶️" in avisos[0] and "assistente" in avisos[0]
+    assert robo.rodada(agora=momento("2026-10-22 10:15")) == "pausado"
+    assert len(avisos) == 1 and tentativas == [1]
+
+
+def test_celular_que_reconecta_sozinho_segue_a_rodada(monkeypatch, avisos):
+    ativar(robo_inicio=0, robo_fim=24)
+    robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-22 10:00")))
+    monkeypatch.setattr(robo.av, "tela_aberta", lambda: False)
+    monkeypatch.setattr(robo.celular_robo, "conectado", lambda: False)
+    monkeypatch.setattr(robo.celular_robo, "reconectar_sozinho", lambda: (True, "moto g(100)"))
+    assert robo.rodada(agora=momento("2026-10-22 00:01")) == "nada a fazer agora"
+    assert robo.ler_config()["robo_pausado"] is False and avisos == []
+
+
+def test_com_a_tela_do_celular_aberta_nem_reconecta(monkeypatch, avisos):
+    ativar(robo_inicio=0, robo_fim=24)
+    monkeypatch.setattr(robo.av, "tela_aberta", lambda: True)
+    monkeypatch.setattr(robo.celular_robo, "conectado", lambda: pytest.fail("não devia olhar o celular"))
+    assert "tela do celular está aberta" in robo.rodada(agora=momento("2026-10-22 10:00"))
+    assert robo.ler_config()["robo_pausado"] is False
 
 
 def test_com_o_explorar_no_celular_a_rodada_nao_toca(monkeypatch, avisos):

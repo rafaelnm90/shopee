@@ -7,7 +7,10 @@ Dois robôs, cada um com o seu botão de pausar e retomar:
   (assistente_shopee_video.py);
 - o robô automático prepara rascunhos sozinho no celular guardado e posta os que o
   Rafael aprova aqui, um por um, em "Rascunhos do Robô 📝" (robo_shopee_video.py).
-Os dois puxam da mesma Fonte dos Vídeos, e o vídeo que um usou o outro não pega.
+Os dois puxam da mesma Fonte dos Vídeos, e o vídeo que um usou o outro não pega. Um
+cobre o outro: com o robô ativo, o assistente fica em espera; com o robô pausado (pelo
+Rafael ou sozinho, quando perde o celular), o assistente manda as postagens no privado.
+Retomar Postagem ▶️ acha o celular sozinho antes de retomar (celular_robo).
 
 Este painel guarda o que o Rafael controla, na chave "shopee_video" das configurações:
 - assistente: pausa, quantos vídeos por dia (faixa sorteada a cada dia) e a janela de
@@ -87,10 +90,20 @@ async def enviar_um(fonte):
             return f"deu erro ao preparar ({type(e).__name__})"
 
 
+def assistente_em_espera(config):
+    """
+    Com o robô automático ativo, o assistente não manda: um cobre o outro, nunca os dois
+    juntos. Os horários que passam em espera são pulados, como pausado.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    return not config["robo_pausado"]
+
+
 async def verificar_envio():
     """Volta do agendador: manda um vídeo se um horário do plano de hoje já passou."""
     config = ler_config()
-    if _envio.locked() or not assistente.decidir_envio(config):
+    efetivo = {**config, "pausado": config["pausado"] or assistente_em_espera(config)}
+    if _envio.locked() or not assistente.decidir_envio(efetivo):
         return
     logger.info(f"🎬 [Shopee Vídeo] {await enviar_um(config['fonte'])}.")
 
@@ -259,8 +272,18 @@ def _linha_treino():
 
 
 def texto_painel(config, agora=None):
-    status = "⏸️ <b>Pausado</b>" if config["pausado"] else "▶️ <b>Ativo</b>"
-    status_robo = "⏸️ <b>Pausado</b>" if config["robo_pausado"] else "▶️ <b>Ativo</b>"
+    if config["pausado"]:
+        status = "⏸️ <b>Pausado</b>"
+    elif assistente_em_espera(config):
+        status = "💤 <b>Em espera</b> (o robô automático está postando)"
+    else:
+        status = "▶️ <b>Ativo</b>"
+    if not config["robo_pausado"]:
+        status_robo = "▶️ <b>Ativo</b>"
+    elif config.get("robo_pausa_motivo") == "celular desconectado":
+        status_robo = "⏸️ <b>Pausado</b> (o celular desconectou; toque em Retomar Postagem ▶️)"
+    else:
+        status_robo = "⏸️ <b>Pausado</b>"
     piso, topo = config["limite_min"], config["limite_max"]
     hoje = f" (sorteado a cada dia; hoje: <b>{videos_hoje(config, agora)}</b>)" if topo > piso else ""
     piso_robo, topo_robo = config["robo_limite_min"], config["robo_limite_max"]
@@ -275,7 +298,7 @@ def texto_painel(config, agora=None):
         f"⏰ Horário dos envios: <b>{rotulo_janela(config['inicio'], config['fim'])}</b>\n"
         f"📤 Mandados hoje: <b>{assistente.enviados_hoje(agora)}</b>\n\n"
         "🤖 <b>Robô automático</b>: prepara rascunhos sozinho no celular guardado e posta os que "
-        "você aprovar em Rascunhos do Robô 📝.\n"
+        "você aprovar em Rascunhos do Robô 📝. Com ele ativo, o assistente fica em espera.\n"
         f"Status: {status_robo}\n"
         f"📦 Rascunhos por dia: <b>{rotulo_faixa(piso_robo, topo_robo)}</b>{hoje_robo}\n"
         f"🕗 Horário do robô: <b>{rotulo_janela(config['robo_inicio'], config['robo_fim'])}</b>\n"
@@ -405,10 +428,12 @@ async def pedir_pausa_robo(message: types.Message, state: FSMContext):
     if not _admin(message): return
     pausar = message.text.startswith("Pausar")
     pergunta = ("⚠️ <b>Pausar</b> o robô automático? Ele para de preparar rascunhos e de postar os "
-                "aprovados até você retomar. Os rascunhos ficam guardados."
+                "aprovados até você retomar, e o modo assistente volta a mandar as postagens aqui no "
+                "privado. Os rascunhos ficam guardados."
                 if pausar else
-                "▶️ <b>Retomar</b> o robô automático? Ele volta a preparar rascunhos e a postar os que você "
-                "aprovar, dentro do Horário do Robô e da quantidade do painel.")
+                "▶️ <b>Retomar</b> o robô automático? Eu acho o celular guardado sozinho e ele volta a "
+                "preparar rascunhos e a postar os que você aprovar, dentro do Horário do Robô. O modo "
+                "assistente fica em espera enquanto isso.")
     botao = "Confirmar Pausa ✅" if pausar else "Confirmar Retomada ✅"
     await message.answer(pergunta, parse_mode="HTML", reply_markup=teclado_com_cancelar(botao))
     await state.set_state(ShopeeVideoFluxo.aguardando_confirmacao_pausa_robo)
@@ -736,11 +761,20 @@ async def pedir_pareamento(message: types.Message, state: FSMContext):
 
 @router.message(F.text == BOTAO_RECONECTAR, StateFilter("*"))
 async def pedir_reconexao(message: types.Message, state: FSMContext):
+    """Primeiro procura a porta nova sozinho; só pede a porta ao Rafael se não achar."""
     if not _admin(message): return
     if not celular_robo.ler().get("pareado_em"):
         await message.answer(f"⚠️ O celular ainda não foi pareado: toque em {BOTAO_PAREAR} primeiro.",
                              reply_markup=teclado_celular())
         return
+    await message.answer("⏳ Procurando o celular guardado (até 1 min)...")
+    ok, resultado = await asyncio.to_thread(celular_robo.reconectar_sozinho)
+    if ok:
+        logger.info("✅ Celular do robô: reconectado sozinho.")
+        await message.answer(f"✅ <b>Celular conectado:</b> {html_escape(resultado)}.", parse_mode="HTML")
+        await mostrar_celular(message, state)
+        return
+    await message.answer(f"⚠️ Não achei sozinho: {html_escape(resultado)}.")
     await _escolher_celular(message, state, "reconectar")
 
 
@@ -866,11 +900,34 @@ async def salvar_janela_robo(message: types.Message, state: FSMContext):
 @router.message(ShopeeVideoFluxo.aguardando_confirmacao_pausa_robo,
                 F.text.in_(["Confirmar Pausa ✅", "Confirmar Retomada ✅"]))
 async def salvar_pausa_robo(message: types.Message, state: FSMContext):
-    pausar = message.text == "Confirmar Pausa ✅"
-    alterar_config(robo_pausado=pausar)
-    logger.info(f"✅ Robô automático da Shopee Vídeo {'pausado' if pausar else 'retomado'}.")
-    await message.answer("⏸️ Robô automático <b>pausado</b>." if pausar
-                         else "▶️ Robô automático <b>retomado</b>.", parse_mode="HTML")
+    """
+    Pausar: o robô para e o assistente volta a mandar no privado. Retomar: antes, o
+    servidor acha o celular sozinho (a porta da Depuração por Wi-Fi muda); sem o celular,
+    continua pausado e diz o que fazer.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    if message.text == "Confirmar Pausa ✅":
+        alterar_config(robo_pausado=True, robo_pausa_motivo="")
+        logger.info("✅ Robô automático da Shopee Vídeo pausado.")
+        await message.answer("⏸️ Robô automático <b>pausado</b>. O modo assistente volta a mandar as postagens "
+                             "aqui no privado.", parse_mode="HTML")
+        await mostrar_painel(message, state)
+        return
+    await message.answer("⏳ Procurando o celular guardado (até 1 min)...")
+    ok, resultado = await asyncio.to_thread(celular_robo.reconectar_sozinho)
+    if not ok:
+        logger.warning(f"⚠️ Robô automático: não retomou, celular fora ({resultado}).")
+        await message.answer(
+            f"⚠️ Não retomei: {html_escape(resultado)}.\n\nNo Motorola: Configurações → Sistema → Opções do "
+            "desenvolvedor → ligue a <b>Depuração por Wi-Fi</b> e confira se o <b>Tailscale</b> está ligado. "
+            "Depois toque de novo em <b>Retomar Postagem ▶️</b>. Enquanto isso, o modo assistente continua "
+            "mandando as postagens aqui.", parse_mode="HTML")
+        await mostrar_painel(message, state)
+        return
+    alterar_config(robo_pausado=False, robo_pausa_motivo="")
+    logger.info("✅ Robô automático da Shopee Vídeo retomado.")
+    await message.answer(f"▶️ Robô automático <b>retomado</b> ({html_escape(resultado)} conectado). O modo "
+                         "assistente fica em espera.", parse_mode="HTML")
     await mostrar_painel(message, state)
 
 
