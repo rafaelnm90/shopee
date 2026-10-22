@@ -149,6 +149,7 @@ class ShopeeVideoFluxo(StatesGroup):
     menu = State()
     menu_robo = State()
     menu_assistente = State()
+    aguardando_tipo_faixa = State()
     aguardando_faixa = State()
     aguardando_confirmacao_faixa = State()
     aguardando_janela = State()
@@ -170,6 +171,10 @@ class ShopeeVideoFluxo(StatesGroup):
 
 
 # --- Configuração ---
+
+BOTAO_FAIXA = "Faixa 🎲"
+BOTAO_FIXO = "Fixo 📌"
+
 
 def ler_config():
     """A configuração do robô, com os valores padrão no que faltar."""
@@ -209,6 +214,53 @@ def interpretar_janela(texto):
     return inicio, fim
 
 
+# Rascunhos por Dia (robô) e Vídeos por Dia (assistente): primeiro o Rafael toca em Faixa
+# ou Fixo, depois digita. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+FAIXA_DO_ROBO = {"coisa": "rascunhos", "faixa": "1-3", "fixo": "2"}
+FAIXA_DO_ASSISTENTE = {"coisa": "vídeos", "faixa": "5-10", "fixo": "6"}
+
+
+def texto_faixa_ou_fixo(pergunta, jeito, piso, topo, maximo):
+    piso_ex, topo_ex = jeito["faixa"].split("-")
+    return (f"{pergunta}\n\n"
+            f"• <b>{BOTAO_FAIXA}</b>: você manda o mínimo e o máximo (ex.: <code>{jeito['faixa']}</code>), "
+            f"e cada dia sorteia um número entre {piso_ex} e {topo_ex}\n"
+            f"• <b>{BOTAO_FIXO}</b>: você manda um número (ex.: <code>{jeito['fixo']}</code>), "
+            f"e são sempre {jeito['fixo']} por dia\n\n"
+            f"<i>Hoje está em {rotulo_faixa(piso, topo)}. Máximo de {maximo} por dia. A faixa existe para a "
+            "quantidade não ser sempre igual, que é o que denuncia robô.</i>")
+
+
+def texto_pedir_numeros(tipo, jeito):
+    if tipo == "faixa":
+        return f"🎲 Envie o <b>mínimo e o máximo</b>, com um traço. Ex.: <code>{jeito['faixa']}</code>."
+    return f"📌 Envie <b>quantos {jeito['coisa']} por dia</b>. Ex.: <code>{jeito['fixo']}</code>."
+
+
+def ler_faixa_escolhida(texto, tipo, jeito, maximo):
+    """
+    (piso, topo) do que o Rafael digitou depois de tocar em Faixa (o máximo maior que o
+    mínimo) ou em Fixo (um número só); sem tocar em nenhum, vale um ou outro. Devolve
+    ((piso, topo), None) ou (None, o aviso).
+    """
+    faixa = interpretar_faixa(texto)
+    if not faixa or faixa[1] > maximo:
+        if tipo == "faixa":
+            return None, f"⚠️ Envie dois números com um traço, de 1 a {maximo} (ex.: <code>{jeito['faixa']}</code>)."
+        if tipo == "fixo":
+            return None, f"⚠️ Envie um número de 1 a {maximo} (ex.: <code>{jeito['fixo']}</code>)."
+        return None, (f"⚠️ Toque em {BOTAO_FAIXA} ou {BOTAO_FIXO}, ou envie um número "
+                      f"(<code>{jeito['fixo']}</code>) ou uma faixa (<code>{jeito['faixa']}</code>), de 1 a {maximo}.")
+    piso, topo = faixa
+    if tipo == "faixa" and topo == piso:
+        return None, (f"⚠️ Na faixa, o máximo tem de ser maior que o mínimo (ex.: <code>{jeito['faixa']}</code>). "
+                      f"Para o mesmo número todo dia, toque em Cancelar e escolha {BOTAO_FIXO}.")
+    if tipo == "fixo" and topo != piso:
+        return None, (f"⚠️ No fixo, envie um número só (ex.: <code>{jeito['fixo']}</code>). "
+                      f"Para sortear entre dois números, toque em Cancelar e escolha {BOTAO_FAIXA}.")
+    return faixa, None
+
+
 def rotulo_faixa(piso, topo):
     return f"{piso} a {topo}" if topo > piso else f"{piso} (fixo)"
 
@@ -239,8 +291,6 @@ BOTAO_TELA = "Ver Tela do Celular 🖥️"
 BOTAO_RASCUNHOS = "Rascunhos do Robô 📝"
 BOTAO_FAIXA_ROBO = "Rascunhos por Dia 📦"
 BOTAO_HORARIO_ROBO = "Horário do Robô 🕗"
-BOTAO_FAIXA = "Faixa 🎲"
-BOTAO_FIXO = "Fixo 📌"
 BOTAO_TREINO = "Testar Caminho 🧭"
 BOTAO_APROVAR = "Aprovar Rascunho ✅"
 BOTAO_RECUSAR = "Recusar Rascunho ❌"
@@ -443,7 +493,7 @@ async def mostrar_assistente(message: types.Message, state: FSMContext):
 ESTADOS_DO_ROBO = ("aguardando_tipo_faixa_robo", "aguardando_faixa_robo", "aguardando_confirmacao_faixa_robo", "aguardando_janela_robo",
                    "aguardando_confirmacao_janela_robo", "aguardando_confirmacao_pausa_robo", "menu_robo",
                    "rascunho", "aguardando_confirmacao_recusa")
-ESTADOS_DO_ASSISTENTE = ("aguardando_faixa", "aguardando_confirmacao_faixa", "aguardando_janela",
+ESTADOS_DO_ASSISTENTE = ("aguardando_tipo_faixa", "aguardando_faixa", "aguardando_confirmacao_faixa", "aguardando_janela",
                          "aguardando_confirmacao_janela", "aguardando_confirmacao_pausa", "menu_assistente")
 ESTADOS_DO_CELULAR = ("celular", "aguardando_escolha_celular", "aguardando_pareamento", "aguardando_porta")
 
@@ -501,14 +551,11 @@ async def pedir_faixa(message: types.Message, state: FSMContext):
     if not _admin(message): return
     config = ler_config()
     await message.answer(
-        "Quantos vídeos por dia?\n\n"
-        "• Faixa: <code>5-10</code>: cada dia sorteia um número entre 5 e 10\n"
-        "• Fixo: <code>6</code>: sempre 6 por dia\n\n"
-        f"<i>Hoje está em {rotulo_faixa(config['limite_min'], config['limite_max'])}. "
-        f"Máximo de {MAXIMO_POR_DIA} por dia. A faixa existe para a quantidade não ser sempre igual, "
-        "que é o que denuncia robô.</i>",
-        parse_mode="HTML", reply_markup=teclado_cancelar)
-    await state.set_state(ShopeeVideoFluxo.aguardando_faixa)
+        texto_faixa_ou_fixo("Quantos vídeos por dia?", FAIXA_DO_ASSISTENTE,
+                            config["limite_min"], config["limite_max"], MAXIMO_POR_DIA),
+        parse_mode="HTML", reply_markup=teclado_faixa_ou_fixo)
+    await state.update_data(tipo_faixa=None)
+    await state.set_state(ShopeeVideoFluxo.aguardando_tipo_faixa)
 
 
 
@@ -610,35 +657,27 @@ async def pedir_pausa_robo(message: types.Message, state: FSMContext):
 
 @router.message(F.text == BOTAO_FAIXA_ROBO, StateFilter("*"))
 async def pedir_faixa_robo(message: types.Message, state: FSMContext):
-    """
-    Primeiro o Rafael escolhe Faixa ou Fixo nos botões; depois digita os números.
-    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
-    """
     if not _admin(message): return
     config = ler_config()
     await message.answer(
-        "Quantos rascunhos novos o robô prepara por dia?\n\n"
-        f"• <b>{BOTAO_FAIXA}</b>: você manda o mínimo e o máximo, e cada dia sorteia um número entre eles\n"
-        f"• <b>{BOTAO_FIXO}</b>: você manda um número, e é sempre esse por dia\n\n"
-        f"<i>Hoje está em {rotulo_faixa(config['robo_limite_min'], config['robo_limite_max'])}. "
-        f"Máximo de {robo.MAXIMO_POR_DIA} por dia. A faixa existe para a quantidade não ser sempre igual, "
-        "que é o que denuncia robô.</i>",
+        texto_faixa_ou_fixo("Quantos rascunhos novos o robô prepara por dia?", FAIXA_DO_ROBO,
+                            config["robo_limite_min"], config["robo_limite_max"], robo.MAXIMO_POR_DIA),
         parse_mode="HTML", reply_markup=teclado_faixa_ou_fixo)
     await state.update_data(tipo_faixa=None)
     await state.set_state(ShopeeVideoFluxo.aguardando_tipo_faixa_robo)
 
 
-@router.message(ShopeeVideoFluxo.aguardando_tipo_faixa_robo, F.text.in_([BOTAO_FAIXA, BOTAO_FIXO]))
-async def escolher_tipo_faixa_robo(message: types.Message, state: FSMContext):
+@router.message(StateFilter(ShopeeVideoFluxo.aguardando_tipo_faixa, ShopeeVideoFluxo.aguardando_tipo_faixa_robo),
+                F.text.in_([BOTAO_FAIXA, BOTAO_FIXO]))
+async def escolher_tipo_faixa(message: types.Message, state: FSMContext):
+    """Faixa 🎲 ou Fixo 📌, no Rascunhos por Dia (robô) ou no Vídeos por Dia (assistente)."""
     if not _admin(message): return
-    faixa = message.text == BOTAO_FAIXA
-    await message.answer(
-        "🎲 Envie o <b>mínimo e o máximo</b>, com um traço. Ex.: <code>1-3</code> (cada dia sorteia entre 1 e 3)."
-        if faixa else
-        "📌 Envie <b>quantos rascunhos por dia</b>. Ex.: <code>2</code> (sempre 2 por dia).",
-        parse_mode="HTML", reply_markup=teclado_cancelar)
-    await state.update_data(tipo_faixa="faixa" if faixa else "fixo")
-    await state.set_state(ShopeeVideoFluxo.aguardando_faixa_robo)
+    do_robo = (await state.get_state() or "").endswith("_robo")
+    tipo = "faixa" if message.text == BOTAO_FAIXA else "fixo"
+    await message.answer(texto_pedir_numeros(tipo, FAIXA_DO_ROBO if do_robo else FAIXA_DO_ASSISTENTE),
+                         parse_mode="HTML", reply_markup=teclado_cancelar)
+    await state.update_data(tipo_faixa=tipo)
+    await state.set_state(ShopeeVideoFluxo.aguardando_faixa_robo if do_robo else ShopeeVideoFluxo.aguardando_faixa)
 
 
 @router.message(F.text == BOTAO_HORARIO_ROBO, StateFilter("*"))
@@ -978,13 +1017,13 @@ async def pedir_reconexao(message: types.Message, state: FSMContext):
 # Ficam depois de todos os botões: no aiogram ganha o primeiro handler que casar, e um
 # botão do painel tocado no meio de um ajuste tem de abrir o botão, não virar resposta.
 
-@router.message(ShopeeVideoFluxo.aguardando_faixa)
+@router.message(StateFilter(ShopeeVideoFluxo.aguardando_tipo_faixa, ShopeeVideoFluxo.aguardando_faixa))
 async def confirmar_faixa(message: types.Message, state: FSMContext):
-    faixa = interpretar_faixa(message.text)
-    if not faixa:
-        await message.answer(
-            f"⚠️ Envie um número (<code>6</code>) ou uma faixa (<code>5-10</code>), de 1 a {MAXIMO_POR_DIA}.",
-            parse_mode="HTML", reply_markup=teclado_cancelar)
+    # Sem tocar em Faixa ou Fixo, um "5-10" ou "6" digitado direto também vale.
+    tipo = (await state.get_data()).get("tipo_faixa")
+    faixa, aviso = ler_faixa_escolhida(message.text, tipo, FAIXA_DO_ASSISTENTE, MAXIMO_POR_DIA)
+    if aviso:
+        await message.answer(aviso, parse_mode="HTML", reply_markup=teclado_cancelar if tipo else teclado_faixa_ou_fixo)
         return
     piso, topo = faixa
     await state.update_data(faixa=[piso, topo])
@@ -1047,29 +1086,12 @@ async def salvar_fonte(message: types.Message, state: FSMContext):
 
 @router.message(StateFilter(ShopeeVideoFluxo.aguardando_tipo_faixa_robo, ShopeeVideoFluxo.aguardando_faixa_robo))
 async def confirmar_faixa_robo(message: types.Message, state: FSMContext):
-    # Sem tocar em Faixa ou Fixo, um "1-3" ou "2" digitado direto também vale.
     tipo = (await state.get_data()).get("tipo_faixa")
-    faixa = interpretar_faixa(message.text)
-    if not faixa or faixa[1] > robo.MAXIMO_POR_DIA:
-        erro = {"faixa": f"⚠️ Envie dois números com um traço, de 1 a {robo.MAXIMO_POR_DIA} (ex.: <code>1-3</code>).",
-                "fixo": f"⚠️ Envie um número de 1 a {robo.MAXIMO_POR_DIA} (ex.: <code>2</code>)."}.get(
-            tipo, f"⚠️ Toque em {BOTAO_FAIXA} ou {BOTAO_FIXO}, ou envie um número (<code>2</code>) "
-                  f"ou uma faixa (<code>1-3</code>), de 1 a {robo.MAXIMO_POR_DIA}.")
-        await message.answer(erro, parse_mode="HTML", reply_markup=teclado_faixa_ou_fixo if not tipo else teclado_cancelar)
+    faixa, aviso = ler_faixa_escolhida(message.text, tipo, FAIXA_DO_ROBO, robo.MAXIMO_POR_DIA)
+    if aviso:
+        await message.answer(aviso, parse_mode="HTML", reply_markup=teclado_cancelar if tipo else teclado_faixa_ou_fixo)
         return
     piso, topo = faixa
-    if tipo == "faixa" and topo == piso:
-        await message.answer(
-            f"⚠️ Na faixa, o máximo tem de ser maior que o mínimo (ex.: <code>1-3</code>). "
-            f"Para o mesmo número todo dia, toque em Cancelar e escolha {BOTAO_FIXO}.",
-            parse_mode="HTML", reply_markup=teclado_cancelar)
-        return
-    if tipo == "fixo" and topo != piso:
-        await message.answer(
-            f"⚠️ No fixo, envie um número só (ex.: <code>2</code>). "
-            f"Para sortear entre dois números, toque em Cancelar e escolha {BOTAO_FAIXA}.",
-            parse_mode="HTML", reply_markup=teclado_cancelar)
-        return
     await state.update_data(faixa=[piso, topo])
     await message.answer(f"Definir <b>{rotulo_faixa(piso, topo)}</b> rascunhos por dia?",
                          parse_mode="HTML", reply_markup=teclado_aprovar_cancelar)
