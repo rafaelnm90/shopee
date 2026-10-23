@@ -66,6 +66,10 @@ def test_falha_de_envio_tenta_de_novo_ate_3_vezes(bm, telegram):
     # A desistência vai para o /status sem travar o robô esperando o próprio banco.
     assert consultar("SELECT COUNT(*) FROM erros_logs WHERE erro LIKE '%desistiu do vídeo r2%'")[0] == 1
     assert time.monotonic() - inicio < 10
+    # Cada tentativa fica no registro dos processos, que o checkup do dia conta.
+    resultados = [r[2] for r in bm.registro_processos.contagem("2000-01-01 00:00:00")
+                  if r[1] == "postagem canal principal" for _ in range(r[5])]
+    assert sorted(resultados) == sorted(["falhou, tenta de novo"] * 4 + ["postado", "desistiu"])
 
 
 def test_fim_da_pausa_no_meio_do_dia_volta_no_mesmo_dia(bm, telegram, monkeypatch, relogio):

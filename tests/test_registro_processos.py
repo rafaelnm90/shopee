@@ -68,3 +68,14 @@ def test_pedido_que_nao_sai_fica_no_registro_com_o_motivo(monkeypatch, tmp_path)
     assert "não deu certo" in msg.saidas[-1]
     linha = consultar("SELECT robo, processo, resultado, detalhe, ok FROM registro_processos")
     assert linha == ("baixador", "pedido Shopee (vídeo)", "não entregue", "a Shopee demorou demais para responder", 0)
+
+
+def test_todos_os_robos_anotam_no_registro():
+    # Pedido do Rafael (23/10): tudo que é processo fica registrado. Robô novo que não
+    # anota nada não passa.
+    import os
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    for robo in ("bot_mestre.py", "espelhador_videos_autorais.py", "motor_userbot.py", "divulgacao_canal.py",
+                 "downloader_bot.py", "assistente_shopee_video.py"):
+        with open(os.path.join(raiz, robo), encoding="utf-8") as arquivo:
+            assert "registro_processos.registrar(" in arquivo.read(), robo

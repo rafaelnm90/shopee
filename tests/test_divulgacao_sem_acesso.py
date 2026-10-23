@@ -54,6 +54,10 @@ def test_sem_acesso_pausa_o_alvo_sem_lotar_os_erros(div):
     rodar(div.enviar_mensagem("principal", OUTRO))
     assert div.registro.textos == textos + 1
     assert div.registro.enviados == [OUTRO]
+    # O registro dos processos guarda o resultado sem o alvo.
+    registro = {(r[1], r[2]): r[5] for r in div.registro_processos.contagem("2000-01-01 00:00:00")}
+    assert registro[("envio (principal)", "sem acesso ao grupo, alvo pausado")] == 1
+    assert registro[("envio (principal)", "enviado")] == 1
 
 
 def test_alvo_pausado_fica_fora_da_hora(div):

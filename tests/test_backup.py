@@ -74,6 +74,8 @@ def test_falha_registra_e_avisa_no_privado(bm, monkeypatch):
     rodar(bm.backup_diario())
     assert len(avisos) == 1 and "backup diário falhou" in avisos[0]
     assert "backup_diario: OSError" in consultar("SELECT erro FROM erros_logs")[0]
+    assert consultar("SELECT processo, resultado, detalhe, ok FROM registro_processos") == (
+        "backup diário", "falhou", "OSError", 0)
 
 
 def test_robo_sobe_sem_backup_recente_e_agenda_um(bm, monkeypatch, tmp_path):

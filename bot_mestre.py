@@ -68,6 +68,7 @@ import blacklist_captura  # de quem os userbots nunca capturam
 import repetidos_publico  # vídeo que já foi ao Grupo Público não vai de novo
 import alvos_sem_acesso  # alvos da divulgação a que a conta perdeu o acesso
 import backup_dados  # backup diário do banco, sessões e .env em ~/backups
+import registro_processos  # cada processo dos robôs, 3 dias, para o checkup do dia
 import faxina_viral  # o resumo da faxina do Acervo Viral, que roda no divulgacao_canal
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
 
@@ -1054,6 +1055,8 @@ async def executar_postagem_fila(item_id):
                 if sucesso and novo_file_id:
                     cursor.execute("UPDATE fila_postagens SET video_id = ?, caminho_video = NULL WHERE caminho_video = ? AND id_unico != ?", (novo_file_id, caminho_video, item_id))
                 conexao.commit()
+                registro_processos.registrar("bot_mestre", "postagem canal principal",
+                                             "postado" if sucesso else "vídeo perdido ou imagem", ok=sucesso)
             
     except Exception as e:
         logger.error(f"❌ Falha crítica ao postar vídeo da fila: {e}")
@@ -1087,6 +1090,10 @@ async def executar_postagem_fila(item_id):
         # esperaria esta soltar o banco (30 s com o robô parado) e desistiria sem registrar.
         if desistiu_apos:
             registrar_erro_json(f"Canal principal desistiu do vídeo {item_id} após {desistiu_apos} tentativas: {e}", origem="bot_mestre.py")
+        registro_processos.registrar(
+            "bot_mestre", "postagem canal principal",
+            "postado (marcado depois)" if sucesso else "desistiu" if desistiu_apos else "falhou, tenta de novo",
+            "" if sucesso else type(e).__name__, ok=bool(sucesso))
 
 # Crédito do repost: o @ do administrador, perguntado ao Telegram.
 _cache_credito_repost = {"valor": None, "expira": None}
@@ -3468,8 +3475,11 @@ async def motor_parceiros_step():
                 logger.info(f"✅ [Parceiro {p.get('nome')}] Vídeo publicado em {chat_destino}.")
                 marcar_parceiro_postado(item["id_unico"], caminho, getattr(enviada, "message_id", None),
                                         nome_produto)
+                registro_processos.registrar("bot_mestre", "postagem Parceiros", "postado", ok=True)
             except Exception as e:
                 logger.error(f"❌ [Parceiro {p.get('nome')}] Falha ao publicar: {e}")
+                registro_processos.registrar("bot_mestre", "postagem Parceiros", "falhou, adiada 30 min",
+                                             type(e).__name__, ok=False)
                 atualizar_item_fila_parceiro(
                     item["id_unico"], "horario_disparo",
                     (agora + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S")
@@ -4785,9 +4795,12 @@ async def motor_repost_publico_step():
                             except Exception: pass
                             logger.error(f"🛑 [Motor Público] {id_unico} foi PUBLICADO mas não foi possível marcar "
                                          "no banco. Arquivo apagado para não republicar. Verifique o SQLite.")
+                            registro_processos.registrar("bot_mestre", "postagem Grupo Público",
+                                                         "postado sem marcar no banco", ok=False)
                             return
 
                         registrar_ultimo_post(grupo_id, "video")  # para a intercalação
+                        registro_processos.registrar("bot_mestre", "postagem Grupo Público", "postado", ok=True)
 
                         # O arquivo cumpriu o papel: sai do disco na hora.
                         try: os.remove(caminho)
@@ -4802,9 +4815,12 @@ async def motor_repost_publico_step():
                             ((agora + timedelta(minutes=30)).strftime("%Y-%m-%d %H:%M:%S"), id_unico)
                         )
                         conexao.commit()
+                        registro_processos.registrar("bot_mestre", "postagem Grupo Público", "falhou, adiada 30 min",
+                                                     type(e).__name__, ok=False)
         
     except Exception as e:
         logger.error(f"❌ [Motor Público] Erro estrutural crítico: {e}")
+        registro_processos.registrar("bot_mestre", "postagem Grupo Público", "erro no motor", type(e).__name__, ok=False)
 
 # Motor do repostador do Grupo Público: a cada 2 minutos.
 scheduler.add_job(motor_repost_publico_step, 'interval', minutes=2, id='motor_repost_publico_loop', replace_existing=True)
@@ -14947,10 +14963,12 @@ async def processar_fila_espiao(forcar=False):
             
             registrar_ultimo_post(canal_destino, "video")  # Intercalação
             logger.info(f"✅ Clone {item_id} publicado com sucesso! ID: {msg_enviada.message_id}")
+            registro_processos.registrar("bot_mestre", "postagem Viral", "postado", ok=True)
             try: os.remove(caminho_video)
             except: pass
         except Exception as e:
             logger.error(f"❌ Falha ao postar clone: {e}")
+            registro_processos.registrar("bot_mestre", "postagem Viral", "falhou", type(e).__name__, ok=False)
             try: os.rename(caminho_video, caminho_video + ".pendente")
             except: pass
             
@@ -16830,8 +16848,10 @@ async def backup_diario():
         caminho, tamanho, removidos = await asyncio.to_thread(backup_dados.fazer_backup)
         logger.info(f"💾 [Backup] {os.path.basename(caminho)} criado ({tamanho / 1024 / 1024:.1f} MB); "
                     f"{removidos} antigo(s) removido(s).")
+        registro_processos.registrar("bot_mestre", "backup diário", "feito", ok=True)
     except Exception as e:
         logger.error(f"❌ [Backup] Falhou ({type(e).__name__}): {e}")
+        registro_processos.registrar("bot_mestre", "backup diário", "falhou", type(e).__name__, ok=False)
         registrar_erro_json(f"backup_diario: {type(e).__name__}: {e}", origem="backup_dados.py")
         try:
             await bot.send_message(ADMIN_ID, f"💾 <b>O backup diário falhou</b>\n<code>{type(e).__name__}</code>. "
