@@ -1,0 +1,40 @@
+name: Investigar o robô (Shopee Vídeo)
+
+# Por que o robô automático da Shopee Vídeo não acha o produto de um vídeo: segue no
+# servidor o link dos vídeos que ele pulou e dos próximos da fonte do painel, como o robô
+# segue, e mostra por que tipos de página o link passou, se chegou a um produto ou a um
+# vídeo (Ver Produtos) e se a API de afiliado devolve a oferta. Só roda quando disparado
+# à mão.
+#
+# O repositório é público, e os logs do Actions também: o investigar_robo.py nunca
+# imprime links, nomes de produto ou textos, só tipos de página e contagens.
+on:
+  workflow_dispatch:
+    inputs:
+      quantos:
+        description: "Quantos próximos vídeos da fonte conferir"
+        required: false
+        default: "15"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  investigar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Seguir os links (só leitura)
+        uses: appleboy/ssh-action@master
+        env:
+          QUANTOS: ${{ inputs.quantos }}
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          command_timeout: 8m
+          envs: QUANTOS
+          script: |
+            cd ~/shopee
+            venv/bin/python3 investigar_robo.py "$QUANTOS"

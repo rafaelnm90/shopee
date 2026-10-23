@@ -24,7 +24,8 @@ Passos, separados por ponto e vírgula:
     rolar:baixo      arrasta a tela (rolar:cima)
     esperar:N        espera N segundos
     escrever:TEXTO   escreve no campo que está com o cursor
-    video            põe na galeria o vídeo do teste (video:novo escolhe outro na fonte)
+    video            põe na galeria o vídeo do teste (video:novo escolhe outro na fonte;
+                     video:link-de-video, um cujo link abre um vídeo, o Ver Produtos)
     link             abre no app o produto (ou o vídeo) do vídeo do teste
     curtir           na página que o link abriu, toca no nome do produto (abre a página
                      completa) e curte; já curtido, segue sem tocar no coração
@@ -89,8 +90,9 @@ import assistente_shopee_video as assistente
 import avisar_rafael
 import celular_robo
 import db
+import legendas
 import links_shopee
-from api_shopee import link_para_converter, tipo_de_link
+from api_shopee import eh_video, link_para_converter, tipo_de_link
 from fuso import fuso_horario
 
 PACOTE = av.PACOTE_SHOPEE
@@ -135,6 +137,8 @@ NOME_NA_GALERIA = "autoral_shopee_video.mp4"
 SEGUNDOS_DEPOIS_DO_PASSO = 3
 MAXIMO_ESPERA = 60
 MAXIMO_LINHAS = 150
+# Quantos vídeos da fonte o video:link-de-video olha (cada um segue o link pela rede).
+CANDIDATOS_DE_VIDEO = 40
 # Teclas do Android para selecionar tudo, copiar e colar no campo em foco (Ctrl+A, C, V).
 CTRL = 0x1000
 TECLA_A, TECLA_C, TECLA_V = 29, 31, 50
@@ -314,26 +318,36 @@ def proibido_no_ponto(xml, x, y):
     return False
 
 
-def video_da_fonte():
+def video_da_fonte(de_video=False):
     """
     {"id", "arquivo", "link", "nome"} do vídeo que o modo assistente mandaria agora,
-    da fonte escolhida no painel; None sem nenhum.
+    da fonte escolhida no painel; None sem nenhum. Com de_video=True, o mais novo cujo
+    link abre um vídeo (Ver Produtos), para mapear esse caminho no celular.
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     fonte = (db.ler_config(CHAVE_PAINEL, {}) or {}).get("fonte", assistente.FONTE_PADRAO)
-    video = assistente.proximo_video(fonte)
-    return dict(video, arquivo=os.path.abspath(video["arquivo"])) if video else None
+    if not de_video:
+        video = assistente.proximo_video(fonte)
+        return dict(video, arquivo=os.path.abspath(video["arquivo"])) if video else None
+    for id_unico, arquivo, link, legenda in assistente._candidatos(fonte)[:CANDIDATOS_DE_VIDEO]:
+        if not (link and arquivo and os.path.exists(arquivo)):
+            continue
+        if eh_video(asyncio.run(link_para_converter(link))):
+            return {"id": id_unico, "arquivo": os.path.abspath(arquivo), "link": link,
+                    "nome": legendas.nome_da_legenda(legenda)}
+    return None
 
 
-def video_do_teste(novo=False):
+def video_do_teste(novo=False, de_video=False):
     """
     O vídeo do teste no celular: com novo=True (passo video:novo), escolhe na fonte e
     guarda; sem, devolve o guardado, enquanto o arquivo existir. None sem nenhum.
+    de_video=True (passo video:link-de-video) escolhe um cujo link abre um vídeo.
     """
     guardado = db.ler_config(CHAVE_TESTE, {}) or {}
     if not novo and guardado.get("arquivo") and os.path.exists(guardado["arquivo"]):
         return guardado
-    video = video_da_fonte()
+    video = video_da_fonte(de_video)
     if video:
         db.salvar_config(CHAVE_TESTE, video)
     return video
@@ -854,7 +868,8 @@ def fazer_passo(d, nome, argumento):
         escrever(d, argumento)
         return True, "escrito"
     if nome in ("link", "video", "titulo", "comentario", "ia", "curtir", "produto", "conferir", "postar"):
-        video = video_do_teste(novo=nome == "video" and argumento == "novo")
+        escolher = nome == "video" and argumento in ("novo", "link-de-video")
+        video = video_do_teste(novo=escolher, de_video=escolher and argumento == "link-de-video")
         if not video:
             return False, "nenhum vídeo da fonte do painel com arquivo e link"
         if nome == "link":
