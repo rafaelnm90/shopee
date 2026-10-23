@@ -565,9 +565,9 @@ async def limpar_video_shopee(caminho, pasta):
     return destino
 
 # Os vídeos da Shopee Vídeo: a página não traz mais o vídeo, e a chamada que o traz
-# recusa robôs (investigar_baixador.py, 23/10/2026). Furar esse bloqueio vai contra as
-# regras da Shopee: o Baixador tenta, e sem vídeo explica e ensina a salvar pelo app.
-# Decisão do Rafael: DECISOES.md, Baixador.
+# recusa robôs (investigar_baixador.py, 23/10/2026). O Baixador não fura esse bloqueio:
+# tenta do jeito normal, depois pede o vídeo ao serviço da Apify (baixar_pela_apify) e,
+# sem vídeo, explica e ensina a salvar pelo app. Decisão do Rafael: DECISOES.md, Baixador.
 ERRO_SHOPEE_BLOQUEOU = "a Shopee está bloqueando downloads automáticos dos vídeos dela"
 COMO_SALVAR_PELO_APP = "💡 Para salvar: abra o vídeo no app da Shopee → <b>Compartilhar</b> → <b>Salvar</b>."
 
@@ -597,6 +597,25 @@ def texto_do_erro(mencao, erro):
     else:
         dica = "<i>Confira se o link está certo e se o vídeo é público.</i>"
     return f"❌ {mencao}, não deu certo: <b>{erro}</b>.\n\n{dica}"
+
+
+async def baixar_mp4_da_shopee(sessao, link_mp4, pasta):
+    """Baixa o .mp4 do CDN da Shopee em pasta/video.mp4, parando se passar do limite de tamanho."""
+    destino = os.path.join(pasta, "video.mp4")
+    async with sessao.get(link_mp4, timeout=TIMEOUT_DOWNLOAD_SEG) as fluxo:
+        if fluxo.status != 200:
+            return None, "o vídeo matriz não está mais disponível no servidor da Shopee"
+        total = 0
+        limite = LIMITE_TELEGRAM_MB * 1024 * 1024
+        with open(destino, "wb") as arquivo:
+            async for pedaco in fluxo.content.iter_chunked(65536):
+                total += len(pedaco)
+                if total > limite:
+                    return None, f"o vídeo passa de {LIMITE_TELEGRAM_MB} MB"
+                arquivo.write(pedaco)
+    if os.path.getsize(destino) > 0:
+        return destino, None
+    return None, "o download da matriz veio vazio"
 
 
 async def baixar_video_shopee(url, pasta):
@@ -745,24 +764,7 @@ async def baixar_video_shopee(url, pasta):
                               "Talvez o link seja de produto, e não de vídeo")
 
             logger.info(f"🛒 MP4 Limpo pronto para download: {link_mp4[:70]}...")
-
-            # Baixa do CDN, parando se passar do limite de tamanho.
-            destino = os.path.join(pasta, "video.mp4")
-            async with sessao.get(link_mp4, timeout=TIMEOUT_DOWNLOAD_SEG) as fluxo:
-                if fluxo.status != 200:
-                    return None, "o vídeo matriz não está mais disponível no servidor da Shopee"
-                total = 0
-                limite = LIMITE_TELEGRAM_MB * 1024 * 1024
-                with open(destino, "wb") as arquivo:
-                    async for pedaco in fluxo.content.iter_chunked(65536):
-                        total += len(pedaco)
-                        if total > limite:
-                            return None, f"o vídeo passa de {LIMITE_TELEGRAM_MB} MB"
-                        arquivo.write(pedaco)
-
-            if os.path.getsize(destino) > 0:
-                return destino, None
-            return None, "o download da matriz veio vazio"
+            return await baixar_mp4_da_shopee(sessao, link_mp4, pasta)
 
     except asyncio.TimeoutError:
         return None, "a Shopee demorou demais para responder"
@@ -868,6 +870,192 @@ async def conferencia_semanal_loop():
             await conferir_shopee_video()
         except Exception as e:
             logger.error(f"❌ Conferência semanal da Shopee Vídeo falhou: {type(e).__name__}")
+
+
+# O serviço de fora que o Rafael escolheu (23/10/2026) para os vídeos da Shopee Vídeo
+# quando a Shopee bloqueia o Baixador: o ator "Shopee Video Scraper" da Apify, pela API
+# oficial da Apify. Ele devolve o endereço do vídeo sem a marca; o Baixador baixa esse
+# arquivo do CDN da Shopee e limpa a cartela do fim, como antes. Só o crédito grátis do
+# mês: sem crédito, a Apify recusa, o Rafael recebe um aviso e o Baixador volta a ensinar
+# a salvar pelo app até o crédito renovar. A chave (APIFY_TOKEN) fica só no .env do
+# servidor, gravada pelo workflow chave_apify.yml a partir do segredo do GitHub.
+# Decisão do Rafael: DECISOES.md, Baixador.
+APIFY_ATOR = "natanielsantos~shopee-video-scraper"
+APIFY_EXECUTAR = f"https://api.apify.com/v2/acts/{APIFY_ATOR}/run-sync-get-dataset-items"
+APIFY_LIMITES = "https://api.apify.com/v2/users/me/limits"
+TIMEOUT_APIFY_SEG = 150
+# Depois de uma recusa por falta de crédito, só tenta de novo um dia depois.
+ESPERA_SEM_CREDITO = timedelta(hours=24)
+# O aviso de crédito acabado sai no máximo uma vez a cada 20 dias (uma vez por mês).
+AVISO_SEM_CREDITO_A_CADA = timedelta(days=20)
+AVISO_SEM_CREDITO = ("⚠️ Baixador: o crédito grátis do mês na Apify acabou. Até ele renovar, os vídeos da "
+                     "Shopee Vídeo voltam a só ensinar a salvar pelo app.")
+
+
+def chave_apify():
+    """A chave da Apify: do ambiente ou lida de novo do .env (o workflow grava sem reiniciar o robô)."""
+    chave = os.getenv("APIFY_TOKEN")
+    if not chave and os.path.exists(".env"):
+        from dotenv import dotenv_values
+        chave = dotenv_values(".env").get("APIFY_TOKEN")
+    return (chave or "").strip() or None
+
+
+def link_para_a_apify(url):
+    """O link que o serviço entende: o do vídeo (share-video) ou o curto; do universal-link, o redir."""
+    import urllib.parse
+    texto = str(url or "").strip()
+    if "universal-link" in texto.lower():
+        redir = urllib.parse.parse_qs(urllib.parse.urlparse(texto).query).get("redir", [""])[0]
+        if redir:
+            return urllib.parse.unquote(redir)
+    return texto
+
+
+def endereco_do_video(itens):
+    """(endereço, tem_marca) do primeiro vídeo que o serviço devolveu; (None, False) se nenhum."""
+    for item in itens if isinstance(itens, list) else []:
+        if not isinstance(item, dict):
+            continue
+        for chave, marca in (("noWatermarkUrl", False), ("watermarkUrl", True)):
+            valor = item.get(chave)
+            if isinstance(valor, str) and valor.startswith("http"):
+                return valor, marca
+    return None, False
+
+
+def _registrar_apify(campo, agora=None):
+    """Conta, no dia, os vídeos que a Apify entregou e os que não."""
+    agora = agora or datetime.now()
+    dia = agora.strftime("%Y-%m-%d")
+
+    def alterar(estado):
+        if estado.get("apify_dia") != dia:
+            estado.update(apify_dia=dia, apify_entregues=0, apify_falhas=0)
+        estado[campo] = estado.get(campo, 0) + 1
+    db.atualizar_config(CHAVE_CONFERENCIA, alterar)
+
+
+def _sem_credito_desde(agora=None):
+    """Quando a Apify recusou por falta de crédito, se foi há menos de ESPERA_SEM_CREDITO; senão None."""
+    marcado = (db.ler_config(CHAVE_CONFERENCIA, {}) or {}).get("apify_sem_credito_em")
+    if not marcado:
+        return None
+    quando = datetime.strptime(marcado, "%Y-%m-%d %H:%M:%S")
+    return quando if (agora or datetime.now()) - quando < ESPERA_SEM_CREDITO else None
+
+
+async def _marcar_sem_credito(agora=None):
+    """Anota a recusa por falta de crédito e avisa o Rafael, no máximo uma vez a cada 20 dias."""
+    agora = agora or datetime.now()
+    momento = agora.strftime("%Y-%m-%d %H:%M:%S")
+
+    def alterar(estado):
+        avisado = estado.get("apify_aviso_em")
+        avisar = not avisado or agora - datetime.strptime(avisado, "%Y-%m-%d %H:%M:%S") >= AVISO_SEM_CREDITO_A_CADA
+        estado["apify_sem_credito_em"] = momento
+        if avisar:
+            estado["apify_aviso_em"] = momento
+        return avisar
+    if db.atualizar_config(CHAVE_CONFERENCIA, alterar):
+        import avisar_rafael
+        try:
+            await asyncio.to_thread(avisar_rafael.mandar_texto, AVISO_SEM_CREDITO)
+        except Exception as e:
+            logger.warning(f"⚠️ Aviso de crédito da Apify não saiu: {type(e).__name__}")
+
+
+def _recusa_por_credito(status, corpo):
+    """
+    A Apify recusou por falta de crédito ou de limite do plano? O "muitos pedidos" (429)
+    não conta: é passageiro e não pede um dia de espera.
+    """
+    texto = str(corpo).lower()
+    return status == 402 or (status == 403 and any(p in texto for p in ("usage", "credit", "paid", "payment", "monthly")))
+
+
+async def baixar_pela_apify(url, pasta, agora=None):
+    """
+    Pede o vídeo ao serviço da Apify e o baixa em pasta. Devolve (caminho, None) ou
+    (None, motivo curto, só para o log e a investigação: nunca vai ao membro).
+    """
+    import aiohttp
+    chave = chave_apify()
+    if not chave:
+        return None, "sem a chave da Apify"
+    if _sem_credito_desde(agora):
+        return None, "sem crédito na Apify"
+    try:
+        async with aiohttp.ClientSession(headers=CABECALHO_NAVEGADOR) as sessao:
+            async with sessao.post(APIFY_EXECUTAR, json={"startUrls": [{"url": link_para_a_apify(url)}]},
+                                   headers={"Authorization": f"Bearer {chave}"},
+                                   timeout=TIMEOUT_APIFY_SEG) as resposta:
+                corpo = await resposta.text()
+                status = resposta.status
+            if _recusa_por_credito(status, corpo):
+                await _marcar_sem_credito(agora)
+                return None, "sem crédito na Apify"
+            if status not in (200, 201):
+                _registrar_apify("apify_falhas", agora)
+                return None, f"a Apify respondeu HTTP {status}"
+            try:
+                itens = json.loads(corpo)
+            except ValueError:
+                _registrar_apify("apify_falhas", agora)
+                return None, "a Apify não devolveu JSON"
+            link_mp4, tem_marca = endereco_do_video(itens)
+            if not link_mp4:
+                _registrar_apify("apify_falhas", agora)
+                return None, "a Apify não achou o vídeo"
+            if tem_marca:
+                # Só a versão com marca: a limpeza borra a marca, como no download direto.
+                open(os.path.join(pasta, "COM_MARCA"), "w").close()
+            caminho, erro = await baixar_mp4_da_shopee(sessao, link_mp4, pasta)
+    except asyncio.TimeoutError:
+        _registrar_apify("apify_falhas", agora)
+        return None, "a Apify demorou demais"
+    except Exception as e:
+        _registrar_apify("apify_falhas", agora)
+        return None, f"erro com a Apify ({type(e).__name__})"
+    _registrar_apify("apify_falhas" if erro else "apify_entregues", agora)
+    return (None, erro) if erro else (caminho, None)
+
+
+async def uso_da_apify():
+    """(usado, limite) do mês na Apify, em dólares, ou None sem a chave ou sem resposta."""
+    import aiohttp
+    chave = chave_apify()
+    if not chave:
+        return None
+    try:
+        async with aiohttp.ClientSession() as sessao:
+            async with sessao.get(APIFY_LIMITES, headers={"Authorization": f"Bearer {chave}"}, timeout=20) as r:
+                dados = (await r.json()).get("data", {}) if r.status == 200 else {}
+    except Exception:
+        return None
+    usado = (dados.get("current") or {}).get("monthlyUsageUsd")
+    limite = (dados.get("limits") or {}).get("maxMonthlyUsageUsd")
+    return (usado, limite) if usado is not None and limite is not None else None
+
+
+async def baixar_da_shopee(url, url_pedido, pasta):
+    """
+    O vídeo de um link da Shopee: do jeito normal e, quando a Shopee bloqueia, pelo
+    serviço da Apify. O bloqueio é anotado sempre pelo jeito normal (a conferência
+    semanal diz se a Shopee liberou). Devolve (caminho, erro para o membro).
+    """
+    caminho, erro = await baixar_video_shopee(url, pasta)
+    mudou = registrar_tentativa_shopee(url, erro)
+    if mudou:
+        asyncio.create_task(avisar_mudanca_shopee(mudou))
+    if erro != ERRO_SHOPEE_BLOQUEOU:
+        return caminho, erro
+    caminho_apify, motivo = await baixar_pela_apify(url_pedido, pasta)
+    if caminho_apify:
+        logger.info("🛒 Vídeo da Shopee Vídeo entregue pelo serviço da Apify.")
+        return caminho_apify, None
+    logger.info(f"🛒 A Apify não entregou o vídeo: {motivo}.")
+    return None, erro
 
 
 async def _baixar_video_uma_vez(url, pasta):
@@ -1243,10 +1431,7 @@ async def receber_link(message: types.Message):
 
         try:
             if plataforma == "Shopee":
-                caminho, erro = await baixar_video_shopee(url, pasta)
-                mudou = registrar_tentativa_shopee(url, erro)
-                if mudou:
-                    asyncio.create_task(avisar_mudanca_shopee(mudou))
+                caminho, erro = await baixar_da_shopee(url, url_pedido, pasta)
             else:
                 caminho, erro = await baixar_video(url, pasta)
 

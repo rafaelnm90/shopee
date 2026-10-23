@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       video:
-        description: "Código do vídeo (o que vem depois de share-video/ no link), curto:CÓDIGO do link br.shp.ee/CÓDIGO, ou ultimo (o último vídeo pedido ao Baixador, lido no servidor)"
+        description: "Código do vídeo (o que vem depois de share-video/ no link), curto:CÓDIGO do link br.shp.ee/CÓDIGO, ultimo (o último vídeo pedido ao Baixador, lido no servidor) ou apify (a chave, o crédito e o último vídeo pela Apify)"
         required: true
         type: string
 
