@@ -5,9 +5,14 @@ Shopee Vídeo. Abre a página como o Baixador abre e mostra só a forma dela: st
 tamanhos e onde há vídeo no JSON da página. Depois roda o próprio baixar_video_shopee e
 diz se deu certo (tamanho e dimensões do arquivo) ou o erro.
 
+Quando a página não traz o vídeo (ela o busca depois, por outra chamada), mostra também
+as chaves do JSON da página e os caminhos de API que aparecem nos scripts públicos dela,
+para achar a chamada que traz o vídeo.
+
 Usado pelo workflow investigar_baixador.yml (só à mão). O log do Actions é público:
-nunca imprime links, nomes, textos da página nem valores do JSON, só caminhos de chave
-(com números e códigos trocados por # e …) e contagens.
+nunca imprime links de vídeo, nomes, textos da página nem valores do JSON; só caminhos de
+chave (com números e códigos trocados por # e …), contagens, e endereços de scripts e de
+APIs da própria Shopee, que são públicos.
 
     python3 investigar_baixador.py ID_DO_VIDEO   # o que vem depois de share-video/ no link
 """
@@ -26,6 +31,11 @@ import videos
 
 URL_DO_VIDEO = "https://sv.shopee.com.br/share-video/{id}"
 MAXIMO_CAMINHOS = 40
+MAXIMO_SCRIPTS = 30
+MAXIMO_APIS = 80
+# Caminho de API dentro de um script: "/api/..." ou "https://.../api/...", com letras,
+# números, _, -, / e . (sem consulta).
+CAMINHO_DE_API = re.compile(r"""["'`]((?:https?://[a-z0-9.-]+)?/api/[A-Za-z0-9_./-]{2,120})["'`]""")
 
 
 def chave_segura(chave):
@@ -60,6 +70,31 @@ def caminhos_de_video(dados, caminho="$"):
             yield caminho, tipo
 
 
+def todas_as_chaves(dados, caminho="$"):
+    """Cada chave do JSON com o tipo do valor (texto e tamanho, número, lista), nunca o valor."""
+    if isinstance(dados, dict):
+        for chave, valor in dados.items():
+            yield from todas_as_chaves(valor, f"{caminho}.{chave_segura(chave)}")
+    elif isinstance(dados, list):
+        yield f"{caminho} (lista de {len(dados)})"
+        for i, item in enumerate(dados[:3]):
+            yield from todas_as_chaves(item, f"{caminho}[{i}]")
+    elif isinstance(dados, str):
+        yield f"{caminho} (texto de {len(dados)})"
+    else:
+        yield f"{caminho} ({type(dados).__name__})"
+
+
+def scripts_da_pagina(html, base):
+    """Os endereços dos scripts que a página carrega (arquivos públicos do site)."""
+    return [urllib.parse.urljoin(base, src) for src in re.findall(r'<script[^>]+src="([^"]+)"', html)]
+
+
+def apis_no_script(codigo):
+    """Os caminhos de API que aparecem num script."""
+    return {achado for achado in CAMINHO_DE_API.findall(codigo or "")}
+
+
 def forma_do_endereco(url):
     """host e caminho com os pedaços longos (ids) trocados por …, sem a consulta."""
     partes = urllib.parse.urlparse(str(url))
@@ -79,10 +114,24 @@ def blocos_json(html):
     return blocos
 
 
+def tem_video(html):
+    """Algum JSON embutido da página tem endereço de vídeo?"""
+    for bruto in blocos_json(html).values():
+        try:
+            if next(caminhos_de_video(json.loads(bruto)), None):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 def descrever_pagina(html):
     linhas = [f"página: {len(html)} caracteres; .mp4 no HTML: {html.lower().count('.mp4')}; "
               f".m3u8: {html.lower().count('.m3u8')}; 'watermark': {html.lower().count('watermark')}; "
               f"scripts: {html.lower().count('<script')}"]
+    globais = sorted(set(re.findall(r"window\.([A-Za-z_]\w{2,40})\s*=", html)))
+    if globais:
+        linhas.append(f"variáveis da página: {', '.join(globais[:20])}")
     blocos = blocos_json(html)
     if not blocos:
         linhas.append("nenhum JSON embutido (__INITIAL_STATE__ ou __NEXT_DATA__)")
@@ -95,7 +144,32 @@ def descrever_pagina(html):
         achados = list(caminhos_de_video(dados))
         linhas.append(f"{nome}: {len(bruto)} caracteres, {len(achados)} endereço(s) de vídeo")
         linhas += [f"   {caminho} ({tipo})" for caminho, tipo in achados[:MAXIMO_CAMINHOS]]
+        if not achados:
+            linhas.append(f"   chaves do {nome}:")
+            linhas += [f"      {chave}" for chave in list(todas_as_chaves(dados))[:MAXIMO_CAMINHOS]]
     return linhas
+
+
+async def procurar_apis(sessao, html, base):
+    """Lê os scripts públicos da página e lista os caminhos de API que eles chamam."""
+    print("== Scripts da página e as APIs que eles chamam")
+    apis = set()
+    scripts = scripts_da_pagina(html, base)
+    print(f"scripts com endereço: {len(scripts)}")
+    for endereco in scripts[:MAXIMO_SCRIPTS]:
+        try:
+            async with sessao.get(endereco, timeout=20) as resposta:
+                codigo = await resposta.text() if resposta.status == 200 else ""
+        except Exception as e:
+            print(f"   {forma_do_endereco(endereco)}: não abriu ({type(e).__name__})")
+            continue
+        encontrados = apis_no_script(codigo)
+        print(f"   {urllib.parse.urlparse(endereco).netloc}{urllib.parse.urlparse(endereco).path}: "
+              f"{len(codigo)} caracteres, {len(encontrados)} API(s)")
+        apis |= encontrados
+    print(f"APIs nos scripts ({len(apis)}):")
+    for api in sorted(apis)[:MAXIMO_APIS]:
+        print(f"   {api}")
 
 
 async def investigar(id_video):
@@ -108,8 +182,10 @@ async def investigar(id_video):
                 print(f"redirecionou: HTTP {passo.status} {forma_do_endereco(passo.url)}")
             print(f"chegou em: HTTP {resposta.status} {forma_do_endereco(resposta.url)}")
             html = await resposta.text()
-    for linha in descrever_pagina(html):
-        print(linha)
+        for linha in descrever_pagina(html):
+            print(linha)
+        if not tem_video(html):
+            await procurar_apis(sessao, html, str(resposta.url))
 
     print("== O Baixador com este link")
     pasta = tempfile.mkdtemp()

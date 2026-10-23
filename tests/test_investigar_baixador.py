@@ -26,3 +26,16 @@ def test_pagina_sem_json_e_endereco_so_com_a_forma():
 
 def test_codigo_invalido_nao_roda():
     assert ib.main(["abc; rm -rf /"]) == 2
+
+
+def test_pagina_sem_video_lista_as_chaves_e_as_apis_dos_scripts():
+    dados = {"props": {"pageProps": {"shareId": "XCA3abc", "lang": "pt"}}, "page": "/share-video/[id]"}
+    html = (f'<html><script id="__NEXT_DATA__">{json.dumps(dados)}</script>'
+            '<script src="/_next/static/chunks/pages/app-1a2b.js"></script></html>')
+    assert not ib.tem_video(html)
+    texto = "\n".join(ib.descrever_pagina(html))
+    assert "$.props.pageProps.shareId (texto de 7)" in texto and "XCA3abc" not in texto
+    assert ib.scripts_da_pagina(html, "https://sv.shopee.com.br/share-video/x") == [
+        "https://sv.shopee.com.br/_next/static/chunks/pages/app-1a2b.js"]
+    codigo = 'fetch("/api/v4/video/get_share_info");x="https://sv.shopee.com.br/api/v1/feed";y="nada"'
+    assert ib.apis_no_script(codigo) == {"/api/v4/video/get_share_info", "https://sv.shopee.com.br/api/v1/feed"}
