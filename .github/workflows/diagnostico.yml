@@ -111,6 +111,13 @@ jobs:
             R=$(sqlite3 -readonly banco_dados.db "SELECT 'Última legenda que não bateu: ' || json_extract(valor, '\$.ultima_legenda_em') || ' → ' || json_extract(valor, '\$.ultima_legenda') FROM configuracoes WHERE chave = 'shopee_video_robo' AND json_extract(valor, '\$.ultima_legenda') IS NOT NULL" 2>/dev/null)
             if [ -n "$R" ]; then echo "$R"; fi
 
+            # Baixador: se a Shopee ainda bloqueia o download dos vídeos da Shopee Vídeo. Só
+            # estados, datas e contagens (o último link pedido fica no banco e nunca sai daqui).
+            echo ""
+            echo "== Baixador (Shopee Vídeo)"
+            R=$(sqlite3 -readonly -separator ' | ' banco_dados.db "SELECT 'situação: ' || COALESCE(json_extract(valor, '\$.situacao'), '?') || ' desde ' || COALESCE(json_extract(valor, '\$.desde'), '?'), 'em ' || COALESCE(json_extract(valor, '\$.dia'), '?') || ': ' || COALESCE(json_extract(valor, '\$.bloqueados_hoje'), 0) || ' bloqueado(s), ' || COALESCE(json_extract(valor, '\$.baixados_hoje'), 0) || ' baixado(s)', 'conferência diária: ' || COALESCE(json_extract(valor, '\$.ultima_conferencia_em') || ' → ' || json_extract(valor, '\$.ultima_conferencia'), 'ainda não rodou') FROM configuracoes WHERE chave = 'baixador_shopee_video'" 2>/dev/null)
+            echo "${R:-nenhum vídeo da Shopee Vídeo pedido desde a conferência}"
+
             # Faxina do Acervo Viral e registro dos administradores: só estados e números.
             # O nome da conta e os nomes dos admins não saem daqui (o log é público).
             echo ""
