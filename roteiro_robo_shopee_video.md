@@ -93,6 +93,11 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     vezes, e o confirmado é curtido. Anexa todos os confirmados (o 1º pelo Adicionar produto,
     os outros pelo Adicionar Mais) e confere a tela final um a um. Nenhum confirmado, ou vídeo
     removido: o vídeo fica de lado. Os produtos de "Ver Mais" ainda não entram.
+  - **link de vídeo sem o Ver Produtos** (23/10/2026: 3 vídeos pulados assim no dia): o robô
+    olha de novo depois de mais 8 s e, se ainda não há, diz qual tela viu, em texto fixo que
+    o `investigar_robo.yml` mostra: o link não abriu o player (`rn_vod_player_view_with_surface`),
+    o player tem o cartão de um produto (com o botão de comprar) sem o Ver Produtos, ou nem
+    isso. O cartão de um produto só ainda não foi mapeado no celular.
 
 ## Onde paramos
 

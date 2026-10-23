@@ -1037,16 +1037,27 @@ def _item_curtido(nome, y, adicionado):
 class AppDoVerProdutos(AppDeMentira):
     """O app com um link de vídeo: o player, o Ver Produtos, as páginas dos produtos e o Adicionar Mais."""
 
-    def __init__(self, removido=False):
+    def __init__(self, removido=False, player="normal"):
         super().__init__()
         self.removido, self.curtidos, self.anexados, self.janela = removido, set(), [], None
+        # player: "normal"; "lento" (o Ver Produtos só aparece na segunda olhada); "um_produto"
+        # (o cartão de um produto, sem o Ver Produtos); "vazio"; "sem_player" (outra tela).
+        self.player, self.olhadas_no_player = player, 0
 
     def _nos(self):
         if self.atual == "removido":
             return [_no("Detalhes do Vídeo", caixa=(300, 1160, 780, 1220), clicavel=False),
                     _no("Este vídeo foi removido pelo criador", caixa=(200, 1240, 880, 1280), clicavel=False)]
         if self.atual == "player":
-            return [_no("Ver Produtos (2)", caixa=(400, 1940, 650, 2000))]
+            self.olhadas_no_player += 1
+            if self.player == "sem_player":
+                return [_no("Para você", caixa=(640, 140, 830, 195), clicavel=False)]
+            nos = [_no(ident=robo.PLAYER_DO_VIDEO, caixa=(0, 0, 1080, 2260), clicavel=False)]
+            if self.player == "um_produto":
+                nos.append(_cartao(PRODUTO_A, 1600))
+            elif self.player == "normal" or (self.player == "lento" and self.olhadas_no_player > 1):
+                nos.append(_no("Ver Produtos (2)", caixa=(400, 1940, 650, 2000)))
+            return nos
         if self.atual == "ver_produtos":
             return [_no(caixa=(0, 400, 1080, 2400), filhos=(
                 _no("Ver Produtos (2)", caixa=(40, 700, 300, 750), clicavel=False)
@@ -1165,6 +1176,30 @@ def test_link_de_video_sem_produto_confirmado_fica_de_lado(monkeypatch, avisos):
     resultado = robo.rodada(preparar=True, d=AppDoVerProdutos(), agora=momento("2026-10-22 23:59"))
     assert "a IA não confirmou nenhum produto do Ver Produtos" in resultado
     assert robo.listar("pulado")[0]["id_video"] == "a1"
+
+
+def test_link_de_video_espera_o_ver_produtos_que_demora(monkeypatch, avisos):
+    _fonte_de_video(monkeypatch)
+    app = AppDoVerProdutos(player="lento")
+    assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert app.anexados == [PRODUTO_A, PRODUTO_B]
+
+
+@pytest.mark.parametrize("player, motivo", [
+    ("um_produto", "o vídeo mostrou o cartão de um produto, sem o Ver Produtos"),
+    ("vazio", "o link de vídeo não mostrou o Ver Produtos"),
+    ("sem_player", "o link de vídeo não abriu o vídeo no app (sem o Ver Produtos)"),
+])
+def test_link_de_video_sem_ver_produtos_diz_o_que_a_tela_mostrou(monkeypatch, avisos, player, motivo):
+    # O motivo é texto fixo, para o investigar_robo.yml mostrar qual dos casos foi.
+    _fonte_de_video(monkeypatch)
+    app = AppDoVerProdutos(player=player)
+    resultado = robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59"))
+    assert motivo in resultado and app.olhadas_no_player == 2
+    pulado = robo.listar("pulado")[0]
+    assert pulado["motivo"] == motivo and robo.passo_do_motivo(motivo) == "Ver Produtos"
+    import investigar_robo
+    assert motivo in investigar_robo.textos_fixos()
 
 
 def test_link_de_video_removido_fica_de_lado(monkeypatch, avisos):
