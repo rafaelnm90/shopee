@@ -75,6 +75,8 @@ def configurar_dependencias(bot: Bot, scheduler, admin_id):
                       replace_existing=True, max_instances=1, coalesce=True)
     scheduler.add_job(verificar_robo, "interval", minutes=15, id="shopee_video_robo",
                       replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(mandar_resumo_do_robo, "cron", hour=HORA_DO_RESUMO, minute=0, id="shopee_video_resumo",
+                      replace_existing=True, max_instances=1, coalesce=True)
 
 
 # Um envio de cada vez: o agendador e o botão Enviar 1 Agora pegariam o mesmo vídeo.
@@ -140,6 +142,21 @@ async def verificar_robo():
         return
     if robo.no_horario(config):
         await rodar_robo("--rodada")
+
+
+# O resumo do dia do robô automático no privado (escolha do Rafael, 23/10/2026): o que ele
+# fez nas últimas 24 h e onde parou. Sem nenhuma tentativa, não manda nada.
+HORA_DO_RESUMO = 22
+
+
+async def mandar_resumo_do_robo():
+    texto = robo.texto_resumo()
+    if not texto:
+        return
+    try:
+        await bot_instance.send_message(ADMIN_ID, texto, parse_mode="HTML")
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Resumo do dia não saiu: {type(e).__name__}")
 
 
 def _admin(message):
@@ -294,6 +311,7 @@ BOTAO_FAIXA_ROBO = "Rascunhos por Dia 📦"
 BOTAO_HORARIO_ROBO = "Horário do Robô 🕗"
 BOTAO_TREINO = "Testar Caminho 🧭"
 BOTAO_PREPARAR = "Preparar 1 Agora ⚡"
+BOTAO_HISTORICO = "Histórico do Robô 📋"
 BOTAO_APROVAR = "Aprovar Rascunho ✅"
 BOTAO_RECUSAR = "Recusar Rascunho ❌"
 BOTAO_PROXIMO = "Próximo Rascunho ⏭️"
@@ -327,7 +345,7 @@ def teclado_robo(config):
     pausa_robo = "Retomar Postagem ▶️" if config["robo_pausado"] else "Pausar Postagem ⏸️"
     return montar_teclado([
         [KeyboardButton(text=pausa_robo), KeyboardButton(text=BOTAO_RASCUNHOS)],
-        [KeyboardButton(text=BOTAO_PREPARAR)],
+        [KeyboardButton(text=BOTAO_PREPARAR), KeyboardButton(text=BOTAO_HISTORICO)],
         [KeyboardButton(text=BOTAO_FAIXA_ROBO), KeyboardButton(text=BOTAO_HORARIO_ROBO)],
         [KeyboardButton(text=BOTAO_TREINO), KeyboardButton(text=BOTAO_CELULAR)],
         [KeyboardButton(text=BOTAO_VOLTAR)],
@@ -435,6 +453,8 @@ def texto_robo(config, agora=None, celular=None):
         "pausado, o assistente volta a mandar no seu privado.\n"
         f"📝 <b>{BOTAO_RASCUNHOS}</b>: aprovar ou recusar os rascunhos, um por um.\n"
         f"⚡ <b>{BOTAO_PREPARAR}</b>: o robô prepara um rascunho na hora, a mais do dia (mesmo pausado).\n"
+        f"📋 <b>{BOTAO_HISTORICO}</b>: tudo o que o robô tentou nas últimas 24 h, com o produto e em que passo "
+        f"parou. Às {HORA_DO_RESUMO}h chega o resumo do dia no seu privado.\n"
         f"📦 <b>{BOTAO_FAIXA_ROBO}</b>: quantos rascunhos ele prepara por dia (uma faixa, sorteada a cada dia).\n"
         f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele pode mexer no celular e postar.\n"
         f"🧭 <b>{BOTAO_TREINO}</b>: confere agora se as telas do app da Shopee continuam iguais "
@@ -728,6 +748,17 @@ async def preparar_handler(message: types.Message, state: FSMContext):
     await message.answer("⚡ Preparando 1 rascunho agora no Motorola. Em uns 5 a 10 min ele chega em "
                          f"{BOTAO_RASCUNHOS}, e o robô avisa aqui; se algo impedir, ele diz o quê.")
     asyncio.create_task(rodar_robo("--preparar"))
+
+
+@router.message(F.text == BOTAO_HISTORICO, StateFilter("*"))
+async def historico_handler(message: types.Message, state: FSMContext):
+    """
+    Tudo o que o robô tentou nas últimas 24 h: o que deu certo, o que foi pulado e em que
+    passo parou. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    if not _admin(message): return
+    await state.set_state(ShopeeVideoFluxo.menu_robo)
+    await message.answer(robo.texto_historico(), parse_mode="HTML", reply_markup=teclado_robo(ler_config()))
 
 
 @router.message(F.text == BOTAO_TREINO, StateFilter("*"))
