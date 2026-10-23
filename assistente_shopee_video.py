@@ -35,6 +35,7 @@ import api_gemini
 import api_shopee
 import db
 import legendas
+import registro_processos
 from fuso import fuso_horario
 from motor_filas import sortear_teto_do_dia
 
@@ -421,14 +422,20 @@ async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO):
     """
     video = proximo_video(fonte)
     if not video:
+        registro_processos.registrar("shopee_video", "assistente: envio", "sem vídeo na fonte", ok=False)
         return f"não há vídeo em {FONTES.get(fonte, fonte)} para mandar (a fila está vazia ou sem arquivos)"
     try:
-        return await _preparar_e_enviar(bot, admin_id, video, agora)
+        resultado = await _preparar_e_enviar(bot, admin_id, video, agora)
     except Exception as e:
         # Vídeo que dá erro (ex.: o Telegram recusa o arquivo) é pulado: sem isso, ele
         # voltaria em todo horário e travaria a fila.
         registrar(video["id"], "erro", type(e).__name__, agora)
+        registro_processos.registrar("shopee_video", "assistente: envio", "erro", type(e).__name__, ok=False)
         raise
+    # As frases do resultado são fixas (_preparar_e_enviar).
+    registro_processos.registrar("shopee_video", "assistente: envio", resultado,
+                                 ok=resultado == "postagem mandada no seu privado")
+    return resultado
 
 
 async def _preparar_e_enviar(bot, admin_id, video, agora):

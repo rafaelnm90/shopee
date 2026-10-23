@@ -57,6 +57,7 @@ from videos import verificar_e_otimizar_video, calcular_hash_video
 import fila_espelhador
 import rotas_espelhador
 import links_grupos  # atalhos dos grupos nos painéis
+import registro_processos  # cada processo, 3 dias, para o checkup do dia
 
 LIMITE_REGISTROS_HASH = 1000  # hashes de vídeo guardados por contexto na anti-duplicata
 
@@ -194,8 +195,10 @@ def salvar_na_fila_clonagem(caminho_video, link_shopee, chat_origem="Desconhecid
         dados.setdefault("fila", []).append(item)
         salvar_fila_clonagem(dados)
         logger.info(f"📦 Clone salvo de forma unificada no SQLite com sucesso (ID: {id_unico}).")
+        registro_processos.registrar("espiao", "captura de vídeo", "na fila do Viral", ok=True)
     except Exception as e:
         logger.error(f"❌ Erro ao salvar na fila unificada do SQLite: {e}")
+        registro_processos.registrar("espiao", "captura de vídeo", "falhou ao salvar", type(e).__name__, ok=False)
 
 def registrar_historico_espiao(nome_grupo):
     """Soma +1 captura no total e no grupo (estatística mostrada no painel do Espião)."""
@@ -322,6 +325,7 @@ async def interceptar_mensagem(event):
         
         if hash_arquivo and verificar_e_registrar_hash(hash_arquivo):
             logger.warning("🚫 Clone bloqueado! O vídeo possui uma assinatura digital idêntica a um ficheiro já processado.")
+            registro_processos.registrar("espiao", "captura de vídeo", "repetido, descartado")
             try:
                 os.remove(caminho_salvo)
                 logger.info("🧹 Ficheiro físico duplicado eliminado com sucesso para poupar espaço.")
@@ -634,10 +638,12 @@ async def processar_fila_espelhador_loop():
                                 
                                 item["msg_postada_id"] = msg_enviada.id  # o painel monta o link do post publicado
                                 logger.info(f"✅ [Espelhador] Disparo concluído na rota '{nome_rota}' para {destino}.")
+                                registro_processos.registrar("espelhador", "envio da rota", "enviado", ok=True)
                                 
                                 await asyncio.sleep(15)  # intervalo mínimo entre envios (anti-ban)
                         else:
                             logger.warning(f"⚠️ [Espelhador] Mensagem original {msg_id} apagada antes do disparo na rota '{nome_rota}'.")
+                            registro_processos.registrar("espelhador", "envio da rota", "original apagada antes do envio")
                     except Exception as e:
                         erro_disparo = e
                         logger.error(f"❌ [Espelhador] Falha no disparo da rota '{nome_rota}': {e}")
@@ -654,10 +660,14 @@ async def processar_fila_espelhador_loop():
                                 espera = int(getattr(erro_disparo, "seconds", 60) or 60) + 30
                                 item["horario_disparo"] = (agora + timedelta(seconds=espera)).strftime("%Y-%m-%d %H:%M:%S")
                             logger.warning(f"🔁 [Espelhador] Tentativa {tentativas}/3 falhou na rota '{nome_rota}'; vai de novo num próximo ciclo.")
+                            registro_processos.registrar("espelhador", "envio da rota", "falhou, tenta de novo",
+                                                         type(erro_disparo).__name__, ok=False)
                             itens_restantes.append(item)
                             houve_disparo = True
                             continue
                         registrar_erro_json(f"Espelhador desistiu após 3 tentativas na rota '{nome_rota}': {erro_disparo}", origem="motor_userbot.py")
+                        registro_processos.registrar("espelhador", "envio da rota", "desistiu após 3 tentativas",
+                                                     type(erro_disparo).__name__, ok=False)
 
                     # Publicado (ou perdido: origem apagada, sem vídeo, ou 3 falhas): fica no
                     # histórico como processado e não volta a ser tentado.
@@ -843,6 +853,7 @@ async def motor_espelhador_userbot(event):
             
         if hash_arquivo and verificar_e_registrar_hash(hash_arquivo, contexto=str(destino)):
             logger.warning(f"🚫 [Espelhador] Loop evitado na rota '{nome_rota}'! O ficheiro de vídeo exato já foi postado neste destino.")
+            registro_processos.registrar("espelhador", "captura da rota", "repetido no destino, descartado")
             continue
             
         item = {

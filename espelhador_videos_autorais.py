@@ -58,6 +58,7 @@ import blacklist_captura  # de quem este robô nunca captura
 import repetidos_publico  # vídeo que já foi ao Grupo Público não vai de novo
 import links_grupos  # atalhos dos grupos nos painéis
 import pool_contas  # quem captura e quem reposta
+import registro_processos  # cada processo, 3 dias, para o checkup do dia
 
 logger = configurar_logs(__name__)
 
@@ -1295,8 +1296,10 @@ async def interceptar_e_espelhar(event):
                     )
                 except Exception as e:
                     registrar_atividade_captura(False, f"{type(e).__name__}: {e}")
+                    registro_processos.registrar("autorais", "captura para o canal", "falhou", type(e).__name__, ok=False)
                     raise
                 registrar_atividade_captura(True)
+                registro_processos.registrar("autorais", "captura para o canal", "publicado", ok=True)
                 logger.info("🚀 Vídeo publicado no canal de destino com a nova legenda autoral!")
                 
                 dias_retorno = config_atual.get('dias_retorno', 15)
@@ -1749,6 +1752,7 @@ async def processar_fila_autorais_loop():
                                 # Hora real da publicação, mostrada no relatório.
                                 item["data_postagem"] = agora.strftime("%Y-%m-%d %H:%M:%S")
                                 logger.info(f"✅ [Motor Autorais] Vídeo de retorno {item.get('id_unico')} publicado com sucesso!")
+                                registro_processos.registrar("autorais", "repostagem ao grupo", "postado", ok=True)
                                 
                                 os.remove(caminho_arquivo)
                                 logger.info("🧹 Ficheiro arquivado removido após postagem final.")
@@ -1757,8 +1761,10 @@ async def processar_fila_autorais_loop():
                                 # senão fica a ser tentado de 60 em 60 segundos para sempre.
                                 encerrar_item = True
                                 logger.warning(f"⚠️ Ficheiro arquivado não encontrado em {caminho_arquivo}. Item encerrado.")
+                                registro_processos.registrar("autorais", "repostagem ao grupo", "arquivo sumiu", ok=False)
                         except Exception as e:
                             logger.error(f"❌ Falha no disparo de retorno: {e}")
+                            registro_processos.registrar("autorais", "repostagem ao grupo", "falhou", type(e).__name__, ok=False)
                             # Problema da conta (expulsa, sem permissão, espera): outra conta
                             # do rodízio tenta no próximo ciclo, sem adiar o vídeo.
                             if await registrar_falha_repost(conta_rep, e):
@@ -2123,6 +2129,8 @@ def avisar_sem_conta_repost():
     _ultimo_aviso_sem_conta = agora
     logger.warning("⏸️ [Motor Autorais] Nenhuma conta de repostagem disponível agora. "
                    "Os vídeos esperam na fila (a captura não reposta).")
+    # No máximo um a cada 10 min, como o aviso do log.
+    registro_processos.registrar("autorais", "repostagem ao grupo", "sem conta de repostagem", ok=False)
 
 
 def proxima_conta_repost():

@@ -31,6 +31,7 @@ import alvos_sem_acesso
 import faxina_baixador
 import faxina_viral  # vídeos que já não servem saem do Acervo Viral
 import registro_admins  # quem administra os grupos e canais do Rafael, conferido todo dia
+import registro_processos  # cada processo, 3 dias, para o checkup do dia
 
 # Importar fuso já trava o processo no horário de Brasília.
 from fuso import configurar_logs
@@ -285,26 +286,31 @@ async def enviar_mensagem(escopo, alvo):
                     await asyncio.sleep(1.5)
 
             logger.info(f"✅ [{rotulo}] Envio concluído para {alvo}.")
+            registro_processos.registrar("divulgacao", f"envio ({escopo})", "enviado", ok=True)
 
     except FloodWaitError as e:
         espera = int(getattr(e, "seconds", 60) or 60)
         bloqueio_flood_ate = datetime.now() + timedelta(seconds=espera + 30)
         logger.error(f"⏳ [{rotulo}] FloodWait de {espera}s em {alvo}. Motor congelado até {bloqueio_flood_ate.strftime('%H:%M:%S')}.")
         registrar_erro_json(f"FloodWait {espera}s ({escopo}/{alvo})", origem="divulgacao_canal.py")
+        registro_processos.registrar("divulgacao", f"envio ({escopo})", "FloodWait, motor parado", ok=False)
 
     except PeerFloodError:
         bloqueio_flood_ate = datetime.now() + timedelta(hours=1)
         logger.critical(f"🚨 [{rotulo}] PeerFloodError em {alvo}: a CONTA foi sinalizada como spam. Motor congelado por 1 hora. Reduza frequência e réplicas antes de retomar.")
         registrar_erro_json(f"PeerFloodError ({escopo}/{alvo}) - conta sinalizada", origem="divulgacao_canal.py")
+        registro_processos.registrar("divulgacao", f"envio ({escopo})", "conta sinalizada como spam", ok=False)
 
     except (ChatWriteForbiddenError, UserBannedInChannelError):
         logger.warning(f"🚫 [{rotulo}] Sem permissão de escrita em {alvo} (restrito, silenciado ou banido). Omitindo.")
+        registro_processos.registrar("divulgacao", f"envio ({escopo})", "sem permissão de escrita", ok=False)
 
     except ChannelPrivateError:
         # A conta saiu do grupo, foi banida ou o grupo ficou privado: insistir só
         # lotava o registro de erros. Para o alvo e o bot_mestre avisa no privado.
         if alvos_sem_acesso.marcar(alvo, "ChannelPrivateError"):
             logger.warning(f"🔒 [{rotulo}] Sem acesso a {alvo}: alvo pausado até reativar no painel.")
+        registro_processos.registrar("divulgacao", f"envio ({escopo})", "sem acesso ao grupo, alvo pausado", ok=False)
 
     except Exception as e:
         erro_str = str(e).lower()
@@ -315,6 +321,7 @@ async def enviar_mensagem(escopo, alvo):
         else:
             logger.error(f"❌ [{rotulo}] Falha ao enviar para {alvo}: {e}")
             registrar_erro_json(f"enviar_mensagem ({escopo}/{alvo}): {e}", origem="divulgacao_canal.py")
+        registro_processos.registrar("divulgacao", f"envio ({escopo})", "falhou", type(e).__name__, ok=False)
 
 
 # Horários já sorteados por alvo (última hora), compartilhados entre os escopos:
