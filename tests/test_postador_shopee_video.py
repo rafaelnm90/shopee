@@ -1040,4 +1040,6 @@ def test_video_link_de_video_escolhe_o_que_abre_um_video(monkeypatch):
     ps.assistente.registrar("viral:2", "enviado")          # já mandado pelo assistente: fica de fora
     video = ps.video_do_teste(novo=True, de_video=True)
     assert video["id"] == "viral:3" and ps.db.ler_config(ps.CHAVE_TESTE)["id"] == "viral:3"
+    # De novo: o de agora fica de fora, e não há outro com link de vídeo.
+    assert ps.video_da_fonte(de_video=True) is None
     assert ps.separar_passos("video:link-de-video") == [("video", "link-de-video")]
