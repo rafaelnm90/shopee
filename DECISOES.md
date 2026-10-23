@@ -38,6 +38,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - os processos que ainda não anotavam: garimpo, financeiro, métricas, faxinas, monitor de saúde, conferência dos grupos, botão de ofertas, notas fiscais, captura dos parceiros, Correio Público, faxina do Acervo Viral e do tópico do Baixador, registro dos admins, resumo das 22h e conferência semanal da Shopee Vídeo;
   - se a **IA do Espião** acerta o produto, se a **captura dos parceiros** não repete vídeo ou produto de outro parceiro nem da conta principal e se os robôs **pegam os vídeos de cada grupo de origem**;
   - as **mensagens dos membros no Grupo Público**: uma vez por semana a IA confere se alguém postou ou falou algo contra as regras gerais (ofensa ou briga, golpe, conteúdo adulto ou ilegal, divulgação de outros grupos ou canais, link que não é da Shopee, mensagem repetida) e o bot **só avisa** no privado; nada é apagado sozinho.
+- **23/10/2026:** o checkup achou, no Viral, a mesma rotina saindo duas vezes em seguida (3 vezes no dia). Escolha do Rafael (a recomendada): a rotina **segura e sai depois**. Se a última rotina de hoje no mesmo canal (principal, Viral ou Grupo Público) foi do mesmo assunto e ainda há outra, de outro assunto, marcada para hoje no canal, esta sai de 10 a 25 min depois dela. Sem outra marcada, sai na hora. Bom Dia, Boa Noite, campanhas e disparo manual não esperam.
 
 ## Canal principal
 

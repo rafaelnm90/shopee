@@ -1913,6 +1913,37 @@ def horario_dentro_do_turno(agora, turno, horario_sugerido=None):
     candidato = agora + _td(minutes=random.randint(3, 10))
     return candidato if candidato <= limite_turno else None
 
+def assunto_anterior_no_canal(dados_rotina, canal, hoje_str):
+    """O tipo da última rotina que saiu hoje no canal, pelo histórico do dia; None sem nenhuma."""
+    historico = dados_rotina.get("historico_diario", {})
+    if historico.get("data") != hoje_str:
+        return None
+    ultimo, hora_ultima = None, ""
+    for tipo, horas in historico.get("contagem", {}).items():
+        if not isinstance(horas, list) or not horas or not rotinas.conhecida(tipo):
+            continue
+        if rotinas.canal_da_rotina(tipo) == canal and horas[-1] >= hora_ultima:
+            ultimo, hora_ultima = tipo, horas[-1]
+    return ultimo
+
+
+def proxima_de_outro_assunto(tipo, canal, agora):
+    """
+    Quando sai hoje a próxima rotina do mesmo canal com outro assunto; None sem nenhuma.
+    Bom Dia e Boa Noite não contam: depois do Boa Noite o canal principal não recebe mais rotina.
+    """
+    horarios = []
+    for job in scheduler.get_jobs():
+        outro = job.args[0] if job.id.startswith("job_rotina_") and job.args else None
+        if (not outro or outro == tipo or outro in ("bom_dia", "boa_noite") or not rotinas.conhecida(outro)
+                or rotinas.canal_da_rotina(outro) != canal):
+            continue
+        quando = getattr(job, "next_run_time", None)
+        if quando and quando > agora and quando.astimezone(fuso_horario).date() == agora.date():
+            horarios.append(quando.astimezone(fuso_horario))
+    return min(horarios, default=None)
+
+
 async def disparar_mensagem(tipo, forcar=False):
     """
     Dispara uma rotina de texto (gerada pela IA) no canal do tipo: principal, Viral
@@ -1994,6 +2025,21 @@ async def disparar_mensagem(tipo, forcar=False):
             logger.info(f"🚦 [Intercalação] '{tipo}' adiado para {novo_horario.strftime('%H:%M')}: o último post foi texto e há {estoque_videos} vídeo(s) na fila.")
             registro_processos.registrar("bot_mestre", processo_rotina, "adiada (intercalação)", tipo)
             return
+
+    # Mesmo assunto em seguida: a última rotina de hoje neste canal foi deste assunto e há
+    # outra, de outro assunto, marcada para hoje; esta sai logo depois dela.
+    # Decisão do Rafael: DECISOES.md, Trabalho com o Claude.
+    if not forcar and tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
+        if assunto_anterior_no_canal(dados_rotina, canal_rotina, hoje_str) == tipo:
+            depois_de = proxima_de_outro_assunto(tipo, canal_rotina, agora_tz)
+            if depois_de:
+                novo_horario = depois_de + timedelta(minutes=random.randint(10, 25))
+                job_id = f"job_rotina_{tipo}_seguido_{int(agora_tz.timestamp())}"
+                scheduler.add_job(disparar_mensagem, 'date', run_date=novo_horario, args=[tipo], id=job_id, replace_existing=True)
+                logger.info(f"🔀 [Assunto seguido] '{tipo}' adiado para {novo_horario.strftime('%H:%M')}: a última "
+                            f"rotina do {canal_rotina} foi do mesmo assunto.")
+                registro_processos.registrar("bot_mestre", processo_rotina, "adiada (mesmo assunto em seguida)", tipo)
+                return
     
     # Bom Dia e Boa Noite uma vez por dia; as demais rotinas do principal só no expediente.
     if tipo == "bom_dia" and dados_rotina.get("ultimo_bom_dia") == hoje_str:
@@ -2248,7 +2294,7 @@ def descobrir_escopo_job(job_id):
     if job_id.startswith('job_campanha_'):
         return "principal"
     tipo = None
-    m = re.match(r'^job_rotina_(.+?)_(?:intercalado|reagendado)_\d+$', job_id)
+    m = re.match(r'^job_rotina_(.+?)_(?:intercalado|reagendado|seguido)_\d+$', job_id)
     if m:
         tipo = m.group(1)
     else:
