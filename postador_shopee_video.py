@@ -91,6 +91,7 @@ import avisar_rafael
 import celular_robo
 import db
 import legendas
+import registro_processos
 import links_shopee
 from api_shopee import eh_video, link_para_converter, tipo_de_link
 from fuso import fuso_horario
@@ -436,12 +437,35 @@ def mesmo_produto(texto, nome):
 
 def nome_na_pagina(texto, nome):
     """
-    O texto da página do produto é o nome desse produto? A página pode pôr um pedaço curto
-    antes do nome (o selo "Oficial", um número): vale o nome começando numa das primeiras
-    palavras, com a mesma régua de mesmo_produto.
+    O texto da tela é o nome desse produto? O app pode pôr um pedaço curto antes do nome
+    (o selo "Oficial", um número), na página do produto e nas listas: vale o nome
+    começando numa das primeiras palavras, com a mesma régua de mesmo_produto. Usado em
+    todo lugar em que o robô confere o nome na tela (página, Minhas Curtidas, janela de
+    editar e tela final), para os quatro aceitarem o mesmo nome.
     """
     palavras = (texto or "").split()
     return any(mesmo_produto(" ".join(palavras[i:]), nome) for i in range(min(len(palavras), 4)))
+
+
+def parecido_na_tela(xml, nome):
+    """
+    Quando o nome não é achado: o quanto o texto mais parecido da tela lembra o nome do
+    produto, em números (o nome não sai daqui): (% das palavras do nome que estão nele,
+    quantas palavras vêm antes do nome nele, ou -1 se o nome não começa em nenhuma).
+    Diz se o produto estava na lista com outro nome ou se não estava.
+    """
+    # Palavras de 3 letras ou mais: "de", "a" e "e" estão em quase todo nome.
+    alvo = {p for p in _normal(nome).split() if len(p) >= 3}
+    melhor = (0, -1)
+    for el in elementos(xml):
+        texto = _normal(el["texto"]).rstrip(".… ")
+        if len(texto) < TAMANHO_MINIMO_DO_NOME or not alvo:
+            continue
+        palavras = texto.split()
+        comum = len(alvo & set(palavras)) * 100 // len(alvo)
+        antes = next((i for i in range(len(palavras)) if mesmo_produto(" ".join(palavras[i:]), nome)), -1)
+        melhor = max(melhor, (comum, antes))
+    return melhor
 
 
 def adicionar_do_produto(xml, nome):
@@ -453,7 +477,7 @@ def adicionar_do_produto(xml, nome):
     lista = elementos(xml)
     botoes = [el for el in lista if _normal(el["texto"]) == "adicionar"]
     for el in lista:
-        if not mesmo_produto(el["texto"], nome):
+        if not nome_na_pagina(el["texto"], nome):
             continue
         blocos = sorted((b for b in lista if b["clicavel"] and _dentro(_centro(el), b["caixa"])),
                         key=lambda b: (b["caixa"][2] - b["caixa"][0]) * (b["caixa"][3] - b["caixa"][1]))
@@ -530,6 +554,11 @@ def adicionar_produto(d, video):
         if rolagem < ROLAGENS_DO_PRODUTO:
             rolar(d)
             time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
+    # Para a próxima vez dar para saber a causa: o produto estava com outro nome ou não estava.
+    comum, antes = parecido_na_tela(tela, nome)
+    registro_processos.registrar("shopee_video", "anexar o produto", "nome não achado em Minhas Curtidas",
+                                 f"o mais parecido tem {comum}% das palavras"
+                                 + (f" e o nome começa depois de {antes} palavra(s)" if antes > 0 else ""), ok=False)
     avisar_rafael.mandar_texto(f"{AVISO_SEM_PRODUTO}\n\nO produto do vídeo não está em Minhas Curtidas: {nome}")
     return False, "o produto do vídeo não está na lista: nada adicionado (aviso no privado)"
 
@@ -549,7 +578,7 @@ def conferir_janela(d, nome, ponto):
     lista = elementos(d.dump_hierarchy())
     if not janela_de_editar_aberta(lista):
         return False, f"Adicionar tocado em {ponto}, mas a janela de editar o nome não abriu"
-    if not any(mesmo_produto(el["texto"], nome) for el in lista):
+    if not any(nome_na_pagina(el["texto"], nome) for el in lista):
         avisar_rafael.mandar_texto(f"{AVISO_JANELA_ERRADA}\n\nO produto do vídeo é: {nome}")
         return False, "a janela de editar o nome é de outro produto: Feito não tocado (aviso no privado)"
     if not ponto:
@@ -680,7 +709,7 @@ def conferir_tela_final(d, video):
     anexados = [el["texto"] for el in elementos(d.dump_hierarchy()) if el["id"] == "tv_product_title"]
     sobrando = list(anexados)
     for nome in nomes:
-        par = next((anexado for anexado in sobrando if mesmo_produto(anexado, nome)), None)
+        par = next((anexado for anexado in sobrando if nome_na_pagina(anexado, nome)), None)
         if par is None:
             break
         sobrando.remove(par)

@@ -1105,3 +1105,31 @@ def test_nome_lido_no_celular_vale_sem_a_api_e_os_produtos_do_video_vao_juntos(m
     monkeypatch.setattr(ps.assistente, "produtos_do_link", nao_chamar)
     assert ps.nome_do_produto({"link": "https://s.shopee.com.br/v", "produto": "Copo"}) == "Copo"
     assert ps.nomes_dos_produtos({"link": "x", "produtos": ["Copo", "Garrafa"]}) == ["Copo", "Garrafa"]
+
+
+def test_minhas_curtidas_aceita_o_mesmo_pedaco_antes_do_nome_que_a_pagina():
+    # 23/10 15:28: o robô curtiu na página (que aceita um selo antes do nome) e não achou o
+    # produto em Minhas Curtidas, que exigia o nome igual. Os dois lugares usam a mesma régua.
+    tela = TELA_CURTIDAS.replace(f'text="{VESTIDO}"', f'text="Oficial {VESTIDO}"')
+    assert ps.adicionar_do_produto(tela, VESTIDO)["caixa"] == (850, 1235, 1000, 1280)
+    assert ps.adicionar_do_produto(TELA_CURTIDAS, "Vestido Infantil Liso Para Meninas de Festa") is None
+
+
+def test_nome_nao_achado_deixa_no_registro_o_quanto_o_mais_parecido_lembra(monkeypatch):
+    import registro_processos as rp
+    avisos = []
+    monkeypatch.setattr(ps.avisar_rafael, "mandar_texto", avisos.append)
+    monkeypatch.setattr(ps, "rolar", lambda d: None)
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+
+    class Celular:
+        def dump_hierarchy(self):
+            return TELA_CURTIDAS.replace(f'text="{VESTIDO}"', 'text="Um texto bem comprido antes do nome ' + VESTIDO + '"')
+
+    ok, motivo = ps.adicionar_produto(Celular(), {"produto": VESTIDO})
+    assert not ok and "não está na lista" in motivo and VESTIDO in avisos[0]
+    linha = [l for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "anexar o produto"][0]
+    assert linha[2] == "nome não achado em Minhas Curtidas"
+    assert linha[3] == "o mais parecido tem 100% das palavras e o nome começa depois de 7 palavra(s)"
+    assert "Vestido" not in linha[3]
+    assert ps.parecido_na_tela(TELA_CURTIDAS, "Panela de Pressão Inox") == (0, -1)

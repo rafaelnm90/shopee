@@ -22,7 +22,6 @@ import assistente_shopee_video as assistente
 import db
 
 PADRAO_PROXIMOS = 15
-LINK_SEM_PRODUTO = "o link não diz o produto"
 
 
 async def classificar(link):
@@ -54,14 +53,19 @@ def links_das_fontes():
 
 
 def pulados():
-    """(id do vídeo, o motivo foi o link sem produto?) dos vídeos que o robô pulou."""
+    """
+    (id do vídeo, passo em que parou) dos vídeos que o robô pulou. O passo é o rótulo fixo
+    do histórico do robô (robo_shopee_video.passo_do_motivo), nunca o motivo, que pode ter
+    o nome do produto.
+    """
+    import robo_shopee_video as robo   # aqui dentro: o robô traz a IA e o celular junto
     with db.conexao() as con:
         try:
             linhas = con.execute("SELECT id_video, motivo FROM shopee_video_rascunhos WHERE estado = 'pulado' "
                                  "ORDER BY id DESC").fetchall()
         except Exception:
             return []
-    return [(id_video, (motivo or "").startswith(LINK_SEM_PRODUTO)) for id_video, motivo in linhas]
+    return [(id_video, robo.passo_do_motivo(motivo) or "sem motivo") for id_video, motivo in linhas]
 
 
 def proximos(quantos):
@@ -76,8 +80,8 @@ async def investigar(quantos):
     links = links_das_fontes()
     lista = pulados()
     print(f"== Vídeos que o robô pulou: {len(lista)}")
-    for i, (id_video, sem_produto) in enumerate(lista, 1):
-        motivo = "o link não diz o produto" if sem_produto else "outro motivo"
+    for i, (id_video, passo) in enumerate(lista, 1):
+        motivo = f"parou em {passo}"
         link = links.get(id_video)
         if not link:
             print(f"   {i}. motivo: {motivo} | o vídeo já saiu da fonte")
