@@ -1,4 +1,4 @@
-"""downloader_bot: vídeo da Shopee Vídeo que a Shopee não deixa baixar explica e ensina a salvar pelo app; a conferência diária do bloqueio."""
+"""downloader_bot: vídeo da Shopee Vídeo que a Shopee não deixa baixar explica e ensina a salvar pelo app; a conferência semanal do bloqueio."""
 
 from datetime import datetime
 
@@ -97,7 +97,7 @@ def test_link_curto_da_shopee_video_que_nao_redireciona_tambem_ensina_a_salvar(m
     assert dl.eh_link_curto_de_video("https://br.shp.ee/x") and not dl.eh_link_curto_de_video("https://s.shopee.com.br/x")
 
 
-# --- Conferência diária do bloqueio (pedido do Rafael em 23/10) ---
+# --- Conferência semanal do bloqueio (pedido do Rafael em 23/10) ---
 
 VIDEO = "https://sv.shopee.com.br/share-video/AAAAcopos"
 
@@ -128,7 +128,7 @@ def test_cada_tentativa_anota_a_situacao_e_so_a_mudanca_vira_aviso(avisos):
             dl.db.ler_config(dl.CHAVE_CONFERENCIA)["baixados_hoje"]) == (0, 1)
 
 
-def test_conferencia_diaria_baixa_o_ultimo_video_do_jeito_normal_e_avisa_quando_libera(monkeypatch, avisos):
+def test_conferencia_semanal_baixa_o_ultimo_video_do_jeito_normal_e_avisa_quando_libera(monkeypatch, avisos):
     assert rodar(dl.conferir_shopee_video()) == "nenhum vídeo da Shopee Vídeo pedido ainda"
     dl.registrar_tentativa_shopee(VIDEO, dl.ERRO_SHOPEE_BLOQUEOU, datetime(2026, 10, 23, 9, 0))
     monkeypatch.setattr(dl, "PASTA_TEMP_DOWNLOAD", ".")
@@ -152,6 +152,8 @@ def test_conferencia_diaria_baixa_o_ultimo_video_do_jeito_normal_e_avisa_quando_
     assert avisos[-1] == dl.AVISO_DA_MUDANCA["bloqueado"]
 
 
-def test_conferencia_roda_uma_vez_por_dia_no_horario():
-    assert dl.segundos_ate_a_conferencia(datetime(2026, 10, 23, 7, 0)) == 17 * 60
-    assert dl.segundos_ate_a_conferencia(datetime(2026, 10, 23, 7, 17)) == 24 * 3600
+def test_conferencia_roda_toda_segunda_as_7h17_e_nao_todo_dia():
+    # O Rafael pediu (23/10) a conferência toda semana, não todo dia. 23/10/2026 é sexta.
+    assert dl.segundos_ate_a_conferencia(datetime(2026, 10, 23, 7, 0)) == 3 * 86400 + 17 * 60
+    assert dl.segundos_ate_a_conferencia(datetime(2026, 10, 26, 7, 0)) == 17 * 60
+    assert dl.segundos_ate_a_conferencia(datetime(2026, 10, 26, 7, 17)) == 7 * 86400

@@ -771,17 +771,18 @@ async def baixar_video_shopee(url, pasta):
         return None, "erro interno ao extrair matriz da Shopee"
 
 # A conferência do bloqueio da Shopee Vídeo: cada vídeo de lá que o Baixador tenta (de um
-# membro ou da conferência diária) diz se a Shopee ainda bloqueia. Mudou, o Rafael recebe
+# membro ou da conferência semanal) diz se a Shopee ainda bloqueia. Mudou, o Rafael recebe
 # aviso no privado; o diagnostico.yml mostra a situação, só com estados e datas. A
 # conferência baixa do jeito normal, sem furar o bloqueio. Decisão do Rafael:
 # DECISOES.md, Baixador.
 CHAVE_CONFERENCIA = "baixador_shopee_video"
-HORA_DA_CONFERENCIA = (7, 17)   # de Brasília, todo dia
+# Toda segunda-feira às 7h17, de Brasília: o Rafael pediu toda semana, não todo dia.
+DIA_DA_CONFERENCIA, HORA_DA_CONFERENCIA = 0, (7, 17)
 AVISO_DA_MUDANCA = {
     "liberado": ("✅ Baixador: a Shopee voltou a deixar baixar os vídeos da Shopee Vídeo. "
                  "Os membros já recebem o vídeo de novo."),
     "bloqueado": ("⚠️ Baixador: a Shopee voltou a bloquear o download dos vídeos da Shopee Vídeo. "
-                  "O Baixador explica aos membros e ensina a salvar pelo app, e confere de novo todo dia."),
+                  "O Baixador explica aos membros e ensina a salvar pelo app, e confere de novo toda semana."),
 }
 
 
@@ -826,7 +827,7 @@ async def avisar_mudanca_shopee(situacao):
 
 async def conferir_shopee_video(agora=None):
     """
-    A conferência diária: baixa de novo, do jeito normal, o último vídeo da Shopee Vídeo
+    A conferência semanal: baixa de novo, do jeito normal, o último vídeo da Shopee Vídeo
     que um membro pediu, e anota o resultado. Sem nenhum pedido ainda, não confere.
     Devolve o resultado em poucas palavras.
     """
@@ -845,7 +846,7 @@ async def conferir_shopee_video(agora=None):
                         lambda estado: estado.update(ultima_conferencia_em=momento, ultima_conferencia=resultado))
     if mudou:
         await avisar_mudanca_shopee(mudou)
-    logger.info(f"🔎 Conferência diária da Shopee Vídeo: {resultado}.")
+    logger.info(f"🔎 Conferência semanal da Shopee Vídeo: {resultado}.")
     return resultado
 
 
@@ -853,19 +854,20 @@ def segundos_ate_a_conferencia(agora=None):
     agora = agora or datetime.now()
     hora, minuto = HORA_DA_CONFERENCIA
     alvo = agora.replace(hour=hora, minute=minuto, second=0, microsecond=0)
+    alvo += timedelta(days=(DIA_DA_CONFERENCIA - agora.weekday()) % 7)
     if alvo <= agora:
-        alvo += timedelta(days=1)
+        alvo += timedelta(days=7)
     return (alvo - agora).total_seconds()
 
 
-async def conferencia_diaria_loop():
-    """Todo dia na HORA_DA_CONFERENCIA, a conferência do bloqueio da Shopee Vídeo."""
+async def conferencia_semanal_loop():
+    """Toda semana, no DIA_DA_CONFERENCIA e na HORA_DA_CONFERENCIA, a conferência do bloqueio da Shopee Vídeo."""
     while True:
         await asyncio.sleep(segundos_ate_a_conferencia())
         try:
             await conferir_shopee_video()
         except Exception as e:
-            logger.error(f"❌ Conferência diária da Shopee Vídeo falhou: {type(e).__name__}")
+            logger.error(f"❌ Conferência semanal da Shopee Vídeo falhou: {type(e).__name__}")
 
 
 async def _baixar_video_uma_vez(url, pasta):
@@ -1466,7 +1468,7 @@ async def main():
     logger.info(f"📥 Downloader no ar como @{me.username} "
                 f"(privacy {'desligado ✅' if me.can_read_all_group_messages else 'LIGADO ⚠️'})")
     asyncio.create_task(faxina_diaria_loop())
-    asyncio.create_task(conferencia_diaria_loop())
+    asyncio.create_task(conferencia_semanal_loop())
 
     asyncio.create_task(reenviar_painel_downloader())
 
