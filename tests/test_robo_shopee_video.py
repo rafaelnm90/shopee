@@ -559,3 +559,22 @@ def test_o_compartilhar_do_perfil_nao_serve_para_o_link_do_post():
     perfil = _xml('<node text="" content-desc="profile share" class="android.view.View" clickable="true" '
                   'bounds="[860,140][940,200]"></node>')
     assert robo.botao_de_compartilhar(perfil) is None
+
+
+def test_da_edicao_de_um_video_novo_o_robo_descarta_e_volta_ao_inicio(monkeypatch):
+    # Na edição de um vídeo novo, o voltar pergunta se salva como rascunho: o robô
+    # descarta, para a lista do app só ter os rascunhos que ele terminou.
+    monkeypatch.setitem(TELAS, "sair_da_edicao", [
+        _no("Deseja sair da página de edição?", "tv_main_title", (100, 1780, 980, 1840), clicavel=False),
+        _no("Salvar Rascunho", "tv_save", (100, 2090, 980, 2150)),
+        _no("Descartar", "tv_no_save", (100, 2190, 980, 2250)),
+        _no("Cancelar", "tv_cancel", (100, 2310, 980, 2370))])
+    monkeypatch.setitem(CAMINHO, ("sair_da_edicao", "@tv_no_save"), "galeria")
+    app = AppComVoltar()
+    monkeypatch.setattr(app, "VOLTAR", {**AppComVoltar.VOLTAR, "aviso": "final", "edicao": "sair_da_edicao",
+                                        "sair_da_edicao": "edicao", "galeria": "camera", "camera": "perfil"})
+    monkeypatch.setitem(CAMINHO, ("aviso", "@buttonDefaultPositive"), "edicao")
+    app.atual = "final"
+    robo.ir_ao_inicio(app)
+    assert app.atual == "eu"
+    assert "@buttonDefaultPositive" in app.toques and "@tv_no_save" in app.toques and "@tv_save" not in app.toques

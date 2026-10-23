@@ -393,9 +393,18 @@ def tem_exato(xml, texto):
     return any(ps._normal(el["texto"]) == ps._normal(texto) for el in ps.elementos(xml))
 
 
+def sair_da_edicao(xml):
+    """
+    A janela que o voltar abre na edição de um vídeo novo (Motorola, 23/10/2026): "Deseja
+    sair da página de edição?", com Salvar Rascunho, Descartar (@tv_no_save) e Cancelar.
+    O robô descarta: o que ele não terminou não vira rascunho na lista do app.
+    """
+    return tem(xml, "@tv_no_save") and tem(xml, "sair da página de edição")
+
+
 def voltar(d, ate, vezes=15):
     """
-    Aperta voltar, confirmando o aviso de sair, até a tela ter um elemento com o texto
+    Aperta voltar, confirmando os avisos de sair, até a tela ter um elemento com o texto
     exato. Nunca fecha o app à força: fechar e reabrir em seguida chama a Verificação.
     """
     for _ in range(vezes):
@@ -404,6 +413,9 @@ def voltar(d, ate, vezes=15):
             return
         if aviso_de_sair(xml):
             tocar(d, "@buttonDefaultPositive", 3)
+            continue
+        if sair_da_edicao(xml):
+            tocar(d, "@tv_no_save", 4)
             continue
         d.press("back")
         pausa(3)
