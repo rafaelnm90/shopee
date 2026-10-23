@@ -394,6 +394,68 @@ def test_rascunho_do_plano_que_falhou_tenta_de_novo_ate_2_vezes(monkeypatch, avi
     assert resultados[3] == "nada a fazer agora"              # acabaram as tentativas
 
 
+def test_rascunho_do_plano_que_nao_saiu_avisa_onde_parou_e_quando_tenta_de_novo(monkeypatch, avisos):
+    # Escolha do Rafael (23/10): o "começando um rascunho" sempre tem um fim no privado.
+    _fonte(monkeypatch, confere=False)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    agora = momento("2026-10-22 23:59")
+    robo.rodada(d=Intocavel(), agora=agora)
+    aviso = next(a for a in avisos if isinstance(a, str) and "o rascunho não saiu" in a)
+    assert "Parou em: conferência da IA" in aviso and "tentativa 2 de 3" in aviso
+    assert "Histórico do Robô 📋" in aviso
+    robo.rodada(d=Intocavel(), agora=agora)
+    robo.rodada(d=Intocavel(), agora=agora)
+    finais = [a for a in avisos if isinstance(a, str) and "o rascunho não saiu" in a]
+    assert "tentativa 3 de 3" in finais[1] and "acabaram" in finais[2]
+    # O histórico guarda cada tentativa, e o diagnóstico conta resultado e passo sem nomes.
+    lista = robo.tentativas_desde("2026-10-22 00:00:00")
+    assert [(t["resultado"], t["passo"]) for t in lista] == [
+        ("sem vídeo", "vídeo da fonte"), ("sem vídeo", "vídeo da fonte"), ("pulado", "conferência da IA")]
+    assert "Parou em: vídeo da fonte" in finais[2]
+
+
+def test_preparar_1_agora_que_falha_nao_repete_o_aviso(monkeypatch, avisos):
+    _fonte(monkeypatch, confere=False)
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True})
+    robo.rodada(preparar=True, d=Intocavel(), agora=momento("2026-10-22 23:59"))
+    assert not any(isinstance(a, str) and "o rascunho não saiu" in a for a in avisos)
+    assert "não preparei o rascunho que você pediu" in avisos[-1]
+
+
+def test_rascunho_salvo_entra_no_historico_com_o_produto(monkeypatch, avisos):
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    ultima = robo.tentativas_desde("2026-10-22 00:00:00")[0]
+    assert (ultima["acao"], ultima["resultado"], ultima["produto"]) == ("rascunho", "salvo", VESTIDO)
+    assert "✅ 1 salvo" in robo.texto_historico(momento("2026-10-22 23:59"))
+
+
+def test_passo_do_motivo():
+    assert robo.passo_do_motivo(robo.SEM_OFERTA) == "oferta de afiliado"
+    assert robo.passo_do_motivo("a IA viu outro produto no vídeo (1ª vez): parado") == "conferência da IA"
+    assert robo.passo_do_motivo("a IA viu violação das diretrizes") == "diretrizes da Shopee"
+    assert robo.passo_do_motivo("toquei no coração, mas o produto não ficou curtido") == "curtir o produto"
+    assert robo.passo_do_motivo("o título não ficou na legenda (pela cópia: ...)") == "escrever o título"
+    assert robo.passo_do_motivo("toquei em Rascunhos, mas o app continuou na tela final") == "salvar em Rascunhos"
+    assert robo.passo_do_motivo("o rascunho aberto não tem o título do aprovado") == "abrir o rascunho"
+    assert robo.passo_do_motivo("não consegui voltar até Eu") == "navegar no app"
+    assert robo.passo_do_motivo("algo novo") == "outro" and robo.passo_do_motivo("") == ""
+
+
+def test_historico_guarda_30_dias_e_mostra_as_12_mais_novas():
+    for dia in range(1, 21):
+        robo.registrar_tentativa("rascunho", "pulado", robo.SEM_OFERTA, agora=momento(f"2026-10-{dia:02d} 10:00"))
+    robo.registrar_tentativa("rascunho", "salvo", produto="Vestido", agora=momento("2026-11-25 10:00"))
+    # Só ficam os dos últimos 30 dias.
+    assert [t["resultado"] for t in robo.tentativas_desde("2000-01-01 00:00:00")] == ["salvo"]
+    for minuto in range(15):
+        robo.registrar_tentativa("rascunho", "pulado", robo.SEM_OFERTA, agora=momento(f"2026-11-25 11:{minuto:02d}"))
+    texto = robo.texto_historico(momento("2026-11-25 12:00"))
+    assert "⏭️ 15 pulado" in texto and "✅ 1 salvo" in texto and "e mais 4 tentativa(s)" in texto
+    assert len(texto) < 4096
+
+
 def test_horario_novo_tira_a_repeticao_do_anterior_e_o_que_deu_certo_nao_repete():
     config = {**robo.PADRAO, "robo_limite_min": 2, "robo_limite_max": 2, "robo_inicio": 0, "robo_fim": 24}
     cedo, tarde = momento("2026-10-22 11:59"), momento("2026-10-22 23:59")

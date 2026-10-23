@@ -35,6 +35,7 @@ produto, título ou link.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
 import asyncio
+import html
 import json
 import logging
 import os
@@ -281,6 +282,165 @@ def ids_usados():
     with db.conexao() as con:
         _criar_tabela(con)
         return {linha[0] for linha in con.execute("SELECT id_video FROM shopee_video_rascunhos")}
+
+
+# --- Histórico das tentativas (tabela shopee_video_tentativas) ---
+# Cada coisa que o robô tenta (rascunho, postar, apagar, treino) e como terminou, com o
+# passo em que parou. O Rafael vê em Histórico do Robô 📋, recebe o aviso do rascunho que
+# não saiu e o resumo das 22h; o diagnóstico do servidor, que é público, conta só os
+# resultados e os passos, nunca o produto nem o motivo. Decisão do Rafael: DECISOES.md,
+# Shopee Vídeo.
+DIAS_DO_HISTORICO = 30
+LINHAS_DO_HISTORICO = 12
+# O passo em que parou, achado no motivo (as frases fixas do robô e do postador). A
+# ordem importa: o primeiro trecho que aparece no motivo decide.
+PASSOS = (
+    ("sem oferta de afiliado", "oferta de afiliado"),
+    ("o link não diz o produto", "achar o produto do link"),
+    ("violação", "diretrizes da Shopee"),
+    ("a IA", "conferência da IA"),
+    ("Ver Produtos", "Ver Produtos"),
+    ("foi removido", "vídeo removido"),
+    ("coração", "curtir o produto"),
+    ("curtido", "curtir o produto"),
+    ("não está na página", "curtir o produto"),
+    ("galeria", "escolher o vídeo na galeria"),
+    ("rascunho aberto", "abrir o rascunho"),
+    ("nenhum rascunho salvo", "abrir o rascunho"),
+    ("legenda", "escrever o título"),
+    ("título", "escrever o título"),
+    ("toquei em Rascunhos", "salvar em Rascunhos"),
+    ("Adicionar", "anexar o produto"),
+    ("não está na lista", "anexar o produto"),
+    ("tela final", "conferir a tela final"),
+    ("Postar", "postar"),
+    ("Excluir", "apagar o rascunho"),
+    ("verificação", "verificação da Shopee"),
+    ("desconectado", "celular desconectado"),
+    ("nenhum vídeo", "vídeo da fonte"),
+    ("sem oferta", "oferta de afiliado"),
+    ("não consegui voltar", "navegar no app"),
+    ("não achei", "navegar no app"),
+    ("erro", "erro inesperado"),
+)
+SIMBOLOS = {"salvo": "✅", "postado": "📤", "apagado": "🗑️", "pulado": "⏭️", "parou": "⚠️", "erro": "❌",
+            "verificação": "🧩", "sem vídeo": "📭", "treino ok": "🧭", "treino parou": "🧭"}
+NOMES_DAS_ACOES = {"rascunho": "Rascunho", "postar": "Postagem", "apagar": "Apagar rascunho",
+                   "treino": "Testar Caminho", "rodada": "Rodada"}
+
+
+def _criar_tabela_tentativas(con):
+    con.execute("CREATE TABLE IF NOT EXISTS shopee_video_tentativas ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, momento TEXT, acao TEXT, resultado TEXT, "
+                "passo TEXT, motivo TEXT, produto TEXT)")
+
+
+def passo_do_motivo(motivo):
+    """Em que passo o robô parou, em poucas palavras, a partir do motivo."""
+    texto = str(motivo or "").casefold()
+    if not texto:
+        return ""
+    return next((passo for trecho, passo in PASSOS if trecho.casefold() in texto), "outro")
+
+
+def registrar_tentativa(acao, resultado, motivo="", produto="", agora=None):
+    """Guarda uma tentativa no histórico; as com mais de DIAS_DO_HISTORICO dias saem."""
+    try:
+        with db.conexao() as con:
+            _criar_tabela_tentativas(con)
+            con.execute("INSERT INTO shopee_video_tentativas (momento, acao, resultado, passo, motivo, produto) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (_momento(agora), acao, resultado, passo_do_motivo(motivo), str(motivo or ""),
+                         str(produto or "")))
+            corte = _momento(agora_br(agora) - timedelta(days=DIAS_DO_HISTORICO))
+            con.execute("DELETE FROM shopee_video_tentativas WHERE momento < ?", (corte,))
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Tentativa não entrou no histórico: {type(e).__name__}")
+
+
+def tentativas_desde(desde):
+    """As tentativas a partir de desde ("AAAA-MM-DD HH:MM:SS"), da mais nova para a mais velha."""
+    with db.conexao() as con:
+        _criar_tabela_tentativas(con)
+        linhas = con.execute("SELECT momento, acao, resultado, passo, motivo, produto FROM shopee_video_tentativas "
+                             "WHERE momento >= ? ORDER BY id DESC", (desde,)).fetchall()
+    return [dict(zip(("momento", "acao", "resultado", "passo", "motivo", "produto"), linha)) for linha in linhas]
+
+
+def _ultimas_24h(agora=None):
+    return tentativas_desde(_momento(agora_br(agora) - timedelta(hours=24)))
+
+
+def _produto_do_video(video):
+    return ps.nome_do_produto(video) or ("vídeo com vários produtos (Ver Produtos)" if video.get("de_video") else "")
+
+
+def _contagem(lista):
+    """"✅ 1 salvo | ⏭️ 3 pulado" com o que aconteceu, na ordem de SIMBOLOS."""
+    contas = {}
+    for tentativa in lista:
+        contas[tentativa["resultado"]] = contas.get(tentativa["resultado"], 0) + 1
+    return " | ".join(f"{SIMBOLOS.get(r, '•')} {contas[r]} {r}" for r in SIMBOLOS if r in contas)
+
+
+def texto_historico(agora=None):
+    """A tela do Histórico do Robô 📋: as tentativas das últimas 24 h, da mais nova para a mais velha."""
+    lista = _ultimas_24h(agora)
+    if not lista:
+        return "📋 <b>Histórico do Robô</b>\n\nNenhuma tentativa nas últimas 24 h."
+    linhas = ["📋 <b>Histórico do Robô</b> (últimas 24 h)", _contagem(lista), ""]
+    for t in lista[:LINHAS_DO_HISTORICO]:
+        quando = datetime.strptime(t["momento"], "%Y-%m-%d %H:%M:%S").strftime("%d/%m %H:%M")
+        linhas.append(f"{SIMBOLOS.get(t['resultado'], '•')} <b>{quando}</b> · "
+                      f"{NOMES_DAS_ACOES.get(t['acao'], t['acao'])}: {html.escape(t['resultado'])}")
+        if t["produto"]:
+            linhas.append(f"   🛍️ {html.escape(t['produto'][:80])}")
+        if t["motivo"]:
+            linhas.append(f"   📍 {html.escape(t['passo'])}: {html.escape(t['motivo'][:120])}")
+    if len(lista) > LINHAS_DO_HISTORICO:
+        linhas.append(f"\n… e mais {len(lista) - LINHAS_DO_HISTORICO} tentativa(s) antes destas.")
+    return "\n".join(linhas)
+
+
+def texto_resumo(agora=None):
+    """O resumo das 22h: o que o robô fez nas últimas 24 h e onde parou. None sem nenhuma tentativa."""
+    lista = _ultimas_24h(agora)
+    if not lista:
+        return None
+    problemas = {}
+    for t in lista:
+        if t["resultado"] in ("pulado", "parou", "erro", "verificação", "sem vídeo", "treino parou"):
+            problemas[t["passo"] or "outro"] = problemas.get(t["passo"] or "outro", 0) + 1
+    linhas = ["🤖 <b>Resumo do Robô da Shopee Vídeo</b> (últimas 24 h)", "", _contagem(lista)]
+    if problemas:
+        linhas += ["", "<b>Onde parou</b>"]
+        linhas += [f"• {html.escape(passo)}: {n}×" for passo, n in sorted(problemas.items(), key=lambda p: -p[1])]
+    linhas += ["", f"📝 Esperando a sua aprovação: <b>{len(esperando_aprovacao())}</b>",
+               "Detalhes: Robô Automático 🤖 → Histórico do Robô 📋."]
+    return "\n".join(linhas)
+
+
+def aviso_rascunho_nao_saiu(config, agora=None):
+    """
+    O fim do "começando um rascunho" quando o rascunho do plano não sai: o produto, o
+    passo em que parou, o motivo e quando o robô tenta de novo.
+    """
+    ultima = (tentativas_desde(_momento(agora_br(agora) - timedelta(hours=1))) or [{}])[0]
+    estado = estado_do_dia(config, agora)
+    if estado.get("repetir"):
+        feita = TENTATIVAS_A_MAIS - estado.get("tentativas", 0) + 1
+        proxima = (f"Tento de novo na próxima rodada (em até 15 min), com outro vídeo: tentativa {feita + 1} de "
+                   f"{TENTATIVAS_A_MAIS + 1}.")
+    else:
+        futuros = [h for h in estado.get("horarios", []) if h > agora_br(agora).strftime("%H:%M")]
+        proxima = (f"As tentativas deste horário acabaram. Próximo horário do plano: {futuros[0]}." if futuros
+                   else "As tentativas deste horário acabaram, e hoje não há mais horários: amanhã tem plano novo.")
+    return ("⏭️ Robô da Shopee Vídeo: o rascunho não saiu.\n\n"
+            f"🛍️ Produto: {ultima.get('produto') or '—'}\n"
+            f"📍 Parou em: {ultima.get('passo') or 'outro'}\n"
+            f"❓ Motivo: {ultima.get('motivo') or '—'}\n\n"
+            f"🔁 {proxima}\n\n"
+            "Tudo o que o robô tentou: Robô Automático 🤖 → Histórico do Robô 📋.")
 
 
 def esperando_aprovacao():
@@ -586,24 +746,36 @@ def preparar_rascunho(d, config, agora=None):
     for _ in range(VIDEOS_SEM_OFERTA_POR_RODADA):
         video = proximo_video(config)
         if not video:
-            return "nenhum vídeo da fonte com arquivo e link de produto para um rascunho"
+            resultado = "nenhum vídeo da fonte com arquivo e link de produto para um rascunho"
+            registrar_tentativa("rascunho", "sem vídeo", resultado, agora=agora)
+            return resultado
         # No link de vídeo, os produtos vêm do Ver Produtos, no celular.
         if video["de_video"] or ps.nome_do_produto(video):
             break
         atualizar(criar(video["id"], agora), estado="pulado", motivo=SEM_OFERTA)
+        registrar_tentativa("rascunho", "pulado", SEM_OFERTA, agora=agora)
     else:
-        return f"os próximos {VIDEOS_SEM_OFERTA_POR_RODADA} vídeos da fonte são de produtos sem oferta de afiliado"
+        resultado = f"os próximos {VIDEOS_SEM_OFERTA_POR_RODADA} vídeos da fonte são de produtos sem oferta de afiliado"
+        registrar_tentativa("rascunho", "sem vídeo", resultado, agora=agora)
+        return resultado
     ident = criar(video["id"], agora)
     assistente.registrar(video["id"], "robo", "rascunho do robô", agora)
     try:
         _preparar(d, ident, video, config.get("fonte", assistente.FONTE_PADRAO))
-    except (Parada, Verificacao) as e:
-        do_video = isinstance(e, Parada) and e.do_video
-        _desfazer_reserva(ident, video["id"], e.motivo if isinstance(e, Parada) else "verificação", do_video)
+    except Verificacao:
+        _desfazer_reserva(ident, video["id"], "verificação", False)
+        registrar_tentativa("rascunho", "verificação", "verificação da Shopee na tela", _produto_do_video(video), agora)
+        raise
+    except Parada as e:
+        _desfazer_reserva(ident, video["id"], e.motivo, e.do_video)
+        registrar_tentativa("rascunho", "pulado" if e.do_video else "parou", e.motivo, _produto_do_video(video), agora)
         raise
     except Exception as e:
         _desfazer_reserva(ident, video["id"], type(e).__name__, False)
+        registrar_tentativa("rascunho", "erro", f"erro inesperado ({type(e).__name__})", _produto_do_video(video), agora)
         raise
+    registrar_tentativa("rascunho", "salvo", produto=", ".join((pegar(ident) or {}).get("produtos") or [])
+                        or _produto_do_video(video), agora=agora)
     return "rascunho salvo"
 
 
@@ -1056,6 +1228,7 @@ def rodada(treino=False, preparar=False, d=None, agora=None):
             if not ok:
                 if not na_hora:
                     pausar_por_desconexao(motivo)
+                registrar_tentativa("rodada", "parou", f"celular desconectado ({motivo})", agora=agora)
                 return _resposta(preparar, f"celular desconectado ({motivo})")
     with celular_robo.trava() as livre:
         if not livre:
@@ -1077,20 +1250,32 @@ def rodada(treino=False, preparar=False, d=None, agora=None):
 
 def _agir(d, acao, ident, preparar, config, agora):
     """A ação da rodada no celular, já dentro da trava, com o que fazer quando ela para."""
+    # O rascunho entra no histórico pelo preparar_rascunho, que sabe qual vídeo tentou.
+    produto = ", ".join((pegar(ident) or {}).get("produtos") or []) if ident else ""
     try:
         if acao == "treino":
-            return treinar(d, agora)
+            resultado = treinar(d, agora)
+            registrar_tentativa("treino", "treino ok" if "OK" in resultado else "treino parou",
+                                "" if "OK" in resultado else resultado, agora=agora)
+            return resultado
         if acao == "apagar":
-            return apagar_do_app(d, pegar(ident))
+            resultado = apagar_do_app(d, pegar(ident))
+            registrar_tentativa("apagar", "apagado", produto=produto, agora=agora)
+            return resultado
         if acao == "postar":
-            return publicar(d, pegar(ident), agora)
+            resultado = publicar(d, pegar(ident), agora)
+            registrar_tentativa("postar", "postado", produto=produto, agora=agora)
+            return resultado
         resultado = preparar_rascunho(d, config, agora)
         if resultado == "rascunho salvo":
             return resultado
         _repetir_depois(acao, preparar, config, agora)
+        _avisar_que_nao_saiu(acao, preparar, config, agora)
         return _resposta(preparar, resultado)
     except Verificacao:
         logger.warning("⚠️ [Robô Shopee Vídeo] Verificação da Shopee na tela: parado.")
+        if acao != "rascunho":
+            registrar_tentativa(acao, "verificação", "verificação da Shopee na tela", produto, agora)
         av.abrir_tela(celular=True, verificacao=True)
         return f"{acao}: verificação na tela; parado"
     except Parada as e:
@@ -1099,14 +1284,30 @@ def _agir(d, acao, ident, preparar, config, agora):
             atualizar(ident, estado="rascunho", postar_em=None, motivo=e.motivo)
             avisar(f"⚠️ Robô da Shopee Vídeo: não consegui {'postar' if acao == 'postar' else 'apagar'} "
                    f"o rascunho ({e.motivo}). Não toquei em mais nada; ele voltou para Rascunhos do Robô 📝.")
+        if acao != "rascunho":
+            registrar_tentativa(acao, "parou", e.motivo, produto, agora)
         _repetir_depois(acao, preparar, config, agora)
+        _avisar_que_nao_saiu(acao, preparar, config, agora)
         return _resposta(preparar, f"{acao}: parado ({e.motivo})")
     except Exception as e:
         # Erro que ninguém previu: a rodada termina com o tipo dele, e o celular fica
         # para a próxima rodada voltar ao início.
         logger.exception(f"❌ [Robô Shopee Vídeo] Erro na rodada ({acao}): {type(e).__name__}")
+        if acao != "rascunho":
+            registrar_tentativa(acao, "erro", f"erro inesperado ({type(e).__name__})", produto, agora)
         _repetir_depois(acao, preparar, config, agora)
+        _avisar_que_nao_saiu(acao, preparar, config, agora)
         return _resposta(preparar, f"{acao}: erro {type(e).__name__}")
+
+
+def _avisar_que_nao_saiu(acao, preparar, config, agora=None):
+    """
+    O rascunho do plano que não saiu ganha um aviso no privado, com o passo e a próxima
+    tentativa. O Preparar 1 Agora já responde pelo _resposta. Decisão do Rafael:
+    DECISOES.md, Shopee Vídeo.
+    """
+    if acao == "rascunho" and not preparar:
+        avisar(aviso_rascunho_nao_saiu(config, agora))
 
 
 def _repetir_depois(acao, preparar, config, agora=None):

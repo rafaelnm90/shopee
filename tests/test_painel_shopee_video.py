@@ -52,7 +52,8 @@ def test_menu_do_robo_e_como_funciona(bm, Msg, Est):
     assert "O que cada botão faz" in texto and "Testar Caminho 🧭" in texto
     assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu_robo.state
     assert _textos(sv.teclado_robo(sv.ler_config())) == [
-        "Retomar Postagem ▶️", "Rascunhos do Robô 📝", "Preparar 1 Agora ⚡", "Rascunhos por Dia 📦", "Horário do Robô 🕗",
+        "Retomar Postagem ▶️", "Rascunhos do Robô 📝", "Preparar 1 Agora ⚡", "Histórico do Robô 📋",
+        "Rascunhos por Dia 📦", "Horário do Robô 🕗",
         "Testar Caminho 🧭", "Celular do Robô 📱", "Voltar à Shopee Vídeo 🔙"]
     msg = Msg("Como Funciona ❓")
     rodar(sv.como_funciona_handler(msg, est))
@@ -541,3 +542,26 @@ def test_treino_sem_resultado_depois_de_meia_hora_diz_que_nao_terminou(bm):
     assert linha.startswith("⚠️ o treino de 23/10 às 00:00 não terminou") and sv.BOTAO_TREINO in linha
     sv.robo.gravar_estado(treino_resultado="ok")
     assert sv._linha_treino(datetime(2026, 10, 23, 4, 53)) == "✅ caminho OK em 23/10 às 00:00"
+
+
+def test_historico_do_robo_mostra_as_tentativas_e_o_resumo_das_22h(bm, Msg, Est, monkeypatch):
+    # Escolha do Rafael (23/10): ver o que o robô já tentou, o que deu errado e onde parou.
+    sv, est = _painel(bm), Est()
+    msg = Msg("Histórico do Robô 📋")
+    rodar(sv.historico_handler(msg, est))
+    assert "Nenhuma tentativa" in msg.saidas[-1]
+    sv.robo.registrar_tentativa("rascunho", "pulado", "o nome do produto do vídeo não está na página: nada tocado",
+                                "Copo <Térmico>")
+    rodar(sv.historico_handler(msg, est))
+    texto = msg.saidas[-1]
+    assert "⏭️ 1 pulado" in texto and "Copo &lt;Térmico&gt;" in texto and "curtir o produto" in texto
+    assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu_robo.state
+    enviados = []
+
+    class Bot:
+        async def send_message(self, chat, texto, **kwargs):
+            enviados.append((chat, texto))
+
+    monkeypatch.setattr(sv, "bot_instance", Bot())
+    rodar(sv.mandar_resumo_do_robo())
+    assert enviados and "Resumo do Robô" in enviados[0][1] and "curtir o produto: 1×" in enviados[0][1]

@@ -110,6 +110,13 @@ jobs:
             # de caractere (o robô nunca grava o texto do título aqui).
             R=$(sqlite3 -readonly banco_dados.db "SELECT 'Última legenda que não bateu: ' || json_extract(valor, '\$.ultima_legenda_em') || ' → ' || json_extract(valor, '\$.ultima_legenda') FROM configuracoes WHERE chave = 'shopee_video_robo' AND json_extract(valor, '\$.ultima_legenda') IS NOT NULL" 2>/dev/null)
             if [ -n "$R" ]; then echo "$R"; fi
+            # O histórico das tentativas do robô: só resultados e passos (frases fixas do
+            # código), nunca o produto nem o motivo.
+            DESDE24=$(TZ=America/Sao_Paulo date -d '24 hours ago' '+%Y-%m-%d %H:%M:%S')
+            R=$(sqlite3 -readonly banco_dados.db "SELECT resultado || ': ' || COUNT(*) FROM shopee_video_tentativas WHERE momento >= '$DESDE24' GROUP BY resultado ORDER BY COUNT(*) DESC" 2>/dev/null | paste -sd ' ' -)
+            echo "Tentativas nas últimas 24 h: ${R:-nenhuma}"
+            R=$(sqlite3 -readonly banco_dados.db "SELECT acao || ' → ' || passo || ': ' || COUNT(*) FROM shopee_video_tentativas WHERE momento >= '$DESDE24' AND passo != '' GROUP BY acao, passo ORDER BY COUNT(*) DESC" 2>/dev/null | paste -sd '|' - | sed 's/|/ | /g')
+            if [ -n "$R" ]; then echo "Onde parou nas últimas 24 h: $R"; fi
 
             # Baixador: se a Shopee ainda bloqueia o download dos vídeos da Shopee Vídeo. Só
             # estados, datas e contagens (o último link pedido fica no banco e nunca sai daqui).
