@@ -61,6 +61,8 @@ LUGARES_POR_ROBO = 5
 # As chaves do robo_shopee_video (sem importá-lo, que traz a IA e o celular junto; o
 # tests/test_checkup.py confere que são as mesmas). O robô começa pausado.
 CHAVE_CONFIG_SV, CHAVE_DIA_SV = "shopee_video", "shopee_video_robo_dia"
+# A folga depois do fim da suspensão (a mesma do robo_shopee_video.FOLGA_DA_SUSPENSAO).
+FOLGA_DA_SUSPENSAO_SV = timedelta(minutes=15)
 # Resultados do robô da Shopee Vídeo que pedem investigação.
 RESULTADOS_RUINS = ("erro", "parou", "verificação", "treino parou")
 
@@ -484,7 +486,16 @@ def postagens_de_hoje(agora=None):
 def robo_da_shopee_video(agora=None):
     """Plano de hoje, rascunhos salvos hoje e as tentativas ruins das últimas 24 h (ação, resultado, passo)."""
     agora = _agora(agora)
-    pausado = (db.ler_config(CHAVE_CONFIG_SV, {}) or {}).get("robo_pausado", True)
+    config = db.ler_config(CHAVE_CONFIG_SV, {}) or {}
+    pausado = config.get("robo_pausado", True)
+    # A conta de Shopee Vídeo suspensa pela Shopee: o robô espera o fim e não salva nada.
+    suspenso = ""
+    try:
+        fim = datetime.strptime(config.get("robo_suspenso_ate") or "", "%Y-%m-%d %H:%M:%S")
+        if agora.replace(tzinfo=None) < fim + FOLGA_DA_SUSPENSAO_SV:
+            suspenso = fim.strftime("%d/%m %H:%M")
+    except ValueError:
+        pass
     plano = db.ler_config(CHAVE_DIA_SV, {}) or {}
     hoje = agora.strftime("%Y-%m-%d")
     horarios = plano.get("horarios", []) if plano.get("data") == hoje else []
@@ -502,7 +513,7 @@ def robo_da_shopee_video(agora=None):
     except sqlite3.OperationalError:
         ruins = []
     pulados = _contar("SELECT COUNT(*) FROM shopee_video_rascunhos WHERE criado_em >= ? AND estado = 'pulado'", hoje)
-    return {"ativo": not pausado, "horarios": len(horarios), "vencidos": vencidos,
+    return {"ativo": not pausado, "suspenso": suspenso, "horarios": len(horarios), "vencidos": vencidos,
             "salvos": salvos or 0, "pulados": pulados or 0, "ruins": ruins}
 
 
@@ -543,7 +554,7 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
             pontos.append(f"{nome}: {f['atrasados']} item(ns) atrasado(s) na fila")
         if (f["postados"] == 0 and (f["media"] or 0) >= MEDIA_PARA_COBRAR and agora.hour >= HORA_PARA_COBRAR):
             pontos.append(f"{nome}: nenhum post hoje (média de {f['media']:.1f} por dia)")
-    if robo_sv["ativo"] and robo_sv["salvos"] < robo_sv["vencidos"]:
+    if robo_sv["ativo"] and not robo_sv.get("suspenso") and robo_sv["salvos"] < robo_sv["vencidos"]:
         pontos.append(f"Robô da Shopee Vídeo: {robo_sv['vencidos']} horário(s) vencido(s) hoje e "
                       f"{robo_sv['salvos']} rascunho(s) salvo(s) ({robo_sv.get('pulados', 0)} vídeo(s) pulado(s))")
     for acao, resultado, passo, qtd in robo_sv["ruins"]:
@@ -689,7 +700,10 @@ def main():
 
     print("\n== Robô da Shopee Vídeo")
     robo_sv = robo_da_shopee_video(agora)
-    print(f"{'ativo' if robo_sv['ativo'] else 'pausado'} | horários hoje {robo_sv['horarios']} | "
+    situacao = 'ativo' if robo_sv['ativo'] else 'pausado'
+    if robo_sv["suspenso"]:
+        situacao += f" | conta suspensa pela Shopee até {robo_sv['suspenso']}"
+    print(f"{situacao} | horários hoje {robo_sv['horarios']} | "
           f"vencidos {robo_sv['vencidos']} | rascunhos salvos hoje {robo_sv['salvos']} | "
           f"vídeos pulados hoje {robo_sv['pulados']}")
     for acao, resultado, passo, qtd in robo_sv["ruins"]:

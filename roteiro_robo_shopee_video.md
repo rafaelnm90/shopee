@@ -20,6 +20,16 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   32768 a 60999 do IP do celular na rede privada) e conecta. Sem conseguir (depuração
   desligada, celular fora do Tailscale), a Postagem pausa sozinha e o assistente assume;
   Retomar Postagem ▶️ procura de novo antes de retomar.
+- **Conta suspensa pela Shopee (mapeado no Motorola em 23/10/2026):** com a conta de
+  Shopee Vídeo suspensa, tocar em **Postar vídeo** não abre nada (a tela fica no Perfil).
+  O aviso fica em **Notificações** (aba de baixo, `title` "Notificações") → filtro
+  **"Lives, Vídeos e ..."** (na fileira de filtros, ~540,947): um texto "Sua conta foi
+  banida temporariamente até DD-MM-AAAA HH:MM:SS ... Você não poderá publicar ... em
+  Shopee Vídeo durante o período de suspensão". O robô (`ler_suspensao`) só toca na aba
+  e no filtro e rola a lista 2 vezes; não abre a notificação. Ele olha quando a
+  Biblioteca não aparece depois do Postar vídeo (`abrir_galeria`) e antes de postar um
+  aprovado. Até o fim (chave `robo_suspenso_ate` de `shopee_video`, mais 15 min), nada
+  toca no celular, e o assistente espera junto.
 - **Mapa:** os caminhos ficam nas listas `CAMINHO_PERFIL`, `CAMINHO_POSTAR` e
   `CAMINHO_PRODUTO` do `robo_shopee_video.py` (o que tocar, a espera e o que tem de
   aparecer depois). O treino confere cada passo contra elas; quando a Shopee mudar uma

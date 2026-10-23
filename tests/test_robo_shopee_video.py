@@ -195,6 +195,8 @@ def _xml(*nos):
 
 
 ABA_EU = _no("Eu", caixa=(860, 2250, 1080, 2400))
+ABA_NOTIFICACOES = _no("Notificações", caixa=(650, 2250, 860, 2400))
+FILTRO_DOS_VIDEOS = _no("Lives, Vídeos e Afiliados", caixa=(440, 900, 640, 990))
 PRODUTO_NA_LISTA = _no(caixa=(0, 1060, 1080, 1330), filhos=(
     _no(VESTIDO, caixa=(300, 1070, 1040, 1130), clicavel=False)
     + _no(caixa=(840, 1225, 1010, 1290), filhos=_no("Adicionar", caixa=(850, 1235, 1000, 1280), clicavel=False))))
@@ -208,7 +210,7 @@ def _tela_final(legenda="", produto=False):
 
 
 TELAS = {
-    "inicio": [ABA_EU, _no("Início", caixa=(0, 2250, 200, 2400))],
+    "inicio": [ABA_EU, ABA_NOTIFICACOES, _no("Início", caixa=(0, 2250, 200, 2400))],
     "pagina_curta": [_no(caixa=(0, 1100, 1080, 1300), filhos=_no(VESTIDO, caixa=(40, 1190, 1010, 1245), clicavel=False)),
                      _no("Compre Agora", caixa=(500, 1365, 720, 1410))],
     "pagina_completa": [_no(ident="buttonItemLike", caixa=(1000, 1205, 1056, 1261))],
@@ -232,6 +234,12 @@ TELAS = {
     "janela": [_no("Editar nome do produto", caixa=(300, 1310, 780, 1370), clicavel=False),
                _no(VESTIDO, caixa=(360, 1450, 1040, 1510), clicavel=False), _no("Feito", caixa=(480, 2290, 600, 2340))],
     "live": [ABA_EU, _no("Live e Vídeo", caixa=(400, 2250, 600, 2400))],
+    # As Notificações, como no Motorola: os filtros no alto e a lista embaixo.
+    "notificacoes": [_no("Notificações", caixa=(400, 160, 680, 220), clicavel=False), FILTRO_DOS_VIDEOS,
+                     ABA_NOTIFICACOES, ABA_EU],
+    "notificacoes_videos": [_no("Notificações", caixa=(400, 160, 680, 220), clicavel=False), FILTRO_DOS_VIDEOS,
+                            _no("Seu vídeo teve mais de 100 visualizações", caixa=(40, 1990, 1040, 2050),
+                                clicavel=False), ABA_NOTIFICACOES, ABA_EU],
 }
 CAMINHO = {
     ("inicio", "Eu"): "eu", ("eu", "Criadores & Afiliados"): "criadores", ("criadores", "Conta"): "conta",
@@ -241,6 +249,8 @@ CAMINHO = {
     ("pagina_curta", VESTIDO): "pagina_completa", ("pagina_completa", "@buttonItemLike"): "pagina_curtida",
     ("final", "@ll_add_product_symbol"): "curtidas", ("curtidas", "Adicionar"): "janela",
     ("janela", "Feito"): "final", ("final", "@tv_drafts_box"): "live",
+    ("inicio", "Notificações"): "notificacoes", ("notificacoes", "Lives, Vídeos e Afiliados"): "notificacoes_videos",
+    ("notificacoes", "Eu"): "eu", ("notificacoes_videos", "Eu"): "eu",
 }
 
 
@@ -321,6 +331,12 @@ class AppDeMentira:
         self.prints.append(caminho)
         with open(caminho, "wb") as f:
             f.write(b"png")
+
+    def window_size(self):
+        return 1080, 2400
+
+    def swipe(self, *pontos):
+        self.toques.append("rolar")
 
 
 def _fonte(monkeypatch, confere=True, violacao=False):
@@ -403,7 +419,7 @@ def test_mesmo_video_3_vezes_depois_outro_ate_3_videos_e_espera_o_proximo_horari
                 f"Vestido 👗\n{LINK}", f"2026-10-22 0{numero}:00:00")
     tentados = []
 
-    def falha(d, ident, video, fonte):
+    def falha(d, ident, video, fonte, agora=None):
         tentados.append(video["id"])
         raise robo.Parada("não achei o botão Rascunhos")
 
@@ -1218,3 +1234,102 @@ def test_rascunho_de_varios_produtos_so_e_postado_com_todos_na_tela_final(monkey
     assert robo.ps.conferir_tela_final(app, video)[0]
     app.anexados = [PRODUTO_A, PRODUTO_B, RECOMENDADO]
     assert not robo.ps.conferir_tela_final(app, video)[0]
+
+
+# --- Conta de Shopee Vídeo suspensa pela Shopee ---
+
+BANIDA = ("Sua conta foi banida temporariamente até 26-10-2026 19:04:26 devido à violação das Diretrizes da "
+          "Comunidade da Shopee Vídeo. Você não poderá publicar conteúdos em Shopee Vídeo durante o período "
+          "de suspensão.")
+
+
+@pytest.fixture
+def conta_suspensa(monkeypatch):
+    """O Postar vídeo não abre nada, e as Notificações mostram o aviso da suspensão (Motorola, 23/10/2026)."""
+    monkeypatch.setitem(CAMINHO, ("perfil", "Postar vídeo"), "perfil")
+    monkeypatch.setitem(TELAS, "notificacoes_videos",
+                        TELAS["notificacoes_videos"] + [_no(BANIDA, caixa=(40, 1100, 1040, 1300), clicavel=False)])
+
+
+def test_suspensao_na_tela_le_o_fim_e_ignora_a_que_ja_acabou():
+    agora = momento("2026-10-23 19:30")
+    fim = robo.suspensao_na_tela(_xml(_no(BANIDA, clicavel=False)), agora)
+    assert fim == datetime(2026, 10, 26, 19, 4, 26, tzinfo=fuso_horario)
+    assert robo.suspensao_na_tela(_xml(_no(BANIDA, clicavel=False)), momento("2026-10-26 19:05")) is None
+    # Com duas, vale a que acaba por último; sem o "publicar", não é a suspensão.
+    outra = BANIDA.replace("26-10-2026 19:04:26", "29-10-2026 08:00:00")
+    assert robo.suspensao_na_tela(_xml(_no(BANIDA), _no(outra)), agora).day == 29
+    assert robo.suspensao_na_tela(_xml(_no("Sua conta foi verificada até 26-10-2026 19:04:26")), agora) is None
+
+
+def test_conta_suspensa_para_o_rascunho_avisa_uma_vez_e_nao_toca_ate_o_fim(monkeypatch, avisos, conta_suspensa):
+    # Escolha do Rafael (23/10, P4): pausar robô e assistente, avisar com a data e voltar sozinho.
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    app = AppDeMentira()
+    resultado = robo.rodada(d=app, agora=momento("2026-10-23 23:59"))
+    assert resultado == "conta de Shopee Vídeo suspensa pela Shopee até 26/10 às 19:04"
+    config = robo.ler_config()
+    assert config["robo_suspenso_ate"] == "2026-10-26 19:04:26" and config["robo_pausado"] is False
+    assert "Biblioteca" not in app.toques and "@tv_drafts_box" not in app.toques
+    # Primeiro o "começando um rascunho"; depois só o aviso da suspensão, sem o "não saiu".
+    assert len(avisos) == 2 and "26/10 às 19:04" in avisos[1] and "voltam sozinhos" in avisos[1]
+    assert not any("o rascunho não saiu" in a for a in avisos)
+    # O horário não volta, e o vídeo volta para a fila (o problema não era dele).
+    assert robo.estado_do_dia(config, momento("2026-10-23 23:59")).get("repetir") is False
+    assert robo.proximo_video(config)["id"] == "a1"
+    assert robo.tentativas_desde("2026-10-23 00:00:00")[0]["resultado"] == "suspensa"
+    # Até o fim (com a folga), nem a rodada nem o Preparar 1 Agora tocam no celular.
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-24 10:00")).startswith("conta suspensa até 26/10")
+    assert len(avisos) == 2
+    assert robo.rodada(preparar=True, d=Intocavel(), agora=momento("2026-10-26 19:15")).startswith("conta suspensa")
+    assert "não preparei o rascunho" in avisos[-1] and "26/10 às 19:04" in avisos[-1]
+
+
+def test_aprovado_espera_a_suspensao_sem_tocar_em_postar(monkeypatch, avisos, caminho_do_rascunho, conta_suspensa):
+    ident = _aprovado(monkeypatch)
+    app = AppComQuadros()
+    app.legenda, app.com_produto = TITULO, True
+    assert robo.rodada(d=app, agora=momento("2026-10-23 19:30")).startswith("conta de Shopee Vídeo suspensa")
+    assert "@btn_post" not in app.toques and "Rascunhos: 1" not in app.toques
+    assert robo.pegar(ident)["estado"] == "aprovado" and len(avisos) == 1 and "26/10 às 19:04" in avisos[0]
+
+
+def test_sem_suspensao_o_aprovado_e_postado_depois_de_olhar_as_notificacoes(monkeypatch, avisos, caminho_do_rascunho):
+    ident = _aprovado(monkeypatch)
+    app = AppComQuadros()
+    app.legenda, app.com_produto = TITULO, True
+    assert robo.rodada(d=app, agora=momento("2026-10-23 19:30")) == "rascunho aprovado postado"
+    # Olhou as Notificações (rolou a lista procurando o aviso) e só então postou.
+    assert app.toques.index("Lives, Vídeos e Afiliados") < app.toques.index("@btn_post")
+    assert app.toques.count("rolar") == robo.ROLADAS_NAS_NOTIFICACOES and robo.pegar(ident)["estado"] == "postado"
+    assert "robo_suspenso_ate" not in robo.ler_config()
+
+
+def test_fim_da_suspensao_volta_sozinho_e_espalha_os_aprovados(monkeypatch):
+    ativar(robo_inicio=8, robo_fim=22, robo_suspenso_ate="2026-10-26 19:04:26")
+    um = _rascunho("aprovado", postar_em="2026-10-24 10:00:00")
+    dois = _rascunho("aprovado", postar_em="2026-10-24 11:00:00")
+    assert robo.fim_da_suspensao(momento("2026-10-26 19:10")) is None          # ainda na folga
+    aviso = robo.fim_da_suspensao(momento("2026-10-26 19:20"))
+    assert "acabou" in aviso and "Voltei a preparar e postar" in aviso and "2 aprovado(s)" in aviso
+    assert "robo_suspenso_ate" not in robo.ler_config() and robo.fim_da_suspensao(momento("2026-10-26 19:35")) is None
+    horas = sorted(robo.pegar(i)["postar_em"] for i in (um, dois))
+    assert horas[0] > "2026-10-26 19:20:00"
+    distancia = (datetime.strptime(horas[1], "%Y-%m-%d %H:%M:%S") - datetime.strptime(horas[0], "%Y-%m-%d %H:%M:%S"))
+    assert distancia.total_seconds() >= robo.INTERVALO_DAS_POSTAGENS[0] * 60
+
+
+def test_quem_pausou_na_suspensao_continua_pausado_no_fim():
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True, "pausado": False,
+                                              "robo_suspenso_ate": "2026-10-26 19:04:26"})
+    aviso = robo.fim_da_suspensao(momento("2026-10-26 19:20"))
+    assert "continua pausado" in aviso and "assistente volta" in aviso
+    assert robo.ler_config()["robo_pausado"] is True
+
+
+def test_treino_na_conta_suspensa_avisa_a_suspensao_e_nao_que_o_app_mudou(monkeypatch, avisos, conta_suspensa):
+    resultado = robo.rodada(treino=True, d=AppDeMentira(), agora=momento("2026-10-23 19:30"))
+    assert resultado.startswith("conta de Shopee Vídeo suspensa")
+    assert robo.ler_estado()["treino_resultado"].startswith("conta de Shopee Vídeo suspensa")
+    assert len(avisos) == 1 and "algo mudou" not in str(avisos) and "26/10 às 19:04" in avisos[0]
