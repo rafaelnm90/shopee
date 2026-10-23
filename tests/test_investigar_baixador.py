@@ -45,7 +45,18 @@ def test_pagina_sem_video_lista_as_chaves_e_as_apis_dos_scripts():
 def test_trechos_da_api_mostram_o_codigo_em_volta():
     codigo = "a" * 400 + 'fetch("/api/v2/timeline/single",{post_id:e})' + "b" * 400
     trechos = ib.trechos_da_api(codigo, "/api/v2/timeline/single")
-    assert len(trechos) == 1 and "post_id" in trechos[0] and len(trechos[0]) <= 2 * ib.TRECHO + 30
+    assert len(trechos) == 1 and "post_id" in trechos[0]
+    assert len(trechos[0]) <= ib.TRECHO + ib.TRECHO_DEPOIS + 30
+
+
+def test_marcas_de_seguranca_contam_os_cabecalhos_contra_robos_dos_scripts():
+    # O Rafael perguntou (23/10) se a chamada do vídeo mudou: as marcas dizem se ela pede
+    # a assinatura contra robôs da Shopee ou só parâmetros comuns.
+    codigos = {"app.js": 'h["af-ac-enc-dat"]=s();h["x-api-source"]="pc";h["af-ac-enc-dat"]',
+               "video.js": 'get("/api/v2/timeline/single",{withCredentials:!0})', "vazio.js": ""}
+    achadas = ib.marcas_de_seguranca(codigos)
+    assert achadas["af-ac-enc-dat"] == (2, ["app.js"]) and achadas["x-api-source"] == (1, ["app.js"])
+    assert achadas["withCredentials"] == (1, ["video.js"]) and "captcha" not in achadas
 
 
 def test_link_curto_e_forma_do_universal_link_com_o_redir():
