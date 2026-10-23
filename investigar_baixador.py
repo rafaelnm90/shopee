@@ -17,6 +17,7 @@ APIs da própria Shopee, que são públicos.
     python3 investigar_baixador.py ID_DO_VIDEO   # o que vem depois de share-video/ no link
     python3 investigar_baixador.py curto:CODIGO  # o link curto br.shp.ee/CODIGO, como o membro cola
     python3 investigar_baixador.py ultimo        # o último vídeo da Shopee Vídeo pedido ao Baixador
+    python3 investigar_baixador.py apify         # a chave e o crédito da Apify, e o último vídeo por ela
 
 O "ultimo" é o da conferência semanal do Claude: o link fica no banco do servidor
 (chave baixador_shopee_video) e nunca é impresso.
@@ -314,7 +315,42 @@ async def investigar(id_video="", curto=False, url=None):
         shutil.rmtree(pasta, ignore_errors=True)
 
 
+async def investigar_apify():
+    """
+    O caminho da Apify (o serviço de fora que o Baixador usa quando a Shopee bloqueia):
+    se a chave está no servidor, o crédito do mês e, com o último vídeo pedido, o
+    download de verdade por ela. Só estados e números.
+    """
+    print("== A Apify")
+    if not dl.chave_apify():
+        print("chave: não está no servidor (rodar o chave_apify.yml depois de cadastrar o segredo APIFY_TOKEN)")
+        return
+    print("chave: está no servidor")
+    uso = await dl.uso_da_apify()
+    print(f"crédito do mês: US$ {uso[0]:.2f} usados de US$ {uso[1]:.2f}" if uso else "crédito do mês: a Apify não respondeu")
+    link = (dl.db.ler_config(dl.CHAVE_CONFERENCIA, {}) or {}).get("ultimo_link")
+    if not link:
+        print("nenhum vídeo da Shopee Vídeo pedido ao Baixador ainda: o download pela Apify fica para o primeiro")
+        return
+    pasta = tempfile.mkdtemp()
+    try:
+        caminho, motivo = await dl.baixar_pela_apify(link, pasta)
+        if motivo:
+            print(f"download pela Apify: não deu ({motivo})")
+        else:
+            largura, altura = await videos.dimensoes(caminho, timeout=30)
+            marca = os.path.exists(os.path.join(pasta, "COM_MARCA"))
+            print(f"download pela Apify: {os.path.getsize(caminho) / 1e6:.2f} MB, {largura}x{altura}, "
+                  f"{'versão com marca' if marca else 'versão sem marca'}")
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+
+
 def main(argumentos):
+    if argumentos == ["apify"]:
+        logging.getLogger(dl.logger.name).setLevel(logging.CRITICAL + 1)
+        asyncio.run(investigar_apify())
+        return 0
     if len(argumentos) != 1 or not re.fullmatch(r"(curto:)?[A-Za-z0-9_\-=%]+", argumentos[0]):
         print(__doc__)
         return 2

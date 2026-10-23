@@ -1,0 +1,43 @@
+name: Guardar a chave da Apify no servidor
+
+# O Baixador pede os vídeos da Shopee Vídeo ao serviço da Apify quando a Shopee bloqueia
+# (escolha do Rafael em 23/10/2026, DECISOES.md, Baixador). A chave fica no segredo
+# APIFY_TOKEN do repositório (Settings → Secrets and variables → Actions); este
+# workflow a grava no .env do servidor, sem mostrá-la, e testa a Apify com o
+# investigar_baixador.py apify. Só roda quando disparado à mão; rodar de novo troca a
+# chave. O Baixador lê a chave nova sem precisar reiniciar.
+#
+# O repositório é público, e os logs do Actions também: nada aqui imprime a chave
+# (o GitHub também a esconde), e o teste mostra só estados e números.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  guardar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Gravar a chave no .env e testar a Apify
+        uses: appleboy/ssh-action@master
+        env:
+          APIFY: ${{ secrets.APIFY_TOKEN }}
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          command_timeout: 8m
+          envs: APIFY
+          script: |
+            cd ~/shopee
+            if [ -z "$APIFY" ]; then
+              echo "❌ O segredo APIFY_TOKEN não está cadastrado no repositório."
+              exit 1
+            fi
+            touch .env
+            sed -i '/^APIFY_TOKEN=/d' .env
+            printf 'APIFY_TOKEN=%s\n' "$APIFY" >> .env
+            echo "✅ Chave da Apify gravada no .env do servidor."
+            venv/bin/python3 investigar_baixador.py apify
