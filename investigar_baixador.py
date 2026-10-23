@@ -16,6 +16,10 @@ APIs da própria Shopee, que são públicos.
 
     python3 investigar_baixador.py ID_DO_VIDEO   # o que vem depois de share-video/ no link
     python3 investigar_baixador.py curto:CODIGO  # o link curto br.shp.ee/CODIGO, como o membro cola
+    python3 investigar_baixador.py ultimo        # o último vídeo da Shopee Vídeo pedido ao Baixador
+
+O "ultimo" é o da conferência semanal do Claude: o link fica no banco do servidor
+(chave baixador_shopee_video) e nunca é impresso.
 """
 import asyncio
 import json
@@ -219,9 +223,15 @@ async def testar_api(sessao, id_video):
                 print(f"      {chave}")
 
 
-async def investigar(id_video, curto=False):
+def id_do_video(endereco):
+    """O código do vídeo (o que vem depois de share-video/), mesmo dentro do redir; "" sem ele."""
+    achado = re.search(r"/share-video/([A-Za-z0-9_\-=]+)", urllib.parse.unquote(str(endereco or "")))
+    return achado.group(1) if achado else ""
+
+
+async def investigar(id_video="", curto=False, url=None):
     import aiohttp
-    url = (URL_CURTA if curto else URL_DO_VIDEO).format(id=id_video)
+    url = url or (URL_CURTA if curto else URL_DO_VIDEO).format(id=id_video)
     print("== A página, como o Baixador abre")
     async with aiohttp.ClientSession(headers=dl.CABECALHO_NAVEGADOR) as sessao:
         async with sessao.get(url, allow_redirects=True, timeout=25) as resposta:
@@ -235,9 +245,11 @@ async def investigar(id_video, curto=False):
               f"{'sim' if dl.eh_video_da_shopee(urllib.parse.unquote(redir) or final) or dl.eh_link_curto_de_video(final) else 'não'}")
         for linha in descrever_pagina(html):
             print(linha)
-        if not tem_video(html) and not curto:
+        # No link curto, o código é o do encurtador, não o do vídeo: a API não serve.
+        alvo = "" if curto else (id_video or id_do_video(final))
+        if not tem_video(html) and alvo:
             await procurar_apis(sessao, html, str(resposta.url))
-            await testar_api(sessao, id_video)
+            await testar_api(sessao, alvo)
 
     print("== O Baixador com este link")
     pasta = tempfile.mkdtemp()
@@ -261,6 +273,13 @@ def main(argumentos):
     # O Baixador loga endereços (e erros que podem trazer endereços); aqui o log é
     # público, e o resultado sai pelos prints acima.
     logging.getLogger(dl.logger.name).setLevel(logging.CRITICAL + 1)
+    if argumentos[0] == "ultimo":
+        link = (dl.db.ler_config(dl.CHAVE_CONFERENCIA, {}) or {}).get("ultimo_link")
+        if not link:
+            print("nenhum vídeo da Shopee Vídeo pedido ao Baixador ainda")
+            return 0
+        asyncio.run(investigar(url=link))
+        return 0
     curto = argumentos[0].startswith("curto:")
     asyncio.run(investigar(urllib.parse.unquote(argumentos[0].removeprefix("curto:")), curto))
     return 0

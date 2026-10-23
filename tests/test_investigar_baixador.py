@@ -2,6 +2,7 @@
 import json
 
 import investigar_baixador as ib
+from conftest import inserir
 
 
 def test_descreve_onde_ha_video_sem_mostrar_endereco_nem_id():
@@ -53,3 +54,24 @@ def test_link_curto_e_forma_do_universal_link_com_o_redir():
                  "XCA3abcdefghijk%3D%3D&fromShareLink=1")
     forma = ib.forma_do_endereco(universal)
     assert forma == "shopee.com.br/… (redir: sv.shopee.com.br/share-video/…)"
+
+
+def test_ultimo_usa_o_link_guardado_no_banco_sem_imprimir(monkeypatch, capsys):
+    # A conferência semanal do Claude (pedido do Rafael em 23/10): o último vídeo pedido ao
+    # Baixador, lido no servidor; o log do Actions é público e o link nunca aparece.
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    assert ib.main(["ultimo"]) == 0
+    assert "nenhum vídeo da Shopee Vídeo pedido" in capsys.readouterr().out
+    link = "https://shopee.com.br/universal-link?redir=https%3A%2F%2Fsv.shopee.com.br%2Fshare-video%2FXCA3abc%3D%3D"
+    ib.dl.db.salvar_config(ib.dl.CHAVE_CONFERENCIA, {"ultimo_link": link})
+    chamadas = []
+
+    async def investigar(id_video="", curto=False, url=None):
+        chamadas.append(url)
+
+    monkeypatch.setattr(ib, "investigar", investigar)
+    assert ib.main(["ultimo"]) == 0
+    assert chamadas == [link] and "XCA3abc" not in capsys.readouterr().out
+    # O código do vídeo sai do redir para a conferência da API.
+    assert ib.id_do_video(link) == "XCA3abc=="
+    assert ib.id_do_video("https://br.shp.ee/abc") == ""
