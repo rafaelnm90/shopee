@@ -54,10 +54,13 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     mostra "Link copiado". O robô lê o link copiado (testado com o passo `copiado`: um
     link curto da Shopee, sem nunca mostrá-lo no log). O ícone tem a descrição "... video
     share icon" e só vale no player (o Perfil tem um compartilhar do perfil, no alto).
+  - **voltar da edição de um vídeo novo** (23/10/2026, ao descartar a postagem de teste):
+    depois do aviso de sair da tela final, a edição (`SSZMultipleEditActivity`) pergunta
+    "Deseja sair da página de edição?", com Salvar Rascunho (`tv_save`), **Descartar**
+    (`tv_no_save`) e Cancelar (`tv_cancel`). O robô descarta; depois, mais dois voltar
+    chegam ao Perfil.
 - **Ainda a mapear:** o link que abre um vídeo (Ver Produtos, vários produtos): até lá, o
-  robô só usa vídeos com link de produto, e os outros ficam para o assistente. E o
-  voltar da edição de um vídeo novo (antes de ser rascunho): o robô confirma o aviso de
-  sair e aperta voltar até a barra de baixo; o treino da segunda mostra se trava.
+  robô só usa vídeos com link de produto, e os outros ficam para o assistente.
 
 ## Onde paramos
 
