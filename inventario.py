@@ -753,7 +753,7 @@ EVENTOS_BAIXADOR = (
     ("trava(s) de canais", re.compile(r"🔒 \d+ bloqueado: falta")),
     ("trava(s) expirada(s) sem entrar", re.compile(r"⏳ Aviso de trava de \d+ expirou")),
     ("limite(s) diário(s)", re.compile(r"📦 \d+ atingiu o limite")),
-    ("falha(s) de download", re.compile(r"(❌ yt-dlp saiu|🎬 Sem formato|❌ Falha ao entregar)")),
+    ("falha(s) de download", re.compile(r"(❌ yt-dlp saiu|🎬 Sem formato|❌ Falha ao entregar|❌ Não entregue)")),
     ("início(s) do robô", re.compile(r"📥 Downloader no ar")),
 )
 

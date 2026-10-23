@@ -75,6 +75,47 @@ def test_log_do_robo_conta_quedas_rastros_avisos_e_erros():
     assert "privado" not in texto and "{…}" in texto
 
 
+def test_rastros_agrupados_pelo_tipo_e_pelo_lugar_do_codigo():
+    rastro_do_projeto = [
+        "Traceback (most recent call last):",
+        '  File "/home/ubuntu/shopee/bot_mestre.py", line 120, in publicar',
+        "    await bot.send_video(chat, video)",
+        '  File "/home/ubuntu/shopee/venv/lib/python3.12/site-packages/aiogram/client/bot.py", line 50, in send_video',
+        "    raise TelegramBadRequest(...)",
+        "aiogram.exceptions.TelegramBadRequest: Bad Request: chat -1001234567890 dado privado",
+    ]
+    so_biblioteca = [
+        "Traceback (most recent call last):",
+        '  File "/usr/lib/python3.12/asyncio/tasks.py", line 10, in run',
+        '  File "/home/ubuntu/shopee/venv/lib/python3.12/site-packages/telethon/client.py", line 77, in conectar',
+        "ConnectionError: segredo",
+    ]
+    linhas = ["2026-10-23 10:00:00.000 -0300 - ❌ algo"] + rastro_do_projeto * 2 + so_biblioteca
+    rastros = checkup.rastros_do_log(linhas)
+    assert rastros[0] == ("aiogram.exceptions.TelegramBadRequest", "bot_mestre.py:120 (publicar)", 2)
+    assert ("ConnectionError", "telethon/client.py:77", 1) in rastros
+    assert "privado" not in str(rastros) and "segredo" not in str(rastros)
+
+
+def test_processo_que_mais_falha_que_acerta_vira_ponto_de_atencao():
+    import registro_processos as rp
+    for _ in range(4):
+        rp.registrar("baixador", "pedido Shopee (vídeo)", "não entregue", "a Shopee demorou", ok=False,
+                     agora=AGORA - timedelta(hours=2))
+    rp.registrar("baixador", "pedido Shopee (vídeo)", "entregue", ok=True, agora=AGORA - timedelta(hours=1))
+    for _ in range(5):
+        rp.registrar("baixador", "pedido TikTok", "trava de canais", agora=AGORA - timedelta(hours=1))
+    rp.registrar("baixador", "pedido TikTok", "não entregue", "o vídeo é privado", ok=False, agora=AGORA)
+
+    processos = checkup.processos_do_dia(AGORA)
+    assert processos[("baixador", "pedido Shopee (vídeo)")]["falhas"] == 4
+    assert processos[("baixador", "pedido TikTok")]["neutros"] == 5
+    pontos = checkup.pontos_de_atencao([], {}, {}, {"ativo": False, "vencidos": 0, "salvos": 0, "ruins": []},
+                                       {}, ("x", 1.0, 1), AGORA, processos)
+    assert pontos == ["baixador: pedido Shopee (vídeo): 4 falha(s) e 1 acerto(s) "
+                      "(mais comum: não entregue - a Shopee demorou, 4x)"]
+
+
 def _filas_de_teste():
     with db.conexao() as c:
         c.execute("CREATE TABLE IF NOT EXISTS fila_postagens (id_unico TEXT, data_alvo TEXT, status TEXT, "
@@ -123,11 +164,16 @@ def test_robo_da_shopee_video_horarios_vencidos_e_tentativas_ruins():
     db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False})
     db.salvar_config(robo.CHAVE_DIA, {"data": "2026-10-23", "horarios": ["09:43", "12:40", "23:10"], "feitos": 2})
     robo.registrar_tentativa("rascunho", "salvo", agora=AGORA - timedelta(hours=12))
+    # Os rascunhos contam pela tabela deles: o histórico das tentativas pode ter começado depois.
+    robo.atualizar(robo.criar("v1", AGORA - timedelta(hours=12)), estado="postado")
+    robo.atualizar(robo.criar("v2", AGORA - timedelta(hours=9)), estado="pulado")
+    robo.criar("v3", AGORA - timedelta(hours=1))                                  # ainda preparando
+    robo.atualizar(robo.criar("v0", AGORA - timedelta(days=1)), estado="rascunho")  # ontem
     robo.registrar_tentativa("rascunho", "parou", "não achei o botão Rascunhos", "Fone X",
                              agora=AGORA - timedelta(hours=9))
 
     r = checkup.robo_da_shopee_video(AGORA)
-    assert (r["ativo"], r["horarios"], r["vencidos"], r["salvos"]) == (True, 3, 2, 1)
+    assert (r["ativo"], r["horarios"], r["vencidos"], r["salvos"], r["pulados"]) == (True, 3, 2, 1, 1)
     assert r["ruins"] == [("rascunho", "parou", "navegar no app", 1)]
     assert "Fone X" not in str(r)
 
@@ -138,6 +184,7 @@ def test_pontos_de_atencao():
              {"origem": "a", "lugar": "a.py:1", "texto": "y", "tipo": "(sem rastro)", "qtd": 2, "ultimo": "",
               "novo": False}]
     logs = {"downloader_bot": {"quedas": 1, "rastros": 2, "erros": 3, "avisos": 0,
+                               "rastros_por_lugar": [("ValueError", "downloader_bot.py:9 (f)", 2)],
                                "problemas": [("downloader_bot.py:5", "t", "error", 3)]}}
     filas = {"Viral": {"postados": 0, "para_hoje": 0, "atrasados": 2, "media": 4.0},
              "Autorais": {"postados": 0, "para_hoje": 0, "atrasados": 0, "media": 1.0}}
@@ -146,7 +193,8 @@ def test_pontos_de_atencao():
     pontos = checkup.pontos_de_atencao(erros, logs, filas, robo_sv, {"falha(s) de download": 4}, None, AGORA)
     texto = "\n".join(pontos)
     assert "erro novo: 1x bot_mestre.py:10" in texto and "a.py:1" not in texto   # 2x antigo não cobra
-    assert "downloader_bot: caiu" in texto and "2 rastro(s)" in texto and "downloader_bot.py:5" in texto
+    assert "downloader_bot: caiu" in texto and "downloader_bot.py:5" in texto
+    assert "2 rastro(s) de erro no log (mais comum: ValueError em downloader_bot.py:9 (f), 2x)" in texto
     assert "Viral: 2 item(ns) atrasado(s)" in texto and "Viral: nenhum post hoje" in texto
     assert "Autorais: nenhum post" not in texto      # média baixa não cobra
     assert "2 horário(s) vencido(s)" in texto and "navegar no app" in texto
@@ -163,7 +211,8 @@ def test_saida_completa_sem_dado_privado(monkeypatch, capsys):
     monkeypatch.setattr(checkup.backup_dados, "ultimo_backup", lambda: None)
     checkup.main()
     saida = capsys.readouterr().out
-    for secao in ("== Erros registrados", "== Log de cada robô", "== Postagens de hoje", "== Robô da Shopee Vídeo",
+    for secao in ("== Erros registrados", "== Log de cada robô", "== Processos dos robôs", "== Postagens de hoje",
+                  "== Robô da Shopee Vídeo",
                   "== Baixador e backup", "== Pontos de atenção"):
         assert secao in saida
     assert "secreto" not in saida

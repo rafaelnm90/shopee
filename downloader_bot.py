@@ -27,6 +27,7 @@ import hashlib
 import db
 import json
 import links_shopee
+import registro_processos
 import videos
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -579,6 +580,26 @@ def eh_video_da_shopee(url):
     return partes.netloc.lower().startswith("sv.shopee.") or "/share-video/" in partes.path
 
 
+def forma_do_link_shopee(url):
+    """Rótulo fixo do link da Shopee que o membro colou, para o registro dos processos."""
+    if eh_video_da_shopee(url):
+        return "vídeo"
+    if eh_link_curto_de_video(url):
+        return "link curto"
+    if "universal-link" in str(url or "").lower():
+        return "universal-link"
+    return "produto ou outro"
+
+
+def processo_do_pedido(plataforma, url):
+    """O nome do processo no registro: a plataforma e, na Shopee, a forma do link."""
+    return f"pedido {plataforma} ({forma_do_link_shopee(url)})" if plataforma == "Shopee" else f"pedido {plataforma}"
+
+
+def anotar_pedido(plataforma, url, resultado, detalhe="", ok=None):
+    registro_processos.registrar("baixador", processo_do_pedido(plataforma, url), resultado, detalhe, ok)
+
+
 def eh_link_curto_de_video(url):
     """
     br.shp.ee, o encurtador do Compartilhar da Shopee Vídeo. No servidor ele não
@@ -1053,8 +1074,10 @@ async def baixar_da_shopee(url, url_pedido, pasta):
     caminho_apify, motivo = await baixar_pela_apify(url_pedido, pasta)
     if caminho_apify:
         logger.info("🛒 Vídeo da Shopee Vídeo entregue pelo serviço da Apify.")
+        registro_processos.registrar("baixador", "Shopee pela Apify", "baixou", ok=True)
         return caminho_apify, None
     logger.info(f"🛒 A Apify não entregou o vídeo: {motivo}.")
+    registro_processos.registrar("baixador", "Shopee pela Apify", "não baixou", motivo, ok=False)
     return None, erro
 
 
@@ -1322,6 +1345,8 @@ async def receber_link(message: types.Message):
             segundos = 20
 
         aviso = await message.answer(texto_aviso, parse_mode="HTML")
+        registro_processos.registrar("baixador", "mensagem sem link", "orientada",
+                                     "arquivo no lugar do link" if tem_midia else "texto")
 
         # A mensagem sem link sai na hora; esperar a faxina de 3 dias deixaria ela
         # empurrando o painel para cima.
@@ -1356,6 +1381,7 @@ async def receber_link(message: types.Message):
         )
         GATES_ABERTOS[message.from_user.id] = aviso_trava
         logger.info(f"🔒 {message.from_user.id} bloqueado: falta {len(faltando)} canal(is).")
+        anotar_pedido(plataforma, url, "trava de canais")
 
         # Desistiu? O aviso não fica encalhado no tópico. Se ela entrar nos canais
         # nesse meio-tempo, o fluxo normal já terá apagado e o GATES_ABERTOS estará
@@ -1373,6 +1399,7 @@ async def receber_link(message: types.Message):
             parse_mode="HTML"
         )
         logger.info(f"📦 {message.from_user.id} atingiu o limite ({usados}).")
+        anotar_pedido(plataforma, url, "limite diário")
         asyncio.create_task(expirar_aviso_limite(aviso_limite, message))
         return
 
@@ -1409,6 +1436,7 @@ async def receber_link(message: types.Message):
             asyncio.create_task(apagar_link_original(message))
 
             logger.info(f"♻️ Entregue do cache para {message.from_user.id} ({plataforma}).")
+            anotar_pedido(plataforma, url, "entregue do cache", ok=True)
 
             # O painel também desce quando a entrega vem do cache. Sem isto ele
             # só acompanha os downloads reais e fica para trás nas repetições.
@@ -1441,6 +1469,8 @@ async def receber_link(message: types.Message):
 
             if erro:
                 await status.edit_text(texto_do_erro(mencao, erro), parse_mode="HTML")
+                logger.info(f"❌ Não entregue para {message.from_user.id} ({plataforma}): {erro}")
+                anotar_pedido(plataforma, url_pedido, "não entregue", erro, ok=False)
                 return
 
             legenda = (
@@ -1484,12 +1514,14 @@ async def receber_link(message: types.Message):
                 asyncio.create_task(apagar_depois(aviso_cota, 30))
 
             logger.info(f"📤 Vídeo entregue para {message.from_user.id} ({plataforma}).")
+            anotar_pedido(plataforma, url_pedido, "entregue", ok=True)
 
             # Marca o painel para descer daqui a 3 min, não na hora.
             agendar_painel()
 
         except Exception as e:
             logger.error(f"❌ Falha ao entregar: {e}")
+            anotar_pedido(plataforma, url_pedido, "falha no envio", type(e).__name__, ok=False)
             try:
                 await status.edit_text(f"❌ {mencao}, algo deu errado no envio. Tente de novo.")
             except Exception: pass
