@@ -1,10 +1,12 @@
-"""downloader_bot: vídeo da Shopee Vídeo que a Shopee não deixa baixar explica e ensina a salvar pelo app."""
+"""downloader_bot: vídeo da Shopee Vídeo que a Shopee não deixa baixar explica e ensina a salvar pelo app; a conferência diária do bloqueio."""
+
+from datetime import datetime
 
 import aiohttp
 import pytest
 
 import downloader_bot as dl
-from conftest import rodar
+from conftest import inserir, rodar
 
 UNIVERSAL = ("https://shopee.com.br/universal-link?redir=https%3A%2F%2Fsv.shopee.com.br%2Fshare-video%2FAAAAcopos"
              "%3D%3D%3FfromSource%3Dcopy_link&fromShareLink=share-marker")
@@ -93,3 +95,63 @@ def test_link_curto_da_shopee_video_que_nao_redireciona_tambem_ensina_a_salvar(m
     caminho, erro = rodar(dl.baixar_video_shopee("https://br.shp.ee/03xe6k5k?fromSource=copy_link", str(tmp_path)))
     assert caminho is None and erro == dl.ERRO_SHOPEE_BLOQUEOU
     assert dl.eh_link_curto_de_video("https://br.shp.ee/x") and not dl.eh_link_curto_de_video("https://s.shopee.com.br/x")
+
+
+# --- Conferência diária do bloqueio (pedido do Rafael em 23/10) ---
+
+VIDEO = "https://sv.shopee.com.br/share-video/AAAAcopos"
+
+
+@pytest.fixture
+def avisos(monkeypatch):
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    enviados = []
+    import avisar_rafael
+    monkeypatch.setattr(avisar_rafael, "mandar_texto", lambda texto: enviados.append(texto) or True)
+    return enviados
+
+
+def test_cada_tentativa_anota_a_situacao_e_so_a_mudanca_vira_aviso(avisos):
+    manha, tarde = datetime(2026, 10, 23, 9, 0), datetime(2026, 10, 23, 15, 0)
+    assert dl.registrar_tentativa_shopee(VIDEO, dl.ERRO_SHOPEE_BLOQUEOU, manha) is None   # 1ª anotação
+    assert dl.registrar_tentativa_shopee(VIDEO, dl.ERRO_SHOPEE_BLOQUEOU, manha) is None
+    # Link de produto e os outros erros não dizem nada sobre o bloqueio.
+    assert dl.registrar_tentativa_shopee("https://shopee.com.br/x-i.1.2", None, tarde) is None
+    assert dl.registrar_tentativa_shopee(VIDEO, "a Shopee demorou demais para responder", tarde) is None
+    assert dl.registrar_tentativa_shopee(VIDEO, None, tarde) == "liberado"
+    estado = dl.db.ler_config(dl.CHAVE_CONFERENCIA)
+    assert estado["situacao"] == "liberado" and estado["desde"] == "2026-10-23 15:00:00"
+    assert (estado["bloqueados_hoje"], estado["baixados_hoje"]) == (2, 1) and estado["ultimo_link"] == VIDEO
+    # Dia novo zera as contagens do dia.
+    dl.registrar_tentativa_shopee(VIDEO, None, datetime(2026, 10, 24, 8, 0))
+    assert (dl.db.ler_config(dl.CHAVE_CONFERENCIA)["bloqueados_hoje"],
+            dl.db.ler_config(dl.CHAVE_CONFERENCIA)["baixados_hoje"]) == (0, 1)
+
+
+def test_conferencia_diaria_baixa_o_ultimo_video_do_jeito_normal_e_avisa_quando_libera(monkeypatch, avisos):
+    assert rodar(dl.conferir_shopee_video()) == "nenhum vídeo da Shopee Vídeo pedido ainda"
+    dl.registrar_tentativa_shopee(VIDEO, dl.ERRO_SHOPEE_BLOQUEOU, datetime(2026, 10, 23, 9, 0))
+    monkeypatch.setattr(dl, "PASTA_TEMP_DOWNLOAD", ".")
+    pedidos = []
+
+    async def baixar(link, pasta):
+        pedidos.append(link)
+        return "video.mp4", None
+
+    monkeypatch.setattr(dl, "baixar_video_shopee", baixar)
+    assert rodar(dl.conferir_shopee_video(datetime(2026, 10, 24, 7, 17))) == "baixou"
+    assert pedidos == [VIDEO] and avisos == [dl.AVISO_DA_MUDANCA["liberado"]]
+    estado = dl.db.ler_config(dl.CHAVE_CONFERENCIA)
+    assert estado["ultima_conferencia_em"] == "2026-10-24 07:17:00" and estado["ultima_conferencia"] == "baixou"
+
+    async def bloqueado(link, pasta):
+        return None, dl.ERRO_SHOPEE_BLOQUEOU
+
+    monkeypatch.setattr(dl, "baixar_video_shopee", bloqueado)
+    assert rodar(dl.conferir_shopee_video(datetime(2026, 10, 25, 7, 17))) == "bloqueado"
+    assert avisos[-1] == dl.AVISO_DA_MUDANCA["bloqueado"]
+
+
+def test_conferencia_roda_uma_vez_por_dia_no_horario():
+    assert dl.segundos_ate_a_conferencia(datetime(2026, 10, 23, 7, 0)) == 17 * 60
+    assert dl.segundos_ate_a_conferencia(datetime(2026, 10, 23, 7, 17)) == 24 * 3600

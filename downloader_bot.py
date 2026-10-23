@@ -770,6 +770,104 @@ async def baixar_video_shopee(url, pasta):
         logger.error(f"❌ Erro crítico na extração da matriz da Shopee: {e}")
         return None, "erro interno ao extrair matriz da Shopee"
 
+# A conferência do bloqueio da Shopee Vídeo: cada vídeo de lá que o Baixador tenta (de um
+# membro ou da conferência diária) diz se a Shopee ainda bloqueia. Mudou, o Rafael recebe
+# aviso no privado; o diagnostico.yml mostra a situação, só com estados e datas. A
+# conferência baixa do jeito normal, sem furar o bloqueio. Decisão do Rafael:
+# DECISOES.md, Baixador.
+CHAVE_CONFERENCIA = "baixador_shopee_video"
+HORA_DA_CONFERENCIA = (7, 17)   # de Brasília, todo dia
+AVISO_DA_MUDANCA = {
+    "liberado": ("✅ Baixador: a Shopee voltou a deixar baixar os vídeos da Shopee Vídeo. "
+                 "Os membros já recebem o vídeo de novo."),
+    "bloqueado": ("⚠️ Baixador: a Shopee voltou a bloquear o download dos vídeos da Shopee Vídeo. "
+                  "O Baixador explica aos membros e ensina a salvar pelo app, e confere de novo todo dia."),
+}
+
+
+def registrar_tentativa_shopee(link, erro, agora=None):
+    """
+    Guarda o resultado de um link da Shopee Vídeo. Devolve a situação nova ("bloqueado"
+    ou "liberado") quando ela mudou, para o aviso; senão None. Link de produto e os
+    outros erros não dizem nada sobre o bloqueio.
+    """
+    if erro == ERRO_SHOPEE_BLOQUEOU:
+        situacao = "bloqueado"
+    elif not erro and (eh_video_da_shopee(link) or eh_link_curto_de_video(link)):
+        situacao = "liberado"
+    else:
+        return None
+    agora = agora or datetime.now()
+    momento, dia = agora.strftime("%Y-%m-%d %H:%M:%S"), agora.strftime("%Y-%m-%d")
+
+    def alterar(estado):
+        if estado.get("dia") != dia:
+            estado.update(dia=dia, bloqueados_hoje=0, baixados_hoje=0)
+        campo = "bloqueados_hoje" if situacao == "bloqueado" else "baixados_hoje"
+        estado[campo] = estado.get(campo, 0) + 1
+        anterior = estado.get("situacao")
+        if anterior != situacao:
+            estado.update(situacao=situacao, desde=momento)
+        estado.update(ultima_tentativa_em=momento, ultimo_link=link)
+        # A primeira anotação não é mudança: não havia situação antes para comparar.
+        return situacao if anterior and anterior != situacao else None
+
+    return db.atualizar_config(CHAVE_CONFERENCIA, alterar)
+
+
+async def avisar_mudanca_shopee(situacao):
+    """O aviso no privado do Rafael, pelo bot principal, quando o bloqueio muda."""
+    import avisar_rafael
+    try:
+        await asyncio.to_thread(avisar_rafael.mandar_texto, AVISO_DA_MUDANCA[situacao])
+    except Exception as e:
+        logger.warning(f"⚠️ Aviso do bloqueio da Shopee Vídeo não saiu: {type(e).__name__}")
+
+
+async def conferir_shopee_video(agora=None):
+    """
+    A conferência diária: baixa de novo, do jeito normal, o último vídeo da Shopee Vídeo
+    que um membro pediu, e anota o resultado. Sem nenhum pedido ainda, não confere.
+    Devolve o resultado em poucas palavras.
+    """
+    link = (db.ler_config(CHAVE_CONFERENCIA, {}) or {}).get("ultimo_link")
+    if not link:
+        return "nenhum vídeo da Shopee Vídeo pedido ainda"
+    pasta = tempfile.mkdtemp(dir=PASTA_TEMP_DOWNLOAD)
+    try:
+        _, erro = await baixar_video_shopee(link, pasta)
+    finally:
+        shutil.rmtree(pasta, ignore_errors=True)
+    mudou = registrar_tentativa_shopee(link, erro, agora)
+    resultado = "baixou" if not erro else ("bloqueado" if erro == ERRO_SHOPEE_BLOQUEOU else "outro erro")
+    momento = (agora or datetime.now()).strftime("%Y-%m-%d %H:%M:%S")
+    db.atualizar_config(CHAVE_CONFERENCIA,
+                        lambda estado: estado.update(ultima_conferencia_em=momento, ultima_conferencia=resultado))
+    if mudou:
+        await avisar_mudanca_shopee(mudou)
+    logger.info(f"🔎 Conferência diária da Shopee Vídeo: {resultado}.")
+    return resultado
+
+
+def segundos_ate_a_conferencia(agora=None):
+    agora = agora or datetime.now()
+    hora, minuto = HORA_DA_CONFERENCIA
+    alvo = agora.replace(hour=hora, minute=minuto, second=0, microsecond=0)
+    if alvo <= agora:
+        alvo += timedelta(days=1)
+    return (alvo - agora).total_seconds()
+
+
+async def conferencia_diaria_loop():
+    """Todo dia na HORA_DA_CONFERENCIA, a conferência do bloqueio da Shopee Vídeo."""
+    while True:
+        await asyncio.sleep(segundos_ate_a_conferencia())
+        try:
+            await conferir_shopee_video()
+        except Exception as e:
+            logger.error(f"❌ Conferência diária da Shopee Vídeo falhou: {type(e).__name__}")
+
+
 async def _baixar_video_uma_vez(url, pasta):
     """
     Roda o yt-dlp em SUBPROCESSO. Chamar direto travaria o bot inteiro,
@@ -1144,6 +1242,9 @@ async def receber_link(message: types.Message):
         try:
             if plataforma == "Shopee":
                 caminho, erro = await baixar_video_shopee(url, pasta)
+                mudou = registrar_tentativa_shopee(url, erro)
+                if mudou:
+                    asyncio.create_task(avisar_mudanca_shopee(mudou))
             else:
                 caminho, erro = await baixar_video(url, pasta)
 
@@ -1356,7 +1457,7 @@ async def comando_painel_downloader(message: types.Message):
     except Exception: pass
 
 async def main():
-    """Sobe o bot e as rotinas de fundo (atualização do yt-dlp, faxina do tópico, painel)."""
+    """Sobe o bot e as rotinas de fundo (atualização do yt-dlp, faxina do tópico, conferência da Shopee Vídeo, painel)."""
     if not TOKEN:
         logger.error("❌ TELEGRAM_TOKEN_DOWNLOADER não encontrado no .env. Encerrando.")
         return
@@ -1365,6 +1466,7 @@ async def main():
     logger.info(f"📥 Downloader no ar como @{me.username} "
                 f"(privacy {'desligado ✅' if me.can_read_all_group_messages else 'LIGADO ⚠️'})")
     asyncio.create_task(faxina_diaria_loop())
+    asyncio.create_task(conferencia_diaria_loop())
 
     asyncio.create_task(reenviar_painel_downloader())
 
