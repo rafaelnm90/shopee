@@ -79,3 +79,17 @@ def test_eh_video_da_shopee():
     assert dl.eh_video_da_shopee("https://shopee.com.br/share-video/AAAA?x=1")
     assert not dl.eh_video_da_shopee("https://shopee.com.br/produto-i.1.2")
     assert not dl.eh_video_da_shopee(None)
+
+
+def test_link_curto_da_shopee_video_que_nao_redireciona_tambem_ensina_a_salvar(monkeypatch, tmp_path):
+    # Vídeo do Rafael (23/10, 09:00): no servidor, br.shp.ee responde 200 com uma página que
+    # só redireciona por script; o Baixador nunca chegava ao vídeo e dizia "talvez o link
+    # seja de produto".
+    class SemRedirecionar(Sessao):
+        def get(self, url, **kwargs):
+            return Resposta(url, "<html><script>var ULS = {};</script></html>")
+
+    monkeypatch.setattr(aiohttp, "ClientSession", SemRedirecionar)
+    caminho, erro = rodar(dl.baixar_video_shopee("https://br.shp.ee/03xe6k5k?fromSource=copy_link", str(tmp_path)))
+    assert caminho is None and erro == dl.ERRO_SHOPEE_BLOQUEOU
+    assert dl.eh_link_curto_de_video("https://br.shp.ee/x") and not dl.eh_link_curto_de_video("https://s.shopee.com.br/x")

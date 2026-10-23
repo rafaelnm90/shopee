@@ -579,6 +579,17 @@ def eh_video_da_shopee(url):
     return partes.netloc.lower().startswith("sv.shopee.") or "/share-video/" in partes.path
 
 
+def eh_link_curto_de_video(url):
+    """
+    br.shp.ee, o encurtador do Compartilhar da Shopee Vídeo. No servidor ele não
+    redireciona: abre uma página que só redireciona por script, no celular, e o Baixador
+    nunca chega à página do vídeo (investigar_baixador, 23/10/2026).
+    """
+    import urllib.parse
+    host = urllib.parse.urlparse(str(url or "")).netloc.lower()
+    return host == "shp.ee" or host.endswith(".shp.ee")
+
+
 def texto_do_erro(mencao, erro):
     """A mensagem do download que não deu certo, com a dica que serve para aquele erro."""
     if erro == ERRO_SHOPEE_BLOQUEOU:
@@ -727,7 +738,8 @@ async def baixar_video_shopee(url, pasta):
                 logger.warning("⚠️ Só há a versão com marca: o ffmpeg limpa depois.")
 
             if not link_mp4:
-                if eh_video_da_shopee(pagina):
+                # Link curto que ficou nele mesmo: a página que só redireciona por script.
+                if eh_video_da_shopee(pagina) or eh_link_curto_de_video(pagina):
                     return None, ERRO_SHOPEE_BLOQUEOU
                 return None, ("não achei nenhum arquivo de vídeo nesta página da Shopee. "
                               "Talvez o link seja de produto, e não de vídeo")
