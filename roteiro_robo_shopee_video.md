@@ -51,8 +51,9 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   - **link do post:** o vídeo no Perfil abre o player (`NativePlayerActivity`); o ícone de
     compartilhar fica na coluna da direita (~1001,1985, sem texto, só a descrição) e abre
     a folha com os apps e, embaixo, **Copiar link** (~360,2251), Salvar e Fixar. O app
-    mostra "Link copiado". O passo `copiado` do explorar diz se o celular deixa o robô
-    ler o link (sem nunca mostrá-lo).
+    mostra "Link copiado". O robô lê o link copiado (testado com o passo `copiado`: um
+    link curto da Shopee, sem nunca mostrá-lo no log). O ícone tem a descrição "... video
+    share icon" e só vale no player (o Perfil tem um compartilhar do perfil, no alto).
 - **Ainda a mapear:** o link que abre um vídeo (Ver Produtos, vários produtos): até lá, o
   robô só usa vídeos com link de produto, e os outros ficam para o assistente. E o
   voltar da edição de um vídeo novo (antes de ser rascunho): o robô confirma o aviso de
