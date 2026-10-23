@@ -78,6 +78,10 @@ VIDEOS_SEM_OFERTA_POR_RODADA = 5
 SEM_OFERTA = "o link não diz o produto do vídeo (produto sem oferta de afiliado)"
 # Produtos do Ver Produtos que o robô confere num vídeo (cada um custa 2 conferências da IA).
 MAXIMO_PRODUTOS_DO_VIDEO = 6
+# O player do vídeo no app; sem ele, o link não abriu o vídeo.
+PLAYER_DO_VIDEO = "rn_vod_player_view_with_surface"
+# Segundos a mais antes de desistir do Ver Produtos: o player às vezes demora a mostrá-lo.
+ESPERA_DO_VER_PRODUTOS = 8
 CHAVE_ESTADO = "shopee_video_robo"
 PASTA_RASCUNHOS = os.path.join(av.PASTA_TRABALHO, "rascunhos")
 # Minutos sorteados entre uma postagem aprovada e a seguinte.
@@ -915,10 +919,13 @@ def _produtos_do_video(d, video, vistos):
     ps.abrir_link(d, video["link"])
     pausa(12)
     xml = tela(d)
+    if not ps.video_removido(xml) and not tem(xml, "Ver Produtos"):
+        pausa(ESPERA_DO_VER_PRODUTOS)
+        xml = tela(d)
     if ps.video_removido(xml):
         raise Parada("o vídeo do link foi removido", do_video=True)
     if not tem(xml, "Ver Produtos"):
-        raise Parada("o link de vídeo não mostrou o Ver Produtos", do_video=True)
+        raise Parada(_sem_ver_produtos(xml), do_video=True)
     tocar(d, "Ver Produtos", 6)
     quantos = len(ps.produtos_vinculados(tela(d)))
     if not quantos:
@@ -947,6 +954,20 @@ def _produtos_do_video(d, video, vistos):
     if not confirmados:
         raise Parada("a IA não confirmou nenhum produto do Ver Produtos", do_video=True)
     return confirmados
+
+
+def _sem_ver_produtos(xml):
+    """
+    Por que o vídeo não mostrou o Ver Produtos, em texto fixo, que o investigar_robo.yml
+    mostra: o link não abriu o player, o player tem o cartão de um produto (com o botão
+    de comprar) sem o Ver Produtos, ou nem isso.
+    """
+    lista = ps.elementos(xml)
+    if not any(el["id"] == PLAYER_DO_VIDEO for el in lista):
+        return "o link de vídeo não abriu o vídeo no app (sem o Ver Produtos)"
+    if any(ps.texto_proibido(el["texto"]) for el in lista):
+        return "o vídeo mostrou o cartão de um produto, sem o Ver Produtos"
+    return "o link de vídeo não mostrou o Ver Produtos"
 
 
 def nome_na_galeria(ident):
