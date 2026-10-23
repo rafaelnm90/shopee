@@ -572,7 +572,7 @@ def _preparar(d, ident, video, fonte):
     seguir(d, CAMINHO_POSTAR)
 
     tocar(d, "@et_caption", 3)
-    d.send_keys(textos["titulo"])
+    ps.escrever(d, textos["titulo"])
     pausa(3)
     na_tela = legenda_na_tela(tela(d))
     if not mesma_legenda(na_tela, textos["titulo"]):

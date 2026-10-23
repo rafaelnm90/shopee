@@ -333,6 +333,21 @@ def video_do_teste(novo=False):
     return video
 
 
+def escrever(d, texto):
+    """
+    Escreve no campo com o cursor pela acessibilidade do Android (o set_text do campo em
+    foco): o send_keys do uiautomator2 troca cada emoji de fora do plano básico (💡, 👗)
+    por ".." (visto no Motorola em 23/10/2026 com o passo legenda), e o título ia ao ar
+    errado. O texto entra inteiro, no lugar do que havia no campo. Sem campo em foco, cai
+    no send_keys.
+    """
+    campo = d(focused=True)
+    if campo.exists:
+        campo.set_text(texto)
+    else:
+        d.send_keys(texto)
+
+
 def escrever_titulo(d, video):
     """Escreve o título da IA (prompt do Gem e diretrizes) no campo com o cursor. (ok, o que dizer no log)."""
     textos = asyncio.run(assistente.textos_do_video(video["arquivo"], video.get("nome") or ""))
@@ -340,7 +355,7 @@ def escrever_titulo(d, video):
         return False, "a IA viu violação das diretrizes: título não escrito"
     if not textos or not textos["titulo"]:
         return False, "a IA não devolveu título"
-    d.send_keys(textos["titulo"])
+    escrever(d, textos["titulo"])
     # O título fica guardado para a aprovação do rascunho mostrar o texto que está na
     # legenda, e o comentário (da mesma resposta da IA) para o passo comentario.
     db.salvar_config(CHAVE_TESTE, dict(video, titulo=textos["titulo"], comentario=textos.get("comentario") or ""))
@@ -782,7 +797,7 @@ def fazer_passo(d, nome, argumento):
         time.sleep(min(float(argumento or 1), MAXIMO_ESPERA))
         return True, "esperado"
     if nome == "escrever":
-        d.send_keys(argumento)
+        escrever(d, argumento)
         return True, "escrito"
     if nome in ("link", "video", "titulo", "comentario", "ia", "curtir", "produto", "conferir", "postar"):
         video = video_do_teste(novo=nome == "video" and argumento == "novo")
