@@ -99,3 +99,63 @@ def test_ids_dos_bots_vem_dos_tokens(monkeypatch):
     monkeypatch.setenv("TELEGRAM_TOKEN_DOWNLOADER", "111:abc")
     monkeypatch.setenv("TELEGRAM_TOKEN", "222:def")
     assert fb.ids_dos_bots() == {111, 222}
+
+
+# --- Respostas de erro (escolhas do Rafael em 23/10: somem em 5 min, as antigas também) ---
+
+from datetime import datetime, timedelta, timezone
+
+AGORA = datetime(2026, 10, 23, 22, 0, tzinfo=timezone.utc)
+
+
+def erro(id_, membro, minutos_atras):
+    mencao = SimpleNamespace(user_id=membro)
+    return SimpleNamespace(id=id_, sender_id=BOT, sender=None, action=None, entities=[mencao],
+                           date=AGORA - timedelta(minutes=minutos_atras),
+                           message="❌ Vânia, não deu certo: não achei nenhum arquivo de vídeo.")
+
+
+def link(id_, membro, minutos_atras):
+    return SimpleNamespace(id=id_, sender_id=membro, sender=None, action=None, entities=[],
+                           date=AGORA - timedelta(minutes=minutos_atras),
+                           message="https://br.shp.ee/abc?fromSource=copy_link")
+
+
+def test_erro_vencido_sai_com_o_link_do_membro_e_o_recente_fica(monkeypatch):
+    _sem_espera(monkeypatch)
+    outra = 456
+    mensagens = [
+        link(10, PESSOA, 60 * 30), erro(11, PESSOA, 60 * 30 - 1),          # de ontem: os dois saem
+        link(20, outra, 20), video(21),                                     # vídeo entregue fica
+        link(30, PESSOA, 8), erro(31, PESSOA, 7),                           # 7 min: saem
+        link(40, outra, 3), erro(41, outra, 2),                             # 2 min: ainda ficam
+    ]
+    for m in mensagens:
+        m.date = getattr(m, "date", AGORA)
+    assert sorted(fb.erros_vencidos(mensagens, {BOT}, AGORA)) == [10, 11, 30, 31]
+
+
+def test_link_longe_do_erro_ou_de_outra_pessoa_fica():
+    antigo = link(5, PESSOA, 120)                          # 2 h antes do erro: outro pedido
+    alheio = link(6, 789, 9)
+    assert fb.erros_vencidos([antigo, alheio, erro(7, PESSOA, 8)], {BOT}, AGORA) == [7]
+
+
+def test_mencao_pelo_link_tg_user_tambem_vale():
+    resposta = erro(9, PESSOA, 10)
+    resposta.entities = [SimpleNamespace(url=f"tg://user?id={PESSOA}")]
+    assert fb.mencionado(resposta) == PESSOA
+    assert fb.erros_vencidos([link(8, PESSOA, 11), resposta], {BOT}, AGORA) == [9, 8]
+
+
+def test_faxina_apaga_o_erro_vencido_e_o_link_do_tópico(monkeypatch):
+    _sem_espera(monkeypatch)
+    _registrar_painel(1)
+    agora = datetime.now(timezone.utc)
+    pedido = link(2, PESSOA, 0)
+    pedido.date = agora - timedelta(days=3)
+    resposta = erro(3, PESSOA, 0)
+    resposta.date = agora - timedelta(days=3)
+    tg = TelegramFalso([painel(1), pedido, resposta])
+    assert rodar(fb.limpar_topico(tg, bots={BOT})) == (2, None)
+    assert tg.apagados() == [2, 3]
