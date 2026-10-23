@@ -677,7 +677,12 @@ def abrir_rascunho(d, rascunho):
     pausa(10)
     seguir(d, [("@tv_compress", 10, "@et_caption")])
     tela(d)
-    if not mesma_legenda(ps.legenda_do_campo(d), rascunho["titulo"]):
+    # Aqui o campo não está em foco e a leitura vem pela acessibilidade, com ".." no lugar
+    # de cada emoji de fora do plano básico; o texto com os emojis já foi conferido pela
+    # cópia do campo quando o rascunho foi preparado.
+    lida = ps.legenda_do_campo(d)
+    if not (mesma_legenda(lida, rascunho["titulo"])
+            or mesma_legenda(lida, ps.como_o_android_le(rascunho["titulo"]))):
         raise Parada("o rascunho aberto não tem o título do aprovado")
     _conferir(ps.conferir_tela_final(d, video_do_rascunho(rascunho)), do_video=False)
 

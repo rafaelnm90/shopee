@@ -249,10 +249,12 @@ class AppDeMentira:
     def __init__(self):
         self.atual, self.legenda, self.com_produto = "inicio", "", False
         self.toques, self.teclas, self.comandos, self.enviados, self.prints = [], [], [], [], []
+        self.clipboard, self.em_foco = None, False
 
     def _nos(self):
         nos = TELAS[self.atual]
-        return _tela_final(self.legenda, self.com_produto) if nos == "final" else nos
+        # Como no Motorola: a leitura da tela traz ".." no lugar de cada emoji como o 👗.
+        return _tela_final(robo.ps.como_o_android_le(self.legenda), self.com_produto) if nos == "final" else nos
 
     def dump_hierarchy(self):
         return _xml(*self._nos())
@@ -263,6 +265,7 @@ class AppDeMentira:
         tocados.sort(key=lambda el: (el["caixa"][2] - el["caixa"][0]) * (el["caixa"][3] - el["caixa"][1]))
         nomes = [nome for el in tocados for nome in (el["texto"], "@" + el["id"] if el["id"] else "") if nome]
         self.toques.append(next((n for n in nomes if n.startswith("@")), nomes[0]) if nomes else (x, y))
+        self.em_foco = "@et_caption" in nomes
         for nome in nomes:
             if (self.atual, nome) in CAMINHO:
                 if nome == "Feito":
@@ -277,7 +280,15 @@ class AppDeMentira:
     def send_keys(self, texto):
         self.legenda += texto
 
-    def press(self, tecla):
+    def set_clipboard(self, texto, label=None):
+        self.clipboard = texto
+
+    def press(self, tecla, meta=None):
+        if meta:
+            # Ctrl+C com o cursor no campo da legenda copia o texto como o app guardou.
+            if tecla == robo.ps.TECLA_C and self.atual == "final" and self.em_foco:
+                self.clipboard = self.legenda
+            return
         self.teclas.append(tecla)
         self.atual = "inicio"
 
@@ -612,6 +623,36 @@ def test_preparar_1_agora_salva_um_rascunho_mesmo_pausado_e_fora_do_plano(monkey
     assert robo.json.loads(rascunho["conferencia"]) == ["vestido", "vestido"]     # as 2 vezes da IA
     assert "Postar" not in app.toques and "@btn_post" not in app.toques
     assert robo.ler_config()["robo_pausado"] is True                              # continua pausado
+
+
+def test_titulo_com_emoji_trocado_pelo_app_para_sem_salvar_o_rascunho(monkeypatch, avisos):
+    # A conferência vale pela cópia do campo: se o próprio app guardar ".." no lugar do 👗,
+    # o robô para, mesmo que a leitura da tela também mostre "..".
+    _fonte(monkeypatch)
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True})
+
+    class AppQueTrocaEmoji(AppDeMentira):
+        def send_keys(self, texto):
+            self.legenda += robo.ps.como_o_android_le(texto)
+
+    app = AppQueTrocaEmoji()
+    resultado = robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59"))
+    assert "o título não ficou na legenda" in resultado and robo.esperando_aprovacao() == []
+    assert "@tv_drafts_box" not in app.toques
+
+
+def test_sem_a_copia_do_campo_o_emoji_lido_como_ponto_para_o_rascunho(monkeypatch, avisos):
+    # Sem a cópia (o Android não deixou ler), sobra a leitura com ".." no lugar do 👗: para.
+    _fonte(monkeypatch)
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True})
+
+    class AppSemCopia(AppDeMentira):
+        def press(self, tecla, meta=None):
+            if not meta:
+                super().press(tecla)
+
+    resultado = robo.rodada(preparar=True, d=AppSemCopia(), agora=momento("2026-10-22 23:59"))
+    assert "o título não ficou na legenda" in resultado and robo.esperando_aprovacao() == []
 
 
 def test_preparar_1_agora_sem_video_diz_no_privado_por_que_nao_preparou(monkeypatch, avisos):
