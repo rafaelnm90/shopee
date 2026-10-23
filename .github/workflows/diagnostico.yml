@@ -123,7 +123,11 @@ jobs:
             echo ""
             echo "== Baixador (Shopee Vídeo)"
             R=$(sqlite3 -readonly -separator ' | ' banco_dados.db "SELECT 'situação: ' || COALESCE(json_extract(valor, '\$.situacao'), '?') || ' desde ' || COALESCE(json_extract(valor, '\$.desde'), '?'), 'em ' || COALESCE(json_extract(valor, '\$.dia'), '?') || ': ' || COALESCE(json_extract(valor, '\$.bloqueados_hoje'), 0) || ' bloqueado(s), ' || COALESCE(json_extract(valor, '\$.baixados_hoje'), 0) || ' baixado(s)', 'conferência semanal: ' || COALESCE(json_extract(valor, '\$.ultima_conferencia_em') || ' → ' || json_extract(valor, '\$.ultima_conferencia'), 'ainda não rodou') FROM configuracoes WHERE chave = 'baixador_shopee_video'" 2>/dev/null)
-            echo "${R:-nenhum vídeo da Shopee Vídeo pedido desde a conferência}"
+            echo "${R:-bloqueio: nenhum resultado de bloqueio ou de liberação anotado ainda}"
+            # O resultado de cada pedido ao Baixador (registro_processos.py): só rótulos e os
+            # motivos fixos do código, nunca o link nem quem pediu.
+            R=$(sqlite3 -readonly banco_dados.db "SELECT processo || ' → ' || resultado || ': ' || COUNT(*) FROM registro_processos WHERE robo = 'baixador' AND processo LIKE 'pedido%' AND momento >= '$DESDE24' GROUP BY processo, resultado ORDER BY COUNT(*) DESC" 2>/dev/null | paste -sd '|' - | sed 's/|/ | /g')
+            echo "Pedidos nas últimas 24 h: ${R:-nenhum anotado}"
             R=$(sqlite3 -readonly -separator ' | ' banco_dados.db "SELECT 'Apify em ' || COALESCE(json_extract(valor, '\$.apify_dia'), '?') || ': ' || COALESCE(json_extract(valor, '\$.apify_entregues'), 0) || ' entregue(s), ' || COALESCE(json_extract(valor, '\$.apify_falhas'), 0) || ' falha(s)', 'sem crédito em: ' || COALESCE(json_extract(valor, '\$.apify_sem_credito_em'), 'nunca') FROM configuracoes WHERE chave = 'baixador_shopee_video' AND json_extract(valor, '\$.apify_dia') IS NOT NULL" 2>/dev/null)
             if [ -n "$R" ]; then echo "$R"; fi
 

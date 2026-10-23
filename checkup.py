@@ -11,10 +11,12 @@ estados, horários e trechos fixos do código (arquivo:linha e o texto fixo de
 cada chamada de log ou de registrar_erro_json, com {…} no lugar das variáveis).
 Nunca o texto de um erro, de um log, de uma fila ou do banco.
 
-Seções: erros registrados (erros_logs), log de cada robô (quedas, rastros,
-avisos e erros por lugar do código), postagens de hoje por fila, robô da
-Shopee Vídeo, Baixador e backup. No fim, os pontos de atenção.
+Seções: erros registrados (erros_logs), log de cada robô (quedas, rastros de
+erro pelo tipo e pelo lugar do código, avisos e erros por lugar do código),
+processos dos robôs (registro_processos.py), postagens de hoje por fila, robô
+da Shopee Vídeo, Baixador e backup. No fim, os pontos de atenção.
 """
+import os
 import re
 import sqlite3
 import subprocess
@@ -23,6 +25,7 @@ from datetime import datetime, timedelta
 import backup_dados
 import db
 import inventario
+import registro_processos
 from fuso import fuso_horario
 
 # Erro que já tem seção própria no diagnostico.yml (Links sem conversão).
@@ -36,6 +39,8 @@ IDADE_MAXIMA_BACKUP_H = 26
 # Fila sem nenhum post até a noite, com média de pelo menos isso por dia, é ponto de atenção.
 MEDIA_PARA_COBRAR = 2
 HORA_PARA_COBRAR = 18
+# Processo com pelo menos tantas falhas, e não menos falhas que acertos, é ponto de atenção.
+FALHAS_PARA_COBRAR = 3
 # Quantos lugares do código mostrar por robô no log.
 LUGARES_POR_ROBO = 5
 # As chaves do robo_shopee_video (sem importá-lo, que traz a IA e o celular junto; o
@@ -121,6 +126,47 @@ def ler_journal(servico):
     return [linha for linha in r.stdout.splitlines() if linha.strip()]
 
 
+def _lugar_do_quadro(caminho, linha, funcao):
+    """O quadro do rastro como arquivo:linha (função); de biblioteca, o caminho dentro dela."""
+    if "site-packages/" in caminho:
+        return f"{caminho.split('site-packages/', 1)[1]}:{linha}"
+    return f"{os.path.basename(caminho)}:{linha} ({funcao})"
+
+
+def _eh_do_projeto(caminho):
+    return caminho.endswith(".py") and "site-packages/" not in caminho and not caminho.startswith("/usr/")
+
+
+def rastros_do_log(linhas):
+    """
+    Os rastros de erro do log agrupados pelo tipo da exceção e pelo último lugar do
+    código do projeto por onde passaram (ou, sem nenhum, o último da biblioteca):
+    [(tipo, lugar, quantidade)], o mais frequente primeiro. A mensagem da exceção,
+    que pode ter dados, não sai.
+    """
+    grupos, i = {}, 0
+    while i < len(linhas):
+        if not linhas[i].startswith("Traceback (most recent call last)"):
+            i += 1
+            continue
+        do_projeto = de_biblioteca = None
+        i += 1
+        while i < len(linhas) and linhas[i][:1] in (" ", "\t"):
+            quadro = re.match(r'\s+File "([^"]+)", line (\d+), in (\S+)', linhas[i])
+            if quadro:
+                caminho, linha, funcao = quadro.groups()
+                lugar = _lugar_do_quadro(caminho, linha, funcao)
+                if _eh_do_projeto(caminho):
+                    do_projeto = lugar
+                else:
+                    de_biblioteca = lugar
+            i += 1
+        tipo = re.match(r"([A-Za-z_][\w.]*)", linhas[i].strip()) if i < len(linhas) else None
+        chave = (tipo.group(1) if tipo else "?", do_projeto or de_biblioteca or "?")
+        grupos[chave] = grupos.get(chave, 0) + 1
+    return sorted(((tipo, lugar, qtd) for (tipo, lugar), qtd in grupos.items()), key=lambda r: -r[2])
+
+
 def resumo_do_log(linhas, modelos):
     """
     O que o log de um robô diz das últimas 24 h, só em números e lugares do código:
@@ -135,10 +181,27 @@ def resumo_do_log(linhas, modelos):
         "inicios": sum(1 for l in linhas if l.startswith("Started ")),
         "quedas": sum(1 for l in linhas if "Scheduled restart job" in l or "Failed with result" in l),
         "rastros": sum(1 for l in linhas if l.startswith("Traceback (most recent call last)")),
+        "rastros_por_lugar": rastros_do_log(linhas),
         "avisos": sum(qtd for _o, _t, nivel, qtd in problemas if nivel == "warning"),
         "erros": sum(qtd for _o, _t, nivel, qtd in problemas if nivel != "warning"),
         "problemas": problemas,
     }
+
+
+# --- Processos dos robôs ---
+
+def processos_do_dia(agora=None):
+    """
+    O registro dos processos das últimas 24 h por robô e processo: acertos, falhas,
+    neutros e cada resultado com o detalhe (textos fixos do código).
+    """
+    desde = _momento(_agora(agora) - timedelta(hours=24))
+    processos = {}
+    for robo, processo, resultado, detalhe, ok, qtd in registro_processos.contagem(desde):
+        p = processos.setdefault((robo, processo), {"ok": 0, "falhas": 0, "neutros": 0, "resultados": []})
+        p["ok" if ok == 1 else "falhas" if ok == 0 else "neutros"] += qtd
+        p["resultados"].append((resultado, detalhe, ok, qtd))
+    return processos
 
 
 # --- Postagens de hoje ---
@@ -222,19 +285,21 @@ def robo_da_shopee_video(agora=None):
     hoje = agora.strftime("%Y-%m-%d")
     horarios = plano.get("horarios", []) if plano.get("data") == hoje else []
     vencidos = sum(1 for h in horarios if h <= agora.strftime("%H:%M"))
+    # Pela tabela dos rascunhos, que guarda todos; o histórico das tentativas pode ter
+    # começado depois.
+    salvos = _contar("SELECT COUNT(*) FROM shopee_video_rascunhos WHERE criado_em >= ? "
+                     "AND estado NOT IN ('pulado', 'preparando')", hoje)
     try:
         with db.conexao() as conexao:
-            salvos = conexao.execute(
-                "SELECT COUNT(*) FROM shopee_video_tentativas WHERE acao = 'rascunho' AND resultado = 'salvo' "
-                "AND momento >= ?", (hoje,)).fetchone()[0]
             ruins = conexao.execute(
                 "SELECT acao, resultado, passo, COUNT(*) FROM shopee_video_tentativas WHERE momento >= ? "
                 f"AND resultado IN ({','.join('?' * len(RESULTADOS_RUINS))}) GROUP BY 1, 2, 3 ORDER BY 4 DESC",
                 (_momento(agora - timedelta(hours=24)), *RESULTADOS_RUINS)).fetchall()
     except sqlite3.OperationalError:
-        salvos, ruins = 0, []
+        ruins = []
+    pulados = _contar("SELECT COUNT(*) FROM shopee_video_rascunhos WHERE criado_em >= ? AND estado = 'pulado'", hoje)
     return {"ativo": not pausado, "horarios": len(horarios), "vencidos": vencidos,
-            "salvos": salvos, "ruins": ruins}
+            "salvos": salvos or 0, "pulados": pulados or 0, "ruins": ruins}
 
 
 # --- Baixador e backup ---
@@ -250,7 +315,7 @@ def baixador(linhas):
 
 # --- Pontos de atenção ---
 
-def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None):
+def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None, processos=None):
     """As frases fixas, com números, do que o Claude precisa investigar."""
     agora = _agora(agora)
     pontos = []
@@ -262,7 +327,8 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None)
         if r["quedas"]:
             pontos.append(f"{servico}: caiu e o systemd reiniciou {r['quedas']} vez(es)")
         if r["rastros"]:
-            pontos.append(f"{servico}: {r['rastros']} rastro(s) de erro no log")
+            tipo, lugar, qtd = (r.get("rastros_por_lugar") or [("?", "?", r["rastros"])])[0]
+            pontos.append(f"{servico}: {r['rastros']} rastro(s) de erro no log (mais comum: {tipo} em {lugar}, {qtd}x)")
         erros_do_log = [p for p in r["problemas"] if p[2] != "warning"]
         if erros_do_log:
             onde, _t, _n, qtd = erros_do_log[0]
@@ -274,9 +340,14 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None)
             pontos.append(f"{nome}: nenhum post hoje (média de {f['media']:.1f} por dia)")
     if robo_sv["ativo"] and robo_sv["salvos"] < robo_sv["vencidos"]:
         pontos.append(f"Robô da Shopee Vídeo: {robo_sv['vencidos']} horário(s) vencido(s) hoje e "
-                      f"{robo_sv['salvos']} rascunho(s) salvo(s)")
+                      f"{robo_sv['salvos']} rascunho(s) salvo(s) ({robo_sv.get('pulados', 0)} vídeo(s) pulado(s))")
     for acao, resultado, passo, qtd in robo_sv["ruins"]:
         pontos.append(f"Robô da Shopee Vídeo: {acao} → {resultado} em \"{passo or '?'}\" {qtd}x")
+    for (robo, processo), p in (processos or {}).items():
+        if p["falhas"] >= FALHAS_PARA_COBRAR and p["falhas"] >= p["ok"]:
+            resultado, detalhe, _ok, qtd = max((r for r in p["resultados"] if r[2] == 0), key=lambda r: r[3])
+            pontos.append(f"{robo}: {processo}: {p['falhas']} falha(s) e {p['ok']} acerto(s) "
+                          f"(mais comum: {resultado}{f' - {detalhe}' if detalhe else ''}, {qtd}x)")
     falhas = baixados.get("falha(s) de download", 0)
     if falhas >= 3 and falhas > baixados.get("entregue(s)", 0):
         pontos.append(f"Baixador: {falhas} falha(s) de download e {baixados.get('entregue(s)', 0)} entregue(s)")
@@ -322,6 +393,17 @@ def main():
               f"rastros {r['rastros']} | avisos {r['avisos']} | erros {r['erros']}")
         for onde, texto, nivel, qtd in r["problemas"][:LUGARES_POR_ROBO]:
             print(f"   {qtd:5}x {nivel:8} {onde:34} {texto}")
+        for tipo, lugar, qtd in r["rastros_por_lugar"][:LUGARES_POR_ROBO]:
+            print(f"   {qtd:5}x rastro   {tipo} em {lugar}")
+
+    print("\n== Processos dos robôs (registro, últimas 24 h)")
+    processos = processos_do_dia(agora)
+    for (robo, processo), p in processos.items():
+        print(f"{robo}: {processo}: acertos {p['ok']} | falhas {p['falhas']} | outros {p['neutros']}")
+        for resultado, detalhe, _ok, qtd in p["resultados"]:
+            print(f"   {qtd:5}x {resultado}{f' - {detalhe}' if detalhe else ''}")
+    if not processos:
+        print("nenhum processo registrado")
 
     print("\n== Postagens de hoje")
     filas = postagens_de_hoje(agora)
@@ -333,7 +415,8 @@ def main():
     print("\n== Robô da Shopee Vídeo")
     robo_sv = robo_da_shopee_video(agora)
     print(f"{'ativo' if robo_sv['ativo'] else 'pausado'} | horários hoje {robo_sv['horarios']} | "
-          f"vencidos {robo_sv['vencidos']} | rascunhos salvos hoje {robo_sv['salvos']}")
+          f"vencidos {robo_sv['vencidos']} | rascunhos salvos hoje {robo_sv['salvos']} | "
+          f"vídeos pulados hoje {robo_sv['pulados']}")
     for acao, resultado, passo, qtd in robo_sv["ruins"]:
         print(f"   {qtd}x {acao} → {resultado} em \"{passo or '?'}\"")
 
@@ -343,7 +426,7 @@ def main():
     backup = backup_dados.ultimo_backup()
     print("Backup: nenhum" if backup is None else f"Backup: o último tem {backup[1]:.1f} h")
 
-    pontos = sem_journal + pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora)
+    pontos = sem_journal + pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora, processos)
     print(f"\n== Pontos de atenção ({len(pontos)})")
     for ponto in pontos:
         print(f"⚠️ {ponto}")
