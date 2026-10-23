@@ -137,8 +137,9 @@ NOME_NA_GALERIA = "autoral_shopee_video.mp4"
 SEGUNDOS_DEPOIS_DO_PASSO = 3
 MAXIMO_ESPERA = 60
 MAXIMO_LINHAS = 150
-# Quantos vídeos da fonte o video:link-de-video olha (cada um segue o link pela rede).
-CANDIDATOS_DE_VIDEO = 40
+# Quantos vídeos da fonte, ainda não usados, o video:link-de-video olha (cada um segue o
+# link pela rede).
+CANDIDATOS_DE_VIDEO = 60
 # Teclas do Android para selecionar tudo, copiar e colar no campo em foco (Ctrl+A, C, V).
 CTRL = 0x1000
 TECLA_A, TECLA_C, TECLA_V = 29, 31, 50
@@ -329,7 +330,7 @@ def video_da_fonte(de_video=False):
     if not de_video:
         video = assistente.proximo_video(fonte)
         return dict(video, arquivo=os.path.abspath(video["arquivo"])) if video else None
-    for id_unico, arquivo, link, legenda in assistente._candidatos(fonte)[:CANDIDATOS_DE_VIDEO]:
+    for id_unico, arquivo, link, legenda in assistente.candidatos_nao_usados(fonte)[:CANDIDATOS_DE_VIDEO]:
         if not (link and arquivo and os.path.exists(arquivo)):
             continue
         if eh_video(asyncio.run(link_para_converter(link))):

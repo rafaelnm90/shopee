@@ -67,15 +67,7 @@ def pulados():
 def proximos(quantos):
     """Os próximos vídeos da fonte do painel que nem o assistente mandou nem o robô usou."""
     fonte = (db.ler_config("shopee_video", {}) or {}).get("fonte", assistente.FONTE_PADRAO)
-    with db.conexao() as con:
-        assistente._criar_tabela(con)
-        usados = {linha[0] for linha in con.execute("SELECT id_unico FROM shopee_video_enviados")}
-        try:
-            usados |= {linha[0] for linha in con.execute("SELECT id_video FROM shopee_video_rascunhos")}
-        except Exception:
-            pass
-    escolhidos = [link for id_video, arquivo, link, _ in assistente._candidatos(fonte)
-                  if link and arquivo and id_video not in usados]
+    escolhidos = [link for _, arquivo, link, _ in assistente.candidatos_nao_usados(fonte) if link and arquivo]
     return fonte, escolhidos[:quantos]
 
 
