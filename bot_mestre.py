@@ -69,6 +69,7 @@ import repetidos_publico  # vídeo que já foi ao Grupo Público não vai de nov
 import alvos_sem_acesso  # alvos da divulgação a que a conta perdeu o acesso
 import backup_dados  # backup diário do banco, sessões e .env em ~/backups
 import registro_processos  # cada processo dos robôs, 3 dias, para o checkup do dia
+import rotinas  # em que canal sai cada rotina de texto
 import faxina_viral  # o resumo da faxina do Acervo Viral, que roda no divulgacao_canal
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
 
@@ -1413,6 +1414,7 @@ def diagnostico_temp():
         logger.error(f"❌ [Faxina] Falha ao diagnosticar temp/: {e}")
         return 0, 0, 0
 
+@registro_processos.anotar("bot_mestre", "faxina do disco")
 async def faxina_disco_periodica():
     """
     Faxina de disco com agenda própria, a cada 6 horas, separada da lixeira das 3h:
@@ -1486,6 +1488,7 @@ def relatorio_disco():
         linhas.append(f"{pasta}/: {qtd} arq · {total / (1024**2):.0f} MB")
     return "  |  ".join(linhas)
 
+@registro_processos.anotar("bot_mestre", "faxina da lixeira")
 async def varredor_de_lixeira():
     """
     Às 3h: apaga as mensagens da lixeira, poda os achadinhos e o cache da IA e limpa
@@ -1605,6 +1608,7 @@ def marco_cruzado(atual, anterior):
     cruzados = [m for m in marcos if anterior < m <= atual]
     return max(cruzados) if cruzados else None
 
+@registro_processos.anotar("bot_mestre", "métricas do dia")
 async def coletar_metricas_diarias():
     """Roda às 23:50 e fotografa o dia de cada canal."""
     try:
@@ -1919,11 +1923,11 @@ async def disparar_mensagem(tipo, forcar=False):
     dados_rotina = ler_config_rotina()
     
     # Destino de cada rotina
-    rotinas_virais = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral", "promo_achadinhos_viral"]
-    rotinas_publico = ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico", "promo_achadinhos_publico"]
-    
-    is_viral = tipo in rotinas_virais
-    is_publico = tipo in rotinas_publico or tipo.startswith("campanha_pub_")
+    canal_rotina = rotinas.canal_da_rotina(tipo)
+    is_viral = canal_rotina == "Viral"
+    is_publico = canal_rotina == "Grupo Público"
+    # No registro dos processos, para o checkup conferir espaçamento e assuntos por canal.
+    processo_rotina = f"rotina {canal_rotina}"
     
     chat_destino = GRUPO_ID
     if is_viral:
@@ -1938,12 +1942,15 @@ async def disparar_mensagem(tipo, forcar=False):
     # Pausas das rotinas: valem até para disparo forçado.
     if is_viral and dados_rotina.get("pausado_viral", False):
         logger.info(f"🛑 Disparo abortado ({tipo}): Rotinas do VIRAL estão pausadas.")
+        registro_processos.registrar("bot_mestre", processo_rotina, "pausada", tipo)
         return
     if is_publico and dados_rotina.get("pausado_publico", False):
         logger.info(f"🛑 Disparo abortado ({tipo}): Rotinas do PÚBLICO estão pausadas.")
+        registro_processos.registrar("bot_mestre", processo_rotina, "pausada", tipo)
         return
     if not is_viral and not is_publico and dados_rotina.get("pausado", False):
         logger.warning(f"🛑 Disparo abortado ({tipo}): Rotinas do PRINCIPAL estão pausadas.")
+        registro_processos.registrar("bot_mestre", processo_rotina, "pausada", tipo)
         return
 
 
@@ -1978,6 +1985,7 @@ async def disparar_mensagem(tipo, forcar=False):
             job_id = f"job_rotina_{tipo}_intercalado_{int(agora_tz.timestamp())}"
             scheduler.add_job(disparar_mensagem, 'date', run_date=novo_horario, args=[tipo], id=job_id, replace_existing=True)
             logger.info(f"🚦 [Intercalação] '{tipo}' adiado para {novo_horario.strftime('%H:%M')}: o último post foi texto e há {estoque_videos} vídeo(s) na fila.")
+            registro_processos.registrar("bot_mestre", processo_rotina, "adiada (intercalação)", tipo)
             return
     
     # Bom Dia e Boa Noite uma vez por dia; as demais rotinas do principal só no expediente.
@@ -2130,6 +2138,9 @@ async def disparar_mensagem(tipo, forcar=False):
             logger.info(f"📤 Disparando {tipo} para Thread: {thread_param if thread_param else 'Geral'}")
             msg_enviada = await bot.send_message(chat_destino, texto, message_thread_id=thread_param)
             registrar_lixeira(msg_enviada.message_id, chat_destino)
+            # A origem é o tópico: no Público a mesma rotina vai a vários tópicos em seguida.
+            registro_processos.registrar("bot_mestre", processo_rotina, "enviada", tipo, ok=True,
+                                         origem=f"{chat_destino}:{thread_param}")
             
             await asyncio.sleep(1)  # respiro antes do anexo
             
@@ -2161,6 +2172,8 @@ async def disparar_mensagem(tipo, forcar=False):
                 logger.error(f"❌ O tópico {thread_id} não existe mais no grupo ou o ID '{thread_id}' é inválido.")
             else:
                 logger.error(f"❌ Erro ao enviar rotina {tipo} para thread {thread_id}: {e}")
+            registro_processos.registrar("bot_mestre", processo_rotina, "falhou", f"{tipo}: {type(e).__name__}",
+                                         ok=False, origem=f"{chat_destino}:{thread_id}")
             
         await asyncio.sleep(4)  # pausa entre tópicos, para não tomar flood do Telegram
 
@@ -2218,8 +2231,8 @@ def salvar_config_rotina(dados):
     db.salvar_config("config_rotina", dados)
 
 # Rotinas de cada robô; o que não está nestas listas é do canal principal.
-ROTINAS_VIRAIS = ["promo_principal", "link_grupo_viral", "divulgar_gem_viral", "promo_publico_viral", "promo_achadinhos_viral"]
-ROTINAS_PUBLICO = ["link_grupo_publico", "promo_principal_publico", "promo_viral_publico", "promo_achadinhos_publico"]
+# As listas ficam no rotinas.py, que o checkup do dia também usa.
+ROTINAS_VIRAIS, ROTINAS_PUBLICO = rotinas.ROTINAS_VIRAIS, rotinas.ROTINAS_PUBLICO
 
 def descobrir_escopo_job(job_id):
     """A qual robô o job pertence (principal, viral, publico), pelo tipo da rotina no id."""
@@ -3319,6 +3332,7 @@ def ler_fila_parceiro_por_dia_captura(parceiro_id):
         logger.error(f"❌ [Parceiros] Erro ao agrupar a fila por dia de captura: {e}")
     return grupos
 
+@registro_processos.anotar("bot_mestre", "fechamento do dia dos parceiros")
 async def fechar_dia_captura_parceiros(incluir_hoje=False):
     """
     Fecha o dia de captura: sorteia a cota do dia e apaga do disco o excedente na hora,
@@ -6797,6 +6811,7 @@ def agendar_proximo_garimpo(primeiro=False):
             pass
 
 
+@registro_processos.anotar("bot_mestre", "garimpo de ofertas")
 async def ciclo_garimpo_automatico():
     """
     O que o agendador chama: roda o garimpo e, aconteça o que acontecer, marca o
@@ -14980,6 +14995,7 @@ async def processar_fila_espiao(forcar=False):
         # Folga entre publicações do mesmo ciclo (no forçado, um atrás do outro)
         await asyncio.sleep(15)
 
+@registro_processos.anotar("bot_mestre", "financeiro (API da Shopee)")
 async def sincronizar_financeiro_horario():
     """De hora em hora: pedidos dos últimos 3 dias na API da Shopee para o banco."""
     logger.info("⏰ [Financeiro] Iniciando sincronização em background com a API Shopee...")
@@ -14989,6 +15005,7 @@ async def sincronizar_financeiro_horario():
         processar_e_salvar_pedidos_api(conversoes)
         logger.info("✅ [Financeiro] Varredura horária concluída. Banco de Pedidos atualizado.")
 
+@registro_processos.anotar("bot_mestre", "financeiro: varredura dos pendentes")
 async def varredura_retroativa_pendentes():
     """
     Madrugada: com pedido ainda pendente no banco, busca de novo desde o mais antigo
@@ -15030,6 +15047,7 @@ async def varredura_retroativa_pendentes():
         processar_e_salvar_pedidos_api(conversoes)
         logger.info("✅ [Pente Fino] Varredura profunda concluída! Pendentes antigos consolidados (Confirmados ou Cancelados).")
 
+@registro_processos.anotar("bot_mestre", "conferência diária dos grupos")
 async def checkup_diario_grupos():
     """Relatório diário ao admin: canais do Espião e rotas do Espelhador com falha de acesso."""
     logger.info("🚀 Consolidando relatório de saúde diário do sistema...")
@@ -15485,6 +15503,7 @@ async def reenviar_botao_ofertas():
 
         logger.info(f"📌 [Painel Fixo] Painel de submissão recriado no fim do tópico (ID {msg.message_id}).")
 
+@registro_processos.anotar("bot_mestre", "botão de ofertas")
 async def renovar_botao_ofertas_velho(agora=None):
     """Job de hora em hora: recria o painel de submissão que já fez IDADE_RENOVAR_PAINEL."""
     config = ler_submissao_config()
@@ -16902,6 +16921,7 @@ def _tamanho_pasta_gb(pasta):
         pass
     return total / (1024 ** 3)
 
+@registro_processos.anotar("bot_mestre", "monitor de saúde")
 async def monitor_saude():
     """Roda de hora em hora. Silencioso quando está tudo bem."""
     alertas = []

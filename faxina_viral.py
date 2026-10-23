@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 
 import api_shopee
 import db
+import registro_processos
 import links_shopee
 
 logger = logging.getLogger("Faxina_Viral")
@@ -120,6 +121,7 @@ async def _nome_da_conta(client):
         return "conta principal"
 
 
+@registro_processos.anotar("divulgacao", "faxina do Acervo Viral")
 async def rodada(client, agora=None):
     """Uma passada pelo canal: decide, apaga e grava o resumo. Devolve o resumo."""
     agora = agora or datetime.now(timezone.utc)

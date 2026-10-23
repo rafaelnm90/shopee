@@ -13,19 +13,23 @@ Nunca o texto de um erro, de um log, de uma fila ou do banco.
 
 Seções: erros registrados (erros_logs), log de cada robô (quedas, rastros de
 erro pelo tipo e pelo lugar do código, avisos e erros por lugar do código),
-processos dos robôs (registro_processos.py), postagens de hoje por fila, robô
-da Shopee Vídeo, Baixador e backup. No fim, os pontos de atenção.
+processos dos robôs (registro_processos.py), rotinas e divulgação (espaçamento,
+assunto repetido em seguida e o que saiu contra o configurado), postagens de
+hoje por fila, robô da Shopee Vídeo, Baixador e backup. No fim, os pontos de
+atenção.
 """
 import os
 import re
 import sqlite3
 import subprocess
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
 import backup_dados
 import db
 import inventario
 import registro_processos
+import rotinas
 from fuso import fuso_horario
 
 # Erro que já tem seção própria no diagnostico.yml (Links sem conversão).
@@ -41,6 +45,12 @@ MEDIA_PARA_COBRAR = 2
 HORA_PARA_COBRAR = 18
 # Processo com pelo menos tantas falhas, e não menos falhas que acertos, é ponto de atenção.
 FALHAS_PARA_COBRAR = 3
+# Rotinas do mesmo canal com menos que isso entre uma e outra saíram "juntas". Na
+# divulgação, o piso é a regra dela: 15 min entre dois envios ao mesmo grupo. Mais que
+# PICO_PARA_COBRAR envios em JANELA_DO_PICO min, somando todos os grupos, é rajada.
+INTERVALO_CURTO_ROTINA = 10
+INTERVALO_CURTO_DIVULGACAO = 15
+JANELA_DO_PICO, PICO_PARA_COBRAR = 5, 10
 # Quantos lugares do código mostrar por robô no log.
 LUGARES_POR_ROBO = 5
 # As chaves do robo_shopee_video (sem importá-lo, que traz a IA e o celular junto; o
@@ -204,6 +214,84 @@ def processos_do_dia(agora=None):
     return processos
 
 
+# --- Rotinas e divulgação ---
+
+def _minutos(hora):
+    horas, minutos = str(hora).split(":")[:2]
+    return int(horas) * 60 + int(minutos)
+
+
+def rotinas_do_dia(agora=None):
+    """
+    As rotinas de texto de hoje por canal, pelo histórico que o bot guarda
+    (config_rotina.historico_diario: cada rotina e os horários em que saiu): quantas
+    saíram, o menor intervalo, os intervalos curtos, as vezes em que o mesmo assunto
+    saiu em seguida, quantas de cada assunto e as que saíram a mais ou a menos que o
+    configurado (a menos só depois do fim da janela daquela rotina e sem pausa).
+    """
+    agora = _agora(agora)
+    config = db.ler_config("config_rotina", {}) or {}
+    historico = config.get("historico_diario") or {}
+    contagem = historico.get("contagem", {}) if historico.get("data") == agora.strftime("%Y-%m-%d") else {}
+    saidas = {canal: [] for canal in rotinas.CANAIS}
+    for tipo, horarios in contagem.items():
+        for hora in horarios if isinstance(horarios, list) else []:
+            saidas[rotinas.canal_da_rotina(tipo)].append((_minutos(hora), tipo))
+    pausado = {"canal principal": config.get("pausado"), "Viral": config.get("pausado_viral"),
+               "Grupo Público": config.get("pausado_publico")}
+    resultado = {}
+    for canal, lista in saidas.items():
+        lista.sort()
+        intervalos = [b[0] - a[0] for a, b in zip(lista, lista[1:])]
+        por_assunto = Counter(tipo for _m, tipo in lista)
+        fora = []
+        for tipo, regra in config.items():
+            if not isinstance(regra, dict) or "frequencia" not in regra or rotinas.canal_da_rotina(tipo) != canal:
+                continue
+            esperado, feitas = int(regra.get("frequencia") or 0), por_assunto.get(tipo, 0)
+            if feitas > esperado:
+                fora.append((tipo, feitas, esperado, "a mais"))
+            elif feitas < esperado and agora.hour >= int(regra.get("fim", 24)) and not pausado[canal]:
+                fora.append((tipo, feitas, esperado, "a menos"))
+        resultado[canal] = {
+            "enviadas": len(lista), "menor": min(intervalos) if intervalos else None,
+            "curtos": sum(1 for i in intervalos if i < INTERVALO_CURTO_ROTINA),
+            "seguidos": sum(1 for a, b in zip(lista, lista[1:]) if a[1] == b[1]),
+            "por_assunto": por_assunto, "fora_do_previsto": fora, "pausado": bool(pausado[canal]),
+        }
+    return resultado
+
+
+def divulgacao_do_dia(agora=None):
+    """
+    Os envios da divulgação nas últimas 24 h, pelo registro dos processos (o grupo vai
+    só como apelido): envios, grupos, o menor intervalo no mesmo grupo, os envios ao
+    mesmo grupo abaixo do piso, as vezes em que um grupo que recebe mais de um assunto
+    recebeu o mesmo em seguida, e o pico de envios em JANELA_DO_PICO min.
+    """
+    desde = _momento(_agora(agora) - timedelta(hours=24))
+    linhas = registro_processos.sequencia("divulgacao", "envio (", desde, resultado="enviado")
+    por_grupo = defaultdict(list)
+    for momento, processo, _resultado, _detalhe, origem in linhas:
+        por_grupo[origem].append((datetime.strptime(momento, "%Y-%m-%d %H:%M:%S"), processo))
+    menor, curtos, seguidos = None, 0, 0
+    for envios in por_grupo.values():
+        varios_assuntos = len({processo for _m, processo in envios}) > 1
+        for (m1, p1), (m2, p2) in zip(envios, envios[1:]):
+            intervalo = (m2 - m1).total_seconds() / 60
+            menor = intervalo if menor is None else min(menor, intervalo)
+            curtos += intervalo < INTERVALO_CURTO_DIVULGACAO
+            seguidos += varios_assuntos and p1 == p2
+    momentos = sorted(m for envios in por_grupo.values() for m, _p in envios)
+    pico, inicio = 0, 0
+    for fim, momento in enumerate(momentos):
+        while momento - momentos[inicio] > timedelta(minutes=JANELA_DO_PICO):
+            inicio += 1
+        pico = max(pico, fim - inicio + 1)
+    return {"envios": len(linhas), "grupos": len(por_grupo), "menor": menor, "curtos": curtos,
+            "seguidos": seguidos, "pico": pico, "por_assunto": Counter(processo for _m, processo, *_ in linhas)}
+
+
 # --- Postagens de hoje ---
 
 def _contar(sql, *params):
@@ -315,7 +403,8 @@ def baixador(linhas):
 
 # --- Pontos de atenção ---
 
-def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None, processos=None):
+def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None, processos=None,
+                      rotinas_hoje=None, divulgacao=None):
     """As frases fixas, com números, do que o Claude precisa investigar."""
     agora = _agora(agora)
     pontos = []
@@ -348,6 +437,21 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
             resultado, detalhe, _ok, qtd = max((r for r in p["resultados"] if r[2] == 0), key=lambda r: r[3])
             pontos.append(f"{robo}: {processo}: {p['falhas']} falha(s) e {p['ok']} acerto(s) "
                           f"(mais comum: {resultado}{f' - {detalhe}' if detalhe else ''}, {qtd}x)")
+    for canal, r in (rotinas_hoje or {}).items():
+        if r["curtos"]:
+            pontos.append(f"Rotinas do {canal}: {r['curtos']} intervalo(s) abaixo de {INTERVALO_CURTO_ROTINA} min "
+                          f"(menor: {r['menor']} min)")
+        if r["seguidos"]:
+            pontos.append(f"Rotinas do {canal}: {r['seguidos']} vez(es) o mesmo assunto em seguida")
+        for tipo, feitas, esperado, sentido in r["fora_do_previsto"]:
+            pontos.append(f"Rotinas do {canal}: {tipo} saiu {feitas} vez(es), configurado {esperado} ({sentido})")
+    if divulgacao and divulgacao["curtos"]:
+        pontos.append(f"Divulgação: {divulgacao['curtos']} envio(s) ao mesmo grupo com menos de "
+                      f"{INTERVALO_CURTO_DIVULGACAO} min (menor: {divulgacao['menor']:.0f} min)")
+    if divulgacao and divulgacao["seguidos"]:
+        pontos.append(f"Divulgação: {divulgacao['seguidos']} vez(es) o mesmo assunto em seguida no mesmo grupo")
+    if divulgacao and divulgacao["pico"] >= PICO_PARA_COBRAR:
+        pontos.append(f"Divulgação: {divulgacao['pico']} envios em {JANELA_DO_PICO} min (rajada)")
     falhas = baixados.get("falha(s) de download", 0)
     if falhas >= 3 and falhas > baixados.get("entregue(s)", 0):
         pontos.append(f"Baixador: {falhas} falha(s) de download e {baixados.get('entregue(s)', 0)} entregue(s)")
@@ -405,6 +509,22 @@ def main():
     if not processos:
         print("nenhum processo registrado")
 
+    print("\n== Rotinas de texto de hoje (por canal)")
+    rotinas_hoje = rotinas_do_dia(agora)
+    for canal, r in rotinas_hoje.items():
+        menor = "—" if r["menor"] is None else f"{r['menor']} min"
+        print(f"{canal}{' (pausado)' if r['pausado'] else ''}: enviadas {r['enviadas']} | menor intervalo {menor} | "
+              f"abaixo de {INTERVALO_CURTO_ROTINA} min {r['curtos']} | mesmo assunto em seguida {r['seguidos']}")
+        if r["por_assunto"]:
+            print("   " + " | ".join(f"{tipo}: {qtd}" for tipo, qtd in sorted(r["por_assunto"].items())))
+    divulgacao = divulgacao_do_dia(agora)
+    menor = "—" if divulgacao["menor"] is None else f"{divulgacao['menor']:.0f} min"
+    print(f"Divulgação (24 h): envios {divulgacao['envios']} | grupos {divulgacao['grupos']} | "
+          f"menor intervalo no mesmo grupo {menor} | abaixo de {INTERVALO_CURTO_DIVULGACAO} min {divulgacao['curtos']} | "
+          f"mesmo assunto em seguida {divulgacao['seguidos']} | pico em {JANELA_DO_PICO} min {divulgacao['pico']}")
+    if divulgacao["por_assunto"]:
+        print("   " + " | ".join(f"{p}: {q}" for p, q in sorted(divulgacao["por_assunto"].items())))
+
     print("\n== Postagens de hoje")
     filas = postagens_de_hoje(agora)
     for nome, f in filas.items():
@@ -426,7 +546,8 @@ def main():
     backup = backup_dados.ultimo_backup()
     print("Backup: nenhum" if backup is None else f"Backup: o último tem {backup[1]:.1f} h")
 
-    pontos = sem_journal + pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora, processos)
+    pontos = sem_journal + pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora, processos,
+                                             rotinas_hoje, divulgacao)
     print(f"\n== Pontos de atenção ({len(pontos)})")
     for ponto in pontos:
         print(f"⚠️ {ponto}")

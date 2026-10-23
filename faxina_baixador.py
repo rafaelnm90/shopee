@@ -18,6 +18,7 @@ import os
 import time
 
 import db
+import registro_processos
 
 GRUPO_DOWNLOADER = -1003892378604      # Grupo Público para Afiliados
 TOPICO_DOWNLOADER = 1054               # tópico "Downloader Videos"
@@ -61,6 +62,7 @@ def eh_painel(msg, bots):
     return de_bot and TITULO_PAINEL in (getattr(msg, "message", None) or "")
 
 
+@registro_processos.anotar("divulgacao", "faxina do tópico do Baixador")
 async def limpar_topico(client, limite=None, bots=None):
     """
     Apaga os painéis antigos e os avisos de fixação do tópico. Fica o painel
