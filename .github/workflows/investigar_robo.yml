@@ -7,7 +7,8 @@ name: Investigar o robô (Shopee Vídeo)
 # à mão.
 #
 # O repositório é público, e os logs do Actions também: o investigar_robo.py nunca
-# imprime links, nomes de produto ou textos, só tipos de página e contagens.
+# imprime links, nomes de produto ou textos, só tipos de página, contagens e o motivo
+# do pulo quando ele é um texto fixo do código.
 on:
   workflow_dispatch:
     inputs:

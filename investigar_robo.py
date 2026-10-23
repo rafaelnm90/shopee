@@ -7,12 +7,15 @@ forma: por que tipos de página ele passou, se chegou a um produto ou a um víde
 Produtos) e se a API de afiliado devolve a oferta do produto. No fim, as contagens.
 
 Usado pelo workflow investigar_robo.yml (só à mão). O log do Actions é público: nunca
-imprime links, nomes de produto, motivos ou textos; só tipos de página e contagens.
+imprime links, nomes de produto ou textos; só tipos de página, contagens e o motivo do
+pulo quando ele é um texto fixo do código (sem nada do vídeo ou do produto).
 
     python3 investigar_robo.py [QUANTOS]   # os pulados e os QUANTOS próximos (padrão 15)
 """
+import ast
 import asyncio
 import logging
+import os
 import re
 import sys
 from collections import Counter
@@ -22,6 +25,9 @@ import assistente_shopee_video as assistente
 import db
 
 PADRAO_PROXIMOS = 15
+PASTA = os.path.dirname(os.path.abspath(__file__))
+# Onde nascem os motivos do robô (as Paradas dele e as respostas do postador).
+ARQUIVOS_DOS_MOTIVOS = ("robo_shopee_video.py", "postador_shopee_video.py")
 
 
 async def classificar(link):
@@ -52,11 +58,28 @@ def links_das_fontes():
     return links
 
 
+def textos_fixos():
+    """
+    Os textos escritos inteiros no código do robô e do postador (fora os pedaços de
+    f-string, que levam o nome do produto). Motivo igual a um deles é texto público do
+    repositório e pode sair no log.
+    """
+    textos = set()
+    for arquivo in ARQUIVOS_DOS_MOTIVOS:
+        with open(os.path.join(PASTA, arquivo), encoding="utf-8") as f:
+            arvore = ast.parse(f.read())
+        de_f_string = {id(parte) for no in ast.walk(arvore) if isinstance(no, ast.JoinedStr) for parte in no.values}
+        textos |= {no.value for no in ast.walk(arvore)
+                   if isinstance(no, ast.Constant) and isinstance(no.value, str) and id(no) not in de_f_string}
+    return textos
+
+
 def pulados():
     """
-    (id do vídeo, passo em que parou) dos vídeos que o robô pulou. O passo é o rótulo fixo
-    do histórico do robô (robo_shopee_video.passo_do_motivo), nunca o motivo, que pode ter
-    o nome do produto.
+    (id do vídeo, passo em que parou, motivo) dos vídeos que o robô pulou. O passo é o
+    rótulo fixo do histórico do robô (robo_shopee_video.passo_do_motivo); o motivo vem só
+    quando é um texto fixo do código (textos_fixos), senão "", porque pode ter o nome do
+    produto.
     """
     import robo_shopee_video as robo   # aqui dentro: o robô traz a IA e o celular junto
     with db.conexao() as con:
@@ -65,7 +88,9 @@ def pulados():
                                  "ORDER BY id DESC").fetchall()
         except Exception:
             return []
-    return [(id_video, robo.passo_do_motivo(motivo) or "sem motivo") for id_video, motivo in linhas]
+    fixos = textos_fixos()
+    return [(id_video, robo.passo_do_motivo(motivo) or "sem motivo", motivo if motivo in fixos else "")
+            for id_video, motivo in linhas]
 
 
 def proximos(quantos):
@@ -80,8 +105,8 @@ async def investigar(quantos):
     links = links_das_fontes()
     lista = pulados()
     print(f"== Vídeos que o robô pulou: {len(lista)}")
-    for i, (id_video, passo) in enumerate(lista, 1):
-        motivo = f"parou em {passo}"
+    for i, (id_video, passo, fixo) in enumerate(lista, 1):
+        motivo = f"parou em {passo}" + (f" ({fixo})" if fixo else "")
         link = links.get(id_video)
         if not link:
             print(f"   {i}. motivo: {motivo} | o vídeo já saiu da fonte")
