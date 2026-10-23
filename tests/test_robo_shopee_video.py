@@ -381,17 +381,46 @@ def test_ia_que_nao_confirma_pula_o_video_sem_tocar_no_celular(monkeypatch, avis
     assert robo.assistente.proximo_video("autorais")["id"] == "a1"
 
 
-def test_rascunho_do_plano_que_falhou_tenta_de_novo_ate_2_vezes(monkeypatch, avisos):
+def test_video_com_problema_proprio_passa_ao_proximo_e_sem_video_o_horario_acaba(monkeypatch, avisos):
     # Escolha do Rafael (23/10): o horário das 01:03 falhou e o dia ficou sem aquele
-    # rascunho. Agora ele volta nas rodadas seguintes, até 2 vezes a mais.
+    # rascunho; o rascunho do plano tenta de novo. O vídeo pulado (problema dele) passa
+    # direto ao próximo; sem mais vídeo na fonte, as tentativas do horário acabam.
     _fonte(monkeypatch, confere=False)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
     agora = momento("2026-10-22 23:59")
-    resultados = [robo.rodada(d=Intocavel(), agora=agora) for _ in range(4)]
-    assert "parado" in resultados[0]                         # o horário do plano
-    assert resultados[1].startswith("nenhum vídeo")           # 1ª tentativa a mais (o vídeo foi pulado)
-    assert resultados[2].startswith("nenhum vídeo")           # 2ª tentativa a mais
-    assert resultados[3] == "nada a fazer agora"              # acabaram as tentativas
+    resultados = [robo.rodada(d=Intocavel(), agora=agora) for _ in range(5)]
+    assert "parado" in resultados[0]                         # o horário do plano: vídeo pulado
+    assert all(r.startswith("nenhum vídeo") for r in resultados[1:4])   # as 3 tentativas do vídeo 2
+    assert resultados[4] == "nada a fazer agora"              # acabaram as tentativas
+
+
+def test_mesmo_video_3_vezes_depois_outro_ate_3_videos_e_espera_o_proximo_horario(monkeypatch, avisos):
+    # Pedido do Rafael (23/10): tenta o mesmo vídeo; sem dar certo, outro vídeo, para o dia
+    # ter os rascunhos do plano; depois de 3 vídeos, para até o próximo horário.
+    _fonte(monkeypatch)
+    for numero in range(2, 5):
+        inserir("INSERT INTO fila_autorais VALUES (?, ?, ?, ?)", f"a{numero}", "archive/vestido.mp4",
+                f"Vestido 👗\n{LINK}", f"2026-10-22 0{numero}:00:00")
+    tentados = []
+
+    def falha(d, ident, video, fonte):
+        tentados.append(video["id"])
+        raise robo.Parada("não achei o botão Rascunhos")
+
+    monkeypatch.setattr(robo, "_preparar", falha)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    agora = momento("2026-10-22 23:59")
+    resultados = [robo.rodada(d=Intocavel(), agora=agora) for _ in range(10)]
+    assert all("parado" in r for r in resultados[:9]) and resultados[9] == "nada a fazer agora"
+    primeiro, segundo, terceiro = tentados[0], tentados[3], tentados[6]
+    assert tentados == [primeiro] * 3 + [segundo] * 3 + [terceiro] * 3
+    assert len({primeiro, segundo, terceiro}) == 3
+    finais = [a for a in avisos if isinstance(a, str) and "o rascunho não saiu" in a]
+    assert "tentativa 2 de 3 do vídeo 1 de 3" in finais[0] and "com outro vídeo: vídeo 2 de 3" in finais[2]
+    assert "acabaram" in finais[8] and len(finais) == 9
+    # O vídeo fica de lado só naquele dia: no dia seguinte ele pode voltar.
+    assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-23 08:00")).get("evitar") is None
+    assert robo.proximo_video(robo.ler_config())["id"] in {primeiro, segundo, terceiro, "a1", "a2", "a3", "a4"}
 
 
 def test_rascunho_do_plano_que_nao_saiu_avisa_onde_parou_e_quando_tenta_de_novo(monkeypatch, avisos):
@@ -401,17 +430,18 @@ def test_rascunho_do_plano_que_nao_saiu_avisa_onde_parou_e_quando_tenta_de_novo(
     agora = momento("2026-10-22 23:59")
     robo.rodada(d=Intocavel(), agora=agora)
     aviso = next(a for a in avisos if isinstance(a, str) and "o rascunho não saiu" in a)
-    assert "Parou em: conferência da IA" in aviso and "tentativa 2 de 3" in aviso
+    assert "Parou em: conferência da IA" in aviso and "com outro vídeo: vídeo 2 de 3" in aviso
     assert "Histórico do Robô 📋" in aviso
-    robo.rodada(d=Intocavel(), agora=agora)
-    robo.rodada(d=Intocavel(), agora=agora)
+    for _ in range(3):
+        robo.rodada(d=Intocavel(), agora=agora)
     finais = [a for a in avisos if isinstance(a, str) and "o rascunho não saiu" in a]
-    assert "tentativa 3 de 3" in finais[1] and "acabaram" in finais[2]
+    assert "tentativa 2 de 3 do vídeo 2 de 3" in finais[1] and "tentativa 3 de 3" in finais[2]
+    assert "acabaram" in finais[3]
     # O histórico guarda cada tentativa, e o diagnóstico conta resultado e passo sem nomes.
     lista = robo.tentativas_desde("2026-10-22 00:00:00")
     assert [(t["resultado"], t["passo"]) for t in lista] == [
-        ("sem vídeo", "vídeo da fonte"), ("sem vídeo", "vídeo da fonte"), ("pulado", "conferência da IA")]
-    assert "Parou em: vídeo da fonte" in finais[2]
+        ("sem vídeo", "vídeo da fonte")] * 3 + [("pulado", "conferência da IA")]
+    assert "Parou em: vídeo da fonte" in finais[3]
 
 
 def test_preparar_1_agora_que_falha_nao_repete_o_aviso(monkeypatch, avisos):
