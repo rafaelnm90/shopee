@@ -565,3 +565,45 @@ def test_historico_do_robo_mostra_as_tentativas_e_o_resumo_das_22h(bm, Msg, Est,
     monkeypatch.setattr(sv, "bot_instance", Bot())
     rodar(sv.mandar_resumo_do_robo())
     assert enviados and "Resumo do Robô" in enviados[0][1] and "curtir o produto: 1×" in enviados[0][1]
+
+
+def test_conta_suspensa_deixa_os_dois_em_espera_e_o_fim_avisa_no_privado(bm, monkeypatch):
+    # Escolha do Rafael (23/10, P4): com a conta suspensa pela Shopee, nem o robô nem o
+    # assistente trabalham; no fim, os dois voltam sozinhos e o privado recebe o aviso.
+    from datetime import datetime, timedelta
+    from fuso import fuso_horario
+    sv = _painel(bm)
+    pedidos, rodadas, enviados = [], [], []
+
+    async def preparar(bot, admin_id, agora=None, fonte=None):
+        pedidos.append(fonte)
+        return "postagem mandada no seu privado"
+
+    async def rodar_robo(*argumentos):
+        rodadas.append(argumentos)
+
+    class Bot:
+        async def send_message(self, chat, texto, **kwargs):
+            enviados.append(texto)
+
+    monkeypatch.setattr(sv.assistente, "preparar_e_enviar", preparar)
+    monkeypatch.setattr(sv.assistente, "decidir_envio", lambda config: not config["pausado"])
+    monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
+    monkeypatch.setattr(sv, "bot_instance", Bot())
+    fim = datetime.now(fuso_horario) + timedelta(days=2)
+    sv.alterar_config(pausado=False, robo_pausado=True, robo_inicio=0, robo_fim=24,
+                      robo_suspenso_ate=fim.strftime("%Y-%m-%d %H:%M:%S"))
+    # O Rafael pausou o robô no meio da suspensão: mesmo assim o assistente espera.
+    rodar(sv.verificar_envio())
+    assert pedidos == [] and "suspensa pela Shopee" in sv.texto_assistente(sv.ler_config())
+    assert "suspendeu a conta" in sv.texto_painel(sv.ler_config())
+    assert "Pausado" in sv.texto_robo(sv.ler_config()) and "suspensa" in sv.texto_robo(sv.ler_config())
+    sv.alterar_config(robo_pausado=False)
+    rodar(sv.verificar_robo())
+    assert rodadas == [] and enviados == [] and "Em espera" in sv.texto_robo(sv.ler_config())
+    # Acabou (com a folga): o aviso chega, e o robô volta a rodar na mesma volta.
+    sv.alterar_config(robo_suspenso_ate=(datetime.now(fuso_horario) - timedelta(minutes=20)).strftime(
+        "%Y-%m-%d %H:%M:%S"))
+    rodar(sv.verificar_robo())
+    assert len(enviados) == 1 and "acabou" in enviados[0] and rodadas == [("--rodada",)]
+    assert "robo_suspenso_ate" not in sv.ler_config()

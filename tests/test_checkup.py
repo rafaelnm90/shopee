@@ -32,6 +32,7 @@ def test_chaves_do_robo_sao_as_mesmas():
     import robo_shopee_video as robo
     assert checkup.CHAVE_CONFIG_SV == robo.CHAVE_CONFIG
     assert checkup.CHAVE_DIA_SV == robo.CHAVE_DIA
+    assert checkup.FOLGA_DA_SUSPENSAO_SV == robo.FOLGA_DA_SUSPENSAO
     assert robo.PADRAO["robo_pausado"] is True
 
 
@@ -322,3 +323,16 @@ def test_verificacao_semanal_do_publico_so_numeros_e_cobra_atraso():
     assert pontos == ["Grupo Público: a verificação semanal não roda há 10 dias"]
     db.salvar_config("moderacao_publico", {})
     assert checkup.verificacao_do_publico(AGORA) is None
+
+
+def test_conta_suspensa_nao_cobra_horario_vencido_e_mostra_ate_quando():
+    import robo_shopee_video as robo
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False, "robo_suspenso_ate": "2026-10-26 19:04:26"})
+    db.salvar_config(robo.CHAVE_DIA, {"data": "2026-10-23", "horarios": ["09:43", "12:40"], "feitos": 2})
+    r = checkup.robo_da_shopee_video(AGORA)
+    assert r["suspenso"] == "26/10 19:04" and r["vencidos"] == 2 and r["salvos"] == 0
+    pontos = checkup.pontos_de_atencao([], {}, {}, r, {}, None, AGORA)
+    assert not any("horário(s) vencido(s)" in p for p in pontos)
+    # Depois do fim (e da folga), volta a cobrar.
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False, "robo_suspenso_ate": "2026-10-23 10:00:00"})
+    assert checkup.robo_da_shopee_video(AGORA)["suspenso"] == ""

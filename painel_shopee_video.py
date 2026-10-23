@@ -97,10 +97,11 @@ async def enviar_um(fonte):
 def assistente_em_espera(config):
     """
     Com o robô automático ativo, o assistente não manda: um cobre o outro, nunca os dois
-    juntos. Os horários que passam em espera são pulados, como pausado.
+    juntos. Com a conta de Shopee Vídeo suspensa pela Shopee, espera também. Os horários
+    que passam em espera são pulados, como pausado.
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
-    return not config["robo_pausado"]
+    return not config["robo_pausado"] or robo.suspensa(config)
 
 
 async def verificar_envio():
@@ -133,12 +134,22 @@ async def rodar_robo(*argumentos):
 
 
 async def verificar_robo():
-    """Volta do agendador: uma rodada do robô, se ele está ativo e dentro do Horário do Robô."""
+    """
+    Volta do agendador: uma rodada do robô, se ele está ativo e dentro do Horário do Robô.
+    Acabada a suspensão da conta pela Shopee, avisa no privado que os dois voltaram.
+    """
+    aviso = robo.fim_da_suspensao()
+    if aviso:
+        logger.info("✅ [Robô Shopee Vídeo] A suspensão da conta acabou.")
+        try:
+            await bot_instance.send_message(ADMIN_ID, aviso)
+        except Exception as e:
+            logger.warning(f"⚠️ [Robô Shopee Vídeo] Aviso do fim da suspensão não saiu: {type(e).__name__}")
     config = ler_config()
     if _rodada.locked():
         return
-    if config["robo_pausado"]:
-        # Os horários de rascunho que passam pausado são pulados, como no assistente.
+    if config["robo_pausado"] or robo.suspensa(config):
+        # Os horários de rascunho que passam pausado ou suspenso são pulados, como no assistente.
         robo.consumir_horarios(config)
         return
     if robo.no_horario(config):
@@ -396,6 +407,12 @@ def _linha_treino(agora=None):
 
 def quem_posta(config):
     """Quem está postando agora, numa frase: o robô, o assistente ou ninguém."""
+    if robo.suspensa(config):
+        ate = robo.quando_acaba(robo.suspenso_ate(config))
+        if config["robo_pausado"] and config["pausado"]:
+            return f"⏸️ <b>ninguém</b> (os dois estão pausados, e a Shopee suspendeu a conta de Shopee Vídeo até {ate})"
+        return (f"⛔ <b>ninguém</b> (a Shopee suspendeu a conta de Shopee Vídeo até {ate}; depois disso, volta "
+                "sozinho quem estava postando)")
     if not config["robo_pausado"]:
         return "🤖 <b>o Robô Automático</b> (pelo Motorola; o assistente fica em espera)"
     if config["pausado"]:
@@ -424,6 +441,11 @@ def texto_painel(config, agora=None):
 
 
 def status_robo(config):
+    if robo.suspensa(config):
+        ate = robo.quando_acaba(robo.suspenso_ate(config))
+        if config["robo_pausado"]:
+            return f"⏸️ <b>Pausado</b> (e a conta de Shopee Vídeo está suspensa pela Shopee até {ate})"
+        return f"⛔ <b>Em espera</b> (conta de Shopee Vídeo suspensa pela Shopee até {ate}; volta sozinho depois)"
     if not config["robo_pausado"]:
         return "▶️ <b>Ativo</b>"
     if config.get("robo_pausa_motivo") == "celular desconectado":
@@ -468,6 +490,9 @@ def texto_robo(config, agora=None, celular=None):
 def texto_assistente(config, agora=None):
     if config["pausado"]:
         status = "⏸️ <b>Pausado</b>"
+    elif robo.suspensa(config):
+        status = (f"💤 <b>Em espera</b> (conta de Shopee Vídeo suspensa pela Shopee até "
+                  f"{robo.quando_acaba(robo.suspenso_ate(config))})")
     elif assistente_em_espera(config):
         status = "💤 <b>Em espera</b> (o robô automático está postando)"
     else:
@@ -507,7 +532,10 @@ COMO_FUNCIONA = (
     "resolver pela tela do celular, de onde estiver.\n\n"
     "6️⃣ <b>A Shopee mudou o app?</b> Toda segunda o robô treina o caminho e avisa se algo mudou "
     "(Testar Caminho 🧭 faz isso na hora). Aí o Claude ajusta.\n\n"
-    "7️⃣ <b>Resetou ou trocou o Motorola?</b> Robô Automático 🤖 → Celular do Robô 📱 → Passo a Passo 📖."
+    "7️⃣ <b>Resetou ou trocou o Motorola?</b> Robô Automático 🤖 → Celular do Robô 📱 → Passo a Passo 📖.\n\n"
+    "8️⃣ <b>A Shopee suspendeu a conta?</b> O robô lê o aviso nas Notificações do app, pausa ele e o "
+    "assistente até o fim da suspensão e avisa aqui. No fim, os dois voltam sozinhos (se você pausou o "
+    "robô no meio, ele continua pausado)."
 )
 
 
@@ -1240,8 +1268,15 @@ async def salvar_pausa_robo(message: types.Message, state: FSMContext):
     if message.text == "Confirmar Pausa ✅":
         alterar_config(robo_pausado=True, robo_pausa_motivo="")
         logger.info("✅ Robô automático da Shopee Vídeo pausado.")
-        await message.answer("⏸️ Robô automático <b>pausado</b>. O modo assistente volta a mandar as postagens "
-                             "aqui no privado.", parse_mode="HTML")
+        config = ler_config()
+        if robo.suspensa(config):
+            await message.answer(
+                "⏸️ Robô automático <b>pausado</b>. A conta de Shopee Vídeo está suspensa pela Shopee até "
+                f"{robo.quando_acaba(robo.suspenso_ate(config))}. Depois disso, o robô continua pausado e o modo "
+                "assistente volta a mandar as postagens aqui (se ele não estiver pausado).", parse_mode="HTML")
+        else:
+            await message.answer("⏸️ Robô automático <b>pausado</b>. O modo assistente volta a mandar as "
+                                 "postagens aqui no privado.", parse_mode="HTML")
         await mostrar_robo(message, state)
         return
     await message.answer("⏳ Procurando o celular guardado (até 1 min)...")
@@ -1257,8 +1292,12 @@ async def salvar_pausa_robo(message: types.Message, state: FSMContext):
         return
     alterar_config(robo_pausado=False, robo_pausa_motivo="")
     logger.info("✅ Robô automático da Shopee Vídeo retomado.")
+    config = ler_config()
+    suspensao = (f"\n\n⛔ A conta de Shopee Vídeo está suspensa pela Shopee até "
+                 f"{robo.quando_acaba(robo.suspenso_ate(config))}: ele começa sozinho depois disso."
+                 if robo.suspensa(config) else "")
     await message.answer(f"▶️ Robô automático <b>retomado</b> ({html_escape(resultado)} conectado). O modo "
-                         "assistente fica em espera.", parse_mode="HTML")
+                         f"assistente fica em espera.{suspensao}", parse_mode="HTML")
     await mostrar_robo(message, state)
 
 

@@ -26,7 +26,9 @@ privado do Rafael ou com o explorar tocando nele, não toca em nada. Celular des
 tenta reconectar sozinho (celular_robo.reconectar_sozinho); sem conseguir, pausa a
 Postagem e avisa, e o modo assistente volta a mandar as postagens no privado até o
 Rafael tocar em Retomar Postagem ▶️. Na Verificação da Shopee para na hora e manda o
-link da tela do celular no privado.
+link da tela do celular no privado. Com a conta de Shopee Vídeo suspensa pela Shopee (o
+aviso fica nas Notificações do app), não toca em nada até o fim da suspensão, e o modo
+assistente espera junto; no fim, os dois voltam sozinhos (painel_shopee_video).
 
 Nunca toca em Postar sem o Aprovar do Rafael no bot, nem nos botões de comprar. Curtir e
 comentar o próprio vídeo continuam à mão (diretriz 9.1.1): depois de postar, o comentário
@@ -95,6 +97,19 @@ MAXIMO_DA_RODADA = 30 * 60  # segundos; o painel mata a rodada que passa disso
 # Estados de um rascunho: o que ainda está no app do celular e o que já saiu dele.
 NO_APP = ("rascunho", "aprovado", "recusado")
 
+# A suspensão da conta de Shopee Vídeo, como a Shopee avisa (Notificações → filtro "Lives,
+# Vídeos e ...", Motorola, 23/10/2026): "Sua conta foi banida temporariamente até
+# 26-10-2026 19:04:26 devido ... Você não poderá publicar conteúdos em Shopee Vídeo
+# durante o período de suspensão". A data é de Brasília.
+SUSPENSAO = re.compile(r"conta foi\b.{0,80}?\baté (\d{1,2})[-/](\d{1,2})[-/](\d{4}),? "
+                       r"(\d{1,2}):(\d{2})(?::(\d{2}))?", re.IGNORECASE | re.DOTALL)
+ABA_DAS_NOTIFICACOES = "Notificações"
+FILTRO_DOS_VIDEOS = "Lives, Vídeos"
+# Quantas vezes o robô rola a lista das notificações procurando o aviso.
+ROLADAS_NAS_NOTIFICACOES = 2
+# Uns minutos depois do fim antes de voltar: o relógio da Shopee pode atrasar um pouco.
+FOLGA_DA_SUSPENSAO = timedelta(minutes=15)
+
 
 class Parada(Exception):
     """
@@ -109,6 +124,17 @@ class Parada(Exception):
 
 class Verificacao(Exception):
     """A Shopee abriu a Verificação (CAPTCHA): só o Rafael resolve."""
+
+
+class Suspensa(Exception):
+    """
+    A Shopee suspendeu a conta de Shopee Vídeo até ate (Brasília): nada de preparar nem
+    postar até lá. Não é uma Parada: não gasta tentativa nem avisa rascunho que não saiu.
+    """
+
+    def __init__(self, ate):
+        super().__init__(f"conta de Shopee Vídeo suspensa pela Shopee até {quando_acaba(ate)}")
+        self.ate = ate
 
 
 # --- Configuração e plano do dia ---
@@ -230,6 +256,102 @@ def treino_da_semana_pendente(agora=None):
     return agora_br(agora).weekday() == DIA_DO_TREINO and ler_estado().get("treino_semana") != semana(agora)
 
 
+# --- Suspensão da conta pela Shopee ---
+
+def quando_acaba(ate):
+    return ate.strftime("%d/%m às %H:%M")
+
+
+def suspenso_ate(config):
+    """O fim da suspensão guardado (datetime de Brasília), ou None."""
+    try:
+        fim = datetime.strptime(config.get("robo_suspenso_ate") or "", "%Y-%m-%d %H:%M:%S")
+        return fim.replace(tzinfo=fuso_horario)
+    except ValueError:
+        return None
+
+
+def suspensa(config, agora=None):
+    """
+    A conta de Shopee Vídeo está suspensa agora (até o fim e a folga)? Enquanto estiver, o
+    robô não toca no celular e o assistente fica em espera. Decisão do Rafael:
+    DECISOES.md, Shopee Vídeo.
+    """
+    ate = suspenso_ate(config)
+    return bool(ate) and agora_br(agora) < ate + FOLGA_DA_SUSPENSAO
+
+
+def guardar_suspensao(ate):
+    """
+    Guarda o fim da suspensão. A pausa do Rafael (robo_pausado) fica como está: no fim,
+    volta o que ele tinha escolhido. Devolve True se a data é nova (para avisar uma vez só).
+    """
+    texto = ate.strftime("%Y-%m-%d %H:%M:%S")
+
+    def gravar(dados):
+        nova = dados.get("robo_suspenso_ate") != texto
+        dados["robo_suspenso_ate"] = texto
+        return nova
+    return bool(db.atualizar_config(CHAVE_CONFIG, gravar))
+
+
+def remarcar_aprovados(config, agora=None):
+    """
+    Os aprovados que esperaram a suspensão ganham horário novo, espalhados como na
+    aprovação (proxima_postagem): no fim dela, nunca saem todos de uma vez.
+    """
+    aprovados = sorted(listar("aprovado"), key=lambda r: (r["postar_em"] or "", r["id"]))
+    for rascunho in aprovados:
+        atualizar(rascunho["id"], postar_em=None)
+    for rascunho in aprovados:
+        atualizar(rascunho["id"], postar_em=proxima_postagem(config, agora))
+    return len(aprovados)
+
+
+def fim_da_suspensao(agora=None):
+    """
+    A suspensão acabou (com a folga)? Tira a marca, espalha de novo os aprovados e devolve
+    o aviso para o privado do Rafael; None se não havia suspensão ou ela continua. O
+    painel chama a cada 15 min. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    config = ler_config()
+    ate = suspenso_ate(config)
+    if not ate or suspensa(config, agora):
+        return None
+    db.atualizar_config(CHAVE_CONFIG, lambda dados: dados.pop("robo_suspenso_ate", None))
+    aprovados = remarcar_aprovados(config, agora)
+    fila = f" Os {aprovados} aprovado(s) que esperavam saem espalhados no Horário do Robô." if aprovados else ""
+    if not config["robo_pausado"]:
+        return ("✅ Robô da Shopee Vídeo: a suspensão da Shopee Vídeo acabou. Voltei a preparar e postar no "
+                f"Horário do Robô, e o modo assistente segue em espera.{fila}")
+    if config.get("pausado", True):
+        return ("✅ Shopee Vídeo: a suspensão acabou. O robô e o modo assistente continuam pausados, como você "
+                "deixou: para voltar, toque em Shopee Vídeo 🎬 → Robô Automático 🤖 → Retomar Postagem ▶️.")
+    return ("✅ Shopee Vídeo: a suspensão acabou. O robô continua pausado, como você deixou, e o modo assistente "
+            "volta a mandar as postagens aqui no privado.")
+
+
+def suspensao_na_tela(xml, agora=None):
+    """
+    O fim da suspensão que a tela das notificações mostra (datetime de Brasília), ou None.
+    Suspensão que já acabou não conta; com mais de uma, vale a que acaba por último.
+    """
+    fins = []
+    for el in ps.elementos(xml):
+        texto = el["texto"]
+        if "publicar" not in texto.casefold():
+            continue
+        for dia, mes, ano, hora, minuto, segundo in SUSPENSAO.findall(texto):
+            try:
+                fim = datetime(int(ano), int(mes), int(dia), int(hora), int(minuto), int(segundo or 0),
+                               tzinfo=fuso_horario)
+            except ValueError:
+                continue
+            if fim > agora_br(agora):
+                fins.append(fim)
+    return max(fins, default=None)
+
+
 # --- Rascunhos (tabela shopee_video_rascunhos) ---
 
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
@@ -320,6 +442,7 @@ LINHAS_DO_HISTORICO = 12
 # O passo em que parou, achado no motivo (as frases fixas do robô e do postador). A
 # ordem importa: o primeiro trecho que aparece no motivo decide.
 PASSOS = (
+    ("suspensa pela Shopee", "conta suspensa pela Shopee"),
     ("sem oferta de afiliado", "oferta de afiliado"),
     ("o link não diz o produto", "achar o produto do link"),
     ("violação", "diretrizes da Shopee"),
@@ -349,7 +472,7 @@ PASSOS = (
     ("erro", "erro inesperado"),
 )
 SIMBOLOS = {"salvo": "✅", "postado": "📤", "apagado": "🗑️", "pulado": "⏭️", "parou": "⚠️", "erro": "❌",
-            "verificação": "🧩", "sem vídeo": "📭", "treino ok": "🧭", "treino parou": "🧭"}
+            "verificação": "🧩", "suspensa": "⛔", "sem vídeo": "📭", "treino ok": "🧭", "treino parou": "🧭"}
 NOMES_DAS_ACOES = {"rascunho": "Rascunho", "postar": "Postagem", "apagar": "Apagar rascunho",
                    "treino": "Testar Caminho", "rodada": "Rodada"}
 
@@ -712,6 +835,43 @@ def ir_ao_perfil(d):
     seguir(d, CAMINHO_PERFIL)
 
 
+def ler_suspensao(d, agora=None):
+    """
+    Olha nas Notificações (filtro Lives, Vídeos e ...) se a Shopee suspendeu a conta de
+    Shopee Vídeo, e até quando. Só toca na aba e no filtro e rola a lista: não abre
+    nenhuma notificação. Sem o aviso, ou se a tela não abre: None.
+    """
+    try:
+        ir_ao_inicio(d)
+        tocar(d, ABA_DAS_NOTIFICACOES, 6)
+        tocar(d, FILTRO_DOS_VIDEOS, 5)
+        for vez in range(ROLADAS_NAS_NOTIFICACOES + 1):
+            ate = suspensao_na_tela(tela(d), agora)
+            if ate:
+                return ate
+            if vez < ROLADAS_NAS_NOTIFICACOES:
+                ps.rolar(d)
+                pausa(2)
+    except Parada as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Não consegui olhar as Notificações: {ps.mascarar(e.motivo)}")
+    return None
+
+
+def abrir_galeria(d, agora=None):
+    """
+    Postar vídeo → Biblioteca. Com a conta de Shopee Vídeo suspensa, o Postar vídeo não
+    abre nada (Motorola, 23/10/2026): sem a Biblioteca, o robô olha nas Notificações se
+    é suspensão antes de dar a rodada por parada.
+    """
+    try:
+        seguir(d, CAMINHO_GALERIA)
+    except Parada:
+        ate = ler_suspensao(d, agora)
+        if ate:
+            raise Suspensa(ate) from None
+        raise
+
+
 # A legenda e a comparação com o título ficam no postador, que o explorar também usa.
 legenda_na_tela = ps.legenda_na_tela
 mesma_legenda = ps.mesma_legenda
@@ -790,7 +950,11 @@ def preparar_rascunho(d, config, agora=None):
     ident = criar(video["id"], agora)
     assistente.registrar(video["id"], "robo", "rascunho do robô", agora)
     try:
-        _preparar(d, ident, video, config.get("fonte", assistente.FONTE_PADRAO))
+        _preparar(d, ident, video, config.get("fonte", assistente.FONTE_PADRAO), agora)
+    except Suspensa as e:
+        _desfazer_reserva(ident, video["id"], "conta suspensa", False)
+        registrar_tentativa("rascunho", "suspensa", str(e), _produto_do_video(video), agora)
+        raise
     except Verificacao:
         _desfazer_reserva(ident, video["id"], "verificação", False)
         registrar_tentativa("rascunho", "verificação", "verificação da Shopee na tela", _produto_do_video(video), agora)
@@ -827,7 +991,7 @@ def _conferir(resultado, do_video=True):
         raise Parada(motivo, do_video=do_video)
 
 
-def _preparar(d, ident, video, fonte):
+def _preparar(d, ident, video, fonte, agora=None):
     vistos = []
     if video.get("de_video"):
         avisar("🤖 Robô da Shopee Vídeo: começando um rascunho.\n\nProdutos: os do Ver Produtos do vídeo; a IA "
@@ -872,7 +1036,7 @@ def _preparar(d, ident, video, fonte):
     # O vídeo na galeria com um nome só dele: o mais novo da galeria é o que vai no rascunho.
     if not ps.por_na_galeria(d, copia, nome_na_galeria(ident)):
         raise Parada("o vídeo não apareceu na galeria do celular")
-    seguir(d, CAMINHO_GALERIA)
+    abrir_galeria(d, agora)
     marcar_so_o_mais_novo(d)
     seguir(d, CAMINHO_EDICAO)
 
@@ -1044,7 +1208,14 @@ def abrir_rascunho(d, rascunho):
 
 
 def publicar(d, rascunho, agora=None):
-    """Posta o rascunho aprovado e manda no privado o link do post e o comentário."""
+    """
+    Posta o rascunho aprovado e manda no privado o link do post e o comentário. Antes,
+    olha nas Notificações se a conta está suspensa: não se sabe o que o Postar faz com a
+    conta suspensa, e o robô não marca como postado o que não foi ao ar.
+    """
+    ate = ler_suspensao(d, agora)
+    if ate:
+        raise Suspensa(ate)
     abrir_rascunho(d, rascunho)
     _conferir(ps.postar(d, video_do_rascunho(rascunho)), do_video=False)
     pausa(15)
@@ -1195,7 +1366,7 @@ def treinar(d, agora=None):
                 raise Parada(f"página do produto: {motivo}")
         # O quadro "Rascunhos: N" só aparece com algum rascunho salvo: o treino não o exige.
         ir_ao_perfil(d)
-        seguir(d, CAMINHO_GALERIA)
+        abrir_galeria(d, agora)
         marcar_so_o_mais_novo(d)
         seguir(d, CAMINHO_EDICAO)
         xml = tela(d)
@@ -1204,6 +1375,10 @@ def treinar(d, agora=None):
         if faltam:
             raise Parada(f"a tela final não tem {', '.join(faltam)}")
         seguir(d, CAMINHO_PRODUTO)
+    except Suspensa as e:
+        gravar_estado(treino_resultado=str(e))
+        _sair_sem_salvar(d)
+        raise
     except Parada as e:
         gravar_estado(treino_resultado=f"mudou: {e.motivo}")
         _print_do_treino(d, f"⚠️ Treino do robô da Shopee Vídeo: algo mudou no app ({e.motivo}). "
@@ -1266,8 +1441,17 @@ def rodada(treino=False, preparar=False, d=None, agora=None):
         if config["robo_pausado"]:
             consumir_horarios(config, agora)
             return "pausado"
+        if suspensa(config, agora):
+            # Os horários que passam na suspensão são pulados, como pausado.
+            consumir_horarios(config, agora)
+            return f"conta suspensa até {quando_acaba(suspenso_ate(config))}"
         if not no_horario(config, agora):
             return "fora do Horário do Robô"
+    elif suspensa(config, agora):
+        ate = quando_acaba(suspenso_ate(config))
+        avisar(f"⛔ Robô da Shopee Vídeo: não {'preparei o rascunho' if preparar else 'testei o caminho'}. A conta "
+               f"de Shopee Vídeo está suspensa pela Shopee até {ate}, e o robô não toca no celular até lá.")
+        return f"conta suspensa até {ate}"
     if d is None:
         if av.tela_aberta():
             return _resposta(preparar, "a tela do celular está aberta no privado do Rafael")
@@ -1320,6 +1504,8 @@ def _agir(d, acao, ident, preparar, config, agora):
         _repetir_depois(acao, preparar, config, agora)
         _avisar_que_nao_saiu(acao, preparar, config, agora)
         return _resposta(preparar, resultado)
+    except Suspensa as e:
+        return _suspender(e, acao, preparar, produto, agora)
     except Verificacao:
         logger.warning("⚠️ [Robô Shopee Vídeo] Verificação da Shopee na tela: parado.")
         if acao != "rascunho":
@@ -1346,6 +1532,28 @@ def _agir(d, acao, ident, preparar, config, agora):
         _repetir_depois(acao, preparar, config, agora, getattr(e, "id_video", None))
         _avisar_que_nao_saiu(acao, preparar, config, agora)
         return _resposta(preparar, f"{acao}: erro {type(e).__name__}")
+
+
+def _suspender(e, acao, preparar, produto="", agora=None):
+    """
+    A conta está suspensa: guarda até quando e avisa o Rafael uma vez. O aprovado continua
+    aprovado e sai depois da suspensão (fim_da_suspensao); o rascunho do plano não gasta
+    tentativa nem manda o aviso de que não saiu. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    ate = quando_acaba(e.ate)
+    logger.warning(f"⛔ [Robô Shopee Vídeo] Conta suspensa pela Shopee até {ate}: robô e assistente em espera.")
+    if acao != "rascunho":
+        registrar_tentativa(acao, "suspensa", str(e), produto, agora)
+    if guardar_suspensao(e.ate):
+        avisar(f"⛔ Robô da Shopee Vídeo: a Shopee suspendeu a sua conta de Shopee Vídeo até {ate} (o aviso está "
+               "nas Notificações do app da Shopee).\n\n"
+               "Pausei o robô e o modo assistente até lá: nada de preparar nem postar, e sem avisos de rascunho "
+               "que não saiu. Os rascunhos aprovados ficam guardados e saem depois, espalhados.\n\n"
+               "Quando a suspensão acabar, os dois voltam sozinhos e eu aviso aqui. Se quiser que o robô continue "
+               "pausado depois, toque em Shopee Vídeo 🎬 → Robô Automático 🤖 → Pausar Postagem ⏸️.")
+    elif preparar:
+        _resposta(preparar, str(e))
+    return str(e)
 
 
 def _avisar_que_nao_saiu(acao, preparar, config, agora=None):
