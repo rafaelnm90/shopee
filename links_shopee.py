@@ -59,3 +59,22 @@ def codigo_do_link_curto(link):
     """O código do link curto, em minúsculas ('S.SHOPEE.COM.BR/AbC1' → 'abc1'), ou None."""
     achado = _PADRAO_CODIGO.search(str(link or ""))
     return achado.group(1).lower() if achado else None
+
+
+def chave_produto(link):
+    """
+    A identidade do PRODUTO de um link, não da URL: "prod_<loja>_<item>" no link longo
+    (/product/<loja>/<item> ou /<nome>-i.<loja>.<item>) e "curto_<código>" no link curto.
+
+    Sozinha, não reconhece o mesmo item por trás de dois encurtadores diferentes: o
+    espelhador dos Autorais abre o link curto antes (chave_produto_resolvida) e guarda o
+    par código → produto na tabela links_resolvidos.
+    """
+    if not link:
+        return None
+    alvo = str(link).split("?")[0].strip().lower()
+    m = re.search(r"/product/(\d+)/(\d+)", alvo) or re.search(r"-i\.(\d+)\.(\d+)", alvo)
+    if m:
+        return f"prod_{m.group(1)}_{m.group(2)}"
+    codigo = codigo_do_link_curto(alvo)
+    return f"curto_{codigo}" if codigo else None

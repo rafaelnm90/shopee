@@ -272,6 +272,7 @@ async def interceptar_mensagem(event):
 
     # O post precisa vir de um alvo; se o alvo tem tópico, também do tópico certo.
     eh_alvo_espiao = False
+    alvo_casado = None
     for alvo in alvos:
         alvo_str = str(alvo).lower()
         alvo_base = alvo_str.split(':')[0]
@@ -283,11 +284,11 @@ async def interceptar_mensagem(event):
                 t_evento = topico_id_evento if topico_id_evento else 1
                 t_alvo = alvo_topico if alvo_topico else 1
                 if t_evento == t_alvo:
-                    eh_alvo_espiao = True
+                    eh_alvo_espiao, alvo_casado = True, alvo_str
                     break
             else:
                 # Alvo sem tópico: escuta o grupo todo.
-                eh_alvo_espiao = True
+                eh_alvo_espiao, alvo_casado = True, alvo_str
                 break
 
     if not eh_alvo_espiao:
@@ -298,6 +299,9 @@ async def interceptar_mensagem(event):
     
     # Sem link da Shopee é conversa: ignora.
     if link_capturado:
+        # O alvo da lista (como está no painel, em minúsculas) vira apelido: o checkup
+        # conta por grupo vigiado o que chegou, para achar o que parou de mandar.
+        registro_processos.registrar("espiao", "vídeo com link no grupo vigiado", "visto", origem=alvo_casado)
         # Só vídeo interessa, e isso é checado antes da duplicidade: o link só é
         # registrado como capturado quando há vídeo. Senão um post com foto e link
         # bloquearia por 24 h o post com vídeo do mesmo produto.
@@ -741,7 +745,7 @@ async def motor_espelhador_userbot(event):
         topico_id_evento = getattr(event.message.reply_to, 'reply_to_top_id', None) or getattr(event.message.reply_to, 'reply_to_msg_id', None)
 
     dados = ler_espelhos_config()
-    rotas_ativas = []
+    rotas_ativas, origens_casadas = [], []
     
     for r in dados.get("rotas", []):
         origens_rota = [str(o).lower() for o in r.get("origens", [])]
@@ -750,6 +754,7 @@ async def motor_espelhador_userbot(event):
             
         # A rota pega o post se ele vem de uma das origens (e do tópico, se a origem tiver um).
         para_esta_rota = False
+        origem_casada = None
         for origem in origens_rota:
             origem_base = origem.split(':')[0]
             origem_topico = int(origem.split(':')[1]) if ':' in origem and origem.split(':')[1].isdigit() else None
@@ -759,14 +764,15 @@ async def motor_espelhador_userbot(event):
                     t_evento = topico_id_evento if topico_id_evento else 1
                     t_origem = origem_topico if origem_topico else 1
                     if t_evento == t_origem:
-                        para_esta_rota = True
+                        para_esta_rota, origem_casada = True, origem
                         break
                 else:
-                    para_esta_rota = True
+                    para_esta_rota, origem_casada = True, origem
                     break
                     
         if para_esta_rota:
             rotas_ativas.append(r)
+            origens_casadas.append(origem_casada)
     
     if not rotas_ativas:
         return
@@ -783,6 +789,8 @@ async def motor_espelhador_userbot(event):
         return
     
     logger.info(f"🔄 [Espelhador] Interceptação acionada! Mídia e link detetados na origem {chat_id_str}.")
+    for origem_casada in origens_casadas:
+        registro_processos.registrar("espelhador", "vídeo com link na origem da rota", "visto", origem=origem_casada)
     logger.info("🔗 [Espelhador] A converter o link da Shopee encontrado via API Central...")
     link_final_convertido = await converter_link_shopee(link_capturado, "geral")
     logger.info("✅ [Espelhador] Sucesso: Link convertido utilizando a função nativa correta.")

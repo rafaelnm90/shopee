@@ -141,3 +141,6 @@ def test_captura_guarda_o_link_do_post_no_telegram(esp):
                                          "https://t.me/c/1/9")
     assert consultar("SELECT link_original, link_post_origem FROM fila_parceiros WHERE id_unico = ?",
                      id_unico) == ("https://s.shopee.com.br/x", "https://t.me/c/1/9")
+    # A chave do produto fica junto, para o checkup achar o mesmo produto em dois parceiros.
+    outro = esp.inserir_fila_parceiro(2, "/tmp/y.mp4", "https://shopee.com.br/a-i.1.2", "2026-10-10", chave="prod_1_2")
+    assert consultar("SELECT chave_produto FROM fila_parceiros WHERE id_unico = ?", outro) == ("prod_1_2",)

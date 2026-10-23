@@ -70,6 +70,7 @@ import alvos_sem_acesso  # alvos da divulgação a que a conta perdeu o acesso
 import backup_dados  # backup diário do banco, sessões e .env em ~/backups
 import registro_processos  # cada processo dos robôs, 3 dias, para o checkup do dia
 import rotinas  # em que canal sai cada rotina de texto
+import conferencia_espiao  # o nome que a IA do Espião deu confere com o produto?
 import faxina_viral  # o resumo da faxina do Acervo Viral, que roda no divulgacao_canal
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
 
@@ -14979,6 +14980,10 @@ async def processar_fila_espiao(forcar=False):
             registrar_ultimo_post(canal_destino, "video")  # Intercalação
             logger.info(f"✅ Clone {item_id} publicado com sucesso! ID: {msg_enviada.message_id}")
             registro_processos.registrar("bot_mestre", "postagem Viral", "postado", ok=True)
+            if texto_ia:
+                # Em segundo plano: a consulta à API não segura o próximo clone.
+                asyncio.create_task(conferencia_espiao.anotar(legendas.separar_nome_e_hashtags(texto_ia)[0],
+                                                              link_original))
             try: os.remove(caminho_video)
             except: pass
         except Exception as e:
