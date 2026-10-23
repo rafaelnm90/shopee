@@ -68,8 +68,27 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     edição da legenda aberta; sem a cópia, para. Na tela final, o Ctrl+A abre a edição do texto e
     tira o Postar e o Rascunhos da tela (o voltar fecha): ao reabrir um rascunho, o robô só lê pela
     acessibilidade e aceita ".." no lugar do emoji.
-- **Ainda a mapear:** o link que abre um vídeo (Ver Produtos, vários produtos): até lá, o
-  robô só usa vídeos com link de produto, e os outros ficam para o assistente.
+  - **link de vídeo, o Ver Produtos** (23/10/2026, explorar com `video:link-de-video`): o link
+    abre o player do vídeo (`HomeActivity_`, aba Live e Vídeo) com **"Ver Produtos (N)"** e, ao
+    lado, um cartão com **"Comprar com cupom"** (proibido, como todo texto que começa com
+    "comprar" ou "compre"). Vídeo apagado: a página "… do Vídeo" com **"Este vídeo foi
+    removido"**. O toque em Ver Produtos abre por cima (`ReactTransparentActivity_`) os cupons
+    da loja, os **cartões dos produtos que o criador vinculou** (nome, preço, avaliação e o
+    Comprar com cupom), **"Ver Mais (N)"** e **"Você Também Pode Gostar"** (recomendações da
+    Shopee, que não são do vídeo). O toque no nome abre a página do produto
+    (`HalfPdpActivity`), com o coração (`buttonItemLike`/`buttonItemLiked`) e o nome no id
+    **`labelProductPageProductName`**; o voltar volta à lista.
+  - **mais de um produto na tela final** (23/10/2026): com um produto anexado, a tela mostra
+    **"Adicionar Mais"** (`tv_add_more`), que abre a mesma lista (o anexado aparece como
+    "Adicionado"; cada item mostra a taxa de comissão); Adicionar → "Editar nome do produto" →
+    Feito, e a tela final mostra os produtos lado a lado (`rv_product`, um `tv_product_title`
+    e um X `iv_close` cada). Sem legenda escrita, o voltar da tela final vai direto à edição,
+    sem o aviso de sair.
+  - **o robô com link de vídeo:** abre o vídeo, toca em Ver Produtos e, em cada produto
+    vinculado (até 6, nunca os recomendados), lê o nome na página, a IA confere vídeo × nome 2
+    vezes, e o confirmado é curtido. Anexa todos os confirmados (o 1º pelo Adicionar produto,
+    os outros pelo Adicionar Mais) e confere a tela final um a um. Nenhum confirmado, ou vídeo
+    removido: o vídeo fica de lado. Os produtos de "Ver Mais" ainda não entram.
 
 ## Onde paramos
 
