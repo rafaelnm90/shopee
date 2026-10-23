@@ -51,6 +51,11 @@ MARCAS_DE_SEGURANCA = ("af-ac-enc-dat", "af-ac-enc-sz-token", "x-sap-ri", "x-sap
                        "withCredentials", "SPC_", "captcha", "antifraud", "anti_fraud", "risk_token")
 # A API que a página de compartilhamento chama para buscar o vídeo (achada em 23/10/2026).
 API_DO_VIDEO = "https://sv.shopee.com.br/api/v2/timeline/single"
+CAMINHO_DA_API_DO_VIDEO = "/api/v2/timeline/single"
+# A página manda a chamada do vídeo para um endereço-base guardado numa variável
+# (baseURL): os endereços da Shopee que aparecem nos scripts são os candidatos.
+HOST_DA_SHOPEE = re.compile(r"https?://((?:[a-z0-9-]+\.)*shopee\.com\.br)\b")
+MAXIMO_HOSTS = 8
 # Caminho de API dentro de um script: "/api/..." ou "https://.../api/...", com letras,
 # números, _, -, / e . (sem consulta).
 CAMINHO_DE_API = re.compile(r"""["'`]((?:https?://[a-z0-9.-]+)?/api/[A-Za-z0-9_./-]{2,120})["'`]""")
@@ -179,6 +184,11 @@ def trechos_da_api(codigo, api):
             for i in [m.start() for m in re.finditer(re.escape(api), codigo or "")][:3]]
 
 
+def hosts_da_shopee(codigos):
+    """Os endereços (host) da Shopee Brasil que aparecem nos scripts, sem repetir."""
+    return sorted({host for codigo in codigos.values() for host in HOST_DA_SHOPEE.findall(codigo or "")})
+
+
 def marcas_de_seguranca(codigos):
     """marca → (vezes, scripts em que aparece), só das marcas que aparecem."""
     achadas = {}
@@ -224,25 +234,35 @@ async def procurar_apis(sessao, html, base):
         print("   nenhuma marca")
     for marca, (vezes, onde) in sorted(achadas.items()):
         print(f"   {marca}: {vezes} vez(es) em {', '.join(onde[:4])}")
+    hosts = hosts_da_shopee(todos)
+    print(f"== Endereços da Shopee nos scripts ({len(hosts)}): {', '.join(hosts[:20])}")
+    return hosts
 
 
-async def testar_api(sessao, id_video):
-    """Chama a API do vídeo com os nomes de parâmetro prováveis e mostra só a forma da resposta."""
+async def testar_api(sessao, id_video, hosts=()):
+    """
+    Chama a API do vídeo com os nomes de parâmetro prováveis e, com o post_id (o que o
+    script da página manda), em cada endereço da Shopee dos scripts, que pode ser o
+    baseURL da chamada. Mostra só a forma da resposta.
+    """
     print("== A API do vídeo")
-    for parametros in ({"post_id": id_video}, {"postId": id_video}, {"id": id_video}):
+    tentativas = [(API_DO_VIDEO, {nome: id_video}, nome) for nome in ("post_id", "postId", "id")]
+    tentativas += [(f"https://{host}{CAMINHO_DA_API_DO_VIDEO}", {"post_id": id_video}, f"{host}, post_id")
+                   for host in [h for h in hosts if h != "sv.shopee.com.br"][:MAXIMO_HOSTS]]
+    for endereco, parametros, rotulo in tentativas:
         try:
-            async with sessao.get(API_DO_VIDEO, params=parametros, timeout=20) as resposta:
+            async with sessao.get(endereco, params=parametros, timeout=20) as resposta:
                 corpo = await resposta.text()
         except Exception as e:
-            print(f"   {list(parametros)[0]}: não respondeu ({type(e).__name__})")
+            print(f"   {rotulo}: não respondeu ({type(e).__name__})")
             continue
         try:
             dados = json.loads(corpo)
         except ValueError:
-            print(f"   {list(parametros)[0]}: HTTP {resposta.status}, {len(corpo)} caracteres, não é JSON")
+            print(f"   {rotulo}: HTTP {resposta.status}, {len(corpo)} caracteres, não é JSON")
             continue
         videos_achados = list(caminhos_de_video(dados))
-        print(f"   {list(parametros)[0]}: HTTP {resposta.status}, {len(corpo)} caracteres, "
+        print(f"   {rotulo}: HTTP {resposta.status}, {len(corpo)} caracteres, "
               f"{len(videos_achados)} endereço(s) de vídeo")
         for caminho, tipo in videos_achados[:MAXIMO_CAMINHOS]:
             print(f"      {caminho} ({tipo})")
@@ -276,8 +296,8 @@ async def investigar(id_video="", curto=False, url=None):
         # No link curto, o código é o do encurtador, não o do vídeo: a API não serve.
         alvo = "" if curto else (id_video or id_do_video(final))
         if not tem_video(html) and alvo:
-            await procurar_apis(sessao, html, str(resposta.url))
-            await testar_api(sessao, alvo)
+            hosts = await procurar_apis(sessao, html, str(resposta.url))
+            await testar_api(sessao, alvo, hosts)
 
     print("== O Baixador com este link")
     pasta = tempfile.mkdtemp()
