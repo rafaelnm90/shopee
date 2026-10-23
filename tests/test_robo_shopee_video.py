@@ -218,8 +218,12 @@ TELAS = {
     "conta": [_no("Perfil em Shopee Vídeo", caixa=(100, 600, 700, 680))],
     "perfil": [_no("Postar vídeo", caixa=(700, 2200, 1040, 2300)), _no("Rascunhos: 1", caixa=(20, 900, 350, 1300))],
     "camera": [_no("Biblioteca", caixa=(800, 2100, 1000, 2200))],
-    "galeria": [_no(ident="ll_check", caixa=(300, 300, 360, 360))],
-    "galeria_marcada": [_no("Próximo (1)", "tv_pick_top_next", (860, 2080, 980, 2130))],
+    # Dois vídeos na galeria: o mais novo (1º) e um antigo; a caixa marcada tem o número.
+    "galeria": [_no(ident="ll_check", caixa=(300, 300, 360, 360)), _no(ident="ll_check", caixa=(600, 300, 660, 360))],
+    "galeria_marcada": [_no(ident="ll_check", caixa=(300, 300, 360, 360),
+                            filhos=_no("1", "check", (320, 310, 340, 330), clicavel=False)),
+                        _no(ident="ll_check", caixa=(600, 300, 660, 360)),
+                        _no("Próximo (1)", "tv_pick_top_next", (860, 2080, 980, 2130))],
     "edicao": [_no("Próximo", "tv_compress", (860, 150, 1040, 210))],
     "final": "final",
     "curtidas": [_no("Minhas Curtidas", caixa=(300, 410, 510, 460)), _no("Mais Recente", caixa=(300, 520, 510, 570)),
@@ -648,3 +652,22 @@ def test_main_grava_a_ultima_rodada_mascarada(monkeypatch):
     estado = robo.ler_estado()
     assert estado["ultima_rodada"].startswith("rascunho: parado (não achei") and "Vestido" not in estado["ultima_rodada"]
     assert estado["ultima_rodada_em"]
+
+
+def test_galeria_que_lembra_um_video_antigo_marcado_fica_so_com_o_mais_novo(monkeypatch):
+    # No Motorola (23/10) a galeria lembrou a marcação de antes: tocar sem olhar desmarcava
+    # o vídeo ou juntaria dois vídeos no mesmo post.
+    monkeypatch.setitem(TELAS, "galeria_lembrada", [
+        _no(ident="ll_check", caixa=(300, 300, 360, 360)),
+        _no(ident="ll_check", caixa=(600, 300, 660, 360), filhos=_no("1", "check", (620, 310, 640, 330), clicavel=False)),
+        _no("Próximo (1)", "tv_pick_top_next", (860, 2080, 980, 2130))])
+    monkeypatch.setitem(CAMINHO, ("galeria_lembrada", (630, 330)), "galeria")
+    monkeypatch.setitem(CAMINHO, ("galeria", (330, 330)), "galeria_marcada")
+    app = AppComQuadros()
+    app.atual = "galeria_lembrada"
+    robo.marcar_so_o_mais_novo(app)
+    assert app.toques == [(630, 330), (330, 330)] and app.atual == "galeria_marcada"
+    # Já certo: não toca em nada.
+    app.toques = []
+    robo.marcar_so_o_mais_novo(app)
+    assert app.toques == []

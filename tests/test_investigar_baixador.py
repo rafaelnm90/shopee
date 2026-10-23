@@ -39,3 +39,9 @@ def test_pagina_sem_video_lista_as_chaves_e_as_apis_dos_scripts():
         "https://sv.shopee.com.br/_next/static/chunks/pages/app-1a2b.js"]
     codigo = 'fetch("/api/v4/video/get_share_info");x="https://sv.shopee.com.br/api/v1/feed";y="nada"'
     assert ib.apis_no_script(codigo) == {"/api/v4/video/get_share_info", "https://sv.shopee.com.br/api/v1/feed"}
+
+
+def test_trechos_da_api_mostram_o_codigo_em_volta():
+    codigo = "a" * 400 + 'fetch("/api/v2/timeline/single",{post_id:e})' + "b" * 400
+    trechos = ib.trechos_da_api(codigo, "/api/v2/timeline/single")
+    assert len(trechos) == 1 and "post_id" in trechos[0] and len(trechos[0]) <= 2 * ib.TRECHO + 30

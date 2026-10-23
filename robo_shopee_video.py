@@ -371,10 +371,12 @@ CAMINHO_PERFIL = [
     ("Conta", 5, "Perfil em Shopee Vídeo"),
     ("Perfil em Shopee Vídeo", 6, "Postar vídeo"),
 ]
-CAMINHO_POSTAR = [
+CAMINHO_GALERIA = [
     ("Postar vídeo", 8, "Biblioteca"),
     ("Biblioteca", 6, "@ll_check"),
-    ("@ll_check", 3, "@tv_pick_top_next"),
+]
+# Depois da galeria (com só o vídeo mais novo marcado): a edição e a tela final.
+CAMINHO_EDICAO = [
     ("@tv_pick_top_next", 10, "@tv_compress"),
     ("@tv_compress", 10, "@et_caption"),
 ]
@@ -435,6 +437,31 @@ def ir_ao_inicio(d):
     d.app_start(ps.PACOTE, wait=True)
     pausa(5)
     voltar(d, "Eu")
+
+
+def marcar_so_o_mais_novo(d):
+    """
+    Na galeria, deixa marcado só o vídeo mais novo (o 1º da grade). O app lembra a
+    marcação de antes (visto no Motorola em 23/10/2026): tocar sem olhar desmarcaria o
+    vídeo, ou juntaria dois vídeos no mesmo post. Cada quadro tem a caixa @ll_check, com
+    o número da ordem (@check) quando está marcado.
+    """
+    for _ in range(4):
+        elementos = ps.elementos(tela(d))
+        caixas = sorted((el for el in elementos if el["id"] == "ll_check"),
+                        key=lambda el: (el["caixa"][1], el["caixa"][0]))
+        if not caixas:
+            raise Parada("a galeria não mostrou os vídeos")
+        marcados = [i for i, caixa in enumerate(caixas)
+                    if any(el["id"] == "check" and el["texto"].strip() and ps._dentro(ps._centro(el), caixa["caixa"])
+                           for el in elementos)]
+        if marcados == [0]:
+            return
+        # Primeiro desmarca o que não é o mais novo; depois marca o mais novo.
+        alvo = next((i for i in marcados if i != 0), 0)
+        d.click(*ps._centro(caixas[alvo]))
+        pausa(2)
+    raise Parada("não consegui deixar marcado só o vídeo mais novo na galeria")
 
 
 def ir_ao_perfil(d):
@@ -569,12 +596,14 @@ def _preparar(d, ident, video, fonte):
     # O vídeo na galeria com um nome só dele: o mais novo da galeria é o que vai no rascunho.
     if not ps.por_na_galeria(d, copia, nome_na_galeria(ident)):
         raise Parada("o vídeo não apareceu na galeria do celular")
-    seguir(d, CAMINHO_POSTAR)
+    seguir(d, CAMINHO_GALERIA)
+    marcar_so_o_mais_novo(d)
+    seguir(d, CAMINHO_EDICAO)
 
     tocar(d, "@et_caption", 3)
     ps.escrever(d, textos["titulo"])
     pausa(3)
-    na_tela = legenda_na_tela(tela(d))
+    na_tela = ps.legenda_do_campo(d)
     if not mesma_legenda(na_tela, textos["titulo"]):
         raise Parada(f"o título não ficou na legenda ({ps.comparar_legenda(na_tela, textos['titulo'])})")
     tocar(d, "@tv_right", 3)
@@ -647,8 +676,8 @@ def abrir_rascunho(d, rascunho):
     d.click(*ps._centro(quadros[posicao]))
     pausa(10)
     seguir(d, [("@tv_compress", 10, "@et_caption")])
-    xml = tela(d)
-    if not mesma_legenda(legenda_na_tela(xml), rascunho["titulo"]):
+    tela(d)
+    if not mesma_legenda(ps.legenda_do_campo(d), rascunho["titulo"]):
         raise Parada("o rascunho aberto não tem o título do aprovado")
     _conferir(ps.conferir_tela_final(d, video_do_rascunho(rascunho)), do_video=False)
 
@@ -785,7 +814,9 @@ def treinar(d, agora=None):
                 raise Parada(f"página do produto: {motivo}")
         # O quadro "Rascunhos: N" só aparece com algum rascunho salvo: o treino não o exige.
         ir_ao_perfil(d)
-        seguir(d, CAMINHO_POSTAR)
+        seguir(d, CAMINHO_GALERIA)
+        marcar_so_o_mais_novo(d)
+        seguir(d, CAMINHO_EDICAO)
         xml = tela(d)
         faltam = [alvo for alvo in ("@et_caption", "@ll_add_product_symbol", "@tv_drafts_box", "@btn_post")
                   if not tem(xml, alvo)]

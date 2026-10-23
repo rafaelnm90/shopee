@@ -900,6 +900,9 @@ def test_passo_legenda_compara_com_o_titulo_guardado_sem_mostrar_o_texto():
     class Celular:
         legenda = titulo.replace(" #", "\n#")
 
+        def __call__(self, **seletor):
+            return type("Campo", (), {"exists": False})()
+
         def dump_hierarchy(self):
             return ('<hierarchy><node class="android.widget.EditText" clickable="true" '
                     f'resource-id="com.shopee.br:id/et_caption" text="{self.legenda}" bounds="[40,300][1040,400]"/>'
@@ -907,7 +910,7 @@ def test_passo_legenda_compara_com_o_titulo_guardado_sem_mostrar_o_texto():
                     'text="56/150" bounds="[980,580][1060,620]"/></hierarchy>')
 
     ok, texto = ps.fazer_passo(Celular(), "legenda", "")
-    assert ok and texto.startswith("a legenda é o título") and "contador do app: 56/150" in texto
+    assert ok and "pelo campo: a legenda é o título" in texto and "contador do app: 56/150" in texto
     Celular.legenda = "Outra coisa"
     ok, texto = ps.fazer_passo(Celular(), "legenda", "")
     assert ok and "NÃO é o título" in texto and "Lustre" not in texto and "Outra" not in texto
@@ -933,3 +936,24 @@ def test_escrever_poe_o_texto_inteiro_no_campo_em_foco_com_os_emojis():
 
     ps.escrever(Celular(), "Luminária 💡 de mesa ✨ #decoracao")
     assert Campo.texto == "Luminária 💡 de mesa ✨ #decoracao" and Celular.teclado == []
+
+
+def test_legenda_lida_do_campo_e_nao_do_retrato_que_troca_emoji_por_ponto():
+    # No Motorola (23/10), o retrato da tela mostrou ".." onde o título tinha 💡.
+    titulo = "Luminária 💡 de mesa ✨ #decoracao"
+
+    class Campo:
+        exists = True
+
+        def get_text(self):
+            return titulo
+
+    class Celular:
+        def __call__(self, **seletor):
+            assert seletor == {"resourceId": "com.shopee.br:id/et_caption"}
+            return Campo()
+
+        def dump_hierarchy(self):
+            raise AssertionError("não deveria ler o retrato")
+
+    assert ps.mesma_legenda(ps.legenda_do_campo(Celular()), titulo)

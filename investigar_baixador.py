@@ -33,6 +33,9 @@ URL_DO_VIDEO = "https://sv.shopee.com.br/share-video/{id}"
 MAXIMO_CAMINHOS = 40
 MAXIMO_SCRIPTS = 30
 MAXIMO_APIS = 80
+TRECHO = 300
+# A API que a página de compartilhamento chama para buscar o vídeo (achada em 23/10/2026).
+API_DO_VIDEO = "https://sv.shopee.com.br/api/v2/timeline/single"
 # Caminho de API dentro de um script: "/api/..." ou "https://.../api/...", com letras,
 # números, _, -, / e . (sem consulta).
 CAMINHO_DE_API = re.compile(r"""["'`]((?:https?://[a-z0-9.-]+)?/api/[A-Za-z0-9_./-]{2,120})["'`]""")
@@ -150,10 +153,16 @@ def descrever_pagina(html):
     return linhas
 
 
+def trechos_da_api(codigo, api):
+    """Os pedaços do script em volta de cada chamada da API: mostram os parâmetros."""
+    return [codigo[max(0, i - TRECHO):i + len(api) + TRECHO]
+            for i in [m.start() for m in re.finditer(re.escape(api), codigo or "")][:3]]
+
+
 async def procurar_apis(sessao, html, base):
     """Lê os scripts públicos da página e lista os caminhos de API que eles chamam."""
     print("== Scripts da página e as APIs que eles chamam")
-    apis = set()
+    apis, codigos = set(), []
     scripts = scripts_da_pagina(html, base)
     print(f"scripts com endereço: {len(scripts)}")
     for endereco in scripts[:MAXIMO_SCRIPTS]:
@@ -167,9 +176,40 @@ async def procurar_apis(sessao, html, base):
         print(f"   {urllib.parse.urlparse(endereco).netloc}{urllib.parse.urlparse(endereco).path}: "
               f"{len(codigo)} caracteres, {len(encontrados)} API(s)")
         apis |= encontrados
+        if encontrados:
+            codigos.append(codigo)
     print(f"APIs nos scripts ({len(apis)}):")
     for api in sorted(apis)[:MAXIMO_APIS]:
         print(f"   {api}")
+        # O código em volta da chamada (script público da Shopee) mostra os parâmetros.
+        for codigo in codigos:
+            for trecho in trechos_da_api(codigo, api):
+                print(f"      trecho: {trecho}")
+
+
+async def testar_api(sessao, id_video):
+    """Chama a API do vídeo com os nomes de parâmetro prováveis e mostra só a forma da resposta."""
+    print("== A API do vídeo")
+    for parametros in ({"post_id": id_video}, {"postId": id_video}, {"id": id_video}):
+        try:
+            async with sessao.get(API_DO_VIDEO, params=parametros, timeout=20) as resposta:
+                corpo = await resposta.text()
+        except Exception as e:
+            print(f"   {list(parametros)[0]}: não respondeu ({type(e).__name__})")
+            continue
+        try:
+            dados = json.loads(corpo)
+        except ValueError:
+            print(f"   {list(parametros)[0]}: HTTP {resposta.status}, {len(corpo)} caracteres, não é JSON")
+            continue
+        videos_achados = list(caminhos_de_video(dados))
+        print(f"   {list(parametros)[0]}: HTTP {resposta.status}, {len(corpo)} caracteres, "
+              f"{len(videos_achados)} endereço(s) de vídeo")
+        for caminho, tipo in videos_achados[:MAXIMO_CAMINHOS]:
+            print(f"      {caminho} ({tipo})")
+        if not videos_achados:
+            for chave in list(todas_as_chaves(dados))[:MAXIMO_CAMINHOS]:
+                print(f"      {chave}")
 
 
 async def investigar(id_video):
@@ -186,6 +226,7 @@ async def investigar(id_video):
             print(linha)
         if not tem_video(html):
             await procurar_apis(sessao, html, str(resposta.url))
+            await testar_api(sessao, id_video)
 
     print("== O Baixador com este link")
     pasta = tempfile.mkdtemp()
