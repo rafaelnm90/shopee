@@ -878,8 +878,11 @@ def test_curtir_acha_o_nome_com_o_selo_antes(monkeypatch):
 
 def test_copiado_diz_so_se_e_link_da_shopee_e_o_tamanho():
     class Celular:
-        clipboard = "https://sv.shopee.com.br/share-video/abc"
+        clipboard = "Olha este vídeo: https://sv.shopee.com.br/share-video/abc"
     ok, texto = ps.fazer_passo(Celular(), "copiado", "")
-    assert ok and texto == "link da Shopee copiado (40 caracteres)" and "http" not in texto
+    assert ok and texto == "link da Shopee copiado (40 caracteres, num texto de 57)" and "http" not in texto
+    assert ps.link_copiado(Celular()) == "https://sv.shopee.com.br/share-video/abc"
     Celular.clipboard = "outra coisa"
-    assert ps.fazer_passo(Celular(), "copiado", "") == (False, "o que está copiado não é um link da Shopee")
+    assert ps.fazer_passo(Celular(), "copiado", "") == (False, "o copiado (11 caracteres) não tem link da Shopee")
+    Celular.clipboard = None
+    assert ps.fazer_passo(Celular(), "copiado", "") == (False, "nada copiado, ou o Android não deixou ler")
