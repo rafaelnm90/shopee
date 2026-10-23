@@ -11,9 +11,10 @@ um vídeo (Shopee, TikTok, Pinterest, Instagram) e recebe o arquivo sem marca d'
   CANAIS_OBRIGATORIOS. Limite de LIMITE_DIARIO_DOWNLOADS por dia.
 - O mesmo link já entregue é reenviado pelo file_id, sem baixar de novo.
 - O tópico se mantém limpo: o painel de instruções desce para o fim depois das
-  entregas e o mais novo fica fixado. Os vídeos entregues ficam para sempre; os
-  painéis antigos e os avisos "fixou" são apagados pela conta principal
-  (faxina_baixador.py, no divulgacao_canal), porque bot só apaga até 48 h.
+  entregas e o mais novo fica fixado. Os vídeos entregues ficam para sempre; a
+  resposta de erro some 5 min depois, junto com o link do membro. Os painéis
+  antigos, os avisos "fixou" e os erros que sobrarem são apagados pela conta
+  principal (faxina_baixador.py, no divulgacao_canal), porque bot só apaga até 48 h.
 
 Usa o mesmo banco_dados.db dos outros robôs, com tabelas próprias.
 """
@@ -54,7 +55,7 @@ router = Router()
 
 # Grupo Público para Afiliados, tópico "Downloader Videos": definidos junto da
 # faxina do tópico, que roda no divulgacao_canal.
-from faxina_baixador import GRUPO_DOWNLOADER, TOPICO_DOWNLOADER
+from faxina_baixador import EXPIRACAO_ERRO_S, GRUPO_DOWNLOADER, TOPICO_DOWNLOADER
 
 # Canais exigidos depois da cortesia (nesta ordem na tela).
 CANAIS_OBRIGATORIOS = [
@@ -1284,6 +1285,17 @@ async def apagar_depois(mensagem, segundos):
     try: await mensagem.delete()
     except Exception: pass
 
+async def expirar_erro(resposta, link_original):
+    """
+    A resposta de erro fica EXPIRACAO_ERRO_S no tópico (tempo de ler a dica) e some junto
+    com o link do membro. Se o robô reiniciar antes, a faxina do tópico (faxina_baixador)
+    apaga as duas. Decisão do Rafael: DECISOES.md, Baixador.
+    """
+    await asyncio.sleep(EXPIRACAO_ERRO_S)
+    for mensagem in (resposta, link_original):
+        try: await mensagem.delete()
+        except Exception: pass
+
 # O aviso de cota estourada não fica exposto no tópico: quanto menos gente
 # souber que existe limite, menos gente tenta contornar.
 EXPIRACAO_AVISO_LIMITE_SEG = 180
@@ -1470,6 +1482,7 @@ async def receber_link(message: types.Message):
 
             if erro:
                 await status.edit_text(texto_do_erro(mencao, erro), parse_mode="HTML")
+                asyncio.create_task(expirar_erro(status, message))
                 logger.info(f"❌ Não entregue para {message.from_user.id} ({plataforma}): {erro}")
                 anotar_pedido(plataforma, url_pedido, "não entregue", erro, ok=False)
                 return
@@ -1525,6 +1538,7 @@ async def receber_link(message: types.Message):
             anotar_pedido(plataforma, url_pedido, "falha no envio", type(e).__name__, ok=False)
             try:
                 await status.edit_text(f"❌ {mencao}, algo deu errado no envio. Tente de novo.")
+                asyncio.create_task(expirar_erro(status, message))
             except Exception: pass
         finally:
             # Nada fica no servidor: apaga a pasta inteira, dê certo ou não.
