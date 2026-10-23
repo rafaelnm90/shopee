@@ -1,0 +1,292 @@
+"""
+As punições da Shopee Vídeo e o texto da apelação de cada uma, para o Rafael copiar e
+colar no app (Apelar aqui). Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+
+O caminho:
+- o robô (robo_shopee_video.py) lê no Motorola a tela Saúde do Vídeo, uma vez por dia,
+  quando acha uma punição nova nas Notificações, quando acha a suspensão da conta e
+  pelo botão Gerar Apelação ⚖️; cada punição entra na tabela shopee_video_punicoes, com
+  o vídeo (título e data do post) e o texto que a IA escreveu (gerar_texto);
+- o bot_mestre (painel_shopee_video, lembrar) manda no privado o aviso de cada punição
+  ainda não recorrida e o repete de hora em hora, a qualquer hora, como as perguntas do
+  Claude, até o Rafael tocar em Já recorri ou Não vou recorrer; se a Saúde do Vídeo
+  mostrar que ela já foi recorrida, para também;
+- Relatório Geral 📊 → Saúde da Shopee Vídeo 🩺 mostra as punições (texto_saude).
+
+O texto só diz o que é verdade: punição por propriedade intelectual de vídeo que veio de
+outro canal não ganha texto dizendo que o vídeo é dele; o aviso diz de onde veio.
+"""
+import html
+import logging
+import re
+from datetime import datetime, timedelta
+
+import db
+from fuso import fuso_horario
+
+logger = logging.getLogger(__name__)
+
+INTERVALO = timedelta(hours=1)
+# O campo "Razão para apelar" do app aceita até 200 caracteres.
+TAMANHO_DO_TEXTO = 200
+# A Saúde do Vídeo mostra as violações dos últimos 30 dias.
+DIAS_DA_SAUDE = 30
+# Status da apelação, como o app escreve.
+NAO_RECORRIDO = "Não Recorrido"
+# O que o Rafael decidiu (ou o app mostrou) sobre cada punição.
+PENDENTE, RECORRIDA, NAO_VAI = "pendente", "recorrida", "nao_vai"
+ROTULOS = {PENDENTE: "⏳ não recorrida (lembrando de hora em hora)", RECORRIDA: "✅ recorrida",
+           NAO_VAI: "🚫 você escolheu não recorrer"}
+# Fontes que são vídeos do próprio Rafael: só nelas o texto pode dizer que o vídeo é dele.
+FONTES_PROPRIAS = ("autorais",)
+CALLBACK_RECORRI, CALLBACK_NAO_VAI = "apel_ok:", "apel_nao:"
+
+
+def _momento(agora=None):
+    return (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _criar_tabela(con):
+    con.execute("CREATE TABLE IF NOT EXISTS shopee_video_punicoes ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, chave TEXT UNIQUE, tipo TEXT, data_punicao TEXT, "
+                "status_app TEXT, titulo TEXT, postado_em TEXT, rascunho INTEGER, fonte TEXT, texto TEXT, "
+                "observacao TEXT, situacao TEXT, criada TEXT, lida_em TEXT, ultimo_aviso TEXT, "
+                "avisos INTEGER DEFAULT 0)")
+
+
+COLUNAS = ("id", "chave", "tipo", "data_punicao", "status_app", "titulo", "postado_em", "rascunho", "fonte",
+           "texto", "observacao", "situacao", "criada", "lida_em", "ultimo_aviso", "avisos")
+
+
+def _ler(linhas):
+    return [dict(zip(COLUNAS, linha)) for linha in linhas]
+
+
+def chave(tipo, data_punicao):
+    """Uma punição é o tipo e a data dela, como a Saúde do Vídeo mostra."""
+    return f"{' '.join(str(tipo).split())}|{' '.join(str(data_punicao).split())}"
+
+
+def recorrida_no_app(status_app):
+    return bool(status_app) and status_app.strip().casefold() != NAO_RECORRIDO.casefold()
+
+
+def conhecida(tipo, data_punicao):
+    """A punição já está na tabela? (o robô não precisa abrir o vídeo dela de novo)"""
+    with db.conexao() as con:
+        _criar_tabela(con)
+        return con.execute("SELECT 1 FROM shopee_video_punicoes WHERE chave = ?",
+                           (chave(tipo, data_punicao),)).fetchone() is not None
+
+
+def guardar(tipo, data_punicao, status_app, titulo="", postado_em="", rascunho=None, fonte="", texto="",
+            observacao="", agora=None):
+    """
+    Guarda uma punição nova, ou atualiza o status do app de uma conhecida. A que já foi
+    recorrida no app nunca é lembrada; a pendente que o app mostra recorrida para de
+    ser lembrada. Devolve o id.
+    """
+    k = chave(tipo, data_punicao)
+    with db.conexao() as con:
+        _criar_tabela(con)
+        linha = con.execute("SELECT id, situacao FROM shopee_video_punicoes WHERE chave = ?", (k,)).fetchone()
+        if linha:
+            ident, situacao = linha
+            if situacao == PENDENTE and recorrida_no_app(status_app):
+                situacao = RECORRIDA
+            con.execute("UPDATE shopee_video_punicoes SET status_app = ?, situacao = ?, lida_em = ? WHERE id = ?",
+                        (status_app, situacao, _momento(agora), ident))
+            return ident
+        situacao = RECORRIDA if recorrida_no_app(status_app) else PENDENTE
+        cursor = con.execute(
+            "INSERT INTO shopee_video_punicoes (chave, tipo, data_punicao, status_app, titulo, postado_em, rascunho, "
+            "fonte, texto, observacao, situacao, criada, lida_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (k, tipo, data_punicao, status_app, titulo, postado_em, rascunho, fonte, texto, observacao, situacao,
+             _momento(agora), _momento(agora)))
+        return cursor.lastrowid
+
+
+def pegar(ident):
+    with db.conexao() as con:
+        _criar_tabela(con)
+        return next(iter(_ler(con.execute(f"SELECT {', '.join(COLUNAS)} FROM shopee_video_punicoes WHERE id = ?",
+                                          (ident,)).fetchall())), None)
+
+
+def todas():
+    """Da mais nova para a mais velha (pela ordem em que o robô achou)."""
+    with db.conexao() as con:
+        _criar_tabela(con)
+        return _ler(con.execute(f"SELECT {', '.join(COLUNAS)} FROM shopee_video_punicoes ORDER BY id DESC").fetchall())
+
+
+def marcar(ident, situacao):
+    """O Rafael tocou em Já recorri ou Não vou recorrer: o lembrete para. False se já não estava pendente."""
+    with db.conexao() as con:
+        _criar_tabela(con)
+        cursor = con.execute("UPDATE shopee_video_punicoes SET situacao = ? WHERE id = ? AND situacao = ?",
+                             (situacao, ident, PENDENTE))
+        return cursor.rowcount > 0
+
+
+def vencidas(agora=None):
+    """As pendentes que ainda não foram avisadas ou cujo último aviso tem 1 h ou mais."""
+    limite = _momento((agora or datetime.now(fuso_horario)) - INTERVALO)
+    return [p for p in todas()[::-1]
+            if p["situacao"] == PENDENTE and (not p["ultimo_aviso"] or p["ultimo_aviso"] <= limite)]
+
+
+def marcar_aviso(ident, agora=None):
+    with db.conexao() as con:
+        _criar_tabela(con)
+        con.execute("UPDATE shopee_video_punicoes SET ultimo_aviso = ?, avisos = COALESCE(avisos, 0) + 1 WHERE id = ?",
+                    (_momento(agora), ident))
+
+
+# --- O aviso no privado ---
+
+def montar_aviso(p):
+    """O aviso em HTML: a punição, o vídeo, o texto para copiar com um toque e onde colar."""
+    avisos = p.get("avisos") or 0
+    topo = ("⚖️ <b>A Shopee puniu um vídeo seu: dá para recorrer</b>" if not avisos
+            else f"🔔 <b>Lembrete {avisos + 1}: a punição da Shopee Vídeo ainda espera o recurso</b>")
+    linhas = [topo, "", f"🚫 <b>Punição:</b> {html.escape(p['tipo'])} ({html.escape(p['data_punicao'])})"]
+    if p["titulo"]:
+        linhas.append(f"🎬 <b>Vídeo:</b> {html.escape(p['titulo'][:150])}")
+    if p["postado_em"]:
+        linhas.append(f"📅 <b>Postado em:</b> {html.escape(p['postado_em'])}")
+    if p["observacao"]:
+        linhas += ["", f"ℹ️ {html.escape(p['observacao'])}"]
+    if p["texto"]:
+        linhas += ["", f"👇 Toque no texto para copiar ({len(p['texto'])} de {TAMANHO_DO_TEXTO} caracteres):",
+                   f"<code>{html.escape(p['texto'])}</code>"]
+    linhas += ["", "📲 No app: Notificações (ou Eu → Criadores &amp; Afiliados → Saúde do Vídeo) → o vídeo → "
+                   "<b>Apelar aqui</b> → cole em Razão para apelar → <b>Enviar</b>. Não apague o vídeo enquanto o "
+                   "recurso estiver em análise.",
+               "", "Lembro de hora em hora até você tocar num dos botões abaixo."]
+    return "\n".join(linhas)
+
+
+def botoes(p):
+    """Os botões do aviso: qualquer um dos dois para o lembrete."""
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Já recorri", callback_data=f"{CALLBACK_RECORRI}{p['id']}"),
+        InlineKeyboardButton(text="🚫 Não vou recorrer", callback_data=f"{CALLBACK_NAO_VAI}{p['id']}")]])
+
+
+async def lembrar(enviar, agora=None):
+    """
+    Manda o aviso de cada punição pendente nunca avisada, e de novo a cada hora.
+    enviar(texto, p) é a função do bot (async, devolve True se saiu). Um aviso que não
+    sai fica para a próxima volta. Devolve quantos saíram.
+    """
+    enviados = 0
+    for p in vencidas(agora):
+        try:
+            if await enviar(montar_aviso(p), p):
+                marcar_aviso(p["id"], agora)
+                enviados += 1
+        except Exception as e:
+            logger.warning(f"⚠️ [Apelação Shopee Vídeo] Aviso da punição {p['id']} não saiu: {type(e).__name__}")
+    return enviados
+
+
+# --- O texto da apelação ---
+
+PROMPT = """Você escreve o texto de um recurso (apelação) para a Shopee Vídeo, em português do Brasil.
+O criador vai copiar e colar o texto no campo "Razão para apelar", que aceita no máximo {limite} caracteres.
+
+Regras:
+- No máximo {limite} caracteres, contando espaços. Uma ou duas frases, educadas e diretas.
+- Só fatos que estão abaixo. Nunca invente nada (marca, autorização, que o vídeo é original) que não esteja aqui.
+- Diga por que o vídeo cumpre a regra da punição e termine pedindo a revisão.
+- Se o nome do produto puder ser confundido com outra coisa (ex.: "botijão térmico" com botijão de gás), deixe claro o que o produto é.
+- Sem hashtags, emojis, aspas ou link. Devolva só o texto.
+
+Punição: {tipo}
+Explicação da Shopee: {explicacao}
+Título do vídeo: {titulo}
+Produto anexado ao vídeo: {produtos}
+O que a IA viu no vídeo antes de postar: {conferencia}
+De onde veio o vídeo: {origem}
+"""
+
+
+def _encurtar(texto, limite=TAMANHO_DO_TEXTO):
+    """Corta no fim da última frase que cabe; sem frase inteira, no último espaço."""
+    texto = " ".join(str(texto or "").replace('"', "").split())
+    if len(texto) <= limite:
+        return texto
+    corte = texto[:limite]
+    fim = max(corte.rfind(". "), corte.rfind("! "), corte.rfind("? "))
+    if fim >= limite // 2:
+        return corte[:fim + 1]
+    return corte[:corte.rfind(" ")].rstrip(",;:") + "."
+
+
+def so_com_autoria_verdadeira(tipo, fonte):
+    """
+    Punição por propriedade intelectual (ou direitos autorais) de vídeo que não é do
+    Rafael: o texto diria que o vídeo é dele, o que não é verdade.
+    """
+    texto = (tipo or "").casefold()
+    autoral = "propriedade intelectual" in texto or "direito" in texto
+    return not autoral or (fonte or "") in FONTES_PROPRIAS
+
+
+async def gerar_texto(tipo, explicacao="", titulo="", produtos=(), conferencia="", fonte="", tentativas=2):
+    """
+    O texto do recurso, com até 200 caracteres, ou ("", observação) quando não cabe
+    texto verdadeiro. Devolve (texto, observacao).
+    """
+    if not so_com_autoria_verdadeira(tipo, fonte):
+        return "", ("O vídeo veio de outro canal (não é dos Autorais), então não escrevi texto dizendo que ele é "
+                    "seu. Se quiser recorrer mesmo assim, conte no recurso o que é verdade sobre o vídeo.")
+    import api_gemini
+    origem = {"autorais": "gravado pelo próprio criador (Autorais)"}.get(fonte, f"de outro canal ({fonte})"
+                                                                           if fonte else "não se sabe")
+    prompt = PROMPT.format(limite=TAMANHO_DO_TEXTO, tipo=tipo, explicacao=explicacao or "—", titulo=titulo or "—",
+                           produtos=", ".join(produtos) or "—", conferencia=conferencia or "—", origem=origem)
+    melhor = ""
+    for _ in range(tentativas):
+        resposta = await api_gemini.gerar_texto_gemini(prompt)
+        texto = " ".join(str(resposta or "").replace('"', "").split())
+        if texto and len(texto) <= TAMANHO_DO_TEXTO:
+            return texto, ""
+        melhor = melhor or texto
+    if melhor:
+        return _encurtar(melhor), ""
+    return "", "A IA não respondeu agora: toque em Gerar Apelação ⚖️ (Relatório Geral 📊 → Saúde da Shopee Vídeo 🩺) para tentar de novo."
+
+
+# --- A tela Saúde da Shopee Vídeo ---
+
+def texto_saude(config, ultima_leitura="", agora=None):
+    """Relatório Geral 📊 → Saúde da Shopee Vídeo 🩺: a suspensão e as punições dos últimos 30 dias."""
+    import robo_shopee_video as robo
+    agora = agora or datetime.now(fuso_horario)
+    linhas = ["🩺 <b>Saúde da Shopee Vídeo</b>", ""]
+    if robo.suspensa(config, agora):
+        linhas.append(f"⛔ Conta suspensa pela Shopee até <b>{robo.quando_acaba(robo.suspenso_ate(config))}</b>.")
+    else:
+        linhas.append("✅ Conta sem suspensão.")
+    linhas.append(f"🔎 Última olhada na Saúde do Vídeo do Motorola: <b>{ultima_leitura or 'ainda não olhou'}</b>")
+    corte = _momento(agora - timedelta(days=DIAS_DA_SAUDE))
+    recentes = [p for p in todas() if (p["criada"] or "") >= corte]
+    linhas += ["", f"<b>Punições dos últimos {DIAS_DA_SAUDE} dias: {len(recentes)}</b>"]
+    for p in recentes[:15]:
+        titulo = f"\n   🎬 {html.escape(p['titulo'][:80])}" if p["titulo"] else ""
+        linhas.append(f"• {html.escape(p['tipo'])} ({html.escape(p['data_punicao'])}): "
+                      f"{ROTULOS.get(p['situacao'], p['situacao'])}{titulo}")
+    linhas += ["", "<b>O que o botão faz</b>",
+               "⚖️ <b>Gerar Apelação</b>: o robô olha agora a Saúde do Vídeo no Motorola e manda aqui o texto "
+               "pronto de cada punição ainda não recorrida, com os botões Já recorri e Não vou recorrer. Ele "
+               "também olha sozinho uma vez por dia."]
+    return "\n".join(linhas)
+
+
+def ler_explicacao(texto):
+    """A explicação da Shopee, sem espaços repetidos e sem o "Apelar aqui." do fim."""
+    return re.sub(r"\s*Apelar aqui\.?\s*$", "", " ".join(str(texto or "").split()))
+
