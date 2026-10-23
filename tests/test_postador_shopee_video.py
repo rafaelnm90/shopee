@@ -62,6 +62,10 @@ class Aparelho:
     def swipe(self, *pontos):
         self.comandos.append(["rolar", *pontos])
 
+    def __call__(self, **seletor):
+        """O d(focused=True) do uiautomator2: aqui, nenhum campo em foco (cai no send_keys)."""
+        return type("Campo", (), {"exists": False})()
+
     def send_keys(self, texto):
         self.escrito.append(texto)
 
@@ -907,3 +911,25 @@ def test_passo_legenda_compara_com_o_titulo_guardado_sem_mostrar_o_texto():
     Celular.legenda = "Outra coisa"
     ok, texto = ps.fazer_passo(Celular(), "legenda", "")
     assert ok and "NÃO é o título" in texto and "Lustre" not in texto and "Outra" not in texto
+
+
+def test_escrever_poe_o_texto_inteiro_no_campo_em_foco_com_os_emojis():
+    # O send_keys trocava o 💡 por ".." (Motorola, 23/10): o texto vai pelo set_text do campo.
+    class Campo:
+        exists, texto = True, None
+
+        def set_text(self, texto):
+            Campo.texto = texto
+
+    class Celular:
+        teclado = []
+
+        def __call__(self, **seletor):
+            assert seletor == {"focused": True}
+            return Campo()
+
+        def send_keys(self, texto):
+            Celular.teclado.append(texto)
+
+    ps.escrever(Celular(), "Luminária 💡 de mesa ✨ #decoracao")
+    assert Campo.texto == "Luminária 💡 de mesa ✨ #decoracao" and Celular.teclado == []

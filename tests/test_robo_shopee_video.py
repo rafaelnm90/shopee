@@ -266,6 +266,10 @@ class AppDeMentira:
                 self.atual = CAMINHO[(self.atual, nome)]
                 return
 
+    def __call__(self, **seletor):
+        """O d(focused=True) do uiautomator2: aqui, nenhum campo em foco (cai no send_keys)."""
+        return type("Campo", (), {"exists": False})()
+
     def send_keys(self, texto):
         self.legenda += texto
 
