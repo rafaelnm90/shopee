@@ -1,0 +1,39 @@
+name: Investigar o Baixador (Shopee Vídeo)
+
+# Por que o Baixador não acha o vídeo de um link da Shopee Vídeo: abre a página no
+# servidor como o Baixador abre e mostra só a forma dela (status, tamanhos, onde há
+# vídeo no JSON), e roda o download de verdade, dizendo o tamanho ou o erro. Só roda
+# quando disparado à mão.
+#
+# O repositório é público, e os logs do Actions também: o investigar_baixador.py nunca
+# imprime links, nomes ou textos da página. A entrada é só o código do vídeo (o que vem
+# depois de share-video/), de um vídeo público, sem o link de compartilhamento.
+on:
+  workflow_dispatch:
+    inputs:
+      video:
+        description: "Código do vídeo (o que vem depois de share-video/ no link)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  investigar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Abrir a página e baixar (só leitura)
+        uses: appleboy/ssh-action@master
+        env:
+          VIDEO: ${{ inputs.video }}
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          command_timeout: 8m
+          envs: VIDEO
+          script: |
+            cd ~/shopee
+            venv/bin/python3 investigar_baixador.py "$VIDEO"
