@@ -180,6 +180,9 @@ PALAVRAS_DA_TELA = frozenset("""
     quebra-cabeça peça complete completar tente atualizar erro carregando aguarde rede
     conexão internet ops algo deu errado página encontrada negado bloqueado suspeita
     atividade incomum robô humano captcha verify slide puzzle
+    está estão disponível disponíveis indisponível removido removida foi foram existe
+    encontrado encontrados vinculado vinculados vinculou ainda há possui sendo
+    exibido exibidos ocultado privado expirou expirado
 """.split())
 NUMERO = re.compile(r"[\d.,%R$()+x×/:#-]*\d[\d.,%R$()+x×/:#-]*")
 PONTUACAO = ".,:;!?()[]{}\"'«»“”‘’-–—/|+*·•"
@@ -323,15 +326,18 @@ def video_da_fonte(de_video=False):
     """
     {"id", "arquivo", "link", "nome"} do vídeo que o modo assistente mandaria agora,
     da fonte escolhida no painel; None sem nenhum. Com de_video=True, o mais novo cujo
-    link abre um vídeo (Ver Produtos), para mapear esse caminho no celular.
+    link abre um vídeo (Ver Produtos), fora o vídeo do teste de agora, para mapear esse
+    caminho no celular.
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     fonte = (db.ler_config(CHAVE_PAINEL, {}) or {}).get("fonte", assistente.FONTE_PADRAO)
     if not de_video:
         video = assistente.proximo_video(fonte)
         return dict(video, arquivo=os.path.abspath(video["arquivo"])) if video else None
+    anterior = (db.ler_config(CHAVE_TESTE, {}) or {}).get("id")
     for id_unico, arquivo, link, legenda in assistente.candidatos_nao_usados(fonte)[:CANDIDATOS_DE_VIDEO]:
-        if not (link and arquivo and os.path.exists(arquivo)):
+        # O de agora fica de fora: video:link-de-video de novo passa para o seguinte.
+        if id_unico == anterior or not (link and arquivo and os.path.exists(arquivo)):
             continue
         if eh_video(asyncio.run(link_para_converter(link))):
             return {"id": id_unico, "arquivo": os.path.abspath(arquivo), "link": link,
