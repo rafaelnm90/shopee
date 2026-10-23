@@ -808,7 +808,8 @@ def treinar(d, agora=None):
     usado, sem curtir. Avisa no privado: caminho OK, ou a tela que mudou, com o print.
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
-    gravar_estado(treino_semana=semana(agora), treino_em=_momento(agora))
+    # O resultado do treino anterior sai: enquanto este roda, o painel mostra "rodando".
+    gravar_estado(treino_semana=semana(agora), treino_em=_momento(agora), treino_resultado="")
     try:
         ultimo = (listar(*NO_APP, "postado", "apagado") or [None])[-1]
         if ultimo:

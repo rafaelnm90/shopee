@@ -399,11 +399,20 @@ def test_verificacao_no_meio_para_e_manda_a_tela(monkeypatch, avisos):
 
 def test_treino_percorre_o_caminho_sem_salvar_nem_postar(monkeypatch, avisos):
     app = AppDeMentira()
+    robo.gravar_estado(treino_resultado="mudou: antigo")
+    vistos = []
+    original = robo.ir_ao_perfil
+
+    def ir_ao_perfil(d):
+        vistos.append(robo.ler_estado()["treino_resultado"])     # o do treino anterior já saiu
+        original(d)
+
+    monkeypatch.setattr(robo, "ir_ao_perfil", ir_ao_perfil)
     resultado = robo.rodada(treino=True, d=app, agora=momento("2026-10-22 03:00"))
     assert resultado == "treino: caminho OK"
     assert "@tv_drafts_box" not in app.toques and "@btn_post" not in app.toques and "Postar" not in app.toques
     assert "caminho OK" in avisos[-1]
-    assert robo.ler_estado()["treino_resultado"] == "ok"
+    assert robo.ler_estado()["treino_resultado"] == "ok" and vistos == [""]
 
 
 def test_treino_avisa_com_print_quando_uma_tela_mudou(monkeypatch, avisos):
