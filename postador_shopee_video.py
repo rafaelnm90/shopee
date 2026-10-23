@@ -41,7 +41,10 @@ Passos, separados por ponto e vírgula:
     print            manda um print da tela no privado do Rafael (nunca no log); print:postar
                      avisa que é a tela antes de postar
     legenda          compara a legenda da tela final com o título do passo titulo (só
-                     tamanhos e códigos de caractere no log, nunca o texto)
+                     tamanhos e códigos de caractere no log, nunca o texto), lida de três
+                     jeitos: pela cópia do campo, pela acessibilidade e pelo retrato da tela;
+                     legenda:TEXTO compara com o texto dado
+    colar:TEXTO      troca o texto do campo com o cursor pelo texto, colando (Ctrl+V)
     copiado          diz se o que está copiado no celular é um link da Shopee e o tamanho
                      dele (o link nunca vai para o log): é como o robô pega o link do post
     tela             só descreve a tela
@@ -132,6 +135,9 @@ NOME_NA_GALERIA = "autoral_shopee_video.mp4"
 SEGUNDOS_DEPOIS_DO_PASSO = 3
 MAXIMO_ESPERA = 60
 MAXIMO_LINHAS = 150
+# Teclas do Android para selecionar tudo, copiar e colar no campo em foco (Ctrl+A, C, V).
+CTRL = 0x1000
+TECLA_A, TECLA_C, TECLA_V = 29, 31, 50
 
 # Palavras que aparecem nos botões e menus do app. Só elas saem no log como estão;
 # o resto (nome da conta, nome de produto, comentário) vira "…".
@@ -336,10 +342,8 @@ def video_do_teste(novo=False):
 def escrever(d, texto):
     """
     Escreve no campo com o cursor pela acessibilidade do Android (o set_text do campo em
-    foco): o send_keys do uiautomator2 troca cada emoji de fora do plano básico (💡, 👗)
-    por ".." (visto no Motorola em 23/10/2026 com o passo legenda), e o título ia ao ar
-    errado. O texto entra inteiro, no lugar do que havia no campo. Sem campo em foco, cai
-    no send_keys.
+    foco): o texto entra inteiro, com os emojis, no lugar do que havia no campo. Sem campo
+    em foco, cai no send_keys.
     """
     campo = d(focused=True)
     if campo.exists:
@@ -699,16 +703,51 @@ def legenda_na_tela(xml):
     return next((el["texto"] for el in elementos(xml) if el["id"] == "et_caption"), "")
 
 
-def legenda_do_campo(d):
+def legenda_lida(d):
     """
-    O texto do campo da legenda lido direto do campo (get_text do uiautomator2). O retrato
-    da tela (XML) pode trocar cada metade de um emoji de fora do plano básico (💡, 👗) por
-    "." e fazer um título certo parecer errado. Sem o campo, lê do retrato.
+    O texto do campo da legenda pela acessibilidade do Android (get_text do uiautomator2;
+    sem o campo, o retrato da tela). Essa leitura devolve cada emoji de fora do plano
+    básico (💡, 👗) como ".." (no Motorola, em 23/10/2026, até a bio e as legendas postadas
+    à mão vieram assim): serve para achar o campo, não para conferir esses emojis.
     """
     campo = d(resourceId=f"{PACOTE}:id/et_caption")
     if campo.exists:
         return campo.get_text() or ""
     return legenda_na_tela(d.dump_hierarchy())
+
+
+def legenda_copiada(d):
+    """
+    O texto do campo da legenda em foco pela área de transferência: Ctrl+A e Ctrl+C no
+    campo e lê o copiado, que vem como o app guardou, com os emojis. A área é limpa antes,
+    para um copiado antigo nunca passar pelo texto do campo. "" quando o campo não está
+    em foco, o app não copiou ou o Android não deixou ler.
+    """
+    try:
+        d.set_clipboard("")
+        d.press(TECLA_A, CTRL)
+        d.press(TECLA_C, CTRL)
+    except Exception:
+        return ""
+    time.sleep(1)
+    return texto_copiado(d)
+
+
+def legenda_do_campo(d):
+    """A legenda do campo pela cópia (com os emojis); sem a cópia, pela acessibilidade."""
+    return legenda_copiada(d) or legenda_lida(d)
+
+
+def como_o_android_le(texto):
+    """O texto como a leitura pela acessibilidade o devolve: cada emoji de fora do plano básico vira ".."."""
+    return "".join(".." if ord(c) > 0xFFFF else c for c in texto or "")
+
+
+def colar(d, texto):
+    """Troca o texto do campo em foco pelo texto, pela área de transferência (Ctrl+A e Ctrl+V), como quem cola."""
+    d.set_clipboard(texto)
+    d.press(TECLA_A, CTRL)
+    d.press(TECLA_V, CTRL)
 
 
 def _o_que_conta(texto):
@@ -750,7 +789,7 @@ def separar_passos(texto):
     """Lista de (nome, argumento). Passo desconhecido vira ValueError antes de tocar em qualquer coisa."""
     conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "esperar", "escrever",
                   "link", "video", "titulo", "comentario", "ia", "curtir", "produto", "conferir", "postar",
-                  "print", "copiado", "legenda", "tela"}
+                  "print", "copiado", "legenda", "colar", "tela"}
     passos = []
     for pedaco in (texto or "").split(";"):
         pedaco = pedaco.strip()
@@ -834,13 +873,19 @@ def fazer_passo(d, nome, argumento):
         return ((True, "vídeo na galeria") if por_na_galeria(d, video["arquivo"])
                 else (False, "o vídeo não apareceu na galeria"))
     if nome == "legenda":
-        guardado = db.ler_config(CHAVE_TESTE, {}) or {}
+        # Sem argumento, compara com o título guardado pelo passo titulo; com ele, com o texto dado.
+        titulo = argumento or (db.ler_config(CHAVE_TESTE, {}) or {}).get("titulo") or ""
         tela = d.dump_hierarchy()
         contador = next((el["texto"] for el in elementos(tela) if el["id"] == "tv_content_num"), "")
-        titulo = guardado.get("titulo") or ""
-        return True, (f"pelo campo: {comparar_legenda(legenda_do_campo(d), titulo)} | pelo retrato da tela: "
+        emojis = sum(ord(c) > 0xFFFF for c in titulo)
+        return True, (f"pela cópia: {comparar_legenda(legenda_copiada(d), titulo)} | pela acessibilidade: "
+                      f"{comparar_legenda(legenda_lida(d), titulo)} | pelo retrato da tela: "
                       f"{comparar_legenda(legenda_na_tela(tela), titulo)}") + (
-            f"; contador do app: {contador}" if re.fullmatch(r"[\d/ ]+", contador or "") else "")
+            f"; contador do app: {contador}" if re.fullmatch(r"[\d/ ]+", contador or "") else "") + (
+            f"; {emojis} emoji(s) de fora do plano básico no título")
+    if nome == "colar":
+        colar(d, argumento)
+        return True, "colado"
     if nome == "copiado":
         texto, link = texto_copiado(d), link_copiado(d)
         if link:

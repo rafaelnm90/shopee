@@ -910,14 +910,75 @@ def test_passo_legenda_compara_com_o_titulo_guardado_sem_mostrar_o_texto():
                     'text="56/150" bounds="[980,580][1060,620]"/></hierarchy>')
 
     ok, texto = ps.fazer_passo(Celular(), "legenda", "")
-    assert ok and "pelo campo: a legenda é o título" in texto and "contador do app: 56/150" in texto
+    assert ok and "pela acessibilidade: a legenda é o título" in texto and "contador do app: 56/150" in texto
+    assert "pela cópia: a legenda NÃO é o título: 0 caracteres" in texto      # sem a cópia, nada
     Celular.legenda = "Outra coisa"
     ok, texto = ps.fazer_passo(Celular(), "legenda", "")
     assert ok and "NÃO é o título" in texto and "Lustre" not in texto and "Outra" not in texto
 
 
+class CelularComCopia:
+    """O campo da legenda em foco guarda o texto com os emojis; a leitura da tela troca cada um por ".."."""
+
+    def __init__(self, guardado, copia=True):
+        self.guardado, self.copia, self.clipboard, self.teclas = guardado, copia, "copiado antigo", []
+
+    def set_clipboard(self, texto, label=None):
+        self.clipboard = texto
+
+    def press(self, tecla, meta=None):
+        self.teclas.append((tecla, meta))
+        if self.copia and (tecla, meta) == (ps.TECLA_C, ps.CTRL):
+            self.clipboard = self.guardado
+        if (tecla, meta) == (ps.TECLA_V, ps.CTRL):
+            self.guardado = self.clipboard
+
+    def __call__(self, **seletor):
+        lido = ps.como_o_android_le(self.guardado)
+        return type("Campo", (), {"exists": True, "get_text": lambda campo: lido})()
+
+    def dump_hierarchy(self):
+        return ('<hierarchy><node class="android.widget.EditText" clickable="true" resource-id='
+                f'"com.shopee.br:id/et_caption" text="{ps.como_o_android_le(self.guardado)}" bounds="[40,300][1040,400]"/>'
+                '</hierarchy>')
+
+
+def test_legenda_copiada_traz_os_emojis_que_a_leitura_da_tela_troca_por_ponto():
+    titulo = "Luminária 💡 de mesa ✨ #decoracao"
+    celular = CelularComCopia(titulo)
+    assert ps.legenda_lida(celular) == "Luminária .. de mesa ✨ #decoracao"
+    assert not ps.mesma_legenda(ps.legenda_lida(celular), titulo)
+    assert ps.legenda_do_campo(celular) == titulo and ps.mesma_legenda(ps.legenda_do_campo(celular), titulo)
+    assert celular.teclas[-2:] == [(ps.TECLA_A, ps.CTRL), (ps.TECLA_C, ps.CTRL)]
+
+
+def test_copia_que_nao_aconteceu_nunca_devolve_o_copiado_antigo():
+    celular = CelularComCopia("Luminária 💡 de mesa", copia=False)
+    assert ps.legenda_copiada(celular) == ""
+    assert ps.legenda_do_campo(celular) == "Luminária .. de mesa"         # cai na leitura da tela
+
+
+def test_como_o_android_le_troca_so_os_emojis_de_fora_do_plano_basico():
+    assert ps.como_o_android_le("Vestido 👗 lindo ✨ ❤️") == "Vestido .. lindo ✨ ❤️"
+    assert ps.como_o_android_le(None) == ""
+
+
+def test_passos_colar_e_legenda_com_texto_comparam_com_o_texto_dado():
+    celular = CelularComCopia("")
+    assert ps.separar_passos("colar:Teste 💡 ok; legenda:Teste 💡 ok") == [
+        ("colar", "Teste 💡 ok"), ("legenda", "Teste 💡 ok")]
+    assert ps.fazer_passo(celular, "colar", "Teste 💡 ok") == (True, "colado")
+    assert celular.guardado == "Teste 💡 ok"
+    assert celular.teclas == [(ps.TECLA_A, ps.CTRL), (ps.TECLA_V, ps.CTRL)]
+    ok, texto = ps.fazer_passo(celular, "legenda", "Teste 💡 ok")
+    assert ok and texto.startswith("pela cópia: a legenda é o título (10 caracteres na tela, 10 no título)")
+    assert ("pela acessibilidade: a legenda NÃO é o título: 11 caracteres na tela, 10 no título; a 1ª diferença "
+            "está no caractere 7 (na tela U+002E, no título U+1F4A1)") in texto
+    assert texto.endswith("; 1 emoji(s) de fora do plano básico no título")
+
+
 def test_escrever_poe_o_texto_inteiro_no_campo_em_foco_com_os_emojis():
-    # O send_keys trocava o 💡 por ".." (Motorola, 23/10): o texto vai pelo set_text do campo.
+    # O texto vai inteiro pelo set_text do campo em foco, com os emojis.
     class Campo:
         exists, texto = True, None
 
@@ -939,7 +1000,7 @@ def test_escrever_poe_o_texto_inteiro_no_campo_em_foco_com_os_emojis():
 
 
 def test_legenda_lida_do_campo_e_nao_do_retrato_que_troca_emoji_por_ponto():
-    # No Motorola (23/10), o retrato da tela mostrou ".." onde o título tinha 💡.
+    # Sem a cópia do campo, a leitura vem do campo (get_text) antes do retrato da tela.
     titulo = "Luminária 💡 de mesa ✨ #decoracao"
 
     class Campo:

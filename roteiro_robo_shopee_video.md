@@ -59,10 +59,13 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     "Deseja sair da página de edição?", com Salvar Rascunho (`tv_save`), **Descartar**
     (`tv_no_save`) e Cancelar (`tv_cancel`). O robô descarta; depois, mais dois voltar
     chegam ao Perfil.
-  - **escrever o título** (23/10/2026, passo `legenda`): o `send_keys` do uiautomator2 trocava cada
-    emoji de fora do plano básico (💡, 👗) por ".." (138 caracteres na tela contra 137 no título, o
-    contador do app em 138/150); os simples (✨) passavam. O robô e o explorar escrevem pelo
-    `set_text` do campo em foco (acessibilidade), com o texto inteiro de uma vez.
+  - **conferir o título na legenda** (23/10/2026, passo `legenda`): a leitura pela acessibilidade
+    (o retrato da tela e o `get_text`) devolve cada emoji de fora do plano básico (💡, 👗) como ".."
+    (138 caracteres na tela contra 137 no título), escrito pelo `send_keys` ou pelo `set_text`; os
+    simples (✨) passam. A bio e as legendas postadas à mão no Perfil também aparecem com "..", o
+    que aponta para a leitura, e não para o texto do app. O robô escreve pelo `set_text` do campo
+    em foco e confere pela cópia do campo (Ctrl+A e Ctrl+C), que traz o texto como o app guardou;
+    sem a cópia, para. Ao reabrir um rascunho (campo sem foco), aceita ".." no lugar do emoji.
 - **Ainda a mapear:** o link que abre um vídeo (Ver Produtos, vários produtos): até lá, o
   robô só usa vídeos com link de produto, e os outros ficam para o assistente.
 
