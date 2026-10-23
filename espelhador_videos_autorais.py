@@ -527,6 +527,15 @@ def anotar_parceiro(parceiro_id, campo, motivo=None):
     global _diagnostico_gravado_em
     if not parceiro_id:
         return
+    # Só o fim da captura vai ao registro (os contadores de mensagens e vídeos ficam no
+    # diagnóstico do dia). A origem é o parceiro.
+    if campo in ("capturados", "recusado"):
+        # Recusa pela regra (já reservado, acesso, lista negra) não é falha; download que
+        # falhou é.
+        registro_processos.registrar("autorais", "captura de parceiro",
+                                     "capturado" if campo == "capturados" else "recusado", motivo or "",
+                                     ok=True if campo == "capturados" else False if motivo == "download do vídeo falhou"
+                                     else None, origem=parceiro_id)
     try:
         dia = _diagnostico_do_dia(parceiro_id)
         if campo == "recusado":
@@ -1951,18 +1960,22 @@ async def processar_fila_publico_loop():
                     )
                 logger.info(f"📥 [Correio Público] Vídeo {id_unico} baixado "
                             f"({os.path.getsize(caminho) / (1024**2):.1f} MB). O bot publica no horário.")
+                registro_processos.registrar("autorais", "Correio Público: download", "baixado", ok=True)
 
             except FloodWaitError as e:
                 # Telegram mandou esperar. Respeitar não é opcional: esta conta é a peça
                 # mais frágil do sistema e uma rajada teimosa derruba ela.
                 espera = int(getattr(e, "seconds", 60))
                 logger.warning(f"⏳ [Correio Público] FloodWait de {espera}s.")
+                registro_processos.registrar("autorais", "Correio Público: download", "FloodWait", ok=False)
                 await asyncio.sleep(espera + 5)
                 continue
 
             except Exception as e:
                 logger.error(f"❌ [Correio Público] Falha ao baixar o vídeo {id_unico}: {e} "
                              f"| origem={origem_final!r} msg_id={msg_id!r}")
+                registro_processos.registrar("autorais", "Correio Público: download", "falhou, adiado 30 min",
+                                             type(e).__name__, ok=False)
                 # Falhou: adia 30 min, senão este item segura o preparo dos seguintes.
                 with db.conexao() as conexao:
                     conexao.execute(

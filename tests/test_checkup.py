@@ -217,3 +217,56 @@ def test_saida_completa_sem_dado_privado(monkeypatch, capsys):
         assert secao in saida
     assert "secreto" not in saida
     assert "Backup: nenhum" in saida
+
+
+def test_rotinas_espacamento_assunto_seguido_e_o_configurado():
+    db.salvar_config("config_rotina", {
+        "incentivo": {"inicio": 10, "fim": 20, "frequencia": 2},
+        "link_grupo": {"inicio": 9, "fim": 21, "frequencia": 3},
+        "promo_principal": {"inicio": 10, "fim": 20, "frequencia": 1},
+        "link_grupo_publico": {"inicio": 9, "fim": 23, "frequencia": 2},
+        "pausado_viral": True,
+        "historico_diario": {"data": "2026-10-23", "contagem": {
+            "incentivo": ["10:00", "10:05", "15:00"],           # 3 de 2 configuradas, duas juntas
+            "link_grupo": ["12:00"],                            # 1 de 3, janela já fechou às 21h
+            "link_grupo_publico": ["11:00"],                    # janela até 23h: ainda não cobra
+        }},
+    })
+    r = checkup.rotinas_do_dia(AGORA)
+    principal = r["canal principal"]
+    assert (principal["enviadas"], principal["menor"], principal["curtos"], principal["seguidos"]) == (4, 5, 1, 1)
+    assert ("incentivo", 3, 2, "a mais") in principal["fora_do_previsto"]
+    assert ("link_grupo", 1, 3, "a menos") in principal["fora_do_previsto"]
+    assert r["Grupo Público"]["fora_do_previsto"] == []
+    assert r["Viral"]["fora_do_previsto"] == [] and r["Viral"]["pausado"]   # pausado não cobra "a menos"
+    pontos = checkup.pontos_de_atencao([], {}, {}, {"ativo": False, "vencidos": 0, "salvos": 0, "ruins": []},
+                                       {}, ("x", 1.0, 1), AGORA, {}, r, None)
+    assert "Rotinas do canal principal: 1 intervalo(s) abaixo de 10 min (menor: 5 min)" in pontos
+    assert "Rotinas do canal principal: 1 vez(es) o mesmo assunto em seguida" in pontos
+
+
+def test_divulgacao_piso_por_grupo_assunto_seguido_e_rajada():
+    import registro_processos as rp
+
+    def envio(escopo, alvo, minutos_atras):
+        rp.registrar("divulgacao", f"envio ({escopo})", "enviado", ok=True, origem=alvo,
+                     agora=AGORA - timedelta(minutes=minutos_atras))
+    envio("principal", "-1001", 120)
+    envio("viral", "-1001", 110)        # outro assunto, 10 min depois: abaixo do piso de 15
+    envio("viral", "-1001", 60)         # mesmo assunto em seguida, num grupo com dois assuntos
+    envio("principal", "-1002", 100)
+    envio("principal", "-1002", 40)     # grupo de um assunto só: em seguida é o normal
+    d = checkup.divulgacao_do_dia(AGORA)
+    assert (d["envios"], d["grupos"], d["curtos"], d["seguidos"]) == (5, 2, 1, 1)
+    assert d["menor"] == 10 and d["pico"] == 1       # nenhum par a menos de 5 min
+    assert "-1001" not in str(d)
+
+
+def test_canal_de_cada_rotina():
+    import rotinas
+    assert rotinas.canal_da_rotina("promo_principal") == "Viral"
+    assert rotinas.canal_da_rotina("promo_publico") == "canal principal"
+    assert rotinas.canal_da_rotina("promo_publico_viral") == "Viral"
+    assert rotinas.canal_da_rotina("link_grupo_publico") == "Grupo Público"
+    assert rotinas.canal_da_rotina("campanha_pub_0_11.11") == "Grupo Público"
+    assert rotinas.canal_da_rotina("campanha_0_11.11") == "canal principal"

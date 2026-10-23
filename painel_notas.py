@@ -22,6 +22,7 @@ import asyncio
 import aiohttp
 import sqlite3
 import db
+import registro_processos
 import base64
 import time
 import logging
@@ -239,6 +240,8 @@ async def processar_fila_envios(msg_progresso: types.Message = None, retomada=Fa
 
 
 def _marcar_nota(id_registro, status, motivo_erro=None):
+    registro_processos.registrar("notas", "envio de nota fiscal", "enviada" if status == "ENVIADO" else status.lower(),
+                                 ok=status == "ENVIADO")
     """Grava na fila o resultado do envio de uma nota (ENVIADO, ou ERRO com o motivo)."""
     with db.conexao() as conexao:
         if motivo_erro is None:

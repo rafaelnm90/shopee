@@ -15,6 +15,7 @@ import logging
 from datetime import datetime, timedelta
 
 import db
+import registro_processos
 
 logger = logging.getLogger("Registro_Admins")
 
@@ -190,6 +191,7 @@ def gravar(grupos, agora=None):
     return mudancas
 
 
+@registro_processos.anotar("divulgacao", "registro dos administradores")
 async def conferir(client):
     """Coleta e grava. O log leva só números: nomes de pessoas não vão para o log."""
     try:

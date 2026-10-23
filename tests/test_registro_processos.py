@@ -79,3 +79,31 @@ def test_todos_os_robos_anotam_no_registro():
                  "downloader_bot.py", "assistente_shopee_video.py"):
         with open(os.path.join(raiz, robo), encoding="utf-8") as arquivo:
             assert "registro_processos.registrar(" in arquivo.read(), robo
+
+
+def test_job_anotado_fica_no_registro_com_o_tipo_do_erro():
+    @rp.anotar("bot_mestre", "faxina de teste")
+    async def faxina(falhar):
+        if falhar:
+            raise OSError("disco")
+        return "ok"
+
+    assert rodar(faxina(False)) == "ok"
+    try:
+        rodar(faxina(True))
+    except OSError:
+        pass
+    linhas = rp.contagem("2000-01-01 00:00:00")
+    assert ("bot_mestre", "faxina de teste", "concluído", "", 1, 1) in linhas
+    assert ("bot_mestre", "faxina de teste", "falhou", "OSError", 0, 1) in linhas
+    assert faxina.__name__ == "faxina"
+
+
+def test_apelido_da_origem_e_sequencia_em_ordem():
+    rp.registrar("divulgacao", "envio (viral)", "enviado", ok=True, origem="-1001234567890",
+                 agora=AGORA - timedelta(minutes=5))
+    rp.registrar("divulgacao", "envio (principal)", "enviado", ok=True, origem="-1001234567890", agora=AGORA)
+    linhas = rp.sequencia("divulgacao", "envio (", "2000-01-01 00:00:00")
+    assert [l[1] for l in linhas] == ["envio (viral)", "envio (principal)"]
+    assert linhas[0][4] == linhas[1][4] == rp.apelido("-1001234567890") and len(linhas[0][4]) == 8
+    assert "1234567890" not in str(linhas)

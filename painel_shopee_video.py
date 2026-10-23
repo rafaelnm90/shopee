@@ -49,6 +49,7 @@ import android_virtual as av
 import assistente_shopee_video as assistente
 import celular_robo
 import db
+import registro_processos
 import robo_shopee_video as robo
 from fuso import fuso_horario
 from motor_filas import sortear_teto_do_dia
@@ -149,6 +150,7 @@ async def verificar_robo():
 HORA_DO_RESUMO = 22
 
 
+@registro_processos.anotar("shopee_video", "resumo das 22h")
 async def mandar_resumo_do_robo():
     texto = robo.texto_resumo()
     if not texto:

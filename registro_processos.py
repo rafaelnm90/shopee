@@ -13,7 +13,14 @@ viram "#".
 Uso: registro_processos.registrar("baixador", "pedido Shopee (vídeo)", "erro",
 detalhe="a Shopee demorou demais para responder", ok=False). Nunca levanta erro:
 o registro não pode derrubar o processo que ele anota.
+
+origem (opcional) é de onde ou para onde foi o processo (o grupo vigiado, o alvo da
+divulgação, o tópico): fica só como um apelido (os 8 primeiros caracteres do SHA-1),
+para o checkup comparar o mesmo grupo ao longo do dia sem o id sair no log.
 """
+import asyncio
+import functools
+import hashlib
 import logging
 import re
 from datetime import datetime, timedelta
@@ -30,15 +37,22 @@ TAMANHO_DO_DETALHE = 120
 def _criar_tabela(con):
     con.execute("CREATE TABLE IF NOT EXISTS registro_processos ("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, momento TEXT, robo TEXT, processo TEXT, "
-                "resultado TEXT, detalhe TEXT, ok INTEGER)")
+                "resultado TEXT, detalhe TEXT, ok INTEGER, origem TEXT)")
+    if "origem" not in {linha[1] for linha in con.execute("PRAGMA table_info(registro_processos)")}:
+        con.execute("ALTER TABLE registro_processos ADD COLUMN origem TEXT")
     con.execute("CREATE INDEX IF NOT EXISTS idx_registro_processos_momento ON registro_processos (momento)")
+
+
+def apelido(origem):
+    """O apelido de um grupo, alvo ou tópico: o mesmo sempre, sem dizer qual é."""
+    return hashlib.sha1(str(origem).encode()).hexdigest()[:8] if origem not in (None, "") else None
 
 
 def _limpo(texto):
     return re.sub(r"-?\d{5,}", "#", str(texto or ""))[:TAMANHO_DO_DETALHE]
 
 
-def registrar(robo, processo, resultado, detalhe="", ok=None, agora=None):
+def registrar(robo, processo, resultado, detalhe="", ok=None, agora=None, origem=None):
     """
     Anota um processo. ok: True deu certo, False deu errado, None nem um nem outro
     (ex.: o pedido parou na trava de canais, que é a regra funcionando).
@@ -47,10 +61,10 @@ def registrar(robo, processo, resultado, detalhe="", ok=None, agora=None):
     try:
         with db.conexao() as con:
             _criar_tabela(con)
-            con.execute("INSERT INTO registro_processos (momento, robo, processo, resultado, detalhe, ok) "
-                        "VALUES (?, ?, ?, ?, ?, ?)",
+            con.execute("INSERT INTO registro_processos (momento, robo, processo, resultado, detalhe, ok, origem) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
                         (agora.strftime("%Y-%m-%d %H:%M:%S"), robo, _limpo(processo), _limpo(resultado),
-                         _limpo(detalhe), None if ok is None else int(bool(ok))))
+                         _limpo(detalhe), None if ok is None else int(bool(ok)), apelido(origem)))
             corte = (agora - timedelta(days=DIAS_DO_REGISTRO)).strftime("%Y-%m-%d %H:%M:%S")
             con.execute("DELETE FROM registro_processos WHERE momento < ?", (corte,))
     except Exception as e:
@@ -70,3 +84,55 @@ def contagem(desde):
                 "WHERE momento >= ? GROUP BY 1, 2, 3, 4, 5 ORDER BY 1, 2, 6 DESC", (desde,)).fetchall()
     except Exception:
         return []
+
+
+def sequencia(robo, prefixo_do_processo, desde, resultado=None):
+    """
+    As linhas do robô cujo processo começa pelo prefixo, desde o momento, em ordem de
+    tempo: [(momento, processo, resultado, detalhe, origem)]. Para o checkup medir o
+    espaçamento e a ordem dos assuntos.
+    """
+    try:
+        with db.conexao() as con:
+            _criar_tabela(con)
+            sql = ("SELECT momento, processo, resultado, detalhe, origem FROM registro_processos "
+                   "WHERE robo = ? AND processo LIKE ? AND momento >= ?")
+            parametros = [robo, prefixo_do_processo.replace("%", "") + "%", desde]
+            if resultado is not None:
+                sql += " AND resultado = ?"
+                parametros.append(resultado)
+            return con.execute(sql + " ORDER BY momento, id", parametros).fetchall()
+    except Exception:
+        return []
+
+
+def anotar(robo, processo):
+    """
+    Decorador para os jobs de manutenção (rodam de hora em hora ou menos): cada execução
+    fica no registro, como "concluído" ou "falhou" com o tipo do erro. O que o job trata
+    sozinho aparece no log do robô, que o checkup lê por lugar do código.
+    """
+    def decorar(funcao):
+        if asyncio.iscoroutinefunction(funcao):
+            @functools.wraps(funcao)
+            async def envolvida(*args, **kwargs):
+                try:
+                    resultado = await funcao(*args, **kwargs)
+                except Exception as e:
+                    registrar(robo, processo, "falhou", type(e).__name__, ok=False)
+                    raise
+                registrar(robo, processo, "concluído", ok=True)
+                return resultado
+            return envolvida
+
+        @functools.wraps(funcao)
+        def envolvida_sincrona(*args, **kwargs):
+            try:
+                resultado = funcao(*args, **kwargs)
+            except Exception as e:
+                registrar(robo, processo, "falhou", type(e).__name__, ok=False)
+                raise
+            registrar(robo, processo, "concluído", ok=True)
+            return resultado
+        return envolvida_sincrona
+    return decorar

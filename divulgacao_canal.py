@@ -286,7 +286,8 @@ async def enviar_mensagem(escopo, alvo):
                     await asyncio.sleep(1.5)
 
             logger.info(f"✅ [{rotulo}] Envio concluído para {alvo}.")
-            registro_processos.registrar("divulgacao", f"envio ({escopo})", "enviado", ok=True)
+            # A origem é o alvo: o checkup mede o espaçamento e os assuntos em cada grupo.
+            registro_processos.registrar("divulgacao", f"envio ({escopo})", "enviado", ok=True, origem=alvo)
 
     except FloodWaitError as e:
         espera = int(getattr(e, "seconds", 60) or 60)

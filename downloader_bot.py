@@ -870,6 +870,7 @@ async def conferir_shopee_video(agora=None):
     if mudou:
         await avisar_mudanca_shopee(mudou)
     logger.info(f"🔎 Conferência semanal da Shopee Vídeo: {resultado}.")
+    registro_processos.registrar("baixador", "conferência semanal da Shopee Vídeo", resultado, ok=not erro)
     return resultado
 
 
