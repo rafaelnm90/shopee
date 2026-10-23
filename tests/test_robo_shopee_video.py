@@ -695,6 +695,10 @@ def test_titulo_com_emoji_trocado_pelo_app_para_sem_salvar_o_rascunho(monkeypatc
     resultado = robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59"))
     assert "o título não ficou na legenda" in resultado and robo.esperando_aprovacao() == []
     assert "@tv_drafts_box" not in app.toques
+    # O diagnóstico (público) mostra por onde leu e os tamanhos, nunca o título.
+    conferencia = robo.ler_estado()["ultima_legenda"]
+    assert conferencia.startswith("pela cópia: a legenda NÃO é o título") and "U+1F457" in conferencia
+    assert "1 emoji(s) de fora do plano básico" in conferencia and "Gatinho" not in conferencia
 
 
 def test_sem_a_copia_do_campo_o_emoji_lido_como_ponto_para_o_rascunho(monkeypatch, avisos):
@@ -709,6 +713,7 @@ def test_sem_a_copia_do_campo_o_emoji_lido_como_ponto_para_o_rascunho(monkeypatc
 
     resultado = robo.rodada(preparar=True, d=AppSemCopia(), agora=momento("2026-10-22 23:59"))
     assert "o título não ficou na legenda" in resultado and robo.esperando_aprovacao() == []
+    assert robo.ler_estado()["ultima_legenda"].startswith("sem a cópia, pela acessibilidade: ")
 
 
 def test_preparar_1_agora_sem_video_diz_no_privado_por_que_nao_preparou(monkeypatch, avisos):

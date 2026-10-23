@@ -625,9 +625,15 @@ def _preparar(d, ident, video, fonte):
     tocar(d, "@et_caption", 3)
     ps.escrever(d, textos["titulo"])
     pausa(3)
-    na_tela = ps.legenda_do_campo(d)
+    copiada = ps.legenda_copiada(d)
+    na_tela = copiada or ps.legenda_lida(d)
     if not mesma_legenda(na_tela, textos["titulo"]):
-        raise Parada(f"o título não ficou na legenda ({ps.comparar_legenda(na_tela, textos['titulo'])})")
+        # Por onde leu, tamanhos e códigos de caractere, nunca o texto: o diagnóstico do
+        # servidor, que é público, mostra esta conferência para achar o que não bateu.
+        conferencia = (f"{'pela cópia' if copiada else 'sem a cópia, pela acessibilidade'}: "
+                       f"{ps.comparar_legenda(na_tela, textos['titulo'])}; {_forma_do_titulo(textos['titulo'])}")
+        gravar_estado(ultima_legenda=conferencia, ultima_legenda_em=_momento())
+        raise Parada(f"o título não ficou na legenda ({conferencia})")
     tocar(d, "@tv_right", 3)
 
     seguir(d, CAMINHO_PRODUTO)
@@ -683,6 +689,12 @@ def posicao_no_app(rascunho):
     """
     no_app = sorted(listar(*NO_APP), key=lambda r: (r["criado_em"], r["id"]), reverse=True)
     return next(i for i, r in enumerate(no_app) if r["id"] == rascunho["id"])
+
+
+def _forma_do_titulo(titulo):
+    """O tamanho do título como o app conta (cada emoji de fora do plano básico vale 2) e quantos emojis desses."""
+    return (f"o título tem {len(titulo.encode('utf-16-le')) // 2} no contador do app e "
+            f"{sum(ord(c) > 0xFFFF for c in titulo)} emoji(s) de fora do plano básico")
 
 
 def abrir_rascunho(d, rascunho):

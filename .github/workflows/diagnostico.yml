@@ -106,6 +106,10 @@ jobs:
             echo "${R:-nenhum rascunho ainda}"
             R=$(sqlite3 -readonly banco_dados.db "SELECT 'Última rodada: ' || COALESCE(json_extract(valor, '\$.ultima_rodada_em'), '?') || ' → ' || COALESCE(json_extract(valor, '\$.ultima_rodada'), '?') FROM configuracoes WHERE chave = 'shopee_video_robo'" 2>/dev/null)
             echo "${R:-Última rodada: ainda não gravada}"
+            # A última legenda que não bateu com o título: por onde leu, tamanhos e códigos
+            # de caractere (o robô nunca grava o texto do título aqui).
+            R=$(sqlite3 -readonly banco_dados.db "SELECT 'Última legenda que não bateu: ' || json_extract(valor, '\$.ultima_legenda_em') || ' → ' || json_extract(valor, '\$.ultima_legenda') FROM configuracoes WHERE chave = 'shopee_video_robo' AND json_extract(valor, '\$.ultima_legenda') IS NOT NULL" 2>/dev/null)
+            if [ -n "$R" ]; then echo "$R"; fi
 
             # Faxina do Acervo Viral e registro dos administradores: só estados e números.
             # O nome da conta e os nomes dos admins não saem daqui (o log é público).

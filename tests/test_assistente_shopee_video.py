@@ -123,9 +123,20 @@ def test_le_o_json_da_ia_mesmo_com_texto_em_volta():
 def test_titulo_comprido_perde_palavras_do_fim_sem_cortar_no_meio():
     titulo = "Garrafa Térmica 🧊 " + " ".join(f"#hashtag{i}" for i in range(30))
     encaixado = asv.encaixar_titulo(titulo)
-    assert len(encaixado) <= 150 and titulo.startswith(encaixado)
+    assert asv.tamanho_no_app(encaixado) <= 150 and titulo.startswith(encaixado)
     assert titulo[len(encaixado)] == " "
     assert asv.encaixar_titulo("curto   demais") == "curto demais"
+
+
+def test_titulo_conta_como_o_contador_do_app_com_emoji_valendo_2():
+    # No Motorola (23/10), "Teste 💡 ok 👗 fim ✨" (18 caracteres) apareceu como 20/150: um
+    # título de 150 com emojis desses passava do limite do campo da legenda.
+    assert asv.tamanho_no_app("Teste 💡 ok 👗 fim ✨") == 20
+    titulo = "Luminária 💡 de Mesa 👗 " + "palavra " * 30
+    encaixado = asv.encaixar_titulo(titulo)
+    assert len(encaixado) < 150 and asv.tamanho_no_app(encaixado) <= 150
+    assert titulo.startswith(encaixado) and titulo[len(encaixado)] == " "
+    assert asv.tamanho_no_app(asv.encaixar_titulo("💡" * 100)) == 150
 
 
 # --- Produtos ---
@@ -197,7 +208,8 @@ def test_mensagem_de_video_manda_ver_os_produtos_do_criador():
 
 def test_mensagem_mostra_o_titulo_curto():
     curto = asv.montar_mensagem(TEXTOS, [], "https://s.shopee.com.br/v")
-    assert f"({len(TEXTOS['titulo'])} caracteres, abaixo de {asv.TITULO_MIN} ⚠️;" in curto
+    # O tamanho como o contador do app (o 🧊 vale 2), para bater com o x/150 da legenda.
+    assert f"({asv.tamanho_no_app(TEXTOS['titulo'])} caracteres, abaixo de {asv.TITULO_MIN} ⚠️;" in curto
     certo = asv.montar_mensagem({**TEXTOS, "titulo": "x" * asv.TITULO_MIN}, [], "https://s.shopee.com.br/v")
     assert f"({asv.TITULO_MIN} caracteres;" in certo and "abaixo de" not in certo
 
