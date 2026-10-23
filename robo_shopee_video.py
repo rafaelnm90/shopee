@@ -677,10 +677,11 @@ def abrir_rascunho(d, rascunho):
     pausa(10)
     seguir(d, [("@tv_compress", 10, "@et_caption")])
     tela(d)
-    # Aqui o campo não está em foco e a leitura vem pela acessibilidade, com ".." no lugar
-    # de cada emoji de fora do plano básico; o texto com os emojis já foi conferido pela
-    # cópia do campo quando o rascunho foi preparado.
-    lida = ps.legenda_do_campo(d)
+    # Aqui só a leitura pela acessibilidade, sem a cópia: o Ctrl+A na tela final abre a
+    # edição do texto e tira o Postar da tela (Motorola, 23/10/2026). Essa leitura traz
+    # ".." no lugar de cada emoji de fora do plano básico; o texto com os emojis já foi
+    # conferido pela cópia do campo quando o rascunho foi preparado.
+    lida = ps.legenda_lida(d)
     if not (mesma_legenda(lida, rascunho["titulo"])
             or mesma_legenda(lida, ps.como_o_android_le(rascunho["titulo"]))):
         raise Parada("o rascunho aberto não tem o título do aprovado")

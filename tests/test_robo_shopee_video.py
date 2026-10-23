@@ -226,6 +226,7 @@ TELAS = {
                         _no("Próximo (1)", "tv_pick_top_next", (860, 2080, 980, 2130))],
     "edicao": [_no("Próximo", "tv_compress", (860, 150, 1040, 210))],
     "final": "final",
+    "final_editando": [_no("", "et_caption", (40, 300, 1040, 400))],
     "curtidas": [_no("Minhas Curtidas", caixa=(300, 410, 510, 460)), _no("Mais Recente", caixa=(300, 520, 510, 570)),
                  PRODUTO_NA_LISTA],
     "janela": [_no("Editar nome do produto", caixa=(300, 1310, 780, 1370), clicavel=False),
@@ -285,8 +286,12 @@ class AppDeMentira:
 
     def press(self, tecla, meta=None):
         if meta:
-            # Ctrl+C com o cursor no campo da legenda copia o texto como o app guardou.
-            if tecla == robo.ps.TECLA_C and self.atual == "final" and self.em_foco:
+            if self.atual == "final" and not self.em_foco:
+                # Como no Motorola: Ctrl+A na tela final, fora da edição da legenda, abre a
+                # edição do texto e tira o Postar e o Rascunhos da tela.
+                self.atual = "final_editando"
+            elif tecla == robo.ps.TECLA_C and self.atual == "final":
+                # Ctrl+C com o cursor no campo da legenda copia o texto como o app guardou.
                 self.clipboard = self.legenda
             return
         self.teclas.append(tecla)
