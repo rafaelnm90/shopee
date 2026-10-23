@@ -273,7 +273,7 @@ def test_passo_desconhecido_nao_toca_em_nada(capsys):
 
 def test_para_no_primeiro_passo_que_falha(capsys):
     aparelho = Aparelho()
-    assert ps.explorar("tocar:Comprar; voltar", aparelho) is False
+    assert ps.explorar("tocar:Botão que não existe; voltar", aparelho) is False
     assert aparelho.teclas == [] and "não achei na tela" in capsys.readouterr().out
 
 
@@ -1043,3 +1043,15 @@ def test_video_link_de_video_escolhe_o_que_abre_um_video(monkeypatch):
     # De novo: o de agora fica de fora, e não há outro com link de vídeo.
     assert ps.video_da_fonte(de_video=True) is None
     assert ps.separar_passos("video:link-de-video") == [("video", "link-de-video")]
+
+
+def test_comprar_com_cupom_do_player_e_proibido():
+    # No player de um vídeo (Motorola, 23/10) há "Comprar com cupom": botão de comprar.
+    for texto in ("Comprar com cupom", "Compre agora", "COMPRAR", "comprar  agora", "Adicionar ao carrinho"):
+        assert ps.eh_alvo_proibido(texto), texto
+    for texto in ("Ver Produtos (2)", "Compras", "Compartilhar", "Postar vídeo", "Comprou 2 mil"):
+        assert not ps.eh_alvo_proibido(texto), texto
+    tela = ('<hierarchy><node class="android.view.ViewGroup" clickable="true" bounds="[400,1820][830,1890]">'
+            '<node text="Comprar com cupom" class="android.widget.TextView" bounds="[450,1830][780,1880]"/></node>'
+            '</hierarchy>')
+    assert ps.proibido_no_ponto(tela, 613, 1855) and not ps.proibido_no_ponto(tela, 522, 1969)
