@@ -29,7 +29,7 @@ import re
 from datetime import datetime, timedelta
 from telethon import utils
 from telethon import TelegramClient, events
-from telethon.errors import FloodWaitError
+from telethon.errors import ChannelPrivateError, FloodWaitError
 from dotenv import load_dotenv
 from utils import registrar_erro_json, chave_cache_ia, consultar_cache_ia, gravar_cache_ia
 from motor_filas import calcular_horarios_distribuicao, aplicar_limite_diario_fila, ler_faixa_limite
@@ -216,6 +216,18 @@ async def gerar_legenda_com_ia_espelhador(caminho_video):
     """Pede à IA o nome do produto e as hashtags (legendas.PROMPT_NOME_E_HASHTAGS). Devolve o texto ou None."""
     return await analisar_video_gemini(caminho_video, legendas.PROMPT_NOME_E_HASHTAGS)
 
+async def chat_do_evento(event):
+    """
+    O chat da mensagem nova; None quando a conta perdeu o acesso a ele (saiu ou foi
+    tirada do canal, que ainda manda a última atualização): não há o que capturar.
+    """
+    try:
+        return await event.get_chat()
+    except ChannelPrivateError:
+        logger.debug("🔒 Mensagem de um canal a que a conta não tem mais acesso: ignorada.")
+        return None
+
+
 @client.on(events.NewMessage)
 async def interceptar_mensagem(event):
     """
@@ -227,7 +239,9 @@ async def interceptar_mensagem(event):
     
     destino_autorais = ler_excecao_ponte()
     
-    chat = await event.get_chat()
+    chat = await chat_do_evento(event)
+    if chat is None:
+        return
     chat_id = str(chat.id)
     chat_username = f"@{chat.username.lower()}" if getattr(chat, 'username', None) else ""
     
@@ -705,7 +719,9 @@ async def motor_espelhador_userbot(event):
     (encaminhado de lá), link já postado nesse destino nas últimas 24 h e vídeo
     (hash) já postado nesse destino.
     """
-    chat = await event.get_chat()
+    chat = await chat_do_evento(event)
+    if chat is None:
+        return
     chat_id_str = str(chat.id)
     chat_username = f"@{chat.username.lower()}" if getattr(chat, 'username', None) else ""
     chat_id_completo = f"-100{chat.id}" if not chat_id_str.startswith("-100") else chat_id_str
