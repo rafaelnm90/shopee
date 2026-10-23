@@ -59,6 +59,10 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     "Deseja sair da página de edição?", com Salvar Rascunho (`tv_save`), **Descartar**
     (`tv_no_save`) e Cancelar (`tv_cancel`). O robô descarta; depois, mais dois voltar
     chegam ao Perfil.
+  - **voltar que sai da Shopee** (23/10/2026, o Rafael via o Telegram na frente no
+    Motorola): um voltar a mais sai do app e mostra o que estava embaixo. O robô confere o
+    pacote dos elementos da tela antes de cada voltar; fora da Shopee, traz a Shopee de volta
+    (`app_start`, sem fechar o app) e nunca aperta voltar no outro app.
   - **conferir o título na legenda** (23/10/2026, passo `legenda`): a leitura pela acessibilidade
     (o retrato da tela e o `get_text`) devolve cada emoji de fora do plano básico (💡, 👗) como ".."
     (138 caracteres na tela contra 137 no título); os simples (✨) passam. A bio e as legendas

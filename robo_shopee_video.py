@@ -448,15 +448,34 @@ def sair_da_edicao(xml):
     return tem(xml, "@tv_no_save") and tem(xml, "sair da página de edição")
 
 
+def fora_da_shopee(xml):
+    """
+    A tela é de outro app (o Telegram, a tela inicial do celular): um voltar a mais na
+    Shopee sai dela e mostra o app que estava embaixo. Avisos do Android por cima da
+    Shopee (pacotes "android" e "com.android.*") não contam: o voltar os fecha. Sem o
+    pacote nos elementos, não dá para saber: False.
+    """
+    pacotes = {el["pacote"] for el in ps.elementos(xml) if el["pacote"]}
+    outros = {p for p in pacotes if p != "android" and not p.startswith("com.android.")}
+    return bool(outros) and ps.PACOTE not in pacotes
+
+
 def voltar(d, ate, vezes=15):
     """
     Aperta voltar, confirmando os avisos de sair, até a tela ter um elemento com o texto
     exato. Nunca fecha o app à força: fechar e reabrir em seguida chama a Verificação.
+    Fora da Shopee, não aperta voltar: traz a Shopee de volta para a frente.
     """
     for _ in range(vezes):
         xml = tela(d)
         if tem_exato(xml, ate) and not tem(xml, "@et_caption"):
             return
+        if fora_da_shopee(xml):
+            # Nunca apertar voltar em outro app: a Shopee volta para a frente.
+            logger.warning("⚠️ [Robô Shopee Vídeo] O voltar saiu da Shopee: trazendo a Shopee de volta.")
+            d.app_start(ps.PACOTE, wait=True)
+            pausa(5)
+            continue
         if aviso_de_sair(xml):
             tocar(d, "@buttonDefaultPositive", 3)
             continue

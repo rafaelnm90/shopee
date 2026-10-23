@@ -656,6 +656,46 @@ def test_sem_rascunho_salvo_o_perfil_nao_tem_o_quadro_e_o_robo_para(monkeypatch,
     assert robo.pegar(ident)["estado"] == "rascunho"
 
 
+def _no_do_app(pacote, texto, caixa):
+    return _no(texto, caixa=caixa).replace("<node ", f'<node package="{pacote}" ', 1)
+
+
+class CelularQueSaiuDaShopee:
+    """O voltar a mais saiu da Shopee e o Telegram ficou na frente."""
+
+    def __init__(self):
+        self.app, self.teclas, self.aberturas = "org.telegram.messenger", [], []
+
+    def dump_hierarchy(self):
+        if self.app == robo.ps.PACOTE:
+            return _xml(_no_do_app(robo.ps.PACOTE, "Eu", (860, 2250, 1080, 2400)))
+        return _xml(_no_do_app(self.app, "Conversas", (0, 100, 500, 200)))
+
+    def press(self, tecla):
+        self.teclas.append(tecla)
+
+    def app_start(self, pacote, wait=False):
+        self.aberturas.append(pacote)
+        self.app = pacote
+
+
+def test_voltar_fora_da_shopee_traz_a_shopee_e_nunca_aperta_voltar_no_outro_app():
+    # O Rafael via o Telegram na frente no Motorola (23/10): o voltar não pode mexer em outro app.
+    celular = CelularQueSaiuDaShopee()
+    robo.voltar(celular, "Eu")
+    assert celular.teclas == [] and celular.aberturas == [robo.ps.PACOTE]
+
+
+def test_aviso_do_android_por_cima_da_shopee_nao_conta_como_outro_app():
+    aviso = _xml(_no_do_app("com.android.permissioncontroller", "Permitir", (100, 1000, 500, 1100)))
+    telegram = _xml(_no_do_app("org.telegram.messenger", "Conversas", (0, 100, 500, 200)))
+    shopee = _xml(_no_do_app(robo.ps.PACOTE, "Eu", (860, 2250, 1080, 2400)))
+    assert robo.fora_da_shopee(telegram)
+    assert not robo.fora_da_shopee(aviso) and not robo.fora_da_shopee(shopee)
+    # Sem o pacote nos elementos (como nas telas de mentira), não dá para saber.
+    assert not robo.fora_da_shopee(_xml(_no("Conversas")))
+
+
 def test_volta_ao_inicio_pelo_eu_da_barra_e_nao_por_um_seu_no_meio_do_texto(monkeypatch):
     app = AppComVoltar()
     app.atual = "perfil"
