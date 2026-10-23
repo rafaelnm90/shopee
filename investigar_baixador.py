@@ -232,7 +232,7 @@ async def investigar(id_video, curto=False):
             html = await resposta.text()
         redir = urllib.parse.parse_qs(urllib.parse.urlparse(final).query).get("redir", [""])[0]
         print(f"o Baixador reconhece como vídeo da Shopee Vídeo: "
-              f"{'sim' if dl.eh_video_da_shopee(urllib.parse.unquote(redir) or final) else 'não'}")
+              f"{'sim' if dl.eh_video_da_shopee(urllib.parse.unquote(redir) or final) or dl.eh_link_curto_de_video(final) else 'não'}")
         for linha in descrever_pagina(html):
             print(linha)
         if not tem_video(html) and not curto:
