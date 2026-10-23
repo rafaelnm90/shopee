@@ -301,12 +301,23 @@ def ler_resposta(texto):
             "comentario": str(dados.get("comentario") or "").strip()}
 
 
+def tamanho_no_app(texto):
+    """
+    O tamanho como o contador da Shopee conta (o "x/150" da legenda): cada emoji de fora
+    do plano básico (💡, 👗) vale 2, como no Motorola em 23/10/2026 ("Teste 💡 ok 👗 fim ✨",
+    18 caracteres, apareceu como 20/150).
+    """
+    return len((texto or "").encode("utf-16-le")) // 2
+
+
 def encaixar_titulo(titulo):
-    """O título dentro dos 150 caracteres da Shopee: tira palavras do fim, nunca corta uma no meio."""
+    """O título dentro dos 150 do contador da Shopee: tira palavras do fim, nunca corta uma no meio."""
     titulo = " ".join(titulo.split())
-    while len(titulo) > TITULO_MAX and " " in titulo:
+    while tamanho_no_app(titulo) > TITULO_MAX and " " in titulo:
         titulo = titulo.rsplit(" ", 1)[0]
-    return titulo[:TITULO_MAX]
+    while tamanho_no_app(titulo) > TITULO_MAX:
+        titulo = titulo[:-1]
+    return titulo
 
 
 async def gerar_textos(arquivo, nome_produto=""):
@@ -321,12 +332,13 @@ async def textos_do_video(arquivo, nome_produto=""):
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     textos = await gerar_textos(arquivo, nome_produto)
-    if not textos or textos["violacao"] or not textos["titulo"] or len(textos["titulo"]) >= TITULO_MIN:
+    if not textos or textos["violacao"] or not textos["titulo"] or tamanho_no_app(textos["titulo"]) >= TITULO_MIN:
         return textos
-    logger.info(f"🔁 [Shopee Vídeo] Título com {len(textos['titulo'])} caracteres "
+    logger.info(f"🔁 [Shopee Vídeo] Título com {tamanho_no_app(textos['titulo'])} caracteres "
                 f"(mínimo {TITULO_MIN}); pedindo de novo à IA.")
     outra = await gerar_textos(arquivo, nome_produto)
-    if outra and outra["titulo"] and (outra["violacao"] or len(outra["titulo"]) > len(textos["titulo"])):
+    if outra and outra["titulo"] and (outra["violacao"]
+                                      or tamanho_no_app(outra["titulo"]) > tamanho_no_app(textos["titulo"])):
         return outra
     return textos
 
@@ -367,7 +379,7 @@ def montar_mensagem(textos, produtos, link):
         adicionar = ("Adicionar Produto → Minhas Curtidas → os produtos: o de menor preço primeiro; "
                      "no empate, o de maior comissão → Postar.")
 
-    tamanho = len(textos["titulo"])
+    tamanho = tamanho_no_app(textos["titulo"])
     curto = f", abaixo de {TITULO_MIN} ⚠️" if tamanho < TITULO_MIN else ""
     return (
         "🎬 <b>Postagem pronta para a Shopee Vídeo</b>\n"
