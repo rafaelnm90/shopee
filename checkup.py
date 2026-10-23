@@ -17,7 +17,8 @@ processos dos robôs (registro_processos.py), rotinas e divulgação (espaçamen
 assunto repetido em seguida e o que saiu contra o configurado), postagens de
 hoje por fila, captura por grupo de origem (Espião, Espelhador e parceiros, pela
 posição na lista do painel), produto repetido entre parceiros ou com a conta
-principal, robô da Shopee Vídeo, Baixador e backup. No fim, os pontos de atenção.
+principal, a verificação semanal do Grupo Público (só os números), robô da Shopee
+Vídeo, Baixador e backup. No fim, os pontos de atenção.
 """
 import os
 import re
@@ -392,6 +393,20 @@ def parceiros_repetidos(agora=None):
             "com_a_conta": sum(1 for chave in por_chave if chave in da_conta)}
 
 
+# --- Grupo Público: verificação semanal ---
+
+def verificacao_do_publico(agora=None):
+    """
+    A última verificação semanal das mensagens do Grupo Público (moderacao_publico.py):
+    quando, quantas de membros, suspeitas por regra. Só números. None se nunca rodou.
+    """
+    dados = db.ler_config("moderacao_publico", {}) or {}
+    if not dados.get("quando"):
+        return None
+    quando = datetime.strptime(dados["quando"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+    return {**dados, "horas": (_agora(agora) - quando).total_seconds() / 3600}
+
+
 # --- Postagens de hoje ---
 
 def _contar(sql, *params):
@@ -504,7 +519,7 @@ def baixador(linhas):
 # --- Pontos de atenção ---
 
 def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None, processos=None,
-                      rotinas_hoje=None, divulgacao=None, captura=None, repetidos=None):
+                      rotinas_hoje=None, divulgacao=None, captura=None, repetidos=None, publico=None):
     """As frases fixas, com números, do que o Claude precisa investigar."""
     agora = _agora(agora)
     pontos = []
@@ -562,6 +577,13 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
     if repetidos and repetidos["com_a_conta"]:
         pontos.append(f"Parceiros: {repetidos['com_a_conta']} produto(s) de parceiro que também saíram pela conta "
                       "principal nos últimos 3 dias")
+    # Uma vez por semana: o ponto aparece só no checkup do dia em que ela rodou, e cobra
+    # se passou de 8 dias sem rodar (a de segunda não rodou).
+    if publico and publico["horas"] <= 24 and publico.get("suspeitas"):
+        pontos.append(f"Grupo Público: {publico['suspeitas']} mensagem(ns) suspeita(s) na verificação semanal "
+                      "(o Rafael recebeu no privado)")
+    if publico and publico["horas"] > 8 * 24:
+        pontos.append(f"Grupo Público: a verificação semanal não roda há {publico['horas'] / 24:.0f} dias")
     falhas = baixados.get("falha(s) de download", 0)
     if falhas >= 3 and falhas > baixados.get("entregue(s)", 0):
         pontos.append(f"Baixador: {falhas} falha(s) de download e {baixados.get('entregue(s)', 0)} entregue(s)")
@@ -645,6 +667,14 @@ def main():
     print(f"Parceiros (3 dias): capturas com produto identificado {repetidos['capturas']} | mesmo produto em mais "
           f"de um parceiro {repetidos['entre_parceiros']} | também na conta principal {repetidos['com_a_conta']}")
 
+    publico = verificacao_do_publico(agora)
+    if publico:
+        regras = " | ".join(f"{regra}: {n}" for regra, n in sorted((publico.get("por_regra") or {}).items()))
+        print(f"\n== Grupo Público (verificação semanal de {publico['quando'][:16]})\n"
+              f"mensagens {publico.get('mensagens', 0)} | de membros {publico.get('de_membros', 0)} | "
+              f"suspeitas {publico.get('suspeitas', 0)} | sem julgamento da IA {publico.get('nao_julgadas', 0)}"
+              + (f"\n   {regras}" if regras else ""))
+
     print("\n== Postagens de hoje")
     filas = postagens_de_hoje(agora)
     for nome, f in filas.items():
@@ -667,7 +697,7 @@ def main():
     print("Backup: nenhum" if backup is None else f"Backup: o último tem {backup[1]:.1f} h")
 
     pontos = sem_journal + pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora, processos,
-                                             rotinas_hoje, divulgacao, captura, repetidos)
+                                             rotinas_hoje, divulgacao, captura, repetidos, publico)
     print(f"\n== Pontos de atenção ({len(pontos)})")
     for ponto in pontos:
         print(f"⚠️ {ponto}")
