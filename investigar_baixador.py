@@ -15,6 +15,7 @@ chave (com números e códigos trocados por # e …), contagens, e endereços de
 APIs da própria Shopee, que são públicos.
 
     python3 investigar_baixador.py ID_DO_VIDEO   # o que vem depois de share-video/ no link
+    python3 investigar_baixador.py curto:CODIGO  # o link curto br.shp.ee/CODIGO, como o membro cola
 """
 import asyncio
 import json
@@ -30,6 +31,7 @@ import downloader_bot as dl
 import videos
 
 URL_DO_VIDEO = "https://sv.shopee.com.br/share-video/{id}"
+URL_CURTA = "https://br.shp.ee/{id}"
 MAXIMO_CAMINHOS = 40
 MAXIMO_SCRIPTS = 30
 MAXIMO_APIS = 80
@@ -99,10 +101,15 @@ def apis_no_script(codigo):
 
 
 def forma_do_endereco(url):
-    """host e caminho com os pedaços longos (ids) trocados por …, sem a consulta."""
+    """
+    host e caminho com os pedaços longos (ids) trocados por …, sem a consulta; no
+    universal-link, também a forma do destino que vem no parâmetro redir.
+    """
     partes = urllib.parse.urlparse(str(url))
     pedacos = ["…" if len(p) > 12 else p for p in partes.path.split("/")]
-    return f"{partes.netloc}{'/'.join(pedacos)}"
+    forma = f"{partes.netloc}{'/'.join(pedacos)}"
+    redir = urllib.parse.parse_qs(partes.query).get("redir", [""])[0]
+    return f"{forma} (redir: {forma_do_endereco(urllib.parse.unquote(redir))})" if redir else forma
 
 
 def blocos_json(html):
@@ -212,19 +219,23 @@ async def testar_api(sessao, id_video):
                 print(f"      {chave}")
 
 
-async def investigar(id_video):
+async def investigar(id_video, curto=False):
     import aiohttp
-    url = URL_DO_VIDEO.format(id=id_video)
+    url = (URL_CURTA if curto else URL_DO_VIDEO).format(id=id_video)
     print("== A página, como o Baixador abre")
     async with aiohttp.ClientSession(headers=dl.CABECALHO_NAVEGADOR) as sessao:
         async with sessao.get(url, allow_redirects=True, timeout=25) as resposta:
             for passo in resposta.history:
                 print(f"redirecionou: HTTP {passo.status} {forma_do_endereco(passo.url)}")
             print(f"chegou em: HTTP {resposta.status} {forma_do_endereco(resposta.url)}")
+            final = str(resposta.url)
             html = await resposta.text()
+        redir = urllib.parse.parse_qs(urllib.parse.urlparse(final).query).get("redir", [""])[0]
+        print(f"o Baixador reconhece como vídeo da Shopee Vídeo: "
+              f"{'sim' if dl.eh_video_da_shopee(urllib.parse.unquote(redir) or final) else 'não'}")
         for linha in descrever_pagina(html):
             print(linha)
-        if not tem_video(html):
+        if not tem_video(html) and not curto:
             await procurar_apis(sessao, html, str(resposta.url))
             await testar_api(sessao, id_video)
 
@@ -244,13 +255,14 @@ async def investigar(id_video):
 
 
 def main(argumentos):
-    if len(argumentos) != 1 or not re.fullmatch(r"[A-Za-z0-9_\-=%]+", argumentos[0]):
+    if len(argumentos) != 1 or not re.fullmatch(r"(curto:)?[A-Za-z0-9_\-=%]+", argumentos[0]):
         print(__doc__)
         return 2
     # O Baixador loga endereços (e erros que podem trazer endereços); aqui o log é
     # público, e o resultado sai pelos prints acima.
     logging.getLogger(dl.logger.name).setLevel(logging.CRITICAL + 1)
-    asyncio.run(investigar(urllib.parse.unquote(argumentos[0])))
+    curto = argumentos[0].startswith("curto:")
+    asyncio.run(investigar(urllib.parse.unquote(argumentos[0].removeprefix("curto:")), curto))
     return 0
 
 

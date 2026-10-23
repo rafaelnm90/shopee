@@ -45,3 +45,11 @@ def test_trechos_da_api_mostram_o_codigo_em_volta():
     codigo = "a" * 400 + 'fetch("/api/v2/timeline/single",{post_id:e})' + "b" * 400
     trechos = ib.trechos_da_api(codigo, "/api/v2/timeline/single")
     assert len(trechos) == 1 and "post_id" in trechos[0] and len(trechos[0]) <= 2 * ib.TRECHO + 30
+
+
+def test_link_curto_e_forma_do_universal_link_com_o_redir():
+    assert ib.main(["curto:abc; rm"]) == 2
+    universal = ("https://shopee.com.br/universal-link?redir=https%3A%2F%2Fsv.shopee.com.br%2Fshare-video%2F"
+                 "XCA3abcdefghijk%3D%3D&fromShareLink=1")
+    forma = ib.forma_do_endereco(universal)
+    assert forma == "shopee.com.br/… (redir: sv.shopee.com.br/share-video/…)"
