@@ -184,6 +184,14 @@ PALAVRAS_DA_TELA = frozenset("""
     está estão disponível disponíveis indisponível removido removida foi foram existe
     encontrado encontrados vinculado vinculados vinculou ainda há possui sendo
     exibido exibidos ocultado privado expirou expirado
+    saúde violação violações violou infração infrações penalidade penalidades pontos punição
+    punições irrelevante contrafeito propriedade intelectual direitos autorais diretrizes
+    comunidade política políticas regras aviso avisos status apelação apelações apelar
+    apelada apelado recorrido recorrida recurso recursos razão motivo bem-sucedido
+    malsucedido rejeitado rejeitada aprovada análise revisão pendente decisão retorno
+    aprender postado postada últimos dias banida banido temporariamente suspensão suspensa
+    período reincidência identificado identificada correspondente apresentado evidências
+    orientamos gerou ação seu sua deixe-nos saber poderá desempenho data
 """.split())
 NUMERO = re.compile(r"[\d.,%R$()+x×/:#-]*\d[\d.,%R$()+x×/:#-]*")
 PONTUACAO = ".,:;!?()[]{}\"'«»“”‘’-–—/|+*·•"
