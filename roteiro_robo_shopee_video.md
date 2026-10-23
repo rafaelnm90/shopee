@@ -61,11 +61,13 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     chegam ao Perfil.
   - **conferir o título na legenda** (23/10/2026, passo `legenda`): a leitura pela acessibilidade
     (o retrato da tela e o `get_text`) devolve cada emoji de fora do plano básico (💡, 👗) como ".."
-    (138 caracteres na tela contra 137 no título), escrito pelo `send_keys` ou pelo `set_text`; os
-    simples (✨) passam. A bio e as legendas postadas à mão no Perfil também aparecem com "..", o
-    que aponta para a leitura, e não para o texto do app. O robô escreve pelo `set_text` do campo
-    em foco e confere pela cópia do campo (Ctrl+A e Ctrl+C), que traz o texto como o app guardou;
-    sem a cópia, para. Ao reabrir um rascunho (campo sem foco), aceita ".." no lugar do emoji.
+    (138 caracteres na tela contra 137 no título); os simples (✨) passam. A bio e as legendas
+    postadas à mão no Perfil também aparecem com "..". A cópia do campo (Ctrl+A e Ctrl+C) trouxe o
+    texto certo, com os emojis, escrito pelo `set_text` ou colado (`colar`): o app guarda o emoji, só
+    a leitura troca. O robô escreve pelo `set_text` do campo em foco e confere pela cópia, com a
+    edição da legenda aberta; sem a cópia, para. Na tela final, o Ctrl+A abre a edição do texto e
+    tira o Postar e o Rascunhos da tela (o voltar fecha): ao reabrir um rascunho, o robô só lê pela
+    acessibilidade e aceita ".." no lugar do emoji.
 - **Ainda a mapear:** o link que abre um vídeo (Ver Produtos, vários produtos): até lá, o
   robô só usa vídeos com link de produto, e os outros ficam para o assistente.
 

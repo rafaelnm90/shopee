@@ -722,6 +722,9 @@ def legenda_copiada(d):
     campo e lê o copiado, que vem como o app guardou, com os emojis. A área é limpa antes,
     para um copiado antigo nunca passar pelo texto do campo. "" quando o campo não está
     em foco, o app não copiou ou o Android não deixou ler.
+
+    Só com a edição da legenda aberta (depois de tocar no campo): na tela final, o Ctrl+A
+    abre a edição do texto e tira o Postar e o Rascunhos da tela (Motorola, 23/10/2026).
     """
     try:
         d.set_clipboard("")
@@ -734,7 +737,7 @@ def legenda_copiada(d):
 
 
 def legenda_do_campo(d):
-    """A legenda do campo pela cópia (com os emojis); sem a cópia, pela acessibilidade."""
+    """A legenda do campo pela cópia (com os emojis); sem a cópia, pela acessibilidade. Só na edição da legenda."""
     return legenda_copiada(d) or legenda_lida(d)
 
 
