@@ -86,3 +86,9 @@ def test_ultimo_usa_o_link_guardado_no_banco_sem_imprimir(monkeypatch, capsys):
     # O código do vídeo sai do redir para a conferência da API.
     assert ib.id_do_video(link) == "XCA3abc=="
     assert ib.id_do_video("https://br.shp.ee/abc") == ""
+
+
+def test_hosts_da_shopee_nos_scripts_sao_os_candidatos_ao_baseurl():
+    codigos = {"a.js": 'r._n="https://sv.shopee.com.br";x="https://shopee.com.br/api"',
+               "b.js": 'y="https://mall.shopee.com.br/x";z="https://outro.com/shopee.com.br"'}
+    assert ib.hosts_da_shopee(codigos) == ["mall.shopee.com.br", "shopee.com.br", "sv.shopee.com.br"]
