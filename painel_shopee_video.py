@@ -349,13 +349,29 @@ def teclado_assistente(config):
     ])
 
 
-def _linha_treino():
+# Um treino leva poucos minutos. Sem resultado depois disto, ele parou no meio (o processo
+# caiu ou foi reiniciado junto com o bot), e o painel diz isso em vez de "rodando" para sempre.
+MINUTOS_DO_TREINO = 30
+
+
+def _linha_treino(agora=None):
     estado = robo.ler_estado()
     if not estado.get("treino_em"):
         return "ainda não rodou"
-    resultado = estado.get("treino_resultado") or "rodando"
+    resultado = estado.get("treino_resultado") or ""
     quando = _data_curta(estado["treino_em"])
-    return f"✅ caminho OK em {quando}" if resultado == "ok" else f"⚠️ {html_escape(resultado)} em {quando}"
+    if resultado == "ok":
+        return f"✅ caminho OK em {quando}"
+    if not resultado:
+        try:
+            inicio = datetime.strptime(estado["treino_em"], "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            inicio = None
+        agora = (agora or datetime.now(fuso_horario)).replace(tzinfo=None)
+        if inicio and (agora - inicio).total_seconds() < MINUTOS_DO_TREINO * 60:
+            return f"⏳ rodando desde {quando}"
+        return f"⚠️ o treino de {quando} não terminou; toque em {BOTAO_TREINO} para rodar de novo"
+    return f"⚠️ {html_escape(resultado)} em {quando}"
 
 
 def quem_posta(config):

@@ -528,3 +528,16 @@ def test_preparar_1_agora_roda_o_robo_na_hora(bm, Msg, Est, monkeypatch):
 
     rodar(tocar())
     assert chamadas == [("--preparar",)] and "Preparando 1 rascunho" in msg.saidas[0]
+
+
+def test_treino_sem_resultado_depois_de_meia_hora_diz_que_nao_terminou(bm):
+    # Painel do Rafael (23/10, 04:53): "Treino: ⚠️ rodando em 23/10 às 00:00", parado assim
+    # desde a meia-noite, porque o treino não terminou e nada gravou o resultado.
+    from datetime import datetime
+    sv = _painel(bm)
+    sv.robo.gravar_estado(treino_em="2026-10-23 00:00:00", treino_resultado="")
+    assert sv._linha_treino(datetime(2026, 10, 23, 0, 10)) == "⏳ rodando desde 23/10 às 00:00"
+    linha = sv._linha_treino(datetime(2026, 10, 23, 4, 53))
+    assert linha.startswith("⚠️ o treino de 23/10 às 00:00 não terminou") and sv.BOTAO_TREINO in linha
+    sv.robo.gravar_estado(treino_resultado="ok")
+    assert sv._linha_treino(datetime(2026, 10, 23, 4, 53)) == "✅ caminho OK em 23/10 às 00:00"
