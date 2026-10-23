@@ -374,6 +374,48 @@ def test_ia_que_nao_confirma_pula_o_video_sem_tocar_no_celular(monkeypatch, avis
     assert robo.assistente.proximo_video("autorais")["id"] == "a1"
 
 
+def test_rascunho_do_plano_que_falhou_tenta_de_novo_ate_2_vezes(monkeypatch, avisos):
+    # Escolha do Rafael (23/10): o horário das 01:03 falhou e o dia ficou sem aquele
+    # rascunho. Agora ele volta nas rodadas seguintes, até 2 vezes a mais.
+    _fonte(monkeypatch, confere=False)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    agora = momento("2026-10-22 23:59")
+    resultados = [robo.rodada(d=Intocavel(), agora=agora) for _ in range(4)]
+    assert "parado" in resultados[0]                         # o horário do plano
+    assert resultados[1].startswith("nenhum vídeo")           # 1ª tentativa a mais (o vídeo foi pulado)
+    assert resultados[2].startswith("nenhum vídeo")           # 2ª tentativa a mais
+    assert resultados[3] == "nada a fazer agora"              # acabaram as tentativas
+
+
+def test_horario_novo_tira_a_repeticao_do_anterior_e_o_que_deu_certo_nao_repete():
+    config = {**robo.PADRAO, "robo_limite_min": 2, "robo_limite_max": 2, "robo_inicio": 0, "robo_fim": 24}
+    cedo, tarde = momento("2026-10-22 11:59"), momento("2026-10-22 23:59")
+    assert robo.o_que_fazer(config, cedo) == ("rascunho", None)
+    robo.marcar_para_repetir(config, cedo)
+    assert robo.o_que_fazer(config, tarde) == ("rascunho", None)     # o 2º horário, com tentativas novas
+    assert robo.o_que_fazer(config, tarde) is None                    # a repetição do 1º saiu
+    assert robo.estado_do_dia(config, tarde)["tentativas"] == robo.TENTATIVAS_A_MAIS
+
+
+def test_verificacao_e_preparar_1_agora_nao_repetem(monkeypatch, avisos):
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    agora = momento("2026-10-22 23:59")
+    monkeypatch.setattr(robo.av, "abrir_tela", lambda **kwargs: None)
+
+    erro = [robo.Verificacao()]
+
+    def falha(*args, **kwargs):
+        raise erro[0]
+
+    monkeypatch.setattr(robo, "_preparar", falha)
+    assert "verificação" in robo.rodada(d=AppDeMentira(), agora=agora)
+    assert robo.rodada(d=Intocavel(), agora=agora) == "nada a fazer agora"
+    erro[0] = robo.Parada("a tela mudou")
+    assert "parado" in robo.rodada(preparar=True, d=AppDeMentira(), agora=agora)
+    assert robo.rodada(d=Intocavel(), agora=agora) == "nada a fazer agora"
+
+
 def test_violacao_pula_o_video(monkeypatch, avisos):
     _fonte(monkeypatch, violacao=True)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
