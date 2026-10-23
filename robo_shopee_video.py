@@ -67,6 +67,10 @@ CHAVE_DIA = "shopee_video_robo_dia"
 # Rascunho do plano que não deu certo volta nas rodadas seguintes, até estas vezes a mais
 # por horário. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 TENTATIVAS_A_MAIS = 2
+# Vídeo de produto sem oferta de afiliado (não paga comissão) fica de lado antes de tocar
+# no celular; numa rodada, até estes. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+VIDEOS_SEM_OFERTA_POR_RODADA = 5
+SEM_OFERTA = "o link não diz o produto do vídeo (produto sem oferta de afiliado)"
 CHAVE_ESTADO = "shopee_video_robo"
 PASTA_RASCUNHOS = os.path.join(av.PASTA_TRABALHO, "rascunhos")
 # Minutos sorteados entre uma postagem aprovada e a seguinte.
@@ -546,10 +550,20 @@ def preparar_rascunho(d, config, agora=None):
     """
     Um rascunho novo, do vídeo da fonte até Rascunhos, com todas as conferências. O vídeo
     fica reservado (o assistente não o pega) enquanto o robô trabalha nele.
+
+    Antes de tocar no celular, o vídeo cujo produto não tem oferta de afiliado (a API não
+    diz o produto: não paga comissão) fica de lado, e o robô passa ao próximo na mesma
+    rodada, sem gastar a tentativa do horário. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
-    video = proximo_video(config)
-    if not video:
-        return "nenhum vídeo da fonte com arquivo e link de produto para um rascunho"
+    for _ in range(VIDEOS_SEM_OFERTA_POR_RODADA):
+        video = proximo_video(config)
+        if not video:
+            return "nenhum vídeo da fonte com arquivo e link de produto para um rascunho"
+        if ps.nome_do_produto(video):
+            break
+        atualizar(criar(video["id"], agora), estado="pulado", motivo=SEM_OFERTA)
+    else:
+        return f"os próximos {VIDEOS_SEM_OFERTA_POR_RODADA} vídeos da fonte são de produtos sem oferta de afiliado"
     ident = criar(video["id"], agora)
     assistente.registrar(video["id"], "robo", "rascunho do robô", agora)
     try:
