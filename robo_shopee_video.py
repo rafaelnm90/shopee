@@ -654,12 +654,15 @@ def publicar(d, rascunho, agora=None):
 
 def botao_de_compartilhar(xml):
     """
-    No player do vídeo, o ícone de compartilhar fica na coluna da direita, sem texto (só
-    a descrição, em inglês ou português). None se não achou.
+    No player do vídeo (o que tem "Adicionar um comentário"), o ícone de compartilhar
+    fica na coluna da direita, sem texto: a descrição é "... video share icon". O Perfil
+    tem outro compartilhar, o do perfil, que não serve. None se não achou.
     """
+    if not tem(xml, "Adicionar um comentário"):
+        return None
     for el in ps.elementos(xml):
         descricao = el["descricao"].casefold()
-        if el["clicavel"] and ("share" in descricao or "compartilh" in descricao):
+        if el["clicavel"] and "video" in descricao and "share" in descricao:
             return ps._centro(el)
     return None
 

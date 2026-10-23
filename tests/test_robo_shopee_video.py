@@ -540,8 +540,8 @@ def test_link_do_post_pula_o_quadro_de_rascunhos_e_os_fixados(monkeypatch):
                     _no(caixa=(722, 1210, 1080, 1680))]
     monkeypatch.setitem(TELAS, "perfil", TELAS_PERFIL)
     monkeypatch.setitem(TELAS, "player", [
-        '<node text="" content-desc="share video button" class="android.view.View" clickable="true" '
-        'bounds="[950,1935][1052,2035]"></node>'])
+        '<node text="" content-desc="post video share icon" class="android.view.View" clickable="true" '
+        'bounds="[950,1935][1052,2035]"></node>', _no("Adicionar um comentário...", caixa=(200, 2300, 900, 2360))])
     monkeypatch.setitem(TELAS, "folha", [_no("Copiar link", caixa=(280, 2200, 440, 2300))])
     for chave, destino in ((("perfil", (901, 1445)), "player"), (("player", (1001, 1985)), "folha"),
                            (("folha", "Copiar link"), "player")):
@@ -553,3 +553,9 @@ def test_link_do_post_pula_o_quadro_de_rascunhos_e_os_fixados(monkeypatch):
     assert app.toques == [(901, 1445), (1001, 1985), "Copiar link"]
     app.clipboard = "texto qualquer"
     assert robo.link_do_post(app) == ""
+
+
+def test_o_compartilhar_do_perfil_nao_serve_para_o_link_do_post():
+    perfil = _xml('<node text="" content-desc="profile share" class="android.view.View" clickable="true" '
+                  'bounds="[860,140][940,200]"></node>')
+    assert robo.botao_de_compartilhar(perfil) is None
