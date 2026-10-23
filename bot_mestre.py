@@ -71,6 +71,7 @@ import backup_dados  # backup diário do banco, sessões e .env em ~/backups
 import registro_processos  # cada processo dos robôs, 3 dias, para o checkup do dia
 import rotinas  # em que canal sai cada rotina de texto
 import conferencia_espiao  # o nome que a IA do Espião deu confere com o produto?
+import perguntas_rafael  # as perguntas do Claude no privado, lembradas de hora em hora
 import faxina_viral  # o resumo da faxina do Acervo Viral, que roda no divulgacao_canal
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
 
@@ -16945,6 +16946,23 @@ def agendar_backup_atrasado():
                           id='backup_atrasado', replace_existing=True)
         logger.info("💾 [Backup] Último backup velho ou inexistente: um novo sai em 5 min.")
 
+# --- Perguntas do Claude ao Rafael ---
+
+async def lembrar_perguntas_do_claude():
+    """
+    A cada volta, manda de novo no privado cada pergunta do Claude ainda sem resposta
+    cujo último aviso tem 1 h ou mais (perguntas_rafael.py). Pedido do Rafael:
+    DECISOES.md, Trabalho com o Claude.
+    """
+    async def enviar(texto):
+        await bot.send_message(ADMIN_ID, texto, parse_mode="HTML", disable_web_page_preview=True)
+        return True
+    enviados = await perguntas_rafael.lembrar(enviar)
+    if enviados:
+        logger.info(f"❓ [Perguntas do Claude] {enviados} lembrete(s) no privado.")
+        registro_processos.registrar("bot_mestre", "lembrete de pergunta do Claude", "enviado", str(enviados), ok=True)
+
+
 # --- Monitor de saúde ---
 # Checa a cada hora e só fala quando há problema; cada tipo de alerta repete no
 # máximo a cada 6 horas.
@@ -17257,6 +17275,11 @@ async def main():
 
     # Monitor de saúde (avisa o admin no privado)
     scheduler.add_job(monitor_saude, 'interval', hours=1, id='monitor_saude_loop', replace_existing=True)
+
+    # Perguntas do Claude sem resposta: confere a cada 5 min e lembra de hora em hora,
+    # contando do último aviso (um restart não adianta nem atrasa o lembrete).
+    scheduler.add_job(lembrar_perguntas_do_claude, 'interval', minutes=5, id='perguntas_do_claude_loop',
+                      replace_existing=True)
 
     # Painel de submissão do Grupo Público: renovado com 24 h, antes do limite de 48 h
     # do Telegram para o bot apagar o anterior

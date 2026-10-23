@@ -1,20 +1,34 @@
 name: Avisar o Rafael
 
-# O Claude dispara este workflow quando uma pergunta dele ao Rafael está há muito
-# tempo sem resposta: o bot principal manda um aviso curto no privado do Rafael
-# (avisar_rafael.py). Só roda à mão (run_workflow).
+# O Claude dispara este workflow para falar com o Rafael no privado do bot principal:
+#   aviso       o lembrete diário das pendências (avisar_rafael.py), com assunto curto;
+#   pergunta    uma pergunta do Claude, cifrada em "dados" (perguntas_rafael.py cifrar):
+#               o servidor guarda, manda na hora e o bot_mestre lembra de hora em hora
+#               até ela ser respondida; o log mostra só o código (P1, P2...);
+#   respondida  o código da pergunta em "dados": os lembretes param.
+# Só roda à mão (run_workflow).
 #
-# O repositório é público, e os logs e as entradas do Actions também: o assunto
-# vai em poucas palavras, sem dado privado (nome de canal, de pessoa, valores).
+# O repositório é público, e os logs e as entradas do Actions também: o assunto vai
+# em poucas palavras, sem dado privado, e a pergunta vai cifrada com a chave do servidor.
 on:
   workflow_dispatch:
     inputs:
+      acao:
+        description: "aviso (lembrete diário), pergunta (nova, cifrada) ou respondida"
+        required: false
+        type: choice
+        options: [aviso, pergunta, respondida]
+        default: aviso
       assunto:
-        description: "Assunto da pendência, em poucas palavras e sem dado privado"
-        required: true
+        description: "Só no aviso: assunto em poucas palavras e sem dado privado"
+        required: false
         type: string
       link:
-        description: "Link da sessão do Claude (opcional)"
+        description: "Só no aviso: link da sessão do Claude (opcional)"
+        required: false
+        type: string
+      dados:
+        description: "pergunta: o texto cifrado; respondida: o código (ex.: P3)"
         required: false
         type: string
 
@@ -26,17 +40,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Aviso no privado pelo bot
+      - name: Mensagem no privado pelo bot
         uses: appleboy/ssh-action@master
         env:
+          ACAO: ${{ inputs.acao }}
           ASSUNTO: ${{ inputs.assunto }}
           LINK: ${{ inputs.link }}
+          DADOS: ${{ inputs.dados }}
         with:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
           key: ${{ secrets.ORACLE_SSH_KEY }}
-          envs: ASSUNTO,LINK
+          envs: ACAO,ASSUNTO,LINK,DADOS
           command_timeout: 2m
           script: |
             cd ~/shopee
-            venv/bin/python3 avisar_rafael.py "$ASSUNTO" "$LINK"
+            case "$ACAO" in
+              pergunta) venv/bin/python3 perguntas_rafael.py nova "$DADOS" ;;
+              respondida) venv/bin/python3 perguntas_rafael.py respondida "$DADOS" ;;
+              *) venv/bin/python3 avisar_rafael.py "$ASSUNTO" "$LINK" ;;
+            esac
