@@ -338,8 +338,18 @@ async def faxina_diaria_loop():
 # fica nos servidores do Telegram, e reenviar o mesmo id não baixa nem ocupa disco.
 
 def chave_cache_video(url):
-    """Ignora rastreadores (?fromSource=, ?_t=) para o mesmo vídeo gerar a mesma chave."""
-    limpo = str(url or "").strip().lower().split("?")[0].rstrip("/")
+    """
+    Ignora rastreadores (?fromSource=, ?_t=) para o mesmo vídeo gerar a mesma chave. No
+    universal-link da Shopee o vídeo está no parâmetro redir: a chave sai dele, senão todo
+    universal-link cairia no mesmo vídeo do cache.
+    """
+    import urllib.parse
+    texto = str(url or "").strip()
+    if "universal-link" in texto.lower():
+        redir = urllib.parse.parse_qs(urllib.parse.urlparse(texto).query).get("redir", [""])[0]
+        if redir:
+            texto = urllib.parse.unquote(redir)
+    limpo = texto.lower().split("?")[0].rstrip("/")
     return hashlib.md5(limpo.encode()).hexdigest()[:20]
 
 def _garantir_cache_videos(cursor):
