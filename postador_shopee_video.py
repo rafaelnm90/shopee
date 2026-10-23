@@ -40,6 +40,8 @@ Passos, separados por ponto e vírgula:
     postar           toca em Postar na tela final, com o produto conferido de novo na hora
     print            manda um print da tela no privado do Rafael (nunca no log); print:postar
                      avisa que é a tela antes de postar
+    copiado          diz se o que está copiado no celular é um link da Shopee e o tamanho
+                     dele (o link nunca vai para o log): é como o robô pega o link do post
     tela             só descreve a tela
 
 ia, produto e conferir param a exploração quando o produto não bate, e avisam o Rafael
@@ -156,6 +158,7 @@ PALAVRAS_DA_TELA = frozenset("""
     fixado fixados fixar desafixar alterações deseja certeza perder perdido perdidas isso
     este esta esse essa será serão editado edição editando manter selecionado
     selecionados item itens tem mil
+    share like liked comment comments more button icon options copy delete pin pinned
     verificação verificar segurança arraste arrastar deslize deslizar controle deslizante
     quebra-cabeça peça complete completar tente atualizar erro carregando aguarde rede
     conexão internet ops algo deu errado página encontrada negado bloqueado suspeita
@@ -659,11 +662,20 @@ def por_na_galeria(d, arquivo, nome=NOME_NA_GALERIA):
     return nome in getattr(lista, "output", "")
 
 
+def link_copiado(d):
+    """O link da Shopee que está copiado no celular (Copiar link do post); "" sem ele."""
+    try:
+        copiado = (d.clipboard or "").strip()
+    except Exception:
+        return ""
+    return copiado if copiado.startswith("http") and "shopee" in copiado.casefold() else ""
+
+
 def separar_passos(texto):
     """Lista de (nome, argumento). Passo desconhecido vira ValueError antes de tocar em qualquer coisa."""
     conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "esperar", "escrever",
                   "link", "video", "titulo", "comentario", "ia", "curtir", "produto", "conferir", "postar",
-                  "print", "tela"}
+                  "print", "copiado", "tela"}
     passos = []
     for pedaco in (texto or "").split(";"):
         pedaco = pedaco.strip()
@@ -746,6 +758,10 @@ def fazer_passo(d, nome, argumento):
             return postar(d, video)
         return ((True, "vídeo na galeria") if por_na_galeria(d, video["arquivo"])
                 else (False, "o vídeo não apareceu na galeria"))
+    if nome == "copiado":
+        copiado = link_copiado(d)
+        return ((True, f"link da Shopee copiado ({len(copiado)} caracteres)") if copiado
+                else (False, "o que está copiado não é um link da Shopee"))
     if nome == "print":
         legenda = LEGENDA_PRINT_POSTAR if argumento == "postar" else LEGENDA_PRINT
         return ((True, "print mandado no privado") if mandar_print(d, legenda)

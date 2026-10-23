@@ -375,29 +375,46 @@ CAMINHO_PRODUTO = [
     ("Minhas Curtidas", 5, "Mais Recente"),
     ("Mais Recente", 5, "Adicionar"),
 ]
-# Botões de janelas que perguntam se o robô quer sair sem salvar o que está editando.
-SAIR_SEM_SALVAR = ("Descartar", "Sair sem salvar", "Não salvar")
 
 
-def ir_ao_inicio(d):
+def aviso_de_sair(xml):
     """
-    O app na tela de início (a barra de baixo, com Eu). Abre o app se precisar e volta
-    tela por tela; nunca fecha o app à força: fechar e reabrir em seguida chama a
-    Verificação.
+    A janela que o voltar abre na tela final ("Se você voltar, ... serão ..."), com
+    Cancelar e o botão de confirmar (@buttonDefaultPositive). No Motorola (22/10/2026),
+    confirmar volta para a edição do vídeo; num rascunho aberto, o rascunho continua
+    salvo na lista.
     """
-    d.app_start(ps.PACOTE, wait=True)
-    pausa(5)
-    for _ in range(8):
+    return (tem(xml, "@buttonDefaultPositive")
+            and any(el["id"] == "content" and "voltar" in el["texto"].casefold() for el in ps.elementos(xml)))
+
+
+def tem_exato(xml, texto):
+    """Algum elemento com exatamente esse texto (o "Eu" da barra, não um "seu" no meio de outro)."""
+    return any(ps._normal(el["texto"]) == ps._normal(texto) for el in ps.elementos(xml))
+
+
+def voltar(d, ate, vezes=15):
+    """
+    Aperta voltar, confirmando o aviso de sair, até a tela ter um elemento com o texto
+    exato. Nunca fecha o app à força: fechar e reabrir em seguida chama a Verificação.
+    """
+    for _ in range(vezes):
         xml = tela(d)
-        if tem(xml, "Eu") and not tem(xml, "@et_caption"):
+        if tem_exato(xml, ate) and not tem(xml, "@et_caption"):
             return
-        saida = next((b for b in SAIR_SEM_SALVAR if tem(xml, b)), None)
-        if saida:
-            tocar(d, saida, 3)
+        if aviso_de_sair(xml):
+            tocar(d, "@buttonDefaultPositive", 3)
             continue
         d.press("back")
         pausa(3)
-    raise Parada("não consegui voltar ao início do app")
+    raise Parada(f"não consegui voltar até {ate}")
+
+
+def ir_ao_inicio(d):
+    """O app na tela de início (a barra de baixo, com Eu), abrindo o app se precisar."""
+    d.app_start(ps.PACOTE, wait=True)
+    pausa(5)
+    voltar(d, "Eu")
 
 
 def ir_ao_perfil(d):
@@ -566,9 +583,16 @@ def nome_na_galeria(ident):
 # --- Os rascunhos no app ---
 
 def abrir_lista_de_rascunhos(d):
-    """Perfil em Shopee Vídeo → o quadro "Rascunhos: N" → a lista."""
+    """
+    Perfil em Shopee Vídeo → o quadro "Rascunhos: N" (o 1º da grade; só aparece com
+    algum rascunho salvo) → a lista, com Selecionar no alto.
+    """
     ir_ao_perfil(d)
-    tocar(d, "Rascunhos", 6)
+    if not tem(tela(d), "Rascunhos:"):
+        raise Parada("o Perfil não tem nenhum rascunho salvo")
+    tocar(d, "Rascunhos:", 6)
+    if not tem(tela(d), "Selecionar"):
+        raise Parada("a lista de rascunhos não abriu")
 
 
 def quadros_da_lista(xml):
@@ -628,26 +652,45 @@ def publicar(d, rascunho, agora=None):
     return "rascunho aprovado postado"
 
 
+def botao_de_compartilhar(xml):
+    """
+    No player do vídeo, o ícone de compartilhar fica na coluna da direita, sem texto (só
+    a descrição, em inglês ou português). None se não achou.
+    """
+    for el in ps.elementos(xml):
+        descricao = el["descricao"].casefold()
+        if el["clicavel"] and ("share" in descricao or "compartilh" in descricao):
+            return ps._centro(el)
+    return None
+
+
 def link_do_post(d):
     """
-    O link do post que acabou de sair: Perfil em Shopee Vídeo → o vídeo mais novo →
-    Compartilhar → Copiar link. Qualquer passo que não aparece: sem link (o post saiu
-    do mesmo jeito, e a mensagem diz onde achar). Nada aqui desfaz a postagem: até a
-    Verificação só abre a tela do celular no privado.
+    O link do post que acabou de sair: Perfil em Shopee Vídeo → o vídeo mais novo → o
+    ícone de compartilhar → Copiar link (mapeado no Motorola em 22/10/2026). Qualquer
+    passo que não aparece: sem link (o post saiu do mesmo jeito, e a mensagem diz onde
+    achar). Nada aqui desfaz a postagem: até a Verificação só abre a tela do celular no
+    privado.
     """
     try:
         ir_ao_perfil(d)
-        quadros = [q for q in quadros_da_lista(tela(d)) if not tem_texto_no_quadro(d, q, "Rascunhos")]
+        # Na grade do Perfil vêm primeiro o quadro "Rascunhos: N" e os vídeos fixados; o
+        # mais novo é o primeiro depois deles.
+        quadros = [q for q in quadros_da_lista(tela(d))
+                   if not any(tem_texto_no_quadro(d, q, texto) for texto in ("Rascunhos", "Fixado"))]
         if not quadros:
             return ""
         d.click(*ps._centro(quadros[0]))
         pausa(8)
-        for alvo in ("Compartilhar", "Copiar link"):
-            if not tem(tela(d), alvo):
-                return ""
-            tocar(d, alvo, 4)
-        copiado = (d.clipboard or "").strip()
-        return copiado if copiado.startswith("http") and "shopee" in copiado else ""
+        compartilhar = botao_de_compartilhar(tela(d))
+        if not compartilhar:
+            return ""
+        d.click(*compartilhar)
+        pausa(4)
+        if not tem(tela(d), "Copiar link"):
+            return ""
+        tocar(d, "Copiar link", 3)
+        return ps.link_copiado(d)
     except Verificacao:
         av.abrir_tela(celular=True, verificacao=True)
         return ""
@@ -665,19 +708,24 @@ def tem_texto_no_quadro(d, quadro, texto):
 
 def apagar_do_app(d, rascunho):
     """
-    Apaga do app o rascunho que o Rafael recusou: a lista → Selecionar → o rascunho →
-    Excluir → confirmar. Confere antes, abrindo-o, que é o rascunho recusado.
+    Apaga do app o rascunho que o Rafael recusou. Confere antes, abrindo-o, que é o
+    rascunho recusado; volta para a lista (o rascunho continua salvo) → Selecionar → o
+    rascunho → "Excluir (1)" → a janela "Excluir vídeos selecionados?" → Confirmar.
+    Com outro número no Excluir, para sem apagar nada.
     """
     abrir_rascunho(d, rascunho)
-    ir_ao_inicio(d)
-    abrir_lista_de_rascunhos(d)
+    voltar(d, "Selecionar")
     quadros = quadros_da_lista(tela(d))
     posicao = posicao_no_app(rascunho)
     tocar(d, "Selecionar", 3)
     d.click(*ps._centro(quadros[posicao]))
     pausa(2)
-    tocar(d, "Excluir", 3)
-    tocar(d, "Excluir", 6)
+    if not tem(tela(d), "Excluir (1)"):
+        raise Parada("a lista não marcou só o rascunho recusado para excluir")
+    tocar(d, "Excluir (1)", 3)
+    if not tem(tela(d), "Excluir vídeos selecionados?"):
+        raise Parada("a confirmação de excluir não apareceu")
+    tocar(d, "Confirmar", 6)
     atualizar(rascunho["id"], estado="apagado")
     _limpar_galeria(d, rascunho)
     return "rascunho recusado apagado"
@@ -713,9 +761,8 @@ def treinar(d, agora=None):
             ok, motivo, _ = ps.abrir_pagina_completa(d, video_do_rascunho(ultimo))
             if not ok:
                 raise Parada(f"página do produto: {motivo}")
+        # O quadro "Rascunhos: N" só aparece com algum rascunho salvo: o treino não o exige.
         ir_ao_perfil(d)
-        if not tem(tela(d), "Rascunhos"):
-            raise Parada("o Perfil em Shopee Vídeo não mostrou os Rascunhos")
         seguir(d, CAMINHO_POSTAR)
         xml = tela(d)
         faltam = [alvo for alvo in ("@et_caption", "@ll_add_product_symbol", "@tv_drafts_box", "@btn_post")

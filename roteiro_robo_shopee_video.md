@@ -29,17 +29,34 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   vídeo e o print ficam em `~/shopee_video/rascunhos` (ID.mp4 e ID.png). Na galeria do
   celular, o vídeo de cada rascunho tem nome próprio (`robo_shopee_video_ID.mp4`), para
   ser o mais novo, e sai de lá depois de postado ou apagado.
-- **Ainda a mapear no Motorola** (o robô para e avisa se não achar; nada disso foi visto
-  ainda):
-  - a página completa depois de tocar no nome do produto (o passo `curtir`);
-  - a lista de rascunhos: os quadros (o robô escolhe pela posição, do mais novo para o
-    mais velho, e confere o título e o produto antes de postar) e apagar um rascunho
-    (Selecionar → o rascunho → Excluir → confirmar);
-  - o que o app pergunta ao sair da tela final sem salvar (o robô toca em Descartar, Sair
-    sem salvar ou Não salvar) e se isso apaga um rascunho aberto;
-  - o link do post (o vídeo mais novo do Perfil → Compartilhar → Copiar link);
-  - o link que abre um vídeo (Ver Produtos, vários produtos): até lá, o robô só usa
-    vídeos com link de produto, e os outros ficam para o assistente.
+- **Mapeado no Motorola (22/10/2026, à noite, 13 rodadas do explorar, sem verificação):**
+  - **curtir:** o link abre a página curta (`ReactActivity_`); o toque no nome abre a
+    página completa, com o coração (`buttonItemLike`; curtido: `buttonItemLiked`). Testado
+    com o nome que tem selo ou número antes (`nome_na_pagina`);
+  - **sair da tela final sem salvar:** o voltar abre o aviso "Se você voltar, ... serão
+    ..." (`content`), com Cancelar (`buttonDefaultNegative`) e o confirmar
+    (`buttonDefaultPositive`). Confirmar volta para a edição do vídeo; um segundo voltar
+    no aviso só fecha o aviso. Num **rascunho aberto**, confirmar e voltar de novo leva
+    à lista, e **o rascunho continua salvo** (o robô pode abrir um rascunho para
+    conferir e desistir sem perder nada);
+  - **Perfil em Shopee Vídeo:** o 1º quadro da grade é "Rascunhos: N", que **só aparece
+    com algum rascunho salvo**; depois vêm os vídeos **Fixados** (rótulo "Fixado" no
+    canto) e só então o mais novo;
+  - **lista de rascunhos:** o texto de aviso no alto, os quadros (o 1º em ~179,658, com a
+    data embaixo) e Selecionar (~933,173). Em Selecionar, o alto vira Cancelar e embaixo
+    aparece **"Excluir (N)"** (~539,2312); o toque no quadro o marca. Excluir abre
+    **"Excluir vídeos selecionados?"** com Cancelar (~329,1312) e **Confirmar**
+    (~751,1312). Depois de confirmar, a lista fica vazia e o quadro some do Perfil. O
+    robô só confirma com "Excluir (1)";
+  - **link do post:** o vídeo no Perfil abre o player (`NativePlayerActivity`); o ícone de
+    compartilhar fica na coluna da direita (~1001,1985, sem texto, só a descrição) e abre
+    a folha com os apps e, embaixo, **Copiar link** (~360,2251), Salvar e Fixar. O app
+    mostra "Link copiado". O passo `copiado` do explorar diz se o celular deixa o robô
+    ler o link (sem nunca mostrá-lo).
+- **Ainda a mapear:** o link que abre um vídeo (Ver Produtos, vários produtos): até lá, o
+  robô só usa vídeos com link de produto, e os outros ficam para o assistente. E o
+  voltar da edição de um vídeo novo (antes de ser rascunho): o robô confirma o aviso de
+  sair e aperta voltar até a barra de baixo; o treino da segunda mostra se trava.
 
 ## Onde paramos
 
