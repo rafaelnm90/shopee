@@ -564,6 +564,30 @@ async def limpar_video_shopee(caminho, pasta):
                 f"cartela cortada em {corte or 'nenhuma'}s).")
     return destino
 
+# Os vídeos da Shopee Vídeo: a página não traz mais o vídeo, e a chamada que o traz
+# recusa robôs (investigar_baixador.py, 23/10/2026). Furar esse bloqueio vai contra as
+# regras da Shopee: o Baixador tenta, e sem vídeo explica e ensina a salvar pelo app.
+# Decisão do Rafael: DECISOES.md, Baixador.
+ERRO_SHOPEE_BLOQUEOU = "a Shopee está bloqueando downloads automáticos dos vídeos dela"
+COMO_SALVAR_PELO_APP = "💡 Para salvar: abra o vídeo no app da Shopee → <b>Compartilhar</b> → <b>Salvar</b>."
+
+
+def eh_video_da_shopee(url):
+    """O endereço é de um vídeo da Shopee Vídeo (sv.shopee... ou .../share-video/...)?"""
+    import urllib.parse
+    partes = urllib.parse.urlparse(str(url or ""))
+    return partes.netloc.lower().startswith("sv.shopee.") or "/share-video/" in partes.path
+
+
+def texto_do_erro(mencao, erro):
+    """A mensagem do download que não deu certo, com a dica que serve para aquele erro."""
+    if erro == ERRO_SHOPEE_BLOQUEOU:
+        dica = COMO_SALVAR_PELO_APP
+    else:
+        dica = "<i>Confira se o link está certo e se o vídeo é público.</i>"
+    return f"❌ {mencao}, não deu certo: <b>{erro}</b>.\n\n{dica}"
+
+
 async def baixar_video_shopee(url, pasta):
     """
     Baixa o vídeo de um link da Shopee em `pasta`. Devolve (caminho, None) ou
@@ -586,12 +610,14 @@ async def baixar_video_shopee(url, pasta):
                     return None, "não consegui abrir a página da Shopee"
                 html = await resposta.text()
                 url_final = str(resposta.url)
+            pagina = url_final
 
             # Às vezes a página é um "universal-link" com o destino real no parâmetro redir.
             if "universal-link" in url_final and "redir=" in url_final:
                 destino_real = urllib.parse.parse_qs(urllib.parse.urlparse(url_final).query).get("redir", [None])[0]
                 if destino_real:
                     destino_real = urllib.parse.unquote(destino_real)
+                    pagina = destino_real
                     logger.info(f"🛒 Link real localizado: {destino_real[:70]}...")
                     async with sessao.get(destino_real, allow_redirects=True, timeout=25) as r2:
                         if r2.status == 200:
@@ -701,6 +727,8 @@ async def baixar_video_shopee(url, pasta):
                 logger.warning("⚠️ Só há a versão com marca: o ffmpeg limpa depois.")
 
             if not link_mp4:
+                if eh_video_da_shopee(pagina):
+                    return None, ERRO_SHOPEE_BLOQUEOU
                 return None, ("não achei nenhum arquivo de vídeo nesta página da Shopee. "
                               "Talvez o link seja de produto, e não de vídeo")
 
@@ -1112,11 +1140,7 @@ async def receber_link(message: types.Message):
                 caminho = await limpar_video_shopee(caminho, pasta)
 
             if erro:
-                await status.edit_text(
-                    f"❌ {mencao}, não deu certo: <b>{erro}</b>.\n\n"
-                    "<i>Confira se o link está certo e se o vídeo é público.</i>",
-                    parse_mode="HTML"
-                )
+                await status.edit_text(texto_do_erro(mencao, erro), parse_mode="HTML")
                 return
 
             legenda = (

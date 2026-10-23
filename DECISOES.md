@@ -171,6 +171,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - Os painéis antigos e as mensagens "fixou uma mensagem" são apagados sozinhos pela conta principal (userbot, no `divulgacao_canal`), a cada 10 min. O Telegram só deixa bot apagar mensagem com menos de 48 h, por isso o bot não dava conta.
   - A faxina de 3 dias do bot, que tentava apagar tudo (inclusive os vídeos) e nunca conseguia, saiu.
 - **04/10/2026:** quem já usou os downloads de cortesia e não está nos canais obrigatórios recebe o aviso para entrar, que some em 3 min. Se a pessoa não entrar, o link dela some junto, como no aviso de limite diário: no tópico não fica link que parece ignorado.
+- **23/10/2026:** a Shopee bloqueia o download automático dos vídeos da Shopee Vídeo: a página não traz mais o vídeo, e a chamada que o traz recusa robôs. O Baixador não fura esse bloqueio (vai contra as regras da Shopee). Escolha do Rafael: o Baixador tenta baixar primeiro (se a Shopee liberar de novo, volta a funcionar sozinho) e, sem o vídeo, responde que "a Shopee está bloqueando downloads automáticos dos vídeos dela" e ensina a salvar pelo app: abrir o vídeo no app da Shopee → Compartilhar → Salvar. Link de produto sem vídeo continua com a mensagem de antes. Download que não deu certo não gasta a cota.
 
 ## Shopee Vídeo
 
