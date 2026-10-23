@@ -811,3 +811,179 @@ def test_galeria_que_lembra_um_video_antigo_marcado_fica_so_com_o_mais_novo(monk
     app.toques = []
     robo.marcar_so_o_mais_novo(app)
     assert app.toques == []
+
+
+# --- Link de vídeo: o Ver Produtos (mapeado no Motorola em 23/10/2026) ---
+
+PRODUTO_A = "Garrafa Térmica Inox 1 Litro Com Alça e Tampa Rosqueável"
+PRODUTO_B = "Copo Térmico Inox 500 ml Com Canudo e Tampa"
+RECOMENDADO = "Kit Potes Herméticos De Vidro Para Cozinha Com Tampa"
+LINK_DE_VIDEO = "https://s.shopee.com.br/videocomprodutos"
+
+
+def _cartao(nome, y):
+    """Um cartão da lista do Ver Produtos: nome, preço e o botão de comprar (que o robô nunca toca)."""
+    return _no(caixa=(0, y, 1080, y + 300), filhos=(
+        _no(nome, caixa=(300, y + 20, 1040, y + 80), clicavel=False)
+        + _no("R$59,90", caixa=(300, y + 200, 500, y + 240), clicavel=False)
+        + _no(caixa=(780, y + 200, 1050, y + 280),
+              filhos=_no("Comprar com cupom", caixa=(790, y + 210, 1040, y + 270), clicavel=False))))
+
+
+def _item_curtido(nome, y, adicionado):
+    return _no(caixa=(0, y, 1080, y + 270), filhos=(
+        _no(nome, caixa=(300, y + 10, 1040, y + 70), clicavel=False)
+        + _no(caixa=(840, y + 165, 1010, y + 230),
+              filhos=_no("Adicionado" if adicionado else "Adicionar", caixa=(850, y + 175, 1000, y + 220),
+                         clicavel=False))))
+
+
+class AppDoVerProdutos(AppDeMentira):
+    """O app com um link de vídeo: o player, o Ver Produtos, as páginas dos produtos e o Adicionar Mais."""
+
+    def __init__(self, removido=False):
+        super().__init__()
+        self.removido, self.curtidos, self.anexados, self.janela = removido, set(), [], None
+
+    def _nos(self):
+        if self.atual == "removido":
+            return [_no("Detalhes do Vídeo", caixa=(300, 1160, 780, 1220), clicavel=False),
+                    _no("Este vídeo foi removido pelo criador", caixa=(200, 1240, 880, 1280), clicavel=False)]
+        if self.atual == "player":
+            return [_no("Ver Produtos (2)", caixa=(400, 1940, 650, 2000))]
+        if self.atual == "ver_produtos":
+            return [_no(caixa=(0, 400, 1080, 2400), filhos=(
+                _no("Ver Produtos (2)", caixa=(40, 700, 300, 750), clicavel=False)
+                + _cartao(PRODUTO_A, 1030) + _cartao(PRODUTO_B, 1350)
+                + _no("Ver Mais (1)", caixa=(400, 1720, 640, 1770))
+                + _no("Você Também Pode Gostar", caixa=(300, 1870, 780, 1920), clicavel=False)
+                + _cartao(RECOMENDADO, 1940)))]
+        if self.atual.startswith("pdp:"):
+            nome = self.atual[4:]
+            return [_no(ident="buttonItemLiked" if nome in self.curtidos else "buttonItemLike", caixa=(1000, 1510, 1056, 1566)),
+                    _no(nome, "labelProductPageProductName", (40, 1850, 1040, 1900), clicavel=False),
+                    _no("Compre agora", "buttonProductBuyNow", (600, 2290, 1040, 2370))]
+        if self.atual == "curtidas":
+            return [_no("Minhas Curtidas", caixa=(300, 410, 510, 460)), _no("Mais Recente", caixa=(300, 520, 510, 570)),
+                    _item_curtido(PRODUTO_A, 650, PRODUTO_A in self.anexados),
+                    _item_curtido(PRODUTO_B, 930, PRODUTO_B in self.anexados)]
+        if self.atual == "janela":
+            return [_no("Editar nome do produto", caixa=(300, 1310, 780, 1370), clicavel=False),
+                    _no(self.janela, caixa=(360, 1450, 1040, 1510), clicavel=False), _no("Feito", caixa=(480, 2290, 600, 2340))]
+        if self.atual == "final":
+            nos = _tela_final(robo.ps.como_o_android_le(self.legenda))
+            for i, nome in enumerate(self.anexados):
+                nos.append(_no(nome, "tv_product_title", (40 + 500 * i, 820, 500 + 500 * i, 880), clicavel=False))
+            if self.anexados:
+                nos.append(_no("Adicionar Mais", "tv_add_more", (800, 700, 980, 760)))
+            return nos
+        return super()._nos()
+
+    def shell(self, partes):
+        resposta = super().shell(partes)
+        if "android.intent.action.VIEW" in partes:
+            self.atual = "removido" if self.removido else "player"
+        return resposta
+
+    def click(self, x, y):
+        tocados = [el for el in robo.ps.elementos(self.dump_hierarchy()) if robo.ps._dentro((x, y), el["caixa"])]
+        textos = {el["texto"] for el in tocados} | {"@" + el["id"] for el in tocados if el["id"]}
+        assert not any(robo.ps.texto_proibido(t) for t in textos), f"tocou num botão de comprar: {textos}"
+        if self.atual == "player" and "Ver Produtos (2)" in textos:
+            self.atual = "ver_produtos"
+        elif self.atual == "ver_produtos":
+            nome = next((t for t in textos if t in (PRODUTO_A, PRODUTO_B, RECOMENDADO)), None)
+            self.toques.append(nome or (x, y))
+            if nome:
+                self.atual = "pdp:" + nome
+            return
+        elif self.atual.startswith("pdp:") and "@buttonItemLike" in textos:
+            self.curtidos.add(self.atual[4:])
+        elif self.atual == "final" and "@tv_add_more" in textos:
+            self.atual = "curtidas"
+        elif self.atual == "final" and "@ll_add_product_symbol" in textos:
+            self.atual = "curtidas"
+        elif self.atual == "curtidas" and "Adicionar" in textos:
+            self.janela = PRODUTO_A if y < 930 else PRODUTO_B       # o item de cima é o A
+            self.atual = "janela"
+        elif self.atual == "janela" and "Feito" in textos:
+            self.anexados.append(self.janela)
+            self.atual = "final"
+        else:
+            return super().click(x, y)
+        self.toques.append(next((t for t in textos if t.startswith("@")), next(iter(textos), (x, y))))
+
+    def press(self, tecla, meta=None):
+        if meta or tecla != "back" or not (self.atual.startswith("pdp:") or self.atual in ("ver_produtos", "player")):
+            return super().press(tecla, meta)
+        self.teclas.append(tecla)
+        self.atual = {"ver_produtos": "player", "player": "inicio"}.get(self.atual, "ver_produtos")
+
+
+def _fonte_de_video(monkeypatch, confirma=(PRODUTO_A, PRODUTO_B)):
+    _fonte(monkeypatch)
+    inserir("UPDATE fila_autorais SET legenda = ?", f"Garrafa 🧴\n{LINK_DE_VIDEO}")
+
+    async def converter(link):
+        return "https://sv.shopee.com.br/share-video/AAAA" if link == LINK_DE_VIDEO else "https://shopee.com.br/product/1/2"
+
+    async def produtos_do_link(link):
+        return [], link       # link de vídeo: a API não diz os produtos
+
+    async def analisar(arquivo, prompt):
+        confere = any(nome in prompt for nome in confirma)
+        return '{"confere": %s, "motivo": "a IA viu no vídeo"}' % ("true" if confere else "false")
+
+    monkeypatch.setattr(robo, "link_para_converter", converter)
+    monkeypatch.setattr(robo.ps, "link_para_converter", converter)
+    monkeypatch.setattr(robo.assistente, "produtos_do_link", produtos_do_link)
+    monkeypatch.setattr(robo.ps.api_gemini, "analisar_video_gemini", analisar)
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True, "fonte": "autorais"})
+
+
+def test_link_de_video_curte_e_anexa_todos_os_produtos_que_a_ia_confirma(monkeypatch, avisos):
+    # Escolha do Rafael (23/10): no Ver Produtos, todos os produtos do criador que a IA
+    # confirmar; nunca os de "Você Também Pode Gostar" nem um botão de comprar.
+    _fonte_de_video(monkeypatch)
+    app = AppDoVerProdutos()
+    assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert app.curtidos == {PRODUTO_A, PRODUTO_B} and app.anexados == [PRODUTO_A, PRODUTO_B]
+    assert RECOMENDADO not in app.toques
+    rascunho = robo.esperando_aprovacao()[0]
+    assert rascunho["produtos"] == [PRODUTO_A, PRODUTO_B]
+    assert len(robo.json.loads(rascunho["conferencia"])) == 4          # 2 conferências por produto
+    assert "os do Ver Produtos" in avisos[0]
+
+
+def test_link_de_video_deixa_de_fora_o_produto_que_a_ia_recusa(monkeypatch, avisos):
+    _fonte_de_video(monkeypatch, confirma=(PRODUTO_B,))
+    app = AppDoVerProdutos()
+    assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert app.curtidos == {PRODUTO_B} and app.anexados == [PRODUTO_B]
+    assert robo.esperando_aprovacao()[0]["produtos"] == [PRODUTO_B]
+    assert not any("A IA" in str(a) and PRODUTO_A in str(a) for a in avisos)   # recusado não vira aviso
+
+
+def test_link_de_video_sem_produto_confirmado_fica_de_lado(monkeypatch, avisos):
+    _fonte_de_video(monkeypatch, confirma=())
+    resultado = robo.rodada(preparar=True, d=AppDoVerProdutos(), agora=momento("2026-10-22 23:59"))
+    assert "a IA não confirmou nenhum produto do Ver Produtos" in resultado
+    assert robo.listar("pulado")[0]["id_video"] == "a1"
+
+
+def test_link_de_video_removido_fica_de_lado(monkeypatch, avisos):
+    _fonte_de_video(monkeypatch)
+    resultado = robo.rodada(preparar=True, d=AppDoVerProdutos(removido=True), agora=momento("2026-10-22 23:59"))
+    assert "o vídeo do link foi removido" in resultado and robo.listar("pulado")[0]["id_video"] == "a1"
+
+
+def test_rascunho_de_varios_produtos_so_e_postado_com_todos_na_tela_final(monkeypatch, avisos):
+    app = AppDoVerProdutos()
+    app.atual, app.anexados = "final", [PRODUTO_A]
+    video = {"id": "a1", "arquivo": "x.mp4", "link": LINK_DE_VIDEO, "produtos": [PRODUTO_A, PRODUTO_B]}
+    ok, motivo = robo.ps.conferir_tela_final(app, video)
+    assert not ok and "1 produto(s) anexado(s)" in motivo
+    app.anexados = [PRODUTO_B, PRODUTO_A]
+    assert robo.ps.conferir_tela_final(app, video)[0]
+    app.anexados = [PRODUTO_A, PRODUTO_B, RECOMENDADO]
+    assert not robo.ps.conferir_tela_final(app, video)[0]

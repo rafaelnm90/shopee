@@ -788,7 +788,7 @@ def texto_rascunho(rascunho, posicao, total):
     return (f"📝 <b>Rascunho {posicao} de {total}</b> (salvo em {_data_curta(rascunho['criado_em'])})\n\n"
             "📝 <b>Título</b> (o que está na legenda):\n"
             f"<code>{html_escape(rascunho['titulo'] or '')}</code>\n\n"
-            f"🛍️ <b>Produto anexado:</b>\n{produtos}\n"
+            f"🛍️ <b>{'Produtos anexados' if len(rascunho['produtos'] or []) > 1 else 'Produto anexado'}:</b>\n{produtos}\n"
             f"🔗 {html_escape(rascunho['link'] or '')}\n\n"
             f"{linhas_da_origem(rascunho.get('fonte'))}"
             f"{linhas_da_conferencia(rascunho.get('conferencia'))}{aviso}"

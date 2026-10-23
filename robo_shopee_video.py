@@ -71,6 +71,8 @@ TENTATIVAS_A_MAIS = 2
 # no celular; numa rodada, até estes. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 VIDEOS_SEM_OFERTA_POR_RODADA = 5
 SEM_OFERTA = "o link não diz o produto do vídeo (produto sem oferta de afiliado)"
+# Produtos do Ver Produtos que o robô confere num vídeo (cada um custa 2 conferências da IA).
+MAXIMO_PRODUTOS_DO_VIDEO = 6
 CHAVE_ESTADO = "shopee_video_robo"
 PASTA_RASCUNHOS = os.path.join(av.PASTA_TRABALHO, "rascunhos")
 # Minutos sorteados entre uma postagem aprovada e a seguinte.
@@ -411,6 +413,13 @@ CAMINHO_PRODUTO = [
     ("Minhas Curtidas", 5, "Mais Recente"),
     ("Mais Recente", 5, "Adicionar"),
 ]
+# Com um produto já anexado, a tela final mostra "Adicionar Mais" (mapeado no Motorola em
+# 23/10/2026): a mesma lista, com o anexado marcado como "Adicionado".
+CAMINHO_MAIS_UM_PRODUTO = [
+    ("@tv_add_more", 8, "Minhas Curtidas"),
+    ("Minhas Curtidas", 5, "Mais Recente"),
+    ("Mais Recente", 5, "Adicionar"),
+]
 
 
 def aviso_de_sair(xml):
@@ -501,9 +510,9 @@ mesma_legenda = ps.mesma_legenda
 
 
 def video_do_rascunho(rascunho):
-    """O vídeo no formato que as conferências do explorar usam."""
+    """O vídeo no formato que as conferências do explorar usam, com os produtos que o rascunho anexou."""
     return {"id": rascunho["id_video"], "arquivo": rascunho["arquivo"], "link": rascunho["link"],
-            "nome": (rascunho["produtos"] or [""])[0]}
+            "nome": (rascunho["produtos"] or [""])[0], "produtos": rascunho["produtos"] or []}
 
 
 def avisar(texto):
@@ -527,8 +536,8 @@ def avisar_foto(caminho, legenda):
 def proximo_video(config):
     """
     O vídeo da Fonte dos Vídeos do painel que nem o assistente mandou nem o robô usou,
-    com link de produto: o caminho do link que abre um vídeo (Ver Produtos) ainda não
-    está mapeado no Motorola, e o robô não adivinha. Sem nenhum, None.
+    com link de produto ou de vídeo (Ver Produtos; "de_video" no dicionário). Sem nenhum,
+    None.
     """
     fonte = config.get("fonte", assistente.FONTE_PADRAO)
     usados = ids_usados()
@@ -540,9 +549,8 @@ def proximo_video(config):
         if (id_video in mandados or id_video in usados or not arquivo or not link
                 or not os.path.exists(arquivo) or arquivo.lower().endswith(assistente.EXTENSOES_DE_IMAGEM)):
             continue
-        if eh_video(asyncio.run(link_para_converter(link))):
-            continue
-        return {"id": id_video, "arquivo": os.path.abspath(arquivo), "link": link, "nome": nome_da_legenda(legenda)}
+        return {"id": id_video, "arquivo": os.path.abspath(arquivo), "link": link, "nome": nome_da_legenda(legenda),
+                "de_video": eh_video(asyncio.run(link_para_converter(link)))}
     return None
 
 
@@ -559,7 +567,8 @@ def preparar_rascunho(d, config, agora=None):
         video = proximo_video(config)
         if not video:
             return "nenhum vídeo da fonte com arquivo e link de produto para um rascunho"
-        if ps.nome_do_produto(video):
+        # No link de vídeo, os produtos vêm do Ver Produtos, no celular.
+        if video["de_video"] or ps.nome_do_produto(video):
             break
         atualizar(criar(video["id"], agora), estado="pulado", motivo=SEM_OFERTA)
     else:
@@ -596,14 +605,20 @@ def _conferir(resultado, do_video=True):
 
 
 def _preparar(d, ident, video, fonte):
-    nome = ps.nome_do_produto(video)
-    if not nome:
-        raise Parada("o link não diz o produto do vídeo", do_video=True)
-    # Antes de tocar no celular, o Rafael sabe qual vídeo e qual produto o robô pegou.
-    avisar(f"🤖 Robô da Shopee Vídeo: começando um rascunho.\n\nProduto: {nome}\n"
-           f"Vídeo: o mais novo de {assistente.FONTES.get(fonte, fonte)} ainda não usado.")
     vistos = []
-    _conferir(ps.ia_confere_produto(video, vistos))
+    if video.get("de_video"):
+        avisar("🤖 Robô da Shopee Vídeo: começando um rascunho.\n\nProdutos: os do Ver Produtos do vídeo; a IA "
+               f"confere cada um.\nVídeo: o mais novo de {assistente.FONTES.get(fonte, fonte)} ainda não usado.")
+        nomes = _produtos_do_video(d, video, vistos)
+    else:
+        nome = ps.nome_do_produto(video)
+        if not nome:
+            raise Parada("o link não diz o produto do vídeo", do_video=True)
+        # Antes de tocar no celular, o Rafael sabe qual vídeo e qual produto o robô pegou.
+        avisar(f"🤖 Robô da Shopee Vídeo: começando um rascunho.\n\nProduto: {nome}\n"
+               f"Vídeo: o mais novo de {assistente.FONTES.get(fonte, fonte)} ainda não usado.")
+        _conferir(ps.ia_confere_produto(video, vistos))
+        nomes = [nome]
     # A origem e o que a IA viu ficam no rascunho, para o Rafael validar com isso na mão.
     atualizar(ident, fonte=fonte, conferencia=json.dumps(vistos, ensure_ascii=False))
     textos = asyncio.run(assistente.textos_do_video(video["arquivo"], video.get("nome") or ""))
@@ -617,16 +632,18 @@ def _preparar(d, ident, video, fonte):
     os.makedirs(PASTA_RASCUNHOS, exist_ok=True)
     copia = os.path.join(PASTA_RASCUNHOS, f"{ident}.mp4")
     shutil.copyfile(video["arquivo"], copia)
-    atualizar(ident, arquivo=copia, link=video["link"], produtos=[nome], titulo=textos["titulo"],
+    atualizar(ident, arquivo=copia, link=video["link"], produtos=nomes, titulo=textos["titulo"],
               comentario=textos.get("comentario") or "")
 
-    # Curtir o produto pela página dele, como o Rafael faz antes de postar.
-    ir_ao_inicio(d)
-    ps.abrir_link(d, video["link"])
-    pausa(12)
-    tela(d)
-    _conferir(ps.curtir(d, video))
-    pausa(3)
+    if not video.get("de_video"):
+        # Curtir o produto pela página dele, como o Rafael faz antes de postar (os do Ver
+        # Produtos já foram curtidos lá).
+        ir_ao_inicio(d)
+        ps.abrir_link(d, video["link"])
+        pausa(12)
+        tela(d)
+        _conferir(ps.curtir(d, video))
+        pausa(3)
     ir_ao_perfil(d)
 
     # O vídeo na galeria com um nome só dele: o mais novo da galeria é o que vai no rascunho.
@@ -650,10 +667,11 @@ def _preparar(d, ident, video, fonte):
         raise Parada(f"o título não ficou na legenda ({conferencia})")
     tocar(d, "@tv_right", 3)
 
-    seguir(d, CAMINHO_PRODUTO)
-    _conferir(ps.adicionar_produto(d, video))
-    tocar(d, "Feito", 6)
-    _conferir(ps.conferir_tela_final(d, video))
+    for i, nome in enumerate(nomes):
+        seguir(d, CAMINHO_PRODUTO if i == 0 else CAMINHO_MAIS_UM_PRODUTO)
+        _conferir(ps.adicionar_produto(d, dict(video, produto=nome)))
+        tocar(d, "Feito", 6)
+    _conferir(ps.conferir_tela_final(d, dict(video, produtos=nomes)))
 
     print_tela = os.path.join(PASTA_RASCUNHOS, f"{ident}.png")
     d.screenshot(print_tela)
@@ -664,6 +682,52 @@ def _preparar(d, ident, video, fonte):
     esperando = len(esperando_aprovacao())
     avisar(f"📝 Robô da Shopee Vídeo: rascunho novo salvo no celular. {esperando} esperando a sua aprovação "
            "em Shopee Vídeo 🎬 → Rascunhos do Robô 📝.")
+
+
+def _produtos_do_video(d, video, vistos):
+    """
+    Link de vídeo (Ver Produtos): abre o vídeo no celular e, na lista do Ver Produtos, cada
+    produto que o criador vinculou (nunca as recomendações de "Você Também Pode Gostar"):
+    lê o nome na página dele, a IA confere o vídeo com esse nome VEZES_DA_IA vezes, e o
+    confirmado é curtido. Devolve os nomes confirmados; nenhum ou vídeo removido: o vídeo
+    fica de lado. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    ir_ao_inicio(d)
+    ps.abrir_link(d, video["link"])
+    pausa(12)
+    xml = tela(d)
+    if ps.video_removido(xml):
+        raise Parada("o vídeo do link foi removido", do_video=True)
+    if not tem(xml, "Ver Produtos"):
+        raise Parada("o link de vídeo não mostrou o Ver Produtos", do_video=True)
+    tocar(d, "Ver Produtos", 6)
+    quantos = len(ps.produtos_vinculados(tela(d)))
+    if not quantos:
+        raise Parada("o Ver Produtos não mostrou os produtos do criador", do_video=True)
+    confirmados = []
+    for i in range(min(quantos, MAXIMO_PRODUTOS_DO_VIDEO)):
+        xml = tela(d)
+        pontos = ps.produtos_vinculados(xml)
+        if i >= len(pontos):
+            break
+        if ps.proibido_no_ponto(xml, *pontos[i]):
+            raise Parada(ps.RECUSA)
+        d.click(*pontos[i])
+        pausa(8)
+        xml = tela(d)
+        nome = ps.nome_na_pagina_do_produto(xml)
+        if nome and nome not in confirmados:
+            deste = []
+            ok, _ = ps.ia_confere_produto(dict(video, produto=nome), deste, avisar=False)
+            if ok:
+                _conferir(ps.curtir_na_pagina(d, xml))
+                confirmados.append(nome)
+                vistos.extend(deste)
+        d.press("back")
+        pausa(4)
+    if not confirmados:
+        raise Parada("a IA não confirmou nenhum produto do Ver Produtos", do_video=True)
+    return confirmados
 
 
 def nome_na_galeria(ident):

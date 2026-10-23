@@ -1055,3 +1055,53 @@ def test_comprar_com_cupom_do_player_e_proibido():
             '<node text="Comprar com cupom" class="android.widget.TextView" bounds="[450,1830][780,1880]"/></node>'
             '</hierarchy>')
     assert ps.proibido_no_ponto(tela, 613, 1855) and not ps.proibido_no_ponto(tela, 522, 1969)
+
+
+VER_PRODUTOS = """<hierarchy><node class="android.view.ViewGroup" clickable="true" bounds="[0,400][1080,2400]">
+  <node text="Ver Produtos (2)" class="android.widget.TextView" bounds="[40,700][300,750]" />
+  <node class="android.view.ViewGroup" clickable="true" bounds="[0,1030][1080,1330]">
+    <node text="-20%" class="android.widget.TextView" bounds="[200,1050][300,1090]" />
+    <node text="Garrafa Térmica Inox 1 Litro Com Alça" class="android.widget.TextView" bounds="[330,1070][1040,1120]" />
+    <node text="R$5 de desconto" class="android.widget.TextView" bounds="[330,1140][700,1180]" />
+    <node class="android.view.ViewGroup" clickable="true" bounds="[780,1240][1050,1310]">
+      <node text="Comprar com cupom" class="android.widget.TextView" bounds="[790,1250][1040,1300]" />
+    </node>
+  </node>
+  <node class="android.view.ViewGroup" clickable="true" bounds="[0,1350][1080,1650]">
+    <node text="Copo Térmico 500 ml" class="android.widget.TextView" bounds="[330,1390][1040,1440]" />
+    <node class="android.view.ViewGroup" clickable="true" bounds="[780,1560][1050,1630]">
+      <node text="Comprar com cupom" class="android.widget.TextView" bounds="[790,1570][1040,1620]" />
+    </node>
+  </node>
+  <node text="Ver Mais (1)" class="android.widget.TextView" clickable="true" bounds="[400,1720][640,1770]" />
+  <node text="Você Também Pode Gostar" class="android.widget.TextView" bounds="[300,1870][780,1920]" />
+  <node class="android.view.ViewGroup" clickable="true" bounds="[0,1940][1080,2240]">
+    <node text="Kit Potes Herméticos De Vidro Para Cozinha" class="android.widget.TextView" bounds="[330,1960][1040,2010]" />
+  </node>
+</node></hierarchy>"""
+
+
+def test_ver_produtos_toca_no_nome_dos_vinculados_e_nunca_nas_recomendacoes():
+    # Mapeado no Motorola (23/10): a lista do Ver Produtos tem os produtos do criador e,
+    # depois de "Ver Mais" e "Você Também Pode Gostar", recomendações que não são do vídeo.
+    assert ps.produtos_vinculados(VER_PRODUTOS) == [(685, 1095), (685, 1415)]
+    assert all(not ps.proibido_no_ponto(VER_PRODUTOS, x, y) for x, y in ps.produtos_vinculados(VER_PRODUTOS))
+
+
+def test_pagina_do_produto_e_video_removido():
+    pagina = ('<hierarchy><node text="Copo Térmico 500 ml " resource-id="com.shopee.br:id/labelProductPageProductName" '
+              'class="android.widget.TextView" bounds="[40,1850][1040,1900]"/></hierarchy>')
+    assert ps.nome_na_pagina_do_produto(pagina) == "Copo Térmico 500 ml"
+    assert ps.nome_na_pagina_do_produto(VER_PRODUTOS) == ""
+    removido = ('<hierarchy><node text="Este vídeo foi removido pelo criador" class="android.widget.TextView" '
+                'bounds="[200,1240][880,1280]"/></hierarchy>')
+    assert ps.video_removido(removido) and not ps.video_removido(VER_PRODUTOS)
+
+
+def test_nome_lido_no_celular_vale_sem_a_api_e_os_produtos_do_video_vao_juntos(monkeypatch):
+    async def nao_chamar(link):
+        raise AssertionError("o nome já veio do celular")
+
+    monkeypatch.setattr(ps.assistente, "produtos_do_link", nao_chamar)
+    assert ps.nome_do_produto({"link": "https://s.shopee.com.br/v", "produto": "Copo"}) == "Copo"
+    assert ps.nomes_dos_produtos({"link": "x", "produtos": ["Copo", "Garrafa"]}) == ["Copo", "Garrafa"]

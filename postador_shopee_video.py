@@ -485,7 +485,13 @@ def ponto_livre(botao, xml):
 
 
 def nome_do_produto(video):
-    """Nome do produto do vídeo pela API de afiliado, a partir do link; "" quando o link não diz."""
+    """
+    Nome do produto do vídeo pela API de afiliado, a partir do link; "" quando o link não
+    diz. Num link de vídeo (Ver Produtos), o nome vem da página do produto no celular e fica
+    em video["produto"].
+    """
+    if (video or {}).get("produto"):
+        return video["produto"]
     if not (video or {}).get("link"):
         return ""
     produtos, _ = asyncio.run(assistente.produtos_do_link(video["link"]))
@@ -551,14 +557,15 @@ def conferir_janela(d, nome, ponto):
     return True, f"produto do vídeo achado pelo nome; Adicionar tocado em {ponto}; a janela confere"
 
 
-def ia_confere_produto(video, vistos=None):
+def ia_confere_produto(video, vistos=None, avisar=True):
     """
     A IA assiste ao vídeo com o nome do produto do link e diz se é o mesmo produto:
     pega o link errado que vem da fonte antes de qualquer toque. Confere VEZES_DA_IA
     vezes, porque já recusou um vídeo que tinha aceitado antes. Sem confirmação em todas
     (não confere, não respondeu ou o link não diz o produto), a exploração para.
     vistos (lista): recebe o que a IA disse em cada vez, para o Rafael ver no rascunho.
-    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    avisar=False: o produto recusado não vira aviso no privado (nos produtos do Ver
+    Produtos, o recusado só fica de fora). Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     nome = nome_do_produto(video)
     if not nome:
@@ -575,8 +582,9 @@ def ia_confere_produto(video, vistos=None):
         if not isinstance(dados, dict):
             return False, f"a IA não respondeu à conferência ({vez}ª vez): parado"
         if dados.get("confere") is not True:
-            avisar_rafael.mandar_texto(f"{AVISO_IA}\n\nProduto do link: {nome}\nO que a IA viu: "
-                                       f"{str(dados.get('motivo') or '').strip()}")
+            if avisar:
+                avisar_rafael.mandar_texto(f"{AVISO_IA}\n\nProduto do link: {nome}\nO que a IA viu: "
+                                           f"{str(dados.get('motivo') or '').strip()}")
             return False, f"a IA viu outro produto no vídeo ({vez}ª vez): parado (aviso no privado)"
         if vistos is not None:
             vistos.append(str(dados.get("motivo") or "").strip())
@@ -629,7 +637,17 @@ def curtir(d, video):
     ok, resultado, tela = abrir_pagina_completa(d, video)
     if not ok:
         return False, resultado
+    return curtir_na_pagina(d, tela)
+
+
+def curtir_na_pagina(d, tela):
+    """
+    Curte o produto da página que está aberta, com o coração já na tela: já curtido
+    (buttonItemLiked), segue sem tocar, porque o toque descurtiria.
+    """
     lista = elementos(tela)
+    if not tem_coracao(lista):
+        return False, "o coração não está na página do produto: nada curtido"
     if any(el["id"] == "buttonItemLiked" for el in lista):
         return True, "o produto já estava curtido: segui sem tocar no coração"
     coracao = next(el for el in lista if el["id"] == "buttonItemLike")
@@ -640,19 +658,90 @@ def curtir(d, video):
     return True, "produto curtido"
 
 
+def nomes_dos_produtos(video):
+    """
+    Os produtos que vão no post: os do Ver Produtos que a IA confirmou (video["produtos"])
+    ou o do link.
+    """
+    if (video or {}).get("produtos"):
+        return list(video["produtos"])
+    nome = nome_do_produto(video)
+    return [nome] if nome else []
+
+
 def conferir_tela_final(d, video):
     """
-    Na tela final, antes de Rascunhos (e, no robô pronto, de Postar): o único produto
-    anexado tem de ser o do vídeo. Diferente, a mais ou nenhum: não segue e avisa.
+    Na tela final, antes de Rascunhos (e, no robô pronto, de Postar): os produtos anexados
+    têm de ser os do vídeo, um para um (o do link, ou os do Ver Produtos que a IA
+    confirmou). Diferente, a mais, a menos ou nenhum: não segue e avisa.
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
-    nome = nome_do_produto(video)
+    nomes = nomes_dos_produtos(video)
     anexados = [el["texto"] for el in elementos(d.dump_hierarchy()) if el["id"] == "tv_product_title"]
-    if nome and len(anexados) == 1 and mesmo_produto(anexados[0], nome):
-        return True, "tela final confere: o produto anexado é o do vídeo"
-    avisar_rafael.mandar_texto(f"{AVISO_TELA_FINAL}\n\nProduto do vídeo: {nome or 'o link não diz'}")
-    return False, (f"tela final com {len(anexados)} produto(s) anexado(s) que não confere(m) com o do vídeo: "
-                   "nada salvo (aviso no privado)")
+    sobrando = list(anexados)
+    for nome in nomes:
+        par = next((anexado for anexado in sobrando if mesmo_produto(anexado, nome)), None)
+        if par is None:
+            break
+        sobrando.remove(par)
+    else:
+        if nomes and not sobrando:
+            return True, (f"tela final confere: os {len(nomes)} produtos anexados são os do vídeo" if len(nomes) > 1
+                          else "tela final confere: o produto anexado é o do vídeo")
+    avisar_rafael.mandar_texto(f"{AVISO_TELA_FINAL}\n\nProduto(s) do vídeo: {'; '.join(nomes) or 'o link não diz'}")
+    return False, (f"tela final com {len(anexados)} produto(s) anexado(s) que não confere(m) com o(s) "
+                   f"{len(nomes)} do vídeo: nada salvo (aviso no privado)")
+
+
+# --- Link de vídeo: o Ver Produtos (mapeado no Motorola em 23/10/2026) ---
+# O link abre o player do vídeo (Live e Vídeo) com "Ver Produtos (N)"; o toque abre, por
+# cima, a lista com os produtos que o criador vinculou ao vídeo e, depois de "Ver Mais" e
+# "Você Também Pode Gostar", recomendações da Shopee, que não são do vídeo. O toque no nome
+# de um produto abre a página dele (HalfPdpActivity), com o coração e o nome no id
+# labelProductPageProductName. Vídeo apagado: "Este vídeo foi removido".
+FIM_DOS_VINCULADOS = ("ver mais", "você também pode gostar")
+
+
+def video_removido(xml):
+    """O link abriu o aviso de vídeo removido?"""
+    return any(_normal(el["texto"]).startswith("este vídeo foi removido") for el in elementos(xml))
+
+
+def _texto_de_nome(texto):
+    """Texto que pode ser o nome do produto num cartão (não preço, desconto, nota nem botão)."""
+    normal = _normal(texto)
+    return bool(normal) and not (normal.startswith("r$") or normal[0].isdigit() or normal[0] in "-+#"
+                                 or texto_proibido(normal) or normal == "apenas vídeo")
+
+
+def produtos_vinculados(xml):
+    """
+    Onde tocar para abrir cada produto que o criador vinculou ao vídeo, na lista do Ver
+    Produtos, de cima para baixo: o nome (o texto mais longo) de cada cartão abaixo do
+    título e acima de "Ver Mais" e de "Você Também Pode Gostar". Ponto sobre um botão de
+    comprar fica de fora.
+    """
+    lista = elementos(xml)
+    topo = max((el["caixa"][3] for el in lista if _normal(el["texto"]).startswith("ver produtos")), default=0)
+    fim = min((el["caixa"][1] for el in lista if _normal(el["texto"]).startswith(FIM_DOS_VINCULADOS)), default=10 ** 6)
+    cartoes = sorted((el for el in lista if el["clicavel"] and el["caixa"][1] >= topo and el["caixa"][3] <= fim
+                      and el["caixa"][2] - el["caixa"][0] >= 800 and 150 <= el["caixa"][3] - el["caixa"][1] <= 500),
+                     key=lambda el: el["caixa"][1])
+    pontos = []
+    for cartao in cartoes:
+        nomes = [el for el in lista if el["texto"] and _texto_de_nome(el["texto"]) and el is not cartao
+                 and _dentro(_centro(el), cartao["caixa"])]
+        if not nomes:
+            continue
+        x, y = _centro(max(nomes, key=lambda el: len(el["texto"])))
+        if not proibido_no_ponto(xml, x, y):
+            pontos.append((x, y))
+    return pontos
+
+
+def nome_na_pagina_do_produto(xml):
+    """O nome do produto na página dele (labelProductPageProductName); "" sem ele."""
+    return next((el["texto"].strip() for el in elementos(xml) if el["id"] == "labelProductPageProductName"), "")
 
 
 def toca_em_rascunhos(xml, x, y):
