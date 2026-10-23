@@ -416,6 +416,44 @@ def test_verificacao_e_preparar_1_agora_nao_repetem(monkeypatch, avisos):
     assert robo.rodada(d=Intocavel(), agora=agora) == "nada a fazer agora"
 
 
+def test_video_sem_oferta_de_afiliado_fica_de_lado_e_o_proximo_vira_rascunho(monkeypatch, avisos):
+    # Investigação de 23/10: o vídeo em que "o link não diz o produto" é de um produto sem
+    # oferta de afiliado (não paga comissão). Escolha do Rafael: pular na hora, sem gastar
+    # a tentativa do horário, e seguir com o próximo vídeo na mesma rodada.
+    _fonte(monkeypatch)
+    with open("archive/sem_oferta.mp4", "wb") as f:
+        f.write(b"video")
+    inserir("INSERT INTO fila_autorais VALUES (?, ?, ?, ?)", "b2", "archive/sem_oferta.mp4",
+            "Copo 🥤\nhttps://s.shopee.com.br/semoferta", "2026-10-22 10:00:00")
+
+    async def produtos_do_link(link):
+        if "semoferta" in link:
+            return [], link
+        return [{"nome": VESTIDO, "preco": 59.9, "comissao": 10.0}], link
+
+    monkeypatch.setattr(robo.assistente, "produtos_do_link", produtos_do_link)
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True, "fonte": "autorais"})
+    assert robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert robo.esperando_aprovacao()[0]["id_video"] == "a1"
+    pulado = robo.listar("pulado")[0]
+    assert pulado["id_video"] == "b2" and pulado["motivo"] == robo.SEM_OFERTA
+    assert "Copo" not in " ".join(str(a) for a in avisos)        # o robô nem começou o do copo
+
+
+def test_so_videos_sem_oferta_param_a_rodada_sem_tocar_no_celular(monkeypatch, avisos):
+    _fonte(monkeypatch)
+
+    async def produtos_do_link(link):
+        return [], link
+
+    monkeypatch.setattr(robo.assistente, "produtos_do_link", produtos_do_link)
+    monkeypatch.setattr(robo, "VIDEOS_SEM_OFERTA_POR_RODADA", 1)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    resultado = robo.rodada(d=Intocavel(), agora=momento("2026-10-22 23:59"))
+    assert resultado == "os próximos 1 vídeos da fonte são de produtos sem oferta de afiliado"
+    assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 23:59"))["repetir"] is True
+
+
 def test_violacao_pula_o_video(monkeypatch, avisos):
     _fonte(monkeypatch, violacao=True)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
