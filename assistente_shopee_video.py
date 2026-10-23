@@ -182,6 +182,22 @@ def _candidatos(fonte):
     return candidatos
 
 
+def candidatos_nao_usados(fonte):
+    """
+    (id, arquivo, link, legenda) dos vídeos da fonte que nem o assistente mandou nem o robô
+    automático usou, do mais novo para o mais velho (para o explorar e o investigar_robo).
+    """
+    with db.conexao() as con:
+        _criar_tabela(con)
+        usados = {linha[0] for linha in con.execute("SELECT id_unico FROM shopee_video_enviados")}
+        try:
+            usados |= {linha[0] for linha in con.execute("SELECT id_video FROM shopee_video_rascunhos")}
+        except Exception:
+            pass    # o robô automático ainda não criou a tabela dele
+    return [candidato for candidato in _candidatos(fonte if fonte in FONTES else FONTE_PADRAO)
+            if candidato[0] not in usados]
+
+
 def proximo_video(fonte=FONTE_PADRAO):
     """
     {"id", "arquivo", "link", "nome"} do vídeo mais novo da fonte que ainda tem o

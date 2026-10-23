@@ -1034,8 +1034,10 @@ def test_video_link_de_video_escolhe_o_que_abre_um_video(monkeypatch):
     async def converter(link):
         return destinos[link]
 
+    candidatos.append(("viral:3", "archive/b.mp4", "https://s.shopee.com.br/video", ""))
     monkeypatch.setattr(ps.assistente, "_candidatos", lambda fonte: candidatos)
     monkeypatch.setattr(ps, "link_para_converter", converter)
+    ps.assistente.registrar("viral:2", "enviado")          # já mandado pelo assistente: fica de fora
     video = ps.video_do_teste(novo=True, de_video=True)
-    assert video["id"] == "viral:2" and ps.db.ler_config(ps.CHAVE_TESTE)["id"] == "viral:2"
+    assert video["id"] == "viral:3" and ps.db.ler_config(ps.CHAVE_TESTE)["id"] == "viral:3"
     assert ps.separar_passos("video:link-de-video") == [("video", "link-de-video")]
