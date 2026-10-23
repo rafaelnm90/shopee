@@ -297,18 +297,27 @@ AVISO_VERIFICACAO = "\n== verificação na tela: parado; o Rafael resolve com a 
 
 
 # Botões que tocar e xy nunca tocam: o que publica o vídeo (só o passo postar chega nele) e
-# os de comprar da página do produto (Compre agora, carrinho e chat, embaixo). "Postar
-# vídeo" não entra: só abre a câmera. Postar: DECISOES.md, Shopee Vídeo.
+# os de comprar (Compre agora, carrinho e chat na página do produto; "Comprar com cupom"
+# no player de um vídeo, visto no Motorola em 23/10/2026): todo texto que começa com
+# "comprar" ou "compre". "Postar vídeo" não entra: só abre a câmera. Postar: DECISOES.md,
+# Shopee Vídeo.
 TEXTOS_PROIBIDOS = frozenset({"postar", "compre agora", "comprar agora", "adicionar ao carrinho"})
+COMECOS_PROIBIDOS = ("comprar", "compre")
 IDS_PROIBIDOS = frozenset({"btn_post", "buttonProductBuyNow", "buttonProductAddCart", "buttonProductChatNow"})
 RECUSA = "recusado: a exploração nunca toca em Postar nem nos botões de comprar"
+
+
+def texto_proibido(texto):
+    """O texto é de um botão que o robô nunca toca (Postar ou de comprar)?"""
+    normal = _normal(texto)
+    return normal in TEXTOS_PROIBIDOS or any(normal == c or normal.startswith(c + " ") for c in COMECOS_PROIBIDOS)
 
 
 def eh_alvo_proibido(alvo):
     """O alvo de um tocar (texto ou @id) é um dos botões proibidos?"""
     if alvo.startswith("@"):
         return alvo[1:] in IDS_PROIBIDOS
-    return _normal(alvo) in TEXTOS_PROIBIDOS
+    return texto_proibido(alvo)
 
 
 def proibido_no_ponto(xml, x, y):
@@ -316,8 +325,7 @@ def proibido_no_ponto(xml, x, y):
     for el in elementos(xml):
         x1, y1, x2, y2 = el["caixa"]
         if x1 <= x <= x2 and y1 <= y <= y2 and (
-                el["id"] in IDS_PROIBIDOS
-                or any(_normal(el[campo]) in TEXTOS_PROIBIDOS for campo in ("texto", "descricao"))):
+                el["id"] in IDS_PROIBIDOS or any(texto_proibido(el[campo]) for campo in ("texto", "descricao"))):
             return True
     return False
 
