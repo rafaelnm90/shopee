@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       video:
-        description: "Código do vídeo (o que vem depois de share-video/ no link)"
+        description: "Código do vídeo (o que vem depois de share-video/ no link) ou curto:CÓDIGO do link br.shp.ee/CÓDIGO"
         required: true
         type: string
 
