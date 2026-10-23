@@ -39,6 +39,7 @@ import json
 import logging
 import os
 import random
+import re
 import shutil
 import sys
 import time
@@ -734,6 +735,9 @@ def nome_na_galeria(ident):
     return f"robo_shopee_video_{ident}.mp4"
 
 
+ARQUIVO_NO_SERVIDOR = re.compile(r"^(\d+)\.(?:mp4|png)$")
+
+
 # --- Os rascunhos no app ---
 
 def abrir_lista_de_rascunhos(d):
@@ -814,7 +818,6 @@ def publicar(d, rascunho, agora=None):
     if rascunho["comentario"]:
         avisar(ps.AVISO_COMENTARIO)
         avisar(rascunho["comentario"])
-    _limpar_galeria(d, rascunho)
     return "rascunho aprovado postado"
 
 
@@ -896,18 +899,38 @@ def apagar_do_app(d, rascunho):
         raise Parada("a confirmação de excluir não apareceu")
     tocar(d, "Confirmar", 6)
     atualizar(rascunho["id"], estado="apagado")
-    _limpar_galeria(d, rascunho)
     return "rascunho recusado apagado"
 
 
-def _limpar_galeria(d, rascunho):
-    """O vídeo do rascunho sai da galeria do celular quando não é mais preciso."""
-    try:
-        caminho = f"{ps.GALERIA}/{nome_na_galeria(rascunho['id'])}"
-        d.shell(["rm", "-f", caminho])
-        d.shell(["am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", "file://" + caminho])
-    except Exception as e:
-        logger.warning(f"⚠️ [Robô Shopee Vídeo] Vídeo não saiu da galeria: {type(e).__name__}")
+def faxina_dos_arquivos(d):
+    """
+    O vídeo e o print de cada rascunho são a memória só deste robô, para aquele rascunho:
+    ficam no servidor e na galeria do celular enquanto ele espera a aprovação ou a vez de
+    ir ao ar, e saem depois de usados (postado, apagado do app, ou o preparo que parou no
+    meio). Do rascunho fica só a linha no banco, que impede o mesmo vídeo de voltar. Roda
+    no fim de cada rodada que mexeu no celular, ainda dentro da trava: nenhum rascunho
+    está sendo preparado ao mesmo tempo. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    guardar = {rascunho["id"] for rascunho in listar(*NO_APP)}
+    usados = {}
+    for nome in os.listdir(PASTA_RASCUNHOS) if os.path.isdir(PASTA_RASCUNHOS) else []:
+        achado = ARQUIVO_NO_SERVIDOR.match(nome)
+        if achado and int(achado.group(1)) not in guardar:
+            usados.setdefault(int(achado.group(1)), []).append(os.path.join(PASTA_RASCUNHOS, nome))
+    for ident, arquivos in sorted(usados.items()):
+        # A cópia do servidor sai só depois da galeria: é ela que lembra o que falta tirar
+        # do celular, se ele cair no meio.
+        try:
+            caminho = f"{ps.GALERIA}/{nome_na_galeria(ident)}"
+            d.shell(["rm", "-f", caminho])
+            d.shell(["am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
+                     "-d", "file://" + caminho])
+            for arquivo in arquivos:
+                os.remove(arquivo)
+        except Exception as e:
+            logger.warning(f"⚠️ [Robô Shopee Vídeo] Vídeo usado não saiu do celular ou do servidor: "
+                           f"{type(e).__name__}")
+            return
 
 
 # --- Treino ---
@@ -1028,35 +1051,43 @@ def rodada(treino=False, preparar=False, d=None, agora=None):
             return "nada a fazer agora"
         d = d or ps.conectar(celular=True)
         try:
-            if acao == "treino":
-                return treinar(d, agora)
-            if acao == "apagar":
-                return apagar_do_app(d, pegar(ident))
-            if acao == "postar":
-                return publicar(d, pegar(ident), agora)
-            resultado = preparar_rascunho(d, config, agora)
-            if resultado == "rascunho salvo":
-                return resultado
-            _repetir_depois(acao, preparar, config, agora)
-            return _resposta(preparar, resultado)
-        except Verificacao:
-            logger.warning("⚠️ [Robô Shopee Vídeo] Verificação da Shopee na tela: parado.")
-            av.abrir_tela(celular=True, verificacao=True)
-            return f"{acao}: verificação na tela; parado"
-        except Parada as e:
-            if acao in ("postar", "apagar"):
-                # Não insiste: o Rafael decide de novo pelo botão.
-                atualizar(ident, estado="rascunho", postar_em=None, motivo=e.motivo)
-                avisar(f"⚠️ Robô da Shopee Vídeo: não consegui {'postar' if acao == 'postar' else 'apagar'} "
-                       f"o rascunho ({e.motivo}). Não toquei em mais nada; ele voltou para Rascunhos do Robô 📝.")
-            _repetir_depois(acao, preparar, config, agora)
-            return _resposta(preparar, f"{acao}: parado ({e.motivo})")
-        except Exception as e:
-            # Erro que ninguém previu: a rodada termina com o tipo dele, e o celular fica
-            # para a próxima rodada voltar ao início.
-            logger.exception(f"❌ [Robô Shopee Vídeo] Erro na rodada ({acao}): {type(e).__name__}")
-            _repetir_depois(acao, preparar, config, agora)
-            return _resposta(preparar, f"{acao}: erro {type(e).__name__}")
+            return _agir(d, acao, ident, preparar, config, agora)
+        finally:
+            faxina_dos_arquivos(d)
+
+
+def _agir(d, acao, ident, preparar, config, agora):
+    """A ação da rodada no celular, já dentro da trava, com o que fazer quando ela para."""
+    try:
+        if acao == "treino":
+            return treinar(d, agora)
+        if acao == "apagar":
+            return apagar_do_app(d, pegar(ident))
+        if acao == "postar":
+            return publicar(d, pegar(ident), agora)
+        resultado = preparar_rascunho(d, config, agora)
+        if resultado == "rascunho salvo":
+            return resultado
+        _repetir_depois(acao, preparar, config, agora)
+        return _resposta(preparar, resultado)
+    except Verificacao:
+        logger.warning("⚠️ [Robô Shopee Vídeo] Verificação da Shopee na tela: parado.")
+        av.abrir_tela(celular=True, verificacao=True)
+        return f"{acao}: verificação na tela; parado"
+    except Parada as e:
+        if acao in ("postar", "apagar"):
+            # Não insiste: o Rafael decide de novo pelo botão.
+            atualizar(ident, estado="rascunho", postar_em=None, motivo=e.motivo)
+            avisar(f"⚠️ Robô da Shopee Vídeo: não consegui {'postar' if acao == 'postar' else 'apagar'} "
+                   f"o rascunho ({e.motivo}). Não toquei em mais nada; ele voltou para Rascunhos do Robô 📝.")
+        _repetir_depois(acao, preparar, config, agora)
+        return _resposta(preparar, f"{acao}: parado ({e.motivo})")
+    except Exception as e:
+        # Erro que ninguém previu: a rodada termina com o tipo dele, e o celular fica
+        # para a próxima rodada voltar ao início.
+        logger.exception(f"❌ [Robô Shopee Vídeo] Erro na rodada ({acao}): {type(e).__name__}")
+        _repetir_depois(acao, preparar, config, agora)
+        return _resposta(preparar, f"{acao}: erro {type(e).__name__}")
 
 
 def _repetir_depois(acao, preparar, config, agora=None):
