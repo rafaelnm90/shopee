@@ -61,3 +61,10 @@ def test_nenhum_arquivo_tem_a_propria_receita_de_link_da_shopee():
         if re.search(r"s\\\.shopee\\\.com\\\.br|shp\\\.ee|^def extrair_link_shopee", texto, re.MULTILINE):
             copias.append(os.path.basename(arquivo))
     assert copias == []
+
+
+def test_link_qualquer_da_shopee_pega_o_subdominio_do_video():
+    texto = "Veja no Shopee Vídeo: https://sv.shopee.com.br/share-video/AbC?x=1 e compre"
+    assert ls.primeiro_link(texto, ls.PADRAO_LINK_QUALQUER) == "https://sv.shopee.com.br/share-video/AbC?x=1"
+    assert ls.primeiro_link("s.shopee.com.br/Xy", ls.PADRAO_LINK_QUALQUER) == "https://s.shopee.com.br/Xy"
+    assert ls.primeiro_link("https://exemplo.com/x", ls.PADRAO_LINK_QUALQUER) is None

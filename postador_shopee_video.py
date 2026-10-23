@@ -83,6 +83,7 @@ import assistente_shopee_video as assistente
 import avisar_rafael
 import celular_robo
 import db
+import links_shopee
 from api_shopee import link_para_converter, tipo_de_link
 from fuso import fuso_horario
 
@@ -662,13 +663,17 @@ def por_na_galeria(d, arquivo, nome=NOME_NA_GALERIA):
     return nome in getattr(lista, "output", "")
 
 
-def link_copiado(d):
-    """O link da Shopee que está copiado no celular (Copiar link do post); "" sem ele."""
+def texto_copiado(d):
+    """O que está copiado no celular; "" se nada ou se o Android não deixou ler."""
     try:
-        copiado = (d.clipboard or "").strip()
+        return (d.clipboard or "").strip()
     except Exception:
         return ""
-    return copiado if copiado.startswith("http") and "shopee" in copiado.casefold() else ""
+
+
+def link_copiado(d):
+    """O link da Shopee que está copiado no celular (Copiar link do post); "" sem ele."""
+    return links_shopee.primeiro_link(texto_copiado(d), links_shopee.PADRAO_LINK_QUALQUER) or ""
 
 
 def separar_passos(texto):
@@ -759,9 +764,11 @@ def fazer_passo(d, nome, argumento):
         return ((True, "vídeo na galeria") if por_na_galeria(d, video["arquivo"])
                 else (False, "o vídeo não apareceu na galeria"))
     if nome == "copiado":
-        copiado = link_copiado(d)
-        return ((True, f"link da Shopee copiado ({len(copiado)} caracteres)") if copiado
-                else (False, "o que está copiado não é um link da Shopee"))
+        texto, link = texto_copiado(d), link_copiado(d)
+        if link:
+            return True, f"link da Shopee copiado ({len(link)} caracteres, num texto de {len(texto)})"
+        return False, ("nada copiado, ou o Android não deixou ler" if not texto
+                       else f"o copiado ({len(texto)} caracteres) não tem link da Shopee")
     if nome == "print":
         legenda = LEGENDA_PRINT_POSTAR if argumento == "postar" else LEGENDA_PRINT
         return ((True, "print mandado no privado") if mandar_print(d, legenda)

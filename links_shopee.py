@@ -19,6 +19,9 @@ _HOSTS = "|".join(re.escape(host) for host in ENCURTADORES)
 PADRAO_LINK_CURTO = re.compile(rf"(?:https?://)?(?:{_HOSTS})/[^\s<]+", re.IGNORECASE)
 # Curto ou do próprio site (shopee.com.br/...), para quem cola o link do produto.
 PADRAO_LINK_SHOPEE = re.compile(rf"(?:https?://)?(?:{_HOSTS}|shopee\.com\.br)/[^\s<]+", re.IGNORECASE)
+# Qualquer endereço da Shopee, também com subdomínio (o do vídeo, sv.shopee.com.br): o
+# link que o Copiar link de um post da Shopee Vídeo põe no celular, às vezes com texto antes.
+PADRAO_LINK_QUALQUER = re.compile(rf"(?:https?://)?(?:[\w-]+\.)*(?:{_HOSTS}|shopee\.com\.br)/[^\s<]+", re.IGNORECASE)
 # O código do link curto (s.shopee.com.br/<código>), que serve de identidade do link.
 _PADRAO_CODIGO = re.compile(rf"(?:{_HOSTS})/([A-Za-z0-9]+)", re.IGNORECASE)
 
