@@ -40,6 +40,15 @@ MAXIMO_CAMINHOS = 40
 MAXIMO_SCRIPTS = 30
 MAXIMO_APIS = 80
 TRECHO = 300
+# Depois da chamada vêm os parâmetros e os cabeçalhos que ela manda: mais código.
+TRECHO_DEPOIS = 1500
+# Marcas, nos scripts públicos da página, de cabeçalhos e verificações contra robôs da
+# Shopee e de cabeçalhos comuns da API. Só a contagem sai no log: diz se a chamada do
+# vídeo depende de uma assinatura contra robôs (que o Baixador não fura) ou só de
+# parâmetros comuns.
+MARCAS_DE_SEGURANCA = ("af-ac-enc-dat", "af-ac-enc-sz-token", "x-sap-ri", "x-sap-sec", "x-sap-access",
+                       "x-csrftoken", "csrftoken", "x-api-source", "x-shopee-language", "x-requested-with",
+                       "withCredentials", "SPC_", "captcha", "antifraud", "anti_fraud", "risk_token")
 # A API que a página de compartilhamento chama para buscar o vídeo (achada em 23/10/2026).
 API_DO_VIDEO = "https://sv.shopee.com.br/api/v2/timeline/single"
 # Caminho de API dentro de um script: "/api/..." ou "https://.../api/...", com letras,
@@ -166,14 +175,26 @@ def descrever_pagina(html):
 
 def trechos_da_api(codigo, api):
     """Os pedaços do script em volta de cada chamada da API: mostram os parâmetros."""
-    return [codigo[max(0, i - TRECHO):i + len(api) + TRECHO]
+    return [codigo[max(0, i - TRECHO):i + len(api) + TRECHO_DEPOIS]
             for i in [m.start() for m in re.finditer(re.escape(api), codigo or "")][:3]]
+
+
+def marcas_de_seguranca(codigos):
+    """marca → (vezes, scripts em que aparece), só das marcas que aparecem."""
+    achadas = {}
+    for nome, codigo in codigos.items():
+        for marca in MARCAS_DE_SEGURANCA:
+            vezes = (codigo or "").count(marca)
+            if vezes:
+                total, onde = achadas.get(marca, (0, []))
+                achadas[marca] = (total + vezes, onde + [nome])
+    return achadas
 
 
 async def procurar_apis(sessao, html, base):
     """Lê os scripts públicos da página e lista os caminhos de API que eles chamam."""
     print("== Scripts da página e as APIs que eles chamam")
-    apis, codigos = set(), []
+    apis, codigos, todos = set(), [], {}
     scripts = scripts_da_pagina(html, base)
     print(f"scripts com endereço: {len(scripts)}")
     for endereco in scripts[:MAXIMO_SCRIPTS]:
@@ -184,6 +205,7 @@ async def procurar_apis(sessao, html, base):
             print(f"   {forma_do_endereco(endereco)}: não abriu ({type(e).__name__})")
             continue
         encontrados = apis_no_script(codigo)
+        todos[urllib.parse.urlparse(endereco).path.rsplit("/", 1)[-1]] = codigo
         print(f"   {urllib.parse.urlparse(endereco).netloc}{urllib.parse.urlparse(endereco).path}: "
               f"{len(codigo)} caracteres, {len(encontrados)} API(s)")
         apis |= encontrados
@@ -196,6 +218,12 @@ async def procurar_apis(sessao, html, base):
         for codigo in codigos:
             for trecho in trechos_da_api(codigo, api):
                 print(f"      trecho: {trecho}")
+    print("== Cabeçalhos e verificações contra robôs nos scripts")
+    achadas = marcas_de_seguranca(todos)
+    if not achadas:
+        print("   nenhuma marca")
+    for marca, (vezes, onde) in sorted(achadas.items()):
+        print(f"   {marca}: {vezes} vez(es) em {', '.join(onde[:4])}")
 
 
 async def testar_api(sessao, id_video):
