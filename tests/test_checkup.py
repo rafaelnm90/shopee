@@ -308,3 +308,17 @@ def test_parceiros_produto_repetido_entre_parceiros_e_com_a_conta_principal():
                                                  "data_captura": "2026-10-23 08:00:00"}]})
     r = checkup.parceiros_repetidos(AGORA)
     assert r == {"capturas": 3, "entre_parceiros": 1, "com_a_conta": 1}
+
+
+def test_verificacao_semanal_do_publico_so_numeros_e_cobra_atraso():
+    db.salvar_config("moderacao_publico", {"quando": "2026-10-23 07:47:00", "mensagens": 900, "de_membros": 120,
+                                           "suspeitas": 2, "por_regra": {"golpe ou fraude": 2}})
+    p = checkup.verificacao_do_publico(AGORA)
+    vazio = {"ativo": False, "vencidos": 0, "salvos": 0, "ruins": []}
+    pontos = checkup.pontos_de_atencao([], {}, {}, vazio, {}, ("x", 1.0, 1), AGORA, {}, {}, None, {}, None, p)
+    assert pontos == ["Grupo Público: 2 mensagem(ns) suspeita(s) na verificação semanal (o Rafael recebeu no privado)"]
+    p = checkup.verificacao_do_publico(AGORA + timedelta(days=9))
+    pontos = checkup.pontos_de_atencao([], {}, {}, vazio, {}, ("x", 1.0, 1), AGORA, {}, {}, None, {}, None, p)
+    assert pontos == ["Grupo Público: a verificação semanal não roda há 10 dias"]
+    db.salvar_config("moderacao_publico", {})
+    assert checkup.verificacao_do_publico(AGORA) is None

@@ -32,6 +32,7 @@ import faxina_baixador
 import faxina_viral  # vídeos que já não servem saem do Acervo Viral
 import registro_admins  # quem administra os grupos e canais do Rafael, conferido todo dia
 import registro_processos  # cada processo, 3 dias, para o checkup do dia
+import moderacao_publico  # a verificação semanal das mensagens do Grupo Público
 
 # Importar fuso já trava o processo no horário de Brasília.
 from fuso import configurar_logs
@@ -630,6 +631,11 @@ async def main():
     scheduler.add_job(registro_admins.conferir, 'cron', hour=registro_admins.HORA_CONFERENCIA[0],
                       minute=registro_admins.HORA_CONFERENCIA[1], args=[client])
     asyncio.create_task(registro_admins.conferir_se_atrasado(client))
+
+    # Mensagens dos membros do Grupo Público: toda segunda de manhã, só avisa o Rafael.
+    # Decisão do Rafael: DECISOES.md, Trabalho com o Claude.
+    scheduler.add_job(moderacao_publico.conferir_semana, 'cron', day_of_week=moderacao_publico.DIA_DA_SEMANA,
+                      hour=moderacao_publico.HORA[0], minute=moderacao_publico.HORA[1], args=[client])
     
     scheduler.start()
     logger.info("🤖 Sistema automático rodando. Pressione Ctrl+C para parar.")
