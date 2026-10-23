@@ -574,7 +574,7 @@ def _preparar(d, ident, video, fonte):
     tocar(d, "@et_caption", 3)
     ps.escrever(d, textos["titulo"])
     pausa(3)
-    na_tela = legenda_na_tela(tela(d))
+    na_tela = ps.legenda_do_campo(d)
     if not mesma_legenda(na_tela, textos["titulo"]):
         raise Parada(f"o título não ficou na legenda ({ps.comparar_legenda(na_tela, textos['titulo'])})")
     tocar(d, "@tv_right", 3)
@@ -647,8 +647,8 @@ def abrir_rascunho(d, rascunho):
     d.click(*ps._centro(quadros[posicao]))
     pausa(10)
     seguir(d, [("@tv_compress", 10, "@et_caption")])
-    xml = tela(d)
-    if not mesma_legenda(legenda_na_tela(xml), rascunho["titulo"]):
+    tela(d)
+    if not mesma_legenda(ps.legenda_do_campo(d), rascunho["titulo"]):
         raise Parada("o rascunho aberto não tem o título do aprovado")
     _conferir(ps.conferir_tela_final(d, video_do_rascunho(rascunho)), do_video=False)
 

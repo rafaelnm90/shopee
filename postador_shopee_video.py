@@ -695,8 +695,20 @@ def texto_copiado(d):
 
 
 def legenda_na_tela(xml):
-    """O texto do campo da legenda (@et_caption) na tela final; "" sem ele."""
+    """O texto do campo da legenda (@et_caption) no retrato da tela; "" sem ele."""
     return next((el["texto"] for el in elementos(xml) if el["id"] == "et_caption"), "")
+
+
+def legenda_do_campo(d):
+    """
+    O texto do campo da legenda lido direto do campo (get_text do uiautomator2). O retrato
+    da tela (XML) pode trocar cada metade de um emoji de fora do plano básico (💡, 👗) por
+    "." e fazer um título certo parecer errado. Sem o campo, lê do retrato.
+    """
+    campo = d(resourceId=f"{PACOTE}:id/et_caption")
+    if campo.exists:
+        return campo.get_text() or ""
+    return legenda_na_tela(d.dump_hierarchy())
 
 
 def _o_que_conta(texto):
@@ -825,7 +837,9 @@ def fazer_passo(d, nome, argumento):
         guardado = db.ler_config(CHAVE_TESTE, {}) or {}
         tela = d.dump_hierarchy()
         contador = next((el["texto"] for el in elementos(tela) if el["id"] == "tv_content_num"), "")
-        return True, comparar_legenda(legenda_na_tela(tela), guardado.get("titulo") or "") + (
+        titulo = guardado.get("titulo") or ""
+        return True, (f"pelo campo: {comparar_legenda(legenda_do_campo(d), titulo)} | pelo retrato da tela: "
+                      f"{comparar_legenda(legenda_na_tela(tela), titulo)}") + (
             f"; contador do app: {contador}" if re.fullmatch(r"[\d/ ]+", contador or "") else "")
     if nome == "copiado":
         texto, link = texto_copiado(d), link_copiado(d)
