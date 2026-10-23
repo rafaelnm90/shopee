@@ -886,3 +886,24 @@ def test_copiado_diz_so_se_e_link_da_shopee_e_o_tamanho():
     assert ps.fazer_passo(Celular(), "copiado", "") == (False, "o copiado (11 caracteres) não tem link da Shopee")
     Celular.clipboard = None
     assert ps.fazer_passo(Celular(), "copiado", "") == (False, "nada copiado, ou o Android não deixou ler")
+
+
+def test_passo_legenda_compara_com_o_titulo_guardado_sem_mostrar_o_texto():
+    titulo = "Lustre Escandinavo de 3 Cores ✨ #iluminacao #casamoderna"
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    ps.db.salvar_config(ps.CHAVE_TESTE, {"titulo": titulo})
+
+    class Celular:
+        legenda = titulo.replace(" #", "\n#")
+
+        def dump_hierarchy(self):
+            return ('<hierarchy><node class="android.widget.EditText" clickable="true" '
+                    f'resource-id="com.shopee.br:id/et_caption" text="{self.legenda}" bounds="[40,300][1040,400]"/>'
+                    '<node class="android.widget.TextView" clickable="false" resource-id="com.shopee.br:id/tv_content_num" '
+                    'text="56/150" bounds="[980,580][1060,620]"/></hierarchy>')
+
+    ok, texto = ps.fazer_passo(Celular(), "legenda", "")
+    assert ok and texto.startswith("a legenda é o título") and "contador do app: 56/150" in texto
+    Celular.legenda = "Outra coisa"
+    ok, texto = ps.fazer_passo(Celular(), "legenda", "")
+    assert ok and "NÃO é o título" in texto and "Lustre" not in texto and "Outra" not in texto

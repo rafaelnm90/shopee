@@ -104,6 +104,8 @@ jobs:
             echo "Rascunhos por estado: ${R:-nenhum}"
             R=$(sqlite3 -readonly -separator ' | ' banco_dados.db "SELECT 'último: ' || estado, 'criado: ' || criado_em, 'origem: ' || COALESCE(fonte, '?') FROM shopee_video_rascunhos ORDER BY id DESC LIMIT 1" 2>/dev/null)
             echo "${R:-nenhum rascunho ainda}"
+            R=$(sqlite3 -readonly banco_dados.db "SELECT 'Última rodada: ' || COALESCE(json_extract(valor, '\$.ultima_rodada_em'), '?') || ' → ' || COALESCE(json_extract(valor, '\$.ultima_rodada'), '?') FROM configuracoes WHERE chave = 'shopee_video_robo'" 2>/dev/null)
+            echo "${R:-Última rodada: ainda não gravada}"
 
             # Faxina do Acervo Viral e registro dos administradores: só estados e números.
             # O nome da conta e os nomes dos admins não saem daqui (o log é público).
