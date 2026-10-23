@@ -1,8 +1,8 @@
 """
 Manda um aviso curto no privado do Rafael pelo bot principal. Usado pelo
-workflow avisar.yml, que o Claude dispara quando uma pergunta dele ao Rafael
-está há muito tempo sem resposta (regra no CLAUDE.md, "Como trabalhamos"). O
-tela_android.py usa o mandar_texto para levar o link da tela do Android, e o
+workflow avisar.yml para o lembrete diário das pendências (as perguntas do
+Claude vão pelo perguntas_rafael.py, que usa o mandar_texto). O tela_android.py
+usa o mandar_texto para levar o link da tela do Android, e o
 postador_shopee_video.py usa o mandar_foto para o print do rascunho.
 
     python3 avisar_rafael.py "assunto da pendência" [link da sessão do Claude]
@@ -48,14 +48,19 @@ def montar_texto(assunto, link=""):
     return texto
 
 
-def mandar_texto(texto):
-    """Manda um texto no privado do Rafael pelo Bot API. Devolve True se o Telegram aceitou."""
+def mandar_texto(texto, html=False):
+    """
+    Manda um texto no privado do Rafael pelo Bot API. Devolve True se o Telegram aceitou.
+    html=True: o texto vem em HTML (negrito, o <code> que copia com um toque).
+    """
     load_dotenv(os.path.join(PASTA, ".env"))
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
         raise RuntimeError("TELEGRAM_TOKEN ausente no .env")
-    dados = urllib.parse.urlencode({"chat_id": admin_id(), "text": texto,
-                                    "disable_web_page_preview": "true"}).encode()
+    campos = {"chat_id": admin_id(), "text": texto, "disable_web_page_preview": "true"}
+    if html:
+        campos["parse_mode"] = "HTML"
+    dados = urllib.parse.urlencode(campos).encode()
     with urllib.request.urlopen(f"https://api.telegram.org/bot{token}/sendMessage", dados, timeout=20) as r:
         return bool(json.loads(r.read().decode()).get("ok"))
 

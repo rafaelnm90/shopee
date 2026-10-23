@@ -31,6 +31,7 @@ import backup_dados
 import db
 import inventario
 import links_shopee
+import perguntas_rafael
 import registro_processos
 import rotas_espelhador
 import rotinas
@@ -674,6 +675,10 @@ def main():
               f"mensagens {publico.get('mensagens', 0)} | de membros {publico.get('de_membros', 0)} | "
               f"suspeitas {publico.get('suspeitas', 0)} | sem julgamento da IA {publico.get('nao_julgadas', 0)}"
               + (f"\n   {regras}" if regras else ""))
+
+    abertas = [p["codigo"] for p in perguntas_rafael.abertas()]
+    print(f"\n== Perguntas do Claude ao Rafael\nsem resposta: {len(abertas)}"
+          + (f" ({', '.join(abertas)}; o bot lembra de hora em hora)" if abertas else ""))
 
     print("\n== Postagens de hoje")
     filas = postagens_de_hoje(agora)
