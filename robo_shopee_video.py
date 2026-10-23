@@ -11,6 +11,7 @@ minutos tocando no celular, e a IA dele não pode dividir a conexão com a do bo
 
     python3 robo_shopee_video.py --rodada
     python3 robo_shopee_video.py --treino      # o treino na hora (botão Testar Caminho 🧭)
+    python3 robo_shopee_video.py --preparar    # um rascunho na hora (botão Preparar 1 Agora ⚡)
 
 Cada rodada faz no máximo uma coisa, nesta ordem:
 1. o treino da semana, na primeira rodada de segunda-feira: percorre o caminho até a tela
@@ -179,14 +180,21 @@ def treino_da_semana_pendente(agora=None):
 # --- Rascunhos (tabela shopee_video_rascunhos) ---
 
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
-           "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo")
+           "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia")
+# Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
+COLUNAS_NOVAS = ("fonte", "conferencia")
 
 
 def _criar_tabela(con):
     con.execute("CREATE TABLE IF NOT EXISTS shopee_video_rascunhos ("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, id_video TEXT, criado_em TEXT, estado TEXT, "
                 "arquivo TEXT, print TEXT, link TEXT, produtos TEXT, titulo TEXT, comentario TEXT, "
-                "aprovado_em TEXT, postar_em TEXT, postado_em TEXT, link_post TEXT, motivo TEXT)")
+                "aprovado_em TEXT, postar_em TEXT, postado_em TEXT, link_post TEXT, motivo TEXT, "
+                "fonte TEXT, conferencia TEXT)")
+    existentes = {linha[1] for linha in con.execute("PRAGMA table_info(shopee_video_rascunhos)")}
+    for coluna in COLUNAS_NOVAS:
+        if coluna not in existentes:
+            con.execute(f"ALTER TABLE shopee_video_rascunhos ADD COLUMN {coluna} TEXT")
 
 
 def _momento(agora=None):
@@ -536,7 +544,10 @@ def _preparar(d, ident, video, fonte):
     # Antes de tocar no celular, o Rafael sabe qual vídeo e qual produto o robô pegou.
     avisar(f"🤖 Robô da Shopee Vídeo: começando um rascunho.\n\nProduto: {nome}\n"
            f"Vídeo: o mais novo de {assistente.FONTES.get(fonte, fonte)} ainda não usado.")
-    _conferir(ps.ia_confere_produto(video))
+    vistos = []
+    _conferir(ps.ia_confere_produto(video, vistos))
+    # A origem e o que a IA viu ficam no rascunho, para o Rafael validar com isso na mão.
+    atualizar(ident, fonte=fonte, conferencia=json.dumps(vistos, ensure_ascii=False))
     textos = asyncio.run(assistente.textos_do_video(video["arquivo"], video.get("nome") or ""))
     if not textos or not textos["titulo"]:
         raise Parada("a IA não devolveu o título")
@@ -834,13 +845,16 @@ def pausar_por_desconexao(motivo):
            "no bot, toque em Shopee Vídeo 🎬 → Retomar Postagem ▶️. Eu acho o celular sozinho.")
 
 
-def rodada(treino=False, d=None, agora=None):
+def rodada(treino=False, preparar=False, d=None, agora=None):
     """
-    Uma rodada. treino=True é o botão Testar Caminho 🧭: roda o treino na hora, mesmo
-    pausado ou fora do horário (o Rafael pediu agora). Devolve o que aconteceu, numa frase.
+    Uma rodada. treino=True é o botão Testar Caminho 🧭 e preparar=True o Preparar 1
+    Agora ⚡: rodam na hora, mesmo pausado ou fora do horário (o Rafael pediu agora), e o
+    rascunho do Preparar 1 Agora é a mais do plano do dia. Devolve o que aconteceu, numa
+    frase. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     config = ler_config()
-    if not treino:
+    na_hora = treino or preparar
+    if not na_hora:
         if config["robo_pausado"]:
             consumir_horarios(config, agora)
             return "pausado"
@@ -848,17 +862,22 @@ def rodada(treino=False, d=None, agora=None):
             return "fora do Horário do Robô"
     if d is None:
         if av.tela_aberta():
-            return "a tela do celular está aberta no privado do Rafael"
+            return _resposta(preparar, "a tela do celular está aberta no privado do Rafael")
         if not celular_robo.conectado():
             ok, motivo = celular_robo.reconectar_sozinho()
             if not ok:
-                if not treino:
+                if not na_hora:
                     pausar_por_desconexao(motivo)
-                return f"celular desconectado ({motivo})"
+                return _resposta(preparar, f"celular desconectado ({motivo})")
     with celular_robo.trava() as livre:
         if not livre:
-            return "o explorar está tocando no celular"
-        acao, ident = ("treino", None) if treino else (o_que_fazer(config, agora) or (None, None))
+            return _resposta(preparar, "o explorar está tocando no celular")
+        if treino:
+            acao, ident = "treino", None
+        elif preparar:
+            acao, ident = "rascunho", None
+        else:
+            acao, ident = o_que_fazer(config, agora) or (None, None)
         if not acao:
             return "nada a fazer agora"
         d = d or ps.conectar(celular=True)
@@ -869,7 +888,8 @@ def rodada(treino=False, d=None, agora=None):
                 return apagar_do_app(d, pegar(ident))
             if acao == "postar":
                 return publicar(d, pegar(ident), agora)
-            return preparar_rascunho(d, config, agora)
+            resultado = preparar_rascunho(d, config, agora)
+            return resultado if resultado == "rascunho salvo" else _resposta(preparar, resultado)
         except Verificacao:
             logger.warning("⚠️ [Robô Shopee Vídeo] Verificação da Shopee na tela: parado.")
             av.abrir_tela(celular=True, verificacao=True)
@@ -880,16 +900,23 @@ def rodada(treino=False, d=None, agora=None):
                 atualizar(ident, estado="rascunho", postar_em=None, motivo=e.motivo)
                 avisar(f"⚠️ Robô da Shopee Vídeo: não consegui {'postar' if acao == 'postar' else 'apagar'} "
                        f"o rascunho ({e.motivo}). Não toquei em mais nada; ele voltou para Rascunhos do Robô 📝.")
-            return f"{acao}: parado ({e.motivo})"
+            return _resposta(preparar, f"{acao}: parado ({e.motivo})")
+
+
+def _resposta(preparar, resultado):
+    """No Preparar 1 Agora o Rafael espera a resposta: o que impediu o rascunho vai também no privado."""
+    if preparar:
+        avisar(f"⚠️ Robô da Shopee Vídeo: não preparei o rascunho que você pediu ({resultado}).")
+    return resultado
 
 
 def main(argumentos):
     logging.basicConfig(level=os.getenv("NIVEL_LOG", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
-    treino = "--treino" in argumentos
-    if not treino and "--rodada" not in argumentos:
+    treino, preparar = "--treino" in argumentos, "--preparar" in argumentos
+    if not treino and not preparar and "--rodada" not in argumentos:
         print(__doc__)
         return 2
-    resultado = rodada(treino=treino)
+    resultado = rodada(treino=treino, preparar=preparar)
     logger.info(f"🤖 [Robô Shopee Vídeo] {resultado}.")
     return 0
 

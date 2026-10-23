@@ -52,7 +52,7 @@ def test_menu_do_robo_e_como_funciona(bm, Msg, Est):
     assert "O que cada botão faz" in texto and "Testar Caminho 🧭" in texto
     assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu_robo.state
     assert _textos(sv.teclado_robo(sv.ler_config())) == [
-        "Retomar Postagem ▶️", "Rascunhos do Robô 📝", "Rascunhos por Dia 📦", "Horário do Robô 🕗",
+        "Retomar Postagem ▶️", "Rascunhos do Robô 📝", "Preparar 1 Agora ⚡", "Rascunhos por Dia 📦", "Horário do Robô 🕗",
         "Testar Caminho 🧭", "Celular do Robô 📱", "Voltar à Shopee Vídeo 🔙"]
     msg = Msg("Como Funciona ❓")
     rodar(sv.como_funciona_handler(msg, est))
@@ -398,7 +398,7 @@ def test_botoes_vem_antes_das_respostas_de_texto(bm):
     ordem = [h.callback.__name__ for h in sv.router.message.handlers]
     botoes = ("painel_handler", "menu_robo_handler", "menu_assistente_handler", "como_funciona_handler",
               "voltar_ao_robo", "pedir_faixa", "pedir_janela", "pedir_pausa", "enviar_agora_handler",
-              "pedir_fonte", "pedir_pausa_robo", "pedir_faixa_robo", "escolher_tipo_faixa", "pedir_janela_robo", "treino_handler",
+              "pedir_fonte", "pedir_pausa_robo", "pedir_faixa_robo", "escolher_tipo_faixa", "pedir_janela_robo", "treino_handler", "preparar_handler",
               "rascunhos_handler", "aprovar_handler", "pedir_recusa", "proximo_handler")
     respostas = ("confirmar_faixa", "confirmar_janela", "salvar_fonte", "confirmar_com_os_botoes",
                  "confirmar_faixa_robo", "confirmar_janela_robo", "salvar_recusa")
@@ -410,7 +410,7 @@ def test_so_o_admin_usa_o_painel(bm, Msg, Est):
     for handler, texto in ((sv.painel_handler, "Shopee Vídeo 🎬"), (sv.pedir_faixa, "Vídeos por Dia 📦"),
                            (sv.pedir_pausa, "Retomar Robô ▶️"), (sv.enviar_agora_handler, "Enviar 1 Agora 📤"),
                            (sv.pedir_pausa_robo, "Retomar Postagem ▶️"), (sv.rascunhos_handler, "Rascunhos do Robô 📝"),
-                           (sv.treino_handler, "Testar Caminho 🧭"), (sv.aprovar_handler, "Aprovar Rascunho ✅")):
+                           (sv.treino_handler, "Testar Caminho 🧭"), (sv.preparar_handler, "Preparar 1 Agora ⚡"), (sv.aprovar_handler, "Aprovar Rascunho ✅")):
         msg = Msg(texto, user_id=123)
         rodar(handler(msg, Est()))
         assert msg.saidas == [], texto
@@ -493,3 +493,38 @@ def test_fonte_cancelada_nao_muda_nada(bm, Msg, Est):
     est = Est(estado=sv.ShopeeVideoFluxo.aguardando_fonte)
     rodar(bm.cancelar_fluxo_global(Msg("Cancelar ❌"), est))
     assert sv.ler_config()["fonte"] == "autorais"
+
+
+def test_rascunho_mostra_a_origem_e_o_que_a_ia_conferiu(bm):
+    # Escolha do Rafael (23/10): validar cada rascunho também pela origem do vídeo (com o
+    # alerta de vídeo copiado) e pelo que a IA viu nas duas conferências.
+    sv = _painel(bm)
+    rascunho = {"criado_em": "2026-10-23 10:00:00", "titulo": "Lustre", "produtos": ["Lustre Escandinavo"],
+                "link": "https://s.shopee.com.br/x", "motivo": "", "fonte": "viral",
+                "conferencia": '["o vídeo mostra um lustre de 3 cores", "lustre igual ao do link"]'}
+    texto = sv.texto_rascunho(rascunho, 1, 1)
+    assert "Origem do vídeo:</b> Viral (Espião)" in texto and "propriedade intelectual" in texto
+    assert "(2 vezes)" in texto and "1ª: o vídeo mostra um lustre de 3 cores" in texto and "2ª: lustre igual" in texto
+    texto = sv.texto_rascunho(dict(rascunho, fonte="autorais"), 1, 1)
+    assert "Autorais" in texto and "propriedade intelectual" not in texto
+    # Rascunho de antes desta mudança: sem origem nem conferência, o texto continua certo.
+    texto = sv.texto_rascunho(dict(rascunho, fonte=None, conferencia=None), 1, 1)
+    assert "Origem" not in texto and "A IA conferiu" not in texto and "Lustre Escandinavo" in texto
+
+
+def test_preparar_1_agora_roda_o_robo_na_hora(bm, Msg, Est, monkeypatch):
+    sv = _painel(bm)
+    chamadas = []
+
+    async def rodar_robo(*argumentos):
+        chamadas.append(argumentos)
+
+    monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
+    msg = Msg("Preparar 1 Agora ⚡")
+
+    async def tocar():
+        await sv.preparar_handler(msg, Est())
+        await sv.asyncio.sleep(0)
+
+    rodar(tocar())
+    assert chamadas == [("--preparar",)] and "Preparando 1 rascunho" in msg.saidas[0]

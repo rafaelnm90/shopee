@@ -29,6 +29,7 @@ celular de longe (tela_android.py).
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
 import asyncio
+import json
 import logging
 import os
 import re
@@ -292,6 +293,7 @@ BOTAO_RASCUNHOS = "Rascunhos do Robô 📝"
 BOTAO_FAIXA_ROBO = "Rascunhos por Dia 📦"
 BOTAO_HORARIO_ROBO = "Horário do Robô 🕗"
 BOTAO_TREINO = "Testar Caminho 🧭"
+BOTAO_PREPARAR = "Preparar 1 Agora ⚡"
 BOTAO_APROVAR = "Aprovar Rascunho ✅"
 BOTAO_RECUSAR = "Recusar Rascunho ❌"
 BOTAO_PROXIMO = "Próximo Rascunho ⏭️"
@@ -325,11 +327,11 @@ def teclado_robo(config):
     pausa_robo = "Retomar Postagem ▶️" if config["robo_pausado"] else "Pausar Postagem ⏸️"
     return montar_teclado([
         [KeyboardButton(text=pausa_robo), KeyboardButton(text=BOTAO_RASCUNHOS)],
+        [KeyboardButton(text=BOTAO_PREPARAR)],
         [KeyboardButton(text=BOTAO_FAIXA_ROBO), KeyboardButton(text=BOTAO_HORARIO_ROBO)],
         [KeyboardButton(text=BOTAO_TREINO), KeyboardButton(text=BOTAO_CELULAR)],
         [KeyboardButton(text=BOTAO_VOLTAR)],
     ])
-
 
 
 teclado_faixa_ou_fixo = montar_teclado([
@@ -416,6 +418,7 @@ def texto_robo(config, agora=None, celular=None):
         "▶️ <b>Retomar / Pausar Postagem</b>: liga ou pausa o robô. O Retomar acha o Motorola sozinho; "
         "pausado, o assistente volta a mandar no seu privado.\n"
         f"📝 <b>{BOTAO_RASCUNHOS}</b>: aprovar ou recusar os rascunhos, um por um.\n"
+        f"⚡ <b>{BOTAO_PREPARAR}</b>: o robô prepara um rascunho na hora, a mais do dia (mesmo pausado).\n"
         f"📦 <b>{BOTAO_FAIXA_ROBO}</b>: quantos rascunhos ele prepara por dia (uma faixa, sorteada a cada dia).\n"
         f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele pode mexer no celular e postar.\n"
         f"🧭 <b>{BOTAO_TREINO}</b>: confere agora se as telas do app da Shopee continuam iguais "
@@ -694,6 +697,23 @@ async def pedir_janela_robo(message: types.Message, state: FSMContext):
     await state.set_state(ShopeeVideoFluxo.aguardando_janela_robo)
 
 
+@router.message(F.text == BOTAO_PREPARAR, StateFilter("*"))
+async def preparar_handler(message: types.Message, state: FSMContext):
+    """
+    Um rascunho na hora, a mais do plano do dia, mesmo pausado ou fora do Horário do
+    Robô: para testar ou ter mais um. Ele entra em Rascunhos do Robô 📝 como os outros.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    if not _admin(message): return
+    if _rodada.locked():
+        await message.answer("⏳ O robô está no meio de uma rodada no celular. Tente de novo em alguns minutos.")
+        return
+    logger.info("⚡ Shopee Vídeo: Preparar 1 Agora.")
+    await message.answer("⚡ Preparando 1 rascunho agora no Motorola. Em uns 5 a 10 min ele chega em "
+                         f"{BOTAO_RASCUNHOS}, e o robô avisa aqui; se algo impedir, ele diz o quê.")
+    asyncio.create_task(rodar_robo("--preparar"))
+
+
 @router.message(F.text == BOTAO_TREINO, StateFilter("*"))
 async def treino_handler(message: types.Message, state: FSMContext):
     """
@@ -719,15 +739,43 @@ def teclado_rascunho():
                            [KeyboardButton(text=BOTAO_VOLTAR)]])
 
 
+def linhas_da_origem(fonte):
+    """
+    De onde veio o vídeo. Só os Autorais são vídeos próprios: os outros são copiados de
+    outros canais e podem ser removidos por propriedade intelectual (o 1º post do robô,
+    em 18/10/2026, foi). Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    if not fonte:
+        return ""
+    nome = assistente.FONTES.get(fonte, fonte)
+    alerta = ("" if fonte == "autorais" else
+              "\n⚠️ Vídeo copiado de outro canal: pode ser removido por propriedade intelectual.")
+    return f"🎞️ <b>Origem do vídeo:</b> {html_escape(nome)}{alerta}\n\n"
+
+
+def linhas_da_conferencia(conferencia):
+    """O que a IA disse em cada conferência vídeo × produto, para o Rafael julgar também."""
+    try:
+        vistos = json.loads(conferencia or "[]")
+    except ValueError:
+        vistos = []
+    if not vistos:
+        return ""
+    linhas = "\n".join(f"{vez}ª: {html_escape(visto or 'confere (sem motivo)')}" for vez, visto in enumerate(vistos, 1))
+    return f"🤖 <b>A IA conferiu o vídeo com o produto ({len(vistos)} vezes):</b>\n{linhas}\n\n"
+
+
 def texto_rascunho(rascunho, posicao, total):
     produtos = "\n".join(f"• {html_escape(nome)}" for nome in rascunho["produtos"]) or "• ?"
-    aviso = (f"\n⚠️ Da última vez não deu certo: {html_escape(rascunho['motivo'])}\n"
+    aviso = (f"⚠️ Da última vez não deu certo: {html_escape(rascunho['motivo'])}\n\n"
              if rascunho.get("motivo") else "")
     return (f"📝 <b>Rascunho {posicao} de {total}</b> (salvo em {_data_curta(rascunho['criado_em'])})\n\n"
             "📝 <b>Título</b> (o que está na legenda):\n"
             f"<code>{html_escape(rascunho['titulo'] or '')}</code>\n\n"
             f"🛍️ <b>Produto anexado:</b>\n{produtos}\n"
-            f"🔗 {html_escape(rascunho['link'] or '')}\n{aviso}\n"
+            f"🔗 {html_escape(rascunho['link'] or '')}\n\n"
+            f"{linhas_da_origem(rascunho.get('fonte'))}"
+            f"{linhas_da_conferencia(rascunho.get('conferencia'))}{aviso}"
             f"<b>{BOTAO_APROVAR}</b>: o robô posta, um de cada vez, dentro do Horário do Robô.\n"
             f"<b>{BOTAO_RECUSAR}</b>: o robô apaga o rascunho do celular, e o vídeo não volta.")
 
