@@ -64,6 +64,9 @@ PADRAO = {"robo_pausado": True, "robo_limite_min": 1, "robo_limite_max": 2,
           "robo_inicio": ps.HORARIO_DAS_RODADAS[0], "robo_fim": ps.HORARIO_DAS_RODADAS[1]}
 MAXIMO_POR_DIA = 20
 CHAVE_DIA = "shopee_video_robo_dia"
+# Rascunho do plano que não deu certo volta nas rodadas seguintes, até estas vezes a mais
+# por horário. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+TENTATIVAS_A_MAIS = 2
 CHAVE_ESTADO = "shopee_video_robo"
 PASTA_RASCUNHOS = os.path.join(av.PASTA_TRABALHO, "rascunhos")
 # Minutos sorteados entre uma postagem aprovada e a seguinte.
@@ -149,12 +152,30 @@ def consumir_horarios(config, agora=None):
     """
     Marca como feitos os horários que já passaram e diz se havia algum novo. Vários de uma
     vez (robô pausado ou fora do ar) contam como um só: retomar não solta tudo de uma vez.
+    O horário novo ganha as tentativas a mais e tira a repetição do anterior.
     """
     estado = estado_do_dia(config, agora)
     passados = horarios_vencidos(estado, agora)
     if passados <= estado["feitos"]:
         return False
-    estado["feitos"] = passados
+    estado.update(feitos=passados, tentativas=TENTATIVAS_A_MAIS, repetir=False)
+    db.salvar_config(CHAVE_DIA, estado)
+    return True
+
+
+def marcar_para_repetir(config, agora=None):
+    """O rascunho do plano não deu certo: volta na rodada seguinte, se o horário ainda tem tentativa."""
+    estado = estado_do_dia(config, agora)
+    estado["repetir"] = estado.get("tentativas", 0) > 0
+    db.salvar_config(CHAVE_DIA, estado)
+
+
+def repetir_o_que_falhou(config, agora=None):
+    """O rascunho do plano que falhou volta nesta rodada? Gasta uma das tentativas a mais."""
+    estado = estado_do_dia(config, agora)
+    if not estado.get("repetir") or estado.get("tentativas", 0) <= 0:
+        return False
+    estado.update(repetir=False, tentativas=estado["tentativas"] - 1)
     db.salvar_config(CHAVE_DIA, estado)
     return True
 
@@ -301,7 +322,8 @@ def recusar(ident, agora=None):
 def o_que_fazer(config, agora=None):
     """
     A tarefa desta rodada: ("treino", None), ("apagar", id), ("postar", id),
-    ("rascunho", None) ou None. Gasta o horário do plano quando escolhe um rascunho.
+    ("rascunho", None) ou None. Gasta o horário do plano, ou uma tentativa a mais do
+    rascunho que falhou, quando escolhe um rascunho.
     """
     if treino_da_semana_pendente(agora):
         return "treino", None
@@ -312,7 +334,7 @@ def o_que_fazer(config, agora=None):
     prontos = [r for r in listar("aprovado") if r["postar_em"] and r["postar_em"] <= agora_txt]
     if prontos:
         return "postar", min(prontos, key=lambda r: r["postar_em"])["id"]
-    if consumir_horarios(config, agora):
+    if consumir_horarios(config, agora) or repetir_o_que_falhou(config, agora):
         return "rascunho", None
     return None
 
@@ -923,7 +945,10 @@ def rodada(treino=False, preparar=False, d=None, agora=None):
             if acao == "postar":
                 return publicar(d, pegar(ident), agora)
             resultado = preparar_rascunho(d, config, agora)
-            return resultado if resultado == "rascunho salvo" else _resposta(preparar, resultado)
+            if resultado == "rascunho salvo":
+                return resultado
+            _repetir_depois(acao, preparar, config, agora)
+            return _resposta(preparar, resultado)
         except Verificacao:
             logger.warning("⚠️ [Robô Shopee Vídeo] Verificação da Shopee na tela: parado.")
             av.abrir_tela(celular=True, verificacao=True)
@@ -934,12 +959,25 @@ def rodada(treino=False, preparar=False, d=None, agora=None):
                 atualizar(ident, estado="rascunho", postar_em=None, motivo=e.motivo)
                 avisar(f"⚠️ Robô da Shopee Vídeo: não consegui {'postar' if acao == 'postar' else 'apagar'} "
                        f"o rascunho ({e.motivo}). Não toquei em mais nada; ele voltou para Rascunhos do Robô 📝.")
+            _repetir_depois(acao, preparar, config, agora)
             return _resposta(preparar, f"{acao}: parado ({e.motivo})")
         except Exception as e:
             # Erro que ninguém previu: a rodada termina com o tipo dele, e o celular fica
             # para a próxima rodada voltar ao início.
             logger.exception(f"❌ [Robô Shopee Vídeo] Erro na rodada ({acao}): {type(e).__name__}")
+            _repetir_depois(acao, preparar, config, agora)
             return _resposta(preparar, f"{acao}: erro {type(e).__name__}")
+
+
+def _repetir_depois(acao, preparar, config, agora=None):
+    """
+    Rascunho do plano que não deu certo volta na rodada seguinte (até TENTATIVAS_A_MAIS
+    vezes por horário). O Preparar 1 Agora não volta: o Rafael vê o motivo e toca de novo.
+    A Verificação da Shopee não passa por aqui: ela para tudo. Decisão do Rafael:
+    DECISOES.md, Shopee Vídeo.
+    """
+    if acao == "rascunho" and not preparar:
+        marcar_para_repetir(config, agora)
 
 
 def _resposta(preparar, resultado):
