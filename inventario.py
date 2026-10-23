@@ -122,6 +122,26 @@ def banco():
             print(f"   {chave:32} {tamanho_legivel(tamanho or 0):>9}")
 
 
+def classificar_erro(erro, rastro):
+    """
+    (onde, tipo) de uma linha do erros_logs, sem o texto do erro, que pode ter dados:
+    onde é o começo fixo do erro ("enviar_mensagem (", "varredura_origem_loop:") e
+    tipo, a exceção da última linha do rastro (ou a citada no erro).
+    """
+    tipo = "(sem rastro)"
+    for linha in reversed((rastro or "").strip().splitlines()):
+        m = re.match(r"^([A-Za-z_][\w.]*(?:Error|Exception|Wait|Invalid|Forbidden|Timeout)\w*)\b", linha.strip())
+        if m:
+            tipo = m.group(1)
+            break
+    else:
+        m = re.search(r"\b([A-Z]\w+(?:Error|Exception|Wait|Invalid|Forbidden|Timeout)\w*)\b", erro or "")
+        if m:
+            tipo = m.group(1)
+    onde = re.split(r"[ :(]", (erro or "").strip(), 1)[0][:40] or "?"
+    return onde, tipo
+
+
 def erros_registrados():
     """
     O erros_logs por origem e tipo de exceção (a última linha do rastro). O texto
@@ -136,18 +156,7 @@ def erros_registrados():
     corte = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() - 86400))
     grupos = {}
     for quando, origem, erro, rastro in linhas:
-        tipo = "(sem rastro)"
-        for linha in reversed((rastro or "").strip().splitlines()):
-            m = re.match(r"^([A-Za-z_][\w.]*(?:Error|Exception|Wait|Invalid|Forbidden|Timeout)\w*)\b", linha.strip())
-            if m:
-                tipo = m.group(1)
-                break
-        else:
-            m = re.search(r"\b([A-Z]\w+(?:Error|Exception|Wait|Invalid|Forbidden|Timeout)\w*)\b", erro or "")
-            if m:
-                tipo = m.group(1)
-        # De onde: o começo fixo do erro ("enviar_mensagem (", "varredura_origem_loop:").
-        onde = re.split(r"[ :(]", (erro or "").strip(), 1)[0][:40] or "?"
+        onde, tipo = classificar_erro(erro, rastro)
         chave = (origem or "?", onde, tipo)
         total, recentes, ultimo = grupos.get(chave, (0, 0, ""))
         grupos[chave] = (total + 1, recentes + (1 if (quando or "") >= corte else 0), max(ultimo, quando or ""))
@@ -638,10 +647,27 @@ def contas_dos_autorais():
         print(f"   (não deu para ler a origem: {type(e).__name__})")
 
 
+NIVEIS_DO_LOGGER = ("debug", "info", "warning", "error", "exception", "critical")
+
+
 def modelos_de_log():
     """
-    Trechos fixos de cada logger.info/warning/error do código, com arquivo e linha.
-    Um f-string vira o texto fixo com um coringa no lugar de cada variável.
+    Trechos fixos de cada logger.info/warning/error do código, com arquivo, linha e
+    nível. Um f-string vira o texto fixo com um coringa no lugar de cada variável.
+    """
+    def nivel(n):
+        if (isinstance(n.func, ast.Attribute) and n.func.attr in NIVEIS_DO_LOGGER
+                and getattr(n.func.value, "id", "") == "logger"):
+            return n.func.attr
+        return None
+    return modelos_de_chamadas(nivel)
+
+
+def modelos_de_chamadas(rotulo_da_chamada):
+    """
+    Modelos (regex, arquivo:linha, texto fixo, tamanho do fixo, primeiro caractere,
+    rótulo) do primeiro argumento de cada chamada do código a que rotulo_da_chamada(n)
+    dá um rótulo: o nível do logger ou "erro" do registrar_erro_json (checkup.py).
     """
     modelos = []
     for arq in glob.glob(os.path.join(PASTA, "*.py")):
@@ -650,9 +676,10 @@ def modelos_de_log():
         except SyntaxError:
             continue
         for n in ast.walk(arvore):
-            if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
-                    and n.func.attr in ("debug", "info", "warning", "error", "critical")
-                    and getattr(n.func.value, "id", "") == "logger" and n.args):
+            if not (isinstance(n, ast.Call) and n.args):
+                continue
+            rotulo = rotulo_da_chamada(n)
+            if not rotulo:
                 continue
             partes = []
             arg = n.args[0]
@@ -670,7 +697,7 @@ def modelos_de_log():
             primeiro = pedacos[0]
             inicio = primeiro.value[:1] if isinstance(primeiro, ast.Constant) and isinstance(primeiro.value, str) else ""
             modelos.append((re.compile("^" + "".join(partes), re.S), f"{os.path.basename(arq)}:{n.lineno}",
-                            texto.replace("\n", " ")[:70], len(fixo), inicio))
+                            texto.replace("\n", " ")[:70], len(fixo), inicio, rotulo))
     # O mais específico primeiro: o de texto fixo maior ganha.
     modelos.sort(key=lambda m: -m[3])
     return modelos
@@ -686,7 +713,7 @@ def perfil_do_log(linhas, modelos):
     contagem, sem_modelo = {}, 0
     for linha in linhas:
         mensagem = linha.split(" - ", 1)[1] if " - " in linha else linha
-        for regex, onde, texto, _, _inicio in por_inicio.get(mensagem[:1], []) + genericos:
+        for regex, onde, texto, *_ in por_inicio.get(mensagem[:1], []) + genericos:
             if regex.match(mensagem):
                 contagem[(onde, texto)] = contagem.get((onde, texto), 0) + 1
                 break

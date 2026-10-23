@@ -1,0 +1,34 @@
+name: Checkup do dia
+
+# O que pode ter dado errado nos robôs nas últimas 24 h: erros registrados e o lugar
+# do código que os gravou, quedas e erros no log de cada robô, postagens de hoje por
+# fila (com atrasos e a média dos 7 dias), robô da Shopee Vídeo, Baixador e backup,
+# e no fim os pontos de atenção. Roda todo dia às 22:20 de Brasília e pode ser
+# disparado à mão. O Claude lê o resultado na rotina do checkup diário, investiga
+# cada ponto e corrige pelo PR (CLAUDE.md, Como trabalhamos).
+#
+# O repositório é público, e os logs do Actions também: o checkup.py imprime só
+# números, estados e trechos fixos do código, nunca conteúdo de log, fila ou banco.
+on:
+  schedule:
+    - cron: "20 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checkup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Conferir o dia (só leitura)
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          command_timeout: 8m
+          script: |
+            cd ~/shopee
+            venv/bin/python3 checkup.py
