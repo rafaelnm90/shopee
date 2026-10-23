@@ -251,6 +251,7 @@ class AppDeMentira:
         self.atual, self.legenda, self.com_produto = "inicio", "", False
         self.toques, self.teclas, self.comandos, self.enviados, self.prints = [], [], [], [], []
         self.clipboard, self.em_foco = None, False
+        self.galeria = set()
 
     def _nos(self):
         nos = TELAS[self.atual]
@@ -304,11 +305,17 @@ class AppDeMentira:
         self.comandos.append(partes)
         if "android.intent.action.VIEW" in partes:
             self.atual = "pagina_curta"
-        saida = " ".join(nome for _, nome in self.enviados) if "content" in partes else ""
+        if partes[:2] == ["rm", "-f"]:
+            self.galeria.discard(partes[2].rsplit("/", 1)[-1])
+        if partes[0] == "ls":
+            saida = "\n".join(sorted(self.galeria))
+        else:
+            saida = " ".join(nome for _, nome in self.enviados) if "content" in partes else ""
         return type("R", (), {"output": saida})()
 
     def push(self, origem, destino):
         self.enviados.append((origem, destino.rsplit("/", 1)[-1]))
+        self.galeria.add(destino.rsplit("/", 1)[-1])
 
     def screenshot(self, caminho):
         self.prints.append(caminho)
@@ -752,6 +759,63 @@ def test_sem_a_copia_do_campo_o_emoji_lido_como_ponto_para_o_rascunho(monkeypatc
     resultado = robo.rodada(preparar=True, d=AppSemCopia(), agora=momento("2026-10-22 23:59"))
     assert "o título não ficou na legenda" in resultado and robo.esperando_aprovacao() == []
     assert robo.ler_estado()["ultima_legenda"].startswith("sem a cópia, pela acessibilidade: ")
+
+
+def _arquivos_do_rascunho(ident, app):
+    """O vídeo e o print do rascunho no servidor, e o vídeo na galeria do celular."""
+    os.makedirs(robo.PASTA_RASCUNHOS, exist_ok=True)
+    arquivos = [os.path.join(robo.PASTA_RASCUNHOS, f"{ident}.{ext}") for ext in ("mp4", "png")]
+    for arquivo in arquivos:
+        with open(arquivo, "wb") as f:
+            f.write(b"x")
+    robo.atualizar(ident, arquivo=arquivos[0], print=arquivos[1])
+    app.galeria.add(robo.nome_na_galeria(ident))
+    return arquivos
+
+
+def test_postado_sai_do_servidor_e_da_galeria_e_o_que_espera_aprovacao_fica(monkeypatch, avisos, caminho_do_rascunho):
+    # Pedido do Rafael (23/10): a memória de cada rascunho é só do robô e sai depois de usada.
+    ident = _aprovado(monkeypatch)
+    esperando = _rascunho("rascunho", criado="2026-10-21 10:00:00")   # mais velho: fica depois na lista do app
+    app = AppComQuadros()
+    app.legenda, app.com_produto = TITULO, True
+    postado, guardado = _arquivos_do_rascunho(ident, app), _arquivos_do_rascunho(esperando, app)
+    assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho aprovado postado"
+    assert not any(os.path.exists(arquivo) for arquivo in postado)
+    assert all(os.path.exists(arquivo) for arquivo in guardado)
+    assert app.galeria == {robo.nome_na_galeria(esperando)}
+    # A linha do banco fica: é ela que impede o mesmo vídeo de voltar.
+    assert robo.pegar(ident)["estado"] == "postado" and "video:1" in robo.ids_usados()
+
+
+def test_preparo_que_parou_no_meio_nao_deixa_o_video_no_servidor_nem_na_galeria(monkeypatch, avisos):
+    _fonte(monkeypatch)
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True})
+
+    class AppQueTrocaEmoji(AppDeMentira):
+        def send_keys(self, texto):
+            self.legenda += robo.ps.como_o_android_le(texto)
+
+    app = AppQueTrocaEmoji()
+    resultado = robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59"))
+    assert "o título não ficou na legenda" in resultado
+    # O vídeo chegou a ir para a galeria antes de parar; no fim da rodada, saiu dos dois lugares.
+    assert app.enviados and app.galeria == set() and os.listdir(robo.PASTA_RASCUNHOS) == []
+
+
+def test_celular_que_cai_na_faxina_deixa_a_copia_do_servidor_para_a_proxima_rodada(avisos):
+    ident = _rascunho("postado")
+
+    class AppQueCaiu(AppDeMentira):
+        def shell(self, partes):
+            raise ConnectionError("o celular saiu da rede")
+
+    app = AppQueCaiu()
+    arquivos = _arquivos_do_rascunho(ident, app)
+    robo.faxina_dos_arquivos(app)
+    assert all(os.path.exists(arquivo) for arquivo in arquivos)
+    robo.faxina_dos_arquivos(AppDeMentira())
+    assert not any(os.path.exists(arquivo) for arquivo in arquivos)
 
 
 def test_preparar_1_agora_sem_video_diz_no_privado_por_que_nao_preparou(monkeypatch, avisos):
