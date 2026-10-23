@@ -47,11 +47,16 @@ def test_relatorio_nunca_mostra_link_nome_ou_motivo(monkeypatch, capsys):
             "viral:1", "pulado", "o link não diz o produto do vídeo")
     inserir("INSERT INTO shopee_video_rascunhos (id_video, estado, motivo) VALUES (?, ?, ?)",
             "viral:9", "pulado", "a IA viu o Copo Térmico")
+    inserir("INSERT INTO shopee_video_rascunhos (id_video, estado, motivo) VALUES (?, ?, ?)",
+            "viral:8", "pulado", "o link de vídeo não mostrou o Ver Produtos")
     assert ir.main(["5"]) == 0
     saida = capsys.readouterr().out
-    # O passo em que parou, pelo rótulo fixo do histórico do robô (nunca o motivo).
-    assert "2. motivo: parou em achar o produto do link | caminho: link curto → produto | produto SEM oferta" in saida
-    assert "1. motivo: parou em conferência da IA | o vídeo já saiu da fonte" in saida
-    assert "1 × pulado (parou em achar o produto do link): produto SEM oferta na API de afiliado" in saida
+    # O passo em que parou, pelo rótulo fixo do histórico do robô; o motivo só quando é
+    # um texto fixo do código, nunca o que leva o nome do produto.
+    assert "1. motivo: parou em Ver Produtos (o link de vídeo não mostrou o Ver Produtos) |" in saida
+    assert "Copo" not in saida
+    assert "3. motivo: parou em achar o produto do link (o link não diz o produto do vídeo) | caminho: link curto → produto | produto SEM oferta" in saida
+    assert "2. motivo: parou em conferência da IA | o vídeo já saiu da fonte" in saida
+    assert "1 × pulado (parou em achar o produto do link (o link não diz o produto do vídeo)): produto SEM oferta na API de afiliado" in saida
     assert "shopee.com.br" not in saida and "Copo" not in saida
     assert ir.main(["x"]) == 2
