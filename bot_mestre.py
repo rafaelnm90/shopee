@@ -1929,6 +1929,12 @@ async def disparar_mensagem(tipo, forcar=False):
     is_publico = canal_rotina == "Grupo Público"
     # No registro dos processos, para o checkup conferir espaçamento e assuntos por canal.
     processo_rotina = f"rotina {canal_rotina}"
+    # Chave antiga do banco, sem texto no código: não entra no histórico do dia.
+    if not rotinas.conhecida(tipo):
+        logger.warning(f"🛑 Disparo abortado ({tipo}): rotina sem texto no código.")
+        registro_processos.registrar("bot_mestre", processo_rotina, "ignorada (rotina sem texto no código)", tipo,
+                                     ok=False)
+        return
     
     chat_destino = GRUPO_ID
     if is_viral:
@@ -2375,7 +2381,9 @@ def agendar_tarefas_diarias(escopo="todos"):
             return ponto_insercao
         return None
 
-    tipos_restantes = [t for t in dados_rotina.keys() if t not in ["bom_dia", "boa_noite", "pausado", "pausado_viral", "pausado_publico", "ultimo_bom_dia", "ultimo_boa_noite", "historico_diario"]]
+    # Só as rotinas que o código conhece: uma chave antiga no banco não ganha horário.
+    tipos_restantes = [t for t in dados_rotina.keys() if t not in ["bom_dia", "boa_noite", "pausado", "pausado_viral", "pausado_publico", "ultimo_bom_dia", "ultimo_boa_noite", "historico_diario"]
+                       and rotinas.conhecida(t)]
     rotinas_virais = [t for t in tipos_restantes if t in rotinas_virais_lista]
     rotinas_publico = [t for t in tipos_restantes if t in rotinas_publico_lista]
     rotinas_principais = [t for t in tipos_restantes if t not in rotinas_virais_lista and t not in rotinas_publico_lista]
