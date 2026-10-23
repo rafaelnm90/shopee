@@ -93,6 +93,18 @@ jobs:
             echo "Links sem a marcação de afiliado:${JANELAS%|}"
             sqlite3 -readonly -separator ' · ' banco_dados.db "SELECT json_extract(contexto, '\$.robo'), json_extract(contexto, '\$.tipo') || ' ' || json_extract(contexto, '\$.detalhe'), COUNT(*) || ' link(s)' FROM erros_logs WHERE origem = '$ORIGEM' AND timestamp >= '$DESDE' GROUP BY 1, 2 ORDER BY COUNT(*) DESC" 2>/dev/null | sed 's/^/   /'
 
+            # Robô automático da Shopee Vídeo: só estados, datas e números (nunca título,
+            # produto, link ou o motivo de uma parada, que pode ter o nome do produto).
+            echo ""
+            echo "== Robô da Shopee Vídeo"
+            if pgrep -f "[r]obo_shopee_video.py" >/dev/null; then echo "Rodada no celular: rodando agora"; else echo "Rodada no celular: nenhuma agora"; fi
+            R=$(sqlite3 -readonly banco_dados.db "SELECT 'Postagem: ' || CASE json_extract(valor, '\$.robo_pausado') WHEN 0 THEN 'ativa' ELSE 'pausada' END || ' | fonte: ' || COALESCE(json_extract(valor, '\$.fonte'), 'autorais') FROM configuracoes WHERE chave = 'shopee_video'" 2>/dev/null)
+            echo "${R:-Postagem: pausada (padrão)}"
+            R=$(sqlite3 -readonly banco_dados.db "SELECT estado || ': ' || COUNT(*) FROM shopee_video_rascunhos GROUP BY estado" 2>/dev/null | paste -sd ' ' -)
+            echo "Rascunhos por estado: ${R:-nenhum}"
+            R=$(sqlite3 -readonly -separator ' | ' banco_dados.db "SELECT 'último: ' || estado, 'criado: ' || criado_em, 'origem: ' || COALESCE(fonte, '?') FROM shopee_video_rascunhos ORDER BY id DESC LIMIT 1" 2>/dev/null)
+            echo "${R:-nenhum rascunho ainda}"
+
             # Faxina do Acervo Viral e registro dos administradores: só estados e números.
             # O nome da conta e os nomes dos admins não saem daqui (o log é público).
             echo ""
