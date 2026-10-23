@@ -33,9 +33,16 @@ def admin_id():
 
 
 def montar_texto(assunto, link=""):
-    texto = ("🤖 O Claude está esperando uma resposta sua.\n\n"
-             f"📌 {assunto.strip()[:300]}\n\n"
-             "Abra a conversa com o Claude para responder.")
+    """
+    O lembrete diário das pendências (assunto começando com "Lembrete") não é pergunta:
+    dizer que o Claude espera uma resposta fazia o Rafael procurar uma pergunta que não
+    existia.
+    """
+    if assunto.strip().casefold().startswith("lembrete"):
+        topo, fim = "🤖 Lembrete do Claude: o que está pendente.", "Abra a conversa com o Claude para ver a lista."
+    else:
+        topo, fim = "🤖 O Claude está esperando uma resposta sua.", "Abra a conversa com o Claude para responder."
+    texto = f"{topo}\n\n📌 {assunto.strip()[:300]}\n\n{fim}"
     if link.strip():
         texto += f"\n{link.strip()}"
     return texto
@@ -75,7 +82,7 @@ def mandar_foto(caminho, legenda=""):
 
 
 def enviar(assunto, link=""):
-    """O aviso de pergunta sem resposta. Devolve True se o Telegram aceitou."""
+    """O aviso de pergunta sem resposta, ou o lembrete do dia. Devolve True se o Telegram aceitou."""
     return mandar_texto(montar_texto(assunto, link))
 
 

@@ -17,6 +17,14 @@ def test_texto_curto_com_assunto_e_link():
     assert len(avisar_rafael.montar_texto("x" * 1000)) < 500
 
 
+def test_lembrete_do_dia_nao_diz_que_espera_resposta():
+    # O Rafael (23/10) recebeu o lembrete das pendências dizendo "esperando uma resposta sua"
+    # e procurou uma pergunta que não existia.
+    texto = avisar_rafael.montar_texto("Lembrete do dia: 3 pendências (chips dos Autorais)")
+    assert texto.startswith("🤖 Lembrete do Claude") and "esperando uma resposta" not in texto
+    assert "para ver a lista" in texto and "📌 Lembrete do dia: 3 pendências" in texto
+
+
 def test_envia_para_o_admin_pelo_bot(bm, monkeypatch):
     pedidos = []
 
