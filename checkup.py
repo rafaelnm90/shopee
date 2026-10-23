@@ -15,8 +15,9 @@ Seções: erros registrados (erros_logs), log de cada robô (quedas, rastros de
 erro pelo tipo e pelo lugar do código, avisos e erros por lugar do código),
 processos dos robôs (registro_processos.py), rotinas e divulgação (espaçamento,
 assunto repetido em seguida e o que saiu contra o configurado), postagens de
-hoje por fila, robô da Shopee Vídeo, Baixador e backup. No fim, os pontos de
-atenção.
+hoje por fila, captura por grupo de origem (Espião, Espelhador e parceiros, pela
+posição na lista do painel), produto repetido entre parceiros ou com a conta
+principal, robô da Shopee Vídeo, Baixador e backup. No fim, os pontos de atenção.
 """
 import os
 import re
@@ -28,7 +29,9 @@ from datetime import datetime, timedelta
 import backup_dados
 import db
 import inventario
+import links_shopee
 import registro_processos
+import rotas_espelhador
 import rotinas
 from fuso import fuso_horario
 
@@ -292,6 +295,103 @@ def divulgacao_do_dia(agora=None):
             "seguidos": seguidos, "pico": pico, "por_assunto": Counter(processo for _m, processo, *_ in linhas)}
 
 
+# --- Captura por grupo de origem e parceiros ---
+
+def _por_origem(robo, prefixo, agora):
+    """(últimas 24 h, as 48 h antes delas): quantos registros por apelido de origem."""
+    corte = _momento(agora - timedelta(hours=24))
+    recente, antes = Counter(), Counter()
+    for momento, _p, _r, _d, origem in registro_processos.sequencia(robo, prefixo, _momento(agora - timedelta(hours=72))):
+        (recente if momento >= corte else antes)[origem] += 1
+    return recente, antes
+
+
+def _resumo_das_origens(origens, contagens):
+    """
+    Pela posição na lista do painel (1, 2, 3...): quantas origens, quantas mandaram
+    vídeo nas 24 h, as que não mandaram e as que pararam (mandaram nas 48 h antes).
+    """
+    recente, antes = contagens
+    apelidos = [registro_processos.apelido(str(o).lower()) for o in origens]
+    return {
+        "origens": len(apelidos),
+        "com_video": sum(1 for a in apelidos if recente[a]),
+        "sem_video": [i + 1 for i, a in enumerate(apelidos) if not recente[a]],
+        "pararam": [i + 1 for i, a in enumerate(apelidos) if not recente[a] and antes[a]],
+    }
+
+
+def captura_por_origem(agora=None):
+    """
+    O que chegou de cada grupo vigiado: Espião (vídeo com link em cada alvo), Espelhador
+    (em cada origem das rotas, na ordem das rotas) e parceiros (capturas de cada um).
+    """
+    agora = _agora(agora)
+    alvos = (db.ler_config("alvos_espiao", {}) or {}).get("alvos", [])
+    origens_das_rotas = []
+    for rota in rotas_espelhador.ler().get("rotas", []):
+        origens_das_rotas += [str(o) for o in rota.get("origens", [])]
+        if "origem" in rota:
+            origens_das_rotas.append(str(rota["origem"]))
+    parceiros = []
+    try:
+        with db.conexao() as conexao:
+            parceiros = [str(linha[0]) for linha in conexao.execute("SELECT id FROM parceiros ORDER BY id")]
+    except sqlite3.OperationalError:
+        pass
+    return {
+        "Espião": _resumo_das_origens(alvos, _por_origem("espiao", "vídeo com link no grupo vigiado", agora)),
+        "Espelhador": _resumo_das_origens(origens_das_rotas,
+                                          _por_origem("espelhador", "vídeo com link na origem da rota", agora)),
+        "Parceiros": _resumo_das_origens(parceiros, _por_origem("autorais", "captura de parceiro", agora)),
+    }
+
+
+def _chave_resolvida(chave, conexao):
+    """A chave do link curto trocada pela do produto, quando o espelhador já abriu o link."""
+    if not chave or not chave.startswith("curto_"):
+        return chave
+    try:
+        linha = conexao.execute("SELECT chave_final FROM links_resolvidos WHERE codigo_curto = ?",
+                                (chave[len("curto_"):],)).fetchone()
+    except sqlite3.OperationalError:
+        return chave
+    return linha[0] if linha and linha[0] else chave
+
+
+def parceiros_repetidos(agora=None):
+    """
+    Nos últimos 3 dias: produtos capturados para mais de um parceiro, e produtos de
+    parceiro que também saíram pela conta principal (reservados no sorteio do Público
+    ou na fila do Viral).
+    """
+    agora = _agora(agora)
+    desde = _momento(agora - timedelta(days=3))
+    try:
+        with db.conexao() as conexao:
+            linhas = conexao.execute(
+                "SELECT parceiro_id, chave_produto FROM fila_parceiros WHERE chave_produto IS NOT NULL "
+                "AND chave_produto != '' AND data_captura >= ?", (desde,)).fetchall()
+            por_chave = defaultdict(set)
+            for parceiro, chave in linhas:
+                por_chave[_chave_resolvida(chave, conexao)].add(parceiro)
+            da_conta = set()
+            try:
+                da_conta |= {_chave_resolvida(c, conexao) for (c,) in conexao.execute(
+                    "SELECT video_id FROM videos_reservados WHERE parceiro_id = 0 AND data_reserva >= ? "
+                    "AND video_id NOT LIKE 'doc_%'", (desde,))}
+            except sqlite3.OperationalError:
+                pass
+            for item in (db.ler_config("fila_clonagem", {}) or {}).get("fila", []):
+                if str(item.get("data_captura") or "") >= desde[:10]:
+                    da_conta.add(_chave_resolvida(links_shopee.chave_produto(item.get("link_original")), conexao))
+    except sqlite3.OperationalError:
+        return {"capturas": 0, "entre_parceiros": 0, "com_a_conta": 0}
+    return {"capturas": len(linhas),
+            "entre_parceiros": sum(1 for parceiros in por_chave.values() if len(parceiros) > 1),
+            "com_a_conta": sum(1 for chave in por_chave if chave in da_conta)}
+
+
 # --- Postagens de hoje ---
 
 def _contar(sql, *params):
@@ -404,7 +504,7 @@ def baixador(linhas):
 # --- Pontos de atenção ---
 
 def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None, processos=None,
-                      rotinas_hoje=None, divulgacao=None):
+                      rotinas_hoje=None, divulgacao=None, captura=None, repetidos=None):
     """As frases fixas, com números, do que o Claude precisa investigar."""
     agora = _agora(agora)
     pontos = []
@@ -452,6 +552,16 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
         pontos.append(f"Divulgação: {divulgacao['seguidos']} vez(es) o mesmo assunto em seguida no mesmo grupo")
     if divulgacao and divulgacao["pico"] >= PICO_PARA_COBRAR:
         pontos.append(f"Divulgação: {divulgacao['pico']} envios em {JANELA_DO_PICO} min (rajada)")
+    for sistema, c in (captura or {}).items():
+        if c["pararam"]:
+            pontos.append(f"{sistema}: pararam de mandar vídeo (tinham nos 2 dias antes): nº "
+                          + ", nº ".join(map(str, c["pararam"])) + " da lista do painel")
+    if repetidos and repetidos["entre_parceiros"]:
+        pontos.append(f"Parceiros: {repetidos['entre_parceiros']} produto(s) capturado(s) para mais de um parceiro "
+                      "nos últimos 3 dias")
+    if repetidos and repetidos["com_a_conta"]:
+        pontos.append(f"Parceiros: {repetidos['com_a_conta']} produto(s) de parceiro que também saíram pela conta "
+                      "principal nos últimos 3 dias")
     falhas = baixados.get("falha(s) de download", 0)
     if falhas >= 3 and falhas > baixados.get("entregue(s)", 0):
         pontos.append(f"Baixador: {falhas} falha(s) de download e {baixados.get('entregue(s)', 0)} entregue(s)")
@@ -525,6 +635,16 @@ def main():
     if divulgacao["por_assunto"]:
         print("   " + " | ".join(f"{p}: {q}" for p, q in sorted(divulgacao["por_assunto"].items())))
 
+    print("\n== Captura por grupo de origem (pela posição na lista do painel)")
+    captura = captura_por_origem(agora)
+    for sistema, c in captura.items():
+        sem = ", ".join(f"nº {n}" for n in c["sem_video"]) or "nenhuma"
+        print(f"{sistema}: {c['origens']} na lista | com vídeo em 24 h: {c['com_video']} | sem vídeo em 24 h: {sem}"
+              + (f" | pararam: {', '.join(f'nº {n}' for n in c['pararam'])}" if c["pararam"] else ""))
+    repetidos = parceiros_repetidos(agora)
+    print(f"Parceiros (3 dias): capturas com produto identificado {repetidos['capturas']} | mesmo produto em mais "
+          f"de um parceiro {repetidos['entre_parceiros']} | também na conta principal {repetidos['com_a_conta']}")
+
     print("\n== Postagens de hoje")
     filas = postagens_de_hoje(agora)
     for nome, f in filas.items():
@@ -547,7 +667,7 @@ def main():
     print("Backup: nenhum" if backup is None else f"Backup: o último tem {backup[1]:.1f} h")
 
     pontos = sem_journal + pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora, processos,
-                                             rotinas_hoje, divulgacao)
+                                             rotinas_hoje, divulgacao, captura, repetidos)
     print(f"\n== Pontos de atenção ({len(pontos)})")
     for ponto in pontos:
         print(f"⚠️ {ponto}")

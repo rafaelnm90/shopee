@@ -28,7 +28,6 @@ import time
 import asyncio
 import random
 import aiohttp
-import re
 from datetime import datetime, timedelta
 from telethon import TelegramClient, events, functions
 from telethon.tl.types import MessageMediaDocument
@@ -50,7 +49,7 @@ os.makedirs("archive", exist_ok=True)
 
 from api_gemini import analisar_video_gemini
 from api_shopee import converter_link_shopee
-from links_shopee import extrair_link_shopee, codigo_do_link_curto
+from links_shopee import extrair_link_shopee, codigo_do_link_curto, chave_produto
 import legendas
 from videos import verificar_e_otimizar_video
 from motor_filas import calcular_horarios_distribuicao, faixa_de_config, sortear_teto_do_dia
@@ -588,7 +587,10 @@ def _garantir_fila_parceiros(cursor):
     ''')
     # Colunas que a tabela antiga não tinha: o link do post de origem (no Telegram,
     # não o da Shopee), a mensagem publicada no destino e o nome do produto.
-    for coluna in ("link_post_origem TEXT DEFAULT ''", "msg_postada_id INTEGER", "nome_produto TEXT DEFAULT ''"):
+    # chave_produto: a identidade do produto (links_shopee.chave_produto, com o link curto
+    # já aberto), para o checkup conferir que o mesmo produto não foi a dois parceiros.
+    for coluna in ("link_post_origem TEXT DEFAULT ''", "msg_postada_id INTEGER", "nome_produto TEXT DEFAULT ''",
+                   "chave_produto TEXT"):
         try:
             cursor.execute(f"ALTER TABLE fila_parceiros ADD COLUMN {coluna}")
         except sqlite3.OperationalError:
@@ -615,7 +617,7 @@ def contar_fila_parceiro(parceiro_id, data_alvo):
     except Exception:
         return 0
 
-def inserir_fila_parceiro(parceiro_id, caminho, link, data_alvo, link_post=""):
+def inserir_fila_parceiro(parceiro_id, caminho, link, data_alvo, link_post="", chave=None):
     try:
         with db.conexao() as conexao:
             cursor = conexao.cursor()
@@ -623,9 +625,9 @@ def inserir_fila_parceiro(parceiro_id, caminho, link, data_alvo, link_post=""):
             id_unico = f"p{parceiro_id}_{int(datetime.now().timestamp())}_{random.randint(1000, 9999)}"
             cursor.execute(
                 "INSERT INTO fila_parceiros (id_unico, parceiro_id, caminho_video, link_original, data_captura, "
-                "data_alvo, link_post_origem) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "data_alvo, link_post_origem, chave_produto) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (id_unico, int(parceiro_id), caminho, link, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), data_alvo,
-                 link_post or "")
+                 link_post or "", chave)
             )
         return id_unico
     except Exception as e:
@@ -697,7 +699,7 @@ async def capturar_para_parceiros(event, chat_id, link_capturado, parceiro_orige
                 anotar_parceiro(p.get("id"), "recusado", "download do vídeo falhou")
                 continue
 
-            inserir_fila_parceiro(p.get("id"), destino, link_capturado, data_alvo, link_post)
+            inserir_fila_parceiro(p.get("id"), destino, link_capturado, data_alvo, link_post, chave=chaves[1])
             anotar_parceiro(p.get("id"), "capturados")
             logger.info(f"🎯 [Parceiro {p.get('nome')}] Vídeo capturado e agendado para {data_alvo}. "
                         f"Disco: {espaco_usado_parceiros_gb():.2f} GB de {TETO_DISCO_PARCEIROS_GB} GB.")
@@ -789,26 +791,6 @@ def pasta_do_parceiro(parceiro_id):
     caminho = os.path.join(PASTA_PARCEIROS, str(parceiro_id))
     os.makedirs(caminho, exist_ok=True)
     return caminho
-
-def chave_produto(link):
-    """
-    Normaliza o link da Shopee para identificar o PRODUTO, não a URL.
-
-    ATENÇÃO: sozinha, esta função NÃO reconhece o mesmo item por trás de dois
-    encurtadores diferentes — para link curto ela usa o código do encurtador
-    como identidade. Quem precisa dessa garantia chama chave_produto_resolvida,
-    que abre o link antes e assim chega ao ID real do produto.
-    """
-    if not link:
-        return None
-    alvo = str(link).split("?")[0].strip().lower()
-    # Formato longo: /product/<loja>/<item> ou /<nome>-i.<loja>.<item>
-    m = re.search(r'/product/(\d+)/(\d+)', alvo) or re.search(r'-i\.(\d+)\.(\d+)', alvo)
-    if m:
-        return f"prod_{m.group(1)}_{m.group(2)}"
-    # Link curto: usa o código dele como identidade
-    codigo = codigo_do_link_curto(alvo)
-    return f"curto_{codigo}" if codigo else None
 
 # Validade do cache de encurtadores. O par código → produto não muda, mas guardar
 # para sempre acumula campanha velha: link de um ano atrás dificilmente volta.

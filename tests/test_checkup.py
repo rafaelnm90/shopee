@@ -270,3 +270,41 @@ def test_canal_de_cada_rotina():
     assert rotinas.canal_da_rotina("link_grupo_publico") == "Grupo Público"
     assert rotinas.canal_da_rotina("campanha_pub_0_11.11") == "Grupo Público"
     assert rotinas.canal_da_rotina("campanha_0_11.11") == "canal principal"
+
+
+def test_captura_por_grupo_de_origem_mostra_quem_parou_pela_posicao():
+    import registro_processos as rp
+    db.salvar_config("alvos_espiao", {"alvos": ["@GrupoA", "-1009:5", "@grupoc"]})
+    db.salvar_config("espelhador_rotas", {"rotas": [{"nome": "r1", "origens": ["@origem1", "@origem2"]}]})
+    # Grupo 1 manda hoje; o 2 mandou ontem e parou; o 3 nunca mandou.
+    rp.registrar("espiao", "vídeo com link no grupo vigiado", "visto", origem="@grupoa",
+                 agora=AGORA - timedelta(hours=2))
+    rp.registrar("espiao", "vídeo com link no grupo vigiado", "visto", origem="-1009:5",
+                 agora=AGORA - timedelta(hours=30))
+    rp.registrar("espelhador", "vídeo com link na origem da rota", "visto", origem="@origem2",
+                 agora=AGORA - timedelta(hours=1))
+    c = checkup.captura_por_origem(AGORA)
+    assert c["Espião"] == {"origens": 3, "com_video": 1, "sem_video": [2, 3], "pararam": [2]}
+    assert c["Espelhador"]["sem_video"] == [1] and c["Espelhador"]["pararam"] == []
+    pontos = checkup.pontos_de_atencao([], {}, {}, {"ativo": False, "vencidos": 0, "salvos": 0, "ruins": []},
+                                       {}, ("x", 1.0, 1), AGORA, {}, {}, None, c, None)
+    assert pontos == ["Espião: pararam de mandar vídeo (tinham nos 2 dias antes): nº 2 da lista do painel"]
+
+
+def test_parceiros_produto_repetido_entre_parceiros_e_com_a_conta_principal():
+    with db.conexao() as c:
+        c.execute("CREATE TABLE fila_parceiros (id_unico TEXT, parceiro_id INTEGER, data_captura TEXT, "
+                  "chave_produto TEXT)")
+        c.execute("CREATE TABLE videos_reservados (video_id TEXT PRIMARY KEY, parceiro_id INTEGER, data_reserva TEXT)")
+        c.execute("CREATE TABLE links_resolvidos (codigo_curto TEXT PRIMARY KEY, chave_final TEXT, data_resolucao TEXT)")
+        c.execute("INSERT INTO links_resolvidos VALUES ('abc1', 'prod_1_2', '2026-10-23')")
+        for linha in (("p1", 1, "2026-10-23 10:00:00", "prod_1_2"),
+                      ("p2", 2, "2026-10-23 11:00:00", "curto_abc1"),     # o mesmo produto, por link curto
+                      ("p3", 1, "2026-10-23 12:00:00", "prod_7_8"),
+                      ("p4", 2, "2026-10-15 12:00:00", "prod_9_9")):     # fora dos 3 dias
+            c.execute("INSERT INTO fila_parceiros VALUES (?, ?, ?, ?)", linha)
+        c.execute("INSERT INTO videos_reservados VALUES ('prod_7_8', 0, '2026-10-23 09:00:00')")
+    db.salvar_config("fila_clonagem", {"fila": [{"link_original": "https://shopee.com.br/x-i.9.9",
+                                                 "data_captura": "2026-10-23 08:00:00"}]})
+    r = checkup.parceiros_repetidos(AGORA)
+    assert r == {"capturas": 3, "entre_parceiros": 1, "com_a_conta": 1}
