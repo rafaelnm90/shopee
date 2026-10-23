@@ -455,3 +455,101 @@ def test_rascunho_aberto_com_outro_titulo_nao_e_postado(monkeypatch, avisos, cam
     rascunho = robo.pegar(ident)
     assert rascunho["estado"] == "rascunho" and "título" in rascunho["motivo"]
     assert "não consegui postar" in avisos[-1]
+
+
+# --- Telas mapeadas no Motorola em 22/10/2026: aviso de sair, apagar e o link do post ---
+
+TELAS["aviso"] = [_no("Se você voltar, as edições serão descartadas.", "content", (60, 1100, 1020, 1250), clicavel=False),
+                  _no("Cancelar", "buttonDefaultNegative", (100, 1300, 500, 1380)),
+                  _no("Descartar", "buttonDefaultPositive", (580, 1300, 980, 1380))]
+QUADROS = [_no(caixa=(20, 400, 350, 800)), _no(caixa=(370, 400, 700, 800))]
+TELAS["lista_selecao"] = [_no("Cancelar", caixa=(860, 150, 1040, 200))] + QUADROS + [_no("Excluir (0)", caixa=(300, 2280, 780, 2350))]
+TELAS["lista_marcada"] = [_no("Cancelar", caixa=(860, 150, 1040, 200))] + QUADROS + [_no("Excluir (1)", caixa=(300, 2280, 780, 2350))]
+TELAS["confirmar_exclusao"] = [_no("Excluir vídeos selecionados?", caixa=(200, 1160, 880, 1220), clicavel=False),
+                               _no("Cancelar", caixa=(200, 1280, 460, 1340)), _no("Confirmar", caixa=(620, 1280, 880, 1340))]
+TELAS["lista_vazia"] = [_no("Rascunhos", caixa=(400, 150, 620, 200), clicavel=False)]
+
+
+class AppComVoltar(AppComQuadros):
+    """O voltar como no Motorola: da tela final abre o aviso; no aviso, fecha o aviso."""
+    VOLTAR = {"final": "aviso", "aviso": "final", "rascunho_aberto": "lista_rascunhos",
+              "lista_rascunhos": "perfil", "perfil": "conta", "conta": "criadores", "criadores": "eu"}
+
+    def press(self, tecla):
+        self.teclas.append(tecla)
+        self.atual = self.VOLTAR.get(self.atual, "inicio")
+
+
+@pytest.fixture
+def caminho_de_apagar(monkeypatch, caminho_do_rascunho):
+    for chave, destino in ((("aviso", "@buttonDefaultPositive"), "rascunho_aberto"),
+                           (("lista_rascunhos", "Selecionar"), "lista_selecao"),
+                           (("lista_selecao", (185, 600)), "lista_marcada"),
+                           (("lista_marcada", "Excluir (1)"), "confirmar_exclusao"),
+                           (("confirmar_exclusao", "Confirmar"), "lista_vazia")):
+        monkeypatch.setitem(CAMINHO, chave, destino)
+
+
+def _recusado(monkeypatch):
+    ident = _aprovado(monkeypatch)
+    robo.atualizar(ident, estado="recusado", postar_em=None)
+    return ident
+
+
+def test_recusado_e_apagado_com_a_confirmacao_e_o_aviso_de_sair(monkeypatch, avisos, caminho_de_apagar):
+    ident = _recusado(monkeypatch)
+    app = AppComVoltar()
+    app.legenda, app.com_produto = TITULO, True
+    assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho recusado apagado"
+    # Abre para conferir, sai pelo aviso (o rascunho continua salvo) e apaga pela lista.
+    assert "@buttonDefaultPositive" in app.toques
+    assert app.toques[-3:] == [(185, 600), "Excluir (1)", "Confirmar"]
+    assert "@btn_post" not in app.toques and robo.pegar(ident)["estado"] == "apagado"
+
+
+def test_com_outro_numero_no_excluir_nada_e_apagado(monkeypatch, avisos, caminho_de_apagar):
+    ident = _recusado(monkeypatch)
+    monkeypatch.setitem(TELAS, "lista_marcada", TELAS["lista_selecao"][:-1] + [_no("Excluir (2)", caixa=(300, 2280, 780, 2350))])
+    app = AppComVoltar()
+    app.legenda, app.com_produto = TITULO, True
+    assert "parado" in robo.rodada(d=app, agora=momento("2026-10-22 23:59"))
+    assert "Confirmar" not in app.toques and robo.pegar(ident)["estado"] == "rascunho"
+    assert "não consegui apagar" in avisos[-1]
+
+
+def test_sem_rascunho_salvo_o_perfil_nao_tem_o_quadro_e_o_robo_para(monkeypatch, avisos, caminho_de_apagar):
+    ident = _recusado(monkeypatch)
+    monkeypatch.setitem(TELAS, "perfil", [_no("Postar vídeo", caixa=(700, 2200, 1040, 2300))])
+    app = AppComVoltar()
+    assert "nenhum rascunho salvo" in robo.rodada(d=app, agora=momento("2026-10-22 23:59"))
+    assert robo.pegar(ident)["estado"] == "rascunho"
+
+
+def test_volta_ao_inicio_pelo_eu_da_barra_e_nao_por_um_seu_no_meio_do_texto(monkeypatch):
+    app = AppComVoltar()
+    app.atual = "perfil"
+    monkeypatch.setitem(TELAS, "perfil", TELAS["perfil"] + [_no("Siga o seu perfil", caixa=(40, 500, 1040, 560), clicavel=False)])
+    robo.ir_ao_inicio(app)
+    assert app.atual == "eu" and app.teclas == ["back"] * 3
+
+
+def test_link_do_post_pula_o_quadro_de_rascunhos_e_os_fixados(monkeypatch):
+    TELAS_PERFIL = [_no("Postar vídeo", caixa=(700, 2200, 1040, 2300)),
+                    _no(caixa=(0, 1210, 358, 1680), filhos=_no("Rascunhos: 1", caixa=(40, 1460, 320, 1510), clicavel=False)),
+                    _no(caixa=(361, 1210, 719, 1680), filhos=_no("Fixado", caixa=(380, 1230, 480, 1270), clicavel=False)),
+                    _no(caixa=(722, 1210, 1080, 1680))]
+    monkeypatch.setitem(TELAS, "perfil", TELAS_PERFIL)
+    monkeypatch.setitem(TELAS, "player", [
+        '<node text="" content-desc="share video button" class="android.view.View" clickable="true" '
+        'bounds="[950,1935][1052,2035]"></node>'])
+    monkeypatch.setitem(TELAS, "folha", [_no("Copiar link", caixa=(280, 2200, 440, 2300))])
+    for chave, destino in ((("perfil", (901, 1445)), "player"), (("player", (1001, 1985)), "folha"),
+                           (("folha", "Copiar link"), "player")):
+        monkeypatch.setitem(CAMINHO, chave, destino)
+    app = AppComQuadros()
+    app.clipboard = "https://sv.shopee.com.br/share-video/abc"
+    monkeypatch.setattr(robo, "ir_ao_perfil", lambda d: setattr(d, "atual", "perfil"))
+    assert robo.link_do_post(app) == "https://sv.shopee.com.br/share-video/abc"
+    assert app.toques == [(901, 1445), (1001, 1985), "Copiar link"]
+    app.clipboard = "texto qualquer"
+    assert robo.link_do_post(app) == ""

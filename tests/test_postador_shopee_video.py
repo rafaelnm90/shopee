@@ -96,6 +96,7 @@ def sem_espera(monkeypatch):
     ("Descartar alterações", "Descartar alterações"),
     ("Fixado", "Fixado"),
     ("Copiar link", "Copiar link"),
+    ("share video button", "share video button"),
     ("", ""),
 ])
 def test_mascara_tira_o_que_nao_e_botao(texto, forma):
@@ -873,3 +874,12 @@ def test_curtir_acha_o_nome_com_o_selo_antes(monkeypatch):
     aparelho.tela = TELA_PAGINA_CURTA.replace(f'text="{VESTIDO}"', f'text="Oficial {VESTIDO}"')
     assert ps.explorar("curtir", aparelho)
     assert aparelho.toques == [(525, 1217), (1028, 1233)]
+
+
+def test_copiado_diz_so_se_e_link_da_shopee_e_o_tamanho():
+    class Celular:
+        clipboard = "https://sv.shopee.com.br/share-video/abc"
+    ok, texto = ps.fazer_passo(Celular(), "copiado", "")
+    assert ok and texto == "link da Shopee copiado (40 caracteres)" and "http" not in texto
+    Celular.clipboard = "outra coisa"
+    assert ps.fazer_passo(Celular(), "copiado", "") == (False, "o que está copiado não é um link da Shopee")
