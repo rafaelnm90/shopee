@@ -66,9 +66,12 @@ PADRAO = {"robo_pausado": True, "robo_limite_min": 1, "robo_limite_max": 2,
           "robo_inicio": ps.HORARIO_DAS_RODADAS[0], "robo_fim": ps.HORARIO_DAS_RODADAS[1]}
 MAXIMO_POR_DIA = 20
 CHAVE_DIA = "shopee_video_robo_dia"
-# Rascunho do plano que não deu certo volta nas rodadas seguintes, até estas vezes a mais
-# por horário. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+# Rascunho do plano que não deu certo volta nas rodadas seguintes: até estas vezes a mais
+# com o mesmo vídeo e, se não der, com outro, até VIDEOS_POR_HORARIO vídeos no horário.
+# Depois disso o robô espera o próximo horário do plano. Decisão do Rafael: DECISOES.md,
+# Shopee Vídeo.
 TENTATIVAS_A_MAIS = 2
+VIDEOS_POR_HORARIO = 3
 # Vídeo de produto sem oferta de afiliado (não paga comissão) fica de lado antes de tocar
 # no celular; numa rodada, até estes. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 VIDEOS_SEM_OFERTA_POR_RODADA = 5
@@ -160,21 +163,38 @@ def consumir_horarios(config, agora=None):
     """
     Marca como feitos os horários que já passaram e diz se havia algum novo. Vários de uma
     vez (robô pausado ou fora do ar) contam como um só: retomar não solta tudo de uma vez.
-    O horário novo ganha as tentativas a mais e tira a repetição do anterior.
+    O horário novo ganha as tentativas a mais, começa no primeiro vídeo e tira a repetição
+    do anterior.
     """
     estado = estado_do_dia(config, agora)
     passados = horarios_vencidos(estado, agora)
     if passados <= estado["feitos"]:
         return False
-    estado.update(feitos=passados, tentativas=TENTATIVAS_A_MAIS, repetir=False)
+    estado.update(feitos=passados, tentativas=TENTATIVAS_A_MAIS, videos=1, repetir=False)
     db.salvar_config(CHAVE_DIA, estado)
     return True
 
 
-def marcar_para_repetir(config, agora=None):
-    """O rascunho do plano não deu certo: volta na rodada seguinte, se o horário ainda tem tentativa."""
+def marcar_para_repetir(config, agora=None, video=None, do_video=False):
+    """
+    O rascunho do plano não deu certo. Com tentativa sobrando, o mesmo vídeo volta na
+    rodada seguinte. Sem tentativa, ou com o problema no próprio vídeo (do_video: ele já
+    ficou de lado), o horário passa a outro vídeo, com as tentativas de novo, até
+    VIDEOS_POR_HORARIO; o vídeo que esgotou as tentativas fica de lado só hoje. Sem vídeo
+    na fonte não há outro para tentar: o horário acaba. Decisão do Rafael: DECISOES.md,
+    Shopee Vídeo.
+    """
     estado = estado_do_dia(config, agora)
-    estado["repetir"] = estado.get("tentativas", 0) > 0
+    if not do_video and estado.get("tentativas", 0) > 0:
+        estado["repetir"] = True
+    elif video and estado.get("videos", 1) < VIDEOS_POR_HORARIO:
+        if not do_video:
+            estado["evitar"] = estado.get("evitar", []) + [video]
+        # Uma tentativa a mais que no começo do horário: a primeira do vídeo novo também
+        # passa pelo repetir_o_que_falhou.
+        estado.update(videos=estado.get("videos", 1) + 1, tentativas=TENTATIVAS_A_MAIS + 1, repetir=True)
+    else:
+        estado["repetir"] = False
     db.salvar_config(CHAVE_DIA, estado)
 
 
@@ -289,8 +309,9 @@ def ids_usados():
 # passo em que parou. O Rafael vê em Histórico do Robô 📋, recebe o aviso do rascunho que
 # não saiu e o resumo das 22h; o diagnóstico do servidor, que é público, conta só os
 # resultados e os passos, nunca o produto nem o motivo. Decisão do Rafael: DECISOES.md,
-# Shopee Vídeo.
-DIAS_DO_HISTORICO = 30
+# Shopee Vídeo. Fica 3 dias no banco, como todo registro de processo (DECISOES.md,
+# Trabalho com o Claude).
+DIAS_DO_HISTORICO = 3
 LINHAS_DO_HISTORICO = 12
 # O passo em que parou, achado no motivo (as frases fixas do robô e do postador). A
 # ordem importa: o primeiro trecho que aparece no motivo decide.
@@ -427,10 +448,13 @@ def aviso_rascunho_nao_saiu(config, agora=None):
     """
     ultima = (tentativas_desde(_momento(agora_br(agora) - timedelta(hours=1))) or [{}])[0]
     estado = estado_do_dia(config, agora)
-    if estado.get("repetir"):
+    video = f"vídeo {estado.get('videos', 1)} de {VIDEOS_POR_HORARIO}"
+    if estado.get("repetir") and estado.get("tentativas", 0) > TENTATIVAS_A_MAIS:
+        proxima = f"Tento de novo na próxima rodada (em até 15 min), com outro vídeo: {video}."
+    elif estado.get("repetir"):
         feita = TENTATIVAS_A_MAIS - estado.get("tentativas", 0) + 1
-        proxima = (f"Tento de novo na próxima rodada (em até 15 min), com outro vídeo: tentativa {feita + 1} de "
-                   f"{TENTATIVAS_A_MAIS + 1}.")
+        proxima = (f"Tento de novo na próxima rodada (em até 15 min): tentativa {feita + 1} de "
+                   f"{TENTATIVAS_A_MAIS + 1} do {video}.")
     else:
         futuros = [h for h in estado.get("horarios", []) if h > agora_br(agora).strftime("%H:%M")]
         proxima = (f"As tentativas deste horário acabaram. Próximo horário do plano: {futuros[0]}." if futuros
@@ -713,14 +737,14 @@ def avisar_foto(caminho, legenda):
 
 # --- Preparar um rascunho ---
 
-def proximo_video(config):
+def proximo_video(config, evitar=()):
     """
     O vídeo da Fonte dos Vídeos do painel que nem o assistente mandou nem o robô usou,
-    com link de produto ou de vídeo (Ver Produtos; "de_video" no dicionário). Sem nenhum,
-    None.
+    com link de produto ou de vídeo (Ver Produtos; "de_video" no dicionário), fora os de
+    evitar (os que esgotaram as tentativas hoje). Sem nenhum, None.
     """
     fonte = config.get("fonte", assistente.FONTE_PADRAO)
-    usados = ids_usados()
+    usados = ids_usados() | set(evitar)
     with db.conexao() as con:
         assistente._criar_tabela(con)
         mandados = {linha[0] for linha in con.execute("SELECT id_unico FROM shopee_video_enviados")}
@@ -743,8 +767,9 @@ def preparar_rascunho(d, config, agora=None):
     diz o produto: não paga comissão) fica de lado, e o robô passa ao próximo na mesma
     rodada, sem gastar a tentativa do horário. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
+    evitar = estado_do_dia(config, agora).get("evitar", [])
     for _ in range(VIDEOS_SEM_OFERTA_POR_RODADA):
-        video = proximo_video(config)
+        video = proximo_video(config, evitar)
         if not video:
             resultado = "nenhum vídeo da fonte com arquivo e link de produto para um rascunho"
             registrar_tentativa("rascunho", "sem vídeo", resultado, agora=agora)
@@ -769,10 +794,12 @@ def preparar_rascunho(d, config, agora=None):
     except Parada as e:
         _desfazer_reserva(ident, video["id"], e.motivo, e.do_video)
         registrar_tentativa("rascunho", "pulado" if e.do_video else "parou", e.motivo, _produto_do_video(video), agora)
+        e.id_video = video["id"]
         raise
     except Exception as e:
         _desfazer_reserva(ident, video["id"], type(e).__name__, False)
         registrar_tentativa("rascunho", "erro", f"erro inesperado ({type(e).__name__})", _produto_do_video(video), agora)
+        e.id_video = video["id"]
         raise
     registrar_tentativa("rascunho", "salvo", produto=", ".join((pegar(ident) or {}).get("produtos") or [])
                         or _produto_do_video(video), agora=agora)
@@ -1286,7 +1313,7 @@ def _agir(d, acao, ident, preparar, config, agora):
                    f"o rascunho ({e.motivo}). Não toquei em mais nada; ele voltou para Rascunhos do Robô 📝.")
         if acao != "rascunho":
             registrar_tentativa(acao, "parou", e.motivo, produto, agora)
-        _repetir_depois(acao, preparar, config, agora)
+        _repetir_depois(acao, preparar, config, agora, getattr(e, "id_video", None), e.do_video)
         _avisar_que_nao_saiu(acao, preparar, config, agora)
         return _resposta(preparar, f"{acao}: parado ({e.motivo})")
     except Exception as e:
@@ -1295,7 +1322,7 @@ def _agir(d, acao, ident, preparar, config, agora):
         logger.exception(f"❌ [Robô Shopee Vídeo] Erro na rodada ({acao}): {type(e).__name__}")
         if acao != "rascunho":
             registrar_tentativa(acao, "erro", f"erro inesperado ({type(e).__name__})", produto, agora)
-        _repetir_depois(acao, preparar, config, agora)
+        _repetir_depois(acao, preparar, config, agora, getattr(e, "id_video", None))
         _avisar_que_nao_saiu(acao, preparar, config, agora)
         return _resposta(preparar, f"{acao}: erro {type(e).__name__}")
 
@@ -1310,15 +1337,15 @@ def _avisar_que_nao_saiu(acao, preparar, config, agora=None):
         avisar(aviso_rascunho_nao_saiu(config, agora))
 
 
-def _repetir_depois(acao, preparar, config, agora=None):
+def _repetir_depois(acao, preparar, config, agora=None, video=None, do_video=False):
     """
-    Rascunho do plano que não deu certo volta na rodada seguinte (até TENTATIVAS_A_MAIS
-    vezes por horário). O Preparar 1 Agora não volta: o Rafael vê o motivo e toca de novo.
-    A Verificação da Shopee não passa por aqui: ela para tudo. Decisão do Rafael:
-    DECISOES.md, Shopee Vídeo.
+    Rascunho do plano que não deu certo volta na rodada seguinte (marcar_para_repetir: 3
+    tentativas por vídeo, até VIDEOS_POR_HORARIO vídeos). O Preparar 1 Agora não volta: o
+    Rafael vê o motivo e toca de novo. A Verificação da Shopee não passa por aqui: ela para
+    tudo. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     if acao == "rascunho" and not preparar:
-        marcar_para_repetir(config, agora)
+        marcar_para_repetir(config, agora, video, do_video)
 
 
 def _resposta(preparar, resultado):
