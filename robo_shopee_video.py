@@ -442,14 +442,9 @@ def ir_ao_perfil(d):
     seguir(d, CAMINHO_PERFIL)
 
 
-def legenda_na_tela(xml):
-    return next((el["texto"] for el in ps.elementos(xml) if el["id"] == "et_caption"), "")
-
-
-def mesma_legenda(na_tela, titulo):
-    """A legenda da tela é o título guardado? O campo pode cortar o fim."""
-    a, b = (" ".join((t or "").split()) for t in (na_tela, titulo))
-    return bool(a and b) and (a == b or (len(a) >= 30 and b.startswith(a.rstrip(".… "))))
+# A legenda e a comparação com o título ficam no postador, que o explorar também usa.
+legenda_na_tela = ps.legenda_na_tela
+mesma_legenda = ps.mesma_legenda
 
 
 def video_do_rascunho(rascunho):
@@ -579,8 +574,9 @@ def _preparar(d, ident, video, fonte):
     tocar(d, "@et_caption", 3)
     d.send_keys(textos["titulo"])
     pausa(3)
-    if not mesma_legenda(legenda_na_tela(tela(d)), textos["titulo"]):
-        raise Parada("o título não ficou na legenda")
+    na_tela = legenda_na_tela(tela(d))
+    if not mesma_legenda(na_tela, textos["titulo"]):
+        raise Parada(f"o título não ficou na legenda ({ps.comparar_legenda(na_tela, textos['titulo'])})")
     tocar(d, "@tv_right", 3)
 
     seguir(d, CAMINHO_PRODUTO)
@@ -901,6 +897,11 @@ def rodada(treino=False, preparar=False, d=None, agora=None):
                 avisar(f"⚠️ Robô da Shopee Vídeo: não consegui {'postar' if acao == 'postar' else 'apagar'} "
                        f"o rascunho ({e.motivo}). Não toquei em mais nada; ele voltou para Rascunhos do Robô 📝.")
             return _resposta(preparar, f"{acao}: parado ({e.motivo})")
+        except Exception as e:
+            # Erro que ninguém previu: a rodada termina com o tipo dele, e o celular fica
+            # para a próxima rodada voltar ao início.
+            logger.exception(f"❌ [Robô Shopee Vídeo] Erro na rodada ({acao}): {type(e).__name__}")
+            return _resposta(preparar, f"{acao}: erro {type(e).__name__}")
 
 
 def _resposta(preparar, resultado):
@@ -918,6 +919,9 @@ def main(argumentos):
         return 2
     resultado = rodada(treino=treino, preparar=preparar)
     logger.info(f"🤖 [Robô Shopee Vídeo] {resultado}.")
+    # O resultado fica no banco com o texto mascarado (sem nome de produto), para o
+    # diagnóstico do servidor, que é público, mostrar como foi a última rodada.
+    gravar_estado(ultima_rodada=ps.mascarar(resultado), ultima_rodada_em=_momento())
     return 0
 
 

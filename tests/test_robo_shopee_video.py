@@ -399,6 +399,17 @@ def test_mesma_legenda():
     assert robo.mesma_legenda(TITULO[:40] + "…", TITULO)
     assert not robo.mesma_legenda("Outro título qualquer que não é este de jeito nenhum", TITULO)
     assert not robo.mesma_legenda("", TITULO)
+    # O que o app pode mudar sem mudar o título: quebra de linha antes das hashtags,
+    # espaço de largura zero e o seletor de variação do emoji.
+    assert robo.mesma_legenda(TITULO.replace(" #", "\n#").replace("👗", "👗\ufe0f"), TITULO)
+    assert robo.mesma_legenda(TITULO.replace("#", "\u200b#"), TITULO)
+    assert not robo.mesma_legenda(TITULO.replace("Gatinho", "Cachorro"), TITULO)
+
+
+def test_comparar_legenda_diz_onde_difere_sem_mostrar_o_texto():
+    assert robo.ps.comparar_legenda(TITULO, TITULO).startswith("a legenda é o título")
+    texto = robo.ps.comparar_legenda("Vestido Infantil Estampado Cachorro", TITULO)
+    assert "NÃO é o título" in texto and "caractere 28" in texto and "U+0043" in texto and "Vestido" not in texto
 
 
 TELAS["lista_rascunhos"] = [_no("Selecionar", caixa=(860, 150, 1040, 200)),
@@ -611,3 +622,25 @@ def test_tabela_antiga_ganha_as_colunas_novas_sem_perder_os_rascunhos():
             "antigo", "2026-10-22 10:00:00", "rascunho", "[]")
     rascunho = robo.esperando_aprovacao()[0]
     assert rascunho["id_video"] == "antigo" and rascunho["fonte"] is None and rascunho["conferencia"] is None
+
+
+def test_erro_inesperado_no_preparar_avisa_e_nao_derruba_a_rodada(monkeypatch, avisos):
+    _fonte(monkeypatch)
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True})
+
+    def quebra(*args, **kwargs):
+        raise KeyError("x")
+
+    monkeypatch.setattr(robo.ps, "curtir", quebra)
+    resultado = robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 23:59"))
+    assert resultado == "rascunho: erro KeyError"
+    assert "não preparei o rascunho que você pediu (rascunho: erro KeyError)" in avisos[-1]
+    assert robo.listar("preparando", "rascunho") == []                       # a reserva foi desfeita
+
+
+def test_main_grava_a_ultima_rodada_mascarada(monkeypatch):
+    monkeypatch.setattr(robo, "rodada", lambda **kw: f"rascunho: parado (não achei {VESTIDO} na lista)")
+    assert robo.main(["--preparar"]) == 0
+    estado = robo.ler_estado()
+    assert estado["ultima_rodada"].startswith("rascunho: parado (não achei") and "Vestido" not in estado["ultima_rodada"]
+    assert estado["ultima_rodada_em"]

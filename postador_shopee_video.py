@@ -40,6 +40,8 @@ Passos, separados por ponto e vírgula:
     postar           toca em Postar na tela final, com o produto conferido de novo na hora
     print            manda um print da tela no privado do Rafael (nunca no log); print:postar
                      avisa que é a tela antes de postar
+    legenda          compara a legenda da tela final com o título do passo titulo (só
+                     tamanhos e códigos de caractere no log, nunca o texto)
     copiado          diz se o que está copiado no celular é um link da Shopee e o tamanho
                      dele (o link nunca vai para o log): é como o robô pega o link do post
     tela             só descreve a tela
@@ -74,6 +76,7 @@ import re
 import sys
 import tempfile
 import time
+import unicodedata
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
@@ -158,7 +161,9 @@ PALAVRAS_DA_TELA = frozenset("""
     excluir excluído excluídos apagar apagado deletar remover descartar copiar copiado
     fixado fixados fixar desafixar alterações deseja certeza perder perdido perdidas isso
     este esta esse essa será serão editado edição editando manter selecionado
-    selecionados item itens tem mil
+    selecionados item itens tem mil parado parada erro achei consegui ficou título titulo lista
+    nenhum nenhuma celular desconectado pausado horário rodada aprovado recusado pulado
+    preparando mostrou mudou marcou apareceu abriu
     share like liked comment comments more button icon options copy delete pin pinned
     verificação verificar segurança arraste arrastar deslize deslizar controle deslizante
     quebra-cabeça peça complete completar tente atualizar erro carregando aguarde rede
@@ -674,6 +679,41 @@ def texto_copiado(d):
         return ""
 
 
+def legenda_na_tela(xml):
+    """O texto do campo da legenda (@et_caption) na tela final; "" sem ele."""
+    return next((el["texto"] for el in elementos(xml) if el["id"] == "et_caption"), "")
+
+
+def _o_que_conta(texto):
+    """
+    O texto da legenda sem o que o app pode mudar sem mudar o título: espaços e quebras
+    de linha, caracteres invisíveis (largura zero) e o seletor de variação dos emojis.
+    """
+    texto = unicodedata.normalize("NFC", texto or "")
+    return "".join(c for c in texto if not c.isspace() and unicodedata.category(c) not in ("Cf", "Mn", "Cc"))
+
+
+def mesma_legenda(na_tela, titulo):
+    """A legenda da tela é o título guardado? O campo pode cortar o fim."""
+    a, b = _o_que_conta(na_tela), _o_que_conta(titulo)
+    return bool(a and b) and (a == b or (len(a) >= 25 and b.startswith(a.rstrip(".…"))))
+
+
+def comparar_legenda(na_tela, titulo):
+    """
+    Onde a legenda da tela e o título diferem, só com tamanhos e códigos de caractere: o
+    log do explorar é público e nunca leva o texto.
+    """
+    if mesma_legenda(na_tela, titulo):
+        return f"a legenda é o título ({len(na_tela)} caracteres na tela, {len(titulo)} no título)"
+    a, b = na_tela or "", titulo or ""
+    i = next((i for i, (x, y) in enumerate(zip(a, b)) if x != y), min(len(a), len(b)))
+    def codigo(texto):
+        return f"U+{ord(texto[i]):04X}" if i < len(texto) else "fim"
+    return (f"a legenda NÃO é o título: {len(a)} caracteres na tela, {len(b)} no título; a 1ª diferença "
+            f"está no caractere {i + 1} (na tela {codigo(a)}, no título {codigo(b)})")
+
+
 def link_copiado(d):
     """O link da Shopee que está copiado no celular (Copiar link do post); "" sem ele."""
     return links_shopee.primeiro_link(texto_copiado(d), links_shopee.PADRAO_LINK_QUALQUER) or ""
@@ -683,7 +723,7 @@ def separar_passos(texto):
     """Lista de (nome, argumento). Passo desconhecido vira ValueError antes de tocar em qualquer coisa."""
     conhecidos = {"abrir", "fechar", "tocar", "xy", "voltar", "inicio", "rolar", "esperar", "escrever",
                   "link", "video", "titulo", "comentario", "ia", "curtir", "produto", "conferir", "postar",
-                  "print", "copiado", "tela"}
+                  "print", "copiado", "legenda", "tela"}
     passos = []
     for pedaco in (texto or "").split(";"):
         pedaco = pedaco.strip()
@@ -766,6 +806,12 @@ def fazer_passo(d, nome, argumento):
             return postar(d, video)
         return ((True, "vídeo na galeria") if por_na_galeria(d, video["arquivo"])
                 else (False, "o vídeo não apareceu na galeria"))
+    if nome == "legenda":
+        guardado = db.ler_config(CHAVE_TESTE, {}) or {}
+        tela = d.dump_hierarchy()
+        contador = next((el["texto"] for el in elementos(tela) if el["id"] == "tv_content_num"), "")
+        return True, comparar_legenda(legenda_na_tela(tela), guardado.get("titulo") or "") + (
+            f"; contador do app: {contador}" if re.fullmatch(r"[\d/ ]+", contador or "") else "")
     if nome == "copiado":
         texto, link = texto_copiado(d), link_copiado(d)
         if link:
