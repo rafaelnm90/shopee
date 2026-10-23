@@ -498,12 +498,13 @@ def conferir_janela(d, nome, ponto):
     return True, f"produto do vídeo achado pelo nome; Adicionar tocado em {ponto}; a janela confere"
 
 
-def ia_confere_produto(video):
+def ia_confere_produto(video, vistos=None):
     """
     A IA assiste ao vídeo com o nome do produto do link e diz se é o mesmo produto:
     pega o link errado que vem da fonte antes de qualquer toque. Confere VEZES_DA_IA
     vezes, porque já recusou um vídeo que tinha aceitado antes. Sem confirmação em todas
     (não confere, não respondeu ou o link não diz o produto), a exploração para.
+    vistos (lista): recebe o que a IA disse em cada vez, para o Rafael ver no rascunho.
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     nome = nome_do_produto(video)
@@ -524,6 +525,8 @@ def ia_confere_produto(video):
             avisar_rafael.mandar_texto(f"{AVISO_IA}\n\nProduto do link: {nome}\nO que a IA viu: "
                                        f"{str(dados.get('motivo') or '').strip()}")
             return False, f"a IA viu outro produto no vídeo ({vez}ª vez): parado (aviso no privado)"
+        if vistos is not None:
+            vistos.append(str(dados.get("motivo") or "").strip())
     return True, f"a IA confere {VEZES_DA_IA} vezes: o produto do link é o do vídeo"
 
 

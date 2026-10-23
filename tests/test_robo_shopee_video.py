@@ -578,3 +578,36 @@ def test_da_edicao_de_um_video_novo_o_robo_descarta_e_volta_ao_inicio(monkeypatc
     robo.ir_ao_inicio(app)
     assert app.atual == "eu"
     assert "@buttonDefaultPositive" in app.toques and "@tv_no_save" in app.toques and "@tv_save" not in app.toques
+
+
+# --- Preparar 1 Agora e o que o rascunho guarda para o Rafael validar (23/10/2026) ---
+
+def test_preparar_1_agora_salva_um_rascunho_mesmo_pausado_e_fora_do_plano(monkeypatch, avisos):
+    _fonte(monkeypatch)
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True, "robo_inicio": 8, "robo_fim": 9,
+                                               "fonte": "autorais"})
+    app = AppDeMentira()
+    assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    rascunho = robo.esperando_aprovacao()[0]
+    assert rascunho["fonte"] == "autorais"
+    assert robo.json.loads(rascunho["conferencia"]) == ["vestido", "vestido"]     # as 2 vezes da IA
+    assert "Postar" not in app.toques and "@btn_post" not in app.toques
+    assert robo.ler_config()["robo_pausado"] is True                              # continua pausado
+
+
+def test_preparar_1_agora_sem_video_diz_no_privado_por_que_nao_preparou(monkeypatch, avisos):
+    inserir("CREATE TABLE IF NOT EXISTS fila_autorais (id_unico TEXT, caminho_arquivo TEXT, legenda TEXT, data_captura TEXT)")
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True})
+    resultado = robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 23:59"))
+    assert "nenhum vídeo" in resultado
+    assert "não preparei o rascunho que você pediu" in avisos[-1]
+
+
+def test_tabela_antiga_ganha_as_colunas_novas_sem_perder_os_rascunhos():
+    inserir("CREATE TABLE shopee_video_rascunhos (id INTEGER PRIMARY KEY AUTOINCREMENT, id_video TEXT, "
+            "criado_em TEXT, estado TEXT, arquivo TEXT, print TEXT, link TEXT, produtos TEXT, titulo TEXT, "
+            "comentario TEXT, aprovado_em TEXT, postar_em TEXT, postado_em TEXT, link_post TEXT, motivo TEXT)")
+    inserir("INSERT INTO shopee_video_rascunhos (id_video, criado_em, estado, produtos) VALUES (?, ?, ?, ?)",
+            "antigo", "2026-10-22 10:00:00", "rascunho", "[]")
+    rascunho = robo.esperando_aprovacao()[0]
+    assert rascunho["id_video"] == "antigo" and rascunho["fonte"] is None and rascunho["conferencia"] is None
