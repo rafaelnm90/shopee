@@ -1018,3 +1018,24 @@ def test_legenda_lida_do_campo_e_nao_do_retrato_que_troca_emoji_por_ponto():
             raise AssertionError("não deveria ler o retrato")
 
     assert ps.mesma_legenda(ps.legenda_do_campo(Celular()), titulo)
+
+
+def test_video_link_de_video_escolhe_o_que_abre_um_video(monkeypatch):
+    # Para mapear o Ver Produtos no celular: o vídeo da fonte cujo link abre outro vídeo.
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    os.makedirs("archive", exist_ok=True)
+    for nome in ("a.mp4", "b.mp4"):
+        open(os.path.join("archive", nome), "wb").close()
+    candidatos = [("viral:1", "archive/a.mp4", "https://s.shopee.com.br/produto", ""),
+                  ("viral:2", "archive/b.mp4", "https://s.shopee.com.br/video", "")]
+    destinos = {"https://s.shopee.com.br/produto": "https://shopee.com.br/product/1/2",
+                "https://s.shopee.com.br/video": "https://sv.shopee.com.br/share-video/AAAA"}
+
+    async def converter(link):
+        return destinos[link]
+
+    monkeypatch.setattr(ps.assistente, "_candidatos", lambda fonte: candidatos)
+    monkeypatch.setattr(ps, "link_para_converter", converter)
+    video = ps.video_do_teste(novo=True, de_video=True)
+    assert video["id"] == "viral:2" and ps.db.ler_config(ps.CHAVE_TESTE)["id"] == "viral:2"
+    assert ps.separar_passos("video:link-de-video") == [("video", "link-de-video")]
