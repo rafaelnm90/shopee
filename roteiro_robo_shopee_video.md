@@ -58,8 +58,10 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
 - **Comentários dos vídeos (mapeado no Motorola em 24/10/2026, com o vídeo do Rafael):**
   Notificações → filtro **Lives, Vídeos e …**: cada linha é um quadro com um texto (o aviso;
   o de comentário traz o nome da pessoa, "comentou no seu vídeo:" e o comentário entre
-  aspas) e a hora embaixo. Tocar no texto abre o vídeo (`HomeActivity_`) e, uns 8 s depois,
-  o **painel de comentários** por cima (`ReactTransparentActivity_`): o cartão do produto no
+  aspas) e a hora embaixo. Tocar no texto abre o vídeo (`HomeActivity_`) e, às vezes, uns
+  8 s depois, o painel de comentários por cima; outras vezes só o vídeo (na 2ª vez que a
+  mesma notificação foi aberta), e o robô toca no balão da coluna da direita. O
+  **painel de comentários** (`ReactTransparentActivity_`) tem o cartão do produto no
   alto (nome, preço, "com cupom"), **"# Comentários"**, e cada comentário com a foto (x≈84;
   a resposta fica recuada, x≈178), o nome (e o selo **"Criador"** quando é o Rafael), o
   texto, o coração (desc "… comment like", x≈1014), a data ("há # …" ou "# de …"),
@@ -73,8 +75,10 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   `tv_audience_viewer_num` (espectadores), `tv_send_message` (Diga alguma coisa) e o
   "Compre Agora" do produto (proibido). **Vídeo:** player `rn_vod_player_view_…`, o cartão
   do produto com "Comprar com cupom" (proibido), o nome do criador e a legenda embaixo e, na
-  coluna da direita (x≈1002), a foto, o **coração** (~1645, desc "like …", com o número), o
-  **balão de comentários** (~1806, com o número), compartilhar (~1982) e mais.
+  coluna da direita (x≈1002), a foto ("… profile avatar icon"), o **coração** (~1645, desc
+  "like …" sem curtir e "unlike …" curtido, com o número), o **balão de comentários**
+  (~1806, com o número), compartilhar ("… video share icon", ~1982) e mais. O nome do
+  criador fica no "video caption user" e a legenda no "video caption …".
 - **Rascunhos:** tabela `shopee_video_rascunhos` (estados preparando → rascunho →
   aprovado → postado, ou recusado → apagado; pulado quando o problema é do vídeo). O
   vídeo e o print ficam em `~/shopee_video/rascunhos` (ID.mp4 e ID.png). Na galeria do

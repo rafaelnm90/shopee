@@ -1851,7 +1851,8 @@ def respostas_pendentes(agora=None):
 def feed_pendente(agora=None):
     """Falta comentar no feed hoje (3 por dia, P10), e o último foi há INTERVALO_DO_FEED ou mais?"""
     inicio = agora_br(agora).strftime("%Y-%m-%d 00:00:00")
-    if interacoes.quantos_desde("video_feed", "comentado", inicio) >= interacoes.COMENTARIOS_NO_FEED_POR_DIA:
+    if interacoes.quantos_desde("video_feed", interacoes.COMENTADOS_NO_FEED, inicio) >= \
+            interacoes.COMENTARIOS_NO_FEED_POR_DIA:
         return False
     return (ler_estado().get("feed_em") or "") <= _momento(agora_br(agora) - INTERVALO_DO_FEED)
 
@@ -1874,6 +1875,9 @@ def _ler_notificacoes(d, topo=None):
         novas = [t["texto"] for t in interacoes.linhas_das_notificacoes(tela(d), FILTRO_DOS_VIDEOS)
                  if t["texto"] not in linhas]
         linhas += novas
+        if any(PENALIDADE in t.casefold() for t in novas):
+            # O aviso de penalidade faz o robô ler a Saúde do Vídeo (saude_pedida_pela_notificacao).
+            gravar_estado(penalidade_vista_em=_momento())
         if not topo or topo in map(interacoes.marca, linhas) or (vez and not novas):
             break
         ps.rolar(d)
@@ -1948,6 +1952,26 @@ def _abrir_notificacao(d, texto):
     raise Parada("a notificação do comentário não está mais na lista")
 
 
+def _abrir_comentarios(d):
+    """
+    O painel de comentários do vídeo aberto pela notificação. Às vezes ele abre sozinho uns
+    8 s depois do vídeo; outras, só o vídeo aparece (Motorola, 24/10/2026), e o robô toca no
+    balão de comentários da coluna da direita.
+    """
+    if esperar_na_tela(d, "Comentários", ESPERA_DOS_COMENTARIOS // 2):
+        return
+    xml = tela(d)
+    video = interacoes.video_do_feed(xml)
+    if not video:
+        raise Parada("o vídeo do comentário não abriu")
+    if ps.proibido_no_ponto(xml, *video["balao"]):
+        raise Parada(ps.RECUSA)
+    d.click(*video["balao"])
+    pausa(3)
+    if not esperar_na_tela(d, "Comentários", ESPERA_DOS_COMENTARIOS // 2):
+        raise Parada("o painel de comentários não abriu")
+
+
 def _achar_no_painel(d, nome, comentario):
     """
     (tela, comentários do painel, posição do comentário da pessoa ou None), rolando o painel.
@@ -2020,8 +2044,7 @@ def _responder_um(d, texto, agora=None):
     produto = ""
     try:
         _abrir_notificacao(d, texto)
-        if not esperar_na_tela(d, "Comentários", ESPERA_DOS_COMENTARIOS):
-            raise Parada("o painel de comentários não abriu")
+        _abrir_comentarios(d)
         xml, painel, i = _achar_no_painel(d, nome, comentario)
         if i is None:
             raise Parada("o comentário não está mais no vídeo")
@@ -2128,7 +2151,10 @@ def _curtir_no_feed(d, video):
 
 
 def _comentar_no_feed(d, video, texto):
-    """Abre os comentários pelo balão, escreve, envia e confere que o comentário apareceu."""
+    """
+    Abre os comentários pelo balão, escreve e envia. Devolve se o comentário apareceu na
+    lista; antes de enviar, o que não dá certo para (Parada).
+    """
     xml = tela(d)
     if ps.proibido_no_ponto(xml, *video["balao"]):
         raise Parada(ps.RECUSA)
@@ -2145,8 +2171,13 @@ def _comentar_no_feed(d, video, texto):
     if not interacoes.campo_de_escrever(tela(d)):
         raise Parada("o campo de comentar não abriu")
     _escrever_e_enviar(d, texto)
-    if not any(interacoes.parecidos(c["texto"], texto) for c in interacoes.comentarios_do_painel(tela(d))):
-        raise Parada("o comentário não apareceu no vídeo do feed")
+    for vez in range(2):
+        if any(interacoes.parecidos(c["texto"], texto) for c in interacoes.comentarios_do_painel(tela(d))):
+            return True
+        if not vez:
+            ps.rolar(d, para_cima=True)
+            pausa(2)
+    return False
 
 
 def interagir_no_feed(d, agora=None):
@@ -2194,12 +2225,19 @@ def _interagir_com(d, video, marca, anteriores, agora=None):
         return "feed: a IA pulou o vídeo"
     _curtir_no_feed(d, video)
     try:
-        _comentar_no_feed(d, video, texto)
+        apareceu = _comentar_no_feed(d, video, texto)
     except Parada as e:
         registro_processos.registrar(REGISTRO, "feed: comentar", "parou", e.motivo, ok=False, origem=marca)
         raise
-    interacoes.guardar(marca, "video_feed", "comentado", agora)
     gravar_estado(feed_textos=(anteriores + [texto])[-10:])
+    if not apareceu:
+        # Enviado sem aparecer: pode ter saído, então o vídeo não volta e conta no dia.
+        interacoes.guardar(marca, "video_feed", "não confirmado", agora)
+        registro_processos.registrar(REGISTRO, "feed: comentar", "não confirmado", "enviado sem aparecer na lista",
+                                     ok=False, origem=marca)
+        registrar_tentativa("feed", "parou", "o comentário não apareceu no vídeo do feed", agora=agora)
+        return "feed: comentário enviado sem aparecer na lista"
+    interacoes.guardar(marca, "video_feed", "comentado", agora)
     registro_processos.registrar(REGISTRO, "feed: comentar", "comentado", ok=True, origem=marca)
     registrar_tentativa("feed", "comentado", agora=agora)
     return "feed: 1 vídeo curtido e comentado"
