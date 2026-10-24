@@ -631,18 +631,35 @@ def test_saude_em_relatorio_geral_lembra_as_punicoes_e_os_botoes_param(bm, Msg, 
     rodar(__import__("asyncio").sleep(0))
     assert rodadas == [("--saude",)]
 
-    enviados = []
+    enviados, apagadas, editadas = [], [], []
 
     class Bot:
         async def send_message(self, chat, texto, **kwargs):
             enviados.append((texto, kwargs.get("reply_markup")))
+            return SimpleNamespace(message_id=900 + len(enviados))
+
+        async def delete_message(self, chat, mensagem):
+            if mensagem == 901:
+                # O primeiro aviso passou das 48 h: o Telegram não deixa apagar.
+                raise RuntimeError("message can't be deleted")
+            apagadas.append(mensagem)
+
+        async def edit_message_text(self, text, chat_id=None, message_id=None):
+            editadas.append((message_id, text))
     monkeypatch.setattr(sv, "bot_instance", Bot())
     rodar(sv.lembrar_apelacoes())
     texto, teclado = enviados[0]
     assert "<code>O vídeo mostra o produto do anúncio.</code>" in texto
-    botao_recorri = teclado.inline_keyboard[0][0]
+    # Mais dois lembretes, de hora em hora; os ids ficam guardados para apagar depois.
+    for _ in range(2):
+        with sv.db.conexao() as con:
+            con.execute("UPDATE shopee_video_punicoes SET ultimo_aviso = '2000-01-01 00:00:00'")
+        rodar(sv.lembrar_apelacoes())
+    assert sv.apelacoes.mensagens_de(ident) == [901, 902, 903]
+    botao_recorri = enviados[-1][1].inline_keyboard[0][0]
     respostas, teclados = [], []
     mensagem = Msg()
+    mensagem.message_id = 903
 
     async def editar(reply_markup=None):
         teclados.append(reply_markup)
@@ -655,5 +672,8 @@ def test_saude_em_relatorio_geral_lembra_as_punicoes_e_os_botoes_param(bm, Msg, 
     rodar(sv.decisao_da_apelacao(clique))
     assert "você recorreu" in respostas[0] and teclados == [None]
     assert sv.apelacoes.pegar(ident)["situacao"] == "recorrida"
+    # Escolha do Rafael (24/10, P7): os lembretes de antes saem do privado; fica a tocada.
+    assert apagadas == [902] and editadas == [(901, sv.LEMBRETE_RESOLVIDO)]
+    assert sv.apelacoes.mensagens_de(ident) == [903]
     rodar(sv.lembrar_apelacoes())
-    assert len(enviados) == 1
+    assert len(enviados) == 3

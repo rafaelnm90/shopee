@@ -17,6 +17,7 @@ O texto só diz o que é verdade: punição por propriedade intelectual de víde
 outro canal não ganha texto dizendo que o vídeo é dele; o aviso diz de onde veio.
 """
 import html
+import json
 import logging
 import re
 from datetime import datetime, timedelta
@@ -66,14 +67,17 @@ def _criar_tabela(con):
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, chave TEXT UNIQUE, tipo TEXT, data_punicao TEXT, "
                 "status_app TEXT, titulo TEXT, postado_em TEXT, rascunho INTEGER, fonte TEXT, texto TEXT, "
                 "observacao TEXT, situacao TEXT, criada TEXT, lida_em TEXT, ultimo_aviso TEXT, "
-                "avisos INTEGER DEFAULT 0, recorrida_em TEXT)")
-    # A coluna que veio depois entra na tabela que já existe no servidor.
-    if "recorrida_em" not in {linha[1] for linha in con.execute("PRAGMA table_info(shopee_video_punicoes)")}:
-        con.execute("ALTER TABLE shopee_video_punicoes ADD COLUMN recorrida_em TEXT")
+                "avisos INTEGER DEFAULT 0, recorrida_em TEXT, mensagens TEXT)")
+    # As colunas que vieram depois entram na tabela que já existe no servidor.
+    existentes = {linha[1] for linha in con.execute("PRAGMA table_info(shopee_video_punicoes)")}
+    for coluna in ("recorrida_em", "mensagens"):
+        if coluna not in existentes:
+            con.execute(f"ALTER TABLE shopee_video_punicoes ADD COLUMN {coluna} TEXT")
 
 
 COLUNAS = ("id", "chave", "tipo", "data_punicao", "status_app", "titulo", "postado_em", "rascunho", "fonte",
-           "texto", "observacao", "situacao", "criada", "lida_em", "ultimo_aviso", "avisos", "recorrida_em")
+           "texto", "observacao", "situacao", "criada", "lida_em", "ultimo_aviso", "avisos", "recorrida_em",
+           "mensagens")
 
 
 def _ler(linhas):
@@ -223,11 +227,28 @@ def vencidas(agora=None):
             if p["situacao"] == PENDENTE and (not p["ultimo_aviso"] or p["ultimo_aviso"] <= limite)]
 
 
-def marcar_aviso(ident, agora=None):
+def marcar_aviso(ident, agora=None, mensagem=None):
+    """O aviso saiu; mensagem: o id dele no privado, para apagar quando o Rafael decidir."""
     with db.conexao() as con:
         _criar_tabela(con)
-        con.execute("UPDATE shopee_video_punicoes SET ultimo_aviso = ?, avisos = COALESCE(avisos, 0) + 1 WHERE id = ?",
-                    (_momento(agora), ident))
+        linha = con.execute("SELECT mensagens FROM shopee_video_punicoes WHERE id = ?", (ident,)).fetchone()
+        mensagens = json.loads((linha[0] if linha else None) or "[]")
+        if type(mensagem) is int:
+            mensagens.append(mensagem)
+        con.execute("UPDATE shopee_video_punicoes SET ultimo_aviso = ?, avisos = COALESCE(avisos, 0) + 1, "
+                    "mensagens = ? WHERE id = ?", (_momento(agora), json.dumps(mensagens), ident))
+
+
+def mensagens_de(ident):
+    """Os ids, no privado, do aviso e dos lembretes da punição."""
+    p = pegar(ident)
+    return json.loads((p or {}).get("mensagens") or "[]")
+
+
+def guardar_mensagens(ident, mensagens):
+    with db.conexao() as con:
+        _criar_tabela(con)
+        con.execute("UPDATE shopee_video_punicoes SET mensagens = ? WHERE id = ?", (json.dumps(mensagens), ident))
 
 
 # --- O aviso no privado ---
@@ -265,14 +286,16 @@ def botoes(p):
 async def lembrar(enviar, agora=None):
     """
     Manda o aviso de cada punição pendente nunca avisada, e de novo a cada hora.
-    enviar(texto, p) é a função do bot (async, devolve True se saiu). Um aviso que não
-    sai fica para a próxima volta. Devolve quantos saíram.
+    enviar(texto, p) é a função do bot (async, devolve o id da mensagem, que fica guardado
+    para apagar depois, ou True se saiu). Um aviso que não sai fica para a próxima volta.
+    Devolve quantos saíram.
     """
     enviados = 0
     for p in vencidas(agora):
         try:
-            if await enviar(montar_aviso(p), p):
-                marcar_aviso(p["id"], agora)
+            mensagem = await enviar(montar_aviso(p), p)
+            if mensagem:
+                marcar_aviso(p["id"], agora, mensagem)
                 enviados += 1
         except Exception as e:
             logger.warning(f"⚠️ [Apelação Shopee Vídeo] Aviso da punição {p['id']} não saiu: {type(e).__name__}")
