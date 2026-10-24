@@ -125,6 +125,77 @@ def test_aprovado_espera_a_hora_dele():
     assert robo.o_que_fazer(config, momento("2026-10-22 16:00"))[0] == "postar"
 
 
+# --- O Horário das Interações (escolha do Rafael, P22 a P24) ---
+
+def _com_interacoes(inicio=12, fim=15, **mais):
+    return {**robo.PADRAO, "robo_limite_min": 6, "robo_limite_max": 6, "robo_inicio": 8, "robo_fim": 22,
+            "robo_interacoes_inicio": inicio, "robo_interacoes_fim": fim, **mais}
+
+
+def test_plano_do_dia_pula_o_horario_das_interacoes():
+    horarios = robo.planejar(_com_interacoes(), "2026-10-25")
+    assert len(horarios) == 6 and all(not "12:00" <= h < "15:00" for h in horarios)
+    assert all("08:00" <= h < "22:00" for h in horarios)
+    # Sem ele escolhido, o plano corre o Horário do Robô inteiro, como antes.
+    sem = {**_com_interacoes(), "robo_interacoes_inicio": None, "robo_interacoes_fim": None}
+    assert robo.planejar(sem, "2026-10-25") != horarios
+
+
+def test_na_janela_das_interacoes_so_responde_e_comenta_no_feed(monkeypatch):
+    config = _com_interacoes()
+    robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-25 13:00")))
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: True)
+    monkeypatch.setattr(robo, "feed_pendente", lambda agora=None: True)
+    aprovado = _rascunho("aprovado", postar_em="2026-10-25 09:00:00")
+    # 13h: na janela, nem o aprovado vencido sai nem o plano gasta horário.
+    assert robo.o_que_fazer(config, momento("2026-10-25 13:00")) == ("responder", None)
+    assert robo.estado_do_dia(config, momento("2026-10-25 13:00"))["feitos"] == 0
+    # 16h: fora dela, o robô posta e prepara, e não responde nem comenta.
+    assert robo.o_que_fazer(config, momento("2026-10-25 16:00")) == ("postar", aprovado)
+    robo.atualizar(aprovado, estado="postado")
+    assert robo.o_que_fazer(config, momento("2026-10-25 16:00")) == ("rascunho", None)
+    monkeypatch.setattr(robo, "consumir_horarios", lambda config, agora=None: False)
+    monkeypatch.setattr(robo, "repetir_o_que_falhou", lambda config, agora=None: False)
+    assert robo.o_que_fazer(config, momento("2026-10-25 16:30")) is None
+
+
+def test_janela_das_interacoes_fora_do_horario_do_robo_tambem_roda():
+    config = _com_interacoes(inicio=22, fim=24)
+    assert robo.no_horario(config, momento("2026-10-25 22:30"))
+    assert not robo.no_horario(config, momento("2026-10-25 07:30"))
+
+
+def test_aprovado_nao_cai_no_horario_das_interacoes():
+    class Sorteio:
+        @staticmethod
+        def randint(a, b):
+            return a
+
+    quando = robo.proxima_postagem(_com_interacoes(), momento("2026-10-25 11:58"), sorteio=Sorteio)
+    assert quando == "2026-10-25 15:05:00"
+    # Interações até a meia-noite: o aprovado vai para o começo do Horário do Robô de amanhã.
+    quando = robo.proxima_postagem(_com_interacoes(inicio=21, fim=24), momento("2026-10-25 20:58"), sorteio=Sorteio)
+    assert quando == "2026-10-26 08:05:00"
+
+
+def test_feed_numa_janela_curta_espalha_os_3_comentarios_nela():
+    from datetime import timedelta
+    assert robo.intervalo_do_feed(_com_interacoes(inicio=12, fim=15)) == timedelta(hours=1)
+    assert robo.intervalo_do_feed(_com_interacoes(inicio=10, fim=20)) == robo.INTERVALO_DO_FEED
+    assert robo.intervalo_do_feed({**robo.PADRAO}) == robo.INTERVALO_DO_FEED
+
+
+def test_mudar_a_janela_replaneja_o_que_falta_sem_perder_os_feitos():
+    config = _com_interacoes(inicio=None, fim=None)
+    estado = robo.estado_do_dia(config, momento("2026-10-25 09:00"))
+    estado["feitos"] = 2
+    robo.db.salvar_config(robo.CHAVE_DIA, estado)
+    robo.replanejar_hoje(_com_interacoes(), momento("2026-10-25 09:00"))
+    novo = robo.db.ler_config(robo.CHAVE_DIA)
+    assert novo["feitos"] == 2 and all(not "12:00" <= h < "15:00" for h in novo["horarios"])
+
+
 # --- A rodada não toca no celular quando não deve ---
 
 class Intocavel:
