@@ -192,14 +192,18 @@ async def lembrar_apelacoes():
     Pedido do Rafael: DECISOES.md, Shopee Vídeo.
     """
     async def enviar(texto, p):
-        await bot_instance.send_message(ADMIN_ID, texto, parse_mode="HTML", reply_markup=apelacoes.botoes(p),
-                                        disable_web_page_preview=True)
-        return True
+        mensagem = await bot_instance.send_message(ADMIN_ID, texto, parse_mode="HTML",
+                                                   reply_markup=apelacoes.botoes(p), disable_web_page_preview=True)
+        # O id volta para apagar este lembrete quando o Rafael tocar num dos botões.
+        return mensagem.message_id
     enviados = await apelacoes.lembrar(enviar)
     if enviados:
         logger.info(f"⚖️ [Apelação Shopee Vídeo] {enviados} aviso(s) de punição no privado.")
         registro_processos.registrar("shopee_video", "aviso de punição para recorrer", "enviado", str(enviados),
                                      ok=True)
+
+
+LEMBRETE_RESOLVIDO = "✅ Punição resolvida: este lembrete não vale mais."
 
 
 @router.callback_query(F.data.startswith((apelacoes.CALLBACK_RECORRI, apelacoes.CALLBACK_NAO_VAI)))
@@ -219,8 +223,30 @@ async def decisao_da_apelacao(callback: types.CallbackQuery):
         await callback.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
+    if ident.isdigit():
+        await limpar_lembretes(int(ident), getattr(callback.message, "message_id", None))
     if mudou:
         await callback.message.answer(resposta)
+
+
+async def limpar_lembretes(ident, tocada):
+    """
+    Tocou num dos botões: os outros avisos e lembretes da punição saem do privado, e fica
+    só a mensagem tocada, sem os botões, e a confirmação. O Telegram só deixa apagar até
+    48 h depois do envio: o mais velho fica com o texto trocado (e sem os botões).
+    Escolha do Rafael (24/10, P7): DECISOES.md, Shopee Vídeo.
+    """
+    for mensagem in apelacoes.mensagens_de(ident):
+        if mensagem == tocada:
+            continue
+        try:
+            await bot_instance.delete_message(ADMIN_ID, mensagem)
+        except Exception:
+            try:
+                await bot_instance.edit_message_text(text=LEMBRETE_RESOLVIDO, chat_id=ADMIN_ID, message_id=mensagem)
+            except Exception:
+                pass
+    apelacoes.guardar_mensagens(ident, [tocada] if tocada else [])
 
 
 def teclado_saude():
