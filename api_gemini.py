@@ -223,3 +223,53 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
         ULTIMO_ERRO_IA = str(e)[:400]
         logger.error(f"❌ [IA] Falha crítica na análise do vídeo: {e}")
         return None
+
+
+# --- Os modelos que a chave enxerga (modelos_ia.yml) ---
+
+# Modelos de generateContent que não servem aos robôs (imagem, voz, embeddings...).
+FORA_DOS_ROBOS = ("image", "tts", "audio", "live", "embedding", "robotics", "computer-use", "veo", "imagen")
+
+
+def modelos_da_chave():
+    """Os modelos Gemini de texto (generateContent) que a chave do .env enxerga, só os nomes."""
+    nomes = (m.name.split("/")[-1] for m in client_genai.models.list() if "generateContent" in (m.supported_actions or []))
+    return sorted(n for n in nomes if n.startswith("gemini") and not any(p in n for p in FORA_DOS_ROBOS))
+
+
+def testar_modelo(modelo):
+    """Uma chamada curta ao modelo: "responde", ou o motivo fixo de não responder."""
+    try:
+        resposta = client_genai.models.generate_content(model=modelo, contents="Responda só: ok")
+        return "responde" if (resposta and resposta.text) else "resposta vazia"
+    except Exception as e:
+        fora = tempo_fora(str(e))
+        return fora[1] if fora else f"erro {type(e).__name__}"
+
+
+def relatorio_dos_modelos(da_chave, testar=None):
+    """
+    As linhas do modelos_ia.yml: cada modelo da cascata, se a chave enxerga e (com testar)
+    se responde, e os modelos de texto da chave que não estão na cascata. Só nomes de
+    modelo e motivos fixos: o log do Actions é público.
+    """
+    def situacao(modelo):
+        partes = ["na chave" if modelo in da_chave else "fora da chave"]
+        if testar:
+            partes.append(testar(modelo))
+        return ", ".join(partes)
+
+    linhas = ["== Cascata (na ordem)"] + [f"{modelo}: {situacao(modelo)}" for modelo in MODELOS_CASCATA_GEMINI]
+    novos = [m for m in da_chave if m not in MODELOS_CASCATA_GEMINI]
+    linhas.append("== Modelos de texto da chave fora da cascata")
+    linhas += [f"{modelo}: {situacao(modelo)}" for modelo in novos] or ["nenhum"]
+    return linhas
+
+
+if __name__ == "__main__":
+    import sys
+    if not sys.argv[1:] or sys.argv[1] != "modelos":
+        print("Uso: python3 api_gemini.py modelos [--testar]")
+        sys.exit(2)
+    logging.disable(logging.CRITICAL)
+    print("\n".join(relatorio_dos_modelos(modelos_da_chave(), testar_modelo if "--testar" in sys.argv else None)))
