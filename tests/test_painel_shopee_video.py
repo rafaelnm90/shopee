@@ -357,7 +357,14 @@ def test_robo_roda_a_cada_15_min_so_ativo_e_no_horario(bm, monkeypatch):
     sv = _painel(bm)
     agendador = AsyncIOScheduler(timezone=bm.FUSO_STR)
     sv.configurar_dependencias(sv.bot_instance, agendador, sv.ADMIN_ID)
-    assert agendador.get_job("shopee_video_robo").trigger.interval.total_seconds() == 900
+    from datetime import datetime
+    from fuso import fuso_horario
+    job = agendador.get_job("shopee_video_robo")
+    assert job.trigger.interval.total_seconds() == 900
+    # Depois de um reinício, a primeira volta sai em 2 min, não em 15 (23/10: os deploys
+    # seguidos atrasaram o post aprovado).
+    falta = (job.next_run_time - datetime.now(fuso_horario)).total_seconds()
+    assert 60 < falta <= 120
     rodadas = []
 
     async def rodar_robo(*argumentos):

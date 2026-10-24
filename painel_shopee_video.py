@@ -34,7 +34,7 @@ import logging
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from html import escape as html_escape
 
 from aiogram import Router, Bot, types, F
@@ -68,6 +68,7 @@ PADRAO = {"pausado": True, "limite_min": 5, "limite_max": 10, "inicio": 13, "fim
           "fonte": assistente.FONTE_PADRAO, **robo.PADRAO}
 MAXIMO_POR_DIA = 50
 ROBO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "robo_shopee_video.py")
+PRIMEIRA_VOLTA_DO_ROBO = timedelta(minutes=2)
 
 
 def configurar_dependencias(bot: Bot, scheduler, admin_id):
@@ -75,8 +76,12 @@ def configurar_dependencias(bot: Bot, scheduler, admin_id):
     bot_instance, scheduler_instance, ADMIN_ID = bot, scheduler, admin_id
     scheduler.add_job(verificar_envio, "interval", minutes=5, id="shopee_video_assistente",
                       replace_existing=True, max_instances=1, coalesce=True)
+    # Depois de um reinício (deploy), a primeira volta sai em PRIMEIRA_VOLTA_DO_ROBO: esperar
+    # os 15 min inteiros atrasava o aprovado que já estava na hora (23/10: 2 deploys seguidos
+    # empurraram o post das 23:03 para depois das 23:26).
     scheduler.add_job(verificar_robo, "interval", minutes=15, id="shopee_video_robo",
-                      replace_existing=True, max_instances=1, coalesce=True)
+                      replace_existing=True, max_instances=1, coalesce=True,
+                      next_run_time=datetime.now(fuso_horario) + PRIMEIRA_VOLTA_DO_ROBO)
     scheduler.add_job(mandar_resumo_do_robo, "cron", hour=HORA_DO_RESUMO, minute=0, id="shopee_video_resumo",
                       replace_existing=True, max_instances=1, coalesce=True)
     scheduler.add_job(lembrar_apelacoes, "interval", minutes=5, id="shopee_video_apelacoes",
