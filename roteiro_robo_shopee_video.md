@@ -137,7 +137,11 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     Comprar com cupom), **"Ver Mais (N)"** e **"Você Também Pode Gostar"** (recomendações da
     Shopee, que não são do vídeo). O toque no nome abre a página do produto
     (`HalfPdpActivity`), com o coração (`buttonItemLike`/`buttonItemLiked`) e o nome no id
-    **`labelProductPageProductName`**; o voltar volta à lista.
+    **`labelProductPageProductName`**; o voltar volta à lista. **Vídeo com um produto só**
+    (24/10/2026): o player não mostra o "Ver Produtos (N)"; no lugar dele, embaixo do cartão,
+    fica a **barra dos produtos** (descrição terminada em "video product icon") com o desconto
+    e o nome. O toque na barra abre a mesma lista, com "Ver Produtos (1)", o cartão do produto
+    do criador e o "Você Também Pode Gostar" logo abaixo (sem o "Ver Mais").
   - **mais de um produto na tela final** (23/10/2026): com um produto anexado, a tela mostra
     **"Adicionar Mais"** (`tv_add_more`), que abre a mesma lista (o anexado aparece como
     "Adicionado"; cada item mostra a taxa de comissão); Adicionar → "Editar nome do produto" →

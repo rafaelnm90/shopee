@@ -190,11 +190,13 @@ def test_com_o_explorar_no_celular_a_rodada_nao_toca(monkeypatch, avisos):
 
 # --- O caminho no app, com um app de mentira ---
 
-def _no(texto="", ident="", caixa=(0, 0, 10, 10), clicavel=True, filhos=""):
+def _no(texto="", ident="", caixa=(0, 0, 10, 10), clicavel=True, filhos="", desc=""):
     x1, y1, x2, y2 = caixa
     atributos = f'text="{escape(texto, {chr(34): "&quot;"})}" class="android.view.View" clickable="{"true" if clicavel else "false"}"'
     if ident:
         atributos += f' resource-id="com.shopee.br:id/{ident}"'
+    if desc:
+        atributos += f' content-desc="{escape(desc)}"'
     return f'<node {atributos} bounds="[{x1},{y1}][{x2},{y2}]">{filhos}</node>'
 
 
@@ -1095,7 +1097,8 @@ class AppDoVerProdutos(AppDeMentira):
         super().__init__()
         self.removido, self.curtidos, self.anexados, self.janela = removido, set(), [], None
         # player: "normal"; "lento" (o Ver Produtos só aparece na segunda olhada); "um_produto"
-        # (o cartão de um produto, sem o Ver Produtos); "vazio"; "sem_player" (outra tela).
+        # (um produto só: o cartão e a barra com o nome dele, sem o Ver Produtos); "so_cartao"
+        # (o cartão, sem a barra); "vazio"; "sem_player" (outra tela).
         self.player, self.olhadas_no_player = player, 0
 
     def _nos(self):
@@ -1107,11 +1110,22 @@ class AppDoVerProdutos(AppDeMentira):
             if self.player == "sem_player":
                 return [_no("Para você", caixa=(640, 140, 830, 195), clicavel=False)]
             nos = [_no(ident=robo.PLAYER_DO_VIDEO, caixa=(0, 0, 1080, 2260), clicavel=False)]
-            if self.player == "um_produto":
+            if self.player in ("um_produto", "so_cartao"):
                 nos.append(_cartao(PRODUTO_A, 1600))
+            if self.player == "um_produto":
+                # A barra embaixo do vídeo com o desconto e o nome (Motorola, 24/10/2026).
+                nos.append(_no(desc="shopee video product icon", caixa=(30, 2050, 820, 2110), filhos=(
+                    _no("-20% de desconto", caixa=(40, 2060, 300, 2100), clicavel=False)
+                    + _no("Garrafa Térmica Inox de 1 Litro", caixa=(320, 2060, 810, 2100), clicavel=False))))
             elif self.player == "normal" or (self.player == "lento" and self.olhadas_no_player > 1):
                 nos.append(_no("Ver Produtos (2)", caixa=(400, 1940, 650, 2000)))
             return nos
+        if self.atual == "ver_produtos" and self.player == "um_produto":
+            return [_no(caixa=(0, 400, 1080, 2400), filhos=(
+                _no("Ver Produtos (1)", caixa=(40, 700, 300, 750), clicavel=False)
+                + _cartao(PRODUTO_A, 1030)
+                + _no("Você Também Pode Gostar", caixa=(300, 1420, 780, 1470), clicavel=False)
+                + _cartao(RECOMENDADO, 1500)))]
         if self.atual == "ver_produtos":
             return [_no(caixa=(0, 400, 1080, 2400), filhos=(
                 _no("Ver Produtos (2)", caixa=(40, 700, 300, 750), clicavel=False)
@@ -1150,7 +1164,8 @@ class AppDoVerProdutos(AppDeMentira):
         tocados = [el for el in robo.ps.elementos(self.dump_hierarchy()) if robo.ps._dentro((x, y), el["caixa"])]
         textos = {el["texto"] for el in tocados} | {"@" + el["id"] for el in tocados if el["id"]}
         assert not any(robo.ps.texto_proibido(t) for t in textos), f"tocou num botão de comprar: {textos}"
-        if self.atual == "player" and "Ver Produtos (2)" in textos:
+        if self.atual == "player" and ("Ver Produtos (2)" in textos
+                                       or any(el["descricao"] == "shopee video product icon" for el in tocados)):
             self.atual = "ver_produtos"
         elif self.atual == "ver_produtos":
             nome = next((t for t in textos if t in (PRODUTO_A, PRODUTO_B, RECOMENDADO)), None)
@@ -1239,8 +1254,19 @@ def test_link_de_video_espera_o_ver_produtos_que_demora(monkeypatch, avisos):
     assert app.anexados == [PRODUTO_A, PRODUTO_B]
 
 
+def test_link_de_video_com_um_produto_so_abre_a_lista_pela_barra(monkeypatch, avisos):
+    # 24/10/2026 (Preparar 1 Agora do Rafael): o vídeo de um produto só não mostra o "Ver
+    # Produtos (N)", só a barra com o nome dele, e o robô desistia. A barra abre a mesma lista.
+    _fonte_de_video(monkeypatch)
+    app = AppDoVerProdutos(player="um_produto")
+    assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert app.curtidos == {PRODUTO_A} and app.anexados == [PRODUTO_A]
+    assert RECOMENDADO not in app.toques
+    assert robo.esperando_aprovacao()[0]["produtos"] == [PRODUTO_A]
+
+
 @pytest.mark.parametrize("player, motivo", [
-    ("um_produto", "o vídeo mostrou o cartão de um produto, sem o Ver Produtos"),
+    ("so_cartao", "o vídeo mostrou o cartão de um produto, sem o Ver Produtos"),
     ("vazio", "o link de vídeo não mostrou o Ver Produtos"),
     ("sem_player", "o link de vídeo não abriu o vídeo no app (sem o Ver Produtos)"),
 ])

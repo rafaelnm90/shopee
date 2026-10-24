@@ -973,6 +973,18 @@ def produtos_vinculados(xml):
     return pontos
 
 
+def barra_dos_produtos(xml):
+    """
+    A barra dos produtos embaixo do vídeo (descrição terminada em "video product icon").
+    No vídeo com um produto só ela mostra o desconto e o nome, sem o "Ver Produtos (N)", e
+    o toque nela abre a mesma lista do Ver Produtos, com o produto do criador em cima e o
+    "Você Também Pode Gostar" embaixo (Motorola, 24/10/2026). O centro dela, ou None.
+    """
+    barra = next((el for el in elementos(xml) if el["clicavel"]
+                  and _normal(el["descricao"]).endswith("video product icon")), None)
+    return _centro(barra) if barra else None
+
+
 def nome_na_pagina_do_produto(xml):
     """O nome do produto na página dele (labelProductPageProductName); "" sem ele."""
     return next((el["texto"].strip() for el in elementos(xml) if el["id"] == "labelProductPageProductName"), "")

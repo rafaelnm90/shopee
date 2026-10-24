@@ -1495,8 +1495,8 @@ def _preparar(d, ident, video, fonte, agora=None):
 
 def _produtos_do_video(d, video, vistos):
     """
-    Link de vídeo (Ver Produtos): abre o vídeo no celular e, na lista do Ver Produtos, cada
-    produto que o criador vinculou (nunca as recomendações de "Você Também Pode Gostar"):
+    Link de vídeo (Ver Produtos): abre o vídeo no celular e, na lista do Ver Produtos (pelo
+    "Ver Produtos (N)" ou, com um produto só, pela barra dele), cada produto que o criador vinculou (nunca as recomendações de "Você Também Pode Gostar"):
     lê o nome na página dele, a IA confere o vídeo com esse nome VEZES_DA_IA vezes, e o
     confirmado é curtido. Devolve os nomes confirmados; nenhum ou vídeo removido: o vídeo
     fica de lado. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
@@ -1510,9 +1510,18 @@ def _produtos_do_video(d, video, vistos):
         xml = tela(d)
     if ps.video_removido(xml):
         raise Parada("o vídeo do link foi removido", do_video=True)
-    if not tem(xml, "Ver Produtos"):
-        raise Parada(_sem_ver_produtos(xml), do_video=True)
-    tocar(d, "Ver Produtos", 6)
+    if tem(xml, "Ver Produtos"):
+        tocar(d, "Ver Produtos", 6)
+    else:
+        # Vídeo com um produto só: no lugar do Ver Produtos, a barra com o nome dele, que
+        # abre a mesma lista.
+        barra = ps.barra_dos_produtos(xml)
+        if not barra:
+            raise Parada(_sem_ver_produtos(xml), do_video=True)
+        if ps.proibido_no_ponto(xml, *barra):
+            raise Parada(ps.RECUSA)
+        d.click(*barra)
+        pausa(6)
     quantos = len(ps.produtos_vinculados(tela(d)))
     if not quantos:
         raise Parada("o Ver Produtos não mostrou os produtos do criador", do_video=True)
@@ -1546,7 +1555,7 @@ def _sem_ver_produtos(xml):
     """
     Por que o vídeo não mostrou o Ver Produtos, em texto fixo, que o investigar_robo.yml
     mostra: o link não abriu o player, o player tem o cartão de um produto (com o botão
-    de comprar) sem o Ver Produtos, ou nem isso.
+    de comprar) sem o Ver Produtos nem a barra dos produtos, ou nem isso.
     """
     lista = ps.elementos(xml)
     if not any(el["id"] == PLAYER_DO_VIDEO for el in lista):
