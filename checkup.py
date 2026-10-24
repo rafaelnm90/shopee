@@ -281,7 +281,7 @@ SEM_META = {
     ("shopee_video", "aviso de punição para recorrer"), ("shopee_video", "conferir a tela final"),
     ("shopee_video", "curtir o produto"), ("shopee_video", "feed: "),
     ("shopee_video", "notificações (respostas)"), ("shopee_video", "preparo interrompido"),
-    ("shopee_video", "rodada fora do bot"),
+    ("shopee_video", "rodada fora do bot"), ("shopee_video", "título da IA"),
     ("shopee_video", "responder comentário"),
 }
 

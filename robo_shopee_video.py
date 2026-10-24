@@ -82,6 +82,9 @@ CHAVE_DIA = "shopee_video_robo_dia"
 # Shopee Vídeo.
 TENTATIVAS_A_MAIS = 2
 VIDEOS_POR_HORARIO = 3
+# A IA que volta sem o título ganha mais uma chance, depois desta pausa (segundos).
+TENTATIVAS_DO_TITULO = 2
+ESPERA_DO_TITULO = 45
 # Vídeo de produto sem oferta de afiliado (não paga comissão) fica de lado antes de tocar
 # no celular; numa rodada, até estes. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 VIDEOS_SEM_OFERTA_POR_RODADA = 5
@@ -551,6 +554,7 @@ PASSOS = (
     ("sem oferta de afiliado", "oferta de afiliado"),
     ("o link não diz o produto", "achar o produto do link"),
     ("violação", "diretrizes da Shopee"),
+    ("não devolveu o título", "título da IA"),
     ("a IA", "conferência da IA"),
     ("Ver Produtos", "Ver Produtos"),
     ("foi removido", "vídeo removido"),
@@ -1407,6 +1411,44 @@ def _conferir(resultado, do_video=True):
         raise Parada(motivo, do_video=do_video)
 
 
+def _motivo_da_ia():
+    """
+    Por que a IA não deu o título, em códigos fixos do Google (nunca o texto dela): a resposta
+    vazia traz o finish_reason (SAFETY, RECITATION, MAX_TOKENS...) ou o block_reason; a cota
+    e os outros erros vêm do ULTIMO_ERRO_IA; sem erro, a IA respondeu sem o título no JSON.
+    """
+    erro = ps.api_gemini.ULTIMO_ERRO_IA or ""
+    codigos = sorted(set(re.findall(r"(?:finish|block)_reason=<?(?:\w+\.)?([A-Z_]{3,})", erro)) - {"STOP"})
+    if codigos:
+        return f"resposta vazia ({', '.join(codigos)})"
+    if "VAZIO" in erro:
+        return "resposta vazia"
+    if re.search(r"429|RESOURCE_EXHAUSTED|quota", erro, re.I):
+        return "cota da IA"
+    return "erro da IA" if erro else "resposta sem o título"
+
+
+def _textos_da_ia(video):
+    """
+    O título e o comentário da IA. A IA às vezes volta vazia (bloqueio do Google que muda de
+    uma tentativa para outra): mais uma chance depois de uma pausa, antes de desistir. Cada
+    falha entra no registro com o motivo em código fixo, para o checkup mostrar a causa.
+    """
+    motivo = ""
+    for vez in range(TENTATIVAS_DO_TITULO):
+        ps.api_gemini.ULTIMO_ERRO_IA = None
+        textos = asyncio.run(assistente.textos_do_video(video["arquivo"], video.get("nome") or ""))
+        if textos and textos["titulo"]:
+            if vez:
+                registro_processos.registrar(REGISTRO, "título da IA", "veio na nova tentativa", ok=True)
+            return textos
+        motivo = _motivo_da_ia()
+        registro_processos.registrar(REGISTRO, "título da IA", "sem título", motivo, ok=False)
+        if vez + 1 < TENTATIVAS_DO_TITULO:
+            pausa(ESPERA_DO_TITULO)
+    raise Parada(f"a IA não devolveu o título ({motivo})")
+
+
 def _preparar(d, ident, video, fonte, agora=None):
     vistos = []
     if video.get("de_video"):
@@ -1424,9 +1466,7 @@ def _preparar(d, ident, video, fonte, agora=None):
         nomes = [nome]
     # A origem e o que a IA viu ficam no rascunho, para o Rafael validar com isso na mão.
     atualizar(ident, fonte=fonte, conferencia=json.dumps(vistos, ensure_ascii=False))
-    textos = asyncio.run(assistente.textos_do_video(video["arquivo"], video.get("nome") or ""))
-    if not textos or not textos["titulo"]:
-        raise Parada("a IA não devolveu o título")
+    textos = _textos_da_ia(video)
     if textos["violacao"]:
         avisar(f"⚠️ Robô da Shopee Vídeo: pulei o vídeo. A IA viu possível violação das diretrizes: "
                f"{textos['motivo'] or 'sem motivo'}")

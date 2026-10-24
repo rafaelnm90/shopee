@@ -396,6 +396,42 @@ def test_rascunho_completo_curte_pelo_nome_e_salva_sem_tocar_em_postar(monkeypat
     assert robo.assistente.proximo_video("autorais") is None
 
 
+def _titulo_vazio_e_depois(monkeypatch, respostas):
+    """A IA do título: None (resposta vazia do Google, motivo no ULTIMO_ERRO_IA) ou o título."""
+    vazia = ("Todos os modelos da cascata falharam → gemini-x: VAZIO (finish_reason=<FinishReason.RECITATION: "
+             "'RECITATION'>)")
+
+    async def textos(arquivo, nome):
+        if respostas.pop(0) is None:
+            robo.ps.api_gemini.ULTIMO_ERRO_IA = vazia
+            return None
+        return {"violacao": False, "motivo": "", "titulo": TITULO, "comentario": "Amei! #achadinhos"}
+
+    monkeypatch.setattr(robo.assistente, "textos_do_video", textos)
+
+
+def test_titulo_vazio_da_ia_tenta_de_novo_e_anota_o_motivo(monkeypatch, avisos):
+    # 24/10/2026 (Preparar 1 Agora, 12:48): a IA conferiu o produto, mas voltou vazia no
+    # título em todos os modelos, e o robô desistiu na hora. A resposta vazia do Google muda
+    # de uma tentativa para outra: o robô tenta mais uma vez depois de uma pausa.
+    from conftest import consultar
+    _fonte(monkeypatch)
+    _titulo_vazio_e_depois(monkeypatch, [None, "ok"])
+    assert robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = 'título da IA' "
+                     "AND ok = 0") == ("sem título", "resposta vazia (RECITATION)")
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = 'título da IA' AND ok = 1") == (
+        "veio na nova tentativa",)
+
+
+def test_titulo_vazio_duas_vezes_para_com_o_motivo_e_o_passo(monkeypatch, avisos):
+    _fonte(monkeypatch)
+    _titulo_vazio_e_depois(monkeypatch, [None, None])
+    resultado = robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 23:59"))
+    assert "a IA não devolveu o título (resposta vazia (RECITATION))" in resultado
+    assert robo.passo_do_motivo(resultado) == "título da IA"
+
+
 def test_ia_que_nao_confirma_pula_o_video_sem_tocar_no_celular(monkeypatch, avisos):
     _fonte(monkeypatch, confere=False)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
