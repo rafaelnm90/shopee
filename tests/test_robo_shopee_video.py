@@ -899,6 +899,59 @@ def test_voltar_que_nao_chega_anota_a_tela_em_que_ficou_sem_o_texto_dela():
         "não chegou ao Eu", onde, 0)
 
 
+AVISO_DE_APP_TRAVADO = _xml(
+    '<node text="Shopee não está respondendo" resource-id="android:id/alertTitle" package="android" '
+    'class="android.widget.TextView" clickable="false" bounds="[100,1090][980,1160]"></node>',
+    '<node text="Fechar app" resource-id="android:id/aerr_close" package="android" '
+    'class="android.widget.Button" clickable="true" bounds="[100,1210][980,1300]"></node>',
+    '<node text="Aguardar" resource-id="android:id/aerr_wait" package="android" '
+    'class="android.widget.Button" clickable="true" bounds="[100,1340][980,1430]"></node>')
+
+
+class CelularComAppTravado:
+    """O Motorola em 24/10 (13:17 e 13:38): o Android pergunta se fecha a Shopee, que não responde."""
+
+    def __init__(self, travado_por):
+        self.travado_por, self.toques = travado_por, []
+
+    def dump_hierarchy(self):
+        if len(self.toques) < self.travado_por:
+            return AVISO_DE_APP_TRAVADO
+        return _xml(ABA_EU)
+
+    def click(self, x, y):
+        self.toques.append((x, y))
+
+
+def test_app_que_nao_responde_ganha_o_aguardar_e_a_rodada_segue():
+    from conftest import consultar
+    celular = CelularComAppTravado(travado_por=1)
+    assert robo.tem_exato(robo.tela(celular), "Eu")
+    # Sempre no Aguardar (540,1385), nunca no Fechar app.
+    assert celular.toques == [(540, 1385)]
+    assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = 'app travado'") == (
+        "voltou depois do Aguardar", 1)
+
+
+def test_app_que_continua_travado_para_a_rodada_sem_tocar_em_fechar_app():
+    from conftest import consultar
+    celular = CelularComAppTravado(travado_por=99)
+    with pytest.raises(robo.Parada) as parada:
+        robo.tela(celular)
+    assert celular.toques == [(540, 1385)] * robo.VEZES_DO_AGUARDAR
+    assert robo.passo_do_motivo(parada.value.motivo) == "app travado"
+    assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = 'app travado'") == (
+        "continuou travado", 0)
+
+
+def test_voltar_toca_em_aguardar_no_aviso_de_app_travado_em_vez_de_apertar_voltar():
+    celular = CelularComAppTravado(travado_por=1)
+    celular.teclas = []
+    celular.press = celular.teclas.append
+    robo.voltar(celular, "Eu")
+    assert celular.toques == [(540, 1385)] and celular.teclas == []
+
+
 def test_aviso_do_android_por_cima_da_shopee_nao_conta_como_outro_app():
     aviso = _xml(_no_do_app("com.android.permissioncontroller", "Permitir", (100, 1000, 500, 1100)))
     telegram = _xml(_no_do_app("org.telegram.messenger", "Conversas", (0, 100, 500, 200)))

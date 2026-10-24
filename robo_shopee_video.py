@@ -147,6 +147,11 @@ ESPERA_DA_SAUDE = 24
 # robô relê a tela até este tanto de segundos (24/10/2026, 08:58, a postagem do aprovado
 # parou com a grade ainda carregando).
 ESPERA_DOS_RASCUNHOS = 18
+# O aviso do Android "Shopee não está respondendo" (24/10/2026, 13:17 e 13:38, dois
+# rascunhos pararam com ele na frente): quantas vezes o robô toca em Aguardar e os
+# segundos que dá ao app depois de cada toque.
+VEZES_DO_AGUARDAR = 3
+ESPERA_DO_AGUARDAR = 15
 # A Saúde é lida de novo pelo aviso de penalidade nas Notificações só depois disto.
 INTERVALO_DA_SAUDE = timedelta(hours=6)
 # Depois do Já recorri, a Saúde é lida de hora em hora até sair o resultado (escolha do
@@ -537,6 +542,7 @@ LINHAS_DO_HISTORICO = 12
 PASSOS = (
     ("suspensa pela Shopee", "conta suspensa pela Shopee"),
     ("rodada foi interrompida", "rodada interrompida"),
+    ("não está respondendo", "app travado"),
     ("notificação do comentário", "achar a notificação"),
     ("painel de comentários", "abrir os comentários"),
     ("comentário não está", "achar o comentário"),
@@ -784,11 +790,35 @@ def pausa(segundos):
 
 
 def tela(d):
-    """A tela de agora; para na hora se for a Verificação."""
+    """
+    A tela de agora; para na hora se for a Verificação. Com o aviso do Android de app que
+    não responde ("Shopee não está respondendo", com Fechar app e Aguardar), toca em
+    Aguardar e dá um tempo ao app; nunca em Fechar app, porque fechar e reabrir chama a
+    Verificação. Ainda travado depois de VEZES_DO_AGUARDAR toques, a rodada para.
+    """
     xml = d.dump_hierarchy()
-    if ps.eh_verificacao(xml):
-        raise Verificacao()
-    return xml
+    for vez in range(VEZES_DO_AGUARDAR + 1):
+        if ps.eh_verificacao(xml):
+            raise Verificacao()
+        if not app_travado(xml):
+            if vez:
+                registro_processos.registrar(REGISTRO, "app travado", "voltou depois do Aguardar",
+                                             f"{vez} toque(s)", ok=True)
+            return xml
+        if vez == VEZES_DO_AGUARDAR:
+            break
+        d.click(*ps.achar(xml, "@aerr_wait"))
+        pausa(ESPERA_DO_AGUARDAR)
+        xml = d.dump_hierarchy()
+    registro_processos.registrar(REGISTRO, "app travado", "continuou travado",
+                                 f"{VEZES_DO_AGUARDAR} toque(s) em Aguardar", ok=False)
+    raise Parada(f"o celular mostra que o app não está respondendo, mesmo depois de {VEZES_DO_AGUARDAR} "
+                 "toques em Aguardar")
+
+
+def app_travado(xml):
+    """O aviso do Android de app que não responde (os botões Fechar app e Aguardar) está na tela?"""
+    return tem(xml, "@aerr_wait")
 
 
 def tem(xml, alvo):
