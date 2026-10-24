@@ -134,6 +134,10 @@ ROLADAS_NA_SAUDE = 4
 # O Centro do criador e a Saúde do Vídeo carregam pela rede (React e página web): o robô
 # relê a tela até este tanto de segundos antes de dar a leitura por parada.
 ESPERA_DA_SAUDE = 24
+# O quadro "Rascunhos: N" da grade do Perfil carrega pela rede depois do Postar vídeo: o
+# robô relê a tela até este tanto de segundos (24/10/2026, 08:58, a postagem do aprovado
+# parou com a grade ainda carregando).
+ESPERA_DOS_RASCUNHOS = 18
 # A Saúde é lida de novo pelo aviso de penalidade nas Notificações só depois disto.
 INTERVALO_DA_SAUDE = timedelta(hours=6)
 # Depois do Já recorri, a Saúde é lida de hora em hora até sair o resultado (escolha do
@@ -1509,8 +1513,9 @@ def abrir_lista_de_rascunhos(d):
     algum rascunho salvo) → a lista, com Selecionar no alto.
     """
     ir_ao_perfil(d)
-    if not tem(tela(d), "Rascunhos:"):
-        raise Parada("o Perfil não tem nenhum rascunho salvo")
+    if not esperar_na_tela(d, "Rascunhos:", ESPERA_DOS_RASCUNHOS):
+        raise Parada(f"o Perfil não tem nenhum rascunho salvo (o quadro Rascunhos não apareceu em "
+                     f"{ESPERA_DOS_RASCUNHOS} s)")
     tocar(d, "Rascunhos:", 6)
     if not tem(tela(d), "Selecionar"):
         raise Parada("a lista de rascunhos não abriu")
