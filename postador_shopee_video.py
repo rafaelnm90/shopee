@@ -196,6 +196,12 @@ PALAVRAS_DA_TELA = frozenset("""
     aprender postado postada últimos dias banida banido temporariamente suspensão suspensa
     período reincidência identificado identificada correspondente apresentado evidências
     orientamos gerou ação seu sua deixe-nos saber poderá desempenho data
+    responder respondeu respondendo resposta respostas comentou curtiu curtiram seguiu
+    adicione escreva digite diga alguma coisa mencionou marcou hoje ontem dia horas hora
+    minuto tradução traduzir ocultar mostrar fixo espectadores assistindo assistir ao vivo
+    avatar user reply replies send close input add header item list view author follow
+    following likes heart filled outline unlike unliked active inactive selected unselected
+    state on off count number profile creator title description desc caption name
 """.split())
 NUMERO = re.compile(r"[\d.,%R$()+x×/:#-]*\d[\d.,%R$()+x×/:#-]*")
 PONTUACAO = ".,:;!?()[]{}\"'«»“”‘’-–—/|+*·•"
