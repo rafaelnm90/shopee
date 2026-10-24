@@ -122,8 +122,12 @@ vídeo de vestido com link de fibra de cabelo não confere).
 Responda só com um JSON: {{"confere": true ou false, "motivo": "uma frase curta"}}"""
 AVISO_JANELA_ERRADA = ("🤖 Robô da Shopee Vídeo: a janela de editar o nome aberta no celular é de outro "
                        "produto, não do produto do vídeo. Parei sem tocar em Feito; confira o celular.")
-# Quantas vezes o passo produto rola a lista de Minhas Curtidas atrás do produto do vídeo.
-ROLAGENS_DO_PRODUTO = 3
+# Quantas vezes o passo produto rola a lista de Minhas Curtidas atrás do produto do vídeo
+# (para antes, no fim da lista). O produto que já estava curtido de outro dia fica mais
+# embaixo em Mais Recente: o curtir não toca nele, porque o toque descurtiria.
+ROLAGENS_DO_PRODUTO = 8
+# Segundos que a lista de Minhas Curtidas tem para carregar antes da busca do produto.
+ESPERA_DA_LISTA = 9
 # Quantas vezes o passo curtir rola a página completa do produto atrás do coração.
 ROLAGENS_DO_CORACAO = 2
 # Quantas vezes a IA confere o produto do link com o vídeo: ela já recusou um vídeo que
@@ -547,6 +551,8 @@ def adicionar_produto(d, video):
     if janela_de_editar_aberta(elementos(d.dump_hierarchy())):
         # Um toque de antes (como o que fecha a bolinha da Motorola) já abriu um produto.
         return conferir_janela(d, nome, None)
+    esperar_a_lista(d)
+    melhor, anterior, rolagens, acabou = (0, -1), None, 0, False
     for rolagem in range(ROLAGENS_DO_PRODUTO + 1):
         tela = d.dump_hierarchy()
         botao = adicionar_do_produto(tela, nome)
@@ -559,16 +565,39 @@ def adicionar_produto(d, video):
                 return False, RECUSA
             d.click(x, y)
             return conferir_janela(d, nome, ponto)
+        melhor = max(melhor, parecido_na_tela(tela, nome))
+        textos = textos_longos(tela)
+        if textos == anterior:
+            # Rolou e a lista não mudou: chegou ao fim, o produto não está nela.
+            acabou = True
+            break
+        anterior = textos
         if rolagem < ROLAGENS_DO_PRODUTO:
             rolar(d)
+            rolagens += 1
             time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
-    # Para a próxima vez dar para saber a causa: o produto estava com outro nome ou não estava.
-    comum, antes = parecido_na_tela(tela, nome)
+    # Para a próxima vez dar para saber a causa: o produto estava com outro nome, mais
+    # embaixo do que o robô rolou, ou não estava (a lista acabou).
+    comum, antes = melhor
     registro_processos.registrar("shopee_video", "anexar o produto", "nome não achado em Minhas Curtidas",
                                  f"o mais parecido tem {comum}% das palavras"
-                                 + (f" e o nome começa depois de {antes} palavra(s)" if antes > 0 else ""), ok=False)
+                                 + (f" e o nome começa depois de {antes} palavra(s)" if antes > 0 else "")
+                                 + f"; {rolagens} rolada(s)" + ("; a lista acabou" if acabou else ""), ok=False)
     avisar_rafael.mandar_texto(f"{AVISO_SEM_PRODUTO}\n\nO produto do vídeo não está em Minhas Curtidas: {nome}")
     return False, "o produto do vídeo não está na lista: nada adicionado (aviso no privado)"
+
+
+def esperar_a_lista(d):
+    """A lista de Minhas Curtidas carrega pela rede: espera algum Adicionar aparecer."""
+    for _ in range(ESPERA_DA_LISTA // 3):
+        if any(_normal(el["texto"]) == "adicionar" for el in elementos(d.dump_hierarchy())):
+            return
+        time.sleep(3)
+
+
+def textos_longos(xml):
+    """Os textos do tamanho de um nome de produto: dizem se a lista mudou depois de rolar."""
+    return frozenset(el["texto"] for el in elementos(xml) if len(el["texto"].strip()) >= TAMANHO_MINIMO_DO_NOME)
 
 
 def janela_de_editar_aberta(lista):
@@ -686,12 +715,16 @@ def curtir_na_pagina(d, tela):
     if not tem_coracao(lista):
         return False, "o coração não está na página do produto: nada curtido"
     if any(el["id"] == "buttonItemLiked" for el in lista):
+        # Já curtido de outro dia fica mais embaixo em Minhas Curtidas: o registro conta,
+        # para o checkup ligar ao "nome não achado" do anexar.
+        registro_processos.registrar("shopee_video", "curtir o produto", "já estava curtido", ok=True)
         return True, "o produto já estava curtido: segui sem tocar no coração"
     coracao = next(el for el in lista if el["id"] == "buttonItemLike")
     d.click(*_centro(coracao))
     time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
     if not any(el["id"] == "buttonItemLiked" for el in elementos(d.dump_hierarchy())):
         return False, "toquei no coração, mas o produto não ficou curtido"
+    registro_processos.registrar("shopee_video", "curtir o produto", "curtido agora", ok=True)
     return True, "produto curtido"
 
 
@@ -707,6 +740,12 @@ def nomes_dos_produtos(video):
 
 
 ROTULO_DE_IA = "Rótulo de conteúdo gerado por IA"
+# Quantas vezes o robô rola a tela final atrás da linha do Rótulo de IA.
+ROLAGENS_DO_ROTULO = 3
+
+
+def tem_rotulo_de_ia(lista):
+    return any(_normal(el["texto"]).startswith(_normal(ROTULO_DE_IA)) for el in lista)
 
 
 def chave_do_rotulo_de_ia(lista):
@@ -736,23 +775,41 @@ def ajustar_rotulo_de_ia(d, ligado):
     ficar desligado, segue como o app abre. Escolha do Rafael: DECISOES.md, Shopee Vídeo.
     """
     estado = "ligado" if ligado else "desligado"
-    tela = d.dump_hierarchy()
-    chave = chave_do_rotulo_de_ia(elementos(tela))
-    if not chave:
-        if ligado:
-            return False, "o Rótulo de IA não está na tela final: nada salvo"
-        return True, "o Rótulo de IA não está na tela: fica como o app abre (desligado)"
-    if chave["marcado"] == ligado:
-        return True, f"Rótulo de IA já {estado}"
-    x, y = _centro(chave)
-    if proibido_no_ponto(tela, x, y):
-        return False, RECUSA
-    d.click(x, y)
-    time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
-    depois = chave_do_rotulo_de_ia(elementos(d.dump_hierarchy()))
-    if not depois or depois["marcado"] != ligado:
-        return False, f"toquei no Rótulo de IA, mas ele não ficou {estado}"
-    return True, f"Rótulo de IA {estado}"
+    # A linha fica embaixo dos produtos anexados: sem ela na tela, rola até achar e, no
+    # fim, volta ao alto, como estava (o print do rascunho mostra a legenda e o produto).
+    rolagens = 0
+    try:
+        for rolagem in range(ROLAGENS_DO_ROTULO + 1):
+            tela = d.dump_hierarchy()
+            lista = elementos(tela)
+            chave = chave_do_rotulo_de_ia(lista)
+            if chave or not ligado or rolagem == ROLAGENS_DO_ROTULO:
+                break
+            rolar(d)
+            rolagens += 1
+            time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
+        if not chave:
+            if ligado:
+                chaves = sum(1 for el in lista if "switch" in el["classe"].lower())
+                linha = "a linha do nome está, mas a chave não" if tem_rotulo_de_ia(lista) else "nem a linha do nome"
+                return False, (f"o Rótulo de IA não está na tela final ({linha}; {chaves} chave(s) na tela; "
+                               f"{rolagens} rolada(s)): nada salvo")
+            return True, "o Rótulo de IA não está na tela: fica como o app abre (desligado)"
+        if chave["marcado"] == ligado:
+            return True, f"Rótulo de IA já {estado}"
+        x, y = _centro(chave)
+        if proibido_no_ponto(tela, x, y):
+            return False, RECUSA
+        d.click(x, y)
+        time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
+        depois = chave_do_rotulo_de_ia(elementos(d.dump_hierarchy()))
+        if not depois or depois["marcado"] != ligado:
+            return False, f"toquei no Rótulo de IA, mas ele não ficou {estado}"
+        return True, f"Rótulo de IA {estado}"
+    finally:
+        for _ in range(rolagens):
+            rolar(d, para_cima=True)
+            time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
 
 
 def conferir_tela_final(d, video):

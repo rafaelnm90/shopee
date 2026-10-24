@@ -173,7 +173,10 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
      Rótulo de IA e Compartilhar automaticamente, e embaixo **Rascunhos** e **Postar**.
      O Rótulo de conteúdo gerado por IA tem a explicação embaixo do nome e a chave à
      direita, na mesma linha; o robô acha a chave pela linha do nome e confere o
-     `checked` depois do toque (a classe e o id dela ainda não foram vistos no Motorola);
+     `checked` depois do toque (a classe e o id dela ainda não foram vistos no Motorola).
+     Com produto anexado, a linha pode ficar abaixo da tela (24/10/2026, de madrugada, o
+     rascunho parou sem achá-la): o robô rola até 3 vezes atrás dela e depois volta ao
+     alto; sem achar, o motivo diz se a linha do nome estava e quantas chaves viu;
   6. **Rascunhos** salva (barra de progresso "carregando, aguarde") e volta para a aba
      Live e Vídeo, sem pedir confirmação.
 
@@ -248,7 +251,10 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
 3. Adicionar Produto → Minhas Curtidas → Mais Recente: os curtidos agora ficam em
    cima (curtiu 2, são os 2 primeiros). Entre eles, o de menor preço primeiro; no
    empate, o de maior comissão. O robô acha cada um pelo nome, não pela posição. Na
-   janela "Editar nome do produto", só **Feito**.
+   janela "Editar nome do produto", só **Feito**. O produto que já estava curtido de
+   outro dia fica mais embaixo (o curtir não toca no coração, que descurtiria): o robô
+   espera a lista carregar e rola até 8 vezes, parando no fim da lista; o registro
+   anota "já estava curtido" no curtir e, no anexar que não acha, quantas vezes rolou.
 4. Título no campo da legenda; as chaves da última tela como vêm.
 5. Postar. Curtir e comentar nunca é automático (diretriz 9.1.1).
 

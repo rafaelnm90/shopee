@@ -87,8 +87,10 @@ da Shopee Vídeo abaixo. Se algo violar uma diretriz, responda "violacao": true 
 
 "feito_por_ia": true só se o vídeo for claramente gerado por IA (imagens geradas por IA, \
 avatar ou apresentador artificial, voz sintética narrando). Vídeo filmado de verdade, mesmo \
-com cortes, filtros, legendas, música ou imagens do anúncio, é false; na dúvida, false. Quando \
-for true, diga em "sinal_ia", em uma frase curta, o que mostra que é IA; senão, "sinal_ia": "".
+com cortes, filtros, legendas, música ou imagens do anúncio, é false; na dúvida, false. Julgue \
+só o vídeo, nunca o nome do produto: produto artificial (planta, flor ou cabelo artificial) num \
+vídeo filmado não é conteúdo gerado por IA. Quando for true, diga em "sinal_ia", em uma frase \
+curta, o que no vídeo mostra que é IA; senão, "sinal_ia": "".
 
 {produto}Diretrizes da Shopee Vídeo:
 {diretrizes}"""

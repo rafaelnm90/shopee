@@ -1622,6 +1622,44 @@ def test_video_feito_por_ia_vai_com_o_rotulo_ligado_e_o_rafael_ve(monkeypatch, a
     assert not robo.ps.ajustar_rotulo_de_ia(app, True)[0] and robo.ps.ajustar_rotulo_de_ia(app, False)[0]
 
 
+class RotuloEmbaixo(ComRotuloDeIA):
+    """Como no Motorola com produto anexado: a linha do Rótulo de IA só aparece depois de rolar."""
+
+    def __init__(self):
+        super().__init__()
+        self.descida = 0
+
+    def _nos(self):
+        nos = super()._nos()
+        if self.descida:
+            return nos
+        return [n for n in nos if n not in _linha_do_rotulo(self.rotulo)]
+
+    def swipe(self, x1, y1, x2, y2, duracao):
+        self.toques.append("rolar" if y1 > y2 else "subir")
+        self.descida += 1 if y1 > y2 else -1
+
+
+def test_rotulo_de_ia_embaixo_da_tela_e_achado_rolando_e_a_tela_volta_ao_alto():
+    # Visto em 24/10 de madrugada: com o produto anexado, a linha fica abaixo da tela.
+    app = RotuloEmbaixo()
+    app.atual = "final"
+    ok, motivo = robo.ps.ajustar_rotulo_de_ia(app, True)
+    assert ok and app.rotulo, motivo
+    assert app.toques == ["rolar", "rotulo_ia", "subir"] and app.descida == 0
+    # Desligado não rola: fica como o app abre.
+    app = RotuloEmbaixo()
+    app.atual = "final"
+    assert robo.ps.ajustar_rotulo_de_ia(app, False)[0] and app.toques == []
+    # Sem a linha em lugar nenhum: rola o máximo, diz o que viu e volta ao alto.
+    app = AppComQuadros()
+    app.atual = "final"
+    ok, motivo = robo.ps.ajustar_rotulo_de_ia(app, True)
+    assert not ok and "nem a linha do nome" in motivo and f"{robo.ps.ROLAGENS_DO_ROTULO} rolada(s)" in motivo
+    assert app.toques.count("rolar") == 2 * robo.ps.ROLAGENS_DO_ROTULO
+    assert robo.passo_do_motivo(motivo) == "rótulo de IA"
+
+
 def test_video_real_fica_com_o_rotulo_desligado(monkeypatch, avisos, caminho_do_rascunho):
     _fonte(monkeypatch)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
