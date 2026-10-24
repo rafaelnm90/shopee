@@ -185,6 +185,10 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     com `@aerr_close` (Fechar app) e `@aerr_wait` (Aguardar). Travada, a tela da Shopee
     (`HomeActivity_`) fica sem nenhum elemento e cada leitura demora cerca de 1 min. O
     robô toca em Aguardar 3 vezes e, se não voltar, em Fechar app e reabre (P15).
+  - loja de férias (24/10/2026): a página do produto mostra "Esse vendedor está de
+    férias." por alguns segundos, embaixo, por cima do Compre Agora. O produto curtido
+    entra em Meus Favoritos, mas não aparece no Adicionar Produto do vídeo. O robô lê o
+    aviso ao abrir a página e pula o vídeo.
 - **No celular de verdade (17 e 18/10/2026), o caminho até Rascunhos:**
   1. abrir → **Eu** → **Criadores & Afiliados** (quase sempre tela nativa; às vezes abre
      como página web) → aba **Conta** → **Perfil em Shopee Vídeo** → **Postar vídeo**

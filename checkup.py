@@ -283,6 +283,7 @@ SEM_META = {
     ("shopee_video", "notificações (respostas)"), ("shopee_video", "preparo interrompido"),
     ("shopee_video", "rodada fora do bot"), ("shopee_video", "título da IA"),
     ("shopee_video", "voltar no app"), ("shopee_video", "app travado"),
+    ("shopee_video", "produto de loja de férias"),
     ("shopee_video", "responder comentário"),
 }
 

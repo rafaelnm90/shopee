@@ -326,6 +326,13 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - se continuar travado depois de reabrir, para e avisa.
   
   Fora esse aviso, o robô continua nunca fechando o app (fechar e reabrir já chamou a Verificação no Android virtual). As outras opções eram o robô parar e mandar o link da tela para o Rafael fechar, ou só avisar.
+- **24/10/2026:** produto de **loja de férias** não vai para rascunho. Investigado com o Rafael:
+  - às 14:25, o robô curtiu o "Conjunto de Teclado e Mouse HB199" e a curtida ficou salva (1º em Meus Favoritos);
+  - mesmo assim, o produto não aparecia em Adicionar Produto → Minhas Curtidas, que ordena pela hora da curtida;
+  - a página do produto mostrava "Esse vendedor está de férias.", e a API de afiliado não avisa isso;
+  - o robô só descobria no fim, depois da galeria e do título.
+  
+  Agora, ao abrir a página do produto, o robô procura esse aviso (na tela e no aviso rápido do Android). Se aparecer, pula o vídeo na hora, com o motivo no histórico. No Ver Produtos, o produto de loja de férias fica de fora, como o recusado pela IA. O checkup conta quantos apareceram.
 
 ## Monitor, deploy e servidor
 

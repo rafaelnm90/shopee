@@ -154,6 +154,8 @@ VEZES_DO_AGUARDAR = 3
 ESPERA_DO_AGUARDAR = 15
 # Segundos que a Shopee tem para abrir depois de fechada pelo aviso de app travado.
 ESPERA_DEPOIS_DE_REABRIR = 20
+# Produto de loja de férias (a página avisa) não entra no Adicionar Produto do vídeo.
+MOTIVO_DE_FERIAS = "a loja do produto está de férias: a Shopee não deixa anexar o produto ao vídeo"
 # A Saúde é lida de novo pelo aviso de penalidade nas Notificações só depois disto.
 INTERVALO_DA_SAUDE = timedelta(hours=6)
 # Depois do Já recorri, a Saúde é lida de hora em hora até sair o resultado (escolha do
@@ -545,6 +547,7 @@ PASSOS = (
     ("suspensa pela Shopee", "conta suspensa pela Shopee"),
     ("rodada foi interrompida", "rodada interrompida"),
     ("não está respondendo", "app travado"),
+    ("de férias", "loja de férias"),
     ("notificação do comentário", "achar a notificação"),
     ("painel de comentários", "abrir os comentários"),
     ("comentário não está", "achar o comentário"),
@@ -1574,9 +1577,9 @@ def _preparar(d, ident, video, fonte, agora=None):
         # Curtir o produto pela página dele, como o Rafael faz antes de postar (os do Ver
         # Produtos já foram curtidos lá).
         ir_ao_inicio(d)
+        ps.limpar_aviso_rapido(d)
         ps.abrir_link(d, video["link"])
-        pausa(12)
-        tela(d)
+        _esperar_a_pagina_do_produto(d)
         _conferir(ps.curtir(d, video))
         pausa(3)
     ir_ao_perfil(d)
@@ -1621,6 +1624,20 @@ def _preparar(d, ident, video, fonte, agora=None):
            "em Shopee Vídeo 🎬 → Rascunhos do Robô 📝.")
 
 
+def _esperar_a_pagina_do_produto(d, voltas=4):
+    """
+    Espera a página do produto abrir (uns 12 s), olhando a cada volta o aviso de loja de
+    férias, que some em segundos. Produto de loja de férias não entra no Adicionar Produto
+    do vídeo, mesmo curtido (24/10/2026, o teclado curtido às 14:25 não estava na lista):
+    o vídeo fica de lado na hora, antes da galeria e do título.
+    """
+    for _ in range(voltas):
+        pausa(2)
+        if ps.loja_de_ferias(d, tela(d)):
+            registro_processos.registrar(REGISTRO, "produto de loja de férias", "vídeo pulado", ok=None)
+            raise Parada(MOTIVO_DE_FERIAS, do_video=True)
+
+
 def _produtos_do_video(d, video, vistos):
     """
     Link de vídeo (Ver Produtos): abre o vídeo no celular e, na lista do Ver Produtos (pelo
@@ -1653,7 +1670,7 @@ def _produtos_do_video(d, video, vistos):
     quantos = len(ps.produtos_vinculados(tela(d)))
     if not quantos:
         raise Parada("o Ver Produtos não mostrou os produtos do criador", do_video=True)
-    confirmados = []
+    confirmados, de_ferias = [], 0
     for i in range(min(quantos, MAXIMO_PRODUTOS_DO_VIDEO)):
         xml = tela(d)
         pontos = ps.produtos_vinculados(xml)
@@ -1661,11 +1678,17 @@ def _produtos_do_video(d, video, vistos):
             break
         if ps.proibido_no_ponto(xml, *pontos[i]):
             raise Parada(ps.RECUSA)
+        ps.limpar_aviso_rapido(d)
         d.click(*pontos[i])
         pausa(8)
         xml = tela(d)
         nome = ps.nome_na_pagina_do_produto(xml)
-        if nome and nome not in confirmados:
+        if ps.loja_de_ferias(d, xml):
+            # Não entra no Adicionar Produto do vídeo: fica de fora, como o recusado pela IA.
+            registro_processos.registrar(REGISTRO, "produto de loja de férias", "produto do Ver Produtos de fora",
+                                         ok=None)
+            de_ferias += 1
+        elif nome and nome not in confirmados:
             deste = []
             ok, _ = ps.ia_confere_produto(dict(video, produto=nome), deste, avisar=False)
             if ok:
@@ -1675,7 +1698,8 @@ def _produtos_do_video(d, video, vistos):
         d.press("back")
         pausa(4)
     if not confirmados:
-        raise Parada("a IA não confirmou nenhum produto do Ver Produtos", do_video=True)
+        raise Parada(MOTIVO_DE_FERIAS if de_ferias else "a IA não confirmou nenhum produto do Ver Produtos",
+                     do_video=True)
     return confirmados
 
 
