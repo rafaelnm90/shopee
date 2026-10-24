@@ -124,6 +124,8 @@ def test_le_o_json_da_ia_mesmo_com_texto_em_volta():
     assert ia["feito_por_ia"] is True and ia["sinal_ia"] == "avatar falando com voz sintética"
     assert asv.ler_resposta('{"feito_por_ia": "talvez", "titulo": "x"}')["feito_por_ia"] is False
     assert "feito_por_ia" in asv.montar_prompt() and "na dúvida, false" in asv.montar_prompt()
+    # Visto em 24/10: produto "artificial" no nome não faz o vídeo filmado ser de IA.
+    assert "nunca o nome do produto" in asv.montar_prompt()
 
 
 def test_titulo_comprido_perde_palavras_do_fim_sem_cortar_no_meio():

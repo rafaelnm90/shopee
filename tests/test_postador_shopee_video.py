@@ -237,6 +237,17 @@ def test_curtir_com_o_produto_ja_curtido_nao_toca_no_coracao(monkeypatch, capsys
     assert "já estava curtido" in capsys.readouterr().out
 
 
+def test_curtir_deixa_no_registro_se_o_produto_ja_estava_curtido():
+    # O já curtido de outro dia fica mais embaixo em Minhas Curtidas: o checkup liga os dois.
+    import registro_processos as rp
+    assert ps.curtir_na_pagina(Aparelho(tela=CURTIDO), CURTIDO)[0]
+    aparelho = Aparelho(tela=TELA_PRODUTO)
+    aparelho.click = lambda x, y: setattr(aparelho, "tela", CURTIDO)
+    assert ps.curtir_na_pagina(aparelho, TELA_PRODUTO)[0]
+    linhas = {l[2] for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "curtir o produto"}
+    assert linhas == {"já estava curtido", "curtido agora"}
+
+
 def test_curtir_rola_atras_do_coracao_e_para_sem_ele(monkeypatch, capsys):
     _autorais()
     _produto_do_link(monkeypatch, VESTIDO)
@@ -667,7 +678,8 @@ def test_produto_fora_da_lista_nao_adiciona_nada_e_avisa_no_privado(monkeypatch,
     aparelho = Aparelho(tela=TELA_CURTIDAS)
     assert not ps.explorar("produto", aparelho)
     assert aparelho.toques == []
-    assert sum(1 for comando in aparelho.comandos if comando[0] == "rolar") == ps.ROLAGENS_DO_PRODUTO
+    # A lista não muda depois de rolar: acabou, e o robô para de rolar.
+    assert sum(1 for comando in aparelho.comandos if comando[0] == "rolar") == 1
     assert len(avisos) == 1 and "Garrafa Térmica Inox" in avisos[0]
     saida = capsys.readouterr().out
     assert "nada adicionado" in saida and "Garrafa" not in saida
@@ -1115,6 +1127,15 @@ def test_minhas_curtidas_aceita_o_mesmo_pedaco_antes_do_nome_que_a_pagina():
     assert ps.adicionar_do_produto(TELA_CURTIDAS, "Vestido Infantil Liso Para Meninas de Festa") is None
 
 
+def test_minhas_curtidas_espera_a_lista_carregar(monkeypatch):
+    esperas = []
+    monkeypatch.setattr(ps.time, "sleep", esperas.append)
+    ps.esperar_a_lista(Aparelho(tela=TELA_CURTIDAS))
+    assert esperas == []
+    ps.esperar_a_lista(Aparelho(tela=TELA_EU))
+    assert sum(esperas) == ps.ESPERA_DA_LISTA
+
+
 def test_nome_nao_achado_deixa_no_registro_o_quanto_o_mais_parecido_lembra(monkeypatch):
     import registro_processos as rp
     avisos = []
@@ -1130,6 +1151,7 @@ def test_nome_nao_achado_deixa_no_registro_o_quanto_o_mais_parecido_lembra(monke
     assert not ok and "não está na lista" in motivo and VESTIDO in avisos[0]
     linha = [l for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "anexar o produto"][0]
     assert linha[2] == "nome não achado em Minhas Curtidas"
-    assert linha[3] == "o mais parecido tem 100% das palavras e o nome começa depois de 7 palavra(s)"
+    assert linha[3] == ("o mais parecido tem 100% das palavras e o nome começa depois de 7 palavra(s); "
+                        "1 rolada(s); a lista acabou")
     assert "Vestido" not in linha[3]
     assert ps.parecido_na_tela(TELA_CURTIDAS, "Panela de Pressão Inox") == (0, -1)
