@@ -194,11 +194,17 @@ def resumo_do_log(linhas, modelos):
     ranking, _sem_modelo = inventario.perfil_do_log(linhas, modelos)
     problemas = [(onde, texto, nivel_de.get(onde), qtd) for (onde, texto), qtd in ranking
                  if nivel_de.get(onde) in ("warning", "error", "exception", "critical")]
+    # O log sai sem hora (-o cat): o último "Started" separa o que veio depois do último
+    # início (deploy ou reinício). Um erro que o código novo corrigiu fica só antes dele.
+    inicios = [i for i, l in enumerate(linhas) if l.startswith("Started ")]
+    depois = linhas[inicios[-1] + 1:] if inicios else linhas
     return {
-        "inicios": sum(1 for l in linhas if l.startswith("Started ")),
+        "inicios": len(inicios),
         "quedas": sum(1 for l in linhas if "Scheduled restart job" in l or "Failed with result" in l),
         "rastros": sum(1 for l in linhas if l.startswith("Traceback (most recent call last)")),
         "rastros_por_lugar": rastros_do_log(linhas),
+        "rastros_depois": sum(1 for l in depois if l.startswith("Traceback (most recent call last)")),
+        "rastros_depois_por_lugar": rastros_do_log(depois),
         "avisos": sum(qtd for _o, _t, nivel, qtd in problemas if nivel == "warning"),
         "erros": sum(qtd for _o, _t, nivel, qtd in problemas if nivel != "warning"),
         "problemas": problemas,
@@ -242,6 +248,9 @@ def rotinas_do_dia(agora=None):
     contagem = historico.get("contagem", {}) if historico.get("data") == agora.strftime("%Y-%m-%d") else {}
     saidas = {canal: [] for canal in rotinas.CANAIS}
     for tipo, horarios in contagem.items():
+        # Chave antiga no banco, sem texto no código: não é agendada e nunca saiu de verdade.
+        if not rotinas.conhecida(tipo):
+            continue
         for hora in horarios if isinstance(horarios, list) else []:
             saidas[rotinas.canal_da_rotina(tipo)].append((_minutos(hora), tipo))
     pausado = {"canal principal": config.get("pausado"), "Viral": config.get("pausado_viral"),
@@ -253,7 +262,8 @@ def rotinas_do_dia(agora=None):
         por_assunto = Counter(tipo for _m, tipo in lista)
         fora = []
         for tipo, regra in config.items():
-            if not isinstance(regra, dict) or "frequencia" not in regra or rotinas.canal_da_rotina(tipo) != canal:
+            if (not isinstance(regra, dict) or "frequencia" not in regra or not rotinas.conhecida(tipo)
+                    or rotinas.canal_da_rotina(tipo) != canal):
                 continue
             esperado, feitas = int(regra.get("frequencia") or 0), por_assunto.get(tipo, 0)
             if feitas > esperado:
@@ -261,12 +271,24 @@ def rotinas_do_dia(agora=None):
             elif feitas < esperado and agora.hour >= int(regra.get("fim", 24)) and not pausado[canal]:
                 fora.append((tipo, feitas, esperado, "a menos"))
         resultado[canal] = {
+            "linha_do_tempo": {tipo: linha_do_tempo_da_rotina(canal, tipo, agora) for tipo, *_ in fora},
             "enviadas": len(lista), "menor": min(intervalos) if intervalos else None,
             "curtos": sum(1 for i in intervalos if i < INTERVALO_CURTO_ROTINA),
             "seguidos": sum(1 for a, b in zip(lista, lista[1:]) if a[1] == b[1]),
             "por_assunto": por_assunto, "fora_do_previsto": fora, "pausado": bool(pausado[canal]),
         }
     return resultado
+
+
+def linha_do_tempo_da_rotina(canal, tipo, agora=None):
+    """
+    O que o registro diz da rotina hoje, em ordem: [(HH:MM, resultado)] (enviada, adiada,
+    pausada...). Mostra onde se perdeu a que saiu a menos; só horas e textos fixos do código.
+    """
+    desde = _agora(agora).strftime("%Y-%m-%d 00:00:00")
+    return [(momento[11:16], resultado)
+            for momento, _p, resultado, detalhe, _o in registro_processos.sequencia("bot_mestre", f"rotina {canal}", desde)
+            if detalhe == tipo]
 
 
 def divulgacao_do_dia(agora=None):
@@ -544,9 +566,14 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
     for servico, r in logs.items():
         if r["quedas"]:
             pontos.append(f"{servico}: caiu e o systemd reiniciou {r['quedas']} vez(es)")
-        if r["rastros"]:
-            tipo, lugar, qtd = (r.get("rastros_por_lugar") or [("?", "?", r["rastros"])])[0]
-            pontos.append(f"{servico}: {r['rastros']} rastro(s) de erro no log (mais comum: {tipo} em {lugar}, {qtd}x)")
+        # Rastro só de antes do último início (o deploy trouxe o código novo) não cobra:
+        # a seção do log mostra quantos vieram depois.
+        depois = r.get("rastros_depois", r["rastros"])
+        if depois:
+            lugares = r.get("rastros_depois_por_lugar") or r.get("rastros_por_lugar") or [("?", "?", depois)]
+            tipo, lugar, qtd = lugares[0]
+            pontos.append(f"{servico}: {depois} rastro(s) de erro no log depois do último início ({r['rastros']} em "
+                          f"24 h; mais comum: {tipo} em {lugar}, {qtd}x)")
         erros_do_log = [p for p in r["problemas"] if p[2] != "warning"]
         if erros_do_log:
             onde, _t, _n, qtd = erros_do_log[0]
@@ -640,11 +667,13 @@ def main():
             linhas_baixador = linhas
         r = logs[servico] = resumo_do_log(linhas, modelos)
         print(f"{servico}: {len(linhas)} linha(s) | inícios {r['inicios']} | quedas {r['quedas']} | "
-              f"rastros {r['rastros']} | avisos {r['avisos']} | erros {r['erros']}")
+              f"rastros {r['rastros']} ({r['rastros_depois']} depois do último início) | avisos {r['avisos']} | "
+              f"erros {r['erros']}")
         for onde, texto, nivel, qtd in r["problemas"][:LUGARES_POR_ROBO]:
             print(f"   {qtd:5}x {nivel:8} {onde:34} {texto}")
+        depois_por_lugar = {(tipo, lugar): qtd for tipo, lugar, qtd in r["rastros_depois_por_lugar"]}
         for tipo, lugar, qtd in r["rastros_por_lugar"][:LUGARES_POR_ROBO]:
-            print(f"   {qtd:5}x rastro   {tipo} em {lugar}")
+            print(f"   {qtd:5}x rastro   {tipo} em {lugar} ({depois_por_lugar.get((tipo, lugar), 0)} depois do último início)")
 
     print("\n== Processos dos robôs (registro, últimas 24 h)")
     processos = processos_do_dia(agora)
@@ -663,6 +692,9 @@ def main():
               f"abaixo de {INTERVALO_CURTO_ROTINA} min {r['curtos']} | mesmo assunto em seguida {r['seguidos']}")
         if r["por_assunto"]:
             print("   " + " | ".join(f"{tipo}: {qtd}" for tipo, qtd in sorted(r["por_assunto"].items())))
+        for tipo, feitas, esperado, sentido in r["fora_do_previsto"]:
+            passos = ", ".join(f"{hora} {resultado}" for hora, resultado in r["linha_do_tempo"].get(tipo, []))
+            print(f"   {tipo} ({feitas} de {esperado}, {sentido}): {passos or 'nada no registro hoje'}")
     divulgacao = divulgacao_do_dia(agora)
     menor = "—" if divulgacao["menor"] is None else f"{divulgacao['menor']:.0f} min"
     print(f"Divulgação (24 h): envios {divulgacao['envios']} | grupos {divulgacao['grupos']} | "

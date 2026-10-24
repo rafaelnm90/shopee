@@ -98,6 +98,28 @@ def test_rastros_agrupados_pelo_tipo_e_pelo_lugar_do_codigo():
     assert "privado" not in str(rastros) and "segredo" not in str(rastros)
 
 
+def test_rastro_so_de_antes_do_ultimo_inicio_nao_cobra():
+    # Checkup de 23/10: os rastros corrigidos às 17h continuavam como ponto de atenção à
+    # noite, porque o log das 24 h não tem hora. O último "Started" (deploy) separa.
+    import inventario
+    rastro = ["Traceback (most recent call last):",
+              '  File "/home/ubuntu/shopee/bot_mestre.py", line 2093, in disparar_mensagem',
+              "UnboundLocalError: cannot access local variable 'prompt'"]
+    corrigido = (["Started bot_mestre_bot.service - Bot Mestre."] + rastro * 3
+                 + ["Started bot_mestre_bot.service - Bot Mestre.", "2026-10-23 18:00:00.000 -0300 - ok"])
+    r = checkup.resumo_do_log(corrigido, inventario.modelos_de_log())
+    assert (r["rastros"], r["rastros_depois"], r["rastros_depois_por_lugar"]) == (3, 0, [])
+    sem_robo = {"ativo": False, "vencidos": 0, "salvos": 0, "ruins": []}
+    assert checkup.pontos_de_atencao([], {"bot_mestre_bot": r}, {}, sem_robo, {}, ("x", 1.0, 1), AGORA) == []
+    # Depois do último início ainda acontece: cobra, dizendo quantos vieram depois.
+    r = checkup.resumo_do_log(corrigido + rastro, inventario.modelos_de_log())
+    pontos = checkup.pontos_de_atencao([], {"bot_mestre_bot": r}, {}, sem_robo, {}, ("x", 1.0, 1), AGORA)
+    assert pontos == ["bot_mestre_bot: 1 rastro(s) de erro no log depois do último início (4 em 24 h; mais comum: "
+                      "UnboundLocalError em bot_mestre.py:2093 (disparar_mensagem), 1x)"]
+    # Sem nenhum início nas 24 h, o robô estava no ar o dia todo: tudo conta.
+    assert checkup.resumo_do_log(rastro * 2, inventario.modelos_de_log())["rastros_depois"] == 2
+
+
 def test_processo_que_mais_falha_que_acerta_vira_ponto_de_atencao():
     import registro_processos as rp
     for _ in range(4):
@@ -195,7 +217,8 @@ def test_pontos_de_atencao():
     texto = "\n".join(pontos)
     assert "erro novo: 1x bot_mestre.py:10" in texto and "a.py:1" not in texto   # 2x antigo não cobra
     assert "downloader_bot: caiu" in texto and "downloader_bot.py:5" in texto
-    assert "2 rastro(s) de erro no log (mais comum: ValueError em downloader_bot.py:9 (f), 2x)" in texto
+    assert ("2 rastro(s) de erro no log depois do último início (2 em 24 h; mais comum: ValueError em "
+            "downloader_bot.py:9 (f), 2x)") in texto
     assert "Viral: 2 item(ns) atrasado(s)" in texto and "Viral: nenhum post hoje" in texto
     assert "Autorais: nenhum post" not in texto      # média baixa não cobra
     assert "2 horário(s) vencido(s)" in texto and "navegar no app" in texto
@@ -244,6 +267,30 @@ def test_rotinas_espacamento_assunto_seguido_e_o_configurado():
                                        {}, ("x", 1.0, 1), AGORA, {}, r, None)
     assert "Rotinas do canal principal: 1 intervalo(s) abaixo de 10 min (menor: 5 min)" in pontos
     assert "Rotinas do canal principal: 1 vez(es) o mesmo assunto em seguida" in pontos
+
+
+def test_rotina_antiga_do_banco_nao_conta_e_a_que_falta_mostra_a_linha_do_tempo():
+    # Checkup de 23/10: uma chave antiga do banco (sem texto no código, nunca enviada)
+    # contava como 16 rotinas do canal principal, com intervalos curtos e "a menos".
+    import registro_processos as rp
+    db.salvar_config("config_rotina", {
+        "repost_fake_publico": {"inicio": 8, "fim": 20, "frequencia": 20},
+        "promo_principal": {"inicio": 8, "fim": 20, "frequencia": 3},
+        "historico_diario": {"data": "2026-10-23", "contagem": {
+            "repost_fake_publico": ["10:00", "10:01", "10:02"],
+            "promo_principal": ["09:00", "15:00"],
+        }},
+    })
+    for horas, resultado in ((9, "enviada"), (13, "adiada (intercalação)"), (15, "enviada"),
+                             (19, "adiada (mesmo assunto em seguida)")):
+        rp.registrar("bot_mestre", "rotina Viral", resultado, "promo_principal",
+                     agora=AGORA.replace(hour=horas, minute=5))
+    r = checkup.rotinas_do_dia(AGORA)
+    assert r["canal principal"]["enviadas"] == 0 and r["canal principal"]["fora_do_previsto"] == []
+    assert r["Viral"]["fora_do_previsto"] == [("promo_principal", 2, 3, "a menos")]
+    assert r["Viral"]["linha_do_tempo"]["promo_principal"] == [
+        ("09:05", "enviada"), ("13:05", "adiada (intercalação)"), ("15:05", "enviada"),
+        ("19:05", "adiada (mesmo assunto em seguida)")]
 
 
 def test_divulgacao_piso_por_grupo_assunto_seguido_e_rajada():
