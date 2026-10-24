@@ -559,8 +559,10 @@ def interacoes_da_shopee_video(agora=None):
     agora = _agora(agora)
     desde, hoje = _momento(agora - timedelta(hours=24)), agora.strftime("%Y-%m-%d 00:00:00")
     respostas = registro_processos.sequencia("shopee_video", "responder comentário", desde)
-    feed = registro_processos.sequencia("shopee_video", "feed: comentar", _momento(agora - timedelta(days=3)),
-                                        resultado="comentado")
+    # O enviado que não apareceu na lista também conta: pode ter saído.
+    feed = [linha for linha in registro_processos.sequencia("shopee_video", "feed: comentar",
+                                                            _momento(agora - timedelta(days=3)))
+            if linha[2] in ("comentado", "não confirmado")]
     curtidas = registro_processos.sequencia("shopee_video", "feed: curtir", desde)
     return {
         "respostas": dict(Counter(resultado for _m, _p, resultado, _d, _o in respostas)),

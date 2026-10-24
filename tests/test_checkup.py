@@ -405,8 +405,10 @@ def test_respostas_e_feed_da_shopee_video_no_radar():
              origem="c", agora=antes(9))
     registro("shopee_video", "responder comentário", "sem resposta", "3 tentativa(s)", ok=False, origem="d",
              agora=antes(8))
-    for horas, origem in ((30, "v1"), (5, "v1"), (4, "v2"), (3, "v3"), (2, "v4")):
+    for horas, origem in ((30, "v1"), (5, "v1"), (4, "v2"), (3, "v3")):
         registro("shopee_video", "feed: comentar", "comentado", ok=True, origem=origem, agora=antes(horas))
+    registro("shopee_video", "feed: comentar", "não confirmado", ok=False, origem="v4", agora=antes(2))
+    registro("shopee_video", "feed: comentar", "parou", ok=False, origem="v5", agora=antes(1))
     r = checkup.interacoes_da_shopee_video(AGORA)
     assert r["respostas"] == {"respondido": 1, "resposta no lugar errado": 1, "já respondido": 1, "sem resposta": 1}
     assert r["duplicadas"] == 1 and r["rodou_hoje"] and r["feed_hoje"] == 4 and r["feed_repetidos"] == 1
