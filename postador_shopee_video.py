@@ -466,11 +466,16 @@ def parecido_na_tela(xml, nome):
     quantas palavras vêm antes do nome nele, ou -1 se o nome não começa em nenhuma).
     Diz se o produto estava na lista com outro nome ou se não estava.
     """
+    return parecido_entre([el["texto"] for el in elementos(xml)], nome)
+
+
+def parecido_entre(textos, nome):
+    """O parecido_na_tela de uma lista de textos (ex.: os nomes anexados na tela final)."""
     # Palavras de 3 letras ou mais: "de", "a" e "e" estão em quase todo nome.
     alvo = {p for p in _normal(nome).split() if len(p) >= 3}
     melhor = (0, -1)
-    for el in elementos(xml):
-        texto = _normal(el["texto"]).rstrip(".… ")
+    for texto in textos:
+        texto = _normal(texto).rstrip(".… ")
         if len(texto) < TAMANHO_MINIMO_DO_NOME or not alvo:
             continue
         palavras = texto.split()
@@ -564,7 +569,10 @@ def adicionar_produto(d, video):
             if proibido_no_ponto(tela, x, y):
                 return False, RECUSA
             d.click(x, y)
-            return conferir_janela(d, nome, ponto)
+            ok, motivo = conferir_janela(d, nome, ponto)
+            if ok:
+                registro_processos.registrar("shopee_video", "anexar o produto", "anexado", f"{rolagens} rolada(s)", ok=True)
+            return ok, motivo
         melhor = max(melhor, parecido_na_tela(tela, nome))
         textos = textos_longos(tela)
         if textos == anterior:
@@ -857,6 +865,17 @@ def conferir_tela_final(d, video):
         if nomes and not sobrando:
             return True, (f"tela final confere: os {len(nomes)} produtos anexados são os do vídeo" if len(nomes) > 1
                           else "tela final confere: o produto anexado é o do vídeo")
+    # Só números no registro (o nome não sai daqui): quantos anexados e o quanto o anexado
+    # mais parecido lembra o nome de cada produto do vídeo, para a próxima vez dar para
+    # saber se o nome veio cortado, se é outro produto ou se não havia nenhum na tela.
+    partes = []
+    for nome in nomes:
+        comum, antes = parecido_entre(anexados, nome)
+        partes.append(f"{comum}% das palavras" + (f", o nome começa depois de {antes} palavra(s)" if antes > 0 else ""))
+    parecidos = "; ".join(partes)
+    registro_processos.registrar("shopee_video", "conferir a tela final", "produto não confere",
+                                 f"{len(anexados)} anexado(s) na tela; {len(nomes)} do vídeo"
+                                 + (f"; o mais parecido com cada um: {parecidos}" if nomes and anexados else ""), ok=False)
     avisar_rafael.mandar_texto(f"{AVISO_TELA_FINAL}\n\nProduto(s) do vídeo: {'; '.join(nomes) or 'o link não diz'}")
     return False, (f"tela final com {len(anexados)} produto(s) anexado(s) que não confere(m) com o(s) "
                    f"{len(nomes)} do vídeo: nada salvo (aviso no privado)")
