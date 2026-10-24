@@ -25,7 +25,7 @@ def test_disparo_gera_o_link_de_novo_a_partir_do_original(monkeypatch):
     item = {"link_original": ORIGINAL, "link_convertido": GUARDADO,
             "texto_processado": f"<b>Mochila</b>\n\n🔗 <b>Link do Produto:</b>\n{GUARDADO}"}
     texto = rodar(mu.renovar_link_no_disparo(item, item["texto_processado"]))
-    assert pedidos == [(ORIGINAL, "geral", False)]
+    assert pedidos == [(ORIGINAL, "espelhador", False)]
     assert NOVO in texto and GUARDADO not in texto
     assert item["link_convertido"] == NOVO and NOVO in item["texto_processado"]
 

@@ -48,6 +48,7 @@ os.makedirs("temp", exist_ok=True)
 os.makedirs("archive", exist_ok=True)
 
 from api_gemini import analisar_video_gemini
+import api_shopee
 from api_shopee import converter_link_shopee
 from links_shopee import extrair_link_shopee, codigo_do_link_curto, chave_produto
 import legendas
@@ -1237,7 +1238,7 @@ async def interceptar_e_espelhar(event):
             return
 
         logger.info("🔗 A converter o link da Shopee para o seu ID de afiliado via API Central...")
-        link_novo = await converter_link_shopee(link_capturado, "geral")
+        link_novo = await converter_link_shopee(link_capturado, api_shopee.ETIQUETA_AUTORAIS)
 
         logger.info("📥 Iniciando o download do vídeo...")
         caminho_video = await event.download_media(file="temp/temp_espelho_isolado_")

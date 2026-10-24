@@ -45,6 +45,8 @@ from aiogram.types import KeyboardButton, FSInputFile, InlineKeyboardMarkup, Inl
 import subprocess
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from api_gemini import gerar_texto_gemini, analisar_video_gemini, MODELOS_CASCATA_GEMINI, client_genai
+import api_shopee
+import vendas
 from api_shopee import converter_link_shopee, buscar_ofertas_shopee, testar_chaves_afiliado, ORIGEM_SEM_CONVERSAO
 import links_shopee  # achar links da Shopee do mesmo jeito em todos os robôs
 import legendas  # legenda dos posts e pedido de nome e hashtags à IA, iguais em todos os robôs
@@ -7006,7 +7008,7 @@ async def processar_garimpo_automatico(forcado=False):
         link_original = item_escolhido.get("productLink")
         
         gancho = await gerar_copy_achadinho_ia(nome, preco, desconto, nota_loja)
-        link_curto = await converter_link_shopee(link_original, nome_nicho)
+        link_curto = await converter_link_shopee(link_original, [api_shopee.ETIQUETA_ACHADINHOS, nome_nicho])
         legenda_final = montar_legenda_achadinho(nome, preco, taxa_desconto, nota_loja, link_curto, gancho)
         
         try:
@@ -7301,11 +7303,17 @@ def ler_banco_pedidos():
 def salvar_banco_pedidos(dados):
     db.salvar_config("banco_pedidos", dados)
 
+# O relatório de vendas pede também a etiqueta do link e os produtos (vendas.py). Se a
+# API recusar esses campos, o processo volta ao relatório de antes até reiniciar.
+_relatorio_completo = True
+
+
 async def buscar_dados_financeiros_shopee(dias_retroativos=30):
     """
     Relatório de conversões da API de afiliados dos últimos dias_retroativos dias,
     em fatias de 30 (o limite da API é 31). None sem as chaves no .env.
     """
+    global _relatorio_completo
     if not SHOPEE_APP_ID or not SHOPEE_APP_SECRET:
         logger.warning("⏳ [API Shopee] Chaves financeiras ausentes no .env.")
         return None
@@ -7327,20 +7335,7 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
         endpoint = "https://open-api.affiliate.shopee.com.br/graphql"
         
         payload = {
-            "query": """query getConversionReport($purchaseTimeStart: Int64!, $purchaseTimeEnd: Int64!, $limit: Int!) {
-                conversionReport(purchaseTimeStart: $purchaseTimeStart, purchaseTimeEnd: $purchaseTimeEnd, limit: $limit) {
-                    nodes {
-                        purchaseTime
-                        shopeeCommissionCapped
-                        sellerCommission
-                        totalCommission
-                        orders {
-                            orderId
-                            orderStatus
-                        }
-                    }
-                }
-            }""",
+            "query": vendas.consulta_de_conversoes(completa=_relatorio_completo),
             "variables": {
                 "purchaseTimeStart": str(start_ts),
                 "purchaseTimeEnd": str(end_ts),
@@ -7366,6 +7361,15 @@ async def buscar_dados_financeiros_shopee(dias_retroativos=30):
                     if response.status == 200:
                         dados = json.loads(dados_crus)
                         erros_shopee = dados.get("errors")
+                        if erros_shopee and _relatorio_completo:
+                            # Campo novo (etiqueta e produtos) que a API não aceitou: volta ao
+                            # relatório de antes, para o financeiro nunca parar por causa dele.
+                            _relatorio_completo = False
+                            logger.warning(f"⚠️ [Financeiro] Relatório com etiqueta e produtos recusado; "
+                                           f"seguindo sem eles: {str(erros_shopee[0].get('message'))[:80]}")
+                            registrar_erro_json("Relatório de vendas com etiqueta e produtos recusado pela API",
+                                                origem="bot_mestre.py")
+                            return await buscar_dados_financeiros_shopee(dias_retroativos)
                         if erros_shopee:
                             mensagem_erro = erros_shopee[0].get("message", "Erro Desconhecido")
                             logger.error(f"❌ A Shopee recusou a fatia {i} a {i+dias_para_puxar} dias: {mensagem_erro}")
@@ -7410,6 +7414,8 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
             dt_obj = dt_obj_utc.astimezone(fuso_horario)
             dt_db_str = dt_obj.strftime("%Y-%m-%d")
             
+            # A etiqueta do link (o robô ou canal que levou à venda) e os produtos do pedido.
+            etiqueta = vendas.etiqueta_do_utm(conv.get("utmContent"))
             qtd_itens = len(orders)
             c_total_frac = c_total / qtd_itens
             c_shopee_frac = c_shopee / qtd_itens
@@ -7422,7 +7428,12 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
                     
                 novo_status = order.get("orderStatus", "").upper()
                 
+                itens = vendas.itens_do_pedido(order)
                 if order_sn in pedidos_db:
+                    if conv.get("utmContent") is not None and (
+                            pedidos_db[order_sn].get("etiqueta") != etiqueta or pedidos_db[order_sn].get("itens") != itens):
+                        pedidos_db[order_sn].update(etiqueta=etiqueta, itens=itens)
+                        houve_atualizacao = True
                     estado_anterior = pedidos_db[order_sn]["status"]
                     comissao_anterior = pedidos_db[order_sn].get("comissao_total", 0) or 0
                     estava_confirmado = estado_anterior == "COMPLETED"
@@ -7459,6 +7470,8 @@ def processar_e_salvar_pedidos_api(conversoes, ignorar_ledger=False):
                         "comissao_shopee": c_shopee_frac,
                         "comissao_vendedor": c_extra_frac
                     }
+                    if conv.get("utmContent") is not None:
+                        pedidos_db[order_sn].update(etiqueta=etiqueta, itens=itens)
                     houve_atualizacao = True
                     # Já veio confirmado: entra no saldo.
                     if not ignorar_ledger and novo_status == "COMPLETED":
@@ -15054,7 +15067,7 @@ async def processar_fila_espiao(forcar=False):
             continue
             
         logger.info(f"🕵️ Processando clone agendado: {item_id}")
-        link_final = await converter_link_shopee(link_original)
+        link_final = await converter_link_shopee(link_original, api_shopee.ETIQUETA_VIRAL)
         
         try:
             prompt_espiao = legendas.PROMPT_NOME_E_HASHTAGS
@@ -15138,6 +15151,17 @@ async def sincronizar_financeiro_horario():
     if conversoes:
         processar_e_salvar_pedidos_api(conversoes)
         logger.info("✅ [Financeiro] Varredura horária concluída. Banco de Pedidos atualizado.")
+
+@registro_processos.anotar("bot_mestre", "relatório semanal de vendas")
+async def relatorio_semanal_de_vendas():
+    """
+    Toda segunda: a comissão dos 7 dias antes por canal (a etiqueta de cada robô nos links)
+    e os produtos que mais renderam, no privado. Pedido do Rafael (P13).
+    Decisão do Rafael: DECISOES.md, Financeiro
+    """
+    texto = vendas.texto_semanal(ler_banco_pedidos(), datetime.now(fuso_horario))
+    await bot.send_message(ADMIN_ID, texto, parse_mode="HTML")
+
 
 @registro_processos.anotar("bot_mestre", "financeiro: varredura dos pendentes")
 async def varredura_retroativa_pendentes():
@@ -16067,7 +16091,7 @@ async def montar_resposta_busca(termo, ofertas, total_bruto):
             nota = 0
         vendas = int(oferta.get("sales") or 0)
 
-        link = await converter_link_shopee(oferta.get("productLink"), "busca")
+        link = await converter_link_shopee(oferta.get("productLink"), api_shopee.ETIQUETA_BUSCA)
 
         faixa = _faixa_preco(oferta)
         detalhes = [faixa] if faixa else []
@@ -17407,6 +17431,9 @@ async def main():
     
     # Pente fino dos pedidos pendentes antigos (02:00)
     scheduler.add_job(varredura_retroativa_pendentes, 'cron', hour=2, minute=0, timezone=FUSO_STR)
+    # Toda segunda de manhã: as vendas da semana por canal e por produto (vendas.py).
+    scheduler.add_job(relatorio_semanal_de_vendas, 'cron', day_of_week='mon', hour=9, minute=13,
+                      timezone=FUSO_STR, id='relatorio_semanal_vendas', replace_existing=True)
 
     # Relatório diário de saúde dos canais (11:00)
     scheduler.add_job(checkup_diario_grupos, 'cron', hour=11, minute=0, timezone=FUSO_STR)
