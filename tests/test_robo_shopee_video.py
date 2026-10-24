@@ -774,6 +774,31 @@ def test_sem_rascunho_salvo_o_perfil_nao_tem_o_quadro_e_o_robo_para(monkeypatch,
     assert robo.pegar(ident)["estado"] == "rascunho"
 
 
+class PerfilDevagar(AppComQuadros):
+    """O Perfil com a grade (o quadro Rascunhos) carregando pela rede nas primeiras leituras."""
+
+    def __init__(self, leituras_sem_grade):
+        super().__init__()
+        self.sem_grade = leituras_sem_grade
+
+    def _nos(self):
+        nos = super()._nos()
+        if self.atual == "perfil" and self.sem_grade > 0:
+            self.sem_grade -= 1
+            return [n for n in nos if "Rascunhos:" not in n]
+        return nos
+
+
+def test_aprovado_espera_o_quadro_rascunhos_carregar_no_perfil(monkeypatch, avisos, caminho_do_rascunho):
+    # 24/10, 08:58: a postagem parou com "o Perfil não tem nenhum rascunho salvo"; a grade
+    # do Perfil carrega pela rede depois do Postar vídeo.
+    ident = _aprovado(monkeypatch)
+    app = PerfilDevagar(3)
+    app.legenda, app.com_produto = TITULO, True
+    assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho aprovado postado"
+    assert robo.pegar(ident)["estado"] == "postado"
+
+
 def _no_do_app(pacote, texto, caixa):
     return _no(texto, caixa=caixa).replace("<node ", f'<node package="{pacote}" ', 1)
 

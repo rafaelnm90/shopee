@@ -72,7 +72,8 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
     conferir e desistir sem perder nada);
   - **Perfil em Shopee Vídeo:** o 1º quadro da grade é "Rascunhos: N", que **só aparece
     com algum rascunho salvo**; depois vêm os vídeos **Fixados** (rótulo "Fixado" no
-    canto) e só então o mais novo;
+    canto) e só então o mais novo. A grade carrega pela rede depois do Postar vídeo: o
+    robô espera até 18 s o quadro aparecer (24/10/2026, a postagem parou sem esperar);
   - **lista de rascunhos:** o texto de aviso no alto, os quadros (o 1º em ~179,658, com a
     data embaixo) e Selecionar (~933,173). Em Selecionar, o alto vira Cancelar e embaixo
     aparece **"Excluir (N)"** (~539,2312); o toque no quadro o marca. Excluir abre
