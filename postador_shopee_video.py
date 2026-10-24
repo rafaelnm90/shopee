@@ -706,6 +706,55 @@ def nomes_dos_produtos(video):
     return [nome] if nome else []
 
 
+ROTULO_DE_IA = "Rótulo de conteúdo gerado por IA"
+
+
+def chave_do_rotulo_de_ia(lista):
+    """
+    A chave do Rótulo de conteúdo gerado por IA na tela final: na mesma linha do nome, à
+    direita (a frase que explica fica embaixo do nome, e as chaves de Salvar no dispositivo
+    e de Compartilhar ficam nas linhas de cima e de baixo). None sem a linha na tela.
+    """
+    nome = next((el for el in lista if _normal(el["texto"]).startswith(_normal(ROTULO_DE_IA))), None)
+    if not nome:
+        return None
+    _x0, topo, _x1, base = nome["caixa"]
+    direita = 0.7 * max(el["caixa"][2] for el in lista)
+    candidatas = [el for el in lista if el is not nome and (el["clicavel"] or "switch" in el["classe"].lower())
+                  and _centro(el)[0] >= direita and topo - 40 <= _centro(el)[1] <= base + 120]
+    centro = (topo + base) / 2
+    # A chave de verdade é a de classe Switch; sem ela, o que aceita toque mais perto do nome.
+    return min(candidatas, key=lambda el: ("switch" not in el["classe"].lower(), abs(_centro(el)[1] - centro)),
+               default=None)
+
+
+def ajustar_rotulo_de_ia(d, ligado):
+    """
+    Deixa o Rótulo de conteúdo gerado por IA como a IA decidiu: ligado só no vídeo
+    claramente feito por IA; senão, desligado, como o app abre. Toca na chave e confere que
+    ela mudou. Sem achar a chave: para se era para ligar (não vai sem o rótulo); se era para
+    ficar desligado, segue como o app abre. Escolha do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    estado = "ligado" if ligado else "desligado"
+    tela = d.dump_hierarchy()
+    chave = chave_do_rotulo_de_ia(elementos(tela))
+    if not chave:
+        if ligado:
+            return False, "o Rótulo de IA não está na tela final: nada salvo"
+        return True, "o Rótulo de IA não está na tela: fica como o app abre (desligado)"
+    if chave["marcado"] == ligado:
+        return True, f"Rótulo de IA já {estado}"
+    x, y = _centro(chave)
+    if proibido_no_ponto(tela, x, y):
+        return False, RECUSA
+    d.click(x, y)
+    time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
+    depois = chave_do_rotulo_de_ia(elementos(d.dump_hierarchy()))
+    if not depois or depois["marcado"] != ligado:
+        return False, f"toquei no Rótulo de IA, mas ele não ficou {estado}"
+    return True, f"Rótulo de IA {estado}"
+
+
 def conferir_tela_final(d, video):
     """
     Na tela final, antes de Rascunhos (e, no robô pronto, de Postar): os produtos anexados
