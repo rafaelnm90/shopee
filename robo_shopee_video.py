@@ -152,6 +152,8 @@ ESPERA_DOS_RASCUNHOS = 18
 # segundos que dá ao app depois de cada toque.
 VEZES_DO_AGUARDAR = 3
 ESPERA_DO_AGUARDAR = 15
+# Segundos que a Shopee tem para abrir depois de fechada pelo aviso de app travado.
+ESPERA_DEPOIS_DE_REABRIR = 20
 # A Saúde é lida de novo pelo aviso de penalidade nas Notificações só depois disto.
 INTERVALO_DA_SAUDE = timedelta(hours=6)
 # Depois do Já recorri, a Saúde é lida de hora em hora até sair o resultado (escolha do
@@ -789,12 +791,14 @@ def pausa(segundos):
     time.sleep(segundos + random.uniform(0.5, 2.5))
 
 
-def tela(d):
+def tela(d, seguir=False):
     """
     A tela de agora; para na hora se for a Verificação. Com o aviso do Android de app que
     não responde ("Shopee não está respondendo", com Fechar app e Aguardar), toca em
-    Aguardar e dá um tempo ao app; nunca em Fechar app, porque fechar e reabrir chama a
-    Verificação. Ainda travado depois de VEZES_DO_AGUARDAR toques, a rodada para.
+    Aguardar e dá um tempo ao app. Ainda travado depois de VEZES_DO_AGUARDAR toques,
+    fecha e reabre a Shopee (fechar_e_reabrir). O passo que esperava outra tela não
+    continua do início do app: a rodada para; com seguir=True (o voltar, que leva ao
+    início de qualquer jeito), devolve a tela do app reaberto.
     """
     xml = d.dump_hierarchy()
     for vez in range(VEZES_DO_AGUARDAR + 1):
@@ -810,10 +814,42 @@ def tela(d):
         d.click(*ps.achar(xml, "@aerr_wait"))
         pausa(ESPERA_DO_AGUARDAR)
         xml = d.dump_hierarchy()
-    registro_processos.registrar(REGISTRO, "app travado", "continuou travado",
-                                 f"{VEZES_DO_AGUARDAR} toque(s) em Aguardar", ok=False)
-    raise Parada(f"o celular mostra que o app não está respondendo, mesmo depois de {VEZES_DO_AGUARDAR} "
-                 "toques em Aguardar")
+    xml = fechar_e_reabrir(d, xml)
+    if seguir:
+        return xml
+    raise Parada("a Shopee não está respondendo (aviso do Android): fechei e reabri o app; o passo fica "
+                 "para a próxima rodada")
+
+
+def fechar_e_reabrir(d, xml):
+    """
+    A Shopee continua sem responder depois dos Aguardar: toca em Fechar app no aviso do
+    Android e abre a Shopee de novo. Devolve a tela do app reaberto. A Verificação que
+    aparecer depois para a rodada como sempre (o Rafael recebe o link da tela); o app
+    ainda travado também para. Fora este aviso, o robô nunca fecha o app.
+    Escolha do Rafael (24/10, P15): DECISOES.md, Shopee Vídeo.
+    """
+    fechar = ps.achar(xml, "@aerr_close")
+    if not fechar:
+        registro_processos.registrar(REGISTRO, "app travado", "continuou travado", "o aviso sem o Fechar app",
+                                     ok=False)
+        raise Parada("a Shopee não está respondendo e o aviso do Android não tem o Fechar app")
+    d.click(*fechar)
+    pausa(4)
+    d.app_start(ps.PACOTE, wait=True)
+    pausa(ESPERA_DEPOIS_DE_REABRIR)
+    xml = d.dump_hierarchy()
+    if ps.eh_verificacao(xml):
+        registro_processos.registrar(REGISTRO, "app travado", "fechado e reaberto", "a Verificação apareceu",
+                                     ok=False)
+        raise Verificacao()
+    if app_travado(xml):
+        registro_processos.registrar(REGISTRO, "app travado", "continuou travado", "depois de fechar e reabrir",
+                                     ok=False)
+        raise Parada("a Shopee não está respondendo, mesmo depois de fechar e reabrir o app")
+    registro_processos.registrar(REGISTRO, "app travado", "fechado e reaberto",
+                                 f"depois de {VEZES_DO_AGUARDAR} toque(s) em Aguardar", ok=True)
+    return xml
 
 
 def app_travado(xml):
@@ -935,11 +971,12 @@ def fora_da_shopee(xml):
 def voltar(d, ate, vezes=15):
     """
     Aperta voltar, confirmando os avisos de sair, até a tela ter um elemento com o texto
-    exato. Nunca fecha o app à força: fechar e reabrir em seguida chama a Verificação.
-    Fora da Shopee, não aperta voltar: traz a Shopee de volta para a frente.
+    exato. Nunca fecha o app à força (fechar e reabrir em seguida chama a Verificação),
+    fora o aviso do Android de app que não responde (tela). Fora da Shopee, não aperta
+    voltar: traz a Shopee de volta para a frente.
     """
     for _ in range(vezes):
-        xml = tela(d)
+        xml = tela(d, seguir=True)
         if tem_exato(xml, ate) and not tem(xml, "@et_caption"):
             return
         if fora_da_shopee(xml):

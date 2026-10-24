@@ -909,39 +909,72 @@ AVISO_DE_APP_TRAVADO = _xml(
 
 
 class CelularComAppTravado:
-    """O Motorola em 24/10 (13:17 e 13:38): o Android pergunta se fecha a Shopee, que não responde."""
+    """
+    O Motorola em 24/10 (13:17 e 13:38): o Android pergunta se fecha a Shopee, que não
+    responde. travado_por: quantos toques em Aguardar até voltar; depois_de_reabrir: a
+    tela da Shopee aberta de novo pelo Fechar app (None: continua travada).
+    """
 
-    def __init__(self, travado_por):
-        self.travado_por, self.toques = travado_por, []
+    def __init__(self, travado_por, depois_de_reabrir=None):
+        self.travado_por, self.depois_de_reabrir = travado_por, depois_de_reabrir
+        self.toques, self.aberturas, self.fechado = [], [], False
 
     def dump_hierarchy(self):
+        if self.fechado:
+            return self.depois_de_reabrir or AVISO_DE_APP_TRAVADO
         if len(self.toques) < self.travado_por:
             return AVISO_DE_APP_TRAVADO
         return _xml(ABA_EU)
 
     def click(self, x, y):
         self.toques.append((x, y))
+        self.fechado = self.fechado or (x, y) == FECHAR_APP
+
+    def app_start(self, pacote, wait=False):
+        self.aberturas.append(pacote)
+
+
+AGUARDAR, FECHAR_APP = (540, 1385), (540, 1255)
 
 
 def test_app_que_nao_responde_ganha_o_aguardar_e_a_rodada_segue():
     from conftest import consultar
     celular = CelularComAppTravado(travado_por=1)
     assert robo.tem_exato(robo.tela(celular), "Eu")
-    # Sempre no Aguardar (540,1385), nunca no Fechar app.
-    assert celular.toques == [(540, 1385)]
+    assert celular.toques == [AGUARDAR] and celular.aberturas == []
     assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = 'app travado'") == (
         "voltou depois do Aguardar", 1)
 
 
-def test_app_que_continua_travado_para_a_rodada_sem_tocar_em_fechar_app():
+def test_app_que_continua_travado_e_fechado_e_reaberto_e_o_passo_fica_para_a_proxima():
+    # Escolha do Rafael (24/10, P15): depois de 3 Aguardar, Fechar app e reabrir.
+    from conftest import consultar
+    celular = CelularComAppTravado(travado_por=99, depois_de_reabrir=_xml(ABA_EU))
+    with pytest.raises(robo.Parada) as parada:
+        robo.tela(celular)
+    assert celular.toques == [AGUARDAR] * robo.VEZES_DO_AGUARDAR + [FECHAR_APP]
+    assert celular.aberturas == [robo.ps.PACOTE]
+    assert robo.passo_do_motivo(parada.value.motivo) == "app travado"
+    assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = 'app travado'") == (
+        "fechado e reaberto", 1)
+
+
+def test_app_travado_mesmo_depois_de_reabrir_para_sem_fechar_de_novo():
     from conftest import consultar
     celular = CelularComAppTravado(travado_por=99)
     with pytest.raises(robo.Parada) as parada:
         robo.tela(celular)
-    assert celular.toques == [(540, 1385)] * robo.VEZES_DO_AGUARDAR
-    assert robo.passo_do_motivo(parada.value.motivo) == "app travado"
+    assert celular.toques.count(FECHAR_APP) == 1 and celular.aberturas == [robo.ps.PACOTE]
+    assert "mesmo depois de fechar e reabrir" in parada.value.motivo
     assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = 'app travado'") == (
         "continuou travado", 0)
+
+
+def test_verificacao_depois_de_reabrir_o_app_travado_para_como_sempre(monkeypatch):
+    celular = CelularComAppTravado(travado_por=99, depois_de_reabrir=_xml(ABA_EU))
+    monkeypatch.setattr(robo.ps, "eh_verificacao", lambda xml: celular.fechado)
+    with pytest.raises(robo.Verificacao):
+        robo.tela(celular)
 
 
 def test_voltar_toca_em_aguardar_no_aviso_de_app_travado_em_vez_de_apertar_voltar():
@@ -949,7 +982,15 @@ def test_voltar_toca_em_aguardar_no_aviso_de_app_travado_em_vez_de_apertar_volta
     celular.teclas = []
     celular.press = celular.teclas.append
     robo.voltar(celular, "Eu")
-    assert celular.toques == [(540, 1385)] and celular.teclas == []
+    assert celular.toques == [AGUARDAR] and celular.teclas == []
+
+
+def test_voltar_segue_do_app_reaberto_depois_do_fechar_app():
+    celular = CelularComAppTravado(travado_por=99, depois_de_reabrir=_xml(ABA_EU))
+    celular.teclas = []
+    celular.press = celular.teclas.append
+    robo.voltar(celular, "Eu")
+    assert celular.toques[-1] == FECHAR_APP and celular.teclas == []
 
 
 def test_aviso_do_android_por_cima_da_shopee_nao_conta_como_outro_app():
