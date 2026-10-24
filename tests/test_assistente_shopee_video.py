@@ -113,11 +113,17 @@ def test_prompt_leva_as_regras_do_gem_e_as_diretrizes():
 def test_le_o_json_da_ia_mesmo_com_texto_em_volta():
     texto = ('```json\n{"violacao": false, "motivo": "", "titulo": "Garrafa Térmica 🧊 #garrafa", '
              '"comentario": "Mantém gelado o dia todo #casa"}\n```')
-    assert asv.ler_resposta(texto) == {"violacao": False, "motivo": "", "titulo": "Garrafa Térmica 🧊 #garrafa",
+    assert asv.ler_resposta(texto) == {"violacao": False, "motivo": "", "feito_por_ia": False, "sinal_ia": "",
+                                       "titulo": "Garrafa Térmica 🧊 #garrafa",
                                        "comentario": "Mantém gelado o dia todo #casa"}
     assert asv.ler_resposta("não sei") is None
     assert asv.ler_resposta("{quebrado") is None
     assert asv.ler_resposta('{"violacao": true, "motivo": "marca no vídeo"}')["violacao"] is True
+    # Rótulo de IA (escolha do Rafael, 24/10, P8): só o true de verdade liga; "talvez" fica desligado.
+    ia = asv.ler_resposta('{"feito_por_ia": true, "sinal_ia": "avatar falando com voz sintética", "titulo": "x"}')
+    assert ia["feito_por_ia"] is True and ia["sinal_ia"] == "avatar falando com voz sintética"
+    assert asv.ler_resposta('{"feito_por_ia": "talvez", "titulo": "x"}')["feito_por_ia"] is False
+    assert "feito_por_ia" in asv.montar_prompt() and "na dúvida, false" in asv.montar_prompt()
 
 
 def test_titulo_comprido_perde_palavras_do_fim_sem_cortar_no_meio():

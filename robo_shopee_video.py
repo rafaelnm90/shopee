@@ -422,9 +422,11 @@ def suspensao_na_tela(xml, agora=None):
 # --- Rascunhos (tabela shopee_video_rascunhos) ---
 
 COLUNAS = ("id", "id_video", "criado_em", "estado", "arquivo", "print", "link", "produtos", "titulo",
-           "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia")
+           "comentario", "aprovado_em", "postar_em", "postado_em", "link_post", "motivo", "fonte", "conferencia",
+           "rotulo_ia")
 # Colunas que vieram depois da tabela: entram nas tabelas antigas sem perder nada.
-COLUNAS_NOVAS = ("fonte", "conferencia")
+# rotulo_ia: vazio = o rótulo de IA desligado; com texto = ligado, e o texto é o que a IA viu.
+COLUNAS_NOVAS = ("fonte", "conferencia", "rotulo_ia")
 
 
 def _criar_tabela(con):
@@ -432,7 +434,7 @@ def _criar_tabela(con):
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, id_video TEXT, criado_em TEXT, estado TEXT, "
                 "arquivo TEXT, print TEXT, link TEXT, produtos TEXT, titulo TEXT, comentario TEXT, "
                 "aprovado_em TEXT, postar_em TEXT, postado_em TEXT, link_post TEXT, motivo TEXT, "
-                "fonte TEXT, conferencia TEXT)")
+                "fonte TEXT, conferencia TEXT, rotulo_ia TEXT)")
     existentes = {linha[1] for linha in con.execute("PRAGMA table_info(shopee_video_rascunhos)")}
     for coluna in COLUNAS_NOVAS:
         if coluna not in existentes:
@@ -511,6 +513,7 @@ LINHAS_DO_HISTORICO = 12
 PASSOS = (
     ("suspensa pela Shopee", "conta suspensa pela Shopee"),
     ("Centro do criador", "achar a Saúde no Centro do criador"),
+    ("Rótulo de IA", "rótulo de IA"),
     ("Saúde do Vídeo não abriu", "abrir a Saúde do Vídeo"),
     ("sem oferta de afiliado", "oferta de afiliado"),
     ("o link não diz o produto", "achar o produto do link"),
@@ -1367,11 +1370,15 @@ def _preparar(d, ident, video, fonte, agora=None):
                f"{textos['motivo'] or 'sem motivo'}")
         raise Parada("a IA viu violação das diretrizes", do_video=True)
 
+    # Vídeo claramente feito por IA vai com o Rótulo de IA ligado; na dúvida, desligado.
+    # Escolha do Rafael (24/10, P8): DECISOES.md, Shopee Vídeo.
+    rotulo_ia = (textos.get("sinal_ia") or "a IA viu que o vídeo é gerado por IA") if textos.get("feito_por_ia") else ""
+
     os.makedirs(PASTA_RASCUNHOS, exist_ok=True)
     copia = os.path.join(PASTA_RASCUNHOS, f"{ident}.mp4")
     shutil.copyfile(video["arquivo"], copia)
     atualizar(ident, arquivo=copia, link=video["link"], produtos=nomes, titulo=textos["titulo"],
-              comentario=textos.get("comentario") or "")
+              comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia)
 
     if not video.get("de_video"):
         # Curtir o produto pela página dele, como o Rafael faz antes de postar (os do Ver
@@ -1410,6 +1417,8 @@ def _preparar(d, ident, video, fonte, agora=None):
         _conferir(ps.adicionar_produto(d, dict(video, produto=nome)))
         tocar(d, "Feito", 6)
     _conferir(ps.conferir_tela_final(d, dict(video, produtos=nomes)))
+    # Antes do print: o Rafael vê no print a chave como vai ao ar.
+    _conferir(ps.ajustar_rotulo_de_ia(d, bool(rotulo_ia)))
 
     print_tela = os.path.join(PASTA_RASCUNHOS, f"{ident}.png")
     d.screenshot(print_tela)
@@ -1568,6 +1577,7 @@ def publicar(d, rascunho, agora=None):
     if ate:
         raise Suspensa(ate)
     abrir_rascunho(d, rascunho)
+    _conferir(ps.ajustar_rotulo_de_ia(d, bool(rascunho.get("rotulo_ia"))), do_video=False)
     _conferir(ps.postar(d, video_do_rascunho(rascunho)), do_video=False)
     pausa(15)
     atualizar(rascunho["id"], estado="postado", postado_em=_momento(agora))

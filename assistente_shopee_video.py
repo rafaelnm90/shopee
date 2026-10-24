@@ -62,7 +62,7 @@ PROMPT = """Atue como um especialista em Growth Hacking e Marketing para Shopee.
 detalhadamente o vídeo (produto, estilo e público-alvo) e gere o texto para postar na Shopee Vídeo.
 
 Responda SOMENTE com um JSON, sem nada antes ou depois, neste formato:
-{{"violacao": false, "motivo": "", "titulo": "...", "comentario": "..."}}
+{{"violacao": false, "motivo": "", "feito_por_ia": false, "sinal_ia": "", "titulo": "...", "comentario": "..."}}
 
 "titulo": o Título do Vídeo, com apenas o nome do produto (sem frase de gancho nem texto \
 criativo), seguido de emojis e do máximo possível de hashtags de alta performance e grande \
@@ -84,6 +84,11 @@ e #copotermico em vez da marca).
 Antes de responder, analise com rigor o vídeo e o texto que você gerou contra as diretrizes \
 da Shopee Vídeo abaixo. Se algo violar uma diretriz, responda "violacao": true e diga em \
 "motivo", em uma frase curta, qual regra. Se não, "violacao": false e "motivo": "".
+
+"feito_por_ia": true só se o vídeo for claramente gerado por IA (imagens geradas por IA, \
+avatar ou apresentador artificial, voz sintética narrando). Vídeo filmado de verdade, mesmo \
+com cortes, filtros, legendas, música ou imagens do anúncio, é false; na dúvida, false. Quando \
+for true, diga em "sinal_ia", em uma frase curta, o que mostra que é IA; senão, "sinal_ia": "".
 
 {produto}Diretrizes da Shopee Vídeo:
 {diretrizes}"""
@@ -303,7 +308,10 @@ def montar_prompt(nome_produto=""):
 
 
 def ler_resposta(texto):
-    """O JSON da IA como dict ({violacao, motivo, titulo, comentario}); None se não veio um JSON."""
+    """
+    O JSON da IA como dict ({violacao, motivo, feito_por_ia, sinal_ia, titulo, comentario});
+    None se não veio um JSON. feito_por_ia só vale com true de verdade: na dúvida, desligado.
+    """
     achado = re.search(r"\{.*\}", texto or "", re.S)
     if not achado:
         return None
@@ -314,6 +322,7 @@ def ler_resposta(texto):
     if not isinstance(dados, dict):
         return None
     return {"violacao": bool(dados.get("violacao")), "motivo": str(dados.get("motivo") or "").strip(),
+            "feito_por_ia": dados.get("feito_por_ia") is True, "sinal_ia": str(dados.get("sinal_ia") or "").strip(),
             "titulo": encaixar_titulo(str(dados.get("titulo") or "")),
             "comentario": str(dados.get("comentario") or "").strip()}
 

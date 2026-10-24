@@ -945,6 +945,15 @@ def linhas_da_conferencia(conferencia):
     return f"🤖 <b>A IA conferiu o vídeo com o produto ({len(vistos)} vezes):</b>\n{linhas}\n\n"
 
 
+def linha_do_rotulo_de_ia(rotulo_ia):
+    """O que a IA decidiu sobre o Rótulo de IA (rascunho de antes dessa conferência: nada)."""
+    if rotulo_ia is None:
+        return ""
+    if rotulo_ia:
+        return f"🤖 <b>Rótulo de IA:</b> ligado. A IA viu: {html_escape(rotulo_ia)}\n\n"
+    return "🤖 <b>Rótulo de IA:</b> desligado (a IA não viu sinal claro de vídeo feito por IA).\n\n"
+
+
 def texto_rascunho(rascunho, posicao, total):
     produtos = "\n".join(f"• {html_escape(nome)}" for nome in rascunho["produtos"]) or "• ?"
     aviso = (f"⚠️ Da última vez não deu certo: {html_escape(rascunho['motivo'])}\n\n"
@@ -955,7 +964,8 @@ def texto_rascunho(rascunho, posicao, total):
             f"🛍️ <b>{'Produtos anexados' if len(rascunho['produtos'] or []) > 1 else 'Produto anexado'}:</b>\n{produtos}\n"
             f"🔗 {html_escape(rascunho['link'] or '')}\n\n"
             f"{linhas_da_origem(rascunho.get('fonte'))}"
-            f"{linhas_da_conferencia(rascunho.get('conferencia'))}{aviso}"
+            f"{linhas_da_conferencia(rascunho.get('conferencia'))}{linha_do_rotulo_de_ia(rascunho.get('rotulo_ia'))}"
+            f"{aviso}"
             f"<b>{BOTAO_APROVAR}</b>: o robô posta, um de cada vez, dentro do Horário do Robô.\n"
             f"<b>{BOTAO_RECUSAR}</b>: o robô apaga o rascunho do celular, e o vídeo não volta.")
 

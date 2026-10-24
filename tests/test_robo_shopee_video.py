@@ -495,6 +495,7 @@ def test_passo_do_motivo():
     assert robo.passo_do_motivo("o Centro do criador não mostrou a Saúde do Vídeo") == "achar a Saúde no Centro do criador"
     assert robo.passo_do_motivo("não achei Centro do criador na tela") == "achar a Saúde no Centro do criador"
     assert robo.passo_do_motivo("a Saúde do Vídeo não abriu") == "abrir a Saúde do Vídeo"
+    assert robo.passo_do_motivo("toquei no Rótulo de IA, mas ele não ficou ligado") == "rótulo de IA"
     assert robo.passo_do_motivo("algo novo") == "outro" and robo.passo_do_motivo("") == ""
 
 
@@ -1555,6 +1556,91 @@ def test_aviso_antigo_nas_notificacoes_nao_vale_se_a_saude_nao_mostra_o_bloqueio
     robo.db.salvar_config(robo.CHAVE_ESTADO, {})
     monkeypatch.setitem(TELAS_DA_SAUDE, "saude", TELAS_DA_SAUDE["saude"] + [_no(SAUDE_BANIDO, clicavel=False)])
     assert robo.ler_suspensao(AppDaSaude(), momento("2026-10-24 12:00")).day == 26
+
+
+def _linha_do_rotulo(ligado):
+    """A linha do Rótulo de IA na tela final, como no Motorola: nome, explicação embaixo e a chave à direita."""
+    return [_no("Salvar no dispositivo", caixa=(40, 1150, 700, 1200), clicavel=False),
+            '<node text="" class="android.widget.Switch" clickable="true" checked="false" bounds="[900,1150][1040,1200]"/>',
+            _no(robo.ps.ROTULO_DE_IA, caixa=(40, 1300, 700, 1350), clicavel=False),
+            _no("Ative isso se o seu vídeo incluir conteúdo gerado por IA", caixa=(40, 1360, 860, 1450), clicavel=False),
+            f'<node text="" class="android.widget.Switch" clickable="true" checked="{"true" if ligado else "false"}" '
+            'bounds="[900,1340][1040,1390]"/>',
+            _no("Compartilhar automaticamente", caixa=(40, 1560, 700, 1610), clicavel=False),
+            _no(ident="iv_facebook", caixa=(930, 1550, 1030, 1620))]
+
+
+class ComRotuloDeIA(AppComQuadros):
+    """A tela final com a linha do Rótulo de IA; o toque na chave dela liga ou desliga."""
+
+    def __init__(self, chave_funciona=True):
+        super().__init__()
+        self.rotulo, self.chave_funciona = False, chave_funciona
+
+    def _nos(self):
+        nos = super()._nos()
+        return nos + _linha_do_rotulo(self.rotulo) if self.atual in ("final", "final_editando") else nos
+
+    def click(self, x, y):
+        if self.atual in ("final", "final_editando") and 900 <= x <= 1040 and 1340 <= y <= 1390:
+            self.toques.append("rotulo_ia")
+            self.rotulo = self.rotulo != self.chave_funciona
+            return
+        super().click(x, y)
+
+
+def test_chave_do_rotulo_de_ia_e_a_da_linha_dele():
+    lista = robo.ps.elementos(_xml(*_linha_do_rotulo(True)))
+    chave = robo.ps.chave_do_rotulo_de_ia(lista)
+    assert robo.ps._centro(chave) == (970, 1365) and chave["marcado"] is True
+    assert robo.ps.chave_do_rotulo_de_ia(robo.ps.elementos(_xml(*_tela_final()))) is None
+
+
+def test_video_feito_por_ia_vai_com_o_rotulo_ligado_e_o_rafael_ve(monkeypatch, avisos, caminho_do_rascunho):
+    # Escolha do Rafael (24/10, P8): a IA marca sozinha; claramente IA liga, na dúvida desligado.
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+
+    async def textos(arquivo, nome):
+        return {"violacao": False, "motivo": "", "feito_por_ia": True, "sinal_ia": "avatar com voz sintética",
+                "titulo": TITULO, "comentario": "Amei!"}
+    monkeypatch.setattr(robo.assistente, "textos_do_video", textos)
+    app = ComRotuloDeIA()
+    assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert app.rotulo and app.toques.index("rotulo_ia") < app.toques.index("@tv_drafts_box")
+    rascunho = robo.esperando_aprovacao()[0]
+    assert rascunho["rotulo_ia"] == "avatar com voz sintética"
+    import painel_shopee_video as sv
+    assert "Rótulo de IA:</b> ligado. A IA viu: avatar com voz sintética" in sv.texto_rascunho(rascunho, 1, 1)
+    # A chave que não muda com o toque, ou a linha que não está na tela: não vai sem o rótulo.
+    app = ComRotuloDeIA(chave_funciona=False)
+    app.atual = "final"
+    ok, motivo = robo.ps.ajustar_rotulo_de_ia(app, True)
+    assert not ok and robo.passo_do_motivo(motivo) == "rótulo de IA"
+    app = AppComQuadros()
+    app.atual = "final"
+    assert not robo.ps.ajustar_rotulo_de_ia(app, True)[0] and robo.ps.ajustar_rotulo_de_ia(app, False)[0]
+
+
+def test_video_real_fica_com_o_rotulo_desligado(monkeypatch, avisos, caminho_do_rascunho):
+    _fonte(monkeypatch)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    app = ComRotuloDeIA()
+    assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert not app.rotulo and "rotulo_ia" not in app.toques
+    import painel_shopee_video as sv
+    rascunho = robo.esperando_aprovacao()[0]
+    assert rascunho["rotulo_ia"] == "" and "Rótulo de IA:</b> desligado" in sv.texto_rascunho(rascunho, 1, 1)
+    assert sv.linha_do_rotulo_de_ia(None) == ""      # rascunho de antes da conferência
+
+
+def test_aprovado_com_rotulo_de_ia_confere_a_chave_antes_de_postar(monkeypatch, avisos, caminho_do_rascunho):
+    ident = _aprovado(monkeypatch)
+    robo.atualizar(ident, rotulo_ia="avatar com voz sintética")
+    app = ComRotuloDeIA()
+    app.legenda, app.com_produto = TITULO, True
+    assert robo.rodada(d=app, agora=momento("2026-10-23 19:30")) == "rascunho aprovado postado"
+    assert app.rotulo and app.toques.index("rotulo_ia") < app.toques.index("@btn_post")
 
 
 class SaudeDevagar(AppDaSaude):

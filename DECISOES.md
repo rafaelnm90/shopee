@@ -213,7 +213,8 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - Eu → Criadores e Afiliados → Perfil em Shopee Vídeo → Postar vídeo → o vídeo na galeria → Próximo;
   - efeito de giro é opcional: o robô começa sem;
   - Adicionar Produto → Minhas Curtidas: primeiro o de menor preço; no empate, o de maior comissão;
-  - o título vai no campo da legenda, e as chaves da última tela ficam como vêm (reutilização ligada; salvar no aparelho e rótulo de IA desligados).
+  - ~~o título vai no campo da legenda, e as chaves da última tela ficam como vêm (reutilização ligada; salvar no aparelho e rótulo de IA desligados).~~ Substituída em 24/10/2026: o Rótulo de IA segue a escolha P8 (abaixo, no fim da seção);
+  - o título vai no campo da legenda, e as chaves da última tela ficam como vêm (reutilização ligada; salvar no aparelho desligado); o Rótulo de conteúdo gerado por IA segue a IA (24/10/2026, P8).
 - **05/10/2026:** o Rafael confirmou que os vídeos vêm dos Autorais (o tutorial usou um vídeo do Acervo Viral).
 - **05/10/2026:** o texto vem do prompt do Gem "Shopee Vídeo" do Rafael, adaptado ao robô. Do que o Gem gera, o robô usa só o "título do vídeo": nome do produto sem frase de gancho, emojis e hashtags, de 130 a 150 caracteres, sem marca. A headline fica de fora, como o Rafael já faz.
 - **05/10/2026:** as diretrizes da Shopee Vídeo (PDF do Rafael) ficam resumidas em `diretrizes_shopee_video.md` e valem sempre ("isso é importante"). A IA recebe o resumo com cada vídeo e, se achar violação (o ❌ do Gem), o robô não posta aquele vídeo.
@@ -307,6 +308,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **09/10/2026:** título abaixo de 130 caracteres (no teste saiu com 115): o robô pede à IA mais uma vez e fica com o título mais longo. Se continuar curto, manda assim mesmo, com o tamanho e um aviso ⚠️ na mensagem, para o Rafael completar se quiser.
 - **09/10/2026:** o preço da mensagem é o da promoção do momento (o vermelho do app). Quando a promoção acaba, o preço volta ao normal; o Rafael viu que isso não atrapalha.
 - **24/10/2026:** depois de aprovar (ou recusar) o último rascunho em Rascunhos do Robô 📝, o bot mostra só o "✅ Aprovado..." e o "📝 Nenhum rascunho esperando a sua aprovação.", já com o teclado do painel da Shopee Vídeo, sem repetir o texto do painel inteiro (pedido do Rafael, com print).
+- **24/10/2026:** escolha do Rafael (P8) sobre o **Rótulo de conteúdo gerado por IA** da tela final do app: **a IA marca sozinha, sem pular vídeo**. A IA que escreve o título também diz se o vídeo é claramente feito por IA (imagens geradas, avatar ou apresentador artificial, voz sintética); só então o robô liga o rótulo, antes do print e de Rascunhos, e confere que ligou (se não ligar, o rascunho não sai). Vídeo real ou na dúvida: desligado. A mensagem do rascunho diz o que a IA concluiu, e antes de Postar o robô confere a chave de novo. O Rafael perguntou se a IA erraria: sim, nos dois sentidos; nenhuma IA identifica com certeza, ela acerta os casos óbvios, e um vídeo de IA bem feito pode sair sem o rótulo (as outras opções eram pular o vídeo na dúvida, a recomendada, ou deixar sempre desligado).
 
 ## Monitor, deploy e servidor
 
