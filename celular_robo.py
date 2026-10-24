@@ -106,6 +106,9 @@ def _motivo(resultado):
     for trecho, motivo in (("wrong password", "o código não confere (ou a janela já fechou)"),
                            ("protocol fault", "o código não confere (ou a janela já fechou)"),
                            ("connection refused", "o celular recusou: a porta mudou ou a depuração está desligada"),
+                           # 24/10/2026: com a depuração ligada e a porta aberta, o celular parou de
+                           # aceitar o servidor; parear de novo resolveu.
+                           ("failed to authenticate", "o celular não reconhece mais este servidor: parear de novo"),
                            ("timed out", "o celular não respondeu: confira o Tailscale e o Wi-Fi dele"),
                            ("no route", "o celular não respondeu: confira o Tailscale e o Wi-Fi dele"),
                            ("unauthorized", "o celular ainda não autorizou este servidor")):

@@ -293,3 +293,13 @@ def test_ocupado_ve_a_trava_de_outra_rodada(cr, monkeypatch, tmp_path):
     with cr.trava() as livre:
         assert livre and cr.ocupado() is True
     assert cr.ocupado() is False
+
+
+@pytest.mark.parametrize("saida, motivo", [
+    ("failed to authenticate to x", "parear de novo"),
+    ("failed to connect to x: Connection refused", "a porta mudou ou a depuração está desligada"),
+    ("algo novo", "o adb não conseguiu"),
+])
+def test_motivo_do_adb_em_palavras_simples_sem_o_endereco(cr, saida, motivo):
+    assert motivo in cr._motivo((1, saida.replace("x", f"{IP}:37000")))
+    assert IP not in cr._motivo((1, saida.replace("x", f"{IP}:37000")))
