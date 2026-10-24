@@ -97,11 +97,12 @@ MAXIMO_DA_RODADA = 30 * 60  # segundos; o painel mata a rodada que passa disso
 # Estados de um rascunho: o que ainda está no app do celular e o que já saiu dele.
 NO_APP = ("rascunho", "aprovado", "recusado")
 
-# A suspensão da conta de Shopee Vídeo, como a Shopee avisa (Notificações → filtro "Lives,
-# Vídeos e ...", Motorola, 23/10/2026): "Sua conta foi banida temporariamente até
+# A suspensão da conta de Shopee Vídeo, como a Shopee avisa (Motorola, 23/10/2026): nas
+# Notificações (filtro "Lives, Vídeos e ..."), "Sua conta foi banida temporariamente até
 # 26-10-2026 19:04:26 devido ... Você não poderá publicar conteúdos em Shopee Vídeo
-# durante o período de suspensão". A data é de Brasília.
-SUSPENSAO = re.compile(r"conta foi\b.{0,80}?\baté (\d{1,2})[-/](\d{1,2})[-/](\d{4}),? "
+# durante o período de suspensão"; na Saúde do Vídeo, "Seu acesso para postar vídeos foi
+# banido até 26/10/2026 19:04:26 devido a múltiplas violações". A data é de Brasília.
+SUSPENSAO = re.compile(r"\b(?:conta|acesso)\b.{0,80}?\bbanid[oa]\b.{0,40}?\baté (\d{1,2})[-/](\d{1,2})[-/](\d{4}),? "
                        r"(\d{1,2}):(\d{2})(?::(\d{2}))?", re.IGNORECASE | re.DOTALL)
 ABA_DAS_NOTIFICACOES = "Notificações"
 FILTRO_DOS_VIDEOS = "Lives, Vídeos"
@@ -333,13 +334,14 @@ def fim_da_suspensao(agora=None):
 
 def suspensao_na_tela(xml, agora=None):
     """
-    O fim da suspensão que a tela das notificações mostra (datetime de Brasília), ou None.
-    Suspensão que já acabou não conta; com mais de uma, vale a que acaba por último.
+    O fim da suspensão que a tela (Notificações ou Saúde do Vídeo) mostra (datetime de
+    Brasília), ou None. Suspensão que já acabou não conta; com mais de uma, vale a que
+    acaba por último.
     """
     fins = []
     for el in ps.elementos(xml):
         texto = el["texto"]
-        if "publicar" not in texto.casefold():
+        if "publicar" not in texto.casefold() and "postar" not in texto.casefold():
             continue
         for dia, mes, ano, hora, minuto, segundo in SUSPENSAO.findall(texto):
             try:

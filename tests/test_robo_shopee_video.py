@@ -1259,7 +1259,11 @@ def test_suspensao_na_tela_le_o_fim_e_ignora_a_que_ja_acabou():
     # Com duas, vale a que acaba por último; sem o "publicar", não é a suspensão.
     outra = BANIDA.replace("26-10-2026 19:04:26", "29-10-2026 08:00:00")
     assert robo.suspensao_na_tela(_xml(_no(BANIDA), _no(outra)), agora).day == 29
-    assert robo.suspensao_na_tela(_xml(_no("Sua conta foi verificada até 26-10-2026 19:04:26")), agora) is None
+    assert robo.suspensao_na_tela(_xml(_no("Sua conta foi verificada até 26-10-2026 19:04:26 e pode publicar")),
+                                  agora) is None
+    # O mesmo aviso, como a Saúde do Vídeo mostra.
+    saude = "Seu acesso para postar vídeos foi banido até 26/10/2026 19:04:26 devido a múltiplas violações. Ver Detalhes"
+    assert robo.suspensao_na_tela(_xml(_no(saude, clicavel=False)), agora) == fim
 
 
 def test_conta_suspensa_para_o_rascunho_avisa_uma_vez_e_nao_toca_ate_o_fim(monkeypatch, avisos, conta_suspensa):
