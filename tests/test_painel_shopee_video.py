@@ -607,3 +607,53 @@ def test_conta_suspensa_deixa_os_dois_em_espera_e_o_fim_avisa_no_privado(bm, mon
     rodar(sv.verificar_robo())
     assert len(enviados) == 1 and "acabou" in enviados[0] and rodadas == [("--rodada",)]
     assert "robo_suspenso_ate" not in sv.ler_config()
+
+
+def test_saude_em_relatorio_geral_lembra_as_punicoes_e_os_botoes_param(bm, Msg, Est, monkeypatch):
+    # Pedidos do Rafael (23/10): a Saúde em Relatório Geral, o texto do recurso no privado e
+    # o lembrete de hora em hora até Já recorri ou Não vou recorrer.
+    from types import SimpleNamespace
+    sv = _painel(bm)
+    assert sv.BOTAO_SAUDE in _textos(bm.obter_teclado_relatorios())
+    ident = sv.apelacoes.guardar("Produto Irrelevante", "23/10/2026 19:04:25", "Não Recorrido",
+                                 titulo="Botijão Térmico", texto="O vídeo mostra o produto do anúncio.")
+    sv.robo.gravar_estado(saude_lida_em="2026-10-24 10:00:00", saude_pontos=6)
+    msg = Msg(sv.BOTAO_SAUDE)
+    rodar(sv.saude_handler(msg, Est()))
+    assert "Pontos de penalidade: <b>6</b>" in msg.saidas[-1] and "Botijão Térmico" in msg.saidas[-1]
+    assert sv.BOTAO_GERAR_APELACAO in _textos(sv.teclado_saude())
+    rodadas = []
+
+    async def rodar_robo(*argumentos):
+        rodadas.append(argumentos)
+    monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
+    rodar(sv.gerar_apelacao_handler(Msg(sv.BOTAO_GERAR_APELACAO), Est()))
+    rodar(__import__("asyncio").sleep(0))
+    assert rodadas == [("--saude",)]
+
+    enviados = []
+
+    class Bot:
+        async def send_message(self, chat, texto, **kwargs):
+            enviados.append((texto, kwargs.get("reply_markup")))
+    monkeypatch.setattr(sv, "bot_instance", Bot())
+    rodar(sv.lembrar_apelacoes())
+    texto, teclado = enviados[0]
+    assert "<code>O vídeo mostra o produto do anúncio.</code>" in texto
+    botao_recorri = teclado.inline_keyboard[0][0]
+    respostas, teclados = [], []
+    mensagem = Msg()
+
+    async def editar(reply_markup=None):
+        teclados.append(reply_markup)
+    mensagem.edit_reply_markup = editar
+
+    async def responder(texto, **k):
+        respostas.append(texto)
+    clique = SimpleNamespace(data=botao_recorri.callback_data, from_user=SimpleNamespace(id=bm.ADMIN_ID),
+                             message=mensagem, answer=responder)
+    rodar(sv.decisao_da_apelacao(clique))
+    assert "você recorreu" in respostas[0] and teclados == [None]
+    assert sv.apelacoes.pegar(ident)["situacao"] == "recorrida"
+    rodar(sv.lembrar_apelacoes())
+    assert len(enviados) == 1

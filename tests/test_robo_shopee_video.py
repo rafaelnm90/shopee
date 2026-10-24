@@ -20,10 +20,15 @@ def momento(texto):
     return datetime.strptime(texto, "%Y-%m-%d %H:%M").replace(tzinfo=fuso_horario)
 
 
+# A leitura da Saúde do Vídeo do dia fica de fora dos testes que não são dela.
+SAUDE_DO_DIA = robo.saude_do_dia_pendente
+
+
 @pytest.fixture(autouse=True)
 def sem_espera(monkeypatch):
     monkeypatch.setattr(robo.time, "sleep", lambda s: None)
     monkeypatch.setattr(robo.ps.time, "sleep", lambda s: None)
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
     # No servidor a tabela já existe (o bot_mestre cria).
     inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
 
@@ -1337,3 +1342,175 @@ def test_treino_na_conta_suspensa_avisa_a_suspensao_e_nao_que_o_app_mudou(monkey
     assert resultado.startswith("conta de Shopee Vídeo suspensa")
     assert robo.ler_estado()["treino_resultado"].startswith("conta de Shopee Vídeo suspensa")
     assert len(avisos) == 1 and "algo mudou" not in str(avisos) and "26/10 às 19:04" in avisos[0]
+
+
+# --- Saúde do Vídeo e apelação (mapeada no Motorola em 24/10/2026) ---
+
+SAUDE_BANIDO = ("Seu acesso para postar vídeos foi banido até 26/10/2026 19:04:26 devido a múltiplas violações. "
+                "Ver Detalhes")
+EXPLICACAO = ("Conteúdos publicados devem promover de forma clara e direta o mesmo produto do anúncio vinculado.")
+
+
+def _punicao_na_lista(tipo, data, status, y):
+    return [_no(tipo, caixa=(300, y, 1000, y + 40), clicavel=False),
+            _no(f"Data de Punição: {data}", caixa=(300, y + 50, 1000, y + 90), clicavel=False),
+            _no(f"Status da Apelação: {status}", caixa=(300, y + 100, 1000, y + 140), clicavel=False)]
+
+
+def _removido(titulo, postado, apelar=True):
+    return ([_no("Removido", caixa=(400, 460, 680, 510), clicavel=False),
+             _no("O vídeo violou nossas Diretrizes da Comunidade.", caixa=(100, 540, 980, 580), clicavel=False),
+             _no(titulo, caixa=(300, 760, 1000, 810), clicavel=False),
+             _no(f"Postado em: {postado}.", caixa=(300, 890, 1000, 930), clicavel=False),
+             _no(EXPLICACAO, caixa=(60, 1000, 1020, 1250), clicavel=False)]
+            + ([_no(caixa=(40, 1280, 1040, 1340), filhos=_no("Apelar aqui.", caixa=(60, 1300, 430, 1350),
+                                                              clicavel=False))] if apelar else []))
+
+
+TELAS_DA_SAUDE = {
+    "centro": [_no("Live e Vídeo", caixa=(100, 180, 520, 240), clicavel=False),
+               _no("Saúde do Vídeo", caixa=(60, 1330, 380, 1385), clicavel=False),
+               _no("Melhoria Necessária", caixa=(640, 1330, 980, 1385)),
+               _no("O acesso para postagem de vídeos está temporariamente bloqueado.", caixa=(40, 1410, 1040, 1470))],
+    "saude": ([_no("Saúde do Vídeo", caixa=(400, 180, 700, 220), clicavel=False),
+               _no("Banido Temporariamente", caixa=(400, 410, 760, 450), clicavel=False),
+               _no(SAUDE_BANIDO, caixa=(60, 500, 1020, 580), clicavel=False),
+               _no("Ponto de Penalidade", caixa=(380, 1010, 700, 1050), clicavel=False),
+               _no("6", caixa=(510, 1090, 570, 1150), clicavel=False),
+               _no("Vídeos de Violação", caixa=(380, 1860, 700, 1900), clicavel=False)]
+              + _punicao_na_lista("Produto Irrelevante", "23/10/2026 19:04:25", "Não Recorrido", 1950)
+              + _punicao_na_lista("Contrafeito", "06/10/2026 22:44:53", "Bem-sucedido", 2110)
+              + _punicao_na_lista("Violação de Propriedade Intelectual", "18/10/2026 20:20:56", "Não Recorrido", 2260)),
+    "removido_1": _removido(robo.ps.como_o_android_le(TITULO), "18:46:10 2026-10-23"),
+    "removido_3": _removido("Organizador de Gaveta #casa", "20:20:00 2026-10-18"),
+}
+
+
+class AppDaSaude(AppDeMentira):
+    """O app de mentira com o Centro do criador, a Saúde do Vídeo e a tela Removido de cada punição."""
+
+    CAMINHO = {("perfil", "Centro do criador"): "centro", ("centro", "Melhoria Necessária"): "saude",
+               ("saude", "Produto Irrelevante"): "removido_1",
+               ("saude", "Violação de Propriedade Intelectual"): "removido_3",
+               ("saude", "Contrafeito"): "removido_2"}
+
+    def _nos(self):
+        if self.atual in TELAS_DA_SAUDE:
+            return TELAS_DA_SAUDE[self.atual]
+        nos = super()._nos()
+        return nos + [_no("Centro do criador", caixa=(620, 980, 980, 1040))] if self.atual == "perfil" else nos
+
+    def click(self, x, y):
+        import postador_shopee_video as ps
+        tocados = [el for el in ps.elementos(self.dump_hierarchy()) if ps._dentro((x, y), el["caixa"]) and el["texto"]]
+        for el in sorted(tocados, key=lambda el: (el["caixa"][2] - el["caixa"][0]) * (el["caixa"][3] - el["caixa"][1])):
+            if (self.atual, el["texto"]) in self.CAMINHO:
+                self.toques.append(el["texto"])
+                self.atual = self.CAMINHO[(self.atual, el["texto"])]
+                return
+        super().click(x, y)
+
+    def press(self, tecla, meta=None):
+        if tecla == "back" and self.atual.startswith("removido"):
+            self.teclas.append(tecla)
+            self.atual = "saude"
+            return
+        super().press(tecla, meta)
+
+
+@pytest.fixture
+def ia_da_apelacao(monkeypatch):
+    pedidos = []
+
+    async def gerar(prompt):
+        pedidos.append(prompt)
+        return ("O vídeo mostra o mesmo produto do anúncio: vestido infantil estampado de gatinho, igual em cor e "
+                "modelo. Peço a revisão da penalidade.")
+    import api_gemini
+    monkeypatch.setattr(api_gemini, "gerar_texto_gemini", gerar)
+    return pedidos
+
+
+def _postado_pelo_robo():
+    ident = _rascunho("postado", postado_em="2026-10-23 18:45:30", fonte="viral",
+                      conferencia='["o vestido do vídeo é o do link"]')
+    return ident
+
+
+def test_gerar_apelacao_le_a_saude_acha_o_video_e_escreve_so_o_que_e_verdade(monkeypatch, avisos, ia_da_apelacao):
+    # Pedido do Rafael (23/10, P5): o texto do recurso pronto para copiar, de cada punição sem recurso.
+    ident = _postado_pelo_robo()
+    app = AppDaSaude()
+    resultado = robo.rodada(saude=True, d=app, agora=momento("2026-10-24 10:00"))
+    assert resultado == "saúde lida: 3 punição(ões) em 30 dias, 2 nova(s)"
+    punicoes = {p["tipo"]: p for p in robo.apelacoes.todas()}
+    irrelevante = punicoes["Produto Irrelevante"]
+    assert irrelevante["situacao"] == "pendente" and irrelevante["rascunho"] == ident and irrelevante["fonte"] == "viral"
+    assert irrelevante["texto"].startswith("O vídeo mostra o mesmo produto") and len(irrelevante["texto"]) <= 200
+    assert irrelevante["postado_em"] == "18:46:10 2026-10-23"
+    # Só um pedido à IA: a de propriedade intelectual, de vídeo que não é dos Autorais, não ganha texto.
+    assert len(ia_da_apelacao) == 1 and VESTIDO in ia_da_apelacao[0] and "vestido do vídeo" in ia_da_apelacao[0]
+    intelectual = punicoes["Violação de Propriedade Intelectual"]
+    assert intelectual["texto"] == "" and "outro canal" in intelectual["observacao"]
+    assert punicoes["Contrafeito"]["situacao"] == "recorrida"
+    # Nunca abre o Recurso: só lê a tela Removido e volta.
+    assert "Apelar aqui." not in app.toques and "Enviar" not in app.toques
+    # A Saúde também mostra a suspensão: guardada e avisada uma vez.
+    assert robo.ler_config()["robo_suspenso_ate"] == "2026-10-26 19:04:26"
+    assert any("suspendeu a sua conta" in a for a in avisos)
+    assert "Pontos de penalidade: 6" in avisos[-1] and "2 nova(s)" in avisos[-1]
+    estado = robo.ler_estado()
+    assert estado["saude_pontos"] == 6 and estado["saude_punicoes"] == 3
+    # De novo: nada novo, a IA não é chamada de novo.
+    robo.rodada(saude=True, d=AppDaSaude(), agora=momento("2026-10-24 11:00"))
+    assert len(ia_da_apelacao) == 1 and len(robo.apelacoes.todas()) == 3
+
+
+def test_punicao_sem_apelar_aqui_nao_e_lembrada(monkeypatch, avisos, ia_da_apelacao):
+    monkeypatch.setitem(TELAS_DA_SAUDE, "removido_1", _removido("Outro vídeo", "10:00:00 2026-10-05", apelar=False))
+    robo.rodada(saude=True, d=AppDaSaude(), agora=momento("2026-10-24 10:00"))
+    irrelevante = next(p for p in robo.apelacoes.todas() if p["tipo"] == "Produto Irrelevante")
+    assert irrelevante["situacao"] == "encerrada" and "prazo" in irrelevante["observacao"]
+
+
+def test_saude_uma_vez_por_dia_e_tambem_com_a_conta_suspensa(monkeypatch, avisos, ia_da_apelacao):
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", SAUDE_DO_DIA)
+    ativar(robo_inicio=0, robo_fim=24, robo_suspenso_ate="2026-10-26 19:04:26")
+    robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-24 10:00")))
+    assert robo.rodada(d=AppDaSaude(), agora=momento("2026-10-24 10:00")).startswith("saúde lida")
+    # Já leu hoje: com a conta suspensa, não toca mais no celular.
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-24 10:15")).startswith("conta suspensa")
+    assert robo.saude_do_dia_pendente(momento("2026-10-25 08:00"))
+
+
+def test_saude_que_nao_abre_nao_toma_as_rodadas_do_dia(monkeypatch, avisos):
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", SAUDE_DO_DIA)
+    ativar(robo_inicio=0, robo_fim=24)
+    robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-24 10:00")))
+    # O app de mentira comum não tem o Centro do criador: a leitura para.
+    assert "saude: parado" in robo.rodada(d=AppDeMentira(), agora=momento("2026-10-24 10:00"))
+    assert robo.o_que_fazer(robo.ler_config(), momento("2026-10-24 10:15")) != ("saude", None)
+
+
+def test_aviso_de_penalidade_nas_notificacoes_pede_a_saude_de_novo():
+    robo.gravar_estado(saude_lida_em="2026-10-24 08:00:00", saude_tentada_em="2026-10-24 08:00:00",
+                       penalidade_vista_em="2026-10-24 09:00:00")
+    assert not robo.saude_pedida_pela_notificacao(momento("2026-10-24 10:00"))     # leu há menos de 6 h
+    assert robo.saude_pedida_pela_notificacao(momento("2026-10-24 14:30"))
+    robo.gravar_estado(saude_tentada_em="2026-10-24 14:31:00")
+    assert not robo.saude_pedida_pela_notificacao(momento("2026-10-24 22:00"))     # nada visto depois
+
+
+def test_punicoes_na_tela_e_tela_removido():
+    xml = _xml(*TELAS_DA_SAUDE["saude"])
+    punicoes = robo.punicoes_na_tela(xml)
+    assert [(p["tipo"], p["data"], p["status"]) for p in punicoes] == [
+        ("Produto Irrelevante", "23/10/2026 19:04:25", "Não Recorrido"),
+        ("Contrafeito", "06/10/2026 22:44:53", "Bem-sucedido"),
+        ("Violação de Propriedade Intelectual", "18/10/2026 20:20:56", "Não Recorrido")]
+    assert robo.pontos_de_penalidade(xml) == 6
+    # Punição cortada embaixo da tela (sem o status) fica para depois de rolar.
+    assert robo.punicoes_na_tela(_xml(*TELAS_DA_SAUDE["saude"][:-1]))[-1]["tipo"] == "Contrafeito"
+    detalhe = robo.ler_removido(_xml(*TELAS_DA_SAUDE["removido_3"]))
+    assert detalhe == {"titulo": "Organizador de Gaveta #casa", "postado_em": "20:20:00 2026-10-18",
+                       "explicacao": EXPLICACAO, "pode_apelar": True}

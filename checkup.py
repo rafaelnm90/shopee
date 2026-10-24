@@ -513,8 +513,10 @@ def robo_da_shopee_video(agora=None):
     except sqlite3.OperationalError:
         ruins = []
     pulados = _contar("SELECT COUNT(*) FROM shopee_video_rascunhos WHERE criado_em >= ? AND estado = 'pulado'", hoje)
+    # As punições da Saúde do Vídeo que esperam o recurso do Rafael (apelacoes_shopee_video).
+    punicoes = _contar("SELECT COUNT(*) FROM shopee_video_punicoes WHERE situacao = 'pendente'")
     return {"ativo": not pausado, "suspenso": suspenso, "horarios": len(horarios), "vencidos": vencidos,
-            "salvos": salvos or 0, "pulados": pulados or 0, "ruins": ruins}
+            "salvos": salvos or 0, "pulados": pulados or 0, "ruins": ruins, "punicoes": punicoes or 0}
 
 
 # --- Baixador e backup ---
@@ -703,6 +705,8 @@ def main():
     situacao = 'ativo' if robo_sv['ativo'] else 'pausado'
     if robo_sv["suspenso"]:
         situacao += f" | conta suspensa pela Shopee até {robo_sv['suspenso']}"
+    if robo_sv.get("punicoes"):
+        situacao += f" | punições esperando recurso: {robo_sv['punicoes']}"
     print(f"{situacao} | horários hoje {robo_sv['horarios']} | "
           f"vencidos {robo_sv['vencidos']} | rascunhos salvos hoje {robo_sv['salvos']} | "
           f"vídeos pulados hoje {robo_sv['pulados']}")

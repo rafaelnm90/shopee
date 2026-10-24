@@ -34,9 +34,11 @@ DIAS_DA_SAUDE = 30
 # Status da apelação, como o app escreve.
 NAO_RECORRIDO = "Não Recorrido"
 # O que o Rafael decidiu (ou o app mostrou) sobre cada punição.
-PENDENTE, RECORRIDA, NAO_VAI = "pendente", "recorrida", "nao_vai"
+PENDENTE, RECORRIDA, NAO_VAI, ENCERRADA = "pendente", "recorrida", "nao_vai", "encerrada"
 ROTULOS = {PENDENTE: "⏳ não recorrida (lembrando de hora em hora)", RECORRIDA: "✅ recorrida",
-           NAO_VAI: "🚫 você escolheu não recorrer"}
+           NAO_VAI: "🚫 você escolheu não recorrer", ENCERRADA: "⌛ o prazo do recurso acabou"}
+# A escala dos pontos de penalidade na Saúde do Vídeo (0 a 15, Motorola em 24/10/2026).
+PONTOS_DA_ESCALA = 15
 # Fontes que são vídeos do próprio Rafael: só nelas o texto pode dizer que o vídeo é dele.
 FONTES_PROPRIAS = ("autorais",)
 CALLBACK_RECORRI, CALLBACK_NAO_VAI = "apel_ok:", "apel_nao:"
@@ -80,11 +82,12 @@ def conhecida(tipo, data_punicao):
 
 
 def guardar(tipo, data_punicao, status_app, titulo="", postado_em="", rascunho=None, fonte="", texto="",
-            observacao="", agora=None):
+            observacao="", pode_apelar=True, agora=None):
     """
     Guarda uma punição nova, ou atualiza o status do app de uma conhecida. A que já foi
     recorrida no app nunca é lembrada; a pendente que o app mostra recorrida para de
-    ser lembrada. Devolve o id.
+    ser lembrada; a que não tem mais o Apelar aqui (prazo acabou) também não é lembrada.
+    Devolve o id.
     """
     k = chave(tipo, data_punicao)
     with db.conexao() as con:
@@ -97,7 +100,7 @@ def guardar(tipo, data_punicao, status_app, titulo="", postado_em="", rascunho=N
             con.execute("UPDATE shopee_video_punicoes SET status_app = ?, situacao = ?, lida_em = ? WHERE id = ?",
                         (status_app, situacao, _momento(agora), ident))
             return ident
-        situacao = RECORRIDA if recorrida_no_app(status_app) else PENDENTE
+        situacao = RECORRIDA if recorrida_no_app(status_app) else PENDENTE if pode_apelar else ENCERRADA
         cursor = con.execute(
             "INSERT INTO shopee_video_punicoes (chave, tipo, data_punicao, status_app, titulo, postado_em, rascunho, "
             "fonte, texto, observacao, situacao, criada, lida_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -262,16 +265,28 @@ async def gerar_texto(tipo, explicacao="", titulo="", produtos=(), conferencia="
 
 # --- A tela Saúde da Shopee Vídeo ---
 
-def texto_saude(config, ultima_leitura="", agora=None):
-    """Relatório Geral 📊 → Saúde da Shopee Vídeo 🩺: a suspensão e as punições dos últimos 30 dias."""
+def texto_saude(config, estado_robo=None, agora=None):
+    """
+    Relatório Geral 📊 → Saúde da Shopee Vídeo 🩺: a suspensão, os pontos de penalidade
+    e as punições dos últimos 30 dias, como o robô leu no Motorola (estado_robo).
+    """
     import robo_shopee_video as robo
     agora = agora or datetime.now(fuso_horario)
+    estado_robo = estado_robo or {}
     linhas = ["🩺 <b>Saúde da Shopee Vídeo</b>", ""]
     if robo.suspensa(config, agora):
         linhas.append(f"⛔ Conta suspensa pela Shopee até <b>{robo.quando_acaba(robo.suspenso_ate(config))}</b>.")
     else:
         linhas.append("✅ Conta sem suspensão.")
-    linhas.append(f"🔎 Última olhada na Saúde do Vídeo do Motorola: <b>{ultima_leitura or 'ainda não olhou'}</b>")
+    pontos = estado_robo.get("saude_pontos")
+    if pontos is not None:
+        linhas.append(f"⚠️ Pontos de penalidade: <b>{pontos}</b> (a escala do app vai até {PONTOS_DA_ESCALA})")
+    lida = estado_robo.get("saude_lida_em") or ""
+    try:
+        lida = datetime.strptime(lida, "%Y-%m-%d %H:%M:%S").strftime("%d/%m às %H:%M")
+    except ValueError:
+        lida = "ainda não olhou"
+    linhas.append(f"🔎 Última olhada na Saúde do Vídeo do Motorola: <b>{lida}</b>")
     corte = _momento(agora - timedelta(days=DIAS_DA_SAUDE))
     recentes = [p for p in todas() if (p["criada"] or "") >= corte]
     linhas += ["", f"<b>Punições dos últimos {DIAS_DA_SAUDE} dias: {len(recentes)}</b>"]

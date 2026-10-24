@@ -7453,7 +7453,7 @@ def obter_teclado_relatorios():
     botoes = [
         [KeyboardButton(text="Relatório Financeiro 💰"), KeyboardButton(text="Diagnóstico de IA 🧠")],
         [KeyboardButton(text="Relatórios de Filas 📋"), KeyboardButton(text="Logs de Erros ⚠️")],
-        [KeyboardButton(text="Disparador de Notas 🧾")],
+        [KeyboardButton(text="Disparador de Notas 🧾"), KeyboardButton(text=painel_shopee_video.BOTAO_SAUDE)],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return montar_teclado(botoes)

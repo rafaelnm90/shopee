@@ -333,6 +333,11 @@ def test_conta_suspensa_nao_cobra_horario_vencido_e_mostra_ate_quando():
     assert r["suspenso"] == "26/10 19:04" and r["vencidos"] == 2 and r["salvos"] == 0
     pontos = checkup.pontos_de_atencao([], {}, {}, r, {}, None, AGORA)
     assert not any("horário(s) vencido(s)" in p for p in pontos)
+    # As punições que esperam o recurso aparecem só como número.
+    import apelacoes_shopee_video as ap
+    ap.guardar("Produto Irrelevante", "23/10/2026 19:04:25", "Não Recorrido", titulo="Botijão secreto")
+    r = checkup.robo_da_shopee_video(AGORA)
+    assert r["punicoes"] == 1 and "Botijão" not in str(r)
     # Depois do fim (e da folga), volta a cobrar.
     db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False, "robo_suspenso_ate": "2026-10-23 10:00:00"})
     assert checkup.robo_da_shopee_video(AGORA)["suspenso"] == ""

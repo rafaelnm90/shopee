@@ -76,8 +76,9 @@ def test_tela_saude_mostra_suspensao_e_punicoes():
     import robo_shopee_video as robo
     _punicao()
     config = {**robo.PADRAO, "robo_suspenso_ate": "2026-10-26 19:04:26"}
-    texto = ap.texto_saude(config, "23/10 20:00", AGORA)
-    assert "suspensa pela Shopee até <b>26/10 às 19:04</b>" in texto and "23/10 20:00" in texto
+    texto = ap.texto_saude(config, {"saude_lida_em": "2026-10-23 20:00:00", "saude_pontos": 6}, AGORA)
+    assert "suspensa pela Shopee até <b>26/10 às 19:04</b>" in texto and "23/10 às 20:00" in texto
+    assert "Pontos de penalidade: <b>6</b>" in texto
     assert "Punições dos últimos 30 dias: 1" in texto and "não recorrida" in texto and "Botijão" in texto
     assert "Gerar Apelação" in texto
     assert ap.ler_explicacao("Conteúdos   publicados devem promover. Apelar aqui.") == "Conteúdos publicados devem promover."

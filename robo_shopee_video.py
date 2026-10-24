@@ -12,6 +12,7 @@ minutos tocando no celular, e a IA dele não pode dividir a conexão com a do bo
     python3 robo_shopee_video.py --rodada
     python3 robo_shopee_video.py --treino      # o treino na hora (botão Testar Caminho 🧭)
     python3 robo_shopee_video.py --preparar    # um rascunho na hora (botão Preparar 1 Agora ⚡)
+    python3 robo_shopee_video.py --saude       # a Saúde do Vídeo na hora (botão Gerar Apelação ⚖️)
 
 Cada rodada faz no máximo uma coisa, nesta ordem:
 1. o treino da semana, na primeira rodada de segunda-feira: percorre o caminho até a tela
@@ -49,6 +50,7 @@ import time
 from datetime import datetime, timedelta
 
 import android_virtual as av
+import apelacoes_shopee_video as apelacoes
 import assistente_shopee_video as assistente
 import avisar_rafael
 import celular_robo
@@ -110,6 +112,27 @@ FILTRO_DOS_VIDEOS = "Lives, Vídeos"
 ROLADAS_NAS_NOTIFICACOES = 2
 # Uns minutos depois do fim antes de voltar: o relógio da Shopee pode atrasar um pouco.
 FOLGA_DA_SUSPENSAO = timedelta(minutes=15)
+# O aviso de penalidade nas Notificações ("[Esta ação gerou pontos de penalidade] ...").
+PENALIDADE = "pontos de penalidade"
+
+# A Saúde do Vídeo (mapeada no Motorola em 24/10/2026, com o vídeo do Rafael): Perfil em
+# Shopee Vídeo → Centro do criador (a tela "Live e Vídeo") → o quadro Saúde do Vídeo, que
+# abre uma página web com o aviso de suspensão, os pontos de penalidade e os Vídeos de
+# Violação dos últimos 30 dias (tipo, "Data de Punição: ..." e "Status da Apelação: ...",
+# cada um num texto). Cada punição abre a tela Removido: o título, "Postado em: HH:MM:SS
+# AAAA-MM-DD.", a explicação da Shopee e o Apelar aqui (que abre o Recurso, com a Razão
+# para apelar de até 200 caracteres e o Enviar: o robô nunca abre nem escreve ali; quem
+# cola o texto e envia é o Rafael).
+CAMINHO_CENTRO_DO_CRIADOR = [("Centro do criador", 8, "Saúde do Vídeo")]
+SAUDE_DO_VIDEO = "Saúde do Vídeo"
+VIDEOS_DE_VIOLACAO = "Vídeos de Violação"
+DATA_DA_PUNICAO = "Data de Punição:"
+STATUS_DA_APELACAO = "Status da Apelação:"
+POSTADO_EM = "Postado em:"
+APELAR_AQUI = "Apelar aqui"
+ROLADAS_NA_SAUDE = 4
+# A Saúde é lida de novo pelo aviso de penalidade nas Notificações só depois disto.
+INTERVALO_DA_SAUDE = timedelta(hours=6)
 
 
 class Parada(Exception):
@@ -474,9 +497,10 @@ PASSOS = (
     ("erro", "erro inesperado"),
 )
 SIMBOLOS = {"salvo": "✅", "postado": "📤", "apagado": "🗑️", "pulado": "⏭️", "parou": "⚠️", "erro": "❌",
-            "verificação": "🧩", "suspensa": "⛔", "sem vídeo": "📭", "treino ok": "🧭", "treino parou": "🧭"}
+            "verificação": "🧩", "suspensa": "⛔", "sem vídeo": "📭", "treino ok": "🧭", "treino parou": "🧭",
+            "saúde lida": "🩺"}
 NOMES_DAS_ACOES = {"rascunho": "Rascunho", "postar": "Postagem", "apagar": "Apagar rascunho",
-                   "treino": "Testar Caminho", "rodada": "Rodada"}
+                   "treino": "Testar Caminho", "rodada": "Rodada", "saude": "Saúde do Vídeo"}
 
 
 def _criar_tabela_tentativas(con):
@@ -641,8 +665,8 @@ def recusar(ident, agora=None):
 
 def o_que_fazer(config, agora=None):
     """
-    A tarefa desta rodada: ("treino", None), ("apagar", id), ("postar", id),
-    ("rascunho", None) ou None. Gasta o horário do plano, ou uma tentativa a mais do
+    A tarefa desta rodada: ("treino", None), ("apagar", id), ("postar", id), ("saude",
+    None) (a Saúde do Vídeo, uma vez por dia), ("rascunho", None) ou None. Gasta o horário do plano, ou uma tentativa a mais do
     rascunho que falhou, quando escolhe um rascunho.
     """
     if treino_da_semana_pendente(agora):
@@ -654,6 +678,8 @@ def o_que_fazer(config, agora=None):
     prontos = [r for r in listar("aprovado") if r["postar_em"] and r["postar_em"] <= agora_txt]
     if prontos:
         return "postar", min(prontos, key=lambda r: r["postar_em"])["id"]
+    if saude_do_dia_pendente(agora):
+        return "saude", None
     if consumir_horarios(config, agora) or repetir_o_que_falhou(config, agora):
         return "rascunho", None
     return None
@@ -848,7 +874,10 @@ def ler_suspensao(d, agora=None):
         tocar(d, ABA_DAS_NOTIFICACOES, 6)
         tocar(d, FILTRO_DOS_VIDEOS, 5)
         for vez in range(ROLADAS_NAS_NOTIFICACOES + 1):
-            ate = suspensao_na_tela(tela(d), agora)
+            xml = tela(d)
+            if any(PENALIDADE in el["texto"].casefold() for el in ps.elementos(xml)):
+                gravar_estado(penalidade_vista_em=_momento(agora))
+            ate = suspensao_na_tela(xml, agora)
             if ate:
                 return ate
             if vez < ROLADAS_NAS_NOTIFICACOES:
@@ -872,6 +901,195 @@ def abrir_galeria(d, agora=None):
         if ate:
             raise Suspensa(ate) from None
         raise
+
+
+# --- A Saúde do Vídeo e as punições (apelação: apelacoes_shopee_video.py) ---
+
+def punicoes_na_tela(xml):
+    """
+    As punições que a lista Vídeos de Violação mostra: [{tipo, data, status, ponto}], na
+    ordem da tela. O tipo é o texto logo antes de "Data de Punição:"; punição sem o status
+    na tela (cortada embaixo) fica para depois de rolar.
+    """
+    achadas, anterior, atual = [], None, None
+    for el in ps.elementos(xml):
+        texto = " ".join(el["texto"].split())
+        if not texto:
+            continue
+        if texto.startswith(DATA_DA_PUNICAO) and anterior:
+            atual = {"tipo": anterior["texto"], "data": texto[len(DATA_DA_PUNICAO):].strip(), "status": "",
+                     "ponto": ps._centro(anterior)}
+        elif texto.startswith(STATUS_DA_APELACAO) and atual:
+            atual["status"] = texto[len(STATUS_DA_APELACAO):].strip()
+            achadas.append(atual)
+            atual = None
+        else:
+            anterior = dict(el, texto=texto)
+    return achadas
+
+
+def pontos_de_penalidade(xml):
+    """O número logo depois de "Ponto de Penalidade" na Saúde do Vídeo, ou None."""
+    elementos = [el for el in ps.elementos(xml) if el["texto"].strip()]
+    for i, el in enumerate(elementos):
+        if "ponto de penalidade" in el["texto"].casefold():
+            seguinte = next((e["texto"].strip() for e in elementos[i + 1:i + 3] if e["texto"].strip().isdigit()), None)
+            return int(seguinte) if seguinte else None
+    return None
+
+
+def ler_removido(xml):
+    """
+    A tela Removido de uma punição: o título do vídeo (o texto logo antes do "Postado
+    em"), a data do post, a explicação da Shopee e se ainda há o Apelar aqui.
+    """
+    elementos = [el for el in ps.elementos(xml) if el["texto"].strip()]
+    titulo = postado = explicacao = ""
+    for i, el in enumerate(elementos):
+        texto = " ".join(el["texto"].split())
+        if texto.startswith(POSTADO_EM):
+            postado = texto[len(POSTADO_EM):].strip().rstrip(".")
+            titulo = " ".join(elementos[i - 1]["texto"].split()) if i else ""
+            explicacao = next((" ".join(e["texto"].split()) for e in elementos[i + 1:]
+                               if not e["texto"].strip().startswith(APELAR_AQUI)), "")
+            break
+    return {"titulo": titulo, "postado_em": postado, "explicacao": apelacoes.ler_explicacao(explicacao),
+            "pode_apelar": tem(xml, APELAR_AQUI)}
+
+
+def rascunho_do_post(titulo, postado_em):
+    """
+    O rascunho postado pelo robô que é o vídeo punido: pelo título (como o app lê, com
+    ".." no lugar dos emojis) ou pela hora do post (a Shopee mostra "HH:MM:SS
+    AAAA-MM-DD"), com até 20 min de diferença. None: o vídeo não é do robô.
+    """
+    postados = listar("postado")
+    for r in postados:
+        if r["titulo"] and titulo and (mesma_legenda(titulo, r["titulo"])
+                                       or mesma_legenda(titulo, ps.como_o_android_le(r["titulo"]))):
+            return r
+    try:
+        quando = datetime.strptime(postado_em, "%H:%M:%S %Y-%m-%d")
+    except ValueError:
+        return None
+    for r in postados:
+        try:
+            if abs((datetime.strptime(r["postado_em"] or "", "%Y-%m-%d %H:%M:%S") - quando).total_seconds()) <= 20 * 60:
+                return r
+        except ValueError:
+            continue
+    return None
+
+
+def _texto_da_apelacao(tipo, detalhe, rascunho):
+    """O texto do recurso pela IA, com o que o robô sabe do vídeo. Devolve (texto, observação)."""
+    if not detalhe["pode_apelar"]:
+        return "", "A Shopee não mostra mais o Apelar aqui nesta punição: o prazo do recurso acabou."
+    produtos, conferencia, fonte = [], "", ""
+    if rascunho:
+        produtos = rascunho["produtos"] or []
+        fonte = rascunho.get("fonte") or ""
+        try:
+            conferencia = "; ".join(str(v) for v in json.loads(rascunho.get("conferencia") or "[]"))[:400]
+        except (TypeError, ValueError):
+            conferencia = ""
+    return asyncio.run(apelacoes.gerar_texto(tipo, detalhe["explicacao"], detalhe["titulo"], produtos, conferencia,
+                                             fonte))
+
+
+def abrir_saude(d):
+    """
+    Perfil em Shopee Vídeo → Centro do criador → o quadro Saúde do Vídeo. O nome do quadro
+    não aceita toque: o robô toca no que aceita na mesma linha (o "Melhoria Necessária",
+    "Bom"...) ou, sem ele, na frase logo abaixo.
+    """
+    ir_ao_perfil(d)
+    seguir(d, CAMINHO_CENTRO_DO_CRIADOR)
+    elementos = ps.elementos(tela(d))
+    rotulo = next((el for el in elementos if ps._normal(el["texto"]) == ps._normal(SAUDE_DO_VIDEO)), None)
+    if not rotulo:
+        raise Parada("o Centro do criador não mostrou a Saúde do Vídeo")
+    x, y = ps._centro(rotulo)
+    na_linha = [el for el in elementos if el["clicavel"] and abs(ps._centro(el)[1] - y) <= 60 and ps._centro(el)[0] > x]
+    abaixo = [el for el in elementos if el["clicavel"] and y < ps._centro(el)[1] <= y + 200]
+    alvo = (na_linha or sorted(abaixo, key=lambda el: ps._centro(el)[1]) or [rotulo])[0]
+    d.click(*ps._centro(alvo))
+    pausa(8)
+    if not tem(tela(d), VIDEOS_DE_VIOLACAO):
+        raise Parada("a Saúde do Vídeo não abriu")
+
+
+def ler_saude(d, agora=None):
+    """
+    Lê a Saúde do Vídeo: a suspensão, os pontos de penalidade e cada punição. Punição nova
+    sem recurso: abre a tela dela, lê o vídeo e pede à IA o texto do recurso; ela entra em
+    apelacoes_shopee_video, e o bot_mestre a manda no privado e lembra de hora em hora.
+    Punição já conhecida só atualiza o status (recorrida no app = o lembrete para). Não
+    abre o Recurso nem escreve nada no app. Devolve (novas, total, pontos).
+    Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    # A tentativa conta para a leitura do dia mesmo se der errado: a Saúde que não abre não
+    # pode tomar todas as rodadas do dia no lugar dos rascunhos.
+    gravar_estado(saude_tentada_em=_momento(agora))
+    abrir_saude(d)
+    xml = tela(d)
+    pontos = pontos_de_penalidade(xml)
+    ate = suspensao_na_tela(xml, agora)
+    if ate and guardar_suspensao(ate):
+        avisar_suspensao(ate)
+    vistas, novas = set(), 0
+    for _ in range(ROLADAS_NA_SAUDE + 1):
+        andou = False
+        while True:
+            punicao = next((p for p in punicoes_na_tela(tela(d))
+                            if apelacoes.chave(p["tipo"], p["data"]) not in vistas), None)
+            if not punicao:
+                break
+            vistas.add(apelacoes.chave(punicao["tipo"], punicao["data"]))
+            andou = True
+            if apelacoes.recorrida_no_app(punicao["status"]) or apelacoes.conhecida(punicao["tipo"], punicao["data"]):
+                apelacoes.guardar(punicao["tipo"], punicao["data"], punicao["status"], agora=agora)
+                continue
+            d.click(*punicao["ponto"])
+            pausa(7)
+            xml = tela(d)
+            if not tem(xml, POSTADO_EM):
+                # A tela da punição não abriu: o voltar sairia da lista. Fica para a próxima leitura.
+                logger.warning("⚠️ [Robô Shopee Vídeo] A tela de uma punição não abriu na Saúde do Vídeo.")
+                continue
+            detalhe = ler_removido(xml)
+            d.press("back")
+            pausa(4)
+            rascunho = rascunho_do_post(detalhe["titulo"], detalhe["postado_em"])
+            texto, observacao = _texto_da_apelacao(punicao["tipo"], detalhe, rascunho)
+            apelacoes.guardar(punicao["tipo"], punicao["data"], punicao["status"], detalhe["titulo"],
+                              detalhe["postado_em"], rascunho["id"] if rascunho else None,
+                              (rascunho or {}).get("fonte") or "", texto, observacao,
+                              pode_apelar=detalhe["pode_apelar"], agora=agora)
+            novas += 1
+        if not andou:
+            break
+        ps.rolar(d)
+        pausa(3)
+    gravar_estado(saude_lida_em=_momento(agora), saude_pontos=pontos, saude_punicoes=len(vistas))
+    _sair_sem_salvar(d)
+    return novas, len(vistas), pontos
+
+
+def saude_do_dia_pendente(agora=None):
+    """O robô ainda não tentou ler a Saúde do Vídeo hoje? (uma vez por dia)"""
+    return not (ler_estado().get("saude_tentada_em") or "").startswith(agora_br(agora).strftime("%Y-%m-%d"))
+
+
+def saude_pedida_pela_notificacao(agora=None):
+    """
+    O robô viu o aviso de penalidade nas Notificações depois da última leitura da Saúde,
+    e ela tem mais de INTERVALO_DA_SAUDE: lê de novo para achar a punição nova.
+    """
+    estado = ler_estado()
+    vista = estado.get("penalidade_vista_em") or ""
+    ultima = max(estado.get("saude_lida_em") or "", estado.get("saude_tentada_em") or "")
+    return bool(vista) and vista > ultima and ultima <= _momento(agora_br(agora) - INTERVALO_DA_SAUDE)
 
 
 # A legenda e a comparação com o título ficam no postador, que o explorar também usa.
@@ -1430,15 +1648,17 @@ def pausar_por_desconexao(motivo):
            "no bot, toque em Shopee Vídeo 🎬 → Retomar Postagem ▶️. Eu acho o celular sozinho.")
 
 
-def rodada(treino=False, preparar=False, d=None, agora=None):
+def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
     """
-    Uma rodada. treino=True é o botão Testar Caminho 🧭 e preparar=True o Preparar 1
-    Agora ⚡: rodam na hora, mesmo pausado ou fora do horário (o Rafael pediu agora), e o
-    rascunho do Preparar 1 Agora é a mais do plano do dia. Devolve o que aconteceu, numa
-    frase. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    Uma rodada. treino=True é o botão Testar Caminho 🧭, preparar=True o Preparar 1
+    Agora ⚡ e saude=True o Gerar Apelação ⚖️ (Relatório Geral 📊 → Saúde da Shopee
+    Vídeo 🩺): rodam na hora, mesmo pausado ou fora do horário (o Rafael pediu agora), e o
+    rascunho do Preparar 1 Agora é a mais do plano do dia. Com a conta suspensa, a única
+    coisa que o robô faz no celular é ler a Saúde do Vídeo (uma vez por dia, ou pelo
+    botão). Devolve o que aconteceu, numa frase. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     config = ler_config()
-    na_hora = treino or preparar
+    na_hora = treino or preparar or saude
     if not na_hora:
         if config["robo_pausado"]:
             consumir_horarios(config, agora)
@@ -1446,10 +1666,12 @@ def rodada(treino=False, preparar=False, d=None, agora=None):
         if suspensa(config, agora):
             # Os horários que passam na suspensão são pulados, como pausado.
             consumir_horarios(config, agora)
-            return f"conta suspensa até {quando_acaba(suspenso_ate(config))}"
-        if not no_horario(config, agora):
+            if not (no_horario(config, agora) and saude_do_dia_pendente(agora)):
+                return f"conta suspensa até {quando_acaba(suspenso_ate(config))}"
+            saude = True
+        elif not no_horario(config, agora):
             return "fora do Horário do Robô"
-    elif suspensa(config, agora):
+    elif suspensa(config, agora) and not saude:
         ate = quando_acaba(suspenso_ate(config))
         avisar(f"⛔ Robô da Shopee Vídeo: não {'preparei o rascunho' if preparar else 'testei o caminho'}. A conta "
                f"de Shopee Vídeo está suspensa pela Shopee até {ate}, e o robô não toca no celular até lá.")
@@ -1471,19 +1693,27 @@ def rodada(treino=False, preparar=False, d=None, agora=None):
             acao, ident = "treino", None
         elif preparar:
             acao, ident = "rascunho", None
+        elif saude:
+            acao, ident = "saude", None
         else:
             acao, ident = o_que_fazer(config, agora) or (None, None)
         if not acao:
             return "nada a fazer agora"
         d = d or ps.conectar(celular=True)
         try:
-            return _agir(d, acao, ident, preparar, config, agora)
+            resultado = _agir(d, acao, ident, preparar, config, agora, pedido=saude and na_hora)
+            if acao != "saude" and saude_pedida_pela_notificacao(agora):
+                _ler_saude_junto(d, agora)
+            return resultado
         finally:
             faxina_dos_arquivos(d)
 
 
-def _agir(d, acao, ident, preparar, config, agora):
-    """A ação da rodada no celular, já dentro da trava, com o que fazer quando ela para."""
+def _agir(d, acao, ident, preparar, config, agora, pedido=False):
+    """
+    A ação da rodada no celular, já dentro da trava, com o que fazer quando ela para.
+    pedido=True: o Rafael pediu a Saúde do Vídeo pelo botão Gerar Apelação ⚖️ e espera a resposta.
+    """
     # O rascunho entra no histórico pelo preparar_rascunho, que sabe qual vídeo tentou.
     produto = ", ".join((pegar(ident) or {}).get("produtos") or []) if ident else ""
     try:
@@ -1491,6 +1721,17 @@ def _agir(d, acao, ident, preparar, config, agora):
             resultado = treinar(d, agora)
             registrar_tentativa("treino", "treino ok" if "OK" in resultado else "treino parou",
                                 "" if "OK" in resultado else resultado, agora=agora)
+            return resultado
+        if acao == "saude":
+            novas, total, pontos = ler_saude(d, agora)
+            resultado = f"saúde lida: {total} punição(ões) em 30 dias, {novas} nova(s)"
+            registrar_tentativa("saude", "saúde lida", agora=agora)
+            if pedido:
+                avisar(f"🩺 Robô da Shopee Vídeo: li a Saúde do Vídeo. Pontos de penalidade: "
+                       f"{'?' if pontos is None else pontos}. Punições nos últimos 30 dias: {total}; "
+                       f"{novas} nova(s) para recorrer" + (" (o texto de cada uma chega aqui em seguida)." if novas
+                                                             else ".")
+                       + "\n\nTudo em Relatório Geral 📊 → Saúde da Shopee Vídeo 🩺.")
             return resultado
         if acao == "apagar":
             resultado = apagar_do_app(d, pegar(ident))
@@ -1507,7 +1748,10 @@ def _agir(d, acao, ident, preparar, config, agora):
         _avisar_que_nao_saiu(acao, preparar, config, agora)
         return _resposta(preparar, resultado)
     except Suspensa as e:
-        return _suspender(e, acao, preparar, produto, agora)
+        resultado = _suspender(e, acao, preparar, produto, agora)
+        # A punição que levou à suspensão ganha o texto do recurso na mesma rodada.
+        _ler_saude_junto(d, agora)
+        return resultado
     except Verificacao:
         logger.warning("⚠️ [Robô Shopee Vídeo] Verificação da Shopee na tela: parado.")
         if acao != "rascunho":
@@ -1522,6 +1766,9 @@ def _agir(d, acao, ident, preparar, config, agora):
                    f"o rascunho ({e.motivo}). Não toquei em mais nada; ele voltou para Rascunhos do Robô 📝.")
         if acao != "rascunho":
             registrar_tentativa(acao, "parou", e.motivo, produto, agora)
+        if acao == "saude" and pedido:
+            avisar(f"⚠️ Robô da Shopee Vídeo: não consegui ler a Saúde do Vídeo ({e.motivo}). Toque de novo em "
+                   "Gerar Apelação ⚖️ daqui a pouco.")
         _repetir_depois(acao, preparar, config, agora, getattr(e, "id_video", None), e.do_video)
         _avisar_que_nao_saiu(acao, preparar, config, agora)
         return _resposta(preparar, f"{acao}: parado ({e.motivo})")
@@ -1547,15 +1794,30 @@ def _suspender(e, acao, preparar, produto="", agora=None):
     if acao != "rascunho":
         registrar_tentativa(acao, "suspensa", str(e), produto, agora)
     if guardar_suspensao(e.ate):
-        avisar(f"⛔ Robô da Shopee Vídeo: a Shopee suspendeu a sua conta de Shopee Vídeo até {ate} (o aviso está "
-               "nas Notificações do app da Shopee).\n\n"
-               "Pausei o robô e o modo assistente até lá: nada de preparar nem postar, e sem avisos de rascunho "
-               "que não saiu. Os rascunhos aprovados ficam guardados e saem depois, espalhados.\n\n"
-               "Quando a suspensão acabar, os dois voltam sozinhos e eu aviso aqui. Se quiser que o robô continue "
-               "pausado depois, toque em Shopee Vídeo 🎬 → Robô Automático 🤖 → Pausar Postagem ⏸️.")
+        avisar_suspensao(e.ate)
     elif preparar:
         _resposta(preparar, str(e))
     return str(e)
+
+
+def avisar_suspensao(ate):
+    """O aviso, uma vez por suspensão, de que robô e assistente esperam até o fim dela."""
+    avisar(f"⛔ Robô da Shopee Vídeo: a Shopee suspendeu a sua conta de Shopee Vídeo até {quando_acaba(ate)} (o aviso "
+           "está nas Notificações e na Saúde do Vídeo do app da Shopee).\n\n"
+           "Pausei o robô e o modo assistente até lá: nada de preparar nem postar, e sem avisos de rascunho "
+           "que não saiu. Os rascunhos aprovados ficam guardados e saem depois, espalhados.\n\n"
+           "Quando a suspensão acabar, os dois voltam sozinhos e eu aviso aqui. Se quiser que o robô continue "
+           "pausado depois, toque em Shopee Vídeo 🎬 → Robô Automático 🤖 → Pausar Postagem ⏸️.")
+
+
+def _ler_saude_junto(d, agora=None):
+    """A Saúde do Vídeo lida no fim de outra ação (suspensão achada, aviso de penalidade): erro não derruba a rodada."""
+    try:
+        ler_saude(d, agora)
+    except (Parada, Verificacao) as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Não li a Saúde do Vídeo: {ps.mascarar(getattr(e, 'motivo', ''))}")
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Erro ao ler a Saúde do Vídeo: {type(e).__name__}")
 
 
 def _avisar_que_nao_saiu(acao, preparar, config, agora=None):
@@ -1588,11 +1850,11 @@ def _resposta(preparar, resultado):
 
 def main(argumentos):
     logging.basicConfig(level=os.getenv("NIVEL_LOG", "INFO"), format="%(asctime)s %(levelname)s %(message)s")
-    treino, preparar = "--treino" in argumentos, "--preparar" in argumentos
-    if not treino and not preparar and "--rodada" not in argumentos:
+    treino, preparar, saude = "--treino" in argumentos, "--preparar" in argumentos, "--saude" in argumentos
+    if not treino and not preparar and not saude and "--rodada" not in argumentos:
         print(__doc__)
         return 2
-    resultado = rodada(treino=treino, preparar=preparar)
+    resultado = rodada(treino=treino, preparar=preparar, saude=saude)
     logger.info(f"🤖 [Robô Shopee Vídeo] {resultado}.")
     # O resultado fica no banco com o texto mascarado (sem nome de produto), para o
     # diagnóstico do servidor, que é público, mostrar como foi a última rodada.
