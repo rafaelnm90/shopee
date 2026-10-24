@@ -1817,3 +1817,26 @@ def test_preparo_interrompido_pelo_reinicio_volta_para_a_fila_na_rodada_seguinte
     assert robo.pegar(preso) is None and robo.pegar(novo)["estado"] == "preparando"
     assert "video:9" not in robo.ids_usados()
     assert robo.tentativas_desde("2026-10-24 00:00:00")[0]["passo"] == "rodada interrompida"
+
+
+def test_horario_do_plano_interrompido_no_meio_tenta_de_novo(monkeypatch):
+    # 24/10/2026: os deploys da manhã mataram a rodada no meio do preparo; o vídeo voltou
+    # para a fila, mas o horário do plano ficou como feito, e o robô dizia "nada a fazer
+    # agora" com horários vencidos sem rascunho.
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    config = {**robo.PADRAO, "robo_pausado": False, "robo_limite_min": 1, "robo_limite_max": 1,
+              "robo_inicio": 0, "robo_fim": 24}
+    robo.db.salvar_config(robo.CHAVE_CONFIG, config)
+    agora = momento("2026-10-27 23:59")
+    robo.gravar_estado(treino_semana=robo.semana(agora), respostas_em="2026-10-27 23:59:00",
+                       feed_em="2026-10-27 23:59:00")
+    assert robo.o_que_fazer(config, agora) == ("rascunho", None)
+    # A rodada começa o preparo e morre no meio (o processo é morto: nada depois roda).
+    robo._em_preparo(config, agora, True)
+    robo.criar("video:9", momento("2026-10-27 23:00"))
+    assert robo.o_que_fazer(config, agora) is None
+    assert robo.soltar_preparos_interrompidos(agora) == 1
+    assert robo.o_que_fazer(config, agora) == ("rascunho", None)
+    # Só uma vez: a marca saiu.
+    robo.soltar_preparos_interrompidos(agora)
+    assert robo.o_que_fazer(config, agora) is None
