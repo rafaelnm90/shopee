@@ -132,6 +132,8 @@ Assista ao vídeo inteiro, compare com a foto e diga se o vídeo mostra o mesmo 
 Outro produto do mesmo tipo com outro formato ou modelo, só um acessório dele, ou um vídeo em que o \
 produto da foto não aparece, não confere.
 Responda só com um JSON: {{"confere": true ou false, "motivo": "uma frase curta"}}"""
+# O aviso da página do produto de loja de férias (loja_de_ferias).
+AVISO_DE_FERIAS = "está de férias"
 # A foto do anúncio tem até isto de tamanho (bytes); maior que isso, a conferência segue só pelo nome.
 TAMANHO_MAXIMO_DA_FOTO = 5 * 1024 * 1024
 AVISO_JANELA_ERRADA = ("🤖 Robô da Shopee Vídeo: a janela de editar o nome aberta no celular é de outro "
@@ -709,6 +711,29 @@ def ia_confere_produto(video, vistos=None, avisar=True):
                                  "com a foto do anúncio" if foto else "só pelo nome", ok=True)
     return True, (f"a IA confere {VEZES_DA_IA} vezes" + (" com a foto do anúncio" if foto else "")
                   + ": o produto do link é o do vídeo")
+
+
+def limpar_aviso_rapido(d):
+    """Esquece o último aviso rápido (toast) do Android, antes de abrir uma página."""
+    try:
+        d.clear_toast()
+    except Exception:
+        pass
+
+
+def loja_de_ferias(d, xml):
+    """
+    A página do produto avisa que a loja está de férias ("Esse vendedor está de férias.",
+    visto no app em 24/10/2026)? Produto de loja de férias não vende, e o Adicionar Produto
+    do vídeo não o mostra, mesmo curtido. O aviso some em segundos: vale o que está na
+    tela e o último aviso rápido do Android.
+    """
+    textos = [el["texto"] for el in elementos(xml)]
+    try:
+        textos.append(d.last_toast or "")
+    except Exception:
+        pass
+    return any(AVISO_DE_FERIAS in _normal(texto) for texto in textos)
 
 
 def tem_coracao(lista):

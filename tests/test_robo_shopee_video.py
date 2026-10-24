@@ -620,6 +620,50 @@ def test_so_videos_sem_oferta_param_a_rodada_sem_tocar_no_celular(monkeypatch, a
     assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 23:59"))["repetir"] is True
 
 
+class AppDeLojaDeFerias(AppDeMentira):
+    """A página do produto avisa "Esse vendedor está de férias." (24/10, o teclado HB199)."""
+
+    def __init__(self, pelo_toast=False):
+        super().__init__()
+        self.pelo_toast, self.toast_limpo = pelo_toast, False
+
+    def _nos(self):
+        nos = super()._nos()
+        if self.atual == "pagina_curta" and not self.pelo_toast:
+            nos = nos + [_no("Esse vendedor está de férias.", caixa=(200, 2180, 880, 2240), clicavel=False)]
+        return nos
+
+    def clear_toast(self):
+        self.toast_limpo = True
+
+    @property
+    def last_toast(self):
+        return "Esse vendedor está de férias." if self.pelo_toast and self.atual == "pagina_curta" else None
+
+
+@pytest.mark.parametrize("pelo_toast", [False, True])
+def test_produto_de_loja_de_ferias_pula_o_video_antes_da_galeria(monkeypatch, avisos, pelo_toast):
+    # 24/10/2026: o robô curtiu o teclado, pôs o vídeo, escreveu o título e não achou o
+    # produto no Adicionar Produto: a loja estava de férias, e a Shopee esconde o produto.
+    from conftest import consultar
+    _fonte(monkeypatch)
+    app = AppDeLojaDeFerias(pelo_toast=pelo_toast)
+    resultado = robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59"))
+    assert robo.MOTIVO_DE_FERIAS in resultado and app.toast_limpo
+    assert app.enviados == [] and "@buttonItemLike" not in app.toques     # nem galeria nem curtida
+    pulado = robo.listar("pulado")[0]
+    assert pulado["motivo"] == robo.MOTIVO_DE_FERIAS and robo.passo_do_motivo(pulado["motivo"]) == "loja de férias"
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = 'produto de loja de férias'") == (
+        "vídeo pulado",)
+
+
+def test_aviso_de_ferias_de_outra_tela_nao_conta():
+    # O nome de um produto pode ter "de férias": só o aviso da loja conta.
+    xml = _xml(_no("Kit de férias para praia", caixa=(0, 0, 500, 60)))
+    assert not robo.ps.loja_de_ferias(object(), xml)
+    assert robo.ps.loja_de_ferias(object(), _xml(_no("Esse vendedor está de férias.", caixa=(0, 0, 500, 60))))
+
+
 def test_violacao_pula_o_video(monkeypatch, avisos):
     _fonte(monkeypatch, violacao=True)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
