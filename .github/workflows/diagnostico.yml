@@ -143,4 +143,11 @@ jobs:
             N=$(sqlite3 -readonly banco_dados.db "SELECT COUNT(*) FROM admins_mudancas WHERE avisado = 0" 2>/dev/null || echo "?")
             echo "Mudanças de admins esperando aviso: $N"
 
+            # Os erros graves (alertas.py): cada um vai na hora para o privado do Rafael, uma
+            # vez (e de novo depois de 6 h, se continuar). Aqui só os rótulos fixos; o Claude
+            # lê esta seção nas retomadas e corrige (pedido do Rafael, P12).
+            echo ""
+            echo "== Graves agora (avisados no privado do Rafael)"
+            venv/bin/python3 alertas.py verificar "$CAIDOS" 2>/dev/null || echo "Graves agora: ? (a conferência falhou)"
+
             exit $ALERTA
