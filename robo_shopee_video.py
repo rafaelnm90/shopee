@@ -926,7 +926,28 @@ def voltar(d, ate, vezes=15):
             continue
         d.press("back")
         pausa(3)
-    raise Parada(f"não consegui voltar até {ate}")
+    onde = onde_ficou(d)
+    registro_processos.registrar(REGISTRO, "voltar no app", f"não chegou ao {ate}", onde, ok=False)
+    raise Parada(f"não consegui voltar até {ate} ({onde})")
+
+
+def onde_ficou(d):
+    """
+    A tela em que o voltar ficou preso, só com nomes fixos (o registro sai no checkup, que
+    é público): o app, o nome da tela dele (a classe, sem o pacote) e se a tela do celular
+    estava ligada. Nunca o texto da tela.
+    """
+    try:
+        atual = d.app_current() or {}
+        app = atual.get("package") or "?"
+        nome = (atual.get("activity") or "?").rsplit(".", 1)[-1]
+    except Exception:
+        app, nome = "?", "?"
+    try:
+        ligada = {True: "ligada", False: "desligada"}.get((d.info or {}).get("screenOn"), "?")
+    except Exception:
+        ligada = "?"
+    return f"app {app}, tela {nome}, tela do celular {ligada}"
 
 
 def ir_ao_inicio(d):
