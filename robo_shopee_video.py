@@ -133,6 +133,9 @@ APELAR_AQUI = "Apelar aqui"
 ROLADAS_NA_SAUDE = 4
 # A Saúde é lida de novo pelo aviso de penalidade nas Notificações só depois disto.
 INTERVALO_DA_SAUDE = timedelta(hours=6)
+# Depois do Já recorri, a Saúde é lida de hora em hora até sair o resultado (escolha do
+# Rafael em 24/10, P6).
+INTERVALO_DO_RECURSO = timedelta(hours=1)
 
 
 class Parada(Exception):
@@ -343,18 +346,52 @@ def fim_da_suspensao(agora=None):
     if not ate or suspensa(config, agora):
         return None
     db.atualizar_config(CHAVE_CONFIG, lambda dados: dados.pop("robo_suspenso_ate", None))
-    aprovados = remarcar_aprovados(config, agora)
+    return _aviso_de_volta(config, remarcar_aprovados(config, agora), "a suspensão da Shopee Vídeo acabou")
+
+
+def _aviso_de_volta(config, aprovados, motivo):
+    """O aviso de que robô e assistente voltam (a pausa do Rafael continua valendo)."""
     fila = f" Os {aprovados} aprovado(s) que esperavam saem espalhados no Horário do Robô." if aprovados else ""
     if not config["robo_pausado"]:
-        return ("✅ Robô da Shopee Vídeo: a suspensão da Shopee Vídeo acabou. Voltei a preparar e postar no "
-                f"Horário do Robô, e o modo assistente segue em espera.{fila}\n\n"
+        return (f"✅ Robô da Shopee Vídeo: {motivo}. Voltei a preparar e postar no Horário do Robô, e o modo "
+                f"assistente segue em espera.{fila}\n\n"
                 "Se você tirou o Motorola do carregador, ponha de volta e confira a Depuração por Wi-Fi: sem o "
                 "celular, o robô pausa e avisa aqui, e o modo assistente volta a mandar as postagens.")
     if config.get("pausado", True):
-        return ("✅ Shopee Vídeo: a suspensão acabou. O robô e o modo assistente continuam pausados, como você "
-                "deixou: para voltar, toque em Shopee Vídeo 🎬 → Robô Automático 🤖 → Retomar Postagem ▶️.")
-    return ("✅ Shopee Vídeo: a suspensão acabou. O robô continua pausado, como você deixou, e o modo assistente "
-            "volta a mandar as postagens aqui no privado.")
+        return (f"✅ Shopee Vídeo: {motivo}. O robô e o modo assistente continuam pausados, como você deixou: "
+                "para voltar, toque em Shopee Vídeo 🎬 → Robô Automático 🤖 → Retomar Postagem ▶️.")
+    return (f"✅ Shopee Vídeo: {motivo}. O robô continua pausado, como você deixou, e o modo assistente volta a "
+            "mandar as postagens aqui no privado.")
+
+
+def suspensao_retirada(ate):
+    """A Shopee já tirou essa suspensão antes do prazo (o aviso dela ainda fica nas Notificações)?"""
+    return ate.strftime("%Y-%m-%d %H:%M:%S") in (ler_estado().get("suspensoes_retiradas") or [])
+
+
+def anotar_retirada(ate):
+    texto = ate.strftime("%Y-%m-%d %H:%M:%S")
+    db.atualizar_config(CHAVE_ESTADO, lambda dados: dados.update(
+        suspensoes_retiradas=sorted(set(dados.get("suspensoes_retiradas") or []) | {texto})[-10:]))
+
+
+def suspensao_acabou_antes(agora=None):
+    """
+    A Saúde do Vídeo não mostra mais o bloqueio, mas o robô esperava a suspensão: a
+    Shopee a tirou antes do prazo (o recurso deu certo e os pontos baixaram). Tira a
+    marca, espalha os aprovados e avisa. Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    config = ler_config()
+    ate = suspenso_ate(config)
+    if not ate or not suspensa(config, agora):
+        return False
+    anotar_retirada(ate)
+    db.atualizar_config(CHAVE_CONFIG, lambda dados: dados.pop("robo_suspenso_ate", None))
+    logger.info("✅ [Robô Shopee Vídeo] A Shopee tirou a suspensão antes do prazo.")
+    avisar(_aviso_de_volta(config, remarcar_aprovados(config, agora),
+                           "a Shopee tirou a suspensão antes do prazo (a Saúde do Vídeo não mostra mais o bloqueio; "
+                           "o recurso deve ter dado certo)"))
+    return True
 
 
 def suspensao_na_tela(xml, agora=None):
@@ -668,7 +705,8 @@ def recusar(ident, agora=None):
 def o_que_fazer(config, agora=None):
     """
     A tarefa desta rodada: ("treino", None), ("apagar", id), ("postar", id), ("saude",
-    None) (a Saúde do Vídeo, uma vez por dia), ("rascunho", None) ou None. Gasta o horário do plano, ou uma tentativa a mais do
+    None) (a Saúde do Vídeo, uma vez por dia e de hora em hora depois do Já recorri),
+    ("rascunho", None) ou None. Gasta o horário do plano, ou uma tentativa a mais do
     rascunho que falhou, quando escolhe um rascunho.
     """
     if treino_da_semana_pendente(agora):
@@ -680,7 +718,7 @@ def o_que_fazer(config, agora=None):
     prontos = [r for r in listar("aprovado") if r["postar_em"] and r["postar_em"] <= agora_txt]
     if prontos:
         return "postar", min(prontos, key=lambda r: r["postar_em"])["id"]
-    if saude_do_dia_pendente(agora):
+    if saude_do_dia_pendente(agora) or saude_pedida_pelo_recurso(agora):
         return "saude", None
     if consumir_horarios(config, agora) or repetir_o_que_falhou(config, agora):
         return "rascunho", None
@@ -867,9 +905,32 @@ def ir_ao_perfil(d):
 
 def ler_suspensao(d, agora=None):
     """
-    Olha nas Notificações (filtro Lives, Vídeos e ...) se a Shopee suspendeu a conta de
-    Shopee Vídeo, e até quando. Só toca na aba e no filtro e rola a lista: não abre
-    nenhuma notificação. Sem o aviso, ou se a tela não abre: None.
+    A conta está suspensa, e até quando? Primeiro as Notificações (rápido); achando o
+    aviso, confirma na Saúde do Vídeo, que mostra a situação de agora: com o recurso
+    aceito, a Shopee tira a suspensão antes do prazo, mas o aviso antigo continua nas
+    Notificações. A suspensão que a Saúde não mostra fica anotada como retirada e não é
+    mais conferida. Sem a Saúde abrir, vale o aviso das Notificações. Sem aviso: None.
+    Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    ate = _suspensao_nas_notificacoes(d, agora)
+    if not ate or suspensao_retirada(ate):
+        return None
+    try:
+        abrir_saude(d)
+        na_saude = suspensao_na_tela(tela(d), agora)
+    except Parada as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Não confirmei a suspensão na Saúde do Vídeo: {ps.mascarar(e.motivo)}")
+        return ate
+    if not na_saude:
+        anotar_retirada(ate)
+        return None
+    return na_saude
+
+
+def _suspensao_nas_notificacoes(d, agora=None):
+    """
+    O fim da suspensão que o aviso nas Notificações (filtro Lives, Vídeos e ...) diz, ou
+    None. Só toca na aba e no filtro e rola a lista: não abre nenhuma notificação.
     """
     try:
         ir_ao_inicio(d)
@@ -1037,9 +1098,13 @@ def ler_saude(d, agora=None):
     xml = tela(d)
     pontos = pontos_de_penalidade(xml)
     ate = suspensao_na_tela(xml, agora)
-    if ate and guardar_suspensao(ate):
-        avisar_suspensao(ate)
-    vistas, novas = set(), 0
+    if ate:
+        if guardar_suspensao(ate):
+            avisar_suspensao(ate)
+    else:
+        # Sem o bloqueio na Saúde: se o robô esperava a suspensão, ela saiu antes do prazo.
+        suspensao_acabou_antes(agora)
+    vistas, novas, completa, aceitas, recusadas = set(), 0, False, [], []
     for _ in range(ROLADAS_NA_SAUDE + 1):
         andou = False
         while True:
@@ -1049,8 +1114,14 @@ def ler_saude(d, agora=None):
                 break
             vistas.add(apelacoes.chave(punicao["tipo"], punicao["data"]))
             andou = True
-            if apelacoes.recorrida_no_app(punicao["status"]) or apelacoes.conhecida(punicao["tipo"], punicao["data"]):
-                apelacoes.guardar(punicao["tipo"], punicao["data"], punicao["status"], agora=agora)
+            antes = apelacoes.situacao_de(punicao["tipo"], punicao["data"])
+            if apelacoes.recorrida_no_app(punicao["status"]) or antes:
+                ident = apelacoes.guardar(punicao["tipo"], punicao["data"], punicao["status"], agora=agora)
+                if antes in (apelacoes.PENDENTE, apelacoes.RECORRIDA) and apelacoes.aceita_no_app(punicao["status"]):
+                    aceitas.append(apelacoes.pegar(ident))
+                elif (antes in (apelacoes.PENDENTE, apelacoes.RECORRIDA)
+                      and apelacoes.recusada_no_app(punicao["status"])):
+                    recusadas.append(apelacoes.pegar(ident))
                 continue
             d.click(*punicao["ponto"])
             pausa(7)
@@ -1070,9 +1141,18 @@ def ler_saude(d, agora=None):
                               pode_apelar=detalhe["pode_apelar"], agora=agora)
             novas += 1
         if not andou:
+            completa = True
             break
         ps.rolar(d)
         pausa(3)
+    if completa:
+        aceitas += apelacoes.retirar_ausentes(vistas, agora)
+    for p in aceitas:
+        avisar(f"🎉 Robô da Shopee Vídeo: o recurso da punição {p['tipo']} ({p['data_punicao']}) deu certo: a Shopee "
+               "a tirou ou marcou como aceita na Saúde do Vídeo. Parei de lembrar dela.")
+    for p in recusadas:
+        avisar(f"❌ Robô da Shopee Vídeo: a Shopee não aceitou o recurso da punição {p['tipo']} ({p['data_punicao']}). "
+               "Os pontos dela continuam na Saúde do Vídeo.")
     gravar_estado(saude_lida_em=_momento(agora), saude_pontos=pontos, saude_punicoes=len(vistas))
     _sair_sem_salvar(d)
     return novas, len(vistas), pontos
@@ -1081,6 +1161,17 @@ def ler_saude(d, agora=None):
 def saude_do_dia_pendente(agora=None):
     """O robô ainda não tentou ler a Saúde do Vídeo hoje? (uma vez por dia)"""
     return not (ler_estado().get("saude_tentada_em") or "").startswith(agora_br(agora).strftime("%Y-%m-%d"))
+
+
+def saude_pedida_pelo_recurso(agora=None):
+    """
+    O Rafael tocou em Já recorri numa punição e o resultado ainda não saiu: a Saúde é
+    lida de hora em hora (a última tentativa tem 1 h ou mais). Escolha do Rafael:
+    DECISOES.md, Shopee Vídeo.
+    """
+    if not apelacoes.esperando_resultado(agora):
+        return False
+    return (ler_estado().get("saude_tentada_em") or "") <= _momento(agora_br(agora) - INTERVALO_DO_RECURSO)
 
 
 def saude_pedida_pela_notificacao(agora=None):
@@ -1668,7 +1759,8 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
         if suspensa(config, agora):
             # Os horários que passam na suspensão são pulados, como pausado.
             consumir_horarios(config, agora)
-            if not (no_horario(config, agora) and saude_do_dia_pendente(agora)):
+            ler_a_saude = saude_do_dia_pendente(agora) or saude_pedida_pelo_recurso(agora)
+            if not (no_horario(config, agora) and ler_a_saude):
                 return f"conta suspensa até {quando_acaba(suspenso_ate(config))}"
             # A leitura do dia conta já aqui: com o celular fora, não tenta de novo a cada rodada.
             gravar_estado(saude_tentada_em=_momento(agora))

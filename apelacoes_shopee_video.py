@@ -35,10 +35,23 @@ DIAS_DA_SAUDE = 30
 NAO_RECORRIDO = "Não Recorrido"
 # O que o Rafael decidiu (ou o app mostrou) sobre cada punição.
 PENDENTE, RECORRIDA, NAO_VAI, ENCERRADA = "pendente", "recorrida", "nao_vai", "encerrada"
+# O recurso deu certo: a Shopee marca "Bem-sucedido" ou tira a punição da Saúde do Vídeo
+# (com isso os pontos baixam, e a suspensão que dependia deles some). Saiu da lista por ter
+# mais de 30 dias: fora da janela.
+ACEITA, RETIRADA, FORA_DA_JANELA, RECUSADA = "aceita", "retirada", "fora_da_janela", "recusada"
 ROTULOS = {PENDENTE: "⏳ não recorrida (lembrando de hora em hora)", RECORRIDA: "✅ recorrida",
-           NAO_VAI: "🚫 você escolheu não recorrer", ENCERRADA: "⌛ o prazo do recurso acabou"}
-# A escala dos pontos de penalidade na Saúde do Vídeo (0 a 15, Motorola em 24/10/2026).
+           NAO_VAI: "🚫 você escolheu não recorrer", ENCERRADA: "⌛ o prazo do recurso acabou",
+           ACEITA: "🎉 recurso aceito", RETIRADA: "🎉 a Shopee tirou a punição (recurso aceito)",
+           FORA_DA_JANELA: "📅 saiu dos últimos 30 dias", RECUSADA: "❌ a Shopee não aceitou o recurso"}
+# Depois do Já recorri, o robô olha a Saúde do Vídeo de hora em hora até sair o resultado
+# (escolha do Rafael em 24/10, P6), por até estes dias: o Já recorri tocado sem o recurso
+# enviado não deixa o robô olhando para sempre.
+DIAS_ESPERANDO_O_RESULTADO = 7
+# A escala dos pontos de penalidade na Saúde do Vídeo (0 a 15, Motorola em 24/10/2026) e,
+# como o Rafael explicou (24/10/2026), com quantos a Shopee suspende as postagens: com 5
+# não há suspensão, com 6 há; o recurso aceito tira os pontos da punição.
 PONTOS_DA_ESCALA = 15
+PONTOS_DA_SUSPENSAO = 6
 # Fontes que são vídeos do próprio Rafael: só nelas o texto pode dizer que o vídeo é dele.
 FONTES_PROPRIAS = ("autorais",)
 CALLBACK_RECORRI, CALLBACK_NAO_VAI = "apel_ok:", "apel_nao:"
@@ -53,11 +66,14 @@ def _criar_tabela(con):
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, chave TEXT UNIQUE, tipo TEXT, data_punicao TEXT, "
                 "status_app TEXT, titulo TEXT, postado_em TEXT, rascunho INTEGER, fonte TEXT, texto TEXT, "
                 "observacao TEXT, situacao TEXT, criada TEXT, lida_em TEXT, ultimo_aviso TEXT, "
-                "avisos INTEGER DEFAULT 0)")
+                "avisos INTEGER DEFAULT 0, recorrida_em TEXT)")
+    # A coluna que veio depois entra na tabela que já existe no servidor.
+    if "recorrida_em" not in {linha[1] for linha in con.execute("PRAGMA table_info(shopee_video_punicoes)")}:
+        con.execute("ALTER TABLE shopee_video_punicoes ADD COLUMN recorrida_em TEXT")
 
 
 COLUNAS = ("id", "chave", "tipo", "data_punicao", "status_app", "titulo", "postado_em", "rascunho", "fonte",
-           "texto", "observacao", "situacao", "criada", "lida_em", "ultimo_aviso", "avisos")
+           "texto", "observacao", "situacao", "criada", "lida_em", "ultimo_aviso", "avisos", "recorrida_em")
 
 
 def _ler(linhas):
@@ -71,6 +87,26 @@ def chave(tipo, data_punicao):
 
 def recorrida_no_app(status_app):
     return bool(status_app) and status_app.strip().casefold() != NAO_RECORRIDO.casefold()
+
+
+def aceita_no_app(status_app):
+    """O app marca o recurso aceito como "Bem-sucedido"."""
+    return "sucedid" in (status_app or "").casefold() and "mal" not in (status_app or "").casefold()
+
+
+def recusada_no_app(status_app):
+    """O recurso que a Shopee não aceitou (o texto exato do app ainda não foi visto: as formas comuns)."""
+    texto = (status_app or "").casefold()
+    return any(palavra in texto for palavra in ("malsucedid", "mal-sucedid", "recusad", "rejeitad", "negad",
+                                                "reprovad", "falhou", "não aceit"))
+
+
+def situacao_de(tipo, data_punicao):
+    with db.conexao() as con:
+        _criar_tabela(con)
+        linha = con.execute("SELECT situacao FROM shopee_video_punicoes WHERE chave = ?",
+                            (chave(tipo, data_punicao),)).fetchone()
+        return linha[0] if linha else None
 
 
 def conhecida(tipo, data_punicao):
@@ -97,10 +133,15 @@ def guardar(tipo, data_punicao, status_app, titulo="", postado_em="", rascunho=N
             ident, situacao = linha
             if situacao == PENDENTE and recorrida_no_app(status_app):
                 situacao = RECORRIDA
+            if aceita_no_app(status_app) and situacao not in (RETIRADA, FORA_DA_JANELA):
+                situacao = ACEITA
+            elif recusada_no_app(status_app) and situacao in (PENDENTE, RECORRIDA):
+                situacao = RECUSADA
             con.execute("UPDATE shopee_video_punicoes SET status_app = ?, situacao = ?, lida_em = ? WHERE id = ?",
                         (status_app, situacao, _momento(agora), ident))
             return ident
-        situacao = RECORRIDA if recorrida_no_app(status_app) else PENDENTE if pode_apelar else ENCERRADA
+        situacao = (ACEITA if aceita_no_app(status_app) else RECUSADA if recusada_no_app(status_app)
+                    else RECORRIDA if recorrida_no_app(status_app) else PENDENTE if pode_apelar else ENCERRADA)
         cursor = con.execute(
             "INSERT INTO shopee_video_punicoes (chave, tipo, data_punicao, status_app, titulo, postado_em, rascunho, "
             "fonte, texto, observacao, situacao, criada, lida_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -123,13 +164,56 @@ def todas():
         return _ler(con.execute(f"SELECT {', '.join(COLUNAS)} FROM shopee_video_punicoes ORDER BY id DESC").fetchall())
 
 
-def marcar(ident, situacao):
-    """O Rafael tocou em Já recorri ou Não vou recorrer: o lembrete para. False se já não estava pendente."""
+def marcar(ident, situacao, agora=None):
+    """
+    O Rafael tocou em Já recorri ou Não vou recorrer: o lembrete para. False se já não
+    estava pendente. Já recorri guarda a hora: o robô passa a esperar o resultado.
+    """
     with db.conexao() as con:
         _criar_tabela(con)
-        cursor = con.execute("UPDATE shopee_video_punicoes SET situacao = ? WHERE id = ? AND situacao = ?",
-                             (situacao, ident, PENDENTE))
+        cursor = con.execute("UPDATE shopee_video_punicoes SET situacao = ?, recorrida_em = ? WHERE id = ? AND "
+                             "situacao = ?", (situacao, _momento(agora) if situacao == RECORRIDA else None, ident,
+                                              PENDENTE))
         return cursor.rowcount > 0
+
+
+def esperando_resultado(agora=None):
+    """
+    As punições que o Rafael recorreu (Já recorri) há menos de DIAS_ESPERANDO_O_RESULTADO
+    dias e ainda sem resultado: o robô olha a Saúde do Vídeo de hora em hora por elas.
+    """
+    corte = _momento((agora or datetime.now(fuso_horario)) - timedelta(days=DIAS_ESPERANDO_O_RESULTADO))
+    return [p for p in todas() if p["situacao"] == RECORRIDA and (p["recorrida_em"] or "") >= corte]
+
+
+def _data(data_punicao):
+    try:
+        return datetime.strptime(" ".join(str(data_punicao).split()), "%d/%m/%Y %H:%M:%S").replace(tzinfo=fuso_horario)
+    except ValueError:
+        return None
+
+
+def retirar_ausentes(vistas, agora=None):
+    """
+    Depois de uma leitura completa da Saúde do Vídeo: a punição guardada que não está
+    mais na lista saiu. Com menos de 30 dias, a Shopee a tirou (recurso aceito); com mais,
+    saiu da janela. Devolve as que o Rafael esperava (pendentes ou recorridas) e que a
+    Shopee tirou, para o aviso.
+    """
+    agora = agora or datetime.now(fuso_horario)
+    retiradas = []
+    for p in todas():
+        if p["chave"] in vistas or p["situacao"] in (RETIRADA, FORA_DA_JANELA):
+            continue
+        data = _data(p["data_punicao"])
+        recente = data is None or agora - data < timedelta(days=DIAS_DA_SAUDE - 1)
+        nova = RETIRADA if recente else FORA_DA_JANELA
+        with db.conexao() as con:
+            con.execute("UPDATE shopee_video_punicoes SET situacao = ?, lida_em = ? WHERE id = ?",
+                        (nova, _momento(agora), p["id"]))
+        if recente and p["situacao"] in (PENDENTE, RECORRIDA):
+            retiradas.append(p)
+    return retiradas
 
 
 def vencidas(agora=None):
@@ -280,7 +364,13 @@ def texto_saude(config, estado_robo=None, agora=None):
         linhas.append("✅ Conta sem suspensão.")
     pontos = estado_robo.get("saude_pontos")
     if pontos is not None:
-        linhas.append(f"⚠️ Pontos de penalidade: <b>{pontos}</b> (a escala do app vai até {PONTOS_DA_ESCALA})")
+        if pontos >= PONTOS_DA_SUSPENSAO:
+            nota = f"com {PONTOS_DA_SUSPENSAO} ou mais, a Shopee suspende as postagens; recurso aceito tira pontos"
+        elif pontos == PONTOS_DA_SUSPENSAO - 1:
+            nota = f"a 1 ponto da suspensão, que vem com {PONTOS_DA_SUSPENSAO}"
+        else:
+            nota = f"a suspensão vem com {PONTOS_DA_SUSPENSAO}"
+        linhas.append(f"⚠️ Pontos de penalidade: <b>{pontos}</b> ({nota})")
     lida = estado_robo.get("saude_lida_em") or ""
     try:
         lida = datetime.strptime(lida, "%Y-%m-%d %H:%M:%S").strftime("%d/%m às %H:%M")

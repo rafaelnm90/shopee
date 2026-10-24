@@ -210,7 +210,9 @@ async def decisao_da_apelacao(callback: types.CallbackQuery):
     recorri = callback.data.startswith(apelacoes.CALLBACK_RECORRI)
     ident = callback.data.split(":", 1)[1]
     mudou = ident.isdigit() and apelacoes.marcar(int(ident), apelacoes.RECORRIDA if recorri else apelacoes.NAO_VAI)
-    resposta = ("✅ Anotado: você recorreu. Parei de lembrar desta punição." if recorri
+    resposta = ("✅ Anotado: você recorreu. Parei de lembrar desta punição, e o robô olha a Saúde do Vídeo de "
+                "hora em hora (no Horário do Robô) até sair o resultado do recurso; quando sair, eu aviso aqui."
+                if recorri
                 else "🚫 Anotado: você não vai recorrer. Parei de lembrar desta punição.")
     await callback.answer(resposta if mudou else "Esta punição já estava resolvida.")
     try:
