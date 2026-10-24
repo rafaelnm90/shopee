@@ -83,3 +83,10 @@ def test_modelos_da_chave_so_os_de_texto(monkeypatch):
 def test_teste_do_modelo_diz_o_motivo_fixo(gemini):
     gemini.respostas.update(b=COTA_DO_DIA, c=NAO_EXISTE)
     assert [ia.testar_modelo(m) for m in "abc"] == ["responde", "cota do dia", "modelo não encontrado"]
+
+
+def test_cascata_sem_repetidos_e_so_modelos_de_texto():
+    # A cascata é atualizada à mão pelo resultado do modelos_ia.yml: um nome repetido gastaria
+    # duas chamadas na mesma cota, e um modelo de imagem ou voz nunca devolve o texto pedido.
+    assert len(set(ia.MODELOS_CASCATA_GEMINI)) == len(ia.MODELOS_CASCATA_GEMINI)
+    assert all(m.startswith("gemini") and not any(p in m for p in ia.FORA_DOS_ROBOS) for m in ia.MODELOS_CASCATA_GEMINI)

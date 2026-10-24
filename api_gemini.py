@@ -21,15 +21,25 @@ GEMINI_API_KEY = os.getenv('GEMINI_KEY')
 
 client_genai = genai.Client(api_key=GEMINI_API_KEY)
 
-# Ordem de tentativa: o primeiro modelo que responder vence.
+# Ordem de tentativa: o primeiro modelo que responder vence. Cada modelo tem a própria
+# cota diária, por isso a lista é longa: o melhor vem primeiro e os outros seguram o
+# dia quando a cota dos de cima acaba. Conferida com a chave pelo modelos_ia.yml (24/10/2026):
+# o 3.7 e o 3.5 Flash foram descontinuados, mas o Google ainda os atende (redireciona
+# para o 3.8 e o 3.6); ficam enquanto responderem, e o que der "não encontrado" sai da
+# vez sozinho por 6 h (tempo_fora). Escolha do Rafael (P14): DECISOES.md, Código e manutenção.
 MODELOS_CASCATA_GEMINI = [
+    "gemini-4-argon",
     "gemini-3.1-pro-preview",
+    "gemini-pro-latest",
+    "gemini-3.8-flash",
     "gemini-3.7-flash",
     "gemini-3.6-flash",
+    "gemini-flash-latest",
     "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
     "gemini-3-flash-preview",
     "gemini-3.1-flash-lite",
+    "gemini-flash-lite-latest",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
     "gemini-3.1-flash-lite-preview"
@@ -228,7 +238,8 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
 # --- Os modelos que a chave enxerga (modelos_ia.yml) ---
 
 # Modelos de generateContent que não servem aos robôs (imagem, voz, embeddings...).
-FORA_DOS_ROBOS = ("image", "tts", "audio", "live", "embedding", "robotics", "computer-use", "veo", "imagen")
+FORA_DOS_ROBOS = ("image", "tts", "audio", "live", "embedding", "robotics", "computer-use", "veo", "imagen",
+                  "transcribe", "banana", "customtools")
 
 
 def modelos_da_chave():
