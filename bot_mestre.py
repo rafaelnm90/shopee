@@ -73,6 +73,7 @@ import rotinas  # em que canal sai cada rotina de texto
 import conferencia_espiao  # o nome que a IA do Espião deu confere com o produto?
 import perguntas_rafael  # as perguntas do Claude no privado, lembradas de hora em hora
 import faxina_viral  # o resumo da faxina do Acervo Viral, que roda no divulgacao_canal
+import exemplos  # os exemplos das perguntas dos painéis, com o que está valendo agora
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
 
 logger = configurar_logs(__name__)
@@ -1146,6 +1147,10 @@ def ler_pausa_programada():
 
 def salvar_pausa_programada(dados):
     db.salvar_config("pausa_programada", dados)
+
+def exemplo_retorno_da_pausa():
+    """O exemplo da data de retorno: amanhã às 15:00, para não mostrar um dia que já passou."""
+    return (datetime.now(fuso_horario) + timedelta(days=1)).strftime("%d/%m") + " 15:00"
 
 def recalcular_datas_pos_pausa():
     """
@@ -3584,6 +3589,33 @@ def rotulo_cota_de_config(config, chave_min, chave_max, chave_legado=None):
     piso, topo = faixa_de_config(config, chave_min, chave_max, chave_legado)
     return rotulo_cota(piso, topo) if piso else "sem cota"
 
+def texto_cota_por_dia(pergunta, nome, cota):
+    """
+    A pergunta da cota por dia (Faixa ou Fixo) com os exemplos de agora: a cota que está
+    valendo e, do outro jeito, a última que o Rafael mandou (exemplos.py).
+    """
+    faixa, fixo = exemplos.faixa_e_fixo(nome, cota, "4-8", "6")
+    menor, maior = exemplos.partes_da_faixa(faixa)
+    return (f"{pergunta}\n\n"
+            f"• Faixa: <code>{faixa}</code> — cada dia sorteia um número entre {menor} e {maior} "
+            f"(média {exemplos.media(faixa)})\n"
+            f"• Fixo: <code>{fixo}</code> — sempre {fixo} por dia\n\n"
+            "<i>A faixa existe para a quantidade não ser sempre igual, que é o que denuncia robô.</i>")
+
+def aviso_cota_invalida(nome, cota):
+    faixa, fixo = exemplos.faixa_e_fixo(nome, cota, "4-8", "6")
+    return f"⚠️ Envie um número (<code>{fixo}</code>) ou uma faixa (<code>{faixa}</code>)."
+
+def cota_do_publico():
+    return faixa_de_config(ler_submissao_config(), "repost_limite_min", "repost_limite_max", "repost_limite")
+
+def cota_dos_autorais():
+    return faixa_de_config(ler_autorais_config(), "limite_min", "limite_max", "limite_videos")
+
+def exemplo_janela_parceiro(p):
+    return exemplos.janela(f"parceiro_{p.get('id')}", p.get("janela_inicio", 0) or 0,
+                           p.get("janela_fim", 24) or 24, "8-23")
+
 DIAS_HISTORICO_PARCEIROS = 3   # publicados ficam na fila por 3 dias, só como registro
 
 
@@ -3798,17 +3830,15 @@ async def acoes_parceiro(message: types.Message, state: FSMContext):
             "✏️ Envie o novo <b>número de dias de atraso</b> (D+X).\n\n"
             "<i>É quanto tempo o vídeo fica guardado antes de ser publicado.</i>"),
         "Editar Cota 📦":    ("cota",
-            "Quantos vídeos por dia este parceiro pode publicar?\n\n"
-            "• Faixa: <code>4-8</code> — cada dia sorteia um número entre 4 e 8 (média 6)\n"
-            "• Fixo: <code>6</code> — sempre 6 por dia\n\n"
-            "<i>A faixa existe para a quantidade não ser sempre igual, que é o que denuncia robô.</i>"),
+            texto_cota_por_dia("Quantos vídeos por dia este parceiro pode publicar?",
+                               f"parceiro_{pid}_cota", ler_faixa_limite(p))),
         "Editar @ do Parceiro 👤": ("arroba",
             "✏️ Envie o <b>@ do parceiro no Telegram</b> (ex.: <code>@joaosilva</code>).\n\n"
             "<i>Ele aparece em \"👤 Vídeo enviado por\" nos vídeos deste parceiro que vão para a "
             "Vídeos da Comunidade do Grupo Público. Envie <code>-</code> para tirar o @.</i>"),
         "Editar Janela 🕒":  ("janela",
             "Em que horário este parceiro pode publicar?\n\n"
-            "• Formato <code>Inicio-Fim</code> — Exemplo: <code>8-23</code>\n"
+            f"• Formato <code>Inicio-Fim</code> — Exemplo: <code>{exemplo_janela_parceiro(p)}</code>\n"
             "• <code>0-24</code> libera o dia inteiro\n\n"
             "<i>A captura continua 24h; só a publicação respeita a janela.</i>"),
     }
@@ -3849,7 +3879,8 @@ async def salvar_edicao_parceiro(message: types.Message, state: FSMContext):
         # Uma pergunta, duas colunas: faixa "6-10" ou número fixo "6".
         casou = re.match(r"^(\d{1,3})(?:\s*-\s*(\d{1,3}))?$", valor)
         if not casou:
-            await message.answer("⚠️ Envie um número (<code>6</code>) ou uma faixa (<code>6-10</code>).", parse_mode="HTML"); return
+            await message.answer(aviso_cota_invalida(f"parceiro_{pid}_cota", ler_faixa_limite(buscar_parceiro(pid) or {})),
+                                 parse_mode="HTML"); return
         piso = int(casou.group(1))
         topo = int(casou.group(2)) if casou.group(2) else piso
         if topo < piso:
@@ -3857,6 +3888,7 @@ async def salvar_edicao_parceiro(message: types.Message, state: FSMContext):
         if atualizar_parceiro(pid, "limite_min", piso) and atualizar_parceiro(pid, "limite_max", topo):
             # Zera o campo antigo para não sobrar duas fontes de verdade.
             atualizar_parceiro(pid, "limite_diario", 0)
+            exemplos.lembrar_faixa(f"parceiro_{pid}_cota", piso, topo)
             logger.info(f"👥 [Parceiros] #{pid}: cota diária definida para {piso}-{topo}.")
             rotulo = f"{piso} a {topo} vídeos/dia" if topo > piso else f"{piso} vídeos/dia"
             await message.answer(f"✅ <b>Cota atualizada:</b> {rotulo}.", parse_mode="HTML")
@@ -3869,11 +3901,13 @@ async def salvar_edicao_parceiro(message: types.Message, state: FSMContext):
         # Uma pergunta, duas colunas: janela_inicio e janela_fim de uma vez.
         casou = re.match(r"^(\d{1,2})\s*-\s*(\d{1,2})$", valor)
         if not casou:
-            await message.answer("⚠️ Use o formato <code>Inicio-Fim</code>. Exemplo: <code>8-23</code>.", parse_mode="HTML"); return
+            await message.answer("⚠️ Use o formato <code>Inicio-Fim</code>. Exemplo: "
+                                 f"<code>{exemplo_janela_parceiro(buscar_parceiro(pid) or {})}</code>.", parse_mode="HTML"); return
         ini, fim = map(int, casou.groups())
         if ini >= fim or ini < 0 or fim > 24:
             await message.answer("⚠️ O início precisa ser menor que o fim, dentro de 0 a 24.", parse_mode="HTML"); return
         if atualizar_parceiro(pid, "janela_inicio", ini) and atualizar_parceiro(pid, "janela_fim", fim):
+            exemplos.lembrar_janela(f"parceiro_{pid}", ini, fim)
             logger.info(f"👥 [Parceiros] #{pid}: janela de publicação definida para {ini}h-{fim}h.")
             await message.answer(f"✅ <b>Janela atualizada:</b> {ini}h às {fim}h.", parse_mode="HTML")
         else:
@@ -4025,7 +4059,7 @@ async def voltar_passo_parceiro(message, state: FSMContext, destino):
         "app_secret": ("🔐 <b>PASSO 4 de 8 — App Secret</b>\n\nCole o <b>App Secret</b> deste parceiro.\n<i>⚠️ Dado sensível: apague a mensagem do chat depois de enviar.</i>", SubmissaoAdminFluxo.parceiro_app_secret),
         "origem":     ("📥 <b>PASSO 5 de 8 — Canal de ORIGEM</b>\n\nDe onde este parceiro vai pegar os vídeos?\nEnvie o <b>ID, @username ou link</b> do canal.", SubmissaoAdminFluxo.parceiro_origem),
         "destino":    ("📤 <b>PASSO 6 de 8 — Canal de DESTINO</b>\n\nOnde este parceiro vai publicar os vídeos?", SubmissaoAdminFluxo.parceiro_destino),
-        "dias":       ("⏳ <b>PASSO 7 de 8 — Dias de atraso (D+X)</b>\n\nQuantos dias o vídeo fica guardado antes de ser repostado?\n<i>Envie apenas o número. Exemplo: 30</i>", SubmissaoAdminFluxo.parceiro_dias),
+        "dias":       ("⏳ <b>PASSO 7 de 8 — Dias de atraso (D+X)</b>\n\nQuantos dias o vídeo fica guardado antes de ser repostado?\n<i>Envie apenas o número. Exemplo: " + exemplos.exemplo("parceiro_novo_dias", 30) + "</i>", SubmissaoAdminFluxo.parceiro_dias),
     }
     texto, novo_estado = passos[destino]
     await message.answer(texto, parse_mode="HTML", reply_markup=teclado_wizard_nav)
@@ -4228,13 +4262,14 @@ async def parceiro_receber_dias(message: types.Message, state: FSMContext):
 
     valor = (message.text or "").strip()
     if not valor.isdigit() or not (0 <= int(valor) <= 365):
-        await message.answer("⚠️ Envie um número entre <b>0 e 365</b>. Exemplo: <b>30</b>", parse_mode="HTML", reply_markup=teclado_wizard_nav); return
+        await message.answer(f"⚠️ Envie um número entre <b>0 e 365</b>. Exemplo: <b>{exemplos.exemplo('parceiro_novo_dias', 30)}</b>",
+                             parse_mode="HTML", reply_markup=teclado_wizard_nav); return
 
     await state.update_data(dias_atraso=int(valor))
     await message.answer(
         "📦 <b>PASSO 8 de 8 — Cota diária</b>\n\n"
         "Quantos vídeos por dia este parceiro pode publicar?\n"
-        "<i>Envie apenas o número. Exemplo: 6</i>",
+        f"<i>Envie apenas o número. Exemplo: {exemplos.exemplo('parceiro_novo_cota', 6)}</i>",
         parse_mode="HTML", reply_markup=teclado_wizard_nav
     )
     await state.set_state(SubmissaoAdminFluxo.parceiro_limite)
@@ -4248,7 +4283,8 @@ async def parceiro_receber_limite(message: types.Message, state: FSMContext):
 
     valor = (message.text or "").strip()
     if not valor.isdigit() or not (1 <= int(valor) <= 100):
-        await message.answer("⚠️ Envie um número entre <b>1 e 100</b>. Exemplo: <b>6</b>", parse_mode="HTML", reply_markup=teclado_wizard_nav); return
+        await message.answer(f"⚠️ Envie um número entre <b>1 e 100</b>. Exemplo: <b>{exemplos.exemplo('parceiro_novo_cota', 6)}</b>",
+                             parse_mode="HTML", reply_markup=teclado_wizard_nav); return
 
     await state.update_data(limite_diario=int(valor))
     d = await state.get_data()
@@ -4281,6 +4317,8 @@ async def parceiro_confirmar_cadastro(message: types.Message, state: FSMContext)
     novo_id = salvar_parceiro(d)
 
     if novo_id:
+        exemplos.lembrar("parceiro_novo_dias", d.get("dias_atraso"))
+        exemplos.lembrar("parceiro_novo_cota", d.get("limite_diario"))
         logger.info(f"👥 [Parceiros] '{d.get('nome')}' cadastrado com o ID {novo_id}.")
         await message.answer(f"✅ <b>Parceiro cadastrado!</b>\n{d.get('nome')} recebeu o ID <code>#{novo_id}</code>.", parse_mode="HTML")
     else:
@@ -4549,7 +4587,9 @@ async def processar_pausa_repostagem_publico(message: types.Message, state: FSMC
 @dp.message(F.text == "Editar Dias (Público) ⏳", StateFilter("*"))
 async def pedir_dias_repost_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
-    await message.answer("Por quantos <b>dias</b> o vídeo deve ficar arquivado antes de ir para o Grupo Público? (Ex: 15)", parse_mode="HTML", reply_markup=teclado_cancelar)
+    dias = ler_submissao_config().get("repost_dias", 15)
+    await message.answer(f"Por quantos <b>dias</b> o vídeo deve ficar arquivado antes de ir para o Grupo Público? (Ex: {dias})",
+                         parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(SubmissaoAdminFluxo.aguardando_repost_dias)
 
 @dp.message(SubmissaoAdminFluxo.aguardando_repost_dias)
@@ -4593,10 +4633,7 @@ async def processar_dias_repost_publico(message: types.Message, state: FSMContex
 async def pedir_limite_repost_publico(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID: return
     await message.answer(
-        "Quantos vídeos por dia no Grupo Público?\n\n"
-        "• Faixa: <code>4-8</code> — cada dia sorteia um número entre 4 e 8 (média 6)\n"
-        "• Fixo: <code>6</code> — sempre 6 por dia\n\n"
-        "<i>A faixa existe para a quantidade não ser sempre igual, que é o que denuncia robô.</i>",
+        texto_cota_por_dia("Quantos vídeos por dia no Grupo Público?", "publico_cota", cota_do_publico()),
         parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(SubmissaoAdminFluxo.aguardando_repost_limite)
 
@@ -4608,7 +4645,8 @@ async def confirmar_limite_repost_publico(message: types.Message, state: FSMCont
         return
     faixa = interpretar_faixa_cota(message.text)
     if not faixa:
-        await message.answer("⚠️ Envie um número (<code>6</code>) ou uma faixa (<code>4-8</code>).", parse_mode="HTML", reply_markup=teclado_cancelar)
+        await message.answer(aviso_cota_invalida("publico_cota", cota_do_publico()), parse_mode="HTML",
+                             reply_markup=teclado_cancelar)
         return
 
     piso, topo = faixa
@@ -4638,6 +4676,7 @@ async def processar_limite_repost_publico(message: types.Message, state: FSMCont
     # Mantém o campo antigo alinhado, para qualquer leitor que ainda o consulte.
     config["repost_limite"] = piso
     salvar_submissao_config(config)
+    exemplos.lembrar_faixa("publico_cota", piso, topo)
     
     logger.info(f"✅ Cota do repost público atualizada para: {piso}-{topo}")
     await message.answer(f"✅ <b>Cota Diária Atualizada!</b>\nO robô enviará <b>{rotulo_cota(piso, topo)}</b> ao Grupo Público.", parse_mode="HTML")
@@ -6312,7 +6351,9 @@ async def processar_destino_autorais(message: types.Message, state: FSMContext):
 # ----------------------------------------------------
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Dias ⏳")
 async def pedir_dias_autorais(message: types.Message, state: FSMContext):
-    await message.answer("Por quantos <b>dias</b> o vídeo deve ficar arquivado e oculto até retornar para o grupo de origem? (Ex: 15)", parse_mode="HTML", reply_markup=teclado_cancelar)
+    dias = ler_autorais_config().get("dias_retorno", 15)
+    await message.answer(f"Por quantos <b>dias</b> o vídeo deve ficar arquivado e oculto até retornar para o grupo de origem? (Ex: {dias})",
+                         parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(AutoraisFluxo.aguardando_dias_retorno)
 
 @dp.message(AutoraisFluxo.aguardando_dias_retorno)
@@ -6356,10 +6397,7 @@ async def processar_dias_autorais(message: types.Message, state: FSMContext):
 @dp.message(AutoraisFluxo.menu_principal, F.text == "Editar Limite 📦")
 async def pedir_limite_autorais(message: types.Message, state: FSMContext):
     await message.answer(
-        "Quantos vídeos por dia?\n\n"
-        "• Faixa: <code>4-8</code> — cada dia sorteia um número entre 4 e 8 (média 6)\n"
-        "• Fixo: <code>6</code> — sempre 6 por dia\n\n"
-        "<i>A faixa existe para a quantidade não ser sempre igual, que é o que denuncia robô.</i>",
+        texto_cota_por_dia("Quantos vídeos por dia?", "autorais_cota", cota_dos_autorais()),
         parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(AutoraisFluxo.aguardando_limite_videos)
 
@@ -6371,7 +6409,8 @@ async def confirmar_limite_autorais(message: types.Message, state: FSMContext):
         
     faixa = interpretar_faixa_cota(message.text)
     if not faixa:
-        await message.answer("⚠️ Envie um número (<code>6</code>) ou uma faixa (<code>4-8</code>).", parse_mode="HTML", reply_markup=teclado_cancelar)
+        await message.answer(aviso_cota_invalida("autorais_cota", cota_dos_autorais()), parse_mode="HTML",
+                             reply_markup=teclado_cancelar)
         return
 
     piso, topo = faixa
@@ -6402,6 +6441,7 @@ async def processar_limite_autorais(message: types.Message, state: FSMContext):
     # Mantém o campo antigo alinhado, para qualquer leitor que ainda o consulte.
     config["limite_videos"] = piso
     salvar_autorais_config(config)
+    exemplos.lembrar_faixa("autorais_cota", piso, topo)
     
     await message.answer(f"✅ <b>Cota de Retorno Atualizada!</b>\nO robô arquivará <b>{rotulo_cota(piso, topo)}</b>.", parse_mode="HTML")
     await submenu_regras_retorno(message, state)
@@ -6420,7 +6460,8 @@ async def pedir_janela_autorais(message: types.Message, state: FSMContext):
 
     await message.answer(
         f"Defina a <b>Janela de Horário</b> em que os vídeos de retorno podem ser postados.\n\n"
-        f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>8-22</code>) ou clique no botão para rodar 24h.\n"
+        f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>{exemplos.janela('autorais', inicio, fim, '8-22')}</code>) "
+        "ou clique no botão para rodar 24h.\n"
         f"<i>Janela atual: {inicio}h às {fim}h</i>",
         parse_mode="HTML",
         reply_markup=teclado_janela_dia_todo
@@ -6443,7 +6484,10 @@ async def confirmar_janela_autorais(message: types.Message, state: FSMContext):
     else:
         match = re.match(r"^(\d{1,2})\s*-\s*(\d{1,2})$", texto)
         if not match:
-            await message.answer("⚠️ Formato inválido! Use exatamente como no exemplo: <code>8-22</code>.", parse_mode="HTML", reply_markup=teclado_janela_dia_todo)
+            config = ler_autorais_config()
+            exemplo = exemplos.janela("autorais", config.get("inicio", 10), config.get("fim", 20), "8-22")
+            await message.answer(f"⚠️ Formato inválido! Use exatamente como no exemplo: <code>{exemplo}</code>.",
+                                 parse_mode="HTML", reply_markup=teclado_janela_dia_todo)
             return
         inicio, fim = map(int, match.groups())
         if inicio >= fim or inicio < 0 or fim > 24:
@@ -6486,6 +6530,7 @@ async def processar_janela_autorais(message: types.Message, state: FSMContext):
     config["inicio"] = inicio
     config["fim"] = fim
     salvar_autorais_config(config)
+    exemplos.lembrar_janela("autorais", inicio, fim)
 
     logger.info(f"✅ Janela de postagem dos Autorais atualizada para {inicio}h-{fim}h.")
 
@@ -10273,7 +10318,7 @@ async def salvar_novo_numero(message: types.Message, state: FSMContext):
         await message.answer(f"Sucesso! O próximo post será o 'Vídeo {novo_numero}'.", reply_markup=obter_teclado_principal())
         await state.clear()
     else:
-        await message.answer("Por favor, digite apenas números. Exemplo: 50", reply_markup=teclado_cancelar)
+        await message.answer(f"Por favor, digite apenas números. Exemplo: {ler_contador()}", reply_markup=teclado_cancelar)
 
 @dp.message(F.text == "🛠️ Configurações Avançadas", StateFilter("*"))
 async def menu_configuracoes(message: types.Message, state: FSMContext):
@@ -10983,7 +11028,8 @@ async def pedir_janela_achadinhos(message: types.Message, state: FSMContext):
 
     await message.answer(
         f"Defina a <b>Janela de Horário</b> em que o garimpo pode publicar ofertas.\n\n"
-        f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>8-22</code>) ou clique no botão para rodar 24h.\n"
+        f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>{exemplos.janela('achadinhos', inicio, fim, '8-22')}</code>) "
+        "ou clique no botão para rodar 24h.\n"
         f"<i>Janela atual: {inicio}h às {fim}h</i>",
         parse_mode="HTML",
         reply_markup=teclado_janela_dia_todo
@@ -11004,7 +11050,9 @@ async def confirmar_janela_achadinhos(message: types.Message, state: FSMContext)
     else:
         match = re.match(r"^(\d{1,2})\s*-\s*(\d{1,2})$", texto)
         if not match:
-            await message.answer("⚠️ Formato inválido! Use exatamente como no exemplo: <code>8-22</code>.",
+            config = ler_achadinhos_config()
+            exemplo = exemplos.janela("achadinhos", config.get("inicio", 8), config.get("fim", 22), "8-22")
+            await message.answer(f"⚠️ Formato inválido! Use exatamente como no exemplo: <code>{exemplo}</code>.",
                                  parse_mode="HTML", reply_markup=teclado_janela_dia_todo)
             return
         inicio, fim = map(int, match.groups())
@@ -11046,6 +11094,7 @@ async def salvar_janela_achadinhos(message: types.Message, state: FSMContext):
     config["inicio"] = data.get("janela_inicio", 8)
     config["fim"] = data.get("janela_fim", 22)
     salvar_achadinhos_config(config)
+    exemplos.lembrar_janela("achadinhos", config["inicio"], config["fim"])
 
     logger.info(f"⏰ [Achadinhos] Janela alterada para {config['inicio']}h–{config['fim']}h.")
     await message.answer(f"✅ Janela salva: <b>{config['inicio']}h às {config['fim']}h</b>.", parse_mode="HTML")
@@ -12023,7 +12072,8 @@ async def iniciar_config_janela_espiao(message: types.Message, state: FSMContext
     
     await message.answer(
         f"Defina a <b>Janela de Horário</b> útil em que o Espião pode postar os vídeos.\n\n"
-        f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>) ou clique no botão abaixo para rodar 24h:\n"
+        f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>{exemplos.janela('espiao', inicio, fim, '10-22')}</code>) "
+        "ou clique no botão abaixo para rodar 24h:\n"
         f"<i>Janela atual: {inicio}h às {fim}h</i>", 
         reply_markup=teclado_janela_dia_todo,
         parse_mode="HTML"
@@ -12040,7 +12090,9 @@ async def receber_janela_espiao(message: types.Message, state: FSMContext):
     else:
         match = re.match(r"^(\d{1,2})-(\d{1,2})$", texto)
         if not match:
-            await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22.", reply_markup=teclado_janela_dia_todo)
+            dados = ler_alvos_espiao()
+            exemplo = exemplos.janela("espiao", dados.get("inicio", 10), dados.get("fim", 22), "10-22")
+            await message.answer(f"Formato inválido! Use o formato exato como no exemplo: {exemplo}.", reply_markup=teclado_janela_dia_todo)
             return
         inicio, fim = map(int, match.groups())
         if inicio >= fim or inicio < 0 or fim > 24:
@@ -12069,6 +12121,7 @@ async def confirmar_janela_espiao(message: types.Message, state: FSMContext):
     dados["inicio"] = inicio
     dados["fim"] = fim
     salvar_alvos_espiao(dados)
+    exemplos.lembrar_janela("espiao", inicio, fim)
     
     texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"estritamente entre as {inicio}h e as {fim}h"
     await message.answer(f"✅ <b>Janela do Espião Salva!</b>\nO robô postará {texto_exibicao}.", parse_mode="HTML")
@@ -12464,7 +12517,7 @@ async def iniciar_pausa_programada(message: types.Message, state: FSMContext):
         await state.set_state(PausaProgramadaFluxo.aguardando_intencao_encerramento)
         return
         
-    await message.answer("📅 <b>Configurar Pausa Programada</b>\n\nDigite a data e a hora exatas do seu <b>retorno</b> no formato DD/MM HH:MM (Exemplo: 29/05 15:00).\nO robô voltará a funcionar automaticamente neste momento exato.", parse_mode="HTML", reply_markup=teclado_cancelar)
+    await message.answer(f"📅 <b>Configurar Pausa Programada</b>\n\nDigite a data e a hora exatas do seu <b>retorno</b> no formato DD/MM HH:MM (Exemplo: {exemplo_retorno_da_pausa()}).\nO robô voltará a funcionar automaticamente neste momento exato.", parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.set_state(PausaProgramadaFluxo.aguardando_data_retorno)
 
 @dp.message(PausaProgramadaFluxo.aguardando_data_retorno)
@@ -12478,7 +12531,7 @@ async def processar_data_retorno(message: types.Message, state: FSMContext):
     
     match = re.match(r"^(\d{1,2})/(\d{1,2})\s+(\d{1,2}):(\d{1,2})$", message.text.strip())
     if not match:
-        await message.answer("Formato inválido. Use DD/MM HH:MM, como por exemplo: 29/05 15:00.", reply_markup=teclado_cancelar)
+        await message.answer(f"Formato inválido. Use DD/MM HH:MM, como por exemplo: {exemplo_retorno_da_pausa()}.", reply_markup=teclado_cancelar)
         return
         
     dia, mes, hora, minuto = map(int, match.groups())
@@ -12781,6 +12834,20 @@ def ler_alvos_divulgacao():
 def salvar_alvos_divulgacao(dados):
     db.salvar_config("alvos_divulgacao", dados)
 
+def valores_spam_de_agora(dados, alvo=None):
+    """Frequência, repetições e réplicas que valem hoje: as do alvo ou, sem elas, as do padrão global."""
+    conf = dados.get("config_alvos", {}).get(alvo, {}) if alvo else {}
+    return (conf.get("frequencia", dados.get("frequencia_por_hora", 0)),
+            conf.get("repeticoes", dados.get("repeticoes_internas", 6)),
+            conf.get("replicas", dados.get("replicas_mensagem", 5)))
+
+async def aviso_valores_spam(state, dados):
+    """O aviso de formato errado com o exemplo do que está valendo (global ou do alvo em edição)."""
+    info = await state.get_data()
+    alvo = None if info.get("edicao_global") else info.get("alvo_em_edicao")
+    freq, rep, repl = valores_spam_de_agora(dados, alvo)
+    return f"Formato inválido. Envie os três números isolados por vírgula (Exemplo: {freq}, {rep}, {repl})."
+
 @dp.message(F.text == "SPAM em Grupos 📢")
 async def gerenciar_divulgacao(message: types.Message, state: FSMContext):
     """Painel do SPAM em Grupos: padrão global, alvos e o ajuste de cada um."""
@@ -12986,7 +13053,7 @@ async def salvar_valores_unificados(message: types.Message, state: FSMContext):
     match = re.match(r"^(\d+)\s*,\s*(\d+)\s*,\s*(\d+)$", message.text.strip())
     
     if not match:
-        await message.answer("Formato inválido. Envie os três números isolados por vírgula (Exemplo: 3, 6, 5).", reply_markup=teclado_cancelar)
+        await message.answer(await aviso_valores_spam(state, ler_alvos_divulgacao()), reply_markup=teclado_cancelar)
         return
         
     freq, rep, repl = map(int, match.groups())
@@ -13259,7 +13326,7 @@ async def salvar_valores_unificados_viral(message: types.Message, state: FSMCont
     match = re.match(r"^(\d+)\s*,\s*(\d+)\s*,\s*(\d+)$", message.text.strip())
     
     if not match:
-        await message.answer("Formato inválido. Envie os três números isolados por vírgula (Exemplo: 3, 6, 5).", reply_markup=teclado_cancelar)
+        await message.answer(await aviso_valores_spam(state, ler_alvos_divulgacao_viral()), reply_markup=teclado_cancelar)
         return
         
     freq, rep, repl = map(int, match.groups())
@@ -13509,10 +13576,11 @@ async def selecionar_tipo_edicao_div(message: types.Message, state: FSMContext):
     await state.update_data(edicao_global=is_global)
 
     if is_global:
+        freq, rep, repl = valores_spam_de_agora(ler_alvos_divulgacao_escopo(escopo))
         await message.answer(
             "Envie os três números separados por vírgula:\n"
             "<b>Frequência/hora, Repetições no texto, Réplicas por disparo</b>\n\n"
-            "<i>Exemplo: 1, 1, 1 — um anúncio por hora em cada grupo.</i>",
+            f"<i>Exemplo com a sua configuração atual:</i>\n<code>{freq}, {rep}, {repl}</code>",
             reply_markup=teclado_cancelar, parse_mode="HTML"
         )
         await state.set_state(ConfigDivulgacaoEscopo.aguardando_valores_unificados)
@@ -13544,10 +13612,12 @@ async def selecionar_alvo_edicao_div(message: types.Message, state: FSMContext):
         return
 
     await state.update_data(alvo_em_edicao=alvos[indice])
+    freq, rep, repl = valores_spam_de_agora(ler_alvos_divulgacao_escopo(escopo), alvos[indice])
     await message.answer(
         f"Configurando <code>{alvos[indice]}</code>.\n\n"
         "Envie os três números separados por vírgula:\n"
-        "<b>Frequência/hora, Repetições no texto, Réplicas por disparo</b>",
+        "<b>Frequência/hora, Repetições no texto, Réplicas por disparo</b>\n\n"
+        f"<i>Exemplo com a configuração atual dele:</i>\n<code>{freq}, {rep}, {repl}</code>",
         reply_markup=teclado_cancelar, parse_mode="HTML"
     )
     await state.set_state(ConfigDivulgacaoEscopo.aguardando_valores_unificados)
@@ -13558,7 +13628,7 @@ async def salvar_valores_div(message: types.Message, state: FSMContext):
     escopo = await _escopo_div_atual(state)
     match = re.match(r"^(\d+)\s*,\s*(\d+)\s*,\s*(\d+)$", message.text.strip())
     if not match:
-        await message.answer("Formato inválido. Envie os três números isolados por vírgula (Exemplo: 1, 1, 1).", reply_markup=teclado_cancelar)
+        await message.answer(await aviso_valores_spam(state, ler_alvos_divulgacao_escopo(escopo)), reply_markup=teclado_cancelar)
         return
 
     freq, rep, repl = map(int, match.groups())
@@ -13773,7 +13843,9 @@ async def salvar_horario_rotina(message: types.Message, state: FSMContext):
         # Bom Dia e Boa Noite: só a janela; saem 1x por dia
         match = re.match(r"^(\d{1,2})-(\d{1,2})$", message.text.strip())
         if not match:
-            await message.answer("Formato inválido! Use o formato exato como no exemplo: 6-9", reply_markup=teclado_cancelar)
+            atual = ler_config_rotina().get(tipo, {"inicio": 6, "fim": 9, "frequencia": 1})
+            await message.answer(f"Formato inválido! Use o formato exato como no exemplo: {atual['inicio']}-{atual['fim']}",
+                                 reply_markup=teclado_cancelar)
             return
         
         inicio, fim = map(int, match.groups())
@@ -13782,7 +13854,9 @@ async def salvar_horario_rotina(message: types.Message, state: FSMContext):
         # Demais rotinas: janela e quantidade por dia
         match = re.match(r"^(\d{1,2})-(\d{1,2}),\s*(\d+)$", message.text.strip())
         if not match:
-            await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-20, 3", reply_markup=teclado_cancelar)
+            atual = ler_config_rotina().get(tipo, {"inicio": 10, "fim": 20, "frequencia": 3})
+            await message.answer("Formato inválido! Use o formato exato como no exemplo: "
+                                 f"{atual['inicio']}-{atual['fim']}, {atual['frequencia']}", reply_markup=teclado_cancelar)
             return
             
         inicio, fim, freq = map(int, match.groups())

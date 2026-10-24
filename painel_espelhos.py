@@ -21,6 +21,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from aiogram import Router, Bot, types, F
 from aiogram.fsm.context import FSMContext
+import exemplos  # os exemplos das perguntas com o que está valendo agora
 import fila_espelhador
 import rotas_espelhador
 from links_grupos import nome_clicavel  # nome do grupo como atalho para abri-lo
@@ -121,6 +122,24 @@ teclado_espelhador_abrangencia = montar_teclado([
 def ler_espelhos():
     """As rotas (rotas_espelhador.py, no banco), com as origens no formato de texto."""
     return rotas_espelhador.ler()
+
+async def rota_em_edicao(state):
+    """A rota aberta em Editar (pelo índice guardado no fluxo); {} se ela não existe mais."""
+    indice = (await state.get_data()).get("indice_edicao")
+    rotas = ler_espelhos().get("rotas", [])
+    return rotas[indice] if isinstance(indice, int) and 0 <= indice < len(rotas) else {}
+
+
+def exemplo_janela_da_rota(rota=None):
+    """O exemplo de horário: o da rota; rota nova ou em Dia Todo, o último que o Rafael mandou."""
+    rota = rota or {}
+    return exemplos.janela("espelhador_rota", rota.get("inicio"), rota.get("fim"), "10-22")
+
+
+def exemplos_da_cota(rota):
+    """(Faixa, Fixo) do Limite Diário: o da rota e, do outro jeito, o último que o Rafael mandou."""
+    return exemplos.faixa_e_fixo("espelhador_cota", ler_faixa_limite(rota), "6-10", "6")
+
 
 def ler_contador_espelhador(nome_rota):
     """Quantos vídeos da rota ainda esperam publicação (os já publicados não contam)."""
@@ -580,7 +599,8 @@ async def receber_origem_criacao(message: types.Message, state: FSMContext):
     
     if origens_validas:
         await state.update_data(origens=origens_validas)
-        texto_resposta += "Excelente. Agora defina a <b>Janela de Horário</b> para a postagem.\nEnvie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>) ou clique no botão abaixo para rodar 24h:"
+        texto_resposta += ("Excelente. Agora defina a <b>Janela de Horário</b> para a postagem.\nEnvie no formato "
+                           f"<code>Inicio-Fim</code> (Exemplo: <code>{exemplo_janela_da_rota()}</code>) ou clique no botão abaixo para rodar 24h:")
         await message.answer(texto_resposta, reply_markup=teclado_espelhador_janela, parse_mode="HTML")
         await state.set_state(EspelhadorFluxo.aguardando_janela)
     else:
@@ -602,7 +622,8 @@ async def receber_janela_rota(message: types.Message, state: FSMContext):
     else:
         match = re.match(r"^(\d{1,2})-(\d{1,2})$", texto)
         if not match:
-            await message.answer("Formato inválido! Use o formato exato como no exemplo: 10-22, ou clique em 'Dia Todo (24h) 🕛'.", reply_markup=teclado_espelhador_janela)
+            await message.answer(f"Formato inválido! Use o formato exato como no exemplo: {exemplo_janela_da_rota()}, "
+                                 "ou clique em 'Dia Todo (24h) 🕛'.", reply_markup=teclado_espelhador_janela)
             return
             
         inicio, fim = map(int, match.groups())
@@ -738,6 +759,7 @@ async def finalizar_cadastro_rota(message: types.Message, state: FSMContext):
     
     dados.setdefault("rotas", []).append(nova_rota)
     salvar_espelhos(dados)
+    exemplos.lembrar_janela("espelhador_rota", inicio, fim)
     
     logger.info(f"✅ Rota inteligente criada com sucesso: {nome_rota}.")
     
@@ -995,7 +1017,8 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
     elif texto == "🕒 Modificar Janela":
         await message.answer(
             "Defina a <b>Nova Janela de Horário</b> para a postagem nesta rota.\n"
-            "Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>10-22</code>) ou clique no botão abaixo para rodar 24h:", 
+            f"Envie no formato <code>Inicio-Fim</code> (Exemplo: <code>{exemplo_janela_da_rota(await rota_em_edicao(state))}</code>) "
+            "ou clique no botão abaixo para rodar 24h:", 
             reply_markup=teclado_espelhador_janela, 
             parse_mode="HTML"
         )
@@ -1005,10 +1028,12 @@ async def processar_acao_edicao(message: types.Message, state: FSMContext):
             [KeyboardButton(text="Todos os Vídeos ♾️")],
             [KeyboardButton(text="Cancelar Operação ❌")]
         ])
+        faixa, fixo = exemplos_da_cota(await rota_em_edicao(state))
+        menor, maior = exemplos.partes_da_faixa(faixa)
         await message.answer(
             "Quantos vídeos esta rota pode publicar <b>por dia</b>?\n\n"
-            "• Faixa: <code>6-10</code> — cada dia sorteia um número entre 6 e 10\n"
-            "• Fixo: <code>6</code> — sempre 6 por dia\n\n"
+            f"• Faixa: <code>{faixa}</code> — cada dia sorteia um número entre {menor} e {maior}\n"
+            f"• Fixo: <code>{fixo}</code> — sempre {fixo} por dia\n\n"
             "<i>A captura continua pegando tudo; o que passar do teto do dia é "
             "descartado, não fica para o dia seguinte.</i>",
             reply_markup=teclado_teto,
@@ -1357,7 +1382,10 @@ async def salvar_edicao_janela(message: types.Message, state: FSMContext):
         inicio, fim = 0, 24
     else:
         match = re.match(r"^(\d{1,2})-(\d{1,2})$", texto)
-        if not match: return await message.answer("Formato inválido!", reply_markup=teclado_espelhador_janela)
+        if not match:
+            exemplo = exemplo_janela_da_rota(await rota_em_edicao(state))
+            return await message.answer(f"Formato inválido! Use o formato do exemplo: {exemplo}.",
+                                        reply_markup=teclado_espelhador_janela)
         inicio, fim = map(int, match.groups())
         if inicio >= fim or inicio < 0 or fim > 24: return await message.answer("Valores inválidos!", reply_markup=teclado_espelhador_janela)
             
@@ -1375,8 +1403,9 @@ async def salvar_edicao_limite_diario(message: types.Message, state: FSMContext)
     else:
         casou = re.match(r"^(\d{1,3})(?:\s*-\s*(\d{1,3}))?$", texto)
         if not casou:
+            faixa, fixo = exemplos_da_cota(await rota_em_edicao(state))
             return await message.answer(
-                "Envie um número (<code>6</code>) ou uma faixa (<code>6-10</code>), "
+                f"Envie um número (<code>{fixo}</code>) ou uma faixa (<code>{faixa}</code>), "
                 "ou use o botão <b>Todos os Vídeos ♾️</b>.",
                 parse_mode="HTML"
             )
@@ -1388,8 +1417,9 @@ async def salvar_edicao_limite_diario(message: types.Message, state: FSMContext)
                 parse_mode="HTML"
             )
         if topo < piso:
+            faixa, _ = exemplos_da_cota(await rota_em_edicao(state))
             return await message.answer(
-                "O segundo número precisa ser maior que o primeiro. Exemplo: <code>6-10</code>.",
+                f"O segundo número precisa ser maior que o primeiro. Exemplo: <code>{faixa}</code>.",
                 parse_mode="HTML"
             )
 
@@ -1419,6 +1449,8 @@ async def confirmar_edicao_limite_diario(message: types.Message, state: FSMConte
     dados["rotas"][indice]["limite_min"] = piso
     dados["rotas"][indice]["limite_max"] = topo
     salvar_espelhos(dados)
+    if piso:
+        exemplos.lembrar_faixa("espelhador_cota", piso, topo)
 
     if piso == 0:
         texto_exibicao = "todos os vídeos capturados"
@@ -1462,6 +1494,7 @@ async def confirmar_edicao_janela(message: types.Message, state: FSMContext):
     dados["rotas"][indice]["inicio"] = inicio
     dados["rotas"][indice]["fim"] = fim
     salvar_espelhos(dados)
+    exemplos.lembrar_janela("espelhador_rota", inicio, fim)
     
     texto_exibicao = "24 horas por dia" if inicio == 0 and fim == 24 else f"entre as {inicio}h e as {fim}h"
     await message.answer(f"✅ A janela de postagem foi atualizada para <b>{texto_exibicao}</b> com sucesso!", parse_mode="HTML")
