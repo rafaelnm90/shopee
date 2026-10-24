@@ -491,6 +491,10 @@ def test_passo_do_motivo():
     assert robo.passo_do_motivo("toquei em Rascunhos, mas o app continuou na tela final") == "salvar em Rascunhos"
     assert robo.passo_do_motivo("o rascunho aberto não tem o título do aprovado") == "abrir o rascunho"
     assert robo.passo_do_motivo("não consegui voltar até Eu") == "navegar no app"
+    # A Saúde do Vídeo: o checkup diz onde parou (não "outro").
+    assert robo.passo_do_motivo("o Centro do criador não mostrou a Saúde do Vídeo") == "achar a Saúde no Centro do criador"
+    assert robo.passo_do_motivo("não achei Centro do criador na tela") == "achar a Saúde no Centro do criador"
+    assert robo.passo_do_motivo("a Saúde do Vídeo não abriu") == "abrir a Saúde do Vídeo"
     assert robo.passo_do_motivo("algo novo") == "outro" and robo.passo_do_motivo("") == ""
 
 
@@ -1551,6 +1555,55 @@ def test_aviso_antigo_nas_notificacoes_nao_vale_se_a_saude_nao_mostra_o_bloqueio
     robo.db.salvar_config(robo.CHAVE_ESTADO, {})
     monkeypatch.setitem(TELAS_DA_SAUDE, "saude", TELAS_DA_SAUDE["saude"] + [_no(SAUDE_BANIDO, clicavel=False)])
     assert robo.ler_suspensao(AppDaSaude(), momento("2026-10-24 12:00")).day == 26
+
+
+class SaudeDevagar(AppDaSaude):
+    """O Centro do criador e a Saúde do Vídeo, que carregam pela rede, vazios nas primeiras leituras."""
+
+    def __init__(self, leituras_vazias):
+        super().__init__()
+        self.vazias = dict(leituras_vazias)
+
+    def _nos(self):
+        if self.vazias.get(self.atual, 0) > 0:
+            self.vazias[self.atual] -= 1
+            return []
+        return super()._nos()
+
+
+def test_saude_que_demora_a_carregar_e_esperada():
+    # Checkup de 23/10: a leitura da Saúde parou uma vez; as duas telas carregam pela rede.
+    app = SaudeDevagar({"centro": 3, "saude": 5})
+    robo.abrir_saude(app)
+    assert app.atual == "saude"
+    with pytest.raises(robo.Parada, match="a Saúde do Vídeo não abriu"):
+        robo.abrir_saude(SaudeDevagar({"saude": 50}))
+    with pytest.raises(robo.Parada, match="Centro do criador não mostrou"):
+        robo.abrir_saude(SaudeDevagar({"centro": 50}))
+
+
+def test_saude_que_nao_abre_nao_pausa_pelo_aviso_antigo_se_o_postar_abre(monkeypatch, avisos, caminho_do_rascunho,
+                                                                          conta_suspensa):
+    # O recurso aceito tira a suspensão, mas o aviso antigo fica nas Notificações. Sem a
+    # Saúde do Vídeo para confirmar, o teste é o Postar vídeo: abrindo a Biblioteca, a conta
+    # não está bloqueada, e o aprovado é postado em vez de esperar até 26/10.
+    monkeypatch.setitem(CAMINHO, ("perfil", "Postar vídeo"), "camera")
+    ident = _aprovado(monkeypatch)
+    app = AppComQuadros()
+    app.legenda, app.com_produto = TITULO, True
+    assert robo.rodada(d=app, agora=momento("2026-10-23 19:30")) == "rascunho aprovado postado"
+    assert app.toques.index("Postar vídeo") < app.toques.index("@btn_post") and "Biblioteca" not in app.toques
+    assert robo.pegar(ident)["estado"] == "postado" and "robo_suspenso_ate" not in robo.ler_config()
+    assert robo.suspensao_retirada(datetime(2026, 10, 26, 19, 4, 26, tzinfo=fuso_horario))
+    # Com o Postar vídeo fechado, o aviso das Notificações vale, antes de postar e na galeria.
+    robo.db.salvar_config(robo.CHAVE_ESTADO, {})
+    monkeypatch.setitem(CAMINHO, ("perfil", "Postar vídeo"), "perfil")
+    assert robo.ler_suspensao(AppDeMentira(), momento("2026-10-23 20:00")).day == 26
+    app = AppDeMentira()
+    with pytest.raises(robo.Suspensa):
+        robo.ir_ao_perfil(app)
+        robo.abrir_galeria(app, momento("2026-10-23 20:00"))
+    assert app.toques.count("Postar vídeo") == 1
 
 
 def test_suspensao_tirada_antes_do_prazo_volta_na_leitura_da_saude(monkeypatch, avisos, ia_da_apelacao):

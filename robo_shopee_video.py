@@ -131,6 +131,9 @@ STATUS_DA_APELACAO = "Status da Apelação:"
 POSTADO_EM = "Postado em:"
 APELAR_AQUI = "Apelar aqui"
 ROLADAS_NA_SAUDE = 4
+# O Centro do criador e a Saúde do Vídeo carregam pela rede (React e página web): o robô
+# relê a tela até este tanto de segundos antes de dar a leitura por parada.
+ESPERA_DA_SAUDE = 24
 # A Saúde é lida de novo pelo aviso de penalidade nas Notificações só depois disto.
 INTERVALO_DA_SAUDE = timedelta(hours=6)
 # Depois do Já recorri, a Saúde é lida de hora em hora até sair o resultado (escolha do
@@ -507,6 +510,8 @@ LINHAS_DO_HISTORICO = 12
 # ordem importa: o primeiro trecho que aparece no motivo decide.
 PASSOS = (
     ("suspensa pela Shopee", "conta suspensa pela Shopee"),
+    ("Centro do criador", "achar a Saúde no Centro do criador"),
+    ("Saúde do Vídeo não abriu", "abrir a Saúde do Vídeo"),
     ("sem oferta de afiliado", "oferta de afiliado"),
     ("o link não diz o produto", "achar o produto do link"),
     ("violação", "diretrizes da Shopee"),
@@ -744,6 +749,18 @@ def tem(xml, alvo):
     return ps.achar(xml, alvo) is not None
 
 
+def esperar_na_tela(d, alvo, segundos):
+    """Relê a tela a cada 3 s, por até `segundos`, até o alvo aparecer. Devolve a tela com ele, ou None."""
+    voltas = max(1, segundos // 3)
+    for volta in range(voltas + 1):
+        xml = tela(d)
+        if tem(xml, alvo):
+            return xml
+        if volta < voltas:
+            pausa(3)
+    return None
+
+
 def tocar(d, alvo, espera):
     """Toca no botão (texto ou @id) e espera. Nunca nos proibidos (Postar, comprar)."""
     xml = tela(d)
@@ -903,13 +920,15 @@ def ir_ao_perfil(d):
     seguir(d, CAMINHO_PERFIL)
 
 
-def ler_suspensao(d, agora=None):
+def ler_suspensao(d, agora=None, postar_fechado=False):
     """
     A conta está suspensa, e até quando? Primeiro as Notificações (rápido); achando o
     aviso, confirma na Saúde do Vídeo, que mostra a situação de agora: com o recurso
     aceito, a Shopee tira a suspensão antes do prazo, mas o aviso antigo continua nas
     Notificações. A suspensão que a Saúde não mostra fica anotada como retirada e não é
-    mais conferida. Sem a Saúde abrir, vale o aviso das Notificações. Sem aviso: None.
+    mais conferida. Sem a Saúde abrir, o teste é o Postar vídeo: abrindo a Biblioteca, a
+    conta não está bloqueada e o aviso antigo também fica como retirado; quem chega aqui
+    porque o Postar vídeo não abriu (postar_fechado) fica com o aviso. Sem aviso: None.
     Pedido do Rafael: DECISOES.md, Shopee Vídeo.
     """
     ate = _suspensao_nas_notificacoes(d, agora)
@@ -920,11 +939,28 @@ def ler_suspensao(d, agora=None):
         na_saude = suspensao_na_tela(tela(d), agora)
     except Parada as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] Não confirmei a suspensão na Saúde do Vídeo: {ps.mascarar(e.motivo)}")
-        return ate
+        if postar_fechado or not postar_abre(d):
+            return ate
+        logger.info("✅ [Robô Shopee Vídeo] O Postar vídeo abriu a Biblioteca: o aviso antigo de suspensão não vale mais.")
+        na_saude = None
     if not na_saude:
         anotar_retirada(ate)
         return None
     return na_saude
+
+
+def postar_abre(d):
+    """
+    O Postar vídeo abre a Biblioteca? Com a conta bloqueada, não abre (Motorola,
+    23/10/2026). Só abre e olha: não escolhe vídeo nenhum, e o passo seguinte do robô
+    começa de novo do início do app.
+    """
+    try:
+        ir_ao_perfil(d)
+        seguir(d, CAMINHO_GALERIA[:1])
+    except Parada:
+        return False
+    return True
 
 
 def _suspensao_nas_notificacoes(d, agora=None):
@@ -960,7 +996,7 @@ def abrir_galeria(d, agora=None):
     try:
         seguir(d, CAMINHO_GALERIA)
     except Parada:
-        ate = ler_suspensao(d, agora)
+        ate = ler_suspensao(d, agora, postar_fechado=True)
         if ate:
             raise Suspensa(ate) from None
         raise
@@ -1067,8 +1103,10 @@ def abrir_saude(d):
     "Bom"...) ou, sem ele, na frase logo abaixo.
     """
     ir_ao_perfil(d)
-    seguir(d, CAMINHO_CENTRO_DO_CRIADOR)
-    elementos = ps.elementos(tela(d))
+    botao, espera, esperado = CAMINHO_CENTRO_DO_CRIADOR[0]
+    tocar(d, botao, espera)
+    xml = esperar_na_tela(d, esperado, ESPERA_DA_SAUDE)
+    elementos = ps.elementos(xml) if xml else []
     rotulo = next((el for el in elementos if ps._normal(el["texto"]) == ps._normal(SAUDE_DO_VIDEO)), None)
     if not rotulo:
         raise Parada("o Centro do criador não mostrou a Saúde do Vídeo")
@@ -1078,7 +1116,7 @@ def abrir_saude(d):
     alvo = (na_linha or sorted(abaixo, key=lambda el: ps._centro(el)[1]) or [rotulo])[0]
     d.click(*ps._centro(alvo))
     pausa(8)
-    if not tem(tela(d), VIDEOS_DE_VIOLACAO):
+    if not esperar_na_tela(d, VIDEOS_DE_VIOLACAO, ESPERA_DA_SAUDE):
         raise Parada("a Saúde do Vídeo não abriu")
 
 

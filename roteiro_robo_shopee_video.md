@@ -47,6 +47,10 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   Recurso aceito (Rafael, 24/10/2026): a punição some da lista (ou fica "Bem-sucedido"),
   os pontos baixam e, abaixo de 6, o bloqueio some da Saúde antes do prazo; o aviso
   "banida até" continua nas Notificações, por isso o robô confere sempre na Saúde.
+  O Centro do criador e a Saúde carregam pela rede: o robô relê a tela por até 24 s.
+  Se a Saúde não abre antes de postar, o teste é o Postar vídeo: abrindo a Biblioteca,
+  a conta não está bloqueada e o aviso antigo não vale (em 23/10 a Saúde não abriu uma
+  vez, e o aviso antigo sozinho teria pausado o robô até 26/10).
 - **Mapa:** os caminhos ficam nas listas `CAMINHO_PERFIL`, `CAMINHO_POSTAR` e
   `CAMINHO_PRODUTO` do `robo_shopee_video.py` (o que tocar, a espera e o que tem de
   aparecer depois). O treino confere cada passo contra elas; quando a Shopee mudar uma
