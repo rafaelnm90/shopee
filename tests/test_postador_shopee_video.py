@@ -864,6 +864,52 @@ def test_ia_que_confirma_e_depois_nega_para(monkeypatch, capsys):
     assert len(avisos) == 1 and "2ª vez" in capsys.readouterr().out
 
 
+def test_ia_compara_o_video_com_a_foto_do_anuncio(monkeypatch, capsys):
+    # Pedido do Rafael (P13): a foto do anúncio vai junto com o vídeo, e a IA compara o
+    # item, não só o tipo (24/10: punição de "produto irrelevante").
+    _autorais()
+    avisos = _avisos(monkeypatch)
+
+    async def produtos_do_link(link):
+        return [{"nome": VESTIDO, "preco": 59.9, "comissao": 10.0, "imagem": "https://cf.shopee.com.br/file/x"}], link
+
+    class Foto:
+        def __init__(self, url, timeout=None):
+            self.url = url
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self, limite):
+            return b"\xff\xd8foto"
+
+    pedidos = []
+
+    async def analisar(arquivo, prompt, imagens=None):
+        pedidos.append((prompt, imagens))
+        return '{"confere": true, "motivo": "o mesmo vestido da foto"}'
+
+    monkeypatch.setattr(ps.assistente, "produtos_do_link", produtos_do_link)
+    monkeypatch.setattr(ps.urllib.request, "urlopen", Foto)
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    assert ps.explorar("ia", Aparelho())
+    assert len(pedidos) == 2 and pedidos[0][1] == [(b"\xff\xd8foto", "image/jpeg")]
+    assert "foto do anúncio" in pedidos[0][0] and VESTIDO in pedidos[0][0]
+    assert "com a foto do anúncio" in capsys.readouterr().out and avisos == []
+
+    # A foto que não baixa: a conferência segue só pelo nome, como antes.
+    def falha(url, timeout=None):
+        raise OSError("sem rede")
+
+    monkeypatch.setattr(ps.urllib.request, "urlopen", falha)
+    pedidos.clear()
+    assert ps.explorar("ia", Aparelho())
+    assert pedidos[0][1] is None and "foto do anúncio" not in pedidos[0][0]
+
+
 @pytest.mark.parametrize("resposta, avisa", [
     ('{"confere": false, "motivo": "o vídeo mostra um vestido; o link é de fibra de cabelo"}', True),
     ('{"confere": "talvez"}', True),
