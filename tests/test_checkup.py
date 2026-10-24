@@ -518,3 +518,17 @@ def test_meta_de_cada_job_e_memoria_dos_pontos():
     assert resolvidos == ["Backup: o último tem # h"]
     marcas, _ = checkup.lembrar_pontos(["Backup: o último tem 27 h"], dia(3))
     assert marcas == {"Backup: o último tem 27 h": "voltou"}
+
+
+def test_log_da_rodada_do_robo_e_lido_pelo_nome_no_journal(monkeypatch):
+    # A rodada do robô da Shopee Vídeo roda numa unidade própria a cada vez: o log dela é
+    # achado pelo nome (-t), e o dos serviços pela unidade (-u).
+    pedidos = []
+
+    class Feito:
+        returncode, stdout = 0, "linha\n"
+
+    monkeypatch.setattr(checkup.subprocess, "run", lambda partes, **k: pedidos.append(partes) or Feito())
+    checkup.ler_journal("robo_shopee_video")
+    checkup.ler_journal("bot_mestre_bot")
+    assert pedidos[0][3:5] == ["-t", "robo_shopee_video"] and pedidos[1][3:5] == ["-u", "bot_mestre_bot.service"]

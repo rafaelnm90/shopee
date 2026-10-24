@@ -138,8 +138,14 @@ def erros_registrados(agora=None):
 
 # --- Log de cada robô ---
 
+# A rodada do robô da Shopee Vídeo roda cada vez numa unidade própria do systemd
+# (painel_shopee_video): o log dela é lido pelo nome no journal, não pelo serviço.
+LOGS_POR_NOME = ("robo_shopee_video",)
+
+
 def ler_journal(servico):
-    r = subprocess.run(["sudo", "-n", "journalctl", "-u", f"{servico}.service", "--since", "24 hours ago",
+    filtro = ["-t", servico] if servico in LOGS_POR_NOME else ["-u", f"{servico}.service"]
+    r = subprocess.run(["sudo", "-n", "journalctl", *filtro, "--since", "24 hours ago",
                         "-o", "cat", "-q"], capture_output=True, text=True, timeout=180)
     if r.returncode and not r.stdout:
         # Sem acesso ao journal não é o mesmo que um dia sem log.
@@ -275,6 +281,7 @@ SEM_META = {
     ("shopee_video", "aviso de punição para recorrer"), ("shopee_video", "conferir a tela final"),
     ("shopee_video", "curtir o produto"), ("shopee_video", "feed: "),
     ("shopee_video", "notificações (respostas)"), ("shopee_video", "preparo interrompido"),
+    ("shopee_video", "rodada fora do bot"),
     ("shopee_video", "responder comentário"),
 }
 
@@ -839,7 +846,7 @@ def main():
     print("\n== Log de cada robô")
     modelos = inventario.modelos_de_log()
     logs, linhas_baixador, sem_journal = {}, [], []
-    for servico in inventario.SERVICOS:
+    for servico in inventario.SERVICOS + LOGS_POR_NOME:
         try:
             linhas = ler_journal(servico)
         except Exception as e:

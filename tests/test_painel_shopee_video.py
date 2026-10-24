@@ -700,3 +700,76 @@ def test_saude_em_relatorio_geral_lembra_as_punicoes_e_os_botoes_param(bm, Msg, 
     assert sv.apelacoes.mensagens_de(ident) == [903]
     rodar(sv.lembrar_apelacoes())
     assert len(enviados) == 3
+
+
+def _comandos(sv, monkeypatch, criada=0, voltas_ativa=1):
+    """O systemd falso: o systemd-run devolve `criada`; a unidade fica ativa por `voltas_ativa` consultas."""
+    pedidos = []
+
+    async def comando(*partes, espera=30):
+        pedidos.append(partes)
+        if "systemd-run" in partes:
+            return criada
+        return 0 if sum("is-active" in p for p in pedidos) <= voltas_ativa else 3
+
+    async def sem_espera(segundos):
+        pass
+
+    monkeypatch.setattr(sv, "_comando", comando)
+    monkeypatch.setattr(sv.asyncio, "sleep", sem_espera)
+    return pedidos
+
+
+def test_rodada_roda_numa_unidade_propria_e_o_reinicio_do_bot_nao_a_mata(bm, monkeypatch):
+    from conftest import consultar
+    sv = _painel(bm)
+    pedidos = _comandos(sv, monkeypatch, voltas_ativa=2)
+    monkeypatch.setattr(sv.asyncio, "create_subprocess_exec",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("não devia rodar dentro do bot")))
+    rodar(sv.rodar_robo("--rodada"))
+    criar = pedidos[0]
+    assert criar[:3] == ("sudo", "-n", "systemd-run") and criar[-2:] == (sv.ROBO, "--rodada")
+    assert "--property=SyslogIdentifier=robo_shopee_video" in criar and any(p.startswith("--uid=") for p in criar)
+    # O bot espera a unidade acabar (uma rodada de cada vez) e anota no registro.
+    assert sum("is-active" in p for p in pedidos) == 3 and not sv._rodada.locked()
+    assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = 'rodada fora do bot'") == (
+        "unidade própria", 1)
+
+
+def test_sem_o_systemd_run_a_rodada_vai_como_processo_do_bot(bm, monkeypatch):
+    from conftest import consultar
+    sv = _painel(bm)
+    _comandos(sv, monkeypatch, criada=1)
+    iniciados = []
+
+    class Processo:
+        async def wait(self):
+            return 0
+
+    async def iniciar(*partes, **opcoes):
+        iniciados.append(partes)
+        return Processo()
+
+    monkeypatch.setattr(sv.asyncio, "create_subprocess_exec", iniciar)
+    rodar(sv.rodar_robo("--preparar"))
+    assert iniciados == [(sv.sys.executable, sv.ROBO, "--preparar")]
+    assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = 'rodada fora do bot'") == (
+        "sem systemd-run", 0)
+
+
+def test_rodada_de_antes_do_reinicio_no_celular_segura_os_botoes_e_o_agendador(bm, Msg, Est, monkeypatch):
+    sv = _painel(bm)
+    rodadas = []
+
+    async def rodar_robo(*argumentos):
+        rodadas.append(argumentos)
+
+    monkeypatch.setattr(sv, "rodar_robo", rodar_robo)
+    monkeypatch.setattr(sv.celular_robo, "ocupado", lambda: True)
+    sv.alterar_config(robo_pausado=False, robo_inicio=0, robo_fim=24)
+    rodar(sv.verificar_robo())
+    for botao, handler in (("Preparar 1 Agora ⚡", sv.preparar_handler), ("Testar Caminho 🧭", sv.treino_handler)):
+        msg = Msg(botao)
+        rodar(handler(msg, Est()))
+        assert "no meio de uma rodada" in msg.saidas[0]
+    assert rodadas == []

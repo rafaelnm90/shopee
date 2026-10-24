@@ -208,6 +208,12 @@ def reconectar_sozinho():
     return False, "a Depuração por Wi-Fi está desligada no celular"
 
 
+def ocupado():
+    """Algum processo (o robô automático ou o explorar) está com a trava do celular agora?"""
+    with trava() as livre:
+        return not livre
+
+
 @contextlib.contextmanager
 def trava():
     """

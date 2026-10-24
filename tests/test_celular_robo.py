@@ -241,3 +241,12 @@ def test_sem_achar_o_celular_diz_o_motivo(cr, monkeypatch, dados, online, portas
     monkeypatch.setattr(cr, "conectar", lambda ip, porta: pytest.fail("não devia conectar"))
     ok, resultado = cr.reconectar_sozinho()
     assert not ok and motivo in resultado
+
+
+def test_ocupado_ve_a_trava_de_outra_rodada(cr, monkeypatch, tmp_path):
+    # O bot vê a rodada que ficou rodando na unidade própria depois de um reinício pela trava.
+    monkeypatch.setattr(cr, "ARQUIVO_TRAVA", str(tmp_path / "celular.trava"))
+    assert cr.ocupado() is False
+    with cr.trava() as livre:
+        assert livre and cr.ocupado() is True
+    assert cr.ocupado() is False
