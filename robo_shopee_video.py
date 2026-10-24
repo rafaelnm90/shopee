@@ -84,6 +84,9 @@ TENTATIVAS_A_MAIS = 2
 VIDEOS_POR_HORARIO = 3
 # A IA que volta sem o título ganha mais uma chance, depois desta pausa (segundos).
 TENTATIVAS_DO_TITULO = 2
+# O Google bloqueia pelo conteúdo do vídeo (24/10/2026, PROHIBITED_CONTENT nas duas
+# tentativas): esses códigos se repetem para o mesmo vídeo, então ele fica de lado na hora.
+BLOQUEIOS_DO_CONTEUDO = {"PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "SAFETY", "IMAGE_SAFETY"}
 ESPERA_DO_TITULO = 45
 # Vídeo de produto sem oferta de afiliado (não paga comissão) fica de lado antes de tocar
 # no celular; numa rodada, até estes. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
@@ -1502,6 +1505,12 @@ def _conferir(resultado, do_video=True):
         raise Parada(motivo, do_video=do_video)
 
 
+def _codigos_da_ia():
+    """Os códigos do Google (finish_reason e block_reason) da última resposta vazia, sem o STOP."""
+    erro = ps.api_gemini.ULTIMO_ERRO_IA or ""
+    return sorted(set(re.findall(r"(?:finish|block)_reason=<?(?:\w+\.)?([A-Z_]{3,})", erro)) - {"STOP"})
+
+
 def _motivo_da_ia():
     """
     Por que a IA não deu o título, em códigos fixos do Google (nunca o texto dela): a resposta
@@ -1509,7 +1518,7 @@ def _motivo_da_ia():
     e os outros erros vêm do ULTIMO_ERRO_IA; sem erro, a IA respondeu sem o título no JSON.
     """
     erro = ps.api_gemini.ULTIMO_ERRO_IA or ""
-    codigos = sorted(set(re.findall(r"(?:finish|block)_reason=<?(?:\w+\.)?([A-Z_]{3,})", erro)) - {"STOP"})
+    codigos = _codigos_da_ia()
     if codigos:
         return f"resposta vazia ({', '.join(codigos)})"
     if "VAZIO" in erro:
@@ -1522,8 +1531,10 @@ def _motivo_da_ia():
 def _textos_da_ia(video):
     """
     O título e o comentário da IA. A IA às vezes volta vazia (bloqueio do Google que muda de
-    uma tentativa para outra): mais uma chance depois de uma pausa, antes de desistir. Cada
-    falha entra no registro com o motivo em código fixo, para o checkup mostrar a causa.
+    uma tentativa para outra, como o RECITATION): mais uma chance depois de uma pausa, antes
+    de desistir. O bloqueio pelo conteúdo do vídeo (BLOQUEIOS_DO_CONTEUDO) não muda: o vídeo
+    fica de lado na hora, e o horário passa ao próximo. Cada falha entra no registro com o
+    motivo em código fixo, para o checkup mostrar a causa.
     """
     motivo = ""
     for vez in range(TENTATIVAS_DO_TITULO):
@@ -1535,6 +1546,9 @@ def _textos_da_ia(video):
             return textos
         motivo = _motivo_da_ia()
         registro_processos.registrar(REGISTRO, "título da IA", "sem título", motivo, ok=False)
+        if BLOQUEIOS_DO_CONTEUDO & set(_codigos_da_ia()):
+            raise Parada(f"a IA não devolveu o título ({motivo}): o Google bloqueia o conteúdo deste vídeo",
+                         do_video=True)
         if vez + 1 < TENTATIVAS_DO_TITULO:
             pausa(ESPERA_DO_TITULO)
     raise Parada(f"a IA não devolveu o título ({motivo})")
