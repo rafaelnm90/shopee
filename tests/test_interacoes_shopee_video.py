@@ -228,8 +228,11 @@ class CelularDosComentarios:
     lugar: onde a resposta aparece depois de enviada ("embaixo", "outro" ou "nenhum").
     """
 
-    def __init__(self, linhas=(NOTIFICACAO,), ja_respondido=False, lugar="embaixo", campo="Responder a Maria Souza"):
+    def __init__(self, linhas=(NOTIFICACAO,), ja_respondido=False, lugar="embaixo", campo="Responder a Maria Souza",
+                 abre_sozinho=False):
         self.linhas, self.ja_respondido, self.lugar, self.campo = list(linhas), ja_respondido, lugar, campo
+        # Como no Motorola: às vezes o painel abre sozinho; outras, só o vídeo, e o robô toca no balão.
+        self.abre_sozinho = abre_sozinho
         self.atual, self.em_foco, self.escrito, self.enviadas, self.toques = "inicio", False, "", [], []
 
     def _comentarios(self):
@@ -252,6 +255,8 @@ class CelularDosComentarios:
             return _xml(_el("Notificações", caixa=(400, 160, 680, 220)), FILTRO, *BARRA)
         if self.atual == "lista":
             return _notificacoes(*self.linhas)
+        if self.atual == "player":
+            return _player("Loja Rafa", "Vestido lindo", coracao="unlike icon")
         teclado = [_el(ident="key_pos_space", classe="FrameLayout", caixa=(300, 1900, 800, 1950))] if self.em_foco else []
         return _painel(*self._comentarios(), campo=self.campo if self.atual == "respondendo" else None)[:-len(
             "</node></hierarchy>")] + "".join(teclado) + "</node></hierarchy>"
@@ -266,6 +271,8 @@ class CelularDosComentarios:
         elif self.atual == "notificacoes" and "Lives, Vídeos e Afiliados" in textos:
             self.atual = "lista"
         elif self.atual == "lista" and any(t in self.linhas for t in textos):
+            self.atual = "painel" if self.abre_sozinho else "player"
+        elif self.atual == "player" and "comment video icon" in textos:
             self.atual = "painel"
         elif self.atual == "painel" and "Responder" in textos:
             self.atual, self.em_foco = "respondendo", True
@@ -323,6 +330,15 @@ def test_comentario_novo_e_respondido_embaixo_dele_e_nao_volta(avisos, ia):
     assert robo.responder_comentarios(app, momento("2026-10-24 11:00")) == "respostas: nenhum comentário novo"
     assert len(app.enviadas) == 1
     assert robo.tentativas_desde("2026-10-24 00:00:00")[-1]["resultado"] == "respondido"
+
+
+def test_painel_que_abre_sozinho_tambem_serve_e_o_aviso_de_penalidade_pede_a_saude(avisos, ia):
+    robo.gravar_estado(respostas_topo=it.marca("Ana curtiu seu vídeo."))
+    penalidade = "[Esta ação gerou pontos de penalidade] O produto adicionado ao seu vídeo foi identificado"
+    app = CelularDosComentarios(linhas=(penalidade, NOTIFICACAO, "Ana curtiu seu vídeo."), abre_sozinho=True)
+    assert robo.responder_comentarios(app, momento("2026-10-24 10:00")) == "respostas: 1 respondido"
+    assert "comment video icon" not in app.toques
+    assert robo.ler_estado().get("penalidade_vista_em")
 
 
 def test_comentario_que_o_perfil_ja_respondeu_nao_ganha_outra_resposta(avisos, ia):
@@ -488,3 +504,19 @@ def test_rodada_responde_depois_dos_rascunhos_e_o_feed_por_ultimo(monkeypatch):
     assert robo.o_que_fazer(config, agora) == ("feed", None)
     robo.gravar_estado(feed_em="2026-10-27 23:59:00")
     assert robo.o_que_fazer(config, agora) is None
+
+
+def test_comentario_do_feed_que_nao_aparece_conta_no_dia_e_o_video_nao_volta(monkeypatch, avisos, ia_do_feed):
+    app = CelularDoFeed(videos=[("Loja da Bia", "Mini saia linda"), ("Ana Achados", "Copo térmico")])
+    original = app.click
+
+    def envia_e_some(x, y):
+        original(x, y)
+        if app.atual == "painel":
+            app.comentarios.clear()
+
+    monkeypatch.setattr(app, "click", envia_e_some)
+    assert robo.interagir_no_feed(app, momento("2026-10-24 10:00")) == "feed: comentário enviado sem aparecer na lista"
+    marca = it.marca("Loja da Bia", "Mini saia linda")
+    assert it.resultado_de(marca, "video_feed") == "não confirmado"
+    assert it.quantos_desde("video_feed", it.COMENTADOS_NO_FEED, "2026-10-24 00:00:00") == 1

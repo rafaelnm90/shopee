@@ -33,6 +33,9 @@ TAMANHO_DA_RESPOSTA = 150
 TAMANHO_DO_COMENTARIO = 80
 # Os estados de um comentário em que ele não volta mais.
 FINAIS = frozenset({"respondido", "já respondido", "pulado", "desistiu", "anterior", "lugar errado"})
+# Os vídeos do feed que contam nos 3 do dia: o comentado e o que foi enviado sem aparecer
+# na tela (pode ter saído; não é comentado de novo).
+COMENTADOS_NO_FEED = ("comentado", "não confirmado")
 
 # O aviso de comentário nas Notificações: "Fulana comentou no seu vídeo: "Amei!"".
 COMENTOU = re.compile(r"^(?P<nome>.+?)\s+comentou no seu v[ií]deo\s*:?\s*(?P<texto>.*)$", re.S | re.I)
@@ -41,7 +44,7 @@ ASPAS = "\"“”'‘’"
 HORA_DA_LINHA = re.compile(r"^(?:\S+\s+)?\d{1,2}:\d{2}$")
 # O que acompanha cada comentário no painel e não é o nome nem o texto.
 EM_VOLTA_DO_COMENTARIO = (
-    re.compile(r"^criador$"), re.compile(r"^responder$"), re.compile(r"^curtido pelo criador"),
+    re.compile(r"^criador$"), re.compile(r"^responder$"), re.compile(r"^curtido pel[oa] criador"),
     re.compile(r"^há \d+"), re.compile(r"^\d{1,2} de \w+"), re.compile(r"^\d{1,2}[-/]\d{1,2}([-/]\d{2,4})?$"),
     re.compile(r"^[\d.,]+( ?mil)?$"), re.compile(r"^(ver|ocultar) (\d+ )?respostas?"), re.compile(r"^ver tradução"),
 )
@@ -108,12 +111,14 @@ def terminado(marca_):
     return resultado_de(marca_, "comentario") in FINAIS
 
 
-def quantos_desde(tipo, resultado, desde):
-    """Quantas marcas do tipo ficaram com o resultado desde o momento ("AAAA-MM-DD HH:MM:SS")."""
+def quantos_desde(tipo, resultados, desde):
+    """Quantas marcas do tipo ficaram com um dos resultados desde o momento ("AAAA-MM-DD HH:MM:SS")."""
+    resultados = (resultados,) if isinstance(resultados, str) else tuple(resultados)
     with db.conexao() as con:
         _criar_tabela(con)
-        return con.execute("SELECT COUNT(*) FROM shopee_video_interacoes WHERE tipo = ? AND resultado = ? "
-                           "AND momento >= ?", (tipo, resultado, desde)).fetchone()[0]
+        return con.execute(f"SELECT COUNT(*) FROM shopee_video_interacoes WHERE tipo = ? AND resultado IN "
+                           f"({','.join('?' * len(resultados))}) AND momento >= ?",
+                           (tipo, *resultados, desde)).fetchone()[0]
 
 
 # --- As Notificações ---
