@@ -1514,3 +1514,21 @@ def test_punicoes_na_tela_e_tela_removido():
     detalhe = robo.ler_removido(_xml(*TELAS_DA_SAUDE["removido_3"]))
     assert detalhe == {"titulo": "Organizador de Gaveta #casa", "postado_em": "20:20:00 2026-10-18",
                        "explicacao": EXPLICACAO, "pode_apelar": True}
+
+
+def test_celular_fora_na_suspensao_nao_pausa_nem_avisa(monkeypatch, avisos):
+    # Pedido do Rafael (24/10): na suspensão ele pode tirar o Motorola do carregador.
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", SAUDE_DO_DIA)
+    ativar(robo_inicio=0, robo_fim=24, robo_suspenso_ate="2026-10-26 19:04:26")
+    tentativas = []
+    monkeypatch.setattr(robo.av, "tela_aberta", lambda: False)
+    monkeypatch.setattr(robo.celular_robo, "conectado", lambda: False)
+    monkeypatch.setattr(robo.celular_robo, "reconectar_sozinho",
+                        lambda: tentativas.append(1) or (False, "a Depuração por Wi-Fi está desligada no celular"))
+    assert "celular fora (esperado)" in robo.rodada(agora=momento("2026-10-24 10:00"))
+    assert robo.ler_config()["robo_pausado"] is False and avisos == []
+    # A leitura do dia já contou: as rodadas seguintes nem procuram o celular.
+    assert robo.rodada(agora=momento("2026-10-24 10:15")).startswith("conta suspensa") and tentativas == [1]
+    # Acabou a suspensão (com a folga) e o celular não voltou: pausa e avisa, como sempre.
+    assert "desconectado" in robo.rodada(agora=momento("2026-10-26 19:30"))
+    assert robo.ler_config()["robo_pausado"] is True and "Retomar Postagem" in avisos[-1]

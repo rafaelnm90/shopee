@@ -347,7 +347,9 @@ def fim_da_suspensao(agora=None):
     fila = f" Os {aprovados} aprovado(s) que esperavam saem espalhados no Horário do Robô." if aprovados else ""
     if not config["robo_pausado"]:
         return ("✅ Robô da Shopee Vídeo: a suspensão da Shopee Vídeo acabou. Voltei a preparar e postar no "
-                f"Horário do Robô, e o modo assistente segue em espera.{fila}")
+                f"Horário do Robô, e o modo assistente segue em espera.{fila}\n\n"
+                "Se você tirou o Motorola do carregador, ponha de volta e confira a Depuração por Wi-Fi: sem o "
+                "celular, o robô pausa e avisa aqui, e o modo assistente volta a mandar as postagens.")
     if config.get("pausado", True):
         return ("✅ Shopee Vídeo: a suspensão acabou. O robô e o modo assistente continuam pausados, como você "
                 "deixou: para voltar, toque em Shopee Vídeo 🎬 → Robô Automático 🤖 → Retomar Postagem ▶️.")
@@ -1668,6 +1670,8 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
             consumir_horarios(config, agora)
             if not (no_horario(config, agora) and saude_do_dia_pendente(agora)):
                 return f"conta suspensa até {quando_acaba(suspenso_ate(config))}"
+            # A leitura do dia conta já aqui: com o celular fora, não tenta de novo a cada rodada.
+            gravar_estado(saude_tentada_em=_momento(agora))
             saude = True
         elif not no_horario(config, agora):
             return "fora do Horário do Robô"
@@ -1681,6 +1685,11 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
             return _resposta(preparar, "a tela do celular está aberta no privado do Rafael")
         if not celular_robo.conectado():
             ok, motivo = celular_robo.reconectar_sozinho()
+            if not ok and not na_hora and suspensa(config, agora):
+                # Na suspensão o Rafael pode tirar o Motorola do carregador: o celular fora é
+                # esperado, e o robô não pausa nem avisa. No fim dela, sem o celular, pausa e
+                # avisa como sempre. Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+                return f"conta suspensa até {quando_acaba(suspenso_ate(config))}; celular fora (esperado)"
             if not ok:
                 if not na_hora:
                     pausar_por_desconexao(motivo)
