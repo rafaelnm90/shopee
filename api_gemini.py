@@ -138,10 +138,11 @@ async def gerar_texto_gemini(prompt):
     logger.error("❌ [IA] Falha crítica: Nenhum motor da cascata respondeu.")
     return None
 
-async def analisar_video_gemini(caminho_video, prompt):
+async def analisar_video_gemini(caminho_video, prompt, imagens=None):
     """
     Sobe o vídeo para o Gemini, espera o processamento e pede a análise com
-    `prompt`, tentando os modelos da cascata em ordem.
+    `prompt`, tentando os modelos da cascata em ordem. imagens: [(bytes, tipo)] que
+    vão junto com o vídeo (a foto do anúncio, para a IA comparar com o vídeo).
 
     O vídeo é sempre apagado do Google no final, com sucesso ou não, para não
     gastar a cota de armazenamento. O upload tem 3 tentativas. Roda numa thread
@@ -172,13 +173,15 @@ async def analisar_video_gemini(caminho_video, prompt):
                 raise Exception("Falha de processamento no servidor do Google.")
                 
             logger.info("✅ [IA] Vídeo pronto! Gerando a copy...")
+            from google.genai import types
+            partes_das_imagens = [types.Part.from_bytes(data=dados, mime_type=tipo) for dados, tipo in imagens or []]
 
             falhas = []   # motivo de cada modelo, para a mensagem de erro final
             for modelo_nome in _modelos_da_vez():
                 try:
                     response = client_genai.models.generate_content(
                         model=modelo_nome,
-                        contents=[video_gemini, prompt]
+                        contents=[video_gemini, *partes_das_imagens, prompt]
                     )
 
                     texto = None

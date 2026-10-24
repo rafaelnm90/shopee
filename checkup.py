@@ -271,6 +271,7 @@ SEM_META = {
     ("espiao", "captura de vídeo"), ("espiao", "vídeo com link no grupo vigiado"), ("espiao", "IA: nome do produto"),
     ("notas", "envio de nota fiscal"),
     ("shopee_video", "anexar o produto"), ("shopee_video", "assistente: envio"),
+    ("shopee_video", "conferência da IA (produto × vídeo)"),
     ("shopee_video", "aviso de punição para recorrer"), ("shopee_video", "conferir a tela final"),
     ("shopee_video", "curtir o produto"), ("shopee_video", "feed: "),
     ("shopee_video", "notificações (respostas)"), ("shopee_video", "preparo interrompido"),

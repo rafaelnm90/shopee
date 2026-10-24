@@ -81,6 +81,7 @@ import sys
 import tempfile
 import time
 import unicodedata
+import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime
 
@@ -120,6 +121,19 @@ Assista ao vídeo inteiro e diga se o produto mostrado no vídeo é esse produto
 ou pelo menos o mesmo tipo de produto: vídeo de vestido infantil com link de vestido infantil confere; \
 vídeo de vestido com link de fibra de cabelo não confere).
 Responda só com um JSON: {{"confere": true ou false, "motivo": "uma frase curta"}}"""
+# Com a foto do anúncio (a da API de afiliado), a IA compara o item, não só o tipo: a
+# Shopee pune o "produto irrelevante" (24/10/2026) quando o anexado não é o do vídeo.
+# Pedido do Rafael (P13): DECISOES.md, Shopee Vídeo.
+PROMPT_PRODUTO_COM_FOTO = """Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.
+A imagem que vai junto com o vídeo é a foto do anúncio do produto do link: "{nome}".
+A Shopee pune quando o produto anexado não é o produto mostrado no vídeo.
+Assista ao vídeo inteiro, compare com a foto e diga se o vídeo mostra o mesmo produto do anúncio \
+(o mesmo item; cor ou estampa diferentes podem ser outra variação do mesmo anúncio). \
+Outro produto do mesmo tipo com outro formato ou modelo, só um acessório dele, ou um vídeo em que o \
+produto da foto não aparece, não confere.
+Responda só com um JSON: {{"confere": true ou false, "motivo": "uma frase curta"}}"""
+# A foto do anúncio tem até isto de tamanho (bytes); maior que isso, a conferência segue só pelo nome.
+TAMANHO_MAXIMO_DA_FOTO = 5 * 1024 * 1024
 AVISO_JANELA_ERRADA = ("🤖 Robô da Shopee Vídeo: a janela de editar o nome aberta no celular é de outro "
                        "produto, não do produto do vídeo. Parei sem tocar em Feito; confira o celular.")
 # Quantas vezes o passo produto rola a lista de Minhas Curtidas atrás do produto do vídeo
@@ -637,6 +651,27 @@ def conferir_janela(d, nome, ponto):
     return True, f"produto do vídeo achado pelo nome; Adicionar tocado em {ponto}; a janela confere"
 
 
+def foto_do_produto(video):
+    """
+    A foto do anúncio do produto do link (bytes), pela API de afiliado; None quando não dá
+    (link de vídeo com Ver Produtos, a API fora, a foto não baixou): aí a conferência segue
+    só pelo nome, como antes.
+    """
+    if (video or {}).get("produto") or not (video or {}).get("link"):
+        return None
+    try:
+        produtos, _ = asyncio.run(assistente.produtos_do_link(video["link"]))
+        endereco = produtos[0].get("imagem") if produtos else ""
+        if not endereco:
+            return None
+        with urllib.request.urlopen(endereco, timeout=20) as resposta:
+            dados = resposta.read(TAMANHO_MAXIMO_DA_FOTO + 1)
+        return dados if 0 < len(dados) <= TAMANHO_MAXIMO_DA_FOTO else None
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"⚠️ [Shopee Vídeo] A foto do anúncio não veio: {type(e).__name__}")
+        return None
+
+
 def ia_confere_produto(video, vistos=None, avisar=True):
     """
     A IA assiste ao vídeo com o nome do produto do link e diz se é o mesmo produto:
@@ -651,9 +686,11 @@ def ia_confere_produto(video, vistos=None, avisar=True):
     if not nome:
         avisar_rafael.mandar_texto(f"{AVISO_IA}\n\nO link do vídeo não diz qual é o produto.")
         return False, "o link não diz o produto do vídeo: a IA não tem o que conferir (aviso no privado)"
+    foto = foto_do_produto(video)
+    prompt = (PROMPT_PRODUTO_COM_FOTO if foto else PROMPT_PRODUTO_DO_VIDEO).format(nome=nome)
     for vez in range(1, VEZES_DA_IA + 1):
-        resposta = asyncio.run(api_gemini.analisar_video_gemini(video["arquivo"],
-                                                                PROMPT_PRODUTO_DO_VIDEO.format(nome=nome)))
+        com_foto = {"imagens": [(foto, "image/jpeg")]} if foto else {}
+        resposta = asyncio.run(api_gemini.analisar_video_gemini(video["arquivo"], prompt, **com_foto))
         achado = re.search(r"\{.*\}", resposta or "", re.S)
         try:
             dados = json.loads(achado.group(0)) if achado else None
@@ -668,7 +705,10 @@ def ia_confere_produto(video, vistos=None, avisar=True):
             return False, f"a IA viu outro produto no vídeo ({vez}ª vez): parado (aviso no privado)"
         if vistos is not None:
             vistos.append(str(dados.get("motivo") or "").strip())
-    return True, f"a IA confere {VEZES_DA_IA} vezes: o produto do link é o do vídeo"
+    registro_processos.registrar("shopee_video", "conferência da IA (produto × vídeo)", "confere",
+                                 "com a foto do anúncio" if foto else "só pelo nome", ok=True)
+    return True, (f"a IA confere {VEZES_DA_IA} vezes" + (" com a foto do anúncio" if foto else "")
+                  + ": o produto do link é o do vídeo")
 
 
 def tem_coracao(lista):
