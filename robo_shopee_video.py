@@ -278,6 +278,17 @@ def repetir_o_que_falhou(config, agora=None):
     return True
 
 
+def _em_preparo(config, agora, comecou):
+    """
+    Marca no plano do dia que o rascunho do horário está sendo preparado. Se a rodada
+    morrer no meio (sem chegar ao fim do preparo), a rodada seguinte vê a marca e o horário
+    tenta de novo (soltar_preparos_interrompidos).
+    """
+    estado = estado_do_dia(config, agora)
+    estado["em_preparo"] = comecou
+    db.salvar_config(CHAVE_DIA, estado)
+
+
 def ler_estado():
     return db.ler_config(CHAVE_ESTADO, {}) or {}
 
@@ -1371,7 +1382,8 @@ def soltar_preparos_interrompidos(agora=None):
     """
     Rascunho que ficou em "preparando" por mais que uma rodada inteira: a rodada morreu no
     meio (o deploy reinicia o bot_mestre e mata o processo dela). O vídeo volta para a fila
-    e a tentativa entra no histórico, para o checkup ver. Devolve quantos soltou.
+    e a tentativa entra no histórico, para o checkup ver; o horário do plano que estava em
+    preparo (em_preparo no plano do dia) tenta de novo. Devolve quantos soltou.
     """
     limite = _momento(agora_br(agora) - timedelta(seconds=MAXIMO_DA_RODADA))
     presos = [r for r in listar("preparando") if (r["criado_em"] or "") < limite]
@@ -1379,6 +1391,13 @@ def soltar_preparos_interrompidos(agora=None):
         _desfazer_reserva(rascunho["id"], rascunho["id_video"], "a rodada foi interrompida", False)
         registrar_tentativa("rascunho", "parou", "a rodada foi interrompida no meio do preparo", agora=agora)
         registro_processos.registrar(REGISTRO, "preparo interrompido", "solto", "o vídeo voltou para a fila", ok=False)
+    estado = estado_do_dia(ler_config(), agora)
+    if estado.get("em_preparo"):
+        # O rascunho do plano morreu no meio: o horário tenta de novo, e a tentativa perdida
+        # volta, porque a culpa não foi do vídeo. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+        estado.update(em_preparo=False, repetir=True, tentativas=estado.get("tentativas", 0) + 1)
+        db.salvar_config(CHAVE_DIA, estado)
+        registro_processos.registrar(REGISTRO, "preparo interrompido", "horário do plano tenta de novo", ok=None)
     return len(presos)
 
 
@@ -2375,7 +2394,13 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
             resultado = publicar(d, pegar(ident), agora)
             registrar_tentativa("postar", "postado", produto=produto, agora=agora)
             return resultado
-        resultado = preparar_rascunho(d, config, agora)
+        if not preparar:
+            _em_preparo(config, agora, True)
+        try:
+            resultado = preparar_rascunho(d, config, agora)
+        finally:
+            if not preparar:
+                _em_preparo(config, agora, False)
         if resultado == "rascunho salvo":
             return resultado
         _repetir_depois(acao, preparar, config, agora)
