@@ -657,6 +657,9 @@ def test_produto_adiciona_o_do_video_pelo_nome_e_nao_o_primeiro_da_lista(monkeyp
     saida = capsys.readouterr().out
     assert "achado pelo nome" in saida and "a janela confere" in saida
     assert "Vestido" not in saida and "Gatinho" not in saida
+    # O anexado fica no registro, com quantas vezes rolou a lista.
+    import registro_processos as rp
+    assert [l[2:4] for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "anexar o produto"] == [("anexado", "0 rolada(s)")]
 
 
 def test_produto_aceita_o_nome_cortado_na_lista_e_na_janela(monkeypatch):
@@ -767,6 +770,21 @@ def test_conferir_tela_final(anexados, confere, monkeypatch, capsys):
     assert len(avisos) == (0 if confere else 1)
     saida = capsys.readouterr().out
     assert ("tela final confere" in saida) is confere and "Vestido" not in saida and "Fibra" not in saida
+
+
+def test_tela_final_que_nao_confere_deixa_no_registro_so_numeros(monkeypatch):
+    # 24/10, 09:19: a tela final não conferiu e não deu para saber por quê. O registro
+    # diz quantos anexados e o quanto o mais parecido lembra o nome (o nome não vai).
+    import registro_processos as rp
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    _avisos(monkeypatch)
+    assert not ps.explorar("conferir", Aparelho(tela=_tela_final("Vestido Infantil Estampado Rosa")))
+    assert not ps.explorar("conferir", Aparelho(tela=_tela_final()))
+    linhas = [l[3] for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "conferir a tela final"]
+    assert sorted(linhas) == ["0 anexado(s) na tela; 1 do vídeo",
+                              "1 anexado(s) na tela; 1 do vídeo; o mais parecido com cada um: 42% das palavras"]
+    assert not any("Vestido" in l for l in linhas)
 
 
 def test_rascunhos_so_e_tocado_com_o_produto_do_video_na_tela_final(monkeypatch, capsys):
