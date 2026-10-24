@@ -16955,8 +16955,9 @@ async def lembrar_perguntas_do_claude():
     DECISOES.md, Trabalho com o Claude.
     """
     async def enviar(texto):
-        await bot.send_message(ADMIN_ID, texto, parse_mode="HTML", disable_web_page_preview=True)
-        return True
+        mensagem = await bot.send_message(ADMIN_ID, texto, parse_mode="HTML", disable_web_page_preview=True)
+        # O id volta para o perguntas_rafael apagar o lembrete quando a pergunta for respondida.
+        return mensagem.message_id
     enviados = await perguntas_rafael.lembrar(enviar)
     if enviados:
         logger.info(f"❓ [Perguntas do Claude] {enviados} lembrete(s) no privado.")

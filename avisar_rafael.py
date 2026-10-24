@@ -48,21 +48,51 @@ def montar_texto(assunto, link=""):
     return texto
 
 
-def mandar_texto(texto, html=False):
-    """
-    Manda um texto no privado do Rafael pelo Bot API. Devolve True se o Telegram aceitou.
-    html=True: o texto vem em HTML (negrito, o <code> que copia com um toque).
-    """
+def _chamar(metodo, campos):
+    """Uma chamada ao Bot API no privado do Rafael. Devolve a resposta do Telegram (dict)."""
     load_dotenv(os.path.join(PASTA, ".env"))
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
         raise RuntimeError("TELEGRAM_TOKEN ausente no .env")
-    campos = {"chat_id": admin_id(), "text": texto, "disable_web_page_preview": "true"}
+    dados = urllib.parse.urlencode({"chat_id": admin_id(), **campos}).encode()
+    with urllib.request.urlopen(f"https://api.telegram.org/bot{token}/{metodo}", dados, timeout=20) as r:
+        return json.loads(r.read().decode())
+
+
+def mandar_texto_com_id(texto, html=False):
+    """
+    Manda um texto no privado do Rafael e devolve o id da mensagem, para apagar depois
+    (True se o Telegram aceitou sem dizer o id; None se recusou). html=True: o texto vem
+    em HTML (negrito, o <code> que copia com um toque).
+    """
+    campos = {"text": texto, "disable_web_page_preview": "true"}
     if html:
         campos["parse_mode"] = "HTML"
-    dados = urllib.parse.urlencode(campos).encode()
-    with urllib.request.urlopen(f"https://api.telegram.org/bot{token}/sendMessage", dados, timeout=20) as r:
-        return bool(json.loads(r.read().decode()).get("ok"))
+    resposta = _chamar("sendMessage", campos)
+    if not resposta.get("ok"):
+        return None
+    return (resposta.get("result") or {}).get("message_id") or True
+
+
+def mandar_texto(texto, html=False):
+    """Manda um texto no privado do Rafael pelo Bot API. Devolve True se o Telegram aceitou."""
+    return mandar_texto_com_id(texto, html) is not None
+
+
+def apagar_mensagem(ident):
+    """Apaga uma mensagem do bot no privado. O Telegram só deixa até 48 h depois do envio: False depois disso."""
+    try:
+        return bool(_chamar("deleteMessage", {"message_id": ident}).get("ok"))
+    except Exception:
+        return False
+
+
+def editar_texto(ident, texto):
+    """Troca o texto de uma mensagem do bot no privado (o que já não dá para apagar)."""
+    try:
+        return bool(_chamar("editMessageText", {"message_id": ident, "text": texto}).get("ok"))
+    except Exception:
+        return False
 
 
 def mandar_foto(caminho, legenda=""):

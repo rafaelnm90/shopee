@@ -13,8 +13,10 @@ O caminho:
   tabela perguntas_rafael e sai na hora no privado, com um código (P1, P2...);
 - o bot_mestre (lembrar) manda de novo a cada hora enquanto ela estiver aberta,
   mesmo que o Claude esteja sem crédito;
-- quando o Rafael responde, o Claude marca pelo avisar.yml ("respondida P3") e os
-  lembretes param.
+- quando o Rafael responde, o Claude marca pelo avisar.yml ("respondida P3"): os
+  lembretes param e o bot apaga do privado a pergunta e os lembretes dela (o que já
+  passou das 48 h que o Telegram deixa apagar fica com o texto trocado por "respondida"),
+  para o Rafael não responder duas vezes. Fica só o "Recebi a sua resposta".
 
 Cada aviso traz a pergunta, as opções, o texto pronto para o Rafael copiar com um
 toque (no Telegram, o texto em <code> copia ao tocar) e colar na conversa com a
@@ -52,7 +54,10 @@ def _momento(agora=None):
 def _criar_tabela(con):
     con.execute("CREATE TABLE IF NOT EXISTS perguntas_rafael ("
                 "id INTEGER PRIMARY KEY AUTOINCREMENT, pergunta TEXT, opcoes TEXT, link TEXT, criada TEXT, "
-                "ultimo_aviso TEXT, avisos INTEGER DEFAULT 0, respondida TEXT)")
+                "ultimo_aviso TEXT, avisos INTEGER DEFAULT 0, respondida TEXT, mensagens TEXT)")
+    # A coluna que veio depois entra na tabela que já existe no servidor.
+    if "mensagens" not in {linha[1] for linha in con.execute("PRAGMA table_info(perguntas_rafael)")}:
+        con.execute("ALTER TABLE perguntas_rafael ADD COLUMN mensagens TEXT")
 
 
 def _opcoes(opcoes):
@@ -116,11 +121,54 @@ def vencidas(agora=None):
     return [p for p in abertas() if not p["ultimo_aviso"] or p["ultimo_aviso"] <= limite]
 
 
-def marcar_aviso(ident, agora=None):
+def marcar_aviso(ident, agora=None, mensagem=None):
+    """O aviso saiu; mensagem: o id dele no privado, para apagar quando a pergunta for respondida."""
     with db.conexao() as con:
         _criar_tabela(con)
-        con.execute("UPDATE perguntas_rafael SET ultimo_aviso = ?, avisos = COALESCE(avisos, 0) + 1 WHERE id = ?",
-                    (_momento(agora), ident))
+        linha = con.execute("SELECT mensagens FROM perguntas_rafael WHERE id = ?", (ident,)).fetchone()
+        mensagens = json.loads((linha[0] if linha else None) or "[]")
+        if type(mensagem) is int:
+            mensagens.append(mensagem)
+        con.execute("UPDATE perguntas_rafael SET ultimo_aviso = ?, avisos = COALESCE(avisos, 0) + 1, mensagens = ? "
+                    "WHERE id = ?", (_momento(agora), json.dumps(mensagens), ident))
+
+
+def mensagens_de(cod):
+    """Os ids, no privado, da pergunta e dos lembretes dela."""
+    numero = str(cod or "").strip().upper().lstrip("P")
+    if not numero.isdigit():
+        return []
+    with db.conexao() as con:
+        _criar_tabela(con)
+        linha = con.execute("SELECT mensagens FROM perguntas_rafael WHERE id = ?", (int(numero),)).fetchone()
+    return json.loads((linha[0] if linha else None) or "[]")
+
+
+def limpar_do_privado(cod, apagar, editar):
+    """
+    Pergunta respondida: tira do privado a pergunta e os lembretes dela, para o Rafael
+    não responder duas vezes. O que o Telegram não deixa mais apagar (mais de 48 h) fica
+    com o texto trocado. Pedido do Rafael: DECISOES.md, Trabalho com o Claude.
+    """
+    mensagens = mensagens_de(cod)
+    apagadas = 0
+    for ident in mensagens:
+        if apagar(ident):
+            apagadas += 1
+        else:
+            editar(ident, f"✅ Pergunta {cod} respondida: este aviso não vale mais.")
+    return apagadas, len(mensagens)
+
+
+def texto_da_confirmacao(cod, apagadas, total):
+    """O "Recebi a sua resposta" que fica no privado, dizendo o que saiu de lá."""
+    texto = f"✅ Recebi a sua resposta da pergunta {cod}. Parei de lembrar"
+    if not total:
+        return texto + "."
+    if apagadas == total:
+        return texto + " e apaguei daqui a pergunta e os lembretes dela."
+    return (texto + f" e apaguei daqui {apagadas} mensagem(ns) dela. As de mais de 2 dias, que o Telegram "
+            "não deixa apagar, ficaram marcadas como respondidas.")
 
 
 def texto_para_copiar(p):
@@ -152,14 +200,16 @@ def montar_aviso(p):
 async def lembrar(enviar, agora=None):
     """
     Manda de novo cada pergunta aberta cujo último aviso tem 1 h ou mais. enviar(texto)
-    é a função do robô que manda no privado (async, devolve True se saiu). Um aviso que
-    não sai fica para a próxima volta. Devolve quantos saíram.
+    é a função do robô que manda no privado (async, devolve o id da mensagem, que fica
+    guardado para apagar depois, ou True se saiu). Um aviso que não sai fica para a
+    próxima volta. Devolve quantos saíram.
     """
     enviados = 0
     for p in vencidas(agora):
         try:
-            if await enviar(montar_aviso(p)):
-                marcar_aviso(p["id"], agora)
+            mensagem = await enviar(montar_aviso(p))
+            if mensagem:
+                marcar_aviso(p["id"], agora, mensagem)
                 enviados += 1
         except Exception as e:
             logger.warning(f"⚠️ [Perguntas do Claude] Lembrete de {p['codigo']} não saiu: {type(e).__name__}")
@@ -185,8 +235,9 @@ def receber(texto_cifrado, agora=None):
     dados = abrir(texto_cifrado, registro_privado.chave())
     cod = nova(dados.get("pergunta"), dados.get("opcoes"), dados.get("link"), agora)
     p = next(p for p in abertas() if p["codigo"] == cod)
-    if avisar_rafael.mandar_texto(montar_aviso(p), html=True):
-        marcar_aviso(p["id"], agora)
+    mensagem = avisar_rafael.mandar_texto_com_id(montar_aviso(p), html=True)
+    if mensagem:
+        marcar_aviso(p["id"], agora, mensagem)
     return cod
 
 
@@ -211,8 +262,9 @@ def main(argumentos):
         if marcar_respondida(valor):
             import avisar_rafael
             cod = valor.strip().upper()
-            avisar_rafael.mandar_texto(f"✅ Recebi a sua resposta da pergunta {cod}. Parei de lembrar.")
-            print(f"✅ {cod} respondida: os lembretes pararam.")
+            apagadas, total = limpar_do_privado(cod, avisar_rafael.apagar_mensagem, avisar_rafael.editar_texto)
+            avisar_rafael.mandar_texto(texto_da_confirmacao(cod, apagadas, total))
+            print(f"✅ {cod} respondida: os lembretes pararam; {apagadas} de {total} mensagens apagadas do privado.")
             return 0
         print("⚠️ Código não encontrado ou já respondido.")
         return 1

@@ -46,6 +46,31 @@ def test_envia_para_o_admin_pelo_bot(bm, monkeypatch):
     assert "Pergunta pendente" in campos["text"][0]
 
 
+def test_id_da_mensagem_para_apagar_e_editar_depois(bm, monkeypatch):
+    pedidos = []
+
+    class Resposta(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def urlopen(url, dados, timeout=None):
+        pedidos.append((url.rsplit("/", 1)[1], urllib.parse.parse_qs(dados.decode())))
+        if url.endswith("/deleteMessage"):
+            # O Telegram recusa apagar o que passou de 48 h.
+            return Resposta(json.dumps({"ok": False, "description": "message can't be deleted"}).encode())
+        return Resposta(json.dumps({"ok": True, "result": {"message_id": 88}}).encode())
+    monkeypatch.setattr(avisar_rafael.urllib.request, "urlopen", urlopen)
+
+    assert avisar_rafael.mandar_texto_com_id("Pergunta", html=True) == 88
+    assert avisar_rafael.mandar_texto("Pergunta") is True
+    assert avisar_rafael.apagar_mensagem(88) is False and avisar_rafael.editar_texto(88, "Respondida") is True
+    assert [p[0] for p in pedidos] == ["sendMessage", "sendMessage", "deleteMessage", "editMessageText"]
+    assert pedidos[2][1]["message_id"] == ["88"] and pedidos[3][1]["chat_id"] == [str(bm.ADMIN_ID)]
+
+
 def test_foto_vai_para_o_admin_pelo_bot(bm, monkeypatch, tmp_path):
     pedidos = []
 

@@ -1,5 +1,6 @@
 """perguntas_rafael.py: a pergunta do Claude vai ao privado e é lembrada de hora em hora até a resposta."""
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 import perguntas_rafael as pr
 from conftest import rodar
@@ -59,12 +60,14 @@ def test_pergunta_cifrada_chega_aberta_ao_servidor(monkeypatch):
     chave = Fernet.generate_key()
     monkeypatch.setattr(registro_privado, "chave", lambda: chave)
     mandados = []
-    monkeypatch.setattr(avisar_rafael, "mandar_texto", lambda texto, html=False: mandados.append((texto, html)) or True)
+    monkeypatch.setattr(avisar_rafael, "mandar_texto_com_id",
+                        lambda texto, html=False: mandados.append((texto, html)) or 501)
     cifrado = pr.cifrar({"pergunta": "Pergunta secreta?", "opcoes": OPCOES, "link": LINK}, chave)
     assert "secreta" not in cifrado
     assert pr.receber(cifrado, AGORA) == "P1"
     assert mandados[0][1] is True and "Pergunta secreta?" in mandados[0][0]
     assert pr.vencidas(AGORA + timedelta(minutes=30)) == []                     # já avisada agora
+    assert pr.mensagens_de("P1") == [501]
 
 
 def test_robo_lembra_pelo_privado(bm, monkeypatch):
@@ -73,8 +76,34 @@ def test_robo_lembra_pelo_privado(bm, monkeypatch):
 
     async def send_message(chat_id, texto, **k):
         enviados.append((chat_id, texto, k.get("parse_mode")))
+        return SimpleNamespace(message_id=700 + len(enviados))
     monkeypatch.setattr(bm.bot, "send_message", send_message)
     rodar(bm.lembrar_perguntas_do_claude())
     assert enviados and enviados[0][0] == bm.ADMIN_ID and enviados[0][2] == "HTML"
     rodar(bm.lembrar_perguntas_do_claude())                                    # menos de 1 h: não repete
-    assert len(enviados) == 1
+    assert len(enviados) == 1 and pr.mensagens_de("P1") == [701]
+
+
+def test_respondida_sai_do_privado_com_os_lembretes(monkeypatch):
+    # Pedido do Rafael (24/10): respondida aqui, a pergunta some do privado do bot, para ele
+    # não achar que ficou sem resposta e responder de novo.
+    import avisar_rafael
+    pr.nova("Pergunta?", OPCOES, LINK, AGORA)
+    ids = iter([31, 32, 33])
+
+    async def enviar(texto):
+        return next(ids)
+    for horas in range(3):
+        rodar(pr.lembrar(enviar, AGORA + timedelta(hours=horas)))
+    assert pr.mensagens_de("p1") == [31, 32, 33]
+    apagadas, editadas, mandadas = [], [], []
+    # A de 31 passou das 48 h: o Telegram não deixa apagar, e o texto dela vira "respondida".
+    monkeypatch.setattr(avisar_rafael, "apagar_mensagem", lambda ident: ident != 31 and not apagadas.append(ident))
+    monkeypatch.setattr(avisar_rafael, "editar_texto", lambda ident, texto: editadas.append((ident, texto)) or True)
+    monkeypatch.setattr(avisar_rafael, "mandar_texto", lambda texto, html=False: mandadas.append(texto) or True)
+    assert pr.main(["respondida", "p1"]) == 0
+    assert apagadas == [32, 33] and editadas[0][0] == 31 and "P1 respondida" in editadas[0][1]
+    assert "Recebi a sua resposta da pergunta P1" in mandadas[0] and "2 mensagem(ns)" in mandadas[0]
+    assert pr.main(["respondida", "P1"]) == 1 and len(mandadas) == 1          # a segunda vez não mexe em nada
+    assert "apaguei daqui a pergunta e os lembretes dela" in pr.texto_da_confirmacao("P2", 3, 3)
+    assert pr.texto_da_confirmacao("P2", 0, 0).endswith("Parei de lembrar.")
