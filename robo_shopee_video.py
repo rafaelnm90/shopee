@@ -2194,18 +2194,24 @@ def interagir_no_feed(d, agora=None):
     anteriores = ler_estado().get("feed_textos") or []
     try:
         for _ in range(VIDEOS_OLHADOS_NO_FEED):
-            xml = tela(d)
-            if interacoes.eh_live(xml):
-                registro_processos.registrar(REGISTRO, "feed: vídeo olhado", "live pulada", ok=None)
+            # Cada tela olhada fica no registro com o que o robô viu nela (um texto fixo):
+            # o checkup mostra onde ele se perde quando nenhum vídeo serve.
+            video, motivo = interacoes.ler_o_feed(tela(d))
+            marca = interacoes.marca(video["autor"], video["legenda"]) if video else None
+            if not video:
+                visto = "live pulada" if motivo == "live" else f"pulada: {motivo}"
+            elif interacoes.resultado_de(marca, "video_feed"):
+                visto = "já comentado antes"
+            elif _proprio(video):
+                visto = "vídeo do próprio perfil"
             else:
-                video = interacoes.video_do_feed(xml)
-                marca = interacoes.marca(video["autor"], video["legenda"]) if video else None
-                if video and not interacoes.resultado_de(marca, "video_feed") and not _proprio(video):
-                    pausa(random.uniform(6, 14))  # assiste um pouco antes
-                    if pular:
-                        pular -= 1
-                    else:
-                        return _interagir_com(d, video, marca, anteriores, agora)
+                pausa(random.uniform(6, 14))  # assiste um pouco antes
+                if not pular:
+                    registro_processos.registrar(REGISTRO, "feed: vídeo olhado", "escolhido", ok=None)
+                    return _interagir_com(d, video, marca, anteriores, agora)
+                pular -= 1
+                visto = "deixado passar"
+            registro_processos.registrar(REGISTRO, "feed: vídeo olhado", visto, ok=None)
             pausa(random.uniform(2, 6))
             ps.rolar(d)
             pausa(4)

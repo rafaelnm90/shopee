@@ -324,29 +324,44 @@ def video_do_feed(xml):
     O vídeo na tela do feed: {"autor", "legenda", "coracao", "coracao_desc", "balao"}, ou
     None (live, outra tela). A coluna da direita, de cima para baixo: foto do criador,
     coração, balão de comentários, compartilhar ("share" na descrição) e mais; o nome do
-    criador e a legenda ficam embaixo, à esquerda, com "video" no começo da descrição.
+    criador ("video caption user") e a legenda ("video caption ...") ficam embaixo, à esquerda.
+    """
+    return ler_o_feed(xml)[0]
+
+
+def ler_o_feed(xml):
+    """
+    (vídeo, motivo): o vídeo de video_do_feed, ou None e o motivo fixo de não ser um vídeo
+    para comentar. O motivo vai para o registro, e o checkup mostra onde o robô se perdeu.
     """
     elementos = ps.elementos(xml)
-    if eh_live(xml) or not any(el["id"].startswith("rn_vod_player_view") for el in elementos):
-        return None
+    if eh_live(xml):
+        return None, "live"
+    if not any(el["id"].startswith("rn_vod_player_view") for el in elementos):
+        return None, "tela sem o player de vídeo"
     direita = sorted((el for el in elementos if el["clicavel"] and ps._centro(el)[0] > 900),
                      key=lambda el: el["caixa"][1])
     compartilhar = next((i for i, el in enumerate(direita) if "share" in el["descricao"].casefold()), None)
-    if compartilhar is None or compartilhar < 2:
-        return None
+    if compartilhar is None:
+        return None, "sem o compartilhar na coluna da direita"
+    if compartilhar < 2:
+        return None, "coluna da direita sem o coração e o balão"
     coracao, balao = direita[compartilhar - 2], direita[compartilhar - 1]
-    caixas = sorted((el for el in elementos if ps._normal(el["descricao"]).startswith("video ")
+    # Embaixo, à esquerda: "video caption user" (o nome do criador) e "video caption ..." (a legenda).
+    caixas = sorted((el for el in elementos if ps._normal(el["descricao"]).startswith("video caption")
                      and ps._centro(el)[0] < 700), key=lambda el: el["caixa"][1])
-    textos = []
-    for caixa in caixas:
-        texto = next((el["texto"] for el in elementos if el["texto"].strip()
-                      and ps._dentro(ps._centro(el), caixa["caixa"])), "")
-        if texto and texto not in textos:
-            textos.append(texto)
-    if not textos:
-        return None
-    return {"autor": textos[0], "legenda": " ".join(textos[1:2]), "coracao": ps._centro(coracao),
-            "coracao_desc": coracao["descricao"], "balao": ps._centro(balao)}
+
+    def texto_em(caixa):
+        return next((el["texto"] for el in elementos if el["texto"].strip()
+                     and ps._dentro(ps._centro(el), caixa["caixa"])), "")
+
+    autor = next((texto_em(c) for c in caixas if ps._normal(c["descricao"]) == "video caption user"), "")
+    if not autor:
+        return None, "sem o nome do criador"
+    legenda = next((t for t in (texto_em(c) for c in caixas if ps._normal(c["descricao"]) != "video caption user")
+                    if t and t != autor), "")
+    return {"autor": autor, "legenda": legenda, "coracao": ps._centro(coracao),
+            "coracao_desc": coracao["descricao"], "balao": ps._centro(balao)}, ""
 
 
 def campo_de_comentar(xml):
