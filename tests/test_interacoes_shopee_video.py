@@ -160,9 +160,9 @@ def _player(autor="Loja da Bia", legenda="Mini saia que veste bem", coracao="lik
                     *ABAS, *BARRA)
     return _xml(_el(ident="rn_vod_player_view_with_surface", classe="FrameLayout", caixa=(0, 0, 1080, 2260)),
                 *ABAS,
-                _el(desc="video author", classe="ViewGroup", caixa=(40, 2030, 460, 2080), clicavel=True),
+                _el(desc="video caption user", classe="ViewGroup", caixa=(40, 2030, 460, 2080), clicavel=True),
                 _el(autor, caixa=(40, 2030, 460, 2080)),
-                _el(desc="video title", classe="ViewGroup", caixa=(40, 2100, 820, 2160), clicavel=True),
+                _el(desc="video caption title", classe="ViewGroup", caixa=(40, 2100, 820, 2160), clicavel=True),
                 _el(legenda, caixa=(40, 2100, 820, 2160)),
                 _el(desc="avatar icon", classe="ViewGroup", caixa=(960, 1390, 1040, 1470), clicavel=True),
                 _el(desc=coracao, classe="ViewGroup", caixa=(960, 1600, 1040, 1680), clicavel=True),
@@ -179,6 +179,43 @@ def test_feed_live_e_video():
     assert video["coracao"] == (1000, 1640) and video["balao"] == (1000, 1805)
     assert it.coracao_curtido("like icon") is False and it.coracao_curtido("unlike icon") is True
     assert it.coracao_curtido("…") is None
+
+
+def _player_do_motorola(compartilhar=True, autor="Loja da Bia"):
+    """O vídeo do Para você como o Motorola mostrou em 24/10/2026 (explorar 156): o ícone do alto à
+    direita, a foto e o seguir do criador, o cartão do produto e o rótulo de IA."""
+    nos = [_el(ident="rn_vod_player_view_with_surface", classe="FrameLayout", caixa=(0, 0, 1080, 2260)), *ABAS,
+           _el(desc="search icon", classe="ViewGroup", caixa=(970, 130, 1052, 205), clicavel=True),
+           _el(desc="shopee video product card", classe="ViewGroup", caixa=(250, 1820, 975, 1890), clicavel=True),
+           _el("Comprar com cupom", caixa=(450, 1830, 780, 1880)),
+           _el(desc="close product card", classe="ViewGroup", caixa=(760, 1620, 812, 1670), clicavel=True),
+           _el(desc="video caption user", classe="ViewGroup", caixa=(40, 2030, 285, 2082), clicavel=True),
+           _el(autor, caixa=(40, 2030, 285, 2082)),
+           _el(desc="video caption title", classe="ViewGroup", caixa=(30, 2105, 822, 2161), clicavel=True),
+           _el("Mini saia que veste bem... mais", caixa=(30, 2105, 822, 2161)),
+           _el(desc="creator profile avatar icon", classe="ViewGroup", caixa=(961, 1393, 1041, 1473), clicavel=True),
+           _el(desc="creator profile avatar follow icon", classe="ViewGroup", caixa=(980, 1466, 1024, 1510),
+               clicavel=True),
+           _el(desc="like icon", classe="ViewGroup", caixa=(962, 1605, 1042, 1685), clicavel=True),
+           _el("12", caixa=(985, 1675, 1020, 1700)),
+           _el(desc="comment video icon", classe="ViewGroup", caixa=(962, 1766, 1042, 1846), clicavel=True),
+           _el("3", caixa=(985, 1858, 1020, 1884))]
+    if compartilhar:
+        nos += [_el(desc="video share icon", classe="ViewGroup", caixa=(961, 1942, 1041, 2022), clicavel=True),
+                _el("Compartilhar", caixa=(940, 2040, 1062, 2070))]
+    nos += [_el(desc="video more icon", classe="ViewGroup", caixa=(961, 2128, 1041, 2208), clicavel=True),
+            _el("Identificado como conteúdo gerado por IA.", caixa=(40, 2185, 805, 2215)), *BARRA]
+    return _xml(*nos)
+
+
+def test_feed_le_o_video_como_o_motorola_mostra_e_diz_por_que_pula():
+    video, motivo = it.ler_o_feed(_player_do_motorola())
+    assert motivo == "" and video["autor"] == "Loja da Bia" and video["legenda"].startswith("Mini saia")
+    assert video["coracao"] == (1002, 1645) and video["balao"] == (1002, 1806)
+    assert it.ler_o_feed(_player(live=True)) == (None, "live")
+    assert it.ler_o_feed(_xml(*ABAS, *BARRA)) == (None, "tela sem o player de vídeo")
+    assert it.ler_o_feed(_player_do_motorola(compartilhar=False)) == (None, "sem o compartilhar na coluna da direita")
+    assert it.ler_o_feed(_player_do_motorola(autor="")) == (None, "sem o nome do criador")
 
 
 def test_marcas_guardam_o_fim_e_contam_as_tentativas():
