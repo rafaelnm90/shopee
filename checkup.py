@@ -18,7 +18,8 @@ assunto repetido em seguida e o que saiu contra o configurado), postagens de
 hoje por fila, captura por grupo de origem (Espião, Espelhador e parceiros, pela
 posição na lista do painel), produto repetido entre parceiros ou com a conta
 principal, a verificação semanal do Grupo Público (só os números), robô da Shopee
-Vídeo, Baixador e backup. No fim, os pontos de atenção.
+Vídeo (com as respostas aos comentários e o feed), Baixador e backup. No fim, os
+pontos de atenção.
 """
 import os
 import re
@@ -541,6 +542,39 @@ def robo_da_shopee_video(agora=None):
             "salvos": salvos or 0, "pulados": pulados or 0, "ruins": ruins, "punicoes": punicoes or 0}
 
 
+# --- Respostas aos comentários e feed da Shopee Vídeo ---
+
+# O mesmo de interacoes_shopee_video (o tests/test_checkup.py confere): 3 por dia (P10).
+COMENTARIOS_NO_FEED_POR_DIA = 3
+
+
+def interacoes_da_shopee_video(agora=None):
+    """
+    As respostas aos comentários dos vídeos e o feed, pelo registro de processos: cada
+    resultado das respostas nas últimas 24 h, os comentários com mais de uma resposta do
+    perfil, se as respostas rodaram hoje, os comentários no feed hoje (a meta é 3) e o
+    mesmo vídeo do feed comentado mais de uma vez em 3 dias. Pedido do Rafael: DECISOES.md,
+    Shopee Vídeo.
+    """
+    agora = _agora(agora)
+    desde, hoje = _momento(agora - timedelta(hours=24)), agora.strftime("%Y-%m-%d 00:00:00")
+    respostas = registro_processos.sequencia("shopee_video", "responder comentário", desde)
+    feed = registro_processos.sequencia("shopee_video", "feed: comentar", _momento(agora - timedelta(days=3)),
+                                        resultado="comentado")
+    curtidas = registro_processos.sequencia("shopee_video", "feed: curtir", desde)
+    return {
+        "respostas": dict(Counter(resultado for _m, _p, resultado, _d, _o in respostas)),
+        # "já respondido" com "2 resposta(s) do perfil" ou mais: o comentário ganhou resposta repetida.
+        "duplicadas": sum(1 for _m, _p, resultado, detalhe, _o in respostas
+                          if resultado == "já respondido" and not str(detalhe).startswith("1 ")),
+        "rodou_hoje": bool(registro_processos.sequencia("shopee_video", "notificações (respostas)", hoje)),
+        "feed_hoje": sum(1 for momento, *_ in feed if momento >= hoje),
+        "feed_repetidos": sum(1 for n in Counter(o for *_x, o in feed if o).values() if n > 1),
+        "curtidas": dict(Counter(resultado for _m, _p, resultado, _d, _o in curtidas)),
+        "lives": len(registro_processos.sequencia("shopee_video", "feed: vídeo olhado", desde, resultado="live pulada")),
+    }
+
+
 # --- Baixador e backup ---
 
 def baixador(linhas):
@@ -555,7 +589,8 @@ def baixador(linhas):
 # --- Pontos de atenção ---
 
 def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None, processos=None,
-                      rotinas_hoje=None, divulgacao=None, captura=None, repetidos=None, publico=None):
+                      rotinas_hoje=None, divulgacao=None, captura=None, repetidos=None, publico=None,
+                      interacoes=None):
     """As frases fixas, com números, do que o Claude precisa investigar."""
     agora = _agora(agora)
     pontos = []
@@ -588,6 +623,30 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
                       f"{robo_sv['salvos']} rascunho(s) salvo(s) ({robo_sv.get('pulados', 0)} vídeo(s) pulado(s))")
     for acao, resultado, passo, qtd in robo_sv["ruins"]:
         pontos.append(f"Robô da Shopee Vídeo: {acao} → {resultado} em \"{passo or '?'}\" {qtd}x")
+    if interacoes:
+        respostas = interacoes["respostas"]
+        if respostas.get("resposta no lugar errado"):
+            pontos.append(f"Respostas da Shopee Vídeo: {respostas['resposta no lugar errado']} resposta(s) que não "
+                          "ficaram embaixo do comentário certo")
+        if respostas.get("sem resposta"):
+            pontos.append(f"Respostas da Shopee Vídeo: {respostas['sem resposta']} comentário(s) que ficaram sem "
+                          "resposta depois de 3 tentativas")
+        if interacoes["duplicadas"]:
+            pontos.append(f"Respostas da Shopee Vídeo: {interacoes['duplicadas']} comentário(s) com mais de uma "
+                          "resposta do perfil")
+        if interacoes["feed_hoje"] > COMENTARIOS_NO_FEED_POR_DIA:
+            pontos.append(f"Feed da Shopee Vídeo: {interacoes['feed_hoje']} comentários hoje (o combinado é "
+                          f"{COMENTARIOS_NO_FEED_POR_DIA})")
+        if interacoes["feed_repetidos"]:
+            pontos.append(f"Feed da Shopee Vídeo: {interacoes['feed_repetidos']} vídeo(s) comentado(s) mais de uma "
+                          "vez em 3 dias")
+        # A meta do dia: com o robô no ar, as respostas rodam uma vez e o feed tem 3 comentários.
+        if robo_sv["ativo"] and not robo_sv.get("suspenso") and agora.hour >= HORA_PARA_COBRAR:
+            if not interacoes["rodou_hoje"]:
+                pontos.append("Respostas da Shopee Vídeo: as Notificações não foram lidas hoje")
+            if interacoes["feed_hoje"] < COMENTARIOS_NO_FEED_POR_DIA:
+                pontos.append(f"Feed da Shopee Vídeo: {interacoes['feed_hoje']} de {COMENTARIOS_NO_FEED_POR_DIA} "
+                              "comentários hoje")
     for (robo, processo), p in (processos or {}).items():
         if p["falhas"] >= FALHAS_PARA_COBRAR and p["falhas"] >= p["ok"]:
             resultado, detalhe, _ok, qtd = max((r for r in p["resultados"] if r[2] == 0), key=lambda r: r[3])
@@ -745,6 +804,15 @@ def main():
     for acao, resultado, passo, qtd in robo_sv["ruins"]:
         print(f"   {qtd}x {acao} → {resultado} em \"{passo or '?'}\"")
 
+    interacoes = interacoes_da_shopee_video(agora)
+    respostas = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["respostas"].items()))
+    print(f"Respostas aos comentários (24 h): {respostas or 'nenhuma'} | com mais de uma resposta do perfil: "
+          f"{interacoes['duplicadas']} | Notificações lidas hoje: {'sim' if interacoes['rodou_hoje'] else 'não'}")
+    curtidas = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["curtidas"].items()))
+    print(f"Feed: comentados hoje {interacoes['feed_hoje']} de {COMENTARIOS_NO_FEED_POR_DIA} | mesmo vídeo mais de "
+          f"uma vez (3 dias): {interacoes['feed_repetidos']} | curtir (24 h): {curtidas or 'nenhum'} | "
+          f"lives puladas (24 h): {interacoes['lives']}")
+
     print("\n== Baixador e backup")
     baixados = baixador(linhas_baixador)
     print(" | ".join(f"{evento}: {qtd}" for evento, qtd in sorted(baixados.items())) or "nenhum evento")
@@ -752,7 +820,7 @@ def main():
     print("Backup: nenhum" if backup is None else f"Backup: o último tem {backup[1]:.1f} h")
 
     pontos = sem_journal + pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora, processos,
-                                             rotinas_hoje, divulgacao, captura, repetidos, publico)
+                                             rotinas_hoje, divulgacao, captura, repetidos, publico, interacoes)
     print(f"\n== Pontos de atenção ({len(pontos)})")
     for ponto in pontos:
         print(f"⚠️ {ponto}")
