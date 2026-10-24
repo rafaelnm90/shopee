@@ -124,6 +124,49 @@ async def verificar_envio():
 
 # Uma rodada do robô de cada vez: o agendador e o Testar Caminho tocariam juntos no celular.
 _rodada = asyncio.Lock()
+# Cada rodada roda numa unidade própria do systemd (systemd-run), fora do bot_mestre: o
+# deploy que reinicia o bot não mata mais a rodada no meio do celular (pedido do Rafael,
+# P13: DECISOES.md, Shopee Vídeo). O log dela sai no journal com este nome.
+UNIDADE_DA_RODADA = "robo-shopee-video"
+NOME_NO_LOG = "robo_shopee_video"
+
+
+def robo_ocupado():
+    """Uma rodada (deste bot ou de antes de um reinício) ou o explorar está no celular agora?"""
+    return _rodada.locked() or celular_robo.ocupado()
+
+
+async def _comando(*partes, espera=30):
+    """O código de saída de um comando curto do sistema; None se não rodou."""
+    try:
+        processo = await asyncio.create_subprocess_exec(*partes, stdout=asyncio.subprocess.DEVNULL,
+                                                        stderr=asyncio.subprocess.DEVNULL)
+        return await asyncio.wait_for(processo.wait(), espera)
+    except (OSError, asyncio.TimeoutError):
+        return None
+
+
+async def _rodar_fora_do_bot(argumentos):
+    """
+    A rodada numa unidade própria do systemd, e espera ela acabar. False quando o
+    servidor não deixa (sem o sudo do systemd-run): a rodada vai como processo do bot.
+    """
+    unidade = f"{UNIDADE_DA_RODADA}-{datetime.now(fuso_horario):%Y%m%d%H%M%S}"
+    criada = await _comando(
+        "sudo", "-n", "systemd-run", f"--unit={unidade}", "--collect", "--quiet",
+        f"--uid={os.getuid()}", f"--working-directory={os.path.dirname(ROBO)}",
+        f"--property=RuntimeMaxSec={robo.MAXIMO_DA_RODADA + 60}", f"--property=SyslogIdentifier={NOME_NO_LOG}",
+        "--setenv=PYTHONUNBUFFERED=1", sys.executable, ROBO, *argumentos)
+    if criada != 0:
+        registro_processos.registrar("shopee_video", "rodada fora do bot", "sem systemd-run",
+                                     "a rodada foi como processo do bot", ok=False)
+        return False
+    registro_processos.registrar("shopee_video", "rodada fora do bot", "unidade própria", ok=True)
+    for _ in range((robo.MAXIMO_DA_RODADA + 120) // 10):
+        await asyncio.sleep(10)
+        if await _comando("systemctl", "is-active", "--quiet", unidade) != 0:
+            return True
+    return True
 
 
 async def rodar_robo(*argumentos):
@@ -133,6 +176,8 @@ async def rodar_robo(*argumentos):
     o log; o que importa ao Rafael o próprio robô manda no privado.
     """
     async with _rodada:
+        if await _rodar_fora_do_bot(argumentos):
+            return
         processo = await asyncio.create_subprocess_exec(sys.executable, ROBO, *argumentos,
                                                         cwd=os.path.dirname(ROBO))
         try:
@@ -155,7 +200,7 @@ async def verificar_robo():
         except Exception as e:
             logger.warning(f"⚠️ [Robô Shopee Vídeo] Aviso do fim da suspensão não saiu: {type(e).__name__}")
     config = ler_config()
-    if _rodada.locked():
+    if robo_ocupado():
         return
     if config["robo_pausado"] or robo.suspensa(config):
         # Os horários de rascunho que passam pausado ou suspenso são pulados, como no assistente.
@@ -276,7 +321,7 @@ async def saude_handler(message: types.Message, state: FSMContext):
 async def gerar_apelacao_handler(message: types.Message, state: FSMContext):
     """O robô lê a Saúde do Vídeo na hora, mesmo pausado, e manda o texto de cada punição nova sem recurso."""
     if not _admin(message): return
-    if _rodada.locked():
+    if robo_ocupado():
         await message.answer("⏳ O robô está no meio de uma rodada no celular. Tente de novo em alguns minutos.")
         return
     logger.info("⚖️ Shopee Vídeo: Gerar Apelação.")
@@ -898,7 +943,7 @@ async def preparar_handler(message: types.Message, state: FSMContext):
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     if not _admin(message): return
-    if _rodada.locked():
+    if robo_ocupado():
         await message.answer("⏳ O robô está no meio de uma rodada no celular. Tente de novo em alguns minutos.")
         return
     logger.info("⚡ Shopee Vídeo: Preparar 1 Agora.")
@@ -926,7 +971,7 @@ async def treino_handler(message: types.Message, state: FSMContext):
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     if not _admin(message): return
-    if _rodada.locked():
+    if robo_ocupado():
         await message.answer("⏳ O robô está no meio de uma rodada no celular. Tente de novo em alguns minutos.")
         return
     logger.info("🧭 Shopee Vídeo: Testar Caminho.")
