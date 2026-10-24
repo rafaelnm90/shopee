@@ -424,3 +424,97 @@ def test_respostas_e_feed_da_shopee_video_no_radar():
     assert "as Notificações não foram lidas hoje" in texto and "1 de 3 comentários hoje" in texto
     pausado = dict(robo_sv, ativo=False)
     assert checkup.pontos_de_atencao([], {}, {}, pausado, {}, ("x", 1.0, 1), AGORA, interacoes=vazio) == []
+
+
+# Funções que dão o nome do processo, com o começo fixo que devolvem.
+CHAMADAS = {"processo_do_pedido": "pedido "}
+
+
+def _processos_no_codigo():
+    """
+    (robô, processo) de cada registrar e anotar do registro de processos nos .py do
+    projeto, lidos pelo código (AST). Constante do módulo vale como texto; no f-string,
+    vale o começo fixo.
+    """
+    import ast
+    import os
+    raiz = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    achados = set()
+    for nome in sorted(os.listdir(raiz)):
+        if not nome.endswith(".py"):
+            continue
+        with open(os.path.join(raiz, nome), encoding="utf-8") as arquivo:
+            arvore = ast.parse(arquivo.read())
+        def texto(no):
+            if isinstance(no, ast.Constant) and isinstance(no.value, str):
+                return no.value
+            if isinstance(no, ast.Name):
+                return variaveis.get(no.id)
+            if isinstance(no, ast.Call) and isinstance(no.func, ast.Name):
+                return CHAMADAS.get(no.func.id)
+            if isinstance(no, ast.JoinedStr):
+                fixo = ""
+                for parte in no.values:
+                    if not isinstance(parte, ast.Constant):
+                        break
+                    fixo += parte.value
+                return fixo
+            return None
+
+        # Variável com o nome do processo (constante do módulo ou f-string na função).
+        variaveis = {}
+        for no in ast.walk(arvore):
+            if isinstance(no, ast.Assign) and len(no.targets) == 1 and isinstance(no.targets[0], ast.Name):
+                valor = texto(no.value) if isinstance(no.value, (ast.Constant, ast.JoinedStr)) else None
+                if valor is not None:
+                    variaveis.setdefault(no.targets[0].id, valor)
+        for no in ast.walk(arvore):
+            if (isinstance(no, ast.Call) and isinstance(no.func, ast.Attribute)
+                    and no.func.attr in ("registrar", "anotar") and isinstance(no.func.value, ast.Name)
+                    and no.func.value.id == "registro_processos" and len(no.args) >= 2):
+                robo, processo = texto(no.args[0]), texto(no.args[1])
+                assert robo is not None and processo is not None, f"{nome}:{no.lineno}: robô ou processo sem texto fixo"
+                achados.add((nome, no.lineno, robo, processo))
+    return achados
+
+
+def test_todo_processo_de_robo_tem_lugar_no_checkup():
+    # Pedido do Rafael (P12): ação nova de robô sem registro e sem linha no checkup não passa.
+    achados = _processos_no_codigo()
+    assert len(achados) > 40
+    fora = [f"{nome}:{linha} ({robo}, {processo})" for nome, linha, robo, processo in achados
+            if not checkup.classificado(robo, processo)]
+    assert not fora, "processo sem meta (METAS) nem lugar em SEM_META no checkup.py: " + "; ".join(fora)
+    # E o contrário: o que está nas listas do checkup ainda existe no código.
+    pares = {(robo, processo) for _n, _l, robo, processo in achados}
+    for robo, processo in checkup.METAS:
+        assert (robo, processo) in pares, f"meta de um processo que não existe mais: {robo}, {processo}"
+    for robo, comeco in checkup.SEM_META:
+        assert any(r == robo and p.startswith(comeco) for r, p in pares), f"SEM_META sobrando: {robo}, {comeco}"
+
+
+def test_meta_de_cada_job_e_memoria_dos_pontos():
+    import registro_processos
+    for horas in range(10):
+        registro_processos.registrar("bot_mestre", "monitor de saúde", "concluído", ok=True,
+                                     agora=AGORA - timedelta(hours=horas))
+    processos = checkup.processos_do_dia(AGORA)
+    metas = {(r, p): (feito, minimo) for r, p, _e, feito, minimo in checkup.metas_do_dia(processos)}
+    assert metas[("bot_mestre", "monitor de saúde")] == (10, 21)
+    robo_sv = {"ativo": False, "vencidos": 0, "salvos": 0, "ruins": []}
+    pontos = checkup.pontos_de_atencao([], {}, {}, robo_sv, {}, ("x", 1.0, 1), AGORA, processos,
+                                       metas=checkup.metas_do_dia(processos))
+    assert "bot_mestre: monitor de saúde: rodou 10 vez(es) em 24 h, o esperado é 24" in pontos
+
+    # A memória: novo no 1º dia, repetido no 2º, resolvido no 3º e "voltou" no 4º.
+    def dia(n):
+        return AGORA + timedelta(days=n)
+    marcas, resolvidos = checkup.lembrar_pontos(["Backup: o último tem 30 h"], dia(0))
+    assert marcas == {"Backup: o último tem 30 h": "novo"} and resolvidos == []
+    marcas, _ = checkup.lembrar_pontos(["Backup: o último tem 31 h"], dia(1))
+    assert marcas == {"Backup: o último tem 31 h": "há 2 dias seguidos"}
+    checkup.lembrar_pontos(["Backup: o último tem 31 h"], dia(1))        # rodou de novo no mesmo dia
+    marcas, resolvidos = checkup.lembrar_pontos([], dia(2))
+    assert resolvidos == ["Backup: o último tem # h"]
+    marcas, _ = checkup.lembrar_pontos(["Backup: o último tem 27 h"], dia(3))
+    assert marcas == {"Backup: o último tem 27 h": "voltou"}

@@ -6,7 +6,9 @@ o Claude lê o resultado na rotina do checkup diário, investiga cada ponto de
 atenção e corrige pelo PR. O que ainda não dá para conferir por aqui ganha uma
 seção nova (DECISOES.md, Trabalho com o Claude).
 
-Só lê. O repositório e os logs do Actions são públicos: saem só números,
+Só lê, menos a memória dos próprios pontos de atenção (tabela checkup_pontos: a forma
+de cada ponto, com os números trocados por #). O repositório e os logs do Actions são
+públicos: saem só números,
 estados, horários e trechos fixos do código (arquivo:linha e o texto fixo de
 cada chamada de log ou de registrar_erro_json, com {…} no lugar das variáveis).
 Nunca o texto de um erro, de um log, de uma fila ou do banco.
@@ -18,8 +20,9 @@ assunto repetido em seguida e o que saiu contra o configurado), postagens de
 hoje por fila, captura por grupo de origem (Espião, Espelhador e parceiros, pela
 posição na lista do painel), produto repetido entre parceiros ou com a conta
 principal, a verificação semanal do Grupo Público (só os números), robô da Shopee
-Vídeo (com as respostas aos comentários e o feed), Baixador e backup. No fim, os
-pontos de atenção.
+Vídeo (com as respostas aos comentários e o feed), Baixador e backup, e a meta de cada
+job (esperado × feito). No fim, os pontos de atenção, cada um marcado como novo,
+repetido há N dias ou que voltou, e os que se resolveram desde o checkup anterior.
 """
 import os
 import re
@@ -226,6 +229,120 @@ def processos_do_dia(agora=None):
         p["ok" if ok == 1 else "falhas" if ok == 0 else "neutros"] += qtd
         p["resultados"].append((resultado, detalhe, ok, qtd))
     return processos
+
+
+# --- Metas: o que cada job devia fazer em 24 h ---
+# Pedido do Rafael (P12, DECISOES.md, Monitor, deploy e servidor): cada atividade diz o
+# que devia fazer no dia, e o checkup compara com o que o registro de processos anotou.
+# (robô, processo): (execuções esperadas em 24 h, o mínimo que não cobra). Os de hora em
+# hora têm folga para um reinício no minuto do job.
+METAS = {
+    ("bot_mestre", "monitor de saúde"): (24, 21),
+    ("bot_mestre", "botão de ofertas"): (24, 21),
+    ("bot_mestre", "financeiro (API da Shopee)"): (24, 21),
+    ("bot_mestre", "faxina do disco"): (4, 3),
+    ("bot_mestre", "faxina da lixeira"): (1, 1),
+    ("bot_mestre", "métricas do dia"): (1, 1),
+    ("bot_mestre", "fechamento do dia dos parceiros"): (1, 1),
+    ("bot_mestre", "financeiro: varredura dos pendentes"): (1, 1),
+    ("bot_mestre", "conferência diária dos grupos"): (1, 1),
+    ("bot_mestre", "backup diário"): (1, 1),
+    ("divulgacao", "registro dos administradores"): (1, 1),
+    ("divulgacao", "faxina do Acervo Viral"): (4, 3),
+    ("divulgacao", "faxina do tópico do Baixador"): (144, 100),
+    ("shopee_video", "resumo das 22h"): (1, 1),
+}
+# Os processos que acontecem quando há o que fazer (um pedido, uma postagem, um envio):
+# não têm uma quantidade certa por dia e entram na seção dos processos e nas seções de
+# cada atividade (filas, rotinas, captura, Shopee Vídeo). O começo do nome basta (os
+# processos com o escopo no fim, como "envio (grupos)"). O tests/test_checkup.py barra
+# processo novo de robô que não esteja aqui nem em METAS.
+SEM_META = {
+    ("autorais", "Correio Público: download"), ("autorais", "captura de parceiro"),
+    ("autorais", "captura para o canal"), ("autorais", "repostagem ao grupo"),
+    ("baixador", "Shopee pela Apify"), ("baixador", "conferência semanal da Shopee Vídeo"),
+    ("baixador", "mensagem sem link"), ("baixador", "pedido "),
+    ("bot_mestre", "garimpo de ofertas"), ("bot_mestre", "lembrete de pergunta do Claude"),
+    ("bot_mestre", "postagem "), ("bot_mestre", "rotina "),
+    ("divulgacao", "envio ("), ("divulgacao", "verificação semanal do Grupo Público"),
+    ("espelhador", "captura da rota"), ("espelhador", "envio da rota"),
+    ("espelhador", "vídeo com link na origem da rota"),
+    ("espiao", "captura de vídeo"), ("espiao", "vídeo com link no grupo vigiado"), ("espiao", "IA: nome do produto"),
+    ("notas", "envio de nota fiscal"),
+    ("shopee_video", "anexar o produto"), ("shopee_video", "assistente: envio"),
+    ("shopee_video", "aviso de punição para recorrer"), ("shopee_video", "conferir a tela final"),
+    ("shopee_video", "curtir o produto"), ("shopee_video", "feed: "),
+    ("shopee_video", "notificações (respostas)"), ("shopee_video", "preparo interrompido"),
+    ("shopee_video", "responder comentário"),
+}
+
+
+def classificado(robo, processo):
+    """O processo tem meta (METAS) ou está entre os que acontecem quando há o que fazer (SEM_META)?"""
+    return (robo, processo) in METAS or any(r == robo and processo.startswith(p) for r, p in SEM_META)
+
+
+def metas_do_dia(processos):
+    """Para cada job com meta: (robô, processo, esperado, feito, mínimo), pelo registro das últimas 24 h."""
+    return [(robo, processo, esperado, sum(processos.get((robo, processo), {}).get(k, 0)
+                                           for k in ("ok", "falhas", "neutros")), minimo)
+            for (robo, processo), (esperado, minimo) in METAS.items()]
+
+
+# --- Memória dos pontos de atenção ---
+# Pedido do Rafael (P12): cada ponto mostra se é novo, se repete há dias ou se voltou
+# depois de resolvido (a correção não funcionou), e o checkup lista o que se resolveu.
+# Guarda só a forma do ponto (o texto fixo do código, com os números trocados por #).
+DIAS_DA_MEMORIA = 30
+
+
+def chave_do_ponto(ponto):
+    """O ponto sem os números: o mesmo problema em dias diferentes tem a mesma chave."""
+    return re.sub(r"\d+(?:[.,:]\d+)*", "#", ponto)
+
+
+def _criar_tabela_pontos(con):
+    con.execute("CREATE TABLE IF NOT EXISTS checkup_pontos (dia TEXT, chave TEXT, PRIMARY KEY (dia, chave))")
+
+
+def lembrar_pontos(pontos, agora=None):
+    """
+    Guarda os pontos de hoje (o checkup rodado de novo no mesmo dia troca os de hoje) e
+    devolve ({ponto: marca}, resolvidos): a marca é "novo", "há N dias seguidos" ou
+    "voltou" (já tinha aparecido e sumido); resolvidos são as chaves do checkup anterior
+    que não aparecem hoje.
+    """
+    agora = _agora(agora)
+    hoje = agora.strftime("%Y-%m-%d")
+    with db.conexao() as con:
+        _criar_tabela_pontos(con)
+        historico = con.execute("SELECT dia, chave FROM checkup_pontos WHERE dia < ?", (hoje,)).fetchall()
+        con.execute("DELETE FROM checkup_pontos WHERE dia = ? OR dia < ?",
+                    (hoje, (agora - timedelta(days=DIAS_DA_MEMORIA)).strftime("%Y-%m-%d")))
+        # A linha vazia marca que o checkup rodou no dia, mesmo sem nenhum ponto.
+        con.executemany("INSERT OR IGNORE INTO checkup_pontos (dia, chave) VALUES (?, ?)",
+                        [(hoje, "")] + [(hoje, chave_do_ponto(p)) for p in pontos])
+    dias = sorted({dia for dia, _ in historico}, reverse=True)
+    por_dia = defaultdict(set)
+    for dia, chave in historico:
+        por_dia[dia].add(chave)
+    marcas = {}
+    for ponto in pontos:
+        chave = chave_do_ponto(ponto)
+        seguidos = 0
+        for dia in dias:
+            if chave not in por_dia[dia]:
+                break
+            seguidos += 1
+        if seguidos:
+            marcas[ponto] = f"há {seguidos + 1} dias seguidos"
+        elif any(chave in chaves for chaves in por_dia.values()):
+            marcas[ponto] = "voltou"
+        else:
+            marcas[ponto] = "novo"
+    hoje_chaves = {chave_do_ponto(p) for p in pontos}
+    resolvidos = sorted(c for c in por_dia[dias[0]] if c and c not in hoje_chaves) if dias else []
+    return marcas, resolvidos
 
 
 # --- Rotinas e divulgação ---
@@ -592,7 +709,7 @@ def baixador(linhas):
 
 def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None, processos=None,
                       rotinas_hoje=None, divulgacao=None, captura=None, repetidos=None, publico=None,
-                      interacoes=None):
+                      interacoes=None, metas=None):
     """As frases fixas, com números, do que o Claude precisa investigar."""
     agora = _agora(agora)
     pontos = []
@@ -649,6 +766,9 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
             if interacoes["feed_hoje"] < COMENTARIOS_NO_FEED_POR_DIA:
                 pontos.append(f"Feed da Shopee Vídeo: {interacoes['feed_hoje']} de {COMENTARIOS_NO_FEED_POR_DIA} "
                               "comentários hoje")
+    for robo, processo, esperado, feito, minimo in metas or []:
+        if feito < minimo:
+            pontos.append(f"{robo}: {processo}: rodou {feito} vez(es) em 24 h, o esperado é {esperado}")
     for (robo, processo), p in (processos or {}).items():
         if p["falhas"] >= FALHAS_PARA_COBRAR and p["falhas"] >= p["ok"]:
             resultado, detalhe, _ok, qtd = max((r for r in p["resultados"] if r[2] == 0), key=lambda r: r[3])
@@ -745,6 +865,10 @@ def main():
     if not processos:
         print("nenhum processo registrado")
 
+    print("\n== Metas do dia (esperado × feito em 24 h)")
+    for robo, processo, esperado, feito, minimo in metas_do_dia(processos):
+        print(f"{'✅' if feito >= minimo else '⚠️'} {robo}: {processo}: {feito} de {esperado}")
+
     print("\n== Rotinas de texto de hoje (por canal)")
     rotinas_hoje = rotinas_do_dia(agora)
     for canal, r in rotinas_hoje.items():
@@ -822,11 +946,18 @@ def main():
     print("Backup: nenhum" if backup is None else f"Backup: o último tem {backup[1]:.1f} h")
 
     pontos = sem_journal + pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora, processos,
-                                             rotinas_hoje, divulgacao, captura, repetidos, publico, interacoes)
+                                             rotinas_hoje, divulgacao, captura, repetidos, publico, interacoes,
+                                             metas_do_dia(processos))
+    marcas, resolvidos = lembrar_pontos(pontos, agora)
     print(f"\n== Pontos de atenção ({len(pontos)})")
     for ponto in pontos:
-        print(f"⚠️ {ponto}")
+        print(f"⚠️ {ponto} [{marcas[ponto]}]")
     if not pontos:
+        print("nenhum")
+    print(f"\n== Resolvidos desde o checkup anterior ({len(resolvidos)})")
+    for chave in resolvidos:
+        print(f"✅ {chave}")
+    if not resolvidos:
         print("nenhum")
 
 
