@@ -139,6 +139,20 @@ def test_pausado_nao_toca_e_pula_os_horarios(monkeypatch, avisos):
     assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 21:59"))["feitos"] == 1
 
 
+def test_pausa_por_desconexao_guarda_os_horarios_e_na_volta_contam_como_um(monkeypatch, avisos):
+    # 24/10/2026: o celular caiu às 15:09 e o horário das 15:29 foi pulado na pausa sozinha.
+    # Escolha do Rafael (P16): na volta do celular, os perdidos contam como um só.
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_limite_min": 2, "robo_limite_max": 2,
+                                              "robo_pausado": True, "robo_pausa_motivo": robo.MOTIVO_DA_DESCONEXAO})
+    monkeypatch.setattr(robo.celular_robo, "conectado", lambda: pytest.fail("pausado nem olha o celular"))
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 21:59")) == "pausado"
+    assert robo.estado_do_dia(robo.ler_config(), momento("2026-10-22 21:59"))["feitos"] == 0
+    # Retomado: os 2 horários que passaram viram um só, feito agora.
+    robo.db.atualizar_config(robo.CHAVE_CONFIG, lambda dados: dados.update(robo_pausado=False, robo_pausa_motivo=""))
+    assert robo.consumir_horarios(robo.ler_config(), momento("2026-10-22 21:59")) is True
+    assert robo.consumir_horarios(robo.ler_config(), momento("2026-10-22 21:59")) is False
+
+
 def test_fora_do_horario_nao_toca(monkeypatch, avisos):
     ativar(robo_inicio=8, robo_fim=22)
     assert robo.rodada(d=Intocavel(), agora=momento("2026-10-22 22:00")) == "fora do Horário do Robô"
