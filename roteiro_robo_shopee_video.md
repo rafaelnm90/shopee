@@ -252,8 +252,9 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
    cima (curtiu 2, são os 2 primeiros). Entre eles, o de menor preço primeiro; no
    empate, o de maior comissão. O robô acha cada um pelo nome, não pela posição. Na
    janela "Editar nome do produto", só **Feito**. O produto que já estava curtido de
-   outro dia fica mais embaixo (o curtir não toca no coração, que descurtiria): o robô
-   espera a lista carregar e rola até 8 vezes, parando no fim da lista; o registro
+   outro dia fica mais embaixo: o curtir o descurte e curte de novo (pedido do Rafael,
+   24/10/2026), e ele sobe ao 1º lugar. O anexar espera a lista carregar e rola até 8
+   vezes, parando no fim da lista (para o toque de descurtir que não pegou); o registro
    anota "já estava curtido" no curtir e, no anexar que não acha, quantas vezes rolou.
 4. Título no campo da legenda; as chaves da última tela como vêm.
 5. Postar. Curtir e comentar nunca é automático (diretriz 9.1.1).

@@ -228,24 +228,60 @@ def test_curtir_abre_a_pagina_completa_pelo_nome_e_curte(monkeypatch, capsys):
     assert "produto curtido" in saida and "Vestido" not in saida
 
 
-def test_curtir_com_o_produto_ja_curtido_nao_toca_no_coracao(monkeypatch, capsys):
+class Coracao(AparelhoDaPagina):
+    """A página completa com o coração que troca a cada toque (ou não, quando o toque não pega)."""
+
+    def __init__(self, descurte=True, curte=True):
+        super().__init__(completa=CURTIDO)
+        self.descurte, self.curte = descurte, curte
+
+    def click(self, x, y):
+        super().click(x, y)
+        if len(self.toques) == 1:
+            return                                                        # o nome: abre a página completa
+        if self.completa == CURTIDO and self.descurte:
+            self.completa = TELA_PRODUTO
+        elif self.completa == TELA_PRODUTO and self.curte:
+            self.completa = CURTIDO
+
+
+def test_curtir_com_o_produto_ja_curtido_descurte_e_curte_de_novo(monkeypatch, capsys):
+    # Pedido do Rafael (24/10): já curtido de outro dia, descurtir e curtir de novo faz o
+    # produto ir para o 1º lugar de Minhas Curtidas.
+    import registro_processos as rp
     _autorais()
     _produto_do_link(monkeypatch, VESTIDO)
-    aparelho = AparelhoDaPagina(completa=CURTIDO)
+    aparelho = Coracao()
     assert ps.explorar("curtir", aparelho)
-    assert aparelho.toques == [(525, 1217)]
-    assert "já estava curtido" in capsys.readouterr().out
+    assert aparelho.toques == [(525, 1217), (1028, 1233), (1028, 1233)] and aparelho.completa == CURTIDO
+    assert "descurti e curti de novo" in capsys.readouterr().out
+    linha = [l for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "curtir o produto"][0]
+    assert linha[2:4] == ("já estava curtido", "descurtido e curtido de novo")
+
+
+def test_curtido_que_nao_descurte_segue_e_o_que_nao_volta_a_curtir_para(monkeypatch):
+    _autorais()
+    _produto_do_link(monkeypatch, VESTIDO)
+    # O toque para descurtir não pegou: continua curtido, só mais embaixo; segue.
+    aparelho = Coracao(descurte=False)
+    assert ps.explorar("curtir", aparelho)
+    assert len(aparelho.toques) == 2
+    # Descurtiu, mas não volta a curtir: tenta 2 vezes e para (sem o produto na lista).
+    aparelho = Coracao(curte=False)
+    assert not ps.explorar("curtir", aparelho)
+    assert len(aparelho.toques) == 4 and aparelho.completa == TELA_PRODUTO
 
 
 def test_curtir_deixa_no_registro_se_o_produto_ja_estava_curtido():
-    # O já curtido de outro dia fica mais embaixo em Minhas Curtidas: o checkup liga os dois.
+    # O checkup liga o curtir ao "nome não achado" do anexar.
     import registro_processos as rp
-    assert ps.curtir_na_pagina(Aparelho(tela=CURTIDO), CURTIDO)[0]
     aparelho = Aparelho(tela=TELA_PRODUTO)
     aparelho.click = lambda x, y: setattr(aparelho, "tela", CURTIDO)
     assert ps.curtir_na_pagina(aparelho, TELA_PRODUTO)[0]
-    linhas = {l[2] for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "curtir o produto"}
-    assert linhas == {"já estava curtido", "curtido agora"}
+    # O toque para descurtir que não pega fica no registro com o motivo.
+    assert ps.curtir_na_pagina(Aparelho(tela=CURTIDO), CURTIDO)[0]
+    linhas = {(l[2], l[3]) for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "curtir o produto"}
+    assert linhas == {("curtido agora", ""), ("já estava curtido", "o toque para descurtir não pegou")}
 
 
 def test_curtir_rola_atras_do_coracao_e_para_sem_ele(monkeypatch, capsys):

@@ -123,8 +123,8 @@ Responda só com um JSON: {{"confere": true ou false, "motivo": "uma frase curta
 AVISO_JANELA_ERRADA = ("🤖 Robô da Shopee Vídeo: a janela de editar o nome aberta no celular é de outro "
                        "produto, não do produto do vídeo. Parei sem tocar em Feito; confira o celular.")
 # Quantas vezes o passo produto rola a lista de Minhas Curtidas atrás do produto do vídeo
-# (para antes, no fim da lista). O produto que já estava curtido de outro dia fica mais
-# embaixo em Mais Recente: o curtir não toca nele, porque o toque descurtiria.
+# (para antes, no fim da lista). O já curtido de outro dia o curtir descurte e curte de novo,
+# para ficar em 1º; a rolagem funda cobre o toque que não pegou.
 ROLAGENS_DO_PRODUTO = 8
 # Segundos que a lista de Minhas Curtidas tem para carregar antes da busca do produto.
 ESPERA_DA_LISTA = 9
@@ -696,8 +696,8 @@ def abrir_pagina_completa(d, video):
 def curtir(d, video):
     """
     Curte o produto do vídeo na página completa dele (abrir_pagina_completa). Já curtido
-    (buttonItemLiked), segue sem tocar: o toque descurtiria. Sem achar o nome ou o
-    coração, para sem curtir nada.
+    (buttonItemLiked) de outro dia: descurte e curte de novo, para ele subir ao 1º lugar
+    de Minhas Curtidas. Sem achar o nome ou o coração, para sem curtir nada.
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     ok, resultado, tela = abrir_pagina_completa(d, video)
@@ -706,23 +706,49 @@ def curtir(d, video):
     return curtir_na_pagina(d, tela)
 
 
+def tocar_no_coracao(d, lista, ident):
+    """Toca no coração (buttonItemLike ou buttonItemLiked) e devolve a tela de depois."""
+    coracao = next(el for el in lista if el["id"] == ident)
+    d.click(*_centro(coracao))
+    time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
+    return elementos(d.dump_hierarchy())
+
+
+def curtido(lista):
+    return any(el["id"] == "buttonItemLiked" for el in lista)
+
+
 def curtir_na_pagina(d, tela):
     """
-    Curte o produto da página que está aberta, com o coração já na tela: já curtido
-    (buttonItemLiked), segue sem tocar, porque o toque descurtiria.
+    Curte o produto da página que está aberta, com o coração já na tela. Já curtido de
+    outro dia, ele fica mais embaixo em Minhas Curtidas → Mais Recente: o robô descurte e
+    curte de novo, e o produto sobe ao 1º lugar. Pedido do Rafael: DECISOES.md, Shopee Vídeo.
     """
     lista = elementos(tela)
     if not tem_coracao(lista):
         return False, "o coração não está na página do produto: nada curtido"
-    if any(el["id"] == "buttonItemLiked" for el in lista):
-        # Já curtido de outro dia fica mais embaixo em Minhas Curtidas: o registro conta,
-        # para o checkup ligar ao "nome não achado" do anexar.
-        registro_processos.registrar("shopee_video", "curtir o produto", "já estava curtido", ok=True)
-        return True, "o produto já estava curtido: segui sem tocar no coração"
-    coracao = next(el for el in lista if el["id"] == "buttonItemLike")
-    d.click(*_centro(coracao))
-    time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
-    if not any(el["id"] == "buttonItemLiked" for el in elementos(d.dump_hierarchy())):
+    if curtido(lista):
+        lista = tocar_no_coracao(d, lista, "buttonItemLiked")
+        if curtido(lista):
+            # O toque não descurtiu: o produto segue curtido, só mais embaixo na lista (o
+            # anexar rola atrás dele).
+            registro_processos.registrar("shopee_video", "curtir o produto", "já estava curtido",
+                                         "o toque para descurtir não pegou", ok=True)
+            return True, "o produto já estava curtido e o toque para descurtir não pegou: segui"
+        if not tem_coracao(lista):
+            return False, "descurti o produto para ele subir na lista, mas o coração sumiu da tela"
+        for _ in range(2):
+            lista = tocar_no_coracao(d, lista, "buttonItemLike")
+            if curtido(lista) or not tem_coracao(lista):
+                break
+        if not curtido(lista):
+            registro_processos.registrar("shopee_video", "curtir o produto", "descurtido e não curtido de novo", ok=False)
+            return False, "descurti o produto para ele subir na lista, mas ele não ficou curtido de novo"
+        registro_processos.registrar("shopee_video", "curtir o produto", "já estava curtido",
+                                     "descurtido e curtido de novo", ok=True)
+        return True, "o produto já estava curtido: descurti e curti de novo, para ele ficar em 1º na lista"
+    lista = tocar_no_coracao(d, lista, "buttonItemLike")
+    if not curtido(lista):
         return False, "toquei no coração, mas o produto não ficou curtido"
     registro_processos.registrar("shopee_video", "curtir o produto", "curtido agora", ok=True)
     return True, "produto curtido"
