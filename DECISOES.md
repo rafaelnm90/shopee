@@ -157,6 +157,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 ## Financeiro
 
 - **03/10/2026:** na confirmação de um pedido, o saldo soma só a comissão final. O ajuste de valor só entra para pedido que já estava confirmado. Os erros antigos que já estavam no saldo gravado não foram recalculados.
+- **24/10/2026:** pedido do Rafael (P13, escolheu as três melhorias que o Claude propôs: medir o que vende, foto do produto × vídeo na Shopee Vídeo e o robô da Shopee Vídeo separado do bot). **Medir o que vende:** cada robô marca os seus links com a própria etiqueta (subId): `viral` (Espião), `autorais`, `espelhador`, `achadinhos` + o nicho (garimpo) e `busca` (Buscador do Grupo Público); os parceiros continuam com a deles. O relatório de vendas que o bot puxa de hora em hora passa a trazer a etiqueta e os produtos de cada pedido, e toda **segunda às 09:13** chega no privado a comissão dos 7 dias anteriores por canal e os 5 produtos que mais renderam (venda sem etiqueta: Shopee Vídeo, links antigos e compras fora dos links dos robôs). Com umas semanas de dados, o Claude propõe como cada robô passa a priorizar o que vende (canal, categoria, horário), e isso vai ao Rafael antes de mudar.
 
 ## Notas fiscais
 

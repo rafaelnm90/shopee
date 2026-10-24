@@ -218,11 +218,28 @@ def _motivo_da_recusa(status, resposta):
     return f"a API recusou (status {status})", "recusa", status
 
 
+# A etiqueta (subId) de cada robô nos links de afiliado: o relatório de vendas traz a
+# etiqueta de volta (utmContent), e o relatório semanal soma a comissão por canal e por
+# produto (vendas.py). Pedido do Rafael (P13): DECISOES.md, Financeiro.
+ETIQUETA_VIRAL = "viral"
+ETIQUETA_AUTORAIS = "autorais"
+ETIQUETA_ESPELHADOR = "espelhador"
+ETIQUETA_ACHADINHOS = "achadinhos"
+ETIQUETA_BUSCA = "busca"
+
+
+def etiquetas(sub_ids):
+    """Os subIds limpos (até 5, o limite da Shopee) de um texto ou de uma lista de textos."""
+    lista = [sub_ids] if isinstance(sub_ids, str) else list(sub_ids or [])
+    return [limpar_sub_id(s) for s in lista if str(s).strip()][:5] or ["geral"]
+
+
 async def converter_link_shopee(link_original, sub_id_nicho="geral", app_id=None, app_secret=None,
                                 avisar_falha=True):
     """
     Converte um link da Shopee em link curto de afiliado, marcado com o subId
-    do nicho para rastrear de onde veio a venda.
+    do nicho para rastrear de onde veio a venda. sub_id_nicho pode ser uma lista
+    (até 5 etiquetas, da mais geral para a mais detalhada: ["achadinhos", "casa"]).
 
     Erro de rede ou recusa da API: tenta de novo duas vezes (PAUSAS_ENTRE_TENTATIVAS).
     Em QUALQUER falha que sobrar (sem chaves, erro de rede, recusa da API) devolve o link
@@ -235,7 +252,8 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", app_id=None
     """
     cred_id = app_id or SHOPEE_APP_ID
     cred_secret = app_secret or SHOPEE_APP_SECRET
-    sub_id_limpo = limpar_sub_id(sub_id_nicho)
+    sub_ids = etiquetas(sub_id_nicho)
+    sub_id_limpo = "-".join(sub_ids)
 
     def falhou(motivo):
         if avisar_falha:
@@ -257,7 +275,7 @@ async def converter_link_shopee(link_original, sub_id_nicho="geral", app_id=None
         "query": "mutation generateShortLink($originUrl: String!, $subIds: [String!]) { generateShortLink(input: {originUrl: $originUrl, subIds: $subIds}) { shortLink } }",
         "variables": {
             "originUrl": link_processar,
-            "subIds": [sub_id_limpo]
+            "subIds": sub_ids
         }
     }
 

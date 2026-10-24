@@ -50,6 +50,7 @@ API_ID = int(os.getenv('API_ID'))
 API_HASH = os.getenv('API_HASH')
 
 from api_gemini import analisar_video_gemini
+import api_shopee
 from api_shopee import converter_link_shopee
 from links_shopee import extrair_link_shopee
 import legendas
@@ -808,7 +809,7 @@ async def motor_espelhador_userbot(event):
     for origem_casada in origens_casadas:
         registro_processos.registrar("espelhador", "vídeo com link na origem da rota", "visto", origem=origem_casada)
     logger.info("🔗 [Espelhador] A converter o link da Shopee encontrado via API Central...")
-    link_final_convertido = await converter_link_shopee(link_capturado, "geral")
+    link_final_convertido = await converter_link_shopee(link_capturado, api_shopee.ETIQUETA_ESPELHADOR)
     logger.info("✅ [Espelhador] Sucesso: Link convertido utilizando a função nativa correta.")
 
     logger.info("📥 [Espelhador] Descarregando vídeo temporário para verificação de duplicidade...")
@@ -914,7 +915,7 @@ async def renovar_link_no_disparo(item, texto):
     origem = item.get("link_original") or guardado
     if not origem:
         return texto
-    novo = await converter_link_shopee(origem, "geral", avisar_falha=False)
+    novo = await converter_link_shopee(origem, api_shopee.ETIQUETA_ESPELHADOR, avisar_falha=False)
     if not novo or novo == origem:
         logger.warning("⚠️ [Espelhador] Link não renovado no disparo; vai o da captura.")
         return texto
