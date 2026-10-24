@@ -968,8 +968,10 @@ async def mostrar_rascunho(message, state, depois_de=None):
     """
     pendentes = robo.esperando_aprovacao()
     if not pendentes:
-        await message.answer("📝 Nenhum rascunho esperando a sua aprovação.")
-        await mostrar_painel(message, state)
+        # Só a frase, já com o teclado do painel: o texto do painel inteiro depois de cada
+        # aprovação ou recusa repetia o que o Rafael já sabe. Pedido dele: DECISOES.md, Shopee Vídeo.
+        await state.set_state(ShopeeVideoFluxo.menu)
+        await message.answer("📝 Nenhum rascunho esperando a sua aprovação.", reply_markup=teclado_painel(ler_config()))
         return
     seguintes = [r for r in pendentes if depois_de is not None and r["id"] > depois_de]
     rascunho = (seguintes or pendentes)[0]

@@ -311,7 +311,23 @@ def test_rascunhos_um_por_um_com_video_print_titulo_e_link(bm, Msg, Est):
     msg = MsgComMidia(Msg, "Confirmar Recusa ✅")
     rodar(sv.salvar_recusa(msg, est))
     assert sv.robo.pegar(segundo)["estado"] == "recusado"
-    assert "Nenhum rascunho esperando" in msg.saidas[-2]
+    # Pedido do Rafael (24/10): no fim, só a frase, sem o texto do painel inteiro.
+    assert msg.saidas[-2:] == ["❌ Recusado. O robô apaga o rascunho do celular na próxima rodada.",
+                               "📝 Nenhum rascunho esperando a sua aprovação."]
+    assert not any("Quem posta agora" in s for s in msg.saidas)
+
+
+def test_aprovar_o_ultimo_mostra_so_as_duas_frases(bm, Msg, Est):
+    # Pedido do Rafael (24/10): depois de aprovar, só o "Aprovado" e o "Nenhum rascunho",
+    # com o teclado do painel, sem o texto do painel inteiro.
+    sv, est = _painel(bm), Est()
+    _rascunho(sv, "Único título #a")
+    rodar(sv.rascunhos_handler(MsgComMidia(Msg, "Rascunhos do Robô 📝"), est))
+    msg = MsgComMidia(Msg, "Aprovar Rascunho ✅")
+    rodar(sv.aprovar_handler(msg, est))
+    assert len(msg.saidas) == 2 and msg.saidas[0].startswith("✅ Aprovado.")
+    assert msg.saidas[1] == "📝 Nenhum rascunho esperando a sua aprovação."
+    assert est.estado == sv.ShopeeVideoFluxo.menu
 
 
 def test_proximo_rascunho_da_a_volta(bm, Msg, Est):

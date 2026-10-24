@@ -306,6 +306,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
 - **09/10/2026:** o Rafael trocou a ordem dos dois primeiros passos: 1) salvar o vídeo; 2) favoritar o produto (❤️, pelo link; link de vídeo: só os produtos que o criador vinculou); 3) postar, com o título para copiar e Adicionar Produto → Minhas Curtidas; 4) comentar depois de postar. Favoritar continua antes de postar, pelo mesmo motivo.
 - **09/10/2026:** título abaixo de 130 caracteres (no teste saiu com 115): o robô pede à IA mais uma vez e fica com o título mais longo. Se continuar curto, manda assim mesmo, com o tamanho e um aviso ⚠️ na mensagem, para o Rafael completar se quiser.
 - **09/10/2026:** o preço da mensagem é o da promoção do momento (o vermelho do app). Quando a promoção acaba, o preço volta ao normal; o Rafael viu que isso não atrapalha.
+- **24/10/2026:** depois de aprovar (ou recusar) o último rascunho em Rascunhos do Robô 📝, o bot mostra só o "✅ Aprovado..." e o "📝 Nenhum rascunho esperando a sua aprovação.", já com o teclado do painel da Shopee Vídeo, sem repetir o texto do painel inteiro (pedido do Rafael, com print).
 
 ## Monitor, deploy e servidor
 
