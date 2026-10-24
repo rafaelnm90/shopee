@@ -1251,7 +1251,66 @@ def test_nome_nao_achado_deixa_no_registro_o_quanto_o_mais_parecido_lembra(monke
     assert not ok and "não está na lista" in motivo and VESTIDO in avisos[0]
     linha = [l for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "anexar o produto"][0]
     assert linha[2] == "nome não achado em Minhas Curtidas"
-    assert linha[3] == ("o mais parecido tem 100% das palavras e o nome começa depois de 7 palavra(s); "
-                        "1 rolada(s); a lista acabou")
+    assert linha[3] == ("o mais parecido tem 100% e o nome começa depois de 7 palavra(s); "
+                        "o 1º da lista tem 0%; 1 rolada(s); a lista acabou")
     assert "Vestido" not in linha[3]
     assert ps.parecido_na_tela(TELA_CURTIDAS, "Panela de Pressão Inox") == (0, -1)
+
+
+def _nao_achado(monkeypatch, tela, nome):
+    """O detalhe que o anexar deixa no registro quando não acha o produto em Minhas Curtidas."""
+    import registro_processos as rp
+    monkeypatch.setattr(ps.avisar_rafael, "mandar_texto", lambda texto: None)
+    monkeypatch.setattr(ps, "rolar", lambda d: None)
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+
+    class Celular:
+        def dump_hierarchy(self):
+            return tela
+
+    ok, _ = ps.adicionar_produto(Celular(), {"produto": nome})
+    assert not ok
+    return [l for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "anexar o produto"][0][3]
+
+
+def test_nome_nao_achado_diz_onde_o_mais_parecido_difere_e_o_quanto_o_1o_lembra(monkeypatch):
+    # 24/10 18:09: o mais parecido tinha 85% das palavras e a lista acabou. Para a próxima
+    # vez dizer se era o produto com o nome mostrado de outro jeito (o 1º da lista é o
+    # curtido por último) ou outro produto: as posições que faltam e o 1º, só em números.
+    tela = TELA_CURTIDAS.replace(f'text="{VESTIDO}"', 'text="Vestido Infantil Liso Gatinho Para Meninas de 4 a 14 Anos"')
+    detalhe = _nao_achado(monkeypatch, tela, VESTIDO)
+    assert detalhe == ("o mais parecido tem 85% (faltam a 3ª; 1 a mais); o 1º da lista tem 0%; "
+                       "1 rolada(s); a lista acabou")
+    assert len(detalhe) <= 120 and "Vestido" not in detalhe and "Liso" not in detalhe
+
+
+def test_detalhe_do_nao_achado_cabe_no_registro_com_muitas_diferencas(monkeypatch):
+    tela = TELA_CURTIDAS.replace(f'text="{VESTIDO}"', 'text="Vestido Adulto Liso Grande Para Mulheres Festa Noite Longo"')
+    detalhe = _nao_achado(monkeypatch, tela, VESTIDO)
+    assert detalhe.startswith("o mais parecido tem ") and "(faltam a 2ª, 3ª, 4ª…;" in detalhe
+    assert detalhe.endswith("; a lista acabou") and len(detalhe) <= 120
+
+
+@pytest.mark.parametrize("texto", [
+    "【Oferta】Vestido Infantil Estampado Gatinho Para Meninas de 4 a 14 Anos",
+    "Vestido Infantil - Estampado Gatinho Para Meninas de 4 a 14 Anos",
+    "Vestido Infantil Estampado Gatinho Para Meninas de 4 a 14 Anos 🔥",
+])
+def test_sinal_ou_acento_codificado_de_outro_jeito_nao_faz_outro_produto(texto):
+    # Um colchete, traço, emoji ou acento de outra codificação a mais não é outro produto: a
+    # lista de Adicionar Produto pode mostrar os sinais do nome de outro jeito.
+    assert ps.nome_na_pagina(texto, VESTIDO)
+    tela = TELA_CURTIDAS.replace(f'text="{VESTIDO}"', f'text="{texto}"')
+    assert ps.adicionar_do_produto(tela, VESTIDO)["caixa"] == (850, 1235, 1000, 1280)
+
+
+def test_acento_de_outra_codificacao_e_o_mesmo_nome():
+    import unicodedata
+    panela = "Panela de Pressão Inox 4,5 Litros"
+    assert ps.mesmo_produto(unicodedata.normalize("NFD", panela), panela)
+    assert not ps.mesmo_produto("Panela de Pressao Inox 4,5 Litros", panela)
+
+
+def test_nomes_da_lista_de_cima_para_baixo_so_os_que_tem_adicionar():
+    assert ps.nomes_da_lista(TELA_CURTIDAS) == ["Fibra Proteína Cabelo Cacheado Luxo", VESTIDO]
+    assert ps.nomes_da_lista(TELA_EU) == []
