@@ -55,6 +55,26 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   `CAMINHO_PRODUTO` do `robo_shopee_video.py` (o que tocar, a espera e o que tem de
   aparecer depois). O treino confere cada passo contra elas; quando a Shopee mudar uma
   tela, remapear com o explorar e mudar ali.
+- **Comentários dos vídeos (mapeado no Motorola em 24/10/2026, com o vídeo do Rafael):**
+  Notificações → filtro **Lives, Vídeos e …**: cada linha é um quadro com um texto (o aviso;
+  o de comentário traz o nome da pessoa, "comentou no seu vídeo:" e o comentário entre
+  aspas) e a hora embaixo. Tocar no texto abre o vídeo (`HomeActivity_`) e, uns 8 s depois,
+  o **painel de comentários** por cima (`ReactTransparentActivity_`): o cartão do produto no
+  alto (nome, preço, "com cupom"), **"# Comentários"**, e cada comentário com a foto (x≈84;
+  a resposta fica recuada, x≈178), o nome (e o selo **"Criador"** quando é o Rafael), o
+  texto, o coração (desc "… comment like", x≈1014), a data ("há # …" ou "# de …"),
+  **Responder** e "Curtido pelo criador". O primeiro da lista é a legenda do vídeo, com o
+  selo Criador. Embaixo, os emojis rápidos e o campo "add a comment" com o botão de enviar
+  ao lado (x≈1007). O toque em **Responder** abre o teclado e o campo vira "… a …" (a
+  resposta àquela pessoa); o voltar fecha o teclado e o segundo voltar sai da resposta.
+- **Feed Live e Vídeo (mapeado no Motorola em 24/10/2026):** a aba de baixo **Live e
+  Vídeo** abre o player em tela cheia, com as abas Vídeos, Lives e **Para você** no alto;
+  o rolar passa ao seguinte. **Live:** ids `live_room_in_video_feed_…`,
+  `tv_audience_viewer_num` (espectadores), `tv_send_message` (Diga alguma coisa) e o
+  "Compre Agora" do produto (proibido). **Vídeo:** player `rn_vod_player_view_…`, o cartão
+  do produto com "Comprar com cupom" (proibido), o nome do criador e a legenda embaixo e, na
+  coluna da direita (x≈1002), a foto, o **coração** (~1645, desc "like …", com o número), o
+  **balão de comentários** (~1806, com o número), compartilhar (~1982) e mais.
 - **Rascunhos:** tabela `shopee_video_rascunhos` (estados preparando → rascunho →
   aprovado → postado, ou recusado → apagado; pulado quando o problema é do vídeo). O
   vídeo e o print ficam em `~/shopee_video/rascunhos` (ID.mp4 e ID.png). Na galeria do
