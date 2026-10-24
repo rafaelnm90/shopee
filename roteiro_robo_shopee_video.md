@@ -30,6 +30,20 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   Biblioteca não aparece depois do Postar vídeo (`abrir_galeria`) e antes de postar um
   aprovado. Até o fim (chave `robo_suspenso_ate` de `shopee_video`, mais 15 min), nada
   toca no celular, e o assistente espera junto.
+- **Saúde do Vídeo (mapeada no Motorola em 24/10/2026, com o vídeo do Rafael):** Perfil em
+  Shopee Vídeo → **Centro do criador** (`ReactActivity_`, a tela "Live e Vídeo", aba Vídeo) →
+  o quadro **Saúde do Vídeo** (o nome não aceita toque; o robô toca no "Melhoria Necessária"
+  da mesma linha, ~805,1357). Abre uma página web (`WebPageActivity_`): "Banido
+  Temporariamente" com "Seu acesso para postar vídeos foi banido até DD/MM/AAAA HH:MM:SS",
+  "Ponto de Penalidade" e o número (escala de 0 a 15), Diretrizes da Comunidade (Aprender) e
+  **Vídeos de Violação** (últimos 30 dias): cada punição em três textos, o tipo ("Produto
+  Irrelevante", "Contrafeito", "Violação de Propriedade Intelectual"), "Data de Punição:
+  DD/MM/AAAA HH:MM:SS" e "Status da Apelação: Não Recorrido" (ou "Bem-sucedido"...). Tocar no
+  tipo abre a tela **Removido** (`ReactActivity_`): o título (com ".." no lugar dos emojis),
+  "Postado em: HH:MM:SS AAAA-MM-DD.", a explicação da Shopee e **Apelar aqui.** (abre o
+  **Recurso**: "Razão para apelar *", contador 0/200, o campo e **Enviar**; o robô nunca
+  abre). O voltar da Removido volta para a lista no mesmo ponto da rolagem. Falta ver:
+  se a punição antiga (05/10) ainda tem o Apelar aqui (o celular desconectou no meio).
 - **Mapa:** os caminhos ficam nas listas `CAMINHO_PERFIL`, `CAMINHO_POSTAR` e
   `CAMINHO_PRODUTO` do `robo_shopee_video.py` (o que tocar, a espera e o que tem de
   aparecer depois). O treino confere cada passo contra elas; quando a Shopee mudar uma

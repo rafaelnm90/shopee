@@ -46,6 +46,7 @@ from teclados import (montar_teclado, teclado_com_cancelar, teclado_cancelar,
                       teclado_aprovar_cancelar, teclado_janela_dia_todo)
 
 import android_virtual as av
+import apelacoes_shopee_video as apelacoes
 import assistente_shopee_video as assistente
 import celular_robo
 import db
@@ -77,6 +78,8 @@ def configurar_dependencias(bot: Bot, scheduler, admin_id):
     scheduler.add_job(verificar_robo, "interval", minutes=15, id="shopee_video_robo",
                       replace_existing=True, max_instances=1, coalesce=True)
     scheduler.add_job(mandar_resumo_do_robo, "cron", hour=HORA_DO_RESUMO, minute=0, id="shopee_video_resumo",
+                      replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(lembrar_apelacoes, "interval", minutes=5, id="shopee_video_apelacoes",
                       replace_existing=True, max_instances=1, coalesce=True)
 
 
@@ -174,6 +177,78 @@ async def mandar_resumo_do_robo():
 
 def _admin(message):
     return message.from_user is not None and message.from_user.id == ADMIN_ID
+
+
+# --- Apelação das punições (apelacoes_shopee_video.py) ---
+
+BOTAO_SAUDE = "Saúde da Shopee Vídeo 🩺"
+BOTAO_GERAR_APELACAO = "Gerar Apelação ⚖️"
+
+
+async def lembrar_apelacoes():
+    """
+    Volta do agendador: o aviso de cada punição nova sem recurso e o lembrete de hora em
+    hora, a qualquer hora, até o Rafael tocar em Já recorri ou Não vou recorrer.
+    Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    async def enviar(texto, p):
+        await bot_instance.send_message(ADMIN_ID, texto, parse_mode="HTML", reply_markup=apelacoes.botoes(p),
+                                        disable_web_page_preview=True)
+        return True
+    enviados = await apelacoes.lembrar(enviar)
+    if enviados:
+        logger.info(f"⚖️ [Apelação Shopee Vídeo] {enviados} aviso(s) de punição no privado.")
+        registro_processos.registrar("shopee_video", "aviso de punição para recorrer", "enviado", str(enviados),
+                                     ok=True)
+
+
+@router.callback_query(F.data.startswith((apelacoes.CALLBACK_RECORRI, apelacoes.CALLBACK_NAO_VAI)))
+async def decisao_da_apelacao(callback: types.CallbackQuery):
+    """Já recorri ou Não vou recorrer: o lembrete daquela punição para."""
+    if callback.from_user is None or callback.from_user.id != ADMIN_ID:
+        return
+    recorri = callback.data.startswith(apelacoes.CALLBACK_RECORRI)
+    ident = callback.data.split(":", 1)[1]
+    mudou = ident.isdigit() and apelacoes.marcar(int(ident), apelacoes.RECORRIDA if recorri else apelacoes.NAO_VAI)
+    resposta = ("✅ Anotado: você recorreu. Parei de lembrar desta punição." if recorri
+                else "🚫 Anotado: você não vai recorrer. Parei de lembrar desta punição.")
+    await callback.answer(resposta if mudou else "Esta punição já estava resolvida.")
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    if mudou:
+        await callback.message.answer(resposta)
+
+
+def teclado_saude():
+    return montar_teclado([[KeyboardButton(text=BOTAO_GERAR_APELACAO)],
+                           [KeyboardButton(text="Relatório Geral 📊"), KeyboardButton(text="Voltar ao Início 🔙")]])
+
+
+@router.message(F.text == BOTAO_SAUDE, StateFilter("*"))
+async def saude_handler(message: types.Message, state: FSMContext):
+    """
+    Relatório Geral 📊 → Saúde da Shopee Vídeo 🩺 (ideia do Rafael, 23/10/2026): a
+    suspensão, os pontos de penalidade e as punições, como o robô leu no Motorola.
+    """
+    if not _admin(message): return
+    await state.clear()
+    await message.answer(apelacoes.texto_saude(ler_config(), robo.ler_estado()), parse_mode="HTML",
+                         reply_markup=teclado_saude())
+
+
+@router.message(F.text == BOTAO_GERAR_APELACAO, StateFilter("*"))
+async def gerar_apelacao_handler(message: types.Message, state: FSMContext):
+    """O robô lê a Saúde do Vídeo na hora, mesmo pausado, e manda o texto de cada punição nova sem recurso."""
+    if not _admin(message): return
+    if _rodada.locked():
+        await message.answer("⏳ O robô está no meio de uma rodada no celular. Tente de novo em alguns minutos.")
+        return
+    logger.info("⚖️ Shopee Vídeo: Gerar Apelação.")
+    await message.answer("⚖️ O robô vai olhar a Saúde do Vídeo no Motorola agora. Em uns 3 a 5 min chega aqui o "
+                         "resumo e, para cada punição nova sem recurso, o texto pronto para copiar.")
+    asyncio.create_task(rodar_robo("--saude"))
 
 
 class ShopeeVideoFluxo(StatesGroup):
