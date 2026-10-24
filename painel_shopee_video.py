@@ -50,6 +50,7 @@ import apelacoes_shopee_video as apelacoes
 import assistente_shopee_video as assistente
 import celular_robo
 import db
+import exemplos
 import registro_processos
 import robo_shopee_video as robo
 from fuso import fuso_horario
@@ -354,9 +355,27 @@ def interpretar_janela(texto):
 
 
 # Rascunhos por Dia (robô) e Vídeos por Dia (assistente): primeiro o Rafael toca em Faixa
-# ou Fixo, depois digita. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
-FAIXA_DO_ROBO = {"coisa": "rascunhos", "faixa": "1-3", "fixo": "2"}
-FAIXA_DO_ASSISTENTE = {"coisa": "vídeos", "faixa": "5-10", "fixo": "6"}
+# ou Fixo, depois digita. Decisão do Rafael: DECISOES.md, Shopee Vídeo. Os exemplos são os
+# de agora (exemplos.py); "faixa" e "fixo" aqui são só os de quem nunca mandou.
+FAIXA_DO_ROBO = {"coisa": "rascunhos", "faixa": "1-3", "fixo": "2", "nome": "shopee_video_robo",
+                 "chaves": ("robo_limite_min", "robo_limite_max")}
+FAIXA_DO_ASSISTENTE = {"coisa": "vídeos", "faixa": "5-10", "fixo": "6", "nome": "shopee_video_assistente",
+                       "chaves": ("limite_min", "limite_max")}
+
+
+def com_exemplos_de_agora(jeito, config=None):
+    """O jeito da pergunta com a faixa e o fixo de agora (ou os últimos que o Rafael mandou)."""
+    config = config or ler_config()
+    cota = tuple(config[chave] for chave in jeito["chaves"])
+    faixa, fixo = exemplos.faixa_e_fixo(jeito["nome"], cota, jeito["faixa"], jeito["fixo"])
+    return {**jeito, "faixa": faixa, "fixo": fixo}
+
+
+def exemplo_do_horario(config, do_robo):
+    """O "início-fim" de agora; em Dia Todo, o último que o Rafael mandou."""
+    if do_robo:
+        return exemplos.janela("shopee_video_robo", config["robo_inicio"], config["robo_fim"], "9-21")
+    return exemplos.janela("shopee_video_assistente", config["inicio"], config["fim"], "13-22")
 
 
 def texto_faixa_ou_fixo(pergunta, jeito, piso, topo, maximo):
@@ -728,7 +747,7 @@ async def pedir_faixa(message: types.Message, state: FSMContext):
     if not _admin(message): return
     config = ler_config()
     await message.answer(
-        texto_faixa_ou_fixo("Quantos vídeos por dia?", FAIXA_DO_ASSISTENTE,
+        texto_faixa_ou_fixo("Quantos vídeos por dia?", com_exemplos_de_agora(FAIXA_DO_ASSISTENTE, config),
                             config["limite_min"], config["limite_max"], MAXIMO_POR_DIA),
         parse_mode="HTML", reply_markup=teclado_faixa_ou_fixo)
     await state.update_data(tipo_faixa=None)
@@ -744,7 +763,7 @@ async def pedir_janela(message: types.Message, state: FSMContext):
     config = ler_config()
     await message.answer(
         "Em que horário as postagens podem chegar? Elas se espalham dentro dessa faixa.\n\n"
-        "Envie <code>início-fim</code> (ex.: <code>13-22</code>) ou toque em Dia Todo.\n"
+        f"Envie <code>início-fim</code> (ex.: <code>{exemplo_do_horario(config, False)}</code>) ou toque em Dia Todo.\n"
         f"<i>Hoje está {rotulo_janela(config['inicio'], config['fim'])}.</i>",
         parse_mode="HTML", reply_markup=teclado_janela_dia_todo)
     await state.set_state(ShopeeVideoFluxo.aguardando_janela)
@@ -837,8 +856,8 @@ async def pedir_faixa_robo(message: types.Message, state: FSMContext):
     if not _admin(message): return
     config = ler_config()
     await message.answer(
-        texto_faixa_ou_fixo("Quantos rascunhos novos o robô prepara por dia?", FAIXA_DO_ROBO,
-                            config["robo_limite_min"], config["robo_limite_max"], robo.MAXIMO_POR_DIA),
+        texto_faixa_ou_fixo("Quantos rascunhos novos o robô prepara por dia?",
+                            com_exemplos_de_agora(FAIXA_DO_ROBO, config), config["robo_limite_min"], config["robo_limite_max"], robo.MAXIMO_POR_DIA),
         parse_mode="HTML", reply_markup=teclado_faixa_ou_fixo)
     await state.update_data(tipo_faixa=None)
     await state.set_state(ShopeeVideoFluxo.aguardando_tipo_faixa_robo)
@@ -851,7 +870,7 @@ async def escolher_tipo_faixa(message: types.Message, state: FSMContext):
     if not _admin(message): return
     do_robo = (await state.get_state() or "").endswith("_robo")
     tipo = "faixa" if message.text == BOTAO_FAIXA else "fixo"
-    await message.answer(texto_pedir_numeros(tipo, FAIXA_DO_ROBO if do_robo else FAIXA_DO_ASSISTENTE),
+    await message.answer(texto_pedir_numeros(tipo, com_exemplos_de_agora(FAIXA_DO_ROBO if do_robo else FAIXA_DO_ASSISTENTE)),
                          parse_mode="HTML", reply_markup=teclado_cancelar)
     await state.update_data(tipo_faixa=tipo)
     await state.set_state(ShopeeVideoFluxo.aguardando_faixa_robo if do_robo else ShopeeVideoFluxo.aguardando_faixa)
@@ -864,7 +883,7 @@ async def pedir_janela_robo(message: types.Message, state: FSMContext):
     await message.answer(
         "Em que horário o robô pode tocar no celular? Os rascunhos e as postagens aprovadas se "
         "espalham dentro dessa faixa, em minutos sorteados.\n\n"
-        "Envie <code>início-fim</code> (ex.: <code>9-21</code>) ou toque em Dia Todo.\n"
+        f"Envie <code>início-fim</code> (ex.: <code>{exemplo_do_horario(config, True)}</code>) ou toque em Dia Todo.\n"
         f"<i>Hoje está {rotulo_janela(config['robo_inicio'], config['robo_fim'])}. Fora dele, se a Shopee "
         "pedir a verificação, ninguém resolve até você acordar.</i>",
         parse_mode="HTML", reply_markup=teclado_janela_dia_todo)
@@ -1266,7 +1285,7 @@ async def pedir_reconexao(message: types.Message, state: FSMContext):
 async def confirmar_faixa(message: types.Message, state: FSMContext):
     # Sem tocar em Faixa ou Fixo, um "5-10" ou "6" digitado direto também vale.
     tipo = (await state.get_data()).get("tipo_faixa")
-    faixa, aviso = ler_faixa_escolhida(message.text, tipo, FAIXA_DO_ASSISTENTE, MAXIMO_POR_DIA)
+    faixa, aviso = ler_faixa_escolhida(message.text, tipo, com_exemplos_de_agora(FAIXA_DO_ASSISTENTE), MAXIMO_POR_DIA)
     if aviso:
         await message.answer(aviso, parse_mode="HTML", reply_markup=teclado_cancelar if tipo else teclado_faixa_ou_fixo)
         return
@@ -1281,6 +1300,7 @@ async def confirmar_faixa(message: types.Message, state: FSMContext):
 async def salvar_faixa(message: types.Message, state: FSMContext):
     piso, topo = (await state.get_data())["faixa"]
     alterar_config(limite_min=piso, limite_max=topo)
+    exemplos.lembrar_faixa(FAIXA_DO_ASSISTENTE["nome"], piso, topo)
     logger.info(f"✅ Shopee Vídeo: {piso} a {topo} vídeos por dia.")
     await message.answer(f"✅ Vídeos por dia: <b>{rotulo_faixa(piso, topo)}</b>.", parse_mode="HTML")
     await mostrar_assistente(message, state)
@@ -1291,7 +1311,8 @@ async def confirmar_janela(message: types.Message, state: FSMContext):
     janela = interpretar_janela(message.text)
     if not janela:
         await message.answer(
-            "⚠️ Use o formato <code>13-22</code>, com o início menor que o fim (de 0 a 24).",
+            f"⚠️ Use o formato <code>{exemplo_do_horario(ler_config(), False)}</code>, com o início menor que "
+            "o fim (de 0 a 24).",
             parse_mode="HTML", reply_markup=teclado_janela_dia_todo)
         return
     inicio, fim = janela
@@ -1304,6 +1325,7 @@ async def confirmar_janela(message: types.Message, state: FSMContext):
 async def salvar_janela(message: types.Message, state: FSMContext):
     inicio, fim = (await state.get_data())["janela"]
     alterar_config(inicio=inicio, fim=fim)
+    exemplos.lembrar_janela("shopee_video_assistente", inicio, fim)
     logger.info(f"✅ Shopee Vídeo: janela {inicio}h-{fim}h.")
     await message.answer(f"✅ Horário de postagem: <b>{rotulo_janela(inicio, fim)}</b>.", parse_mode="HTML")
     await mostrar_assistente(message, state)
@@ -1332,7 +1354,7 @@ async def salvar_fonte(message: types.Message, state: FSMContext):
 @router.message(StateFilter(ShopeeVideoFluxo.aguardando_tipo_faixa_robo, ShopeeVideoFluxo.aguardando_faixa_robo))
 async def confirmar_faixa_robo(message: types.Message, state: FSMContext):
     tipo = (await state.get_data()).get("tipo_faixa")
-    faixa, aviso = ler_faixa_escolhida(message.text, tipo, FAIXA_DO_ROBO, robo.MAXIMO_POR_DIA)
+    faixa, aviso = ler_faixa_escolhida(message.text, tipo, com_exemplos_de_agora(FAIXA_DO_ROBO), robo.MAXIMO_POR_DIA)
     if aviso:
         await message.answer(aviso, parse_mode="HTML", reply_markup=teclado_cancelar if tipo else teclado_faixa_ou_fixo)
         return
@@ -1347,6 +1369,7 @@ async def confirmar_faixa_robo(message: types.Message, state: FSMContext):
 async def salvar_faixa_robo(message: types.Message, state: FSMContext):
     piso, topo = (await state.get_data())["faixa"]
     alterar_config(robo_limite_min=piso, robo_limite_max=topo)
+    exemplos.lembrar_faixa(FAIXA_DO_ROBO["nome"], piso, topo)
     logger.info(f"✅ Shopee Vídeo: robô com {piso} a {topo} rascunhos por dia.")
     await message.answer(f"✅ Rascunhos por dia: <b>{rotulo_faixa(piso, topo)}</b>.", parse_mode="HTML")
     await mostrar_robo(message, state)
@@ -1357,7 +1380,8 @@ async def confirmar_janela_robo(message: types.Message, state: FSMContext):
     janela = interpretar_janela(message.text)
     if not janela:
         await message.answer(
-            "⚠️ Use o formato <code>9-21</code>, com o início menor que o fim (de 0 a 24).",
+            f"⚠️ Use o formato <code>{exemplo_do_horario(ler_config(), True)}</code>, com o início menor que "
+            "o fim (de 0 a 24).",
             parse_mode="HTML", reply_markup=teclado_janela_dia_todo)
         return
     inicio, fim = janela
@@ -1371,6 +1395,7 @@ async def confirmar_janela_robo(message: types.Message, state: FSMContext):
 async def salvar_janela_robo(message: types.Message, state: FSMContext):
     inicio, fim = (await state.get_data())["janela"]
     alterar_config(robo_inicio=inicio, robo_fim=fim)
+    exemplos.lembrar_janela("shopee_video_robo", inicio, fim)
     logger.info(f"✅ Shopee Vídeo: Horário do Robô {inicio}h-{fim}h.")
     await message.answer(f"✅ Horário do robô: <b>{rotulo_janela(inicio, fim)}</b>.", parse_mode="HTML")
     await mostrar_robo(message, state)
