@@ -73,6 +73,7 @@ vira "#". Também nunca imprime os links.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
 import asyncio
+import io
 import json
 import logging
 import os
@@ -122,16 +123,27 @@ ou pelo menos o mesmo tipo de produto: vídeo de vestido infantil com link de ve
 vídeo de vestido com link de fibra de cabelo não confere).
 Responda só com um JSON: {{"confere": true ou false, "motivo": "uma frase curta"}}"""
 # Com a foto do anúncio (a da API de afiliado), a IA compara o item, não só o tipo: a
-# Shopee pune o "produto irrelevante" (24/10/2026) quando o anexado não é o do vídeo.
-# Pedido do Rafael (P13): DECISOES.md, Shopee Vídeo.
+# Shopee pune o "produto irrelevante" (24/10/2026) quando o anexado não é o do vídeo, e
+# outra cor não confirma. Pedidos do Rafael (P13 e P19): DECISOES.md, Shopee Vídeo.
 PROMPT_PRODUTO_COM_FOTO = """Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.
 A imagem que vai junto com o vídeo é a foto do anúncio do produto do link: "{nome}".
 A Shopee pune quando o produto anexado não é o produto mostrado no vídeo.
-Assista ao vídeo inteiro, compare com a foto e diga se o vídeo mostra o mesmo produto do anúncio \
-(o mesmo item; cor ou estampa diferentes podem ser outra variação do mesmo anúncio). \
-Outro produto do mesmo tipo com outro formato ou modelo, só um acessório dele, ou um vídeo em que o \
-produto da foto não aparece, não confere.
+Assista ao vídeo inteiro, compare com a foto e diga se o vídeo mostra o mesmo produto do anúncio: \
+o mesmo item, da mesma cor e estampa da foto. \
+Outro produto do mesmo tipo com outro formato ou modelo, o mesmo produto em outra cor ou estampa, só \
+um acessório dele, ou um vídeo em que o produto da foto não aparece, não confere.
 Responda só com um JSON: {{"confere": true ou false, "motivo": "uma frase curta"}}"""
+# A última chance do anexar (P18): o recorte do 1º da lista de Minhas Curtidas (a foto
+# pequena, o nome e o preço) com o vídeo. Mesma régua da foto do anúncio, com a mesma cor
+# (P19). Escolhas do Rafael: DECISOES.md, Shopee Vídeo.
+PROMPT_ITEM_DA_LISTA = """Você confere um vídeo de afiliado da Shopee antes de ele ir para a Shopee Vídeo.
+A imagem que vai junto com o vídeo é o produto que vai ser anexado a ele, recortado da lista de \
+produtos curtidos (a foto pequena, o nome e o preço).
+A Shopee pune quando o produto anexado não é o produto mostrado no vídeo.
+Assista ao vídeo inteiro, compare com a imagem e diga se o vídeo mostra o mesmo produto: o mesmo \
+item, da mesma cor e estampa. Outro produto do mesmo tipo, outro modelo, o mesmo produto em outra \
+cor, só um acessório dele, ou um vídeo em que o produto da imagem não aparece, não confere.
+Responda só com um JSON: {"confere": true ou false, "motivo": "uma frase curta"}"""
 # O aviso da página do produto de loja de férias (loja_de_ferias).
 AVISO_DE_FERIAS = "está de férias"
 # A foto do anúncio tem até isto de tamanho (bytes); maior que isso, a conferência segue só pelo nome.
@@ -152,6 +164,10 @@ VEZES_DA_IA = 2
 SEGUNDOS_DA_PAGINA = 8
 # Nome cortado na lista só vale como o mesmo produto a partir deste tamanho.
 TAMANHO_MINIMO_DO_NOME = 15
+# Os curtidos agora ficam em cima em Minhas Curtidas → Mais Recente, e o app pode mostrar o
+# nome de outro jeito que a API (24/10/2026: o curtido estava em 1º, com 0% das palavras do
+# nome da API): no topo, vale o nome com esta parte das palavras. Escolha do Rafael (P18).
+PARECIDO_NO_TOPO = 80
 # Elemento de outro app até este tamanho (px) é coisa flutuante, como a bolinha da Motorola.
 LADO_MAXIMO_FLUTUANTE = 400
 NOME_NA_GALERIA = "autoral_shopee_video.mp4"
@@ -557,27 +573,54 @@ def adicionar_do_produto(xml, nome):
 
 def _adicionar_do_bloco(lista, botoes, el):
     """O único Adicionar do menor bloco de toque com esse texto; None se não há ou há mais de um."""
+    return _bloco_do_adicionar(lista, botoes, el)[1]
+
+
+def _bloco_do_adicionar(lista, botoes, el):
+    """(o menor bloco de toque com esse texto, o único Adicionar dele); (None, None) sem ele."""
     blocos = sorted((b for b in lista if b["clicavel"] and _dentro(_centro(el), b["caixa"])),
                     key=lambda b: (b["caixa"][2] - b["caixa"][0]) * (b["caixa"][3] - b["caixa"][1]))
     for bloco in blocos:
         dentro = [bt for bt in botoes if _dentro(_centro(bt), bloco["caixa"])]
         if len(dentro) == 1:
-            return dentro[0]
+            return bloco, dentro[0]
         if dentro:
             break
-    return None
+    return None, None
 
 
-def nomes_da_lista(xml):
+def produtos_da_lista(xml):
     """
-    Os nomes dos produtos na tela de Adicionar Produto, de cima para baixo: os textos do
-    tamanho de um nome que têm um Adicionar só no bloco deles.
+    Os produtos na tela de Adicionar Produto, de cima para baixo: {"nome", "bloco", "botao"}.
+    O nome é o primeiro texto do tamanho de um nome no bloco que tem um Adicionar só (o de
+    baixo, "Taxa de comissão", é do mesmo produto); o já anexado ("Adicionado") fica de fora.
     """
     lista = elementos(xml)
     botoes = [el for el in lista if _normal(el["texto"]) == "adicionar"]
-    nomes = [el for el in lista
-             if len(el["texto"].strip()) >= TAMANHO_MINIMO_DO_NOME and _adicionar_do_bloco(lista, botoes, el)]
-    return [el["texto"] for el in sorted(nomes, key=lambda el: el["caixa"][1])]
+    produtos = []
+    for el in sorted(lista, key=lambda el: el["caixa"][1]):
+        if len(el["texto"].strip()) < TAMANHO_MINIMO_DO_NOME:
+            continue
+        bloco, botao = _bloco_do_adicionar(lista, botoes, el)
+        if botao and all(p["bloco"]["caixa"] != bloco["caixa"] for p in produtos):
+            produtos.append({"nome": el["texto"], "bloco": bloco, "botao": botao})
+    return produtos
+
+
+def nomes_da_lista(xml):
+    """Os nomes dos produtos na tela de Adicionar Produto, de cima para baixo."""
+    return [p["nome"] for p in produtos_da_lista(xml)]
+
+
+def no_topo_pelo_nome(primeiros, nome):
+    """
+    Entre os primeiros da lista (os curtidos agora), o que tem o nome do produto: igual,
+    cortado ou com PARECIDO_NO_TOPO% das palavras ou mais; o mais parecido, ou None.
+    """
+    candidatos = [(100 if nome_na_pagina(p["nome"], nome) else parecido_entre([p["nome"]], nome)[0], i)
+                  for i, p in enumerate(primeiros)]
+    comum, i = max(candidatos, key=lambda c: (c[0], -c[1]), default=(0, -1))
+    return primeiros[i] if comum >= PARECIDO_NO_TOPO else None
 
 
 def ponto_livre(botao, xml):
@@ -612,15 +655,21 @@ def nome_do_produto(video):
     return produtos[0]["nome"] if produtos else ""
 
 
-def adicionar_produto(d, video):
+def adicionar_produto(d, video, anexados=None, no_topo=1):
     """
-    Toca em Adicionar só no produto do vídeo, achado pelo nome, rolando a lista se
-    preciso, e confere o nome de novo na janela "Editar nome do produto" que abre.
-    Pela posição, um toque desviado adiciona outro produto: a bolinha de dicas da
-    Motorola fica em cima do Adicionar do 1º, e o toque que a fecha pode cair na lista.
-    Sem achar ou com outro produto na janela, não segue (o Feito fica sem tocar) e avisa
-    o Rafael no privado; o nome não vai para o log.
-    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    Anexa o produto do vídeo pela lista de Minhas Curtidas → Mais Recente, onde os curtidos
+    agora ficam em cima (curtiu 2, são os 2 primeiros: no_topo). Escolha do Rafael (P18),
+    nesta ordem:
+    1. entre os no_topo primeiros, o que tem o nome do produto (igual, cortado ou com
+       PARECIDO_NO_TOPO% das palavras): o app pode mostrar o nome de outro jeito que a API;
+    2. o nome do produto mais embaixo, rolando a lista (o curtido de outro dia cujo
+       descurtir não pegou fica lá);
+    3. última chance: o 1º da lista, se a IA conferir o recorte dele (foto, nome e preço)
+       com o vídeo: o mesmo item, da mesma cor.
+    Toca no Adicionar num ponto que a bolinha da Motorola não cobre e confere a janela
+    "Editar nome do produto" pelo nome que a lista mostra. anexados (lista) recebe esse nome,
+    que a tela final e o postar conferem. Sem achar: não segue e avisa no privado; o nome
+    não vai para o log. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     nome = nome_do_produto(video)
     if not nome:
@@ -628,26 +677,24 @@ def adicionar_produto(d, video):
         return False, "o link não diz o produto do vídeo: nada adicionado (aviso no privado)"
     if janela_de_editar_aberta(elementos(d.dump_hierarchy())):
         # Um toque de antes (como o que fecha a bolinha da Motorola) já abriu um produto.
-        return conferir_janela(d, nome, None)
+        ok, motivo = conferir_janela(d, nome, None)
+        if ok and anexados is not None:
+            anexados.append(nome)
+        return ok, motivo
     esperar_a_lista(d)
-    melhor, anterior, rolagens, acabou, primeiro = (0, -1, ""), None, 0, False, None
+    tela = d.dump_hierarchy()
+    topo = produtos_da_lista(tela)[:max(no_topo, 1)]
+    escolhido = no_topo_pelo_nome(topo, nome)
+    if escolhido:
+        return _tocar_em_adicionar(d, tela, escolhido["botao"], escolhido["nome"], "no topo, pelo nome", anexados)
+    melhor, anterior, rolagens, acabou = (0, -1, ""), None, 0, False
+    primeiro = topo[0]["nome"] if topo else ""
     for rolagem in range(ROLAGENS_DO_PRODUTO + 1):
-        tela = d.dump_hierarchy()
-        if primeiro is None:
-            primeiro = (nomes_da_lista(tela) or [""])[0]
+        if rolagem:
+            tela = d.dump_hierarchy()
         botao = adicionar_do_produto(tela, nome)
         if botao:
-            ponto = ponto_livre(botao, tela)
-            if not ponto:
-                return False, "o Adicionar do produto está coberto por outro app: nada tocado"
-            x, y = ponto
-            if proibido_no_ponto(tela, x, y):
-                return False, RECUSA
-            d.click(x, y)
-            ok, motivo = conferir_janela(d, nome, ponto)
-            if ok:
-                registro_processos.registrar("shopee_video", "anexar o produto", "anexado", f"{rolagens} rolada(s)", ok=True)
-            return ok, motivo
+            return _tocar_em_adicionar(d, tela, botao, nome, f"pelo nome; {rolagens} rolada(s)", anexados)
         melhor = max(melhor, mais_parecido([el["texto"] for el in elementos(tela)], nome), key=lambda m: m[:2])
         textos = textos_longos(tela)
         if textos == anterior:
@@ -670,14 +717,99 @@ def adicionar_produto(d, video):
         faltam, sobram = diferenca_do_nome(texto, nome)
         posicoes = ", ".join(f"{i}ª" for i in faltam[:3]) + ("…" if len(faltam) > 3 else "")
         diferenca = (f" (faltam a {posicoes}" if faltam else " (nenhuma falta") + f"; {sobram} a mais)"
-    no_topo = f"; o 1º da lista tem {parecido_entre([primeiro], nome)[0]}%" if primeiro else ""
+    topo_txt = f"; o 1º da lista tem {parecido_entre([primeiro], nome)[0]}%" if primeiro else ""
     registro_processos.registrar("shopee_video", "anexar o produto", "nome não achado em Minhas Curtidas",
                                  f"o mais parecido tem {comum}%" + diferenca
                                  + (f" e o nome começa depois de {antes} palavra(s)" if antes > 0 else "")
-                                 + no_topo
-                                 + f"; {rolagens} rolada(s)" + ("; a lista acabou" if acabou else ""), ok=False)
-    avisar_rafael.mandar_texto(f"{AVISO_SEM_PRODUTO}\n\nO produto do vídeo não está em Minhas Curtidas: {nome}")
-    return False, "o produto do vídeo não está na lista: nada adicionado (aviso no privado)"
+                                 + topo_txt
+                                 + f"; {rolagens} rolada(s)" + ("; a lista acabou" if acabou else ""), ok=None)
+    ok, motivo = _pelo_primeiro_com_a_ia(d, video, rolagens, anexados)
+    if ok:
+        return ok, motivo
+    registro_processos.registrar("shopee_video", "anexar o produto", "não anexado",
+                                 "nem pelo nome nem pela foto do 1º da lista", ok=False)
+    avisar_rafael.mandar_texto(f"{AVISO_SEM_PRODUTO}\n\nO produto do vídeo não está em Minhas Curtidas, "
+                               f"e a foto do 1º da lista não confere com o vídeo: {nome}")
+    return False, f"o produto do vídeo não está na lista, nem pela foto do 1º ({motivo}): nada adicionado (aviso no privado)"
+
+
+def _tocar_em_adicionar(d, tela, botao, nome_na_janela, como, anexados):
+    """Toca no Adicionar fora da bolinha da Motorola e confere a janela pelo nome que ela deve mostrar."""
+    ponto = ponto_livre(botao, tela)
+    if not ponto:
+        return False, "o Adicionar do produto está coberto por outro app: nada tocado"
+    x, y = ponto
+    if proibido_no_ponto(tela, x, y):
+        return False, RECUSA
+    d.click(x, y)
+    ok, motivo = conferir_janela(d, nome_na_janela, ponto)
+    if ok:
+        registro_processos.registrar("shopee_video", "anexar o produto", "anexado", como, ok=True)
+        if anexados is not None:
+            anexados.append(nome_na_janela)
+    return ok, motivo
+
+
+def _pelo_primeiro_com_a_ia(d, video, rolagens, anexados):
+    """
+    A última chance do anexar (P18): volta ao alto da lista, recorta o 1º (foto, nome e
+    preço) e a IA o compara com o vídeo; confirmado, ele é anexado. Devolve (ok, motivo).
+    """
+    for _ in range(rolagens):
+        rolar(d, para_cima=True)
+        time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
+    tela = d.dump_hierarchy()
+    primeiros = produtos_da_lista(tela)
+    if not primeiros:
+        return False, "a lista não tem produto para conferir"
+    primeiro = primeiros[0]
+    imagem = recorte_da_tela(d, primeiro["bloco"]["caixa"])
+    if not imagem:
+        return False, "sem o recorte do 1º da lista"
+    ok, motivo = ia_confere_item(video, imagem)
+    registro_processos.registrar("shopee_video", "conferência da IA (produto × vídeo)",
+                                 "confere" if ok else "não confere", "o 1º da lista, pela foto", ok=ok)
+    if not ok:
+        return False, motivo
+    return _tocar_em_adicionar(d, tela, primeiro["botao"], primeiro["nome"], "o 1º da lista, pela IA", anexados)
+
+
+def recorte_da_tela(d, caixa):
+    """A parte da tela dentro da caixa, em PNG (bytes); None quando o print não vem."""
+    try:
+        saida = io.BytesIO()
+        d.screenshot().crop(caixa).save(saida, format="PNG")
+        return saida.getvalue()
+    except Exception as e:
+        logging.getLogger(__name__).warning(f"⚠️ [Shopee Vídeo] O recorte do produto não veio: {type(e).__name__}")
+        return None
+
+
+def ia_confere_item(video, imagem):
+    """
+    A IA compara o vídeo com o recorte do produto da lista, VEZES_DA_IA vezes; só confirma
+    o mesmo item, da mesma cor. O que a IA diz não sai daqui (pode ter o nome do produto).
+    """
+    if not (video or {}).get("arquivo"):
+        return False, "sem o arquivo do vídeo para a conferência pela foto"
+    for vez in range(1, VEZES_DA_IA + 1):
+        resposta = asyncio.run(api_gemini.analisar_video_gemini(video["arquivo"], PROMPT_ITEM_DA_LISTA,
+                                                                 imagens=[(imagem, "image/png")]))
+        dados = _json_da_ia(resposta)
+        if not isinstance(dados, dict):
+            return False, f"a conferência pela foto não respondeu ({vez}ª vez)"
+        if dados.get("confere") is not True:
+            return False, f"a foto do 1º da lista não é o produto do vídeo ({vez}ª vez)"
+    return True, f"a foto do 1º da lista confere com o vídeo {VEZES_DA_IA} vezes"
+
+
+def _json_da_ia(resposta):
+    """O JSON da resposta da IA (o primeiro {...}); None quando não há ou não abre."""
+    achado = re.search(r"\{.*\}", resposta or "", re.S)
+    try:
+        return json.loads(achado.group(0)) if achado else None
+    except ValueError:
+        return None
 
 
 def esperar_a_lista(d):

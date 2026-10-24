@@ -4,7 +4,8 @@ Robô automático da Shopee Vídeo: no celular guardado do Rafael (celular_robo.
 rascunhos sozinho e posta os que o Rafael aprova no bot (Shopee Vídeo 🎬 → Rascunhos do
 Robô 📝, no painel_shopee_video.py). Usa os passos e as conferências do explorar
 (postador_shopee_video.py): a IA confere o produto do link com o vídeo, o produto é achado
-pelo nome em Minhas Curtidas e a tela final é conferida antes de salvar e de postar.
+no topo de Minhas Curtidas (pelo nome parecido ou, por último, pela foto conferida pela IA)
+e a tela final é conferida antes de salvar e de postar.
 
 O painel (bot_mestre) chama uma rodada a cada 15 min, num processo à parte: o robô passa
 minutos tocando no celular, e a IA dele não pode dividir a conexão com a do bot.
@@ -1619,11 +1620,16 @@ def _preparar(d, ident, video, fonte, agora=None):
         raise Parada(f"o título não ficou na legenda ({conferencia})")
     tocar(d, "@tv_right", 3)
 
+    # Os curtidos agora ficam em cima da lista: o 2º produto do vídeo procura entre os que
+    # sobraram no topo. A tela final e o postar conferem o nome que a lista mostra, que pode
+    # ser outro que o da API. Escolha do Rafael (P18): DECISOES.md, Shopee Vídeo.
+    anexados = []
     for i, nome in enumerate(nomes):
         seguir(d, CAMINHO_PRODUTO if i == 0 else CAMINHO_MAIS_UM_PRODUTO)
-        _conferir(ps.adicionar_produto(d, dict(video, produto=nome)))
+        _conferir(ps.adicionar_produto(d, dict(video, produto=nome), anexados, no_topo=len(nomes) - i))
         tocar(d, "Feito", 6)
-    _conferir(ps.conferir_tela_final(d, dict(video, produtos=nomes)))
+    _conferir(ps.conferir_tela_final(d, dict(video, produtos=anexados)))
+    atualizar(ident, produtos=anexados)
     # Antes do print: o Rafael vê no print a chave como vai ao ar.
     _conferir(ps.ajustar_rotulo_de_ia(d, bool(rotulo_ia)))
 

@@ -204,7 +204,9 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
      Captions, Figurinha) → **Próximo** (`@tv_compress`);
   5. tela final (`PublishVideoActivity`): **Adicionar legenda** (onde vai o título),
      Selecionar Capa, Hashtag, **Adicionar produto** (abre a lista com busca, abas
-     **Minhas Curtidas** e **Todos**, ordem Relevância/Mais Recente/Em Destaque/Preço e,
+     **Minhas Curtidas** e **Todos** (em 24/10/2026, no Motorola, vieram também **Minha
+     Loja**, antes de Minhas Curtidas, e **Afiliados**, no fim; o app abre em Minhas
+     Curtidas → Mais Recente), ordem Relevância/Mais Recente/Em Destaque/Preço e,
      em cada produto, taxa de comissão, preço e **Adicionar**; o voltar devolve a tela
      final sem perder o vídeo), as chaves Permitir a reutilização, Salvar no dispositivo,
      Rótulo de IA e Compartilhar automaticamente, e embaixo **Rascunhos** e **Postar**.
@@ -287,7 +289,11 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
    galeria → Próximo. Efeito de giro é opcional.
 3. Adicionar Produto → Minhas Curtidas → Mais Recente: os curtidos agora ficam em
    cima (curtiu 2, são os 2 primeiros). Entre eles, o de menor preço primeiro; no
-   empate, o de maior comissão. O robô acha cada um pelo nome, não pela posição. Na
+   empate, o de maior comissão. O app pode mostrar o nome de outro jeito que a API (em
+   24/10/2026, o curtido estava em 1º sem nenhuma palavra do nome da API): o robô pega
+   entre os curtidos agora no topo o de nome parecido (80% das palavras), depois o nome
+   igual mais embaixo e, em última chance, o 1º se a IA conferir a foto dele com o vídeo
+   (escolha do Rafael, P18); a janela, a tela final e o postar conferem o nome da lista. Na
    janela "Editar nome do produto", só **Feito**. O produto que já estava curtido de
    outro dia fica mais embaixo: o curtir o descurte e curte de novo (pedido do Rafael,
    24/10/2026), e ele sobe ao 1º lugar. O anexar espera a lista carregar e rola até 8

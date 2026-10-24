@@ -659,7 +659,8 @@ def test_produto_adiciona_o_do_video_pelo_nome_e_nao_o_primeiro_da_lista(monkeyp
     assert "Vestido" not in saida and "Gatinho" not in saida
     # O anexado fica no registro, com quantas vezes rolou a lista.
     import registro_processos as rp
-    assert [l[2:4] for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "anexar o produto"] == [("anexado", "0 rolada(s)")]
+    assert [l[2:4] for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "anexar o produto"] == [
+        ("anexado", "pelo nome; 0 rolada(s)")]
 
 
 def test_produto_aceita_o_nome_cortado_na_lista_e_na_janela(monkeypatch):
@@ -717,8 +718,9 @@ def test_produto_fora_da_lista_nao_adiciona_nada_e_avisa_no_privado(monkeypatch,
     aparelho = Aparelho(tela=TELA_CURTIDAS)
     assert not ps.explorar("produto", aparelho)
     assert aparelho.toques == []
-    # A lista não muda depois de rolar: acabou, e o robô para de rolar.
-    assert sum(1 for comando in aparelho.comandos if comando[0] == "rolar") == 1
+    # A lista não muda depois de rolar: acabou, e o robô para de rolar e volta ao alto para
+    # a última chance (o 1º pela foto, que aqui não tem o print da tela).
+    assert sum(1 for comando in aparelho.comandos if comando[0] == "rolar") == 2
     assert len(avisos) == 1 and "Garrafa Térmica Inox" in avisos[0]
     saida = capsys.readouterr().out
     assert "nada adicionado" in saida and "Garrafa" not in saida
@@ -1240,7 +1242,7 @@ def test_nome_nao_achado_deixa_no_registro_o_quanto_o_mais_parecido_lembra(monke
     import registro_processos as rp
     avisos = []
     monkeypatch.setattr(ps.avisar_rafael, "mandar_texto", avisos.append)
-    monkeypatch.setattr(ps, "rolar", lambda d: None)
+    monkeypatch.setattr(ps, "rolar", lambda d, para_cima=False: None)
     monkeypatch.setattr(ps.time, "sleep", lambda s: None)
 
     class Celular:
@@ -1249,7 +1251,8 @@ def test_nome_nao_achado_deixa_no_registro_o_quanto_o_mais_parecido_lembra(monke
 
     ok, motivo = ps.adicionar_produto(Celular(), {"produto": VESTIDO})
     assert not ok and "não está na lista" in motivo and VESTIDO in avisos[0]
-    linha = [l for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "anexar o produto"][0]
+    linha = [l for l in rp.contagem("2000-01-01 00:00:00")
+             if l[1] == "anexar o produto" and l[2] == "nome não achado em Minhas Curtidas"][0]
     assert linha[2] == "nome não achado em Minhas Curtidas"
     assert linha[3] == ("o mais parecido tem 100% e o nome começa depois de 7 palavra(s); "
                         "o 1º da lista tem 0%; 1 rolada(s); a lista acabou")
@@ -1261,7 +1264,7 @@ def _nao_achado(monkeypatch, tela, nome):
     """O detalhe que o anexar deixa no registro quando não acha o produto em Minhas Curtidas."""
     import registro_processos as rp
     monkeypatch.setattr(ps.avisar_rafael, "mandar_texto", lambda texto: None)
-    monkeypatch.setattr(ps, "rolar", lambda d: None)
+    monkeypatch.setattr(ps, "rolar", lambda d, para_cima=False: None)
     monkeypatch.setattr(ps.time, "sleep", lambda s: None)
 
     class Celular:
@@ -1270,7 +1273,8 @@ def _nao_achado(monkeypatch, tela, nome):
 
     ok, _ = ps.adicionar_produto(Celular(), {"produto": nome})
     assert not ok
-    return [l for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "anexar o produto"][0][3]
+    return [l for l in rp.contagem("2000-01-01 00:00:00")
+            if l[1] == "anexar o produto" and l[2] == "nome não achado em Minhas Curtidas"][0][3]
 
 
 def test_nome_nao_achado_diz_onde_o_mais_parecido_difere_e_o_quanto_o_1o_lembra(monkeypatch):
@@ -1314,3 +1318,105 @@ def test_acento_de_outra_codificacao_e_o_mesmo_nome():
 def test_nomes_da_lista_de_cima_para_baixo_so_os_que_tem_adicionar():
     assert ps.nomes_da_lista(TELA_CURTIDAS) == ["Fibra Proteína Cabelo Cacheado Luxo", VESTIDO]
     assert ps.nomes_da_lista(TELA_EU) == []
+
+
+# --- O 1º da lista de Minhas Curtidas (escolha do Rafael, P18) ---
+
+PARECIDO = "Vestido Infantil Liso Gatinho Para Meninas de 4 a 14 Anos"   # 85% das palavras do VESTIDO
+PANELA = "Panela de Pressão Inox 4,5 Litros Fechamento Externo"
+FIBRA = "Fibra Proteína Cabelo Cacheado Luxo"
+
+
+def _lista(primeiro, segundo):
+    return TELA_CURTIDAS.replace(f'text="{FIBRA}"', f'text="{primeiro}"').replace(
+        f'text="{VESTIDO}"', f'text="{segundo}"')
+
+
+class AparelhoComPrint(AparelhoComJanela):
+    """A lista, a janela depois do toque e o print da tela (o do uiautomator2 é uma imagem PIL)."""
+
+    def screenshot(self):
+        from PIL import Image
+        return Image.new("RGB", (1080, 2400), "white")
+
+
+def _ia_da_foto(monkeypatch, confere):
+    chamadas = []
+
+    async def analisar(arquivo, prompt, imagens=None):
+        chamadas.append((prompt, imagens))
+        return '{"confere": %s, "motivo": "o item da imagem"}' % ("true" if confere else "false")
+
+    monkeypatch.setattr(ps.api_gemini, "analisar_video_gemini", analisar)
+    return chamadas
+
+
+def _anexar_linhas():
+    import registro_processos as rp
+    return sorted(l[2:4] for l in rp.contagem("2000-01-01 00:00:00") if l[1] == "anexar o produto")
+
+
+def test_o_1o_da_lista_com_o_nome_parecido_e_anexado_com_o_nome_que_o_app_mostra(monkeypatch):
+    # 24/10/2026: o produto curtido estava em 1º, mas com o nome diferente do da API. O 1º vale
+    # com 80% das palavras, e a janela e a tela final conferem o nome da lista.
+    _avisos(monkeypatch)
+    anexados = []
+    aparelho = AparelhoComJanela(tela=_lista(PARECIDO, PANELA), nome_na_janela=PARECIDO)
+    ok, motivo = ps.adicionar_produto(aparelho, {"produto": VESTIDO}, anexados)
+    assert ok and aparelho.toques == [(925, 977)] and anexados == [PARECIDO]
+    assert _anexar_linhas() == [("anexado", "no topo, pelo nome")]
+
+
+def test_o_2o_produto_do_video_procura_entre_os_que_sobraram_no_topo(monkeypatch):
+    _avisos(monkeypatch)
+    anexados = []
+    aparelho = AparelhoComJanela(tela=_lista(FIBRA, PARECIDO), nome_na_janela=PARECIDO)
+    assert ps.adicionar_produto(aparelho, {"produto": VESTIDO}, anexados, no_topo=2)[0]
+    assert aparelho.toques == [(925, 1257)] and anexados == [PARECIDO]
+
+
+def test_nome_parecido_fora_do_topo_nao_vale(monkeypatch):
+    # Só os curtidos agora (no topo) valem pelo nome parecido; mais embaixo, só o nome igual.
+    _avisos(monkeypatch)
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+    aparelho = AparelhoComJanela(tela=_lista(FIBRA, PARECIDO), nome_na_janela=PARECIDO)
+    assert not ps.adicionar_produto(aparelho, {"produto": VESTIDO}, [], no_topo=1)[0]
+    assert aparelho.toques == []
+
+
+def test_ultima_chance_a_ia_confere_a_foto_do_1o_e_ele_e_anexado(monkeypatch):
+    avisos = _avisos(monkeypatch)
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+    chamadas = _ia_da_foto(monkeypatch, confere=True)
+    anexados = []
+    aparelho = AparelhoComPrint(tela=_lista(FIBRA, PANELA), nome_na_janela=FIBRA)
+    ok, motivo = ps.adicionar_produto(aparelho, {"produto": VESTIDO, "arquivo": "video.mp4"}, anexados)
+    assert ok and aparelho.toques == [(925, 977)] and anexados == [FIBRA] and avisos == []
+    # A IA recebe o recorte do 1º, em PNG, com a régua da mesma cor, VEZES_DA_IA vezes.
+    assert len(chamadas) == ps.VEZES_DA_IA
+    assert all(prompt == ps.PROMPT_ITEM_DA_LISTA and imagens[0][1] == "image/png" and imagens[0][0][:4] == b"\x89PNG"
+               for prompt, imagens in chamadas)
+    assert ("anexado", "o 1º da lista, pela IA") in _anexar_linhas()
+    import registro_processos as rp
+    assert ("confere", "o 1º da lista, pela foto") in [l[2:4] for l in rp.contagem("2000-01-01 00:00:00")
+                                                      if l[1] == "conferência da IA (produto × vídeo)"]
+
+
+def test_ultima_chance_recusada_pela_ia_nao_anexa_e_avisa(monkeypatch):
+    import robo_shopee_video as robo
+    avisos = _avisos(monkeypatch)
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+    _ia_da_foto(monkeypatch, confere=False)
+    aparelho = AparelhoComPrint(tela=_lista(FIBRA, PANELA), nome_na_janela=FIBRA)
+    ok, motivo = ps.adicionar_produto(aparelho, {"produto": VESTIDO, "arquivo": "video.mp4"}, [])
+    assert not ok and aparelho.toques == []
+    assert len(avisos) == 1 and VESTIDO in avisos[0] and "o item da imagem" not in motivo
+    assert robo.passo_do_motivo(motivo) == "anexar o produto"
+    assert ("não anexado", "nem pelo nome nem pela foto do 1º da lista") in _anexar_linhas()
+
+
+def test_a_ia_so_confirma_a_mesma_cor_da_foto(monkeypatch):
+    # Escolha do Rafael (P19): a Shopee pede o produto exato do vídeo; outra cor não confirma.
+    for prompt in (ps.PROMPT_PRODUTO_COM_FOTO, ps.PROMPT_ITEM_DA_LISTA):
+        assert "da mesma cor" in prompt and "outra cor" in prompt
+    assert "podem ser outra variação" not in ps.PROMPT_PRODUTO_COM_FOTO

@@ -410,6 +410,39 @@ def test_rascunho_completo_curte_pelo_nome_e_salva_sem_tocar_em_postar(monkeypat
     assert robo.assistente.proximo_video("autorais") is None
 
 
+NOME_NO_APP = "Vestidinho Gatinho Estampado Menina Infantil Verão"
+
+
+def test_produto_com_outro_nome_no_app_vai_pelo_1o_da_lista_com_a_foto_conferida(monkeypatch, avisos):
+    # 24/10/2026: o produto curtido estava em 1º em Minhas Curtidas, com um nome sem nenhuma
+    # palavra do nome da API, e o rascunho parava. Escolha do Rafael (P18): o 1º da lista, pela
+    # foto conferida pela IA; a tela final e o rascunho ficam com o nome que o app mostra.
+    import sys
+    from PIL import Image
+    _fonte(monkeypatch)
+    fotos = []
+
+    async def analisar(arquivo, prompt, imagens=None):
+        fotos.extend(imagens or [])
+        return '{"confere": true, "motivo": "vestido"}'
+
+    monkeypatch.setattr(robo.ps.api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setitem(TELAS, "curtidas", [n.replace(VESTIDO, NOME_NO_APP) for n in TELAS["curtidas"]])
+    monkeypatch.setitem(TELAS, "janela", [n.replace(VESTIDO, NOME_NO_APP) for n in TELAS["janela"]])
+    modulo = sys.modules[__name__]
+    tela_final = modulo._tela_final
+    monkeypatch.setattr(modulo, "_tela_final", lambda legenda="", produto=False: [
+        n.replace(VESTIDO, NOME_NO_APP) for n in tela_final(legenda, produto)])
+    print_da_tela = AppDeMentira.screenshot
+    monkeypatch.setattr(AppDeMentira, "screenshot", lambda self, caminho=None: (
+        Image.new("RGB", (1080, 2400)) if caminho is None else print_da_tela(self, caminho)))
+    monkeypatch.setattr(robo.ps.time, "sleep", lambda s: None)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert fotos and fotos[0][1] == "image/png"
+    assert robo.esperando_aprovacao()[0]["produtos"] == [NOME_NO_APP]
+
+
 def _titulo_vazio_e_depois(monkeypatch, respostas):
     """A IA do título: None (resposta vazia do Google, motivo no ULTIMO_ERRO_IA) ou o título."""
     vazia = ("Todos os modelos da cascata falharam → gemini-x: VAZIO (finish_reason=<FinishReason.RECITATION: "
