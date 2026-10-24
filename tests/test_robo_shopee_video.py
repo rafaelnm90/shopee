@@ -446,6 +446,25 @@ def test_titulo_vazio_duas_vezes_para_com_o_motivo_e_o_passo(monkeypatch, avisos
     assert robo.passo_do_motivo(resultado) == "título da IA"
 
 
+def test_bloqueio_do_google_pelo_conteudo_pula_o_video_sem_tentar_de_novo(monkeypatch, avisos):
+    # 24/10/2026: as duas tentativas voltaram PROHIBITED_CONTENT, bloqueio que não muda para o
+    # mesmo vídeo: ele fica de lado na hora, e o horário passa ao próximo vídeo.
+    _fonte(monkeypatch)
+    chamadas = []
+
+    async def textos(arquivo, nome):
+        chamadas.append(arquivo)
+        robo.ps.api_gemini.ULTIMO_ERRO_IA = ("Todos os modelos da cascata falharam → gemini-x: VAZIO "
+                                             "(block_reason=<BlockedReason.PROHIBITED_CONTENT: 'PROHIBITED_CONTENT'>)")
+        return None
+
+    monkeypatch.setattr(robo.assistente, "textos_do_video", textos)
+    resultado = robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 23:59"))
+    assert "o Google bloqueia o conteúdo deste vídeo" in resultado and len(chamadas) == 1
+    pulado = robo.listar("pulado")[0]
+    assert "PROHIBITED_CONTENT" in pulado["motivo"] and robo.passo_do_motivo(pulado["motivo"]) == "título da IA"
+
+
 def test_ia_que_nao_confirma_pula_o_video_sem_tocar_no_celular(monkeypatch, avisos):
     _fonte(monkeypatch, confere=False)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
