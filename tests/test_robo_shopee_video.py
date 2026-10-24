@@ -870,6 +870,35 @@ def test_voltar_fora_da_shopee_traz_a_shopee_e_nunca_aperta_voltar_no_outro_app(
     assert celular.teclas == [] and celular.aberturas == [robo.ps.PACOTE]
 
 
+class CelularPresoSemEu:
+    """O voltar não chega ao Eu (como nos rascunhos de 24/10, 13:17 e 13:38)."""
+
+    info = {"screenOn": False}
+
+    def __init__(self):
+        self.teclas = []
+
+    def dump_hierarchy(self):
+        return _xml(_no_do_app(robo.ps.PACOTE, "Ver Produtos (1)", (0, 1500, 600, 1600)))
+
+    def press(self, tecla):
+        self.teclas.append(tecla)
+
+    def app_current(self):
+        return {"package": robo.ps.PACOTE, "activity": "com.shopee.app.react.ReactTransparentActivity_"}
+
+
+def test_voltar_que_nao_chega_anota_a_tela_em_que_ficou_sem_o_texto_dela():
+    from conftest import consultar
+    celular = CelularPresoSemEu()
+    with pytest.raises(robo.Parada) as parada:
+        robo.voltar(celular, "Eu", vezes=3)
+    onde = f"app {robo.ps.PACOTE}, tela ReactTransparentActivity_, tela do celular desligada"
+    assert str(parada.value) == f"não consegui voltar até Eu ({onde})" and celular.teclas == ["back"] * 3
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = 'voltar no app'") == (
+        "não chegou ao Eu", onde, 0)
+
+
 def test_aviso_do_android_por_cima_da_shopee_nao_conta_como_outro_app():
     aviso = _xml(_no_do_app("com.android.permissioncontroller", "Permitir", (100, 1000, 500, 1100)))
     telegram = _xml(_no_do_app("org.telegram.messenger", "Conversas", (0, 100, 500, 200)))
