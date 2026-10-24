@@ -346,6 +346,8 @@ class ShopeeVideoFluxo(StatesGroup):
     aguardando_confirmacao_faixa_robo = State()
     aguardando_janela_robo = State()
     aguardando_confirmacao_janela_robo = State()
+    aguardando_janela_interacoes = State()
+    aguardando_confirmacao_janela_interacoes = State()
     aguardando_confirmacao_pausa_robo = State()
     rascunho = State()
     aguardando_confirmacao_recusa = State()
@@ -472,6 +474,18 @@ def rotulo_janela(inicio, fim):
     return "o dia todo (24h)" if (inicio, fim) == (0, 24) else f"das {inicio}h às {fim}h"
 
 
+def rotulo_interacoes(config):
+    """O Horário das Interações em palavras; sem ele escolhido, junto com o Horário do Robô."""
+    janela = robo.janela_das_interacoes(config)
+    return rotulo_janela(janela[0], janela[1]) if janela else "junto com o Horário do Robô"
+
+
+def rotulo_de_postar(config):
+    """Os trechos em que o robô prepara e posta: "das 8h às 12h e das 14h às 22h"."""
+    trechos = robo.trechos_de_postar(config)
+    return " e ".join(rotulo_janela(a // 60, -(-b // 60)) for a, b in trechos) or "nenhum"
+
+
 def videos_hoje(config, agora=None):
     """Quantos vídeos o dia de hoje sorteou dentro da faixa (o mesmo número o dia inteiro)."""
     dia = (agora or datetime.now(fuso_horario)).strftime("%Y-%m-%d")
@@ -494,6 +508,8 @@ BOTAO_TELA = "Ver Tela do Celular 🖥️"
 BOTAO_RASCUNHOS = "Rascunhos do Robô 📝"
 BOTAO_FAIXA_ROBO = "Rascunhos por Dia 📦"
 BOTAO_HORARIO_ROBO = "Horário do Robô 🕗"
+BOTAO_HORARIO_INTERACOES = "Horário das Interações 💬"
+BOTAO_SEM_HORARIO_PROPRIO = "Junto com o Robô 🔁"
 BOTAO_TREINO = "Testar Caminho 🧭"
 BOTAO_PREPARAR = "Preparar 1 Agora ⚡"
 BOTAO_HISTORICO = "Histórico do Robô 📋"
@@ -532,9 +548,16 @@ def teclado_robo(config):
         [KeyboardButton(text=pausa_robo), KeyboardButton(text=BOTAO_RASCUNHOS)],
         [KeyboardButton(text=BOTAO_PREPARAR), KeyboardButton(text=BOTAO_HISTORICO)],
         [KeyboardButton(text=BOTAO_FAIXA_ROBO), KeyboardButton(text=BOTAO_HORARIO_ROBO)],
+        [KeyboardButton(text=BOTAO_HORARIO_INTERACOES)],
         [KeyboardButton(text=BOTAO_TREINO), KeyboardButton(text=BOTAO_CELULAR)],
         [KeyboardButton(text=BOTAO_VOLTAR)],
     ])
+
+
+teclado_janela_interacoes = montar_teclado([
+    [KeyboardButton(text=BOTAO_SEM_HORARIO_PROPRIO)],
+    [KeyboardButton(text="Cancelar ❌")],
+])
 
 
 teclado_faixa_ou_fixo = montar_teclado([
@@ -640,7 +663,9 @@ def texto_robo(config, agora=None, celular=None):
         f"Status: {status_robo(config)}\n"
         f"{linha_celular}"
         f"📦 Rascunhos por dia: <b>{rotulo_faixa(piso, topo)}</b>{hoje}\n"
-        f"🕗 Horário do robô: <b>{rotulo_janela(config['robo_inicio'], config['robo_fim'])}</b>\n"
+        f"🕗 Horário do robô: <b>{rotulo_janela(config['robo_inicio'], config['robo_fim'])}</b>"
+        + (f" (prepara e posta {rotulo_de_postar(config)})" if robo.janela_das_interacoes(config) else "") + "\n"
+        f"💬 Horário das interações: <b>{rotulo_interacoes(config)}</b>\n"
         f"📝 Esperando a sua aprovação: <b>{len(robo.esperando_aprovacao())}</b> | "
         f"✅ Aprovados na fila: <b>{len(robo.listar('aprovado'))}</b>\n"
         f"🧭 Treino: {_linha_treino()}\n\n"
@@ -652,7 +677,10 @@ def texto_robo(config, agora=None, celular=None):
         f"📋 <b>{BOTAO_HISTORICO}</b>: tudo o que o robô tentou nas últimas 24 h, com o produto e em que passo "
         f"parou. Às {HORA_DO_RESUMO}h chega o resumo do dia no seu privado.\n"
         f"📦 <b>{BOTAO_FAIXA_ROBO}</b>: quantos rascunhos ele prepara por dia (uma faixa, sorteada a cada dia).\n"
-        f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele pode mexer no celular e postar.\n"
+        f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele prepara os rascunhos e posta (fora do Horário das "
+        "Interações).\n"
+        f"💬 <b>{BOTAO_HORARIO_INTERACOES}</b>: em que horário ele responde os comentários dos seus vídeos e "
+        "comenta e curte os de outros criadores. Nessa janela ele não prepara nem posta.\n"
         f"🧭 <b>{BOTAO_TREINO}</b>: confere agora se as telas do app da Shopee continuam iguais "
         "(ele faz isso sozinho toda segunda).\n"
         f"📱 <b>{BOTAO_CELULAR}</b>: a ligação com o Motorola (reconectar, ver a tela de longe)."
@@ -732,7 +760,8 @@ async def mostrar_assistente(message: types.Message, state: FSMContext):
 
 # Depois de um Cancelar ❌ (bot_mestre), volta à tela de onde o ajuste saiu.
 ESTADOS_DO_ROBO = ("aguardando_tipo_faixa_robo", "aguardando_faixa_robo", "aguardando_confirmacao_faixa_robo", "aguardando_janela_robo",
-                   "aguardando_confirmacao_janela_robo", "aguardando_confirmacao_pausa_robo", "menu_robo",
+                   "aguardando_confirmacao_janela_robo", "aguardando_janela_interacoes",
+                   "aguardando_confirmacao_janela_interacoes", "aguardando_confirmacao_pausa_robo", "menu_robo",
                    "rascunho", "aguardando_confirmacao_recusa")
 ESTADOS_DO_ASSISTENTE = ("aguardando_tipo_faixa", "aguardando_faixa", "aguardando_confirmacao_faixa", "aguardando_janela",
                          "aguardando_confirmacao_janela", "aguardando_confirmacao_pausa", "menu_assistente")
@@ -933,6 +962,28 @@ async def pedir_janela_robo(message: types.Message, state: FSMContext):
         "pedir a verificação, ninguém resolve até você acordar.</i>",
         parse_mode="HTML", reply_markup=teclado_janela_dia_todo)
     await state.set_state(ShopeeVideoFluxo.aguardando_janela_robo)
+
+
+@router.message(F.text == BOTAO_HORARIO_INTERACOES, StateFilter("*"))
+async def pedir_janela_interacoes(message: types.Message, state: FSMContext):
+    """
+    O Horário das Interações: nele o robô só responde os comentários e comenta e curte no
+    feed; fora dele, só prepara e posta. Escolha do Rafael (24/10, P22 a P24): DECISOES.md,
+    Shopee Vídeo.
+    """
+    if not _admin(message): return
+    config = ler_config()
+    janela = robo.janela_das_interacoes(config) or (None, None)
+    exemplo = exemplos.janela("shopee_video_interacoes", *janela, "12-15")
+    await message.answer(
+        "Em que horário o robô responde os comentários dos seus vídeos e comenta e curte os vídeos de outros "
+        "criadores? Nessa janela ele não prepara nem posta; fora dela, só prepara e posta.\n\n"
+        f"Envie <code>início-fim</code> (ex.: <code>{exemplo}</code>) ou toque em {BOTAO_SEM_HORARIO_PROPRIO} para "
+        "ele voltar a interagir dentro do Horário do Robô.\n"
+        f"<i>Hoje está {rotulo_interacoes(config)}. Com 3 h ou mais cabem, com folga, os 3 comentários do dia "
+        "e as respostas.</i>",
+        parse_mode="HTML", reply_markup=teclado_janela_interacoes)
+    await state.set_state(ShopeeVideoFluxo.aguardando_janela_interacoes)
 
 
 @router.message(F.text == BOTAO_PREPARAR, StateFilter("*"))
@@ -1436,6 +1487,54 @@ async def confirmar_janela_robo(message: types.Message, state: FSMContext):
     await state.set_state(ShopeeVideoFluxo.aguardando_confirmacao_janela_robo)
 
 
+@router.message(ShopeeVideoFluxo.aguardando_janela_interacoes)
+async def confirmar_janela_interacoes(message: types.Message, state: FSMContext):
+    config = ler_config()
+    janela = None
+    if message.text != BOTAO_SEM_HORARIO_PROPRIO:
+        janela = interpretar_janela(message.text)
+        if not janela or janela == (0, 24):
+            await message.answer(
+                "⚠️ Use o formato <code>12-15</code>, com o início menor que o fim (de 0 a 24). O dia todo não "
+                "serve: não sobraria hora para preparar e postar.",
+                parse_mode="HTML", reply_markup=teclado_janela_interacoes)
+            return
+    novo = {**config, "robo_interacoes_inicio": janela[0] if janela else None,
+            "robo_interacoes_fim": janela[1] if janela else None}
+    if janela and not robo.trechos_de_postar(novo):
+        await message.answer(
+            f"⚠️ Assim não sobra hora para preparar e postar: o Horário do Robô "
+            f"({rotulo_janela(config['robo_inicio'], config['robo_fim'])}) fica todo dentro dela. Mande uma "
+            f"janela menor ou mude antes o {BOTAO_HORARIO_ROBO}.",
+            parse_mode="HTML", reply_markup=teclado_janela_interacoes)
+        return
+    await state.update_data(janela_interacoes=list(janela) if janela else None)
+    if janela:
+        texto = (f"Interações <b>{rotulo_janela(janela[0], janela[1])}</b>; preparar e postar "
+                 f"<b>{rotulo_de_postar(novo)}</b>?")
+    else:
+        texto = (f"Interações de volta junto com o Horário do Robô "
+                 f"(<b>{rotulo_janela(config['robo_inicio'], config['robo_fim'])}</b>)?")
+    await message.answer(texto, parse_mode="HTML", reply_markup=teclado_aprovar_cancelar)
+    await state.set_state(ShopeeVideoFluxo.aguardando_confirmacao_janela_interacoes)
+
+
+@router.message(ShopeeVideoFluxo.aguardando_confirmacao_janela_interacoes, F.text == "Aprovar ✅")
+async def salvar_janela_interacoes(message: types.Message, state: FSMContext):
+    janela = (await state.get_data()).get("janela_interacoes")
+    alterar_config(robo_interacoes_inicio=janela[0] if janela else None,
+                   robo_interacoes_fim=janela[1] if janela else None)
+    if janela:
+        exemplos.lembrar_janela("shopee_video_interacoes", *janela)
+    config = ler_config()
+    # Os rascunhos que faltam hoje saem do plano novo, fora da janela nova.
+    robo.replanejar_hoje(config)
+    logger.info(f"✅ Shopee Vídeo: Horário das Interações {janela[0]}h-{janela[1]}h." if janela
+                else "✅ Shopee Vídeo: interações de volta no Horário do Robô.")
+    await message.answer(f"✅ Horário das interações: <b>{rotulo_interacoes(config)}</b>.", parse_mode="HTML")
+    await mostrar_robo(message, state)
+
+
 @router.message(ShopeeVideoFluxo.aguardando_confirmacao_janela_robo, F.text == "Aprovar ✅")
 async def salvar_janela_robo(message: types.Message, state: FSMContext):
     inicio, fim = (await state.get_data())["janela"]
@@ -1508,6 +1607,7 @@ async def salvar_recusa(message: types.Message, state: FSMContext):
                             ShopeeVideoFluxo.aguardando_fonte,
                             ShopeeVideoFluxo.aguardando_confirmacao_faixa_robo,
                             ShopeeVideoFluxo.aguardando_confirmacao_janela_robo,
+                            ShopeeVideoFluxo.aguardando_confirmacao_janela_interacoes,
                             ShopeeVideoFluxo.aguardando_confirmacao_pausa_robo,
                             ShopeeVideoFluxo.aguardando_confirmacao_recusa))
 async def confirmar_com_os_botoes(message: types.Message, state: FSMContext):

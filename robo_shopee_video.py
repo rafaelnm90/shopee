@@ -72,9 +72,11 @@ logger = logging.getLogger("RoboShopeeVideo")
 
 CHAVE_CONFIG = "shopee_video"  # a mesma chave do painel_shopee_video
 # Começa pausado: o Rafael retoma no painel. Rascunhos por dia em faixa (sorteada a cada
-# dia) e o Horário do Robô, em horas de Brasília.
+# dia), o Horário do Robô e o Horário das Interações (None até o Rafael escolher), em
+# horas de Brasília.
 PADRAO = {"robo_pausado": True, "robo_limite_min": 1, "robo_limite_max": 2,
-          "robo_inicio": ps.HORARIO_DAS_RODADAS[0], "robo_fim": ps.HORARIO_DAS_RODADAS[1]}
+          "robo_inicio": ps.HORARIO_DAS_RODADAS[0], "robo_fim": ps.HORARIO_DAS_RODADAS[1],
+          "robo_interacoes_inicio": None, "robo_interacoes_fim": None}
 MAXIMO_POR_DIA = 20
 CHAVE_DIA = "shopee_video_robo_dia"
 # Rascunho do plano que não deu certo volta nas rodadas seguintes: até estas vezes a mais
@@ -204,7 +206,36 @@ def agora_br(agora=None):
 
 
 def no_horario(config, agora=None):
-    return config["robo_inicio"] <= agora_br(agora).hour < config["robo_fim"]
+    """O robô pode rodar agora: no Horário do Robô ou no Horário das Interações."""
+    return (config["robo_inicio"] <= agora_br(agora).hour < config["robo_fim"]
+            or na_hora_das_interacoes(config, agora))
+
+
+# O Horário das Interações (responder os comentários dos vídeos do Rafael e comentar e
+# curtir no feed) fica separado do de preparar e postar: nele o robô só interage, e fora
+# dele, só prepara e posta. Sem ele escolhido, tudo segue no Horário do Robô, como antes.
+# Escolha do Rafael (24/10, P22 a P24): DECISOES.md, Shopee Vídeo.
+
+def janela_das_interacoes(config):
+    """(início, fim) do Horário das Interações, em horas; None enquanto o Rafael não escolheu."""
+    inicio, fim = config.get("robo_interacoes_inicio"), config.get("robo_interacoes_fim")
+    return (int(inicio), int(fim)) if inicio is not None and fim is not None else None
+
+
+def na_hora_das_interacoes(config, agora=None):
+    janela = janela_das_interacoes(config)
+    return bool(janela) and janela[0] <= agora_br(agora).hour < janela[1]
+
+
+def trechos_de_postar(config):
+    """Os trechos do dia, em minutos (início, fim), em que o robô prepara e posta."""
+    inicio, fim = config["robo_inicio"] * 60, min(config["robo_fim"] * 60, 24 * 60 - 1)
+    janela = janela_das_interacoes(config)
+    if not janela:
+        return [(inicio, fim)] if fim > inicio else []
+    corte_inicio, corte_fim = janela[0] * 60, janela[1] * 60
+    trechos = [(inicio, min(fim, corte_inicio)), (max(inicio, corte_fim), fim)]
+    return [(a, b) for a, b in trechos if b > a]
 
 
 def quantos_hoje(config, dia):
@@ -218,16 +249,35 @@ def planejar(config, dia):
     mesma lista. Nunca a mesma quantidade nem os mesmos horários todo dia.
     """
     quantos = quantos_hoje(config, dia)
-    if quantos <= 0:
+    trechos = trechos_de_postar(config)
+    total = sum(b - a for a, b in trechos)
+    if quantos <= 0 or total <= 0:
         return []
-    inicio, fim = config["robo_inicio"] * 60, min(config["robo_fim"] * 60, 24 * 60 - 1)
-    parte = (fim - inicio) / quantos
+    # As partes iguais correm pelos trechos de postar, pulando o Horário das Interações.
+    parte = total / quantos
     sorteio = random.Random(f"{CHAVE_ESTADO}:{dia}")
     horarios = []
     for i in range(quantos):
-        minuto = int(inicio + i * parte + sorteio.uniform(min(5, parte / 3), max(parte - 5, parte * 2 / 3)))
+        corrido = int(i * parte + sorteio.uniform(min(5, parte / 3), max(parte - 5, parte * 2 / 3)))
+        for a, b in trechos:
+            if corrido < b - a:
+                minuto = a + corrido
+                break
+            corrido -= b - a
+        else:
+            minuto = trechos[-1][1] - 1
         horarios.append(f"{minuto // 60:02d}:{minuto % 60:02d}")
     return sorted(horarios)
+
+
+def replanejar_hoje(config, agora=None):
+    """
+    O Horário das Interações mudou: os horários de rascunho que faltam hoje saem do plano
+    novo, fora da janela nova; os já feitos continuam contados.
+    """
+    estado = estado_do_dia(config, agora)
+    estado["horarios"] = planejar(config, estado["data"])
+    db.salvar_config(CHAVE_DIA, estado)
 
 
 def estado_do_dia(config, agora=None):
@@ -728,8 +778,9 @@ def proxima_postagem(config, agora=None, sorteio=random):
     """
     Quando postar um rascunho que o Rafael acabou de aprovar: depois do último aprovado
     (ou postado) com um intervalo sorteado, ou daqui a poucos minutos se nenhum está
-    marcado. Fora do Horário do Robô, vai para o começo do próximo horário, com uns
-    minutos sorteados: os aprovados saem espalhados, nunca todos de uma vez.
+    marcado. Fora do Horário do Robô, vai para o começo do próximo horário, e no Horário
+    das Interações, para o fim dele, com uns minutos sorteados: os aprovados saem
+    espalhados, nunca todos de uma vez.
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     momento = agora_br(agora)
@@ -741,13 +792,22 @@ def proxima_postagem(config, agora=None, sorteio=random):
         quando = max(base, momento) + timedelta(minutes=sorteio.randint(*INTERVALO_DAS_POSTAGENS))
     else:
         quando = momento + timedelta(minutes=sorteio.randint(*ESPERA_DA_PRIMEIRA))
-    if quando.hour >= config["robo_fim"] or (quando.date() > momento.date() and quando.hour < config["robo_inicio"]):
-        dia = quando.date() if quando.hour < config["robo_inicio"] else quando.date() + timedelta(days=1)
-        quando = datetime(dia.year, dia.month, dia.day, config["robo_inicio"], tzinfo=momento.tzinfo)
-        quando += timedelta(minutes=sorteio.randint(*ESPERA_DA_PRIMEIRA))
-    elif quando.hour < config["robo_inicio"]:
-        quando = quando.replace(hour=config["robo_inicio"], minute=0) + timedelta(
-            minutes=sorteio.randint(*ESPERA_DA_PRIMEIRA))
+    janela = janela_das_interacoes(config)
+    # Ajusta até cair no horário de postar: fora do Horário do Robô, o começo do próximo; no
+    # Horário das Interações (P22), o fim dele. Sempre com uns minutos sorteados.
+    for _ in range(4):
+        if janela and janela[0] <= quando.hour < janela[1]:
+            quando = (datetime(quando.year, quando.month, quando.day, tzinfo=momento.tzinfo)
+                      + timedelta(hours=janela[1], minutes=sorteio.randint(*ESPERA_DA_PRIMEIRA)))
+        elif quando.hour >= config["robo_fim"] or (quando.date() > momento.date() and quando.hour < config["robo_inicio"]):
+            dia = quando.date() if quando.hour < config["robo_inicio"] else quando.date() + timedelta(days=1)
+            quando = datetime(dia.year, dia.month, dia.day, config["robo_inicio"], tzinfo=momento.tzinfo)
+            quando += timedelta(minutes=sorteio.randint(*ESPERA_DA_PRIMEIRA))
+        elif quando.hour < config["robo_inicio"]:
+            quando = quando.replace(hour=config["robo_inicio"], minute=0) + timedelta(
+                minutes=sorteio.randint(*ESPERA_DA_PRIMEIRA))
+        else:
+            break
     return _momento(quando)
 
 
@@ -776,17 +836,22 @@ def o_que_fazer(config, agora=None):
     recusados = listar("recusado")
     if recusados:
         return "apagar", recusados[0]["id"]
+    # Postar e preparar só fora do Horário das Interações; responder e o feed só nele (sem
+    # ele escolhido, no Horário do Robô, como antes). Escolha do Rafael (P22 a P24).
+    # (A rodada já confere o horário: aqui só a separação entre os dois.)
+    postar = not na_hora_das_interacoes(config, agora)
+    interagir = not postar or not janela_das_interacoes(config)
     agora_txt = _momento(agora)
     prontos = [r for r in listar("aprovado") if r["postar_em"] and r["postar_em"] <= agora_txt]
-    if prontos:
+    if postar and prontos:
         return "postar", min(prontos, key=lambda r: r["postar_em"])["id"]
     if saude_do_dia_pendente(agora) or saude_pedida_pelo_recurso(agora):
         return "saude", None
-    if consumir_horarios(config, agora) or repetir_o_que_falhou(config, agora):
+    if postar and (consumir_horarios(config, agora) or repetir_o_que_falhou(config, agora)):
         return "rascunho", None
-    if respostas_pendentes(agora):
+    if interagir and respostas_pendentes(agora):
         return "responder", None
-    if feed_pendente(agora):
+    if interagir and feed_pendente(agora):
         return "feed", None
     return None
 
@@ -2049,12 +2114,23 @@ def respostas_pendentes(agora=None):
 
 
 def feed_pendente(agora=None):
-    """Falta comentar no feed hoje (3 por dia, P10), e o último foi há INTERVALO_DO_FEED ou mais?"""
+    """
+    Falta comentar no feed hoje (3 por dia, P10), e o último foi há INTERVALO_DO_FEED ou mais?
+    Num Horário das Interações curto, o intervalo encolhe para os 3 caberem nele.
+    """
     inicio = agora_br(agora).strftime("%Y-%m-%d 00:00:00")
     if interacoes.quantos_desde("video_feed", interacoes.COMENTADOS_NO_FEED, inicio) >= \
             interacoes.COMENTARIOS_NO_FEED_POR_DIA:
         return False
-    return (ler_estado().get("feed_em") or "") <= _momento(agora_br(agora) - INTERVALO_DO_FEED)
+    return (ler_estado().get("feed_em") or "") <= _momento(agora_br(agora) - intervalo_do_feed(ler_config()))
+
+
+def intervalo_do_feed(config):
+    """INTERVALO_DO_FEED, ou a janela das interações dividida pelos comentários do dia, se for menor."""
+    janela = janela_das_interacoes(config)
+    if not janela:
+        return INTERVALO_DO_FEED
+    return min(INTERVALO_DO_FEED, timedelta(hours=janela[1] - janela[0]) / interacoes.COMENTARIOS_NO_FEED_POR_DIA)
 
 
 def _ir_as_notificacoes(d):

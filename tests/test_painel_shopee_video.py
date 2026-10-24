@@ -53,7 +53,7 @@ def test_menu_do_robo_e_como_funciona(bm, Msg, Est):
     assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu_robo.state
     assert _textos(sv.teclado_robo(sv.ler_config())) == [
         "Retomar Postagem ▶️", "Rascunhos do Robô 📝", "Preparar 1 Agora ⚡", "Histórico do Robô 📋",
-        "Rascunhos por Dia 📦", "Horário do Robô 🕗",
+        "Rascunhos por Dia 📦", "Horário do Robô 🕗", "Horário das Interações 💬",
         "Testar Caminho 🧭", "Celular do Robô 📱", "Voltar à Shopee Vídeo 🔙"]
     msg = Msg("Como Funciona ❓")
     rodar(sv.como_funciona_handler(msg, est))
@@ -422,10 +422,11 @@ def test_botoes_vem_antes_das_respostas_de_texto(bm):
     ordem = [h.callback.__name__ for h in sv.router.message.handlers]
     botoes = ("painel_handler", "menu_robo_handler", "menu_assistente_handler", "como_funciona_handler",
               "voltar_ao_robo", "pedir_faixa", "pedir_janela", "pedir_pausa", "enviar_agora_handler",
-              "pedir_fonte", "pedir_pausa_robo", "pedir_faixa_robo", "escolher_tipo_faixa", "pedir_janela_robo", "treino_handler", "preparar_handler",
+              "pedir_fonte", "pedir_pausa_robo", "pedir_faixa_robo", "escolher_tipo_faixa", "pedir_janela_robo",
+              "pedir_janela_interacoes", "treino_handler", "preparar_handler",
               "rascunhos_handler", "aprovar_handler", "pedir_recusa", "proximo_handler")
     respostas = ("confirmar_faixa", "confirmar_janela", "salvar_fonte", "confirmar_com_os_botoes",
-                 "confirmar_faixa_robo", "confirmar_janela_robo", "salvar_recusa")
+                 "confirmar_faixa_robo", "confirmar_janela_robo", "confirmar_janela_interacoes", "salvar_recusa")
     assert max(ordem.index(b) for b in botoes) < min(ordem.index(r) for r in respostas)
 
 
@@ -773,3 +774,44 @@ def test_rodada_de_antes_do_reinicio_no_celular_segura_os_botoes_e_o_agendador(b
         rodar(handler(msg, Est()))
         assert "no meio de uma rodada" in msg.saidas[0]
     assert rodadas == []
+
+
+def test_horario_das_interacoes_separa_as_horas_de_postar(bm, Msg, Est):
+    # Escolha do Rafael (24/10, P22 a P24): um botão próprio; nele só responder e o feed,
+    # fora dele só preparar e postar.
+    sv, est = _painel(bm), Est()
+    sv.alterar_config(robo_inicio=8, robo_fim=22)
+    assert "Horário das interações: <b>junto com o Horário do Robô</b>" in sv.texto_robo(sv.ler_config())
+    msg = Msg("Horário das Interações 💬")
+    rodar(sv.pedir_janela_interacoes(msg, est))
+    assert "não prepara nem posta" in msg.saidas[0]
+    msg = Msg("12-15")
+    rodar(sv.confirmar_janela_interacoes(msg, est))
+    assert sv.ler_config()["robo_interacoes_inicio"] is None                 # só grava depois de aprovar
+    assert "preparar e postar <b>das 8h às 12h e das 15h às 22h</b>" in msg.saidas[0]
+    rodar(sv.salvar_janela_interacoes(Msg("Aprovar ✅"), est))
+    config = sv.ler_config()
+    assert (config["robo_interacoes_inicio"], config["robo_interacoes_fim"]) == (12, 15)
+    texto = sv.texto_robo(config)
+    assert "Horário das interações: <b>das 12h às 15h</b>" in texto
+    assert "prepara e posta das 8h às 12h e das 15h às 22h" in texto
+    # Os rascunhos que faltam hoje saem do plano novo, fora da janela.
+    assert all(not "12:00" <= h < "15:00" for h in bm.db.ler_config(sv.robo.CHAVE_DIA)["horarios"])
+
+
+def test_horario_das_interacoes_recusa_o_que_tira_toda_a_hora_de_postar(bm, Msg, Est):
+    sv = _painel(bm)
+    sv.alterar_config(robo_inicio=9, robo_fim=12)
+    for texto in ("Dia Todo", "8-13", "15-12"):
+        msg = Msg(texto)
+        rodar(sv.confirmar_janela_interacoes(msg, Est(estado=sv.ShopeeVideoFluxo.aguardando_janela_interacoes)))
+        assert "⚠️" in msg.saidas[0], texto
+    assert sv.ler_config()["robo_interacoes_inicio"] is None
+
+
+def test_junto_com_o_robo_volta_as_interacoes_para_o_horario_do_robo(bm, Msg, Est):
+    sv, est = _painel(bm), Est()
+    sv.alterar_config(robo_interacoes_inicio=12, robo_interacoes_fim=15)
+    rodar(sv.confirmar_janela_interacoes(Msg("Junto com o Robô 🔁"), est))
+    rodar(sv.salvar_janela_interacoes(Msg("Aprovar ✅"), est))
+    assert sv.robo.janela_das_interacoes(sv.ler_config()) is None
