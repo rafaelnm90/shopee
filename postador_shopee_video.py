@@ -456,13 +456,24 @@ def _dentro(ponto, caixa):
     return x1 <= ponto[0] <= x2 and y1 <= ponto[1] <= y2
 
 
+def _nome_normal(texto):
+    """
+    O nome de produto para comparar: sem caixa, com a mesma codificação dos acentos (NFKC)
+    e com os sinais (colchete, traço, barra, reticências, emoji) como espaço. Um sinal a
+    mais ou a menos não faz outro produto, e a palavra colada num sinal ("【oferta】kit")
+    precisa contar como as palavras dela.
+    """
+    texto = unicodedata.normalize("NFKC", texto or "").casefold()
+    return " ".join("".join(c if c.isalnum() else " " for c in texto).split())
+
+
 def mesmo_produto(texto, nome):
     """
     O texto da tela é o nome desse produto? Igual, ou um começa com o outro, porque a
     lista pode cortar o nome com reticências; o pedaço cortado precisa ser grande o
     bastante para não confundir dois produtos parecidos.
     """
-    a, b = (_normal(t).rstrip(".… ") for t in (texto, nome))
+    a, b = (_nome_normal(t) for t in (texto, nome))
     if not a or not b:
         return False
     curto, longo = sorted((a, b), key=len)
@@ -477,7 +488,7 @@ def nome_na_pagina(texto, nome):
     todo lugar em que o robô confere o nome na tela (página, Minhas Curtidas, janela de
     editar e tela final), para os quatro aceitarem o mesmo nome.
     """
-    palavras = (texto or "").split()
+    palavras = _nome_normal(texto).split()
     return any(mesmo_produto(" ".join(palavras[i:]), nome) for i in range(min(len(palavras), 4)))
 
 
@@ -493,18 +504,39 @@ def parecido_na_tela(xml, nome):
 
 def parecido_entre(textos, nome):
     """O parecido_na_tela de uma lista de textos (ex.: os nomes anexados na tela final)."""
+    return mais_parecido(textos, nome)[:2]
+
+
+def mais_parecido(textos, nome):
+    """
+    O texto que mais lembra o nome do produto: (% das palavras do nome que estão nele,
+    quantas palavras vêm antes do nome nele ou -1, o texto; "" quando nenhum serve).
+    """
     # Palavras de 3 letras ou mais: "de", "a" e "e" estão em quase todo nome.
-    alvo = {p for p in _normal(nome).split() if len(p) >= 3}
-    melhor = (0, -1)
+    alvo = {p for p in _nome_normal(nome).split() if len(p) >= 3}
+    melhor = (0, -1, "")
     for texto in textos:
-        texto = _normal(texto).rstrip(".… ")
-        if len(texto) < TAMANHO_MINIMO_DO_NOME or not alvo:
+        normal = _nome_normal(texto)
+        if len(normal) < TAMANHO_MINIMO_DO_NOME or not alvo:
             continue
-        palavras = texto.split()
+        palavras = normal.split()
         comum = len(alvo & set(palavras)) * 100 // len(alvo)
         antes = next((i for i in range(len(palavras)) if mesmo_produto(" ".join(palavras[i:]), nome)), -1)
-        melhor = max(melhor, (comum, antes))
+        melhor = max(melhor, (comum, antes, texto), key=lambda m: m[:2])
     return melhor
+
+
+def diferenca_do_nome(texto, nome):
+    """
+    Onde o texto parecido difere do nome, só em números (o nome não sai daqui): as
+    posições (1, 2...) das palavras do nome que faltam nele e quantas palavras dele não
+    estão no nome. Diz se a diferença é um selo no começo, um corte no fim ou outro produto.
+    """
+    nome_palavras = _nome_normal(nome).split()
+    palavras = _nome_normal(texto).split()
+    faltam = [i + 1 for i, p in enumerate(nome_palavras) if p not in palavras]
+    sobram = sum(1 for p in palavras if p not in nome_palavras)
+    return faltam, sobram
 
 
 def adicionar_do_produto(xml, nome):
@@ -516,17 +548,36 @@ def adicionar_do_produto(xml, nome):
     lista = elementos(xml)
     botoes = [el for el in lista if _normal(el["texto"]) == "adicionar"]
     for el in lista:
-        if not nome_na_pagina(el["texto"], nome):
-            continue
-        blocos = sorted((b for b in lista if b["clicavel"] and _dentro(_centro(el), b["caixa"])),
-                        key=lambda b: (b["caixa"][2] - b["caixa"][0]) * (b["caixa"][3] - b["caixa"][1]))
-        for bloco in blocos:
-            dentro = [bt for bt in botoes if _dentro(_centro(bt), bloco["caixa"])]
-            if len(dentro) == 1:
-                return dentro[0]
-            if dentro:
-                break
+        if nome_na_pagina(el["texto"], nome):
+            botao = _adicionar_do_bloco(lista, botoes, el)
+            if botao:
+                return botao
     return None
+
+
+def _adicionar_do_bloco(lista, botoes, el):
+    """O único Adicionar do menor bloco de toque com esse texto; None se não há ou há mais de um."""
+    blocos = sorted((b for b in lista if b["clicavel"] and _dentro(_centro(el), b["caixa"])),
+                    key=lambda b: (b["caixa"][2] - b["caixa"][0]) * (b["caixa"][3] - b["caixa"][1]))
+    for bloco in blocos:
+        dentro = [bt for bt in botoes if _dentro(_centro(bt), bloco["caixa"])]
+        if len(dentro) == 1:
+            return dentro[0]
+        if dentro:
+            break
+    return None
+
+
+def nomes_da_lista(xml):
+    """
+    Os nomes dos produtos na tela de Adicionar Produto, de cima para baixo: os textos do
+    tamanho de um nome que têm um Adicionar só no bloco deles.
+    """
+    lista = elementos(xml)
+    botoes = [el for el in lista if _normal(el["texto"]) == "adicionar"]
+    nomes = [el for el in lista
+             if len(el["texto"].strip()) >= TAMANHO_MINIMO_DO_NOME and _adicionar_do_bloco(lista, botoes, el)]
+    return [el["texto"] for el in sorted(nomes, key=lambda el: el["caixa"][1])]
 
 
 def ponto_livre(botao, xml):
@@ -579,9 +630,11 @@ def adicionar_produto(d, video):
         # Um toque de antes (como o que fecha a bolinha da Motorola) já abriu um produto.
         return conferir_janela(d, nome, None)
     esperar_a_lista(d)
-    melhor, anterior, rolagens, acabou = (0, -1), None, 0, False
+    melhor, anterior, rolagens, acabou, primeiro = (0, -1, ""), None, 0, False, None
     for rolagem in range(ROLAGENS_DO_PRODUTO + 1):
         tela = d.dump_hierarchy()
+        if primeiro is None:
+            primeiro = (nomes_da_lista(tela) or [""])[0]
         botao = adicionar_do_produto(tela, nome)
         if botao:
             ponto = ponto_livre(botao, tela)
@@ -595,7 +648,7 @@ def adicionar_produto(d, video):
             if ok:
                 registro_processos.registrar("shopee_video", "anexar o produto", "anexado", f"{rolagens} rolada(s)", ok=True)
             return ok, motivo
-        melhor = max(melhor, parecido_na_tela(tela, nome))
+        melhor = max(melhor, mais_parecido([el["texto"] for el in elementos(tela)], nome), key=lambda m: m[:2])
         textos = textos_longos(tela)
         if textos == anterior:
             # Rolou e a lista não mudou: chegou ao fim, o produto não está nela.
@@ -607,11 +660,21 @@ def adicionar_produto(d, video):
             rolagens += 1
             time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
     # Para a próxima vez dar para saber a causa: o produto estava com outro nome, mais
-    # embaixo do que o robô rolou, ou não estava (a lista acabou).
-    comum, antes = melhor
+    # embaixo do que o robô rolou, ou não estava (a lista acabou). O 1º da lista é o
+    # curtido por último: parecido com o nome, é o produto com o nome mostrado de outro
+    # jeito; diferente, o produto curtido não entrou na lista.
+    # O registro guarda até 120 caracteres: o detalhe fica curto ("%" = das palavras do nome).
+    comum, antes, texto = melhor
+    diferenca = ""
+    if texto and comum < 100:
+        faltam, sobram = diferenca_do_nome(texto, nome)
+        posicoes = ", ".join(f"{i}ª" for i in faltam[:3]) + ("…" if len(faltam) > 3 else "")
+        diferenca = (f" (faltam a {posicoes}" if faltam else " (nenhuma falta") + f"; {sobram} a mais)"
+    no_topo = f"; o 1º da lista tem {parecido_entre([primeiro], nome)[0]}%" if primeiro else ""
     registro_processos.registrar("shopee_video", "anexar o produto", "nome não achado em Minhas Curtidas",
-                                 f"o mais parecido tem {comum}% das palavras"
+                                 f"o mais parecido tem {comum}%" + diferenca
                                  + (f" e o nome começa depois de {antes} palavra(s)" if antes > 0 else "")
+                                 + no_topo
                                  + f"; {rolagens} rolada(s)" + ("; a lista acabou" if acabou else ""), ok=False)
     avisar_rafael.mandar_texto(f"{AVISO_SEM_PRODUTO}\n\nO produto do vídeo não está em Minhas Curtidas: {nome}")
     return False, "o produto do vídeo não está na lista: nada adicionado (aviso no privado)"
