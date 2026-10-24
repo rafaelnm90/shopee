@@ -133,6 +133,9 @@ APELAR_AQUI = "Apelar aqui"
 ROLADAS_NA_SAUDE = 4
 # A Saúde é lida de novo pelo aviso de penalidade nas Notificações só depois disto.
 INTERVALO_DA_SAUDE = timedelta(hours=6)
+# Depois do Já recorri, a Saúde é lida de hora em hora até sair o resultado (escolha do
+# Rafael em 24/10, P6).
+INTERVALO_DO_RECURSO = timedelta(hours=1)
 
 
 class Parada(Exception):
@@ -702,7 +705,8 @@ def recusar(ident, agora=None):
 def o_que_fazer(config, agora=None):
     """
     A tarefa desta rodada: ("treino", None), ("apagar", id), ("postar", id), ("saude",
-    None) (a Saúde do Vídeo, uma vez por dia), ("rascunho", None) ou None. Gasta o horário do plano, ou uma tentativa a mais do
+    None) (a Saúde do Vídeo, uma vez por dia e de hora em hora depois do Já recorri),
+    ("rascunho", None) ou None. Gasta o horário do plano, ou uma tentativa a mais do
     rascunho que falhou, quando escolhe um rascunho.
     """
     if treino_da_semana_pendente(agora):
@@ -714,7 +718,7 @@ def o_que_fazer(config, agora=None):
     prontos = [r for r in listar("aprovado") if r["postar_em"] and r["postar_em"] <= agora_txt]
     if prontos:
         return "postar", min(prontos, key=lambda r: r["postar_em"])["id"]
-    if saude_do_dia_pendente(agora):
+    if saude_do_dia_pendente(agora) or saude_pedida_pelo_recurso(agora):
         return "saude", None
     if consumir_horarios(config, agora) or repetir_o_que_falhou(config, agora):
         return "rascunho", None
@@ -1100,7 +1104,7 @@ def ler_saude(d, agora=None):
     else:
         # Sem o bloqueio na Saúde: se o robô esperava a suspensão, ela saiu antes do prazo.
         suspensao_acabou_antes(agora)
-    vistas, novas, completa, aceitas = set(), 0, False, []
+    vistas, novas, completa, aceitas, recusadas = set(), 0, False, [], []
     for _ in range(ROLADAS_NA_SAUDE + 1):
         andou = False
         while True:
@@ -1115,6 +1119,9 @@ def ler_saude(d, agora=None):
                 ident = apelacoes.guardar(punicao["tipo"], punicao["data"], punicao["status"], agora=agora)
                 if antes in (apelacoes.PENDENTE, apelacoes.RECORRIDA) and apelacoes.aceita_no_app(punicao["status"]):
                     aceitas.append(apelacoes.pegar(ident))
+                elif (antes in (apelacoes.PENDENTE, apelacoes.RECORRIDA)
+                      and apelacoes.recusada_no_app(punicao["status"])):
+                    recusadas.append(apelacoes.pegar(ident))
                 continue
             d.click(*punicao["ponto"])
             pausa(7)
@@ -1143,6 +1150,9 @@ def ler_saude(d, agora=None):
     for p in aceitas:
         avisar(f"🎉 Robô da Shopee Vídeo: o recurso da punição {p['tipo']} ({p['data_punicao']}) deu certo: a Shopee "
                "a tirou ou marcou como aceita na Saúde do Vídeo. Parei de lembrar dela.")
+    for p in recusadas:
+        avisar(f"❌ Robô da Shopee Vídeo: a Shopee não aceitou o recurso da punição {p['tipo']} ({p['data_punicao']}). "
+               "Os pontos dela continuam na Saúde do Vídeo.")
     gravar_estado(saude_lida_em=_momento(agora), saude_pontos=pontos, saude_punicoes=len(vistas))
     _sair_sem_salvar(d)
     return novas, len(vistas), pontos
@@ -1151,6 +1161,17 @@ def ler_saude(d, agora=None):
 def saude_do_dia_pendente(agora=None):
     """O robô ainda não tentou ler a Saúde do Vídeo hoje? (uma vez por dia)"""
     return not (ler_estado().get("saude_tentada_em") or "").startswith(agora_br(agora).strftime("%Y-%m-%d"))
+
+
+def saude_pedida_pelo_recurso(agora=None):
+    """
+    O Rafael tocou em Já recorri numa punição e o resultado ainda não saiu: a Saúde é
+    lida de hora em hora (a última tentativa tem 1 h ou mais). Escolha do Rafael:
+    DECISOES.md, Shopee Vídeo.
+    """
+    if not apelacoes.esperando_resultado(agora):
+        return False
+    return (ler_estado().get("saude_tentada_em") or "") <= _momento(agora_br(agora) - INTERVALO_DO_RECURSO)
 
 
 def saude_pedida_pela_notificacao(agora=None):
@@ -1738,7 +1759,8 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
         if suspensa(config, agora):
             # Os horários que passam na suspensão são pulados, como pausado.
             consumir_horarios(config, agora)
-            if not (no_horario(config, agora) and saude_do_dia_pendente(agora)):
+            ler_a_saude = saude_do_dia_pendente(agora) or saude_pedida_pelo_recurso(agora)
+            if not (no_horario(config, agora) and ler_a_saude):
                 return f"conta suspensa até {quando_acaba(suspenso_ate(config))}"
             # A leitura do dia conta já aqui: com o celular fora, não tenta de novo a cada rodada.
             gravar_estado(saude_tentada_em=_momento(agora))

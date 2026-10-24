@@ -1572,3 +1572,33 @@ def test_punicao_que_sumiu_da_lista_avisa_que_o_recurso_deu_certo(monkeypatch, a
     sumiu = next(p for p in robo.apelacoes.todas() if p["data_punicao"] == "22/10/2026 11:00:00")
     assert sumiu["situacao"] == "retirada"
     assert any("deu certo" in a and "22/10/2026 11:00:00" in a for a in avisos)
+
+
+
+def test_depois_do_ja_recorri_a_saude_e_lida_de_hora_em_hora_ate_o_resultado(monkeypatch, avisos, ia_da_apelacao):
+    # Escolha do Rafael (24/10, P6): de hora em hora depois do Já recorri, até sair o resultado.
+    ap = robo.apelacoes
+    ident = ap.guardar("Produto Irrelevante", "23/10/2026 19:04:25", "Não Recorrido", titulo="Botijão",
+                       agora=momento("2026-10-24 09:00"))
+    assert not robo.saude_pedida_pelo_recurso(momento("2026-10-24 10:00"))
+    ap.marcar(ident, ap.RECORRIDA, momento("2026-10-24 10:00"))
+    robo.gravar_estado(saude_tentada_em="2026-10-24 09:30:00")
+    assert robo.saude_pedida_pelo_recurso(momento("2026-10-24 10:30"))
+    ativar(robo_inicio=0, robo_fim=24)
+    robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-24 10:30")))
+    assert robo.o_que_fazer(robo.ler_config(), momento("2026-10-24 10:30")) == ("saude", None)
+    # Leu agora: só daqui a 1 h.
+    robo.gravar_estado(saude_tentada_em="2026-10-24 10:30:00")
+    assert not robo.saude_pedida_pelo_recurso(momento("2026-10-24 11:00"))
+    # O resultado saiu (recusado): para de olhar e avisa.
+    original = TELAS_DA_SAUDE["saude"]
+    monkeypatch.setitem(TELAS_DA_SAUDE, "saude", original[:6]
+                        + _punicao_na_lista("Produto Irrelevante", "23/10/2026 19:04:25", "Malsucedido", 1950)
+                        + original[9:])
+    robo.rodada(saude=True, d=AppDaSaude(), agora=momento("2026-10-24 11:40"))
+    assert ap.pegar(ident)["situacao"] == "recusada" and not ap.esperando_resultado(momento("2026-10-24 12:00"))
+    assert any("não aceitou o recurso" in a for a in avisos)
+    # Já recorri de mais de 7 dias sem resultado: para de olhar.
+    outra = ap.guardar("Contrafeito", "20/10/2026 10:00:00", "Não Recorrido", agora=momento("2026-10-20 11:00"))
+    ap.marcar(outra, ap.RECORRIDA, momento("2026-10-20 12:00"))
+    assert ap.esperando_resultado(momento("2026-10-26 12:00")) and not ap.esperando_resultado(momento("2026-10-28 12:00"))
