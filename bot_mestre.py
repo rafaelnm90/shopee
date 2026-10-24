@@ -17343,13 +17343,18 @@ async def main():
     _iniciar_tabela_buscas()
     scheduler.add_job(varredor_de_lixeira, 'cron', hour=3, minute=0, timezone=FUSO_STR)
 
+    # Os jobs de hora em hora (ou a cada 6 h) rodam num minuto fixo, e não "1 h depois de
+    # ligar": cada deploy reinicia o bot, e o intervalo recomeçava do zero, pulando vezes.
+    # O checkup cobra a meta de cada job (pedido do Rafael, P12).
+    # Decisão do Rafael: DECISOES.md, Monitor, deploy e servidor
     # Faxina de disco a cada 6 h, além do varredor das 03h: com 24 h de proteção e uma
     # passagem por dia, um órfão criado logo depois das 03h esperava quase 48 h.
-    scheduler.add_job(faxina_disco_periodica, 'interval', hours=6,
+    scheduler.add_job(faxina_disco_periodica, 'cron', hour='*/6', minute=13, timezone=FUSO_STR,
                       id='faxina_disco_loop', replace_existing=True)
 
     # Monitor de saúde (avisa o admin no privado)
-    scheduler.add_job(monitor_saude, 'interval', hours=1, id='monitor_saude_loop', replace_existing=True)
+    scheduler.add_job(monitor_saude, 'cron', minute=7, timezone=FUSO_STR, id='monitor_saude_loop',
+                      replace_existing=True)
 
     # Perguntas do Claude sem resposta: confere a cada 5 min e lembra de hora em hora,
     # contando do último aviso (um restart não adianta nem atrasa o lembrete).
@@ -17358,7 +17363,7 @@ async def main():
 
     # Painel de submissão do Grupo Público: renovado com 24 h, antes do limite de 48 h
     # do Telegram para o bot apagar o anterior
-    scheduler.add_job(renovar_botao_ofertas_velho, 'interval', hours=1, id='renovar_painel_ofertas',
+    scheduler.add_job(renovar_botao_ofertas_velho, 'cron', minute=37, timezone=FUSO_STR, id='renovar_painel_ofertas',
                       replace_existing=True)
 
     # Backup diário do banco, sessões e .env (e um já, se o último estiver velho)
