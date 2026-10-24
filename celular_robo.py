@@ -183,10 +183,11 @@ def portas_abertas(ip, portas=PORTAS_DA_DEPURACAO, prazo=0.5, juntas=400):
 
 def reconectar_sozinho():
     """
-    Reconecta sem o Rafael mandar a porta: primeiro a porta guardada; se não der, procura
+    Reconecta sem o Rafael mandar a porta: primeiro a porta guardada, refazendo a conexão
+    do adb (ela pode ficar presa com o celular e a depuração ligados); se não der, procura
     a porta nova da Depuração por Wi-Fi no celular, pela rede privada, e conecta nela.
     Só a depuração desligada (ou o celular fora da rede) impede. (True, modelo) ou
-    (False, motivo em palavras simples).
+    (False, motivo em palavras simples, que diz se a porta da depuração respondia).
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     if conectado():
@@ -199,13 +200,62 @@ def reconectar_sozinho():
     rede = {c["ip"]: c for c in celulares_na_rede()}
     if not rede.get(dados["ip"], {}).get("online"):
         return False, "o celular não está na rede privada (Tailscale desligado ou celular sem internet)"
-    for porta in portas_abertas(dados["ip"]):
+    motivo_da_guardada = ""
+    if dados.get("porta"):
+        # A conexão sem fio do adb pode ficar presa ("offline") com a depuração ligada: o
+        # "adb connect" diz que já está conectado e nada responde. Desfazer e refazer resolve.
+        av._rodar("adb", "disconnect", endereco(), timeout=10)
+        ok, resultado = conectar(dados["ip"], dados["porta"])
+        if ok:
+            return True, resultado
+        motivo_da_guardada = resultado
+    abertas = portas_abertas(dados["ip"])
+    for porta in abertas:
         if porta == dados.get("porta"):
             continue
         ok, resultado = conectar(dados["ip"], porta)
         if ok:
             return True, resultado
-    return False, "a Depuração por Wi-Fi está desligada no celular"
+    if dados.get("porta") in abertas:
+        return False, (f"a Depuração por Wi-Fi responde no celular, mas o adb não conecta ({motivo_da_guardada}); "
+                       "se continuar, parear de novo pelo Celular do Robô")
+    if abertas:
+        return False, (f"o celular tem {len(abertas)} porta(s) aberta(s), mas nenhuma é a da Depuração por Wi-Fi; "
+                       "se ela estiver ligada, parear de novo pelo Celular do Robô")
+    return False, "a Depuração por Wi-Fi está desligada no celular (nenhuma porta dela aberta)"
+
+
+def _estado_do_adb(resultado):
+    """O estado do adb no endereço guardado, em uma palavra (sem a saída crua, que traz o endereço)."""
+    if av._ok(resultado):
+        return resultado[1].strip() or "?"
+    saida = (resultado[1] if resultado else "").lower()
+    for trecho, estado in (("offline", "offline"), ("unauthorized", "não autorizado"), ("not found", "sem conexão")):
+        if trecho in saida:
+            return estado
+    return "sem resposta"
+
+
+def descrever_estado():
+    """
+    A ligação com o celular guardado em uma linha, para o android.yml (estado), só com
+    estados e números (o log do Actions é público: nunca o endereço, a porta nem o nome):
+    se está na rede privada, se a porta guardada está aberta, o estado do adb nela e
+    quantas portas abertas o celular tem. Só lê: não conecta nem desconecta nada.
+    """
+    dados = ler()
+    if not dados.get("pareado_em") or not dados.get("ip"):
+        return "ainda não pareado"
+    if shutil.which("adb") is None:
+        return "sem o adb no servidor"
+    online = {c["ip"]: c["online"] for c in celulares_na_rede()}.get(dados["ip"])
+    if not online:
+        return "na rede privada: não"
+    abertas = portas_abertas(dados["ip"])
+    alvo = endereco()
+    estado = _estado_do_adb(av._rodar("adb", "-s", alvo, "get-state", timeout=10)) if alvo else "sem porta guardada"
+    return (f"na rede privada: sim | porta guardada: {'aberta' if dados.get('porta') in abertas else 'fechada'} | "
+            f"adb: {estado} | portas abertas no celular: {len(abertas)}")
 
 
 def ocupado():

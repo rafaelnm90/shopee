@@ -219,6 +219,8 @@ def mostrar_estado():
     estado = estado_conteiner()
     print(f"contêiner {CONTEINER}: {estado or 'não existe'}")
     print(f"rede privada (celular): {estado_tailscale()}")
+    import celular_robo
+    print(f"celular guardado: {celular_robo.descrever_estado()}")
     if estado != "running":
         return
     uso = _rodar("sudo", "-n", "docker", "stats", "--no-stream", "--format", "{{.MemUsage}} | CPU {{.CPUPerc}}",

@@ -224,8 +224,51 @@ def test_reconecta_sozinho_procurando_a_porta_nova(cr, monkeypatch):
     tentadas = []
     monkeypatch.setattr(cr, "conectar", lambda ip, porta: tentadas.append(porta) or (
         (True, "moto g(100)") if porta == 41000 else (False, "o celular recusou")))
+    pedidos = []
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pedidos.append(partes) or (0, ""))
     assert cr.reconectar_sozinho() == (True, "moto g(100)")
-    assert tentadas == [39999, 41000]                                       # a porta velha não é tentada de novo
+    # A porta guardada é tentada uma vez, depois de desfazer a conexão presa; na busca, não de novo.
+    assert pedidos == [("adb", "disconnect", f"{IP}:37000")] and tentadas == [37000, 39999, 41000]
+
+
+def test_conexao_presa_volta_na_porta_guardada_sem_procurar_outra(cr, monkeypatch):
+    # 24/10, 15:09: o robô disse "Depuração desligada" com ela ligada; o adb tinha ficado preso.
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr, "conectado", lambda: False)
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: pytest.fail("não devia procurar outra porta"))
+    pedidos = []
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: pedidos.append(partes) or (0, ""))
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (True, "moto g(100)") if porta == 37000 else (False, "x"))
+    assert cr.reconectar_sozinho() == (True, "moto g(100)")
+    assert pedidos == [("adb", "disconnect", f"{IP}:37000")]
+
+
+def test_porta_guardada_aberta_que_nao_conecta_nao_culpa_a_depuracao(cr, monkeypatch):
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr, "conectado", lambda: False)
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [37000])
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: (0, ""))
+    monkeypatch.setattr(cr, "conectar", lambda ip, porta: (False, "o celular ainda não autorizou este servidor"))
+    ok, motivo = cr.reconectar_sozinho()
+    assert not ok and "responde no celular" in motivo and "não autorizou" in motivo
+    assert "desligada" not in motivo
+
+
+@pytest.mark.parametrize("resposta, esperado", [
+    ((0, "device"), "adb: device"), ((1, "error: device offline"), "adb: offline"),
+    ((1, "error: device unauthorized"), "adb: não autorizado"), (None, "adb: sem resposta"),
+])
+def test_estado_do_celular_so_com_estados_e_numeros(cr, monkeypatch, resposta, esperado):
+    cr._gravar(ip=IP, porta=37000, pareado_em="2026-10-17 10:00:00")
+    monkeypatch.setattr(cr, "celulares_na_rede", lambda: [{"nome": "moto", "ip": IP, "online": True}])
+    monkeypatch.setattr(cr, "portas_abertas", lambda ip: [37000, 41000])
+    monkeypatch.setattr(cr.av, "_rodar", lambda *partes, timeout=0: resposta)
+    linha = cr.descrever_estado()
+    assert esperado in linha and "porta guardada: aberta" in linha and "portas abertas no celular: 2" in linha
+    # O log do android.yml é público: nem o endereço nem a porta.
+    assert IP not in linha and "37000" not in linha
 
 
 @pytest.mark.parametrize("dados, online, portas, motivo", [
