@@ -34,6 +34,7 @@ def test_chaves_do_robo_sao_as_mesmas():
     assert checkup.CHAVE_DIA_SV == robo.CHAVE_DIA
     assert checkup.FOLGA_DA_SUSPENSAO_SV == robo.FOLGA_DA_SUSPENSAO
     assert robo.PADRAO["robo_pausado"] is True
+    assert checkup.COMENTARIOS_NO_FEED_POR_DIA == robo.interacoes.COMENTARIOS_NO_FEED_POR_DIA
 
 
 def test_erro_ligado_ao_lugar_do_codigo_sem_o_texto():
@@ -388,3 +389,36 @@ def test_conta_suspensa_nao_cobra_horario_vencido_e_mostra_ate_quando():
     # Depois do fim (e da folga), volta a cobrar.
     db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False, "robo_suspenso_ate": "2026-10-23 10:00:00"})
     assert checkup.robo_da_shopee_video(AGORA)["suspenso"] == ""
+
+
+def test_respostas_e_feed_da_shopee_video_no_radar():
+    import registro_processos
+    registro = registro_processos.registrar
+
+    def antes(horas):
+        return AGORA - timedelta(hours=horas)
+
+    registro("shopee_video", "notificações (respostas)", "topo achado", "2 linha(s) nova(s)", ok=True, agora=antes(10))
+    registro("shopee_video", "responder comentário", "respondido", ok=True, origem="a", agora=antes(10))
+    registro("shopee_video", "responder comentário", "resposta no lugar errado", ok=False, origem="b", agora=antes(9))
+    registro("shopee_video", "responder comentário", "já respondido", "2 resposta(s) do perfil", ok=False,
+             origem="c", agora=antes(9))
+    registro("shopee_video", "responder comentário", "sem resposta", "3 tentativa(s)", ok=False, origem="d",
+             agora=antes(8))
+    for horas, origem in ((30, "v1"), (5, "v1"), (4, "v2"), (3, "v3"), (2, "v4")):
+        registro("shopee_video", "feed: comentar", "comentado", ok=True, origem=origem, agora=antes(horas))
+    r = checkup.interacoes_da_shopee_video(AGORA)
+    assert r["respostas"] == {"respondido": 1, "resposta no lugar errado": 1, "já respondido": 1, "sem resposta": 1}
+    assert r["duplicadas"] == 1 and r["rodou_hoje"] and r["feed_hoje"] == 4 and r["feed_repetidos"] == 1
+    robo_sv = {"ativo": True, "vencidos": 0, "salvos": 0, "ruins": []}
+    texto = "\n".join(checkup.pontos_de_atencao([], {}, {}, robo_sv, {}, ("x", 1.0, 1), AGORA, interacoes=r))
+    for trecho in ("não ficaram embaixo do comentário certo", "ficaram sem resposta depois de 3 tentativas",
+                   "com mais de uma resposta do perfil", "4 comentários hoje (o combinado é 3)",
+                   "comentado(s) mais de uma vez em 3 dias"):
+        assert trecho in texto
+    # A meta do dia: sem as Notificações lidas e com menos de 3 no feed, à noite, cobra.
+    vazio = {"respostas": {}, "duplicadas": 0, "rodou_hoje": False, "feed_hoje": 1, "feed_repetidos": 0}
+    texto = "\n".join(checkup.pontos_de_atencao([], {}, {}, robo_sv, {}, ("x", 1.0, 1), AGORA, interacoes=vazio))
+    assert "as Notificações não foram lidas hoje" in texto and "1 de 3 comentários hoje" in texto
+    pausado = dict(robo_sv, ativo=False)
+    assert checkup.pontos_de_atencao([], {}, {}, pausado, {}, ("x", 1.0, 1), AGORA, interacoes=vazio) == []
