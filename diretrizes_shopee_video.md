@@ -71,5 +71,9 @@ violência, fraude, atividade ilegal e risco à segurança das pessoas.
 - Título e comentário sem nome de marca, com nomes genéricos (regra 7).
 - A IA confere o vídeo e o texto antes. Se achar violação, o robô não posta
   e diz o porquê.
-- O robô não curte nem comenta nada sozinho (regra 9). O texto do comentário
-  vai no privado do Rafael, que comenta à mão se quiser.
+- Curtidas e comentários (regra 9): o robô responde os comentários dos vídeos do
+  Rafael e curte e comenta 3 vídeos de outros criadores por dia, sempre com um texto
+  diferente, feito pela IA para aquele comentário ou vídeo, nunca uma mensagem
+  repetida; pula comentário ofensivo, golpe ou propaganda. O comentário do próprio
+  vídeo (o do Gem) continua no privado do Rafael, que comenta à mão se quiser.
+  Escolha do Rafael em 24/10/2026, avisado da regra 9 (DECISOES.md, Shopee Vídeo).

@@ -21,7 +21,11 @@ Cada rodada faz no máximo uma coisa, nesta ordem:
 3. posta um rascunho aprovado cuja hora chegou: os aprovados saem um de cada vez, com um
    intervalo sorteado entre eles, sempre dentro do Horário do Robô;
 4. prepara um rascunho novo quando um horário do plano do dia passou: cada dia sorteia
-   quantos (a faixa Rascunhos por Dia) e espalha os horários pelo Horário do Robô.
+   quantos (a faixa Rascunhos por Dia) e espalha os horários pelo Horário do Robô;
+5. responde os comentários novos dos vídeos do Rafael, uma vez por dia (Notificações →
+   Lives, Vídeos e ...; o texto é da IA e cada resposta é conferida embaixo do comentário);
+6. curte e comenta um vídeo de outro criador no feed Live e Vídeo → Para você, até 3 por
+   dia, espalhados (interacoes_shopee_video.py).
 Pausado (Pausar Postagem ⏸️), fora do Horário do Robô, com a tela do celular aberta no
 privado do Rafael ou com o explorar tocando nele, não toca em nada. Celular desconectado:
 tenta reconectar sozinho (celular_robo.reconectar_sozinho); sem conseguir, pausa a
@@ -32,8 +36,8 @@ aviso fica nas Notificações do app), não toca em nada até o fim da suspensã
 assistente espera junto; no fim, os dois voltam sozinhos (painel_shopee_video).
 
 Nunca toca em Postar sem o Aprovar do Rafael no bot, nem nos botões de comprar. Curtir e
-comentar o próprio vídeo continuam à mão (diretriz 9.1.1): depois de postar, o comentário
-chega no privado, numa mensagem só dele. No log, só estados e números: nada de nome de
+comentar o próprio vídeo continuam à mão: depois de postar, o comentário chega no
+privado, numa mensagem só dele. No log, só estados e números: nada de nome de
 produto, título ou link.
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
@@ -55,7 +59,9 @@ import assistente_shopee_video as assistente
 import avisar_rafael
 import celular_robo
 import db
+import interacoes_shopee_video as interacoes
 import postador_shopee_video as ps
+import registro_processos
 from api_shopee import eh_video, link_para_converter
 from fuso import fuso_horario
 from legendas import nome_da_legenda
@@ -516,6 +522,17 @@ LINHAS_DO_HISTORICO = 12
 # ordem importa: o primeiro trecho que aparece no motivo decide.
 PASSOS = (
     ("suspensa pela Shopee", "conta suspensa pela Shopee"),
+    ("notificação do comentário", "achar a notificação"),
+    ("painel de comentários", "abrir os comentários"),
+    ("comentário não está", "achar o comentário"),
+    ("Responder", "tocar em Responder"),
+    ("IA não escreveu", "texto da IA"),
+    ("campo de comentar", "abrir o campo de comentar"),
+    ("campo de escrever", "escrever o texto"),
+    ("botão de enviar", "enviar"),
+    ("resposta não", "conferir a resposta"),
+    ("comentário não apareceu", "conferir o comentário"),
+    ("coração do vídeo do feed", "curtir no feed"),
     ("Centro do criador", "achar a Saúde no Centro do criador"),
     ("Rótulo de IA", "rótulo de IA"),
     ("Saúde do Vídeo não abriu", "abrir a Saúde do Vídeo"),
@@ -549,9 +566,10 @@ PASSOS = (
 )
 SIMBOLOS = {"salvo": "✅", "postado": "📤", "apagado": "🗑️", "pulado": "⏭️", "parou": "⚠️", "erro": "❌",
             "verificação": "🧩", "suspensa": "⛔", "sem vídeo": "📭", "treino ok": "🧭", "treino parou": "🧭",
-            "saúde lida": "🩺"}
+            "saúde lida": "🩺", "respondido": "💬", "comentado": "❤️"}
 NOMES_DAS_ACOES = {"rascunho": "Rascunho", "postar": "Postagem", "apagar": "Apagar rascunho",
-                   "treino": "Testar Caminho", "rodada": "Rodada", "saude": "Saúde do Vídeo"}
+                   "treino": "Testar Caminho", "rodada": "Rodada", "saude": "Saúde do Vídeo",
+                   "responder": "Resposta a comentário", "feed": "Feed (Para você)"}
 
 
 def _criar_tabela_tentativas(con):
@@ -718,8 +736,9 @@ def o_que_fazer(config, agora=None):
     """
     A tarefa desta rodada: ("treino", None), ("apagar", id), ("postar", id), ("saude",
     None) (a Saúde do Vídeo, uma vez por dia e de hora em hora depois do Já recorri),
-    ("rascunho", None) ou None. Gasta o horário do plano, ou uma tentativa a mais do
-    rascunho que falhou, quando escolhe um rascunho.
+    ("rascunho", None), ("responder", None) (os comentários dos vídeos, uma vez por dia),
+    ("feed", None) (um vídeo do feed, até 3 por dia) ou None. Gasta o horário do plano, ou
+    uma tentativa a mais do rascunho que falhou, quando escolhe um rascunho.
     """
     if treino_da_semana_pendente(agora):
         return "treino", None
@@ -734,6 +753,10 @@ def o_que_fazer(config, agora=None):
         return "saude", None
     if consumir_horarios(config, agora) or repetir_o_que_falhou(config, agora):
         return "rascunho", None
+    if respostas_pendentes(agora):
+        return "responder", None
+    if feed_pendente(agora):
+        return "feed", None
     return None
 
 
@@ -1777,6 +1800,395 @@ def _sair_sem_salvar(d):
         pass
 
 
+# --- Respostas aos comentários e o feed (interacoes_shopee_video) ---
+# Pedidos do Rafael de 24/10/2026 (P9, P10 e P11): DECISOES.md, Shopee Vídeo. Cada
+# resposta e cada comentário no feed é conferido na tela depois de enviado, entra no
+# registro de processos (o checkup conta) e no Histórico do Robô; o que não se confirma
+# para e não se repete às cegas.
+
+# Quantas vezes o robô rola as Notificações procurando a linha do topo da vez anterior.
+ROLADAS_NAS_RESPOSTAS = 6
+# Respostas numa rodada (cada uma leva perto de 1 min); o resto fica para a rodada seguinte.
+RESPOSTAS_POR_RODADA = 8
+# O painel de comentários abre uns 8 s depois do vídeo (Motorola, 24/10/2026).
+ESPERA_DOS_COMENTARIOS = 20
+ROLADAS_NO_PAINEL = 4
+ABA_DO_FEED = "Live e Vídeo"
+ABA_PARA_VOCE = "Para você"
+# Quantos vídeos do feed o robô passa, no máximo, procurando um para comentar.
+VIDEOS_OLHADOS_NO_FEED = 12
+# Os 3 comentários do dia no feed saem espalhados, não um atrás do outro.
+INTERVALO_DO_FEED = timedelta(hours=2)
+REGISTRO = "shopee_video"
+
+
+def respostas_pendentes(agora=None):
+    """
+    Hora de responder os comentários? Uma vez por dia, e de novo na rodada seguinte
+    quando a anterior parou no limite de RESPOSTAS_POR_RODADA.
+    """
+    estado = ler_estado()
+    hoje = agora_br(agora).strftime("%Y-%m-%d")
+    return bool(estado.get("respostas_continuar")) or not (estado.get("respostas_em") or "").startswith(hoje)
+
+
+def feed_pendente(agora=None):
+    """Falta comentar no feed hoje (3 por dia, P10), e o último foi há INTERVALO_DO_FEED ou mais?"""
+    inicio = agora_br(agora).strftime("%Y-%m-%d 00:00:00")
+    if interacoes.quantos_desde("video_feed", "comentado", inicio) >= interacoes.COMENTARIOS_NO_FEED_POR_DIA:
+        return False
+    return (ler_estado().get("feed_em") or "") <= _momento(agora_br(agora) - INTERVALO_DO_FEED)
+
+
+def _ir_as_notificacoes(d):
+    ir_ao_inicio(d)
+    tocar(d, ABA_DAS_NOTIFICACOES, 6)
+    tocar(d, FILTRO_DOS_VIDEOS, 5)
+
+
+def _ler_notificacoes(d, topo=None):
+    """
+    As linhas das Notificações (filtro Lives, Vídeos e ...), de cima para baixo, rolando
+    até achar a linha do topo da vez anterior (ou até ROLADAS_NAS_RESPOSTAS). Sem topo
+    guardado, só a primeira tela.
+    """
+    _ir_as_notificacoes(d)
+    linhas = []
+    for vez in range(ROLADAS_NAS_RESPOSTAS + 1):
+        novas = [t["texto"] for t in interacoes.linhas_das_notificacoes(tela(d), FILTRO_DOS_VIDEOS)
+                 if t["texto"] not in linhas]
+        linhas += novas
+        if not topo or topo in map(interacoes.marca, linhas) or (vez and not novas):
+            break
+        ps.rolar(d)
+        pausa(2)
+    return linhas
+
+
+def responder_comentarios(d, agora=None):
+    """
+    Responde os comentários novos dos vídeos do Rafael: lê as Notificações até a linha do
+    topo da vez anterior e, do mais velho para o mais novo, abre cada "comentou no seu
+    vídeo" e responde (_responder_um). Na primeira vez só guarda o topo (P11: só os novos).
+    O topo só anda quando todos os comentários acima dele tiveram um fim: o que falhou volta
+    na próxima vez.
+    """
+    estado = ler_estado()
+    topo = estado.get("respostas_topo")
+    linhas = _ler_notificacoes(d, topo)
+    if not linhas:
+        registro_processos.registrar(REGISTRO, "notificações (respostas)", "lista vazia", ok=None)
+        return "respostas: nenhuma notificação"
+    if not topo:
+        for texto in linhas:
+            if interacoes.comentario_da_notificacao(texto):
+                interacoes.guardar(interacoes.marca(texto), "comentario", "anterior", agora)
+        gravar_estado(respostas_topo=interacoes.marca(linhas[0]))
+        registro_processos.registrar(REGISTRO, "notificações (respostas)", "topo guardado", ok=True)
+        return "respostas: guardei o topo das notificações (respondo os que chegarem daqui em diante)"
+    marcas = [interacoes.marca(t) for t in linhas]
+    if topo in marcas:
+        novas = linhas[:marcas.index(topo)]
+        registro_processos.registrar(REGISTRO, "notificações (respostas)", "topo achado",
+                                     f"{len(novas)} linha(s) nova(s)", ok=True)
+    else:
+        # A linha do topo sumiu ou ficou longe demais: vale tudo o que foi lido, e as marcas
+        # evitam responder de novo o que já teve um fim.
+        novas = linhas
+        registro_processos.registrar(REGISTRO, "notificações (respostas)", "topo não achado",
+                                     f"{len(linhas)} linha(s) lida(s)", ok=None)
+    pendentes = [t for t in novas
+                 if interacoes.comentario_da_notificacao(t) and not interacoes.terminado(interacoes.marca(t))]
+    contagem, sobrou = {}, False
+    for i, texto in enumerate(reversed(pendentes)):
+        if i >= RESPOSTAS_POR_RODADA:
+            sobrou = True
+            break
+        resultado = _responder_um(d, texto, agora)
+        contagem[resultado] = contagem.get(resultado, 0) + 1
+        pausa(random.uniform(4, 12))
+    if not any(not interacoes.terminado(interacoes.marca(t)) for t in pendentes):
+        gravar_estado(respostas_topo=marcas[0])
+    gravar_estado(respostas_continuar=sobrou)
+    if not pendentes:
+        return "respostas: nenhum comentário novo"
+    return "respostas: " + ", ".join(f"{n} {r}" for r, n in sorted(contagem.items())) + (
+        "; o resto fica para a próxima rodada" if sobrou else "")
+
+
+def _abrir_notificacao(d, texto):
+    """Abre o vídeo pela linha da notificação (o texto exato), rolando a lista até ela."""
+    _ir_as_notificacoes(d)
+    for vez in range(ROLADAS_NAS_RESPOSTAS + 1):
+        linha = next((t for t in interacoes.linhas_das_notificacoes(tela(d), FILTRO_DOS_VIDEOS)
+                      if t["texto"] == texto), None)
+        if linha:
+            d.click(*linha["ponto"])
+            pausa(4)
+            return
+        if vez < ROLADAS_NAS_RESPOSTAS:
+            ps.rolar(d)
+            pausa(2)
+    raise Parada("a notificação do comentário não está mais na lista")
+
+
+def _achar_no_painel(d, nome, comentario):
+    """
+    (tela, comentários do painel, posição do comentário da pessoa ou None), rolando o painel.
+    Respostas escondidas ("Ver # respostas") embaixo dele são abertas uma vez, para o robô ver
+    se o Rafael já respondeu.
+    """
+    abertas = False
+    xml, painel, i = "", [], None
+    for vez in range(ROLADAS_NO_PAINEL + 1):
+        xml = tela(d)
+        painel = interacoes.comentarios_do_painel(xml)
+        i = interacoes.alvo_no_painel(painel, nome, comentario)
+        if i is not None:
+            escondidas = painel[i]["ver_respostas"] or next(
+                (c["ver_respostas"] for c in interacoes.respostas_embaixo(painel, i) if c["ver_respostas"]), None)
+            if escondidas and not abertas:
+                d.click(*escondidas)
+                pausa(3)
+                abertas = True
+                xml = tela(d)
+                painel = interacoes.comentarios_do_painel(xml)
+                i = interacoes.alvo_no_painel(painel, nome, comentario)
+            return xml, painel, i
+        if vez < ROLADAS_NO_PAINEL:
+            ps.rolar(d)
+            pausa(2)
+    return xml, painel, None
+
+
+def _fechar_teclado(d):
+    """Fecha o teclado, se ele está na tela: o voltar sem teclado fecharia o painel."""
+    if interacoes.teclado_aberto(tela(d)):
+        d.press("back")
+        pausa(2)
+
+
+def _escrever_e_enviar(d, texto):
+    """
+    Escreve no campo em foco, confere o que ficou e toca no enviar ao lado. Para antes de
+    enviar se o campo não mostra exatamente o texto.
+    """
+    ps.escrever(d, texto)
+    pausa(2)
+    campo = d(focused=True)
+    escrito = campo.get_text() if campo.exists else ""
+    if ps._normal(escrito) != ps._normal(texto):
+        raise Parada("o texto não ficou no campo de escrever")
+    xml = tela(d)
+    campo_na_tela = interacoes.campo_de_escrever(xml)
+    enviar = interacoes.botao_de_enviar(xml, campo_na_tela) if campo_na_tela else None
+    if not enviar:
+        raise Parada("não achei o botão de enviar ao lado do campo")
+    if ps.proibido_no_ponto(xml, *enviar):
+        raise Parada(ps.RECUSA)
+    d.click(*enviar)
+    pausa(4)
+    _fechar_teclado(d)
+
+
+def _responder_um(d, texto, agora=None):
+    """
+    Responde um comentário: abre o vídeo pela notificação, acha o comentário da pessoa no
+    painel, confere que ninguém do perfil respondeu ainda, pede a resposta à IA, toca em
+    Responder daquele comentário, escreve, envia e confere que a resposta ficou embaixo
+    dele. Devolve o resultado ("respondido", "já respondido", "pulado", "lugar errado",
+    "falhou" ou "desistiu").
+    """
+    marca = interacoes.marca(texto)
+    nome, comentario = interacoes.comentario_da_notificacao(texto)
+    produto = ""
+    try:
+        _abrir_notificacao(d, texto)
+        if not esperar_na_tela(d, "Comentários", ESPERA_DOS_COMENTARIOS):
+            raise Parada("o painel de comentários não abriu")
+        xml, painel, i = _achar_no_painel(d, nome, comentario)
+        if i is None:
+            raise Parada("o comentário não está mais no vídeo")
+        produto = interacoes.produto_do_painel(xml)
+        respostas = interacoes.do_criador_embaixo(painel, i)
+        if respostas:
+            _guardar_o_perfil(painel, i)
+            interacoes.guardar(marca, "comentario", "já respondido", agora)
+            registro_processos.registrar(REGISTRO, "responder comentário", "já respondido",
+                                         f"{respostas} resposta(s) do perfil", ok=None if respostas == 1 else False,
+                                         origem=marca)
+            return "já respondido"
+        legenda = next((c["texto"] or c["nome"] for c in painel if c["criador"] and not c["resposta"]), "")
+        anteriores = ler_estado().get("respostas_textos") or []
+        resposta = asyncio.run(interacoes.gerar_resposta(comentario, produto, legenda, anteriores))
+        if resposta is None:
+            raise Parada("a IA não escreveu a resposta")
+        if not resposta:
+            interacoes.guardar(marca, "comentario", "pulado", agora)
+            registro_processos.registrar(REGISTRO, "responder comentário", "pulado pela IA",
+                                         "ofensivo, golpe ou propaganda", ok=None, origem=marca)
+            registrar_tentativa("responder", "pulado", "a IA achou o comentário ofensivo, golpe ou propaganda",
+                                produto, agora)
+            avisar(f"💬 Robô da Shopee Vídeo: não respondi um comentário no vídeo de {produto or 'um produto'}: "
+                   "a IA achou ofensivo, golpe ou propaganda. Se quiser, responda à mão.")
+            return "pulado"
+        if not painel[i]["responder"]:
+            raise Parada("não achei o Responder do comentário")
+        d.click(*painel[i]["responder"])
+        pausa(3)
+        campo = interacoes.campo_de_escrever(tela(d))
+        if not campo or not ps._normal(campo["texto"]).startswith("respond"):
+            raise Parada("o Responder não abriu o campo da resposta")
+        _escrever_e_enviar(d, resposta)
+        xml, painel, i = _achar_no_painel(d, nome, comentario)
+        lugar = interacoes.onde_ficou(painel, i, resposta)
+        if lugar == "embaixo":
+            _guardar_o_perfil(painel, i)
+            interacoes.guardar(marca, "comentario", "respondido", agora)
+            gravar_estado(respostas_textos=(anteriores + [resposta])[-10:])
+            registro_processos.registrar(REGISTRO, "responder comentário", "respondido", ok=True, origem=marca)
+            registrar_tentativa("responder", "respondido", produto=produto, agora=agora)
+            return "respondido"
+        if lugar == "outro lugar":
+            # Erro grave (P12): a resposta foi parar embaixo de outro comentário ou solta.
+            interacoes.guardar(marca, "comentario", "lugar errado", agora)
+            registro_processos.registrar(REGISTRO, "responder comentário", "resposta no lugar errado", ok=False,
+                                         origem=marca)
+            registrar_tentativa("responder", "parou", "a resposta não ficou embaixo do comentário certo", produto,
+                                agora)
+            avisar(f"⚠️ Robô da Shopee Vídeo: a resposta a um comentário no vídeo de {produto or 'um produto'} "
+                   f"não ficou embaixo do comentário certo. Confira no app e apague à mão se precisar: "
+                   f"\"{resposta}\". Não vou responder esse comentário de novo.")
+            return "lugar errado"
+        raise Parada("a resposta não apareceu embaixo do comentário")
+    except Parada as e:
+        # Na próxima vez, o robô confere de novo se o perfil já respondeu antes de responder:
+        # uma resposta que saiu sem aparecer na tela não vira duas.
+        tentativas = interacoes.guardar_falha(marca, "comentario", agora)
+        registro_processos.registrar(REGISTRO, "responder comentário", "parou", e.motivo, ok=False, origem=marca)
+        registrar_tentativa("responder", "parou", e.motivo, produto, agora)
+        if tentativas < interacoes.TENTATIVAS_DO_COMENTARIO:
+            return "falhou"
+        interacoes.guardar(marca, "comentario", "desistiu", agora)
+        registro_processos.registrar(REGISTRO, "responder comentário", "sem resposta",
+                                     f"{tentativas} tentativa(s)", ok=False, origem=marca)
+        avisar(f"⚠️ Robô da Shopee Vídeo: tentei {tentativas} vezes e não consegui responder o comentário de "
+               f"{nome} no vídeo de {produto or 'um produto'} ({e.motivo}). Ele fica para você responder à mão.")
+        return "desistiu"
+    finally:
+        _sair_sem_salvar(d)
+
+
+def _guardar_o_perfil(painel, i):
+    """A marca do nome do perfil do Rafael (o da resposta com o selo Criador), para o feed pular os vídeos dele."""
+    dono = next((c["nome"] for c in interacoes.respostas_embaixo(painel, i) if c["criador"] and c["nome"]), "")
+    if dono:
+        gravar_estado(conta_marca=interacoes.marca(dono))
+
+
+def _proprio(video):
+    """O vídeo do feed é do próprio Rafael? Pelo nome do perfil (visto nas respostas) ou pelo título postado."""
+    conta = ler_estado().get("conta_marca")
+    if conta and interacoes.marca(video["autor"]) == conta:
+        return True
+    return any(interacoes.parecidos(r["titulo"] or "", video["legenda"]) for r in listar("postado") if r["titulo"])
+
+
+def _curtir_no_feed(d, video):
+    """Curte o vídeo pelo coração da coluna da direita e confere que ficou curtido."""
+    if interacoes.coracao_curtido(video["coracao_desc"]):
+        return
+    xml = tela(d)
+    if ps.proibido_no_ponto(xml, *video["coracao"]):
+        raise Parada(ps.RECUSA)
+    d.click(*video["coracao"])
+    pausa(2)
+    depois = interacoes.video_do_feed(tela(d))
+    curtido = interacoes.coracao_curtido(depois["coracao_desc"]) if depois else None
+    if not depois or curtido is False or (curtido is None and depois["coracao_desc"] == video["coracao_desc"]):
+        registro_processos.registrar(REGISTRO, "feed: curtir", "não curtiu", ok=False)
+        raise Parada("o toque no coração do vídeo do feed não curtiu")
+    registro_processos.registrar(REGISTRO, "feed: curtir", "curtido", ok=True)
+
+
+def _comentar_no_feed(d, video, texto):
+    """Abre os comentários pelo balão, escreve, envia e confere que o comentário apareceu."""
+    xml = tela(d)
+    if ps.proibido_no_ponto(xml, *video["balao"]):
+        raise Parada(ps.RECUSA)
+    d.click(*video["balao"])
+    pausa(3)
+    xml = esperar_na_tela(d, "Comentários", 12)
+    if not xml:
+        raise Parada("o painel de comentários do vídeo do feed não abriu")
+    campo = interacoes.campo_de_comentar(xml)
+    if not campo:
+        raise Parada("não achei o campo de comentar no vídeo do feed")
+    d.click(*campo)
+    pausa(2)
+    if not interacoes.campo_de_escrever(tela(d)):
+        raise Parada("o campo de comentar não abriu")
+    _escrever_e_enviar(d, texto)
+    if not any(interacoes.parecidos(c["texto"], texto) for c in interacoes.comentarios_do_painel(tela(d))):
+        raise Parada("o comentário não apareceu no vídeo do feed")
+
+
+def interagir_no_feed(d, agora=None):
+    """
+    Live e Vídeo → Para você: passa as lives, olha uns vídeos e, num vídeo de outro criador
+    que ainda não comentou, curte e comenta (texto da IA, diferente dos anteriores). Um
+    vídeo por rodada; os 3 do dia saem espalhados (feed_pendente). Pedido do Rafael (P10).
+    """
+    ir_ao_inicio(d)
+    tocar(d, ABA_DO_FEED, 8)
+    tocar(d, ABA_PARA_VOCE, 6)
+    # Comenta o 1º, o 2º ou o 3º vídeo que der: não sempre o primeiro que aparece.
+    pular = random.randint(0, 2)
+    anteriores = ler_estado().get("feed_textos") or []
+    try:
+        for _ in range(VIDEOS_OLHADOS_NO_FEED):
+            xml = tela(d)
+            if interacoes.eh_live(xml):
+                registro_processos.registrar(REGISTRO, "feed: vídeo olhado", "live pulada", ok=None)
+            else:
+                video = interacoes.video_do_feed(xml)
+                marca = interacoes.marca(video["autor"], video["legenda"]) if video else None
+                if video and not interacoes.resultado_de(marca, "video_feed") and not _proprio(video):
+                    pausa(random.uniform(6, 14))  # assiste um pouco antes
+                    if pular:
+                        pular -= 1
+                    else:
+                        return _interagir_com(d, video, marca, anteriores, agora)
+            pausa(random.uniform(2, 6))
+            ps.rolar(d)
+            pausa(4)
+        registro_processos.registrar(REGISTRO, "feed: comentar", "nenhum vídeo para comentar", ok=None)
+        return "feed: nenhum vídeo para comentar"
+    finally:
+        _sair_sem_salvar(d)
+
+
+def _interagir_com(d, video, marca, anteriores, agora=None):
+    texto = asyncio.run(interacoes.gerar_comentario(video["legenda"], anteriores))
+    if texto is None:
+        raise Parada("a IA não escreveu o comentário do feed")
+    if not texto:
+        interacoes.guardar(marca, "video_feed", "pulado", agora)
+        registro_processos.registrar(REGISTRO, "feed: comentar", "pulado pela IA", ok=None, origem=marca)
+        return "feed: a IA pulou o vídeo"
+    _curtir_no_feed(d, video)
+    try:
+        _comentar_no_feed(d, video, texto)
+    except Parada as e:
+        registro_processos.registrar(REGISTRO, "feed: comentar", "parou", e.motivo, ok=False, origem=marca)
+        raise
+    interacoes.guardar(marca, "video_feed", "comentado", agora)
+    gravar_estado(feed_textos=(anteriores + [texto])[-10:])
+    registro_processos.registrar(REGISTRO, "feed: comentar", "comentado", ok=True, origem=marca)
+    registrar_tentativa("feed", "comentado", agora=agora)
+    return "feed: 1 vídeo curtido e comentado"
+
+
 # --- A rodada ---
 
 def pausar_por_desconexao(motivo):
@@ -1887,6 +2299,12 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
                                                              else ".")
                        + "\n\nTudo em Relatório Geral 📊 → Saúde da Shopee Vídeo 🩺.")
             return resultado
+        if acao == "responder":
+            gravar_estado(respostas_em=_momento(agora), respostas_continuar=False)
+            return responder_comentarios(d, agora)
+        if acao == "feed":
+            gravar_estado(feed_em=_momento(agora))
+            return interagir_no_feed(d, agora)
         if acao == "apagar":
             resultado = apagar_do_app(d, pegar(ident))
             registrar_tentativa("apagar", "apagado", produto=produto, agora=agora)
