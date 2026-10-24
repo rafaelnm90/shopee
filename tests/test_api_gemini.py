@@ -59,3 +59,27 @@ def test_prazos_de_cada_erro():
     assert ia.tempo_fora(NAO_EXISTE)[0] == ia.ESPERA_MODELO_INEXISTENTE_S
     assert ia.tempo_fora("429 quota exceeded")[0] == ia.ESPERA_COTA_S
     assert ia.tempo_fora("500 INTERNAL") is None
+
+
+def test_relatorio_dos_modelos_mostra_a_cascata_e_os_novos_so_com_nomes(monkeypatch):
+    # O modelos_ia.yml mantém a cascata atualizada: o modelo que a chave não enxerga e o
+    # modelo novo da chave que a cascata ainda não usa aparecem, com o motivo fixo do teste.
+    monkeypatch.setattr(ia, "MODELOS_CASCATA_GEMINI", ["gemini-a", "gemini-velho"])
+    respostas = {"gemini-a": "responde", "gemini-velho": "modelo não encontrado", "gemini-novo": "responde"}
+    linhas = ia.relatorio_dos_modelos(["gemini-a", "gemini-novo"], testar=respostas.get)
+    assert linhas == ["== Cascata (na ordem)", "gemini-a: na chave, responde",
+                      "gemini-velho: fora da chave, modelo não encontrado",
+                      "== Modelos de texto da chave fora da cascata", "gemini-novo: na chave, responde"]
+
+
+def test_modelos_da_chave_so_os_de_texto(monkeypatch):
+    modelos = [SimpleNamespace(name=f"models/{nome}", supported_actions=acoes) for nome, acoes in (
+        ("gemini-z-flash", ["generateContent"]), ("gemini-z-flash-image", ["generateContent"]),
+        ("gemini-z-tts", ["generateContent"]), ("text-embedding-9", ["embedContent"]), ("gemini-a-pro", None))]
+    monkeypatch.setattr(ia, "client_genai", SimpleNamespace(models=SimpleNamespace(list=lambda: modelos)))
+    assert ia.modelos_da_chave() == ["gemini-z-flash"]
+
+
+def test_teste_do_modelo_diz_o_motivo_fixo(gemini):
+    gemini.respostas.update(b=COTA_DO_DIA, c=NAO_EXISTE)
+    assert [ia.testar_modelo(m) for m in "abc"] == ["responde", "cota do dia", "modelo não encontrado"]

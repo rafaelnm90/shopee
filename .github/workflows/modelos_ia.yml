@@ -1,0 +1,34 @@
+name: Modelos da IA
+
+# Quais modelos do Gemini a chave do servidor enxerga e, com "testar" marcado, se cada
+# um responde (uma chamada curta por modelo): para manter a cascata do api_gemini.py
+# com os modelos novos e sem os descontinuados. Só roda quando disparado à mão.
+#
+# O repositório é público, e os logs do Actions também: saem só nomes de modelo e
+# motivos fixos (cota, não encontrado, resposta vazia), nunca a chave.
+on:
+  workflow_dispatch:
+    inputs:
+      testar:
+        description: "Mandar uma chamada curta a cada modelo para ver se responde"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  modelos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Perguntar ao Google quais modelos a chave enxerga
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          command_timeout: 8m
+          script: |
+            cd ~/shopee
+            venv/bin/python3 api_gemini.py modelos ${{ inputs.testar && '--testar' || '' }}
