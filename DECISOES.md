@@ -333,6 +333,7 @@ As regras de PR, CI, merge e avisos estão no `CLAUDE.md`, em "Como trabalhamos"
   - o robô só descobria no fim, depois da galeria e do título.
   
   Agora, ao abrir a página do produto, o robô procura esse aviso (na tela e no aviso rápido do Android). Se aparecer, pula o vídeo na hora, com o motivo no histórico. No Ver Produtos, o produto de loja de férias fica de fora, como o recusado pela IA. O checkup conta quantos apareceram.
+- **24/10/2026:** escolha do Rafael (P16) para os horários do plano que passam enquanto o robô está **pausado sozinho por desconexão do celular**: na volta do celular (Retomar Postagem), eles **contam como um só**, feito logo depois, como com o robô fora do ar. A pausa que o Rafael faz no botão continua pulando os horários. Em 24/10 o celular caiu às 15:09, e o horário das 15:29 foi pulado. As outras opções eram pular, como na pausa do botão, ou recuperar todos espalhados no resto do Horário do Robô.
 
 ## Monitor, deploy e servidor
 

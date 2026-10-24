@@ -2431,6 +2431,11 @@ def _interagir_com(d, video, marca, anteriores, agora=None):
 
 # --- A rodada ---
 
+# A pausa que o robô faz sozinho quando perde o celular (robo_pausa_motivo); o painel a
+# mostra diferente da pausa do botão.
+MOTIVO_DA_DESCONEXAO = "celular desconectado"
+
+
 def pausar_por_desconexao(motivo):
     """
     Sem o celular, a Postagem pausa sozinha (o botão vira Retomar Postagem ▶️) e o modo
@@ -2438,7 +2443,7 @@ def pausar_por_desconexao(motivo):
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     db.atualizar_config(CHAVE_CONFIG, lambda dados: dados.update(robo_pausado=True,
-                                                                robo_pausa_motivo="celular desconectado"))
+                                                                robo_pausa_motivo=MOTIVO_DA_DESCONEXAO))
     logger.warning(f"⚠️ [Robô Shopee Vídeo] Celular desconectado ({motivo}): Postagem pausada.")
     avisar(f"📱 Robô da Shopee Vídeo: perdi a conexão com o celular guardado ({motivo}). Pausei a Postagem, "
            "e o modo assistente volta a mandar as postagens aqui no privado para você postar à mão.\n\n"
@@ -2459,7 +2464,11 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
     na_hora = treino or preparar or saude
     if not na_hora:
         if config["robo_pausado"]:
-            consumir_horarios(config, agora)
+            # Pausa do Rafael: os horários que passam nela são pulados. Pausa sozinha, por
+            # desconexão: ficam, e na volta do celular contam como um só, como com o robô fora
+            # do ar. Escolha do Rafael (24/10, P16): DECISOES.md, Shopee Vídeo.
+            if config.get("robo_pausa_motivo") != MOTIVO_DA_DESCONEXAO:
+                consumir_horarios(config, agora)
             return "pausado"
         if suspensa(config, agora):
             # Os horários que passam na suspensão são pulados, como pausado.
