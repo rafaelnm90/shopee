@@ -44,6 +44,9 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   **Recurso**: "Razão para apelar *", contador 0/200, o campo e **Enviar**; o robô nunca
   abre). O voltar da Removido volta para a lista no mesmo ponto da rolagem. Falta ver:
   se a punição antiga (05/10) ainda tem o Apelar aqui (o celular desconectou no meio).
+  Recurso aceito (Rafael, 24/10/2026): a punição some da lista (ou fica "Bem-sucedido"),
+  os pontos baixam e, abaixo de 6, o bloqueio some da Saúde antes do prazo; o aviso
+  "banida até" continua nas Notificações, por isso o robô confere sempre na Saúde.
 - **Mapa:** os caminhos ficam nas listas `CAMINHO_PERFIL`, `CAMINHO_POSTAR` e
   `CAMINHO_PRODUTO` do `robo_shopee_video.py` (o que tocar, a espera e o que tem de
   aparecer depois). O treino confere cada passo contra elas; quando a Shopee mudar uma

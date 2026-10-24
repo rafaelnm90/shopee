@@ -1452,7 +1452,7 @@ def test_gerar_apelacao_le_a_saude_acha_o_video_e_escreve_so_o_que_e_verdade(mon
     assert len(ia_da_apelacao) == 1 and VESTIDO in ia_da_apelacao[0] and "vestido do vídeo" in ia_da_apelacao[0]
     intelectual = punicoes["Violação de Propriedade Intelectual"]
     assert intelectual["texto"] == "" and "outro canal" in intelectual["observacao"]
-    assert punicoes["Contrafeito"]["situacao"] == "recorrida"
+    assert punicoes["Contrafeito"]["situacao"] == "aceita"
     # Nunca abre o Recurso: só lê a tela Removido e volta.
     assert "Apelar aqui." not in app.toques and "Enviar" not in app.toques
     # A Saúde também mostra a suspensão: guardada e avisada uma vez.
@@ -1532,3 +1532,43 @@ def test_celular_fora_na_suspensao_nao_pausa_nem_avisa(monkeypatch, avisos):
     # Acabou a suspensão (com a folga) e o celular não voltou: pausa e avisa, como sempre.
     assert "desconectado" in robo.rodada(agora=momento("2026-10-26 19:30"))
     assert robo.ler_config()["robo_pausado"] is True and "Retomar Postagem" in avisos[-1]
+
+
+
+def test_aviso_antigo_nas_notificacoes_nao_vale_se_a_saude_nao_mostra_o_bloqueio(monkeypatch, avisos, conta_suspensa):
+    # Pedido do Rafael (24/10): o recurso aceito tira a suspensão antes do prazo, mas o aviso
+    # antigo continua nas Notificações; quem diz a situação de agora é a Saúde do Vídeo.
+    sem_bloqueio = [n for n in TELAS_DA_SAUDE["saude"] if "banido" not in n.casefold() and "Banido" not in n]
+    monkeypatch.setitem(TELAS_DA_SAUDE, "saude", sem_bloqueio)
+    monkeypatch.setitem(CAMINHO, ("perfil", "Postar vídeo"), "camera")
+    app = AppDaSaude()
+    assert robo.ler_suspensao(app, momento("2026-10-24 10:00")) is None
+    assert robo.suspensao_retirada(datetime(2026, 10, 26, 19, 4, 26, tzinfo=fuso_horario))
+    # Da segunda vez nem abre a Saúde: a suspensão já ficou anotada como retirada.
+    app = AppDaSaude()
+    assert robo.ler_suspensao(app, momento("2026-10-24 11:00")) is None and "Centro do criador" not in app.toques
+    # Com o bloqueio na Saúde, vale a data dela.
+    robo.db.salvar_config(robo.CHAVE_ESTADO, {})
+    monkeypatch.setitem(TELAS_DA_SAUDE, "saude", TELAS_DA_SAUDE["saude"] + [_no(SAUDE_BANIDO, clicavel=False)])
+    assert robo.ler_suspensao(AppDaSaude(), momento("2026-10-24 12:00")).day == 26
+
+
+def test_suspensao_tirada_antes_do_prazo_volta_na_leitura_da_saude(monkeypatch, avisos, ia_da_apelacao):
+    sem_bloqueio = [n for n in TELAS_DA_SAUDE["saude"] if "banido" not in n.casefold()]
+    monkeypatch.setitem(TELAS_DA_SAUDE, "saude", sem_bloqueio)
+    ativar(robo_inicio=8, robo_fim=22, robo_suspenso_ate="2026-10-26 19:04:26")
+    aprovado = _rascunho("aprovado", postar_em="2026-10-24 09:00:00")
+    robo.rodada(saude=True, d=AppDaSaude(), agora=momento("2026-10-24 10:00"))
+    config = robo.ler_config()
+    assert "robo_suspenso_ate" not in config and config["robo_pausado"] is False
+    assert any("tirou a suspensão antes do prazo" in a for a in avisos)
+    assert robo.pegar(aprovado)["postar_em"] > "2026-10-24 10:00:00"
+
+
+def test_punicao_que_sumiu_da_lista_avisa_que_o_recurso_deu_certo(monkeypatch, avisos, ia_da_apelacao):
+    robo.apelacoes.guardar("Produto Irrelevante", "22/10/2026 11:00:00", "Não Recorrido", titulo="Garrafa",
+                           agora=momento("2026-10-23 10:00"))
+    robo.rodada(saude=True, d=AppDaSaude(), agora=momento("2026-10-24 10:00"))
+    sumiu = next(p for p in robo.apelacoes.todas() if p["data_punicao"] == "22/10/2026 11:00:00")
+    assert sumiu["situacao"] == "retirada"
+    assert any("deu certo" in a and "22/10/2026 11:00:00" in a for a in avisos)

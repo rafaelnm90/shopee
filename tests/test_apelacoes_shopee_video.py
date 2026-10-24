@@ -41,9 +41,25 @@ def test_recorrida_no_app_para_o_lembrete_e_a_mesma_punicao_nao_duplica():
     assert ap.conhecida("Produto Irrelevante", "23/10/2026  19:04:25")
     assert _punicao(status="Em análise") == ident
     assert ap.pegar(ident)["situacao"] == ap.RECORRIDA and ap.vencidas(AGORA) == []
-    # Punição que o robô já acha recorrida nunca é lembrada.
+    # Punição que o robô já acha recorrida nunca é lembrada; "Bem-sucedido" é o recurso aceito.
     outra = ap.guardar("Contrafeito", "06/10/2026 22:44:53", "Bem-sucedido", agora=AGORA)
-    assert ap.pegar(outra)["situacao"] == ap.RECORRIDA and len(ap.todas()) == 2
+    assert ap.pegar(outra)["situacao"] == ap.ACEITA and len(ap.todas()) == 2
+    assert _punicao(status="Bem-sucedido") == ident and ap.pegar(ident)["situacao"] == ap.ACEITA
+
+
+def test_punicao_que_some_da_saude_foi_tirada_pela_shopee_e_a_antiga_saiu_da_janela():
+    # Pedido do Rafael (24/10): com o recurso aceito, a Shopee pode tirar a punição da lista.
+    pendente = _punicao()
+    nao_vai = ap.guardar("Produto Irrelevante", "18/10/2026 14:33:18", "Não Recorrido", agora=AGORA)
+    ap.marcar(nao_vai, ap.NAO_VAI)
+    antiga = ap.guardar("Contrafeito", "20/09/2026 10:00:00", "Não Recorrido", agora=AGORA)
+    fica = ap.guardar("Violação de Propriedade Intelectual", "18/10/2026 20:20:56", "Não Recorrido", agora=AGORA)
+    vistas = {ap.chave("Violação de Propriedade Intelectual", "18/10/2026 20:20:56")}
+    retiradas = ap.retirar_ausentes(vistas, AGORA)
+    assert [p["id"] for p in retiradas] == [pendente]          # só a que ele esperava ganha aviso
+    assert ap.pegar(pendente)["situacao"] == ap.RETIRADA and ap.pegar(nao_vai)["situacao"] == ap.RETIRADA
+    assert ap.pegar(antiga)["situacao"] == ap.FORA_DA_JANELA and ap.pegar(fica)["situacao"] == ap.PENDENTE
+    assert [p["id"] for p in ap.vencidas(AGORA)] == [fica]
 
 
 def test_texto_da_ia_cabe_em_200_caracteres(monkeypatch):
@@ -78,7 +94,9 @@ def test_tela_saude_mostra_suspensao_e_punicoes():
     config = {**robo.PADRAO, "robo_suspenso_ate": "2026-10-26 19:04:26"}
     texto = ap.texto_saude(config, {"saude_lida_em": "2026-10-23 20:00:00", "saude_pontos": 6}, AGORA)
     assert "suspensa pela Shopee até <b>26/10 às 19:04</b>" in texto and "23/10 às 20:00" in texto
-    assert "Pontos de penalidade: <b>6</b>" in texto
+    assert "Pontos de penalidade: <b>6</b> (com 6 ou mais, a Shopee suspende" in texto
+    texto = ap.texto_saude({**robo.PADRAO}, {"saude_pontos": 5}, AGORA)
+    assert "a 1 ponto da suspensão" in texto and "Conta sem suspensão" in texto
     assert "Punições dos últimos 30 dias: 1" in texto and "não recorrida" in texto and "Botijão" in texto
     assert "Gerar Apelação" in texto
     assert ap.ler_explicacao("Conteúdos   publicados devem promover. Apelar aqui.") == "Conteúdos publicados devem promover."
