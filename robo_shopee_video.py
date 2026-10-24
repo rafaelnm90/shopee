@@ -522,6 +522,7 @@ LINHAS_DO_HISTORICO = 12
 # ordem importa: o primeiro trecho que aparece no motivo decide.
 PASSOS = (
     ("suspensa pela Shopee", "conta suspensa pela Shopee"),
+    ("rodada foi interrompida", "rodada interrompida"),
     ("notificação do comentário", "achar a notificação"),
     ("painel de comentários", "abrir os comentários"),
     ("comentário não está", "achar o comentário"),
@@ -1364,6 +1365,21 @@ def _desfazer_reserva(ident, id_video, motivo, do_video):
     with db.conexao() as con:
         assistente._criar_tabela(con)
         con.execute("DELETE FROM shopee_video_enviados WHERE id_unico = ? AND status = 'robo'", (id_video,))
+
+
+def soltar_preparos_interrompidos(agora=None):
+    """
+    Rascunho que ficou em "preparando" por mais que uma rodada inteira: a rodada morreu no
+    meio (o deploy reinicia o bot_mestre e mata o processo dela). O vídeo volta para a fila
+    e a tentativa entra no histórico, para o checkup ver. Devolve quantos soltou.
+    """
+    limite = _momento(agora_br(agora) - timedelta(seconds=MAXIMO_DA_RODADA))
+    presos = [r for r in listar("preparando") if (r["criado_em"] or "") < limite]
+    for rascunho in presos:
+        _desfazer_reserva(rascunho["id"], rascunho["id_video"], "a rodada foi interrompida", False)
+        registrar_tentativa("rascunho", "parou", "a rodada foi interrompida no meio do preparo", agora=agora)
+        registro_processos.registrar(REGISTRO, "preparo interrompido", "solto", "o vídeo voltou para a fila", ok=False)
+    return len(presos)
 
 
 def _conferir(resultado, do_video=True):
@@ -2255,6 +2271,8 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
     with celular_robo.trava() as livre:
         if not livre:
             return _resposta(preparar, "o explorar está tocando no celular")
+        # Dentro da trava, nenhum preparo está rodando: o "preparando" antigo é de uma rodada morta.
+        soltar_preparos_interrompidos(agora)
         if treino:
             acao, ident = "treino", None
         elif preparar:
