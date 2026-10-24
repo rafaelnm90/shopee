@@ -1807,3 +1807,13 @@ def test_depois_do_ja_recorri_a_saude_e_lida_de_hora_em_hora_ate_o_resultado(mon
     outra = ap.guardar("Contrafeito", "20/10/2026 10:00:00", "Não Recorrido", agora=momento("2026-10-20 11:00"))
     ap.marcar(outra, ap.RECORRIDA, momento("2026-10-20 12:00"))
     assert ap.esperando_resultado(momento("2026-10-26 12:00")) and not ap.esperando_resultado(momento("2026-10-28 12:00"))
+
+
+def test_preparo_interrompido_pelo_reinicio_volta_para_a_fila_na_rodada_seguinte():
+    # 24/10/2026: o deploy das 09:42 matou a rodada no meio, e o rascunho ficou em "preparando".
+    preso = robo.criar("video:9", momento("2026-10-24 09:42"))
+    novo = robo.criar("video:10", momento("2026-10-24 10:20"))
+    assert robo.soltar_preparos_interrompidos(momento("2026-10-24 10:30")) == 1
+    assert robo.pegar(preso) is None and robo.pegar(novo)["estado"] == "preparando"
+    assert "video:9" not in robo.ids_usados()
+    assert robo.tentativas_desde("2026-10-24 00:00:00")[0]["passo"] == "rodada interrompida"
