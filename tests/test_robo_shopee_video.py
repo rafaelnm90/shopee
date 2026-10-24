@@ -29,6 +29,9 @@ def sem_espera(monkeypatch):
     monkeypatch.setattr(robo.time, "sleep", lambda s: None)
     monkeypatch.setattr(robo.ps.time, "sleep", lambda s: None)
     monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    # As respostas aos comentários e o feed têm testes próprios (test_interacoes_shopee_video).
+    monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
+    monkeypatch.setattr(robo, "feed_pendente", lambda agora=None: False)
     # No servidor a tabela já existe (o bot_mestre cria).
     inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
 
