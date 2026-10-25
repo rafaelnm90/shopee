@@ -836,11 +836,13 @@ def o_que_fazer(config, agora=None):
     recusados = listar("recusado")
     if recusados:
         return "apagar", recusados[0]["id"]
-    # Postar e preparar só fora do Horário das Interações; responder e o feed só nele (sem
-    # ele escolhido, no Horário do Robô, como antes). Escolha do Rafael (P22 a P24).
-    # (A rodada já confere o horário: aqui só a separação entre os dois.)
-    postar = not na_hora_das_interacoes(config, agora)
-    interagir = not postar or not janela_das_interacoes(config)
+    # Responder e o feed só no Horário das Interações (sem ele escolhido, no Horário do Robô,
+    # como antes); preparar e postar fora dele, ou nele depois que as interações do dia
+    # acabam. Escolhas do Rafael (P22 a P24 e P26). (A rodada já confere o horário: aqui
+    # só a separação entre os dois.)
+    na_janela = na_hora_das_interacoes(config, agora)
+    postar = not na_janela or interacoes_do_dia_feitas(agora)
+    interagir = na_janela or not janela_das_interacoes(config)
     agora_txt = _momento(agora)
     prontos = [r for r in listar("aprovado") if r["postar_em"] and r["postar_em"] <= agora_txt]
     if postar and prontos:
@@ -2123,6 +2125,13 @@ def feed_pendente(agora=None):
             interacoes.COMENTARIOS_NO_FEED_POR_DIA:
         return False
     return (ler_estado().get("feed_em") or "") <= _momento(agora_br(agora) - intervalo_do_feed(ler_config()))
+
+
+def interacoes_do_dia_feitas(agora=None):
+    """As respostas e os comentários do feed de hoje já saíram todos? Aí o postar volta, mesmo na janela."""
+    inicio = agora_br(agora).strftime("%Y-%m-%d 00:00:00")
+    return not respostas_pendentes(agora) and interacoes.quantos_desde(
+        "video_feed", interacoes.COMENTADOS_NO_FEED, inicio) >= interacoes.COMENTARIOS_NO_FEED_POR_DIA
 
 
 def intervalo_do_feed(config):

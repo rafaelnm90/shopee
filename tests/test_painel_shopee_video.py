@@ -784,7 +784,7 @@ def test_horario_das_interacoes_separa_as_horas_de_postar(bm, Msg, Est):
     assert "Horário das interações: <b>junto com o Horário do Robô</b>" in sv.texto_robo(sv.ler_config())
     msg = Msg("Horário das Interações 💬")
     rodar(sv.pedir_janela_interacoes(msg, est))
-    assert "não prepara nem posta" in msg.saidas[0]
+    assert "só volta a preparar e postar quando acaba" in msg.saidas[0]
     msg = Msg("12-15")
     rodar(sv.confirmar_janela_interacoes(msg, est))
     assert sv.ler_config()["robo_interacoes_inicio"] is None                 # só grava depois de aprovar

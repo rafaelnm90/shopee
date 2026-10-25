@@ -160,6 +160,20 @@ def test_na_janela_das_interacoes_so_responde_e_comenta_no_feed(monkeypatch):
     assert robo.o_que_fazer(config, momento("2026-10-25 16:30")) is None
 
 
+def test_na_janela_o_postar_volta_quando_as_interacoes_do_dia_acabam(monkeypatch):
+    # Escolha do Rafael (P26): o postar só para enquanto ainda tem comentário ou resposta.
+    config = _com_interacoes()
+    robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-25 13:00")))
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
+    monkeypatch.setattr(robo, "feed_pendente", lambda agora=None: False)
+    aprovado = _rascunho("aprovado", postar_em="2026-10-25 09:00:00")
+    monkeypatch.setattr(robo.interacoes, "quantos_desde", lambda *a, **k: 2)
+    assert robo.o_que_fazer(config, momento("2026-10-25 13:00")) is None        # falta 1 do feed
+    monkeypatch.setattr(robo.interacoes, "quantos_desde", lambda *a, **k: 3)
+    assert robo.o_que_fazer(config, momento("2026-10-25 13:00")) == ("postar", aprovado)
+
+
 def test_janela_das_interacoes_fora_do_horario_do_robo_tambem_roda():
     config = _com_interacoes(inicio=22, fim=24)
     assert robo.no_horario(config, momento("2026-10-25 22:30"))
