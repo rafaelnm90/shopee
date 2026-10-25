@@ -14,7 +14,9 @@ O caminho:
 - Relatório Geral 📊 → Saúde da Shopee Vídeo 🩺 mostra as punições (texto_saude).
 
 O texto só diz o que é verdade: punição por propriedade intelectual de vídeo que veio de
-outro canal não ganha texto dizendo que o vídeo é dele; o aviso diz de onde veio.
+outro canal nunca ganha texto dizendo que o vídeo é dele; ganha o texto sem autoria
+(texto_sem_autoria: afiliado, o produto vendido na própria Shopee, o pedido de revisão), e
+o aviso diz de onde veio o vídeo.
 """
 import html
 import json
@@ -345,14 +347,37 @@ def so_com_autoria_verdadeira(tipo, fonte):
     return not autoral or (fonte or "") in FONTES_PROPRIAS
 
 
+# O recurso da punição por propriedade intelectual de vídeo que veio de outro canal: só o que
+# é verdade, sem dizer que o vídeo é do Rafael nem que é original. Escolha do Rafael (P31):
+# DECISOES.md, Shopee Vídeo.
+TEXTO_SEM_AUTORIA = ("Sou afiliado da Shopee. Este vídeo divulga {produto}, vendido na própria Shopee e anexado "
+                     "ao vídeo. Peço a revisão da remoção.")
+
+
+def texto_sem_autoria(produtos=(), titulo=""):
+    """
+    O texto sem autoria, com até TAMANHO_DO_TEXTO caracteres: o nome do produto anexado (ou o
+    título do vídeo sem as hashtags), cortado numa palavra se não couber.
+    """
+    nome = " ".join(str((produtos or [""])[0] or "").split()) or " ".join(
+        palavra for palavra in str(titulo or "").split() if not palavra.startswith("#"))
+    if not nome:
+        return TEXTO_SEM_AUTORIA.format(produto="o produto do vídeo")
+    cabe = TAMANHO_DO_TEXTO - len(TEXTO_SEM_AUTORIA.format(produto="o produto "))
+    if len(nome) > cabe:
+        nome = nome[:cabe].rsplit(" ", 1)[0].rstrip(",;:-")
+    return TEXTO_SEM_AUTORIA.format(produto=f"o produto {nome}")
+
+
 async def gerar_texto(tipo, explicacao="", titulo="", produtos=(), conferencia="", fonte="", tentativas=2):
     """
     O texto do recurso, com até 200 caracteres, ou ("", observação) quando não cabe
     texto verdadeiro. Devolve (texto, observacao).
     """
     if not so_com_autoria_verdadeira(tipo, fonte):
-        return "", ("O vídeo veio de outro canal (não é dos Autorais), então não escrevi texto dizendo que ele é "
-                    "seu. Se quiser recorrer mesmo assim, conte no recurso o que é verdade sobre o vídeo.")
+        return texto_sem_autoria(produtos, titulo), (
+            "O vídeo veio de outro canal (não é dos Autorais): o texto não diz que ele é seu, só que você é "
+            "afiliado e divulga o produto vendido na própria Shopee. Nesse caso a Shopee costuma manter a remoção.")
     import api_gemini
     origem = {"autorais": "gravado pelo próprio criador (Autorais)"}.get(fonte, f"de outro canal ({fonte})"
                                                                            if fonte else "não se sabe")

@@ -77,14 +77,25 @@ def test_texto_da_ia_cabe_em_200_caracteres(monkeypatch):
     assert len(ap._encurtar(longo)) <= ap.TAMANHO_DO_TEXTO and ap._encurtar(longo).endswith(".")
 
 
-def test_propriedade_intelectual_de_video_de_outro_canal_nao_ganha_texto_de_autoria(monkeypatch):
+def test_propriedade_intelectual_de_video_de_outro_canal_ganha_texto_sem_autoria(monkeypatch):
+    # Escolha do Rafael (25/10, P31): o recurso sai com um texto verdadeiro, que não diz que o
+    # vídeo é dele nem que é original, só que ele é afiliado e divulga o produto da Shopee.
     import api_gemini
 
     async def gerar(prompt):
         raise AssertionError("não devia pedir texto à IA")
     monkeypatch.setattr(api_gemini, "gerar_texto_gemini", gerar)
-    texto, observacao = rodar(ap.gerar_texto("Violação de Propriedade Intelectual", fonte="viral"))
-    assert texto == "" and "outro canal" in observacao
+    texto, observacao = rodar(ap.gerar_texto("Violação de Propriedade Intelectual", fonte="viral",
+                                             produtos=["Mesa de Jantar Redonda com 4 Cadeiras"]))
+    assert texto.startswith("Sou afiliado da Shopee.") and "Mesa de Jantar Redonda com 4 Cadeiras" in texto
+    assert "outro canal" in observacao and len(texto) <= ap.TAMANHO_DO_TEXTO
+    assert not any(palavra in texto.casefold() for palavra in ("original", "meu vídeo", "autor", "gravei"))
+    # Sem produto, o título sem as hashtags; nome longo é cortado numa palavra, dentro dos 200.
+    pelo_titulo = ap.texto_sem_autoria(titulo="Mesa de Jantar Redonda #mesajantar #sala")
+    assert "o produto Mesa de Jantar Redonda," in pelo_titulo and "#" not in pelo_titulo
+    longo = ap.texto_sem_autoria(["Conjunto Mesa " + "Cadeira Madeira Maciça " * 10])
+    assert len(longo) <= ap.TAMANHO_DO_TEXTO and longo.endswith("Peço a revisão da remoção.")
+    assert ap.texto_sem_autoria() == ap.TEXTO_SEM_AUTORIA.format(produto="o produto do vídeo")
     assert ap.so_com_autoria_verdadeira("Violação de Propriedade Intelectual", "autorais")
 
 

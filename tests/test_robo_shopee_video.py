@@ -2014,10 +2014,11 @@ def test_gerar_apelacao_le_a_saude_acha_o_video_e_escreve_so_o_que_e_verdade(mon
     assert irrelevante["situacao"] == "pendente" and irrelevante["rascunho"] == ident and irrelevante["fonte"] == "viral"
     assert irrelevante["texto"].startswith("O vídeo mostra o mesmo produto") and len(irrelevante["texto"]) <= 200
     assert irrelevante["postado_em"] == "18:46:10 2026-10-23"
-    # Só um pedido à IA: a de propriedade intelectual, de vídeo que não é dos Autorais, não ganha texto.
+    # Só um pedido à IA: a de propriedade intelectual, de vídeo que não é dos Autorais, ganha o texto
+    # sem autoria, que não passa pela IA (P31).
     assert len(ia_da_apelacao) == 1 and VESTIDO in ia_da_apelacao[0] and "vestido do vídeo" in ia_da_apelacao[0]
     intelectual = punicoes["Violação de Propriedade Intelectual"]
-    assert intelectual["texto"] == "" and "outro canal" in intelectual["observacao"]
+    assert intelectual["texto"].startswith("Sou afiliado da Shopee.") and "outro canal" in intelectual["observacao"]
     assert punicoes["Contrafeito"]["situacao"] == "aceita"
     # Nunca abre o Recurso: só lê a tela Removido e volta.
     assert "Apelar aqui." not in app.toques and "Enviar" not in app.toques
