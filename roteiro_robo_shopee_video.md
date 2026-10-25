@@ -63,7 +63,8 @@ sabe do app, o que falta mapear e como o robô trabalha. As decisões ficam no
   mesma notificação foi aberta), e o robô toca no balão da coluna da direita. O
   **painel de comentários** (`ReactTransparentActivity_`) tem o cartão do produto no
   alto (nome, preço, "com cupom"), **"# Comentários"** (no vídeo sem nenhum comentário, o
-  painel abre sem esse título: o robô o reconhece também pelo campo "add a comment"), e cada comentário com a foto (x≈84;
+  painel abre com "0 Comentário" e já com o campo "Adicionar um comentário..." em foco e o
+  teclado aberto: o robô escreve direto, sem tocar no "add a comment"), e cada comentário com a foto (x≈84;
   a resposta fica recuada, x≈178), o nome (e o selo **"Criador"** quando é o Rafael), o
   texto, o coração (desc "… comment like", x≈1014), a data ("há # …" ou "# de …"),
   **Responder** e "Curtido pelo criador". O primeiro da lista é a legenda do vídeo, com o
