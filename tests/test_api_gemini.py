@@ -65,17 +65,22 @@ def test_relatorio_dos_modelos_mostra_a_cascata_e_os_novos_so_com_nomes(monkeypa
     # O modelos_ia.yml mantém a cascata atualizada: o modelo que a chave não enxerga e o
     # modelo novo da chave que a cascata ainda não usa aparecem, com o motivo fixo do teste.
     monkeypatch.setattr(ia, "MODELOS_CASCATA_GEMINI", ["gemini-a", "gemini-velho"])
-    respostas = {"gemini-a": "responde", "gemini-velho": "modelo não encontrado", "gemini-novo": "responde"}
-    linhas = ia.relatorio_dos_modelos(["gemini-a", "gemini-novo"], testar=respostas.get)
+    monkeypatch.setattr(ia, "DESCONTINUADOS", ("gemini-saiu", "gemini-sumiu"))
+    respostas = {"gemini-a": "responde", "gemini-velho": "modelo não encontrado", "gemini-novo": "responde",
+                 "gemini-saiu": "responde"}
+    linhas = ia.relatorio_dos_modelos(["gemini-a", "gemini-novo", "gemini-saiu"], testar=respostas.get)
+    # O descontinuado que a chave ainda enxerga fica à parte, para não voltar à cascata como novo (P36).
     assert linhas == ["== Cascata (na ordem)", "gemini-a: na chave, responde",
                       "gemini-velho: fora da chave, modelo não encontrado",
-                      "== Modelos de texto da chave fora da cascata", "gemini-novo: na chave, responde"]
+                      "== Modelos de texto da chave fora da cascata", "gemini-novo: na chave, responde",
+                      "== Descontinuados pelo Google que a chave ainda enxerga (não voltam)", "gemini-saiu"]
 
 
 def test_modelos_da_chave_so_os_de_texto(monkeypatch):
     modelos = [SimpleNamespace(name=f"models/{nome}", supported_actions=acoes) for nome, acoes in (
         ("gemini-z-flash", ["generateContent"]), ("gemini-z-flash-image", ["generateContent"]),
-        ("gemini-z-tts", ["generateContent"]), ("text-embedding-9", ["embedContent"]), ("gemini-a-pro", None))]
+        ("gemini-z-tts", ["generateContent"]), ("text-embedding-9", ["embedContent"]), ("gemini-a-pro", None),
+        ("gemini-omni-9-flash", ["generateContent"]))]
     monkeypatch.setattr(ia, "client_genai", SimpleNamespace(models=SimpleNamespace(list=lambda: modelos)))
     assert ia.modelos_da_chave() == ["gemini-z-flash"]
 
@@ -90,6 +95,13 @@ def test_cascata_sem_repetidos_e_so_modelos_de_texto():
     # duas chamadas na mesma cota, e um modelo de imagem ou voz nunca devolve o texto pedido.
     assert len(set(ia.MODELOS_CASCATA_GEMINI)) == len(ia.MODELOS_CASCATA_GEMINI)
     assert all(m.startswith("gemini") and not any(p in m for p in ia.FORA_DOS_ROBOS) for m in ia.MODELOS_CASCATA_GEMINI)
+
+
+def test_descontinuado_nao_fica_na_cascata():
+    # Escolha do Rafael (P36): todo modelo que o Google descontinuou sai da cascata, mesmo que
+    # ainda responda redirecionado para o modelo novo.
+    assert not set(ia.DESCONTINUADOS) & set(ia.MODELOS_CASCATA_GEMINI)
+    assert {"gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite-preview"} <= set(ia.DESCONTINUADOS)
 
 
 BLOQUEADO = "block_reason=<BlockedReason.PROHIBITED_CONTENT: 'PROHIBITED_CONTENT'>"
