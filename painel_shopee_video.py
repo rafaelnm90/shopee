@@ -726,8 +726,8 @@ def texto_edicao(config):
         "todos os seus grupos e vídeos são autorais.\n\n"
         f"Agora: {rotulo_edicao(config)}\n\n"
         "<b>O que cada botão faz</b>\n"
-        f"👀 <b>{BOTAO_EXEMPLO_EDICAO}</b>: manda no seu privado 1 vídeo já editado, sem postar, "
-        "para você ver antes de ligar.\n"
+        f"👀 <b>{BOTAO_EXEMPLO_EDICAO}</b>: manda no seu privado, já editado e sem postar, o próximo vídeo que "
+        "o robô pegaria; cada toque mostra um vídeo novo.\n"
         f"✅ <b>{BOTAO_LIGAR_EDICAO}</b> / ⏸️ <b>{BOTAO_DESLIGAR_EDICAO}</b>: liga ou desliga a edição nos "
         "próximos rascunhos. Se a edição de um vídeo não sair, o rascunho vai com o vídeo como veio."
     )
@@ -895,7 +895,7 @@ async def exemplo_edicao_handler(message: types.Message, state: FSMContext):
         await message.answer("⏳ O exemplo da edição já está sendo montado. Ele chega aqui em instantes.")
         return
     async with _exemplo_da_edicao:
-        await message.answer("⏳ Montando o exemplo com o vídeo mais novo. Leva até uns 2 minutos.")
+        await message.answer("⏳ Montando o exemplo com o próximo vídeo que o robô pegaria. Leva até uns 2 minutos.")
         with tempfile.TemporaryDirectory() as pasta:
             destino = os.path.join(pasta, "exemplo.mp4")
             try:
@@ -910,7 +910,8 @@ async def exemplo_edicao_handler(message: types.Message, state: FSMContext):
             await message.answer_video(
                 FSInputFile(destino), supports_streaming=True, parse_mode="HTML",
                 caption=(f"✂️ Exemplo da edição (não foi postado): {html_escape(nome)}.\n"
-                         f"Se gostar, toque em {BOTAO_LIGAR_EDICAO}."))
+                         f"Toque de novo em {BOTAO_EXEMPLO_EDICAO} para ver outro vídeo."
+                         + ("" if edicao_video.ligada() else f" Se gostar, toque em {BOTAO_LIGAR_EDICAO}.")))
     await mostrar_edicao(message, state)
 
 
