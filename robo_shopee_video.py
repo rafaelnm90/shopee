@@ -92,7 +92,7 @@ VIDEOS_POR_HORARIO = 3
 TENTATIVAS_DO_TITULO = 2
 # O Google bloqueia pelo conteúdo do vídeo (24/10/2026, PROHIBITED_CONTENT nas duas
 # tentativas): esses códigos se repetem para o mesmo vídeo, então ele fica de lado na hora.
-BLOQUEIOS_DO_CONTEUDO = {"PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "SAFETY", "IMAGE_SAFETY"}
+BLOQUEIOS_DO_CONTEUDO = ps.api_gemini.BLOQUEIOS_DO_CONTEUDO
 ESPERA_DO_TITULO = 45
 # Vídeo de produto sem oferta de afiliado (não paga comissão) fica de lado antes de tocar
 # no celular; numa rodada, até estes. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
@@ -1708,8 +1708,7 @@ def _conferir_curtida(resultado):
 
 def _codigos_da_ia():
     """Os códigos do Google (finish_reason e block_reason) da última resposta vazia, sem o STOP."""
-    erro = ps.api_gemini.ULTIMO_ERRO_IA or ""
-    return sorted(set(re.findall(r"(?:finish|block)_reason=<?(?:\w+\.)?([A-Z_]{3,})", erro)) - {"STOP"})
+    return sorted(ps.api_gemini.codigos_do_google(ps.api_gemini.ULTIMO_ERRO_IA))
 
 
 def _motivo_da_ia():
