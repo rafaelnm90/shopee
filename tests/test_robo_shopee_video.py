@@ -92,6 +92,31 @@ def test_aprovados_saem_um_de_cada_vez_com_intervalo_sorteado(monkeypatch):
     assert all(r["estado"] == "aprovado" for r in robo.listar("aprovado"))
 
 
+def test_fila_mostra_os_que_esperam_aprovacao_e_os_aprovados_com_a_hora_e_o_porque(monkeypatch):
+    # Pedido do Rafael (25/10): ver os rascunhos e os aprovados, e saber por que o aprovado
+    # que passou da hora ainda não saiu.
+    ativar(robo_inicio=8, robo_fim=22, robo_interacoes_inicio=10, robo_interacoes_fim=12)
+    _rascunho(criado="2026-10-25 09:00:00")
+    atrasado = _rascunho()
+    robo.atualizar(atrasado, estado="aprovado", postar_em="2026-10-25 09:50:00", produtos=["Copo Térmico"])
+    depois = _rascunho()
+    robo.atualizar(depois, estado="aprovado", postar_em="2026-10-25 12:20:00", produtos=["Mini Saia", "Blusa"])
+    texto = robo.texto_da_fila(agora=momento("2026-10-25 10:30"))
+    assert "Esperando a sua aprovação (1)" in texto and "salvo em 25/10 às 09:00" in texto
+    assert "Aprovados, esperando ir ao ar (2)" in texto
+    assert texto.index("Copo Térmico") < texto.index("Mini Saia (+1)")
+    assert "posta por volta de 25/10 às 09:50" in texto and "posta por volta de 25/10 às 12:20" in texto
+    assert texto.count("já passou da hora") == 1
+    assert "no Horário das Interações, esperando acabarem 3 comentário(s) no feed" in texto
+    # Pausado, o motivo é a pausa; sem nada, a fila diz "nenhum".
+    ativar(robo_pausado=True)
+    assert "a Postagem está pausada" in robo.texto_da_fila(agora=momento("2026-10-25 10:30"))
+    for ident in (atrasado, depois):
+        robo.atualizar(ident, estado="postado")
+    robo.atualizar(robo.esperando_aprovacao()[0]["id"], estado="recusado")
+    assert robo.texto_da_fila(agora=momento("2026-10-25 10:30")).count("nenhum") == 2
+
+
 def test_aprovado_fora_do_horario_vai_para_o_comeco_do_proximo(monkeypatch):
     ativar(robo_inicio=8, robo_fim=22)
     noite = robo.proxima_postagem(robo.ler_config(), momento("2026-10-22 21:50"), random.Random(1))

@@ -757,6 +757,61 @@ def texto_historico(agora=None):
     return "\n".join(linhas)
 
 
+def motivo_da_espera(config, agora=None):
+    """Por que um aprovado já na hora de ir ao ar ainda não saiu (o que o o_que_fazer segura agora)."""
+    if config["robo_pausado"]:
+        return "a Postagem está pausada"
+    if suspensa(config, agora):
+        return f"conta suspensa pela Shopee até {quando_acaba(suspenso_ate(config))}"
+    if na_hora_do_descurtir(agora):
+        return f"às {HORA_DO_DESCURTIR}h o robô só descurte"
+    if not no_horario(config, agora):
+        return "fora do Horário do Robô"
+    if na_hora_das_interacoes(config, agora) and not interacoes_do_dia_feitas(agora):
+        inicio = agora_br(agora).strftime("%Y-%m-%d 00:00:00")
+        faltam = max(0, interacoes.COMENTARIOS_NO_FEED_POR_DIA
+                     - interacoes.quantos_desde("video_feed", interacoes.COMENTADOS_NO_FEED, inicio))
+        partes = ([f"{faltam} comentário(s) no feed"] if faltam else []) + (
+            ["as respostas aos comentários"] if respostas_pendentes(agora) else [])
+        return f"no Horário das Interações, esperando acabarem {' e '.join(partes) or 'as interações'} do dia"
+    return "sai numa das próximas rodadas (a cada 15 min)"
+
+
+def texto_da_fila(config=None, agora=None):
+    """
+    A tela da Fila de Rascunhos 🗂️: os rascunhos esperando a aprovação do Rafael e os
+    aprovados, com a hora prevista de ir ao ar e, para o que já passou da hora, por que ainda
+    não saiu. Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    config = config or ler_config()
+    agora_txt = _momento(agora)
+
+    def produto(r):
+        nomes = r["produtos"] or []
+        return html.escape((nomes[0] if nomes else r["titulo"] or "?")[:70]) + (
+            f" (+{len(nomes) - 1})" if len(nomes) > 1 else "")
+
+    def curta(texto):
+        return f"{texto[8:10]}/{texto[5:7]} às {texto[11:16]}" if texto and len(texto) >= 16 else "?"
+
+    linhas = ["🗂️ <b>Fila de Rascunhos</b>", ""]
+    pendentes = esperando_aprovacao()
+    linhas.append(f"📝 <b>Esperando a sua aprovação ({len(pendentes)})</b>")
+    linhas += [f"• {produto(r)}\n   salvo em {curta(r['criado_em'])}" for r in pendentes] or ["nenhum"]
+    aprovados = sorted(listar("aprovado"), key=lambda r: (r["postar_em"] or "", r["id"]))
+    linhas += ["", f"✅ <b>Aprovados, esperando ir ao ar ({len(aprovados)})</b>"]
+    espera = motivo_da_espera(config, agora)
+    for r in aprovados:
+        linhas.append(f"• {produto(r)}\n   posta por volta de {curta(r['postar_em'])}")
+        if r["postar_em"] and r["postar_em"] <= agora_txt:
+            linhas.append(f"   ⏳ já passou da hora: {html.escape(espera)}")
+    if not aprovados:
+        linhas.append("nenhum")
+    if pendentes:
+        linhas += ["", "Para aprovar ou recusar: Rascunhos do Robô 📝."]
+    return "\n".join(linhas)
+
+
 def texto_resumo(agora=None):
     """O resumo das 22h: o que o robô fez nas últimas 24 h e onde parou. None sem nenhuma tentativa."""
     lista = _ultimas_24h(agora)
