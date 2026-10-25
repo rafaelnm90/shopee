@@ -42,6 +42,8 @@ def avisos(monkeypatch):
     monkeypatch.setattr(robo.avisar_rafael, "mandar_texto", lambda texto: mandados.append(texto) or True)
     monkeypatch.setattr(robo.avisar_rafael, "mandar_foto",
                         lambda caminho, legenda="": mandados.append(("foto", legenda)) or True)
+    monkeypatch.setattr(robo.avisar_rafael, "mandar_video",
+                        lambda caminho, legenda="": mandados.append(("video", legenda)) or True)
     return mandados
 
 
@@ -644,6 +646,41 @@ def test_titulo_que_veio_com_as_regras_em_palavras_leves_fica_no_registro(monkey
     assert robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
     assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = 'título da IA'") == (
         "veio com as regras em palavras leves", 1)
+
+
+def test_video_recusado_pelo_google_chega_no_privado_uma_vez_com_o_que_ele_disse(monkeypatch, avisos, tmp_path):
+    # Escolha do Rafael (P29): cada vídeo que o Google recusa chega no privado na hora, com
+    # o vídeo, o produto, o que o Google disse e o que deu o pedido em palavras leves.
+    _fonte(monkeypatch)
+    recusa = {"codigos": ["PROHIBITED_CONTENT"], "categorias": [("HARM_CATEGORY_SEXUALLY_EXPLICIT", "MEDIUM")]}
+
+    async def passou_com_leves(arquivo, nome):
+        robo.assistente.ULTIMA_RECUSA = {**recusa, "leves": "passou"}
+        return {"violacao": False, "motivo": "", "titulo": TITULO, "comentario": "Amei! #achadinhos",
+                "regras_leves": True}
+
+    monkeypatch.setattr(robo.assistente, "textos_do_video", passou_com_leves)
+    assert robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    videos = [legenda for tipo, legenda in (a for a in avisos if isinstance(a, tuple)) if tipo == "video"]
+    assert len(videos) == 1 and VESTIDO in videos[0] and "conteúdo proibido" in videos[0]
+    assert "sexual (médio)" in videos[0] and "passou ✅" in videos[0]
+
+    # Recusado de novo: o vídeo é pulado, e o aviso diz isso (uma vez só).
+    avisos.clear()
+    inserir("INSERT INTO fila_autorais VALUES (?, ?, ?, ?)", "a2", "archive/vestido.mp4",
+            f"Vestido 👗\n{LINK}", "2026-10-22 09:30:00")
+
+    async def recusado(arquivo, nome):
+        robo.ps.api_gemini.ULTIMO_ERRO_IA = ("Todos os modelos da cascata falharam → gemini-x: VAZIO "
+                                             "(block_reason=<BlockedReason.PROHIBITED_CONTENT: 'PROHIBITED_CONTENT'>)")
+        robo.assistente.ULTIMA_RECUSA = {**recusa, "leves": "recusado de novo"}
+        return None
+
+    monkeypatch.setattr(robo.assistente, "textos_do_video", recusado)
+    resultado = robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-23 00:30"))
+    assert "o Google bloqueia o conteúdo deste vídeo" in resultado
+    videos = [a[1] for a in avisos if isinstance(a, tuple) and a[0] == "video"]
+    assert len(videos) == 1 and "recusado de novo ❌" in videos[0]
 
 
 def test_ia_que_nao_confirma_pula_o_video_sem_tocar_no_celular(monkeypatch, avisos):

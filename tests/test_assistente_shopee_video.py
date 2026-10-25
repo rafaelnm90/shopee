@@ -285,8 +285,10 @@ def test_recusado_pelo_conteudo_pede_de_novo_com_as_regras_em_palavras_leves(mon
         return resposta
 
     monkeypatch.setattr(asv, "gerar_textos", gerar)
+    monkeypatch.setattr(asv.api_gemini, "ULTIMA_RECUSA", {"codigos": ["PROHIBITED_CONTENT"], "categorias": []})
     textos = rodar(asv.textos_do_video("v.mp4"))
     assert pedidos == [False, True] and textos["regras_leves"] is True
+    assert asv.ULTIMA_RECUSA == {"codigos": ["PROHIBITED_CONTENT"], "categorias": [], "leves": "passou"}
 
     # Recusado de novo: sem texto, e o motivo do Google continua para quem pediu.
     pedidos = []
@@ -298,7 +300,22 @@ def test_recusado_pelo_conteudo_pede_de_novo_com_as_regras_em_palavras_leves(mon
 
     monkeypatch.setattr(asv, "gerar_textos", recusa_sempre)
     assert rodar(asv.textos_do_video("v.mp4")) is None and pedidos == [False, True]
-    assert asv.recusado_pelo_conteudo()
+    assert asv.recusado_pelo_conteudo() and asv.ULTIMA_RECUSA["leves"] == "recusado de novo"
+
+    # Sem recusa do Google, nada para avisar.
+    _respostas(monkeypatch, _com_titulo(asv.TITULO_MIN))
+    rodar(asv.textos_do_video("v.mp4"))
+    assert asv.ULTIMA_RECUSA is None
+
+
+def test_aviso_da_recusa_diz_o_produto_o_que_o_google_disse_e_o_pedido_leve():
+    texto = asv.texto_da_recusa({"codigos": ["PROHIBITED_CONTENT"], "leves": "passou",
+                                 "categorias": [("HARM_CATEGORY_SEXUALLY_EXPLICIT", "MEDIUM")]}, "Máscara de Cílios")
+    assert "Produto: Máscara de Cílios" in texto and "conteúdo proibido (o Google não diz qual parte)" in texto
+    assert "sexual (médio)" in texto and "passou ✅" in texto
+    texto = asv.texto_da_recusa({"codigos": [], "leves": "sem resposta"})
+    assert "não identificado" in texto and "sem código" in texto and "Categorias" not in texto
+    assert "não respondeu" in texto
 
 
 def test_regras_em_palavras_leves_sao_as_mesmas_sem_as_palavras_fortes():

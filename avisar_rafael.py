@@ -2,8 +2,9 @@
 Manda um aviso curto no privado do Rafael pelo bot principal. Usado pelo
 workflow avisar.yml para o lembrete diário das pendências (as perguntas do
 Claude vão pelo perguntas_rafael.py, que usa o mandar_texto). O tela_android.py
-usa o mandar_texto para levar o link da tela do Android, e o
-postador_shopee_video.py usa o mandar_foto para o print do rascunho.
+usa o mandar_texto para levar o link da tela do Android, o
+postador_shopee_video.py usa o mandar_foto para o print do rascunho, e o
+robo_shopee_video.py usa o mandar_video para o vídeo que o Google recusou.
 
     python3 avisar_rafael.py "assunto da pendência" [link da sessão do Claude]
 
@@ -95,25 +96,41 @@ def editar_texto(ident, texto):
         return False
 
 
-def mandar_foto(caminho, legenda=""):
-    """Manda uma imagem no privado do Rafael pelo Bot API. Devolve True se o Telegram aceitou."""
+def _mandar_arquivo(metodo, campo, caminho, nome, tipo, legenda):
+    """Um arquivo (com legenda) no privado do Rafael pelo Bot API. Devolve True se o Telegram aceitou."""
     load_dotenv(os.path.join(PASTA, ".env"))
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
         raise RuntimeError("TELEGRAM_TOKEN ausente no .env")
     fronteira = uuid.uuid4().hex
     partes = []
-    for nome, valor in (("chat_id", str(admin_id())), ("caption", legenda[:1000])):
-        partes.append(f'--{fronteira}\r\nContent-Disposition: form-data; name="{nome}"\r\n\r\n{valor}\r\n'.encode())
+    for chave, valor in (("chat_id", str(admin_id())), ("caption", legenda[:1000])):
+        partes.append(f'--{fronteira}\r\nContent-Disposition: form-data; name="{chave}"\r\n\r\n{valor}\r\n'.encode())
     with open(caminho, "rb") as f:
-        imagem = f.read()
-    partes.append(f'--{fronteira}\r\nContent-Disposition: form-data; name="photo"; filename="tela.png"\r\n'
-                  "Content-Type: image/png\r\n\r\n".encode() + imagem + b"\r\n")
+        conteudo = f.read()
+    partes.append(f'--{fronteira}\r\nContent-Disposition: form-data; name="{campo}"; filename="{nome}"\r\n'
+                  f"Content-Type: {tipo}\r\n\r\n".encode() + conteudo + b"\r\n")
     partes.append(f"--{fronteira}--\r\n".encode())
-    pedido = urllib.request.Request(f"https://api.telegram.org/bot{token}/sendPhoto", data=b"".join(partes),
+    pedido = urllib.request.Request(f"https://api.telegram.org/bot{token}/{metodo}", data=b"".join(partes),
                                     headers={"Content-Type": f"multipart/form-data; boundary={fronteira}"})
-    with urllib.request.urlopen(pedido, timeout=60) as r:
+    with urllib.request.urlopen(pedido, timeout=120) as r:
         return bool(json.loads(r.read().decode()).get("ok"))
+
+
+def mandar_foto(caminho, legenda=""):
+    """Manda uma imagem no privado do Rafael pelo Bot API. Devolve True se o Telegram aceitou."""
+    return _mandar_arquivo("sendPhoto", "photo", caminho, "tela.png", "image/png", legenda)
+
+
+# O Bot API só aceita enviar arquivo de até 50 MB.
+LIMITE_DO_VIDEO = 50 * 1024 * 1024
+
+
+def mandar_video(caminho, legenda=""):
+    """Manda um vídeo no privado do Rafael pelo Bot API. Devolve True se o Telegram aceitou (False se grande demais)."""
+    if os.path.getsize(caminho) > LIMITE_DO_VIDEO:
+        return False
+    return _mandar_arquivo("sendVideo", "video", caminho, "video.mp4", "video/mp4", legenda)
 
 
 def enviar(assunto, link=""):

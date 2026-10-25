@@ -113,6 +113,30 @@ def codigos_do_google(texto):
     return set(re.findall(r"(?:finish|block)_reason=<?(?:\w+\.)?([A-Z_]{3,})", texto or "")) - {"STOP"}
 
 
+# O que o Google respondeu na última análise recusada pelo conteúdo, para o aviso ao Rafael:
+# {"codigos": [...], "categorias": [(categoria, nível), ...]}; None se a última não foi
+# recusada. O Google não diz o motivo detalhado: só o código e, às vezes, a categoria.
+ULTIMA_RECUSA = None
+
+
+def _nome_do_google(valor):
+    """O nome de um enum do Google (HarmCategory.HARM_CATEGORY_X, BlockedReason.Y), sem o prefixo."""
+    return str(getattr(valor, "name", valor) or "").rsplit(".", 1)[-1]
+
+
+def categorias_da_recusa(response):
+    """As categorias que o Google marcou (bloqueadas ou com nível médio ou alto): {(categoria, nível)}."""
+    marcadas = set()
+    avaliacoes = list(getattr(getattr(response, "prompt_feedback", None), "safety_ratings", None) or [])
+    for cand in getattr(response, "candidates", None) or []:
+        avaliacoes += list(getattr(cand, "safety_ratings", None) or [])
+    for avaliacao in avaliacoes:
+        nivel = _nome_do_google(getattr(avaliacao, "probability", ""))
+        if getattr(avaliacao, "blocked", False) or nivel in ("MEDIUM", "HIGH"):
+            marcadas.add((_nome_do_google(getattr(avaliacao, "category", "")), nivel))
+    return marcadas
+
+
 class ConteudoBloqueado(Exception):
     """Nenhum modelo deu o texto, e algum recusou o pedido pelo conteúdo (BLOQUEIOS_DO_CONTEUDO)."""
 
@@ -174,7 +198,8 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
     porque a SDK é bloqueante. Devolve o texto ou None; em falha, o motivo
     fica em ULTIMO_ERRO_IA.
     """
-    global ULTIMO_ERRO_IA
+    global ULTIMO_ERRO_IA, ULTIMA_RECUSA
+    ULTIMA_RECUSA = None
 
     def processar_ia():
         logger.info("🚀 [IA] Iniciando upload do vídeo para o Google Storage...")
@@ -205,6 +230,7 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
 
             falhas = []   # motivo de cada modelo, para a mensagem de erro final
             recusas = 0   # modelos que responderam vazio pelo conteúdo do pedido
+            codigos, categorias = set(), set()   # o que o Google disse nessas recusas
             for modelo_nome in _modelos_da_vez():
                 try:
                     response = client_genai.models.generate_content(
@@ -227,6 +253,8 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
                     falhas.append(f"{modelo_nome}: VAZIO ({motivo})")
                     if BLOQUEIOS_DO_CONTEUDO & codigos_do_google(motivo):
                         recusas += 1
+                        codigos |= codigos_do_google(motivo)
+                        categorias |= categorias_da_recusa(response)
                     logger.warning(f"⚠️ [IA] {modelo_nome} devolveu resposta vazia → {motivo}")
 
                 except Exception as erro_modelo:
@@ -240,7 +268,7 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
             # Com uma recusa pelo conteúdo, quem pediu põe o vídeo de lado (os outros modelos
             # sem cota ou com erro passageiro não mudam isso).
             if recusas:
-                raise ConteudoBloqueado(mensagem)
+                raise ConteudoBloqueado(mensagem, {"codigos": sorted(codigos), "categorias": sorted(categorias)})
             raise Exception(mensagem)
         finally:
             if video_gemini:
@@ -255,8 +283,9 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
         return resultado
     except ConteudoBloqueado as e:
         # Quem pediu põe o vídeo de lado: aviso, não erro do robô.
-        ULTIMO_ERRO_IA = str(e)[:400]
-        logger.warning(f"🚫 [IA] O Google recusou o pedido pelo conteúdo (vídeo e texto): {e}")
+        mensagem, ULTIMA_RECUSA = e.args
+        ULTIMO_ERRO_IA = mensagem[:400]
+        logger.warning(f"🚫 [IA] O Google recusou o pedido pelo conteúdo (vídeo e texto): {mensagem}")
         return None
     except Exception as e:
         ULTIMO_ERRO_IA = str(e)[:400]
