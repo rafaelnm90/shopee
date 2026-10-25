@@ -1420,3 +1420,26 @@ def test_a_ia_so_confirma_a_mesma_cor_da_foto(monkeypatch):
     for prompt in (ps.PROMPT_PRODUTO_COM_FOTO, ps.PROMPT_ITEM_DA_LISTA):
         assert "da mesma cor" in prompt and "outra cor" in prompt
     assert "podem ser outra variação" not in ps.PROMPT_PRODUTO_COM_FOTO
+
+
+def test_com_a_lista_limpa_o_anexar_nao_rola_a_lista(monkeypatch):
+    # Escolha do Rafael (P27): com a limpeza anterior dada certo, os curtidos são só os de
+    # agora; o produto não é procurado rolando a lista inteira, e o topo continua conferido.
+    rolagens = []
+    monkeypatch.setattr(ps, "rolar", lambda d, para_cima=False: rolagens.append(para_cima))
+    detalhe = None
+    import registro_processos as rp
+    monkeypatch.setattr(ps.avisar_rafael, "mandar_texto", lambda texto: None)
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+
+    class Celular:
+        def dump_hierarchy(self):
+            return TELA_CURTIDAS
+
+    ok, _ = ps.adicionar_produto(Celular(), {"produto": "Panela de Pressão Inox"}, rolar_a_lista=False)
+    detalhe = [l for l in rp.contagem("2000-01-01 00:00:00")
+               if l[1] == "anexar o produto" and l[2] == "nome não achado em Minhas Curtidas"][0][3]
+    assert not ok and rolagens == [] and detalhe.endswith("0 rolada(s); lista limpa") and len(detalhe) <= 120
+    # Sem a lista limpa, rola como sempre.
+    ps.adicionar_produto(Celular(), {"produto": "Panela de Pressão Inox"})
+    assert False in rolagens
