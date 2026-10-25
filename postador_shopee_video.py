@@ -655,7 +655,7 @@ def nome_do_produto(video):
     return produtos[0]["nome"] if produtos else ""
 
 
-def adicionar_produto(d, video, anexados=None, no_topo=1):
+def adicionar_produto(d, video, anexados=None, no_topo=1, rolar_a_lista=True):
     """
     Anexa o produto do vídeo pela lista de Minhas Curtidas → Mais Recente, onde os curtidos
     agora ficam em cima (curtiu 2, são os 2 primeiros: no_topo). Escolha do Rafael (P18),
@@ -663,7 +663,8 @@ def adicionar_produto(d, video, anexados=None, no_topo=1):
     1. entre os no_topo primeiros, o que tem o nome do produto (igual, cortado ou com
        PARECIDO_NO_TOPO% das palavras): o app pode mostrar o nome de outro jeito que a API;
     2. o nome do produto mais embaixo, rolando a lista (o curtido de outro dia cujo
-       descurtir não pegou fica lá);
+       descurtir não pegou fica lá); com a lista limpa (rolar_a_lista=False: a limpeza
+       anterior deu certo), só o que está na tela, sem rolar (P27);
     3. última chance: o 1º da lista, se a IA conferir o recorte dele (foto, nome e preço)
        com o vídeo: o mesmo item, da mesma cor.
     Toca no Adicionar num ponto que a bolinha da Motorola não cobre e confere a janela
@@ -689,7 +690,8 @@ def adicionar_produto(d, video, anexados=None, no_topo=1):
         return _tocar_em_adicionar(d, tela, escolhido["botao"], escolhido["nome"], "no topo, pelo nome", anexados)
     melhor, anterior, rolagens, acabou = (0, -1, ""), None, 0, False
     primeiro = topo[0]["nome"] if topo else ""
-    for rolagem in range(ROLAGENS_DO_PRODUTO + 1):
+    maximo = ROLAGENS_DO_PRODUTO if rolar_a_lista else 0
+    for rolagem in range(maximo + 1):
         if rolagem:
             tela = d.dump_hierarchy()
         botao = adicionar_do_produto(tela, nome)
@@ -702,7 +704,7 @@ def adicionar_produto(d, video, anexados=None, no_topo=1):
             acabou = True
             break
         anterior = textos
-        if rolagem < ROLAGENS_DO_PRODUTO:
+        if rolagem < maximo:
             rolar(d)
             rolagens += 1
             time.sleep(SEGUNDOS_DEPOIS_DO_PASSO)
@@ -722,7 +724,8 @@ def adicionar_produto(d, video, anexados=None, no_topo=1):
                                  f"o mais parecido tem {comum}%" + diferenca
                                  + (f" e o nome começa depois de {antes} palavra(s)" if antes > 0 else "")
                                  + topo_txt
-                                 + f"; {rolagens} rolada(s)" + ("; a lista acabou" if acabou else ""), ok=None)
+                                 + f"; {rolagens} rolada(s)" + ("; a lista acabou" if acabou else "")
+                                 + ("" if rolar_a_lista else "; lista limpa"), ok=None)
     ok, motivo = _pelo_primeiro_com_a_ia(d, video, rolagens, anexados)
     if ok:
         return ok, motivo
@@ -992,6 +995,10 @@ def curtido(lista):
     return any(el["id"] == "buttonItemLiked" for el in lista)
 
 
+# O curtido de outro dia cujo descurtir não pegou: ele fica mais embaixo em Minhas Curtidas.
+CURTIDO_DE_ANTES = "o produto já estava curtido e o toque para descurtir não pegou: segui"
+
+
 def curtir_na_pagina(d, tela):
     """
     Curte o produto da página que está aberta, com o coração já na tela. Já curtido de
@@ -1008,7 +1015,7 @@ def curtir_na_pagina(d, tela):
             # anexar rola atrás dele).
             registro_processos.registrar("shopee_video", "curtir o produto", "já estava curtido",
                                          "o toque para descurtir não pegou", ok=True)
-            return True, "o produto já estava curtido e o toque para descurtir não pegou: segui"
+            return True, CURTIDO_DE_ANTES
         if not tem_coracao(lista):
             return False, "descurti o produto para ele subir na lista, mas o coração sumiu da tela"
         for _ in range(2):

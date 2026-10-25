@@ -2392,3 +2392,63 @@ def test_remocao_que_nao_pega_para_e_diz_onde(monkeypatch, avisos):
     resultado = robo.rodada(d=app, agora=momento("2026-10-25 04:05"))
     assert "não diminuiu" in resultado and len(app.favoritos) == 3 and "Cancelar" not in app.toques
     assert robo.passo_do_motivo(resultado) == "descurtir em Meus Favoritos"
+
+
+def _anexar_espiao(monkeypatch):
+    """O rolar_a_lista com que o robô chamou o anexar em cada produto."""
+    chamadas = []
+    original = robo.ps.adicionar_produto
+
+    def espiao(d, video, anexados=None, no_topo=1, rolar_a_lista=True):
+        chamadas.append(rolar_a_lista)
+        return original(d, video, anexados, no_topo, rolar_a_lista)
+
+    monkeypatch.setattr(robo.ps, "adicionar_produto", espiao)
+    return chamadas
+
+
+def test_lista_limpa_pelas_4h_o_rascunho_nao_rola_e_continua_limpa(monkeypatch, avisos):
+    # Escolha do Rafael (P27): depois da limpeza dada certo, o anexar não rola a lista inteira.
+    ativar(robo_inicio=8, robo_fim=22, robo_limite_min=1, robo_limite_max=1)
+    assert not robo.lista_limpa()
+    robo.rodada(d=AppDosFavoritos(favoritos=2), agora=momento("2026-10-25 04:05"))
+    assert robo.lista_limpa()
+    _fonte(monkeypatch)
+    chamadas = _anexar_espiao(monkeypatch)
+    app = AppDeMentira()
+    assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-25 10:00")) == "rascunho salvo"
+    assert chamadas == [False] and not app.curtido and robo.lista_limpa()
+
+
+def test_descurtir_que_falha_no_fim_suja_a_lista_e_o_proximo_rola(monkeypatch, avisos):
+    ativar(robo_inicio=8, robo_fim=22, robo_limite_min=1, robo_limite_max=1)
+    robo.gravar_estado(lista_limpa=True)
+    _fonte(monkeypatch)
+    monkeypatch.setattr(robo.ps, "descurtir", lambda d, video: (False, "toquei no coração, mas o produto continuou curtido"))
+    assert robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-25 10:00")) == "rascunho salvo"
+    assert not robo.lista_limpa()
+    inserir("INSERT INTO fila_autorais VALUES (?, ?, ?, ?)", "a2", "archive/vestido.mp4",
+            f"Vestido 👗\n{LINK}", "2026-10-25 09:30:00")
+    chamadas = _anexar_espiao(monkeypatch)
+    assert robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-25 11:00")) == "rascunho salvo"
+    assert chamadas == [True]
+
+
+def test_curtido_de_outro_dia_que_nao_descurtiu_suja_a_lista(monkeypatch, avisos):
+    robo.gravar_estado(lista_limpa=True)
+    robo._conferir_curtida((True, robo.ps.CURTIDO_DE_ANTES))
+    assert not robo.lista_limpa()
+    robo.gravar_estado(lista_limpa=True)
+    robo._conferir_curtida((True, "produto curtido"))
+    assert robo.lista_limpa()
+
+
+def test_descurtir_das_4h_que_para_no_meio_deixa_a_lista_suja(monkeypatch, avisos):
+    class SemConfirmar(AppDosFavoritos):
+        def _nos(self):
+            return [n.replace('text="Remover"', 'text="Apagar"') for n in super()._nos()]
+
+    ativar(robo_inicio=8, robo_fim=22)
+    robo.gravar_estado(lista_limpa=True)
+    robo.rodada(d=SemConfirmar(favoritos=3), agora=momento("2026-10-25 04:05"))
+    assert not robo.lista_limpa()

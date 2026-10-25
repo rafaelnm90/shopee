@@ -1549,9 +1549,14 @@ def preparar_rascunho(d, config, agora=None):
     except Suspensa as e:
         _desfazer_reserva(ident, video["id"], "conta suspensa", False)
         registrar_tentativa("rascunho", "suspensa", str(e), _produto_do_video(video), agora)
+        if curtidos:
+            gravar_estado(lista_limpa=False)
         raise
     except Verificacao:
         _desfazer_reserva(ident, video["id"], "verificação", False)
+        if curtidos:
+            # Na Verificação o robô para sem descurtir: a curtida fica para as 4h.
+            gravar_estado(lista_limpa=False)
         registrar_tentativa("rascunho", "verificação", "verificação da Shopee na tela", _produto_do_video(video), agora)
         raise
     except Parada as e:
@@ -1584,24 +1589,28 @@ def descurtir_no_fim(d, video, curtidos):
     """
     if not curtidos:
         return
+    todos = False
     try:
         if video.get("de_video"):
             _abrir_ver_produtos(d, video)
+            todos = True
             for indice, nome in curtidos:
                 xml = tela(d)
                 pontos = ps.produtos_vinculados(xml)
                 if indice >= len(pontos) or ps.proibido_no_ponto(xml, *pontos[indice]):
                     registro_processos.registrar(REGISTRO, "descurtir no fim do rascunho", "produto fora da lista",
                                                  ok=False)
+                    todos = False
                     continue
                 d.click(*pontos[indice])
                 pausa(8)
                 xml = tela(d)
                 if ps.nome_na_pagina_do_produto(xml) == nome:
-                    ps.descurtir_na_pagina(d, xml)
+                    todos = ps.descurtir_na_pagina(d, xml)[0] and todos
                 else:
                     registro_processos.registrar(REGISTRO, "descurtir no fim do rascunho",
                                                  "outro produto na posição", ok=False)
+                    todos = False
                 d.press("back")
                 pausa(4)
         else:
@@ -1609,8 +1618,9 @@ def descurtir_no_fim(d, video, curtidos):
             ps.limpar_aviso_rapido(d)
             ps.abrir_link(d, video["link"])
             pausa(8)
-            ps.descurtir(d, video)
+            todos = ps.descurtir(d, video)[0]
     except Verificacao:
+        gravar_estado(lista_limpa=False)
         raise
     except Parada as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] Não descurti no fim do rascunho: {ps.mascarar(e.motivo)}")
@@ -1618,6 +1628,9 @@ def descurtir_no_fim(d, video, curtidos):
     except Exception as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] Erro ao descurtir no fim do rascunho: {type(e).__name__}")
         registro_processos.registrar(REGISTRO, "descurtir no fim do rascunho", "erro", type(e).__name__, ok=False)
+    if not todos:
+        # Uma curtida ficou para trás: a lista não está limpa até o descurtir das 4h (P27).
+        gravar_estado(lista_limpa=False)
 
 
 def _desfazer_reserva(ident, id_video, motivo, do_video):
@@ -1658,6 +1671,21 @@ def _conferir(resultado, do_video=True):
     ok, motivo = resultado
     if not ok:
         raise Parada(motivo, do_video=do_video)
+
+
+# Minhas Curtidas está limpa quando a última limpeza deu certo: o descurtir das 4h acabou
+# a lista, e cada rascunho desde então descurtiu o que curtiu. Qualquer curtida que ficou
+# para trás suja a lista até o próximo descurtir das 4h. Escolha do Rafael (P27):
+# DECISOES.md, Shopee Vídeo.
+def lista_limpa():
+    return bool(ler_estado().get("lista_limpa"))
+
+
+def _conferir_curtida(resultado):
+    """Confere a curtida; o curtido de outro dia que não descurtiu fica mais embaixo: a lista não está limpa."""
+    _conferir(resultado)
+    if resultado[1] == ps.CURTIDO_DE_ANTES:
+        gravar_estado(lista_limpa=False)
 
 
 def _codigos_da_ia():
@@ -1779,6 +1807,7 @@ def descurtir_tudo(d, agora=None):
     if not esperar_na_tela(d, "Editar", 12):
         # Sem nada curtido, a página não tem o que editar.
         registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", "nada curtido", ok=True)
+        gravar_estado(lista_limpa=True)
         ir_ao_inicio(d)
         return "nada curtido em Meus Favoritos"
     tocar(d, "Editar", 3)
@@ -1814,7 +1843,7 @@ def descurtir_tudo(d, agora=None):
             # pergunta do app que o robô não conhece, por exemplo).
             raise Parada("toquei em Remover dos Favoritos, mas a lista de Meus Favoritos não diminuiu")
         removidos += marcados
-    gravar_estado(descurtir_continuar=not acabou)
+    gravar_estado(descurtir_continuar=not acabou, lista_limpa=acabou)
     xml = tela(d)
     if tem_exato(xml, "Feito"):
         d.click(*_ponto_exato(xml, "Feito"))
@@ -1869,7 +1898,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None):
         ps.limpar_aviso_rapido(d)
         ps.abrir_link(d, video["link"])
         _esperar_a_pagina_do_produto(d)
-        _conferir(ps.curtir(d, video))
+        _conferir_curtida(ps.curtir(d, video))
         curtidos.append((None, ps.nome_do_produto(video)))
         pausa(3)
     ir_ao_perfil(d)
@@ -1898,10 +1927,14 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None):
     # Os curtidos agora ficam em cima da lista: o 2º produto do vídeo procura entre os que
     # sobraram no topo. A tela final e o postar conferem o nome que a lista mostra, que pode
     # ser outro que o da API. Escolha do Rafael (P18): DECISOES.md, Shopee Vídeo.
+    # Com a lista limpa (a limpeza anterior deu certo), o produto não é procurado rolando a
+    # lista inteira; o topo continua conferido. Escolha do Rafael (P27): DECISOES.md, Shopee Vídeo.
+    limpa = lista_limpa()
     anexados = []
     for i, nome in enumerate(nomes):
         seguir(d, CAMINHO_PRODUTO if i == 0 else CAMINHO_MAIS_UM_PRODUTO)
-        _conferir(ps.adicionar_produto(d, dict(video, produto=nome), anexados, no_topo=len(nomes) - i))
+        _conferir(ps.adicionar_produto(d, dict(video, produto=nome), anexados, no_topo=len(nomes) - i,
+                                       rolar_a_lista=not limpa))
         tocar(d, "Feito", 6)
     _conferir(ps.conferir_tela_final(d, dict(video, produtos=anexados)))
     atualizar(ident, produtos=anexados)
@@ -1964,7 +1997,7 @@ def _produtos_do_video(d, video, vistos, curtidos=None):
             deste = []
             ok, _ = ps.ia_confere_produto(dict(video, produto=nome), deste, avisar=False)
             if ok:
-                _conferir(ps.curtir_na_pagina(d, xml))
+                _conferir_curtida(ps.curtir_na_pagina(d, xml))
                 if curtidos is not None:
                     curtidos.append((i, nome))
                 confirmados.append(nome)
@@ -2876,7 +2909,8 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
                        + "\n\nTudo em Relatório Geral 📊 → Saúde da Shopee Vídeo 🩺.")
             return resultado
         if acao == "descurtir":
-            gravar_estado(descurtir_em=_momento(agora), descurtir_continuar=False)
+            # A lista só fica limpa se este descurtir chegar ao fim (P27).
+            gravar_estado(descurtir_em=_momento(agora), descurtir_continuar=False, lista_limpa=False)
             resultado = descurtir_tudo(d, agora)
             registrar_tentativa("descurtir", "descurtido", agora=agora)
             return resultado
