@@ -557,3 +557,41 @@ def test_comentario_do_feed_que_nao_aparece_conta_no_dia_e_o_video_nao_volta(mon
     marca = it.marca("Loja da Bia", "Mini saia linda")
     assert it.resultado_de(marca, "video_feed") == "não confirmado"
     assert it.quantos_desde("video_feed", it.COMENTADOS_NO_FEED, "2026-10-24 00:00:00") == 1
+
+
+class CelularDoFeedSemComentarios(CelularDoFeed):
+    """O vídeo sem nenhum comentário: o painel abre sem o título "N Comentários" (Motorola, 25/10/2026)."""
+
+    def dump_hierarchy(self):
+        xml = super().dump_hierarchy()
+        if self.atual in ("painel", "escrevendo") and not self.comentarios.get(self.indice):
+            xml = xml.replace('text="4 Comentários"', 'text="Seja o primeiro"')
+        return xml
+
+
+def test_feed_comenta_no_video_sem_nenhum_comentario(avisos, ia_do_feed):
+    # Em 25/10, os 3 comentários do feed que pararam em "o painel de comentários não abriu"
+    # eram em vídeos com 0 comentários: o painel abria, mas sem o título que o robô esperava.
+    app = CelularDoFeedSemComentarios(videos=[("Loja da Bia", "Mini saia linda")])
+    assert robo.interagir_no_feed(app, momento("2026-10-24 10:00")) == "feed: 1 vídeo curtido e comentado"
+    assert app.comentarios == {0: ["Que achado! 0"]}
+
+
+def test_feed_que_para_guarda_o_caso_com_a_tela_da_hora(monkeypatch, avisos, ia_do_feed):
+    # O caso tem de mostrar a tela em que parou (o painel), e não a de depois de sair dela.
+    class PainelQueNaoAbre(CelularDoFeed):
+        def click(self, x, y):
+            super().click(x, y)
+            if self.atual == "painel":
+                self.atual = "travado"
+
+        def dump_hierarchy(self):
+            return _xml(_el("Carregando")) if self.atual == "travado" else super().dump_hierarchy()
+
+    telas = []
+    monkeypatch.setattr(robo, "_guardar_caso", lambda d, acao, resultado, motivo, **k: telas.append(d.atual))
+    monkeypatch.setattr(robo, "pausa", lambda segundos: None)
+    app = PainelQueNaoAbre(videos=[("Loja da Bia", "Mini saia linda")])
+    with pytest.raises(robo.Parada, match="painel de comentários") as erro:
+        robo.interagir_no_feed(app, momento("2026-10-24 10:00"))
+    assert telas == ["travado"] and erro.value.caso_guardado
