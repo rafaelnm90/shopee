@@ -36,6 +36,8 @@ TAMANHO_DO_TEXTO = 200
 DIAS_DA_SAUDE = 30
 # Status da apelação, como o app escreve.
 NAO_RECORRIDO = "Não Recorrido"
+# Punições sem recurso com o texto na tela Saúde da Shopee Vídeo (cabe na mensagem do Telegram).
+PENDENTES_NA_TELA = 5
 # O que o Rafael decidiu (ou o app mostrou) sobre cada punição.
 PENDENTE, RECORRIDA, NAO_VAI, ENCERRADA = "pendente", "recorrida", "nao_vai", "encerrada"
 # O recurso deu certo: a Shopee marca "Bem-sucedido" ou tira a punição da Saúde do Vídeo
@@ -255,6 +257,18 @@ def guardar_mensagens(ident, mensagens):
 
 # --- O aviso no privado ---
 
+def texto_para_copiar(p):
+    """
+    O texto do recurso da punição: o guardado ou, na de propriedade intelectual de vídeo de
+    outro canal guardada sem texto, o texto sem autoria pelo título (P31).
+    """
+    if p.get("texto"):
+        return p["texto"]
+    if not so_com_autoria_verdadeira(p.get("tipo"), p.get("fonte")):
+        return texto_sem_autoria(titulo=p.get("titulo") or "")
+    return ""
+
+
 def montar_aviso(p):
     """O aviso em HTML: a punição, o vídeo, o texto para copiar com um toque e onde colar."""
     avisos = p.get("avisos") or 0
@@ -267,9 +281,10 @@ def montar_aviso(p):
         linhas.append(f"📅 <b>Postado em:</b> {html.escape(p['postado_em'])}")
     if p["observacao"]:
         linhas += ["", f"ℹ️ {html.escape(p['observacao'])}"]
-    if p["texto"]:
-        linhas += ["", f"👇 Toque no texto para copiar ({len(p['texto'])} de {TAMANHO_DO_TEXTO} caracteres):",
-                   f"<code>{html.escape(p['texto'])}</code>"]
+    texto = texto_para_copiar(p)
+    if texto:
+        linhas += ["", f"👇 Toque no texto para copiar ({len(texto)} de {TAMANHO_DO_TEXTO} caracteres):",
+                   f"<code>{html.escape(texto)}</code>"]
     linhas += ["", "📲 No app: Notificações (ou Eu → Criadores &amp; Afiliados → Saúde do Vídeo) → o vídeo → "
                    "<b>Apelar aqui</b> → cole em Razão para apelar → <b>Enviar</b>. Não apague o vídeo enquanto o "
                    "recurso estiver em análise.",
@@ -432,6 +447,19 @@ def texto_saude(config, estado_robo=None, agora=None):
         titulo = f"\n   🎬 {html.escape(p['titulo'][:80])}" if p["titulo"] else ""
         linhas.append(f"• {html.escape(p['tipo'])} ({html.escape(p['data_punicao'])}): "
                       f"{ROTULOS.get(p['situacao'], p['situacao'])}{titulo}")
+    # O texto de cada punição ainda sem recurso, também aqui, para copiar a qualquer hora (pedido
+    # do Rafael, 25/10: "onde que eu posso ver?").
+    pendentes = [p for p in recentes if p["situacao"] == PENDENTE][:PENDENTES_NA_TELA]
+    if pendentes:
+        linhas += ["", "<b>Para recorrer</b> (toque no texto para copiar):"]
+        for p in pendentes:
+            texto = texto_para_copiar(p)
+            linhas.append(f"🎬 {html.escape((p['titulo'] or p['tipo'])[:80])}")
+            linhas.append(f"<code>{html.escape(texto)}</code>" if texto else
+                          "   sem texto ainda: toque em Gerar Apelação ⚖️")
+        linhas.append("📲 No app: Notificações (ou Eu → Criadores &amp; Afiliados → Saúde do Vídeo) → o vídeo → "
+                      "<b>Apelar aqui</b> → cole em Razão para apelar → <b>Enviar</b>. Depois toque em "
+                      "<b>✅ Já recorri</b> no aviso do privado, para os lembretes pararem.")
     linhas += ["", "<b>O que o botão faz</b>",
                "⚖️ <b>Gerar Apelação</b>: o robô olha agora a Saúde do Vídeo no Motorola e manda aqui o texto "
                "pronto de cada punição ainda não recorrida, com os botões Já recorri e Não vou recorrer. Ele "

@@ -99,6 +99,22 @@ def test_propriedade_intelectual_de_video_de_outro_canal_ganha_texto_sem_autoria
     assert ap.so_com_autoria_verdadeira("Violação de Propriedade Intelectual", "autorais")
 
 
+def test_tela_saude_mostra_o_texto_de_cada_punicao_sem_recurso():
+    # Pedido do Rafael (25/10): "onde que eu posso ver?" o texto para recorrer, a qualquer hora.
+    import robo_shopee_video as robo
+    _punicao()
+    sem_texto = ap.guardar("Violação de Propriedade Intelectual", "25/10/2026 14:41:08", "Não Recorrido",
+                           titulo="Mesa de Jantar Redonda #mesajantar", fonte="viral", agora=AGORA)
+    texto = ap.texto_saude({**robo.PADRAO}, {}, AGORA)
+    assert "Para recorrer" in texto and f"<code>{TEXTO}</code>" in texto
+    # A guardada sem texto (antes da P31) ganha o texto sem autoria pelo título, aqui e no aviso.
+    sem_autoria = ap.texto_sem_autoria(titulo="Mesa de Jantar Redonda #mesajantar")
+    assert f"<code>{sem_autoria}</code>" in texto and "Apelar aqui" in texto and "Já recorri" in texto
+    assert sem_autoria in ap.montar_aviso(ap.pegar(sem_texto))
+    ap.marcar(sem_texto, ap.RECORRIDA, AGORA)
+    assert sem_autoria not in ap.texto_saude({**robo.PADRAO}, {}, AGORA)
+
+
 def test_tela_saude_mostra_suspensao_e_punicoes():
     import robo_shopee_video as robo
     _punicao()
