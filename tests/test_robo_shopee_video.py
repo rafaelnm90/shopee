@@ -630,6 +630,22 @@ def test_bloqueio_do_google_pelo_conteudo_pula_o_video_sem_tentar_de_novo(monkey
     assert "PROHIBITED_CONTENT" in pulado["motivo"] and robo.passo_do_motivo(pulado["motivo"]) == "título da IA"
 
 
+def test_titulo_que_veio_com_as_regras_em_palavras_leves_fica_no_registro(monkeypatch, avisos):
+    # Escolha do Rafael (P28): o assistente refaz o pedido recusado com as regras em palavras
+    # leves; o checkup conta quantos títulos vieram assim.
+    from conftest import consultar
+    _fonte(monkeypatch)
+
+    async def textos(arquivo, nome):
+        return {"violacao": False, "motivo": "", "titulo": TITULO, "comentario": "Amei! #achadinhos",
+                "regras_leves": True}
+
+    monkeypatch.setattr(robo.assistente, "textos_do_video", textos)
+    assert robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    assert consultar("SELECT resultado, ok FROM registro_processos WHERE processo = 'título da IA'") == (
+        "veio com as regras em palavras leves", 1)
+
+
 def test_ia_que_nao_confirma_pula_o_video_sem_tocar_no_celular(monkeypatch, avisos):
     _fonte(monkeypatch, confere=False)
     ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)

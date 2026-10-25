@@ -1,5 +1,6 @@
 """Modo assistente da Shopee Vídeo: quando mandar, qual vídeo, texto da IA, produtos e a mensagem do privado."""
 import os
+import re
 from datetime import datetime
 
 import pytest
@@ -227,7 +228,7 @@ def test_mensagem_mostra_o_titulo_curto():
 def _respostas(monkeypatch, *respostas):
     chamadas = []
 
-    async def gerar(arquivo, nome=""):
+    async def gerar(arquivo, nome="", leves=False):
         chamadas.append(arquivo)
         return respostas[len(chamadas) - 1]
 
@@ -267,6 +268,51 @@ def test_violacao_ou_ia_sem_resposta_nao_pede_de_novo(monkeypatch):
         assert rodar(asv.textos_do_video("v.mp4")) == primeira and len(chamadas) == 1
 
 
+RECUSADO = ("Todos os modelos da cascata falharam → gemini-x: VAZIO "
+            "(block_reason=<BlockedReason.PROHIBITED_CONTENT: 'PROHIBITED_CONTENT'>)")
+
+
+def test_recusado_pelo_conteudo_pede_de_novo_com_as_regras_em_palavras_leves(monkeypatch):
+    # Escolha do Rafael (P28): o Google recusou o título de vídeos comuns por causa das palavras
+    # fortes das diretrizes; só nessa hora, mais um pedido com as mesmas regras em palavras leves.
+    pedidos = []
+    respostas = iter([None, _com_titulo(asv.TITULO_MIN)])
+
+    async def gerar(arquivo, nome="", leves=False):
+        pedidos.append(leves)
+        resposta = next(respostas)
+        asv.api_gemini.ULTIMO_ERRO_IA = None if resposta else RECUSADO
+        return resposta
+
+    monkeypatch.setattr(asv, "gerar_textos", gerar)
+    textos = rodar(asv.textos_do_video("v.mp4"))
+    assert pedidos == [False, True] and textos["regras_leves"] is True
+
+    # Recusado de novo: sem texto, e o motivo do Google continua para quem pediu.
+    pedidos = []
+
+    async def recusa_sempre(arquivo, nome="", leves=False):
+        pedidos.append(leves)
+        asv.api_gemini.ULTIMO_ERRO_IA = RECUSADO
+        return None
+
+    monkeypatch.setattr(asv, "gerar_textos", recusa_sempre)
+    assert rodar(asv.textos_do_video("v.mp4")) is None and pedidos == [False, True]
+    assert asv.recusado_pelo_conteudo()
+
+
+def test_regras_em_palavras_leves_sao_as_mesmas_sem_as_palavras_fortes():
+    normal, leves = asv.ler_diretrizes(), asv.ler_diretrizes(leves=True)
+    fortes = ("nud", "sex", "infantil", "menor", "íntim", "fetiche", "suicíd", "automutila", "abuso",
+              "terroris", "violênc", "mortos", "ferid")
+    assert [f for f in fortes if f in normal.casefold()]
+    assert not [f for f in fortes if f in leves.casefold()]
+    regras = re.compile(r"^\s*(\d+)\. \*\*", re.M)
+    assert regras.findall(leves) == regras.findall(normal) and len(regras.findall(normal)) == 15
+    assert asv.ler_diretrizes(leves=True) in asv.montar_prompt(leves=True)
+    assert normal in asv.montar_prompt()
+
+
 # --- Envio ---
 
 class Bot:
@@ -281,7 +327,7 @@ class Bot:
 
 
 def _preparar(monkeypatch, textos):
-    async def gerar(arquivo, nome=""):
+    async def gerar(arquivo, nome="", leves=False):
         return textos
 
     async def produtos(link):
@@ -317,7 +363,7 @@ def test_ia_sem_resposta_pula_o_video_sem_mandar(monkeypatch):
 
 
 def test_sem_video_avisa_e_nao_chama_a_ia(monkeypatch):
-    async def gerar(arquivo, nome=""):
+    async def gerar(arquivo, nome="", leves=False):
         raise AssertionError("não devia chamar a IA")
 
     monkeypatch.setattr(asv, "gerar_textos", gerar)
