@@ -697,7 +697,7 @@ def texto_robo(config, agora=None, celular=None):
         f"⚡ <b>{BOTAO_PREPARAR}</b>: o robô prepara um rascunho na hora, a mais do dia (mesmo pausado).\n"
         f"📋 <b>{BOTAO_HISTORICO}</b>: tudo o que o robô tentou nas últimas 24 h, com o produto e em que passo "
         f"parou. Às {HORA_DO_RESUMO}h chega o resumo do dia no seu privado.\n"
-        f"✂️ <b>{BOTAO_EDICAO}</b>: a foto do produto no começo e a miniatura no topo dos vídeos; ver um "
+        f"✂️ <b>{BOTAO_EDICAO}</b>: a foto do produto no começo, a miniatura no canto e a seta vermelha; ver um "
         "exemplo, ligar ou desligar.\n"
         f"📦 <b>{BOTAO_FAIXA_ROBO}</b>: quantos rascunhos ele prepara por dia (uma faixa, sorteada a cada dia).\n"
         f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele prepara os rascunhos e posta (fora do Horário das "
@@ -720,7 +720,8 @@ def texto_edicao(config):
     return (
         "✂️ <b>Edição dos Vídeos</b>\n"
         f"O robô edita o vídeo antes do rascunho, como você faz no LumaFusion: a foto do anúncio do produto "
-        f"nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos e uma miniatura dela no topo do vídeo inteiro.\n\n"
+        f"nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos e, até o fim do vídeo, uma miniatura dela no canto "
+        "de cima à direita e uma seta vermelha embaixo à esquerda, no lugar em que você põe no LumaFusion.\n\n"
         "Vale para todos os vídeos que o robô usa (Autorais, Viral, Canal Afiliados e Grupo Público): "
         "todos os seus grupos e vídeos são autorais.\n\n"
         f"Agora: {rotulo_edicao(config)}\n\n"
