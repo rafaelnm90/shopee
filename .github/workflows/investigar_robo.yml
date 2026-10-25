@@ -3,8 +3,9 @@ name: Investigar o robô (Shopee Vídeo)
 # Por que o robô automático da Shopee Vídeo não acha o produto de um vídeo: segue no
 # servidor o link dos vídeos que ele pulou e dos próximos da fonte do painel, como o robô
 # segue, e mostra por que tipos de página o link passou, se chegou a um produto ou a um
-# vídeo (Ver Produtos) e se a API de afiliado devolve a oferta. Só roda quando disparado
-# à mão.
+# vídeo (Ver Produtos) e se a API de afiliado devolve a oferta. Antes, cada tentativa
+# das últimas 24 h que não deu certo, com a hora, o passo e a forma do motivo (o texto
+# fixo do código, com "…" no que muda). Só roda quando disparado à mão.
 #
 # O repositório é público, e os logs do Actions também: o investigar_robo.py nunca
 # imprime links, nomes de produto ou textos, só tipos de página, contagens e o motivo

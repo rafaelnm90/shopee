@@ -60,3 +60,27 @@ def test_relatorio_nunca_mostra_link_nome_ou_motivo(monkeypatch, capsys):
     assert "1 × pulado (parou em achar o produto do link (o link não diz o produto do vídeo)): produto SEM oferta na API de afiliado" in saida
     assert "shopee.com.br" not in saida and "Copo" not in saida
     assert ir.main(["x"]) == 2
+
+
+def test_tentativas_que_nao_deram_certo_com_a_hora_o_passo_e_so_a_forma_do_motivo(capsys):
+    # Pedido do Rafael (25/10): corrigir o que impediu de postar. A lista diz a hora (antes ou
+    # depois de uma correção) e a forma do motivo, nunca o nome do produto (o log é público).
+    import robo_shopee_video as robo
+    from datetime import timedelta
+    agora = robo.agora_br()
+    robo.registrar_tentativa("rascunho", "pulado", "o produto do vídeo não está na lista, nem pela foto do 1º "
+                             "(a foto do 1º da lista não é o produto do vídeo (1ª vez)): nada adicionado (aviso no privado)",
+                             "Copo Térmico",
+                             agora=agora - timedelta(hours=2))
+    robo.registrar_tentativa("rascunho", "parou", "não achei Editar na tela", agora=agora - timedelta(hours=1))
+    robo.registrar_tentativa("rascunho", "salvo", produto="Copo Térmico", agora=agora - timedelta(minutes=30))
+    robo.registrar_tentativa("rascunho", "parou", "Copo Térmico sumiu", agora=agora - timedelta(minutes=10))
+    robo.registrar_tentativa("rascunho", "pulado", "o link não diz o produto do vídeo", agora=agora - timedelta(hours=30))
+    linhas = ir.tentativas_que_nao_deram_certo()
+    assert [linha[1:4] for linha in linhas] == [("rascunho", "pulado", "anexar o produto"),
+                                               ("rascunho", "parou", "navegar no app"),
+                                               ("rascunho", "parou", "outro")]
+    assert linhas[0][4] == "o produto do vídeo não está na lista, nem pela foto do 1º (…): nada adicionado (aviso no privado)"
+    assert linhas[1][4] == "não achei … na tela" and linhas[2][4] == ""
+    assert linhas[0][0] == (agora - timedelta(hours=2)).strftime("%m-%d %H:%M")
+    assert "Copo" not in str(linhas)
