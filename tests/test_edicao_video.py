@@ -108,32 +108,45 @@ def test_ffmpeg_que_demora_demais_desiste(monkeypatch, tmp_path):
     assert edicao_video.editar("video.mp4", b"foto", str(tmp_path / "r.mp4")).startswith("o ffmpeg passou de")
 
 
-def test_exemplo_usa_o_video_mais_novo_dos_autorais_com_foto(monkeypatch, tmp_path):
-    sem_arquivo, com_foto = str(tmp_path / "sumiu.mp4"), str(tmp_path / "a.mp4")
-    open(com_foto, "wb").close()
-    candidatos = [("1", sem_arquivo, "https://s.shopee.com.br/a", ""), ("2", com_foto, None, ""),
-                  ("3", com_foto, "https://s.shopee.com.br/sem-foto", ""), ("4", com_foto, "https://s.shopee.com.br/b", "")]
-    monkeypatch.setattr(edicao_video.assistente, "_candidatos", lambda fonte: candidatos if fonte == "autorais" else [])
+def _fontes_de_mentira(monkeypatch, candidatos, fonte_do_robo="autorais"):
+    """O exemplo com as fontes de mentira ({fonte: [(id, arquivo, link, legenda)]}) e a foto e o nome fixos."""
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    db.salvar_config("shopee_video", {"fonte": fonte_do_robo})
+    monkeypatch.setattr(edicao_video.assistente, "candidatos_nao_usados", lambda fonte: candidatos.get(fonte, []))
     monkeypatch.setattr(edicao_video.ps, "foto_do_produto",
                         lambda video: None if "sem-foto" in video["link"] else b"foto")
     monkeypatch.setattr(edicao_video.ps, "nome_do_produto", lambda video: "Copo Térmico")
     editados = []
     monkeypatch.setattr(edicao_video, "editar", lambda video, foto, destino: editados.append(video) or "")
+    return editados
+
+
+def test_exemplo_usa_o_proximo_video_do_robo_com_arquivo_link_e_foto(monkeypatch, tmp_path):
+    sem_arquivo, com_foto = str(tmp_path / "sumiu.mp4"), str(tmp_path / "a.mp4")
+    open(com_foto, "wb").close()
+    editados = _fontes_de_mentira(monkeypatch, {"autorais": [
+        ("1", sem_arquivo, "https://s.shopee.com.br/a", ""), ("2", com_foto, None, ""),
+        ("3", com_foto, "https://s.shopee.com.br/sem-foto", ""), ("4", com_foto, "https://s.shopee.com.br/b", "")]})
     assert edicao_video.exemplo("exemplo.mp4") == ("Copo Térmico", "")
     assert editados == [com_foto]
 
 
-def test_exemplo_usa_outra_fonte_sem_autorais_e_sem_video_diz_o_motivo(monkeypatch, tmp_path):
-    viral = str(tmp_path / "viral.mp4")
-    open(viral, "wb").close()
-    candidatos = {"viral": [("viral:clone_1", viral, "https://s.shopee.com.br/v", "")]}
-    monkeypatch.setattr(edicao_video.assistente, "_candidatos", lambda fonte: candidatos.get(fonte, []))
-    monkeypatch.setattr(edicao_video.ps, "foto_do_produto", lambda video: b"foto")
-    monkeypatch.setattr(edicao_video.ps, "nome_do_produto", lambda video: "Garrafa")
-    editados = []
-    monkeypatch.setattr(edicao_video, "editar", lambda video, foto, destino: editados.append(video) or "")
-    assert edicao_video.exemplo("exemplo.mp4") == ("Garrafa", "") and editados == [viral]
-    monkeypatch.setattr(edicao_video.assistente, "_candidatos", lambda fonte: [])
+def test_cada_exemplo_mostra_um_video_novo_e_recomeca_no_fim(monkeypatch, tmp_path):
+    # Pedido do Rafael (25/10): cada toque em Ver Exemplo da Edição mostra um vídeo novo, o
+    # próximo que o robô pegaria para postar (a fonte do robô primeiro), sem postar.
+    videos = {nome: str(tmp_path / f"{nome}.mp4") for nome in ("v1", "v2", "a1")}
+    for caminho in videos.values():
+        open(caminho, "wb").close()
+    editados = _fontes_de_mentira(monkeypatch, {
+        "viral": [("viral:1", videos["v1"], "https://s.shopee.com.br/1", ""),
+                  ("viral:2", videos["v2"], "https://s.shopee.com.br/2", "")],
+        "autorais": [("a1", videos["a1"], "https://s.shopee.com.br/3", "")]}, fonte_do_robo="viral")
+    for _ in range(4):
+        assert edicao_video.exemplo("exemplo.mp4")[0] == "Copo Térmico"
+    assert editados == [videos["v1"], videos["v2"], videos["a1"], videos["v1"]]
+
+
+def test_exemplo_sem_video_diz_o_motivo(monkeypatch):
+    _fontes_de_mentira(monkeypatch, {})
     nome, motivo = edicao_video.exemplo("exemplo.mp4")
     assert nome is None and motivo == "nenhum vídeo com o arquivo e o link no servidor agora"
-
