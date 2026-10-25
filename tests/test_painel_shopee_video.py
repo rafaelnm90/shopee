@@ -53,7 +53,7 @@ def test_menu_do_robo_e_como_funciona(bm, Msg, Est):
     assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu_robo.state
     assert _textos(sv.teclado_robo(sv.ler_config())) == [
         "Retomar Postagem ▶️", "Rascunhos do Robô 📝", "Fila de Rascunhos 🗂️", "Preparar 1 Agora ⚡",
-        "Histórico do Robô 📋",
+        "Histórico do Robô 📋", "Edição dos Vídeos ✂️",
         "Rascunhos por Dia 📦", "Horário do Robô 🕗", "Horário das Interações 💬",
         "Testar Caminho 🧭", "Celular do Robô 📱", "Voltar à Shopee Vídeo 🔙"]
     msg = Msg("Como Funciona ❓")
@@ -277,6 +277,45 @@ class MsgComMidia:
 
     async def answer_photo(self, foto, **kwargs):
         self.midias.append(("foto", foto.path, kwargs.get("caption", "")))
+
+
+def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
+    # Escolha do Rafael (P37): a edição só vale nos vídeos dele (Autorais) e começa desligada,
+    # até ele ver o exemplo e ligar.
+    sv, est = _painel(bm), Est()
+    assert not sv.ler_config()["edicao_ligada"] and "Edição dos vídeos: ⏸️" in sv.texto_robo(sv.ler_config())
+    msg = Msg("Edição dos Vídeos ✂️")
+    rodar(sv.edicao_handler(msg, est))
+    texto = msg.saidas[-1]
+    assert "Autorais" in texto and "nunca" in texto and "desligada" in texto and "O que cada botão faz" in texto
+    assert _textos(sv.teclado_edicao(sv.ler_config())) == [
+        "Ver Exemplo da Edição 👀", "Ligar Edição ✅", "Voltar ao Robô 🔙"]
+    rodar(sv.ligar_edicao_handler(Msg("Ligar Edição ✅"), est))
+    assert sv.ler_config()["edicao_ligada"] and sv.edicao_video.vale_para("autorais")
+    assert "Desligar Edição ⏸️" in _textos(sv.teclado_edicao(sv.ler_config()))
+    rodar(sv.ligar_edicao_handler(Msg("Desligar Edição ⏸️"), est))
+    assert not sv.edicao_video.vale_para("autorais")
+
+
+def test_exemplo_da_edicao_chega_no_privado_sem_postar(bm, Msg, Est, monkeypatch):
+    sv, est = _painel(bm), Est()
+
+    def exemplo(destino):
+        with open(destino, "wb") as arquivo:
+            arquivo.write(b"editado")
+        return "Copo Térmico", ""
+
+    monkeypatch.setattr(sv.edicao_video, "exemplo", exemplo)
+    msg = MsgComMidia(Msg, "Ver Exemplo da Edição 👀")
+    rodar(sv.exemplo_edicao_handler(msg, est))
+    assert msg.midias and msg.midias[0][0] == "video"
+    assert "não foi postado" in msg.midias[0][2] and "Copo Térmico" in msg.midias[0][2]
+    # O arquivo do exemplo não fica no servidor.
+    assert not os.path.exists(msg.midias[0][1])
+    monkeypatch.setattr(sv.edicao_video, "exemplo", lambda destino: (None, "nenhum vídeo dos Autorais"))
+    msg = MsgComMidia(Msg, "Ver Exemplo da Edição 👀")
+    rodar(sv.exemplo_edicao_handler(msg, est))
+    assert not msg.midias and any("O exemplo não saiu: nenhum vídeo dos Autorais" in t for t in msg.saidas)
 
 
 def _rascunho(sv, titulo="Vestido Infantil 👗 #vestido", criado="2026-10-22 10:00:00"):

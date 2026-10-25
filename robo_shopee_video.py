@@ -64,6 +64,7 @@ import avisar_rafael
 import casos_robo
 import celular_robo
 import db
+import edicao_video
 import interacoes_shopee_video as interacoes
 import postador_shopee_video as ps
 import registro_processos
@@ -2186,7 +2187,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
 
     os.makedirs(PASTA_RASCUNHOS, exist_ok=True)
     copia = os.path.join(PASTA_RASCUNHOS, f"{ident}.mp4")
-    shutil.copyfile(video["arquivo"], copia)
+    copiar_para_o_rascunho(video, fonte, copia)
     atualizar(ident, arquivo=copia, link=video["link"], produtos=nomes, titulo=textos["titulo"],
               comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia)
 
@@ -2250,6 +2251,25 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     esperando = len(esperando_aprovacao())
     avisar(f"📝 Robô da Shopee Vídeo: rascunho novo salvo no celular. {esperando} esperando a sua aprovação "
            "em Shopee Vídeo 🎬 → Rascunhos do Robô 📝.")
+
+
+PROCESSO_DA_EDICAO = "edição do vídeo: foto do produto e miniatura"
+
+
+def copiar_para_o_rascunho(video, fonte, copia):
+    """
+    A cópia do vídeo que vai ao rascunho. Nos vídeos do Rafael (Autorais) e das fontes
+    liberadas para afiliados, com a edição ligada, ela leva a foto do produto no começo e
+    a miniatura no topo; se a edição não sai, o rascunho segue com o vídeo como veio.
+    Nunca nos vídeos de outras pessoas. Escolha do Rafael (25/10, P37): DECISOES.md, Shopee Vídeo.
+    """
+    if edicao_video.vale_para(fonte) and not video.get("de_video"):
+        motivo = edicao_video.editar(video["arquivo"], ps.foto_do_produto(video), copia)
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_EDICAO, "sem edição" if motivo else "editado",
+                                     motivo, ok=not motivo)
+        if not motivo:
+            return
+    shutil.copyfile(video["arquivo"], copia)
 
 
 def _esperar_a_pagina_do_produto(d, voltas=4):
