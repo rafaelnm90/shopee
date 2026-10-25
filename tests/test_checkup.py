@@ -243,6 +243,24 @@ def test_robo_agora_mostra_as_falhas_recentes_e_o_aprovado_que_passou_da_hora():
     assert "Postagem: pausada" in checkup.robo_agora(AGORA)[-1]
 
 
+def test_aprovados_postados_mostram_o_atraso_sobre_o_previsto():
+    # 25/10: o Rafael viu um aprovado que "ficou de postar agora" sair depois; o checkup
+    # mostra o aprovado, o previsto e o postado de cada um, e cobra o que atrasou demais.
+    import robo_shopee_video as robo
+
+    def em(horas_atras):
+        return (AGORA - timedelta(hours=horas_atras)).strftime("%Y-%m-%d %H:%M:%S")
+
+    na_hora = robo.criar("v1", AGORA - timedelta(hours=5))
+    robo.atualizar(na_hora, estado="postado", aprovado_em=em(4), postar_em=em(3.5), postado_em=em(3.4))
+    tarde = robo.criar("v2", AGORA - timedelta(hours=5))
+    robo.atualizar(tarde, estado="postado", aprovado_em=em(3), postar_em=em(2.5), postado_em=em(1.5))
+    r = checkup.robo_da_shopee_video(AGORA)
+    assert [atraso for *_h, atraso in r["postados"]] == [6, 60]
+    pontos = checkup.pontos_de_atencao([], {}, {}, r, {}, None, AGORA)
+    assert "Robô da Shopee Vídeo: 1 aprovado(s) foram ao ar com mais de 30 min de atraso (o maior: 60 min)" in pontos
+
+
 def test_sobreposicoes_mostram_tarefa_no_horario_de_outra():
     # Pergunta do Rafael (25/10): uma tarefa em cima da outra pode atrapalhar; o checkup mostra
     # quando o robô fez outra coisa na hora do descurtir, interação fora do Horário das
