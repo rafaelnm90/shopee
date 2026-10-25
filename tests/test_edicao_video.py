@@ -1,5 +1,6 @@
-"""edicao_video e videos.com_foto_e_miniatura: a foto do produto no começo, a miniatura no canto e a seta vermelha, com o ffmpeg de mentira."""
+"""edicao_video e videos.com_foto_e_miniatura: a foto do produto no começo, a miniatura no canto e a seta do Rafael, com o ffmpeg de mentira (e de verdade, quando a máquina tem)."""
 import os
+import shutil
 import subprocess
 from types import SimpleNamespace
 
@@ -39,7 +40,7 @@ def test_vale_em_todas_as_fontes_so_depois_de_ligar():
 
 def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, tmp_path):
     # Vídeo do Rafael (25/10): a miniatura com 25% da largura no canto de cima à direita
-    # (posição X 60 e Y -80 no LumaFusion) e a seta vermelha embaixo à esquerda, até o fim.
+    # (posição X 60 e Y -80 no LumaFusion) e a seta dele embaixo à esquerda, até o fim.
     comandos = _programas(monkeypatch)
     pasta = tmp_path / "rascunhos"
     pasta.mkdir()
@@ -49,34 +50,76 @@ def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, t
         assert arquivo.read() == b"editado"
     ffmpeg = comandos[-1]
     filtro = ffmpeg[ffmpeg.index("-filter_complex") + 1]
-    assert "concat=n=2:v=1:a=0" in filtro and "720:1280" in filtro
+    assert "720:1280" in filtro
     assert f"-t {edicao_video.SEGUNDOS_DA_FOTO}" in " ".join(ffmpeg) and "scale=180:-2" in filtro
     assert "overlay=x=576-w/2:y=128-h/2:shortest=1" in filtro
-    assert "[comfoto][3:v]overlay=x=143-w/2:y=842-h/2:shortest=1[editado]" in filtro
+    # A seta entra depois de juntar a foto e o vídeo: começa com o vídeo, por cima dos dois,
+    # e o pulso do fim do arquivo (quadros 111 a 140) se repete até o fim.
+    assert "[foto][comfoto]concat=n=2:v=1:a=0[juntos]" in filtro
+    assert "[3:v]loop=loop=-1:size=30:start=111[seta]" in filtro
+    assert "[juntos][seta]overlay=x=142-w/2:y=846-h/2:shortest=1" in filtro
     entradas = [ffmpeg[i + 1] for i, parte in enumerate(ffmpeg) if parte == "-i"]
-    assert entradas[3].endswith("seta.png")
+    assert entradas[3] == edicao_video.SETA
     # Com som: o áudio do vídeo começa depois da foto, que vai em silêncio.
     assert "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro and "[a]" in ffmpeg
-    # A seta é desenhada a cada edição e não fica no servidor.
+    # Só o vídeo editado fica na pasta do rascunho.
     assert os.listdir(pasta) == ["rascunho.mp4"]
 
 
-def test_seta_vermelha_com_fundo_transparente(tmp_path):
+def test_a_seta_e_a_do_rafael_sem_fundo_com_a_entrada_e_um_pulso():
+    # Pedido do Rafael (25/10): a seta do arquivo dele, sem o fundo preto.
     from PIL import Image
-    caminho = str(tmp_path / "seta.png")
-    edicao_video.desenhar_seta(caminho)
-    with Image.open(caminho) as arquivo:
-        seta = arquivo.copy()
-    assert seta.mode == "RGBA" and seta.size == edicao_video.TAMANHO_DA_SETA
-    pixels = [seta.getpixel((x, y)) for x in range(seta.width) for y in range(seta.height)]
-    vermelhos = [p for p in pixels if p[3] > 200 and p[0] > 200 and p[1] < 40 and p[2] < 40]
+    with Image.open(edicao_video.SETA) as arquivo:
+        assert arquivo.format == "PNG" and arquivo.mode == "RGBA"
+        inicio, quadros = edicao_video.PULSO_DA_SETA
+        assert arquivo.n_frames == inicio + quadros and arquivo.info.get("duration") == 40   # 25 por segundo
+        arquivo.seek(0)
+        primeiro = arquivo.copy()
+        arquivo.seek(inicio + quadros // 2)
+        pulso = arquivo.copy()
+    # Antes de 1,6 s ainda não há seta; no pulso ela é vermelha, num fundo todo transparente.
+    largura, altura = pulso.size
+    assert all(primeiro.getpixel((x, y))[3] == 0 for x in range(0, largura, 3) for y in range(0, altura, 3))
+    pixels = [pulso.getpixel((x, y)) for x in range(largura) for y in range(altura)]
+    vermelhos = [p for p in pixels if p[3] == 255 and p[0] > 180 and p[1] < 40 and p[2] < 40]
     transparentes = [p for p in pixels if p[3] == 0]
     assert len(vermelhos) > len(pixels) * 0.1 and len(transparentes) > len(pixels) * 0.4
-    # O canto de baixo à direita tem a ponta; o de baixo à esquerda fica vazio.
-    largura, altura = seta.size
-    assert any(seta.getpixel((x, y))[3] > 200 for x in range(largura * 2 // 3, largura)
+    # Nada escuro e opaco: o preto do fundo saiu, e a borda não fica com contorno escuro.
+    assert not [p for p in pixels if p[3] > 60 and max(p[:3]) < 120]
+    # O canto de baixo à direita tem a ponta; os cantos de cima e o de baixo à esquerda ficam vazios.
+    assert any(pulso.getpixel((x, y))[3] == 255 for x in range(largura * 2 // 3, largura)
                for y in range(altura // 2, altura))
-    assert all(seta.getpixel((x, y))[3] == 0 for x in range(largura // 4) for y in range(altura * 3 // 4, altura))
+    for cantos in ((0, 0), (largura - 10, 0), (0, altura - 10)):
+        assert all(pulso.getpixel((cantos[0] + x, cantos[1] + y))[3] == 0 for x in range(10) for y in range(10))
+    assert os.path.getsize(edicao_video.SETA) < 1024 * 1024
+
+
+def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
+    # Com o ffmpeg de verdade: num vídeo claro, onde a seta está o vermelho aparece e o resto
+    # do recorte dela continua claro (sem o quadrado preto), também depois do fim do arquivo.
+    if not shutil.which("ffmpeg"):
+        assert edicao_video.editar(str(tmp_path / "nao_existe.mp4"), b"foto", str(tmp_path / "r.mp4")) != ""
+        return
+    video, foto = tmp_path / "v.mp4", tmp_path / "foto.jpg"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0xf0e0c0:size=360x640:rate=30:duration=6",
+                    str(video)], check=True)
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0x3060a0:size=200x200",
+                    "-frames:v", "1", str(foto)], check=True)
+    destino = tmp_path / "editado.mp4"
+    assert edicao_video.editar(str(video), foto.read_bytes(), str(destino)) == ""
+    quadro = tmp_path / "quadro.ppm"
+    # 7,5 s: depois dos 5,6 s do arquivo da seta, já no pulso repetido.
+    subprocess.run(["ffmpeg", "-v", "error", "-ss", "7.5", "-i", str(destino), "-frames:v", "1", str(quadro)],
+                   check=True)
+    from PIL import Image
+    with Image.open(quadro) as imagem:
+        tela = imagem.convert("RGB")
+    assert tela.size == (720, 1280)
+    cx, cy = edicao_video.CENTRO_DA_SETA
+    recorte = [tela.getpixel((x, y)) for x in range(cx - 90, cx + 90, 2) for y in range(cy - 68, cy + 68, 2)]
+    vermelhos = [p for p in recorte if p[0] > 150 and p[1] < 70 and p[2] < 70]
+    escuros = [p for p in recorte if max(p) < 90]
+    assert len(vermelhos) > len(recorte) * 0.05 and not escuros
 
 
 def test_video_sem_som_sai_sem_som(monkeypatch, tmp_path):

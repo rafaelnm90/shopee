@@ -9,6 +9,11 @@ def test_so_documentacao_testes_e_workflows_nao_reinicia_ninguem():
                                  ".claude/scripts/ver_video.sh", "inventario.py", "validar_deploy.py"]) == []
 
 
+def test_midia_lida_a_cada_uso_nao_reinicia_ninguem():
+    # A seta da edição dos vídeos é lida a cada edição: o robô pega a nova sem reiniciar.
+    assert sa.servicos_afetados(["midia/seta_da_shopee.apng"]) == []
+
+
 def test_modulo_de_um_robo_reinicia_so_ele():
     assert sa.servicos_afetados(["faxina_baixador.py"]) == ["divulgacao_canal_bot", "downloader_bot"]
     assert sa.servicos_afetados(["painel_notas.py"]) == ["bot_mestre_bot"]
