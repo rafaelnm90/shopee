@@ -117,6 +117,9 @@ jobs:
             echo "Tentativas nas últimas 24 h: ${R:-nenhuma}"
             R=$(sqlite3 -readonly banco_dados.db "SELECT acao || ' → ' || passo || ': ' || COUNT(*) FROM shopee_video_tentativas WHERE momento >= '$DESDE24' AND passo != '' GROUP BY acao, passo ORDER BY COUNT(*) DESC" 2>/dev/null | paste -sd '|' - | sed 's/|/ | /g')
             if [ -n "$R" ]; then echo "Onde parou nas últimas 24 h: $R"; fi
+            # A janela da retomada do Claude (a cada 3 h; às 8h, 12 h): as paradas, os pulados
+            # e os aprovados que passaram da hora de ir ao ar. Só ações, passos fixos, horas e números.
+            venv/bin/python3 checkup.py robo-agora 2>/dev/null || echo "Robô agora: ? (a conferência falhou)"
 
             # Baixador: se a Shopee ainda bloqueia o download dos vídeos da Shopee Vídeo. Só
             # estados, datas e contagens (o último link pedido fica no banco e nunca sai daqui).
