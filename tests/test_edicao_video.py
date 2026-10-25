@@ -1,4 +1,4 @@
-"""edicao_video e videos.com_foto_e_miniatura: a foto do produto no começo e a miniatura no topo, só nos vídeos do Rafael (P37), com o ffmpeg de mentira."""
+"""edicao_video e videos.com_foto_e_miniatura: a foto do produto no começo, a miniatura no canto e a seta vermelha, com o ffmpeg de mentira."""
 import os
 import subprocess
 from types import SimpleNamespace
@@ -37,18 +37,46 @@ def test_vale_em_todas_as_fontes_so_depois_de_ligar():
     assert all(edicao_video.vale_para(fonte) for fonte in fontes) and not edicao_video.vale_para("outra")
 
 
-def test_edita_com_a_foto_no_comeco_e_a_miniatura_no_topo(monkeypatch, tmp_path):
+def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, tmp_path):
+    # Vídeo do Rafael (25/10): a miniatura com 25% da largura no canto de cima à direita
+    # (posição X 60 e Y -80 no LumaFusion) e a seta vermelha embaixo à esquerda, até o fim.
     comandos = _programas(monkeypatch)
-    destino = str(tmp_path / "rascunho.mp4")
+    pasta = tmp_path / "rascunhos"
+    pasta.mkdir()
+    destino = str(pasta / "rascunho.mp4")
     assert edicao_video.editar("video.mp4", b"foto", destino) == ""
-    assert open(destino, "rb").read() == b"editado"
+    with open(destino, "rb") as arquivo:
+        assert arquivo.read() == b"editado"
     ffmpeg = comandos[-1]
     filtro = ffmpeg[ffmpeg.index("-filter_complex") + 1]
-    assert "concat=n=2:v=1:a=0" in filtro and "overlay=(W-w)/2:" in filtro and "720:1280" in filtro
-    assert f"-t {edicao_video.SEGUNDOS_DA_FOTO}" in " ".join(ffmpeg) and "scale=220:-2" in filtro
-    assert "overlay=(W-w)/2:60" in filtro
+    assert "concat=n=2:v=1:a=0" in filtro and "720:1280" in filtro
+    assert f"-t {edicao_video.SEGUNDOS_DA_FOTO}" in " ".join(ffmpeg) and "scale=180:-2" in filtro
+    assert "overlay=x=576-w/2:y=128-h/2:shortest=1" in filtro
+    assert "[comfoto][3:v]overlay=x=143-w/2:y=842-h/2:shortest=1[editado]" in filtro
+    entradas = [ffmpeg[i + 1] for i, parte in enumerate(ffmpeg) if parte == "-i"]
+    assert entradas[3].endswith("seta.png")
     # Com som: o áudio do vídeo começa depois da foto, que vai em silêncio.
-    assert "[3:a][som]concat=n=2:v=0:a=1[a]" in filtro and "[a]" in ffmpeg
+    assert "[4:a][som]concat=n=2:v=0:a=1[a]" in filtro and "[a]" in ffmpeg
+    # A seta é desenhada a cada edição e não fica no servidor.
+    assert os.listdir(pasta) == ["rascunho.mp4"]
+
+
+def test_seta_vermelha_com_fundo_transparente(tmp_path):
+    from PIL import Image
+    caminho = str(tmp_path / "seta.png")
+    edicao_video.desenhar_seta(caminho)
+    with Image.open(caminho) as arquivo:
+        seta = arquivo.copy()
+    assert seta.mode == "RGBA" and seta.size == edicao_video.TAMANHO_DA_SETA
+    pixels = [seta.getpixel((x, y)) for x in range(seta.width) for y in range(seta.height)]
+    vermelhos = [p for p in pixels if p[3] > 200 and p[0] > 200 and p[1] < 40 and p[2] < 40]
+    transparentes = [p for p in pixels if p[3] == 0]
+    assert len(vermelhos) > len(pixels) * 0.1 and len(transparentes) > len(pixels) * 0.4
+    # O canto de baixo à direita tem a ponta; o de baixo à esquerda fica vazio.
+    largura, altura = seta.size
+    assert any(seta.getpixel((x, y))[3] > 200 for x in range(largura * 2 // 3, largura)
+               for y in range(altura // 2, altura))
+    assert all(seta.getpixel((x, y))[3] == 0 for x in range(largura // 4) for y in range(altura * 3 // 4, altura))
 
 
 def test_video_sem_som_sai_sem_som(monkeypatch, tmp_path):
