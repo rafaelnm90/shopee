@@ -243,6 +243,47 @@ def test_robo_agora_mostra_as_falhas_recentes_e_o_aprovado_que_passou_da_hora():
     assert "Postagem: pausada" in checkup.robo_agora(AGORA)[-1]
 
 
+def test_sobreposicoes_mostram_tarefa_no_horario_de_outra():
+    # Pergunta do Rafael (25/10): uma tarefa em cima da outra pode atrapalhar; o checkup mostra
+    # quando o robô fez outra coisa na hora do descurtir, interação fora do Horário das
+    # Interações, preparo dentro dele antes do feed, rotinas coladas e os envios do assistente.
+    import robo_shopee_video as robo
+    import registro_processos
+    assert checkup.HORA_DO_DESCURTIR_SV == robo.HORA_DO_DESCURTIR
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False, "robo_interacoes_inicio": 9,
+                                         "robo_interacoes_fim": 11})
+    dia = AGORA.strftime("%Y-%m-%d")
+
+    def em(hora):
+        return datetime.strptime(f"{dia} {hora}", "%Y-%m-%d %H:%M").replace(tzinfo=fuso_horario)
+
+    robo.registrar_tentativa("descurtir", "descurtido", agora=em("04:10"))
+    robo.registrar_tentativa("feed", "comentado", agora=em("04:20"))                # na hora do descurtir
+    robo.registrar_tentativa("feed", "comentado", agora=em("15:00"))                # fora da janela
+    robo.registrar_tentativa("rascunho", "salvo", agora=em("09:30"))                # antes dos 3 do feed
+    robo.registrar_tentativa("rascunho", "salvo", agora=em("13:00"))                # fora da janela: certo
+    registro_processos.registrar("shopee_video", "descurtir tudo (4h)", "descurtido", agora=em("04:12"))
+    registro_processos.registrar("shopee_video", "curtir o produto", "curtido agora", agora=em("04:05"))
+    registro_processos.registrar("shopee_video", "rodada fora do bot", "unidade própria", agora=em("04:00"))
+    registro_processos.registrar("shopee_video", "assistente: envio", "postagem mandada no seu privado",
+                                 agora=em("15:20"))
+    db.salvar_config("config_rotina", {"historico_diario": {"data": dia, "contagem": {
+        "link_grupo_viral": ["10:00", "18:00"], "promo_principal": ["10:00"]}}})
+    r = checkup.sobreposicoes(AGORA)
+    assert r["janela"] == (9, 11)
+    assert [hora for hora, _o in r["no_descurtir"]] == ["04:05", "04:20"]
+    assert [hora for hora, _o in r["fora_da_janela"]] == ["04:20", "15:00"]
+    assert [hora for hora, _o in r["preparo_na_janela"]] == ["09:30"]
+    assert r["rotinas_coladas"] == {"Viral": [("10:00", "link_grupo_viral", "10:00", "promo_principal")]}
+    assert r["assistente"] == [("15:20", "postagem mandada no seu privado")]
+    pontos = checkup.pontos_de_atencao([], {}, {}, {"ativo": False, "ruins": [], "salvos": 0, "vencidos": 0},
+                                       {}, None, AGORA, sobre=r)
+    assert "Sobreposição: 2 atividade(s) do robô da Shopee Vídeo na hora do descurtir (4h)" in pontos
+    assert "Sobreposição: 2 interação(ões) do robô fora do Horário das Interações" in pontos
+    assert ("Sobreposição: 1 passo(s) de preparo ou postagem no Horário das Interações antes dos comentários "
+            "do feed") in pontos
+
+
 def test_pontos_de_atencao():
     erros = [{"origem": "bot_mestre.py", "lugar": "bot_mestre.py:10", "texto": "x", "tipo": "ValueError",
               "qtd": 1, "ultimo": "10:00", "novo": True},

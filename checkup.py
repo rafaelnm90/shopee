@@ -20,8 +20,8 @@ assunto repetido em seguida e o que saiu contra o configurado), postagens de
 hoje por fila, captura por grupo de origem (Espião, Espelhador e parceiros, pela
 posição na lista do painel), produto repetido entre parceiros ou com a conta
 principal, a verificação semanal do Grupo Público (só os números), robô da Shopee
-Vídeo (com as respostas aos comentários e o feed), Baixador e backup, e a meta de cada
-job (esperado × feito). No fim, os pontos de atenção, cada um marcado como novo,
+Vídeo (com as respostas aos comentários e o feed), as sobreposições (uma tarefa no
+horário de outra), Baixador e backup, e a meta de cada job (esperado × feito). No fim, os pontos de atenção, cada um marcado como novo,
 repetido há N dias ou que voltou, e os que se resolveram desde o checkup anterior.
 
 Com `robo-agora`, só as linhas do robô da Shopee Vídeo que o diagnostico.yml mostra de
@@ -82,6 +82,9 @@ RESULTADOS_RUINS = ("erro", "parou", "verificação", "treino parou")
 ATRASO_DO_APROVADO = timedelta(minutes=30)
 # As janelas que a retomada do Claude lê no diagnóstico (a cada 3 h; às 8h, a noite toda).
 JANELAS_DA_RETOMADA = (3, 12)
+# A hora em que o robô da Shopee Vídeo só descurte (P25); o tests/test_checkup.py confere
+# que é a mesma do robo_shopee_video.
+HORA_DO_DESCURTIR_SV = 4
 
 
 def mascarar(texto):
@@ -787,6 +790,123 @@ def robo_agora(agora=None):
     return linhas
 
 
+# --- Sobreposições ---
+
+# O que o robô da Shopee Vídeo faz no celular, pelo nome no registro e pela ação da
+# tentativa: o que fica de fora é do bot (rodada, assistente, avisos), não do celular.
+PROCESSOS_DO_DESCURTIR = ("descurtir tudo (4h)",)
+PROCESSOS_DE_INTERACAO = ("feed:", "notificações (respostas)", "responder comentário")
+PROCESSOS_DE_PREPARO = ("curtir o produto", "anexar o produto", "conferência da IA", "conferir a tela final",
+                        "título da IA", "produto de loja de férias", "descurtir no fim do rascunho",
+                        "preparo interrompido")
+ACOES_DE_INTERACAO, ACOES_DE_PREPARO = ("feed", "responder"), ("rascunho", "postar", "apagar")
+
+
+def _tipo_da_atividade(processo=None, acao=None):
+    """'descurtir', 'interação', 'preparo' (preparar, postar, apagar) ou None (outra coisa)."""
+    if acao:
+        return ("descurtir" if acao == "descurtir" else "interação" if acao in ACOES_DE_INTERACAO
+                else "preparo" if acao in ACOES_DE_PREPARO else None)
+    if processo.startswith(PROCESSOS_DO_DESCURTIR):
+        return "descurtir"
+    if processo.startswith(PROCESSOS_DE_INTERACAO):
+        return "interação"
+    if processo.startswith(PROCESSOS_DE_PREPARO):
+        return "preparo"
+    return None
+
+
+def atividades_do_celular(agora=None):
+    """
+    O que o robô da Shopee Vídeo fez no celular nas últimas 24 h, em ordem: [(momento,
+    tipo, o quê)], pelas tentativas (ação e resultado) e pelo registro dos processos (cada
+    passo). Só ações, resultados e nomes fixos do código.
+    """
+    agora = _agora(agora)
+    desde = _momento(agora - timedelta(hours=24))
+    atividades = []
+    try:
+        with db.conexao() as conexao:
+            tentativas = conexao.execute("SELECT momento, acao, resultado FROM shopee_video_tentativas "
+                                         "WHERE momento >= ?", (desde,)).fetchall()
+    except sqlite3.OperationalError:
+        tentativas = []
+    for momento, acao, resultado in tentativas:
+        tipo = _tipo_da_atividade(acao=acao)
+        if tipo:
+            atividades.append((momento, tipo, f"{acao} → {resultado}"))
+    for momento, processo, resultado, _d, _o in registro_processos.sequencia("shopee_video", "", desde):
+        tipo = _tipo_da_atividade(processo=processo)
+        if tipo:
+            atividades.append((momento, tipo, f"{processo} → {resultado}"))
+    return sorted(atividades)
+
+
+def sobreposicoes(agora=None):
+    """
+    Uma tarefa em cima da outra nas últimas 24 h, para o Claude conferir (pergunta do
+    Rafael, 25/10: "a sobreposição pode atrapalhar"). O celular tem uma trava (uma tarefa
+    de cada vez); aqui entra o que cai no horário de outra:
+    - na hora do descurtir (4h), qualquer outra atividade do robô;
+    - com o Horário das Interações escolhido, interação fora dele e preparo ou postagem
+      dentro dele antes de acabarem os comentários do feed do dia (P26);
+    - rotinas de texto do mesmo canal a menos de INTERVALO_CURTO_ROTINA min uma da outra;
+    - os envios do modo assistente (só com o robô pausado: um cobre o outro).
+    Só horas, ações e nomes fixos do código.
+    """
+    agora = _agora(agora)
+    config = db.ler_config(CHAVE_CONFIG_SV, {}) or {}
+    atividades = atividades_do_celular(agora)
+    no_descurtir = [(m[11:16], o_que) for m, tipo, o_que in atividades
+                    if int(m[11:13]) == HORA_DO_DESCURTIR_SV and tipo != "descurtir"]
+    janela = None
+    if config.get("robo_interacoes_inicio") is not None and config.get("robo_interacoes_fim") is not None:
+        janela = (int(config["robo_interacoes_inicio"]), int(config["robo_interacoes_fim"]))
+    fora_da_janela, preparo_na_janela = [], []
+    if janela:
+        feitos = defaultdict(int)
+        for momento, tipo, o_que in atividades:
+            dentro = janela[0] <= int(momento[11:13]) < janela[1]
+            if o_que.startswith("feed: comentar → comentado"):
+                feitos[momento[:10]] += 1
+            if tipo == "interação" and not dentro:
+                fora_da_janela.append((momento[11:16], o_que))
+            elif (tipo == "preparo" and dentro and int(momento[11:13]) != HORA_DO_DESCURTIR_SV
+                  and feitos[momento[:10]] < COMENTARIOS_NO_FEED_POR_DIA):
+                preparo_na_janela.append((momento[11:16], o_que))
+    coladas = {}
+    for canal, horarios in rotinas_coladas(agora).items():
+        if horarios:
+            coladas[canal] = horarios
+    assistente = [(momento[11:16], resultado) for momento, _p, resultado, _d, _o in registro_processos.sequencia(
+        "shopee_video", "assistente: envio", _momento(agora - timedelta(hours=24)))]
+    return {"janela": janela, "no_descurtir": no_descurtir, "fora_da_janela": fora_da_janela,
+            "preparo_na_janela": preparo_na_janela, "rotinas_coladas": coladas, "assistente": assistente,
+            "robo_ativo": not config.get("robo_pausado", True)}
+
+
+def rotinas_coladas(agora=None):
+    """
+    As rotinas de texto de hoje que saíram a menos de INTERVALO_CURTO_ROTINA min da
+    anterior no mesmo canal: {canal: [(HH:MM, tipo, HH:MM, tipo)]}, pelo histórico do bot.
+    """
+    agora = _agora(agora)
+    config = db.ler_config("config_rotina", {}) or {}
+    historico = config.get("historico_diario") or {}
+    contagem = historico.get("contagem", {}) if historico.get("data") == agora.strftime("%Y-%m-%d") else {}
+    saidas = {canal: [] for canal in rotinas.CANAIS}
+    for tipo, horarios in contagem.items():
+        if rotinas.conhecida(tipo):
+            for hora in horarios if isinstance(horarios, list) else []:
+                saidas[rotinas.canal_da_rotina(tipo)].append((_minutos(hora), str(hora)[:5], tipo))
+    resultado = {}
+    for canal, lista in saidas.items():
+        lista.sort()
+        resultado[canal] = [(a[1], a[2], b[1], b[2]) for a, b in zip(lista, lista[1:])
+                            if b[0] - a[0] < INTERVALO_CURTO_ROTINA]
+    return resultado
+
+
 # --- Respostas aos comentários e feed da Shopee Vídeo ---
 
 # O mesmo de interacoes_shopee_video (o tests/test_checkup.py confere): 3 por dia (P10).
@@ -837,7 +957,7 @@ def baixador(linhas):
 
 def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None, processos=None,
                       rotinas_hoje=None, divulgacao=None, captura=None, repetidos=None, publico=None,
-                      interacoes=None, metas=None):
+                      interacoes=None, metas=None, sobre=None):
     """As frases fixas, com números, do que o Claude precisa investigar."""
     agora = _agora(agora)
     pontos = []
@@ -897,6 +1017,16 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
             if interacoes["feed_hoje"] < COMENTARIOS_NO_FEED_POR_DIA:
                 pontos.append(f"Feed da Shopee Vídeo: {interacoes['feed_hoje']} de {COMENTARIOS_NO_FEED_POR_DIA} "
                               "comentários hoje")
+    if sobre:
+        if sobre["no_descurtir"]:
+            pontos.append(f"Sobreposição: {len(sobre['no_descurtir'])} atividade(s) do robô da Shopee Vídeo na hora "
+                          f"do descurtir ({HORA_DO_DESCURTIR_SV}h)")
+        if sobre["fora_da_janela"]:
+            pontos.append(f"Sobreposição: {len(sobre['fora_da_janela'])} interação(ões) do robô fora do Horário "
+                          "das Interações")
+        if sobre["preparo_na_janela"]:
+            pontos.append(f"Sobreposição: {len(sobre['preparo_na_janela'])} passo(s) de preparo ou postagem no "
+                          "Horário das Interações antes dos comentários do feed")
     for robo, processo, esperado, feito, minimo in metas or []:
         if feito < minimo:
             pontos.append(f"{robo}: {processo}: rodou {feito} vez(es) em 24 h, o esperado é {esperado}")
@@ -1081,6 +1211,26 @@ def main():
           f"uma vez (3 dias): {interacoes['feed_repetidos']} | curtir (24 h): {curtidas or 'nenhum'} | "
           f"lives puladas (24 h): {interacoes['lives']}")
 
+    print("\n== Sobreposições (uma tarefa no horário de outra, 24 h)")
+    sobre = sobreposicoes(agora)
+    for titulo, lista in ((f"Robô na hora do descurtir ({HORA_DO_DESCURTIR_SV}h), fora o descurtir",
+                           sobre["no_descurtir"]),
+                          ("Interação fora do Horário das Interações", sobre["fora_da_janela"]),
+                          ("Preparo ou postagem no Horário das Interações antes dos comentários do feed",
+                           sobre["preparo_na_janela"])):
+        print(f"{titulo}: {len(lista)}")
+        for hora, o_que in lista[:10]:
+            print(f"   {hora} {o_que}")
+    if not sobre["janela"]:
+        print("   (Horário das Interações não escolhido: interações e preparo dividem o Horário do Robô)")
+    print("Rotinas de texto coladas (menos de "
+          f"{INTERVALO_CURTO_ROTINA} min no mesmo canal): {sum(len(v) for v in sobre['rotinas_coladas'].values())}")
+    for canal, pares in sobre["rotinas_coladas"].items():
+        for hora_a, tipo_a, hora_b, tipo_b in pares:
+            print(f"   {canal}: {hora_a} {tipo_a} → {hora_b} {tipo_b}")
+    envios = ", ".join(f"{hora} {resultado}" for hora, resultado in sobre["assistente"])
+    print(f"Modo assistente (24 h, só manda com o robô pausado): {envios or 'nenhum envio'}")
+
     print("\n== Baixador e backup")
     baixados = baixador(linhas_baixador)
     print(" | ".join(f"{evento}: {qtd}" for evento, qtd in sorted(baixados.items())) or "nenhum evento")
@@ -1089,7 +1239,7 @@ def main():
 
     pontos = sem_journal + pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora, processos,
                                              rotinas_hoje, divulgacao, captura, repetidos, publico, interacoes,
-                                             metas_do_dia(processos))
+                                             metas_do_dia(processos), sobre)
     marcas, resolvidos = lembrar_pontos(pontos, agora)
     print(f"\n== Pontos de atenção ({len(pontos)})")
     for ponto in pontos:
