@@ -300,6 +300,11 @@ def test_sobreposicoes_mostram_tarefa_no_horario_de_outra():
     assert "Sobreposição: 2 interação(ões) do robô fora do Horário das Interações" in pontos
     assert ("Sobreposição: 1 passo(s) de preparo ou postagem no Horário das Interações antes dos comentários "
             "do feed") in pontos
+    # A janela escolhida às 10:00 não cobra o que o robô fez antes dela.
+    db.atualizar_config(robo.CHAVE_CONFIG, lambda c: c.update(robo_interacoes_desde=f"{dia} 10:00:00"))
+    r = checkup.sobreposicoes(AGORA)
+    assert [hora for hora, _o in r["fora_da_janela"]] == ["15:00"] and r["preparo_na_janela"] == []
+    assert r["janela_desde"] == f"{dia} 10:00:00"
 
 
 def test_pontos_de_atencao():

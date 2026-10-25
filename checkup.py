@@ -890,6 +890,9 @@ def sobreposicoes(agora=None):
     janela = None
     if config.get("robo_interacoes_inicio") is not None and config.get("robo_interacoes_fim") is not None:
         janela = (int(config["robo_interacoes_inicio"]), int(config["robo_interacoes_fim"]))
+    # A janela só vale do momento em que o Rafael a escolheu: o que veio antes seguia a regra
+    # de então e não conta como sobreposição.
+    janela_desde = config.get("robo_interacoes_desde") or ""
     fora_da_janela, preparo_na_janela = [], []
     if janela:
         feitos = defaultdict(int)
@@ -897,6 +900,8 @@ def sobreposicoes(agora=None):
             dentro = janela[0] <= int(momento[11:13]) < janela[1]
             if o_que.startswith("feed: comentar → comentado"):
                 feitos[momento[:10]] += 1
+            if momento < janela_desde:
+                continue
             if tipo == "interação" and not dentro:
                 fora_da_janela.append((momento[11:16], o_que))
             elif (tipo == "preparo" and dentro and int(momento[11:13]) != HORA_DO_DESCURTIR_SV
@@ -908,7 +913,8 @@ def sobreposicoes(agora=None):
             coladas[canal] = horarios
     assistente = [(momento[11:16], resultado) for momento, _p, resultado, _d, _o in registro_processos.sequencia(
         "shopee_video", "assistente: envio", _momento(agora - timedelta(hours=24)))]
-    return {"janela": janela, "no_descurtir": no_descurtir, "fora_da_janela": fora_da_janela,
+    return {"janela": janela, "janela_desde": janela_desde, "no_descurtir": no_descurtir,
+            "fora_da_janela": fora_da_janela,
             "preparo_na_janela": preparo_na_janela, "rotinas_coladas": coladas, "assistente": assistente,
             "robo_ativo": not config.get("robo_pausado", True)}
 
@@ -1257,6 +1263,12 @@ def main():
             print(f"   {hora} {o_que}")
     if not sobre["janela"]:
         print("   (Horário das Interações não escolhido: interações e preparo dividem o Horário do Robô)")
+    elif sobre["janela_desde"]:
+        print(f"   (Horário das Interações {sobre['janela'][0]}h-{sobre['janela'][1]}h, conferido desde "
+              f"{sobre['janela_desde'][8:10]}/{sobre['janela_desde'][5:7]} {sobre['janela_desde'][11:16]})")
+    else:
+        print(f"   (Horário das Interações {sobre['janela'][0]}h-{sobre['janela'][1]}h, sem a hora em que foi "
+              "escolhido: conferido nas 24 h)")
     print("Rotinas de texto coladas (menos de "
           f"{INTERVALO_CURTO_ROTINA} min no mesmo canal): {sum(len(v) for v in sobre['rotinas_coladas'].values())}")
     for canal, pares in sobre["rotinas_coladas"].items():
