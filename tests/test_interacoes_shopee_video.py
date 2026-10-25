@@ -577,6 +577,25 @@ def test_feed_comenta_no_video_sem_nenhum_comentario(avisos, ia_do_feed):
     assert app.comentarios == {0: ["Que achado! 0"]}
 
 
+class CelularDoFeedQueAbreEscrevendo(CelularDoFeed):
+    """O vídeo sem nenhum comentário: o painel já abre com o campo de escrever em foco e o teclado (Motorola, 25/10/2026, 12:15)."""
+
+    def click(self, x, y):
+        antes = self.atual
+        super().click(x, y)
+        if antes == "player" and self.atual == "painel":
+            self.atual, self.em_foco = "escrevendo", True
+
+
+def test_feed_escreve_direto_quando_o_painel_ja_abre_escrevendo(avisos, ia_do_feed):
+    # Em 25/10 às 12:15, o painel do vídeo sem comentários abriu já com "Adicionar um comentário..."
+    # em foco e o teclado: não havia o "add a comment" fechado, e o robô parava.
+    app = CelularDoFeedQueAbreEscrevendo(videos=[("Loja da Bia", "Mini saia linda")])
+    assert robo.interagir_no_feed(app, momento("2026-10-24 10:00")) == "feed: 1 vídeo curtido e comentado"
+    assert app.comentarios == {0: ["Que achado! 0"]}
+    assert "input add a comment" not in app.toques
+
+
 def test_feed_que_para_guarda_o_caso_com_a_tela_da_hora(monkeypatch, avisos, ia_do_feed):
     # O caso tem de mostrar a tela em que parou (o painel), e não a de depois de sair dela.
     class PainelQueNaoAbre(CelularDoFeed):

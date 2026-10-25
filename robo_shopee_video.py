@@ -2880,13 +2880,13 @@ def _curtir_no_feed(d, video):
 def painel_de_comentarios(d, segundos=12):
     """
     A tela com o painel de comentários aberto, relendo por até `segundos`, ou None. Vale o
-    título ("Comentários", "Comentário") ou o campo de comentar: no vídeo sem nenhum
-    comentário, o painel abre sem o título de sempre (Motorola, 25/10/2026).
+    título ("N Comentários", "0 Comentário"), o campo de comentar ou o de escrever: no vídeo
+    sem nenhum comentário, o painel abre com "0 Comentário" e já escrevendo (Motorola, 25/10/2026).
     """
     voltas = max(1, segundos // 3)
     for volta in range(voltas + 1):
         xml = tela(d)
-        if interacoes.campo_de_comentar(xml) or tem(xml, "Comentário"):
+        if interacoes.campo_de_comentar(xml) or interacoes.campo_de_escrever(xml) or tem(xml, "Comentário"):
             return xml
         if volta < voltas:
             pausa(3)
@@ -2906,13 +2906,16 @@ def _comentar_no_feed(d, video, texto):
     xml = painel_de_comentarios(d)
     if not xml:
         raise Parada("o painel de comentários do vídeo do feed não abriu")
-    campo = interacoes.campo_de_comentar(xml)
-    if not campo:
-        raise Parada("não achei o campo de comentar no vídeo do feed")
-    d.click(*campo)
-    pausa(2)
-    if not interacoes.campo_de_escrever(tela(d)):
-        raise Parada("o campo de comentar não abriu")
+    # No vídeo sem nenhum comentário, o painel já abre com o campo de escrever em foco e o
+    # teclado ("Adicionar um comentário...", Motorola, 25/10/2026): escreve direto.
+    if not interacoes.campo_de_escrever(xml):
+        campo = interacoes.campo_de_comentar(xml)
+        if not campo:
+            raise Parada("não achei o campo de comentar no vídeo do feed")
+        d.click(*campo)
+        pausa(2)
+        if not interacoes.campo_de_escrever(tela(d)):
+            raise Parada("o campo de comentar não abriu")
     _escrever_e_enviar(d, texto)
     for vez in range(2):
         if any(interacoes.parecidos(c["texto"], texto) for c in interacoes.comentarios_do_painel(tela(d))):
