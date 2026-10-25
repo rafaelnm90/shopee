@@ -99,3 +99,56 @@ def test_exemplo_sem_video_dos_autorais_diz_o_motivo(monkeypatch):
     monkeypatch.setattr(edicao_video.assistente, "_candidatos", lambda fonte: [])
     nome, motivo = edicao_video.exemplo("exemplo.mp4")
     assert nome is None and "chip novo" in motivo
+
+
+def _fila_do_viral(*itens):
+    db.salvar_config("fila_clonagem", {"fila": [{"id": ident, "chat_origem": origem} for ident, origem in itens]})
+
+
+def test_grupo_autoral_casa_pelo_numero_com_ou_sem_100_e_pelo_arroba(monkeypatch):
+    # Escolha do Rafael (P38): ele marca no Espião os grupos de vídeos autorais.
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    assert edicao_video.alternar_grupos(["-1001234", "@GrupoAutoral", "-1005678:9"]) == (
+        ["-1001234", "@GrupoAutoral", "-1005678:9"], [])
+    assert edicao_video.grupos_autorais() == ["-1001234", "@grupoautoral", "-1005678:9"]
+    monkeypatch.setattr(edicao_video.links_grupos, "arroba", lambda alvo: "@GrupoAutoral" if alvo == "-1004321" else None)
+    assert edicao_video.do_grupo_autoral("-1001234")
+    assert edicao_video.do_grupo_autoral("-1004321")       # pelo @ do grupo
+    assert edicao_video.do_grupo_autoral("-1005678")       # o grupo do tópico marcado
+    assert not edicao_video.do_grupo_autoral("-1009999") and not edicao_video.do_grupo_autoral("")
+    assert edicao_video.do_grupo_autoral("-1001234", marcados=["1234"])
+    # Tocar de novo desmarca.
+    assert edicao_video.alternar_grupos(["-1001234"]) == ([], ["-1001234"])
+    assert not edicao_video.do_grupo_autoral("-1001234")
+
+
+def test_viral_so_de_grupo_marcado_e_com_a_edicao_ligada(monkeypatch):
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    monkeypatch.setattr(edicao_video.links_grupos, "arroba", lambda alvo: None)
+    _fila_do_viral(("clone_1", "-1001234"), ("clone_2", "-1009999"))
+    edicao_video.alternar_grupos(["-1001234"])
+    autoral, outro = {"id": "viral:clone_1"}, {"id": "viral:clone_2"}
+    assert not edicao_video.vale_para("viral", autoral)          # desligada
+    db.salvar_config("shopee_video", {"edicao_ligada": True})
+    assert edicao_video.vale_para("viral", autoral)
+    assert not edicao_video.vale_para("viral", outro) and not edicao_video.vale_para("viral", {"id": "viral:sumiu"})
+    assert not edicao_video.vale_para("publico", {"id": "publico:1"})
+
+
+def test_exemplo_usa_o_viral_de_grupo_autoral_sem_autorais(monkeypatch, tmp_path):
+    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
+    monkeypatch.setattr(edicao_video.links_grupos, "arroba", lambda alvo: None)
+    autoral, outro = str(tmp_path / "autoral.mp4"), str(tmp_path / "outro.mp4")
+    for caminho in (autoral, outro):
+        open(caminho, "wb").close()
+    _fila_do_viral(("clone_1", "-1009999"), ("clone_2", "-1001234"))
+    edicao_video.alternar_grupos(["-1001234"])
+    candidatos = {"autorais": [], "viral": [("viral:clone_1", outro, "https://s.shopee.com.br/a", ""),
+                                            ("viral:clone_2", autoral, "https://s.shopee.com.br/b", "")]}
+    monkeypatch.setattr(edicao_video.assistente, "_candidatos", lambda fonte: candidatos[fonte])
+    monkeypatch.setattr(edicao_video.ps, "foto_do_produto", lambda video: b"foto")
+    monkeypatch.setattr(edicao_video.ps, "nome_do_produto", lambda video: "Garrafa")
+    editados = []
+    monkeypatch.setattr(edicao_video, "editar", lambda video, foto, destino: editados.append(video) or "")
+    assert edicao_video.exemplo("exemplo.mp4") == ("Garrafa", "")
+    assert editados == [autoral]

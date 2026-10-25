@@ -287,7 +287,8 @@ def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
     msg = Msg("Edição dos Vídeos ✂️")
     rodar(sv.edicao_handler(msg, est))
     texto = msg.saidas[-1]
-    assert "Autorais" in texto and "nunca" in texto and "desligada" in texto and "O que cada botão faz" in texto
+    assert "Autorais" in texto and "Grupos Autorais ✂️" in texto and "não é editado" in texto
+    assert "desligada" in texto and "O que cada botão faz" in texto
     assert _textos(sv.teclado_edicao(sv.ler_config())) == [
         "Ver Exemplo da Edição 👀", "Ligar Edição ✅", "Voltar ao Robô 🔙"]
     rodar(sv.ligar_edicao_handler(Msg("Ligar Edição ✅"), est))
