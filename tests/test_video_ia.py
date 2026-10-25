@@ -8,6 +8,24 @@ def test_escolhe_o_veo_mais_novo_e_mais_barato():
     assert video_ia.escolher_modelo(["veo-3.0-generate-001", "veo-3.0-fast-generate-001"]) == "veo-3.0-fast-generate-001"
     assert video_ia.escolher_modelo(["veo-2.0-generate-001"]) == "veo-2.0-generate-001"
     assert video_ia.escolher_modelo([]) is None
+    # Modelo de vídeo com outro nome (a ação de gerar vídeo) entra quando não há Veo.
+    assert video_ia.escolher_modelo(["gemini-omni-flash-video"]) == "gemini-omni-flash-video"
+
+
+class _Modelo:
+    def __init__(self, nome, acoes):
+        self.name, self.supported_actions = f"models/{nome}", acoes
+
+
+def test_modelos_de_video_pelo_nome_ou_pela_acao(monkeypatch, capsys):
+    modelos = [_Modelo("gemini-2.5-flash", ["generateContent", "countTokens"]),
+               _Modelo("veo-3.1-lite-generate-001", ["predictLongRunning"]),
+               _Modelo("omni-video", ["predictLongRunning"]), _Modelo("imagen-4", ["predict"])]
+    monkeypatch.setattr(video_ia.api_gemini.client_genai.models, "list", lambda: modelos)
+    assert video_ia.modelos_de_video() == ["omni-video", "veo-3.1-lite-generate-001"]
+    assert video_ia.main(["modelos"]) == 0
+    saida = capsys.readouterr().out
+    assert "Modelos de vídeo na chave: 2" in saida and "predictLongRunning 2" in saida and "generateContent 1" in saida
 
 
 def test_teste_manda_o_video_so_no_privado_e_o_log_so_tem_numeros(monkeypatch, capsys):
