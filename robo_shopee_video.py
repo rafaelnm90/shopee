@@ -176,11 +176,12 @@ class Parada(Exception):
     """
     A rodada para aqui. do_video=True quando o problema é do vídeo (a IA não confirmou,
     o produto não foi achado): ele não volta. Sem isso, o vídeo pode ir numa próxima vez.
+    caso_guardado=True: quem parou já guardou o caso com a tela da hora (casos_robo).
     """
 
     def __init__(self, motivo, do_video=False):
         super().__init__(motivo)
-        self.motivo, self.do_video = motivo, do_video
+        self.motivo, self.do_video, self.caso_guardado = motivo, do_video, False
 
 
 class Verificacao(Exception):
@@ -2821,6 +2822,22 @@ def _curtir_no_feed(d, video):
     registro_processos.registrar(REGISTRO, "feed: curtir", "curtido", ok=True)
 
 
+def painel_de_comentarios(d, segundos=12):
+    """
+    A tela com o painel de comentários aberto, relendo por até `segundos`, ou None. Vale o
+    título ("Comentários", "Comentário") ou o campo de comentar: no vídeo sem nenhum
+    comentário, o painel abre sem o título de sempre (Motorola, 25/10/2026).
+    """
+    voltas = max(1, segundos // 3)
+    for volta in range(voltas + 1):
+        xml = tela(d)
+        if interacoes.campo_de_comentar(xml) or tem(xml, "Comentário"):
+            return xml
+        if volta < voltas:
+            pausa(3)
+    return None
+
+
 def _comentar_no_feed(d, video, texto):
     """
     Abre os comentários pelo balão, escreve e envia. Devolve se o comentário apareceu na
@@ -2831,7 +2848,7 @@ def _comentar_no_feed(d, video, texto):
         raise Parada(ps.RECUSA)
     d.click(*video["balao"])
     pausa(3)
-    xml = esperar_na_tela(d, "Comentários", 12)
+    xml = painel_de_comentarios(d)
     if not xml:
         raise Parada("o painel de comentários do vídeo do feed não abriu")
     campo = interacoes.campo_de_comentar(xml)
@@ -2888,6 +2905,11 @@ def interagir_no_feed(d, agora=None):
             pausa(4)
         registro_processos.registrar(REGISTRO, "feed: comentar", "nenhum vídeo para comentar", ok=None)
         return "feed: nenhum vídeo para comentar"
+    except Parada as e:
+        # O caso guarda a tela de agora (o painel que não abriu, por exemplo), antes de sair.
+        _guardar_caso(d, "feed", "parou", e.motivo, agora=agora)
+        e.caso_guardado = True
+        raise
     finally:
         _sair_sem_salvar(d)
 
@@ -3087,7 +3109,7 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
         av.abrir_tela(celular=True, verificacao=True)
         return f"{acao}: verificação na tela; parado"
     except Parada as e:
-        if acao != "rascunho":
+        if acao != "rascunho" and not e.caso_guardado:
             _guardar_caso(d, acao, "parou", e.motivo, ident=ident, agora=agora)
         if acao in ("postar", "apagar"):
             # Não insiste: o Rafael decide de novo pelo botão.
