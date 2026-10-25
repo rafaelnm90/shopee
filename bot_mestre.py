@@ -2061,6 +2061,8 @@ async def disparar_mensagem(tipo, forcar=False):
         if not forcar:
             if not is_viral and not is_publico and dados_rotina.get("ultimo_bom_dia") != hoje_str:
                 logger.warning(f"🛑 Disparo abortado ({tipo}): Expediente principal fechado.")
+                registro_processos.registrar("bot_mestre", processo_rotina, "fora do expediente (antes do Bom Dia)",
+                                             tipo, ok=False)
                 return
                 
             if not is_viral and not is_publico:
@@ -2074,9 +2076,12 @@ async def disparar_mensagem(tipo, forcar=False):
                         novo_horario = momento_bd + timedelta(minutes=random.randint(12, 25))
                         job_id = f"job_rotina_{tipo}_reagendado_{int(agora_tz.timestamp())}"
                         scheduler.add_job(disparar_mensagem, 'date', run_date=novo_horario, args=[tipo], id=job_id, replace_existing=True)
+                        registro_processos.registrar("bot_mestre", processo_rotina, "adiada (logo depois do Bom Dia)", tipo)
                         return
                         
             if not is_viral and not is_publico and dados_rotina.get("ultimo_boa_noite") == hoje_str:
+                registro_processos.registrar("bot_mestre", processo_rotina, "fora do expediente (depois do Boa Noite)",
+                                             tipo, ok=False)
                 return
 
     hora_exata_disparo = agora_tz.strftime("%H:%M")
@@ -2319,12 +2324,45 @@ NOMES_AMIGAVEIS_ROTINA = {
     "promo_achadinhos": "Achadinhos VIP",
 }
 
-def agendar_tarefas_diarias(escopo="todos"):
+# Os horários das rotinas de hoje ficam no banco: ao ligar o bot (um deploy, um
+# reinício), a grade volta com os mesmos horários em vez de sortear de novo. Sorteando a
+# cada reinício, a rotina ia para o meio da lacuna que sobrava e, num dia de vários
+# deploys, era empurrada até depois do Boa Noite e não saía (24/10: promo_publico 0 de 1).
+CHAVE_HORARIOS_ROTINAS = "rotinas_horarios_do_dia"
+
+
+def horario_da_rotina(job_id, horario, manter):
+    """
+    O horário do job de rotina. manter=True (ao ligar o bot): o já marcado hoje, se ainda
+    está por vir; o que passou com o bot fora do ar sai daqui a poucos minutos. Sem marca,
+    ou com manter=False (madrugada e painel, que sorteiam de novo), o novo, que fica guardado.
+    """
+    agora = datetime.now(fuso_horario)
+    hoje = agora.strftime("%Y-%m-%d")
+
+    def alterar(grade):
+        if grade.get("data") != hoje:
+            grade.clear()
+            grade.update({"data": hoje, "horarios": {}})
+        quando, marcado = horario, grade["horarios"].get(job_id) if manter else None
+        if marcado:
+            quando = datetime.strptime(marcado, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+            if quando <= agora:
+                quando = agora + timedelta(minutes=random.randint(2, 5))
+        quando = quando.replace(microsecond=0)
+        grade["horarios"][job_id] = quando.strftime("%Y-%m-%d %H:%M:%S")
+        return quando
+
+    return db.atualizar_config(CHAVE_HORARIOS_ROTINAS, alterar, {}) or horario
+
+
+def agendar_tarefas_diarias(escopo="todos", manter_horarios=False):
     """
     Sorteia os horários de rotina do dia e refaz os jobs do escopo pedido ("todos",
     "principal", "viral" ou "publico"). Com "todos" (madrugada e ligar o bot), também
     faz a faxina da fila do canal principal e reagenda os vídeos dele. Rotina que já
-    saiu hoje não é agendada de novo.
+    saiu hoje não é agendada de novo. manter_horarios=True (ao ligar o bot): os horários
+    já marcados hoje continuam (horario_da_rotina).
     """
     logger.info(f"🔄 Sorteando horários de rotina (Escopo: {escopo.upper()})...")
     
@@ -2476,7 +2514,9 @@ def agendar_tarefas_diarias(escopo="todos"):
             duracao_min_gap = 60 if tipo == ultimo_tipo_agendado else 20
             horario_ideal = encontrar_maior_lacuna_e_inserir(duracao_minima=duracao_min_gap)
             if horario_ideal:
-                scheduler.add_job(disparar_mensagem, 'date', run_date=horario_ideal, args=[tipo], id=f"job_rotina_{tipo}_{indice}", replace_existing=True)
+                job_id = f"job_rotina_{tipo}_{indice}"
+                scheduler.add_job(disparar_mensagem, 'date', run_date=horario_da_rotina(job_id, horario_ideal, manter_horarios),
+                                  args=[tipo], id=job_id, replace_existing=True)
                 ultimo_tipo_agendado = tipo
             else:
                 minutos_offset = random.randint(30, 90) if tipo == ultimo_tipo_agendado else random.randint(15, 60)
@@ -2485,7 +2525,9 @@ def agendar_tarefas_diarias(escopo="todos"):
                 if horario_fallback >= fronteira_final:
                     horario_fallback = fronteira_final - timedelta(minutes=random.randint(5, 30))
                     if horario_fallback <= agora: horario_fallback = agora + timedelta(minutes=2)
-                scheduler.add_job(disparar_mensagem, 'date', run_date=horario_fallback, args=[tipo], id=f"job_rotina_{tipo}_{indice}", replace_existing=True)
+                job_id = f"job_rotina_{tipo}_{indice}"
+                scheduler.add_job(disparar_mensagem, 'date', run_date=horario_da_rotina(job_id, horario_fallback, manter_horarios),
+                                  args=[tipo], id=job_id, replace_existing=True)
                 ultimo_tipo_agendado = tipo
 
         # 5. Datas duplas (dia == mês, ex. 9.9) dos próximos 4 dias: um aviso por turno
@@ -2598,7 +2640,9 @@ def agendar_tarefas_diarias(escopo="todos"):
                         break
             if conflito_geral: horario_candidato += timedelta(minutes=random.randint(3, 8))
                 
-            scheduler.add_job(disparar_mensagem, 'date', run_date=horario_candidato, args=[tipo], id=f"job_rotina_{tipo}_{indice}", replace_existing=True)
+            job_id = f"job_rotina_{tipo}_{indice}"
+            scheduler.add_job(disparar_mensagem, 'date', run_date=horario_da_rotina(job_id, horario_candidato, manter_horarios),
+                              args=[tipo], id=job_id, replace_existing=True)
             ultimo_tipo_viral = tipo
 
     if escopo in ["todos", "publico"]:
@@ -2692,7 +2736,9 @@ def agendar_tarefas_diarias(escopo="todos"):
                         horario_candidato += timedelta(minutes=random.randint(3, 8))
                         break
 
-            scheduler.add_job(disparar_mensagem, 'date', run_date=horario_candidato, args=[tipo], id=f"job_rotina_{tipo}_{indice}", replace_existing=True)
+            job_id = f"job_rotina_{tipo}_{indice}"
+            scheduler.add_job(disparar_mensagem, 'date', run_date=horario_da_rotina(job_id, horario_candidato, manter_horarios),
+                              args=[tipo], id=job_id, replace_existing=True)
             ultimo_tipo_publico = tipo
 
         # 8. Datas duplas do Grupo Público: 3 turnos no dia do evento, com o prefixo
@@ -17018,6 +17064,9 @@ def capturar_falha_task(loop, contexto):
 # Às 03:40, depois da lixeira das 03:00. Se o robô sobe com o último backup
 # velho (mais de 24 h), faz um 5 min depois de subir, sem esperar a madrugada.
 IDADE_MAXIMA_BACKUP_H = 30     # o monitor de saúde avisa acima disso
+# Quanto um job de hora em hora (monitor de saúde, botão de ofertas) pode atrasar e
+# ainda rodar, em segundos, quando o laço do bot está ocupado na hora marcada.
+FOLGA_DOS_JOBS_DE_HORA = 600
 
 async def backup_diario():
     """Gera o backup do dia; se falhar, registra o erro e avisa no privado."""
@@ -17377,8 +17426,10 @@ async def main():
                       id='faxina_disco_loop', replace_existing=True)
 
     # Monitor de saúde (avisa o admin no privado)
+    # Com folga para atrasar: sem ela, o job que acha o laço ocupado por mais de 1 s na
+    # hora marcada é pulado (24/10: 19 de 24).
     scheduler.add_job(monitor_saude, 'cron', minute=7, timezone=FUSO_STR, id='monitor_saude_loop',
-                      replace_existing=True)
+                      replace_existing=True, misfire_grace_time=FOLGA_DOS_JOBS_DE_HORA, coalesce=True)
 
     # Perguntas do Claude sem resposta: confere a cada 5 min e lembra de hora em hora,
     # contando do último aviso (um restart não adianta nem atrasa o lembrete).
@@ -17388,7 +17439,7 @@ async def main():
     # Painel de submissão do Grupo Público: renovado com 24 h, antes do limite de 48 h
     # do Telegram para o bot apagar o anterior
     scheduler.add_job(renovar_botao_ofertas_velho, 'cron', minute=37, timezone=FUSO_STR, id='renovar_painel_ofertas',
-                      replace_existing=True)
+                      replace_existing=True, misfire_grace_time=FOLGA_DOS_JOBS_DE_HORA, coalesce=True)
 
     # Backup diário do banco, sessões e .env (e um já, se o último estiver velho)
     scheduler.add_job(backup_diario, 'cron', hour=3, minute=40, timezone=FUSO_STR,
@@ -17445,8 +17496,9 @@ async def main():
     # Fiscal da fila do principal (de minuto em minuto)
     scheduler.add_job(motor_fila_minuto, 'interval', minutes=1, timezone=FUSO_STR)
     
-    # Grade de hoje já na subida
-    agendar_tarefas_diarias()
+    # Grade de hoje já na subida, com os horários que já estavam marcados (um deploy não
+    # empurra as rotinas para mais tarde).
+    agendar_tarefas_diarias(manter_horarios=True)
 
     # Menu que estava aberto quando o robô parou volta ao Painel Inicial no horário certo
     rearmar_inatividade_apos_reinicio()

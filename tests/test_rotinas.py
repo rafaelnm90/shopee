@@ -127,3 +127,52 @@ def test_sem_assunto_seguido_ou_sem_outra_marcada_sai_na_hora(bm, relogio, monke
             bm.scheduler.shutdown(wait=False)
     with pytest.raises(Parou):
         rodar(cenario())
+
+
+def test_ligar_o_bot_mantem_os_horarios_das_rotinas_de_hoje(bm, relogio):
+    # 24/10: com muitos deploys no dia, cada reinício sorteava de novo e empurrava a rotina
+    # para o meio da lacuna que sobrava, até depois do Boa Noite (promo_publico 0 de 1).
+    from datetime import timedelta
+    relogio("10:00")
+    hoje = datetime.now(bm.fuso_horario).strftime("%Y-%m-%d")
+    _config(bm, hoje)
+
+    def horarios():
+        return {job.id: job.next_run_time for job in bm.scheduler.get_jobs() if job.id.startswith("job_rotina_incentivo_")}
+
+    async def cenario():
+        bm.scheduler.start()
+        try:
+            bm.agendar_tarefas_diarias("principal")
+            antes = horarios()
+            # O deploy: o bot liga de novo e refaz a grade.
+            bm.agendar_tarefas_diarias("principal", manter_horarios=True)
+            depois = horarios()
+            # Um horário que passou com o bot fora do ar sai daqui a poucos minutos.
+            grade = bm.db.ler_config(bm.CHAVE_HORARIOS_ROTINAS)
+            primeiro = sorted(grade["horarios"])[0]
+            grade["horarios"][primeiro] = f"{hoje} 09:00:00"
+            bm.db.salvar_config(bm.CHAVE_HORARIOS_ROTINAS, grade)
+            bm.agendar_tarefas_diarias("principal", manter_horarios=True)
+            atrasado = bm.scheduler.get_job(primeiro).next_run_time
+            return antes, depois, atrasado
+        finally:
+            bm.scheduler.shutdown(wait=False)
+
+    antes, depois, atrasado = rodar(cenario())
+    assert len(antes) == 2 and antes == depois
+    agora = datetime.now(bm.fuso_horario)
+    assert agora + timedelta(minutes=2, seconds=-2) <= atrasado <= agora + timedelta(minutes=5, seconds=1)
+
+
+def test_rotina_do_principal_depois_do_boa_noite_fica_no_registro(bm, relogio, monkeypatch):
+    relogio("22:30")
+    hoje = datetime.now(bm.fuso_horario).strftime("%Y-%m-%d")
+    _config(bm, hoje)
+    r = bm.ler_config_rotina()
+    r["ultimo_boa_noite"] = hoje
+    bm.salvar_config_rotina(r)
+    monkeypatch.setattr(bm, "contar_videos_pendentes", lambda chat: 0)
+    rodar(bm.disparar_mensagem("incentivo"))
+    linhas = bm.registro_processos.contagem("2000-01-01 00:00:00")
+    assert any(l[2] == "fora do expediente (depois do Boa Noite)" and l[3] == "incentivo" for l in linhas)
