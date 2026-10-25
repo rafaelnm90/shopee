@@ -127,34 +127,3 @@ def test_alerta_sem_publicacao_ignora_clones_de_amanha(bm, monkeypatch):
     rodar(bm.monitor_saude())
     assert not any("Nenhuma publicação" in a for a in alertas)
 
-
-def test_grupos_autorais_marcados_e_desmarcados_pelo_numero(bm, Msg, Est, monkeypatch):
-    # Escolha do Rafael (P38): no Espião, ele marca os grupos de vídeos autorais; os vídeos
-    # do Viral deles recebem a edição do robô da Shopee Vídeo.
-    d = bm.ler_alvos_espiao()
-    d["alvos"] = ["@grupoa", "-1001234", "-1005678:9"]
-    bm.salvar_alvos_espiao(d)
-    vigiados = []
-
-    async def menu_grupos_vigiados(message, state):
-        vigiados.append(True)
-
-    monkeypatch.setattr(bm, "menu_grupos_vigiados", menu_grupos_vigiados)
-    msg, est = Msg("Grupos Autorais ✂️"), Est()
-    rodar(bm.pedir_grupo_autoral_espiao(msg, est))
-    assert "quem grava libera os vídeos para afiliados" in msg.saidas[-1]
-    assert "1. ▫️" in msg.saidas[-1] and "-1001234" in msg.saidas[-1]
-    assert rodar(est.get_state()) == bm.EspiaoFluxo.aguardando_grupo_autoral.state
-    msg = Msg("2, 3, 9")
-    rodar(bm.marcar_grupo_autoral_espiao(msg, est))
-    assert bm.edicao_video.grupos_autorais() == ["-1001234", "-1005678:9"] and vigiados
-    assert "✂️ marcado: <code>-1001234</code>" in msg.saidas[0]
-    msg = Msg("Grupos Autorais ✂️")
-    rodar(bm.pedir_grupo_autoral_espiao(msg, est))
-    assert "2. ✂️" in msg.saidas[-1] and "1. ▫️" in msg.saidas[-1]
-    msg = Msg("2")
-    rodar(bm.marcar_grupo_autoral_espiao(msg, est))
-    assert bm.edicao_video.grupos_autorais() == ["-1005678:9"] and "▫️ desmarcado" in msg.saidas[0]
-    msg = Msg("abc")
-    rodar(bm.marcar_grupo_autoral_espiao(msg, Est()))
-    assert "Nenhum número válido" in msg.saidas[-1]

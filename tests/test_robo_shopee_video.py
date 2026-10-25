@@ -721,52 +721,38 @@ def test_rascunho_dos_autorais_vai_editado_com_a_edicao_ligada(monkeypatch, avis
                      robo.PROCESSO_DA_EDICAO) == ("editado",)
 
 
-def test_sem_edicao_nos_videos_de_outras_pessoas_desligada_ou_quando_falha(monkeypatch, tmp_path):
+def test_sem_edicao_desligada_no_ver_produtos_ou_quando_falha(monkeypatch, tmp_path):
     original, copia = str(tmp_path / "original.mp4"), str(tmp_path / "copia.mp4")
     with open(original, "wb") as arquivo:
         arquivo.write(b"original")
-    chamadas = []
+    respostas, chamadas = ["o ffmpeg falhou", ""], []
+
+    def editar(video, foto, destino):
+        chamadas.append(video)
+        motivo = respostas.pop(0)
+        if not motivo:
+            with open(destino, "wb") as arquivo:
+                arquivo.write(b"editado")
+        return motivo
+
     monkeypatch.setattr(robo.ps, "foto_do_produto", lambda video: b"foto")
-    monkeypatch.setattr(robo.edicao_video, "editar", lambda video, foto, destino: chamadas.append(video) or "o ffmpeg falhou")
+    monkeypatch.setattr(robo.edicao_video, "editar", editar)
     video = {"arquivo": original, "link": LINK}
-    # Desligada: nem os Autorais são editados.
+    # Desligada: nenhum vídeo é editado.
     robo.copiar_para_o_rascunho(video, "autorais", copia)
     assert open(copia, "rb").read() == b"original" and not chamadas
     ativar(edicao_ligada=True)
-    # Vídeo de outra pessoa (Viral) e vídeo com Ver Produtos: nunca.
-    robo.copiar_para_o_rascunho(video, "viral", copia)
+    # Vídeo com Ver Produtos (vários produtos, sem uma foto só): sem edição.
     robo.copiar_para_o_rascunho(dict(video, de_video=True), "autorais", copia)
     assert not chamadas
     # A edição que não sai não para o rascunho: ele vai com o vídeo como veio.
     os.remove(copia)
-    robo.copiar_para_o_rascunho(video, "autorais", copia)
+    robo.copiar_para_o_rascunho(video, "viral", copia)
     assert chamadas == [original] and open(copia, "rb").read() == b"original"
     assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
                      robo.PROCESSO_DA_EDICAO) == ("sem edição", "o ffmpeg falhou", 0)
-
-
-def test_video_do_viral_de_grupo_autoral_vai_editado(monkeypatch, tmp_path):
-    # Escolha do Rafael (P38): os vídeos do Viral dos grupos que ele marcou como autorais no
-    # Espião recebem a edição; os dos outros grupos, não.
-    original, copia = str(tmp_path / "original.mp4"), str(tmp_path / "copia.mp4")
-    with open(original, "wb") as arquivo:
-        arquivo.write(b"original")
-    monkeypatch.setattr(robo.ps, "foto_do_produto", lambda video: b"foto")
-    monkeypatch.setattr(robo.edicao_video.links_grupos, "arroba", lambda alvo: None)
-
-    def editar(video, foto, destino):
-        with open(destino, "wb") as arquivo:
-            arquivo.write(b"editado")
-        return ""
-
-    monkeypatch.setattr(robo.edicao_video, "editar", editar)
-    robo.db.salvar_config("fila_clonagem", {"fila": [{"id": "clone_1", "chat_origem": "-1001234"},
-                                                     {"id": "clone_2", "chat_origem": "-1009999"}]})
-    robo.edicao_video.alternar_grupos(["-1001234"])
-    ativar(edicao_ligada=True)
-    robo.copiar_para_o_rascunho({"id": "viral:clone_2", "arquivo": original, "link": LINK}, "viral", copia)
-    assert open(copia, "rb").read() == b"original"
-    robo.copiar_para_o_rascunho({"id": "viral:clone_1", "arquivo": original, "link": LINK}, "viral", copia)
+    # Todos os vídeos do Rafael são autorais: o do Viral também vai editado.
+    robo.copiar_para_o_rascunho(video, "viral", copia)
     assert open(copia, "rb").read() == b"editado"
 
 
