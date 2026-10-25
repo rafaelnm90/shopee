@@ -58,6 +58,7 @@ from datetime import datetime, timedelta
 
 import android_virtual as av
 import apelacoes_shopee_video as apelacoes
+import api_shopee
 import assistente_shopee_video as assistente
 import avisar_rafael
 import casos_robo
@@ -100,6 +101,14 @@ VIDEOS_SEM_OFERTA_POR_RODADA = 5
 SEM_OFERTA = "o link não diz o produto do vídeo (produto sem oferta de afiliado)"
 # Produtos do Ver Produtos que o robô confere num vídeo (cada um custa 2 conferências da IA).
 MAXIMO_PRODUTOS_DO_VIDEO = 6
+# O mesmo produto com mais comissão (P33): a busca da API por maior comissão traz até
+# estes, entram só os de nome parecido (PARECIDO_NA_BUSCA% das palavras do nome do link),
+# e a IA confere com o vídeo até CANDIDATOS_NA_IA deles (cada um custa até 2 conferências).
+# A busca usa as primeiras PALAVRAS_DA_BUSCA palavras do nome: o nome inteiro traz pouco.
+OFERTAS_NA_BUSCA = 20
+PARECIDO_NA_BUSCA = 60
+CANDIDATOS_NA_IA = 2
+PALAVRAS_DA_BUSCA = 6
 # O player do vídeo no app; sem ele, o link não abriu o vídeo.
 PLAYER_DO_VIDEO = "rn_vod_player_view_with_surface"
 # Segundos a mais antes de desistir do Ver Produtos: o player às vezes demora a mostrá-lo.
@@ -2049,6 +2058,87 @@ def descurtir_tudo(d, agora=None):
     return f"{removidos} produto(s) descurtido(s) em Meus favoritos"
 
 
+# --- O mesmo produto com mais comissão (P33) ---
+
+PROCESSO_DA_COMISSAO = "comissão: o mesmo produto que paga mais"
+
+
+def termo_da_busca(nome):
+    """As primeiras PALAVRAS_DA_BUSCA palavras do nome, sem o que vem entre colchetes ou parênteses e sem símbolos."""
+    limpo = re.sub(r"\[[^\]]*\]|\([^)]*\)", " ", nome or "")
+    palavras = [p for p in re.sub(r"[^\w\s-]", " ", limpo).split() if p.strip("-_")]
+    return " ".join(palavras[:PALAVRAS_DA_BUSCA])
+
+
+def candidatos_de_mais_comissao(original, ofertas):
+    """
+    Das ofertas da busca, as que pagam mais que o produto do link e têm o nome parecido
+    com o dele, da maior comissão para a menor: [{nome, link, comissao}]. O próprio produto
+    do link nunca entra: a comissão dele não é maior que ela mesma.
+    """
+    candidatos = []
+    for oferta in ofertas:
+        nome = (oferta.get("productName") or "").strip()
+        link = oferta.get("productLink") or ""
+        comissao = assistente._numero(oferta.get("commissionRate")) * 100
+        if not nome or not link or comissao <= original["comissao"]:
+            continue
+        if ps.parecido_entre([nome], original["nome"])[0] < PARECIDO_NA_BUSCA:
+            continue
+        candidatos.append({"nome": nome, "link": link, "comissao": comissao,
+                           "vendas": int(assistente._numero(oferta.get("sales")))})
+    return sorted(candidatos, key=lambda c: (-c["comissao"], -c["vendas"]))
+
+
+def trocar_pela_maior_comissao(video):
+    """
+    O mesmo produto do link, de outra loja, que paga mais comissão (contando a Comissão
+    Extra), como o Rafael faz pela busca por foto com o filtro Comissão: a API busca pelo
+    nome por maior comissão, ficam os de nome parecido que pagam mais, e a IA confere cada
+    um com o vídeo pela foto do anúncio, com a mesma régua do produto do link (o mesmo item,
+    da mesma cor). O primeiro confirmado vale: {nome, link, comissao, antes, vistos}, com o
+    link curto que o celular abre. Nenhum: None, e o robô segue com o produto do link. A
+    troca é um ganho a mais: um erro nela nunca derruba o rascunho.
+    Escolha do Rafael (25/10, P33): DECISOES.md, Shopee Vídeo.
+    """
+    try:
+        return _trocar_pela_maior_comissao(video)
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] A busca do produto que paga mais deu erro: {type(e).__name__}")
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_COMISSAO, f"mantido - erro ({type(e).__name__})")
+        return None
+
+
+def _trocar_pela_maior_comissao(video):
+    def anotar(resultado, ok=None):
+        registro_processos.registrar(REGISTRO, PROCESSO_DA_COMISSAO, resultado, ok=ok)
+
+    produtos, _ = asyncio.run(assistente.produtos_do_link(video["link"]))
+    if not produtos:
+        anotar("mantido - a API não disse o produto do link")
+        return None
+    original = produtos[0]
+    ofertas = asyncio.run(api_shopee.buscar_ofertas_shopee(termo_da_busca(original["nome"]), limite=OFERTAS_NA_BUSCA,
+                                                           sort_type=5))
+    candidatos = candidatos_de_mais_comissao(original, ofertas)
+    if not candidatos:
+        anotar("mantido - nenhum com mais comissão" if ofertas else "mantido - a busca não trouxe nada")
+        return None
+    for candidato in candidatos[:CANDIDATOS_NA_IA]:
+        link = asyncio.run(api_shopee.converter_link_shopee(candidato["link"], api_shopee.ETIQUETA_SHOPEE_VIDEO,
+                                                            avisar_falha=False))
+        if not link or link == candidato["link"]:
+            # Sem o link curto, o celular não abre o produto (fica no esqueleto da página).
+            continue
+        vistos = []
+        ok, _ = ps.ia_confere_produto(dict(video, link=link), vistos, avisar=False)
+        if ok:
+            anotar("trocado", ok=True)
+            return {**candidato, "link": link, "antes": original["comissao"], "vistos": vistos}
+    anotar("mantido - a IA não confirmou nenhum")
+    return None
+
+
 def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
     """
     O rascunho no celular. curtidos recebe cada produto que o robô curtiu (descurtir_no_fim);
@@ -2066,10 +2156,21 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         nome = ps.nome_do_produto(video)
         if not nome:
             raise Parada("o link não diz o produto do vídeo", do_video=True)
+        # O mesmo produto de outra loja que paga mais, já conferido pela IA com o vídeo, toma
+        # o lugar do produto do link (o video muda aqui: curtir, anexar e descurtir usam o
+        # novo). Escolha do Rafael (25/10, P33): DECISOES.md, Shopee Vídeo.
+        troca = trocar_pela_maior_comissao(video)
+        if troca:
+            video["link"] = troca["link"]
+            nome = ps.nome_do_produto(video) or troca["nome"]
+            vistos.extend(troca["vistos"])
         # Antes de tocar no celular, o Rafael sabe qual vídeo e qual produto o robô pegou.
         avisar(f"🤖 Robô da Shopee Vídeo: começando um rascunho.\n\nProduto: {nome}\n"
-               f"Vídeo: o mais novo de {assistente.FONTES.get(fonte, fonte)} ainda não usado.")
-        _conferir(ps.ia_confere_produto(video, vistos))
+               + (f"Comissão: {troca['comissao']:.1f}% (o produto do link pagava {troca['antes']:.1f}%: troquei "
+                  "pelo mesmo produto de outra loja, conferido pela IA com o vídeo)\n" if troca else "")
+               + f"Vídeo: o mais novo de {assistente.FONTES.get(fonte, fonte)} ainda não usado.")
+        if not troca:
+            _conferir(ps.ia_confere_produto(video, vistos))
         nomes = [nome]
     # A origem e o que a IA viu ficam no rascunho, para o Rafael validar com isso na mão.
     atualizar(ident, fonte=fonte, conferencia=json.dumps(vistos, ensure_ascii=False))

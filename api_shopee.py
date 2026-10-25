@@ -226,6 +226,9 @@ ETIQUETA_AUTORAIS = "autorais"
 ETIQUETA_ESPELHADOR = "espelhador"
 ETIQUETA_ACHADINHOS = "achadinhos"
 ETIQUETA_BUSCA = "busca"
+# O link que o robô da Shopee Vídeo abre no celular para curtir o produto de maior comissão
+# (o app não abre o endereço /product/ direto; o link curto, sim).
+ETIQUETA_SHOPEE_VIDEO = "shopeevideo"
 
 
 def etiquetas(sub_ids):
@@ -330,6 +333,7 @@ async def buscar_ofertas_shopee(keyword, limite=10, app_id=None, app_secret=None
                     shopName
                     imageUrl
                     productLink
+                    commissionRate
                 }
             }
         }""",
