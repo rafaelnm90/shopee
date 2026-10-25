@@ -359,6 +359,10 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
      "Selecionado N/M" e o botão **Remover dos Favoritos** (~841,2326). A rotina das 4h
      marca tudo e remove, de novo e de novo, até a lista acabar (falta ver no celular se
      o app pergunta antes de remover; o robô confirma se perguntar, nunca no Cancelar).
+     O app guarda a edição aberta: saindo sem o Feito, Meus Favoritos abre da próxima vez
+     já na edição, com Feito, "Selecionado N/M" e Remover dos Favoritos, sem o Editar
+     (Motorola, 25/10/2026). O robô aceita os dois jeitos; só dá a lista por vazia com as
+     abas Todos e Categoria na tela e nem Editar nem edição.
    - Página do produto presa no esqueleto (ícone de presente e barras cinzas, ids
      `ll_head_root` e `iv_head_image`), até abrindo à mão: era a verificação das 04:27
      de 18/10/2026, que expirou sem resposta. Forçar a parada da Shopee faz a

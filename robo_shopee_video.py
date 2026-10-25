@@ -1553,14 +1553,14 @@ def preparar_rascunho(d, config, agora=None):
         _desfazer_reserva(ident, video["id"], "conta suspensa", False)
         registrar_tentativa("rascunho", "suspensa", str(e), _produto_do_video(video), agora)
         if curtidos:
-            gravar_estado(lista_limpa=False)
+            gravar_estado(favoritos_limpos=False)
         raise
     except Verificacao:
         _guardar_caso(d, "rascunho", "verificação", "verificação da Shopee na tela", video, ident, agora)
         _desfazer_reserva(ident, video["id"], "verificação", False)
         if curtidos:
             # Na Verificação o robô para sem descurtir: a curtida fica para as 4h.
-            gravar_estado(lista_limpa=False)
+            gravar_estado(favoritos_limpos=False)
         registrar_tentativa("rascunho", "verificação", "verificação da Shopee na tela", _produto_do_video(video), agora)
         raise
     except Parada as e:
@@ -1628,7 +1628,7 @@ def descurtir_no_fim(d, video, curtidos):
             pausa(8)
             todos = ps.descurtir(d, video)[0]
     except Verificacao:
-        gravar_estado(lista_limpa=False)
+        gravar_estado(favoritos_limpos=False)
         raise
     except Parada as e:
         logger.warning(f"⚠️ [Robô Shopee Vídeo] Não descurti no fim do rascunho: {ps.mascarar(e.motivo)}")
@@ -1638,7 +1638,7 @@ def descurtir_no_fim(d, video, curtidos):
         registro_processos.registrar(REGISTRO, "descurtir no fim do rascunho", "erro", type(e).__name__, ok=False)
     if not todos:
         # Uma curtida ficou para trás: a lista não está limpa até o descurtir das 4h (P27).
-        gravar_estado(lista_limpa=False)
+        gravar_estado(favoritos_limpos=False)
 
 
 def _guardar_caso(d, acao, resultado, motivo, video=None, ident=None, agora=None):
@@ -1696,14 +1696,14 @@ def _conferir(resultado, do_video=True):
 # para trás suja a lista até o próximo descurtir das 4h. Escolha do Rafael (P27):
 # DECISOES.md, Shopee Vídeo.
 def lista_limpa():
-    return bool(ler_estado().get("lista_limpa"))
+    return bool(ler_estado().get("favoritos_limpos"))
 
 
 def _conferir_curtida(resultado):
     """Confere a curtida; o curtido de outro dia que não descurtiu fica mais embaixo: a lista não está limpa."""
     _conferir(resultado)
     if resultado[1] == ps.CURTIDO_DE_ANTES:
-        gravar_estado(lista_limpa=False)
+        gravar_estado(favoritos_limpos=False)
 
 
 def _codigos_da_ia():
@@ -1763,6 +1763,8 @@ REMOVER_DOS_FAVORITOS = "Remover dos Favoritos"
 VOLTAS_DO_DESCURTIR = 10
 # O botão que confirma a remoção, se o app perguntar (nunca o Cancelar).
 CONFIRMAR_REMOCAO = ("@buttonDefaultPositive", "Remover", "Excluir", "Confirmar", "Sim", "OK")
+# As abas do alto de Meus Favoritos: com elas na tela, a página abriu (Motorola, 25/10/2026).
+ABAS_DE_FAVORITOS = ("Todos", "Categoria")
 
 
 def selecionados(xml):
@@ -1806,6 +1808,25 @@ def _confirmar_remocao(d):
             return
 
 
+def pagina_dos_favoritos(d, segundos=12):
+    """
+    Como Meus Favoritos abriu, relendo a tela por até `segundos`: "editar" (o botão Editar),
+    "editando" (o app guarda a edição aberta da última vez: no Motorola, em 25/10/2026, a
+    página abriu já com Feito, Selecionado N/M e Remover dos Favoritos) ou "vazia" (as abas
+    da página, sem Editar nem edição, até o fim da espera). None: a página não abriu.
+    """
+    voltas = max(1, segundos // 3)
+    for volta in range(voltas + 1):
+        xml = tela(d)
+        if tem(xml, REMOVER_DOS_FAVORITOS) or selecionados(xml):
+            return "editando"
+        if tem(xml, "Editar"):
+            return "editar"
+        if volta < voltas:
+            pausa(3)
+    return "vazia" if any(tem_exato(xml, aba) for aba in ABAS_DE_FAVORITOS) else None
+
+
 def descurtir_tudo(d, agora=None):
     """
     A rotina das 4h: tira de Meus Favoritos tudo o que está curtido (Eu → Meus Favoritos →
@@ -1821,13 +1842,17 @@ def descurtir_tudo(d, agora=None):
         if not tem(tela(d), MEUS_FAVORITOS):
             raise Parada("não achei Meus Favoritos na aba Eu")
     tocar(d, MEUS_FAVORITOS, 6)
-    if not esperar_na_tela(d, "Editar", 12):
+    pagina = pagina_dos_favoritos(d)
+    if pagina is None:
+        raise Parada("Meus Favoritos não abriu (nem Editar, nem a edição, nem as abas da página)")
+    if pagina == "vazia":
         # Sem nada curtido, a página não tem o que editar.
         registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", "nada curtido", ok=True)
-        gravar_estado(lista_limpa=True)
+        gravar_estado(favoritos_limpos=True)
         ir_ao_inicio(d)
         return "nada curtido em Meus Favoritos"
-    tocar(d, "Editar", 3)
+    if pagina == "editar":
+        tocar(d, "Editar", 3)
     removidos, acabou = 0, False
     for volta in range(VOLTAS_DO_DESCURTIR):
         xml = tela(d)
@@ -1860,7 +1885,7 @@ def descurtir_tudo(d, agora=None):
             # pergunta do app que o robô não conhece, por exemplo).
             raise Parada("toquei em Remover dos Favoritos, mas a lista de Meus Favoritos não diminuiu")
         removidos += marcados
-    gravar_estado(descurtir_continuar=not acabou, lista_limpa=acabou)
+    gravar_estado(descurtir_continuar=not acabou, favoritos_limpos=acabou)
     xml = tela(d)
     if tem_exato(xml, "Feito"):
         d.click(*_ponto_exato(xml, "Feito"))
@@ -2933,7 +2958,7 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
             return resultado
         if acao == "descurtir":
             # A lista só fica limpa se este descurtir chegar ao fim (P27).
-            gravar_estado(descurtir_em=_momento(agora), descurtir_continuar=False, lista_limpa=False)
+            gravar_estado(descurtir_em=_momento(agora), descurtir_continuar=False, favoritos_limpos=False)
             resultado = descurtir_tudo(d, agora)
             registrar_tentativa("descurtir", "descurtido", agora=agora)
             return resultado
