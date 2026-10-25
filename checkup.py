@@ -707,12 +707,40 @@ def robo_da_shopee_video(agora=None):
     ruins = [(acao, resultado, passo, qtd) for acao, resultado, passo, qtd, _p, _u in linhas
              if resultado in RESULTADOS_RUINS]
     atrasados, minutos = aprovados_atrasados(agora)
+    postados = aprovados_postados(agora)
     pulados = _contar("SELECT COUNT(*) FROM shopee_video_rascunhos WHERE criado_em >= ? AND estado = 'pulado'", hoje)
     # As punições da Saúde do Vídeo que esperam o recurso do Rafael (apelacoes_shopee_video).
     punicoes = _contar("SELECT COUNT(*) FROM shopee_video_punicoes WHERE situacao = 'pendente'")
     return {"ativo": not pausado, "suspenso": suspenso, "horarios": len(horarios), "vencidos": vencidos,
             "salvos": salvos or 0, "pulados": pulados or 0, "ruins": ruins, "linhas": linhas,
-            "punicoes": punicoes or 0, "atrasados": atrasados, "minutos_de_atraso": minutos}
+            "punicoes": punicoes or 0, "atrasados": atrasados, "minutos_de_atraso": minutos,
+            "postados": postados}
+
+
+def aprovados_postados(agora=None):
+    """
+    Os aprovados que foram ao ar nas últimas 24 h: [(aprovado HH:MM, previsto HH:MM,
+    postado HH:MM, atraso em min)]. O atraso é do postado sobre o previsto: diz se outra
+    tarefa (um preparo longo segurando o celular, a pausa) atrasou o post.
+    """
+    agora = _agora(agora)
+    try:
+        with db.conexao() as conexao:
+            linhas = conexao.execute(
+                "SELECT aprovado_em, postar_em, postado_em FROM shopee_video_rascunhos WHERE estado = 'postado' "
+                "AND postado_em >= ? AND postar_em IS NOT NULL ORDER BY postado_em",
+                (_momento(agora - timedelta(hours=24)),)).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    postados = []
+    for aprovado, previsto, postado in linhas:
+        try:
+            atraso = int((datetime.strptime(postado, "%Y-%m-%d %H:%M:%S")
+                          - datetime.strptime(previsto, "%Y-%m-%d %H:%M:%S")).total_seconds() // 60)
+        except (TypeError, ValueError):
+            continue
+        postados.append(((aprovado or "")[11:16] or "?", previsto[11:16], postado[11:16], atraso))
+    return postados
 
 
 def tentativas_recentes(horas, agora=None):
@@ -990,6 +1018,10 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
                       f"{robo_sv['salvos']} rascunho(s) salvo(s) ({robo_sv.get('pulados', 0)} vídeo(s) pulado(s))")
     for acao, resultado, passo, qtd in robo_sv["ruins"]:
         pontos.append(f"Robô da Shopee Vídeo: {acao} → {resultado} em \"{passo or '?'}\" {qtd}x")
+    tarde = [atraso for *_h, atraso in robo_sv.get("postados", []) if atraso > ATRASO_DO_APROVADO.total_seconds() // 60]
+    if tarde:
+        pontos.append(f"Robô da Shopee Vídeo: {len(tarde)} aprovado(s) foram ao ar com mais de "
+                      f"{int(ATRASO_DO_APROVADO.total_seconds() // 60)} min de atraso (o maior: {max(tarde)} min)")
     if robo_sv["ativo"] and not robo_sv.get("suspenso") and robo_sv.get("atrasados"):
         pontos.append(f"Robô da Shopee Vídeo: {robo_sv['atrasados']} aprovado(s) passaram da hora de ir ao ar "
                       f"(o mais atrasado há {robo_sv['minutos_de_atraso']} min)")
@@ -1201,6 +1233,8 @@ def main():
         print(_linha_da_tentativa(tentativa))
     print(f"Aprovados que passaram da hora de ir ao ar: {robo_sv['atrasados']}"
           + (f" (o mais atrasado há {robo_sv['minutos_de_atraso']} min)" if robo_sv["atrasados"] else ""))
+    for aprovado, previsto, postado, atraso in robo_sv.get("postados", []):
+        print(f"   aprovado {aprovado} → previsto {previsto} → postado {postado} (atraso {atraso} min)")
 
     interacoes = interacoes_da_shopee_video(agora)
     respostas = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["respostas"].items()))
