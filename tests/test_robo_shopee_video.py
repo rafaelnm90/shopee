@@ -2332,114 +2332,119 @@ def test_horario_do_plano_interrompido_no_meio_tenta_de_novo(monkeypatch):
 
 # --- Descurtir tudo às 4h (escolha do Rafael, P25) ---
 
+CAIXA = robo.CAIXA_DE_MARCAR
+
+
 class AppDosFavoritos(AppDeMentira):
     """
-    Eu → Meus Favoritos → Editar, como no Motorola (24/10/2026): as abas Todos e Categoria no
-    alto, a caixa de cada produto, a de marcar tudo, o "Selecionado N/M" e o Remover dos
-    Favoritos, que pergunta antes de remover. A lista mostra até 4 produtos por vez (carrega aos
-    poucos). editando=True: o app guardou a edição aberta, e a página já abre nela (25/10/2026).
+    Eu → Criadores & Afiliados → Meus favoritos, como o Rafael mostrou no Motorola (25/10/2026):
+    o título com quantos há (até 1000), o filtro Melhor Oferta e o aviso com Substituir Tudo no
+    alto, 5 produtos por tela, cada um com a caixa de marcar; na barra de baixo, a caixa de
+    marcar tudo, o "Selecionado N/50", o Like (tira os marcados) e o Compartilhar. O Meus
+    Favoritos de comprador da aba Eu é outra lista: o robô não pode ir para lá.
+    marcar_tudo=False: a caixa de baixo não marca nada, e o robô marca um por um, rolando.
     """
 
-    def __init__(self, favoritos=6, editando=False):
+    def __init__(self, favoritos=6, marcar_tudo=True):
         super().__init__()
         self.favoritos = [f"Produto {i}" for i in range(favoritos)]
-        self.marcados, self.pergunta, self.editando_ao_abrir = set(), False, editando
+        self.marcados, self.marcar_tudo, self.topo = [], marcar_tudo, 0
 
     def _visiveis(self):
-        return self.favoritos[:4]
+        return self.favoritos[self.topo:self.topo + 5]
 
     def _nos(self):
         if self.atual == "eu":
             return [ABA_EU, _no("Criadores & Afiliados", caixa=(600, 1630, 1000, 1700)),
                     _no("Meus Favoritos", caixa=(600, 1990, 950, 2060))]
-        if self.atual in ("favoritos", "editando"):
-            editando = self.atual == "editando"
-            nos = [_no("Feito" if editando else "Editar", caixa=(940, 160, 1060, 220)) if self.favoritos or editando
-                   else _no("Meus Favoritos", caixa=(300, 160, 700, 220), clicavel=False),
-                   _no("Todos", caixa=(40, 300, 250, 360)), _no("Categoria", caixa=(830, 300, 1040, 360))]
+        if self.atual == "afiliado":
+            return [_no("Meus favoritos", caixa=(660, 680, 830, 760)), _no("Oferta", caixa=(60, 2300, 210, 2400)),
+                    _no("Conversão", caixa=(330, 2300, 480, 2400)), _no("Conta", caixa=(870, 2300, 1020, 2400))]
+        if self.atual == "favoritos":
+            nos = [_no(f"Meus favoritos({min(len(self.favoritos), 1000)})", caixa=(120, 160, 560, 220)),
+                   _no("Melhor Oferta", caixa=(480, 300, 650, 350)),
+                   _no("Substituir Tudo", caixa=(740, 440, 910, 500))]
             for i, nome in enumerate(self._visiveis()):
-                y = 400 + 450 * i
-                nos.append(_no(nome, caixa=(40, y, 1040, y + 60), clicavel=False))
-                if editando:
-                    nos.append(_no(caixa=(60, y + 300, 150, y + 390)))
-            if editando:
-                nos += [_no(caixa=(30, 2290, 86, 2360)),
-                        _no(caixa=(100, 2290, 330, 2360), filhos=_no(
-                            f"Selecionado {len(self.marcados)}/{len(self.favoritos)}", caixa=(130, 2300, 325, 2350),
-                            clicavel=False)),
-                        _no("Remover dos Favoritos", caixa=(700, 2290, 980, 2360))]
-            if self.pergunta:
-                nos += [_no("Remover os produtos selecionados?", caixa=(200, 1000, 880, 1060), clicavel=False),
-                        _no("Cancelar", caixa=(200, 1200, 500, 1280)), _no("Remover", caixa=(580, 1200, 880, 1280))]
+                y = 600 + 340 * i
+                nos += [_no(caixa=(50, y + 80, 120, y + 150), ident=CAIXA),
+                        _no(nome, caixa=(420, y, 1040, y + 60), clicavel=False)]
+            nos += [_no(caixa=(30, 2290, 96, 2356), ident=CAIXA),
+                    _no(f"Selecionado {len(self.marcados)}/50", caixa=(120, 2300, 380, 2350), clicavel=False),
+                    _no("Like", caixa=(600, 2290, 750, 2356)), _no("Compartilhar", caixa=(800, 2290, 1010, 2356))]
             return nos
         return super()._nos()
 
     def click(self, x, y):
         tocados = {el["texto"] for el in robo.ps.elementos(self.dump_hierarchy()) if robo.ps._dentro((x, y), el["caixa"])}
+        assert not tocados & {"Compartilhar", "Substituir Tudo", "Meus Favoritos"}, f"tocou em {tocados}"
         if self.atual == "inicio" and "Eu" in tocados:
             self.atual = "eu"
-        elif self.atual == "eu" and "Meus Favoritos" in tocados:
-            self.atual = "editando" if self.editando_ao_abrir else "favoritos"
-        elif self.atual == "favoritos" and "Editar" in tocados:
-            self.atual = "editando"
-        elif self.pergunta:
-            assert "Cancelar" not in tocados, "tocou em Cancelar"
-            if "Remover" in tocados:
-                self.favoritos = [f for f in self.favoritos if f not in self.marcados]
-                self.marcados, self.pergunta = set(), False
-                if not self.favoritos:
-                    self.atual = "favoritos"
-        elif self.atual == "editando" and "Feito" in tocados:
-            self.atual = "favoritos"
-        elif self.atual == "editando" and "Remover dos Favoritos" in tocados:
-            self.pergunta = bool(self.marcados)
-        elif self.atual == "editando" and (30 <= x <= 86 and 2290 <= y <= 2360):
-            visiveis = set(self._visiveis())
-            self.marcados = set() if self.marcados >= visiveis else visiveis
+        elif self.atual == "eu" and "Criadores & Afiliados" in tocados:
+            self.atual = "afiliado"
+        elif self.atual == "afiliado" and "Meus favoritos" in tocados:
+            self.atual, self.topo = "favoritos", 0
+        elif self.atual == "favoritos" and "Like" in tocados:
+            self.favoritos = [f for f in self.favoritos if f not in self.marcados]
+            self.marcados, self.topo = [], 0
+        elif self.atual == "favoritos" and 30 <= x <= 96 and 2290 <= y <= 2356:
+            if self.marcar_tudo:
+                self.marcados = self.favoritos[:50]
+        elif self.atual == "favoritos" and 50 <= x <= 120:
+            linha = (y - 680) // 340
+            nome = self._visiveis()[linha]
+            if nome in self.marcados:
+                self.marcados.remove(nome)
+            elif len(self.marcados) < 50:
+                self.marcados.append(nome)
         else:
             return super().click(x, y)
         self.toques.append(next(iter(tocados), (x, y)))
 
+    def swipe(self, *pontos):
+        self.toques.append("rolar")
+        if self.atual == "favoritos":
+            self.topo = min(self.topo + 3, max(0, len(self.favoritos) - 1))
 
-def test_as_4h_descurte_tudo_em_meus_favoritos(monkeypatch, avisos):
+
+def test_as_4h_descurte_tudo_em_meus_favoritos_pelo_caminho_de_afiliado(monkeypatch, avisos):
+    # O Rafael ensinou (vídeo de 25/10): Eu → Criadores & Afiliados → Meus favoritos → marcar →
+    # Like. O Meus Favoritos de comprador da aba Eu é outra lista (o app de mentira barra).
     from conftest import consultar
     ativar(robo_inicio=8, robo_fim=22)
     app = AppDosFavoritos(favoritos=6)
     resultado = robo.rodada(d=app, agora=momento("2026-10-25 04:05"))
-    assert resultado == "6 produto(s) descurtido(s) em Meus Favoritos"
-    assert app.favoritos == [] and "Cancelar" not in app.toques
+    assert resultado == "6 produto(s) descurtido(s) em Meus favoritos"
+    assert app.favoritos == [] and "Like" in app.toques and robo.lista_limpa()
     assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = 'descurtir tudo (4h)'") == (
         "descurtido", "6 produto(s)", 1)
     # Feito, a hora fica parada até as 5h.
     assert robo.rodada(d=Intocavel(), agora=momento("2026-10-25 04:20")) == "nada a fazer agora"
 
 
-def test_lista_grande_continua_na_rodada_seguinte(monkeypatch, avisos):
+def test_lista_grande_vai_de_50_em_50_e_continua_na_rodada_seguinte(monkeypatch, avisos):
     monkeypatch.setattr(robo, "VOLTAS_DO_DESCURTIR", 2)
     ativar(robo_inicio=8, robo_fim=22)
-    app = AppDosFavoritos(favoritos=12)
+    app = AppDosFavoritos(favoritos=130)
     assert "o resto fica para a próxima rodada" in robo.rodada(d=app, agora=momento("2026-10-25 04:05"))
-    assert len(app.favoritos) == 4
+    assert len(app.favoritos) == 30
     assert robo.o_que_fazer(robo.ler_config(), momento("2026-10-25 04:20")) == ("descurtir", None)
-    assert robo.rodada(d=app, agora=momento("2026-10-25 04:20")) == "4 produto(s) descurtido(s) em Meus Favoritos"
+    assert robo.rodada(d=app, agora=momento("2026-10-25 04:20")) == "30 produto(s) descurtido(s) em Meus favoritos"
     assert app.favoritos == [] and robo.o_que_fazer(robo.ler_config(), momento("2026-10-25 04:35")) is None
+
+
+def test_sem_a_caixa_de_marcar_tudo_marca_um_por_um_rolando(monkeypatch, avisos):
+    # Como o Rafael fez no vídeo: marcando produto por produto, rolando a lista.
+    ativar(robo_inicio=8, robo_fim=22)
+    app = AppDosFavoritos(favoritos=12, marcar_tudo=False)
+    assert robo.rodada(d=app, agora=momento("2026-10-25 04:05")) == "12 produto(s) descurtido(s) em Meus favoritos"
+    assert app.favoritos == [] and "rolar" in app.toques
 
 
 def test_sem_nada_curtido_nao_ha_o_que_descurtir(monkeypatch, avisos):
     ativar(robo_inicio=8, robo_fim=22)
     assert robo.rodada(d=AppDosFavoritos(favoritos=0), agora=momento("2026-10-25 04:05")) == (
-        "nada curtido em Meus Favoritos")
+        "nada curtido em Meus favoritos")
     assert robo.lista_limpa()
-
-
-def test_favoritos_que_abrem_ja_em_edicao_sao_descurtidos(monkeypatch, avisos):
-    # Motorola, 25/10/2026: o app guardou a edição aberta, e Meus Favoritos abriu com Feito e
-    # Remover dos Favoritos, sem o Editar. O robô achou que não havia nada curtido e deu a
-    # lista por limpa, com os produtos lá.
-    ativar(robo_inicio=8, robo_fim=22)
-    app = AppDosFavoritos(favoritos=5, editando=True)
-    assert robo.rodada(d=app, agora=momento("2026-10-25 04:05")) == "5 produto(s) descurtido(s) em Meus Favoritos"
-    assert app.favoritos == [] and "Editar" not in app.toques and robo.lista_limpa()
 
 
 def test_favoritos_que_nao_abrem_param_sem_dar_a_lista_por_limpa(monkeypatch, avisos):
@@ -2450,7 +2455,24 @@ def test_favoritos_que_nao_abrem_param_sem_dar_a_lista_por_limpa(monkeypatch, av
     monkeypatch.setattr(robo, "pausa", lambda segundos: None)
     ativar(robo_inicio=8, robo_fim=22)
     resultado = robo.rodada(d=NaoAbre(favoritos=3), agora=momento("2026-10-25 04:05"))
-    assert "Meus Favoritos não abriu" in resultado and not robo.lista_limpa()
+    assert "Meus favoritos não abriu" in resultado and not robo.lista_limpa()
+    assert robo.passo_do_motivo(resultado) == "descurtir em Meus Favoritos"
+
+
+def test_sem_a_area_de_afiliado_nao_cai_no_meus_favoritos_de_comprador(monkeypatch, avisos):
+    # Se o toque em Criadores & Afiliados não abrir a área de afiliado, o "Meus favoritos" da
+    # aba Eu é o de comprador, outra lista: o robô para em vez de tocar nele.
+    class SemAfiliado(AppDosFavoritos):
+        def click(self, x, y):
+            if self.atual == "eu" and 600 <= x <= 1000 and 1630 <= y <= 1700:
+                self.toques.append("Criadores & Afiliados")
+                return
+            return super().click(x, y)
+
+    monkeypatch.setattr(robo, "pausa", lambda segundos: None)
+    ativar(robo_inicio=8, robo_fim=22)
+    resultado = robo.rodada(d=SemAfiliado(favoritos=3), agora=momento("2026-10-25 04:05"))
+    assert "Criadores & Afiliados não abriu" in resultado and not robo.lista_limpa()
 
 
 def test_pausado_nao_descurte(monkeypatch, avisos):
@@ -2458,17 +2480,19 @@ def test_pausado_nao_descurte(monkeypatch, avisos):
     assert robo.rodada(d=Intocavel(), agora=momento("2026-10-25 04:05")) == "pausado"
 
 
-def test_remocao_que_nao_pega_para_e_diz_onde(monkeypatch, avisos):
-    # Uma pergunta do app que o robô não conhece: os produtos continuam marcados e a lista igual.
-    class SemConfirmar(AppDosFavoritos):
-        def _nos(self):
-            return [n.replace(">Remover<", ">Apagar<").replace('text="Remover"', 'text="Apagar"')
-                    for n in super()._nos()]
+def test_like_que_nao_tira_para_e_diz_onde(monkeypatch, avisos):
+    # Uma pergunta do app que o robô não conhece: os produtos continuam marcados e na lista.
+    class LikeQueNaoPega(AppDosFavoritos):
+        def click(self, x, y):
+            if self.atual == "favoritos" and 600 <= x <= 750 and 2290 <= y <= 2356:
+                self.toques.append("Like")
+                return
+            return super().click(x, y)
 
     ativar(robo_inicio=8, robo_fim=22)
-    app = SemConfirmar(favoritos=3)
+    app = LikeQueNaoPega(favoritos=3)
     resultado = robo.rodada(d=app, agora=momento("2026-10-25 04:05"))
-    assert "não diminuiu" in resultado and len(app.favoritos) == 3 and "Cancelar" not in app.toques
+    assert "continuaram em Meus favoritos" in resultado and len(app.favoritos) == 3
     assert robo.passo_do_motivo(resultado) == "descurtir em Meus Favoritos"
 
 
@@ -2522,13 +2546,15 @@ def test_curtido_de_outro_dia_que_nao_descurtiu_suja_a_lista(monkeypatch, avisos
 
 
 def test_descurtir_das_4h_que_para_no_meio_deixa_a_lista_suja(monkeypatch, avisos):
-    class SemConfirmar(AppDosFavoritos):
-        def _nos(self):
-            return [n.replace('text="Remover"', 'text="Apagar"') for n in super()._nos()]
+    class LikeQueNaoPega(AppDosFavoritos):
+        def click(self, x, y):
+            if self.atual == "favoritos" and 600 <= x <= 750 and 2290 <= y <= 2356:
+                return
+            return super().click(x, y)
 
     ativar(robo_inicio=8, robo_fim=22)
     robo.gravar_estado(favoritos_limpos=True)
-    robo.rodada(d=SemConfirmar(favoritos=3), agora=momento("2026-10-25 04:05"))
+    robo.rodada(d=LikeQueNaoPega(favoritos=3), agora=momento("2026-10-25 04:05"))
     assert not robo.lista_limpa()
 
 
