@@ -90,3 +90,57 @@ def test_cascata_sem_repetidos_e_so_modelos_de_texto():
     # duas chamadas na mesma cota, e um modelo de imagem ou voz nunca devolve o texto pedido.
     assert len(set(ia.MODELOS_CASCATA_GEMINI)) == len(ia.MODELOS_CASCATA_GEMINI)
     assert all(m.startswith("gemini") and not any(p in m for p in ia.FORA_DOS_ROBOS) for m in ia.MODELOS_CASCATA_GEMINI)
+
+
+BLOQUEADO = "block_reason=<BlockedReason.PROHIBITED_CONTENT: 'PROHIBITED_CONTENT'>"
+
+
+@pytest.fixture
+def video_no_gemini(monkeypatch):
+    """A análise de vídeo com o Google de mentira: o upload sai pronto e cada modelo responde a resposta dada."""
+    monkeypatch.setattr(ia, "MODELOS_CASCATA_GEMINI", ["a", "b", "c"])
+    monkeypatch.setattr(ia, "_fora_ate", {})
+    monkeypatch.setattr(ia, "ULTIMO_ERRO_IA", None)
+    estado = SimpleNamespace(respostas={})
+    arquivo = SimpleNamespace(name="files/1", state=SimpleNamespace(name="ACTIVE"))
+
+    def generate_content(model, contents):
+        resposta = estado.respostas.get(model, "ok")
+        if resposta.startswith(("429", "404", "500")):
+            raise RuntimeError(resposta)
+        if resposta == "bloqueado":
+            return SimpleNamespace(text=None, prompt_feedback=BLOQUEADO, candidates=[])
+        if resposta == "vazio":
+            return SimpleNamespace(text=None, prompt_feedback=None,
+                                   candidates=[SimpleNamespace(finish_reason="RECITATION", safety_ratings=None)])
+        return SimpleNamespace(text=resposta)
+
+    monkeypatch.setattr(ia, "client_genai", SimpleNamespace(
+        models=SimpleNamespace(generate_content=generate_content),
+        files=SimpleNamespace(upload=lambda file: arquivo, get=lambda name: arquivo, delete=lambda name: None)))
+    return estado
+
+
+def _niveis(caplog, trecho):
+    return [registro.levelname for registro in caplog.records if trecho in registro.getMessage()]
+
+
+def test_conteudo_recusado_em_todos_os_modelos_e_aviso_nao_erro(video_no_gemini, caplog):
+    # Um sem cota e os outros recusando o conteúdo: o vídeo é que não serve, não é falha do robô.
+    video_no_gemini.respostas = {"a": COTA_DO_DIA, "b": "bloqueado", "c": "bloqueado"}
+    with caplog.at_level("WARNING", logger="API_Gemini"):
+        assert rodar(ia.analisar_video_gemini("v.mp4", "p")) is None
+    assert _niveis(caplog, "recusou o conteúdo do vídeo") == ["WARNING"]
+    assert not _niveis(caplog, "Falha crítica")
+    assert ia.codigos_do_google(ia.ULTIMO_ERRO_IA) == {"PROHIBITED_CONTENT"}
+
+
+def test_falha_que_nao_e_do_conteudo_continua_erro(video_no_gemini, caplog):
+    # Um recusou o conteúdo, mas outro caiu por erro do Google: não dá para culpar o vídeo.
+    video_no_gemini.respostas = {"a": "bloqueado", "b": "500 INTERNAL", "c": "vazio"}
+    with caplog.at_level("WARNING", logger="API_Gemini"):
+        assert rodar(ia.analisar_video_gemini("v.mp4", "p")) is None
+    assert _niveis(caplog, "Falha crítica") == ["ERROR"]
+    assert not _niveis(caplog, "recusou o conteúdo do vídeo")
+    video_no_gemini.respostas = {"a": "bloqueado", "b": "texto do b"}
+    assert rodar(ia.analisar_video_gemini("v.mp4", "p")) == "texto do b"
