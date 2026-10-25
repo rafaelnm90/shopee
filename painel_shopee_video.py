@@ -513,6 +513,7 @@ BOTAO_SEM_HORARIO_PROPRIO = "Junto com o Robô 🔁"
 BOTAO_TREINO = "Testar Caminho 🧭"
 BOTAO_PREPARAR = "Preparar 1 Agora ⚡"
 BOTAO_HISTORICO = "Histórico do Robô 📋"
+BOTAO_FILA = "Fila de Rascunhos 🗂️"
 BOTAO_APROVAR = "Aprovar Rascunho ✅"
 BOTAO_RECUSAR = "Recusar Rascunho ❌"
 BOTAO_PROXIMO = "Próximo Rascunho ⏭️"
@@ -546,7 +547,8 @@ def teclado_robo(config):
     pausa_robo = "Retomar Postagem ▶️" if config["robo_pausado"] else "Pausar Postagem ⏸️"
     return montar_teclado([
         [KeyboardButton(text=pausa_robo), KeyboardButton(text=BOTAO_RASCUNHOS)],
-        [KeyboardButton(text=BOTAO_PREPARAR), KeyboardButton(text=BOTAO_HISTORICO)],
+        [KeyboardButton(text=BOTAO_FILA), KeyboardButton(text=BOTAO_PREPARAR)],
+        [KeyboardButton(text=BOTAO_HISTORICO)],
         [KeyboardButton(text=BOTAO_FAIXA_ROBO), KeyboardButton(text=BOTAO_HORARIO_ROBO)],
         [KeyboardButton(text=BOTAO_HORARIO_INTERACOES)],
         [KeyboardButton(text=BOTAO_TREINO), KeyboardButton(text=BOTAO_CELULAR)],
@@ -675,6 +677,8 @@ def texto_robo(config, agora=None, celular=None):
         "▶️ <b>Retomar / Pausar Postagem</b>: liga ou pausa o robô. O Retomar acha o Motorola sozinho; "
         "pausado, o assistente volta a mandar no seu privado.\n"
         f"📝 <b>{BOTAO_RASCUNHOS}</b>: aprovar ou recusar os rascunhos, um por um.\n"
+        f"🗂️ <b>{BOTAO_FILA}</b>: a lista dos rascunhos esperando a sua aprovação e dos aprovados, com a hora "
+        "prevista de cada post e, se algum passou da hora, por que ainda não saiu.\n"
         f"⚡ <b>{BOTAO_PREPARAR}</b>: o robô prepara um rascunho na hora, a mais do dia (mesmo pausado).\n"
         f"📋 <b>{BOTAO_HISTORICO}</b>: tudo o que o robô tentou nas últimas 24 h, com o produto e em que passo "
         f"parou. Às {HORA_DO_RESUMO}h chega o resumo do dia no seu privado.\n"
@@ -1016,6 +1020,17 @@ async def historico_handler(message: types.Message, state: FSMContext):
     if not _admin(message): return
     await state.set_state(ShopeeVideoFluxo.menu_robo)
     await message.answer(robo.texto_historico(), parse_mode="HTML", reply_markup=teclado_robo(ler_config()))
+
+
+@router.message(F.text == BOTAO_FILA, StateFilter("*"))
+async def fila_handler(message: types.Message, state: FSMContext):
+    """
+    Os rascunhos esperando aprovação e os aprovados, com a hora prevista de ir ao ar e o
+    porquê de um aprovado atrasado. Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    if not _admin(message): return
+    await state.set_state(ShopeeVideoFluxo.menu_robo)
+    await message.answer(robo.texto_da_fila(), parse_mode="HTML", reply_markup=teclado_robo(ler_config()))
 
 
 @router.message(F.text == BOTAO_TREINO, StateFilter("*"))

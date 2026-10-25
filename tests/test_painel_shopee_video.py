@@ -49,10 +49,11 @@ def test_menu_do_robo_e_como_funciona(bm, Msg, Est):
     rodar(sv.menu_robo_handler(msg, est))
     texto = msg.saidas[-1]
     assert "Robô Automático" in texto and "Pausado" in texto and "Celular: ⚠️" in texto
-    assert "O que cada botão faz" in texto and "Testar Caminho 🧭" in texto
+    assert "O que cada botão faz" in texto and "Testar Caminho 🧭" in texto and "Fila de Rascunhos 🗂️" in texto
     assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu_robo.state
     assert _textos(sv.teclado_robo(sv.ler_config())) == [
-        "Retomar Postagem ▶️", "Rascunhos do Robô 📝", "Preparar 1 Agora ⚡", "Histórico do Robô 📋",
+        "Retomar Postagem ▶️", "Rascunhos do Robô 📝", "Fila de Rascunhos 🗂️", "Preparar 1 Agora ⚡",
+        "Histórico do Robô 📋",
         "Rascunhos por Dia 📦", "Horário do Robô 🕗", "Horário das Interações 💬",
         "Testar Caminho 🧭", "Celular do Robô 📱", "Voltar à Shopee Vídeo 🔙"]
     msg = Msg("Como Funciona ❓")
@@ -589,6 +590,15 @@ def test_historico_do_robo_mostra_as_tentativas_e_o_resumo_das_22h(bm, Msg, Est,
     monkeypatch.setattr(sv, "bot_instance", Bot())
     rodar(sv.mandar_resumo_do_robo())
     assert enviados and "Resumo do Robô" in enviados[0][1] and "curtir o produto: 1×" in enviados[0][1]
+
+
+def test_fila_de_rascunhos_mostra_a_lista_no_menu_do_robo(bm, Msg, Est):
+    # Pedido do Rafael (25/10): ver os rascunhos esperando aprovação e os aprovados.
+    sv, est = _painel(bm), Est()
+    msg = Msg("Fila de Rascunhos 🗂️")
+    rodar(sv.fila_handler(msg, est))
+    assert "Fila de Rascunhos" in msg.saidas[-1] and msg.saidas[-1].count("nenhum") == 2
+    assert rodar(est.get_state()) == sv.ShopeeVideoFluxo.menu_robo.state
 
 
 def test_conta_suspensa_deixa_os_dois_em_espera_e_o_fim_avisa_no_privado(bm, monkeypatch):
