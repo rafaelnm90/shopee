@@ -46,15 +46,30 @@ PROMPT = (
 )
 
 
+# O que os modelos de vídeo aceitam (o Veo gera por "predictLongRunning"); os de texto e
+# imagem ficam de fora.
+ACOES_DE_VIDEO = ("predictLongRunning", "generateVideos")
+
+
 def modelos_de_video():
-    """Os modelos de vídeo (Veo) que a chave do .env enxerga, só os nomes."""
-    nomes = (m.name.split("/")[-1] for m in api_gemini.client_genai.models.list())
-    return sorted(n for n in nomes if n.startswith("veo"))
+    """Os modelos de vídeo que a chave do .env enxerga (o nome "veo" ou a ação de gerar vídeo), só os nomes."""
+    return sorted(m.name.split("/")[-1] for m in api_gemini.client_genai.models.list()
+                  if m.name.split("/")[-1].startswith("veo")
+                  or any(acao in (m.supported_actions or []) for acao in ACOES_DE_VIDEO))
+
+
+def acoes_da_chave():
+    """{ação: quantos modelos} de tudo o que a chave enxerga: mostra se ela é de uso pago (vídeo, imagem) ou só texto."""
+    contagem = {}
+    for modelo in api_gemini.client_genai.models.list():
+        for acao in modelo.supported_actions or []:
+            contagem[acao] = contagem.get(acao, 0) + 1
+    return contagem
 
 
 def escolher_modelo(nomes):
-    """O mais novo e mais barato da lista: Veo 3 antes do 2; Lite, depois Fast, depois o resto."""
-    for geracao in ("veo-3", "veo-2"):
+    """O mais novo e mais barato da lista: Veo 3 antes do 2 e dos outros; Lite, depois Fast, depois o resto."""
+    for geracao in ("veo-3", "veo-2", ""):
         da_geracao = sorted((n for n in nomes if n.startswith(geracao)), reverse=True)
         for tipo in PREFERENCIA:
             escolhido = next((n for n in da_geracao if tipo in n), None)
@@ -137,6 +152,8 @@ def main(argumentos):
         print(f"Modelos de vídeo na chave: {len(nomes)}")
         for nome in nomes:
             print(f"   {nome}")
+        print("Ações de todos os modelos da chave: "
+              + ", ".join(f"{acao} {n}" for acao, n in sorted(acoes_da_chave().items())))
         print(f"Para o teste: {escolher_modelo(nomes) or 'nenhum'}")
         return 0
     if argumentos == ["testar"]:
