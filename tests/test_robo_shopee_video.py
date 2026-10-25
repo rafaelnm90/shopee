@@ -2281,15 +2281,16 @@ def test_horario_do_plano_interrompido_no_meio_tenta_de_novo(monkeypatch):
 
 class AppDosFavoritos(AppDeMentira):
     """
-    Eu → Meus Favoritos → Editar, como no Motorola (24/10/2026): a caixa de cada produto, a de
-    marcar tudo, o "Selecionado N/M" e o Remover dos Favoritos, que pergunta antes de remover. A
-    lista mostra até 4 produtos por vez (carrega aos poucos).
+    Eu → Meus Favoritos → Editar, como no Motorola (24/10/2026): as abas Todos e Categoria no
+    alto, a caixa de cada produto, a de marcar tudo, o "Selecionado N/M" e o Remover dos
+    Favoritos, que pergunta antes de remover. A lista mostra até 4 produtos por vez (carrega aos
+    poucos). editando=True: o app guardou a edição aberta, e a página já abre nela (25/10/2026).
     """
 
-    def __init__(self, favoritos=6):
+    def __init__(self, favoritos=6, editando=False):
         super().__init__()
         self.favoritos = [f"Produto {i}" for i in range(favoritos)]
-        self.marcados, self.pergunta = set(), False
+        self.marcados, self.pergunta, self.editando_ao_abrir = set(), False, editando
 
     def _visiveis(self):
         return self.favoritos[:4]
@@ -2301,7 +2302,8 @@ class AppDosFavoritos(AppDeMentira):
         if self.atual in ("favoritos", "editando"):
             editando = self.atual == "editando"
             nos = [_no("Feito" if editando else "Editar", caixa=(940, 160, 1060, 220)) if self.favoritos or editando
-                   else _no("Meus Favoritos", caixa=(300, 160, 700, 220), clicavel=False)]
+                   else _no("Meus Favoritos", caixa=(300, 160, 700, 220), clicavel=False),
+                   _no("Todos", caixa=(40, 300, 250, 360)), _no("Categoria", caixa=(830, 300, 1040, 360))]
             for i, nome in enumerate(self._visiveis()):
                 y = 400 + 450 * i
                 nos.append(_no(nome, caixa=(40, y, 1040, y + 60), clicavel=False))
@@ -2324,7 +2326,7 @@ class AppDosFavoritos(AppDeMentira):
         if self.atual == "inicio" and "Eu" in tocados:
             self.atual = "eu"
         elif self.atual == "eu" and "Meus Favoritos" in tocados:
-            self.atual = "favoritos"
+            self.atual = "editando" if self.editando_ao_abrir else "favoritos"
         elif self.atual == "favoritos" and "Editar" in tocados:
             self.atual = "editando"
         elif self.pergunta:
@@ -2374,6 +2376,28 @@ def test_sem_nada_curtido_nao_ha_o_que_descurtir(monkeypatch, avisos):
     ativar(robo_inicio=8, robo_fim=22)
     assert robo.rodada(d=AppDosFavoritos(favoritos=0), agora=momento("2026-10-25 04:05")) == (
         "nada curtido em Meus Favoritos")
+    assert robo.lista_limpa()
+
+
+def test_favoritos_que_abrem_ja_em_edicao_sao_descurtidos(monkeypatch, avisos):
+    # Motorola, 25/10/2026: o app guardou a edição aberta, e Meus Favoritos abriu com Feito e
+    # Remover dos Favoritos, sem o Editar. O robô achou que não havia nada curtido e deu a
+    # lista por limpa, com os produtos lá.
+    ativar(robo_inicio=8, robo_fim=22)
+    app = AppDosFavoritos(favoritos=5, editando=True)
+    assert robo.rodada(d=app, agora=momento("2026-10-25 04:05")) == "5 produto(s) descurtido(s) em Meus Favoritos"
+    assert app.favoritos == [] and "Editar" not in app.toques and robo.lista_limpa()
+
+
+def test_favoritos_que_nao_abrem_param_sem_dar_a_lista_por_limpa(monkeypatch, avisos):
+    class NaoAbre(AppDosFavoritos):
+        def _nos(self):
+            return [ABA_EU] if self.atual == "favoritos" else super()._nos()
+
+    monkeypatch.setattr(robo, "pausa", lambda segundos: None)
+    ativar(robo_inicio=8, robo_fim=22)
+    resultado = robo.rodada(d=NaoAbre(favoritos=3), agora=momento("2026-10-25 04:05"))
+    assert "Meus Favoritos não abriu" in resultado and not robo.lista_limpa()
 
 
 def test_pausado_nao_descurte(monkeypatch, avisos):
@@ -2423,7 +2447,7 @@ def test_lista_limpa_pelas_4h_o_rascunho_nao_rola_e_continua_limpa(monkeypatch, 
 
 def test_descurtir_que_falha_no_fim_suja_a_lista_e_o_proximo_rola(monkeypatch, avisos):
     ativar(robo_inicio=8, robo_fim=22, robo_limite_min=1, robo_limite_max=1)
-    robo.gravar_estado(lista_limpa=True)
+    robo.gravar_estado(favoritos_limpos=True)
     _fonte(monkeypatch)
     monkeypatch.setattr(robo.ps, "descurtir", lambda d, video: (False, "toquei no coração, mas o produto continuou curtido"))
     assert robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-25 10:00")) == "rascunho salvo"
@@ -2436,10 +2460,10 @@ def test_descurtir_que_falha_no_fim_suja_a_lista_e_o_proximo_rola(monkeypatch, a
 
 
 def test_curtido_de_outro_dia_que_nao_descurtiu_suja_a_lista(monkeypatch, avisos):
-    robo.gravar_estado(lista_limpa=True)
+    robo.gravar_estado(favoritos_limpos=True)
     robo._conferir_curtida((True, robo.ps.CURTIDO_DE_ANTES))
     assert not robo.lista_limpa()
-    robo.gravar_estado(lista_limpa=True)
+    robo.gravar_estado(favoritos_limpos=True)
     robo._conferir_curtida((True, "produto curtido"))
     assert robo.lista_limpa()
 
@@ -2450,7 +2474,7 @@ def test_descurtir_das_4h_que_para_no_meio_deixa_a_lista_suja(monkeypatch, aviso
             return [n.replace('text="Remover"', 'text="Apagar"') for n in super()._nos()]
 
     ativar(robo_inicio=8, robo_fim=22)
-    robo.gravar_estado(lista_limpa=True)
+    robo.gravar_estado(favoritos_limpos=True)
     robo.rodada(d=SemConfirmar(favoritos=3), agora=momento("2026-10-25 04:05"))
     assert not robo.lista_limpa()
 
