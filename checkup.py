@@ -257,6 +257,7 @@ METAS = {
     ("divulgacao", "faxina do Acervo Viral"): (4, 3),
     ("divulgacao", "faxina do tópico do Baixador"): (144, 100),
     ("shopee_video", "resumo das 22h"): (1, 1),
+    ("shopee_video", "descurtir tudo (4h)"): (1, 1),
 }
 # Os processos que acontecem quando há o que fazer (um pedido, uma postagem, um envio):
 # não têm uma quantidade certa por dia e entram na seção dos processos e nas seções de
@@ -279,7 +280,8 @@ SEM_META = {
     ("shopee_video", "anexar o produto"), ("shopee_video", "assistente: envio"),
     ("shopee_video", "conferência da IA (produto × vídeo)"),
     ("shopee_video", "aviso de punição para recorrer"), ("shopee_video", "conferir a tela final"),
-    ("shopee_video", "curtir o produto"), ("shopee_video", "feed: "),
+    ("shopee_video", "curtir o produto"), ("shopee_video", "descurtir no fim do rascunho"),
+    ("shopee_video", "feed: "),
     ("shopee_video", "notificações (respostas)"), ("shopee_video", "preparo interrompido"),
     ("shopee_video", "rodada fora do bot"), ("shopee_video", "título da IA"),
     ("shopee_video", "voltar no app"), ("shopee_video", "app travado"),

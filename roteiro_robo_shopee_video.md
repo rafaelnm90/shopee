@@ -348,6 +348,17 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
      `buttonItemLiked` e aparece "Adicionado aos Meus Favoritos com sucesso!". Se o
      produto já está curtido, `@buttonItemLike` não existe e o passo falha sem
      descurtir. O vídeo do teste fica o mesmo em todos os passos; `video:novo` troca.
+   - Descurtir (pedido do Rafael, 24/10/2026): na mesma página, tocar em
+     `buttonItemLiked` volta o id para `buttonItemLike`. No fim de cada rascunho, o robô
+     descurte assim os produtos que curtiu para ele (pelo link ou pelo Ver Produtos).
+   - Meus Favoritos (Motorola, 24/10/2026): aba **Eu** → **Meus Favoritos** (no bloco
+     "Mais atividades", ~775,2028) abre a lista dos curtidos, em 2 colunas, com os filtros
+     Todos, Status e Categoria e o **Editar** no canto de cima. No Editar, cada produto
+     ganha uma caixa de marcar (embaixo, à esquerda do cartão), o botão de cima vira
+     **Feito** e a barra de baixo mostra a caixa de marcar tudo (~58,2326), o
+     "Selecionado N/M" e o botão **Remover dos Favoritos** (~841,2326). A rotina das 4h
+     marca tudo e remove, de novo e de novo, até a lista acabar (falta ver no celular se
+     o app pergunta antes de remover; o robô confirma se perguntar, nunca no Cancelar).
    - Página do produto presa no esqueleto (ícone de presente e barras cinzas, ids
      `ll_head_root` e `iv_head_image`), até abrindo à mão: era a verificação das 04:27
      de 18/10/2026, que expirou sem resposta. Forçar a parada da Shopee faz a

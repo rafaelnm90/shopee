@@ -5,7 +5,8 @@ rascunhos sozinho e posta os que o Rafael aprova no bot (Shopee Vídeo 🎬 → 
 Robô 📝, no painel_shopee_video.py). Usa os passos e as conferências do explorar
 (postador_shopee_video.py): a IA confere o produto do link com o vídeo, o produto é achado
 no topo de Minhas Curtidas (pelo nome parecido ou, por último, pela foto conferida pela IA)
-e a tela final é conferida antes de salvar e de postar.
+e a tela final é conferida antes de salvar e de postar. No fim de cada rascunho, salvo ou
+não, descurte os produtos que curtiu para ele.
 
 O painel (bot_mestre) chama uma rodada a cada 15 min, num processo à parte: o robô passa
 minutos tocando no celular, e a IA dele não pode dividir a conexão com a do bot.
@@ -15,7 +16,8 @@ minutos tocando no celular, e a IA dele não pode dividir a conexão com a do bo
     python3 robo_shopee_video.py --preparar    # um rascunho na hora (botão Preparar 1 Agora ⚡)
     python3 robo_shopee_video.py --saude       # a Saúde do Vídeo na hora (botão Gerar Apelação ⚖️)
 
-Cada rodada faz no máximo uma coisa, nesta ordem:
+Cada rodada faz no máximo uma coisa, nesta ordem (às 4h, só a primeira):
+0. às 4h, descurte tudo em Meus Favoritos, uma vez por dia (P25);
 1. o treino da semana, na primeira rodada de segunda-feira: percorre o caminho até a tela
    final sem salvar nem postar e confere cada tela com o mapa (os CAMINHOs abaixo);
 2. apaga no app um rascunho que o Rafael recusou;
@@ -206,9 +208,29 @@ def agora_br(agora=None):
 
 
 def no_horario(config, agora=None):
-    """O robô pode rodar agora: no Horário do Robô ou no Horário das Interações."""
+    """O robô pode rodar agora: no Horário do Robô, no Horário das Interações ou na hora do descurtir."""
     return (config["robo_inicio"] <= agora_br(agora).hour < config["robo_fim"]
-            or na_hora_das_interacoes(config, agora))
+            or na_hora_das_interacoes(config, agora) or na_hora_do_descurtir(agora))
+
+
+# Uma hora do dia só para descurtir tudo em Meus Favoritos (os produtos curtidos para o
+# Adicionar Produto): nela o robô não prepara, não posta e não interage. Fixa às 4h, de
+# madrugada. Escolha do Rafael (24/10, P25): DECISOES.md, Shopee Vídeo.
+HORA_DO_DESCURTIR = 4
+
+
+def na_hora_do_descurtir(agora=None):
+    return agora_br(agora).hour == HORA_DO_DESCURTIR
+
+
+def descurtir_pendente(agora=None):
+    """
+    Falta descurtir tudo hoje? Uma vez por dia, e de novo na rodada seguinte (na mesma
+    hora) quando a anterior parou depois de VOLTAS_DO_DESCURTIR voltas.
+    """
+    estado = ler_estado()
+    hoje = agora_br(agora).strftime("%Y-%m-%d")
+    return bool(estado.get("descurtir_continuar")) or not (estado.get("descurtir_em") or "").startswith(hoje)
 
 
 # O Horário das Interações (responder os comentários dos vídeos do Rafael e comentar e
@@ -228,13 +250,17 @@ def na_hora_das_interacoes(config, agora=None):
 
 
 def trechos_de_postar(config):
-    """Os trechos do dia, em minutos (início, fim), em que o robô prepara e posta."""
-    inicio, fim = config["robo_inicio"] * 60, min(config["robo_fim"] * 60, 24 * 60 - 1)
+    """
+    Os trechos do dia, em minutos (início, fim), em que o robô prepara e posta: o Horário
+    do Robô sem o Horário das Interações e sem a hora do descurtir.
+    """
+    trechos = [(config["robo_inicio"] * 60, min(config["robo_fim"] * 60, 24 * 60 - 1))]
+    cortes = [(HORA_DO_DESCURTIR * 60, (HORA_DO_DESCURTIR + 1) * 60)]
     janela = janela_das_interacoes(config)
-    if not janela:
-        return [(inicio, fim)] if fim > inicio else []
-    corte_inicio, corte_fim = janela[0] * 60, janela[1] * 60
-    trechos = [(inicio, min(fim, corte_inicio)), (max(inicio, corte_fim), fim)]
+    if janela:
+        cortes.append((janela[0] * 60, janela[1] * 60))
+    for corte_inicio, corte_fim in cortes:
+        trechos = [parte for a, b in trechos for parte in ((a, min(b, corte_inicio)), (max(a, corte_fim), b))]
     return [(a, b) for a, b in trechos if b > a]
 
 
@@ -601,6 +627,7 @@ PASSOS = (
     ("suspensa pela Shopee", "conta suspensa pela Shopee"),
     ("rodada foi interrompida", "rodada interrompida"),
     ("não está respondendo", "app travado"),
+    ("Meus Favoritos", "descurtir em Meus Favoritos"),
     ("de férias", "loja de férias"),
     ("notificação do comentário", "achar a notificação"),
     ("painel de comentários", "abrir os comentários"),
@@ -647,10 +674,11 @@ PASSOS = (
 )
 SIMBOLOS = {"salvo": "✅", "postado": "📤", "apagado": "🗑️", "pulado": "⏭️", "parou": "⚠️", "erro": "❌",
             "verificação": "🧩", "suspensa": "⛔", "sem vídeo": "📭", "treino ok": "🧭", "treino parou": "🧭",
-            "saúde lida": "🩺", "respondido": "💬", "comentado": "❤️"}
+            "saúde lida": "🩺", "respondido": "💬", "comentado": "❤️", "descurtido": "💔"}
 NOMES_DAS_ACOES = {"rascunho": "Rascunho", "postar": "Postagem", "apagar": "Apagar rascunho",
                    "treino": "Testar Caminho", "rodada": "Rodada", "saude": "Saúde do Vídeo",
-                   "responder": "Resposta a comentário", "feed": "Feed (Para você)"}
+                   "responder": "Resposta a comentário", "feed": "Feed (Para você)",
+                   "descurtir": "Descurtir tudo (4h)"}
 
 
 def _criar_tabela_tentativas(con):
@@ -779,8 +807,8 @@ def proxima_postagem(config, agora=None, sorteio=random):
     Quando postar um rascunho que o Rafael acabou de aprovar: depois do último aprovado
     (ou postado) com um intervalo sorteado, ou daqui a poucos minutos se nenhum está
     marcado. Fora do Horário do Robô, vai para o começo do próximo horário, e no Horário
-    das Interações, para o fim dele, com uns minutos sorteados: os aprovados saem
-    espalhados, nunca todos de uma vez.
+    das Interações e na hora do descurtir, para o fim deles, com uns minutos sorteados: os
+    aprovados saem espalhados, nunca todos de uma vez.
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     momento = agora_br(agora)
@@ -794,11 +822,14 @@ def proxima_postagem(config, agora=None, sorteio=random):
         quando = momento + timedelta(minutes=sorteio.randint(*ESPERA_DA_PRIMEIRA))
     janela = janela_das_interacoes(config)
     # Ajusta até cair no horário de postar: fora do Horário do Robô, o começo do próximo; no
-    # Horário das Interações (P22), o fim dele. Sempre com uns minutos sorteados.
-    for _ in range(4):
-        if janela and janela[0] <= quando.hour < janela[1]:
+    # Horário das Interações (P22) e na hora do descurtir (P25), o fim deles. Sempre com uns
+    # minutos sorteados.
+    for _ in range(6):
+        fim_do_corte = (janela[1] if janela and janela[0] <= quando.hour < janela[1]
+                        else HORA_DO_DESCURTIR + 1 if quando.hour == HORA_DO_DESCURTIR else None)
+        if fim_do_corte is not None:
             quando = (datetime(quando.year, quando.month, quando.day, tzinfo=momento.tzinfo)
-                      + timedelta(hours=janela[1], minutes=sorteio.randint(*ESPERA_DA_PRIMEIRA)))
+                      + timedelta(hours=fim_do_corte, minutes=sorteio.randint(*ESPERA_DA_PRIMEIRA)))
         elif quando.hour >= config["robo_fim"] or (quando.date() > momento.date() and quando.hour < config["robo_inicio"]):
             dia = quando.date() if quando.hour < config["robo_inicio"] else quando.date() + timedelta(days=1)
             quando = datetime(dia.year, dia.month, dia.day, config["robo_inicio"], tzinfo=momento.tzinfo)
@@ -825,12 +856,16 @@ def recusar(ident, agora=None):
 
 def o_que_fazer(config, agora=None):
     """
-    A tarefa desta rodada: ("treino", None), ("apagar", id), ("postar", id), ("saude",
+    A tarefa desta rodada: ("descurtir", None) (tudo em Meus Favoritos, às 4h, e nessa
+    hora só isso), ("treino", None), ("apagar", id), ("postar", id), ("saude",
     None) (a Saúde do Vídeo, uma vez por dia e de hora em hora depois do Já recorri),
     ("rascunho", None), ("responder", None) (os comentários dos vídeos, uma vez por dia),
     ("feed", None) (um vídeo do feed, até 3 por dia) ou None. Gasta o horário do plano, ou
     uma tentativa a mais do rascunho que falhou, quando escolhe um rascunho.
     """
+    if na_hora_do_descurtir(agora):
+        # A hora do descurtir é só dele (P25).
+        return ("descurtir", None) if descurtir_pendente(agora) else None
     if treino_da_semana_pendente(agora):
         return "treino", None
     recusados = listar("recusado")
@@ -1508,8 +1543,9 @@ def preparar_rascunho(d, config, agora=None):
         return resultado
     ident = criar(video["id"], agora)
     assistente.registrar(video["id"], "robo", "rascunho do robô", agora)
+    curtidos = []
     try:
-        _preparar(d, ident, video, config.get("fonte", assistente.FONTE_PADRAO), agora)
+        _preparar(d, ident, video, config.get("fonte", assistente.FONTE_PADRAO), agora, curtidos)
     except Suspensa as e:
         _desfazer_reserva(ident, video["id"], "conta suspensa", False)
         registrar_tentativa("rascunho", "suspensa", str(e), _produto_do_video(video), agora)
@@ -1522,15 +1558,66 @@ def preparar_rascunho(d, config, agora=None):
         _desfazer_reserva(ident, video["id"], e.motivo, e.do_video)
         registrar_tentativa("rascunho", "pulado" if e.do_video else "parou", e.motivo, _produto_do_video(video), agora)
         e.id_video = video["id"]
+        descurtir_no_fim(d, video, curtidos)
         raise
     except Exception as e:
         _desfazer_reserva(ident, video["id"], type(e).__name__, False)
         registrar_tentativa("rascunho", "erro", f"erro inesperado ({type(e).__name__})", _produto_do_video(video), agora)
         e.id_video = video["id"]
+        descurtir_no_fim(d, video, curtidos)
         raise
     registrar_tentativa("rascunho", "salvo", produto=", ".join((pegar(ident) or {}).get("produtos") or [])
                         or _produto_do_video(video), agora=agora)
+    descurtir_no_fim(d, video, curtidos)
     return "rascunho salvo"
+
+
+def descurtir_no_fim(d, video, curtidos):
+    """
+    O fim de cada rascunho, salvo ou não: descurte os produtos que o robô curtiu nele
+    (curtidos: (posição no Ver Produtos, nome), com a posição None no link de produto), pelo
+    mesmo caminho do curtir. A curtida só serve para o produto subir em Minhas Curtidas; o
+    rascunho salvo guarda o produto anexado, e o postar confere a tela final antes de tocar
+    em Postar. O que não descurtir aqui fica para o descurtir das 4h. A Verificação da
+    Shopee segue parando tudo; a conta suspensa não passa por aqui (o robô não toca no
+    celular nela). Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    if not curtidos:
+        return
+    try:
+        if video.get("de_video"):
+            _abrir_ver_produtos(d, video)
+            for indice, nome in curtidos:
+                xml = tela(d)
+                pontos = ps.produtos_vinculados(xml)
+                if indice >= len(pontos) or ps.proibido_no_ponto(xml, *pontos[indice]):
+                    registro_processos.registrar(REGISTRO, "descurtir no fim do rascunho", "produto fora da lista",
+                                                 ok=False)
+                    continue
+                d.click(*pontos[indice])
+                pausa(8)
+                xml = tela(d)
+                if ps.nome_na_pagina_do_produto(xml) == nome:
+                    ps.descurtir_na_pagina(d, xml)
+                else:
+                    registro_processos.registrar(REGISTRO, "descurtir no fim do rascunho",
+                                                 "outro produto na posição", ok=False)
+                d.press("back")
+                pausa(4)
+        else:
+            ir_ao_inicio(d)
+            ps.limpar_aviso_rapido(d)
+            ps.abrir_link(d, video["link"])
+            pausa(8)
+            ps.descurtir(d, video)
+    except Verificacao:
+        raise
+    except Parada as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Não descurti no fim do rascunho: {ps.mascarar(e.motivo)}")
+        registro_processos.registrar(REGISTRO, "descurtir no fim do rascunho", "parou", ok=False)
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Erro ao descurtir no fim do rascunho: {type(e).__name__}")
+        registro_processos.registrar(REGISTRO, "descurtir no fim do rascunho", "erro", type(e).__name__, ok=False)
 
 
 def _desfazer_reserva(ident, id_video, motivo, do_video):
@@ -1622,12 +1709,132 @@ def _textos_da_ia(video):
     raise Parada(f"a IA não devolveu o título ({motivo})")
 
 
-def _preparar(d, ident, video, fonte, agora=None):
+# Eu → Meus Favoritos → Editar, como no Motorola (24/10/2026): cada produto ganha uma
+# caixa de marcar; na barra de baixo ficam a caixa de marcar tudo, o "Selecionado N/M" e o
+# botão Remover dos Favoritos. A lista carrega aos poucos: o robô marca tudo e remove de
+# novo, até não sobrar nada, em VOLTAS_DO_DESCURTIR voltas por rodada.
+MEUS_FAVORITOS = "Meus Favoritos"
+REMOVER_DOS_FAVORITOS = "Remover dos Favoritos"
+VOLTAS_DO_DESCURTIR = 10
+# O botão que confirma a remoção, se o app perguntar (nunca o Cancelar).
+CONFIRMAR_REMOCAO = ("@buttonDefaultPositive", "Remover", "Excluir", "Confirmar", "Sim", "OK")
+
+
+def selecionados(xml):
+    """(marcados, total) do "Selecionado N/M" da edição de Meus Favoritos; None sem ele na tela."""
+    for el in ps.elementos(xml):
+        achado = re.search(r"selecionado\D*(\d+)\s*/\s*(\d+)", el["texto"], re.I)
+        if achado:
+            return int(achado.group(1)), int(achado.group(2))
+    return None
+
+
+def caixa_de_marcar_tudo(xml):
+    """A caixa de marcar tudo: a que aceita toque à esquerda do "Selecionado N/M", na mesma linha."""
+    lista = ps.elementos(xml)
+    texto = next((el for el in lista if re.match(r"selecionado", el["texto"].strip(), re.I)), None)
+    if not texto:
+        return None
+    esquerda, topo, _direita, base = texto["caixa"]
+    meio = (topo + base) // 2
+    caixas = [el for el in lista if el["clicavel"] and el["caixa"][2] <= esquerda + 5
+              and el["caixa"][1] <= meio <= el["caixa"][3]]
+    return ps._centro(min(caixas, key=lambda el: el["caixa"][0])) if caixas else None
+
+
+def _ponto_exato(xml, alvo):
+    """O centro do elemento com exatamente esse texto (ou esse @id); None sem ele."""
+    for el in ps.elementos(xml):
+        if (alvo.startswith("@") and el["id"] == alvo[1:]) or ps._normal(el["texto"]) == ps._normal(alvo):
+            return ps._centro(el)
+    return None
+
+
+def _confirmar_remocao(d):
+    """Se o app pergunta antes de remover, toca no botão que confirma."""
+    xml = tela(d)
+    for alvo in CONFIRMAR_REMOCAO:
+        ponto = _ponto_exato(xml, alvo)
+        if ponto and not ps.proibido_no_ponto(xml, *ponto):
+            d.click(*ponto)
+            pausa(3)
+            return
+
+
+def descurtir_tudo(d, agora=None):
+    """
+    A rotina das 4h: tira de Meus Favoritos tudo o que está curtido (Eu → Meus Favoritos →
+    Editar → marcar tudo → Remover dos Favoritos), até a lista acabar. Sobrou depois de
+    VOLTAS_DO_DESCURTIR voltas: a rodada seguinte, na mesma hora, continua. Só números no
+    registro, nunca o nome dos produtos. Escolha do Rafael (P25): DECISOES.md, Shopee Vídeo.
+    """
+    ir_ao_inicio(d)
+    tocar(d, "Eu", 5)
+    if not esperar_na_tela(d, MEUS_FAVORITOS, 9):
+        ps.rolar(d)
+        pausa(2)
+        if not tem(tela(d), MEUS_FAVORITOS):
+            raise Parada("não achei Meus Favoritos na aba Eu")
+    tocar(d, MEUS_FAVORITOS, 6)
+    if not esperar_na_tela(d, "Editar", 12):
+        # Sem nada curtido, a página não tem o que editar.
+        registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", "nada curtido", ok=True)
+        ir_ao_inicio(d)
+        return "nada curtido em Meus Favoritos"
+    tocar(d, "Editar", 3)
+    removidos, acabou = 0, False
+    for volta in range(VOLTAS_DO_DESCURTIR):
+        xml = tela(d)
+        caixa = caixa_de_marcar_tudo(xml)
+        if not caixa:
+            if volta:
+                # A edição fechou com a lista vazia.
+                acabou = True
+                break
+            raise Parada("a edição de Meus Favoritos não mostrou a caixa de marcar tudo")
+        marcados, total = 0, 0
+        for _ in range(2):
+            # A caixa de marcar tudo pode ter ficado marcada da volta anterior: um toque a desmarca.
+            d.click(*caixa)
+            pausa(2)
+            marcados, total = selecionados(tela(d)) or (0, 0)
+            if marcados or not total:
+                break
+        if not marcados:
+            if total:
+                raise Parada("marquei tudo em Meus Favoritos, mas nenhum produto ficou marcado")
+            acabou = True
+            break
+        tocar(d, REMOVER_DOS_FAVORITOS, 3)
+        _confirmar_remocao(d)
+        pausa(4)
+        depois = selecionados(tela(d))
+        if depois and depois[0] and depois[1] >= total:
+            # Os mesmos continuam marcados e a lista não diminuiu: a remoção não pegou (uma
+            # pergunta do app que o robô não conhece, por exemplo).
+            raise Parada("toquei em Remover dos Favoritos, mas a lista de Meus Favoritos não diminuiu")
+        removidos += marcados
+    gravar_estado(descurtir_continuar=not acabou)
+    xml = tela(d)
+    if tem_exato(xml, "Feito"):
+        d.click(*_ponto_exato(xml, "Feito"))
+        pausa(2)
+    ir_ao_inicio(d)
+    registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", "descurtido" if acabou else "continua depois",
+                                 f"{removidos} produto(s)", ok=True if acabou else None)
+    if not acabou:
+        return f"{removidos} produto(s) descurtido(s) em Meus Favoritos; o resto fica para a próxima rodada"
+    return f"{removidos} produto(s) descurtido(s) em Meus Favoritos"
+
+
+def _preparar(d, ident, video, fonte, agora=None, curtidos=None):
+    """O rascunho no celular. curtidos recebe cada produto que o robô curtiu (descurtir_no_fim)."""
+    curtidos = [] if curtidos is None else curtidos
     vistos = []
     if video.get("de_video"):
         avisar("🤖 Robô da Shopee Vídeo: começando um rascunho.\n\nProdutos: os do Ver Produtos do vídeo; a IA "
                f"confere cada um.\nVídeo: o mais novo de {assistente.FONTES.get(fonte, fonte)} ainda não usado.")
-        nomes = _produtos_do_video(d, video, vistos)
+        nomes = _produtos_do_video(d, video, vistos, curtidos)
     else:
         nome = ps.nome_do_produto(video)
         if not nome:
@@ -1663,6 +1870,7 @@ def _preparar(d, ident, video, fonte, agora=None):
         ps.abrir_link(d, video["link"])
         _esperar_a_pagina_do_produto(d)
         _conferir(ps.curtir(d, video))
+        curtidos.append((None, ps.nome_do_produto(video)))
         pausa(3)
     ir_ao_perfil(d)
 
@@ -1725,13 +1933,54 @@ def _esperar_a_pagina_do_produto(d, voltas=4):
             raise Parada(MOTIVO_DE_FERIAS, do_video=True)
 
 
-def _produtos_do_video(d, video, vistos):
+def _produtos_do_video(d, video, vistos, curtidos=None):
     """
     Link de vídeo (Ver Produtos): abre o vídeo no celular e, na lista do Ver Produtos (pelo
     "Ver Produtos (N)" ou, com um produto só, pela barra dele), cada produto que o criador vinculou (nunca as recomendações de "Você Também Pode Gostar"):
     lê o nome na página dele, a IA confere o vídeo com esse nome VEZES_DA_IA vezes, e o
     confirmado é curtido. Devolve os nomes confirmados; nenhum ou vídeo removido: o vídeo
     fica de lado. Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    quantos = _abrir_ver_produtos(d, video)
+    confirmados, de_ferias = [], 0
+    for i in range(min(quantos, MAXIMO_PRODUTOS_DO_VIDEO)):
+        xml = tela(d)
+        pontos = ps.produtos_vinculados(xml)
+        if i >= len(pontos):
+            break
+        if ps.proibido_no_ponto(xml, *pontos[i]):
+            raise Parada(ps.RECUSA)
+        ps.limpar_aviso_rapido(d)
+        d.click(*pontos[i])
+        pausa(8)
+        xml = tela(d)
+        nome = ps.nome_na_pagina_do_produto(xml)
+        if ps.loja_de_ferias(d, xml):
+            # Não entra no Adicionar Produto do vídeo: fica de fora, como o recusado pela IA.
+            registro_processos.registrar(REGISTRO, "produto de loja de férias", "produto do Ver Produtos de fora",
+                                         ok=None)
+            de_ferias += 1
+        elif nome and nome not in confirmados:
+            deste = []
+            ok, _ = ps.ia_confere_produto(dict(video, produto=nome), deste, avisar=False)
+            if ok:
+                _conferir(ps.curtir_na_pagina(d, xml))
+                if curtidos is not None:
+                    curtidos.append((i, nome))
+                confirmados.append(nome)
+                vistos.extend(deste)
+        d.press("back")
+        pausa(4)
+    if not confirmados:
+        raise Parada(MOTIVO_DE_FERIAS if de_ferias else "a IA não confirmou nenhum produto do Ver Produtos",
+                     do_video=True)
+    return confirmados
+
+
+def _abrir_ver_produtos(d, video):
+    """
+    Abre o vídeo do link e a lista do Ver Produtos (pelo "Ver Produtos (N)" ou, com um
+    produto só, pela barra dele). Devolve quantos produtos o criador vinculou.
     """
     ir_ao_inicio(d)
     ps.abrir_link(d, video["link"])
@@ -1757,37 +2006,7 @@ def _produtos_do_video(d, video, vistos):
     quantos = len(ps.produtos_vinculados(tela(d)))
     if not quantos:
         raise Parada("o Ver Produtos não mostrou os produtos do criador", do_video=True)
-    confirmados, de_ferias = [], 0
-    for i in range(min(quantos, MAXIMO_PRODUTOS_DO_VIDEO)):
-        xml = tela(d)
-        pontos = ps.produtos_vinculados(xml)
-        if i >= len(pontos):
-            break
-        if ps.proibido_no_ponto(xml, *pontos[i]):
-            raise Parada(ps.RECUSA)
-        ps.limpar_aviso_rapido(d)
-        d.click(*pontos[i])
-        pausa(8)
-        xml = tela(d)
-        nome = ps.nome_na_pagina_do_produto(xml)
-        if ps.loja_de_ferias(d, xml):
-            # Não entra no Adicionar Produto do vídeo: fica de fora, como o recusado pela IA.
-            registro_processos.registrar(REGISTRO, "produto de loja de férias", "produto do Ver Produtos de fora",
-                                         ok=None)
-            de_ferias += 1
-        elif nome and nome not in confirmados:
-            deste = []
-            ok, _ = ps.ia_confere_produto(dict(video, produto=nome), deste, avisar=False)
-            if ok:
-                _conferir(ps.curtir_na_pagina(d, xml))
-                confirmados.append(nome)
-                vistos.extend(deste)
-        d.press("back")
-        pausa(4)
-    if not confirmados:
-        raise Parada(MOTIVO_DE_FERIAS if de_ferias else "a IA não confirmou nenhum produto do Ver Produtos",
-                     do_video=True)
-    return confirmados
+    return quantos
 
 
 def _sem_ver_produtos(xml):
@@ -2579,7 +2798,8 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
             # Os horários que passam na suspensão são pulados, como pausado.
             consumir_horarios(config, agora)
             ler_a_saude = saude_do_dia_pendente(agora) or saude_pedida_pelo_recurso(agora)
-            if not (no_horario(config, agora) and ler_a_saude):
+            # A hora do descurtir é só dele; na suspensão, nem ele (o robô não toca no celular).
+            if not (no_horario(config, agora) and not na_hora_do_descurtir(agora) and ler_a_saude):
                 return f"conta suspensa até {quando_acaba(suspenso_ate(config))}"
             # A leitura do dia conta já aqui: com o celular fora, não tenta de novo a cada rodada.
             gravar_estado(saude_tentada_em=_momento(agora))
@@ -2654,6 +2874,11 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
                        f"{novas} nova(s) para recorrer" + (" (o texto de cada uma chega aqui em seguida)." if novas
                                                              else ".")
                        + "\n\nTudo em Relatório Geral 📊 → Saúde da Shopee Vídeo 🩺.")
+            return resultado
+        if acao == "descurtir":
+            gravar_estado(descurtir_em=_momento(agora), descurtir_continuar=False)
+            resultado = descurtir_tudo(d, agora)
+            registrar_tentativa("descurtir", "descurtido", agora=agora)
             return resultado
         if acao == "responder":
             gravar_estado(respostas_em=_momento(agora), respostas_continuar=False)

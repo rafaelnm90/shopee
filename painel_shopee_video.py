@@ -666,6 +666,8 @@ def texto_robo(config, agora=None, celular=None):
         f"🕗 Horário do robô: <b>{rotulo_janela(config['robo_inicio'], config['robo_fim'])}</b>"
         + (f" (prepara e posta {rotulo_de_postar(config)})" if robo.janela_das_interacoes(config) else "") + "\n"
         f"💬 Horário das interações: <b>{rotulo_interacoes(config)}</b>\n"
+        f"💔 Descurtir tudo em Meus Favoritos: todo dia às <b>{robo.HORA_DO_DESCURTIR}h</b> (nessa hora, só isso; "
+        "no fim de cada rascunho, ele já tira as curtidas que deu)\n"
         f"📝 Esperando a sua aprovação: <b>{len(robo.esperando_aprovacao())}</b> | "
         f"✅ Aprovados na fila: <b>{len(robo.listar('aprovado'))}</b>\n"
         f"🧭 Treino: {_linha_treino()}\n\n"

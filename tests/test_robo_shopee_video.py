@@ -210,6 +210,44 @@ def test_mudar_a_janela_replaneja_o_que_falta_sem_perder_os_feitos():
     assert novo["feitos"] == 2 and all(not "12:00" <= h < "15:00" for h in novo["horarios"])
 
 
+# --- A hora do descurtir (escolha do Rafael, P25: fixa às 4h) ---
+
+def test_as_4h_o_robo_so_descurte_uma_vez(monkeypatch):
+    config = {**robo.PADRAO, "robo_limite_min": 6, "robo_limite_max": 6, "robo_inicio": 0, "robo_fim": 24}
+    monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: True)
+    aprovado = _rascunho("aprovado", postar_em="2026-10-25 03:00:00")
+    _rascunho("recusado")
+    assert robo.no_horario({**config, "robo_inicio": 8, "robo_fim": 22}, momento("2026-10-25 04:10"))
+    assert robo.o_que_fazer(config, momento("2026-10-25 04:10")) == ("descurtir", None)
+    robo.gravar_estado(descurtir_em="2026-10-25 04:10:00", descurtir_continuar=False)
+    # Feito o descurtir, o resto da hora fica parado: nem o treino, nem apagar, nem postar.
+    assert robo.o_que_fazer(config, momento("2026-10-25 04:40")) is None
+    robo.gravar_estado(descurtir_continuar=True)
+    assert robo.o_que_fazer(config, momento("2026-10-25 04:40")) == ("descurtir", None)
+    robo.gravar_estado(descurtir_continuar=False)
+    assert robo.o_que_fazer(config, momento("2026-10-25 05:00"))[0] in ("treino", "apagar")
+    assert robo.o_que_fazer({**config, "robo_inicio": 8}, momento("2026-10-25 04:59")) is None
+    assert aprovado
+
+
+def test_plano_e_aprovados_pulam_a_hora_do_descurtir():
+    class Sorteio:
+        @staticmethod
+        def randint(a, b):
+            return a
+
+    config = {**robo.PADRAO, "robo_limite_min": 24, "robo_limite_max": 24, "robo_inicio": 0, "robo_fim": 24}
+    horarios = robo.planejar(config, "2026-10-25")
+    assert len(horarios) == 24 and not any(h.startswith("04:") for h in horarios)
+    assert robo.proxima_postagem(config, momento("2026-10-25 03:58"), sorteio=Sorteio) == "2026-10-25 05:05:00"
+
+
+def test_conta_suspensa_as_4h_nao_le_a_saude(monkeypatch, avisos):
+    ativar(robo_inicio=0, robo_fim=24, robo_suspenso_ate="2026-11-01 00:00:00")
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: True)
+    assert "suspensa" in robo.rodada(d=Intocavel(), agora=momento("2026-10-25 04:10"))
+
+
 # --- A rodada não toca no celular quando não deve ---
 
 class Intocavel:
@@ -356,6 +394,7 @@ CAMINHO = {
     ("camera", "Biblioteca"): "galeria", ("galeria", "@ll_check"): "galeria_marcada",
     ("galeria_marcada", "@tv_pick_top_next"): "edicao", ("edicao", "@tv_compress"): "final",
     ("pagina_curta", VESTIDO): "pagina_completa", ("pagina_completa", "@buttonItemLike"): "pagina_curtida",
+    ("pagina_curtida", "@buttonItemLiked"): "pagina_completa",
     ("final", "@ll_add_product_symbol"): "curtidas", ("curtidas", "Adicionar"): "janela",
     ("janela", "Feito"): "final", ("final", "@tv_drafts_box"): "live",
     ("inicio", "Notificações"): "notificacoes", ("notificacoes", "Lives, Vídeos e Afiliados"): "notificacoes_videos",
@@ -371,6 +410,8 @@ class AppDeMentira:
         self.toques, self.teclas, self.comandos, self.enviados, self.prints = [], [], [], [], []
         self.clipboard, self.em_foco = None, False
         self.galeria = set()
+        # A curtida do produto fica na conta: a página completa aberta de novo mostra o coração cheio.
+        self.curtido = False
 
     def _nos(self):
         nos = TELAS[self.atual]
@@ -391,7 +432,11 @@ class AppDeMentira:
             if (self.atual, nome) in CAMINHO:
                 if nome == "Feito":
                     self.com_produto = True
+                if nome in ("@buttonItemLike", "@buttonItemLiked"):
+                    self.curtido = nome == "@buttonItemLike"
                 self.atual = CAMINHO[(self.atual, nome)]
+                if self.atual == "pagina_completa" and self.curtido:
+                    self.atual = "pagina_curtida"
                 return
 
     def __call__(self, **seletor):
@@ -483,7 +528,9 @@ def test_rascunho_completo_curte_pelo_nome_e_salva_sem_tocar_em_postar(monkeypat
     resultado = robo.rodada(d=app, agora=momento("2026-10-22 23:59"))
     assert resultado == "rascunho salvo"
     assert "@buttonItemLike" in app.toques and "Postar" not in app.toques and "@btn_post" not in app.toques
-    assert app.toques[-1] == "@tv_drafts_box" and app.legenda == TITULO
+    assert "@tv_drafts_box" in app.toques and app.legenda == TITULO
+    # Salvo o rascunho, o robô descurte o produto que curtiu para ele (pedido do Rafael, 24/10).
+    assert app.toques.index("@tv_drafts_box") < app.toques.index("@buttonItemLiked") and not app.curtido
     rascunho = robo.esperando_aprovacao()[0]
     assert rascunho["titulo"] == TITULO and rascunho["produtos"] == [VESTIDO] and rascunho["link"] == LINK
     assert os.path.exists(rascunho["arquivo"]) and os.path.exists(rascunho["print"])
@@ -616,7 +663,7 @@ def test_mesmo_video_3_vezes_depois_outro_ate_3_videos_e_espera_o_proximo_horari
                 f"Vestido 👗\n{LINK}", f"2026-10-22 0{numero}:00:00")
     tentados = []
 
-    def falha(d, ident, video, fonte, agora=None):
+    def falha(d, ident, video, fonte, agora=None, curtidos=None):
         tentados.append(video["id"])
         raise robo.Parada("não achei o botão Rascunhos")
 
@@ -1450,6 +1497,8 @@ class AppDoVerProdutos(AppDeMentira):
     def __init__(self, removido=False, player="normal"):
         super().__init__()
         self.removido, self.curtidos, self.anexados, self.janela = removido, set(), [], None
+        # Todos os que o robô curtiu, mesmo os descurtidos no fim do rascunho.
+        self.ja_curtidos = set()
         # player: "normal"; "lento" (o Ver Produtos só aparece na segunda olhada); "um_produto"
         # (um produto só: o cartão e a barra com o nome dele, sem o Ver Produtos); "so_cartao"
         # (o cartão, sem a barra); "vazio"; "sem_player" (outra tela).
@@ -1529,6 +1578,9 @@ class AppDoVerProdutos(AppDeMentira):
             return
         elif self.atual.startswith("pdp:") and "@buttonItemLike" in textos:
             self.curtidos.add(self.atual[4:])
+            self.ja_curtidos.add(self.atual[4:])
+        elif self.atual.startswith("pdp:") and "@buttonItemLiked" in textos:
+            self.curtidos.discard(self.atual[4:])
         elif self.atual == "final" and "@tv_add_more" in textos:
             self.atual = "curtidas"
         elif self.atual == "final" and "@ll_add_product_symbol" in textos:
@@ -1577,7 +1629,9 @@ def test_link_de_video_curte_e_anexa_todos_os_produtos_que_a_ia_confirma(monkeyp
     _fonte_de_video(monkeypatch)
     app = AppDoVerProdutos()
     assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
-    assert app.curtidos == {PRODUTO_A, PRODUTO_B} and app.anexados == [PRODUTO_A, PRODUTO_B]
+    assert app.ja_curtidos == {PRODUTO_A, PRODUTO_B} and app.anexados == [PRODUTO_A, PRODUTO_B]
+    # No fim do rascunho, as curtidas que o robô deu saem (pedido do Rafael, 24/10).
+    assert app.curtidos == set()
     assert RECOMENDADO not in app.toques
     rascunho = robo.esperando_aprovacao()[0]
     assert rascunho["produtos"] == [PRODUTO_A, PRODUTO_B]
@@ -1589,7 +1643,7 @@ def test_link_de_video_deixa_de_fora_o_produto_que_a_ia_recusa(monkeypatch, avis
     _fonte_de_video(monkeypatch, confirma=(PRODUTO_B,))
     app = AppDoVerProdutos()
     assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
-    assert app.curtidos == {PRODUTO_B} and app.anexados == [PRODUTO_B]
+    assert app.ja_curtidos == {PRODUTO_B} and app.anexados == [PRODUTO_B] and app.curtidos == set()
     assert robo.esperando_aprovacao()[0]["produtos"] == [PRODUTO_B]
     assert not any("A IA" in str(a) and PRODUTO_A in str(a) for a in avisos)   # recusado não vira aviso
 
@@ -1614,7 +1668,7 @@ def test_link_de_video_com_um_produto_so_abre_a_lista_pela_barra(monkeypatch, av
     _fonte_de_video(monkeypatch)
     app = AppDoVerProdutos(player="um_produto")
     assert robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
-    assert app.curtidos == {PRODUTO_A} and app.anexados == [PRODUTO_A]
+    assert app.ja_curtidos == {PRODUTO_A} and app.anexados == [PRODUTO_A] and app.curtidos == set()
     assert RECOMENDADO not in app.toques
     assert robo.esperando_aprovacao()[0]["produtos"] == [PRODUTO_A]
 
@@ -2220,3 +2274,121 @@ def test_horario_do_plano_interrompido_no_meio_tenta_de_novo(monkeypatch):
     # Só uma vez: a marca saiu.
     robo.soltar_preparos_interrompidos(agora)
     assert robo.o_que_fazer(config, agora) is None
+
+
+# --- Descurtir tudo às 4h (escolha do Rafael, P25) ---
+
+class AppDosFavoritos(AppDeMentira):
+    """
+    Eu → Meus Favoritos → Editar, como no Motorola (24/10/2026): a caixa de cada produto, a de
+    marcar tudo, o "Selecionado N/M" e o Remover dos Favoritos, que pergunta antes de remover. A
+    lista mostra até 4 produtos por vez (carrega aos poucos).
+    """
+
+    def __init__(self, favoritos=6):
+        super().__init__()
+        self.favoritos = [f"Produto {i}" for i in range(favoritos)]
+        self.marcados, self.pergunta = set(), False
+
+    def _visiveis(self):
+        return self.favoritos[:4]
+
+    def _nos(self):
+        if self.atual == "eu":
+            return [ABA_EU, _no("Criadores & Afiliados", caixa=(600, 1630, 1000, 1700)),
+                    _no("Meus Favoritos", caixa=(600, 1990, 950, 2060))]
+        if self.atual in ("favoritos", "editando"):
+            editando = self.atual == "editando"
+            nos = [_no("Feito" if editando else "Editar", caixa=(940, 160, 1060, 220)) if self.favoritos or editando
+                   else _no("Meus Favoritos", caixa=(300, 160, 700, 220), clicavel=False)]
+            for i, nome in enumerate(self._visiveis()):
+                y = 400 + 450 * i
+                nos.append(_no(nome, caixa=(40, y, 1040, y + 60), clicavel=False))
+                if editando:
+                    nos.append(_no(caixa=(60, y + 300, 150, y + 390)))
+            if editando:
+                nos += [_no(caixa=(30, 2290, 86, 2360)),
+                        _no(caixa=(100, 2290, 330, 2360), filhos=_no(
+                            f"Selecionado {len(self.marcados)}/{len(self.favoritos)}", caixa=(130, 2300, 325, 2350),
+                            clicavel=False)),
+                        _no("Remover dos Favoritos", caixa=(700, 2290, 980, 2360))]
+            if self.pergunta:
+                nos += [_no("Remover os produtos selecionados?", caixa=(200, 1000, 880, 1060), clicavel=False),
+                        _no("Cancelar", caixa=(200, 1200, 500, 1280)), _no("Remover", caixa=(580, 1200, 880, 1280))]
+            return nos
+        return super()._nos()
+
+    def click(self, x, y):
+        tocados = {el["texto"] for el in robo.ps.elementos(self.dump_hierarchy()) if robo.ps._dentro((x, y), el["caixa"])}
+        if self.atual == "inicio" and "Eu" in tocados:
+            self.atual = "eu"
+        elif self.atual == "eu" and "Meus Favoritos" in tocados:
+            self.atual = "favoritos"
+        elif self.atual == "favoritos" and "Editar" in tocados:
+            self.atual = "editando"
+        elif self.pergunta:
+            assert "Cancelar" not in tocados, "tocou em Cancelar"
+            if "Remover" in tocados:
+                self.favoritos = [f for f in self.favoritos if f not in self.marcados]
+                self.marcados, self.pergunta = set(), False
+                if not self.favoritos:
+                    self.atual = "favoritos"
+        elif self.atual == "editando" and "Feito" in tocados:
+            self.atual = "favoritos"
+        elif self.atual == "editando" and "Remover dos Favoritos" in tocados:
+            self.pergunta = bool(self.marcados)
+        elif self.atual == "editando" and (30 <= x <= 86 and 2290 <= y <= 2360):
+            visiveis = set(self._visiveis())
+            self.marcados = set() if self.marcados >= visiveis else visiveis
+        else:
+            return super().click(x, y)
+        self.toques.append(next(iter(tocados), (x, y)))
+
+
+def test_as_4h_descurte_tudo_em_meus_favoritos(monkeypatch, avisos):
+    from conftest import consultar
+    ativar(robo_inicio=8, robo_fim=22)
+    app = AppDosFavoritos(favoritos=6)
+    resultado = robo.rodada(d=app, agora=momento("2026-10-25 04:05"))
+    assert resultado == "6 produto(s) descurtido(s) em Meus Favoritos"
+    assert app.favoritos == [] and "Cancelar" not in app.toques
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = 'descurtir tudo (4h)'") == (
+        "descurtido", "6 produto(s)", 1)
+    # Feito, a hora fica parada até as 5h.
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-25 04:20")) == "nada a fazer agora"
+
+
+def test_lista_grande_continua_na_rodada_seguinte(monkeypatch, avisos):
+    monkeypatch.setattr(robo, "VOLTAS_DO_DESCURTIR", 2)
+    ativar(robo_inicio=8, robo_fim=22)
+    app = AppDosFavoritos(favoritos=12)
+    assert "o resto fica para a próxima rodada" in robo.rodada(d=app, agora=momento("2026-10-25 04:05"))
+    assert len(app.favoritos) == 4
+    assert robo.o_que_fazer(robo.ler_config(), momento("2026-10-25 04:20")) == ("descurtir", None)
+    assert robo.rodada(d=app, agora=momento("2026-10-25 04:20")) == "4 produto(s) descurtido(s) em Meus Favoritos"
+    assert app.favoritos == [] and robo.o_que_fazer(robo.ler_config(), momento("2026-10-25 04:35")) is None
+
+
+def test_sem_nada_curtido_nao_ha_o_que_descurtir(monkeypatch, avisos):
+    ativar(robo_inicio=8, robo_fim=22)
+    assert robo.rodada(d=AppDosFavoritos(favoritos=0), agora=momento("2026-10-25 04:05")) == (
+        "nada curtido em Meus Favoritos")
+
+
+def test_pausado_nao_descurte(monkeypatch, avisos):
+    robo.db.salvar_config(robo.CHAVE_CONFIG, {**robo.PADRAO, "robo_pausado": True})
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-25 04:05")) == "pausado"
+
+
+def test_remocao_que_nao_pega_para_e_diz_onde(monkeypatch, avisos):
+    # Uma pergunta do app que o robô não conhece: os produtos continuam marcados e a lista igual.
+    class SemConfirmar(AppDosFavoritos):
+        def _nos(self):
+            return [n.replace(">Remover<", ">Apagar<").replace('text="Remover"', 'text="Apagar"')
+                    for n in super()._nos()]
+
+    ativar(robo_inicio=8, robo_fim=22)
+    app = SemConfirmar(favoritos=3)
+    resultado = robo.rodada(d=app, agora=momento("2026-10-25 04:05"))
+    assert "não diminuiu" in resultado and len(app.favoritos) == 3 and "Cancelar" not in app.toques
+    assert robo.passo_do_motivo(resultado) == "descurtir em Meus Favoritos"
