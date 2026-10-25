@@ -11,7 +11,7 @@ ANTIGA = "rotina_antiga_publico"
 
 
 def test_toda_rotina_conhecida_tem_texto_no_codigo(bm):
-    codigo = inspect.getsource(bm.disparar_mensagem)
+    codigo = inspect.getsource(bm._disparar_mensagem)
     for tipo in rotinas.ROTINAS_PRINCIPAIS + rotinas.ROTINAS_VIRAIS + rotinas.ROTINAS_PUBLICO:
         assert f'"{tipo}"' in codigo, tipo
     assert rotinas.conhecida("campanha_pub_0_11.11") and not rotinas.conhecida(ANTIGA)
@@ -163,6 +163,47 @@ def test_ligar_o_bot_mantem_os_horarios_das_rotinas_de_hoje(bm, relogio):
     assert len(antes) == 2 and antes == depois
     agora = datetime.now(bm.fuso_horario)
     assert agora + timedelta(minutes=2, seconds=-2) <= atrasado <= agora + timedelta(minutes=5, seconds=1)
+
+
+def test_rotinas_atrasadas_pelo_reinicio_saem_espacadas_no_mesmo_canal(bm, relogio):
+    # 25/10: depois de um deploy, as rotinas que passaram saíam "daqui a 2 a 5 min"; duas no
+    # mesmo segundo saíram coladas no Viral (0 min). Agora ficam a 10 min ou mais no canal.
+    from datetime import timedelta
+    relogio("10:00")
+    agora = datetime.now(bm.fuso_horario)
+    hoje = agora.strftime("%Y-%m-%d")
+    passou = f"{hoje} 09:00:00"
+    bm.db.salvar_config(bm.CHAVE_HORARIOS_ROTINAS, {"data": hoje, "horarios": {
+        "job_rotina_link_grupo_viral_0": passou, "job_rotina_promo_principal_0": passou,
+        "job_rotina_divulgar_gem_viral_0": passou, "job_rotina_incentivo_0": passou}})
+    viral = sorted(bm.horario_da_rotina(j, agora, True) for j in (
+        "job_rotina_link_grupo_viral_0", "job_rotina_promo_principal_0", "job_rotina_divulgar_gem_viral_0"))
+    assert all((b - a) >= timedelta(minutes=bm.ESPACO_DAS_ATRASADAS) for a, b in zip(viral, viral[1:]))
+    assert agora + timedelta(minutes=2, seconds=-2) <= viral[0] <= agora + timedelta(minutes=5, seconds=1)
+    # Outro canal não espera pelo Viral.
+    principal = bm.horario_da_rotina("job_rotina_incentivo_0", agora, True)
+    assert principal <= agora + timedelta(minutes=5, seconds=1)
+
+
+def test_duas_rotinas_do_mesmo_canal_juntas_saem_uma_de_cada_vez(bm, monkeypatch):
+    # A segunda espera a primeira terminar: assim já vê o último post como texto na
+    # intercalação, em vez de as duas passarem juntas.
+    import asyncio
+    passos = []
+
+    async def disparo(tipo, forcar=False):
+        passos.append(("começa", tipo))
+        await asyncio.sleep(0.05)
+        passos.append(("acaba", tipo))
+    monkeypatch.setattr(bm, "_disparar_mensagem", disparo)
+
+    async def juntas(*tipos):
+        await asyncio.gather(*(bm.disparar_mensagem(t) for t in tipos))
+    rodar(juntas("link_grupo_viral", "promo_principal"))          # as duas do Viral
+    assert [p[0] for p in passos] == ["começa", "acaba", "começa", "acaba"]
+    passos.clear()
+    rodar(juntas("link_grupo_viral", "incentivo"))                # canais diferentes não esperam
+    assert [p[0] for p in passos] == ["começa", "começa", "acaba", "acaba"]
 
 
 def test_rotina_do_principal_depois_do_boa_noite_fica_no_registro(bm, relogio, monkeypatch):
