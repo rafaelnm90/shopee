@@ -308,7 +308,8 @@ def test_curtir_que_nao_pega_avisa(monkeypatch, capsys):
     _produto_do_link(monkeypatch, VESTIDO)
     aparelho = AparelhoDaPagina()
     assert not ps.explorar("curtir", aparelho)
-    assert aparelho.toques == [(525, 1217), (1028, 1233)]
+    # O nome, o coração e, sem o coração trocar depois da espera, mais um toque nele.
+    assert aparelho.toques == [(525, 1217), (1028, 1233), (1028, 1233)]
     assert "não ficou curtido" in capsys.readouterr().out
 
 
@@ -1443,3 +1444,49 @@ def test_com_a_lista_limpa_o_anexar_nao_rola_a_lista(monkeypatch):
     # Sem a lista limpa, rola como sempre.
     ps.adicionar_produto(Celular(), {"produto": "Panela de Pressão Inox"})
     assert False in rolagens
+
+
+
+class CoracaoLento(Coracao):
+    """A página do produto novo (coração vazio) que troca só na 2ª leitura depois do toque, ou só no 2º toque."""
+
+    def __init__(self, leituras_ate_trocar=0, toques_ate_curtir=1):
+        super().__init__()
+        self.completa = TELA_PRODUTO
+        self.leituras, self.leituras_ate_trocar, self.toques_ate_curtir = 0, leituras_ate_trocar, toques_ate_curtir
+
+    def click(self, x, y):
+        self.toques.append((x, y))
+        if len(self.toques) >= self.toques_ate_curtir:
+            self.leituras = 0
+            self.vai_curtir = True
+
+    def dump_hierarchy(self):
+        if not self.toques:
+            return self.tela
+        if getattr(self, "vai_curtir", False):
+            self.leituras += 1
+            if self.leituras > self.leituras_ate_trocar:
+                return CURTIDO
+        return TELA_PRODUTO
+
+
+def test_coracao_que_demora_a_trocar_e_esperado_sem_tocar_de_novo(monkeypatch):
+    # 24/10, 18:32: o robô tocou no coração e leu a tela antes de ela mudar.
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+    aparelho = CoracaoLento(leituras_ate_trocar=2)
+    assert ps.curtir_na_pagina(aparelho, TELA_PRODUTO) == (True, "produto curtido")
+    assert len(aparelho.toques) == 1
+
+
+def test_toque_no_coracao_que_nao_pega_ganha_mais_um(monkeypatch):
+    import registro_processos as rp
+    monkeypatch.setattr(ps.time, "sleep", lambda s: None)
+    aparelho = CoracaoLento(toques_ate_curtir=2)
+    assert ps.curtir_na_pagina(aparelho, TELA_PRODUTO)[0] and len(aparelho.toques) == 2
+    assert ("curtido agora", "no 2º toque") in {(l[2], l[3]) for l in rp.contagem("2000-01-01 00:00:00")
+                                                if l[1] == "curtir o produto"}
+    # Nem no 2º toque: para, e o registro diz.
+    aparelho = CoracaoLento(toques_ate_curtir=9)
+    assert ps.curtir_na_pagina(aparelho, TELA_PRODUTO) == (False, "toquei no coração, mas o produto não ficou curtido")
+    assert len(aparelho.toques) == 2
