@@ -1952,12 +1952,25 @@ def proxima_de_outro_assunto(tipo, canal, agora):
     return min(horarios, default=None)
 
 
+# Uma rotina de cada vez em cada canal: duas que disparavam no mesmo segundo passavam
+# juntas pela intercalação (o último post só vira "texto" depois do envio) e saíam coladas
+# (25/10, Viral, 0 min). As rotinas saem espaçadas: DECISOES.md, Trabalho com o Claude.
+_travas_das_rotinas = {}
+
+
 async def disparar_mensagem(tipo, forcar=False):
     """
     Dispara uma rotina de texto (gerada pela IA) no canal do tipo: principal, Viral
     ou Grupo Público. Passa pelas pausas, pelo espaçamento das campanhas, pela
     intercalação com os vídeos e pelo expediente; forcar=True só respeita as pausas.
+    Uma de cada vez por canal: a segunda espera a primeira sair e já a vê na intercalação.
     """
+    async with _travas_das_rotinas.setdefault(rotinas.canal_da_rotina(tipo), asyncio.Lock()):
+        await _disparar_mensagem(tipo, forcar)
+
+
+async def _disparar_mensagem(tipo, forcar=False):
+    """O disparo de disparar_mensagem, já com a trava do canal na mão."""
     logger.debug(f"🔍 Validando status antes de disparar a rotina '{tipo}' (Forçar: {forcar})...")
     
     dados_rotina = ler_config_rotina()
@@ -2329,12 +2342,22 @@ NOMES_AMIGAVEIS_ROTINA = {
 # cada reinício, a rotina ia para o meio da lacuna que sobrava e, num dia de vários
 # deploys, era empurrada até depois do Boa Noite e não saía (24/10: promo_publico 0 de 1).
 CHAVE_HORARIOS_ROTINAS = "rotinas_horarios_do_dia"
+# As rotinas que passaram com o bot fora do ar saem daqui a poucos minutos, mas com este
+# espaço (min) entre elas e as outras do mesmo canal: juntas, saíam coladas.
+ESPACO_DAS_ATRASADAS = 10
+
+
+def _canal_do_job_de_rotina(job_id):
+    """O canal da rotina de um job "job_rotina_<tipo>_<n>", ou None se o id for de outro jeito."""
+    achado = re.match(r"^job_rotina_(.+)_\d+$", job_id)
+    return rotinas.canal_da_rotina(achado.group(1)) if achado else None
 
 
 def horario_da_rotina(job_id, horario, manter):
     """
     O horário do job de rotina. manter=True (ao ligar o bot): o já marcado hoje, se ainda
-    está por vir; o que passou com o bot fora do ar sai daqui a poucos minutos. Sem marca,
+    está por vir; o que passou com o bot fora do ar sai daqui a poucos minutos, a
+    ESPACO_DAS_ATRASADAS min ou mais das outras rotinas do mesmo canal. Sem marca,
     ou com manter=False (madrugada e painel, que sorteiam de novo), o novo, que fica guardado.
     """
     agora = datetime.now(fuso_horario)
@@ -2349,6 +2372,12 @@ def horario_da_rotina(job_id, horario, manter):
             quando = datetime.strptime(marcado, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
             if quando <= agora:
                 quando = agora + timedelta(minutes=random.randint(2, 5))
+                canal = _canal_do_job_de_rotina(job_id)
+                vizinhas = [datetime.strptime(h, "%Y-%m-%d %H:%M:%S").replace(tzinfo=fuso_horario)
+                            for outro, h in grade["horarios"].items()
+                            if outro != job_id and _canal_do_job_de_rotina(outro) == canal]
+                while any(abs((quando - v).total_seconds()) < ESPACO_DAS_ATRASADAS * 60 for v in vizinhas):
+                    quando += timedelta(minutes=random.randint(ESPACO_DAS_ATRASADAS, ESPACO_DAS_ATRASADAS + 5))
         quando = quando.replace(microsecond=0)
         grade["horarios"][job_id] = quando.strftime("%Y-%m-%d %H:%M:%S")
         return quando
