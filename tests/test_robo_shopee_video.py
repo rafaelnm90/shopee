@@ -152,6 +152,26 @@ def test_aprovado_espera_a_hora_dele():
     assert robo.o_que_fazer(config, momento("2026-10-22 16:00"))[0] == "postar"
 
 
+def test_aprovado_chegando_segura_tarefa_longa_e_sai_na_hora(monkeypatch):
+    # Escolha do Rafael (25/10, P30): o de 09:59 saiu às 10:15 porque o feed segurava o
+    # celular. Com um aprovado indo ao ar antes da próxima rodada, nada de tarefa longa.
+    config = {**robo.PADRAO, "robo_pausado": False, "robo_limite_min": 1, "robo_limite_max": 1,
+              "robo_inicio": 0, "robo_fim": 24}
+    agora = momento("2026-10-25 09:46")
+    robo.gravar_estado(treino_semana=robo.semana(agora))
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
+    monkeypatch.setattr(robo, "feed_pendente", lambda agora=None: True)
+    robo.db.salvar_config(robo.CHAVE_DIA, {"data": "2026-10-25", "horarios": ["09:30"], "feitos": 0})
+    perto = _rascunho("aprovado", postar_em="2026-10-25 09:59:00")
+    assert robo.o_que_fazer(config, agora) is None                          # espera: nem rascunho nem feed
+    assert robo.o_que_fazer(config, momento("2026-10-25 10:00")) == ("postar", perto)
+    robo.atualizar(perto, estado="postado")
+    _rascunho("aprovado", postar_em="2026-10-25 11:30:00")                  # longe: segue o resto
+    assert robo.o_que_fazer(config, momento("2026-10-25 10:01")) == ("rascunho", None)
+    assert robo.o_que_fazer(config, momento("2026-10-25 10:02")) == ("feed", None)
+
+
 # --- O Horário das Interações (escolha do Rafael, P22 a P24) ---
 
 def _com_interacoes(inicio=12, fim=15, **mais):

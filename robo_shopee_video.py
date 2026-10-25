@@ -219,6 +219,9 @@ def no_horario(config, agora=None):
 # Adicionar Produto, a lista de afiliado): nela o robô não prepara, não posta e não interage. Fixa às 4h, de
 # madrugada. Escolha do Rafael (24/10, P25): DECISOES.md, Shopee Vídeo.
 HORA_DO_DESCURTIR = 4
+# Com um aprovado indo ao ar nesse tempo (o das rodadas), a rodada não começa tarefa longa:
+# a seguinte já pega o post na hora. Escolha do Rafael (P30): DECISOES.md, Shopee Vídeo.
+ANTES_DO_POST = timedelta(minutes=15)
 
 
 def na_hora_do_descurtir(agora=None):
@@ -937,9 +940,15 @@ def o_que_fazer(config, agora=None):
     postar = not na_janela or interacoes_do_dia_feitas(agora)
     interagir = na_janela or not janela_das_interacoes(config)
     agora_txt = _momento(agora)
-    prontos = [r for r in listar("aprovado") if r["postar_em"] and r["postar_em"] <= agora_txt]
+    aprovados = listar("aprovado")
+    prontos = [r for r in aprovados if r["postar_em"] and r["postar_em"] <= agora_txt]
     if postar and prontos:
         return "postar", min(prontos, key=lambda r: r["postar_em"])["id"]
+    # Um aprovado vai ao ar antes da próxima rodada: nada de tarefa longa (Saúde, rascunho,
+    # respostas, feed), que seguraria o celular na hora do post. Escolha do Rafael (P30).
+    logo = _momento(agora_br(agora) + ANTES_DO_POST)
+    if postar and any(r["postar_em"] and agora_txt < r["postar_em"] <= logo for r in aprovados):
+        return None
     if saude_do_dia_pendente(agora) or saude_pedida_pelo_recurso(agora):
         return "saude", None
     if postar and (consumir_horarios(config, agora) or repetir_o_que_falhou(config, agora)):
