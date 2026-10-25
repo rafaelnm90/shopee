@@ -680,7 +680,8 @@ def texto_robo(config, agora=None, celular=None):
         f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele prepara os rascunhos e posta (fora do Horário das "
         "Interações).\n"
         f"💬 <b>{BOTAO_HORARIO_INTERACOES}</b>: em que horário ele responde os comentários dos seus vídeos e "
-        "comenta e curte os de outros criadores. Nessa janela ele não prepara nem posta.\n"
+        "comenta e curte os de outros criadores. Nessa janela, ele só volta a preparar e postar quando acaba "
+        "os comentários e as respostas do dia.\n"
         f"🧭 <b>{BOTAO_TREINO}</b>: confere agora se as telas do app da Shopee continuam iguais "
         "(ele faz isso sozinho toda segunda).\n"
         f"📱 <b>{BOTAO_CELULAR}</b>: a ligação com o Motorola (reconectar, ver a tela de longe)."
@@ -977,7 +978,8 @@ async def pedir_janela_interacoes(message: types.Message, state: FSMContext):
     exemplo = exemplos.janela("shopee_video_interacoes", *janela, "12-15")
     await message.answer(
         "Em que horário o robô responde os comentários dos seus vídeos e comenta e curte os vídeos de outros "
-        "criadores? Nessa janela ele não prepara nem posta; fora dela, só prepara e posta.\n\n"
+        "criadores? Nessa janela, ele só volta a preparar e postar quando acaba os comentários e as respostas do "
+        "dia; fora dela, só prepara e posta.\n\n"
         f"Envie <code>início-fim</code> (ex.: <code>{exemplo}</code>) ou toque em {BOTAO_SEM_HORARIO_PROPRIO} para "
         "ele voltar a interagir dentro do Horário do Robô.\n"
         f"<i>Hoje está {rotulo_interacoes(config)}. Com 3 h ou mais cabem, com folga, os 3 comentários do dia "
