@@ -995,6 +995,23 @@ def curtido(lista):
     return any(el["id"] == "buttonItemLiked" for el in lista)
 
 
+# O coração pode demorar a trocar depois do toque (24/10, 18:32: "toquei no coração, mas
+# o produto não ficou curtido"): o robô relê a tela algumas vezes antes de decidir que o
+# toque não pegou, e só então toca de novo (tocar antes desfaria um toque que pegou tarde).
+VEZES_DO_CORACAO = 3
+SEGUNDOS_DO_CORACAO = 2
+
+
+def esperar_o_coracao(d, lista, curtido_esperado):
+    """Relê a tela até o coração ficar como o esperado (ou sumir), por VEZES_DO_CORACAO vezes."""
+    for _ in range(VEZES_DO_CORACAO):
+        if curtido(lista) == curtido_esperado or not tem_coracao(lista):
+            return lista
+        time.sleep(SEGUNDOS_DO_CORACAO)
+        lista = elementos(d.dump_hierarchy())
+    return lista
+
+
 # O curtido de outro dia cujo descurtir não pegou: ele fica mais embaixo em Minhas Curtidas.
 CURTIDO_DE_ANTES = "o produto já estava curtido e o toque para descurtir não pegou: segui"
 
@@ -1009,7 +1026,7 @@ def curtir_na_pagina(d, tela):
     if not tem_coracao(lista):
         return False, "o coração não está na página do produto: nada curtido"
     if curtido(lista):
-        lista = tocar_no_coracao(d, lista, "buttonItemLiked")
+        lista = esperar_o_coracao(d, tocar_no_coracao(d, lista, "buttonItemLiked"), False)
         if curtido(lista):
             # O toque não descurtiu: o produto segue curtido, só mais embaixo na lista (o
             # anexar rola atrás dele).
@@ -1019,7 +1036,7 @@ def curtir_na_pagina(d, tela):
         if not tem_coracao(lista):
             return False, "descurti o produto para ele subir na lista, mas o coração sumiu da tela"
         for _ in range(2):
-            lista = tocar_no_coracao(d, lista, "buttonItemLike")
+            lista = esperar_o_coracao(d, tocar_no_coracao(d, lista, "buttonItemLike"), True)
             if curtido(lista) or not tem_coracao(lista):
                 break
         if not curtido(lista):
@@ -1028,10 +1045,15 @@ def curtir_na_pagina(d, tela):
         registro_processos.registrar("shopee_video", "curtir o produto", "já estava curtido",
                                      "descurtido e curtido de novo", ok=True)
         return True, "o produto já estava curtido: descurti e curti de novo, para ele ficar em 1º na lista"
-    lista = tocar_no_coracao(d, lista, "buttonItemLike")
+    for vez in range(2):
+        lista = esperar_o_coracao(d, tocar_no_coracao(d, lista, "buttonItemLike"), True)
+        if curtido(lista) or not tem_coracao(lista):
+            break
     if not curtido(lista):
+        registro_processos.registrar("shopee_video", "curtir o produto", "não ficou curtido", ok=False)
         return False, "toquei no coração, mas o produto não ficou curtido"
-    registro_processos.registrar("shopee_video", "curtir o produto", "curtido agora", ok=True)
+    registro_processos.registrar("shopee_video", "curtir o produto", "curtido agora",
+                                 "no 2º toque" if vez else "", ok=True)
     return True, "produto curtido"
 
 
@@ -1055,7 +1077,7 @@ def descurtir_na_pagina(d, tela):
     if not curtido(lista):
         return True, "o produto já não estava curtido"
     for _ in range(2):
-        lista = tocar_no_coracao(d, lista, "buttonItemLiked")
+        lista = esperar_o_coracao(d, tocar_no_coracao(d, lista, "buttonItemLiked"), False)
         if not curtido(lista) or not tem_coracao(lista):
             break
     if curtido(lista) or not tem_coracao(lista):
