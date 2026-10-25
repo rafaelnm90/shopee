@@ -1732,23 +1732,26 @@ def _textos_da_ia(video):
     """
     O título e o comentário da IA. A IA às vezes volta vazia (bloqueio do Google que muda de
     uma tentativa para outra, como o RECITATION): mais uma chance depois de uma pausa, antes
-    de desistir. O bloqueio pelo conteúdo do vídeo (BLOQUEIOS_DO_CONTEUDO) não muda: o vídeo
-    fica de lado na hora, e o horário passa ao próximo. Cada falha entra no registro com o
-    motivo em código fixo, para o checkup mostrar a causa.
+    de desistir. O pedido recusado pelo conteúdo (BLOQUEIOS_DO_CONTEUDO) já é refeito pelo
+    assistente com as regras em palavras leves (P28); recusado de novo, o vídeo fica de lado
+    na hora, e o horário passa ao próximo. Cada falha entra no registro com o motivo em código
+    fixo, para o checkup mostrar a causa.
     """
     motivo = ""
     for vez in range(TENTATIVAS_DO_TITULO):
         ps.api_gemini.ULTIMO_ERRO_IA = None
         textos = asyncio.run(assistente.textos_do_video(video["arquivo"], video.get("nome") or ""))
         if textos and textos["titulo"]:
-            if vez:
+            if textos.get("regras_leves"):
+                registro_processos.registrar(REGISTRO, "título da IA", "veio com as regras em palavras leves", ok=True)
+            elif vez:
                 registro_processos.registrar(REGISTRO, "título da IA", "veio na nova tentativa", ok=True)
             return textos
         motivo = _motivo_da_ia()
         registro_processos.registrar(REGISTRO, "título da IA", "sem título", motivo, ok=False)
         if BLOQUEIOS_DO_CONTEUDO & set(_codigos_da_ia()):
-            raise Parada(f"a IA não devolveu o título ({motivo}): o Google bloqueia o conteúdo deste vídeo",
-                         do_video=True)
+            raise Parada(f"a IA não devolveu o título ({motivo}, também com as regras em palavras leves): o Google "
+                         "bloqueia o conteúdo deste vídeo", do_video=True)
         if vez + 1 < TENTATIVAS_DO_TITULO:
             pausa(ESPERA_DO_TITULO)
     raise Parada(f"a IA não devolveu o título ({motivo})")

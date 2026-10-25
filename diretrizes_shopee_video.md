@@ -5,7 +5,9 @@ Central de Ajuda do Afiliado (página de 15/03/2026, enviada pelo Rafael em
 05/10/2026). O robô da Shopee Vídeo segue estas regras sempre, e a IA recebe
 este arquivo junto com cada vídeo: se ela achar violação no vídeo ou no texto
 que gerou, o vídeo não é postado. Quando a Shopee mudar as diretrizes,
-atualize este arquivo.
+atualize este arquivo. Se o Google recusar o pedido pelo conteúdo, a IA recebe
+as mesmas regras em palavras leves (`TROCAS_LEVES`, no assistente_shopee_video):
+palavra forte nova aqui ganha a troca lá (o teste das diretrizes leves cobra).
 
 A punição vai de remover o vídeo e suspender funções até bloquear a conta.
 Tolerância zero: exploração infantil, nudez, sexo sem consentimento, ódio,

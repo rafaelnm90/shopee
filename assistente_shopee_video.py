@@ -296,17 +296,61 @@ def ordenar_produtos(produtos):
 
 # --- Texto da IA ---
 
-def ler_diretrizes():
+# As mesmas regras das diretrizes em palavras leves. O filtro do Google recusa o pedido
+# (PROHIBITED_CONTENT) quando o texto com nudez, exploração infantil e menores vai junto com
+# um vídeo comum que mostra uma pessoa (máscara de cílios, folha depilatória, 25/10/2026).
+# Da mais longa para a mais curta; o espaço casa também com a quebra de linha do arquivo.
+# Escolha do Rafael (P28): DECISOES.md, Shopee Vídeo.
+TROCAS_LEVES = [
+    ("Qualquer sexualização, nudez ou roupa reveladora", "Qualquer conteúdo impróprio ou roupa inadequada"),
+    ("Suicídio, automutilação e atos perigosos", "Saúde e atos perigosos"),
+    ("qualquer coisa sexual com animais", "qualquer coisa imprópria com animais"),
+    ("Violência e imagens chocantes", "Agressão e imagens chocantes"),
+    ("Nudez, imitação de nudez", "Pouca roupa ou aparência de pouca roupa"),
+    ("sexo sem consentimento", "conteúdo adulto"),
+    ("exploração infantil", "conteúdo impróprio com crianças"),
+    ("Menores de idade", "Crianças e adolescentes"),
+    ("Nudez e sexo", "Conteúdo adulto"),
+    ("menor em atividade", "criança em atividade"),
+    ("linguagem sexual", "linguagem adulta"),
+    ("ambiente íntimo", "ambiente particular"),
+    ("partes íntimas", "partes do corpo"),
+    ("violência realista", "cenas fortes"),
+    ("mortos, feridas", "cenas tristes"),
+    ("sexualizar", "provocar"),
+    ("sexualização", "conteúdo impróprio"),
+    ("fetiche", "conteúdo adulto"),
+    ("Terrorismo", "Grupos extremistas"),
+    ("se ferir", "se machucar"),
+    ("violência", "agressão"),
+    ("sexual", "adulto"),
+    ("nudez", "pouca roupa"),
+    ("abuso", "maus-tratos"),
+]
+
+
+def ler_diretrizes(leves=False):
+    """O resumo das diretrizes; leves=True: as mesmas regras com TROCAS_LEVES."""
     try:
         with open(ARQUIVO_DIRETRIZES, encoding="utf-8") as f:
-            return f.read()
+            texto = f.read()
     except OSError:
         return ""
+    if leves:
+        for forte, leve in TROCAS_LEVES:
+            texto = re.sub(r"\s+".join(map(re.escape, forte.split())), leve, texto)
+    return texto
 
 
-def montar_prompt(nome_produto=""):
+def montar_prompt(nome_produto="", leves=False):
     produto = f"Nome do produto, segundo o post (pode ajudar a identificar): {nome_produto}\n\n" if nome_produto else ""
-    return PROMPT.format(titulo_min=TITULO_MIN, titulo_max=TITULO_MAX, produto=produto, diretrizes=ler_diretrizes())
+    return PROMPT.format(titulo_min=TITULO_MIN, titulo_max=TITULO_MAX, produto=produto,
+                         diretrizes=ler_diretrizes(leves))
+
+
+def recusado_pelo_conteudo():
+    """A última análise de vídeo foi recusada pelo Google pelo conteúdo do pedido?"""
+    return bool(api_gemini.BLOQUEIOS_DO_CONTEUDO & api_gemini.codigos_do_google(api_gemini.ULTIMO_ERRO_IA))
 
 
 def ler_resposta(texto):
@@ -348,23 +392,36 @@ def encaixar_titulo(titulo):
     return titulo
 
 
-async def gerar_textos(arquivo, nome_produto=""):
-    return ler_resposta(await api_gemini.analisar_video_gemini(arquivo, montar_prompt(nome_produto)))
+async def gerar_textos(arquivo, nome_produto="", leves=False):
+    return ler_resposta(await api_gemini.analisar_video_gemini(arquivo, montar_prompt(nome_produto, leves)))
 
 
 async def textos_do_video(arquivo, nome_produto=""):
     """
-    O texto da IA para o vídeo. Título abaixo de TITULO_MIN: pede mais uma vez e fica com
-    o título mais longo; se continuar curto, vai assim mesmo, e a mensagem mostra o
-    tamanho para o Rafael completar se quiser. Violação na segunda resposta também vale.
-    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
+    O texto da IA para o vídeo. Recusado pelo Google pelo conteúdo do pedido: pede mais uma
+    vez com as regras em palavras leves (TROCAS_LEVES), e os textos dizem "regras_leves".
+    Título abaixo de TITULO_MIN: pede mais uma vez e fica com o título mais longo; se
+    continuar curto, vai assim mesmo, e a mensagem mostra o tamanho para o Rafael completar
+    se quiser. Violação na segunda resposta também vale.
+    Decisões do Rafael (P28 e o título curto): DECISOES.md, Shopee Vídeo.
     """
+    api_gemini.ULTIMO_ERRO_IA = None
+    leves = False
     textos = await gerar_textos(arquivo, nome_produto)
+    if textos is None and recusado_pelo_conteudo():
+        logger.info("🔁 [Shopee Vídeo] O Google recusou o pedido pelo conteúdo; pedindo de novo com as "
+                    "regras em palavras leves.")
+        leves = True
+        textos = await gerar_textos(arquivo, nome_produto, leves=True)
+        if textos:
+            textos["regras_leves"] = True
     if not textos or textos["violacao"] or not textos["titulo"] or tamanho_no_app(textos["titulo"]) >= TITULO_MIN:
         return textos
     logger.info(f"🔁 [Shopee Vídeo] Título com {tamanho_no_app(textos['titulo'])} caracteres "
                 f"(mínimo {TITULO_MIN}); pedindo de novo à IA.")
-    outra = await gerar_textos(arquivo, nome_produto)
+    outra = await gerar_textos(arquivo, nome_produto, leves=leves)
+    if outra and leves:
+        outra["regras_leves"] = True
     if outra and outra["titulo"] and (outra["violacao"]
                                       or tamanho_no_app(outra["titulo"]) > tamanho_no_app(textos["titulo"])):
         return outra
