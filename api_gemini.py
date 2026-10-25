@@ -23,27 +23,34 @@ client_genai = genai.Client(api_key=GEMINI_API_KEY)
 
 # Ordem de tentativa: o primeiro modelo que responder vence. Cada modelo tem a própria
 # cota diária, por isso a lista é longa: o melhor vem primeiro e os outros seguram o
-# dia quando a cota dos de cima acaba. Conferida com a chave pelo modelos_ia.yml (24/10/2026):
-# o 3.7 e o 3.5 Flash foram descontinuados, mas o Google ainda os atende (redireciona
-# para o 3.8 e o 3.6); ficam enquanto responderem, e o que der "não encontrado" sai da
-# vez sozinho por 6 h (tempo_fora). Escolha do Rafael (P14): DECISOES.md, Código e manutenção.
+# dia quando a cota dos de cima acaba. Toda semana o Claude confere a página de
+# descontinuação do Google e o modelos_ia.yml: sai todo modelo que o Google descontinuou
+# (mesmo que ainda responda redirecionado) e entram os modelos novos de texto que a chave
+# enxerga e respondem. Escolha do Rafael (P36): DECISOES.md, Código e manutenção.
 MODELOS_CASCATA_GEMINI = [
     "gemini-4-argon",
     "gemini-3.1-pro-preview",
     "gemini-pro-latest",
     "gemini-3.8-flash",
-    "gemini-3.7-flash",
     "gemini-3.6-flash",
     "gemini-flash-latest",
-    "gemini-3.5-flash",
     "gemini-3.5-flash-lite",
     "gemini-3-flash-preview",
     "gemini-3.1-flash-lite",
     "gemini-flash-lite-latest",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
-    "gemini-3.1-flash-lite-preview"
 ]
+
+# Os que o Google descontinuou e saíram da cascata (P36). A chave ainda os enxerga (o Google
+# redireciona ou atende por um tempo), e o modelos_ia.yml os mostra à parte para nenhum
+# voltar à cascata como se fosse novo (o 3.7 Flash vai para o 3.8, o 3.5 Flash para o 3.6
+# e o 3.1 Flash-Lite preview foi desligado pelo Google).
+DESCONTINUADOS = (
+    "gemini-3.7-flash",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite-preview",
+)
 
 logger = logging.getLogger("API_Gemini")
 
@@ -295,9 +302,9 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
 
 # --- Os modelos que a chave enxerga (modelos_ia.yml) ---
 
-# Modelos de generateContent que não servem aos robôs (imagem, voz, embeddings...).
+# Modelos de generateContent que não servem aos robôs (imagem, voz, embeddings, vídeo do Omni...).
 FORA_DOS_ROBOS = ("image", "tts", "audio", "live", "embedding", "robotics", "computer-use", "veo", "imagen",
-                  "transcribe", "banana", "customtools")
+                  "transcribe", "banana", "customtools", "omni")
 
 
 def modelos_da_chave():
@@ -329,9 +336,12 @@ def relatorio_dos_modelos(da_chave, testar=None):
         return ", ".join(partes)
 
     linhas = ["== Cascata (na ordem)"] + [f"{modelo}: {situacao(modelo)}" for modelo in MODELOS_CASCATA_GEMINI]
-    novos = [m for m in da_chave if m not in MODELOS_CASCATA_GEMINI]
+    novos = [m for m in da_chave if m not in MODELOS_CASCATA_GEMINI and m not in DESCONTINUADOS]
     linhas.append("== Modelos de texto da chave fora da cascata")
     linhas += [f"{modelo}: {situacao(modelo)}" for modelo in novos] or ["nenhum"]
+    velhos = [m for m in DESCONTINUADOS if m in da_chave]
+    linhas.append("== Descontinuados pelo Google que a chave ainda enxerga (não voltam)")
+    linhas += velhos or ["nenhum"]
     return linhas
 
 
