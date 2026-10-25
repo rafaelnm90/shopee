@@ -302,6 +302,43 @@ def test_rotina_antiga_do_banco_nao_conta_e_a_que_falta_mostra_a_linha_do_tempo(
         ("19:05", "adiada (mesmo assunto em seguida)")]
 
 
+def test_rotina_adiada_ha_pouco_ainda_vai_sair_e_a_de_ontem_que_nao_saiu_e_cobrada():
+    # Checkup de 24/10: às 22:20, divulgar_gem_viral estava 2 de 3, adiada pela intercalação
+    # às 21:51; saiu depois do checkup. A adiada há pouco não é cobrada; a de ontem que
+    # ficou adiada e não saiu mais, sim (no checkup do dia seguinte).
+    import registro_processos as rp
+    db.salvar_config("config_rotina", {
+        "divulgar_gem_viral": {"inicio": 8, "fim": 22, "frequencia": 3},
+        "promo_principal": {"inicio": 8, "fim": 22, "frequencia": 2},
+        "historico_diario": {"data": "2026-10-23", "contagem": {
+            "divulgar_gem_viral": ["09:05", "17:51"], "promo_principal": ["10:00"]}},
+    })
+
+    def linha(quando, tipo, resultado):
+        rp.registrar("bot_mestre", "rotina Viral", resultado, tipo, agora=quando)
+    linha(AGORA.replace(hour=9, minute=5), "divulgar_gem_viral", "enviada")
+    linha(AGORA.replace(hour=21, minute=51), "divulgar_gem_viral", "adiada (intercalação)")
+    linha(AGORA.replace(hour=10, minute=0), "promo_principal", "enviada")
+    linha(AGORA.replace(hour=19, minute=0), "promo_principal", "adiada (intercalação)")   # há 3 h: perdeu
+    ontem = AGORA - timedelta(days=1)
+    linha(ontem.replace(hour=21, minute=0), "link_grupo_viral", "enviada")
+    linha(ontem.replace(hour=23, minute=10), "link_grupo_viral", "adiada (intercalação)")
+    linha(ontem.replace(hour=23, minute=40), "promo_publico_viral", "adiada (intercalação)")
+    linha(AGORA.replace(hour=0, minute=5), "promo_publico_viral", "enviada")       # saiu depois da meia-noite
+    linha(ontem.replace(hour=22, minute=0), "promo_achadinhos_viral", "adiada (intercalação)")
+    linha(ontem.replace(hour=22, minute=30), "promo_achadinhos_viral", "enviada")
+
+    viral = checkup.rotinas_do_dia(AGORA)["Viral"]
+    assert viral["adiadas"] == [("divulgar_gem_viral", 2, 3, "21:51")]
+    assert viral["fora_do_previsto"] == [("promo_principal", 1, 2, "a menos")]
+    assert viral["ontem_sem_sair"] == [("link_grupo_viral", "23:10")]
+    pontos = checkup.pontos_de_atencao([], {}, {}, {"ativo": False, "vencidos": 0, "salvos": 0, "ruins": []},
+                                       {}, ("x", 1.0, 1), AGORA, {}, {"Viral": viral}, None)
+    assert not any("divulgar_gem_viral" in ponto for ponto in pontos)
+    assert "Rotinas do Viral: ontem, link_grupo_viral ficou adiada e não saiu" in pontos
+    assert "Rotinas do Viral: promo_principal saiu 1 vez(es), configurado 2 (a menos)" in pontos
+
+
 def test_divulgacao_piso_por_grupo_assunto_seguido_e_rajada():
     import registro_processos as rp
 

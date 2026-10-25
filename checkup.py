@@ -59,6 +59,9 @@ FALHAS_PARA_COBRAR = 3
 # divulgação, o piso é a regra dela: 15 min entre dois envios ao mesmo grupo. Mais que
 # PICO_PARA_COBRAR envios em JANELA_DO_PICO min, somando todos os grupos, é rajada.
 INTERVALO_CURTO_ROTINA = 10
+# Rotina adiada há menos que isto ainda tem o novo disparo marcado (a intercalação adia
+# de 20 a 45 min): sai depois do checkup, então não é cobrada como "a menos".
+MINUTOS_DA_ADIADA = 60
 INTERVALO_CURTO_DIVULGACAO = 15
 JANELA_DO_PICO, PICO_PARA_COBRAR = 5, 10
 # Quantos lugares do código mostrar por robô no log.
@@ -372,7 +375,9 @@ def rotinas_do_dia(agora=None):
     (config_rotina.historico_diario: cada rotina e os horários em que saiu): quantas
     saíram, o menor intervalo, os intervalos curtos, as vezes em que o mesmo assunto
     saiu em seguida, quantas de cada assunto e as que saíram a mais ou a menos que o
-    configurado (a menos só depois do fim da janela daquela rotina e sem pausa).
+    configurado (a menos só depois do fim da janela daquela rotina e sem pausa). A que
+    falta mas foi adiada há pouco (MINUTOS_DA_ADIADA) ainda vai tentar: fica em "adiadas",
+    sem cobrar; a de ontem que ficou adiada e não saiu vem em "ontem_sem_sair".
     """
     agora = _agora(agora)
     config = db.ler_config("config_rotina", {}) or {}
@@ -392,7 +397,7 @@ def rotinas_do_dia(agora=None):
         lista.sort()
         intervalos = [b[0] - a[0] for a, b in zip(lista, lista[1:])]
         por_assunto = Counter(tipo for _m, tipo in lista)
-        fora = []
+        fora, adiadas, linhas = [], [], {}
         for tipo, regra in config.items():
             if (not isinstance(regra, dict) or "frequencia" not in regra or not rotinas.conhecida(tipo)
                     or rotinas.canal_da_rotina(tipo) != canal):
@@ -401,15 +406,43 @@ def rotinas_do_dia(agora=None):
             if feitas > esperado:
                 fora.append((tipo, feitas, esperado, "a mais"))
             elif feitas < esperado and agora.hour >= int(regra.get("fim", 24)) and not pausado[canal]:
-                fora.append((tipo, feitas, esperado, "a menos"))
+                linhas[tipo] = linha_do_tempo_da_rotina(canal, tipo, agora)
+                ultima = linhas[tipo][-1] if linhas[tipo] else None
+                if (ultima and ultima[1].startswith("adiada")
+                        and 0 <= agora.hour * 60 + agora.minute - _minutos(ultima[0]) < MINUTOS_DA_ADIADA):
+                    adiadas.append((tipo, feitas, esperado, ultima[0]))
+                else:
+                    fora.append((tipo, feitas, esperado, "a menos"))
         resultado[canal] = {
-            "linha_do_tempo": {tipo: linha_do_tempo_da_rotina(canal, tipo, agora) for tipo, *_ in fora},
+            "linha_do_tempo": {tipo: linhas.get(tipo) or linha_do_tempo_da_rotina(canal, tipo, agora)
+                               for tipo, *_ in fora},
+            "adiadas": adiadas, "ontem_sem_sair": adiadas_de_ontem(canal, agora),
             "enviadas": len(lista), "menor": min(intervalos) if intervalos else None,
             "curtos": sum(1 for i in intervalos if i < INTERVALO_CURTO_ROTINA),
             "seguidos": sum(1 for a, b in zip(lista, lista[1:]) if a[1] == b[1]),
             "por_assunto": por_assunto, "fora_do_previsto": fora, "pausado": bool(pausado[canal]),
         }
     return resultado
+
+
+def adiadas_de_ontem(canal, agora=None):
+    """
+    As rotinas do canal que ontem ficaram adiadas e não saíram depois: a última linha do
+    registro de ontem é uma adiada, e ela não saiu logo depois da meia-noite. O checkup
+    das 22:20 vê a rotina ainda adiada; esta conferência, no dia seguinte, diz se saiu.
+    [(tipo, HH:MM da última adiada)].
+    """
+    agora = _agora(agora)
+    ontem = (agora - timedelta(days=1)).strftime("%Y-%m-%d")
+    ultima, logo_depois = {}, set()
+    for momento, _p, resultado, detalhe, _o in registro_processos.sequencia(
+            "bot_mestre", f"rotina {canal}", f"{ontem} 00:00:00"):
+        if momento[:10] == ontem:
+            ultima[detalhe] = (momento[11:16], resultado)
+        elif momento[11:13] == "00":
+            logo_depois.add(detalhe)
+    return sorted((tipo, hora) for tipo, (hora, resultado) in ultima.items()
+                  if resultado.startswith("adiada") and tipo not in logo_depois)
 
 
 def linha_do_tempo_da_rotina(canal, tipo, agora=None):
@@ -805,6 +838,8 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
             pontos.append(f"Rotinas do {canal}: {r['seguidos']} vez(es) o mesmo assunto em seguida")
         for tipo, feitas, esperado, sentido in r["fora_do_previsto"]:
             pontos.append(f"Rotinas do {canal}: {tipo} saiu {feitas} vez(es), configurado {esperado} ({sentido})")
+        for tipo, _hora in r.get("ontem_sem_sair", []):
+            pontos.append(f"Rotinas do {canal}: ontem, {tipo} ficou adiada e não saiu")
     if divulgacao and divulgacao["curtos"]:
         pontos.append(f"Divulgação: {divulgacao['curtos']} envio(s) ao mesmo grupo com menos de "
                       f"{INTERVALO_CURTO_DIVULGACAO} min (menor: {divulgacao['menor']:.0f} min)")
@@ -903,6 +938,10 @@ def main():
         for tipo, feitas, esperado, sentido in r["fora_do_previsto"]:
             passos = ", ".join(f"{hora} {resultado}" for hora, resultado in r["linha_do_tempo"].get(tipo, []))
             print(f"   {tipo} ({feitas} de {esperado}, {sentido}): {passos or 'nada no registro hoje'}")
+        for tipo, feitas, esperado, hora in r["adiadas"]:
+            print(f"   {tipo} ({feitas} de {esperado}): adiada às {hora}, ainda vai tentar de novo")
+        for tipo, hora in r["ontem_sem_sair"]:
+            print(f"   ontem: {tipo} ficou adiada às {hora} e não saiu")
     divulgacao = divulgacao_do_dia(agora)
     menor = "—" if divulgacao["menor"] is None else f"{divulgacao['menor']:.0f} min"
     print(f"Divulgação (24 h): envios {divulgacao['envios']} | grupos {divulgacao['grupos']} | "
