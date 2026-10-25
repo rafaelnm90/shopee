@@ -1028,6 +1028,36 @@ def curtir_na_pagina(d, tela):
     return True, "produto curtido"
 
 
+def descurtir(d, video):
+    """
+    Descurte o produto do vídeo na página completa dele, aberta pelo link como no curtir:
+    o fim de cada rascunho, deu certo ou não, tira a curtida que o robô deu.
+    Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    ok, resultado, tela = abrir_pagina_completa(d, video)
+    if not ok:
+        return False, resultado
+    return descurtir_na_pagina(d, tela)
+
+
+def descurtir_na_pagina(d, tela):
+    """Descurte o produto da página que está aberta (2 toques no máximo, conferindo cada um)."""
+    lista = elementos(tela)
+    if not tem_coracao(lista):
+        return False, "o coração não está na página do produto: nada descurtido"
+    if not curtido(lista):
+        return True, "o produto já não estava curtido"
+    for _ in range(2):
+        lista = tocar_no_coracao(d, lista, "buttonItemLiked")
+        if not curtido(lista) or not tem_coracao(lista):
+            break
+    if curtido(lista) or not tem_coracao(lista):
+        registro_processos.registrar("shopee_video", "descurtir no fim do rascunho", "não descurtiu", ok=False)
+        return False, "toquei no coração, mas o produto continuou curtido"
+    registro_processos.registrar("shopee_video", "descurtir no fim do rascunho", "descurtido", ok=True)
+    return True, "produto descurtido"
+
+
 def nomes_dos_produtos(video):
     """
     Os produtos que vão no post: os do Ver Produtos que a IA confirmou (video["produtos"])
