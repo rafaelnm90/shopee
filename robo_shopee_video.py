@@ -17,7 +17,7 @@ minutos tocando no celular, e a IA dele não pode dividir a conexão com a do bo
     python3 robo_shopee_video.py --saude       # a Saúde do Vídeo na hora (botão Gerar Apelação ⚖️)
 
 Cada rodada faz no máximo uma coisa, nesta ordem (às 4h, só a primeira):
-0. às 4h, descurte tudo em Meus Favoritos, uma vez por dia (P25);
+0. às 4h, descurte tudo em Meus favoritos (Criadores & Afiliados), uma vez por dia (P25);
 1. o treino da semana, na primeira rodada de segunda-feira: percorre o caminho até a tela
    final sem salvar nem postar e confere cada tela com o mapa (os CAMINHOs abaixo);
 2. apaga no app um rascunho que o Rafael recusou;
@@ -214,8 +214,8 @@ def no_horario(config, agora=None):
             or na_hora_das_interacoes(config, agora) or na_hora_do_descurtir(agora))
 
 
-# Uma hora do dia só para descurtir tudo em Meus Favoritos (os produtos curtidos para o
-# Adicionar Produto): nela o robô não prepara, não posta e não interage. Fixa às 4h, de
+# Uma hora do dia só para descurtir tudo em Meus favoritos (os produtos curtidos para o
+# Adicionar Produto, a lista de afiliado): nela o robô não prepara, não posta e não interage. Fixa às 4h, de
 # madrugada. Escolha do Rafael (24/10, P25): DECISOES.md, Shopee Vídeo.
 HORA_DO_DESCURTIR = 4
 
@@ -629,6 +629,7 @@ PASSOS = (
     ("rodada foi interrompida", "rodada interrompida"),
     ("não está respondendo", "app travado"),
     ("Meus Favoritos", "descurtir em Meus Favoritos"),
+    ("Criadores & Afiliados", "descurtir em Meus Favoritos"),
     ("de férias", "loja de férias"),
     ("notificação do comentário", "achar a notificação"),
     ("painel de comentários", "abrir os comentários"),
@@ -1783,21 +1784,33 @@ def _textos_da_ia(video, nomes=None):
             _avisar_recusa(video, nomes, recusa)
 
 
-# Eu → Meus Favoritos → Editar, como no Motorola (24/10/2026): cada produto ganha uma
-# caixa de marcar; na barra de baixo ficam a caixa de marcar tudo, o "Selecionado N/M" e o
-# botão Remover dos Favoritos. A lista carrega aos poucos: o robô marca tudo e remove de
-# novo, até não sobrar nada, em VOLTAS_DO_DESCURTIR voltas por rodada.
-MEUS_FAVORITOS = "Meus Favoritos"
-REMOVER_DOS_FAVORITOS = "Remover dos Favoritos"
+# Eu → Criadores & Afiliados → Meus favoritos, como o Rafael ensinou (vídeo de 25/10/2026): a
+# lista de afiliado (AN_MyLikesListPage), a mesma do Minhas Curtidas do Adicionar Produto (o
+# Meus Favoritos de comprador, direto na aba Eu, é outra lista). Cada produto tem uma caixa de
+# marcar; na barra de baixo ficam a caixa de marcar tudo, o "Selecionado N/50" (até 50 de cada
+# vez), o Like, que tira os marcados ("Removido das Minhas Curtidas com sucesso!"), e o
+# Compartilhar. O robô marca e tira de novo, até a lista acabar, em VOLTAS_DO_DESCURTIR voltas
+# por rodada. Nunca toca em Compartilhar nem no Substituir Tudo do aviso do alto da lista.
+CRIADORES_E_AFILIADOS = "Criadores & Afiliados"
+MEUS_FAVORITOS = "Meus favoritos"
+# Uma aba da área de afiliado: com ela na tela, o toque em Criadores & Afiliados pegou (sem ela,
+# "Meus favoritos" acharia o Meus Favoritos de comprador da aba Eu).
+ABA_DE_AFILIADO = "Conversão"
+# O filtro do alto da lista: com ele na tela, Meus favoritos abriu.
+FILTRO_DOS_FAVORITOS = "Melhor Oferta"
+CAIXA_DE_MARCAR = "AN_Checkbox_CheckedIconUnCheckIcon_Img"
+BOTAO_LIKE = "Like"
+NUNCA_NOS_FAVORITOS = ("compartilhar", "substituir")
+LIMITE_DA_SELECAO = 50
 VOLTAS_DO_DESCURTIR = 10
+# Sem a caixa de marcar tudo, o robô marca um por um, rolando a lista até estas vezes.
+ROLAGENS_DA_SELECAO = 12
 # O botão que confirma a remoção, se o app perguntar (nunca o Cancelar).
 CONFIRMAR_REMOCAO = ("@buttonDefaultPositive", "Remover", "Excluir", "Confirmar", "Sim", "OK")
-# As abas do alto de Meus Favoritos: com elas na tela, a página abriu (Motorola, 25/10/2026).
-ABAS_DE_FAVORITOS = ("Todos", "Categoria")
 
 
 def selecionados(xml):
-    """(marcados, total) do "Selecionado N/M" da edição de Meus Favoritos; None sem ele na tela."""
+    """(marcados, máximo) do "Selecionado N/M" da barra de Meus favoritos; None sem ele na tela."""
     for el in ps.elementos(xml):
         achado = re.search(r"selecionado\D*(\d+)\s*/\s*(\d+)", el["texto"], re.I)
         if achado:
@@ -1805,17 +1818,27 @@ def selecionados(xml):
     return None
 
 
-def caixa_de_marcar_tudo(xml):
-    """A caixa de marcar tudo: a que aceita toque à esquerda do "Selecionado N/M", na mesma linha."""
+def _marcados(xml):
+    return (selecionados(xml) or (0, 0))[0]
+
+
+def caixas_de_marcar(xml):
+    """
+    (a caixa de marcar tudo, [as caixas dos produtos]), pelo id da caixa: a de marcar tudo é a
+    da linha do "Selecionado N/M"; as outras são as dos produtos na tela.
+    """
     lista = ps.elementos(xml)
     texto = next((el for el in lista if re.match(r"selecionado", el["texto"].strip(), re.I)), None)
-    if not texto:
-        return None
-    esquerda, topo, _direita, base = texto["caixa"]
-    meio = (topo + base) // 2
-    caixas = [el for el in lista if el["clicavel"] and el["caixa"][2] <= esquerda + 5
-              and el["caixa"][1] <= meio <= el["caixa"][3]]
-    return ps._centro(min(caixas, key=lambda el: el["caixa"][0])) if caixas else None
+    linha = (texto["caixa"][1] + texto["caixa"][3]) // 2 if texto else None
+    barra, produtos = None, []
+    for el in lista:
+        if el["id"] != CAIXA_DE_MARCAR:
+            continue
+        if linha is not None and el["caixa"][1] <= linha <= el["caixa"][3]:
+            barra = ps._centro(el)
+        elif ps._centro(el) not in produtos:
+            produtos.append(ps._centro(el))
+    return barra, produtos
 
 
 def _ponto_exato(xml, alvo):
@@ -1824,6 +1847,14 @@ def _ponto_exato(xml, alvo):
         if (alvo.startswith("@") and el["id"] == alvo[1:]) or ps._normal(el["texto"]) == ps._normal(alvo):
             return ps._centro(el)
     return None
+
+
+def _seguro(xml, ponto):
+    """O toque nesse ponto não cai em Compartilhar, no Substituir Tudo nem em nada proibido (comprar, carrinho)."""
+    if ps.proibido_no_ponto(xml, *ponto):
+        return False
+    return not any(ps._dentro(ponto, el["caixa"]) and any(p in el["texto"].casefold() for p in NUNCA_NOS_FAVORITOS)
+                   for el in ps.elementos(xml))
 
 
 def _confirmar_remocao(d):
@@ -1839,92 +1870,118 @@ def _confirmar_remocao(d):
 
 def pagina_dos_favoritos(d, segundos=12):
     """
-    Como Meus Favoritos abriu, relendo a tela por até `segundos`: "editar" (o botão Editar),
-    "editando" (o app guarda a edição aberta da última vez: no Motorola, em 25/10/2026, a
-    página abriu já com Feito, Selecionado N/M e Remover dos Favoritos) ou "vazia" (as abas
-    da página, sem Editar nem edição, até o fim da espera). None: a página não abriu.
+    Como Meus favoritos abriu, relendo a tela por até `segundos`: "com produtos" (as caixas de
+    marcar dos produtos) ou "vazia" (o filtro do alto da lista, sem nenhum produto, até o fim da
+    espera). None: a página não abriu.
     """
     voltas = max(1, segundos // 3)
     for volta in range(voltas + 1):
         xml = tela(d)
-        if tem(xml, REMOVER_DOS_FAVORITOS) or selecionados(xml):
-            return "editando"
-        if tem(xml, "Editar"):
-            return "editar"
+        if caixas_de_marcar(xml)[1]:
+            return "com produtos"
         if volta < voltas:
             pausa(3)
-    return "vazia" if any(tem_exato(xml, aba) for aba in ABAS_DE_FAVORITOS) else None
+    return "vazia" if tem(xml, FILTRO_DOS_FAVORITOS) else None
+
+
+def _marcar(d):
+    """
+    Marca até LIMITE_DA_SELECAO produtos: primeiro pela caixa de marcar tudo; se ela não marcar
+    nenhum, um por um, rolando a lista. Cada toque é conferido pelo "Selecionado N/M": o que
+    desmarcou (já estava marcado) leva outro toque. Os que já estavam marcados de antes valem.
+    Devolve quantos ficaram marcados.
+    """
+    xml = tela(d)
+    marcados = _marcados(xml)
+    if marcados:
+        return marcados
+    barra, _ = caixas_de_marcar(xml)
+    if barra and _seguro(xml, barra):
+        d.click(*barra)
+        pausa(2)
+        xml = tela(d)
+        marcados = _marcados(xml)
+        if marcados:
+            return marcados
+    for _ in range(ROLAGENS_DA_SELECAO):
+        for ponto in caixas_de_marcar(xml)[1]:
+            if marcados >= LIMITE_DA_SELECAO:
+                return marcados
+            if not _seguro(xml, ponto):
+                continue
+            d.click(*ponto)
+            pausa(1)
+            xml = tela(d)
+            if _marcados(xml) < marcados:
+                d.click(*ponto)
+                pausa(1)
+                xml = tela(d)
+            marcados = _marcados(xml)
+        if marcados >= LIMITE_DA_SELECAO:
+            break
+        ps.rolar(d)
+        pausa(2)
+        xml = tela(d)
+    return marcados
 
 
 def descurtir_tudo(d, agora=None):
     """
-    A rotina das 4h: tira de Meus Favoritos tudo o que está curtido (Eu → Meus Favoritos →
-    Editar → marcar tudo → Remover dos Favoritos), até a lista acabar. Sobrou depois de
-    VOLTAS_DO_DESCURTIR voltas: a rodada seguinte, na mesma hora, continua. Só números no
-    registro, nunca o nome dos produtos. Escolha do Rafael (P25): DECISOES.md, Shopee Vídeo.
+    A rotina das 4h: tira de Meus favoritos (a lista de afiliado, a do Minhas Curtidas) tudo o
+    que está curtido: Eu → Criadores & Afiliados → Meus favoritos → marcar → Like, até a lista
+    acabar. Sobrou depois de VOLTAS_DO_DESCURTIR voltas: a rodada seguinte, na mesma hora,
+    continua. Só números no registro, nunca o nome dos produtos.
+    Escolhas do Rafael (P25 e o caminho que ele ensinou): DECISOES.md, Shopee Vídeo.
     """
     ir_ao_inicio(d)
     tocar(d, "Eu", 5)
-    if not esperar_na_tela(d, MEUS_FAVORITOS, 9):
+    if not esperar_na_tela(d, CRIADORES_E_AFILIADOS, 9):
         ps.rolar(d)
         pausa(2)
-        if not tem(tela(d), MEUS_FAVORITOS):
-            raise Parada("não achei Meus Favoritos na aba Eu")
+        if not tem(tela(d), CRIADORES_E_AFILIADOS):
+            raise Parada("não achei Criadores & Afiliados na aba Eu")
+    tocar(d, CRIADORES_E_AFILIADOS, 6)
+    if not esperar_na_tela(d, ABA_DE_AFILIADO, 12) or not tem(tela(d), MEUS_FAVORITOS):
+        raise Parada("a área de Criadores & Afiliados não abriu com Meus favoritos")
     tocar(d, MEUS_FAVORITOS, 6)
     pagina = pagina_dos_favoritos(d)
     if pagina is None:
-        raise Parada("Meus Favoritos não abriu (nem Editar, nem a edição, nem as abas da página)")
+        raise Parada("Meus favoritos não abriu (nem produtos, nem o filtro da lista)")
     if pagina == "vazia":
-        # Sem nada curtido, a página não tem o que editar.
         registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", "nada curtido", ok=True)
         gravar_estado(favoritos_limpos=True)
         ir_ao_inicio(d)
-        return "nada curtido em Meus Favoritos"
-    if pagina == "editar":
-        tocar(d, "Editar", 3)
+        return "nada curtido em Meus favoritos"
     removidos, acabou = 0, False
-    for volta in range(VOLTAS_DO_DESCURTIR):
-        xml = tela(d)
-        caixa = caixa_de_marcar_tudo(xml)
-        if not caixa:
-            if volta:
-                # A edição fechou com a lista vazia.
-                acabou = True
-                break
-            raise Parada("a edição de Meus Favoritos não mostrou a caixa de marcar tudo")
-        marcados, total = 0, 0
-        for _ in range(2):
-            # A caixa de marcar tudo pode ter ficado marcada da volta anterior: um toque a desmarca.
-            d.click(*caixa)
-            pausa(2)
-            marcados, total = selecionados(tela(d)) or (0, 0)
-            if marcados or not total:
-                break
-        if not marcados:
-            if total:
-                raise Parada("marquei tudo em Meus Favoritos, mas nenhum produto ficou marcado")
+    for _volta in range(VOLTAS_DO_DESCURTIR):
+        if not caixas_de_marcar(tela(d))[1]:
             acabou = True
             break
-        tocar(d, REMOVER_DOS_FAVORITOS, 3)
+        marcados = _marcar(d)
+        if not marcados:
+            raise Parada("marquei os produtos de Meus favoritos, mas nenhum ficou marcado")
+        xml = tela(d)
+        ponto = _ponto_exato(xml, BOTAO_LIKE)
+        if not ponto or not _seguro(xml, ponto):
+            raise Parada("a barra de Meus favoritos não mostrou o Like")
+        d.click(*ponto)
+        pausa(3)
         _confirmar_remocao(d)
-        pausa(4)
-        depois = selecionados(tela(d))
-        if depois and depois[0] and depois[1] >= total:
-            # Os mesmos continuam marcados e a lista não diminuiu: a remoção não pegou (uma
-            # pergunta do app que o robô não conhece, por exemplo).
-            raise Parada("toquei em Remover dos Favoritos, mas a lista de Meus Favoritos não diminuiu")
-        removidos += marcados
-    gravar_estado(descurtir_continuar=not acabou, favoritos_limpos=acabou)
-    xml = tela(d)
-    if tem_exato(xml, "Feito"):
-        d.click(*_ponto_exato(xml, "Feito"))
         pausa(2)
+        if _marcados(tela(d)) >= marcados:
+            # Os mesmos continuam marcados: o Like não tirou (uma pergunta do app que o robô
+            # não conhece, por exemplo).
+            raise Parada("toquei em Like, mas os produtos marcados continuaram em Meus favoritos")
+        removidos += marcados
+    else:
+        acabou = not caixas_de_marcar(tela(d))[1]
+    gravar_estado(descurtir_continuar=not acabou, favoritos_limpos=acabou)
     ir_ao_inicio(d)
     registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", "descurtido" if acabou else "continua depois",
                                  f"{removidos} produto(s)", ok=True if acabou else None)
     if not acabou:
-        return f"{removidos} produto(s) descurtido(s) em Meus Favoritos; o resto fica para a próxima rodada"
-    return f"{removidos} produto(s) descurtido(s) em Meus Favoritos"
+        return f"{removidos} produto(s) descurtido(s) em Meus favoritos; o resto fica para a próxima rodada"
+    return f"{removidos} produto(s) descurtido(s) em Meus favoritos"
 
 
 def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):

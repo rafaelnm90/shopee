@@ -351,18 +351,22 @@ postar no alto da tela, com telas nativas, que o robô lê melhor que a WebView.
    - Descurtir (pedido do Rafael, 24/10/2026): na mesma página, tocar em
      `buttonItemLiked` volta o id para `buttonItemLike`. No fim de cada rascunho, o robô
      descurte assim os produtos que curtiu para ele (pelo link ou pelo Ver Produtos).
-   - Meus Favoritos (Motorola, 24/10/2026): aba **Eu** → **Meus Favoritos** (no bloco
-     "Mais atividades", ~775,2028) abre a lista dos curtidos, em 2 colunas, com os filtros
-     Todos, Status e Categoria e o **Editar** no canto de cima. No Editar, cada produto
-     ganha uma caixa de marcar (embaixo, à esquerda do cartão), o botão de cima vira
-     **Feito** e a barra de baixo mostra a caixa de marcar tudo (~58,2326), o
-     "Selecionado N/M" e o botão **Remover dos Favoritos** (~841,2326). A rotina das 4h
-     marca tudo e remove, de novo e de novo, até a lista acabar (falta ver no celular se
-     o app pergunta antes de remover; o robô confirma se perguntar, nunca no Cancelar).
-     O app guarda a edição aberta: saindo sem o Feito, Meus Favoritos abre da próxima vez
-     já na edição, com Feito, "Selecionado N/M" e Remover dos Favoritos, sem o Editar
-     (Motorola, 25/10/2026). O robô aceita os dois jeitos; só dá a lista por vazia com as
-     abas Todos e Categoria na tela e nem Editar nem edição.
+   - Meus favoritos de afiliado (o Rafael ensinou em vídeo, 25/10/2026): aba **Eu** →
+     **Criadores & Afiliados** (no bloco "Mais atividades") → área de afiliado (abas Oferta,
+     Conversão e Conta embaixo) → **Meus favoritos** (o coração, ~746,722). É a lista
+     `AN_MyLikesListPage`, a mesma do Minhas Curtidas do Adicionar Produto. O título diz
+     quantos há ("Meus favoritos(1000)", até 1000), com os filtros Ordenar e Melhor Oferta e,
+     às vezes, um aviso com **Substituir Tudo** (nunca tocar). Cada produto tem uma caixa de
+     marcar à esquerda (`AN_Checkbox_CheckedIconUnCheckIcon_Img`, ~84) e os ícones de mais e
+     compartilhar à direita. Na barra de baixo: a mesma caixa (~63,2323), o "Selecionado
+     N/50" (até 50 de cada vez), o **Like** (~675,2323), que tira os marcados ("Removido das
+     Minhas Curtidas com sucesso!"), e o **Compartilhar** (nunca tocar). A rotina das 4h marca
+     (pela caixa de baixo; sem ela, um por um, rolando), toca em Like e repete até a lista
+     acabar. Falta ver no celular se a caixa de baixo marca tudo de uma vez: o robô confere
+     pelo "Selecionado N/50".
+   - Meus Favoritos de comprador (aba **Eu** → **Meus Favoritos**, Motorola, 24/10/2026): outra
+     lista, com Editar, Todos, Status e Categoria e o Remover dos Favoritos; o app guarda a
+     edição aberta. Não é a do Minhas Curtidas: o robô não mexe nela.
    - Página do produto presa no esqueleto (ícone de presente e barras cinzas, ids
      `ll_head_root` e `iv_head_image`), até abrindo à mão: era a verificação das 04:27
      de 18/10/2026, que expirou sem resposta. Forçar a parada da Shopee faz a
