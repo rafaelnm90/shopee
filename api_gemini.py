@@ -103,8 +103,8 @@ def _tirar_da_vez(modelo, erro_txt):
 ULTIMO_ERRO_IA = None
 
 # Os códigos do Google (finish_reason e block_reason) de resposta vazia pelo conteúdo do
-# vídeo: se repetem para o mesmo vídeo, em todos os modelos. Quem pediu a análise põe o
-# vídeo de lado; não é falha do robô nem da IA.
+# pedido (o vídeo junto com o texto): se repetem para o mesmo pedido. Quem pediu a análise
+# põe o vídeo de lado; não é falha do robô nem da IA.
 BLOQUEIOS_DO_CONTEUDO = {"PROHIBITED_CONTENT", "BLOCKLIST", "SPII", "SAFETY", "IMAGE_SAFETY"}
 
 
@@ -114,7 +114,7 @@ def codigos_do_google(texto):
 
 
 class ConteudoBloqueado(Exception):
-    """Todos os modelos que responderam recusaram o conteúdo do vídeo (os outros estavam sem cota)."""
+    """Nenhum modelo deu o texto, e algum recusou o pedido pelo conteúdo (BLOQUEIOS_DO_CONTEUDO)."""
 
 
 def _motivo_resposta_vazia(response):
@@ -204,8 +204,7 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
             partes_das_imagens = [types.Part.from_bytes(data=dados, mime_type=tipo) for dados, tipo in imagens or []]
 
             falhas = []   # motivo de cada modelo, para a mensagem de erro final
-            recusas = 0   # modelos que responderam vazio pelo conteúdo do vídeo
-            outras = 0    # falhas que não são recusa do conteúdo nem cota ou modelo inexistente
+            recusas = 0   # modelos que responderam vazio pelo conteúdo do pedido
             for modelo_nome in _modelos_da_vez():
                 try:
                     response = client_genai.models.generate_content(
@@ -228,20 +227,19 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
                     falhas.append(f"{modelo_nome}: VAZIO ({motivo})")
                     if BLOQUEIOS_DO_CONTEUDO & codigos_do_google(motivo):
                         recusas += 1
-                    else:
-                        outras += 1
                     logger.warning(f"⚠️ [IA] {modelo_nome} devolveu resposta vazia → {motivo}")
 
                 except Exception as erro_modelo:
                     erro_txt = str(erro_modelo)
                     falhas.append(f"{modelo_nome}: {type(erro_modelo).__name__} {erro_txt[:150]}")
                     if not _tirar_da_vez(modelo_nome, erro_txt):
-                        outras += 1
                         logger.warning(f"⚠️ [IA] Erro em {modelo_nome}: {type(erro_modelo).__name__} → {erro_txt[:200]}")
                     continue
 
             mensagem = "Todos os modelos da cascata falharam → " + " | ".join(falhas)
-            if recusas and not outras:
+            # Com uma recusa pelo conteúdo, quem pediu põe o vídeo de lado (os outros modelos
+            # sem cota ou com erro passageiro não mudam isso).
+            if recusas:
                 raise ConteudoBloqueado(mensagem)
             raise Exception(mensagem)
         finally:
@@ -256,9 +254,9 @@ async def analisar_video_gemini(caminho_video, prompt, imagens=None):
         resultado = await asyncio.to_thread(processar_ia)
         return resultado
     except ConteudoBloqueado as e:
-        # O vídeo é que não serve (quem pediu o põe de lado): aviso, não erro do robô.
+        # Quem pediu põe o vídeo de lado: aviso, não erro do robô.
         ULTIMO_ERRO_IA = str(e)[:400]
-        logger.warning(f"🚫 [IA] O Google recusou o conteúdo do vídeo em todos os modelos: {e}")
+        logger.warning(f"🚫 [IA] O Google recusou o pedido pelo conteúdo (vídeo e texto): {e}")
         return None
     except Exception as e:
         ULTIMO_ERRO_IA = str(e)[:400]
