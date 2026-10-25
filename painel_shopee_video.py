@@ -1541,8 +1541,10 @@ async def confirmar_janela_interacoes(message: types.Message, state: FSMContext)
 @router.message(ShopeeVideoFluxo.aguardando_confirmacao_janela_interacoes, F.text == "Aprovar ✅")
 async def salvar_janela_interacoes(message: types.Message, state: FSMContext):
     janela = (await state.get_data()).get("janela_interacoes")
+    # A hora da escolha fica junto: o checkup só cobra a janela nova do que veio depois dela.
     alterar_config(robo_interacoes_inicio=janela[0] if janela else None,
-                   robo_interacoes_fim=janela[1] if janela else None)
+                   robo_interacoes_fim=janela[1] if janela else None,
+                   robo_interacoes_desde=datetime.now(fuso_horario).strftime("%Y-%m-%d %H:%M:%S"))
     if janela:
         exemplos.lembrar_janela("shopee_video_interacoes", *janela)
     config = ler_config()

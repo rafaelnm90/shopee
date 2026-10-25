@@ -802,6 +802,7 @@ def test_horario_das_interacoes_separa_as_horas_de_postar(bm, Msg, Est):
     rodar(sv.salvar_janela_interacoes(Msg("Aprovar ✅"), est))
     config = sv.ler_config()
     assert (config["robo_interacoes_inicio"], config["robo_interacoes_fim"]) == (12, 15)
+    assert config["robo_interacoes_desde"]                                   # o checkup cobra só daqui
     texto = sv.texto_robo(config)
     assert "Horário das interações: <b>das 12h às 15h</b>" in texto
     assert "prepara e posta das 8h às 12h e das 15h às 22h" in texto
