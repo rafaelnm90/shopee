@@ -4,7 +4,9 @@ Investiga no servidor por que o robô automático da Shopee Vídeo não acha o p
 vídeo ("o link não diz o produto do vídeo"). Para os vídeos que o robô pulou e para os
 próximos da Fonte dos Vídeos do painel, segue o link como o robô segue e mostra só a
 forma: por que tipos de página ele passou, se chegou a um produto ou a um vídeo (Ver
-Produtos) e se a API de afiliado devolve a oferta do produto. No fim, as contagens.
+Produtos) e se a API de afiliado devolve a oferta do produto. No fim, as contagens. Antes,
+cada tentativa das últimas 24 h que não deu certo, com a hora, o passo e a forma do
+motivo (o texto fixo do código, com "…" no que muda de um vídeo para outro).
 
 Usado pelo workflow investigar_robo.yml (só à mão). O log do Actions é público: nunca
 imprime links, nomes de produto ou textos; só tipos de página, contagens e o motivo do
@@ -19,6 +21,7 @@ import os
 import re
 import sys
 from collections import Counter
+from datetime import timedelta
 
 import api_shopee
 import assistente_shopee_video as assistente
@@ -74,6 +77,57 @@ def textos_fixos():
     return textos
 
 
+def moldes_fixos():
+    """
+    As frases montadas no código do robô e do postador (f-strings), como (regex, molde): o
+    molde é o texto fixo com "…" no lugar do que muda, e a regex reconhece um motivo
+    montado por ela. As de texto fixo mais longo primeiro: dizem mais do motivo.
+    """
+    moldes = []
+    for arquivo in ARQUIVOS_DOS_MOTIVOS:
+        with open(os.path.join(PASTA, arquivo), encoding="utf-8") as f:
+            arvore = ast.parse(f.read())
+        for no in ast.walk(arvore):
+            if not isinstance(no, ast.JoinedStr):
+                continue
+            partes = [parte.value if isinstance(parte, ast.Constant) else None for parte in no.values]
+            fixo = "".join(parte for parte in partes if parte)
+            if len(fixo) < 12:
+                continue
+            regex = "".join(re.escape(parte) if parte is not None else ".+?" for parte in partes)
+            moldes.append((len(fixo), re.compile(regex + "$", re.S),
+                           "".join(parte if parte is not None else "…" for parte in partes)))
+    return [(regex, molde) for _, regex, molde in sorted(moldes, key=lambda m: -m[0])]
+
+
+def forma_do_motivo(motivo, fixos, moldes):
+    """O motivo como pode sair no log: inteiro se é texto fixo do código; senão o molde que o montou; senão ""."""
+    if not motivo or motivo in fixos:
+        return motivo or ""
+    return next((molde for regex, molde in moldes if regex.match(motivo)), "")
+
+
+# Os resultados que deram certo (o resto entra na lista do que não deu).
+DERAM_CERTO = ("salvo", "postado", "apagado", "treino ok", "saúde lida", "respondido", "comentado", "descurtido")
+
+
+def tentativas_que_nao_deram_certo():
+    """(hora, ação, resultado, passo, forma do motivo) das últimas 24 h, da mais velha para a mais nova."""
+    import robo_shopee_video as robo   # aqui dentro: o robô traz a IA e o celular junto
+    desde = robo._momento(robo.agora_br() - timedelta(hours=24))
+    with db.conexao() as con:
+        try:
+            linhas = con.execute(
+                "SELECT momento, acao, resultado, passo, motivo FROM shopee_video_tentativas WHERE momento >= ? "
+                f"AND resultado NOT IN ({','.join('?' * len(DERAM_CERTO))}) ORDER BY momento",
+                (desde, *DERAM_CERTO)).fetchall()
+        except Exception:
+            return []
+    fixos, moldes = textos_fixos(), moldes_fixos()
+    return [(momento[5:16], acao, resultado, passo or "outro", forma_do_motivo(motivo, fixos, moldes))
+            for momento, acao, resultado, passo, motivo in linhas]
+
+
 def pulados():
     """
     (id do vídeo, passo em que parou, motivo) dos vídeos que o robô pulou. O passo é o
@@ -102,6 +156,10 @@ def proximos(quantos):
 
 async def investigar(quantos):
     contagem = Counter()
+    ruins = tentativas_que_nao_deram_certo()
+    print(f"== Tentativas das últimas 24 h que não deram certo: {len(ruins)}")
+    for quando, acao, resultado, passo, forma in ruins:
+        print(f"   {quando} {acao} → {resultado} em {passo}" + (f": {forma}" if forma else ""))
     links = links_das_fontes()
     lista = pulados()
     print(f"== Vídeos que o robô pulou: {len(lista)}")
