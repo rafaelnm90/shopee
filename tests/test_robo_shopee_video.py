@@ -1,4 +1,5 @@
 """Robô automático da Shopee Vídeo (robo_shopee_video): plano do dia, aprovação espalhada, rodada e o caminho no app."""
+import json
 import os
 import random
 from datetime import datetime
@@ -22,6 +23,8 @@ def momento(texto):
 
 # A leitura da Saúde do Vídeo do dia fica de fora dos testes que não são dela.
 SAUDE_DO_DIA = robo.saude_do_dia_pendente
+# A busca do mesmo produto com mais comissão (P33) também: ela vai à API de afiliado.
+TROCAR = robo.trocar_pela_maior_comissao
 
 
 @pytest.fixture(autouse=True)
@@ -29,6 +32,7 @@ def sem_espera(monkeypatch):
     monkeypatch.setattr(robo.time, "sleep", lambda s: None)
     monkeypatch.setattr(robo.ps.time, "sleep", lambda s: None)
     monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo, "trocar_pela_maior_comissao", lambda video: None)
     # As respostas aos comentários e o feed têm testes próprios (test_interacoes_shopee_video).
     monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
     monkeypatch.setattr(robo, "feed_pendente", lambda agora=None: False)
@@ -587,6 +591,106 @@ def test_rascunho_completo_curte_pelo_nome_e_salva_sem_tocar_em_postar(monkeypat
     assert "Rascunhos do Robô 📝" in avisos[-1]
     # O assistente não pega o mesmo vídeo.
     assert robo.assistente.proximo_video("autorais") is None
+
+
+FOLHAS = "Folhas Prontas Facial Depilsam Ouro 10 Pares"
+
+
+def _busca_de_comissao(monkeypatch, ofertas, confirma=()):
+    """A API (produto do link a 5% e as ofertas da busca), o link curto e a IA de mentira; devolve o que foi pedido."""
+    pedidos = {"busca": [], "ia": []}
+
+    async def produtos_do_link(link):
+        return [{"nome": FOLHAS, "preco": 10.9, "comissao": 5.0}], link
+
+    async def buscar(termo, limite=10, sort_type=2):
+        pedidos["busca"].append((termo, limite, sort_type))
+        return ofertas
+
+    async def converter(link, etiqueta, avisar_falha=True):
+        return link if "falha" in link else "https://s.shopee.com.br/" + link.rsplit("/", 1)[-1]
+
+    def ia(video, vistos, avisar=True):
+        pedidos["ia"].append(video["link"])
+        if video["link"] in confirma:
+            vistos.append("é o mesmo pacote")
+            return True, "confere"
+        return False, "outro produto"
+
+    monkeypatch.setattr(robo.assistente, "produtos_do_link", produtos_do_link)
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
+    monkeypatch.setattr(robo.api_shopee, "converter_link_shopee", converter)
+    monkeypatch.setattr(robo.ps, "ia_confere_produto", ia)
+    return pedidos
+
+
+def _oferta(nome, comissao, item):
+    return {"productName": nome, "commissionRate": str(comissao), "productLink": f"https://shopee.com.br/product/9/{item}",
+            "sales": 10}
+
+
+def test_troca_pelo_mesmo_produto_que_paga_mais_conferido_pela_ia(monkeypatch):
+    # Escolha do Rafael (25/10, P33): como a busca por foto com o filtro Comissão que ele faz,
+    # o robô acha o mesmo produto de outra loja que paga mais e a IA confere com o vídeo.
+    ofertas = [_oferta(FOLHAS, 0.05, 1),                                       # o do link: não paga mais
+               _oferta("Óleo Finalizador Semi Di Lino Cristal", 0.20, 2),      # paga mais, mas é outro
+               _oferta("Folhas Prontas Facial Depilsam Ouro 20 Folhas", 0.095, 3),
+               _oferta("Promoção Folhas Prontas Depilsam Facial Ouro", 0.08, 4)]
+    pedidos = _busca_de_comissao(monkeypatch, ofertas, confirma=("https://s.shopee.com.br/4",))
+    troca = TROCAR({"link": LINK, "arquivo": "video.mp4"})
+    assert pedidos["busca"] == [("Folhas Prontas Facial Depilsam Ouro 10", robo.OFERTAS_NA_BUSCA, 5)]
+    # Da maior comissão para a menor, só os de nome parecido; a IA recusou o de 9,5%.
+    assert pedidos["ia"] == ["https://s.shopee.com.br/3", "https://s.shopee.com.br/4"]
+    assert troca["link"] == "https://s.shopee.com.br/4" and troca["comissao"] == 8.0 and troca["antes"] == 5.0
+    assert troca["vistos"] == ["é o mesmo pacote"]
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_COMISSAO, "2000-01-01 00:00:00")
+    assert [r[2] for r in registro] == ["trocado"]
+
+
+def test_sem_produto_que_pague_mais_fica_o_do_link(monkeypatch):
+    pedidos = _busca_de_comissao(monkeypatch, [_oferta(FOLHAS, 0.04, 1), _oferta("Kit Óleo Finalizador", 0.2, 2)])
+    assert TROCAR({"link": LINK, "arquivo": "video.mp4"}) is None and pedidos["ia"] == []
+    # Nenhum confirmado pela IA (ou sem o link curto, que o celular abre): fica o do link.
+    pedidos = _busca_de_comissao(monkeypatch, [_oferta(FOLHAS + " Kit", 0.09, "falha"), _oferta(FOLHAS, 0.08, 5)])
+    assert TROCAR({"link": LINK, "arquivo": "video.mp4"}) is None
+    assert pedidos["ia"] == ["https://s.shopee.com.br/5"]
+    registro = robo.registro_processos.sequencia("shopee_video", robo.PROCESSO_DA_COMISSAO, "2000-01-01 00:00:00")
+    assert [r[2] for r in registro] == ["mantido - nenhum com mais comissão", "mantido - a IA não confirmou nenhum"]
+    assert (robo.termo_da_busca("Kit [Oficial] Folhas (10 pares) Prontas ✨ Facial Depilsam Ouro Mel")
+            == "Kit Folhas Prontas Facial Depilsam Ouro")
+
+    # Um erro na busca nunca derruba o rascunho: fica o produto do link.
+    async def quebrada(termo, limite=10, sort_type=2):
+        raise ConnectionError("sem rede")
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", quebrada)
+    assert TROCAR({"link": LINK, "arquivo": "video.mp4"}) is None
+
+
+def test_rascunho_vai_com_o_produto_que_paga_mais(monkeypatch, avisos):
+    _fonte(monkeypatch)
+    analises = []
+
+    async def produtos_do_link(link):
+        return [{"nome": VESTIDO, "preco": 59.9, "comissao": 15.0 if "mais" in link else 10.0}], link
+
+    async def analisar(arquivo, prompt, imagens=None):
+        analises.append(prompt)
+        return '{"confere": true, "motivo": "vestido"}'
+
+    monkeypatch.setattr(robo.assistente, "produtos_do_link", produtos_do_link)
+    monkeypatch.setattr(robo.ps.api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(robo, "trocar_pela_maior_comissao",
+                        lambda video: {"nome": VESTIDO, "link": "https://s.shopee.com.br/mais", "comissao": 15.0,
+                                       "antes": 10.0, "vistos": ["mesmo vestido", "mesmo vestido"]})
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    app = AppDeMentira()
+    assert robo.rodada(d=app, agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    rascunho = robo.esperando_aprovacao()[0]
+    assert rascunho["link"] == "https://s.shopee.com.br/mais" and rascunho["produtos"] == [VESTIDO]
+    assert "Comissão: 15.0% (o produto do link pagava 10.0%" in avisos[0]
+    # A IA já conferiu o produto novo com o vídeo na troca: a conferência não se repete.
+    assert not any(p.startswith("Você confere um vídeo") for p in analises)
+    assert json.loads(robo.pegar(rascunho["id"])["conferencia"]) == ["mesmo vestido", "mesmo vestido"]
 
 
 NOME_NO_APP = "Vestidinho Gatinho Estampado Menina Infantil Verão"

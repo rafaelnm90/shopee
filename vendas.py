@@ -33,6 +33,7 @@ NOMES_DOS_CANAIS = {
     "espelhador": "Espelhador de canais",
     "achadinhos": "Achadinhos (garimpo de ofertas)",
     "busca": "Buscador do Grupo Público",
+    "shopeevideo": "Shopee Vídeo (link aberto no celular do robô)",
     "geral": "Links de antes das etiquetas",
     "": "Sem etiqueta (Shopee Vídeo e compras fora dos links dos robôs)",
 }
