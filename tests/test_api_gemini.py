@@ -110,6 +110,13 @@ def video_no_gemini(monkeypatch):
             raise RuntimeError(resposta)
         if resposta == "bloqueado":
             return SimpleNamespace(text=None, prompt_feedback=BLOQUEADO, candidates=[])
+        if resposta == "bloqueado com categoria":
+            avaliacoes = [SimpleNamespace(category=SimpleNamespace(name="HARM_CATEGORY_SEXUALLY_EXPLICIT"),
+                                          probability=SimpleNamespace(name="MEDIUM"), blocked=False),
+                          SimpleNamespace(category="HarmCategory.HARM_CATEGORY_HATE_SPEECH",
+                                          probability="HarmProbability.NEGLIGIBLE", blocked=False)]
+            return SimpleNamespace(text=None, prompt_feedback=BLOQUEADO, candidates=[
+                SimpleNamespace(finish_reason="STOP", safety_ratings=avaliacoes)])
         if resposta == "vazio":
             return SimpleNamespace(text=None, prompt_feedback=None,
                                    candidates=[SimpleNamespace(finish_reason="RECITATION", safety_ratings=None)])
@@ -153,3 +160,14 @@ def test_falha_sem_recusa_do_conteudo_continua_erro(video_no_gemini, caplog):
     assert not _niveis(caplog, "recusou o pedido pelo conteúdo")
     video_no_gemini.respostas = {"a": "bloqueado", "b": "texto do b"}
     assert rodar(ia.analisar_video_gemini("v.mp4", "p")) == "texto do b"
+
+
+def test_recusa_guarda_o_que_o_google_disse_para_o_aviso(video_no_gemini):
+    # Escolha do Rafael (P29): o aviso diz o código e as categorias marcadas (nível médio ou
+    # alto); o Google não dá o motivo detalhado.
+    video_no_gemini.respostas = {"a": "bloqueado com categoria", "b": "bloqueado", "c": COTA_DO_DIA}
+    assert rodar(ia.analisar_video_gemini("v.mp4", "p")) is None
+    assert ia.ULTIMA_RECUSA == {"codigos": ["PROHIBITED_CONTENT"],
+                                "categorias": [("HARM_CATEGORY_SEXUALLY_EXPLICIT", "MEDIUM")]}
+    video_no_gemini.respostas = {"a": "texto"}
+    assert rodar(ia.analisar_video_gemini("v.mp4", "p")) == "texto" and ia.ULTIMA_RECUSA is None

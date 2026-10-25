@@ -348,6 +348,46 @@ def montar_prompt(nome_produto="", leves=False):
                          diretrizes=ler_diretrizes(leves))
 
 
+# A recusa do Google no último textos_do_video, para o aviso ao Rafael (escolha dele, P29):
+# o que o Google disse (api_gemini.ULTIMA_RECUSA) e "leves" = o que deu o pedido refeito
+# com as regras em palavras leves ("passou", "recusado de novo" ou "sem resposta"). None
+# se o Google não recusou.
+ULTIMA_RECUSA = None
+
+# O que cada código e cada categoria do Google quer dizer, em palavras simples.
+CODIGOS_DO_GOOGLE = {
+    "PROHIBITED_CONTENT": "conteúdo proibido (o Google não diz qual parte)",
+    "BLOCKLIST": "palavra da lista proibida do Google",
+    "SPII": "dado pessoal sensível",
+    "SAFETY": "segurança",
+    "IMAGE_SAFETY": "imagem imprópria",
+}
+CATEGORIAS_DO_GOOGLE = {
+    "HARM_CATEGORY_SEXUALLY_EXPLICIT": "sexual",
+    "HARM_CATEGORY_DANGEROUS_CONTENT": "perigoso",
+    "HARM_CATEGORY_HARASSMENT": "assédio",
+    "HARM_CATEGORY_HATE_SPEECH": "ódio",
+    "HARM_CATEGORY_CIVIC_INTEGRITY": "política",
+}
+NIVEIS_DO_GOOGLE = {"HIGH": "alto", "MEDIUM": "médio", "LOW": "baixo", "NEGLIGIBLE": "mínimo"}
+
+
+def texto_da_recusa(recusa, produto=""):
+    """O aviso do vídeo recusado pelo Google: o produto, o que o Google disse e o pedido refeito."""
+    codigos = ", ".join(f"{CODIGOS_DO_GOOGLE.get(c, c)} ({c})" for c in recusa.get("codigos") or []) or "sem código"
+    categorias = ", ".join(f"{CATEGORIAS_DO_GOOGLE.get(c, c)} ({NIVEIS_DO_GOOGLE.get(n, n)})"
+                           for c, n in recusa.get("categorias") or [])
+    leves = {
+        "passou": "passou ✅: a causa era o texto das diretrizes no pedido, não o vídeo. O vídeo segue normalmente.",
+        "recusado de novo": "recusado de novo ❌: o problema parece ser o próprio vídeo. Ele foi pulado.",
+    }.get(recusa.get("leves"), "a IA não respondeu ⚠️ (tenta de novo mais tarde ou pula o vídeo).")
+    return (f"🚫 Shopee Vídeo: o Google recusou o pedido do título deste vídeo.\n\n"
+            f"Produto: {produto or 'não identificado'}\n"
+            f"O que o Google disse: {codigos}\n"
+            + (f"Categorias marcadas: {categorias}\n" if categorias else "")
+            + f"\nPedido de novo com as regras em palavras leves: {leves}")
+
+
 def recusado_pelo_conteudo():
     """A última análise de vídeo foi recusada pelo Google pelo conteúdo do pedido?"""
     return bool(api_gemini.BLOQUEIOS_DO_CONTEUDO & api_gemini.codigos_do_google(api_gemini.ULTIMO_ERRO_IA))
@@ -405,16 +445,19 @@ async def textos_do_video(arquivo, nome_produto=""):
     se quiser. Violação na segunda resposta também vale.
     Decisões do Rafael (P28 e o título curto): DECISOES.md, Shopee Vídeo.
     """
+    global ULTIMA_RECUSA
     api_gemini.ULTIMO_ERRO_IA = None
-    leves = False
+    ULTIMA_RECUSA, leves = None, False
     textos = await gerar_textos(arquivo, nome_produto)
     if textos is None and recusado_pelo_conteudo():
         logger.info("🔁 [Shopee Vídeo] O Google recusou o pedido pelo conteúdo; pedindo de novo com as "
                     "regras em palavras leves.")
-        leves = True
+        recusa, leves = dict(api_gemini.ULTIMA_RECUSA or {}), True
         textos = await gerar_textos(arquivo, nome_produto, leves=True)
         if textos:
             textos["regras_leves"] = True
+        recusa["leves"] = "passou" if textos else "recusado de novo" if recusado_pelo_conteudo() else "sem resposta"
+        ULTIMA_RECUSA = recusa
     if not textos or textos["violacao"] or not textos["titulo"] or tamanho_no_app(textos["titulo"]) >= TITULO_MIN:
         return textos
     logger.info(f"🔁 [Shopee Vídeo] Título com {tamanho_no_app(textos['titulo'])} caracteres "
@@ -510,6 +553,10 @@ async def _preparar_e_enviar(bot, admin_id, video, agora):
     from aiogram.types import FSInputFile
 
     textos = await textos_do_video(video["arquivo"], video["nome"])
+    if ULTIMA_RECUSA:
+        # Escolha do Rafael (P29): cada vídeo recusado pelo Google chega no privado na hora.
+        await bot.send_video(admin_id, video=FSInputFile(video["arquivo"]), supports_streaming=True,
+                             caption=texto_da_recusa(ULTIMA_RECUSA, video["nome"])[:1000])
     if not textos or not textos["titulo"]:
         registrar(video["id"], "erro", "a IA não respondeu", agora)
         return "a IA não gerou o texto; o vídeo foi pulado"

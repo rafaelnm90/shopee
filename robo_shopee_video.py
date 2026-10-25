@@ -1494,6 +1494,14 @@ def avisar_foto(caminho, legenda):
         return False
 
 
+def avisar_video(caminho, legenda):
+    try:
+        return avisar_rafael.mandar_video(caminho, legenda)
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] Vídeo não chegou ao Rafael: {type(e).__name__}")
+        return False
+
+
 # --- Preparar um rascunho ---
 
 def proximo_video(config, evitar=()):
@@ -1728,7 +1736,18 @@ def _motivo_da_ia():
     return "erro da IA" if erro else "resposta sem o título"
 
 
-def _textos_da_ia(video):
+def _avisar_recusa(video, nomes, recusa):
+    """
+    O vídeo que o Google recusou, no privado na hora: o vídeo, o produto, o que o Google disse
+    e o que deu o pedido em palavras leves. Sem conseguir mandar o vídeo, vai só o texto.
+    Escolha do Rafael (P29): DECISOES.md, Shopee Vídeo.
+    """
+    legenda = assistente.texto_da_recusa(recusa, ", ".join(nomes or []))
+    if not (video.get("arquivo") and os.path.exists(video["arquivo"]) and avisar_video(video["arquivo"], legenda)):
+        avisar(legenda)
+
+
+def _textos_da_ia(video, nomes=None):
     """
     O título e o comentário da IA. A IA às vezes volta vazia (bloqueio do Google que muda de
     uma tentativa para outra, como o RECITATION): mais uma chance depois de uma pausa, antes
@@ -1737,24 +1756,31 @@ def _textos_da_ia(video):
     na hora, e o horário passa ao próximo. Cada falha entra no registro com o motivo em código
     fixo, para o checkup mostrar a causa.
     """
-    motivo = ""
-    for vez in range(TENTATIVAS_DO_TITULO):
-        ps.api_gemini.ULTIMO_ERRO_IA = None
-        textos = asyncio.run(assistente.textos_do_video(video["arquivo"], video.get("nome") or ""))
-        if textos and textos["titulo"]:
-            if textos.get("regras_leves"):
-                registro_processos.registrar(REGISTRO, "título da IA", "veio com as regras em palavras leves", ok=True)
-            elif vez:
-                registro_processos.registrar(REGISTRO, "título da IA", "veio na nova tentativa", ok=True)
-            return textos
-        motivo = _motivo_da_ia()
-        registro_processos.registrar(REGISTRO, "título da IA", "sem título", motivo, ok=False)
-        if BLOQUEIOS_DO_CONTEUDO & set(_codigos_da_ia()):
-            raise Parada(f"a IA não devolveu o título ({motivo}, também com as regras em palavras leves): o Google "
-                         "bloqueia o conteúdo deste vídeo", do_video=True)
-        if vez + 1 < TENTATIVAS_DO_TITULO:
-            pausa(ESPERA_DO_TITULO)
-    raise Parada(f"a IA não devolveu o título ({motivo})")
+    motivo, recusa = "", None
+    try:
+        for vez in range(TENTATIVAS_DO_TITULO):
+            ps.api_gemini.ULTIMO_ERRO_IA, assistente.ULTIMA_RECUSA = None, None
+            textos = asyncio.run(assistente.textos_do_video(video["arquivo"], video.get("nome") or ""))
+            recusa = assistente.ULTIMA_RECUSA or recusa
+            if textos and textos["titulo"]:
+                if textos.get("regras_leves"):
+                    registro_processos.registrar(REGISTRO, "título da IA", "veio com as regras em palavras leves",
+                                                 ok=True)
+                elif vez:
+                    registro_processos.registrar(REGISTRO, "título da IA", "veio na nova tentativa", ok=True)
+                return textos
+            motivo = _motivo_da_ia()
+            registro_processos.registrar(REGISTRO, "título da IA", "sem título", motivo, ok=False)
+            if BLOQUEIOS_DO_CONTEUDO & set(_codigos_da_ia()):
+                raise Parada(f"a IA não devolveu o título ({motivo}, também com as regras em palavras leves): o "
+                             "Google bloqueia o conteúdo deste vídeo", do_video=True)
+            if vez + 1 < TENTATIVAS_DO_TITULO:
+                pausa(ESPERA_DO_TITULO)
+        raise Parada(f"a IA não devolveu o título ({motivo})")
+    finally:
+        # Uma vez por vídeo, com o que deu por último (o Rafael vê a causa da recusa).
+        if recusa:
+            _avisar_recusa(video, nomes, recusa)
 
 
 # Eu → Meus Favoritos → Editar, como no Motorola (24/10/2026): cada produto ganha uma
@@ -1925,7 +1951,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         nomes = [nome]
     # A origem e o que a IA viu ficam no rascunho, para o Rafael validar com isso na mão.
     atualizar(ident, fonte=fonte, conferencia=json.dumps(vistos, ensure_ascii=False))
-    textos = _textos_da_ia(video)
+    textos = _textos_da_ia(video, nomes)
     if textos["violacao"]:
         avisar(f"⚠️ Robô da Shopee Vídeo: pulei o vídeo. A IA viu possível violação das diretrizes: "
                f"{textos['motivo'] or 'sem motivo'}")

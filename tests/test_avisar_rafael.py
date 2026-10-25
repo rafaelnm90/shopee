@@ -93,3 +93,32 @@ def test_foto_vai_para_o_admin_pelo_bot(bm, monkeypatch, tmp_path):
     assert pedido.full_url.endswith("/sendPhoto") and b"\x89PNG imagem" in pedido.data
     assert f'name="chat_id"\r\n\r\n{bm.ADMIN_ID}\r\n'.encode() in pedido.data
     assert b'name="caption"\r\n\r\nRascunho\r\n' in pedido.data
+
+
+def test_video_vai_para_o_admin_pelo_bot_e_o_grande_demais_nao(bm, monkeypatch, tmp_path):
+    # O vídeo que o Google recusou (P29) chega no privado; acima do limite do Bot API, o
+    # robô manda só o texto.
+    pedidos = []
+
+    class Resposta(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    def urlopen(pedido, timeout=None):
+        pedidos.append(pedido)
+        return Resposta(json.dumps({"ok": True}).encode())
+    monkeypatch.setattr(avisar_rafael.urllib.request, "urlopen", urlopen)
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"\x00\x00\x00 ftypmp42 video")
+
+    assert avisar_rafael.mandar_video(str(video), "Recusado pelo Google") is True
+    pedido = pedidos[0]
+    assert pedido.full_url.endswith("/sendVideo") and b"ftypmp42 video" in pedido.data
+    assert b'name="video"; filename="video.mp4"' in pedido.data
+    assert b'name="caption"\r\n\r\nRecusado pelo Google\r\n' in pedido.data
+
+    monkeypatch.setattr(avisar_rafael, "LIMITE_DO_VIDEO", 5)
+    assert avisar_rafael.mandar_video(str(video), "grande") is False and len(pedidos) == 1
