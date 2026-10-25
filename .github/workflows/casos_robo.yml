@@ -1,0 +1,91 @@
+name: Casos das falhas do robô (Shopee Vídeo, cifrados)
+
+# Os casos que o robô da Shopee Vídeo guarda em cada tentativa que não dá certo
+# (casos_robo.py: o motivo inteiro, o vídeo em quadros, o título, os produtos, o print e a
+# tela do celular), para o Claude fazer o checkup completo. Só roda à mão. Ações:
+#   exportar  leva os casos, cifrados pelo servidor, ao ramo casos-robo (um commit só,
+#             trocado a cada exportação: o ramo não acumula histórico);
+#   apagar    depois de analisado e resolvido: apaga os casos no servidor e o ramo.
+# Pedido do Rafael: nada disso fica acumulando no servidor.
+#
+# O repositório e os logs do Actions são públicos: o arquivo só abre com a chave do
+# servidor, e aqui não sai nada do conteúdo, só quantos casos.
+on:
+  workflow_dispatch:
+    inputs:
+      acao:
+        description: "O que fazer"
+        type: choice
+        options: [exportar, apagar]
+        default: exportar
+
+permissions:
+  contents: write
+
+concurrency:
+  group: casos-robo
+
+jobs:
+  casos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Casos do robô
+        env:
+          HOST: ${{ secrets.ORACLE_HOST }}
+          USUARIO: ${{ secrets.ORACLE_USER }}
+          CHAVE_SSH: ${{ secrets.ORACLE_SSH_KEY }}
+          TOKEN: ${{ github.token }}
+          REPOSITORIO: ${{ github.repository }}
+          ACAO: ${{ inputs.acao }}
+        run: |
+          set -euo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$CHAVE_SSH" > ~/.ssh/servidor
+          chmod 600 ~/.ssh/servidor
+          servidor() {
+            ssh -i ~/.ssh/servidor -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null \
+              -o LogLevel=ERROR "$USUARIO@$HOST" "cd ~/shopee && venv/bin/python3 casos_robo.py $1"
+          }
+
+          git init -q ramo
+          cd ramo
+          git remote add origin "https://x-access-token:${TOKEN}@github.com/${REPOSITORIO}.git"
+
+          if [ "$ACAO" = "apagar" ]; then
+            servidor apagar
+            if git ls-remote --exit-code --heads origin casos-robo >/dev/null 2>&1; then
+              git push -q origin --delete casos-robo
+              echo "✅ Ramo casos-robo apagado."
+            else
+              echo "Ramo casos-robo: já não existia."
+            fi
+            exit 0
+          fi
+
+          QUANTOS=$(servidor contar | tr -dc '0-9')
+          echo "Casos guardados no servidor: ${QUANTOS:-?}"
+          if [ "${QUANTOS:-0}" = "0" ]; then
+            echo "Nada para exportar."
+            exit 0
+          fi
+          servidor cifrado > ../novo
+          if ! grep -q '^gAAAAA' ../novo; then
+            echo "❌ O servidor não devolveu os casos cifrados."
+            exit 1
+          fi
+          git checkout -q --orphan casos-robo
+          mv ../novo casos.zip.cifrado
+          cat > README.md <<'FIM'
+          # Casos das falhas do robô da Shopee Vídeo (cifrados)
+
+          Este ramo guarda só o `casos.zip.cifrado`, montado pelo servidor dos robôs
+          (`casos_robo.py`) e gravado pelo workflow `casos_robo.yml`. Sem a chave do
+          servidor, o arquivo não abre. Depois de analisado, o workflow apaga o ramo.
+          FIM
+          git add README.md casos.zip.cifrado
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898173+github-actions[bot]@users.noreply.github.com" \
+              commit -q -m "Casos das falhas do robô (cifrados)"
+          git push -q -f origin casos-robo
+          echo "✅ ${QUANTOS} caso(s) cifrado(s) no ramo casos-robo."

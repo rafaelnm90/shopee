@@ -32,6 +32,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
 import backup_dados
+import casos_robo
 import db
 import inventario
 import links_shopee
@@ -949,6 +950,9 @@ def main():
     print(f"{situacao} | horários hoje {robo_sv['horarios']} | "
           f"vencidos {robo_sv['vencidos']} | rascunhos salvos hoje {robo_sv['salvos']} | "
           f"vídeos pulados hoje {robo_sv['pulados']}")
+    # O caso completo de cada falha fica cifrado para o Claude (casos_robo.yml exportar) e
+    # sai depois de analisado (casos_robo.yml apagar).
+    print(f"Casos guardados para o checkup do Claude: {len(casos_robo.casos())}")
     for acao, resultado, passo, qtd, primeiro, ultimo in robo_sv.get("linhas", []):
         quando = f"às {ultimo}" if qtd == 1 or primeiro == ultimo else f"de {primeiro} a {ultimo}"
         print(f"   {qtd}x {acao} → {resultado} em \"{passo or '?'}\" ({quando})")
