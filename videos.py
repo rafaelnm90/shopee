@@ -4,7 +4,8 @@ Arquivo de vídeo tratado do mesmo jeito em todos os robôs: medir a resolução
 reconhece o mesmo vídeo. Usado pelo Espião e pelo Espelhador (motor_userbot), pelos
 Autorais (espelhador_videos_autorais, pelo repetidos_publico) e pelo Baixador
 (downloader_bot, só a medição). Os quadros espalhados do vídeo (quadros) vão nos casos
-das falhas do robô da Shopee Vídeo (casos_robo).
+das falhas do robô da Shopee Vídeo (casos_robo). A foto do produto no começo com a
+miniatura no topo (com_foto_e_miniatura) é a edição dos vídeos do Rafael (edicao_video).
 
 Um lugar só para que um ajuste no tratamento valha para todos os canais
 (DECISOES.md, Código e manutenção).
@@ -14,6 +15,7 @@ import hashlib
 import logging
 import os
 import subprocess
+import tempfile
 
 logger = logging.getLogger("Videos")
 
@@ -121,6 +123,84 @@ async def verificar_e_otimizar_video(caminho_video, relatorio=None):
         logger.error(f"❌ [Upscaling] Erro na função de otimização: {e}")
 
     return caminho_video
+
+
+def imagem_abre(caminho):
+    """A imagem abre no ffmpeg? Uma que não abre, repetida em laço, prende o ffmpeg até o tempo acabar."""
+    try:
+        saida = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width", "-of", "csv=p=0",
+             caminho], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    largura = saida.stdout.strip().splitlines()[0] if saida.stdout.strip() else ""
+    return saida.returncode == 0 and largura.isdigit() and int(largura) > 0
+
+
+def tem_audio(caminho):
+    try:
+        saida = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a", "-show_entries", "stream=index", "-of", "csv=p=0",
+             caminho], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return bool(saida.strip())
+
+
+QUADROS_POR_SEGUNDO = 30
+
+
+def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, topo, com_audio):
+    """
+    O ffmpeg da edição: a foto em tela cheia (fundo branco) por `segundos`, depois o vídeo
+    em 720x1280 com a foto em miniatura (`miniatura` px de largura, com borda branca) no
+    topo, centralizada a `topo` px do alto. O som do vídeo começa depois da foto, que vai
+    em silêncio; vídeo sem som sai sem som.
+    """
+    tela = f"{FILTRO_720P},setsar=1,fps={QUADROS_POR_SEGUNDO},format=yuv420p"
+    filtro = (f"[0:v]{tela.replace('color=black', 'color=white')}[foto];"
+              f"[1:v]{tela}[corpo];"
+              f"[2:v]scale={miniatura}:-2,pad=iw+8:ih+8:4:4:color=white[mini];"
+              f"[corpo][mini]overlay=(W-w)/2:{topo}:shortest=1[comfoto];"
+              "[foto][comfoto]concat=n=2:v=1:a=0[v]")
+    entradas = ["-loop", "1", "-t", str(segundos), "-i", foto, "-i", video, "-loop", "1", "-i", foto]
+    saida = ["-map", "[v]"]
+    if com_audio:
+        entradas += ["-f", "lavfi", "-t", str(segundos), "-i", "anullsrc=channel_layout=stereo:sample_rate=44100"]
+        filtro += (";[1:a]aresample=44100,aformat=channel_layouts=stereo[som];"
+                   "[3:a][som]concat=n=2:v=0:a=1[a]")
+        saida += ["-map", "[a]", "-c:a", "aac", "-b:a", "128k"]
+    return (["ffmpeg", "-v", "error", "-y"] + entradas + ["-filter_complex", filtro] + saida
+            + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-movflags", "+faststart", destino])
+
+
+def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=220, topo=60, espera=300):
+    """
+    Grava em destino o vídeo com a foto (bytes) no começo e em miniatura no topo. Devolve ""
+    quando deu certo, ou o motivo fixo de não ter dado (o destino não fica pela metade).
+    """
+    if not foto:
+        return "a foto do anúncio não veio"
+    # Ao lado do destino: o os.replace no fim não atravessa disco.
+    with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
+        caminho_da_foto = os.path.join(pasta, "foto.jpg")
+        with open(caminho_da_foto, "wb") as arquivo:
+            arquivo.write(foto)
+        if not imagem_abre(caminho_da_foto):
+            return "a foto do anúncio não é uma imagem que abre"
+        temporario = os.path.join(pasta, "editado.mp4")
+        comando = comando_foto_e_miniatura(caminho_da_foto, video, temporario, segundos, miniatura, topo,
+                                           tem_audio(video))
+        try:
+            feito = subprocess.run(comando, capture_output=True, timeout=espera)
+        except subprocess.TimeoutExpired:
+            return f"o ffmpeg passou de {espera // 60} min"
+        except OSError:
+            return "o ffmpeg não abriu"
+        if feito.returncode != 0 or not os.path.exists(temporario) or not os.path.getsize(temporario):
+            return f"o ffmpeg falhou (código {feito.returncode})"
+        os.replace(temporario, destino)
+    return ""
 
 
 def calcular_hash_video(caminho_arquivo):

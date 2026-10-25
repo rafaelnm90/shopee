@@ -34,6 +34,7 @@ import logging
 import os
 import re
 import sys
+import tempfile
 from datetime import datetime, timedelta
 from html import escape as html_escape
 
@@ -50,6 +51,7 @@ import apelacoes_shopee_video as apelacoes
 import assistente_shopee_video as assistente
 import celular_robo
 import db
+import edicao_video
 import exemplos
 import registro_processos
 import robo_shopee_video as robo
@@ -66,7 +68,7 @@ ADMIN_ID = None
 CHAVE_CONFIG = "shopee_video"
 # Os dois começam pausados: só trabalham quando o Rafael retomar no painel.
 PADRAO = {"pausado": True, "limite_min": 5, "limite_max": 10, "inicio": 13, "fim": 22,
-          "fonte": assistente.FONTE_PADRAO, **robo.PADRAO}
+          "fonte": assistente.FONTE_PADRAO, "edicao_ligada": False, **robo.PADRAO}
 MAXIMO_POR_DIA = 50
 ROBO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "robo_shopee_video.py")
 PRIMEIRA_VOLTA_DO_ROBO = timedelta(minutes=2)
@@ -514,6 +516,10 @@ BOTAO_TREINO = "Testar Caminho 🧭"
 BOTAO_PREPARAR = "Preparar 1 Agora ⚡"
 BOTAO_HISTORICO = "Histórico do Robô 📋"
 BOTAO_FILA = "Fila de Rascunhos 🗂️"
+BOTAO_EDICAO = "Edição dos Vídeos ✂️"
+BOTAO_EXEMPLO_EDICAO = "Ver Exemplo da Edição 👀"
+BOTAO_LIGAR_EDICAO = "Ligar Edição ✅"
+BOTAO_DESLIGAR_EDICAO = "Desligar Edição ⏸️"
 BOTAO_APROVAR = "Aprovar Rascunho ✅"
 BOTAO_RECUSAR = "Recusar Rascunho ❌"
 BOTAO_PROXIMO = "Próximo Rascunho ⏭️"
@@ -548,7 +554,7 @@ def teclado_robo(config):
     return montar_teclado([
         [KeyboardButton(text=pausa_robo), KeyboardButton(text=BOTAO_RASCUNHOS)],
         [KeyboardButton(text=BOTAO_FILA), KeyboardButton(text=BOTAO_PREPARAR)],
-        [KeyboardButton(text=BOTAO_HISTORICO)],
+        [KeyboardButton(text=BOTAO_HISTORICO), KeyboardButton(text=BOTAO_EDICAO)],
         [KeyboardButton(text=BOTAO_FAIXA_ROBO), KeyboardButton(text=BOTAO_HORARIO_ROBO)],
         [KeyboardButton(text=BOTAO_HORARIO_INTERACOES)],
         [KeyboardButton(text=BOTAO_TREINO), KeyboardButton(text=BOTAO_CELULAR)],
@@ -566,6 +572,14 @@ teclado_faixa_ou_fixo = montar_teclado([
     [KeyboardButton(text=BOTAO_FAIXA), KeyboardButton(text=BOTAO_FIXO)],
     [KeyboardButton(text="Cancelar ❌")],
 ])
+
+
+def teclado_edicao(config):
+    liga = BOTAO_DESLIGAR_EDICAO if config.get("edicao_ligada") else BOTAO_LIGAR_EDICAO
+    return montar_teclado([
+        [KeyboardButton(text=BOTAO_EXEMPLO_EDICAO), KeyboardButton(text=liga)],
+        [KeyboardButton(text=BOTAO_VOLTAR_ROBO)],
+    ])
 
 
 def teclado_assistente(config):
@@ -672,6 +686,7 @@ def texto_robo(config, agora=None, celular=None):
         "no fim de cada rascunho, ele já tira as curtidas que deu)\n"
         f"📝 Esperando a sua aprovação: <b>{len(robo.esperando_aprovacao())}</b> | "
         f"✅ Aprovados na fila: <b>{len(robo.listar('aprovado'))}</b>\n"
+        f"✂️ Edição dos vídeos: {rotulo_edicao(config)}\n"
         f"🧭 Treino: {_linha_treino()}\n\n"
         "<b>O que cada botão faz</b>\n"
         "▶️ <b>Retomar / Pausar Postagem</b>: liga ou pausa o robô. O Retomar acha o Motorola sozinho; "
@@ -682,6 +697,8 @@ def texto_robo(config, agora=None, celular=None):
         f"⚡ <b>{BOTAO_PREPARAR}</b>: o robô prepara um rascunho na hora, a mais do dia (mesmo pausado).\n"
         f"📋 <b>{BOTAO_HISTORICO}</b>: tudo o que o robô tentou nas últimas 24 h, com o produto e em que passo "
         f"parou. Às {HORA_DO_RESUMO}h chega o resumo do dia no seu privado.\n"
+        f"✂️ <b>{BOTAO_EDICAO}</b>: a foto do produto no começo e a miniatura no topo, só nos seus vídeos "
+        "(Autorais); ver um exemplo, ligar ou desligar.\n"
         f"📦 <b>{BOTAO_FAIXA_ROBO}</b>: quantos rascunhos ele prepara por dia (uma faixa, sorteada a cada dia).\n"
         f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele prepara os rascunhos e posta (fora do Horário das "
         "Interações).\n"
@@ -691,6 +708,27 @@ def texto_robo(config, agora=None, celular=None):
         f"🧭 <b>{BOTAO_TREINO}</b>: confere agora se as telas do app da Shopee continuam iguais "
         "(ele faz isso sozinho toda segunda).\n"
         f"📱 <b>{BOTAO_CELULAR}</b>: a ligação com o Motorola (reconectar, ver a tela de longe)."
+    )
+
+
+def rotulo_edicao(config):
+    return "✅ <b>ligada</b> (só nos Autorais)" if config.get("edicao_ligada") else "⏸️ <b>desligada</b>"
+
+
+def texto_edicao(config):
+    """A tela da Edição dos Vídeos. Escolha do Rafael (25/10, P37): DECISOES.md, Shopee Vídeo."""
+    return (
+        "✂️ <b>Edição dos Vídeos</b>\n"
+        f"O robô edita o vídeo antes do rascunho, como você faz no LumaFusion: a foto do anúncio do produto "
+        f"nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos e uma miniatura dela no topo do vídeo inteiro.\n\n"
+        "Só nos seus vídeos (<b>Autorais</b>) e de grupos ou criadores que liberam o uso para afiliados. "
+        "Nos vídeos de outras pessoas (Viral, Canal Afiliados, Grupo Público), nunca.\n\n"
+        f"Agora: {rotulo_edicao(config)}\n\n"
+        "<b>O que cada botão faz</b>\n"
+        f"👀 <b>{BOTAO_EXEMPLO_EDICAO}</b>: manda no seu privado 1 vídeo dos Autorais já editado, sem postar, "
+        "para você ver antes de ligar.\n"
+        f"✅ <b>{BOTAO_LIGAR_EDICAO}</b> / ⏸️ <b>{BOTAO_DESLIGAR_EDICAO}</b>: liga ou desliga a edição nos "
+        "próximos rascunhos. Se a edição de um vídeo não sair, o rascunho vai com o vídeo como veio."
     )
 
 
@@ -819,6 +857,60 @@ async def como_funciona_handler(message: types.Message, state: FSMContext):
 async def voltar_ao_robo(message: types.Message, state: FSMContext):
     if not _admin(message): return
     await mostrar_robo(message, state)
+
+
+# --- Edição dos vídeos ---
+
+# Um exemplo de cada vez: cada um baixa a foto e passa o vídeo pelo ffmpeg.
+_exemplo_da_edicao = asyncio.Lock()
+
+
+async def mostrar_edicao(message, state):
+    await state.set_state(ShopeeVideoFluxo.menu_robo)
+    config = ler_config()
+    await message.answer(texto_edicao(config), parse_mode="HTML", reply_markup=teclado_edicao(config))
+
+
+@router.message(F.text == BOTAO_EDICAO, StateFilter("*"))
+async def edicao_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await mostrar_edicao(message, state)
+
+
+@router.message(F.text.in_([BOTAO_LIGAR_EDICAO, BOTAO_DESLIGAR_EDICAO]), StateFilter("*"))
+async def ligar_edicao_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    ligar = message.text == BOTAO_LIGAR_EDICAO
+    alterar_config(edicao_ligada=ligar)
+    registro_processos.registrar("shopee_video", "edição do vídeo: painel", "ligada" if ligar else "desligada", ok=True)
+    logger.info(f"✂️ [Shopee Vídeo] Edição dos vídeos {'ligada' if ligar else 'desligada'} pelo painel.")
+    await mostrar_edicao(message, state)
+
+
+@router.message(F.text == BOTAO_EXEMPLO_EDICAO, StateFilter("*"))
+async def exemplo_edicao_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    if _exemplo_da_edicao.locked():
+        await message.answer("⏳ O exemplo da edição já está sendo montado. Ele chega aqui em instantes.")
+        return
+    async with _exemplo_da_edicao:
+        await message.answer("⏳ Montando o exemplo com o vídeo mais novo dos Autorais. Leva até uns 2 minutos.")
+        with tempfile.TemporaryDirectory() as pasta:
+            destino = os.path.join(pasta, "exemplo.mp4")
+            try:
+                nome, motivo = await asyncio.to_thread(edicao_video.exemplo, destino)
+            except Exception as e:
+                nome, motivo = None, f"erro ({type(e).__name__})"
+            registro_processos.registrar("shopee_video", "edição do vídeo: exemplo", "mandado" if nome else "não saiu",
+                                         motivo, ok=bool(nome))
+            if not nome:
+                await message.answer(f"⚠️ O exemplo não saiu: {html_escape(motivo)}.", parse_mode="HTML")
+                return
+            await message.answer_video(
+                FSInputFile(destino), supports_streaming=True, parse_mode="HTML",
+                caption=(f"✂️ Exemplo da edição (não foi postado): {html_escape(nome)}.\n"
+                         f"Se gostar, toque em {BOTAO_LIGAR_EDICAO}."))
+    await mostrar_edicao(message, state)
 
 
 # --- Vídeos por dia ---

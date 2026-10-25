@@ -8,7 +8,7 @@ from xml.sax.saxutils import escape
 import pytest
 
 import robo_shopee_video as robo
-from conftest import inserir
+from conftest import consultar, inserir
 from fuso import fuso_horario
 
 VESTIDO = "Vestido Infantil Estampado Gatinho Para Meninas de 4 a 14 Anos"
@@ -691,6 +691,58 @@ def test_rascunho_vai_com_o_produto_que_paga_mais(monkeypatch, avisos):
     # A IA já conferiu o produto novo com o vídeo na troca: a conferência não se repete.
     assert not any(p.startswith("Você confere um vídeo") for p in analises)
     assert json.loads(robo.pegar(rascunho["id"])["conferencia"]) == ["mesmo vestido", "mesmo vestido"]
+
+
+def test_rascunho_dos_autorais_vai_editado_com_a_edicao_ligada(monkeypatch, avisos):
+    # Escolha do Rafael (P37): nos vídeos dele (Autorais), com a edição ligada no painel, o
+    # rascunho leva a foto do produto no começo e a miniatura no topo.
+    _fonte(monkeypatch)
+    editados = []
+
+    def editar(video, foto, destino):
+        editados.append((video, foto))
+        with open(destino, "wb") as arquivo:
+            arquivo.write(b"editado")
+        return ""
+
+    async def analisar(arquivo, prompt, imagens=None):
+        return '{"confere": true, "motivo": "vestido"}'
+
+    # A mesma foto do anúncio vai à conferência da IA (com a foto) e à edição.
+    monkeypatch.setattr(robo.ps, "foto_do_produto", lambda video: b"foto do anuncio")
+    monkeypatch.setattr(robo.ps.api_gemini, "analisar_video_gemini", analisar)
+    monkeypatch.setattr(robo.edicao_video, "editar", editar)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24, edicao_ligada=True)
+    assert robo.rodada(d=AppDeMentira(), agora=momento("2026-10-22 23:59")) == "rascunho salvo"
+    rascunho = robo.esperando_aprovacao()[0]
+    assert open(rascunho["arquivo"], "rb").read() == b"editado"
+    assert editados == [(os.path.abspath("archive/vestido.mp4"), b"foto do anuncio")]
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DA_EDICAO) == ("editado",)
+
+
+def test_sem_edicao_nos_videos_de_outras_pessoas_desligada_ou_quando_falha(monkeypatch, tmp_path):
+    original, copia = str(tmp_path / "original.mp4"), str(tmp_path / "copia.mp4")
+    with open(original, "wb") as arquivo:
+        arquivo.write(b"original")
+    chamadas = []
+    monkeypatch.setattr(robo.ps, "foto_do_produto", lambda video: b"foto")
+    monkeypatch.setattr(robo.edicao_video, "editar", lambda video, foto, destino: chamadas.append(video) or "o ffmpeg falhou")
+    video = {"arquivo": original, "link": LINK}
+    # Desligada: nem os Autorais são editados.
+    robo.copiar_para_o_rascunho(video, "autorais", copia)
+    assert open(copia, "rb").read() == b"original" and not chamadas
+    ativar(edicao_ligada=True)
+    # Vídeo de outra pessoa (Viral) e vídeo com Ver Produtos: nunca.
+    robo.copiar_para_o_rascunho(video, "viral", copia)
+    robo.copiar_para_o_rascunho(dict(video, de_video=True), "autorais", copia)
+    assert not chamadas
+    # A edição que não sai não para o rascunho: ele vai com o vídeo como veio.
+    os.remove(copia)
+    robo.copiar_para_o_rascunho(video, "autorais", copia)
+    assert chamadas == [original] and open(copia, "rb").read() == b"original"
+    assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
+                     robo.PROCESSO_DA_EDICAO) == ("sem edição", "o ffmpeg falhou", 0)
 
 
 NOME_NO_APP = "Vestidinho Gatinho Estampado Menina Infantil Verão"
