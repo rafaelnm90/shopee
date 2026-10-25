@@ -745,6 +745,31 @@ def test_sem_edicao_nos_videos_de_outras_pessoas_desligada_ou_quando_falha(monke
                      robo.PROCESSO_DA_EDICAO) == ("sem edição", "o ffmpeg falhou", 0)
 
 
+def test_video_do_viral_de_grupo_autoral_vai_editado(monkeypatch, tmp_path):
+    # Escolha do Rafael (P38): os vídeos do Viral dos grupos que ele marcou como autorais no
+    # Espião recebem a edição; os dos outros grupos, não.
+    original, copia = str(tmp_path / "original.mp4"), str(tmp_path / "copia.mp4")
+    with open(original, "wb") as arquivo:
+        arquivo.write(b"original")
+    monkeypatch.setattr(robo.ps, "foto_do_produto", lambda video: b"foto")
+    monkeypatch.setattr(robo.edicao_video.links_grupos, "arroba", lambda alvo: None)
+
+    def editar(video, foto, destino):
+        with open(destino, "wb") as arquivo:
+            arquivo.write(b"editado")
+        return ""
+
+    monkeypatch.setattr(robo.edicao_video, "editar", editar)
+    robo.db.salvar_config("fila_clonagem", {"fila": [{"id": "clone_1", "chat_origem": "-1001234"},
+                                                     {"id": "clone_2", "chat_origem": "-1009999"}]})
+    robo.edicao_video.alternar_grupos(["-1001234"])
+    ativar(edicao_ligada=True)
+    robo.copiar_para_o_rascunho({"id": "viral:clone_2", "arquivo": original, "link": LINK}, "viral", copia)
+    assert open(copia, "rb").read() == b"original"
+    robo.copiar_para_o_rascunho({"id": "viral:clone_1", "arquivo": original, "link": LINK}, "viral", copia)
+    assert open(copia, "rb").read() == b"editado"
+
+
 NOME_NO_APP = "Vestidinho Gatinho Estampado Menina Infantil Verão"
 
 

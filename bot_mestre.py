@@ -76,6 +76,7 @@ import conferencia_espiao  # o nome que a IA do Espião deu confere com o produt
 import perguntas_rafael  # as perguntas do Claude no privado, lembradas de hora em hora
 import faxina_viral  # o resumo da faxina do Acervo Viral, que roda no divulgacao_canal
 import exemplos  # os exemplos das perguntas dos painéis, com o que está valendo agora
+import edicao_video  # os grupos autorais do Espião, cujos vídeos o robô da Shopee Vídeo edita
 from utils import registrar_erro_json, ler_cache_nomes_grupos, salvar_nome_grupo, validar_e_formatar_alvo
 
 logger = configurar_logs(__name__)
@@ -421,6 +422,7 @@ class EspiaoFluxo(StatesGroup):
     aguardando_blacklist_remove = State()
     aguardando_confirmacao_blacklist_conflito = State()
     aguardando_acao_analise = State()
+    aguardando_grupo_autoral = State()
 
 class AchadinhosFluxo(StatesGroup):
     menu_principal = State()
@@ -699,7 +701,7 @@ teclado_opcoes_espiao = montar_teclado([
     [KeyboardButton(text="Definir Destino 🎯")],
     [KeyboardButton(text="Adicionar Grupo ➕"), KeyboardButton(text="Remover Grupo 🗑️")],
     [KeyboardButton(text="Editar Janela 🕒"), KeyboardButton(text="Editar Atraso ⏳")],
-    [KeyboardButton(text="Analisar Canais Vigiados 🔎")],
+    [KeyboardButton(text="Grupos Autorais ✂️"), KeyboardButton(text="Analisar Canais Vigiados 🔎")],
     [KeyboardButton(text="Voltar ao Menu Espião 🔙")]
 ])
 
@@ -12096,6 +12098,65 @@ async def processar_remocao_espiao(message: types.Message, state: FSMContext):
         await message.answer("⚠️ Erro de sincronização. Ação cancelada.")
         
     await menu_grupos_vigiados(message, state)
+
+# Os grupos de vídeos autorais (quem grava libera para afiliados postarem): os vídeos do
+# Viral que vêm deles recebem a edição do robô da Shopee Vídeo (foto do produto e
+# miniatura). Escolha do Rafael (25/10, P38): DECISOES.md, Shopee Vídeo.
+@dp.message(EspiaoFluxo.menu_principal, F.text == "Grupos Autorais ✂️")
+async def pedir_grupo_autoral_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    alvos = ler_alvos_espiao().get("alvos", [])
+    if not alvos:
+        await message.answer("Não há grupos vigiados para marcar.", reply_markup=teclado_opcoes_espiao)
+        return
+    marcados = edicao_video.grupos_autorais()
+    cache_nomes = ler_cache_nomes_grupos()
+    texto = ("✂️ <b>Grupos Autorais</b>\n"
+             "Marque os grupos de vídeos autorais, em que quem grava libera os vídeos para afiliados "
+             "postarem. Os vídeos do Viral que vêm deles recebem a edição do robô da Shopee Vídeo (a foto "
+             "do produto no começo e a miniatura no topo), quando ela está ligada em Shopee Vídeo 🎬 → "
+             "Robô Automático 🤖 → Edição dos Vídeos ✂️. Grupo não marcado não é editado.\n\n"
+             "Digite o <b>NÚMERO</b> do grupo para marcar ou desmarcar.\n"
+             "<i>(Para vários, separe por vírgula. Ex: 1, 3, 4)</i>\n\n")
+    mensagens_para_enviar = []
+    for i, alvo in enumerate(alvos, 1):
+        marca = "✂️" if str(alvo).lower() in marcados else "▫️"
+        nome = formatar_nome_alvo(alvo, cache_nomes)
+        nome = f"{nome_clicavel(nome, alvo)} " if nome and nome != str(alvo) else ""
+        linha = f"{i}. {marca} {nome}<code>{html_escape(str(alvo))}</code>\n"
+        if len(texto) + len(linha) > 3800:
+            mensagens_para_enviar.append(texto)
+            texto = ""
+        texto += linha
+    mensagens_para_enviar.append(texto + "\n✂️ = autoral (recebe a edição)")
+    for i, msg in enumerate(mensagens_para_enviar):
+        await message.answer(msg, parse_mode="HTML",
+                             reply_markup=teclado_cancelar if i == len(mensagens_para_enviar) - 1 else None)
+    await state.set_state(EspiaoFluxo.aguardando_grupo_autoral)
+
+
+@dp.message(EspiaoFluxo.aguardando_grupo_autoral)
+async def marcar_grupo_autoral_espiao(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID: return
+    alvos = ler_alvos_espiao().get("alvos", [])
+    escolhidos = []
+    for entrada in (message.text or "").replace(" ", "").split(","):
+        if entrada.isdigit() and 0 < int(entrada) <= len(alvos) and alvos[int(entrada) - 1] not in escolhidos:
+            escolhidos.append(alvos[int(entrada) - 1])
+    if not escolhidos:
+        await message.answer("⚠️ Nenhum número válido detectado. Tente novamente:", reply_markup=teclado_cancelar)
+        return
+    marcados, desmarcados = edicao_video.alternar_grupos(escolhidos)
+    registro_processos.registrar("bot_mestre", "grupos autorais do Espião", "marcados pelo painel",
+                                 f"{len(marcados)} marcado(s), {len(desmarcados)} desmarcado(s)", ok=True)
+    logger.info(f"✂️ [Espião] Grupos autorais: {len(marcados)} marcado(s), {len(desmarcados)} desmarcado(s).")
+    texto = "✅ <b>Grupos autorais atualizados.</b>\n"
+    texto += "".join(f"✂️ marcado: <code>{html_escape(str(a))}</code>\n" for a in marcados)
+    texto += "".join(f"▫️ desmarcado: <code>{html_escape(str(a))}</code>\n" for a in desmarcados)
+    await message.answer(texto, parse_mode="HTML")
+    await state.clear()
+    await menu_grupos_vigiados(message, state)
+
 
 @dp.message(EspiaoFluxo.menu_principal, F.text == "Definir Destino 🎯")
 async def pedir_destino_espiao(message: types.Message, state: FSMContext):
