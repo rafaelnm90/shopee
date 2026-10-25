@@ -26,15 +26,15 @@ def _programas(monkeypatch, largura_da_foto="800", audio="1", codigo_ffmpeg=0):
     return comandos
 
 
-def test_so_vale_ligada_e_nos_videos_do_rafael():
+def test_vale_em_todas_as_fontes_so_depois_de_ligar():
+    # O Rafael confirmou que todos os grupos e vídeos dele são autorais: a edição vale em
+    # todas as fontes do robô, só depois de ele ligar (DECISOES.md, Shopee Vídeo).
     inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
-    # Escolha do Rafael (P37): nunca nos vídeos de outras pessoas, e só depois de ele ligar.
-    assert not edicao_video.vale_para("autorais")
+    fontes = ("autorais", "viral", "principal", "publico")
+    assert edicao_video.FONTES_COM_EDICAO == fontes
+    assert not any(edicao_video.vale_para(fonte) for fonte in fontes)
     db.salvar_config("shopee_video", {"edicao_ligada": True})
-    assert edicao_video.vale_para("autorais")
-    for fonte in ("viral", "principal", "publico"):
-        assert not edicao_video.vale_para(fonte)
-    assert edicao_video.FONTES_COM_EDICAO == ("autorais",)
+    assert all(edicao_video.vale_para(fonte) for fonte in fontes) and not edicao_video.vale_para("outra")
 
 
 def test_edita_com_a_foto_no_comeco_e_a_miniatura_no_topo(monkeypatch, tmp_path):
@@ -95,60 +95,17 @@ def test_exemplo_usa_o_video_mais_novo_dos_autorais_com_foto(monkeypatch, tmp_pa
     assert editados == [com_foto]
 
 
-def test_exemplo_sem_video_dos_autorais_diz_o_motivo(monkeypatch):
-    monkeypatch.setattr(edicao_video.assistente, "_candidatos", lambda fonte: [])
-    nome, motivo = edicao_video.exemplo("exemplo.mp4")
-    assert nome is None and "chip novo" in motivo
-
-
-def _fila_do_viral(*itens):
-    db.salvar_config("fila_clonagem", {"fila": [{"id": ident, "chat_origem": origem} for ident, origem in itens]})
-
-
-def test_grupo_autoral_casa_pelo_numero_com_ou_sem_100_e_pelo_arroba(monkeypatch):
-    # Escolha do Rafael (P38): ele marca no Espião os grupos de vídeos autorais.
-    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
-    assert edicao_video.alternar_grupos(["-1001234", "@GrupoAutoral", "-1005678:9"]) == (
-        ["-1001234", "@GrupoAutoral", "-1005678:9"], [])
-    assert edicao_video.grupos_autorais() == ["-1001234", "@grupoautoral", "-1005678:9"]
-    monkeypatch.setattr(edicao_video.links_grupos, "arroba", lambda alvo: "@GrupoAutoral" if alvo == "-1004321" else None)
-    assert edicao_video.do_grupo_autoral("-1001234")
-    assert edicao_video.do_grupo_autoral("-1004321")       # pelo @ do grupo
-    assert edicao_video.do_grupo_autoral("-1005678")       # o grupo do tópico marcado
-    assert not edicao_video.do_grupo_autoral("-1009999") and not edicao_video.do_grupo_autoral("")
-    assert edicao_video.do_grupo_autoral("-1001234", marcados=["1234"])
-    # Tocar de novo desmarca.
-    assert edicao_video.alternar_grupos(["-1001234"]) == ([], ["-1001234"])
-    assert not edicao_video.do_grupo_autoral("-1001234")
-
-
-def test_viral_so_de_grupo_marcado_e_com_a_edicao_ligada(monkeypatch):
-    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
-    monkeypatch.setattr(edicao_video.links_grupos, "arroba", lambda alvo: None)
-    _fila_do_viral(("clone_1", "-1001234"), ("clone_2", "-1009999"))
-    edicao_video.alternar_grupos(["-1001234"])
-    autoral, outro = {"id": "viral:clone_1"}, {"id": "viral:clone_2"}
-    assert not edicao_video.vale_para("viral", autoral)          # desligada
-    db.salvar_config("shopee_video", {"edicao_ligada": True})
-    assert edicao_video.vale_para("viral", autoral)
-    assert not edicao_video.vale_para("viral", outro) and not edicao_video.vale_para("viral", {"id": "viral:sumiu"})
-    assert not edicao_video.vale_para("publico", {"id": "publico:1"})
-
-
-def test_exemplo_usa_o_viral_de_grupo_autoral_sem_autorais(monkeypatch, tmp_path):
-    inserir("CREATE TABLE IF NOT EXISTS configuracoes (chave TEXT PRIMARY KEY, valor TEXT)")
-    monkeypatch.setattr(edicao_video.links_grupos, "arroba", lambda alvo: None)
-    autoral, outro = str(tmp_path / "autoral.mp4"), str(tmp_path / "outro.mp4")
-    for caminho in (autoral, outro):
-        open(caminho, "wb").close()
-    _fila_do_viral(("clone_1", "-1009999"), ("clone_2", "-1001234"))
-    edicao_video.alternar_grupos(["-1001234"])
-    candidatos = {"autorais": [], "viral": [("viral:clone_1", outro, "https://s.shopee.com.br/a", ""),
-                                            ("viral:clone_2", autoral, "https://s.shopee.com.br/b", "")]}
-    monkeypatch.setattr(edicao_video.assistente, "_candidatos", lambda fonte: candidatos[fonte])
+def test_exemplo_usa_outra_fonte_sem_autorais_e_sem_video_diz_o_motivo(monkeypatch, tmp_path):
+    viral = str(tmp_path / "viral.mp4")
+    open(viral, "wb").close()
+    candidatos = {"viral": [("viral:clone_1", viral, "https://s.shopee.com.br/v", "")]}
+    monkeypatch.setattr(edicao_video.assistente, "_candidatos", lambda fonte: candidatos.get(fonte, []))
     monkeypatch.setattr(edicao_video.ps, "foto_do_produto", lambda video: b"foto")
     monkeypatch.setattr(edicao_video.ps, "nome_do_produto", lambda video: "Garrafa")
     editados = []
     monkeypatch.setattr(edicao_video, "editar", lambda video, foto, destino: editados.append(video) or "")
-    assert edicao_video.exemplo("exemplo.mp4") == ("Garrafa", "")
-    assert editados == [autoral]
+    assert edicao_video.exemplo("exemplo.mp4") == ("Garrafa", "") and editados == [viral]
+    monkeypatch.setattr(edicao_video.assistente, "_candidatos", lambda fonte: [])
+    nome, motivo = edicao_video.exemplo("exemplo.mp4")
+    assert nome is None and motivo == "nenhum vídeo com o arquivo e o link no servidor agora"
+

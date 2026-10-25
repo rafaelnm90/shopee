@@ -2258,12 +2258,12 @@ PROCESSO_DA_EDICAO = "edição do vídeo: foto do produto e miniatura"
 
 def copiar_para_o_rascunho(video, fonte, copia):
     """
-    A cópia do vídeo que vai ao rascunho. Nos vídeos autorais (os Autorais e os do Viral
-    dos grupos marcados como autorais no Espião), com a edição ligada, ela leva a foto do
-    produto no começo e a miniatura no topo; se a edição não sai, o rascunho segue com o
-    vídeo como veio. Escolhas do Rafael (25/10, P37 e P38): DECISOES.md, Shopee Vídeo.
+    A cópia do vídeo que vai ao rascunho. Com a edição ligada, ela leva a foto do produto
+    no começo e a miniatura no topo (todos os vídeos do Rafael são autorais); se a edição
+    não sai, o rascunho segue com o vídeo como veio. Escolhas do Rafael (25/10, P37 e
+    depois da P38): DECISOES.md, Shopee Vídeo.
     """
-    if edicao_video.vale_para(fonte, video) and not video.get("de_video"):
+    if edicao_video.vale_para(fonte) and not video.get("de_video"):
         motivo = edicao_video.editar(video["arquivo"], ps.foto_do_produto(video), copia)
         registro_processos.registrar(REGISTRO, PROCESSO_DA_EDICAO, "sem edição" if motivo else "editado",
                                      motivo, ok=not motivo)

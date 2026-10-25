@@ -29,7 +29,8 @@ TABELAS_SEM_USO = (
     "financeiro_despesas", "financeiro_saques", "historico_financeiro", "pedidos_financeiro",
     "mensagens_topico",                                # a faxina do Baixador não guarda mais mensagens
 )
-CHAVES_SEM_USO = ("fila_espelhador",)                  # cópia velha da fila; a de agora é fila_espelhador.CHAVE
+CHAVES_SEM_USO = ("fila_espelhador",                   # cópia velha da fila; a de agora é fila_espelhador.CHAVE
+                  "grupos_autorais")                   # a marca por grupo: todos os grupos são autorais
 ARQUIVOS_VELHOS = (
     "banco_dados.bak-2026-08-31.db", "banco_dados.bak-2026-08-31.dbsqlite3",
     "banco_dados.bak-2026-09-01-noite.db", "backup_dados.tar.gz",

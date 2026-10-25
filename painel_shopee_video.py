@@ -697,8 +697,8 @@ def texto_robo(config, agora=None, celular=None):
         f"⚡ <b>{BOTAO_PREPARAR}</b>: o robô prepara um rascunho na hora, a mais do dia (mesmo pausado).\n"
         f"📋 <b>{BOTAO_HISTORICO}</b>: tudo o que o robô tentou nas últimas 24 h, com o produto e em que passo "
         f"parou. Às {HORA_DO_RESUMO}h chega o resumo do dia no seu privado.\n"
-        f"✂️ <b>{BOTAO_EDICAO}</b>: a foto do produto no começo e a miniatura no topo, nos vídeos autorais "
-        "(Autorais e grupos autorais do Espião); ver um exemplo, ligar ou desligar.\n"
+        f"✂️ <b>{BOTAO_EDICAO}</b>: a foto do produto no começo e a miniatura no topo dos vídeos; ver um "
+        "exemplo, ligar ou desligar.\n"
         f"📦 <b>{BOTAO_FAIXA_ROBO}</b>: quantos rascunhos ele prepara por dia (uma faixa, sorteada a cada dia).\n"
         f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele prepara os rascunhos e posta (fora do Horário das "
         "Interações).\n"
@@ -712,24 +712,20 @@ def texto_robo(config, agora=None, celular=None):
 
 
 def rotulo_edicao(config):
-    grupos = len(edicao_video.grupos_autorais())
-    alcance = f"nos Autorais e em {grupos} grupo(s) autoral(is) do Espião" if grupos else "nos Autorais"
-    return f"✅ <b>ligada</b> ({alcance})" if config.get("edicao_ligada") else "⏸️ <b>desligada</b>"
+    return "✅ <b>ligada</b> (em todos os vídeos)" if config.get("edicao_ligada") else "⏸️ <b>desligada</b>"
 
 
 def texto_edicao(config):
-    """A tela da Edição dos Vídeos. Escolhas do Rafael (25/10, P37 e P38): DECISOES.md, Shopee Vídeo."""
+    """A tela da Edição dos Vídeos. Escolhas do Rafael (25/10): DECISOES.md, Shopee Vídeo."""
     return (
         "✂️ <b>Edição dos Vídeos</b>\n"
         f"O robô edita o vídeo antes do rascunho, como você faz no LumaFusion: a foto do anúncio do produto "
         f"nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos e uma miniatura dela no topo do vídeo inteiro.\n\n"
-        "Vale para os vídeos autorais: os <b>Autorais</b> e os do Viral que vêm de um grupo marcado como "
-        "autoral (quem grava libera os vídeos para afiliados postarem). Marque os grupos em Espião "
-        "Afiliados 🕵️ → Grupos Vigiados 📡 → Grupos Autorais ✂️. Vídeo de grupo não marcado, do Canal "
-        "Afiliados ou do Grupo Público não é editado.\n\n"
+        "Vale para todos os vídeos que o robô usa (Autorais, Viral, Canal Afiliados e Grupo Público): "
+        "todos os seus grupos e vídeos são autorais.\n\n"
         f"Agora: {rotulo_edicao(config)}\n\n"
         "<b>O que cada botão faz</b>\n"
-        f"👀 <b>{BOTAO_EXEMPLO_EDICAO}</b>: manda no seu privado 1 vídeo autoral já editado, sem postar, "
+        f"👀 <b>{BOTAO_EXEMPLO_EDICAO}</b>: manda no seu privado 1 vídeo já editado, sem postar, "
         "para você ver antes de ligar.\n"
         f"✅ <b>{BOTAO_LIGAR_EDICAO}</b> / ⏸️ <b>{BOTAO_DESLIGAR_EDICAO}</b>: liga ou desliga a edição nos "
         "próximos rascunhos. Se a edição de um vídeo não sair, o rascunho vai com o vídeo como veio."
@@ -898,7 +894,7 @@ async def exemplo_edicao_handler(message: types.Message, state: FSMContext):
         await message.answer("⏳ O exemplo da edição já está sendo montado. Ele chega aqui em instantes.")
         return
     async with _exemplo_da_edicao:
-        await message.answer("⏳ Montando o exemplo com o vídeo autoral mais novo. Leva até uns 2 minutos.")
+        await message.answer("⏳ Montando o exemplo com o vídeo mais novo. Leva até uns 2 minutos.")
         with tempfile.TemporaryDirectory() as pasta:
             destino = os.path.join(pasta, "exemplo.mp4")
             try:
