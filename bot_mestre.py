@@ -65,6 +65,7 @@ import painel_notas
 import painel_shopee_video  # painel do robô da Shopee Vídeo (Outros Canais)
 import painel_acessos  # Acessos do Servidor: Tailscale e Oracle (Opções do Servidor)
 import painel_admins  # Administradores dos grupos e canais (Opções do Servidor)
+import painel_ia  # IA: o link da conversa com o Claude (Opções do Servidor)
 import pool_contas  # contas dos userbots (quem espelha, quem reposta)
 import blacklist_captura  # de quem os userbots nunca capturam
 import repetidos_publico  # vídeo que já foi ao Grupo Público não vai de novo
@@ -546,6 +547,9 @@ painel_acessos.configurar_dependencias(bot, ADMIN_ID)
 dp.include_router(painel_admins.router)
 painel_admins.configurar_dependencias(bot, ADMIN_ID)
 
+dp.include_router(painel_ia.router)
+painel_ia.configurar_dependencias(bot, ADMIN_ID)
+
 # --- Teclados ---
 # O padrão (montar_teclado) e os teclados que vários painéis usam iguais
 # (teclado_cancelar, teclado_aprovar_cancelar, teclado_janela_dia_todo) vêm do
@@ -665,7 +669,7 @@ def obter_teclado_opcoes_servidor():
     botoes = [
         [KeyboardButton(text="Monitorar Servidor 🖥️"), KeyboardButton(text="Zerar Filas e Tarefas 🧹")],
         [KeyboardButton(text="Reiniciar Robôs 🔄"), KeyboardButton(text="Acessos do Servidor 🔐")],
-        [KeyboardButton(text=painel_admins.BOTAO)],
+        [KeyboardButton(text=painel_admins.BOTAO), KeyboardButton(text=painel_ia.BOTAO)],
         [KeyboardButton(text="Voltar ao Início 🔙")]
     ]
     return montar_teclado(botoes)
