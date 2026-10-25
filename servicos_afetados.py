@@ -7,8 +7,9 @@ commit que estava no servidor e o novo. Usado pelo deploy.yml:
 Imprime os serviços, um por linha. Reinicia só quem roda código que mudou: o
 arquivo do robô e todo módulo do projeto que ele importa, direta ou
 indiretamente (inclusive import dentro de função). Mudança só em documentação,
-testes, workflows ou ferramentas que nenhum robô importa não reinicia ninguém:
-cada reinício derruba os painéis abertos e refaz a grade do dia.
+testes, workflows, ferramentas que nenhum robô importa ou mídia lida a cada uso
+(midia/) não reinicia ninguém: cada reinício derruba os painéis abertos e refaz a
+grade do dia.
 
 Um .py que mudou só em comentários ou docstrings também não reinicia ninguém.
 Na dúvida, todos: requirements.txt mudou, o mesmo commit de novo (deploy
@@ -32,6 +33,8 @@ SERVICOS = {
 
 # Não rodam dentro de robô nenhum.
 PASTAS_SEM_EFEITO = ("tests/", ".github/", ".claude/")
+# Lidos a cada uso (a seta da edição dos vídeos): o robô pega o arquivo novo sem reiniciar.
+PASTAS_LIDAS_NA_HORA = ("midia/",)
 ARQUIVOS_SEM_EFEITO = {".gitignore", "servicos_linux/instalar_servicos.sh"}
 
 
@@ -70,7 +73,8 @@ def servicos_afetados(mudados, pasta=PASTA):
     for caminho in mudados:
         if caminho == "requirements.txt":
             return todos
-        if caminho.startswith(PASTAS_SEM_EFEITO) or caminho.endswith(".md") or caminho in ARQUIVOS_SEM_EFEITO:
+        if (caminho.startswith(PASTAS_SEM_EFEITO + PASTAS_LIDAS_NA_HORA) or caminho.endswith(".md")
+                or caminho in ARQUIVOS_SEM_EFEITO):
             continue
         if caminho.startswith("servicos_linux/") and caminho.endswith(".service"):
             servico = os.path.basename(caminho)[:-len(".service")]

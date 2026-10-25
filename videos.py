@@ -152,13 +152,15 @@ QUADROS_POR_SEGUNDO = 30
 
 
 def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, com_audio, seta=None,
-                             centro_seta=None):
+                             centro_seta=None, pulso_da_seta=(0, 1)):
     """
     O ffmpeg da edição: a foto em tela cheia (fundo branco) por `segundos`, depois o vídeo
     em 720x1280 com a foto em miniatura (`miniatura` px de largura) com o centro em
-    `centro` (x, y) e, com `seta` (uma imagem com fundo transparente), a seta com o centro em
-    `centro_seta`, as duas até o fim do vídeo. O som do vídeo começa depois da foto, que vai
-    em silêncio; vídeo sem som sai sem som.
+    `centro` (x, y) até o fim. Com `seta` (uma animação APNG com fundo transparente), a seta
+    com o centro em `centro_seta` desde o começo, por cima da foto e do vídeo, como
+    na linha do tempo do LumaFusion; `pulso_da_seta` = (primeiro quadro, quantos quadros) é o
+    trecho do fim da animação que se repete até o fim do vídeo. O som do vídeo começa depois
+    da foto, que vai em silêncio; vídeo sem som sai sem som.
     """
     tela = f"{FILTRO_720P},setsar=1,fps={QUADROS_POR_SEGUNDO},format=yuv420p"
     filtro = (f"[0:v]{tela.replace('color=black', 'color=white')}[foto];"
@@ -167,9 +169,12 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
               f"[corpo][mini]overlay=x={centro[0]}-w/2:y={centro[1]}-h/2:shortest=1[comfoto];")
     entradas = ["-loop", "1", "-t", str(segundos), "-i", foto, "-i", video, "-loop", "1", "-i", foto]
     if seta:
-        entradas += ["-loop", "1", "-i", seta]
-        filtro += (f"[comfoto][3:v]overlay=x={centro_seta[0]}-w/2:y={centro_seta[1]}-h/2:shortest=1[editado];"
-                   "[foto][editado]concat=n=2:v=1:a=0[v]")
+        inicio, quadros = pulso_da_seta
+        entradas += ["-i", seta]
+        filtro += ("[foto][comfoto]concat=n=2:v=1:a=0[juntos];"
+                   f"[3:v]loop=loop=-1:size={quadros}:start={inicio}[seta];"
+                   f"[juntos][seta]overlay=x={centro_seta[0]}-w/2:y={centro_seta[1]}-h/2:shortest=1,"
+                   "format=yuv420p[v]")
     else:
         filtro += "[foto][comfoto]concat=n=2:v=1:a=0[v]"
     saida = ["-map", "[v]"]
@@ -184,11 +189,11 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
 
 
 def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro=(576, 128), seta=None,
-                         centro_seta=None, espera=300):
+                         centro_seta=None, espera=300, pulso_da_seta=(0, 1)):
     """
     Grava em destino o vídeo com a foto (bytes) no começo e em miniatura por cima, e a seta
-    (caminho de uma imagem com fundo transparente), se vier. Devolve "" quando deu certo, ou
-    o motivo fixo de não ter dado (o destino não fica pela metade).
+    (caminho de uma animação APNG com fundo transparente), se vier. Devolve "" quando deu
+    certo, ou o motivo fixo de não ter dado (o destino não fica pela metade).
     """
     if not foto:
         return "a foto do anúncio não veio"
@@ -201,7 +206,7 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
             return "a foto do anúncio não é uma imagem que abre"
         temporario = os.path.join(pasta, "editado.mp4")
         comando = comando_foto_e_miniatura(caminho_da_foto, video, temporario, segundos, miniatura, centro,
-                                           tem_audio(video), seta, centro_seta)
+                                           tem_audio(video), seta, centro_seta, pulso_da_seta)
         try:
             feito = subprocess.run(comando, capture_output=True, timeout=espera)
         except subprocess.TimeoutExpired:
