@@ -60,6 +60,7 @@ import android_virtual as av
 import apelacoes_shopee_video as apelacoes
 import assistente_shopee_video as assistente
 import avisar_rafael
+import casos_robo
 import celular_robo
 import db
 import interacoes_shopee_video as interacoes
@@ -1543,9 +1544,11 @@ def preparar_rascunho(d, config, agora=None):
         return resultado
     ident = criar(video["id"], agora)
     assistente.registrar(video["id"], "robo", "rascunho do robô", agora)
-    curtidos = []
+    # curtidos: os produtos que o robô curtiu (descurtir_no_fim); celular: se ele já usou o
+    # celular (o caso só lê a tela quando ela é deste rascunho).
+    curtidos, celular = [], []
     try:
-        _preparar(d, ident, video, config.get("fonte", assistente.FONTE_PADRAO), agora, curtidos)
+        _preparar(d, ident, video, config.get("fonte", assistente.FONTE_PADRAO), agora, curtidos, celular)
     except Suspensa as e:
         _desfazer_reserva(ident, video["id"], "conta suspensa", False)
         registrar_tentativa("rascunho", "suspensa", str(e), _produto_do_video(video), agora)
@@ -1553,6 +1556,7 @@ def preparar_rascunho(d, config, agora=None):
             gravar_estado(lista_limpa=False)
         raise
     except Verificacao:
+        _guardar_caso(d, "rascunho", "verificação", "verificação da Shopee na tela", video, ident, agora)
         _desfazer_reserva(ident, video["id"], "verificação", False)
         if curtidos:
             # Na Verificação o robô para sem descurtir: a curtida fica para as 4h.
@@ -1560,12 +1564,16 @@ def preparar_rascunho(d, config, agora=None):
         registrar_tentativa("rascunho", "verificação", "verificação da Shopee na tela", _produto_do_video(video), agora)
         raise
     except Parada as e:
+        _guardar_caso(d if celular else None, "rascunho", "pulado" if e.do_video else "parou", e.motivo, video,
+                      ident, agora)
         _desfazer_reserva(ident, video["id"], e.motivo, e.do_video)
         registrar_tentativa("rascunho", "pulado" if e.do_video else "parou", e.motivo, _produto_do_video(video), agora)
         e.id_video = video["id"]
         descurtir_no_fim(d, video, curtidos)
         raise
     except Exception as e:
+        _guardar_caso(d if celular else None, "rascunho", "erro", f"erro inesperado ({type(e).__name__})", video,
+                      ident, agora)
         _desfazer_reserva(ident, video["id"], type(e).__name__, False)
         registrar_tentativa("rascunho", "erro", f"erro inesperado ({type(e).__name__})", _produto_do_video(video), agora)
         e.id_video = video["id"]
@@ -1631,6 +1639,16 @@ def descurtir_no_fim(d, video, curtidos):
     if not todos:
         # Uma curtida ficou para trás: a lista não está limpa até o descurtir das 4h (P27).
         gravar_estado(lista_limpa=False)
+
+
+def _guardar_caso(d, acao, resultado, motivo, video=None, ident=None, agora=None):
+    """
+    O caso completo da tentativa que não deu certo (motivo, vídeo, título, produtos, print e
+    tela), cifrado para o checkup do Claude e apagado depois (casos_robo). Pedido do
+    Rafael: DECISOES.md, Shopee Vídeo.
+    """
+    casos_robo.guardar(d, acao, resultado, motivo, passo_do_motivo(motivo), video,
+                       pegar(ident) if ident else None, agora)
 
 
 def _desfazer_reserva(ident, id_video, motivo, do_video):
@@ -1856,11 +1874,16 @@ def descurtir_tudo(d, agora=None):
     return f"{removidos} produto(s) descurtido(s) em Meus Favoritos"
 
 
-def _preparar(d, ident, video, fonte, agora=None, curtidos=None):
-    """O rascunho no celular. curtidos recebe cada produto que o robô curtiu (descurtir_no_fim)."""
+def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
+    """
+    O rascunho no celular. curtidos recebe cada produto que o robô curtiu (descurtir_no_fim);
+    celular ganha um item quando o robô começa a usar o celular.
+    """
     curtidos = [] if curtidos is None else curtidos
+    celular = [] if celular is None else celular
     vistos = []
     if video.get("de_video"):
+        celular.append(True)
         avisar("🤖 Robô da Shopee Vídeo: começando um rascunho.\n\nProdutos: os do Ver Produtos do vídeo; a IA "
                f"confere cada um.\nVídeo: o mais novo de {assistente.FONTES.get(fonte, fonte)} ainda não usado.")
         nomes = _produtos_do_video(d, video, vistos, curtidos)
@@ -1891,6 +1914,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None):
     atualizar(ident, arquivo=copia, link=video["link"], produtos=nomes, titulo=textos["titulo"],
               comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia)
 
+    celular.append(True)
     if not video.get("de_video"):
         # Curtir o produto pela página dele, como o Rafael faz antes de postar (os do Ver
         # Produtos já foram curtidos lá).
@@ -2948,10 +2972,13 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
     except Verificacao:
         logger.warning("⚠️ [Robô Shopee Vídeo] Verificação da Shopee na tela: parado.")
         if acao != "rascunho":
+            _guardar_caso(d, acao, "verificação", "verificação da Shopee na tela", ident=ident, agora=agora)
             registrar_tentativa(acao, "verificação", "verificação da Shopee na tela", produto, agora)
         av.abrir_tela(celular=True, verificacao=True)
         return f"{acao}: verificação na tela; parado"
     except Parada as e:
+        if acao != "rascunho":
+            _guardar_caso(d, acao, "parou", e.motivo, ident=ident, agora=agora)
         if acao in ("postar", "apagar"):
             # Não insiste: o Rafael decide de novo pelo botão.
             atualizar(ident, estado="rascunho", postar_em=None, motivo=e.motivo)
@@ -2970,6 +2997,7 @@ def _agir(d, acao, ident, preparar, config, agora, pedido=False):
         # para a próxima rodada voltar ao início.
         logger.exception(f"❌ [Robô Shopee Vídeo] Erro na rodada ({acao}): {type(e).__name__}")
         if acao != "rascunho":
+            _guardar_caso(d, acao, "erro", f"erro inesperado ({type(e).__name__})", ident=ident, agora=agora)
             registrar_tentativa(acao, "erro", f"erro inesperado ({type(e).__name__})", produto, agora)
         _repetir_depois(acao, preparar, config, agora, getattr(e, "id_video", None))
         _avisar_que_nao_saiu(acao, preparar, config, agora)

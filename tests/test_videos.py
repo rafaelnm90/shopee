@@ -120,3 +120,20 @@ def test_nenhum_arquivo_tem_a_propria_receita_de_video():
             if receita in texto:
                 copias.append((os.path.basename(arquivo), receita))
     assert copias == []
+
+
+def test_quadros_espalhados_do_video(tmp_path):
+    # Os casos das falhas do robô da Shopee Vídeo levam alguns quadros do vídeo (casos_robo).
+    import shutil
+    import subprocess
+    if not shutil.which("ffmpeg"):
+        assert videos.quadros("nao_existe.mp4", str(tmp_path)) == 0
+        return
+    video = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=duration=4:size=320x240:rate=10",
+                    str(video)], check=True)
+    assert videos.quadros(str(video), str(tmp_path), quantos=3, largura=160) == 3
+    assert sorted(p.name for p in tmp_path.glob("quadro_*.jpg")) == ["quadro_1.jpg", "quadro_2.jpg", "quadro_3.jpg"]
+    lixo = tmp_path / "lixo.mp4"
+    lixo.write_bytes(b"nao e video")
+    assert videos.quadros(str(lixo), str(tmp_path / "x")) == 0

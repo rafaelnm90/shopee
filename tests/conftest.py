@@ -135,11 +135,13 @@ def pasta_limpa(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def celular_na_pasta_do_teste(tmp_path, monkeypatch):
-    """A trava do celular e os rascunhos do robô na pasta do teste, nunca na casa de quem roda."""
+    """A trava do celular, os rascunhos e os casos do robô na pasta do teste, nunca na casa de quem roda."""
+    import casos_robo
     import celular_robo
     import robo_shopee_video
     monkeypatch.setattr(celular_robo, "ARQUIVO_TRAVA", str(tmp_path / "celular.trava"))
     monkeypatch.setattr(robo_shopee_video, "PASTA_RASCUNHOS", str(tmp_path / "rascunhos"))
+    monkeypatch.setattr(casos_robo, "PASTA", str(tmp_path / "casos"))
 
 
 @pytest.fixture

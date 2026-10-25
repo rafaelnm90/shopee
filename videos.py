@@ -3,7 +3,8 @@ Arquivo de vídeo tratado do mesmo jeito em todos os robôs: medir a resolução
 (ffprobe), subir para 720p o vídeo pequeno antes de postar e a assinatura SHA-256 que
 reconhece o mesmo vídeo. Usado pelo Espião e pelo Espelhador (motor_userbot), pelos
 Autorais (espelhador_videos_autorais, pelo repetidos_publico) e pelo Baixador
-(downloader_bot, só a medição).
+(downloader_bot, só a medição). Os quadros espalhados do vídeo (quadros) vão nos casos
+das falhas do robô da Shopee Vídeo (casos_robo).
 
 Um lugar só para que um ajuste no tratamento valha para todos os canais
 (DECISOES.md, Código e manutenção).
@@ -12,6 +13,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import subprocess
 
 logger = logging.getLogger("Videos")
 
@@ -46,6 +48,30 @@ async def dimensoes(caminho, timeout=None):
         return int(largura), int(altura)
     except (ValueError, IndexError):
         return None, None
+
+
+def quadros(caminho, pasta, quantos=4, largura=360, timeout=20):
+    """
+    Grava em pasta quantos quadros do vídeo (quadro_1.jpg...), espalhados do começo ao fim,
+    com essa largura. Devolve quantos saíram; vídeo que não abre dá 0, sem erro.
+    """
+    try:
+        duracao = float(subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", caminho],
+            capture_output=True, text=True, timeout=timeout).stdout.strip() or 0)
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0
+    feitos = 0
+    for i in range(quantos if duracao > 0 else 0):
+        destino = os.path.join(pasta, f"quadro_{i + 1}.jpg")
+        try:
+            subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{duracao * (i + 0.5) / quantos:.2f}", "-i", caminho,
+                            "-frames:v", "1", "-vf", f"scale={largura}:-2", destino],
+                           capture_output=True, timeout=timeout)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        feitos += os.path.exists(destino)
+    return feitos
 
 
 async def verificar_e_otimizar_video(caminho_video, relatorio=None):

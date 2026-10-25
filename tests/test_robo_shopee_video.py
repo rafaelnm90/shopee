@@ -663,7 +663,7 @@ def test_mesmo_video_3_vezes_depois_outro_ate_3_videos_e_espera_o_proximo_horari
                 f"Vestido 👗\n{LINK}", f"2026-10-22 0{numero}:00:00")
     tentados = []
 
-    def falha(d, ident, video, fonte, agora=None, curtidos=None):
+    def falha(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
         tentados.append(video["id"])
         raise robo.Parada("não achei o botão Rascunhos")
 
@@ -1683,7 +1683,8 @@ def test_link_de_video_sem_ver_produtos_diz_o_que_a_tela_mostrou(monkeypatch, av
     _fonte_de_video(monkeypatch)
     app = AppDoVerProdutos(player=player)
     resultado = robo.rodada(preparar=True, d=app, agora=momento("2026-10-22 23:59"))
-    assert motivo in resultado and app.olhadas_no_player == 2
+    # Duas olhadas do robô (a segunda depois da espera) e a do caso guardado para o checkup.
+    assert motivo in resultado and app.olhadas_no_player == 3
     pulado = robo.listar("pulado")[0]
     assert pulado["motivo"] == motivo and robo.passo_do_motivo(motivo) == "Ver Produtos"
     import investigar_robo
@@ -2452,3 +2453,21 @@ def test_descurtir_das_4h_que_para_no_meio_deixa_a_lista_suja(monkeypatch, aviso
     robo.gravar_estado(lista_limpa=True)
     robo.rodada(d=SemConfirmar(favoritos=3), agora=momento("2026-10-25 04:05"))
     assert not robo.lista_limpa()
+
+
+def test_rascunho_que_nao_sai_deixa_o_caso_completo_para_o_checkup(monkeypatch, avisos):
+    # Pedido do Rafael (25/10): depois de um erro, o Claude vê tudo o que o robô viu (o
+    # motivo, o título, o produto, a tela), cifrado; depois de resolvido, é apagado.
+    import json
+    _fonte(monkeypatch)
+    monkeypatch.setattr(robo.ps, "adicionar_produto", lambda *a, **k: (
+        False, "o produto do vídeo não está na lista, nem pela foto do 1º (x): nada adicionado (aviso no privado)"))
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24)
+    robo.rodada(preparar=True, d=AppDeMentira(), agora=momento("2026-10-22 23:59"))
+    casos = robo.casos_robo.casos()
+    assert len(casos) == 1 and casos[0].endswith("-rascunho")
+    with open(os.path.join(robo.casos_robo.PASTA, casos[0], "caso.json"), encoding="utf-8") as f:
+        caso = json.load(f)
+    assert (caso["resultado"], caso["passo"]) == ("pulado", "anexar o produto")
+    assert caso["rascunho"]["titulo"] == TITULO and caso["rascunho"]["produtos"] == [VESTIDO]
+    assert caso["video"]["link"] == LINK and os.path.exists(os.path.join(robo.casos_robo.PASTA, casos[0], "tela.xml"))
