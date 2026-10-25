@@ -657,19 +657,28 @@ def robo_da_shopee_video(agora=None):
     # começado depois.
     salvos = _contar("SELECT COUNT(*) FROM shopee_video_rascunhos WHERE criado_em >= ? "
                      "AND estado NOT IN ('pulado', 'preparando')", hoje)
+    # Os pulados (vídeo com problema próprio) também, com a hora da primeira e da última
+    # vez: diz se o que parou continua depois de uma correção.
+    vistos = RESULTADOS_RUINS + ("pulado",)
     try:
         with db.conexao() as conexao:
-            ruins = conexao.execute(
-                "SELECT acao, resultado, passo, COUNT(*) FROM shopee_video_tentativas WHERE momento >= ? "
-                f"AND resultado IN ({','.join('?' * len(RESULTADOS_RUINS))}) GROUP BY 1, 2, 3 ORDER BY 4 DESC",
-                (_momento(agora - timedelta(hours=24)), *RESULTADOS_RUINS)).fetchall()
+            linhas = conexao.execute(
+                "SELECT acao, resultado, passo, COUNT(*), MIN(momento), MAX(momento) FROM shopee_video_tentativas "
+                f"WHERE momento >= ? AND resultado IN ({','.join('?' * len(vistos))}) GROUP BY 1, 2, 3 "
+                "ORDER BY 4 DESC, 6 DESC",
+                (_momento(agora - timedelta(hours=24)), *vistos)).fetchall()
     except sqlite3.OperationalError:
-        ruins = []
+        linhas = []
+    ruins = [(acao, resultado, passo, qtd) for acao, resultado, passo, qtd, _p, _u in linhas
+             if resultado in RESULTADOS_RUINS]
+    linhas = [(acao, resultado, passo, qtd, (primeiro or "")[11:16], (ultimo or "")[11:16])
+              for acao, resultado, passo, qtd, primeiro, ultimo in linhas]
     pulados = _contar("SELECT COUNT(*) FROM shopee_video_rascunhos WHERE criado_em >= ? AND estado = 'pulado'", hoje)
     # As punições da Saúde do Vídeo que esperam o recurso do Rafael (apelacoes_shopee_video).
     punicoes = _contar("SELECT COUNT(*) FROM shopee_video_punicoes WHERE situacao = 'pendente'")
     return {"ativo": not pausado, "suspenso": suspenso, "horarios": len(horarios), "vencidos": vencidos,
-            "salvos": salvos or 0, "pulados": pulados or 0, "ruins": ruins, "punicoes": punicoes or 0}
+            "salvos": salvos or 0, "pulados": pulados or 0, "ruins": ruins, "linhas": linhas,
+            "punicoes": punicoes or 0}
 
 
 # --- Respostas aos comentários e feed da Shopee Vídeo ---
@@ -940,8 +949,9 @@ def main():
     print(f"{situacao} | horários hoje {robo_sv['horarios']} | "
           f"vencidos {robo_sv['vencidos']} | rascunhos salvos hoje {robo_sv['salvos']} | "
           f"vídeos pulados hoje {robo_sv['pulados']}")
-    for acao, resultado, passo, qtd in robo_sv["ruins"]:
-        print(f"   {qtd}x {acao} → {resultado} em \"{passo or '?'}\"")
+    for acao, resultado, passo, qtd, primeiro, ultimo in robo_sv.get("linhas", []):
+        quando = f"às {ultimo}" if qtd == 1 or primeiro == ultimo else f"de {primeiro} a {ultimo}"
+        print(f"   {qtd}x {acao} → {resultado} em \"{passo or '?'}\" ({quando})")
 
     interacoes = interacoes_da_shopee_video(agora)
     respostas = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["respostas"].items()))
