@@ -1,0 +1,36 @@
+name: Vídeo de IA (Shopee Vídeo)
+
+# Teste do vídeo feito por IA a partir da foto do anúncio do produto (pedido do Rafael em
+# 25/10, P34): "modelos" mostra os modelos de vídeo (Veo) que a chave do Google enxerga, sem
+# custo; "testar" gera 1 vídeo de uns 8 s do próximo produto da fonte do painel e manda só
+# no privado do Rafael (custa menos de US$ 1; nada é postado). Só roda quando disparado à mão.
+#
+# O repositório é público, e os logs do Actions também: o video_ia.py imprime só nomes de
+# modelo, estados e números; o nome do produto, a foto e o vídeo vão só no privado.
+on:
+  workflow_dispatch:
+    inputs:
+      acao:
+        description: "O que fazer"
+        type: choice
+        options: [modelos, testar]
+        default: modelos
+
+permissions:
+  contents: read
+
+jobs:
+  video_ia:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Vídeo de IA no servidor
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          command_timeout: 13m
+          script: |
+            cd ~/shopee
+            venv/bin/python3 video_ia.py ${{ inputs.acao }}
