@@ -125,22 +125,31 @@ def _niveis(caplog, trecho):
     return [registro.levelname for registro in caplog.records if trecho in registro.getMessage()]
 
 
-def test_conteudo_recusado_em_todos_os_modelos_e_aviso_nao_erro(video_no_gemini, caplog):
-    # Um sem cota e os outros recusando o conteúdo: o vídeo é que não serve, não é falha do robô.
+def test_conteudo_recusado_e_aviso_nao_erro(video_no_gemini, caplog):
+    # Um sem cota e os outros recusando o conteúdo: quem pediu põe o vídeo de lado.
     video_no_gemini.respostas = {"a": COTA_DO_DIA, "b": "bloqueado", "c": "bloqueado"}
     with caplog.at_level("WARNING", logger="API_Gemini"):
         assert rodar(ia.analisar_video_gemini("v.mp4", "p")) is None
-    assert _niveis(caplog, "recusou o conteúdo do vídeo") == ["WARNING"]
+    assert _niveis(caplog, "recusou o pedido pelo conteúdo") == ["WARNING"]
     assert not _niveis(caplog, "Falha crítica")
     assert ia.codigos_do_google(ia.ULTIMO_ERRO_IA) == {"PROHIBITED_CONTENT"}
 
 
-def test_falha_que_nao_e_do_conteudo_continua_erro(video_no_gemini, caplog):
-    # Um recusou o conteúdo, mas outro caiu por erro do Google: não dá para culpar o vídeo.
+def test_recusa_do_conteudo_com_outros_erros_tambem_e_aviso(video_no_gemini, caplog):
+    # Checkup de 25/10: com a recusa num modelo e erro passageiro ou resposta vazia por outro
+    # motivo nos outros, o robô já põe o vídeo de lado; o log continuava erro.
     video_no_gemini.respostas = {"a": "bloqueado", "b": "500 INTERNAL", "c": "vazio"}
     with caplog.at_level("WARNING", logger="API_Gemini"):
         assert rodar(ia.analisar_video_gemini("v.mp4", "p")) is None
+    assert _niveis(caplog, "recusou o pedido pelo conteúdo") == ["WARNING"]
+    assert not _niveis(caplog, "Falha crítica")
+
+
+def test_falha_sem_recusa_do_conteudo_continua_erro(video_no_gemini, caplog):
+    video_no_gemini.respostas = {"a": "500 INTERNAL", "b": "vazio", "c": COTA_DO_MINUTO}
+    with caplog.at_level("WARNING", logger="API_Gemini"):
+        assert rodar(ia.analisar_video_gemini("v.mp4", "p")) is None
     assert _niveis(caplog, "Falha crítica") == ["ERROR"]
-    assert not _niveis(caplog, "recusou o conteúdo do vídeo")
+    assert not _niveis(caplog, "recusou o pedido pelo conteúdo")
     video_no_gemini.respostas = {"a": "bloqueado", "b": "texto do b"}
     assert rodar(ia.analisar_video_gemini("v.mp4", "p")) == "texto do b"
