@@ -196,9 +196,17 @@ def test_robo_da_shopee_video_horarios_vencidos_e_tentativas_ruins():
     robo.registrar_tentativa("rascunho", "parou", "não achei o botão Rascunhos", "Fone X",
                              agora=AGORA - timedelta(hours=9))
 
+    robo.registrar_tentativa("rascunho", "pulado", "o produto do vídeo não está na lista", "Fone X",
+                             agora=AGORA - timedelta(hours=8))
+    robo.registrar_tentativa("rascunho", "pulado", "o produto do vídeo não está na lista", "Fone X",
+                             agora=AGORA - timedelta(hours=2))
+
     r = checkup.robo_da_shopee_video(AGORA)
     assert (r["ativo"], r["horarios"], r["vencidos"], r["salvos"], r["pulados"]) == (True, 3, 2, 1, 1)
     assert r["ruins"] == [("rascunho", "parou", "navegar no app", 1)]
+    # Os pulados também, com a hora da primeira e da última vez (diz se continua depois de uma correção).
+    primeiro, ultimo = ((AGORA - timedelta(hours=h)).strftime("%H:%M") for h in (8, 2))
+    assert ("rascunho", "pulado", "anexar o produto", 2, primeiro, ultimo) in r["linhas"]
     assert "Fone X" not in str(r)
 
 
