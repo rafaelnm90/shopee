@@ -23,11 +23,16 @@ principal, a verificação semanal do Grupo Público (só os números), robô da
 Vídeo (com as respostas aos comentários e o feed), Baixador e backup, e a meta de cada
 job (esperado × feito). No fim, os pontos de atenção, cada um marcado como novo,
 repetido há N dias ou que voltou, e os que se resolveram desde o checkup anterior.
+
+Com `robo-agora`, só as linhas do robô da Shopee Vídeo que o diagnostico.yml mostra de
+hora em hora para a retomada do Claude (a cada 3 h): paradas, erros e pulados nas
+últimas 3 h e 12 h e os aprovados que passaram da hora de ir ao ar.
 """
 import os
 import re
 import sqlite3
 import subprocess
+import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
@@ -73,6 +78,10 @@ CHAVE_CONFIG_SV, CHAVE_DIA_SV = "shopee_video", "shopee_video_robo_dia"
 FOLGA_DA_SUSPENSAO_SV = timedelta(minutes=15)
 # Resultados do robô da Shopee Vídeo que pedem investigação.
 RESULTADOS_RUINS = ("erro", "parou", "verificação", "treino parou")
+# O aprovado que passou da hora de ir ao ar há mais que isso (a rodada é a cada 15 min).
+ATRASO_DO_APROVADO = timedelta(minutes=30)
+# As janelas que a retomada do Claude lê no diagnóstico (a cada 3 h; às 8h, a noite toda).
+JANELAS_DA_RETOMADA = (3, 12)
 
 
 def mascarar(texto):
@@ -691,8 +700,25 @@ def robo_da_shopee_video(agora=None):
     # começado depois.
     salvos = _contar("SELECT COUNT(*) FROM shopee_video_rascunhos WHERE criado_em >= ? "
                      "AND estado NOT IN ('pulado', 'preparando')", hoje)
-    # Os pulados (vídeo com problema próprio) também, com a hora da primeira e da última
-    # vez: diz se o que parou continua depois de uma correção.
+    linhas = tentativas_recentes(24, agora)
+    ruins = [(acao, resultado, passo, qtd) for acao, resultado, passo, qtd, _p, _u in linhas
+             if resultado in RESULTADOS_RUINS]
+    atrasados, minutos = aprovados_atrasados(agora)
+    pulados = _contar("SELECT COUNT(*) FROM shopee_video_rascunhos WHERE criado_em >= ? AND estado = 'pulado'", hoje)
+    # As punições da Saúde do Vídeo que esperam o recurso do Rafael (apelacoes_shopee_video).
+    punicoes = _contar("SELECT COUNT(*) FROM shopee_video_punicoes WHERE situacao = 'pendente'")
+    return {"ativo": not pausado, "suspenso": suspenso, "horarios": len(horarios), "vencidos": vencidos,
+            "salvos": salvos or 0, "pulados": pulados or 0, "ruins": ruins, "linhas": linhas,
+            "punicoes": punicoes or 0, "atrasados": atrasados, "minutos_de_atraso": minutos}
+
+
+def tentativas_recentes(horas, agora=None):
+    """
+    As tentativas ruins e os pulados das últimas `horas`, por ação, resultado e passo, com a
+    hora (HH:MM) da primeira e da última vez: diz se o que parou continua depois de uma
+    correção. Só frases fixas do código, nunca o produto nem o motivo.
+    """
+    agora = _agora(agora)
     vistos = RESULTADOS_RUINS + ("pulado",)
     try:
         with db.conexao() as conexao:
@@ -700,19 +726,65 @@ def robo_da_shopee_video(agora=None):
                 "SELECT acao, resultado, passo, COUNT(*), MIN(momento), MAX(momento) FROM shopee_video_tentativas "
                 f"WHERE momento >= ? AND resultado IN ({','.join('?' * len(vistos))}) GROUP BY 1, 2, 3 "
                 "ORDER BY 4 DESC, 6 DESC",
-                (_momento(agora - timedelta(hours=24)), *vistos)).fetchall()
+                (_momento(agora - timedelta(hours=horas)), *vistos)).fetchall()
     except sqlite3.OperationalError:
-        linhas = []
-    ruins = [(acao, resultado, passo, qtd) for acao, resultado, passo, qtd, _p, _u in linhas
-             if resultado in RESULTADOS_RUINS]
-    linhas = [(acao, resultado, passo, qtd, (primeiro or "")[11:16], (ultimo or "")[11:16])
-              for acao, resultado, passo, qtd, primeiro, ultimo in linhas]
-    pulados = _contar("SELECT COUNT(*) FROM shopee_video_rascunhos WHERE criado_em >= ? AND estado = 'pulado'", hoje)
-    # As punições da Saúde do Vídeo que esperam o recurso do Rafael (apelacoes_shopee_video).
-    punicoes = _contar("SELECT COUNT(*) FROM shopee_video_punicoes WHERE situacao = 'pendente'")
-    return {"ativo": not pausado, "suspenso": suspenso, "horarios": len(horarios), "vencidos": vencidos,
-            "salvos": salvos or 0, "pulados": pulados or 0, "ruins": ruins, "linhas": linhas,
-            "punicoes": punicoes or 0}
+        return []
+    return [(acao, resultado, passo, qtd, (primeiro or "")[11:16], (ultimo or "")[11:16])
+            for acao, resultado, passo, qtd, primeiro, ultimo in linhas]
+
+
+def aprovados_atrasados(agora=None):
+    """
+    Os rascunhos que o Rafael aprovou e passaram da hora de ir ao ar há mais de
+    ATRASO_DO_APROVADO: quantos e há quantos minutos está o mais atrasado.
+    """
+    agora = _agora(agora)
+    try:
+        with db.conexao() as conexao:
+            qtd, mais_antigo = conexao.execute(
+                "SELECT COUNT(*), MIN(postar_em) FROM shopee_video_rascunhos WHERE estado = 'aprovado' "
+                "AND postar_em IS NOT NULL AND postar_em <= ?",
+                (_momento(agora - ATRASO_DO_APROVADO),)).fetchone()
+    except sqlite3.OperationalError:
+        return 0, 0
+    if not qtd:
+        return 0, 0
+    try:
+        antes = datetime.strptime(mais_antigo, "%Y-%m-%d %H:%M:%S")
+    except ValueError:
+        return qtd, 0
+    return qtd, int((agora.replace(tzinfo=None) - antes).total_seconds() // 60)
+
+
+def _linha_da_tentativa(tentativa):
+    """Uma linha de tentativas_recentes, com a hora da primeira e da última vez."""
+    acao, resultado, passo, qtd, primeiro, ultimo = tentativa
+    quando = f"às {ultimo}" if qtd == 1 or primeiro == ultimo else f"de {primeiro} a {ultimo}"
+    return f"   {qtd}x {acao} → {resultado} em \"{passo or '?'}\" ({quando})"
+
+
+def robo_agora(agora=None):
+    """
+    As linhas do diagnóstico de hora em hora para a retomada do Claude (a cada 3 h): as
+    paradas, os erros e os pulados do robô da Shopee Vídeo nas janelas de 3 h e 12 h e os
+    aprovados que passaram da hora de ir ao ar. Só ações, passos fixos, horas e números.
+    Pedido do Rafael: DECISOES.md, Trabalho com o Claude.
+    """
+    agora = _agora(agora)
+    config = db.ler_config(CHAVE_CONFIG_SV, {}) or {}
+    linhas = []
+    for horas in JANELAS_DA_RETOMADA:
+        recentes = tentativas_recentes(horas, agora)
+        ruins = sum(qtd for _a, resultado, _p, qtd, *_h in recentes if resultado in RESULTADOS_RUINS)
+        pulados = sum(qtd for _a, resultado, _p, qtd, *_h in recentes if resultado == "pulado")
+        linhas.append(f"Robô agora, últimas {horas} h: paradas ou erros {ruins} | pulados {pulados}")
+        linhas += [_linha_da_tentativa(t) for t in recentes]
+    atrasados, minutos = aprovados_atrasados(agora)
+    situacao = "pausada" if config.get("robo_pausado", True) else "ativa"
+    linhas.append(f"Aprovados que passaram da hora (mais de {int(ATRASO_DO_APROVADO.total_seconds() // 60)} min): "
+                  f"{atrasados}" + (f" (o mais atrasado há {minutos} min)" if atrasados else "")
+                  + f" | Postagem: {situacao}")
+    return linhas
 
 
 # --- Respostas aos comentários e feed da Shopee Vídeo ---
@@ -798,6 +870,9 @@ def pontos_de_atencao(erros, logs, filas, robo_sv, baixados, backup, agora=None,
                       f"{robo_sv['salvos']} rascunho(s) salvo(s) ({robo_sv.get('pulados', 0)} vídeo(s) pulado(s))")
     for acao, resultado, passo, qtd in robo_sv["ruins"]:
         pontos.append(f"Robô da Shopee Vídeo: {acao} → {resultado} em \"{passo or '?'}\" {qtd}x")
+    if robo_sv["ativo"] and not robo_sv.get("suspenso") and robo_sv.get("atrasados"):
+        pontos.append(f"Robô da Shopee Vídeo: {robo_sv['atrasados']} aprovado(s) passaram da hora de ir ao ar "
+                      f"(o mais atrasado há {robo_sv['minutos_de_atraso']} min)")
     if interacoes:
         respostas = interacoes["respostas"]
         if respostas.get("resposta no lugar errado"):
@@ -992,9 +1067,10 @@ def main():
     # O caso completo de cada falha fica cifrado para o Claude (casos_robo.yml exportar) e
     # sai depois de analisado (casos_robo.yml apagar).
     print(f"Casos guardados para o checkup do Claude: {len(casos_robo.casos())}")
-    for acao, resultado, passo, qtd, primeiro, ultimo in robo_sv.get("linhas", []):
-        quando = f"às {ultimo}" if qtd == 1 or primeiro == ultimo else f"de {primeiro} a {ultimo}"
-        print(f"   {qtd}x {acao} → {resultado} em \"{passo or '?'}\" ({quando})")
+    for tentativa in robo_sv.get("linhas", []):
+        print(_linha_da_tentativa(tentativa))
+    print(f"Aprovados que passaram da hora de ir ao ar: {robo_sv['atrasados']}"
+          + (f" (o mais atrasado há {robo_sv['minutos_de_atraso']} min)" if robo_sv["atrasados"] else ""))
 
     interacoes = interacoes_da_shopee_video(agora)
     respostas = " | ".join(f"{resultado}: {qtd}" for resultado, qtd in sorted(interacoes["respostas"].items()))
@@ -1028,4 +1104,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["robo-agora"]:
+        print("\n".join(robo_agora()))
+    else:
+        main()

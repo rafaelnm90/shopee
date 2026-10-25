@@ -210,6 +210,39 @@ def test_robo_da_shopee_video_horarios_vencidos_e_tentativas_ruins():
     assert "Fone X" not in str(r)
 
 
+def test_robo_agora_mostra_as_falhas_recentes_e_o_aprovado_que_passou_da_hora():
+    # Pedido do Rafael (25/10): o Claude reconhece sozinho, na retomada de cada 3 h, as falhas
+    # do robô e o aprovado que não saiu, sem esperar o checkup da noite nem o Rafael pedir.
+    import robo_shopee_video as robo
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": False})
+    robo.registrar_tentativa("feed", "parou", "o painel de comentários do vídeo do feed não abriu",
+                             agora=AGORA - timedelta(hours=2))
+    robo.registrar_tentativa("feed", "parou", "o painel de comentários do vídeo do feed não abriu",
+                             agora=AGORA - timedelta(hours=1))
+    robo.registrar_tentativa("rascunho", "pulado", "o produto do vídeo não está na lista", "Fone X",
+                             agora=AGORA - timedelta(hours=8))
+    atrasado = robo.criar("v1", AGORA - timedelta(hours=3))
+    robo.atualizar(atrasado, estado="aprovado", postar_em=(AGORA - timedelta(minutes=90)).strftime("%Y-%m-%d %H:%M:%S"))
+    na_hora = robo.criar("v2", AGORA - timedelta(hours=3))
+    robo.atualizar(na_hora, estado="aprovado", postar_em=(AGORA - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S"))
+    texto = "\n".join(checkup.robo_agora(AGORA))
+    tres, doze = texto.split("últimas 12 h")
+    assert "últimas 3 h: paradas ou erros 2 | pulados 0" in tres and "2x feed → parou em" in tres
+    assert "paradas ou erros 2 | pulados 1" in doze and "rascunho → pulado" in doze
+    # Só o que passou da hora há mais de 30 min (a rodada é a cada 15 min).
+    assert "Aprovados que passaram da hora (mais de 30 min): 1 (o mais atrasado há 90 min) | Postagem: ativa" in texto
+    assert "Fone X" not in texto
+    r = checkup.robo_da_shopee_video(AGORA)
+    assert (r["atrasados"], r["minutos_de_atraso"]) == (1, 90)
+    pontos = checkup.pontos_de_atencao([], {}, {}, r, {}, None, AGORA)
+    assert "Robô da Shopee Vídeo: 1 aprovado(s) passaram da hora de ir ao ar (o mais atrasado há 90 min)" in pontos
+    # Pausado pelo Rafael, o aprovado esperando não é falha.
+    db.salvar_config(robo.CHAVE_CONFIG, {"robo_pausado": True})
+    r = checkup.robo_da_shopee_video(AGORA)
+    assert not any("aprovado" in p for p in checkup.pontos_de_atencao([], {}, {}, r, {}, None, AGORA))
+    assert "Postagem: pausada" in checkup.robo_agora(AGORA)[-1]
+
+
 def test_pontos_de_atencao():
     erros = [{"origem": "bot_mestre.py", "lugar": "bot_mestre.py:10", "texto": "x", "tipo": "ValueError",
               "qtd": 1, "ultimo": "10:00", "novo": True},
