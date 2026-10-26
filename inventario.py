@@ -810,6 +810,7 @@ def fora_do_projeto():
         t, q, _i = medir(caminho) if os.path.isdir(caminho) else (os.path.getsize(caminho), 1, 0)
         total, qtd = total + t, qtd + q
     print(f"/tmp (do usuário)        {tamanho_legivel(total):>9} | {qtd:6} arquivo(s)")
+    docker_e_android()
     print("Memória de cada robô:")
     for servico in SERVICOS:
         r = subprocess.run(["systemctl", "show", "-p", "MemoryCurrent", "--value", f"{servico}.service"],
@@ -825,6 +826,26 @@ def _comando(*partes):
     except (FileNotFoundError, subprocess.TimeoutExpired):
         return None
     return r.returncode, (r.stdout or "").strip()
+
+
+def docker_e_android():
+    """
+    O espaço do Docker (imagens, contêineres, volumes e cache de build) e o da pasta de
+    dados do Android virtual, que ficam fora da pasta do projeto e só se leem com sudo.
+    Só tipos, quantidades e tamanhos.
+    """
+    r = _comando("sudo", "-n", "docker", "system", "df", "--format",
+                 "{{.Type}}|{{.TotalCount}}|{{.Size}}|{{.Reclaimable}}")
+    if not r or r[0] != 0:
+        print("Docker: não deu para medir (sem Docker ou sem sudo)")
+    else:
+        for linha in r[1].splitlines():
+            tipo, qtd, tamanho, recuperavel = (linha.split("|") + ["?"] * 4)[:4]
+            print(f"Docker {tipo + ':':16} {tamanho:>9} | {qtd:>6} item(ns) | sem uso: {recuperavel}")
+    pasta = os.path.expanduser("~/android_shopee")
+    r = _comando("sudo", "-n", "du", "-sb", pasta)
+    if r and r[0] == 0 and r[1].split()[:1] and r[1].split()[0].isdigit():
+        print(f"~/android_shopee/        {tamanho_legivel(int(r[1].split()[0])):>9} | dados do Android virtual")
 
 
 def _sim_nao(valor):
