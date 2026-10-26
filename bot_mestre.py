@@ -1347,6 +1347,10 @@ def registrar_lixeira(msg_id, chat_id=GRUPO_ID):
 # ==========================================
 HORAS_PROTEGIDAS_TEMP = 24        # arquivos recentes podem estar sendo processados
 DIAS_RETENCAO_ARCHIVE = 30        # vídeos dos Autorais já publicados
+# Os logs do sistema (journal) guardam só os últimos dias: o checkup e o diagnóstico
+# leem as últimas 24 h, e sem isso eles cresciam até o limite do Ubuntu (uns 4 GB).
+# Escolha do Rafael (P42): DECISOES.md, Monitor, deploy e servidor.
+DIAS_DO_JOURNAL = 7
 
 def _caminhos_protegidos():
     """Todo arquivo referenciado por alguma fila pendente. Estes são intocáveis."""
@@ -1433,8 +1437,22 @@ async def faxina_disco_periodica():
     Faxina de disco com agenda própria, a cada 6 horas, separada da lixeira das 3h:
     uma falha no SQLite ou nos achadinhos não pode pular a limpeza do disco. Roda
     numa thread porque percorre o sistema de arquivos e não pode prender o event loop.
+    Também apara os logs do sistema (aparar_journal).
     """
     await asyncio.to_thread(limpar_arquivos_orfaos)
+    await asyncio.to_thread(aparar_journal)
+
+def aparar_journal():
+    """Tira do journal o que passou de DIAS_DO_JOURNAL dias. True se o journalctl aceitou."""
+    try:
+        r = subprocess.run(["sudo", "-n", "journalctl", f"--vacuum-time={DIAS_DO_JOURNAL}d"],
+                           capture_output=True, timeout=120)
+    except (OSError, subprocess.SubprocessError) as e:
+        logger.warning(f"⚠️ [Faxina] O journal não foi aparado: {type(e).__name__}")
+        return False
+    if r.returncode != 0:
+        logger.warning(f"⚠️ [Faxina] O journal não foi aparado (código {r.returncode}).")
+    return r.returncode == 0
 
 def limpar_arquivos_orfaos():
     """Apaga o que não está em fila nenhuma e já passou do prazo de proteção."""
