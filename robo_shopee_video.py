@@ -110,6 +110,9 @@ OFERTAS_NA_BUSCA = 20
 PARECIDO_NA_BUSCA = 60
 CANDIDATOS_NA_IA = 2
 PALAVRAS_DA_BUSCA = 6
+# Na foto do Ver Produtos (P39), a oferta achada pelo nome tem de ser quase o mesmo nome do
+# produto anexado: a foto vai em tela cheia no começo do vídeo e na miniatura.
+PARECIDO_DA_FOTO = 80
 # O player do vídeo no app; sem ele, o link não abriu o vídeo.
 PLAYER_DO_VIDEO = "rn_vod_player_view_with_surface"
 # Segundos a mais antes de desistir do Ver Produtos: o player às vezes demora a mostrá-lo.
@@ -2187,7 +2190,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
 
     os.makedirs(PASTA_RASCUNHOS, exist_ok=True)
     copia = os.path.join(PASTA_RASCUNHOS, f"{ident}.mp4")
-    copiar_para_o_rascunho(video, fonte, copia)
+    copiar_para_o_rascunho(video, fonte, copia, nomes)
     atualizar(ident, arquivo=copia, link=video["link"], produtos=nomes, titulo=textos["titulo"],
               comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia)
 
@@ -2256,20 +2259,47 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
 PROCESSO_DA_EDICAO = "edição do vídeo: foto do produto e miniatura"
 
 
-def copiar_para_o_rascunho(video, fonte, copia):
+def copiar_para_o_rascunho(video, fonte, copia, nomes=()):
     """
     A cópia do vídeo que vai ao rascunho. Com a edição ligada, ela leva a foto do produto
-    no começo e a miniatura no topo (todos os vídeos do Rafael são autorais); se a edição
-    não sai, o rascunho segue com o vídeo como veio. Escolhas do Rafael (25/10, P37 e
-    depois da P38): DECISOES.md, Shopee Vídeo.
+    no começo, a miniatura e a seta (todos os vídeos do Rafael são autorais); no vídeo de
+    Ver Produtos, a foto é a do 1º produto anexado (nomes[0]). Se a edição não sai, o
+    rascunho segue com o vídeo como veio. Escolhas do Rafael (25/10, P37, depois da P38, e
+    P39): DECISOES.md, Shopee Vídeo.
     """
-    if edicao_video.vale_para(fonte) and not video.get("de_video"):
-        motivo = edicao_video.editar(video["arquivo"], ps.foto_do_produto(video), copia)
+    if edicao_video.vale_para(fonte):
+        if video.get("de_video"):
+            foto = foto_do_ver_produtos(nomes[0]) if nomes else None
+        else:
+            foto = ps.foto_do_produto(video)
+        motivo = edicao_video.editar(video["arquivo"], foto, copia)
         registro_processos.registrar(REGISTRO, PROCESSO_DA_EDICAO, "sem edição" if motivo else "editado",
                                      motivo, ok=not motivo)
         if not motivo:
             return
     shutil.copyfile(video["arquivo"], copia)
+
+
+def foto_do_ver_produtos(nome):
+    """
+    A foto do anúncio do 1º produto anexado num vídeo de Ver Produtos (o link é do vídeo,
+    não do produto): a API de afiliado busca pelo nome, por relevância, e vale a oferta de
+    nome mais parecido, com pelo menos PARECIDO_DA_FOTO% das palavras. None quando não
+    acha ou a foto não baixa: o rascunho segue sem a edição. A IA já conferiu esse produto
+    com o vídeo. Escolha do Rafael (25/10, P39): DECISOES.md, Shopee Vídeo.
+    """
+    try:
+        ofertas = asyncio.run(api_shopee.buscar_ofertas_shopee(termo_da_busca(nome), limite=OFERTAS_NA_BUSCA,
+                                                               sort_type=1))
+        parecidos = [(ps.parecido_entre([oferta.get("productName") or ""], nome)[0], i)
+                     for i, oferta in enumerate(ofertas)]
+        parecido, melhor = max(parecidos, default=(0, None))
+        if melhor is None or parecido < PARECIDO_DA_FOTO:
+            return None
+        return ps.baixar_foto(ofertas[melhor].get("imageUrl") or "")
+    except Exception as e:
+        logger.warning(f"⚠️ [Robô Shopee Vídeo] A foto do produto do Ver Produtos não veio: {type(e).__name__}")
+        return None
 
 
 def _esperar_a_pagina_do_produto(d, voltas=4):

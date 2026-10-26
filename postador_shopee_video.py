@@ -861,15 +861,19 @@ def foto_do_produto(video):
         return None
     try:
         produtos, _ = asyncio.run(assistente.produtos_do_link(video["link"]))
-        endereco = produtos[0].get("imagem") if produtos else ""
-        if not endereco:
-            return None
-        with urllib.request.urlopen(endereco, timeout=20) as resposta:
-            dados = resposta.read(TAMANHO_MAXIMO_DA_FOTO + 1)
-        return dados if 0 < len(dados) <= TAMANHO_MAXIMO_DA_FOTO else None
+        return baixar_foto(produtos[0].get("imagem") if produtos else "")
     except Exception as e:
         logging.getLogger(__name__).warning(f"⚠️ [Shopee Vídeo] A foto do anúncio não veio: {type(e).__name__}")
         return None
+
+
+def baixar_foto(endereco):
+    """A foto do anúncio (bytes) do endereço que a API de afiliado deu; None sem endereço ou grande demais."""
+    if not endereco:
+        return None
+    with urllib.request.urlopen(endereco, timeout=20) as resposta:
+        dados = resposta.read(TAMANHO_MAXIMO_DA_FOTO + 1)
+    return dados if 0 < len(dados) <= TAMANHO_MAXIMO_DA_FOTO else None
 
 
 def ia_confere_produto(video, vistos=None, avisar=True):
