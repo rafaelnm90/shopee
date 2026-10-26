@@ -160,6 +160,29 @@ def test_painel_inicial_volta_depois_de_15_min_em_qualquer_menu(bm, monkeypatch)
     rodar(cenario())
 
 
+def test_falha_ao_restaurar_o_painel_deixa_o_rastro_com_o_tipo_do_erro(bm, monkeypatch, caplog):
+    # Checkup de 25/10: "Erro ao atualizar o teclado e limpar chat" saiu 1x sem dizer o tipo; com
+    # o rastro, o checkup mostra o tipo do erro e a linha.
+    from aiogram.fsm.context import FSMContext
+    from aiogram.fsm.storage.base import StorageKey
+
+    async def send_message(chat_id, texto, **k):
+        raise TimeoutError("o Telegram não respondeu")
+
+    monkeypatch.setattr(bm.bot, "send_message", send_message)
+    estado = FSMContext(storage=bm.dp.storage, key=StorageKey(bot_id=bm.bot.id, chat_id=bm.ADMIN_ID,
+                                                              user_id=bm.ADMIN_ID, thread_id=None))
+
+    async def cenario():
+        await estado.update_data(painel_atual="outros")
+        with caplog.at_level("ERROR"):
+            await bm.resetar_sessao_inatividade(bm.ADMIN_ID, bm.ADMIN_ID)
+
+    rodar(cenario())
+    erros = [r for r in caplog.records if "Erro ao atualizar o teclado" in r.getMessage()]
+    assert erros and erros[0].exc_info and erros[0].exc_info[0] is TimeoutError
+
+
 def test_painel_inicial_volta_mesmo_com_restart_no_meio_dos_15_min(bm, monkeypatch):
     # O Rafael notou em 11/10: o Espelhador aberto às 17:03 seguia na tela à meia-noite. O
     # deploy reiniciou o bot às 17:15, e o cronômetro, que só existia na memória, sumiu.

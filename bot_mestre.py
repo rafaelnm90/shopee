@@ -2892,7 +2892,8 @@ async def resetar_sessao_inatividade(chat_id: int, user_id: int, thread_id: int 
         
         logger.info("🧹 Mensagem temporária apagada e botões restaurados com sucesso.")
     except Exception as e:
-        logger.error(f"❌ Erro ao atualizar o teclado e limpar chat: {e}")
+        # Com o rastro, o checkup mostra o tipo do erro e a linha (o texto do erro fica no log).
+        logger.exception(f"❌ Erro ao atualizar o teclado e limpar chat: {e}")
 
 class InatividadeMiddleware(BaseMiddleware):
     """Rearma, a cada mensagem ou clique do admin no privado, o cronômetro de 15 min do painel."""
