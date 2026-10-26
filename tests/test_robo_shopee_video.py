@@ -2309,6 +2309,13 @@ def test_punicoes_na_tela_e_tela_removido():
                        "explicacao": EXPLICACAO, "pode_apelar": True}
 
 
+def test_limpeza_das_4h_aparece_como_limpeza_dos_favoritos():
+    # Pedido do Rafael (25/10): no resumo das 22h e no Histórico, "limpeza dos favoritos" no
+    # lugar de "descurtido" (no banco fica o resultado de sempre, que o checkup conta).
+    texto = robo._contagem([{"resultado": "descurtido"}, {"resultado": "salvo"}])
+    assert texto == "✅ 1 salvo | 💔 1 limpeza dos favoritos"
+
+
 def test_celular_fora_na_suspensao_nao_pausa_nem_avisa(monkeypatch, avisos):
     # Pedido do Rafael (24/10): na suspensão ele pode tirar o Motorola do carregador.
     monkeypatch.setattr(robo, "saude_do_dia_pendente", SAUDE_DO_DIA)

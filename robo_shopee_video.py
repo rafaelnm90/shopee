@@ -697,7 +697,10 @@ SIMBOLOS = {"salvo": "✅", "postado": "📤", "apagado": "🗑️", "pulado": "
 NOMES_DAS_ACOES = {"rascunho": "Rascunho", "postar": "Postagem", "apagar": "Apagar rascunho",
                    "treino": "Testar Caminho", "rodada": "Rodada", "saude": "Saúde do Vídeo",
                    "responder": "Resposta a comentário", "feed": "Feed (Para você)",
-                   "descurtir": "Descurtir tudo (4h)"}
+                   "descurtir": "Limpeza dos favoritos (4h)"}
+# Como o resultado aparece para o Rafael no resumo das 22h e no Histórico (no banco fica o
+# resultado de sempre, que o checkup conta). Pedido do Rafael (25/10): DECISOES.md, Shopee Vídeo.
+NOMES_DOS_RESULTADOS = {"descurtido": "limpeza dos favoritos"}
 
 
 def _criar_tabela_tentativas(con):
@@ -751,7 +754,8 @@ def _contagem(lista):
     contas = {}
     for tentativa in lista:
         contas[tentativa["resultado"]] = contas.get(tentativa["resultado"], 0) + 1
-    return " | ".join(f"{SIMBOLOS.get(r, '•')} {contas[r]} {r}" for r in SIMBOLOS if r in contas)
+    return " | ".join(f"{SIMBOLOS.get(r, '•')} {contas[r]} {NOMES_DOS_RESULTADOS.get(r, r)}"
+                      for r in SIMBOLOS if r in contas)
 
 
 def texto_historico(agora=None):
@@ -763,7 +767,8 @@ def texto_historico(agora=None):
     for t in lista[:LINHAS_DO_HISTORICO]:
         quando = datetime.strptime(t["momento"], "%Y-%m-%d %H:%M:%S").strftime("%d/%m %H:%M")
         linhas.append(f"{SIMBOLOS.get(t['resultado'], '•')} <b>{quando}</b> · "
-                      f"{NOMES_DAS_ACOES.get(t['acao'], t['acao'])}: {html.escape(t['resultado'])}")
+                      f"{NOMES_DAS_ACOES.get(t['acao'], t['acao'])}: "
+                      f"{html.escape(NOMES_DOS_RESULTADOS.get(t['resultado'], t['resultado']))}")
         if t["produto"]:
             linhas.append(f"   🛍️ {html.escape(t['produto'][:80])}")
         if t["motivo"]:
