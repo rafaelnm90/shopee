@@ -2257,27 +2257,31 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
 
 
 PROCESSO_DA_EDICAO = "edição do vídeo: foto do produto e miniatura"
+MOTIVO_SEM_EDICAO = "a edição do vídeo não saiu: só vídeo editado vai à Shopee Vídeo"
 
 
 def copiar_para_o_rascunho(video, fonte, copia, nomes=()):
     """
     A cópia do vídeo que vai ao rascunho. Com a edição ligada, ela leva a foto do produto
     no começo, a miniatura e a seta (todos os vídeos do Rafael são autorais); no vídeo de
-    Ver Produtos, a foto é a do 1º produto anexado (nomes[0]). Se a edição não sai, o
-    rascunho segue com o vídeo como veio. Escolhas do Rafael (25/10, P37, depois da P38, e
-    P39): DECISOES.md, Shopee Vídeo.
+    Ver Produtos, a foto é a do 1º produto anexado (nomes[0]). Com a edição ligada, só vai
+    vídeo editado: o que não sai editado fica de lado (Parada) e o robô pega o próximo; sem
+    a foto do anúncio, o vídeo não volta, e o ffmpeg que falhou deixa tentar de novo depois.
+    Escolhas do Rafael (25/10, P37, depois da P38, P39 e "só vídeos editados"): DECISOES.md,
+    Shopee Vídeo.
     """
-    if edicao_video.vale_para(fonte):
-        if video.get("de_video"):
-            foto = foto_do_ver_produtos(nomes[0]) if nomes else None
-        else:
-            foto = ps.foto_do_produto(video)
-        motivo = edicao_video.editar(video["arquivo"], foto, copia)
-        registro_processos.registrar(REGISTRO, PROCESSO_DA_EDICAO, "sem edição" if motivo else "editado",
-                                     motivo, ok=not motivo)
-        if not motivo:
-            return
-    shutil.copyfile(video["arquivo"], copia)
+    if not edicao_video.vale_para(fonte):
+        shutil.copyfile(video["arquivo"], copia)
+        return
+    if video.get("de_video"):
+        foto = foto_do_ver_produtos(nomes[0]) if nomes else None
+    else:
+        foto = ps.foto_do_produto(video)
+    motivo = edicao_video.editar(video["arquivo"], foto, copia)
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_EDICAO, "vídeo de lado" if motivo else "editado",
+                                 motivo, ok=not motivo)
+    if motivo:
+        raise Parada(f"{MOTIVO_SEM_EDICAO} ({motivo})", do_video=motivo.startswith("a foto do anúncio"))
 
 
 def foto_do_ver_produtos(nome):
@@ -2285,7 +2289,7 @@ def foto_do_ver_produtos(nome):
     A foto do anúncio do 1º produto anexado num vídeo de Ver Produtos (o link é do vídeo,
     não do produto): a API de afiliado busca pelo nome, por relevância, e vale a oferta de
     nome mais parecido, com pelo menos PARECIDO_DA_FOTO% das palavras. None quando não
-    acha ou a foto não baixa: o rascunho segue sem a edição. A IA já conferiu esse produto
+    acha ou a foto não baixa: o vídeo fica de lado (só vídeo editado vai). A IA já conferiu esse produto
     com o vídeo. Escolha do Rafael (25/10, P39): DECISOES.md, Shopee Vídeo.
     """
     try:

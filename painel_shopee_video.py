@@ -731,7 +731,8 @@ def texto_edicao(config):
         f"👀 <b>{BOTAO_EXEMPLO_EDICAO}</b>: manda no seu privado, já editado e sem postar, o próximo vídeo que "
         "o robô pegaria; cada toque mostra um vídeo novo.\n"
         f"✅ <b>{BOTAO_LIGAR_EDICAO}</b> / ⏸️ <b>{BOTAO_DESLIGAR_EDICAO}</b>: liga ou desliga a edição nos "
-        "próximos rascunhos. Se a edição de um vídeo não sair, o rascunho vai com o vídeo como veio."
+        "próximos rascunhos. Com a edição ligada, só vai vídeo editado: o vídeo que não sair editado fica de "
+        "lado e o robô pega o próximo."
     )
 
 
