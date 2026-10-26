@@ -62,10 +62,65 @@ def vale_para(fonte):
     return fonte in FONTES_COM_EDICAO and ligada()
 
 
-def editar(video, foto, destino):
-    """O vídeo editado com a foto (bytes) em destino: "" quando deu certo, ou o motivo fixo."""
+# A capa da bebida alcoólica: a tela de 720x1280 que abre o vídeo (o app usa o primeiro
+# quadro como capa) com a foto do anúncio em cima e, logo embaixo, os três avisos da Shopee
+# em letras brancas sobre faixa preta. Fica no meio da tela, longe das bordas que a grade da
+# Shopee corta na miniatura. Escolha do Rafael (26/10, P43): DECISOES.md, Shopee Vídeo.
+TELA = (720, 1280)
+AREA_DA_FOTO = (60, 740)        # de cima a baixo, em y
+AREA_DOS_AVISOS = (790, 1090)
+MARGEM_DOS_AVISOS = 40
+MAIOR_LETRA = 44
+
+
+def capa_com_avisos(foto):
+    """A capa da bebida alcoólica (PNG, bytes) com a foto do anúncio (bytes); None se a foto não abre."""
+    import io
+
+    import matplotlib
+    from PIL import Image, ImageDraw, ImageFont
+    try:
+        imagem = Image.open(io.BytesIO(foto)).convert("RGB")
+    except Exception:
+        return None
+    largura, altura = TELA
+    capa = Image.new("RGB", TELA, "white")
+    topo, base = AREA_DA_FOTO
+    escala = min(largura / imagem.width, (base - topo) / imagem.height)
+    imagem = imagem.resize((max(1, round(imagem.width * escala)), max(1, round(imagem.height * escala))))
+    capa.paste(imagem, ((largura - imagem.width) // 2, topo + (base - topo - imagem.height) // 2))
+
+    desenho = ImageDraw.Draw(capa)
+    fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
+    cima, baixo = AREA_DOS_AVISOS
+    # A maior letra em que o aviso mais comprido cabe na largura, com a margem.
+    for tamanho in range(MAIOR_LETRA, 12, -2):
+        fonte = ImageFont.truetype(fonte_ttf, tamanho)
+        if max(desenho.textlength(aviso, font=fonte) for aviso in assistente.AVISOS_DE_ALCOOL) \
+                <= largura - 2 * MARGEM_DOS_AVISOS:
+            break
+    desenho.rectangle((0, cima, largura, baixo), fill="black")
+    passo = (baixo - cima) / len(assistente.AVISOS_DE_ALCOOL)
+    for i, aviso in enumerate(assistente.AVISOS_DE_ALCOOL):
+        desenho.text((largura / 2, cima + passo * (i + 0.5)), aviso, font=fonte, fill="white", anchor="mm")
+    saida = io.BytesIO()
+    capa.save(saida, format="PNG")
+    return saida.getvalue()
+
+
+def editar(video, foto, destino, avisos=False):
+    """
+    O vídeo editado com a foto (bytes) em destino: "" quando deu certo, ou o motivo fixo.
+    Com avisos=True (bebida alcoólica), a capa com os avisos abre o vídeo no lugar da foto.
+    """
+    capa = None
+    if avisos and foto:
+        capa = capa_com_avisos(foto)
+        if not capa:
+            return "a capa com os avisos da bebida alcoólica não saiu"
     return videos.com_foto_e_miniatura(video, foto, destino, SEGUNDOS_DA_FOTO, LARGURA_DA_MINIATURA,
-                                       CENTRO_DA_MINIATURA, SETA, CENTRO_DA_SETA, ESPERA_MAXIMA, PULSO_DA_SETA)
+                                       CENTRO_DA_MINIATURA, SETA, CENTRO_DA_SETA, ESPERA_MAXIMA, PULSO_DA_SETA,
+                                       capa)
 
 
 def _fontes_do_exemplo():

@@ -51,6 +51,13 @@ logger = logging.getLogger("ShopeeVideo")
 CHAVE_DIA = "shopee_video_dia"
 ARQUIVO_DIRETRIZES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "diretrizes_shopee_video.md")
 TITULO_MIN, TITULO_MAX = 130, 150
+# Os avisos que a Shopee exige em vídeo de bebida alcoólica (e-mail de 26/10/2026): na capa,
+# que é a foto do produto no começo do vídeo editado (edicao_video), e no fim do título, que
+# no app é a legenda. O aviso falado fica faltando. Escolha do Rafael (P43): DECISOES.md,
+# Shopee Vídeo.
+AVISOS_DE_ALCOOL = ("Produto destinado a adultos", "Consumo proibido para menores de 18 anos", "Beba com moderação")
+TEXTO_DOS_AVISOS = ". ".join(AVISOS_DE_ALCOOL) + "."
+SEM_AVISOS = "vídeo de lado: bebida alcoólica só vai com os avisos na capa, e a edição não saiu"
 URL_API = "https://open-api.affiliate.shopee.com.br/graphql"
 LINK_DO_POST = re.compile(r"https?://[^\s<>\"]*shopee[^\s<>\"]*")
 EXTENSOES_DE_IMAGEM = (".jpg", ".jpeg", ".png", ".webp", ".gif")
@@ -73,7 +80,8 @@ PROMPT = """Atue como um especialista em Growth Hacking e Marketing para Shopee.
 detalhadamente o vídeo (produto, estilo e público-alvo) e gere o texto para postar na Shopee Vídeo.
 
 Responda SOMENTE com um JSON, sem nada antes ou depois, neste formato:
-{{"violacao": false, "motivo": "", "feito_por_ia": false, "sinal_ia": "", "titulo": "...", "comentario": "..."}}
+{{"violacao": false, "motivo": "", "feito_por_ia": false, "sinal_ia": "", "bebida_alcoolica": false, \
+"titulo": "...", "comentario": "..."}}
 
 "titulo": o Título do Vídeo, com apenas o nome do produto (sem frase de gancho nem texto \
 criativo), seguido de emojis e do máximo possível de hashtags de alta performance e grande \
@@ -102,6 +110,12 @@ com cortes, filtros, legendas, música ou imagens do anúncio, é false; na dúv
 só o vídeo, nunca o nome do produto: produto artificial (planta, flor ou cabelo artificial) num \
 vídeo filmado não é conteúdo gerado por IA. Quando for true, diga em "sinal_ia", em uma frase \
 curta, o que no vídeo mostra que é IA; senão, "sinal_ia": "".
+
+"bebida_alcoolica": true se o produto vendido no vídeo for bebida alcoólica (cerveja, vinho, \
+destilado, licor, drink pronto com álcool); copo, taça, balde de gelo, abridor e outros \
+acessórios são false. Bebida alcoólica sozinha não é violação: os avisos obrigatórios da capa e \
+da legenda são postos depois, fora do seu texto; é violação só o que continua proibido nas \
+diretrizes (menor de idade bebendo, incentivo ao consumo excessivo, glorificar a bebida).
 
 {produto}Diretrizes da Shopee Vídeo:
 {diretrizes}"""
@@ -321,6 +335,8 @@ TROCAS_LEVES = [
     ("sexo sem consentimento", "conteúdo adulto"),
     ("exploração infantil", "conteúdo impróprio com crianças"),
     ("Menores de idade", "Crianças e adolescentes"),
+    ("menores de idade", "crianças e adolescentes"),
+    ("menores de 18 anos", "pessoas abaixo de 18 anos"),
     ("Nudez e sexo", "Conteúdo adulto"),
     ("menor em atividade", "criança em atividade"),
     ("linguagem sexual", "linguagem adulta"),
@@ -406,8 +422,9 @@ def recusado_pelo_conteudo():
 
 def ler_resposta(texto):
     """
-    O JSON da IA como dict ({violacao, motivo, feito_por_ia, sinal_ia, titulo, comentario});
-    None se não veio um JSON. feito_por_ia só vale com true de verdade: na dúvida, desligado.
+    O JSON da IA como dict ({violacao, motivo, feito_por_ia, sinal_ia, bebida_alcoolica,
+    titulo, comentario}); None se não veio um JSON. feito_por_ia e bebida_alcoolica só valem
+    com true de verdade. Na bebida alcoólica, o título já leva os avisos no fim.
     """
     achado = re.search(r"\{.*\}", texto or "", re.S)
     if not achado:
@@ -418,9 +435,12 @@ def ler_resposta(texto):
         return None
     if not isinstance(dados, dict):
         return None
+    alcool = dados.get("bebida_alcoolica") is True
+    titulo = str(dados.get("titulo") or "")
     return {"violacao": bool(dados.get("violacao")), "motivo": str(dados.get("motivo") or "").strip(),
             "feito_por_ia": dados.get("feito_por_ia") is True, "sinal_ia": str(dados.get("sinal_ia") or "").strip(),
-            "titulo": encaixar_titulo(str(dados.get("titulo") or "")),
+            "bebida_alcoolica": alcool,
+            "titulo": titulo_com_avisos(titulo) if alcool and titulo.strip() else encaixar_titulo(titulo),
             "comentario": str(dados.get("comentario") or "").strip()}
 
 
@@ -433,14 +453,23 @@ def tamanho_no_app(texto):
     return len((texto or "").encode("utf-16-le")) // 2
 
 
-def encaixar_titulo(titulo):
+def encaixar_titulo(titulo, limite=TITULO_MAX):
     """O título dentro dos 150 do contador da Shopee: tira palavras do fim, nunca corta uma no meio."""
     titulo = " ".join(titulo.split())
-    while tamanho_no_app(titulo) > TITULO_MAX and " " in titulo:
+    while tamanho_no_app(titulo) > limite and " " in titulo:
         titulo = titulo.rsplit(" ", 1)[0]
-    while tamanho_no_app(titulo) > TITULO_MAX:
+    while tamanho_no_app(titulo) > limite:
         titulo = titulo[:-1]
     return titulo
+
+
+def titulo_com_avisos(titulo):
+    """
+    O título da bebida alcoólica, com os avisos no fim e tudo dentro dos 150: o título perde
+    palavras do fim (as hashtags primeiro), os avisos nunca.
+    """
+    espaco = TITULO_MAX - tamanho_no_app(TEXTO_DOS_AVISOS) - 1
+    return f"{encaixar_titulo(titulo, espaco)} {TEXTO_DOS_AVISOS}".strip()
 
 
 async def gerar_textos(arquivo, nome_produto="", leves=False):
@@ -520,6 +549,9 @@ def montar_mensagem(textos, produtos, link):
 
     tamanho = tamanho_no_app(textos["titulo"])
     curto = f", abaixo de {TITULO_MIN} ⚠️" if tamanho < TITULO_MIN else ""
+    alcool = ("🔞 <b>Bebida alcoólica:</b> os 3 avisos da Shopee já estão na capa (a foto do começo do vídeo) e "
+              "no fim do título. Deixe a capa no 1º quadro e não tire os avisos do título.\n"
+              if textos.get("bebida_alcoolica") else "")
     return (
         "🎬 <b>Postagem pronta para a Shopee Vídeo</b>\n"
         "Siga na ordem: abrir o link no meio da postagem faz a Shopee perder o que você já fez.\n\n"
@@ -527,6 +559,7 @@ def montar_mensagem(textos, produtos, link):
         f"{favoritar}\n\n"
         "3️⃣ <b>Poste:</b> Shopee → Eu → Criadores e Afiliados → Perfil em Shopee Vídeo → "
         "Postar vídeo → escolha o vídeo → Próximo.\n"
+        f"{alcool}"
         f"📝 <b>Título</b> ({tamanho} caracteres{curto}; toque para copiar):\n"
         f"<code>{html.escape(textos['titulo'])}</code>\n"
         f"{adicionar}\n\n"
@@ -559,15 +592,16 @@ async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO):
         # As frases do resultado são fixas (_preparar_e_enviar).
         registro_processos.registrar("shopee_video", "assistente: envio", resultado,
                                      ok=resultado == "postagem mandada no seu privado")
-        if resultado != SEM_EDICAO:
+        if resultado not in (SEM_EDICAO, SEM_AVISOS):
             return resultado
     return f"nenhum dos {VIDEOS_POR_ENVIO} próximos vídeos saiu editado (só vídeo editado vai); tento de novo no próximo horário"
 
 
-def _editar(video, produtos, destino):
+def _editar(video, produtos, destino, avisos=False):
     """
     O vídeo editado em destino, com a foto do anúncio do produto do link: "" quando deu
-    certo, ou o motivo fixo. O edicao_video importa este módulo: o import fica aqui dentro.
+    certo, ou o motivo fixo; com avisos=True, a capa dos avisos da bebida alcoólica no lugar
+    da foto. O edicao_video importa este módulo: o import fica aqui dentro.
     """
     import edicao_video
     import postador_shopee_video as ps
@@ -576,7 +610,7 @@ def _editar(video, produtos, destino):
     except Exception as e:
         logger.warning(f"⚠️ [Shopee Vídeo] A foto do anúncio não veio: {type(e).__name__}")
         foto = None
-    return edicao_video.editar(video["arquivo"], foto, destino)
+    return edicao_video.editar(video["arquivo"], foto, destino, avisos=avisos)
 
 
 def _edicao_ligada(fonte):
@@ -612,6 +646,17 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
                                f"possível violação das diretrizes: {html.escape(textos['motivo'] or 'sem motivo')}",
                                parse_mode="HTML")
         return "vídeo pulado por possível violação das diretrizes"
+    # Bebida alcoólica vai com os avisos da Shopee na capa: o vídeo editado é refeito com
+    # eles; sem a edição, fica de lado. Escolha do Rafael (P43): DECISOES.md, Shopee Vídeo.
+    if textos.get("bebida_alcoolica"):
+        motivo = SEM_AVISOS
+        if pasta and _edicao_ligada(fonte):
+            motivo = await asyncio.to_thread(_editar, video, produtos, arquivo, True)
+            registro_processos.registrar("shopee_video", "edição do vídeo: assistente", "vídeo de lado" if motivo
+                                         else "editado com os avisos", motivo, ok=not motivo)
+        if motivo:
+            registrar(video["id"], "sem_edicao", motivo, agora)
+            return SEM_AVISOS
     await bot.send_video(admin_id, video=FSInputFile(arquivo), supports_streaming=True,
                          caption="🎬 Vídeo para a Shopee Vídeo: siga os passos da mensagem abaixo.")
     await bot.send_message(admin_id, montar_mensagem(textos, produtos, link), parse_mode="HTML",

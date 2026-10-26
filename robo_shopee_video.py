@@ -2234,7 +2234,7 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
 
     os.makedirs(PASTA_RASCUNHOS, exist_ok=True)
     copia = os.path.join(PASTA_RASCUNHOS, f"{ident}.mp4")
-    copiar_para_o_rascunho(video, fonte, copia, nomes)
+    copiar_para_o_rascunho(video, fonte, copia, nomes, alcool=textos.get("bebida_alcoolica", False))
     atualizar(ident, arquivo=copia, link=video["link"], produtos=nomes, titulo=textos["titulo"],
               comentario=textos.get("comentario") or "", rotulo_ia=rotulo_ia)
 
@@ -2302,27 +2302,33 @@ def _preparar(d, ident, video, fonte, agora=None, curtidos=None, celular=None):
 
 PROCESSO_DA_EDICAO = "edição do vídeo: foto do produto e miniatura"
 MOTIVO_SEM_EDICAO = "a edição do vídeo não saiu: só vídeo editado vai à Shopee Vídeo"
+MOTIVO_SEM_AVISOS = "bebida alcoólica só vai com os avisos na capa, e a edição dos vídeos está desligada"
 
 
-def copiar_para_o_rascunho(video, fonte, copia, nomes=()):
+def copiar_para_o_rascunho(video, fonte, copia, nomes=(), alcool=False):
     """
     A cópia do vídeo que vai ao rascunho. Com a edição ligada, ela leva a foto do produto
     no começo, a miniatura e a seta (todos os vídeos do Rafael são autorais); no vídeo de
     Ver Produtos, a foto é a do 1º produto anexado (nomes[0]). Com a edição ligada, só vai
     vídeo editado: o que não sai editado fica de lado (Parada) e o robô pega o próximo; sem
     a foto do anúncio, o vídeo não volta, e o ffmpeg que falhou deixa tentar de novo depois.
-    Escolhas do Rafael (25/10, P37, depois da P38, P39 e "só vídeos editados"): DECISOES.md,
-    Shopee Vídeo.
+    Bebida alcoólica (alcool=True) abre com a capa dos avisos da Shopee no lugar da foto, e
+    sem a edição ela não tem como levar os avisos: fica de lado.
+    Escolhas do Rafael (25/10, P37, depois da P38, P39 e "só vídeos editados"; 26/10, P43):
+    DECISOES.md, Shopee Vídeo.
     """
     if not edicao_video.vale_para(fonte):
+        if alcool:
+            raise Parada(MOTIVO_SEM_AVISOS, do_video=True)
         shutil.copyfile(video["arquivo"], copia)
         return
     if video.get("de_video"):
         foto = foto_do_ver_produtos(nomes[0]) if nomes else None
     else:
         foto = ps.foto_do_produto(video)
-    motivo = edicao_video.editar(video["arquivo"], foto, copia)
-    registro_processos.registrar(REGISTRO, PROCESSO_DA_EDICAO, "vídeo de lado" if motivo else "editado",
+    motivo = edicao_video.editar(video["arquivo"], foto, copia, avisos=alcool)
+    feito = "editado com os avisos" if alcool else "editado"
+    registro_processos.registrar(REGISTRO, PROCESSO_DA_EDICAO, "vídeo de lado" if motivo else feito,
                                  motivo, ok=not motivo)
     if motivo:
         raise Parada(f"{MOTIVO_SEM_EDICAO} ({motivo})", do_video=motivo.startswith("a foto do anúncio"))

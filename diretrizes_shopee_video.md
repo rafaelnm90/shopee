@@ -2,7 +2,8 @@
 
 Resumo, com palavras nossas, das "Diretrizes da comunidade Shopee Video" da
 Central de Ajuda do Afiliado (página de 15/03/2026, enviada pelo Rafael em
-05/10/2026). O robô da Shopee Vídeo segue estas regras sempre, e a IA recebe
+05/10/2026), com as novidades do e-mail da Shopee de 26/10/2026 (bebida alcoólica e
+airsoft, na seção própria abaixo). O robô da Shopee Vídeo segue estas regras sempre, e a IA recebe
 este arquivo junto com cada vídeo: se ela achar violação no vídeo ou no texto
 que gerou, o vídeo não é postado. Quando a Shopee mudar as diretrizes,
 atualize este arquivo. Se o Google recusar o pedido pelo conteúdo, a IA recebe
@@ -29,9 +30,10 @@ violência, fraude, atividade ilegal e risco à segurança das pessoas.
    produto químico, mexer em equipamento de segurança.
 4. **Itens ilegais e regulamentados.** Produto proibido ou que exige licença
    (medicamento, produto veterinário, bateria, produto oftalmológico,
-   suplemento...), promessa milagrosa, cigarro e tabaco, bebida alcoólica
-   (venda ou consumo), dados pessoais de outras pessoas, golpe e ganho fácil,
-   crime, violência, exploração de pessoas, promoção ou cupom falso.
+   suplemento...), promessa milagrosa, cigarro e tabaco, dados pessoais de
+   outras pessoas, golpe e ganho fácil, crime, violência, exploração de
+   pessoas, promoção ou cupom falso. Bebida alcoólica e airsoft têm regra
+   própria, na seção abaixo.
 5. **Violência e imagens chocantes.** Maus-tratos a animais, violência
    realista, mortos, feridas, horror. Coisas nojentas (espremer cravo, cera
    de ouvido, pele descamando, banheiro sujo, dente estragado) perdem alcance
@@ -67,12 +69,27 @@ violência, fraude, atividade ilegal e risco à segurança das pessoas.
 15. **Comportamento.** Pessoa deitada na cama ou no sofá, ambiente íntimo,
     gestos provocativos, distração (telefone, comer, dormir).
 
+## Bebida alcoólica e airsoft (e-mail da Shopee de 26/10/2026)
+
+- **Bebida alcoólica** pode ser divulgada em qualquer horário, com três avisos
+  obrigatórios: "Produto destinado a adultos", "Consumo proibido para menores de
+  18 anos" e "Beba com moderação", visíveis na capa do vídeo e escritos na legenda
+  (a Shopee pede também que sejam falados). Continua proibido: menores de idade
+  bebendo, incentivar o consumo excessivo e glorificar a bebida.
+- **Airsoft** pode ser divulgado: mostrar o produto, as funções e explicar como
+  ele é. Continua proibido: violência com ele, ou usá-lo para fazer ou encenar
+  ameaça.
+
 ## O que isso muda no robô
 
 - Só entram os produtos que o criador vinculou ao próprio vídeo (regra 2).
 - Título e comentário sem nome de marca, com nomes genéricos (regra 7).
 - A IA confere o vídeo e o texto antes. Se achar violação, o robô não posta
   e diz o porquê.
+- Bebida alcoólica: o robô põe os três avisos na capa (a foto do produto no
+  começo do vídeo) e no fim do título; o vídeo não é reprovado por vir sem os
+  avisos, só pelo que continua proibido. O aviso falado fica faltando (escolha do
+  Rafael em 26/10/2026, P43). Airsoft entra sem violência nem ameaça (P44).
 - Curtidas e comentários (regra 9): o robô responde os comentários dos vídeos do
   Rafael e curte e comenta 3 vídeos de outros criadores por dia, sempre com um texto
   diferente, feito pela IA para aquele comentário ou vídeo, nunca uma mensagem
