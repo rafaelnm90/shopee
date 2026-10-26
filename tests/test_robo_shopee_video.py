@@ -721,6 +721,23 @@ def test_rascunho_dos_autorais_vai_editado_com_a_edicao_ligada(monkeypatch, avis
                      robo.PROCESSO_DA_EDICAO) == ("editado",)
 
 
+def test_rascunho_sem_edicao_nao_sai_com_a_edicao_ligada(monkeypatch, avisos):
+    # Pedido do Rafael (25/10): na Shopee Vídeo, só vídeo editado. Sem a foto do anúncio, o
+    # rascunho não sai e o vídeo fica de lado, sem tocar no celular.
+    _fonte(monkeypatch)
+
+    async def analisar(arquivo, prompt, imagens=None):
+        return '{"confere": true, "motivo": "vestido"}'
+
+    monkeypatch.setattr(robo.ps, "foto_do_produto", lambda video: None)
+    monkeypatch.setattr(robo.ps.api_gemini, "analisar_video_gemini", analisar)
+    ativar(robo_limite_min=1, robo_limite_max=1, robo_inicio=0, robo_fim=24, edicao_ligada=True)
+    app = AppDeMentira()
+    resultado = robo.rodada(d=app, agora=momento("2026-10-22 23:59"))
+    assert robo.MOTIVO_SEM_EDICAO in resultado and not robo.esperando_aprovacao()
+    assert consultar("SELECT resultado FROM shopee_video_tentativas ORDER BY rowid DESC") == ("pulado",)
+
+
 def test_sem_edicao_desligada_ou_quando_falha(monkeypatch, tmp_path):
     original, copia = str(tmp_path / "original.mp4"), str(tmp_path / "copia.mp4")
     with open(original, "wb") as arquivo:
@@ -742,12 +759,15 @@ def test_sem_edicao_desligada_ou_quando_falha(monkeypatch, tmp_path):
     robo.copiar_para_o_rascunho(video, "autorais", copia)
     assert open(copia, "rb").read() == b"original" and not chamadas
     ativar(edicao_ligada=True)
-    # A edição que não sai não para o rascunho: ele vai com o vídeo como veio.
+    # Com a edição ligada, só vídeo editado vai (pedido do Rafael, 25/10): a edição que não
+    # sai deixa o vídeo de lado. O ffmpeg que falhou deixa o vídeo tentar de novo depois.
     os.remove(copia)
-    robo.copiar_para_o_rascunho(video, "viral", copia)
-    assert chamadas == [original] and open(copia, "rb").read() == b"original"
+    with pytest.raises(robo.Parada) as parada:
+        robo.copiar_para_o_rascunho(video, "viral", copia)
+    assert parada.value.motivo.startswith(robo.MOTIVO_SEM_EDICAO) and not parada.value.do_video
+    assert chamadas == [original] and not os.path.exists(copia)
     assert consultar("SELECT resultado, detalhe, ok FROM registro_processos WHERE processo = ?",
-                     robo.PROCESSO_DA_EDICAO) == ("sem edição", "o ffmpeg falhou", 0)
+                     robo.PROCESSO_DA_EDICAO) == ("vídeo de lado", "o ffmpeg falhou", 0)
     # Todos os vídeos do Rafael são autorais: o do Viral também vai editado.
     robo.copiar_para_o_rascunho(video, "viral", copia)
     assert open(copia, "rb").read() == b"editado"
@@ -785,12 +805,14 @@ def test_ver_produtos_vai_editado_com_a_foto_do_1o_produto_anexado(monkeypatch, 
     assert fotos == [b"foto de https://cf.shopee.com.br/vestido"] and open(copia, "rb").read() == b"editado"
     # Busca pelo nome, por relevância (1), com as primeiras palavras.
     assert buscas == [("Vestido Infantil Estampado Gatinho Verão Menina", 1)]
-    # Nenhuma oferta com o nome parecido o bastante: segue sem a edição, com o vídeo como veio.
+    # Nenhuma oferta com o nome parecido o bastante: sem a foto não há edição, e o vídeo fica
+    # de lado de vez (só vídeo editado vai).
     os.remove(copia)
-    robo.copiar_para_o_rascunho(video, "viral", copia, ["Tênis Esportivo Corrida Masculino"])
-    assert fotos[-1] is None and open(copia, "rb").read() == b"original"
+    with pytest.raises(robo.Parada) as parada:
+        robo.copiar_para_o_rascunho(video, "viral", copia, ["Tênis Esportivo Corrida Masculino"])
+    assert fotos[-1] is None and not os.path.exists(copia) and parada.value.do_video
     assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ? ORDER BY rowid DESC",
-                     robo.PROCESSO_DA_EDICAO) == ("sem edição", "a foto do anúncio não veio")
+                     robo.PROCESSO_DA_EDICAO) == ("vídeo de lado", "a foto do anúncio não veio")
 
 
 NOME_NO_APP = "Vestidinho Gatinho Estampado Menina Infantil Verão"

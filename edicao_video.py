@@ -39,7 +39,7 @@ CENTRO_DA_MINIATURA = (576, 128)
 SETA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midia", "seta_da_shopee.apng")
 CENTRO_DA_SETA = (142, 846)
 PULSO_DA_SETA = (72, 30)
-# Uns minutos bastam para um vídeo curto; depois disso o rascunho segue sem a edição.
+# Uns minutos bastam para um vídeo curto; depois disso a edição desiste (e o vídeo fica para depois).
 ESPERA_MAXIMA = 300
 # Quantos vídeos de cada fonte o exemplo tenta até achar um com a foto do anúncio na API:
 # a fonte do robô pode ter só vídeos de Ver Produtos na frente, e as outras também contam.
