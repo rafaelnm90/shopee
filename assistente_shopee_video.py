@@ -13,6 +13,11 @@ Para cada vídeo:
   API de afiliado; link de vídeo da Shopee Vídeo não diz os produtos, e o Rafael os
   vê no próprio vídeo.
 
+Com a edição dos vídeos ligada no painel do robô (edicao_video), o vídeo vai já editado
+(a foto do anúncio no começo, a miniatura e a seta), e o que não dá para editar (link de
+vídeo, sem uma foto só, ou sem a foto na API) fica de lado: o assistente tenta o próximo
+na mesma hora, até VIDEOS_POR_ENVIO. Pedido do Rafael (25/10, P40): só vídeo editado.
+
 Quando mandar: cada dia sorteia quantos vídeos (a faixa do painel) e espalha os
 horários pela janela do painel, com um sorteio fixo por dia. A cada volta do agendador,
 manda no máximo um vídeo, e só se um horário já passou. Pausado, os horários que
@@ -21,12 +26,14 @@ passam são pulados, para não sair tudo de uma vez ao retomar.
 O robô nunca posta, curte nem comenta na Shopee (diretriz 9.1.1).
 Decisão do Rafael: DECISOES.md, Shopee Vídeo.
 """
+import asyncio
 import html
 import json
 import logging
 import os
 import random
 import re
+import tempfile
 from datetime import datetime
 
 import aiohttp
@@ -57,6 +64,10 @@ FONTES = {
     "publico": "Grupo Público 📬",
 }
 FONTE_PADRAO = "autorais"
+# Com a edição ligada, quantos vídeos o assistente tenta numa vez até achar um que sai
+# editado; e a frase do resultado do que fica de lado por isso.
+VIDEOS_POR_ENVIO = 5
+SEM_EDICAO = "vídeo de lado: a edição não saiu (só vídeo editado vai)"
 
 PROMPT = """Atue como um especialista em Growth Hacking e Marketing para Shopee. Analise \
 detalhadamente o vídeo (produto, estilo e público-alvo) e gere o texto para postar na Shopee Vídeo.
@@ -531,27 +542,62 @@ async def preparar_e_enviar(bot, admin_id, agora=None, fonte=FONTE_PADRAO):
     Prepara o próximo vídeo e manda no privado. Devolve o que aconteceu, numa frase,
     para o log e para o botão Enviar 1 Agora.
     """
-    video = proximo_video(fonte)
-    if not video:
-        registro_processos.registrar("shopee_video", "assistente: envio", "sem vídeo na fonte", ok=False)
-        return f"não há vídeo em {FONTES.get(fonte, fonte)} para mandar (a fila está vazia ou sem arquivos)"
+    for _ in range(VIDEOS_POR_ENVIO):
+        video = proximo_video(fonte)
+        if not video:
+            registro_processos.registrar("shopee_video", "assistente: envio", "sem vídeo na fonte", ok=False)
+            return f"não há vídeo em {FONTES.get(fonte, fonte)} para mandar (a fila está vazia ou sem arquivos)"
+        try:
+            with tempfile.TemporaryDirectory() as pasta:
+                resultado = await _preparar_e_enviar(bot, admin_id, video, agora, fonte, pasta)
+        except Exception as e:
+            # Vídeo que dá erro (ex.: o Telegram recusa o arquivo) é pulado: sem isso, ele
+            # voltaria em todo horário e travaria a fila.
+            registrar(video["id"], "erro", type(e).__name__, agora)
+            registro_processos.registrar("shopee_video", "assistente: envio", "erro", type(e).__name__, ok=False)
+            raise
+        # As frases do resultado são fixas (_preparar_e_enviar).
+        registro_processos.registrar("shopee_video", "assistente: envio", resultado,
+                                     ok=resultado == "postagem mandada no seu privado")
+        if resultado != SEM_EDICAO:
+            return resultado
+    return f"nenhum dos {VIDEOS_POR_ENVIO} próximos vídeos saiu editado (só vídeo editado vai); tento de novo no próximo horário"
+
+
+def _editar(video, produtos, destino):
+    """
+    O vídeo editado em destino, com a foto do anúncio do produto do link: "" quando deu
+    certo, ou o motivo fixo. O edicao_video importa este módulo: o import fica aqui dentro.
+    """
+    import edicao_video
+    import postador_shopee_video as ps
     try:
-        resultado = await _preparar_e_enviar(bot, admin_id, video, agora)
+        foto = ps.baixar_foto(produtos[0].get("imagem")) if produtos else None
     except Exception as e:
-        # Vídeo que dá erro (ex.: o Telegram recusa o arquivo) é pulado: sem isso, ele
-        # voltaria em todo horário e travaria a fila.
-        registrar(video["id"], "erro", type(e).__name__, agora)
-        registro_processos.registrar("shopee_video", "assistente: envio", "erro", type(e).__name__, ok=False)
-        raise
-    # As frases do resultado são fixas (_preparar_e_enviar).
-    registro_processos.registrar("shopee_video", "assistente: envio", resultado,
-                                 ok=resultado == "postagem mandada no seu privado")
-    return resultado
+        logger.warning(f"⚠️ [Shopee Vídeo] A foto do anúncio não veio: {type(e).__name__}")
+        foto = None
+    return edicao_video.editar(video["arquivo"], foto, destino)
 
 
-async def _preparar_e_enviar(bot, admin_id, video, agora):
+def _edicao_ligada(fonte):
+    import edicao_video
+    return edicao_video.vale_para(fonte)
+
+
+async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pasta=None):
     from aiogram.types import FSInputFile
 
+    # Com a edição ligada, o vídeo que não sai editado fica de lado antes de gastar a IA.
+    produtos, link = await produtos_do_link(video["link"])
+    arquivo = video["arquivo"]
+    if pasta and _edicao_ligada(fonte):
+        arquivo = os.path.join(pasta, os.path.basename(video["arquivo"]))
+        motivo = await asyncio.to_thread(_editar, video, produtos, arquivo)
+        registro_processos.registrar("shopee_video", "edição do vídeo: assistente", "vídeo de lado" if motivo
+                                     else "editado", motivo, ok=not motivo)
+        if motivo:
+            registrar(video["id"], "sem_edicao", motivo, agora)
+            return SEM_EDICAO
     textos = await textos_do_video(video["arquivo"], video["nome"])
     if ULTIMA_RECUSA:
         # Escolha do Rafael (P29): cada vídeo recusado pelo Google chega no privado na hora.
@@ -566,8 +612,7 @@ async def _preparar_e_enviar(bot, admin_id, video, agora):
                                f"possível violação das diretrizes: {html.escape(textos['motivo'] or 'sem motivo')}",
                                parse_mode="HTML")
         return "vídeo pulado por possível violação das diretrizes"
-    produtos, link = await produtos_do_link(video["link"])
-    await bot.send_video(admin_id, video=FSInputFile(video["arquivo"]), supports_streaming=True,
+    await bot.send_video(admin_id, video=FSInputFile(arquivo), supports_streaming=True,
                          caption="🎬 Vídeo para a Shopee Vídeo: siga os passos da mensagem abaixo.")
     await bot.send_message(admin_id, montar_mensagem(textos, produtos, link), parse_mode="HTML",
                            disable_web_page_preview=True)

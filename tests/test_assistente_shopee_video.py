@@ -399,6 +399,80 @@ def test_video_que_da_erro_e_pulado_para_nao_travar_a_fila(monkeypatch):
     assert asv.proximo_video() is None
 
 
+# --- Só vídeo editado (P40) ---
+
+LEGENDA_VIDEO = LEGENDA.replace("https://s.shopee.com.br/abc", "https://s.shopee.com.br/video")
+
+
+def _com_edicao(monkeypatch, conteudos, ias):
+    """Edição ligada, com o ffmpeg e a foto de mentira; o link de vídeo não traz produto (sem foto)."""
+    import db
+    import edicao_video
+    import postador_shopee_video as ps
+    db.salvar_config("shopee_video", {"edicao_ligada": True})
+
+    async def gerar(arquivo, nome="", leves=False):
+        ias.append(arquivo)
+        return TEXTOS
+
+    async def produtos(link):
+        if "video" in link:
+            return [], link
+        return [{"nome": "Garrafa", "preco": 19.9, "comissao": 8.0, "imagem": "https://cf.shopee.com.br/g"}], link
+
+    def editar(video, foto, destino):
+        if not foto:
+            return "a foto do anúncio não veio"
+        with open(destino, "wb") as arquivo:
+            arquivo.write(b"editado com " + foto)
+        return ""
+
+    class BotQueLe(Bot):
+        async def send_video(self, chat_id, video, **kw):
+            with open(video.path, "rb") as arquivo:
+                conteudos.append(arquivo.read())
+            await super().send_video(chat_id, video, **kw)
+
+    monkeypatch.setattr(asv, "gerar_textos", gerar)
+    monkeypatch.setattr(asv, "produtos_do_link", produtos)
+    monkeypatch.setattr(ps, "baixar_foto", lambda endereco: b"foto")
+    monkeypatch.setattr(edicao_video, "editar", editar)
+    return BotQueLe()
+
+
+def test_com_a_edicao_ligada_o_assistente_manda_o_video_editado(monkeypatch):
+    # Pedido do Rafael (25/10, P40): na Shopee Vídeo, só vídeo editado, também no assistente.
+    conteudos, ias = [], []
+    bot = _com_edicao(monkeypatch, conteudos, ias)
+    _fila(("novo", LEGENDA, "archive/novo.mp4", "2026-10-02 10:00"))
+    assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
+    assert conteudos == [b"editado com foto"] and "Postagem pronta" in bot.mensagens[0][1]
+    # A IA assiste ao vídeo original, sem a foto e a seta por cima.
+    assert set(ias) == {"archive/novo.mp4"}
+
+
+def test_o_que_nao_sai_editado_fica_de_lado_e_vai_o_proximo_sem_gastar_a_ia(monkeypatch):
+    conteudos, ias = [], []
+    bot = _com_edicao(monkeypatch, conteudos, ias)
+    _fila(("produto", LEGENDA, "archive/produto.mp4", "2026-10-02 09:00"),
+          ("video", LEGENDA_VIDEO, "archive/video.mp4", "2026-10-02 10:00"))
+    assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
+    assert conteudos == [b"editado com foto"] and set(ias) == {"archive/produto.mp4"}
+    # O de link de vídeo (sem uma foto só) ficou de lado e não volta.
+    assert asv.proximo_video() is None and asv.enviados_hoje() == 1
+
+
+def test_nenhum_editado_avisa_sem_mandar_nada(monkeypatch):
+    conteudos, ias = [], []
+    bot = _com_edicao(monkeypatch, conteudos, ias)
+    _fila(*[(f"v{i}", LEGENDA_VIDEO, f"archive/v{i}.mp4", f"2026-10-02 1{i}:00") for i in range(6)])
+    resultado = rodar(asv.preparar_e_enviar(bot, 42))
+    assert resultado.startswith(f"nenhum dos {asv.VIDEOS_POR_ENVIO} próximos vídeos saiu editado")
+    assert conteudos == [] and ias == [] and bot.mensagens == []
+    # Tentou só VIDEOS_POR_ENVIO numa vez; o 6º fica para o próximo horário.
+    assert asv.proximo_video()["id"] == "v0"
+
+
 # --- Fontes ---
 
 def _arquivo(caminho):
