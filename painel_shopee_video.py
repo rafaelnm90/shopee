@@ -191,8 +191,9 @@ async def rodar_robo(*argumentos):
 
 async def verificar_robo():
     """
-    Volta do agendador: uma rodada do robô, se ele está ativo e dentro do Horário do Robô.
-    Acabada a suspensão da conta pela Shopee, avisa no privado que os dois voltaram.
+    Volta do agendador: uma rodada do robô, se ele está ativo e dentro do Horário do Robô
+    (também com a conta suspensa: o robô sabe o que pode fazer nela). Acabada a suspensão
+    da conta pela Shopee, avisa no privado que os dois voltaram.
     """
     aviso = robo.fim_da_suspensao()
     if aviso:
@@ -204,10 +205,15 @@ async def verificar_robo():
     config = ler_config()
     if robo_ocupado():
         return
-    if config["robo_pausado"] or robo.suspensa(config):
-        # Os horários de rascunho que passam pausado ou suspenso são pulados, como no assistente.
+    if config["robo_pausado"]:
+        # Os horários de rascunho que passam pausado são pulados, como no assistente.
         robo.consumir_horarios(config)
         return
+    if robo.suspensa(config):
+        # Na suspensão os horários de rascunho também são pulados, mas a rodada segue: o robô
+        # só não prepara, não posta e não treina; a limpeza dos favoritos, apagar o recusado,
+        # as respostas, o feed e a Saúde do Vídeo continuam. Pedido do Rafael: DECISOES.md.
+        robo.consumir_horarios(config)
     if robo.no_horario(config):
         await rodar_robo("--rodada")
 
@@ -656,7 +662,9 @@ def status_robo(config):
         ate = robo.quando_acaba(robo.suspenso_ate(config))
         if config["robo_pausado"]:
             return f"⏸️ <b>Pausado</b> (e a conta de Shopee Vídeo está suspensa pela Shopee até {ate})"
-        return f"⛔ <b>Em espera</b> (conta de Shopee Vídeo suspensa pela Shopee até {ate}; volta sozinho depois)"
+        return (f"⛔ <b>Sem postar</b> (conta de Shopee Vídeo suspensa pela Shopee até {ate}: não prepara nem "
+                "posta, e volta sozinho depois; a limpeza dos favoritos, as respostas, o feed e a Saúde do Vídeo "
+                "continuam)")
     if not config["robo_pausado"]:
         return "▶️ <b>Ativo</b>"
     if config.get("robo_pausa_motivo") == "celular desconectado":
@@ -782,8 +790,10 @@ COMO_FUNCIONA = (
     "6️⃣ <b>A Shopee mudou o app?</b> Toda segunda o robô treina o caminho e avisa se algo mudou "
     "(Testar Caminho 🧭 faz isso na hora). Aí o Claude ajusta.\n\n"
     "7️⃣ <b>Resetou ou trocou o Motorola?</b> Robô Automático 🤖 → Celular do Robô 📱 → Passo a Passo 📖.\n\n"
-    "8️⃣ <b>A Shopee suspendeu a conta?</b> O robô lê o aviso nas Notificações do app, pausa ele e o "
-    "assistente até o fim da suspensão e avisa aqui. No fim, os dois voltam sozinhos (se você pausou o "
+    "8️⃣ <b>A Shopee suspendeu a conta?</b> O robô lê o aviso nas Notificações do app e avisa aqui. Até o "
+    "fim da suspensão, ele não prepara, não posta e não testa o caminho (a Shopee fecha o Postar vídeo), e o "
+    "assistente espera; a limpeza dos favoritos, as respostas aos comentários, o feed e a Saúde do Vídeo "
+    "continuam, e com o celular fora da tomada ele só pula. No fim, os dois voltam sozinhos (se você pausou o "
     "robô no meio, ele continua pausado)."
 )
 
