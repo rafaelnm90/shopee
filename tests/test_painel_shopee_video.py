@@ -642,8 +642,9 @@ def test_fila_de_rascunhos_mostra_a_lista_no_menu_do_robo(bm, Msg, Est):
 
 
 def test_conta_suspensa_deixa_os_dois_em_espera_e_o_fim_avisa_no_privado(bm, monkeypatch):
-    # Escolha do Rafael (23/10, P4): com a conta suspensa pela Shopee, nem o robô nem o
-    # assistente trabalham; no fim, os dois voltam sozinhos e o privado recebe o aviso.
+    # Escolha do Rafael (23/10, P4): com a conta suspensa pela Shopee, o assistente espera e o
+    # robô não posta; no fim, os dois voltam sozinhos e o privado recebe o aviso. Pedido de
+    # 25/10: na suspensão a rodada do robô segue (ele só não prepara, não posta e não treina).
     from datetime import datetime, timedelta
     from fuso import fuso_horario
     sv = _painel(bm)
@@ -672,14 +673,16 @@ def test_conta_suspensa_deixa_os_dois_em_espera_e_o_fim_avisa_no_privado(bm, mon
     assert pedidos == [] and "suspensa pela Shopee" in sv.texto_assistente(sv.ler_config())
     assert "suspendeu a conta" in sv.texto_painel(sv.ler_config())
     assert "Pausado" in sv.texto_robo(sv.ler_config()) and "suspensa" in sv.texto_robo(sv.ler_config())
+    rodar(sv.verificar_robo())
+    assert rodadas == []                                   # pausado pelo Rafael: nada roda
     sv.alterar_config(robo_pausado=False)
     rodar(sv.verificar_robo())
-    assert rodadas == [] and enviados == [] and "Em espera" in sv.texto_robo(sv.ler_config())
-    # Acabou (com a folga): o aviso chega, e o robô volta a rodar na mesma volta.
+    assert rodadas == [("--rodada",)] and enviados == [] and "Sem postar" in sv.texto_robo(sv.ler_config())
+    # Acabou (com a folga): o aviso chega, e o robô roda na mesma volta.
     sv.alterar_config(robo_suspenso_ate=(datetime.now(fuso_horario) - timedelta(minutes=20)).strftime(
         "%Y-%m-%d %H:%M:%S"))
     rodar(sv.verificar_robo())
-    assert len(enviados) == 1 and "acabou" in enviados[0] and rodadas == [("--rodada",)]
+    assert len(enviados) == 1 and "acabou" in enviados[0] and rodadas == [("--rodada",), ("--rodada",)]
     assert "robo_suspenso_ate" not in sv.ler_config()
 
 

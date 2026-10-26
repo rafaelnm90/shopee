@@ -35,8 +35,10 @@ tenta reconectar sozinho (celular_robo.reconectar_sozinho); sem conseguir, pausa
 Postagem e avisa, e o modo assistente volta a mandar as postagens no privado até o
 Rafael tocar em Retomar Postagem ▶️. Na Verificação da Shopee para na hora e manda o
 link da tela do celular no privado. Com a conta de Shopee Vídeo suspensa pela Shopee (o
-aviso fica nas Notificações do app), não toca em nada até o fim da suspensão, e o modo
-assistente espera junto; no fim, os dois voltam sozinhos (painel_shopee_video).
+aviso fica nas Notificações do app), não prepara, não posta e não treina até o fim da
+suspensão (o Postar vídeo fica fechado), e o modo assistente espera junto; o resto segue
+no horário de sempre, e com o celular fora da tomada só pula. No fim, os dois voltam
+sozinhos (painel_shopee_video).
 
 Nunca toca em Postar sem o Aprovar do Rafael no bot, nem nos botões de comprar. Curtir e
 comentar o próprio vídeo continuam à mão: depois de postar, o comentário chega no
@@ -435,8 +437,8 @@ def suspenso_ate(config):
 def suspensa(config, agora=None):
     """
     A conta de Shopee Vídeo está suspensa agora (até o fim e a folga)? Enquanto estiver, o
-    robô não toca no celular e o assistente fica em espera. Decisão do Rafael:
-    DECISOES.md, Shopee Vídeo.
+    robô não prepara, não posta e não treina (o_que_fazer), e o assistente fica em espera.
+    Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     ate = suspenso_ate(config)
     return bool(ate) and agora_br(agora) < ate + FOLGA_DA_SUSPENSAO
@@ -945,7 +947,11 @@ def o_que_fazer(config, agora=None):
     if na_hora_do_descurtir(agora):
         # A hora do descurtir é só dele (P25).
         return ("descurtir", None) if descurtir_pendente(agora) else None
-    if treino_da_semana_pendente(agora):
+    # Na suspensão a Shopee fecha o Postar vídeo: o treino, o preparo e a postagem, que
+    # passam por ele, esperam o fim. O resto segue: a limpeza dos favoritos, apagar o
+    # recusado, a Saúde do Vídeo, as respostas e o feed. Pedido do Rafael (25/10): DECISOES.md.
+    sem_postar = suspensa(config, agora)
+    if treino_da_semana_pendente(agora) and not sem_postar:
         return "treino", None
     recusados = listar("recusado")
     if recusados:
@@ -955,7 +961,7 @@ def o_que_fazer(config, agora=None):
     # acabam. Escolhas do Rafael (P22 a P24 e P26). (A rodada já confere o horário: aqui
     # só a separação entre os dois.)
     na_janela = na_hora_das_interacoes(config, agora)
-    postar = not na_janela or interacoes_do_dia_feitas(agora)
+    postar = (not na_janela or interacoes_do_dia_feitas(agora)) and not sem_postar
     interagir = na_janela or not janela_das_interacoes(config)
     agora_txt = _momento(agora)
     aprovados = listar("aprovado")
@@ -3211,21 +3217,16 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
                 consumir_horarios(config, agora)
             return "pausado"
         if suspensa(config, agora):
-            # Os horários que passam na suspensão são pulados, como pausado.
+            # Os horários de rascunho que passam na suspensão são pulados, como pausado: o
+            # preparo e a postagem esperam o fim (o_que_fazer), e o resto segue.
             consumir_horarios(config, agora)
-            ler_a_saude = saude_do_dia_pendente(agora) or saude_pedida_pelo_recurso(agora)
-            # A hora do descurtir é só dele; na suspensão, nem ele (o robô não toca no celular).
-            if not (no_horario(config, agora) and not na_hora_do_descurtir(agora) and ler_a_saude):
-                return f"conta suspensa até {quando_acaba(suspenso_ate(config))}"
-            # A leitura do dia conta já aqui: com o celular fora, não tenta de novo a cada rodada.
-            gravar_estado(saude_tentada_em=_momento(agora))
-            saude = True
-        elif not no_horario(config, agora):
+        if not no_horario(config, agora):
             return "fora do Horário do Robô"
     elif suspensa(config, agora) and not saude:
         ate = quando_acaba(suspenso_ate(config))
         avisar(f"⛔ Robô da Shopee Vídeo: não {'preparei o rascunho' if preparar else 'testei o caminho'}. A conta "
-               f"de Shopee Vídeo está suspensa pela Shopee até {ate}, e o robô não toca no celular até lá.")
+               f"de Shopee Vídeo está suspensa pela Shopee até {ate}, e até lá o Postar vídeo não abre: o "
+               "robô não prepara, não posta e não testa o caminho (o resto continua).")
         return f"conta suspensa até {ate}"
     if d is None:
         if av.tela_aberta():
@@ -3384,8 +3385,10 @@ def avisar_suspensao(ate):
     """O aviso, uma vez por suspensão, de que robô e assistente esperam até o fim dela."""
     avisar(f"⛔ Robô da Shopee Vídeo: a Shopee suspendeu a sua conta de Shopee Vídeo até {quando_acaba(ate)} (o aviso "
            "está nas Notificações e na Saúde do Vídeo do app da Shopee).\n\n"
-           "Pausei o robô e o modo assistente até lá: nada de preparar nem postar, e sem avisos de rascunho "
-           "que não saiu. Os rascunhos aprovados ficam guardados e saem depois, espalhados.\n\n"
+           "Até lá o robô não prepara nem posta (o Postar vídeo fica fechado), o modo assistente espera, e não "
+           "chegam avisos de rascunho que não saiu. Os rascunhos aprovados ficam guardados e saem depois, "
+           "espalhados. O resto continua no horário de sempre: a limpeza dos favoritos às 4h, as respostas aos "
+           "comentários, o feed e a Saúde do Vídeo (com o celular fora da tomada, o robô só pula, sem avisar).\n\n"
            "Quando a suspensão acabar, os dois voltam sozinhos e eu aviso aqui. Se quiser que o robô continue "
            "pausado depois, toque em Shopee Vídeo 🎬 → Robô Automático 🤖 → Pausar Postagem ⏸️.")
 

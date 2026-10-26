@@ -293,10 +293,14 @@ def test_plano_e_aprovados_pulam_a_hora_do_descurtir():
     assert robo.proxima_postagem(config, momento("2026-10-25 03:58"), sorteio=Sorteio) == "2026-10-25 05:05:00"
 
 
-def test_conta_suspensa_as_4h_nao_le_a_saude(monkeypatch, avisos):
+def test_conta_suspensa_as_4h_faz_a_limpeza_dos_favoritos_e_nao_le_a_saude(monkeypatch, avisos):
+    # Pedido do Rafael (25/10): na suspensão, só o preparo, a postagem e o treino esperam; a
+    # limpeza dos favoritos das 4h continua, e a hora dela segue só dela.
     ativar(robo_inicio=0, robo_fim=24, robo_suspenso_ate="2026-11-01 00:00:00")
     monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: True)
-    assert "suspensa" in robo.rodada(d=Intocavel(), agora=momento("2026-10-25 04:10"))
+    app = AppDosFavoritos(favoritos=3)
+    assert robo.rodada(d=app, agora=momento("2026-10-25 04:10")) == "3 produto(s) descurtido(s) em Meus favoritos"
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-25 04:25")) == "nada a fazer agora"
 
 
 # --- A rodada não toca no celular quando não deve ---
@@ -2080,8 +2084,10 @@ def test_conta_suspensa_para_o_rascunho_avisa_uma_vez_e_nao_toca_ate_o_fim(monke
     assert robo.estado_do_dia(config, momento("2026-10-23 23:59")).get("repetir") is False
     assert robo.proximo_video(config)["id"] == "a1"
     assert robo.tentativas_desde("2026-10-23 00:00:00")[0]["resultado"] == "suspensa"
-    # Até o fim (com a folga), nem a rodada nem o Preparar 1 Agora tocam no celular.
-    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-24 10:00")).startswith("conta suspensa até 26/10")
+    # Até o fim (com a folga), nem a rodada nem o Preparar 1 Agora preparam ou postam (o resto
+    # continua: aqui não há mais nada a fazer, e o celular não é tocado).
+    robo.gravar_estado(saude_tentada_em="2026-10-24 09:00:00", treino_semana=robo.semana(momento("2026-10-24 10:00")))
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-24 10:00")) == "nada a fazer agora"
     assert len(avisos) == 2
     assert robo.rodada(preparar=True, d=Intocavel(), agora=momento("2026-10-26 19:15")).startswith("conta suspensa")
     assert "não preparei o rascunho" in avisos[-1] and "26/10 às 19:04" in avisos[-1]
@@ -2271,8 +2277,8 @@ def test_saude_uma_vez_por_dia_e_tambem_com_a_conta_suspensa(monkeypatch, avisos
     ativar(robo_inicio=0, robo_fim=24, robo_suspenso_ate="2026-10-26 19:04:26")
     robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-24 10:00")))
     assert robo.rodada(d=AppDaSaude(), agora=momento("2026-10-24 10:00")).startswith("saúde lida")
-    # Já leu hoje: com a conta suspensa, não toca mais no celular.
-    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-24 10:15")).startswith("conta suspensa")
+    # Já leu hoje: com a conta suspensa e nada mais a fazer, não toca mais no celular.
+    assert robo.rodada(d=Intocavel(), agora=momento("2026-10-24 10:15")) == "nada a fazer agora"
     assert robo.saude_do_dia_pendente(momento("2026-10-25 08:00"))
 
 
@@ -2316,6 +2322,34 @@ def test_limpeza_das_4h_aparece_como_limpeza_dos_favoritos():
     assert texto == "✅ 1 salvo | 💔 1 limpeza dos favoritos"
 
 
+def test_na_suspensao_so_o_preparo_a_postagem_e_o_treino_esperam(monkeypatch, avisos):
+    # Pedido do Rafael (25/10): na suspensão, o que não passa pelo Postar vídeo continua
+    # (apagar o recusado, a Saúde, as respostas e o feed); o preparo, a postagem e o treino
+    # esperam o fim, porque a Shopee fecha o Postar vídeo.
+    ativar(robo_inicio=0, robo_fim=24, robo_suspenso_ate="2026-10-29 00:00:00")
+    config = robo.ler_config()
+    segunda = momento("2026-10-26 10:00")
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo, "consumir_horarios", lambda config, agora=None: True)
+    assert robo.o_que_fazer(config, segunda) is None                      # sem treino, sem rascunho
+    monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: True)
+    assert robo.o_que_fazer(config, segunda) == ("responder", None)
+    monkeypatch.setattr(robo, "respostas_pendentes", lambda agora=None: False)
+    monkeypatch.setattr(robo, "feed_pendente", lambda agora=None: True)
+    assert robo.o_que_fazer(config, segunda) == ("feed", None)
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: True)
+    assert robo.o_que_fazer(config, segunda) == ("saude", None)
+    monkeypatch.setattr(robo, "listar", lambda *estados: [{"id": 7, "postar_em": "2026-10-26 09:00:00"}])
+    # Com um recusado e um aprovado já na hora: apaga o recusado; o aprovado espera o fim.
+    assert robo.o_que_fazer(config, segunda) == ("apagar", 7)
+    monkeypatch.setattr(robo, "listar", lambda *estados: [] if "recusado" in estados else
+                        [{"id": 8, "postar_em": "2026-10-26 09:00:00"}])
+    assert robo.o_que_fazer(config, segunda) == ("saude", None)
+    # Acabada a suspensão, o treino da segunda e a postagem voltam.
+    ativar(robo_inicio=0, robo_fim=24)
+    assert robo.o_que_fazer(robo.ler_config(), segunda) == ("treino", None)
+
+
 def test_celular_fora_na_suspensao_nao_pausa_nem_avisa(monkeypatch, avisos):
     # Pedido do Rafael (24/10): na suspensão ele pode tirar o Motorola do carregador.
     monkeypatch.setattr(robo, "saude_do_dia_pendente", SAUDE_DO_DIA)
@@ -2327,8 +2361,10 @@ def test_celular_fora_na_suspensao_nao_pausa_nem_avisa(monkeypatch, avisos):
                         lambda: tentativas.append(1) or (False, "a Depuração por Wi-Fi está desligada no celular"))
     assert "celular fora (esperado)" in robo.rodada(agora=momento("2026-10-24 10:00"))
     assert robo.ler_config()["robo_pausado"] is False and avisos == []
-    # A leitura do dia já contou: as rodadas seguintes nem procuram o celular.
-    assert robo.rodada(agora=momento("2026-10-24 10:15")).startswith("conta suspensa") and tentativas == [1]
+    # Na suspensão o resto continua (pedido do Rafael, 25/10): cada rodada procura o celular de
+    # novo, e com ele fora só pula, sem pausar nem avisar.
+    assert "celular fora (esperado)" in robo.rodada(agora=momento("2026-10-24 10:15")) and tentativas == [1, 1]
+    assert robo.ler_config()["robo_pausado"] is False and avisos == []
     # Acabou a suspensão (com a folga) e o celular não voltou: pausa e avisa, como sempre.
     assert "desconectado" in robo.rodada(agora=momento("2026-10-26 19:30"))
     assert robo.ler_config()["robo_pausado"] is True and "Retomar Postagem" in avisos[-1]
