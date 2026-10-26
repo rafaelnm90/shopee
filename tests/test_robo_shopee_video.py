@@ -2406,6 +2406,27 @@ def test_celular_fora_na_suspensao_nao_pausa_nem_avisa(monkeypatch, avisos):
     assert robo.ler_config()["robo_pausado"] is True and "Retomar Postagem" in avisos[-1]
 
 
+def test_limpeza_das_4h_sem_celular_na_suspensao_fica_no_registro_uma_vez(monkeypatch, avisos):
+    # Checkup de 26/10, 04:42: "descurtir tudo (4h): 0 de 1", sem dizer que o celular estava
+    # fora da tomada na suspensão (o que o Rafael pode fazer). O registro guarda o porquê.
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    ativar(robo_inicio=8, robo_fim=22, robo_suspenso_ate="2026-10-28 14:41:00")
+    monkeypatch.setattr(robo.av, "tela_aberta", lambda: False)
+    monkeypatch.setattr(robo.celular_robo, "conectado", lambda: False)
+    monkeypatch.setattr(robo.celular_robo, "reconectar_sozinho", lambda: (False, "fora da tomada"))
+
+    def anotados():
+        return consultar("SELECT COUNT(*), MIN(resultado), MAX(ok) FROM registro_processos "
+                         "WHERE processo = 'descurtir tudo (4h)'")
+    for hora in ("04:05", "04:20", "04:35"):
+        assert "celular fora (esperado)" in robo.rodada(agora=momento(f"2026-10-26 {hora}"))
+    assert anotados() == (1, "celular fora na suspensão", None)
+    # Fora da hora da limpeza, nada vai ao registro dela; no dia seguinte, de novo uma vez.
+    robo.rodada(agora=momento("2026-10-26 10:00"))
+    robo.rodada(agora=momento("2026-10-27 04:05"))
+    assert anotados()[0] == 2 and avisos == []
+
+
 
 def test_aviso_antigo_nas_notificacoes_nao_vale_se_a_saude_nao_mostra_o_bloqueio(monkeypatch, avisos, conta_suspensa):
     # Pedido do Rafael (24/10): o recurso aceito tira a suspensão antes do prazo, mas o aviso

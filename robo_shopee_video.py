@@ -253,6 +253,21 @@ def descurtir_pendente(agora=None):
     return bool(estado.get("descurtir_continuar")) or not (estado.get("descurtir_em") or "").startswith(hoje)
 
 
+def anotar_limpeza_sem_celular(agora=None):
+    """
+    Na suspensão, com o celular fora da tomada, a limpeza das 4h não roda (pedido do
+    Rafael: DECISOES.md, Shopee Vídeo). Fica no registro uma vez por dia, para o checkup
+    mostrar o porquê em vez de cobrar a limpeza que faltou.
+    """
+    if not na_hora_do_descurtir(agora) or not descurtir_pendente(agora):
+        return
+    hoje = agora_br(agora).strftime("%Y-%m-%d")
+    if ler_estado().get("descurtir_sem_celular") == hoje:
+        return
+    gravar_estado(descurtir_sem_celular=hoje)
+    registro_processos.registrar(REGISTRO, "descurtir tudo (4h)", "celular fora na suspensão", ok=None, agora=agora)
+
+
 # O Horário das Interações (responder os comentários dos vídeos do Rafael e comentar e
 # curtir no feed) fica separado do de preparar e postar: nele o robô só interage, e fora
 # dele, só prepara e posta. Sem ele escolhido, tudo segue no Horário do Robô, como antes.
@@ -3258,6 +3273,7 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
                 # Na suspensão o Rafael pode tirar o Motorola do carregador: o celular fora é
                 # esperado, e o robô não pausa nem avisa. No fim dela, sem o celular, pausa e
                 # avisa como sempre. Pedido do Rafael: DECISOES.md, Shopee Vídeo.
+                anotar_limpeza_sem_celular(agora)
                 return f"conta suspensa até {quando_acaba(suspenso_ate(config))}; celular fora (esperado)"
             if not ok:
                 if not na_hora:
