@@ -152,11 +152,12 @@ QUADROS_POR_SEGUNDO = 30
 
 
 def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, com_audio, seta=None,
-                             centro_seta=None, pulso_da_seta=(0, 1)):
+                             centro_seta=None, pulso_da_seta=(0, 1), capa=None):
     """
-    O ffmpeg da edição: a foto em tela cheia (fundo branco) por `segundos`, depois o vídeo
-    em 720x1280 com a foto em miniatura (`miniatura` px de largura) com o centro em
-    `centro` (x, y) até o fim. Com `seta` (uma animação APNG com fundo transparente), a seta
+    O ffmpeg da edição: a foto em tela cheia (fundo branco) por `segundos`, ou a `capa` no
+    lugar dela, quando vier (uma imagem já montada, como a da bebida alcoólica com os
+    avisos), depois o vídeo em 720x1280 com a foto em miniatura (`miniatura` px de largura)
+    com o centro em `centro` (x, y) até o fim. Com `seta` (uma animação APNG com fundo transparente), a seta
     com o centro em `centro_seta`, do começo do vídeo, logo depois da foto, até o fim;
     `pulso_da_seta` = (primeiro quadro, quantos quadros) é o trecho do fim da animação que
     se repete até o fim do vídeo. O som do vídeo começa depois da foto, que vai em silêncio;
@@ -167,7 +168,7 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
               f"[1:v]{tela}[corpo];"
               f"[2:v]scale={miniatura}:-2[mini];"
               f"[corpo][mini]overlay=x={centro[0]}-w/2:y={centro[1]}-h/2:shortest=1[comfoto];")
-    entradas = ["-loop", "1", "-t", str(segundos), "-i", foto, "-i", video, "-loop", "1", "-i", foto]
+    entradas = ["-loop", "1", "-t", str(segundos), "-i", capa or foto, "-i", video, "-loop", "1", "-i", foto]
     if seta:
         inicio, quadros = pulso_da_seta
         entradas += ["-i", seta]
@@ -189,11 +190,12 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
 
 
 def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro=(576, 128), seta=None,
-                         centro_seta=None, espera=300, pulso_da_seta=(0, 1)):
+                         centro_seta=None, espera=300, pulso_da_seta=(0, 1), capa=None):
     """
     Grava em destino o vídeo com a foto (bytes) no começo e em miniatura por cima, e a seta
-    (caminho de uma animação APNG com fundo transparente), se vier. Devolve "" quando deu
-    certo, ou o motivo fixo de não ter dado (o destino não fica pela metade).
+    (caminho de uma animação APNG com fundo transparente), se vier. Com a `capa` (bytes de
+    uma imagem), ela abre o vídeo no lugar da foto. Devolve "" quando deu certo, ou o motivo
+    fixo de não ter dado (o destino não fica pela metade).
     """
     if not foto:
         return "a foto do anúncio não veio"
@@ -204,9 +206,16 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
             arquivo.write(foto)
         if not imagem_abre(caminho_da_foto):
             return "a foto do anúncio não é uma imagem que abre"
+        caminho_da_capa = None
+        if capa:
+            caminho_da_capa = os.path.join(pasta, "capa.png")
+            with open(caminho_da_capa, "wb") as arquivo:
+                arquivo.write(capa)
+            if not imagem_abre(caminho_da_capa):
+                return "a capa não é uma imagem que abre"
         temporario = os.path.join(pasta, "editado.mp4")
         comando = comando_foto_e_miniatura(caminho_da_foto, video, temporario, segundos, miniatura, centro,
-                                           tem_audio(video), seta, centro_seta, pulso_da_seta)
+                                           tem_audio(video), seta, centro_seta, pulso_da_seta, caminho_da_capa)
         try:
             feito = subprocess.run(comando, capture_output=True, timeout=espera)
         except subprocess.TimeoutExpired:

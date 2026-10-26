@@ -1,4 +1,5 @@
 """Modo assistente da Shopee Vídeo: quando mandar, qual vídeo, texto da IA, produtos e a mensagem do privado."""
+import json
 import os
 import re
 from datetime import datetime
@@ -6,7 +7,7 @@ from datetime import datetime
 import pytest
 
 import assistente_shopee_video as asv
-from conftest import inserir, rodar
+from conftest import consultar, inserir, rodar
 from fuso import fuso_horario
 
 CONFIG = {"pausado": False, "limite_min": 5, "limite_max": 5, "inicio": 13, "fim": 22}
@@ -115,7 +116,7 @@ def test_le_o_json_da_ia_mesmo_com_texto_em_volta():
     texto = ('```json\n{"violacao": false, "motivo": "", "titulo": "Garrafa Térmica 🧊 #garrafa", '
              '"comentario": "Mantém gelado o dia todo #casa"}\n```')
     assert asv.ler_resposta(texto) == {"violacao": False, "motivo": "", "feito_por_ia": False, "sinal_ia": "",
-                                       "titulo": "Garrafa Térmica 🧊 #garrafa",
+                                       "bebida_alcoolica": False, "titulo": "Garrafa Térmica 🧊 #garrafa",
                                        "comentario": "Mantém gelado o dia todo #casa"}
     assert asv.ler_resposta("não sei") is None
     assert asv.ler_resposta("{quebrado") is None
@@ -420,7 +421,7 @@ def _com_edicao(monkeypatch, conteudos, ias):
             return [], link
         return [{"nome": "Garrafa", "preco": 19.9, "comissao": 8.0, "imagem": "https://cf.shopee.com.br/g"}], link
 
-    def editar(video, foto, destino):
+    def editar(video, foto, destino, avisos=False):
         if not foto:
             return "a foto do anúncio não veio"
         with open(destino, "wb") as arquivo:
@@ -524,3 +525,81 @@ def test_fonte_sem_fila_ou_desconhecida_nao_quebra():
 
 def test_sem_video_diz_qual_fonte_esta_vazia():
     assert "Viral (Espião) 🕵️" in rodar(asv.preparar_e_enviar(Bot(), 42, fonte="viral"))
+
+
+
+# --- Bebida alcoólica e airsoft (e-mail da Shopee de 26/10/2026) ---
+
+def test_bebida_alcoolica_tem_os_avisos_no_fim_do_titulo_dentro_dos_150():
+    # Escolha do Rafael (P43): o robô põe os avisos; no app o título é a legenda, de 150.
+    titulo = "Kit Cerveja Artesanal 🍺 " + " ".join(f"#cerveja{i}" for i in range(20))
+    resposta = json.dumps({"violacao": False, "bebida_alcoolica": True, "titulo": titulo, "comentario": "c"})
+    textos = asv.ler_resposta(resposta)
+    assert textos["bebida_alcoolica"] is True
+    assert textos["titulo"].startswith("Kit Cerveja Artesanal 🍺 #cerveja0")
+    assert textos["titulo"].endswith("Produto destinado a adultos. Consumo proibido para menores de 18 anos. "
+                                     "Beba com moderação.")
+    assert asv.TITULO_MAX - 12 <= asv.tamanho_no_app(textos["titulo"]) <= asv.TITULO_MAX
+    # Sem bebida alcoólica (ou na dúvida, sem o true), o título fica como sempre.
+    for valor in (False, "true", None):
+        textos = asv.ler_resposta(json.dumps({"bebida_alcoolica": valor, "titulo": titulo}))
+        assert textos["bebida_alcoolica"] is False and asv.TEXTO_DOS_AVISOS not in textos["titulo"]
+
+
+def test_regras_novas_de_bebida_alcoolica_e_airsoft_no_resumo_e_no_pedido():
+    diretrizes = asv.ler_diretrizes()
+    assert "bebida alcoólica\n   (venda ou consumo)" not in diretrizes and "Airsoft" in diretrizes
+    for aviso in asv.AVISOS_DE_ALCOOL:
+        assert aviso in " ".join(diretrizes.split())
+    prompt = asv.montar_prompt()
+    assert '"bebida_alcoolica": false' in prompt and "Bebida alcoólica sozinha não é violação" in prompt
+
+
+def test_mensagem_da_bebida_alcoolica_pede_para_deixar_a_capa_e_os_avisos():
+    texto = asv.montar_mensagem({**TEXTOS, "bebida_alcoolica": True}, [], "https://s.shopee.com.br/abc")
+    assert "🔞 <b>Bebida alcoólica:</b>" in texto and "Deixe a capa no 1º quadro" in texto
+    assert "🔞" not in asv.montar_mensagem(TEXTOS, [], "https://s.shopee.com.br/abc")
+
+
+def test_bebida_alcoolica_vai_editada_com_os_avisos_na_capa(monkeypatch):
+    conteudos, ias = [], []
+    bot = _com_edicao(monkeypatch, conteudos, ias)
+    import edicao_video
+    editados = []
+
+    def editar(video, foto, destino, avisos=False):
+        editados.append(avisos)
+        with open(destino, "wb") as arquivo:
+            arquivo.write(b"capa com os avisos" if avisos else b"editado")
+        return ""
+    monkeypatch.setattr(edicao_video, "editar", editar)
+
+    async def gerar(arquivo, nome="", leves=False):
+        ias.append(arquivo)
+        return {**TEXTOS, "bebida_alcoolica": True}
+    monkeypatch.setattr(asv, "gerar_textos", gerar)
+    _fila(("cerveja", LEGENDA, "archive/cerveja.mp4", "2026-10-02 10:00"))
+    assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
+    assert editados == [False, True] and conteudos == [b"capa com os avisos"]
+    assert consultar("SELECT resultado FROM registro_processos WHERE processo = 'edição do vídeo: assistente' "
+                     "ORDER BY rowid DESC LIMIT 1") == ("editado com os avisos",)
+
+
+def test_bebida_alcoolica_sem_a_edicao_fica_de_lado_e_vai_o_proximo(monkeypatch):
+    # Sem a edição não há como pôr os avisos na capa: o vídeo de bebida alcoólica fica de lado.
+    ias = []
+
+    async def gerar(arquivo, nome="", leves=False):
+        ias.append(arquivo)
+        return {**TEXTOS, "bebida_alcoolica": "cerveja" in arquivo}
+
+    async def produtos(link):
+        return [], link
+    monkeypatch.setattr(asv, "gerar_textos", gerar)
+    monkeypatch.setattr(asv, "produtos_do_link", produtos)
+    bot = Bot()
+    # O mais novo (a cerveja) vem primeiro, fica de lado, e o copo vai na mesma hora.
+    _fila(("copo", LEGENDA, "archive/copo.mp4", "2026-10-02 09:00"),
+          ("cerveja", LEGENDA, "archive/cerveja.mp4", "2026-10-02 10:00"))
+    assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
+    assert bot.videos == [(42, "copo.mp4")] and asv.proximo_video() is None

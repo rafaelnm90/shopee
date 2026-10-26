@@ -133,6 +133,66 @@ def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
     assert vermelho > 0.05 and not escuros
 
 
+
+def _foto_jpg():
+    import io
+
+    from PIL import Image
+    saida = io.BytesIO()
+    Image.new("RGB", (800, 800), (200, 120, 40)).save(saida, "JPEG")
+    return saida.getvalue()
+
+
+def test_capa_da_bebida_alcoolica_tem_a_foto_e_os_tres_avisos(monkeypatch, tmp_path):
+    # Escolha do Rafael (26/10, P43): os avisos da Shopee na capa, que é o começo do vídeo.
+    import io
+
+    from PIL import Image
+    capa = Image.open(io.BytesIO(edicao_video.capa_com_avisos(_foto_jpg()))).convert("RGB")
+    assert capa.size == edicao_video.TELA
+    meio = (edicao_video.AREA_DA_FOTO[0] + edicao_video.AREA_DA_FOTO[1]) // 2
+    assert capa.getpixel((360, meio)) == (200, 120, 40) or max(abs(a - b) for a, b in zip(
+        capa.getpixel((360, meio)), (200, 120, 40))) < 8
+    cima, baixo = edicao_video.AREA_DOS_AVISOS
+    faixa = [capa.getpixel((x, y)) for x in range(0, 720, 4) for y in range(cima, baixo, 4)]
+    assert sum(1 for p in faixa if max(p) < 40) > len(faixa) * 0.6       # a faixa preta
+    assert sum(1 for p in faixa if min(p) > 200) > 50                     # as letras brancas
+    assert edicao_video.capa_com_avisos(b"nao e imagem") is None
+    # Na edição, a capa abre o vídeo no lugar da foto.
+    comandos = _programas(monkeypatch)
+    destino = tmp_path / "editado.mp4"
+    assert edicao_video.editar(str(tmp_path / "v.mp4"), _foto_jpg(), str(destino), avisos=True) == ""
+    ffmpeg = [c for c in comandos if c[0] == "ffmpeg"][0]
+    assert ffmpeg[ffmpeg.index("-i") + 1].endswith("capa.png")
+    comandos.clear()
+    assert edicao_video.editar(str(tmp_path / "v.mp4"), _foto_jpg(), str(destino)) == ""
+    ffmpeg = [c for c in comandos if c[0] == "ffmpeg"][0]
+    assert ffmpeg[ffmpeg.index("-i") + 1].endswith("foto.jpg")
+
+
+def test_edicao_de_verdade_da_bebida_alcoolica_abre_com_os_avisos(tmp_path):
+    if not shutil.which("ffmpeg"):
+        return
+    video = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0xf0e0c0:size=360x640:rate=30:duration=3",
+                    str(video)], check=True)
+    destino = tmp_path / "editado.mp4"
+    assert edicao_video.editar(str(video), _foto_jpg(), str(destino), avisos=True) == ""
+    from PIL import Image
+
+    def faixa_escura(segundo):
+        quadro = tmp_path / f"quadro_{segundo}.ppm"
+        subprocess.run(["ffmpeg", "-v", "error", "-ss", str(segundo), "-i", str(destino), "-frames:v", "1",
+                        str(quadro)], check=True)
+        with Image.open(quadro) as imagem:
+            tela = imagem.convert("RGB")
+        cima, baixo = edicao_video.AREA_DOS_AVISOS
+        pontos = [tela.getpixel((x, y)) for x in range(0, 720, 8) for y in range(cima + 10, baixo - 10, 8)]
+        return sum(1 for p in pontos if max(p) < 60) / len(pontos)
+
+    # O primeiro quadro (a capa) tem a faixa dos avisos; o vídeo depois da foto, não.
+    assert faixa_escura(0) > 0.5 and faixa_escura(2.5) < 0.1
+
 def test_video_sem_som_sai_sem_som(monkeypatch, tmp_path):
     comandos = _programas(monkeypatch, audio="")
     assert edicao_video.editar("video.mp4", b"foto", str(tmp_path / "r.mp4")) == ""
