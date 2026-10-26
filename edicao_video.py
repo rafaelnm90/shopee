@@ -41,12 +41,16 @@ CENTRO_DA_SETA = (142, 846)
 PULSO_DA_SETA = (72, 30)
 # Uns minutos bastam para um vídeo curto; depois disso o rascunho segue sem a edição.
 ESPERA_MAXIMA = 300
-# Quantos vídeos o exemplo tenta até achar um com a foto do anúncio na API.
-VIDEOS_TENTADOS = 10
-# Os vídeos já mostrados no exemplo (os ids da fonte): cada toque mostra um vídeo novo, e
-# quando todos já foram mostrados a lista recomeça. Pedido do Rafael (25/10): DECISOES.md.
+# Quantos vídeos de cada fonte o exemplo tenta até achar um com a foto do anúncio na API:
+# a fonte do robô pode ter só vídeos de Ver Produtos na frente, e as outras também contam.
+VIDEOS_POR_FONTE = 6
+# Os vídeos já mostrados no exemplo (os ids da fonte, em "ids"): cada toque mostra um vídeo
+# novo; sem vídeo novo com foto, recomeça pelos já mostrados. Em "sem_foto", os que não têm a
+# foto do anúncio (os de Ver Produtos e os sem oferta), para não gastar tempo com eles de
+# novo. Pedido do Rafael (25/10): DECISOES.md, Shopee Vídeo.
 CHAVE_EXEMPLOS = "edicao_exemplos_mostrados"
 EXEMPLOS_LEMBRADOS = 100
+SEM_FOTO_LEMBRADOS = 300
 
 
 def ligada():
@@ -70,25 +74,30 @@ def _fontes_do_exemplo():
     return (fonte,) + tuple(f for f in FONTES_COM_EDICAO if f != fonte)
 
 
-def _videos_do_exemplo(mostrados):
+def _videos_do_exemplo(pular):
     """
     (id, arquivo, link) dos próximos vídeos que o robô pegaria para postar (os ainda não
-    usados, do mais novo para o mais velho), sem os que o exemplo já mostrou.
+    usados, do mais novo para o mais velho), até VIDEOS_POR_FONTE de cada fonte, sem os de
+    pular.
     """
     achados = []
     for fonte in _fontes_do_exemplo():
+        da_fonte = 0
         for id_video, arquivo, link, _ in assistente.candidatos_nao_usados(fonte):
-            if (id_video not in mostrados and arquivo and link and os.path.exists(arquivo)
+            if da_fonte >= VIDEOS_POR_FONTE:
+                break
+            if (id_video not in pular and arquivo and link and os.path.exists(arquivo)
                     and not arquivo.lower().endswith(assistente.EXTENSOES_DE_IMAGEM)):
                 achados.append((id_video, arquivo, link))
-            if len(achados) >= VIDEOS_TENTADOS:
-                return achados
+                da_fonte += 1
     return achados
 
 
-def _lembrar_mostrado(id_video):
+def _lembrar(lista, id_video, limite, recomecar=False):
+    """Põe o vídeo na lista (ids ou sem_foto) da chave dos exemplos; recomecar zera a lista antes."""
     def alterar(dados):
-        dados["ids"] = (dados.get("ids", []) + [id_video])[-EXEMPLOS_LEMBRADOS:]
+        anteriores = [] if recomecar else dados.get(lista, [])
+        dados[lista] = (anteriores + [id_video])[-limite:]
     db.atualizar_config(CHAVE_EXEMPLOS, alterar)
 
 
@@ -96,25 +105,29 @@ def exemplo(destino):
     """
     O exemplo para o Rafael ver a edição: o próximo vídeo que o robô pegaria para postar,
     editado em destino, sem postar e sem gastar o vídeo. Cada chamada pega um vídeo que o
-    exemplo ainda não mostrou; mostrados todos, recomeça. Devolve (nome do produto, "")
-    quando deu certo, ou (None, motivo).
+    exemplo ainda não mostrou; sem nenhum novo com a foto do anúncio, recomeça pelos já
+    mostrados. Devolve (nome do produto, "") quando deu certo, ou (None, motivo).
     """
-    mostrados = set((db.ler_config(CHAVE_EXEMPLOS, {}) or {}).get("ids", []))
-    videos_do_exemplo = _videos_do_exemplo(mostrados)
-    if not videos_do_exemplo and mostrados:
-        db.salvar_config(CHAVE_EXEMPLOS, {"ids": []})
-        videos_do_exemplo = _videos_do_exemplo(set())
-    sem_foto = False
-    for id_video, arquivo, link in videos_do_exemplo:
-        foto = ps.foto_do_produto({"link": link})
-        if not foto:
-            sem_foto = True
-            continue
-        motivo = editar(arquivo, foto, destino)
-        if motivo:
-            return None, motivo
-        _lembrar_mostrado(id_video)
-        return ps.nome_do_produto({"link": link}) or "produto do link", ""
-    if sem_foto:
-        return None, "nenhum dos próximos vídeos tem a foto do anúncio na API agora"
+    dados = db.ler_config(CHAVE_EXEMPLOS, {}) or {}
+    mostrados, sem_foto = set(dados.get("ids", [])), set(dados.get("sem_foto", []))
+    algum_sem_foto = False
+    for recomecar in (False, True):
+        pular = sem_foto if recomecar else mostrados | sem_foto
+        for id_video, arquivo, link in _videos_do_exemplo(pular):
+            foto = ps.foto_do_produto({"link": link})
+            if not foto:
+                algum_sem_foto = True
+                sem_foto.add(id_video)
+                _lembrar("sem_foto", id_video, SEM_FOTO_LEMBRADOS)
+                continue
+            motivo = editar(arquivo, foto, destino)
+            if motivo:
+                return None, motivo
+            _lembrar("ids", id_video, EXEMPLOS_LEMBRADOS, recomecar=recomecar)
+            return ps.nome_do_produto({"link": link}) or "produto do link", ""
+        if not mostrados:
+            break
+    if algum_sem_foto or _videos_do_exemplo(set()):
+        return None, ("nenhum dos próximos vídeos tem a foto do anúncio na API agora (os de Ver Produtos, "
+                      "com vários produtos, não têm uma foto só)")
     return None, "nenhum vídeo com o arquivo e o link no servidor agora"

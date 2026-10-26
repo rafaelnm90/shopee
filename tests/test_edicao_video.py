@@ -204,3 +204,45 @@ def test_exemplo_sem_video_diz_o_motivo(monkeypatch):
     _fontes_de_mentira(monkeypatch, {})
     nome, motivo = edicao_video.exemplo("exemplo.mp4")
     assert nome is None and motivo == "nenhum vídeo com o arquivo e o link no servidor agora"
+
+
+def test_exemplo_procura_nas_outras_fontes_quando_a_do_robo_so_tem_ver_produtos(monkeypatch, tmp_path):
+    # 25/10: os próximos do Viral eram quase todos de Ver Produtos (sem uma foto só) e os dois
+    # com foto já tinham sido mostrados; o exemplo olhava só os 10 primeiros do Viral e falhava.
+    arquivo = str(tmp_path / "v.mp4")
+    open(arquivo, "wb").close()
+    viral = [(f"viral:{i}", arquivo, f"https://s.shopee.com.br/sem-foto-{i}", "") for i in range(12)]
+    editados = _fontes_de_mentira(monkeypatch, {"viral": viral, "autorais": [
+        ("a1", arquivo, "https://s.shopee.com.br/a1", "")]}, fonte_do_robo="viral")
+    fotos = []
+    monkeypatch.setattr(edicao_video.ps, "foto_do_produto",
+                        lambda video: fotos.append(video["link"]) or (None if "sem-foto" in video["link"] else b"foto"))
+    assert edicao_video.exemplo("exemplo.mp4") == ("Copo Térmico", "")
+    assert editados == [arquivo] and fotos[-1].endswith("/a1")
+    assert len(fotos) == edicao_video.VIDEOS_POR_FONTE + 1
+    # Os sem foto ficam lembrados: o toque seguinte não pergunta de novo à API por eles.
+    fotos.clear()
+    edicao_video.exemplo("exemplo.mp4")
+    assert not [link for link in fotos if "sem-foto-0" in link]
+
+
+def test_sem_video_novo_com_foto_recomeca_pelos_ja_mostrados(monkeypatch, tmp_path):
+    arquivo = str(tmp_path / "v.mp4")
+    open(arquivo, "wb").close()
+    editados = _fontes_de_mentira(monkeypatch, {"viral": [
+        ("viral:1", arquivo, "https://s.shopee.com.br/1", ""),
+        ("viral:2", arquivo, "https://s.shopee.com.br/sem-foto-2", "")]}, fonte_do_robo="viral")
+    for _ in range(3):
+        assert edicao_video.exemplo("exemplo.mp4") == ("Copo Térmico", "")
+    assert len(editados) == 3
+    assert db.ler_config(edicao_video.CHAVE_EXEMPLOS, {})["ids"] == ["viral:1"]
+
+
+def test_so_videos_sem_foto_diz_que_nenhum_tem_a_foto(monkeypatch, tmp_path):
+    arquivo = str(tmp_path / "v.mp4")
+    open(arquivo, "wb").close()
+    _fontes_de_mentira(monkeypatch, {"viral": [("viral:1", arquivo, "https://s.shopee.com.br/sem-foto-1", "")]},
+                       fonte_do_robo="viral")
+    for _ in range(2):
+        nome, motivo = edicao_video.exemplo("exemplo.mp4")
+        assert nome is None and motivo.startswith("nenhum dos próximos vídeos tem a foto do anúncio")
