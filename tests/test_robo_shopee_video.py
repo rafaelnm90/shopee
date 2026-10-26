@@ -721,7 +721,7 @@ def test_rascunho_dos_autorais_vai_editado_com_a_edicao_ligada(monkeypatch, avis
                      robo.PROCESSO_DA_EDICAO) == ("editado",)
 
 
-def test_sem_edicao_desligada_no_ver_produtos_ou_quando_falha(monkeypatch, tmp_path):
+def test_sem_edicao_desligada_ou_quando_falha(monkeypatch, tmp_path):
     original, copia = str(tmp_path / "original.mp4"), str(tmp_path / "copia.mp4")
     with open(original, "wb") as arquivo:
         arquivo.write(b"original")
@@ -742,9 +742,6 @@ def test_sem_edicao_desligada_no_ver_produtos_ou_quando_falha(monkeypatch, tmp_p
     robo.copiar_para_o_rascunho(video, "autorais", copia)
     assert open(copia, "rb").read() == b"original" and not chamadas
     ativar(edicao_ligada=True)
-    # Vídeo com Ver Produtos (vários produtos, sem uma foto só): sem edição.
-    robo.copiar_para_o_rascunho(dict(video, de_video=True), "autorais", copia)
-    assert not chamadas
     # A edição que não sai não para o rascunho: ele vai com o vídeo como veio.
     os.remove(copia)
     robo.copiar_para_o_rascunho(video, "viral", copia)
@@ -754,6 +751,46 @@ def test_sem_edicao_desligada_no_ver_produtos_ou_quando_falha(monkeypatch, tmp_p
     # Todos os vídeos do Rafael são autorais: o do Viral também vai editado.
     robo.copiar_para_o_rascunho(video, "viral", copia)
     assert open(copia, "rb").read() == b"editado"
+
+
+def test_ver_produtos_vai_editado_com_a_foto_do_1o_produto_anexado(monkeypatch, tmp_path):
+    # Escolha do Rafael (25/10, P39): no vídeo de Ver Produtos (vários produtos), a foto da
+    # edição é a do anúncio do 1º produto anexado, achado na API pelo nome.
+    original, copia = str(tmp_path / "original.mp4"), str(tmp_path / "copia.mp4")
+    with open(original, "wb") as arquivo:
+        arquivo.write(b"original")
+    fotos, buscas = [], []
+
+    def editar(video, foto, destino):
+        fotos.append(foto)
+        if not foto:
+            return "a foto do anúncio não veio"
+        with open(destino, "wb") as arquivo:
+            arquivo.write(b"editado")
+        return ""
+
+    async def buscar(termo, limite=10, sort_type=2):
+        buscas.append((termo, sort_type))
+        return [{"productName": "Capinha Transparente Celular", "imageUrl": "https://cf.shopee.com.br/outra"},
+                {"productName": "Vestido Infantil Estampado Gatinho Verão Menina",
+                 "imageUrl": "https://cf.shopee.com.br/vestido"}]
+
+    monkeypatch.setattr(robo.api_shopee, "buscar_ofertas_shopee", buscar)
+    monkeypatch.setattr(robo.ps, "baixar_foto", lambda endereco: b"foto de " + endereco.encode())
+    monkeypatch.setattr(robo.ps, "foto_do_produto", lambda video: pytest.fail("o link é de vídeo, não de produto"))
+    monkeypatch.setattr(robo.edicao_video, "editar", editar)
+    ativar(edicao_ligada=True)
+    video = {"arquivo": original, "link": LINK, "de_video": True}
+    robo.copiar_para_o_rascunho(video, "viral", copia, ["Vestido Infantil Estampado Gatinho Verão Menina", "Laço"])
+    assert fotos == [b"foto de https://cf.shopee.com.br/vestido"] and open(copia, "rb").read() == b"editado"
+    # Busca pelo nome, por relevância (1), com as primeiras palavras.
+    assert buscas == [("Vestido Infantil Estampado Gatinho Verão Menina", 1)]
+    # Nenhuma oferta com o nome parecido o bastante: segue sem a edição, com o vídeo como veio.
+    os.remove(copia)
+    robo.copiar_para_o_rascunho(video, "viral", copia, ["Tênis Esportivo Corrida Masculino"])
+    assert fotos[-1] is None and open(copia, "rb").read() == b"original"
+    assert consultar("SELECT resultado, detalhe FROM registro_processos WHERE processo = ? ORDER BY rowid DESC",
+                     robo.PROCESSO_DA_EDICAO) == ("sem edição", "a foto do anúncio não veio")
 
 
 NOME_NO_APP = "Vestidinho Gatinho Estampado Menina Infantil Verão"
