@@ -604,6 +604,9 @@ MINUTOS_DO_TREINO = 30
 
 def _linha_treino(agora=None):
     estado = robo.ler_estado()
+    if estado.get("treino_depois_da_suspensao"):
+        # A segunda caiu na suspensão: o treino roda logo que ela acaba (P41).
+        return "⏳ o desta semana roda logo que a suspensão acabar"
     if not estado.get("treino_em"):
         return "ainda não rodou"
     resultado = estado.get("treino_resultado") or ""
@@ -794,7 +797,8 @@ COMO_FUNCIONA = (
     "fim da suspensão, ele não prepara, não posta e não testa o caminho (a Shopee fecha o Postar vídeo), e o "
     "assistente espera; a limpeza dos favoritos, as respostas aos comentários, o feed e a Saúde do Vídeo "
     "continuam, e com o celular fora da tomada ele só pula. No fim, os dois voltam sozinhos (se você pausou o "
-    "robô no meio, ele continua pausado)."
+    "robô no meio, ele continua pausado), e o teste do caminho da segunda que caiu na suspensão roda logo "
+    "no começo."
 )
 
 

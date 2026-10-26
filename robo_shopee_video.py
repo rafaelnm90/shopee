@@ -38,7 +38,7 @@ link da tela do celular no privado. Com a conta de Shopee Vídeo suspensa pela S
 aviso fica nas Notificações do app), não prepara, não posta e não treina até o fim da
 suspensão (o Postar vídeo fica fechado), e o modo assistente espera junto; o resto segue
 no horário de sempre, e com o celular fora da tomada só pula. No fim, os dois voltam
-sozinhos (painel_shopee_video).
+sozinhos (painel_shopee_video), e o treino da segunda que caiu na suspensão roda primeiro.
 
 Nunca toca em Postar sem o Aprovar do Rafael no bot, nem nos botões de comprar. Curtir e
 comentar o próprio vídeo continuam à mão: depois de postar, o comentário chega no
@@ -415,8 +415,26 @@ def semana(agora=None):
 
 
 def treino_da_semana_pendente(agora=None):
-    """É segunda-feira e o treino desta semana ainda não rodou?"""
-    return agora_br(agora).weekday() == DIA_DO_TREINO and ler_estado().get("treino_semana") != semana(agora)
+    """
+    O treino tem de rodar? Na segunda, se o desta semana ainda não rodou; e o da segunda
+    que caiu na suspensão da conta, logo que ela acaba (adiar_treino_da_suspensao).
+    """
+    estado = ler_estado()
+    if estado.get("treino_depois_da_suspensao"):
+        return True
+    return agora_br(agora).weekday() == DIA_DO_TREINO and estado.get("treino_semana") != semana(agora)
+
+
+def adiar_treino_da_suspensao(agora=None):
+    """
+    Na suspensão o treino não roda (ele passa pelo Postar vídeo, que a Shopee fecha): o da
+    segunda que cai nela roda logo que ela acaba, antes de voltar a postar. Escolha do
+    Rafael (P41): DECISOES.md, Shopee Vídeo.
+    """
+    estado = ler_estado()
+    if (not estado.get("treino_depois_da_suspensao") and agora_br(agora).weekday() == DIA_DO_TREINO
+            and estado.get("treino_semana") != semana(agora)):
+        gravar_estado(treino_depois_da_suspensao=True)
 
 
 # --- Suspensão da conta pela Shopee ---
@@ -2643,7 +2661,8 @@ def treinar(d, agora=None):
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     # O resultado do treino anterior sai: enquanto este roda, o painel mostra "rodando".
-    gravar_estado(treino_semana=semana(agora), treino_em=_momento(agora), treino_resultado="")
+    gravar_estado(treino_semana=semana(agora), treino_em=_momento(agora), treino_resultado="",
+                  treino_depois_da_suspensao=False)
     try:
         ultimo = (listar(*NO_APP, "postado", "apagado") or [None])[-1]
         if ultimo:
@@ -3218,8 +3237,10 @@ def rodada(treino=False, preparar=False, d=None, agora=None, saude=False):
             return "pausado"
         if suspensa(config, agora):
             # Os horários de rascunho que passam na suspensão são pulados, como pausado: o
-            # preparo e a postagem esperam o fim (o_que_fazer), e o resto segue.
+            # preparo e a postagem esperam o fim (o_que_fazer), e o resto segue. O treino da
+            # segunda fica para logo depois do fim.
             consumir_horarios(config, agora)
+            adiar_treino_da_suspensao(agora)
         if not no_horario(config, agora):
             return "fora do Horário do Robô"
     elif suspensa(config, agora) and not saude:
