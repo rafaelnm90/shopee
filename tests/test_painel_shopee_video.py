@@ -609,6 +609,16 @@ def test_treino_sem_resultado_depois_de_meia_hora_diz_que_nao_terminou(bm):
     assert sv._linha_treino(datetime(2026, 10, 23, 4, 53)) == "✅ caminho OK em 23/10 às 00:00"
 
 
+
+def test_treino_adiado_pela_suspensao_aparece_no_painel(bm):
+    # Escolha do Rafael (P41): o treino da segunda que caiu na suspensão roda logo depois dela.
+    sv = _painel(bm)
+    sv.robo.gravar_estado(treino_em="2026-10-19 10:00:00", treino_resultado="ok", treino_depois_da_suspensao=True)
+    assert sv._linha_treino() == "⏳ o desta semana roda logo que a suspensão acabar"
+    sv.robo.gravar_estado(treino_depois_da_suspensao=False)
+    assert sv._linha_treino().startswith("✅ caminho OK")
+
+
 def test_historico_do_robo_mostra_as_tentativas_e_o_resumo_das_22h(bm, Msg, Est, monkeypatch):
     # Escolha do Rafael (23/10): ver o que o robô já tentou, o que deu errado e onde parou.
     sv, est = _painel(bm), Est()

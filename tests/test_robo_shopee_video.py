@@ -2350,6 +2350,42 @@ def test_na_suspensao_so_o_preparo_a_postagem_e_o_treino_esperam(monkeypatch, av
     assert robo.o_que_fazer(robo.ler_config(), segunda) == ("treino", None)
 
 
+
+def test_treino_da_segunda_na_suspensao_roda_logo_depois_do_fim(monkeypatch, avisos):
+    # Escolha do Rafael (P41): o treino da segunda que cai na suspensão roda logo que ela
+    # acaba, antes de voltar a preparar e postar, e não fica para a segunda seguinte.
+    ativar(robo_inicio=0, robo_fim=24, robo_suspenso_ate="2026-10-28 14:41:00")
+    robo.gravar_estado(treino_semana=robo.semana(momento("2026-10-19 10:00")))
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo.av, "tela_aberta", lambda: False)
+    monkeypatch.setattr(robo.celular_robo, "conectado", lambda: False)
+    monkeypatch.setattr(robo.celular_robo, "reconectar_sozinho", lambda: (False, "fora da tomada"))
+    # Domingo, na suspensão: ainda não é o dia do treino, nada fica marcado.
+    robo.rodada(agora=momento("2026-10-25 10:00"))
+    assert not robo.ler_estado().get("treino_depois_da_suspensao")
+    # Segunda, na suspensão e com o celular fora: o treino fica para depois do fim.
+    assert "celular fora (esperado)" in robo.rodada(agora=momento("2026-10-26 10:00"))
+    assert robo.ler_estado()["treino_depois_da_suspensao"] is True
+    config = robo.ler_config()
+    assert robo.o_que_fazer(config, momento("2026-10-27 10:00")) != ("treino", None)
+    # Quarta, acabada a suspensão: a primeira rodada faz o treino antes de tudo.
+    monkeypatch.setattr(robo, "consumir_horarios", lambda config, agora=None: True)
+    assert robo.fim_da_suspensao(momento("2026-10-28 15:00"))
+    quarta = momento("2026-10-28 15:00")
+    assert robo.o_que_fazer(robo.ler_config(), quarta) == ("treino", None)
+    # O treino rodou (aqui, parado no primeiro passo): a marca sai, e na quinta o robô volta
+    # ao preparo de sempre.
+    monkeypatch.setattr(robo, "listar", lambda *estados: (_ for _ in ()).throw(robo.Parada("tela")))
+    monkeypatch.setattr(robo, "_print_do_treino", lambda d, legenda: None)
+    monkeypatch.setattr(robo, "_sair_sem_salvar", lambda d: None)
+    assert robo.treinar(None, quarta) == "treino: mudou (tela)"
+    assert robo.ler_estado()["treino_depois_da_suspensao"] is False
+    monkeypatch.undo()
+    monkeypatch.setattr(robo, "saude_do_dia_pendente", lambda agora=None: False)
+    monkeypatch.setattr(robo, "consumir_horarios", lambda config, agora=None: True)
+    assert robo.o_que_fazer(robo.ler_config(), momento("2026-10-29 10:00")) == ("rascunho", None)
+
+
 def test_celular_fora_na_suspensao_nao_pausa_nem_avisa(monkeypatch, avisos):
     # Pedido do Rafael (24/10): na suspensão ele pode tirar o Motorola do carregador.
     monkeypatch.setattr(robo, "saude_do_dia_pendente", SAUDE_DO_DIA)
