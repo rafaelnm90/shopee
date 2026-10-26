@@ -157,10 +157,10 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     O ffmpeg da edição: a foto em tela cheia (fundo branco) por `segundos`, depois o vídeo
     em 720x1280 com a foto em miniatura (`miniatura` px de largura) com o centro em
     `centro` (x, y) até o fim. Com `seta` (uma animação APNG com fundo transparente), a seta
-    com o centro em `centro_seta` desde o começo, por cima da foto e do vídeo, como
-    na linha do tempo do LumaFusion; `pulso_da_seta` = (primeiro quadro, quantos quadros) é o
-    trecho do fim da animação que se repete até o fim do vídeo. O som do vídeo começa depois
-    da foto, que vai em silêncio; vídeo sem som sai sem som.
+    com o centro em `centro_seta`, do começo do vídeo, logo depois da foto, até o fim;
+    `pulso_da_seta` = (primeiro quadro, quantos quadros) é o trecho do fim da animação que
+    se repete até o fim do vídeo. O som do vídeo começa depois da foto, que vai em silêncio;
+    vídeo sem som sai sem som.
     """
     tela = f"{FILTRO_720P},setsar=1,fps={QUADROS_POR_SEGUNDO},format=yuv420p"
     filtro = (f"[0:v]{tela.replace('color=black', 'color=white')}[foto];"
@@ -171,10 +171,10 @@ def comando_foto_e_miniatura(foto, video, destino, segundos, miniatura, centro, 
     if seta:
         inicio, quadros = pulso_da_seta
         entradas += ["-i", seta]
-        filtro += ("[foto][comfoto]concat=n=2:v=1:a=0[juntos];"
-                   f"[3:v]loop=loop=-1:size={quadros}:start={inicio}[seta];"
-                   f"[juntos][seta]overlay=x={centro_seta[0]}-w/2:y={centro_seta[1]}-h/2:shortest=1,"
-                   "format=yuv420p[v]")
+        filtro += (f"[3:v]loop=loop=-1:size={quadros}:start={inicio}[seta];"
+                   f"[comfoto][seta]overlay=x={centro_seta[0]}-w/2:y={centro_seta[1]}-h/2:shortest=1,"
+                   "format=yuv420p[editado];"
+                   "[foto][editado]concat=n=2:v=1:a=0[v]")
     else:
         filtro += "[foto][comfoto]concat=n=2:v=1:a=0[v]"
     saida = ["-map", "[v]"]

@@ -53,11 +53,11 @@ def test_edita_com_a_foto_no_comeco_a_miniatura_no_canto_e_a_seta(monkeypatch, t
     assert "720:1280" in filtro
     assert f"-t {edicao_video.SEGUNDOS_DA_FOTO}" in " ".join(ffmpeg) and "scale=180:-2" in filtro
     assert "overlay=x=576-w/2:y=128-h/2:shortest=1" in filtro
-    # A seta entra depois de juntar a foto e o vídeo: começa com o vídeo, por cima dos dois,
-    # e o pulso do fim do arquivo (quadros 111 a 140) se repete até o fim.
-    assert "[foto][comfoto]concat=n=2:v=1:a=0[juntos]" in filtro
-    assert "[3:v]loop=loop=-1:size=30:start=111[seta]" in filtro
-    assert "[juntos][seta]overlay=x=142-w/2:y=846-h/2:shortest=1" in filtro
+    # A seta entra só no vídeo, logo depois da foto (pedido do Rafael, 25/10), e o pulso do fim
+    # do arquivo (quadros 72 a 101) se repete até o fim.
+    assert "[3:v]loop=loop=-1:size=30:start=72[seta]" in filtro
+    assert "[comfoto][seta]overlay=x=142-w/2:y=846-h/2:shortest=1,format=yuv420p[editado]" in filtro
+    assert "[foto][editado]concat=n=2:v=1:a=0[v]" in filtro
     entradas = [ffmpeg[i + 1] for i, parte in enumerate(ffmpeg) if parte == "-i"]
     assert entradas[3] == edicao_video.SETA
     # Com som: o áudio do vídeo começa depois da foto, que vai em silêncio.
@@ -77,10 +77,12 @@ def test_a_seta_e_a_do_rafael_sem_fundo_com_a_entrada_e_um_pulso():
         primeiro = arquivo.copy()
         arquivo.seek(inicio + quadros // 2)
         pulso = arquivo.copy()
-    # Antes de 1,6 s ainda não há seta; no pulso ela é vermelha, num fundo todo transparente.
+    # O primeiro quadro já é o começo do desenho (a seta aparece logo depois da foto, sem
+    # espera); no pulso ela é vermelha, num fundo todo transparente.
     largura, altura = pulso.size
-    assert all(primeiro.getpixel((x, y))[3] == 0 for x in range(0, largura, 3) for y in range(0, altura, 3))
     pixels = [pulso.getpixel((x, y)) for x in range(largura) for y in range(altura)]
+    comeco = [primeiro.getpixel((x, y))[3] for x in range(largura) for y in range(altura)]
+    assert 0 < sum(1 for a in comeco if a) < len(pixels) * 0.02
     vermelhos = [p for p in pixels if p[3] == 255 and p[0] > 180 and p[1] < 40 and p[2] < 40]
     transparentes = [p for p in pixels if p[3] == 0]
     assert len(vermelhos) > len(pixels) * 0.1 and len(transparentes) > len(pixels) * 0.4
@@ -107,19 +109,28 @@ def test_edicao_de_verdade_tem_a_seta_sem_fundo_ate_o_fim(tmp_path):
                     "-frames:v", "1", str(foto)], check=True)
     destino = tmp_path / "editado.mp4"
     assert edicao_video.editar(str(video), foto.read_bytes(), str(destino)) == ""
-    quadro = tmp_path / "quadro.ppm"
-    # 7,5 s: depois dos 5,6 s do arquivo da seta, já no pulso repetido.
-    subprocess.run(["ffmpeg", "-v", "error", "-ss", "7.5", "-i", str(destino), "-frames:v", "1", str(quadro)],
-                   check=True)
     from PIL import Image
-    with Image.open(quadro) as imagem:
-        tela = imagem.convert("RGB")
-    assert tela.size == (720, 1280)
-    cx, cy = edicao_video.CENTRO_DA_SETA
-    recorte = [tela.getpixel((x, y)) for x in range(cx - 90, cx + 90, 2) for y in range(cy - 68, cy + 68, 2)]
-    vermelhos = [p for p in recorte if p[0] > 150 and p[1] < 70 and p[2] < 70]
-    escuros = [p for p in recorte if max(p) < 90]
-    assert len(vermelhos) > len(recorte) * 0.05 and not escuros
+
+    def onde_fica_a_seta(segundo):
+        quadro = tmp_path / f"quadro_{segundo}.ppm"
+        subprocess.run(["ffmpeg", "-v", "error", "-ss", str(segundo), "-i", str(destino), "-frames:v", "1",
+                        str(quadro)], check=True)
+        with Image.open(quadro) as imagem:
+            tela = imagem.convert("RGB")
+        assert tela.size == (720, 1280)
+        cx, cy = edicao_video.CENTRO_DA_SETA
+        recorte = [tela.getpixel((x, y)) for x in range(cx - 90, cx + 90, 2) for y in range(cy - 68, cy + 68, 2)]
+        vermelhos = [p for p in recorte if p[0] > 150 and p[1] < 70 and p[2] < 70]
+        escuros = [p for p in recorte if max(p) < 90]
+        return len(vermelhos) / len(recorte), escuros
+
+    # Na foto (os 2 primeiros segundos), nada de seta; ela começa a se desenhar com o vídeo.
+    assert onde_fica_a_seta(1.9) == (0, [])
+    vermelho, escuros = onde_fica_a_seta(2.6)
+    assert vermelho > 0 and not escuros
+    # 7,5 s: depois do fim do arquivo da seta, já no pulso repetido.
+    vermelho, escuros = onde_fica_a_seta(7.5)
+    assert vermelho > 0.05 and not escuros
 
 
 def test_video_sem_som_sai_sem_som(monkeypatch, tmp_path):

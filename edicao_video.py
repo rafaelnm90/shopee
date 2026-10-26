@@ -33,12 +33,12 @@ CENTRO_DA_MINIATURA = (576, 128)
 # A seta é a do Rafael (o arquivo Seta_da_Shopee que ele usa no LumaFusion), com o fundo
 # preto tirado: só o pedaço com a seta, já no tamanho dele (62,9%, posição X -23 e Y 16), com
 # o centro perto do canto de baixo à esquerda, apontando para onde a Shopee mostra o produto.
-# Ela começa com o vídeo, aparece se desenhando aos 1,6 s (por cima da foto, como na linha do
-# tempo dele) e pulsa: o arquivo guarda a entrada e um pulso (quadros 111 a 140, 1,2 s), que
-# se repete até o fim. Pedido do Rafael (25/10): DECISOES.md, Shopee Vídeo.
+# Ela começa logo depois da foto, já se desenhando quando o vídeo começa, e pulsa: o arquivo
+# guarda a entrada e um pulso (quadros 72 a 101, 1,2 s), que se repete até o fim do vídeo.
+# Pedido do Rafael (25/10): DECISOES.md, Shopee Vídeo.
 SETA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "midia", "seta_da_shopee.apng")
 CENTRO_DA_SETA = (142, 846)
-PULSO_DA_SETA = (111, 30)
+PULSO_DA_SETA = (72, 30)
 # Uns minutos bastam para um vídeo curto; depois disso o rascunho segue sem a edição.
 ESPERA_MAXIMA = 300
 # Quantos vídeos o exemplo tenta até achar um com a foto do anúncio na API.
