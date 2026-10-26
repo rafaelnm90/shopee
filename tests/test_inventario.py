@@ -98,3 +98,24 @@ def test_baixador_por_hora_so_contagens():
     assert por_hora["2026-10-04 08"] == {"pedido(s) liberado(s)": 1, "entregue(s)": 1,
                                          "trava(s) de canais": 1, "trava(s) expirada(s) sem entrar": 1}
     assert por_hora["2026-10-04 15"] == {"entregue(s)": 1}
+
+
+def test_docker_e_android_so_tipos_e_tamanhos(capsys, monkeypatch):
+    # Pergunta do Rafael (26/10): o que acumula sem necessidade no servidor. A imagem do
+    # Android virtual (sem uso desde 05/10) fica no Docker, fora da pasta do projeto.
+    def comando(*partes):
+        if "system" in partes:
+            return 0, "Images|2|1.9GB|1.9GB (100%)\nContainers|1|0B|0B\nLocal Volumes|0|0B|0B"
+        if "du" in partes:
+            return 0, "524288000\t/home/ubuntu/android_shopee"
+        return None
+
+    monkeypatch.setattr(inventario, "_comando", comando)
+    inventario.docker_e_android()
+    saida = capsys.readouterr().out
+    assert "Docker Images:" in saida and "1.9GB" in saida and "sem uso: 1.9GB (100%)" in saida
+    assert "~/android_shopee/" in saida and "500.0 MB" in saida
+
+    monkeypatch.setattr(inventario, "_comando", lambda *partes: None)
+    inventario.docker_e_android()
+    assert "Docker: não deu para medir" in capsys.readouterr().out
