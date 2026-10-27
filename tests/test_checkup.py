@@ -365,6 +365,8 @@ def test_rotinas_espacamento_assunto_seguido_e_o_configurado():
     r = checkup.rotinas_do_dia(AGORA)
     principal = r["canal principal"]
     assert (principal["enviadas"], principal["menor"], principal["curtos"], principal["seguidos"]) == (4, 5, 1, 1)
+    # Qual foi o mesmo assunto em seguida, com os horários (26/10: só o número não dizia qual).
+    assert principal["pares_seguidos"] == ["10:00 incentivo → 10:05 incentivo"]
     assert ("incentivo", 3, 2, "a mais") in principal["fora_do_previsto"]
     assert ("link_grupo", 1, 3, "a menos") in principal["fora_do_previsto"]
     assert r["Grupo Público"]["fora_do_previsto"] == []

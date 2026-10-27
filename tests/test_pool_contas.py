@@ -141,6 +141,9 @@ def test_checagem_com_erro_guarda_o_motivo_e_nao_muda_o_estado(pc, monkeypatch):
     conta_a = pc.obter_conta("A")
     assert conta_a["status_grupo"] == pc.STATUS_DESCONHECIDO
     assert conta_a["ultimo_erro"] == "RuntimeError: rede caiu"
+    # O tipo do erro vai ao registro: o checkup só via a forma da linha do log (26/10, 6x).
+    linhas = pc.registro_processos.contagem("2000-01-01 00:00:00")
+    assert any(l[:4] == ("autorais", "checagem da conta", "erro", "RuntimeError") for l in linhas)
 
 
 def test_conta_sem_papel_tambem_tem_o_canal_conferido(pc, monkeypatch):
