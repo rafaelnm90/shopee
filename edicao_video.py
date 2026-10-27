@@ -158,12 +158,20 @@ TRECHO_MINIMO = 1.5
 # perto disso, ele corta e acelera menos.
 MINIMO_DO_REMONTADO = 8
 
-# Os textos da tela: um de cada vez, no alto, abaixo da miniatura (que vai até uns 250 px)
-# e longe da seta e dos botões do app, em letra grande (a regra 13 da Shopee pune texto
-# pequeno ou sobreposto).
-TOPO_DOS_TEXTOS = 280
-LARGURA_DOS_TEXTOS = 600
-LETRA_DOS_TEXTOS = (54, 34)         # a maior e a menor
+# Os textos da tela: um de cada vez, longe da seta e dos botões do app, em letra que se lê
+# bem (a regra 13 da Shopee pune texto pequeno ou sobreposto), mas sem tampar o produto: a
+# caixa ocupa uns 7% da tela, e em cada vídeo a IA escolhe o lugar em que ela não cobre o
+# produto nem o rosto de alguém (escolha do Rafael, P46: a letra grande, logo abaixo da
+# miniatura, cobria o alto do móvel e o decote do vestido). Os lugares, em (x, topo, largura
+# máxima das linhas; a caixa tem mais 56 px de margem) no vídeo de 720x1280; x None =
+# centralizado:
+# - "alto": no topo, à esquerda, ao lado da miniatura (que vai de x 486 a 666);
+# - "meio": logo abaixo da miniatura (que vai até uns 250 px), centralizado.
+LUGARES_DOS_TEXTOS = {"alto": (24, 110, 390), "meio": (None, 280, 480)}
+LUGAR_PADRAO = "alto"
+TOPO_DOS_TEXTOS = LUGARES_DOS_TEXTOS["meio"][1]
+LARGURA_DOS_TEXTOS = LUGARES_DOS_TEXTOS["meio"][2]
+LETRA_DOS_TEXTOS = (40, 28)         # a maior e a menor
 SEGUNDOS_DE_CADA_TEXTO = 3.0
 FUNDO_DOS_TEXTOS = (20, 20, 20, 200)
 FUNDO_DO_PRECO = (238, 77, 45, 230)  # o laranja da Shopee
@@ -184,7 +192,11 @@ PROMPT_DOS_TEXTOS = (
     "desconto, promoção, emoji ou hashtag.\n"
     "Diga também onde alguém fala no vídeo (voz de gente, não música): \"falas\", a lista dos trechos em "
     "segundos desde o começo do vídeo, como [[início, fim], ...]; [] se ninguém fala.\n"
-    "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"falas\": [[0.0, 0.0]]}}"
+    "E onde os textos podem ficar sem cobrir o produto nem o rosto de alguém, na maior parte do vídeo: "
+    "\"lugar\", \"alto\" (no topo, à esquerda, entre uns 8% e 18% da altura) ou \"meio\" (centralizado, "
+    "entre uns 22% e 33% da altura).\n"
+    "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"falas\": [[0.0, 0.0]], "
+    "\"lugar\": \"alto\"}}"
 )
 
 # Onde alguém fala, o vídeo fica inteiro e na velocidade normal: nada de corte, aceleração
@@ -315,8 +327,11 @@ def ritmo(movimentos, duracao, por_segundo=QUADROS_DO_MOVIMENTO, com_fala=frozen
     return trechos
 
 
-def letreiro(texto, fundo=FUNDO_DOS_TEXTOS):
-    """O texto da tela (PNG com fundo transparente, bytes): letras brancas numa caixa de cantos redondos."""
+def letreiro(texto, fundo=FUNDO_DOS_TEXTOS, largura_maxima=None):
+    """
+    O texto da tela (PNG com fundo transparente, bytes): letras brancas numa caixa de cantos
+    redondos, com as linhas até largura_maxima (padrão: LARGURA_DOS_TEXTOS).
+    """
     import io
 
     import matplotlib
@@ -324,19 +339,20 @@ def letreiro(texto, fundo=FUNDO_DOS_TEXTOS):
     fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
     rascunho = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
     maior, menor = LETRA_DOS_TEXTOS
+    limite = largura_maxima or LARGURA_DOS_TEXTOS
     for tamanho in range(maior, menor - 1, -2):
         fonte = ImageFont.truetype(fonte_ttf, tamanho)
         linhas, linha = [], ""
         # Só o espaço comum separa as linhas: o espaço fixo ("R$ 39,90") não quebra.
         for palavra in [p for p in texto.split(" ") if p]:
             tentativa = f"{linha} {palavra}".strip()
-            if not linha or rascunho.textlength(tentativa, font=fonte) <= LARGURA_DOS_TEXTOS:
+            if not linha or rascunho.textlength(tentativa, font=fonte) <= limite:
                 linha = tentativa
             else:
                 linhas.append(linha)
                 linha = palavra
         linhas.append(linha)
-        if len(linhas) <= 2 and all(rascunho.textlength(t, font=fonte) <= LARGURA_DOS_TEXTOS for t in linhas):
+        if len(linhas) <= 2 and all(rascunho.textlength(t, font=fonte) <= limite for t in linhas):
             break
     altura_da_linha = round(tamanho * 1.25)
     largura = round(max(rascunho.textlength(t, font=fonte) for t in linhas)) + 2 * 28
@@ -380,6 +396,8 @@ def textos_da_tela(video, nome):
     textos = {"nome": _so_letras(str(dados.get("nome") or ""), MAXIMO_DO_NOME),
               "vantagem": _so_letras(str(dados.get("vantagem") or ""), MAXIMO_DA_VANTAGEM)}
     textos = {chave: valor for chave, valor in textos.items() if valor}
+    if dados.get("lugar") in LUGARES_DOS_TEXTOS:
+        textos["lugar"] = dados["lugar"]
     falas = _falas(dados.get("falas"))
     if falas is not None:
         textos["falas"] = falas
@@ -421,12 +439,13 @@ def horarios_dos_textos(textos, duracao):
             for i, texto in enumerate(textos)]
 
 
-def editar_2(video, foto, destino, nome="", vantagem="", preco=None, falas=None):
+def editar_2(video, foto, destino, nome="", vantagem="", preco=None, falas=None, lugar=None):
     """
     O Editor 2 em destino: o vídeo remontado (ritmo), com os textos da tela, e depois o
     Editor 1 por cima. falas: os trechos com fala da IA ([(início, fim)]); None = sem a
-    resposta dela (aí vale o som). Devolve (motivo, resumo): motivo "" quando deu certo;
-    resumo diz o que mudou, para o Rafael comparar.
+    resposta dela (aí vale o som). lugar: onde vão os textos ("alto" ou "meio", da IA; sem
+    ela, LUGAR_PADRAO). Devolve (motivo, resumo): motivo "" quando deu certo; resumo diz o
+    que mudou, para o Rafael comparar.
     """
     import tempfile
     original = videos.duracao(video)
@@ -438,17 +457,20 @@ def editar_2(video, foto, destino, nome="", vantagem="", preco=None, falas=None)
     fundos = {texto: FUNDO_DOS_TEXTOS for texto in (nome, vantagem) if texto}
     if texto_do_preco(preco):
         fundos[texto_do_preco(preco)] = FUNDO_DO_PRECO
+    lugar = lugar if lugar in LUGARES_DOS_TEXTOS else LUGAR_PADRAO
+    x_do_lugar, topo, largura_maxima = LUGARES_DOS_TEXTOS[lugar]
     letreiros = []
     for texto, inicio, fim in horarios_dos_textos(list(fundos), remontado):
-        imagem = letreiro(texto, fundos[texto])
+        imagem = letreiro(texto, fundos[texto], largura_maxima)
         # A largura está no cabeçalho do PNG (bytes 16 a 20).
         largura = int.from_bytes(imagem[16:20], "big")
-        letreiros.append((imagem, inicio, fim, (TELA[0] - largura) // 2, TOPO_DOS_TEXTOS))
+        x = (TELA[0] - largura) // 2 if x_do_lugar is None else x_do_lugar
+        letreiros.append((imagem, inicio, fim, x, topo))
     resumo = {"original": original, "remontado": remontado,
               "cortado": original - sum(fim - inicio for inicio, fim, _ in trechos),
               "acelerados": sum(1 for *_, v in trechos if v > 1),
               "camera_lenta": sum(1 for *_, v in trechos if v < 1),
-              "com_fala": sum(min(JANELA, original - i * JANELA) for i in com_fala),
+              "com_fala": sum(min(JANELA, original - i * JANELA) for i in com_fala), "lugar": lugar,
               "textos": [texto for texto, *_ in horarios_dos_textos(list(fundos), remontado)]}
     with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
         corpo = os.path.join(pasta, "remontado.mp4")
@@ -553,7 +575,8 @@ def exemplo_editor_2(destino):
         produto = _produto_do_link(link)
         textos = textos_da_tela(arquivo, produto["nome"]) if produto.get("nome") else {}
         motivo, resumo = editar_2(arquivo, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
-                                  produto.get("preco"), textos.get("falas"))
+                                  produto.get("preco"), textos.get("falas"), textos.get("lugar"))
+        resumo["lugar_da_ia"] = "lugar" in textos
         resumo["textos_da_ia"] = bool(textos.get("nome") or textos.get("vantagem"))
         return motivo, resumo
 

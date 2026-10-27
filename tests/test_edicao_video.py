@@ -410,7 +410,7 @@ def test_editor_2_de_verdade_tira_o_parado_e_poe_os_textos(tmp_path):
     destino = tmp_path / "editado.mp4"
     # A IA disse que ninguém fala (o som é só um apito): os parados podem sair.
     motivo, resumo = edicao_video.editar_2(str(video), _foto_jpg(), str(destino), "Copo Térmico", "", 39.9,
-                                           falas=[])
+                                           falas=[], lugar="meio")
     assert motivo == ""
     # Os 6 s parados saem; dos 9 s mexendo, 1 s vai em câmera lenta. A foto continua no começo.
     assert resumo["cortado"] == 6 and resumo["camera_lenta"] == 1 and resumo["acelerados"] == 0
@@ -420,12 +420,12 @@ def test_editor_2_de_verdade_tira_o_parado_e_poe_os_textos(tmp_path):
     assert resumo["textos"] == ["Copo Térmico", "A partir de R$ 39,90"]
     from PIL import Image
 
-    def caixa_do_texto(segundo):
+    def caixa_do_texto(segundo, ponto=(360, edicao_video.LUGARES_DOS_TEXTOS["meio"][1] + 6)):
         quadro = tmp_path / f"quadro_{segundo}.ppm"
         subprocess.run(["ffmpeg", "-v", "error", "-ss", str(segundo), "-i", str(destino), "-frames:v", "1",
                         str(quadro)], check=True)
         with Image.open(quadro) as imagem:
-            return imagem.convert("RGB").getpixel((360, edicao_video.TOPO_DOS_TEXTOS + 6))
+            return imagem.convert("RGB").getpixel(ponto)
 
     # O nome logo depois da foto (caixa escura) e o preço no fim (caixa laranja).
     assert max(caixa_do_texto(3.0)) < 80
@@ -436,6 +436,9 @@ def test_editor_2_de_verdade_tira_o_parado_e_poe_os_textos(tmp_path):
     motivo, resumo = edicao_video.editar_2(str(video), _foto_jpg(), str(destino), "Copo", "", None,
                                            falas=[(0.5, 2.5)])
     assert motivo == "" and resumo["cortado"] == 3 and resumo["com_fala"] == 3
+    # Sem o lugar da IA, o texto vai no padrão: no alto, à esquerda, ao lado da miniatura (P46).
+    x, topo, _ = edicao_video.LUGARES_DOS_TEXTOS[edicao_video.LUGAR_PADRAO]
+    assert resumo["lugar"] == "alto" and max(caixa_do_texto(2.8, (x + 12, topo + 6))) < 80
     # Sem a resposta da IA, todo trecho com som conta como fala: nada é cortado.
     motivo, resumo = edicao_video.editar_2(str(video), _foto_jpg(), str(destino), "Copo", "", None)
     assert motivo == "" and resumo["cortado"] == 0 and resumo["acelerados"] == 0
@@ -462,7 +465,7 @@ def test_exemplo_do_editor_2_tem_a_lista_propria_e_o_preco_da_api(monkeypatch, t
     monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome: {"nome": "Copo Térmico"})
     pedidos = []
 
-    def editar_2(video, foto, destino, nome="", vantagem="", preco=None, falas=None):
+    def editar_2(video, foto, destino, nome="", vantagem="", preco=None, falas=None, lugar=None):
         pedidos.append((video, nome, vantagem, preco))
         return "", {"textos": [nome]}
 
@@ -513,6 +516,11 @@ def test_ia_diz_onde_tem_fala_e_resposta_torta_vira_sem_resposta(monkeypatch):
     assert edicao_video.textos_da_tela("v.mp4", "Copo")["falas"] == []
     responde('{"nome": "Copo", "falas": "o vídeo inteiro"}')
     assert "falas" not in edicao_video.textos_da_tela("v.mp4", "Copo")
+    # O lugar dos textos (P46): só "alto" ou "meio" valem.
+    responde('{"nome": "Copo", "lugar": "meio"}')
+    assert edicao_video.textos_da_tela("v.mp4", "Copo")["lugar"] == "meio"
+    responde('{"nome": "Copo", "lugar": "embaixo"}')
+    assert "lugar" not in edicao_video.textos_da_tela("v.mp4", "Copo")
 
 
 def test_volume_do_som_por_janela(tmp_path):
@@ -533,3 +541,17 @@ def test_volume_do_som_por_janela(tmp_path):
     subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=black:size=64x64:rate=10:duration=1",
                     str(sem_som)], check=True)
     assert edicao_video.videos.som_por_janela(str(sem_som)) == []
+
+
+def test_texto_da_tela_menor_cabe_ao_lado_da_miniatura():
+    # Escolha do Rafael (P46, 27/10): a caixa grande cobria o produto; agora uns 7% da tela, e
+    # no alto ela cabe à esquerda da miniatura (que começa em x 486).
+    import io
+
+    from PIL import Image
+    for texto in ("Confortável e cheio de estilo", "Cintura alta e ótima modelagem", "Aparador Buffet Retrô"):
+        for lugar, (x, topo, largura) in edicao_video.LUGARES_DOS_TEXTOS.items():
+            with Image.open(io.BytesIO(edicao_video.letreiro(texto, largura_maxima=largura))) as imagem:
+                assert imagem.width * imagem.height <= 0.08 * 720 * 1280, (texto, lugar)
+                if lugar == "alto":
+                    assert x + imagem.width < 486 - 10 and topo + imagem.height < 280
