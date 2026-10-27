@@ -43,6 +43,7 @@ import api_shopee
 import db
 import legendas
 import registro_processos
+import videos
 from fuso import fuso_horario
 from motor_filas import sortear_teto_do_dia
 
@@ -522,12 +523,13 @@ def _linha_do_produto(produto):
             f"comissão {produto['comissao']:.1f}%").replace(".0%", "%")
 
 
-def montar_mensagem(textos, produtos, link):
+def montar_mensagem(textos, produtos, link, mudo=False):
     """
     A mensagem do privado, em passos na ordem de fazer, com título e comentário para
     copiar com um toque: salvar o vídeo, favoritar o produto, postar e comentar.
     Favoritar vem antes de postar: abrir o link do produto no meio da postagem tira o
-    Rafael da tela de postar, e ele perde o que já fez.
+    Rafael da tela de postar, e ele perde o que já fez. Com mudo=True (o vídeo original
+    não tem som), o passo de postar lembra de pôr uma música da Shopee (P48).
     Decisão do Rafael: DECISOES.md, Shopee Vídeo.
     """
     if len(produtos) == 1:
@@ -552,6 +554,8 @@ def montar_mensagem(textos, produtos, link):
     alcool = ("🔞 <b>Bebida alcoólica:</b> os 3 avisos da Shopee já estão na capa (a foto do começo do vídeo) e "
               "no fim do título. Deixe a capa no 1º quadro e não tire os avisos do título.\n"
               if textos.get("bebida_alcoolica") else "")
+    musica = ("🔇 <b>Vídeo sem som:</b> na tela de edição, a que vem depois do Próximo, toque em Adicionar "
+              "Música, escolha uma música da Shopee e toque em Próximo.\n" if mudo else "")
     return (
         "🎬 <b>Postagem pronta para a Shopee Vídeo</b>\n"
         "Siga na ordem: abrir o link no meio da postagem faz a Shopee perder o que você já fez.\n\n"
@@ -559,6 +563,7 @@ def montar_mensagem(textos, produtos, link):
         f"{favoritar}\n\n"
         "3️⃣ <b>Poste:</b> Shopee → Eu → Criadores e Afiliados → Perfil em Shopee Vídeo → "
         "Postar vídeo → escolha o vídeo → Próximo.\n"
+        f"{musica}"
         f"{alcool}"
         f"📝 <b>Título</b> ({tamanho} caracteres{curto}; toque para copiar):\n"
         f"<code>{html.escape(textos['titulo'])}</code>\n"
@@ -657,9 +662,12 @@ async def _preparar_e_enviar(bot, admin_id, video, agora, fonte=FONTE_PADRAO, pa
         if motivo:
             registrar(video["id"], "sem_edicao", motivo, agora)
             return SEM_AVISOS
+    # O vídeo mudo ganha uma música da Shopee na hora de postar (escolha do Rafael, P48).
+    # Quem diz se há som é o original: a edição põe uma trilha de silêncio no vídeo mudo.
+    mudo = await asyncio.to_thread(videos.mudo, video["arquivo"])
     await bot.send_video(admin_id, video=FSInputFile(arquivo), supports_streaming=True,
                          caption="🎬 Vídeo para a Shopee Vídeo: siga os passos da mensagem abaixo.")
-    await bot.send_message(admin_id, montar_mensagem(textos, produtos, link), parse_mode="HTML",
+    await bot.send_message(admin_id, montar_mensagem(textos, produtos, link, mudo), parse_mode="HTML",
                            disable_web_page_preview=True)
     registrar(video["id"], "enviado", "", agora)
     return "postagem mandada no seu privado"

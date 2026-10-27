@@ -7,7 +7,8 @@ Autorais (espelhador_videos_autorais, pelo repetidos_publico) e pelo Baixador
 das falhas do robô da Shopee Vídeo (casos_robo). A foto do produto no começo, com a
 miniatura e a seta por cima (com_foto_e_miniatura), é a edição dos vídeos do Rafael
 (edicao_video); o vídeo remontado sem as partes paradas, com trechos acelerados ou em
-câmera lenta e textos por cima (movimento, com_cortes_e_ritmo), é o Editor 2 dela.
+câmera lenta e textos por cima (movimento, com_cortes_e_ritmo), é o Editor 2 dela. O vídeo
+sem som nenhum (mudo) ganha uma música da Shopee na hora de postar (assistente_shopee_video).
 
 Um lugar só para que um ajuste no tratamento valha para todos os canais
 (DECISOES.md, Código e manutenção).
@@ -292,6 +293,24 @@ def som_por_janela(caminho, janela=0.5, timeout=120):
         rms = float(numpy.sqrt(numpy.mean(pedaco ** 2))) if len(pedaco) else 0.0
         volumes.append(max(-100.0, float(20 * numpy.log10(rms / 32768))) if rms > 0 else -100.0)
     return volumes
+
+
+# Abaixo disto do começo ao fim, o vídeo é mudo: o silêncio digital fica em -100 e o chiado
+# mais baixo de uma gravação, perto de -60; fala e música passam de -40.
+VOLUME_DO_MUDO = -60.0
+
+
+def mudo(caminho, timeout=120):
+    """
+    True quando o vídeo não tem som que se ouça: sem a trilha de áudio, ou com ela abaixo de
+    VOLUME_DO_MUDO do começo ao fim. Arquivo que não existe não é mudo.
+    """
+    if not os.path.exists(caminho):
+        return False
+    if not tem_audio(caminho):
+        return True
+    volumes = som_por_janela(caminho, timeout=timeout)
+    return bool(volumes) and max(volumes) <= VOLUME_DO_MUDO
 
 
 # Na emenda de dois trechos, o som entra e sai em 30 ms, sem estalo.
