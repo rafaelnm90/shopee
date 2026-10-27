@@ -289,87 +289,21 @@ def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
     texto = msg.saidas[-1]
     assert "todos os vídeos que o robô usa" in texto and "Viral" in texto and "Grupo Público" in texto
     assert "desligada" in texto and "O que cada botão faz" in texto
+    # Pedido do Rafael (27/10): dois botões só, o Editor 1 sem legendas e o Editor 2 com legendas,
+    # cada um com o vídeo completo e as versões; o Editor 2 só no exemplo, até ele escolher.
     assert _textos(sv.teclado_edicao(sv.ler_config())) == [
-        "Ver Exemplo Editor 1 👀", "Ver Exemplo Editor 2 ✨", "Ver Exemplo Editor 3 🔀", "Ver Exemplo Editor 4 🎬",
-        "Ligar Edição ✅", "Voltar ao Robô 🔙"]
-    # Pedido do Rafael (27/10): os Editores 2, 3 e 4 só no exemplo, até ele escolher qual fica.
-    assert "Editor 1</b> (o que vale nos rascunhos)" in texto and "Editor 2</b> (em teste, só no exemplo)" in texto
-    assert "Editor 3</b> (em teste, só no exemplo): primeiro o vídeo completo, como o Editor 1 entrega" in texto
-    assert "Editor 4</b> (em teste, só no exemplo): primeiro o vídeo completo, como o Editor 2 entrega" in texto
+        "Editor 1 sem Legendas 👀", "Editor 2 com Legendas ✨", "Ligar Edição ✅", "Voltar ao Robô 🔙"]
+    assert "Editor 1 sem legendas</b> (o que vale nos rascunhos)" in texto
+    assert "Editor 2 com legendas</b> (em teste, só no exemplo)" in texto
+    assert "O exemplo de cada editor</b>: primeiro o vídeo completo, como o editor entrega" in texto
     assert "segue dali (o que vinha antes vai para o fim)" in texto
     assert "a 1ª versão tem uns 3/4 do vídeo completo e a 2ª é a mais curta (pelo menos 8 s" in texto
+    assert "Editor 3" not in texto and "Editor 4" not in texto
     rodar(sv.ligar_edicao_handler(Msg("Ligar Edição ✅"), est))
     assert sv.ler_config()["edicao_ligada"] and sv.edicao_video.vale_para("autorais")
     assert "Desligar Edição ⏸️" in _textos(sv.teclado_edicao(sv.ler_config()))
     rodar(sv.ligar_edicao_handler(Msg("Desligar Edição ⏸️"), est))
     assert not sv.edicao_video.vale_para("autorais")
-
-
-def test_exemplo_da_edicao_chega_no_privado_sem_postar(bm, Msg, Est, monkeypatch):
-    sv, est = _painel(bm), Est()
-
-    def exemplo(destino):
-        with open(destino, "wb") as arquivo:
-            arquivo.write(b"editado")
-        return "Copo Térmico", ""
-
-    monkeypatch.setattr(sv.edicao_video, "exemplo", exemplo)
-    msg = MsgComMidia(Msg, "Ver Exemplo Editor 1 👀")
-    rodar(sv.exemplo_edicao_handler(msg, est))
-    assert msg.midias and msg.midias[0][0] == "video"
-    assert "não foi postado" in msg.midias[0][2] and "Copo Térmico" in msg.midias[0][2]
-    # O arquivo do exemplo não fica no servidor.
-    assert not os.path.exists(msg.midias[0][1])
-    monkeypatch.setattr(sv.edicao_video, "exemplo", lambda destino: (None, "nenhum vídeo dos Autorais"))
-    # O botão com o nome de antes, que ainda pode estar no teclado, vale como o Editor 1.
-    msg = MsgComMidia(Msg, "Ver Exemplo da Edição 👀")
-    rodar(sv.exemplo_edicao_handler(msg, est))
-    assert not msg.midias and any("O exemplo do Editor 1 não saiu: nenhum vídeo dos Autorais" in t
-                                  for t in msg.saidas)
-
-
-def test_exemplo_do_editor_2_chega_com_o_que_mudou_no_video(bm, Msg, Est, monkeypatch):
-    # Pedido do Rafael (27/10): o Editor 2 (o Editor 1 sem as partes paradas, com trechos
-    # acelerados e textos na tela) só no exemplo, para comparar com o Editor 1.
-    sv, est = _painel(bm), Est()
-    resumo = {"original": 24.0, "remontado": 15.2, "cortado": 6.4, "acelerados": 3, "camera_lenta": 1,
-              "textos": ["Copo Térmico", "Mantém gelado", "A partir de R$\u00a039,90"], "textos_da_ia": True,
-              "lugar": "alto", "lugar_da_ia": True}
-
-    def exemplo_editor_2(destino):
-        with open(destino, "wb") as arquivo:
-            arquivo.write(b"editado")
-        return "Copo Térmico <inox>", "", resumo
-
-    monkeypatch.setattr(sv.edicao_video, "exemplo_editor_2", exemplo_editor_2)
-    msg = MsgComMidia(Msg, "Ver Exemplo Editor 2 ✨")
-    rodar(sv.exemplo_editor_2_handler(msg, est))
-    legenda = msg.midias[0][2]
-    assert "Exemplo do Editor 2 (não foi postado): Copo Térmico &lt;inox&gt;" in legenda
-    assert "Vídeo de 24 s → 15 s" in legenda and "Partes paradas tiradas: 6 s" in legenda
-    assert "Trechos acelerados: 3 | 🐢 Em câmera lenta: 1" in legenda and "“Mantém gelado”" in legenda
-    assert "A IA não escreveu" not in legenda and not os.path.exists(msg.midias[0][1])
-    assert "Com fala" not in legenda
-    assert "Lugar do texto: no alto, ao lado da miniatura (a IA escolheu)" in legenda
-    assert consultar("SELECT processo, resultado FROM registro_processos ORDER BY rowid DESC") == (
-        "edição do vídeo: exemplo do editor 2", "mandado")
-    # Sem os textos da IA, o exemplo sai com o preço e avisa; a fala mantida aparece (P45).
-    resumo.update(textos=["A partir de R$\u00a039,90"], textos_da_ia=False, cortado=0, com_fala=7.5)
-    msg = MsgComMidia(Msg, "Ver Exemplo Editor 2 ✨")
-    rodar(sv.exemplo_editor_2_handler(msg, est))
-    assert "A IA não escreveu o nome e a vantagem" in msg.midias[0][2]
-    assert "Nenhuma parte parada para tirar" in msg.midias[0][2]
-    assert "Com fala, ficou inteiro e na velocidade normal: 8 s" in msg.midias[0][2]
-    # Escolha do Rafael (P47): os lados também valem e, sem lugar livre, o vídeo vai sem texto.
-    resumo.update(textos=["Conjunto"], textos_da_ia=True, lugar="direita")
-    assert "Lugar do texto: do lado direito, no meio da altura (a IA escolheu)" in sv.resumo_do_editor_2(resumo)
-    resumo.update(textos=[], lugar="nenhum")
-    legenda = sv.resumo_do_editor_2(resumo)
-    assert "Sem texto na tela: a IA não achou lugar" in legenda and "Textos na tela" not in legenda
-    monkeypatch.setattr(sv.edicao_video, "exemplo_editor_2", lambda destino: (None, "o vídeo não abre", None))
-    msg = MsgComMidia(Msg, "Ver Exemplo Editor 2 ✨")
-    rodar(sv.exemplo_editor_2_handler(msg, est))
-    assert not msg.midias and any("O exemplo do Editor 2 não saiu: o vídeo não abre" in t for t in msg.saidas)
 
 
 def _rascunho(sv, titulo="Vestido Infantil 👗 #vestido", criado="2026-10-22 10:00:00"):
@@ -950,7 +884,7 @@ def test_exemplo_cortado_por_um_reinicio_e_avisado_ao_ligar(bm, Msg, Est, monkey
     sv.db.salvar_config(sv.CHAVE_EXEMPLO_EM_ANDAMENTO, {"editor": 2, "desde": (agora - timedelta(minutes=2)).isoformat()})
     rodar(sv.avisar_exemplo_interrompido())
     assert len(enviados) == 1 and enviados[0][0] == sv.ADMIN_ID
-    assert "Editor 2 foi interrompido" in enviados[0][1] and "Ver Exemplo Editor 2 ✨" in enviados[0][1]
+    assert "Editor 2 (com legendas) foi interrompido" in enviados[0][1] and "Editor 2 com Legendas ✨" in enviados[0][1]
     assert not sv.db.ler_config(sv.CHAVE_EXEMPLO_EM_ANDAMENTO, {})
     # Ligar de novo não repete; anotação velha (de horas atrás) não avisa.
     rodar(sv.avisar_exemplo_interrompido())
@@ -958,13 +892,13 @@ def test_exemplo_cortado_por_um_reinicio_e_avisado_ao_ligar(bm, Msg, Est, monkey
     rodar(sv.avisar_exemplo_interrompido())
     assert len(enviados) == 1
     # O exemplo que termina (saindo ou não) apaga a anotação.
-    monkeypatch.setattr(sv.edicao_video, "exemplo", lambda destino: (None, "nenhum vídeo dos Autorais"))
-    rodar(sv.exemplo_edicao_handler(MsgComMidia(Msg, "Ver Exemplo Editor 1 👀"), est))
+    monkeypatch.setattr(sv.edicao_video, "exemplo_editor_1", lambda destino: (None, "nenhum vídeo dos Autorais", None))
+    rodar(sv.exemplo_editor_1_handler(MsgComMidia(Msg, "Editor 1 sem Legendas 👀"), est))
     assert not sv.db.ler_config(sv.CHAVE_EXEMPLO_EM_ANDAMENTO, {})
-    # O do Editor 3 também avisa, com o botão dele.
+    # A anotação de antes da junção dos editores (Editor 3) avisa com o botão do Editor 1.
     sv.db.salvar_config(sv.CHAVE_EXEMPLO_EM_ANDAMENTO, {"editor": 3, "desde": (agora - timedelta(minutes=5)).isoformat()})
     rodar(sv.avisar_exemplo_interrompido())
-    assert "Editor 3 foi interrompido" in enviados[-1][1] and "Ver Exemplo Editor 3 🔀" in enviados[-1][1]
+    assert "Editor 1 (sem legendas) foi interrompido" in enviados[-1][1] and "Editor 1 sem Legendas 👀" in enviados[-1][1]
 
 
 def _exemplo_com_versoes(sv, destino, versoes):
@@ -978,69 +912,105 @@ def _exemplo_com_versoes(sv, destino, versoes):
     return lista
 
 
-def test_exemplo_do_editor_3_manda_o_completo_e_as_versoes_sem_textos(bm, Msg, Est, monkeypatch):
-    # Pedido do Rafael (27/10): o Editor 3 faz as versões a partir do Editor 1, sem textos, e o
-    # 1º vídeo é o completo, como o Editor 1 entrega.
+def test_exemplo_do_editor_1_manda_o_completo_e_as_versoes_sem_legendas(bm, Msg, Est, monkeypatch):
+    # Pedidos do Rafael (27/10): o Editor 1 sem legendas manda o vídeo completo, como ele entrega,
+    # e as versões, sem textos; nada fica no servidor.
     sv, est = _painel(bm), Est()
 
-    def exemplo_editor_3(destino):
+    def exemplo_editor_1(destino):
         versoes = _exemplo_com_versoes(sv, destino, [
             {"remontado": 12.0, "curta": False, "textos": [], "gancho": None, "vantagem": ""},
             {"remontado": 9.0, "curta": True, "textos": [], "gancho": (4.0, 6.0), "vantagem": "Fechamento com zíper"}])
         return "Bolsa", "", {"original": 12.0, "inteiro": 12.0, "com_fala": 0, "versoes_da_ia": 1, "lugar_da_ia": False,
                              "versoes": versoes}
 
-    monkeypatch.setattr(sv.edicao_video, "exemplo_editor_3", exemplo_editor_3)
-    msg = MsgComMidia(Msg, "Ver Exemplo Editor 3 🔀")
-    rodar(sv.exemplo_editor_3_handler(msg, est))
+    monkeypatch.setattr(sv.edicao_video, "exemplo_editor_1", exemplo_editor_1)
+    msg = MsgComMidia(Msg, "Editor 1 sem Legendas 👀")
+    rodar(sv.exemplo_editor_1_handler(msg, est))
+    assert any("Montando o exemplo do Editor 1 (sem legendas)" in t for t in msg.saidas)
     completo, versao = msg.midias[0][2], msg.midias[1][2]
-    assert "Exemplo do Editor 3, vídeo 1 de 2" in completo
-    assert "▶️ O vídeo completo, na ordem, como o Editor 1 entrega" in completo
-    assert "(mais os 2 s da foto): o vídeo inteiro" in completo
-    assert "Exemplo do Editor 3, vídeo 2 de 2" in versao
+    assert "Exemplo do Editor 1 (sem legendas), vídeo 1 de 2 (não foi postado): Bolsa." in completo
+    assert "▶️ O vídeo completo, na ordem" in completo and "(mais os 2 s da foto): o vídeo inteiro" in completo
+    assert "Exemplo do Editor 1 (sem legendas), vídeo 2 de 2" in versao
     assert "do vídeo original (o que ele mostra: “Fechamento com zíper”) e segue dali; o que vinha antes vai para o fim" in versao
     assert "(mais os 2 s da foto): 75% do vídeo completo, a mais curta" in versao
     assert not any("Textos na tela" in legenda or "Lugar do texto" in legenda for legenda in (completo, versao))
     assert "rendeu o completo e mais 1 versão diferente de verdade" in versao
-    assert "compare com os Editores 1, 2 e 4" in versao
+    assert "compare com o Editor 2 com Legendas ✨" in versao
+    assert not any(os.path.exists(m[1]) for m in msg.midias)
+    assert consultar("SELECT processo, resultado FROM registro_processos ORDER BY rowid DESC") == (
+        "edição do vídeo: exemplo do editor 1", "mandado")
     so_completo = {"inteiro": 12.0, "versoes_da_ia": 0,
                    "versoes": [{"remontado": 12.0, "curta": False, "gancho": None, "textos": []}]}
     assert "rendeu só o vídeo completo, sem versões (a IA não sugeriu momentos diferentes)" in sv.legenda_das_versoes(
-        "Bolsa", so_completo, 0, 3)
-    assert consultar("SELECT processo, resultado FROM registro_processos ORDER BY rowid DESC") == (
-        "edição do vídeo: exemplo do editor 3", "mandado")
+        "Bolsa", so_completo, 0, 1)
+    # Os botões de antes, que ainda podem estar no teclado, valem como o Editor 1.
+    monkeypatch.setattr(sv.edicao_video, "exemplo_editor_1", lambda destino: (None, "nenhum vídeo dos Autorais", None))
+    for antigo in ("Ver Exemplo Editor 1 👀", "Ver Exemplo da Edição 👀", "Ver Exemplo Editor 3 🔀"):
+        assert antigo in sv.BOTOES_ANTIGOS_EDITOR_1
+        msg = MsgComMidia(Msg, antigo)
+        rodar(sv.exemplo_editor_1_handler(msg, est))
+        assert not msg.midias and any("O exemplo do Editor 1 (sem legendas) não saiu: nenhum vídeo dos Autorais" in t
+                                      for t in msg.saidas)
 
 
-def test_exemplo_do_editor_4_manda_o_completo_e_cada_versao_com_o_que_mudou(bm, Msg, Est, monkeypatch):
-    # Pedido do Rafael (27/10): o Editor 4 entrega o vídeo completo, como o Editor 2, e até 2
-    # versões diferentes de verdade a partir dele (outro começo, outra vantagem, outra chamada;
-    # cada uma de um tamanho, P49), só no exemplo.
+def test_exemplo_do_editor_2_manda_o_completo_com_o_que_mudou_e_as_versoes(bm, Msg, Est, monkeypatch):
+    # Pedidos do Rafael (27/10): o Editor 2 com legendas manda o vídeo completo, como ele entrega
+    # (sem as partes paradas, com trechos acelerados e textos na tela), e as versões.
     sv, est = _painel(bm), Est()
+    completo = {"original": 24.0, "remontado": 15.2, "cortado": 6.4, "acelerados": 3, "camera_lenta": 1,
+                "com_fala": 0}
+    resumo = {"original": 24.0, "inteiro": 15.2, "lugar": "alto", "lugar_da_ia": True, "com_fala": 0,
+              "textos_da_ia": True, "versoes_da_ia": 3, "completo": completo}
 
-    def exemplo_editor_4(destino):
-        versoes = _exemplo_com_versoes(sv, destino, [
-            {"remontado": 10.7, "curta": False, "gancho": None, "vantagem": "Leve",
-             "textos": ["Bolsa de Palha", "Leve", "A partir de R$ 25,80"]},
-            {"remontado": 8.0, "curta": True, "gancho": (9.0, 10.5), "vantagem": "Vantagem 2",
-             "textos": ["Vantagem 2", "Bolsa de Palha", "Chamada 2"]}])
-        return "Bolsa <palha>", "", {"original": 12.0, "inteiro": 10.7, "lugar": "alto", "lugar_da_ia": True, "com_fala": 0,
-                                     "versoes_da_ia": 3, "versoes": versoes}
+    def exemplo_editor_2(destino):
+        resumo["versoes"] = _exemplo_com_versoes(sv, destino, [
+            {"remontado": 15.2, "curta": False, "gancho": None, "vantagem": "Mantém gelado",
+             "textos": ["Copo Térmico", "Mantém gelado", "A partir de R$ 39,90"]},
+            {"remontado": 11.4, "curta": True, "gancho": (9.0, 10.5), "vantagem": "Tampa firme",
+             "textos": ["Tampa firme", "Copo Térmico", "Chamada 2"]}])
+        return "Copo Térmico <inox>", "", resumo
 
-    monkeypatch.setattr(sv.edicao_video, "exemplo_editor_4", exemplo_editor_4)
-    msg = MsgComMidia(Msg, "Ver Exemplo Editor 4 🎬")
-    rodar(sv.exemplo_editor_4_handler(msg, est))
+    monkeypatch.setattr(sv.edicao_video, "exemplo_editor_2", exemplo_editor_2)
+    msg = MsgComMidia(Msg, "Editor 2 com Legendas ✨")
+    rodar(sv.exemplo_editor_2_handler(msg, est))
     assert [m[0] for m in msg.midias] == ["video", "video"]
     primeira, segunda = msg.midias[0][2], msg.midias[1][2]
-    assert "Editor 4, vídeo 1 de 2 (não foi postado): Bolsa &lt;palha&gt;" in primeira
-    assert "▶️ O vídeo completo, na ordem, como o Editor 2 entrega" in primeira and "“Leve”" in primeira
-    assert "Lugar do texto" not in primeira and "(mais os 2 s da foto): o vídeo inteiro" in primeira
+    assert "Exemplo do Editor 2 (com legendas), vídeo 1 de 2 (não foi postado): Copo Térmico &lt;inox&gt;" in primeira
+    assert "▶️ O vídeo completo, na ordem" in primeira and "(mais os 2 s da foto): o vídeo inteiro" in primeira
+    assert "Partes paradas tiradas: 6 s" in primeira and "Trechos acelerados: 3 | 🐢 Em câmera lenta: 1" in primeira
+    assert "“Mantém gelado”" in primeira and "Com fala" not in primeira and "A IA não escreveu" not in primeira
+    assert "Lugar do texto" not in primeira and "Partes paradas" not in segunda
     assert "vídeo 2 de 2" in segunda and "Abre com o trecho de 9,0 s a 10,5 s do vídeo original e segue dali" in segunda
-    assert "“Vantagem 2”" in segunda and "(mais os 2 s da foto): 75% do vídeo completo, a mais curta" in segunda
-    assert "rendeu o completo e mais 1 versão diferente de verdade" in segunda and "Lugar do texto: no alto" in segunda
+    assert "(o que ele mostra" not in segunda and "“Tampa firme”" in segunda
+    assert "(mais os 2 s da foto): 75% do vídeo completo, a mais curta" in segunda
+    assert "rendeu o completo e mais 1 versão diferente de verdade" in segunda
+    assert "Lugar do texto: no alto, ao lado da miniatura (a IA escolheu)" in segunda
+    assert "compare com o Editor 1 sem Legendas 👀" in segunda
     assert not any(os.path.exists(m[1]) for m in msg.midias)
     assert consultar("SELECT processo, resultado FROM registro_processos ORDER BY rowid DESC") == (
-        "edição do vídeo: exemplo do editor 4", "mandado")
-    monkeypatch.setattr(sv.edicao_video, "exemplo_editor_4", lambda destino: (None, "o vídeo não abre", None))
+        "edição do vídeo: exemplo do editor 2", "mandado")
+    # Sem os textos da IA, o completo sai com o preço e avisa; a fala mantida aparece (P45).
+    completo.update(cortado=0, com_fala=7.5)
+    resumo.update(textos_da_ia=False)
     msg = MsgComMidia(Msg, "Ver Exemplo Editor 4 🎬")
-    rodar(sv.exemplo_editor_4_handler(msg, est))
-    assert not msg.midias and any("O exemplo do Editor 4 não saiu: o vídeo não abre" in t for t in msg.saidas)
+    rodar(sv.exemplo_editor_2_handler(msg, est))
+    primeira = msg.midias[0][2]
+    assert "A IA não escreveu o nome e a vantagem" in primeira and "Nenhuma parte parada para tirar" in primeira
+    assert "Com fala, ficou inteiro e na velocidade normal: 8 s" in primeira
+    # Escolha do Rafael (P47): os lados também valem e, sem lugar livre, o vídeo vai sem texto.
+    resumo.update(lugar="direita")
+    assert "Lugar do texto: do lado direito, no meio da altura (a IA escolheu)" in sv.legenda_das_versoes(
+        "Copo", resumo, 1, 2)
+    for versao in resumo["versoes"]:
+        versao["textos"] = []
+    resumo.update(lugar="nenhum")
+    legenda = sv.legenda_das_versoes("Copo", resumo, 1, 2)
+    assert "Sem texto na tela: a IA não achou lugar" in legenda and "Textos na tela" not in legenda
+    # Os botões de antes do Editor 2 e do 4 valem como o Editor 2.
+    assert sv.BOTOES_ANTIGOS_EDITOR_2 == ["Ver Exemplo Editor 2 ✨", "Ver Exemplo Editor 4 🎬"]
+    monkeypatch.setattr(sv.edicao_video, "exemplo_editor_2", lambda destino: (None, "o vídeo não abre", None))
+    msg = MsgComMidia(Msg, "Ver Exemplo Editor 2 ✨")
+    rodar(sv.exemplo_editor_2_handler(msg, est))
+    assert not msg.midias and any("O exemplo do Editor 2 (com legendas) não saiu: o vídeo não abre" in t
+                                  for t in msg.saidas)

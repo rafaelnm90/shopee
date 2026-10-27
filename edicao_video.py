@@ -11,14 +11,13 @@ privado e ligar no painel (Shopee Vídeo 🎬 → Robô Automático 🤖 → Edi
 chave edicao_ligada de shopee_video). Escolhas do Rafael (25/10/2026, P37 e depois da
 P38): DECISOES.md, Shopee Vídeo.
 
-O Editor 2 (editar_2) é esta edição com três acréscimos, em teste só no exemplo do painel:
-o vídeo remontado sem as partes paradas, com trechos acelerados e uma câmera lenta curta,
-e os textos da tela (nome, vantagem e preço). O Rafael compara os dois exemplos e escolhe
-qual fica (pedido de 27/10/2026: DECISOES.md, Shopee Vídeo). Os Editores 3 (editar_3, a partir
-do Editor 1) e 4 (editar_4, a partir do Editor 2), também só no exemplo, fazem do mesmo vídeo até
-3 vídeos: o completo, como o Editor 1 ou o 2 entrega, e versões diferentes de verdade, cada
-uma abrindo com um momento diferente e seguindo dali, cada uma de um tamanho; no 4, com outra
-vantagem na tela e outra chamada no fim.
+O Editor 2 (editar_2, "com legendas") é esta edição com três acréscimos, em teste só no
+exemplo do painel: o vídeo remontado sem as partes paradas, com trechos acelerados e uma
+câmera lenta curta, e os textos da tela (nome, vantagem e preço). O exemplo de cada editor
+(exemplo_editor_1 e exemplo_editor_2) entrega o vídeo completo e até 2 versões diferentes de
+verdade, cada uma abrindo com um momento diferente e seguindo dali, cada uma de um tamanho; no
+Editor 2, com outra vantagem na tela e outra chamada no fim. O Rafael compara os dois e
+escolhe qual fica (pedidos de 27/10/2026: DECISOES.md, Shopee Vídeo).
 
 Usado pelo robô automático (robo_shopee_video, na cópia do vídeo que vai ao rascunho) e
 pelo painel da Shopee Vídeo (os exemplos).
@@ -133,9 +132,9 @@ def editar(video, foto, destino, avisos=False):
 
 
 # --- Editor 2 ---
-# O Editor 1 é a edição de cima, a que vale nos rascunhos. O Editor 2 é o Editor 1 com três
-# acréscimos, em teste: o Rafael vê os dois exemplos no painel e decide qual fica (pedido
-# de 27/10/2026: DECISOES.md, Shopee Vídeo). Antes da foto, da miniatura e da seta, o vídeo
+# O Editor 1 (sem legendas) é a edição de cima, a que vale nos rascunhos. O Editor 2 (com
+# legendas) é o Editor 1 com três acréscimos, em teste: o Rafael vê os dois exemplos no painel
+# e decide qual fica (pedido de 27/10/2026: DECISOES.md, Shopee Vídeo). Antes da foto, da miniatura e da seta, o vídeo
 # é remontado: as partes paradas saem, os trechos calmos ficam mais rápidos, o de mais ação
 # ganha uma câmera lenta curta, e os textos da tela (nome, vantagem e preço) entram por cima.
 
@@ -205,17 +204,6 @@ _FALAS_E_LUGAR_NO_PROMPT = (
     "uns 33% da largura, entre uns 31% e 44% da altura) ou \"direita\" (o mesmo, na borda direita); "
     f"\"{SEM_LUGAR}\" se todos esses cobrem o produto ou um rosto.\n"
 )
-PROMPT_DOS_TEXTOS = (
-    "Você vai ver um vídeo curto de um produto vendido na Shopee: {nome}.\n"
-    "Escreva dois textos curtos para aparecer na tela do vídeo, em português do Brasil:\n"
-    + _NOME_NO_PROMPT
-    + "- \"vantagem\": uma vantagem do produto que o próprio vídeo mostra (ex.: \"Mantém gelado o dia todo\"), "
-    f"até {MAXIMO_DA_VANTAGEM} caracteres.\n"
-    + _REGRAS_NO_PROMPT + _FALAS_E_LUGAR_NO_PROMPT
-    + "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\", \"falas\": [[0.0, 0.0]], "
-    "\"lugar\": \"alto\"}}"
-)
-
 # Onde alguém fala, o vídeo fica inteiro e na velocidade normal: nada de corte, aceleração
 # ou câmera lenta (escolha do Rafael, P45: o 1º exemplo cortou o começo da fala junto com a
 # parte parada). Os trechos com fala vêm da IA, com esta folga de cada lado; sem a resposta
@@ -439,16 +427,6 @@ def _nome_lugar_e_falas(dados):
     return textos
 
 
-def textos_da_tela(video, nome):
-    """{"nome", "vantagem"} que a IA escreveu vendo o vídeo; {} quando ela não respondeu."""
-    dados = _resposta_da_ia(video, PROMPT_DOS_TEXTOS.format(nome=nome))
-    textos = _nome_lugar_e_falas(dados)
-    vantagem = _so_letras(str(dados.get("vantagem") or ""), MAXIMO_DA_VANTAGEM)
-    if vantagem:
-        textos["vantagem"] = vantagem
-    return textos
-
-
 def _falas(bruto):
     """Os trechos com fala que a IA deu ([(início, fim)], em segundos); None quando não vieram certos."""
     if not isinstance(bruto, list):
@@ -547,7 +525,7 @@ def editar_2(video, foto, destino, nome="", vantagem="", preco=None, falas=None,
 
 
 def _montar_editor_2(video, foto, destino, original, com_fala, trechos, nome, vantagem, preco, lugar):
-    """O Editor 2 em destino com a remontagem já medida (o Editor 4 usa no vídeo completo)."""
+    """O Editor 2 em destino com a remontagem já medida (editar_2_e_versoes usa no vídeo completo)."""
     import tempfile
     remontado = _segundos_remontados(trechos)
     letreiros, textos = _letreiros([(nome, FUNDO_DOS_TEXTOS), (vantagem, FUNDO_DOS_TEXTOS),
@@ -631,15 +609,6 @@ def _exemplo(lista, editar_um):
     return None, "nenhum vídeo com o arquivo e o link no servidor agora", None
 
 
-def exemplo(destino):
-    """
-    O exemplo do Editor 1 (a edição que vale nos rascunhos) em destino. Devolve (nome do
-    produto, "") quando deu certo, ou (None, motivo).
-    """
-    nome, motivo, _ = _exemplo("ids", lambda arquivo, link, foto: (editar(arquivo, foto, destino), None))
-    return nome, motivo
-
-
 def _produto_do_link(link):
     """O produto do link pela API de afiliado ({nome, preco, ...}); {} quando ela não diz."""
     import asyncio
@@ -650,39 +619,21 @@ def _produto_do_link(link):
     return produtos[0] if produtos else {}
 
 
-def exemplo_editor_2(destino):
-    """
-    O exemplo do Editor 2 em destino, com os textos da tela que a IA escreveu vendo o
-    vídeo e o preço da API. Tem a lista própria dos já mostrados. Devolve (nome do produto,
-    "", resumo) quando deu certo, ou (None, motivo, resumo ou None).
-    """
-    def editar_um(arquivo, link, foto):
-        produto = _produto_do_link(link)
-        textos = textos_da_tela(arquivo, produto["nome"]) if produto.get("nome") else {}
-        motivo, resumo = editar_2(arquivo, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
-                                  produto.get("preco"), textos.get("falas"), textos.get("lugar"))
-        resumo["lugar_da_ia"] = "lugar" in textos
-        resumo["textos_da_ia"] = bool(textos.get("nome") or textos.get("vantagem"))
-        return motivo, resumo
-
-    return _exemplo("ids_2", editar_um)
-
-
-# --- Editores 3 e 4: versões do mesmo vídeo ---
-# Os Editores 3 e 4 entregam, de um vídeo, o vídeo completo e até 2 versões diferentes de
-# verdade, em teste só no exemplo (pedido do Rafael de 27/10/2026, depois do que a Rafaela
-# contou no grupo sobre as ferramentas que "multiplicam" um vídeo: DECISOES.md, Shopee Vídeo).
-# O 1º é o vídeo completo, como o Editor 1 (no 3) ou o Editor 2 (no 4) entrega (pedido do
-# Rafael, 27/10). Cada versão abre com um momento diferente do vídeo (o gancho), que a IA
-# aponta com a vantagem que ele mostra, e segue dali; o que vinha antes do gancho vai para o
-# fim. E cada uma tem um tamanho: a 1ª uns 3/4 do completo e a 2ª a mais curta (escolha do
-# Rafael, P49: nas versões do conjunto de jardim, todas voltavam ao começo do vídeo depois do
-# gancho e terminavam iguais, com o mesmo tamanho). Assim, em nenhum segundo dois vídeos
-# mostram a mesma parte. O Editor 3 parte do Editor 1: sem textos e nada acelerado. O Editor 4
-# parte do Editor 2: com os textos na tela (nas versões, a vantagem do gancho e uma chamada
-# diferente no fim). Não são cópias quase iguais para a Shopee não reconhecer o mesmo vídeo (a
-# regra 9 pune mensagens repetitivas): versão só sai com um gancho longe do começo do vídeo e
-# dos das outras, e o vídeo curto, ou com fala do começo ao fim, rende menos versões.
+# --- Os exemplos dos Editores 1 e 2: o vídeo completo e as versões ---
+# O exemplo de cada editor entrega, de um vídeo, o vídeo completo e até 2 versões diferentes
+# de verdade (pedido do Rafael de 27/10/2026, depois do que a Rafaela contou no grupo sobre as
+# ferramentas que "multiplicam" um vídeo: DECISOES.md, Shopee Vídeo). O 1º é o vídeo completo,
+# como o Editor 1 (sem legendas) ou o Editor 2 (com legendas) entrega. Cada versão abre com um
+# momento diferente do vídeo (o gancho), que a IA aponta com a vantagem que ele mostra, e
+# segue dali; o que vinha antes do gancho vai para o fim. E cada uma tem um tamanho: a 1ª uns
+# 3/4 do completo e a 2ª a mais curta (escolha do Rafael, P49: nas versões do conjunto de
+# jardim, todas voltavam ao começo do vídeo depois do gancho e terminavam iguais, com o mesmo
+# tamanho). Assim, em nenhum segundo dois vídeos mostram a mesma parte. As versões do Editor 1
+# vão sem textos e nada acelerado; as do Editor 2 são remontadas como ele, com os textos na
+# tela (a vantagem do gancho e uma chamada diferente no fim). Não são cópias quase iguais para
+# a Shopee não reconhecer o mesmo vídeo (a regra 9 pune mensagens repetitivas): versão só sai
+# com um gancho longe do começo do vídeo e dos das outras, e o vídeo curto, ou com fala do
+# começo ao fim, rende menos versões.
 VERSOES_POR_VIDEO = 3
 # O tamanho de cada vídeo entregue, em fração do completo, na ordem (o completo e as versões);
 # nenhum fica com menos de MINIMO_DO_REMONTADO. O que sai é o fim da versão, nunca o meio de
@@ -831,12 +782,13 @@ def _resumo_da_versao(arquivo, plano, da_ia, textos=()):
             "textos": list(textos), "vantagem": da_ia.get("vantagem", ""), "gancho": (da_ia["inicio"], da_ia["fim"])}
 
 
-def editar_3(video, foto, destino, versoes_da_ia=(), falas=None):
+def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None):
     """
-    O Editor 3 em arquivo_da_versao(destino, n): o 1º é o vídeo completo com o Editor 1, e os
-    seguintes as versões (planejar_versoes), cada uma só começando no gancho dela, no tamanho
-    dela, e com o Editor 1 por cima: sem textos e nada acelerado. versoes_da_ia = [{"vantagem",
-    "inicio", "fim", ...}]. Devolve (motivo, resumo): motivo "" quando todos saíram.
+    O Editor 1 e as versões em arquivo_da_versao(destino, n): o 1º é o vídeo completo com o
+    Editor 1, e os seguintes as versões (planejar_versoes), cada uma só começando no gancho
+    dela, no tamanho dela, e com o Editor 1 por cima: sem textos e nada acelerado.
+    versoes_da_ia = [{"vantagem", "inicio", "fim", ...}]. Devolve (motivo, resumo): motivo ""
+    quando todos saíram.
     """
     import tempfile
     original = videos.duracao(video)
@@ -863,13 +815,15 @@ def editar_3(video, foto, destino, versoes_da_ia=(), falas=None):
     return "", resumo
 
 
-def editar_4(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), preco=None, falas=None, lugar=None):
+def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), preco=None, falas=None,
+                       lugar=None):
     """
-    O Editor 4 em arquivo_da_versao(destino, n): o 1º é o vídeo completo com o Editor 2 (o
-    nome, a vantagem e o preço), e os seguintes as versões (planejar_versoes), cada uma
-    remontada como no Editor 2, com os seus textos (a vantagem do gancho, o nome, o preço e a
-    chamada, nessa ordem) e com o Editor 1 por cima. versoes_da_ia = [{"vantagem", "chamada",
-    "inicio", "fim"}]. Devolve (motivo, resumo): motivo "" quando todos saíram.
+    O Editor 2 e as versões em arquivo_da_versao(destino, n): o 1º é o vídeo completo com o
+    Editor 2 (o nome, a vantagem e o preço), e os seguintes as versões (planejar_versoes),
+    cada uma remontada como no Editor 2, com os seus textos (a vantagem do gancho, o nome, o
+    preço e a chamada, nessa ordem) e com o Editor 1 por cima. versoes_da_ia = [{"vantagem",
+    "chamada", "inicio", "fim"}]. Devolve (motivo, resumo): motivo "" quando todos saíram; o
+    resumo do completo, como o do Editor 2, fica em resumo["completo"].
     """
     import tempfile
     original = videos.duracao(video)
@@ -882,7 +836,7 @@ def editar_4(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), preco
     motivo, do_completo = _montar_editor_2(video, foto, completo, original, com_fala, trechos, nome, vantagem,
                                            preco, lugar)
     resumo = {"original": original, "inteiro": do_completo["remontado"], "lugar": lugar,
-              "com_fala": do_completo["com_fala"],
+              "com_fala": do_completo["com_fala"], "completo": do_completo,
               "versoes": [_resumo_do_completo(completo, do_completo["remontado"], do_completo["textos"], vantagem)]}
     if motivo:
         return motivo, resumo
@@ -915,24 +869,25 @@ def _exemplo_das_versoes(destino, lista, editar_versoes):
         textos = textos_das_versoes(arquivo, produto["nome"]) if produto.get("nome") else {}
         motivo, resumo = editar_versoes(arquivo, foto, textos, produto)
         resumo["lugar_da_ia"] = "lugar" in textos
+        resumo["textos_da_ia"] = bool(textos.get("nome") or textos.get("vantagem"))
         resumo["versoes_da_ia"] = len(textos.get("versoes", []))
         return motivo, resumo
 
     return _exemplo(lista, editar_um)
 
 
-def exemplo_editor_3(destino):
+def exemplo_editor_1(destino):
     """
-    O exemplo do Editor 3: o completo e as versões em arquivo_da_versao(destino, n) (a lista
-    em resumo["versoes"]). Tem a lista própria dos já mostrados. Devolve (nome do produto, "",
-    resumo) quando deu certo, ou (None, motivo, resumo ou None).
+    O exemplo do Editor 1 (sem legendas): o completo e as versões em arquivo_da_versao(destino,
+    n) (a lista em resumo["versoes"]). Tem a lista própria dos já mostrados. Devolve (nome do
+    produto, "", resumo) quando deu certo, ou (None, motivo, resumo ou None).
     """
-    return _exemplo_das_versoes(destino, "ids_3", lambda arquivo, foto, textos, produto: editar_3(
+    return _exemplo_das_versoes(destino, "ids", lambda arquivo, foto, textos, produto: editar_1_e_versoes(
         arquivo, foto, destino, textos.get("versoes", []), textos.get("falas")))
 
 
-def exemplo_editor_4(destino):
-    """O exemplo do Editor 4, como o do Editor 3, com os textos na tela e o preço da API."""
-    return _exemplo_das_versoes(destino, "ids_4", lambda arquivo, foto, textos, produto: editar_4(
+def exemplo_editor_2(destino):
+    """O exemplo do Editor 2 (com legendas), como o do Editor 1, com os textos na tela e o preço da API."""
+    return _exemplo_das_versoes(destino, "ids_2", lambda arquivo, foto, textos, produto: editar_2_e_versoes(
         arquivo, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""), textos.get("versoes", []),
         produto.get("preco"), textos.get("falas"), textos.get("lugar")))

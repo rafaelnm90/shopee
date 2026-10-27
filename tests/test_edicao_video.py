@@ -237,13 +237,19 @@ def _fontes_de_mentira(monkeypatch, candidatos, fonte_do_robo="autorais"):
     return editados
 
 
+def _exemplo_simples():
+    """O exemplo com o Editor 1 só (sem IA nem versões): a escolha do vídeo é a mesma dos dois editores."""
+    return edicao_video._exemplo("ids", lambda arquivo, link, foto: (
+        edicao_video.editar(arquivo, foto, "exemplo.mp4"), None))[:2]
+
+
 def test_exemplo_usa_o_proximo_video_do_robo_com_arquivo_link_e_foto(monkeypatch, tmp_path):
     sem_arquivo, com_foto = str(tmp_path / "sumiu.mp4"), str(tmp_path / "a.mp4")
     open(com_foto, "wb").close()
     editados = _fontes_de_mentira(monkeypatch, {"autorais": [
         ("1", sem_arquivo, "https://s.shopee.com.br/a", ""), ("2", com_foto, None, ""),
         ("3", com_foto, "https://s.shopee.com.br/sem-foto", ""), ("4", com_foto, "https://s.shopee.com.br/b", "")]})
-    assert edicao_video.exemplo("exemplo.mp4") == ("Copo Térmico", "")
+    assert _exemplo_simples() == ("Copo Térmico", "")
     assert editados == [com_foto]
 
 
@@ -258,13 +264,13 @@ def test_cada_exemplo_mostra_um_video_novo_e_recomeca_no_fim(monkeypatch, tmp_pa
                   ("viral:2", videos["v2"], "https://s.shopee.com.br/2", "")],
         "autorais": [("a1", videos["a1"], "https://s.shopee.com.br/3", "")]}, fonte_do_robo="viral")
     for _ in range(4):
-        assert edicao_video.exemplo("exemplo.mp4")[0] == "Copo Térmico"
+        assert _exemplo_simples()[0] == "Copo Térmico"
     assert editados == [videos["v1"], videos["v2"], videos["a1"], videos["v1"]]
 
 
 def test_exemplo_sem_video_diz_o_motivo(monkeypatch):
     _fontes_de_mentira(monkeypatch, {})
-    nome, motivo = edicao_video.exemplo("exemplo.mp4")
+    nome, motivo = _exemplo_simples()
     assert nome is None and motivo == "nenhum vídeo com o arquivo e o link no servidor agora"
 
 
@@ -279,12 +285,12 @@ def test_exemplo_procura_nas_outras_fontes_quando_a_do_robo_so_tem_ver_produtos(
     fotos = []
     monkeypatch.setattr(edicao_video.ps, "foto_do_produto",
                         lambda video: fotos.append(video["link"]) or (None if "sem-foto" in video["link"] else b"foto"))
-    assert edicao_video.exemplo("exemplo.mp4") == ("Copo Térmico", "")
+    assert _exemplo_simples() == ("Copo Térmico", "")
     assert editados == [arquivo] and fotos[-1].endswith("/a1")
     assert len(fotos) == edicao_video.VIDEOS_POR_FONTE + 1
     # Os sem foto ficam lembrados: o toque seguinte não pergunta de novo à API por eles.
     fotos.clear()
-    edicao_video.exemplo("exemplo.mp4")
+    _exemplo_simples()
     assert not [link for link in fotos if "sem-foto-0" in link]
 
 
@@ -295,7 +301,7 @@ def test_sem_video_novo_com_foto_recomeca_pelos_ja_mostrados(monkeypatch, tmp_pa
         ("viral:1", arquivo, "https://s.shopee.com.br/1", ""),
         ("viral:2", arquivo, "https://s.shopee.com.br/sem-foto-2", "")]}, fonte_do_robo="viral")
     for _ in range(3):
-        assert edicao_video.exemplo("exemplo.mp4") == ("Copo Térmico", "")
+        assert _exemplo_simples() == ("Copo Térmico", "")
     assert len(editados) == 3
     assert db.ler_config(edicao_video.CHAVE_EXEMPLOS, {})["ids"] == ["viral:1"]
 
@@ -306,7 +312,7 @@ def test_so_videos_sem_foto_diz_que_nenhum_tem_a_foto(monkeypatch, tmp_path):
     _fontes_de_mentira(monkeypatch, {"viral": [("viral:1", arquivo, "https://s.shopee.com.br/sem-foto-1", "")]},
                        fonte_do_robo="viral")
     for _ in range(2):
-        nome, motivo = edicao_video.exemplo("exemplo.mp4")
+        nome, motivo = _exemplo_simples()
         assert nome is None and motivo.startswith("nenhum dos próximos vídeos tem a foto do anúncio")
 
 
@@ -376,7 +382,7 @@ def test_preco_a_partir_de_numa_linha_so_com_o_numero():
         assert imagem.getpixel((0, 0))[3] == 0 and imagem.getpixel((imagem.width // 2, 8))[3] > 150
 
 
-def test_textos_da_tela_vem_da_ia_limpos_e_curtos(monkeypatch):
+def test_textos_da_ia_vem_limpos_e_curtos(monkeypatch):
     import api_gemini
     pedidos = []
 
@@ -386,7 +392,7 @@ def test_textos_da_tela_vem_da_ia_limpos_e_curtos(monkeypatch):
                 '"vantagem": "Mantém gelado o dia todo #top"}')
 
     monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
-    textos = edicao_video.textos_da_tela("v.mp4", "Copo Térmico Marca X 500 ml")
+    textos = edicao_video.textos_das_versoes("v.mp4", "Copo Térmico Marca X 500 ml")
     assert textos == {"nome": "Copo Térmico de Inox Grande", "vantagem": "Mantém gelado o dia todo top"}
     assert "Copo Térmico Marca X 500 ml" in pedidos[0] and "marca" in pedidos[0]
 
@@ -394,7 +400,7 @@ def test_textos_da_tela_vem_da_ia_limpos_e_curtos(monkeypatch):
         return None
 
     monkeypatch.setattr(api_gemini, "analisar_video_gemini", sem_resposta)
-    assert edicao_video.textos_da_tela("v.mp4", "Copo") == {}
+    assert edicao_video.textos_das_versoes("v.mp4", "Copo") == {}
 
 
 def test_editor_2_de_verdade_tira_o_parado_e_poe_os_textos(tmp_path):
@@ -456,30 +462,43 @@ def test_remontar_sem_som_nao_mexe_no_som(monkeypatch, tmp_path):
     assert edicao_video.videos.com_cortes_e_ritmo("v.mp4", [], str(tmp_path / "r.mp4")) != ""
 
 
-def test_exemplo_do_editor_2_tem_a_lista_propria_e_o_preco_da_api(monkeypatch, tmp_path):
+def test_exemplos_dos_dois_editores_tem_a_lista_propria_e_o_preco_da_api(monkeypatch, tmp_path):
+    # Pedido do Rafael (27/10): dois editores, o 1 sem legendas e o 2 com legendas, cada um com o
+    # vídeo completo e as versões; cada um com a lista própria dos vídeos já mostrados.
     videos = {nome: str(tmp_path / f"{nome}.mp4") for nome in ("v1", "v2")}
     for caminho in videos.values():
         open(caminho, "wb").close()
-    editados = _fontes_de_mentira(monkeypatch, {"viral": [
+    _fontes_de_mentira(monkeypatch, {"viral": [
         ("viral:1", videos["v1"], "https://s.shopee.com.br/1", ""),
         ("viral:2", videos["v2"], "https://s.shopee.com.br/2", "")]}, fonte_do_robo="viral")
     monkeypatch.setattr(edicao_video, "_produto_do_link", lambda link: {"nome": "Copo Marca X", "preco": 39.9})
-    monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome: {"nome": "Copo Térmico"})
+    versoes = [{"vantagem": "Tampa firme", "inicio": 4.0, "fim": 6.0, "chamada": "Veja aqui"}]
+    monkeypatch.setattr(edicao_video, "textos_das_versoes", lambda video, nome: {
+        "nome": "Copo Térmico", "vantagem": "Gelado o dia todo", "versoes": versoes, "falas": [], "lugar": "meio"})
     pedidos = []
 
-    def editar_2(video, foto, destino, nome="", vantagem="", preco=None, falas=None, lugar=None):
-        pedidos.append((video, nome, vantagem, preco))
-        return "", {"textos": [nome]}
+    def editar_1_e_versoes(video, foto, destino, versoes_da_ia=(), falas=None):
+        pedidos.append((1, video, list(versoes_da_ia), falas))
+        return "", {"versoes": []}
 
-    monkeypatch.setattr(edicao_video, "editar_2", editar_2)
-    assert edicao_video.exemplo("exemplo.mp4") == ("Copo Térmico", "")
+    def editar_2_e_versoes(video, foto, destino, nome="", vantagem="", versoes_da_ia=(), preco=None, falas=None,
+                           lugar=None):
+        pedidos.append((2, video, nome, vantagem, list(versoes_da_ia), preco, lugar))
+        return "", {"versoes": []}
+
+    monkeypatch.setattr(edicao_video, "editar_1_e_versoes", editar_1_e_versoes)
+    monkeypatch.setattr(edicao_video, "editar_2_e_versoes", editar_2_e_versoes)
+    nome, motivo, resumo = edicao_video.exemplo_editor_1("exemplo.mp4")
+    assert (nome, motivo) == ("Copo Térmico", "") and resumo["versoes_da_ia"] == 1 and resumo["lugar_da_ia"]
     nome, motivo, resumo = edicao_video.exemplo_editor_2("exemplo.mp4")
     # O Editor 1 já mostrou o v1; o Editor 2 tem a lista dele e começa pelo v1 também.
     assert (nome, motivo) == ("Copo Térmico", "") and resumo["textos_da_ia"]
-    assert editados == [videos["v1"]] and pedidos == [(videos["v1"], "Copo Térmico", "", 39.9)]
-    assert db.ler_config(edicao_video.CHAVE_EXEMPLOS, {})["ids_2"] == ["viral:1"]
+    assert pedidos == [(1, videos["v1"], versoes, []),
+                       (2, videos["v1"], "Copo Térmico", "Gelado o dia todo", versoes, 39.9, "meio")]
+    dados = db.ler_config(edicao_video.CHAVE_EXEMPLOS, {})
+    assert dados["ids"] == ["viral:1"] and dados["ids_2"] == ["viral:1"]
     edicao_video.exemplo_editor_2("exemplo.mp4")
-    assert pedidos[-1][0] == videos["v2"]
+    assert pedidos[-1][1] == videos["v2"]
 
 
 def test_onde_alguem_fala_o_ritmo_nao_corta_nao_acelera_nem_poe_camera_lenta():
@@ -513,17 +532,17 @@ def test_ia_diz_onde_tem_fala_e_resposta_torta_vira_sem_resposta(monkeypatch):
         monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
 
     responde('{"nome": "Copo", "vantagem": "", "falas": [[0.5, 3], [4, 6.5], [9, 8]]}')
-    assert edicao_video.textos_da_tela("v.mp4", "Copo") == {"nome": "Copo", "falas": [(0.5, 3.0), (4.0, 6.5)]}
+    assert edicao_video.textos_das_versoes("v.mp4", "Copo") == {"nome": "Copo", "falas": [(0.5, 3.0), (4.0, 6.5)]}
     responde('{"nome": "Copo", "falas": []}')
-    assert edicao_video.textos_da_tela("v.mp4", "Copo")["falas"] == []
+    assert edicao_video.textos_das_versoes("v.mp4", "Copo")["falas"] == []
     responde('{"nome": "Copo", "falas": "o vídeo inteiro"}')
-    assert "falas" not in edicao_video.textos_da_tela("v.mp4", "Copo")
+    assert "falas" not in edicao_video.textos_das_versoes("v.mp4", "Copo")
     # O lugar dos textos (P46 e P47): os de LUGARES_DOS_TEXTOS ou "nenhum"; o resto não vale.
     for lugar in ("meio", "esquerda", "direita", "nenhum"):
         responde('{"nome": "Copo", "lugar": "%s"}' % lugar)
-        assert edicao_video.textos_da_tela("v.mp4", "Copo")["lugar"] == lugar
+        assert edicao_video.textos_das_versoes("v.mp4", "Copo")["lugar"] == lugar
     responde('{"nome": "Copo", "lugar": "embaixo"}')
-    assert "lugar" not in edicao_video.textos_da_tela("v.mp4", "Copo")
+    assert "lugar" not in edicao_video.textos_das_versoes("v.mp4", "Copo")
 
 
 def test_volume_do_som_por_janela(tmp_path):
@@ -714,12 +733,11 @@ VERSOES_DA_IA = [{"vantagem": "Fechamento com zíper", "inicio": 9.0, "fim": 10.
                  {"vantagem": "Várias cores", "inicio": 4.5, "fim": 6.0, "chamada": "Escolha a sua"}]
 
 
-def test_editor_3_entrega_o_completo_e_as_versoes_sem_textos_nem_acelerar(monkeypatch, tmp_path):
-    # Pedido do Rafael (27/10): o Editor 3 é o das versões a partir do Editor 1, sem textos e
-    # nada acelerado; o 1º vídeo é o completo, como o Editor 1 entrega, e cada versão segue do
-    # seu momento e tem um tamanho (P49).
+def test_editor_1_entrega_o_completo_e_as_versoes_sem_textos_nem_acelerar(monkeypatch, tmp_path):
+    # Pedidos do Rafael (27/10): o Editor 1 sem legendas entrega o vídeo completo e as versões,
+    # sem textos e nada acelerado; cada versão segue do seu momento e tem um tamanho (P49).
     montados, editados = _versoes_de_mentira(monkeypatch)
-    motivo, resumo = edicao_video.editar_3("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), VERSOES_DA_IA, falas=[])
+    motivo, resumo = edicao_video.editar_1_e_versoes("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), VERSOES_DA_IA, falas=[])
     assert motivo == "" and editados == [("v.mp4", "exemplo_1.mp4"), ("remontado_2.mp4", "exemplo_2.mp4"),
                                          ("remontado_3.mp4", "exemplo_3.mp4")]
     assert montados == [([(9.0, 12.0, 1.0), (0.0, 6.0, 1.0)], 0), ([(4.5, 12.0, 1.0), (0.0, 0.5, 1.0)], 0)]
@@ -730,15 +748,15 @@ def test_editor_3_entrega_o_completo_e_as_versoes_sem_textos_nem_acelerar(monkey
     # Sem momento que sirva, só o completo: o próprio vídeo com o Editor 1, sem remontar.
     montados.clear()
     editados.clear()
-    _, resumo = edicao_video.editar_3("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), [], falas=[])
+    _, resumo = edicao_video.editar_1_e_versoes("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), [], falas=[])
     assert montados == [] and editados == [("v.mp4", "exemplo_1.mp4")]
     assert [v["gancho"] for v in resumo["versoes"]] == [None]
 
 
-def test_editor_4_entrega_o_completo_do_editor_2_e_cada_versao_com_os_textos_dela(monkeypatch, tmp_path):
-    # Pedido do Rafael (27/10): o 1º vídeo do Editor 4 é o completo, como o Editor 2 entrega.
+def test_editor_2_entrega_o_completo_e_cada_versao_com_os_textos_dela(monkeypatch, tmp_path):
+    # Pedidos do Rafael (27/10): o Editor 2 com legendas entrega o vídeo completo e as versões.
     montados, editados = _versoes_de_mentira(monkeypatch)
-    motivo, resumo = edicao_video.editar_4("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa de Palha",
+    motivo, resumo = edicao_video.editar_2_e_versoes("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa de Palha",
                                            "Leve e resistente", VERSOES_DA_IA, 25.8, falas=[], lugar="alto")
     assert motivo == "" and [e[1] for e in editados] == ["exemplo_1.mp4", "exemplo_2.mp4", "exemplo_3.mp4"]
     # O completo é a remontagem do Editor 2, inteira, com os 3 textos dele.
@@ -748,6 +766,8 @@ def test_editor_4_entrega_o_completo_do_editor_2_e_cada_versao_com_os_textos_del
     assert all(edicao_video._segundos_remontados(m[0]) == pytest.approx(edicao_video.MINIMO_DO_REMONTADO)
                for m in montados[1:])
     completo, segunda, terceira = resumo["versoes"]
+    # O resumo do completo, como o do Editor 2, para a legenda (o que ele mudou no vídeo).
+    assert resumo["completo"]["acelerados"] == 1 and resumo["completo"]["cortado"] == 0
     preco = edicao_video.texto_do_preco(25.8)
     assert completo["gancho"] is None and completo["textos"] == ["Bolsa de Palha", "Leve e resistente", preco]
     # Nas versões, a vantagem do gancho abre e a chamada fecha.
@@ -756,7 +776,7 @@ def test_editor_4_entrega_o_completo_do_editor_2_e_cada_versao_com_os_textos_del
     assert segunda["gancho"] == (9.0, 10.5) and segunda["curta"] and not completo["curta"]
     # Sem lugar livre (P47), todos vão sem os textos.
     montados.clear()
-    _, resumo = edicao_video.editar_4("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa", "Leve",
+    _, resumo = edicao_video.editar_2_e_versoes("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa", "Leve",
                                       VERSOES_DA_IA, 25.8, falas=[], lugar="nenhum")
     assert [m[1] for m in montados] == [0, 0, 0] and all(v["textos"] == [] for v in resumo["versoes"])
 
