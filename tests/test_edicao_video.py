@@ -602,3 +602,118 @@ def test_texto_da_ia_comprido_nao_termina_em_palavra_de_ligacao():
     assert corta("Mantém gelado por muito tempo com tampa", 36) == "Mantém gelado por muito tempo"
     assert corta("Copo Térmico", 28) == "Copo Térmico"
     assert edicao_video.MAXIMO_DA_VANTAGEM == 36
+
+
+def test_editor_3_versoes_com_gancho_diferente_e_a_segunda_mais_curta():
+    # Pedido do Rafael (27/10): de um vídeo, até 3 versões diferentes de verdade, cada uma
+    # abrindo com um momento diferente; a segunda mais curta, sem os trechos calmos.
+    trechos = [(0.0, 4.0, 1.0), (4.0, 8.0, edicao_video.ACELERADO), (8.0, 12.0, 1.0)]
+    # O 3º gancho repete o 1º: não vira versão.
+    versoes = edicao_video.versoes_do_editor_3(trechos, [(9.0, 10.5), (1.0, 2.0), (9.2, 10.0)], frozenset())
+    assert [v["gancho"] for v in versoes] == [0, 1]
+    primeira, segunda = versoes
+    assert primeira["trechos"][0] == (9.0, 10.5, 1.0) and not primeira["curta"]
+    assert primeira["trechos"][1:] == [(0.0, 4.0, 1.0), (4.0, 8.0, edicao_video.ACELERADO), (8.0, 9.0, 1.0),
+                                       (10.5, 12.0, 1.0)]
+    assert segunda["trechos"] == [(1.0, 2.0, 1.0), (0.0, 1.0, 1.0), (2.0, 4.0, 1.0), (8.0, 12.0, 1.0)]
+    assert segunda["curta"] and edicao_video._segundos_remontados(segunda["trechos"]) >= edicao_video.MINIMO_DO_REMONTADO
+    # Nenhum pedaço do vídeo aparece duas vezes na mesma versão.
+    for versao in versoes:
+        pedacos = sorted((a, b) for a, b, _ in versao["trechos"])
+        assert all(pedacos[i][1] <= pedacos[i + 1][0] for i in range(len(pedacos) - 1))
+
+
+def test_editor_3_nao_abre_com_fala_e_sem_gancho_faz_uma_versao_so():
+    # P45: onde alguém fala, o vídeo fica inteiro e na ordem; o gancho nunca tem fala.
+    trechos = [(0.0, 12.0, 1.0)]
+    com_fala = edicao_video.janelas_com_fala([(0.5, 3.0)], 12.0)
+    versoes = edicao_video.versoes_do_editor_3(trechos, [(1.0, 2.5), (6.0, 7.5)], com_fala)
+    assert [v["gancho"] for v in versoes] == [1] and versoes[0]["trechos"][0] == (6.0, 7.5, 1.0)
+    # Gancho fora dos trechos (parte parada que saiu) ou curto demais não serve: uma versão só.
+    so_uma = edicao_video.versoes_do_editor_3([(0.0, 5.0, 1.0), (8.0, 12.0, 1.0)], [(5.2, 7.8), (3.0, 3.5)],
+                                              frozenset())
+    assert so_uma == [{"gancho": None, "trechos": [(0.0, 5.0, 1.0), (8.0, 12.0, 1.0)], "curta": False}]
+    assert edicao_video.versoes_do_editor_3(trechos, [], frozenset())[0]["gancho"] is None
+
+
+def test_editor_3_le_as_versoes_da_ia(monkeypatch):
+    import api_gemini
+
+    def responde(texto):
+        async def analisar(video, prompt, imagens=None):
+            assert "até 3 versões diferentes" in prompt and "Bolsa" in prompt
+            return texto
+        monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
+
+    responde('{"nome": "Bolsa de Palha", "lugar": "esquerda", "falas": [], "versoes": ['
+             '{"vantagem": "Várias cores", "inicio": 0.5, "fim": 2.5, "chamada": "Escolha a sua aqui embaixo"},'
+             '{"vantagem": "Fechamento com zíper", "inicio": "6", "fim": 8, "chamada": "Toque no produto"},'
+             '{"vantagem": "", "inicio": 9, "fim": 10}, {"vantagem": "Torta", "inicio": 5, "fim": 4},'
+             '{"vantagem": "Leve", "inicio": 9, "fim": 11, "chamada": "Veja aqui"},'
+             '{"vantagem": "Quarta", "inicio": 11, "fim": 12}]}')
+    textos = edicao_video.textos_do_editor_3("v.mp4", "Bolsa")
+    assert textos["nome"] == "Bolsa de Palha" and textos["lugar"] == "esquerda" and textos["falas"] == []
+    assert [(v["vantagem"], v["inicio"], v["fim"], v["chamada"]) for v in textos["versoes"]] == [
+        ("Várias cores", 0.5, 2.5, "Escolha a sua aqui embaixo"), ("Fechamento com zíper", 6.0, 8.0, "Toque no produto"),
+        ("Leve", 9.0, 11.0, "Veja aqui")]
+    responde("sem JSON")
+    assert edicao_video.textos_do_editor_3("v.mp4", "Bolsa") == {}
+
+
+def test_editor_3_monta_cada_versao_com_os_textos_dela(monkeypatch, tmp_path):
+    monkeypatch.setattr(edicao_video.videos, "duracao", lambda video, timeout=30: 12.0)
+    monkeypatch.setattr(edicao_video, "ritmo", lambda movimentos, duracao, por_segundo=10, com_fala=frozenset(): [
+        (0.0, 4.0, 1.0), (4.0, 8.0, edicao_video.ACELERADO), (8.0, 12.0, 1.0)])
+    monkeypatch.setattr(edicao_video.videos, "movimento", lambda video, por_segundo=10, timeout=120: [])
+    montados, editados = [], []
+
+    def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
+        montados.append((list(trechos), len(letreiros)))
+        return ""
+
+    def editar(video, foto, destino, avisos=False):
+        editados.append(os.path.basename(destino))
+        return ""
+    monkeypatch.setattr(edicao_video.videos, "com_cortes_e_ritmo", com_cortes_e_ritmo)
+    monkeypatch.setattr(edicao_video, "editar", editar)
+    versoes_da_ia = [{"vantagem": "Fechamento com zíper", "inicio": 9.0, "fim": 10.5, "chamada": "Toque no produto"},
+                     {"vantagem": "Várias cores", "inicio": 1.0, "fim": 2.0, "chamada": "Escolha a sua"}]
+    motivo, resumo = edicao_video.editar_3("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa de Palha",
+                                           versoes_da_ia, 25.8, falas=[], lugar="alto")
+    assert motivo == "" and editados == ["exemplo_1.mp4", "exemplo_2.mp4"]
+    assert [m[0][0] for m in montados] == [(9.0, 10.5, 1.0), (1.0, 2.0, 1.0)] and [m[1] for m in montados] == [4, 4]
+    primeira, segunda = resumo["versoes"]
+    # A vantagem do gancho abre, a chamada fecha.
+    assert primeira["textos"] == ["Fechamento com zíper", "Bolsa de Palha", "A partir de R$ 25,80",
+                                  "Toque no produto"]
+    assert segunda["textos"][0] == "Várias cores" and segunda["textos"][-1] == "Escolha a sua"
+    assert primeira["gancho"] == (9.0, 10.5) and segunda["curta"] and not primeira["curta"]
+    # Sem lugar livre (P47), as versões vão sem os textos.
+    montados.clear()
+    _, resumo = edicao_video.editar_3("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa", versoes_da_ia, 25.8,
+                                      falas=[], lugar="nenhum")
+    assert [m[1] for m in montados] == [0, 0] and all(v["textos"] == [] for v in resumo["versoes"])
+
+
+def test_remontar_pode_trocar_a_ordem_dos_trechos(tmp_path):
+    # O Editor 3 abre cada versão com um momento do meio do vídeo: o ffmpeg monta na ordem da lista.
+    if not shutil.which("ffmpeg"):
+        return
+    from PIL import Image
+    video = tmp_path / "v.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=red:size=360x640:rate=30:duration=2",
+                    "-f", "lavfi", "-i", "color=c=green:size=360x640:rate=30:duration=2",
+                    "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0[v]", "-map", "[v]", str(video)], check=True)
+    destino = tmp_path / "r.mp4"
+    assert edicao_video.videos.com_cortes_e_ritmo(str(video), [(2.0, 4.0, 1.0), (0.0, 2.0, 1.0)], str(destino)) == ""
+
+    def cor(segundo):
+        quadro = tmp_path / f"q_{segundo}.ppm"
+        subprocess.run(["ffmpeg", "-v", "error", "-ss", str(segundo), "-i", str(destino), "-frames:v", "1",
+                        str(quadro)], check=True)
+        with Image.open(quadro) as imagem:
+            return imagem.convert("RGB").getpixel((360, 640))
+    vermelho, verde, _ = cor(0.5)
+    assert verde > 100 and vermelho < 80
+    vermelho, verde, _ = cor(3.0)
+    assert vermelho > 150 and verde < 80

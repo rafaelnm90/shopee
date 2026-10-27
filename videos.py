@@ -320,7 +320,7 @@ EMENDA_DO_SOM = 0.03
 def comando_cortes_e_ritmo(video, trechos, destino, com_audio, letreiros=()):
     """
     O ffmpeg do vídeo remontado: trechos = [(início, fim, velocidade)], cada pedaço do vídeo
-    original na ordem, na velocidade dele (o som acompanha, sem mudar o tom; o que não está
+    original na ordem da lista (que pode trocar a ordem do original), na velocidade dele (o som acompanha, sem mudar o tom; o que não está
     em nenhum trecho sai). Sai em 720x1280. letreiros = [(imagem, início, fim, x, y)]: cada
     imagem (PNG com fundo transparente) por cima, com o canto de cima à esquerda em (x, y),
     nesses segundos do vídeo já remontado.
