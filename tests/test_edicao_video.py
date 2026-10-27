@@ -604,12 +604,12 @@ def test_texto_da_ia_comprido_nao_termina_em_palavra_de_ligacao():
     assert edicao_video.MAXIMO_DA_VANTAGEM == 36
 
 
-def test_editor_3_versoes_com_gancho_diferente_e_a_segunda_mais_curta():
+def test_versoes_com_gancho_diferente_e_a_segunda_mais_curta():
     # Pedido do Rafael (27/10): de um vídeo, até 3 versões diferentes de verdade, cada uma
-    # abrindo com um momento diferente; a segunda mais curta, sem os trechos calmos.
+    # abrindo com um momento diferente; no Editor 4, a segunda mais curta, sem os trechos calmos.
     trechos = [(0.0, 4.0, 1.0), (4.0, 8.0, edicao_video.ACELERADO), (8.0, 12.0, 1.0)]
     # O 3º gancho repete o 1º: não vira versão.
-    versoes = edicao_video.versoes_do_editor_3(trechos, [(9.0, 10.5), (1.0, 2.0), (9.2, 10.0)], frozenset())
+    versoes = edicao_video.planejar_versoes(trechos, [(9.0, 10.5), (1.0, 2.0), (9.2, 10.0)], frozenset())
     assert [v["gancho"] for v in versoes] == [0, 1]
     primeira, segunda = versoes
     assert primeira["trechos"][0] == (9.0, 10.5, 1.0) and not primeira["curta"]
@@ -623,20 +623,20 @@ def test_editor_3_versoes_com_gancho_diferente_e_a_segunda_mais_curta():
         assert all(pedacos[i][1] <= pedacos[i + 1][0] for i in range(len(pedacos) - 1))
 
 
-def test_editor_3_nao_abre_com_fala_e_sem_gancho_faz_uma_versao_so():
+def test_versao_nao_abre_com_fala_e_sem_gancho_faz_uma_versao_so():
     # P45: onde alguém fala, o vídeo fica inteiro e na ordem; o gancho nunca tem fala.
     trechos = [(0.0, 12.0, 1.0)]
     com_fala = edicao_video.janelas_com_fala([(0.5, 3.0)], 12.0)
-    versoes = edicao_video.versoes_do_editor_3(trechos, [(1.0, 2.5), (6.0, 7.5)], com_fala)
+    versoes = edicao_video.planejar_versoes(trechos, [(1.0, 2.5), (6.0, 7.5)], com_fala)
     assert [v["gancho"] for v in versoes] == [1] and versoes[0]["trechos"][0] == (6.0, 7.5, 1.0)
     # Gancho fora dos trechos (parte parada que saiu) ou curto demais não serve: uma versão só.
-    so_uma = edicao_video.versoes_do_editor_3([(0.0, 5.0, 1.0), (8.0, 12.0, 1.0)], [(5.2, 7.8), (3.0, 3.5)],
+    so_uma = edicao_video.planejar_versoes([(0.0, 5.0, 1.0), (8.0, 12.0, 1.0)], [(5.2, 7.8), (3.0, 3.5)],
                                               frozenset())
     assert so_uma == [{"gancho": None, "trechos": [(0.0, 5.0, 1.0), (8.0, 12.0, 1.0)], "curta": False}]
-    assert edicao_video.versoes_do_editor_3(trechos, [], frozenset())[0]["gancho"] is None
+    assert edicao_video.planejar_versoes(trechos, [], frozenset())[0]["gancho"] is None
 
 
-def test_editor_3_le_as_versoes_da_ia(monkeypatch):
+def test_versoes_da_ia(monkeypatch):
     import api_gemini
 
     def responde(texto):
@@ -651,16 +651,17 @@ def test_editor_3_le_as_versoes_da_ia(monkeypatch):
              '{"vantagem": "", "inicio": 9, "fim": 10}, {"vantagem": "Torta", "inicio": 5, "fim": 4},'
              '{"vantagem": "Leve", "inicio": 9, "fim": 11, "chamada": "Veja aqui"},'
              '{"vantagem": "Quarta", "inicio": 11, "fim": 12}]}')
-    textos = edicao_video.textos_do_editor_3("v.mp4", "Bolsa")
+    textos = edicao_video.textos_das_versoes("v.mp4", "Bolsa")
     assert textos["nome"] == "Bolsa de Palha" and textos["lugar"] == "esquerda" and textos["falas"] == []
     assert [(v["vantagem"], v["inicio"], v["fim"], v["chamada"]) for v in textos["versoes"]] == [
         ("Várias cores", 0.5, 2.5, "Escolha a sua aqui embaixo"), ("Fechamento com zíper", 6.0, 8.0, "Toque no produto"),
         ("Leve", 9.0, 11.0, "Veja aqui")]
     responde("sem JSON")
-    assert edicao_video.textos_do_editor_3("v.mp4", "Bolsa") == {}
+    assert edicao_video.textos_das_versoes("v.mp4", "Bolsa") == {}
 
 
-def test_editor_3_monta_cada_versao_com_os_textos_dela(monkeypatch, tmp_path):
+def _versoes_de_mentira(monkeypatch):
+    """Vídeo de 12 s com 4 s acelerados no meio, e o que o ffmpeg e o Editor 1 receberam."""
     monkeypatch.setattr(edicao_video.videos, "duracao", lambda video, timeout=30: 12.0)
     monkeypatch.setattr(edicao_video, "ritmo", lambda movimentos, duracao, por_segundo=10, com_fala=frozenset(): [
         (0.0, 4.0, 1.0), (4.0, 8.0, edicao_video.ACELERADO), (8.0, 12.0, 1.0)])
@@ -672,15 +673,40 @@ def test_editor_3_monta_cada_versao_com_os_textos_dela(monkeypatch, tmp_path):
         return ""
 
     def editar(video, foto, destino, avisos=False):
-        editados.append(os.path.basename(destino))
+        editados.append((os.path.basename(video), os.path.basename(destino)))
         return ""
     monkeypatch.setattr(edicao_video.videos, "com_cortes_e_ritmo", com_cortes_e_ritmo)
     monkeypatch.setattr(edicao_video, "editar", editar)
-    versoes_da_ia = [{"vantagem": "Fechamento com zíper", "inicio": 9.0, "fim": 10.5, "chamada": "Toque no produto"},
-                     {"vantagem": "Várias cores", "inicio": 1.0, "fim": 2.0, "chamada": "Escolha a sua"}]
-    motivo, resumo = edicao_video.editar_3("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa de Palha",
+    return montados, editados
+
+
+VERSOES_DA_IA = [{"vantagem": "Fechamento com zíper", "inicio": 9.0, "fim": 10.5, "chamada": "Toque no produto"},
+                 {"vantagem": "Várias cores", "inicio": 1.0, "fim": 2.0, "chamada": "Escolha a sua"}]
+
+
+def test_editor_3_so_muda_o_comeco_sem_textos_nem_cortes(monkeypatch, tmp_path):
+    # Pedido do Rafael (27/10): o Editor 3 é o das versões a partir do Editor 1: sem textos,
+    # nada cortado nem acelerado, só o momento de abertura muda.
+    montados, editados = _versoes_de_mentira(monkeypatch)
+    motivo, resumo = edicao_video.editar_3("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), VERSOES_DA_IA, falas=[])
+    assert motivo == "" and [e[1] for e in editados] == ["exemplo_1.mp4", "exemplo_2.mp4"]
+    assert montados == [([(9.0, 10.5, 1.0), (0.0, 9.0, 1.0), (10.5, 12.0, 1.0)], 0),
+                        ([(1.0, 2.0, 1.0), (0.0, 1.0, 1.0), (2.0, 12.0, 1.0)], 0)]
+    assert all(not v["textos"] and not v["curta"] for v in resumo["versoes"])
+    assert [v["vantagem"] for v in resumo["versoes"]] == ["Fechamento com zíper", "Várias cores"]
+    # Sem momento que sirva, uma versão só: o próprio vídeo com o Editor 1, sem remontar.
+    montados.clear()
+    editados.clear()
+    _, resumo = edicao_video.editar_3("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), [], falas=[])
+    assert montados == [] and editados == [("v.mp4", "exemplo_1.mp4")] and resumo["versoes"][0]["gancho"] is None
+
+
+def test_editor_4_monta_cada_versao_com_os_textos_dela(monkeypatch, tmp_path):
+    montados, editados = _versoes_de_mentira(monkeypatch)
+    versoes_da_ia = VERSOES_DA_IA
+    motivo, resumo = edicao_video.editar_4("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa de Palha",
                                            versoes_da_ia, 25.8, falas=[], lugar="alto")
-    assert motivo == "" and editados == ["exemplo_1.mp4", "exemplo_2.mp4"]
+    assert motivo == "" and [e[1] for e in editados] == ["exemplo_1.mp4", "exemplo_2.mp4"]
     assert [m[0][0] for m in montados] == [(9.0, 10.5, 1.0), (1.0, 2.0, 1.0)] and [m[1] for m in montados] == [4, 4]
     primeira, segunda = resumo["versoes"]
     # A vantagem do gancho abre, a chamada fecha.
@@ -690,13 +716,13 @@ def test_editor_3_monta_cada_versao_com_os_textos_dela(monkeypatch, tmp_path):
     assert primeira["gancho"] == (9.0, 10.5) and segunda["curta"] and not primeira["curta"]
     # Sem lugar livre (P47), as versões vão sem os textos.
     montados.clear()
-    _, resumo = edicao_video.editar_3("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa", versoes_da_ia, 25.8,
+    _, resumo = edicao_video.editar_4("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa", versoes_da_ia, 25.8,
                                       falas=[], lugar="nenhum")
     assert [m[1] for m in montados] == [0, 0] and all(v["textos"] == [] for v in resumo["versoes"])
 
 
 def test_remontar_pode_trocar_a_ordem_dos_trechos(tmp_path):
-    # O Editor 3 abre cada versão com um momento do meio do vídeo: o ffmpeg monta na ordem da lista.
+    # Os Editores 3 e 4 abrem cada versão com um momento do meio do vídeo: o ffmpeg monta na ordem da lista.
     if not shutil.which("ffmpeg"):
         return
     from PIL import Image
