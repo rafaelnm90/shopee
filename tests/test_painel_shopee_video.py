@@ -328,7 +328,8 @@ def test_exemplo_do_editor_2_chega_com_o_que_mudou_no_video(bm, Msg, Est, monkey
     # acelerados e textos na tela) só no exemplo, para comparar com o Editor 1.
     sv, est = _painel(bm), Est()
     resumo = {"original": 24.0, "remontado": 15.2, "cortado": 6.4, "acelerados": 3, "camera_lenta": 1,
-              "textos": ["Copo Térmico", "Mantém gelado", "A partir de R$\u00a039,90"], "textos_da_ia": True}
+              "textos": ["Copo Térmico", "Mantém gelado", "A partir de R$\u00a039,90"], "textos_da_ia": True,
+              "lugar": "alto", "lugar_da_ia": True}
 
     def exemplo_editor_2(destino):
         with open(destino, "wb") as arquivo:
@@ -344,6 +345,7 @@ def test_exemplo_do_editor_2_chega_com_o_que_mudou_no_video(bm, Msg, Est, monkey
     assert "Trechos acelerados: 3 | 🐢 Em câmera lenta: 1" in legenda and "“Mantém gelado”" in legenda
     assert "A IA não escreveu" not in legenda and not os.path.exists(msg.midias[0][1])
     assert "Com fala" not in legenda
+    assert "Lugar do texto: no alto, ao lado da miniatura (a IA escolheu)" in legenda
     assert consultar("SELECT processo, resultado FROM registro_processos ORDER BY rowid DESC") == (
         "edição do vídeo: exemplo do editor 2", "mandado")
     # Sem os textos da IA, o exemplo sai com o preço e avisa; a fala mantida aparece (P45).
