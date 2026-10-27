@@ -137,3 +137,23 @@ def test_quadros_espalhados_do_video(tmp_path):
     lixo = tmp_path / "lixo.mp4"
     lixo.write_bytes(b"nao e video")
     assert videos.quadros(str(lixo), str(tmp_path / "x")) == 0
+
+
+def test_video_mudo_sem_trilha_ou_em_silencio(tmp_path):
+    # Escolha do Rafael (P48): o vídeo sem som nenhum ganha uma música da Shopee na postagem.
+    import shutil
+    import subprocess
+    assert videos.mudo(str(tmp_path / "nao_existe.mp4")) is False
+    if not shutil.which("ffmpeg"):
+        return
+
+    def gravar(nome, *som):
+        caminho = str(tmp_path / nome)
+        subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=black:size=64x64:rate=10:duration=2",
+                        *som, "-shortest", caminho], check=True)
+        return caminho
+    assert videos.mudo(gravar("sem_trilha.mp4")) is True
+    assert videos.mudo(gravar("silencio.mp4", "-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=8000",
+                              "-map", "0:v", "-map", "1:a")) is True
+    assert videos.mudo(gravar("apito.mp4", "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+                              "-map", "0:v", "-map", "1:a")) is False

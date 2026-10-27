@@ -603,3 +603,22 @@ def test_bebida_alcoolica_sem_a_edicao_fica_de_lado_e_vai_o_proximo(monkeypatch)
           ("cerveja", LEGENDA, "archive/cerveja.mp4", "2026-10-02 10:00"))
     assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
     assert bot.videos == [(42, "copo.mp4")] and asv.proximo_video() is None
+
+
+def test_video_mudo_pede_musica_da_shopee_na_postagem(monkeypatch):
+    # Escolha do Rafael (P48, 27/10): o vídeo sem som ganha uma música da Shopee na hora de
+    # postar; no modo assistente, quem põe é ele, e a mensagem lembra.
+    texto = asv.montar_mensagem(TEXTOS, [], "https://s.shopee.com.br/abc", mudo=True)
+    assert "🔇 <b>Vídeo sem som:</b>" in texto and "Adicionar Música" in texto
+    assert texto.index("Vídeo sem som") < texto.index("Título")
+    assert "🔇" not in asv.montar_mensagem(TEXTOS, [], "https://s.shopee.com.br/abc")
+    _preparar(monkeypatch, TEXTOS)
+    conferidos = []
+
+    def mudo(caminho, timeout=120):
+        conferidos.append(os.path.basename(caminho))
+        return True
+    monkeypatch.setattr(asv.videos, "mudo", mudo)
+    bot = Bot()
+    assert rodar(asv.preparar_e_enviar(bot, 42)) == "postagem mandada no seu privado"
+    assert conferidos == ["novo.mp4"] and "Vídeo sem som" in bot.mensagens[-1][1]
