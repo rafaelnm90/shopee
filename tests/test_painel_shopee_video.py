@@ -296,6 +296,8 @@ def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
     assert "Editor 1</b> (o que vale nos rascunhos)" in texto and "Editor 2</b> (em teste, só no exemplo)" in texto
     assert "Editor 3</b> (em teste, só no exemplo): o Editor 1 em até 3 versões" in texto
     assert "Editor 4</b> (em teste, só no exemplo): o Editor 2 em até 3 versões" in texto
+    assert "segue dali (o que vinha antes vai para o fim)" in texto
+    assert "a 1ª é o vídeo inteiro, a 2ª uns 3/4 e a 3ª a mais curta (pelo menos 8 s" in texto
     rodar(sv.ligar_edicao_handler(Msg("Ligar Edição ✅"), est))
     assert sv.ler_config()["edicao_ligada"] and sv.edicao_video.vale_para("autorais")
     assert "Desligar Edição ⏸️" in _textos(sv.teclado_edicao(sv.ler_config()))
@@ -973,7 +975,7 @@ def test_exemplo_do_editor_3_manda_as_versoes_sem_textos(bm, Msg, Est, monkeypat
         arquivo = sv.edicao_video.arquivo_da_versao(destino, 1)
         with open(arquivo, "wb") as saida:
             saida.write(b"editado")
-        return "Bolsa", "", {"original": 12.0, "com_fala": 0, "versoes_da_ia": 1, "lugar_da_ia": False,
+        return "Bolsa", "", {"original": 12.0, "inteiro": 12.0, "com_fala": 0, "versoes_da_ia": 1, "lugar_da_ia": False,
                              "versoes": [{"arquivo": arquivo, "remontado": 12.0, "curta": False, "textos": [],
                                           "gancho": (4.0, 6.0), "vantagem": "Fechamento com zíper"}]}
 
@@ -982,6 +984,8 @@ def test_exemplo_do_editor_3_manda_as_versoes_sem_textos(bm, Msg, Est, monkeypat
     rodar(sv.exemplo_editor_3_handler(msg, est))
     legenda = msg.midias[0][2]
     assert "Exemplo do Editor 3, versão 1 de 1" in legenda and "(o que ele mostra: “Fechamento com zíper”)" in legenda
+    assert "do vídeo original (o que ele mostra: “Fechamento com zíper”) e segue dali; o que vinha antes vai para o fim" in legenda
+    assert "(mais os 2 s da foto): o vídeo inteiro" in legenda
     assert "Textos na tela" not in legenda and "Lugar do texto" not in legenda
     assert "rendeu 1 versão diferente de verdade" in legenda and "compare com os Editores 1, 2 e 4" in legenda
     assert consultar("SELECT processo, resultado FROM registro_processos ORDER BY rowid DESC") == (
@@ -990,8 +994,8 @@ def test_exemplo_do_editor_3_manda_as_versoes_sem_textos(bm, Msg, Est, monkeypat
 
 def test_exemplo_do_editor_4_manda_cada_versao_com_o_que_mudou(bm, Msg, Est, monkeypatch):
     # Pedido do Rafael (27/10): o Editor 4 faz do mesmo vídeo até 3 versões diferentes de
-    # verdade a partir do Editor 2 (outro começo, outra vantagem, outra chamada; a segunda mais
-    # curta), só no exemplo.
+    # verdade a partir do Editor 2 (outro começo, outra vantagem, outra chamada; cada uma de um
+    # tamanho, P49), só no exemplo.
     sv, est = _painel(bm), Est()
 
     def exemplo_editor_4(destino):
@@ -1002,7 +1006,7 @@ def test_exemplo_do_editor_4_manda_cada_versao_com_o_que_mudou(bm, Msg, Est, mon
                 saida.write(b"editado")
             versoes.append({"arquivo": arquivo, "remontado": 10.7 if numero == 1 else 8.0, "curta": curta,
                             "gancho": gancho, "textos": [f"Vantagem {numero}", "Bolsa de Palha", f"Chamada {numero}"]})
-        return "Bolsa <palha>", "", {"original": 12.0, "lugar": "alto", "lugar_da_ia": True, "com_fala": 0,
+        return "Bolsa <palha>", "", {"original": 12.0, "inteiro": 10.7, "lugar": "alto", "lugar_da_ia": True, "com_fala": 0,
                                      "versoes_da_ia": 3, "versoes": versoes}
 
     monkeypatch.setattr(sv.edicao_video, "exemplo_editor_4", exemplo_editor_4)
@@ -1013,7 +1017,8 @@ def test_exemplo_do_editor_4_manda_cada_versao_com_o_que_mudou(bm, Msg, Est, mon
     assert "Editor 4, versão 1 de 2 (não foi postado): Bolsa &lt;palha&gt;" in primeira
     assert "Abre com o trecho de 9,0 s a 10,5 s do vídeo original" in primeira and "“Vantagem 1”" in primeira
     assert "Lugar do texto" not in primeira
-    assert "versão 2 de 2" in segunda and "a mais curta: sem os trechos calmos" in segunda
+    assert "(mais os 2 s da foto): o vídeo inteiro" in primeira
+    assert "versão 2 de 2" in segunda and "(mais os 2 s da foto): 75% do vídeo inteiro, a mais curta" in segunda
     assert "rendeu 2 versões diferentes de verdade" in segunda and "Lugar do texto: no alto" in segunda
     assert not any(os.path.exists(m[1]) for m in msg.midias)
     assert consultar("SELECT processo, resultado FROM registro_processos ORDER BY rowid DESC") == (

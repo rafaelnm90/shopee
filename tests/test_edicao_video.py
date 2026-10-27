@@ -4,6 +4,8 @@ import shutil
 import subprocess
 from types import SimpleNamespace
 
+import pytest
+
 import db
 import edicao_video
 from conftest import inserir
@@ -604,34 +606,60 @@ def test_texto_da_ia_comprido_nao_termina_em_palavra_de_ligacao():
     assert edicao_video.MAXIMO_DA_VANTAGEM == 36
 
 
-def test_versoes_com_gancho_diferente_e_a_segunda_mais_curta():
-    # Pedido do Rafael (27/10): de um vídeo, até 3 versões diferentes de verdade, cada uma
-    # abrindo com um momento diferente; no Editor 4, a segunda mais curta, sem os trechos calmos.
-    trechos = [(0.0, 4.0, 1.0), (4.0, 8.0, edicao_video.ACELERADO), (8.0, 12.0, 1.0)]
-    # O 3º gancho repete o 1º: não vira versão.
-    versoes = edicao_video.planejar_versoes(trechos, [(9.0, 10.5), (1.0, 2.0), (9.2, 10.0)], frozenset())
-    assert [v["gancho"] for v in versoes] == [0, 1]
-    primeira, segunda = versoes
-    assert primeira["trechos"][0] == (9.0, 10.5, 1.0) and not primeira["curta"]
-    assert primeira["trechos"][1:] == [(0.0, 4.0, 1.0), (4.0, 8.0, edicao_video.ACELERADO), (8.0, 9.0, 1.0),
-                                       (10.5, 12.0, 1.0)]
-    assert segunda["trechos"] == [(1.0, 2.0, 1.0), (0.0, 1.0, 1.0), (2.0, 4.0, 1.0), (8.0, 12.0, 1.0)]
-    assert segunda["curta"] and edicao_video._segundos_remontados(segunda["trechos"]) >= edicao_video.MINIMO_DO_REMONTADO
+def _no_original(trechos, segundo):
+    """O segundo do vídeo original que a versão mostra no segundo dado dela."""
+    for a, b, v in trechos:
+        if segundo < (b - a) / v:
+            return a + segundo * v
+        segundo -= (b - a) / v
+    return None
+
+
+def test_versoes_seguem_do_gancho_e_cada_uma_tem_um_tamanho():
+    # Escolha do Rafael (P49): nas versões do conjunto de jardim, todas voltavam ao começo do
+    # vídeo depois do gancho e terminavam iguais, com o mesmo tamanho. Agora cada versão segue
+    # do seu gancho (o que vinha antes vai para o fim) e tem um tamanho: inteira, uns 3/4 e a
+    # mais curta.
+    trechos = [(0.0, 8.0, 1.0), (8.0, 12.0, edicao_video.ACELERADO), (12.0, 20.0, 1.0)]
+    inteira = edicao_video._segundos_remontados(trechos)
+    # O 3º gancho começa a 1 s do 1º: não vira versão.
+    versoes = edicao_video.planejar_versoes(trechos, [(13.0, 15.0), (2.0, 3.5), (14.0, 15.5), (6.0, 7.0)],
+                                            frozenset())
+    assert [v["gancho"] for v in versoes] == [0, 1, 3]
+    primeira, segunda, terceira = versoes
+    assert primeira["trechos"] == [(13.0, 20.0, 1.0), (0.0, 8.0, 1.0), (8.0, 12.0, edicao_video.ACELERADO),
+                                   (12.0, 13.0, 1.0)] and not primeira["curta"]
+    assert segunda["trechos"][:2] == [(2.0, 8.0, 1.0), (8.0, 12.0, edicao_video.ACELERADO)] and segunda["curta"]
+    assert segunda["trechos"][2][0] == 12.0 and segunda["trechos"][2][1] == pytest.approx(12.0 + inteira * 0.75 - 6.0 - 4.0 / 1.5)
+    assert terceira["trechos"][0] == (6.0, 8.0, 1.0) and terceira["curta"]
+    tamanhos = [edicao_video._segundos_remontados(v["trechos"]) for v in versoes]
+    assert tamanhos == pytest.approx([inteira, inteira * 0.75, inteira * 0.5])
+    # Em nenhum segundo duas versões mostram a mesma parte do vídeo.
+    for uma, outra in ((primeira, segunda), (primeira, terceira), (segunda, terceira)):
+        segundos = [n / 10 for n in range(int(min(tamanhos) * 10))]
+        assert min(abs(_no_original(uma["trechos"], t) - _no_original(outra["trechos"], t)) for t in segundos) >= 2
     # Nenhum pedaço do vídeo aparece duas vezes na mesma versão.
     for versao in versoes:
         pedacos = sorted((a, b) for a, b, _ in versao["trechos"])
         assert all(pedacos[i][1] <= pedacos[i + 1][0] for i in range(len(pedacos) - 1))
+    # Vídeo curto: nenhuma versão fica com menos de MINIMO_DO_REMONTADO.
+    curtas = edicao_video.planejar_versoes([(0.0, 10.0, 1.0)], [(0.0, 2.0), (5.0, 7.0)], frozenset())
+    assert [edicao_video._segundos_remontados(v["trechos"]) for v in curtas] == [10.0, edicao_video.MINIMO_DO_REMONTADO]
 
 
-def test_versao_nao_abre_com_fala_e_sem_gancho_faz_uma_versao_so():
+def test_versao_nao_abre_com_fala_nem_corta_a_fala_e_sem_gancho_faz_uma_versao_so():
     # P45: onde alguém fala, o vídeo fica inteiro e na ordem; o gancho nunca tem fala.
     trechos = [(0.0, 12.0, 1.0)]
     com_fala = edicao_video.janelas_com_fala([(0.5, 3.0)], 12.0)
     versoes = edicao_video.planejar_versoes(trechos, [(1.0, 2.5), (6.0, 7.5)], com_fala)
-    assert [v["gancho"] for v in versoes] == [1] and versoes[0]["trechos"][0] == (6.0, 7.5, 1.0)
+    assert [v["gancho"] for v in versoes] == [1] and versoes[0]["trechos"] == [(6.0, 12.0, 1.0), (0.0, 6.0, 1.0)]
+    # O corte do fim de uma versão mais curta não cai no meio de uma fala: ela fica inteira.
+    com_fala = edicao_video.janelas_com_fala([(10.5, 13.0)], 20.0)
+    _, segunda = edicao_video.planejar_versoes([(0.0, 20.0, 1.0)], [(3.0, 5.0), (16.0, 17.0)], com_fala)
+    assert segunda["curta"] and segunda["trechos"] == [(16.0, 20.0, 1.0), (0.0, 13.5, 1.0)]
     # Gancho fora dos trechos (parte parada que saiu) ou curto demais não serve: uma versão só.
     so_uma = edicao_video.planejar_versoes([(0.0, 5.0, 1.0), (8.0, 12.0, 1.0)], [(5.2, 7.8), (3.0, 3.5)],
-                                              frozenset())
+                                           frozenset())
     assert so_uma == [{"gancho": None, "trechos": [(0.0, 5.0, 1.0), (8.0, 12.0, 1.0)], "curta": False}]
     assert edicao_video.planejar_versoes(trechos, [], frozenset())[0]["gancho"] is None
 
@@ -642,6 +670,7 @@ def test_versoes_da_ia(monkeypatch):
     def responde(texto):
         async def analisar(video, prompt, imagens=None):
             assert "até 3 versões diferentes" in prompt and "Bolsa" in prompt
+            assert "pelo menos 3 segundos entre o começo de um momento e o de outro" in prompt
             return texto
         monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
 
@@ -684,15 +713,15 @@ VERSOES_DA_IA = [{"vantagem": "Fechamento com zíper", "inicio": 9.0, "fim": 10.
                  {"vantagem": "Várias cores", "inicio": 1.0, "fim": 2.0, "chamada": "Escolha a sua"}]
 
 
-def test_editor_3_so_muda_o_comeco_sem_textos_nem_cortes(monkeypatch, tmp_path):
-    # Pedido do Rafael (27/10): o Editor 3 é o das versões a partir do Editor 1: sem textos,
-    # nada cortado nem acelerado, só o momento de abertura muda.
+def test_editor_3_muda_o_comeco_e_o_tamanho_sem_textos_nem_acelerar(monkeypatch, tmp_path):
+    # Pedido do Rafael (27/10): o Editor 3 é o das versões a partir do Editor 1: sem textos e
+    # nada acelerado; cada versão segue do seu momento e tem um tamanho (P49).
     montados, editados = _versoes_de_mentira(monkeypatch)
     motivo, resumo = edicao_video.editar_3("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), VERSOES_DA_IA, falas=[])
     assert motivo == "" and [e[1] for e in editados] == ["exemplo_1.mp4", "exemplo_2.mp4"]
-    assert montados == [([(9.0, 10.5, 1.0), (0.0, 9.0, 1.0), (10.5, 12.0, 1.0)], 0),
-                        ([(1.0, 2.0, 1.0), (0.0, 1.0, 1.0), (2.0, 12.0, 1.0)], 0)]
-    assert all(not v["textos"] and not v["curta"] for v in resumo["versoes"])
+    assert montados == [([(9.0, 12.0, 1.0), (0.0, 9.0, 1.0)], 0), ([(1.0, 10.0, 1.0)], 0)]
+    assert all(not v["textos"] for v in resumo["versoes"]) and resumo["inteiro"] == 12.0
+    assert [v["curta"] for v in resumo["versoes"]] == [False, True]
     assert [v["vantagem"] for v in resumo["versoes"]] == ["Fechamento com zíper", "Várias cores"]
     # Sem momento que sirva, uma versão só: o próprio vídeo com o Editor 1, sem remontar.
     montados.clear()
@@ -707,7 +736,8 @@ def test_editor_4_monta_cada_versao_com_os_textos_dela(monkeypatch, tmp_path):
     motivo, resumo = edicao_video.editar_4("v.mp4", b"foto", str(tmp_path / "exemplo.mp4"), "Bolsa de Palha",
                                            versoes_da_ia, 25.8, falas=[], lugar="alto")
     assert motivo == "" and [e[1] for e in editados] == ["exemplo_1.mp4", "exemplo_2.mp4"]
-    assert [m[0][0] for m in montados] == [(9.0, 10.5, 1.0), (1.0, 2.0, 1.0)] and [m[1] for m in montados] == [4, 4]
+    assert [m[0][0] for m in montados] == [(9.0, 12.0, 1.0), (1.0, 4.0, 1.0)] and [m[1] for m in montados] == [4, 4]
+    assert edicao_video._segundos_remontados(montados[1][0]) == pytest.approx(edicao_video.MINIMO_DO_REMONTADO)
     primeira, segunda = resumo["versoes"]
     # A vantagem do gancho abre, a chamada fecha.
     assert primeira["textos"] == ["Fechamento com zíper", "Bolsa de Palha", "A partir de R$ 25,80",
