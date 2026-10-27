@@ -917,3 +917,32 @@ def test_junto_com_o_robo_volta_as_interacoes_para_o_horario_do_robo(bm, Msg, Es
     rodar(sv.confirmar_janela_interacoes(Msg("Junto com o Robô 🔁"), est))
     rodar(sv.salvar_janela_interacoes(Msg("Aprovar ✅"), est))
     assert sv.robo.janela_das_interacoes(sv.ler_config()) is None
+
+
+def test_exemplo_cortado_por_um_reinicio_e_avisado_ao_ligar(bm, Msg, Est, monkeypatch):
+    # 27/10: o Rafael tocou no Editor 2 às 23:05 e o deploy reiniciou o bot às 23:07; o
+    # exemplo sumiu sem aviso. Ao ligar, o bot avisa e pede para tocar de novo.
+    from datetime import datetime, timedelta
+    sv, est = _painel(bm), Est()
+    enviados = []
+
+    class Bot:
+        async def send_message(self, chat, texto, **kwargs):
+            enviados.append((chat, texto))
+
+    monkeypatch.setattr(sv, "bot_instance", Bot())
+    agora = datetime.now(sv.fuso_horario)
+    sv.db.salvar_config(sv.CHAVE_EXEMPLO_EM_ANDAMENTO, {"editor": 2, "desde": (agora - timedelta(minutes=2)).isoformat()})
+    rodar(sv.avisar_exemplo_interrompido())
+    assert len(enviados) == 1 and enviados[0][0] == sv.ADMIN_ID
+    assert "Editor 2 foi interrompido" in enviados[0][1] and "Ver Exemplo Editor 2 ✨" in enviados[0][1]
+    assert not sv.db.ler_config(sv.CHAVE_EXEMPLO_EM_ANDAMENTO, {})
+    # Ligar de novo não repete; anotação velha (de horas atrás) não avisa.
+    rodar(sv.avisar_exemplo_interrompido())
+    sv.db.salvar_config(sv.CHAVE_EXEMPLO_EM_ANDAMENTO, {"editor": 1, "desde": (agora - timedelta(hours=3)).isoformat()})
+    rodar(sv.avisar_exemplo_interrompido())
+    assert len(enviados) == 1
+    # O exemplo que termina (saindo ou não) apaga a anotação.
+    monkeypatch.setattr(sv.edicao_video, "exemplo", lambda destino: (None, "nenhum vídeo dos Autorais"))
+    rodar(sv.exemplo_edicao_handler(MsgComMidia(Msg, "Ver Exemplo Editor 1 👀"), est))
+    assert not sv.db.ler_config(sv.CHAVE_EXEMPLO_EM_ANDAMENTO, {})
