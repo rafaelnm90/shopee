@@ -89,6 +89,8 @@ def configurar_dependencias(bot: Bot, scheduler, admin_id):
                       replace_existing=True, max_instances=1, coalesce=True)
     scheduler.add_job(lembrar_apelacoes, "interval", minutes=5, id="shopee_video_apelacoes",
                       replace_existing=True, max_instances=1, coalesce=True)
+    scheduler.add_job(avisar_exemplo_interrompido, "date", id="shopee_video_exemplo_interrompido",
+                      replace_existing=True, run_date=datetime.now(fuso_horario) + timedelta(seconds=30))
 
 
 # Um envio de cada vez: o agendador e o botão Enviar 1 Agora pegariam o mesmo vídeo.
@@ -891,6 +893,32 @@ async def voltar_ao_robo(message: types.Message, state: FSMContext):
 
 # Um exemplo de cada vez (Editor 1 ou 2): cada um baixa a foto e passa o vídeo pelo ffmpeg.
 _exemplo_da_edicao = asyncio.Lock()
+# O exemplo leva minutos, e um deploy no meio reinicia o bot e o corta sem aviso (27/10: o
+# Rafael tocou no Editor 2 às 23:05 e o bot reiniciou às 23:07). O exemplo em andamento fica
+# anotado; ao ligar, o bot avisa que ele foi interrompido. Anotação velha não avisa.
+CHAVE_EXEMPLO_EM_ANDAMENTO = "edicao_exemplo_em_andamento"
+EXEMPLO_INTERROMPIDO_RECENTE = timedelta(minutes=30)
+
+
+async def avisar_exemplo_interrompido():
+    """Ao ligar o bot: o exemplo que estava sendo montado foi cortado pelo reinício? Avisa no privado."""
+    anotado = db.ler_config(CHAVE_EXEMPLO_EM_ANDAMENTO, {}) or {}
+    if not anotado.get("editor"):
+        return
+    db.salvar_config(CHAVE_EXEMPLO_EM_ANDAMENTO, {})
+    try:
+        desde = datetime.fromisoformat(anotado.get("desde", ""))
+    except ValueError:
+        return
+    if datetime.now(fuso_horario) - desde > EXEMPLO_INTERROMPIDO_RECENTE:
+        return
+    botao = BOTAO_EXEMPLO_EDICAO if anotado["editor"] == 1 else BOTAO_EXEMPLO_EDITOR_2
+    try:
+        await bot_instance.send_message(
+            ADMIN_ID, f"⚠️ O exemplo do Editor {anotado['editor']} foi interrompido por uma atualização do bot "
+                      f"e não chegou. Toque de novo em {botao}.")
+    except Exception as e:
+        logger.warning(f"⚠️ [Shopee Vídeo] Aviso do exemplo interrompido não saiu: {type(e).__name__}")
 
 
 async def mostrar_edicao(message, state):
@@ -945,38 +973,49 @@ async def _mandar_exemplo(message, state, editor):
     async with _exemplo_da_edicao:
         await message.answer(f"⏳ Montando o exemplo do Editor {editor} com o próximo vídeo que o robô pegaria. "
                              f"Leva até uns {2 if editor == 1 else 4} minutos.")
-        with tempfile.TemporaryDirectory() as pasta:
-            destino = os.path.join(pasta, "exemplo.mp4")
-            resumo = None
-            try:
-                if editor == 1:
-                    nome, motivo = await asyncio.to_thread(edicao_video.exemplo, destino)
-                else:
-                    nome, motivo, resumo = await asyncio.to_thread(edicao_video.exemplo_editor_2, destino)
-            except Exception as e:
-                nome, motivo = None, f"erro ({type(e).__name__})"
+        db.salvar_config(CHAVE_EXEMPLO_EM_ANDAMENTO, {"editor": editor, "desde": datetime.now(fuso_horario).isoformat()})
+        try:
+            saiu = await _montar_e_mandar_exemplo(message, editor)
+        finally:
+            db.salvar_config(CHAVE_EXEMPLO_EM_ANDAMENTO, {})
+    if saiu:
+        await mostrar_edicao(message, state)
+
+
+async def _montar_e_mandar_exemplo(message, editor):
+    """O exemplo do editor (1 ou 2) montado e mandado no privado; False quando não saiu (com o aviso)."""
+    with tempfile.TemporaryDirectory() as pasta:
+        destino = os.path.join(pasta, "exemplo.mp4")
+        resumo = None
+        try:
             if editor == 1:
-                registro_processos.registrar("shopee_video", "edição do vídeo: exemplo",
-                                             "mandado" if nome else "não saiu", motivo, ok=bool(nome))
+                nome, motivo = await asyncio.to_thread(edicao_video.exemplo, destino)
             else:
-                registro_processos.registrar("shopee_video", "edição do vídeo: exemplo do editor 2",
-                                             "mandado" if nome else "não saiu", motivo, ok=bool(nome))
-            if not nome:
-                await message.answer(f"⚠️ O exemplo do Editor {editor} não saiu: {html_escape(motivo)}.",
-                                     parse_mode="HTML")
-                return
-            botao = BOTAO_EXEMPLO_EDICAO if editor == 1 else BOTAO_EXEMPLO_EDITOR_2
-            if editor == 1:
-                legenda = (f"✂️ Exemplo do Editor 1 (não foi postado): {html_escape(nome)}.\n"
-                           f"Toque de novo em {botao} para ver outro vídeo."
-                           + ("" if edicao_video.ligada() else f" Se gostar, toque em {BOTAO_LIGAR_EDICAO}."))
-            else:
-                legenda = (f"✨ Exemplo do Editor 2 (não foi postado): {html_escape(nome)}.\n"
-                           f"{resumo_do_editor_2(resumo)}\n"
-                           f"Toque de novo em {botao} para ver outro vídeo; compare com o {BOTAO_EXEMPLO_EDICAO}.")
-            await message.answer_video(FSInputFile(destino), supports_streaming=True, parse_mode="HTML",
-                                       caption=legenda)
-    await mostrar_edicao(message, state)
+                nome, motivo, resumo = await asyncio.to_thread(edicao_video.exemplo_editor_2, destino)
+        except Exception as e:
+            nome, motivo = None, f"erro ({type(e).__name__})"
+        if editor == 1:
+            registro_processos.registrar("shopee_video", "edição do vídeo: exemplo",
+                                         "mandado" if nome else "não saiu", motivo, ok=bool(nome))
+        else:
+            registro_processos.registrar("shopee_video", "edição do vídeo: exemplo do editor 2",
+                                         "mandado" if nome else "não saiu", motivo, ok=bool(nome))
+        if not nome:
+            await message.answer(f"⚠️ O exemplo do Editor {editor} não saiu: {html_escape(motivo)}.",
+                                 parse_mode="HTML")
+            return False
+        botao = BOTAO_EXEMPLO_EDICAO if editor == 1 else BOTAO_EXEMPLO_EDITOR_2
+        if editor == 1:
+            legenda = (f"✂️ Exemplo do Editor 1 (não foi postado): {html_escape(nome)}.\n"
+                       f"Toque de novo em {botao} para ver outro vídeo."
+                       + ("" if edicao_video.ligada() else f" Se gostar, toque em {BOTAO_LIGAR_EDICAO}."))
+        else:
+            legenda = (f"✨ Exemplo do Editor 2 (não foi postado): {html_escape(nome)}.\n"
+                       f"{resumo_do_editor_2(resumo)}\n"
+                       f"Toque de novo em {botao} para ver outro vídeo; compare com o {BOTAO_EXEMPLO_EDICAO}.")
+        await message.answer_video(FSInputFile(destino), supports_streaming=True, parse_mode="HTML",
+                                   caption=legenda)
+    return True
 
 
 @router.message(F.text.in_([BOTAO_EXEMPLO_EDICAO, BOTAO_EXEMPLO_EDICAO_ANTIGO]), StateFilter("*"))
