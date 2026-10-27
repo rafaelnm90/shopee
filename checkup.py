@@ -282,7 +282,7 @@ METAS = {
 # processo novo de robô que não esteja aqui nem em METAS.
 SEM_META = {
     ("autorais", "Correio Público: download"), ("autorais", "captura de parceiro"),
-    ("autorais", "captura para o canal"), ("autorais", "repostagem ao grupo"),
+    ("autorais", "captura para o canal"), ("autorais", "repostagem ao grupo"), ("autorais", "checagem da conta"),
     ("baixador", "Shopee pela Apify"), ("baixador", "conferência semanal da Shopee Vídeo"),
     ("baixador", "mensagem sem link"), ("baixador", "pedido "),
     ("bot_mestre", "garimpo de ofertas"), ("bot_mestre", "lembrete de pergunta do Claude"),
@@ -382,6 +382,10 @@ def _minutos(hora):
     return int(horas) * 60 + int(minutos)
 
 
+def _hhmm(minutos):
+    return f"{minutos // 60:02d}:{minutos % 60:02d}"
+
+
 def rotinas_do_dia(agora=None):
     """
     As rotinas de texto de hoje por canal, pelo histórico que o bot guarda
@@ -433,6 +437,8 @@ def rotinas_do_dia(agora=None):
             "enviadas": len(lista), "menor": min(intervalos) if intervalos else None,
             "curtos": sum(1 for i in intervalos if i < INTERVALO_CURTO_ROTINA),
             "seguidos": sum(1 for a, b in zip(lista, lista[1:]) if a[1] == b[1]),
+            "pares_seguidos": [f"{_hhmm(a[0])} {a[1]} → {_hhmm(b[0])} {b[1]}"
+                               for a, b in zip(lista, lista[1:]) if a[1] == b[1]],
             "por_assunto": por_assunto, "fora_do_previsto": fora, "pausado": bool(pausado[canal]),
         }
     return resultado
@@ -1179,6 +1185,8 @@ def main():
               f"abaixo de {INTERVALO_CURTO_ROTINA} min {r['curtos']} | mesmo assunto em seguida {r['seguidos']}")
         if r["por_assunto"]:
             print("   " + " | ".join(f"{tipo}: {qtd}" for tipo, qtd in sorted(r["por_assunto"].items())))
+        for par in r.get("pares_seguidos", []):
+            print(f"   mesmo assunto em seguida: {par}")
         for tipo, feitas, esperado, sentido in r["fora_do_previsto"]:
             passos = ", ".join(f"{hora} {resultado}" for hora, resultado in r["linha_do_tempo"].get(tipo, []))
             print(f"   {tipo} ({feitas} de {esperado}, {sentido}): {passos or 'nada no registro hoje'}")

@@ -154,6 +154,7 @@ import base64
 import sqlite3
 import db
 import logging
+import registro_processos
 import asyncio
 import getpass
 import re
@@ -1760,6 +1761,8 @@ async def checar_conta(conta, grupo_id=None, cliente=None):
     except Exception as e:
         atualizar_status(apelido, erro=f"{type(e).__name__}: {e}")
         logger.error(f"❌ [Pool] Erro ao checar '{apelido}': {type(e).__name__}: {e}")
+        # O tipo do erro no registro: o checkup só vê a forma da linha do log, sem o tipo.
+        registro_processos.registrar("autorais", "checagem da conta", "erro", type(e).__name__, ok=False)
         return (conta.get("status_grupo"), conta.get("status_sessao"))
 
     finally:

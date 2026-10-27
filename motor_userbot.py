@@ -584,6 +584,9 @@ async def processar_fila_espelhador_loop():
                 if deve_disparar:
                     msg_enviada = None
                     erro_disparo = None
+                    # O passo em que o envio está, para o registro dizer onde a falha aconteceu
+                    # (o checkup só vê rótulos fixos: um ValueError sozinho não diz nada).
+                    etapa = "ler a origem"
                     try:
                         chat_origem_bruto = item["chat_origem"]
                         chat_origem = int(chat_origem_bruto) if str(chat_origem_bruto).lstrip('-').isdigit() else chat_origem_bruto
@@ -601,6 +604,7 @@ async def processar_fila_espelhador_loop():
                                 # aqui o vídeo que passou pelo teto do dia, então nada é desperdício.
                                 caminho_disparo = None
                                 houve_upscale = False
+                                etapa = "baixar o vídeo"
                                 try:
                                     caminho_disparo = await mensagem_original.download_media(file="temp/temp_disparo_espelho_")
                                 except Exception as e:
@@ -613,20 +617,24 @@ async def processar_fila_espelhador_loop():
                                     caminho_disparo = await verificar_e_otimizar_video(caminho_disparo, relatorio_upscale)
                                     houve_upscale = bool(relatorio_upscale.get("upscaled"))
 
+                                etapa = "renovar o link"
                                 texto = await renovar_link_no_disparo(item, texto)
 
                                 # IA só agora, no vídeo que vai mesmo ao ar.
                                 if item.get("legenda_ia_pendente"):
+                                    etapa = "legenda da IA"
                                     texto = await montar_legenda_no_disparo(
                                         caminho_disparo, chat_origem, msg_id, item
                                     )
 
+                                etapa = "achar o destino"
                                 try:
                                     entidade_destino = await client.get_entity(destino)
                                 except ValueError:
                                     id_teste = int(destino) if str(destino).lstrip('-').isdigit() else destino
                                     entidade_destino = await client.get_entity(id_teste)
 
+                                etapa = "enviar ao destino"
                                 try:
                                     if houve_upscale and caminho_disparo and os.path.exists(caminho_disparo):
                                         # Sobe o arquivo re-encodado; supports_streaming faz o post sair
@@ -665,7 +673,7 @@ async def processar_fila_espelhador_loop():
                             registro_processos.registrar("espelhador", "envio da rota", "original apagada antes do envio")
                     except Exception as e:
                         erro_disparo = e
-                        logger.error(f"❌ [Espelhador] Falha no disparo da rota '{nome_rota}': {e}")
+                        logger.error(f"❌ [Espelhador] Falha no disparo da rota '{nome_rota}' ({etapa}): {e}")
 
                     # Erro antes de o vídeo sair (rede, flood, destino inacessível): o item volta
                     # para a fila e é tentado nos próximos ciclos, até 3 vezes; num flood, só
@@ -680,13 +688,13 @@ async def processar_fila_espelhador_loop():
                                 item["horario_disparo"] = (agora + timedelta(seconds=espera)).strftime("%Y-%m-%d %H:%M:%S")
                             logger.warning(f"🔁 [Espelhador] Tentativa {tentativas}/3 falhou na rota '{nome_rota}'; vai de novo num próximo ciclo.")
                             registro_processos.registrar("espelhador", "envio da rota", "falhou, tenta de novo",
-                                                         type(erro_disparo).__name__, ok=False)
+                                                         f"{type(erro_disparo).__name__} em {etapa}", ok=False)
                             itens_restantes.append(item)
                             houve_disparo = True
                             continue
-                        registrar_erro_json(f"Espelhador desistiu após 3 tentativas na rota '{nome_rota}': {erro_disparo}", origem="motor_userbot.py")
+                        registrar_erro_json(f"Espelhador desistiu após 3 tentativas na rota '{nome_rota}' ({etapa}): {erro_disparo}", origem="motor_userbot.py")
                         registro_processos.registrar("espelhador", "envio da rota", "desistiu após 3 tentativas",
-                                                     type(erro_disparo).__name__, ok=False)
+                                                     f"{type(erro_disparo).__name__} em {etapa}", ok=False)
 
                     # Publicado (ou perdido: origem apagada, sem vídeo, ou 3 falhas): fica no
                     # histórico como processado e não volta a ser tentado.
