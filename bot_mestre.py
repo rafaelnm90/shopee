@@ -42,6 +42,7 @@ from aiogram import BaseMiddleware
 from typing import Callable, Dict, Any, Awaitable
 from aiogram.fsm.storage.base import StorageKey
 from aiogram.types import KeyboardButton, FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.exceptions import TelegramRetryAfter
 import subprocess
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from api_gemini import gerar_texto_gemini, analisar_video_gemini, MODELOS_CASCATA_GEMINI, client_genai
@@ -1957,6 +1958,27 @@ def assunto_anterior_no_canal(dados_rotina, canal, hoje_str):
     return ultimo
 
 
+# Duas rotinas do mesmo canal nunca saem a menos disto uma da outra. A intercalação com os
+# vídeos só segura quando ainda há vídeo do dia; no fim do dia saíram duas a 9 min (26/10,
+# Viral). As rotinas saem espaçadas: DECISOES.md, Trabalho com o Claude.
+MINUTOS_ENTRE_ROTINAS = 10
+
+
+def minutos_desde_a_ultima_no_canal(dados_rotina, canal, agora):
+    """Minutos desde a última rotina que saiu hoje no canal, pelo histórico do dia; None sem nenhuma."""
+    historico = dados_rotina.get("historico_diario", {})
+    if historico.get("data") != agora.strftime("%Y-%m-%d"):
+        return None
+    ultima = ""
+    for tipo, horas in historico.get("contagem", {}).items():
+        if isinstance(horas, list) and horas and rotinas.conhecida(tipo) and rotinas.canal_da_rotina(tipo) == canal:
+            ultima = max(ultima, horas[-1])
+    if not ultima:
+        return None
+    hora, minuto = (int(parte) for parte in ultima.split(":"))
+    return (agora.hour * 60 + agora.minute) - (hora * 60 + minuto)
+
+
 def proxima_de_outro_assunto(tipo, canal, agora):
     """
     Quando sai hoje a próxima rotina do mesmo canal com outro assunto; None sem nenhuma.
@@ -1972,6 +1994,23 @@ def proxima_de_outro_assunto(tipo, canal, agora):
         if quando and quando > agora and quando.astimezone(fuso_horario).date() == agora.date():
             horarios.append(quando.astimezone(fuso_horario))
     return min(horarios, default=None)
+
+
+# O Telegram pede para esperar (flood) em canal movimentado: a rotina espera o tempo pedido,
+# até este teto, e tenta de novo uma vez, em vez de se perder (26/10, Viral).
+ESPERA_MAXIMA_DO_TELEGRAM = 120
+
+
+async def com_espera_do_telegram(envio):
+    """Chama envio() (um envio do bot); no TelegramRetryAfter, espera o pedido e tenta de novo uma vez."""
+    try:
+        return await envio()
+    except TelegramRetryAfter as e:
+        if e.retry_after > ESPERA_MAXIMA_DO_TELEGRAM:
+            raise
+        logger.warning(f"⏳ O Telegram pediu {e.retry_after}s de espera; a rotina tenta de novo depois disso.")
+        await asyncio.sleep(e.retry_after + 1)
+        return await envio()
 
 
 # Uma rotina de cada vez em cada canal: duas que disparavam no mesmo segundo passavam
@@ -2084,6 +2123,18 @@ async def _disparar_mensagem(tipo, forcar=False):
                 registro_processos.registrar("bot_mestre", processo_rotina, "adiada (mesmo assunto em seguida)", tipo)
                 return
     
+    # Espaçamento no canal: a menos de MINUTOS_ENTRE_ROTINAS da última, espera completar.
+    if not forcar and tipo not in ["bom_dia", "boa_noite"] and not tipo.startswith("campanha_"):
+        minutos = minutos_desde_a_ultima_no_canal(dados_rotina, canal_rotina, agora_tz)
+        if minutos is not None and 0 <= minutos < MINUTOS_ENTRE_ROTINAS:
+            novo_horario = agora_tz + timedelta(minutes=MINUTOS_ENTRE_ROTINAS - minutos + random.randint(1, 10))
+            job_id = f"job_rotina_{tipo}_reagendado_{int(agora_tz.timestamp())}"
+            scheduler.add_job(disparar_mensagem, 'date', run_date=novo_horario, args=[tipo], id=job_id, replace_existing=True)
+            logger.info(f"⏱️ [Espaçamento] '{tipo}' adiado para {novo_horario.strftime('%H:%M')}: a última rotina do "
+                        f"{canal_rotina} saiu há {minutos} min.")
+            registro_processos.registrar("bot_mestre", processo_rotina, "adiada (espaçamento)", tipo)
+            return
+
     # Bom Dia e Boa Noite uma vez por dia; as demais rotinas do principal só no expediente.
     if tipo == "bom_dia" and dados_rotina.get("ultimo_bom_dia") == hoje_str:
         logger.warning("🛑 Bloqueio Anti-Acidente: O 'Bom Dia' já foi enviado hoje.")
@@ -2237,7 +2288,8 @@ async def _disparar_mensagem(tipo, forcar=False):
                 thread_param = None
             
             logger.info(f"📤 Disparando {tipo} para Thread: {thread_param if thread_param else 'Geral'}")
-            msg_enviada = await bot.send_message(chat_destino, texto, message_thread_id=thread_param)
+            msg_enviada = await com_espera_do_telegram(
+                lambda: bot.send_message(chat_destino, texto, message_thread_id=thread_param))
             registrar_lixeira(msg_enviada.message_id, chat_destino)
             # A origem é o tópico: no Público a mesma rotina vai a vários tópicos em seguida.
             registro_processos.registrar("bot_mestre", processo_rotina, "enviada", tipo, ok=True,

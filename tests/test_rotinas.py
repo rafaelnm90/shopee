@@ -217,3 +217,71 @@ def test_rotina_do_principal_depois_do_boa_noite_fica_no_registro(bm, relogio, m
     rodar(bm.disparar_mensagem("incentivo"))
     linhas = bm.registro_processos.contagem("2000-01-01 00:00:00")
     assert any(l[2] == "fora do expediente (depois do Boa Noite)" and l[3] == "incentivo" for l in linhas)
+
+
+def _jobs_depois_de(bm, tipo, **kwargs):
+    async def cenario():
+        bm.scheduler.start()
+        try:
+            await bm.disparar_mensagem(tipo, **kwargs)
+            return {j.id: j.next_run_time.astimezone(bm.fuso_horario) for j in bm.scheduler.get_jobs()}
+        finally:
+            bm.scheduler.shutdown(wait=False)
+    return rodar(cenario())
+
+
+def test_rotina_a_menos_de_10_min_da_ultima_do_canal_espera_completar(bm, relogio, monkeypatch):
+    # 26/10, Viral: 21:39 divulgar_gem_viral e 21:48 promo_publico_viral. Sem vídeo do dia na
+    # fila, a intercalação não segurava. As rotinas saem espaçadas (DECISOES.md).
+    relogio("21:48")
+    agora = datetime.now(bm.fuso_horario)
+    _viral_ate_a_ia(bm, monkeypatch)
+    _historico(bm, agora.strftime("%Y-%m-%d"), {"divulgar_gem_viral": ["21:39"], "incentivo": ["21:47"]})
+    jobs = _jobs_depois_de(bm, "promo_publico_viral")
+    adiado = next(quando for ident, quando in jobs.items()
+                  if ident.startswith("job_rotina_promo_publico_viral_reagendado_"))
+    assert "21:50" <= adiado.strftime("%H:%M") <= "21:59"
+    assert bm.descobrir_escopo_job(next(i for i in jobs if "_reagendado_" in i)) == "viral"
+    assert "promo_publico_viral" not in bm.ler_config_rotina()["historico_diario"]["contagem"]
+    linhas = bm.registro_processos.contagem("2000-01-01 00:00:00")
+    assert any(l[1] == "rotina Viral" and l[2] == "adiada (espaçamento)" for l in linhas)
+
+
+@pytest.mark.parametrize("hora, contagem, forcar", [
+    ("21:50", {"divulgar_gem_viral": ["21:39"]}, False),     # 11 min depois: sai
+    ("21:48", {"incentivo": ["21:45"]}, False),               # a de 3 min atrás é de outro canal
+    ("21:48", {"divulgar_gem_viral": ["21:39"]}, True),      # disparo manual
+])
+def test_rotina_espacada_ou_de_outro_canal_sai_na_hora(bm, relogio, monkeypatch, hora, contagem, forcar):
+    relogio(hora)
+    _viral_ate_a_ia(bm, monkeypatch)
+    _historico(bm, datetime.now(bm.fuso_horario).strftime("%Y-%m-%d"), contagem)
+    with pytest.raises(Parou):
+        _jobs_depois_de(bm, "promo_publico_viral", forcar=forcar)
+
+
+def test_rotina_espera_o_tempo_que_o_telegram_pede_e_tenta_de_novo(bm, monkeypatch):
+    # 26/10, Viral: link_grupo_viral falhou com TelegramRetryAfter e se perdeu.
+    from aiogram.exceptions import TelegramRetryAfter
+    from aiogram.methods import SendMessage
+    esperas, tentativas = [], []
+
+    async def dormir(segundos):
+        esperas.append(segundos)
+    monkeypatch.setattr(bm.asyncio, "sleep", dormir)
+
+    def envio(pede):
+        async def enviar():
+            tentativas.append(1)
+            if len(tentativas) == 1:
+                raise TelegramRetryAfter(method=SendMessage(chat_id=1, text="x"), message="Flood", retry_after=pede)
+            return "enviada"
+        return enviar
+
+    assert rodar(bm.com_espera_do_telegram(envio(7))) == "enviada"
+    assert esperas == [8] and len(tentativas) == 2
+    # Espera longa demais: não segura a rotina, a falha fica no registro como antes.
+    tentativas.clear()
+    with pytest.raises(TelegramRetryAfter):
+        rodar(bm.com_espera_do_telegram(envio(bm.ESPERA_MAXIMA_DO_TELEGRAM + 1)))
+    assert len(tentativas) == 1
