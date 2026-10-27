@@ -269,6 +269,31 @@ def movimento(caminho, por_segundo=10, timeout=120):
     return [float(valor) for valor in numpy.abs(numpy.diff(quadros, axis=0)).mean(axis=1)]
 
 
+def som_por_janela(caminho, janela=0.5, timeout=120):
+    """
+    O volume do som (dBFS, de -100 a 0) em cada janela de `janela` segundos do vídeo, do
+    começo ao fim. Vídeo sem som ou que não abre dá [].
+    """
+    import numpy
+    amostras_por_segundo = 8000
+    try:
+        feito = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", caminho, "-vn", "-ac", "1", "-ar", str(amostras_por_segundo),
+             "-f", "s16le", "-"], capture_output=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if feito.returncode != 0 or not feito.stdout:
+        return []
+    som = numpy.frombuffer(feito.stdout[:len(feito.stdout) // 2 * 2], dtype=numpy.int16).astype(numpy.float64)
+    por_janela = int(amostras_por_segundo * janela)
+    volumes = []
+    for inicio in range(0, len(som), por_janela):
+        pedaco = som[inicio:inicio + por_janela]
+        rms = float(numpy.sqrt(numpy.mean(pedaco ** 2))) if len(pedaco) else 0.0
+        volumes.append(max(-100.0, float(20 * numpy.log10(rms / 32768))) if rms > 0 else -100.0)
+    return volumes
+
+
 # Na emenda de dois trechos, o som entra e sai em 30 ms, sem estalo.
 EMENDA_DO_SOM = 0.03
 

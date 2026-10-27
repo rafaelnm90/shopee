@@ -408,7 +408,9 @@ def test_editor_2_de_verdade_tira_o_parado_e_poe_os_textos(tmp_path):
                     "-filter_complex", "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]", "-map", "[v]", "-map", "3:a",
                     "-shortest", str(video)], check=True)
     destino = tmp_path / "editado.mp4"
-    motivo, resumo = edicao_video.editar_2(str(video), _foto_jpg(), str(destino), "Copo Térmico", "", 39.9)
+    # A IA disse que ninguém fala (o som é só um apito): os parados podem sair.
+    motivo, resumo = edicao_video.editar_2(str(video), _foto_jpg(), str(destino), "Copo Térmico", "", 39.9,
+                                           falas=[])
     assert motivo == ""
     # Os 6 s parados saem; dos 9 s mexendo, 1 s vai em câmera lenta. A foto continua no começo.
     assert resumo["cortado"] == 6 and resumo["camera_lenta"] == 1 and resumo["acelerados"] == 0
@@ -429,6 +431,14 @@ def test_editor_2_de_verdade_tira_o_parado_e_poe_os_textos(tmp_path):
     assert max(caixa_do_texto(3.0)) < 80
     vermelho, verde, azul = caixa_do_texto(8.5)
     assert vermelho > 180 and verde < 120 and azul < 100
+    # Escolha do Rafael (P45): onde alguém fala, nada sai. Fala nos 3 s parados do começo:
+    # só os 3 s parados do fim saem.
+    motivo, resumo = edicao_video.editar_2(str(video), _foto_jpg(), str(destino), "Copo", "", None,
+                                           falas=[(0.5, 2.5)])
+    assert motivo == "" and resumo["cortado"] == 3 and resumo["com_fala"] == 3
+    # Sem a resposta da IA, todo trecho com som conta como fala: nada é cortado.
+    motivo, resumo = edicao_video.editar_2(str(video), _foto_jpg(), str(destino), "Copo", "", None)
+    assert motivo == "" and resumo["cortado"] == 0 and resumo["acelerados"] == 0
 
 
 def test_remontar_sem_som_nao_mexe_no_som(monkeypatch, tmp_path):
@@ -452,7 +462,7 @@ def test_exemplo_do_editor_2_tem_a_lista_propria_e_o_preco_da_api(monkeypatch, t
     monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome: {"nome": "Copo Térmico"})
     pedidos = []
 
-    def editar_2(video, foto, destino, nome="", vantagem="", preco=None):
+    def editar_2(video, foto, destino, nome="", vantagem="", preco=None, falas=None):
         pedidos.append((video, nome, vantagem, preco))
         return "", {"textos": [nome]}
 
@@ -465,3 +475,61 @@ def test_exemplo_do_editor_2_tem_a_lista_propria_e_o_preco_da_api(monkeypatch, t
     assert db.ler_config(edicao_video.CHAVE_EXEMPLOS, {})["ids_2"] == ["viral:1"]
     edicao_video.exemplo_editor_2("exemplo.mp4")
     assert pedidos[-1][0] == videos["v2"]
+
+
+def test_onde_alguem_fala_o_ritmo_nao_corta_nao_acelera_nem_poe_camera_lenta():
+    # Escolha do Rafael (P45, 27/10): no 1º exemplo, o começo da fala saiu junto com a parte
+    # parada. 3 s parados com fala, 3 s calmos com fala, 2 s de ação com fala e 6 s de ação.
+    movimentos = _movimentos((3, 0.1), (3, 2.0), (2, 9.0), (6, 6.0))
+    com_fala = edicao_video.janelas_com_fala([(0.2, 7.9)], 14)
+    trechos = edicao_video.ritmo(movimentos, 14, com_fala=com_fala)
+    assert trechos[0][:2] == (0.0, 8.5) and trechos[0][2] == 1.0
+    lentos = [(inicio, fim) for inicio, fim, v in trechos if v == edicao_video.CAMERA_LENTA]
+    assert lentos and all(inicio >= 8.0 for inicio, _ in lentos)
+    # Sem fala, os mesmos 3 s parados saem.
+    assert edicao_video.ritmo(movimentos, 14)[0][0] == 3.0
+
+
+def test_janelas_com_fala_pela_ia_com_folga_ou_pelo_som():
+    # Pela IA: de 1,0 a 1,6 s, com 0,3 s de folga de cada lado (0,7 a 1,9 s).
+    assert edicao_video.janelas_com_fala([(1.0, 1.6)], 5) == {1, 2, 3}
+    assert edicao_video.janelas_com_fala([], 5) == frozenset()
+    # Sem a IA (None): as janelas com som acima do silêncio, também música.
+    volumes = [-100.0, -20.0, -55.0, -30.0]
+    assert edicao_video.janelas_com_fala(None, 2, volumes) == {1, 3}
+
+
+def test_ia_diz_onde_tem_fala_e_resposta_torta_vira_sem_resposta(monkeypatch):
+    import api_gemini
+
+    def responde(texto):
+        async def analisar(video, prompt, imagens=None):
+            return texto
+        monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
+
+    responde('{"nome": "Copo", "vantagem": "", "falas": [[0.5, 3], [4, 6.5], [9, 8]]}')
+    assert edicao_video.textos_da_tela("v.mp4", "Copo") == {"nome": "Copo", "falas": [(0.5, 3.0), (4.0, 6.5)]}
+    responde('{"nome": "Copo", "falas": []}')
+    assert edicao_video.textos_da_tela("v.mp4", "Copo")["falas"] == []
+    responde('{"nome": "Copo", "falas": "o vídeo inteiro"}')
+    assert "falas" not in edicao_video.textos_da_tela("v.mp4", "Copo")
+
+
+def test_volume_do_som_por_janela(tmp_path):
+    if not shutil.which("ffmpeg"):
+        return
+    video = tmp_path / "v.mp4"
+    # 1 s de silêncio e 1 s de apito.
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=black:size=64x64:rate=10:duration=2",
+                    "-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=8000:d=1",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=1:sample_rate=8000",
+                    "-filter_complex", "[1:a][2:a]concat=n=2:v=0:a=1[a]", "-map", "0:v", "-map", "[a]",
+                    str(video)], check=True)
+    volumes = edicao_video.videos.som_por_janela(str(video))
+    # O AAC pode deixar um restinho depois do fim: as 4 primeiras janelas são as que contam.
+    assert len(volumes) >= 4 and max(volumes[:2]) < edicao_video.SILENCIO < min(volumes[2:4])
+    assert all(type(v) is float for v in volumes)
+    sem_som = tmp_path / "mudo.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=black:size=64x64:rate=10:duration=1",
+                    str(sem_som)], check=True)
+    assert edicao_video.videos.som_por_janela(str(sem_som)) == []

@@ -745,7 +745,8 @@ def texto_edicao(config):
         "todos os seus grupos e vídeos são autorais. Nos vídeos de Ver Produtos (vários produtos), a foto é a do "
         "1º produto que o robô anexou.\n\n"
         "<b>Editor 2</b> (em teste, só no exemplo): o Editor 1 e mais três coisas. As partes paradas do vídeo "
-        "saem; os trechos calmos ficam mais rápidos e o segundo de mais ação vai em câmera lenta; e entram textos "
+        "saem; os trechos calmos ficam mais rápidos e o segundo de mais ação vai em câmera lenta (onde alguém "
+        "fala, o vídeo fica inteiro e na velocidade normal); e entram textos "
         "na tela, um de cada vez: o nome do produto e uma vantagem que o vídeo mostra (escritos pela IA, sem "
         "marca) e o preço (\"A partir de\", pela API). Compare os dois e diga qual fica.\n\n"
         f"Agora: {rotulo_edicao(config)} (Editor 1)\n\n"
@@ -957,6 +958,8 @@ def resumo_do_editor_2(resumo):
                   else "✂️ Nenhuma parte parada para tirar")
     linhas.append(f"⏩ Trechos acelerados: {resumo.get('acelerados', 0)} | "
                   f"🐢 Em câmera lenta: {resumo.get('camera_lenta', 0)}")
+    if resumo.get("com_fala", 0) >= 0.5:
+        linhas.append(f"🗣️ Com fala, ficou inteiro e na velocidade normal: {_segundos(resumo['com_fala'])}")
     textos = resumo.get("textos") or []
     if textos:
         linhas.append("🔤 Textos na tela: " + ", ".join(f"“{html_escape(t)}”" for t in textos))
