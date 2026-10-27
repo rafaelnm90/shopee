@@ -748,8 +748,9 @@ def texto_edicao(config):
         "saem; os trechos calmos ficam mais rápidos e o segundo de mais ação vai em câmera lenta (onde alguém "
         "fala, o vídeo fica inteiro e na velocidade normal); e entram textos "
         "na tela, um de cada vez: o nome do produto e uma vantagem que o vídeo mostra (escritos pela IA, sem "
-        "marca) e o preço (\"A partir de\", pela API), em letra média, no alto ou logo abaixo da miniatura, onde "
-        "a IA vê que não cobrem o produto nem o rosto. Compare os dois e diga qual fica.\n\n"
+        "marca) e o preço (\"A partir de\", pela API), em letra média, no alto, logo abaixo da miniatura ou num "
+        "dos lados, onde a IA vê que não cobrem o produto nem o rosto; sem lugar livre, o vídeo vai sem os "
+        "textos. Compare os dois e diga qual fica.\n\n"
         f"Agora: {rotulo_edicao(config)} (Editor 1)\n\n"
         "<b>O que cada botão faz</b>\n"
         f"👀 <b>{BOTAO_EXEMPLO_EDICAO}</b>: manda no seu privado, já editado e sem postar, o próximo vídeo que "
@@ -964,10 +965,14 @@ def resumo_do_editor_2(resumo):
     textos = resumo.get("textos") or []
     if textos:
         linhas.append("🔤 Textos na tela: " + ", ".join(f"“{html_escape(t)}”" for t in textos))
-        lugar = {"alto": "no alto, ao lado da miniatura", "meio": "logo abaixo da miniatura"}.get(resumo.get("lugar"))
+        lugar = {"alto": "no alto, ao lado da miniatura", "meio": "logo abaixo da miniatura",
+                 "esquerda": "do lado esquerdo, no meio da altura",
+                 "direita": "do lado direito, no meio da altura"}.get(resumo.get("lugar"))
         if lugar:
             linhas.append(f"📍 Lugar do texto: {lugar}"
                           + (" (a IA escolheu)" if resumo.get("lugar_da_ia") else " (o padrão: a IA não disse)"))
+    elif resumo.get("lugar") == edicao_video.SEM_LUGAR:
+        linhas.append("📍 Sem texto na tela: a IA não achou lugar que não cubra o rosto ou o produto.")
     if not resumo.get("textos_da_ia", True):
         linhas.append("⚠️ A IA não escreveu o nome e a vantagem desta vez.")
     return "\n".join(linhas)

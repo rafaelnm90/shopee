@@ -362,7 +362,7 @@ def test_textos_um_de_cada_vez_e_o_que_nao_cabe_sai():
 
 def test_preco_a_partir_de_numa_linha_so_com_o_numero():
     # "A partir de": o anúncio pode ter variações de preço (regra 14, informação errada).
-    assert edicao_video.texto_do_preco(39.9) == "A partir de R$ 39,90"
+    assert edicao_video.texto_do_preco(39.9) == "A\u00a0partir\u00a0de R$\u00a039,90"
     assert edicao_video.texto_do_preco(0) == edicao_video.texto_do_preco(None) == ""
     import io
 
@@ -417,7 +417,7 @@ def test_editor_2_de_verdade_tira_o_parado_e_poe_os_textos(tmp_path):
     assert abs(resumo["remontado"] - (8 + 1 / edicao_video.CAMERA_LENTA)) < 0.01
     assert abs(edicao_video.videos.duracao(str(destino)) - (resumo["remontado"] + edicao_video.SEGUNDOS_DA_FOTO)) < 0.3
     assert edicao_video.videos.tem_audio(str(destino))
-    assert resumo["textos"] == ["Copo Térmico", "A partir de R$ 39,90"]
+    assert resumo["textos"] == ["Copo Térmico", "A\u00a0partir\u00a0de R$\u00a039,90"]
     from PIL import Image
 
     def caixa_do_texto(segundo, ponto=(360, edicao_video.LUGARES_DOS_TEXTOS["meio"][1] + 6)):
@@ -437,7 +437,7 @@ def test_editor_2_de_verdade_tira_o_parado_e_poe_os_textos(tmp_path):
                                            falas=[(0.5, 2.5)])
     assert motivo == "" and resumo["cortado"] == 3 and resumo["com_fala"] == 3
     # Sem o lugar da IA, o texto vai no padrão: no alto, à esquerda, ao lado da miniatura (P46).
-    x, topo, _ = edicao_video.LUGARES_DOS_TEXTOS[edicao_video.LUGAR_PADRAO]
+    x, topo, *_ = edicao_video.LUGARES_DOS_TEXTOS[edicao_video.LUGAR_PADRAO]
     assert resumo["lugar"] == "alto" and max(caixa_do_texto(2.8, (x + 12, topo + 6))) < 80
     # Sem a resposta da IA, todo trecho com som conta como fala: nada é cortado.
     motivo, resumo = edicao_video.editar_2(str(video), _foto_jpg(), str(destino), "Copo", "", None)
@@ -516,9 +516,10 @@ def test_ia_diz_onde_tem_fala_e_resposta_torta_vira_sem_resposta(monkeypatch):
     assert edicao_video.textos_da_tela("v.mp4", "Copo")["falas"] == []
     responde('{"nome": "Copo", "falas": "o vídeo inteiro"}')
     assert "falas" not in edicao_video.textos_da_tela("v.mp4", "Copo")
-    # O lugar dos textos (P46): só "alto" ou "meio" valem.
-    responde('{"nome": "Copo", "lugar": "meio"}')
-    assert edicao_video.textos_da_tela("v.mp4", "Copo")["lugar"] == "meio"
+    # O lugar dos textos (P46 e P47): os de LUGARES_DOS_TEXTOS ou "nenhum"; o resto não vale.
+    for lugar in ("meio", "esquerda", "direita", "nenhum"):
+        responde('{"nome": "Copo", "lugar": "%s"}' % lugar)
+        assert edicao_video.textos_da_tela("v.mp4", "Copo")["lugar"] == lugar
     responde('{"nome": "Copo", "lugar": "embaixo"}')
     assert "lugar" not in edicao_video.textos_da_tela("v.mp4", "Copo")
 
@@ -549,9 +550,45 @@ def test_texto_da_tela_menor_cabe_ao_lado_da_miniatura():
     import io
 
     from PIL import Image
-    for texto in ("Confortável e cheio de estilo", "Cintura alta e ótima modelagem", "Aparador Buffet Retrô"):
-        for lugar, (x, topo, largura) in edicao_video.LUGARES_DOS_TEXTOS.items():
-            with Image.open(io.BytesIO(edicao_video.letreiro(texto, largura_maxima=largura))) as imagem:
+    for texto in ("Confortável e cheio de estilo", "Cintura alta e ótima modelagem", "Aparador Buffet Retrô",
+                  "Mantém a bebida gelada por 24 horas", edicao_video.texto_do_preco(1299.9)):
+        for lugar, (x, topo, largura, linhas) in edicao_video.LUGARES_DOS_TEXTOS.items():
+            with Image.open(io.BytesIO(edicao_video.letreiro(texto, largura_maxima=largura,
+                                                             linhas_maximas=linhas))) as imagem:
                 assert imagem.width * imagem.height <= 0.08 * 720 * 1280, (texto, lugar)
                 if lugar == "alto":
                     assert x + imagem.width < 486 - 10 and topo + imagem.height < 280
+                if lugar in ("esquerda", "direita"):
+                    # Nos lados (P47): estreita, longe do meio da tela, acima da seta (que
+                    # começa em y 776) e dos botões do app à direita.
+                    assert imagem.width <= 0.34 * 720 and topo + imagem.height < 740, (texto, lugar)
+                    if texto.startswith("A\u00a0partir"):
+                        # O preço em 2 linhas: "A partir de" e o valor, sem quebrar por dentro.
+                        assert imagem.height < 3 * round(28 * 1.25) + 2 * 18
+
+
+def test_editor_2_nos_lados_e_sem_lugar_livre_sem_texto(monkeypatch, tmp_path):
+    # Escolha do Rafael (P47, 27/10): no vídeo do conjunto, o alto cobriu o rosto da modelo e
+    # o meio cobriria o conjunto. A IA ganha os lados e, sem lugar livre, o vídeo vai sem texto.
+    monkeypatch.setattr(edicao_video.videos, "duracao", lambda video, timeout=30: 12.0)
+    monkeypatch.setattr(edicao_video.videos, "movimento", lambda video, por_segundo=10, timeout=120: [5.0] * 120)
+    monkeypatch.setattr(edicao_video, "editar", lambda video, foto, destino, avisos=False: "")
+    montados = []
+
+    def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
+        montados.append(list(letreiros))
+        return ""
+    monkeypatch.setattr(edicao_video.videos, "com_cortes_e_ritmo", com_cortes_e_ritmo)
+    destino = str(tmp_path / "r.mp4")
+
+    motivo, resumo = edicao_video.editar_2("v.mp4", b"foto", destino, "Conjunto Corset e Saia", "Modelo elegante",
+                                           50.99, falas=[], lugar="nenhum")
+    assert motivo == "" and montados[-1] == [] and resumo["textos"] == [] and resumo["lugar"] == "nenhum"
+
+    edicao_video.editar_2("v.mp4", b"foto", destino, "Conjunto Corset e Saia", "", 50.99, falas=[], lugar="esquerda")
+    assert [(x, topo) for _, _, _, x, topo in montados[-1]] == [(16, 400), (16, 400)]
+
+    edicao_video.editar_2("v.mp4", b"foto", destino, "Conjunto Corset e Saia", "", 50.99, falas=[], lugar="direita")
+    for imagem, _, _, x, topo in montados[-1]:
+        # Encostado na direita: a caixa termina a 16 px da borda.
+        assert topo == 400 and x + int.from_bytes(imagem[16:20], "big") == 720 - 16

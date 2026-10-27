@@ -355,6 +355,12 @@ def test_exemplo_do_editor_2_chega_com_o_que_mudou_no_video(bm, Msg, Est, monkey
     assert "A IA não escreveu o nome e a vantagem" in msg.midias[0][2]
     assert "Nenhuma parte parada para tirar" in msg.midias[0][2]
     assert "Com fala, ficou inteiro e na velocidade normal: 8 s" in msg.midias[0][2]
+    # Escolha do Rafael (P47): os lados também valem e, sem lugar livre, o vídeo vai sem texto.
+    resumo.update(textos=["Conjunto"], textos_da_ia=True, lugar="direita")
+    assert "Lugar do texto: do lado direito, no meio da altura (a IA escolheu)" in sv.resumo_do_editor_2(resumo)
+    resumo.update(textos=[], lugar="nenhum")
+    legenda = sv.resumo_do_editor_2(resumo)
+    assert "Sem texto na tela: a IA não achou lugar" in legenda and "Textos na tela" not in legenda
     monkeypatch.setattr(sv.edicao_video, "exemplo_editor_2", lambda destino: (None, "o vídeo não abre", None))
     msg = MsgComMidia(Msg, "Ver Exemplo Editor 2 ✨")
     rodar(sv.exemplo_editor_2_handler(msg, est))
