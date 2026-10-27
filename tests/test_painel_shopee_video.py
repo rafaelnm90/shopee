@@ -1,7 +1,7 @@
 """Painel da Shopee Vídeo (Outros Canais): o assistente (pausa, vídeos por dia, horário e Enviar 1 Agora) e o robô automático (pausa, rascunhos por dia, horário, rascunhos para aprovar e treino)."""
 import os
 
-from conftest import rodar
+from conftest import consultar, rodar
 
 
 def _textos(teclado):
@@ -290,7 +290,9 @@ def test_edicao_dos_videos_comeca_desligada_e_liga_pelo_painel(bm, Msg, Est):
     assert "todos os vídeos que o robô usa" in texto and "Viral" in texto and "Grupo Público" in texto
     assert "desligada" in texto and "O que cada botão faz" in texto
     assert _textos(sv.teclado_edicao(sv.ler_config())) == [
-        "Ver Exemplo da Edição 👀", "Ligar Edição ✅", "Voltar ao Robô 🔙"]
+        "Ver Exemplo Editor 1 👀", "Ver Exemplo Editor 2 ✨", "Ligar Edição ✅", "Voltar ao Robô 🔙"]
+    # Pedido do Rafael (27/10): o Editor 2 só no exemplo, até ele escolher qual fica.
+    assert "Editor 1</b> (o que vale nos rascunhos)" in texto and "Editor 2</b> (em teste, só no exemplo)" in texto
     rodar(sv.ligar_edicao_handler(Msg("Ligar Edição ✅"), est))
     assert sv.ler_config()["edicao_ligada"] and sv.edicao_video.vale_para("autorais")
     assert "Desligar Edição ⏸️" in _textos(sv.teclado_edicao(sv.ler_config()))
@@ -307,16 +309,52 @@ def test_exemplo_da_edicao_chega_no_privado_sem_postar(bm, Msg, Est, monkeypatch
         return "Copo Térmico", ""
 
     monkeypatch.setattr(sv.edicao_video, "exemplo", exemplo)
-    msg = MsgComMidia(Msg, "Ver Exemplo da Edição 👀")
+    msg = MsgComMidia(Msg, "Ver Exemplo Editor 1 👀")
     rodar(sv.exemplo_edicao_handler(msg, est))
     assert msg.midias and msg.midias[0][0] == "video"
     assert "não foi postado" in msg.midias[0][2] and "Copo Térmico" in msg.midias[0][2]
     # O arquivo do exemplo não fica no servidor.
     assert not os.path.exists(msg.midias[0][1])
     monkeypatch.setattr(sv.edicao_video, "exemplo", lambda destino: (None, "nenhum vídeo dos Autorais"))
+    # O botão com o nome de antes, que ainda pode estar no teclado, vale como o Editor 1.
     msg = MsgComMidia(Msg, "Ver Exemplo da Edição 👀")
     rodar(sv.exemplo_edicao_handler(msg, est))
-    assert not msg.midias and any("O exemplo não saiu: nenhum vídeo dos Autorais" in t for t in msg.saidas)
+    assert not msg.midias and any("O exemplo do Editor 1 não saiu: nenhum vídeo dos Autorais" in t
+                                  for t in msg.saidas)
+
+
+def test_exemplo_do_editor_2_chega_com_o_que_mudou_no_video(bm, Msg, Est, monkeypatch):
+    # Pedido do Rafael (27/10): o Editor 2 (o Editor 1 sem as partes paradas, com trechos
+    # acelerados e textos na tela) só no exemplo, para comparar com o Editor 1.
+    sv, est = _painel(bm), Est()
+    resumo = {"original": 24.0, "remontado": 15.2, "cortado": 6.4, "acelerados": 3, "camera_lenta": 1,
+              "textos": ["Copo Térmico", "Mantém gelado", "A partir de R$\u00a039,90"], "textos_da_ia": True}
+
+    def exemplo_editor_2(destino):
+        with open(destino, "wb") as arquivo:
+            arquivo.write(b"editado")
+        return "Copo Térmico <inox>", "", resumo
+
+    monkeypatch.setattr(sv.edicao_video, "exemplo_editor_2", exemplo_editor_2)
+    msg = MsgComMidia(Msg, "Ver Exemplo Editor 2 ✨")
+    rodar(sv.exemplo_editor_2_handler(msg, est))
+    legenda = msg.midias[0][2]
+    assert "Exemplo do Editor 2 (não foi postado): Copo Térmico &lt;inox&gt;" in legenda
+    assert "Vídeo de 24 s → 15 s" in legenda and "Partes paradas tiradas: 6 s" in legenda
+    assert "Trechos acelerados: 3 | 🐢 Em câmera lenta: 1" in legenda and "“Mantém gelado”" in legenda
+    assert "A IA não escreveu" not in legenda and not os.path.exists(msg.midias[0][1])
+    assert consultar("SELECT processo, resultado FROM registro_processos ORDER BY rowid DESC") == (
+        "edição do vídeo: exemplo do editor 2", "mandado")
+    # Sem os textos da IA, o exemplo sai com o preço e avisa.
+    resumo.update(textos=["A partir de R$\u00a039,90"], textos_da_ia=False, cortado=0)
+    msg = MsgComMidia(Msg, "Ver Exemplo Editor 2 ✨")
+    rodar(sv.exemplo_editor_2_handler(msg, est))
+    assert "A IA não escreveu o nome e a vantagem" in msg.midias[0][2]
+    assert "Nenhuma parte parada para tirar" in msg.midias[0][2]
+    monkeypatch.setattr(sv.edicao_video, "exemplo_editor_2", lambda destino: (None, "o vídeo não abre", None))
+    msg = MsgComMidia(Msg, "Ver Exemplo Editor 2 ✨")
+    rodar(sv.exemplo_editor_2_handler(msg, est))
+    assert not msg.midias and any("O exemplo do Editor 2 não saiu: o vídeo não abre" in t for t in msg.saidas)
 
 
 def _rascunho(sv, titulo="Vestido Infantil 👗 #vestido", criado="2026-10-22 10:00:00"):

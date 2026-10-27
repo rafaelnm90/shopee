@@ -523,7 +523,10 @@ BOTAO_PREPARAR = "Preparar 1 Agora ⚡"
 BOTAO_HISTORICO = "Histórico do Robô 📋"
 BOTAO_FILA = "Fila de Rascunhos 🗂️"
 BOTAO_EDICAO = "Edição dos Vídeos ✂️"
-BOTAO_EXEMPLO_EDICAO = "Ver Exemplo da Edição 👀"
+BOTAO_EXEMPLO_EDICAO = "Ver Exemplo Editor 1 👀"
+# O nome de antes do Editor 2 ainda pode estar no teclado do Rafael: vale como o Editor 1.
+BOTAO_EXEMPLO_EDICAO_ANTIGO = "Ver Exemplo da Edição 👀"
+BOTAO_EXEMPLO_EDITOR_2 = "Ver Exemplo Editor 2 ✨"
 BOTAO_LIGAR_EDICAO = "Ligar Edição ✅"
 BOTAO_DESLIGAR_EDICAO = "Desligar Edição ⏸️"
 BOTAO_APROVAR = "Aprovar Rascunho ✅"
@@ -583,7 +586,8 @@ teclado_faixa_ou_fixo = montar_teclado([
 def teclado_edicao(config):
     liga = BOTAO_DESLIGAR_EDICAO if config.get("edicao_ligada") else BOTAO_LIGAR_EDICAO
     return montar_teclado([
-        [KeyboardButton(text=BOTAO_EXEMPLO_EDICAO), KeyboardButton(text=liga)],
+        [KeyboardButton(text=BOTAO_EXEMPLO_EDICAO), KeyboardButton(text=BOTAO_EXEMPLO_EDITOR_2)],
+        [KeyboardButton(text=liga)],
         [KeyboardButton(text=BOTAO_VOLTAR_ROBO)],
     ])
 
@@ -708,8 +712,8 @@ def texto_robo(config, agora=None, celular=None):
         f"⚡ <b>{BOTAO_PREPARAR}</b>: o robô prepara um rascunho na hora, a mais do dia (mesmo pausado).\n"
         f"📋 <b>{BOTAO_HISTORICO}</b>: tudo o que o robô tentou nas últimas 24 h, com o produto e em que passo "
         f"parou. Às {HORA_DO_RESUMO}h chega o resumo do dia no seu privado.\n"
-        f"✂️ <b>{BOTAO_EDICAO}</b>: a foto do produto no começo, a miniatura no canto e a seta vermelha; ver um "
-        "exemplo, ligar ou desligar.\n"
+        f"✂️ <b>{BOTAO_EDICAO}</b>: a foto do produto no começo, a miniatura no canto e a seta vermelha; ver os "
+        "exemplos do Editor 1 e do Editor 2, ligar ou desligar.\n"
         f"📦 <b>{BOTAO_FAIXA_ROBO}</b>: quantos rascunhos ele prepara por dia (uma faixa, sorteada a cada dia).\n"
         f"🕗 <b>{BOTAO_HORARIO_ROBO}</b>: em que horário ele prepara os rascunhos e posta (fora do Horário das "
         "Interações).\n"
@@ -727,20 +731,26 @@ def rotulo_edicao(config):
 
 
 def texto_edicao(config):
-    """A tela da Edição dos Vídeos. Escolhas do Rafael (25/10): DECISOES.md, Shopee Vídeo."""
+    """A tela da Edição dos Vídeos. Escolhas do Rafael (25 e 27/10): DECISOES.md, Shopee Vídeo."""
     return (
         "✂️ <b>Edição dos Vídeos</b>\n"
-        f"O robô edita o vídeo antes do rascunho, como você faz no LumaFusion: a foto do anúncio do produto "
+        f"<b>Editor 1</b> (o que vale nos rascunhos): o robô edita o vídeo antes do rascunho, como você faz no "
+        f"LumaFusion: a foto do anúncio do produto "
         f"nos primeiros {edicao_video.SEGUNDOS_DA_FOTO} segundos e, até o fim do vídeo, uma miniatura dela no canto "
         "de cima à direita e a sua seta vermelha (a do arquivo Seta da Shopee, sem o fundo) embaixo à esquerda, "
         "no lugar em que você põe no LumaFusion.\n\n"
         "Vale para todos os vídeos que o robô usa (Autorais, Viral, Canal Afiliados e Grupo Público): "
         "todos os seus grupos e vídeos são autorais. Nos vídeos de Ver Produtos (vários produtos), a foto é a do "
         "1º produto que o robô anexou.\n\n"
-        f"Agora: {rotulo_edicao(config)}\n\n"
+        "<b>Editor 2</b> (em teste, só no exemplo): o Editor 1 e mais três coisas. As partes paradas do vídeo "
+        "saem; os trechos calmos ficam mais rápidos e o segundo de mais ação vai em câmera lenta; e entram textos "
+        "na tela, um de cada vez: o nome do produto e uma vantagem que o vídeo mostra (escritos pela IA, sem "
+        "marca) e o preço (\"A partir de\", pela API). Compare os dois e diga qual fica.\n\n"
+        f"Agora: {rotulo_edicao(config)} (Editor 1)\n\n"
         "<b>O que cada botão faz</b>\n"
         f"👀 <b>{BOTAO_EXEMPLO_EDICAO}</b>: manda no seu privado, já editado e sem postar, o próximo vídeo que "
         "o robô pegaria; cada toque mostra um vídeo novo.\n"
+        f"✨ <b>{BOTAO_EXEMPLO_EDITOR_2}</b>: o mesmo, com o Editor 2, e o que ele mudou no vídeo.\n"
         f"✅ <b>{BOTAO_LIGAR_EDICAO}</b> / ⏸️ <b>{BOTAO_DESLIGAR_EDICAO}</b>: liga ou desliga a edição nos "
         "próximos rascunhos. Com a edição ligada, só vai vídeo editado: o vídeo que não sair editado fica de "
         "lado e o robô pega o próximo."
@@ -879,7 +889,7 @@ async def voltar_ao_robo(message: types.Message, state: FSMContext):
 
 # --- Edição dos vídeos ---
 
-# Um exemplo de cada vez: cada um baixa a foto e passa o vídeo pelo ffmpeg.
+# Um exemplo de cada vez (Editor 1 ou 2): cada um baixa a foto e passa o vídeo pelo ffmpeg.
 _exemplo_da_edicao = asyncio.Lock()
 
 
@@ -905,31 +915,80 @@ async def ligar_edicao_handler(message: types.Message, state: FSMContext):
     await mostrar_edicao(message, state)
 
 
-@router.message(F.text == BOTAO_EXEMPLO_EDICAO, StateFilter("*"))
-async def exemplo_edicao_handler(message: types.Message, state: FSMContext):
-    if not _admin(message): return
+def _segundos(valor):
+    return f"{valor:.0f} s".replace(".", ",")
+
+
+def resumo_do_editor_2(resumo):
+    """O que o Editor 2 mudou no vídeo, para a legenda do exemplo (números e os textos da tela)."""
+    resumo = resumo or {}
+    linhas = [f"⏱️ Vídeo de {_segundos(resumo.get('original', 0))} → {_segundos(resumo.get('remontado', 0))} "
+              f"(mais os {edicao_video.SEGUNDOS_DA_FOTO} s da foto)"]
+    cortado = resumo.get("cortado", 0)
+    linhas.append(f"✂️ Partes paradas tiradas: {_segundos(cortado)}" if cortado >= 0.5
+                  else "✂️ Nenhuma parte parada para tirar")
+    linhas.append(f"⏩ Trechos acelerados: {resumo.get('acelerados', 0)} | "
+                  f"🐢 Em câmera lenta: {resumo.get('camera_lenta', 0)}")
+    textos = resumo.get("textos") or []
+    if textos:
+        linhas.append("🔤 Textos na tela: " + ", ".join(f"“{html_escape(t)}”" for t in textos))
+    if not resumo.get("textos_da_ia", True):
+        linhas.append("⚠️ A IA não escreveu o nome e a vantagem desta vez.")
+    return "\n".join(linhas)
+
+
+async def _mandar_exemplo(message, state, editor):
+    """Monta e manda no privado o exemplo do editor (1 ou 2), um exemplo de cada vez."""
     if _exemplo_da_edicao.locked():
-        await message.answer("⏳ O exemplo da edição já está sendo montado. Ele chega aqui em instantes.")
+        await message.answer("⏳ Um exemplo da edição já está sendo montado. Ele chega aqui em instantes.")
         return
     async with _exemplo_da_edicao:
-        await message.answer("⏳ Montando o exemplo com o próximo vídeo que o robô pegaria. Leva até uns 2 minutos.")
+        await message.answer(f"⏳ Montando o exemplo do Editor {editor} com o próximo vídeo que o robô pegaria. "
+                             f"Leva até uns {2 if editor == 1 else 4} minutos.")
         with tempfile.TemporaryDirectory() as pasta:
             destino = os.path.join(pasta, "exemplo.mp4")
+            resumo = None
             try:
-                nome, motivo = await asyncio.to_thread(edicao_video.exemplo, destino)
+                if editor == 1:
+                    nome, motivo = await asyncio.to_thread(edicao_video.exemplo, destino)
+                else:
+                    nome, motivo, resumo = await asyncio.to_thread(edicao_video.exemplo_editor_2, destino)
             except Exception as e:
                 nome, motivo = None, f"erro ({type(e).__name__})"
-            registro_processos.registrar("shopee_video", "edição do vídeo: exemplo", "mandado" if nome else "não saiu",
-                                         motivo, ok=bool(nome))
+            if editor == 1:
+                registro_processos.registrar("shopee_video", "edição do vídeo: exemplo",
+                                             "mandado" if nome else "não saiu", motivo, ok=bool(nome))
+            else:
+                registro_processos.registrar("shopee_video", "edição do vídeo: exemplo do editor 2",
+                                             "mandado" if nome else "não saiu", motivo, ok=bool(nome))
             if not nome:
-                await message.answer(f"⚠️ O exemplo não saiu: {html_escape(motivo)}.", parse_mode="HTML")
+                await message.answer(f"⚠️ O exemplo do Editor {editor} não saiu: {html_escape(motivo)}.",
+                                     parse_mode="HTML")
                 return
-            await message.answer_video(
-                FSInputFile(destino), supports_streaming=True, parse_mode="HTML",
-                caption=(f"✂️ Exemplo da edição (não foi postado): {html_escape(nome)}.\n"
-                         f"Toque de novo em {BOTAO_EXEMPLO_EDICAO} para ver outro vídeo."
-                         + ("" if edicao_video.ligada() else f" Se gostar, toque em {BOTAO_LIGAR_EDICAO}.")))
+            botao = BOTAO_EXEMPLO_EDICAO if editor == 1 else BOTAO_EXEMPLO_EDITOR_2
+            if editor == 1:
+                legenda = (f"✂️ Exemplo do Editor 1 (não foi postado): {html_escape(nome)}.\n"
+                           f"Toque de novo em {botao} para ver outro vídeo."
+                           + ("" if edicao_video.ligada() else f" Se gostar, toque em {BOTAO_LIGAR_EDICAO}."))
+            else:
+                legenda = (f"✨ Exemplo do Editor 2 (não foi postado): {html_escape(nome)}.\n"
+                           f"{resumo_do_editor_2(resumo)}\n"
+                           f"Toque de novo em {botao} para ver outro vídeo; compare com o {BOTAO_EXEMPLO_EDICAO}.")
+            await message.answer_video(FSInputFile(destino), supports_streaming=True, parse_mode="HTML",
+                                       caption=legenda)
     await mostrar_edicao(message, state)
+
+
+@router.message(F.text.in_([BOTAO_EXEMPLO_EDICAO, BOTAO_EXEMPLO_EDICAO_ANTIGO]), StateFilter("*"))
+async def exemplo_edicao_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await _mandar_exemplo(message, state, 1)
+
+
+@router.message(F.text == BOTAO_EXEMPLO_EDITOR_2, StateFilter("*"))
+async def exemplo_editor_2_handler(message: types.Message, state: FSMContext):
+    if not _admin(message): return
+    await _mandar_exemplo(message, state, 2)
 
 
 # --- Vídeos por dia ---

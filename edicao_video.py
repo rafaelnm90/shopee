@@ -11,8 +11,13 @@ privado e ligar no painel (Shopee Vídeo 🎬 → Robô Automático 🤖 → Edi
 chave edicao_ligada de shopee_video). Escolhas do Rafael (25/10/2026, P37 e depois da
 P38): DECISOES.md, Shopee Vídeo.
 
+O Editor 2 (editar_2) é esta edição com três acréscimos, em teste só no exemplo do painel:
+o vídeo remontado sem as partes paradas, com trechos acelerados e uma câmera lenta curta,
+e os textos da tela (nome, vantagem e preço). O Rafael compara os dois exemplos e escolhe
+qual fica (pedido de 27/10/2026: DECISOES.md, Shopee Vídeo).
+
 Usado pelo robô automático (robo_shopee_video, na cópia do vídeo que vai ao rascunho) e
-pelo painel da Shopee Vídeo (o exemplo).
+pelo painel da Shopee Vídeo (os exemplos).
 """
 import os
 
@@ -123,6 +128,286 @@ def editar(video, foto, destino, avisos=False):
                                        capa)
 
 
+# --- Editor 2 ---
+# O Editor 1 é a edição de cima, a que vale nos rascunhos. O Editor 2 é o Editor 1 com três
+# acréscimos, em teste: o Rafael vê os dois exemplos no painel e decide qual fica (pedido
+# de 27/10/2026: DECISOES.md, Shopee Vídeo). Antes da foto, da miniatura e da seta, o vídeo
+# é remontado: as partes paradas saem, os trechos calmos ficam mais rápidos, o de mais ação
+# ganha uma câmera lenta curta, e os textos da tela (nome, vantagem e preço) entram por cima.
+
+# O vídeo é olhado em janelas de meio segundo.
+JANELA = 0.5
+QUADROS_DO_MOVIMENTO = 10           # por segundo, na medição
+# Diferença média entre quadros (0 a 255) abaixo disto é imagem parada; abaixo da fração
+# do movimento típico do vídeo também (um vídeo agitado tem o "parado" mais alto).
+PARADO = 0.8
+PARADO_DO_TIPICO = 0.15
+# Abaixo desta fração do típico, o trecho é calmo: vai acelerado.
+CALMO_DO_TIPICO = 0.6
+ACELERADO = 1.5
+# O segundo de mais ação vai em câmera lenta (só em vídeo de 6 s ou mais).
+CAMERA_LENTA = 0.75
+SEGUNDOS_EM_CAMERA_LENTA = 1.0
+VIDEO_COM_CAMERA_LENTA = 6
+# Parado por 1 s ou mais sai; parado mais curto só acelera.
+PARADO_QUE_SAI = 1.0
+# Um trecho acelerado ou normal dura pelo menos isto: mais curto, segue a velocidade do
+# vizinho (trocar a cada meio segundo deixa o vídeo soluçando).
+TRECHO_MINIMO = 1.5
+# O vídeo remontado não fica com menos que isto, nem com menos da metade do original:
+# perto disso, ele corta e acelera menos.
+MINIMO_DO_REMONTADO = 8
+
+# Os textos da tela: um de cada vez, no alto, abaixo da miniatura (que vai até uns 250 px)
+# e longe da seta e dos botões do app, em letra grande (a regra 13 da Shopee pune texto
+# pequeno ou sobreposto).
+TOPO_DOS_TEXTOS = 280
+LARGURA_DOS_TEXTOS = 600
+LETRA_DOS_TEXTOS = (54, 34)         # a maior e a menor
+SEGUNDOS_DE_CADA_TEXTO = 3.0
+FUNDO_DOS_TEXTOS = (20, 20, 20, 200)
+FUNDO_DO_PRECO = (238, 77, 45, 230)  # o laranja da Shopee
+MAXIMO_DO_NOME = 28
+MAXIMO_DA_VANTAGEM = 36
+
+# A IA escreve o nome e a vantagem vendo o vídeo, com as regras da Shopee Vídeo que mais
+# pegam texto na tela (regras 7, 13 e 14 das diretrizes): sem marca, sem prometer o que o
+# vídeo não mostra, sem preço ou promoção (o preço vem da API, com "a partir de").
+PROMPT_DOS_TEXTOS = (
+    "Você vai ver um vídeo curto de um produto vendido na Shopee: {nome}.\n"
+    "Escreva dois textos curtos para aparecer na tela do vídeo, em português do Brasil:\n"
+    "- \"nome\": o nome genérico do produto, como o comprador procura (ex.: \"Copo Térmico\"), "
+    f"até {MAXIMO_DO_NOME} caracteres;\n"
+    "- \"vantagem\": uma vantagem do produto que o próprio vídeo mostra (ex.: \"Mantém gelado o dia todo\"), "
+    f"até {MAXIMO_DA_VANTAGEM} caracteres.\n"
+    "Regras da Shopee Vídeo: nada de nome, logo ou slogan de marca; nada que o vídeo não mostre; sem preço, "
+    "desconto, promoção, emoji ou hashtag.\n"
+    "Responda só com o JSON: {{\"nome\": \"...\", \"vantagem\": \"...\"}}"
+)
+
+
+def ritmo(movimentos, duracao, por_segundo=QUADROS_DO_MOVIMENTO):
+    """
+    [(início, fim, velocidade)] do vídeo remontado, pelo movimento de cada janela: parado
+    de PARADO_QUE_SAI ou mais sai, calmo vai a ACELERADO, o resto a 1, e o segundo de mais
+    ação em CAMERA_LENTA. Sem medição, o vídeo fica inteiro como está.
+    """
+    if duracao <= 0:
+        return []
+    if not movimentos:
+        return [(0.0, duracao, 1.0)]
+    janelas = max(1, int(-(-duracao // JANELA)))
+    por_janela = round(por_segundo * JANELA)
+    medidas, quietude = [], []
+    for i in range(janelas):
+        # A diferença j é a mudança que chega no quadro j+1: a janela i junta as que chegam
+        # dentro dela.
+        pedaco = sorted(movimentos[max(0, i * por_janela - 1):(i + 1) * por_janela - 1])
+        if not pedaco:
+            medidas.append(medidas[-1] if medidas else 0.0)
+            quietude.append(quietude[-1] if quietude else 0.0)
+            continue
+        medidas.append(sum(pedaco) / len(pedaco))
+        # A mediana não conta o salto de uma troca de cena: a janela que começa parada é parada.
+        quietude.append(pedaco[len(pedaco) // 2])
+    # Calmo ou ação pela média com as vizinhas (sem isso o ritmo troca a cada meio segundo);
+    # parado pela janela mesmo, para o corte pegar o parado inteiro, até a borda.
+    suave = [sum(medidas[max(0, i - 1):i + 2]) / len(medidas[max(0, i - 1):i + 2]) for i in range(janelas)]
+    tipico = sorted(suave)[len(suave) // 2]
+    parado, calmo = max(PARADO, PARADO_DO_TIPICO * tipico), CALMO_DO_TIPICO * tipico
+
+    def tamanho(i):
+        return min(JANELA, duracao - i * JANELA)
+
+    tipo = ["parado" if quietude[i] < parado else "calmo" if suave[i] < calmo else "acao" for i in range(janelas)]
+    # Parado curto não sai: fica como calmo.
+    i = 0
+    while i < janelas:
+        fim = i
+        while fim < janelas and tipo[fim] == "parado":
+            fim += 1
+        if fim > i and sum(tamanho(j) for j in range(i, fim)) < PARADO_QUE_SAI:
+            tipo[i:fim] = ["calmo"] * (fim - i)
+        i = max(fim, i + 1)
+    lenta = set()
+    if duracao >= VIDEO_COM_CAMERA_LENTA:
+        quantas = max(1, round(SEGUNDOS_EM_CAMERA_LENTA / JANELA))
+        acao = [i for i in range(janelas - quantas + 1) if all(tipo[j] == "acao" for j in range(i, i + quantas))]
+        if acao:
+            # Pela mediana: o salto de uma emenda não puxa a câmera lenta para ela.
+            pico = max(acao, key=lambda i: sum(quietude[i:i + quantas]))
+            lenta = set(range(pico, pico + quantas))
+
+    def velocidades(cortar, acelerar):
+        return [CAMERA_LENTA if i in lenta
+                else (0.0 if cortar else ACELERADO if acelerar else 1.0) if tipo[i] == "parado"
+                else ACELERADO if tipo[i] == "calmo" and acelerar else 1.0 for i in range(janelas)]
+
+    def sem_trechos_curtos(vel):
+        vel = list(vel)
+        for _ in range(janelas):
+            corridas, i = [], 0
+            while i < janelas:
+                fim = i
+                while fim < janelas and vel[fim] == vel[i]:
+                    fim += 1
+                corridas.append((i, fim, vel[i]))
+                i = fim
+            mudou = False
+            for n, (inicio, fim, v) in enumerate(corridas):
+                if v not in (1.0, ACELERADO) or sum(tamanho(j) for j in range(inicio, fim)) >= TRECHO_MINIMO:
+                    continue
+                vizinhos = [corridas[k][2] for k in (n - 1, n + 1)
+                            if 0 <= k < len(corridas) and corridas[k][2] in (1.0, ACELERADO)]
+                if vizinhos:
+                    vel[inicio:fim] = [vizinhos[0]] * (fim - inicio)
+                    mudou = True
+                    break
+            if not mudou:
+                return vel
+        return vel
+
+    def remontado(vel):
+        return sum(tamanho(i) / v for i, v in enumerate(vel) if v)
+
+    limite = min(duracao, max(MINIMO_DO_REMONTADO, duracao / 2))
+    for cortar, acelerar in ((True, True), (False, True), (False, False)):
+        vel = sem_trechos_curtos(velocidades(cortar, acelerar))
+        if remontado(vel) >= limite - 1e-6:
+            break
+    trechos = []
+    for i, v in enumerate(vel):
+        inicio, fim = i * JANELA, i * JANELA + tamanho(i)
+        if not v:
+            continue
+        if trechos and trechos[-1][2] == v and abs(trechos[-1][1] - inicio) < 1e-6:
+            trechos[-1] = (trechos[-1][0], fim, v)
+        else:
+            trechos.append((inicio, fim, v))
+    return trechos
+
+
+def letreiro(texto, fundo=FUNDO_DOS_TEXTOS):
+    """O texto da tela (PNG com fundo transparente, bytes): letras brancas numa caixa de cantos redondos."""
+    import io
+
+    import matplotlib
+    from PIL import Image, ImageDraw, ImageFont
+    fonte_ttf = os.path.join(matplotlib.get_data_path(), "fonts", "ttf", "DejaVuSans-Bold.ttf")
+    rascunho = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    maior, menor = LETRA_DOS_TEXTOS
+    for tamanho in range(maior, menor - 1, -2):
+        fonte = ImageFont.truetype(fonte_ttf, tamanho)
+        linhas, linha = [], ""
+        # Só o espaço comum separa as linhas: o espaço fixo ("R$ 39,90") não quebra.
+        for palavra in [p for p in texto.split(" ") if p]:
+            tentativa = f"{linha} {palavra}".strip()
+            if not linha or rascunho.textlength(tentativa, font=fonte) <= LARGURA_DOS_TEXTOS:
+                linha = tentativa
+            else:
+                linhas.append(linha)
+                linha = palavra
+        linhas.append(linha)
+        if len(linhas) <= 2 and all(rascunho.textlength(t, font=fonte) <= LARGURA_DOS_TEXTOS for t in linhas):
+            break
+    altura_da_linha = round(tamanho * 1.25)
+    largura = round(max(rascunho.textlength(t, font=fonte) for t in linhas)) + 2 * 28
+    altura = altura_da_linha * len(linhas) + 2 * 18
+    imagem = Image.new("RGBA", (largura, altura), (0, 0, 0, 0))
+    desenho = ImageDraw.Draw(imagem)
+    desenho.rounded_rectangle((0, 0, largura - 1, altura - 1), radius=22, fill=fundo)
+    for i, texto_da_linha in enumerate(linhas):
+        desenho.text((largura / 2, 18 + altura_da_linha * (i + 0.5)), texto_da_linha, font=fonte,
+                     fill="white", anchor="mm")
+    saida = io.BytesIO()
+    imagem.save(saida, format="PNG")
+    return saida.getvalue()
+
+
+def _so_letras(texto, maximo):
+    """O texto da IA só com letras, números e pontuação simples (a fonte não tem emoji), até `maximo` caracteres."""
+    import re
+    limpo = " ".join(re.sub(r"[^\w\s.,!?%/+\-:()]", " ", texto or "").split())
+    if len(limpo) <= maximo:
+        return limpo
+    return limpo[:maximo].rsplit(" ", 1)[0].rstrip(" ,.-:")
+
+
+def textos_da_tela(video, nome):
+    """{"nome", "vantagem"} que a IA escreveu vendo o vídeo; {} quando ela não respondeu."""
+    import asyncio
+    import json
+    import re
+
+    import api_gemini
+    try:
+        resposta = asyncio.run(api_gemini.analisar_video_gemini(video, PROMPT_DOS_TEXTOS.format(nome=nome)))
+    except Exception:
+        return {}
+    achado = re.search(r"\{.*\}", resposta or "", re.S)
+    try:
+        dados = json.loads(achado.group(0)) if achado else {}
+    except ValueError:
+        return {}
+    textos = {"nome": _so_letras(str(dados.get("nome") or ""), MAXIMO_DO_NOME),
+              "vantagem": _so_letras(str(dados.get("vantagem") or ""), MAXIMO_DA_VANTAGEM)}
+    return {chave: valor for chave, valor in textos.items() if valor}
+
+
+# Entre o "R$" e o número, para os dois não ficarem em linhas diferentes.
+ESPACO_FIXO = "\u00a0"
+
+
+def texto_do_preco(preco):
+    """O preço da tela, do jeito que fica certo mesmo com variações de preço no anúncio."""
+    return f"A partir de {assistente._reais(preco).replace(' ', ESPACO_FIXO)}" if preco and preco > 0 else ""
+
+
+def horarios_dos_textos(textos, duracao):
+    """[(texto, início, fim)]: um de cada vez, cada um na sua parte do vídeo remontado; o que não cabe sai."""
+    while textos and duracao / len(textos) < 1.5:
+        textos = textos[:-1]
+    if not textos:
+        return []
+    parte = duracao / len(textos)
+    return [(texto, round(parte * i + 0.3, 2), round(min(parte * (i + 1) - 0.2, parte * i + 0.3 + SEGUNDOS_DE_CADA_TEXTO), 2))
+            for i, texto in enumerate(textos)]
+
+
+def editar_2(video, foto, destino, nome="", vantagem="", preco=None):
+    """
+    O Editor 2 em destino: o vídeo remontado (ritmo), com os textos da tela, e depois o
+    Editor 1 por cima. Devolve (motivo, resumo): motivo "" quando deu certo; resumo diz o
+    que mudou, para o Rafael comparar.
+    """
+    import tempfile
+    original = videos.duracao(video)
+    if not original:
+        return "o vídeo não abre", {}
+    trechos = ritmo(videos.movimento(video, QUADROS_DO_MOVIMENTO), original)
+    remontado = sum((fim - inicio) / vel for inicio, fim, vel in trechos)
+    fundos = {texto: FUNDO_DOS_TEXTOS for texto in (nome, vantagem) if texto}
+    if texto_do_preco(preco):
+        fundos[texto_do_preco(preco)] = FUNDO_DO_PRECO
+    letreiros = []
+    for texto, inicio, fim in horarios_dos_textos(list(fundos), remontado):
+        imagem = letreiro(texto, fundos[texto])
+        # A largura está no cabeçalho do PNG (bytes 16 a 20).
+        largura = int.from_bytes(imagem[16:20], "big")
+        letreiros.append((imagem, inicio, fim, (TELA[0] - largura) // 2, TOPO_DOS_TEXTOS))
+    resumo = {"original": original, "remontado": remontado,
+              "cortado": original - sum(fim - inicio for inicio, fim, _ in trechos),
+              "acelerados": sum(1 for *_, v in trechos if v > 1),
+              "camera_lenta": sum(1 for *_, v in trechos if v < 1),
+              "textos": [texto for texto, *_ in horarios_dos_textos(list(fundos), remontado)]}
+    with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
+        corpo = os.path.join(pasta, "remontado.mp4")
+        motivo = videos.com_cortes_e_ritmo(video, trechos, corpo, letreiros, ESPERA_MAXIMA)
+        if motivo:
+            return motivo, resumo
+        return editar(corpo, foto, destino), resumo
+
+
 def _fontes_do_exemplo():
     """A fonte que o robô usa para postar primeiro, depois as outras."""
     fonte = (db.ler_config("shopee_video", {}) or {}).get("fonte", assistente.FONTE_PADRAO)
@@ -156,15 +441,16 @@ def _lembrar(lista, id_video, limite, recomecar=False):
     db.atualizar_config(CHAVE_EXEMPLOS, alterar)
 
 
-def exemplo(destino):
+def _exemplo(lista, editar_um):
     """
-    O exemplo para o Rafael ver a edição: o próximo vídeo que o robô pegaria para postar,
-    editado em destino, sem postar e sem gastar o vídeo. Cada chamada pega um vídeo que o
-    exemplo ainda não mostrou; sem nenhum novo com a foto do anúncio, recomeça pelos já
-    mostrados. Devolve (nome do produto, "") quando deu certo, ou (None, motivo).
+    O próximo vídeo que o robô pegaria para postar, editado por editar_um(arquivo, link,
+    foto) → (motivo, extra), sem postar e sem gastar o vídeo. Cada chamada pega um vídeo que
+    o exemplo deste editor (a `lista` da chave dos exemplos) ainda não mostrou; sem nenhum
+    novo com a foto do anúncio, recomeça pelos já mostrados. Devolve (nome do produto, "",
+    extra) quando deu certo, ou (None, motivo, extra).
     """
     dados = db.ler_config(CHAVE_EXEMPLOS, {}) or {}
-    mostrados, sem_foto = set(dados.get("ids", [])), set(dados.get("sem_foto", []))
+    mostrados, sem_foto = set(dados.get(lista, [])), set(dados.get("sem_foto", []))
     algum_sem_foto = False
     for recomecar in (False, True):
         pular = sem_foto if recomecar else mostrados | sem_foto
@@ -175,14 +461,50 @@ def exemplo(destino):
                 sem_foto.add(id_video)
                 _lembrar("sem_foto", id_video, SEM_FOTO_LEMBRADOS)
                 continue
-            motivo = editar(arquivo, foto, destino)
+            motivo, extra = editar_um(arquivo, link, foto)
             if motivo:
-                return None, motivo
-            _lembrar("ids", id_video, EXEMPLOS_LEMBRADOS, recomecar=recomecar)
-            return ps.nome_do_produto({"link": link}) or "produto do link", ""
+                return None, motivo, extra
+            _lembrar(lista, id_video, EXEMPLOS_LEMBRADOS, recomecar=recomecar)
+            return ps.nome_do_produto({"link": link}) or "produto do link", "", extra
         if not mostrados:
             break
     if algum_sem_foto or _videos_do_exemplo(set()):
         return None, ("nenhum dos próximos vídeos tem a foto do anúncio na API agora (os de Ver Produtos, "
-                      "com vários produtos, não têm uma foto só)")
-    return None, "nenhum vídeo com o arquivo e o link no servidor agora"
+                      "com vários produtos, não têm uma foto só)"), None
+    return None, "nenhum vídeo com o arquivo e o link no servidor agora", None
+
+
+def exemplo(destino):
+    """
+    O exemplo do Editor 1 (a edição que vale nos rascunhos) em destino. Devolve (nome do
+    produto, "") quando deu certo, ou (None, motivo).
+    """
+    nome, motivo, _ = _exemplo("ids", lambda arquivo, link, foto: (editar(arquivo, foto, destino), None))
+    return nome, motivo
+
+
+def _produto_do_link(link):
+    """O produto do link pela API de afiliado ({nome, preco, ...}); {} quando ela não diz."""
+    import asyncio
+    try:
+        produtos, _ = asyncio.run(assistente.produtos_do_link(link))
+    except Exception:
+        return {}
+    return produtos[0] if produtos else {}
+
+
+def exemplo_editor_2(destino):
+    """
+    O exemplo do Editor 2 em destino, com os textos da tela que a IA escreveu vendo o
+    vídeo e o preço da API. Tem a lista própria dos já mostrados. Devolve (nome do produto,
+    "", resumo) quando deu certo, ou (None, motivo, resumo ou None).
+    """
+    def editar_um(arquivo, link, foto):
+        produto = _produto_do_link(link)
+        textos = textos_da_tela(arquivo, produto["nome"]) if produto.get("nome") else {}
+        motivo, resumo = editar_2(arquivo, foto, destino, textos.get("nome", ""), textos.get("vantagem", ""),
+                                  produto.get("preco"))
+        resumo["textos_da_ia"] = bool(textos)
+        return motivo, resumo
+
+    return _exemplo("ids_2", editar_um)

@@ -6,7 +6,8 @@ Autorais (espelhador_videos_autorais, pelo repetidos_publico) e pelo Baixador
 (downloader_bot, só a medição). Os quadros espalhados do vídeo (quadros) vão nos casos
 das falhas do robô da Shopee Vídeo (casos_robo). A foto do produto no começo, com a
 miniatura e a seta por cima (com_foto_e_miniatura), é a edição dos vídeos do Rafael
-(edicao_video).
+(edicao_video); o vídeo remontado sem as partes paradas, com trechos acelerados ou em
+câmera lenta e textos por cima (movimento, com_cortes_e_ritmo), é o Editor 2 dela.
 
 Um lugar só para que um ajuste no tratamento valha para todos os canais
 (DECISOES.md, Código e manutenção).
@@ -216,6 +217,117 @@ def com_foto_e_miniatura(video, foto, destino, segundos=2, miniatura=180, centro
         temporario = os.path.join(pasta, "editado.mp4")
         comando = comando_foto_e_miniatura(caminho_da_foto, video, temporario, segundos, miniatura, centro,
                                            tem_audio(video), seta, centro_seta, pulso_da_seta, caminho_da_capa)
+        try:
+            feito = subprocess.run(comando, capture_output=True, timeout=espera)
+        except subprocess.TimeoutExpired:
+            return f"o ffmpeg passou de {espera // 60} min"
+        except OSError:
+            return "o ffmpeg não abriu"
+        if feito.returncode != 0 or not os.path.exists(temporario) or not os.path.getsize(temporario):
+            return f"o ffmpeg falhou (código {feito.returncode})"
+        os.replace(temporario, destino)
+    return ""
+
+
+def duracao(caminho, timeout=30):
+    """A duração do vídeo em segundos, pelo ffprobe; 0 quando não dá para ler."""
+    try:
+        saida = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", caminho],
+            capture_output=True, text=True, timeout=timeout).stdout.strip()
+        return max(0.0, float(saida or 0))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return 0.0
+
+
+# O movimento é medido em quadros pequenos, em tons de cinza: basta para ver se a imagem
+# mexe, e um vídeo de um minuto passa em poucos segundos.
+LADO_DO_MOVIMENTO = 64
+
+
+def movimento(caminho, por_segundo=10, timeout=120):
+    """
+    Quanto a imagem muda de um quadro para o seguinte, por_segundo vezes por segundo: a
+    diferença média entre os dois (0 a 255). Imagem parada fica perto de 0; mão mexendo no
+    produto, bem acima. Vídeo que não abre dá [].
+    """
+    import numpy
+    lado = LADO_DO_MOVIMENTO
+    try:
+        feito = subprocess.run(
+            ["ffmpeg", "-v", "error", "-i", caminho, "-vf", f"fps={por_segundo},scale={lado}:{lado},format=gray",
+             "-f", "rawvideo", "-"], capture_output=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if feito.returncode != 0:
+        return []
+    bruto = numpy.frombuffer(feito.stdout, dtype=numpy.uint8)
+    total = len(bruto) // (lado * lado)
+    if total < 2:
+        return []
+    quadros = bruto[:total * lado * lado].reshape(total, lado * lado).astype(numpy.int16)
+    return [float(valor) for valor in numpy.abs(numpy.diff(quadros, axis=0)).mean(axis=1)]
+
+
+# Na emenda de dois trechos, o som entra e sai em 30 ms, sem estalo.
+EMENDA_DO_SOM = 0.03
+
+
+def comando_cortes_e_ritmo(video, trechos, destino, com_audio, letreiros=()):
+    """
+    O ffmpeg do vídeo remontado: trechos = [(início, fim, velocidade)], cada pedaço do vídeo
+    original na ordem, na velocidade dele (o som acompanha, sem mudar o tom; o que não está
+    em nenhum trecho sai). Sai em 720x1280. letreiros = [(imagem, início, fim, x, y)]: cada
+    imagem (PNG com fundo transparente) por cima, com o canto de cima à esquerda em (x, y),
+    nesses segundos do vídeo já remontado.
+    """
+    quantos = len(trechos)
+    filtro = f"[0:v]split={quantos}" + "".join(f"[v{i}]" for i in range(quantos)) + ";"
+    if com_audio:
+        filtro += f"[0:a]asplit={quantos}" + "".join(f"[a{i}]" for i in range(quantos)) + ";"
+    juntar = ""
+    for i, (inicio, fim, velocidade) in enumerate(trechos):
+        filtro += (f"[v{i}]trim=start={inicio:.3f}:end={fim:.3f},"
+                   f"setpts=(PTS-STARTPTS)/{velocidade:g}[c{i}];")
+        juntar += f"[c{i}]"
+        if com_audio:
+            fica = (fim - inicio) / velocidade
+            filtro += (f"[a{i}]atrim=start={inicio:.3f}:end={fim:.3f},asetpts=PTS-STARTPTS,"
+                       f"atempo={velocidade:g},afade=t=in:d={EMENDA_DO_SOM},"
+                       f"afade=t=out:st={max(0.0, fica - EMENDA_DO_SOM):.3f}:d={EMENDA_DO_SOM}[b{i}];")
+            juntar += f"[b{i}]"
+    filtro += f"{juntar}concat=n={quantos}:v=1:a={1 if com_audio else 0}[corpo]" + ("[som]" if com_audio else "") + ";"
+    filtro += f"[corpo]fps={QUADROS_POR_SEGUNDO},{FILTRO_720P},setsar=1,format=yuv420p[t0]"
+    entradas = ["-i", video]
+    for i, (imagem, inicio, fim, x, y) in enumerate(letreiros):
+        entradas += ["-i", imagem]
+        filtro += (f";[t{i}][{i + 1}:v]overlay=x={x}:y={y}:enable='between(t,{inicio:.2f},{fim:.2f})',"
+                   f"format=yuv420p[t{i + 1}]")
+    saida = ["-map", f"[t{len(letreiros)}]"]
+    if com_audio:
+        saida += ["-map", "[som]", "-c:a", "aac", "-b:a", "128k"]
+    # Qualidade alta aqui: o vídeo remontado ainda passa pela edição do Editor 1 depois.
+    return (["ffmpeg", "-v", "error", "-y"] + entradas + ["-filter_complex", filtro] + saida
+            + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-movflags", "+faststart", destino])
+
+
+def com_cortes_e_ritmo(video, trechos, destino, letreiros=(), espera=300):
+    """
+    Grava em destino o vídeo remontado pelos trechos (início, fim, velocidade), com os
+    letreiros (imagem PNG em bytes, início, fim, x, y) por cima. Devolve "" quando deu
+    certo, ou o motivo fixo de não ter dado (o destino não fica pela metade).
+    """
+    if not trechos:
+        return "o vídeo não tem nenhum trecho para montar"
+    with tempfile.TemporaryDirectory(dir=os.path.dirname(os.path.abspath(destino))) as pasta:
+        imagens = []
+        for i, (imagem, inicio, fim, x, y) in enumerate(letreiros):
+            caminho = os.path.join(pasta, f"letreiro_{i}.png")
+            with open(caminho, "wb") as arquivo:
+                arquivo.write(imagem)
+            imagens.append((caminho, inicio, fim, x, y))
+        temporario = os.path.join(pasta, "remontado.mp4")
+        comando = comando_cortes_e_ritmo(video, trechos, temporario, tem_audio(video), imagens)
         try:
             feito = subprocess.run(comando, capture_output=True, timeout=espera)
         except subprocess.TimeoutExpired:

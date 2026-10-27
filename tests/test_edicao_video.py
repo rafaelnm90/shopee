@@ -306,3 +306,162 @@ def test_so_videos_sem_foto_diz_que_nenhum_tem_a_foto(monkeypatch, tmp_path):
     for _ in range(2):
         nome, motivo = edicao_video.exemplo("exemplo.mp4")
         assert nome is None and motivo.startswith("nenhum dos próximos vídeos tem a foto do anúncio")
+
+
+# --- Editor 2 (pedido do Rafael, 27/10: o Editor 1 sem as partes paradas, com trechos
+# acelerados e uma câmera lenta curta, e os textos da tela; só no exemplo até ele escolher) ---
+
+def _movimentos(*partes):
+    """Movimento de mentira, 10 medidas por segundo: partes = [(segundos, quanto mexe)]."""
+    return [quanto for segundos, quanto in partes for _ in range(round(segundos * 10))]
+
+
+def _remontado(trechos):
+    return sum((fim - inicio) / velocidade for inicio, fim, velocidade in trechos)
+
+
+def test_ritmo_tira_o_parado_acelera_o_calmo_e_poe_camera_lenta_na_acao():
+    movimentos = _movimentos((3, 0.1), (4, 6.0), (3, 2.0), (2, 9.0), (3, 6.0))
+    trechos = edicao_video.ritmo(movimentos, 15)
+    # Os 3 s parados do começo saem inteiros; o resto fica, na ordem.
+    assert trechos[0][0] == 3.0 and trechos[-1][1] == 15
+    assert all(trechos[i][1] <= trechos[i + 1][0] for i in range(len(trechos) - 1))
+    velocidades = {v for *_, v in trechos}
+    assert velocidades == {1.0, edicao_video.ACELERADO, edicao_video.CAMERA_LENTA}
+    # A câmera lenta fica no segundo de mais ação (de 10 a 12 s) e dura 1 s.
+    lentos = [(inicio, fim) for inicio, fim, v in trechos if v == edicao_video.CAMERA_LENTA]
+    assert len(lentos) == 1 and 10 <= lentos[0][0] and lentos[0][1] <= 12 and lentos[0][1] - lentos[0][0] == 1
+    # O calmo (de 7 a 10 s) vai acelerado, num trecho só.
+    acelerados = [(inicio, fim) for inicio, fim, v in trechos if v == edicao_video.ACELERADO]
+    assert len(acelerados) == 1 and 7 <= acelerados[0][0] and acelerados[0][1] <= 10
+    # Nenhum trecho normal ou acelerado com menos de 1,5 s: o ritmo não fica soluçando.
+    assert all(fim - inicio >= edicao_video.TRECHO_MINIMO for inicio, fim, v in trechos
+               if v != edicao_video.CAMERA_LENTA and fim != 15)
+
+
+def test_ritmo_nao_corta_parado_curto_nem_deixa_o_video_curto_demais():
+    # Meio segundo parado no meio só acelera, não sai.
+    trechos = edicao_video.ritmo(_movimentos((4, 5.0), (0.5, 0.1), (4.5, 5.0)), 9)
+    assert trechos[0][0] == 0 and trechos[-1][1] == 9 and _remontado(trechos) > 8
+    # 7 s parados num vídeo de 10 s: cortar deixaria 3 s. O vídeo fica com 8 s ou mais.
+    trechos = edicao_video.ritmo(_movimentos((7, 0.1), (3, 5.0)), 10)
+    assert _remontado(trechos) >= edicao_video.MINIMO_DO_REMONTADO
+    # Sem medição (o vídeo não abriu no ffmpeg), fica inteiro como está.
+    assert edicao_video.ritmo([], 12) == [(0.0, 12, 1.0)] and edicao_video.ritmo([1.0], 0) == []
+
+
+def test_textos_um_de_cada_vez_e_o_que_nao_cabe_sai():
+    horarios = edicao_video.horarios_dos_textos(["nome", "vantagem", "preço"], 12)
+    assert [t for t, *_ in horarios] == ["nome", "vantagem", "preço"]
+    assert all(fim - inicio <= edicao_video.SEGUNDOS_DE_CADA_TEXTO for _, inicio, fim in horarios)
+    assert all(horarios[i][2] < horarios[i + 1][1] for i in range(2)) and horarios[-1][2] <= 12
+    # Vídeo curto: cada texto precisa de 1,5 s; o do fim sai primeiro.
+    assert [t for t, *_ in edicao_video.horarios_dos_textos(["nome", "vantagem", "preço"], 4)] == ["nome", "vantagem"]
+    assert edicao_video.horarios_dos_textos(["nome"], 1) == []
+
+
+def test_preco_a_partir_de_numa_linha_so_com_o_numero():
+    # "A partir de": o anúncio pode ter variações de preço (regra 14, informação errada).
+    assert edicao_video.texto_do_preco(39.9) == "A partir de R$ 39,90"
+    assert edicao_video.texto_do_preco(0) == edicao_video.texto_do_preco(None) == ""
+    import io
+
+    from PIL import Image
+    with Image.open(io.BytesIO(edicao_video.letreiro(edicao_video.texto_do_preco(1299.9),
+                                                     edicao_video.FUNDO_DO_PRECO))) as imagem:
+        # Duas linhas ("A partir de" e o preço), dentro da tela e com o fundo transparente.
+        assert imagem.mode == "RGBA" and imagem.width <= 720 and 100 < imagem.height < 200
+        assert imagem.getpixel((0, 0))[3] == 0 and imagem.getpixel((imagem.width // 2, 8))[3] > 150
+
+
+def test_textos_da_tela_vem_da_ia_limpos_e_curtos(monkeypatch):
+    import api_gemini
+    pedidos = []
+
+    async def analisar(video, prompt, imagens=None):
+        pedidos.append(prompt)
+        return ('ok {"nome": "Copo Térmico 🥤 de Inox Grande Premium Novo", '
+                '"vantagem": "Mantém gelado o dia todo #top"}')
+
+    monkeypatch.setattr(api_gemini, "analisar_video_gemini", analisar)
+    textos = edicao_video.textos_da_tela("v.mp4", "Copo Térmico Marca X 500 ml")
+    assert textos == {"nome": "Copo Térmico de Inox Grande", "vantagem": "Mantém gelado o dia todo top"}
+    assert "Copo Térmico Marca X 500 ml" in pedidos[0] and "marca" in pedidos[0]
+
+    async def sem_resposta(video, prompt, imagens=None):
+        return None
+
+    monkeypatch.setattr(api_gemini, "analisar_video_gemini", sem_resposta)
+    assert edicao_video.textos_da_tela("v.mp4", "Copo") == {}
+
+
+def test_editor_2_de_verdade_tira_o_parado_e_poe_os_textos(tmp_path):
+    if not shutil.which("ffmpeg"):
+        assert edicao_video.editar_2(str(tmp_path / "nao_existe.mp4"), b"foto", str(tmp_path / "r.mp4"))[0] != ""
+        return
+    video = tmp_path / "v.mp4"
+    # 3 s parados, 9 s mexendo e 3 s parados de novo, com som.
+    subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "color=c=0xd0c0a0:size=360x640:rate=30:duration=3",
+                    "-f", "lavfi", "-i", "testsrc2=size=360x640:rate=30:duration=9",
+                    "-f", "lavfi", "-i", "color=c=0xa0c0d0:size=360x640:rate=30:duration=3",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=15",
+                    "-filter_complex", "[0:v][1:v][2:v]concat=n=3:v=1:a=0[v]", "-map", "[v]", "-map", "3:a",
+                    "-shortest", str(video)], check=True)
+    destino = tmp_path / "editado.mp4"
+    motivo, resumo = edicao_video.editar_2(str(video), _foto_jpg(), str(destino), "Copo Térmico", "", 39.9)
+    assert motivo == ""
+    # Os 6 s parados saem; dos 9 s mexendo, 1 s vai em câmera lenta. A foto continua no começo.
+    assert resumo["cortado"] == 6 and resumo["camera_lenta"] == 1 and resumo["acelerados"] == 0
+    assert abs(resumo["remontado"] - (8 + 1 / edicao_video.CAMERA_LENTA)) < 0.01
+    assert abs(edicao_video.videos.duracao(str(destino)) - (resumo["remontado"] + edicao_video.SEGUNDOS_DA_FOTO)) < 0.3
+    assert edicao_video.videos.tem_audio(str(destino))
+    assert resumo["textos"] == ["Copo Térmico", "A partir de R$ 39,90"]
+    from PIL import Image
+
+    def caixa_do_texto(segundo):
+        quadro = tmp_path / f"quadro_{segundo}.ppm"
+        subprocess.run(["ffmpeg", "-v", "error", "-ss", str(segundo), "-i", str(destino), "-frames:v", "1",
+                        str(quadro)], check=True)
+        with Image.open(quadro) as imagem:
+            return imagem.convert("RGB").getpixel((360, edicao_video.TOPO_DOS_TEXTOS + 6))
+
+    # O nome logo depois da foto (caixa escura) e o preço no fim (caixa laranja).
+    assert max(caixa_do_texto(3.0)) < 80
+    vermelho, verde, azul = caixa_do_texto(8.5)
+    assert vermelho > 180 and verde < 120 and azul < 100
+
+
+def test_remontar_sem_som_nao_mexe_no_som(monkeypatch, tmp_path):
+    comandos = _programas(monkeypatch, audio="")
+    trechos = [(0.0, 2.0, 1.0), (3.0, 5.0, 1.5)]
+    assert edicao_video.videos.com_cortes_e_ritmo("v.mp4", trechos, str(tmp_path / "r.mp4")) == ""
+    filtro = comandos[-1][comandos[-1].index("-filter_complex") + 1]
+    assert "asplit" not in filtro and "atempo" not in filtro and "concat=n=2:v=1:a=0" in filtro
+    assert "trim=start=3.000:end=5.000,setpts=(PTS-STARTPTS)/1.5" in filtro
+    assert edicao_video.videos.com_cortes_e_ritmo("v.mp4", [], str(tmp_path / "r.mp4")) != ""
+
+
+def test_exemplo_do_editor_2_tem_a_lista_propria_e_o_preco_da_api(monkeypatch, tmp_path):
+    videos = {nome: str(tmp_path / f"{nome}.mp4") for nome in ("v1", "v2")}
+    for caminho in videos.values():
+        open(caminho, "wb").close()
+    editados = _fontes_de_mentira(monkeypatch, {"viral": [
+        ("viral:1", videos["v1"], "https://s.shopee.com.br/1", ""),
+        ("viral:2", videos["v2"], "https://s.shopee.com.br/2", "")]}, fonte_do_robo="viral")
+    monkeypatch.setattr(edicao_video, "_produto_do_link", lambda link: {"nome": "Copo Marca X", "preco": 39.9})
+    monkeypatch.setattr(edicao_video, "textos_da_tela", lambda video, nome: {"nome": "Copo Térmico"})
+    pedidos = []
+
+    def editar_2(video, foto, destino, nome="", vantagem="", preco=None):
+        pedidos.append((video, nome, vantagem, preco))
+        return "", {"textos": [nome]}
+
+    monkeypatch.setattr(edicao_video, "editar_2", editar_2)
+    assert edicao_video.exemplo("exemplo.mp4") == ("Copo Térmico", "")
+    nome, motivo, resumo = edicao_video.exemplo_editor_2("exemplo.mp4")
+    # O Editor 1 já mostrou o v1; o Editor 2 tem a lista dele e começa pelo v1 também.
+    assert (nome, motivo) == ("Copo Térmico", "") and resumo["textos_da_ia"]
+    assert editados == [videos["v1"]] and pedidos == [(videos["v1"], "Copo Térmico", "", 39.9)]
+    assert db.ler_config(edicao_video.CHAVE_EXEMPLOS, {})["ids_2"] == ["viral:1"]
+    edicao_video.exemplo_editor_2("exemplo.mp4")
+    assert pedidos[-1][0] == videos["v2"]
